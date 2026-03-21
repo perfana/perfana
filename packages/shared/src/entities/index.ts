@@ -16,6 +16,7 @@ export * from './alert-tag-filter.entity';
 export * from './api-key.entity';
 export * from './audit-log.entity';
 export * from './application-dashboard.entity';
+export * from './metrics-source.entity';
 export * from './profile-grafana-dashboard.entity';
 export * from './profile-benchmark.entity';
 export * from './benchmark.entity';
