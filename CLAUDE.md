@@ -1,6 +1,40 @@
 # CLAUDE.md
 
-This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
+Performance analysis platform — ingests load test results, collects metrics from Grafana/Dynatrace/Prometheus, runs ADAPT regression detection, provides dashboards with SLO compliance.
+
+## Quick Start
+
+```bash
+npm install
+docker compose -f docker-compose.infra.yml up -d
+# Wait for Postgres + Keycloak to be healthy, then:
+npm run dev
+```
+
+- API: http://localhost:3001/api/docs (Swagger)
+- Web: http://localhost:4001
+- Keycloak: http://localhost:8080 (admin/admin, realm: perfana-prod)
+- Login: perfana@example.com / perfana
+
+## Project Index
+
+> **Progressive disclosure:** Scan this index. Read only what's relevant to your task.
+
+| Area | Path | What's there | Docs |
+|------|------|-------------|------|
+| 📡 API | `apps/api/` | NestJS REST API, 36+ modules | [CODING_RULES](apps/api/CODING_RULES.md) |
+| 🌐 Frontend | `apps/web/` | Next.js, MUI + Radix + Tailwind | [CODING_RULES](apps/web/CODING_RULES.md) |
+| 🔧 Worker | `apps/worker/` | BullMQ pipelines, ADAPT algorithm | [README](apps/worker/README.md) |
+| 🔄 Grafana Sync | `apps/grafana-sync/` | Dashboard sync background service | [CODING_RULES](apps/grafana-sync/CODING_RULES.md) |
+| 🗄️ Shared | `packages/shared/` | TypeORM entities, types, utils | [README](packages/shared/README.md) |
+| ⚙️ Config | `packages/config/` | TypeORM config factory | — |
+| 🏗️ Infra | `docker-compose.infra.yml` | Full local stack | — |
+
+→ System diagrams: [ARCHITECTURE.md](ARCHITECTURE.md)
+→ Code patterns: [CONVENTIONS.md](CONVENTIONS.md)
+→ Improvement plan: [PLAN.md](PLAN.md)
+
+---
 
 ## 📋 Development Standards
 
@@ -463,3 +497,11 @@ const handleExpand = () => {
 - AI-powered root cause analysis
 - Real-time test monitoring and alerts
 - Multi-format data export capabilities
+
+## gstack
+
+Use `/browse` for all web browsing. Never use `mcp__claude-in-chrome__*` tools.
+
+Available: `/office-hours` `/plan-ceo-review` `/plan-eng-review` `/plan-design-review` `/design-consultation` `/review` `/ship` `/browse` `/qa` `/qa-only` `/design-review` `/setup-browser-cookies` `/retro` `/investigate` `/document-release` `/codex` `/careful` `/freeze` `/guard` `/unfreeze` `/gstack-upgrade`
+
+If gstack skills aren't working: `cd .claude/skills/gstack && ./setup`
