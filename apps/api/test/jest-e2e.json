@@ -1,0 +1,34 @@
+{
+  "displayName": "api-e2e",
+  "testEnvironment": "node",
+  "moduleFileExtensions": ["ts", "js", "json"],
+  "rootDir": "..",
+  "testRegex": "test/.*\\.e2e-spec\\.ts$",
+  "transform": {
+    "^.+\\.(t|j)s$": ["ts-jest", {
+      "tsconfig": "<rootDir>/tsconfig.test.json",
+      "isolatedModules": true
+    }]
+  },
+  "moduleNameMapper": {
+    "^jose$": "<rootDir>/src/test/__mocks__/jose.ts",
+    "^bullmq$": "<rootDir>/src/test/__mocks__/bullmq.ts",
+    "^@perfana/shared/entities$": "<rootDir>/../../packages/shared/src/entities/index.ts",
+    "^@perfana/shared/(.*)$": "<rootDir>/../../packages/shared/src/$1",
+    "^@perfana/shared$": "<rootDir>/../../packages/shared/src/index.ts",
+    "^(\\.\\.\\/.*)\\.js$": "$1",
+    "^(\\..*)\\.js$": "$1"
+  },
+  "testTimeout": 30000,
+  "setupFilesAfterEnv": ["<rootDir>/src/test/setup.ts"],
+  "setupFiles": ["<rootDir>/src/test/env.setup.ts"],
+  "coverageDirectory": "../coverage/apps/api-e2e",
+  "collectCoverageFrom": [
+    "src/**/*.ts",
+    "!src/**/*.spec.ts",
+    "!src/**/*.test.ts",
+    "!src/**/test/**/*",
+    "!src/main.ts"
+  ],
+  "verbose": true
+}

@@ -1,0 +1,98 @@
+version: '3.8'
+
+services:
+  # Worker application
+  # NOTE: Build context is monorepo root to include shared packages
+  worker:
+    build:
+      context: ../..
+      dockerfile: apps/worker/docker/Dockerfile
+    environment:
+      DB_HOST: db
+      DB_PORT: 5432
+      DB_USERNAME: perfana
+      DB_PASSWORD: password
+      DB_NAME: perfana_ds
+      LOG_LEVEL: ${LOG_LEVEL:-debug}
+      NODE_ENV: development
+    volumes:
+      - ./src:/app/apps/worker/src
+      - ./package.json:/app/apps/worker/package.json
+      - ./tsconfig.json:/app/apps/worker/tsconfig.json
+      - ../../packages/shared/src:/app/packages/shared/src
+    depends_on:
+      db:
+        condition: service_healthy
+    restart: unless-stopped
+    command: npm run dev
+
+  # PostgreSQL with TimescaleDB
+  db:
+    image: timescale/timescaledb:latest-pg15
+    environment:
+      POSTGRES_DB: perfana_ds
+      POSTGRES_USER: perfana
+      POSTGRES_PASSWORD: password
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./scripts:/docker-entrypoint-initdb.d
+    ports:
+      - "${DB_PORT:-5432}:5432"
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U perfana -d perfana_ds"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # Optional: Redis for additional caching
+  redis:
+    image: redis:7-alpine
+    ports:
+      - "${REDIS_PORT:-6379}:6379"
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+
+  # Optional: Grafana for testing
+  grafana:
+    image: grafana/grafana:latest
+    environment:
+      GF_SECURITY_ADMIN_PASSWORD: admin
+      GF_INSTALL_PLUGINS: grafana-clock-panel
+    volumes:
+      - grafana_data:/var/lib/grafana
+    ports:
+      - "${GRAFANA_PORT:-3000}:3000"
+    restart: unless-stopped
+
+  # Optional: Prometheus for testing metrics
+  prometheus:
+    image: prom/prometheus:latest
+    command:
+      - '--config.file=/etc/prometheus/prometheus.yml'
+      - '--storage.tsdb.path=/prometheus'
+      - '--web.console.libraries=/etc/prometheus/console_libraries'
+      - '--web.console.templates=/etc/prometheus/consoles'
+      - '--web.enable-lifecycle'
+    volumes:
+      - ./docker/prometheus.yml:/etc/prometheus/prometheus.yml
+      - prometheus_data:/prometheus
+    ports:
+      - "${PROMETHEUS_PORT:-9090}:9090"
+    restart: unless-stopped
+
+volumes:
+  postgres_data:
+    driver: local
+  grafana_data:
+    driver: local
+  prometheus_data:
+    driver: local
+
+networks:
+  default:
+    name: perfana-ds-network

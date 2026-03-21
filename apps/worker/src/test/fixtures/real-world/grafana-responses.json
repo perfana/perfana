@@ -1,0 +1,353 @@
+{
+  "test_run_id": "MyAfterburner-acc-loadTest-00002",
+  "time_range": {
+    "from": "2025-09-18T07:18:23.359Z",
+    "to": "2025-09-18T07:24:31.916Z",
+    "from_ms": 1758179903359,
+    "to_ms": 1758180271916
+  },
+  "grafana_config": {
+    "working_url": "http://grafana:3000",
+    "tried_urls": [
+      "http://localhost:3000",
+      "http://grafana:3000",
+      "http://host.docker.internal:3000",
+      "http://127.0.0.1:3000"
+    ],
+    "org_id": "1"
+  },
+  "fetched_at": "2025-09-25T18:13:21.887Z",
+  "responses": {
+    "panel_1_error": {
+      "panel_info": {
+        "panel_id": 1,
+        "panel_title": "Log items per second",
+        "dashboard_label": "Loki afterburner-be"
+      },
+      "error": "Request failed with status code 400",
+      "metrics_from_db": [
+        {
+          "metric_name": "ERROR",
+          "unit": null
+        },
+        {
+          "metric_name": "INFO",
+          "unit": null
+        },
+        {
+          "metric_name": "WARN",
+          "unit": null
+        }
+      ]
+    },
+    "panel_1_db_only": {
+      "panel_info": {
+        "panel_id": 1,
+        "panel_title": "Log items per second",
+        "dashboard_label": "Loki afterburner-be"
+      },
+      "metrics_from_db": [
+        {
+          "metric_name": "ERROR",
+          "unit": null
+        },
+        {
+          "metric_name": "INFO",
+          "unit": null
+        },
+        {
+          "metric_name": "WARN",
+          "unit": null
+        }
+      ]
+    },
+    "panel_2_error": {
+      "panel_info": {
+        "panel_id": 2,
+        "panel_title": "CPU",
+        "dashboard_label": "JFR Exporter afterburner-fe"
+      },
+      "error": "Request failed with status code 400",
+      "metrics_from_db": [
+        {
+          "metric_name": "max_jvmSystem",
+          "unit": "percent"
+        },
+        {
+          "metric_name": "max_jvmUser",
+          "unit": "percent"
+        },
+        {
+          "metric_name": "max_machineTotal",
+          "unit": "percent"
+        }
+      ]
+    },
+    "panel_2_db_only": {
+      "panel_info": {
+        "panel_id": 2,
+        "panel_title": "CPU",
+        "dashboard_label": "JFR Exporter afterburner-fe"
+      },
+      "metrics_from_db": [
+        {
+          "metric_name": "max_jvmSystem",
+          "unit": "percent"
+        },
+        {
+          "metric_name": "max_jvmUser",
+          "unit": "percent"
+        },
+        {
+          "metric_name": "max_machineTotal",
+          "unit": "percent"
+        }
+      ]
+    },
+    "panel_3_error": {
+      "panel_info": {
+        "panel_id": 3,
+        "panel_title": "Garbage collections (young)",
+        "dashboard_label": "JFR Exporter afterburner-fe"
+      },
+      "error": "Request failed with status code 400",
+      "metrics_from_db": [
+        {
+          "metric_name": "Total",
+          "unit": "short"
+        },
+        {
+          "metric_name": "Users for load generator: 56d608be69a9",
+          "unit": "short"
+        },
+        {
+          "metric_name": "youngGc.max",
+          "unit": "ms"
+        }
+      ]
+    },
+    "panel_3_db_only": {
+      "panel_info": {
+        "panel_id": 3,
+        "panel_title": "Garbage collections (young)",
+        "dashboard_label": "JFR Exporter afterburner-fe"
+      },
+      "metrics_from_db": [
+        {
+          "metric_name": "Total",
+          "unit": "short"
+        },
+        {
+          "metric_name": "Users for load generator: 56d608be69a9",
+          "unit": "short"
+        },
+        {
+          "metric_name": "youngGc.max",
+          "unit": "ms"
+        }
+      ]
+    },
+    "panel_4_error": {
+      "panel_info": {
+        "panel_id": 4,
+        "panel_title": "Memory allocation rate",
+        "dashboard_label": "JFR Exporter afterburner-fe"
+      },
+      "error": "Request failed with status code 400",
+      "metrics_from_db": [
+        {
+          "metric_name": "bytes per second",
+          "unit": "Bps"
+        }
+      ]
+    },
+    "panel_4_db_only": {
+      "panel_info": {
+        "panel_id": 4,
+        "panel_title": "Memory allocation rate",
+        "dashboard_label": "JFR Exporter afterburner-fe"
+      },
+      "metrics_from_db": [
+        {
+          "metric_name": "bytes per second",
+          "unit": "Bps"
+        }
+      ]
+    },
+    "panel_5_error": {
+      "panel_info": {
+        "panel_id": 5,
+        "panel_title": "Classes loaded",
+        "dashboard_label": "JFR Exporter afterburner-fe"
+      },
+      "error": "Request failed with status code 400",
+      "metrics_from_db": [
+        {
+          "metric_name": "classes-loaded.max",
+          "unit": "none"
+        }
+      ]
+    },
+    "panel_5_db_only": {
+      "panel_info": {
+        "panel_id": 5,
+        "panel_title": "Classes loaded",
+        "dashboard_label": "JFR Exporter afterburner-fe"
+      },
+      "metrics_from_db": [
+        {
+          "metric_name": "classes-loaded.max",
+          "unit": "none"
+        }
+      ]
+    },
+    "panel_6_error": {
+      "panel_info": {
+        "panel_id": 6,
+        "panel_title": "Threads active",
+        "dashboard_label": "JFR Exporter afterburner-fe"
+      },
+      "error": "Request failed with status code 400",
+      "metrics_from_db": [
+        {
+          "metric_name": "database_call",
+          "unit": "reqps"
+        },
+        {
+          "metric_name": "flaky_call",
+          "unit": "reqps"
+        },
+        {
+          "metric_name": "max_activeCount",
+          "unit": "none"
+        },
+        {
+          "metric_name": "max_daemonCount",
+          "unit": "none"
+        },
+        {
+          "metric_name": "memory_churn",
+          "unit": "reqps"
+        }
+      ]
+    },
+    "panel_6_db_only": {
+      "panel_info": {
+        "panel_id": 6,
+        "panel_title": "Threads active",
+        "dashboard_label": "JFR Exporter afterburner-fe"
+      },
+      "metrics_from_db": [
+        {
+          "metric_name": "database_call",
+          "unit": "reqps"
+        },
+        {
+          "metric_name": "flaky_call",
+          "unit": "reqps"
+        },
+        {
+          "metric_name": "max_activeCount",
+          "unit": "none"
+        },
+        {
+          "metric_name": "max_daemonCount",
+          "unit": "none"
+        },
+        {
+          "metric_name": "memory_churn",
+          "unit": "reqps"
+        }
+      ]
+    },
+    "panel_7_error": {
+      "panel_info": {
+        "panel_id": 7,
+        "panel_title": "Heap used",
+        "dashboard_label": "JFR Exporter afterburner-fe"
+      },
+      "error": "Request failed with status code 400",
+      "metrics_from_db": [
+        {
+          "metric_name": "max_heapCommitted",
+          "unit": "bytes"
+        },
+        {
+          "metric_name": "max_heapUsed",
+          "unit": "bytes"
+        }
+      ]
+    },
+    "panel_7_db_only": {
+      "panel_info": {
+        "panel_id": 7,
+        "panel_title": "Heap used",
+        "dashboard_label": "JFR Exporter afterburner-fe"
+      },
+      "metrics_from_db": [
+        {
+          "metric_name": "max_heapCommitted",
+          "unit": "bytes"
+        },
+        {
+          "metric_name": "max_heapUsed",
+          "unit": "bytes"
+        }
+      ]
+    },
+    "panel_8_error": {
+      "panel_info": {
+        "panel_id": 8,
+        "panel_title": "Garbage collections (old)",
+        "dashboard_label": "JFR Exporter afterburner-fe"
+      },
+      "error": "Request failed with status code 400",
+      "metrics_from_db": [
+        {
+          "metric_name": "Old GC duration",
+          "unit": "ms"
+        }
+      ]
+    },
+    "panel_8_db_only": {
+      "panel_info": {
+        "panel_id": 8,
+        "panel_title": "Garbage collections (old)",
+        "dashboard_label": "JFR Exporter afterburner-fe"
+      },
+      "metrics_from_db": [
+        {
+          "metric_name": "Old GC duration",
+          "unit": "ms"
+        }
+      ]
+    },
+    "panel_9_error": {
+      "panel_info": {
+        "panel_id": 9,
+        "panel_title": "Safe points",
+        "dashboard_label": "JFR Exporter afterburner-fe"
+      },
+      "error": "Request failed with status code 400",
+      "metrics_from_db": [
+        {
+          "metric_name": "Safe point duration",
+          "unit": "ms"
+        }
+      ]
+    },
+    "panel_9_db_only": {
+      "panel_info": {
+        "panel_id": 9,
+        "panel_title": "Safe points",
+        "dashboard_label": "JFR Exporter afterburner-fe"
+      },
+      "metrics_from_db": [
+        {
+          "metric_name": "Safe point duration",
+          "unit": "ms"
+        }
+      ]
+    }
+  }
+}

@@ -1,0 +1,625 @@
+import { Test, TestingModule } from '@nestjs/testing';
+import { INestApplication } from '@nestjs/common';
+import { AppModule } from '../../app.module';
+import { DatabaseTestHelper } from '../utils/database-test-helper';
+import { TestDataFactory } from '../utils/test-data-factory';
+import request from 'supertest';
+
+describe('Migration Comparison E2E Tests', () => {
+  let app: INestApplication;
+  let testContext: any;
+  let comparisonResults: any[] = [];
+
+  beforeAll(async () => {
+    const moduleFixture: TestingModule = await Test.createTestingModule({
+      imports: [AppModule],
+    }).compile();
+
+    app = moduleFixture.createNestApplication();
+    await app.init();
+
+    testContext = await DatabaseTestHelper.setupTestEnvironment();
+  });
+
+  afterAll(async () => {
+    await app.close();
+    await DatabaseTestHelper.teardownTestEnvironment();
+
+    // Generate final comparison report
+    if (comparisonResults.length > 0) {
+      const report = DatabaseTestHelper.generateComparisonReport(comparisonResults);
+      console.log('\n=== MIGRATION COMPARISON REPORT ===');
+      console.log(`Total Tests: ${report.totalTests}`);
+      console.log(`Passed: ${report.passedTests}`);
+      console.log(`Failed: ${report.failedTests}`);
+      console.log(`Success Rate: ${report.summary.successRate.toFixed(2)}%`);
+      console.log(`Average Duration: ${report.summary.averageDuration.toFixed(2)}ms`);
+
+      if (report.summary.criticalFailures.length > 0) {
+        console.log('\nCritical Failures:');
+        report.summary.criticalFailures.forEach(failure => {
+          console.log(`- ${failure}`);
+        });
+      }
+    }
+  });
+
+  describe('End-to-End API Workflows', () => {
+    test('should complete full user registration and authentication workflow', async () => {
+      const userData = TestDataFactory.createUser({
+        email: 'e2e.workflow@test.com',
+        password: 'E2EWorkflow123!',
+      });
+
+      // Step 1: Register user via API
+      const registerResponse = await request(app.getHttpServer())
+        .post('/auth/signup')
+        .send({
+          email: userData.email,
+          password: userData.password,
+          firstName: userData.firstName,
+          lastName: userData.lastName,
+        })
+        .expect(201);
+
+      expect(registerResponse.body.access_token).toBeDefined();
+      expect(registerResponse.body.user.email).toBe(userData.email);
+
+      // Step 2: Sign in via API
+      const signinResponse = await request(app.getHttpServer())
+        .post('/auth/signin')
+        .send({
+          email: userData.email,
+          password: userData.password,
+        })
+        .expect(200);
+
+      expect(signinResponse.body.access_token).toBeDefined();
+      const accessToken = signinResponse.body.access_token;
+
+      // Step 3: Access protected endpoint
+      const profileResponse = await request(app.getHttpServer())
+        .get('/auth/profile')
+        .set('Authorization', `Bearer ${accessToken}`)
+        .expect(200);
+
+      expect(profileResponse.body.email).toBe(userData.email);
+
+      // Step 4: Verify user exists in database
+      const dbUser = await testContext.nativeService.findUserByEmail(userData.email);
+      expect(dbUser).toBeDefined();
+      expect(dbUser.email).toBe(userData.email);
+
+      comparisonResults.push({
+        operation: 'fullUserWorkflow',
+        nativeResult: { success: true, userId: dbUser.id },
+        duration: 0,
+        success: true,
+      });
+    });
+
+    test('should complete full test run creation and retrieval workflow', async () => {
+      // First, get authenticated user
+      const authResponse = await request(app.getHttpServer())
+        .post('/auth/signin')
+        .send({
+          email: 'e2e.workflow@test.com',
+          password: 'E2EWorkflow123!',
+        });
+
+      const accessToken = authResponse.body.access_token;
+
+      // Step 1: Create test run via API
+      const testRunData = TestDataFactory.createTestRun({
+        testRunId: 'e2e-workflow-test-run',
+        applicationName: 'e2e-test-app',
+        environment: 'test',
+      });
+
+      const createResponse = await request(app.getHttpServer())
+        .post('/test')
+        .set('Authorization', `Bearer ${accessToken}`)
+        .send(testRunData)
+        .expect(201);
+
+      expect(createResponse.body.testRunId).toBe(testRunData.testRunId);
+
+      // Step 2: Retrieve test run via API
+      const getResponse = await request(app.getHttpServer())
+        .get(`/test-runs/${testRunData.testRunId}`)
+        .set('Authorization', `Bearer ${accessToken}`)
+        .expect(200);
+
+      expect(getResponse.body.testRunId).toBe(testRunData.testRunId);
+      expect(getResponse.body.applicationName).toBe(testRunData.applicationName);
+
+      // Step 3: List test runs with filters
+      const listResponse = await request(app.getHttpServer())
+        .get('/test-runs')
+        .query({ applicationName: testRunData.applicationName })
+        .set('Authorization', `Bearer ${accessToken}`)
+        .expect(200);
+
+      expect(Array.isArray(listResponse.body)).toBe(true);
+      expect(listResponse.body.some((tr: any) => tr.testRunId === testRunData.testRunId)).toBe(true);
+
+      // Step 4: Verify in database
+      const dbTestRun = await testContext.nativeService.getTestRunByTestRunId(testRunData.testRunId);
+      expect(dbTestRun).toBeDefined();
+      expect(dbTestRun.applicationName).toBe(testRunData.applicationName);
+
+      comparisonResults.push({
+        operation: 'fullTestRunWorkflow',
+        nativeResult: { success: true, testRunId: dbTestRun.testRunId },
+        duration: 0,
+        success: true,
+      });
+    });
+
+    test('should complete configuration management workflow', async () => {
+      const authResponse = await request(app.getHttpServer())
+        .post('/auth/signin')
+        .send({
+          email: 'e2e.workflow@test.com',
+          password: 'E2EWorkflow123!',
+        });
+
+      const accessToken = authResponse.body.access_token;
+      const testRunId = 'e2e-workflow-test-run';
+
+      // Step 1: Add single configuration
+      const singleConfigResponse = await request(app.getHttpServer())
+        .post('/config/key')
+        .set('Authorization', `Bearer ${accessToken}`)
+        .send({
+          testRunId,
+          key: 'e2e.config.single',
+          value: 'single-value',
+          category: 'e2e',
+        })
+        .expect(201);
+
+      expect(singleConfigResponse.body.key).toBe('e2e.config.single');
+
+      // Step 2: Add multiple configurations
+      const multipleConfigs = [
+        { key: 'e2e.config.multi1', value: 'multi-value-1', category: 'e2e' },
+        { key: 'e2e.config.multi2', value: 'multi-value-2', category: 'e2e' },
+      ];
+
+      const multipleConfigResponse = await request(app.getHttpServer())
+        .post('/config/keys')
+        .set('Authorization', `Bearer ${accessToken}`)
+        .send({
+          testRunId,
+          configurations: multipleConfigs,
+        })
+        .expect(201);
+
+      expect(Array.isArray(multipleConfigResponse.body)).toBe(true);
+      expect(multipleConfigResponse.body.length).toBe(2);
+
+      // Step 3: Retrieve all configurations for test run
+      const getConfigsResponse = await request(app.getHttpServer())
+        .get(`/test-runs/${testRunId}/configs`)
+        .set('Authorization', `Bearer ${accessToken}`)
+        .expect(200);
+
+      expect(Array.isArray(getConfigsResponse.body)).toBe(true);
+      expect(getConfigsResponse.body.length).toBeGreaterThanOrEqual(3);
+
+      // Verify in database
+      const dbTestRun = await testContext.nativeService.getTestRunByTestRunId(testRunId);
+      const dbConfigs = await testContext.nativeService.getTestRunConfigurations(dbTestRun.id);
+      const e2eConfigs = dbConfigs.filter((c: any) => c.category === 'e2e');
+      expect(e2eConfigs.length).toBe(3);
+
+      comparisonResults.push({
+        operation: 'fullConfigurationWorkflow',
+        nativeResult: { success: true, configCount: e2eConfigs.length },
+        duration: 0,
+        success: true,
+      });
+    });
+
+    test('should complete API key management workflow', async () => {
+      const authResponse = await request(app.getHttpServer())
+        .post('/auth/signin')
+        .send({
+          email: 'e2e.workflow@test.com',
+          password: 'E2EWorkflow123!',
+        });
+
+      const accessToken = authResponse.body.access_token;
+
+      // Step 1: Create API key
+      const createApiKeyResponse = await request(app.getHttpServer())
+        .post('/api-keys')
+        .set('Authorization', `Bearer ${accessToken}`)
+        .send({
+          description: 'E2E Test API Key',
+          expiresAt: new Date(Date.now() + 86400000).toISOString(), // 24 hours
+        })
+        .expect(201);
+
+      expect(createApiKeyResponse.body.key).toBeDefined();
+      expect(createApiKeyResponse.body.description).toBe('E2E Test API Key');
+      const createdApiKey = createApiKeyResponse.body;
+
+      // Step 2: List API keys
+      const listApiKeysResponse = await request(app.getHttpServer())
+        .get('/api-keys')
+        .set('Authorization', `Bearer ${accessToken}`)
+        .expect(200);
+
+      expect(Array.isArray(listApiKeysResponse.body)).toBe(true);
+      expect(listApiKeysResponse.body.some((key: any) => key.id === createdApiKey.id)).toBe(true);
+
+      // Step 3: Use API key for authentication
+      const testWithApiKeyResponse = await request(app.getHttpServer())
+        .get('/test-runs')
+        .set('Authorization', `Bearer ${createdApiKey.key}`)
+        .expect(200);
+
+      expect(Array.isArray(testWithApiKeyResponse.body)).toBe(true);
+
+      // Step 4: Validate API key
+      const validateResponse = await request(app.getHttpServer())
+        .post('/api-keys/validate')
+        .set('Authorization', `Bearer ${accessToken}`)
+        .send({ key: createdApiKey.key })
+        .expect(200);
+
+      expect(validateResponse.body.valid).toBe(true);
+
+      // Verify in database
+      const dbApiKey = await testContext.nativeService.findApiKeyByKey(createdApiKey.key);
+      expect(dbApiKey).toBeDefined();
+      expect(dbApiKey.description).toBe('E2E Test API Key');
+      expect(dbApiKey.usageCount).toBeGreaterThan(0);
+
+      comparisonResults.push({
+        operation: 'fullApiKeyWorkflow',
+        nativeResult: { success: true, apiKeyId: dbApiKey.id },
+        duration: 0,
+        success: true,
+      });
+    });
+  });
+
+  describe('Performance and Load Testing', () => {
+    test('should handle concurrent API requests efficiently', async () => {
+      const authResponse = await request(app.getHttpServer())
+        .post('/auth/signin')
+        .send({
+          email: 'e2e.workflow@test.com',
+          password: 'E2EWorkflow123!',
+        });
+
+      const accessToken = authResponse.body.access_token;
+
+      // Create multiple test runs concurrently
+      const testRunPromises = Array.from({ length: 10 }, (_, i) => {
+        const testRunData = TestDataFactory.createTestRun({
+          testRunId: `concurrent-e2e-${i}-${Date.now()}`,
+          applicationName: 'concurrent-e2e-app',
+        });
+
+        return request(app.getHttpServer())
+          .post('/test')
+          .set('Authorization', `Bearer ${accessToken}`)
+          .send(testRunData);
+      });
+
+      const startTime = Date.now();
+      const results = await Promise.allSettled(testRunPromises);
+      const duration = Date.now() - startTime;
+
+      const successful = results.filter(r => r.status === 'fulfilled' && (r.value as any).status === 201);
+      expect(successful.length).toBe(10);
+      expect(duration).toBeLessThan(5000); // Should complete within 5 seconds
+
+      comparisonResults.push({
+        operation: 'concurrentApiRequests',
+        nativeResult: { successCount: successful.length, totalDuration: duration },
+        duration,
+        success: successful.length === 10,
+      });
+    });
+
+    test('should maintain API response times under load', async () => {
+      const authResponse = await request(app.getHttpServer())
+        .post('/auth/signin')
+        .send({
+          email: 'e2e.workflow@test.com',
+          password: 'E2EWorkflow123!',
+        });
+
+      const accessToken = authResponse.body.access_token;
+
+      // Measure response times for various endpoints
+      const endpoints = [
+        { method: 'GET', path: '/test-runs', expectedStatus: 200 },
+        { method: 'GET', path: '/auth/profile', expectedStatus: 200 },
+        { method: 'GET', path: '/api-keys', expectedStatus: 200 },
+      ];
+
+      const responseTimes: number[] = [];
+
+      for (const endpoint of endpoints) {
+        for (let i = 0; i < 5; i++) {
+          const startTime = Date.now();
+
+          await request(app.getHttpServer())
+            [endpoint.method.toLowerCase() as 'get'](endpoint.path)
+            .set('Authorization', `Bearer ${accessToken}`)
+            .expect(endpoint.expectedStatus);
+
+          const responseTime = Date.now() - startTime;
+          responseTimes.push(responseTime);
+        }
+      }
+
+      const averageResponseTime = responseTimes.reduce((sum, time) => sum + time, 0) / responseTimes.length;
+      const maxResponseTime = Math.max(...responseTimes);
+
+      expect(averageResponseTime).toBeLessThan(500); // 500ms average
+      expect(maxResponseTime).toBeLessThan(1000); // 1 second max
+
+      comparisonResults.push({
+        operation: 'apiResponseTimes',
+        nativeResult: { averageResponseTime, maxResponseTime },
+        duration: averageResponseTime,
+        success: averageResponseTime < 500 && maxResponseTime < 1000,
+      });
+    });
+  });
+
+  describe('Error Handling and Edge Cases', () => {
+    test('should handle authentication errors correctly', async () => {
+      // Test with invalid credentials
+      await request(app.getHttpServer())
+        .post('/auth/signin')
+        .send({
+          email: 'nonexistent@test.com',
+          password: 'wrongpassword',
+        })
+        .expect(401);
+
+      // Test with malformed token
+      await request(app.getHttpServer())
+        .get('/auth/profile')
+        .set('Authorization', 'Bearer invalid-token')
+        .expect(401);
+
+      // Test with expired API key
+      await request(app.getHttpServer())
+        .get('/test-runs')
+        .set('Authorization', 'Bearer expired-or-invalid-key')
+        .expect(401);
+
+      comparisonResults.push({
+        operation: 'authenticationErrorHandling',
+        nativeResult: { success: true },
+        duration: 0,
+        success: true,
+      });
+    });
+
+    test('should handle validation errors correctly', async () => {
+      const authResponse = await request(app.getHttpServer())
+        .post('/auth/signin')
+        .send({
+          email: 'e2e.workflow@test.com',
+          password: 'E2EWorkflow123!',
+        });
+
+      const accessToken = authResponse.body.access_token;
+
+      // Test with missing required fields
+      await request(app.getHttpServer())
+        .post('/test')
+        .set('Authorization', `Bearer ${accessToken}`)
+        .send({
+          // Missing required fields
+          environment: 'test',
+        })
+        .expect(400);
+
+      // Test with invalid data types
+      await request(app.getHttpServer())
+        .post('/config/key')
+        .set('Authorization', `Bearer ${accessToken}`)
+        .send({
+          testRunId: 'invalid-id',
+          key: '', // Empty key
+          value: 'some-value',
+        })
+        .expect(400);
+
+      comparisonResults.push({
+        operation: 'validationErrorHandling',
+        nativeResult: { success: true },
+        duration: 0,
+        success: true,
+      });
+    });
+
+    test('should handle resource not found errors correctly', async () => {
+      const authResponse = await request(app.getHttpServer())
+        .post('/auth/signin')
+        .send({
+          email: 'e2e.workflow@test.com',
+          password: 'E2EWorkflow123!',
+        });
+
+      const accessToken = authResponse.body.access_token;
+
+      // Test with non-existent test run
+      await request(app.getHttpServer())
+        .get('/test-runs/non-existent-test-run-id')
+        .set('Authorization', `Bearer ${accessToken}`)
+        .expect(404);
+
+      // Test with non-existent API key
+      await request(app.getHttpServer())
+        .get('/api-keys/non-existent-uuid')
+        .set('Authorization', `Bearer ${accessToken}`)
+        .expect(404);
+
+      comparisonResults.push({
+        operation: 'notFoundErrorHandling',
+        nativeResult: { success: true },
+        duration: 0,
+        success: true,
+      });
+    });
+  });
+
+  describe('Data Consistency Verification', () => {
+    test('should maintain data consistency across operations', async () => {
+      const authResponse = await request(app.getHttpServer())
+        .post('/auth/signin')
+        .send({
+          email: 'e2e.workflow@test.com',
+          password: 'E2EWorkflow123!',
+        });
+
+      const accessToken = authResponse.body.access_token;
+
+      // Create test run via API
+      const testRunData = TestDataFactory.createTestRun({
+        testRunId: 'consistency-test-run',
+        applicationName: 'consistency-app',
+      });
+
+      await request(app.getHttpServer())
+        .post('/test')
+        .set('Authorization', `Bearer ${accessToken}`)
+        .send(testRunData)
+        .expect(201);
+
+      // Add configurations via API
+      await request(app.getHttpServer())
+        .post('/config/keys')
+        .set('Authorization', `Bearer ${accessToken}`)
+        .send({
+          testRunId: testRunData.testRunId,
+          configurations: [
+            { key: 'consistency.test.1', value: 'value1', category: 'test' },
+            { key: 'consistency.test.2', value: 'value2', category: 'test' },
+          ],
+        })
+        .expect(201);
+
+      // Verify via API
+      const apiTestRun = await request(app.getHttpServer())
+        .get(`/test-runs/${testRunData.testRunId}`)
+        .set('Authorization', `Bearer ${accessToken}`)
+        .expect(200);
+
+      const apiConfigs = await request(app.getHttpServer())
+        .get(`/test-runs/${testRunData.testRunId}/configs`)
+        .set('Authorization', `Bearer ${accessToken}`)
+        .expect(200);
+
+      // Verify via database
+      const dbTestRun = await testContext.nativeService.getTestRunByTestRunId(testRunData.testRunId);
+      const dbConfigs = await testContext.nativeService.getTestRunConfigurations(dbTestRun.id);
+
+      // Compare API and database results
+      expect(apiTestRun.body.testRunId).toBe(dbTestRun.testRunId);
+      expect(apiTestRun.body.applicationName).toBe(dbTestRun.applicationName);
+      expect(apiConfigs.body.length).toBe(dbConfigs.length);
+
+      const testConfigs = dbConfigs.filter((c: any) => c.category === 'test');
+      expect(testConfigs.length).toBe(2);
+
+      comparisonResults.push({
+        operation: 'dataConsistencyVerification',
+        nativeResult: {
+          apiTestRunId: apiTestRun.body.testRunId,
+          dbTestRunId: dbTestRun.testRunId,
+          configCountMatch: apiConfigs.body.length === dbConfigs.length
+        },
+        duration: 0,
+        success: true,
+      });
+    });
+  });
+
+  describe('Security Regression Testing', () => {
+    test('should properly secure endpoints with authentication', async () => {
+      // Test that protected endpoints require authentication
+      const protectedEndpoints = [
+        { method: 'GET', path: '/test-runs' },
+        { method: 'GET', path: '/auth/profile' },
+        { method: 'POST', path: '/test' },
+        { method: 'GET', path: '/api-keys' },
+      ];
+
+      for (const endpoint of protectedEndpoints) {
+        await request(app.getHttpServer())
+          [endpoint.method.toLowerCase() as 'get' | 'post'](endpoint.path)
+          .expect(401);
+      }
+
+      comparisonResults.push({
+        operation: 'endpointSecurityVerification',
+        nativeResult: { success: true, endpointCount: protectedEndpoints.length },
+        duration: 0,
+        success: true,
+      });
+    });
+
+    test('should properly validate API keys and JWT tokens', async () => {
+      // Test with valid JWT
+      const authResponse = await request(app.getHttpServer())
+        .post('/auth/signin')
+        .send({
+          email: 'e2e.workflow@test.com',
+          password: 'E2EWorkflow123!',
+        })
+        .expect(200);
+
+      const jwtToken = authResponse.body.access_token;
+
+      await request(app.getHttpServer())
+        .get('/auth/profile')
+        .set('Authorization', `Bearer ${jwtToken}`)
+        .expect(200);
+
+      // Create and test with valid API key
+      const apiKeyResponse = await request(app.getHttpServer())
+        .post('/api-keys')
+        .set('Authorization', `Bearer ${jwtToken}`)
+        .send({ description: 'Security test key' })
+        .expect(201);
+
+      const apiKey = apiKeyResponse.body.key;
+
+      await request(app.getHttpServer())
+        .get('/test-runs')
+        .set('Authorization', `Bearer ${apiKey}`)
+        .expect(200);
+
+      // Test with invalid tokens
+      await request(app.getHttpServer())
+        .get('/auth/profile')
+        .set('Authorization', 'Bearer invalid-jwt-token')
+        .expect(401);
+
+      await request(app.getHttpServer())
+        .get('/test-runs')
+        .set('Authorization', 'Bearer invalid-api-key')
+        .expect(401);
+
+      comparisonResults.push({
+        operation: 'tokenValidationSecurity',
+        nativeResult: { success: true },
+        duration: 0,
+        success: true,
+      });
+    });
+  });
+});

@@ -1,0 +1,3881 @@
+{
+  "test_run_id": "MyAfterburner-acc-loadTest-00002",
+  "datasource_type": "prometheus",
+  "test_run_data": {
+    "start_time": "2025-09-18T07:18:23.359Z",
+    "end_time": "2025-09-18T07:24:31.916Z",
+    "system_under_test": "MyAfterburner",
+    "test_environment": "acc"
+  },
+  "grafana_config": {
+    "working_url": "http://grafana:3000",
+    "org_id": "1"
+  },
+  "fetched_at": "2025-09-25T18:57:40.024Z",
+  "results": {
+    "panel_32_afterburner-fe_request_0": {
+      "panel_info": {
+        "panel_id": 32,
+        "panel_title": "Threads",
+        "dashboard_label": "JVM afterburner-fe",
+        "dashboard_uid": "spring-boot-kubernetes-jvm-mimir",
+        "datasource_type": "prometheus"
+      },
+      "variable_context": {
+        "system_under_test": "MyAfterburner",
+        "test_environment": "acc",
+        "service": "afterburner-fe"
+      },
+      "original_request": {
+        "method": "POST",
+        "endpoint": "/api/ds/query",
+        "request_body": {
+          "to": "1758180271916",
+          "from": "1758179903359",
+          "queries": [
+            {
+              "expr": "avg(jvm_threads_live_threads{service=\"afterburner-fe\", system_under_test=\"MyAfterburner\", test_environment=\"acc\"}) by(kubernetes_pod_name)",
+              "step": 2400,
+              "refId": "A",
+              "format": "time_series",
+              "metric": "",
+              "instant": false,
+              "datasource": {
+                "uid": "prometheus",
+                "type": "prometheus"
+              },
+              "datasourceId": 2,
+              "legendFormat": "live",
+              "intervalFactor": 2
+            },
+            {
+              "expr": "avg(jvm_threads_daemon_threads{service=\"afterburner-fe\", system_under_test=\"MyAfterburner\", test_environment=\"acc\"}) by(kubernetes_pod_name)",
+              "step": 2400,
+              "refId": "B",
+              "format": "time_series",
+              "metric": "",
+              "instant": false,
+              "datasource": {
+                "uid": "prometheus",
+                "type": "prometheus"
+              },
+              "datasourceId": 2,
+              "legendFormat": "daemon",
+              "intervalFactor": 2
+            },
+            {
+              "expr": "avg(jvm_threads_peak_threads{service=\"afterburner-fe\", system_under_test=\"MyAfterburner\", test_environment=\"acc\"}) by(kubernetes_pod_name)",
+              "step": 2400,
+              "refId": "C",
+              "format": "time_series",
+              "instant": false,
+              "datasource": {
+                "uid": "prometheus",
+                "type": "prometheus"
+              },
+              "datasourceId": 2,
+              "legendFormat": "peak",
+              "intervalFactor": 2
+            },
+            {
+              "expr": "process_threads{service=\"afterburner-fe\", system_under_test=\"MyAfterburner\", test_environment=\"acc\"}",
+              "step": 2400,
+              "refId": "D",
+              "format": "time_series",
+              "instant": false,
+              "interval": "",
+              "datasource": {
+                "uid": "prometheus",
+                "type": "prometheus"
+              },
+              "datasourceId": 2,
+              "legendFormat": "process",
+              "intervalFactor": 2
+            }
+          ]
+        },
+        "path_parameters": {
+          "ds_type": "prometheus",
+          "requestId": "b1c17f43-37ef-452d-b89e-248b308e0585:32"
+        }
+      },
+      "substituted_request": {
+        "queries": [
+          {
+            "expr": "avg(jvm_threads_live_threads{service=\"afterburner-fe\", system_under_test=\"MyAfterburner\", test_environment=\"acc\"}) by(kubernetes_pod_name)",
+            "step": 2400,
+            "refId": "A",
+            "format": "time_series",
+            "metric": "",
+            "instant": false,
+            "datasource": {
+              "uid": "prometheus",
+              "type": "prometheus"
+            },
+            "datasourceId": 2,
+            "legendFormat": "live",
+            "intervalFactor": 2
+          },
+          {
+            "expr": "avg(jvm_threads_daemon_threads{service=\"afterburner-fe\", system_under_test=\"MyAfterburner\", test_environment=\"acc\"}) by(kubernetes_pod_name)",
+            "step": 2400,
+            "refId": "B",
+            "format": "time_series",
+            "metric": "",
+            "instant": false,
+            "datasource": {
+              "uid": "prometheus",
+              "type": "prometheus"
+            },
+            "datasourceId": 2,
+            "legendFormat": "daemon",
+            "intervalFactor": 2
+          },
+          {
+            "expr": "avg(jvm_threads_peak_threads{service=\"afterburner-fe\", system_under_test=\"MyAfterburner\", test_environment=\"acc\"}) by(kubernetes_pod_name)",
+            "step": 2400,
+            "refId": "C",
+            "format": "time_series",
+            "instant": false,
+            "datasource": {
+              "uid": "prometheus",
+              "type": "prometheus"
+            },
+            "datasourceId": 2,
+            "legendFormat": "peak",
+            "intervalFactor": 2
+          },
+          {
+            "expr": "process_threads{service=\"afterburner-fe\", system_under_test=\"MyAfterburner\", test_environment=\"acc\"}",
+            "step": 2400,
+            "refId": "D",
+            "format": "time_series",
+            "instant": false,
+            "interval": "",
+            "datasource": {
+              "uid": "prometheus",
+              "type": "prometheus"
+            },
+            "datasourceId": 2,
+            "legendFormat": "process",
+            "intervalFactor": 2
+          }
+        ],
+        "range": {
+          "from": "2025-09-18T07:18:23.359Z",
+          "to": "2025-09-18T07:24:31.916Z",
+          "raw": {
+            "from": "2025-09-18T07:18:23.359Z",
+            "to": "2025-09-18T07:24:31.916Z"
+          }
+        },
+        "from": "2025-09-18T07:18:23.359Z",
+        "to": "2025-09-18T07:24:31.916Z",
+        "interval": "15s"
+      },
+      "grafana_response": {
+        "results": {
+          "A": {
+            "status": 200,
+            "frames": [
+              {
+                "schema": {
+                  "refId": "A",
+                  "meta": {
+                    "type": "timeseries-multi",
+                    "typeVersion": [
+                      0,
+                      1
+                    ],
+                    "custom": {
+                      "resultType": "matrix"
+                    },
+                    "executedQueryString": "Expr: avg(jvm_threads_live_threads{service=\"afterburner-fe\", system_under_test=\"MyAfterburner\", test_environment=\"acc\"}) by(kubernetes_pod_name)\nStep: 30s"
+                  },
+                  "fields": [
+                    {
+                      "name": "Time",
+                      "type": "time",
+                      "typeInfo": {
+                        "frame": "time.Time"
+                      },
+                      "config": {
+                        "interval": 30000
+                      }
+                    },
+                    {
+                      "name": "Value",
+                      "type": "number",
+                      "typeInfo": {
+                        "frame": "float64"
+                      },
+                      "labels": {},
+                      "config": {
+                        "displayNameFromDS": "live"
+                      }
+                    }
+                  ]
+                },
+                "data": {
+                  "values": [
+                    [
+                      1758179880000,
+                      1758179910000,
+                      1758179940000,
+                      1758179970000,
+                      1758180000000,
+                      1758180030000,
+                      1758180060000,
+                      1758180090000,
+                      1758180120000,
+                      1758180150000,
+                      1758180180000,
+                      1758180210000,
+                      1758180240000,
+                      1758180270000
+                    ],
+                    [
+                      52,
+                      40,
+                      51,
+                      54,
+                      81,
+                      85,
+                      87,
+                      87,
+                      86,
+                      86,
+                      85,
+                      86,
+                      88,
+                      88
+                    ]
+                  ]
+                }
+              }
+            ]
+          },
+          "B": {
+            "status": 200,
+            "frames": [
+              {
+                "schema": {
+                  "refId": "B",
+                  "meta": {
+                    "type": "timeseries-multi",
+                    "typeVersion": [
+                      0,
+                      1
+                    ],
+                    "custom": {
+                      "resultType": "matrix"
+                    },
+                    "executedQueryString": "Expr: avg(jvm_threads_daemon_threads{service=\"afterburner-fe\", system_under_test=\"MyAfterburner\", test_environment=\"acc\"}) by(kubernetes_pod_name)\nStep: 30s"
+                  },
+                  "fields": [
+                    {
+                      "name": "Time",
+                      "type": "time",
+                      "typeInfo": {
+                        "frame": "time.Time"
+                      },
+                      "config": {
+                        "interval": 30000
+                      }
+                    },
+                    {
+                      "name": "Value",
+                      "type": "number",
+                      "typeInfo": {
+                        "frame": "float64"
+                      },
+                      "labels": {},
+                      "config": {
+                        "displayNameFromDS": "daemon"
+                      }
+                    }
+                  ]
+                },
+                "data": {
+                  "values": [
+                    [
+                      1758179880000,
+                      1758179910000,
+                      1758179940000,
+                      1758179970000,
+                      1758180000000,
+                      1758180030000,
+                      1758180060000,
+                      1758180090000,
+                      1758180120000,
+                      1758180150000,
+                      1758180180000,
+                      1758180210000,
+                      1758180240000,
+                      1758180270000
+                    ],
+                    [
+                      44,
+                      33,
+                      44,
+                      47,
+                      74,
+                      78,
+                      80,
+                      80,
+                      79,
+                      79,
+                      78,
+                      79,
+                      81,
+                      81
+                    ]
+                  ]
+                }
+              }
+            ]
+          },
+          "C": {
+            "status": 200,
+            "frames": [
+              {
+                "schema": {
+                  "refId": "C",
+                  "meta": {
+                    "type": "timeseries-multi",
+                    "typeVersion": [
+                      0,
+                      1
+                    ],
+                    "custom": {
+                      "resultType": "matrix"
+                    },
+                    "executedQueryString": "Expr: avg(jvm_threads_peak_threads{service=\"afterburner-fe\", system_under_test=\"MyAfterburner\", test_environment=\"acc\"}) by(kubernetes_pod_name)\nStep: 30s"
+                  },
+                  "fields": [
+                    {
+                      "name": "Time",
+                      "type": "time",
+                      "typeInfo": {
+                        "frame": "time.Time"
+                      },
+                      "config": {
+                        "interval": 30000
+                      }
+                    },
+                    {
+                      "name": "Value",
+                      "type": "number",
+                      "typeInfo": {
+                        "frame": "float64"
+                      },
+                      "labels": {},
+                      "config": {
+                        "displayNameFromDS": "peak"
+                      }
+                    }
+                  ]
+                },
+                "data": {
+                  "values": [
+                    [
+                      1758179880000,
+                      1758179910000,
+                      1758179940000,
+                      1758179970000,
+                      1758180000000,
+                      1758180030000,
+                      1758180060000,
+                      1758180090000,
+                      1758180120000,
+                      1758180150000,
+                      1758180180000,
+                      1758180210000,
+                      1758180240000,
+                      1758180270000
+                    ],
+                    [
+                      56,
+                      44,
+                      53,
+                      55,
+                      82,
+                      86,
+                      88,
+                      88,
+                      88,
+                      88,
+                      88,
+                      88,
+                      88,
+                      89
+                    ]
+                  ]
+                }
+              }
+            ]
+          },
+          "D": {
+            "status": 200,
+            "frames": [
+              {
+                "schema": {
+                  "refId": "D",
+                  "meta": {
+                    "typeVersion": [
+                      0,
+                      0
+                    ],
+                    "executedQueryString": "Expr: process_threads{service=\"afterburner-fe\", system_under_test=\"MyAfterburner\", test_environment=\"acc\"}\nStep: 30s"
+                  },
+                  "fields": []
+                },
+                "data": {
+                  "values": []
+                }
+              }
+            ]
+          }
+        }
+      },
+      "timestamp": "2025-09-25T18:57:39.912Z"
+    },
+    "panel_32_afterburner-be_request_0": {
+      "panel_info": {
+        "panel_id": 32,
+        "panel_title": "Threads",
+        "dashboard_label": "JVM afterburner-be",
+        "dashboard_uid": "spring-boot-kubernetes-jvm-mimir",
+        "datasource_type": "prometheus"
+      },
+      "variable_context": {
+        "system_under_test": "MyAfterburner",
+        "test_environment": "acc",
+        "service": "afterburner-be"
+      },
+      "original_request": {
+        "method": "POST",
+        "endpoint": "/api/ds/query",
+        "request_body": {
+          "to": "1758180271916",
+          "from": "1758179903359",
+          "queries": [
+            {
+              "expr": "avg(jvm_threads_live_threads{service=\"afterburner-be\", system_under_test=\"MyAfterburner\", test_environment=\"acc\"}) by(kubernetes_pod_name)",
+              "step": 2400,
+              "refId": "A",
+              "format": "time_series",
+              "metric": "",
+              "instant": false,
+              "datasource": {
+                "uid": "prometheus",
+                "type": "prometheus"
+              },
+              "datasourceId": 2,
+              "legendFormat": "live",
+              "intervalFactor": 2
+            },
+            {
+              "expr": "avg(jvm_threads_daemon_threads{service=\"afterburner-be\", system_under_test=\"MyAfterburner\", test_environment=\"acc\"}) by(kubernetes_pod_name)",
+              "step": 2400,
+              "refId": "B",
+              "format": "time_series",
+              "metric": "",
+              "instant": false,
+              "datasource": {
+                "uid": "prometheus",
+                "type": "prometheus"
+              },
+              "datasourceId": 2,
+              "legendFormat": "daemon",
+              "intervalFactor": 2
+            },
+            {
+              "expr": "avg(jvm_threads_peak_threads{service=\"afterburner-be\", system_under_test=\"MyAfterburner\", test_environment=\"acc\"}) by(kubernetes_pod_name)",
+              "step": 2400,
+              "refId": "C",
+              "format": "time_series",
+              "instant": false,
+              "datasource": {
+                "uid": "prometheus",
+                "type": "prometheus"
+              },
+              "datasourceId": 2,
+              "legendFormat": "peak",
+              "intervalFactor": 2
+            },
+            {
+              "expr": "process_threads{service=\"afterburner-be\", system_under_test=\"MyAfterburner\", test_environment=\"acc\"}",
+              "step": 2400,
+              "refId": "D",
+              "format": "time_series",
+              "instant": false,
+              "interval": "",
+              "datasource": {
+                "uid": "prometheus",
+                "type": "prometheus"
+              },
+              "datasourceId": 2,
+              "legendFormat": "process",
+              "intervalFactor": 2
+            }
+          ]
+        },
+        "path_parameters": {
+          "ds_type": "prometheus",
+          "requestId": "fc4ea02f-de75-4813-b6e6-41c7c58e12e5:32"
+        }
+      },
+      "substituted_request": {
+        "queries": [
+          {
+            "expr": "avg(jvm_threads_live_threads{service=\"afterburner-be\", system_under_test=\"MyAfterburner\", test_environment=\"acc\"}) by(kubernetes_pod_name)",
+            "step": 2400,
+            "refId": "A",
+            "format": "time_series",
+            "metric": "",
+            "instant": false,
+            "datasource": {
+              "uid": "prometheus",
+              "type": "prometheus"
+            },
+            "datasourceId": 2,
+            "legendFormat": "live",
+            "intervalFactor": 2
+          },
+          {
+            "expr": "avg(jvm_threads_daemon_threads{service=\"afterburner-be\", system_under_test=\"MyAfterburner\", test_environment=\"acc\"}) by(kubernetes_pod_name)",
+            "step": 2400,
+            "refId": "B",
+            "format": "time_series",
+            "metric": "",
+            "instant": false,
+            "datasource": {
+              "uid": "prometheus",
+              "type": "prometheus"
+            },
+            "datasourceId": 2,
+            "legendFormat": "daemon",
+            "intervalFactor": 2
+          },
+          {
+            "expr": "avg(jvm_threads_peak_threads{service=\"afterburner-be\", system_under_test=\"MyAfterburner\", test_environment=\"acc\"}) by(kubernetes_pod_name)",
+            "step": 2400,
+            "refId": "C",
+            "format": "time_series",
+            "instant": false,
+            "datasource": {
+              "uid": "prometheus",
+              "type": "prometheus"
+            },
+            "datasourceId": 2,
+            "legendFormat": "peak",
+            "intervalFactor": 2
+          },
+          {
+            "expr": "process_threads{service=\"afterburner-be\", system_under_test=\"MyAfterburner\", test_environment=\"acc\"}",
+            "step": 2400,
+            "refId": "D",
+            "format": "time_series",
+            "instant": false,
+            "interval": "",
+            "datasource": {
+              "uid": "prometheus",
+              "type": "prometheus"
+            },
+            "datasourceId": 2,
+            "legendFormat": "process",
+            "intervalFactor": 2
+          }
+        ],
+        "range": {
+          "from": "2025-09-18T07:18:23.359Z",
+          "to": "2025-09-18T07:24:31.916Z",
+          "raw": {
+            "from": "2025-09-18T07:18:23.359Z",
+            "to": "2025-09-18T07:24:31.916Z"
+          }
+        },
+        "from": "2025-09-18T07:18:23.359Z",
+        "to": "2025-09-18T07:24:31.916Z",
+        "interval": "15s"
+      },
+      "grafana_response": {
+        "results": {
+          "A": {
+            "status": 200,
+            "frames": [
+              {
+                "schema": {
+                  "refId": "A",
+                  "meta": {
+                    "type": "timeseries-multi",
+                    "typeVersion": [
+                      0,
+                      1
+                    ],
+                    "custom": {
+                      "resultType": "matrix"
+                    },
+                    "executedQueryString": "Expr: avg(jvm_threads_live_threads{service=\"afterburner-be\", system_under_test=\"MyAfterburner\", test_environment=\"acc\"}) by(kubernetes_pod_name)\nStep: 30s"
+                  },
+                  "fields": [
+                    {
+                      "name": "Time",
+                      "type": "time",
+                      "typeInfo": {
+                        "frame": "time.Time"
+                      },
+                      "config": {
+                        "interval": 30000
+                      }
+                    },
+                    {
+                      "name": "Value",
+                      "type": "number",
+                      "typeInfo": {
+                        "frame": "float64"
+                      },
+                      "labels": {},
+                      "config": {
+                        "displayNameFromDS": "live"
+                      }
+                    }
+                  ]
+                },
+                "data": {
+                  "values": [
+                    [
+                      1758179880000,
+                      1758179910000,
+                      1758179940000,
+                      1758179970000,
+                      1758180000000,
+                      1758180030000,
+                      1758180060000,
+                      1758180090000,
+                      1758180120000,
+                      1758180150000,
+                      1758180180000,
+                      1758180210000,
+                      1758180240000,
+                      1758180270000
+                    ],
+                    [
+                      43,
+                      45,
+                      45,
+                      45,
+                      68,
+                      71,
+                      72,
+                      72,
+                      74,
+                      74,
+                      72,
+                      72,
+                      72,
+                      73
+                    ]
+                  ]
+                }
+              }
+            ]
+          },
+          "B": {
+            "status": 200,
+            "frames": [
+              {
+                "schema": {
+                  "refId": "B",
+                  "meta": {
+                    "type": "timeseries-multi",
+                    "typeVersion": [
+                      0,
+                      1
+                    ],
+                    "custom": {
+                      "resultType": "matrix"
+                    },
+                    "executedQueryString": "Expr: avg(jvm_threads_daemon_threads{service=\"afterburner-be\", system_under_test=\"MyAfterburner\", test_environment=\"acc\"}) by(kubernetes_pod_name)\nStep: 30s"
+                  },
+                  "fields": [
+                    {
+                      "name": "Time",
+                      "type": "time",
+                      "typeInfo": {
+                        "frame": "time.Time"
+                      },
+                      "config": {
+                        "interval": 30000
+                      }
+                    },
+                    {
+                      "name": "Value",
+                      "type": "number",
+                      "typeInfo": {
+                        "frame": "float64"
+                      },
+                      "labels": {},
+                      "config": {
+                        "displayNameFromDS": "daemon"
+                      }
+                    }
+                  ]
+                },
+                "data": {
+                  "values": [
+                    [
+                      1758179880000,
+                      1758179910000,
+                      1758179940000,
+                      1758179970000,
+                      1758180000000,
+                      1758180030000,
+                      1758180060000,
+                      1758180090000,
+                      1758180120000,
+                      1758180150000,
+                      1758180180000,
+                      1758180210000,
+                      1758180240000,
+                      1758180270000
+                    ],
+                    [
+                      35,
+                      36,
+                      36,
+                      36,
+                      59,
+                      62,
+                      63,
+                      63,
+                      65,
+                      65,
+                      63,
+                      63,
+                      63,
+                      64
+                    ]
+                  ]
+                }
+              }
+            ]
+          },
+          "C": {
+            "status": 200,
+            "frames": [
+              {
+                "schema": {
+                  "refId": "C",
+                  "meta": {
+                    "type": "timeseries-multi",
+                    "typeVersion": [
+                      0,
+                      1
+                    ],
+                    "custom": {
+                      "resultType": "matrix"
+                    },
+                    "executedQueryString": "Expr: avg(jvm_threads_peak_threads{service=\"afterburner-be\", system_under_test=\"MyAfterburner\", test_environment=\"acc\"}) by(kubernetes_pod_name)\nStep: 30s"
+                  },
+                  "fields": [
+                    {
+                      "name": "Time",
+                      "type": "time",
+                      "typeInfo": {
+                        "frame": "time.Time"
+                      },
+                      "config": {
+                        "interval": 30000
+                      }
+                    },
+                    {
+                      "name": "Value",
+                      "type": "number",
+                      "typeInfo": {
+                        "frame": "float64"
+                      },
+                      "labels": {},
+                      "config": {
+                        "displayNameFromDS": "peak"
+                      }
+                    }
+                  ]
+                },
+                "data": {
+                  "values": [
+                    [
+                      1758179880000,
+                      1758179910000,
+                      1758179940000,
+                      1758179970000,
+                      1758180000000,
+                      1758180030000,
+                      1758180060000,
+                      1758180090000,
+                      1758180120000,
+                      1758180150000,
+                      1758180180000,
+                      1758180210000,
+                      1758180240000,
+                      1758180270000
+                    ],
+                    [
+                      48,
+                      49,
+                      49,
+                      49,
+                      69,
+                      71,
+                      74,
+                      74,
+                      74,
+                      74,
+                      74,
+                      74,
+                      74,
+                      75
+                    ]
+                  ]
+                }
+              }
+            ]
+          },
+          "D": {
+            "status": 200,
+            "frames": [
+              {
+                "schema": {
+                  "refId": "D",
+                  "meta": {
+                    "typeVersion": [
+                      0,
+                      0
+                    ],
+                    "executedQueryString": "Expr: process_threads{service=\"afterburner-be\", system_under_test=\"MyAfterburner\", test_environment=\"acc\"}\nStep: 30s"
+                  },
+                  "fields": []
+                },
+                "data": {
+                  "values": []
+                }
+              }
+            ]
+          }
+        }
+      },
+      "timestamp": "2025-09-25T18:57:39.926Z"
+    },
+    "panel_61_afterburner-be_request_0": {
+      "panel_info": {
+        "panel_id": 61,
+        "panel_title": "File Descriptors",
+        "dashboard_label": "JVM afterburner-be",
+        "dashboard_uid": "spring-boot-kubernetes-jvm-mimir",
+        "datasource_type": "prometheus"
+      },
+      "variable_context": {
+        "system_under_test": "MyAfterburner",
+        "test_environment": "acc",
+        "service": "afterburner-be"
+      },
+      "original_request": {
+        "method": "POST",
+        "endpoint": "/api/ds/query",
+        "request_body": {
+          "to": "1758180271916",
+          "from": "1758179903359",
+          "queries": [
+            {
+              "expr": "avg(process_open_fds{service=\"afterburner-be\", system_under_test=\"MyAfterburner\", test_environment=\"acc\"}) by(kubernetes_name)",
+              "hide": false,
+              "step": 2400,
+              "refId": "A",
+              "format": "time_series",
+              "metric": "",
+              "instant": false,
+              "datasource": {
+                "uid": "prometheus",
+                "type": "prometheus"
+              },
+              "datasourceId": 2,
+              "legendFormat": "{{ kubernetes_name }} open fds",
+              "intervalFactor": 2
+            },
+            {
+              "expr": "avg(process_max_fds{service=\"afterburner-be\", system_under_test=\"MyAfterburner\", test_environment=\"acc\"}) by(kubernetes_name)",
+              "hide": false,
+              "step": 2400,
+              "refId": "B",
+              "format": "time_series",
+              "metric": "",
+              "instant": false,
+              "datasource": {
+                "uid": "prometheus",
+                "type": "prometheus"
+              },
+              "datasourceId": 2,
+              "legendFormat": "{{ kubernetes_name }} max  ffds",
+              "intervalFactor": 2
+            },
+            {
+              "expr": "avg(process_files_open_files{service=\"afterburner-be\", system_under_test=\"MyAfterburner\", test_environment=\"acc\"}) by(kubernetes_name)",
+              "hide": false,
+              "step": 2400,
+              "refId": "C",
+              "format": "time_series",
+              "metric": "",
+              "instant": false,
+              "datasource": {
+                "uid": "prometheus",
+                "type": "prometheus"
+              },
+              "datasourceId": 2,
+              "legendFormat": "{{ kubernetes_name }} open files",
+              "intervalFactor": 2
+            },
+            {
+              "expr": "avg(process_files_max_files{service=\"afterburner-be\", system_under_test=\"MyAfterburner\", test_environment=\"acc\"}) by(kubernetes_name)",
+              "hide": false,
+              "step": 2400,
+              "refId": "D",
+              "format": "time_series",
+              "metric": "",
+              "instant": false,
+              "datasource": {
+                "uid": "prometheus",
+                "type": "prometheus"
+              },
+              "datasourceId": 2,
+              "legendFormat": "{{ kubernetes_name }} max open files",
+              "intervalFactor": 2
+            }
+          ]
+        },
+        "path_parameters": {
+          "ds_type": "prometheus",
+          "requestId": "fc4ea02f-de75-4813-b6e6-41c7c58e12e5:61"
+        }
+      },
+      "substituted_request": {
+        "queries": [
+          {
+            "expr": "avg(process_open_fds{service=\"afterburner-be\", system_under_test=\"MyAfterburner\", test_environment=\"acc\"}) by(kubernetes_name)",
+            "hide": false,
+            "step": 2400,
+            "refId": "A",
+            "format": "time_series",
+            "metric": "",
+            "instant": false,
+            "datasource": {
+              "uid": "prometheus",
+              "type": "prometheus"
+            },
+            "datasourceId": 2,
+            "legendFormat": "{{ kubernetes_name }} open fds",
+            "intervalFactor": 2
+          },
+          {
+            "expr": "avg(process_max_fds{service=\"afterburner-be\", system_under_test=\"MyAfterburner\", test_environment=\"acc\"}) by(kubernetes_name)",
+            "hide": false,
+            "step": 2400,
+            "refId": "B",
+            "format": "time_series",
+            "metric": "",
+            "instant": false,
+            "datasource": {
+              "uid": "prometheus",
+              "type": "prometheus"
+            },
+            "datasourceId": 2,
+            "legendFormat": "{{ kubernetes_name }} max  ffds",
+            "intervalFactor": 2
+          },
+          {
+            "expr": "avg(process_files_open_files{service=\"afterburner-be\", system_under_test=\"MyAfterburner\", test_environment=\"acc\"}) by(kubernetes_name)",
+            "hide": false,
+            "step": 2400,
+            "refId": "C",
+            "format": "time_series",
+            "metric": "",
+            "instant": false,
+            "datasource": {
+              "uid": "prometheus",
+              "type": "prometheus"
+            },
+            "datasourceId": 2,
+            "legendFormat": "{{ kubernetes_name }} open files",
+            "intervalFactor": 2
+          },
+          {
+            "expr": "avg(process_files_max_files{service=\"afterburner-be\", system_under_test=\"MyAfterburner\", test_environment=\"acc\"}) by(kubernetes_name)",
+            "hide": false,
+            "step": 2400,
+            "refId": "D",
+            "format": "time_series",
+            "metric": "",
+            "instant": false,
+            "datasource": {
+              "uid": "prometheus",
+              "type": "prometheus"
+            },
+            "datasourceId": 2,
+            "legendFormat": "{{ kubernetes_name }} max open files",
+            "intervalFactor": 2
+          }
+        ],
+        "range": {
+          "from": "2025-09-18T07:18:23.359Z",
+          "to": "2025-09-18T07:24:31.916Z",
+          "raw": {
+            "from": "2025-09-18T07:18:23.359Z",
+            "to": "2025-09-18T07:24:31.916Z"
+          }
+        },
+        "from": "2025-09-18T07:18:23.359Z",
+        "to": "2025-09-18T07:24:31.916Z",
+        "interval": "15s"
+      },
+      "grafana_response": {
+        "results": {
+          "A": {
+            "status": 200,
+            "frames": [
+              {
+                "schema": {
+                  "refId": "A",
+                  "meta": {
+                    "typeVersion": [
+                      0,
+                      0
+                    ],
+                    "executedQueryString": "Expr: avg(process_open_fds{service=\"afterburner-be\", system_under_test=\"MyAfterburner\", test_environment=\"acc\"}) by(kubernetes_name)\nStep: 30s"
+                  },
+                  "fields": []
+                },
+                "data": {
+                  "values": []
+                }
+              }
+            ]
+          },
+          "B": {
+            "status": 200,
+            "frames": [
+              {
+                "schema": {
+                  "refId": "B",
+                  "meta": {
+                    "typeVersion": [
+                      0,
+                      0
+                    ],
+                    "executedQueryString": "Expr: avg(process_max_fds{service=\"afterburner-be\", system_under_test=\"MyAfterburner\", test_environment=\"acc\"}) by(kubernetes_name)\nStep: 30s"
+                  },
+                  "fields": []
+                },
+                "data": {
+                  "values": []
+                }
+              }
+            ]
+          },
+          "C": {
+            "status": 200,
+            "frames": [
+              {
+                "schema": {
+                  "refId": "C",
+                  "meta": {
+                    "type": "timeseries-multi",
+                    "typeVersion": [
+                      0,
+                      1
+                    ],
+                    "custom": {
+                      "resultType": "matrix"
+                    },
+                    "executedQueryString": "Expr: avg(process_files_open_files{service=\"afterburner-be\", system_under_test=\"MyAfterburner\", test_environment=\"acc\"}) by(kubernetes_name)\nStep: 30s"
+                  },
+                  "fields": [
+                    {
+                      "name": "Time",
+                      "type": "time",
+                      "typeInfo": {
+                        "frame": "time.Time"
+                      },
+                      "config": {
+                        "interval": 30000
+                      }
+                    },
+                    {
+                      "name": "Value",
+                      "type": "number",
+                      "typeInfo": {
+                        "frame": "float64"
+                      },
+                      "labels": {},
+                      "config": {
+                        "displayNameFromDS": " open files"
+                      }
+                    }
+                  ]
+                },
+                "data": {
+                  "values": [
+                    [
+                      1758179880000,
+                      1758179910000,
+                      1758179940000,
+                      1758179970000,
+                      1758180000000,
+                      1758180030000,
+                      1758180060000,
+                      1758180090000,
+                      1758180120000,
+                      1758180150000,
+                      1758180180000,
+                      1758180210000,
+                      1758180240000,
+                      1758180270000
+                    ],
+                    [
+                      224,
+                      226,
+                      236,
+                      235,
+                      260,
+                      262,
+                      259,
+                      258,
+                      254,
+                      257,
+                      258,
+                      259,
+                      258,
+                      258
+                    ]
+                  ]
+                }
+              }
+            ]
+          },
+          "D": {
+            "status": 200,
+            "frames": [
+              {
+                "schema": {
+                  "refId": "D",
+                  "meta": {
+                    "type": "timeseries-multi",
+                    "typeVersion": [
+                      0,
+                      1
+                    ],
+                    "custom": {
+                      "resultType": "matrix"
+                    },
+                    "executedQueryString": "Expr: avg(process_files_max_files{service=\"afterburner-be\", system_under_test=\"MyAfterburner\", test_environment=\"acc\"}) by(kubernetes_name)\nStep: 30s"
+                  },
+                  "fields": [
+                    {
+                      "name": "Time",
+                      "type": "time",
+                      "typeInfo": {
+                        "frame": "time.Time"
+                      },
+                      "config": {
+                        "interval": 30000
+                      }
+                    },
+                    {
+                      "name": "Value",
+                      "type": "number",
+                      "typeInfo": {
+                        "frame": "float64"
+                      },
+                      "labels": {},
+                      "config": {
+                        "displayNameFromDS": " max open files"
+                      }
+                    }
+                  ]
+                },
+                "data": {
+                  "values": [
+                    [
+                      1758179880000,
+                      1758179910000,
+                      1758179940000,
+                      1758179970000,
+                      1758180000000,
+                      1758180030000,
+                      1758180060000,
+                      1758180090000,
+                      1758180120000,
+                      1758180150000,
+                      1758180180000,
+                      1758180210000,
+                      1758180240000,
+                      1758180270000
+                    ],
+                    [
+                      1048576,
+                      1048576,
+                      1048576,
+                      1048576,
+                      1048576,
+                      1048576,
+                      1048576,
+                      1048576,
+                      1048576,
+                      1048576,
+                      1048576,
+                      1048576,
+                      1048576,
+                      1048576
+                    ]
+                  ]
+                }
+              }
+            ]
+          }
+        }
+      },
+      "timestamp": "2025-09-25T18:57:39.938Z"
+    },
+    "panel_61_afterburner-fe_request_0": {
+      "panel_info": {
+        "panel_id": 61,
+        "panel_title": "File Descriptors",
+        "dashboard_label": "JVM afterburner-fe",
+        "dashboard_uid": "spring-boot-kubernetes-jvm-mimir",
+        "datasource_type": "prometheus"
+      },
+      "variable_context": {
+        "system_under_test": "MyAfterburner",
+        "test_environment": "acc",
+        "service": "afterburner-fe"
+      },
+      "original_request": {
+        "method": "POST",
+        "endpoint": "/api/ds/query",
+        "request_body": {
+          "to": "1758180271916",
+          "from": "1758179903359",
+          "queries": [
+            {
+              "expr": "avg(process_open_fds{service=\"afterburner-fe\", system_under_test=\"MyAfterburner\", test_environment=\"acc\"}) by(kubernetes_name)",
+              "hide": false,
+              "step": 2400,
+              "refId": "A",
+              "format": "time_series",
+              "metric": "",
+              "instant": false,
+              "datasource": {
+                "uid": "prometheus",
+                "type": "prometheus"
+              },
+              "datasourceId": 2,
+              "legendFormat": "{{ kubernetes_name }} open fds",
+              "intervalFactor": 2
+            },
+            {
+              "expr": "avg(process_max_fds{service=\"afterburner-fe\", system_under_test=\"MyAfterburner\", test_environment=\"acc\"}) by(kubernetes_name)",
+              "hide": false,
+              "step": 2400,
+              "refId": "B",
+              "format": "time_series",
+              "metric": "",
+              "instant": false,
+              "datasource": {
+                "uid": "prometheus",
+                "type": "prometheus"
+              },
+              "datasourceId": 2,
+              "legendFormat": "{{ kubernetes_name }} max  ffds",
+              "intervalFactor": 2
+            },
+            {
+              "expr": "avg(process_files_open_files{service=\"afterburner-fe\", system_under_test=\"MyAfterburner\", test_environment=\"acc\"}) by(kubernetes_name)",
+              "hide": false,
+              "step": 2400,
+              "refId": "C",
+              "format": "time_series",
+              "metric": "",
+              "instant": false,
+              "datasource": {
+                "uid": "prometheus",
+                "type": "prometheus"
+              },
+              "datasourceId": 2,
+              "legendFormat": "{{ kubernetes_name }} open files",
+              "intervalFactor": 2
+            },
+            {
+              "expr": "avg(process_files_max_files{service=\"afterburner-fe\", system_under_test=\"MyAfterburner\", test_environment=\"acc\"}) by(kubernetes_name)",
+              "hide": false,
+              "step": 2400,
+              "refId": "D",
+              "format": "time_series",
+              "metric": "",
+              "instant": false,
+              "datasource": {
+                "uid": "prometheus",
+                "type": "prometheus"
+              },
+              "datasourceId": 2,
+              "legendFormat": "{{ kubernetes_name }} max open files",
+              "intervalFactor": 2
+            }
+          ]
+        },
+        "path_parameters": {
+          "ds_type": "prometheus",
+          "requestId": "b1c17f43-37ef-452d-b89e-248b308e0585:61"
+        }
+      },
+      "substituted_request": {
+        "queries": [
+          {
+            "expr": "avg(process_open_fds{service=\"afterburner-fe\", system_under_test=\"MyAfterburner\", test_environment=\"acc\"}) by(kubernetes_name)",
+            "hide": false,
+            "step": 2400,
+            "refId": "A",
+            "format": "time_series",
+            "metric": "",
+            "instant": false,
+            "datasource": {
+              "uid": "prometheus",
+              "type": "prometheus"
+            },
+            "datasourceId": 2,
+            "legendFormat": "{{ kubernetes_name }} open fds",
+            "intervalFactor": 2
+          },
+          {
+            "expr": "avg(process_max_fds{service=\"afterburner-fe\", system_under_test=\"MyAfterburner\", test_environment=\"acc\"}) by(kubernetes_name)",
+            "hide": false,
+            "step": 2400,
+            "refId": "B",
+            "format": "time_series",
+            "metric": "",
+            "instant": false,
+            "datasource": {
+              "uid": "prometheus",
+              "type": "prometheus"
+            },
+            "datasourceId": 2,
+            "legendFormat": "{{ kubernetes_name }} max  ffds",
+            "intervalFactor": 2
+          },
+          {
+            "expr": "avg(process_files_open_files{service=\"afterburner-fe\", system_under_test=\"MyAfterburner\", test_environment=\"acc\"}) by(kubernetes_name)",
+            "hide": false,
+            "step": 2400,
+            "refId": "C",
+            "format": "time_series",
+            "metric": "",
+            "instant": false,
+            "datasource": {
+              "uid": "prometheus",
+              "type": "prometheus"
+            },
+            "datasourceId": 2,
+            "legendFormat": "{{ kubernetes_name }} open files",
+            "intervalFactor": 2
+          },
+          {
+            "expr": "avg(process_files_max_files{service=\"afterburner-fe\", system_under_test=\"MyAfterburner\", test_environment=\"acc\"}) by(kubernetes_name)",
+            "hide": false,
+            "step": 2400,
+            "refId": "D",
+            "format": "time_series",
+            "metric": "",
+            "instant": false,
+            "datasource": {
+              "uid": "prometheus",
+              "type": "prometheus"
+            },
+            "datasourceId": 2,
+            "legendFormat": "{{ kubernetes_name }} max open files",
+            "intervalFactor": 2
+          }
+        ],
+        "range": {
+          "from": "2025-09-18T07:18:23.359Z",
+          "to": "2025-09-18T07:24:31.916Z",
+          "raw": {
+            "from": "2025-09-18T07:18:23.359Z",
+            "to": "2025-09-18T07:24:31.916Z"
+          }
+        },
+        "from": "2025-09-18T07:18:23.359Z",
+        "to": "2025-09-18T07:24:31.916Z",
+        "interval": "15s"
+      },
+      "grafana_response": {
+        "results": {
+          "A": {
+            "status": 200,
+            "frames": [
+              {
+                "schema": {
+                  "refId": "A",
+                  "meta": {
+                    "typeVersion": [
+                      0,
+                      0
+                    ],
+                    "executedQueryString": "Expr: avg(process_open_fds{service=\"afterburner-fe\", system_under_test=\"MyAfterburner\", test_environment=\"acc\"}) by(kubernetes_name)\nStep: 30s"
+                  },
+                  "fields": []
+                },
+                "data": {
+                  "values": []
+                }
+              }
+            ]
+          },
+          "B": {
+            "status": 200,
+            "frames": [
+              {
+                "schema": {
+                  "refId": "B",
+                  "meta": {
+                    "typeVersion": [
+                      0,
+                      0
+                    ],
+                    "executedQueryString": "Expr: avg(process_max_fds{service=\"afterburner-fe\", system_under_test=\"MyAfterburner\", test_environment=\"acc\"}) by(kubernetes_name)\nStep: 30s"
+                  },
+                  "fields": []
+                },
+                "data": {
+                  "values": []
+                }
+              }
+            ]
+          },
+          "C": {
+            "status": 200,
+            "frames": [
+              {
+                "schema": {
+                  "refId": "C",
+                  "meta": {
+                    "type": "timeseries-multi",
+                    "typeVersion": [
+                      0,
+                      1
+                    ],
+                    "custom": {
+                      "resultType": "matrix"
+                    },
+                    "executedQueryString": "Expr: avg(process_files_open_files{service=\"afterburner-fe\", system_under_test=\"MyAfterburner\", test_environment=\"acc\"}) by(kubernetes_name)\nStep: 30s"
+                  },
+                  "fields": [
+                    {
+                      "name": "Time",
+                      "type": "time",
+                      "typeInfo": {
+                        "frame": "time.Time"
+                      },
+                      "config": {
+                        "interval": 30000
+                      }
+                    },
+                    {
+                      "name": "Value",
+                      "type": "number",
+                      "typeInfo": {
+                        "frame": "float64"
+                      },
+                      "labels": {},
+                      "config": {
+                        "displayNameFromDS": " open files"
+                      }
+                    }
+                  ]
+                },
+                "data": {
+                  "values": [
+                    [
+                      1758179880000,
+                      1758179910000,
+                      1758179940000,
+                      1758179970000,
+                      1758180000000,
+                      1758180030000,
+                      1758180060000,
+                      1758180090000,
+                      1758180120000,
+                      1758180150000,
+                      1758180180000,
+                      1758180210000,
+                      1758180240000,
+                      1758180270000
+                    ],
+                    [
+                      228,
+                      220,
+                      227,
+                      257,
+                      335,
+                      339,
+                      337,
+                      337,
+                      333,
+                      332,
+                      333,
+                      335,
+                      343,
+                      308
+                    ]
+                  ]
+                }
+              }
+            ]
+          },
+          "D": {
+            "status": 200,
+            "frames": [
+              {
+                "schema": {
+                  "refId": "D",
+                  "meta": {
+                    "type": "timeseries-multi",
+                    "typeVersion": [
+                      0,
+                      1
+                    ],
+                    "custom": {
+                      "resultType": "matrix"
+                    },
+                    "executedQueryString": "Expr: avg(process_files_max_files{service=\"afterburner-fe\", system_under_test=\"MyAfterburner\", test_environment=\"acc\"}) by(kubernetes_name)\nStep: 30s"
+                  },
+                  "fields": [
+                    {
+                      "name": "Time",
+                      "type": "time",
+                      "typeInfo": {
+                        "frame": "time.Time"
+                      },
+                      "config": {
+                        "interval": 30000
+                      }
+                    },
+                    {
+                      "name": "Value",
+                      "type": "number",
+                      "typeInfo": {
+                        "frame": "float64"
+                      },
+                      "labels": {},
+                      "config": {
+                        "displayNameFromDS": " max open files"
+                      }
+                    }
+                  ]
+                },
+                "data": {
+                  "values": [
+                    [
+                      1758179880000,
+                      1758179910000,
+                      1758179940000,
+                      1758179970000,
+                      1758180000000,
+                      1758180030000,
+                      1758180060000,
+                      1758180090000,
+                      1758180120000,
+                      1758180150000,
+                      1758180180000,
+                      1758180210000,
+                      1758180240000,
+                      1758180270000
+                    ],
+                    [
+                      1048576,
+                      1048576,
+                      1048576,
+                      1048576,
+                      1048576,
+                      1048576,
+                      1048576,
+                      1048576,
+                      1048576,
+                      1048576,
+                      1048576,
+                      1048576,
+                      1048576,
+                      1048576
+                    ]
+                  ]
+                }
+              }
+            ]
+          }
+        }
+      },
+      "timestamp": "2025-09-25T18:57:39.958Z"
+    },
+    "panel_91_afterburner-be_request_0": {
+      "panel_info": {
+        "panel_id": 91,
+        "panel_title": "Log Events (1m)",
+        "dashboard_label": "JVM afterburner-be",
+        "dashboard_uid": "spring-boot-kubernetes-jvm-mimir",
+        "datasource_type": "prometheus"
+      },
+      "variable_context": {
+        "system_under_test": "MyAfterburner",
+        "test_environment": "acc",
+        "service": "afterburner-be"
+      },
+      "original_request": {
+        "method": "POST",
+        "endpoint": "/api/ds/query",
+        "request_body": {
+          "to": "1758180271916",
+          "from": "1758179903359",
+          "queries": [
+            {
+              "expr": "increase(logback_events_total{service=\"afterburner-be\", system_under_test=\"MyAfterburner\", test_environment=\"acc\"}[1m])",
+              "step": 1200,
+              "refId": "A",
+              "format": "time_series",
+              "metric": "",
+              "instant": false,
+              "interval": "",
+              "datasource": {
+                "uid": "prometheus",
+                "type": "prometheus"
+              },
+              "datasourceId": 2,
+              "legendFormat": "{{level}}",
+              "intervalFactor": 2
+            }
+          ]
+        },
+        "path_parameters": {
+          "ds_type": "prometheus",
+          "requestId": "fc4ea02f-de75-4813-b6e6-41c7c58e12e5:91"
+        }
+      },
+      "substituted_request": {
+        "queries": [
+          {
+            "expr": "increase(logback_events_total{service=\"afterburner-be\", system_under_test=\"MyAfterburner\", test_environment=\"acc\"}[1m])",
+            "step": 1200,
+            "refId": "A",
+            "format": "time_series",
+            "metric": "",
+            "instant": false,
+            "interval": "",
+            "datasource": {
+              "uid": "prometheus",
+              "type": "prometheus"
+            },
+            "datasourceId": 2,
+            "legendFormat": "{{level}}",
+            "intervalFactor": 2
+          }
+        ],
+        "range": {
+          "from": "2025-09-18T07:18:23.359Z",
+          "to": "2025-09-18T07:24:31.916Z",
+          "raw": {
+            "from": "2025-09-18T07:18:23.359Z",
+            "to": "2025-09-18T07:24:31.916Z"
+          }
+        },
+        "from": "2025-09-18T07:18:23.359Z",
+        "to": "2025-09-18T07:24:31.916Z",
+        "interval": "15s"
+      },
+      "grafana_response": {
+        "results": {
+          "A": {
+            "status": 200,
+            "frames": [
+              {
+                "schema": {
+                  "refId": "A",
+                  "meta": {
+                    "type": "timeseries-multi",
+                    "typeVersion": [
+                      0,
+                      1
+                    ],
+                    "custom": {
+                      "resultType": "matrix"
+                    },
+                    "executedQueryString": "Expr: increase(logback_events_total{service=\"afterburner-be\", system_under_test=\"MyAfterburner\", test_environment=\"acc\"}[1m])\nStep: 30s"
+                  },
+                  "fields": [
+                    {
+                      "name": "Time",
+                      "type": "time",
+                      "typeInfo": {
+                        "frame": "time.Time"
+                      },
+                      "config": {
+                        "interval": 30000
+                      }
+                    },
+                    {
+                      "name": "Value",
+                      "type": "number",
+                      "typeInfo": {
+                        "frame": "float64"
+                      },
+                      "labels": {
+                        "instance": "afterburner-be:8080",
+                        "job": "afterburner-be",
+                        "level": "debug",
+                        "service": "afterburner-be",
+                        "system_under_test": "MyAfterburner",
+                        "test_environment": "acc"
+                      },
+                      "config": {
+                        "displayNameFromDS": "debug"
+                      }
+                    }
+                  ]
+                },
+                "data": {
+                  "values": [
+                    [
+                      1758179880000,
+                      1758179910000,
+                      1758179940000,
+                      1758179970000,
+                      1758180000000,
+                      1758180030000,
+                      1758180060000,
+                      1758180090000,
+                      1758180120000,
+                      1758180150000,
+                      1758180180000,
+                      1758180210000,
+                      1758180240000,
+                      1758180270000
+                    ],
+                    [
+                      0,
+                      0,
+                      0,
+                      0,
+                      0,
+                      0,
+                      0,
+                      0,
+                      0,
+                      0,
+                      0,
+                      0,
+                      0,
+                      0
+                    ]
+                  ]
+                }
+              },
+              {
+                "schema": {
+                  "refId": "A",
+                  "meta": {
+                    "type": "timeseries-multi",
+                    "typeVersion": [
+                      0,
+                      1
+                    ],
+                    "custom": {
+                      "resultType": "matrix"
+                    }
+                  },
+                  "fields": [
+                    {
+                      "name": "Time",
+                      "type": "time",
+                      "typeInfo": {
+                        "frame": "time.Time"
+                      },
+                      "config": {
+                        "interval": 30000
+                      }
+                    },
+                    {
+                      "name": "Value",
+                      "type": "number",
+                      "typeInfo": {
+                        "frame": "float64"
+                      },
+                      "labels": {
+                        "instance": "afterburner-be:8080",
+                        "job": "afterburner-be",
+                        "level": "error",
+                        "service": "afterburner-be",
+                        "system_under_test": "MyAfterburner",
+                        "test_environment": "acc"
+                      },
+                      "config": {
+                        "displayNameFromDS": "error"
+                      }
+                    }
+                  ]
+                },
+                "data": {
+                  "values": [
+                    [
+                      1758179880000,
+                      1758179910000,
+                      1758179940000,
+                      1758179970000,
+                      1758180000000,
+                      1758180030000,
+                      1758180060000,
+                      1758180090000,
+                      1758180120000,
+                      1758180150000,
+                      1758180180000,
+                      1758180210000,
+                      1758180240000,
+                      1758180270000
+                    ],
+                    [
+                      0,
+                      0,
+                      0,
+                      0,
+                      0,
+                      0,
+                      0,
+                      0,
+                      0,
+                      0,
+                      0,
+                      0,
+                      0,
+                      0
+                    ]
+                  ]
+                }
+              },
+              {
+                "schema": {
+                  "refId": "A",
+                  "meta": {
+                    "type": "timeseries-multi",
+                    "typeVersion": [
+                      0,
+                      1
+                    ],
+                    "custom": {
+                      "resultType": "matrix"
+                    }
+                  },
+                  "fields": [
+                    {
+                      "name": "Time",
+                      "type": "time",
+                      "typeInfo": {
+                        "frame": "time.Time"
+                      },
+                      "config": {
+                        "interval": 30000
+                      }
+                    },
+                    {
+                      "name": "Value",
+                      "type": "number",
+                      "typeInfo": {
+                        "frame": "float64"
+                      },
+                      "labels": {
+                        "instance": "afterburner-be:8080",
+                        "job": "afterburner-be",
+                        "level": "info",
+                        "service": "afterburner-be",
+                        "system_under_test": "MyAfterburner",
+                        "test_environment": "acc"
+                      },
+                      "config": {
+                        "displayNameFromDS": "info"
+                      }
+                    }
+                  ]
+                },
+                "data": {
+                  "values": [
+                    [
+                      1758179880000,
+                      1758179910000,
+                      1758179940000,
+                      1758179970000,
+                      1758180000000,
+                      1758180030000,
+                      1758180060000,
+                      1758180090000,
+                      1758180120000,
+                      1758180150000,
+                      1758180180000,
+                      1758180210000,
+                      1758180240000,
+                      1758180270000
+                    ],
+                    [
+                      0,
+                      32.72727272727273,
+                      50.974000000000004,
+                      0,
+                      9789.912074325923,
+                      19800.360006545576,
+                      19822.178585065183,
+                      19778.181818181816,
+                      19834.54846275522,
+                      19793.814432989693,
+                      19833.827245786593,
+                      19821.457791676516,
+                      19799.280026180866,
+                      19812.730677624044
+                    ]
+                  ]
+                }
+              },
+              {
+                "schema": {
+                  "refId": "A",
+                  "meta": {
+                    "type": "timeseries-multi",
+                    "typeVersion": [
+                      0,
+                      1
+                    ],
+                    "custom": {
+                      "resultType": "matrix"
+                    }
+                  },
+                  "fields": [
+                    {
+                      "name": "Time",
+                      "type": "time",
+                      "typeInfo": {
+                        "frame": "time.Time"
+                      },
+                      "config": {
+                        "interval": 30000
+                      }
+                    },
+                    {
+                      "name": "Value",
+                      "type": "number",
+                      "typeInfo": {
+                        "frame": "float64"
+                      },
+                      "labels": {
+                        "instance": "afterburner-be:8080",
+                        "job": "afterburner-be",
+                        "level": "trace",
+                        "service": "afterburner-be",
+                        "system_under_test": "MyAfterburner",
+                        "test_environment": "acc"
+                      },
+                      "config": {
+                        "displayNameFromDS": "trace"
+                      }
+                    }
+                  ]
+                },
+                "data": {
+                  "values": [
+                    [
+                      1758179880000,
+                      1758179910000,
+                      1758179940000,
+                      1758179970000,
+                      1758180000000,
+                      1758180030000,
+                      1758180060000,
+                      1758180090000,
+                      1758180120000,
+                      1758180150000,
+                      1758180180000,
+                      1758180210000,
+                      1758180240000,
+                      1758180270000
+                    ],
+                    [
+                      0,
+                      0,
+                      0,
+                      0,
+                      0,
+                      0,
+                      0,
+                      0,
+                      0,
+                      0,
+                      0,
+                      0,
+                      0,
+                      0
+                    ]
+                  ]
+                }
+              },
+              {
+                "schema": {
+                  "refId": "A",
+                  "meta": {
+                    "type": "timeseries-multi",
+                    "typeVersion": [
+                      0,
+                      1
+                    ],
+                    "custom": {
+                      "resultType": "matrix"
+                    }
+                  },
+                  "fields": [
+                    {
+                      "name": "Time",
+                      "type": "time",
+                      "typeInfo": {
+                        "frame": "time.Time"
+                      },
+                      "config": {
+                        "interval": 30000
+                      }
+                    },
+                    {
+                      "name": "Value",
+                      "type": "number",
+                      "typeInfo": {
+                        "frame": "float64"
+                      },
+                      "labels": {
+                        "instance": "afterburner-be:8080",
+                        "job": "afterburner-be",
+                        "level": "warn",
+                        "service": "afterburner-be",
+                        "system_under_test": "MyAfterburner",
+                        "test_environment": "acc"
+                      },
+                      "config": {
+                        "displayNameFromDS": "warn"
+                      }
+                    }
+                  ]
+                },
+                "data": {
+                  "values": [
+                    [
+                      1758179880000,
+                      1758179910000,
+                      1758179940000,
+                      1758179970000,
+                      1758180000000,
+                      1758180030000,
+                      1758180060000,
+                      1758180090000,
+                      1758180120000,
+                      1758180150000,
+                      1758180180000,
+                      1758180210000,
+                      1758180240000,
+                      1758180270000
+                    ],
+                    [
+                      0,
+                      0,
+                      0,
+                      0,
+                      0,
+                      0,
+                      0,
+                      0,
+                      0,
+                      0,
+                      0,
+                      0,
+                      0,
+                      0
+                    ]
+                  ]
+                }
+              }
+            ]
+          }
+        }
+      },
+      "timestamp": "2025-09-25T18:57:39.969Z"
+    },
+    "panel_91_afterburner-fe_request_0": {
+      "panel_info": {
+        "panel_id": 91,
+        "panel_title": "Log Events (1m)",
+        "dashboard_label": "JVM afterburner-fe",
+        "dashboard_uid": "spring-boot-kubernetes-jvm-mimir",
+        "datasource_type": "prometheus"
+      },
+      "variable_context": {
+        "system_under_test": "MyAfterburner",
+        "test_environment": "acc",
+        "service": "afterburner-fe"
+      },
+      "original_request": {
+        "method": "POST",
+        "endpoint": "/api/ds/query",
+        "request_body": {
+          "to": "1758180271916",
+          "from": "1758179903359",
+          "queries": [
+            {
+              "expr": "increase(logback_events_total{service=\"afterburner-fe\", system_under_test=\"MyAfterburner\", test_environment=\"acc\"}[1m])",
+              "step": 1200,
+              "refId": "A",
+              "format": "time_series",
+              "metric": "",
+              "instant": false,
+              "interval": "",
+              "datasource": {
+                "uid": "prometheus",
+                "type": "prometheus"
+              },
+              "datasourceId": 2,
+              "legendFormat": "{{level}}",
+              "intervalFactor": 2
+            }
+          ]
+        },
+        "path_parameters": {
+          "ds_type": "prometheus",
+          "requestId": "b1c17f43-37ef-452d-b89e-248b308e0585:91"
+        }
+      },
+      "substituted_request": {
+        "queries": [
+          {
+            "expr": "increase(logback_events_total{service=\"afterburner-fe\", system_under_test=\"MyAfterburner\", test_environment=\"acc\"}[1m])",
+            "step": 1200,
+            "refId": "A",
+            "format": "time_series",
+            "metric": "",
+            "instant": false,
+            "interval": "",
+            "datasource": {
+              "uid": "prometheus",
+              "type": "prometheus"
+            },
+            "datasourceId": 2,
+            "legendFormat": "{{level}}",
+            "intervalFactor": 2
+          }
+        ],
+        "range": {
+          "from": "2025-09-18T07:18:23.359Z",
+          "to": "2025-09-18T07:24:31.916Z",
+          "raw": {
+            "from": "2025-09-18T07:18:23.359Z",
+            "to": "2025-09-18T07:24:31.916Z"
+          }
+        },
+        "from": "2025-09-18T07:18:23.359Z",
+        "to": "2025-09-18T07:24:31.916Z",
+        "interval": "15s"
+      },
+      "grafana_response": {
+        "results": {
+          "A": {
+            "status": 200,
+            "frames": [
+              {
+                "schema": {
+                  "refId": "A",
+                  "meta": {
+                    "type": "timeseries-multi",
+                    "typeVersion": [
+                      0,
+                      1
+                    ],
+                    "custom": {
+                      "resultType": "matrix"
+                    },
+                    "executedQueryString": "Expr: increase(logback_events_total{service=\"afterburner-fe\", system_under_test=\"MyAfterburner\", test_environment=\"acc\"}[1m])\nStep: 30s"
+                  },
+                  "fields": [
+                    {
+                      "name": "Time",
+                      "type": "time",
+                      "typeInfo": {
+                        "frame": "time.Time"
+                      },
+                      "config": {
+                        "interval": 30000
+                      }
+                    },
+                    {
+                      "name": "Value",
+                      "type": "number",
+                      "typeInfo": {
+                        "frame": "float64"
+                      },
+                      "labels": {
+                        "instance": "afterburner-fe:8080",
+                        "job": "afterburner-fe",
+                        "level": "debug",
+                        "service": "afterburner-fe",
+                        "system_under_test": "MyAfterburner",
+                        "test_environment": "acc"
+                      },
+                      "config": {
+                        "displayNameFromDS": "debug"
+                      }
+                    }
+                  ]
+                },
+                "data": {
+                  "values": [
+                    [
+                      1758179880000,
+                      1758179910000,
+                      1758179940000,
+                      1758179970000,
+                      1758180000000,
+                      1758180030000,
+                      1758180060000,
+                      1758180090000,
+                      1758180120000,
+                      1758180150000,
+                      1758180180000,
+                      1758180210000,
+                      1758180240000,
+                      1758180270000
+                    ],
+                    [
+                      0,
+                      0,
+                      0,
+                      0,
+                      0,
+                      0,
+                      0,
+                      0,
+                      0,
+                      0,
+                      0,
+                      0,
+                      0,
+                      0
+                    ]
+                  ]
+                }
+              },
+              {
+                "schema": {
+                  "refId": "A",
+                  "meta": {
+                    "type": "timeseries-multi",
+                    "typeVersion": [
+                      0,
+                      1
+                    ],
+                    "custom": {
+                      "resultType": "matrix"
+                    }
+                  },
+                  "fields": [
+                    {
+                      "name": "Time",
+                      "type": "time",
+                      "typeInfo": {
+                        "frame": "time.Time"
+                      },
+                      "config": {
+                        "interval": 30000
+                      }
+                    },
+                    {
+                      "name": "Value",
+                      "type": "number",
+                      "typeInfo": {
+                        "frame": "float64"
+                      },
+                      "labels": {
+                        "instance": "afterburner-fe:8080",
+                        "job": "afterburner-fe",
+                        "level": "error",
+                        "service": "afterburner-fe",
+                        "system_under_test": "MyAfterburner",
+                        "test_environment": "acc"
+                      },
+                      "config": {
+                        "displayNameFromDS": "error"
+                      }
+                    }
+                  ]
+                },
+                "data": {
+                  "values": [
+                    [
+                      1758179880000,
+                      1758179910000,
+                      1758179940000,
+                      1758179970000,
+                      1758180000000,
+                      1758180030000,
+                      1758180060000,
+                      1758180090000,
+                      1758180120000,
+                      1758180150000,
+                      1758180180000,
+                      1758180210000,
+                      1758180240000,
+                      1758180270000
+                    ],
+                    [
+                      0,
+                      0,
+                      0,
+                      0,
+                      33.78563246604484,
+                      56.725209992363915,
+                      76.36224795912801,
+                      78.54688267059402,
+                      80.72874052255496,
+                      96.00174548628158,
+                      58.91016200294551,
+                      56.72727272727272,
+                      80.72433729682557,
+                      72
+                    ]
+                  ]
+                }
+              },
+              {
+                "schema": {
+                  "refId": "A",
+                  "meta": {
+                    "type": "timeseries-multi",
+                    "typeVersion": [
+                      0,
+                      1
+                    ],
+                    "custom": {
+                      "resultType": "matrix"
+                    }
+                  },
+                  "fields": [
+                    {
+                      "name": "Time",
+                      "type": "time",
+                      "typeInfo": {
+                        "frame": "time.Time"
+                      },
+                      "config": {
+                        "interval": 30000
+                      }
+                    },
+                    {
+                      "name": "Value",
+                      "type": "number",
+                      "typeInfo": {
+                        "frame": "float64"
+                      },
+                      "labels": {
+                        "instance": "afterburner-fe:8080",
+                        "job": "afterburner-fe",
+                        "level": "info",
+                        "service": "afterburner-fe",
+                        "system_under_test": "MyAfterburner",
+                        "test_environment": "acc"
+                      },
+                      "config": {
+                        "displayNameFromDS": "info"
+                      }
+                    }
+                  ]
+                },
+                "data": {
+                  "values": [
+                    [
+                      1758179880000,
+                      1758179910000,
+                      1758179940000,
+                      1758179970000,
+                      1758180000000,
+                      1758180030000,
+                      1758180060000,
+                      1758180090000,
+                      1758180120000,
+                      1758180150000,
+                      1758180180000,
+                      1758180210000,
+                      1758180240000,
+                      1758180270000
+                    ],
+                    [
+                      0,
+                      47.99825460892331,
+                      58.4328202697164,
+                      130.9090909090909,
+                      11155.241040746196,
+                      21612.30500709065,
+                      21599.60727986764,
+                      21606.938307969238,
+                      21589.48344515355,
+                      21606.938307969238,
+                      21596.029018709432,
+                      21593.454545454544,
+                      21625.395440165812,
+                      21462.545454545452
+                    ]
+                  ]
+                }
+              },
+              {
+                "schema": {
+                  "refId": "A",
+                  "meta": {
+                    "type": "timeseries-multi",
+                    "typeVersion": [
+                      0,
+                      1
+                    ],
+                    "custom": {
+                      "resultType": "matrix"
+                    }
+                  },
+                  "fields": [
+                    {
+                      "name": "Time",
+                      "type": "time",
+                      "typeInfo": {
+                        "frame": "time.Time"
+                      },
+                      "config": {
+                        "interval": 30000
+                      }
+                    },
+                    {
+                      "name": "Value",
+                      "type": "number",
+                      "typeInfo": {
+                        "frame": "float64"
+                      },
+                      "labels": {
+                        "instance": "afterburner-fe:8080",
+                        "job": "afterburner-fe",
+                        "level": "trace",
+                        "service": "afterburner-fe",
+                        "system_under_test": "MyAfterburner",
+                        "test_environment": "acc"
+                      },
+                      "config": {
+                        "displayNameFromDS": "trace"
+                      }
+                    }
+                  ]
+                },
+                "data": {
+                  "values": [
+                    [
+                      1758179880000,
+                      1758179910000,
+                      1758179940000,
+                      1758179970000,
+                      1758180000000,
+                      1758180030000,
+                      1758180060000,
+                      1758180090000,
+                      1758180120000,
+                      1758180150000,
+                      1758180180000,
+                      1758180210000,
+                      1758180240000,
+                      1758180270000
+                    ],
+                    [
+                      0,
+                      0,
+                      0,
+                      0,
+                      0,
+                      0,
+                      0,
+                      0,
+                      0,
+                      0,
+                      0,
+                      0,
+                      0,
+                      0
+                    ]
+                  ]
+                }
+              },
+              {
+                "schema": {
+                  "refId": "A",
+                  "meta": {
+                    "type": "timeseries-multi",
+                    "typeVersion": [
+                      0,
+                      1
+                    ],
+                    "custom": {
+                      "resultType": "matrix"
+                    }
+                  },
+                  "fields": [
+                    {
+                      "name": "Time",
+                      "type": "time",
+                      "typeInfo": {
+                        "frame": "time.Time"
+                      },
+                      "config": {
+                        "interval": 30000
+                      }
+                    },
+                    {
+                      "name": "Value",
+                      "type": "number",
+                      "typeInfo": {
+                        "frame": "float64"
+                      },
+                      "labels": {
+                        "instance": "afterburner-fe:8080",
+                        "job": "afterburner-fe",
+                        "level": "warn",
+                        "service": "afterburner-fe",
+                        "system_under_test": "MyAfterburner",
+                        "test_environment": "acc"
+                      },
+                      "config": {
+                        "displayNameFromDS": "warn"
+                      }
+                    }
+                  ]
+                },
+                "data": {
+                  "values": [
+                    [
+                      1758179880000,
+                      1758179910000,
+                      1758179940000,
+                      1758179970000,
+                      1758180000000,
+                      1758180030000,
+                      1758180060000,
+                      1758180090000,
+                      1758180120000,
+                      1758180150000,
+                      1758180180000,
+                      1758180210000,
+                      1758180240000,
+                      1758180270000
+                    ],
+                    [
+                      0,
+                      4.363477691720301,
+                      0,
+                      0,
+                      34.90972563137512,
+                      56.725209992363915,
+                      76.36224795912801,
+                      78.54688267059402,
+                      80.72874052255496,
+                      96.00174548628158,
+                      58.91016200294551,
+                      56.72727272727272,
+                      80.72433729682557,
+                      72
+                    ]
+                  ]
+                }
+              }
+            ]
+          }
+        }
+      },
+      "timestamp": "2025-09-25T18:57:39.978Z"
+    },
+    "panel_93_afterburner-be_request_0_error": {
+      "panel_info": {
+        "panel_id": 93,
+        "panel_title": "Load",
+        "dashboard_label": "JVM afterburner-be",
+        "dashboard_uid": "spring-boot-kubernetes-jvm-mimir",
+        "datasource_type": "prometheus"
+      },
+      "variable_context": {
+        "system_under_test": "MyAfterburner",
+        "test_environment": "acc",
+        "service": "afterburner-be"
+      },
+      "original_request": {
+        "method": "POST",
+        "endpoint": "/api/ds/query",
+        "request_body": {
+          "to": "1758180271916",
+          "from": "1758179903359",
+          "queries": [
+            {
+              "expr": "avg(system_load_average_1m{service=\"afterburner-be\", system_under_test=\"MyAfterburner\", test_environment=\"acc\"}) by(kubernetes_pod_name)",
+              "step": 2400,
+              "refId": "A",
+              "format": "time_series",
+              "metric": "",
+              "instant": false,
+              "datasource": {
+                "uid": "prometheus",
+                "type": "prometheus"
+              },
+              "datasourceId": 2,
+              "legendFormat": "system load average 1m",
+              "intervalFactor": 2
+            },
+            {
+              "expr": "",
+              "refId": "B",
+              "format": "time_series",
+              "instant": false,
+              "datasource": {
+                "uid": "prometheus",
+                "type": "prometheus"
+              },
+              "datasourceId": 2,
+              "legendFormat": "",
+              "intervalFactor": 2
+            },
+            {
+              "expr": "system_cpu_count{service=\"afterburner-be\", system_under_test=\"MyAfterburner\", test_environment=\"acc\"}",
+              "refId": "C",
+              "format": "time_series",
+              "instant": false,
+              "datasource": {
+                "uid": "prometheus",
+                "type": "prometheus"
+              },
+              "datasourceId": 2,
+              "legendFormat": "cpu count",
+              "intervalFactor": 2
+            }
+          ]
+        },
+        "path_parameters": {
+          "ds_type": "prometheus",
+          "requestId": "fc4ea02f-de75-4813-b6e6-41c7c58e12e5:93"
+        }
+      },
+      "substituted_request": {
+        "queries": [
+          {
+            "expr": "avg(system_load_average_1m{service=\"afterburner-be\", system_under_test=\"MyAfterburner\", test_environment=\"acc\"}) by(kubernetes_pod_name)",
+            "step": 2400,
+            "refId": "A",
+            "format": "time_series",
+            "metric": "",
+            "instant": false,
+            "datasource": {
+              "uid": "prometheus",
+              "type": "prometheus"
+            },
+            "datasourceId": 2,
+            "legendFormat": "system load average 1m",
+            "intervalFactor": 2
+          },
+          {
+            "expr": "",
+            "refId": "B",
+            "format": "time_series",
+            "instant": false,
+            "datasource": {
+              "uid": "prometheus",
+              "type": "prometheus"
+            },
+            "datasourceId": 2,
+            "legendFormat": "",
+            "intervalFactor": 2
+          },
+          {
+            "expr": "system_cpu_count{service=\"afterburner-be\", system_under_test=\"MyAfterburner\", test_environment=\"acc\"}",
+            "refId": "C",
+            "format": "time_series",
+            "instant": false,
+            "datasource": {
+              "uid": "prometheus",
+              "type": "prometheus"
+            },
+            "datasourceId": 2,
+            "legendFormat": "cpu count",
+            "intervalFactor": 2
+          }
+        ],
+        "range": {
+          "from": "2025-09-18T07:18:23.359Z",
+          "to": "2025-09-18T07:24:31.916Z",
+          "raw": {
+            "from": "2025-09-18T07:18:23.359Z",
+            "to": "2025-09-18T07:24:31.916Z"
+          }
+        },
+        "from": "2025-09-18T07:18:23.359Z",
+        "to": "2025-09-18T07:24:31.916Z",
+        "interval": "15s"
+      },
+      "error": "Request failed with status code 400",
+      "error_status": 400,
+      "error_data": {
+        "results": {
+          "A": {
+            "status": 200,
+            "frames": [
+              {
+                "schema": {
+                  "refId": "A",
+                  "meta": {
+                    "type": "timeseries-multi",
+                    "typeVersion": [
+                      0,
+                      1
+                    ],
+                    "custom": {
+                      "resultType": "matrix"
+                    },
+                    "executedQueryString": "Expr: avg(system_load_average_1m{service=\"afterburner-be\", system_under_test=\"MyAfterburner\", test_environment=\"acc\"}) by(kubernetes_pod_name)\nStep: 30s"
+                  },
+                  "fields": [
+                    {
+                      "name": "Time",
+                      "type": "time",
+                      "typeInfo": {
+                        "frame": "time.Time"
+                      },
+                      "config": {
+                        "interval": 30000
+                      }
+                    },
+                    {
+                      "name": "Value",
+                      "type": "number",
+                      "typeInfo": {
+                        "frame": "float64"
+                      },
+                      "labels": {},
+                      "config": {
+                        "displayNameFromDS": "system load average 1m"
+                      }
+                    }
+                  ]
+                },
+                "data": {
+                  "values": [
+                    [
+                      1758179880000,
+                      1758179910000,
+                      1758179940000,
+                      1758179970000,
+                      1758180000000,
+                      1758180030000,
+                      1758180060000,
+                      1758180090000,
+                      1758180120000,
+                      1758180150000,
+                      1758180180000,
+                      1758180210000,
+                      1758180240000,
+                      1758180270000
+                    ],
+                    [
+                      4.97,
+                      7.83,
+                      6.9,
+                      6.43,
+                      6.79,
+                      6.31,
+                      6.14,
+                      5.82,
+                      5.39,
+                      5.41,
+                      4.92,
+                      5.42,
+                      4.67,
+                      5.18
+                    ]
+                  ]
+                }
+              }
+            ]
+          },
+          "B": {
+            "error": "bad_data: invalid parameter \"query\": unknown position: parse error: no expression found in input",
+            "errorSource": "",
+            "status": 400,
+            "frames": [
+              {
+                "schema": {
+                  "refId": "B",
+                  "meta": {
+                    "typeVersion": [
+                      0,
+                      0
+                    ],
+                    "executedQueryString": "Expr: \nStep: 30s"
+                  },
+                  "fields": []
+                },
+                "data": {
+                  "values": []
+                }
+              }
+            ]
+          },
+          "C": {
+            "status": 200,
+            "frames": [
+              {
+                "schema": {
+                  "refId": "C",
+                  "meta": {
+                    "type": "timeseries-multi",
+                    "typeVersion": [
+                      0,
+                      1
+                    ],
+                    "custom": {
+                      "resultType": "matrix"
+                    },
+                    "executedQueryString": "Expr: system_cpu_count{service=\"afterburner-be\", system_under_test=\"MyAfterburner\", test_environment=\"acc\"}\nStep: 30s"
+                  },
+                  "fields": [
+                    {
+                      "name": "Time",
+                      "type": "time",
+                      "typeInfo": {
+                        "frame": "time.Time"
+                      },
+                      "config": {
+                        "interval": 30000
+                      }
+                    },
+                    {
+                      "name": "system_cpu_count",
+                      "type": "number",
+                      "typeInfo": {
+                        "frame": "float64"
+                      },
+                      "labels": {
+                        "__name__": "system_cpu_count",
+                        "instance": "afterburner-be:8080",
+                        "job": "afterburner-be",
+                        "service": "afterburner-be",
+                        "system_under_test": "MyAfterburner",
+                        "test_environment": "acc"
+                      },
+                      "config": {
+                        "displayNameFromDS": "cpu count"
+                      }
+                    }
+                  ]
+                },
+                "data": {
+                  "values": [
+                    [
+                      1758179880000,
+                      1758179910000,
+                      1758179940000,
+                      1758179970000,
+                      1758180000000,
+                      1758180030000,
+                      1758180060000,
+                      1758180090000,
+                      1758180120000,
+                      1758180150000,
+                      1758180180000,
+                      1758180210000,
+                      1758180240000,
+                      1758180270000
+                    ],
+                    [
+                      2,
+                      2,
+                      2,
+                      2,
+                      2,
+                      2,
+                      2,
+                      2,
+                      2,
+                      2,
+                      2,
+                      2,
+                      2,
+                      2
+                    ]
+                  ]
+                }
+              }
+            ]
+          }
+        }
+      },
+      "timestamp": "2025-09-25T18:57:39.990Z"
+    },
+    "panel_93_afterburner-fe_request_0_error": {
+      "panel_info": {
+        "panel_id": 93,
+        "panel_title": "Load",
+        "dashboard_label": "JVM afterburner-fe",
+        "dashboard_uid": "spring-boot-kubernetes-jvm-mimir",
+        "datasource_type": "prometheus"
+      },
+      "variable_context": {
+        "system_under_test": "MyAfterburner",
+        "test_environment": "acc",
+        "service": "afterburner-fe"
+      },
+      "original_request": {
+        "method": "POST",
+        "endpoint": "/api/ds/query",
+        "request_body": {
+          "to": "1758180271916",
+          "from": "1758179903359",
+          "queries": [
+            {
+              "expr": "avg(system_load_average_1m{service=\"afterburner-fe\", system_under_test=\"MyAfterburner\", test_environment=\"acc\"}) by(kubernetes_pod_name)",
+              "step": 2400,
+              "refId": "A",
+              "format": "time_series",
+              "metric": "",
+              "instant": false,
+              "datasource": {
+                "uid": "prometheus",
+                "type": "prometheus"
+              },
+              "datasourceId": 2,
+              "legendFormat": "system load average 1m",
+              "intervalFactor": 2
+            },
+            {
+              "expr": "",
+              "refId": "B",
+              "format": "time_series",
+              "instant": false,
+              "datasource": {
+                "uid": "prometheus",
+                "type": "prometheus"
+              },
+              "datasourceId": 2,
+              "legendFormat": "",
+              "intervalFactor": 2
+            },
+            {
+              "expr": "system_cpu_count{service=\"afterburner-fe\", system_under_test=\"MyAfterburner\", test_environment=\"acc\"}",
+              "refId": "C",
+              "format": "time_series",
+              "instant": false,
+              "datasource": {
+                "uid": "prometheus",
+                "type": "prometheus"
+              },
+              "datasourceId": 2,
+              "legendFormat": "cpu count",
+              "intervalFactor": 2
+            }
+          ]
+        },
+        "path_parameters": {
+          "ds_type": "prometheus",
+          "requestId": "b1c17f43-37ef-452d-b89e-248b308e0585:93"
+        }
+      },
+      "substituted_request": {
+        "queries": [
+          {
+            "expr": "avg(system_load_average_1m{service=\"afterburner-fe\", system_under_test=\"MyAfterburner\", test_environment=\"acc\"}) by(kubernetes_pod_name)",
+            "step": 2400,
+            "refId": "A",
+            "format": "time_series",
+            "metric": "",
+            "instant": false,
+            "datasource": {
+              "uid": "prometheus",
+              "type": "prometheus"
+            },
+            "datasourceId": 2,
+            "legendFormat": "system load average 1m",
+            "intervalFactor": 2
+          },
+          {
+            "expr": "",
+            "refId": "B",
+            "format": "time_series",
+            "instant": false,
+            "datasource": {
+              "uid": "prometheus",
+              "type": "prometheus"
+            },
+            "datasourceId": 2,
+            "legendFormat": "",
+            "intervalFactor": 2
+          },
+          {
+            "expr": "system_cpu_count{service=\"afterburner-fe\", system_under_test=\"MyAfterburner\", test_environment=\"acc\"}",
+            "refId": "C",
+            "format": "time_series",
+            "instant": false,
+            "datasource": {
+              "uid": "prometheus",
+              "type": "prometheus"
+            },
+            "datasourceId": 2,
+            "legendFormat": "cpu count",
+            "intervalFactor": 2
+          }
+        ],
+        "range": {
+          "from": "2025-09-18T07:18:23.359Z",
+          "to": "2025-09-18T07:24:31.916Z",
+          "raw": {
+            "from": "2025-09-18T07:18:23.359Z",
+            "to": "2025-09-18T07:24:31.916Z"
+          }
+        },
+        "from": "2025-09-18T07:18:23.359Z",
+        "to": "2025-09-18T07:24:31.916Z",
+        "interval": "15s"
+      },
+      "error": "Request failed with status code 400",
+      "error_status": 400,
+      "error_data": {
+        "results": {
+          "A": {
+            "status": 200,
+            "frames": [
+              {
+                "schema": {
+                  "refId": "A",
+                  "meta": {
+                    "type": "timeseries-multi",
+                    "typeVersion": [
+                      0,
+                      1
+                    ],
+                    "custom": {
+                      "resultType": "matrix"
+                    },
+                    "executedQueryString": "Expr: avg(system_load_average_1m{service=\"afterburner-fe\", system_under_test=\"MyAfterburner\", test_environment=\"acc\"}) by(kubernetes_pod_name)\nStep: 30s"
+                  },
+                  "fields": [
+                    {
+                      "name": "Time",
+                      "type": "time",
+                      "typeInfo": {
+                        "frame": "time.Time"
+                      },
+                      "config": {
+                        "interval": 30000
+                      }
+                    },
+                    {
+                      "name": "Value",
+                      "type": "number",
+                      "typeInfo": {
+                        "frame": "float64"
+                      },
+                      "labels": {},
+                      "config": {
+                        "displayNameFromDS": "system load average 1m"
+                      }
+                    }
+                  ]
+                },
+                "data": {
+                  "values": [
+                    [
+                      1758179880000,
+                      1758179910000,
+                      1758179940000,
+                      1758179970000,
+                      1758180000000,
+                      1758180030000,
+                      1758180060000,
+                      1758180090000,
+                      1758180120000,
+                      1758180150000,
+                      1758180180000,
+                      1758180210000,
+                      1758180240000,
+                      1758180270000
+                    ],
+                    [
+                      4.97,
+                      7.83,
+                      6.9,
+                      6.43,
+                      6.79,
+                      6.31,
+                      6.14,
+                      5.82,
+                      5.39,
+                      5.41,
+                      4.92,
+                      5.42,
+                      4.67,
+                      5.18
+                    ]
+                  ]
+                }
+              }
+            ]
+          },
+          "B": {
+            "error": "bad_data: invalid parameter \"query\": unknown position: parse error: no expression found in input",
+            "errorSource": "",
+            "status": 400,
+            "frames": [
+              {
+                "schema": {
+                  "refId": "B",
+                  "meta": {
+                    "typeVersion": [
+                      0,
+                      0
+                    ],
+                    "executedQueryString": "Expr: \nStep: 30s"
+                  },
+                  "fields": []
+                },
+                "data": {
+                  "values": []
+                }
+              }
+            ]
+          },
+          "C": {
+            "status": 200,
+            "frames": [
+              {
+                "schema": {
+                  "refId": "C",
+                  "meta": {
+                    "type": "timeseries-multi",
+                    "typeVersion": [
+                      0,
+                      1
+                    ],
+                    "custom": {
+                      "resultType": "matrix"
+                    },
+                    "executedQueryString": "Expr: system_cpu_count{service=\"afterburner-fe\", system_under_test=\"MyAfterburner\", test_environment=\"acc\"}\nStep: 30s"
+                  },
+                  "fields": [
+                    {
+                      "name": "Time",
+                      "type": "time",
+                      "typeInfo": {
+                        "frame": "time.Time"
+                      },
+                      "config": {
+                        "interval": 30000
+                      }
+                    },
+                    {
+                      "name": "system_cpu_count",
+                      "type": "number",
+                      "typeInfo": {
+                        "frame": "float64"
+                      },
+                      "labels": {
+                        "__name__": "system_cpu_count",
+                        "instance": "afterburner-fe:8080",
+                        "job": "afterburner-fe",
+                        "service": "afterburner-fe",
+                        "system_under_test": "MyAfterburner",
+                        "test_environment": "acc"
+                      },
+                      "config": {
+                        "displayNameFromDS": "cpu count"
+                      }
+                    }
+                  ]
+                },
+                "data": {
+                  "values": [
+                    [
+                      1758179880000,
+                      1758179910000,
+                      1758179940000,
+                      1758179970000,
+                      1758180000000,
+                      1758180030000,
+                      1758180060000,
+                      1758180090000,
+                      1758180120000,
+                      1758180150000,
+                      1758180180000,
+                      1758180210000,
+                      1758180240000,
+                      1758180270000
+                    ],
+                    [
+                      2,
+                      2,
+                      2,
+                      2,
+                      2,
+                      2,
+                      2,
+                      2,
+                      2,
+                      2,
+                      2,
+                      2,
+                      2,
+                      2
+                    ]
+                  ]
+                }
+              }
+            ]
+          }
+        }
+      },
+      "timestamp": "2025-09-25T18:57:40.001Z"
+    },
+    "panel_106_afterburner-fe_request_0": {
+      "panel_info": {
+        "panel_id": 106,
+        "panel_title": "CPU",
+        "dashboard_label": "JVM afterburner-fe",
+        "dashboard_uid": "spring-boot-kubernetes-jvm-mimir",
+        "datasource_type": "prometheus"
+      },
+      "variable_context": {
+        "system_under_test": "MyAfterburner",
+        "test_environment": "acc",
+        "service": "afterburner-fe"
+      },
+      "original_request": {
+        "method": "POST",
+        "endpoint": "/api/ds/query",
+        "request_body": {
+          "to": "1758180271916",
+          "from": "1758179903359",
+          "queries": [
+            {
+              "expr": "avg(system_cpu_usage{service=\"afterburner-fe\", system_under_test=\"MyAfterburner\", test_environment=\"acc\"}) by(kubernetes_pod_name)",
+              "hide": false,
+              "step": 2400,
+              "refId": "A",
+              "format": "time_series",
+              "metric": "",
+              "instant": false,
+              "datasource": {
+                "uid": "prometheus",
+                "type": "prometheus"
+              },
+              "datasourceId": 2,
+              "legendFormat": "system",
+              "intervalFactor": 1
+            },
+            {
+              "expr": "avg(process_cpu_usage{service=\"afterburner-fe\", system_under_test=\"MyAfterburner\", test_environment=\"acc\"}) by(kubernetes_pod_name)",
+              "hide": false,
+              "refId": "B",
+              "format": "time_series",
+              "instant": false,
+              "datasource": {
+                "uid": "prometheus",
+                "type": "prometheus"
+              },
+              "datasourceId": 2,
+              "legendFormat": "process",
+              "intervalFactor": 1
+            }
+          ]
+        },
+        "path_parameters": {
+          "ds_type": "prometheus",
+          "requestId": "b1c17f43-37ef-452d-b89e-248b308e0585:106"
+        }
+      },
+      "substituted_request": {
+        "queries": [
+          {
+            "expr": "avg(system_cpu_usage{service=\"afterburner-fe\", system_under_test=\"MyAfterburner\", test_environment=\"acc\"}) by(kubernetes_pod_name)",
+            "hide": false,
+            "step": 2400,
+            "refId": "A",
+            "format": "time_series",
+            "metric": "",
+            "instant": false,
+            "datasource": {
+              "uid": "prometheus",
+              "type": "prometheus"
+            },
+            "datasourceId": 2,
+            "legendFormat": "system",
+            "intervalFactor": 1
+          },
+          {
+            "expr": "avg(process_cpu_usage{service=\"afterburner-fe\", system_under_test=\"MyAfterburner\", test_environment=\"acc\"}) by(kubernetes_pod_name)",
+            "hide": false,
+            "refId": "B",
+            "format": "time_series",
+            "instant": false,
+            "datasource": {
+              "uid": "prometheus",
+              "type": "prometheus"
+            },
+            "datasourceId": 2,
+            "legendFormat": "process",
+            "intervalFactor": 1
+          }
+        ],
+        "range": {
+          "from": "2025-09-18T07:18:23.359Z",
+          "to": "2025-09-18T07:24:31.916Z",
+          "raw": {
+            "from": "2025-09-18T07:18:23.359Z",
+            "to": "2025-09-18T07:24:31.916Z"
+          }
+        },
+        "from": "2025-09-18T07:18:23.359Z",
+        "to": "2025-09-18T07:24:31.916Z",
+        "interval": "15s"
+      },
+      "grafana_response": {
+        "results": {
+          "A": {
+            "status": 200,
+            "frames": [
+              {
+                "schema": {
+                  "refId": "A",
+                  "meta": {
+                    "type": "timeseries-multi",
+                    "typeVersion": [
+                      0,
+                      1
+                    ],
+                    "custom": {
+                      "resultType": "matrix"
+                    },
+                    "executedQueryString": "Expr: avg(system_cpu_usage{service=\"afterburner-fe\", system_under_test=\"MyAfterburner\", test_environment=\"acc\"}) by(kubernetes_pod_name)\nStep: 15s"
+                  },
+                  "fields": [
+                    {
+                      "name": "Time",
+                      "type": "time",
+                      "typeInfo": {
+                        "frame": "time.Time"
+                      },
+                      "config": {
+                        "interval": 15000
+                      }
+                    },
+                    {
+                      "name": "Value",
+                      "type": "number",
+                      "typeInfo": {
+                        "frame": "float64"
+                      },
+                      "labels": {},
+                      "config": {
+                        "displayNameFromDS": "system"
+                      }
+                    }
+                  ]
+                },
+                "data": {
+                  "values": [
+                    [
+                      1758179895000,
+                      1758179910000,
+                      1758179925000,
+                      1758179940000,
+                      1758179955000,
+                      1758179970000,
+                      1758179985000,
+                      1758180000000,
+                      1758180015000,
+                      1758180030000,
+                      1758180045000,
+                      1758180060000,
+                      1758180075000,
+                      1758180090000,
+                      1758180105000,
+                      1758180120000,
+                      1758180135000,
+                      1758180150000,
+                      1758180165000,
+                      1758180180000,
+                      1758180195000,
+                      1758180210000,
+                      1758180225000,
+                      1758180240000,
+                      1758180255000,
+                      1758180270000
+                    ],
+                    [
+                      0.28562166666666666,
+                      0.188195,
+                      0,
+                      0.025220555555555555,
+                      0.024038125,
+                      0.122710625,
+                      0.16837125,
+                      0.2558978571428571,
+                      0.11829642857142857,
+                      0.24074357142857142,
+                      0.1494175,
+                      0.08484583333333333,
+                      0.062123333333333336,
+                      0.0787,
+                      0.063415,
+                      0.069444,
+                      0.06856625,
+                      0.06763875,
+                      0.06186,
+                      0.08972333333333334,
+                      0.08287166666666666,
+                      0.07274833333333333,
+                      0.10808,
+                      0.0873075,
+                      0.06187,
+                      0.056155
+                    ]
+                  ]
+                }
+              }
+            ]
+          },
+          "B": {
+            "status": 200,
+            "frames": [
+              {
+                "schema": {
+                  "refId": "B",
+                  "meta": {
+                    "type": "timeseries-multi",
+                    "typeVersion": [
+                      0,
+                      1
+                    ],
+                    "custom": {
+                      "resultType": "matrix"
+                    },
+                    "executedQueryString": "Expr: avg(process_cpu_usage{service=\"afterburner-fe\", system_under_test=\"MyAfterburner\", test_environment=\"acc\"}) by(kubernetes_pod_name)\nStep: 15s"
+                  },
+                  "fields": [
+                    {
+                      "name": "Time",
+                      "type": "time",
+                      "typeInfo": {
+                        "frame": "time.Time"
+                      },
+                      "config": {
+                        "interval": 15000
+                      }
+                    },
+                    {
+                      "name": "Value",
+                      "type": "number",
+                      "typeInfo": {
+                        "frame": "float64"
+                      },
+                      "labels": {},
+                      "config": {
+                        "displayNameFromDS": "process"
+                      }
+                    }
+                  ]
+                },
+                "data": {
+                  "values": [
+                    [
+                      1758179895000,
+                      1758179910000,
+                      1758179925000,
+                      1758179940000,
+                      1758179955000,
+                      1758179970000,
+                      1758179985000,
+                      1758180000000,
+                      1758180015000,
+                      1758180030000,
+                      1758180045000,
+                      1758180060000,
+                      1758180075000,
+                      1758180090000,
+                      1758180105000,
+                      1758180120000,
+                      1758180135000,
+                      1758180150000,
+                      1758180165000,
+                      1758180180000,
+                      1758180195000,
+                      1758180210000,
+                      1758180225000,
+                      1758180240000,
+                      1758180255000,
+                      1758180270000
+                    ],
+                    [
+                      0.2833333333333333,
+                      0.2,
+                      0,
+                      0.027777777777777776,
+                      0.01875,
+                      0.11875,
+                      0.16875,
+                      0.25,
+                      0.11428571428571428,
+                      0.24285714285714285,
+                      0.14166666666666666,
+                      0.08333333333333333,
+                      0.058333333333333334,
+                      0.07,
+                      0.06,
+                      0.07,
+                      0.075,
+                      0.0625,
+                      0.0625,
+                      0.1,
+                      0.08333333333333333,
+                      0.06666666666666667,
+                      0.1,
+                      0.1,
+                      0.05,
+                      0.05
+                    ]
+                  ]
+                }
+              }
+            ]
+          }
+        }
+      },
+      "timestamp": "2025-09-25T18:57:40.011Z"
+    },
+    "panel_106_afterburner-be_request_0": {
+      "panel_info": {
+        "panel_id": 106,
+        "panel_title": "CPU",
+        "dashboard_label": "JVM afterburner-be",
+        "dashboard_uid": "spring-boot-kubernetes-jvm-mimir",
+        "datasource_type": "prometheus"
+      },
+      "variable_context": {
+        "system_under_test": "MyAfterburner",
+        "test_environment": "acc",
+        "service": "afterburner-be"
+      },
+      "original_request": {
+        "method": "POST",
+        "endpoint": "/api/ds/query",
+        "request_body": {
+          "to": "1758180271916",
+          "from": "1758179903359",
+          "queries": [
+            {
+              "expr": "avg(system_cpu_usage{service=\"afterburner-be\", system_under_test=\"MyAfterburner\", test_environment=\"acc\"}) by(kubernetes_pod_name)",
+              "hide": false,
+              "step": 2400,
+              "refId": "A",
+              "format": "time_series",
+              "metric": "",
+              "instant": false,
+              "datasource": {
+                "uid": "prometheus",
+                "type": "prometheus"
+              },
+              "datasourceId": 2,
+              "legendFormat": "system",
+              "intervalFactor": 1
+            },
+            {
+              "expr": "avg(process_cpu_usage{service=\"afterburner-be\", system_under_test=\"MyAfterburner\", test_environment=\"acc\"}) by(kubernetes_pod_name)",
+              "hide": false,
+              "refId": "B",
+              "format": "time_series",
+              "instant": false,
+              "datasource": {
+                "uid": "prometheus",
+                "type": "prometheus"
+              },
+              "datasourceId": 2,
+              "legendFormat": "process",
+              "intervalFactor": 1
+            }
+          ]
+        },
+        "path_parameters": {
+          "ds_type": "prometheus",
+          "requestId": "fc4ea02f-de75-4813-b6e6-41c7c58e12e5:106"
+        }
+      },
+      "substituted_request": {
+        "queries": [
+          {
+            "expr": "avg(system_cpu_usage{service=\"afterburner-be\", system_under_test=\"MyAfterburner\", test_environment=\"acc\"}) by(kubernetes_pod_name)",
+            "hide": false,
+            "step": 2400,
+            "refId": "A",
+            "format": "time_series",
+            "metric": "",
+            "instant": false,
+            "datasource": {
+              "uid": "prometheus",
+              "type": "prometheus"
+            },
+            "datasourceId": 2,
+            "legendFormat": "system",
+            "intervalFactor": 1
+          },
+          {
+            "expr": "avg(process_cpu_usage{service=\"afterburner-be\", system_under_test=\"MyAfterburner\", test_environment=\"acc\"}) by(kubernetes_pod_name)",
+            "hide": false,
+            "refId": "B",
+            "format": "time_series",
+            "instant": false,
+            "datasource": {
+              "uid": "prometheus",
+              "type": "prometheus"
+            },
+            "datasourceId": 2,
+            "legendFormat": "process",
+            "intervalFactor": 1
+          }
+        ],
+        "range": {
+          "from": "2025-09-18T07:18:23.359Z",
+          "to": "2025-09-18T07:24:31.916Z",
+          "raw": {
+            "from": "2025-09-18T07:18:23.359Z",
+            "to": "2025-09-18T07:24:31.916Z"
+          }
+        },
+        "from": "2025-09-18T07:18:23.359Z",
+        "to": "2025-09-18T07:24:31.916Z",
+        "interval": "15s"
+      },
+      "grafana_response": {
+        "results": {
+          "A": {
+            "status": 200,
+            "frames": [
+              {
+                "schema": {
+                  "refId": "A",
+                  "meta": {
+                    "type": "timeseries-multi",
+                    "typeVersion": [
+                      0,
+                      1
+                    ],
+                    "custom": {
+                      "resultType": "matrix"
+                    },
+                    "executedQueryString": "Expr: avg(system_cpu_usage{service=\"afterburner-be\", system_under_test=\"MyAfterburner\", test_environment=\"acc\"}) by(kubernetes_pod_name)\nStep: 15s"
+                  },
+                  "fields": [
+                    {
+                      "name": "Time",
+                      "type": "time",
+                      "typeInfo": {
+                        "frame": "time.Time"
+                      },
+                      "config": {
+                        "interval": 15000
+                      }
+                    },
+                    {
+                      "name": "Value",
+                      "type": "number",
+                      "typeInfo": {
+                        "frame": "float64"
+                      },
+                      "labels": {},
+                      "config": {
+                        "displayNameFromDS": "system"
+                      }
+                    }
+                  ]
+                },
+                "data": {
+                  "values": [
+                    [
+                      1758179910000,
+                      1758179925000,
+                      1758179940000,
+                      1758179955000,
+                      1758179970000,
+                      1758179985000,
+                      1758180000000,
+                      1758180015000,
+                      1758180030000,
+                      1758180045000,
+                      1758180060000,
+                      1758180075000,
+                      1758180090000,
+                      1758180105000,
+                      1758180120000,
+                      1758180135000,
+                      1758180150000,
+                      1758180165000,
+                      1758180180000,
+                      1758180195000,
+                      1758180210000,
+                      1758180225000,
+                      1758180240000,
+                      1758180255000,
+                      1758180270000
+                    ],
+                    [
+                      0.031025,
+                      0,
+                      0.017486666666666668,
+                      0.036415,
+                      0.008519285714285714,
+                      0.13642125,
+                      0.11199857142857143,
+                      0.06211071428571428,
+                      0.06041785714285714,
+                      0.07711166666666666,
+                      0.052624166666666666,
+                      0.043291666666666666,
+                      0.064671,
+                      0.038675,
+                      0.036179,
+                      0.04988375,
+                      0.04028,
+                      0.04178375,
+                      0.053176666666666664,
+                      0.03800666666666667,
+                      0.041216666666666665,
+                      0.042405,
+                      0.06748,
+                      0.060295,
+                      0.050415
+                    ]
+                  ]
+                }
+              }
+            ]
+          },
+          "B": {
+            "status": 200,
+            "frames": [
+              {
+                "schema": {
+                  "refId": "B",
+                  "meta": {
+                    "type": "timeseries-multi",
+                    "typeVersion": [
+                      0,
+                      1
+                    ],
+                    "custom": {
+                      "resultType": "matrix"
+                    },
+                    "executedQueryString": "Expr: avg(process_cpu_usage{service=\"afterburner-be\", system_under_test=\"MyAfterburner\", test_environment=\"acc\"}) by(kubernetes_pod_name)\nStep: 15s"
+                  },
+                  "fields": [
+                    {
+                      "name": "Time",
+                      "type": "time",
+                      "typeInfo": {
+                        "frame": "time.Time"
+                      },
+                      "config": {
+                        "interval": 15000
+                      }
+                    },
+                    {
+                      "name": "Value",
+                      "type": "number",
+                      "typeInfo": {
+                        "frame": "float64"
+                      },
+                      "labels": {},
+                      "config": {
+                        "displayNameFromDS": "process"
+                      }
+                    }
+                  ]
+                },
+                "data": {
+                  "values": [
+                    [
+                      1758179910000,
+                      1758179925000,
+                      1758179940000,
+                      1758179955000,
+                      1758179970000,
+                      1758179985000,
+                      1758180000000,
+                      1758180015000,
+                      1758180030000,
+                      1758180045000,
+                      1758180060000,
+                      1758180075000,
+                      1758180090000,
+                      1758180105000,
+                      1758180120000,
+                      1758180135000,
+                      1758180150000,
+                      1758180165000,
+                      1758180180000,
+                      1758180195000,
+                      1758180210000,
+                      1758180225000,
+                      1758180240000,
+                      1758180255000,
+                      1758180270000
+                    ],
+                    [
+                      0,
+                      0,
+                      0.022222222222222223,
+                      0.03333333333333333,
+                      0.007142857142857143,
+                      0.1375,
+                      0.10714285714285714,
+                      0.06428571428571428,
+                      0.05714285714285714,
+                      0.06666666666666667,
+                      0.058333333333333334,
+                      0.041666666666666664,
+                      0.06,
+                      0.04,
+                      0.04,
+                      0.05,
+                      0.0375,
+                      0.0375,
+                      0.05,
+                      0.03333333333333333,
+                      0.05,
+                      0.025,
+                      0.075,
+                      0.05,
+                      0.1
+                    ]
+                  ]
+                }
+              }
+            ]
+          }
+        }
+      },
+      "timestamp": "2025-09-25T18:57:40.024Z"
+    }
+  }
+}

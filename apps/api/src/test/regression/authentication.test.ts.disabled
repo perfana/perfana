@@ -1,0 +1,413 @@
+import { DatabaseTestHelper } from '../utils/database-test-helper';
+import { TestDataFactory } from '../utils/test-data-factory';
+
+describe('Authentication System Regression Tests', () => {
+  let testContext: any;
+
+  beforeAll(async () => {
+    testContext = await DatabaseTestHelper.setupTestEnvironment();
+  });
+
+  afterAll(async () => {
+    await DatabaseTestHelper.teardownTestEnvironment();
+  });
+
+  describe('User Registration and Authentication Flow', () => {
+    const regressionUserEmail = 'regression.auth@test.com';
+    const regressionPassword = 'RegressionTest123!';
+
+    test('should complete full user registration flow', async () => {
+      const registrationResult = await DatabaseTestHelper.compareOperation(
+        'userRegistration',
+        () => testContext.authService.signUp(
+          regressionUserEmail,
+          regressionPassword,
+          'Regression',
+          'Test'
+        )
+      );
+
+      expect(registrationResult.success).toBe(true);
+      expect(registrationResult.nativeResult.access_token).toBeDefined();
+      expect(registrationResult.nativeResult.refresh_token).toBeDefined();
+      expect(registrationResult.nativeResult.user.email).toBe(regressionUserEmail);
+      expect(registrationResult.nativeResult.user.firstName).toBe('Regression');
+      expect(registrationResult.nativeResult.user.lastName).toBe('Test');
+      expect(registrationResult.nativeResult.user.isActive).toBe(true);
+    });
+
+    test('should authenticate with valid credentials', async () => {
+      const authResult = await DatabaseTestHelper.compareOperation(
+        'userAuthentication',
+        () => testContext.authService.signIn(regressionUserEmail, regressionPassword)
+      );
+
+      expect(authResult.success).toBe(true);
+      expect(authResult.nativeResult.access_token).toBeDefined();
+      expect(authResult.nativeResult.refresh_token).toBeDefined();
+      expect(authResult.nativeResult.user.email).toBe(regressionUserEmail);
+    });
+
+    test('should reject authentication with invalid credentials', async () => {
+      await expect(
+        testContext.authService.signIn(regressionUserEmail, 'wrongPassword')
+      ).rejects.toThrow('Invalid credentials');
+    });
+
+    test('should reject registration with duplicate email', async () => {
+      await expect(
+        testContext.authService.signUp(
+          regressionUserEmail, // Same email as already registered
+          'AnotherPassword123!',
+          'Another',
+          'User'
+        )
+      ).rejects.toThrow('User already exists');
+    });
+  });
+
+  describe('Token Management and Validation', () => {
+    let accessToken: string;
+    let refreshToken: string;
+
+    beforeEach(async () => {
+      const authResult = await testContext.authService.signIn(
+        'regression.auth@test.com',
+        'RegressionTest123!'
+      );
+      accessToken = authResult.access_token;
+      refreshToken = authResult.refresh_token;
+    });
+
+    test('should validate access tokens correctly', async () => {
+      const validationResult = await DatabaseTestHelper.compareOperation(
+        'tokenValidation',
+        () => testContext.authService.validateToken(accessToken)
+      );
+
+      expect(validationResult.success).toBe(true);
+      expect(validationResult.nativeResult.email).toBe('regression.auth@test.com');
+      expect(validationResult.nativeResult.sub).toBeDefined();
+    });
+
+    test('should extract user from valid token', async () => {
+      const userResult = await DatabaseTestHelper.compareOperation(
+        'getUserFromToken',
+        () => testContext.authService.getUserFromToken(accessToken)
+      );
+
+      expect(userResult.success).toBe(true);
+      expect(userResult.nativeResult.email).toBe('regression.auth@test.com');
+      expect(userResult.nativeResult.firstName).toBe('Regression');
+      expect(userResult.nativeResult.lastName).toBe('Test');
+    });
+
+    test('should refresh tokens successfully', async () => {
+      const refreshResult = await DatabaseTestHelper.compareOperation(
+        'tokenRefresh',
+        () => testContext.authService.refreshToken(refreshToken)
+      );
+
+      expect(refreshResult.success).toBe(true);
+      expect(refreshResult.nativeResult.access_token).toBeDefined();
+      expect(refreshResult.nativeResult.refresh_token).toBeDefined();
+      expect(refreshResult.nativeResult.access_token).not.toBe(accessToken);
+    });
+
+    test('should reject invalid tokens', async () => {
+      await expect(
+        testContext.authService.validateToken('invalid.token.here')
+      ).rejects.toThrow();
+
+      await expect(
+        testContext.authService.refreshToken('invalid.refresh.token')
+      ).rejects.toThrow('Invalid refresh token');
+    });
+
+    test('should reject expired tokens', async () => {
+      // Create a token with very short expiry for testing
+      const shortLivedToken = await testContext.authService.jwtService.signAsync(
+        { sub: 'test', email: 'test@test.com' },
+        { secret: 'test-secret', expiresIn: '1ms' }
+      );
+
+      // Wait for token to expire
+      await new Promise(resolve => setTimeout(resolve, 10));
+
+      await expect(
+        testContext.authService.validateToken(shortLivedToken)
+      ).rejects.toThrow();
+    });
+  });
+
+  describe('Password Management', () => {
+    let testUser: any;
+
+    beforeEach(async () => {
+      const authResult = await testContext.authService.signIn(
+        'regression.auth@test.com',
+        'RegressionTest123!'
+      );
+      testUser = await testContext.authService.getUserFromToken(authResult.access_token);
+    });
+
+    test('should change password with valid current password', async () => {
+      const newPassword = 'NewPassword123!';
+
+      const changeResult = await DatabaseTestHelper.compareOperation(
+        'passwordChange',
+        () => testContext.authService.changePassword(
+          testUser.id,
+          'RegressionTest123!',
+          newPassword
+        )
+      );
+
+      expect(changeResult.success).toBe(true);
+      expect(changeResult.nativeResult.message).toBe('Password changed successfully');
+
+      // Verify new password works
+      const authResult = await testContext.authService.signIn(
+        'regression.auth@test.com',
+        newPassword
+      );
+      expect(authResult.access_token).toBeDefined();
+
+      // Restore original password for other tests
+      await testContext.authService.changePassword(
+        testUser.id,
+        newPassword,
+        'RegressionTest123!'
+      );
+    });
+
+    test('should reject password change with incorrect current password', async () => {
+      await expect(
+        testContext.authService.changePassword(
+          testUser.id,
+          'wrongCurrentPassword',
+          'NewPassword123!'
+        )
+      ).rejects.toThrow('Current password is incorrect');
+    });
+
+    test('should handle password reset request', async () => {
+      const resetResult = await DatabaseTestHelper.compareOperation(
+        'passwordReset',
+        () => testContext.authService.resetPassword('regression.auth@test.com')
+      );
+
+      expect(resetResult.success).toBe(true);
+      expect(resetResult.nativeResult.message).toContain('reset link has been sent');
+    });
+
+    test('should handle password reset for non-existent user', async () => {
+      const resetResult = await DatabaseTestHelper.compareOperation(
+        'passwordResetNonExistent',
+        () => testContext.authService.resetPassword('nonexistent@test.com')
+      );
+
+      expect(resetResult.success).toBe(true);
+      expect(resetResult.nativeResult.message).toContain('reset link has been sent');
+    });
+  });
+
+  describe('Authentication Performance Regression', () => {
+    test('should maintain registration performance standards', async () => {
+      const performanceTest = await DatabaseTestHelper.measurePerformance(
+        async () => {
+          const userData = TestDataFactory.createUser();
+          return testContext.authService.signUp(
+            userData.email,
+            userData.password,
+            userData.firstName,
+            userData.lastName
+          );
+        },
+        5
+      );
+
+      expect(performanceTest.averageDuration).toBeLessThan(500); // 500ms threshold
+      expect(performanceTest.results).toHaveLength(5);
+      expect(performanceTest.results.every(r => r.access_token)).toBe(true);
+    });
+
+    test('should maintain authentication performance standards', async () => {
+      // Create a test user first
+      const testUser = TestDataFactory.createUser({
+        email: 'perf.test@regression.com',
+      });
+      await testContext.authService.signUp(
+        testUser.email,
+        testUser.password,
+        testUser.firstName,
+        testUser.lastName
+      );
+
+      const performanceTest = await DatabaseTestHelper.measurePerformance(
+        () => testContext.authService.signIn(testUser.email, testUser.password),
+        10
+      );
+
+      expect(performanceTest.averageDuration).toBeLessThan(200); // 200ms threshold
+      expect(performanceTest.results).toHaveLength(10);
+      expect(performanceTest.results.every((r: any) => r.access_token)).toBe(true);
+    });
+
+    test('should maintain token validation performance standards', async () => {
+      const authResult = await testContext.authService.signIn(
+        'regression.auth@test.com',
+        'RegressionTest123!'
+      );
+
+      const performanceTest = await DatabaseTestHelper.measurePerformance(
+        () => testContext.authService.validateToken(authResult.access_token),
+        20
+      );
+
+      expect(performanceTest.averageDuration).toBeLessThan(50); // 50ms threshold
+      expect(performanceTest.results).toHaveLength(20);
+      expect(performanceTest.results.every((r: any) => r.email === 'regression.auth@test.com')).toBe(true);
+    });
+  });
+
+  describe('Concurrent Authentication Scenarios', () => {
+    test('should handle concurrent registrations without conflicts', async () => {
+      const users = TestDataFactory.createMultipleUsers(5, {
+        password: 'ConcurrentTest123!',
+      });
+
+      const registrationPromises = users.map(user =>
+        testContext.authService.signUp(
+          user.email,
+          user.password,
+          user.firstName,
+          user.lastName
+        )
+      );
+
+      const results = await Promise.allSettled(registrationPromises);
+      const successful = results.filter(r => r.status === 'fulfilled');
+
+      expect(successful.length).toBe(5);
+
+      // Verify all users can authenticate
+      const authPromises = users.map(user =>
+        testContext.authService.signIn(user.email, user.password)
+      );
+
+      const authResults = await Promise.allSettled(authPromises);
+      const successfulAuth = authResults.filter(r => r.status === 'fulfilled');
+
+      expect(successfulAuth.length).toBe(5);
+    });
+
+    test('should handle concurrent password changes safely', async () => {
+      const testUser = TestDataFactory.createUser({
+        email: 'concurrent.password@test.com',
+        password: 'OriginalPassword123!',
+      });
+
+      await testContext.authService.signUp(
+        testUser.email,
+        testUser.password,
+        testUser.firstName,
+        testUser.lastName
+      );
+
+      const user = await testContext.authService.getUserFromToken(
+        (await testContext.authService.signIn(testUser.email, testUser.password)).access_token
+      );
+
+      // Attempt concurrent password changes (only one should succeed)
+      const passwordChangePromises = [
+        testContext.authService.changePassword(
+          user.id,
+          'OriginalPassword123!',
+          'NewPassword1!'
+        ),
+        testContext.authService.changePassword(
+          user.id,
+          'OriginalPassword123!',
+          'NewPassword2!'
+        ),
+      ];
+
+      const results = await Promise.allSettled(passwordChangePromises);
+      const successful = results.filter(r => r.status === 'fulfilled');
+      const failed = results.filter(r => r.status === 'rejected');
+
+      // One should succeed, one should fail
+      expect(successful.length).toBe(1);
+      expect(failed.length).toBe(1);
+    });
+  });
+
+  describe('Security Regression Tests', () => {
+    test('should properly hash passwords', async () => {
+      const user = await testContext.nativeService.findUserByEmail('regression.auth@test.com');
+
+      // Password should be hashed, not stored in plain text
+      expect(user.passwordHash).not.toBe('RegressionTest123!');
+      expect(user.passwordHash).toMatch(/^\$2[aby]\$\d+\$/); // bcrypt hash pattern
+    });
+
+    test('should generate unique tokens for each authentication', async () => {
+      const auth1 = await testContext.authService.signIn(
+        'regression.auth@test.com',
+        'RegressionTest123!'
+      );
+
+      const auth2 = await testContext.authService.signIn(
+        'regression.auth@test.com',
+        'RegressionTest123!'
+      );
+
+      expect(auth1.access_token).not.toBe(auth2.access_token);
+      expect(auth1.refresh_token).not.toBe(auth2.refresh_token);
+    });
+
+    test('should not expose sensitive information in tokens', async () => {
+      const authResult = await testContext.authService.signIn(
+        'regression.auth@test.com',
+        'RegressionTest123!'
+      );
+
+      const payload = await testContext.authService.validateToken(authResult.access_token);
+
+      // Token should not contain password or sensitive data
+      expect(payload).not.toHaveProperty('password');
+      expect(payload).not.toHaveProperty('passwordHash');
+      expect(payload).toHaveProperty('email');
+      expect(payload).toHaveProperty('sub');
+    });
+
+    test('should enforce proper token expiration', async () => {
+      // This test verifies that tokens actually expire
+      // In a real scenario, you might want to create a short-lived token for testing
+      const authResult = await testContext.authService.signIn(
+        'regression.auth@test.com',
+        'RegressionTest123!'
+      );
+
+      const payload = await testContext.authService.validateToken(authResult.access_token);
+
+      expect(payload.exp).toBeDefined();
+      expect(payload.iat).toBeDefined();
+      expect(payload.exp).toBeGreaterThan(payload.iat!);
+    });
+  });
+
+  describe('Health Check Integration', () => {
+    test('should pass authentication service health check', async () => {
+      const healthResult = await DatabaseTestHelper.compareOperation(
+        'authServiceHealthCheck',
+        () => testContext.authService.healthCheck()
+      );
+
+      expect(healthResult.success).toBe(true);
+      expect(healthResult.nativeResult.status).toBe('healthy');
+      expect(healthResult.nativeResult.timestamp).toBeDefined();
+    });
+  });
+});

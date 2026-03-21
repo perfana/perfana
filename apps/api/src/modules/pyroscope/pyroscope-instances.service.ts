@@ -1,0 +1,377 @@
+import { Injectable, Logger, NotFoundException } from '@nestjs/common';
+import { InjectRepository } from '@nestjs/typeorm';
+import { Repository } from 'typeorm';
+import { PyroscopeInstance as PyroscopeInstanceEntity } from '../../entities';
+import { AuthorizationService } from '../../common/services/authorization.service';
+
+export interface PyroscopeInstance {
+  id: string;
+  label: string;
+  pyroscope_url: string;
+  backend_url?: string;
+  pyroscope_stand_alone: boolean;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface PyroscopeInstanceQuery {
+  label?: string;
+  pyroscopeStandAlone?: boolean;
+}
+
+/**
+ * Service responsible for managing Pyroscope instances.
+ *
+ * Authorization:
+ * - Implements organization-based access control (RBAC Phase 3)
+ * - Users see only instances from their accessible organizations
+ * - Legacy instances (null organization_id) are accessible to all for backward compatibility
+ * - Global admins bypass all authorization checks
+ * - Requires org-admin privileges for create/update/delete operations
+ */
+@Injectable()
+export class PyroscopeInstancesService {
+  private readonly logger = new Logger(PyroscopeInstancesService.name);
+
+  constructor(
+    @InjectRepository(PyroscopeInstanceEntity)
+    private pyroscopeInstanceRepo: Repository<PyroscopeInstanceEntity>,
+    private readonly authzService: AuthorizationService,
+  ) {}
+
+  /**
+   * Check if user is org-admin in any of their organizations
+   * @throws Error if user is not an org-admin
+   */
+  private async requireOrgAdmin(userId: string, roles: string[]): Promise<void> {
+    // Global admins always have access
+    if (this.authzService.isGlobalAdmin(roles)) {
+      return;
+    }
+
+    // Check if user is org-admin in any organization
+    const isOrgAdmin = await this.authzService.isOrgAdminInAnyOrganization(userId);
+    if (!isOrgAdmin) {
+      throw new Error('Organization admin privileges required to manage pyroscope instances');
+    }
+  }
+
+  private mapEntityToDto(entity: PyroscopeInstanceEntity): PyroscopeInstance {
+    return {
+      id: entity.id,
+      label: entity.label,
+      pyroscope_url: entity.pyroscopeUrl,
+      backend_url: entity.backendUrl,
+      pyroscope_stand_alone: entity.pyroscopeStandAlone,
+      created_at: entity.createdAt.toISOString(),
+      updated_at: entity.updatedAt.toISOString(),
+    };
+  }
+
+  /**
+   * Find all Pyroscope instances
+   *
+   * @param userId - The user ID for authorization
+   * @param roles - The user's roles for authorization checks
+   * @param query - Optional query filters
+   *
+   * Filters instances by user's accessible organizations.
+   * Global admins see all instances. Legacy instances (null organization_id) are accessible to all.
+   */
+  async findAll(userId: string, roles: string[], query?: PyroscopeInstanceQuery, organizationId?: string): Promise<PyroscopeInstance[]> {
+    try {
+      // Log authorization context for debugging
+      const isAdmin = this.authzService.isGlobalAdmin(roles);
+      this.logger.debug(`findAll: userId=${userId}, isGlobalAdmin=${isAdmin}, organizationId=${organizationId}`);
+
+      const queryBuilder = this.pyroscopeInstanceRepo
+        .createQueryBuilder('pi')
+        .orderBy('pi.created_at', 'DESC');
+
+      // Organization filtering
+      if (organizationId) {
+        // Explicit org selected — scope to that org only
+        queryBuilder.andWhere('pi.organization_id = :organizationId', { organizationId });
+      } else if (!isAdmin) {
+        const accessibleOrganizations = await this.authzService.getAccessibleOrganizations(userId);
+        queryBuilder.andWhere(
+          '(pi.organization_id IN (:...orgIds) OR pi.organization_id IS NULL)',
+          {
+            orgIds: accessibleOrganizations.length > 0
+              ? accessibleOrganizations
+              : ['00000000-0000-0000-0000-000000000000'] // Dummy UUID when user has no orgs
+          }
+        );
+      }
+
+      if (query?.label) {
+        queryBuilder.andWhere('pi.label ILIKE :label', { label: `%${query.label}%` });
+      }
+      if (query?.pyroscopeStandAlone !== undefined) {
+        queryBuilder.andWhere('pi.pyroscope_stand_alone = :pyroscopeStandAlone', {
+          pyroscopeStandAlone: query.pyroscopeStandAlone
+        });
+      }
+
+      const entities = await queryBuilder.getMany();
+      return entities.map(e => this.mapEntityToDto(e));
+    } catch (error) {
+      this.logger.error('Failed to fetch Pyroscope instances:', error);
+      throw error;
+    }
+  }
+
+  /**
+   * Find a single Pyroscope instance by ID
+   *
+   * @param id - The Pyroscope instance ID
+   * @param userId - The user ID for authorization
+   * @param roles - The user's roles for authorization checks
+   *
+   * Checks if user has access to the instance based on organization membership.
+   * Global admins and legacy instances (null organization_id) bypass checks.
+   */
+  async findOne(id: string, userId: string, roles: string[]): Promise<PyroscopeInstance> {
+    try {
+      // Log authorization context for debugging
+      const isAdmin = this.authzService.isGlobalAdmin(roles);
+      this.logger.debug(`findOne: id=${id}, userId=${userId}, isGlobalAdmin=${isAdmin}`);
+
+      const entity = await this.pyroscopeInstanceRepo.findOne({
+        where: { id }
+      });
+
+      if (!entity) {
+        throw new NotFoundException(`Pyroscope instance with id ${id} not found`);
+      }
+
+      // Check access permission based on organization
+      if (!isAdmin && entity.organizationId) {
+        const accessibleOrganizations = await this.authzService.getAccessibleOrganizations(userId);
+        if (!accessibleOrganizations.includes(entity.organizationId)) {
+          throw new NotFoundException(`Pyroscope instance with id ${id} not found`);
+        }
+      }
+
+      return this.mapEntityToDto(entity);
+    } catch (error) {
+      if (error instanceof NotFoundException) {
+        throw error;
+      }
+      this.logger.error('Failed to find Pyroscope instance:', error);
+      throw error;
+    }
+  }
+
+  /**
+   * Create a new Pyroscope instance
+   *
+   * @param createDto - The create DTO
+   * @param userId - The user ID for authorization and ownership tracking
+   * @param roles - The user's roles for authorization checks
+   *
+   * Sets ownership tracking (created_by, updated_by) on the new instance.
+   * Requires org-admin privileges.
+   */
+  async create(createDto: any, userId: string, roles: string[]): Promise<PyroscopeInstance> {
+    try {
+      // Log authorization context for debugging
+      const isAdmin = this.authzService.isGlobalAdmin(roles);
+      this.logger.debug(`create: userId=${userId}, isGlobalAdmin=${isAdmin}`);
+
+      // Check if user is org-admin in any organization
+      await this.requireOrgAdmin(userId, roles);
+
+      const entity = this.pyroscopeInstanceRepo.create({
+        label: createDto.label,
+        pyroscopeUrl: createDto.pyroscopeUrl,
+        backendUrl: createDto.backendUrl,
+        pyroscopeStandAlone: createDto.pyroscopeStandAlone || false,
+        createdBy: userId,
+        updatedBy: userId,
+        organizationId: createDto.organizationId || undefined,
+      });
+
+      const savedEntity = await this.pyroscopeInstanceRepo.save(entity);
+
+      this.logger.log(`Pyroscope instance created: ${createDto.label}`);
+      return this.mapEntityToDto(savedEntity);
+    } catch (error) {
+      this.logger.error('Failed to create Pyroscope instance:', error);
+      throw error;
+    }
+  }
+
+  /**
+   * Update an existing Pyroscope instance
+   *
+   * @param id - The Pyroscope instance ID
+   * @param updateDto - The update DTO
+   * @param userId - The user ID for authorization and ownership tracking
+   * @param roles - The user's roles for authorization checks
+   *
+   * Validates user has permission to modify the instance.
+   * Sets updated_by to track who made the change.
+   */
+  async update(id: string, updateDto: any, userId: string, roles: string[]): Promise<PyroscopeInstance> {
+    try {
+      // Log authorization context for debugging
+      const isAdmin = this.authzService.isGlobalAdmin(roles);
+      this.logger.debug(`update: id=${id}, userId=${userId}, isGlobalAdmin=${isAdmin}`);
+
+      // Check if user is org-admin in any organization
+      await this.requireOrgAdmin(userId, roles);
+
+      const entity = await this.pyroscopeInstanceRepo.findOne({ where: { id } });
+
+      if (!entity) {
+        throw new NotFoundException(`Pyroscope instance with id ${id} not found`);
+      }
+
+      // Check modification permission based on organization
+      if (!isAdmin && entity.organizationId) {
+        const accessibleOrganizations = await this.authzService.getAccessibleOrganizations(userId);
+        if (!accessibleOrganizations.includes(entity.organizationId)) {
+          throw new NotFoundException(`Pyroscope instance with id ${id} not found`);
+        }
+      }
+
+      // Update only provided fields
+      if (updateDto.label !== undefined) entity.label = updateDto.label;
+      if (updateDto.pyroscopeUrl !== undefined) entity.pyroscopeUrl = updateDto.pyroscopeUrl;
+      if (updateDto.backendUrl !== undefined) entity.backendUrl = updateDto.backendUrl;
+      if (updateDto.pyroscopeStandAlone !== undefined) entity.pyroscopeStandAlone = updateDto.pyroscopeStandAlone;
+
+      // Track who updated the instance
+      entity.updatedBy = userId;
+
+      const updatedEntity = await this.pyroscopeInstanceRepo.save(entity);
+
+      this.logger.log(`Pyroscope instance updated: ${id}`);
+      return this.mapEntityToDto(updatedEntity);
+    } catch (error) {
+      if (error instanceof NotFoundException) {
+        throw error;
+      }
+      this.logger.error('Failed to update Pyroscope instance:', error);
+      throw error;
+    }
+  }
+
+  /**
+   * Delete a Pyroscope instance
+   *
+   * @param id - The Pyroscope instance ID
+   * @param userId - The user ID for authorization
+   * @param roles - The user's roles for authorization checks
+   *
+   * Validates user has permission to delete the instance based on organization membership.
+   */
+  async remove(id: string, userId: string, roles: string[]): Promise<void> {
+    try {
+      // Log authorization context for debugging
+      const isAdmin = this.authzService.isGlobalAdmin(roles);
+      this.logger.debug(`remove: id=${id}, userId=${userId}, isGlobalAdmin=${isAdmin}`);
+
+      // Check if user is org-admin in any organization
+      await this.requireOrgAdmin(userId, roles);
+
+      const entity = await this.pyroscopeInstanceRepo.findOne({ where: { id } });
+
+      if (!entity) {
+        throw new NotFoundException(`Pyroscope instance with id ${id} not found`);
+      }
+
+      // Check deletion permission based on organization
+      if (!isAdmin && entity.organizationId) {
+        const accessibleOrganizations = await this.authzService.getAccessibleOrganizations(userId);
+        if (!accessibleOrganizations.includes(entity.organizationId)) {
+          throw new NotFoundException(`Pyroscope instance with id ${id} not found`);
+        }
+      }
+
+      await this.pyroscopeInstanceRepo.remove(entity);
+
+      this.logger.log(`Pyroscope instance ${id} deleted successfully`);
+    } catch (error) {
+      if (error instanceof NotFoundException) {
+        throw error;
+      }
+      this.logger.error('Failed to delete Pyroscope instance:', error);
+      throw error;
+    }
+  }
+
+  /**
+   * Test connection to a Pyroscope instance
+   *
+   * @param id - The Pyroscope instance ID
+   * @param userId - The user ID for authorization
+   * @param roles - The user's roles for authorization checks
+   *
+   * Note: PyroscopeInstance entity does not have organization_id yet, so access checks are not applied.
+   * Full access permission checks will be enabled when Phase 4 adds organization_id column.
+   */
+  async testConnection(id: string, userId: string, roles: string[]): Promise<{ success: boolean; message: string }> {
+    try {
+      // Log authorization context for debugging
+      const isAdmin = this.authzService.isGlobalAdmin(roles);
+      this.logger.debug(`testConnection: id=${id}, userId=${userId}, isGlobalAdmin=${isAdmin}`);
+
+      const instance = await this.findOne(id, userId, roles);
+
+      // TODO: Implement actual Pyroscope connection test
+      // For now, return success if instance exists
+      return {
+        success: true,
+        message: `Connection test for ${instance.label} successful`
+      };
+    } catch (error) {
+      this.logger.error('Failed to test Pyroscope connection:', error);
+      return {
+        success: false,
+        message: (error && typeof error === 'object' && 'message' in error ? (error as Error).message : null) || 'Connection test failed'
+      };
+    }
+  }
+
+  /**
+   * Test Pyroscope connection with provided parameters (without saving)
+   *
+   * @param params - Connection parameters
+   * @param userId - The user ID for authorization
+   * @param roles - The user's roles for authorization checks
+   *
+   * Note: This method validates connection parameters without accessing stored data,
+   * so no resource-level authorization is needed. Basic authentication is still required.
+   */
+  async testConnectionWithParams(
+    params: { pyroscopeUrl: string },
+    userId: string,
+    roles: string[],
+  ): Promise<{ success: boolean; message: string }> {
+    try {
+      // Log authorization context for debugging
+      const isAdmin = this.authzService.isGlobalAdmin(roles);
+      this.logger.debug(`testConnectionWithParams: userId=${userId}, isGlobalAdmin=${isAdmin}`);
+
+      // TODO: Implement actual Pyroscope connection test with provided parameters
+      // For now, just validate that required fields are present
+      if (!params.pyroscopeUrl) {
+        throw new Error('Pyroscope URL is required');
+      }
+
+      // Return success for now
+      return {
+        success: true,
+        message: 'Connection test successful'
+      };
+    } catch (error) {
+      this.logger.error('Failed to test Pyroscope connection with params:', error);
+      return {
+        success: false,
+        message: (error && typeof error === 'object' && 'message' in error ? (error as Error).message : null) || 'Connection test failed'
+      };
+    }
+  }
+}

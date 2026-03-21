@@ -1,0 +1,505 @@
+import { Test, TestingModule } from '@nestjs/testing';
+import { INestApplication } from '@nestjs/common';
+import { ConfigModule } from '@nestjs/config';
+import { TypeOrmModule } from '@nestjs/typeorm';
+import { Repository } from 'typeorm';
+import { getRepositoryToken } from '@nestjs/typeorm';
+import { v4 as uuidv4 } from 'uuid';
+import {
+  Organization,
+  Team,
+  SystemUnderTest,
+  Benchmark,
+  DsAdaptConclusion,
+  DsMetrics,
+  DsChangePoints,
+  ApplicationDashboard,
+  User,
+  TestRun,
+  ApiKey,
+  TestRunConfiguration
+} from '../entities';
+
+describe('Phase 3 Migration Validation Suite', () => {
+  let app: INestApplication;
+  let organizationRepo: Repository<Organization>;
+  let teamRepo: Repository<Team>;
+  let systemUnderTestRepo: Repository<SystemUnderTest>;
+  let benchmarkRepo: Repository<Benchmark>;
+  let dsAdaptConclusionRepo: Repository<DsAdaptConclusion>;
+  let dsMetricsRepo: Repository<DsMetrics>;
+  let dsChangePointsRepo: Repository<DsChangePoints>;
+  let applicationDashboardRepo: Repository<ApplicationDashboard>;
+  let userRepo: Repository<User>;
+
+  // Test data for the new entities
+  const testOrganization = {
+    name: 'Test Organization',
+    description: 'Organization for migration testing'
+  };
+
+  const testTeam = {
+    name: 'Test Team',
+    description: 'Team for migration testing'
+  };
+
+  const testSystemUnderTest = {
+    name: 'Test System',
+    description: 'System under test for migration testing',
+    tracing_service: 'jaeger',
+    pyroscope_application: 'test-app',
+    pyroscope_profiler: 'test-profiler'
+  };
+
+  const testUser = {
+    email: 'phase3test@migration.com',
+    passwordHash: '$2b$12$test.hash.for.migration.testing'
+  };
+
+  const testBenchmark = {
+    test_environment: 'test',
+    workload: 'load-test',
+    source: 'grafana' as const,
+    grafana_instance: 'test-instance',
+    dashboard_label: 'Test Dashboard',
+    configuration: { type: 'response-time', evaluateType: 'avg' },
+    enabled: true,
+    valid: true,
+    description: 'Test benchmark for migration'
+  };
+
+  const testDsAdaptConclusion = {
+    test_run_id: uuidv4(),
+    control_group_id: uuidv4(),
+    regressions: [],
+    improvements: [],
+    differences: [],
+    tracked_regressions: [],
+    conclusion: 'PASSED',
+    details: { summary: 'All tests passed' }
+  };
+
+  const testDsMetrics = {
+    test_run_id: uuidv4(),
+    dashboard_uid: 'test-dashboard-uid',
+    panel_id: 1,
+    panel_title: 'Response Time',
+    metric_name: 'response_time_ms',
+    time: new Date('2024-01-01T00:00:00Z'),
+    timestep: 1.0,
+    ramp_up: false,
+    value: 150.5,
+    unit: 'ms'
+  };
+
+  const testDsChangePoints = {
+    system_under_test_id: 'sut-001',
+    workload: 'load-test',
+    test_environment: 'test',
+    test_run_id: uuidv4(),
+    panel_title: 'Response Time',
+    dashboard_label: 'Performance Dashboard',
+    dashboard_uid: 'perf-dashboard',
+    panel_id: 1,
+    metric_name: 'response_time'
+  };
+
+  const testApplicationDashboard = {
+    systemUnderTestId: uuidv4(),
+    testEnvironment: 'test',
+    grafanaInstanceId: uuidv4(),
+    grafanaDashboardId: uuidv4(),
+    dashboardName: 'Test Application Dashboard',
+    dashboardLabel: 'Test Dashboard Label'
+  };
+
+  beforeAll(async () => {
+    const moduleFixture: TestingModule = await Test.createTestingModule({
+      imports: [
+        ConfigModule.forRoot({
+          isGlobal: true,
+          envFilePath: ['.env.test', '.env.local', '.env'],
+        }),
+        TypeOrmModule.forRootAsync({
+          useFactory: async () => ({
+            type: 'postgres',
+            host: process.env.DB_HOST || 'localhost',
+            port: parseInt(process.env.DB_PORT || '5432') || 5432,
+            username: process.env.DB_USERNAME || 'perfana',
+            password: process.env.DB_PASSWORD || 'password',
+            database: process.env.DB_NAME || 'perfana_test',
+            entities: [
+              Organization,
+              Team,
+              SystemUnderTest,
+              Benchmark,
+              DsAdaptConclusion,
+              DsMetrics,
+              DsChangePoints,
+              ApplicationDashboard,
+              User,
+              TestRun,
+              ApiKey,
+              TestRunConfiguration
+            ],
+            synchronize: true, // Only for testing
+            dropSchema: true, // Clean start for each test
+            logging: false,
+          }),
+        }),
+        TypeOrmModule.forFeature([
+          Organization,
+          Team,
+          SystemUnderTest,
+          Benchmark,
+          DsAdaptConclusion,
+          DsMetrics,
+          DsChangePoints,
+          ApplicationDashboard,
+          User,
+          TestRun,
+          ApiKey,
+          TestRunConfiguration
+        ]),
+      ],
+    }).compile();
+
+    app = moduleFixture.createNestApplication();
+    await app.init();
+
+    // Get repository instances
+    organizationRepo = app.get(getRepositoryToken(Organization));
+    teamRepo = app.get(getRepositoryToken(Team));
+    systemUnderTestRepo = app.get(getRepositoryToken(SystemUnderTest));
+    benchmarkRepo = app.get(getRepositoryToken(Benchmark));
+    dsAdaptConclusionRepo = app.get(getRepositoryToken(DsAdaptConclusion));
+    dsMetricsRepo = app.get(getRepositoryToken(DsMetrics));
+    dsChangePointsRepo = app.get(getRepositoryToken(DsChangePoints));
+    applicationDashboardRepo = app.get(getRepositoryToken(ApplicationDashboard));
+    userRepo = app.get(getRepositoryToken(User));
+  });
+
+  afterAll(async () => {
+    await app.close();
+  });
+
+  describe('Organization Management Entities', () => {
+    it('should create and retrieve organizations', async () => {
+      const organization = organizationRepo.create(testOrganization);
+      const savedOrganization = await organizationRepo.save(organization);
+
+      expect(savedOrganization.id).toBeDefined();
+      expect(savedOrganization.name).toBe(testOrganization.name);
+      expect(savedOrganization.description).toBe(testOrganization.description);
+      expect(savedOrganization.created_at).toBeDefined();
+      expect(savedOrganization.updated_at).toBeDefined();
+
+      const foundOrganization = await organizationRepo.findOne({
+        where: { id: savedOrganization.id }
+      });
+      expect(foundOrganization).toBeTruthy();
+      expect(foundOrganization!.name).toBe(testOrganization.name);
+    });
+
+    it('should create teams with organization relationships', async () => {
+      // First create an organization
+      const organization = await organizationRepo.save(organizationRepo.create(testOrganization));
+
+      // Create team with organization relationship
+      const teamData = { ...testTeam, organization_id: organization.id };
+      const team = teamRepo.create(teamData);
+      const savedTeam = await teamRepo.save(team);
+
+      expect(savedTeam.id).toBeDefined();
+      expect(savedTeam.name).toBe(testTeam.name);
+      expect(savedTeam.organization_id).toBe(organization.id);
+
+      // Test relationship loading
+      const teamWithOrganization = await teamRepo.findOne({
+        where: { id: savedTeam.id },
+        relations: ['organization']
+      });
+      expect(teamWithOrganization!.organization).toBeTruthy();
+      expect(teamWithOrganization!.organization.name).toBe(testOrganization.name);
+    });
+
+    it('should create systems under test with team relationships', async () => {
+      // Create prerequisite entities
+      const organization = await organizationRepo.save(organizationRepo.create(testOrganization));
+      const teamData = { ...testTeam, organization_id: organization.id };
+      const team = await teamRepo.save(teamRepo.create(teamData));
+
+      // Create system under test
+      const sutData = { ...testSystemUnderTest, team_id: team.id };
+      const sut = systemUnderTestRepo.create(sutData);
+      const savedSut = await systemUnderTestRepo.save(sut);
+
+      expect(savedSut.id).toBeDefined();
+      expect(savedSut.name).toBe(testSystemUnderTest.name);
+      expect(savedSut.team_id).toBe(team.id);
+      expect(savedSut.tracing_service).toBe(testSystemUnderTest.tracing_service);
+
+      // Test relationship loading
+      const sutWithTeam = await systemUnderTestRepo.findOne({
+        where: { id: savedSut.id },
+        relations: ['team']
+      });
+      expect(sutWithTeam!.team).toBeTruthy();
+      expect(sutWithTeam!.team!.name).toBe(testTeam.name);
+    });
+  });
+
+  describe('Benchmarking Entities', () => {
+    it('should create and retrieve benchmarks with relationships', async () => {
+      // Create prerequisite entities
+      const organization = await organizationRepo.save(organizationRepo.create(testOrganization));
+      const team = await teamRepo.save(teamRepo.create({ ...testTeam, organization_id: organization.id }));
+      const sut = await systemUnderTestRepo.save(systemUnderTestRepo.create({ ...testSystemUnderTest, team_id: team.id }));
+      const appDashboard = await applicationDashboardRepo.save(applicationDashboardRepo.create(testApplicationDashboard));
+      const user = await userRepo.save(userRepo.create(testUser));
+
+      // Create benchmark
+      const benchmarkData = {
+        ...testBenchmark,
+        system_under_test_id: sut.id,
+        application_dashboard_id: appDashboard.id,
+        created_by: user.id,
+        updated_by: user.id
+      };
+      const benchmark = benchmarkRepo.create(benchmarkData);
+      const savedBenchmark = await benchmarkRepo.save(benchmark);
+
+      expect(savedBenchmark.id).toBeDefined();
+      expect(savedBenchmark.test_environment).toBe(testBenchmark.test_environment);
+      expect(savedBenchmark.workload).toBe(testBenchmark.workload);
+      expect(savedBenchmark.source).toBe(testBenchmark.source);
+      expect(savedBenchmark.configuration).toEqual(testBenchmark.configuration);
+      expect(savedBenchmark.enabled).toBe(true);
+
+      // Test relationships
+      const benchmarkWithRelations = await benchmarkRepo.findOne({
+        where: { id: savedBenchmark.id },
+        relations: ['system_under_test', 'application_dashboard', 'creator']
+      });
+      expect(benchmarkWithRelations!.system_under_test).toBeTruthy();
+      expect(benchmarkWithRelations!.application_dashboard).toBeTruthy();
+      expect(benchmarkWithRelations!.creator).toBeTruthy();
+    });
+  });
+
+  describe('Data Science Platform Entities', () => {
+    it('should create and retrieve DS adapt conclusions', async () => {
+      const conclusion = dsAdaptConclusionRepo.create(testDsAdaptConclusion);
+      const savedConclusion = await dsAdaptConclusionRepo.save(conclusion);
+
+      expect(savedConclusion.id).toBeDefined();
+      expect(savedConclusion.test_run_id).toBe(testDsAdaptConclusion.test_run_id);
+      expect(savedConclusion.conclusion).toBe(testDsAdaptConclusion.conclusion);
+      expect(savedConclusion.details).toEqual(testDsAdaptConclusion.details);
+      expect(savedConclusion.updated_at).toBeDefined();
+    });
+
+    it('should create and retrieve DS metrics with application dashboard relationship', async () => {
+      // Create application dashboard first
+      const appDashboard = await applicationDashboardRepo.save(applicationDashboardRepo.create(testApplicationDashboard));
+
+      // Create DS metrics
+      const metricsData = { ...testDsMetrics, application_dashboard_id: appDashboard.id };
+      const metrics = dsMetricsRepo.create(metricsData);
+      const savedMetrics = await dsMetricsRepo.save(metrics);
+
+      expect(savedMetrics.test_run_id).toBe(testDsMetrics.test_run_id);
+      expect(savedMetrics.dashboard_uid).toBe(testDsMetrics.dashboard_uid);
+      expect(savedMetrics.panel_id).toBe(testDsMetrics.panel_id);
+      expect(savedMetrics.metric_name).toBe(testDsMetrics.metric_name);
+      expect(savedMetrics.value).toBe(testDsMetrics.value);
+      expect(savedMetrics.unit).toBe(testDsMetrics.unit);
+
+      // Test relationship
+      const metricsWithDashboard = await dsMetricsRepo.findOne({
+        where: {
+          test_run_id: savedMetrics.test_run_id,
+          application_dashboard_id: savedMetrics.application_dashboard_id,
+          dashboard_uid: savedMetrics.dashboard_uid,
+          panel_id: savedMetrics.panel_id,
+          time: savedMetrics.time
+        },
+        relations: ['application_dashboard']
+      });
+      expect(metricsWithDashboard!.application_dashboard).toBeTruthy();
+      expect(metricsWithDashboard!.application_dashboard.dashboardName).toBe(testApplicationDashboard.dashboardName);
+    });
+
+    it('should create and retrieve DS change points', async () => {
+      // Create application dashboard first
+      const appDashboard = await applicationDashboardRepo.save(applicationDashboardRepo.create(testApplicationDashboard));
+
+      // Create change points
+      const changePointsData = { ...testDsChangePoints, application_dashboard_id: appDashboard.id };
+      const changePoints = dsChangePointsRepo.create(changePointsData);
+      const savedChangePoints = await dsChangePointsRepo.save(changePoints);
+
+      expect(savedChangePoints.id).toBeDefined();
+      expect(savedChangePoints.system_under_test_id).toBe(testDsChangePoints.system_under_test_id);
+      expect(savedChangePoints.workload).toBe(testDsChangePoints.workload);
+      expect(savedChangePoints.test_environment).toBe(testDsChangePoints.test_environment);
+      expect(savedChangePoints.test_run_id).toBe(testDsChangePoints.test_run_id);
+
+      // Test relationship
+      const changePointsWithDashboard = await dsChangePointsRepo.findOne({
+        where: { id: savedChangePoints.id },
+        relations: ['application_dashboard']
+      });
+      expect(changePointsWithDashboard!.application_dashboard).toBeTruthy();
+    });
+  });
+
+  describe('Complex Queries and Relationships', () => {
+    it('should handle complex queries across multiple Phase 3 entities', async () => {
+      // Create a complete data hierarchy
+      const organization = await organizationRepo.save(organizationRepo.create({
+        name: 'Complex Test Org',
+        description: 'Organization for complex query testing'
+      }));
+
+      const team = await teamRepo.save(teamRepo.create({
+        name: 'Complex Test Team',
+        description: 'Team for complex query testing',
+        organization_id: organization.id
+      }));
+
+      const sut = await systemUnderTestRepo.save(systemUnderTestRepo.create({
+        name: 'Complex Test System',
+        description: 'System for complex query testing',
+        team_id: team.id,
+        tracing_service: 'tempo'
+      }));
+
+      const appDashboard = await applicationDashboardRepo.save(applicationDashboardRepo.create({
+        systemUnderTestId: sut.id,
+        testEnvironment: 'production',
+        grafanaInstanceId: uuidv4(),
+        grafanaDashboardId: uuidv4(),
+        dashboardName: 'Complex Test Dashboard',
+        dashboardLabel: 'Complex Dashboard Label'
+      }));
+
+      const user = await userRepo.save(userRepo.create({
+        email: 'complex@test.com',
+        passwordHash: '$2b$12$complex.test.hash'
+      }));
+
+      await benchmarkRepo.save(benchmarkRepo.create({
+        system_under_test_id: sut.id,
+        test_environment: 'production',
+        workload: 'stress-test',
+        source: 'dynatrace',
+        application_dashboard_id: appDashboard.id,
+        configuration: { type: 'throughput', threshold: 1000 },
+        enabled: true,
+        valid: true,
+        created_by: user.id,
+        updated_by: user.id
+      }));
+
+      // Test complex query joining multiple entities
+      const complexQuery = await benchmarkRepo
+        .createQueryBuilder('benchmark')
+        .leftJoinAndSelect('benchmark.system_under_test', 'sut')
+        .leftJoinAndSelect('sut.team', 'team')
+        .leftJoinAndSelect('team.organization', 'organization')
+        .leftJoinAndSelect('benchmark.application_dashboard', 'dashboard')
+        .leftJoinAndSelect('benchmark.creator', 'creator')
+        .where('organization.name = :orgName', { orgName: 'Complex Test Org' })
+        .andWhere('benchmark.enabled = true')
+        .getOne();
+
+      expect(complexQuery).toBeTruthy();
+      expect(complexQuery!.system_under_test).toBeTruthy();
+      expect(complexQuery!.system_under_test.team).toBeTruthy();
+      expect(complexQuery!.system_under_test.team!.organization).toBeTruthy();
+      expect(complexQuery!.system_under_test.team!.organization!.name).toBe('Complex Test Org');
+      expect(complexQuery!.application_dashboard).toBeTruthy();
+      expect(complexQuery!.creator).toBeTruthy();
+    });
+
+    it('should handle data science metrics aggregation queries', async () => {
+      const appDashboard = await applicationDashboardRepo.save(applicationDashboardRepo.create(testApplicationDashboard));
+
+      // Use a unique test_run_id for this aggregation test
+      const aggregationTestRunId = uuidv4();
+
+      // Create multiple metrics for aggregation testing
+      const metricsData = [
+        { ...testDsMetrics, test_run_id: aggregationTestRunId, application_dashboard_id: appDashboard.id, value: 100, time: new Date('2024-01-01T00:00:00Z') },
+        { ...testDsMetrics, test_run_id: aggregationTestRunId, application_dashboard_id: appDashboard.id, value: 150, time: new Date('2024-01-01T00:01:00Z') },
+        { ...testDsMetrics, test_run_id: aggregationTestRunId, application_dashboard_id: appDashboard.id, value: 120, time: new Date('2024-01-01T00:02:00Z') },
+      ];
+
+      for (const data of metricsData) {
+        await dsMetricsRepo.save(dsMetricsRepo.create(data));
+      }
+
+      // Test aggregation query
+      const aggregationResult = await dsMetricsRepo
+        .createQueryBuilder('metrics')
+        .select('AVG(metrics.value)', 'average_value')
+        .addSelect('MAX(metrics.value)', 'max_value')
+        .addSelect('MIN(metrics.value)', 'min_value')
+        .addSelect('COUNT(*)', 'count')
+        .where('metrics.test_run_id = :testRunId', { testRunId: aggregationTestRunId })
+        .getRawOne();
+
+      expect(aggregationResult).toBeTruthy();
+      expect(parseFloat(aggregationResult.average_value)).toBeCloseTo(123.33, 1);
+      expect(parseFloat(aggregationResult.max_value)).toBe(150);
+      expect(parseFloat(aggregationResult.min_value)).toBe(100);
+      expect(parseInt(aggregationResult.count)).toBe(3);
+    });
+  });
+
+  describe('Data Validation and Constraints', () => {
+    it('should allow benchmark source values (no database-level enum constraint)', async () => {
+      const organization = await organizationRepo.save(organizationRepo.create(testOrganization));
+      const team = await teamRepo.save(teamRepo.create({ ...testTeam, organization_id: organization.id }));
+      const sut = await systemUnderTestRepo.save(systemUnderTestRepo.create({ ...testSystemUnderTest, team_id: team.id }));
+
+      const benchmarkWithInvalidSource = benchmarkRepo.create({
+        ...testBenchmark,
+        system_under_test_id: sut.id,
+        source: 'invalid_source' as any
+      });
+
+      // This should succeed since no database-level enum constraint is enforced
+      const saved = await benchmarkRepo.save(benchmarkWithInvalidSource);
+      expect(saved.source).toBe('invalid_source');
+    });
+
+    it('should allow conclusion values (no database-level enum constraint)', async () => {
+      const conclusionWithInvalidValue = dsAdaptConclusionRepo.create({
+        ...testDsAdaptConclusion,
+        conclusion: 'INVALID_CONCLUSION' as any
+      });
+
+      // This should succeed since no database-level enum constraint is enforced
+      const saved = await dsAdaptConclusionRepo.save(conclusionWithInvalidValue);
+      expect(saved.conclusion).toBe('INVALID_CONCLUSION');
+    });
+
+    it('should handle UUID array fields correctly', async () => {
+      const conclusionWithArrays = dsAdaptConclusionRepo.create({
+        ...testDsAdaptConclusion,
+        regressions: ['123e4567-e89b-12d3-a456-426614174001', '123e4567-e89b-12d3-a456-426614174002'],
+        improvements: ['123e4567-e89b-12d3-a456-426614174003'],
+        differences: [],
+        tracked_regressions: ['123e4567-e89b-12d3-a456-426614174004']
+      });
+
+      const saved = await dsAdaptConclusionRepo.save(conclusionWithArrays);
+      expect(saved.regressions).toHaveLength(2);
+      expect(saved.improvements).toHaveLength(1);
+      expect(saved.differences).toHaveLength(0);
+      expect(saved.tracked_regressions).toHaveLength(1);
+    });
+  });
+});

@@ -1,0 +1,189 @@
+# syntax=docker/dockerfile:1.7-labs
+# ================================================================================================
+# PERFANA MIGRATIONS - Database Migration Runner
+# ================================================================================================
+# Lightweight image for running TypeORM database migrations
+# Usage: docker build -f Dockerfile.migrations -t perfana/perfana-migration:0.1.0 .
+# ================================================================================================
+
+ARG NODE_VERSION=20
+ARG ALPINE_VERSION=3.20
+
+# ================================================================================================
+# STAGE 1: Build Stage
+# ================================================================================================
+FROM node:${NODE_VERSION}-alpine${ALPINE_VERSION} AS builder
+
+WORKDIR /app
+
+# Install build dependencies
+RUN apk add --no-cache python3 make g++
+
+# Copy all package files for proper workspace resolution
+COPY package*.json ./
+COPY turbo.json ./
+COPY tsconfig.base.json ./
+COPY apps/api/package*.json ./apps/api/
+COPY apps/web/package*.json ./apps/web/
+COPY apps/grafana-sync/package*.json ./apps/grafana-sync/
+COPY apps/worker/package*.json ./apps/worker/
+COPY packages/shared/package*.json ./packages/shared/
+COPY packages/config/package*.json ./packages/config/
+
+# Install all dependencies (needed for TypeScript compilation)
+RUN npm ci --ignore-scripts && npm cache clean --force
+
+# Copy shared package source
+COPY packages/shared/ ./packages/shared/
+
+# Build the shared package
+WORKDIR /app/packages/shared
+RUN npm run build
+
+# ================================================================================================
+# STAGE 2: Production Migration Runner
+# ================================================================================================
+FROM node:${NODE_VERSION}-alpine${ALPINE_VERSION} AS migrations
+
+# Security: Create non-root user
+RUN addgroup -g 10001 -S perfana \
+    && adduser -u 10001 -D -S -G perfana perfana
+
+WORKDIR /app
+
+# Install only production dependencies for pg and typeorm
+RUN npm init -y && \
+    npm install --save typeorm@^0.3.27 pg@^8.11.3 dotenv@^16.0.0 reflect-metadata@^0.1.13 && \
+    npm cache clean --force
+
+# Copy compiled migrations, entities, and utils
+COPY --from=builder --chown=perfana:perfana /app/packages/shared/dist/database/migrations ./migrations/
+COPY --from=builder --chown=perfana:perfana /app/packages/shared/dist/entities ./entities/
+COPY --from=builder --chown=perfana:perfana /app/packages/shared/dist/utils ./utils/
+
+# Copy schema_dump.sql to /database/ (required by InitialSchema migration)
+# The migration uses: join(__dirname, '../../../../../database/schema_dump.sql')
+# From /app/migrations, this resolves to /database/schema_dump.sql
+COPY --chown=perfana:perfana database/schema_dump.sql /database/schema_dump.sql
+
+# Create a standalone ormconfig for the container
+COPY --chown=perfana:perfana <<'EOF' ormconfig.js
+const { DataSource } = require('typeorm');
+require('reflect-metadata');
+
+const AppDataSource = new DataSource({
+  type: 'postgres',
+  host: process.env.DB_HOST || 'localhost',
+  port: parseInt(process.env.DB_PORT || '5432'),
+  username: process.env.DB_USERNAME || 'perfana',
+  password: process.env.DB_PASSWORD || 'perfana',
+  database: process.env.DB_NAME || 'perfana',
+  ssl: process.env.DB_SSL === 'true' ? { rejectUnauthorized: false } : false,
+  entities: ['entities/**/*.entity.js'],
+  migrations: ['migrations/**/*.js'],
+  synchronize: false,
+  logging: ['error', 'warn', 'migration', 'schema'],
+  migrationsTableName: 'typeorm_migrations',
+});
+
+module.exports = { AppDataSource };
+EOF
+
+# Create migration runner script
+COPY --chown=perfana:perfana <<'EOF' run-migrations.js
+const { AppDataSource } = require('./ormconfig');
+
+async function runMigrations() {
+  try {
+    console.log('Initializing database connection...');
+    console.log(`Host: ${process.env.DB_HOST || 'localhost'}`);
+    console.log(`Port: ${process.env.DB_PORT || '5432'}`);
+    console.log(`Database: ${process.env.DB_NAME || 'perfana'}`);
+    console.log(`User: ${process.env.DB_USERNAME || 'perfana'}`);
+    console.log(`SSL: ${process.env.DB_SSL === 'true' ? 'enabled' : 'disabled'}`);
+
+    await AppDataSource.initialize();
+    console.log('Database connection established.');
+
+    console.log('Running pending migrations...');
+    const migrations = await AppDataSource.runMigrations();
+
+    if (migrations.length === 0) {
+      console.log('No pending migrations to run.');
+    } else {
+      console.log(`Successfully ran ${migrations.length} migration(s):`);
+      migrations.forEach(m => console.log(`  - ${m.name}`));
+    }
+
+    await AppDataSource.destroy();
+    console.log('Migration completed successfully.');
+    process.exit(0);
+  } catch (error) {
+    console.error('Migration failed:', error);
+    process.exit(1);
+  }
+}
+
+runMigrations();
+EOF
+
+# Create migration show script
+COPY --chown=perfana:perfana <<'EOF' show-migrations.js
+const { AppDataSource } = require('./ormconfig');
+
+async function showMigrations() {
+  try {
+    await AppDataSource.initialize();
+
+    const migrations = await AppDataSource.showMigrations();
+    console.log('Migration status:', migrations ? 'Pending migrations exist' : 'All migrations applied');
+
+    await AppDataSource.destroy();
+    process.exit(migrations ? 1 : 0);
+  } catch (error) {
+    console.error('Failed to check migrations:', error);
+    process.exit(1);
+  }
+}
+
+showMigrations();
+EOF
+
+# Create revert script
+COPY --chown=perfana:perfana <<'EOF' revert-migration.js
+const { AppDataSource } = require('./ormconfig');
+
+async function revertMigration() {
+  try {
+    console.log('Initializing database connection...');
+    await AppDataSource.initialize();
+    console.log('Database connection established.');
+
+    console.log('Reverting last migration...');
+    await AppDataSource.undoLastMigration();
+
+    console.log('Migration reverted successfully.');
+    await AppDataSource.destroy();
+    process.exit(0);
+  } catch (error) {
+    console.error('Revert failed:', error);
+    process.exit(1);
+  }
+}
+
+revertMigration();
+EOF
+
+# Set ownership
+RUN chown -R perfana:perfana /app
+
+# Switch to non-root user
+USER perfana:perfana
+
+# Labels
+LABEL org.opencontainers.image.title="Perfana Database Migrations" \
+      org.opencontainers.image.description="TypeORM migration runner for Perfana" \
+      org.opencontainers.image.vendor="Perfana"
+
+# Default command: run migrations
+CMD ["node", "run-migrations.js"]

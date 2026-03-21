@@ -1,0 +1,444 @@
+import { Injectable, NotFoundException, ForbiddenException, Logger } from '@nestjs/common';
+import { InjectRepository } from '@nestjs/typeorm';
+import { Repository, Brackets } from 'typeorm';
+import { CompareFilterPreset, ApplicationDashboard, TestRun as TestRunEntity } from '../../entities';
+import { CreateComparePresetDto } from './dto/create-compare-preset.dto';
+import { UpdateComparePresetDto } from './dto/update-compare-preset.dto';
+import { ComparePresetResponseDto } from './dto/compare-preset-response.dto';
+import { ResourceNotFoundException } from '../../common/exceptions/business.exception';
+import { AuthorizationService } from '../../common/services/authorization.service';
+
+@Injectable()
+export class ComparePresetsService {
+  private readonly logger = new Logger(ComparePresetsService.name);
+
+  constructor(
+    @InjectRepository(CompareFilterPreset)
+    private comparePresetRepo: Repository<CompareFilterPreset>,
+    @InjectRepository(TestRunEntity)
+    private testRunRepo: Repository<TestRunEntity>,
+    private readonly authzService: AuthorizationService,
+  ) {}
+
+  /**
+   * Validate that the user has access to a test run via organization membership.
+   * Loads organizations via AuthorizationService (not from ctx.organizations which is always empty).
+   */
+  private async validateTestRunAccess(
+    testRunId: string,
+    userId: string,
+    roles: string[],
+  ): Promise<boolean> {
+    // Admins bypass all filtering
+    if (this.authzService.isGlobalAdmin(roles)) {
+      return true;
+    }
+
+    const organizationIds = await this.authzService.getAccessibleOrganizations(userId);
+
+    // Non-admin users with no organization memberships have no access
+    if (organizationIds.length === 0) {
+      return false;
+    }
+
+    // Check if the test run belongs to one of the user's organizations
+    const query = `
+      SELECT 1
+      FROM test_runs tr
+      INNER JOIN systems_under_test sut ON sut.id = tr.system_under_test_id
+      WHERE tr.test_run_id = $1
+        AND (sut.organization_id = ANY($2::uuid[]) OR sut.organization_id IS NULL)
+      LIMIT 1
+    `;
+
+    const result = await this.testRunRepo.query(query, [testRunId, organizationIds]);
+    return result && result.length > 0;
+  }
+
+  async create(
+    createComparePresetDto: CreateComparePresetDto,
+    userId: string,
+    roles: string[] = [],
+  ): Promise<ComparePresetResponseDto> {
+    const isAdmin = this.authzService.isGlobalAdmin(roles);
+    this.logger.log(`Creating compare preset: ${createComparePresetDto.name}${isAdmin ? ' (admin)' : ''}`);
+
+    try {
+      // Validate access to referenced test runs for non-admin users
+      if (!isAdmin) {
+        // Check baseline test run access
+        if (createComparePresetDto.baseline_test_run_id) {
+          const hasAccess = await this.validateTestRunAccess(
+            createComparePresetDto.baseline_test_run_id,
+            userId,
+            roles,
+          );
+          if (!hasAccess) {
+            throw new ResourceNotFoundException('TestRun', createComparePresetDto.baseline_test_run_id);
+          }
+        }
+
+        // Check created-for test run access
+        if (createComparePresetDto.created_for_test_run_id) {
+          const hasAccess = await this.validateTestRunAccess(
+            createComparePresetDto.created_for_test_run_id,
+            userId,
+            roles,
+          );
+          if (!hasAccess) {
+            throw new ResourceNotFoundException('TestRun', createComparePresetDto.created_for_test_run_id);
+          }
+        }
+      }
+
+      const preset = this.comparePresetRepo.create({
+        name: createComparePresetDto.name,
+        description: createComparePresetDto.description,
+        presetType: createComparePresetDto.preset_type,
+        seriesSearchText: createComparePresetDto.series_search_text,
+        showPercentiles: createComparePresetDto.show_percentiles || false,
+        applicationDashboardId: createComparePresetDto.application_dashboard_id,
+        source: createComparePresetDto.source,
+        dashboardLabel: createComparePresetDto.dashboard_label,
+        panelId: createComparePresetDto.panel_id,
+        panelTitle: createComparePresetDto.panel_title,
+        baselineTestRunId: createComparePresetDto.baseline_test_run_id,
+        seriesConfig: createComparePresetDto.series_config,
+        createdForTestRunId: createComparePresetDto.created_for_test_run_id,
+        isGlobal: createComparePresetDto.is_global || false,
+        createdBy: userId
+      });
+
+      const savedPreset = await this.comparePresetRepo.save(preset);
+      return this.mapToDto(savedPreset, null, null);
+    } catch (error) {
+      this.logger.error('Failed to create compare preset:', error);
+      throw new Error(`Failed to create compare preset: ${error && typeof error === 'object' && 'message' in error ? (error as Error).message : 'Unknown error'}`);
+    }
+  }
+
+  async findAll(
+    userId: string,
+    currentTestRunId?: string,
+    roles: string[] = [],
+  ): Promise<ComparePresetResponseDto[]> {
+    const isAdmin = this.authzService.isGlobalAdmin(roles);
+    this.logger.log(`Fetching compare presets for user: ${userId}${isAdmin ? ' (admin)' : ''}`);
+
+    try {
+      // Resolve SUT context from the provided testRunId
+      let sutContext: { systemUnderTestId: string; testEnvironment: string; workload: string } | null = null;
+      if (currentTestRunId) {
+        const testRun = await this.testRunRepo.findOne({
+          where: { testRunId: currentTestRunId },
+          select: ['systemUnderTestId', 'testEnvironment', 'workload'],
+        });
+        if (testRun) {
+          sutContext = {
+            systemUnderTestId: testRun.systemUnderTestId,
+            testEnvironment: testRun.testEnvironment,
+            workload: testRun.workload,
+          };
+        }
+      }
+
+      // Get both user's own presets and global presets
+      const queryBuilder = this.comparePresetRepo
+        .createQueryBuilder('preset')
+        .leftJoinAndSelect('preset.applicationDashboard', 'dashboard')
+        .where('(preset.createdBy = :userId OR preset.isGlobal = :isGlobal)', {
+          userId,
+          isGlobal: true
+        });
+
+      // Scope presets to the same SUT/environment/workload
+      if (sutContext) {
+        queryBuilder
+          .leftJoin('test_runs', 'tr', 'tr.test_run_id = preset.createdForTestRunId')
+          .andWhere(new Brackets(qb => {
+            qb.where(
+              'tr.system_under_test_id = :sutId AND tr.test_environment = :env AND tr.workload = :workload',
+              { sutId: sutContext.systemUnderTestId, env: sutContext.testEnvironment, workload: sutContext.workload }
+            )
+            .orWhere('preset.createdForTestRunId IS NULL');
+          }));
+      }
+
+      queryBuilder.orderBy('preset.createdAt', 'DESC');
+
+      const allData = await queryBuilder.getMany();
+
+      // Filter the results based on preset type and test run
+      let filteredData = allData;
+      if (currentTestRunId) {
+        // Show generic presets and specific presets created for this test run
+        filteredData = allData.filter(preset =>
+          preset.presetType === 'generic' ||
+          (preset.presetType === 'specific' && preset.createdForTestRunId === currentTestRunId)
+        );
+      } else {
+        // If no currentTestRunId, only show generic presets to avoid confusion
+        filteredData = allData.filter(preset => preset.presetType === 'generic');
+      }
+
+      // For non-admin users, filter out global presets that reference test runs from other organizations
+      if (!isAdmin) {
+        const accessCheckedData: CompareFilterPreset[] = [];
+        for (const preset of filteredData) {
+          // User's own presets are always visible
+          if (preset.createdBy === userId) {
+            accessCheckedData.push(preset);
+            continue;
+          }
+
+          // Global presets: check access to referenced test runs
+          let hasAccess = true;
+
+          if (preset.baselineTestRunId) {
+            hasAccess = await this.validateTestRunAccess(preset.baselineTestRunId, userId, roles);
+          }
+
+          if (hasAccess && preset.createdForTestRunId) {
+            hasAccess = await this.validateTestRunAccess(preset.createdForTestRunId, userId, roles);
+          }
+
+          if (hasAccess) {
+            accessCheckedData.push(preset);
+          }
+        }
+        filteredData = accessCheckedData;
+      }
+
+      // For each preset that has baseline_test_run_id, fetch test run data
+      const enrichedData = await Promise.all(
+        filteredData.map(async (preset) => {
+          let testRunData = null;
+
+          // Fetch test run data if baseline_test_run_id exists
+          if (preset.baselineTestRunId) {
+            try {
+              testRunData = await this.testRunRepo.findOne({
+                where: { testRunId: preset.baselineTestRunId },
+                select: ['applicationRelease', 'annotations']
+              });
+            } catch (error) {
+              this.logger.warn(`Failed to fetch test run data for ${preset.baselineTestRunId}:`, error);
+            }
+          }
+
+          return this.mapToDto(preset, preset.applicationDashboard || null, testRunData);
+        })
+      );
+
+      return enrichedData;
+    } catch (error) {
+      this.logger.error('Failed to fetch compare presets:', error);
+      throw new Error(`Failed to fetch compare presets: ${error && typeof error === 'object' && 'message' in error ? (error as Error).message : 'Unknown error'}`);
+    }
+  }
+
+  async findOne(
+    id: string,
+    userId: string,
+    roles: string[] = [],
+  ): Promise<ComparePresetResponseDto> {
+    const isAdmin = this.authzService.isGlobalAdmin(roles);
+    this.logger.log(`Fetching compare preset: ${id}${isAdmin ? ' (admin)' : ''}`);
+
+    try {
+      const preset = await this.comparePresetRepo
+        .createQueryBuilder('preset')
+        .leftJoinAndSelect('preset.applicationDashboard', 'dashboard')
+        .where('preset.id = :id', { id })
+        .andWhere('(preset.createdBy = :userId OR preset.isGlobal = :isGlobal)', {
+          userId,
+          isGlobal: true
+        })
+        .getOne();
+
+      if (!preset) {
+        throw new NotFoundException(`Compare preset with ID ${id} not found`);
+      }
+
+      // For non-admin users accessing global presets, verify organization access to referenced test runs
+      if (!isAdmin && preset.createdBy !== userId) {
+        if (preset.baselineTestRunId) {
+          const hasAccess = await this.validateTestRunAccess(preset.baselineTestRunId, userId, roles);
+          if (!hasAccess) {
+            throw new NotFoundException(`Compare preset with ID ${id} not found`);
+          }
+        }
+
+        if (preset.createdForTestRunId) {
+          const hasAccess = await this.validateTestRunAccess(preset.createdForTestRunId, userId, roles);
+          if (!hasAccess) {
+            throw new NotFoundException(`Compare preset with ID ${id} not found`);
+          }
+        }
+      }
+
+      // Fetch test run data if baseline_test_run_id exists
+      let testRunData = null;
+      if (preset.baselineTestRunId) {
+        try {
+          testRunData = await this.testRunRepo.findOne({
+            where: { testRunId: preset.baselineTestRunId },
+            select: ['applicationRelease', 'annotations']
+          });
+        } catch (error) {
+          this.logger.warn(`Failed to fetch test run data for ${preset.baselineTestRunId}:`, error);
+        }
+      }
+
+      return this.mapToDto(preset, preset.applicationDashboard || null, testRunData);
+    } catch (error) {
+      if (error instanceof NotFoundException) {
+        throw error;
+      }
+      this.logger.error(`Failed to fetch compare preset ${id}:`, error);
+      throw new Error(`Failed to fetch compare preset: ${error && typeof error === 'object' && 'message' in error ? (error as Error).message : 'Unknown error'}`);
+    }
+  }
+
+  async update(
+    id: string,
+    updateComparePresetDto: UpdateComparePresetDto,
+    userId: string,
+    roles: string[] = [],
+  ): Promise<ComparePresetResponseDto> {
+    const isAdmin = this.authzService.isGlobalAdmin(roles);
+    this.logger.log(`Updating compare preset: ${id}${isAdmin ? ' (admin)' : ''}`);
+
+    try {
+      // First check if user owns this preset
+      const existing = await this.findOne(id, userId, roles);
+      if (existing.created_by !== userId) {
+        throw new ForbiddenException('You can only update your own presets');
+      }
+
+      // Validate access to new test run references for non-admin users
+      if (!isAdmin) {
+        if (updateComparePresetDto.baseline_test_run_id !== undefined && updateComparePresetDto.baseline_test_run_id) {
+          const hasAccess = await this.validateTestRunAccess(
+            updateComparePresetDto.baseline_test_run_id,
+            userId,
+            roles,
+          );
+          if (!hasAccess) {
+            throw new ResourceNotFoundException('TestRun', updateComparePresetDto.baseline_test_run_id);
+          }
+        }
+      }
+
+      // Build update object mapping DTO fields to entity fields
+      const updateData: Partial<CompareFilterPreset> = {};
+      if (updateComparePresetDto.name !== undefined) updateData.name = updateComparePresetDto.name;
+      if (updateComparePresetDto.description !== undefined) updateData.description = updateComparePresetDto.description;
+      if (updateComparePresetDto.preset_type !== undefined) updateData.presetType = updateComparePresetDto.preset_type;
+      if (updateComparePresetDto.series_search_text !== undefined) updateData.seriesSearchText = updateComparePresetDto.series_search_text;
+      if (updateComparePresetDto.show_percentiles !== undefined) updateData.showPercentiles = updateComparePresetDto.show_percentiles;
+      if (updateComparePresetDto.application_dashboard_id !== undefined) updateData.applicationDashboardId = updateComparePresetDto.application_dashboard_id;
+      if ((updateComparePresetDto as any).source !== undefined) updateData.source = (updateComparePresetDto as any).source;
+      if ((updateComparePresetDto as any).dashboard_label !== undefined) updateData.dashboardLabel = (updateComparePresetDto as any).dashboard_label;
+      if (updateComparePresetDto.panel_id !== undefined) updateData.panelId = updateComparePresetDto.panel_id;
+      if (updateComparePresetDto.panel_title !== undefined) updateData.panelTitle = updateComparePresetDto.panel_title;
+      if (updateComparePresetDto.baseline_test_run_id !== undefined) updateData.baselineTestRunId = updateComparePresetDto.baseline_test_run_id;
+      if ((updateComparePresetDto as any).series_config !== undefined) updateData.seriesConfig = (updateComparePresetDto as any).series_config;
+      if (updateComparePresetDto.is_global !== undefined) updateData.isGlobal = updateComparePresetDto.is_global;
+
+      await this.comparePresetRepo.update(
+        { id, createdBy: userId },
+        updateData
+      );
+
+      // Fetch updated preset
+      const updated = await this.comparePresetRepo.findOne({
+        where: { id },
+        relations: ['applicationDashboard']
+      });
+
+      if (!updated) {
+        throw new Error('Failed to fetch updated preset');
+      }
+
+      // Fetch test run data if needed
+      let testRunData = null;
+      if (updated.baselineTestRunId) {
+        try {
+          testRunData = await this.testRunRepo.findOne({
+            where: { testRunId: updated.baselineTestRunId },
+            select: ['applicationRelease', 'annotations']
+          });
+        } catch (error) {
+          this.logger.warn(`Failed to fetch test run data for ${updated.baselineTestRunId}:`, error);
+        }
+      }
+
+      return this.mapToDto(updated, updated.applicationDashboard || null, testRunData);
+    } catch (error) {
+      if (error instanceof ForbiddenException || error instanceof NotFoundException) {
+        throw error;
+      }
+      this.logger.error(`Failed to update compare preset ${id}:`, error);
+      throw new Error(`Failed to update compare preset: ${error && typeof error === 'object' && 'message' in error ? (error as Error).message : 'Unknown error'}`);
+    }
+  }
+
+  async remove(
+    id: string,
+    userId: string,
+    roles: string[] = [],
+  ): Promise<void> {
+    const isAdmin = this.authzService.isGlobalAdmin(roles);
+    this.logger.log(`Deleting compare preset: ${id}${isAdmin ? ' (admin)' : ''}`);
+
+    try {
+      // First check if user owns this preset (organization filtering handled in findOne)
+      const existing = await this.findOne(id, userId, roles);
+      if (existing.created_by !== userId) {
+        throw new ForbiddenException('You can only delete your own presets');
+      }
+
+      await this.comparePresetRepo.delete({
+        id,
+        createdBy: userId
+      });
+
+      this.logger.log(`Deleted compare preset: ${id}`);
+    } catch (error) {
+      if (error instanceof ForbiddenException || error instanceof NotFoundException) {
+        throw error;
+      }
+      this.logger.error(`Failed to delete compare preset ${id}:`, error);
+      throw new Error(`Failed to delete compare preset: ${error && typeof error === 'object' && 'message' in error ? (error as Error).message : 'Unknown error'}`);
+    }
+  }
+
+  private mapToDto(
+    preset: CompareFilterPreset,
+    dashboard: ApplicationDashboard | null,
+    testRun: Pick<TestRunEntity, 'applicationRelease' | 'annotations'> | null
+  ): ComparePresetResponseDto {
+    return {
+      id: preset.id,
+      name: preset.name,
+      description: preset.description,
+      preset_type: preset.presetType as any,
+      series_search_text: preset.seriesSearchText,
+      show_percentiles: preset.showPercentiles,
+      application_dashboard_id: preset.applicationDashboardId,
+      source: preset.source,
+      panel_id: preset.panelId,
+      panel_title: preset.panelTitle,
+      baseline_test_run_id: preset.baselineTestRunId,
+      baseline_application_release: testRun?.applicationRelease,
+      baseline_annotations: testRun?.annotations,
+      dashboard_label: preset.dashboardLabel || dashboard?.dashboardLabel,
+      series_config: preset.seriesConfig as any,
+      is_global: preset.isGlobal,
+      created_by: preset.createdBy || '',
+      created_at: preset.createdAt.toISOString(),
+      updated_at: preset.updatedAt.toISOString()
+    };
+  }
+}

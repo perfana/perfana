@@ -1,0 +1,1 @@
+export { useEventsData } from './useEventsData';

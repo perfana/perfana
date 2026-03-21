@@ -1,0 +1,1 @@
+export { useAnomalyTableHandlers } from './useAnomalyTableHandlers';

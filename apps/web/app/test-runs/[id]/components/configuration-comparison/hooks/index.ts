@@ -1,0 +1,1 @@
+export { useConfigComparison } from './useConfigComparison';

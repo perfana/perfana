@@ -1,0 +1,197 @@
+# ============================================
+# Dependencies
+# ============================================
+node_modules/
+.pnp
+.pnp.js
+.yarn/
+.pnpm-store/
+.npm/
+package-lock.json  # Use this if you prefer to keep package-lock.json out, or remove this line
+
+# ============================================
+# Production builds & compiled output
+# ============================================
+/build
+/dist
+dist/
+apps/*/dist/
+apps/*/.next/
+.next/
+out/
+*.tsbuildinfo
+tsconfig.tsbuildinfo
+*.js.map
+
+# ============================================
+# Runtime data
+# ============================================
+pids
+*.pid
+*.seed
+*.pid.lock
+
+# ============================================
+# Environment variables & secrets
+# ============================================
+.env
+.env.*
+!.env.example
+!.env.template
+*.env.local
+*.env.development.local
+*.env.test.local
+*.env.production.local
+*.pem
+*.key
+*.crt
+*.p12
+secrets/
+credentials.json
+
+# ============================================
+# Logs
+# ============================================
+logs/
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+lerna-debug.log*
+pnpm-debug.log*
+.pnpm-debug.log*
+
+# ============================================
+# OS generated files
+# ============================================
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Thumbs.db
+desktop.ini
+
+# ============================================
+# IDEs and editors
+# ============================================
+.vscode/
+!.vscode/extensions.json
+!.vscode/settings.json
+.idea/
+*.swp
+*.swo
+*.swn
+*~
+.project
+.classpath
+.c9/
+*.launch
+.settings/
+*.sublime-workspace
+*.sublime-project
+
+# ============================================
+# Testing
+# ============================================
+coverage/
+.nyc_output/
+*.lcov
+.jest/
+test-results/
+junit.xml
+
+# ============================================
+# Monorepo tools
+# ============================================
+.turbo/
+.nx/
+
+# ============================================
+# Supabase
+# ============================================
+.supabase/
+supabase/.branches
+supabase/.temp
+
+# ============================================
+# Database
+# ============================================
+*.db
+*.sqlite
+*.sqlite3
+*.db-journal
+*_data_dump.sql
+*_dump.sql
+postgres_*.sql
+supabase_*.sql
+schema_dump_*.sql
+
+# ============================================
+# Temporary files & backups
+# ============================================
+*.tmp
+*.temp
+*.bak
+*.backup
+*.cache
+.cache/
+
+# ============================================
+# Next.js specific
+# ============================================
+.vercel
+.next/
+out/
+next-env.d.ts
+
+# ============================================
+# NestJS specific
+# ============================================
+apps/api/dist/
+apps/api/.env
+
+# ============================================
+# TypeScript
+# ============================================
+*.tsbuildinfo
+.tsbuildinfo
+
+# TypeScript compiled output (build artifacts)
+*.d.ts
+!next-env.d.ts
+*.d.ts.map
+
+# Compiled JS in source directories (TypeScript should compile to dist/)
+packages/*/src/**/*.js
+apps/*/src/**/*.js
+
+# ============================================
+# SonarQube
+# ============================================
+.sonarqube/
+.scannerwork/
+sonar-scanner.properties
+
+# ============================================
+# Misc
+# ============================================
+.eslintcache
+*.code-workspace
+
+# Auto Claude data directory
+.auto-claude/
+
+# Local provisioning data (YAML files mounted at runtime)
+/provisioning/
+
+# ============================================
+# Infrastructure symlinks (resolve to ../perfana-demo)
+# ============================================
+# These are symlinks, not tracked content - the targets live in perfana-demo
+infra/grafana/dashboards
+infra/test_db
+infra/loadtest
+infra/jmeter
+infra/dynatrace-mock

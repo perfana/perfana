@@ -1,0 +1,618 @@
+### New console messages
+- [INFO] [KEYCLOAK] Refreshing token: token expired @ webpack-internal:///(app-pages-browser)/../../no...
+- [INFO] [KEYCLOAK] Token refreshed @ webpack-internal:///(app-pages-browser)/../../node_modules/keycl...
+- [INFO] [KEYCLOAK] Estimated time difference between browser and server is 0 seconds @ webpack-intern...
+- [LOG] Token refreshed successfully @ webpack-internal:///(app-pages-browser)/./lib/keycloak-auth.ts:...
+- [INFO] [KEYCLOAK] Refreshing token: token expired @ webpack-internal:///(app-pages-browser)/../../no...
+- [INFO] [KEYCLOAK] Token refreshed @ webpack-internal:///(app-pages-browser)/../../node_modules/keycl...
+- [INFO] [KEYCLOAK] Estimated time difference between browser and server is 0 seconds @ webpack-intern...
+- [LOG] Token refreshed successfully @ webpack-internal:///(app-pages-browser)/./lib/keycloak-auth.ts:...
+- [INFO] [KEYCLOAK] Refreshing token: token expired @ webpack-internal:///(app-pages-browser)/../../no...
+- [INFO] [KEYCLOAK] Token refreshed @ webpack-internal:///(app-pages-browser)/../../node_modules/keycl...
+- [INFO] [KEYCLOAK] Estimated time difference between browser and server is 0 seconds @ webpack-intern...
+- [LOG] Token refreshed successfully @ webpack-internal:///(app-pages-browser)/./lib/keycloak-auth.ts:...
+
+### Page state
+- Page URL: http://localhost:4001/test-runs/PerfanaWebshop-acc-loadTest-00011?system=PerfanaWebshop&environment=acc&workload=loadTest
+- Page Title: Perfana - Performance Analysis Platform
+- Page Snapshot:
+```yaml
+- generic [ref=e1]:
+  - button "Open Next.js Dev Tools" [ref=e7] [cursor=pointer]:
+    - img [ref=e8]
+  - alert [ref=e11]
+  - generic [ref=e12]:
+    - generic [ref=e15]:
+      - generic [ref=e16]:
+        - generic [ref=e17]:
+          - img "Perfana Logo" [ref=e763]
+          - heading "Perfana" [level=6] [ref=e764]
+        - button [ref=e21] [cursor=pointer]:
+          - img [ref=e22]
+      - separator [ref=e24]
+      - generic [ref=e25]:
+        - generic [ref=e26]:
+          - generic [ref=e27]: Overview
+          - list [ref=e28]:
+            - listitem [ref=e29]:
+              - link "Home" [ref=e765] [cursor=pointer]:
+                - /url: /
+                - img [ref=e32]
+                - generic [ref=e35]: Home
+            - listitem [ref=e36]:
+              - link "Test Runs" [ref=e766] [cursor=pointer]:
+                - /url: /test-runs
+                - img [ref=e39]
+                - generic [ref=e42]: Test Runs
+          - separator [ref=e43]
+        - generic [ref=e44]:
+          - generic [ref=e45]: Configuration
+          - list [ref=e46]:
+            - listitem [ref=e47]:
+              - link "Systems Under Test" [ref=e767] [cursor=pointer]:
+                - /url: /systems
+                - img [ref=e50]
+                - generic [ref=e53]: Systems Under Test
+            - listitem [ref=e54]:
+              - link "Integrations" [ref=e768] [cursor=pointer]:
+                - /url: /integrations
+                - img [ref=e57]
+                - generic [ref=e60]: Integrations
+            - listitem [ref=e61]:
+              - link "Settings" [ref=e769] [cursor=pointer]:
+                - /url: /settings
+                - img [ref=e64]
+                - generic [ref=e67]: Settings
+            - listitem [ref=e68]:
+              - link "Profiles" [ref=e770] [cursor=pointer]:
+                - /url: /settings/profiles
+                - img [ref=e71]
+                - generic [ref=e74]: Profiles
+      - generic [ref=e75]:
+        - separator [ref=e76]
+        - generic [ref=e77] [cursor=pointer]:
+          - img [ref=e79]
+          - generic [ref=e81]:
+            - paragraph [ref=e82]: dmoll1974
+            - text: dmoll1974@gmail.com
+    - main [ref=e84]:
+      - generic [ref=e418]:
+        - generic [ref=e420]:
+          - generic [ref=e421]:
+            - button "Back" [ref=e771] [cursor=pointer]:
+              - img [ref=e424]
+              - text: Back
+            - heading "Test Run Details" [level=1] [ref=e772]
+          - generic [ref=e427]:
+            - generic [ref=e428]:
+              - 'generic "Previous test run: PerfanaWebshop-acc-loadTest-00010" [ref=e773]':
+                - button [ref=e430] [cursor=pointer]:
+                  - img [ref=e431]
+              - 'generic "Next test run: PerfanaWebshop-acc-loadTest-00012" [ref=e774]':
+                - button [ref=e434] [cursor=pointer]:
+                  - img [ref=e435]
+            - separator [ref=e437]
+            - button "actions" [ref=e775] [cursor=pointer]:
+              - img [ref=e439]
+        - generic [ref=e441]:
+          - tablist "Test run details tabs" [ref=e776]:
+            - tab "Results" [selected] [ref=e777] [cursor=pointer]
+            - tab "Root Cause Analysis" [ref=e778] [cursor=pointer]
+            - tab "Reporting" [ref=e779] [cursor=pointer]: Reporting
+          - tabpanel "Results" [ref=e780]:
+            - generic [ref=e451]:
+              - generic [ref=e454] [cursor=pointer]:
+                - generic [ref=e455]:
+                  - heading "Test Run Info" [level=2] [ref=e781]
+                  - button [ref=e457]:
+                    - img [ref=e458]
+                - generic [ref=e460]:
+                  - generic [ref=e462]:
+                    - paragraph [ref=e464]: "00011"
+                    - paragraph [ref=e465]: Test Run ID
+                  - generic [ref=e466]:
+                    - generic [ref=e468]: Fail
+                    - generic [ref=e470]: 2.4.3-good-baseline
+                    - generic [ref=e472]: CI Build
+              - generic [ref=e476] [cursor=pointer]:
+                - generic [ref=e477]:
+                  - heading "Environment Configuration" [level=2] [ref=e782]
+                  - button [ref=e480]:
+                    - img [ref=e481]
+                - generic [ref=e483]:
+                  - generic [ref=e485]:
+                    - paragraph [ref=e487]: "0"
+                    - paragraph [ref=e488]: Config Changes
+                  - generic [ref=e489]:
+                    - generic [ref=e490]:
+                      - generic [ref=e491]: "25"
+                      - generic [ref=e492]: unchanged
+                    - generic [ref=e493]:
+                      - generic [ref=e494]: "1"
+                      - generic [ref=e495]: ignored
+                - generic: Select Test Run for Configuration Comparison
+                - generic: Filter by key
+                - generic: Filter by tags
+              - generic [ref=e499] [cursor=pointer]:
+                - generic [ref=e500]:
+                  - heading "Grafana Dashboards" [level=2] [ref=e783]
+                  - button [ref=e503]:
+                    - img [ref=e504]
+                - generic [ref=e506]:
+                  - generic [ref=e508]:
+                    - paragraph [ref=e510]: "15"
+                    - paragraph [ref=e511]: Dashboards Configured
+                  - generic [ref=e512]:
+                    - generic [ref=e514]: G1GC
+                    - generic [ref=e516]: JMeter
+                    - generic [ref=e518]: JVM
+                    - generic [ref=e520]: database
+                    - generic [ref=e522]: http connection pool
+                    - generic [ref=e524]: jfr
+              - generic [ref=e528] [cursor=pointer]:
+                - generic [ref=e529]:
+                  - heading "Performance Analysis" [level=2] [ref=e784]
+                  - button [ref=e531]:
+                    - img [ref=e532]
+                - generic [ref=e534]:
+                  - generic [ref=e536]:
+                    - paragraph [ref=e538]: Excellent
+                    - paragraph [ref=e539]: Overall Apdex
+                  - generic [ref=e540]:
+                    - generic [ref=e541]:
+                      - generic [ref=e542]: "2"
+                      - generic [ref=e543]: scenarios
+                    - generic [ref=e545]: 3 txn/s
+                    - generic [ref=e547]: 9 req/s
+                    - generic [ref=e549]: "Avg: 318.51ms"
+              - generic [ref=e553] [cursor=pointer]:
+                - generic [ref=e554]:
+                  - heading "Service Level Objectives" [level=2] [ref=e785]
+                  - button [ref=e556]:
+                    - img [ref=e557]
+                - generic [ref=e559]:
+                  - generic [ref=e561]:
+                    - paragraph [ref=e563]: "0"
+                    - paragraph [ref=e564]: Failed SLOs
+                  - generic [ref=e566]:
+                    - generic [ref=e567]: "11"
+                    - generic [ref=e568]: passed
+              - generic [ref=e571] [cursor=pointer]:
+                - generic [ref=e572]:
+                  - heading "Anomaly Detection" [level=2] [ref=e786]
+                  - button [ref=e575]:
+                    - img [ref=e576]
+                - generic [ref=e578]:
+                  - generic [ref=e580]:
+                    - paragraph [ref=e582]: "1"
+                    - paragraph [ref=e583]: Regressions Detected
+                  - generic [ref=e584]:
+                    - generic [ref=e585]:
+                      - generic [ref=e586]: "59"
+                      - generic [ref=e587]: decrease
+                    - generic [ref=e588]:
+                      - generic [ref=e589]: "2"
+                      - generic [ref=e590]: increase
+                    - generic [ref=e591]:
+                      - generic [ref=e592]: "7"
+                      - generic [ref=e593]: improvement
+                    - generic [ref=e594]:
+                      - generic [ref=e595]: "1"
+                      - generic [ref=e596]: regression
+                    - generic [ref=e598]: Feedback required
+                    - generic [ref=e599]:
+                      - generic [ref=e600]: "2"
+                      - generic [ref=e601]: unresolved
+              - generic [ref=e605]:
+                - generic [ref=e606]:
+                  - heading "AWR Reports" [level=2] [ref=e787]
+                  - button [ref=e608] [cursor=pointer]:
+                    - img [ref=e622]
+                - generic [ref=e626]:
+                  - separator [ref=e627]
+                  - generic [ref=e628]:
+                    - generic [ref=e629]:
+                      - generic [ref=e630]:
+                        - generic [ref=e631]: Select Report
+                        - generic [ref=e632]:
+                          - combobox "Select Report awr_report_26079_26081-1.html" [ref=e788] [cursor=pointer]:
+                            - paragraph [ref=e635]: awr_report_26079_26081-1.html
+                          - textbox: bdc32cca-d6bb-4aec-a09b-35f42868b1f1
+                          - img
+                          - group:
+                            - generic: Select Report
+                      - button "Upload AWR Report" [ref=e789] [cursor=pointer]:
+                        - img [ref=e637]
+                      - button "Delete AWR Report" [ref=e790] [cursor=pointer]:
+                        - img [ref=e640]
+                    - tablist "AWR analysis tabs" [ref=e791]:
+                      - tab "Overview" [ref=e792] [cursor=pointer]
+                      - tab "Top SQL" [ref=e793] [cursor=pointer]
+                      - tab "Wait Events" [ref=e794] [cursor=pointer]
+                      - tab "Insights 33" [ref=e795] [cursor=pointer]:
+                        - generic [ref=e651]:
+                          - generic [ref=e652]: Insights
+                          - generic [ref=e653]: "33"
+                      - tab "Compare" [selected] [ref=e796] [cursor=pointer]: Compare
+                    - tabpanel [ref=e656]:
+                      - generic [ref=e706]:
+                        - generic [ref=e708]:
+                          - generic [ref=e710]:
+                            - generic [ref=e753]: Select Baseline
+                            - generic [ref=e711]:
+                              - combobox [ref=e712] [cursor=pointer]:
+                                - paragraph [ref=e798]: PerfanaWebshop-acc-loadTest-00012
+                              - textbox: 3f00f1b8-f835-492a-95aa-ec37ff327324
+                              - img
+                              - group:
+                                - generic: Select Baseline
+                          - button "Compare" [ref=e799] [cursor=pointer]:
+                            - img [ref=e801]
+                            - text: Compare
+                        - generic [ref=e804]:
+                          - img [ref=e805]
+                          - generic [ref=e807]:
+                            - heading "Performance Regressed" [level=6] [ref=e808]
+                            - paragraph [ref=e809]: 17 regressions, 0 improvements detected
+                        - generic [ref=e810]:
+                          - generic [ref=e813]:
+                            - img [ref=e815]
+                            - generic [ref=e817]:
+                              - heading "17" [level=4] [ref=e818]
+                              - paragraph [ref=e819]: SQL Regressions
+                          - generic [ref=e822]:
+                            - img [ref=e824]
+                            - generic [ref=e826]:
+                              - heading "0" [level=4] [ref=e827]
+                              - paragraph [ref=e828]: SQL Improvements
+                          - generic [ref=e831]:
+                            - img [ref=e833]
+                            - generic [ref=e835]:
+                              - heading "0" [level=4] [ref=e836]
+                              - paragraph [ref=e837]: Wait Increases
+                          - generic [ref=e840]:
+                            - img [ref=e842]
+                            - generic [ref=e844]:
+                              - heading "9" [level=4] [ref=e845]
+                              - paragraph [ref=e846]: New SQL
+                        - generic [ref=e847]:
+                          - tablist [ref=e851]:
+                            - tab "Summary" [ref=e852] [cursor=pointer]
+                            - tab "SQL Changes" [active] [selected] [ref=e853] [cursor=pointer]: SQL Changes
+                            - tab "Wait Events" [ref=e854] [cursor=pointer]
+                            - tab "Load Profile" [ref=e855] [cursor=pointer]
+                            - tab "Insights" [ref=e856] [cursor=pointer]
+                          - generic [ref=e875]:
+                            - generic [ref=e876]:
+                              - heading "Regressions (17)" [level=6] [ref=e877]
+                              - generic [ref=e878]:
+                                - generic [ref=e879]:
+                                  - generic [ref=e880]:
+                                    - paragraph [ref=e881] [cursor=pointer]: 1mkvp4m5tz0yt
+                                    - paragraph [ref=e884]: Regressed (+44.4%)
+                                  - generic [ref=e885]:
+                                    - generic [ref=e886]:
+                                      - text: Elapsed
+                                      - paragraph [ref=e887]: 390.00 ms
+                                    - generic [ref=e888]:
+                                      - text: CPU
+                                      - paragraph [ref=e889]: 0.00 us
+                                    - generic [ref=e890]:
+                                      - text: Buffer Gets
+                                      - paragraph [ref=e891]: "0"
+                                    - generic [ref=e892]:
+                                      - text: Executions
+                                      - paragraph [ref=e893]: 22,108
+                                - generic [ref=e894]:
+                                  - generic [ref=e895]:
+                                    - paragraph [ref=e896] [cursor=pointer]: dgyasuu54kfwq
+                                    - paragraph [ref=e899]: Regressed (+30.5%)
+                                  - generic [ref=e900]:
+                                    - generic [ref=e901]:
+                                      - text: Elapsed
+                                      - paragraph [ref=e902]: 770.00 ms
+                                    - generic [ref=e903]:
+                                      - text: CPU
+                                      - paragraph [ref=e904]: 0.00 us
+                                    - generic [ref=e905]:
+                                      - text: Buffer Gets
+                                      - paragraph [ref=e906]: "0"
+                                    - generic [ref=e907]:
+                                      - text: Executions
+                                      - paragraph [ref=e908]: 4,375
+                                - generic [ref=e909]:
+                                  - generic [ref=e910]:
+                                    - paragraph [ref=e911] [cursor=pointer]: ad4mnz49py5zn
+                                    - paragraph [ref=e914]: Regressed (+42.3%)
+                                  - generic [ref=e915]:
+                                    - generic [ref=e916]:
+                                      - text: Elapsed
+                                      - paragraph [ref=e917]: 370.00 ms
+                                    - generic [ref=e918]:
+                                      - text: CPU
+                                      - paragraph [ref=e919]: 0.00 us
+                                    - generic [ref=e920]:
+                                      - text: Buffer Gets
+                                      - paragraph [ref=e921]: "0"
+                                    - generic [ref=e922]:
+                                      - text: Executions
+                                      - paragraph [ref=e923]: 4,811
+                                - generic [ref=e924]:
+                                  - generic [ref=e925]:
+                                    - paragraph [ref=e926] [cursor=pointer]: aqtbx0s4xt2n3
+                                    - paragraph [ref=e929]: Regressed (+53.3%)
+                                  - generic [ref=e930]:
+                                    - generic [ref=e931]:
+                                      - text: Elapsed
+                                      - paragraph [ref=e932]: 230.00 ms
+                                    - generic [ref=e933]:
+                                      - text: CPU
+                                      - paragraph [ref=e934]: 0.00 us
+                                    - generic [ref=e935]:
+                                      - text: Buffer Gets
+                                      - paragraph [ref=e936]: "0"
+                                    - generic [ref=e937]:
+                                      - text: Executions
+                                      - paragraph [ref=e938]: 7,807
+                                - generic [ref=e939]:
+                                  - generic [ref=e940]:
+                                    - paragraph [ref=e941] [cursor=pointer]: fbb89s1j2mrxy
+                                    - paragraph [ref=e944]: Regressed (+53.1%)
+                                  - generic [ref=e945]:
+                                    - generic [ref=e946]:
+                                      - text: Elapsed
+                                      - paragraph [ref=e947]: 490.00 ms
+                                    - generic [ref=e948]:
+                                      - text: CPU
+                                      - paragraph [ref=e949]: 0.00 us
+                                    - generic [ref=e950]:
+                                      - text: Buffer Gets
+                                      - paragraph [ref=e951]: "0"
+                                    - generic [ref=e952]:
+                                      - text: Executions
+                                      - paragraph [ref=e953]: 3,556
+                                - generic [ref=e954]:
+                                  - generic [ref=e955]:
+                                    - paragraph [ref=e956] [cursor=pointer]: d1vv6ts4c62ct
+                                    - paragraph [ref=e959]: Regressed (+47.9%)
+                                  - generic [ref=e960]:
+                                    - generic [ref=e961]:
+                                      - text: Elapsed
+                                      - paragraph [ref=e962]: 1.05 s
+                                    - generic [ref=e963]:
+                                      - text: CPU
+                                      - paragraph [ref=e964]: 0.00 us
+                                    - generic [ref=e965]:
+                                      - text: Buffer Gets
+                                      - paragraph [ref=e966]: "0"
+                                    - generic [ref=e967]:
+                                      - text: Executions
+                                      - paragraph [ref=e968]: 1,313
+                                - generic [ref=e969]:
+                                  - generic [ref=e970]:
+                                    - paragraph [ref=e971] [cursor=pointer]: bbjcn1233f2yr
+                                    - paragraph [ref=e974]: Regressed (+43.1%)
+                                  - generic [ref=e975]:
+                                    - generic [ref=e976]:
+                                      - text: Elapsed
+                                      - paragraph [ref=e977]: 930.00 ms
+                                    - generic [ref=e978]:
+                                      - text: CPU
+                                      - paragraph [ref=e979]: 0.00 us
+                                    - generic [ref=e980]:
+                                      - text: Buffer Gets
+                                      - paragraph [ref=e981]: "0"
+                                    - generic [ref=e982]:
+                                      - text: Executions
+                                      - paragraph [ref=e983]: 1,393
+                                - generic [ref=e984]:
+                                  - generic [ref=e985]:
+                                    - paragraph [ref=e986] [cursor=pointer]: 7298df2hk1fs5
+                                    - paragraph [ref=e989]: Regressed (+71.4%)
+                                  - generic [ref=e990]:
+                                    - generic [ref=e991]:
+                                      - text: Elapsed
+                                      - paragraph [ref=e992]: 120.00 ms
+                                    - generic [ref=e993]:
+                                      - text: CPU
+                                      - paragraph [ref=e994]: 0.00 us
+                                    - generic [ref=e995]:
+                                      - text: Buffer Gets
+                                      - paragraph [ref=e996]: "0"
+                                    - generic [ref=e997]:
+                                      - text: Executions
+                                      - paragraph [ref=e998]: 8,848
+                                - generic [ref=e999]:
+                                  - generic [ref=e1000]:
+                                    - paragraph [ref=e1001] [cursor=pointer]: 9jgss3kjna25x
+                                    - paragraph [ref=e1004]: Regressed (+47.6%)
+                                  - generic [ref=e1005]:
+                                    - generic [ref=e1006]:
+                                      - text: Elapsed
+                                      - paragraph [ref=e1007]: 310.00 ms
+                                    - generic [ref=e1008]:
+                                      - text: CPU
+                                      - paragraph [ref=e1009]: 0.00 us
+                                    - generic [ref=e1010]:
+                                      - text: Buffer Gets
+                                      - paragraph [ref=e1011]: "0"
+                                    - generic [ref=e1012]:
+                                      - text: Executions
+                                      - paragraph [ref=e1013]: 3,444
+                                - generic [ref=e1014]:
+                                  - generic [ref=e1015]:
+                                    - paragraph [ref=e1016] [cursor=pointer]: fgbqptsgj7yr7
+                                    - paragraph [ref=e1019]: Regressed (+50.0%)
+                                  - generic [ref=e1020]:
+                                    - generic [ref=e1021]:
+                                      - text: Elapsed
+                                      - paragraph [ref=e1022]: 30.00 ms
+                                    - generic [ref=e1023]:
+                                      - text: CPU
+                                      - paragraph [ref=e1024]: 0.00 us
+                                    - generic [ref=e1025]:
+                                      - text: Buffer Gets
+                                      - paragraph [ref=e1026]: "0"
+                                    - generic [ref=e1027]:
+                                      - text: Executions
+                                      - paragraph [ref=e1028]: 27,504
+                              - paragraph [ref=e1029]: ... and 7 more
+                            - generic [ref=e1030]:
+                              - heading "New Statements (9)" [level=6] [ref=e1031]
+                              - generic [ref=e1032]:
+                                - generic [ref=e1033]:
+                                  - generic [ref=e1034]:
+                                    - paragraph [ref=e1035] [cursor=pointer]: 9a1jx9m6fh816
+                                    - paragraph [ref=e1038]: New
+                                  - generic [ref=e1039]:
+                                    - generic [ref=e1040]:
+                                      - text: Elapsed
+                                      - paragraph [ref=e1041]: 620.00 ms
+                                    - generic [ref=e1042]:
+                                      - text: CPU
+                                      - paragraph [ref=e1043]: 0.00 us
+                                    - generic [ref=e1044]:
+                                      - text: Buffer Gets
+                                      - paragraph [ref=e1045]: "0"
+                                    - generic [ref=e1046]:
+                                      - text: Executions
+                                      - paragraph [ref=e1047]: 1,393
+                                - generic [ref=e1048]:
+                                  - generic [ref=e1049]:
+                                    - paragraph [ref=e1050] [cursor=pointer]: 97ur000ngjdd4
+                                    - paragraph [ref=e1053]: New
+                                  - generic [ref=e1054]:
+                                    - generic [ref=e1055]:
+                                      - text: Elapsed
+                                      - paragraph [ref=e1056]: 570.00 ms
+                                    - generic [ref=e1057]:
+                                      - text: CPU
+                                      - paragraph [ref=e1058]: 0.00 us
+                                    - generic [ref=e1059]:
+                                      - text: Buffer Gets
+                                      - paragraph [ref=e1060]: "0"
+                                    - generic [ref=e1061]:
+                                      - text: Executions
+                                      - paragraph [ref=e1062]: 1,313
+                                - generic [ref=e1063]:
+                                  - generic [ref=e1064]:
+                                    - paragraph [ref=e1065] [cursor=pointer]: ff05pm82n12br
+                                    - paragraph [ref=e1068]: New
+                                  - generic [ref=e1069]:
+                                    - generic [ref=e1070]:
+                                      - text: Elapsed
+                                      - paragraph [ref=e1071]: 1.09 s
+                                    - generic [ref=e1072]:
+                                      - text: CPU
+                                      - paragraph [ref=e1073]: 0.00 us
+                                    - generic [ref=e1074]:
+                                      - text: Buffer Gets
+                                      - paragraph [ref=e1075]: "0"
+                                    - generic [ref=e1076]:
+                                      - text: Executions
+                                      - paragraph [ref=e1077]: "509"
+                                - generic [ref=e1078]:
+                                  - generic [ref=e1079]:
+                                    - paragraph [ref=e1080] [cursor=pointer]: 024bgr6fppq7y
+                                    - paragraph [ref=e1083]: New
+                                  - generic [ref=e1084]:
+                                    - generic [ref=e1085]:
+                                      - text: Elapsed
+                                      - paragraph [ref=e1086]: 0.00 us
+                                    - generic [ref=e1087]:
+                                      - text: CPU
+                                      - paragraph [ref=e1088]: 0.00 us
+                                    - generic [ref=e1089]:
+                                      - text: Buffer Gets
+                                      - paragraph [ref=e1090]: "0"
+                                    - generic [ref=e1091]:
+                                      - text: Executions
+                                      - paragraph [ref=e1092]: 106,081
+                                - generic [ref=e1093]:
+                                  - generic [ref=e1094]:
+                                    - paragraph [ref=e1095] [cursor=pointer]: by7064aqm8w3b
+                                    - paragraph [ref=e1098]: New
+                                  - generic [ref=e1099]:
+                                    - generic [ref=e1100]:
+                                      - text: Elapsed
+                                      - paragraph [ref=e1101]: 470.00 ms
+                                    - generic [ref=e1102]:
+                                      - text: CPU
+                                      - paragraph [ref=e1103]: 0.00 us
+                                    - generic [ref=e1104]:
+                                      - text: Buffer Gets
+                                      - paragraph [ref=e1105]: "0"
+                                    - generic [ref=e1106]:
+                                      - text: Executions
+                                      - paragraph [ref=e1107]: "983"
+                                - generic [ref=e1108]:
+                                  - generic [ref=e1109]:
+                                    - paragraph [ref=e1110] [cursor=pointer]: 3mmcwuyvjx2d9
+                                    - paragraph [ref=e1113]: New
+                                  - generic [ref=e1114]:
+                                    - generic [ref=e1115]:
+                                      - text: Elapsed
+                                      - paragraph [ref=e1116]: 940.00 ms
+                                    - generic [ref=e1117]:
+                                      - text: CPU
+                                      - paragraph [ref=e1118]: 0.00 us
+                                    - generic [ref=e1119]:
+                                      - text: Buffer Gets
+                                      - paragraph [ref=e1120]: "0"
+                                    - generic [ref=e1121]:
+                                      - text: Executions
+                                      - paragraph [ref=e1122]: 9,148
+                                - generic [ref=e1123]:
+                                  - generic [ref=e1124]:
+                                    - paragraph [ref=e1125] [cursor=pointer]: 3p65tbkgdcdjs
+                                    - paragraph [ref=e1128]: New
+                                  - generic [ref=e1129]:
+                                    - generic [ref=e1130]:
+                                      - text: Elapsed
+                                      - paragraph [ref=e1131]: 380.00 ms
+                                    - generic [ref=e1132]:
+                                      - text: CPU
+                                      - paragraph [ref=e1133]: 0.00 us
+                                    - generic [ref=e1134]:
+                                      - text: Buffer Gets
+                                      - paragraph [ref=e1135]: "0"
+                                    - generic [ref=e1136]:
+                                      - text: Executions
+                                      - paragraph [ref=e1137]: "1"
+                                - generic [ref=e1138]:
+                                  - generic [ref=e1139]:
+                                    - paragraph [ref=e1140] [cursor=pointer]: b09gdqbvp8ka9
+                                    - paragraph [ref=e1143]: New
+                                  - generic [ref=e1144]:
+                                    - generic [ref=e1145]:
+                                      - text: Elapsed
+                                      - paragraph [ref=e1146]: 290.00 ms
+                                    - generic [ref=e1147]:
+                                      - text: CPU
+                                      - paragraph [ref=e1148]: 0.00 us
+                                    - generic [ref=e1149]:
+                                      - text: Buffer Gets
+                                      - paragraph [ref=e1150]: "0"
+                                    - generic [ref=e1151]:
+                                      - text: Executions
+                                      - paragraph [ref=e1152]: "4"
+                                - generic [ref=e1153]:
+                                  - generic [ref=e1154]:
+                                    - paragraph [ref=e1155] [cursor=pointer]: 0chzg3jpw3pq9
+                                    - paragraph [ref=e1158]: New
+                                  - generic [ref=e1159]:
+                                    - generic [ref=e1160]:
+                                      - text: Elapsed
+                                      - paragraph [ref=e1161]: 330.00 ms
+                                    - generic [ref=e1162]:
+                                      - text: CPU
+                                      - paragraph [ref=e1163]: 0.00 us
+                                    - generic [ref=e1164]:
+                                      - text: Buffer Gets
+                                      - paragraph [ref=e1165]: "0"
+                                    - generic [ref=e1166]:
+                                      - text: Executions
+                                      - paragraph [ref=e1167]: "2"
+  - generic [ref=e621]: "DB Time(s):"
+  - img [ref=e704]
+```

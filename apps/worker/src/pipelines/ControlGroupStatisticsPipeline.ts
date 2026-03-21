@@ -1,0 +1,467 @@
+import { BasePipelineTypeORM } from './BasePipelineTypeORM.js';
+import { PipelineResult } from '../types/pipeline.js';
+import { EntityManager } from 'typeorm';
+
+export interface ControlGroupStatisticsInput {
+  controlGroupIds?: string[];  // Optional: specific control groups to process
+  testRunIds?: string[];        // Optional: process control groups for these test runs
+}
+
+/**
+ * Control Group Statistics Pipeline
+ *
+ * This pipeline calculates statistics for control groups, aggregating metrics
+ * from the control test runs. It's separated from control group creation to
+ * match the Python architecture where statistics calculation is a separate step.
+ *
+ * The statistics are calculated at the metric level but using the shared control
+ * runs from the test-run-level control group.
+ */
+export class ControlGroupStatisticsPipeline extends BasePipelineTypeORM {
+  validateInput(input: unknown): boolean {
+    if (!input || typeof input !== 'object') {return false;}
+    const typedInput = input as any;
+
+    // Must have either controlGroupIds or testRunIds
+    const hasControlGroupIds = Array.isArray(typedInput.controlGroupIds) &&
+                              typedInput.controlGroupIds.length > 0;
+    const hasTestRunIds = Array.isArray(typedInput.testRunIds) &&
+                         typedInput.testRunIds.length > 0;
+
+    return hasControlGroupIds || hasTestRunIds;
+  }
+
+  async execute(input: unknown): Promise<PipelineResult> {
+    const startTime = Date.now();
+
+    if (!this.validateInput(input)) {
+      return this.createErrorResult(
+        'Invalid input: expected { controlGroupIds?: string[], testRunIds?: string[] }',
+        'INVALID_INPUT'
+      );
+    }
+
+    const { controlGroupIds, testRunIds } = input as ControlGroupStatisticsInput;
+
+    try {
+      // If testRunIds provided, use them as controlGroupIds (they're the same in Python pattern)
+      const groupIds = controlGroupIds || testRunIds || [];
+
+      this.logger.info(`Starting control group statistics calculation for ${groupIds.length} groups`);
+
+      // Cleanup stale data before processing
+      await this.cleanupStaleApplicationDashboards(['ds_control_group_statistics']);
+
+      const result = await this.withTransaction(async (manager: EntityManager) => {
+        // Process statistics for each control group
+        let totalStatisticsCreated = 0;
+
+        for (const controlGroupId of groupIds) {
+          const statsCount = await this.calculateStatisticsForControlGroup(manager, controlGroupId);
+          totalStatisticsCreated += statsCount;
+        }
+
+        return { totalStatisticsCreated };
+      });
+
+      const duration = Date.now() - startTime;
+      this.logPerformance('control-group-statistics', startTime, {
+        controlGroups: groupIds.length,
+        statisticsCreated: result.totalStatisticsCreated
+      });
+
+      this.logger.info(`✅ Control group statistics completed: ${result.totalStatisticsCreated} statistics created for ${groupIds.length} control groups in ${duration}ms`);
+
+      return this.createSuccessResult({
+        statisticsCreated: result.totalStatisticsCreated,
+        controlGroups: groupIds.length
+      }, duration);
+
+    } catch (error) {
+      const duration = Date.now() - startTime;
+      this.logError(error as Error, { controlGroupIds, testRunIds });
+      return this.createErrorResult(
+        error as Error,
+        'CONTROL_GROUP_STATISTICS_FAILED',
+        { controlGroupIds, testRunIds },
+        duration
+      );
+    }
+  }
+
+  /**
+   * Calculate statistics for a single control group
+   * This aggregates metrics from all control test runs for each unique metric
+   */
+  private async calculateStatisticsForControlGroup(
+    manager: EntityManager,
+    controlGroupId: string
+  ): Promise<number> {
+
+    this.logger.info(`📊 Processing control group: ${controlGroupId}`);
+
+    // First get the control group information
+    const controlGroupQuery = `
+      SELECT
+        control_group_id,
+        system_under_test_id,
+        workload,
+        test_environment,
+        test_runs,
+        n_test_runs,
+        organization_id,
+        team_id
+      FROM ds_control_groups
+      WHERE control_group_id = $1
+    `;
+
+    const cgResult = await manager.query(controlGroupQuery, [controlGroupId]);
+    if (cgResult.length === 0) {
+      this.logger.warn(`⚠️ Control group not found: ${controlGroupId}`);
+      this.logger.warn('💡 This could mean:');
+      this.logger.warn('   1. ControlGroupsPipeline hasn\'t run yet for this test run');
+      this.logger.warn('   2. Control group was deleted');
+      this.logger.warn('   3. Incorrect control_group_id provided');
+      return 0;
+    }
+
+    const controlGroup = cgResult[0];
+    this.logger.info(`✅ Found control group: ${controlGroupId}`);
+    this.logger.info(`   📝 System: ${controlGroup.system_under_test_id}`);
+    this.logger.info(`   📝 Environment: ${controlGroup.test_environment}`);
+    this.logger.info(`   📝 Workload: ${controlGroup.workload}`);
+    this.logger.info(`   📝 Control runs: ${controlGroup.n_test_runs}`);
+
+    // If no control runs, skip statistics calculation
+    if (!controlGroup.test_runs || controlGroup.test_runs.length === 0) {
+      this.logger.warn(`⚠️ Control group ${controlGroupId} has no control runs`);
+      this.logger.warn('💡 This could mean:');
+      this.logger.warn('   1. No previous test runs exist for this configuration');
+      this.logger.warn('   2. Control group was just created (first test run)');
+      return 0;
+    }
+
+    this.logger.info(`🔍 Control runs to aggregate: ${controlGroup.test_runs.join(', ')}`);
+
+    // Check if there are metric statistics for the control runs
+    const metricStatsCheckQuery = `
+      SELECT COUNT(*) as count
+      FROM ds_metric_statistics
+      WHERE test_run_id = ANY($1::varchar[])
+    `;
+    const metricStatsCount = await manager.query(metricStatsCheckQuery, [controlGroup.test_runs]);
+    const totalMetricStats = parseInt(metricStatsCount[0]?.count || '0', 10);
+
+    this.logger.info(`🔍 Found ${totalMetricStats} metric statistics across control runs`);
+
+    if (totalMetricStats === 0) {
+      this.logger.warn(`⚠️ No metric statistics found for control runs`);
+      this.logger.warn('💡 This could mean:');
+      this.logger.warn('   1. StatisticsPipeline hasn\'t run for the control test runs');
+      this.logger.warn('   2. Control test runs have no metrics data');
+      return 0;
+    }
+
+
+    // Calculate statistics using TimescaleDB aggregations on raw metrics data
+    // OPTIMIZED: Aggregate raw metrics FIRST, then join metadata to avoid cartesian explosion
+    const statisticsQuery = `
+      WITH raw_metrics_aggregated AS (
+        -- FIRST: Aggregate raw metric data points directly (no join yet)
+        -- This avoids the cartesian product between metadata and raw data
+        SELECT
+          m.application_dashboard_id,
+          m.panel_id,
+          m.metric_name,
+          AVG(m.value) as mean,
+          MIN(m.value) as min_value,
+          MAX(m.value) as max_value,
+          STDDEV_POP(m.value) as std_dev,
+          percentile_agg(m.value) as pct_agg,
+          (STDDEV_POP(m.value) < 0.0001) as is_constant,
+          (COUNT(m.value) = 0) as all_missing
+        FROM ds_metrics m
+        INNER JOIN test_runs tr ON m.test_run_id = tr.test_run_id
+        WHERE m.test_run_id = ANY($2::varchar[])
+          AND m.value IS NOT NULL
+          AND (
+            m.application_dashboard_id IN (
+              SELECT id FROM application_dashboards ad
+              WHERE ad.organization_id = tr.organization_id OR ad.organization_id IS NULL
+            )
+            OR m.application_dashboard_id IN (
+              SELECT DISTINCT application_dashboard_id FROM dynatrace_queries dq
+              WHERE dq.organization_id = tr.organization_id OR dq.organization_id IS NULL
+            )
+          )
+        GROUP BY m.application_dashboard_id, m.panel_id, m.metric_name
+      ),
+
+      control_metrics_metadata AS (
+        -- Get DISTINCT metadata per metric (not per test run)
+        SELECT DISTINCT ON (ms.application_dashboard_id, ms.panel_id, ms.metric_name)
+          ms.application_dashboard_id,
+          ms.panel_id,
+          ms.metric_name,
+          ms.dashboard_uid,
+          ms.dashboard_label,
+          ms.panel_title,
+          ms.unit,
+          ms.benchmark_id
+        FROM ds_metric_statistics ms
+        INNER JOIN test_runs tr ON ms.test_run_id = tr.test_run_id
+        WHERE ms.test_run_id = ANY($2::varchar[])
+          AND (
+            ms.application_dashboard_id IN (
+              SELECT id FROM application_dashboards ad
+              WHERE ad.organization_id = tr.organization_id OR ad.organization_id IS NULL
+            )
+            OR ms.application_dashboard_id IN (
+              SELECT DISTINCT application_dashboard_id FROM dynatrace_queries dq
+              WHERE dq.organization_id = tr.organization_id OR dq.organization_id IS NULL
+            )
+          )
+        ORDER BY ms.application_dashboard_id, ms.panel_id, ms.metric_name, ms.dashboard_uid NULLS LAST
+      ),
+
+      metadata_aggregated AS (
+        -- Aggregate metadata fields across control runs
+        SELECT
+          ms.application_dashboard_id,
+          ms.panel_id,
+          ms.metric_name,
+          AVG(ms.last_value) as last_value,
+          AVG(ms.count) as count,
+          AVG(ms.n_missing) as n_missing,
+          AVG(ms.n_non_zero) as n_non_zero,
+          AVG(ms.n_missing::float / NULLIF(ms.count, 0) * 100) as pct_missing,
+          array_agg(DISTINCT ms.benchmark_id) FILTER (WHERE ms.benchmark_id IS NOT NULL) as benchmark_ids
+        FROM ds_metric_statistics ms
+        INNER JOIN test_runs tr ON ms.test_run_id = tr.test_run_id
+        WHERE ms.test_run_id = ANY($2::varchar[])
+          AND (
+            ms.application_dashboard_id IN (
+              SELECT id FROM application_dashboards ad
+              WHERE ad.organization_id = tr.organization_id OR ad.organization_id IS NULL
+            )
+            OR ms.application_dashboard_id IN (
+              SELECT DISTINCT application_dashboard_id FROM dynatrace_queries dq
+              WHERE dq.organization_id = tr.organization_id OR dq.organization_id IS NULL
+            )
+          )
+        GROUP BY ms.application_dashboard_id, ms.panel_id, ms.metric_name
+      ),
+
+      final_stats AS (
+        -- Join pre-aggregated raw metrics with metadata (small join: ~800 rows x ~800 rows)
+        SELECT
+          r.application_dashboard_id,
+          r.panel_id,
+          r.metric_name,
+          m.dashboard_uid,
+          m.dashboard_label,
+          m.panel_title,
+          m.unit,
+          ma.benchmark_ids,
+          r.mean,
+          r.min_value,
+          r.max_value,
+          r.std_dev,
+          ma.last_value,
+          ma.count,
+          ma.n_missing,
+          ma.n_non_zero,
+          r.is_constant,
+          r.all_missing,
+          ma.pct_missing,
+          -- Approximate percentiles using TimescaleDB toolkit (O(n) single pass)
+          approx_percentile(0.50, r.pct_agg) as median,
+          approx_percentile(0.10, r.pct_agg) as q10,
+          approx_percentile(0.25, r.pct_agg) as q25,
+          approx_percentile(0.75, r.pct_agg) as q75,
+          approx_percentile(0.90, r.pct_agg) as q90,
+          approx_percentile(0.95, r.pct_agg) as q95,
+          approx_percentile(0.99, r.pct_agg) as q99,
+          -- IQR and IDR from approximate percentiles
+          approx_percentile(0.75, r.pct_agg) - approx_percentile(0.25, r.pct_agg) as iqr,
+          approx_percentile(0.90, r.pct_agg) - approx_percentile(0.10, r.pct_agg) as idr
+        FROM raw_metrics_aggregated r
+        JOIN control_metrics_metadata m ON
+          m.application_dashboard_id = r.application_dashboard_id AND
+          m.panel_id = r.panel_id AND
+          m.metric_name = r.metric_name
+        JOIN metadata_aggregated ma ON
+          ma.application_dashboard_id = r.application_dashboard_id AND
+          ma.panel_id = r.panel_id AND
+          ma.metric_name = r.metric_name
+        WHERE r.pct_agg IS NOT NULL
+      )
+
+      -- Insert or update the control group statistics
+      INSERT INTO ds_control_group_statistics (
+        control_group_id,
+        application_dashboard_id,
+        panel_id,
+        metric_name,
+        test_run_id,
+        dashboard_uid,
+        dashboard_label,
+        panel_title,
+        unit,
+        benchmark_ids,
+        mean,
+        median,
+        min_value,
+        max_value,
+        std_dev,
+        last_value,
+        count,
+        n_missing,
+        n_non_zero,
+        q10,
+        q25,
+        q75,
+        q90,
+        q95,
+        q99,
+        iqr,
+        idr,
+        is_constant,
+        all_missing,
+        pct_missing,
+        updated_at,
+        organization_id,
+        team_id,
+        created_by,
+        updated_by
+      )
+      SELECT
+        $1 as control_group_id,
+        application_dashboard_id,
+        panel_id,
+        metric_name,
+        $1 as test_run_id,  -- Use control_group_id as test_run_id
+        COALESCE(dashboard_uid, ''),
+        COALESCE(dashboard_label, ''),
+        COALESCE(panel_title, ''),
+        COALESCE(unit, ''),
+        COALESCE(benchmark_ids, ARRAY[]::uuid[]),
+        COALESCE(mean, 0),
+        COALESCE(median, 0),
+        COALESCE(min_value, 0),
+        COALESCE(max_value, 0),
+        COALESCE(std_dev, 0),
+        last_value,
+        COALESCE(count, 0),
+        COALESCE(n_missing, 0),
+        COALESCE(n_non_zero, 0),
+        COALESCE(q10, 0),
+        COALESCE(q25, 0),
+        COALESCE(q75, 0),
+        COALESCE(q90, 0),
+        COALESCE(q95, 0),
+        COALESCE(q99, 0),
+        COALESCE(iqr, 0),
+        COALESCE(idr, 0),
+        COALESCE(is_constant, false),
+        COALESCE(all_missing, false),
+        COALESCE(pct_missing, 0),
+        NOW(),
+        $3 as organization_id,
+        $4 as team_id,
+        'worker-pipeline' as created_by,
+        'worker-pipeline' as updated_by
+      FROM final_stats
+      ON CONFLICT (control_group_id, application_dashboard_id, panel_id, metric_name)
+      DO UPDATE SET
+        test_run_id = EXCLUDED.test_run_id,
+        dashboard_uid = EXCLUDED.dashboard_uid,
+        dashboard_label = EXCLUDED.dashboard_label,
+        panel_title = EXCLUDED.panel_title,
+        unit = EXCLUDED.unit,
+        benchmark_ids = EXCLUDED.benchmark_ids,
+        mean = EXCLUDED.mean,
+        median = EXCLUDED.median,
+        min_value = EXCLUDED.min_value,
+        max_value = EXCLUDED.max_value,
+        std_dev = EXCLUDED.std_dev,
+        last_value = EXCLUDED.last_value,
+        count = EXCLUDED.count,
+        n_missing = EXCLUDED.n_missing,
+        n_non_zero = EXCLUDED.n_non_zero,
+        q10 = EXCLUDED.q10,
+        q25 = EXCLUDED.q25,
+        q75 = EXCLUDED.q75,
+        q90 = EXCLUDED.q90,
+        q95 = EXCLUDED.q95,
+        q99 = EXCLUDED.q99,
+        iqr = EXCLUDED.iqr,
+        idr = EXCLUDED.idr,
+        is_constant = EXCLUDED.is_constant,
+        all_missing = EXCLUDED.all_missing,
+        pct_missing = EXCLUDED.pct_missing,
+        updated_at = NOW(),
+        organization_id = EXCLUDED.organization_id,
+        team_id = EXCLUDED.team_id,
+        updated_by = EXCLUDED.updated_by
+    `;
+
+    this.logger.info(`🚀 Executing control group statistics aggregation INSERT...`);
+
+    // First, count how many rows the aggregation would produce
+    const countQuery = `
+      WITH control_metrics_metadata AS (
+        SELECT
+          ms.application_dashboard_id,
+          ms.panel_id,
+          ms.metric_name
+        FROM ds_metric_statistics ms
+        WHERE ms.test_run_id = ANY($1::varchar[])
+      ),
+      raw_metrics AS (
+        SELECT
+          application_dashboard_id,
+          panel_id,
+          metric_name
+        FROM ds_metrics
+        WHERE test_run_id = ANY($1::varchar[])
+          AND value IS NOT NULL
+      )
+      SELECT COUNT(DISTINCT (m.application_dashboard_id, m.panel_id, m.metric_name))::integer as expected_rows
+      FROM control_metrics_metadata m
+      WHERE EXISTS (
+        SELECT 1 FROM raw_metrics r
+        WHERE r.application_dashboard_id = m.application_dashboard_id
+        AND r.panel_id = m.panel_id
+        AND r.metric_name = m.metric_name
+      )
+    `;
+
+    const expectedCount = await manager.query(countQuery, [controlGroup.test_runs]);
+    const expectedRows = expectedCount[0]?.expected_rows || 0;
+
+    this.logger.info(`📊 Aggregation will process ${expectedRows} unique metrics`);
+
+    const result = await manager.query(statisticsQuery, [controlGroupId, controlGroup.test_runs, controlGroup.organization_id || null, controlGroup.team_id || null]);
+
+    // For INSERT with ON CONFLICT, TypeORM returns the pg driver result with rowCount
+    const rowCount = (result).rowCount || 0;
+
+    this.logger.info(`✅ Control group statistics aggregation completed`);
+    this.logger.info(`   📝 Processed: ${expectedRows} unique metrics`);
+    this.logger.info(`   📝 Inserted: ${rowCount} new statistic records`);
+    this.logger.info(`   📊 Source: ${totalMetricStats} metric statistics from ${controlGroup.n_test_runs} control runs`);
+
+    if (rowCount === 0 && expectedRows > 0) {
+      this.logger.info(`ℹ️  All ${expectedRows} statistics already exist (ON CONFLICT updated existing records)`);
+    } else if (rowCount === 0 && expectedRows === 0) {
+      this.logger.warn(`⚠️ No metrics were available to aggregate`);
+    } else if (rowCount < expectedRows) {
+      this.logger.info(`ℹ️  Inserted ${rowCount} new records, updated ${expectedRows - rowCount} existing records`);
+    } else {
+      this.logger.info(`✅ All ${rowCount} records are new`);
+    }
+
+    return rowCount;
+  }
+}

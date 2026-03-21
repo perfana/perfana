@@ -1,0 +1,2361 @@
+{
+  "test_run_id": "MyAfterburner-acc-loadTest-00002",
+  "time_range": {
+    "from": "2025-09-18T07:18:23.359Z",
+    "to": "2025-09-18T07:24:31.916Z",
+    "from_ms": 1758179903359,
+    "to_ms": 1758180271916
+  },
+  "grafana_config": {
+    "working_url": "http://grafana:3000",
+    "org_id": "1"
+  },
+  "target_dashboards": [
+    "gatling-overview-influxdb",
+    "spring-boot-kubernetes-jvm-mimir"
+  ],
+  "fetched_at": "2025-09-25T18:19:37.324Z",
+  "dashboards": {
+    "gatling-overview-influxdb": {
+      "dashboard_info": {
+        "uid": "gatling-overview-influxdb",
+        "title": "Gatling",
+        "tags": [
+          "perfana",
+          "perfana-template",
+          "perfana-performance-test-tool",
+          "gatling"
+        ],
+        "panel_count": 19
+      },
+      "panels": {
+        "3": {
+          "panel_info": {
+            "panel_id": 3,
+            "panel_title": "Active users",
+            "dashboard_label": "Gatling AfterburnerBasicSimulation",
+            "targets": [
+              {
+                "alias": "Total",
+                "datasource": {
+                  "type": "influxdb",
+                  "uid": "influxdb-gatling"
+                },
+                "groupBy": [
+                  {
+                    "params": [
+                      "$__interval"
+                    ],
+                    "type": "time"
+                  },
+                  {
+                    "params": [
+                      "nodeName::tag"
+                    ],
+                    "type": "tag"
+                  },
+                  {
+                    "params": [
+                      "scenario::tag"
+                    ],
+                    "type": "tag"
+                  },
+                  {
+                    "params": [
+                      "null"
+                    ],
+                    "type": "fill"
+                  }
+                ],
+                "hide": false,
+                "measurement": "users",
+                "orderByTime": "ASC",
+                "policy": "30d",
+                "query": "select sum(value) from (SELECT max(\"active\") as value FROM \"30d\".\"users\" WHERE (\"testEnvironment\"::tag =~ /^$test_environment$/ AND \"systemUnderTest\"::tag =~ /^$system_under_test$/) AND $timeFilter GROUP BY time($__interval), \"nodeName\"::tag, \"scenario\"::tag) where $timeFilter group by time($__interval)",
+                "rawQuery": true,
+                "refId": "A",
+                "resultFormat": "time_series",
+                "select": [
+                  [
+                    {
+                      "params": [
+                        "active"
+                      ],
+                      "type": "field"
+                    },
+                    {
+                      "params": [],
+                      "type": "max"
+                    }
+                  ]
+                ],
+                "tags": [
+                  {
+                    "key": "testEnvironment::tag",
+                    "operator": "=~",
+                    "value": "/^$test_environment$/"
+                  },
+                  {
+                    "condition": "AND",
+                    "key": "systemUnderTest::tag",
+                    "operator": "=~",
+                    "value": "/^$system_under_test$/"
+                  }
+                ]
+              },
+              {
+                "alias": "Users for load generator: $tag_nodeName",
+                "datasource": {
+                  "type": "influxdb",
+                  "uid": "influxdb-gatling"
+                },
+                "groupBy": [
+                  {
+                    "params": [
+                      "$__interval"
+                    ],
+                    "type": "time"
+                  },
+                  {
+                    "params": [
+                      "nodeName::tag"
+                    ],
+                    "type": "tag"
+                  },
+                  {
+                    "params": [
+                      "null"
+                    ],
+                    "type": "fill"
+                  }
+                ],
+                "hide": false,
+                "measurement": "users",
+                "orderByTime": "ASC",
+                "policy": "30d",
+                "query": "select sum(value) from (SELECT max(\"active\") as value FROM \"30d\".\"users\" WHERE (\"testEnvironment\"::tag =~ /^$test_environment$/ AND \"systemUnderTest\"::tag =~ /^$system_under_test$/) AND $timeFilter GROUP BY time($__interval), \"nodeName\"::tag, \"scenario\"::tag) where $timeFilter group by time($__interval), \"nodeName\"",
+                "rawQuery": true,
+                "refId": "B",
+                "resultFormat": "time_series",
+                "select": [
+                  [
+                    {
+                      "params": [
+                        "active"
+                      ],
+                      "type": "field"
+                    },
+                    {
+                      "params": [],
+                      "type": "mean"
+                    }
+                  ]
+                ],
+                "tags": [
+                  {
+                    "key": "testEnvironment::tag",
+                    "operator": "=~",
+                    "value": "/^$test_environment$/"
+                  },
+                  {
+                    "condition": "AND",
+                    "key": "systemUnderTest::tag",
+                    "operator": "=~",
+                    "value": "/^$system_under_test$/"
+                  }
+                ]
+              }
+            ]
+          },
+          "grafana_query": {
+            "queries": [
+              {
+                "alias": "Total",
+                "datasource": {
+                  "type": "influxdb",
+                  "uid": "influxdb-gatling"
+                },
+                "groupBy": [
+                  {
+                    "params": [
+                      "$__interval"
+                    ],
+                    "type": "time"
+                  },
+                  {
+                    "params": [
+                      "nodeName::tag"
+                    ],
+                    "type": "tag"
+                  },
+                  {
+                    "params": [
+                      "scenario::tag"
+                    ],
+                    "type": "tag"
+                  },
+                  {
+                    "params": [
+                      "null"
+                    ],
+                    "type": "fill"
+                  }
+                ],
+                "hide": false,
+                "measurement": "users",
+                "orderByTime": "ASC",
+                "policy": "30d",
+                "query": "select sum(value) from (SELECT max(\"active\") as value FROM \"30d\".\"users\" WHERE (\"testEnvironment\"::tag =~ /^$test_environment$/ AND \"systemUnderTest\"::tag =~ /^$system_under_test$/) AND $timeFilter GROUP BY time($__interval), \"nodeName\"::tag, \"scenario\"::tag) where $timeFilter group by time($__interval)",
+                "rawQuery": true,
+                "refId": "A",
+                "resultFormat": "time_series",
+                "select": [
+                  [
+                    {
+                      "params": [
+                        "active"
+                      ],
+                      "type": "field"
+                    },
+                    {
+                      "params": [],
+                      "type": "max"
+                    }
+                  ]
+                ],
+                "tags": [
+                  {
+                    "key": "testEnvironment::tag",
+                    "operator": "=~",
+                    "value": "/^$test_environment$/"
+                  },
+                  {
+                    "condition": "AND",
+                    "key": "systemUnderTest::tag",
+                    "operator": "=~",
+                    "value": "/^$system_under_test$/"
+                  }
+                ],
+                "intervalMs": 15000,
+                "maxDataPoints": 300
+              },
+              {
+                "alias": "Users for load generator: $tag_nodeName",
+                "datasource": {
+                  "type": "influxdb",
+                  "uid": "influxdb-gatling"
+                },
+                "groupBy": [
+                  {
+                    "params": [
+                      "$__interval"
+                    ],
+                    "type": "time"
+                  },
+                  {
+                    "params": [
+                      "nodeName::tag"
+                    ],
+                    "type": "tag"
+                  },
+                  {
+                    "params": [
+                      "null"
+                    ],
+                    "type": "fill"
+                  }
+                ],
+                "hide": false,
+                "measurement": "users",
+                "orderByTime": "ASC",
+                "policy": "30d",
+                "query": "select sum(value) from (SELECT max(\"active\") as value FROM \"30d\".\"users\" WHERE (\"testEnvironment\"::tag =~ /^$test_environment$/ AND \"systemUnderTest\"::tag =~ /^$system_under_test$/) AND $timeFilter GROUP BY time($__interval), \"nodeName\"::tag, \"scenario\"::tag) where $timeFilter group by time($__interval), \"nodeName\"",
+                "rawQuery": true,
+                "refId": "B",
+                "resultFormat": "time_series",
+                "select": [
+                  [
+                    {
+                      "params": [
+                        "active"
+                      ],
+                      "type": "field"
+                    },
+                    {
+                      "params": [],
+                      "type": "mean"
+                    }
+                  ]
+                ],
+                "tags": [
+                  {
+                    "key": "testEnvironment::tag",
+                    "operator": "=~",
+                    "value": "/^$test_environment$/"
+                  },
+                  {
+                    "condition": "AND",
+                    "key": "systemUnderTest::tag",
+                    "operator": "=~",
+                    "value": "/^$system_under_test$/"
+                  }
+                ],
+                "intervalMs": 15000,
+                "maxDataPoints": 300
+              }
+            ],
+            "range": {
+              "from": "2025-09-18T07:18:23.359Z",
+              "to": "2025-09-18T07:24:31.916Z",
+              "raw": {
+                "from": "2025-09-18T07:18:23.359Z",
+                "to": "2025-09-18T07:24:31.916Z"
+              }
+            },
+            "from": "2025-09-18T07:18:23.359Z",
+            "to": "2025-09-18T07:24:31.916Z",
+            "interval": "15s"
+          },
+          "grafana_response": {
+            "results": {
+              "A": {
+                "status": 200,
+                "frames": []
+              },
+              "B": {
+                "status": 200,
+                "frames": []
+              }
+            }
+          },
+          "database_metrics": [
+            {
+              "metric_name": "Total",
+              "unit": "short",
+              "data_points": "37",
+              "min_value": 0,
+              "max_value": 88,
+              "avg_value": 70.8378378378378
+            },
+            {
+              "metric_name": "Users for load generator: 56d608be69a9",
+              "unit": "short",
+              "data_points": "37",
+              "min_value": 0,
+              "max_value": 88,
+              "avg_value": 70.8378378378378
+            },
+            {
+              "metric_name": "youngGc.max",
+              "unit": "ms",
+              "data_points": "33",
+              "min_value": 3,
+              "max_value": 15,
+              "avg_value": 5.03030303030303
+            }
+          ]
+        },
+        "6": {
+          "panel_info": {
+            "panel_id": 6,
+            "panel_title": "Passed requests per second",
+            "dashboard_label": "Gatling AfterburnerBasicSimulation",
+            "targets": [
+              {
+                "alias": "$tag_name",
+                "datasource": {
+                  "type": "influxdb",
+                  "uid": "influxdb-gatling"
+                },
+                "groupBy": [
+                  {
+                    "params": [
+                      "$interval"
+                    ],
+                    "type": "time"
+                  },
+                  {
+                    "params": [
+                      "name"
+                    ],
+                    "type": "tag"
+                  }
+                ],
+                "measurement": "requests",
+                "orderByTime": "ASC",
+                "policy": "30d",
+                "query": "SELECT count(\"duration\")  / 10 FROM \"30d\".\"requests\" WHERE (\"simulation\" =~ /^$simulation$/ AND \"testEnvironment\" =~ /^$test_environment$/ AND \"systemUnderTest\" =~ /^$system_under_test$/ AND \"result\" = 'OK') AND $timeFilter GROUP BY time($interval), \"name\"",
+                "rawQuery": true,
+                "refId": "A",
+                "resultFormat": "time_series",
+                "select": [
+                  [
+                    {
+                      "params": [
+                        "duration"
+                      ],
+                      "type": "field"
+                    },
+                    {
+                      "params": [],
+                      "type": "count"
+                    },
+                    {
+                      "params": [
+                        " / 10"
+                      ],
+                      "type": "math"
+                    }
+                  ]
+                ],
+                "tags": [
+                  {
+                    "key": "simulation",
+                    "operator": "=~",
+                    "value": "/^$simulation$/"
+                  },
+                  {
+                    "condition": "AND",
+                    "key": "testEnvironment",
+                    "operator": "=~",
+                    "value": "/^$test_environment$/"
+                  },
+                  {
+                    "condition": "AND",
+                    "key": "systemUnderTest",
+                    "operator": "=~",
+                    "value": "/^$system_under_test$/"
+                  },
+                  {
+                    "condition": "AND",
+                    "key": "result",
+                    "operator": "=",
+                    "value": "OK"
+                  }
+                ]
+              }
+            ]
+          },
+          "grafana_query": {
+            "queries": [
+              {
+                "alias": "$tag_name",
+                "datasource": {
+                  "type": "influxdb",
+                  "uid": "influxdb-gatling"
+                },
+                "groupBy": [
+                  {
+                    "params": [
+                      "$interval"
+                    ],
+                    "type": "time"
+                  },
+                  {
+                    "params": [
+                      "name"
+                    ],
+                    "type": "tag"
+                  }
+                ],
+                "measurement": "requests",
+                "orderByTime": "ASC",
+                "policy": "30d",
+                "query": "SELECT count(\"duration\")  / 10 FROM \"30d\".\"requests\" WHERE (\"simulation\" =~ /^$simulation$/ AND \"testEnvironment\" =~ /^$test_environment$/ AND \"systemUnderTest\" =~ /^$system_under_test$/ AND \"result\" = 'OK') AND $timeFilter GROUP BY time($interval), \"name\"",
+                "rawQuery": true,
+                "refId": "A",
+                "resultFormat": "time_series",
+                "select": [
+                  [
+                    {
+                      "params": [
+                        "duration"
+                      ],
+                      "type": "field"
+                    },
+                    {
+                      "params": [],
+                      "type": "count"
+                    },
+                    {
+                      "params": [
+                        " / 10"
+                      ],
+                      "type": "math"
+                    }
+                  ]
+                ],
+                "tags": [
+                  {
+                    "key": "simulation",
+                    "operator": "=~",
+                    "value": "/^$simulation$/"
+                  },
+                  {
+                    "condition": "AND",
+                    "key": "testEnvironment",
+                    "operator": "=~",
+                    "value": "/^$test_environment$/"
+                  },
+                  {
+                    "condition": "AND",
+                    "key": "systemUnderTest",
+                    "operator": "=~",
+                    "value": "/^$system_under_test$/"
+                  },
+                  {
+                    "condition": "AND",
+                    "key": "result",
+                    "operator": "=",
+                    "value": "OK"
+                  }
+                ],
+                "intervalMs": 15000,
+                "maxDataPoints": 300
+              }
+            ],
+            "range": {
+              "from": "2025-09-18T07:18:23.359Z",
+              "to": "2025-09-18T07:24:31.916Z",
+              "raw": {
+                "from": "2025-09-18T07:18:23.359Z",
+                "to": "2025-09-18T07:24:31.916Z"
+              }
+            },
+            "from": "2025-09-18T07:18:23.359Z",
+            "to": "2025-09-18T07:24:31.916Z",
+            "interval": "15s"
+          },
+          "grafana_response": {
+            "results": {
+              "A": {
+                "status": 200,
+                "frames": []
+              }
+            }
+          },
+          "database_metrics": [
+            {
+              "metric_name": "database_call",
+              "unit": "reqps",
+              "data_points": "38",
+              "min_value": 0,
+              "max_value": 15.2,
+              "avg_value": 11.8473684210526
+            },
+            {
+              "metric_name": "flaky_call",
+              "unit": "reqps",
+              "data_points": "38",
+              "min_value": 0,
+              "max_value": 15.1,
+              "avg_value": 11.3789473684211
+            },
+            {
+              "metric_name": "max_activeCount",
+              "unit": "none",
+              "data_points": "38",
+              "min_value": 45,
+              "max_value": 75,
+              "avg_value": 68
+            },
+            {
+              "metric_name": "max_daemonCount",
+              "unit": "none",
+              "data_points": "38",
+              "min_value": 36,
+              "max_value": 66,
+              "avg_value": 59.3157894736842
+            },
+            {
+              "metric_name": "memory_churn",
+              "unit": "reqps",
+              "data_points": "38",
+              "min_value": 0,
+              "max_value": 15.3,
+              "avg_value": 11.8473684210526
+            },
+            {
+              "metric_name": "remote_call_delayed",
+              "unit": "reqps",
+              "data_points": "38",
+              "min_value": 0,
+              "max_value": 15.2,
+              "avg_value": 11.8473684210526
+            },
+            {
+              "metric_name": "simple_cpu_burn",
+              "unit": "reqps",
+              "data_points": "38",
+              "min_value": 0,
+              "max_value": 15,
+              "avg_value": 11.8473684210526
+            },
+            {
+              "metric_name": "simple_delay",
+              "unit": "reqps",
+              "data_points": "38",
+              "min_value": 0,
+              "max_value": 15,
+              "avg_value": 11.8473684210526
+            }
+          ]
+        },
+        "18": {
+          "panel_info": {
+            "panel_id": 18,
+            "panel_title": "Number of requests OK vs KO",
+            "dashboard_label": "Gatling AfterburnerBasicSimulation",
+            "targets": [
+              {
+                "alias": "$tag_name $tag_result",
+                "datasource": {
+                  "type": "influxdb",
+                  "uid": "influxdb-gatling"
+                },
+                "dsType": "influxdb",
+                "groupBy": [
+                  {
+                    "params": [
+                      "name"
+                    ],
+                    "type": "tag"
+                  }
+                ],
+                "measurement": "requests",
+                "orderByTime": "ASC",
+                "policy": "30d",
+                "query": "SELECT count(\"duration\")  as \"OK\" FROM \"30d\".\"requests\" WHERE (\"simulation\" =~ /^$simulation$/ AND \"result\" = 'OK' AND \"testEnvironment\" =~ /^$test_environment$/ AND \"systemUnderTest\" =~ /^$system_under_test$/) AND $timeFilter GROUP BY \"name\"",
+                "rawQuery": true,
+                "refId": "A",
+                "resultFormat": "table",
+                "select": [
+                  [
+                    {
+                      "params": [
+                        "duration"
+                      ],
+                      "type": "field"
+                    },
+                    {
+                      "params": [],
+                      "type": "count"
+                    }
+                  ]
+                ],
+                "tags": [
+                  {
+                    "key": "simulation",
+                    "operator": "=~",
+                    "value": "/^$simulation$/"
+                  },
+                  {
+                    "condition": "AND",
+                    "key": "result",
+                    "operator": "=",
+                    "value": "OK"
+                  },
+                  {
+                    "condition": "AND",
+                    "key": "testEnvironment",
+                    "operator": "=~",
+                    "value": "/^$test_environment$/"
+                  },
+                  {
+                    "condition": "AND",
+                    "key": "systemUnderTest",
+                    "operator": "=~",
+                    "value": "/^$system_under_test$/"
+                  }
+                ]
+              },
+              {
+                "alias": "$tag_name $tag_result",
+                "datasource": {
+                  "type": "influxdb",
+                  "uid": "influxdb-gatling"
+                },
+                "description": "perfana-request-names",
+                "dsType": "influxdb",
+                "groupBy": [
+                  {
+                    "params": [
+                      "name"
+                    ],
+                    "type": "tag"
+                  }
+                ],
+                "hide": false,
+                "measurement": "requests",
+                "orderByTime": "ASC",
+                "policy": "30d",
+                "query": "SELECT count(\"duration\") as \"KO\"  FROM \"30d\".\"requests\" WHERE (\"simulation\" =~ /^$simulation$/ AND \"result\" = 'KO' AND \"testEnvironment\" =~ /^$test_environment$/ AND \"systemUnderTest\" =~ /^$system_under_test$/) AND $timeFilter GROUP BY \"name\"",
+                "rawQuery": true,
+                "refId": "B",
+                "resultFormat": "table",
+                "select": [
+                  [
+                    {
+                      "params": [
+                        "duration"
+                      ],
+                      "type": "field"
+                    },
+                    {
+                      "params": [],
+                      "type": "count"
+                    }
+                  ]
+                ],
+                "tags": [
+                  {
+                    "key": "simulation",
+                    "operator": "=~",
+                    "value": "/^$simulation$/"
+                  },
+                  {
+                    "condition": "AND",
+                    "key": "result",
+                    "operator": "=",
+                    "value": "KO"
+                  },
+                  {
+                    "condition": "AND",
+                    "key": "testEnvironment",
+                    "operator": "=~",
+                    "value": "/^$test_environment$/"
+                  },
+                  {
+                    "condition": "AND",
+                    "key": "systemUnderTest",
+                    "operator": "=~",
+                    "value": "/^$system_under_test$/"
+                  }
+                ]
+              }
+            ]
+          },
+          "grafana_query": {
+            "queries": [
+              {
+                "alias": "$tag_name $tag_result",
+                "datasource": {
+                  "type": "influxdb",
+                  "uid": "influxdb-gatling"
+                },
+                "dsType": "influxdb",
+                "groupBy": [
+                  {
+                    "params": [
+                      "name"
+                    ],
+                    "type": "tag"
+                  }
+                ],
+                "measurement": "requests",
+                "orderByTime": "ASC",
+                "policy": "30d",
+                "query": "SELECT count(\"duration\")  as \"OK\" FROM \"30d\".\"requests\" WHERE (\"simulation\" =~ /^$simulation$/ AND \"result\" = 'OK' AND \"testEnvironment\" =~ /^$test_environment$/ AND \"systemUnderTest\" =~ /^$system_under_test$/) AND $timeFilter GROUP BY \"name\"",
+                "rawQuery": true,
+                "refId": "A",
+                "resultFormat": "table",
+                "select": [
+                  [
+                    {
+                      "params": [
+                        "duration"
+                      ],
+                      "type": "field"
+                    },
+                    {
+                      "params": [],
+                      "type": "count"
+                    }
+                  ]
+                ],
+                "tags": [
+                  {
+                    "key": "simulation",
+                    "operator": "=~",
+                    "value": "/^$simulation$/"
+                  },
+                  {
+                    "condition": "AND",
+                    "key": "result",
+                    "operator": "=",
+                    "value": "OK"
+                  },
+                  {
+                    "condition": "AND",
+                    "key": "testEnvironment",
+                    "operator": "=~",
+                    "value": "/^$test_environment$/"
+                  },
+                  {
+                    "condition": "AND",
+                    "key": "systemUnderTest",
+                    "operator": "=~",
+                    "value": "/^$system_under_test$/"
+                  }
+                ],
+                "intervalMs": 15000,
+                "maxDataPoints": 300
+              },
+              {
+                "alias": "$tag_name $tag_result",
+                "datasource": {
+                  "type": "influxdb",
+                  "uid": "influxdb-gatling"
+                },
+                "description": "perfana-request-names",
+                "dsType": "influxdb",
+                "groupBy": [
+                  {
+                    "params": [
+                      "name"
+                    ],
+                    "type": "tag"
+                  }
+                ],
+                "hide": false,
+                "measurement": "requests",
+                "orderByTime": "ASC",
+                "policy": "30d",
+                "query": "SELECT count(\"duration\") as \"KO\"  FROM \"30d\".\"requests\" WHERE (\"simulation\" =~ /^$simulation$/ AND \"result\" = 'KO' AND \"testEnvironment\" =~ /^$test_environment$/ AND \"systemUnderTest\" =~ /^$system_under_test$/) AND $timeFilter GROUP BY \"name\"",
+                "rawQuery": true,
+                "refId": "B",
+                "resultFormat": "table",
+                "select": [
+                  [
+                    {
+                      "params": [
+                        "duration"
+                      ],
+                      "type": "field"
+                    },
+                    {
+                      "params": [],
+                      "type": "count"
+                    }
+                  ]
+                ],
+                "tags": [
+                  {
+                    "key": "simulation",
+                    "operator": "=~",
+                    "value": "/^$simulation$/"
+                  },
+                  {
+                    "condition": "AND",
+                    "key": "result",
+                    "operator": "=",
+                    "value": "KO"
+                  },
+                  {
+                    "condition": "AND",
+                    "key": "testEnvironment",
+                    "operator": "=~",
+                    "value": "/^$test_environment$/"
+                  },
+                  {
+                    "condition": "AND",
+                    "key": "systemUnderTest",
+                    "operator": "=~",
+                    "value": "/^$system_under_test$/"
+                  }
+                ],
+                "intervalMs": 15000,
+                "maxDataPoints": 300
+              }
+            ],
+            "range": {
+              "from": "2025-09-18T07:18:23.359Z",
+              "to": "2025-09-18T07:24:31.916Z",
+              "raw": {
+                "from": "2025-09-18T07:18:23.359Z",
+                "to": "2025-09-18T07:24:31.916Z"
+              }
+            },
+            "from": "2025-09-18T07:18:23.359Z",
+            "to": "2025-09-18T07:24:31.916Z",
+            "interval": "15s"
+          },
+          "grafana_response": {
+            "results": {
+              "A": {
+                "status": 200,
+                "frames": []
+              },
+              "B": {
+                "status": 200,
+                "frames": []
+              }
+            }
+          },
+          "database_metrics": [
+            {
+              "metric_name": "basket-db-pool",
+              "unit": "short",
+              "data_points": "51",
+              "min_value": 3,
+              "max_value": 3,
+              "avg_value": 3
+            },
+            {
+              "metric_name": "influxdb 172.18.0.12 8086",
+              "unit": "Bps",
+              "data_points": "38",
+              "min_value": 82,
+              "max_value": 372,
+              "avg_value": 223.315789473684
+            },
+            {
+              "metric_name": "<blank> 172.18.0.25 dynamic",
+              "unit": "Bps",
+              "data_points": "37",
+              "min_value": 126,
+              "max_value": 378,
+              "avg_value": 355.810810810811
+            },
+            {
+              "metric_name": "tempo 172.18.0.27 9411",
+              "unit": "Bps",
+              "data_points": "35",
+              "min_value": 20,
+              "max_value": 445,
+              "avg_value": 330.771428571429
+            },
+            {
+              "metric_name": "<blank> 172.18.0.30 dynamic",
+              "unit": "Bps",
+              "data_points": "33",
+              "min_value": 306,
+              "max_value": 304207,
+              "avg_value": 241826.909090909
+            },
+            {
+              "metric_name": "mariadb 172.18.0.11 3306",
+              "unit": "Bps",
+              "data_points": "33",
+              "min_value": 126,
+              "max_value": 1027868,
+              "avg_value": 806413.454545455
+            },
+            {
+              "metric_name": "loki 172.18.0.29 3100",
+              "unit": "Bps",
+              "data_points": "31",
+              "min_value": 21,
+              "max_value": 64,
+              "avg_value": 49.8387096774194
+            },
+            {
+              "metric_name": "employee-db-pool",
+              "unit": "short",
+              "data_points": "25",
+              "min_value": 1,
+              "max_value": 5,
+              "avg_value": 2.72
+            },
+            {
+              "metric_name": "<blank> 172.18.0.32 dynamic",
+              "unit": "Bps",
+              "data_points": "1",
+              "min_value": 108,
+              "max_value": 108,
+              "avg_value": 108
+            }
+          ]
+        },
+        "30": {
+          "panel_info": {
+            "panel_id": 30,
+            "panel_title": "Average Response times",
+            "dashboard_label": "Gatling AfterburnerBasicSimulation",
+            "targets": [
+              {
+                "alias": "$tag_name",
+                "datasource": {
+                  "type": "influxdb",
+                  "uid": "influxdb-gatling"
+                },
+                "dsType": "influxdb",
+                "fields": [
+                  {
+                    "func": "mean",
+                    "name": "value"
+                  }
+                ],
+                "groupBy": [
+                  {
+                    "params": [
+                      "$__interval"
+                    ],
+                    "type": "time"
+                  },
+                  {
+                    "params": [
+                      "name"
+                    ],
+                    "type": "tag"
+                  }
+                ],
+                "hide": false,
+                "measurement": "gatling-percentiles",
+                "orderByTime": "ASC",
+                "policy": "30d",
+                "query": "SELECT mean(\"cq_mean_response_time\") FROM \"30d\".\"gatling-percentiles\" WHERE (\"simulation\" =~ /^$simulation$/ AND \"testEnvironment\" =~ /^$test_environment$/ AND \"systemUnderTest\" =~ /^$system_under_test$/ AND \"result\" = 'OK') AND $timeFilter GROUP BY time($__interval), \"name\"",
+                "rawQuery": true,
+                "refId": "A",
+                "resultFormat": "time_series",
+                "select": [
+                  [
+                    {
+                      "params": [
+                        "cq_mean_response_time"
+                      ],
+                      "type": "field"
+                    },
+                    {
+                      "params": [],
+                      "type": "mean"
+                    }
+                  ]
+                ],
+                "tags": [
+                  {
+                    "condition": "AND",
+                    "key": "simulation",
+                    "operator": "=~",
+                    "value": "/^$simulation$/"
+                  },
+                  {
+                    "condition": "AND",
+                    "key": "testEnvironment",
+                    "operator": "=~",
+                    "value": "/^$test_environment$/"
+                  },
+                  {
+                    "condition": "AND",
+                    "key": "systemUnderTest",
+                    "operator": "=~",
+                    "value": "/^$system_under_test$/"
+                  },
+                  {
+                    "condition": "AND",
+                    "key": "result",
+                    "operator": "=",
+                    "value": "OK"
+                  }
+                ]
+              }
+            ]
+          },
+          "grafana_query": {
+            "queries": [
+              {
+                "alias": "$tag_name",
+                "datasource": {
+                  "type": "influxdb",
+                  "uid": "influxdb-gatling"
+                },
+                "dsType": "influxdb",
+                "fields": [
+                  {
+                    "func": "mean",
+                    "name": "value"
+                  }
+                ],
+                "groupBy": [
+                  {
+                    "params": [
+                      "$__interval"
+                    ],
+                    "type": "time"
+                  },
+                  {
+                    "params": [
+                      "name"
+                    ],
+                    "type": "tag"
+                  }
+                ],
+                "hide": false,
+                "measurement": "gatling-percentiles",
+                "orderByTime": "ASC",
+                "policy": "30d",
+                "query": "SELECT mean(\"cq_mean_response_time\") FROM \"30d\".\"gatling-percentiles\" WHERE (\"simulation\" =~ /^$simulation$/ AND \"testEnvironment\" =~ /^$test_environment$/ AND \"systemUnderTest\" =~ /^$system_under_test$/ AND \"result\" = 'OK') AND $timeFilter GROUP BY time($__interval), \"name\"",
+                "rawQuery": true,
+                "refId": "A",
+                "resultFormat": "time_series",
+                "select": [
+                  [
+                    {
+                      "params": [
+                        "cq_mean_response_time"
+                      ],
+                      "type": "field"
+                    },
+                    {
+                      "params": [],
+                      "type": "mean"
+                    }
+                  ]
+                ],
+                "tags": [
+                  {
+                    "condition": "AND",
+                    "key": "simulation",
+                    "operator": "=~",
+                    "value": "/^$simulation$/"
+                  },
+                  {
+                    "condition": "AND",
+                    "key": "testEnvironment",
+                    "operator": "=~",
+                    "value": "/^$test_environment$/"
+                  },
+                  {
+                    "condition": "AND",
+                    "key": "systemUnderTest",
+                    "operator": "=~",
+                    "value": "/^$system_under_test$/"
+                  },
+                  {
+                    "condition": "AND",
+                    "key": "result",
+                    "operator": "=",
+                    "value": "OK"
+                  }
+                ],
+                "intervalMs": 15000,
+                "maxDataPoints": 300
+              }
+            ],
+            "range": {
+              "from": "2025-09-18T07:18:23.359Z",
+              "to": "2025-09-18T07:24:31.916Z",
+              "raw": {
+                "from": "2025-09-18T07:18:23.359Z",
+                "to": "2025-09-18T07:24:31.916Z"
+              }
+            },
+            "from": "2025-09-18T07:18:23.359Z",
+            "to": "2025-09-18T07:24:31.916Z",
+            "interval": "15s"
+          },
+          "grafana_response": {
+            "results": {
+              "A": {
+                "status": 200,
+                "frames": []
+              }
+            }
+          },
+          "database_metrics": [
+            {
+              "metric_name": "Arena Chunk",
+              "unit": "bytes",
+              "data_points": "38",
+              "min_value": 1626176,
+              "max_value": 18390712,
+              "avg_value": 8124990.73684211
+            },
+            {
+              "metric_name": "Arguments",
+              "unit": "bytes",
+              "data_points": "38",
+              "min_value": 162,
+              "max_value": 162,
+              "avg_value": 162
+            },
+            {
+              "metric_name": "Class",
+              "unit": "bytes",
+              "data_points": "38",
+              "min_value": 1075924137,
+              "max_value": 1076165209,
+              "avg_value": 1076108327.73684
+            },
+            {
+              "metric_name": "Code",
+              "unit": "bytes",
+              "data_points": "38",
+              "min_value": 256759736,
+              "max_value": 259141272,
+              "avg_value": 258433763.578947
+            },
+            {
+              "metric_name": "Compiler",
+              "unit": "bytes",
+              "data_points": "38",
+              "min_value": 327784,
+              "max_value": 18562520,
+              "avg_value": 2042346.31578947
+            },
+            {
+              "metric_name": "GC",
+              "unit": "bytes",
+              "data_points": "38",
+              "min_value": 904370,
+              "max_value": 904370,
+              "avg_value": 904370
+            },
+            {
+              "metric_name": "GCCardSet",
+              "unit": "bytes",
+              "data_points": "38",
+              "min_value": 0,
+              "max_value": 0,
+              "avg_value": 0
+            },
+            {
+              "metric_name": "Internal",
+              "unit": "bytes",
+              "data_points": "38",
+              "min_value": 670646,
+              "max_value": 839648,
+              "avg_value": 801281.552631579
+            },
+            {
+              "metric_name": "Java Heap",
+              "unit": "bytes",
+              "data_points": "38",
+              "min_value": 268435456,
+              "max_value": 268435456,
+              "avg_value": 268435456
+            },
+            {
+              "metric_name": "JVMCI",
+              "unit": "bytes",
+              "data_points": "38",
+              "min_value": 0,
+              "max_value": 0,
+              "avg_value": 0
+            },
+            {
+              "metric_name": "Logging",
+              "unit": "bytes",
+              "data_points": "38",
+              "min_value": 8,
+              "max_value": 8,
+              "avg_value": 8
+            },
+            {
+              "metric_name": "Metaspace",
+              "unit": "bytes",
+              "data_points": "38",
+              "min_value": 134641344,
+              "max_value": 134681808,
+              "avg_value": 134670952
+            },
+            {
+              "metric_name": "Module",
+              "unit": "bytes",
+              "data_points": "38",
+              "min_value": 314208,
+              "max_value": 319968,
+              "avg_value": 316624.842105263
+            },
+            {
+              "metric_name": "Native Memory Tracking",
+              "unit": "bytes",
+              "data_points": "38",
+              "min_value": 6454656,
+              "max_value": 7174720,
+              "avg_value": 6932298.10526316
+            },
+            {
+              "metric_name": "Object Monitors",
+              "unit": "bytes",
+              "data_points": "38",
+              "min_value": 624,
+              "max_value": 42016,
+              "avg_value": 7548.21052631579
+            },
+            {
+              "metric_name": "Other",
+              "unit": "bytes",
+              "data_points": "38",
+              "min_value": 262200,
+              "max_value": 1462704,
+              "avg_value": 1219900.42105263
+            },
+            {
+              "metric_name": "Safepoint",
+              "unit": "bytes",
+              "data_points": "38",
+              "min_value": 8192,
+              "max_value": 8192,
+              "avg_value": 8192
+            },
+            {
+              "metric_name": "Serviceability",
+              "unit": "bytes",
+              "data_points": "38",
+              "min_value": 19463,
+              "max_value": 20095,
+              "avg_value": 19479.6315789474
+            },
+            {
+              "metric_name": "Shared class space",
+              "unit": "bytes",
+              "data_points": "38",
+              "min_value": 16777216,
+              "max_value": 16777216,
+              "avg_value": 16777216
+            },
+            {
+              "metric_name": "Statistics",
+              "unit": "bytes",
+              "data_points": "38",
+              "min_value": 128,
+              "max_value": 128,
+              "avg_value": 128
+            },
+            {
+              "metric_name": "String Deduplication",
+              "unit": "bytes",
+              "data_points": "38",
+              "min_value": 680,
+              "max_value": 680,
+              "avg_value": 680
+            },
+            {
+              "metric_name": "Symbol",
+              "unit": "bytes",
+              "data_points": "38",
+              "min_value": 36099010,
+              "max_value": 36604296,
+              "avg_value": 36483792.9473684
+            },
+            {
+              "metric_name": "Synchronization",
+              "unit": "bytes",
+              "data_points": "38",
+              "min_value": 122568,
+              "max_value": 130784,
+              "avg_value": 128657.052631579
+            },
+            {
+              "metric_name": "Test",
+              "unit": "bytes",
+              "data_points": "38",
+              "min_value": 0,
+              "max_value": 0,
+              "avg_value": 0
+            },
+            {
+              "metric_name": "Thread",
+              "unit": "bytes",
+              "data_points": "38",
+              "min_value": 173936,
+              "max_value": 276808,
+              "avg_value": 252852.210526316
+            },
+            {
+              "metric_name": "Thread Stack",
+              "unit": "bytes",
+              "data_points": "38",
+              "min_value": 106536960,
+              "max_value": 169205760,
+              "avg_value": 154583040
+            },
+            {
+              "metric_name": "Tracing",
+              "unit": "bytes",
+              "data_points": "38",
+              "min_value": 18178502,
+              "max_value": 36310508,
+              "avg_value": 28702651
+            },
+            {
+              "metric_name": "database_call",
+              "unit": "ms",
+              "data_points": "31",
+              "min_value": 43.9666666666667,
+              "max_value": 54,
+              "avg_value": 45.4354304823156
+            },
+            {
+              "metric_name": "flaky_call",
+              "unit": "ms",
+              "data_points": "31",
+              "min_value": 100.785185185185,
+              "max_value": 132.391891891892,
+              "avg_value": 122.015949308473
+            },
+            {
+              "metric_name": "memory_churn",
+              "unit": "ms",
+              "data_points": "31",
+              "min_value": 101.486666666667,
+              "max_value": 103.5,
+              "avg_value": 101.725496155221
+            },
+            {
+              "metric_name": "remote_call_delayed",
+              "unit": "ms",
+              "data_points": "31",
+              "min_value": 224.328859060403,
+              "max_value": 232.6,
+              "avg_value": 225.336980207713
+            },
+            {
+              "metric_name": "simple_cpu_burn",
+              "unit": "ms",
+              "data_points": "31",
+              "min_value": 2.06,
+              "max_value": 4.63636363636364,
+              "avg_value": 2.34601738951484
+            },
+            {
+              "metric_name": "simple_delay",
+              "unit": "ms",
+              "data_points": "31",
+              "min_value": 223.7,
+              "max_value": 227.5,
+              "avg_value": 224.131989247312
+            }
+          ]
+        },
+        "31": {
+          "panel_info": {
+            "panel_id": 31,
+            "panel_title": "Response times 99th percentile",
+            "dashboard_label": "Gatling AfterburnerBasicSimulation",
+            "targets": [
+              {
+                "alias": "$tag_name",
+                "datasource": {
+                  "type": "influxdb",
+                  "uid": "influxdb-gatling"
+                },
+                "dsType": "influxdb",
+                "fields": [
+                  {
+                    "func": "mean",
+                    "name": "value"
+                  }
+                ],
+                "groupBy": [
+                  {
+                    "params": [
+                      "$__interval"
+                    ],
+                    "type": "time"
+                  },
+                  {
+                    "params": [
+                      "name"
+                    ],
+                    "type": "tag"
+                  }
+                ],
+                "hide": false,
+                "measurement": "gatling-percentiles",
+                "orderByTime": "ASC",
+                "policy": "30d",
+                "query": "SELECT mean(\"cq_99pct_response_time\") FROM \"30d\".\"gatling-percentiles\" WHERE (\"simulation\" =~ /^$simulation$/ AND \"testEnvironment\" =~ /^$test_environment$/ AND \"systemUnderTest\" =~ /^$system_under_test$/ AND \"result\" = 'OK') AND $timeFilter GROUP BY time($__interval), \"name\"",
+                "rawQuery": true,
+                "refId": "A",
+                "resultFormat": "time_series",
+                "select": [
+                  [
+                    {
+                      "params": [
+                        "cq_99pct_response_time"
+                      ],
+                      "type": "field"
+                    },
+                    {
+                      "params": [],
+                      "type": "mean"
+                    }
+                  ]
+                ],
+                "tags": [
+                  {
+                    "condition": "AND",
+                    "key": "simulation",
+                    "operator": "=~",
+                    "value": "/^$simulation$/"
+                  },
+                  {
+                    "condition": "AND",
+                    "key": "testEnvironment",
+                    "operator": "=~",
+                    "value": "/^$test_environment$/"
+                  },
+                  {
+                    "condition": "AND",
+                    "key": "systemUnderTest",
+                    "operator": "=~",
+                    "value": "/^$system_under_test$/"
+                  },
+                  {
+                    "condition": "AND",
+                    "key": "result",
+                    "operator": "=",
+                    "value": "OK"
+                  }
+                ]
+              }
+            ]
+          },
+          "grafana_query": {
+            "queries": [
+              {
+                "alias": "$tag_name",
+                "datasource": {
+                  "type": "influxdb",
+                  "uid": "influxdb-gatling"
+                },
+                "dsType": "influxdb",
+                "fields": [
+                  {
+                    "func": "mean",
+                    "name": "value"
+                  }
+                ],
+                "groupBy": [
+                  {
+                    "params": [
+                      "$__interval"
+                    ],
+                    "type": "time"
+                  },
+                  {
+                    "params": [
+                      "name"
+                    ],
+                    "type": "tag"
+                  }
+                ],
+                "hide": false,
+                "measurement": "gatling-percentiles",
+                "orderByTime": "ASC",
+                "policy": "30d",
+                "query": "SELECT mean(\"cq_99pct_response_time\") FROM \"30d\".\"gatling-percentiles\" WHERE (\"simulation\" =~ /^$simulation$/ AND \"testEnvironment\" =~ /^$test_environment$/ AND \"systemUnderTest\" =~ /^$system_under_test$/ AND \"result\" = 'OK') AND $timeFilter GROUP BY time($__interval), \"name\"",
+                "rawQuery": true,
+                "refId": "A",
+                "resultFormat": "time_series",
+                "select": [
+                  [
+                    {
+                      "params": [
+                        "cq_99pct_response_time"
+                      ],
+                      "type": "field"
+                    },
+                    {
+                      "params": [],
+                      "type": "mean"
+                    }
+                  ]
+                ],
+                "tags": [
+                  {
+                    "condition": "AND",
+                    "key": "simulation",
+                    "operator": "=~",
+                    "value": "/^$simulation$/"
+                  },
+                  {
+                    "condition": "AND",
+                    "key": "testEnvironment",
+                    "operator": "=~",
+                    "value": "/^$test_environment$/"
+                  },
+                  {
+                    "condition": "AND",
+                    "key": "systemUnderTest",
+                    "operator": "=~",
+                    "value": "/^$system_under_test$/"
+                  },
+                  {
+                    "condition": "AND",
+                    "key": "result",
+                    "operator": "=",
+                    "value": "OK"
+                  }
+                ],
+                "intervalMs": 15000,
+                "maxDataPoints": 300
+              }
+            ],
+            "range": {
+              "from": "2025-09-18T07:18:23.359Z",
+              "to": "2025-09-18T07:24:31.916Z",
+              "raw": {
+                "from": "2025-09-18T07:18:23.359Z",
+                "to": "2025-09-18T07:24:31.916Z"
+              }
+            },
+            "from": "2025-09-18T07:18:23.359Z",
+            "to": "2025-09-18T07:24:31.916Z",
+            "interval": "15s"
+          },
+          "grafana_response": {
+            "results": {
+              "A": {
+                "status": 200,
+                "frames": []
+              }
+            }
+          },
+          "database_metrics": [
+            {
+              "metric_name": "switch rate",
+              "unit": "hertz",
+              "data_points": "37",
+              "min_value": 11737.61328125,
+              "max_value": 28785.435546875,
+              "avg_value": 19159.8852143159
+            },
+            {
+              "metric_name": "database_call",
+              "unit": "ms",
+              "data_points": "31",
+              "min_value": 49,
+              "max_value": 191,
+              "avg_value": 60.8064516129032
+            },
+            {
+              "metric_name": "flaky_call",
+              "unit": "ms",
+              "data_points": "31",
+              "min_value": 236,
+              "max_value": 242,
+              "avg_value": 238.903225806452
+            },
+            {
+              "metric_name": "memory_churn",
+              "unit": "ms",
+              "data_points": "31",
+              "min_value": 103,
+              "max_value": 164,
+              "avg_value": 105.967741935484
+            },
+            {
+              "metric_name": "remote_call_delayed",
+              "unit": "ms",
+              "data_points": "31",
+              "min_value": 226,
+              "max_value": 346,
+              "avg_value": 235.516129032258
+            },
+            {
+              "metric_name": "simple_cpu_burn",
+              "unit": "ms",
+              "data_points": "31",
+              "min_value": 3,
+              "max_value": 70,
+              "avg_value": 6.74193548387097
+            },
+            {
+              "metric_name": "simple_delay",
+              "unit": "ms",
+              "data_points": "31",
+              "min_value": 225,
+              "max_value": 292,
+              "avg_value": 228.612903225806
+            }
+          ]
+        }
+      },
+      "panel_queries": {}
+    },
+    "spring-boot-kubernetes-jvm-mimir": {
+      "dashboard_info": {
+        "uid": "spring-boot-kubernetes-jvm-mimir",
+        "title": "JVM",
+        "tags": [
+          "Perfana",
+          "perfana-template",
+          "JVM",
+          "$service"
+        ],
+        "panel_count": 6
+      },
+      "panels": {
+        "32": {
+          "panel_info": {
+            "panel_id": 32,
+            "panel_title": "Threads",
+            "dashboard_label": "JVM afterburner-fe",
+            "targets": [
+              {
+                "datasource": {
+                  "type": "prometheus",
+                  "uid": "prometheus"
+                },
+                "expr": "avg(jvm_threads_live_threads{service=\"$service\", system_under_test=\"$system_under_test\", test_environment=\"$test_environment\"}) by(kubernetes_pod_name)",
+                "format": "time_series",
+                "intervalFactor": 2,
+                "legendFormat": "live",
+                "metric": "",
+                "refId": "A",
+                "step": 2400
+              },
+              {
+                "datasource": {
+                  "type": "prometheus",
+                  "uid": "prometheus"
+                },
+                "expr": "avg(jvm_threads_daemon_threads{service=\"$service\", system_under_test=\"$system_under_test\", test_environment=\"$test_environment\"}) by(kubernetes_pod_name)",
+                "format": "time_series",
+                "intervalFactor": 2,
+                "legendFormat": "daemon",
+                "metric": "",
+                "refId": "B",
+                "step": 2400
+              },
+              {
+                "datasource": {
+                  "type": "prometheus",
+                  "uid": "prometheus"
+                },
+                "expr": "avg(jvm_threads_peak_threads{service=\"$service\", system_under_test=\"$system_under_test\", test_environment=\"$test_environment\"}) by(kubernetes_pod_name)",
+                "format": "time_series",
+                "intervalFactor": 2,
+                "legendFormat": "peak",
+                "refId": "C",
+                "step": 2400
+              },
+              {
+                "datasource": {
+                  "type": "prometheus",
+                  "uid": "prometheus"
+                },
+                "expr": "process_threads{service=\"$service\", system_under_test=\"$system_under_test\", test_environment=\"$test_environment\"}",
+                "format": "time_series",
+                "interval": "",
+                "intervalFactor": 2,
+                "legendFormat": "process",
+                "refId": "D",
+                "step": 2400
+              }
+            ]
+          },
+          "grafana_query": {
+            "queries": [
+              {
+                "datasource": {
+                  "type": "prometheus",
+                  "uid": "prometheus"
+                },
+                "expr": "avg(jvm_threads_live_threads{service=\"$service\", system_under_test=\"$system_under_test\", test_environment=\"$test_environment\"}) by(kubernetes_pod_name)",
+                "format": "time_series",
+                "intervalFactor": 2,
+                "legendFormat": "live",
+                "metric": "",
+                "refId": "A",
+                "step": 2400,
+                "intervalMs": 15000,
+                "maxDataPoints": 300
+              },
+              {
+                "datasource": {
+                  "type": "prometheus",
+                  "uid": "prometheus"
+                },
+                "expr": "avg(jvm_threads_daemon_threads{service=\"$service\", system_under_test=\"$system_under_test\", test_environment=\"$test_environment\"}) by(kubernetes_pod_name)",
+                "format": "time_series",
+                "intervalFactor": 2,
+                "legendFormat": "daemon",
+                "metric": "",
+                "refId": "B",
+                "step": 2400,
+                "intervalMs": 15000,
+                "maxDataPoints": 300
+              },
+              {
+                "datasource": {
+                  "type": "prometheus",
+                  "uid": "prometheus"
+                },
+                "expr": "avg(jvm_threads_peak_threads{service=\"$service\", system_under_test=\"$system_under_test\", test_environment=\"$test_environment\"}) by(kubernetes_pod_name)",
+                "format": "time_series",
+                "intervalFactor": 2,
+                "legendFormat": "peak",
+                "refId": "C",
+                "step": 2400,
+                "intervalMs": 15000,
+                "maxDataPoints": 300
+              },
+              {
+                "datasource": {
+                  "type": "prometheus",
+                  "uid": "prometheus"
+                },
+                "expr": "process_threads{service=\"$service\", system_under_test=\"$system_under_test\", test_environment=\"$test_environment\"}",
+                "format": "time_series",
+                "interval": "",
+                "intervalFactor": 2,
+                "legendFormat": "process",
+                "refId": "D",
+                "step": 2400,
+                "intervalMs": 15000,
+                "maxDataPoints": 300
+              }
+            ],
+            "range": {
+              "from": "2025-09-18T07:18:23.359Z",
+              "to": "2025-09-18T07:24:31.916Z",
+              "raw": {
+                "from": "2025-09-18T07:18:23.359Z",
+                "to": "2025-09-18T07:24:31.916Z"
+              }
+            },
+            "from": "2025-09-18T07:18:23.359Z",
+            "to": "2025-09-18T07:24:31.916Z",
+            "interval": "15s"
+          },
+          "grafana_response": {
+            "results": {
+              "A": {
+                "status": 200,
+                "frames": [
+                  {
+                    "schema": {
+                      "refId": "A",
+                      "meta": {
+                        "typeVersion": [
+                          0,
+                          0
+                        ],
+                        "executedQueryString": "Expr: avg(jvm_threads_live_threads{service=\"$service\", system_under_test=\"$system_under_test\", test_environment=\"$test_environment\"}) by(kubernetes_pod_name)\nStep: 30s"
+                      },
+                      "fields": []
+                    },
+                    "data": {
+                      "values": []
+                    }
+                  }
+                ]
+              },
+              "B": {
+                "status": 200,
+                "frames": [
+                  {
+                    "schema": {
+                      "refId": "B",
+                      "meta": {
+                        "typeVersion": [
+                          0,
+                          0
+                        ],
+                        "executedQueryString": "Expr: avg(jvm_threads_daemon_threads{service=\"$service\", system_under_test=\"$system_under_test\", test_environment=\"$test_environment\"}) by(kubernetes_pod_name)\nStep: 30s"
+                      },
+                      "fields": []
+                    },
+                    "data": {
+                      "values": []
+                    }
+                  }
+                ]
+              },
+              "C": {
+                "status": 200,
+                "frames": [
+                  {
+                    "schema": {
+                      "refId": "C",
+                      "meta": {
+                        "typeVersion": [
+                          0,
+                          0
+                        ],
+                        "executedQueryString": "Expr: avg(jvm_threads_peak_threads{service=\"$service\", system_under_test=\"$system_under_test\", test_environment=\"$test_environment\"}) by(kubernetes_pod_name)\nStep: 30s"
+                      },
+                      "fields": []
+                    },
+                    "data": {
+                      "values": []
+                    }
+                  }
+                ]
+              },
+              "D": {
+                "status": 200,
+                "frames": [
+                  {
+                    "schema": {
+                      "refId": "D",
+                      "meta": {
+                        "typeVersion": [
+                          0,
+                          0
+                        ],
+                        "executedQueryString": "Expr: process_threads{service=\"$service\", system_under_test=\"$system_under_test\", test_environment=\"$test_environment\"}\nStep: 30s"
+                      },
+                      "fields": []
+                    },
+                    "data": {
+                      "values": []
+                    }
+                  }
+                ]
+              }
+            }
+          },
+          "database_metrics": [
+            {
+              "metric_name": "difference_cpuThrottledTime",
+              "unit": "ns",
+              "data_points": "367",
+              "min_value": 0,
+              "max_value": 0,
+              "avg_value": 0
+            },
+            {
+              "metric_name": "database_call",
+              "unit": "ms",
+              "data_points": "31",
+              "min_value": 1,
+              "max_value": 17.0653763319544,
+              "avg_value": 3.19922657022781
+            },
+            {
+              "metric_name": "flaky_call",
+              "unit": "ms",
+              "data_points": "31",
+              "min_value": 65.5690175170353,
+              "max_value": 77.9097900154729,
+              "avg_value": 70.0423749367099
+            },
+            {
+              "metric_name": "memory_churn",
+              "unit": "ms",
+              "data_points": "31",
+              "min_value": 0.692594254159573,
+              "max_value": 8.52287092821782,
+              "avg_value": 1.06853365332292
+            },
+            {
+              "metric_name": "remote_call_delayed",
+              "unit": "ms",
+              "data_points": "31",
+              "min_value": 0.682235524641524,
+              "max_value": 22.1791900249183,
+              "avg_value": 2.10411737969134
+            },
+            {
+              "metric_name": "simple_cpu_burn",
+              "unit": "ms",
+              "data_points": "31",
+              "min_value": 0.238282444779159,
+              "max_value": 12.0060089354991,
+              "avg_value": 0.899129477966764
+            },
+            {
+              "metric_name": "simple_delay",
+              "unit": "ms",
+              "data_points": "31",
+              "min_value": 0.682966289812414,
+              "max_value": 9.65828688706445,
+              "avg_value": 1.10917153149207
+            },
+            {
+              "metric_name": "daemon",
+              "unit": "short",
+              "data_points": "28",
+              "min_value": 33,
+              "max_value": 81,
+              "avg_value": 61.7857142857143
+            },
+            {
+              "metric_name": "live",
+              "unit": "short",
+              "data_points": "28",
+              "min_value": 40,
+              "max_value": 88,
+              "avg_value": 69.7857142857143
+            },
+            {
+              "metric_name": "peak",
+              "unit": "short",
+              "data_points": "28",
+              "min_value": 44,
+              "max_value": 89,
+              "avg_value": 71.75
+            }
+          ]
+        },
+        "61": {
+          "panel_info": {
+            "panel_id": 61,
+            "panel_title": "File Descriptors",
+            "dashboard_label": "JVM afterburner-fe",
+            "targets": [
+              {
+                "datasource": {
+                  "type": "prometheus",
+                  "uid": "prometheus"
+                },
+                "expr": "avg(process_open_fds{service=\"$service\", system_under_test=\"$system_under_test\", test_environment=\"$test_environment\"}) by(kubernetes_name)",
+                "format": "time_series",
+                "hide": false,
+                "intervalFactor": 2,
+                "legendFormat": "{{ kubernetes_name }} open fds",
+                "metric": "",
+                "refId": "A",
+                "step": 2400
+              },
+              {
+                "datasource": {
+                  "type": "prometheus",
+                  "uid": "prometheus"
+                },
+                "expr": "avg(process_max_fds{service=\"$service\", system_under_test=\"$system_under_test\", test_environment=\"$test_environment\"}) by(kubernetes_name)",
+                "format": "time_series",
+                "hide": false,
+                "intervalFactor": 2,
+                "legendFormat": "{{ kubernetes_name }} max  ffds",
+                "metric": "",
+                "refId": "B",
+                "step": 2400
+              },
+              {
+                "datasource": {
+                  "type": "prometheus",
+                  "uid": "prometheus"
+                },
+                "expr": "avg(process_files_open_files{service=\"$service\", system_under_test=\"$system_under_test\", test_environment=\"$test_environment\"}) by(kubernetes_name)",
+                "format": "time_series",
+                "hide": false,
+                "intervalFactor": 2,
+                "legendFormat": "{{ kubernetes_name }} open files",
+                "metric": "",
+                "refId": "C",
+                "step": 2400
+              },
+              {
+                "datasource": {
+                  "type": "prometheus",
+                  "uid": "prometheus"
+                },
+                "expr": "avg(process_files_max_files{service=\"$service\", system_under_test=\"$system_under_test\", test_environment=\"$test_environment\"}) by(kubernetes_name)",
+                "format": "time_series",
+                "hide": false,
+                "intervalFactor": 2,
+                "legendFormat": "{{ kubernetes_name }} max open files",
+                "metric": "",
+                "refId": "D",
+                "step": 2400
+              }
+            ]
+          },
+          "grafana_query": {
+            "queries": [
+              {
+                "datasource": {
+                  "type": "prometheus",
+                  "uid": "prometheus"
+                },
+                "expr": "avg(process_open_fds{service=\"$service\", system_under_test=\"$system_under_test\", test_environment=\"$test_environment\"}) by(kubernetes_name)",
+                "format": "time_series",
+                "hide": false,
+                "intervalFactor": 2,
+                "legendFormat": "{{ kubernetes_name }} open fds",
+                "metric": "",
+                "refId": "A",
+                "step": 2400,
+                "intervalMs": 15000,
+                "maxDataPoints": 300
+              },
+              {
+                "datasource": {
+                  "type": "prometheus",
+                  "uid": "prometheus"
+                },
+                "expr": "avg(process_max_fds{service=\"$service\", system_under_test=\"$system_under_test\", test_environment=\"$test_environment\"}) by(kubernetes_name)",
+                "format": "time_series",
+                "hide": false,
+                "intervalFactor": 2,
+                "legendFormat": "{{ kubernetes_name }} max  ffds",
+                "metric": "",
+                "refId": "B",
+                "step": 2400,
+                "intervalMs": 15000,
+                "maxDataPoints": 300
+              },
+              {
+                "datasource": {
+                  "type": "prometheus",
+                  "uid": "prometheus"
+                },
+                "expr": "avg(process_files_open_files{service=\"$service\", system_under_test=\"$system_under_test\", test_environment=\"$test_environment\"}) by(kubernetes_name)",
+                "format": "time_series",
+                "hide": false,
+                "intervalFactor": 2,
+                "legendFormat": "{{ kubernetes_name }} open files",
+                "metric": "",
+                "refId": "C",
+                "step": 2400,
+                "intervalMs": 15000,
+                "maxDataPoints": 300
+              },
+              {
+                "datasource": {
+                  "type": "prometheus",
+                  "uid": "prometheus"
+                },
+                "expr": "avg(process_files_max_files{service=\"$service\", system_under_test=\"$system_under_test\", test_environment=\"$test_environment\"}) by(kubernetes_name)",
+                "format": "time_series",
+                "hide": false,
+                "intervalFactor": 2,
+                "legendFormat": "{{ kubernetes_name }} max open files",
+                "metric": "",
+                "refId": "D",
+                "step": 2400,
+                "intervalMs": 15000,
+                "maxDataPoints": 300
+              }
+            ],
+            "range": {
+              "from": "2025-09-18T07:18:23.359Z",
+              "to": "2025-09-18T07:24:31.916Z",
+              "raw": {
+                "from": "2025-09-18T07:18:23.359Z",
+                "to": "2025-09-18T07:24:31.916Z"
+              }
+            },
+            "from": "2025-09-18T07:18:23.359Z",
+            "to": "2025-09-18T07:24:31.916Z",
+            "interval": "15s"
+          },
+          "grafana_response": {
+            "results": {
+              "A": {
+                "status": 200,
+                "frames": [
+                  {
+                    "schema": {
+                      "refId": "A",
+                      "meta": {
+                        "typeVersion": [
+                          0,
+                          0
+                        ],
+                        "executedQueryString": "Expr: avg(process_open_fds{service=\"$service\", system_under_test=\"$system_under_test\", test_environment=\"$test_environment\"}) by(kubernetes_name)\nStep: 30s"
+                      },
+                      "fields": []
+                    },
+                    "data": {
+                      "values": []
+                    }
+                  }
+                ]
+              },
+              "B": {
+                "status": 200,
+                "frames": [
+                  {
+                    "schema": {
+                      "refId": "B",
+                      "meta": {
+                        "typeVersion": [
+                          0,
+                          0
+                        ],
+                        "executedQueryString": "Expr: avg(process_max_fds{service=\"$service\", system_under_test=\"$system_under_test\", test_environment=\"$test_environment\"}) by(kubernetes_name)\nStep: 30s"
+                      },
+                      "fields": []
+                    },
+                    "data": {
+                      "values": []
+                    }
+                  }
+                ]
+              },
+              "C": {
+                "status": 200,
+                "frames": [
+                  {
+                    "schema": {
+                      "refId": "C",
+                      "meta": {
+                        "typeVersion": [
+                          0,
+                          0
+                        ],
+                        "executedQueryString": "Expr: avg(process_files_open_files{service=\"$service\", system_under_test=\"$system_under_test\", test_environment=\"$test_environment\"}) by(kubernetes_name)\nStep: 30s"
+                      },
+                      "fields": []
+                    },
+                    "data": {
+                      "values": []
+                    }
+                  }
+                ]
+              },
+              "D": {
+                "status": 200,
+                "frames": [
+                  {
+                    "schema": {
+                      "refId": "D",
+                      "meta": {
+                        "typeVersion": [
+                          0,
+                          0
+                        ],
+                        "executedQueryString": "Expr: avg(process_files_max_files{service=\"$service\", system_under_test=\"$system_under_test\", test_environment=\"$test_environment\"}) by(kubernetes_name)\nStep: 30s"
+                      },
+                      "fields": []
+                    },
+                    "data": {
+                      "values": []
+                    }
+                  }
+                ]
+              }
+            }
+          },
+          "database_metrics": [
+            {
+              "metric_name": " max open files",
+              "unit": "short",
+              "data_points": "28",
+              "min_value": 1048576,
+              "max_value": 1048576,
+              "avg_value": 1048576
+            },
+            {
+              "metric_name": " open files",
+              "unit": "short",
+              "data_points": "28",
+              "min_value": 220,
+              "max_value": 343,
+              "avg_value": 277.428571428571
+            }
+          ]
+        },
+        "91": {
+          "panel_info": {
+            "panel_id": 91,
+            "panel_title": "Log Events (1m)",
+            "dashboard_label": "JVM afterburner-be",
+            "targets": [
+              {
+                "datasource": {
+                  "type": "prometheus",
+                  "uid": "prometheus"
+                },
+                "expr": "increase(logback_events_total{service=\"$service\", system_under_test=\"$system_under_test\", test_environment=\"$test_environment\"}[1m])",
+                "format": "time_series",
+                "interval": "",
+                "intervalFactor": 2,
+                "legendFormat": "{{level}}",
+                "metric": "",
+                "refId": "A",
+                "step": 1200
+              }
+            ]
+          },
+          "grafana_query": {
+            "queries": [
+              {
+                "datasource": {
+                  "type": "prometheus",
+                  "uid": "prometheus"
+                },
+                "expr": "increase(logback_events_total{service=\"$service\", system_under_test=\"$system_under_test\", test_environment=\"$test_environment\"}[1m])",
+                "format": "time_series",
+                "interval": "",
+                "intervalFactor": 2,
+                "legendFormat": "{{level}}",
+                "metric": "",
+                "refId": "A",
+                "step": 1200,
+                "intervalMs": 15000,
+                "maxDataPoints": 300
+              }
+            ],
+            "range": {
+              "from": "2025-09-18T07:18:23.359Z",
+              "to": "2025-09-18T07:24:31.916Z",
+              "raw": {
+                "from": "2025-09-18T07:18:23.359Z",
+                "to": "2025-09-18T07:24:31.916Z"
+              }
+            },
+            "from": "2025-09-18T07:18:23.359Z",
+            "to": "2025-09-18T07:24:31.916Z",
+            "interval": "15s"
+          },
+          "grafana_response": {
+            "results": {
+              "A": {
+                "status": 200,
+                "frames": [
+                  {
+                    "schema": {
+                      "refId": "A",
+                      "meta": {
+                        "typeVersion": [
+                          0,
+                          0
+                        ],
+                        "executedQueryString": "Expr: increase(logback_events_total{service=\"$service\", system_under_test=\"$system_under_test\", test_environment=\"$test_environment\"}[1m])\nStep: 30s"
+                      },
+                      "fields": []
+                    },
+                    "data": {
+                      "values": []
+                    }
+                  }
+                ]
+              }
+            }
+          },
+          "database_metrics": [
+            {
+              "metric_name": "debug",
+              "unit": "short",
+              "data_points": "28",
+              "min_value": 0,
+              "max_value": 0,
+              "avg_value": 0
+            },
+            {
+              "metric_name": "error",
+              "unit": "short",
+              "data_points": "28",
+              "min_value": 0,
+              "max_value": 96.0017454862816,
+              "avg_value": 24.6611511115718
+            },
+            {
+              "metric_name": "info",
+              "unit": "short",
+              "data_points": "28",
+              "min_value": 0,
+              "max_value": 21625.3954401658,
+              "avg_value": 14066.2596574042
+            },
+            {
+              "metric_name": "trace",
+              "unit": "short",
+              "data_points": "28",
+              "min_value": 0,
+              "max_value": 0,
+              "avg_value": 0
+            },
+            {
+              "metric_name": "warn",
+              "unit": "short",
+              "data_points": "28",
+              "min_value": 0,
+              "max_value": 96.0017454862816,
+              "avg_value": 24.8571357850379
+            }
+          ]
+        }
+      },
+      "panel_queries": {}
+    }
+  }
+}

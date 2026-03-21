@@ -1,0 +1,23 @@
+{
+  "name": "@perfana/mcp",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Perfana MCP server — exposes test run data to Claude Desktop",
+  "type": "module",
+  "main": "dist/index.js",
+  "scripts": {
+    "dev": "tsc --watch",
+    "build": "tsc",
+    "start": "node dist/index.js",
+    "type-check": "tsc --noEmit",
+    "test": "node --test dist/helpers.test.js dist/perfana-client.test.js"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.7.0",
+    "zod": "^3.22.4"
+  },
+  "devDependencies": {
+    "typescript": "^5.3.3",
+    "@types/node": "^20.11.0"
+  }
+}

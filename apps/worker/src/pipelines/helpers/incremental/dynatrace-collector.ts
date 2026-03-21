@@ -1,0 +1,338 @@
+/**
+ * Dynatrace Metrics Collector for Incremental Metrics Pipeline
+ *
+ * Handles Dynatrace metrics collection for specific time ranges.
+ * Responsible for:
+ * - Loading Dynatrace queries for test runs
+ * - Executing queries with time range override
+ * - Processing results through data processor and batch processor
+ */
+
+import type { Logger } from 'pino';
+import { WorkerDatabaseService } from '../../../common/database.service.js';
+import { DynatraceAPIClient } from '../../../services/dynatrace/DynatraceAPIClient.js';
+import { DynatraceRepository } from '../../../services/dynatrace/DynatraceRepository.js';
+import { DataProcessor } from '../../../services/dynatrace/DataProcessor.js';
+import { DynatraceQueryConfig } from '../../../types/dynatrace/index.js';
+import type { CollectionResult } from './types.js';
+import type { BatchProcessor } from './batch-processor.js';
+import type { MetricProcessor, TestRunContext } from './metric-processor.js';
+
+/**
+ * Test run data with fields needed for Dynatrace collection
+ */
+interface TestRunData {
+  testRunId: string;
+  systemUnderTestId: string;
+  workload: string;
+  testEnvironment: string;
+  startTime?: Date;
+  rampUp?: number;
+  organizationId?: string | null;
+  teamId?: string | null;
+}
+
+/**
+ * Dynatrace Collector
+ *
+ * Manages Dynatrace metrics collection for the Incremental Metrics Pipeline.
+ */
+export class DynatraceCollector {
+  private dynatraceRepository: DynatraceRepository;
+  private dataProcessor: DataProcessor;
+
+  constructor(
+    private logger: Logger,
+    private db: WorkerDatabaseService,
+    private metricProcessor: MetricProcessor,
+    private batchProcessor: BatchProcessor
+  ) {
+    this.dynatraceRepository = new DynatraceRepository(db);
+    this.dataProcessor = new DataProcessor();
+  }
+
+  /**
+   * Collect Dynatrace metrics for a specific time range
+   *
+   * @param testRunId - Test run ID
+   * @param testRun - Test run context
+   * @param dynatraceConfigId - Dynatrace config ID (optional)
+   * @param applicationDashboardIds - Application dashboard IDs to collect (optional)
+   * @param fromTime - Start of time range
+   * @param toTime - End of time range
+   * @returns Collection result with data points and errors
+   */
+  async collect(
+    testRunId: string,
+    testRun: TestRunData,
+    dynatraceConfigId: string | undefined,
+    applicationDashboardIds: string[] | undefined,
+    fromTime: Date,
+    toTime: Date
+  ): Promise<CollectionResult> {
+    const startTime = Date.now();
+    const errors: string[] = [];
+
+    try {
+      this.logger.info(`Collecting Dynatrace metrics for time range`);
+
+      // Load Dynatrace queries
+      const queryConfigs = await this.loadDynatraceQueries(
+        testRun,
+        dynatraceConfigId,
+        applicationDashboardIds
+      );
+
+      if (queryConfigs.length === 0) {
+        this.logger.info(
+          `No Dynatrace queries configured for ${testRun.systemUnderTestId}.${testRun.testEnvironment}.${testRun.workload}`
+        );
+        return {
+          success: true,
+          dataPoints: 0,
+          errors: [],
+          duration: Date.now() - startTime,
+        };
+      }
+
+      this.logger.info(`Found ${queryConfigs.length} Dynatrace queries to execute`);
+
+      // Group queries by dynatrace_config_id
+      const queriesByConfig = this.groupQueriesByConfig(queryConfigs);
+
+      this.logger.info(`Executing queries across ${queriesByConfig.size} Dynatrace instance(s)`);
+
+      // Execute queries and collect results
+      const result = await this.executeQueriesAcrossInstances(
+        queriesByConfig,
+        testRunId,
+        testRun,
+        fromTime,
+        toTime,
+        errors
+      );
+
+      return {
+        success: errors.length === 0,
+        dataPoints: result.totalDataPoints,
+        errors,
+        duration: Date.now() - startTime,
+        maxDataTimestamp: result.maxDataTimestamp,
+      };
+    } catch (error) {
+      const duration = Date.now() - startTime;
+      const errorMessage = error instanceof Error ? error.message : 'Unknown Dynatrace collection error';
+      this.logger.error(`Dynatrace collection failed: ${errorMessage}`);
+      errors.push(errorMessage);
+
+      return {
+        success: false,
+        dataPoints: 0,
+        errors,
+        duration,
+      };
+    }
+  }
+
+  /**
+   * Load Dynatrace queries from database
+   */
+  private async loadDynatraceQueries(
+    testRun: TestRunData,
+    dynatraceConfigId: string | undefined,
+    applicationDashboardIds: string[] | undefined
+  ): Promise<any[]> {
+    let query = `
+      SELECT
+        dq.id,
+        dq.system_under_test_id,
+        dq.test_environment,
+        dq.workload,
+        dq.dashboard_label,
+        dq.panel_title,
+        dq.query,
+        dq.match_metric_pattern,
+        dq.omit_group_by_variable_from_metric_name,
+        dq.template_variables,
+        dq.application_dashboard_id,
+        dq.panel_id,
+        dq.metric_unit,
+        dq.metric_name,
+        dq.dynatrace_config_id
+      FROM dynatrace_queries dq
+      WHERE dq.system_under_test_id = $1
+        AND dq.test_environment = $2
+        AND dq.workload = $3
+    `;
+
+    const params: any[] = [testRun.systemUnderTestId, testRun.testEnvironment, testRun.workload];
+
+    if (dynatraceConfigId) {
+      query += ` AND dq.dynatrace_config_id = $4`;
+      params.push(dynatraceConfigId);
+    }
+
+    if (applicationDashboardIds && applicationDashboardIds.length > 0) {
+      const appDashboardParam = dynatraceConfigId ? '$5' : '$4';
+      query += ` AND dq.application_dashboard_id = ANY(${appDashboardParam})`;
+      params.push(applicationDashboardIds);
+    }
+
+    return this.db.query<any>(query, params);
+  }
+
+  /**
+   * Group queries by Dynatrace config ID
+   */
+  private groupQueriesByConfig(queryConfigs: any[]): Map<string, DynatraceQueryConfig[]> {
+    const queriesByConfig = new Map<string, DynatraceQueryConfig[]>();
+
+    for (const config of queryConfigs) {
+      const configId = config.dynatrace_config_id;
+      if (!queriesByConfig.has(configId)) {
+        queriesByConfig.set(configId, []);
+      }
+
+      // Process query: replace template variables and clean time range
+      let processedQuery = config.query;
+      if (config.template_variables && Object.keys(config.template_variables).length > 0) {
+        processedQuery = this.metricProcessor.replaceTemplateVariables(processedQuery, config.template_variables);
+      }
+      processedQuery = this.metricProcessor.cleanTimeRangeFromQuery(processedQuery);
+
+      // Convert database row to DynatraceQueryConfig
+      const queryConfig: DynatraceQueryConfig = {
+        tileId: config.id,
+        tileTitle: config.panel_title,
+        query: processedQuery,
+        visualization: 'timeseries',
+        dashboardLabel: config.dashboard_label,
+        applicationDashboardId: config.application_dashboard_id,
+        querySettings: {},
+        matchMetricPattern: config.match_metric_pattern,
+        omitGroupByVariableFromMetricName: config.omit_group_by_variable_from_metric_name || [],
+        panelId: config.panel_id,
+        metricName: config.metric_name,
+        dynatraceConfigId: config.dynatrace_config_id,
+      };
+
+      queriesByConfig.get(configId)!.push(queryConfig);
+    }
+
+    return queriesByConfig;
+  }
+
+  /**
+   * Execute queries across all Dynatrace instances
+   */
+  private async executeQueriesAcrossInstances(
+    queriesByConfig: Map<string, DynatraceQueryConfig[]>,
+    testRunId: string,
+    testRun: TestRunData,
+    fromTime: Date,
+    toTime: Date,
+    errors: string[]
+  ): Promise<{ totalDataPoints: number; maxDataTimestamp?: Date }> {
+    let totalDataPoints = 0;
+    let maxDataTimestamp: Date | undefined;
+
+    const testRunContext: TestRunContext = {
+      startTime: testRun.startTime,
+      rampUp: testRun.rampUp,
+      organizationId: testRun.organizationId || null,
+      teamId: testRun.teamId || null,
+    };
+
+    for (const [configId, queries] of queriesByConfig) {
+      try {
+        // Load Dynatrace config
+        const dynatraceConfig = await this.dynatraceRepository.getDynatraceConfigById(configId);
+
+        if (!dynatraceConfig) {
+          const errorMsg = `Dynatrace configuration not found for id: ${configId}`;
+          this.logger.error(errorMsg);
+          errors.push(errorMsg);
+          continue;
+        }
+
+        this.logger.info(
+          `Executing ${queries.length} queries on ${dynatraceConfig.label} (${dynatraceConfig.host})`
+        );
+
+        // Create API client
+        const apiClient = new DynatraceAPIClient({
+          host: dynatraceConfig.host,
+          apiToken: dynatraceConfig.apiToken,
+          platformToken: dynatraceConfig.platformApiToken || '',
+          dynatraceType: dynatraceConfig.dynatraceType,
+          maxConcurrent: 5,
+        });
+
+        try {
+          // Execute queries with time range override
+          const queryResults = await apiClient.executeBatchQueries(queries, fromTime, toTime);
+
+          // Process results
+          const { metricsDocuments } = await this.dataProcessor.processDynatraceResults(
+            queryResults.map((result, index) => ({
+              tileId: result.tileId,
+              tileTitle: result.tileTitle,
+              visualization: queries[index].visualization,
+              query: queries[index].query,
+              matchMetricPattern: queries[index].matchMetricPattern,
+              omitGroupByVariableFromMetricName: queries[index].omitGroupByVariableFromMetricName || [],
+              dashboardLabel: queries[index].dashboardLabel,
+              applicationDashboardId: queries[index].applicationDashboardId,
+              panelId: queries[index].panelId,
+              metricName: queries[index].metricName,
+              result: result.result,
+              error: result.error,
+            })),
+            testRunId,
+            toTime,
+            testRun
+          );
+
+          // Process metrics documents using batch processor
+          const batchResult = await this.batchProcessor.processDynatraceDocuments(
+            metricsDocuments,
+            testRunContext
+          );
+
+          // Accumulate results
+          totalDataPoints += batchResult.totalRecords;
+          errors.push(...batchResult.errors);
+
+          // Track max timestamp
+          if (batchResult.maxDataTimestamp) {
+            if (!maxDataTimestamp || batchResult.maxDataTimestamp > maxDataTimestamp) {
+              maxDataTimestamp = batchResult.maxDataTimestamp;
+            }
+          }
+
+          if (batchResult.totalRecords > 0) {
+            this.logger.info(
+              `Saved ${batchResult.totalRecords} Dynatrace metric records from ${dynatraceConfig.label}`
+            );
+          }
+        } finally {
+          await apiClient.close();
+        }
+      } catch (error) {
+        const errorMsg = error instanceof Error
+          ? error.message
+          : `Unknown error for Dynatrace config ${configId}`;
+        this.logger.error(`Failed to collect from Dynatrace config ${configId}: ${errorMsg}`);
+        errors.push(errorMsg);
+      }
+    }
+
+    if (maxDataTimestamp) {
+      this.logger.info(
+        `Dynatrace collection complete: ${totalDataPoints} data points, maxDataTimestamp: ${maxDataTimestamp.toISOString()}`
+      );
+    }
+
+    return { totalDataPoints, maxDataTimestamp };
+  }
+}

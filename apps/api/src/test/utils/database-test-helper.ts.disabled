@@ -1,0 +1,399 @@
+import { Test, TestingModule } from '@nestjs/testing';
+import { TypeOrmModule } from '@nestjs/typeorm';
+import { ConfigModule } from '@nestjs/config';
+import { JwtModule } from '@nestjs/jwt';
+import { DatabaseFactoryService, SupabaseDatabaseAdapter, IDatabaseAdapter } from '../../common/database-factory.service';
+import { NativeDatabaseService } from '../../common/native-database.service';
+import { DatabaseService } from '../../common/database.service';
+import { NativeAuthService } from '../../modules/auth/native-auth.service';
+import { RealtimeService } from '../../modules/realtime/realtime.service';
+import { User, TestRun, ApiKey, TestRunConfiguration } from '../../entities';
+import { TestDataFactory } from './test-data-factory';
+
+export interface DatabaseTestContext {
+  module: TestingModule;
+  databaseFactory: DatabaseFactoryService;
+  nativeService: NativeDatabaseService;
+  supabaseAdapter: SupabaseDatabaseAdapter;
+  authService: NativeAuthService;
+  realtimeService: RealtimeService;
+}
+
+export interface TestResults {
+  operation: string;
+  nativeResult?: any;
+  supabaseResult?: any;
+  duration: number;
+  success: boolean;
+  error?: string;
+}
+
+export interface ComparisonReport {
+  totalTests: number;
+  passedTests: number;
+  failedTests: number;
+  results: TestResults[];
+  summary: {
+    averageDuration: number;
+    successRate: number;
+    criticalFailures: string[];
+  };
+}
+
+export class DatabaseTestHelper {
+  private static testContext: DatabaseTestContext;
+
+  static async setupTestEnvironment(): Promise<DatabaseTestContext> {
+    const moduleFixture: TestingModule = await Test.createTestingModule({
+      imports: [
+        ConfigModule.forRoot({
+          isGlobal: true,
+          envFilePath: ['.env.test', '.env.local', '.env'],
+        }),
+        TypeOrmModule.forRootAsync({
+          useFactory: async () => ({
+            type: 'postgres',
+            host: process.env.DB_HOST || 'localhost',
+            port: parseInt(process.env.DB_PORT || '5432'),
+            username: process.env.DB_USERNAME || 'perfana_user',
+            password: process.env.DB_PASSWORD || 'perfana_password',
+            database: process.env.DB_NAME || 'perfana_test',
+            entities: [User, TestRun, ApiKey, TestRunConfiguration],
+            synchronize: true,
+            dropSchema: true,
+            logging: process.env.NODE_ENV === 'test' ? false : ['error'],
+          }),
+        }),
+        TypeOrmModule.forFeature([User, TestRun, ApiKey, TestRunConfiguration]),
+        JwtModule.register({
+          secret: process.env.JWT_SECRET || 'test-secret',
+          signOptions: { expiresIn: '1h' },
+        }),
+      ],
+      providers: [
+        DatabaseFactoryService,
+        NativeDatabaseService,
+        DatabaseService,
+        SupabaseDatabaseAdapter,
+        NativeAuthService,
+        RealtimeService,
+      ],
+    }).compile();
+
+    this.testContext = {
+      module: moduleFixture,
+      databaseFactory: moduleFixture.get<DatabaseFactoryService>(DatabaseFactoryService),
+      nativeService: moduleFixture.get<NativeDatabaseService>(NativeDatabaseService),
+      supabaseAdapter: moduleFixture.get<SupabaseDatabaseAdapter>(SupabaseDatabaseAdapter),
+      authService: moduleFixture.get<NativeAuthService>(NativeAuthService),
+      realtimeService: moduleFixture.get<RealtimeService>(RealtimeService),
+    };
+
+    return this.testContext;
+  }
+
+  static async teardownTestEnvironment(): Promise<void> {
+    if (this.testContext?.module) {
+      await this.testContext.module.close();
+    }
+  }
+
+  static getTestContext(): DatabaseTestContext {
+    if (!this.testContext) {
+      throw new Error('Test context not initialized. Call setupTestEnvironment() first.');
+    }
+    return this.testContext;
+  }
+
+  // Generic method to compare operations between native and supabase
+  static async compareOperation<T>(
+    operation: string,
+    nativeOperation: () => Promise<T>,
+    supabaseOperation?: () => Promise<T>
+  ): Promise<TestResults> {
+    const startTime = Date.now();
+    let success = false;
+    let nativeResult: T | undefined;
+    let supabaseResult: T | undefined;
+    let error: string | undefined;
+
+    try {
+      // Execute native operation
+      nativeResult = await nativeOperation();
+
+      // Execute supabase operation if provided
+      if (supabaseOperation) {
+        supabaseResult = await supabaseOperation();
+
+        // Compare results
+        success = this.deepEqual(nativeResult, supabaseResult);
+        if (!success) {
+          error = 'Results differ between native and supabase implementations';
+        }
+      } else {
+        // For native-only tests, success is based on operation completion
+        success = nativeResult !== undefined && nativeResult !== null;
+      }
+    } catch (err) {
+      success = false;
+      error = err instanceof Error ? err.message : 'Unknown error occurred';
+    }
+
+    return {
+      operation,
+      nativeResult,
+      supabaseResult,
+      duration: Date.now() - startTime,
+      success,
+      error,
+    };
+  }
+
+  // Deep equality check for comparing results
+  private static deepEqual(obj1: any, obj2: any): boolean {
+    if (obj1 === obj2) return true;
+
+    if (obj1 == null || obj2 == null) return obj1 === obj2;
+
+    if (typeof obj1 !== typeof obj2) return false;
+
+    if (typeof obj1 !== 'object') return obj1 === obj2;
+
+    if (Array.isArray(obj1) !== Array.isArray(obj2)) return false;
+
+    const keys1 = Object.keys(obj1);
+    const keys2 = Object.keys(obj2);
+
+    if (keys1.length !== keys2.length) return false;
+
+    for (const key of keys1) {
+      if (!keys2.includes(key)) return false;
+      if (!this.deepEqual(obj1[key], obj2[key])) return false;
+    }
+
+    return true;
+  }
+
+  // Performance testing utilities
+  static async measurePerformance<T>(
+    operation: () => Promise<T>,
+    iterations = 100
+  ): Promise<{ averageDuration: number; results: T[] }> {
+    const results: T[] = [];
+    const durations: number[] = [];
+
+    for (let i = 0; i < iterations; i++) {
+      const startTime = Date.now();
+      const result = await operation();
+      const duration = Date.now() - startTime;
+
+      results.push(result);
+      durations.push(duration);
+    }
+
+    const averageDuration = durations.reduce((sum, d) => sum + d, 0) / durations.length;
+
+    return { averageDuration, results };
+  }
+
+  // Bulk test data creation
+  static async createBulkTestData(
+    service: IDatabaseAdapter,
+    userCount = 5,
+    testRunsPerUser = 3,
+    configsPerTestRun = 5
+  ): Promise<{
+    users: any[];
+    testRuns: any[];
+    configurations: any[];
+    apiKeys: any[];
+  }> {
+    const users: any[] = [];
+    const testRuns: any[] = [];
+    const configurations: any[] = [];
+    const apiKeys: any[] = [];
+
+    // Create users
+    for (let i = 0; i < userCount; i++) {
+      const userData = TestDataFactory.createUser({
+        email: `bulk-user-${i}@test.com`,
+        passwordHash: 'hashedPassword123'
+      });
+      const user = await service.createUser(userData);
+      users.push(user);
+
+      // Create API key for user
+      const apiKeyData = TestDataFactory.createApiKey({ createdBy: user.id });
+      const apiKey = await service.createApiKey(apiKeyData);
+      apiKeys.push(apiKey);
+
+      // Create test runs for user
+      for (let j = 0; j < testRunsPerUser; j++) {
+        const testRunData = TestDataFactory.createTestRun({
+          testRunId: `bulk-test-run-${i}-${j}`,
+          applicationName: `bulk-app-${i}`,
+          createdBy: user.id,
+        });
+        const testRun = await service.createTestRun(testRunData);
+        testRuns.push(testRun);
+
+        // Create configurations for test run
+        for (let k = 0; k < configsPerTestRun; k++) {
+          const configData = TestDataFactory.createConfiguration({
+            testRunId: testRun.id,
+            key: `bulk.config.${i}.${j}.${k}`,
+          });
+          const config = await service.createTestRunConfiguration(configData);
+          configurations.push(config);
+        }
+      }
+    }
+
+    return { users, testRuns, configurations, apiKeys };
+  }
+
+  // Regression test data setup
+  static async setupRegressionData(service: IDatabaseAdapter): Promise<{
+    user: any;
+    testRuns: any[];
+    apiKey: any;
+    configurations: any[];
+  }> {
+    // Create deterministic data for regression tests
+    const userData = TestDataFactory.createDeterministicUser();
+    userData.passwordHash = 'deterministic-hash-123';
+    const user = await service.createUser(userData);
+
+    const apiKeyData = TestDataFactory.createDeterministicApiKey();
+    apiKeyData.createdBy = user.id;
+    const apiKey = await service.createApiKey(apiKeyData);
+
+    const testRuns: any[] = [];
+    const configurations: any[] = [];
+
+    // Create 3 deterministic test runs
+    for (let i = 1; i <= 3; i++) {
+      const testRunData = TestDataFactory.createDeterministicTestRun(`-${i}`);
+      testRunData.createdBy = user.id;
+      const testRun = await service.createTestRun(testRunData);
+      testRuns.push(testRun);
+
+      // Create standard configurations for each test run
+      const standardConfigs = [
+        { key: 'app.name', value: testRunData.applicationName },
+        { key: 'app.version', value: testRunData.version! },
+        { key: 'env.name', value: testRunData.environment },
+        { key: 'test.timeout', value: '300000' },
+        { key: 'database.url', value: 'postgres://localhost:5432/test' },
+      ];
+
+      for (const configData of standardConfigs) {
+        const config = TestDataFactory.createDeterministicConfiguration(
+          configData.key,
+          configData.value
+        );
+        config.testRunId = testRun.id;
+        const createdConfig = await service.createTestRunConfiguration(config);
+        configurations.push(createdConfig);
+      }
+    }
+
+    return { user, testRuns, apiKey, configurations };
+  }
+
+  // Data validation utilities
+  static validateDataIntegrity(data: {
+    users: any[];
+    testRuns: any[];
+    configurations: any[];
+    apiKeys: any[];
+  }): { isValid: boolean; errors: string[] } {
+    const errors: string[] = [];
+
+    // Validate users
+    for (const user of data.users) {
+      if (!TestDataFactory.validateUser(user)) {
+        errors.push(`Invalid user: ${JSON.stringify(user)}`);
+      }
+    }
+
+    // Validate test runs
+    for (const testRun of data.testRuns) {
+      if (!TestDataFactory.validateTestRun(testRun)) {
+        errors.push(`Invalid test run: ${JSON.stringify(testRun)}`);
+      }
+
+      // Check if createdBy references a valid user
+      const userExists = data.users.some(u => u.id === testRun.createdBy);
+      if (!userExists) {
+        errors.push(`Test run ${testRun.id} references non-existent user ${testRun.createdBy}`);
+      }
+    }
+
+    // Validate configurations
+    for (const config of data.configurations) {
+      if (!TestDataFactory.validateConfiguration(config)) {
+        errors.push(`Invalid configuration: ${JSON.stringify(config)}`);
+      }
+
+      // Check if testRunId references a valid test run
+      const testRunExists = data.testRuns.some(tr => tr.id === config.testRunId);
+      if (!testRunExists) {
+        errors.push(`Configuration ${config.id} references non-existent test run ${config.testRunId}`);
+      }
+    }
+
+    // Validate API keys
+    for (const apiKey of data.apiKeys) {
+      if (!TestDataFactory.validateApiKey(apiKey)) {
+        errors.push(`Invalid API key: ${JSON.stringify(apiKey)}`);
+      }
+
+      // Check if createdBy references a valid user
+      const userExists = data.users.some(u => u.id === apiKey.createdBy);
+      if (!userExists) {
+        errors.push(`API key ${apiKey.id} references non-existent user ${apiKey.createdBy}`);
+      }
+    }
+
+    return {
+      isValid: errors.length === 0,
+      errors,
+    };
+  }
+
+  // Generate comparison report
+  static generateComparisonReport(results: TestResults[]): ComparisonReport {
+    const totalTests = results.length;
+    const passedTests = results.filter(r => r.success).length;
+    const failedTests = totalTests - passedTests;
+
+    const totalDuration = results.reduce((sum, r) => sum + r.duration, 0);
+    const averageDuration = totalDuration / totalTests;
+
+    const successRate = (passedTests / totalTests) * 100;
+
+    const criticalFailures = results
+      .filter(r => !r.success && r.operation.includes('create'))
+      .map(r => `${r.operation}: ${r.error}`);
+
+    return {
+      totalTests,
+      passedTests,
+      failedTests,
+      results,
+      summary: {
+        averageDuration,
+        successRate,
+        criticalFailures,
+      },
+    };
+  }
+
+  // Cleanup utilities
+  static async cleanupTestData(_service: IDatabaseAdapter, prefix = 'test-'): Promise<void> {
+    // Note: This would require implementing delete methods in the service
+    // For now, we rely on the dropSchema: true option in TypeORM setup
+    console.log(`Cleanup test data with prefix: ${prefix}`);
+  }
+}

@@ -1,0 +1,5787 @@
+{
+  "test_run_id": "MyAfterburner-acc-loadTest-00002",
+  "test_run_data": {
+    "start_time": "2025-09-18T07:18:23.359Z",
+    "end_time": "2025-09-18T07:24:31.916Z",
+    "system_under_test": "MyAfterburner",
+    "test_environment": "acc"
+  },
+  "grafana_config": {
+    "working_url": "http://grafana:3000",
+    "org_id": "1"
+  },
+  "fetched_at": "2025-09-25T18:51:34.631Z",
+  "results": {
+    "panel_3_request_0": {
+      "panel_info": {
+        "panel_id": 3,
+        "panel_title": "Active users",
+        "dashboard_label": "Gatling AfterburnerBasicSimulation",
+        "dashboard_uid": "gatling-overview-influxdb"
+      },
+      "variable_context": {
+        "system_under_test": "MyAfterburner",
+        "test_environment": "acc",
+        "simulation": "AfterburnerBasicSimulation"
+      },
+      "original_request": {
+        "method": "POST",
+        "endpoint": "/api/ds/query",
+        "request_body": {
+          "to": "1758180271916",
+          "from": "1758179903359",
+          "queries": [
+            {
+              "hide": false,
+              "tags": [
+                {
+                  "key": "testEnvironment::tag",
+                  "value": "/^acc$/",
+                  "operator": "=~"
+                },
+                {
+                  "key": "systemUnderTest::tag",
+                  "value": "/^MyAfterburner$/",
+                  "operator": "=~",
+                  "condition": "AND"
+                }
+              ],
+              "alias": "Total",
+              "query": "select sum(value) from (SELECT max(\"active\") as value FROM \"30d\".\"users\" WHERE (\"testEnvironment\"::tag =~ /^acc$/ AND \"systemUnderTest\"::tag =~ /^MyAfterburner$/) AND time >= 1758179903359ms AND time <= 1758180271916ms GROUP BY time(10s), \"nodeName\"::tag, \"scenario\"::tag) where time >= 1758179903359ms AND time <= 1758180271916ms group by time(10s)",
+              "refId": "A",
+              "policy": "30d",
+              "select": [
+                [
+                  {
+                    "type": "field",
+                    "params": [
+                      "active"
+                    ]
+                  },
+                  {
+                    "type": "max",
+                    "params": []
+                  }
+                ]
+              ],
+              "groupBy": [
+                {
+                  "type": "time",
+                  "params": [
+                    "10s"
+                  ]
+                },
+                {
+                  "type": "tag",
+                  "params": [
+                    "nodeName::tag"
+                  ]
+                },
+                {
+                  "type": "tag",
+                  "params": [
+                    "scenario::tag"
+                  ]
+                },
+                {
+                  "type": "fill",
+                  "params": [
+                    "null"
+                  ]
+                }
+              ],
+              "rawQuery": true,
+              "datasource": {
+                "uid": "influxdb-gatling",
+                "type": "influxdb"
+              },
+              "measurement": "users",
+              "orderByTime": "ASC",
+              "datasourceId": 4,
+              "resultFormat": "time_series"
+            },
+            {
+              "hide": false,
+              "tags": [
+                {
+                  "key": "testEnvironment::tag",
+                  "value": "/^acc$/",
+                  "operator": "=~"
+                },
+                {
+                  "key": "systemUnderTest::tag",
+                  "value": "/^MyAfterburner$/",
+                  "operator": "=~",
+                  "condition": "AND"
+                }
+              ],
+              "alias": "Users for load generator: $tag_nodeName",
+              "query": "select sum(value) from (SELECT max(\"active\") as value FROM \"30d\".\"users\" WHERE (\"testEnvironment\"::tag =~ /^acc$/ AND \"systemUnderTest\"::tag =~ /^MyAfterburner$/) AND time >= 1758179903359ms AND time <= 1758180271916ms GROUP BY time(10s), \"nodeName\"::tag, \"scenario\"::tag) where time >= 1758179903359ms AND time <= 1758180271916ms group by time(10s), \"nodeName\"",
+              "refId": "B",
+              "policy": "30d",
+              "select": [
+                [
+                  {
+                    "type": "field",
+                    "params": [
+                      "active"
+                    ]
+                  },
+                  {
+                    "type": "mean",
+                    "params": []
+                  }
+                ]
+              ],
+              "groupBy": [
+                {
+                  "type": "time",
+                  "params": [
+                    "10s"
+                  ]
+                },
+                {
+                  "type": "tag",
+                  "params": [
+                    "nodeName::tag"
+                  ]
+                },
+                {
+                  "type": "fill",
+                  "params": [
+                    "null"
+                  ]
+                }
+              ],
+              "rawQuery": true,
+              "datasource": {
+                "uid": "influxdb-gatling",
+                "type": "influxdb"
+              },
+              "measurement": "users",
+              "orderByTime": "ASC",
+              "datasourceId": 4,
+              "resultFormat": "time_series"
+            }
+          ]
+        },
+        "path_parameters": {
+          "ds_type": "influxdb",
+          "requestId": "1d0d8cdb-fb93-4386-b132-3538be6fdaa4:3"
+        }
+      },
+      "substituted_request": {
+        "queries": [
+          {
+            "hide": false,
+            "tags": [
+              {
+                "key": "testEnvironment::tag",
+                "value": "/^acc$/",
+                "operator": "=~"
+              },
+              {
+                "key": "systemUnderTest::tag",
+                "value": "/^MyAfterburner$/",
+                "operator": "=~",
+                "condition": "AND"
+              }
+            ],
+            "alias": "Total",
+            "query": "select sum(value) from (SELECT max(\"active\") as value FROM \"30d\".\"users\" WHERE (\"testEnvironment\"::tag =~ /^acc$/ AND \"systemUnderTest\"::tag =~ /^MyAfterburner$/) AND time >= 1758179903359ms AND time <= 1758180271916ms GROUP BY time(10s), \"nodeName\"::tag, \"scenario\"::tag) where time >= 1758179903359ms AND time <= 1758180271916ms group by time(10s)",
+            "refId": "A",
+            "policy": "30d",
+            "select": [
+              [
+                {
+                  "type": "field",
+                  "params": [
+                    "active"
+                  ]
+                },
+                {
+                  "type": "max",
+                  "params": []
+                }
+              ]
+            ],
+            "groupBy": [
+              {
+                "type": "time",
+                "params": [
+                  "10s"
+                ]
+              },
+              {
+                "type": "tag",
+                "params": [
+                  "nodeName::tag"
+                ]
+              },
+              {
+                "type": "tag",
+                "params": [
+                  "scenario::tag"
+                ]
+              },
+              {
+                "type": "fill",
+                "params": [
+                  "null"
+                ]
+              }
+            ],
+            "rawQuery": true,
+            "datasource": {
+              "uid": "influxdb-gatling",
+              "type": "influxdb"
+            },
+            "measurement": "users",
+            "orderByTime": "ASC",
+            "datasourceId": 4,
+            "resultFormat": "time_series"
+          },
+          {
+            "hide": false,
+            "tags": [
+              {
+                "key": "testEnvironment::tag",
+                "value": "/^acc$/",
+                "operator": "=~"
+              },
+              {
+                "key": "systemUnderTest::tag",
+                "value": "/^MyAfterburner$/",
+                "operator": "=~",
+                "condition": "AND"
+              }
+            ],
+            "alias": "Users for load generator: $tag_nodeName",
+            "query": "select sum(value) from (SELECT max(\"active\") as value FROM \"30d\".\"users\" WHERE (\"testEnvironment\"::tag =~ /^acc$/ AND \"systemUnderTest\"::tag =~ /^MyAfterburner$/) AND time >= 1758179903359ms AND time <= 1758180271916ms GROUP BY time(10s), \"nodeName\"::tag, \"scenario\"::tag) where time >= 1758179903359ms AND time <= 1758180271916ms group by time(10s), \"nodeName\"",
+            "refId": "B",
+            "policy": "30d",
+            "select": [
+              [
+                {
+                  "type": "field",
+                  "params": [
+                    "active"
+                  ]
+                },
+                {
+                  "type": "mean",
+                  "params": []
+                }
+              ]
+            ],
+            "groupBy": [
+              {
+                "type": "time",
+                "params": [
+                  "10s"
+                ]
+              },
+              {
+                "type": "tag",
+                "params": [
+                  "nodeName::tag"
+                ]
+              },
+              {
+                "type": "fill",
+                "params": [
+                  "null"
+                ]
+              }
+            ],
+            "rawQuery": true,
+            "datasource": {
+              "uid": "influxdb-gatling",
+              "type": "influxdb"
+            },
+            "measurement": "users",
+            "orderByTime": "ASC",
+            "datasourceId": 4,
+            "resultFormat": "time_series"
+          }
+        ],
+        "range": {
+          "from": "2025-09-18T07:18:23.359Z",
+          "to": "2025-09-18T07:24:31.916Z",
+          "raw": {
+            "from": "2025-09-18T07:18:23.359Z",
+            "to": "2025-09-18T07:24:31.916Z"
+          }
+        },
+        "from": "2025-09-18T07:18:23.359Z",
+        "to": "2025-09-18T07:24:31.916Z",
+        "interval": "15s"
+      },
+      "grafana_response": {
+        "results": {
+          "A": {
+            "status": 200,
+            "frames": [
+              {
+                "schema": {
+                  "name": "Total",
+                  "refId": "A",
+                  "meta": {
+                    "typeVersion": [
+                      0,
+                      0
+                    ],
+                    "custom": null,
+                    "preferredVisualisationType": "graph",
+                    "executedQueryString": "select sum(value) from (SELECT max(\"active\") as value FROM \"30d\".\"users\" WHERE (\"testEnvironment\"::tag =~ /^acc$/ AND \"systemUnderTest\"::tag =~ /^MyAfterburner$/) AND time >= 1758179903359ms AND time <= 1758180271916ms GROUP BY time(10s), \"nodeName\"::tag, \"scenario\"::tag) where time >= 1758179903359ms AND time <= 1758180271916ms group by time(10s)"
+                  },
+                  "fields": [
+                    {
+                      "name": "Time",
+                      "type": "time",
+                      "typeInfo": {
+                        "frame": "time.Time"
+                      }
+                    },
+                    {
+                      "name": "Value",
+                      "type": "number",
+                      "typeInfo": {
+                        "frame": "float64",
+                        "nullable": true
+                      },
+                      "config": {
+                        "displayNameFromDS": "Total"
+                      }
+                    }
+                  ]
+                },
+                "data": {
+                  "values": [
+                    [
+                      1758179900000,
+                      1758179910000,
+                      1758179920000,
+                      1758179930000,
+                      1758179940000,
+                      1758179950000,
+                      1758179960000,
+                      1758179970000,
+                      1758179980000,
+                      1758179990000,
+                      1758180000000,
+                      1758180010000,
+                      1758180020000,
+                      1758180030000,
+                      1758180040000,
+                      1758180050000,
+                      1758180060000,
+                      1758180070000,
+                      1758180080000,
+                      1758180090000,
+                      1758180100000,
+                      1758180110000,
+                      1758180120000,
+                      1758180130000,
+                      1758180140000,
+                      1758180150000,
+                      1758180160000,
+                      1758180170000,
+                      1758180180000,
+                      1758180190000,
+                      1758180200000,
+                      1758180210000,
+                      1758180220000,
+                      1758180230000,
+                      1758180240000,
+                      1758180250000,
+                      1758180260000,
+                      1758180270000
+                    ],
+                    [
+                      null,
+                      2,
+                      0,
+                      0,
+                      0,
+                      0,
+                      0,
+                      88,
+                      88,
+                      87,
+                      86,
+                      86,
+                      88,
+                      86,
+                      87,
+                      88,
+                      87,
+                      87,
+                      87,
+                      87,
+                      87,
+                      86,
+                      87,
+                      87,
+                      86,
+                      87,
+                      86,
+                      87,
+                      87,
+                      87,
+                      86,
+                      88,
+                      87,
+                      86,
+                      86,
+                      87,
+                      87,
+                      13
+                    ]
+                  ]
+                }
+              }
+            ]
+          },
+          "B": {
+            "status": 200,
+            "frames": [
+              {
+                "schema": {
+                  "name": "Users for load generator: 56d608be69a9",
+                  "refId": "B",
+                  "meta": {
+                    "typeVersion": [
+                      0,
+                      0
+                    ],
+                    "custom": null,
+                    "preferredVisualisationType": "graph",
+                    "executedQueryString": "select sum(value) from (SELECT max(\"active\") as value FROM \"30d\".\"users\" WHERE (\"testEnvironment\"::tag =~ /^acc$/ AND \"systemUnderTest\"::tag =~ /^MyAfterburner$/) AND time >= 1758179903359ms AND time <= 1758180271916ms GROUP BY time(10s), \"nodeName\"::tag, \"scenario\"::tag) where time >= 1758179903359ms AND time <= 1758180271916ms group by time(10s), \"nodeName\""
+                  },
+                  "fields": [
+                    {
+                      "name": "Time",
+                      "type": "time",
+                      "typeInfo": {
+                        "frame": "time.Time"
+                      }
+                    },
+                    {
+                      "name": "Value",
+                      "type": "number",
+                      "typeInfo": {
+                        "frame": "float64",
+                        "nullable": true
+                      },
+                      "labels": {
+                        "nodeName": "56d608be69a9"
+                      },
+                      "config": {
+                        "displayNameFromDS": "Users for load generator: 56d608be69a9"
+                      }
+                    }
+                  ]
+                },
+                "data": {
+                  "values": [
+                    [
+                      1758179900000,
+                      1758179910000,
+                      1758179920000,
+                      1758179930000,
+                      1758179940000,
+                      1758179950000,
+                      1758179960000,
+                      1758179970000,
+                      1758179980000,
+                      1758179990000,
+                      1758180000000,
+                      1758180010000,
+                      1758180020000,
+                      1758180030000,
+                      1758180040000,
+                      1758180050000,
+                      1758180060000,
+                      1758180070000,
+                      1758180080000,
+                      1758180090000,
+                      1758180100000,
+                      1758180110000,
+                      1758180120000,
+                      1758180130000,
+                      1758180140000,
+                      1758180150000,
+                      1758180160000,
+                      1758180170000,
+                      1758180180000,
+                      1758180190000,
+                      1758180200000,
+                      1758180210000,
+                      1758180220000,
+                      1758180230000,
+                      1758180240000,
+                      1758180250000,
+                      1758180260000,
+                      1758180270000
+                    ],
+                    [
+                      null,
+                      2,
+                      0,
+                      0,
+                      0,
+                      0,
+                      0,
+                      88,
+                      88,
+                      87,
+                      86,
+                      86,
+                      88,
+                      86,
+                      87,
+                      88,
+                      87,
+                      87,
+                      87,
+                      87,
+                      87,
+                      86,
+                      87,
+                      87,
+                      86,
+                      87,
+                      86,
+                      87,
+                      87,
+                      87,
+                      86,
+                      88,
+                      87,
+                      86,
+                      86,
+                      87,
+                      87,
+                      13
+                    ]
+                  ]
+                }
+              }
+            ]
+          }
+        }
+      },
+      "timestamp": "2025-09-25T18:51:34.518Z"
+    },
+    "panel_6_request_0": {
+      "panel_info": {
+        "panel_id": 6,
+        "panel_title": "Passed requests per second",
+        "dashboard_label": "Gatling AfterburnerBasicSimulation",
+        "dashboard_uid": "gatling-overview-influxdb"
+      },
+      "variable_context": {
+        "system_under_test": "MyAfterburner",
+        "test_environment": "acc",
+        "simulation": "AfterburnerBasicSimulation"
+      },
+      "original_request": {
+        "method": "POST",
+        "endpoint": "/api/ds/query",
+        "request_body": {
+          "to": "1758180271916",
+          "from": "1758179903359",
+          "queries": [
+            {
+              "tags": [
+                {
+                  "key": "simulation",
+                  "value": "/^AfterburnerBasicSimulation$/",
+                  "operator": "=~"
+                },
+                {
+                  "key": "testEnvironment",
+                  "value": "/^acc$/",
+                  "operator": "=~",
+                  "condition": "AND"
+                },
+                {
+                  "key": "systemUnderTest",
+                  "value": "/^MyAfterburner$/",
+                  "operator": "=~",
+                  "condition": "AND"
+                },
+                {
+                  "key": "result",
+                  "value": "OK",
+                  "operator": "=",
+                  "condition": "AND"
+                }
+              ],
+              "alias": "$tag_name",
+              "query": "SELECT count(\"duration\")  / 10 FROM \"30d\".\"requests\" WHERE (\"simulation\" =~ /^AfterburnerBasicSimulation$/ AND \"testEnvironment\" =~ /^acc$/ AND \"systemUnderTest\" =~ /^MyAfterburner$/ AND \"result\" = 'OK') AND time >= 1758179903359ms AND time <= 1758180271916ms GROUP BY time(10s), \"name\"",
+              "refId": "A",
+              "policy": "30d",
+              "select": [
+                [
+                  {
+                    "type": "field",
+                    "params": [
+                      "duration"
+                    ]
+                  },
+                  {
+                    "type": "count",
+                    "params": []
+                  },
+                  {
+                    "type": "math",
+                    "params": [
+                      " / 10"
+                    ]
+                  }
+                ]
+              ],
+              "groupBy": [
+                {
+                  "type": "time",
+                  "params": [
+                    "10s"
+                  ]
+                },
+                {
+                  "type": "tag",
+                  "params": [
+                    "name"
+                  ]
+                }
+              ],
+              "rawQuery": true,
+              "datasource": {
+                "uid": "influxdb-gatling",
+                "type": "influxdb"
+              },
+              "measurement": "requests",
+              "orderByTime": "ASC",
+              "datasourceId": 4,
+              "resultFormat": "time_series"
+            }
+          ]
+        },
+        "path_parameters": {
+          "ds_type": "influxdb",
+          "requestId": "1d0d8cdb-fb93-4386-b132-3538be6fdaa4:6"
+        }
+      },
+      "substituted_request": {
+        "queries": [
+          {
+            "tags": [
+              {
+                "key": "simulation",
+                "value": "/^AfterburnerBasicSimulation$/",
+                "operator": "=~"
+              },
+              {
+                "key": "testEnvironment",
+                "value": "/^acc$/",
+                "operator": "=~",
+                "condition": "AND"
+              },
+              {
+                "key": "systemUnderTest",
+                "value": "/^MyAfterburner$/",
+                "operator": "=~",
+                "condition": "AND"
+              },
+              {
+                "key": "result",
+                "value": "OK",
+                "operator": "=",
+                "condition": "AND"
+              }
+            ],
+            "alias": "$tag_name",
+            "query": "SELECT count(\"duration\")  / 10 FROM \"30d\".\"requests\" WHERE (\"simulation\" =~ /^AfterburnerBasicSimulation$/ AND \"testEnvironment\" =~ /^acc$/ AND \"systemUnderTest\" =~ /^MyAfterburner$/ AND \"result\" = 'OK') AND time >= 1758179903359ms AND time <= 1758180271916ms GROUP BY time(10s), \"name\"",
+            "refId": "A",
+            "policy": "30d",
+            "select": [
+              [
+                {
+                  "type": "field",
+                  "params": [
+                    "duration"
+                  ]
+                },
+                {
+                  "type": "count",
+                  "params": []
+                },
+                {
+                  "type": "math",
+                  "params": [
+                    " / 10"
+                  ]
+                }
+              ]
+            ],
+            "groupBy": [
+              {
+                "type": "time",
+                "params": [
+                  "10s"
+                ]
+              },
+              {
+                "type": "tag",
+                "params": [
+                  "name"
+                ]
+              }
+            ],
+            "rawQuery": true,
+            "datasource": {
+              "uid": "influxdb-gatling",
+              "type": "influxdb"
+            },
+            "measurement": "requests",
+            "orderByTime": "ASC",
+            "datasourceId": 4,
+            "resultFormat": "time_series"
+          }
+        ],
+        "range": {
+          "from": "2025-09-18T07:18:23.359Z",
+          "to": "2025-09-18T07:24:31.916Z",
+          "raw": {
+            "from": "2025-09-18T07:18:23.359Z",
+            "to": "2025-09-18T07:24:31.916Z"
+          }
+        },
+        "from": "2025-09-18T07:18:23.359Z",
+        "to": "2025-09-18T07:24:31.916Z",
+        "interval": "15s"
+      },
+      "grafana_response": {
+        "results": {
+          "A": {
+            "status": 200,
+            "frames": [
+              {
+                "schema": {
+                  "name": "database_call",
+                  "refId": "A",
+                  "meta": {
+                    "typeVersion": [
+                      0,
+                      0
+                    ],
+                    "custom": null,
+                    "preferredVisualisationType": "graph",
+                    "executedQueryString": "SELECT count(\"duration\")  / 10 FROM \"30d\".\"requests\" WHERE (\"simulation\" =~ /^AfterburnerBasicSimulation$/ AND \"testEnvironment\" =~ /^acc$/ AND \"systemUnderTest\" =~ /^MyAfterburner$/ AND \"result\" = 'OK') AND time >= 1758179903359ms AND time <= 1758180271916ms GROUP BY time(10s), \"name\""
+                  },
+                  "fields": [
+                    {
+                      "name": "Time",
+                      "type": "time",
+                      "typeInfo": {
+                        "frame": "time.Time"
+                      }
+                    },
+                    {
+                      "name": "Value",
+                      "type": "number",
+                      "typeInfo": {
+                        "frame": "float64",
+                        "nullable": true
+                      },
+                      "labels": {
+                        "name": "database_call"
+                      },
+                      "config": {
+                        "displayNameFromDS": "database_call"
+                      }
+                    }
+                  ]
+                },
+                "data": {
+                  "values": [
+                    [
+                      1758179900000,
+                      1758179910000,
+                      1758179920000,
+                      1758179930000,
+                      1758179940000,
+                      1758179950000,
+                      1758179960000,
+                      1758179970000,
+                      1758179980000,
+                      1758179990000,
+                      1758180000000,
+                      1758180010000,
+                      1758180020000,
+                      1758180030000,
+                      1758180040000,
+                      1758180050000,
+                      1758180060000,
+                      1758180070000,
+                      1758180080000,
+                      1758180090000,
+                      1758180100000,
+                      1758180110000,
+                      1758180120000,
+                      1758180130000,
+                      1758180140000,
+                      1758180150000,
+                      1758180160000,
+                      1758180170000,
+                      1758180180000,
+                      1758180190000,
+                      1758180200000,
+                      1758180210000,
+                      1758180220000,
+                      1758180230000,
+                      1758180240000,
+                      1758180250000,
+                      1758180260000,
+                      1758180270000
+                    ],
+                    [
+                      0,
+                      0.2,
+                      0,
+                      0,
+                      0,
+                      0,
+                      0.3,
+                      15,
+                      15.1,
+                      14.9,
+                      15,
+                      15,
+                      14.8,
+                      15.2,
+                      15,
+                      15,
+                      14.9,
+                      15.1,
+                      15,
+                      14.9,
+                      15,
+                      15.1,
+                      14.9,
+                      15,
+                      15.1,
+                      15.1,
+                      14.9,
+                      14.9,
+                      15.2,
+                      14.8,
+                      15,
+                      15.1,
+                      14.9,
+                      15.1,
+                      15,
+                      14.9,
+                      14.8,
+                      0
+                    ]
+                  ]
+                }
+              },
+              {
+                "schema": {
+                  "name": "flaky_call",
+                  "refId": "A",
+                  "fields": [
+                    {
+                      "name": "Time",
+                      "type": "time",
+                      "typeInfo": {
+                        "frame": "time.Time"
+                      }
+                    },
+                    {
+                      "name": "Value",
+                      "type": "number",
+                      "typeInfo": {
+                        "frame": "float64",
+                        "nullable": true
+                      },
+                      "labels": {
+                        "name": "flaky_call"
+                      },
+                      "config": {
+                        "displayNameFromDS": "flaky_call"
+                      }
+                    }
+                  ]
+                },
+                "data": {
+                  "values": [
+                    [
+                      1758179900000,
+                      1758179910000,
+                      1758179920000,
+                      1758179930000,
+                      1758179940000,
+                      1758179950000,
+                      1758179960000,
+                      1758179970000,
+                      1758179980000,
+                      1758179990000,
+                      1758180000000,
+                      1758180010000,
+                      1758180020000,
+                      1758180030000,
+                      1758180040000,
+                      1758180050000,
+                      1758180060000,
+                      1758180070000,
+                      1758180080000,
+                      1758180090000,
+                      1758180100000,
+                      1758180110000,
+                      1758180120000,
+                      1758180130000,
+                      1758180140000,
+                      1758180150000,
+                      1758180160000,
+                      1758180170000,
+                      1758180180000,
+                      1758180190000,
+                      1758180200000,
+                      1758180210000,
+                      1758180220000,
+                      1758180230000,
+                      1758180240000,
+                      1758180250000,
+                      1758180260000,
+                      1758180270000
+                    ],
+                    [
+                      0.2,
+                      0,
+                      0,
+                      0,
+                      0,
+                      0,
+                      3.7,
+                      14,
+                      14.4,
+                      15.1,
+                      14.4,
+                      14.7,
+                      14.6,
+                      14.1,
+                      14.4,
+                      13.8,
+                      14.7,
+                      14.6,
+                      14.4,
+                      14.1,
+                      14.1,
+                      14.1,
+                      13.5,
+                      14.9,
+                      14.7,
+                      14.8,
+                      14.5,
+                      14.5,
+                      14.7,
+                      14.3,
+                      14.1,
+                      14.8,
+                      13.9,
+                      13.9,
+                      15,
+                      14.9,
+                      10.5,
+                      0
+                    ]
+                  ]
+                }
+              },
+              {
+                "schema": {
+                  "name": "memory_churn",
+                  "refId": "A",
+                  "fields": [
+                    {
+                      "name": "Time",
+                      "type": "time",
+                      "typeInfo": {
+                        "frame": "time.Time"
+                      }
+                    },
+                    {
+                      "name": "Value",
+                      "type": "number",
+                      "typeInfo": {
+                        "frame": "float64",
+                        "nullable": true
+                      },
+                      "labels": {
+                        "name": "memory_churn"
+                      },
+                      "config": {
+                        "displayNameFromDS": "memory_churn"
+                      }
+                    }
+                  ]
+                },
+                "data": {
+                  "values": [
+                    [
+                      1758179900000,
+                      1758179910000,
+                      1758179920000,
+                      1758179930000,
+                      1758179940000,
+                      1758179950000,
+                      1758179960000,
+                      1758179970000,
+                      1758179980000,
+                      1758179990000,
+                      1758180000000,
+                      1758180010000,
+                      1758180020000,
+                      1758180030000,
+                      1758180040000,
+                      1758180050000,
+                      1758180060000,
+                      1758180070000,
+                      1758180080000,
+                      1758180090000,
+                      1758180100000,
+                      1758180110000,
+                      1758180120000,
+                      1758180130000,
+                      1758180140000,
+                      1758180150000,
+                      1758180160000,
+                      1758180170000,
+                      1758180180000,
+                      1758180190000,
+                      1758180200000,
+                      1758180210000,
+                      1758180220000,
+                      1758180230000,
+                      1758180240000,
+                      1758180250000,
+                      1758180260000,
+                      1758180270000
+                    ],
+                    [
+                      0.2,
+                      0,
+                      0,
+                      0,
+                      0,
+                      0,
+                      1.8,
+                      15,
+                      14.9,
+                      15.3,
+                      14.8,
+                      15,
+                      15,
+                      15.1,
+                      14.9,
+                      15,
+                      14.9,
+                      15.1,
+                      14.9,
+                      15.1,
+                      15.2,
+                      14.8,
+                      14.9,
+                      15,
+                      15.1,
+                      15.1,
+                      14.8,
+                      15.1,
+                      15.1,
+                      14.8,
+                      15.1,
+                      14.9,
+                      15.1,
+                      15,
+                      15.1,
+                      14.9,
+                      13.2,
+                      0
+                    ]
+                  ]
+                }
+              },
+              {
+                "schema": {
+                  "name": "remote_call_delayed",
+                  "refId": "A",
+                  "fields": [
+                    {
+                      "name": "Time",
+                      "type": "time",
+                      "typeInfo": {
+                        "frame": "time.Time"
+                      }
+                    },
+                    {
+                      "name": "Value",
+                      "type": "number",
+                      "typeInfo": {
+                        "frame": "float64",
+                        "nullable": true
+                      },
+                      "labels": {
+                        "name": "remote_call_delayed"
+                      },
+                      "config": {
+                        "displayNameFromDS": "remote_call_delayed"
+                      }
+                    }
+                  ]
+                },
+                "data": {
+                  "values": [
+                    [
+                      1758179900000,
+                      1758179910000,
+                      1758179920000,
+                      1758179930000,
+                      1758179940000,
+                      1758179950000,
+                      1758179960000,
+                      1758179970000,
+                      1758179980000,
+                      1758179990000,
+                      1758180000000,
+                      1758180010000,
+                      1758180020000,
+                      1758180030000,
+                      1758180040000,
+                      1758180050000,
+                      1758180060000,
+                      1758180070000,
+                      1758180080000,
+                      1758180090000,
+                      1758180100000,
+                      1758180110000,
+                      1758180120000,
+                      1758180130000,
+                      1758180140000,
+                      1758180150000,
+                      1758180160000,
+                      1758180170000,
+                      1758180180000,
+                      1758180190000,
+                      1758180200000,
+                      1758180210000,
+                      1758180220000,
+                      1758180230000,
+                      1758180240000,
+                      1758180250000,
+                      1758180260000,
+                      1758180270000
+                    ],
+                    [
+                      0.2,
+                      0,
+                      0,
+                      0,
+                      0,
+                      0,
+                      2,
+                      15.1,
+                      15,
+                      15,
+                      14.9,
+                      15.1,
+                      14.9,
+                      15,
+                      15,
+                      14.9,
+                      15,
+                      15,
+                      15,
+                      15.2,
+                      14.9,
+                      14.9,
+                      15.1,
+                      14.9,
+                      15.2,
+                      14.9,
+                      14.8,
+                      15.2,
+                      15,
+                      14.9,
+                      15,
+                      15,
+                      15,
+                      15,
+                      15.1,
+                      15.1,
+                      12.9,
+                      0
+                    ]
+                  ]
+                }
+              },
+              {
+                "schema": {
+                  "name": "simple_cpu_burn",
+                  "refId": "A",
+                  "fields": [
+                    {
+                      "name": "Time",
+                      "type": "time",
+                      "typeInfo": {
+                        "frame": "time.Time"
+                      }
+                    },
+                    {
+                      "name": "Value",
+                      "type": "number",
+                      "typeInfo": {
+                        "frame": "float64",
+                        "nullable": true
+                      },
+                      "labels": {
+                        "name": "simple_cpu_burn"
+                      },
+                      "config": {
+                        "displayNameFromDS": "simple_cpu_burn"
+                      }
+                    }
+                  ]
+                },
+                "data": {
+                  "values": [
+                    [
+                      1758179900000,
+                      1758179910000,
+                      1758179920000,
+                      1758179930000,
+                      1758179940000,
+                      1758179950000,
+                      1758179960000,
+                      1758179970000,
+                      1758179980000,
+                      1758179990000,
+                      1758180000000,
+                      1758180010000,
+                      1758180020000,
+                      1758180030000,
+                      1758180040000,
+                      1758180050000,
+                      1758180060000,
+                      1758180070000,
+                      1758180080000,
+                      1758180090000,
+                      1758180100000,
+                      1758180110000,
+                      1758180120000,
+                      1758180130000,
+                      1758180140000,
+                      1758180150000,
+                      1758180160000,
+                      1758180170000,
+                      1758180180000,
+                      1758180190000,
+                      1758180200000,
+                      1758180210000,
+                      1758180220000,
+                      1758180230000,
+                      1758180240000,
+                      1758180250000,
+                      1758180260000,
+                      1758180270000
+                    ],
+                    [
+                      0.2,
+                      0,
+                      0,
+                      0,
+                      0,
+                      0,
+                      5.5,
+                      15,
+                      15,
+                      15,
+                      15,
+                      15,
+                      15,
+                      15,
+                      15,
+                      15,
+                      15,
+                      15,
+                      15,
+                      15,
+                      15,
+                      15,
+                      15,
+                      15,
+                      15,
+                      15,
+                      15,
+                      15,
+                      15,
+                      15,
+                      15,
+                      15,
+                      15,
+                      15,
+                      15,
+                      15,
+                      9.5,
+                      0
+                    ]
+                  ]
+                }
+              },
+              {
+                "schema": {
+                  "name": "simple_delay",
+                  "refId": "A",
+                  "fields": [
+                    {
+                      "name": "Time",
+                      "type": "time",
+                      "typeInfo": {
+                        "frame": "time.Time"
+                      }
+                    },
+                    {
+                      "name": "Value",
+                      "type": "number",
+                      "typeInfo": {
+                        "frame": "float64",
+                        "nullable": true
+                      },
+                      "labels": {
+                        "name": "simple_delay"
+                      },
+                      "config": {
+                        "displayNameFromDS": "simple_delay"
+                      }
+                    }
+                  ]
+                },
+                "data": {
+                  "values": [
+                    [
+                      1758179900000,
+                      1758179910000,
+                      1758179920000,
+                      1758179930000,
+                      1758179940000,
+                      1758179950000,
+                      1758179960000,
+                      1758179970000,
+                      1758179980000,
+                      1758179990000,
+                      1758180000000,
+                      1758180010000,
+                      1758180020000,
+                      1758180030000,
+                      1758180040000,
+                      1758180050000,
+                      1758180060000,
+                      1758180070000,
+                      1758180080000,
+                      1758180090000,
+                      1758180100000,
+                      1758180110000,
+                      1758180120000,
+                      1758180130000,
+                      1758180140000,
+                      1758180150000,
+                      1758180160000,
+                      1758180170000,
+                      1758180180000,
+                      1758180190000,
+                      1758180200000,
+                      1758180210000,
+                      1758180220000,
+                      1758180230000,
+                      1758180240000,
+                      1758180250000,
+                      1758180260000,
+                      1758180270000
+                    ],
+                    [
+                      0.2,
+                      0,
+                      0,
+                      0,
+                      0,
+                      0,
+                      7,
+                      15,
+                      15,
+                      15,
+                      15,
+                      15,
+                      15,
+                      15,
+                      15,
+                      15,
+                      15,
+                      15,
+                      15,
+                      15,
+                      15,
+                      15,
+                      15,
+                      15,
+                      15,
+                      15,
+                      15,
+                      15,
+                      15,
+                      15,
+                      15,
+                      15,
+                      15,
+                      15,
+                      15,
+                      15,
+                      8,
+                      0
+                    ]
+                  ]
+                }
+              }
+            ]
+          }
+        }
+      },
+      "timestamp": "2025-09-25T18:51:34.534Z"
+    },
+    "panel_18_request_0": {
+      "panel_info": {
+        "panel_id": 18,
+        "panel_title": "Number of requests OK vs KO",
+        "dashboard_label": "Gatling AfterburnerBasicSimulation",
+        "dashboard_uid": "gatling-overview-influxdb"
+      },
+      "variable_context": {
+        "system_under_test": "MyAfterburner",
+        "test_environment": "acc",
+        "simulation": "AfterburnerBasicSimulation"
+      },
+      "original_request": {
+        "method": "POST",
+        "endpoint": "/api/ds/query",
+        "request_body": {
+          "to": "1758180271916",
+          "from": "1758179903359",
+          "queries": [
+            {
+              "tags": [
+                {
+                  "key": "simulation",
+                  "value": "/^AfterburnerBasicSimulation$/",
+                  "operator": "=~"
+                },
+                {
+                  "key": "result",
+                  "value": "OK",
+                  "operator": "=",
+                  "condition": "AND"
+                },
+                {
+                  "key": "testEnvironment",
+                  "value": "/^acc$/",
+                  "operator": "=~",
+                  "condition": "AND"
+                },
+                {
+                  "key": "systemUnderTest",
+                  "value": "/^MyAfterburner$/",
+                  "operator": "=~",
+                  "condition": "AND"
+                }
+              ],
+              "alias": "$tag_name $tag_result",
+              "query": "SELECT count(\"duration\")  as \"OK\" FROM \"30d\".\"requests\" WHERE (\"simulation\" =~ /^AfterburnerBasicSimulation$/ AND \"result\" = 'OK' AND \"testEnvironment\" =~ /^acc$/ AND \"systemUnderTest\" =~ /^MyAfterburner$/) AND time >= 1758179903359ms AND time <= 1758180271916ms GROUP BY \"name\"",
+              "refId": "A",
+              "dsType": "influxdb",
+              "policy": "30d",
+              "select": [
+                [
+                  {
+                    "type": "field",
+                    "params": [
+                      "duration"
+                    ]
+                  },
+                  {
+                    "type": "count",
+                    "params": []
+                  }
+                ]
+              ],
+              "groupBy": [
+                {
+                  "type": "tag",
+                  "params": [
+                    "name"
+                  ]
+                }
+              ],
+              "rawQuery": true,
+              "datasource": {
+                "uid": "influxdb-gatling",
+                "type": "influxdb"
+              },
+              "measurement": "requests",
+              "orderByTime": "ASC",
+              "datasourceId": 4,
+              "resultFormat": "table"
+            },
+            {
+              "hide": false,
+              "tags": [
+                {
+                  "key": "simulation",
+                  "value": "/^AfterburnerBasicSimulation$/",
+                  "operator": "=~"
+                },
+                {
+                  "key": "result",
+                  "value": "KO",
+                  "operator": "=",
+                  "condition": "AND"
+                },
+                {
+                  "key": "testEnvironment",
+                  "value": "/^acc$/",
+                  "operator": "=~",
+                  "condition": "AND"
+                },
+                {
+                  "key": "systemUnderTest",
+                  "value": "/^MyAfterburner$/",
+                  "operator": "=~",
+                  "condition": "AND"
+                }
+              ],
+              "alias": "$tag_name $tag_result",
+              "query": "SELECT count(\"duration\") as \"KO\"  FROM \"30d\".\"requests\" WHERE (\"simulation\" =~ /^AfterburnerBasicSimulation$/ AND \"result\" = 'KO' AND \"testEnvironment\" =~ /^acc$/ AND \"systemUnderTest\" =~ /^MyAfterburner$/) AND time >= 1758179903359ms AND time <= 1758180271916ms GROUP BY \"name\"",
+              "refId": "B",
+              "dsType": "influxdb",
+              "policy": "30d",
+              "select": [
+                [
+                  {
+                    "type": "field",
+                    "params": [
+                      "duration"
+                    ]
+                  },
+                  {
+                    "type": "count",
+                    "params": []
+                  }
+                ]
+              ],
+              "groupBy": [
+                {
+                  "type": "tag",
+                  "params": [
+                    "name"
+                  ]
+                }
+              ],
+              "rawQuery": true,
+              "datasource": {
+                "uid": "influxdb-gatling",
+                "type": "influxdb"
+              },
+              "description": "perfana-request-names",
+              "measurement": "requests",
+              "orderByTime": "ASC",
+              "datasourceId": 4,
+              "resultFormat": "table"
+            }
+          ]
+        },
+        "path_parameters": {
+          "ds_type": "influxdb",
+          "requestId": "1d0d8cdb-fb93-4386-b132-3538be6fdaa4:18"
+        }
+      },
+      "substituted_request": {
+        "queries": [
+          {
+            "tags": [
+              {
+                "key": "simulation",
+                "value": "/^AfterburnerBasicSimulation$/",
+                "operator": "=~"
+              },
+              {
+                "key": "result",
+                "value": "OK",
+                "operator": "=",
+                "condition": "AND"
+              },
+              {
+                "key": "testEnvironment",
+                "value": "/^acc$/",
+                "operator": "=~",
+                "condition": "AND"
+              },
+              {
+                "key": "systemUnderTest",
+                "value": "/^MyAfterburner$/",
+                "operator": "=~",
+                "condition": "AND"
+              }
+            ],
+            "alias": "$tag_name $tag_result",
+            "query": "SELECT count(\"duration\")  as \"OK\" FROM \"30d\".\"requests\" WHERE (\"simulation\" =~ /^AfterburnerBasicSimulation$/ AND \"result\" = 'OK' AND \"testEnvironment\" =~ /^acc$/ AND \"systemUnderTest\" =~ /^MyAfterburner$/) AND time >= 1758179903359ms AND time <= 1758180271916ms GROUP BY \"name\"",
+            "refId": "A",
+            "dsType": "influxdb",
+            "policy": "30d",
+            "select": [
+              [
+                {
+                  "type": "field",
+                  "params": [
+                    "duration"
+                  ]
+                },
+                {
+                  "type": "count",
+                  "params": []
+                }
+              ]
+            ],
+            "groupBy": [
+              {
+                "type": "tag",
+                "params": [
+                  "name"
+                ]
+              }
+            ],
+            "rawQuery": true,
+            "datasource": {
+              "uid": "influxdb-gatling",
+              "type": "influxdb"
+            },
+            "measurement": "requests",
+            "orderByTime": "ASC",
+            "datasourceId": 4,
+            "resultFormat": "table"
+          },
+          {
+            "hide": false,
+            "tags": [
+              {
+                "key": "simulation",
+                "value": "/^AfterburnerBasicSimulation$/",
+                "operator": "=~"
+              },
+              {
+                "key": "result",
+                "value": "KO",
+                "operator": "=",
+                "condition": "AND"
+              },
+              {
+                "key": "testEnvironment",
+                "value": "/^acc$/",
+                "operator": "=~",
+                "condition": "AND"
+              },
+              {
+                "key": "systemUnderTest",
+                "value": "/^MyAfterburner$/",
+                "operator": "=~",
+                "condition": "AND"
+              }
+            ],
+            "alias": "$tag_name $tag_result",
+            "query": "SELECT count(\"duration\") as \"KO\"  FROM \"30d\".\"requests\" WHERE (\"simulation\" =~ /^AfterburnerBasicSimulation$/ AND \"result\" = 'KO' AND \"testEnvironment\" =~ /^acc$/ AND \"systemUnderTest\" =~ /^MyAfterburner$/) AND time >= 1758179903359ms AND time <= 1758180271916ms GROUP BY \"name\"",
+            "refId": "B",
+            "dsType": "influxdb",
+            "policy": "30d",
+            "select": [
+              [
+                {
+                  "type": "field",
+                  "params": [
+                    "duration"
+                  ]
+                },
+                {
+                  "type": "count",
+                  "params": []
+                }
+              ]
+            ],
+            "groupBy": [
+              {
+                "type": "tag",
+                "params": [
+                  "name"
+                ]
+              }
+            ],
+            "rawQuery": true,
+            "datasource": {
+              "uid": "influxdb-gatling",
+              "type": "influxdb"
+            },
+            "description": "perfana-request-names",
+            "measurement": "requests",
+            "orderByTime": "ASC",
+            "datasourceId": 4,
+            "resultFormat": "table"
+          }
+        ],
+        "range": {
+          "from": "2025-09-18T07:18:23.359Z",
+          "to": "2025-09-18T07:24:31.916Z",
+          "raw": {
+            "from": "2025-09-18T07:18:23.359Z",
+            "to": "2025-09-18T07:24:31.916Z"
+          }
+        },
+        "from": "2025-09-18T07:18:23.359Z",
+        "to": "2025-09-18T07:24:31.916Z",
+        "interval": "15s"
+      },
+      "grafana_response": {
+        "results": {
+          "A": {
+            "status": 200,
+            "frames": [
+              {
+                "schema": {
+                  "name": "requests",
+                  "refId": "A",
+                  "meta": {
+                    "typeVersion": [
+                      0,
+                      0
+                    ],
+                    "custom": null,
+                    "preferredVisualisationType": "table",
+                    "executedQueryString": "SELECT count(\"duration\")  as \"OK\" FROM \"30d\".\"requests\" WHERE (\"simulation\" =~ /^AfterburnerBasicSimulation$/ AND \"result\" = 'OK' AND \"testEnvironment\" =~ /^acc$/ AND \"systemUnderTest\" =~ /^MyAfterburner$/) AND time >= 1758179903359ms AND time <= 1758180271916ms GROUP BY \"name\""
+                  },
+                  "fields": [
+                    {
+                      "name": "Time",
+                      "type": "time",
+                      "typeInfo": {
+                        "frame": "time.Time"
+                      }
+                    },
+                    {
+                      "name": "name",
+                      "type": "string",
+                      "typeInfo": {
+                        "frame": "string",
+                        "nullable": true
+                      },
+                      "config": {
+                        "displayNameFromDS": "name"
+                      }
+                    },
+                    {
+                      "name": "OK",
+                      "type": "number",
+                      "typeInfo": {
+                        "frame": "float64",
+                        "nullable": true
+                      },
+                      "config": {
+                        "displayNameFromDS": "OK"
+                      }
+                    }
+                  ]
+                },
+                "data": {
+                  "values": [
+                    [
+                      1758179903359,
+                      1758179903359,
+                      1758179903359,
+                      1758179903359,
+                      1758179903359,
+                      1758179903359
+                    ],
+                    [
+                      "database_call",
+                      "flaky_call",
+                      "memory_churn",
+                      "remote_call_delayed",
+                      "simple_cpu_burn",
+                      "simple_delay"
+                    ],
+                    [
+                      4502,
+                      4324,
+                      4502,
+                      4502,
+                      4502,
+                      4502
+                    ]
+                  ]
+                }
+              }
+            ]
+          },
+          "B": {
+            "status": 200,
+            "frames": [
+              {
+                "schema": {
+                  "name": "requests",
+                  "refId": "B",
+                  "meta": {
+                    "typeVersion": [
+                      0,
+                      0
+                    ],
+                    "custom": null,
+                    "preferredVisualisationType": "table",
+                    "executedQueryString": "SELECT count(\"duration\") as \"KO\"  FROM \"30d\".\"requests\" WHERE (\"simulation\" =~ /^AfterburnerBasicSimulation$/ AND \"result\" = 'KO' AND \"testEnvironment\" =~ /^acc$/ AND \"systemUnderTest\" =~ /^MyAfterburner$/) AND time >= 1758179903359ms AND time <= 1758180271916ms GROUP BY \"name\""
+                  },
+                  "fields": [
+                    {
+                      "name": "Time",
+                      "type": "time",
+                      "typeInfo": {
+                        "frame": "time.Time"
+                      }
+                    },
+                    {
+                      "name": "name",
+                      "type": "string",
+                      "typeInfo": {
+                        "frame": "string",
+                        "nullable": true
+                      },
+                      "config": {
+                        "displayNameFromDS": "name"
+                      }
+                    },
+                    {
+                      "name": "KO",
+                      "type": "number",
+                      "typeInfo": {
+                        "frame": "float64",
+                        "nullable": true
+                      },
+                      "config": {
+                        "displayNameFromDS": "KO"
+                      }
+                    }
+                  ]
+                },
+                "data": {
+                  "values": [
+                    [
+                      1758179903359
+                    ],
+                    [
+                      "flaky_call"
+                    ],
+                    [
+                      178
+                    ]
+                  ]
+                }
+              }
+            ]
+          }
+        }
+      },
+      "timestamp": "2025-09-25T18:51:34.555Z"
+    },
+    "panel_30_request_0": {
+      "panel_info": {
+        "panel_id": 30,
+        "panel_title": "Average Response times",
+        "dashboard_label": "Gatling AfterburnerBasicSimulation",
+        "dashboard_uid": "gatling-overview-influxdb"
+      },
+      "variable_context": {
+        "system_under_test": "MyAfterburner",
+        "test_environment": "acc",
+        "simulation": "AfterburnerBasicSimulation"
+      },
+      "original_request": {
+        "method": "POST",
+        "endpoint": "/api/ds/query",
+        "request_body": {
+          "to": "1758180271916",
+          "from": "1758179903359",
+          "queries": [
+            {
+              "hide": false,
+              "tags": [
+                {
+                  "key": "simulation",
+                  "value": "/^AfterburnerBasicSimulation$/",
+                  "operator": "=~",
+                  "condition": "AND"
+                },
+                {
+                  "key": "testEnvironment",
+                  "value": "/^acc$/",
+                  "operator": "=~",
+                  "condition": "AND"
+                },
+                {
+                  "key": "systemUnderTest",
+                  "value": "/^MyAfterburner$/",
+                  "operator": "=~",
+                  "condition": "AND"
+                },
+                {
+                  "key": "result",
+                  "value": "OK",
+                  "operator": "=",
+                  "condition": "AND"
+                }
+              ],
+              "alias": "$tag_name",
+              "query": "SELECT mean(\"cq_mean_response_time\") FROM \"30d\".\"gatling-percentiles\" WHERE (\"simulation\" =~ /^AfterburnerBasicSimulation$/ AND \"testEnvironment\" =~ /^acc$/ AND \"systemUnderTest\" =~ /^MyAfterburner$/ AND \"result\" = 'OK') AND time >= 1758179903359ms AND time <= 1758180271916ms GROUP BY time(10s), \"name\"",
+              "refId": "A",
+              "dsType": "influxdb",
+              "fields": [
+                {
+                  "func": "mean",
+                  "name": "value"
+                }
+              ],
+              "policy": "30d",
+              "select": [
+                [
+                  {
+                    "type": "field",
+                    "params": [
+                      "cq_mean_response_time"
+                    ]
+                  },
+                  {
+                    "type": "mean",
+                    "params": []
+                  }
+                ]
+              ],
+              "groupBy": [
+                {
+                  "type": "time",
+                  "params": [
+                    "10s"
+                  ]
+                },
+                {
+                  "type": "tag",
+                  "params": [
+                    "name"
+                  ]
+                }
+              ],
+              "rawQuery": true,
+              "datasource": {
+                "uid": "influxdb-gatling",
+                "type": "influxdb"
+              },
+              "measurement": "gatling-percentiles",
+              "orderByTime": "ASC",
+              "datasourceId": 4,
+              "resultFormat": "time_series"
+            }
+          ]
+        },
+        "path_parameters": {
+          "ds_type": "influxdb",
+          "requestId": "1d0d8cdb-fb93-4386-b132-3538be6fdaa4:30"
+        }
+      },
+      "substituted_request": {
+        "queries": [
+          {
+            "hide": false,
+            "tags": [
+              {
+                "key": "simulation",
+                "value": "/^AfterburnerBasicSimulation$/",
+                "operator": "=~",
+                "condition": "AND"
+              },
+              {
+                "key": "testEnvironment",
+                "value": "/^acc$/",
+                "operator": "=~",
+                "condition": "AND"
+              },
+              {
+                "key": "systemUnderTest",
+                "value": "/^MyAfterburner$/",
+                "operator": "=~",
+                "condition": "AND"
+              },
+              {
+                "key": "result",
+                "value": "OK",
+                "operator": "=",
+                "condition": "AND"
+              }
+            ],
+            "alias": "$tag_name",
+            "query": "SELECT mean(\"cq_mean_response_time\") FROM \"30d\".\"gatling-percentiles\" WHERE (\"simulation\" =~ /^AfterburnerBasicSimulation$/ AND \"testEnvironment\" =~ /^acc$/ AND \"systemUnderTest\" =~ /^MyAfterburner$/ AND \"result\" = 'OK') AND time >= 1758179903359ms AND time <= 1758180271916ms GROUP BY time(10s), \"name\"",
+            "refId": "A",
+            "dsType": "influxdb",
+            "fields": [
+              {
+                "func": "mean",
+                "name": "value"
+              }
+            ],
+            "policy": "30d",
+            "select": [
+              [
+                {
+                  "type": "field",
+                  "params": [
+                    "cq_mean_response_time"
+                  ]
+                },
+                {
+                  "type": "mean",
+                  "params": []
+                }
+              ]
+            ],
+            "groupBy": [
+              {
+                "type": "time",
+                "params": [
+                  "10s"
+                ]
+              },
+              {
+                "type": "tag",
+                "params": [
+                  "name"
+                ]
+              }
+            ],
+            "rawQuery": true,
+            "datasource": {
+              "uid": "influxdb-gatling",
+              "type": "influxdb"
+            },
+            "measurement": "gatling-percentiles",
+            "orderByTime": "ASC",
+            "datasourceId": 4,
+            "resultFormat": "time_series"
+          }
+        ],
+        "range": {
+          "from": "2025-09-18T07:18:23.359Z",
+          "to": "2025-09-18T07:24:31.916Z",
+          "raw": {
+            "from": "2025-09-18T07:18:23.359Z",
+            "to": "2025-09-18T07:24:31.916Z"
+          }
+        },
+        "from": "2025-09-18T07:18:23.359Z",
+        "to": "2025-09-18T07:24:31.916Z",
+        "interval": "15s"
+      },
+      "grafana_response": {
+        "results": {
+          "A": {
+            "status": 200,
+            "frames": [
+              {
+                "schema": {
+                  "name": "database_call",
+                  "refId": "A",
+                  "meta": {
+                    "typeVersion": [
+                      0,
+                      0
+                    ],
+                    "custom": null,
+                    "preferredVisualisationType": "graph",
+                    "executedQueryString": "SELECT mean(\"cq_mean_response_time\") FROM \"30d\".\"gatling-percentiles\" WHERE (\"simulation\" =~ /^AfterburnerBasicSimulation$/ AND \"testEnvironment\" =~ /^acc$/ AND \"systemUnderTest\" =~ /^MyAfterburner$/ AND \"result\" = 'OK') AND time >= 1758179903359ms AND time <= 1758180271916ms GROUP BY time(10s), \"name\""
+                  },
+                  "fields": [
+                    {
+                      "name": "Time",
+                      "type": "time",
+                      "typeInfo": {
+                        "frame": "time.Time"
+                      }
+                    },
+                    {
+                      "name": "Value",
+                      "type": "number",
+                      "typeInfo": {
+                        "frame": "float64",
+                        "nullable": true
+                      },
+                      "labels": {
+                        "name": "database_call"
+                      },
+                      "config": {
+                        "displayNameFromDS": "database_call"
+                      }
+                    }
+                  ]
+                },
+                "data": {
+                  "values": [
+                    [
+                      1758179900000,
+                      1758179910000,
+                      1758179920000,
+                      1758179930000,
+                      1758179940000,
+                      1758179950000,
+                      1758179960000,
+                      1758179970000,
+                      1758179980000,
+                      1758179990000,
+                      1758180000000,
+                      1758180010000,
+                      1758180020000,
+                      1758180030000,
+                      1758180040000,
+                      1758180050000,
+                      1758180060000,
+                      1758180070000,
+                      1758180080000,
+                      1758180090000,
+                      1758180100000,
+                      1758180110000,
+                      1758180120000,
+                      1758180130000,
+                      1758180140000,
+                      1758180150000,
+                      1758180160000,
+                      1758180170000,
+                      1758180180000,
+                      1758180190000,
+                      1758180200000,
+                      1758180210000,
+                      1758180220000,
+                      1758180230000,
+                      1758180240000,
+                      1758180250000,
+                      1758180260000,
+                      1758180270000
+                    ],
+                    [
+                      null,
+                      null,
+                      null,
+                      null,
+                      null,
+                      null,
+                      54,
+                      47.766666666666666,
+                      46.21854304635762,
+                      45.63758389261745,
+                      45.63333333333333,
+                      45.50666666666667,
+                      47.83783783783784,
+                      44.9671052631579,
+                      45.053333333333335,
+                      47.233333333333334,
+                      45.375838926174495,
+                      44.78145695364238,
+                      44.72,
+                      44.77852348993289,
+                      44.693333333333335,
+                      44.48344370860927,
+                      45.308724832214764,
+                      44.71333333333333,
+                      44.33112582781457,
+                      44.76158940397351,
+                      44.87919463087248,
+                      45.080536912751676,
+                      45.03947368421053,
+                      44.527027027027025,
+                      44.72,
+                      44.56953642384106,
+                      44.40268456375839,
+                      44.58940397350993,
+                      43.96666666666667,
+                      44.53691275167785,
+                      44.38513513513514,
+                      null
+                    ]
+                  ]
+                }
+              },
+              {
+                "schema": {
+                  "name": "flaky_call",
+                  "refId": "A",
+                  "fields": [
+                    {
+                      "name": "Time",
+                      "type": "time",
+                      "typeInfo": {
+                        "frame": "time.Time"
+                      }
+                    },
+                    {
+                      "name": "Value",
+                      "type": "number",
+                      "typeInfo": {
+                        "frame": "float64",
+                        "nullable": true
+                      },
+                      "labels": {
+                        "name": "flaky_call"
+                      },
+                      "config": {
+                        "displayNameFromDS": "flaky_call"
+                      }
+                    }
+                  ]
+                },
+                "data": {
+                  "values": [
+                    [
+                      1758179900000,
+                      1758179910000,
+                      1758179920000,
+                      1758179930000,
+                      1758179940000,
+                      1758179950000,
+                      1758179960000,
+                      1758179970000,
+                      1758179980000,
+                      1758179990000,
+                      1758180000000,
+                      1758180010000,
+                      1758180020000,
+                      1758180030000,
+                      1758180040000,
+                      1758180050000,
+                      1758180060000,
+                      1758180070000,
+                      1758180080000,
+                      1758180090000,
+                      1758180100000,
+                      1758180110000,
+                      1758180120000,
+                      1758180130000,
+                      1758180140000,
+                      1758180150000,
+                      1758180160000,
+                      1758180170000,
+                      1758180180000,
+                      1758180190000,
+                      1758180200000,
+                      1758180210000,
+                      1758180220000,
+                      1758180230000,
+                      1758180240000,
+                      1758180250000,
+                      1758180260000,
+                      1758180270000
+                    ],
+                    [
+                      null,
+                      null,
+                      null,
+                      null,
+                      null,
+                      null,
+                      116.29729729729729,
+                      120.55714285714286,
+                      119.21527777777777,
+                      116.03973509933775,
+                      114.61111111111111,
+                      120.6938775510204,
+                      126.8082191780822,
+                      113.31914893617021,
+                      118.63194444444444,
+                      131.28985507246378,
+                      130.64625850340136,
+                      121.12328767123287,
+                      123.88194444444444,
+                      119.51773049645391,
+                      118.26950354609929,
+                      123.88652482269504,
+                      100.78518518518518,
+                      120.46308724832215,
+                      113.58503401360544,
+                      132.3918918918919,
+                      130.59310344827585,
+                      119.53793103448275,
+                      128.7482993197279,
+                      126.9090909090909,
+                      130.88652482269504,
+                      120.05405405405405,
+                      123.66187050359713,
+                      125.06474820143885,
+                      125.02666666666667,
+                      118.14093959731544,
+                      131.85714285714286,
+                      null
+                    ]
+                  ]
+                }
+              },
+              {
+                "schema": {
+                  "name": "memory_churn",
+                  "refId": "A",
+                  "fields": [
+                    {
+                      "name": "Time",
+                      "type": "time",
+                      "typeInfo": {
+                        "frame": "time.Time"
+                      }
+                    },
+                    {
+                      "name": "Value",
+                      "type": "number",
+                      "typeInfo": {
+                        "frame": "float64",
+                        "nullable": true
+                      },
+                      "labels": {
+                        "name": "memory_churn"
+                      },
+                      "config": {
+                        "displayNameFromDS": "memory_churn"
+                      }
+                    }
+                  ]
+                },
+                "data": {
+                  "values": [
+                    [
+                      1758179900000,
+                      1758179910000,
+                      1758179920000,
+                      1758179930000,
+                      1758179940000,
+                      1758179950000,
+                      1758179960000,
+                      1758179970000,
+                      1758179980000,
+                      1758179990000,
+                      1758180000000,
+                      1758180010000,
+                      1758180020000,
+                      1758180030000,
+                      1758180040000,
+                      1758180050000,
+                      1758180060000,
+                      1758180070000,
+                      1758180080000,
+                      1758180090000,
+                      1758180100000,
+                      1758180110000,
+                      1758180120000,
+                      1758180130000,
+                      1758180140000,
+                      1758180150000,
+                      1758180160000,
+                      1758180170000,
+                      1758180180000,
+                      1758180190000,
+                      1758180200000,
+                      1758180210000,
+                      1758180220000,
+                      1758180230000,
+                      1758180240000,
+                      1758180250000,
+                      1758180260000,
+                      1758180270000
+                    ],
+                    [
+                      null,
+                      null,
+                      null,
+                      null,
+                      null,
+                      null,
+                      103.5,
+                      102.65333333333334,
+                      102.20805369127517,
+                      101.75816993464052,
+                      101.62837837837837,
+                      101.58,
+                      102.46,
+                      101.52317880794702,
+                      101.48993288590604,
+                      101.62666666666667,
+                      101.56375838926175,
+                      101.56953642384106,
+                      101.63087248322148,
+                      101.57615894039735,
+                      101.52631578947368,
+                      101.62837837837837,
+                      101.59731543624162,
+                      101.62666666666667,
+                      101.50993377483444,
+                      101.66225165562913,
+                      101.51351351351352,
+                      101.54304635761589,
+                      101.64900662251655,
+                      101.55405405405405,
+                      101.54304635761589,
+                      101.61073825503355,
+                      101.5364238410596,
+                      101.48666666666666,
+                      101.62251655629139,
+                      101.59731543624162,
+                      101.51515151515152,
+                      null
+                    ]
+                  ]
+                }
+              },
+              {
+                "schema": {
+                  "name": "remote_call_delayed",
+                  "refId": "A",
+                  "fields": [
+                    {
+                      "name": "Time",
+                      "type": "time",
+                      "typeInfo": {
+                        "frame": "time.Time"
+                      }
+                    },
+                    {
+                      "name": "Value",
+                      "type": "number",
+                      "typeInfo": {
+                        "frame": "float64",
+                        "nullable": true
+                      },
+                      "labels": {
+                        "name": "remote_call_delayed"
+                      },
+                      "config": {
+                        "displayNameFromDS": "remote_call_delayed"
+                      }
+                    }
+                  ]
+                },
+                "data": {
+                  "values": [
+                    [
+                      1758179900000,
+                      1758179910000,
+                      1758179920000,
+                      1758179930000,
+                      1758179940000,
+                      1758179950000,
+                      1758179960000,
+                      1758179970000,
+                      1758179980000,
+                      1758179990000,
+                      1758180000000,
+                      1758180010000,
+                      1758180020000,
+                      1758180030000,
+                      1758180040000,
+                      1758180050000,
+                      1758180060000,
+                      1758180070000,
+                      1758180080000,
+                      1758180090000,
+                      1758180100000,
+                      1758180110000,
+                      1758180120000,
+                      1758180130000,
+                      1758180140000,
+                      1758180150000,
+                      1758180160000,
+                      1758180170000,
+                      1758180180000,
+                      1758180190000,
+                      1758180200000,
+                      1758180210000,
+                      1758180220000,
+                      1758180230000,
+                      1758180240000,
+                      1758180250000,
+                      1758180260000,
+                      1758180270000
+                    ],
+                    [
+                      null,
+                      null,
+                      null,
+                      null,
+                      null,
+                      null,
+                      232.6,
+                      227.63576158940398,
+                      226.27333333333334,
+                      225.80666666666667,
+                      225.73154362416108,
+                      225.42384105960264,
+                      227.6241610738255,
+                      225.1,
+                      224.76666666666668,
+                      228.60402684563758,
+                      224.82666666666665,
+                      224.77333333333334,
+                      224.6,
+                      224.44078947368422,
+                      224.45637583892616,
+                      224.3288590604027,
+                      224.73509933774835,
+                      224.61744966442953,
+                      224.38815789473685,
+                      224.48322147651007,
+                      224.72972972972974,
+                      224.70394736842104,
+                      224.63333333333333,
+                      224.45637583892616,
+                      224.76,
+                      224.38666666666666,
+                      224.43333333333334,
+                      224.39333333333335,
+                      224.6291390728477,
+                      224.52317880794703,
+                      224.58139534883722,
+                      null
+                    ]
+                  ]
+                }
+              },
+              {
+                "schema": {
+                  "name": "simple_cpu_burn",
+                  "refId": "A",
+                  "fields": [
+                    {
+                      "name": "Time",
+                      "type": "time",
+                      "typeInfo": {
+                        "frame": "time.Time"
+                      }
+                    },
+                    {
+                      "name": "Value",
+                      "type": "number",
+                      "typeInfo": {
+                        "frame": "float64",
+                        "nullable": true
+                      },
+                      "labels": {
+                        "name": "simple_cpu_burn"
+                      },
+                      "config": {
+                        "displayNameFromDS": "simple_cpu_burn"
+                      }
+                    }
+                  ]
+                },
+                "data": {
+                  "values": [
+                    [
+                      1758179900000,
+                      1758179910000,
+                      1758179920000,
+                      1758179930000,
+                      1758179940000,
+                      1758179950000,
+                      1758179960000,
+                      1758179970000,
+                      1758179980000,
+                      1758179990000,
+                      1758180000000,
+                      1758180010000,
+                      1758180020000,
+                      1758180030000,
+                      1758180040000,
+                      1758180050000,
+                      1758180060000,
+                      1758180070000,
+                      1758180080000,
+                      1758180090000,
+                      1758180100000,
+                      1758180110000,
+                      1758180120000,
+                      1758180130000,
+                      1758180140000,
+                      1758180150000,
+                      1758180160000,
+                      1758180170000,
+                      1758180180000,
+                      1758180190000,
+                      1758180200000,
+                      1758180210000,
+                      1758180220000,
+                      1758180230000,
+                      1758180240000,
+                      1758180250000,
+                      1758180260000,
+                      1758180270000
+                    ],
+                    [
+                      null,
+                      null,
+                      null,
+                      null,
+                      null,
+                      null,
+                      4.636363636363637,
+                      3.3533333333333335,
+                      2.6333333333333333,
+                      2.48,
+                      2.44,
+                      2.4133333333333336,
+                      3.506666666666667,
+                      2.14,
+                      2.1933333333333334,
+                      2.2466666666666666,
+                      2.2066666666666666,
+                      2.1266666666666665,
+                      2.1466666666666665,
+                      2.1533333333333333,
+                      2.1266666666666665,
+                      2.12,
+                      2.1666666666666665,
+                      2.06,
+                      2.08,
+                      2.0866666666666664,
+                      2.1266666666666665,
+                      2.1733333333333333,
+                      2.14,
+                      2.14,
+                      2.16,
+                      2.1666666666666665,
+                      2.08,
+                      2.08,
+                      2.06,
+                      2.1466666666666665,
+                      2.136842105263158,
+                      null
+                    ]
+                  ]
+                }
+              },
+              {
+                "schema": {
+                  "name": "simple_delay",
+                  "refId": "A",
+                  "fields": [
+                    {
+                      "name": "Time",
+                      "type": "time",
+                      "typeInfo": {
+                        "frame": "time.Time"
+                      }
+                    },
+                    {
+                      "name": "Value",
+                      "type": "number",
+                      "typeInfo": {
+                        "frame": "float64",
+                        "nullable": true
+                      },
+                      "labels": {
+                        "name": "simple_delay"
+                      },
+                      "config": {
+                        "displayNameFromDS": "simple_delay"
+                      }
+                    }
+                  ]
+                },
+                "data": {
+                  "values": [
+                    [
+                      1758179900000,
+                      1758179910000,
+                      1758179920000,
+                      1758179930000,
+                      1758179940000,
+                      1758179950000,
+                      1758179960000,
+                      1758179970000,
+                      1758179980000,
+                      1758179990000,
+                      1758180000000,
+                      1758180010000,
+                      1758180020000,
+                      1758180030000,
+                      1758180040000,
+                      1758180050000,
+                      1758180060000,
+                      1758180070000,
+                      1758180080000,
+                      1758180090000,
+                      1758180100000,
+                      1758180110000,
+                      1758180120000,
+                      1758180130000,
+                      1758180140000,
+                      1758180150000,
+                      1758180160000,
+                      1758180170000,
+                      1758180180000,
+                      1758180190000,
+                      1758180200000,
+                      1758180210000,
+                      1758180220000,
+                      1758180230000,
+                      1758180240000,
+                      1758180250000,
+                      1758180260000,
+                      1758180270000
+                    ],
+                    [
+                      null,
+                      null,
+                      null,
+                      null,
+                      null,
+                      null,
+                      227.5,
+                      225.30666666666667,
+                      224.65333333333334,
+                      224.5,
+                      224.31333333333333,
+                      224.2,
+                      225.29333333333332,
+                      224.1,
+                      223.97333333333333,
+                      224.06666666666666,
+                      223.93333333333334,
+                      223.84,
+                      223.9,
+                      223.88666666666666,
+                      223.73333333333332,
+                      223.87333333333333,
+                      223.84,
+                      223.80666666666667,
+                      223.83333333333334,
+                      223.77333333333334,
+                      223.90666666666667,
+                      223.95333333333335,
+                      223.8,
+                      223.81333333333333,
+                      223.77333333333334,
+                      223.81333333333333,
+                      223.72,
+                      223.7,
+                      223.77333333333334,
+                      223.78666666666666,
+                      223.725,
+                      null
+                    ]
+                  ]
+                }
+              }
+            ]
+          }
+        }
+      },
+      "timestamp": "2025-09-25T18:51:34.566Z"
+    },
+    "panel_31_request_0": {
+      "panel_info": {
+        "panel_id": 31,
+        "panel_title": "Response times 99th percentile",
+        "dashboard_label": "Gatling AfterburnerBasicSimulation",
+        "dashboard_uid": "gatling-overview-influxdb"
+      },
+      "variable_context": {
+        "system_under_test": "MyAfterburner",
+        "test_environment": "acc",
+        "simulation": "AfterburnerBasicSimulation"
+      },
+      "original_request": {
+        "method": "POST",
+        "endpoint": "/api/ds/query",
+        "request_body": {
+          "to": "1758180271916",
+          "from": "1758179903359",
+          "queries": [
+            {
+              "hide": false,
+              "tags": [
+                {
+                  "key": "simulation",
+                  "value": "/^AfterburnerBasicSimulation$/",
+                  "operator": "=~",
+                  "condition": "AND"
+                },
+                {
+                  "key": "testEnvironment",
+                  "value": "/^acc$/",
+                  "operator": "=~",
+                  "condition": "AND"
+                },
+                {
+                  "key": "systemUnderTest",
+                  "value": "/^MyAfterburner$/",
+                  "operator": "=~",
+                  "condition": "AND"
+                },
+                {
+                  "key": "result",
+                  "value": "OK",
+                  "operator": "=",
+                  "condition": "AND"
+                }
+              ],
+              "alias": "$tag_name",
+              "query": "SELECT mean(\"cq_99pct_response_time\") FROM \"30d\".\"gatling-percentiles\" WHERE (\"simulation\" =~ /^AfterburnerBasicSimulation$/ AND \"testEnvironment\" =~ /^acc$/ AND \"systemUnderTest\" =~ /^MyAfterburner$/ AND \"result\" = 'OK') AND time >= 1758179903359ms AND time <= 1758180271916ms GROUP BY time(10s), \"name\"",
+              "refId": "A",
+              "dsType": "influxdb",
+              "fields": [
+                {
+                  "func": "mean",
+                  "name": "value"
+                }
+              ],
+              "policy": "30d",
+              "select": [
+                [
+                  {
+                    "type": "field",
+                    "params": [
+                      "cq_99pct_response_time"
+                    ]
+                  },
+                  {
+                    "type": "mean",
+                    "params": []
+                  }
+                ]
+              ],
+              "groupBy": [
+                {
+                  "type": "time",
+                  "params": [
+                    "10s"
+                  ]
+                },
+                {
+                  "type": "tag",
+                  "params": [
+                    "name"
+                  ]
+                }
+              ],
+              "rawQuery": true,
+              "datasource": {
+                "uid": "influxdb-gatling",
+                "type": "influxdb"
+              },
+              "measurement": "gatling-percentiles",
+              "orderByTime": "ASC",
+              "datasourceId": 4,
+              "resultFormat": "time_series"
+            }
+          ]
+        },
+        "path_parameters": {
+          "ds_type": "influxdb",
+          "requestId": "1d0d8cdb-fb93-4386-b132-3538be6fdaa4:31"
+        }
+      },
+      "substituted_request": {
+        "queries": [
+          {
+            "hide": false,
+            "tags": [
+              {
+                "key": "simulation",
+                "value": "/^AfterburnerBasicSimulation$/",
+                "operator": "=~",
+                "condition": "AND"
+              },
+              {
+                "key": "testEnvironment",
+                "value": "/^acc$/",
+                "operator": "=~",
+                "condition": "AND"
+              },
+              {
+                "key": "systemUnderTest",
+                "value": "/^MyAfterburner$/",
+                "operator": "=~",
+                "condition": "AND"
+              },
+              {
+                "key": "result",
+                "value": "OK",
+                "operator": "=",
+                "condition": "AND"
+              }
+            ],
+            "alias": "$tag_name",
+            "query": "SELECT mean(\"cq_99pct_response_time\") FROM \"30d\".\"gatling-percentiles\" WHERE (\"simulation\" =~ /^AfterburnerBasicSimulation$/ AND \"testEnvironment\" =~ /^acc$/ AND \"systemUnderTest\" =~ /^MyAfterburner$/ AND \"result\" = 'OK') AND time >= 1758179903359ms AND time <= 1758180271916ms GROUP BY time(10s), \"name\"",
+            "refId": "A",
+            "dsType": "influxdb",
+            "fields": [
+              {
+                "func": "mean",
+                "name": "value"
+              }
+            ],
+            "policy": "30d",
+            "select": [
+              [
+                {
+                  "type": "field",
+                  "params": [
+                    "cq_99pct_response_time"
+                  ]
+                },
+                {
+                  "type": "mean",
+                  "params": []
+                }
+              ]
+            ],
+            "groupBy": [
+              {
+                "type": "time",
+                "params": [
+                  "10s"
+                ]
+              },
+              {
+                "type": "tag",
+                "params": [
+                  "name"
+                ]
+              }
+            ],
+            "rawQuery": true,
+            "datasource": {
+              "uid": "influxdb-gatling",
+              "type": "influxdb"
+            },
+            "measurement": "gatling-percentiles",
+            "orderByTime": "ASC",
+            "datasourceId": 4,
+            "resultFormat": "time_series"
+          }
+        ],
+        "range": {
+          "from": "2025-09-18T07:18:23.359Z",
+          "to": "2025-09-18T07:24:31.916Z",
+          "raw": {
+            "from": "2025-09-18T07:18:23.359Z",
+            "to": "2025-09-18T07:24:31.916Z"
+          }
+        },
+        "from": "2025-09-18T07:18:23.359Z",
+        "to": "2025-09-18T07:24:31.916Z",
+        "interval": "15s"
+      },
+      "grafana_response": {
+        "results": {
+          "A": {
+            "status": 200,
+            "frames": [
+              {
+                "schema": {
+                  "name": "database_call",
+                  "refId": "A",
+                  "meta": {
+                    "typeVersion": [
+                      0,
+                      0
+                    ],
+                    "custom": null,
+                    "preferredVisualisationType": "graph",
+                    "executedQueryString": "SELECT mean(\"cq_99pct_response_time\") FROM \"30d\".\"gatling-percentiles\" WHERE (\"simulation\" =~ /^AfterburnerBasicSimulation$/ AND \"testEnvironment\" =~ /^acc$/ AND \"systemUnderTest\" =~ /^MyAfterburner$/ AND \"result\" = 'OK') AND time >= 1758179903359ms AND time <= 1758180271916ms GROUP BY time(10s), \"name\""
+                  },
+                  "fields": [
+                    {
+                      "name": "Time",
+                      "type": "time",
+                      "typeInfo": {
+                        "frame": "time.Time"
+                      }
+                    },
+                    {
+                      "name": "Value",
+                      "type": "number",
+                      "typeInfo": {
+                        "frame": "float64",
+                        "nullable": true
+                      },
+                      "labels": {
+                        "name": "database_call"
+                      },
+                      "config": {
+                        "displayNameFromDS": "database_call"
+                      }
+                    }
+                  ]
+                },
+                "data": {
+                  "values": [
+                    [
+                      1758179900000,
+                      1758179910000,
+                      1758179920000,
+                      1758179930000,
+                      1758179940000,
+                      1758179950000,
+                      1758179960000,
+                      1758179970000,
+                      1758179980000,
+                      1758179990000,
+                      1758180000000,
+                      1758180010000,
+                      1758180020000,
+                      1758180030000,
+                      1758180040000,
+                      1758180050000,
+                      1758180060000,
+                      1758180070000,
+                      1758180080000,
+                      1758180090000,
+                      1758180100000,
+                      1758180110000,
+                      1758180120000,
+                      1758180130000,
+                      1758180140000,
+                      1758180150000,
+                      1758180160000,
+                      1758180170000,
+                      1758180180000,
+                      1758180190000,
+                      1758180200000,
+                      1758180210000,
+                      1758180220000,
+                      1758180230000,
+                      1758180240000,
+                      1758180250000,
+                      1758180260000,
+                      1758180270000
+                    ],
+                    [
+                      null,
+                      null,
+                      null,
+                      null,
+                      null,
+                      null,
+                      55,
+                      59,
+                      53,
+                      53,
+                      51,
+                      55,
+                      161,
+                      52,
+                      53,
+                      191,
+                      52,
+                      56,
+                      51,
+                      53,
+                      54,
+                      50,
+                      61,
+                      53,
+                      50,
+                      50,
+                      52,
+                      56,
+                      52,
+                      53,
+                      52,
+                      52,
+                      51,
+                      51,
+                      49,
+                      51,
+                      53,
+                      null
+                    ]
+                  ]
+                }
+              },
+              {
+                "schema": {
+                  "name": "flaky_call",
+                  "refId": "A",
+                  "fields": [
+                    {
+                      "name": "Time",
+                      "type": "time",
+                      "typeInfo": {
+                        "frame": "time.Time"
+                      }
+                    },
+                    {
+                      "name": "Value",
+                      "type": "number",
+                      "typeInfo": {
+                        "frame": "float64",
+                        "nullable": true
+                      },
+                      "labels": {
+                        "name": "flaky_call"
+                      },
+                      "config": {
+                        "displayNameFromDS": "flaky_call"
+                      }
+                    }
+                  ]
+                },
+                "data": {
+                  "values": [
+                    [
+                      1758179900000,
+                      1758179910000,
+                      1758179920000,
+                      1758179930000,
+                      1758179940000,
+                      1758179950000,
+                      1758179960000,
+                      1758179970000,
+                      1758179980000,
+                      1758179990000,
+                      1758180000000,
+                      1758180010000,
+                      1758180020000,
+                      1758180030000,
+                      1758180040000,
+                      1758180050000,
+                      1758180060000,
+                      1758180070000,
+                      1758180080000,
+                      1758180090000,
+                      1758180100000,
+                      1758180110000,
+                      1758180120000,
+                      1758180130000,
+                      1758180140000,
+                      1758180150000,
+                      1758180160000,
+                      1758180170000,
+                      1758180180000,
+                      1758180190000,
+                      1758180200000,
+                      1758180210000,
+                      1758180220000,
+                      1758180230000,
+                      1758180240000,
+                      1758180250000,
+                      1758180260000,
+                      1758180270000
+                    ],
+                    [
+                      null,
+                      null,
+                      null,
+                      null,
+                      null,
+                      null,
+                      242,
+                      239,
+                      239,
+                      238,
+                      241,
+                      236,
+                      241,
+                      240,
+                      239,
+                      240,
+                      240,
+                      236,
+                      240,
+                      241,
+                      240,
+                      240,
+                      236,
+                      239,
+                      239,
+                      241,
+                      237,
+                      237,
+                      239,
+                      240,
+                      237,
+                      236,
+                      238,
+                      239,
+                      240,
+                      238,
+                      238,
+                      null
+                    ]
+                  ]
+                }
+              },
+              {
+                "schema": {
+                  "name": "memory_churn",
+                  "refId": "A",
+                  "fields": [
+                    {
+                      "name": "Time",
+                      "type": "time",
+                      "typeInfo": {
+                        "frame": "time.Time"
+                      }
+                    },
+                    {
+                      "name": "Value",
+                      "type": "number",
+                      "typeInfo": {
+                        "frame": "float64",
+                        "nullable": true
+                      },
+                      "labels": {
+                        "name": "memory_churn"
+                      },
+                      "config": {
+                        "displayNameFromDS": "memory_churn"
+                      }
+                    }
+                  ]
+                },
+                "data": {
+                  "values": [
+                    [
+                      1758179900000,
+                      1758179910000,
+                      1758179920000,
+                      1758179930000,
+                      1758179940000,
+                      1758179950000,
+                      1758179960000,
+                      1758179970000,
+                      1758179980000,
+                      1758179990000,
+                      1758180000000,
+                      1758180010000,
+                      1758180020000,
+                      1758180030000,
+                      1758180040000,
+                      1758180050000,
+                      1758180060000,
+                      1758180070000,
+                      1758180080000,
+                      1758180090000,
+                      1758180100000,
+                      1758180110000,
+                      1758180120000,
+                      1758180130000,
+                      1758180140000,
+                      1758180150000,
+                      1758180160000,
+                      1758180170000,
+                      1758180180000,
+                      1758180190000,
+                      1758180200000,
+                      1758180210000,
+                      1758180220000,
+                      1758180230000,
+                      1758180240000,
+                      1758180250000,
+                      1758180260000,
+                      1758180270000
+                    ],
+                    [
+                      null,
+                      null,
+                      null,
+                      null,
+                      null,
+                      null,
+                      105,
+                      106,
+                      104,
+                      104,
+                      105,
+                      104,
+                      164,
+                      103,
+                      104,
+                      104,
+                      105,
+                      104,
+                      105,
+                      104,
+                      103,
+                      104,
+                      105,
+                      104,
+                      104,
+                      105,
+                      105,
+                      103,
+                      103,
+                      104,
+                      103,
+                      103,
+                      103,
+                      104,
+                      104,
+                      103,
+                      104,
+                      null
+                    ]
+                  ]
+                }
+              },
+              {
+                "schema": {
+                  "name": "remote_call_delayed",
+                  "refId": "A",
+                  "fields": [
+                    {
+                      "name": "Time",
+                      "type": "time",
+                      "typeInfo": {
+                        "frame": "time.Time"
+                      }
+                    },
+                    {
+                      "name": "Value",
+                      "type": "number",
+                      "typeInfo": {
+                        "frame": "float64",
+                        "nullable": true
+                      },
+                      "labels": {
+                        "name": "remote_call_delayed"
+                      },
+                      "config": {
+                        "displayNameFromDS": "remote_call_delayed"
+                      }
+                    }
+                  ]
+                },
+                "data": {
+                  "values": [
+                    [
+                      1758179900000,
+                      1758179910000,
+                      1758179920000,
+                      1758179930000,
+                      1758179940000,
+                      1758179950000,
+                      1758179960000,
+                      1758179970000,
+                      1758179980000,
+                      1758179990000,
+                      1758180000000,
+                      1758180010000,
+                      1758180020000,
+                      1758180030000,
+                      1758180040000,
+                      1758180050000,
+                      1758180060000,
+                      1758180070000,
+                      1758180080000,
+                      1758180090000,
+                      1758180100000,
+                      1758180110000,
+                      1758180120000,
+                      1758180130000,
+                      1758180140000,
+                      1758180150000,
+                      1758180160000,
+                      1758180170000,
+                      1758180180000,
+                      1758180190000,
+                      1758180200000,
+                      1758180210000,
+                      1758180220000,
+                      1758180230000,
+                      1758180240000,
+                      1758180250000,
+                      1758180260000,
+                      1758180270000
+                    ],
+                    [
+                      null,
+                      null,
+                      null,
+                      null,
+                      null,
+                      null,
+                      242,
+                      232,
+                      231,
+                      230,
+                      230,
+                      230,
+                      309,
+                      230,
+                      228,
+                      346,
+                      229,
+                      231,
+                      228,
+                      226,
+                      230,
+                      227,
+                      228,
+                      228,
+                      226,
+                      227,
+                      232,
+                      228,
+                      227,
+                      228,
+                      230,
+                      227,
+                      227,
+                      227,
+                      231,
+                      228,
+                      228,
+                      null
+                    ]
+                  ]
+                }
+              },
+              {
+                "schema": {
+                  "name": "simple_cpu_burn",
+                  "refId": "A",
+                  "fields": [
+                    {
+                      "name": "Time",
+                      "type": "time",
+                      "typeInfo": {
+                        "frame": "time.Time"
+                      }
+                    },
+                    {
+                      "name": "Value",
+                      "type": "number",
+                      "typeInfo": {
+                        "frame": "float64",
+                        "nullable": true
+                      },
+                      "labels": {
+                        "name": "simple_cpu_burn"
+                      },
+                      "config": {
+                        "displayNameFromDS": "simple_cpu_burn"
+                      }
+                    }
+                  ]
+                },
+                "data": {
+                  "values": [
+                    [
+                      1758179900000,
+                      1758179910000,
+                      1758179920000,
+                      1758179930000,
+                      1758179940000,
+                      1758179950000,
+                      1758179960000,
+                      1758179970000,
+                      1758179980000,
+                      1758179990000,
+                      1758180000000,
+                      1758180010000,
+                      1758180020000,
+                      1758180030000,
+                      1758180040000,
+                      1758180050000,
+                      1758180060000,
+                      1758180070000,
+                      1758180080000,
+                      1758180090000,
+                      1758180100000,
+                      1758180110000,
+                      1758180120000,
+                      1758180130000,
+                      1758180140000,
+                      1758180150000,
+                      1758180160000,
+                      1758180170000,
+                      1758180180000,
+                      1758180190000,
+                      1758180200000,
+                      1758180210000,
+                      1758180220000,
+                      1758180230000,
+                      1758180240000,
+                      1758180250000,
+                      1758180260000,
+                      1758180270000
+                    ],
+                    [
+                      null,
+                      null,
+                      null,
+                      null,
+                      null,
+                      null,
+                      7,
+                      8,
+                      4,
+                      5,
+                      5,
+                      6,
+                      70,
+                      3,
+                      6,
+                      5,
+                      5,
+                      6,
+                      4,
+                      3,
+                      5,
+                      3,
+                      5,
+                      3,
+                      5,
+                      3,
+                      5,
+                      4,
+                      4,
+                      3,
+                      4,
+                      5,
+                      5,
+                      4,
+                      3,
+                      6,
+                      5,
+                      null
+                    ]
+                  ]
+                }
+              },
+              {
+                "schema": {
+                  "name": "simple_delay",
+                  "refId": "A",
+                  "fields": [
+                    {
+                      "name": "Time",
+                      "type": "time",
+                      "typeInfo": {
+                        "frame": "time.Time"
+                      }
+                    },
+                    {
+                      "name": "Value",
+                      "type": "number",
+                      "typeInfo": {
+                        "frame": "float64",
+                        "nullable": true
+                      },
+                      "labels": {
+                        "name": "simple_delay"
+                      },
+                      "config": {
+                        "displayNameFromDS": "simple_delay"
+                      }
+                    }
+                  ]
+                },
+                "data": {
+                  "values": [
+                    [
+                      1758179900000,
+                      1758179910000,
+                      1758179920000,
+                      1758179930000,
+                      1758179940000,
+                      1758179950000,
+                      1758179960000,
+                      1758179970000,
+                      1758179980000,
+                      1758179990000,
+                      1758180000000,
+                      1758180010000,
+                      1758180020000,
+                      1758180030000,
+                      1758180040000,
+                      1758180050000,
+                      1758180060000,
+                      1758180070000,
+                      1758180080000,
+                      1758180090000,
+                      1758180100000,
+                      1758180110000,
+                      1758180120000,
+                      1758180130000,
+                      1758180140000,
+                      1758180150000,
+                      1758180160000,
+                      1758180170000,
+                      1758180180000,
+                      1758180190000,
+                      1758180200000,
+                      1758180210000,
+                      1758180220000,
+                      1758180230000,
+                      1758180240000,
+                      1758180250000,
+                      1758180260000,
+                      1758180270000
+                    ],
+                    [
+                      null,
+                      null,
+                      null,
+                      null,
+                      null,
+                      null,
+                      231,
+                      228,
+                      229,
+                      226,
+                      226,
+                      227,
+                      292,
+                      226,
+                      226,
+                      227,
+                      226,
+                      226,
+                      226,
+                      227,
+                      225,
+                      226,
+                      226,
+                      226,
+                      226,
+                      226,
+                      226,
+                      227,
+                      226,
+                      226,
+                      226,
+                      227,
+                      226,
+                      227,
+                      227,
+                      226,
+                      225,
+                      null
+                    ]
+                  ]
+                }
+              }
+            ]
+          }
+        }
+      },
+      "timestamp": "2025-09-25T18:51:34.577Z"
+    },
+    "panel_32_request_0": {
+      "panel_info": {
+        "panel_id": 32,
+        "panel_title": "Response times stdDev",
+        "dashboard_label": "Gatling AfterburnerBasicSimulation",
+        "dashboard_uid": "gatling-overview-influxdb"
+      },
+      "variable_context": {
+        "system_under_test": "MyAfterburner",
+        "test_environment": "acc",
+        "simulation": "AfterburnerBasicSimulation"
+      },
+      "original_request": {
+        "method": "POST",
+        "endpoint": "/api/ds/query",
+        "request_body": {
+          "to": "1758180271916",
+          "from": "1758179903359",
+          "queries": [
+            {
+              "hide": false,
+              "tags": [
+                {
+                  "key": "simulation",
+                  "value": "/^AfterburnerBasicSimulation$/",
+                  "operator": "=~",
+                  "condition": "AND"
+                },
+                {
+                  "key": "testEnvironment",
+                  "value": "/^acc$/",
+                  "operator": "=~",
+                  "condition": "AND"
+                },
+                {
+                  "key": "systemUnderTest",
+                  "value": "/^MyAfterburner$/",
+                  "operator": "=~",
+                  "condition": "AND"
+                },
+                {
+                  "key": "result",
+                  "value": "OK",
+                  "operator": "=",
+                  "condition": "AND"
+                }
+              ],
+              "alias": "$tag_name",
+              "query": "SELECT mean(\"cq_stddev_response_time\") FROM \"30d\".\"gatling-percentiles\" WHERE (\"simulation\" =~ /^AfterburnerBasicSimulation$/ AND \"testEnvironment\" =~ /^acc$/ AND \"systemUnderTest\" =~ /^MyAfterburner$/ AND \"result\" = 'OK') AND time >= 1758179903359ms AND time <= 1758180271916ms GROUP BY time(10s), \"name\"",
+              "refId": "A",
+              "dsType": "influxdb",
+              "fields": [
+                {
+                  "func": "mean",
+                  "name": "value"
+                }
+              ],
+              "policy": "30d",
+              "select": [
+                [
+                  {
+                    "type": "field",
+                    "params": [
+                      "cq_stddev_response_time"
+                    ]
+                  },
+                  {
+                    "type": "mean",
+                    "params": []
+                  }
+                ]
+              ],
+              "groupBy": [
+                {
+                  "type": "time",
+                  "params": [
+                    "10s"
+                  ]
+                },
+                {
+                  "type": "tag",
+                  "params": [
+                    "name"
+                  ]
+                }
+              ],
+              "rawQuery": true,
+              "datasource": {
+                "uid": "influxdb-gatling",
+                "type": "influxdb"
+              },
+              "measurement": "gatling-percentiles",
+              "orderByTime": "ASC",
+              "datasourceId": 4,
+              "resultFormat": "time_series"
+            }
+          ]
+        },
+        "path_parameters": {
+          "ds_type": "influxdb",
+          "requestId": "1d0d8cdb-fb93-4386-b132-3538be6fdaa4:32"
+        }
+      },
+      "substituted_request": {
+        "queries": [
+          {
+            "hide": false,
+            "tags": [
+              {
+                "key": "simulation",
+                "value": "/^AfterburnerBasicSimulation$/",
+                "operator": "=~",
+                "condition": "AND"
+              },
+              {
+                "key": "testEnvironment",
+                "value": "/^acc$/",
+                "operator": "=~",
+                "condition": "AND"
+              },
+              {
+                "key": "systemUnderTest",
+                "value": "/^MyAfterburner$/",
+                "operator": "=~",
+                "condition": "AND"
+              },
+              {
+                "key": "result",
+                "value": "OK",
+                "operator": "=",
+                "condition": "AND"
+              }
+            ],
+            "alias": "$tag_name",
+            "query": "SELECT mean(\"cq_stddev_response_time\") FROM \"30d\".\"gatling-percentiles\" WHERE (\"simulation\" =~ /^AfterburnerBasicSimulation$/ AND \"testEnvironment\" =~ /^acc$/ AND \"systemUnderTest\" =~ /^MyAfterburner$/ AND \"result\" = 'OK') AND time >= 1758179903359ms AND time <= 1758180271916ms GROUP BY time(10s), \"name\"",
+            "refId": "A",
+            "dsType": "influxdb",
+            "fields": [
+              {
+                "func": "mean",
+                "name": "value"
+              }
+            ],
+            "policy": "30d",
+            "select": [
+              [
+                {
+                  "type": "field",
+                  "params": [
+                    "cq_stddev_response_time"
+                  ]
+                },
+                {
+                  "type": "mean",
+                  "params": []
+                }
+              ]
+            ],
+            "groupBy": [
+              {
+                "type": "time",
+                "params": [
+                  "10s"
+                ]
+              },
+              {
+                "type": "tag",
+                "params": [
+                  "name"
+                ]
+              }
+            ],
+            "rawQuery": true,
+            "datasource": {
+              "uid": "influxdb-gatling",
+              "type": "influxdb"
+            },
+            "measurement": "gatling-percentiles",
+            "orderByTime": "ASC",
+            "datasourceId": 4,
+            "resultFormat": "time_series"
+          }
+        ],
+        "range": {
+          "from": "2025-09-18T07:18:23.359Z",
+          "to": "2025-09-18T07:24:31.916Z",
+          "raw": {
+            "from": "2025-09-18T07:18:23.359Z",
+            "to": "2025-09-18T07:24:31.916Z"
+          }
+        },
+        "from": "2025-09-18T07:18:23.359Z",
+        "to": "2025-09-18T07:24:31.916Z",
+        "interval": "15s"
+      },
+      "grafana_response": {
+        "results": {
+          "A": {
+            "status": 200,
+            "frames": [
+              {
+                "schema": {
+                  "name": "database_call",
+                  "refId": "A",
+                  "meta": {
+                    "typeVersion": [
+                      0,
+                      0
+                    ],
+                    "custom": null,
+                    "preferredVisualisationType": "graph",
+                    "executedQueryString": "SELECT mean(\"cq_stddev_response_time\") FROM \"30d\".\"gatling-percentiles\" WHERE (\"simulation\" =~ /^AfterburnerBasicSimulation$/ AND \"testEnvironment\" =~ /^acc$/ AND \"systemUnderTest\" =~ /^MyAfterburner$/ AND \"result\" = 'OK') AND time >= 1758179903359ms AND time <= 1758180271916ms GROUP BY time(10s), \"name\""
+                  },
+                  "fields": [
+                    {
+                      "name": "Time",
+                      "type": "time",
+                      "typeInfo": {
+                        "frame": "time.Time"
+                      }
+                    },
+                    {
+                      "name": "Value",
+                      "type": "number",
+                      "typeInfo": {
+                        "frame": "float64",
+                        "nullable": true
+                      },
+                      "labels": {
+                        "name": "database_call"
+                      },
+                      "config": {
+                        "displayNameFromDS": "database_call"
+                      }
+                    }
+                  ]
+                },
+                "data": {
+                  "values": [
+                    [
+                      1758179900000,
+                      1758179910000,
+                      1758179920000,
+                      1758179930000,
+                      1758179940000,
+                      1758179950000,
+                      1758179960000,
+                      1758179970000,
+                      1758179980000,
+                      1758179990000,
+                      1758180000000,
+                      1758180010000,
+                      1758180020000,
+                      1758180030000,
+                      1758180040000,
+                      1758180050000,
+                      1758180060000,
+                      1758180070000,
+                      1758180080000,
+                      1758180090000,
+                      1758180100000,
+                      1758180110000,
+                      1758180120000,
+                      1758180130000,
+                      1758180140000,
+                      1758180150000,
+                      1758180160000,
+                      1758180170000,
+                      1758180180000,
+                      1758180190000,
+                      1758180200000,
+                      1758180210000,
+                      1758180220000,
+                      1758180230000,
+                      1758180240000,
+                      1758180250000,
+                      1758180260000,
+                      1758180270000
+                    ],
+                    [
+                      null,
+                      null,
+                      null,
+                      null,
+                      null,
+                      null,
+                      1,
+                      2.620048328532868,
+                      2.1256968731378385,
+                      1.7561273621725815,
+                      1.7317278746290758,
+                      1.975510015421102,
+                      16.301184821532736,
+                      2.0888152577236854,
+                      2.2726464089742855,
+                      17.065376331954436,
+                      2.428648022485587,
+                      2.90721869315009,
+                      1.9563011255836191,
+                      2.4213175930201345,
+                      2.809252848355863,
+                      2.2025872805582116,
+                      3.1599250094999034,
+                      2.1373528966742246,
+                      1.8320183925737425,
+                      1.9207936181746121,
+                      2.4984123382386003,
+                      2.553526386602297,
+                      3.2119016647367378,
+                      3.7858417695443176,
+                      2.069659376053437,
+                      2.231621036451109,
+                      2.2688235524143,
+                      2.1947559414167443,
+                      1.3971047083148511,
+                      2.0649045849721497,
+                      2.1869235641630933,
+                      null
+                    ]
+                  ]
+                }
+              },
+              {
+                "schema": {
+                  "name": "flaky_call",
+                  "refId": "A",
+                  "fields": [
+                    {
+                      "name": "Time",
+                      "type": "time",
+                      "typeInfo": {
+                        "frame": "time.Time"
+                      }
+                    },
+                    {
+                      "name": "Value",
+                      "type": "number",
+                      "typeInfo": {
+                        "frame": "float64",
+                        "nullable": true
+                      },
+                      "labels": {
+                        "name": "flaky_call"
+                      },
+                      "config": {
+                        "displayNameFromDS": "flaky_call"
+                      }
+                    }
+                  ]
+                },
+                "data": {
+                  "values": [
+                    [
+                      1758179900000,
+                      1758179910000,
+                      1758179920000,
+                      1758179930000,
+                      1758179940000,
+                      1758179950000,
+                      1758179960000,
+                      1758179970000,
+                      1758179980000,
+                      1758179990000,
+                      1758180000000,
+                      1758180010000,
+                      1758180020000,
+                      1758180030000,
+                      1758180040000,
+                      1758180050000,
+                      1758180060000,
+                      1758180070000,
+                      1758180080000,
+                      1758180090000,
+                      1758180100000,
+                      1758180110000,
+                      1758180120000,
+                      1758180130000,
+                      1758180140000,
+                      1758180150000,
+                      1758180160000,
+                      1758180170000,
+                      1758180180000,
+                      1758180190000,
+                      1758180200000,
+                      1758180210000,
+                      1758180220000,
+                      1758180230000,
+                      1758180240000,
+                      1758180250000,
+                      1758180260000,
+                      1758180270000
+                    ],
+                    [
+                      null,
+                      null,
+                      null,
+                      null,
+                      null,
+                      null,
+                      68.94759075029576,
+                      73.8566832510285,
+                      71.04732621401078,
+                      69.48312800430544,
+                      67.69451239610942,
+                      65.56901751703535,
+                      77.9097900154729,
+                      66.77203426038864,
+                      69.50682881657566,
+                      68.76726887547578,
+                      67.73688041814468,
+                      66.70313960567829,
+                      71.89750829958716,
+                      69.24826999766641,
+                      67.82718370268286,
+                      70.24183655654853,
+                      69.9192909115212,
+                      68.671419316518,
+                      72.98131150698552,
+                      71.04024299147316,
+                      67.81976692263558,
+                      73.58819544993985,
+                      69.15238716918937,
+                      71.57207625793708,
+                      68.78860912748577,
+                      70.0260188557523,
+                      68.52721388508857,
+                      74.20605942611479,
+                      70.29992760329901,
+                      67.57418547311121,
+                      73.93791945994919,
+                      null
+                    ]
+                  ]
+                }
+              },
+              {
+                "schema": {
+                  "name": "memory_churn",
+                  "refId": "A",
+                  "fields": [
+                    {
+                      "name": "Time",
+                      "type": "time",
+                      "typeInfo": {
+                        "frame": "time.Time"
+                      }
+                    },
+                    {
+                      "name": "Value",
+                      "type": "number",
+                      "typeInfo": {
+                        "frame": "float64",
+                        "nullable": true
+                      },
+                      "labels": {
+                        "name": "memory_churn"
+                      },
+                      "config": {
+                        "displayNameFromDS": "memory_churn"
+                      }
+                    }
+                  ]
+                },
+                "data": {
+                  "values": [
+                    [
+                      1758179900000,
+                      1758179910000,
+                      1758179920000,
+                      1758179930000,
+                      1758179940000,
+                      1758179950000,
+                      1758179960000,
+                      1758179970000,
+                      1758179980000,
+                      1758179990000,
+                      1758180000000,
+                      1758180010000,
+                      1758180020000,
+                      1758180030000,
+                      1758180040000,
+                      1758180050000,
+                      1758180060000,
+                      1758180070000,
+                      1758180080000,
+                      1758180090000,
+                      1758180100000,
+                      1758180110000,
+                      1758180120000,
+                      1758180130000,
+                      1758180140000,
+                      1758180150000,
+                      1758180160000,
+                      1758180170000,
+                      1758180180000,
+                      1758180190000,
+                      1758180200000,
+                      1758180210000,
+                      1758180220000,
+                      1758180230000,
+                      1758180240000,
+                      1758180250000,
+                      1758180260000,
+                      1758180270000
+                    ],
+                    [
+                      null,
+                      null,
+                      null,
+                      null,
+                      null,
+                      null,
+                      0.7859052479933758,
+                      0.8591135330326372,
+                      1.0350294928898516,
+                      0.8031692470166448,
+                      0.9638387352438886,
+                      0.7442847113461513,
+                      8.52287092821782,
+                      0.7817453727490622,
+                      0.740867366621532,
+                      0.8398359273021568,
+                      0.840866249374969,
+                      0.804238221547443,
+                      0.8803331163779808,
+                      0.8361585662437894,
+                      0.9345988863809639,
+                      0.8104790336702856,
+                      0.9220970744409408,
+                      0.8864881824024212,
+                      0.7471505842766828,
+                      0.9156958535710651,
+                      0.7952793244500792,
+                      0.7977894403725697,
+                      0.7589350037755879,
+                      0.818857539824646,
+                      0.754851855997792,
+                      0.7138722858369873,
+                      0.719025585424108,
+                      0.6925942541595732,
+                      0.8698024438863863,
+                      0.7063367917227543,
+                      0.842432396860501,
+                      null
+                    ]
+                  ]
+                }
+              },
+              {
+                "schema": {
+                  "name": "remote_call_delayed",
+                  "refId": "A",
+                  "fields": [
+                    {
+                      "name": "Time",
+                      "type": "time",
+                      "typeInfo": {
+                        "frame": "time.Time"
+                      }
+                    },
+                    {
+                      "name": "Value",
+                      "type": "number",
+                      "typeInfo": {
+                        "frame": "float64",
+                        "nullable": true
+                      },
+                      "labels": {
+                        "name": "remote_call_delayed"
+                      },
+                      "config": {
+                        "displayNameFromDS": "remote_call_delayed"
+                      }
+                    }
+                  ]
+                },
+                "data": {
+                  "values": [
+                    [
+                      1758179900000,
+                      1758179910000,
+                      1758179920000,
+                      1758179930000,
+                      1758179940000,
+                      1758179950000,
+                      1758179960000,
+                      1758179970000,
+                      1758179980000,
+                      1758179990000,
+                      1758180000000,
+                      1758180010000,
+                      1758180020000,
+                      1758180030000,
+                      1758180040000,
+                      1758180050000,
+                      1758180060000,
+                      1758180070000,
+                      1758180080000,
+                      1758180090000,
+                      1758180100000,
+                      1758180110000,
+                      1758180120000,
+                      1758180130000,
+                      1758180140000,
+                      1758180150000,
+                      1758180160000,
+                      1758180170000,
+                      1758180180000,
+                      1758180190000,
+                      1758180200000,
+                      1758180210000,
+                      1758180220000,
+                      1758180230000,
+                      1758180240000,
+                      1758180250000,
+                      1758180260000,
+                      1758180270000
+                    ],
+                    [
+                      null,
+                      null,
+                      null,
+                      null,
+                      null,
+                      null,
+                      3.0847673289381485,
+                      1.5598437687093707,
+                      1.220059777755804,
+                      0.8876230733582474,
+                      1.0630836869451707,
+                      0.9827653914182847,
+                      13.185514425936619,
+                      1.0852890624130007,
+                      0.7721378555730497,
+                      22.179190024918324,
+                      0.91773478547199,
+                      1.2432187422828338,
+                      0.8273836826945902,
+                      0.8436247292854641,
+                      1.1418525812249727,
+                      0.6822355246415245,
+                      0.8617964705966794,
+                      0.8589537589120917,
+                      0.797756308168122,
+                      0.7128551921260355,
+                      1.2702487548689765,
+                      1.0474745143146582,
+                      0.7365497897909974,
+                      0.8658944873343869,
+                      1.0724118211274822,
+                      0.7666423495803132,
+                      0.7273807627709276,
+                      0.8183849430364749,
+                      1.309533728926624,
+                      0.9079973354299572,
+                      0.7974341118805359,
+                      null
+                    ]
+                  ]
+                }
+              },
+              {
+                "schema": {
+                  "name": "simple_cpu_burn",
+                  "refId": "A",
+                  "fields": [
+                    {
+                      "name": "Time",
+                      "type": "time",
+                      "typeInfo": {
+                        "frame": "time.Time"
+                      }
+                    },
+                    {
+                      "name": "Value",
+                      "type": "number",
+                      "typeInfo": {
+                        "frame": "float64",
+                        "nullable": true
+                      },
+                      "labels": {
+                        "name": "simple_cpu_burn"
+                      },
+                      "config": {
+                        "displayNameFromDS": "simple_cpu_burn"
+                      }
+                    }
+                  ]
+                },
+                "data": {
+                  "values": [
+                    [
+                      1758179900000,
+                      1758179910000,
+                      1758179920000,
+                      1758179930000,
+                      1758179940000,
+                      1758179950000,
+                      1758179960000,
+                      1758179970000,
+                      1758179980000,
+                      1758179990000,
+                      1758180000000,
+                      1758180010000,
+                      1758180020000,
+                      1758180030000,
+                      1758180040000,
+                      1758180050000,
+                      1758180060000,
+                      1758180070000,
+                      1758180080000,
+                      1758180090000,
+                      1758180100000,
+                      1758180110000,
+                      1758180120000,
+                      1758180130000,
+                      1758180140000,
+                      1758180150000,
+                      1758180160000,
+                      1758180170000,
+                      1758180180000,
+                      1758180190000,
+                      1758180200000,
+                      1758180210000,
+                      1758180220000,
+                      1758180230000,
+                      1758180240000,
+                      1758180250000,
+                      1758180260000,
+                      1758180270000
+                    ],
+                    [
+                      null,
+                      null,
+                      null,
+                      null,
+                      null,
+                      null,
+                      1.1281521496355336,
+                      1.0175418904799127,
+                      0.5606404136147131,
+                      0.6208891653948386,
+                      0.6182894784764092,
+                      0.7252554899668588,
+                      12.0060089354991,
+                      0.44916029036742955,
+                      0.5986188428504898,
+                      0.6232267910717723,
+                      0.5827113974403922,
+                      0.5592020521448767,
+                      0.4238947993250851,
+                      0.5147054499650401,
+                      0.481840245694945,
+                      0.38285399463510017,
+                      0.5485388359871436,
+                      0.3323699725572671,
+                      0.39323132184913917,
+                      0.34634557492581447,
+                      0.4955732450035123,
+                      0.4880679162040249,
+                      0.41820967092961947,
+                      0.401841399145377,
+                      0.44990677632432974,
+                      0.5105158158277681,
+                      0.44147404097982895,
+                      0.40994352205537715,
+                      0.23828244477915853,
+                      0.5481716610901832,
+                      0.5575502327486498,
+                      null
+                    ]
+                  ]
+                }
+              },
+              {
+                "schema": {
+                  "name": "simple_delay",
+                  "refId": "A",
+                  "fields": [
+                    {
+                      "name": "Time",
+                      "type": "time",
+                      "typeInfo": {
+                        "frame": "time.Time"
+                      }
+                    },
+                    {
+                      "name": "Value",
+                      "type": "number",
+                      "typeInfo": {
+                        "frame": "float64",
+                        "nullable": true
+                      },
+                      "labels": {
+                        "name": "simple_delay"
+                      },
+                      "config": {
+                        "displayNameFromDS": "simple_delay"
+                      }
+                    }
+                  ]
+                },
+                "data": {
+                  "values": [
+                    [
+                      1758179900000,
+                      1758179910000,
+                      1758179920000,
+                      1758179930000,
+                      1758179940000,
+                      1758179950000,
+                      1758179960000,
+                      1758179970000,
+                      1758179980000,
+                      1758179990000,
+                      1758180000000,
+                      1758180010000,
+                      1758180020000,
+                      1758180030000,
+                      1758180040000,
+                      1758180050000,
+                      1758180060000,
+                      1758180070000,
+                      1758180080000,
+                      1758180090000,
+                      1758180100000,
+                      1758180110000,
+                      1758180120000,
+                      1758180130000,
+                      1758180140000,
+                      1758180150000,
+                      1758180160000,
+                      1758180170000,
+                      1758180180000,
+                      1758180190000,
+                      1758180200000,
+                      1758180210000,
+                      1758180220000,
+                      1758180230000,
+                      1758180240000,
+                      1758180250000,
+                      1758180260000,
+                      1758180270000
+                    ],
+                    [
+                      null,
+                      null,
+                      null,
+                      null,
+                      null,
+                      null,
+                      1.4719601443879744,
+                      0.9118656049176161,
+                      0.9482351439085022,
+                      0.6829662898124139,
+                      0.7869460695188035,
+                      0.759724429022585,
+                      9.65828688706445,
+                      0.7836414739736165,
+                      0.8187948802529298,
+                      0.8327738614117041,
+                      0.738824267021022,
+                      0.7778821704737408,
+                      0.792159566327068,
+                      0.9014281485149689,
+                      0.7110505194170894,
+                      0.8051567579805186,
+                      0.8116599942763736,
+                      0.8330155993823398,
+                      0.7633963906235084,
+                      0.7610189801464728,
+                      0.7801795238824567,
+                      0.9716564882180311,
+                      0.7047299449448805,
+                      0.8852760284410954,
+                      0.7248852412453923,
+                      0.8699816141439694,
+                      0.7338415973034547,
+                      0.8253532902286589,
+                      0.8446171180260549,
+                      0.7471347206680603,
+                      0.7458747307182688,
+                      null
+                    ]
+                  ]
+                }
+              }
+            ]
+          }
+        }
+      },
+      "timestamp": "2025-09-25T18:51:34.588Z"
+    },
+    "panel_37_request_0": {
+      "panel_info": {
+        "panel_id": 37,
+        "panel_title": "Total failed requests per second",
+        "dashboard_label": "Gatling AfterburnerBasicSimulation",
+        "dashboard_uid": "gatling-overview-influxdb"
+      },
+      "variable_context": {
+        "system_under_test": "MyAfterburner",
+        "test_environment": "acc",
+        "simulation": "AfterburnerBasicSimulation"
+      },
+      "original_request": {
+        "method": "POST",
+        "endpoint": "/api/ds/query",
+        "request_body": {
+          "to": "1758180271916",
+          "from": "1758179903359",
+          "queries": [
+            {
+              "tags": [
+                {
+                  "key": "simulation",
+                  "value": "/^AfterburnerBasicSimulation$/",
+                  "operator": "=~"
+                },
+                {
+                  "key": "testEnvironment",
+                  "value": "/^acc$/",
+                  "operator": "=~",
+                  "condition": "AND"
+                },
+                {
+                  "key": "systemUnderTest",
+                  "value": "/^MyAfterburner$/",
+                  "operator": "=~",
+                  "condition": "AND"
+                },
+                {
+                  "key": "result",
+                  "value": "KO",
+                  "operator": "=",
+                  "condition": "AND"
+                }
+              ],
+              "alias": "Errors per second",
+              "query": "SELECT count(\"duration\")  / 10 FROM \"30d\".\"requests\" WHERE (\"simulation\" =~ /^AfterburnerBasicSimulation$/ AND \"testEnvironment\" =~ /^acc$/ AND \"systemUnderTest\" =~ /^MyAfterburner$/ AND \"result\" = 'KO') AND time >= 1758179903359ms AND time <= 1758180271916ms GROUP BY time(10s)",
+              "refId": "A",
+              "policy": "30d",
+              "select": [
+                [
+                  {
+                    "type": "field",
+                    "params": [
+                      "duration"
+                    ]
+                  },
+                  {
+                    "type": "count",
+                    "params": []
+                  },
+                  {
+                    "type": "math",
+                    "params": [
+                      " / 10"
+                    ]
+                  }
+                ]
+              ],
+              "groupBy": [
+                {
+                  "type": "time",
+                  "params": [
+                    "10s"
+                  ]
+                }
+              ],
+              "rawQuery": true,
+              "datasource": {
+                "uid": "influxdb-gatling",
+                "type": "influxdb"
+              },
+              "measurement": "requests",
+              "orderByTime": "ASC",
+              "datasourceId": 4,
+              "resultFormat": "time_series"
+            }
+          ]
+        },
+        "path_parameters": {
+          "ds_type": "influxdb",
+          "requestId": "1d0d8cdb-fb93-4386-b132-3538be6fdaa4:37"
+        }
+      },
+      "substituted_request": {
+        "queries": [
+          {
+            "tags": [
+              {
+                "key": "simulation",
+                "value": "/^AfterburnerBasicSimulation$/",
+                "operator": "=~"
+              },
+              {
+                "key": "testEnvironment",
+                "value": "/^acc$/",
+                "operator": "=~",
+                "condition": "AND"
+              },
+              {
+                "key": "systemUnderTest",
+                "value": "/^MyAfterburner$/",
+                "operator": "=~",
+                "condition": "AND"
+              },
+              {
+                "key": "result",
+                "value": "KO",
+                "operator": "=",
+                "condition": "AND"
+              }
+            ],
+            "alias": "Errors per second",
+            "query": "SELECT count(\"duration\")  / 10 FROM \"30d\".\"requests\" WHERE (\"simulation\" =~ /^AfterburnerBasicSimulation$/ AND \"testEnvironment\" =~ /^acc$/ AND \"systemUnderTest\" =~ /^MyAfterburner$/ AND \"result\" = 'KO') AND time >= 1758179903359ms AND time <= 1758180271916ms GROUP BY time(10s)",
+            "refId": "A",
+            "policy": "30d",
+            "select": [
+              [
+                {
+                  "type": "field",
+                  "params": [
+                    "duration"
+                  ]
+                },
+                {
+                  "type": "count",
+                  "params": []
+                },
+                {
+                  "type": "math",
+                  "params": [
+                    " / 10"
+                  ]
+                }
+              ]
+            ],
+            "groupBy": [
+              {
+                "type": "time",
+                "params": [
+                  "10s"
+                ]
+              }
+            ],
+            "rawQuery": true,
+            "datasource": {
+              "uid": "influxdb-gatling",
+              "type": "influxdb"
+            },
+            "measurement": "requests",
+            "orderByTime": "ASC",
+            "datasourceId": 4,
+            "resultFormat": "time_series"
+          }
+        ],
+        "range": {
+          "from": "2025-09-18T07:18:23.359Z",
+          "to": "2025-09-18T07:24:31.916Z",
+          "raw": {
+            "from": "2025-09-18T07:18:23.359Z",
+            "to": "2025-09-18T07:24:31.916Z"
+          }
+        },
+        "from": "2025-09-18T07:18:23.359Z",
+        "to": "2025-09-18T07:24:31.916Z",
+        "interval": "15s"
+      },
+      "grafana_response": {
+        "results": {
+          "A": {
+            "status": 200,
+            "frames": [
+              {
+                "schema": {
+                  "name": "Errors per second",
+                  "refId": "A",
+                  "meta": {
+                    "typeVersion": [
+                      0,
+                      0
+                    ],
+                    "custom": null,
+                    "preferredVisualisationType": "graph",
+                    "executedQueryString": "SELECT count(\"duration\")  / 10 FROM \"30d\".\"requests\" WHERE (\"simulation\" =~ /^AfterburnerBasicSimulation$/ AND \"testEnvironment\" =~ /^acc$/ AND \"systemUnderTest\" =~ /^MyAfterburner$/ AND \"result\" = 'KO') AND time >= 1758179903359ms AND time <= 1758180271916ms GROUP BY time(10s)"
+                  },
+                  "fields": [
+                    {
+                      "name": "Time",
+                      "type": "time",
+                      "typeInfo": {
+                        "frame": "time.Time"
+                      }
+                    },
+                    {
+                      "name": "Value",
+                      "type": "number",
+                      "typeInfo": {
+                        "frame": "float64",
+                        "nullable": true
+                      },
+                      "config": {
+                        "displayNameFromDS": "Errors per second"
+                      }
+                    }
+                  ]
+                },
+                "data": {
+                  "values": [
+                    [
+                      1758179900000,
+                      1758179910000,
+                      1758179920000,
+                      1758179930000,
+                      1758179940000,
+                      1758179950000,
+                      1758179960000,
+                      1758179970000,
+                      1758179980000,
+                      1758179990000,
+                      1758180000000,
+                      1758180010000,
+                      1758180020000,
+                      1758180030000,
+                      1758180040000,
+                      1758180050000,
+                      1758180060000,
+                      1758180070000,
+                      1758180080000,
+                      1758180090000,
+                      1758180100000,
+                      1758180110000,
+                      1758180120000,
+                      1758180130000,
+                      1758180140000,
+                      1758180150000,
+                      1758180160000,
+                      1758180170000,
+                      1758180180000,
+                      1758180190000,
+                      1758180200000,
+                      1758180210000,
+                      1758180220000,
+                      1758180230000,
+                      1758180240000,
+                      1758180250000,
+                      1758180260000,
+                      1758180270000
+                    ],
+                    [
+                      0,
+                      0,
+                      0,
+                      0,
+                      0,
+                      0,
+                      0.1,
+                      0.9,
+                      0.6,
+                      0.1,
+                      0.5,
+                      0.3,
+                      0.4,
+                      1,
+                      0.5,
+                      1.1,
+                      0.4,
+                      0.5,
+                      0.6,
+                      0.8,
+                      0.9,
+                      0.9,
+                      1.4,
+                      0.2,
+                      0.5,
+                      0,
+                      0.6,
+                      0.5,
+                      0.4,
+                      0.6,
+                      0.7,
+                      0.3,
+                      1.1,
+                      1,
+                      0.2,
+                      0.2,
+                      0.5,
+                      0
+                    ]
+                  ]
+                }
+              }
+            ]
+          }
+        }
+      },
+      "timestamp": "2025-09-25T18:51:34.601Z"
+    },
+    "panel_38_request_0": {
+      "panel_info": {
+        "panel_id": 38,
+        "panel_title": "Total passed requests per second",
+        "dashboard_label": "Gatling AfterburnerBasicSimulation",
+        "dashboard_uid": "gatling-overview-influxdb"
+      },
+      "variable_context": {
+        "system_under_test": "MyAfterburner",
+        "test_environment": "acc",
+        "simulation": "AfterburnerBasicSimulation"
+      },
+      "original_request": {
+        "method": "POST",
+        "endpoint": "/api/ds/query",
+        "request_body": {
+          "to": "1758180271916",
+          "from": "1758179903359",
+          "queries": [
+            {
+              "tags": [
+                {
+                  "key": "simulation",
+                  "value": "/^AfterburnerBasicSimulation$/",
+                  "operator": "=~"
+                },
+                {
+                  "key": "testEnvironment",
+                  "value": "/^acc$/",
+                  "operator": "=~",
+                  "condition": "AND"
+                },
+                {
+                  "key": "systemUnderTest",
+                  "value": "/^MyAfterburner$/",
+                  "operator": "=~",
+                  "condition": "AND"
+                },
+                {
+                  "key": "result",
+                  "value": "OK",
+                  "operator": "=",
+                  "condition": "AND"
+                }
+              ],
+              "alias": "Requests per second",
+              "query": "SELECT count(\"duration\")  / 10 FROM \"30d\".\"requests\" WHERE (\"simulation\" =~ /^AfterburnerBasicSimulation$/ AND \"testEnvironment\" =~ /^acc$/ AND \"systemUnderTest\" =~ /^MyAfterburner$/ AND \"result\" = 'OK') AND time >= 1758179903359ms AND time <= 1758180271916ms GROUP BY time(10s)",
+              "refId": "A",
+              "policy": "30d",
+              "select": [
+                [
+                  {
+                    "type": "field",
+                    "params": [
+                      "duration"
+                    ]
+                  },
+                  {
+                    "type": "count",
+                    "params": []
+                  },
+                  {
+                    "type": "math",
+                    "params": [
+                      " / 10"
+                    ]
+                  }
+                ]
+              ],
+              "groupBy": [
+                {
+                  "type": "time",
+                  "params": [
+                    "10s"
+                  ]
+                }
+              ],
+              "rawQuery": true,
+              "datasource": {
+                "uid": "influxdb-gatling",
+                "type": "influxdb"
+              },
+              "measurement": "requests",
+              "orderByTime": "ASC",
+              "datasourceId": 4,
+              "resultFormat": "time_series"
+            }
+          ]
+        },
+        "path_parameters": {
+          "ds_type": "influxdb",
+          "requestId": "1d0d8cdb-fb93-4386-b132-3538be6fdaa4:38"
+        }
+      },
+      "substituted_request": {
+        "queries": [
+          {
+            "tags": [
+              {
+                "key": "simulation",
+                "value": "/^AfterburnerBasicSimulation$/",
+                "operator": "=~"
+              },
+              {
+                "key": "testEnvironment",
+                "value": "/^acc$/",
+                "operator": "=~",
+                "condition": "AND"
+              },
+              {
+                "key": "systemUnderTest",
+                "value": "/^MyAfterburner$/",
+                "operator": "=~",
+                "condition": "AND"
+              },
+              {
+                "key": "result",
+                "value": "OK",
+                "operator": "=",
+                "condition": "AND"
+              }
+            ],
+            "alias": "Requests per second",
+            "query": "SELECT count(\"duration\")  / 10 FROM \"30d\".\"requests\" WHERE (\"simulation\" =~ /^AfterburnerBasicSimulation$/ AND \"testEnvironment\" =~ /^acc$/ AND \"systemUnderTest\" =~ /^MyAfterburner$/ AND \"result\" = 'OK') AND time >= 1758179903359ms AND time <= 1758180271916ms GROUP BY time(10s)",
+            "refId": "A",
+            "policy": "30d",
+            "select": [
+              [
+                {
+                  "type": "field",
+                  "params": [
+                    "duration"
+                  ]
+                },
+                {
+                  "type": "count",
+                  "params": []
+                },
+                {
+                  "type": "math",
+                  "params": [
+                    " / 10"
+                  ]
+                }
+              ]
+            ],
+            "groupBy": [
+              {
+                "type": "time",
+                "params": [
+                  "10s"
+                ]
+              }
+            ],
+            "rawQuery": true,
+            "datasource": {
+              "uid": "influxdb-gatling",
+              "type": "influxdb"
+            },
+            "measurement": "requests",
+            "orderByTime": "ASC",
+            "datasourceId": 4,
+            "resultFormat": "time_series"
+          }
+        ],
+        "range": {
+          "from": "2025-09-18T07:18:23.359Z",
+          "to": "2025-09-18T07:24:31.916Z",
+          "raw": {
+            "from": "2025-09-18T07:18:23.359Z",
+            "to": "2025-09-18T07:24:31.916Z"
+          }
+        },
+        "from": "2025-09-18T07:18:23.359Z",
+        "to": "2025-09-18T07:24:31.916Z",
+        "interval": "15s"
+      },
+      "grafana_response": {
+        "results": {
+          "A": {
+            "status": 200,
+            "frames": [
+              {
+                "schema": {
+                  "name": "Requests per second",
+                  "refId": "A",
+                  "meta": {
+                    "typeVersion": [
+                      0,
+                      0
+                    ],
+                    "custom": null,
+                    "preferredVisualisationType": "graph",
+                    "executedQueryString": "SELECT count(\"duration\")  / 10 FROM \"30d\".\"requests\" WHERE (\"simulation\" =~ /^AfterburnerBasicSimulation$/ AND \"testEnvironment\" =~ /^acc$/ AND \"systemUnderTest\" =~ /^MyAfterburner$/ AND \"result\" = 'OK') AND time >= 1758179903359ms AND time <= 1758180271916ms GROUP BY time(10s)"
+                  },
+                  "fields": [
+                    {
+                      "name": "Time",
+                      "type": "time",
+                      "typeInfo": {
+                        "frame": "time.Time"
+                      }
+                    },
+                    {
+                      "name": "Value",
+                      "type": "number",
+                      "typeInfo": {
+                        "frame": "float64",
+                        "nullable": true
+                      },
+                      "config": {
+                        "displayNameFromDS": "Requests per second"
+                      }
+                    }
+                  ]
+                },
+                "data": {
+                  "values": [
+                    [
+                      1758179900000,
+                      1758179910000,
+                      1758179920000,
+                      1758179930000,
+                      1758179940000,
+                      1758179950000,
+                      1758179960000,
+                      1758179970000,
+                      1758179980000,
+                      1758179990000,
+                      1758180000000,
+                      1758180010000,
+                      1758180020000,
+                      1758180030000,
+                      1758180040000,
+                      1758180050000,
+                      1758180060000,
+                      1758180070000,
+                      1758180080000,
+                      1758180090000,
+                      1758180100000,
+                      1758180110000,
+                      1758180120000,
+                      1758180130000,
+                      1758180140000,
+                      1758180150000,
+                      1758180160000,
+                      1758180170000,
+                      1758180180000,
+                      1758180190000,
+                      1758180200000,
+                      1758180210000,
+                      1758180220000,
+                      1758180230000,
+                      1758180240000,
+                      1758180250000,
+                      1758180260000,
+                      1758180270000
+                    ],
+                    [
+                      1,
+                      0.2,
+                      0,
+                      0,
+                      0,
+                      0,
+                      20.3,
+                      89.1,
+                      89.4,
+                      90.3,
+                      89.1,
+                      89.8,
+                      89.3,
+                      89.4,
+                      89.3,
+                      88.7,
+                      89.5,
+                      89.8,
+                      89.3,
+                      89.3,
+                      89.2,
+                      88.9,
+                      88.4,
+                      89.8,
+                      90.1,
+                      89.9,
+                      89,
+                      89.7,
+                      90,
+                      88.8,
+                      89.2,
+                      89.8,
+                      88.9,
+                      89,
+                      90.2,
+                      89.8,
+                      68.9,
+                      0
+                    ]
+                  ]
+                }
+              }
+            ]
+          }
+        }
+      },
+      "timestamp": "2025-09-25T18:51:34.612Z"
+    },
+    "panel_39_request_0": {
+      "panel_info": {
+        "panel_id": 39,
+        "panel_title": "Failed requests per second",
+        "dashboard_label": "Gatling AfterburnerBasicSimulation",
+        "dashboard_uid": "gatling-overview-influxdb"
+      },
+      "variable_context": {
+        "system_under_test": "MyAfterburner",
+        "test_environment": "acc",
+        "simulation": "AfterburnerBasicSimulation"
+      },
+      "original_request": {
+        "method": "POST",
+        "endpoint": "/api/ds/query",
+        "request_body": {
+          "to": "1758180271916",
+          "from": "1758179903359",
+          "queries": [
+            {
+              "tags": [
+                {
+                  "key": "simulation",
+                  "value": "/^AfterburnerBasicSimulation$/",
+                  "operator": "=~"
+                },
+                {
+                  "key": "testEnvironment",
+                  "value": "/^acc$/",
+                  "operator": "=~",
+                  "condition": "AND"
+                },
+                {
+                  "key": "systemUnderTest",
+                  "value": "/^MyAfterburner$/",
+                  "operator": "=~",
+                  "condition": "AND"
+                },
+                {
+                  "key": "result",
+                  "value": "KO",
+                  "operator": "=",
+                  "condition": "AND"
+                }
+              ],
+              "alias": "$tag_name",
+              "query": "SELECT count(\"duration\")  / 10 FROM \"30d\".\"requests\" WHERE (\"simulation\" =~ /^AfterburnerBasicSimulation$/ AND \"testEnvironment\" =~ /^acc$/ AND \"systemUnderTest\" =~ /^MyAfterburner$/ AND \"result\" = 'KO') AND time >= 1758179903359ms AND time <= 1758180271916ms GROUP BY time(10s), \"name\"",
+              "refId": "A",
+              "policy": "30d",
+              "select": [
+                [
+                  {
+                    "type": "field",
+                    "params": [
+                      "duration"
+                    ]
+                  },
+                  {
+                    "type": "count",
+                    "params": []
+                  },
+                  {
+                    "type": "math",
+                    "params": [
+                      " / 10"
+                    ]
+                  }
+                ]
+              ],
+              "groupBy": [
+                {
+                  "type": "time",
+                  "params": [
+                    "10s"
+                  ]
+                },
+                {
+                  "type": "tag",
+                  "params": [
+                    "name"
+                  ]
+                }
+              ],
+              "rawQuery": true,
+              "datasource": {
+                "uid": "influxdb-gatling",
+                "type": "influxdb"
+              },
+              "measurement": "requests",
+              "orderByTime": "ASC",
+              "datasourceId": 4,
+              "resultFormat": "time_series"
+            }
+          ]
+        },
+        "path_parameters": {
+          "ds_type": "influxdb",
+          "requestId": "1d0d8cdb-fb93-4386-b132-3538be6fdaa4:39"
+        }
+      },
+      "substituted_request": {
+        "queries": [
+          {
+            "tags": [
+              {
+                "key": "simulation",
+                "value": "/^AfterburnerBasicSimulation$/",
+                "operator": "=~"
+              },
+              {
+                "key": "testEnvironment",
+                "value": "/^acc$/",
+                "operator": "=~",
+                "condition": "AND"
+              },
+              {
+                "key": "systemUnderTest",
+                "value": "/^MyAfterburner$/",
+                "operator": "=~",
+                "condition": "AND"
+              },
+              {
+                "key": "result",
+                "value": "KO",
+                "operator": "=",
+                "condition": "AND"
+              }
+            ],
+            "alias": "$tag_name",
+            "query": "SELECT count(\"duration\")  / 10 FROM \"30d\".\"requests\" WHERE (\"simulation\" =~ /^AfterburnerBasicSimulation$/ AND \"testEnvironment\" =~ /^acc$/ AND \"systemUnderTest\" =~ /^MyAfterburner$/ AND \"result\" = 'KO') AND time >= 1758179903359ms AND time <= 1758180271916ms GROUP BY time(10s), \"name\"",
+            "refId": "A",
+            "policy": "30d",
+            "select": [
+              [
+                {
+                  "type": "field",
+                  "params": [
+                    "duration"
+                  ]
+                },
+                {
+                  "type": "count",
+                  "params": []
+                },
+                {
+                  "type": "math",
+                  "params": [
+                    " / 10"
+                  ]
+                }
+              ]
+            ],
+            "groupBy": [
+              {
+                "type": "time",
+                "params": [
+                  "10s"
+                ]
+              },
+              {
+                "type": "tag",
+                "params": [
+                  "name"
+                ]
+              }
+            ],
+            "rawQuery": true,
+            "datasource": {
+              "uid": "influxdb-gatling",
+              "type": "influxdb"
+            },
+            "measurement": "requests",
+            "orderByTime": "ASC",
+            "datasourceId": 4,
+            "resultFormat": "time_series"
+          }
+        ],
+        "range": {
+          "from": "2025-09-18T07:18:23.359Z",
+          "to": "2025-09-18T07:24:31.916Z",
+          "raw": {
+            "from": "2025-09-18T07:18:23.359Z",
+            "to": "2025-09-18T07:24:31.916Z"
+          }
+        },
+        "from": "2025-09-18T07:18:23.359Z",
+        "to": "2025-09-18T07:24:31.916Z",
+        "interval": "15s"
+      },
+      "grafana_response": {
+        "results": {
+          "A": {
+            "status": 200,
+            "frames": [
+              {
+                "schema": {
+                  "name": "flaky_call",
+                  "refId": "A",
+                  "meta": {
+                    "typeVersion": [
+                      0,
+                      0
+                    ],
+                    "custom": null,
+                    "preferredVisualisationType": "graph",
+                    "executedQueryString": "SELECT count(\"duration\")  / 10 FROM \"30d\".\"requests\" WHERE (\"simulation\" =~ /^AfterburnerBasicSimulation$/ AND \"testEnvironment\" =~ /^acc$/ AND \"systemUnderTest\" =~ /^MyAfterburner$/ AND \"result\" = 'KO') AND time >= 1758179903359ms AND time <= 1758180271916ms GROUP BY time(10s), \"name\""
+                  },
+                  "fields": [
+                    {
+                      "name": "Time",
+                      "type": "time",
+                      "typeInfo": {
+                        "frame": "time.Time"
+                      }
+                    },
+                    {
+                      "name": "Value",
+                      "type": "number",
+                      "typeInfo": {
+                        "frame": "float64",
+                        "nullable": true
+                      },
+                      "labels": {
+                        "name": "flaky_call"
+                      },
+                      "config": {
+                        "displayNameFromDS": "flaky_call"
+                      }
+                    }
+                  ]
+                },
+                "data": {
+                  "values": [
+                    [
+                      1758179900000,
+                      1758179910000,
+                      1758179920000,
+                      1758179930000,
+                      1758179940000,
+                      1758179950000,
+                      1758179960000,
+                      1758179970000,
+                      1758179980000,
+                      1758179990000,
+                      1758180000000,
+                      1758180010000,
+                      1758180020000,
+                      1758180030000,
+                      1758180040000,
+                      1758180050000,
+                      1758180060000,
+                      1758180070000,
+                      1758180080000,
+                      1758180090000,
+                      1758180100000,
+                      1758180110000,
+                      1758180120000,
+                      1758180130000,
+                      1758180140000,
+                      1758180150000,
+                      1758180160000,
+                      1758180170000,
+                      1758180180000,
+                      1758180190000,
+                      1758180200000,
+                      1758180210000,
+                      1758180220000,
+                      1758180230000,
+                      1758180240000,
+                      1758180250000,
+                      1758180260000,
+                      1758180270000
+                    ],
+                    [
+                      0,
+                      0,
+                      0,
+                      0,
+                      0,
+                      0,
+                      0.1,
+                      0.9,
+                      0.6,
+                      0.1,
+                      0.5,
+                      0.3,
+                      0.4,
+                      1,
+                      0.5,
+                      1.1,
+                      0.4,
+                      0.5,
+                      0.6,
+                      0.8,
+                      0.9,
+                      0.9,
+                      1.4,
+                      0.2,
+                      0.5,
+                      0,
+                      0.6,
+                      0.5,
+                      0.4,
+                      0.6,
+                      0.7,
+                      0.3,
+                      1.1,
+                      1,
+                      0.2,
+                      0.2,
+                      0.5,
+                      0
+                    ]
+                  ]
+                }
+              }
+            ]
+          }
+        }
+      },
+      "timestamp": "2025-09-25T18:51:34.621Z"
+    },
+    "panel_43_request_0": {
+      "panel_info": {
+        "panel_id": 43,
+        "panel_title": "Error messages count",
+        "dashboard_label": "Gatling AfterburnerBasicSimulation",
+        "dashboard_uid": "gatling-overview-influxdb"
+      },
+      "variable_context": {
+        "system_under_test": "MyAfterburner",
+        "test_environment": "acc",
+        "simulation": "AfterburnerBasicSimulation"
+      },
+      "original_request": {
+        "method": "POST",
+        "endpoint": "/api/ds/query",
+        "request_body": {
+          "to": "1758180271916",
+          "from": "1758179903359",
+          "queries": [
+            {
+              "tags": [
+                {
+                  "key": "simulation",
+                  "value": "/^AfterburnerBasicSimulation$/",
+                  "operator": "=~"
+                },
+                {
+                  "key": "testEnvironment",
+                  "value": "/^acc$/",
+                  "operator": "=~",
+                  "condition": "AND"
+                },
+                {
+                  "key": "systemUnderTest",
+                  "value": "/^MyAfterburner$/",
+                  "operator": "=~",
+                  "condition": "AND"
+                },
+                {
+                  "key": "result",
+                  "value": "KO",
+                  "operator": "=",
+                  "condition": "AND"
+                }
+              ],
+              "alias": "$tag_name $measurement ",
+              "query": "SELECT count(\"duration\") FROM \"30d\".\"requests\" WHERE (\"simulation\" =~ /^AfterburnerBasicSimulation$/ AND \"testEnvironment\" =~ /^acc$/ AND \"systemUnderTest\" =~ /^MyAfterburner$/ AND \"result\" = 'KO') AND time >= 1758179903359ms AND time <= 1758180271916ms GROUP BY \"name\", \"errorMessage\"",
+              "refId": "A",
+              "policy": "30d",
+              "select": [
+                [
+                  {
+                    "type": "field",
+                    "params": [
+                      "duration"
+                    ]
+                  },
+                  {
+                    "type": "count",
+                    "params": []
+                  }
+                ]
+              ],
+              "groupBy": [
+                {
+                  "type": "tag",
+                  "params": [
+                    "name"
+                  ]
+                },
+                {
+                  "type": "tag",
+                  "params": [
+                    "errorMessage"
+                  ]
+                }
+              ],
+              "rawQuery": true,
+              "datasource": {
+                "uid": "influxdb-gatling",
+                "type": "influxdb"
+              },
+              "measurement": "requests",
+              "orderByTime": "ASC",
+              "datasourceId": 4,
+              "resultFormat": "table"
+            }
+          ]
+        },
+        "path_parameters": {
+          "ds_type": "influxdb",
+          "requestId": "1d0d8cdb-fb93-4386-b132-3538be6fdaa4:43"
+        }
+      },
+      "substituted_request": {
+        "queries": [
+          {
+            "tags": [
+              {
+                "key": "simulation",
+                "value": "/^AfterburnerBasicSimulation$/",
+                "operator": "=~"
+              },
+              {
+                "key": "testEnvironment",
+                "value": "/^acc$/",
+                "operator": "=~",
+                "condition": "AND"
+              },
+              {
+                "key": "systemUnderTest",
+                "value": "/^MyAfterburner$/",
+                "operator": "=~",
+                "condition": "AND"
+              },
+              {
+                "key": "result",
+                "value": "KO",
+                "operator": "=",
+                "condition": "AND"
+              }
+            ],
+            "alias": "$tag_name $measurement ",
+            "query": "SELECT count(\"duration\") FROM \"30d\".\"requests\" WHERE (\"simulation\" =~ /^AfterburnerBasicSimulation$/ AND \"testEnvironment\" =~ /^acc$/ AND \"systemUnderTest\" =~ /^MyAfterburner$/ AND \"result\" = 'KO') AND time >= 1758179903359ms AND time <= 1758180271916ms GROUP BY \"name\", \"errorMessage\"",
+            "refId": "A",
+            "policy": "30d",
+            "select": [
+              [
+                {
+                  "type": "field",
+                  "params": [
+                    "duration"
+                  ]
+                },
+                {
+                  "type": "count",
+                  "params": []
+                }
+              ]
+            ],
+            "groupBy": [
+              {
+                "type": "tag",
+                "params": [
+                  "name"
+                ]
+              },
+              {
+                "type": "tag",
+                "params": [
+                  "errorMessage"
+                ]
+              }
+            ],
+            "rawQuery": true,
+            "datasource": {
+              "uid": "influxdb-gatling",
+              "type": "influxdb"
+            },
+            "measurement": "requests",
+            "orderByTime": "ASC",
+            "datasourceId": 4,
+            "resultFormat": "table"
+          }
+        ],
+        "range": {
+          "from": "2025-09-18T07:18:23.359Z",
+          "to": "2025-09-18T07:24:31.916Z",
+          "raw": {
+            "from": "2025-09-18T07:18:23.359Z",
+            "to": "2025-09-18T07:24:31.916Z"
+          }
+        },
+        "from": "2025-09-18T07:18:23.359Z",
+        "to": "2025-09-18T07:24:31.916Z",
+        "interval": "15s"
+      },
+      "grafana_response": {
+        "results": {
+          "A": {
+            "status": 200,
+            "frames": [
+              {
+                "schema": {
+                  "name": "requests",
+                  "refId": "A",
+                  "meta": {
+                    "typeVersion": [
+                      0,
+                      0
+                    ],
+                    "custom": null,
+                    "preferredVisualisationType": "table",
+                    "executedQueryString": "SELECT count(\"duration\") FROM \"30d\".\"requests\" WHERE (\"simulation\" =~ /^AfterburnerBasicSimulation$/ AND \"testEnvironment\" =~ /^acc$/ AND \"systemUnderTest\" =~ /^MyAfterburner$/ AND \"result\" = 'KO') AND time >= 1758179903359ms AND time <= 1758180271916ms GROUP BY \"name\", \"errorMessage\""
+                  },
+                  "fields": [
+                    {
+                      "name": "Time",
+                      "type": "time",
+                      "typeInfo": {
+                        "frame": "time.Time"
+                      }
+                    },
+                    {
+                      "name": "errorMessage",
+                      "type": "string",
+                      "typeInfo": {
+                        "frame": "string",
+                        "nullable": true
+                      },
+                      "config": {
+                        "displayNameFromDS": "errorMessage"
+                      }
+                    },
+                    {
+                      "name": "name",
+                      "type": "string",
+                      "typeInfo": {
+                        "frame": "string",
+                        "nullable": true
+                      },
+                      "config": {
+                        "displayNameFromDS": "name"
+                      }
+                    },
+                    {
+                      "name": "count",
+                      "type": "number",
+                      "typeInfo": {
+                        "frame": "float64",
+                        "nullable": true
+                      },
+                      "config": {
+                        "displayNameFromDS": "count"
+                      }
+                    }
+                  ]
+                },
+                "data": {
+                  "values": [
+                    [
+                      1758179903359
+                    ],
+                    [
+                      "status.find.is(200), but actually found 500"
+                    ],
+                    [
+                      "flaky_call"
+                    ],
+                    [
+                      178
+                    ]
+                  ]
+                }
+              }
+            ]
+          }
+        }
+      },
+      "timestamp": "2025-09-25T18:51:34.630Z"
+    }
+  }
+}

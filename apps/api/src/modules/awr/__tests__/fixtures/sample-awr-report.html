@@ -1,0 +1,103 @@
+<!DOCTYPE HTML PUBLIC "-//W3C//DTD HTML 4.01 Transitional//EN" "http://www.w3.org/TR/html4/loose.dtd">
+<html>
+<head>
+<title>AWR Report</title>
+<style type="text/css">
+body { font-size:10pt; }
+table { font-size:8pt; }
+.tdiff { border-collapse: collapse; }
+.tdiff th { background-color:#cccc99; padding:2px; }
+.tdiff td { border-top: 1px solid gray; padding:2px; }
+</style>
+</head>
+<body>
+
+<h1>WORKLOAD REPOSITORY report for</h1>
+
+<table class="tdiff" border="0" summary="This table displays database instance information">
+<tr><th>DB Name</th><td>ORCL</td><th>DB Id</th><td>123456789</td><th>Instance</th><td>orcl1</td><th>Inst num</th><td>1</td></tr>
+<tr><th>Release</th><td>19.3.0.0.0</td><th>RAC</th><td>NO</td><th>Host</th><td>dbserver01</td></tr>
+</table>
+
+<p><b>Edition:</b> Enterprise Edition</p>
+<p><b>CDB:</b> NO</p>
+<p><b>Platform:</b> Linux x86 64-bit</p>
+<p><b>CPUs:</b> 8</p>
+<p><b>Cores:</b> 4</p>
+<p><b>Sockets:</b> 1</p>
+<p><b>Memory (GB):</b> 32</p>
+
+<h2>Snapshot Summary</h2>
+<table class="tdiff" border="0">
+<tr><th></th><th>Snap Id</th><th>Snap Time</th><th>Sessions</th></tr>
+<tr><td>Begin Snap:</td><td>100</td><td>20-Jan-26 10:00:00</td><td>125</td></tr>
+<tr><td>End Snap:</td><td>101</td><td>20-Jan-26 11:00:00</td><td>130</td></tr>
+<tr><td>Elapsed:</td><td></td><td>60.00 (mins)</td><td></td></tr>
+<tr><td>DB Time:</td><td></td><td>45.50 (mins)</td><td></td></tr>
+</table>
+
+<h2>Load Profile</h2>
+<table class="tdiff" border="0" summary="This table displays load profile">
+<tr><th></th><th>Per Second</th><th>Per Transaction</th><th>Per Exec</th><th>Per Call</th></tr>
+<tr><td>DB Time(s):</td><td>0.76</td><td>0.02</td><td></td><td></td></tr>
+<tr><td>DB CPU(s):</td><td>0.45</td><td>0.01</td><td></td><td></td></tr>
+<tr><td>Redo size (bytes):</td><td>1,234,567</td><td>30,864</td><td></td><td></td></tr>
+<tr><td>Logical reads (blocks):</td><td>25,678</td><td>642</td><td></td><td></td></tr>
+<tr><td>Block changes:</td><td>1,234</td><td>31</td><td></td><td></td></tr>
+<tr><td>Physical reads (blocks):</td><td>456</td><td>11</td><td></td><td></td></tr>
+<tr><td>Physical writes (blocks):</td><td>89</td><td>2</td><td></td><td></td></tr>
+<tr><td>User calls:</td><td>1,500</td><td>38</td><td></td><td></td></tr>
+<tr><td>Parses:</td><td>234</td><td>6</td><td></td><td></td></tr>
+<tr><td>Hard parses:</td><td>12</td><td>0</td><td></td><td></td></tr>
+<tr><td>Transactions:</td><td>40</td><td></td><td></td><td></td></tr>
+<tr><td>Executes (SQL):</td><td>5,678</td><td>142</td><td></td><td></td></tr>
+</table>
+
+<h2>Top 5 Timed Foreground Events</h2>
+<table class="tdiff" border="0" summary="This table displays top timed foreground events">
+<tr><th>Event</th><th>Waits</th><th>Time(s)</th><th>Avg wait(ms)</th><th>% DB time</th><th>Wait Class</th></tr>
+<tr><td>DB CPU</td><td></td><td>1,620</td><td></td><td>59.67</td><td></td></tr>
+<tr><td>db file sequential read</td><td>45,678</td><td>567</td><td>12</td><td>20.85</td><td>User I/O</td></tr>
+<tr><td>log file sync</td><td>12,345</td><td>234</td><td>19</td><td>8.61</td><td>Commit</td></tr>
+<tr><td>SQL*Net message from client</td><td>890,123</td><td>156</td><td>0</td><td>5.74</td><td>Idle</td></tr>
+<tr><td>db file scattered read</td><td>6,789</td><td>89</td><td>13</td><td>3.28</td><td>User I/O</td></tr>
+</table>
+
+<h2>SQL ordered by Elapsed Time</h2>
+<table class="tdiff" border="0" summary="This table displays SQL ordered by elapsed time">
+<tr><th>Elapsed Time (s)</th><th>Executions</th><th>Elapsed per Exec (s)</th><th>%Total</th><th>%CPU</th><th>%IO</th><th>SQL Id</th><th>SQL Module</th></tr>
+<tr><td>456.78</td><td>10,000</td><td>0.05</td><td>16.80</td><td>65.00</td><td>30.00</td><td>abc123xyz456</td><td>JDBC Client</td></tr>
+<tr><td>345.67</td><td>5,000</td><td>0.07</td><td>12.72</td><td>45.00</td><td>50.00</td><td>def456uvw789</td><td>JDBC Client</td></tr>
+<tr><td>234.56</td><td>50,000</td><td>0.00</td><td>8.63</td><td>80.00</td><td>15.00</td><td>ghi789rst012</td><td>SQL*Plus</td></tr>
+<tr><td>123.45</td><td>1,000</td><td>0.12</td><td>4.54</td><td>55.00</td><td>40.00</td><td>jkl012mno345</td><td>JDBC Client</td></tr>
+<tr><td>89.12</td><td>25,000</td><td>0.00</td><td>3.28</td><td>70.00</td><td>25.00</td><td>pqr345stu678</td><td>SQL*Plus</td></tr>
+</table>
+
+<h3>SQL ordered by CPU Time</h3>
+<table class="tdiff" border="0" summary="This table displays SQL ordered by CPU time">
+<tr><th>CPU Time (s)</th><th>Executions</th><th>CPU per Exec (s)</th><th>%Total</th><th>SQL Id</th><th>SQL Module</th></tr>
+<tr><td>297.01</td><td>10,000</td><td>0.03</td><td>18.33</td><td>abc123xyz456</td><td>JDBC Client</td></tr>
+<tr><td>155.55</td><td>5,000</td><td>0.03</td><td>9.60</td><td>def456uvw789</td><td>JDBC Client</td></tr>
+<tr><td>187.65</td><td>50,000</td><td>0.00</td><td>11.58</td><td>ghi789rst012</td><td>SQL*Plus</td></tr>
+</table>
+
+<h3>SQL ordered by Gets</h3>
+<table class="tdiff" border="0" summary="This table displays SQL ordered by gets">
+<tr><th>Buffer Gets</th><th>Executions</th><th>Gets per Exec</th><th>%Total</th><th>SQL Id</th><th>SQL Module</th></tr>
+<tr><td>5,678,901</td><td>10,000</td><td>567.89</td><td>12.34</td><td>abc123xyz456</td><td>JDBC Client</td></tr>
+<tr><td>4,567,890</td><td>5,000</td><td>913.58</td><td>9.92</td><td>def456uvw789</td><td>JDBC Client</td></tr>
+<tr><td>3,456,789</td><td>50,000</td><td>69.14</td><td>7.51</td><td>ghi789rst012</td><td>SQL*Plus</td></tr>
+</table>
+
+<h3>SQL Text</h3>
+<table class="tdiff" border="0" summary="This table displays SQL text">
+<tr><th>SQL Id</th><th>SQL Text</th></tr>
+<tr><td>abc123xyz456</td><td>SELECT * FROM customers WHERE customer_id = :1</td></tr>
+<tr><td>def456uvw789</td><td>UPDATE orders SET status = :1 WHERE order_id = :2</td></tr>
+<tr><td>ghi789rst012</td><td>INSERT INTO audit_log (action, timestamp) VALUES (:1, :2)</td></tr>
+<tr><td>jkl012mno345</td><td>SELECT o.*, c.name FROM orders o JOIN customers c ON o.customer_id = c.id WHERE o.created_at > :1</td></tr>
+<tr><td>pqr345stu678</td><td>DELETE FROM temp_data WHERE created_at < :1</td></tr>
+</table>
+
+</body>
+</html>

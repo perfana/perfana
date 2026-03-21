@@ -1,0 +1,645 @@
+import { Test, TestingModule } from '@nestjs/testing';
+import { INestApplication } from '@nestjs/common';
+import { ConfigModule } from '@nestjs/config';
+import { TypeOrmModule } from '@nestjs/typeorm';
+import { Repository } from 'typeorm';
+import { getRepositoryToken } from '@nestjs/typeorm';
+import { v4 as uuidv4 } from 'uuid';
+import {
+  DsAdaptResults,
+  DsAdaptTrackedResults,
+  DsCompareConfig,
+  DsControlGroupStatistics,
+  DsControlGroups,
+  DsMetricClassification,
+  DsMetricStatistics,
+  DsPanels,
+  DsTrackedDifferences,
+  ApplicationDashboard,
+  SystemUnderTest,
+  Benchmark,
+  User,
+  TestRun
+} from '../entities';
+
+describe('Phase 4 Migration Validation Suite', () => {
+  let app: INestApplication;
+  let dsAdaptResultsRepo: Repository<DsAdaptResults>;
+  let dsAdaptTrackedResultsRepo: Repository<DsAdaptTrackedResults>;
+  let dsCompareConfigRepo: Repository<DsCompareConfig>;
+  let dsControlGroupStatisticsRepo: Repository<DsControlGroupStatistics>;
+  let dsControlGroupsRepo: Repository<DsControlGroups>;
+  let dsMetricClassificationRepo: Repository<DsMetricClassification>;
+  let dsMetricStatisticsRepo: Repository<DsMetricStatistics>;
+  let dsPanelsRepo: Repository<DsPanels>;
+  let dsTrackedDifferencesRepo: Repository<DsTrackedDifferences>;
+  let applicationDashboardRepo: Repository<ApplicationDashboard>;
+  let systemUnderTestRepo: Repository<SystemUnderTest>;
+  let benchmarkRepo: Repository<Benchmark>;
+
+  // Test data for Phase 4 entities
+  const testApplicationDashboard = {
+    systemUnderTestId: uuidv4(),
+    testEnvironment: 'test',
+    workload: 'load-test',
+    grafanaInstanceId: uuidv4(),
+    dashboardUid: 'test-dashboard-uid',
+    dashboardLabel: 'Test Dashboard',
+    tags: ['phase4', 'test']
+  };
+
+  const testSystemUnderTest = {
+    name: 'Phase4 Test System',
+    description: 'System under test for Phase 4 migration testing',
+    tracing_service: 'jaeger',
+    pyroscope_application: 'phase4-test-app',
+    dynatrace_url: 'https://test.dynatrace.com'
+  };
+
+  const testBenchmark = {
+    name: 'Phase4 Test Benchmark',
+    description: 'Benchmark for Phase 4 testing'
+  };
+
+  const testDsAdaptResults = {
+    test_run_id: 'test-run-phase4-001',
+    control_group_id: 'control-group-001',
+    panel_id: 123,
+    metric_name: 'response_time_p95',
+    dashboard_uid: 'test-dashboard-uid',
+    dashboard_label: 'Test Dashboard',
+    panel_title: 'Response Time P95',
+    unit: 'ms',
+    test_run_start: new Date(),
+    benchmark_ids: ['benchmark-1', 'benchmark-2'],
+    mean: { test: 150.5, control: 145.2, diff: 5.3, pctDiff: 3.6 },
+    median: { test: 148.0, control: 143.8, diff: 4.2, pctDiff: 2.9 },
+    q95: { test: 180.2, control: 175.8, diff: 4.4, pctDiff: 2.5 },
+    compare_config: {
+      thresholds: { regression: 5.0, improvement: -2.0 },
+      conditions: { minSamples: 100 }
+    },
+    statistic: { primary: 'median', significance: 0.95 },
+    conditions: { minDataPoints: 100, maxGap: 300 },
+    thresholds: { warning: 5.0, critical: 10.0 },
+    checks: { dataQuality: true, outliers: false },
+    conclusion: {
+      label: 'regression',
+      confidence: 0.92,
+      significance: true,
+      details: 'Performance degradation detected'
+    }
+  };
+
+  const testDsAdaptTrackedResults = {
+    test_run_id: 'test-run-phase4-002',
+    control_group_id: 'control-group-001',
+    tracked_test_run_id: 'test-run-phase4-001',
+    tracked_difference_id: 'diff-001',
+    panel_id: 123,
+    metric_name: 'response_time_p95',
+    test_run_start: new Date(),
+    mean: { test: 152.1, control: 145.2, diff: 6.9, pctDiff: 4.8 },
+    median: { test: 149.5, control: 143.8, diff: 5.7, pctDiff: 4.0 },
+    compare_config: {
+      thresholds: { regression: 5.0, improvement: -2.0 }
+    },
+    conclusion: { label: 'regression', trend: 'increasing' },
+    tracked_conclusion: { label: 'regression', previous_diff: 5.3 }
+  };
+
+  const testDsCompareConfig = {
+    panel_id: 123,
+    config_data: {
+      thresholds: { regression: 5.0, improvement: -2.0 },
+      conditions: { minSamples: 100, significance: 0.95 },
+      algorithm: 'mann-whitney-u'
+    },
+    metric_name: 'response_time_p95',
+    test_environment: 'load-test',
+    workload: 'baseline',
+    config_hash: 'abc123def456',
+    last_modified_at: new Date()
+  };
+
+  const testDsControlGroupStatistics = {
+    control_group_id: 'control-group-001',
+    panel_id: 123,
+    metric_name: 'response_time_p95',
+    mean: 145.2,
+    median: 143.8,
+    min_value: 95.1,
+    max_value: 287.4,
+    std_dev: 28.6,
+    count: 1250,
+    q95: 175.8,
+    q99: 201.3,
+    is_constant: false,
+    all_missing: false,
+    pct_missing: 0.02
+  };
+
+  const testDsControlGroups = {
+    control_group_id: 'control-group-001',
+    system_under_test_id: 'system-001',
+    workload: 'baseline',
+    test_environment: 'production',
+    n_test_runs: 5,
+    test_runs: ['run-001', 'run-002', 'run-003', 'run-004', 'run-005'],
+    first_datetime: new Date('2024-01-01'),
+    last_datetime: new Date(),
+    metric_filters: {
+      excludeOutliers: true,
+      minSamples: 100
+    }
+  };
+
+  const testDsMetricClassification = {
+    test_environment: 'production',
+    workload: 'baseline',
+    dashboard_uid: 'test-dashboard-uid',
+    dashboard_label: 'Test Dashboard',
+    panel_id: 123,
+    panel_title: 'Response Time P95',
+    metric_name: 'response_time_p95',
+    regex: false,
+    higher_is_better: false,
+    metric_classification: 'latency'
+  };
+
+  const testDsMetricStatistics = {
+    test_run_id: 'test-run-phase4-001',
+    panel_id: 123,
+    count: 1250,
+    mean: 145.2,
+    median: 143.8,
+    min_value: 95.1,
+    max_value: 287.4,
+    std_dev: 28.6,
+    q95: 175.8,
+    q99: 201.3,
+    metric_name: 'response_time_p95',
+    test_run_start: new Date(),
+    dashboard_uid: 'test-dashboard-uid',
+    unit: 'ms'
+  };
+
+  const testDsPanels = {
+    test_run_id: 'test-run-phase4-001',
+    dashboard_uid: 'test-dashboard-uid',
+    panel_id: 123,
+    panel_title: 'Response Time P95',
+    dashboard_label: 'Test Dashboard',
+    benchmark_ids: ['benchmark-1', 'benchmark-2'],
+    panel: {
+      id: 123,
+      title: 'Response Time P95',
+      type: 'graph',
+      targets: [{ expr: 'http_request_duration_seconds' }]
+    },
+    query_variables: {
+      interval: '5m',
+      range: '1h'
+    },
+    datasource_type: 'prometheus'
+  };
+
+  const testDsTrackedDifferences = {
+    test_run_id: uuidv4(),
+    panel_id: 123,
+    difference_data: {
+      metric_name: 'response_time_p95',
+      baseline_value: 143.8,
+      current_value: 149.5,
+      difference: 5.7,
+      percentage_change: 4.0,
+      trend: 'increasing',
+      significance: 0.92
+    }
+  };
+
+  beforeAll(async () => {
+    const moduleFixture: TestingModule = await Test.createTestingModule({
+      imports: [
+        ConfigModule.forRoot({
+          isGlobal: true,
+          envFilePath: '.env.test'
+        }),
+        TypeOrmModule.forRoot({
+          type: 'postgres',
+          host: process.env.TEST_DB_HOST || 'localhost',
+          port: parseInt(process.env.TEST_DB_PORT || '5432'),
+          username: process.env.TEST_DB_USERNAME || 'perfana',
+          password: process.env.TEST_DB_PASSWORD || 'perfana',
+          database: process.env.TEST_DB_NAME || 'perfana_test',
+          entities: [
+            DsAdaptResults, DsAdaptTrackedResults, DsCompareConfig,
+            DsControlGroupStatistics, DsControlGroups, DsMetricClassification,
+            DsMetricStatistics, DsPanels, DsTrackedDifferences,
+            ApplicationDashboard, SystemUnderTest, Benchmark, User, TestRun
+          ],
+          synchronize: true,
+          dropSchema: true,
+          logging: false
+        }),
+        TypeOrmModule.forFeature([
+          DsAdaptResults, DsAdaptTrackedResults, DsCompareConfig,
+          DsControlGroupStatistics, DsControlGroups, DsMetricClassification,
+          DsMetricStatistics, DsPanels, DsTrackedDifferences,
+          ApplicationDashboard, SystemUnderTest, Benchmark
+        ])
+      ]
+    }).compile();
+
+    app = moduleFixture.createNestApplication();
+    await app.init();
+
+    // Get repositories
+    dsAdaptResultsRepo = app.get(getRepositoryToken(DsAdaptResults));
+    dsAdaptTrackedResultsRepo = app.get(getRepositoryToken(DsAdaptTrackedResults));
+    dsCompareConfigRepo = app.get(getRepositoryToken(DsCompareConfig));
+    dsControlGroupStatisticsRepo = app.get(getRepositoryToken(DsControlGroupStatistics));
+    dsControlGroupsRepo = app.get(getRepositoryToken(DsControlGroups));
+    dsMetricClassificationRepo = app.get(getRepositoryToken(DsMetricClassification));
+    dsMetricStatisticsRepo = app.get(getRepositoryToken(DsMetricStatistics));
+    dsPanelsRepo = app.get(getRepositoryToken(DsPanels));
+    dsTrackedDifferencesRepo = app.get(getRepositoryToken(DsTrackedDifferences));
+    applicationDashboardRepo = app.get(getRepositoryToken(ApplicationDashboard));
+    systemUnderTestRepo = app.get(getRepositoryToken(SystemUnderTest));
+    benchmarkRepo = app.get(getRepositoryToken(Benchmark));
+  });
+
+  afterAll(async () => {
+    await app.close();
+  });
+
+  describe('Phase 4 Entity CRUD Operations', () => {
+    let savedApplicationDashboard: ApplicationDashboard;
+    let savedSystemUnderTest: SystemUnderTest;
+    let savedBenchmark: Benchmark;
+
+    beforeAll(async () => {
+      // Create prerequisite entities
+      savedSystemUnderTest = await systemUnderTestRepo.save(testSystemUnderTest);
+      savedBenchmark = await benchmarkRepo.save(testBenchmark);
+
+      const dashboardData = {
+        ...testApplicationDashboard,
+        systemUnderTestId: savedSystemUnderTest.id
+      };
+      savedApplicationDashboard = await applicationDashboardRepo.save(dashboardData);
+    });
+
+    it('should create and retrieve DsAdaptResults entity', async () => {
+      const adaptResultData = {
+        ...testDsAdaptResults,
+        application_dashboard_id: savedApplicationDashboard.id
+      };
+
+      const saved = await dsAdaptResultsRepo.save(adaptResultData);
+      expect(saved.id).toBeDefined();
+      expect(saved.test_run_id).toBe(testDsAdaptResults.test_run_id);
+      expect(saved.metric_name).toBe(testDsAdaptResults.metric_name);
+      expect(saved.mean).toEqual(testDsAdaptResults.mean);
+      expect(saved.conclusion).toEqual(testDsAdaptResults.conclusion);
+
+      const retrieved = await dsAdaptResultsRepo.findOne({
+        where: { id: saved.id },
+        relations: ['application_dashboard']
+      });
+      expect(retrieved).toBeDefined();
+      expect(retrieved?.application_dashboard?.id).toBe(savedApplicationDashboard.id);
+    });
+
+    it('should create and retrieve DsAdaptTrackedResults entity', async () => {
+      const trackedResultData = {
+        ...testDsAdaptTrackedResults,
+        application_dashboard_id: savedApplicationDashboard.id
+      };
+
+      const saved = await dsAdaptTrackedResultsRepo.save(trackedResultData);
+      expect(saved.id).toBeDefined();
+      expect(saved.test_run_id).toBe(testDsAdaptTrackedResults.test_run_id);
+      expect(saved.tracked_test_run_id).toBe(testDsAdaptTrackedResults.tracked_test_run_id);
+      expect(saved.conclusion).toEqual(testDsAdaptTrackedResults.conclusion);
+
+      const retrieved = await dsAdaptTrackedResultsRepo.findOne({
+        where: { id: saved.id }
+      });
+      expect(retrieved).toBeDefined();
+      expect(retrieved?.tracked_conclusion).toEqual(testDsAdaptTrackedResults.tracked_conclusion);
+    });
+
+    it('should create and retrieve DsCompareConfig entity', async () => {
+      const compareConfigData = {
+        ...testDsCompareConfig,
+        application_dashboard_id: savedApplicationDashboard.id,
+        system_under_test_id: savedSystemUnderTest.id
+      };
+
+      const saved = await dsCompareConfigRepo.save(compareConfigData);
+      expect(saved.id).toBeDefined();
+      expect(saved.panel_id).toBe(testDsCompareConfig.panel_id);
+      expect(saved.config_data).toEqual(testDsCompareConfig.config_data);
+      expect(saved.config_hash).toBe(testDsCompareConfig.config_hash);
+
+      const retrieved = await dsCompareConfigRepo.findOne({
+        where: { id: saved.id },
+        relations: ['application_dashboard', 'system_under_test']
+      });
+      expect(retrieved).toBeDefined();
+      expect(retrieved?.system_under_test?.id).toBe(savedSystemUnderTest.id);
+    });
+
+    it('should create and retrieve DsControlGroupStatistics entity', async () => {
+      const controlGroupStatsData = {
+        ...testDsControlGroupStatistics,
+        application_dashboard_id: savedApplicationDashboard.id
+      };
+
+      const saved = await dsControlGroupStatisticsRepo.save(controlGroupStatsData);
+      expect(saved.id).toBeDefined();
+      expect(saved.control_group_id).toBe(testDsControlGroupStatistics.control_group_id);
+      expect(saved.mean).toBe(testDsControlGroupStatistics.mean);
+      expect(saved.count).toBe(testDsControlGroupStatistics.count);
+
+      const retrieved = await dsControlGroupStatisticsRepo.findOne({
+        where: { id: saved.id }
+      });
+      expect(retrieved).toBeDefined();
+      expect(retrieved?.q95).toBe(testDsControlGroupStatistics.q95);
+    });
+
+    it('should create and retrieve DsControlGroups entity', async () => {
+      const saved = await dsControlGroupsRepo.save(testDsControlGroups);
+      expect(saved.id).toBeDefined();
+      expect(saved.control_group_id).toBe(testDsControlGroups.control_group_id);
+      expect(saved.n_test_runs).toBe(testDsControlGroups.n_test_runs);
+      expect(saved.test_runs).toEqual(testDsControlGroups.test_runs);
+
+      const retrieved = await dsControlGroupsRepo.findOne({
+        where: { id: saved.id }
+      });
+      expect(retrieved).toBeDefined();
+      expect(retrieved?.metric_filters).toEqual(testDsControlGroups.metric_filters);
+    });
+
+    it('should create and retrieve DsMetricClassification entity', async () => {
+      const metricClassificationData = {
+        ...testDsMetricClassification,
+        system_under_test_id: savedSystemUnderTest.id,
+        application_dashboard_id: savedApplicationDashboard.id
+      };
+
+      const saved = await dsMetricClassificationRepo.save(metricClassificationData);
+      expect(saved.id).toBeDefined();
+      expect(saved.metric_name).toBe(testDsMetricClassification.metric_name);
+      expect(saved.higher_is_better).toBe(testDsMetricClassification.higher_is_better);
+      expect(saved.metric_classification).toBe(testDsMetricClassification.metric_classification);
+
+      const retrieved = await dsMetricClassificationRepo.findOne({
+        where: { id: saved.id },
+        relations: ['system_under_test', 'application_dashboard']
+      });
+      expect(retrieved).toBeDefined();
+      expect(retrieved?.system_under_test?.id).toBe(savedSystemUnderTest.id);
+    });
+
+    it('should create and retrieve DsMetricStatistics entity', async () => {
+      const metricStatsData = {
+        ...testDsMetricStatistics,
+        application_dashboard_id: savedApplicationDashboard.id,
+        benchmark_id: savedBenchmark.id
+      };
+
+      const saved = await dsMetricStatisticsRepo.save(metricStatsData);
+      expect(saved.id).toBeDefined();
+      expect(saved.test_run_id).toBe(testDsMetricStatistics.test_run_id);
+      expect(saved.count).toBe(testDsMetricStatistics.count);
+      expect(saved.mean).toBe(testDsMetricStatistics.mean);
+
+      const retrieved = await dsMetricStatisticsRepo.findOne({
+        where: { id: saved.id },
+        relations: ['application_dashboard', 'benchmark']
+      });
+      expect(retrieved).toBeDefined();
+      expect(retrieved?.benchmark?.id).toBe(savedBenchmark.id);
+    });
+
+    it('should create and retrieve DsPanels entity', async () => {
+      const panelsData = {
+        ...testDsPanels,
+        application_dashboard_id: savedApplicationDashboard.id
+      };
+
+      const saved = await dsPanelsRepo.save(panelsData);
+      expect(saved.id).toBeDefined();
+      expect(saved.test_run_id).toBe(testDsPanels.test_run_id);
+      expect(saved.panel_id).toBe(testDsPanels.panel_id);
+      expect(saved.panel).toEqual(testDsPanels.panel);
+      expect(saved.datasource_type).toBe(testDsPanels.datasource_type);
+
+      const retrieved = await dsPanelsRepo.findOne({
+        where: { id: saved.id }
+      });
+      expect(retrieved).toBeDefined();
+      expect(retrieved?.query_variables).toEqual(testDsPanels.query_variables);
+    });
+
+    it('should create and retrieve DsTrackedDifferences entity', async () => {
+      const trackedDiffData = {
+        ...testDsTrackedDifferences,
+        application_dashboard_id: savedApplicationDashboard.id,
+        benchmark_id: savedBenchmark.id
+      };
+
+      const saved = await dsTrackedDifferencesRepo.save(trackedDiffData);
+      expect(saved.id).toBeDefined();
+      expect(saved.test_run_id).toBe(testDsTrackedDifferences.test_run_id);
+      expect(saved.panel_id).toBe(testDsTrackedDifferences.panel_id);
+      expect(saved.difference_data).toEqual(testDsTrackedDifferences.difference_data);
+
+      const retrieved = await dsTrackedDifferencesRepo.findOne({
+        where: { id: saved.id },
+        relations: ['application_dashboard', 'benchmark']
+      });
+      expect(retrieved).toBeDefined();
+      expect(retrieved?.application_dashboard?.id).toBe(savedApplicationDashboard.id);
+    });
+  });
+
+  describe('Phase 4 Entity Relationships', () => {
+    it('should handle complex JSONB data structures', async () => {
+      const complexAdaptResult = {
+        ...testDsAdaptResults,
+        application_dashboard_id: (await applicationDashboardRepo.findOne({}))?.id,
+        mean: {
+          test: 150.5,
+          control: 145.2,
+          diff: 5.3,
+          pctDiff: 3.6,
+          confidence_interval: [2.1, 8.5]
+        },
+        compare_config: {
+          algorithm: 'mann-whitney-u',
+          thresholds: {
+            regression: 5.0,
+            improvement: -2.0,
+            significance: 0.95
+          },
+          conditions: {
+            minSamples: 100,
+            maxGap: 300,
+            outlierDetection: true
+          }
+        }
+      };
+
+      const saved = await dsAdaptResultsRepo.save(complexAdaptResult);
+      const retrieved = await dsAdaptResultsRepo.findOne({ where: { id: saved.id } });
+
+      expect(retrieved?.mean).toEqual(complexAdaptResult.mean);
+      expect(retrieved?.compare_config).toEqual(complexAdaptResult.compare_config);
+    });
+
+    it('should handle entity relationships correctly', async () => {
+      const dashboard = await applicationDashboardRepo.findOne({});
+      const benchmark = await benchmarkRepo.findOne({});
+
+      const metricStats = await dsMetricStatisticsRepo.save({
+        ...testDsMetricStatistics,
+        application_dashboard_id: dashboard?.id,
+        benchmark_id: benchmark?.id
+      });
+
+      const retrieved = await dsMetricStatisticsRepo.findOne({
+        where: { id: metricStats.id },
+        relations: ['application_dashboard', 'benchmark']
+      });
+
+      expect(retrieved?.application_dashboard).toBeDefined();
+      expect(retrieved?.benchmark).toBeDefined();
+      expect(retrieved?.application_dashboard?.id).toBe(dashboard?.id);
+      expect(retrieved?.benchmark?.id).toBe(benchmark?.id);
+    });
+  });
+
+  describe('Phase 4 Migration Data Integrity', () => {
+    it('should maintain data consistency across Phase 4 entities', async () => {
+      // Create a complete data flow across Phase 4 entities
+      const dashboard = await applicationDashboardRepo.findOne({});
+      const testRunId = 'consistency-test-run-001';
+      const controlGroupId = 'consistency-control-001';
+
+      // Create control group
+      const controlGroup = await dsControlGroupsRepo.save({
+        ...testDsControlGroups,
+        control_group_id: controlGroupId
+      });
+
+      // Create adapt results
+      const adaptResult = await dsAdaptResultsRepo.save({
+        ...testDsAdaptResults,
+        test_run_id: testRunId,
+        control_group_id: controlGroupId,
+        application_dashboard_id: dashboard?.id
+      });
+
+      // Create tracked results
+      const trackedResult = await dsAdaptTrackedResultsRepo.save({
+        ...testDsAdaptTrackedResults,
+        test_run_id: testRunId,
+        control_group_id: controlGroupId,
+        application_dashboard_id: dashboard?.id
+      });
+
+      // Verify consistency
+      expect(adaptResult.test_run_id).toBe(trackedResult.test_run_id);
+      expect(adaptResult.control_group_id).toBe(controlGroup.control_group_id);
+      expect(trackedResult.control_group_id).toBe(controlGroup.control_group_id);
+    });
+
+    it('should handle concurrent operations on Phase 4 entities', async () => {
+      const dashboard = await applicationDashboardRepo.findOne({});
+
+      const promises = Array.from({ length: 5 }, (_, i) =>
+        dsMetricStatisticsRepo.save({
+          ...testDsMetricStatistics,
+          test_run_id: `concurrent-test-${i}`,
+          application_dashboard_id: dashboard?.id
+        })
+      );
+
+      const results = await Promise.all(promises);
+      expect(results).toHaveLength(5);
+      results.forEach((result, index) => {
+        expect(result.test_run_id).toBe(`concurrent-test-${index}`);
+        expect(result.id).toBeDefined();
+      });
+    });
+  });
+
+  describe('Phase 4 Performance and Scalability', () => {
+    it('should efficiently handle bulk operations', async () => {
+      const dashboard = await applicationDashboardRepo.findOne({});
+      const bulkData = Array.from({ length: 50 }, (_, i) => ({
+        ...testDsMetricStatistics,
+        test_run_id: `bulk-test-${i}`,
+        application_dashboard_id: dashboard?.id
+      }));
+
+      const startTime = Date.now();
+      const saved = await dsMetricStatisticsRepo.save(bulkData);
+      const endTime = Date.now();
+
+      expect(saved).toHaveLength(50);
+      expect(endTime - startTime).toBeLessThan(5000); // Should complete within 5 seconds
+    });
+
+    it('should handle complex queries across Phase 4 entities', async () => {
+      const dashboard = await applicationDashboardRepo.findOne({});
+
+      // Query with joins and filters
+      const results = await dsAdaptResultsRepo
+        .createQueryBuilder('ar')
+        .leftJoinAndSelect('ar.application_dashboard', 'ad')
+        .where('ar.application_dashboard_id = :dashboardId', { dashboardId: dashboard?.id })
+        .andWhere('ar.panel_id = :panelId', { panelId: 123 })
+        .getMany();
+
+      expect(Array.isArray(results)).toBe(true);
+    });
+  });
+
+  // Summary test to validate Phase 4 migration completeness
+  it('should validate Phase 4 migration completeness', async () => {
+    const entityCounts = await Promise.all([
+      dsAdaptResultsRepo.count(),
+      dsAdaptTrackedResultsRepo.count(),
+      dsCompareConfigRepo.count(),
+      dsControlGroupStatisticsRepo.count(),
+      dsControlGroupsRepo.count(),
+      dsMetricClassificationRepo.count(),
+      dsMetricStatisticsRepo.count(),
+      dsPanelsRepo.count(),
+      dsTrackedDifferencesRepo.count()
+    ]);
+
+    // Verify that all Phase 4 entities can store data
+    entityCounts.forEach(count => {
+      expect(count).toBeGreaterThan(0);
+    });
+
+    console.log('✅ Phase 4 Migration Validation Complete');
+    console.log(`   - DsAdaptResults: ${entityCounts[0]} records`);
+    console.log(`   - DsAdaptTrackedResults: ${entityCounts[1]} records`);
+    console.log(`   - DsCompareConfig: ${entityCounts[2]} records`);
+    console.log(`   - DsControlGroupStatistics: ${entityCounts[3]} records`);
+    console.log(`   - DsControlGroups: ${entityCounts[4]} records`);
+    console.log(`   - DsMetricClassification: ${entityCounts[5]} records`);
+    console.log(`   - DsMetricStatistics: ${entityCounts[6]} records`);
+    console.log(`   - DsPanels: ${entityCounts[7]} records`);
+    console.log(`   - DsTrackedDifferences: ${entityCounts[8]} records`);
+    console.log('🎉 All Phase 4 entities validated successfully!');
+  });
+});

@@ -1,0 +1,47 @@
+import { Module } from '@nestjs/common';
+import { ConfigModule } from '@nestjs/config';
+import { TypeOrmModule } from '@nestjs/typeorm';
+import { CommonModule } from './common/common.module.js';
+import { RealtimeModule } from './modules/realtime/realtime.module.js';
+import { SchedulersModule } from './schedulers/schedulers.module.js';
+import { createTypeOrmConfig } from './config/typeorm.config.js';
+
+/**
+ * Root Application Module for Worker
+ *
+ * Configures NestJS application with:
+ * - Global configuration (environment variables)
+ * - TypeORM database connection
+ * - Common module with database services
+ * - Realtime module for publishing updates to Redis
+ * - Schedulers module for scheduled tasks (incremental collection)
+ *
+ * This allows worker pipelines to use dependency injection and TypeORM
+ * while maintaining the existing BullMQ-based worker architecture.
+ */
+@Module({
+  imports: [
+    // Global configuration module
+    ConfigModule.forRoot({
+      isGlobal: true,
+      envFilePath: ['.env.local', '.env'],
+      // The worker uses its own environment.ts config system
+      // This makes env vars available via @nestjs/config as well
+    }),
+
+    // TypeORM database connection
+    TypeOrmModule.forRoot(createTypeOrmConfig()),
+
+    // Common module with database services and repositories
+    CommonModule,
+
+    // Realtime module for publishing updates to Redis
+    RealtimeModule,
+
+    // Schedulers module for scheduled tasks
+    SchedulersModule,
+  ],
+  controllers: [],
+  providers: [],
+})
+export class AppModule {}

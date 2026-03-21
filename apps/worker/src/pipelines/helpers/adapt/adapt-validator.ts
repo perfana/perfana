@@ -1,0 +1,343 @@
+/**
+ * ADAPT Pipeline Validator
+ *
+ * Handles input validation and pre-processing validation for the ADAPT
+ * (Automated Detection of Anomalies in Performance Tests) pipeline.
+ *
+ * Responsibilities:
+ * - Input validation and parsing
+ * - Test run existence and processability checks
+ * - Changepoint detection
+ * - Empty control group detection
+ * - Evaluation status management
+ */
+
+import type { Logger } from 'pino';
+import type { EntityManager } from 'typeorm';
+import type { AdaptInput } from './types.js';
+
+/**
+ * Result of input validation
+ */
+export interface InputValidationResult {
+  valid: boolean;
+  input?: AdaptInput;
+  error?: string;
+}
+
+/**
+ * Result of pre-processing validation
+ */
+export interface PreProcessingValidationResult {
+  /** Test runs that have changepoints and should be excluded */
+  changepoints: string[];
+  /** Test runs with empty control groups that should be excluded */
+  emptyControlGroups: string[];
+  /** Test runs that can be processed (after filtering) */
+  processableTestRuns: string[];
+}
+
+export class AdaptValidator {
+  constructor(private logger: Logger) {}
+
+  /**
+   * Validate pipeline input structure and types
+   *
+   * @param input - Unknown input to validate
+   * @returns Validation result with parsed input if valid
+   */
+  validateInput(input: unknown): InputValidationResult {
+    if (!input || typeof input !== 'object') {
+      return {
+        valid: false,
+        error: 'Invalid input: expected an object',
+      };
+    }
+
+    const typedInput = input as Record<string, unknown>;
+
+    // Validate testRunIds
+    if (!Array.isArray(typedInput.testRunIds)) {
+      return {
+        valid: false,
+        error: 'Invalid input: testRunIds must be an array',
+      };
+    }
+
+    if (typedInput.testRunIds.length === 0) {
+      return {
+        valid: false,
+        error: 'Invalid input: testRunIds cannot be empty',
+      };
+    }
+
+    if (!typedInput.testRunIds.every((id: unknown) => typeof id === 'string')) {
+      return {
+        valid: false,
+        error: 'Invalid input: all testRunIds must be strings',
+      };
+    }
+
+    // Parse and return validated input with defaults
+    const validatedInput: AdaptInput = {
+      testRunIds: typedInput.testRunIds as string[],
+      updateControlGroup: typedInput.updateControlGroup !== false,
+      updateControlStatistics: typedInput.updateControlStatistics !== false,
+      updateResults: typedInput.updateResults !== false,
+      updateConclusion: typedInput.updateConclusion !== false,
+      updateTrackedResults: typedInput.updateTrackedResults !== false,
+      applicationDashboardId: typedInput.applicationDashboardId as string | undefined,
+      panelId: typedInput.panelId as number | undefined,
+      metricName: typedInput.metricName as string | undefined,
+    };
+
+    return {
+      valid: true,
+      input: validatedInput,
+    };
+  }
+
+  /**
+   * Update evaluation status for test runs
+   *
+   * @param manager - TypeORM entity manager for transactional operations
+   * @param testRunIds - Test run IDs to update
+   * @param status - Status to set (e.g., 'IN_PROGRESS', 'COMPLETED', 'FAILED')
+   */
+  async updateEvaluationStatus(
+    manager: EntityManager,
+    testRunIds: string[],
+    status: string
+  ): Promise<void> {
+    if (testRunIds.length === 0) {
+      return;
+    }
+
+    const placeholders = testRunIds.map((_: string, i: number) => `$${i + 1}`).join(', ');
+
+    await manager.query(
+      `
+      UPDATE test_runs
+      SET status = jsonb_set(
+          COALESCE(status, '{}'),
+          '{evaluatingAdapt}',
+          $${testRunIds.length + 1}::jsonb
+      ), updated_at = NOW()
+      WHERE test_run_id IN (${placeholders})
+    `,
+      [...testRunIds, JSON.stringify(status)]
+    );
+
+    this.logger.debug(`Updated evaluation status to ${status} for ${testRunIds.length} test runs`);
+  }
+
+  /**
+   * Check for changepoints in the given test runs
+   *
+   * Test runs with changepoints are excluded from ADAPT processing because
+   * they represent baseline shifts that invalidate control group comparisons.
+   *
+   * @param manager - TypeORM entity manager for transactional operations
+   * @param testRunIds - Test run IDs to check
+   * @returns Array of test run IDs that have changepoints
+   */
+  async checkForChangepoints(
+    manager: EntityManager,
+    testRunIds: string[]
+  ): Promise<string[]> {
+    if (testRunIds.length === 0) {
+      return [];
+    }
+
+    const placeholders = testRunIds.map((_: string, i: number) => `$${i + 1}`).join(', ');
+
+    // Query ds_change_points table to find changepoints
+    const result = await manager.query(
+      `
+      SELECT DISTINCT cp.test_run_id
+      FROM ds_change_points cp
+      WHERE cp.test_run_id IN (${placeholders})
+    `,
+      testRunIds
+    );
+
+    const changepoints = result.map((row: { test_run_id: string }) => row.test_run_id);
+
+    if (changepoints.length > 0) {
+      // Update status to NO_BASELINES_FOUND for changepoint test runs
+      const changepointPlaceholders = changepoints.map((_: string, i: number) => `$${i + 1}`).join(', ');
+      await manager.query(
+        `
+        UPDATE test_runs
+        SET status = jsonb_set(
+            COALESCE(status, '{}'),
+            '{evaluatingAdapt}',
+            '"NO_BASELINES_FOUND"'
+        )
+        WHERE test_run_id IN (${changepointPlaceholders})
+      `,
+        changepoints
+      );
+
+      this.logger.info(
+        `Found ${changepoints.length} changepoint test runs (set to NO_BASELINES_FOUND): ${changepoints.join(', ')}`
+      );
+    }
+
+    return changepoints;
+  }
+
+  /**
+   * Check for test runs with empty control groups
+   *
+   * Test runs without control group statistics cannot be compared and are
+   * excluded from ADAPT processing.
+   *
+   * @param manager - TypeORM entity manager for transactional operations
+   * @param testRunIds - Test run IDs to check
+   * @returns Array of test run IDs with empty control groups
+   */
+  async checkEmptyControlGroups(
+    manager: EntityManager,
+    testRunIds: string[]
+  ): Promise<string[]> {
+    if (testRunIds.length === 0) {
+      return [];
+    }
+
+    const placeholders = testRunIds.map((_: string, i: number) => `$${i + 1}`).join(', ');
+
+    const result = await manager.query(
+      `
+      SELECT DISTINCT ms.test_run_id
+      FROM ds_metric_statistics ms
+      LEFT JOIN ds_control_group_statistics cgs ON (
+          cgs.control_group_id = ms.test_run_id AND  -- Assumes testRunId equals controlGroupId
+          cgs.application_dashboard_id = ms.application_dashboard_id AND
+          cgs.panel_id = ms.panel_id AND
+          cgs.metric_name = ms.metric_name
+      )
+      WHERE ms.test_run_id IN (${placeholders})
+        AND (
+          ms.application_dashboard_id IN (SELECT id FROM application_dashboards)
+          OR ms.application_dashboard_id IN (SELECT DISTINCT application_dashboard_id FROM dynatrace_queries)
+        )
+      GROUP BY ms.test_run_id
+      HAVING count(cgs.control_group_id) = 0
+    `,
+      testRunIds
+    );
+
+    const emptyControlGroups = result.map((row: { test_run_id: string }) => row.test_run_id);
+
+    if (emptyControlGroups.length > 0) {
+      // Update status to NO_BASELINES_FOUND for these test runs
+      const emptyPlaceholders = emptyControlGroups.map((_: string, i: number) => `$${i + 1}`).join(', ');
+      await manager.query(
+        `
+        UPDATE test_runs
+        SET status = jsonb_set(
+            COALESCE(status, '{}'),
+            '{evaluatingAdapt}',
+            '"NO_BASELINES_FOUND"'
+        )
+        WHERE test_run_id IN (${emptyPlaceholders})
+      `,
+        emptyControlGroups
+      );
+
+      this.logger.warn(
+        `Found ${emptyControlGroups.length} test runs with empty control groups: ${emptyControlGroups.join(', ')}`
+      );
+    }
+
+    return emptyControlGroups;
+  }
+
+  /**
+   * Perform full pre-processing validation
+   *
+   * Runs all validation checks and returns the set of processable test runs.
+   *
+   * @param manager - TypeORM entity manager for transactional operations
+   * @param testRunIds - Test run IDs to validate
+   * @returns Validation result with changepoints, empty control groups, and processable test runs
+   */
+  async runPreProcessingValidation(
+    manager: EntityManager,
+    testRunIds: string[]
+  ): Promise<PreProcessingValidationResult> {
+    // Check for changepoints
+    const changepoints = await this.checkForChangepoints(manager, testRunIds);
+    const nonChangepointTestRuns = testRunIds.filter((id) => !changepoints.includes(id));
+
+    // Check for empty control groups
+    const emptyControlGroups = await this.checkEmptyControlGroups(manager, nonChangepointTestRuns);
+    const processableTestRuns = nonChangepointTestRuns.filter((id) => !emptyControlGroups.includes(id));
+
+    return {
+      changepoints,
+      emptyControlGroups,
+      processableTestRuns,
+    };
+  }
+
+  /**
+   * Update status to failed when ADAPT processing fails
+   *
+   * Sets evaluatingAdapt to FAILED and adaptTestRunOK to false.
+   * This is called from the pipeline error handler.
+   *
+   * @param testRunIds - Test run IDs to update
+   */
+  async updateFailureStatus(testRunIds: string[]): Promise<void> {
+    const { getDatabaseService } = await import('../../../common/database-accessor.js');
+    const db = getDatabaseService();
+
+    await db.query(`
+      UPDATE test_runs
+      SET
+        status = jsonb_set(
+            COALESCE(status, '{}'),
+            '{evaluatingAdapt}',
+            '"FAILED"'
+        ),
+        consolidated_result = jsonb_set(
+            COALESCE(consolidated_result, '{}'),
+            '{adaptTestRunOK}',
+            'false'::jsonb
+        ),
+        updated_at = NOW()
+      WHERE test_run_id = ANY($1)
+    `, [testRunIds]);
+  }
+}
+
+/**
+ * Substage timing entry for performance logging
+ */
+export interface SubstageEntry {
+  stage: string;
+  duration: number;
+  rows?: number;
+}
+
+/**
+ * Format substage timing breakdown for logging
+ *
+ * @param subStages - Array of substage timing entries
+ * @param totalDuration - Total pipeline duration in milliseconds
+ * @returns Formatted timing breakdown string
+ */
+export function formatSubstageBreakdown(subStages: SubstageEntry[], totalDuration: number): string {
+  const safeDuration = totalDuration || 1; // Avoid division by zero
+  const breakdown = subStages.map(({ stage, duration, rows }) => {
+    const percentage = ((duration / safeDuration) * 100).toFixed(1);
+    const barLength = Math.round((duration / safeDuration) * 40);
+    const bar = '█'.repeat(barLength);
+    const rowsInfo = rows !== undefined ? ` (${rows} rows)` : '';
+    return `  ${stage.padEnd(30)} ${duration.toString().padStart(7)}ms ${percentage.padStart(5)}% ${bar}${rowsInfo}`;
+  }).join('\n');
+
+  return `\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n📊 ADAPT SUBSTAGE TIMING BREAKDOWN\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n${breakdown}\n\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n📈 Total ADAPT Duration: ${totalDuration}ms\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━`;
+}

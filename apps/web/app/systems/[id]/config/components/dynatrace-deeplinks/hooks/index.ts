@@ -1,0 +1,1 @@
+export { useDynatraceEntityMappings } from './useDynatraceEntityMappings';

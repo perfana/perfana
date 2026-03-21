@@ -1,0 +1,62 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 120 120" width="120" height="120">
+  <defs>
+    <!-- Gradient definitions for the 3D faceted look -->
+    <linearGradient id="yellowBright" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" style="stop-color:#FFD000"/>
+      <stop offset="100%" style="stop-color:#FFC000"/>
+    </linearGradient>
+    <linearGradient id="yellowMedium" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" style="stop-color:#FFC000"/>
+      <stop offset="100%" style="stop-color:#FFB000"/>
+    </linearGradient>
+    <linearGradient id="orangeLight" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" style="stop-color:#FFB000"/>
+      <stop offset="100%" style="stop-color:#FFA000"/>
+    </linearGradient>
+    <linearGradient id="orangeMedium" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" style="stop-color:#FFA000"/>
+      <stop offset="100%" style="stop-color:#F09000"/>
+    </linearGradient>
+    <linearGradient id="orangeDark" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" style="stop-color:#E58000"/>
+      <stop offset="100%" style="stop-color:#D07000"/>
+    </linearGradient>
+  </defs>
+
+  <!-- Geometric P shape - outer vertical stroke (left side) -->
+  <!-- Top-left bright yellow facet -->
+  <polygon points="15,10 45,10 45,25 30,35 15,25" fill="url(#yellowBright)"/>
+
+  <!-- Left vertical - upper bright section -->
+  <polygon points="15,25 30,35 30,55 15,45" fill="url(#yellowMedium)"/>
+
+  <!-- Left vertical - middle section -->
+  <polygon points="15,45 30,55 30,85 15,75" fill="url(#orangeLight)"/>
+
+  <!-- Left vertical - lower section -->
+  <polygon points="15,75 30,85 30,110 15,100" fill="url(#orangeMedium)"/>
+
+  <!-- Bottom left facet -->
+  <polygon points="15,100 30,110 45,100 45,85 30,85 15,75" fill="url(#orangeDark)"/>
+
+  <!-- Inner vertical dark side -->
+  <polygon points="30,35 45,25 45,85 30,85 30,55" fill="url(#orangeMedium)"/>
+
+  <!-- P bowl - top horizontal -->
+  <polygon points="45,10 95,10 105,25 95,40 45,40 45,25" fill="url(#yellowBright)"/>
+
+  <!-- P bowl - right side outer curve (top) -->
+  <polygon points="95,10 105,25 105,50 95,65" fill="url(#orangeLight)"/>
+
+  <!-- P bowl - right side inner facet -->
+  <polygon points="95,40 105,50 95,65 80,55" fill="url(#orangeMedium)"/>
+
+  <!-- P bowl - bottom connector -->
+  <polygon points="45,40 95,40 80,55 45,55" fill="url(#orangeLight)"/>
+
+  <!-- P bowl - inner bottom shadow -->
+  <polygon points="45,55 80,55 95,65 45,65" fill="url(#orangeDark)"/>
+
+  <!-- P bowl - inner right vertical -->
+  <polygon points="45,25 45,55 30,55 30,35" fill="url(#orangeMedium)"/>
+</svg>

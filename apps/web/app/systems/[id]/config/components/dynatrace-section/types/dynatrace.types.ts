@@ -1,0 +1,108 @@
+'use client';
+
+import { DynatraceQuery, CreateDynatraceQueryDto, UpdateDynatraceQueryDto } from '@/lib/dynatrace';
+
+/**
+ * Local representation of a Dynatrace query for display
+ */
+export interface DynatraceQueryLocal {
+  id: string;
+  application: string;
+  testEnvironment: string;
+  dashboardLabel: string;
+  applicationDashboardId: string;
+  panelTitle: string;
+  query: string;
+  matchMetricPattern?: string;
+  omitGroupByVariableFromMetricName?: string[];
+  templateVariables?: Record<string, string>;
+  dynatraceConfigLabel?: string;
+  createdAt?: string;
+}
+
+/**
+ * Props for the main DynatraceSection component
+ */
+export interface DynatraceSectionProps {
+  systemId: string;
+  systemName: string;
+  selectedEnvironment: string;
+  selectedWorkload: string;
+}
+
+/**
+ * Props for the QueriesTable component
+ */
+export interface QueriesTableProps {
+  queries: DynatraceQueryLocal[];
+  selectedQueryIds: Set<string>;
+  onSelectAll: () => void;
+  onSelectOne: (id: string) => void;
+  onEditQuery: (query: DynatraceQueryLocal) => void;
+  onDeleteQuery: (query: DynatraceQueryLocal) => void;
+}
+
+/**
+ * Props for the QueriesToolbar component
+ */
+export interface QueriesToolbarProps {
+  selectedCount: number;
+  onBatchDelete: () => void;
+  onClearSelection: () => void;
+}
+
+/**
+ * Hook return type for useDynatraceQueries
+ */
+export interface UseDynatraceQueriesReturn {
+  // State
+  queries: DynatraceQueryLocal[];
+  loading: boolean;
+  error: string | null;
+  selectedQueryIds: Set<string>;
+
+  // Dialog states
+  deleteDialogOpen: boolean;
+  deletingQuery: DynatraceQueryLocal | null;
+  deleteLoading: boolean;
+  importDialogOpen: boolean;
+  importLoading: boolean;
+  addDialogOpen: boolean;
+  addLoading: boolean;
+  editDialogOpen: boolean;
+  editLoading: boolean;
+  editingQuery: DynatraceQuery | null;
+  batchDeleteDialogOpen: boolean;
+
+  // Handlers
+  fetchQueries: () => Promise<void>;
+  handleAddQuery: () => void;
+  handleAddQuerySubmit: (data: CreateDynatraceQueryDto) => Promise<void>;
+  handleImportDashboard: () => void;
+  handleImportQueries: (
+    tiles: { title: string; query: string }[],
+    variableValues: Record<string, string>,
+    dashboardName: string,
+    metricUnit: string,
+    dynatraceConfigId: string
+  ) => Promise<void>;
+  handleEditQuery: (query: DynatraceQueryLocal) => Promise<void>;
+  handleEditQuerySubmit: (id: string, data: UpdateDynatraceQueryDto) => Promise<void>;
+  handleDeleteQuery: (query: DynatraceQueryLocal) => void;
+  handleConfirmDelete: () => Promise<void>;
+  handleSelectAll: () => void;
+  handleSelectOne: (id: string) => void;
+  handleClearSelection: () => void;
+  handleBatchDeleteClick: () => void;
+  handleBatchDeleteConfirm: () => Promise<void>;
+  handleBatchDeleteCancel: () => void;
+
+  // Dialog closers
+  closeDeleteDialog: () => void;
+  closeImportDialog: () => void;
+  closeAddDialog: () => void;
+  closeEditDialog: () => void;
+}
+
+// Re-export types from lib for convenience
+export type { DynatraceQuery, CreateDynatraceQueryDto, UpdateDynatraceQueryDto };

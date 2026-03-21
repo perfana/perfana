@@ -1,0 +1,101 @@
+{
+  "name": "@perfana/shared",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Shared entities, types, config, and utilities for Perfana",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "development": "./src/index.ts",
+      "default": "./dist/index.js"
+    },
+    "./entities": {
+      "types": "./dist/entities/index.d.ts",
+      "development": "./src/entities/index.ts",
+      "default": "./dist/entities/index.js"
+    },
+    "./types": {
+      "types": "./dist/types/index.d.ts",
+      "development": "./src/types/index.ts",
+      "default": "./dist/types/index.js"
+    },
+    "./config": {
+      "types": "./dist/config/index.d.ts",
+      "development": "./src/config/index.ts",
+      "default": "./dist/config/index.js"
+    },
+    "./repositories": {
+      "types": "./dist/repositories/index.d.ts",
+      "development": "./src/repositories/index.ts",
+      "default": "./dist/repositories/index.js"
+    },
+    "./database": {
+      "types": "./dist/database/index.d.ts",
+      "development": "./src/database/index.ts",
+      "default": "./dist/database/index.js"
+    },
+    "./realtime": {
+      "types": "./dist/realtime/index.d.ts",
+      "development": "./src/realtime/index.ts",
+      "default": "./dist/realtime/index.js"
+    },
+    "./constants": {
+      "types": "./dist/constants/index.d.ts",
+      "development": "./src/constants/index.ts",
+      "default": "./dist/constants/index.js"
+    },
+    "./constants/dynatrace-metrics": {
+      "types": "./dist/constants/dynatrace-metrics.d.ts",
+      "development": "./src/constants/dynatrace-metrics.ts",
+      "default": "./dist/constants/dynatrace-metrics.js"
+    },
+    "./services/grafana": {
+      "types": "./dist/services/grafana/index.d.ts",
+      "development": "./src/services/grafana/index.ts",
+      "default": "./dist/services/grafana/index.js"
+    },
+    "./utils": {
+      "types": "./dist/utils/index.d.ts",
+      "development": "./src/utils/index.ts",
+      "default": "./dist/utils/index.js"
+    },
+    "./security": {
+      "types": "./dist/security/index.d.ts",
+      "development": "./src/security/index.ts",
+      "default": "./dist/security/index.js"
+    }
+  },
+  "scripts": {
+    "build": "tsc",
+    "dev": "tsc --watch",
+    "lint": "eslint src --ext .ts,.tsx",
+    "test": "jest --passWithNoTests",
+    "type-check": "tsc --noEmit",
+    "clean": "rimraf dist"
+  },
+  "dependencies": {
+    "@nestjs/common": "^10.2.0",
+    "@nestjs/config": "^3.1.0",
+    "@nestjs/typeorm": "^11.0.0",
+    "ioredis": "^5.8.0",
+    "pg": "^8.11.3",
+    "reflect-metadata": "^0.1.13",
+    "typeorm": "^0.3.27",
+    "undici": "^6.0.0",
+    "zod": "^3.22.0"
+  },
+  "devDependencies": {
+    "@types/jest": "^30.0.0",
+    "@types/node": "^20.10.0",
+    "@types/pg": "^8.10.7",
+    "@typescript-eslint/eslint-plugin": "^6.12.0",
+    "@typescript-eslint/parser": "^6.12.0",
+    "eslint": "^8.55.0",
+    "jest": "^29.7.0",
+    "rimraf": "^5.0.5",
+    "ts-jest": "^29.4.6",
+    "typescript": "^5.3.0"
+  }
+}

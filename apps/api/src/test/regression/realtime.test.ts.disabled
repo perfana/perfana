@@ -1,0 +1,511 @@
+import { DatabaseTestHelper } from '../utils/database-test-helper';
+import { TestDataFactory } from '../utils/test-data-factory';
+
+describe('Real-time System Regression Tests', () => {
+  let testContext: any;
+
+  beforeAll(async () => {
+    testContext = await DatabaseTestHelper.setupTestEnvironment();
+  });
+
+  afterAll(async () => {
+    await DatabaseTestHelper.teardownTestEnvironment();
+  });
+
+  describe('Room Management', () => {
+    test('should generate consistent room names for all test runs', async () => {
+      const result = await DatabaseTestHelper.compareOperation(
+        'getTestRunsRoomAll',
+        () => Promise.resolve(testContext.realtimeService.getTestRunsRoom())
+      );
+
+      expect(result.success).toBe(true);
+      expect(result.nativeResult).toBe('test_runs:all');
+    });
+
+    test('should generate deterministic room names for filtered test runs', async () => {
+      const filters = {
+        applicationName: 'test-app',
+        environment: 'production',
+        status: 'completed',
+      };
+
+      const result1 = await DatabaseTestHelper.compareOperation(
+        'getTestRunsRoomFiltered1',
+        () => Promise.resolve(testContext.realtimeService.getTestRunsRoom(filters))
+      );
+
+      const result2 = await DatabaseTestHelper.compareOperation(
+        'getTestRunsRoomFiltered2',
+        () => Promise.resolve(testContext.realtimeService.getTestRunsRoom(filters))
+      );
+
+      expect(result1.success).toBe(true);
+      expect(result2.success).toBe(true);
+      expect(result1.nativeResult).toBe(result2.nativeResult);
+      expect(result1.nativeResult).toContain('test_runs:');
+      expect(result1.nativeResult).not.toBe('test_runs:all');
+
+      // Room name should be base64 encoded filter string
+      const roomName = result1.nativeResult;
+      expect(roomName).toMatch(/^test_runs:[A-Za-z0-9+/]+=*$/);
+    });
+
+    test('should handle empty filters consistently', async () => {
+      const emptyFilters = {};
+
+      const result = await DatabaseTestHelper.compareOperation(
+        'getTestRunsRoomEmpty',
+        () => Promise.resolve(testContext.realtimeService.getTestRunsRoom(emptyFilters))
+      );
+
+      expect(result.success).toBe(true);
+      expect(result.nativeResult).toBe('test_runs:all');
+    });
+
+    test('should sort filter keys for consistent room names', async () => {
+      const filters1 = { applicationName: 'app1', environment: 'prod' };
+      const filters2 = { environment: 'prod', applicationName: 'app1' };
+
+      const room1 = testContext.realtimeService.getTestRunsRoom(filters1);
+      const room2 = testContext.realtimeService.getTestRunsRoom(filters2);
+
+      expect(room1).toBe(room2);
+    });
+  });
+
+  describe('Initial Data Fetching', () => {
+
+    beforeEach(async () => {
+      // Setup test data
+      await DatabaseTestHelper.setupRegressionData(
+        testContext.nativeService
+      );
+    });
+
+    test('should fetch initial test runs without filters', async () => {
+      const result = await DatabaseTestHelper.compareOperation(
+        'getInitialTestRunsAll',
+        () => testContext.realtimeService.getInitialTestRuns()
+      );
+
+      expect(result.success).toBe(true);
+      expect(Array.isArray(result.nativeResult)).toBe(true);
+      expect(result.nativeResult.length).toBeGreaterThan(0);
+    });
+
+    test('should fetch initial test runs with application filter', async () => {
+      const filters = { applicationName: 'regression-app' };
+
+      const result = await DatabaseTestHelper.compareOperation(
+        'getInitialTestRunsFiltered',
+        () => testContext.realtimeService.getInitialTestRuns(filters)
+      );
+
+      expect(result.success).toBe(true);
+      expect(Array.isArray(result.nativeResult)).toBe(true);
+
+      // All returned test runs should match the filter
+      result.nativeResult.forEach((testRun: any) => {
+        expect(testRun.applicationName).toContain('regression-app');
+      });
+    });
+
+    test('should fetch initial test runs with multiple filters', async () => {
+      const filters = {
+        applicationName: 'regression-app',
+        environment: 'test',
+        status: 'completed',
+      };
+
+      const result = await DatabaseTestHelper.compareOperation(
+        'getInitialTestRunsMultipleFilters',
+        () => testContext.realtimeService.getInitialTestRuns(filters)
+      );
+
+      expect(result.success).toBe(true);
+      expect(Array.isArray(result.nativeResult)).toBe(true);
+
+      // Verify filtering works correctly
+      result.nativeResult.forEach((testRun: any) => {
+        expect(testRun.applicationName).toContain('regression-app');
+        expect(testRun.environment).toBe('test');
+        expect(testRun.status).toBe('completed');
+      });
+    });
+
+    test('should handle filters that return no results', async () => {
+      const filters = { applicationName: 'non-existent-app' };
+
+      const result = await DatabaseTestHelper.compareOperation(
+        'getInitialTestRunsNoResults',
+        () => testContext.realtimeService.getInitialTestRuns(filters)
+      );
+
+      expect(result.success).toBe(true);
+      expect(Array.isArray(result.nativeResult)).toBe(true);
+      expect(result.nativeResult.length).toBe(0);
+    });
+  });
+
+  describe('Test Run Details Fetching', () => {
+    let testRun: any;
+
+    beforeEach(async () => {
+      const { testRuns } = await DatabaseTestHelper.setupRegressionData(
+        testContext.nativeService
+      );
+      testRun = testRuns[0];
+    });
+
+    test('should fetch test run details by testRunId', async () => {
+      const result = await DatabaseTestHelper.compareOperation(
+        'getTestRunDetailsByTestRunId',
+        () => testContext.realtimeService.getTestRunDetails(testRun.testRunId)
+      );
+
+      expect(result.success).toBe(true);
+      expect(result.nativeResult).toBeDefined();
+      expect(result.nativeResult.testRunId).toBe(testRun.testRunId);
+      expect(result.nativeResult.id).toBe(testRun.id);
+    });
+
+    test('should fetch test run details by UUID', async () => {
+      const result = await DatabaseTestHelper.compareOperation(
+        'getTestRunDetailsByUUID',
+        () => testContext.realtimeService.getTestRunDetails(testRun.id)
+      );
+
+      expect(result.success).toBe(true);
+      expect(result.nativeResult).toBeDefined();
+      expect(result.nativeResult.id).toBe(testRun.id);
+      expect(result.nativeResult.testRunId).toBe(testRun.testRunId);
+    });
+
+    test('should handle non-existent test run gracefully', async () => {
+      const result = await DatabaseTestHelper.compareOperation(
+        'getTestRunDetailsNonExistent',
+        () => testContext.realtimeService.getTestRunDetails('non-existent-id')
+      );
+
+      expect(result.success).toBe(true);
+      expect(result.nativeResult).toBeNull();
+    });
+
+    test('should include all necessary test run fields', async () => {
+      const result = await DatabaseTestHelper.compareOperation(
+        'getTestRunDetailsComplete',
+        () => testContext.realtimeService.getTestRunDetails(testRun.testRunId)
+      );
+
+      expect(result.success).toBe(true);
+      const details = result.nativeResult;
+
+      // Verify all critical fields are present
+      expect(details).toHaveProperty('id');
+      expect(details).toHaveProperty('testRunId');
+      expect(details).toHaveProperty('applicationName');
+      expect(details).toHaveProperty('environment');
+      expect(details).toHaveProperty('version');
+      expect(details).toHaveProperty('status');
+      expect(details).toHaveProperty('createdAt');
+      expect(details).toHaveProperty('createdBy');
+    });
+  });
+
+  describe('Broadcasting and Event Handling', () => {
+    let testUser: any;
+
+    beforeEach(async () => {
+      const { user } = await DatabaseTestHelper.setupRegressionData(
+        testContext.nativeService
+      );
+      testUser = user;
+    });
+
+    test('should broadcast test run created events', async () => {
+      const testRunData = TestDataFactory.createDeterministicTestRun('-broadcast-created');
+      testRunData.createdBy = testUser.id;
+
+      const createdTestRun = await testContext.nativeService.createTestRun(testRunData);
+
+      const result = await DatabaseTestHelper.compareOperation(
+        'broadcastTestRunCreated',
+        () => testContext.realtimeService.broadcastTestRunCreated(createdTestRun)
+      );
+
+      expect(result.success).toBe(true);
+      expect(result.nativeResult).toBeUndefined(); // broadcast methods don't return data
+    });
+
+    test('should broadcast test run updated events', async () => {
+      const { testRuns } = await DatabaseTestHelper.setupRegressionData(
+        testContext.nativeService
+      );
+      const testRun = testRuns[0];
+
+      const updatedTestRun = await testContext.nativeService.updateTestRun(testRun.id, {
+        status: 'failed',
+        notes: 'Broadcast test',
+      });
+
+      const result = await DatabaseTestHelper.compareOperation(
+        'broadcastTestRunUpdated',
+        () => testContext.realtimeService.broadcastTestRunUpdated(updatedTestRun)
+      );
+
+      expect(result.success).toBe(true);
+      expect(result.nativeResult).toBeUndefined();
+    });
+
+    test('should broadcast test run deleted events', async () => {
+      const testRunId = 'test-run-to-delete';
+
+      const result = await DatabaseTestHelper.compareOperation(
+        'broadcastTestRunDeleted',
+        () => testContext.realtimeService.broadcastTestRunDeleted(testRunId)
+      );
+
+      expect(result.success).toBe(true);
+      expect(result.nativeResult).toBeUndefined();
+    });
+
+    test('should handle broadcast errors gracefully', async () => {
+      // Test with invalid/malformed data
+      const invalidTestRun = { id: null, testRunId: null };
+
+      const result = await DatabaseTestHelper.compareOperation(
+        'broadcastTestRunCreatedInvalid',
+        () => testContext.realtimeService.broadcastTestRunCreated(invalidTestRun)
+      );
+
+      // Should not throw error, but handle gracefully
+      expect(result.success).toBe(true);
+    });
+  });
+
+  describe('Manual Event Triggers', () => {
+    let testUser: any;
+
+    beforeEach(async () => {
+      const { user } = await DatabaseTestHelper.setupRegressionData(
+        testContext.nativeService
+      );
+      testUser = user;
+    });
+
+    test('should trigger test run created events via Redis', async () => {
+      const testRunData = TestDataFactory.createDeterministicTestRun('-trigger-created');
+      testRunData.createdBy = testUser.id;
+      const testRun = await testContext.nativeService.createTestRun(testRunData);
+
+      const result = await DatabaseTestHelper.compareOperation(
+        'triggerTestRunCreated',
+        () => testContext.realtimeService.triggerTestRunCreated(testRun)
+      );
+
+      expect(result.success).toBe(true);
+      expect(result.nativeResult).toBeUndefined();
+    });
+
+    test('should trigger test run updated events via Redis', async () => {
+      const { testRuns } = await DatabaseTestHelper.setupRegressionData(
+        testContext.nativeService
+      );
+      const testRun = testRuns[0];
+
+      const result = await DatabaseTestHelper.compareOperation(
+        'triggerTestRunUpdated',
+        () => testContext.realtimeService.triggerTestRunUpdated(testRun)
+      );
+
+      expect(result.success).toBe(true);
+      expect(result.nativeResult).toBeUndefined();
+    });
+
+    test('should trigger test run deleted events via Redis', async () => {
+      const testRunId = 'trigger-delete-test';
+
+      const result = await DatabaseTestHelper.compareOperation(
+        'triggerTestRunDeleted',
+        () => testContext.realtimeService.triggerTestRunDeleted(testRunId)
+      );
+
+      expect(result.success).toBe(true);
+      expect(result.nativeResult).toBeUndefined();
+    });
+  });
+
+  describe('Health Check and System Status', () => {
+    test('should pass realtime service health check', async () => {
+      const result = await DatabaseTestHelper.compareOperation(
+        'realtimeHealthCheck',
+        () => testContext.realtimeService.healthCheck()
+      );
+
+      expect(result.success).toBe(true);
+      expect(result.nativeResult.status).toBe('healthy');
+      expect(result.nativeResult.timestamp).toBeDefined();
+      expect(result.nativeResult.connections).toBeDefined();
+      expect(typeof result.nativeResult.connections).toBe('number');
+    });
+
+    test('should report Redis connectivity status', async () => {
+      // Health check implicitly tests Redis connectivity
+      const healthResult = await testContext.realtimeService.healthCheck();
+
+      expect(healthResult.status).toBe('healthy');
+
+      // If health check passes, Redis should be connected
+      expect(testContext.realtimeService.redis).toBeDefined();
+      expect(testContext.realtimeService.subscriberRedis).toBeDefined();
+    });
+  });
+
+  describe('Performance Regression Tests', () => {
+    test('should maintain room generation performance', async () => {
+      const filters = {
+        applicationName: 'performance-test',
+        environment: 'test',
+        status: 'completed',
+        createdBy: 'user-123',
+      };
+
+      const performanceTest = await DatabaseTestHelper.measurePerformance(
+        () => Promise.resolve(testContext.realtimeService.getTestRunsRoom(filters)),
+        100
+      );
+
+      expect(performanceTest.averageDuration).toBeLessThan(10); // 10ms threshold
+      expect(performanceTest.results).toHaveLength(100);
+      expect(performanceTest.results.every(r => r.startsWith('test_runs:'))).toBe(true);
+    });
+
+    test('should maintain initial data fetching performance', async () => {
+      // Setup some test data first
+      await DatabaseTestHelper.setupRegressionData(testContext.nativeService);
+
+      const performanceTest = await DatabaseTestHelper.measurePerformance(
+        () => testContext.realtimeService.getInitialTestRuns({
+          applicationName: 'regression-app'
+        }),
+        10
+      );
+
+      expect(performanceTest.averageDuration).toBeLessThan(200); // 200ms threshold
+      expect(performanceTest.results).toHaveLength(10);
+      expect(performanceTest.results.every(r => Array.isArray(r))).toBe(true);
+    });
+
+    test('should maintain test run details fetching performance', async () => {
+      const { testRuns } = await DatabaseTestHelper.setupRegressionData(
+        testContext.nativeService
+      );
+      const testRunId = testRuns[0].testRunId;
+
+      const performanceTest = await DatabaseTestHelper.measurePerformance(
+        () => testContext.realtimeService.getTestRunDetails(testRunId),
+        20
+      );
+
+      expect(performanceTest.averageDuration).toBeLessThan(100); // 100ms threshold
+      expect(performanceTest.results).toHaveLength(20);
+      expect(performanceTest.results.every(r => r !== null && r !== undefined)).toBe(true);
+      expect(performanceTest.results.every(r => (r as any)?.testRunId === testRunId)).toBe(true);
+    });
+  });
+
+  describe('Error Handling and Resilience', () => {
+    test('should handle database errors gracefully in initial data fetch', async () => {
+      // Test with filters that might cause database errors
+      const result = await DatabaseTestHelper.compareOperation(
+        'getInitialTestRunsError',
+        () => testContext.realtimeService.getInitialTestRuns({
+          invalidFilter: 'this should not break the system'
+        } as any)
+      );
+
+      expect(result.success).toBe(true);
+      expect(Array.isArray(result.nativeResult)).toBe(true);
+    });
+
+    test('should handle database errors gracefully in test run details fetch', async () => {
+      const result = await DatabaseTestHelper.compareOperation(
+        'getTestRunDetailsError',
+        () => testContext.realtimeService.getTestRunDetails('malformed-uuid-that-might-cause-errors')
+      );
+
+      expect(result.success).toBe(true);
+      expect(result.nativeResult).toBeNull();
+    });
+
+    test('should handle Redis connection issues gracefully', async () => {
+      // This test would require actually interrupting Redis connection
+      // For now, we verify that Redis operations don't throw unhandled errors
+      const testData = { id: 'test', testRunId: 'test-123' };
+
+      const operations = [
+        () => testContext.realtimeService.triggerTestRunCreated(testData),
+        () => testContext.realtimeService.triggerTestRunUpdated(testData),
+        () => testContext.realtimeService.triggerTestRunDeleted('test-123'),
+      ];
+
+      for (const operation of operations) {
+        const result = await DatabaseTestHelper.compareOperation(
+          'redisOperation',
+          operation
+        );
+        expect(result.success).toBe(true);
+      }
+    });
+  });
+
+  describe('Concurrent Real-time Operations', () => {
+    test('should handle concurrent room generation requests', async () => {
+      const filters = [
+        { applicationName: 'app1', environment: 'prod' },
+        { applicationName: 'app2', environment: 'test' },
+        { applicationName: 'app3', environment: 'dev' },
+        { applicationName: 'app4', environment: 'staging' },
+        { applicationName: 'app5', environment: 'prod' },
+      ];
+
+      const promises = filters.map(filter =>
+        Promise.resolve(testContext.realtimeService.getTestRunsRoom(filter))
+      );
+
+      const results = await Promise.all(promises);
+
+      expect(results).toHaveLength(5);
+      expect(results.every(r => r.startsWith('test_runs:'))).toBe(true);
+
+      // Each filter should produce a unique room name
+      const uniqueRooms = new Set(results);
+      expect(uniqueRooms.size).toBe(5);
+    });
+
+    test('should handle concurrent broadcasting operations', async () => {
+      const { user } = await DatabaseTestHelper.setupRegressionData(
+        testContext.nativeService
+      );
+
+      const testRuns = await Promise.all(
+        Array.from({ length: 3 }, (_, i) =>
+          testContext.nativeService.createTestRun({
+            ...TestDataFactory.createDeterministicTestRun(`-concurrent-${i}`),
+            createdBy: user.id,
+          })
+        )
+      );
+
+      const broadcastPromises = testRuns.map(testRun =>
+        testContext.realtimeService.broadcastTestRunCreated(testRun)
+      );
+
+      const results = await Promise.allSettled(broadcastPromises);
+      const successful = results.filter(r => r.status === 'fulfilled');
+
+      expect(successful.length).toBe(3);
+    });
+  });
+});

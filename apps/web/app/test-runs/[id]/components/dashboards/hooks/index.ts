@@ -1,0 +1,1 @@
+export { useDashboardsData } from './useDashboardsData';

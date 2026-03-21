@@ -1,0 +1,72 @@
+{
+  "name": "perfana-next-gen",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Perfana performance analysis platform - modern stack",
+  "workspaces": [
+    "apps/*",
+    "packages/*"
+  ],
+  "scripts": {
+    "build": "turbo run build",
+    "dev": "turbo run dev --filter=!@perfana/grafana-sync --filter=!@perfana/perfana-report",
+    "dev:all": "turbo run dev",
+    "dev:api": "turbo run dev --filter=@perfana/api",
+    "dev:web": "turbo run dev --filter=@perfana/web",
+    "dev:grafana-sync": "turbo run dev --filter=@perfana/grafana-sync",
+    "dev:perfana-report": "turbo run dev --filter=@perfana/perfana-report",
+    "lint": "turbo run lint",
+    "test": "turbo run test",
+    "test:coverage": "cd apps/api && npm test -- --coverage && cd ../.. && cd apps/web && npm test -- --coverage && cd ../.. && cd apps/grafana-sync && npm test -- --coverage && cd ../.. && cd apps/worker && npm test -- --coverage && cd ../..",
+    "fix-coverage-paths": "./fix-coverage-paths.sh",
+    "sonar:scan": "./run-sonar-scan.sh",
+    "sonar:baseline": "npm run test:coverage && npm run fix-coverage-paths && ./run-sonar-scan.sh",
+    "type-check": "turbo run type-check",
+    "clean": "turbo run clean",
+    "db:push": "supabase db push",
+    "db:reset": "supabase db reset",
+    "db:migrate": "supabase migration up",
+    "db:generate": "supabase gen types typescript --local > packages/shared/src/types/database.ts",
+    "supabase:start": "supabase start",
+    "supabase:stop": "supabase stop",
+    "supabase:status": "supabase status",
+    "migration:generate": "cd packages/shared && typeorm migration:generate -d ormconfig.js",
+    "migration:run": "cd packages/shared && typeorm migration:run -d ormconfig.js",
+    "migration:revert": "cd packages/shared && typeorm migration:revert -d ormconfig.js",
+    "migration:show": "cd packages/shared && typeorm migration:show -d ormconfig.js"
+  },
+  "devDependencies": {
+    "@faker-js/faker": "^10.0.0",
+    "@playwright/test": "^1.55.0",
+    "@types/multer": "^2.0.0",
+    "@types/node": "^20.10.0",
+    "@types/supertest": "^6.0.3",
+    "prettier": "^3.1.0",
+    "supabase": "^1.226.4",
+    "supertest": "^7.1.4",
+    "turbo": "^1.11.0",
+    "typescript": "^5.3.0"
+  },
+  "engines": {
+    "node": ">=18.0.0",
+    "npm": ">=8.0.0"
+  },
+  "overrides": {
+    "glob": "^10.5.0",
+    "jws": "^3.2.3",
+    "validator": "^13.15.22",
+    "qs": "^6.14.0",
+    "js-yaml": "^4.1.1",
+    "ioredis": "^5.9.1",
+    "basic-ftp": "^5.2.0"
+  },
+  "dependencies": {
+    "@emotion/react": "^11.14.0",
+    "@emotion/styled": "^11.14.1",
+    "@mui/icons-material": "^7.3.1",
+    "@mui/material": "^7.3.1",
+    "@mui/x-data-grid": "^8.10.2",
+    "bullmq": "^5.58.9",
+    "ioredis": "^5.9.1"
+  }
+}

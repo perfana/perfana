@@ -1,0 +1,735 @@
+import { Injectable, Logger, NotFoundException, ConflictException } from '@nestjs/common';
+import { InjectRepository } from '@nestjs/typeorm';
+import { Repository, DataSource } from 'typeorm';
+import { DynatraceConfig } from '../../entities';
+import { DynatraceQuery } from '../../entities';
+import { DynatraceEntityMapping } from '../../entities';
+import { DsPanels } from '../../entities';
+import { DsMetrics } from '../../entities';
+import { CreateDynatraceQueryDto } from './dto/create-dynatrace-query.dto';
+import { UpdateDynatraceQueryDto } from './dto/update-dynatrace-query.dto';
+import { CreateEntityMappingDto } from './dto/create-entity-mapping.dto';
+import { generateDeterministicUuid } from '../../utils/uuid-generator';
+
+@Injectable()
+export class DynatraceRepository {
+  private readonly logger = new Logger(DynatraceRepository.name);
+
+  constructor(
+    @InjectRepository(DynatraceConfig)
+    private configRepo: Repository<DynatraceConfig>,
+    @InjectRepository(DynatraceQuery)
+    private queryRepo: Repository<DynatraceQuery>,
+    @InjectRepository(DynatraceEntityMapping)
+    private entityMappingRepo: Repository<DynatraceEntityMapping>,
+    @InjectRepository(DsPanels)
+    private panelsRepo: Repository<DsPanels>,
+    @InjectRepository(DsMetrics)
+    private metricsRepo: Repository<DsMetrics>,
+    private dataSource: DataSource,
+  ) {}
+
+  private generatePanelId(dashboardLabel: string, panelTitle: string): number {
+    const combined = `${dashboardLabel}-${panelTitle}`;
+    let hash = 0;
+    for (let i = 0; i < combined.length; i++) {
+      const char = combined.charCodeAt(i);
+      hash = ((hash << 5) - hash) + char;
+      hash = hash & hash;
+    }
+    return Math.abs(hash) % 100000;
+  }
+
+  // Config Methods
+  async findAll() {
+    return this.configRepo.find({
+      order: { host: 'ASC' }
+    });
+  }
+
+  async findByHost(host: string) {
+    return this.configRepo.findOne({ where: { host } });
+  }
+
+  async findById(id: string) {
+    return this.configRepo.findOne({ where: { id } });
+  }
+
+  async create(dto: {
+    host: string;
+    api_token: string;
+    dynatrace_type?: 'saas' | 'managed';
+    label: string;
+    platform_api_token?: string;
+    perfana_test_run_id_attribute?: string;
+    perfana_request_name_attribute?: string;
+    created_by?: string;
+    updated_by?: string;
+    organization_id?: string;
+  }) {
+    const config = this.configRepo.create({
+      host: dto.host,
+      apiToken: dto.api_token,
+      dynatraceType: dto.dynatrace_type || 'saas',
+      label: dto.label,
+      platformApiToken: dto.platform_api_token,
+      perfanaTestRunIdAttribute: dto.perfana_test_run_id_attribute,
+      perfanaRequestNameAttribute: dto.perfana_request_name_attribute,
+      createdBy: dto.created_by,
+      updatedBy: dto.updated_by,
+      organizationId: dto.organization_id,
+    });
+    return this.configRepo.save(config);
+  }
+
+  async update(
+    id: string,
+    dto: {
+      perfana_test_run_id_attribute?: string;
+      perfana_request_name_attribute?: string;
+      label?: string;
+      platform_api_token?: string;
+      updated_by?: string;
+    },
+  ) {
+    const updateData: Partial<DynatraceConfig> = {};
+
+    if (dto.perfana_test_run_id_attribute !== undefined) {
+      updateData.perfanaTestRunIdAttribute = dto.perfana_test_run_id_attribute;
+    }
+    if (dto.perfana_request_name_attribute !== undefined) {
+      updateData.perfanaRequestNameAttribute = dto.perfana_request_name_attribute;
+    }
+    if (dto.label !== undefined) {
+      updateData.label = dto.label;
+    }
+    if (dto.platform_api_token !== undefined) {
+      updateData.platformApiToken = dto.platform_api_token;
+    }
+    if (dto.updated_by !== undefined) {
+      updateData.updatedBy = dto.updated_by;
+    }
+
+    await this.configRepo.update(id, updateData);
+
+    const result = await this.configRepo.findOne({ where: { id } });
+    if (!result) {
+      throw new NotFoundException(`Config with id ${id} not found after update`);
+    }
+    return result;
+  }
+
+  async delete(id: string) {
+    await this.configRepo.delete(id);
+  }
+
+  // DQL Methods
+  async findAllQuery() {
+    const results = await this.queryRepo
+      .createQueryBuilder('query')
+      .leftJoinAndSelect('query.dynatraceConfig', 'config')
+      .orderBy('query.createdAt', 'DESC')
+      .getMany();
+    return results.map(this.mapEntityToDtoFields);
+  }
+
+  async findQueryBySystemAndEnvironment(systemId: string, environment: string, workload: string) {
+    const results = await this.queryRepo
+      .createQueryBuilder('query')
+      .leftJoinAndSelect('query.dynatraceConfig', 'config')
+      .where('query.systemUnderTestId = :systemId', { systemId })
+      .andWhere('query.testEnvironment = :environment', { environment })
+      .andWhere('query.workload = :workload', { workload })
+      .orderBy('query.createdAt', 'DESC')
+      .getMany();
+    return results.map(this.mapEntityToDtoFields);
+  }
+
+  private mapEntityToDtoFields(entity: DynatraceQuery) {
+    return {
+      id: entity.id,
+      dynatraceConfigId: entity.dynatraceConfigId,
+      systemUnderTestId: entity.systemUnderTestId,
+      testEnvironment: entity.testEnvironment,
+      workload: entity.workload,
+      dashboardLabel: entity.dashboardLabel,
+      applicationDashboardId: entity.applicationDashboardId,
+      panelTitle: entity.panelTitle,
+      panelId: entity.panelId,
+      query: entity.query,
+      matchMetricPattern: entity.matchMetricPattern,
+      omitGroupByVariableFromMetricName: entity.omitGroupByVariableFromMetricName || [],
+      templateVariables: entity.templateVariables || {},
+      metricUnit: entity.metricUnit,
+      metricName: entity.metricName,
+      dynatraceConfig: entity.dynatraceConfig ? {
+        id: entity.dynatraceConfig.id,
+        host: entity.dynatraceConfig.host,
+        label: entity.dynatraceConfig.label,
+        dynatraceType: entity.dynatraceConfig.dynatraceType,
+      } : undefined,
+      createdAt: entity.createdAt,
+      updatedAt: entity.updatedAt,
+    };
+  }
+
+  async findQueryById(id: string) {
+    const result = await this.queryRepo
+      .createQueryBuilder('query')
+      .leftJoinAndSelect('query.dynatraceConfig', 'config')
+      .where('query.id = :id', { id })
+      .getOne();
+    return result ? this.mapEntityToDtoFields(result) : null;
+  }
+
+  async createQuery(dto: CreateDynatraceQueryDto) {
+    const panelId = dto.panelId || this.generatePanelId(dto.dashboardLabel, dto.panelTitle);
+
+    const query = this.queryRepo.create({
+      dynatraceConfigId: dto.dynatraceConfigId,
+      systemUnderTestId: dto.systemUnderTestId,
+      testEnvironment: dto.testEnvironment,
+      workload: dto.workload,
+      dashboardLabel: dto.dashboardLabel,
+      applicationDashboardId: dto.applicationDashboardId,
+      panelTitle: dto.panelTitle,
+      panelId: panelId,
+      query: dto.query,
+      matchMetricPattern: dto.matchMetricPattern,
+      omitGroupByVariableFromMetricName: dto.omitGroupByVariableFromMetricName,
+      templateVariables: dto.templateVariables,
+      metricUnit: dto.metricUnit,
+      metricName: dto.metricName
+    });
+
+    const result = await this.queryRepo.save(query);
+    return this.mapEntityToDtoFields(result);
+  }
+
+  async updateQuery(id: string, dto: UpdateDynatraceQueryDto) {
+    const updateData: Partial<DynatraceQuery> = {};
+
+    if (dto.dynatraceConfigId !== undefined) updateData.dynatraceConfigId = dto.dynatraceConfigId;
+    if (dto.systemUnderTestId !== undefined) updateData.systemUnderTestId = dto.systemUnderTestId;
+    if (dto.testEnvironment !== undefined) updateData.testEnvironment = dto.testEnvironment;
+    if (dto.workload !== undefined) updateData.workload = dto.workload;
+    if (dto.dashboardLabel !== undefined) updateData.dashboardLabel = dto.dashboardLabel;
+    if (dto.applicationDashboardId !== undefined) updateData.applicationDashboardId = dto.applicationDashboardId;
+    if (dto.panelTitle !== undefined) updateData.panelTitle = dto.panelTitle;
+    if (dto.panelId !== undefined) updateData.panelId = dto.panelId;
+    if (dto.query !== undefined) updateData.query = dto.query;
+    if (dto.matchMetricPattern !== undefined) updateData.matchMetricPattern = dto.matchMetricPattern;
+    if (dto.omitGroupByVariableFromMetricName !== undefined) updateData.omitGroupByVariableFromMetricName = dto.omitGroupByVariableFromMetricName;
+    if (dto.templateVariables !== undefined) updateData.templateVariables = dto.templateVariables;
+    if (dto.metricUnit !== undefined) updateData.metricUnit = dto.metricUnit;
+    if (dto.metricName !== undefined) updateData.metricName = dto.metricName;
+
+    // If dashboardLabel or panelTitle are being updated but panelId is not explicitly provided, regenerate it
+    if ((dto.dashboardLabel !== undefined || dto.panelTitle !== undefined) && dto.panelId === undefined) {
+      const current = await this.findQueryById(id);
+      if (current) {
+        const finalDashboardLabel = dto.dashboardLabel !== undefined ? dto.dashboardLabel : current.dashboardLabel;
+        const finalPanelTitle = dto.panelTitle !== undefined ? dto.panelTitle : current.panelTitle;
+        updateData.panelId = this.generatePanelId(finalDashboardLabel, finalPanelTitle);
+      }
+    }
+
+    await this.queryRepo.update(id, updateData);
+
+    const result = await this.queryRepo.findOne({ where: { id } });
+    if (!result) {
+      throw new NotFoundException(`Query with id ${id} not found after update`);
+    }
+    return this.mapEntityToDtoFields(result);
+  }
+
+  async deleteQuery(id: string) {
+    await this.queryRepo.delete(id);
+  }
+
+  async findDashboardByLabel(dashboardLabel: string) {
+    const result = await this.queryRepo.findOne({
+      where: { dashboardLabel },
+      select: ['applicationDashboardId']
+    });
+    return result?.applicationDashboardId || null;
+  }
+
+  async createQueryWithSharedUuid(dto: CreateDynatraceQueryDto, applicationDashboardId: string) {
+    const panelId = dto.panelId || this.generatePanelId(dto.dashboardLabel, dto.panelTitle);
+
+    const query = this.queryRepo.create({
+      dynatraceConfigId: dto.dynatraceConfigId,
+      systemUnderTestId: dto.systemUnderTestId,
+      testEnvironment: dto.testEnvironment,
+      workload: dto.workload,
+      dashboardLabel: dto.dashboardLabel,
+      applicationDashboardId: applicationDashboardId,
+      panelTitle: dto.panelTitle,
+      panelId: panelId,
+      query: dto.query,
+      matchMetricPattern: dto.matchMetricPattern,
+      omitGroupByVariableFromMetricName: dto.omitGroupByVariableFromMetricName,
+      templateVariables: dto.templateVariables,
+      metricUnit: dto.metricUnit,
+      metricName: dto.metricName
+    });
+
+    const result = await this.queryRepo.save(query);
+    return this.mapEntityToDtoFields(result);
+  }
+
+  async bulkCreateQueryWithSharedUuid(dtoList: CreateDynatraceQueryDto[], applicationDashboardId: string) {
+    const querys = dtoList.map(dto => this.queryRepo.create({
+      dynatraceConfigId: dto.dynatraceConfigId,
+      systemUnderTestId: dto.systemUnderTestId,
+      testEnvironment: dto.testEnvironment,
+      workload: dto.workload,
+      dashboardLabel: dto.dashboardLabel,
+      applicationDashboardId: applicationDashboardId,
+      panelTitle: dto.panelTitle,
+      panelId: dto.panelId || this.generatePanelId(dto.dashboardLabel, dto.panelTitle),
+      query: dto.query,
+      matchMetricPattern: dto.matchMetricPattern,
+      omitGroupByVariableFromMetricName: dto.omitGroupByVariableFromMetricName,
+      templateVariables: dto.templateVariables,
+      metricUnit: dto.metricUnit,
+      metricName: dto.metricName
+    }));
+
+    const results = await this.queryRepo.save(querys);
+    return results.map(this.mapEntityToDtoFields);
+  }
+
+  // SLO Support Methods
+  async getDistinctDashboardLabels(systemId: string, environment: string, workload: string) {
+    const results = await this.queryRepo
+      .createQueryBuilder('query')
+      .select('DISTINCT query.dashboardLabel', 'dashboardLabel')
+      .where('query.systemUnderTestId = :systemId', { systemId })
+      .andWhere('query.testEnvironment = :environment', { environment })
+      .andWhere('query.workload = :workload', { workload })
+      .orderBy('query.dashboardLabel', 'ASC')
+      .getRawMany();
+
+    return results.map(row => ({ dashboardLabel: row.dashboardLabel }));
+  }
+
+  async getPanelTitlesForDashboard(systemId: string, environment: string, workload: string, dashboardLabel: string) {
+    const results = await this.queryRepo
+      .createQueryBuilder('query')
+      .select(['query.panelTitle', 'query.panelId', 'query.applicationDashboardId', 'query.metricUnit'])
+      .where('query.systemUnderTestId = :systemId', { systemId })
+      .andWhere('query.testEnvironment = :environment', { environment })
+      .andWhere('query.workload = :workload', { workload })
+      .andWhere('query.dashboardLabel = :dashboardLabel', { dashboardLabel })
+      .orderBy('query.panelTitle', 'ASC')
+      .getMany();
+
+    // Remove duplicates based on panel_title
+    const uniqueItems = Array.from(
+      new Map(results.map(item => [item.panelTitle, item])).values()
+    );
+
+    return uniqueItems.map(item => ({
+      panelTitle: item.panelTitle,
+      panelId: item.panelId,
+      applicationDashboardId: item.applicationDashboardId,
+      metricUnit: item.metricUnit
+    }));
+  }
+
+  // Entity Mapping Methods
+  async getEntityMappings(systemId?: string, environment?: string, workload?: string) {
+    const queryBuilder = this.entityMappingRepo
+      .createQueryBuilder('mapping')
+      .leftJoinAndSelect('mapping.dynatraceConfig', 'config')
+      .orderBy('mapping.createdAt', 'DESC');
+
+    if (!systemId) {
+      const results = await queryBuilder.getMany();
+      return results.map(entity => this.mapEntityMappingToDtoFieldsWithLabel(entity));
+    }
+
+    // Hierarchical query - get all levels
+    const conditions = [];
+
+    // Level 1: System level
+    conditions.push('(mapping.systemUnderTestId = :systemId AND mapping.testEnvironment IS NULL AND mapping.workload IS NULL)');
+
+    // Level 2: Environment level
+    if (environment) {
+      conditions.push('(mapping.systemUnderTestId = :systemId AND mapping.testEnvironment = :environment AND mapping.workload IS NULL)');
+
+      // Level 3: Workload level
+      if (workload) {
+        conditions.push('(mapping.systemUnderTestId = :systemId AND mapping.testEnvironment = :environment AND mapping.workload = :workload)');
+      }
+    }
+
+    queryBuilder.where(`(${conditions.join(' OR ')})`, { systemId, environment, workload });
+
+    const results = await queryBuilder.getMany();
+
+    // Remove duplicates and sort
+    const uniqueResults = results.filter((item, index, arr) =>
+      arr.findIndex(i => i.id === item.id) === index
+    ).sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
+
+    return uniqueResults.map(entity => this.mapEntityMappingToDtoFieldsWithLabel(entity));
+  }
+
+  async getEntityMappingById(id: string) {
+    const result = await this.entityMappingRepo.findOne({ where: { id } });
+    return result ? this.mapEntityMappingToDtoFields(result) : null;
+  }
+
+  async createEntityMapping(dto: CreateEntityMappingDto) {
+    const mapping = this.entityMappingRepo.create({
+      dynatraceConfigId: dto.dynatraceConfigId,
+      systemUnderTestId: dto.systemUnderTestId,
+      testEnvironment: dto.testEnvironment,
+      workload: dto.workload,
+      entityId: dto.entityId,
+      entityDisplayName: dto.entityDisplayName,
+      entityType: dto.entityType,
+      level: dto.level
+    });
+
+    try {
+      const result = await this.entityMappingRepo.save(mapping);
+
+      // Fetch with joined config to get the label
+      const entityWithConfig = await this.entityMappingRepo
+        .createQueryBuilder('mapping')
+        .leftJoinAndSelect('mapping.dynatraceConfig', 'config')
+        .where('mapping.id = :id', { id: result.id })
+        .getOne();
+
+      return entityWithConfig ? this.mapEntityMappingToDtoFieldsWithLabel(entityWithConfig) : this.mapEntityMappingToDtoFields(result);
+    } catch (error) {
+      // Check if this is a unique constraint violation
+      if (error && typeof error === 'object' && 'code' in error && error.code === '23505') {
+        // PostgreSQL unique constraint violation error code
+        const levelDisplay = dto.level === 'sut' ? 'system' : dto.level === 'sut_testenv' ? 'environment' : 'workload';
+        throw new ConflictException(`This entity is already mapped to this ${levelDisplay}. Please remove the existing mapping first.`);
+      }
+      throw error;
+    }
+  }
+
+  async deleteEntityMapping(id: string) {
+    await this.entityMappingRepo.delete(id);
+  }
+
+  private mapEntityMappingToDtoFields(entity: DynatraceEntityMapping) {
+    return {
+      id: entity.id,
+      dynatraceConfigId: entity.dynatraceConfigId,
+      systemUnderTestId: entity.systemUnderTestId,
+      testEnvironment: entity.testEnvironment,
+      workload: entity.workload,
+      entityId: entity.entityId,
+      entityDisplayName: entity.entityDisplayName,
+      entityType: entity.entityType,
+      level: entity.level,
+      createdAt: entity.createdAt,
+      updatedAt: entity.updatedAt,
+    };
+  }
+
+  private mapEntityMappingToDtoFieldsWithLabel(entity: DynatraceEntityMapping) {
+    return {
+      id: entity.id,
+      dynatraceConfigId: entity.dynatraceConfigId,
+      dynatraceLabel: entity.dynatraceConfig?.label || null,
+      systemUnderTestId: entity.systemUnderTestId,
+      testEnvironment: entity.testEnvironment,
+      workload: entity.workload,
+      entityId: entity.entityId,
+      entityDisplayName: entity.entityDisplayName,
+      entityType: entity.entityType,
+      level: entity.level,
+      createdAt: entity.createdAt,
+      updatedAt: entity.updatedAt,
+    };
+  }
+
+  /**
+   * Generate a deterministic UUID for a Dynatrace dashboard
+   * Used by the service to create consistent dashboard IDs
+   */
+  generateDynatraceDashboardUuid(
+    systemUnderTestId: string,
+    testEnvironment: string,
+    dashboardLabel: string,
+    workload: string
+  ): string {
+    const input = `${systemUnderTestId}-${testEnvironment}-${workload}-dynatrace-${dashboardLabel}`;
+    return generateDeterministicUuid(input);
+  }
+
+  /**
+   * Generate a dashboard UID for Grafana integration
+   */
+  private generateDynatraceDashboardUid(dashboardLabel: string): string {
+    // Sanitize dashboard label for use in UID (lowercase, replace spaces/special chars with hyphens)
+    const sanitized = dashboardLabel
+      .toLowerCase()
+      .replace(/[^a-z0-9-]/g, '-')
+      .replace(/-+/g, '-') // Replace multiple consecutive hyphens with single hyphen
+      .replace(/^-|-$/g, ''); // Remove leading/trailing hyphens
+
+    return `dynatrace-${sanitized}`;
+  }
+
+  /**
+   * Ensure artificial dashboard exists for Dynatrace queries
+   * Creates both grafana_dashboards and application_dashboards entries if they don't exist
+   * Uses deterministic UUID generation to ensure the same dashboard is reused
+   *
+   * @param systemUnderTestId - System under test UUID
+   * @param testEnvironment - Test environment (e.g., "production")
+   * @param workload - Workload identifier
+   * @param dashboardLabel - Dashboard label (e.g., "Host: hostname")
+   * @param applicationDashboardId - Pre-generated application dashboard ID
+   * @returns Promise<void>
+   */
+  async ensureArtificialDashboardExists(
+    systemUnderTestId: string,
+    testEnvironment: string,
+    workload: string,
+    dashboardLabel: string,
+    applicationDashboardId: string
+  ): Promise<void> {
+    const dashboardUid = this.generateDynatraceDashboardUid(dashboardLabel);
+
+    this.logger.log(
+      `Ensuring artificial dashboard exists for ${dashboardLabel} (workload: ${workload})`
+    );
+
+    // Use a transaction to ensure atomicity
+    await this.dataSource.transaction(async (manager) => {
+      // Get the first available grafana instance
+      const grafanaInstances = await manager.query<Array<{ id: string }>>(
+        `SELECT id FROM grafana_instances LIMIT 1`
+      );
+
+      if (!grafanaInstances || grafanaInstances.length === 0) {
+        throw new Error(
+          'No Grafana instances found in database - cannot create Dynatrace dashboard'
+        );
+      }
+
+      const grafanaInstanceId = grafanaInstances[0]!.id;
+
+      // Check if synthetic grafana_dashboard exists for this UID
+      const grafanaDashboardExists = await manager.query(
+        `SELECT id FROM grafana_dashboards WHERE uid = $1 AND grafana_instance_id = $2`,
+        [dashboardUid, grafanaInstanceId]
+      );
+
+      let grafanaDashboardId: string;
+
+      if (!grafanaDashboardExists || grafanaDashboardExists.length === 0) {
+        // Create synthetic grafana_dashboard with grafana_id in 800000+ range
+        // This distinguishes Dynatrace dashboards from performance test metrics (900000+)
+        const syntheticGrafanaId = Math.floor(Math.random() * 100000) + 800000;
+
+        const result = await manager.query<Array<{ id: string }>>(
+          `INSERT INTO grafana_dashboards (
+            grafana_instance_id, grafana_id, uid, name, panels
+          ) VALUES ($1, $2, $3, $4, $5)
+          RETURNING id`,
+          [
+            grafanaInstanceId,
+            syntheticGrafanaId,
+            dashboardUid,
+            dashboardLabel,
+            JSON.stringify([]), // Empty panels array
+          ]
+        );
+        grafanaDashboardId = result[0]!.id;
+        this.logger.log(
+          `Created synthetic grafana_dashboard: ${grafanaDashboardId} (grafana_id: ${syntheticGrafanaId})`
+        );
+      } else {
+        grafanaDashboardId = grafanaDashboardExists[0].id;
+      }
+
+      // Check if application_dashboard exists
+      const appDashboardExists = await manager.query(
+        `SELECT id FROM application_dashboards WHERE id = $1`,
+        [applicationDashboardId]
+      );
+
+      if (!appDashboardExists || appDashboardExists.length === 0) {
+        // Create application_dashboard
+        await manager.query(
+          `INSERT INTO application_dashboards (
+            id, system_under_test_id, test_environment,
+            grafana_instance_id, grafana_dashboard_id,
+            dashboard_name, dashboard_uid, dashboard_label
+          ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+          ON CONFLICT (system_under_test_id, test_environment, grafana_instance_id, dashboard_uid, dashboard_label)
+          DO NOTHING`,
+          [
+            applicationDashboardId,
+            systemUnderTestId,
+            testEnvironment,
+            grafanaInstanceId,
+            grafanaDashboardId,
+            dashboardLabel,
+            dashboardUid,
+            dashboardLabel,
+          ]
+        );
+
+        this.logger.log(`Created Dynatrace application_dashboard: ${applicationDashboardId}`);
+      }
+    });
+  }
+
+  /**
+   * Create ds_compare_config entry for a Dynatrace metric
+   * This enables the metric to be included in anomaly detection and comparison
+   *
+   * @param systemUnderTestId - System under test UUID
+   * @param testEnvironment - Test environment
+   * @param workload - Workload identifier
+   * @param applicationDashboardId - Application dashboard UUID
+   * @param panelId - Panel ID (hash-based)
+   * @param panelTitle - Panel title (metric name)
+   * @param metricSelector - Dynatrace metric selector (used to determine classification)
+   * @returns Promise<void>
+   */
+  async createDsCompareConfigForMetric(
+    systemUnderTestId: string,
+    testEnvironment: string,
+    workload: string,
+    applicationDashboardId: string,
+    panelId: number,
+    panelTitle: string,
+    metricSelector: string
+  ): Promise<void> {
+    // Determine classification and higherIsBetter based on metric type
+    const classification = 'USE_utilization';
+    let higherIsBetter: boolean | null = false;
+
+    // Network Traffic is informational (higherIsBetter: null)
+    if (metricSelector.includes('builtin:host.net.nic.traffic')) {
+      higherIsBetter = null;
+    }
+
+    const configData = {
+      metricClassification: {
+        classification,
+        higherIsBetter,
+      },
+      thresholds: {
+        aggregation: 'mean',
+        percentageThreshold: 0.10,
+        iqrThreshold: 2.0,
+        absoluteThreshold: null,
+      },
+      ignore: false,
+      source: 'dynatrace-host',
+    };
+
+    // Use a transaction to ensure atomicity
+    await this.dataSource.transaction(async (manager) => {
+      // Check if config already exists (unique on application_dashboard_id, panel_id, metric_name)
+      const existingConfig = await manager.query(
+        `SELECT id FROM ds_compare_config
+         WHERE application_dashboard_id = $1
+         AND panel_id = $2
+         AND metric_name IS NULL`,
+        [applicationDashboardId, panelId]
+      );
+
+      if (!existingConfig || existingConfig.length === 0) {
+        await manager.query(
+          `INSERT INTO ds_compare_config (
+            system_under_test_id, test_environment, workload,
+            application_dashboard_id, panel_id, config_data
+          ) VALUES ($1, $2, $3, $4, $5, $6)`,
+          [
+            systemUnderTestId,
+            testEnvironment,
+            workload,
+            applicationDashboardId,
+            panelId,
+            JSON.stringify(configData),
+          ]
+        );
+
+        this.logger.log(
+          `Created ds_compare_config for ${panelTitle} (panel_id: ${panelId})`
+        );
+      } else {
+        this.logger.log(
+          `ds_compare_config already exists for ${panelTitle} (panel_id: ${panelId})`
+        );
+      }
+    });
+  }
+
+  // Metric Names from ds_metrics for Dynatrace Card
+  async getMetricNames(testRunId?: string) {
+    try {
+      // Query panels with JSONB field where panel->description = 'perfana-request-names'
+      const panels = await this.panelsRepo
+        .createQueryBuilder('panel')
+        .select(['panel.test_run_id', 'panel.application_dashboard_id', 'panel.panel_id'])
+        .where("panel.panel->>'description' = :description", { description: 'perfana-request-names' })
+        .andWhere('panel.test_run_id = :testRunId', { testRunId })
+        .getMany();
+
+      if (!panels || panels.length === 0) {
+        return [];
+      }
+
+      // Build conditions for matching metrics - query for all matching test_run/dashboard/panel combinations
+      const conditions = panels.map(panel => ({
+        test_run_id: panel.test_run_id,
+        application_dashboard_id: panel.application_dashboard_id,
+        panel_id: panel.panel_id
+      }));
+
+      // Get distinct metric names from matching metrics using safe query builder
+      const queryBuilder = this.metricsRepo
+        .createQueryBuilder('metric')
+        .select('DISTINCT metric.metric_name', 'metric_name');
+
+      // Build OR conditions safely using query builder methods
+      queryBuilder.where('1 = 0'); // Start with false condition
+      conditions.forEach((condition, index) => {
+        queryBuilder.orWhere(
+          'metric.test_run_id = :testRunId' + index +
+          ' AND metric.application_dashboard_id = :dashboardId' + index +
+          ' AND metric.panel_id = :panelId' + index,
+          {
+            [`testRunId${index}`]: condition.test_run_id,
+            [`dashboardId${index}`]: condition.application_dashboard_id,
+            [`panelId${index}`]: condition.panel_id,
+          }
+        );
+      });
+
+      const metrics = await queryBuilder
+        .orderBy('metric.metric_name', 'ASC')
+        .getRawMany();
+
+      // Get unique metric names
+      const uniqueMetrics = metrics
+        .map((row: { metric_name: string }) => row.metric_name)
+        .filter((name): name is string => name != null);
+
+      this.logger.log(`Found ${uniqueMetrics.length} metric names for test run ${testRunId}`);
+      return uniqueMetrics;
+    } catch (error) {
+      this.logger.error(`Error getting metric names for test run ${testRunId}:`, error);
+      return [];
+    }
+  }
+}

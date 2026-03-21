@@ -1,0 +1,27 @@
+/* Perfana Design System - Main Stylesheet */
+
+/* Import design tokens first */
+@import './tokens.css';
+
+/* Import base styles */
+@import './base.css';
+
+/* Import component styles */
+@import './components.css';
+
+/* Import layout styles */
+@import './layout.css';
+
+/* Import utility classes */
+@import './utilities.css';
+
+/* Google Fonts - Inter for primary typography */
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&display=swap');
+
+/* Google Fonts - JetBrains Mono for code */
+@import url('https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600&display=swap');
+
+/* Design System Version */
+:root {
+  --perfana-design-system-version: '1.0.0';
+}

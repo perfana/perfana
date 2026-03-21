@@ -1,0 +1,309 @@
+# ================================================================================================
+# PERFANA DOCKERIGNORE - SECURITY AND PERFORMANCE FOCUSED
+# ================================================================================================
+# This .dockerignore file excludes sensitive, unnecessary, and large files from Docker builds
+# to improve security, reduce image size, and optimize build performance.
+# ================================================================================================
+
+# ================================================================================================
+# VERSION CONTROL AND DEVELOPMENT FILES
+# ================================================================================================
+.git/
+.gitignore
+.github/
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# ================================================================================================
+# DOCUMENTATION AND README FILES
+# ================================================================================================
+*.md
+*.MD
+README*
+CHANGELOG*
+LICENSE*
+CONTRIBUTING*
+docs/
+documentation/
+
+# ================================================================================================
+# SECURITY AND SENSITIVE FILES
+# ================================================================================================
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+*.crt
+*.p12
+*.pfx
+secrets/
+.secrets/
+.ssh/
+.gnupg/
+
+# ================================================================================================
+# NODE.JS AND NPM FILES
+# ================================================================================================
+node_modules/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+lerna-debug.log*
+.pnpm-debug.log*
+
+# Package manager lock files (keep only npm)
+yarn.lock
+pnpm-lock.yaml
+
+# NPM cache and temporary files
+.npm/
+.yarn/
+.pnpm/
+.node-version
+.nvmrc
+
+# ================================================================================================
+# BUILD ARTIFACTS AND CACHE
+# ================================================================================================
+dist/
+build/
+out/
+.next/
+.nuxt/
+.output/
+.turbo/
+coverage/
+.nyc_output/
+
+# TypeScript build info
+*.tsbuildinfo
+tsconfig.build.tsbuildinfo
+
+# ================================================================================================
+# TESTING FILES AND ARTIFACTS
+# ================================================================================================
+test/
+tests/
+**/*.test.js
+**/*.test.ts
+**/*.spec.js
+**/*.spec.ts
+__tests__/
+__mocks__/
+jest.config.*
+.coverage/
+coverage-summary.json
+test-results/
+test-output/
+
+# Playwright artifacts
+playwright-report/
+test-results/
+.playwright/
+
+# ================================================================================================
+# LINTING AND FORMATTING
+# ================================================================================================
+.eslintcache
+.eslintrc*
+.prettier*
+.stylelintrc*
+.editorconfig
+
+# ================================================================================================
+# DEVELOPMENT TOOLS AND CONFIGURATION
+# ================================================================================================
+.vscode/
+.idea/
+*.iml
+.project
+.classpath
+.settings/
+.metadata/
+
+# Debugging and profiling
+*.cpuprofile
+*.heapsnapshot
+flamegraph.svg
+
+# ================================================================================================
+# OPERATING SYSTEM FILES
+# ================================================================================================
+# macOS
+.DS_Store
+.AppleDouble
+.LSOverride
+Icon?
+._*
+.Spotlight-V100
+.Trashes
+
+# Windows
+Thumbs.db
+ehthumbs.db
+Desktop.ini
+$RECYCLE.BIN/
+
+# Linux
+*~
+.fuse_hidden*
+.nfs*
+
+# ================================================================================================
+# TEMPORARY AND LOG FILES
+# ================================================================================================
+*.log
+*.log.*
+logs/
+tmp/
+temp/
+.tmp/
+.temp/
+
+# Runtime data
+pids/
+*.pid
+*.seed
+*.pid.lock
+
+# ================================================================================================
+# EDITOR AND IDE FILES
+# ================================================================================================
+*.swp
+*.swo
+*~
+.vimrc
+.tern-project
+.tern-port
+
+# Sublime Text
+*.sublime-project
+*.sublime-workspace
+
+# ================================================================================================
+# DOCKER FILES (avoid recursive Docker builds)
+# ================================================================================================
+Dockerfile*
+.dockerignore
+docker-compose*
+.docker/
+
+# ================================================================================================
+# KUBERNETES AND DEPLOYMENT FILES
+# ================================================================================================
+k8s/
+kubernetes/
+helm/
+*.yaml
+*.yml
+!package*.json
+!turbo.json
+
+# ================================================================================================
+# DATABASE AND MIGRATION FILES
+# ================================================================================================
+*.sql
+*.db
+*.sqlite
+*.sqlite3
+migrations/
+seeds/
+dumps/
+backups/
+
+# ================================================================================================
+# MCP SERVER (local CLI tool, not deployed in Docker)
+# ================================================================================================
+apps/mcp/
+
+# ================================================================================================
+# PERFANA-SPECIFIC EXCLUSIONS
+# ================================================================================================
+# Simulation and demo scripts
+simulate-*.js
+create-*.js
+test-upsert-*.js
+working-simulation.js
+
+# Database dumps and analysis files
+*.dump.sql
+*_analysis.md
+*_schema.md
+
+# Supabase local development
+supabase/.branches/
+supabase/.temp/
+supabase/logs/
+
+# ================================================================================================
+# PERFORMANCE AND MONITORING
+# ================================================================================================
+.trace
+.prof
+benchmark-results/
+performance-reports/
+
+# ================================================================================================
+# SECURITY SCANNING RESULTS
+# ================================================================================================
+security-reports/
+vulnerability-reports/
+.security/
+trivy-results.json
+snyk-results.json
+
+# ================================================================================================
+# BACKUP AND ARCHIVE FILES
+# ================================================================================================
+*.backup
+*.bak
+*.old
+*.orig
+*.save
+*.tar
+*.tar.gz
+*.zip
+*.rar
+*.7z
+
+# ================================================================================================
+# LARGE BINARY FILES (unless specifically needed)
+# ================================================================================================
+*.iso
+*.dmg
+*.pkg
+*.msi
+*.exe
+*.dll
+*.so
+*.dylib
+*.bin
+
+# ================================================================================================
+# CLOUD AND DEPLOYMENT SPECIFIC
+# ================================================================================================
+.env.local
+.env.production
+.env.staging
+.vercel/
+.netlify/
+.aws/
+.gcp/
+.azure/
+
+# Terraform
+*.tf
+*.tfvars
+.terraform/
+
+# ================================================================================================
+# MONITORING AND ANALYTICS
+# ================================================================================================
+.amplitude/
+.mixpanel/
+.sentry/
+newrelic.js

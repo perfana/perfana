@@ -1,0 +1,8 @@
+dist
+node_modules
+coverage
+*.config.ts
+*.config.js
+.husky
+scripts/migrate.ts
+scripts/seed.ts

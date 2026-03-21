@@ -1,0 +1,174 @@
+# syntax=docker/dockerfile:1.7-labs
+
+# ================================================================================================
+# PERFANA NEXT-GEN - OPTIMIZED DOCKERFILE
+# ================================================================================================
+# Optimized for minimal image size while maintaining security
+# ================================================================================================
+
+ARG NODE_VERSION=18.19.1
+ARG ALPINE_VERSION=3.19
+
+# ================================================================================================
+# STAGE 1: Base with Alpine for smaller size
+# ================================================================================================
+FROM node:${NODE_VERSION}-alpine${ALPINE_VERSION} AS base
+
+# Install security essentials
+RUN apk upgrade --no-cache && \
+    apk add --no-cache dumb-init ca-certificates && \
+    rm -rf /var/cache/apk/*
+
+# Create non-root user
+RUN addgroup -g 10001 -S perfana && \
+    adduser -u 10001 -D -S -G perfana perfana
+
+WORKDIR /app
+
+# ================================================================================================
+# STAGE 2: Dependencies
+# ================================================================================================
+FROM base AS deps
+
+# Copy package files
+COPY package*.json turbo.json ./
+COPY apps/web/package*.json ./apps/web/
+COPY apps/api/package*.json ./apps/api/
+COPY packages/shared/package*.json ./packages/shared/
+
+# Install all dependencies for building
+RUN npm ci && npm cache clean --force
+
+# ================================================================================================
+# STAGE 3: Build
+# ================================================================================================
+FROM deps AS builder
+
+# Copy source code
+COPY . .
+
+# Set build environment
+ENV NODE_ENV=production
+ENV NEXT_TELEMETRY_DISABLED=1
+ENV TURBOREPO_TELEMETRY_DISABLED=1
+
+# Build the applications
+RUN npm run build
+
+# Clean up and install only production dependencies
+RUN rm -rf node_modules && \
+    npm ci --only=production --ignore-scripts && \
+    npm cache clean --force
+
+# Remove build artifacts that aren't needed
+RUN rm -rf apps/web/.next/cache \
+           apps/web/.next/trace \
+           apps/api/src \
+           packages/*/src \
+           .turbo \
+           /tmp/* \
+           /var/tmp/* \
+           /root/.npm
+
+# ================================================================================================
+# STAGE 4: Web Runtime (Alpine-based for minimal size)
+# ================================================================================================
+FROM node:${NODE_VERSION}-alpine${ALPINE_VERSION} AS web
+
+# Install runtime essentials
+RUN apk add --no-cache dumb-init && \
+    rm -rf /var/cache/apk/*
+
+# Create non-root user
+RUN addgroup -g 10001 -S perfana && \
+    adduser -u 10001 -D -S -G perfana perfana
+
+WORKDIR /app
+
+# Copy only the built application and necessary files
+COPY --from=builder --chown=perfana:perfana /app/apps/web/.next ./apps/web/.next
+COPY --from=builder --chown=perfana:perfana /app/apps/web/public ./apps/web/public
+COPY --from=builder --chown=perfana:perfana /app/apps/web/package.json ./apps/web/package.json
+COPY --from=builder --chown=perfana:perfana /app/packages/shared/dist ./packages/shared/dist
+
+# Copy only production node_modules needed by Next.js
+COPY --from=builder --chown=perfana:perfana /app/node_modules/next ./node_modules/next
+COPY --from=builder --chown=perfana:perfana /app/node_modules/react ./node_modules/react
+COPY --from=builder --chown=perfana:perfana /app/node_modules/react-dom ./node_modules/react-dom
+COPY --from=builder --chown=perfana:perfana /app/node_modules/@swc ./node_modules/@swc
+
+# Copy critical dependencies
+COPY --from=builder --chown=perfana:perfana /app/node_modules/.bin ./node_modules/.bin
+
+# Environment variables
+ENV NODE_ENV=production \
+    NEXT_TELEMETRY_DISABLED=1 \
+    PORT=3000 \
+    HOSTNAME="0.0.0.0"
+
+# Security labels
+LABEL org.opencontainers.image.title="Perfana Web Frontend (Optimized)" \
+      org.opencontainers.image.description="Optimized Perfana Next.js frontend" \
+      security.non-root="true"
+
+# Switch to non-root user
+USER perfana:perfana
+
+# Expose port
+EXPOSE 3000
+
+# Health check
+HEALTHCHECK --interval=30s --timeout=10s --start-period=5s --retries=3 \
+    CMD wget --no-verbose --tries=1 --spider http://localhost:3000/api/health || exit 1
+
+# Start application
+WORKDIR /app/apps/web
+CMD ["dumb-init", "node", "../../node_modules/next/dist/bin/next", "start"]
+
+# ================================================================================================
+# STAGE 5: API Runtime (Alpine-based)
+# ================================================================================================
+FROM node:${NODE_VERSION}-alpine${ALPINE_VERSION} AS api
+
+# Install runtime essentials
+RUN apk add --no-cache dumb-init && \
+    rm -rf /var/cache/apk/*
+
+# Create non-root user
+RUN addgroup -g 10001 -S perfana && \
+    adduser -u 10001 -D -S -G perfana perfana
+
+WORKDIR /app
+
+# Copy built API and necessary files
+COPY --from=builder --chown=perfana:perfana /app/apps/api/dist ./apps/api/dist
+COPY --from=builder --chown=perfana:perfana /app/packages/shared/dist ./packages/shared/dist
+
+# Copy minimal production dependencies for NestJS
+COPY --from=builder --chown=perfana:perfana /app/node_modules/@nestjs ./node_modules/@nestjs
+COPY --from=builder --chown=perfana:perfana /app/node_modules/reflect-metadata ./node_modules/reflect-metadata
+COPY --from=builder --chown=perfana:perfana /app/node_modules/rxjs ./node_modules/rxjs
+COPY --from=builder --chown=perfana:perfana /app/node_modules/class-transformer ./node_modules/class-transformer
+COPY --from=builder --chown=perfana:perfana /app/node_modules/class-validator ./node_modules/class-validator
+
+# Environment variables
+ENV NODE_ENV=production \
+    PORT=3001
+
+# Security labels
+LABEL org.opencontainers.image.title="Perfana API Backend (Optimized)" \
+      org.opencontainers.image.description="Optimized Perfana NestJS API" \
+      security.non-root="true"
+
+# Switch to non-root user
+USER perfana:perfana
+
+# Expose port
+EXPOSE 3001
+
+# Health check
+HEALTHCHECK --interval=30s --timeout=10s --start-period=5s --retries=3 \
+    CMD wget --no-verbose --tries=1 --spider http://localhost:3001/health || exit 1
+
+# Start application
+CMD ["dumb-init", "node", "apps/api/dist/main.js"]

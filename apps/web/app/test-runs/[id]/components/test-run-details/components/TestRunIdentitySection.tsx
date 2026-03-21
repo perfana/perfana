@@ -1,0 +1,291 @@
+'use client';
+
+import {
+  Box,
+  Typography,
+  Chip,
+  CircularProgress,
+  Tooltip,
+  LinearProgress,
+  useTheme,
+} from '@mui/material';
+import { HourglassEmpty, Launch } from '@mui/icons-material';
+import { TestRun } from '@/types/test-runs';
+
+interface TestRunIdentitySectionProps {
+  testRun: TestRun;
+}
+
+export function TestRunIdentitySection({ testRun }: TestRunIdentitySectionProps) {
+  const theme = useTheme();
+  const isDark = theme.palette.mode === 'dark';
+  return (
+    <Box sx={{
+      p: 3,
+      backgroundColor: isDark ? 'rgba(25, 118, 210, 0.04)' : 'rgba(255, 255, 255, 0.7)',
+      backdropFilter: 'blur(10px)',
+      border: isDark ? '1px solid rgba(25, 118, 210, 0.15)' : '1px solid rgba(25, 118, 210, 0.08)',
+      borderRadius: 3,
+      borderLeft: '4px solid',
+      borderLeftColor: isDark ? '#64b5f6' : 'primary.main',
+      boxShadow: isDark ? '0 2px 8px rgba(0, 0, 0, 0.2)' : '0 2px 8px rgba(0, 0, 0, 0.04)',
+      transition: 'all 0.2s ease',
+      '&:hover': {
+        boxShadow: isDark ? '0 4px 12px rgba(0, 0, 0, 0.3)' : '0 4px 12px rgba(0, 0, 0, 0.08)',
+        borderLeftColor: isDark ? '#90caf9' : 'primary.dark',
+      }
+    }}>
+      <Typography
+        variant="overline"
+        sx={{
+          display: 'block',
+          fontSize: '0.875rem',
+          fontWeight: 700,
+          letterSpacing: '0.5px',
+          color: 'primary.main',
+          mb: 2.5,
+        }}
+      >
+        Test Run Identity
+      </Typography>
+
+      {/* Test Run ID */}
+      <Box sx={{ mb: 2.5 }}>
+        <Typography
+          variant="caption"
+          sx={{
+            display: 'block',
+            fontSize: '0.75rem',
+            fontWeight: 500,
+            letterSpacing: '0.5px',
+            textTransform: 'uppercase',
+            color: 'text.secondary',
+            mb: 0.75,
+            opacity: 0.8,
+          }}
+        >
+          Test Run ID
+        </Typography>
+        <Typography
+          variant="body2"
+          sx={{
+            fontFamily: '"SF Mono", "Monaco", "Cascadia Code", "Roboto Mono", monospace',
+            fontSize: '0.875rem',
+            fontWeight: 500,
+            backgroundColor: isDark ? 'rgba(255, 255, 255, 0.05)' : 'rgba(0, 0, 0, 0.03)',
+            px: 1.5,
+            py: 0.75,
+            borderRadius: 1,
+            border: isDark ? '1px solid rgba(255, 255, 255, 0.1)' : '1px solid rgba(0, 0, 0, 0.06)',
+            display: 'inline-block',
+            color: 'text.primary',
+          }}
+        >
+          {testRun.test_run_id}
+        </Typography>
+      </Box>
+
+      {/* Version */}
+      <Box sx={{ mb: 2.5 }}>
+        <Typography
+          variant="caption"
+          sx={{
+            display: 'block',
+            fontSize: '0.75rem',
+            fontWeight: 500,
+            letterSpacing: '0.5px',
+            textTransform: 'uppercase',
+            color: 'text.secondary',
+            mb: 0.75,
+            opacity: 0.8,
+          }}
+        >
+          Version
+        </Typography>
+        <Typography
+          variant="body2"
+          sx={{
+            fontSize: '0.9375rem',
+            fontWeight: 600,
+            color: 'text.primary',
+            lineHeight: 1.4,
+          }}
+        >
+          {testRun.application_release || (
+            <span style={{ fontStyle: 'italic', opacity: 0.5 }}>Not specified</span>
+          )}
+        </Typography>
+      </Box>
+
+      {/* Status */}
+      <Box sx={{ mb: testRun.ci_build_results_url ? 2.5 : 0 }}>
+        <Typography
+          variant="caption"
+          sx={{
+            display: 'block',
+            fontSize: '0.75rem',
+            fontWeight: 500,
+            letterSpacing: '0.5px',
+            textTransform: 'uppercase',
+            color: 'text.secondary',
+            mb: 0.75,
+            opacity: 0.8,
+          }}
+        >
+          Test Status
+        </Typography>
+        <Box sx={{ display: 'flex', flexDirection: 'column', gap: 1.5 }}>
+          <Box sx={{ display: 'flex', gap: 1, flexWrap: 'wrap', alignItems: 'center' }}>
+            <Chip
+              label={testRun.completed ? 'Completed' : 'Running'}
+              size="medium"
+              icon={testRun.completed ? undefined : <CircularProgress size={14} sx={{ ml: 1 }} />}
+              sx={{
+                height: '32px',
+                backgroundColor: testRun.completed ? 'rgba(76, 175, 80, 0.08)' : 'rgba(25, 118, 210, 0.08)',
+                border: testRun.completed ? '1px solid rgba(76, 175, 80, 0.3)' : '1px solid rgba(25, 118, 210, 0.3)',
+                color: testRun.completed ? '#4caf50' : 'primary.main',
+                fontWeight: 600,
+                fontSize: '0.875rem',
+                '& .MuiChip-label': {
+                  px: 1.5,
+                },
+                '& .MuiChip-icon': {
+                  ml: 1,
+                }
+              }}
+            />
+
+            {/* Stale Indicator */}
+            {testRun.is_stale && (
+              <Tooltip
+                title={`Test run became stale at ${testRun.stale_detected_at ? new Date(testRun.stale_detected_at).toLocaleString() : 'unknown time'}`}
+                arrow
+                placement="top"
+              >
+                <Chip
+                  label="Stale"
+                  size="medium"
+                  icon={<HourglassEmpty sx={{ fontSize: '1rem' }} />}
+                  sx={{
+                    height: '32px',
+                    background: 'linear-gradient(135deg, rgba(255, 152, 0, 0.08) 0%, rgba(255, 167, 38, 0.12) 100%)',
+                    border: '1px solid rgba(255, 152, 0, 0.4)',
+                    color: '#ff9800',
+                    fontWeight: 600,
+                    fontSize: '0.875rem',
+                    backdropFilter: 'blur(8px)',
+                    cursor: 'help',
+                    '& .MuiChip-label': {
+                      px: 1.5,
+                    },
+                    '& .MuiChip-icon': {
+                      ml: 1,
+                      color: '#ff9800',
+                    }
+                  }}
+                />
+              </Tooltip>
+            )}
+          </Box>
+
+          {/* Completion Percentage Progress Bar */}
+          {(!testRun.completed || testRun.is_stale) && testRun.completion_percentage !== undefined && (
+            <Box sx={{ width: '100%' }}>
+              <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', mb: 0.5 }}>
+                <Typography
+                  variant="caption"
+                  sx={{
+                    fontSize: '0.7rem',
+                    fontWeight: 500,
+                    color: 'text.secondary',
+                    textTransform: 'uppercase',
+                    letterSpacing: '0.5px',
+                  }}
+                >
+                  Completion
+                </Typography>
+                <Typography
+                  variant="caption"
+                  sx={{
+                    fontSize: '0.75rem',
+                    fontWeight: 600,
+                    color: testRun.is_stale ? '#ff9800' : 'primary.main',
+                  }}
+                >
+                  {testRun.completion_percentage}%
+                </Typography>
+              </Box>
+              <LinearProgress
+                variant="determinate"
+                value={testRun.completion_percentage}
+                sx={{
+                  height: 8,
+                  borderRadius: 4,
+                  backgroundColor: isDark ? 'rgba(255, 255, 255, 0.08)' : 'rgba(0, 0, 0, 0.06)',
+                  '& .MuiLinearProgress-bar': {
+                    borderRadius: 4,
+                    background: testRun.is_stale
+                      ? 'linear-gradient(90deg, #ff9800 0%, #ffb74d 100%)'
+                      : 'linear-gradient(90deg, #1976d2 0%, #42a5f5 100%)',
+                    boxShadow: testRun.is_stale
+                      ? '0 2px 8px rgba(255, 152, 0, 0.3)'
+                      : '0 2px 8px rgba(25, 118, 210, 0.3)',
+                  }
+                }}
+              />
+            </Box>
+          )}
+        </Box>
+      </Box>
+
+      {/* CI/CD Result Link */}
+      {testRun.ci_build_results_url && (
+        <Box>
+          <Typography
+            variant="caption"
+            sx={{
+              display: 'block',
+              fontSize: '0.75rem',
+              fontWeight: 500,
+              letterSpacing: '0.5px',
+              textTransform: 'uppercase',
+              color: 'text.secondary',
+              mb: 0.75,
+              opacity: 0.8,
+            }}
+          >
+            CI/CD Result
+          </Typography>
+          <Box
+            component="a"
+            href={testRun.ci_build_results_url}
+            target="_blank"
+            rel="noopener noreferrer"
+            sx={{
+              display: 'inline-flex',
+              alignItems: 'center',
+              gap: 0.5,
+              textDecoration: 'none',
+              color: 'primary.main',
+              fontSize: '0.875rem',
+              fontWeight: 600,
+              padding: '6px 12px',
+              borderRadius: 1,
+              backgroundColor: 'rgba(25, 118, 210, 0.04)',
+              border: '1px solid rgba(25, 118, 210, 0.2)',
+              transition: 'all 0.2s ease',
+              '&:hover': {
+                backgroundColor: 'rgba(25, 118, 210, 0.08)',
+                borderColor: 'rgba(25, 118, 210, 0.4)',
+              }
+            }}
+          >
+            View Build Results
+            <Launch sx={{ fontSize: '1rem' }} />
+          </Box>
+        </Box>
+      )}
+    </Box>
+  );
+}

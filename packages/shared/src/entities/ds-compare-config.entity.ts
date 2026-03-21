@@ -1,0 +1,62 @@
+import { Entity, PrimaryGeneratedColumn, Column, CreateDateColumn, UpdateDateColumn, ManyToOne, JoinColumn } from 'typeorm';
+import { ApplicationDashboard } from './application-dashboard.entity';
+import { SystemUnderTest } from './system-under-test.entity';
+
+@Entity('ds_compare_config')
+export class DsCompareConfig {
+  @PrimaryGeneratedColumn('uuid')
+  id!: string;
+
+  @Column({ type: 'uuid' })
+  application_dashboard_id!: string;
+
+  @Column({ type: 'integer' })
+  panel_id!: number;
+
+  @Column({ type: 'jsonb' })
+  config_data!: Record<string, any>;
+
+  @Column({ type: 'uuid', nullable: true })
+  organization_id?: string;
+
+  @Column({ type: 'uuid', nullable: true })
+  team_id?: string;
+
+  @Column({ type: 'varchar', length: 255, nullable: true })
+  created_by?: string;
+
+  @Column({ type: 'varchar', length: 255, nullable: true })
+  updated_by?: string;
+
+  @CreateDateColumn()
+  created_at!: Date;
+
+  @UpdateDateColumn()
+  updated_at!: Date;
+
+  @Column({ type: 'varchar', length: 255, nullable: true })
+  metric_name?: string;
+
+  @Column({ type: 'uuid' })
+  system_under_test_id!: string;
+
+  @Column({ type: 'varchar', length: 255 })
+  test_environment!: string;
+
+  @Column({ type: 'varchar', length: 255 })
+  workload!: string;
+
+  @Column({ type: 'varchar', length: 32, nullable: true })
+  config_hash?: string;
+
+  @Column({ type: 'timestamptz', default: () => 'CURRENT_TIMESTAMP' })
+  last_modified_at!: Date;
+
+  @ManyToOne(() => ApplicationDashboard, { onDelete: 'CASCADE' })
+  @JoinColumn({ name: 'application_dashboard_id' })
+  application_dashboard?: ApplicationDashboard;
+
+  @ManyToOne(() => SystemUnderTest)
+  @JoinColumn({ name: 'system_under_test_id' })
+  system_under_test?: SystemUnderTest;
+}
