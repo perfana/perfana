@@ -328,10 +328,58 @@ export function simpleOrchestrateReevaluateBatchWorker() {
             const statuses = await db.getAllCollectionStatuses(testRunId);
 
             // Filter to selected source types
-            const sourcesToRefetch = statuses.filter(s => enabledSourceTypes.has(s.source_type));
+            let sourcesToRefetch = statuses.filter(s => enabledSourceTypes.has(s.source_type));
+
+            // Force mode: discover sources that have no collection status yet
+            // This handles cases where Dynatrace/Grafana configs were added after initial collection
+            if (sourcesToRefetch.length === 0 || !sourcesToRefetch.some(s => enabledSourceTypes.has(s.source_type))) {
+              const testRunFull = await db.testRunRepo.findOne({
+                where: { testRunId },
+                select: ['testRunId', 'systemUnderTestId', 'testEnvironment', 'workload'],
+              });
+
+              if (testRunFull) {
+                const discoveredSources: Array<{ source_type: string; source_id?: string; is_complete: boolean; collected_ranges: any[] }> = [];
+
+                // Discover Grafana instances
+                if (enabledSourceTypes.has('grafana') && !sourcesToRefetch.some(s => s.source_type === 'grafana')) {
+                  const grafanaInstances = await db.query<{ id: string }>(
+                    'SELECT id FROM grafana_instances LIMIT 10'
+                  );
+                  for (const gi of grafanaInstances) {
+                    discoveredSources.push({ source_type: 'grafana', source_id: gi.id, is_complete: false, collected_ranges: [] });
+                  }
+                }
+
+                // Discover Dynatrace configs that have queries matching this test run
+                if (enabledSourceTypes.has('dynatrace') && !sourcesToRefetch.some(s => s.source_type === 'dynatrace')) {
+                  const dtConfigs = await db.query<{ id: string }>(
+                    `SELECT DISTINCT dq.dynatrace_config_id as id
+                     FROM dynatrace_queries dq
+                     WHERE dq.system_under_test_id = $1
+                       AND dq.test_environment = $2
+                       AND dq.workload = $3`,
+                    [testRunFull.systemUnderTestId, testRunFull.testEnvironment, testRunFull.workload]
+                  );
+                  for (const dc of dtConfigs) {
+                    discoveredSources.push({ source_type: 'dynatrace', source_id: dc.id, is_complete: false, collected_ranges: [] });
+                  }
+                }
+
+                // Discover performance test metrics (no source_id needed)
+                if (enabledSourceTypes.has('performance_test') && !sourcesToRefetch.some(s => s.source_type === 'performance_test')) {
+                  discoveredSources.push({ source_type: 'performance_test', is_complete: false, collected_ranges: [] });
+                }
+
+                if (discoveredSources.length > 0) {
+                  logger.info(`  ${testRunId}: discovered ${discoveredSources.length} new sources: ${discoveredSources.map(s => `${s.source_type}/${s.source_id ?? 'null'}`).join(', ')}`);
+                  sourcesToRefetch = [...sourcesToRefetch, ...discoveredSources] as any;
+                }
+              }
+            }
 
             if (sourcesToRefetch.length === 0) {
-              logger.info(`  ${testRunId}: no collection statuses for selected sources, skipping`);
+              logger.info(`  ${testRunId}: no collection statuses or discoverable sources for selected types, skipping`);
               continue;
             }
 
