@@ -118,7 +118,11 @@ export class DynatraceAPIClient {
     // - Cloud metadata endpoints (169.254.169.254)
     // - Kubernetes internal services
     try {
-      assertValidUrl(candidateUrl, { requireHttps: true });
+      const isDev = process.env.NODE_ENV === 'development' || process.env.NODE_ENV === 'dev';
+      assertValidUrl(candidateUrl, {
+        requireHttps: !isDev,
+        allowedHosts: isDev ? ['localhost', '127.0.0.1'] : [],
+      });
       this.baseUrl = candidateUrl;
       logger.debug(`SSRF validation passed for Dynatrace host: ${sanitizeUrl(candidateUrl)}`);
     } catch (error) {

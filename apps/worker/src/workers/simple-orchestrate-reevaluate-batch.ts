@@ -17,6 +17,7 @@ import { JobLockService } from '../services/JobLockService.js';
 import { ProgressReporter } from '../services/ProgressReporter.js';
 import { MetricCollectionGapService } from '../services/MetricCollectionGapService.js';
 import { IncrementalMetricsPipeline } from '../pipelines/IncrementalMetricsPipeline.js';
+import { DynatracePipeline } from '../pipelines/DynatracePipeline.js';
 import { DataSanityCheckPipeline } from '../pipelines/DataSanityCheckPipeline.js';
 import { JobType } from '@perfana/shared/types';
 
@@ -391,20 +392,30 @@ export function simpleOrchestrateReevaluateBatchWorker() {
             }
 
             // Re-collect each source for the full time range
+            // Use full pipelines (not incremental) for force-refetch of completed test runs
             for (const status of sourcesToRefetch) {
               try {
-                const result = await incrementalPipeline.execute({
-                  testRunId,
-                  fromTime,
-                  toTime,
-                  collectGrafanaMetrics: status.source_type === 'grafana',
-                  collectDynatraceMetrics: status.source_type === 'dynatrace',
-                  collectPerformanceTestMetrics: status.source_type === 'performance_test',
-                  ...(status.source_type === 'grafana' && status.source_id ? { grafanaInstanceId: status.source_id } : {}),
-                  ...(status.source_type === 'dynatrace' && status.source_id ? { dynatraceConfigId: status.source_id } : {}),
-                });
+                let dataPoints = 0;
 
-                const dataPoints = (result.data as any)?.totalDataPoints as number || 0;
+                if (status.source_type === 'dynatrace') {
+                  // Use the full DynatracePipeline — same as the analyze worker's dynatrace-collection stage
+                  const dynatracePipeline = new DynatracePipeline(logger);
+                  const result = await dynatracePipeline.execute({ testRunIds: [testRunId] });
+                  dataPoints = (result.data as any)?.totalDataPoints ?? (result.data as any)?.metricsCollected ?? 0;
+                } else {
+                  // Grafana and performance_test use incremental pipeline with full time range
+                  const result = await incrementalPipeline.execute({
+                    testRunId,
+                    fromTime,
+                    toTime,
+                    collectGrafanaMetrics: status.source_type === 'grafana',
+                    collectDynatraceMetrics: false,
+                    collectPerformanceTestMetrics: status.source_type === 'performance_test',
+                    ...(status.source_type === 'grafana' && status.source_id ? { grafanaInstanceId: status.source_id } : {}),
+                  });
+                  dataPoints = (result.data as any)?.totalDataPoints as number || 0;
+                }
+
                 logger.info(`    ${status.source_type}/${status.source_id ?? 'null'}: ${dataPoints} data points collected`);
                 if (dataPoints > 0) { testRunReceivedData = true; }
 
