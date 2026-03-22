@@ -14,6 +14,7 @@ import {
   TIME_RANGE_OPTIONS,
 } from '../types';
 import { TestRun } from '@/types/test-runs';
+import { isGrafana, isPerformanceTest } from '@/lib/metrics-source-utils';
 
 interface UseTrendsDataProps {
   testRun: TestRun | null;
@@ -370,11 +371,7 @@ export function useTrendsData({ testRun, testRunId, trendsExpanded }: UseTrendsD
     const sources: DataSource[] = [];
 
     // Check for real Grafana dashboards (not artificial)
-    // TODO Phase 3.7: replace with source_type from MetricsSource
-    const grafanaDashboards = dashboards.filter(d =>
-      !d.dashboard_uid?.startsWith('performance-test-metrics-') &&
-      !d.dashboard_uid?.startsWith('dynatrace-')
-    );
+    const grafanaDashboards = dashboards.filter(d => isGrafana(d));
     if (grafanaDashboards.length > 0) {
       sources.push('grafana');
     }
@@ -385,10 +382,7 @@ export function useTrendsData({ testRun, testRunId, trendsExpanded }: UseTrendsD
     }
 
     // Check for performance-test-metrics dashboards
-    // TODO Phase 3.7: replace with source_type from MetricsSource
-    const perfMetricsDashboards = dashboards.filter(d =>
-      d.dashboard_uid?.startsWith('performance-test-metrics-')
-    );
+    const perfMetricsDashboards = dashboards.filter(d => isPerformanceTest(d));
     if (perfMetricsDashboards.length > 0) {
       sources.push('performance-metrics');
     }
@@ -428,17 +422,11 @@ export function useTrendsData({ testRun, testRunId, trendsExpanded }: UseTrendsD
   }, [testRun, oldestTestRunDate, oldestTestRunLoading, fetchOldestTestRunDate]);
 
   // Filter dashboards by source type
-  // TODO Phase 3.7: replace with source_type from MetricsSource
   const getFilteredDashboards = useCallback((): ApplicationDashboard[] => {
     if (selectedSource === 'grafana') {
-      return dashboards.filter(d =>
-        !d.dashboard_uid?.startsWith('performance-test-metrics-') &&
-        !d.dashboard_uid?.startsWith('dynatrace-')
-      );
+      return dashboards.filter(d => isGrafana(d));
     } else if (selectedSource === 'performance-metrics') {
-      return dashboards.filter(d =>
-        d.dashboard_uid?.startsWith('performance-test-metrics-')
-      );
+      return dashboards.filter(d => isPerformanceTest(d));
     } else {
       return dynatraceDashboards.map((d, index) => ({
         id: `dynatrace-${index}`,
@@ -507,7 +495,7 @@ export function useTrendsData({ testRun, testRunId, trendsExpanded }: UseTrendsD
 
     const getSource = (): DataSource => {
       if (selectedMetric.type === 'dynatrace') return 'dynatrace';
-      if (selectedDashboard.dashboard_uid?.startsWith('performance-test-metrics-')) return 'performance-metrics';
+      if (isPerformanceTest(selectedDashboard)) return 'performance-metrics';
       return 'grafana';
     };
     const source = getSource();

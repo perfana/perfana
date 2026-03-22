@@ -11,6 +11,7 @@ import {
   initialSLOFormData,
 } from '../types';
 import { SUPPORTED_PANEL_TYPES } from '../utils/slo-validators';
+import { isPerformanceTest } from '@/lib/metrics-source-utils';
 
 export function useAddSLOForm({
   open,
@@ -146,10 +147,7 @@ export function useAddSLOForm({
       if (response.ok) {
         const dashboardsData = await response.json();
         // Filter for performance-test-metrics dashboards only
-        // TODO: Phase 3.7 - migrate to metrics_source_type filtering instead of prefix-based dashboard_uid matching
-        const perfMetricsDashboards = dashboardsData.filter((d: any) =>
-          d.dashboard_uid?.startsWith('performance-test-metrics-')
-        );
+        const perfMetricsDashboards = dashboardsData.filter((d: any) => isPerformanceTest(d));
         setAvailablePerfMetricsDashboards(perfMetricsDashboards);
       } else {
         console.warn('Failed to fetch Performance metrics dashboards:', response.statusText);
@@ -240,10 +238,7 @@ export function useAddSLOForm({
 
       if (response.ok) {
         const dashboardsData = await response.json();
-        // TODO: Phase 3.7 - migrate to metrics_source_type filtering instead of prefix-based dashboard_uid matching
-        const perfMetricsDashboards = dashboardsData.filter((d: any) =>
-          d.dashboard_uid?.startsWith('performance-test-metrics-')
-        );
+        const perfMetricsDashboards = dashboardsData.filter((d: any) => isPerformanceTest(d));
         return perfMetricsDashboards.length > 0;
       }
       return false;

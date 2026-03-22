@@ -1,6 +1,6 @@
 {
-    "description": "Golden-file: real ADAPT output for PerfanaWebshop-acc-loadTest-00005. Includes Grafana + Performance Test + Dynatrace sources.",
-    "capturedAt": "2026-03-22T12:59:41.121222+00:00",
+    "description": "Golden-file: real ADAPT output for PerfanaWebshop-acc-loadTest-00005. Post Phase 3.7 with metrics_source_id JOINs.",
+    "capturedAt": "2026-03-22T14:26:50.847741+00:00",
     "testRunId": "PerfanaWebshop-acc-loadTest-00005",
     "controlGroupId": "PerfanaWebshop-acc-loadTest-00005",
     "controlGroupTestRuns": [
@@ -12,23 +12,23 @@
     "overallConclusion": {
         "conclusion": "REGRESSION",
         "details": {
-            "totalResults": 893,
+            "totalResults": 890,
             "differenceCount": 305,
             "regressionCount": 36,
             "improvementCount": 3,
-            "incomparableCount": 4,
+            "incomparableCount": 1,
             "noDifferenceCount": 545,
             "trackedRegressionCount": 0
         }
     },
-    "resultCount": 894,
+    "resultCount": 891,
     "conclusionLabelCounts": {
         "partial increase": 34,
         "increase": 123,
         "regression": 36,
         "improvement": 3,
         "partial improvement": 9,
-        "incomparable": 4,
+        "incomparable": 1,
         "partial regression": 112,
         "decrease": 17,
         "ignored": 1,
@@ -26144,158 +26144,6 @@
             "exists_data": {
                 "test": true,
                 "control": true
-            },
-            "uses_default_value": false,
-            "default_value": null
-        },
-        {
-            "application_dashboard_id": "1bfc9967-f08c-4ae3-8ba1-065a7df5d20d",
-            "panel_id": 1,
-            "metric_name": "HOST-123_afterburner-be_value",
-            "dashboard_uid": "dynatrace",
-            "dashboard_label": "Host: afterburner-be",
-            "panel_title": "CPU Usage",
-            "unit": null,
-            "statistic": {
-                "diff": null,
-                "name": "median",
-                "test": "50.35011012409003",
-                "absDiff": null,
-                "control": null,
-                "pctDiff": null
-            },
-            "thresholds": {
-                "lower": {},
-                "upper": {}
-            },
-            "checks": {
-                "abs": {
-                    "valid": false,
-                    "isDifference": false
-                },
-                "iqr": {
-                    "valid": false,
-                    "isDifference": false
-                },
-                "pct": {
-                    "valid": false,
-                    "isDifference": false
-                }
-            },
-            "conclusion": {
-                "label": "incomparable",
-                "valid": false,
-                "ignore": false,
-                "decrease": false,
-                "increase": false,
-                "allDifference": false,
-                "partialDifference": false
-            },
-            "compare_config": {
-                "ignore": false,
-                "source": "default",
-                "thresholds": {
-                    "aggregation": "median",
-                    "iqrThreshold": 2,
-                    "percentageThreshold": 0.15
-                },
-                "metricClassification": {
-                    "classification": "unclassified",
-                    "higherIsBetter": null
-                },
-                "defaultValueIfControlGroupMissing": null
-            },
-            "metric_classification": {
-                "classification": "unclassified",
-                "higherIsBetter": null
-            },
-            "is_constant": {
-                "test": false,
-                "control": null
-            },
-            "all_missing": {
-                "test": false,
-                "control": null
-            },
-            "exists_data": {
-                "test": true,
-                "control": false
-            },
-            "uses_default_value": false,
-            "default_value": null
-        },
-        {
-            "application_dashboard_id": "1bfc9967-f08c-4ae3-8ba1-065a7df5d20d",
-            "panel_id": 2,
-            "metric_name": "HOST-123_afterburner-be_value",
-            "dashboard_uid": "dynatrace",
-            "dashboard_label": "Host: afterburner-be",
-            "panel_title": "Response Time",
-            "unit": null,
-            "statistic": {
-                "diff": null,
-                "name": "median",
-                "test": "50.35011012409003",
-                "absDiff": null,
-                "control": null,
-                "pctDiff": null
-            },
-            "thresholds": {
-                "lower": {},
-                "upper": {}
-            },
-            "checks": {
-                "abs": {
-                    "valid": false,
-                    "isDifference": false
-                },
-                "iqr": {
-                    "valid": false,
-                    "isDifference": false
-                },
-                "pct": {
-                    "valid": false,
-                    "isDifference": false
-                }
-            },
-            "conclusion": {
-                "label": "incomparable",
-                "valid": false,
-                "ignore": false,
-                "decrease": false,
-                "increase": false,
-                "allDifference": false,
-                "partialDifference": false
-            },
-            "compare_config": {
-                "ignore": false,
-                "source": "default",
-                "thresholds": {
-                    "aggregation": "median",
-                    "iqrThreshold": 2,
-                    "percentageThreshold": 0.15
-                },
-                "metricClassification": {
-                    "classification": "unclassified",
-                    "higherIsBetter": null
-                },
-                "defaultValueIfControlGroupMissing": null
-            },
-            "metric_classification": {
-                "classification": "unclassified",
-                "higherIsBetter": null
-            },
-            "is_constant": {
-                "test": false,
-                "control": null
-            },
-            "all_missing": {
-                "test": false,
-                "control": null
-            },
-            "exists_data": {
-                "test": true,
-                "control": false
             },
             "uses_default_value": false,
             "default_value": null
@@ -73241,82 +73089,6 @@
             "exists_data": {
                 "test": true,
                 "control": true
-            },
-            "uses_default_value": false,
-            "default_value": null
-        },
-        {
-            "application_dashboard_id": "bb0cca73-2e3e-4b74-8d69-a8cda770bb1d",
-            "panel_id": 1,
-            "metric_name": "HOST-123_afterburner-be_value",
-            "dashboard_uid": "dynatrace",
-            "dashboard_label": "Host: afterburner-fe",
-            "panel_title": "CPU Usage",
-            "unit": null,
-            "statistic": {
-                "diff": null,
-                "name": "median",
-                "test": "50.35011012409003",
-                "absDiff": null,
-                "control": null,
-                "pctDiff": null
-            },
-            "thresholds": {
-                "lower": {},
-                "upper": {}
-            },
-            "checks": {
-                "abs": {
-                    "valid": false,
-                    "isDifference": false
-                },
-                "iqr": {
-                    "valid": false,
-                    "isDifference": false
-                },
-                "pct": {
-                    "valid": false,
-                    "isDifference": false
-                }
-            },
-            "conclusion": {
-                "label": "incomparable",
-                "valid": false,
-                "ignore": false,
-                "decrease": false,
-                "increase": false,
-                "allDifference": false,
-                "partialDifference": false
-            },
-            "compare_config": {
-                "ignore": false,
-                "source": "default",
-                "thresholds": {
-                    "aggregation": "median",
-                    "iqrThreshold": 2,
-                    "percentageThreshold": 0.15
-                },
-                "metricClassification": {
-                    "classification": "unclassified",
-                    "higherIsBetter": null
-                },
-                "defaultValueIfControlGroupMissing": null
-            },
-            "metric_classification": {
-                "classification": "unclassified",
-                "higherIsBetter": null
-            },
-            "is_constant": {
-                "test": false,
-                "control": null
-            },
-            "all_missing": {
-                "test": false,
-                "control": null
-            },
-            "exists_data": {
-                "test": true,
-                "control": false
             },
             "uses_default_value": false,
             "default_value": null

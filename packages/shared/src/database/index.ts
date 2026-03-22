@@ -16,3 +16,4 @@ export { AddMetricsSourceIdColumns1700000000014 } from './migrations/17000000000
 export { BackfillMetricsSources1700000000015 } from './migrations/1700000000015-BackfillMetricsSources';
 export { AddMetricsSourceIdToApplicationDashboard1700000000016 } from './migrations/1700000000016-AddMetricsSourceIdToApplicationDashboard';
 export { MetricsSourceOneToOneAndNullableGrafana1700000000017 } from './migrations/1700000000017-MetricsSourceOneToOneAndNullableGrafana';
+export { MigrateCompareConfigToMetricsSource1700000000018 } from './migrations/1700000000018-MigrateCompareConfigToMetricsSource';

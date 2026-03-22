@@ -13,6 +13,7 @@ import {
 } from '../types';
 import { extractYAxisFormat, generateChartName, PERFORMANCE_METRICS_PANEL_UNITS } from '../utils';
 import { getFilteredDashboards, computeAvailableSources, determineSource } from '../utils';
+import { isDynatrace, isPerformanceTest } from '@/lib/metrics-source-utils';
 import { TestRun } from '@/types/test-runs';
 
 interface UseGraphsDataProps {
@@ -141,9 +142,8 @@ export function useGraphsData({ testRun, testRunId, graphsExpanded }: UseGraphsD
       setPanelsLoading(true);
 
       // Check if this is a Dynatrace artificial dashboard
-      // TODO Phase 3.7: replace with source_type from MetricsSource
       const dashboardToUse = dashboard || selectedDashboard;
-      if (dashboardUid.startsWith('dynatrace-') && testRun && dashboardToUse) {
+      if (isDynatrace({ dashboard_uid: dashboardUid, source_type: dashboardToUse?.source_type }) && testRun && dashboardToUse) {
         const systemId = testRun.system_under_test_id;
         const environment = testRun.test_environment;
         const workload = testRun.workload;
@@ -218,8 +218,7 @@ export function useGraphsData({ testRun, testRunId, graphsExpanded }: UseGraphsD
           return {
             ...panel,
             // Use extracted format, or fall back to known units for performance-metrics panels
-            // TODO Phase 3.7: replace with source_type from MetricsSource
-            yAxesFormat: format || (dashboardUid.startsWith('performance-test-metrics-') ? PERFORMANCE_METRICS_PANEL_UNITS[panel.id] : undefined)
+            yAxesFormat: format || (isPerformanceTest({ dashboard_uid: dashboardUid, source_type: selectedDashboard?.source_type }) ? PERFORMANCE_METRICS_PANEL_UNITS[panel.id] : undefined)
           };
         });
 

@@ -17,6 +17,7 @@ import {
 } from '../types';
 import { calculatePercentageDifference } from '../utils/compare-utils';
 import { TestRun } from '@/types/test-runs';
+import { isGrafana, isPerformanceTest } from '@/lib/metrics-source-utils';
 
 interface UseCompareDataProps {
   testRun: TestRun | null;
@@ -361,17 +362,11 @@ export function useCompareData({ testRun, testRunId, compareExpanded }: UseCompa
   }, [selectedTestRun, testRun, addedSeries]);
 
   // Get dashboards filtered by selected source
-  // TODO Phase 3.7: replace with source_type from MetricsSource
   const getFilteredDashboards = useCallback((): ApplicationDashboard[] => {
     if (selectedSource === 'grafana') {
-      return dashboards.filter(d =>
-        !d.dashboard_uid?.startsWith('performance-test-metrics-') &&
-        !d.dashboard_uid?.startsWith('dynatrace-')
-      );
+      return dashboards.filter(d => isGrafana(d));
     } else if (selectedSource === 'performance-metrics') {
-      return dashboards.filter(d =>
-        d.dashboard_uid?.startsWith('performance-test-metrics-')
-      );
+      return dashboards.filter(d => isPerformanceTest(d));
     } else if (selectedSource === 'dynatrace') {
       return dynatraceDashboards.map((d, index) => ({
         id: `dynatrace-${index}`,
@@ -387,19 +382,12 @@ export function useCompareData({ testRun, testRunId, compareExpanded }: UseCompa
   useEffect(() => {
     const sources: DataSource[] = [];
 
-    // TODO Phase 3.7: replace with source_type from MetricsSource
-    const hasGrafana = dashboards.some(d =>
-      !d.dashboard_uid?.startsWith('performance-test-metrics-') &&
-      !d.dashboard_uid?.startsWith('dynatrace-')
-    );
+    const hasGrafana = dashboards.some(d => isGrafana(d));
     if (hasGrafana) sources.push('grafana');
 
     if (dynatraceDashboards.length > 0) sources.push('dynatrace');
 
-    // TODO Phase 3.7: replace with source_type from MetricsSource
-    const hasPerformanceMetrics = dashboards.some(d =>
-      d.dashboard_uid?.startsWith('performance-test-metrics-')
-    );
+    const hasPerformanceMetrics = dashboards.some(d => isPerformanceTest(d));
     if (hasPerformanceMetrics) sources.push('performance-metrics');
 
     setAvailableSources(sources);

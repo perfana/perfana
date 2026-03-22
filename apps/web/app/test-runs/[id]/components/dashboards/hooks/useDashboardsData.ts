@@ -6,7 +6,8 @@ import { useThemeMode } from '@/contexts/theme-context';
 import { TestRun } from '@/types/test-runs';
 import { filterSystemTags } from '@perfana/shared/utils';
 import { Dashboard } from '../types';
-import { isArtificialDashboard, buildGrafanaIframeUrl } from '../utils';
+import { isArtificialDashboard } from '@/lib/metrics-source-utils';
+import { buildGrafanaIframeUrl } from '../utils';
 
 interface UseDashboardsDataProps {
   testRun: TestRun;
@@ -90,7 +91,6 @@ export function useDashboardsData({
       const dashboardsData = await response.json();
       // Filter out artificial dashboards created by performance-metrics pipeline
       // These don't exist in Grafana and shouldn't be shown in the UI
-      // TODO: Phase 3.7 - migrate to metrics_source_type filtering instead of isArtificialDashboard() prefix check
       const realDashboards = dashboardsData.filter((d: Dashboard) => !isArtificialDashboard(d));
       setDashboards(realDashboards);
 

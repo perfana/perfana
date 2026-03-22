@@ -52,6 +52,7 @@ export class TrackedResultsSQLBuilder {
               fttr.tracked_test_run_id,
               ar.id as tracked_difference_id,
               ar.application_dashboard_id,
+              ar.metrics_source_id,
               ar.panel_id,
               ar.metric_name,
               ar.conclusion as tracked_conclusion,
@@ -103,7 +104,7 @@ export class TrackedResultsSQLBuilder {
           FROM historical_regressions hr
           JOIN ds_metric_statistics ms ON (
               ms.test_run_id = hr.current_test_run_id
-              AND ms.application_dashboard_id = hr.application_dashboard_id
+              AND ms.metrics_source_id = hr.metrics_source_id
               AND ms.panel_id = hr.panel_id
               AND ms.metric_name = hr.metric_name
           )
@@ -146,7 +147,7 @@ export class TrackedResultsSQLBuilder {
           FROM current_metrics cm
           LEFT JOIN ds_control_group_statistics cgs ON (
               cgs.control_group_id = cm.control_group_id
-              AND cgs.application_dashboard_id = cm.application_dashboard_id
+              AND cgs.metrics_source_id = cm.metrics_source_id
               AND cgs.panel_id::text = cm.panel_id
               AND cgs.metric_name = cm.metric_name
           )
