@@ -80,6 +80,7 @@ export function GraphsSelectionControls({
           return (
             <li key={params.key}>
               <ListSubheader
+                component="div"
                 sx={{
                   fontWeight: 700,
                   color,
