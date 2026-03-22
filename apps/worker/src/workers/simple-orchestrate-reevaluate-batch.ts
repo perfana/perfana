@@ -401,7 +401,7 @@ export function simpleOrchestrateReevaluateBatchWorker() {
                   // Use the full DynatracePipeline — same as the analyze worker's dynatrace-collection stage
                   const dynatracePipeline = new DynatracePipeline(logger);
                   const result = await dynatracePipeline.execute({ testRunIds: [testRunId] });
-                  dataPoints = (result.data as any)?.totalDataPoints ?? (result.data as any)?.metricsCollected ?? 0;
+                  dataPoints = (result.data as any)?.totalMetrics ?? (result.data as any)?.totalDataPoints ?? (result.data as any)?.metricsCollected ?? 0;
                 } else {
                   // Grafana and performance_test use incremental pipeline with full time range
                   const result = await incrementalPipeline.execute({
