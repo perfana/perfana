@@ -1,8 +1,8 @@
 {
-  "name": "perfana-next-gen",
+  "name": "perfana",
   "version": "0.1.0",
   "private": true,
-  "description": "Perfana performance analysis platform - modern stack",
+  "description": "Open-source performance analysis platform",
   "workspaces": [
     "apps/*",
     "packages/*"
