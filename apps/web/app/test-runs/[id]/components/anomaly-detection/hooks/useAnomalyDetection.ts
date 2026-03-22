@@ -223,6 +223,9 @@ export function useAnomalyDetection({
         panelId: item.panel_id,
         metricName: item.metric_name
       });
+      if (item.metrics_source_id) {
+        queryParams.set('metricsSourceId', item.metrics_source_id);
+      }
 
       const response = await authenticatedFetch(
         `/metrics/control-group-trends/${testRunId}?${queryParams.toString()}`
@@ -250,8 +253,17 @@ export function useAnomalyDetection({
     setDrawerLoading(prev => ({ ...prev, [rowKey]: true }));
 
     try {
+      const dsAdaptParams = new URLSearchParams({
+        applicationDashboardId: item.application_dashboard_id,
+        panelId: item.panel_id,
+        metricName: item.metric_name,
+      });
+      if (item.metrics_source_id) {
+        dsAdaptParams.set('metricsSourceId', item.metrics_source_id);
+      }
+
       const response = await authenticatedFetch(
-        `/test-runs/${testRunId}/ds-adapt-result?applicationDashboardId=${item.application_dashboard_id}&panelId=${item.panel_id}&metricName=${encodeURIComponent(item.metric_name)}`
+        `/test-runs/${testRunId}/ds-adapt-result?${dsAdaptParams.toString()}`
       );
 
       if (response.ok) {
@@ -450,6 +462,7 @@ export function useAnomalyDetection({
         testEnvironment: testRun?.test_environment,
         workload: testRun?.workload,
         applicationDashboardId: item.application_dashboard_id,
+        ...(item.metrics_source_id && { metricsSourceId: item.metrics_source_id }),
         panelId: item.panel_id.toString(),
         metricName: scope === 'metric' ? item.metric_name : undefined,
         configData: {
@@ -498,6 +511,7 @@ export function useAnomalyDetection({
         metricName: options.scope === 'metric' ? anomaly.metric_name : undefined,
         panelId: String(anomaly.panel_id),
         applicationDashboardId: anomaly.application_dashboard_id,
+        ...(anomaly.metrics_source_id && { metricsSourceId: anomaly.metrics_source_id }),
         scope: options.scope,
         range: options.range,
       };

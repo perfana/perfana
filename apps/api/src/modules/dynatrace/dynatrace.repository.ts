@@ -318,7 +318,7 @@ export class DynatraceRepository {
   async getPanelTitlesForDashboard(systemId: string, environment: string, workload: string, dashboardLabel: string) {
     const results = await this.queryRepo
       .createQueryBuilder('query')
-      .select(['query.panelTitle', 'query.panelId', 'query.applicationDashboardId', 'query.metricUnit'])
+      .select(['query.panelTitle', 'query.panelId', 'query.applicationDashboardId', 'query.metricsSourceId', 'query.metricUnit'])
       .where('query.systemUnderTestId = :systemId', { systemId })
       .andWhere('query.testEnvironment = :environment', { environment })
       .andWhere('query.workload = :workload', { workload })
@@ -335,6 +335,7 @@ export class DynatraceRepository {
       panelTitle: item.panelTitle,
       panelId: item.panelId,
       applicationDashboardId: item.applicationDashboardId,
+      metricsSourceId: item.metricsSourceId,
       metricUnit: item.metricUnit
     }));
   }

@@ -45,7 +45,7 @@ interface UseCompareHandlersProps {
   // Fetch functions
   fetchDashboardPanels: (uid: string) => Promise<Panel[]>;
   fetchDynatraceMetricsList: (label: string) => Promise<void>;
-  fetchPanelMetrics: (dashboardId: string, panelId: number) => Promise<string[]>;
+  fetchPanelMetrics: (dashboardId: string, panelId: number, metricsSourceId?: string) => Promise<string[]>;
 }
 
 export function useCompareHandlers({
@@ -130,7 +130,8 @@ export function useCompareHandlers({
 
     if (metric && selectedDashboard) {
       const applicationDashboardId = metric.applicationDashboardId || selectedDashboard.id;
-      await fetchPanelMetrics(applicationDashboardId, metric.id);
+      const metricsSourceId = metric.metricsSourceId || selectedDashboard.metrics_source_id;
+      await fetchPanelMetrics(applicationDashboardId, metric.id, metricsSourceId);
     } else {
       setAvailableMetrics([]);
     }
@@ -157,6 +158,7 @@ export function useCompareHandlers({
         panelTitle: selectedMetric.title,
         metricName,
         source: selectedSource,
+        metricsSourceId: selectedMetric.metricsSourceId || selectedDashboard.metrics_source_id,
       }));
 
     if (newSeries.length > 0) {

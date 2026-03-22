@@ -101,6 +101,12 @@ export class BenchmarkQueryService {
         });
       }
 
+      if (query.metricsSourceId) {
+        queryBuilder.andWhere('b.metrics_source_id = :metricsSourceId', {
+          metricsSourceId: query.metricsSourceId
+        });
+      }
+
       queryBuilder
         .orderBy('b.config_title', 'ASC')
         .addOrderBy('b.created_at', 'ASC');

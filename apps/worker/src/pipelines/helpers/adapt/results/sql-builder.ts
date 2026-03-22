@@ -78,7 +78,8 @@ export class AdaptResultsSQLBuilder {
               ms.benchmark_id,
               ms.updated_at,
               ms.organization_id,
-              ms.team_id
+              ms.team_id,
+              ms.metrics_source_id
           FROM ds_metric_statistics ms
           WHERE ms.test_run_id IN (${placeholders})
             ${filterSQL}
@@ -110,7 +111,7 @@ export class AdaptResultsSQLBuilder {
           FROM test_metrics tm
           LEFT JOIN ds_control_group_statistics cgs ON (
               cgs.control_group_id = tm.control_group_id
-              AND cgs.application_dashboard_id = tm.application_dashboard_id
+              AND COALESCE(cgs.metrics_source_id, cgs.application_dashboard_id::text) = COALESCE(tm.metrics_source_id, tm.application_dashboard_id::text)
               AND cgs.panel_id::text = tm.panel_id
               AND cgs.metric_name = tm.metric_name
           )
@@ -128,17 +129,17 @@ export class AdaptResultsSQLBuilder {
               ) as compare_config
           FROM with_control wc
           LEFT JOIN temp_config_cache cfg_metric ON (
-              cfg_metric.application_dashboard_id = wc.application_dashboard_id
+              cfg_metric.application_dashboard_id = COALESCE(wc.metrics_source_id, wc.application_dashboard_id)
               AND cfg_metric.panel_id = wc.panel_id::int
               AND cfg_metric.metric_name = wc.metric_name
           )
           LEFT JOIN temp_config_cache cfg_panel ON (
-              cfg_panel.application_dashboard_id = wc.application_dashboard_id
+              cfg_panel.application_dashboard_id = COALESCE(wc.metrics_source_id, wc.application_dashboard_id)
               AND cfg_panel.panel_id = wc.panel_id::int
               AND cfg_panel.metric_name IS NULL
           )
           LEFT JOIN temp_config_cache cfg_dashboard ON (
-              cfg_dashboard.application_dashboard_id = wc.application_dashboard_id
+              cfg_dashboard.application_dashboard_id = COALESCE(wc.metrics_source_id, wc.application_dashboard_id)
               AND cfg_dashboard.panel_id IS NULL
               AND cfg_dashboard.metric_name IS NULL
           )
@@ -247,6 +248,7 @@ export class AdaptResultsSQLBuilder {
           is_constant, all_missing, exists_data,
           compare_config, metric_classification, statistic, thresholds, conditions, checks, conclusion,
           uses_default_value, default_value,
+          metrics_source_id,
           organization_id, team_id, created_by, updated_by
       )
       SELECT
@@ -263,6 +265,7 @@ export class AdaptResultsSQLBuilder {
           CASE WHEN benchmark_id IS NOT NULL THEN ARRAY[benchmark_id::text] ELSE NULL END as benchmark_ids,
           updated_at,
           ${this.fragments.buildStatisticsColumns()},
+          metrics_source_id,
           organization_id,
           team_id,
           'worker-pipeline' as created_by,
@@ -304,6 +307,7 @@ export class AdaptResultsSQLBuilder {
           conclusion = EXCLUDED.conclusion,
           uses_default_value = EXCLUDED.uses_default_value,
           default_value = EXCLUDED.default_value,
+          metrics_source_id = COALESCE(EXCLUDED.metrics_source_id, ds_adapt_results.metrics_source_id),
           organization_id = EXCLUDED.organization_id,
           team_id = EXCLUDED.team_id,
           updated_by = EXCLUDED.updated_by

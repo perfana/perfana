@@ -1,5 +1,6 @@
 import { Entity, PrimaryGeneratedColumn, Column, CreateDateColumn, UpdateDateColumn, ManyToOne, JoinColumn } from 'typeorm';
 import { ApplicationDashboard } from './application-dashboard.entity';
+import { MetricsSource } from './metrics-source.entity';
 
 @Entity('ds_control_group_statistics')
 export class DsControlGroupStatistics {
@@ -117,7 +118,14 @@ export class DsControlGroupStatistics {
   @Column({ type: 'varchar', array: true, nullable: true })
   benchmark_ids?: string[];
 
+  @Column({ type: 'uuid', nullable: true })
+  metrics_source_id?: string;
+
   @ManyToOne(() => ApplicationDashboard)
   @JoinColumn({ name: 'application_dashboard_id' })
   application_dashboard?: ApplicationDashboard;
+
+  @ManyToOne(() => MetricsSource)
+  @JoinColumn({ name: 'metrics_source_id' })
+  metrics_source?: MetricsSource;
 }

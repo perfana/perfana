@@ -141,6 +141,7 @@ export function useGraphsData({ testRun, testRunId, graphsExpanded }: UseGraphsD
       setPanelsLoading(true);
 
       // Check if this is a Dynatrace artificial dashboard
+      // TODO Phase 3.7: replace with source_type from MetricsSource
       const dashboardToUse = dashboard || selectedDashboard;
       if (dashboardUid.startsWith('dynatrace-') && testRun && dashboardToUse) {
         const systemId = testRun.system_under_test_id;
@@ -168,12 +169,13 @@ export function useGraphsData({ testRun, testRunId, graphsExpanded }: UseGraphsD
           const dynatracePanels = await response.json();
 
           // Transform Dynatrace panels to match the Panel interface
-          const transformedPanels = dynatracePanels.map((panel: { panelId: number; panelTitle: string; metricUnit?: string; applicationDashboardId?: string }) => ({
+          const transformedPanels = dynatracePanels.map((panel: { panelId: number; panelTitle: string; metricUnit?: string; applicationDashboardId?: string; metricsSourceId?: string }) => ({
             id: panel.panelId,
             title: panel.panelTitle,
             type: 'dynatrace',
             yAxesFormat: panel.metricUnit,
-            applicationDashboardId: panel.applicationDashboardId
+            applicationDashboardId: panel.applicationDashboardId,
+            metricsSourceId: panel.metricsSourceId
           }));
 
           setPanels(transformedPanels);
@@ -216,6 +218,7 @@ export function useGraphsData({ testRun, testRunId, graphsExpanded }: UseGraphsD
           return {
             ...panel,
             // Use extracted format, or fall back to known units for performance-metrics panels
+            // TODO Phase 3.7: replace with source_type from MetricsSource
             yAxesFormat: format || (dashboardUid.startsWith('performance-test-metrics-') ? PERFORMANCE_METRICS_PANEL_UNITS[panel.id] : undefined)
           };
         });
@@ -239,7 +242,7 @@ export function useGraphsData({ testRun, testRunId, graphsExpanded }: UseGraphsD
   /**
    * Fetch available metrics for a selected panel from ds_metrics table
    */
-  const fetchPanelMetrics = useCallback(async (dashboardId: string, panelId: number) => {
+  const fetchPanelMetrics = useCallback(async (dashboardId: string, panelId: number, metricsSourceId?: string) => {
     if (!testRun || !dashboardId || !panelId) return;
 
     try {
@@ -248,6 +251,9 @@ export function useGraphsData({ testRun, testRunId, graphsExpanded }: UseGraphsD
         applicationDashboardId: dashboardId,
         panelId: panelId.toString()
       });
+      if (metricsSourceId) {
+        params.set('metricsSourceId', metricsSourceId);
+      }
 
       const response = await authenticatedFetch(
         `/metrics/ds-metrics/distinct-names?${params.toString()}`,
@@ -308,7 +314,8 @@ export function useGraphsData({ testRun, testRunId, graphsExpanded }: UseGraphsD
 
     if (panel && selectedDashboard) {
       const applicationDashboardId = panel.applicationDashboardId || selectedDashboard.id;
-      fetchPanelMetrics(applicationDashboardId, panel.id);
+      const metricsSourceId = panel.metricsSourceId || selectedDashboard.metrics_source_id;
+      fetchPanelMetrics(applicationDashboardId, panel.id, metricsSourceId);
     }
   }, [selectedDashboard, fetchPanelMetrics]);
 
@@ -321,6 +328,9 @@ export function useGraphsData({ testRun, testRunId, graphsExpanded }: UseGraphsD
         applicationDashboardId: series.dashboardId,
         panelId: series.panelId.toString()
       });
+      if (series.metricsSourceId) {
+        params.set('metricsSourceId', series.metricsSourceId);
+      }
 
       const testRunIdForQuery = testRun?.test_run_id || testRunId;
       const response = await authenticatedFetch(
@@ -358,6 +368,7 @@ export function useGraphsData({ testRun, testRunId, graphsExpanded }: UseGraphsD
     }
 
     const applicationDashboardId = selectedPanel.applicationDashboardId || selectedDashboard.id;
+    const metricsSourceId = selectedPanel.metricsSourceId || selectedDashboard.metrics_source_id;
     const source = determineSource(selectedPanel.type, selectedDashboard.dashboard_uid);
 
     const newSeriesList: SeriesConfig[] = selectedMetrics.map(metricName => ({
@@ -368,7 +379,8 @@ export function useGraphsData({ testRun, testRunId, graphsExpanded }: UseGraphsD
       panelTitle: selectedPanel.title,
       metricName: metricName,
       source: source,
-      yAxisFormat: selectedPanel.yAxesFormat
+      yAxisFormat: selectedPanel.yAxesFormat,
+      metricsSourceId: metricsSourceId
     }));
 
     // Filter out duplicates

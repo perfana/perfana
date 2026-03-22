@@ -96,13 +96,14 @@ export class TrackedResultsSQLBuilder {
               ms.updated_at,
               ms.organization_id,
               ms.team_id,
+              ms.metrics_source_id,
               hr.tracked_test_run_id,
               hr.tracked_difference_id,
               hr.tracked_conclusion
           FROM historical_regressions hr
           JOIN ds_metric_statistics ms ON (
               ms.test_run_id = hr.current_test_run_id
-              AND ms.application_dashboard_id = hr.application_dashboard_id
+              AND COALESCE(ms.metrics_source_id, ms.application_dashboard_id::text) = COALESCE(hr.application_dashboard_id::text)
               AND ms.panel_id = hr.panel_id
               AND ms.metric_name = hr.metric_name
           )
@@ -145,7 +146,7 @@ export class TrackedResultsSQLBuilder {
           FROM current_metrics cm
           LEFT JOIN ds_control_group_statistics cgs ON (
               cgs.control_group_id = cm.control_group_id
-              AND cgs.application_dashboard_id = cm.application_dashboard_id
+              AND COALESCE(cgs.metrics_source_id, cgs.application_dashboard_id::text) = COALESCE(cm.metrics_source_id, cm.application_dashboard_id::text)
               AND cgs.panel_id::text = cm.panel_id
               AND cgs.metric_name = cm.metric_name
           )
@@ -169,17 +170,17 @@ export class TrackedResultsSQLBuilder {
               ) as compare_config
           FROM with_control wc
           LEFT JOIN temp_tracked_config_cache cfg_metric ON (
-              cfg_metric.application_dashboard_id = wc.application_dashboard_id
+              cfg_metric.application_dashboard_id = COALESCE(wc.metrics_source_id, wc.application_dashboard_id)
               AND cfg_metric.panel_id = wc.panel_id::int
               AND cfg_metric.metric_name = wc.metric_name
           )
           LEFT JOIN temp_tracked_config_cache cfg_panel ON (
-              cfg_panel.application_dashboard_id = wc.application_dashboard_id
+              cfg_panel.application_dashboard_id = COALESCE(wc.metrics_source_id, wc.application_dashboard_id)
               AND cfg_panel.panel_id = wc.panel_id::int
               AND cfg_panel.metric_name IS NULL
           )
           LEFT JOIN temp_tracked_config_cache cfg_dashboard ON (
-              cfg_dashboard.application_dashboard_id = wc.application_dashboard_id
+              cfg_dashboard.application_dashboard_id = COALESCE(wc.metrics_source_id, wc.application_dashboard_id)
               AND cfg_dashboard.panel_id IS NULL
               AND cfg_dashboard.metric_name IS NULL
           )
@@ -340,6 +341,7 @@ export class TrackedResultsSQLBuilder {
           iqr, idr, count, n_missing, n_non_zero, pct_missing, is_constant, all_missing,
           last_value, exists_flags, uses_default_value, default_value,
           compare_config, metric_classification, statistic, conditions, thresholds, checks, conclusion,
+          metrics_source_id,
           organization_id, team_id, created_by, updated_by
       )
       SELECT
@@ -388,6 +390,7 @@ export class TrackedResultsSQLBuilder {
           thresholds,
           checks,
           conclusion,
+          metrics_source_id,
           organization_id,
           team_id,
           'worker-pipeline' as created_by,
@@ -432,6 +435,7 @@ export class TrackedResultsSQLBuilder {
           thresholds = EXCLUDED.thresholds,
           checks = EXCLUDED.checks,
           conclusion = EXCLUDED.conclusion,
+          metrics_source_id = COALESCE(EXCLUDED.metrics_source_id, ds_adapt_tracked_results.metrics_source_id),
           organization_id = EXCLUDED.organization_id,
           team_id = EXCLUDED.team_id,
           updated_by = EXCLUDED.updated_by

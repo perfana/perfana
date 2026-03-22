@@ -141,7 +141,8 @@ export class StatisticsPipeline extends BasePipelineTypeORM {
               m.benchmark_ids[1] as first_benchmark_id,
               m.unit,
               tr.organization_id,
-              tr.team_id
+              tr.team_id,
+              m.metrics_source_id
           FROM ds_metrics m
           INNER JOIN test_runs tr ON m.test_run_id = tr.test_run_id
           WHERE m.test_run_id IN (${placeholders})
@@ -190,7 +191,8 @@ export class StatisticsPipeline extends BasePipelineTypeORM {
               MIN(dashboard_uid) as dashboard_uid,
               MIN(panel_title) as panel_title,
               MIN(dashboard_label) as dashboard_label,
-              MIN(first_benchmark_id::text)::uuid as first_benchmark_id
+              MIN(first_benchmark_id::text)::uuid as first_benchmark_id,
+              MIN(metrics_source_id::text)::uuid as metrics_source_id
 
           FROM metrics_filtered
           GROUP BY
@@ -271,7 +273,8 @@ export class StatisticsPipeline extends BasePipelineTypeORM {
               sa.organization_id,
               sa.team_id,
               'worker-pipeline' as created_by,
-              'worker-pipeline' as updated_by
+              'worker-pipeline' as updated_by,
+              sa.metrics_source_id
 
           FROM statistics_aggregated sa
           LEFT JOIN test_runs tr ON tr.test_run_id = sa.test_run_id
@@ -327,7 +330,8 @@ export class StatisticsPipeline extends BasePipelineTypeORM {
           organization_id,
           team_id,
           created_by,
-          updated_by
+          updated_by,
+          metrics_source_id
       )
       SELECT
           test_run_id,
@@ -367,7 +371,8 @@ export class StatisticsPipeline extends BasePipelineTypeORM {
           organization_id,
           team_id,
           created_by,
-          updated_by
+          updated_by,
+          metrics_source_id
       FROM final_statistics
     `;
 

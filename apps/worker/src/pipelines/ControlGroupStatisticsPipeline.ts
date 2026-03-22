@@ -207,7 +207,8 @@ export class ControlGroupStatisticsPipeline extends BasePipelineTypeORM {
           ms.dashboard_label,
           ms.panel_title,
           ms.unit,
-          ms.benchmark_id
+          ms.benchmark_id,
+          ms.metrics_source_id
         FROM ds_metric_statistics ms
         INNER JOIN test_runs tr ON ms.test_run_id = tr.test_run_id
         WHERE ms.test_run_id = ANY($2::varchar[])
@@ -221,7 +222,7 @@ export class ControlGroupStatisticsPipeline extends BasePipelineTypeORM {
               WHERE dq.organization_id = tr.organization_id OR dq.organization_id IS NULL
             )
           )
-        ORDER BY ms.application_dashboard_id, ms.panel_id, ms.metric_name, ms.dashboard_uid NULLS LAST
+        ORDER BY ms.application_dashboard_id, ms.panel_id, ms.metric_name, ms.dashboard_uid NULLS LAST, ms.metrics_source_id NULLS LAST
       ),
 
       metadata_aggregated AS (
@@ -262,6 +263,7 @@ export class ControlGroupStatisticsPipeline extends BasePipelineTypeORM {
           m.dashboard_label,
           m.panel_title,
           m.unit,
+          m.metrics_source_id,
           ma.benchmark_ids,
           r.mean,
           r.min_value,
@@ -301,6 +303,7 @@ export class ControlGroupStatisticsPipeline extends BasePipelineTypeORM {
       INSERT INTO ds_control_group_statistics (
         control_group_id,
         application_dashboard_id,
+        metrics_source_id,
         panel_id,
         metric_name,
         test_run_id,
@@ -338,6 +341,7 @@ export class ControlGroupStatisticsPipeline extends BasePipelineTypeORM {
       SELECT
         $1 as control_group_id,
         application_dashboard_id,
+        metrics_source_id,
         panel_id,
         metric_name,
         $1 as test_run_id,  -- Use control_group_id as test_run_id
@@ -375,6 +379,7 @@ export class ControlGroupStatisticsPipeline extends BasePipelineTypeORM {
       ON CONFLICT (control_group_id, application_dashboard_id, panel_id, metric_name)
       DO UPDATE SET
         test_run_id = EXCLUDED.test_run_id,
+        metrics_source_id = COALESCE(EXCLUDED.metrics_source_id, ds_control_group_statistics.metrics_source_id),
         dashboard_uid = EXCLUDED.dashboard_uid,
         dashboard_label = EXCLUDED.dashboard_label,
         panel_title = EXCLUDED.panel_title,

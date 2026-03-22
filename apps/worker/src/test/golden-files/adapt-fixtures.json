@@ -1,0 +1,288 @@
+{
+  "description": "ADAPT pipeline golden-file fixtures. Minimal but realistic data for regression detection validation.",
+  "testRunIds": [
+    "aaaaaaaa-1111-4000-a000-000000000001",
+    "aaaaaaaa-1111-4000-a000-000000000002"
+  ],
+  "controlGroupId": "cccccccc-1111-4000-a000-000000000001",
+  "applicationDashboardIds": [
+    "dddddddd-1111-4000-a000-000000000001",
+    "dddddddd-1111-4000-a000-000000000002"
+  ],
+
+  "metrics": {
+    "regression": {
+      "description": "Response time metric where test is >15% higher than control (higherIsBetter=false => regression)",
+      "applicationDashboardId": "dddddddd-1111-4000-a000-000000000001",
+      "panelId": 1,
+      "metricName": "http_response_time_p95",
+      "dashboardUid": "dash-perf-001",
+      "dashboardLabel": "Performance Overview",
+      "panelTitle": "Response Time P95",
+      "unit": "ms",
+      "test": {
+        "mean": 250.0,
+        "median": 240.0,
+        "min_value": 100.0,
+        "max_value": 500.0,
+        "std_dev": 45.0,
+        "last_value": 260.0,
+        "q10": 120.0,
+        "q25": 180.0,
+        "q75": 310.0,
+        "q90": 380.0,
+        "q95": 420.0,
+        "q99": 480.0,
+        "iqr": 130.0,
+        "count": 1000,
+        "is_constant": false,
+        "all_missing": false
+      },
+      "control": {
+        "mean": 200.0,
+        "median": 195.0,
+        "min_value": 80.0,
+        "max_value": 400.0,
+        "std_dev": 38.0,
+        "last_value": 210.0,
+        "q10": 100.0,
+        "q25": 150.0,
+        "q75": 250.0,
+        "q90": 320.0,
+        "q95": 360.0,
+        "q99": 390.0,
+        "iqr": 100.0,
+        "count": 5000,
+        "is_constant": false,
+        "all_missing": false
+      },
+      "compareConfig": {
+        "thresholds": {
+          "aggregation": "median",
+          "percentageThreshold": 0.15,
+          "iqrThreshold": 2,
+          "absoluteThreshold": null
+        },
+        "metricClassification": {
+          "classification": "RED_duration",
+          "higherIsBetter": false
+        },
+        "ignore": false,
+        "source": "user"
+      },
+      "expectedConclusion": {
+        "label": "regression",
+        "valid": true,
+        "increase": true,
+        "decrease": false,
+        "allDifference": true,
+        "partialDifference": true
+      }
+    },
+
+    "improvement": {
+      "description": "Throughput metric where test is >15% higher than control (higherIsBetter=true => improvement)",
+      "applicationDashboardId": "dddddddd-1111-4000-a000-000000000001",
+      "panelId": 2,
+      "metricName": "http_requests_per_second",
+      "dashboardUid": "dash-perf-001",
+      "dashboardLabel": "Performance Overview",
+      "panelTitle": "Throughput",
+      "unit": "req/s",
+      "test": {
+        "mean": 1200.0,
+        "median": 1180.0,
+        "min_value": 800.0,
+        "max_value": 1600.0,
+        "std_dev": 120.0,
+        "last_value": 1250.0,
+        "q10": 900.0,
+        "q25": 1050.0,
+        "q75": 1350.0,
+        "q90": 1450.0,
+        "q95": 1520.0,
+        "q99": 1580.0,
+        "iqr": 300.0,
+        "count": 1000,
+        "is_constant": false,
+        "all_missing": false
+      },
+      "control": {
+        "mean": 1000.0,
+        "median": 980.0,
+        "min_value": 700.0,
+        "max_value": 1300.0,
+        "std_dev": 100.0,
+        "last_value": 1020.0,
+        "q10": 780.0,
+        "q25": 880.0,
+        "q75": 1120.0,
+        "q90": 1200.0,
+        "q95": 1260.0,
+        "q99": 1290.0,
+        "iqr": 240.0,
+        "count": 5000,
+        "is_constant": false,
+        "all_missing": false
+      },
+      "compareConfig": {
+        "thresholds": {
+          "aggregation": "median",
+          "percentageThreshold": 0.15,
+          "iqrThreshold": 2,
+          "absoluteThreshold": null
+        },
+        "metricClassification": {
+          "classification": "RED_rate",
+          "higherIsBetter": true
+        },
+        "ignore": false,
+        "source": "user"
+      },
+      "expectedConclusion": {
+        "label": "improvement",
+        "valid": true,
+        "increase": true,
+        "decrease": false,
+        "allDifference": true,
+        "partialDifference": true
+      }
+    },
+
+    "noDifference": {
+      "description": "Error rate metric where test is within 15% of control (no significant difference)",
+      "applicationDashboardId": "dddddddd-1111-4000-a000-000000000002",
+      "panelId": 3,
+      "metricName": "http_error_rate",
+      "dashboardUid": "dash-errors-001",
+      "dashboardLabel": "Error Dashboard",
+      "panelTitle": "Error Rate",
+      "unit": "%",
+      "test": {
+        "mean": 0.52,
+        "median": 0.50,
+        "min_value": 0.10,
+        "max_value": 1.20,
+        "std_dev": 0.15,
+        "last_value": 0.48,
+        "q10": 0.20,
+        "q25": 0.35,
+        "q75": 0.65,
+        "q90": 0.80,
+        "q95": 0.95,
+        "q99": 1.10,
+        "iqr": 0.30,
+        "count": 1000,
+        "is_constant": false,
+        "all_missing": false
+      },
+      "control": {
+        "mean": 0.50,
+        "median": 0.48,
+        "min_value": 0.08,
+        "max_value": 1.10,
+        "std_dev": 0.14,
+        "last_value": 0.46,
+        "q10": 0.18,
+        "q25": 0.33,
+        "q75": 0.63,
+        "q90": 0.78,
+        "q95": 0.90,
+        "q99": 1.05,
+        "iqr": 0.30,
+        "count": 5000,
+        "is_constant": false,
+        "all_missing": false
+      },
+      "compareConfig": {
+        "thresholds": {
+          "aggregation": "median",
+          "percentageThreshold": 0.15,
+          "iqrThreshold": 2,
+          "absoluteThreshold": null
+        },
+        "metricClassification": {
+          "classification": "RED_errors",
+          "higherIsBetter": false
+        },
+        "ignore": false,
+        "source": "default"
+      },
+      "expectedConclusion": {
+        "label": "no difference",
+        "valid": true,
+        "increase": true,
+        "decrease": false,
+        "allDifference": false,
+        "partialDifference": false
+      }
+    },
+
+    "incomparable": {
+      "description": "Memory metric with no control group data (incomparable)",
+      "applicationDashboardId": "dddddddd-1111-4000-a000-000000000002",
+      "panelId": 4,
+      "metricName": "jvm_heap_used_bytes",
+      "dashboardUid": "dash-errors-001",
+      "dashboardLabel": "Error Dashboard",
+      "panelTitle": "JVM Heap Used",
+      "unit": "bytes",
+      "test": {
+        "mean": 536870912.0,
+        "median": 524288000.0,
+        "min_value": 268435456.0,
+        "max_value": 805306368.0,
+        "std_dev": 67108864.0,
+        "last_value": 570425344.0,
+        "q10": 322122547.0,
+        "q25": 402653184.0,
+        "q75": 671088640.0,
+        "q90": 751619277.0,
+        "q95": 783286886.0,
+        "q99": 800063898.0,
+        "iqr": 268435456.0,
+        "count": 1000,
+        "is_constant": false,
+        "all_missing": false
+      },
+      "control": null,
+      "compareConfig": {
+        "thresholds": {
+          "aggregation": "median",
+          "percentageThreshold": 0.15,
+          "iqrThreshold": 2,
+          "absoluteThreshold": null
+        },
+        "metricClassification": {
+          "classification": "none",
+          "higherIsBetter": null
+        },
+        "ignore": false,
+        "source": "default"
+      },
+      "expectedConclusion": {
+        "label": "incomparable",
+        "valid": false,
+        "increase": false,
+        "decrease": false,
+        "allDifference": false,
+        "partialDifference": false
+      }
+    }
+  },
+
+  "defaultCompareConfig": {
+    "thresholds": {
+      "aggregation": "median",
+      "iqrThreshold": 2,
+      "percentageThreshold": 0.15
+    },
+    "metricClassification": {
+      "classification": "unclassified",
+      "higherIsBetter": null
+    },
+    "defaultValueIfControlGroupMissing": null,
+    "ignore": false,
+    "source": "default"
+  }
+}

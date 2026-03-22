@@ -20,6 +20,7 @@ export class BenchmarkMapper {
       dashboard_id: entity.dashboard_id,
       dashboard_uid: entity.dashboard_uid,
       application_dashboard_id: entity.application_dashboard_id,
+      metrics_source_id: entity.metrics_source_id,
       generic_check_id: entity.generic_check_id,
       configuration: entity.configuration,
       config_title: entity.config_title || entity.configuration?.title,

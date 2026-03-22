@@ -39,6 +39,11 @@ export interface IncrementalMetricsInput {
   applicationDashboardIds?: string[];
 
   /**
+   * Metrics source IDs to collect (optional - preferred over applicationDashboardIds when populated)
+   */
+  metricsSourceIds?: string[];
+
+  /**
    * Dynatrace config ID (optional - if provided, only collect from this instance)
    */
   dynatraceConfigId?: string;

@@ -84,6 +84,7 @@ export interface MetricRecord {
 export interface PanelMetricsDocument {
   testRunId: string;
   applicationDashboardId: string;
+  metricsSourceId?: string;
   dashboardUid: string;
   panelId: number;
   panelTitle: string;

@@ -91,4 +91,12 @@ export class ApplicationDashboard {
   @ManyToOne(() => GrafanaDashboard)
   @JoinColumn({ name: 'grafana_dashboard_id' })
   grafanaDashboard?: GrafanaDashboard;
+
+  // Forward link to MetricsSource (Phase 3.2.2)
+  @Column({ type: 'uuid', nullable: true, name: 'metrics_source_id' })
+  metricsSourceId?: string;
+
+  @ManyToOne('MetricsSource')
+  @JoinColumn({ name: 'metrics_source_id' })
+  metricsSource?: any;
 }

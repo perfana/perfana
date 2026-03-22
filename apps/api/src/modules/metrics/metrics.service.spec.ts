@@ -8,7 +8,8 @@ import {
   DsControlGroups,
   DsChangePoints,
   DsAdaptResults,
-  TestRun as TestRunEntity
+  TestRun as TestRunEntity,
+  ApplicationDashboard,
 } from '../../entities';
 import { AuthorizationService } from '../../common/services/authorization.service';
 import { createAuthorizationServiceMock } from '../../../test/mocks/authorization-service.mock';
@@ -58,6 +59,10 @@ describe('MetricsService', () => {
         },
         {
           provide: getRepositoryToken(TestRunEntity),
+          useValue: createMockRepository(),
+        },
+        {
+          provide: getRepositoryToken(ApplicationDashboard),
           useValue: createMockRepository(),
         },
         {

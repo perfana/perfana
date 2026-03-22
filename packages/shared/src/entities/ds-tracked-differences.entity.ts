@@ -1,6 +1,7 @@
 import { Entity, PrimaryGeneratedColumn, Column, CreateDateColumn, ManyToOne, JoinColumn } from 'typeorm';
 import { ApplicationDashboard } from './application-dashboard.entity';
 import { Benchmark } from './benchmark.entity';
+import { MetricsSource } from './metrics-source.entity';
 
 @Entity('ds_tracked_differences')
 export class DsTrackedDifferences {
@@ -37,9 +38,16 @@ export class DsTrackedDifferences {
   @CreateDateColumn()
   created_at!: Date;
 
+  @Column({ type: 'uuid', nullable: true })
+  metrics_source_id?: string;
+
   @ManyToOne(() => ApplicationDashboard)
   @JoinColumn({ name: 'application_dashboard_id' })
   application_dashboard?: ApplicationDashboard;
+
+  @ManyToOne(() => MetricsSource)
+  @JoinColumn({ name: 'metrics_source_id' })
+  metrics_source?: MetricsSource;
 
   @ManyToOne(() => Benchmark, { onDelete: 'SET NULL' })
   @JoinColumn({ name: 'benchmark_id' })

@@ -19,6 +19,7 @@ export class BenchmarksController {
   @ApiQuery({ name: 'enabled', required: false, description: 'Filter by enabled status' })
   @ApiQuery({ name: 'valid', required: false, description: 'Filter by valid status' })
   @ApiQuery({ name: 'benchmarkType', required: false, enum: ['metric', 'apdex'], description: 'Filter by benchmark type' })
+  @ApiQuery({ name: 'metricsSourceId', required: false, description: 'Filter by metrics source ID' })
   @ApiResponse({ status: 200, description: 'Return all benchmarks' })
   async findAll(@UserCtx() ctx: UserContext, @Query() query: any) {
     try {
@@ -96,6 +97,7 @@ export class BenchmarksController {
     dashboardId?: number;
     dashboardUid?: string;
     applicationDashboardId?: string;
+    metricsSourceId?: string;
     configTitle: string;
     panelTitle: string;
     evaluateType: string;

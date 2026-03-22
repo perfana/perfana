@@ -18,6 +18,8 @@ export interface SeriesConfig {
   dashboardLabel?: string;
   /** Y-axis format */
   yAxisFormat?: string;
+  /** Metrics source ID (Phase 3.5) */
+  metricsSourceId?: string;
 }
 
 /**

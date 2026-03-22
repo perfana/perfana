@@ -146,6 +146,7 @@ export function useAddSLOForm({
       if (response.ok) {
         const dashboardsData = await response.json();
         // Filter for performance-test-metrics dashboards only
+        // TODO: Phase 3.7 - migrate to metrics_source_type filtering instead of prefix-based dashboard_uid matching
         const perfMetricsDashboards = dashboardsData.filter((d: any) =>
           d.dashboard_uid?.startsWith('performance-test-metrics-')
         );
@@ -239,6 +240,7 @@ export function useAddSLOForm({
 
       if (response.ok) {
         const dashboardsData = await response.json();
+        // TODO: Phase 3.7 - migrate to metrics_source_type filtering instead of prefix-based dashboard_uid matching
         const perfMetricsDashboards = dashboardsData.filter((d: any) =>
           d.dashboard_uid?.startsWith('performance-test-metrics-')
         );

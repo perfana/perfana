@@ -223,7 +223,7 @@ export function useTrendsData({ testRun, testRunId, trendsExpanded }: UseTrendsD
   }, [testRun]);
 
   // Fetch available metric names for a selected panel
-  const fetchPanelMetrics = useCallback(async (applicationDashboardId: string, panelId: number) => {
+  const fetchPanelMetrics = useCallback(async (applicationDashboardId: string, panelId: number, metricsSourceId?: string) => {
     try {
       setAvailableMetricsLoading(true);
       setAvailableMetrics([]);
@@ -233,6 +233,11 @@ export function useTrendsData({ testRun, testRunId, trendsExpanded }: UseTrendsD
         applicationDashboardId,
         panelId: panelId.toString()
       });
+
+      // Send metricsSourceId if available
+      if (metricsSourceId) {
+        params.set('metricsSourceId', metricsSourceId);
+      }
 
       const response = await authenticatedFetch(
         `/metrics/ds-metrics/distinct-names?${params.toString()}`,
@@ -290,17 +295,18 @@ export function useTrendsData({ testRun, testRunId, trendsExpanded }: UseTrendsD
           acc[key] = {
             dashboardId: series.dashboardId,
             panelId: series.panelId,
+            metricsSourceId: series.metricsSourceId,
             metricNames: new Set<string>()
           };
         }
         acc[key].metricNames.add(series.metricName);
         return acc;
-      }, {} as Record<string, { dashboardId: string; panelId: number; metricNames: Set<string> }>);
+      }, {} as Record<string, { dashboardId: string; panelId: number; metricsSourceId?: string; metricNames: Set<string> }>);
 
       // Fetch data for each dashboard/panel combination
       const allData: MetricStatistic[] = [];
 
-      for (const { dashboardId, panelId, metricNames } of Object.values(seriesByDashboardPanel)) {
+      for (const { dashboardId, panelId, metricsSourceId, metricNames } of Object.values(seriesByDashboardPanel)) {
         if (panelId == null || dashboardId == null) {
           console.warn('Skipping series group with missing dashboardId or panelId:', { dashboardId, panelId });
           continue;
@@ -312,6 +318,11 @@ export function useTrendsData({ testRun, testRunId, trendsExpanded }: UseTrendsD
           from: fromDate.toISOString(),
           to: toDate.toISOString()
         });
+
+        // Send metricsSourceId if available
+        if (metricsSourceId) {
+          queryParams.set('metricsSourceId', metricsSourceId);
+        }
 
         if (testRun?.systems_under_test?.name) {
           queryParams.set('system', testRun.systems_under_test.name);
@@ -359,6 +370,7 @@ export function useTrendsData({ testRun, testRunId, trendsExpanded }: UseTrendsD
     const sources: DataSource[] = [];
 
     // Check for real Grafana dashboards (not artificial)
+    // TODO Phase 3.7: replace with source_type from MetricsSource
     const grafanaDashboards = dashboards.filter(d =>
       !d.dashboard_uid?.startsWith('performance-test-metrics-') &&
       !d.dashboard_uid?.startsWith('dynatrace-')
@@ -373,6 +385,7 @@ export function useTrendsData({ testRun, testRunId, trendsExpanded }: UseTrendsD
     }
 
     // Check for performance-test-metrics dashboards
+    // TODO Phase 3.7: replace with source_type from MetricsSource
     const perfMetricsDashboards = dashboards.filter(d =>
       d.dashboard_uid?.startsWith('performance-test-metrics-')
     );
@@ -415,6 +428,7 @@ export function useTrendsData({ testRun, testRunId, trendsExpanded }: UseTrendsD
   }, [testRun, oldestTestRunDate, oldestTestRunLoading, fetchOldestTestRunDate]);
 
   // Filter dashboards by source type
+  // TODO Phase 3.7: replace with source_type from MetricsSource
   const getFilteredDashboards = useCallback((): ApplicationDashboard[] => {
     if (selectedSource === 'grafana') {
       return dashboards.filter(d =>
@@ -482,7 +496,8 @@ export function useTrendsData({ testRun, testRunId, trendsExpanded }: UseTrendsD
 
     if (metric && selectedDashboard) {
       const applicationDashboardId = metric.applicationDashboardId || selectedDashboard.id;
-      fetchPanelMetrics(applicationDashboardId, metric.id);
+      const metricsSourceId = metric.metricsSourceId || selectedDashboard.metrics_source_id;
+      fetchPanelMetrics(applicationDashboardId, metric.id, metricsSourceId);
     }
   }, [selectedDashboard, fetchPanelMetrics]);
 
@@ -498,6 +513,7 @@ export function useTrendsData({ testRun, testRunId, trendsExpanded }: UseTrendsD
     const source = getSource();
 
     const applicationDashboardId = selectedMetric.applicationDashboardId || selectedDashboard.id;
+    const metricsSourceId = selectedMetric.metricsSourceId || selectedDashboard.metrics_source_id;
 
     const newSeries: TrendsSeries[] = selectedMetricNames.map(metricName => ({
       id: `${applicationDashboardId}-${selectedMetric.id}-${metricName}-${Date.now()}-${Math.random()}`,
@@ -506,7 +522,8 @@ export function useTrendsData({ testRun, testRunId, trendsExpanded }: UseTrendsD
       panelId: selectedMetric.id,
       panelTitle: selectedMetric.title,
       metricName: metricName,
-      source: source
+      source: source,
+      metricsSourceId: metricsSourceId
     }));
 
     const filteredNewSeries = newSeries.filter(newS =>

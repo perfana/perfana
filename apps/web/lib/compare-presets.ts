@@ -12,6 +12,7 @@ export interface CompareSeriesConfig {
   panelTitle: string;
   metricName: string;
   source: 'grafana' | 'dynatrace' | 'performance-metrics';
+  metricsSourceId?: string;
 }
 
 export interface ComparePreset {

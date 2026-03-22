@@ -16,6 +16,22 @@ export interface ApplicationDashboard {
     values: string[];
   }>;
   tags?: string[];
+  metrics_source_id?: string;
   created_at: string;
   updated_at: string;
+}
+
+// Metrics Source types
+export interface MetricsSource {
+  id: string;
+  system_under_test_id: string;
+  test_environment: string;
+  source_type: 'grafana' | 'dynatrace' | 'prometheus' | 'influxdb' | 'performance_test';
+  source_config_id?: string;
+  external_ref?: string;
+  display_name: string;
+  display_label?: string;
+  workload?: string;
+  tags?: string[];
+  metadata?: Record<string, any>;
 }

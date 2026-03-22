@@ -40,12 +40,16 @@ describe('AutoConfigUpdatesService', () => {
         {
           provide: AutoConfigUpdatesService,
           useFactory: () => {
+            const mockDataSource = {
+              getRepository: jest.fn().mockReturnValue(createMockRepository()),
+            };
             return new AutoConfigUpdatesService(
               applicationDashboardRepo,
               benchmarkRepo,
               grafanaDashboardRepo,
               grafanaInstanceRepo,
               systemUnderTestRepo,
+              mockDataSource as any,
             );
           },
         },

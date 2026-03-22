@@ -103,7 +103,8 @@ export function useComparePresets({
           panelId: config.panelId,
           panelTitle: config.panelTitle,
           metricName: config.metricName,
-          source: config.source as DataSource
+          source: config.source as DataSource,
+          metricsSourceId: (config as any).metricsSourceId
         }));
         setAddedSeries(restoredSeries);
       }

@@ -27,6 +27,7 @@ interface DatabaseTrackedRegression {
   tracked_test_run_id: string;
   tracked_difference_id?: string;
   application_dashboard_id: string;
+  metrics_source_id?: string;
   panel_id: string;
   metric_name: string;
   dashboard_uid?: string;
@@ -120,6 +121,7 @@ export class AdaptService {
       tracked_test_run_id: entity.tracked_test_run_id,
       tracked_difference_id: entity.tracked_difference_id,
       application_dashboard_id: entity.application_dashboard_id,
+      metrics_source_id: entity.metrics_source_id,
       panel_id: entity.panel_id.toString(),
       metric_name: entity.metric_name,
       dashboard_uid: entity.dashboard_uid,
@@ -203,6 +205,7 @@ export class AdaptService {
       trackedTestRunId: dbResult.tracked_test_run_id,
       trackedDifferenceId: dbResult.tracked_difference_id,
       applicationDashboardId: dbResult.application_dashboard_id,
+      metricsSourceId: dbResult.metrics_source_id,
       panelId: dbResult.panel_id,
       metricName: dbResult.metric_name,
       dashboardUid: dbResult.dashboard_uid,

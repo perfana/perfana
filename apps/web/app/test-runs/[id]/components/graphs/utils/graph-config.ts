@@ -14,12 +14,14 @@ export function getFilteredDashboards(
 ): ApplicationDashboard[] {
   if (selectedSource === 'grafana') {
     // Filter out artificial dashboards
+    // TODO Phase 3.7: replace with source_type from MetricsSource
     return dashboards.filter(d =>
       !d.dashboard_uid?.startsWith('performance-test-metrics-') &&
       !d.dashboard_uid?.startsWith('dynatrace-')
     );
   } else if (selectedSource === 'performance-metrics') {
     // Only performance-test-metrics dashboards
+    // TODO Phase 3.7: replace with source_type from MetricsSource
     return dashboards.filter(d =>
       d.dashboard_uid?.startsWith('performance-test-metrics-')
     );
@@ -41,6 +43,7 @@ export function determineSource(
   panelType: string | undefined,
   dashboardUid: string | undefined
 ): DataSource {
+  // TODO Phase 3.7: replace with source_type from MetricsSource
   if (panelType === 'dynatrace') return 'dynatrace';
   if (dashboardUid?.startsWith('performance-test-metrics-')) return 'performance-metrics';
   return 'grafana';
@@ -56,6 +59,7 @@ export function computeAvailableSources(
   const sources: DataSource[] = [];
 
   // Check for real Grafana dashboards (not artificial)
+  // TODO Phase 3.7: replace with source_type from MetricsSource
   const grafanaDashboards = dashboards.filter(d =>
     !d.dashboard_uid?.startsWith('performance-test-metrics-') &&
     !d.dashboard_uid?.startsWith('dynatrace-')
@@ -70,6 +74,7 @@ export function computeAvailableSources(
   }
 
   // Check for performance-test-metrics dashboards
+  // TODO Phase 3.7: replace with source_type from MetricsSource
   const perfMetricsDashboards = dashboards.filter(d =>
     d.dashboard_uid?.startsWith('performance-test-metrics-')
   );

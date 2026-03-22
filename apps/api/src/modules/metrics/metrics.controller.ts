@@ -1,5 +1,5 @@
 import { Controller, Get, Param, NotFoundException, Query, Logger } from '@nestjs/common';
-import { ApiTags, ApiOperation } from '@nestjs/swagger';
+import { ApiTags, ApiOperation, ApiQuery } from '@nestjs/swagger';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { MetricsService } from './metrics.service';
@@ -59,12 +59,14 @@ export class MetricsController {
 
   @Get('ds-metrics/:testRunId/:panelId')
   @ApiOperation({ summary: 'Get DS metrics for a specific panel with optional application dashboard filtering' })
+  @ApiQuery({ name: 'metricsSourceId', required: false, description: 'Metrics source UUID (preferred over applicationDashboardId)' })
   async getDSMetricsForPanel(
     @Param('testRunId') testRunId: string,
     @Param('panelId') panelId: string,
     @UserCtx() ctx: UserContext,
     @Query('benchmarkId') benchmarkId?: string,
-    @Query('applicationDashboardId') applicationDashboardId?: string
+    @Query('applicationDashboardId') applicationDashboardId?: string,
+    @Query('metricsSourceId') metricsSourceId?: string,
   ) {
     const panelIdNumber = parseInt(panelId, 10);
     if (isNaN(panelIdNumber)) {
@@ -98,7 +100,7 @@ export class MetricsController {
       }
     }
 
-    const result = await this.metricsService.findDSMetricsForPanel(testRunId, panelIdNumber, finalApplicationDashboardId, undefined, ctx.userId, ctx.roles);
+    const result = await this.metricsService.findDSMetricsForPanel(testRunId, panelIdNumber, finalApplicationDashboardId, undefined, ctx.userId, ctx.roles, metricsSourceId);
 
     if (result === null) {
       throw new NotFoundException(`DS metrics not found for test run ${testRunId} and panel ${panelIdNumber}`);
@@ -109,6 +111,7 @@ export class MetricsController {
 
   @Get('ds-metric-statistics')
   @ApiOperation({ summary: 'Get DS metric statistics for trends analysis with time range filtering. Supports multiple evaluate types.' })
+  @ApiQuery({ name: 'metricsSourceId', required: false, description: 'Metrics source UUID (preferred over applicationDashboardId)' })
   async getDSMetricStatistics(
     @UserCtx() ctx: UserContext,
     @Query('applicationDashboardId') applicationDashboardId: string,
@@ -119,10 +122,11 @@ export class MetricsController {
     @Query('to') to?: string,
     @Query('system') system?: string,
     @Query('environment') environment?: string,
-    @Query('workload') workload?: string
+    @Query('workload') workload?: string,
+    @Query('metricsSourceId') metricsSourceId?: string,
   ) {
-    if (!applicationDashboardId || !panelId) {
-      throw new Error('applicationDashboardId and panelId are required');
+    if ((!applicationDashboardId && !metricsSourceId) || !panelId) {
+      throw new Error('applicationDashboardId (or metricsSourceId) and panelId are required');
     }
 
     const panelIdNumber = parseInt(panelId, 10);
@@ -145,6 +149,7 @@ export class MetricsController {
         workload,
         ctx.userId,
         ctx.roles,
+        metricsSourceId,
       );
       return result;
     } else if (evaluateType) {
@@ -160,6 +165,7 @@ export class MetricsController {
         workload,
         ctx.userId,
         ctx.roles,
+        metricsSourceId,
       );
       return result;
     } else {
@@ -176,6 +182,7 @@ export class MetricsController {
         workload,
         ctx.userId,
         ctx.roles,
+        metricsSourceId,
       );
       return result;
     }
@@ -183,16 +190,18 @@ export class MetricsController {
 
   @Get('ds-metrics-comparison')
   @ApiOperation({ summary: 'Get raw DS metrics data for two test runs to compare in a graph' })
+  @ApiQuery({ name: 'metricsSourceId', required: false, description: 'Metrics source UUID (preferred over applicationDashboardId)' })
   async getDSMetricsComparison(
     @UserCtx() ctx: UserContext,
     @Query('currentTestRunId') currentTestRunId: string,
     @Query('baselineTestRunId') baselineTestRunId: string,
     @Query('applicationDashboardId') applicationDashboardId: string,
     @Query('panelId') panelId: string,
-    @Query('metricName') metricName?: string
+    @Query('metricName') metricName?: string,
+    @Query('metricsSourceId') metricsSourceId?: string,
   ) {
-    if (!currentTestRunId || !baselineTestRunId || !applicationDashboardId || !panelId) {
-      throw new Error('currentTestRunId, baselineTestRunId, applicationDashboardId, and panelId are required');
+    if (!currentTestRunId || !baselineTestRunId || (!applicationDashboardId && !metricsSourceId) || !panelId) {
+      throw new Error('currentTestRunId, baselineTestRunId, applicationDashboardId (or metricsSourceId), and panelId are required');
     }
 
     const panelIdNumber = parseInt(panelId, 10);
@@ -203,8 +212,8 @@ export class MetricsController {
     try {
       // Fetch metrics for both test runs - filter by metricName at database level for efficiency
       const [currentMetrics, baselineMetrics] = await Promise.all([
-        this.metricsService.findDSMetricsForPanel(currentTestRunId, panelIdNumber, applicationDashboardId, metricName, ctx.userId, ctx.roles),
-        this.metricsService.findDSMetricsForPanel(baselineTestRunId, panelIdNumber, applicationDashboardId, metricName, ctx.userId, ctx.roles)
+        this.metricsService.findDSMetricsForPanel(currentTestRunId, panelIdNumber, applicationDashboardId, metricName, ctx.userId, ctx.roles, metricsSourceId),
+        this.metricsService.findDSMetricsForPanel(baselineTestRunId, panelIdNumber, applicationDashboardId, metricName, ctx.userId, ctx.roles, metricsSourceId)
       ]);
 
       return {
@@ -213,6 +222,7 @@ export class MetricsController {
         currentTestRunId,
         baselineTestRunId,
         applicationDashboardId,
+        metricsSourceId: metricsSourceId || null,
         panelId: panelIdNumber,
         metricName: metricName || null
       };
@@ -224,15 +234,17 @@ export class MetricsController {
 
   @Get('control-group-trends/:testRunId')
   @ApiOperation({ summary: 'Get control group trend data for anomaly detection with version and annotations enrichment' })
+  @ApiQuery({ name: 'metricsSourceId', required: false, description: 'Metrics source UUID (preferred over applicationDashboardId)' })
   async getControlGroupTrends(
     @Param('testRunId') testRunId: string,
     @UserCtx() ctx: UserContext,
     @Query('applicationDashboardId') applicationDashboardId: string,
     @Query('panelId') panelId: string,
-    @Query('metricName') metricName: string
+    @Query('metricName') metricName: string,
+    @Query('metricsSourceId') metricsSourceId?: string,
   ) {
-    if (!applicationDashboardId || !panelId || !metricName) {
-      throw new Error('applicationDashboardId, panelId, and metricName are required');
+    if ((!applicationDashboardId && !metricsSourceId) || !panelId || !metricName) {
+      throw new Error('applicationDashboardId (or metricsSourceId), panelId, and metricName are required');
     }
 
     try {
@@ -243,6 +255,7 @@ export class MetricsController {
         metricName,
         ctx.userId,
         ctx.roles,
+        metricsSourceId,
       );
 
       return trends;
@@ -254,10 +267,12 @@ export class MetricsController {
 
   @Get('ds-metrics/distinct-names')
   @ApiOperation({ summary: 'Get distinct metric names for a dashboard/panel' })
+  @ApiQuery({ name: 'metricsSourceId', required: false, description: 'Metrics source UUID (preferred over applicationDashboardId)' })
   async getDistinctMetricNames(
     @UserCtx() _ctx: UserContext,
     @Query('applicationDashboardId') applicationDashboardId: string,
     @Query('panelId') panelId: string,
+    @Query('metricsSourceId') metricsSourceId?: string,
   ): Promise<string[]> {
     const panelIdNumber = parseInt(panelId, 10);
     if (isNaN(panelIdNumber)) {
@@ -267,6 +282,7 @@ export class MetricsController {
     return this.metricsService.getDistinctMetricNames(
       applicationDashboardId,
       panelIdNumber,
+      metricsSourceId,
     );
   }
 }

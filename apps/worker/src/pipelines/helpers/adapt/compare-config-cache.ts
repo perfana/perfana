@@ -159,17 +159,17 @@ export class CompareConfigCache {
               ) as compare_config
           FROM ${controlCte} wc
           LEFT JOIN ${tempTableName} cfg_metric ON (
-              cfg_metric.application_dashboard_id = wc.application_dashboard_id
+              cfg_metric.application_dashboard_id = COALESCE(wc.metrics_source_id, wc.application_dashboard_id)
               AND cfg_metric.panel_id = wc.panel_id::int
               AND cfg_metric.metric_name = wc.metric_name
           )
           LEFT JOIN ${tempTableName} cfg_panel ON (
-              cfg_panel.application_dashboard_id = wc.application_dashboard_id
+              cfg_panel.application_dashboard_id = COALESCE(wc.metrics_source_id, wc.application_dashboard_id)
               AND cfg_panel.panel_id = wc.panel_id::int
               AND cfg_panel.metric_name IS NULL
           )
           LEFT JOIN ${tempTableName} cfg_dashboard ON (
-              cfg_dashboard.application_dashboard_id = wc.application_dashboard_id
+              cfg_dashboard.application_dashboard_id = COALESCE(wc.metrics_source_id, wc.application_dashboard_id)
               AND cfg_dashboard.panel_id IS NULL
               AND cfg_dashboard.metric_name IS NULL
           )

@@ -843,6 +843,7 @@ export class DynatraceService {
       metrics: metrics.map(m => ({
         panelTitle: m.panelTitle,
         panelId: m.panelId,
+        metricsSourceId: m.metricsSourceId,
         metricUnit: m.metricUnit
       }))
     });
@@ -850,6 +851,7 @@ export class DynatraceService {
       panelTitle: metric.panelTitle,
       panelId: metric.panelId,
       applicationDashboardId: metric.applicationDashboardId,
+      metricsSourceId: metric.metricsSourceId,
       metricUnit: metric.metricUnit
     }));
   }

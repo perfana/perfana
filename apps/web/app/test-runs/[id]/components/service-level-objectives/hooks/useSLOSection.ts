@@ -105,7 +105,7 @@ export interface UseSLOSectionReturn {
   setSelectedSloForEdit: (slo: any) => void;
 
   // Re-evaluation
-  handleReEvaluate: (panelId: number, applicationDashboardId?: string, metricName?: string) => Promise<void>;
+  handleReEvaluate: (panelId: number, applicationDashboardId?: string, metricName?: string, metricsSourceId?: string) => Promise<void>;
 
   // Utilities
   getCheckResultKey: (result: any) => string;
@@ -513,7 +513,7 @@ export function useSLOSection({
   }, [testRunId, loadCheckResults]);
 
   // Re-evaluation handler
-  const handleReEvaluate = useCallback(async (panelId: number, applicationDashboardId?: string, metricName?: string) => {
+  const handleReEvaluate = useCallback(async (panelId: number, applicationDashboardId?: string, metricName?: string, metricsSourceId?: string) => {
     try {
       const testRunIdForReeval = testRun?.test_run_id || testRunId;
 
@@ -522,6 +522,7 @@ export function useSLOSection({
         checks: true,
         adapt: true,
         ...(applicationDashboardId && { applicationDashboardId }),
+        ...(metricsSourceId && { metricsSourceId }),
         ...(panelId && { panelId }),
         ...(metricName && { metricName })
       };

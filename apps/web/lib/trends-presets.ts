@@ -13,6 +13,7 @@ export interface TrendsSeriesConfig {
   metricName: string;
   source: 'grafana' | 'dynatrace' | 'performance-metrics';
   yAxisFormat?: string;
+  metricsSourceId?: string;
 }
 
 export interface TrendsPreset {
