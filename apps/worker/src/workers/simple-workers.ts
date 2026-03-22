@@ -15,18 +15,12 @@ import { JOB_NAMES } from '../types/jobs.js';
 import { createSimpleWorker } from './simple-worker-factory.js';
 import { initializeGrafanaConfig } from '../config/grafana-config-cache.js';
 
-// Import existing pipeline processors
+// Self-registering: populates the pipeline registry on import
+import './pipeline-registrations.js';
+import { createProcessorFromRegistry } from './pipeline-registry.js';
+
+// Complex workers that are NOT in the registry (custom logic beyond the standard pattern)
 import { analyzeTestWorker } from './analyze.js';
-import { metricsCollectionWorker } from './metrics.js';
-import { statisticsWorker } from './statistics.js';
-import { controlGroupsWorker } from './control-groups.js';
-import { controlGroupStatisticsWorker } from './control-group-statistics.js';
-import { adaptWorker } from './adapt.js';
-import { checksWorker } from './checks.js';
-import { panelsWorker } from './panels.js';
-import { performanceTestMetricsWorker } from './performance-test-metrics.js';
-import { dynatraceWorker } from './dynatrace.js';
-import { reevaluateWorker } from './reevaluate.js';
 import { incrementalMetricsWorker } from './incremental-metrics.js';
 // Use simplified orchestrator (NO priority, NO rate limiting)
 import { simpleOrchestrateReevaluateBatchWorker } from './simple-orchestrate-reevaluate-batch.js';
@@ -41,19 +35,11 @@ const workers: Worker[] = [];
  * Routes jobs to appropriate pipeline handlers based on job name
  */
 function createAnalyzeQueueProcessor() {
-  // Get all pipeline processors (all migrated to TypeORM)
+  // Pipeline registry handles the 10 standard workers; add complex ones manually
+  const registryProcessors = createProcessorFromRegistry();
   const processors = {
+    ...registryProcessors,
     [JOB_NAMES.ANALYZE_TEST]: analyzeTestWorker(),
-    [JOB_NAMES.METRICS_COLLECTION]: metricsCollectionWorker(),
-    [JOB_NAMES.STATISTICS_PIPELINE]: statisticsWorker(),
-    [JOB_NAMES.CONTROL_GROUPS_PIPELINE]: controlGroupsWorker(),
-    [JOB_NAMES.CONTROL_GROUP_STATISTICS]: controlGroupStatisticsWorker(),
-    [JOB_NAMES.ADAPT_PIPELINE]: adaptWorker(),
-    [JOB_NAMES.CHECKS_EVALUATION]: checksWorker(),
-    [JOB_NAMES.PANELS_PROCESSING]: panelsWorker(),
-    [JOB_NAMES.PERFORMANCE_TEST_METRICS]: performanceTestMetricsWorker(),
-    [JOB_NAMES.DYNATRACE_COLLECTION]: dynatraceWorker(),
-    [JOB_NAMES.REEVALUATE_CHECKS]: reevaluateWorker(),
     [JOB_NAMES.INCREMENTAL_COLLECTION]: incrementalMetricsWorker(),
   };
 
@@ -75,10 +61,11 @@ function createAnalyzeQueueProcessor() {
  * Routes jobs to appropriate batch pipeline handlers
  */
 function createBatchQueueProcessor() {
+  const registryProcessors = createProcessorFromRegistry();
   const processors = {
     [JOB_NAMES.BATCH_ANALYSIS]: analyzeTestWorker(), // Reuse single test processor
     [JOB_NAMES.BATCH_FLOW]: analyzeTestWorker(), // Reuse single test processor
-    [JOB_NAMES.REEVALUATION_BATCH]: reevaluateWorker(), // Reuse reevaluate processor
+    [JOB_NAMES.REEVALUATION_BATCH]: registryProcessors[JOB_NAMES.REEVALUATE_CHECKS], // From registry
     [JOB_NAMES.ORCHESTRATE_REEVALUATE_BATCH]: simpleOrchestrateReevaluateBatchWorker(), // Simplified orchestrator
   };
 
