@@ -238,7 +238,7 @@ describe('ChecksPipeline', () => {
       // Assert
       expect(result.success).toBe(true);
       expect(mockLogger.info).toHaveBeenCalledWith(
-        expect.stringContaining('with metric filter: dashboard=dash-123, panel=42, metric=cpu_usage')
+        expect.stringContaining('with metric filter: metricsSource=undefined, dashboard=dash-123, panel=42, metric=cpu_usage')
       );
     });
 

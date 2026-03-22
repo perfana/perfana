@@ -162,7 +162,8 @@ export default function SavePresetModal({
       panelId: series.panelId,
       panelTitle: series.panelTitle,
       metricName: series.metricName,
-      source: series.source
+      source: series.source,
+      metricsSourceId: series.metricsSourceId
     }));
   };
   

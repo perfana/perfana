@@ -189,11 +189,18 @@ export function useEditSLOForm({
   // Auto-select dashboard and panel when Grafana dashboards are loaded
   useEffect(() => {
     if (availableDashboards.length > 0 && benchmark && !sloFormData.selectedDashboard) {
-      // Find the dashboard that matches the benchmark - prioritize application_dashboard_id match
+      // Find the dashboard that matches the benchmark - prioritize metrics_source_id, then application_dashboard_id
       let matchingDashboard = null;
 
-      // First try to match by application_dashboard_id (most reliable)
-      if (benchmark.application_dashboard_id) {
+      // First try to match by metrics_source_id (most reliable when available)
+      if (benchmark.metrics_source_id) {
+        matchingDashboard = availableDashboards.find(
+          (dashboard: any) => dashboard.metrics_source_id === benchmark.metrics_source_id
+        );
+      }
+
+      // Then try to match by application_dashboard_id
+      if (!matchingDashboard && benchmark.application_dashboard_id) {
         matchingDashboard = availableDashboards.find(
           (dashboard) => dashboard.id === benchmark.application_dashboard_id
         );

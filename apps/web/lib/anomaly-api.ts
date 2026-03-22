@@ -11,6 +11,7 @@ export interface DeleteAnomalyRequest {
   metricName?: string;
   panelId: string;
   applicationDashboardId: string;
+  metricsSourceId?: string;
   scope: 'metric' | 'panel';
   range: 'current-test-run' | 'all-test-runs';
 }

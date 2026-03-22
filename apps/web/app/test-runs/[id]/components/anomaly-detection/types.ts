@@ -11,6 +11,7 @@ export interface AnomalyData {
   control_group_value: string;
   difference: string | null;
   application_dashboard_id: string;
+  metrics_source_id?: string;
   panel_id: string;
   compare_config?: {
     thresholds?: {

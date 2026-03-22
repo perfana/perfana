@@ -10,7 +10,8 @@ import {
   DsChangePoints,
   DsAdaptResults,
   TestRun,
-  Benchmark
+  Benchmark,
+  ApplicationDashboard,
 } from '../../entities';
 
 @Module({
@@ -22,7 +23,8 @@ import {
       DsChangePoints,
       DsAdaptResults,
       TestRun,
-      Benchmark
+      Benchmark,
+      ApplicationDashboard,
     ]),
     CommonModule,
   ],

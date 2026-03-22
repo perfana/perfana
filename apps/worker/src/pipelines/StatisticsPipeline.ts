@@ -41,6 +41,68 @@ export interface MetricStatisticsResult {
   test_run_start?: Date;
 }
 
+/**
+ * StatisticsPipeline — Per-Test-Run Descriptive Statistics
+ *
+ * Computes descriptive statistics for every (test_run, dashboard, panel, metric)
+ * tuple and writes them to `ds_metric_statistics`. These per-run statistics are
+ * later aggregated into control group statistics and consumed by the ADAPT
+ * regression detection algorithm.
+ *
+ * ──────────────────────────────────────────────────────────────────────────────
+ * SQL CTE Chain Overview
+ * ──────────────────────────────────────────────────────────────────────────────
+ *
+ *   metrics_filtered          Raw data points from ds_metrics, filtered:
+ *        │                      - ramp_up = false  (exclude warm-up period; see below)
+ *        │                      - value IS NOT NULL (ignore gaps)
+ *        │                      - dashboard org-scoping via application_dashboards / dynatrace_queries
+ *        ▼
+ *   statistics_aggregated     GROUP BY (test_run, dashboard, panel, metric):
+ *        │                      - Classical: COUNT, AVG (mean), MIN, MAX, STDDEV_POP
+ *        │                      - TimescaleDB: percentile_agg(value) — single-pass t-digest sketch
+ *        │                      - Auxiliary: n_missing, n_non_zero, distinct_count
+ *        ▼
+ *   final_statistics          Derives remaining columns from the aggregates:
+ *        │                      - Percentiles via approx_percentile(p, pct_agg):
+ *        │                          median (p50), q10, q25, q75, q90, q95, q99
+ *        │                      - IQR = q75 - q25  (interquartile range — robust spread)
+ *        │                      - IDR = q90 - q10  (interdecile range — wider robust spread)
+ *        │                      - is_constant: true when all values are identical (distinct_count=1)
+ *        │                      - all_missing: true when every observation is NULL
+ *        │                      - pct_missing: percentage of NULL observations
+ *        │                      - last_value: value at the latest timestamp (via LATERAL subquery)
+ *        ▼
+ *   INSERT INTO ds_metric_statistics  (delete-then-insert for idempotent re-runs)
+ *
+ * ──────────────────────────────────────────────────────────────────────────────
+ * Ramp-Up Filtering
+ * ──────────────────────────────────────────────────────────────────────────────
+ * Load tests typically begin with a warm-up / ramp-up phase where virtual users
+ * gradually increase. Metrics collected during this phase are non-representative
+ * of steady-state behavior. The MetricsPipeline marks these data points with
+ * ramp_up = true. This pipeline excludes them so statistics reflect only the
+ * steady-state portion of the test.
+ *
+ * ──────────────────────────────────────────────────────────────────────────────
+ * Percentile Calculation
+ * ──────────────────────────────────────────────────────────────────────────────
+ * Uses TimescaleDB Toolkit's `percentile_agg()` which builds a t-digest sketch
+ * in a single pass over the data, then `approx_percentile(p, sketch)` extracts
+ * approximate quantiles. This avoids sorting the full dataset and is O(n) in
+ * both time and memory. The t-digest provides high accuracy at the tails (p10,
+ * p90, p95, p99) where it matters most for performance analysis.
+ *
+ * ──────────────────────────────────────────────────────────────────────────────
+ * Quality Flags
+ * ──────────────────────────────────────────────────────────────────────────────
+ * - is_constant:  All observed values are identical (distinct_count = 1).
+ *                 Downstream ADAPT treats these specially since std_dev = 0
+ *                 makes ratio-based thresholds meaningless.
+ * - all_missing:  Every observation in the group is NULL (count = n_missing).
+ *                 The metric exists in the dashboard definition but produced no
+ *                 usable data — ADAPT labels these "incomparable".
+ */
 export class StatisticsPipeline extends BasePipelineTypeORM {
 
   validateInput(input: unknown): boolean {
@@ -141,7 +203,8 @@ export class StatisticsPipeline extends BasePipelineTypeORM {
               m.benchmark_ids[1] as first_benchmark_id,
               m.unit,
               tr.organization_id,
-              tr.team_id
+              tr.team_id,
+              m.metrics_source_id
           FROM ds_metrics m
           INNER JOIN test_runs tr ON m.test_run_id = tr.test_run_id
           WHERE m.test_run_id IN (${placeholders})
@@ -172,25 +235,31 @@ export class StatisticsPipeline extends BasePipelineTypeORM {
               MAX(value) as max_value,
               STDDEV_POP(value) as std_dev,
 
-              -- Single-pass percentile aggregation using TimescaleDB toolkit
+              -- TimescaleDB percentile_agg builds a t-digest sketch in O(n).
+              -- All percentile extractions in final_statistics share this single sketch.
               percentile_agg(value) as pct_agg,
 
-              -- Use MAX(time) to identify the last data point, then pick its value
-              -- via a CASE expression (avoids building a full sorted array)
+              -- Track max timestamp so the LATERAL join in final_statistics can
+              -- efficiently fetch last_value without ARRAY_AGG + sort.
               MAX(time) as max_time,
 
+              -- n_missing: always 0 here because WHERE filters out NULLs, but kept
+              -- for schema compatibility. Downstream code may re-count from raw data.
               COUNT(CASE WHEN value IS NULL THEN 1 END) as n_missing,
               COUNT(CASE WHEN value > 0 THEN 1 END) as n_non_zero,
 
+              -- distinct_count = 1 → metric is constant (used for is_constant flag)
               COUNT(DISTINCT value) as distinct_count,
-              -- Constant-per-group columns: MIN() is a single-pass aggregate
+              -- These columns are identical within each group; MIN() is just a
+              -- deterministic way to pick one value without a window function.
               MIN(unit) as unit,
               MIN(organization_id::text)::uuid as organization_id,
               MIN(team_id::text)::uuid as team_id,
               MIN(dashboard_uid) as dashboard_uid,
               MIN(panel_title) as panel_title,
               MIN(dashboard_label) as dashboard_label,
-              MIN(first_benchmark_id::text)::uuid as first_benchmark_id
+              MIN(first_benchmark_id::text)::uuid as first_benchmark_id,
+              MIN(metrics_source_id::text)::uuid as metrics_source_id
 
           FROM metrics_filtered
           GROUP BY
@@ -249,11 +318,15 @@ export class StatisticsPipeline extends BasePipelineTypeORM {
                   'p99', approx_percentile(0.99, sa.pct_agg)
               ) as percentiles,
 
+              -- IQR (Interquartile Range): robust measure of spread, less sensitive
+              -- to outliers than std_dev. Used by ADAPT's IQR threshold check.
               (approx_percentile(0.75, sa.pct_agg) - approx_percentile(0.25, sa.pct_agg)) as iqr,
+              -- IDR (Interdecile Range): captures 80% of the distribution (p10..p90),
+              -- useful for understanding tail behavior in response time metrics.
               (approx_percentile(0.90, sa.pct_agg) - approx_percentile(0.10, sa.pct_agg)) as idr,
 
               (sa.distinct_count = 1) as is_constant,
-              (sa.distinct_count = 1) as constant_value,
+              (sa.distinct_count = 1) as constant_value,  -- alias kept for backward compat
               (sa.count = sa.n_missing) as all_missing,
 
               CASE
@@ -271,7 +344,8 @@ export class StatisticsPipeline extends BasePipelineTypeORM {
               sa.organization_id,
               sa.team_id,
               'worker-pipeline' as created_by,
-              'worker-pipeline' as updated_by
+              'worker-pipeline' as updated_by,
+              sa.metrics_source_id
 
           FROM statistics_aggregated sa
           LEFT JOIN test_runs tr ON tr.test_run_id = sa.test_run_id
@@ -327,7 +401,8 @@ export class StatisticsPipeline extends BasePipelineTypeORM {
           organization_id,
           team_id,
           created_by,
-          updated_by
+          updated_by,
+          metrics_source_id
       )
       SELECT
           test_run_id,
@@ -367,7 +442,8 @@ export class StatisticsPipeline extends BasePipelineTypeORM {
           organization_id,
           team_id,
           created_by,
-          updated_by
+          updated_by,
+          metrics_source_id
       FROM final_statistics
     `;
 

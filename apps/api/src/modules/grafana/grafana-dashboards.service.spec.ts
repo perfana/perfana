@@ -241,7 +241,8 @@ describe('GrafanaDashboardsService', () => {
         await service.findAll(mockUserId, mockRoles, query);
 
         // Assert
-        expect(queryBuilder.andWhere).toHaveBeenCalledTimes(3);
+        // 3 user filters + 1 NOT EXISTS filter for synthetic dashboards
+        expect(queryBuilder.andWhere).toHaveBeenCalledTimes(4);
         expect(queryBuilder.orderBy).toHaveBeenCalledWith('gd.name', 'ASC');
       });
     });

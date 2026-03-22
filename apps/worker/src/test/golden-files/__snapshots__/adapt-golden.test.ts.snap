@@ -1,0 +1,1745 @@
+// Vitest Snapshot v1, https://vitest.dev/guide/snapshot.html
+
+exports[`ADAPT SQL Builder Golden-File Tests > AdaptResultsSQLBuilder > buildAdaptResultsSQL > should generate stable SQL (snapshot) 1`] = `
+"
+      WITH test_metrics AS (
+          SELECT
+              ms.test_run_id,
+              ms.test_run_id as control_group_id,  -- assumes testRunId equals controlGroupId per spec
+              ms.application_dashboard_id,
+              ms.panel_id::varchar as panel_id,
+              ms.metric_name,
+              -- All statistics from ds_metric_statistics
+              ms.mean as test_mean,
+              ms.median as test_median,
+              ms.min_value as test_min,
+              ms.max_value as test_max,
+              ms.std_dev as test_std,
+              ms.last_value as test_last,
+              ms.q10 as test_q10,
+              ms.q25 as test_q25,
+              ms.q75 as test_q75,
+              ms.q90 as test_q90,
+              ms.q95 as test_q95,
+              ms.q99 as test_q99,
+              ms.iqr as test_iqr,
+              ms.count as test_n,
+              ms.is_constant as test_is_constant,
+              ms.all_missing as test_all_missing,
+              -- Additional metadata
+              ms.dashboard_uid,
+              ms.dashboard_label,
+              ms.panel_title,
+              ms.unit,
+              ms.test_run_start,
+              ms.benchmark_id,
+              ms.updated_at,
+              ms.organization_id,
+              ms.team_id,
+              ms.metrics_source_id
+          FROM ds_metric_statistics ms
+          WHERE ms.test_run_id IN ($1, $2)
+            
+      ),
+
+      with_control AS (
+          SELECT
+              tm.*,
+              cgs.mean as control_mean,
+              cgs.median as control_median,
+              cgs.min_value as control_min,
+              cgs.max_value as control_max,
+              cgs.std_dev as control_std,
+              cgs.last_value as control_last,
+              cgs.q10 as control_q10,
+              cgs.q25 as control_q25,
+              cgs.q75 as control_q75,
+              cgs.q90 as control_q90,
+              cgs.q95 as control_q95,
+              cgs.q99 as control_q99,
+              cgs.iqr as control_iqr,
+              cgs.count as control_n,
+              cgs.is_constant as control_is_constant,
+              cgs.all_missing as control_all_missing,
+              CASE
+                  WHEN cgs.control_group_id IS NOT NULL THEN true
+                  ELSE false
+              END as control_exists
+          FROM test_metrics tm
+          LEFT JOIN ds_control_group_statistics cgs ON (
+              cgs.control_group_id = tm.control_group_id
+              AND cgs.metrics_source_id = tm.metrics_source_id
+              AND cgs.panel_id::text = tm.panel_id
+              AND cgs.metric_name = tm.metric_name
+          )
+      ),
+
+      with_compare_config AS (
+          -- Resolve comparison config via 4-level fallback hierarchy.
+          -- COALESCE picks the most specific config that exists:
+          -- metric > panel > dashboard > global > hardcoded default.
+          -- This lets users override thresholds at any granularity.
+          SELECT
+              wc.*,
+              COALESCE(
+                  cfg_metric.config_data,     -- 1. metric-specific override
+                  cfg_panel.config_data,      -- 2. panel-level default
+                  cfg_dashboard.config_data,  -- 3. dashboard-level default
+                  cfg_global.config_data,     -- 4. global default
+                  $3::jsonb  -- 5. hardcoded fallback
+              ) as compare_config
+          FROM with_control wc
+          LEFT JOIN temp_config_cache cfg_metric ON (
+              cfg_metric.application_dashboard_id = wc.application_dashboard_id
+              AND cfg_metric.panel_id = wc.panel_id::int
+              AND cfg_metric.metric_name = wc.metric_name
+          )
+          LEFT JOIN temp_config_cache cfg_panel ON (
+              cfg_panel.application_dashboard_id = wc.application_dashboard_id
+              AND cfg_panel.panel_id = wc.panel_id::int
+              AND cfg_panel.metric_name IS NULL
+          )
+          LEFT JOIN temp_config_cache cfg_dashboard ON (
+              cfg_dashboard.application_dashboard_id = wc.application_dashboard_id
+              AND cfg_dashboard.panel_id IS NULL
+              AND cfg_dashboard.metric_name IS NULL
+          )
+          LEFT JOIN temp_config_cache cfg_global ON (
+              cfg_global.application_dashboard_id IS NULL
+              AND cfg_global.panel_id IS NULL
+              AND cfg_global.metric_name IS NULL
+          )
+      ),
+
+      with_dynamic_statistics AS (
+          -- The compare_config specifies WHICH statistic to compare (e.g., "median",
+          -- "p95", "mean"). This CTE resolves that dynamically via CASE, so all
+          -- downstream threshold logic works on a single (test_stat_value, control_stat_value)
+          -- pair regardless of which statistic was chosen.
+          SELECT
+              wcc.*,
+              CASE (wcc.compare_config->'thresholds'->>'aggregation')
+                  WHEN 'mean' THEN wcc.test_mean
+                  WHEN 'median' THEN wcc.test_median
+                  WHEN 'min' THEN wcc.test_min
+                  WHEN 'max' THEN wcc.test_max
+                  WHEN 'last' THEN wcc.test_last
+                  WHEN 'q10' THEN wcc.test_q10
+                  WHEN 'p10' THEN wcc.test_q10  -- Support both notations
+                  WHEN 'q25' THEN wcc.test_q25
+                  WHEN 'p25' THEN wcc.test_q25
+                  WHEN 'q75' THEN wcc.test_q75
+                  WHEN 'p75' THEN wcc.test_q75
+                  WHEN 'q90' THEN wcc.test_q90
+                  WHEN 'p90' THEN wcc.test_q90
+                  WHEN 'q95' THEN wcc.test_q95
+                  WHEN 'p95' THEN wcc.test_q95
+                  WHEN 'q99' THEN wcc.test_q99
+                  WHEN 'p99' THEN wcc.test_q99
+                  ELSE wcc.test_median  -- Default to median
+              END as test_stat_value,
+
+              CASE (wcc.compare_config->'thresholds'->>'aggregation')
+                  WHEN 'mean' THEN wcc.control_mean
+                  WHEN 'median' THEN wcc.control_median
+                  WHEN 'min' THEN wcc.control_min
+                  WHEN 'max' THEN wcc.control_max
+                  WHEN 'last' THEN wcc.control_last
+                  WHEN 'q10' THEN wcc.control_q10
+                  WHEN 'p10' THEN wcc.control_q10
+                  WHEN 'q25' THEN wcc.control_q25
+                  WHEN 'p25' THEN wcc.control_q25
+                  WHEN 'q75' THEN wcc.control_q75
+                  WHEN 'p75' THEN wcc.control_q75
+                  WHEN 'q90' THEN wcc.control_q90
+                  WHEN 'p90' THEN wcc.control_q90
+                  WHEN 'q95' THEN wcc.control_q95
+                  WHEN 'p95' THEN wcc.control_q95
+                  WHEN 'q99' THEN wcc.control_q99
+                  WHEN 'p99' THEN wcc.control_q99
+                  ELSE wcc.control_median  -- Default to median
+              END as control_stat_value
+          FROM with_compare_config wcc
+      ),
+
+      with_threshold_calculations AS (
+          SELECT
+              wds.*,
+              -- Extract threshold values
+              (wds.compare_config->'thresholds'->>'percentageThreshold')::float as percentage_threshold,
+              (wds.compare_config->'thresholds'->>'iqrThreshold')::float as iqr_threshold,
+              (wds.compare_config->'thresholds'->>'absoluteThreshold')::float as absolute_threshold,
+
+              -- Calculate statistical differences (matching legacy Python format)
+              jsonb_build_object(
+                  'name', wds.compare_config->'thresholds'->>'aggregation',
+                  'test', CASE
+                      WHEN wds.test_stat_value IS NOT NULL
+                      THEN wds.test_stat_value::text
+                      ELSE NULL
+                  END,
+                  'control', CASE
+                      WHEN wds.control_stat_value IS NOT NULL
+                      THEN wds.control_stat_value::text
+                      ELSE NULL
+                  END,
+                  'diff', CASE
+                      WHEN wds.test_stat_value IS NOT NULL AND wds.control_stat_value IS NOT NULL
+                      THEN (wds.test_stat_value - wds.control_stat_value)::text
+                      ELSE NULL
+                  END,
+                  'absDiff', CASE
+                      WHEN wds.test_stat_value IS NOT NULL AND wds.control_stat_value IS NOT NULL
+                      THEN ABS(wds.test_stat_value - wds.control_stat_value)::text
+                      ELSE NULL
+                  END,
+                  'pctDiff', CASE
+                      WHEN wds.test_stat_value IS NOT NULL AND wds.control_stat_value IS NOT NULL AND wds.control_stat_value != 0
+                      THEN ((wds.test_stat_value - wds.control_stat_value) / wds.control_stat_value)::text
+                      ELSE NULL
+                  END
+              ) as statistic,
+
+              -- Calculate upper and lower thresholds (legacy format with overall)
+              (CASE
+                  WHEN wds.control_stat_value IS NOT NULL THEN
+                      jsonb_build_object(
+                          'upper', jsonb_build_object(
+                              'pct', CASE
+                                  WHEN (wds.compare_config->'thresholds'->>'percentageThreshold') IS NOT NULL
+                                  THEN wds.control_stat_value * (1 + (wds.compare_config->'thresholds'->>'percentageThreshold')::float)
+                                  ELSE NULL
+                              END,
+                              'iqr', CASE
+                                  WHEN wds.control_iqr IS NOT NULL AND (wds.compare_config->'thresholds'->>'iqrThreshold') IS NOT NULL
+                                  THEN wds.control_stat_value + (wds.control_iqr * (wds.compare_config->'thresholds'->>'iqrThreshold')::float)
+                                  ELSE NULL
+                              END,
+                              'abs', CASE
+                                  WHEN (wds.compare_config->'thresholds'->>'absoluteThreshold') IS NOT NULL
+                                  THEN wds.control_stat_value + (wds.compare_config->'thresholds'->>'absoluteThreshold')::float
+                                  ELSE NULL
+                              END,
+                              'constant', COALESCE(wds.control_stat_value, 0),
+                              'overall', GREATEST(
+                                  CASE
+                                      WHEN (wds.compare_config->'thresholds'->>'percentageThreshold') IS NOT NULL
+                                      THEN wds.control_stat_value * (1 + (wds.compare_config->'thresholds'->>'percentageThreshold')::float)
+                                      ELSE NULL
+                                  END,
+                                  CASE
+                                      WHEN wds.control_iqr IS NOT NULL AND (wds.compare_config->'thresholds'->>'iqrThreshold') IS NOT NULL
+                                      THEN wds.control_stat_value + (wds.control_iqr * (wds.compare_config->'thresholds'->>'iqrThreshold')::float)
+                                      ELSE NULL
+                                  END,
+                                  CASE
+                                      WHEN (wds.compare_config->'thresholds'->>'absoluteThreshold') IS NOT NULL
+                                      THEN wds.control_stat_value + (wds.compare_config->'thresholds'->>'absoluteThreshold')::float
+                                      ELSE NULL
+                                  END
+                              )
+                          ),
+                          'lower', jsonb_build_object(
+                              'pct', CASE
+                                  WHEN (wds.compare_config->'thresholds'->>'percentageThreshold') IS NOT NULL
+                                  THEN wds.control_stat_value * (1 - (wds.compare_config->'thresholds'->>'percentageThreshold')::float)
+                                  ELSE NULL
+                              END,
+                              'iqr', CASE
+                                  WHEN wds.control_iqr IS NOT NULL AND (wds.compare_config->'thresholds'->>'iqrThreshold') IS NOT NULL
+                                  THEN wds.control_stat_value - (wds.control_iqr * (wds.compare_config->'thresholds'->>'iqrThreshold')::float)
+                                  ELSE NULL
+                              END,
+                              'abs', CASE
+                                  WHEN (wds.compare_config->'thresholds'->>'absoluteThreshold') IS NOT NULL
+                                  THEN wds.control_stat_value - (wds.compare_config->'thresholds'->>'absoluteThreshold')::float
+                                  ELSE NULL
+                              END,
+                              'constant', COALESCE(wds.control_stat_value, 0),
+                              'overall', LEAST(
+                                  CASE
+                                      WHEN (wds.compare_config->'thresholds'->>'percentageThreshold') IS NOT NULL
+                                      THEN wds.control_stat_value * (1 - (wds.compare_config->'thresholds'->>'percentageThreshold')::float)
+                                      ELSE NULL
+                                  END,
+                                  CASE
+                                      WHEN wds.control_iqr IS NOT NULL AND (wds.compare_config->'thresholds'->>'iqrThreshold') IS NOT NULL
+                                      THEN wds.control_stat_value - (wds.control_iqr * (wds.compare_config->'thresholds'->>'iqrThreshold')::float)
+                                      ELSE NULL
+                                  END,
+                                  CASE
+                                      WHEN (wds.compare_config->'thresholds'->>'absoluteThreshold') IS NOT NULL
+                                      THEN wds.control_stat_value - (wds.compare_config->'thresholds'->>'absoluteThreshold')::float
+                                      ELSE NULL
+                                  END
+                              )
+                          )
+                      )
+                  ELSE
+                      -- Return empty JSONB object when control_stat_value is NULL to satisfy NOT NULL constraint
+                      jsonb_build_object(
+                          'upper', jsonb_build_object(),
+                          'lower', jsonb_build_object()
+                      )
+              END) as thresholds,
+
+              -- Individual threshold checks
+              jsonb_build_object(
+                  'pct', jsonb_build_object(
+                      'valid', wds.control_exists AND wds.test_stat_value IS NOT NULL AND wds.control_stat_value IS NOT NULL,
+                      'isDifference', CASE
+                          WHEN wds.control_exists AND wds.test_stat_value IS NOT NULL AND wds.control_stat_value IS NOT NULL AND (wds.compare_config->'thresholds'->>'percentageThreshold') IS NOT NULL
+                          THEN (wds.test_stat_value > wds.control_stat_value * (1 + (wds.compare_config->'thresholds'->>'percentageThreshold')::float) OR
+                                wds.test_stat_value < wds.control_stat_value * (1 - (wds.compare_config->'thresholds'->>'percentageThreshold')::float))
+                          ELSE false
+                      END
+                  ),
+                  'iqr', jsonb_build_object(
+                      'valid', wds.control_exists AND wds.test_stat_value IS NOT NULL AND wds.control_stat_value IS NOT NULL AND wds.control_iqr IS NOT NULL,
+                      'isDifference', CASE
+                          WHEN wds.control_exists AND wds.test_stat_value IS NOT NULL AND wds.control_stat_value IS NOT NULL AND wds.control_iqr IS NOT NULL AND (wds.compare_config->'thresholds'->>'iqrThreshold') IS NOT NULL
+                          THEN (wds.test_stat_value > wds.control_stat_value + (wds.control_iqr * (wds.compare_config->'thresholds'->>'iqrThreshold')::float) OR
+                                wds.test_stat_value < wds.control_stat_value - (wds.control_iqr * (wds.compare_config->'thresholds'->>'iqrThreshold')::float))
+                          ELSE false
+                      END
+                  ),
+                  'abs', jsonb_build_object(
+                      'valid', wds.control_exists AND wds.test_stat_value IS NOT NULL AND wds.control_stat_value IS NOT NULL AND (wds.compare_config->'thresholds'->>'absoluteThreshold') IS NOT NULL,
+                      'isDifference', CASE
+                          WHEN wds.control_exists AND wds.test_stat_value IS NOT NULL AND wds.control_stat_value IS NOT NULL AND (wds.compare_config->'thresholds'->>'absoluteThreshold') IS NOT NULL
+                          THEN ABS(wds.test_stat_value - wds.control_stat_value) > (wds.compare_config->'thresholds'->>'absoluteThreshold')::float
+                          ELSE false
+                      END
+                  )
+              ) as checks
+          FROM with_dynamic_statistics wds
+      ),
+
+      final_results AS (
+          -- Combine threshold checks into two summary flags and derive the
+          -- conclusion label. This is where the regression/improvement verdict
+          -- is made for each metric.
+          SELECT
+              wtc.*,
+              -- partialDifference: OR logic — true if ANY threshold is exceeded.
+              -- Used for "partial regression" / "partial improvement" labels.
+              CASE
+                  WHEN (wtc.checks->'pct'->>'isDifference')::boolean = true OR
+                       (wtc.checks->'iqr'->>'isDifference')::boolean = true OR
+                       (wtc.checks->'abs'->>'isDifference')::boolean = true
+                  THEN true
+                  ELSE false
+              END as partial_difference,
+
+              -- allDifference: AND logic — true only if ALL configured (valid)
+              -- thresholds are exceeded. Invalid checks (e.g., IQR when control_iqr
+              -- is null) default to true so they don't block the AND.
+              -- Used for "regression" / "improvement" labels (full, not partial).
+              CASE
+                  WHEN (wtc.checks->'pct'->>'isDifference')::boolean = true AND
+                       (CASE WHEN (wtc.checks->'iqr'->>'valid')::boolean = true
+                        THEN (wtc.checks->'iqr'->>'isDifference')::boolean
+                        ELSE true END) AND
+                       (CASE WHEN (wtc.checks->'abs'->>'valid')::boolean = true
+                        THEN (wtc.checks->'abs'->>'isDifference')::boolean
+                        ELSE true END)
+                  THEN true
+                  ELSE false
+              END as all_difference,
+
+              -- Build conclusion
+              jsonb_build_object(
+                  'valid', wtc.control_exists AND wtc.test_stat_value IS NOT NULL,
+                  'increase', CASE
+                      WHEN wtc.test_stat_value IS NOT NULL AND wtc.control_stat_value IS NOT NULL
+                      THEN wtc.test_stat_value > wtc.control_stat_value
+                      ELSE false
+                  END,
+                  'decrease', CASE
+                      WHEN wtc.test_stat_value IS NOT NULL AND wtc.control_stat_value IS NOT NULL
+                      THEN wtc.test_stat_value < wtc.control_stat_value
+                      ELSE false
+                  END,
+                  'partialDifference', CASE
+                      WHEN (wtc.checks->'pct'->>'isDifference')::boolean = true OR
+                           (wtc.checks->'iqr'->>'isDifference')::boolean = true OR
+                           (wtc.checks->'abs'->>'isDifference')::boolean = true
+                      THEN true
+                      ELSE false
+                  END,
+                  'allDifference', CASE
+                      WHEN (wtc.checks->'pct'->>'isDifference')::boolean = true AND
+                           (CASE WHEN (wtc.checks->'iqr'->>'valid')::boolean = true
+                            THEN (wtc.checks->'iqr'->>'isDifference')::boolean
+                            ELSE true END) AND
+                           (CASE WHEN (wtc.checks->'abs'->>'valid')::boolean = true
+                            THEN (wtc.checks->'abs'->>'isDifference')::boolean
+                            ELSE true END)
+                      THEN true
+                      ELSE false
+                  END,
+                  'ignore', COALESCE((wtc.compare_config->>'ignore')::boolean, false),
+                  'label', CASE
+                      -- Basic validity checks
+                      WHEN NOT (wtc.control_exists AND wtc.test_stat_value IS NOT NULL) THEN 'incomparable'
+                      WHEN COALESCE((wtc.compare_config->>'ignore')::boolean, false) = true THEN 'ignored'
+
+                      -- Check for allDifference (ALL applicable thresholds show difference) - for full labels
+                      WHEN ((wtc.checks->'pct'->>'isDifference')::boolean = true AND
+                            (CASE WHEN (wtc.checks->'iqr'->>'valid')::boolean = true
+                             THEN (wtc.checks->'iqr'->>'isDifference')::boolean
+                             ELSE true END) AND
+                            (CASE WHEN (wtc.checks->'abs'->>'valid')::boolean = true
+                             THEN (wtc.checks->'abs'->>'isDifference')::boolean
+                             ELSE true END)) THEN
+                          -- Full labels when allDifference is true
+                          CASE
+                              WHEN (wtc.compare_config->'metricClassification'->>'higherIsBetter') IS NULL THEN
+                                  CASE
+                                      WHEN wtc.test_stat_value > wtc.control_stat_value THEN 'increase'
+                                      ELSE 'decrease'
+                                  END
+
+                              -- For metrics where higher is better (explicitly true)
+                              WHEN (wtc.compare_config->'metricClassification'->>'higherIsBetter')::boolean = true THEN
+                                  CASE
+                                      WHEN wtc.test_stat_value > wtc.control_stat_value THEN 'improvement'
+                                      ELSE 'regression'
+                                  END
+
+                              -- For metrics where lower is better (explicitly false)
+                              WHEN (wtc.compare_config->'metricClassification'->>'higherIsBetter')::boolean = false THEN
+                                  CASE
+                                      WHEN wtc.test_stat_value < wtc.control_stat_value THEN 'improvement'
+                                      ELSE 'regression'
+                                  END
+                          END
+
+                      -- Check for partialDifference (ANY threshold shows difference) - for partial labels
+                      WHEN ((wtc.checks->'pct'->>'isDifference')::boolean = true OR
+                            (wtc.checks->'iqr'->>'isDifference')::boolean = true OR
+                            (wtc.checks->'abs'->>'isDifference')::boolean = true) THEN
+                          -- Partial labels when partialDifference is true but allDifference is false
+                          CASE
+                              WHEN (wtc.compare_config->'metricClassification'->>'higherIsBetter') IS NULL THEN
+                                  CASE
+                                      WHEN wtc.test_stat_value > wtc.control_stat_value THEN 'partial increase'
+                                      ELSE 'partial decrease'
+                                  END
+                              WHEN (wtc.compare_config->'metricClassification'->>'higherIsBetter')::boolean = true THEN
+                                  CASE
+                                      WHEN wtc.test_stat_value > wtc.control_stat_value THEN 'partial improvement'
+                                      ELSE 'partial regression'
+                                  END
+                              WHEN (wtc.compare_config->'metricClassification'->>'higherIsBetter')::boolean = false THEN
+                                  CASE
+                                      WHEN wtc.test_stat_value < wtc.control_stat_value THEN 'partial improvement'
+                                      ELSE 'partial regression'
+                                  END
+                          END
+
+                      ELSE 'no difference'
+                  END
+              ) as conclusion
+          FROM with_threshold_calculations wtc
+      )
+
+
+      INSERT INTO ds_adapt_results (
+          test_run_id, control_group_id, application_dashboard_id, panel_id, metric_name,
+          dashboard_uid, dashboard_label, panel_title, unit, test_run_start,
+          benchmark_ids, updated_at,
+          mean, median, min, max, std, last_value, q10, q25, q75, q90, q95, q99, iqr, n,
+          is_constant, all_missing, exists_data,
+          compare_config, metric_classification, statistic, thresholds, conditions, checks, conclusion,
+          uses_default_value, default_value,
+          metrics_source_id,
+          organization_id, team_id, created_by, updated_by
+      )
+      SELECT
+          test_run_id,
+          control_group_id,
+          application_dashboard_id,
+          panel_id::int,
+          metric_name,
+          dashboard_uid,
+          dashboard_label,
+          panel_title,
+          unit,
+          test_run_start,
+          CASE WHEN benchmark_id IS NOT NULL THEN ARRAY[benchmark_id::text] ELSE NULL END as benchmark_ids,
+          updated_at,
+          jsonb_build_object(
+              'test', test_mean,
+              'control', control_mean,
+              'diff', CASE WHEN test_mean IS NOT NULL AND control_mean IS NOT NULL THEN test_mean - control_mean ELSE NULL END,
+              'absDiff', CASE WHEN test_mean IS NOT NULL AND control_mean IS NOT NULL THEN ABS(test_mean - control_mean) ELSE NULL END,
+              'pctDiff', CASE WHEN test_mean IS NOT NULL AND control_mean IS NOT NULL AND control_mean != 0 THEN (test_mean - control_mean) / control_mean ELSE NULL END,
+              'iqrDiff', CASE WHEN test_mean IS NOT NULL AND control_mean IS NOT NULL AND control_iqr IS NOT NULL AND control_iqr != 0 THEN (test_mean - control_mean) / control_iqr ELSE NULL END
+          ) as mean,
+          jsonb_build_object(
+              'test', test_median,
+              'control', control_median,
+              'diff', CASE WHEN test_median IS NOT NULL AND control_median IS NOT NULL THEN test_median - control_median ELSE NULL END,
+              'absDiff', CASE WHEN test_median IS NOT NULL AND control_median IS NOT NULL THEN ABS(test_median - control_median) ELSE NULL END,
+              'pctDiff', CASE WHEN test_median IS NOT NULL AND control_median IS NOT NULL AND control_median != 0 THEN (test_median - control_median) / control_median ELSE NULL END,
+              'iqrDiff', CASE WHEN test_median IS NOT NULL AND control_median IS NOT NULL AND control_iqr IS NOT NULL AND control_iqr != 0 THEN (test_median - control_median) / control_iqr ELSE NULL END
+          ) as median,
+          jsonb_build_object(
+              'test', test_min,
+              'control', control_min,
+              'diff', CASE WHEN test_min IS NOT NULL AND control_min IS NOT NULL THEN test_min - control_min ELSE NULL END,
+              'absDiff', CASE WHEN test_min IS NOT NULL AND control_min IS NOT NULL THEN ABS(test_min - control_min) ELSE NULL END,
+              'pctDiff', CASE WHEN test_min IS NOT NULL AND control_min IS NOT NULL AND control_min != 0 THEN (test_min - control_min) / control_min ELSE NULL END,
+              'iqrDiff', CASE WHEN test_min IS NOT NULL AND control_min IS NOT NULL AND control_iqr IS NOT NULL AND control_iqr != 0 THEN (test_min - control_min) / control_iqr ELSE NULL END
+          ) as min,
+          jsonb_build_object(
+              'test', test_max,
+              'control', control_max,
+              'diff', CASE WHEN test_max IS NOT NULL AND control_max IS NOT NULL THEN test_max - control_max ELSE NULL END,
+              'absDiff', CASE WHEN test_max IS NOT NULL AND control_max IS NOT NULL THEN ABS(test_max - control_max) ELSE NULL END,
+              'pctDiff', CASE WHEN test_max IS NOT NULL AND control_max IS NOT NULL AND control_max != 0 THEN (test_max - control_max) / control_max ELSE NULL END,
+              'iqrDiff', CASE WHEN test_max IS NOT NULL AND control_max IS NOT NULL AND control_iqr IS NOT NULL AND control_iqr != 0 THEN (test_max - control_max) / control_iqr ELSE NULL END
+          ) as max,
+          jsonb_build_object(
+              'test', test_std,
+              'control', control_std,
+              'diff', CASE WHEN test_std IS NOT NULL AND control_std IS NOT NULL THEN test_std - control_std ELSE NULL END,
+              'absDiff', CASE WHEN test_std IS NOT NULL AND control_std IS NOT NULL THEN ABS(test_std - control_std) ELSE NULL END,
+              'pctDiff', CASE WHEN test_std IS NOT NULL AND control_std IS NOT NULL AND control_std != 0 THEN (test_std - control_std) / control_std ELSE NULL END,
+              'iqrDiff', CASE WHEN test_std IS NOT NULL AND control_std IS NOT NULL AND control_iqr IS NOT NULL AND control_iqr != 0 THEN (test_std - control_std) / control_iqr ELSE NULL END
+          ) as std,
+          jsonb_build_object(
+              'test', test_last,
+              'control', control_last,
+              'diff', CASE WHEN test_last IS NOT NULL AND control_last IS NOT NULL THEN test_last - control_last ELSE NULL END,
+              'absDiff', CASE WHEN test_last IS NOT NULL AND control_last IS NOT NULL THEN ABS(test_last - control_last) ELSE NULL END,
+              'pctDiff', CASE WHEN test_last IS NOT NULL AND control_last IS NOT NULL AND control_last != 0 THEN (test_last - control_last) / control_last ELSE NULL END,
+              'iqrDiff', CASE WHEN test_last IS NOT NULL AND control_last IS NOT NULL AND control_iqr IS NOT NULL AND control_iqr != 0 THEN (test_last - control_last) / control_iqr ELSE NULL END
+          ) as last_value,
+          jsonb_build_object(
+              'test', test_q10,
+              'control', control_q10,
+              'diff', CASE WHEN test_q10 IS NOT NULL AND control_q10 IS NOT NULL THEN test_q10 - control_q10 ELSE NULL END,
+              'absDiff', CASE WHEN test_q10 IS NOT NULL AND control_q10 IS NOT NULL THEN ABS(test_q10 - control_q10) ELSE NULL END,
+              'pctDiff', CASE WHEN test_q10 IS NOT NULL AND control_q10 IS NOT NULL AND control_q10 != 0 THEN (test_q10 - control_q10) / control_q10 ELSE NULL END,
+              'iqrDiff', CASE WHEN test_q10 IS NOT NULL AND control_q10 IS NOT NULL AND control_iqr IS NOT NULL AND control_iqr != 0 THEN (test_q10 - control_q10) / control_iqr ELSE NULL END
+          ) as q10,
+          jsonb_build_object(
+              'test', test_q25,
+              'control', control_q25,
+              'diff', CASE WHEN test_q25 IS NOT NULL AND control_q25 IS NOT NULL THEN test_q25 - control_q25 ELSE NULL END,
+              'absDiff', CASE WHEN test_q25 IS NOT NULL AND control_q25 IS NOT NULL THEN ABS(test_q25 - control_q25) ELSE NULL END,
+              'pctDiff', CASE WHEN test_q25 IS NOT NULL AND control_q25 IS NOT NULL AND control_q25 != 0 THEN (test_q25 - control_q25) / control_q25 ELSE NULL END,
+              'iqrDiff', CASE WHEN test_q25 IS NOT NULL AND control_q25 IS NOT NULL AND control_iqr IS NOT NULL AND control_iqr != 0 THEN (test_q25 - control_q25) / control_iqr ELSE NULL END
+          ) as q25,
+          jsonb_build_object(
+              'test', test_q75,
+              'control', control_q75,
+              'diff', CASE WHEN test_q75 IS NOT NULL AND control_q75 IS NOT NULL THEN test_q75 - control_q75 ELSE NULL END,
+              'absDiff', CASE WHEN test_q75 IS NOT NULL AND control_q75 IS NOT NULL THEN ABS(test_q75 - control_q75) ELSE NULL END,
+              'pctDiff', CASE WHEN test_q75 IS NOT NULL AND control_q75 IS NOT NULL AND control_q75 != 0 THEN (test_q75 - control_q75) / control_q75 ELSE NULL END,
+              'iqrDiff', CASE WHEN test_q75 IS NOT NULL AND control_q75 IS NOT NULL AND control_iqr IS NOT NULL AND control_iqr != 0 THEN (test_q75 - control_q75) / control_iqr ELSE NULL END
+          ) as q75,
+          jsonb_build_object(
+              'test', test_q90,
+              'control', control_q90,
+              'diff', CASE WHEN test_q90 IS NOT NULL AND control_q90 IS NOT NULL THEN test_q90 - control_q90 ELSE NULL END,
+              'absDiff', CASE WHEN test_q90 IS NOT NULL AND control_q90 IS NOT NULL THEN ABS(test_q90 - control_q90) ELSE NULL END,
+              'pctDiff', CASE WHEN test_q90 IS NOT NULL AND control_q90 IS NOT NULL AND control_q90 != 0 THEN (test_q90 - control_q90) / control_q90 ELSE NULL END,
+              'iqrDiff', CASE WHEN test_q90 IS NOT NULL AND control_q90 IS NOT NULL AND control_iqr IS NOT NULL AND control_iqr != 0 THEN (test_q90 - control_q90) / control_iqr ELSE NULL END
+          ) as q90,
+          jsonb_build_object(
+              'test', test_q95,
+              'control', control_q95,
+              'diff', CASE WHEN test_q95 IS NOT NULL AND control_q95 IS NOT NULL THEN test_q95 - control_q95 ELSE NULL END,
+              'absDiff', CASE WHEN test_q95 IS NOT NULL AND control_q95 IS NOT NULL THEN ABS(test_q95 - control_q95) ELSE NULL END,
+              'pctDiff', CASE WHEN test_q95 IS NOT NULL AND control_q95 IS NOT NULL AND control_q95 != 0 THEN (test_q95 - control_q95) / control_q95 ELSE NULL END,
+              'iqrDiff', CASE WHEN test_q95 IS NOT NULL AND control_q95 IS NOT NULL AND control_iqr IS NOT NULL AND control_iqr != 0 THEN (test_q95 - control_q95) / control_iqr ELSE NULL END
+          ) as q95,
+          jsonb_build_object(
+              'test', test_q99,
+              'control', control_q99,
+              'diff', CASE WHEN test_q99 IS NOT NULL AND control_q99 IS NOT NULL THEN test_q99 - control_q99 ELSE NULL END,
+              'absDiff', CASE WHEN test_q99 IS NOT NULL AND control_q99 IS NOT NULL THEN ABS(test_q99 - control_q99) ELSE NULL END,
+              'pctDiff', CASE WHEN test_q99 IS NOT NULL AND control_q99 IS NOT NULL AND control_q99 != 0 THEN (test_q99 - control_q99) / control_q99 ELSE NULL END,
+              'iqrDiff', CASE WHEN test_q99 IS NOT NULL AND control_q99 IS NOT NULL AND control_iqr IS NOT NULL AND control_iqr != 0 THEN (test_q99 - control_q99) / control_iqr ELSE NULL END
+          ) as q99,
+          jsonb_build_object(
+              'test', test_iqr,
+              'control', control_iqr
+          ) as iqr,
+          jsonb_build_object('test', test_n, 'control', control_n) as n,
+          jsonb_build_object('test', test_is_constant, 'control', control_is_constant) as is_constant,
+          jsonb_build_object('test', test_all_missing, 'control', control_all_missing) as all_missing,
+          jsonb_build_object('test', NOT COALESCE(test_all_missing, true), 'control', NOT COALESCE(control_all_missing, true)) as exists_data,
+          compare_config, compare_config->'metricClassification' as metric_classification,
+          statistic, thresholds,
+          jsonb_build_object('controlExists', control_exists, 'testStatValue', test_stat_value, 'controlStatValue', control_stat_value, 'configuredAggregation', compare_config->'thresholds'->>'aggregation') as conditions,
+          checks, conclusion,
+          false as uses_default_value, NULL as default_value,
+          metrics_source_id,
+          organization_id,
+          team_id,
+          'worker-pipeline' as created_by,
+          'worker-pipeline' as updated_by
+      FROM final_results
+
+      ON CONFLICT (test_run_id, control_group_id, application_dashboard_id, panel_id, metric_name)
+      DO UPDATE SET
+          dashboard_uid = EXCLUDED.dashboard_uid,
+          dashboard_label = EXCLUDED.dashboard_label,
+          panel_title = EXCLUDED.panel_title,
+          unit = EXCLUDED.unit,
+          test_run_start = EXCLUDED.test_run_start,
+          benchmark_ids = EXCLUDED.benchmark_ids,
+          updated_at = EXCLUDED.updated_at,
+          mean = EXCLUDED.mean,
+          median = EXCLUDED.median,
+          min = EXCLUDED.min,
+          max = EXCLUDED.max,
+          std = EXCLUDED.std,
+          last_value = EXCLUDED.last_value,
+          q10 = EXCLUDED.q10,
+          q25 = EXCLUDED.q25,
+          q75 = EXCLUDED.q75,
+          q90 = EXCLUDED.q90,
+          q95 = EXCLUDED.q95,
+          q99 = EXCLUDED.q99,
+          iqr = EXCLUDED.iqr,
+          n = EXCLUDED.n,
+          is_constant = EXCLUDED.is_constant,
+          all_missing = EXCLUDED.all_missing,
+          exists_data = EXCLUDED.exists_data,
+          compare_config = EXCLUDED.compare_config,
+          metric_classification = EXCLUDED.metric_classification,
+          statistic = EXCLUDED.statistic,
+          thresholds = EXCLUDED.thresholds,
+          conditions = EXCLUDED.conditions,
+          checks = EXCLUDED.checks,
+          conclusion = EXCLUDED.conclusion,
+          uses_default_value = EXCLUDED.uses_default_value,
+          default_value = EXCLUDED.default_value,
+          metrics_source_id = COALESCE(EXCLUDED.metrics_source_id, ds_adapt_results.metrics_source_id),
+          organization_id = EXCLUDED.organization_id,
+          team_id = EXCLUDED.team_id,
+          updated_by = EXCLUDED.updated_by
+    
+    "
+`;
+
+exports[`ADAPT SQL Builder Golden-File Tests > AdaptResultsSQLBuilder > buildAdaptResultsSQL with filter > should generate stable SQL with filter (snapshot) 1`] = `
+"
+      WITH test_metrics AS (
+          SELECT
+              ms.test_run_id,
+              ms.test_run_id as control_group_id,  -- assumes testRunId equals controlGroupId per spec
+              ms.application_dashboard_id,
+              ms.panel_id::varchar as panel_id,
+              ms.metric_name,
+              -- All statistics from ds_metric_statistics
+              ms.mean as test_mean,
+              ms.median as test_median,
+              ms.min_value as test_min,
+              ms.max_value as test_max,
+              ms.std_dev as test_std,
+              ms.last_value as test_last,
+              ms.q10 as test_q10,
+              ms.q25 as test_q25,
+              ms.q75 as test_q75,
+              ms.q90 as test_q90,
+              ms.q95 as test_q95,
+              ms.q99 as test_q99,
+              ms.iqr as test_iqr,
+              ms.count as test_n,
+              ms.is_constant as test_is_constant,
+              ms.all_missing as test_all_missing,
+              -- Additional metadata
+              ms.dashboard_uid,
+              ms.dashboard_label,
+              ms.panel_title,
+              ms.unit,
+              ms.test_run_start,
+              ms.benchmark_id,
+              ms.updated_at,
+              ms.organization_id,
+              ms.team_id,
+              ms.metrics_source_id
+          FROM ds_metric_statistics ms
+          WHERE ms.test_run_id IN ($1, $2)
+            AND ms.application_dashboard_id = $4 AND ms.panel_id = $5
+      ),
+
+      with_control AS (
+          SELECT
+              tm.*,
+              cgs.mean as control_mean,
+              cgs.median as control_median,
+              cgs.min_value as control_min,
+              cgs.max_value as control_max,
+              cgs.std_dev as control_std,
+              cgs.last_value as control_last,
+              cgs.q10 as control_q10,
+              cgs.q25 as control_q25,
+              cgs.q75 as control_q75,
+              cgs.q90 as control_q90,
+              cgs.q95 as control_q95,
+              cgs.q99 as control_q99,
+              cgs.iqr as control_iqr,
+              cgs.count as control_n,
+              cgs.is_constant as control_is_constant,
+              cgs.all_missing as control_all_missing,
+              CASE
+                  WHEN cgs.control_group_id IS NOT NULL THEN true
+                  ELSE false
+              END as control_exists
+          FROM test_metrics tm
+          LEFT JOIN ds_control_group_statistics cgs ON (
+              cgs.control_group_id = tm.control_group_id
+              AND cgs.metrics_source_id = tm.metrics_source_id
+              AND cgs.panel_id::text = tm.panel_id
+              AND cgs.metric_name = tm.metric_name
+          )
+      ),
+
+      with_compare_config AS (
+          -- Resolve comparison config via 4-level fallback hierarchy.
+          -- COALESCE picks the most specific config that exists:
+          -- metric > panel > dashboard > global > hardcoded default.
+          -- This lets users override thresholds at any granularity.
+          SELECT
+              wc.*,
+              COALESCE(
+                  cfg_metric.config_data,     -- 1. metric-specific override
+                  cfg_panel.config_data,      -- 2. panel-level default
+                  cfg_dashboard.config_data,  -- 3. dashboard-level default
+                  cfg_global.config_data,     -- 4. global default
+                  $3::jsonb  -- 5. hardcoded fallback
+              ) as compare_config
+          FROM with_control wc
+          LEFT JOIN temp_config_cache cfg_metric ON (
+              cfg_metric.application_dashboard_id = wc.application_dashboard_id
+              AND cfg_metric.panel_id = wc.panel_id::int
+              AND cfg_metric.metric_name = wc.metric_name
+          )
+          LEFT JOIN temp_config_cache cfg_panel ON (
+              cfg_panel.application_dashboard_id = wc.application_dashboard_id
+              AND cfg_panel.panel_id = wc.panel_id::int
+              AND cfg_panel.metric_name IS NULL
+          )
+          LEFT JOIN temp_config_cache cfg_dashboard ON (
+              cfg_dashboard.application_dashboard_id = wc.application_dashboard_id
+              AND cfg_dashboard.panel_id IS NULL
+              AND cfg_dashboard.metric_name IS NULL
+          )
+          LEFT JOIN temp_config_cache cfg_global ON (
+              cfg_global.application_dashboard_id IS NULL
+              AND cfg_global.panel_id IS NULL
+              AND cfg_global.metric_name IS NULL
+          )
+      ),
+
+      with_dynamic_statistics AS (
+          -- The compare_config specifies WHICH statistic to compare (e.g., "median",
+          -- "p95", "mean"). This CTE resolves that dynamically via CASE, so all
+          -- downstream threshold logic works on a single (test_stat_value, control_stat_value)
+          -- pair regardless of which statistic was chosen.
+          SELECT
+              wcc.*,
+              CASE (wcc.compare_config->'thresholds'->>'aggregation')
+                  WHEN 'mean' THEN wcc.test_mean
+                  WHEN 'median' THEN wcc.test_median
+                  WHEN 'min' THEN wcc.test_min
+                  WHEN 'max' THEN wcc.test_max
+                  WHEN 'last' THEN wcc.test_last
+                  WHEN 'q10' THEN wcc.test_q10
+                  WHEN 'p10' THEN wcc.test_q10  -- Support both notations
+                  WHEN 'q25' THEN wcc.test_q25
+                  WHEN 'p25' THEN wcc.test_q25
+                  WHEN 'q75' THEN wcc.test_q75
+                  WHEN 'p75' THEN wcc.test_q75
+                  WHEN 'q90' THEN wcc.test_q90
+                  WHEN 'p90' THEN wcc.test_q90
+                  WHEN 'q95' THEN wcc.test_q95
+                  WHEN 'p95' THEN wcc.test_q95
+                  WHEN 'q99' THEN wcc.test_q99
+                  WHEN 'p99' THEN wcc.test_q99
+                  ELSE wcc.test_median  -- Default to median
+              END as test_stat_value,
+
+              CASE (wcc.compare_config->'thresholds'->>'aggregation')
+                  WHEN 'mean' THEN wcc.control_mean
+                  WHEN 'median' THEN wcc.control_median
+                  WHEN 'min' THEN wcc.control_min
+                  WHEN 'max' THEN wcc.control_max
+                  WHEN 'last' THEN wcc.control_last
+                  WHEN 'q10' THEN wcc.control_q10
+                  WHEN 'p10' THEN wcc.control_q10
+                  WHEN 'q25' THEN wcc.control_q25
+                  WHEN 'p25' THEN wcc.control_q25
+                  WHEN 'q75' THEN wcc.control_q75
+                  WHEN 'p75' THEN wcc.control_q75
+                  WHEN 'q90' THEN wcc.control_q90
+                  WHEN 'p90' THEN wcc.control_q90
+                  WHEN 'q95' THEN wcc.control_q95
+                  WHEN 'p95' THEN wcc.control_q95
+                  WHEN 'q99' THEN wcc.control_q99
+                  WHEN 'p99' THEN wcc.control_q99
+                  ELSE wcc.control_median  -- Default to median
+              END as control_stat_value
+          FROM with_compare_config wcc
+      ),
+
+      with_threshold_calculations AS (
+          SELECT
+              wds.*,
+              -- Extract threshold values
+              (wds.compare_config->'thresholds'->>'percentageThreshold')::float as percentage_threshold,
+              (wds.compare_config->'thresholds'->>'iqrThreshold')::float as iqr_threshold,
+              (wds.compare_config->'thresholds'->>'absoluteThreshold')::float as absolute_threshold,
+
+              -- Calculate statistical differences (matching legacy Python format)
+              jsonb_build_object(
+                  'name', wds.compare_config->'thresholds'->>'aggregation',
+                  'test', CASE
+                      WHEN wds.test_stat_value IS NOT NULL
+                      THEN wds.test_stat_value::text
+                      ELSE NULL
+                  END,
+                  'control', CASE
+                      WHEN wds.control_stat_value IS NOT NULL
+                      THEN wds.control_stat_value::text
+                      ELSE NULL
+                  END,
+                  'diff', CASE
+                      WHEN wds.test_stat_value IS NOT NULL AND wds.control_stat_value IS NOT NULL
+                      THEN (wds.test_stat_value - wds.control_stat_value)::text
+                      ELSE NULL
+                  END,
+                  'absDiff', CASE
+                      WHEN wds.test_stat_value IS NOT NULL AND wds.control_stat_value IS NOT NULL
+                      THEN ABS(wds.test_stat_value - wds.control_stat_value)::text
+                      ELSE NULL
+                  END,
+                  'pctDiff', CASE
+                      WHEN wds.test_stat_value IS NOT NULL AND wds.control_stat_value IS NOT NULL AND wds.control_stat_value != 0
+                      THEN ((wds.test_stat_value - wds.control_stat_value) / wds.control_stat_value)::text
+                      ELSE NULL
+                  END
+              ) as statistic,
+
+              -- Calculate upper and lower thresholds (legacy format with overall)
+              (CASE
+                  WHEN wds.control_stat_value IS NOT NULL THEN
+                      jsonb_build_object(
+                          'upper', jsonb_build_object(
+                              'pct', CASE
+                                  WHEN (wds.compare_config->'thresholds'->>'percentageThreshold') IS NOT NULL
+                                  THEN wds.control_stat_value * (1 + (wds.compare_config->'thresholds'->>'percentageThreshold')::float)
+                                  ELSE NULL
+                              END,
+                              'iqr', CASE
+                                  WHEN wds.control_iqr IS NOT NULL AND (wds.compare_config->'thresholds'->>'iqrThreshold') IS NOT NULL
+                                  THEN wds.control_stat_value + (wds.control_iqr * (wds.compare_config->'thresholds'->>'iqrThreshold')::float)
+                                  ELSE NULL
+                              END,
+                              'abs', CASE
+                                  WHEN (wds.compare_config->'thresholds'->>'absoluteThreshold') IS NOT NULL
+                                  THEN wds.control_stat_value + (wds.compare_config->'thresholds'->>'absoluteThreshold')::float
+                                  ELSE NULL
+                              END,
+                              'constant', COALESCE(wds.control_stat_value, 0),
+                              'overall', GREATEST(
+                                  CASE
+                                      WHEN (wds.compare_config->'thresholds'->>'percentageThreshold') IS NOT NULL
+                                      THEN wds.control_stat_value * (1 + (wds.compare_config->'thresholds'->>'percentageThreshold')::float)
+                                      ELSE NULL
+                                  END,
+                                  CASE
+                                      WHEN wds.control_iqr IS NOT NULL AND (wds.compare_config->'thresholds'->>'iqrThreshold') IS NOT NULL
+                                      THEN wds.control_stat_value + (wds.control_iqr * (wds.compare_config->'thresholds'->>'iqrThreshold')::float)
+                                      ELSE NULL
+                                  END,
+                                  CASE
+                                      WHEN (wds.compare_config->'thresholds'->>'absoluteThreshold') IS NOT NULL
+                                      THEN wds.control_stat_value + (wds.compare_config->'thresholds'->>'absoluteThreshold')::float
+                                      ELSE NULL
+                                  END
+                              )
+                          ),
+                          'lower', jsonb_build_object(
+                              'pct', CASE
+                                  WHEN (wds.compare_config->'thresholds'->>'percentageThreshold') IS NOT NULL
+                                  THEN wds.control_stat_value * (1 - (wds.compare_config->'thresholds'->>'percentageThreshold')::float)
+                                  ELSE NULL
+                              END,
+                              'iqr', CASE
+                                  WHEN wds.control_iqr IS NOT NULL AND (wds.compare_config->'thresholds'->>'iqrThreshold') IS NOT NULL
+                                  THEN wds.control_stat_value - (wds.control_iqr * (wds.compare_config->'thresholds'->>'iqrThreshold')::float)
+                                  ELSE NULL
+                              END,
+                              'abs', CASE
+                                  WHEN (wds.compare_config->'thresholds'->>'absoluteThreshold') IS NOT NULL
+                                  THEN wds.control_stat_value - (wds.compare_config->'thresholds'->>'absoluteThreshold')::float
+                                  ELSE NULL
+                              END,
+                              'constant', COALESCE(wds.control_stat_value, 0),
+                              'overall', LEAST(
+                                  CASE
+                                      WHEN (wds.compare_config->'thresholds'->>'percentageThreshold') IS NOT NULL
+                                      THEN wds.control_stat_value * (1 - (wds.compare_config->'thresholds'->>'percentageThreshold')::float)
+                                      ELSE NULL
+                                  END,
+                                  CASE
+                                      WHEN wds.control_iqr IS NOT NULL AND (wds.compare_config->'thresholds'->>'iqrThreshold') IS NOT NULL
+                                      THEN wds.control_stat_value - (wds.control_iqr * (wds.compare_config->'thresholds'->>'iqrThreshold')::float)
+                                      ELSE NULL
+                                  END,
+                                  CASE
+                                      WHEN (wds.compare_config->'thresholds'->>'absoluteThreshold') IS NOT NULL
+                                      THEN wds.control_stat_value - (wds.compare_config->'thresholds'->>'absoluteThreshold')::float
+                                      ELSE NULL
+                                  END
+                              )
+                          )
+                      )
+                  ELSE
+                      -- Return empty JSONB object when control_stat_value is NULL to satisfy NOT NULL constraint
+                      jsonb_build_object(
+                          'upper', jsonb_build_object(),
+                          'lower', jsonb_build_object()
+                      )
+              END) as thresholds,
+
+              -- Individual threshold checks
+              jsonb_build_object(
+                  'pct', jsonb_build_object(
+                      'valid', wds.control_exists AND wds.test_stat_value IS NOT NULL AND wds.control_stat_value IS NOT NULL,
+                      'isDifference', CASE
+                          WHEN wds.control_exists AND wds.test_stat_value IS NOT NULL AND wds.control_stat_value IS NOT NULL AND (wds.compare_config->'thresholds'->>'percentageThreshold') IS NOT NULL
+                          THEN (wds.test_stat_value > wds.control_stat_value * (1 + (wds.compare_config->'thresholds'->>'percentageThreshold')::float) OR
+                                wds.test_stat_value < wds.control_stat_value * (1 - (wds.compare_config->'thresholds'->>'percentageThreshold')::float))
+                          ELSE false
+                      END
+                  ),
+                  'iqr', jsonb_build_object(
+                      'valid', wds.control_exists AND wds.test_stat_value IS NOT NULL AND wds.control_stat_value IS NOT NULL AND wds.control_iqr IS NOT NULL,
+                      'isDifference', CASE
+                          WHEN wds.control_exists AND wds.test_stat_value IS NOT NULL AND wds.control_stat_value IS NOT NULL AND wds.control_iqr IS NOT NULL AND (wds.compare_config->'thresholds'->>'iqrThreshold') IS NOT NULL
+                          THEN (wds.test_stat_value > wds.control_stat_value + (wds.control_iqr * (wds.compare_config->'thresholds'->>'iqrThreshold')::float) OR
+                                wds.test_stat_value < wds.control_stat_value - (wds.control_iqr * (wds.compare_config->'thresholds'->>'iqrThreshold')::float))
+                          ELSE false
+                      END
+                  ),
+                  'abs', jsonb_build_object(
+                      'valid', wds.control_exists AND wds.test_stat_value IS NOT NULL AND wds.control_stat_value IS NOT NULL AND (wds.compare_config->'thresholds'->>'absoluteThreshold') IS NOT NULL,
+                      'isDifference', CASE
+                          WHEN wds.control_exists AND wds.test_stat_value IS NOT NULL AND wds.control_stat_value IS NOT NULL AND (wds.compare_config->'thresholds'->>'absoluteThreshold') IS NOT NULL
+                          THEN ABS(wds.test_stat_value - wds.control_stat_value) > (wds.compare_config->'thresholds'->>'absoluteThreshold')::float
+                          ELSE false
+                      END
+                  )
+              ) as checks
+          FROM with_dynamic_statistics wds
+      ),
+
+      final_results AS (
+          -- Combine threshold checks into two summary flags and derive the
+          -- conclusion label. This is where the regression/improvement verdict
+          -- is made for each metric.
+          SELECT
+              wtc.*,
+              -- partialDifference: OR logic — true if ANY threshold is exceeded.
+              -- Used for "partial regression" / "partial improvement" labels.
+              CASE
+                  WHEN (wtc.checks->'pct'->>'isDifference')::boolean = true OR
+                       (wtc.checks->'iqr'->>'isDifference')::boolean = true OR
+                       (wtc.checks->'abs'->>'isDifference')::boolean = true
+                  THEN true
+                  ELSE false
+              END as partial_difference,
+
+              -- allDifference: AND logic — true only if ALL configured (valid)
+              -- thresholds are exceeded. Invalid checks (e.g., IQR when control_iqr
+              -- is null) default to true so they don't block the AND.
+              -- Used for "regression" / "improvement" labels (full, not partial).
+              CASE
+                  WHEN (wtc.checks->'pct'->>'isDifference')::boolean = true AND
+                       (CASE WHEN (wtc.checks->'iqr'->>'valid')::boolean = true
+                        THEN (wtc.checks->'iqr'->>'isDifference')::boolean
+                        ELSE true END) AND
+                       (CASE WHEN (wtc.checks->'abs'->>'valid')::boolean = true
+                        THEN (wtc.checks->'abs'->>'isDifference')::boolean
+                        ELSE true END)
+                  THEN true
+                  ELSE false
+              END as all_difference,
+
+              -- Build conclusion
+              jsonb_build_object(
+                  'valid', wtc.control_exists AND wtc.test_stat_value IS NOT NULL,
+                  'increase', CASE
+                      WHEN wtc.test_stat_value IS NOT NULL AND wtc.control_stat_value IS NOT NULL
+                      THEN wtc.test_stat_value > wtc.control_stat_value
+                      ELSE false
+                  END,
+                  'decrease', CASE
+                      WHEN wtc.test_stat_value IS NOT NULL AND wtc.control_stat_value IS NOT NULL
+                      THEN wtc.test_stat_value < wtc.control_stat_value
+                      ELSE false
+                  END,
+                  'partialDifference', CASE
+                      WHEN (wtc.checks->'pct'->>'isDifference')::boolean = true OR
+                           (wtc.checks->'iqr'->>'isDifference')::boolean = true OR
+                           (wtc.checks->'abs'->>'isDifference')::boolean = true
+                      THEN true
+                      ELSE false
+                  END,
+                  'allDifference', CASE
+                      WHEN (wtc.checks->'pct'->>'isDifference')::boolean = true AND
+                           (CASE WHEN (wtc.checks->'iqr'->>'valid')::boolean = true
+                            THEN (wtc.checks->'iqr'->>'isDifference')::boolean
+                            ELSE true END) AND
+                           (CASE WHEN (wtc.checks->'abs'->>'valid')::boolean = true
+                            THEN (wtc.checks->'abs'->>'isDifference')::boolean
+                            ELSE true END)
+                      THEN true
+                      ELSE false
+                  END,
+                  'ignore', COALESCE((wtc.compare_config->>'ignore')::boolean, false),
+                  'label', CASE
+                      -- Basic validity checks
+                      WHEN NOT (wtc.control_exists AND wtc.test_stat_value IS NOT NULL) THEN 'incomparable'
+                      WHEN COALESCE((wtc.compare_config->>'ignore')::boolean, false) = true THEN 'ignored'
+
+                      -- Check for allDifference (ALL applicable thresholds show difference) - for full labels
+                      WHEN ((wtc.checks->'pct'->>'isDifference')::boolean = true AND
+                            (CASE WHEN (wtc.checks->'iqr'->>'valid')::boolean = true
+                             THEN (wtc.checks->'iqr'->>'isDifference')::boolean
+                             ELSE true END) AND
+                            (CASE WHEN (wtc.checks->'abs'->>'valid')::boolean = true
+                             THEN (wtc.checks->'abs'->>'isDifference')::boolean
+                             ELSE true END)) THEN
+                          -- Full labels when allDifference is true
+                          CASE
+                              WHEN (wtc.compare_config->'metricClassification'->>'higherIsBetter') IS NULL THEN
+                                  CASE
+                                      WHEN wtc.test_stat_value > wtc.control_stat_value THEN 'increase'
+                                      ELSE 'decrease'
+                                  END
+
+                              -- For metrics where higher is better (explicitly true)
+                              WHEN (wtc.compare_config->'metricClassification'->>'higherIsBetter')::boolean = true THEN
+                                  CASE
+                                      WHEN wtc.test_stat_value > wtc.control_stat_value THEN 'improvement'
+                                      ELSE 'regression'
+                                  END
+
+                              -- For metrics where lower is better (explicitly false)
+                              WHEN (wtc.compare_config->'metricClassification'->>'higherIsBetter')::boolean = false THEN
+                                  CASE
+                                      WHEN wtc.test_stat_value < wtc.control_stat_value THEN 'improvement'
+                                      ELSE 'regression'
+                                  END
+                          END
+
+                      -- Check for partialDifference (ANY threshold shows difference) - for partial labels
+                      WHEN ((wtc.checks->'pct'->>'isDifference')::boolean = true OR
+                            (wtc.checks->'iqr'->>'isDifference')::boolean = true OR
+                            (wtc.checks->'abs'->>'isDifference')::boolean = true) THEN
+                          -- Partial labels when partialDifference is true but allDifference is false
+                          CASE
+                              WHEN (wtc.compare_config->'metricClassification'->>'higherIsBetter') IS NULL THEN
+                                  CASE
+                                      WHEN wtc.test_stat_value > wtc.control_stat_value THEN 'partial increase'
+                                      ELSE 'partial decrease'
+                                  END
+                              WHEN (wtc.compare_config->'metricClassification'->>'higherIsBetter')::boolean = true THEN
+                                  CASE
+                                      WHEN wtc.test_stat_value > wtc.control_stat_value THEN 'partial improvement'
+                                      ELSE 'partial regression'
+                                  END
+                              WHEN (wtc.compare_config->'metricClassification'->>'higherIsBetter')::boolean = false THEN
+                                  CASE
+                                      WHEN wtc.test_stat_value < wtc.control_stat_value THEN 'partial improvement'
+                                      ELSE 'partial regression'
+                                  END
+                          END
+
+                      ELSE 'no difference'
+                  END
+              ) as conclusion
+          FROM with_threshold_calculations wtc
+      )
+
+
+      INSERT INTO ds_adapt_results (
+          test_run_id, control_group_id, application_dashboard_id, panel_id, metric_name,
+          dashboard_uid, dashboard_label, panel_title, unit, test_run_start,
+          benchmark_ids, updated_at,
+          mean, median, min, max, std, last_value, q10, q25, q75, q90, q95, q99, iqr, n,
+          is_constant, all_missing, exists_data,
+          compare_config, metric_classification, statistic, thresholds, conditions, checks, conclusion,
+          uses_default_value, default_value,
+          metrics_source_id,
+          organization_id, team_id, created_by, updated_by
+      )
+      SELECT
+          test_run_id,
+          control_group_id,
+          application_dashboard_id,
+          panel_id::int,
+          metric_name,
+          dashboard_uid,
+          dashboard_label,
+          panel_title,
+          unit,
+          test_run_start,
+          CASE WHEN benchmark_id IS NOT NULL THEN ARRAY[benchmark_id::text] ELSE NULL END as benchmark_ids,
+          updated_at,
+          jsonb_build_object(
+              'test', test_mean,
+              'control', control_mean,
+              'diff', CASE WHEN test_mean IS NOT NULL AND control_mean IS NOT NULL THEN test_mean - control_mean ELSE NULL END,
+              'absDiff', CASE WHEN test_mean IS NOT NULL AND control_mean IS NOT NULL THEN ABS(test_mean - control_mean) ELSE NULL END,
+              'pctDiff', CASE WHEN test_mean IS NOT NULL AND control_mean IS NOT NULL AND control_mean != 0 THEN (test_mean - control_mean) / control_mean ELSE NULL END,
+              'iqrDiff', CASE WHEN test_mean IS NOT NULL AND control_mean IS NOT NULL AND control_iqr IS NOT NULL AND control_iqr != 0 THEN (test_mean - control_mean) / control_iqr ELSE NULL END
+          ) as mean,
+          jsonb_build_object(
+              'test', test_median,
+              'control', control_median,
+              'diff', CASE WHEN test_median IS NOT NULL AND control_median IS NOT NULL THEN test_median - control_median ELSE NULL END,
+              'absDiff', CASE WHEN test_median IS NOT NULL AND control_median IS NOT NULL THEN ABS(test_median - control_median) ELSE NULL END,
+              'pctDiff', CASE WHEN test_median IS NOT NULL AND control_median IS NOT NULL AND control_median != 0 THEN (test_median - control_median) / control_median ELSE NULL END,
+              'iqrDiff', CASE WHEN test_median IS NOT NULL AND control_median IS NOT NULL AND control_iqr IS NOT NULL AND control_iqr != 0 THEN (test_median - control_median) / control_iqr ELSE NULL END
+          ) as median,
+          jsonb_build_object(
+              'test', test_min,
+              'control', control_min,
+              'diff', CASE WHEN test_min IS NOT NULL AND control_min IS NOT NULL THEN test_min - control_min ELSE NULL END,
+              'absDiff', CASE WHEN test_min IS NOT NULL AND control_min IS NOT NULL THEN ABS(test_min - control_min) ELSE NULL END,
+              'pctDiff', CASE WHEN test_min IS NOT NULL AND control_min IS NOT NULL AND control_min != 0 THEN (test_min - control_min) / control_min ELSE NULL END,
+              'iqrDiff', CASE WHEN test_min IS NOT NULL AND control_min IS NOT NULL AND control_iqr IS NOT NULL AND control_iqr != 0 THEN (test_min - control_min) / control_iqr ELSE NULL END
+          ) as min,
+          jsonb_build_object(
+              'test', test_max,
+              'control', control_max,
+              'diff', CASE WHEN test_max IS NOT NULL AND control_max IS NOT NULL THEN test_max - control_max ELSE NULL END,
+              'absDiff', CASE WHEN test_max IS NOT NULL AND control_max IS NOT NULL THEN ABS(test_max - control_max) ELSE NULL END,
+              'pctDiff', CASE WHEN test_max IS NOT NULL AND control_max IS NOT NULL AND control_max != 0 THEN (test_max - control_max) / control_max ELSE NULL END,
+              'iqrDiff', CASE WHEN test_max IS NOT NULL AND control_max IS NOT NULL AND control_iqr IS NOT NULL AND control_iqr != 0 THEN (test_max - control_max) / control_iqr ELSE NULL END
+          ) as max,
+          jsonb_build_object(
+              'test', test_std,
+              'control', control_std,
+              'diff', CASE WHEN test_std IS NOT NULL AND control_std IS NOT NULL THEN test_std - control_std ELSE NULL END,
+              'absDiff', CASE WHEN test_std IS NOT NULL AND control_std IS NOT NULL THEN ABS(test_std - control_std) ELSE NULL END,
+              'pctDiff', CASE WHEN test_std IS NOT NULL AND control_std IS NOT NULL AND control_std != 0 THEN (test_std - control_std) / control_std ELSE NULL END,
+              'iqrDiff', CASE WHEN test_std IS NOT NULL AND control_std IS NOT NULL AND control_iqr IS NOT NULL AND control_iqr != 0 THEN (test_std - control_std) / control_iqr ELSE NULL END
+          ) as std,
+          jsonb_build_object(
+              'test', test_last,
+              'control', control_last,
+              'diff', CASE WHEN test_last IS NOT NULL AND control_last IS NOT NULL THEN test_last - control_last ELSE NULL END,
+              'absDiff', CASE WHEN test_last IS NOT NULL AND control_last IS NOT NULL THEN ABS(test_last - control_last) ELSE NULL END,
+              'pctDiff', CASE WHEN test_last IS NOT NULL AND control_last IS NOT NULL AND control_last != 0 THEN (test_last - control_last) / control_last ELSE NULL END,
+              'iqrDiff', CASE WHEN test_last IS NOT NULL AND control_last IS NOT NULL AND control_iqr IS NOT NULL AND control_iqr != 0 THEN (test_last - control_last) / control_iqr ELSE NULL END
+          ) as last_value,
+          jsonb_build_object(
+              'test', test_q10,
+              'control', control_q10,
+              'diff', CASE WHEN test_q10 IS NOT NULL AND control_q10 IS NOT NULL THEN test_q10 - control_q10 ELSE NULL END,
+              'absDiff', CASE WHEN test_q10 IS NOT NULL AND control_q10 IS NOT NULL THEN ABS(test_q10 - control_q10) ELSE NULL END,
+              'pctDiff', CASE WHEN test_q10 IS NOT NULL AND control_q10 IS NOT NULL AND control_q10 != 0 THEN (test_q10 - control_q10) / control_q10 ELSE NULL END,
+              'iqrDiff', CASE WHEN test_q10 IS NOT NULL AND control_q10 IS NOT NULL AND control_iqr IS NOT NULL AND control_iqr != 0 THEN (test_q10 - control_q10) / control_iqr ELSE NULL END
+          ) as q10,
+          jsonb_build_object(
+              'test', test_q25,
+              'control', control_q25,
+              'diff', CASE WHEN test_q25 IS NOT NULL AND control_q25 IS NOT NULL THEN test_q25 - control_q25 ELSE NULL END,
+              'absDiff', CASE WHEN test_q25 IS NOT NULL AND control_q25 IS NOT NULL THEN ABS(test_q25 - control_q25) ELSE NULL END,
+              'pctDiff', CASE WHEN test_q25 IS NOT NULL AND control_q25 IS NOT NULL AND control_q25 != 0 THEN (test_q25 - control_q25) / control_q25 ELSE NULL END,
+              'iqrDiff', CASE WHEN test_q25 IS NOT NULL AND control_q25 IS NOT NULL AND control_iqr IS NOT NULL AND control_iqr != 0 THEN (test_q25 - control_q25) / control_iqr ELSE NULL END
+          ) as q25,
+          jsonb_build_object(
+              'test', test_q75,
+              'control', control_q75,
+              'diff', CASE WHEN test_q75 IS NOT NULL AND control_q75 IS NOT NULL THEN test_q75 - control_q75 ELSE NULL END,
+              'absDiff', CASE WHEN test_q75 IS NOT NULL AND control_q75 IS NOT NULL THEN ABS(test_q75 - control_q75) ELSE NULL END,
+              'pctDiff', CASE WHEN test_q75 IS NOT NULL AND control_q75 IS NOT NULL AND control_q75 != 0 THEN (test_q75 - control_q75) / control_q75 ELSE NULL END,
+              'iqrDiff', CASE WHEN test_q75 IS NOT NULL AND control_q75 IS NOT NULL AND control_iqr IS NOT NULL AND control_iqr != 0 THEN (test_q75 - control_q75) / control_iqr ELSE NULL END
+          ) as q75,
+          jsonb_build_object(
+              'test', test_q90,
+              'control', control_q90,
+              'diff', CASE WHEN test_q90 IS NOT NULL AND control_q90 IS NOT NULL THEN test_q90 - control_q90 ELSE NULL END,
+              'absDiff', CASE WHEN test_q90 IS NOT NULL AND control_q90 IS NOT NULL THEN ABS(test_q90 - control_q90) ELSE NULL END,
+              'pctDiff', CASE WHEN test_q90 IS NOT NULL AND control_q90 IS NOT NULL AND control_q90 != 0 THEN (test_q90 - control_q90) / control_q90 ELSE NULL END,
+              'iqrDiff', CASE WHEN test_q90 IS NOT NULL AND control_q90 IS NOT NULL AND control_iqr IS NOT NULL AND control_iqr != 0 THEN (test_q90 - control_q90) / control_iqr ELSE NULL END
+          ) as q90,
+          jsonb_build_object(
+              'test', test_q95,
+              'control', control_q95,
+              'diff', CASE WHEN test_q95 IS NOT NULL AND control_q95 IS NOT NULL THEN test_q95 - control_q95 ELSE NULL END,
+              'absDiff', CASE WHEN test_q95 IS NOT NULL AND control_q95 IS NOT NULL THEN ABS(test_q95 - control_q95) ELSE NULL END,
+              'pctDiff', CASE WHEN test_q95 IS NOT NULL AND control_q95 IS NOT NULL AND control_q95 != 0 THEN (test_q95 - control_q95) / control_q95 ELSE NULL END,
+              'iqrDiff', CASE WHEN test_q95 IS NOT NULL AND control_q95 IS NOT NULL AND control_iqr IS NOT NULL AND control_iqr != 0 THEN (test_q95 - control_q95) / control_iqr ELSE NULL END
+          ) as q95,
+          jsonb_build_object(
+              'test', test_q99,
+              'control', control_q99,
+              'diff', CASE WHEN test_q99 IS NOT NULL AND control_q99 IS NOT NULL THEN test_q99 - control_q99 ELSE NULL END,
+              'absDiff', CASE WHEN test_q99 IS NOT NULL AND control_q99 IS NOT NULL THEN ABS(test_q99 - control_q99) ELSE NULL END,
+              'pctDiff', CASE WHEN test_q99 IS NOT NULL AND control_q99 IS NOT NULL AND control_q99 != 0 THEN (test_q99 - control_q99) / control_q99 ELSE NULL END,
+              'iqrDiff', CASE WHEN test_q99 IS NOT NULL AND control_q99 IS NOT NULL AND control_iqr IS NOT NULL AND control_iqr != 0 THEN (test_q99 - control_q99) / control_iqr ELSE NULL END
+          ) as q99,
+          jsonb_build_object(
+              'test', test_iqr,
+              'control', control_iqr
+          ) as iqr,
+          jsonb_build_object('test', test_n, 'control', control_n) as n,
+          jsonb_build_object('test', test_is_constant, 'control', control_is_constant) as is_constant,
+          jsonb_build_object('test', test_all_missing, 'control', control_all_missing) as all_missing,
+          jsonb_build_object('test', NOT COALESCE(test_all_missing, true), 'control', NOT COALESCE(control_all_missing, true)) as exists_data,
+          compare_config, compare_config->'metricClassification' as metric_classification,
+          statistic, thresholds,
+          jsonb_build_object('controlExists', control_exists, 'testStatValue', test_stat_value, 'controlStatValue', control_stat_value, 'configuredAggregation', compare_config->'thresholds'->>'aggregation') as conditions,
+          checks, conclusion,
+          false as uses_default_value, NULL as default_value,
+          metrics_source_id,
+          organization_id,
+          team_id,
+          'worker-pipeline' as created_by,
+          'worker-pipeline' as updated_by
+      FROM final_results
+
+      ON CONFLICT (test_run_id, control_group_id, application_dashboard_id, panel_id, metric_name)
+      DO UPDATE SET
+          dashboard_uid = EXCLUDED.dashboard_uid,
+          dashboard_label = EXCLUDED.dashboard_label,
+          panel_title = EXCLUDED.panel_title,
+          unit = EXCLUDED.unit,
+          test_run_start = EXCLUDED.test_run_start,
+          benchmark_ids = EXCLUDED.benchmark_ids,
+          updated_at = EXCLUDED.updated_at,
+          mean = EXCLUDED.mean,
+          median = EXCLUDED.median,
+          min = EXCLUDED.min,
+          max = EXCLUDED.max,
+          std = EXCLUDED.std,
+          last_value = EXCLUDED.last_value,
+          q10 = EXCLUDED.q10,
+          q25 = EXCLUDED.q25,
+          q75 = EXCLUDED.q75,
+          q90 = EXCLUDED.q90,
+          q95 = EXCLUDED.q95,
+          q99 = EXCLUDED.q99,
+          iqr = EXCLUDED.iqr,
+          n = EXCLUDED.n,
+          is_constant = EXCLUDED.is_constant,
+          all_missing = EXCLUDED.all_missing,
+          exists_data = EXCLUDED.exists_data,
+          compare_config = EXCLUDED.compare_config,
+          metric_classification = EXCLUDED.metric_classification,
+          statistic = EXCLUDED.statistic,
+          thresholds = EXCLUDED.thresholds,
+          conditions = EXCLUDED.conditions,
+          checks = EXCLUDED.checks,
+          conclusion = EXCLUDED.conclusion,
+          uses_default_value = EXCLUDED.uses_default_value,
+          default_value = EXCLUDED.default_value,
+          metrics_source_id = COALESCE(EXCLUDED.metrics_source_id, ds_adapt_results.metrics_source_id),
+          organization_id = EXCLUDED.organization_id,
+          team_id = EXCLUDED.team_id,
+          updated_by = EXCLUDED.updated_by
+    
+    "
+`;
+
+exports[`ADAPT SQL Builder Golden-File Tests > AdaptResultsSQLBuilder > buildConclusionSQL > should generate stable SQL (snapshot) 1`] = `
+"
+      WITH adapt_results_categorized AS (
+          SELECT
+              test_run_id,
+              control_group_id,
+              (array_agg(organization_id))[1] as organization_id,
+              (array_agg(team_id))[1] as team_id,
+
+              -- Collect by label (exclude ignored results) - only full labels count as regressions/improvements
+              array_agg(id) FILTER (WHERE conclusion->>'label' = 'regression' AND NOT COALESCE((conclusion->>'ignore')::boolean, false)) as regressions,
+              array_agg(id) FILTER (WHERE conclusion->>'label' = 'improvement' AND NOT COALESCE((conclusion->>'ignore')::boolean, false)) as improvements,
+              array_agg(id) FILTER (WHERE conclusion->>'label' IN ('increase', 'decrease', 'partial increase', 'partial decrease', 'partial improvement', 'partial regression') AND NOT COALESCE((conclusion->>'ignore')::boolean, false)) as differences,
+              array_agg(id) FILTER (WHERE conclusion->>'label' = 'no difference' AND NOT COALESCE((conclusion->>'ignore')::boolean, false)) as no_differences,
+              array_agg(id) FILTER (WHERE conclusion->>'label' = 'incomparable' AND NOT COALESCE((conclusion->>'ignore')::boolean, false)) as incomparable,
+
+              -- Count totals for details - only full labels count as regressions/improvements
+              count(*) FILTER (WHERE NOT COALESCE((conclusion->>'ignore')::boolean, false)) as total_comparable_results,
+              count(*) FILTER (WHERE conclusion->>'label' = 'regression' AND NOT COALESCE((conclusion->>'ignore')::boolean, false)) as regression_count,
+              count(*) FILTER (WHERE conclusion->>'label' = 'improvement' AND NOT COALESCE((conclusion->>'ignore')::boolean, false)) as improvement_count,
+              count(*) FILTER (WHERE conclusion->>'label' IN ('increase', 'decrease', 'partial increase', 'partial decrease', 'partial improvement', 'partial regression') AND NOT COALESCE((conclusion->>'ignore')::boolean, false)) as difference_count,
+              count(*) FILTER (WHERE conclusion->>'label' = 'no difference' AND NOT COALESCE((conclusion->>'ignore')::boolean, false)) as no_difference_count,
+              count(*) FILTER (WHERE conclusion->>'label' = 'incomparable' AND NOT COALESCE((conclusion->>'ignore')::boolean, false)) as incomparable_count
+          FROM ds_adapt_results
+          WHERE test_run_id IN ($1, $2)
+          GROUP BY test_run_id, control_group_id
+      ),
+
+      with_tracked_results AS (
+          SELECT
+              arc.*,
+              -- Join with tracked results for historical regressions
+              array_agg(atr.id) FILTER (WHERE atr.conclusion->>'label' = 'regression' AND NOT COALESCE((atr.conclusion->>'ignore')::boolean, false)) as tracked_regressions,
+              count(*) FILTER (WHERE atr.conclusion->>'label' = 'regression' AND NOT COALESCE((atr.conclusion->>'ignore')::boolean, false)) as tracked_regression_count
+          FROM adapt_results_categorized arc
+          LEFT JOIN ds_adapt_tracked_results atr ON (atr.test_run_id = arc.test_run_id)
+          GROUP BY arc.test_run_id, arc.control_group_id, arc.organization_id, arc.team_id, arc.regressions, arc.improvements, arc.differences, arc.no_differences, arc.incomparable,
+                   arc.total_comparable_results, arc.regression_count, arc.improvement_count, arc.difference_count, arc.no_difference_count, arc.incomparable_count
+      )
+
+      INSERT INTO ds_adapt_conclusion (
+          test_run_id, control_group_id, regressions, improvements, differences, tracked_regressions,
+          conclusion, details, updated_at,
+          organization_id, team_id, created_by, updated_by
+      )
+      SELECT
+          test_run_id,
+          control_group_id,
+          COALESCE(regressions, '{}') as regressions,
+          COALESCE(improvements, '{}') as improvements,
+          COALESCE(differences, '{}') as differences,
+          COALESCE(tracked_regressions, '{}') as tracked_regressions,
+
+          -- Overall conclusion logic per specification
+          CASE
+              -- SKIPPED if no results in any category
+              WHEN total_comparable_results = 0 OR total_comparable_results IS NULL THEN 'SKIPPED'
+
+              -- REGRESSION if any regressions or tracked regressions exist
+              WHEN COALESCE(regression_count, 0) > 0 OR COALESCE(tracked_regression_count, 0) > 0 THEN 'REGRESSION'
+
+              -- PASSED otherwise
+              ELSE 'PASSED'
+          END as conclusion,
+
+          -- Details for analysis
+          jsonb_build_object(
+              'totalResults', COALESCE(total_comparable_results, 0),
+              'regressionCount', COALESCE(regression_count, 0),
+              'improvementCount', COALESCE(improvement_count, 0),
+              'differenceCount', COALESCE(difference_count, 0),
+              'noDifferenceCount', COALESCE(no_difference_count, 0),
+              'incomparableCount', COALESCE(incomparable_count, 0),
+              'trackedRegressionCount', COALESCE(tracked_regression_count, 0)
+          ) as details,
+
+          NOW() as updated_at,
+          organization_id,
+          team_id,
+          'worker-pipeline' as created_by,
+          'worker-pipeline' as updated_by
+      FROM with_tracked_results
+
+      ON CONFLICT (test_run_id)
+      DO UPDATE SET
+          control_group_id = EXCLUDED.control_group_id,
+          regressions = EXCLUDED.regressions,
+          improvements = EXCLUDED.improvements,
+          differences = EXCLUDED.differences,
+          tracked_regressions = EXCLUDED.tracked_regressions,
+          conclusion = EXCLUDED.conclusion,
+          details = EXCLUDED.details,
+          updated_at = EXCLUDED.updated_at,
+          organization_id = EXCLUDED.organization_id,
+          team_id = EXCLUDED.team_id,
+          updated_by = EXCLUDED.updated_by
+    "
+`;
+
+exports[`ADAPT SQL Builder Golden-File Tests > TrackedResultsSQLBuilder > buildTrackedResultsSQL > should generate stable SQL (snapshot) 1`] = `
+"
+      WITH control_group_test_runs AS (
+          -- Expand the control group's test_runs[] array into individual rows.
+          -- Each of these past test runs will be checked for historical regressions.
+          SELECT DISTINCT
+              cg.control_group_id,
+              unnest(cg.test_runs) as tracked_test_run_id
+          FROM ds_control_groups cg
+          WHERE cg.control_group_id IN ($1, $2)
+      ),
+      filtered_tracked_test_runs AS (
+          -- Skip runs where the user explicitly accepted the differences
+          -- (differencesAccepted=ACCEPTED) or where the run was in DEBUG mode.
+          -- These should not propagate as tracked regressions.
+          SELECT
+              cgtr.control_group_id,
+              cgtr.tracked_test_run_id
+          FROM control_group_test_runs cgtr
+          JOIN test_runs tr ON tr.test_run_id = cgtr.tracked_test_run_id
+          WHERE COALESCE((tr.adapt_config->>'differencesAccepted'), '') != 'ACCEPTED'
+          AND COALESCE((tr.adapt_config->>'mode'), '') != 'DEBUG'
+      ),
+      historical_regressions AS (
+          -- Find ADAPT results from tracked test runs that showed any kind of
+          -- difference (increase, decrease, regression, improvement). These are
+          -- candidates for re-evaluation against the current test run's data.
+          SELECT
+              fttr.control_group_id as current_test_run_id,
+              fttr.tracked_test_run_id,
+              ar.id as tracked_difference_id,
+              ar.application_dashboard_id,
+              ar.metrics_source_id,
+              ar.panel_id,
+              ar.metric_name,
+              ar.conclusion as tracked_conclusion,
+              -- CRITICAL: Preserve the control group that was active when the
+              -- regression was first detected. This is the "pre-regression"
+              -- baseline we compare against — NOT the current control group.
+              ar.control_group_id as historical_control_group_id
+          FROM filtered_tracked_test_runs fttr
+          JOIN ds_adapt_results ar ON ar.test_run_id = fttr.tracked_test_run_id
+          -- TODO: Find out what the impact can be of leaving this join out. This join fails with dynatrace data because those application_dashboard_id's are in dynatrace_dql table
+          -- JOIN application_dashboards ad ON ad.id = ar.application_dashboard_id  -- Ensure dashboard still exists
+          WHERE ar.conclusion IS NOT NULL
+          AND ar.conclusion->>'label' IN ('increase', 'decrease', 'regression', 'improvement')
+          AND NOT COALESCE((ar.conclusion->>'ignore')::boolean, false)
+      ),
+      current_metrics AS (
+          -- For each historical regression, get the CURRENT test run's value of
+          -- that same metric. The control_group_id is set to the HISTORICAL one
+          -- so the subsequent with_control CTE joins against the pre-regression baseline.
+          SELECT
+              ms.test_run_id,
+              hr.historical_control_group_id as control_group_id,  -- Historical, not current!
+              ms.application_dashboard_id,
+              ms.panel_id::varchar as panel_id,
+              ms.metric_name,
+              ms.mean as test_mean,
+              ms.median as test_median,
+              ms.min_value as test_min,
+              ms.max_value as test_max,
+              ms.std_dev as test_std,
+              ms.last_value as test_last,
+              ms.q10 as test_q10,
+              ms.q25 as test_q25,
+              ms.q75 as test_q75,
+              ms.q90 as test_q90,
+              ms.q95 as test_q95,
+              ms.q99 as test_q99,
+              ms.iqr as test_iqr,
+              ms.count as test_n,
+              ms.is_constant as test_is_constant,
+              ms.all_missing as test_all_missing,
+              ms.dashboard_uid,
+              ms.dashboard_label,
+              ms.panel_title,
+              ms.unit,
+              ms.test_run_start,
+              ms.updated_at,
+              ms.organization_id,
+              ms.team_id,
+              ms.metrics_source_id,
+              hr.tracked_test_run_id,
+              hr.tracked_difference_id,
+              hr.tracked_conclusion
+          FROM historical_regressions hr
+          JOIN ds_metric_statistics ms ON (
+              ms.test_run_id = hr.current_test_run_id
+              AND ms.metrics_source_id = hr.metrics_source_id
+              AND ms.panel_id = hr.panel_id
+              AND ms.metric_name = hr.metric_name
+          )
+      ),
+      with_control AS (
+          -- Join with the HISTORICAL control group statistics (the baseline
+          -- from when the regression was first detected). Despite the comment
+          -- saying "current", cm.control_group_id was set to historical_control_group_id
+          -- in current_metrics, so this actually joins against the pre-regression baseline.
+          SELECT
+              cm.*,
+              cgs.mean as control_mean,
+              cgs.median as control_median,
+              cgs.min_value as control_min,
+              cgs.max_value as control_max,
+              cgs.std_dev as control_std,
+              cgs.last_value as control_last,
+              cgs.q10 as control_q10,
+              cgs.q25 as control_q25,
+              cgs.q75 as control_q75,
+              cgs.q90 as control_q90,
+              cgs.q95 as control_q95,
+              cgs.q99 as control_q99,
+              cgs.iqr as control_iqr,
+              cgs.count as control_n,
+              cgs.is_constant as control_is_constant,
+              cgs.all_missing as control_all_missing,
+              CASE WHEN cgs.control_group_id IS NOT NULL THEN true ELSE false END as control_exists
+          FROM current_metrics cm
+          LEFT JOIN ds_control_group_statistics cgs ON (
+              cgs.control_group_id = cm.control_group_id
+              AND cgs.metrics_source_id = cm.metrics_source_id
+              AND cgs.panel_id::text = cm.panel_id
+              AND cgs.metric_name = cm.metric_name
+          )
+      ),
+      with_compare_config AS (
+          -- Apply compare config (same hierarchy as processAdaptResults)
+          SELECT
+              wc.*,
+              COALESCE(
+                  cfg_metric.config_data,
+                  cfg_panel.config_data,
+                  cfg_dashboard.config_data,
+                  cfg_global.config_data,
+                  $3::jsonb
+              ) as compare_config
+          FROM with_control wc
+          LEFT JOIN temp_tracked_config_cache cfg_metric ON (
+              cfg_metric.application_dashboard_id = wc.application_dashboard_id
+              AND cfg_metric.panel_id = wc.panel_id::int
+              AND cfg_metric.metric_name = wc.metric_name
+          )
+          LEFT JOIN temp_tracked_config_cache cfg_panel ON (
+              cfg_panel.application_dashboard_id = wc.application_dashboard_id
+              AND cfg_panel.panel_id = wc.panel_id::int
+              AND cfg_panel.metric_name IS NULL
+          )
+          LEFT JOIN temp_tracked_config_cache cfg_dashboard ON (
+              cfg_dashboard.application_dashboard_id = wc.application_dashboard_id
+              AND cfg_dashboard.panel_id IS NULL
+              AND cfg_dashboard.metric_name IS NULL
+          )
+          LEFT JOIN temp_tracked_config_cache cfg_global ON (
+              cfg_global.application_dashboard_id IS NULL
+              AND cfg_global.panel_id IS NULL
+              AND cfg_global.metric_name IS NULL
+          )
+      ),
+      -- Re-run full ADAPT analysis (same as processAdaptResults CTEs)
+      with_dynamic_statistics AS (
+          SELECT
+              wcc.*,
+              CASE (wcc.compare_config->'thresholds'->>'aggregation')
+                  WHEN 'mean' THEN wcc.test_mean
+                  WHEN 'median' THEN wcc.test_median
+                  WHEN 'min' THEN wcc.test_min
+                  WHEN 'max' THEN wcc.test_max
+                  WHEN 'last' THEN wcc.test_last
+                  WHEN 'q10' THEN wcc.test_q10 WHEN 'p10' THEN wcc.test_q10
+                  WHEN 'q25' THEN wcc.test_q25 WHEN 'p25' THEN wcc.test_q25
+                  WHEN 'q75' THEN wcc.test_q75 WHEN 'p75' THEN wcc.test_q75
+                  WHEN 'q90' THEN wcc.test_q90 WHEN 'p90' THEN wcc.test_q90
+                  WHEN 'q95' THEN wcc.test_q95 WHEN 'p95' THEN wcc.test_q95
+                  WHEN 'q99' THEN wcc.test_q99 WHEN 'p99' THEN wcc.test_q99
+                  ELSE wcc.test_median
+              END as test_stat_value,
+              CASE (wcc.compare_config->'thresholds'->>'aggregation')
+                  WHEN 'mean' THEN wcc.control_mean
+                  WHEN 'median' THEN wcc.control_median
+                  WHEN 'min' THEN wcc.control_min
+                  WHEN 'max' THEN wcc.control_max
+                  WHEN 'last' THEN wcc.control_last
+                  WHEN 'q10' THEN wcc.control_q10 WHEN 'p10' THEN wcc.control_q10
+                  WHEN 'q25' THEN wcc.control_q25 WHEN 'p25' THEN wcc.control_q25
+                  WHEN 'q75' THEN wcc.control_q75 WHEN 'p75' THEN wcc.control_q75
+                  WHEN 'q90' THEN wcc.control_q90 WHEN 'p90' THEN wcc.control_q90
+                  WHEN 'q95' THEN wcc.control_q95 WHEN 'p95' THEN wcc.control_q95
+                  WHEN 'q99' THEN wcc.control_q99 WHEN 'p99' THEN wcc.control_q99
+                  ELSE wcc.control_median
+              END as control_stat_value
+          FROM with_compare_config wcc
+      ),
+      with_threshold_calculations AS (
+          SELECT
+              wds.*,
+              (wds.compare_config->'thresholds'->>'percentageThreshold')::float as percentage_threshold,
+              (wds.compare_config->'thresholds'->>'iqrThreshold')::float as iqr_threshold,
+              (wds.compare_config->'thresholds'->>'absoluteThreshold')::float as absolute_threshold,
+              jsonb_build_object(
+                  'name', wds.compare_config->'thresholds'->>'aggregation',
+                  'test', CASE WHEN wds.test_stat_value IS NOT NULL THEN wds.test_stat_value::text ELSE NULL END,
+                  'control', CASE WHEN wds.control_stat_value IS NOT NULL THEN wds.control_stat_value::text ELSE NULL END,
+                  'diff', CASE WHEN wds.test_stat_value IS NOT NULL AND wds.control_stat_value IS NOT NULL THEN (wds.test_stat_value - wds.control_stat_value)::text ELSE NULL END,
+                  'absDiff', CASE WHEN wds.test_stat_value IS NOT NULL AND wds.control_stat_value IS NOT NULL THEN ABS(wds.test_stat_value - wds.control_stat_value)::text ELSE NULL END,
+                  'pctDiff', CASE WHEN wds.test_stat_value IS NOT NULL AND wds.control_stat_value IS NOT NULL AND wds.control_stat_value != 0 THEN ((wds.test_stat_value - wds.control_stat_value) / wds.control_stat_value)::text ELSE NULL END
+              ) as statistic,
+              (CASE WHEN wds.control_stat_value IS NOT NULL THEN jsonb_build_object(
+                  'upper', jsonb_build_object(
+                      'pct', CASE WHEN (wds.compare_config->'thresholds'->>'percentageThreshold') IS NOT NULL THEN wds.control_stat_value * (1 + (wds.compare_config->'thresholds'->>'percentageThreshold')::float) ELSE NULL END,
+                      'iqr', CASE WHEN wds.control_iqr IS NOT NULL AND (wds.compare_config->'thresholds'->>'iqrThreshold') IS NOT NULL THEN wds.control_stat_value + (wds.control_iqr * (wds.compare_config->'thresholds'->>'iqrThreshold')::float) ELSE NULL END,
+                      'abs', CASE WHEN (wds.compare_config->'thresholds'->>'absoluteThreshold') IS NOT NULL THEN wds.control_stat_value + (wds.compare_config->'thresholds'->>'absoluteThreshold')::float ELSE NULL END,
+                      'constant', COALESCE(wds.control_stat_value, 0),
+                      'overall', GREATEST(
+                          CASE WHEN (wds.compare_config->'thresholds'->>'percentageThreshold') IS NOT NULL THEN wds.control_stat_value * (1 + (wds.compare_config->'thresholds'->>'percentageThreshold')::float) ELSE NULL END,
+                          CASE WHEN wds.control_iqr IS NOT NULL AND (wds.compare_config->'thresholds'->>'iqrThreshold') IS NOT NULL THEN wds.control_stat_value + (wds.control_iqr * (wds.compare_config->'thresholds'->>'iqrThreshold')::float) ELSE NULL END,
+                          CASE WHEN (wds.compare_config->'thresholds'->>'absoluteThreshold') IS NOT NULL THEN wds.control_stat_value + (wds.compare_config->'thresholds'->>'absoluteThreshold')::float ELSE NULL END
+                      )
+                  ),
+                  'lower', jsonb_build_object(
+                      'pct', CASE WHEN (wds.compare_config->'thresholds'->>'percentageThreshold') IS NOT NULL THEN wds.control_stat_value * (1 - (wds.compare_config->'thresholds'->>'percentageThreshold')::float) ELSE NULL END,
+                      'iqr', CASE WHEN wds.control_iqr IS NOT NULL AND (wds.compare_config->'thresholds'->>'iqrThreshold') IS NOT NULL THEN wds.control_stat_value - (wds.control_iqr * (wds.compare_config->'thresholds'->>'iqrThreshold')::float) ELSE NULL END,
+                      'abs', CASE WHEN (wds.compare_config->'thresholds'->>'absoluteThreshold') IS NOT NULL THEN wds.control_stat_value - (wds.compare_config->'thresholds'->>'absoluteThreshold')::float ELSE NULL END,
+                      'constant', COALESCE(wds.control_stat_value, 0),
+                      'overall', LEAST(
+                          CASE WHEN (wds.compare_config->'thresholds'->>'percentageThreshold') IS NOT NULL THEN wds.control_stat_value * (1 - (wds.compare_config->'thresholds'->>'percentageThreshold')::float) ELSE NULL END,
+                          CASE WHEN wds.control_iqr IS NOT NULL AND (wds.compare_config->'thresholds'->>'iqrThreshold') IS NOT NULL THEN wds.control_stat_value - (wds.control_iqr * (wds.compare_config->'thresholds'->>'iqrThreshold')::float) ELSE NULL END,
+                          CASE WHEN (wds.compare_config->'thresholds'->>'absoluteThreshold') IS NOT NULL THEN wds.control_stat_value - (wds.compare_config->'thresholds'->>'absoluteThreshold')::float ELSE NULL END
+                      )
+                  )
+              ) ELSE jsonb_build_object('upper', jsonb_build_object(), 'lower', jsonb_build_object()) END) as thresholds,
+              jsonb_build_object(
+                  'pct', jsonb_build_object(
+                      'valid', wds.control_exists AND wds.test_stat_value IS NOT NULL AND wds.control_stat_value IS NOT NULL,
+                      'isDifference', CASE WHEN wds.control_exists AND wds.test_stat_value IS NOT NULL AND wds.control_stat_value IS NOT NULL AND (wds.compare_config->'thresholds'->>'percentageThreshold') IS NOT NULL THEN (wds.test_stat_value > wds.control_stat_value * (1 + (wds.compare_config->'thresholds'->>'percentageThreshold')::float) OR wds.test_stat_value < wds.control_stat_value * (1 - (wds.compare_config->'thresholds'->>'percentageThreshold')::float)) ELSE false END
+                  ),
+                  'iqr', jsonb_build_object(
+                      'valid', wds.control_exists AND wds.test_stat_value IS NOT NULL AND wds.control_stat_value IS NOT NULL AND wds.control_iqr IS NOT NULL,
+                      'isDifference', CASE WHEN wds.control_exists AND wds.test_stat_value IS NOT NULL AND wds.control_stat_value IS NOT NULL AND wds.control_iqr IS NOT NULL AND (wds.compare_config->'thresholds'->>'iqrThreshold') IS NOT NULL THEN (wds.test_stat_value > wds.control_stat_value + (wds.control_iqr * (wds.compare_config->'thresholds'->>'iqrThreshold')::float) OR wds.test_stat_value < wds.control_stat_value - (wds.control_iqr * (wds.compare_config->'thresholds'->>'iqrThreshold')::float)) ELSE false END
+                  ),
+                  'abs', jsonb_build_object(
+                      'valid', wds.control_exists AND wds.test_stat_value IS NOT NULL AND wds.control_stat_value IS NOT NULL AND (wds.compare_config->'thresholds'->>'absoluteThreshold') IS NOT NULL,
+                      'isDifference', CASE WHEN wds.control_exists AND wds.test_stat_value IS NOT NULL AND wds.control_stat_value IS NOT NULL AND (wds.compare_config->'thresholds'->>'absoluteThreshold') IS NOT NULL THEN ABS(wds.test_stat_value - wds.control_stat_value) > (wds.compare_config->'thresholds'->>'absoluteThreshold')::float ELSE false END
+                  )
+              ) as checks
+          FROM with_dynamic_statistics wds
+      ),
+      final_tracked_results AS (
+          SELECT
+              wtc.*,
+              -- Build re-evaluated conclusion
+              jsonb_build_object(
+                  'valid', wtc.control_exists AND wtc.test_stat_value IS NOT NULL,
+                  'increase', CASE WHEN wtc.test_stat_value IS NOT NULL AND wtc.control_stat_value IS NOT NULL THEN wtc.test_stat_value > wtc.control_stat_value ELSE false END,
+                  'decrease', CASE WHEN wtc.test_stat_value IS NOT NULL AND wtc.control_stat_value IS NOT NULL THEN wtc.test_stat_value < wtc.control_stat_value ELSE false END,
+                  'partialDifference', CASE WHEN (wtc.checks->'pct'->>'isDifference')::boolean = true OR (wtc.checks->'iqr'->>'isDifference')::boolean = true OR (wtc.checks->'abs'->>'isDifference')::boolean = true THEN true ELSE false END,
+                  'allDifference', CASE WHEN (wtc.checks->'pct'->>'isDifference')::boolean = true AND (CASE WHEN (wtc.checks->'iqr'->>'valid')::boolean = true THEN (wtc.checks->'iqr'->>'isDifference')::boolean ELSE true END) AND (CASE WHEN (wtc.checks->'abs'->>'valid')::boolean = true THEN (wtc.checks->'abs'->>'isDifference')::boolean ELSE true END) THEN true ELSE false END,
+                  'ignore', COALESCE((wtc.compare_config->>'ignore')::boolean, false),
+                  'label', CASE
+                      WHEN NOT (wtc.control_exists AND wtc.test_stat_value IS NOT NULL) THEN 'incomparable'
+                      WHEN COALESCE((wtc.compare_config->>'ignore')::boolean, false) = true THEN 'ignored'
+                      WHEN ((wtc.checks->'pct'->>'isDifference')::boolean = true AND (CASE WHEN (wtc.checks->'iqr'->>'valid')::boolean = true THEN (wtc.checks->'iqr'->>'isDifference')::boolean ELSE true END) AND (CASE WHEN (wtc.checks->'abs'->>'valid')::boolean = true THEN (wtc.checks->'abs'->>'isDifference')::boolean ELSE true END)) THEN
+                          CASE
+                              WHEN (wtc.compare_config->'metricClassification'->>'higherIsBetter') IS NULL THEN CASE WHEN wtc.test_stat_value > wtc.control_stat_value THEN 'increase' ELSE 'decrease' END
+                              WHEN (wtc.compare_config->'metricClassification'->>'higherIsBetter')::boolean = true THEN CASE WHEN wtc.test_stat_value > wtc.control_stat_value THEN 'improvement' ELSE 'regression' END
+                              WHEN (wtc.compare_config->'metricClassification'->>'higherIsBetter')::boolean = false THEN CASE WHEN wtc.test_stat_value < wtc.control_stat_value THEN 'improvement' ELSE 'regression' END
+                          END
+                      WHEN ((wtc.checks->'pct'->>'isDifference')::boolean = true OR (wtc.checks->'iqr'->>'isDifference')::boolean = true OR (wtc.checks->'abs'->>'isDifference')::boolean = true) THEN
+                          CASE
+                              WHEN (wtc.compare_config->'metricClassification'->>'higherIsBetter') IS NULL THEN CASE WHEN wtc.test_stat_value > wtc.control_stat_value THEN 'partial increase' ELSE 'partial decrease' END
+                              WHEN (wtc.compare_config->'metricClassification'->>'higherIsBetter')::boolean = true THEN CASE WHEN wtc.test_stat_value > wtc.control_stat_value THEN 'partial improvement' ELSE 'partial regression' END
+                              WHEN (wtc.compare_config->'metricClassification'->>'higherIsBetter')::boolean = false THEN CASE WHEN wtc.test_stat_value < wtc.control_stat_value THEN 'partial improvement' ELSE 'partial regression' END
+                          END
+                      ELSE 'no difference'
+                  END
+              ) as conclusion
+          FROM with_threshold_calculations wtc
+      )
+
+      INSERT INTO ds_adapt_tracked_results (
+          test_run_id, control_group_id, application_dashboard_id, panel_id, metric_name,
+          dashboard_uid, dashboard_label, panel_title, unit, test_run_start, updated_at,
+          tracked_test_run_id, tracked_difference_id, tracked_conclusion,
+          mean, median, min_value, max_value, std_dev, q10, q25, q75, q90, q95, q99,
+          iqr, idr, count, n_missing, n_non_zero, pct_missing, is_constant, all_missing,
+          last_value, exists_flags, uses_default_value, default_value,
+          compare_config, metric_classification, statistic, conditions, thresholds, checks, conclusion,
+          metrics_source_id,
+          organization_id, team_id, created_by, updated_by
+      )
+      SELECT
+          test_run_id,
+          control_group_id,
+          application_dashboard_id,
+          panel_id::int,
+          metric_name,
+          dashboard_uid,
+          dashboard_label,
+          panel_title,
+          unit,
+          test_run_start,
+          updated_at,
+          tracked_test_run_id,
+          tracked_difference_id,
+          tracked_conclusion,
+          -- Store all re-evaluated statistics as JSONB
+          jsonb_build_object('test', test_mean, 'control', control_mean, 'diff', CASE WHEN test_mean IS NOT NULL AND control_mean IS NOT NULL THEN test_mean - control_mean ELSE NULL END, 'absDiff', CASE WHEN test_mean IS NOT NULL AND control_mean IS NOT NULL THEN ABS(test_mean - control_mean) ELSE NULL END, 'pctDiff', CASE WHEN test_mean IS NOT NULL AND control_mean IS NOT NULL AND control_mean != 0 THEN (test_mean - control_mean) / control_mean ELSE NULL END, 'iqrDiff', CASE WHEN test_mean IS NOT NULL AND control_mean IS NOT NULL AND control_iqr IS NOT NULL AND control_iqr != 0 THEN (test_mean - control_mean) / control_iqr ELSE NULL END) as mean,
+          jsonb_build_object('test', test_median, 'control', control_median, 'diff', CASE WHEN test_median IS NOT NULL AND control_median IS NOT NULL THEN test_median - control_median ELSE NULL END, 'absDiff', CASE WHEN test_median IS NOT NULL AND control_median IS NOT NULL THEN ABS(test_median - control_median) ELSE NULL END, 'pctDiff', CASE WHEN test_median IS NOT NULL AND control_median IS NOT NULL AND control_median != 0 THEN (test_median - control_median) / control_median ELSE NULL END, 'iqrDiff', CASE WHEN test_median IS NOT NULL AND control_median IS NOT NULL AND control_iqr IS NOT NULL AND control_iqr != 0 THEN (test_median - control_median) / control_iqr ELSE NULL END) as median,
+          jsonb_build_object('test', test_min, 'control', control_min) as min_value,
+          jsonb_build_object('test', test_max, 'control', control_max) as max_value,
+          jsonb_build_object('test', test_std, 'control', control_std) as std_dev,
+          jsonb_build_object('test', test_q10, 'control', control_q10) as q10,
+          jsonb_build_object('test', test_q25, 'control', control_q25) as q25,
+          jsonb_build_object('test', test_q75, 'control', control_q75) as q75,
+          jsonb_build_object('test', test_q90, 'control', control_q90) as q90,
+          jsonb_build_object('test', test_q95, 'control', control_q95) as q95,
+          jsonb_build_object('test', test_q99, 'control', control_q99) as q99,
+          jsonb_build_object('test', test_iqr, 'control', control_iqr) as iqr,
+          NULL as idr,
+          jsonb_build_object('test', test_n, 'control', control_n) as count,
+          NULL as n_missing,
+          NULL as n_non_zero,
+          NULL as pct_missing,
+          jsonb_build_object('test', test_is_constant, 'control', control_is_constant) as is_constant,
+          jsonb_build_object('test', test_all_missing, 'control', control_all_missing) as all_missing,
+          jsonb_build_object('test', test_last, 'control', control_last) as last_value,
+          jsonb_build_object('test', NOT COALESCE(test_all_missing, true), 'control', NOT COALESCE(control_all_missing, true)) as exists_flags,
+          false as uses_default_value,
+          NULL as default_value,
+          compare_config,
+          compare_config->'metricClassification' as metric_classification,
+          statistic,
+          jsonb_build_object('controlExists', control_exists, 'testStatValue', test_stat_value, 'controlStatValue', control_stat_value, 'configuredAggregation', compare_config->'thresholds'->>'aggregation') as conditions,
+          thresholds,
+          checks,
+          conclusion,
+          metrics_source_id,
+          organization_id,
+          team_id,
+          'worker-pipeline' as created_by,
+          'worker-pipeline' as updated_by
+      FROM final_tracked_results
+      ON CONFLICT (test_run_id, application_dashboard_id, panel_id, metric_name, tracked_test_run_id)
+      DO UPDATE SET
+          dashboard_uid = EXCLUDED.dashboard_uid,
+          dashboard_label = EXCLUDED.dashboard_label,
+          panel_title = EXCLUDED.panel_title,
+          unit = EXCLUDED.unit,
+          test_run_start = EXCLUDED.test_run_start,
+          updated_at = EXCLUDED.updated_at,
+          tracked_conclusion = EXCLUDED.tracked_conclusion,
+          mean = EXCLUDED.mean,
+          median = EXCLUDED.median,
+          min_value = EXCLUDED.min_value,
+          max_value = EXCLUDED.max_value,
+          std_dev = EXCLUDED.std_dev,
+          q10 = EXCLUDED.q10,
+          q25 = EXCLUDED.q25,
+          q75 = EXCLUDED.q75,
+          q90 = EXCLUDED.q90,
+          q95 = EXCLUDED.q95,
+          q99 = EXCLUDED.q99,
+          iqr = EXCLUDED.iqr,
+          idr = EXCLUDED.idr,
+          count = EXCLUDED.count,
+          n_missing = EXCLUDED.n_missing,
+          n_non_zero = EXCLUDED.n_non_zero,
+          pct_missing = EXCLUDED.pct_missing,
+          is_constant = EXCLUDED.is_constant,
+          all_missing = EXCLUDED.all_missing,
+          last_value = EXCLUDED.last_value,
+          exists_flags = EXCLUDED.exists_flags,
+          uses_default_value = EXCLUDED.uses_default_value,
+          default_value = EXCLUDED.default_value,
+          compare_config = EXCLUDED.compare_config,
+          metric_classification = EXCLUDED.metric_classification,
+          statistic = EXCLUDED.statistic,
+          conditions = EXCLUDED.conditions,
+          thresholds = EXCLUDED.thresholds,
+          checks = EXCLUDED.checks,
+          conclusion = EXCLUDED.conclusion,
+          metrics_source_id = COALESCE(EXCLUDED.metrics_source_id, ds_adapt_tracked_results.metrics_source_id),
+          organization_id = EXCLUDED.organization_id,
+          team_id = EXCLUDED.team_id,
+          updated_by = EXCLUDED.updated_by
+    
+    "
+`;

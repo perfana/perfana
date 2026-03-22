@@ -1,20 +1,34 @@
 # TODOS
 
-## Pre-Phase 3: Capture ADAPT golden-file test fixtures
+## ~~Pre-Phase 3: Capture ADAPT golden-file test fixtures~~ ✅ DONE
 
-**What:** Run perfana-next-gen's ADAPT pipeline against known test data and capture inputs + outputs as JSON fixtures for the rebuild's test suite.
+Completed in Phase 3.3.5. Golden-file tests exist at `apps/worker/src/test/golden-files/` with 47 SQL snapshot tests and 891 real data result comparisons.
 
-**Why:** The ADAPT algorithm is the core IP with 1000+ LOC of complex SQL generation and statistical analysis. Golden-file tests are the only reliable way to verify the rebuilt pipeline produces identical results. This data can ONLY be captured while perfana-next-gen is still the running system.
+---
 
-**Pros:** Guarantees parity between old and new implementations. Catches subtle regressions in statistical calculations that unit tests alone would miss.
+## Fix 2 broken worker unit tests (Phase 3 regression)
 
-**Cons:** Requires a working perfana-next-gen instance with representative test data. Fixtures may need updating if ADAPT logic is intentionally changed.
+**What:** Two worker unit tests fail after Phase 3 MetricsSource changes:
 
-**Context:** The original ADAPT pipeline has minimal test coverage. The rebuild will add documentation and type safety, but without golden-file fixtures we can't verify the refactored code produces the same results. Capture at minimum: threshold calculations (percentage, IQR, absolute), conclusion generation (improved/degraded/unchanged), and tracked results for trend detection.
+1. `ChecksPipeline.test.ts` — "should execute with metric filter and log appropriately"
+   - The test expects a log message matching `StringContaining{...}` but the log format changed when `metricsSourceId` was added to the `ChecksInput` interface and logging in Phase 3.6.
+   - Fix: update the expected log message pattern to include `metricsSourceId`.
 
-**Depends on:** Working perfana-next-gen instance with test data loaded.
+2. `StatisticsPipeline.test.ts` — "should calculate last_value from most recent timestamp"
+   - The test snapshots the SQL string and expects `(array_agg(value ORDER BY time DESC))` but the SQL was modified in Phase 3.3 to include `metrics_source_id` in the column list, shifting the SQL structure.
+   - Fix: update the expected SQL substring to match the new column order.
 
-**Blocked by:** Nothing — can be done independently before Phase 3 starts.
+**Why:** Broken tests erode confidence in the test suite. These are unit tests that validate correct behavior — they should pass.
+
+**Pros:** Restores full test suite to green. Prevents the broken window effect.
+
+**Cons:** None — trivial fixes.
+
+**Context:** Both failures are from Phase 3 changes that modified SQL and logging but didn't update the corresponding unit test assertions. The pipeline behavior is correct (validated by golden-file tests and real data); only the test expectations are stale.
+
+**Depends on:** Nothing.
+
+**Blocked by:** Nothing.
 
 ---
 

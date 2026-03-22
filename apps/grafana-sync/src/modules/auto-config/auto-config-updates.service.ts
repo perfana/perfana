@@ -12,14 +12,19 @@
 
 import { Injectable, Logger } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Repository } from 'typeorm';
+import { Repository, DataSource } from 'typeorm';
 import {
   ApplicationDashboard,
   Benchmark,
   GrafanaDashboard,
   GrafanaInstance,
+  MetricsSource,
   SystemUnderTest,
 } from '@perfana/shared/entities';
+import {
+  upsertMetricsSource,
+  inferSourceTypeFromDashboardUid,
+} from '@perfana/shared/services/metrics-source-upsert';
 import { MappedTestRun, MappedProfileBenchmark } from './auto-config-finders.service';
 import { DashboardVariables } from './types';
 
@@ -69,7 +74,12 @@ export class AutoConfigUpdatesService {
     private grafanaInstanceRepo: Repository<GrafanaInstance>,
     @InjectRepository(SystemUnderTest)
     private systemUnderTestRepo: Repository<SystemUnderTest>,
+    private dataSource: DataSource,
   ) {}
+
+  private get metricsSourceRepo(): Repository<MetricsSource> {
+    return this.dataSource.getRepository(MetricsSource);
+  }
 
   /**
    * Insert application dashboard
@@ -169,6 +179,35 @@ export class AutoConfigUpdatesService {
       }
 
       this.logger.log(`Successfully upserted application dashboard with ID: ${result.id}`);
+
+      // Dual-write: also create/update corresponding MetricsSource
+      // Failures must not block ApplicationDashboard creation
+      try {
+        const sourceType = inferSourceTypeFromDashboardUid(applicationDashboard.dashboardUid);
+        const metricsSourceId = await upsertMetricsSource(this.metricsSourceRepo, {
+          systemUnderTestId: sut.id,
+          testEnvironment: applicationDashboard.testEnvironment,
+          sourceType,
+          sourceConfigId: sourceType === 'grafana' ? grafanaInstance.id : undefined,
+          externalRef: applicationDashboard.dashboardUid,
+          displayName: applicationDashboard.dashboardName,
+          displayLabel: applicationDashboard.dashboardLabel,
+          tags: applicationDashboard.tags,
+          organizationId: applicationDashboard.organizationId,
+        });
+
+        // Set forward link on ApplicationDashboard
+        if (metricsSourceId && result.metricsSourceId !== metricsSourceId) {
+          await this.applicationDashboardRepo.update(result.id, {
+            metricsSourceId,
+          });
+        }
+
+        this.logger.log(`Dual-write: MetricsSource ${metricsSourceId} for ApplicationDashboard ${result.id}`);
+      } catch (msError) {
+        this.logger.error(`MetricsSource dual-write failed for ApplicationDashboard ${result.id} (non-blocking):`, msError);
+      }
+
       return { insertedId: result.id };
     } catch (e) {
       this.logger.error('insertApplicationDashboard failed:', e);

@@ -5,7 +5,6 @@ import 'reflect-metadata';
 
 import { INestApplicationContext } from '@nestjs/common';
 import { loadConfig } from './config/environment.js';
-import { testQueueConnection as _testQueueConnection } from './config/queue.js';
 import { testRedisConnection } from './config/redis.js';
 import { getRedisPool, getRedisPoolStats } from './config/redis-pool.js';
 import { createLogger } from './lib/utils/logger.js';
@@ -84,7 +83,6 @@ export class PerfanaWorkerApp {
       this.logger.info('    - collect-metrics-incremental (scheduled incremental collection)');
       this.logger.info('  Queue 2: perfana-batch (batch processing)');
       this.logger.info('    - batch-analysis, batch-flow, reevaluation-batch');
-      this.logger.info('    - orchestrate-reevaluate-batch');
       this.logger.info('🚀 NO priority, NO rate limiting → <10ms job pickup expected');
       this.logger.info('💎 Using TypeORM for database operations (NestJS integration active)');
       this.logger.info('⏰ Scheduled tasks:');

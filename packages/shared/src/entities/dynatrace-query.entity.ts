@@ -1,5 +1,6 @@
 import { Entity, PrimaryGeneratedColumn, Column, CreateDateColumn, UpdateDateColumn, ManyToOne, JoinColumn } from 'typeorm';
 import { DynatraceConfig } from './dynatrace-config.entity';
+import { MetricsSource } from './metrics-source.entity';
 
 @Entity('dynatrace_queries')
 export class DynatraceQuery {
@@ -23,6 +24,9 @@ export class DynatraceQuery {
 
   @Column({ name: 'application_dashboard_id', type: 'uuid', nullable: true })
   applicationDashboardId?: string;
+
+  @Column({ name: 'metrics_source_id', type: 'uuid', nullable: true })
+  metricsSourceId?: string;
 
   @Column({ name: 'panel_title', type: 'varchar', length: 500 })
   panelTitle!: string;
@@ -70,4 +74,8 @@ export class DynatraceQuery {
   @ManyToOne(() => DynatraceConfig)
   @JoinColumn({ name: 'dynatrace_config_id' })
   dynatraceConfig?: DynatraceConfig;
+
+  @ManyToOne(() => MetricsSource)
+  @JoinColumn({ name: 'metrics_source_id' })
+  metricsSource?: MetricsSource;
 }

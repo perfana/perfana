@@ -98,6 +98,7 @@ export class ComparePresetsService {
         seriesSearchText: createComparePresetDto.series_search_text,
         showPercentiles: createComparePresetDto.show_percentiles || false,
         applicationDashboardId: createComparePresetDto.application_dashboard_id,
+        metricsSourceId: createComparePresetDto.metrics_source_id,
         source: createComparePresetDto.source,
         dashboardLabel: createComparePresetDto.dashboard_label,
         panelId: createComparePresetDto.panel_id,
@@ -121,6 +122,7 @@ export class ComparePresetsService {
     userId: string,
     currentTestRunId?: string,
     roles: string[] = [],
+    metricsSourceId?: string,
   ): Promise<ComparePresetResponseDto[]> {
     const isAdmin = this.authzService.isGlobalAdmin(roles);
     this.logger.log(`Fetching compare presets for user: ${userId}${isAdmin ? ' (admin)' : ''}`);
@@ -162,6 +164,10 @@ export class ComparePresetsService {
             )
             .orWhere('preset.createdForTestRunId IS NULL');
           }));
+      }
+
+      if (metricsSourceId) {
+        queryBuilder.andWhere('preset.metricsSourceId = :metricsSourceId', { metricsSourceId });
       }
 
       queryBuilder.orderBy('preset.createdAt', 'DESC');
@@ -338,6 +344,7 @@ export class ComparePresetsService {
       if (updateComparePresetDto.series_search_text !== undefined) updateData.seriesSearchText = updateComparePresetDto.series_search_text;
       if (updateComparePresetDto.show_percentiles !== undefined) updateData.showPercentiles = updateComparePresetDto.show_percentiles;
       if (updateComparePresetDto.application_dashboard_id !== undefined) updateData.applicationDashboardId = updateComparePresetDto.application_dashboard_id;
+      if (updateComparePresetDto.metrics_source_id !== undefined) updateData.metricsSourceId = updateComparePresetDto.metrics_source_id;
       if ((updateComparePresetDto as any).source !== undefined) updateData.source = (updateComparePresetDto as any).source;
       if ((updateComparePresetDto as any).dashboard_label !== undefined) updateData.dashboardLabel = (updateComparePresetDto as any).dashboard_label;
       if (updateComparePresetDto.panel_id !== undefined) updateData.panelId = updateComparePresetDto.panel_id;
@@ -427,6 +434,7 @@ export class ComparePresetsService {
       series_search_text: preset.seriesSearchText,
       show_percentiles: preset.showPercentiles,
       application_dashboard_id: preset.applicationDashboardId,
+      metrics_source_id: preset.metricsSourceId,
       source: preset.source,
       panel_id: preset.panelId,
       panel_title: preset.panelTitle,

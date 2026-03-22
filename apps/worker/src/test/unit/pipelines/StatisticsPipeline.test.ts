@@ -527,7 +527,7 @@ describe('StatisticsPipeline', () => {
       const aggregationCall = mockEntityManager.query.mock.calls[3];
       const sqlQuery = aggregationCall[0];
 
-      expect(sqlQuery).toContain('(array_agg(value ORDER BY time DESC))[1] as last_value');
+      expect(sqlQuery).toContain('lv.value as last_value');
     });
 
     test('should join with test_runs to get start_time', async () => {

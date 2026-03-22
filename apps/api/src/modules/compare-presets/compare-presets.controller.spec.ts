@@ -211,7 +211,7 @@ describe('ComparePresetsController', () => {
 
         // Assert
         expect(result).toEqual(mockPresets);
-        expect(service.findAll).toHaveBeenCalledWith('user-123', undefined, ['user']);
+        expect(service.findAll).toHaveBeenCalledWith('user-123', undefined, ['user'], undefined);
         expect(result.length).toBe(2);
       });
 
@@ -226,7 +226,7 @@ describe('ComparePresetsController', () => {
 
         // Assert
         expect(result).toEqual(mockPresets);
-        expect(service.findAll).toHaveBeenCalledWith('user-123', testRunId, ['user']);
+        expect(service.findAll).toHaveBeenCalledWith('user-123', testRunId, ['user'], undefined);
       });
 
       it('should return both user presets and global presets', async () => {
@@ -285,7 +285,7 @@ describe('ComparePresetsController', () => {
         await controller.findAll(adminContext);
 
         // Assert
-        expect(service.findAll).toHaveBeenCalledWith('user-123', undefined, ['admin', 'user']);
+        expect(service.findAll).toHaveBeenCalledWith('user-123', undefined, ['admin', 'user'], undefined);
       });
     });
   });
@@ -611,7 +611,7 @@ describe('ComparePresetsController', () => {
         await controller.findAll(mockUserContext, '');
 
         // Assert
-        expect(service.findAll).toHaveBeenCalledWith('user-123', '', ['user']);
+        expect(service.findAll).toHaveBeenCalledWith('user-123', '', ['user'], undefined);
       });
 
       it('should handle special characters in testRunId', async () => {
@@ -623,7 +623,7 @@ describe('ComparePresetsController', () => {
         await controller.findAll(mockUserContext, specialTestRunId);
 
         // Assert
-        expect(service.findAll).toHaveBeenCalledWith('user-123', specialTestRunId, ['user']);
+        expect(service.findAll).toHaveBeenCalledWith('user-123', specialTestRunId, ['user'], undefined);
       });
 
       it('should handle very long testRunId', async () => {
@@ -635,7 +635,7 @@ describe('ComparePresetsController', () => {
         await controller.findAll(mockUserContext, longTestRunId);
 
         // Assert
-        expect(service.findAll).toHaveBeenCalledWith('user-123', longTestRunId, ['user']);
+        expect(service.findAll).toHaveBeenCalledWith('user-123', longTestRunId, ['user'], undefined);
       });
     });
 
@@ -715,7 +715,7 @@ describe('ComparePresetsController', () => {
         await controller.findAll(otherUserContext);
 
         // Assert
-        expect(service.findAll).toHaveBeenCalledWith('other-user-456', undefined, ['admin']);
+        expect(service.findAll).toHaveBeenCalledWith('other-user-456', undefined, ['admin'], undefined);
       });
 
       it('should handle user context with multiple roles', async () => {
@@ -734,7 +734,7 @@ describe('ComparePresetsController', () => {
         await controller.findAll(multiRoleContext);
 
         // Assert
-        expect(service.findAll).toHaveBeenCalledWith('user-123', undefined, ['user', 'admin', 'super-admin']);
+        expect(service.findAll).toHaveBeenCalledWith('user-123', undefined, ['user', 'admin', 'super-admin'], undefined);
       });
 
       it('should handle user context with empty roles', async () => {
@@ -753,7 +753,7 @@ describe('ComparePresetsController', () => {
         await controller.findAll(noRolesContext);
 
         // Assert
-        expect(service.findAll).toHaveBeenCalledWith('user-123', undefined, []);
+        expect(service.findAll).toHaveBeenCalledWith('user-123', undefined, [], undefined);
       });
     });
   });

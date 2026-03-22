@@ -24,6 +24,7 @@ export interface PanelDocument {
   id?: number;
   test_run_id: string;
   application_dashboard_id: string;
+  metrics_source_id?: string;
   dashboard_uid: string;
   panel_id: number;
   panel_title: string;
@@ -55,6 +56,7 @@ export interface MetricsRecord {
 export interface PanelMetricsDocument {
   test_run_id: string;
   application_dashboard_id: string;
+  metrics_source_id?: string;
   dashboard_uid: string;
   panel_id: number;
   panel_title: string;

@@ -50,6 +50,7 @@ export class TrendsPresetsService {
         description: createTrendsPresetDto.description,
         presetType: createTrendsPresetDto.preset_type,
         applicationDashboardId: createTrendsPresetDto.application_dashboard_id,
+        metricsSourceId: createTrendsPresetDto.metrics_source_id,
         panelId: createTrendsPresetDto.panel_id,
         panelTitle: createTrendsPresetDto.panel_title,
         evaluateType: createTrendsPresetDto.evaluate_type,
@@ -81,7 +82,7 @@ export class TrendsPresetsService {
    * - Global admins see all presets
    * - Regular users see their own presets and global presets
    */
-  async findAll(userId: string, roles: string[] = [], currentTestRunId?: string): Promise<TrendsPresetResponseDto[]> {
+  async findAll(userId: string, roles: string[] = [], currentTestRunId?: string, metricsSourceId?: string): Promise<TrendsPresetResponseDto[]> {
     try {
       // Log authorization context for debugging
       const isAdmin = this.authzService.isGlobalAdmin(roles);
@@ -126,6 +127,10 @@ export class TrendsPresetsService {
             )
             .orWhere('preset.createdForTestRunId IS NULL');
           }));
+      }
+
+      if (metricsSourceId) {
+        queryBuilder.andWhere('preset.metricsSourceId = :metricsSourceId', { metricsSourceId });
       }
 
       queryBuilder.orderBy('preset.createdAt', 'DESC');
@@ -259,6 +264,7 @@ export class TrendsPresetsService {
       description: preset.description,
       preset_type: preset.presetType,
       application_dashboard_id: preset.applicationDashboardId,
+      metrics_source_id: preset.metricsSourceId,
       panel_id: preset.panelId,
       panel_title: preset.panelTitle,
       evaluate_type: preset.evaluateType,

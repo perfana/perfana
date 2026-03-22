@@ -1,5 +1,6 @@
 import { Entity, PrimaryGeneratedColumn, Column, CreateDateColumn, UpdateDateColumn, ManyToOne, JoinColumn, Index } from 'typeorm';
 import { ApplicationDashboard } from './application-dashboard.entity';
+import { MetricsSource } from './metrics-source.entity';
 
 @Entity('trends_filter_presets')
 @Index(['name'])
@@ -23,6 +24,9 @@ export class TrendsFilterPreset {
 
   @Column({ name: 'application_dashboard_id', type: 'uuid', nullable: true })
   applicationDashboardId?: string;
+
+  @Column({ name: 'metrics_source_id', type: 'uuid', nullable: true })
+  metricsSourceId?: string;
 
   @Column({ name: 'panel_id', type: 'integer', nullable: true })
   panelId?: number;
@@ -71,4 +75,8 @@ export class TrendsFilterPreset {
   @ManyToOne(() => ApplicationDashboard, { nullable: true, onDelete: 'SET NULL' })
   @JoinColumn({ name: 'application_dashboard_id' })
   applicationDashboard?: ApplicationDashboard;
+
+  @ManyToOne(() => MetricsSource, { nullable: true })
+  @JoinColumn({ name: 'metrics_source_id' })
+  metricsSource?: MetricsSource;
 }

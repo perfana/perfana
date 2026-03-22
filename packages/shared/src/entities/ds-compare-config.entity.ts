@@ -1,5 +1,6 @@
 import { Entity, PrimaryGeneratedColumn, Column, CreateDateColumn, UpdateDateColumn, ManyToOne, JoinColumn } from 'typeorm';
 import { ApplicationDashboard } from './application-dashboard.entity';
+import { MetricsSource } from './metrics-source.entity';
 import { SystemUnderTest } from './system-under-test.entity';
 
 @Entity('ds_compare_config')
@@ -52,9 +53,16 @@ export class DsCompareConfig {
   @Column({ type: 'timestamptz', default: () => 'CURRENT_TIMESTAMP' })
   last_modified_at!: Date;
 
+  @Column({ type: 'uuid', nullable: true })
+  metrics_source_id?: string;
+
   @ManyToOne(() => ApplicationDashboard, { onDelete: 'CASCADE' })
   @JoinColumn({ name: 'application_dashboard_id' })
   application_dashboard?: ApplicationDashboard;
+
+  @ManyToOne(() => MetricsSource)
+  @JoinColumn({ name: 'metrics_source_id' })
+  metrics_source?: MetricsSource;
 
   @ManyToOne(() => SystemUnderTest)
   @JoinColumn({ name: 'system_under_test_id' })

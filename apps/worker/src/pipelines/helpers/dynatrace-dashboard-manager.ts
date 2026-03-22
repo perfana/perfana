@@ -55,6 +55,7 @@ export interface DashboardMetadata {
   dashboardId: string; // UUID
   dashboardUid: string; // Grafana UID
   dashboardLabel: string; // Human-readable label
+  metricsSourceId?: string; // MetricsSource UUID (Phase 3.3)
 }
 
 /**
@@ -117,10 +118,24 @@ export class DynatraceDashboardManager {
       );
     }
 
+    // Dual-write: create/lookup MetricsSource (non-blocking)
+    let metricsSourceId: string | undefined;
+    try {
+      metricsSourceId = await this.upsertMetricsSource(
+        systemUnderTestId,
+        testEnvironment,
+        dashboardUid,
+        dashboardLabel,
+      );
+    } catch (err) {
+      this.logger.error({ err }, `MetricsSource dual-write failed for Dynatrace dashboard ${dashboardId} (non-blocking)`);
+    }
+
     const metadata: DashboardMetadata = {
       dashboardId,
       dashboardUid,
       dashboardLabel,
+      metricsSourceId,
     };
 
     // Cache the metadata
@@ -174,7 +189,8 @@ export class DynatraceDashboardManager {
   }
 
   /**
-   * Create a Dynatrace-specific dashboard in the database
+   * Create a Dynatrace-specific dashboard in the database.
+   * No synthetic GrafanaDashboard is created — grafana columns are NULL for Dynatrace sources.
    */
   private async createDynatraceDashboard(
     dashboardId: string,
@@ -187,68 +203,17 @@ export class DynatraceDashboardManager {
       `🔧 Creating Dynatrace dashboard: ${dashboardLabel} (${dashboardUid})`
     );
 
-    // Get the first available grafana instance
-    const grafanaInstances = await this.dataSource.query<Array<{ id: string }>>(
-      `SELECT id FROM grafana_instances LIMIT 1`
-    );
-
-    if (!grafanaInstances || grafanaInstances.length === 0) {
-      throw new Error(
-        'No Grafana instances found in database - cannot create Dynatrace dashboard'
-      );
-    }
-
-    const grafanaInstanceId = grafanaInstances[0].id;
-
-    // Check if synthetic grafana_dashboard exists for this UID
-    const grafanaDashboardExists = await this.dataSource.query(
-      `SELECT id FROM grafana_dashboards WHERE uid = $1 AND grafana_instance_id = $2`,
-      [dashboardUid, grafanaInstanceId]
-    );
-
-    let grafanaDashboardId: string;
-
-    if (!grafanaDashboardExists || grafanaDashboardExists.length === 0) {
-      // Create synthetic grafana_dashboard with grafana_id in 800000+ range
-      // This distinguishes Dynatrace dashboards from performance test metrics (900000+)
-      const syntheticGrafanaId = Math.floor(Math.random() * 100000) + 800000;
-
-      const result = await this.dataSource.query<Array<{ id: string }>>(
-        `INSERT INTO grafana_dashboards (
-          grafana_instance_id, grafana_id, uid, name, panels
-        ) VALUES ($1, $2, $3, $4, $5)
-        RETURNING id`,
-        [
-          grafanaInstanceId,
-          syntheticGrafanaId,
-          dashboardUid,
-          dashboardLabel,
-          JSON.stringify([]), // Empty panels array
-        ]
-      );
-      grafanaDashboardId = result[0].id;
-      this.logger.info(
-        `✅ Created synthetic grafana_dashboard: ${grafanaDashboardId} (grafana_id: ${syntheticGrafanaId})`
-      );
-    } else {
-      grafanaDashboardId = grafanaDashboardExists[0].id;
-    }
-
-    // Create application_dashboard
+    // Create application_dashboard without Grafana references (nullable columns)
     await this.dataSource.query(
       `INSERT INTO application_dashboards (
         id, system_under_test_id, test_environment,
-        grafana_instance_id, grafana_dashboard_id,
         dashboard_name, dashboard_uid, dashboard_label
-      ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
-      ON CONFLICT (system_under_test_id, test_environment, grafana_instance_id, dashboard_uid, dashboard_label)
-      DO NOTHING`,
+      ) VALUES ($1, $2, $3, $4, $5, $6)
+      ON CONFLICT DO NOTHING`,
       [
         dashboardId,
         systemUnderTestId,
         testEnvironment,
-        grafanaInstanceId,
-        grafanaDashboardId,
         dashboardLabel,
         dashboardUid,
         dashboardLabel,
@@ -256,6 +221,29 @@ export class DynatraceDashboardManager {
     );
 
     this.logger.info(`✅ Created Dynatrace dashboard: ${dashboardId}`);
+  }
+
+  /**
+   * Upsert a MetricsSource for a dynatrace dashboard.
+   * Returns the metrics_source_id.
+   */
+  private async upsertMetricsSource(
+    systemUnderTestId: string,
+    testEnvironment: string,
+    dashboardUid: string,
+    dashboardLabel: string,
+  ): Promise<string | undefined> {
+    const result = await this.dataSource.query<Array<{ id: string }>>(
+      `INSERT INTO metrics_sources (
+        system_under_test_id, test_environment, source_type,
+        external_ref, display_name, display_label
+      ) VALUES ($1, $2, 'dynatrace', $3, $4, $5)
+      ON CONFLICT ON CONSTRAINT uq_metrics_sources_unique
+      DO UPDATE SET display_label = EXCLUDED.display_label, updated_at = NOW()
+      RETURNING id`,
+      [systemUnderTestId, testEnvironment, dashboardUid, dashboardLabel, dashboardLabel]
+    );
+    return result?.[0]?.id;
   }
 
   /**

@@ -8,14 +8,68 @@ export interface ControlGroupStatisticsInput {
 }
 
 /**
- * Control Group Statistics Pipeline
+ * ControlGroupStatisticsPipeline — Baseline Statistics for ADAPT Comparison
  *
- * This pipeline calculates statistics for control groups, aggregating metrics
- * from the control test runs. It's separated from control group creation to
- * match the Python architecture where statistics calculation is a separate step.
+ * ──────────────────────────────────────────────────────────────────────────────
+ * What is a Control Group?
+ * ──────────────────────────────────────────────────────────────────────────────
+ * A control group is a set of recent, passing test runs that share the same
+ * (system_under_test, workload, test_environment) tuple. It represents the
+ * "known-good baseline" that ADAPT compares a new test run against to detect
+ * performance regressions.
  *
- * The statistics are calculated at the metric level but using the shared control
- * runs from the test-run-level control group.
+ * The ControlGroupsPipeline (separate) selects which test runs form the control
+ * group. This pipeline then aggregates their raw metric data into a single set
+ * of baseline statistics per metric, stored in `ds_control_group_statistics`.
+ *
+ * ──────────────────────────────────────────────────────────────────────────────
+ * Aggregation Methodology
+ * ──────────────────────────────────────────────────────────────────────────────
+ * Unlike StatisticsPipeline (which computes stats per individual test run), this
+ * pipeline pools ALL raw data points from ALL control runs into a single
+ * distribution per metric. This means:
+ *
+ *   - mean, std_dev, percentiles are computed over the union of all data points
+ *     across control runs (not averaged across per-run statistics)
+ *   - This yields more robust estimates because the sample size is larger
+ *   - The IQR used by ADAPT thresholds reflects the true variability across runs,
+ *     not just within-run noise
+ *
+ * Metadata fields (last_value, count, n_missing, etc.) ARE averaged across
+ * per-run statistics since they describe per-run characteristics.
+ *
+ * ──────────────────────────────────────────────────────────────────────────────
+ * SQL CTE Chain Overview
+ * ──────────────────────────────────────────────────────────────────────────────
+ *
+ *   raw_metrics_aggregated     Pool raw ds_metrics data points from all control
+ *        │                     runs → GROUP BY (dashboard, panel, metric).
+ *        │                     Compute mean, std_dev, percentile_agg (t-digest).
+ *        │                     Done FIRST (before any joins) to avoid a
+ *        │                     cartesian explosion between metadata and raw data.
+ *        │
+ *   control_metrics_metadata   DISTINCT ON per-metric metadata (dashboard_uid,
+ *        │                     panel_title, unit, benchmark_id, etc.) from
+ *        │                     ds_metric_statistics. Uses the most recent
+ *        │                     non-null values via ORDER BY ... NULLS LAST.
+ *        │
+ *   metadata_aggregated        AVG of per-run counters (last_value, count,
+ *        │                     n_missing, n_non_zero, pct_missing) across the
+ *        │                     control runs. Collects distinct benchmark_ids.
+ *        │
+ *   final_stats                JOIN the three CTEs (small: ~N metrics each),
+ *        │                     extract approximate percentiles from t-digest,
+ *        │                     compute IQR and IDR.
+ *        ▼
+ *   INSERT INTO ds_control_group_statistics  (UPSERT on conflict)
+ *
+ * ──────────────────────────────────────────────────────────────────────────────
+ * DISTINCT ON Logic
+ * ──────────────────────────────────────────────────────────────────────────────
+ * `control_metrics_metadata` uses DISTINCT ON (dashboard_id, panel_id, metric_name)
+ * with ORDER BY ... dashboard_uid NULLS LAST, metrics_source_id NULLS LAST.
+ * This deterministically picks the metadata row that has the most complete
+ * information (non-null dashboard_uid and metrics_source_id preferred).
  */
 export class ControlGroupStatisticsPipeline extends BasePipelineTypeORM {
   validateInput(input: unknown): boolean {
@@ -167,8 +221,10 @@ export class ControlGroupStatisticsPipeline extends BasePipelineTypeORM {
     // OPTIMIZED: Aggregate raw metrics FIRST, then join metadata to avoid cartesian explosion
     const statisticsQuery = `
       WITH raw_metrics_aggregated AS (
-        -- FIRST: Aggregate raw metric data points directly (no join yet)
-        -- This avoids the cartesian product between metadata and raw data
+        -- Pool ALL raw data points from ALL control runs into a single
+        -- distribution per metric. This is fundamentally different from
+        -- averaging per-run statistics — it preserves the true shape of
+        -- the distribution across runs.
         SELECT
           m.application_dashboard_id,
           m.panel_id,
@@ -176,9 +232,9 @@ export class ControlGroupStatisticsPipeline extends BasePipelineTypeORM {
           AVG(m.value) as mean,
           MIN(m.value) as min_value,
           MAX(m.value) as max_value,
-          STDDEV_POP(m.value) as std_dev,
-          percentile_agg(m.value) as pct_agg,
-          (STDDEV_POP(m.value) < 0.0001) as is_constant,
+          STDDEV_POP(m.value) as std_dev,         -- Population std dev (not sample)
+          percentile_agg(m.value) as pct_agg,     -- t-digest sketch for percentile extraction
+          (STDDEV_POP(m.value) < 0.0001) as is_constant,  -- Near-zero variance → constant metric
           (COUNT(m.value) = 0) as all_missing
         FROM ds_metrics m
         INNER JOIN test_runs tr ON m.test_run_id = tr.test_run_id
@@ -198,7 +254,9 @@ export class ControlGroupStatisticsPipeline extends BasePipelineTypeORM {
       ),
 
       control_metrics_metadata AS (
-        -- Get DISTINCT metadata per metric (not per test run)
+        -- Pick ONE metadata row per metric across all control runs.
+        -- DISTINCT ON with ORDER BY ... NULLS LAST ensures we prefer the row
+        -- with the most complete metadata (non-null dashboard_uid, metrics_source_id).
         SELECT DISTINCT ON (ms.application_dashboard_id, ms.panel_id, ms.metric_name)
           ms.application_dashboard_id,
           ms.panel_id,
@@ -207,7 +265,8 @@ export class ControlGroupStatisticsPipeline extends BasePipelineTypeORM {
           ms.dashboard_label,
           ms.panel_title,
           ms.unit,
-          ms.benchmark_id
+          ms.benchmark_id,
+          ms.metrics_source_id
         FROM ds_metric_statistics ms
         INNER JOIN test_runs tr ON ms.test_run_id = tr.test_run_id
         WHERE ms.test_run_id = ANY($2::varchar[])
@@ -221,11 +280,13 @@ export class ControlGroupStatisticsPipeline extends BasePipelineTypeORM {
               WHERE dq.organization_id = tr.organization_id OR dq.organization_id IS NULL
             )
           )
-        ORDER BY ms.application_dashboard_id, ms.panel_id, ms.metric_name, ms.dashboard_uid NULLS LAST
+        ORDER BY ms.application_dashboard_id, ms.panel_id, ms.metric_name, ms.dashboard_uid NULLS LAST, ms.metrics_source_id NULLS LAST
       ),
 
       metadata_aggregated AS (
-        -- Aggregate metadata fields across control runs
+        -- Average per-run counters across control runs. Unlike raw_metrics_aggregated
+        -- (which pools raw data points), this averages the per-run STATISTICS to get
+        -- "typical" values for count, n_missing, last_value, etc.
         SELECT
           ms.application_dashboard_id,
           ms.panel_id,
@@ -253,7 +314,8 @@ export class ControlGroupStatisticsPipeline extends BasePipelineTypeORM {
       ),
 
       final_stats AS (
-        -- Join pre-aggregated raw metrics with metadata (small join: ~800 rows x ~800 rows)
+        -- Combine the three CTEs. All three are grouped by the same key
+        -- (dashboard, panel, metric), so this is a 1:1:1 join — no explosion.
         SELECT
           r.application_dashboard_id,
           r.panel_id,
@@ -262,6 +324,7 @@ export class ControlGroupStatisticsPipeline extends BasePipelineTypeORM {
           m.dashboard_label,
           m.panel_title,
           m.unit,
+          m.metrics_source_id,
           ma.benchmark_ids,
           r.mean,
           r.min_value,
@@ -301,6 +364,7 @@ export class ControlGroupStatisticsPipeline extends BasePipelineTypeORM {
       INSERT INTO ds_control_group_statistics (
         control_group_id,
         application_dashboard_id,
+        metrics_source_id,
         panel_id,
         metric_name,
         test_run_id,
@@ -338,6 +402,7 @@ export class ControlGroupStatisticsPipeline extends BasePipelineTypeORM {
       SELECT
         $1 as control_group_id,
         application_dashboard_id,
+        metrics_source_id,
         panel_id,
         metric_name,
         $1 as test_run_id,  -- Use control_group_id as test_run_id
@@ -375,6 +440,7 @@ export class ControlGroupStatisticsPipeline extends BasePipelineTypeORM {
       ON CONFLICT (control_group_id, application_dashboard_id, panel_id, metric_name)
       DO UPDATE SET
         test_run_id = EXCLUDED.test_run_id,
+        metrics_source_id = COALESCE(EXCLUDED.metrics_source_id, ds_control_group_statistics.metrics_source_id),
         dashboard_uid = EXCLUDED.dashboard_uid,
         dashboard_label = EXCLUDED.dashboard_label,
         panel_title = EXCLUDED.panel_title,

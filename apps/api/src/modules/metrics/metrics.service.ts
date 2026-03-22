@@ -7,7 +7,8 @@ import {
   DsControlGroups,
   DsChangePoints,
   DsAdaptResults,
-  TestRun as TestRunEntity
+  TestRun as TestRunEntity,
+  ApplicationDashboard,
 } from '../../entities';
 import { AuthorizationService } from '../../common/services/authorization.service';
 
@@ -17,13 +18,6 @@ export interface MetricDataPoint {
   value?: number;
   timestep?: number;
   ramp_up?: boolean;
-}
-
-interface MetricWhereConditions {
-  test_run_id: string;
-  panel_id: number;
-  application_dashboard_id?: string;
-  metric_name?: string;
 }
 
 export interface MetricStatisticResult {
@@ -36,6 +30,7 @@ export interface MetricStatisticResult {
   annotations: string | null;
   is_changepoint: boolean;
   consolidated_result: unknown | null;
+  metrics_source_id?: string | null;
   statistics?: Record<string, number | null>;
 }
 
@@ -74,8 +69,22 @@ export class MetricsService {
     private adaptResultsRepo: Repository<DsAdaptResults>,
     @InjectRepository(TestRunEntity)
     private testRunRepo: Repository<TestRunEntity>,
+    @InjectRepository(ApplicationDashboard)
+    private applicationDashboardRepo: Repository<ApplicationDashboard>,
     private readonly authzService: AuthorizationService,
   ) {}
+
+  /**
+   * Resolve an applicationDashboardId from a metricsSourceId by looking up the
+   * application_dashboards table.  Returns undefined when no match is found.
+   */
+  private async resolveApplicationDashboardId(metricsSourceId: string): Promise<string | undefined> {
+    const row = await this.applicationDashboardRepo.findOne({
+      where: { metricsSourceId },
+      select: ['id'],
+    });
+    return row?.id;
+  }
 
   private async validateTestRunAccess(
     testRunId: string,
@@ -114,7 +123,7 @@ export class MetricsService {
     return null;
   }
 
-  async findDSMetricsForPanel(testRunId: string, panelId: number, applicationDashboardId?: string, metricName?: string, userId: string = '', roles: string[] = []): Promise<MetricDataPoint[] | null> {
+  async findDSMetricsForPanel(testRunId: string, panelId: number, applicationDashboardId?: string, metricName?: string, userId: string = '', roles: string[] = [], metricsSourceId?: string): Promise<MetricDataPoint[] | null> {
     try {
       // Validate test run access
       const hasAccess = await this.validateTestRunAccess(testRunId, userId, roles);
@@ -122,8 +131,12 @@ export class MetricsService {
         return null;
       }
 
-      // First, determine the application_dashboard_id to use
+      // If metricsSourceId is provided, we can filter directly on ds_metrics.metrics_source_id
+      // But we still need an applicationDashboardId for the fallback path
       let finalApplicationDashboardId = applicationDashboardId;
+      if (!finalApplicationDashboardId && metricsSourceId) {
+        finalApplicationDashboardId = await this.resolveApplicationDashboardId(metricsSourceId);
+      }
 
       if (!finalApplicationDashboardId) {
         const firstDashboard = await this.metricsRepo.findOne({
@@ -147,7 +160,12 @@ export class MetricsService {
       const countParams: (string | number)[] = [testRunId, panelId];
       let countParamIdx = 3;
 
-      if (finalApplicationDashboardId) {
+      // Prefer metricsSourceId over applicationDashboardId for filtering ds_metrics
+      if (metricsSourceId) {
+        conditions.push(`metrics_source_id = $${countParamIdx}`);
+        countParams.push(metricsSourceId);
+        countParamIdx++;
+      } else if (finalApplicationDashboardId) {
         conditions.push(`application_dashboard_id = $${countParamIdx}`);
         countParams.push(finalApplicationDashboardId);
         countParamIdx++;
@@ -170,7 +188,7 @@ export class MetricsService {
       // If data points exceed threshold, use LTTB downsampling via TimescaleDB toolkit
       if (needs_downsampling) {
         const downsampledResults = await this.executeLTTBQuery(
-          testRunId, panelId, finalApplicationDashboardId, metricName, maxDataPoints,
+          testRunId, panelId, finalApplicationDashboardId, metricName, maxDataPoints, metricsSourceId,
         );
 
         if (!downsampledResults || downsampledResults.length === 0) {
@@ -180,7 +198,7 @@ export class MetricsService {
         return downsampledResults;
       } else {
         // Use regular query for smaller datasets
-        return this.executeRegularQuery(testRunId, panelId, finalApplicationDashboardId, metricName);
+        return this.executeRegularQuery(testRunId, panelId, finalApplicationDashboardId, metricName, metricsSourceId);
       }
 
     } catch (error) {
@@ -189,14 +207,17 @@ export class MetricsService {
     }
   }
 
-  private async executeRegularQuery(testRunId: string, panelId: number, applicationDashboardId?: string, metricName?: string): Promise<MetricDataPoint[] | null> {
+  private async executeRegularQuery(testRunId: string, panelId: number, applicationDashboardId?: string, metricName?: string, metricsSourceId?: string): Promise<MetricDataPoint[] | null> {
     try {
-      const where: MetricWhereConditions = {
+      const where: Record<string, string | number> = {
         test_run_id: testRunId,
         panel_id: panelId,
       };
 
-      if (applicationDashboardId) {
+      // Prefer metricsSourceId over applicationDashboardId
+      if (metricsSourceId) {
+        where.metrics_source_id = metricsSourceId;
+      } else if (applicationDashboardId) {
         where.application_dashboard_id = applicationDashboardId;
       }
 
@@ -239,6 +260,7 @@ export class MetricsService {
     applicationDashboardId?: string,
     metricName?: string,
     maxDataPoints = 4000,
+    metricsSourceId?: string,
   ): Promise<MetricDataPoint[] | null> {
     try {
       // First count distinct metrics to distribute the resolution budget
@@ -249,7 +271,12 @@ export class MetricsService {
       const params: (string | number)[] = [testRunId, panelId];
       let paramIdx = 3;
 
-      if (applicationDashboardId) {
+      // Prefer metricsSourceId over applicationDashboardId
+      if (metricsSourceId) {
+        metricCountConditions.push(`metrics_source_id = $${paramIdx}`);
+        params.push(metricsSourceId);
+        paramIdx++;
+      } else if (applicationDashboardId) {
         metricCountConditions.push(`application_dashboard_id = $${paramIdx}`);
         params.push(applicationDashboardId);
         paramIdx++;
@@ -307,7 +334,7 @@ export class MetricsService {
       );
       // Fallback to regular query if lttb() is unavailable
       return this.executeRegularQuery(
-        testRunId, panelId, applicationDashboardId, metricName,
+        testRunId, panelId, applicationDashboardId, metricName, metricsSourceId,
       );
     }
   }
@@ -323,6 +350,7 @@ export class MetricsService {
     workload?: string,
     userId: string = '',
     roles: string[] = [],
+    metricsSourceId?: string,
   ): Promise<MetricStatisticResult[]> {
     try {
       const isAdmin = this.authzService.isGlobalAdmin(roles);
@@ -384,12 +412,19 @@ export class MetricsService {
       const testRunIds = testRuns.map(tr => tr.testRunId);
 
       // Query ds_metric_statistics for all requested evaluate types
+      // Prefer metricsSourceId over applicationDashboardId for filtering
+      const statisticsWhere: Record<string, unknown> = {
+        panel_id: panelId,
+        test_run_id: In(testRunIds),
+      };
+      if (metricsSourceId) {
+        statisticsWhere.metrics_source_id = metricsSourceId;
+      } else {
+        statisticsWhere.application_dashboard_id = applicationDashboardId;
+      }
+
       const statistics = await this.metricStatisticsRepo.find({
-        where: {
-          application_dashboard_id: applicationDashboardId,
-          panel_id: panelId,
-          test_run_id: In(testRunIds)
-        },
+        where: statisticsWhere,
         select: [
           'test_run_id',
           'panel_id',
@@ -401,6 +436,7 @@ export class MetricsService {
           'count',
           'median',
           'percentiles',
+          'metrics_source_id',
           'updated_at'
         ]
       });
@@ -433,6 +469,7 @@ export class MetricsService {
             : testRun?.annotations || null,
           is_changepoint: changepointMap.get(record.test_run_id) || false,
           consolidated_result: testRun?.consolidatedResult || null,
+          metrics_source_id: record.metrics_source_id || null,
           statistics: {} as Record<string, number | null>
         };
 
@@ -499,6 +536,7 @@ export class MetricsService {
     workload?: string,
     userId: string = '',
     roles: string[] = [],
+    metricsSourceId?: string,
   ): Promise<MetricStatisticResult[]> {
     try {
       const isAdmin = this.authzService.isGlobalAdmin(roles);
@@ -567,15 +605,22 @@ export class MetricsService {
       // Otherwise, select the specific column
       const isPercentile = ['q90', 'q95', 'q99'].includes(evaluateType);
       const selectFields: (keyof DsMetricStatistics)[] = isPercentile
-        ? ['test_run_id', 'panel_id', 'metric_name', 'percentiles', 'updated_at']
-        : ['test_run_id', 'panel_id', 'metric_name', statisticColumn as keyof DsMetricStatistics, 'updated_at'];
+        ? ['test_run_id', 'panel_id', 'metric_name', 'percentiles', 'metrics_source_id', 'updated_at']
+        : ['test_run_id', 'panel_id', 'metric_name', statisticColumn as keyof DsMetricStatistics, 'metrics_source_id', 'updated_at'];
+
+      // Prefer metricsSourceId over applicationDashboardId for filtering
+      const statisticsWhere: Record<string, unknown> = {
+        panel_id: panelId,
+        test_run_id: In(testRunIds),
+      };
+      if (metricsSourceId) {
+        statisticsWhere.metrics_source_id = metricsSourceId;
+      } else {
+        statisticsWhere.application_dashboard_id = applicationDashboardId;
+      }
 
       const statistics = await this.metricStatisticsRepo.find({
-        where: {
-          application_dashboard_id: applicationDashboardId,
-          panel_id: panelId,
-          test_run_id: In(testRunIds)
-        },
+        where: statisticsWhere,
         select: selectFields
       } as FindManyOptions<DsMetricStatistics>);
 
@@ -618,7 +663,8 @@ export class MetricsService {
             ? testRun.annotations.join(', ')
             : testRun?.annotations || null,
           is_changepoint: changepointMap.get(record.test_run_id) || false,
-          consolidated_result: testRun?.consolidatedResult || null
+          consolidated_result: testRun?.consolidatedResult || null,
+          metrics_source_id: record.metrics_source_id || null,
         };
       });
 
@@ -654,6 +700,7 @@ export class MetricsService {
     metricName: string,
     userId: string = '',
     roles: string[] = [],
+    metricsSourceId?: string,
   ): Promise<ControlGroupTrendResult[]> {
     try {
       // Validate test run access
@@ -698,13 +745,20 @@ export class MetricsService {
       }
 
       // Step 3: Query ds_adapt_results for control group test runs
+      // Prefer metricsSourceId over applicationDashboardId for filtering
+      const adaptWhere: Record<string, unknown> = {
+        panel_id: parseInt(panelId),
+        metric_name: metricName,
+        test_run_id: In(controlGroupTestRuns),
+      };
+      if (metricsSourceId) {
+        adaptWhere.metrics_source_id = metricsSourceId;
+      } else {
+        adaptWhere.application_dashboard_id = applicationDashboardId;
+      }
+
       const adaptResults = await this.adaptResultsRepo.find({
-        where: {
-          application_dashboard_id: applicationDashboardId,
-          panel_id: parseInt(panelId),
-          metric_name: metricName,
-          test_run_id: In(controlGroupTestRuns)
-        },
+        where: adaptWhere,
         select: [
           'test_run_id',
           'test_run_start',
@@ -720,13 +774,19 @@ export class MetricsService {
       });
 
       // Step 4: Also fetch the current test run data to add to the trends
+      const currentAdaptWhere: Record<string, unknown> = {
+        panel_id: parseInt(panelId),
+        metric_name: metricName,
+        test_run_id: testRunId,
+      };
+      if (metricsSourceId) {
+        currentAdaptWhere.metrics_source_id = metricsSourceId;
+      } else {
+        currentAdaptWhere.application_dashboard_id = applicationDashboardId;
+      }
+
       const currentTestRunResult = await this.adaptResultsRepo.findOne({
-        where: {
-          application_dashboard_id: applicationDashboardId,
-          panel_id: parseInt(panelId),
-          metric_name: metricName,
-          test_run_id: testRunId
-        },
+        where: currentAdaptWhere,
         select: [
           'test_run_id',
           'test_run_start',
@@ -760,13 +820,19 @@ export class MetricsService {
       if (missingTestRuns.length > 0) {
         this.logger.log(`Missing ds_adapt_results for test runs: ${missingTestRuns.join(', ')}, falling back to ds_metric_statistics`);
 
+        const fallbackWhere: Record<string, unknown> = {
+          panel_id: parseInt(panelId),
+          metric_name: metricName,
+          test_run_id: In(missingTestRuns),
+        };
+        if (metricsSourceId) {
+          fallbackWhere.metrics_source_id = metricsSourceId;
+        } else {
+          fallbackWhere.application_dashboard_id = applicationDashboardId;
+        }
+
         const fallbackData = await this.metricStatisticsRepo.find({
-          where: {
-            application_dashboard_id: applicationDashboardId,
-            panel_id: parseInt(panelId),
-            metric_name: metricName,
-            test_run_id: In(missingTestRuns)
-          },
+          where: fallbackWhere,
           select: [
             'test_run_id',
             'test_run_start',
@@ -896,17 +962,23 @@ export class MetricsService {
   async getDistinctMetricNames(
     applicationDashboardId: string,
     panelId: number,
+    metricsSourceId?: string,
   ): Promise<string[]> {
     try {
-      const result = await this.metricsRepo
+      const qb = this.metricsRepo
         .createQueryBuilder('dsMetrics')
         .select('DISTINCT dsMetrics.metric_name', 'metric_name')
-        .where('dsMetrics.application_dashboard_id = :applicationDashboardId', {
-          applicationDashboardId,
-        })
-        .andWhere('dsMetrics.panel_id = :panelId', { panelId })
-        .orderBy('dsMetrics.metric_name', 'ASC')
-        .getRawMany();
+        .where('dsMetrics.panel_id = :panelId', { panelId })
+        .orderBy('dsMetrics.metric_name', 'ASC');
+
+      // Prefer metricsSourceId over applicationDashboardId
+      if (metricsSourceId) {
+        qb.andWhere('dsMetrics.metrics_source_id = :metricsSourceId', { metricsSourceId });
+      } else {
+        qb.andWhere('dsMetrics.application_dashboard_id = :applicationDashboardId', { applicationDashboardId });
+      }
+
+      const result = await qb.getRawMany();
 
       return result.map((row: { metric_name: string }) => row.metric_name);
     } catch (error) {

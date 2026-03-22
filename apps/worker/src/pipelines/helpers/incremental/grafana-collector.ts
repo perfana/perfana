@@ -70,6 +70,7 @@ export class GrafanaCollector {
    * @param testRun - Test run context
    * @param grafanaInstanceId - Grafana instance ID (optional)
    * @param applicationDashboardIds - Application dashboard IDs to collect (optional)
+   * @param metricsSourceIds - Metrics source IDs to collect (optional, preferred over applicationDashboardIds)
    * @param fromTime - Start of time range
    * @param toTime - End of time range
    * @returns Collection result with data points and errors
@@ -79,6 +80,7 @@ export class GrafanaCollector {
     testRun: TestRunData,
     grafanaInstanceId: string | undefined,
     applicationDashboardIds: string[] | undefined,
+    metricsSourceIds: string[] | undefined,
     fromTime: Date,
     toTime: Date
   ): Promise<CollectionResult> {
@@ -91,8 +93,8 @@ export class GrafanaCollector {
       // Initialize Grafana client
       this.initializeGrafanaClient();
 
-      // Load panels
-      const panels = await this.loadPanels(testRunId, applicationDashboardIds);
+      // Load panels — prefer metricsSourceIds over applicationDashboardIds
+      const panels = await this.loadPanels(testRunId, applicationDashboardIds, metricsSourceIds);
 
       if (panels.length === 0) {
         return {
@@ -174,7 +176,8 @@ export class GrafanaCollector {
    */
   private async loadPanels(
     testRunId: string,
-    applicationDashboardIds: string[] | undefined
+    applicationDashboardIds: string[] | undefined,
+    metricsSourceIds: string[] | undefined
   ): Promise<PanelDocument[]> {
     let query = `
       SELECT
@@ -194,7 +197,11 @@ export class GrafanaCollector {
 
     const params: any[] = [testRunId];
 
-    if (applicationDashboardIds && applicationDashboardIds.length > 0) {
+    // Prefer metricsSourceIds over applicationDashboardIds for filtering
+    if (metricsSourceIds && metricsSourceIds.length > 0) {
+      query += ` AND metrics_source_id = ANY($2)`;
+      params.push(metricsSourceIds);
+    } else if (applicationDashboardIds && applicationDashboardIds.length > 0) {
       query += ` AND application_dashboard_id = ANY($2)`;
       params.push(applicationDashboardIds);
     }

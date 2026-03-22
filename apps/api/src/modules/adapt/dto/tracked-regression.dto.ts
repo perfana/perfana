@@ -33,6 +33,11 @@ export class TrackedRegressionDto {
   @IsUUID()
   applicationDashboardId!: string;
 
+  @ApiProperty({ description: 'Metrics source ID', required: false })
+  @IsOptional()
+  @IsUUID()
+  metricsSourceId?: string;
+
   @ApiProperty({ description: 'Panel ID' })
   @IsString()
   panelId!: string;

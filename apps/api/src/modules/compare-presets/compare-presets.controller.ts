@@ -69,6 +69,11 @@ export class ComparePresetsController {
     required: false,
     example: 'MyApp-prod-loadTest-00042',
   })
+  @ApiQuery({
+    name: 'metricsSourceId',
+    description: 'Optional metrics source ID to filter presets',
+    required: false,
+  })
   @ApiResponse({
     status: 200,
     description: 'Compare presets retrieved successfully',
@@ -81,8 +86,9 @@ export class ComparePresetsController {
   findAll(
     @UserCtx() ctx: UserContext,
     @Query('testRunId') testRunId?: string,
+    @Query('metricsSourceId') metricsSourceId?: string,
   ): Promise<ComparePresetResponseDto[]> {
-    return this.comparePresetsService.findAll(ctx.userId, testRunId, ctx.roles);
+    return this.comparePresetsService.findAll(ctx.userId, testRunId, ctx.roles, metricsSourceId);
   }
 
   @Get(':id')

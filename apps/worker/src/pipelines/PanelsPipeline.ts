@@ -166,7 +166,7 @@ export class PanelsPipeline extends BasePipelineTypeORM {
     if (panelDocuments.length === 0) {return;}
 
     const columns = [
-      'test_run_id', 'application_dashboard_id', 'dashboard_uid', 'panel_id',
+      'test_run_id', 'application_dashboard_id', 'metrics_source_id', 'dashboard_uid', 'panel_id',
       'panel_title', 'dashboard_label', 'benchmark_ids', 'panel',
       'query_variables', 'datasource_type', 'requests', 'errors', 'warnings', 'updated_at',
       'organization_id', 'team_id', 'created_by', 'updated_by'
@@ -186,6 +186,7 @@ export class PanelsPipeline extends BasePipelineTypeORM {
     const params = panelDocuments.flatMap(doc => [
       doc.test_run_id,
       doc.application_dashboard_id,
+      doc.metrics_source_id || null,
       doc.dashboard_uid,
       doc.panel_id,
       doc.panel_title,

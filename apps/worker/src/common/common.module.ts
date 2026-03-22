@@ -6,6 +6,7 @@ import {
   ApplicationDashboard,
   GrafanaInstance,
   GrafanaDashboard,
+  MetricsSource,
   Benchmark,
   DsMetrics,
   DsPanels,
@@ -51,6 +52,7 @@ import {
       // Dashboard & Grafana entities
       GrafanaInstance,
       GrafanaDashboard,
+      MetricsSource,
       ApplicationDashboard,
 
       // Benchmark entities

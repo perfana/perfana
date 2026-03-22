@@ -1,5 +1,6 @@
 import { Entity, PrimaryGeneratedColumn, Column, UpdateDateColumn, ManyToOne, JoinColumn } from 'typeorm';
 import { ApplicationDashboard } from './application-dashboard.entity';
+import { MetricsSource } from './metrics-source.entity';
 
 @Entity('ds_adapt_tracked_results')
 export class DsAdaptTrackedResults {
@@ -153,7 +154,14 @@ export class DsAdaptTrackedResults {
   @Column({ type: 'jsonb', nullable: true })
   tracked_conclusion?: Record<string, any>;
 
+  @Column({ type: 'uuid', nullable: true })
+  metrics_source_id?: string;
+
   @ManyToOne(() => ApplicationDashboard)
   @JoinColumn({ name: 'application_dashboard_id' })
   application_dashboard?: ApplicationDashboard;
+
+  @ManyToOne(() => MetricsSource)
+  @JoinColumn({ name: 'metrics_source_id' })
+  metrics_source?: MetricsSource;
 }

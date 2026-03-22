@@ -17,10 +17,15 @@ import { JobLockService } from '../services/JobLockService.js';
 import { ProgressReporter } from '../services/ProgressReporter.js';
 import { MetricCollectionGapService } from '../services/MetricCollectionGapService.js';
 import { IncrementalMetricsPipeline } from '../pipelines/IncrementalMetricsPipeline.js';
+import { DynatracePipeline } from '../pipelines/DynatracePipeline.js';
+import { PanelsPipeline } from '../pipelines/PanelsPipeline.js';
 import { DataSanityCheckPipeline } from '../pipelines/DataSanityCheckPipeline.js';
 import { JobType } from '@perfana/shared/types';
 
 const logger = getLogger('simple-orchestrate-reevaluate-batch');
+
+/** Maximum time (ms) to wait for a child job to complete before timing out (10 minutes) */
+const JOB_WAIT_TIMEOUT_MS = 600_000;
 
 /**
  * Create a simple queue instance (NO priority, NO rate limiting)
@@ -69,7 +74,7 @@ function createQueueEvents(queueName: string): QueueEvents {
 async function waitForJobs(
   queueEvents: QueueEvents,
   jobIds: string[],
-  timeoutMs: number = 600000,
+  timeoutMs: number = JOB_WAIT_TIMEOUT_MS,
   queue?: Queue
 ): Promise<void> {
   // Ensure QueueEvents is connected before we start listening
@@ -328,10 +333,58 @@ export function simpleOrchestrateReevaluateBatchWorker() {
             const statuses = await db.getAllCollectionStatuses(testRunId);
 
             // Filter to selected source types
-            const sourcesToRefetch = statuses.filter(s => enabledSourceTypes.has(s.source_type));
+            let sourcesToRefetch = statuses.filter(s => enabledSourceTypes.has(s.source_type));
+
+            // Force mode: discover sources that have no collection status yet
+            // This handles cases where Dynatrace/Grafana configs were added after initial collection
+            if (sourcesToRefetch.length === 0 || !sourcesToRefetch.some(s => enabledSourceTypes.has(s.source_type))) {
+              const testRunFull = await db.testRunRepo.findOne({
+                where: { testRunId },
+                select: ['testRunId', 'systemUnderTestId', 'testEnvironment', 'workload'],
+              });
+
+              if (testRunFull) {
+                const discoveredSources: Array<{ source_type: string; source_id?: string; is_complete: boolean; collected_ranges: any[] }> = [];
+
+                // Discover Grafana instances
+                if (enabledSourceTypes.has('grafana') && !sourcesToRefetch.some(s => s.source_type === 'grafana')) {
+                  const grafanaInstances = await db.query<{ id: string }>(
+                    'SELECT id FROM grafana_instances LIMIT 10'
+                  );
+                  for (const gi of grafanaInstances) {
+                    discoveredSources.push({ source_type: 'grafana', source_id: gi.id, is_complete: false, collected_ranges: [] });
+                  }
+                }
+
+                // Discover Dynatrace configs that have queries matching this test run
+                if (enabledSourceTypes.has('dynatrace') && !sourcesToRefetch.some(s => s.source_type === 'dynatrace')) {
+                  const dtConfigs = await db.query<{ id: string }>(
+                    `SELECT DISTINCT dq.dynatrace_config_id as id
+                     FROM dynatrace_queries dq
+                     WHERE dq.system_under_test_id = $1
+                       AND dq.test_environment = $2
+                       AND dq.workload = $3`,
+                    [testRunFull.systemUnderTestId, testRunFull.testEnvironment, testRunFull.workload]
+                  );
+                  for (const dc of dtConfigs) {
+                    discoveredSources.push({ source_type: 'dynatrace', source_id: dc.id, is_complete: false, collected_ranges: [] });
+                  }
+                }
+
+                // Discover performance test metrics (no source_id needed)
+                if (enabledSourceTypes.has('performance_test') && !sourcesToRefetch.some(s => s.source_type === 'performance_test')) {
+                  discoveredSources.push({ source_type: 'performance_test', is_complete: false, collected_ranges: [] });
+                }
+
+                if (discoveredSources.length > 0) {
+                  logger.info(`  ${testRunId}: discovered ${discoveredSources.length} new sources: ${discoveredSources.map(s => `${s.source_type}/${s.source_id ?? 'null'}`).join(', ')}`);
+                  sourcesToRefetch = [...sourcesToRefetch, ...discoveredSources] as any;
+                }
+              }
+            }
 
             if (sourcesToRefetch.length === 0) {
-              logger.info(`  ${testRunId}: no collection statuses for selected sources, skipping`);
+              logger.info(`  ${testRunId}: no collection statuses or discoverable sources for selected types, skipping`);
               continue;
             }
 
@@ -343,31 +396,52 @@ export function simpleOrchestrateReevaluateBatchWorker() {
             }
 
             // Re-collect each source for the full time range
+            // Use full pipelines (not incremental) for force-refetch of completed test runs
             for (const status of sourcesToRefetch) {
               try {
-                const result = await incrementalPipeline.execute({
-                  testRunId,
-                  fromTime,
-                  toTime,
-                  collectGrafanaMetrics: status.source_type === 'grafana',
-                  collectDynatraceMetrics: status.source_type === 'dynatrace',
-                  collectPerformanceTestMetrics: status.source_type === 'performance_test',
-                  ...(status.source_type === 'grafana' && status.source_id ? { grafanaInstanceId: status.source_id } : {}),
-                  ...(status.source_type === 'dynatrace' && status.source_id ? { dynatraceConfigId: status.source_id } : {}),
-                });
+                let dataPoints = 0;
 
-                const dataPoints = (result.data as any)?.totalDataPoints as number || 0;
+                if (status.source_type === 'dynatrace') {
+                  // Use the full DynatracePipeline — same as the analyze worker's dynatrace-collection stage
+                  const dynatracePipeline = new DynatracePipeline(logger);
+                  const result = await dynatracePipeline.execute({ testRunIds: [testRunId] });
+                  dataPoints = (result.data as any)?.totalMetrics ?? (result.data as any)?.totalDataPoints ?? (result.data as any)?.metricsCollected ?? 0;
+                } else {
+                  // Grafana and performance_test use incremental pipeline with full time range
+                  const result = await incrementalPipeline.execute({
+                    testRunId,
+                    fromTime,
+                    toTime,
+                    collectGrafanaMetrics: status.source_type === 'grafana',
+                    collectDynatraceMetrics: false,
+                    collectPerformanceTestMetrics: status.source_type === 'performance_test',
+                    ...(status.source_type === 'grafana' && status.source_id ? { grafanaInstanceId: status.source_id } : {}),
+                  });
+                  dataPoints = (result.data as any)?.totalDataPoints as number || 0;
+                }
+
                 logger.info(`    ${status.source_type}/${status.source_id ?? 'null'}: ${dataPoints} data points collected`);
                 if (dataPoints > 0) { testRunReceivedData = true; }
 
                 // Mark source complete after successful full-range collection
                 try {
                   await gapService.markSourceComplete(testRunId, status.source_type, status.source_id ?? null);
-                } catch (_) { /* non-fatal */ }
+                } catch (markErr) {
+                  logger.warn(`Non-fatal: failed to mark source complete for ${testRunId} ${status.source_type}/${status.source_id ?? 'null'}: ${markErr}`);
+                }
               } catch (err) {
                 const errorMsg = err instanceof Error ? err.message : String(err);
                 logger.error(`    ❌ Force re-fetch failed for ${status.source_type}/${status.source_id ?? 'null'}: ${errorMsg}`);
               }
+            }
+
+            // After metrics collection, refresh panel documents so new dashboards are reflected
+            try {
+              const panelsPipeline = new PanelsPipeline(logger);
+              await panelsPipeline.execute({ testRunId });
+              logger.info(`    Panels refreshed for ${testRunId}`);
+            } catch (panelsErr) {
+              logger.warn(`    Panels refresh failed for ${testRunId}: ${panelsErr instanceof Error ? panelsErr.message : panelsErr}`);
             }
 
             if (testRunReceivedData) { testRunsWithNewData++; }
@@ -396,7 +470,7 @@ export function simpleOrchestrateReevaluateBatchWorker() {
           );
 
           logger.info(`Waiting for statistics job ${statsJob.id}...`);
-          await waitForJobs(analyzeEvents, [statsJob.id!], 600000, analyzeQueue);
+          await waitForJobs(analyzeEvents, [statsJob.id!], JOB_WAIT_TIMEOUT_MS, analyzeQueue);
           logger.info(`✅ Statistics recalculation completed`);
         } else {
           logger.info('⏭️  Skipping statistics recalculation (no new data collected)');
@@ -543,7 +617,9 @@ export function simpleOrchestrateReevaluateBatchWorker() {
               if (allSucceeded) {
                 try {
                   await gapService.markSourceComplete(testRunId, gap.sourceType, gap.sourceId);
-                } catch (_) { /* non-fatal */ }
+                } catch (markErr) {
+                  logger.warn(`Non-fatal: failed to mark source complete for ${testRunId} ${gap.sourceType}/${gap.sourceId ?? 'null'}: ${markErr}`);
+                }
               }
 
               processedGaps++;
@@ -552,7 +628,10 @@ export function simpleOrchestrateReevaluateBatchWorker() {
 
             if (testRunReceivedData) { testRunsWithNewData++; }
 
-            const coverageAfter = await gapService.calculateCoverage(testRunId).catch(() => 0);
+            const coverageAfter = await gapService.calculateCoverage(testRunId).catch((err) => {
+              logger.warn(`Non-fatal: failed to calculate coverage after gap fill for ${testRunId}: ${err}`);
+              return 0;
+            });
             gapAnalysisDetails.push({
               testRunId,
               sourcesAnalyzed: gapInfo.gaps.length,
@@ -582,7 +661,7 @@ export function simpleOrchestrateReevaluateBatchWorker() {
           );
 
           logger.info(`Waiting for statistics job ${statsJob.id}...`);
-          await waitForJobs(analyzeEvents, [statsJob.id!], 600000, analyzeQueue);
+          await waitForJobs(analyzeEvents, [statsJob.id!], JOB_WAIT_TIMEOUT_MS, analyzeQueue);
           logger.info(`✅ Statistics recalculation completed`);
         } else {
           logger.info('⏭️  Skipping statistics recalculation (no new data collected)');
@@ -621,7 +700,7 @@ export function simpleOrchestrateReevaluateBatchWorker() {
         );
 
         logger.info(`Waiting for checks job ${checksJob.id}...`);
-        await waitForJobs(analyzeEvents, [checksJob.id!], 600000, analyzeQueue);
+        await waitForJobs(analyzeEvents, [checksJob.id!], JOB_WAIT_TIMEOUT_MS, analyzeQueue);
 
         const stage2Duration = Date.now() - stage2Start;
         logger.info(`✅ Checks evaluation completed`);
@@ -651,7 +730,7 @@ export function simpleOrchestrateReevaluateBatchWorker() {
           );
 
           logger.info(`Waiting for control groups job ${controlGroupsJob.id}...`);
-          await waitForJobs(analyzeEvents, [controlGroupsJob.id!], 600000, analyzeQueue);
+          await waitForJobs(analyzeEvents, [controlGroupsJob.id!], JOB_WAIT_TIMEOUT_MS, analyzeQueue);
           const controlGroupsDuration = Date.now() - controlGroupsStart;
           logger.info('✅ Control groups completed');
           stageTiming.push({ stage: 'control-groups-creation', duration: controlGroupsDuration });
@@ -667,7 +746,7 @@ export function simpleOrchestrateReevaluateBatchWorker() {
           );
 
           logger.info(`Waiting for control group statistics job ${controlStatsJob.id}...`);
-          await waitForJobs(analyzeEvents, [controlStatsJob.id!], 600000, analyzeQueue);
+          await waitForJobs(analyzeEvents, [controlStatsJob.id!], JOB_WAIT_TIMEOUT_MS, analyzeQueue);
           const controlStatsDuration = Date.now() - controlStatsStart;
           logger.info('✅ Control group statistics completed');
           stageTiming.push({ stage: 'control-group-statistics', duration: controlStatsDuration });
@@ -693,7 +772,7 @@ export function simpleOrchestrateReevaluateBatchWorker() {
         );
 
         logger.info(`Waiting for ADAPT job ${adaptJob.id}...`);
-        await waitForJobs(analyzeEvents, [adaptJob.id!], 600000, analyzeQueue);
+        await waitForJobs(analyzeEvents, [adaptJob.id!], JOB_WAIT_TIMEOUT_MS, analyzeQueue);
         const adaptDuration = Date.now() - adaptStart;
         logger.info(`✅ ADAPT analysis completed`);
         stageTiming.push({ stage: 'adapt-difference-detection', duration: adaptDuration });

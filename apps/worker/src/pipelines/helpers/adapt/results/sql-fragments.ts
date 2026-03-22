@@ -1,8 +1,15 @@
 /**
  * SQL Fragment Builders for ADAPT Results
  *
- * Contains reusable SQL fragment builders for threshold calculations,
- * conclusion logic, and statistics columns.
+ * Reusable SQL fragments shared by both the main ADAPT results pipeline
+ * (sql-builder.ts) and the tracked results re-evaluation pipeline
+ * (tracked-results-sql-builder.ts). The tracked pipeline has its own
+ * inline copy of some fragments due to minor differences in column naming.
+ *
+ * See sql-builder.ts for the full algorithm documentation including:
+ * - Threshold calculation formulas (pct, iqr, abs)
+ * - Conclusion label decision tree
+ * - higherIsBetter classification logic
  */
 
 /**
@@ -150,6 +157,14 @@ export class AdaptSQLFragments {
 
   /**
    * Build threshold checks JSONB
+   *
+   * Each check produces {valid, isDifference}:
+   *   - valid: true if all required values exist (control, test, threshold config)
+   *   - isDifference: true if test value falls outside the [lower, upper] band
+   *
+   * A check that is not valid (e.g., IQR when control_iqr is null) will have
+   * isDifference=false, and in the AND logic (allDifference) it defaults to true
+   * so it does not block the overall decision.
    */
   buildChecksJSONB(): string {
     return `-- Individual threshold checks
@@ -185,6 +200,16 @@ export class AdaptSQLFragments {
 
   /**
    * Build conclusion logic for labeling results
+   *
+   * Decision tree:
+   *   incomparable → no control or no test value
+   *   ignored → user set ignore=true in compare_config
+   *   allDifference=true → full label (regression/improvement/increase/decrease)
+   *   partialDifference=true → partial label
+   *   else → "no difference"
+   *
+   * The higherIsBetter flag from metricClassification determines whether
+   * an increase is good (improvement) or bad (regression).
    */
   buildConclusionLogic(): string {
     return `-- Build conclusion

@@ -426,6 +426,7 @@ export class DataProcessor {
     return {
       test_run_id: testRunId,
       application_dashboard_id: result.applicationDashboardId,
+      metrics_source_id: result.metricsSourceId,
       dashboard_uid: result.dashboardLabel,
       panel_id: result.panelId,
       panel_title: result.tileTitle,
@@ -464,6 +465,7 @@ export class DataProcessor {
     return {
       test_run_id: testRunId,
       application_dashboard_id: result.applicationDashboardId,
+      metrics_source_id: result.metricsSourceId,
       dashboard_uid: result.dashboardLabel,
       panel_id: result.panelId,
       panel_title: result.tileTitle,
@@ -725,6 +727,7 @@ export class DataProcessor {
       return {
         testRunId,
         applicationDashboardId: result.applicationDashboardId,
+        metricsSourceId: result.metricsSourceId,
         dashboardUid: 'dynatrace',
         panelId: result.panelId,
         panelTitle: tileTitle,

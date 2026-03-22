@@ -6,6 +6,46 @@ import { assertValidUrl, sanitizeUrl } from '@perfana/shared/security';
 const logger = getLogger('dynatrace-api-client');
 
 /**
+ * Dynatrace API Client constants
+ */
+
+/** Maximum concurrent API requests to Dynatrace (avoids rate-limiting) */
+const DEFAULT_MAX_CONCURRENT = 5;
+
+/** Number of retry attempts for failed API requests */
+const DEFAULT_MAX_RETRIES = 3;
+
+/** Maximum time (ms) to wait for a DQL async query to complete via polling */
+const DEFAULT_MAX_POLL_WAIT_MS = 120_000; // 120s
+
+/** Interval (ms) between poll requests when waiting for async DQL query results */
+const DEFAULT_POLL_INTERVAL_MS = 2_000; // 2s
+
+/** Timeout (ms) for individual poll requests — polls just check status, so should be fast */
+const POLL_REQUEST_TIMEOUT_MS = 5_000; // 5s
+
+/** Timeout (ms) for the DQL query execution on the Dynatrace side */
+const DQL_FETCH_TIMEOUT_SECONDS = 60;
+
+/** Number of persistent HTTP connections to Dynatrace */
+const AGENT_CONNECTIONS = 10;
+
+/** Keep-alive timeout (ms) for connection reuse between requests */
+const AGENT_KEEP_ALIVE_TIMEOUT_MS = 60_000; // 60s
+
+/** Maximum keep-alive timeout (ms) before forcing a new connection */
+const AGENT_MAX_KEEP_ALIVE_TIMEOUT_MS = 600_000; // 10min
+
+/** Base delay (ms) for exponential backoff: delay = 2^(attempt-1) * BASE_RETRY_DELAY_MS */
+const BASE_RETRY_DELAY_MS = 1_000;
+
+/** Default time range fallback (ms) when no start time is provided — last hour */
+const DEFAULT_TIME_RANGE_MS = 3_600_000; // 1 hour
+
+/** Default resolution for Metrics API v2 queries */
+const METRICS_API_RESOLUTION = '1m';
+
+/**
  * Dynatrace API Client
  *
  * Implements the Dynatrace API integration patterns from Python:
@@ -90,10 +130,10 @@ export class DynatraceAPIClient {
 
   constructor(config: DynatraceAPIConfig) {
     this.config = {
-      maxConcurrent: 5,
-      maxRetries: 3,
-      maxPollWaitMs: 120000,  // 120s max wait for query completion
-      pollInterval: 2000,     // Poll every 2s
+      maxConcurrent: DEFAULT_MAX_CONCURRENT,
+      maxRetries: DEFAULT_MAX_RETRIES,
+      maxPollWaitMs: DEFAULT_MAX_POLL_WAIT_MS,
+      pollInterval: DEFAULT_POLL_INTERVAL_MS,
       ...config
     };
 
@@ -118,7 +158,11 @@ export class DynatraceAPIClient {
     // - Cloud metadata endpoints (169.254.169.254)
     // - Kubernetes internal services
     try {
-      assertValidUrl(candidateUrl, { requireHttps: true });
+      const isDev = process.env.NODE_ENV === 'development' || process.env.NODE_ENV === 'dev';
+      assertValidUrl(candidateUrl, {
+        requireHttps: !isDev,
+        allowedHosts: isDev ? ['localhost', '127.0.0.1'] : [],
+      });
       this.baseUrl = candidateUrl;
       logger.debug(`SSRF validation passed for Dynatrace host: ${sanitizeUrl(candidateUrl)}`);
     } catch (error) {
@@ -146,9 +190,9 @@ export class DynatraceAPIClient {
     // Use Agent pattern: keeps connections alive without per-request timeouts
     // This prevents timeout issues when Dynatrace takes 60+ seconds to process queries
     this.agent = new Agent({
-      connections: 10,
-      keepAliveTimeout: 60000,  // 60s keep-alive for connection reuse
-      keepAliveMaxTimeout: 600000  // 10min max keep-alive
+      connections: AGENT_CONNECTIONS,
+      keepAliveTimeout: AGENT_KEEP_ALIVE_TIMEOUT_MS,
+      keepAliveMaxTimeout: AGENT_MAX_KEEP_ALIVE_TIMEOUT_MS,
     });
 
     this.semaphore = new Semaphore(this.config.maxConcurrent!);
@@ -386,7 +430,7 @@ export class DynatraceAPIClient {
         const payload: Record<string, any> = {
           query,
           timezone,
-          fetchTimeoutSeconds: 60
+          fetchTimeoutSeconds: DQL_FETCH_TIMEOUT_SECONDS
         };
 
         // Add timeframe if provided
@@ -455,7 +499,7 @@ export class DynatraceAPIClient {
         };
 
         if (attempt < maxRetries) {
-          const delay = Math.pow(2, attempt - 1) * 1000;
+          const delay = Math.pow(2, attempt - 1) * BASE_RETRY_DELAY_MS;
           logger.warn(`DQL query start failed, retrying in ${delay}ms:`, errorDetails);
           await new Promise(resolve => setTimeout(resolve, delay));
         } else {
@@ -496,7 +540,7 @@ export class DynatraceAPIClient {
         // Create AbortController with 5s timeout for this individual poll request
         // Poll endpoint should respond quickly - it's just checking status
         const abortController = new AbortController();
-        const pollTimeout = setTimeout(() => abortController.abort(), 5000);
+        const pollTimeout = setTimeout(() => abortController.abort(), POLL_REQUEST_TIMEOUT_MS);
 
         logger.info(`📊 Poll attempt ${pollAttempt} for token ${requestToken} (elapsed: ${elapsed}ms)`);
 
@@ -606,7 +650,7 @@ export class DynatraceAPIClient {
 
     try {
       // Use provided times or default to last hour
-      const from = startTime || new Date(Date.now() - 3600000);
+      const from = startTime || new Date(Date.now() - DEFAULT_TIME_RANGE_MS);
       const to = endTime || new Date();
 
       const fromMs = from.getTime();
@@ -616,7 +660,7 @@ export class DynatraceAPIClient {
         metricSelector,
         from: fromMs.toString(),
         to: toMs.toString(),
-        resolution: '1m' // 1-minute resolution for detailed data
+        resolution: METRICS_API_RESOLUTION
       });
 
       const durationMinutes = Math.round((toMs - fromMs) / 60000);

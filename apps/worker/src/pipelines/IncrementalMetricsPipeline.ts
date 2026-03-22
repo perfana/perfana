@@ -67,6 +67,7 @@ export class IncrementalMetricsPipeline extends BasePipelineTypeORM {
       toTime,
       grafanaInstanceId,
       applicationDashboardIds,
+      metricsSourceIds,
       dynatraceConfigId,
       collectPerformanceTestMetrics = true,
       collectGrafanaMetrics = true,
@@ -100,6 +101,7 @@ export class IncrementalMetricsPipeline extends BasePipelineTypeORM {
           testRun,
           grafanaInstanceId,
           applicationDashboardIds,
+          metricsSourceIds,
           fromTime,
           toTime
         );
@@ -112,6 +114,7 @@ export class IncrementalMetricsPipeline extends BasePipelineTypeORM {
           testRun,
           dynatraceConfigId,
           applicationDashboardIds,
+          metricsSourceIds,
           fromTime,
           toTime
         );

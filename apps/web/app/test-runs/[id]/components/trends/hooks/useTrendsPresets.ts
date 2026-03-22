@@ -24,7 +24,7 @@ interface UseTrendsPresetsProps {
   dashboards: ApplicationDashboard[];
   fetchApplicationDashboards: () => Promise<ApplicationDashboard[]>;
   fetchDashboardPanels: (uid: string) => Promise<Panel[]>;
-  fetchPanelMetrics: (applicationDashboardId: string, panelId: number) => Promise<void>;
+  fetchPanelMetrics: (applicationDashboardId: string, panelId: number, metricsSourceId?: string) => Promise<void>;
   fetchDynatraceMetricsList: (label: string) => Promise<void>;
   setSelectedSource: (source: DataSource) => void;
   setSelectedDashboard: (dashboard: ApplicationDashboard | null) => void;
@@ -157,7 +157,8 @@ export function useTrendsPresets({
               setSelectedMetric(panel);
               // Populate the available metrics dropdown
               const appDashboardId = panel.applicationDashboardId || dashboard.id;
-              fetchPanelMetrics(appDashboardId, panel.id);
+              const metricsSourceId = panel.metricsSourceId || dashboard.metrics_source_id;
+              fetchPanelMetrics(appDashboardId, panel.id, metricsSourceId);
             } else {
               showToast('Metric not found in dashboard');
             }
@@ -232,7 +233,8 @@ export function useTrendsPresets({
             panelTitle: config.panelTitle,
             metricName: config.metricName,
             source: config.source || 'grafana',
-            yAxisFormat: config.yAxisFormat
+            yAxisFormat: config.yAxisFormat,
+            metricsSourceId: config.metricsSourceId
           }));
           setAddedSeries(restoredSeries);
         }
@@ -278,7 +280,8 @@ export function useTrendsPresets({
           panelTitle: series.panelTitle,
           metricName: series.metricName,
           source: series.source,
-          yAxisFormat: series.yAxisFormat
+          yAxisFormat: series.yAxisFormat,
+          metricsSourceId: series.metricsSourceId
         }));
 
       // If no series were added but we have a selected panel, fetch all available metrics

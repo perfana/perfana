@@ -42,6 +42,14 @@ export class CreateTrendsPresetDto {
   application_dashboard_id?: string;
 
   @ApiPropertyOptional({
+    description: 'ID of the metrics source',
+    example: '550e8400-e29b-41d4-a716-446655440000'
+  })
+  @IsString()
+  @IsOptional()
+  metrics_source_id?: string;
+
+  @ApiPropertyOptional({
     description: 'ID of the selected panel/metric',
     example: 5
   })

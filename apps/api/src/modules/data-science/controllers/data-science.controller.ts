@@ -392,6 +392,7 @@ export class DataScienceController {
           checks: true,
           adapt: true,
           applicationDashboardId: '550e8400-e29b-41d4-a716-446655440001',
+          metricsSourceId: '550e8400-e29b-41d4-a716-446655440002',
           panelId: 42,
           metricName: 'response_time_p90'
         }
@@ -413,6 +414,7 @@ export class DataScienceController {
           checks: false,
           adapt: true,
           applicationDashboardId: '550e8400-e29b-41d4-a716-446655440001',
+          metricsSourceId: '550e8400-e29b-41d4-a716-446655440002',
           panelId: 42,
           metricName: 'response_time_p90'
         }
@@ -488,6 +490,7 @@ export class DataScienceController {
         checks: dto.checks,
         adapt: dto.adapt,
         applicationDashboardId: dto.applicationDashboardId,
+        metricsSourceId: dto.metricsSourceId,
         panelId: dto.panelId,
         metricName: dto.metricName
       });

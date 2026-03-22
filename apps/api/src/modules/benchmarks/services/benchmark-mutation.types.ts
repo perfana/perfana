@@ -13,6 +13,7 @@ export interface CreateBenchmarkDto {
   dashboardId?: number;
   dashboardUid?: string;
   applicationDashboardId?: string;
+  metricsSourceId?: string;
   configTitle: string;
   panelTitle: string;
   evaluateType: string;

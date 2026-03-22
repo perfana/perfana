@@ -15,6 +15,51 @@
 import { JobsOptions } from 'bullmq';
 import { getConfig } from './environment.js';
 
+// ── Retry & backoff constants ──────────────────────────────────────────
+// Each job type has a tuned retry/backoff profile based on its failure mode:
+// - External API calls (Grafana, Dynatrace) get more attempts with shorter initial delays
+//   because transient network issues are common and resolve quickly.
+// - Batch/orchestration jobs get fewer attempts with longer delays because they are
+//   heavyweight and a rapid retry would waste resources.
+// - Internal compute jobs (statistics, ADAPT) get moderate settings because failures
+//   are usually data-related and unlikely to self-heal with more retries.
+
+/** Standard retry count for internal compute jobs */
+const ATTEMPTS_STANDARD = 3;
+
+/** Retry count for external API calls (Grafana) — higher due to transient network errors */
+const ATTEMPTS_EXTERNAL_API = 5;
+
+/** Retry count for Dynatrace — high but slightly less than Grafana due to longer query times */
+const ATTEMPTS_DYNATRACE = 4;
+
+/** Retry count for reevaluate-checks — only 2 because input data is already validated */
+const ATTEMPTS_REEVALUATE = 2;
+
+/** Retry count for batch/orchestration jobs — only 2 to avoid expensive duplicate work */
+const ATTEMPTS_BATCH = 2;
+
+/** Short backoff (ms) for fast-recovering failures (e.g., Grafana rate limits) */
+const BACKOFF_SHORT_MS = 2_000;
+
+/** Medium backoff (ms) for moderate recovery time (statistics, panels) */
+const BACKOFF_MEDIUM_MS = 3_000;
+
+/** Standard backoff (ms) for general retries (analyze, ADAPT, reevaluate) */
+const BACKOFF_STANDARD_MS = 5_000;
+
+/** Long backoff (ms) for Dynatrace — their API needs time to recover from rate limits */
+const BACKOFF_DYNATRACE_MS = 10_000;
+
+/** Batch backoff (ms) for orchestration jobs — long delay to let downstream jobs settle */
+const BACKOFF_BATCH_MS = 30_000;
+
+/** Extra-long backoff (ms) for top-level batch analysis — avoid thundering herd on retry */
+const BACKOFF_BATCH_LONG_MS = 60_000;
+
+/** BullMQ drainDelay (ms) — must be >50ms to enable BRPOPLPUSH blocking mode for fast pickup */
+const DRAIN_DELAY_MS = 100;
+
 /**
  * Queue names - simple and clear
  */
@@ -69,11 +114,11 @@ export function getSimpleWorkerConfigs(): Record<SimpleQueueName, SimpleWorkerCo
   workerConfigsCache = {
     [SIMPLE_QUEUES.ANALYZE]: {
       concurrency: config.WORKER_ANALYZE_CONCURRENCY,
-      drainDelay: 100, // Enable BRPOPLPUSH blocking mode
+      drainDelay: DRAIN_DELAY_MS,
     },
     [SIMPLE_QUEUES.BATCH]: {
       concurrency: config.WORKER_BATCH_CONCURRENCY,
-      drainDelay: 100, // Enable BRPOPLPUSH blocking mode
+      drainDelay: DRAIN_DELAY_MS,
     },
   };
 
@@ -98,86 +143,86 @@ export interface SimpleJobOptions extends JobsOptions {
  */
 export const SIMPLE_JOB_OPTIONS: Record<string, SimpleJobOptions> = {
   'analyze-test': {
-    attempts: 3,
-    backoff: { type: 'exponential', delay: 5000 },
+    attempts: ATTEMPTS_STANDARD,
+    backoff: { type: 'exponential', delay: BACKOFF_STANDARD_MS },
     removeOnComplete: 50,
     removeOnFail: 20,
   },
   'metrics-collection': {
-    attempts: 5, // External API, more retries
-    backoff: { type: 'exponential', delay: 2000 },
+    attempts: ATTEMPTS_EXTERNAL_API,
+    backoff: { type: 'exponential', delay: BACKOFF_SHORT_MS },
     removeOnComplete: 100,
     removeOnFail: 25,
   },
   'statistics-calculation': {
-    attempts: 3,
-    backoff: { type: 'exponential', delay: 3000 },
+    attempts: ATTEMPTS_STANDARD,
+    backoff: { type: 'exponential', delay: BACKOFF_MEDIUM_MS },
     removeOnComplete: 75,
     removeOnFail: 15,
   },
   'control-groups-pipeline': {
-    attempts: 3,
-    backoff: { type: 'exponential', delay: 3000 },
+    attempts: ATTEMPTS_STANDARD,
+    backoff: { type: 'exponential', delay: BACKOFF_MEDIUM_MS },
     removeOnComplete: 50,
     removeOnFail: 10,
   },
   'adapt-analysis': {
-    attempts: 3,
-    backoff: { type: 'exponential', delay: 5000 },
+    attempts: ATTEMPTS_STANDARD,
+    backoff: { type: 'exponential', delay: BACKOFF_STANDARD_MS },
     removeOnComplete: 50,
     removeOnFail: 15,
   },
   'checks-evaluation': {
-    attempts: 3,
-    backoff: { type: 'exponential', delay: 2000 },
+    attempts: ATTEMPTS_STANDARD,
+    backoff: { type: 'exponential', delay: BACKOFF_SHORT_MS },
     removeOnComplete: 100,
     removeOnFail: 20,
   },
   'panels-processing': {
-    attempts: 3,
-    backoff: { type: 'exponential', delay: 2000 },
+    attempts: ATTEMPTS_STANDARD,
+    backoff: { type: 'exponential', delay: BACKOFF_SHORT_MS },
     removeOnComplete: 75,
     removeOnFail: 15,
   },
   'performance-test-metrics': {
-    attempts: 3,
-    backoff: { type: 'exponential', delay: 3000 },
+    attempts: ATTEMPTS_STANDARD,
+    backoff: { type: 'exponential', delay: BACKOFF_MEDIUM_MS },
     removeOnComplete: 75,
     removeOnFail: 15,
   },
   'dynatrace-collection': {
-    attempts: 4,
-    backoff: { type: 'exponential', delay: 10000 },
+    attempts: ATTEMPTS_DYNATRACE,
+    backoff: { type: 'exponential', delay: BACKOFF_DYNATRACE_MS },
     removeOnComplete: 50,
     removeOnFail: 10,
   },
   'reevaluate-checks': {
-    attempts: 2,
-    backoff: { type: 'fixed', delay: 5000 },
+    attempts: ATTEMPTS_REEVALUATE,
+    backoff: { type: 'fixed', delay: BACKOFF_STANDARD_MS },
     removeOnComplete: 50,
     removeOnFail: 10,
   },
   'batch-analysis': {
-    attempts: 2,
-    backoff: { type: 'exponential', delay: 60000 },
+    attempts: ATTEMPTS_BATCH,
+    backoff: { type: 'exponential', delay: BACKOFF_BATCH_LONG_MS },
     removeOnComplete: 10,
     removeOnFail: 5,
   },
   'batch-flow': {
-    attempts: 2,
-    backoff: { type: 'exponential', delay: 30000 },
+    attempts: ATTEMPTS_BATCH,
+    backoff: { type: 'exponential', delay: BACKOFF_BATCH_MS },
     removeOnComplete: 15,
     removeOnFail: 5,
   },
   'reevaluation-batch': {
-    attempts: 2,
-    backoff: { type: 'exponential', delay: 30000 },
+    attempts: ATTEMPTS_BATCH,
+    backoff: { type: 'exponential', delay: BACKOFF_BATCH_MS },
     removeOnComplete: 10,
     removeOnFail: 5,
   },
   'orchestrate-reevaluate-batch': {
-    attempts: 2,
-    backoff: { type: 'exponential', delay: 30000 },
+    attempts: ATTEMPTS_BATCH,
+    backoff: { type: 'exponential', delay: BACKOFF_BATCH_MS },
     removeOnComplete: 10,
     removeOnFail: 5,
   },

@@ -1,6 +1,7 @@
 import { Entity, PrimaryGeneratedColumn, Column, CreateDateColumn, UpdateDateColumn, ManyToOne, JoinColumn } from 'typeorm';
 import { SystemUnderTest } from './system-under-test.entity';
 import { ApplicationDashboard } from './application-dashboard.entity';
+import { MetricsSource } from './metrics-source.entity';
 
 @Entity('provisioned_template_ds_compare_configs')
 export class ProvisionedTemplateDsCompareConfig {
@@ -24,6 +25,9 @@ export class ProvisionedTemplateDsCompareConfig {
 
   @Column({ type: 'uuid', nullable: true })
   application_dashboard_id?: string;
+
+  @Column({ type: 'uuid', nullable: true })
+  metrics_source_id?: string;
 
   @Column({ type: 'integer', nullable: true })
   panel_id?: number;
@@ -71,4 +75,8 @@ export class ProvisionedTemplateDsCompareConfig {
   @ManyToOne(() => ApplicationDashboard)
   @JoinColumn({ name: 'application_dashboard_id' })
   application_dashboard?: ApplicationDashboard;
+
+  @ManyToOne(() => MetricsSource)
+  @JoinColumn({ name: 'metrics_source_id' })
+  metrics_source?: MetricsSource;
 }

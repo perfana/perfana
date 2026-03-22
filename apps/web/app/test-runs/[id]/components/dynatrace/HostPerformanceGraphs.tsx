@@ -1,6 +1,6 @@
 'use client';
 
-import { Box, Paper, Typography } from '@mui/material';
+import { Box, Paper, Typography, useTheme } from '@mui/material';
 import dynamic from 'next/dynamic';
 import { HostMetricsResponse } from '@/lib/dynatrace';
 
@@ -19,6 +19,11 @@ export default function HostPerformanceGraphs({
   endTime,
   hostDisplayName
 }: HostPerformanceGraphsProps) {
+  const theme = useTheme();
+  const isDark = theme.palette.mode === 'dark';
+  const textColor = theme.palette.text.primary;
+  const gridColor = isDark ? 'rgba(255,255,255,0.1)' : 'rgba(0,0,0,0.1)';
+
   const createPlotData = (
     timeSeries: { timestamp: string; value: number }[],
     name: string,
@@ -40,20 +45,24 @@ export default function HostPerformanceGraphs({
     return {
       title: {
         text: title,
-        font: { size: 14, weight: 600 },
+        font: { size: 14, weight: 600, color: textColor },
       },
+      paper_bgcolor: 'transparent',
+      plot_bgcolor: 'transparent',
       xaxis: {
-        title: 'Time',
+        title: { text: 'Time', font: { color: textColor } },
         showgrid: true,
-        gridcolor: 'rgba(128,128,128,0.2)',
+        gridcolor: gridColor,
         range: [new Date(startTime), new Date(endTime)],
+        tickfont: { color: textColor },
       },
       yaxis: {
-        title: yAxisTitle,
+        title: { text: yAxisTitle, font: { color: textColor } },
         showgrid: true,
-        gridcolor: 'rgba(128,128,128,0.2)',
+        gridcolor: gridColor,
         ticksuffix: ticksuffix,
         rangemode: 'tozero' as const,
+        tickfont: { color: textColor },
       },
       margin: { l: 70, r: 40, t: 40, b: 60 },
       height: 300,

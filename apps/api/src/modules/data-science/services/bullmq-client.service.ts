@@ -55,6 +55,7 @@ export interface ReevaluationOptions {
   adapt?: boolean;
   // Optional fields for specific metric re-analysis
   applicationDashboardId?: string;
+  metricsSourceId?: string;
   panelId?: number;
   metricName?: string;
 }

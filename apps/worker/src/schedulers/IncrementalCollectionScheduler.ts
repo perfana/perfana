@@ -1,11 +1,13 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { Cron, CronExpression } from '@nestjs/schedule';
-import { Queue } from 'bullmq';
+import { Queue, QueueEvents } from 'bullmq';
+import IORedis from 'ioredis';
 import { getDatabaseService } from '../common/database-accessor.js';
 import { WorkerDatabaseService } from '../common/database.service.js';
 import { getIncrementalCollectionConfig } from '../config/incremental-collection.config.js';
 import { createSimpleQueue } from '../workers/simple-worker-factory.js';
 import { SIMPLE_QUEUES } from '../config/simple-queues.js';
+import { getConfig } from '../config/environment.js';
 import { JOB_NAMES } from '../types/jobs.js';
 import { TestRun, ApplicationDashboard } from '@perfana/shared/entities';
 import { LessThan as _LessThan, MoreThan } from 'typeorm';
@@ -33,15 +35,135 @@ import { LessThan as _LessThan, MoreThan } from 'typeorm';
  *   - attempt: number (1 initially)
  *   - maxAttempts: number (from config)
  */
+/** Maximum backoff delay in milliseconds (10 minutes) */
+const MAX_BACKOFF_MS = 600_000;
+
+/** Base backoff delay in milliseconds (1 minute — matches cron interval) */
+const BASE_BACKOFF_MS = 60_000;
+
+/** Failure count at which we log an error-level warning */
+const FAILURE_WARN_THRESHOLD = 3;
+
+/** Failure count at which we stop retrying until the test run completes */
+const FAILURE_STOP_THRESHOLD = 5;
+
 @Injectable()
 export class IncrementalCollectionScheduler {
   private readonly logger = new Logger(IncrementalCollectionScheduler.name);
   private analyzeQueue: Queue | null = null;
+  private queueEvents: QueueEvents | null = null;
   private isRunning = false;
   private databaseService: WorkerDatabaseService | null = null;
 
+  /**
+   * Tracks consecutive failure counts per source.
+   * Key format: `${testRunId}::${sourceType}::${sourceId}`
+   */
+  private failureCounts = new Map<string, number>();
+
+  /**
+   * Tracks the timestamp of the last failure for backoff calculation.
+   * Key format: `${testRunId}::${sourceType}::${sourceId}`
+   */
+  private lastFailureTime = new Map<string, number>();
+
+  /**
+   * Maps BullMQ job IDs to source keys so we can update failure tracking on completion/failure.
+   */
+  private jobIdToSourceKey = new Map<string, string>();
+
   constructor() {
     this.logger.log('IncrementalCollectionScheduler initialized');
+  }
+
+  /**
+   * Build a source key for failure tracking.
+   */
+  private buildSourceKey(testRunId: string, sourceType: string, sourceId: string | null): string {
+    return `${testRunId}::${sourceType}::${sourceId ?? 'null'}`;
+  }
+
+  /**
+   * Check if a source should be skipped due to backoff.
+   * Returns true if the source is in backoff and should NOT be enqueued.
+   */
+  private shouldSkipDueToBackoff(sourceKey: string): boolean {
+    const failureCount = this.failureCounts.get(sourceKey) ?? 0;
+    if (failureCount === 0) return false;
+
+    // Stop retrying entirely after persistent failures
+    if (failureCount >= FAILURE_STOP_THRESHOLD) {
+      return true;
+    }
+
+    // Check if enough time has passed since the last failure
+    const lastFailure = this.lastFailureTime.get(sourceKey);
+    if (!lastFailure) return false;
+
+    const backoffMs = Math.min(BASE_BACKOFF_MS * Math.pow(2, failureCount), MAX_BACKOFF_MS);
+    const elapsed = Date.now() - lastFailure;
+
+    if (elapsed < backoffMs) {
+      this.logger.debug(
+        `Skipping ${sourceKey} due to backoff (failures: ${failureCount}, ` +
+        `backoff: ${Math.round(backoffMs / 1000)}s, elapsed: ${Math.round(elapsed / 1000)}s)`
+      );
+      return true;
+    }
+
+    return false;
+  }
+
+  /**
+   * Record a failure for a source and log escalations.
+   */
+  private recordFailure(sourceKey: string): void {
+    const count = (this.failureCounts.get(sourceKey) ?? 0) + 1;
+    this.failureCounts.set(sourceKey, count);
+    this.lastFailureTime.set(sourceKey, Date.now());
+
+    if (count === FAILURE_WARN_THRESHOLD) {
+      this.logger.error(
+        `Incremental collection for ${sourceKey} has failed ${count} consecutive times. Consider manual re-fetch.`
+      );
+    } else if (count === FAILURE_STOP_THRESHOLD) {
+      this.logger.error(
+        `Incremental collection for ${sourceKey} persistently failing — stopping retries until test run completes.`
+      );
+    }
+  }
+
+  /**
+   * Record a success for a source — resets failure tracking.
+   */
+  private recordSuccess(sourceKey: string): void {
+    if (this.failureCounts.has(sourceKey)) {
+      const previousCount = this.failureCounts.get(sourceKey) ?? 0;
+      if (previousCount > 0) {
+        this.logger.log(`Incremental collection for ${sourceKey} recovered after ${previousCount} failure(s)`);
+      }
+      this.failureCounts.delete(sourceKey);
+      this.lastFailureTime.delete(sourceKey);
+    }
+  }
+
+  /**
+   * Clean up failure tracking for a specific test run (e.g., when the test run completes).
+   */
+  cleanupTestRun(testRunId: string): void {
+    const prefix = `${testRunId}::`;
+    for (const key of this.failureCounts.keys()) {
+      if (key.startsWith(prefix)) {
+        this.failureCounts.delete(key);
+        this.lastFailureTime.delete(key);
+      }
+    }
+    // Clean up job ID mappings for this test run
+    for (const [jobId, sourceKey] of this.jobIdToSourceKey.entries()) {
+      if (sourceKey.startsWith(prefix)) {
+        this.jobIdToSourceKey.delete(jobId);
+      }
+    }
   }
 
   /**
@@ -60,14 +182,50 @@ export class IncrementalCollectionScheduler {
   }
 
   /**
-   * Initialize the queue connection
-   * Called lazily on first cron execution
+   * Initialize the queue connection and QueueEvents listener.
+   * Called lazily on first cron execution.
    */
   private ensureQueueInitialized(): Queue {
     if (!this.analyzeQueue) {
       this.analyzeQueue = createSimpleQueue(SIMPLE_QUEUES.ANALYZE);
       this.logger.log('Initialized queue for incremental collection');
     }
+
+    if (!this.queueEvents) {
+      const config = getConfig();
+      const connection = new IORedis({
+        host: config.REDIS_HOST,
+        port: config.REDIS_PORT,
+        password: config.REDIS_PASSWORD || undefined,
+        db: config.REDIS_DB,
+        maxRetriesPerRequest: null,
+        enableReadyCheck: false,
+      });
+
+      this.queueEvents = new QueueEvents(SIMPLE_QUEUES.ANALYZE, {
+        connection,
+        prefix: 'bull',
+      });
+
+      this.queueEvents.on('completed', ({ jobId }) => {
+        const sourceKey = this.jobIdToSourceKey.get(jobId);
+        if (sourceKey) {
+          this.recordSuccess(sourceKey);
+          this.jobIdToSourceKey.delete(jobId);
+        }
+      });
+
+      this.queueEvents.on('failed', ({ jobId }) => {
+        const sourceKey = this.jobIdToSourceKey.get(jobId);
+        if (sourceKey) {
+          this.recordFailure(sourceKey);
+          this.jobIdToSourceKey.delete(jobId);
+        }
+      });
+
+      this.logger.log('Initialized QueueEvents for failure tracking');
+    }
+
     return this.analyzeQueue;
   }
 
@@ -211,6 +369,12 @@ export class IncrementalCollectionScheduler {
 
       for (const [sourceKey, dashboards] of grafanaGroups.entries()) {
         const { sourceType, sourceId } = this.parseSourceKey(sourceKey);
+        const failureKey = this.buildSourceKey(testRun.testRunId, sourceType, sourceId);
+
+        // Check backoff before enqueuing
+        if (this.shouldSkipDueToBackoff(failureKey)) {
+          continue;
+        }
 
         // Get last collected time for this source (for true incremental collection)
         const lastCollectedTime = await this.databaseService.getLastCollectedTime(
@@ -231,12 +395,17 @@ export class IncrementalCollectionScheduler {
           maxAttempts,
         };
 
-        await queue.add(JOB_NAMES.INCREMENTAL_COLLECTION, jobPayload, {
+        const job = await queue.add(JOB_NAMES.INCREMENTAL_COLLECTION, jobPayload, {
           attempts: maxAttempts,
           backoff: { type: 'exponential', delay: 2000 },
           removeOnComplete: 100,
           removeOnFail: 25,
         });
+
+        // Track job ID for failure/success callbacks
+        if (job.id) {
+          this.jobIdToSourceKey.set(job.id, failureKey);
+        }
 
         jobsEnqueued++;
         this.logger.debug(
@@ -257,6 +426,13 @@ export class IncrementalCollectionScheduler {
       `, [testRun.systemUnderTestId, testRun.testEnvironment, testRun.workload]);
 
       for (const row of dynatraceConfigs) {
+        const dtFailureKey = this.buildSourceKey(testRun.testRunId, 'dynatrace', row.dynatrace_config_id);
+
+        // Check backoff before enqueuing
+        if (this.shouldSkipDueToBackoff(dtFailureKey)) {
+          continue;
+        }
+
         // Get last collected time for this Dynatrace source
         const lastCollectedTime = await this.databaseService.getLastCollectedTime(
           testRun.testRunId,
@@ -276,12 +452,17 @@ export class IncrementalCollectionScheduler {
           maxAttempts,
         };
 
-        await queue.add(JOB_NAMES.INCREMENTAL_COLLECTION, jobPayload, {
+        const job = await queue.add(JOB_NAMES.INCREMENTAL_COLLECTION, jobPayload, {
           attempts: maxAttempts,
           backoff: { type: 'exponential', delay: 2000 },
           removeOnComplete: 100,
           removeOnFail: 25,
         });
+
+        // Track job ID for failure/success callbacks
+        if (job.id) {
+          this.jobIdToSourceKey.set(job.id, dtFailureKey);
+        }
 
         jobsEnqueued++;
         this.logger.debug(
@@ -291,38 +472,47 @@ export class IncrementalCollectionScheduler {
         );
       }
 
-      // 3. Always enqueue a performance test metrics job
-      // Get last collected time for performance test source
-      const perfTestLastCollected = await this.databaseService.getLastCollectedTime(
-        testRun.testRunId,
-        'performance_test',
-        null
-      );
-      const perfTestFromTime = perfTestLastCollected || testStartTime;
+      // 3. Enqueue a performance test metrics job (with backoff check)
+      const perfTestFailureKey = this.buildSourceKey(testRun.testRunId, 'performance_test', null);
 
-      const perfTestPayload = {
-        testRunId: testRun.testRunId,
-        sourceType: 'performance_test',
-        sourceId: null,
-        applicationDashboardIds: [],
-        fromTime: perfTestFromTime.toISOString(),
-        toTime: toTime.toISOString(),
-        attempt: 1,
-        maxAttempts,
-      };
+      if (!this.shouldSkipDueToBackoff(perfTestFailureKey)) {
+        // Get last collected time for performance test source
+        const perfTestLastCollected = await this.databaseService.getLastCollectedTime(
+          testRun.testRunId,
+          'performance_test',
+          null
+        );
+        const perfTestFromTime = perfTestLastCollected || testStartTime;
 
-      await queue.add(JOB_NAMES.INCREMENTAL_COLLECTION, perfTestPayload, {
-        attempts: maxAttempts,
-        backoff: { type: 'exponential', delay: 2000 },
-        removeOnComplete: 100,
-        removeOnFail: 25,
-      });
+        const perfTestPayload = {
+          testRunId: testRun.testRunId,
+          sourceType: 'performance_test',
+          sourceId: null,
+          applicationDashboardIds: [],
+          fromTime: perfTestFromTime.toISOString(),
+          toTime: toTime.toISOString(),
+          attempt: 1,
+          maxAttempts,
+        };
 
-      jobsEnqueued++;
-      this.logger.debug(
-        `Enqueued performance test incremental collection job for test run ${testRun.testRunId}, ` +
-        `range: ${perfTestFromTime.toISOString()} to ${toTime.toISOString()}`
-      );
+        const perfJob = await queue.add(JOB_NAMES.INCREMENTAL_COLLECTION, perfTestPayload, {
+          attempts: maxAttempts,
+          backoff: { type: 'exponential', delay: 2000 },
+          removeOnComplete: 100,
+          removeOnFail: 25,
+        });
+
+        // Track job ID for failure/success callbacks
+        if (perfJob.id) {
+          this.jobIdToSourceKey.set(perfJob.id, perfTestFailureKey);
+        }
+
+        jobsEnqueued++;
+        this.logger.debug(
+          `Enqueued performance test incremental collection job for test run ${testRun.testRunId}, ` +
+          `range: ${perfTestFromTime.toISOString()} to ${toTime.toISOString()}`
+        );
+      }
 
       this.logger.log(
         `Enqueued ${jobsEnqueued} incremental collection job(s) for test run ${testRun.testRunId} ` +
@@ -393,6 +583,10 @@ export class IncrementalCollectionScheduler {
    * Cleanup method called on module destroy
    */
   async onModuleDestroy(): Promise<void> {
+    if (this.queueEvents) {
+      await this.queueEvents.close();
+      this.logger.log('Closed QueueEvents connection');
+    }
     if (this.analyzeQueue) {
       await this.analyzeQueue.close();
       this.logger.log('Closed queue connection');

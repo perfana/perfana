@@ -1,6 +1,7 @@
 import { Entity, PrimaryGeneratedColumn, Column, CreateDateColumn, UpdateDateColumn, Unique, ManyToOne, JoinColumn } from 'typeorm';
 import { SystemUnderTest } from './system-under-test.entity';
 import { ApplicationDashboard } from './application-dashboard.entity';
+import { MetricsSource } from './metrics-source.entity';
 
 /**
  * Benchmark types:
@@ -53,6 +54,9 @@ export class Benchmark {
 
   @Column({ type: 'uuid', nullable: true })
   application_dashboard_id?: string;
+
+  @Column({ type: 'uuid', nullable: true })
+  metrics_source_id?: string;
 
   @Column({ type: 'varchar', length: 500, nullable: true })
   generic_check_id?: string;
@@ -196,4 +200,8 @@ export class Benchmark {
   @ManyToOne(() => ApplicationDashboard, { onDelete: 'CASCADE' })
   @JoinColumn({ name: 'application_dashboard_id' })
   application_dashboard?: ApplicationDashboard;
+
+  @ManyToOne(() => MetricsSource)
+  @JoinColumn({ name: 'metrics_source_id' })
+  metrics_source?: MetricsSource;
 }

@@ -17,6 +17,7 @@ import {
 } from '../types';
 import { calculatePercentageDifference } from '../utils/compare-utils';
 import { TestRun } from '@/types/test-runs';
+import { isGrafana, isPerformanceTest } from '@/lib/metrics-source-utils';
 
 interface UseCompareDataProps {
   testRun: TestRun | null;
@@ -227,7 +228,7 @@ export function useCompareData({ testRun, testRunId, compareExpanded }: UseCompa
   }, [testRun]);
 
   // Fetch available metric names for a selected panel
-  const fetchPanelMetrics = useCallback(async (applicationDashboardId: string, panelId: number): Promise<string[]> => {
+  const fetchPanelMetrics = useCallback(async (applicationDashboardId: string, panelId: number, metricsSourceId?: string): Promise<string[]> => {
     if (!applicationDashboardId || !panelId || !testRun) {
       setAvailableMetrics([]);
       return [];
@@ -243,6 +244,11 @@ export function useCompareData({ testRun, testRunId, compareExpanded }: UseCompa
         environment: testRun.test_environment || '',
         workload: testRun.workload || ''
       });
+
+      // Send metricsSourceId if available
+      if (metricsSourceId) {
+        params.set('metricsSourceId', metricsSourceId);
+      }
 
       const response = await authenticatedFetch(
         `/metrics/ds-metrics/distinct-names?${params.toString()}`,
@@ -274,12 +280,12 @@ export function useCompareData({ testRun, testRunId, compareExpanded }: UseCompa
       setMetricsLoading(true);
 
       // Group series by dashboard+panel to batch API calls
-      const seriesGroups = new Map<string, { dashboardId: string; panelId: number; metricNames: string[] }>();
+      const seriesGroups = new Map<string, { dashboardId: string; panelId: number; metricsSourceId?: string; metricNames: string[] }>();
 
       for (const series of addedSeries) {
         const key = `${series.dashboardId}-${series.panelId}`;
         if (!seriesGroups.has(key)) {
-          seriesGroups.set(key, { dashboardId: series.dashboardId, panelId: series.panelId, metricNames: [] });
+          seriesGroups.set(key, { dashboardId: series.dashboardId, panelId: series.panelId, metricsSourceId: series.metricsSourceId, metricNames: [] });
         }
         seriesGroups.get(key)!.metricNames.push(series.metricName);
       }
@@ -295,6 +301,11 @@ export function useCompareData({ testRun, testRunId, compareExpanded }: UseCompa
           environment: testRun.test_environment || '',
           workload: testRun.workload || ''
         });
+
+        // Send metricsSourceId if available
+        if (group.metricsSourceId) {
+          params.set('metricsSourceId', group.metricsSourceId);
+        }
 
         const response = await authenticatedFetch(
           `/metrics/ds-metric-statistics?${params.toString()}`,
@@ -353,14 +364,9 @@ export function useCompareData({ testRun, testRunId, compareExpanded }: UseCompa
   // Get dashboards filtered by selected source
   const getFilteredDashboards = useCallback((): ApplicationDashboard[] => {
     if (selectedSource === 'grafana') {
-      return dashboards.filter(d =>
-        !d.dashboard_uid?.startsWith('performance-test-metrics-') &&
-        !d.dashboard_uid?.startsWith('dynatrace-')
-      );
+      return dashboards.filter(d => isGrafana(d));
     } else if (selectedSource === 'performance-metrics') {
-      return dashboards.filter(d =>
-        d.dashboard_uid?.startsWith('performance-test-metrics-')
-      );
+      return dashboards.filter(d => isPerformanceTest(d));
     } else if (selectedSource === 'dynatrace') {
       return dynatraceDashboards.map((d, index) => ({
         id: `dynatrace-${index}`,
@@ -376,17 +382,12 @@ export function useCompareData({ testRun, testRunId, compareExpanded }: UseCompa
   useEffect(() => {
     const sources: DataSource[] = [];
 
-    const hasGrafana = dashboards.some(d =>
-      !d.dashboard_uid?.startsWith('performance-test-metrics-') &&
-      !d.dashboard_uid?.startsWith('dynatrace-')
-    );
+    const hasGrafana = dashboards.some(d => isGrafana(d));
     if (hasGrafana) sources.push('grafana');
 
     if (dynatraceDashboards.length > 0) sources.push('dynatrace');
 
-    const hasPerformanceMetrics = dashboards.some(d =>
-      d.dashboard_uid?.startsWith('performance-test-metrics-')
-    );
+    const hasPerformanceMetrics = dashboards.some(d => isPerformanceTest(d));
     if (hasPerformanceMetrics) sources.push('performance-metrics');
 
     setAvailableSources(sources);

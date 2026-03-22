@@ -1,5 +1,6 @@
 import { ApplicationDashboard, DataSource } from '../types';
 import { DynatraceDashboard } from '@/lib/dynatrace';
+import { isDynatrace, isPerformanceTest, isGrafana } from '@/lib/metrics-source-utils';
 
 /**
  * Filter dashboards by source type
@@ -14,15 +15,10 @@ export function getFilteredDashboards(
 ): ApplicationDashboard[] {
   if (selectedSource === 'grafana') {
     // Filter out artificial dashboards
-    return dashboards.filter(d =>
-      !d.dashboard_uid?.startsWith('performance-test-metrics-') &&
-      !d.dashboard_uid?.startsWith('dynatrace-')
-    );
+    return dashboards.filter(d => isGrafana(d));
   } else if (selectedSource === 'performance-metrics') {
     // Only performance-test-metrics dashboards
-    return dashboards.filter(d =>
-      d.dashboard_uid?.startsWith('performance-test-metrics-')
-    );
+    return dashboards.filter(d => isPerformanceTest(d));
   } else {
     // Dynatrace - use dynatraceDashboards
     return dynatraceDashboards.map((d, index) => ({
@@ -42,7 +38,8 @@ export function determineSource(
   dashboardUid: string | undefined
 ): DataSource {
   if (panelType === 'dynatrace') return 'dynatrace';
-  if (dashboardUid?.startsWith('performance-test-metrics-')) return 'performance-metrics';
+  if (isDynatrace({ dashboard_uid: dashboardUid })) return 'dynatrace';
+  if (isPerformanceTest({ dashboard_uid: dashboardUid })) return 'performance-metrics';
   return 'grafana';
 }
 
@@ -56,10 +53,7 @@ export function computeAvailableSources(
   const sources: DataSource[] = [];
 
   // Check for real Grafana dashboards (not artificial)
-  const grafanaDashboards = dashboards.filter(d =>
-    !d.dashboard_uid?.startsWith('performance-test-metrics-') &&
-    !d.dashboard_uid?.startsWith('dynatrace-')
-  );
+  const grafanaDashboards = dashboards.filter(d => isGrafana(d));
   if (grafanaDashboards.length > 0) {
     sources.push('grafana');
   }
@@ -70,9 +64,7 @@ export function computeAvailableSources(
   }
 
   // Check for performance-test-metrics dashboards
-  const perfMetricsDashboards = dashboards.filter(d =>
-    d.dashboard_uid?.startsWith('performance-test-metrics-')
-  );
+  const perfMetricsDashboards = dashboards.filter(d => isPerformanceTest(d));
   if (perfMetricsDashboards.length > 0) {
     sources.push('performance-metrics');
   }

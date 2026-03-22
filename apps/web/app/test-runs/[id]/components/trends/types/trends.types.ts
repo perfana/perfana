@@ -76,6 +76,7 @@ export interface ApplicationDashboard {
   dashboard_label: string;
   dashboard_name: string;
   dashboard_uid: string;
+  metrics_source_id?: string;
   grafanaInstance?: {
     label: string;
   };
@@ -87,6 +88,7 @@ export interface Panel {
   type: string;
   yAxesFormat?: string;
   applicationDashboardId?: string;
+  metricsSourceId?: string;
 }
 
 export interface TimeRange {
@@ -121,6 +123,7 @@ export interface TrendsSeries {
   metricName: string;
   source: DataSource;
   yAxisFormat?: string;
+  metricsSourceId?: string;
 }
 
 /**

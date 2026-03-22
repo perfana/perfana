@@ -273,6 +273,7 @@ export class DynatracePipeline extends BasePipelineTypeORM {
         omitGroupByVariableFromMetricName: queryConfig.omitGroupByVariableFromMetricName || [],
         dashboardLabel: queryConfig.dashboardLabel,
         applicationDashboardId: queryConfig.applicationDashboardId,
+        metricsSourceId: queryConfig.metricsSourceId,
         panelId: queryConfig.panelId,
         metricName: queryConfig.metricName,  // Explicit metric name (e.g., "CPU Usage")
         result: result.result,
@@ -302,6 +303,7 @@ export class DynatracePipeline extends BasePipelineTypeORM {
           `INSERT INTO ds_panels (
             test_run_id,
             application_dashboard_id,
+            metrics_source_id,
             dashboard_uid,
             panel_id,
             panel_title,
@@ -318,10 +320,11 @@ export class DynatracePipeline extends BasePipelineTypeORM {
             team_id,
             created_by,
             updated_by
-          ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18)`,
+          ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19)`,
           [
             doc.test_run_id,
             doc.application_dashboard_id,
+            doc.metrics_source_id || null,
             doc.dashboard_uid,
             doc.panel_id,
             doc.panel_title,
@@ -374,6 +377,7 @@ export class DynatracePipeline extends BasePipelineTypeORM {
             `INSERT INTO ds_metrics (
               test_run_id,
               application_dashboard_id,
+              metrics_source_id,
               dashboard_uid,
               panel_id,
               panel_title,
@@ -390,7 +394,7 @@ export class DynatracePipeline extends BasePipelineTypeORM {
               team_id,
               created_by,
               updated_by
-            ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18)
+            ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19)
             ON CONFLICT (test_run_id, application_dashboard_id, panel_id, metric_name, time)
             DO UPDATE SET
               value = EXCLUDED.value,
@@ -400,10 +404,12 @@ export class DynatracePipeline extends BasePipelineTypeORM {
               updated_at = NOW(),
               organization_id = EXCLUDED.organization_id,
               team_id = EXCLUDED.team_id,
-              updated_by = EXCLUDED.updated_by`,
+              updated_by = EXCLUDED.updated_by,
+              metrics_source_id = COALESCE(EXCLUDED.metrics_source_id, ds_metrics.metrics_source_id)`,
             [
               doc.testRunId,
               doc.applicationDashboardId,
+              doc.metricsSourceId || null,
               doc.dashboardUid,
               doc.panelId,
               doc.panelTitle,

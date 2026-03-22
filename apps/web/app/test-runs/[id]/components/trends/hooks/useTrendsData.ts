@@ -14,6 +14,7 @@ import {
   TIME_RANGE_OPTIONS,
 } from '../types';
 import { TestRun } from '@/types/test-runs';
+import { isGrafana, isPerformanceTest } from '@/lib/metrics-source-utils';
 
 interface UseTrendsDataProps {
   testRun: TestRun | null;
@@ -223,7 +224,7 @@ export function useTrendsData({ testRun, testRunId, trendsExpanded }: UseTrendsD
   }, [testRun]);
 
   // Fetch available metric names for a selected panel
-  const fetchPanelMetrics = useCallback(async (applicationDashboardId: string, panelId: number) => {
+  const fetchPanelMetrics = useCallback(async (applicationDashboardId: string, panelId: number, metricsSourceId?: string) => {
     try {
       setAvailableMetricsLoading(true);
       setAvailableMetrics([]);
@@ -233,6 +234,11 @@ export function useTrendsData({ testRun, testRunId, trendsExpanded }: UseTrendsD
         applicationDashboardId,
         panelId: panelId.toString()
       });
+
+      // Send metricsSourceId if available
+      if (metricsSourceId) {
+        params.set('metricsSourceId', metricsSourceId);
+      }
 
       const response = await authenticatedFetch(
         `/metrics/ds-metrics/distinct-names?${params.toString()}`,
@@ -290,17 +296,18 @@ export function useTrendsData({ testRun, testRunId, trendsExpanded }: UseTrendsD
           acc[key] = {
             dashboardId: series.dashboardId,
             panelId: series.panelId,
+            metricsSourceId: series.metricsSourceId,
             metricNames: new Set<string>()
           };
         }
         acc[key].metricNames.add(series.metricName);
         return acc;
-      }, {} as Record<string, { dashboardId: string; panelId: number; metricNames: Set<string> }>);
+      }, {} as Record<string, { dashboardId: string; panelId: number; metricsSourceId?: string; metricNames: Set<string> }>);
 
       // Fetch data for each dashboard/panel combination
       const allData: MetricStatistic[] = [];
 
-      for (const { dashboardId, panelId, metricNames } of Object.values(seriesByDashboardPanel)) {
+      for (const { dashboardId, panelId, metricsSourceId, metricNames } of Object.values(seriesByDashboardPanel)) {
         if (panelId == null || dashboardId == null) {
           console.warn('Skipping series group with missing dashboardId or panelId:', { dashboardId, panelId });
           continue;
@@ -312,6 +319,11 @@ export function useTrendsData({ testRun, testRunId, trendsExpanded }: UseTrendsD
           from: fromDate.toISOString(),
           to: toDate.toISOString()
         });
+
+        // Send metricsSourceId if available
+        if (metricsSourceId) {
+          queryParams.set('metricsSourceId', metricsSourceId);
+        }
 
         if (testRun?.systems_under_test?.name) {
           queryParams.set('system', testRun.systems_under_test.name);
@@ -359,10 +371,7 @@ export function useTrendsData({ testRun, testRunId, trendsExpanded }: UseTrendsD
     const sources: DataSource[] = [];
 
     // Check for real Grafana dashboards (not artificial)
-    const grafanaDashboards = dashboards.filter(d =>
-      !d.dashboard_uid?.startsWith('performance-test-metrics-') &&
-      !d.dashboard_uid?.startsWith('dynatrace-')
-    );
+    const grafanaDashboards = dashboards.filter(d => isGrafana(d));
     if (grafanaDashboards.length > 0) {
       sources.push('grafana');
     }
@@ -373,9 +382,7 @@ export function useTrendsData({ testRun, testRunId, trendsExpanded }: UseTrendsD
     }
 
     // Check for performance-test-metrics dashboards
-    const perfMetricsDashboards = dashboards.filter(d =>
-      d.dashboard_uid?.startsWith('performance-test-metrics-')
-    );
+    const perfMetricsDashboards = dashboards.filter(d => isPerformanceTest(d));
     if (perfMetricsDashboards.length > 0) {
       sources.push('performance-metrics');
     }
@@ -417,14 +424,9 @@ export function useTrendsData({ testRun, testRunId, trendsExpanded }: UseTrendsD
   // Filter dashboards by source type
   const getFilteredDashboards = useCallback((): ApplicationDashboard[] => {
     if (selectedSource === 'grafana') {
-      return dashboards.filter(d =>
-        !d.dashboard_uid?.startsWith('performance-test-metrics-') &&
-        !d.dashboard_uid?.startsWith('dynatrace-')
-      );
+      return dashboards.filter(d => isGrafana(d));
     } else if (selectedSource === 'performance-metrics') {
-      return dashboards.filter(d =>
-        d.dashboard_uid?.startsWith('performance-test-metrics-')
-      );
+      return dashboards.filter(d => isPerformanceTest(d));
     } else {
       return dynatraceDashboards.map((d, index) => ({
         id: `dynatrace-${index}`,
@@ -482,7 +484,8 @@ export function useTrendsData({ testRun, testRunId, trendsExpanded }: UseTrendsD
 
     if (metric && selectedDashboard) {
       const applicationDashboardId = metric.applicationDashboardId || selectedDashboard.id;
-      fetchPanelMetrics(applicationDashboardId, metric.id);
+      const metricsSourceId = metric.metricsSourceId || selectedDashboard.metrics_source_id;
+      fetchPanelMetrics(applicationDashboardId, metric.id, metricsSourceId);
     }
   }, [selectedDashboard, fetchPanelMetrics]);
 
@@ -492,12 +495,13 @@ export function useTrendsData({ testRun, testRunId, trendsExpanded }: UseTrendsD
 
     const getSource = (): DataSource => {
       if (selectedMetric.type === 'dynatrace') return 'dynatrace';
-      if (selectedDashboard.dashboard_uid?.startsWith('performance-test-metrics-')) return 'performance-metrics';
+      if (isPerformanceTest(selectedDashboard)) return 'performance-metrics';
       return 'grafana';
     };
     const source = getSource();
 
     const applicationDashboardId = selectedMetric.applicationDashboardId || selectedDashboard.id;
+    const metricsSourceId = selectedMetric.metricsSourceId || selectedDashboard.metrics_source_id;
 
     const newSeries: TrendsSeries[] = selectedMetricNames.map(metricName => ({
       id: `${applicationDashboardId}-${selectedMetric.id}-${metricName}-${Date.now()}-${Math.random()}`,
@@ -506,7 +510,8 @@ export function useTrendsData({ testRun, testRunId, trendsExpanded }: UseTrendsD
       panelId: selectedMetric.id,
       panelTitle: selectedMetric.title,
       metricName: metricName,
-      source: source
+      source: source,
+      metricsSourceId: metricsSourceId
     }));
 
     const filteredNewSeries = newSeries.filter(newS =>

@@ -35,8 +35,8 @@ export interface ApplicationDashboard {
   id: string;
   system_under_test_id: string;
   test_environment: string;
-  grafana_instance_id: string;
-  grafana_dashboard_id: string;
+  grafana_instance_id?: string;
+  grafana_dashboard_id?: string;
   dashboard_name: string;
   dashboard_id?: number;
   dashboard_uid?: string;
@@ -500,8 +500,8 @@ export class ApplicationDashboardsService {
     });
 
     // Unique key: grafanaInstanceId + dashboardUid + dashboardLabel
-    const makeKey = (d: { grafana_instance_id: string; dashboard_uid?: string; dashboard_label: string }) =>
-      `${d.grafana_instance_id}|${d.dashboard_uid ?? ''}|${d.dashboard_label}`;
+    const makeKey = (d: { grafana_instance_id?: string; dashboard_uid?: string; dashboard_label: string }) =>
+      `${d.grafana_instance_id ?? ''}|${d.dashboard_uid ?? ''}|${d.dashboard_label}`;
 
     const existingKeySet = new Set(existingDashboards.map(makeKey));
     const existingByKey = new Map(existingDashboards.map(d => [makeKey(d), d]));
@@ -537,8 +537,8 @@ export class ApplicationDashboardsService {
         {
           systemUnderTestId: dto.targetSystemUnderTestId,
           testEnvironment: dto.targetTestEnvironment,
-          grafanaInstanceId: dashboard.grafana_instance_id,
-          grafanaDashboardId: dashboard.grafana_dashboard_id,
+          grafanaInstanceId: dashboard.grafana_instance_id ?? '',
+          grafanaDashboardId: dashboard.grafana_dashboard_id ?? '',
           dashboardName: dashboard.dashboard_name,
           dashboardId: dashboard.dashboard_id,
           dashboardUid: dashboard.dashboard_uid ?? '',

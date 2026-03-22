@@ -5,6 +5,13 @@ import { GrafanaClient } from '@perfana/shared/services/grafana';
 import { getLogger as _getLogger } from '../lib/utils/logger.js';
 import { getGrafanaConfig, getGrafanaInstanceId } from '../config/grafana-config-cache.js';
 
+/**
+ * Number of records per INSERT batch.
+ * Chosen to stay within PostgreSQL's parameter limit: 200 rows x 21 columns = 4,200 params
+ * (well under the 65535 parameter ceiling). Matches the Python implementation batch size.
+ */
+const DB_INSERT_BATCH_SIZE = 200;
+
 interface MetricsInput {
   testRunId: string;
   benchmarksOnly?: boolean;
@@ -293,6 +300,7 @@ export class MetricsPipeline extends BasePipelineTypeORM {
     const baseData = {
       test_run_id: document.test_run_id,
       application_dashboard_id: document.application_dashboard_id,
+      metrics_source_id: document.metrics_source_id || null,
       dashboard_uid: document.dashboard_uid,
       panel_id: document.panel_id,
       panel_title: document.panel_title,
@@ -355,6 +363,7 @@ export class MetricsPipeline extends BasePipelineTypeORM {
     return {
       test_run_id: panel.test_run_id,
       application_dashboard_id: panel.application_dashboard_id,
+      metrics_source_id: panel.metrics_source_id || null,
       dashboard_uid: panel.dashboard_uid,
       panel_id: panel.panel_id,
       panel_title: panel.panel_title,
@@ -384,6 +393,7 @@ export class MetricsPipeline extends BasePipelineTypeORM {
     return {
       test_run_id: panel.test_run_id,
       application_dashboard_id: panel.application_dashboard_id,
+      metrics_source_id: panel.metrics_source_id || null,
       dashboard_uid: panel.dashboard_uid,
       panel_id: panel.panel_id,
       panel_title: panel.panel_title,
@@ -426,7 +436,7 @@ export class MetricsPipeline extends BasePipelineTypeORM {
    * Conservative batch size for parameter limit compliance
    */
   private async batchInsertRecords(manager: EntityManager, records: any[]): Promise<void> {
-    const batchSize = 200; // Conservative batch size from Python implementation
+    const batchSize = DB_INSERT_BATCH_SIZE;
 
     for (let i = 0; i < records.length; i += batchSize) {
       const batch = records.slice(i, i + batchSize);
@@ -447,7 +457,7 @@ export class MetricsPipeline extends BasePipelineTypeORM {
 
 
     const columns = [
-      'test_run_id', 'application_dashboard_id', 'dashboard_uid', 'panel_id',
+      'test_run_id', 'application_dashboard_id', 'metrics_source_id', 'dashboard_uid', 'panel_id',
       'panel_title', 'dashboard_label', 'benchmark_ids', 'errors',
       'metric_name', 'time', 'timestep', 'ramp_up', 'value', 'unit', 'updated_at', 'created_at',
       'organization_id', 'team_id', 'created_by', 'updated_by'
@@ -468,6 +478,7 @@ export class MetricsPipeline extends BasePipelineTypeORM {
         panel_title = EXCLUDED.panel_title,
         dashboard_label = EXCLUDED.dashboard_label,
         dashboard_uid = EXCLUDED.dashboard_uid,
+        metrics_source_id = COALESCE(EXCLUDED.metrics_source_id, ds_metrics.metrics_source_id),
         benchmark_ids = EXCLUDED.benchmark_ids,
         errors = EXCLUDED.errors,
         timestep = EXCLUDED.timestep,

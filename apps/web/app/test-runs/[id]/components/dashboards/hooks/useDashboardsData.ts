@@ -6,7 +6,8 @@ import { useThemeMode } from '@/contexts/theme-context';
 import { TestRun } from '@/types/test-runs';
 import { filterSystemTags } from '@perfana/shared/utils';
 import { Dashboard } from '../types';
-import { isArtificialDashboard, buildGrafanaIframeUrl } from '../utils';
+import { isArtificialDashboard } from '@/lib/metrics-source-utils';
+import { buildGrafanaIframeUrl } from '../utils';
 
 interface UseDashboardsDataProps {
   testRun: TestRun;

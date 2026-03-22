@@ -95,6 +95,15 @@ export class BatchReevaluateDto {
   applicationDashboardId?: string;
 
   @ApiProperty({
+    description: 'Metrics source ID for specific metric re-analysis (optional)',
+    example: '550e8400-e29b-41d4-a716-446655440002',
+    required: false
+  })
+  @IsOptional()
+  @IsUUID()
+  metricsSourceId?: string;
+
+  @ApiProperty({
     description: 'Panel ID for specific metric re-analysis (optional)',
     example: 1,
     required: false

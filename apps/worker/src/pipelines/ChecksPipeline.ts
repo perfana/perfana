@@ -16,6 +16,7 @@ export interface ChecksInput {
   snapshotId?: string;
   grafanaInfo?: string;
   // Optional: Filter to specific metric for re-evaluation
+  metricsSourceId?: string;
   applicationDashboardId?: string;
   panelId?: number;
   metricName?: string;
@@ -53,10 +54,10 @@ export class ChecksPipeline extends BasePipelineTypeORM {
       }
       const validatedInput = input as ChecksInput;
 
-      const { testRunIds, forceReprocess = false, snapshotId, grafanaInfo, applicationDashboardId, panelId, metricName } = validatedInput;
+      const { testRunIds, forceReprocess = false, snapshotId, grafanaInfo, metricsSourceId, applicationDashboardId, panelId, metricName } = validatedInput;
 
-      if (applicationDashboardId || panelId || metricName) {
-        this.logger.info(`Starting check pipeline for ${testRunIds.length} test runs with metric filter: dashboard=${applicationDashboardId}, panel=${panelId}, metric=${metricName}`);
+      if (metricsSourceId || applicationDashboardId || panelId || metricName) {
+        this.logger.info(`Starting check pipeline for ${testRunIds.length} test runs with metric filter: metricsSource=${metricsSourceId}, dashboard=${applicationDashboardId}, panel=${panelId}, metric=${metricName}`);
       } else {
         this.logger.info(`Starting check pipeline for ${testRunIds.length} test runs`);
       }
@@ -64,7 +65,7 @@ export class ChecksPipeline extends BasePipelineTypeORM {
       // Cleanup stale data before processing
       await this.cleanupStaleApplicationDashboards(['check_results']);
 
-      const result = await this.runCheckPipeline(testRunIds, forceReprocess, snapshotId, grafanaInfo, { applicationDashboardId, panelId, metricName });
+      const result = await this.runCheckPipeline(testRunIds, forceReprocess, snapshotId, grafanaInfo, { metricsSourceId, applicationDashboardId, panelId, metricName });
 
       const duration = Date.now() - startTime;
 
@@ -97,6 +98,7 @@ export class ChecksPipeline extends BasePipelineTypeORM {
     snapshotId?: string,
     grafanaInfo?: string,
     metricFilter?: {
+      metricsSourceId?: string;
       applicationDashboardId?: string;
       panelId?: number;
       metricName?: string;
@@ -218,6 +220,7 @@ export class ChecksPipeline extends BasePipelineTypeORM {
     snapshotId?: string,
     grafanaInfo?: string,
     metricFilter?: {
+      metricsSourceId?: string;
       applicationDashboardId?: string;
       panelId?: number;
       metricName?: string;
@@ -458,6 +461,7 @@ export class ChecksPipeline extends BasePipelineTypeORM {
     manager: EntityManager,
     testRunId: string,
     metricFilter?: {
+      metricsSourceId?: string;
       applicationDashboardId?: string;
       panelId?: number;
       metricName?: string;
@@ -466,8 +470,11 @@ export class ChecksPipeline extends BasePipelineTypeORM {
     const whereClauses = ['test_run_id = $1'];
     const queryParams: any[] = [testRunId];
 
-    // Add filter conditions if provided
-    if (metricFilter?.applicationDashboardId) {
+    // Add filter conditions if provided — prefer metricsSourceId over applicationDashboardId
+    if (metricFilter?.metricsSourceId) {
+      whereClauses.push(`metrics_source_id = $${queryParams.length + 1}`);
+      queryParams.push(metricFilter.metricsSourceId);
+    } else if (metricFilter?.applicationDashboardId) {
       whereClauses.push(`application_dashboard_id = $${queryParams.length + 1}`);
       queryParams.push(metricFilter.applicationDashboardId); // UUID as string
     }

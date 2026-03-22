@@ -58,6 +58,7 @@ export class DynatraceCollector {
    * @param testRun - Test run context
    * @param dynatraceConfigId - Dynatrace config ID (optional)
    * @param applicationDashboardIds - Application dashboard IDs to collect (optional)
+   * @param metricsSourceIds - Metrics source IDs to collect (optional, preferred over applicationDashboardIds)
    * @param fromTime - Start of time range
    * @param toTime - End of time range
    * @returns Collection result with data points and errors
@@ -67,6 +68,7 @@ export class DynatraceCollector {
     testRun: TestRunData,
     dynatraceConfigId: string | undefined,
     applicationDashboardIds: string[] | undefined,
+    metricsSourceIds: string[] | undefined,
     fromTime: Date,
     toTime: Date
   ): Promise<CollectionResult> {
@@ -76,11 +78,12 @@ export class DynatraceCollector {
     try {
       this.logger.info(`Collecting Dynatrace metrics for time range`);
 
-      // Load Dynatrace queries
+      // Load Dynatrace queries — prefer metricsSourceIds over applicationDashboardIds
       const queryConfigs = await this.loadDynatraceQueries(
         testRun,
         dynatraceConfigId,
-        applicationDashboardIds
+        applicationDashboardIds,
+        metricsSourceIds
       );
 
       if (queryConfigs.length === 0) {
@@ -140,7 +143,8 @@ export class DynatraceCollector {
   private async loadDynatraceQueries(
     testRun: TestRunData,
     dynatraceConfigId: string | undefined,
-    applicationDashboardIds: string[] | undefined
+    applicationDashboardIds: string[] | undefined,
+    metricsSourceIds: string[] | undefined
   ): Promise<any[]> {
     let query = `
       SELECT
@@ -166,15 +170,20 @@ export class DynatraceCollector {
     `;
 
     const params: any[] = [testRun.systemUnderTestId, testRun.testEnvironment, testRun.workload];
+    let nextParamIndex = 4;
 
     if (dynatraceConfigId) {
-      query += ` AND dq.dynatrace_config_id = $4`;
+      query += ` AND dq.dynatrace_config_id = $${nextParamIndex}`;
       params.push(dynatraceConfigId);
+      nextParamIndex++;
     }
 
-    if (applicationDashboardIds && applicationDashboardIds.length > 0) {
-      const appDashboardParam = dynatraceConfigId ? '$5' : '$4';
-      query += ` AND dq.application_dashboard_id = ANY(${appDashboardParam})`;
+    // Prefer metricsSourceIds over applicationDashboardIds for filtering
+    if (metricsSourceIds && metricsSourceIds.length > 0) {
+      query += ` AND dq.metrics_source_id = ANY($${nextParamIndex})`;
+      params.push(metricsSourceIds);
+    } else if (applicationDashboardIds && applicationDashboardIds.length > 0) {
+      query += ` AND dq.application_dashboard_id = ANY($${nextParamIndex})`;
       params.push(applicationDashboardIds);
     }
 

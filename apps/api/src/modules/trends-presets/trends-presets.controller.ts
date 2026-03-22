@@ -64,6 +64,11 @@ export class TrendsPresetsController {
     required: false,
     example: 'MyApp-prod-loadTest-00042'
   })
+  @ApiQuery({
+    name: 'metricsSourceId',
+    description: 'Optional metrics source ID to filter presets',
+    required: false,
+  })
   @ApiResponse({
     status: 200,
     description: 'Trends presets retrieved successfully',
@@ -75,9 +80,10 @@ export class TrendsPresetsController {
   })
   findAll(
     @UserCtx() ctx: UserContext,
-    @Query('testRunId') testRunId?: string
+    @Query('testRunId') testRunId?: string,
+    @Query('metricsSourceId') metricsSourceId?: string,
   ): Promise<TrendsPresetResponseDto[]> {
-    return this.trendsPresetsService.findAll(ctx.userId, ctx.roles, testRunId);
+    return this.trendsPresetsService.findAll(ctx.userId, ctx.roles, testRunId, metricsSourceId);
   }
 
   @Get(':id')
