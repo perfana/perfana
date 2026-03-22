@@ -423,6 +423,8 @@ export function useTrendsData({ testRun, testRunId, trendsExpanded }: UseTrendsD
 
   // Get all dashboards merged for the grouped dropdown
   const getAllDashboardsMerged = useCallback((): ApplicationDashboard[] => {
+    const grafanaOnly = dashboards.filter(d => isGrafana(d));
+    const perfTestOnly = dashboards.filter(d => isPerformanceTest(d));
     const dynatraceAsDashboards: ApplicationDashboard[] = dynatraceDashboards.map((d, index) => ({
       id: `dynatrace-${index}`,
       dashboard_label: d.dashboardLabel,
@@ -430,7 +432,7 @@ export function useTrendsData({ testRun, testRunId, trendsExpanded }: UseTrendsD
       dashboard_uid: `dynatrace-${d.dashboardLabel}`,
       source_type: 'dynatrace',
     } as ApplicationDashboard));
-    return [...dashboards, ...dynatraceAsDashboards];
+    return [...grafanaOnly, ...perfTestOnly, ...dynatraceAsDashboards];
   }, [dashboards, dynatraceDashboards]);
 
   // Filter dashboards by source type (kept for backward compatibility)

@@ -497,6 +497,11 @@ export function useGraphsData({ testRun, testRunId, graphsExpanded }: UseGraphsD
    * Get all dashboards merged (grafana + performance-test + dynatrace) for the grouped dropdown
    */
   const getAllDashboardsMerged = useCallback((): ApplicationDashboard[] => {
+    // Split regular dashboards by source type (they include artificial dynatrace/perf-test records)
+    const grafanaOnly = dashboards.filter(d => isGrafana(d));
+    const perfTestOnly = dashboards.filter(d => isPerformanceTest(d));
+
+    // Dynatrace dashboards come from a separate API — convert to ApplicationDashboard shape
     const dynatraceAsDashboards: ApplicationDashboard[] = dynatraceDashboards.map((d, index) => ({
       id: `dynatrace-${index}`,
       dashboard_label: d.dashboardLabel,
@@ -504,7 +509,8 @@ export function useGraphsData({ testRun, testRunId, graphsExpanded }: UseGraphsD
       dashboard_uid: `dynatrace-${d.dashboardLabel}`,
       source_type: 'dynatrace',
     } as ApplicationDashboard));
-    return [...dashboards, ...dynatraceAsDashboards];
+
+    return [...grafanaOnly, ...perfTestOnly, ...dynatraceAsDashboards];
   }, [dashboards, dynatraceDashboards]);
 
   /**
