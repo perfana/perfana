@@ -52,7 +52,6 @@ export async function upsertMetricsSource(
     })
     .orUpdate(
       [
-        'display_label',
         'workload',
         'tags',
         'metadata',

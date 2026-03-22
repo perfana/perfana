@@ -1302,10 +1302,7 @@ describe('DynatraceDashboardManager - MetricsSource', () => {
     // 1st query: check if application_dashboard exists -> not found
     mockDataSource.query
       .mockResolvedValueOnce([]) // SELECT id FROM application_dashboards
-      .mockResolvedValueOnce([{ id: 'grafana-instance-uuid' }]) // SELECT id FROM grafana_instances
-      .mockResolvedValueOnce([]) // SELECT id FROM grafana_dashboards (check synthetic)
-      .mockResolvedValueOnce([{ id: 'grafana-dash-uuid' }]) // INSERT INTO grafana_dashboards RETURNING id
-      .mockResolvedValueOnce([]) // INSERT INTO application_dashboards
+      .mockResolvedValueOnce([]) // INSERT INTO application_dashboards (no grafana refs)
       .mockResolvedValueOnce([{ id: 'metrics-source-uuid-1' }]); // INSERT INTO metrics_sources RETURNING id
 
     // Act
@@ -1327,10 +1324,7 @@ describe('DynatraceDashboardManager - MetricsSource', () => {
     // Arrange
     mockDataSource.query
       .mockResolvedValueOnce([]) // SELECT id FROM application_dashboards
-      .mockResolvedValueOnce([{ id: 'grafana-instance-uuid' }]) // SELECT id FROM grafana_instances
-      .mockResolvedValueOnce([]) // SELECT id FROM grafana_dashboards
-      .mockResolvedValueOnce([{ id: 'grafana-dash-uuid' }]) // INSERT INTO grafana_dashboards RETURNING id
-      .mockResolvedValueOnce([]) // INSERT INTO application_dashboards
+      .mockResolvedValueOnce([]) // INSERT INTO application_dashboards (no grafana refs)
       .mockRejectedValueOnce(new Error('metrics_sources table does not exist')); // INSERT INTO metrics_sources FAILS
 
     // Act
@@ -1356,10 +1350,7 @@ describe('DynatraceDashboardManager - MetricsSource', () => {
     // Arrange - first call creates the dashboard
     mockDataSource.query
       .mockResolvedValueOnce([]) // SELECT id FROM application_dashboards
-      .mockResolvedValueOnce([{ id: 'grafana-instance-uuid' }]) // SELECT id FROM grafana_instances
-      .mockResolvedValueOnce([]) // SELECT id FROM grafana_dashboards
-      .mockResolvedValueOnce([{ id: 'grafana-dash-uuid' }]) // INSERT INTO grafana_dashboards RETURNING id
-      .mockResolvedValueOnce([]) // INSERT INTO application_dashboards
+      .mockResolvedValueOnce([]) // INSERT INTO application_dashboards (no grafana refs)
       .mockResolvedValueOnce([{ id: 'metrics-source-uuid-cached' }]); // INSERT INTO metrics_sources RETURNING id
 
     // Act - first call populates cache
@@ -1381,7 +1372,7 @@ describe('DynatraceDashboardManager - MetricsSource', () => {
     // Assert
     expect(metadata1.metricsSourceId).toBe('metrics-source-uuid-cached');
     expect(metadata2.metricsSourceId).toBe('metrics-source-uuid-cached');
-    // The dataSource.query should only be called for the first invocation (6 calls), not again
-    expect(mockDataSource.query).toHaveBeenCalledTimes(6);
+    // The dataSource.query should only be called for the first invocation (3 calls), not again
+    expect(mockDataSource.query).toHaveBeenCalledTimes(3);
   });
 });

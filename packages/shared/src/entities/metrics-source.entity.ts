@@ -40,6 +40,7 @@ import { SystemUnderTest } from './system-under-test.entity';
   'sourceType',
   'externalRef',
   'displayName',
+  'displayLabel',
 ])
 @Index(['systemUnderTestId', 'testEnvironment'])
 @Index(['systemUnderTestId'])

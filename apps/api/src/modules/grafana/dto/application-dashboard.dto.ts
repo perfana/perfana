@@ -36,13 +36,15 @@ export class CreateApplicationDashboardDto {
   @MaxLength(255)
   testEnvironment!: string;
 
-  @ApiProperty({ description: 'ID of the Grafana instance' })
+  @ApiPropertyOptional({ description: 'ID of the Grafana instance (NULL for non-Grafana sources)' })
+  @IsOptional()
   @IsUUID()
-  grafanaInstanceId!: string;
+  grafanaInstanceId?: string;
 
-  @ApiProperty({ description: 'ID of the Grafana dashboard' })
+  @ApiPropertyOptional({ description: 'ID of the Grafana dashboard (NULL for non-Grafana sources)' })
+  @IsOptional()
   @IsUUID()
-  grafanaDashboardId!: string;
+  grafanaDashboardId?: string;
 
   @ApiProperty({ description: 'Dashboard name from Grafana' })
   @IsString()

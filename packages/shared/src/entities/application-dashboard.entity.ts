@@ -28,11 +28,11 @@ export class ApplicationDashboard {
   @Column({ name: 'test_environment', type: 'varchar', length: 255 })
   testEnvironment!: string;
 
-  @Column({ name: 'grafana_instance_id', type: 'uuid' })
-  grafanaInstanceId!: string;
+  @Column({ name: 'grafana_instance_id', type: 'uuid', nullable: true })
+  grafanaInstanceId?: string;
 
-  @Column({ name: 'grafana_dashboard_id', type: 'uuid' })
-  grafanaDashboardId!: string;
+  @Column({ name: 'grafana_dashboard_id', type: 'uuid', nullable: true })
+  grafanaDashboardId?: string;
 
   @Column({ name: 'dashboard_name', type: 'varchar', length: 255 })
   dashboardName!: string;
