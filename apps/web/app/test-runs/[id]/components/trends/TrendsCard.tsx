@@ -289,14 +289,12 @@ export default function TrendsCard({
 
             {/* Selection Controls */}
             <TrendsSelectionControls
-              selectedSource={trendsData.selectedSource}
-              availableSources={trendsData.availableSources}
-              onSourceSelect={trendsData.handleSourceSelect}
               selectedDashboard={trendsData.selectedDashboard}
-              filteredDashboards={trendsData.getFilteredDashboards()}
+              allDashboards={trendsData.getAllDashboardsMerged()}
               dashboardsLoading={trendsData.dashboardsLoading}
               dynatraceDashboardsLoading={trendsData.dynatraceDashboardsLoading}
               onDashboardSelect={trendsData.handleDashboardSelect}
+              selectedSource={trendsData.selectedSource}
               selectedMetric={trendsData.selectedMetric}
               panels={trendsData.panels}
               panelsLoading={trendsData.panelsLoading}

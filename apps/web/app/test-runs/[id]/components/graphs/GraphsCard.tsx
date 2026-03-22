@@ -266,11 +266,8 @@ export default function GraphsCard({
               onDeletePreset={graphsPresets.handleDeletePreset}
               onDeleteAllPresets={graphsPresets.handleDeleteAllPresets}
               onOpenSavePresetModal={() => graphsPresets.setSavePresetModalOpen(true)}
-              selectedSource={graphsData.selectedSource}
-              availableSources={graphsData.availableSources}
-              onSourceSelect={graphsData.handleSourceSelect}
               selectedDashboard={graphsData.selectedDashboard}
-              filteredDashboards={graphsData.getFilteredDashboards()}
+              allDashboards={graphsData.getAllDashboardsMerged()}
               dashboardsLoading={graphsData.dashboardsLoading}
               dynatraceDashboardsLoading={graphsData.dynatraceDashboardsLoading}
               onDashboardSelect={graphsData.handleDashboardSelect}

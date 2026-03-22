@@ -29,11 +29,8 @@ interface GraphsExpandedContentProps {
   onDeleteAllPresets: () => void;
   onOpenSavePresetModal: () => void;
   // Selection controls
-  selectedSource: string;
-  availableSources: string[];
-  onSourceSelect: (source: string) => void;
   selectedDashboard: string;
-  filteredDashboards: unknown[];
+  allDashboards: unknown[];
   dashboardsLoading: boolean;
   dynatraceDashboardsLoading: boolean;
   onDashboardSelect: (dashboardId: string) => void;
@@ -66,11 +63,8 @@ export function GraphsExpandedContent({
   onDeletePreset,
   onDeleteAllPresets,
   onOpenSavePresetModal,
-  selectedSource,
-  availableSources,
-  onSourceSelect,
   selectedDashboard,
-  filteredDashboards,
+  allDashboards,
   dashboardsLoading,
   dynatraceDashboardsLoading,
   onDashboardSelect,
@@ -115,11 +109,8 @@ export function GraphsExpandedContent({
           Add Series to Graph
         </Typography>
         <GraphsSelectionControls
-          selectedSource={selectedSource}
-          availableSources={availableSources}
-          onSourceSelect={onSourceSelect}
           selectedDashboard={selectedDashboard}
-          filteredDashboards={filteredDashboards}
+          allDashboards={allDashboards}
           dashboardsLoading={dashboardsLoading}
           dynatraceDashboardsLoading={dynatraceDashboardsLoading}
           onDashboardSelect={onDashboardSelect}

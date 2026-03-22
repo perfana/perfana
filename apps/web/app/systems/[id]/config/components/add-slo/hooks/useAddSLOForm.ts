@@ -306,23 +306,15 @@ export function useAddSLOForm({
         setHasDynatraceData(dynatraceDataExists);
         setHasPerfMetricsData(perfMetricsDataExists);
 
-        // Count available sources
-        const availableSources = [hasGrafanaData, dynatraceDataExists, perfMetricsDataExists].filter(Boolean).length;
-
-        // Auto-select source if only one is available
-        if (availableSources === 1) {
-          if (hasGrafanaData) {
-            setSloFormData((prev) => ({ ...prev, source: 'grafana' }));
-            if (systemName && environment) {
-              fetchSloApplicationDashboards();
-            }
-          } else if (dynatraceDataExists) {
-            setSloFormData((prev) => ({ ...prev, source: 'dynatrace' }));
-            fetchDynatraceDashboardsForSlo();
-          } else if (perfMetricsDataExists) {
-            setSloFormData((prev) => ({ ...prev, source: 'performance-metrics' }));
-            fetchPerfMetricsDashboardsForSlo();
-          }
+        // Fetch all available sources upfront for the grouped dropdown
+        if (hasGrafanaData && systemName && environment) {
+          fetchSloApplicationDashboards();
+        }
+        if (dynatraceDataExists) {
+          fetchDynatraceDashboardsForSlo();
+        }
+        if (perfMetricsDataExists) {
+          fetchPerfMetricsDashboardsForSlo();
         }
       };
 
