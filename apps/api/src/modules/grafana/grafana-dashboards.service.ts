@@ -71,6 +71,19 @@ export class GrafanaDashboardsService {
     try {
       const queryBuilder = this.grafanaDashboardRepo.createQueryBuilder('gd');
 
+      // Exclude synthetic dashboards created for non-Grafana sources.
+      // Join through application_dashboards → metrics_sources to check source_type.
+      // Only include dashboards linked to a MetricsSource with source_type = 'grafana'
+      // (or not linked to any MetricsSource — legacy data).
+      if (!query.uid) {
+        queryBuilder.andWhere(`NOT EXISTS (
+          SELECT 1 FROM application_dashboards ad
+          JOIN metrics_sources ms ON ms.id = ad.metrics_source_id
+          WHERE ad.grafana_dashboard_id = gd.id
+            AND ms.source_type != 'grafana'
+        )`);
+      }
+
       // Apply filters
       if (query.grafanaInstanceId) {
         queryBuilder.andWhere('gd.grafanaInstanceId = :grafanaInstanceId', {
