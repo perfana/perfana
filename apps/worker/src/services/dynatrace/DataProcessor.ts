@@ -1,20 +1,3 @@
-/**
- * TODO: WireMock DQL response format does not produce storable metrics.
- *
- * The DynatracePipeline correctly calls WireMock and receives responses,
- * but the DataProcessor extracts 0 metrics from the mock data. The mock
- * response format (simple { timestamp, value } records) doesn't match
- * what the processor expects for the query types configured in the test DB.
- *
- * To fix:
- * 1. Add debug logging to processQueryResult() to trace why records are dropped
- * 2. Compare the WireMock response structure against a real Dynatrace DQL response
- * 3. Update infra/dynatrace-mock/saas/mappings/dql-query.json to match
- * 4. Validate by running force-refetch and checking ds_metrics for Dynatrace rows
- *
- * The dual-write code (metrics_source_id propagation) is correct and tested —
- * only the mock response format needs tuning.
- */
 import { getLogger } from '../../lib/utils/logger.js';
 import {
   DynatraceQueryResult,
