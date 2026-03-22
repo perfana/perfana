@@ -11,6 +11,7 @@ import {
   RelatedTestRun,
 } from '../types';
 import { TestRun } from '@/types/test-runs';
+import { getSourceType } from '@/lib/metrics-source-utils';
 
 interface UseCompareHandlersProps {
   testRun: TestRun | null;
@@ -111,13 +112,25 @@ export function useCompareHandlers({
     setAvailableMetrics([]);
     setSelectedMetricNames([]);
 
-    if ((selectedSource === 'grafana' || selectedSource === 'performance-metrics') && dashboard?.dashboard_uid) {
+    if (!dashboard) return;
+
+    // Auto-determine source from the dashboard itself
+    const detectedSourceType = getSourceType(dashboard);
+    const sourceToUse = (
+      detectedSourceType === 'dynatrace' ? 'dynatrace' as DataSource :
+      detectedSourceType === 'performance_test' ? 'performance-metrics' as DataSource :
+      'grafana' as DataSource
+    );
+    setSelectedSource(sourceToUse);
+
+    if (sourceToUse === 'dynatrace') {
+      const label = dynatraceDashboardLabel || dashboard.dashboard_label;
+      fetchDynatraceMetricsList(label);
+    } else if (dashboard.dashboard_uid) {
       fetchDashboardPanels(dashboard.dashboard_uid);
-    } else if (selectedSource === 'dynatrace' && dynatraceDashboardLabel) {
-      fetchDynatraceMetricsList(dynatraceDashboardLabel);
     }
   }, [
-    selectedSource, setSelectedDashboard, setSelectedMetric, setPanels,
+    setSelectedSource, setSelectedDashboard, setSelectedMetric, setPanels,
     setDynatraceMetrics, setCurrentMetrics, setSelectedMetrics,
     setMetricComparisons, setAvailableMetrics, setSelectedMetricNames,
     fetchDashboardPanels, fetchDynatraceMetricsList

@@ -8,26 +8,22 @@ import {
   TextField,
   CircularProgress,
   Button,
+  ListSubheader,
 } from '@mui/material';
 import { Add } from '@mui/icons-material';
 import {
   ApplicationDashboard,
   Panel,
-  DataSource,
 } from '../types';
+import { getSourceDisplayInfo } from '@/lib/metrics-source-utils';
 
 interface GraphsSelectionControlsProps {
-  // Source selection
-  selectedSource: DataSource;
-  availableSources: DataSource[];
-  onSourceSelect: (source: DataSource) => void;
-
   // Dashboard selection
   selectedDashboard: ApplicationDashboard | null;
-  filteredDashboards: ApplicationDashboard[];
+  allDashboards: ApplicationDashboard[];
   dashboardsLoading: boolean;
   dynatraceDashboardsLoading: boolean;
-  onDashboardSelect: (dashboard: ApplicationDashboard | null, source?: DataSource) => void;
+  onDashboardSelect: (dashboard: ApplicationDashboard | null) => void;
 
   // Panel selection
   selectedPanel: Panel | null;
@@ -46,11 +42,8 @@ interface GraphsSelectionControlsProps {
 }
 
 export function GraphsSelectionControls({
-  selectedSource,
-  availableSources,
-  onSourceSelect,
   selectedDashboard,
-  filteredDashboards,
+  allDashboards,
   dashboardsLoading,
   dynatraceDashboardsLoading,
   onDashboardSelect,
@@ -64,85 +57,71 @@ export function GraphsSelectionControls({
   setSelectedMetrics,
   onAddSeries,
 }: GraphsSelectionControlsProps) {
+  const isLoading = dashboardsLoading || dynatraceDashboardsLoading;
+
   return (
     <Box sx={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
-      {/* Source Selection - Show if multiple sources available */}
-      {availableSources.length > 1 && (
-        <Autocomplete
-          options={[
-            { value: 'grafana' as const, label: 'Grafana' },
-            { value: 'dynatrace' as const, label: 'Dynatrace' },
-            { value: 'performance-metrics' as const, label: 'Performance Metrics' }
-          ].filter(opt => availableSources.includes(opt.value))}
-          getOptionLabel={(option) => option.label}
-          value={{
-            value: selectedSource,
-            label: selectedSource === 'grafana' ? 'Grafana'
-              : selectedSource === 'dynatrace' ? 'Dynatrace'
-              : 'Performance Metrics'
-          }}
-          onChange={(_, newValue) => newValue && onSourceSelect(newValue.value)}
-          renderInput={(params) => (
-            <TextField
-              {...params}
-              label="Source"
-              variant="outlined"
-              fullWidth
-              helperText="Select data source for graphs"
-            />
-          )}
-          renderOption={(props, option) => {
-            const { key, ...otherProps } = props;
-            return (
-              <Box component="li" key={key} {...otherProps}>
-                <Typography variant="body1">{option.label}</Typography>
-              </Box>
-            );
-          }}
-        />
-      )}
-
-      {/* Dashboard Selection */}
+      {/* Dashboard Selection - Grouped by source type */}
       <Autocomplete
-        options={filteredDashboards}
+        options={allDashboards}
         getOptionLabel={(option) => option.dashboard_label || ''}
         isOptionEqualToValue={(option, value) => option.id === value.id}
         value={selectedDashboard}
-        onChange={(_, newValue) => {
-          onDashboardSelect(newValue, selectedSource);
-        }}
-        loading={selectedSource === 'dynatrace' ? dynatraceDashboardsLoading : dashboardsLoading}
-        renderInput={(params) => {
-          const filteredCount = filteredDashboards.length;
-          const isLoading = selectedSource === 'dynatrace' ? dynatraceDashboardsLoading : dashboardsLoading;
+        onChange={(_, newValue) => onDashboardSelect(newValue)}
+        loading={isLoading}
+        groupBy={(option) => getSourceDisplayInfo(option).groupLabel}
+        renderGroup={(params) => {
+          const dashboardInGroup = allDashboards.find(
+            d => getSourceDisplayInfo(d).groupLabel === params.group
+          );
+          const color = dashboardInGroup
+            ? getSourceDisplayInfo(dashboardInGroup).color
+            : '#9E9E9E';
           return (
-            <TextField
-              {...params}
-              label="Dashboard"
-              variant="outlined"
-              fullWidth
-              helperText={
-                isLoading
-                  ? 'Loading dashboards...'
-                  : `Select dashboard (${filteredCount} available)`
-              }
-              InputProps={{
-                ...params.InputProps,
-                endAdornment: (
-                  <>
-                    {isLoading ? <CircularProgress size={20} /> : null}
-                    {params.InputProps.endAdornment}
-                  </>
-                ),
-              }}
-            />
+            <li key={params.key}>
+              <ListSubheader
+                sx={{
+                  fontWeight: 700,
+                  color,
+                  backgroundColor: 'background.paper',
+                  lineHeight: '36px',
+                }}
+              >
+                {params.group}
+              </ListSubheader>
+              <ul style={{ padding: 0 }}>{params.children}</ul>
+            </li>
           );
         }}
+        renderInput={(params) => (
+          <TextField
+            {...params}
+            label="Dashboard"
+            variant="outlined"
+            fullWidth
+            helperText={
+              isLoading
+                ? 'Loading dashboards...'
+                : `Select dashboard (${allDashboards.length} available)`
+            }
+            InputProps={{
+              ...params.InputProps,
+              endAdornment: (
+                <>
+                  {isLoading ? <CircularProgress size={20} /> : null}
+                  {params.InputProps.endAdornment}
+                </>
+              ),
+            }}
+          />
+        )}
         renderOption={(props, option) => {
           const { key, ...otherProps } = props;
+          const { color } = getSourceDisplayInfo(option);
           return (
-            <Box component="li" key={option.id} {...otherProps}>
-              <Typography variant="body1">{option.dashboard_label}</Typography>
+            <Box component="li" key={option.id} {...otherProps} sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+              <Box aria-hidden="true" sx={{ width: 6, height: 6, borderRadius: '50%', bgcolor: color, flexShrink: 0 }} />
+              <Typography variant="body2">{option.dashboard_label}</Typography>
             </Box>
           );
         }}

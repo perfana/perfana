@@ -47,6 +47,7 @@ export interface ApplicationDashboard {
   dashboard_name: string;
   dashboard_uid: string;
   metrics_source_id?: string;
+  source_type?: string;
   grafanaInstance?: {
     label: string;
   };

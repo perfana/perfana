@@ -8,6 +8,7 @@ import {
   TextField,
   CircularProgress,
   Button,
+  ListSubheader,
 } from '@mui/material';
 import { BookmarkBorder } from '@mui/icons-material';
 import {
@@ -19,16 +20,12 @@ import {
   EVALUATE_TYPE_OPTIONS,
 } from '../types';
 import { DynatraceMetric } from '@/lib/dynatrace';
+import { getSourceDisplayInfo, getSourceType } from '@/lib/metrics-source-utils';
 
 interface TrendsSelectionControlsProps {
-  // Source selection
-  selectedSource: DataSource;
-  availableSources: DataSource[];
-  onSourceSelect: (source: DataSource) => void;
-
   // Dashboard selection
   selectedDashboard: ApplicationDashboard | null;
-  filteredDashboards: ApplicationDashboard[];
+  allDashboards: ApplicationDashboard[];
   dashboardsLoading: boolean;
   dynatraceDashboardsLoading: boolean;
   onDashboardSelect: (
@@ -44,6 +41,9 @@ interface TrendsSelectionControlsProps {
   dynatraceMetrics: DynatraceMetric[];
   dynatraceMetricsLoading: boolean;
   onMetricSelect: (metric: Panel | null) => void;
+
+  // Determined source (auto-detected from selected dashboard)
+  selectedSource: DataSource;
 
   // Series selection
   availableMetrics: string[];
@@ -68,11 +68,8 @@ interface TrendsSelectionControlsProps {
 }
 
 export function TrendsSelectionControls({
-  selectedSource,
-  availableSources,
-  onSourceSelect,
   selectedDashboard,
-  filteredDashboards,
+  allDashboards,
   dashboardsLoading,
   dynatraceDashboardsLoading,
   onDashboardSelect,
@@ -82,6 +79,7 @@ export function TrendsSelectionControls({
   dynatraceMetrics,
   dynatraceMetricsLoading,
   onMetricSelect,
+  selectedSource,
   availableMetrics,
   availableMetricsLoading,
   selectedMetricNames,
@@ -96,58 +94,54 @@ export function TrendsSelectionControls({
   onEvaluateTypeChange,
   onSavePresetClick,
 }: TrendsSelectionControlsProps) {
+  const isLoading = dashboardsLoading || dynatraceDashboardsLoading;
+
   return (
     <Box sx={{ display: 'flex', flexDirection: 'column', gap: 2, mb: 3 }}>
-      {/* Source Selection - Only show if multiple sources available */}
-      {availableSources.length > 1 && (
-        <Autocomplete
-          options={[
-            { value: 'grafana' as const, label: 'Grafana' },
-            { value: 'dynatrace' as const, label: 'Dynatrace' },
-            { value: 'performance-metrics' as const, label: 'Performance Metrics' }
-          ].filter(opt => availableSources.includes(opt.value))}
-          getOptionLabel={(option) => option.label}
-          value={{
-            value: selectedSource,
-            label: selectedSource === 'grafana' ? 'Grafana'
-              : selectedSource === 'dynatrace' ? 'Dynatrace'
-              : 'Performance Metrics'
-          }}
-          onChange={(_, newValue) => newValue && onSourceSelect(newValue.value)}
-          renderInput={(params) => (
-            <TextField
-              {...params}
-              label="Source"
-              variant="outlined"
-              fullWidth
-              helperText="Select data source for trends"
-            />
-          )}
-          renderOption={(props, option) => {
-            const { key, ...otherProps } = props;
-            return (
-              <Box component="li" key={key} {...otherProps}>
-                <Typography variant="body1">{option.label}</Typography>
-              </Box>
-            );
-          }}
-        />
-      )}
-
-      {/* Dashboard Selection */}
+      {/* Dashboard Selection - Grouped by source type */}
       <Autocomplete
-        options={filteredDashboards}
+        options={allDashboards}
         getOptionLabel={(option) => option.dashboard_label || ''}
         isOptionEqualToValue={(option, value) => option.id === value.id}
         value={selectedDashboard}
         onChange={(_, newValue) => {
-          if (selectedSource === 'dynatrace' && newValue) {
-            onDashboardSelect(newValue, newValue.dashboard_label, 'dynatrace');
+          if (newValue) {
+            const srcType = getSourceType(newValue);
+            const isDynatrace = srcType === 'dynatrace';
+            onDashboardSelect(
+              newValue,
+              isDynatrace ? newValue.dashboard_label : undefined,
+              undefined
+            );
           } else {
-            onDashboardSelect(newValue, undefined, selectedSource);
+            onDashboardSelect(null);
           }
         }}
-        loading={selectedSource === 'dynatrace' ? dynatraceDashboardsLoading : dashboardsLoading}
+        loading={isLoading}
+        groupBy={(option) => getSourceDisplayInfo(option).groupLabel}
+        renderGroup={(params) => {
+          const dashboardInGroup = allDashboards.find(
+            d => getSourceDisplayInfo(d).groupLabel === params.group
+          );
+          const color = dashboardInGroup
+            ? getSourceDisplayInfo(dashboardInGroup).color
+            : '#9E9E9E';
+          return (
+            <li key={params.key}>
+              <ListSubheader
+                sx={{
+                  fontWeight: 700,
+                  color,
+                  backgroundColor: 'background.paper',
+                  lineHeight: '36px',
+                }}
+              >
+                {params.group}
+              </ListSubheader>
+              <ul style={{ padding: 0 }}>{params.children}</ul>
+            </li>
+          );
+        }}
         renderInput={(params) => (
           <TextField
             {...params}
@@ -155,19 +149,15 @@ export function TrendsSelectionControls({
             variant="outlined"
             fullWidth
             helperText={
-              selectedSource === 'dynatrace'
-                ? (dynatraceDashboardsLoading
-                    ? 'Loading dashboards...'
-                    : `Select dashboard (${filteredDashboards.length} available)`)
-                : (dashboardsLoading
-                    ? 'Loading dashboards...'
-                    : `Select dashboard (${filteredDashboards.length} available)`)
+              isLoading
+                ? 'Loading dashboards...'
+                : `Select dashboard (${allDashboards.length} available)`
             }
             InputProps={{
               ...params.InputProps,
               endAdornment: (
                 <>
-                  {(selectedSource === 'dynatrace' ? dynatraceDashboardsLoading : dashboardsLoading) ? <CircularProgress size={20} /> : null}
+                  {isLoading ? <CircularProgress size={20} /> : null}
                   {params.InputProps.endAdornment}
                 </>
               ),
@@ -176,9 +166,11 @@ export function TrendsSelectionControls({
         )}
         renderOption={(props, option) => {
           const { key, ...otherProps } = props;
+          const { color } = getSourceDisplayInfo(option);
           return (
-            <Box component="li" key={option.id} {...otherProps}>
-              <Typography variant="body1">{option.dashboard_label}</Typography>
+            <Box component="li" key={option.id} {...otherProps} sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+              <Box aria-hidden="true" sx={{ width: 6, height: 6, borderRadius: '50%', bgcolor: color, flexShrink: 0 }} />
+              <Typography variant="body2">{option.dashboard_label}</Typography>
             </Box>
           );
         }}

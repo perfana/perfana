@@ -13,7 +13,7 @@ import {
 } from '../types';
 import { extractYAxisFormat, generateChartName, PERFORMANCE_METRICS_PANEL_UNITS } from '../utils';
 import { getFilteredDashboards, computeAvailableSources, determineSource } from '../utils';
-import { isDynatrace, isPerformanceTest } from '@/lib/metrics-source-utils';
+import { isDynatrace, isPerformanceTest, getSourceType } from '@/lib/metrics-source-utils';
 import { TestRun } from '@/types/test-runs';
 
 interface UseGraphsDataProps {
@@ -291,17 +291,24 @@ export function useGraphsData({ testRun, testRunId, graphsExpanded }: UseGraphsD
     setPanels([]);
     setMetrics([]);
 
-    const sourceToUse = source || selectedSource;
+    if (!dashboard) return;
 
-    if (sourceToUse === 'dynatrace' && dashboard) {
-      const dynatraceUid = `dynatrace-${dashboard.dashboard_label}`;
+    // Auto-determine source from the dashboard itself
+    const detectedSourceType = getSourceType(dashboard);
+    const sourceToUse = source || (
+      detectedSourceType === 'dynatrace' ? 'dynatrace' as DataSource :
+      detectedSourceType === 'performance_test' ? 'performance-metrics' as DataSource :
+      'grafana' as DataSource
+    );
+    setSelectedSource(sourceToUse);
+
+    if (sourceToUse === 'dynatrace') {
+      const dynatraceUid = dashboard.dashboard_uid || `dynatrace-${dashboard.dashboard_label}`;
       fetchDashboardPanels(dynatraceUid, dashboard);
-    } else if (sourceToUse === 'performance-metrics' && dashboard?.dashboard_uid) {
-      fetchDashboardPanels(dashboard.dashboard_uid, dashboard);
-    } else if (sourceToUse === 'grafana' && dashboard?.dashboard_uid) {
+    } else if (dashboard.dashboard_uid) {
       fetchDashboardPanels(dashboard.dashboard_uid, dashboard);
     }
-  }, [selectedSource, fetchDashboardPanels]);
+  }, [fetchDashboardPanels]);
 
   /**
    * Handle panel selection
@@ -487,7 +494,21 @@ export function useGraphsData({ testRun, testRunId, graphsExpanded }: UseGraphsD
   }, [addedSeries]);
 
   /**
-   * Get filtered dashboards based on selected source
+   * Get all dashboards merged (grafana + performance-test + dynatrace) for the grouped dropdown
+   */
+  const getAllDashboardsMerged = useCallback((): ApplicationDashboard[] => {
+    const dynatraceAsDashboards: ApplicationDashboard[] = dynatraceDashboards.map((d, index) => ({
+      id: `dynatrace-${index}`,
+      dashboard_label: d.dashboardLabel,
+      dashboard_name: d.dashboardLabel,
+      dashboard_uid: `dynatrace-${d.dashboardLabel}`,
+      source_type: 'dynatrace',
+    } as ApplicationDashboard));
+    return [...dashboards, ...dynatraceAsDashboards];
+  }, [dashboards, dynatraceDashboards]);
+
+  /**
+   * Get filtered dashboards based on selected source (kept for backward compatibility)
    */
   const getFilteredDashboardsList = useCallback(() => {
     return getFilteredDashboards(selectedSource, dashboards, dynatraceDashboards);
@@ -530,6 +551,7 @@ export function useGraphsData({ testRun, testRunId, graphsExpanded }: UseGraphsD
     fetchSeriesData,
 
     // Handlers
+    getAllDashboardsMerged,
     getFilteredDashboards: getFilteredDashboardsList,
     handleSourceSelect,
     handleDashboardSelect,

@@ -17,7 +17,7 @@ import {
 } from '../types';
 import { calculatePercentageDifference } from '../utils/compare-utils';
 import { TestRun } from '@/types/test-runs';
-import { isGrafana, isPerformanceTest } from '@/lib/metrics-source-utils';
+import { isGrafana, isPerformanceTest, getSourceType } from '@/lib/metrics-source-utils';
 
 interface UseCompareDataProps {
   testRun: TestRun | null;
@@ -361,7 +361,19 @@ export function useCompareData({ testRun, testRunId, compareExpanded }: UseCompa
     }
   }, [selectedTestRun, testRun, addedSeries]);
 
-  // Get dashboards filtered by selected source
+  // Get all dashboards merged for the grouped dropdown
+  const getAllDashboardsMerged = useCallback((): ApplicationDashboard[] => {
+    const dynatraceAsDashboards: ApplicationDashboard[] = dynatraceDashboards.map((d, index) => ({
+      id: `dynatrace-${index}`,
+      dashboard_label: d.dashboardLabel,
+      dashboard_name: d.dashboardLabel,
+      dashboard_uid: `dynatrace-${d.dashboardLabel}`,
+      source_type: 'dynatrace',
+    } as ApplicationDashboard));
+    return [...dashboards, ...dynatraceAsDashboards];
+  }, [dashboards, dynatraceDashboards]);
+
+  // Get dashboards filtered by selected source (kept for backward compatibility)
   const getFilteredDashboards = useCallback((): ApplicationDashboard[] => {
     if (selectedSource === 'grafana') {
       return dashboards.filter(d => isGrafana(d));
@@ -372,7 +384,8 @@ export function useCompareData({ testRun, testRunId, compareExpanded }: UseCompa
         id: `dynatrace-${index}`,
         dashboard_label: d.dashboardLabel,
         dashboard_name: d.dashboardLabel,
-        dashboard_uid: ''
+        dashboard_uid: `dynatrace-${d.dashboardLabel}`,
+        source_type: 'dynatrace',
       } as ApplicationDashboard));
     }
     return dashboards;
@@ -487,6 +500,7 @@ export function useCompareData({ testRun, testRunId, compareExpanded }: UseCompa
     fetchDynatraceMetricsList,
     fetchPanelMetrics,
     fetchMetricsComparison,
+    getAllDashboardsMerged,
     getFilteredDashboards,
   };
 }

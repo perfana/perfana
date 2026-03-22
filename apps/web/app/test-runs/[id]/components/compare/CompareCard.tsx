@@ -239,10 +239,8 @@ export default function CompareCard({
                 selectedTestRun={compareData.selectedTestRun}
                 onTestRunSelect={compareData.setSelectedTestRun}
                 selectedSource={compareData.selectedSource}
-                availableSources={compareData.availableSources}
-                onSourceSelect={compareHandlers.handleSourceSelect}
                 selectedDashboard={compareData.selectedDashboard}
-                filteredDashboards={compareData.getFilteredDashboards()}
+                allDashboards={compareData.getAllDashboardsMerged()}
                 dashboardsLoading={compareData.dashboardsLoading}
                 dynatraceDashboardsLoading={compareData.dynatraceDashboardsLoading}
                 onDashboardSelect={compareHandlers.handleDashboardSelect}

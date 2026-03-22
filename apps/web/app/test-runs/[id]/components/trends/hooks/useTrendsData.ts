@@ -14,7 +14,7 @@ import {
   TIME_RANGE_OPTIONS,
 } from '../types';
 import { TestRun } from '@/types/test-runs';
-import { isGrafana, isPerformanceTest } from '@/lib/metrics-source-utils';
+import { isGrafana, isPerformanceTest, getSourceType } from '@/lib/metrics-source-utils';
 
 interface UseTrendsDataProps {
   testRun: TestRun | null;
@@ -421,7 +421,19 @@ export function useTrendsData({ testRun, testRunId, trendsExpanded }: UseTrendsD
     }
   }, [testRun, oldestTestRunDate, oldestTestRunLoading, fetchOldestTestRunDate]);
 
-  // Filter dashboards by source type
+  // Get all dashboards merged for the grouped dropdown
+  const getAllDashboardsMerged = useCallback((): ApplicationDashboard[] => {
+    const dynatraceAsDashboards: ApplicationDashboard[] = dynatraceDashboards.map((d, index) => ({
+      id: `dynatrace-${index}`,
+      dashboard_label: d.dashboardLabel,
+      dashboard_name: d.dashboardLabel,
+      dashboard_uid: `dynatrace-${d.dashboardLabel}`,
+      source_type: 'dynatrace',
+    } as ApplicationDashboard));
+    return [...dashboards, ...dynatraceAsDashboards];
+  }, [dashboards, dynatraceDashboards]);
+
+  // Filter dashboards by source type (kept for backward compatibility)
   const getFilteredDashboards = useCallback((): ApplicationDashboard[] => {
     if (selectedSource === 'grafana') {
       return dashboards.filter(d => isGrafana(d));
@@ -432,7 +444,8 @@ export function useTrendsData({ testRun, testRunId, trendsExpanded }: UseTrendsD
         id: `dynatrace-${index}`,
         dashboard_label: d.dashboardLabel,
         dashboard_name: d.dashboardLabel,
-        dashboard_uid: ''
+        dashboard_uid: `dynatrace-${d.dashboardLabel}`,
+        source_type: 'dynatrace',
       } as ApplicationDashboard));
     }
   }, [selectedSource, dashboards, dynatraceDashboards]);
@@ -465,14 +478,24 @@ export function useTrendsData({ testRun, testRunId, trendsExpanded }: UseTrendsD
     setAvailableMetrics([]);
     setSelectedMetricNames([]);
 
-    const sourceToUse = source || selectedSource;
+    if (!dashboard) return;
 
-    if (sourceToUse === 'dynatrace' && dynatraceDashboardLabel) {
-      fetchDynatraceMetricsList(dynatraceDashboardLabel);
-    } else if ((sourceToUse === 'grafana' || sourceToUse === 'performance-metrics') && dashboard?.dashboard_uid) {
+    // Auto-determine source from the dashboard itself
+    const detectedSourceType = getSourceType(dashboard);
+    const sourceToUse = source || (
+      detectedSourceType === 'dynatrace' ? 'dynatrace' as DataSource :
+      detectedSourceType === 'performance_test' ? 'performance-metrics' as DataSource :
+      'grafana' as DataSource
+    );
+    setSelectedSource(sourceToUse);
+
+    if (sourceToUse === 'dynatrace') {
+      const label = dynatraceDashboardLabel || dashboard.dashboard_label;
+      fetchDynatraceMetricsList(label);
+    } else if (dashboard.dashboard_uid) {
       fetchDashboardPanels(dashboard.dashboard_uid);
     }
-  }, [selectedSource, fetchDynatraceMetricsList, fetchDashboardPanels]);
+  }, [fetchDynatraceMetricsList, fetchDashboardPanels]);
 
   // Handle metric (panel) selection
   const handleMetricSelect = useCallback((metric: Panel | null) => {
@@ -612,6 +635,7 @@ export function useTrendsData({ testRun, testRunId, trendsExpanded }: UseTrendsD
     fetchMetricsData,
 
     // Handlers
+    getAllDashboardsMerged,
     getFilteredDashboards,
     handleSourceSelect,
     handleDashboardSelect,

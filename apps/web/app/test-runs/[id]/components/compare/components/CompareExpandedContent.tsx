@@ -42,14 +42,12 @@ interface CompareExpandedContentProps {
   selectedTestRun: RelatedTestRun | null;
   onTestRunSelect: (testRun: RelatedTestRun | null) => void;
 
-  // Source selection
+  // Source selection (auto-detected from dashboard)
   selectedSource: DataSource;
-  availableSources: DataSource[];
-  onSourceSelect: (source: DataSource) => void;
 
   // Dashboard selection
   selectedDashboard: ApplicationDashboard | null;
-  filteredDashboards: ApplicationDashboard[];
+  allDashboards: ApplicationDashboard[];
   dashboardsLoading: boolean;
   dynatraceDashboardsLoading: boolean;
   onDashboardSelect: (dashboard: ApplicationDashboard | null, label?: string) => void;
@@ -107,10 +105,8 @@ export function CompareExpandedContent({
   selectedTestRun,
   onTestRunSelect,
   selectedSource,
-  availableSources,
-  onSourceSelect,
   selectedDashboard,
-  filteredDashboards,
+  allDashboards,
   dashboardsLoading,
   dynatraceDashboardsLoading,
   onDashboardSelect,
@@ -176,14 +172,12 @@ export function CompareExpandedContent({
             relatedTestRuns={relatedTestRuns}
             selectedTestRun={selectedTestRun}
             onTestRunSelect={onTestRunSelect}
-            selectedSource={selectedSource}
-            availableSources={availableSources}
-            onSourceSelect={onSourceSelect}
             selectedDashboard={selectedDashboard}
-            filteredDashboards={filteredDashboards}
+            allDashboards={allDashboards}
             dashboardsLoading={dashboardsLoading}
             dynatraceDashboardsLoading={dynatraceDashboardsLoading}
             onDashboardSelect={onDashboardSelect}
+            selectedSource={selectedSource}
             selectedMetric={selectedMetric}
             panels={panels}
             panelsLoading={panelsLoading}
