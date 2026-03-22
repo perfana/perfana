@@ -18,6 +18,7 @@ import { ProgressReporter } from '../services/ProgressReporter.js';
 import { MetricCollectionGapService } from '../services/MetricCollectionGapService.js';
 import { IncrementalMetricsPipeline } from '../pipelines/IncrementalMetricsPipeline.js';
 import { DynatracePipeline } from '../pipelines/DynatracePipeline.js';
+import { PanelsPipeline } from '../pipelines/PanelsPipeline.js';
 import { DataSanityCheckPipeline } from '../pipelines/DataSanityCheckPipeline.js';
 import { JobType } from '@perfana/shared/types';
 
@@ -432,6 +433,15 @@ export function simpleOrchestrateReevaluateBatchWorker() {
                 const errorMsg = err instanceof Error ? err.message : String(err);
                 logger.error(`    ❌ Force re-fetch failed for ${status.source_type}/${status.source_id ?? 'null'}: ${errorMsg}`);
               }
+            }
+
+            // After metrics collection, refresh panel documents so new dashboards are reflected
+            try {
+              const panelsPipeline = new PanelsPipeline(logger);
+              await panelsPipeline.execute({ testRunId });
+              logger.info(`    Panels refreshed for ${testRunId}`);
+            } catch (panelsErr) {
+              logger.warn(`    Panels refresh failed for ${testRunId}: ${panelsErr instanceof Error ? panelsErr.message : panelsErr}`);
             }
 
             if (testRunReceivedData) { testRunsWithNewData++; }
