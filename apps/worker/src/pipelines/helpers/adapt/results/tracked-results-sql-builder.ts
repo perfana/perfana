@@ -103,7 +103,7 @@ export class TrackedResultsSQLBuilder {
           FROM historical_regressions hr
           JOIN ds_metric_statistics ms ON (
               ms.test_run_id = hr.current_test_run_id
-              AND COALESCE(ms.metrics_source_id, ms.application_dashboard_id::text) = COALESCE(hr.application_dashboard_id::text)
+              AND COALESCE(ms.metrics_source_id, ms.application_dashboard_id) = hr.application_dashboard_id
               AND ms.panel_id = hr.panel_id
               AND ms.metric_name = hr.metric_name
           )
@@ -146,7 +146,7 @@ export class TrackedResultsSQLBuilder {
           FROM current_metrics cm
           LEFT JOIN ds_control_group_statistics cgs ON (
               cgs.control_group_id = cm.control_group_id
-              AND COALESCE(cgs.metrics_source_id, cgs.application_dashboard_id::text) = COALESCE(cm.metrics_source_id, cm.application_dashboard_id::text)
+              AND COALESCE(cgs.metrics_source_id, cgs.application_dashboard_id) = COALESCE(cm.metrics_source_id, cm.application_dashboard_id)
               AND cgs.panel_id::text = cm.panel_id
               AND cgs.metric_name = cm.metric_name
           )

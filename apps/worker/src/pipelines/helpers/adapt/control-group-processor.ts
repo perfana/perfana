@@ -102,7 +102,7 @@ export class ControlGroupProcessor {
           FROM ${testMetricsCte} tm
           LEFT JOIN ds_control_group_statistics cgs ON (
               cgs.control_group_id = tm.control_group_id
-              AND COALESCE(cgs.metrics_source_id, cgs.application_dashboard_id::text) = COALESCE(tm.metrics_source_id, tm.application_dashboard_id::text)
+              AND COALESCE(cgs.metrics_source_id, cgs.application_dashboard_id) = COALESCE(tm.metrics_source_id, tm.application_dashboard_id)
               AND cgs.panel_id::text = tm.panel_id
               AND cgs.metric_name = tm.metric_name
           )

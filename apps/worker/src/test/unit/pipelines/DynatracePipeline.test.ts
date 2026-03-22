@@ -1023,6 +1023,203 @@ describe('DynatracePipeline', () => {
     });
   });
 
+  describe('MetricsSource Behavior', () => {
+    it('should include metrics_source_id in ds_metrics INSERT statements', async () => {
+      // Arrange
+      const input = { testRunIds: ['test-run-123'] };
+      const mockQueries = [createMockQuery()];
+      const mockMetricsDoc = createMockMetricsDocument({
+        metricsSourceId: 'ms-uuid-123',
+        data: [
+          {
+            metricName: 'response_time',
+            time: new Date('2024-01-01T00:00:00Z'),
+            timestep: 60,
+            rampUp: false,
+            value: 100,
+            unit: 'ms',
+          },
+        ],
+      });
+
+      const capturedParams: any[][] = [];
+      const mockManager = {
+        query: vi.fn((sql: string, params: any[]) => {
+          capturedParams.push(params);
+          return Promise.resolve({ rows: [] });
+        }),
+      } as unknown as EntityManager;
+
+      mockDatabaseService.transaction.mockImplementation(async (callback) => {
+        return callback(mockManager);
+      });
+
+      mockQueryConstructor.constructQueriesFromDatabase.mockResolvedValue(mockQueries);
+      mockRepository.getDynatraceConfigById.mockResolvedValue(createMockDynatraceConfig());
+      mockAPIClient.executeBatchQueries.mockResolvedValue([
+        { tileId: 'tile-1', tileTitle: 'Panel', result: { records: [] }, error: null },
+      ]);
+      mockDataProcessor.processDynatraceResults.mockResolvedValue({
+        panelDocuments: [],
+        metricsDocuments: [mockMetricsDoc],
+      });
+
+      // Act
+      await pipeline.execute(input);
+
+      // Assert - metrics_source_id is the 3rd parameter ($3) in the ds_metrics INSERT
+      expect(capturedParams.length).toBeGreaterThan(0);
+      expect(capturedParams[0][2]).toBe('ms-uuid-123');
+    });
+
+    it('should pass null metrics_source_id when not provided', async () => {
+      // Arrange
+      const input = { testRunIds: ['test-run-123'] };
+      const mockQueries = [createMockQuery()];
+      const mockMetricsDoc = createMockMetricsDocument({
+        metricsSourceId: undefined,
+        data: [
+          {
+            metricName: 'response_time',
+            time: new Date('2024-01-01T00:00:00Z'),
+            timestep: 60,
+            rampUp: false,
+            value: 100,
+            unit: 'ms',
+          },
+        ],
+      });
+
+      const capturedParams: any[][] = [];
+      const mockManager = {
+        query: vi.fn((sql: string, params: any[]) => {
+          capturedParams.push(params);
+          return Promise.resolve({ rows: [] });
+        }),
+      } as unknown as EntityManager;
+
+      mockDatabaseService.transaction.mockImplementation(async (callback) => {
+        return callback(mockManager);
+      });
+
+      mockQueryConstructor.constructQueriesFromDatabase.mockResolvedValue(mockQueries);
+      mockRepository.getDynatraceConfigById.mockResolvedValue(createMockDynatraceConfig());
+      mockAPIClient.executeBatchQueries.mockResolvedValue([
+        { tileId: 'tile-1', tileTitle: 'Panel', result: { records: [] }, error: null },
+      ]);
+      mockDataProcessor.processDynatraceResults.mockResolvedValue({
+        panelDocuments: [],
+        metricsDocuments: [mockMetricsDoc],
+      });
+
+      // Act
+      await pipeline.execute(input);
+
+      // Assert - metrics_source_id should be null when not provided
+      expect(capturedParams.length).toBeGreaterThan(0);
+      expect(capturedParams[0][2]).toBeNull();
+    });
+
+    it('should include metrics_source_id in ds_panels INSERT statements', async () => {
+      // Arrange
+      const input = { testRunIds: ['test-run-123'] };
+      const mockQueries = [createMockQuery()];
+
+      // Spy on storePanelDocuments to capture the SQL
+      const capturedSQL: string[] = [];
+      const capturedParams: any[][] = [];
+      const mockManager = {
+        query: vi.fn((sql: string, params: any[]) => {
+          capturedSQL.push(sql);
+          capturedParams.push(params);
+          return Promise.resolve({ rows: [] });
+        }),
+      } as unknown as EntityManager;
+
+      mockDatabaseService.transaction.mockImplementation(async (callback) => {
+        return callback(mockManager);
+      });
+
+      // Call storePanelDocuments directly since execute() calls storeMetricsDocuments
+      const panelDoc = {
+        test_run_id: 'test-run-123',
+        application_dashboard_id: 'app-dash-uuid',
+        metrics_source_id: 'ms-uuid-456',
+        dashboard_uid: 'dynatrace-dql',
+        panel_id: 1,
+        panel_title: 'Response Time',
+        dashboard_label: 'Response Time',
+        panel: {},
+        query_variables: {},
+        datasource_type: 'dynatrace',
+        benchmark_ids: [],
+        requests: [],
+        errors: null,
+        warnings: null,
+      };
+
+      const testRun = createMockTestRun();
+
+      // Access private method
+      await (pipeline as any).storePanelDocuments([panelDoc], 'test-run-123', testRun);
+
+      // Assert - ds_panels INSERT should include metrics_source_id
+      const panelInsertSQL = capturedSQL.find(sql => sql.includes('ds_panels'));
+      expect(panelInsertSQL).toBeDefined();
+      expect(panelInsertSQL).toContain('metrics_source_id');
+      // metrics_source_id is the 3rd parameter ($3) in the ds_panels INSERT
+      const panelParams = capturedParams[0];
+      expect(panelParams[2]).toBe('ms-uuid-456');
+    });
+
+    it('should include metrics_source_id column in ds_metrics ON CONFLICT update', async () => {
+      // Arrange
+      const input = { testRunIds: ['test-run-123'] };
+      const mockQueries = [createMockQuery()];
+      const mockMetricsDoc = createMockMetricsDocument({
+        metricsSourceId: 'ms-uuid-789',
+        data: [
+          {
+            metricName: 'response_time',
+            time: new Date('2024-01-01T00:00:00Z'),
+            timestep: 60,
+            rampUp: false,
+            value: 100,
+            unit: 'ms',
+          },
+        ],
+      });
+
+      let capturedSQL = '';
+      const mockManager = {
+        query: vi.fn((sql: string) => {
+          capturedSQL = sql;
+          return Promise.resolve({ rows: [] });
+        }),
+      } as unknown as EntityManager;
+
+      mockDatabaseService.transaction.mockImplementation(async (callback) => {
+        return callback(mockManager);
+      });
+
+      mockQueryConstructor.constructQueriesFromDatabase.mockResolvedValue(mockQueries);
+      mockRepository.getDynatraceConfigById.mockResolvedValue(createMockDynatraceConfig());
+      mockAPIClient.executeBatchQueries.mockResolvedValue([
+        { tileId: 'tile-1', tileTitle: 'Panel', result: { records: [] }, error: null },
+      ]);
+      mockDataProcessor.processDynatraceResults.mockResolvedValue({
+        panelDocuments: [],
+        metricsDocuments: [mockMetricsDoc],
+      });
+
+      // Act
+      await pipeline.execute(input);
+
+      // Assert - ON CONFLICT clause should update metrics_source_id with COALESCE
+      expect(capturedSQL).toContain('metrics_source_id = COALESCE(EXCLUDED.metrics_source_id, ds_metrics.metrics_source_id)');
+    });
+  });
+
   describe('API Client Configuration', () => {
     it('should create API client with correct SaaS configuration', async () => {
       // Arrange
@@ -1079,5 +1276,112 @@ describe('DynatracePipeline', () => {
         })
       );
     });
+  });
+});
+
+describe('DynatraceDashboardManager - MetricsSource', () => {
+  let manager: any;
+  let mockDataSource: any;
+
+  beforeEach(async () => {
+    vi.clearAllMocks();
+
+    mockDataSource = {
+      query: vi.fn(),
+    };
+
+    // Dynamically import to avoid hoisted mock conflicts
+    const { DynatraceDashboardManager } = await import(
+      '../../../pipelines/helpers/dynatrace-dashboard-manager.js'
+    );
+    manager = new DynatraceDashboardManager(mockDataSource, mockLogger);
+  });
+
+  it('should return metricsSourceId in DashboardMetadata from getOrCreateDynatraceDashboard', async () => {
+    // Arrange
+    // 1st query: check if application_dashboard exists -> not found
+    mockDataSource.query
+      .mockResolvedValueOnce([]) // SELECT id FROM application_dashboards
+      .mockResolvedValueOnce([{ id: 'grafana-instance-uuid' }]) // SELECT id FROM grafana_instances
+      .mockResolvedValueOnce([]) // SELECT id FROM grafana_dashboards (check synthetic)
+      .mockResolvedValueOnce([{ id: 'grafana-dash-uuid' }]) // INSERT INTO grafana_dashboards RETURNING id
+      .mockResolvedValueOnce([]) // INSERT INTO application_dashboards
+      .mockResolvedValueOnce([{ id: 'metrics-source-uuid-1' }]); // INSERT INTO metrics_sources RETURNING id
+
+    // Act
+    const metadata = await manager.getOrCreateDynatraceDashboard(
+      'Response Time',
+      'ecommerce',
+      'acc',
+      'loadTest'
+    );
+
+    // Assert
+    expect(metadata.metricsSourceId).toBe('metrics-source-uuid-1');
+    expect(metadata.dashboardLabel).toBe('Response Time');
+    expect(metadata.dashboardId).toBeDefined();
+    expect(metadata.dashboardUid).toBeDefined();
+  });
+
+  it('should continue without metricsSourceId when upsertMetricsSource fails (non-blocking)', async () => {
+    // Arrange
+    mockDataSource.query
+      .mockResolvedValueOnce([]) // SELECT id FROM application_dashboards
+      .mockResolvedValueOnce([{ id: 'grafana-instance-uuid' }]) // SELECT id FROM grafana_instances
+      .mockResolvedValueOnce([]) // SELECT id FROM grafana_dashboards
+      .mockResolvedValueOnce([{ id: 'grafana-dash-uuid' }]) // INSERT INTO grafana_dashboards RETURNING id
+      .mockResolvedValueOnce([]) // INSERT INTO application_dashboards
+      .mockRejectedValueOnce(new Error('metrics_sources table does not exist')); // INSERT INTO metrics_sources FAILS
+
+    // Act
+    const metadata = await manager.getOrCreateDynatraceDashboard(
+      'Response Time',
+      'ecommerce',
+      'acc',
+      'loadTest'
+    );
+
+    // Assert - should succeed but metricsSourceId should be undefined
+    expect(metadata.metricsSourceId).toBeUndefined();
+    expect(metadata.dashboardLabel).toBe('Response Time');
+    expect(metadata.dashboardId).toBeDefined();
+    // Should have logged the error (non-blocking)
+    expect(mockLogger.error).toHaveBeenCalledWith(
+      expect.objectContaining({ err: expect.any(Error) }),
+      expect.stringContaining('MetricsSource dual-write failed')
+    );
+  });
+
+  it('should return cached metricsSourceId on subsequent calls', async () => {
+    // Arrange - first call creates the dashboard
+    mockDataSource.query
+      .mockResolvedValueOnce([]) // SELECT id FROM application_dashboards
+      .mockResolvedValueOnce([{ id: 'grafana-instance-uuid' }]) // SELECT id FROM grafana_instances
+      .mockResolvedValueOnce([]) // SELECT id FROM grafana_dashboards
+      .mockResolvedValueOnce([{ id: 'grafana-dash-uuid' }]) // INSERT INTO grafana_dashboards RETURNING id
+      .mockResolvedValueOnce([]) // INSERT INTO application_dashboards
+      .mockResolvedValueOnce([{ id: 'metrics-source-uuid-cached' }]); // INSERT INTO metrics_sources RETURNING id
+
+    // Act - first call populates cache
+    const metadata1 = await manager.getOrCreateDynatraceDashboard(
+      'Response Time',
+      'ecommerce',
+      'acc',
+      'loadTest'
+    );
+
+    // Act - second call should hit cache
+    const metadata2 = await manager.getOrCreateDynatraceDashboard(
+      'Response Time',
+      'ecommerce',
+      'acc',
+      'loadTest'
+    );
+
+    // Assert
+    expect(metadata1.metricsSourceId).toBe('metrics-source-uuid-cached');
+    expect(metadata2.metricsSourceId).toBe('metrics-source-uuid-cached');
+    // The dataSource.query should only be called for the first invocation (6 calls), not again
+    expect(mockDataSource.query).toHaveBeenCalledTimes(6);
   });
 });
