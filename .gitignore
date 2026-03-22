@@ -194,4 +194,4 @@ infra/grafana/dashboards
 infra/test_db
 infra/loadtest
 infra/jmeter
-infra/dynatrace-mock
+# infra/dynatrace-mock  # Now tracked — WireMock mappings for Dynatrace mock containers
