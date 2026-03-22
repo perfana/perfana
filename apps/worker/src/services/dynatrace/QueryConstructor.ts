@@ -65,6 +65,7 @@ export class QueryConstructor {
           visualization: 'timeseries',
           dashboardLabel: config.dashboardLabel,
           applicationDashboardId: config.applicationDashboardId,
+          metricsSourceId: config.metricsSourceId,
           querySettings: {},
           matchMetricPattern: config.matchMetricPattern,
           omitGroupByVariableFromMetricName: config.omitGroupByVariableFromMetricName || [],

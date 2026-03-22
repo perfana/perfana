@@ -1,6 +1,6 @@
 {
-    "description": "Golden-file: real ADAPT output for PerfanaWebshop-acc-loadTest-00005. Captured before Phase 3.6 SQL changes.",
-    "capturedAt": "2026-03-22T11:27:47.812842+00:00",
+    "description": "Golden-file: real ADAPT output for PerfanaWebshop-acc-loadTest-00005. Includes Grafana + Performance Test + Dynatrace sources.",
+    "capturedAt": "2026-03-22T12:59:41.121222+00:00",
     "testRunId": "PerfanaWebshop-acc-loadTest-00005",
     "controlGroupId": "PerfanaWebshop-acc-loadTest-00005",
     "controlGroupTestRuns": [
@@ -12,23 +12,23 @@
     "overallConclusion": {
         "conclusion": "REGRESSION",
         "details": {
-            "totalResults": 890,
+            "totalResults": 893,
             "differenceCount": 305,
             "regressionCount": 36,
             "improvementCount": 3,
-            "incomparableCount": 1,
+            "incomparableCount": 4,
             "noDifferenceCount": 545,
             "trackedRegressionCount": 0
         }
     },
-    "resultCount": 891,
+    "resultCount": 894,
     "conclusionLabelCounts": {
         "partial increase": 34,
         "increase": 123,
         "regression": 36,
         "improvement": 3,
         "partial improvement": 9,
-        "incomparable": 1,
+        "incomparable": 4,
         "partial regression": 112,
         "decrease": 17,
         "ignored": 1,
@@ -4308,12 +4308,12 @@
             "panel_title": "Transaction Throughput",
             "unit": "txn/s",
             "statistic": {
-                "diff": "-0.5131730706926724",
+                "diff": "-0.5131730706926725",
                 "name": "mean",
-                "test": "0.8852459016393442",
-                "absDiff": "0.5131730706926724",
+                "test": "0.8852459016393441",
+                "absDiff": "0.5131730706926725",
                 "control": "1.3984189723320166",
-                "pctDiff": "-0.3669666107553591"
+                "pctDiff": "-0.36696661075535913"
             },
             "thresholds": {
                 "lower": {
@@ -26149,6 +26149,158 @@
             "default_value": null
         },
         {
+            "application_dashboard_id": "1bfc9967-f08c-4ae3-8ba1-065a7df5d20d",
+            "panel_id": 1,
+            "metric_name": "HOST-123_afterburner-be_value",
+            "dashboard_uid": "dynatrace",
+            "dashboard_label": "Host: afterburner-be",
+            "panel_title": "CPU Usage",
+            "unit": null,
+            "statistic": {
+                "diff": null,
+                "name": "median",
+                "test": "50.35011012409003",
+                "absDiff": null,
+                "control": null,
+                "pctDiff": null
+            },
+            "thresholds": {
+                "lower": {},
+                "upper": {}
+            },
+            "checks": {
+                "abs": {
+                    "valid": false,
+                    "isDifference": false
+                },
+                "iqr": {
+                    "valid": false,
+                    "isDifference": false
+                },
+                "pct": {
+                    "valid": false,
+                    "isDifference": false
+                }
+            },
+            "conclusion": {
+                "label": "incomparable",
+                "valid": false,
+                "ignore": false,
+                "decrease": false,
+                "increase": false,
+                "allDifference": false,
+                "partialDifference": false
+            },
+            "compare_config": {
+                "ignore": false,
+                "source": "default",
+                "thresholds": {
+                    "aggregation": "median",
+                    "iqrThreshold": 2,
+                    "percentageThreshold": 0.15
+                },
+                "metricClassification": {
+                    "classification": "unclassified",
+                    "higherIsBetter": null
+                },
+                "defaultValueIfControlGroupMissing": null
+            },
+            "metric_classification": {
+                "classification": "unclassified",
+                "higherIsBetter": null
+            },
+            "is_constant": {
+                "test": false,
+                "control": null
+            },
+            "all_missing": {
+                "test": false,
+                "control": null
+            },
+            "exists_data": {
+                "test": true,
+                "control": false
+            },
+            "uses_default_value": false,
+            "default_value": null
+        },
+        {
+            "application_dashboard_id": "1bfc9967-f08c-4ae3-8ba1-065a7df5d20d",
+            "panel_id": 2,
+            "metric_name": "HOST-123_afterburner-be_value",
+            "dashboard_uid": "dynatrace",
+            "dashboard_label": "Host: afterburner-be",
+            "panel_title": "Response Time",
+            "unit": null,
+            "statistic": {
+                "diff": null,
+                "name": "median",
+                "test": "50.35011012409003",
+                "absDiff": null,
+                "control": null,
+                "pctDiff": null
+            },
+            "thresholds": {
+                "lower": {},
+                "upper": {}
+            },
+            "checks": {
+                "abs": {
+                    "valid": false,
+                    "isDifference": false
+                },
+                "iqr": {
+                    "valid": false,
+                    "isDifference": false
+                },
+                "pct": {
+                    "valid": false,
+                    "isDifference": false
+                }
+            },
+            "conclusion": {
+                "label": "incomparable",
+                "valid": false,
+                "ignore": false,
+                "decrease": false,
+                "increase": false,
+                "allDifference": false,
+                "partialDifference": false
+            },
+            "compare_config": {
+                "ignore": false,
+                "source": "default",
+                "thresholds": {
+                    "aggregation": "median",
+                    "iqrThreshold": 2,
+                    "percentageThreshold": 0.15
+                },
+                "metricClassification": {
+                    "classification": "unclassified",
+                    "higherIsBetter": null
+                },
+                "defaultValueIfControlGroupMissing": null
+            },
+            "metric_classification": {
+                "classification": "unclassified",
+                "higherIsBetter": null
+            },
+            "is_constant": {
+                "test": false,
+                "control": null
+            },
+            "all_missing": {
+                "test": false,
+                "control": null
+            },
+            "exists_data": {
+                "test": true,
+                "control": false
+            },
+            "uses_default_value": false,
+            "default_value": null
+        },
+        {
             "application_dashboard_id": "1ef6138b-7e45-4d9e-9f6c-8eb43d37dd4b",
             "panel_id": 1,
             "metric_name": "Usage",
@@ -26157,12 +26309,12 @@
             "panel_title": "CPU",
             "unit": "percent",
             "statistic": {
-                "diff": "-0.5879356227496704",
+                "diff": "-0.5879356227496713",
                 "name": "mean",
-                "test": "4.0790222947280785",
-                "absDiff": "0.5879356227496704",
+                "test": "4.079022294728078",
+                "absDiff": "0.5879356227496713",
                 "control": "4.666957917477749",
-                "pctDiff": "-0.12597834245469677"
+                "pctDiff": "-0.12597834245469697"
             },
             "thresholds": {
                 "lower": {
@@ -26682,12 +26834,12 @@
             "panel_title": "Acquire time",
             "unit": "s",
             "statistic": {
-                "diff": "3.9902164779186605e-05",
+                "diff": "3.990216477918666e-05",
                 "name": "mean",
-                "test": "0.0002474014242261708",
-                "absDiff": "3.9902164779186605e-05",
+                "test": "0.00024740142422617086",
+                "absDiff": "3.990216477918666e-05",
                 "control": "0.0002074992594469842",
-                "pctDiff": "0.19230027560354526"
+                "pctDiff": "0.1923002756035455"
             },
             "thresholds": {
                 "lower": {
@@ -27555,12 +27707,12 @@
             "panel_title": "Queries / second",
             "unit": "short",
             "statistic": {
-                "diff": "0.36257757173949856",
+                "diff": "0.3625775717394981",
                 "name": "mean",
-                "test": "1.8952743752555616",
-                "absDiff": "0.36257757173949856",
+                "test": "1.8952743752555612",
+                "absDiff": "0.3625775717394981",
                 "control": "1.532696803516063",
-                "pctDiff": "0.23656183721903262"
+                "pctDiff": "0.23656183721903234"
             },
             "thresholds": {
                 "lower": {
@@ -30810,12 +30962,12 @@
             "panel_title": "CPU",
             "unit": "percent",
             "statistic": {
-                "diff": "8.72212409920489",
+                "diff": "8.722124099204885",
                 "name": "mean",
-                "test": "15.03996224192137",
-                "absDiff": "8.72212409920489",
+                "test": "15.039962241921364",
+                "absDiff": "8.722124099204885",
                 "control": "6.317838142716479",
-                "pctDiff": "1.3805551681092358"
+                "pctDiff": "1.380555168109235"
             },
             "thresholds": {
                 "lower": {
@@ -31161,12 +31313,12 @@
             "panel_title": "HTTP connection pool in use",
             "unit": "percentunit",
             "statistic": {
-                "diff": "-0.0016737388024516747",
+                "diff": "-0.0016737388024516738",
                 "name": "mean",
-                "test": "0.0047619047619047615",
-                "absDiff": "0.0016737388024516747",
+                "test": "0.004761904761904762",
+                "absDiff": "0.0016737388024516738",
                 "control": "0.006435643564356436",
-                "pctDiff": "-0.2600732600732602"
+                "pctDiff": "-0.2600732600732601"
             },
             "thresholds": {
                 "lower": {
@@ -35775,12 +35927,12 @@
             "panel_title": "Transaction Throughput",
             "unit": "txn/s",
             "statistic": {
-                "diff": "-0.4674611098586112",
+                "diff": "-0.46746110985861133",
                 "name": "mean",
-                "test": "0.7934426229508198",
-                "absDiff": "0.4674611098586112",
+                "test": "0.7934426229508197",
+                "absDiff": "0.46746110985861133",
                 "control": "1.260903732809431",
-                "pctDiff": "-0.37073497182616544"
+                "pctDiff": "-0.3707349718261655"
             },
             "thresholds": {
                 "lower": {
@@ -73094,6 +73246,82 @@
             "default_value": null
         },
         {
+            "application_dashboard_id": "bb0cca73-2e3e-4b74-8d69-a8cda770bb1d",
+            "panel_id": 1,
+            "metric_name": "HOST-123_afterburner-be_value",
+            "dashboard_uid": "dynatrace",
+            "dashboard_label": "Host: afterburner-fe",
+            "panel_title": "CPU Usage",
+            "unit": null,
+            "statistic": {
+                "diff": null,
+                "name": "median",
+                "test": "50.35011012409003",
+                "absDiff": null,
+                "control": null,
+                "pctDiff": null
+            },
+            "thresholds": {
+                "lower": {},
+                "upper": {}
+            },
+            "checks": {
+                "abs": {
+                    "valid": false,
+                    "isDifference": false
+                },
+                "iqr": {
+                    "valid": false,
+                    "isDifference": false
+                },
+                "pct": {
+                    "valid": false,
+                    "isDifference": false
+                }
+            },
+            "conclusion": {
+                "label": "incomparable",
+                "valid": false,
+                "ignore": false,
+                "decrease": false,
+                "increase": false,
+                "allDifference": false,
+                "partialDifference": false
+            },
+            "compare_config": {
+                "ignore": false,
+                "source": "default",
+                "thresholds": {
+                    "aggregation": "median",
+                    "iqrThreshold": 2,
+                    "percentageThreshold": 0.15
+                },
+                "metricClassification": {
+                    "classification": "unclassified",
+                    "higherIsBetter": null
+                },
+                "defaultValueIfControlGroupMissing": null
+            },
+            "metric_classification": {
+                "classification": "unclassified",
+                "higherIsBetter": null
+            },
+            "is_constant": {
+                "test": false,
+                "control": null
+            },
+            "all_missing": {
+                "test": false,
+                "control": null
+            },
+            "exists_data": {
+                "test": true,
+                "control": false
+            },
+            "uses_default_value": false,
+            "default_value": null
+        },
+        {
             "application_dashboard_id": "c4eb544f-dec9-4d8c-8388-dda8d46f5c74",
             "panel_id": 32,
             "metric_name": "daemon",
@@ -74677,12 +74905,12 @@
             "panel_title": "Average JVM Heap % used",
             "unit": "percentunit",
             "statistic": {
-                "diff": "0.008007309006049623",
+                "diff": "0.008007309006049734",
                 "name": "mean",
-                "test": "0.7407536682159427",
-                "absDiff": "0.008007309006049623",
+                "test": "0.7407536682159428",
+                "absDiff": "0.008007309006049734",
                 "control": "0.7327463592098931",
-                "pctDiff": "0.010927804560753816"
+                "pctDiff": "0.010927804560753967"
             },
             "thresholds": {
                 "lower": {
@@ -74764,12 +74992,12 @@
             "panel_title": "Average JVM Non-Heap % used",
             "unit": "percentunit",
             "statistic": {
-                "diff": "0.0015462571812128179",
+                "diff": "0.001546257181212804",
                 "name": "mean",
-                "test": "0.1239185888916089",
-                "absDiff": "0.0015462571812128179",
+                "test": "0.12391858889160888",
+                "absDiff": "0.001546257181212804",
                 "control": "0.12237233171039608",
-                "pctDiff": "0.01263567637880889"
+                "pctDiff": "0.012635676378808778"
             },
             "thresholds": {
                 "lower": {
@@ -75112,12 +75340,12 @@
             "panel_title": "Young generation memory pool increase",
             "unit": "Bps",
             "statistic": {
-                "diff": "51640.87170417979",
+                "diff": "51640.871704180725",
                 "name": "mean",
-                "test": "4824848.307670292",
-                "absDiff": "51640.87170417979",
+                "test": "4824848.307670293",
+                "absDiff": "51640.871704180725",
                 "control": "4773207.435966113",
-                "pctDiff": "0.01081890372395423"
+                "pctDiff": "0.010818903723954424"
             },
             "thresholds": {
                 "lower": {
@@ -75199,12 +75427,12 @@
             "panel_title": "Average Pause Durations end of minor GC by cause",
             "unit": "s",
             "statistic": {
-                "diff": "-0.0010899487270155592",
+                "diff": "-0.0010899487270155574",
                 "name": "mean",
-                "test": "0.006357142857142857",
-                "absDiff": "0.0010899487270155592",
+                "test": "0.006357142857142859",
+                "absDiff": "0.0010899487270155574",
                 "control": "0.007447091584158416",
-                "pctDiff": "-0.1463589798377285"
+                "pctDiff": "-0.14635897983772825"
             },
             "thresholds": {
                 "lower": {
@@ -75286,12 +75514,12 @@
             "panel_title": "Maximum Pause Durations end of minor GC by cause",
             "unit": "s",
             "statistic": {
-                "diff": "-0.008747289014615732",
+                "diff": "-0.008747289014615734",
                 "name": "mean",
-                "test": "0.014619047619047624",
-                "absDiff": "0.008747289014615732",
+                "test": "0.014619047619047622",
+                "absDiff": "0.008747289014615734",
                 "control": "0.023366336633663356",
-                "pctDiff": "-0.3743543179983853"
+                "pctDiff": "-0.3743543179983854"
             },
             "thresholds": {
                 "lower": {
@@ -75373,12 +75601,12 @@
             "panel_title": "Average CodeHeap 'non-profiled nmethods' % in use",
             "unit": "percentunit",
             "statistic": {
-                "diff": "-0.000391366068884319",
+                "diff": "-0.0003913660688843468",
                 "name": "mean",
-                "test": "0.0799851810329917",
-                "absDiff": "0.000391366068884319",
+                "test": "0.07998518103299167",
+                "absDiff": "0.0003913660688843468",
                 "control": "0.08037654710187601",
-                "pctDiff": "-0.004869157521637109"
+                "pctDiff": "-0.004869157521637455"
             },
             "thresholds": {
                 "lower": {
@@ -76069,12 +76297,12 @@
             "panel_title": "Old generation memory pool increase",
             "unit": "Bps",
             "statistic": {
-                "diff": "-6400.167265075768",
+                "diff": "-6400.167265075797",
                 "name": "mean",
-                "test": "109928.01217431494",
-                "absDiff": "6400.167265075768",
+                "test": "109928.0121743149",
+                "absDiff": "6400.167265075797",
                 "control": "116328.1794393907",
-                "pctDiff": "-0.055018201917364166"
+                "pctDiff": "-0.055018201917364416"
             },
             "thresholds": {
                 "lower": {
@@ -76243,12 +76471,12 @@
             "panel_title": "Average JVM Non-Heap % used",
             "unit": "percentunit",
             "statistic": {
-                "diff": "-0.001025561604617281",
+                "diff": "-0.0010255616046172533",
                 "name": "mean",
-                "test": "0.1280835062387463",
-                "absDiff": "0.001025561604617281",
+                "test": "0.12808350623874631",
+                "absDiff": "0.0010255616046172533",
                 "control": "0.12910906784336357",
-                "pctDiff": "-0.007943373937619182"
+                "pctDiff": "-0.007943373937618969"
             },
             "thresholds": {
                 "lower": {
@@ -76330,12 +76558,12 @@
             "panel_title": "Average JVM Total % used",
             "unit": "percentunit",
             "statistic": {
-                "diff": "0.01792574290868787",
+                "diff": "0.017925742908687897",
                 "name": "mean",
-                "test": "0.18805896266202288",
-                "absDiff": "0.01792574290868787",
+                "test": "0.1880589626620229",
+                "absDiff": "0.017925742908687897",
                 "control": "0.170133219753335",
-                "pctDiff": "0.10536297928574577"
+                "pctDiff": "0.10536297928574594"
             },
             "thresholds": {
                 "lower": {
@@ -76504,12 +76732,12 @@
             "panel_title": "Collections end of minor GC by cause",
             "unit": "ops",
             "statistic": {
-                "diff": "0.1534025191280829",
+                "diff": "0.15340251912808284",
                 "name": "mean",
-                "test": "0.26320393571092027",
-                "absDiff": "0.1534025191280829",
+                "test": "0.2632039357109202",
+                "absDiff": "0.15340251912808284",
                 "control": "0.10980141658283737",
-                "pctDiff": "1.3970905285393251"
+                "pctDiff": "1.3970905285393247"
             },
             "thresholds": {
                 "lower": {
@@ -76591,12 +76819,12 @@
             "panel_title": "Young generation memory pool increase",
             "unit": "Bps",
             "statistic": {
-                "diff": "9651087.924690913",
+                "diff": "9651087.92469091",
                 "name": "mean",
-                "test": "14494285.03011072",
-                "absDiff": "9651087.924690913",
+                "test": "14494285.030110717",
+                "absDiff": "9651087.92469091",
                 "control": "4843197.105419807",
-                "pctDiff": "1.9927101281694295"
+                "pctDiff": "1.9927101281694286"
             },
             "thresholds": {
                 "lower": {
@@ -76765,12 +76993,12 @@
             "panel_title": "Maximum Pause Durations end of minor GC by cause",
             "unit": "s",
             "statistic": {
-                "diff": "-0.006200848656294196",
+                "diff": "-0.0062008486562942",
                 "name": "mean",
-                "test": "0.015571428571428578",
-                "absDiff": "0.006200848656294196",
+                "test": "0.015571428571428575",
+                "absDiff": "0.0062008486562942",
                 "control": "0.021772277227722774",
-                "pctDiff": "-0.28480478139413995"
+                "pctDiff": "-0.2848047813941401"
             },
             "thresholds": {
                 "lower": {
@@ -76852,12 +77080,12 @@
             "panel_title": "Average CodeHeap 'non-profiled nmethods' % in use",
             "unit": "percentunit",
             "statistic": {
-                "diff": "-0.011495395774635514",
+                "diff": "-0.011495395774635472",
                 "name": "mean",
-                "test": "0.09276720951968376",
-                "absDiff": "0.011495395774635514",
+                "test": "0.0927672095196838",
+                "absDiff": "0.011495395774635472",
                 "control": "0.10426260529431927",
-                "pctDiff": "-0.11025425407494434"
+                "pctDiff": "-0.11025425407494394"
             },
             "thresholds": {
                 "lower": {
@@ -76939,12 +77167,12 @@
             "panel_title": "Average CodeHeap 'profiled nmethods' % in use",
             "unit": "percentunit",
             "statistic": {
-                "diff": "-0.006607807892749951",
+                "diff": "-0.006607807892750006",
                 "name": "mean",
-                "test": "0.2759394121884958",
-                "absDiff": "0.006607807892749951",
+                "test": "0.27593941218849577",
+                "absDiff": "0.006607807892750006",
                 "control": "0.2825472200812458",
-                "pctDiff": "-0.02338656133601276"
+                "pctDiff": "-0.023386561336012957"
             },
             "thresholds": {
                 "lower": {
@@ -77623,12 +77851,12 @@
             "panel_title": "Old generation memory pool increase",
             "unit": "Bps",
             "statistic": {
-                "diff": "328757.14402508485",
+                "diff": "328757.1440250848",
                 "name": "mean",
-                "test": "358852.3533492652",
-                "absDiff": "328757.14402508485",
+                "test": "358852.3533492651",
+                "absDiff": "328757.1440250848",
                 "control": "30095.209324180327",
-                "pctDiff": "10.923902887126335"
+                "pctDiff": "10.923902887126333"
             },
             "thresholds": {
                 "lower": {

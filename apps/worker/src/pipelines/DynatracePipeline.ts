@@ -273,6 +273,7 @@ export class DynatracePipeline extends BasePipelineTypeORM {
         omitGroupByVariableFromMetricName: queryConfig.omitGroupByVariableFromMetricName || [],
         dashboardLabel: queryConfig.dashboardLabel,
         applicationDashboardId: queryConfig.applicationDashboardId,
+        metricsSourceId: queryConfig.metricsSourceId,
         panelId: queryConfig.panelId,
         metricName: queryConfig.metricName,  // Explicit metric name (e.g., "CPU Usage")
         result: result.result,

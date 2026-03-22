@@ -20,6 +20,7 @@ export interface DynatraceQueryConfigFromDb {
   omitGroupByVariableFromMetricName?: string[];
   templateVariables?: Record<string, any>;
   applicationDashboardId: string;
+  metricsSourceId?: string;
   panelId?: number | null;
   metricUnit?: string | null;
   metricName?: string | null;  // Explicit metric name for storage (e.g., "CPU Usage")
@@ -46,6 +47,7 @@ export interface DynatraceQueryConfig {
   visualization: string;
   dashboardLabel: string;
   applicationDashboardId: string;
+  metricsSourceId?: string;
   querySettings: Record<string, any>;
   matchMetricPattern?: string | null;
   omitGroupByVariableFromMetricName?: string[];
@@ -64,6 +66,7 @@ export interface DynatraceQueryResult {
   omitGroupByVariableFromMetricName?: string[];
   dashboardLabel: string;
   applicationDashboardId: string;
+  metricsSourceId?: string;
   panelId?: number | null;
   metricName?: string | null;  // Explicit metric name for storage (e.g., "CPU Usage")
   result: any;

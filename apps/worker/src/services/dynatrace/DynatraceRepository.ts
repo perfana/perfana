@@ -29,35 +29,37 @@ export class DynatraceRepository {
   ): Promise<DynatraceQueryConfigFromDb[]> {
     let query = `
       SELECT
-        id,
-        system_under_test_id as "systemUnderTestId",
-        test_environment as "testEnvironment",
-        workload,
-        dashboard_label as "dashboardLabel",
-        panel_title as "panelTitle",
-        query,
-        match_metric_pattern as "matchMetricPattern",
-        omit_group_by_variable_from_metric_name as "omitGroupByVariableFromMetricName",
-        template_variables as "templateVariables",
-        application_dashboard_id as "applicationDashboardId",
-        panel_id as "panelId",
-        metric_unit as "metricUnit",
-        metric_name as "metricName",
-        dynatrace_config_id as "dynatraceConfigId"
-      FROM dynatrace_queries
-      WHERE system_under_test_id = $1
-        AND test_environment = $2
-        AND workload = $3
+        dq.id,
+        dq.system_under_test_id as "systemUnderTestId",
+        dq.test_environment as "testEnvironment",
+        dq.workload,
+        dq.dashboard_label as "dashboardLabel",
+        dq.panel_title as "panelTitle",
+        dq.query,
+        dq.match_metric_pattern as "matchMetricPattern",
+        dq.omit_group_by_variable_from_metric_name as "omitGroupByVariableFromMetricName",
+        dq.template_variables as "templateVariables",
+        dq.application_dashboard_id as "applicationDashboardId",
+        COALESCE(dq.metrics_source_id, ad.metrics_source_id)::text as "metricsSourceId",
+        dq.panel_id as "panelId",
+        dq.metric_unit as "metricUnit",
+        dq.metric_name as "metricName",
+        dq.dynatrace_config_id as "dynatraceConfigId"
+      FROM dynatrace_queries dq
+      LEFT JOIN application_dashboards ad ON ad.id = dq.application_dashboard_id
+      WHERE dq.system_under_test_id = $1
+        AND dq.test_environment = $2
+        AND dq.workload = $3
     `;
 
     const params: any[] = [systemUnderTestId, testEnvironment, workload];
 
     if (dashboardLabel) {
-      query += ' AND dashboard_label = $4';
+      query += ' AND dq.dashboard_label = $4';
       params.push(dashboardLabel);
     }
 
-    query += ' ORDER BY created_at DESC';
+    query += ' ORDER BY dq.created_at DESC';
 
     const result = await this.db.query(query, params);
 
