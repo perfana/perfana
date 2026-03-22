@@ -1,6 +1,6 @@
 {
     "description": "Golden-file: real ADAPT output for PerfanaWebshop-acc-loadTest-00005. Captured before Phase 3.6 SQL changes.",
-    "capturedAt": "2026-03-22T09:51:11.517475+00:00",
+    "capturedAt": "2026-03-22T11:27:47.812842+00:00",
     "testRunId": "PerfanaWebshop-acc-loadTest-00005",
     "controlGroupId": "PerfanaWebshop-acc-loadTest-00005",
     "controlGroupTestRuns": [
@@ -26,8 +26,8 @@
         "partial increase": 34,
         "increase": 123,
         "regression": 36,
-        "partial improvement": 9,
         "improvement": 3,
+        "partial improvement": 9,
         "incomparable": 1,
         "partial regression": 112,
         "decrease": 17,
@@ -3699,27 +3699,27 @@
             "panel_title": "Transaction Throughput",
             "unit": "txn/s",
             "statistic": {
-                "diff": "-0.40000000000000024",
+                "diff": "-0.4000000000000006",
                 "name": "mean",
                 "test": "0.2000000000000001",
-                "absDiff": "0.40000000000000024",
-                "control": "0.6000000000000003",
-                "pctDiff": "-0.6666666666666667"
+                "absDiff": "0.4000000000000006",
+                "control": "0.6000000000000006",
+                "pctDiff": "-0.666666666666667"
             },
             "thresholds": {
                 "lower": {
                     "abs": null,
-                    "iqr": -0.9978252113822024,
-                    "pct": 0.5100000000000002,
-                    "overall": -0.9978252113822024,
-                    "constant": 0.6000000000000003
+                    "iqr": -0.997825211382202,
+                    "pct": 0.5100000000000006,
+                    "overall": -0.997825211382202,
+                    "constant": 0.6000000000000006
                 },
                 "upper": {
                     "abs": null,
                     "iqr": 2.197825211382203,
-                    "pct": 0.6900000000000003,
+                    "pct": 0.6900000000000007,
                     "overall": 2.197825211382203,
-                    "constant": 0.6000000000000003
+                    "constant": 0.6000000000000006
                 }
             },
             "checks": {
@@ -3873,27 +3873,27 @@
             "panel_title": "Transaction Throughput",
             "unit": "txn/s",
             "statistic": {
-                "diff": "-0.39768786127167766",
+                "diff": "-0.3976878612716769",
                 "name": "mean",
                 "test": "0.2000000000000001",
-                "absDiff": "0.39768786127167766",
-                "control": "0.5976878612716777",
-                "pctDiff": "-0.6653771760154745"
+                "absDiff": "0.3976878612716769",
+                "control": "0.597687861271677",
+                "pctDiff": "-0.6653771760154742"
             },
             "thresholds": {
                 "lower": {
                     "abs": null,
-                    "iqr": -1.000137350110525,
-                    "pct": 0.5080346820809261,
-                    "overall": -1.000137350110525,
-                    "constant": 0.5976878612716777
+                    "iqr": -1.0001373501105257,
+                    "pct": 0.5080346820809254,
+                    "overall": -1.0001373501105257,
+                    "constant": 0.597687861271677
                 },
                 "upper": {
                     "abs": null,
-                    "iqr": 2.1955130726538803,
-                    "pct": 0.6873410404624293,
-                    "overall": 2.1955130726538803,
-                    "constant": 0.5976878612716777
+                    "iqr": 2.1955130726538794,
+                    "pct": 0.6873410404624284,
+                    "overall": 2.1955130726538794,
+                    "constant": 0.597687861271677
                 }
             },
             "checks": {
@@ -4047,27 +4047,27 @@
             "panel_title": "Transaction Throughput",
             "unit": "txn/s",
             "statistic": {
-                "diff": "-0.40000000000000063",
+                "diff": "-0.4000000000000013",
                 "name": "mean",
                 "test": "0.20000000000000012",
-                "absDiff": "0.40000000000000063",
-                "control": "0.6000000000000008",
-                "pctDiff": "-0.6666666666666669"
+                "absDiff": "0.4000000000000013",
+                "control": "0.6000000000000014",
+                "pctDiff": "-0.6666666666666673"
             },
             "thresholds": {
                 "lower": {
                     "abs": null,
-                    "iqr": -0.9978252113822019,
-                    "pct": 0.5100000000000007,
-                    "overall": -0.9978252113822019,
-                    "constant": 0.6000000000000008
+                    "iqr": -0.9978252113822013,
+                    "pct": 0.5100000000000012,
+                    "overall": -0.9978252113822013,
+                    "constant": 0.6000000000000014
                 },
                 "upper": {
                     "abs": null,
-                    "iqr": 2.197825211382203,
-                    "pct": 0.6900000000000008,
-                    "overall": 2.197825211382203,
-                    "constant": 0.6000000000000008
+                    "iqr": 2.197825211382204,
+                    "pct": 0.6900000000000016,
+                    "overall": 2.197825211382204,
+                    "constant": 0.6000000000000014
                 }
             },
             "checks": {
@@ -4134,27 +4134,27 @@
             "panel_title": "Transaction Throughput",
             "unit": "txn/s",
             "statistic": {
-                "diff": "-0.4012820512820516",
+                "diff": "-0.4012820512820519",
                 "name": "mean",
                 "test": "0.20000000000000012",
-                "absDiff": "0.4012820512820516",
-                "control": "0.6012820512820517",
-                "pctDiff": "-0.6673773987206824"
+                "absDiff": "0.4012820512820519",
+                "control": "0.601282051282052",
+                "pctDiff": "-0.6673773987206825"
             },
             "thresholds": {
                 "lower": {
                     "abs": null,
-                    "iqr": -0.996543160100151,
-                    "pct": 0.5110897435897439,
-                    "overall": -0.996543160100151,
-                    "constant": 0.6012820512820517
+                    "iqr": -0.9965431601001506,
+                    "pct": 0.5110897435897442,
+                    "overall": -0.9965431601001506,
+                    "constant": 0.601282051282052
                 },
                 "upper": {
                     "abs": null,
                     "iqr": 2.1991072626642545,
-                    "pct": 0.6914743589743594,
+                    "pct": 0.6914743589743598,
                     "overall": 2.1991072626642545,
-                    "constant": 0.6012820512820517
+                    "constant": 0.601282051282052
                 }
             },
             "checks": {
@@ -4221,27 +4221,27 @@
             "panel_title": "Transaction Throughput",
             "unit": "txn/s",
             "statistic": {
-                "diff": "-0.4000000000000011",
+                "diff": "-0.4000000000000005",
                 "name": "mean",
                 "test": "0.20000000000000012",
-                "absDiff": "0.4000000000000011",
-                "control": "0.6000000000000012",
-                "pctDiff": "-0.6666666666666671"
+                "absDiff": "0.4000000000000005",
+                "control": "0.6000000000000006",
+                "pctDiff": "-0.6666666666666669"
             },
             "thresholds": {
                 "lower": {
                     "abs": null,
-                    "iqr": -0.9978252113822015,
-                    "pct": 0.510000000000001,
-                    "overall": -0.9978252113822015,
-                    "constant": 0.6000000000000012
+                    "iqr": -0.997825211382202,
+                    "pct": 0.5100000000000006,
+                    "overall": -0.997825211382202,
+                    "constant": 0.6000000000000006
                 },
                 "upper": {
                     "abs": null,
-                    "iqr": 2.197825211382204,
-                    "pct": 0.6900000000000013,
-                    "overall": 2.197825211382204,
-                    "constant": 0.6000000000000012
+                    "iqr": 2.197825211382203,
+                    "pct": 0.6900000000000007,
+                    "overall": 2.197825211382203,
+                    "constant": 0.6000000000000006
                 }
             },
             "checks": {
@@ -15792,27 +15792,27 @@
             "panel_title": "Request Throughput",
             "unit": "req/s",
             "statistic": {
-                "diff": "-0.3848648648648655",
+                "diff": "-0.38486486486486626",
                 "name": "mean",
                 "test": "0.2000000000000001",
-                "absDiff": "0.3848648648648655",
-                "control": "0.5848648648648656",
-                "pctDiff": "-0.6580406654343811"
+                "absDiff": "0.38486486486486626",
+                "control": "0.5848648648648663",
+                "pctDiff": "-0.6580406654343816"
             },
             "thresholds": {
                 "lower": {
                     "abs": null,
-                    "iqr": -1.0129603465173371,
-                    "pct": 0.4971351351351357,
-                    "overall": -1.0129603465173371,
-                    "constant": 0.5848648648648656
+                    "iqr": -1.0129603465173362,
+                    "pct": 0.49713513513513635,
+                    "overall": -1.0129603465173362,
+                    "constant": 0.5848648648648663
                 },
                 "upper": {
                     "abs": null,
-                    "iqr": 2.1826900762470682,
-                    "pct": 0.6725945945945954,
-                    "overall": 2.1826900762470682,
-                    "constant": 0.5848648648648656
+                    "iqr": 2.182690076247069,
+                    "pct": 0.6725945945945963,
+                    "overall": 2.182690076247069,
+                    "constant": 0.5848648648648663
                 }
             },
             "checks": {
@@ -15879,27 +15879,27 @@
             "panel_title": "Request Throughput",
             "unit": "req/s",
             "statistic": {
-                "diff": "-0.3999999999999997",
+                "diff": "-0.4000000000000006",
                 "name": "mean",
                 "test": "0.2000000000000001",
-                "absDiff": "0.3999999999999997",
-                "control": "0.5999999999999998",
-                "pctDiff": "-0.6666666666666664"
+                "absDiff": "0.4000000000000006",
+                "control": "0.6000000000000006",
+                "pctDiff": "-0.666666666666667"
             },
             "thresholds": {
                 "lower": {
                     "abs": null,
-                    "iqr": -0.9978252113822029,
-                    "pct": 0.5099999999999998,
-                    "overall": -0.9978252113822029,
-                    "constant": 0.5999999999999998
+                    "iqr": -0.997825211382202,
+                    "pct": 0.5100000000000006,
+                    "overall": -0.997825211382202,
+                    "constant": 0.6000000000000006
                 },
                 "upper": {
                     "abs": null,
-                    "iqr": 2.1978252113822023,
-                    "pct": 0.6899999999999996,
-                    "overall": 2.1978252113822023,
-                    "constant": 0.5999999999999998
+                    "iqr": 2.197825211382203,
+                    "pct": 0.6900000000000007,
+                    "overall": 2.197825211382203,
+                    "constant": 0.6000000000000006
                 }
             },
             "checks": {
@@ -15966,27 +15966,27 @@
             "panel_title": "Request Throughput",
             "unit": "req/s",
             "statistic": {
-                "diff": "-0.38882681564245947",
+                "diff": "-0.3888268156424588",
                 "name": "mean",
                 "test": "0.2000000000000001",
-                "absDiff": "0.38882681564245947",
-                "control": "0.5888268156424595",
-                "pctDiff": "-0.6603415559772303"
+                "absDiff": "0.3888268156424588",
+                "control": "0.5888268156424589",
+                "pctDiff": "-0.6603415559772299"
             },
             "thresholds": {
                 "lower": {
                     "abs": null,
-                    "iqr": -1.0089983957397433,
-                    "pct": 0.5005027932960906,
-                    "overall": -1.0089983957397433,
-                    "constant": 0.5888268156424595
+                    "iqr": -1.0089983957397437,
+                    "pct": 0.50050279329609,
+                    "overall": -1.0089983957397437,
+                    "constant": 0.5888268156424589
                 },
                 "upper": {
                     "abs": null,
-                    "iqr": 2.186652027024662,
-                    "pct": 0.6771508379888284,
-                    "overall": 2.186652027024662,
-                    "constant": 0.5888268156424595
+                    "iqr": 2.1866520270246617,
+                    "pct": 0.6771508379888277,
+                    "overall": 2.1866520270246617,
+                    "constant": 0.5888268156424589
                 }
             },
             "checks": {
@@ -16227,27 +16227,27 @@
             "panel_title": "Request Throughput",
             "unit": "req/s",
             "statistic": {
-                "diff": "-0.37701149425287417",
+                "diff": "-0.3770114942528743",
                 "name": "mean",
                 "test": "0.2000000000000001",
-                "absDiff": "0.37701149425287417",
-                "control": "0.5770114942528742",
+                "absDiff": "0.3770114942528743",
+                "control": "0.5770114942528743",
                 "pctDiff": "-0.6533864541832672"
             },
             "thresholds": {
                 "lower": {
                     "abs": null,
                     "iqr": -1.0208137171293283,
-                    "pct": 0.49045977011494307,
+                    "pct": 0.4904597701149432,
                     "overall": -1.0208137171293283,
-                    "constant": 0.5770114942528742
+                    "constant": 0.5770114942528743
                 },
                 "upper": {
                     "abs": null,
                     "iqr": 2.174836705635077,
-                    "pct": 0.6635632183908053,
+                    "pct": 0.6635632183908055,
                     "overall": 2.174836705635077,
-                    "constant": 0.5770114942528742
+                    "constant": 0.5770114942528743
                 }
             },
             "checks": {
@@ -16314,27 +16314,27 @@
             "panel_title": "Request Throughput",
             "unit": "req/s",
             "statistic": {
-                "diff": "-0.3954022988505743",
+                "diff": "-0.3954022988505761",
                 "name": "mean",
                 "test": "0.2000000000000001",
-                "absDiff": "0.3954022988505743",
-                "control": "0.5954022988505744",
-                "pctDiff": "-0.6640926640926638"
+                "absDiff": "0.3954022988505761",
+                "control": "0.5954022988505762",
+                "pctDiff": "-0.6640926640926648"
             },
             "thresholds": {
                 "lower": {
                     "abs": null,
-                    "iqr": -1.0024229125316282,
-                    "pct": 0.5060919540229882,
-                    "overall": -1.0024229125316282,
-                    "constant": 0.5954022988505744
+                    "iqr": -1.0024229125316264,
+                    "pct": 0.5060919540229897,
+                    "overall": -1.0024229125316264,
+                    "constant": 0.5954022988505762
                 },
                 "upper": {
                     "abs": null,
-                    "iqr": 2.193227510232777,
-                    "pct": 0.6847126436781605,
-                    "overall": 2.193227510232777,
-                    "constant": 0.5954022988505744
+                    "iqr": 2.193227510232779,
+                    "pct": 0.6847126436781625,
+                    "overall": 2.193227510232779,
+                    "constant": 0.5954022988505762
                 }
             },
             "checks": {
@@ -16401,27 +16401,27 @@
             "panel_title": "Request Throughput",
             "unit": "req/s",
             "statistic": {
-                "diff": "-0.3654320987654336",
+                "diff": "-0.3654320987654328",
                 "name": "mean",
                 "test": "0.2000000000000001",
-                "absDiff": "0.3654320987654336",
-                "control": "0.5654320987654337",
-                "pctDiff": "-0.6462882096069877"
+                "absDiff": "0.3654320987654328",
+                "control": "0.5654320987654329",
+                "pctDiff": "-0.6462882096069873"
             },
             "thresholds": {
                 "lower": {
                     "abs": null,
-                    "iqr": -1.0323931126167691,
-                    "pct": 0.4806172839506186,
-                    "overall": -1.0323931126167691,
-                    "constant": 0.5654320987654337
+                    "iqr": -1.0323931126167698,
+                    "pct": 0.4806172839506179,
+                    "overall": -1.0323931126167698,
+                    "constant": 0.5654320987654329
                 },
                 "upper": {
                     "abs": null,
-                    "iqr": 2.1632573101476362,
-                    "pct": 0.6502469135802487,
-                    "overall": 2.1632573101476362,
-                    "constant": 0.5654320987654337
+                    "iqr": 2.1632573101476353,
+                    "pct": 0.6502469135802478,
+                    "overall": 2.1632573101476353,
+                    "constant": 0.5654320987654329
                 }
             },
             "checks": {
@@ -16488,27 +16488,27 @@
             "panel_title": "Request Throughput",
             "unit": "req/s",
             "statistic": {
-                "diff": "-0.3858823529411779",
+                "diff": "-0.3858823529411771",
                 "name": "mean",
                 "test": "0.2000000000000001",
-                "absDiff": "0.3858823529411779",
-                "control": "0.585882352941178",
-                "pctDiff": "-0.6586345381526112"
+                "absDiff": "0.3858823529411771",
+                "control": "0.5858823529411772",
+                "pctDiff": "-0.6586345381526107"
             },
             "thresholds": {
                 "lower": {
                     "abs": null,
-                    "iqr": -1.0119428584410248,
-                    "pct": 0.4980000000000013,
-                    "overall": -1.0119428584410248,
-                    "constant": 0.585882352941178
+                    "iqr": -1.0119428584410255,
+                    "pct": 0.4980000000000006,
+                    "overall": -1.0119428584410255,
+                    "constant": 0.5858823529411772
                 },
                 "upper": {
                     "abs": null,
-                    "iqr": 2.1837075643233805,
-                    "pct": 0.6737647058823546,
-                    "overall": 2.1837075643233805,
-                    "constant": 0.585882352941178
+                    "iqr": 2.18370756432338,
+                    "pct": 0.6737647058823537,
+                    "overall": 2.18370756432338,
+                    "constant": 0.5858823529411772
                 }
             },
             "checks": {
@@ -16575,27 +16575,27 @@
             "panel_title": "Request Throughput",
             "unit": "req/s",
             "statistic": {
-                "diff": "-0.3544303797468361",
+                "diff": "-0.354430379746837",
                 "name": "mean",
                 "test": "0.2000000000000001",
-                "absDiff": "0.3544303797468361",
-                "control": "0.5544303797468362",
-                "pctDiff": "-0.6392694063926945"
+                "absDiff": "0.354430379746837",
+                "control": "0.5544303797468371",
+                "pctDiff": "-0.639269406392695"
             },
             "thresholds": {
                 "lower": {
                     "abs": null,
-                    "iqr": -1.0433948316353665,
-                    "pct": 0.4712658227848107,
-                    "overall": -1.0433948316353665,
-                    "constant": 0.5544303797468362
+                    "iqr": -1.0433948316353656,
+                    "pct": 0.4712658227848115,
+                    "overall": -1.0433948316353656,
+                    "constant": 0.5544303797468371
                 },
                 "upper": {
                     "abs": null,
-                    "iqr": 2.152255591129039,
-                    "pct": 0.6375949367088616,
-                    "overall": 2.152255591129039,
-                    "constant": 0.5544303797468362
+                    "iqr": 2.1522555911290397,
+                    "pct": 0.6375949367088626,
+                    "overall": 2.1522555911290397,
+                    "constant": 0.5544303797468371
                 }
             },
             "checks": {
@@ -16749,27 +16749,27 @@
             "panel_title": "Request Throughput",
             "unit": "req/s",
             "statistic": {
-                "diff": "-0.3404255319148932",
+                "diff": "-0.34042553191489433",
                 "name": "mean",
                 "test": "0.2000000000000001",
-                "absDiff": "0.3404255319148932",
-                "control": "0.5404255319148933",
-                "pctDiff": "-0.6299212598425193"
+                "absDiff": "0.34042553191489433",
+                "control": "0.5404255319148944",
+                "pctDiff": "-0.6299212598425201"
             },
             "thresholds": {
                 "lower": {
                     "abs": null,
-                    "iqr": -1.0573996794673093,
-                    "pct": 0.45936170212765925,
-                    "overall": -1.0573996794673093,
-                    "constant": 0.5404255319148933
+                    "iqr": -1.0573996794673084,
+                    "pct": 0.4593617021276602,
+                    "overall": -1.0573996794673084,
+                    "constant": 0.5404255319148944
                 },
                 "upper": {
                     "abs": null,
-                    "iqr": 2.138250743297096,
-                    "pct": 0.6214893617021272,
-                    "overall": 2.138250743297096,
-                    "constant": 0.5404255319148933
+                    "iqr": 2.138250743297097,
+                    "pct": 0.6214893617021285,
+                    "overall": 2.138250743297097,
+                    "constant": 0.5404255319148944
                 }
             },
             "checks": {
@@ -16923,27 +16923,27 @@
             "panel_title": "Request Throughput",
             "unit": "req/s",
             "statistic": {
-                "diff": "-0.3531034482758636",
+                "diff": "-0.3531034482758628",
                 "name": "mean",
                 "test": "0.2000000000000001",
-                "absDiff": "0.3531034482758636",
-                "control": "0.5531034482758637",
-                "pctDiff": "-0.6384039900249385"
+                "absDiff": "0.3531034482758628",
+                "control": "0.5531034482758629",
+                "pctDiff": "-0.6384039900249381"
             },
             "thresholds": {
                 "lower": {
                     "abs": null,
-                    "iqr": -1.044721763106339,
-                    "pct": 0.4701379310344841,
-                    "overall": -1.044721763106339,
-                    "constant": 0.5531034482758637
+                    "iqr": -1.04472176310634,
+                    "pct": 0.4701379310344834,
+                    "overall": -1.04472176310634,
+                    "constant": 0.5531034482758629
                 },
                 "upper": {
                     "abs": null,
-                    "iqr": 2.1509286596580663,
-                    "pct": 0.6360689655172431,
-                    "overall": 2.1509286596580663,
-                    "constant": 0.5531034482758637
+                    "iqr": 2.1509286596580655,
+                    "pct": 0.6360689655172422,
+                    "overall": 2.1509286596580655,
+                    "constant": 0.5531034482758629
                 }
             },
             "checks": {
@@ -17097,27 +17097,27 @@
             "panel_title": "Request Throughput",
             "unit": "req/s",
             "statistic": {
-                "diff": "-0.38726114649681587",
+                "diff": "-0.38726114649681664",
                 "name": "mean",
                 "test": "0.2000000000000001",
-                "absDiff": "0.38726114649681587",
-                "control": "0.5872611464968159",
-                "pctDiff": "-0.6594360086767899"
+                "absDiff": "0.38726114649681664",
+                "control": "0.5872611464968167",
+                "pctDiff": "-0.6594360086767903"
             },
             "thresholds": {
                 "lower": {
                     "abs": null,
-                    "iqr": -1.0105640648853869,
-                    "pct": 0.4991719745222935,
-                    "overall": -1.0105640648853869,
-                    "constant": 0.5872611464968159
+                    "iqr": -1.010564064885386,
+                    "pct": 0.49917197452229417,
+                    "overall": -1.010564064885386,
+                    "constant": 0.5872611464968167
                 },
                 "upper": {
                     "abs": null,
-                    "iqr": 2.1850863578790185,
-                    "pct": 0.6753503184713383,
-                    "overall": 2.1850863578790185,
-                    "constant": 0.5872611464968159
+                    "iqr": 2.1850863578790194,
+                    "pct": 0.6753503184713392,
+                    "overall": 2.1850863578790194,
+                    "constant": 0.5872611464968167
                 }
             },
             "checks": {
@@ -17184,27 +17184,27 @@
             "panel_title": "Request Throughput",
             "unit": "req/s",
             "statistic": {
-                "diff": "-0.3999999999999995",
+                "diff": "-0.40000000000000063",
                 "name": "mean",
                 "test": "0.20000000000000012",
-                "absDiff": "0.3999999999999995",
-                "control": "0.5999999999999996",
-                "pctDiff": "-0.6666666666666663"
+                "absDiff": "0.40000000000000063",
+                "control": "0.6000000000000008",
+                "pctDiff": "-0.6666666666666669"
             },
             "thresholds": {
                 "lower": {
                     "abs": null,
-                    "iqr": -0.997825211382203,
-                    "pct": 0.5099999999999997,
-                    "overall": -0.997825211382203,
-                    "constant": 0.5999999999999996
+                    "iqr": -0.9978252113822019,
+                    "pct": 0.5100000000000007,
+                    "overall": -0.9978252113822019,
+                    "constant": 0.6000000000000008
                 },
                 "upper": {
                     "abs": null,
-                    "iqr": 2.1978252113822023,
-                    "pct": 0.6899999999999995,
-                    "overall": 2.1978252113822023,
-                    "constant": 0.5999999999999996
+                    "iqr": 2.197825211382203,
+                    "pct": 0.6900000000000008,
+                    "overall": 2.197825211382203,
+                    "constant": 0.6000000000000008
                 }
             },
             "checks": {
@@ -17271,27 +17271,27 @@
             "panel_title": "Request Throughput",
             "unit": "req/s",
             "statistic": {
-                "diff": "-0.39748427672956105",
+                "diff": "-0.3974842767295604",
                 "name": "mean",
                 "test": "0.20000000000000012",
-                "absDiff": "0.39748427672956105",
-                "control": "0.5974842767295612",
-                "pctDiff": "-0.6652631578947374"
+                "absDiff": "0.3974842767295604",
+                "control": "0.5974842767295605",
+                "pctDiff": "-0.6652631578947371"
             },
             "thresholds": {
                 "lower": {
                     "abs": null,
-                    "iqr": -1.0003409346526415,
-                    "pct": 0.507861635220127,
-                    "overall": -1.0003409346526415,
-                    "constant": 0.5974842767295612
+                    "iqr": -1.0003409346526422,
+                    "pct": 0.5078616352201264,
+                    "overall": -1.0003409346526422,
+                    "constant": 0.5974842767295605
                 },
                 "upper": {
                     "abs": null,
-                    "iqr": 2.195309488111764,
-                    "pct": 0.6871069182389953,
-                    "overall": 2.195309488111764,
-                    "constant": 0.5974842767295612
+                    "iqr": 2.1953094881117634,
+                    "pct": 0.6871069182389945,
+                    "overall": 2.1953094881117634,
+                    "constant": 0.5974842767295605
                 }
             },
             "checks": {
@@ -17532,27 +17532,27 @@
             "panel_title": "Request Throughput",
             "unit": "req/s",
             "statistic": {
-                "diff": "-0.358620689655173",
+                "diff": "-0.35862068965517313",
                 "name": "mean",
                 "test": "0.2000000000000001",
-                "absDiff": "0.358620689655173",
-                "control": "0.5586206896551731",
-                "pctDiff": "-0.6419753086419756"
+                "absDiff": "0.35862068965517313",
+                "control": "0.5586206896551732",
+                "pctDiff": "-0.6419753086419757"
             },
             "thresholds": {
                 "lower": {
                     "abs": null,
-                    "iqr": -1.0392045217270296,
-                    "pct": 0.47482758620689713,
-                    "overall": -1.0392045217270296,
-                    "constant": 0.5586206896551731
+                    "iqr": -1.0392045217270294,
+                    "pct": 0.4748275862068972,
+                    "overall": -1.0392045217270294,
+                    "constant": 0.5586206896551732
                 },
                 "upper": {
                     "abs": null,
                     "iqr": 2.156445901037376,
-                    "pct": 0.642413793103449,
+                    "pct": 0.6424137931034491,
                     "overall": 2.156445901037376,
-                    "constant": 0.5586206896551731
+                    "constant": 0.5586206896551732
                 }
             },
             "checks": {
@@ -17619,27 +17619,27 @@
             "panel_title": "Request Throughput",
             "unit": "req/s",
             "statistic": {
-                "diff": "-0.3974522292993627",
+                "diff": "-0.39745222929936436",
                 "name": "mean",
                 "test": "0.20000000000000012",
-                "absDiff": "0.3974522292993627",
-                "control": "0.5974522292993628",
-                "pctDiff": "-0.6652452025586351"
+                "absDiff": "0.39745222929936436",
+                "control": "0.5974522292993645",
+                "pctDiff": "-0.665245202558636"
             },
             "thresholds": {
                 "lower": {
                     "abs": null,
-                    "iqr": -1.00037298208284,
-                    "pct": 0.5078343949044584,
-                    "overall": -1.00037298208284,
-                    "constant": 0.5974522292993628
+                    "iqr": -1.0003729820828382,
+                    "pct": 0.5078343949044598,
+                    "overall": -1.0003729820828382,
+                    "constant": 0.5974522292993645
                 },
                 "upper": {
                     "abs": null,
-                    "iqr": 2.1952774406815654,
-                    "pct": 0.6870700636942672,
-                    "overall": 2.1952774406815654,
-                    "constant": 0.5974522292993628
+                    "iqr": 2.195277440681567,
+                    "pct": 0.6870700636942692,
+                    "overall": 2.195277440681567,
+                    "constant": 0.5974522292993645
                 }
             },
             "checks": {
@@ -17706,27 +17706,27 @@
             "panel_title": "Request Throughput",
             "unit": "req/s",
             "statistic": {
-                "diff": "-0.40000000000000097",
+                "diff": "-0.40000000000000063",
                 "name": "mean",
                 "test": "0.20000000000000012",
-                "absDiff": "0.40000000000000097",
-                "control": "0.6000000000000011",
-                "pctDiff": "-0.6666666666666671"
+                "absDiff": "0.40000000000000063",
+                "control": "0.6000000000000008",
+                "pctDiff": "-0.6666666666666669"
             },
             "thresholds": {
                 "lower": {
                     "abs": null,
-                    "iqr": -0.9978252113822016,
-                    "pct": 0.5100000000000009,
-                    "overall": -0.9978252113822016,
-                    "constant": 0.6000000000000011
+                    "iqr": -0.9978252113822019,
+                    "pct": 0.5100000000000007,
+                    "overall": -0.9978252113822019,
+                    "constant": 0.6000000000000008
                 },
                 "upper": {
                     "abs": null,
-                    "iqr": 2.1978252113822037,
-                    "pct": 0.6900000000000012,
-                    "overall": 2.1978252113822037,
-                    "constant": 0.6000000000000011
+                    "iqr": 2.197825211382203,
+                    "pct": 0.6900000000000008,
+                    "overall": 2.197825211382203,
+                    "constant": 0.6000000000000008
                 }
             },
             "checks": {
@@ -17788,6 +17788,93 @@
             "application_dashboard_id": "0be1ea97-b715-54df-bbe8-0c06bc82cd5b",
             "panel_id": 206,
             "metric_name": "T07_Product_Assets.product_availability_check",
+            "dashboard_uid": "performance-test-metrics-browseandsearch",
+            "dashboard_label": "Performance test metrics BrowseAndSearch",
+            "panel_title": "Request Throughput",
+            "unit": "req/s",
+            "statistic": {
+                "diff": "-0.3894736842105269",
+                "name": "mean",
+                "test": "0.20000000000000012",
+                "absDiff": "0.3894736842105269",
+                "control": "0.589473684210527",
+                "pctDiff": "-0.6607142857142859"
+            },
+            "thresholds": {
+                "lower": {
+                    "abs": null,
+                    "iqr": -1.0083515271716756,
+                    "pct": 0.501052631578948,
+                    "overall": -1.0083515271716756,
+                    "constant": 0.589473684210527
+                },
+                "upper": {
+                    "abs": null,
+                    "iqr": 2.18729889559273,
+                    "pct": 0.677894736842106,
+                    "overall": 2.18729889559273,
+                    "constant": 0.589473684210527
+                }
+            },
+            "checks": {
+                "abs": {
+                    "valid": false,
+                    "isDifference": false
+                },
+                "iqr": {
+                    "valid": true,
+                    "isDifference": false
+                },
+                "pct": {
+                    "valid": true,
+                    "isDifference": true
+                }
+            },
+            "conclusion": {
+                "label": "partial regression",
+                "valid": true,
+                "ignore": false,
+                "decrease": true,
+                "increase": false,
+                "allDifference": false,
+                "partialDifference": true
+            },
+            "compare_config": {
+                "thresholds": {
+                    "aggregation": "mean",
+                    "iqrThreshold": 2,
+                    "absoluteThreshold": null,
+                    "percentageThreshold": 0.15
+                },
+                "metricClassification": {
+                    "classification": "RED_rate",
+                    "higherIsBetter": true
+                },
+                "defaultValueIfControlGroupMissing": 0
+            },
+            "metric_classification": {
+                "classification": "RED_rate",
+                "higherIsBetter": true
+            },
+            "is_constant": {
+                "test": true,
+                "control": false
+            },
+            "all_missing": {
+                "test": false,
+                "control": false
+            },
+            "exists_data": {
+                "test": true,
+                "control": true
+            },
+            "uses_default_value": false,
+            "default_value": null
+        },
+        {
+            "application_dashboard_id": "0be1ea97-b715-54df-bbe8-0c06bc82cd5b",
+            "panel_id": 206,
+            "metric_name": "T07_Product_Assets.product_image_download",
             "dashboard_uid": "performance-test-metrics-browseandsearch",
             "dashboard_label": "Performance test metrics BrowseAndSearch",
             "panel_title": "Request Throughput",
@@ -17874,120 +17961,33 @@
         {
             "application_dashboard_id": "0be1ea97-b715-54df-bbe8-0c06bc82cd5b",
             "panel_id": 206,
-            "metric_name": "T07_Product_Assets.product_image_download",
-            "dashboard_uid": "performance-test-metrics-browseandsearch",
-            "dashboard_label": "Performance test metrics BrowseAndSearch",
-            "panel_title": "Request Throughput",
-            "unit": "req/s",
-            "statistic": {
-                "diff": "-0.389473684210527",
-                "name": "mean",
-                "test": "0.20000000000000012",
-                "absDiff": "0.389473684210527",
-                "control": "0.5894736842105271",
-                "pctDiff": "-0.660714285714286"
-            },
-            "thresholds": {
-                "lower": {
-                    "abs": null,
-                    "iqr": -1.0083515271716754,
-                    "pct": 0.5010526315789481,
-                    "overall": -1.0083515271716754,
-                    "constant": 0.5894736842105271
-                },
-                "upper": {
-                    "abs": null,
-                    "iqr": 2.18729889559273,
-                    "pct": 0.6778947368421062,
-                    "overall": 2.18729889559273,
-                    "constant": 0.5894736842105271
-                }
-            },
-            "checks": {
-                "abs": {
-                    "valid": false,
-                    "isDifference": false
-                },
-                "iqr": {
-                    "valid": true,
-                    "isDifference": false
-                },
-                "pct": {
-                    "valid": true,
-                    "isDifference": true
-                }
-            },
-            "conclusion": {
-                "label": "partial regression",
-                "valid": true,
-                "ignore": false,
-                "decrease": true,
-                "increase": false,
-                "allDifference": false,
-                "partialDifference": true
-            },
-            "compare_config": {
-                "thresholds": {
-                    "aggregation": "mean",
-                    "iqrThreshold": 2,
-                    "absoluteThreshold": null,
-                    "percentageThreshold": 0.15
-                },
-                "metricClassification": {
-                    "classification": "RED_rate",
-                    "higherIsBetter": true
-                },
-                "defaultValueIfControlGroupMissing": 0
-            },
-            "metric_classification": {
-                "classification": "RED_rate",
-                "higherIsBetter": true
-            },
-            "is_constant": {
-                "test": true,
-                "control": false
-            },
-            "all_missing": {
-                "test": false,
-                "control": false
-            },
-            "exists_data": {
-                "test": true,
-                "control": true
-            },
-            "uses_default_value": false,
-            "default_value": null
-        },
-        {
-            "application_dashboard_id": "0be1ea97-b715-54df-bbe8-0c06bc82cd5b",
-            "panel_id": 206,
             "metric_name": "total",
             "dashboard_uid": "performance-test-metrics-browseandsearch",
             "dashboard_label": "Performance test metrics BrowseAndSearch",
             "panel_title": "Request Throughput",
             "unit": "req/s",
             "statistic": {
-                "diff": "0.21699466912501375",
+                "diff": "0.21699466912501553",
                 "name": "mean",
                 "test": "3.2360655737704915",
-                "absDiff": "0.21699466912501375",
-                "control": "3.019070904645478",
-                "pctDiff": "0.07187465149994379"
+                "absDiff": "0.21699466912501553",
+                "control": "3.019070904645476",
+                "pctDiff": "0.07187465149994442"
             },
             "thresholds": {
                 "lower": {
                     "abs": null,
-                    "iqr": -0.9871656517824858,
-                    "pct": 2.566210268948656,
-                    "overall": -0.9871656517824858,
-                    "constant": 3.019070904645478
+                    "iqr": -0.9871656517824876,
+                    "pct": 2.5662102689486543,
+                    "overall": -0.9871656517824876,
+                    "constant": 3.019070904645476
                 },
                 "upper": {
                     "abs": null,
-                    "iqr": 7.025307461073441,
-                    "pct": 3.471931540342299,
-                    "overall": 7.025307461073441,
-                    "constant": 3.019070904645478
+                    "iqr": 7.02530746107344,
+                    "pct": 3.4719315403422972,
+                    "overall": 7.02530746107344,
+                    "constant": 3.019070904645476
                 }
             },
             "checks": {
@@ -26157,27 +26157,27 @@
             "panel_title": "CPU",
             "unit": "percent",
             "statistic": {
-                "diff": "-0.5879356227496721",
+                "diff": "-0.5879356227496704",
                 "name": "mean",
                 "test": "4.0790222947280785",
-                "absDiff": "0.5879356227496721",
-                "control": "4.666957917477751",
-                "pctDiff": "-0.1259783424546971"
+                "absDiff": "0.5879356227496704",
+                "control": "4.666957917477749",
+                "pctDiff": "-0.12597834245469677"
             },
             "thresholds": {
                 "lower": {
                     "abs": null,
-                    "iqr": 0.5875837722710813,
-                    "pct": 3.966914229856088,
-                    "overall": 0.5875837722710813,
-                    "constant": 4.666957917477751
+                    "iqr": 0.5875837722710795,
+                    "pct": 3.9669142298560867,
+                    "overall": 0.5875837722710795,
+                    "constant": 4.666957917477749
                 },
                 "upper": {
                     "abs": null,
-                    "iqr": 8.74633206268442,
-                    "pct": 5.3670016050994125,
-                    "overall": 8.74633206268442,
-                    "constant": 4.666957917477751
+                    "iqr": 8.746332062684418,
+                    "pct": 5.367001605099411,
+                    "overall": 8.746332062684418,
+                    "constant": 4.666957917477749
                 }
             },
             "checks": {
@@ -26682,27 +26682,27 @@
             "panel_title": "Acquire time",
             "unit": "s",
             "statistic": {
-                "diff": "3.9902164779186686e-05",
+                "diff": "3.9902164779186605e-05",
                 "name": "mean",
                 "test": "0.0002474014242261708",
-                "absDiff": "3.9902164779186686e-05",
-                "control": "0.00020749925944698412",
-                "pctDiff": "0.19230027560354573"
+                "absDiff": "3.9902164779186605e-05",
+                "control": "0.0002074992594469842",
+                "pctDiff": "0.19230027560354526"
             },
             "thresholds": {
                 "lower": {
                     "abs": null,
-                    "iqr": 4.8405553369508156e-05,
-                    "pct": 0.0001763743705299365,
-                    "overall": 4.8405553369508156e-05,
-                    "constant": 0.00020749925944698412
+                    "iqr": 4.840555336950824e-05,
+                    "pct": 0.00017637437052993657,
+                    "overall": 4.840555336950824e-05,
+                    "constant": 0.0002074992594469842
                 },
                 "upper": {
                     "abs": null,
-                    "iqr": 0.0003665929655244601,
-                    "pct": 0.00023862414836403172,
-                    "overall": 0.0003665929655244601,
-                    "constant": 0.00020749925944698412
+                    "iqr": 0.0003665929655244602,
+                    "pct": 0.0002386241483640318,
+                    "overall": 0.0003665929655244602,
+                    "constant": 0.0002074992594469842
                 }
             },
             "checks": {
@@ -27205,27 +27205,27 @@
             "panel_title": "Usage time",
             "unit": "s",
             "statistic": {
-                "diff": "0.0008641498167118664",
+                "diff": "0.0008641498167118802",
                 "name": "mean",
                 "test": "0.050357710543424805",
-                "absDiff": "0.0008641498167118664",
-                "control": "0.04949356072671294",
-                "pctDiff": "0.017459843341710968"
+                "absDiff": "0.0008641498167118802",
+                "control": "0.049493560726712925",
+                "pctDiff": "0.017459843341711252"
             },
             "thresholds": {
                 "lower": {
                     "abs": null,
-                    "iqr": 0.04178672011786721,
-                    "pct": 0.04206952661770599,
-                    "overall": 0.04178672011786721,
-                    "constant": 0.04949356072671294
+                    "iqr": 0.041786720117867195,
+                    "pct": 0.042069526617705987,
+                    "overall": 0.041786720117867195,
+                    "constant": 0.049493560726712925
                 },
                 "upper": {
                     "abs": null,
-                    "iqr": 0.05720040133555867,
-                    "pct": 0.05691759483571988,
-                    "overall": 0.05720040133555867,
-                    "constant": 0.04949356072671294
+                    "iqr": 0.057200401335558655,
+                    "pct": 0.056917594835719856,
+                    "overall": 0.057200401335558655,
+                    "constant": 0.049493560726712925
                 }
             },
             "checks": {
@@ -27555,27 +27555,27 @@
             "panel_title": "Queries / second",
             "unit": "short",
             "statistic": {
-                "diff": "0.362577571739499",
+                "diff": "0.36257757173949856",
                 "name": "mean",
                 "test": "1.8952743752555616",
-                "absDiff": "0.362577571739499",
-                "control": "1.5326968035160626",
-                "pctDiff": "0.23656183721903298"
+                "absDiff": "0.36257757173949856",
+                "control": "1.532696803516063",
+                "pctDiff": "0.23656183721903262"
             },
             "thresholds": {
                 "lower": {
                     "abs": null,
-                    "iqr": -0.06508567987793601,
-                    "pct": 1.3027922829886531,
-                    "overall": -0.06508567987793601,
-                    "constant": 1.5326968035160626
+                    "iqr": -0.06508567987793556,
+                    "pct": 1.3027922829886536,
+                    "overall": -0.06508567987793556,
+                    "constant": 1.532696803516063
                 },
                 "upper": {
                     "abs": null,
-                    "iqr": 3.1304792869100613,
-                    "pct": 1.762601324043472,
-                    "overall": 3.1304792869100613,
-                    "constant": 1.5326968035160626
+                    "iqr": 3.1304792869100617,
+                    "pct": 1.7626013240434724,
+                    "overall": 3.1304792869100617,
+                    "constant": 1.532696803516063
                 }
             },
             "checks": {
@@ -30810,27 +30810,27 @@
             "panel_title": "CPU",
             "unit": "percent",
             "statistic": {
-                "diff": "8.722124099204894",
+                "diff": "8.72212409920489",
                 "name": "mean",
                 "test": "15.03996224192137",
-                "absDiff": "8.722124099204894",
-                "control": "6.317838142716475",
-                "pctDiff": "1.3805551681092372"
+                "absDiff": "8.72212409920489",
+                "control": "6.317838142716479",
+                "pctDiff": "1.3805551681092358"
             },
             "thresholds": {
                 "lower": {
                     "abs": null,
-                    "iqr": 2.0326205517048486,
-                    "pct": 5.370162421309003,
-                    "overall": 2.0326205517048486,
-                    "constant": 6.317838142716475
+                    "iqr": 2.032620551704852,
+                    "pct": 5.370162421309007,
+                    "overall": 2.032620551704852,
+                    "constant": 6.317838142716479
                 },
                 "upper": {
                     "abs": null,
-                    "iqr": 10.603055733728102,
-                    "pct": 7.265513864123946,
-                    "overall": 10.603055733728102,
-                    "constant": 6.317838142716475
+                    "iqr": 10.603055733728105,
+                    "pct": 7.26551386412395,
+                    "overall": 10.603055733728105,
+                    "constant": 6.317838142716479
                 }
             },
             "checks": {
@@ -31161,27 +31161,27 @@
             "panel_title": "HTTP connection pool in use",
             "unit": "percentunit",
             "statistic": {
-                "diff": "-0.0016737388024516756",
+                "diff": "-0.0016737388024516747",
                 "name": "mean",
                 "test": "0.0047619047619047615",
-                "absDiff": "0.0016737388024516756",
-                "control": "0.006435643564356437",
-                "pctDiff": "-0.2600732600732603"
+                "absDiff": "0.0016737388024516747",
+                "control": "0.006435643564356436",
+                "pctDiff": "-0.2600732600732602"
             },
             "thresholds": {
                 "lower": {
                     "abs": -0.09356435643564356,
-                    "iqr": 0.006435643564356437,
-                    "pct": 0.005470297029702972,
+                    "iqr": 0.006435643564356436,
+                    "pct": 0.005470297029702971,
                     "overall": -0.09356435643564356,
-                    "constant": 0.006435643564356437
+                    "constant": 0.006435643564356436
                 },
                 "upper": {
                     "abs": 0.10643564356435645,
-                    "iqr": 0.006435643564356437,
-                    "pct": 0.007400990099009902,
+                    "iqr": 0.006435643564356436,
+                    "pct": 0.007400990099009901,
                     "overall": 0.10643564356435645,
-                    "constant": 0.006435643564356437
+                    "constant": 0.006435643564356436
                 }
             },
             "checks": {
@@ -35166,27 +35166,27 @@
             "panel_title": "Transaction Throughput",
             "unit": "txn/s",
             "statistic": {
-                "diff": "-0.3976047904191631",
+                "diff": "-0.3976047904191624",
                 "name": "mean",
                 "test": "0.2000000000000001",
-                "absDiff": "0.3976047904191631",
-                "control": "0.5976047904191631",
-                "pctDiff": "-0.665330661322646"
+                "absDiff": "0.3976047904191624",
+                "control": "0.5976047904191625",
+                "pctDiff": "-0.6653306613226456"
             },
             "thresholds": {
                 "lower": {
                     "abs": null,
-                    "iqr": -1.0002204209630396,
-                    "pct": 0.5079640718562887,
-                    "overall": -1.0002204209630396,
-                    "constant": 0.5976047904191631
+                    "iqr": -1.00022042096304,
+                    "pct": 0.5079640718562881,
+                    "overall": -1.00022042096304,
+                    "constant": 0.5976047904191625
                 },
                 "upper": {
                     "abs": null,
-                    "iqr": 2.1954300018013657,
-                    "pct": 0.6872455089820375,
-                    "overall": 2.1954300018013657,
-                    "constant": 0.5976047904191631
+                    "iqr": 2.1954300018013653,
+                    "pct": 0.6872455089820368,
+                    "overall": 2.1954300018013653,
+                    "constant": 0.5976047904191625
                 }
             },
             "checks": {
@@ -35253,27 +35253,27 @@
             "panel_title": "Transaction Throughput",
             "unit": "txn/s",
             "statistic": {
-                "diff": "-0.3950617283950615",
+                "diff": "-0.3950617283950624",
                 "name": "mean",
                 "test": "0.2000000000000001",
-                "absDiff": "0.3950617283950615",
-                "control": "0.5950617283950616",
-                "pctDiff": "-0.6639004149377591"
+                "absDiff": "0.3950617283950624",
+                "control": "0.5950617283950624",
+                "pctDiff": "-0.6639004149377596"
             },
             "thresholds": {
                 "lower": {
                     "abs": null,
-                    "iqr": -1.0027634829871412,
-                    "pct": 0.5058024691358023,
-                    "overall": -1.0027634829871412,
-                    "constant": 0.5950617283950616
+                    "iqr": -1.0027634829871404,
+                    "pct": 0.5058024691358031,
+                    "overall": -1.0027634829871404,
+                    "constant": 0.5950617283950624
                 },
                 "upper": {
                     "abs": null,
-                    "iqr": 2.192886939777264,
-                    "pct": 0.6843209876543207,
-                    "overall": 2.192886939777264,
-                    "constant": 0.5950617283950616
+                    "iqr": 2.192886939777265,
+                    "pct": 0.6843209876543217,
+                    "overall": 2.192886939777265,
+                    "constant": 0.5950617283950624
                 }
             },
             "checks": {
@@ -35427,27 +35427,27 @@
             "panel_title": "Transaction Throughput",
             "unit": "txn/s",
             "statistic": {
-                "diff": "-0.40000000000000047",
+                "diff": "-0.4000000000000007",
                 "name": "mean",
                 "test": "0.2000000000000001",
-                "absDiff": "0.40000000000000047",
-                "control": "0.6000000000000005",
-                "pctDiff": "-0.6666666666666669"
+                "absDiff": "0.4000000000000007",
+                "control": "0.6000000000000008",
+                "pctDiff": "-0.666666666666667"
             },
             "thresholds": {
                 "lower": {
                     "abs": null,
-                    "iqr": -0.9978252113822021,
-                    "pct": 0.5100000000000005,
-                    "overall": -0.9978252113822021,
-                    "constant": 0.6000000000000005
+                    "iqr": -0.9978252113822019,
+                    "pct": 0.5100000000000007,
+                    "overall": -0.9978252113822019,
+                    "constant": 0.6000000000000008
                 },
                 "upper": {
                     "abs": null,
                     "iqr": 2.197825211382203,
-                    "pct": 0.6900000000000006,
+                    "pct": 0.6900000000000008,
                     "overall": 2.197825211382203,
-                    "constant": 0.6000000000000005
+                    "constant": 0.6000000000000008
                 }
             },
             "checks": {
@@ -35514,27 +35514,27 @@
             "panel_title": "Transaction Throughput",
             "unit": "txn/s",
             "statistic": {
-                "diff": "-0.40000000000000047",
+                "diff": "-0.4000000000000007",
                 "name": "mean",
                 "test": "0.2000000000000001",
-                "absDiff": "0.40000000000000047",
-                "control": "0.6000000000000005",
-                "pctDiff": "-0.6666666666666669"
+                "absDiff": "0.4000000000000007",
+                "control": "0.6000000000000008",
+                "pctDiff": "-0.666666666666667"
             },
             "thresholds": {
                 "lower": {
                     "abs": null,
-                    "iqr": -0.9978252113822021,
-                    "pct": 0.5100000000000005,
-                    "overall": -0.9978252113822021,
-                    "constant": 0.6000000000000005
+                    "iqr": -0.9978252113822019,
+                    "pct": 0.5100000000000007,
+                    "overall": -0.9978252113822019,
+                    "constant": 0.6000000000000008
                 },
                 "upper": {
                     "abs": null,
                     "iqr": 2.197825211382203,
-                    "pct": 0.6900000000000006,
+                    "pct": 0.6900000000000008,
                     "overall": 2.197825211382203,
-                    "constant": 0.6000000000000005
+                    "constant": 0.6000000000000008
                 }
             },
             "checks": {
@@ -35688,27 +35688,27 @@
             "panel_title": "Transaction Throughput",
             "unit": "txn/s",
             "statistic": {
-                "diff": "-0.39703703703703686",
+                "diff": "-0.39703703703703774",
                 "name": "mean",
                 "test": "0.2000000000000001",
-                "absDiff": "0.39703703703703686",
-                "control": "0.5970370370370369",
-                "pctDiff": "-0.6650124069478907"
+                "absDiff": "0.39703703703703774",
+                "control": "0.5970370370370378",
+                "pctDiff": "-0.6650124069478911"
             },
             "thresholds": {
                 "lower": {
                     "abs": null,
-                    "iqr": -1.0007881743451659,
-                    "pct": 0.5074814814814814,
-                    "overall": -1.0007881743451659,
-                    "constant": 0.5970370370370369
+                    "iqr": -1.000788174345165,
+                    "pct": 0.5074814814814821,
+                    "overall": -1.000788174345165,
+                    "constant": 0.5970370370370378
                 },
                 "upper": {
                     "abs": null,
-                    "iqr": 2.1948622484192395,
-                    "pct": 0.6865925925925924,
-                    "overall": 2.1948622484192395,
-                    "constant": 0.5970370370370369
+                    "iqr": 2.1948622484192404,
+                    "pct": 0.6865925925925934,
+                    "overall": 2.1948622484192404,
+                    "constant": 0.5970370370370378
                 }
             },
             "checks": {
@@ -35775,27 +35775,27 @@
             "panel_title": "Transaction Throughput",
             "unit": "txn/s",
             "statistic": {
-                "diff": "-0.4674611098586121",
+                "diff": "-0.4674611098586112",
                 "name": "mean",
                 "test": "0.7934426229508198",
-                "absDiff": "0.4674611098586121",
-                "control": "1.260903732809432",
-                "pctDiff": "-0.3707349718261659"
+                "absDiff": "0.4674611098586112",
+                "control": "1.260903732809431",
+                "pctDiff": "-0.37073497182616544"
             },
             "thresholds": {
                 "lower": {
                     "abs": null,
-                    "iqr": -0.7405065124308867,
-                    "pct": 1.071768172888017,
-                    "overall": -0.7405065124308867,
-                    "constant": 1.260903732809432
+                    "iqr": -0.7405065124308876,
+                    "pct": 1.0717681728880164,
+                    "overall": -0.7405065124308876,
+                    "constant": 1.260903732809431
                 },
                 "upper": {
                     "abs": null,
-                    "iqr": 3.2623139780497503,
-                    "pct": 1.4500392927308465,
-                    "overall": 3.2623139780497503,
-                    "constant": 1.260903732809432
+                    "iqr": 3.2623139780497494,
+                    "pct": 1.4500392927308456,
+                    "overall": 3.2623139780497494,
+                    "constant": 1.260903732809431
                 }
             },
             "checks": {
@@ -50652,27 +50652,27 @@
             "panel_title": "Request Throughput",
             "unit": "req/s",
             "statistic": {
-                "diff": "-0.3826086956521749",
+                "diff": "-0.3826086956521746",
                 "name": "mean",
                 "test": "0.2000000000000001",
-                "absDiff": "0.3826086956521749",
-                "control": "0.582608695652175",
-                "pctDiff": "-0.6567164179104483"
+                "absDiff": "0.3826086956521746",
+                "control": "0.5826086956521747",
+                "pctDiff": "-0.6567164179104481"
             },
             "thresholds": {
                 "lower": {
                     "abs": null,
-                    "iqr": -1.0152165157300277,
-                    "pct": 0.4952173913043487,
-                    "overall": -1.0152165157300277,
-                    "constant": 0.582608695652175
+                    "iqr": -1.0152165157300281,
+                    "pct": 0.49521739130434844,
+                    "overall": -1.0152165157300281,
+                    "constant": 0.5826086956521747
                 },
                 "upper": {
                     "abs": null,
-                    "iqr": 2.1804339070343777,
-                    "pct": 0.6700000000000012,
-                    "overall": 2.1804339070343777,
-                    "constant": 0.582608695652175
+                    "iqr": 2.1804339070343772,
+                    "pct": 0.6700000000000008,
+                    "overall": 2.1804339070343772,
+                    "constant": 0.5826086956521747
                 }
             },
             "checks": {
@@ -50739,27 +50739,27 @@
             "panel_title": "Request Throughput",
             "unit": "req/s",
             "statistic": {
-                "diff": "-0.3976047904191623",
+                "diff": "-0.3976047904191631",
                 "name": "mean",
                 "test": "0.2000000000000001",
-                "absDiff": "0.3976047904191623",
-                "control": "0.5976047904191624",
-                "pctDiff": "-0.6653306613226455"
+                "absDiff": "0.3976047904191631",
+                "control": "0.5976047904191631",
+                "pctDiff": "-0.665330661322646"
             },
             "thresholds": {
                 "lower": {
                     "abs": null,
-                    "iqr": -1.0002204209630403,
-                    "pct": 0.507964071856288,
-                    "overall": -1.0002204209630403,
-                    "constant": 0.5976047904191624
+                    "iqr": -1.0002204209630396,
+                    "pct": 0.5079640718562887,
+                    "overall": -1.0002204209630396,
+                    "constant": 0.5976047904191631
                 },
                 "upper": {
                     "abs": null,
-                    "iqr": 2.1954300018013653,
-                    "pct": 0.6872455089820366,
-                    "overall": 2.1954300018013653,
-                    "constant": 0.5976047904191624
+                    "iqr": 2.1954300018013657,
+                    "pct": 0.6872455089820375,
+                    "overall": 2.1954300018013657,
+                    "constant": 0.5976047904191631
                 }
             },
             "checks": {
@@ -50826,27 +50826,27 @@
             "panel_title": "Request Throughput",
             "unit": "req/s",
             "statistic": {
-                "diff": "-0.39272727272727415",
+                "diff": "-0.39272727272727337",
                 "name": "mean",
                 "test": "0.2000000000000001",
-                "absDiff": "0.39272727272727415",
-                "control": "0.5927272727272742",
-                "pctDiff": "-0.6625766871165651"
+                "absDiff": "0.39272727272727337",
+                "control": "0.5927272727272734",
+                "pctDiff": "-0.6625766871165647"
             },
             "thresholds": {
                 "lower": {
                     "abs": null,
-                    "iqr": -1.0050979386549286,
-                    "pct": 0.503818181818183,
-                    "overall": -1.0050979386549286,
-                    "constant": 0.5927272727272742
+                    "iqr": -1.0050979386549292,
+                    "pct": 0.5038181818181824,
+                    "overall": -1.0050979386549292,
+                    "constant": 0.5927272727272734
                 },
                 "upper": {
                     "abs": null,
-                    "iqr": 2.190552484109477,
-                    "pct": 0.6816363636363653,
-                    "overall": 2.190552484109477,
-                    "constant": 0.5927272727272742
+                    "iqr": 2.1905524841094763,
+                    "pct": 0.6816363636363644,
+                    "overall": 2.1905524841094763,
+                    "constant": 0.5927272727272734
                 }
             },
             "checks": {
@@ -50913,27 +50913,27 @@
             "panel_title": "Request Throughput",
             "unit": "req/s",
             "statistic": {
-                "diff": "-0.3719745222929933",
+                "diff": "-0.3719745222929943",
                 "name": "mean",
                 "test": "0.2000000000000001",
-                "absDiff": "0.3719745222929933",
-                "control": "0.5719745222929934",
-                "pctDiff": "-0.6503340757238305"
+                "absDiff": "0.3719745222929943",
+                "control": "0.5719745222929944",
+                "pctDiff": "-0.6503340757238311"
             },
             "thresholds": {
                 "lower": {
                     "abs": null,
-                    "iqr": -1.0258506890892094,
-                    "pct": 0.48617834394904436,
-                    "overall": -1.0258506890892094,
-                    "constant": 0.5719745222929934
+                    "iqr": -1.0258506890892083,
+                    "pct": 0.48617834394904524,
+                    "overall": -1.0258506890892083,
+                    "constant": 0.5719745222929944
                 },
                 "upper": {
                     "abs": null,
-                    "iqr": 2.169799733675196,
-                    "pct": 0.6577707006369423,
-                    "overall": 2.169799733675196,
-                    "constant": 0.5719745222929934
+                    "iqr": 2.1697997336751973,
+                    "pct": 0.6577707006369435,
+                    "overall": 2.1697997336751973,
+                    "constant": 0.5719745222929944
                 }
             },
             "checks": {
@@ -51087,27 +51087,27 @@
             "panel_title": "Request Throughput",
             "unit": "req/s",
             "statistic": {
-                "diff": "-0.37948717948718025",
+                "diff": "-0.37948717948718014",
                 "name": "mean",
                 "test": "0.2000000000000001",
-                "absDiff": "0.37948717948718025",
-                "control": "0.5794871794871803",
+                "absDiff": "0.37948717948718014",
+                "control": "0.5794871794871802",
                 "pctDiff": "-0.6548672566371685"
             },
             "thresholds": {
                 "lower": {
                     "abs": null,
-                    "iqr": -1.0183380318950224,
-                    "pct": 0.49256410256410327,
-                    "overall": -1.0183380318950224,
-                    "constant": 0.5794871794871803
+                    "iqr": -1.0183380318950226,
+                    "pct": 0.49256410256410316,
+                    "overall": -1.0183380318950226,
+                    "constant": 0.5794871794871802
                 },
                 "upper": {
                     "abs": null,
                     "iqr": 2.1773123908693828,
-                    "pct": 0.6664102564102573,
+                    "pct": 0.6664102564102572,
                     "overall": 2.1773123908693828,
-                    "constant": 0.5794871794871803
+                    "constant": 0.5794871794871802
                 }
             },
             "checks": {
@@ -51174,27 +51174,27 @@
             "panel_title": "Request Throughput",
             "unit": "req/s",
             "statistic": {
-                "diff": "-0.39000000000000057",
+                "diff": "-0.3900000000000007",
                 "name": "mean",
                 "test": "0.2000000000000001",
-                "absDiff": "0.39000000000000057",
-                "control": "0.5900000000000006",
-                "pctDiff": "-0.6610169491525426"
+                "absDiff": "0.3900000000000007",
+                "control": "0.5900000000000007",
+                "pctDiff": "-0.6610169491525427"
             },
             "thresholds": {
                 "lower": {
                     "abs": null,
                     "iqr": -1.007825211382202,
-                    "pct": 0.5015000000000005,
+                    "pct": 0.5015000000000006,
                     "overall": -1.007825211382202,
-                    "constant": 0.5900000000000006
+                    "constant": 0.5900000000000007
                 },
                 "upper": {
                     "abs": null,
                     "iqr": 2.1878252113822034,
-                    "pct": 0.6785000000000007,
+                    "pct": 0.6785000000000008,
                     "overall": 2.1878252113822034,
-                    "constant": 0.5900000000000006
+                    "constant": 0.5900000000000007
                 }
             },
             "checks": {
@@ -51348,27 +51348,27 @@
             "panel_title": "Request Throughput",
             "unit": "req/s",
             "statistic": {
-                "diff": "-0.3975155279503103",
+                "diff": "-0.3975155279503112",
                 "name": "mean",
                 "test": "0.2000000000000001",
-                "absDiff": "0.3975155279503103",
-                "control": "0.5975155279503104",
-                "pctDiff": "-0.6652806652806651"
+                "absDiff": "0.3975155279503112",
+                "control": "0.5975155279503113",
+                "pctDiff": "-0.6652806652806655"
             },
             "thresholds": {
                 "lower": {
                     "abs": null,
-                    "iqr": -1.0003096834318923,
-                    "pct": 0.5078881987577638,
-                    "overall": -1.0003096834318923,
-                    "constant": 0.5975155279503104
+                    "iqr": -1.0003096834318914,
+                    "pct": 0.5078881987577646,
+                    "overall": -1.0003096834318914,
+                    "constant": 0.5975155279503113
                 },
                 "upper": {
                     "abs": null,
-                    "iqr": 2.1953407393325133,
-                    "pct": 0.6871428571428568,
-                    "overall": 2.1953407393325133,
-                    "constant": 0.5975155279503104
+                    "iqr": 2.195340739332514,
+                    "pct": 0.6871428571428579,
+                    "overall": 2.195340739332514,
+                    "constant": 0.5975155279503113
                 }
             },
             "checks": {
@@ -51435,27 +51435,27 @@
             "panel_title": "Request Throughput",
             "unit": "req/s",
             "statistic": {
-                "diff": "-0.38481012658227987",
+                "diff": "-0.3848101265822792",
                 "name": "mean",
                 "test": "0.2000000000000001",
-                "absDiff": "0.38481012658227987",
-                "control": "0.5848101265822799",
-                "pctDiff": "-0.6580086580086587"
+                "absDiff": "0.3848101265822792",
+                "control": "0.5848101265822793",
+                "pctDiff": "-0.6580086580086584"
             },
             "thresholds": {
                 "lower": {
                     "abs": null,
-                    "iqr": -1.0130150847999229,
-                    "pct": 0.49708860759493795,
-                    "overall": -1.0130150847999229,
-                    "constant": 0.5848101265822799
+                    "iqr": -1.0130150847999233,
+                    "pct": 0.49708860759493734,
+                    "overall": -1.0130150847999233,
+                    "constant": 0.5848101265822793
                 },
                 "upper": {
                     "abs": null,
-                    "iqr": 2.1826353379644825,
-                    "pct": 0.6725316455696219,
-                    "overall": 2.1826353379644825,
-                    "constant": 0.5848101265822799
+                    "iqr": 2.182635337964482,
+                    "pct": 0.6725316455696211,
+                    "overall": 2.182635337964482,
+                    "constant": 0.5848101265822793
                 }
             },
             "checks": {
@@ -51522,27 +51522,27 @@
             "panel_title": "Request Throughput",
             "unit": "req/s",
             "statistic": {
-                "diff": "-0.37894736842105314",
+                "diff": "-0.37894736842105403",
                 "name": "mean",
                 "test": "0.2000000000000001",
-                "absDiff": "0.37894736842105314",
-                "control": "0.5789473684210532",
-                "pctDiff": "-0.6545454545454548"
+                "absDiff": "0.37894736842105403",
+                "control": "0.5789473684210541",
+                "pctDiff": "-0.6545454545454553"
             },
             "thresholds": {
                 "lower": {
                     "abs": null,
-                    "iqr": -1.0188778429611496,
-                    "pct": 0.4921052631578952,
-                    "overall": -1.0188778429611496,
-                    "constant": 0.5789473684210532
+                    "iqr": -1.0188778429611487,
+                    "pct": 0.492105263157896,
+                    "overall": -1.0188778429611487,
+                    "constant": 0.5789473684210541
                 },
                 "upper": {
                     "abs": null,
-                    "iqr": 2.176772579803256,
-                    "pct": 0.6657894736842112,
-                    "overall": 2.176772579803256,
-                    "constant": 0.5789473684210532
+                    "iqr": 2.1767725798032567,
+                    "pct": 0.6657894736842122,
+                    "overall": 2.1767725798032567,
+                    "constant": 0.5789473684210541
                 }
             },
             "checks": {
@@ -51696,27 +51696,27 @@
             "panel_title": "Request Throughput",
             "unit": "req/s",
             "statistic": {
-                "diff": "-0.35555555555555685",
+                "diff": "-0.3555555555555563",
                 "name": "mean",
                 "test": "0.2000000000000001",
-                "absDiff": "0.35555555555555685",
-                "control": "0.5555555555555569",
-                "pctDiff": "-0.6400000000000008"
+                "absDiff": "0.3555555555555563",
+                "control": "0.5555555555555564",
+                "pctDiff": "-0.6400000000000003"
             },
             "thresholds": {
                 "lower": {
                     "abs": null,
-                    "iqr": -1.0422696558266458,
-                    "pct": 0.4722222222222234,
-                    "overall": -1.0422696558266458,
-                    "constant": 0.5555555555555569
+                    "iqr": -1.0422696558266464,
+                    "pct": 0.4722222222222229,
+                    "overall": -1.0422696558266464,
+                    "constant": 0.5555555555555564
                 },
                 "upper": {
                     "abs": null,
-                    "iqr": 2.15338076693776,
-                    "pct": 0.6388888888888904,
-                    "overall": 2.15338076693776,
-                    "constant": 0.5555555555555569
+                    "iqr": 2.153380766937759,
+                    "pct": 0.6388888888888897,
+                    "overall": 2.153380766937759,
+                    "constant": 0.5555555555555564
                 }
             },
             "checks": {
@@ -51783,27 +51783,27 @@
             "panel_title": "Request Throughput",
             "unit": "req/s",
             "statistic": {
-                "diff": "-0.38974358974358947",
+                "diff": "-0.38974358974359113",
                 "name": "mean",
                 "test": "0.2000000000000001",
-                "absDiff": "0.38974358974358947",
-                "control": "0.5897435897435895",
-                "pctDiff": "-0.660869565217391"
+                "absDiff": "0.38974358974359113",
+                "control": "0.5897435897435912",
+                "pctDiff": "-0.660869565217392"
             },
             "thresholds": {
                 "lower": {
                     "abs": null,
-                    "iqr": -1.0080816216386133,
-                    "pct": 0.501282051282051,
-                    "overall": -1.0080816216386133,
-                    "constant": 0.5897435897435895
+                    "iqr": -1.0080816216386115,
+                    "pct": 0.5012820512820525,
+                    "overall": -1.0080816216386115,
+                    "constant": 0.5897435897435912
                 },
                 "upper": {
                     "abs": null,
-                    "iqr": 2.187568801125792,
-                    "pct": 0.6782051282051279,
-                    "overall": 2.187568801125792,
-                    "constant": 0.5897435897435895
+                    "iqr": 2.187568801125794,
+                    "pct": 0.6782051282051298,
+                    "overall": 2.187568801125794,
+                    "constant": 0.5897435897435912
                 }
             },
             "checks": {
@@ -51870,27 +51870,27 @@
             "panel_title": "Request Throughput",
             "unit": "req/s",
             "statistic": {
-                "diff": "-0.3646258503401375",
+                "diff": "-0.3646258503401367",
                 "name": "mean",
                 "test": "0.2000000000000001",
-                "absDiff": "0.3646258503401375",
-                "control": "0.5646258503401376",
-                "pctDiff": "-0.6457831325301213"
+                "absDiff": "0.3646258503401367",
+                "control": "0.5646258503401368",
+                "pctDiff": "-0.6457831325301209"
             },
             "thresholds": {
                 "lower": {
                     "abs": null,
-                    "iqr": -1.0331993610420651,
-                    "pct": 0.4799319727891169,
-                    "overall": -1.0331993610420651,
-                    "constant": 0.5646258503401376
+                    "iqr": -1.0331993610420658,
+                    "pct": 0.47993197278911626,
+                    "overall": -1.0331993610420658,
+                    "constant": 0.5646258503401368
                 },
                 "upper": {
                     "abs": null,
-                    "iqr": 2.16245106172234,
-                    "pct": 0.6493197278911581,
-                    "overall": 2.16245106172234,
-                    "constant": 0.5646258503401376
+                    "iqr": 2.1624510617223396,
+                    "pct": 0.6493197278911572,
+                    "overall": 2.1624510617223396,
+                    "constant": 0.5646258503401368
                 }
             },
             "checks": {
@@ -51957,27 +51957,27 @@
             "panel_title": "Request Throughput",
             "unit": "req/s",
             "statistic": {
-                "diff": "-0.37333333333333385",
+                "diff": "-0.37333333333333407",
                 "name": "mean",
                 "test": "0.2000000000000001",
-                "absDiff": "0.37333333333333385",
-                "control": "0.5733333333333339",
-                "pctDiff": "-0.6511627906976747"
+                "absDiff": "0.37333333333333407",
+                "control": "0.5733333333333341",
+                "pctDiff": "-0.6511627906976748"
             },
             "thresholds": {
                 "lower": {
                     "abs": null,
-                    "iqr": -1.0244918780488688,
-                    "pct": 0.48733333333333384,
-                    "overall": -1.0244918780488688,
-                    "constant": 0.5733333333333339
+                    "iqr": -1.0244918780488685,
+                    "pct": 0.487333333333334,
+                    "overall": -1.0244918780488685,
+                    "constant": 0.5733333333333341
                 },
                 "upper": {
                     "abs": null,
                     "iqr": 2.171158544715537,
-                    "pct": 0.659333333333334,
+                    "pct": 0.6593333333333342,
                     "overall": 2.171158544715537,
-                    "constant": 0.5733333333333339
+                    "constant": 0.5733333333333341
                 }
             },
             "checks": {
@@ -52044,27 +52044,27 @@
             "panel_title": "Request Throughput",
             "unit": "req/s",
             "statistic": {
-                "diff": "-0.38974358974359036",
+                "diff": "-0.38974358974359113",
                 "name": "mean",
                 "test": "0.2000000000000001",
-                "absDiff": "0.38974358974359036",
-                "control": "0.5897435897435904",
-                "pctDiff": "-0.6608695652173916"
+                "absDiff": "0.38974358974359113",
+                "control": "0.5897435897435912",
+                "pctDiff": "-0.660869565217392"
             },
             "thresholds": {
                 "lower": {
                     "abs": null,
-                    "iqr": -1.0080816216386124,
-                    "pct": 0.5012820512820518,
-                    "overall": -1.0080816216386124,
-                    "constant": 0.5897435897435904
+                    "iqr": -1.0080816216386115,
+                    "pct": 0.5012820512820525,
+                    "overall": -1.0080816216386115,
+                    "constant": 0.5897435897435912
                 },
                 "upper": {
                     "abs": null,
-                    "iqr": 2.187568801125793,
-                    "pct": 0.6782051282051289,
-                    "overall": 2.187568801125793,
-                    "constant": 0.5897435897435904
+                    "iqr": 2.187568801125794,
+                    "pct": 0.6782051282051298,
+                    "overall": 2.187568801125794,
+                    "constant": 0.5897435897435912
                 }
             },
             "checks": {
@@ -52131,27 +52131,27 @@
             "panel_title": "Request Throughput",
             "unit": "req/s",
             "statistic": {
-                "diff": "-0.3816993464052302",
+                "diff": "-0.3816993464052294",
                 "name": "mean",
                 "test": "0.2000000000000001",
-                "absDiff": "0.3816993464052302",
-                "control": "0.5816993464052302",
-                "pctDiff": "-0.6561797752808997"
+                "absDiff": "0.3816993464052294",
+                "control": "0.5816993464052295",
+                "pctDiff": "-0.6561797752808992"
             },
             "thresholds": {
                 "lower": {
                     "abs": null,
-                    "iqr": -1.0161258649769724,
-                    "pct": 0.4944444444444457,
-                    "overall": -1.0161258649769724,
-                    "constant": 0.5816993464052302
+                    "iqr": -1.0161258649769733,
+                    "pct": 0.494444444444445,
+                    "overall": -1.0161258649769733,
+                    "constant": 0.5816993464052295
                 },
                 "upper": {
                     "abs": null,
-                    "iqr": 2.179524557787433,
-                    "pct": 0.6689542483660147,
-                    "overall": 2.179524557787433,
-                    "constant": 0.5816993464052302
+                    "iqr": 2.179524557787432,
+                    "pct": 0.6689542483660138,
+                    "overall": 2.179524557787432,
+                    "constant": 0.5816993464052295
                 }
             },
             "checks": {
@@ -52218,27 +52218,27 @@
             "panel_title": "Request Throughput",
             "unit": "req/s",
             "statistic": {
-                "diff": "-0.3555555555555553",
+                "diff": "-0.3555555555555563",
                 "name": "mean",
                 "test": "0.2000000000000001",
-                "absDiff": "0.3555555555555553",
-                "control": "0.5555555555555554",
-                "pctDiff": "-0.6399999999999998"
+                "absDiff": "0.3555555555555563",
+                "control": "0.5555555555555564",
+                "pctDiff": "-0.6400000000000003"
             },
             "thresholds": {
                 "lower": {
                     "abs": null,
-                    "iqr": -1.0422696558266473,
-                    "pct": 0.47222222222222204,
-                    "overall": -1.0422696558266473,
-                    "constant": 0.5555555555555554
+                    "iqr": -1.0422696558266464,
+                    "pct": 0.4722222222222229,
+                    "overall": -1.0422696558266464,
+                    "constant": 0.5555555555555564
                 },
                 "upper": {
                     "abs": null,
-                    "iqr": 2.153380766937758,
-                    "pct": 0.6388888888888886,
-                    "overall": 2.153380766937758,
-                    "constant": 0.5555555555555554
+                    "iqr": 2.153380766937759,
+                    "pct": 0.6388888888888897,
+                    "overall": 2.153380766937759,
+                    "constant": 0.5555555555555564
                 }
             },
             "checks": {
@@ -52392,27 +52392,27 @@
             "panel_title": "Request Throughput",
             "unit": "req/s",
             "statistic": {
-                "diff": "-0.3646258503401366",
+                "diff": "-0.3646258503401367",
                 "name": "mean",
                 "test": "0.2000000000000001",
-                "absDiff": "0.3646258503401366",
-                "control": "0.5646258503401367",
-                "pctDiff": "-0.6457831325301208"
+                "absDiff": "0.3646258503401367",
+                "control": "0.5646258503401368",
+                "pctDiff": "-0.6457831325301209"
             },
             "thresholds": {
                 "lower": {
                     "abs": null,
-                    "iqr": -1.033199361042066,
-                    "pct": 0.47993197278911615,
-                    "overall": -1.033199361042066,
-                    "constant": 0.5646258503401367
+                    "iqr": -1.0331993610420658,
+                    "pct": 0.47993197278911626,
+                    "overall": -1.0331993610420658,
+                    "constant": 0.5646258503401368
                 },
                 "upper": {
                     "abs": null,
-                    "iqr": 2.162451061722339,
-                    "pct": 0.6493197278911571,
-                    "overall": 2.162451061722339,
-                    "constant": 0.5646258503401367
+                    "iqr": 2.1624510617223396,
+                    "pct": 0.6493197278911572,
+                    "overall": 2.1624510617223396,
+                    "constant": 0.5646258503401368
                 }
             },
             "checks": {
@@ -52479,27 +52479,27 @@
             "panel_title": "Request Throughput",
             "unit": "req/s",
             "statistic": {
-                "diff": "-0.4000000000000006",
+                "diff": "-0.4000000000000007",
                 "name": "mean",
                 "test": "0.2000000000000001",
-                "absDiff": "0.4000000000000006",
-                "control": "0.6000000000000006",
+                "absDiff": "0.4000000000000007",
+                "control": "0.6000000000000008",
                 "pctDiff": "-0.666666666666667"
             },
             "thresholds": {
                 "lower": {
                     "abs": null,
-                    "iqr": -0.997825211382202,
-                    "pct": 0.5100000000000006,
-                    "overall": -0.997825211382202,
-                    "constant": 0.6000000000000006
+                    "iqr": -0.9978252113822019,
+                    "pct": 0.5100000000000007,
+                    "overall": -0.9978252113822019,
+                    "constant": 0.6000000000000008
                 },
                 "upper": {
                     "abs": null,
                     "iqr": 2.197825211382203,
-                    "pct": 0.6900000000000007,
+                    "pct": 0.6900000000000008,
                     "overall": 2.197825211382203,
-                    "constant": 0.6000000000000006
+                    "constant": 0.6000000000000008
                 }
             },
             "checks": {
@@ -52653,27 +52653,27 @@
             "panel_title": "Request Throughput",
             "unit": "req/s",
             "statistic": {
-                "diff": "-0.364705882352941",
+                "diff": "-0.3647058823529419",
                 "name": "mean",
                 "test": "0.2000000000000001",
-                "absDiff": "0.364705882352941",
-                "control": "0.5647058823529411",
-                "pctDiff": "-0.6458333333333331"
+                "absDiff": "0.3647058823529419",
+                "control": "0.564705882352942",
+                "pctDiff": "-0.6458333333333337"
             },
             "thresholds": {
                 "lower": {
                     "abs": null,
-                    "iqr": -1.0331193290292617,
-                    "pct": 0.47999999999999987,
-                    "overall": -1.0331193290292617,
-                    "constant": 0.5647058823529411
+                    "iqr": -1.0331193290292608,
+                    "pct": 0.48000000000000065,
+                    "overall": -1.0331193290292608,
+                    "constant": 0.564705882352942
                 },
                 "upper": {
                     "abs": null,
-                    "iqr": 2.1625310937351436,
-                    "pct": 0.6494117647058821,
-                    "overall": 2.1625310937351436,
-                    "constant": 0.5647058823529411
+                    "iqr": 2.1625310937351445,
+                    "pct": 0.6494117647058831,
+                    "overall": 2.1625310937351445,
+                    "constant": 0.564705882352942
                 }
             },
             "checks": {
@@ -52740,27 +52740,27 @@
             "panel_title": "Request Throughput",
             "unit": "req/s",
             "statistic": {
-                "diff": "-0.3375000000000016",
+                "diff": "-0.3375000000000008",
                 "name": "mean",
                 "test": "0.2000000000000001",
-                "absDiff": "0.3375000000000016",
-                "control": "0.5375000000000016",
-                "pctDiff": "-0.627906976744187"
+                "absDiff": "0.3375000000000008",
+                "control": "0.5375000000000009",
+                "pctDiff": "-0.6279069767441865"
             },
             "thresholds": {
                 "lower": {
                     "abs": null,
-                    "iqr": -1.060325211382201,
-                    "pct": 0.45687500000000136,
-                    "overall": -1.060325211382201,
-                    "constant": 0.5375000000000016
+                    "iqr": -1.0603252113822017,
+                    "pct": 0.4568750000000007,
+                    "overall": -1.0603252113822017,
+                    "constant": 0.5375000000000009
                 },
                 "upper": {
                     "abs": null,
-                    "iqr": 2.135325211382204,
-                    "pct": 0.6181250000000018,
-                    "overall": 2.135325211382204,
-                    "constant": 0.5375000000000016
+                    "iqr": 2.1353252113822037,
+                    "pct": 0.6181250000000009,
+                    "overall": 2.1353252113822037,
+                    "constant": 0.5375000000000009
                 }
             },
             "checks": {
@@ -52827,27 +52827,27 @@
             "panel_title": "Request Throughput",
             "unit": "req/s",
             "statistic": {
-                "diff": "-0.3771428571428579",
+                "diff": "-0.37714285714285856",
                 "name": "mean",
                 "test": "0.2000000000000001",
-                "absDiff": "0.3771428571428579",
-                "control": "0.577142857142858",
-                "pctDiff": "-0.6534653465346538"
+                "absDiff": "0.37714285714285856",
+                "control": "0.5771428571428586",
+                "pctDiff": "-0.6534653465346543"
             },
             "thresholds": {
                 "lower": {
                     "abs": null,
-                    "iqr": -1.0206823542393448,
-                    "pct": 0.49057142857142927,
-                    "overall": -1.0206823542393448,
-                    "constant": 0.577142857142858
+                    "iqr": -1.020682354239344,
+                    "pct": 0.4905714285714298,
+                    "overall": -1.020682354239344,
+                    "constant": 0.5771428571428586
                 },
                 "upper": {
                     "abs": null,
-                    "iqr": 2.1749680685250605,
-                    "pct": 0.6637142857142866,
-                    "overall": 2.1749680685250605,
-                    "constant": 0.577142857142858
+                    "iqr": 2.1749680685250614,
+                    "pct": 0.6637142857142874,
+                    "overall": 2.1749680685250614,
+                    "constant": 0.5771428571428586
                 }
             },
             "checks": {
@@ -52914,27 +52914,27 @@
             "panel_title": "Request Throughput",
             "unit": "req/s",
             "statistic": {
-                "diff": "-0.3515151515151522",
+                "diff": "-0.35151515151515234",
                 "name": "mean",
                 "test": "0.2000000000000001",
-                "absDiff": "0.3515151515151522",
-                "control": "0.5515151515151523",
-                "pctDiff": "-0.6373626373626378"
+                "absDiff": "0.35151515151515234",
+                "control": "0.5515151515151524",
+                "pctDiff": "-0.6373626373626379"
             },
             "thresholds": {
                 "lower": {
                     "abs": null,
-                    "iqr": -1.0463100598670505,
-                    "pct": 0.4687878787878794,
-                    "overall": -1.0463100598670505,
-                    "constant": 0.5515151515151523
+                    "iqr": -1.0463100598670503,
+                    "pct": 0.46878787878787953,
+                    "overall": -1.0463100598670503,
+                    "constant": 0.5515151515151524
                 },
                 "upper": {
                     "abs": null,
-                    "iqr": 2.149340362897355,
-                    "pct": 0.634242424242425,
-                    "overall": 2.149340362897355,
-                    "constant": 0.5515151515151523
+                    "iqr": 2.1493403628973553,
+                    "pct": 0.6342424242424252,
+                    "overall": 2.1493403628973553,
+                    "constant": 0.5515151515151524
                 }
             },
             "checks": {
@@ -53001,27 +53001,27 @@
             "panel_title": "Request Throughput",
             "unit": "req/s",
             "statistic": {
-                "diff": "-0.38561151079136835",
+                "diff": "-0.3856115107913676",
                 "name": "mean",
                 "test": "0.2000000000000001",
-                "absDiff": "0.38561151079136835",
-                "control": "0.5856115107913684",
-                "pctDiff": "-0.6584766584766593"
+                "absDiff": "0.3856115107913676",
+                "control": "0.5856115107913676",
+                "pctDiff": "-0.6584766584766588"
             },
             "thresholds": {
                 "lower": {
                     "abs": null,
-                    "iqr": -1.0122137005908343,
-                    "pct": 0.49776978417266315,
-                    "overall": -1.0122137005908343,
-                    "constant": 0.5856115107913684
+                    "iqr": -1.0122137005908352,
+                    "pct": 0.4977697841726625,
+                    "overall": -1.0122137005908352,
+                    "constant": 0.5856115107913676
                 },
                 "upper": {
                     "abs": null,
-                    "iqr": 2.183436722173571,
-                    "pct": 0.6734532374100737,
-                    "overall": 2.183436722173571,
-                    "constant": 0.5856115107913684
+                    "iqr": 2.18343672217357,
+                    "pct": 0.6734532374100727,
+                    "overall": 2.18343672217357,
+                    "constant": 0.5856115107913676
                 }
             },
             "checks": {
@@ -53088,27 +53088,27 @@
             "panel_title": "Request Throughput",
             "unit": "req/s",
             "statistic": {
-                "diff": "-0.40000000000000024",
+                "diff": "-0.40000000000000135",
                 "name": "mean",
                 "test": "0.2000000000000001",
-                "absDiff": "0.40000000000000024",
-                "control": "0.6000000000000003",
-                "pctDiff": "-0.6666666666666667"
+                "absDiff": "0.40000000000000135",
+                "control": "0.6000000000000014",
+                "pctDiff": "-0.6666666666666673"
             },
             "thresholds": {
                 "lower": {
                     "abs": null,
-                    "iqr": -0.9978252113822024,
-                    "pct": 0.5100000000000002,
-                    "overall": -0.9978252113822024,
-                    "constant": 0.6000000000000003
+                    "iqr": -0.9978252113822013,
+                    "pct": 0.5100000000000012,
+                    "overall": -0.9978252113822013,
+                    "constant": 0.6000000000000014
                 },
                 "upper": {
                     "abs": null,
-                    "iqr": 2.197825211382203,
-                    "pct": 0.6900000000000003,
-                    "overall": 2.197825211382203,
-                    "constant": 0.6000000000000003
+                    "iqr": 2.197825211382204,
+                    "pct": 0.6900000000000016,
+                    "overall": 2.197825211382204,
+                    "constant": 0.6000000000000014
                 }
             },
             "checks": {
@@ -53175,27 +53175,27 @@
             "panel_title": "Request Throughput",
             "unit": "req/s",
             "statistic": {
-                "diff": "-0.3701492537313448",
+                "diff": "-0.370149253731344",
                 "name": "mean",
                 "test": "0.2000000000000001",
-                "absDiff": "0.3701492537313448",
-                "control": "0.5701492537313448",
-                "pctDiff": "-0.6492146596858647"
+                "absDiff": "0.370149253731344",
+                "control": "0.5701492537313441",
+                "pctDiff": "-0.6492146596858642"
             },
             "thresholds": {
                 "lower": {
                     "abs": null,
-                    "iqr": -1.0276759576508578,
-                    "pct": 0.4846268656716431,
-                    "overall": -1.0276759576508578,
-                    "constant": 0.5701492537313448
+                    "iqr": -1.0276759576508585,
+                    "pct": 0.4846268656716424,
+                    "overall": -1.0276759576508585,
+                    "constant": 0.5701492537313441
                 },
                 "upper": {
                     "abs": null,
-                    "iqr": 2.1679744651135477,
-                    "pct": 0.6556716417910465,
-                    "overall": 2.1679744651135477,
-                    "constant": 0.5701492537313448
+                    "iqr": 2.167974465113547,
+                    "pct": 0.6556716417910456,
+                    "overall": 2.167974465113547,
+                    "constant": 0.5701492537313441
                 }
             },
             "checks": {
@@ -53262,27 +53262,27 @@
             "panel_title": "Request Throughput",
             "unit": "req/s",
             "statistic": {
-                "diff": "-0.37165354330708633",
+                "diff": "-0.37165354330708744",
                 "name": "mean",
                 "test": "0.2000000000000001",
-                "absDiff": "0.37165354330708633",
-                "control": "0.5716535433070864",
-                "pctDiff": "-0.6501377410468318"
+                "absDiff": "0.37165354330708744",
+                "control": "0.5716535433070875",
+                "pctDiff": "-0.6501377410468324"
             },
             "thresholds": {
                 "lower": {
                     "abs": null,
-                    "iqr": -1.0261716680751163,
-                    "pct": 0.4859055118110234,
-                    "overall": -1.0261716680751163,
-                    "constant": 0.5716535433070864
+                    "iqr": -1.0261716680751152,
+                    "pct": 0.48590551181102437,
+                    "overall": -1.0261716680751152,
+                    "constant": 0.5716535433070875
                 },
                 "upper": {
                     "abs": null,
-                    "iqr": 2.169478754689289,
-                    "pct": 0.6574015748031493,
-                    "overall": 2.169478754689289,
-                    "constant": 0.5716535433070864
+                    "iqr": 2.1694787546892904,
+                    "pct": 0.6574015748031505,
+                    "overall": 2.1694787546892904,
+                    "constant": 0.5716535433070875
                 }
             },
             "checks": {
@@ -53349,27 +53349,27 @@
             "panel_title": "Request Throughput",
             "unit": "req/s",
             "statistic": {
-                "diff": "-0.39703703703703774",
+                "diff": "-0.3970370370370384",
                 "name": "mean",
                 "test": "0.2000000000000001",
-                "absDiff": "0.39703703703703774",
-                "control": "0.5970370370370378",
-                "pctDiff": "-0.6650124069478911"
+                "absDiff": "0.3970370370370384",
+                "control": "0.5970370370370385",
+                "pctDiff": "-0.6650124069478915"
             },
             "thresholds": {
                 "lower": {
                     "abs": null,
-                    "iqr": -1.000788174345165,
-                    "pct": 0.5074814814814821,
-                    "overall": -1.000788174345165,
-                    "constant": 0.5970370370370378
+                    "iqr": -1.000788174345164,
+                    "pct": 0.5074814814814826,
+                    "overall": -1.000788174345164,
+                    "constant": 0.5970370370370385
                 },
                 "upper": {
                     "abs": null,
-                    "iqr": 2.1948622484192404,
-                    "pct": 0.6865925925925934,
-                    "overall": 2.1948622484192404,
-                    "constant": 0.5970370370370378
+                    "iqr": 2.1948622484192413,
+                    "pct": 0.6865925925925942,
+                    "overall": 2.1948622484192413,
+                    "constant": 0.5970370370370385
                 }
             },
             "checks": {
@@ -53436,27 +53436,27 @@
             "panel_title": "Request Throughput",
             "unit": "req/s",
             "statistic": {
-                "diff": "-0.38787878787878927",
+                "diff": "-0.3878787878787886",
                 "name": "mean",
                 "test": "0.2000000000000001",
-                "absDiff": "0.38787878787878927",
-                "control": "0.5878787878787893",
-                "pctDiff": "-0.6597938144329905"
+                "absDiff": "0.3878787878787886",
+                "control": "0.5878787878787887",
+                "pctDiff": "-0.65979381443299"
             },
             "thresholds": {
                 "lower": {
                     "abs": null,
-                    "iqr": -1.0099464235034135,
-                    "pct": 0.4996969696969709,
-                    "overall": -1.0099464235034135,
-                    "constant": 0.5878787878787893
+                    "iqr": -1.009946423503414,
+                    "pct": 0.49969696969697036,
+                    "overall": -1.009946423503414,
+                    "constant": 0.5878787878787887
                 },
                 "upper": {
                     "abs": null,
-                    "iqr": 2.185703999260992,
-                    "pct": 0.6760606060606077,
-                    "overall": 2.185703999260992,
-                    "constant": 0.5878787878787893
+                    "iqr": 2.1857039992609915,
+                    "pct": 0.6760606060606069,
+                    "overall": 2.1857039992609915,
+                    "constant": 0.5878787878787887
                 }
             },
             "checks": {
@@ -53523,27 +53523,27 @@
             "panel_title": "Request Throughput",
             "unit": "req/s",
             "statistic": {
-                "diff": "-0.38153846153846127",
+                "diff": "-0.38153846153846227",
                 "name": "mean",
                 "test": "0.2000000000000001",
-                "absDiff": "0.38153846153846127",
-                "control": "0.5815384615384613",
-                "pctDiff": "-0.6560846560846558"
+                "absDiff": "0.38153846153846227",
+                "control": "0.5815384615384623",
+                "pctDiff": "-0.6560846560846565"
             },
             "thresholds": {
                 "lower": {
                     "abs": null,
-                    "iqr": -1.0162867498437413,
-                    "pct": 0.4943076923076921,
-                    "overall": -1.0162867498437413,
-                    "constant": 0.5815384615384613
+                    "iqr": -1.0162867498437405,
+                    "pct": 0.49430769230769295,
+                    "overall": -1.0162867498437405,
+                    "constant": 0.5815384615384623
                 },
                 "upper": {
                     "abs": null,
-                    "iqr": 2.179363672920664,
-                    "pct": 0.6687692307692304,
-                    "overall": 2.179363672920664,
-                    "constant": 0.5815384615384613
+                    "iqr": 2.179363672920665,
+                    "pct": 0.6687692307692317,
+                    "overall": 2.179363672920665,
+                    "constant": 0.5815384615384623
                 }
             },
             "checks": {
@@ -53610,27 +53610,27 @@
             "panel_title": "Request Throughput",
             "unit": "req/s",
             "statistic": {
-                "diff": "0.23790003017198336",
+                "diff": "0.23790003017198424",
                 "name": "mean",
                 "test": "3.813114754098362",
-                "absDiff": "0.23790003017198336",
-                "control": "3.5752147239263787",
-                "pctDiff": "0.06654146632924927"
+                "absDiff": "0.23790003017198424",
+                "control": "3.575214723926378",
+                "pctDiff": "0.06654146632924954"
             },
             "thresholds": {
                 "lower": {
                     "abs": null,
-                    "iqr": -2.4209972283634733,
-                    "pct": 3.038932515337422,
-                    "overall": -2.4209972283634733,
-                    "constant": 3.5752147239263787
+                    "iqr": -2.420997228363474,
+                    "pct": 3.038932515337421,
+                    "overall": -2.420997228363474,
+                    "constant": 3.575214723926378
                 },
                 "upper": {
                     "abs": null,
                     "iqr": 9.57142667621623,
-                    "pct": 4.111496932515335,
+                    "pct": 4.111496932515334,
                     "overall": 9.57142667621623,
-                    "constant": 3.5752147239263787
+                    "constant": 3.575214723926378
                 }
             },
             "checks": {
@@ -62658,27 +62658,27 @@
             "panel_title": "Avg Active Threads",
             "unit": "threads",
             "statistic": {
-                "diff": "0.20408427495291726",
+                "diff": "0.20408427495291903",
                 "name": "mean",
                 "test": "9.194444444444445",
-                "absDiff": "0.20408427495291726",
-                "control": "8.990360169491527",
-                "pctDiff": "0.02270034471427186"
+                "absDiff": "0.20408427495291903",
+                "control": "8.990360169491526",
+                "pctDiff": "0.022700344714272062"
             },
             "thresholds": {
                 "lower": {
                     "abs": null,
-                    "iqr": 7.415144986082382,
-                    "pct": 7.6418061440677985,
-                    "overall": 7.415144986082382,
-                    "constant": 8.990360169491527
+                    "iqr": 7.41514498608238,
+                    "pct": 7.641806144067797,
+                    "overall": 7.41514498608238,
+                    "constant": 8.990360169491526
                 },
                 "upper": {
                     "abs": null,
-                    "iqr": 10.565575352900673,
-                    "pct": 10.338914194915256,
-                    "overall": 10.565575352900673,
-                    "constant": 8.990360169491527
+                    "iqr": 10.565575352900671,
+                    "pct": 10.338914194915255,
+                    "overall": 10.565575352900671,
+                    "constant": 8.990360169491526
                 }
             },
             "checks": {
@@ -74851,27 +74851,27 @@
             "panel_title": "Average JVM Total % used",
             "unit": "percentunit",
             "statistic": {
-                "diff": "0.002862904311301956",
+                "diff": "0.0028629043113019836",
                 "name": "mean",
                 "test": "0.18092215615103519",
-                "absDiff": "0.002862904311301956",
-                "control": "0.17805925183973323",
-                "pctDiff": "0.01607837998712241"
+                "absDiff": "0.0028629043113019836",
+                "control": "0.1780592518397332",
+                "pctDiff": "0.016078379987122568"
             },
             "thresholds": {
                 "lower": {
                     "abs": null,
-                    "iqr": 0.14294826650022388,
-                    "pct": 0.15135036406377325,
-                    "overall": 0.14294826650022388,
-                    "constant": 0.17805925183973323
+                    "iqr": 0.14294826650022385,
+                    "pct": 0.15135036406377322,
+                    "overall": 0.14294826650022385,
+                    "constant": 0.1780592518397332
                 },
                 "upper": {
                     "abs": null,
-                    "iqr": 0.21317023717924258,
-                    "pct": 0.2047681396156932,
-                    "overall": 0.21317023717924258,
-                    "constant": 0.17805925183973323
+                    "iqr": 0.21317023717924255,
+                    "pct": 0.20476813961569318,
+                    "overall": 0.21317023717924255,
+                    "constant": 0.1780592518397332
                 }
             },
             "checks": {
@@ -74938,27 +74938,27 @@
             "panel_title": "Average CodeHeap 'non-nmethods' % in use",
             "unit": "percentunit",
             "statistic": {
-                "diff": "0.00012632807553442094",
+                "diff": "0.00012632807553447645",
                 "name": "mean",
                 "test": "0.2746618060435698",
-                "absDiff": "0.00012632807553442094",
-                "control": "0.2745354779680354",
-                "pctDiff": "0.00046015209571248755"
+                "absDiff": "0.00012632807553447645",
+                "control": "0.27453547796803535",
+                "pctDiff": "0.0004601520957126898"
             },
             "thresholds": {
                 "lower": {
                     "abs": null,
-                    "iqr": 0.2723399081507714,
-                    "pct": 0.23335515627283007,
-                    "overall": 0.23335515627283007,
-                    "constant": 0.2745354779680354
+                    "iqr": 0.27233990815077136,
+                    "pct": 0.23335515627283004,
+                    "overall": 0.23335515627283004,
+                    "constant": 0.27453547796803535
                 },
                 "upper": {
                     "abs": null,
-                    "iqr": 0.2767310477852994,
-                    "pct": 0.3157157996632407,
-                    "overall": 0.3157157996632407,
-                    "constant": 0.2745354779680354
+                    "iqr": 0.27673104778529933,
+                    "pct": 0.31571579966324065,
+                    "overall": 0.31571579966324065,
+                    "constant": 0.27453547796803535
                 }
             },
             "checks": {
@@ -75286,27 +75286,27 @@
             "panel_title": "Maximum Pause Durations end of minor GC by cause",
             "unit": "s",
             "statistic": {
-                "diff": "-0.008747289014615718",
+                "diff": "-0.008747289014615732",
                 "name": "mean",
                 "test": "0.014619047619047624",
-                "absDiff": "0.008747289014615718",
-                "control": "0.023366336633663342",
-                "pctDiff": "-0.374354317998385"
+                "absDiff": "0.008747289014615732",
+                "control": "0.023366336633663356",
+                "pctDiff": "-0.3743543179983853"
             },
             "thresholds": {
                 "lower": {
-                    "abs": -0.07663366336633666,
-                    "iqr": -0.024658389315824158,
-                    "pct": 0.01986138613861384,
-                    "overall": -0.07663366336633666,
-                    "constant": 0.023366336633663342
+                    "abs": -0.07663366336633665,
+                    "iqr": -0.024658389315824144,
+                    "pct": 0.01986138613861385,
+                    "overall": -0.07663366336633665,
+                    "constant": 0.023366336633663356
                 },
                 "upper": {
-                    "abs": 0.12336633663366335,
-                    "iqr": 0.07139106258315084,
-                    "pct": 0.02687128712871284,
-                    "overall": 0.12336633663366335,
-                    "constant": 0.023366336633663342
+                    "abs": 0.12336633663366336,
+                    "iqr": 0.07139106258315085,
+                    "pct": 0.026871287128712857,
+                    "overall": 0.12336633663366336,
+                    "constant": 0.023366336633663356
                 }
             },
             "checks": {
@@ -75373,27 +75373,27 @@
             "panel_title": "Average CodeHeap 'non-profiled nmethods' % in use",
             "unit": "percentunit",
             "statistic": {
-                "diff": "-0.0003913660688843329",
+                "diff": "-0.000391366068884319",
                 "name": "mean",
                 "test": "0.0799851810329917",
-                "absDiff": "0.0003913660688843329",
-                "control": "0.08037654710187603",
-                "pctDiff": "-0.004869157521637282"
+                "absDiff": "0.000391366068884319",
+                "control": "0.08037654710187601",
+                "pctDiff": "-0.004869157521637109"
             },
             "thresholds": {
                 "lower": {
                     "abs": null,
-                    "iqr": 0.049215242820077026,
+                    "iqr": 0.04921524282007701,
                     "pct": 0.06832006503659462,
-                    "overall": 0.049215242820077026,
-                    "constant": 0.08037654710187603
+                    "overall": 0.04921524282007701,
+                    "constant": 0.08037654710187601
                 },
                 "upper": {
                     "abs": null,
-                    "iqr": 0.11153785138367503,
-                    "pct": 0.09243302916715743,
-                    "overall": 0.11153785138367503,
-                    "constant": 0.08037654710187603
+                    "iqr": 0.11153785138367502,
+                    "pct": 0.09243302916715741,
+                    "overall": 0.11153785138367502,
+                    "constant": 0.08037654710187601
                 }
             },
             "checks": {
@@ -76069,27 +76069,27 @@
             "panel_title": "Old generation memory pool increase",
             "unit": "Bps",
             "statistic": {
-                "diff": "-6400.167265075739",
+                "diff": "-6400.167265075768",
                 "name": "mean",
                 "test": "109928.01217431494",
-                "absDiff": "6400.167265075739",
-                "control": "116328.17943939067",
-                "pctDiff": "-0.05501820191736393"
+                "absDiff": "6400.167265075768",
+                "control": "116328.1794393907",
+                "pctDiff": "-0.055018201917364166"
             },
             "thresholds": {
                 "lower": {
                     "abs": -24883671.820560608,
-                    "iqr": -22211.514679915228,
-                    "pct": 98878.95252348208,
+                    "iqr": -22211.5146799152,
+                    "pct": 98878.95252348209,
                     "overall": -24883671.820560608,
-                    "constant": 116328.17943939067
+                    "constant": 116328.1794393907
                 },
                 "upper": {
                     "abs": 25116328.179439392,
                     "iqr": 254867.8735586966,
-                    "pct": 133777.40635529926,
+                    "pct": 133777.4063552993,
                     "overall": 25116328.179439392,
-                    "constant": 116328.17943939067
+                    "constant": 116328.1794393907
                 }
             },
             "checks": {
@@ -76156,27 +76156,27 @@
             "panel_title": "Average JVM Heap % used",
             "unit": "percentunit",
             "statistic": {
-                "diff": "0.011878005282911497",
+                "diff": "0.011878005282911608",
                 "name": "mean",
                 "test": "0.6257211153212656",
-                "absDiff": "0.011878005282911497",
-                "control": "0.6138431100383541",
-                "pctDiff": "0.019350229869272845"
+                "absDiff": "0.011878005282911608",
+                "control": "0.613843110038354",
+                "pctDiff": "0.01935022986927303"
             },
             "thresholds": {
                 "lower": {
                     "abs": null,
-                    "iqr": 0.33963627445864564,
+                    "iqr": 0.3396362744586455,
                     "pct": 0.5217666435326009,
-                    "overall": 0.33963627445864564,
-                    "constant": 0.6138431100383541
+                    "overall": 0.3396362744586455,
+                    "constant": 0.613843110038354
                 },
                 "upper": {
                     "abs": null,
-                    "iqr": 0.8880499456180626,
-                    "pct": 0.7059195765441072,
-                    "overall": 0.8880499456180626,
-                    "constant": 0.6138431100383541
+                    "iqr": 0.8880499456180625,
+                    "pct": 0.7059195765441071,
+                    "overall": 0.8880499456180625,
+                    "constant": 0.613843110038354
                 }
             },
             "checks": {
@@ -76243,27 +76243,27 @@
             "panel_title": "Average JVM Non-Heap % used",
             "unit": "percentunit",
             "statistic": {
-                "diff": "-0.0010255616046172533",
+                "diff": "-0.001025561604617281",
                 "name": "mean",
                 "test": "0.1280835062387463",
-                "absDiff": "0.0010255616046172533",
-                "control": "0.12910906784336354",
-                "pctDiff": "-0.007943373937618969"
+                "absDiff": "0.001025561604617281",
+                "control": "0.12910906784336357",
+                "pctDiff": "-0.007943373937619182"
             },
             "thresholds": {
                 "lower": {
                     "abs": null,
-                    "iqr": 0.11143944930317265,
-                    "pct": 0.10974270766685901,
-                    "overall": 0.10974270766685901,
-                    "constant": 0.12910906784336354
+                    "iqr": 0.11143944930317268,
+                    "pct": 0.10974270766685904,
+                    "overall": 0.10974270766685904,
+                    "constant": 0.12910906784336357
                 },
                 "upper": {
                     "abs": null,
-                    "iqr": 0.14677868638355443,
-                    "pct": 0.14847542801986807,
-                    "overall": 0.14847542801986807,
-                    "constant": 0.12910906784336354
+                    "iqr": 0.14677868638355446,
+                    "pct": 0.1484754280198681,
+                    "overall": 0.1484754280198681,
+                    "constant": 0.12910906784336357
                 }
             },
             "checks": {
@@ -76330,27 +76330,27 @@
             "panel_title": "Average JVM Total % used",
             "unit": "percentunit",
             "statistic": {
-                "diff": "0.017925742908687786",
+                "diff": "0.01792574290868787",
                 "name": "mean",
                 "test": "0.18805896266202288",
-                "absDiff": "0.017925742908687786",
-                "control": "0.1701332197533351",
-                "pctDiff": "0.10536297928574523"
+                "absDiff": "0.01792574290868787",
+                "control": "0.170133219753335",
+                "pctDiff": "0.10536297928574577"
             },
             "thresholds": {
                 "lower": {
                     "abs": null,
-                    "iqr": 0.13479419224386455,
-                    "pct": 0.14461323679033483,
-                    "overall": 0.13479419224386455,
-                    "constant": 0.1701332197533351
+                    "iqr": 0.13479419224386446,
+                    "pct": 0.14461323679033475,
+                    "overall": 0.13479419224386446,
+                    "constant": 0.170133219753335
                 },
                 "upper": {
                     "abs": null,
-                    "iqr": 0.20547224726280564,
-                    "pct": 0.19565320271633535,
-                    "overall": 0.20547224726280564,
-                    "constant": 0.1701332197533351
+                    "iqr": 0.20547224726280555,
+                    "pct": 0.19565320271633524,
+                    "overall": 0.20547224726280555,
+                    "constant": 0.170133219753335
                 }
             },
             "checks": {
@@ -76417,27 +76417,27 @@
             "panel_title": "Average CodeHeap 'non-nmethods' % in use",
             "unit": "percentunit",
             "statistic": {
-                "diff": "-0.000225694565240242",
+                "diff": "-0.00022569456524001996",
                 "name": "mean",
                 "test": "0.26991830639494024",
-                "absDiff": "0.000225694565240242",
-                "control": "0.2701440009601805",
-                "pctDiff": "-0.0008354602154334334"
+                "absDiff": "0.00022569456524001996",
+                "control": "0.27014400096018026",
+                "pctDiff": "-0.0008354602154326121"
             },
             "thresholds": {
                 "lower": {
                     "abs": null,
-                    "iqr": 0.26906256048569893,
-                    "pct": 0.2296224008161534,
-                    "overall": 0.2296224008161534,
-                    "constant": 0.2701440009601805
+                    "iqr": 0.2690625604856987,
+                    "pct": 0.2296224008161532,
+                    "overall": 0.2296224008161532,
+                    "constant": 0.27014400096018026
                 },
                 "upper": {
                     "abs": null,
-                    "iqr": 0.27122544143466204,
-                    "pct": 0.31066560110420754,
-                    "overall": 0.31066560110420754,
-                    "constant": 0.2701440009601805
+                    "iqr": 0.2712254414346618,
+                    "pct": 0.31066560110420727,
+                    "overall": 0.31066560110420727,
+                    "constant": 0.27014400096018026
                 }
             },
             "checks": {
@@ -76508,23 +76508,23 @@
                 "name": "mean",
                 "test": "0.26320393571092027",
                 "absDiff": "0.1534025191280829",
-                "control": "0.10980141658283736",
-                "pctDiff": "1.3970905285393254"
+                "control": "0.10980141658283737",
+                "pctDiff": "1.3970905285393251"
             },
             "thresholds": {
                 "lower": {
                     "abs": null,
-                    "iqr": 0.03693991355524516,
-                    "pct": 0.09333120409541175,
-                    "overall": 0.03693991355524516,
-                    "constant": 0.10980141658283736
+                    "iqr": 0.036939913555245174,
+                    "pct": 0.09333120409541176,
+                    "overall": 0.036939913555245174,
+                    "constant": 0.10980141658283737
                 },
                 "upper": {
                     "abs": null,
                     "iqr": 0.18266291961042957,
                     "pct": 0.12627162907026296,
                     "overall": 0.18266291961042957,
-                    "constant": 0.10980141658283736
+                    "constant": 0.10980141658283737
                 }
             },
             "checks": {
@@ -76591,27 +76591,27 @@
             "panel_title": "Young generation memory pool increase",
             "unit": "Bps",
             "statistic": {
-                "diff": "9651087.924690917",
+                "diff": "9651087.924690913",
                 "name": "mean",
                 "test": "14494285.03011072",
-                "absDiff": "9651087.924690917",
-                "control": "4843197.105419804",
-                "pctDiff": "1.9927101281694313"
+                "absDiff": "9651087.924690913",
+                "control": "4843197.105419807",
+                "pctDiff": "1.9927101281694295"
             },
             "thresholds": {
                 "lower": {
-                    "abs": -20156802.894580197,
-                    "iqr": 1642718.222870239,
-                    "pct": 4116717.5396068334,
-                    "overall": -20156802.894580197,
-                    "constant": 4843197.105419804
+                    "abs": -20156802.894580193,
+                    "iqr": 1642718.2228702419,
+                    "pct": 4116717.539606836,
+                    "overall": -20156802.894580193,
+                    "constant": 4843197.105419807
                 },
                 "upper": {
-                    "abs": 29843197.105419803,
-                    "iqr": 8043675.98796937,
-                    "pct": 5569676.671232775,
-                    "overall": 29843197.105419803,
-                    "constant": 4843197.105419804
+                    "abs": 29843197.105419807,
+                    "iqr": 8043675.987969372,
+                    "pct": 5569676.671232778,
+                    "overall": 29843197.105419807,
+                    "constant": 4843197.105419807
                 }
             },
             "checks": {
@@ -76678,27 +76678,27 @@
             "panel_title": "Average Pause Durations end of minor GC by cause",
             "unit": "s",
             "statistic": {
-                "diff": "-0.0031607228750085876",
+                "diff": "-0.0031607228750085868",
                 "name": "mean",
                 "test": "0.0040421390778533645",
-                "absDiff": "0.0031607228750085876",
-                "control": "0.007202861952861952",
-                "pctDiff": "-0.43881486216082766"
+                "absDiff": "0.0031607228750085868",
+                "control": "0.007202861952861951",
+                "pctDiff": "-0.4388148621608276"
             },
             "thresholds": {
                 "lower": {
                     "abs": -0.09279713804713806,
-                    "iqr": 0.0012172517031752011,
-                    "pct": 0.0061224326599326594,
+                    "iqr": 0.0012172517031752003,
+                    "pct": 0.006122432659932659,
                     "overall": -0.09279713804713806,
-                    "constant": 0.007202861952861952
+                    "constant": 0.007202861952861951
                 },
                 "upper": {
                     "abs": 0.10720286195286195,
                     "iqr": 0.013188472202548703,
-                    "pct": 0.008283291245791245,
+                    "pct": 0.008283291245791243,
                     "overall": 0.10720286195286195,
-                    "constant": 0.007202861952861952
+                    "constant": 0.007202861952861951
                 }
             },
             "checks": {
@@ -76852,27 +76852,27 @@
             "panel_title": "Average CodeHeap 'non-profiled nmethods' % in use",
             "unit": "percentunit",
             "statistic": {
-                "diff": "-0.011495395774635583",
+                "diff": "-0.011495395774635514",
                 "name": "mean",
                 "test": "0.09276720951968376",
-                "absDiff": "0.011495395774635583",
-                "control": "0.10426260529431934",
-                "pctDiff": "-0.11025425407494494"
+                "absDiff": "0.011495395774635514",
+                "control": "0.10426260529431927",
+                "pctDiff": "-0.11025425407494434"
             },
             "thresholds": {
                 "lower": {
                     "abs": null,
-                    "iqr": 0.057932606912995996,
-                    "pct": 0.08862321450017144,
-                    "overall": 0.057932606912995996,
-                    "constant": 0.10426260529431934
+                    "iqr": 0.057932606912995926,
+                    "pct": 0.08862321450017138,
+                    "overall": 0.057932606912995926,
+                    "constant": 0.10426260529431927
                 },
                 "upper": {
                     "abs": null,
-                    "iqr": 0.1505926036756427,
-                    "pct": 0.11990199608846723,
-                    "overall": 0.1505926036756427,
-                    "constant": 0.10426260529431934
+                    "iqr": 0.15059260367564262,
+                    "pct": 0.11990199608846715,
+                    "overall": 0.15059260367564262,
+                    "constant": 0.10426260529431927
                 }
             },
             "checks": {
@@ -77536,27 +77536,27 @@
             "panel_title": "Maximum Pause Durations end of major GC by cause",
             "unit": "s",
             "statistic": {
-                "diff": "0.02170108439415369",
+                "diff": "0.021701084394153698",
                 "name": "mean",
                 "test": "0.07304761904761906",
-                "absDiff": "0.02170108439415369",
-                "control": "0.051346534653465364",
-                "pctDiff": "0.422639707637779"
+                "absDiff": "0.021701084394153698",
+                "control": "0.05134653465346536",
+                "pctDiff": "0.42263970763777925"
             },
             "thresholds": {
                 "lower": {
-                    "abs": -0.04865346534653464,
+                    "abs": -0.04865346534653465,
                     "iqr": -0.1687136826411495,
-                    "pct": 0.04364455445544556,
+                    "pct": 0.04364455445544555,
                     "overall": -0.1687136826411495,
-                    "constant": 0.051346534653465364
+                    "constant": 0.05134653465346536
                 },
                 "upper": {
                     "abs": 0.15134653465346537,
                     "iqr": 0.2714067519480802,
-                    "pct": 0.059048514851485163,
+                    "pct": 0.05904851485148516,
                     "overall": 0.2714067519480802,
-                    "constant": 0.051346534653465364
+                    "constant": 0.05134653465346536
                 }
             },
             "checks": {
@@ -77627,23 +77627,23 @@
                 "name": "mean",
                 "test": "358852.3533492652",
                 "absDiff": "328757.14402508485",
-                "control": "30095.20932418034",
-                "pctDiff": "10.92390288712633"
+                "control": "30095.209324180327",
+                "pctDiff": "10.923902887126335"
             },
             "thresholds": {
                 "lower": {
                     "abs": -24969904.79067582,
-                    "iqr": -61409.91539559243,
-                    "pct": 25580.92792555329,
+                    "iqr": -61409.91539559244,
+                    "pct": 25580.92792555328,
                     "overall": -24969904.79067582,
-                    "constant": 30095.20932418034
+                    "constant": 30095.209324180327
                 },
                 "upper": {
                     "abs": 25030095.20932418,
-                    "iqr": 121600.3340439531,
-                    "pct": 34609.49072280739,
+                    "iqr": 121600.33404395309,
+                    "pct": 34609.49072280737,
                     "overall": 25030095.20932418,
-                    "constant": 30095.20932418034
+                    "constant": 30095.209324180327
                 }
             },
             "checks": {

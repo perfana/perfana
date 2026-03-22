@@ -111,7 +111,7 @@ export class AdaptResultsSQLBuilder {
           FROM test_metrics tm
           LEFT JOIN ds_control_group_statistics cgs ON (
               cgs.control_group_id = tm.control_group_id
-              AND COALESCE(cgs.metrics_source_id, cgs.application_dashboard_id) = COALESCE(tm.metrics_source_id, tm.application_dashboard_id)
+              AND cgs.application_dashboard_id = tm.application_dashboard_id
               AND cgs.panel_id::text = tm.panel_id
               AND cgs.metric_name = tm.metric_name
           )
@@ -129,17 +129,17 @@ export class AdaptResultsSQLBuilder {
               ) as compare_config
           FROM with_control wc
           LEFT JOIN temp_config_cache cfg_metric ON (
-              cfg_metric.application_dashboard_id = COALESCE(wc.metrics_source_id, wc.application_dashboard_id)
+              cfg_metric.application_dashboard_id = wc.application_dashboard_id
               AND cfg_metric.panel_id = wc.panel_id::int
               AND cfg_metric.metric_name = wc.metric_name
           )
           LEFT JOIN temp_config_cache cfg_panel ON (
-              cfg_panel.application_dashboard_id = COALESCE(wc.metrics_source_id, wc.application_dashboard_id)
+              cfg_panel.application_dashboard_id = wc.application_dashboard_id
               AND cfg_panel.panel_id = wc.panel_id::int
               AND cfg_panel.metric_name IS NULL
           )
           LEFT JOIN temp_config_cache cfg_dashboard ON (
-              cfg_dashboard.application_dashboard_id = COALESCE(wc.metrics_source_id, wc.application_dashboard_id)
+              cfg_dashboard.application_dashboard_id = wc.application_dashboard_id
               AND cfg_dashboard.panel_id IS NULL
               AND cfg_dashboard.metric_name IS NULL
           )
