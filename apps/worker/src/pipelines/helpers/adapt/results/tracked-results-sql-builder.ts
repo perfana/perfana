@@ -1,9 +1,68 @@
 /**
- * Tracked Results SQL Builder for ADAPT Pipeline
+ * Tracked Results SQL Builder — Historical Regression Re-Evaluation
  *
- * Builds SQL queries for MongoDB-style re-evaluation of tracked results.
- * This implements the re-evaluation logic where historical regressions are
- * re-analyzed using the current test run's statistics and control group.
+ * ════════════════════════════════════════════════════════════════════════════════
+ * Concept: Why Re-Evaluate Historical Regressions?
+ * ════════════════════════════════════════════════════════════════════════════════
+ *
+ * When ADAPT detects a regression in test run B, that regression may persist
+ * in subsequent runs C, D, E even though their direct comparison to the
+ * (now-shifted) control group shows "no difference". This is because the
+ * control group eventually absorbs the regressed performance as the new normal.
+ *
+ * Tracked results solve this by re-evaluating historical regressions:
+ *   1. Find all past test runs in the control group that had regressions
+ *   2. For each regressed metric, take the CURRENT test run's metric value
+ *   3. Compare it against the HISTORICAL control group (the baseline from
+ *      when the regression was first detected — NOT the current control group)
+ *   4. If the regression still persists, it becomes a "tracked regression"
+ *
+ * This ensures regressions are not silently forgotten when the control group
+ * shifts. A tracked regression keeps the test run verdict as REGRESSION until
+ * the issue is explicitly accepted or the performance returns to the original
+ * baseline.
+ *
+ * ════════════════════════════════════════════════════════════════════════════════
+ * Why the HISTORICAL control group, not the current one?
+ * ════════════════════════════════════════════════════════════════════════════════
+ *
+ * The historical control group represents the "pre-regression" baseline.
+ * Using the current control group would compare against an already-degraded
+ * baseline (since the regressed runs are now part of it), making the
+ * regression invisible. By using the historical control group, we ask:
+ * "Has performance returned to where it was BEFORE the regression?"
+ *
+ * ════════════════════════════════════════════════════════════════════════════════
+ * CTE Pipeline
+ * ════════════════════════════════════════════════════════════════════════════════
+ *
+ *   control_group_test_runs       Unnest the control group's test_runs array
+ *        │                        to get individual tracked test run IDs.
+ *        ▼
+ *   filtered_tracked_test_runs    Exclude runs with differencesAccepted=ACCEPTED
+ *        │                        (user acknowledged the regression) or mode=DEBUG.
+ *        ▼
+ *   historical_regressions        Find ADAPT results from tracked runs that had
+ *        │                        differences (increase/decrease/regression/improvement).
+ *        │                        Critically: preserves historical_control_group_id.
+ *        ▼
+ *   current_metrics               Join with CURRENT test run's ds_metric_statistics
+ *        │                        for the same metrics. Uses historical_control_group_id
+ *        │                        as the control_group_id for the re-evaluation.
+ *        ▼
+ *   with_control                  Join with ds_control_group_statistics using the
+ *        │                        HISTORICAL control group (not current!) to get
+ *        │                        the pre-regression baseline values.
+ *        ▼
+ *   with_compare_config           Same 4-level config hierarchy as main ADAPT.
+ *        ▼
+ *   with_dynamic_statistics       Select configured aggregation statistic.
+ *        ▼
+ *   with_threshold_calculations   Same threshold logic as main ADAPT pipeline.
+ *        ▼
+ *   final_tracked_results         Re-evaluate conclusion with same label logic.
+ *        ▼
+ *   INSERT INTO ds_adapt_tracked_results  (UPSERT on conflict)
  */
 
 /**
@@ -28,7 +87,8 @@ export class TrackedResultsSQLBuilder {
   buildTrackedResultsSQL(placeholders: string, testRunIdsCount: number): string {
     return `
       WITH control_group_test_runs AS (
-          -- Get test runs from control group arrays that need to be tracked
+          -- Expand the control group's test_runs[] array into individual rows.
+          -- Each of these past test runs will be checked for historical regressions.
           SELECT DISTINCT
               cg.control_group_id,
               unnest(cg.test_runs) as tracked_test_run_id
@@ -36,7 +96,9 @@ export class TrackedResultsSQLBuilder {
           WHERE cg.control_group_id IN (${placeholders})
       ),
       filtered_tracked_test_runs AS (
-          -- Filter tracked test runs by ADAPT config
+          -- Skip runs where the user explicitly accepted the differences
+          -- (differencesAccepted=ACCEPTED) or where the run was in DEBUG mode.
+          -- These should not propagate as tracked regressions.
           SELECT
               cgtr.control_group_id,
               cgtr.tracked_test_run_id
@@ -46,7 +108,9 @@ export class TrackedResultsSQLBuilder {
           AND COALESCE((tr.adapt_config->>'mode'), '') != 'DEBUG'
       ),
       historical_regressions AS (
-          -- Get historical ADAPT results that showed differences
+          -- Find ADAPT results from tracked test runs that showed any kind of
+          -- difference (increase, decrease, regression, improvement). These are
+          -- candidates for re-evaluation against the current test run's data.
           SELECT
               fttr.control_group_id as current_test_run_id,
               fttr.tracked_test_run_id,
@@ -56,7 +120,10 @@ export class TrackedResultsSQLBuilder {
               ar.panel_id,
               ar.metric_name,
               ar.conclusion as tracked_conclusion,
-              ar.control_group_id as historical_control_group_id  -- CRITICAL: Use the historical control group!
+              -- CRITICAL: Preserve the control group that was active when the
+              -- regression was first detected. This is the "pre-regression"
+              -- baseline we compare against — NOT the current control group.
+              ar.control_group_id as historical_control_group_id
           FROM filtered_tracked_test_runs fttr
           JOIN ds_adapt_results ar ON ar.test_run_id = fttr.tracked_test_run_id
           -- TODO: Find out what the impact can be of leaving this join out. This join fails with dynatrace data because those application_dashboard_id's are in dynatrace_dql table
@@ -66,10 +133,12 @@ export class TrackedResultsSQLBuilder {
           AND NOT COALESCE((ar.conclusion->>'ignore')::boolean, false)
       ),
       current_metrics AS (
-          -- Get CURRENT test run's metric statistics for historically regressed metrics
+          -- For each historical regression, get the CURRENT test run's value of
+          -- that same metric. The control_group_id is set to the HISTORICAL one
+          -- so the subsequent with_control CTE joins against the pre-regression baseline.
           SELECT
               ms.test_run_id,
-              hr.historical_control_group_id as control_group_id,  -- Use HISTORICAL control group, not current!
+              hr.historical_control_group_id as control_group_id,  -- Historical, not current!
               ms.application_dashboard_id,
               ms.panel_id::varchar as panel_id,
               ms.metric_name,
@@ -124,7 +193,10 @@ export class TrackedResultsSQLBuilder {
    */
   private buildWithControlCTE(): string {
     return `with_control AS (
-          -- Join with CURRENT control group statistics
+          -- Join with the HISTORICAL control group statistics (the baseline
+          -- from when the regression was first detected). Despite the comment
+          -- saying "current", cm.control_group_id was set to historical_control_group_id
+          -- in current_metrics, so this actually joins against the pre-regression baseline.
           SELECT
               cm.*,
               cgs.mean as control_mean,

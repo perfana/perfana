@@ -1,10 +1,99 @@
 /**
- * SQL Builder for ADAPT Results
+ * SQL Builder for ADAPT Results — Core Regression Detection Pipeline
  *
- * Responsible for building complex SQL queries for:
- * - ADAPT results processing
- * - Conclusion generation
- * - Tracked results re-evaluation
+ * Builds the SQL that implements ADAPT (Automated Detection of Application
+ * Performance Trends), comparing each metric from the current test run against
+ * its control group baseline to detect regressions, improvements, or no change.
+ *
+ * ════════════════════════════════════════════════════════════════════════════════
+ * CTE Pipeline (buildAdaptResultsSQL)
+ * ════════════════════════════════════════════════════════════════════════════════
+ *
+ *   test_metrics                    Select per-metric stats for the current test
+ *        │                          run from ds_metric_statistics.
+ *        ▼
+ *   with_control                    LEFT JOIN ds_control_group_statistics to pair
+ *        │                          each test metric with its baseline. Sets
+ *        │                          control_exists = true/false.
+ *        ▼
+ *   with_compare_config             Resolve the comparison configuration with a
+ *        │                          4-level hierarchical fallback:
+ *        │                            1. metric-level   (dashboard + panel + metric)
+ *        │                            2. panel-level    (dashboard + panel)
+ *        │                            3. dashboard-level (dashboard)
+ *        │                            4. global default
+ *        │                          Config contains: aggregation statistic to use,
+ *        │                          threshold values, higherIsBetter classification.
+ *        ▼
+ *   with_dynamic_statistics         Pick the configured aggregation statistic
+ *        │                          (mean, median, p95, etc.) for both test and
+ *        │                          control → test_stat_value, control_stat_value.
+ *        ▼
+ *   with_threshold_calculations     Compute upper/lower bounds and threshold checks:
+ *        │                            - pct:  control +/- percentageThreshold * control
+ *        │                            - iqr:  control +/- iqrThreshold * control_IQR
+ *        │                            - abs:  control +/- absoluteThreshold
+ *        │                          Each check has {valid, isDifference}.
+ *        ▼
+ *   final_results                   Determine conclusion label from checks:
+ *        │                            - allDifference = ALL checks exceeded (AND)
+ *        │                            - partialDifference = ANY check exceeded (OR)
+ *        │                          Then apply higherIsBetter to assign the label.
+ *        ▼
+ *   INSERT INTO ds_adapt_results    (UPSERT on conflict)
+ *
+ * ════════════════════════════════════════════════════════════════════════════════
+ * Threshold Calculation Details
+ * ════════════════════════════════════════════════════════════════════════════════
+ *
+ * Three independent threshold types form a band around the control value:
+ *
+ *   Percentage threshold (pct):
+ *     upper = control * (1 + pctThreshold)
+ *     lower = control * (1 - pctThreshold)
+ *     Example: pctThreshold=0.10 → 10% tolerance band
+ *
+ *   IQR threshold (iqr):
+ *     upper = control + (control_IQR * iqrThreshold)
+ *     lower = control - (control_IQR * iqrThreshold)
+ *     Adapts to the natural variability of the metric. A metric with high
+ *     run-to-run variance gets a wider band. Similar to Tukey's fences.
+ *
+ *   Absolute threshold (abs):
+ *     upper = control + absThreshold
+ *     lower = control - absThreshold
+ *     Fixed tolerance in the metric's unit (ms, bytes, etc.).
+ *
+ *   The "overall" threshold = GREATEST(upper bounds) / LEAST(lower bounds),
+ *   representing the widest acceptable band.
+ *
+ * ════════════════════════════════════════════════════════════════════════════════
+ * Conclusion Label Logic
+ * ════════════════════════════════════════════════════════════════════════════════
+ *
+ *   1. "incomparable" — control group missing or test value is NULL
+ *   2. "ignored"      — compare_config.ignore = true
+ *   3. allDifference=true (pct exceeded AND all valid checks exceeded):
+ *      - higherIsBetter = null  → "increase" / "decrease"
+ *      - higherIsBetter = true  → "improvement" (test > control) / "regression" (test < control)
+ *      - higherIsBetter = false → "improvement" (test < control) / "regression" (test > control)
+ *   4. partialDifference=true (some but not all checks exceeded):
+ *      - Same logic as above but with "partial" prefix
+ *   5. Otherwise → "no difference"
+ *
+ *   The higherIsBetter classification determines the semantic meaning:
+ *   - For throughput metrics (higherIsBetter=true): higher test value = improvement
+ *   - For latency metrics (higherIsBetter=false): lower test value = improvement
+ *   - When unclassified (null): neutral "increase"/"decrease" labels are used
+ *
+ * ════════════════════════════════════════════════════════════════════════════════
+ * Conclusion SQL (buildConclusionSQL)
+ * ════════════════════════════════════════════════════════════════════════════════
+ * Aggregates per-metric ADAPT results into a single pass/fail verdict per
+ * test run. Includes tracked regressions (historical regressions that persist).
+ *   - REGRESSION: any regressions or tracked regressions exist
+ *   - PASSED: no regressions
+ *   - SKIPPED: no comparable results at all
  */
 
 import { AdaptSQLFragments } from './sql-fragments.js';
@@ -118,14 +207,18 @@ export class AdaptResultsSQLBuilder {
       ),
 
       with_compare_config AS (
+          -- Resolve comparison config via 4-level fallback hierarchy.
+          -- COALESCE picks the most specific config that exists:
+          -- metric > panel > dashboard > global > hardcoded default.
+          -- This lets users override thresholds at any granularity.
           SELECT
               wc.*,
               COALESCE(
-                  cfg_metric.config_data,
-                  cfg_panel.config_data,
-                  cfg_dashboard.config_data,
-                  cfg_global.config_data,
-                  $${testRunIdsCount + 1}::jsonb
+                  cfg_metric.config_data,     -- 1. metric-specific override
+                  cfg_panel.config_data,      -- 2. panel-level default
+                  cfg_dashboard.config_data,  -- 3. dashboard-level default
+                  cfg_global.config_data,     -- 4. global default
+                  $${testRunIdsCount + 1}::jsonb  -- 5. hardcoded fallback
               ) as compare_config
           FROM with_control wc
           LEFT JOIN temp_config_cache cfg_metric ON (
@@ -151,9 +244,12 @@ export class AdaptResultsSQLBuilder {
       ),
 
       with_dynamic_statistics AS (
+          -- The compare_config specifies WHICH statistic to compare (e.g., "median",
+          -- "p95", "mean"). This CTE resolves that dynamically via CASE, so all
+          -- downstream threshold logic works on a single (test_stat_value, control_stat_value)
+          -- pair regardless of which statistic was chosen.
           SELECT
               wcc.*,
-              -- Dynamically select test and control values based on configured statistic
               CASE (wcc.compare_config->'thresholds'->>'aggregation')
                   WHEN 'mean' THEN wcc.test_mean
                   WHEN 'median' THEN wcc.test_median
@@ -201,9 +297,13 @@ export class AdaptResultsSQLBuilder {
       ${this.fragments.buildThresholdCalculationsCTE()},
 
       final_results AS (
+          -- Combine threshold checks into two summary flags and derive the
+          -- conclusion label. This is where the regression/improvement verdict
+          -- is made for each metric.
           SELECT
               wtc.*,
-              -- Calculate partialDifference (OR logic - ANY threshold exceeded)
+              -- partialDifference: OR logic — true if ANY threshold is exceeded.
+              -- Used for "partial regression" / "partial improvement" labels.
               CASE
                   WHEN (wtc.checks->'pct'->>'isDifference')::boolean = true OR
                        (wtc.checks->'iqr'->>'isDifference')::boolean = true OR
@@ -212,7 +312,10 @@ export class AdaptResultsSQLBuilder {
                   ELSE false
               END as partial_difference,
 
-              -- Calculate allDifference (AND logic - ALL configured thresholds exceeded)
+              -- allDifference: AND logic — true only if ALL configured (valid)
+              -- thresholds are exceeded. Invalid checks (e.g., IQR when control_iqr
+              -- is null) default to true so they don't block the AND.
+              -- Used for "regression" / "improvement" labels (full, not partial).
               CASE
                   WHEN (wtc.checks->'pct'->>'isDifference')::boolean = true AND
                        (CASE WHEN (wtc.checks->'iqr'->>'valid')::boolean = true

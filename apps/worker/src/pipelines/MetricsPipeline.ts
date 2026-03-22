@@ -5,6 +5,13 @@ import { GrafanaClient } from '@perfana/shared/services/grafana';
 import { getLogger as _getLogger } from '../lib/utils/logger.js';
 import { getGrafanaConfig, getGrafanaInstanceId } from '../config/grafana-config-cache.js';
 
+/**
+ * Number of records per INSERT batch.
+ * Chosen to stay within PostgreSQL's parameter limit: 200 rows x 21 columns = 4,200 params
+ * (well under the 65535 parameter ceiling). Matches the Python implementation batch size.
+ */
+const DB_INSERT_BATCH_SIZE = 200;
+
 interface MetricsInput {
   testRunId: string;
   benchmarksOnly?: boolean;
@@ -429,7 +436,7 @@ export class MetricsPipeline extends BasePipelineTypeORM {
    * Conservative batch size for parameter limit compliance
    */
   private async batchInsertRecords(manager: EntityManager, records: any[]): Promise<void> {
-    const batchSize = 200; // Conservative batch size from Python implementation
+    const batchSize = DB_INSERT_BATCH_SIZE;
 
     for (let i = 0; i < records.length; i += batchSize) {
       const batch = records.slice(i, i + batchSize);

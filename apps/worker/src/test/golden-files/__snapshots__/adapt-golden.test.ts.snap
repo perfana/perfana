@@ -75,14 +75,18 @@ exports[`ADAPT SQL Builder Golden-File Tests > AdaptResultsSQLBuilder > buildAda
       ),
 
       with_compare_config AS (
+          -- Resolve comparison config via 4-level fallback hierarchy.
+          -- COALESCE picks the most specific config that exists:
+          -- metric > panel > dashboard > global > hardcoded default.
+          -- This lets users override thresholds at any granularity.
           SELECT
               wc.*,
               COALESCE(
-                  cfg_metric.config_data,
-                  cfg_panel.config_data,
-                  cfg_dashboard.config_data,
-                  cfg_global.config_data,
-                  $3::jsonb
+                  cfg_metric.config_data,     -- 1. metric-specific override
+                  cfg_panel.config_data,      -- 2. panel-level default
+                  cfg_dashboard.config_data,  -- 3. dashboard-level default
+                  cfg_global.config_data,     -- 4. global default
+                  $3::jsonb  -- 5. hardcoded fallback
               ) as compare_config
           FROM with_control wc
           LEFT JOIN temp_config_cache cfg_metric ON (
@@ -108,9 +112,12 @@ exports[`ADAPT SQL Builder Golden-File Tests > AdaptResultsSQLBuilder > buildAda
       ),
 
       with_dynamic_statistics AS (
+          -- The compare_config specifies WHICH statistic to compare (e.g., "median",
+          -- "p95", "mean"). This CTE resolves that dynamically via CASE, so all
+          -- downstream threshold logic works on a single (test_stat_value, control_stat_value)
+          -- pair regardless of which statistic was chosen.
           SELECT
               wcc.*,
-              -- Dynamically select test and control values based on configured statistic
               CASE (wcc.compare_config->'thresholds'->>'aggregation')
                   WHEN 'mean' THEN wcc.test_mean
                   WHEN 'median' THEN wcc.test_median
@@ -309,9 +316,13 @@ exports[`ADAPT SQL Builder Golden-File Tests > AdaptResultsSQLBuilder > buildAda
       ),
 
       final_results AS (
+          -- Combine threshold checks into two summary flags and derive the
+          -- conclusion label. This is where the regression/improvement verdict
+          -- is made for each metric.
           SELECT
               wtc.*,
-              -- Calculate partialDifference (OR logic - ANY threshold exceeded)
+              -- partialDifference: OR logic — true if ANY threshold is exceeded.
+              -- Used for "partial regression" / "partial improvement" labels.
               CASE
                   WHEN (wtc.checks->'pct'->>'isDifference')::boolean = true OR
                        (wtc.checks->'iqr'->>'isDifference')::boolean = true OR
@@ -320,7 +331,10 @@ exports[`ADAPT SQL Builder Golden-File Tests > AdaptResultsSQLBuilder > buildAda
                   ELSE false
               END as partial_difference,
 
-              -- Calculate allDifference (AND logic - ALL configured thresholds exceeded)
+              -- allDifference: AND logic — true only if ALL configured (valid)
+              -- thresholds are exceeded. Invalid checks (e.g., IQR when control_iqr
+              -- is null) default to true so they don't block the AND.
+              -- Used for "regression" / "improvement" labels (full, not partial).
               CASE
                   WHEN (wtc.checks->'pct'->>'isDifference')::boolean = true AND
                        (CASE WHEN (wtc.checks->'iqr'->>'valid')::boolean = true
@@ -689,14 +703,18 @@ exports[`ADAPT SQL Builder Golden-File Tests > AdaptResultsSQLBuilder > buildAda
       ),
 
       with_compare_config AS (
+          -- Resolve comparison config via 4-level fallback hierarchy.
+          -- COALESCE picks the most specific config that exists:
+          -- metric > panel > dashboard > global > hardcoded default.
+          -- This lets users override thresholds at any granularity.
           SELECT
               wc.*,
               COALESCE(
-                  cfg_metric.config_data,
-                  cfg_panel.config_data,
-                  cfg_dashboard.config_data,
-                  cfg_global.config_data,
-                  $3::jsonb
+                  cfg_metric.config_data,     -- 1. metric-specific override
+                  cfg_panel.config_data,      -- 2. panel-level default
+                  cfg_dashboard.config_data,  -- 3. dashboard-level default
+                  cfg_global.config_data,     -- 4. global default
+                  $3::jsonb  -- 5. hardcoded fallback
               ) as compare_config
           FROM with_control wc
           LEFT JOIN temp_config_cache cfg_metric ON (
@@ -722,9 +740,12 @@ exports[`ADAPT SQL Builder Golden-File Tests > AdaptResultsSQLBuilder > buildAda
       ),
 
       with_dynamic_statistics AS (
+          -- The compare_config specifies WHICH statistic to compare (e.g., "median",
+          -- "p95", "mean"). This CTE resolves that dynamically via CASE, so all
+          -- downstream threshold logic works on a single (test_stat_value, control_stat_value)
+          -- pair regardless of which statistic was chosen.
           SELECT
               wcc.*,
-              -- Dynamically select test and control values based on configured statistic
               CASE (wcc.compare_config->'thresholds'->>'aggregation')
                   WHEN 'mean' THEN wcc.test_mean
                   WHEN 'median' THEN wcc.test_median
@@ -923,9 +944,13 @@ exports[`ADAPT SQL Builder Golden-File Tests > AdaptResultsSQLBuilder > buildAda
       ),
 
       final_results AS (
+          -- Combine threshold checks into two summary flags and derive the
+          -- conclusion label. This is where the regression/improvement verdict
+          -- is made for each metric.
           SELECT
               wtc.*,
-              -- Calculate partialDifference (OR logic - ANY threshold exceeded)
+              -- partialDifference: OR logic — true if ANY threshold is exceeded.
+              -- Used for "partial regression" / "partial improvement" labels.
               CASE
                   WHEN (wtc.checks->'pct'->>'isDifference')::boolean = true OR
                        (wtc.checks->'iqr'->>'isDifference')::boolean = true OR
@@ -934,7 +959,10 @@ exports[`ADAPT SQL Builder Golden-File Tests > AdaptResultsSQLBuilder > buildAda
                   ELSE false
               END as partial_difference,
 
-              -- Calculate allDifference (AND logic - ALL configured thresholds exceeded)
+              -- allDifference: AND logic — true only if ALL configured (valid)
+              -- thresholds are exceeded. Invalid checks (e.g., IQR when control_iqr
+              -- is null) default to true so they don't block the AND.
+              -- Used for "regression" / "improvement" labels (full, not partial).
               CASE
                   WHEN (wtc.checks->'pct'->>'isDifference')::boolean = true AND
                        (CASE WHEN (wtc.checks->'iqr'->>'valid')::boolean = true
@@ -1330,7 +1358,8 @@ exports[`ADAPT SQL Builder Golden-File Tests > AdaptResultsSQLBuilder > buildCon
 exports[`ADAPT SQL Builder Golden-File Tests > TrackedResultsSQLBuilder > buildTrackedResultsSQL > should generate stable SQL (snapshot) 1`] = `
 "
       WITH control_group_test_runs AS (
-          -- Get test runs from control group arrays that need to be tracked
+          -- Expand the control group's test_runs[] array into individual rows.
+          -- Each of these past test runs will be checked for historical regressions.
           SELECT DISTINCT
               cg.control_group_id,
               unnest(cg.test_runs) as tracked_test_run_id
@@ -1338,7 +1367,9 @@ exports[`ADAPT SQL Builder Golden-File Tests > TrackedResultsSQLBuilder > buildT
           WHERE cg.control_group_id IN ($1, $2)
       ),
       filtered_tracked_test_runs AS (
-          -- Filter tracked test runs by ADAPT config
+          -- Skip runs where the user explicitly accepted the differences
+          -- (differencesAccepted=ACCEPTED) or where the run was in DEBUG mode.
+          -- These should not propagate as tracked regressions.
           SELECT
               cgtr.control_group_id,
               cgtr.tracked_test_run_id
@@ -1348,7 +1379,9 @@ exports[`ADAPT SQL Builder Golden-File Tests > TrackedResultsSQLBuilder > buildT
           AND COALESCE((tr.adapt_config->>'mode'), '') != 'DEBUG'
       ),
       historical_regressions AS (
-          -- Get historical ADAPT results that showed differences
+          -- Find ADAPT results from tracked test runs that showed any kind of
+          -- difference (increase, decrease, regression, improvement). These are
+          -- candidates for re-evaluation against the current test run's data.
           SELECT
               fttr.control_group_id as current_test_run_id,
               fttr.tracked_test_run_id,
@@ -1358,7 +1391,10 @@ exports[`ADAPT SQL Builder Golden-File Tests > TrackedResultsSQLBuilder > buildT
               ar.panel_id,
               ar.metric_name,
               ar.conclusion as tracked_conclusion,
-              ar.control_group_id as historical_control_group_id  -- CRITICAL: Use the historical control group!
+              -- CRITICAL: Preserve the control group that was active when the
+              -- regression was first detected. This is the "pre-regression"
+              -- baseline we compare against — NOT the current control group.
+              ar.control_group_id as historical_control_group_id
           FROM filtered_tracked_test_runs fttr
           JOIN ds_adapt_results ar ON ar.test_run_id = fttr.tracked_test_run_id
           -- TODO: Find out what the impact can be of leaving this join out. This join fails with dynatrace data because those application_dashboard_id's are in dynatrace_dql table
@@ -1368,10 +1404,12 @@ exports[`ADAPT SQL Builder Golden-File Tests > TrackedResultsSQLBuilder > buildT
           AND NOT COALESCE((ar.conclusion->>'ignore')::boolean, false)
       ),
       current_metrics AS (
-          -- Get CURRENT test run's metric statistics for historically regressed metrics
+          -- For each historical regression, get the CURRENT test run's value of
+          -- that same metric. The control_group_id is set to the HISTORICAL one
+          -- so the subsequent with_control CTE joins against the pre-regression baseline.
           SELECT
               ms.test_run_id,
-              hr.historical_control_group_id as control_group_id,  -- Use HISTORICAL control group, not current!
+              hr.historical_control_group_id as control_group_id,  -- Historical, not current!
               ms.application_dashboard_id,
               ms.panel_id::varchar as panel_id,
               ms.metric_name,
@@ -1412,7 +1450,10 @@ exports[`ADAPT SQL Builder Golden-File Tests > TrackedResultsSQLBuilder > buildT
           )
       ),
       with_control AS (
-          -- Join with CURRENT control group statistics
+          -- Join with the HISTORICAL control group statistics (the baseline
+          -- from when the regression was first detected). Despite the comment
+          -- saying "current", cm.control_group_id was set to historical_control_group_id
+          -- in current_metrics, so this actually joins against the pre-regression baseline.
           SELECT
               cm.*,
               cgs.mean as control_mean,
