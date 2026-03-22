@@ -204,14 +204,6 @@ export function SLOFormFields({
           }}
         />
       </Grid>
-                    </Typography>
-                  </Box>
-                </Box>
-              );
-            }}
-          />
-        </Grid>
-      )}
 
       {/* Grafana Panel Selection */}
       {sloFormData.source === 'grafana' && sloFormData.selectedDashboard && (
