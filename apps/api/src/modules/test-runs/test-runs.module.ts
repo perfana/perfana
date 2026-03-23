@@ -48,6 +48,7 @@ import { QueueModule } from '../queue/queue.module';
 import { TestRunsGateway } from './gateways/test-runs.gateway';
 import { WebSocketAuthGuard } from './guards/websocket-auth.guard';
 import { ApiKeysModule } from '../api-keys/api-keys.module';
+import { TempoModule } from '../tempo/tempo.module';
 import { CommonModule } from '../../common/common.module';
 import {
   TestRun,
@@ -120,6 +121,7 @@ import {
     QueueModule,
     ApiKeysModule, // Required for WebSocket authentication
     CommonModule, // Provides AuthorizationService for RBAC
+    TempoModule, // Provides TempoService for trace detail fetching
   ],
   controllers: [
     // Specific routes MUST come before parameterized routes
