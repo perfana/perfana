@@ -30,7 +30,7 @@ if (!fs.existsSync(sqlPath)) {
 }
 
 const sql = fs.readFileSync(sqlPath, 'utf8');
-const escaped = sql.replace(/\\/g, '\\\\').replace(/`/g, '\\`').replace(/\$/g, '\\$');
+const escaped = sql.replace(/\\/g, '\\\\').replace(/`/g, '\\`').replace(/\$\{/g, '\\${');
 
 const output = `/**
  * Embedded schema SQL - generated from database/schema_dump.sql

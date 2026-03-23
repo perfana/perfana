@@ -44,4 +44,6 @@ jobs:
             Post findings as review comments on specific lines.
             Use severity levels: red circle for must fix, yellow circle for nit, info for informational.
             If everything looks good, approve with a brief summary.
-          claude_args: "--max-turns 10"
+
+            Skip reviewing auto-generated files like schema-sql.ts — they contain embedded SQL data, not logic.
+          claude_args: "--max-turns 25"

@@ -76,9 +76,9 @@ CREATE TYPE public.tracing_instances_tracing_ui_enum AS ENUM (
 
 CREATE FUNCTION public.tags_hash(tags text[]) RETURNS text
     LANGUAGE sql IMMUTABLE
-    AS \$\$
+    AS $$
       SELECT md5(COALESCE(array_to_string(tags, ','), ''))
-    \$\$;
+    $$;
 
 --
 -- Name: can_access_resource(uuid, uuid, text); Type: FUNCTION; Schema: public; Owner: -
@@ -86,7 +86,7 @@ CREATE FUNCTION public.tags_hash(tags text[]) RETURNS text
 
 CREATE FUNCTION public.can_access_resource(resource_org_id uuid, resource_team_id uuid, resource_created_by text) RETURNS boolean
     LANGUAGE plpgsql STABLE SECURITY DEFINER
-    AS \$\$
+    AS $$
     BEGIN
       IF is_global_admin() THEN
         RETURN TRUE;
@@ -108,7 +108,7 @@ CREATE FUNCTION public.can_access_resource(resource_org_id uuid, resource_team_i
       END IF;
       RETURN FALSE;
     END;
-    \$\$;
+    $$;
 
 
 --
@@ -117,7 +117,7 @@ CREATE FUNCTION public.can_access_resource(resource_org_id uuid, resource_team_i
 
 CREATE FUNCTION public.can_modify_resource(resource_org_id uuid, resource_team_id uuid DEFAULT NULL::uuid, resource_created_by text DEFAULT NULL::text) RETURNS boolean
     LANGUAGE plpgsql STABLE SECURITY DEFINER
-    AS \$\$
+    AS $$
       DECLARE
         user_id TEXT;
         user_orgs UUID[];
@@ -185,7 +185,7 @@ CREATE FUNCTION public.can_modify_resource(resource_org_id uuid, resource_team_i
         -- Deny modification if no conditions match
         RETURN FALSE;
       END;
-      \$\$;
+      $$;
 
 
 --
@@ -194,11 +194,11 @@ CREATE FUNCTION public.can_modify_resource(resource_org_id uuid, resource_team_i
 
 CREATE FUNCTION public.current_user_id() RETURNS text
     LANGUAGE plpgsql STABLE SECURITY DEFINER
-    AS \$\$
+    AS $$
     BEGIN
       RETURN current_setting('app.current_user_id', true);
     END;
-    \$\$;
+    $$;
 
 
 --
@@ -207,7 +207,7 @@ CREATE FUNCTION public.current_user_id() RETURNS text
 
 CREATE FUNCTION public.current_user_organizations() RETURNS uuid[]
     LANGUAGE plpgsql STABLE SECURITY DEFINER
-    AS \$\$
+    AS $$
     DECLARE
       orgs_json TEXT;
       org_array UUID[];
@@ -220,7 +220,7 @@ CREATE FUNCTION public.current_user_organizations() RETURNS uuid[]
       FROM jsonb_array_elements_text(orgs_json::jsonb) AS elem;
       RETURN COALESCE(org_array, ARRAY[]::UUID[]);
     END;
-    \$\$;
+    $$;
 
 
 --
@@ -229,7 +229,7 @@ CREATE FUNCTION public.current_user_organizations() RETURNS uuid[]
 
 CREATE FUNCTION public.current_user_teams() RETURNS uuid[]
     LANGUAGE plpgsql STABLE SECURITY DEFINER
-    AS \$\$
+    AS $$
     DECLARE
       teams_json TEXT;
       team_array UUID[];
@@ -242,7 +242,7 @@ CREATE FUNCTION public.current_user_teams() RETURNS uuid[]
       FROM jsonb_array_elements_text(teams_json::jsonb) AS elem;
       RETURN COALESCE(team_array, ARRAY[]::UUID[]);
     END;
-    \$\$;
+    $$;
 
 
 --
@@ -251,7 +251,7 @@ CREATE FUNCTION public.current_user_teams() RETURNS uuid[]
 
 CREATE FUNCTION public.is_global_admin() RETURNS boolean
     LANGUAGE plpgsql STABLE SECURITY DEFINER
-    AS \$\$
+    AS $$
     DECLARE
       user_roles TEXT;
     BEGIN
@@ -261,7 +261,7 @@ CREATE FUNCTION public.is_global_admin() RETURNS boolean
         user_roles LIKE '%system-admin%'
       );
     END;
-    \$\$;
+    $$;
 
 
 --
@@ -270,7 +270,7 @@ CREATE FUNCTION public.is_global_admin() RETURNS boolean
 
 CREATE FUNCTION public.mark_results_fresh_on_analysis() RETURNS trigger
     LANGUAGE plpgsql
-    AS \$\$
+    AS $$
 BEGIN
   -- Only mark as fresh if this appears to be a real analysis update
   -- (i.e., when statistical data is being updated, not just stale status)
@@ -299,7 +299,7 @@ BEGIN
 
   RETURN NEW;
 END;
-\$\$;
+$$;
 
 
 --
@@ -308,7 +308,7 @@ END;
 
 CREATE FUNCTION public.mark_results_stale_on_config_change() RETURNS trigger
     LANGUAGE plpgsql
-    AS \$\$
+    AS $$
 BEGIN
     -- Only proceed if config_data actually changed
     IF OLD.config_data IS NOT DISTINCT FROM NEW.config_data THEN
@@ -344,7 +344,7 @@ BEGIN
 
     RETURN NEW;
 END;
-\$\$;
+$$;
 
 
 --
@@ -353,7 +353,7 @@ END;
 
 CREATE FUNCTION public.migrate_benchmark_from_mongodb(p_application character varying, p_test_environment character varying, p_test_type character varying, p_grafana character varying, p_dashboard_label character varying, p_dashboard_id integer, p_dashboard_uid character varying, p_panel jsonb, p_generic_check_id character varying DEFAULT NULL::character varying, p_application_dashboard_id character varying DEFAULT NULL::character varying, p_valid boolean DEFAULT true) RETURNS uuid
     LANGUAGE plpgsql
-    AS \$\$
+    AS $$
 DECLARE
     v_benchmark_id uuid;
     v_system_id uuid;
@@ -400,7 +400,7 @@ BEGIN
     
     RETURN v_benchmark_id;
 END;
-\$\$;
+$$;
 
 
 --
@@ -409,7 +409,7 @@ END;
 
 CREATE FUNCTION public.percentile_agg_finalfunc(vals double precision[]) RETURNS jsonb
     LANGUAGE plpgsql IMMUTABLE
-    AS \$\$
+    AS $$
 DECLARE
   result JSONB;
 BEGIN
@@ -430,7 +430,7 @@ BEGIN
 
   RETURN result;
 END;
-\$\$;
+$$;
 
 
 --
@@ -439,12 +439,12 @@ END;
 
 CREATE FUNCTION public.update_deep_links_updated_at() RETURNS trigger
     LANGUAGE plpgsql
-    AS \$\$
+    AS $$
 BEGIN
     NEW.updated_at = NOW();
     RETURN NEW;
 END;
-\$\$;
+$$;
 
 
 --
@@ -453,12 +453,12 @@ END;
 
 CREATE FUNCTION public.update_generic_deep_links_updated_at() RETURNS trigger
     LANGUAGE plpgsql
-    AS \$\$
+    AS $$
 BEGIN
     NEW.updated_at = NOW();
     RETURN NEW;
 END;
-\$\$;
+$$;
 
 
 --
@@ -467,12 +467,12 @@ END;
 
 CREATE FUNCTION public.update_graph_preset_timestamp() RETURNS trigger
     LANGUAGE plpgsql
-    AS \$\$
+    AS $$
       BEGIN
         NEW.updated_at = CURRENT_TIMESTAMP;
         RETURN NEW;
       END;
-      \$\$;
+      $$;
 
 
 --
@@ -481,12 +481,12 @@ CREATE FUNCTION public.update_graph_preset_timestamp() RETURNS trigger
 
 CREATE FUNCTION public.update_graph_presets_updated_at() RETURNS trigger
     LANGUAGE plpgsql
-    AS \$\$
+    AS $$
 BEGIN
     NEW.updated_at = CURRENT_TIMESTAMP;
     RETURN NEW;
 END;
-\$\$;
+$$;
 
 
 --
@@ -495,12 +495,12 @@ END;
 
 CREATE FUNCTION public.update_tracing_instance_timestamp() RETURNS trigger
     LANGUAGE plpgsql
-    AS \$\$
+    AS $$
       BEGIN
         NEW.updated_at = CURRENT_TIMESTAMP;
         RETURN NEW;
       END;
-      \$\$;
+      $$;
 
 
 --
@@ -509,12 +509,12 @@ CREATE FUNCTION public.update_tracing_instance_timestamp() RETURNS trigger
 
 CREATE FUNCTION public.update_tracing_service_timestamp() RETURNS trigger
     LANGUAGE plpgsql
-    AS \$\$
+    AS $$
       BEGIN
         NEW.updated_at = CURRENT_TIMESTAMP;
         RETURN NEW;
       END;
-      \$\$;
+      $$;
 
 
 --
@@ -523,12 +523,12 @@ CREATE FUNCTION public.update_tracing_service_timestamp() RETURNS trigger
 
 CREATE FUNCTION public.update_transaction_apdex_threshold_timestamp() RETURNS trigger
     LANGUAGE plpgsql
-    AS \$\$
+    AS $$
       BEGIN
         NEW.updated_at = CURRENT_TIMESTAMP;
         RETURN NEW;
       END;
-      \$\$;
+      $$;
 
 
 --
@@ -537,12 +537,12 @@ CREATE FUNCTION public.update_transaction_apdex_threshold_timestamp() RETURNS tr
 
 CREATE FUNCTION public.update_updated_at_column() RETURNS trigger
     LANGUAGE plpgsql
-    AS \$\$
+    AS $$
 BEGIN
     NEW.updated_at = NOW();
     RETURN NEW;
 END;
-\$\$;
+$$;
 
 
 --
@@ -551,12 +551,12 @@ END;
 
 CREATE FUNCTION public.update_workload_apdex_threshold_timestamp() RETURNS trigger
     LANGUAGE plpgsql
-    AS \$\$
+    AS $$
       BEGIN
         NEW.updated_at = CURRENT_TIMESTAMP;
         RETURN NEW;
       END;
-      \$\$;
+      $$;
 
 
 --
@@ -565,12 +565,12 @@ CREATE FUNCTION public.update_workload_apdex_threshold_timestamp() RETURNS trigg
 
 CREATE FUNCTION public.update_workload_transaction_apdex_threshold_timestamp() RETURNS trigger
     LANGUAGE plpgsql
-    AS \$\$
+    AS $$
       BEGIN
         NEW.updated_at = CURRENT_TIMESTAMP;
         RETURN NEW;
       END;
-      \$\$;
+      $$;
 
 
 --
@@ -579,7 +579,7 @@ CREATE FUNCTION public.update_workload_transaction_apdex_threshold_timestamp() R
 
 CREATE FUNCTION public.validate_benchmark_configuration() RETURNS trigger
     LANGUAGE plpgsql
-    AS \$\$
+    AS $$
 BEGIN
     -- Configuration must be a valid JSON object
     IF NEW.configuration IS NULL OR jsonb_typeof(NEW.configuration) != 'object' THEN
@@ -607,7 +607,7 @@ BEGIN
     
     RETURN NEW;
 END;
-\$\$;
+$$;
 
 
 SET default_tablespace = '';
