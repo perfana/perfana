@@ -310,4 +310,165 @@ describe('PerfanaClient', () => {
       assert.equal(result[0].id, 'dl-1');
     });
   });
+
+  // ─── getConnectedSources ──────────────────────────────────────────────────
+
+  describe('getConnectedSources', () => {
+    it('fetches from correct URL', async () => {
+      const body = { grafana: { available: true }, tempo: { available: false }, pyroscope: { available: false }, dynatrace: { available: false } };
+      const fetchMock = mockFetch(200, body);
+      await client.getConnectedSources('run-1');
+
+      const url = (fetchMock.mock.calls[0] as { arguments: unknown[] }).arguments[0] as string;
+      assert.equal(url, 'http://localhost:3001/api/test-runs/run-1/data-sources');
+    });
+
+    it('throws on 404', async () => {
+      mockFetch(404, { message: 'Not found' });
+      await assert.rejects(
+        () => client.getConnectedSources('nonexistent'),
+        (err: Error) => { assert.ok(err.message.includes('404')); return true; },
+      );
+    });
+  });
+
+  // ─── getSlowTraces ────────────────────────────────────────────────────────
+
+  describe('getSlowTraces', () => {
+    it('fetches with default params', async () => {
+      const fetchMock = mockFetch(200, []);
+      await client.getSlowTraces('run-1');
+
+      const url = (fetchMock.mock.calls[0] as { arguments: unknown[] }).arguments[0] as string;
+      assert.ok(url.includes('/test-runs/run-1/traces/slow'));
+      assert.ok(url.includes('limit=10'));
+    });
+
+    it('includes service filter when provided', async () => {
+      const fetchMock = mockFetch(200, []);
+      await client.getSlowTraces('run-1', 'checkout-service', 5);
+
+      const url = (fetchMock.mock.calls[0] as { arguments: unknown[] }).arguments[0] as string;
+      assert.ok(url.includes('service=checkout-service'));
+      assert.ok(url.includes('limit=5'));
+    });
+  });
+
+  // ─── getErrorTraces ───────────────────────────────────────────────────────
+
+  describe('getErrorTraces', () => {
+    it('fetches from correct URL with params', async () => {
+      const fetchMock = mockFetch(200, []);
+      await client.getErrorTraces('run-1', 'api-gateway', 20);
+
+      const url = (fetchMock.mock.calls[0] as { arguments: unknown[] }).arguments[0] as string;
+      assert.ok(url.includes('/test-runs/run-1/traces/errors'));
+      assert.ok(url.includes('service=api-gateway'));
+      assert.ok(url.includes('limit=20'));
+    });
+
+    it('omits service when not provided', async () => {
+      const fetchMock = mockFetch(200, []);
+      await client.getErrorTraces('run-1');
+
+      const url = (fetchMock.mock.calls[0] as { arguments: unknown[] }).arguments[0] as string;
+      assert.ok(!url.includes('service='));
+    });
+  });
+
+  // ─── getTraceDetail ───────────────────────────────────────────────────────
+
+  describe('getTraceDetail', () => {
+    it('fetches from correct URL', async () => {
+      const fetchMock = mockFetch(200, { traceId: 'abc123', spans: [], durationMs: 100, spanCount: 0 });
+      await client.getTraceDetail('run-1', 'abc123');
+
+      const url = (fetchMock.mock.calls[0] as { arguments: unknown[] }).arguments[0] as string;
+      assert.equal(url, 'http://localhost:3001/api/test-runs/run-1/traces/abc123');
+    });
+
+    it('encodes traceId with special chars', async () => {
+      const fetchMock = mockFetch(200, { traceId: 'a/b', spans: [], durationMs: 0, spanCount: 0 });
+      await client.getTraceDetail('run-1', 'a/b');
+
+      const url = (fetchMock.mock.calls[0] as { arguments: unknown[] }).arguments[0] as string;
+      assert.ok(url.includes('a%2Fb'));
+    });
+  });
+
+  // ─── getFlamegraph ────────────────────────────────────────────────────────
+
+  describe('getFlamegraph', () => {
+    it('sends service and default detailLevel', async () => {
+      const fetchMock = mockFetch(200, { collapsedStacks: '', stackCount: 0, truncated: false, totalSamples: 0 });
+      await client.getFlamegraph('run-1', 'my-app');
+
+      const url = (fetchMock.mock.calls[0] as { arguments: unknown[] }).arguments[0] as string;
+      assert.ok(url.includes('service=my-app'));
+      assert.ok(url.includes('detailLevel=summary'));
+    });
+
+    it('sends full detailLevel when specified', async () => {
+      const fetchMock = mockFetch(200, { collapsedStacks: '', stackCount: 0, truncated: false, totalSamples: 0 });
+      await client.getFlamegraph('run-1', 'my-app', 'full');
+
+      const url = (fetchMock.mock.calls[0] as { arguments: unknown[] }).arguments[0] as string;
+      assert.ok(url.includes('detailLevel=full'));
+    });
+  });
+
+  // ─── getHotspots ──────────────────────────────────────────────────────────
+
+  describe('getHotspots', () => {
+    it('sends service and default limit', async () => {
+      const fetchMock = mockFetch(200, []);
+      await client.getHotspots('run-1', 'my-app');
+
+      const url = (fetchMock.mock.calls[0] as { arguments: unknown[] }).arguments[0] as string;
+      assert.ok(url.includes('service=my-app'));
+      assert.ok(url.includes('limit=20'));
+    });
+
+    it('respects custom limit', async () => {
+      const fetchMock = mockFetch(200, []);
+      await client.getHotspots('run-1', 'my-app', 5);
+
+      const url = (fetchMock.mock.calls[0] as { arguments: unknown[] }).arguments[0] as string;
+      assert.ok(url.includes('limit=5'));
+    });
+  });
+
+  // ─── getDashboardSnapshot ─────────────────────────────────────────────────
+
+  describe('getDashboardSnapshot', () => {
+    it('sends dashboard as query param', async () => {
+      const fetchMock = mockFetch(200, { dashboardName: 'CPU', panels: [] });
+      await client.getDashboardSnapshot('run-1', 'Docker container metrics');
+
+      const url = (fetchMock.mock.calls[0] as { arguments: unknown[] }).arguments[0] as string;
+      assert.ok(url.includes('/test-runs/run-1/dashboard-snapshot'));
+      assert.ok(url.includes('dashboard=Docker+container+metrics'));
+    });
+  });
+
+  // ─── getDynatraceProblems ─────────────────────────────────────────────────
+
+  describe('getDynatraceProblems', () => {
+    it('fetches from correct URL', async () => {
+      const fetchMock = mockFetch(200, []);
+      await client.getDynatraceProblems('run-1');
+
+      const url = (fetchMock.mock.calls[0] as { arguments: unknown[] }).arguments[0] as string;
+      assert.equal(url, 'http://localhost:3001/api/test-runs/run-1/dynatrace/problems');
+    });
+
+    it('returns parsed problems array', async () => {
+      const problems = [{ problemId: 'P-1', title: 'High CPU', severity: 'ERROR', status: 'OPEN', impact: 'APPLICATION', startTime: '2024-01-01T00:00:00Z', endTime: null, affectedEntities: [] }];
+      mockFetch(200, problems);
+      const result = await client.getDynatraceProblems('run-1');
+
+      assert.equal(result.length, 1);
+      assert.equal(result[0].problemId, 'P-1');
+    });
+  });
 });

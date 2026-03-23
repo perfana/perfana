@@ -305,6 +305,143 @@ server.tool(
   }),
 );
 
+// ─── Tool: list_connected_sources ────────────────────────────────────────────
+
+server.tool(
+  'list_connected_sources',
+  'Discover which data sources (Grafana, Tempo, Pyroscope, Dynatrace) are connected for a test run. Call this first to know which investigation tools are available before starting root cause analysis.',
+  { testRunId: z.string().describe('The test run ID') },
+  safeTool(async ({ testRunId }) => {
+    const sources = await client.getConnectedSources(testRunId);
+    return { content: [{ type: 'text', text: JSON.stringify(sources, null, 2) }] };
+  }),
+);
+
+// ─── Tool: get_grafana_dashboard_snapshot ─────────────────────────────────────
+
+server.tool(
+  'get_grafana_dashboard_snapshot',
+  'Get a summary snapshot of all panels in a Grafana dashboard for a test run — returns min/max/avg/last for each metric in each panel. Much faster than querying individual panels. Use get_available_metrics to find dashboard names first.',
+  {
+    testRunId: z.string().describe('The test run ID'),
+    dashboard: z.string().describe('Dashboard label or name (from get_available_metrics)'),
+  },
+  safeTool(async ({ testRunId, dashboard }) => {
+    const snapshot = await client.getDashboardSnapshot(testRunId, dashboard);
+    return { content: [{ type: 'text', text: JSON.stringify(snapshot, null, 2) }] };
+  }),
+);
+
+// ─── Tool: get_slow_traces ───────────────────────────────────────────────────
+
+server.tool(
+  'get_slow_traces',
+  'Get the slowest distributed traces from Tempo/Jaeger for a test run, sorted by duration. Useful for identifying which requests took the longest and drilling into span-level bottlenecks.',
+  {
+    testRunId: z.string().describe('The test run ID'),
+    service: z.string().optional().describe('Filter by service name (optional — omit to search all services)'),
+    limit: z.number().optional().default(10).describe('Number of traces to return (default: 10, max: 50)'),
+  },
+  safeTool(async ({ testRunId, service, limit }) => {
+    const traces = await client.getSlowTraces(testRunId, service, Math.min(limit, 50));
+    return { content: [{ type: 'text', text: JSON.stringify(traces, null, 2) }] };
+  }),
+);
+
+// ─── Tool: get_trace_detail ──────────────────────────────────────────────────
+
+server.tool(
+  'get_trace_detail',
+  'Get the full span breakdown for a specific trace — shows every service call, database query, and external request with timing. Use after get_slow_traces to drill into a specific slow trace.',
+  {
+    testRunId: z.string().describe('The test run ID (used to resolve which Tempo instance to query)'),
+    traceId: z.string().describe('The trace ID from get_slow_traces results'),
+  },
+  safeTool(async ({ testRunId, traceId }) => {
+    const detail = await client.getTraceDetail(testRunId, traceId);
+
+    // Truncate if too many spans
+    if (detail.spans.length > 100) {
+      detail.spans = detail.spans.slice(0, 100);
+      return {
+        content: [{
+          type: 'text',
+          text: JSON.stringify({
+            ...detail,
+            note: `Truncated from ${detail.spanCount} to 100 spans for readability`,
+          }, null, 2),
+        }],
+      };
+    }
+
+    return { content: [{ type: 'text', text: JSON.stringify(detail, null, 2) }] };
+  }),
+);
+
+// ─── Tool: get_error_traces ──────────────────────────────────────────────────
+
+server.tool(
+  'get_error_traces',
+  'Get distributed traces that contain errors from Tempo/Jaeger for a test run. Useful for identifying which requests failed and where the error originated in the service chain.',
+  {
+    testRunId: z.string().describe('The test run ID'),
+    service: z.string().optional().describe('Filter by service name (optional)'),
+    limit: z.number().optional().default(10).describe('Number of traces to return (default: 10, max: 50)'),
+  },
+  safeTool(async ({ testRunId, service, limit }) => {
+    const traces = await client.getErrorTraces(testRunId, service, Math.min(limit, 50));
+    return { content: [{ type: 'text', text: JSON.stringify(traces, null, 2) }] };
+  }),
+);
+
+// ─── Tool: get_flamegraph ────────────────────────────────────────────────────
+
+server.tool(
+  'get_flamegraph',
+  'Get CPU flamegraph data from Pyroscope for a service during a test run. Returns collapsed-stack format (one line per stack path with sample count) — ideal for identifying hot methods and GC pressure.',
+  {
+    testRunId: z.string().describe('The test run ID'),
+    service: z.string().describe('Application/service name as configured in Pyroscope'),
+    detailLevel: z
+      .enum(['summary', 'full'])
+      .optional()
+      .default('summary')
+      .describe('summary = top 50 stacks (~5KB), full = top 200 stacks (~20KB)'),
+  },
+  safeTool(async ({ testRunId, service, detailLevel }) => {
+    const result = await client.getFlamegraph(testRunId, service, detailLevel);
+    return { content: [{ type: 'text', text: JSON.stringify(result, null, 2) }] };
+  }),
+);
+
+// ─── Tool: get_hotspots ──────────────────────────────────────────────────────
+
+server.tool(
+  'get_hotspots',
+  'Get the top N hottest methods from Pyroscope for a service during a test run — sorted by CPU sample count. Faster than get_flamegraph for a quick overview of where CPU time is spent.',
+  {
+    testRunId: z.string().describe('The test run ID'),
+    service: z.string().describe('Application/service name as configured in Pyroscope'),
+    limit: z.number().optional().default(20).describe('Number of methods to return (default: 20)'),
+  },
+  safeTool(async ({ testRunId, service, limit }) => {
+    const hotspots = await client.getHotspots(testRunId, service, limit);
+    return { content: [{ type: 'text', text: JSON.stringify(hotspots, null, 2) }] };
+  }),
+);
+
+// ─── Tool: get_dynatrace_problems ────────────────────────────────────────────
+
+server.tool(
+  'get_dynatrace_problems',
+  'Get Dynatrace-detected problems (outages, slowdowns, resource contention) that occurred during a test run time window. Useful for correlating performance regressions with infrastructure issues detected by Dynatrace AI.',
+  { testRunId: z.string().describe('The test run ID') },
+  safeTool(async ({ testRunId }) => {
+    const problems = await client.getDynatraceProblems(testRunId);
+    return { content: [{ type: 'text', text: JSON.stringify(problems, null, 2) }] };
+  }),
+);
+
 // ─── Start ────────────────────────────────────────────────────────────────────
 
 const transport = new StdioServerTransport();

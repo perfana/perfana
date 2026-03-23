@@ -157,6 +157,82 @@ export class PerfanaClient {
       .map((r) => r.value);
   }
 
+  // ─── Data sources & cross-source investigation ───────────────────────────
+
+  async getConnectedSources(testRunId: string): Promise<ConnectedSources> {
+    return this.get<ConnectedSources>(
+      `/test-runs/${encodeURIComponent(testRunId)}/data-sources`,
+    );
+  }
+
+  async getSlowTraces(
+    testRunId: string,
+    service?: string,
+    limit: number = 10,
+  ): Promise<TraceSearchResult[]> {
+    const params = new URLSearchParams({ limit: String(limit) });
+    if (service) params.set('service', service);
+    return this.get<TraceSearchResult[]>(
+      `/test-runs/${encodeURIComponent(testRunId)}/traces/slow?${params}`,
+    );
+  }
+
+  async getErrorTraces(
+    testRunId: string,
+    service?: string,
+    limit: number = 10,
+  ): Promise<TraceSearchResult[]> {
+    const params = new URLSearchParams({ limit: String(limit) });
+    if (service) params.set('service', service);
+    return this.get<TraceSearchResult[]>(
+      `/test-runs/${encodeURIComponent(testRunId)}/traces/errors?${params}`,
+    );
+  }
+
+  async getTraceDetail(testRunId: string, traceId: string): Promise<TraceDetail> {
+    return this.get<TraceDetail>(
+      `/test-runs/${encodeURIComponent(testRunId)}/traces/${encodeURIComponent(traceId)}`,
+    );
+  }
+
+  async getFlamegraph(
+    testRunId: string,
+    service: string,
+    detailLevel: 'summary' | 'full' = 'summary',
+  ): Promise<FlamegraphResponse> {
+    const params = new URLSearchParams({ service, detailLevel });
+    return this.get<FlamegraphResponse>(
+      `/test-runs/${encodeURIComponent(testRunId)}/flamegraph?${params}`,
+    );
+  }
+
+  async getHotspots(
+    testRunId: string,
+    service: string,
+    limit: number = 20,
+  ): Promise<HotspotEntry[]> {
+    const params = new URLSearchParams({ service, limit: String(limit) });
+    return this.get<HotspotEntry[]>(
+      `/test-runs/${encodeURIComponent(testRunId)}/hotspots?${params}`,
+    );
+  }
+
+  async getDashboardSnapshot(
+    testRunId: string,
+    dashboard: string,
+  ): Promise<DashboardSnapshot> {
+    const params = new URLSearchParams({ dashboard });
+    return this.get<DashboardSnapshot>(
+      `/test-runs/${encodeURIComponent(testRunId)}/dashboard-snapshot?${params}`,
+    );
+  }
+
+  async getDynatraceProblems(testRunId: string): Promise<DynatraceProblem[]> {
+    return this.get<DynatraceProblem[]>(
+      `/test-runs/${encodeURIComponent(testRunId)}/dynatrace/problems`,
+    );
+  }
+
   // ─── HTTP ──────────────────────────────────────────────────────────────────
 
   private async get<T>(path: string): Promise<T> {
@@ -354,4 +430,94 @@ export interface ErrorDetail {
   responseData: string;
   requestHeaders: string;
   responseHeaders: string;
+}
+
+// ─── Data sources & cross-source investigation types ─────────────────────
+
+export interface ConnectedSources {
+  grafana: {
+    available: boolean;
+    instances: Array<{ id: string; label: string; url: string }>;
+    dashboardCount: number;
+  };
+  tempo: {
+    available: boolean;
+    instances: Array<{ id: string; label: string; apiUrl: string }>;
+  };
+  pyroscope: {
+    available: boolean;
+    instance: { id: string; label: string; backendUrl: string } | null;
+    configurations: Array<{ application: string; profiler: string }>;
+  };
+  dynatrace: {
+    available: boolean;
+    configs: Array<{ id: string; label: string; host: string }>;
+  };
+}
+
+export interface TraceSearchResult {
+  traceId: string;
+  durationMs: number;
+  startTimeUnixNano: string;
+  spanCount: number;
+  rootServiceName: string;
+  rootTraceName: string;
+}
+
+export interface TraceSpan {
+  traceId: string;
+  spanId: string;
+  parentSpanId?: string;
+  operationName: string;
+  serviceName: string;
+  startTimeUnixNano: string;
+  endTimeUnixNano: string;
+  durationNanos: number;
+  status?: { code: number; message?: string };
+  attributes: Record<string, unknown>;
+}
+
+export interface TraceDetail {
+  traceId: string;
+  spans: TraceSpan[];
+  durationMs: number;
+  spanCount: number;
+}
+
+export interface FlamegraphResponse {
+  collapsedStacks: string;
+  stackCount: number;
+  truncated: boolean;
+  totalSamples: number;
+}
+
+export interface HotspotEntry {
+  function: string;
+  samples: number;
+  percentage: number;
+}
+
+export interface DashboardSnapshot {
+  dashboardName: string;
+  panels: Array<{
+    title: string;
+    metrics: Array<{
+      name: string;
+      min: number | null;
+      max: number | null;
+      avg: number | null;
+      last: number | null;
+    }>;
+  }>;
+}
+
+export interface DynatraceProblem {
+  problemId: string;
+  title: string;
+  severity: string;
+  status: string;
+  impact: string;
+  startTime: string;
+  endTime: string | null;
+  affectedEntities: Array<{ entityId: string; name: string }>;
 }
