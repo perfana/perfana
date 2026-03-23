@@ -4,6 +4,14 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
+## [0.2.1] - 2026-03-23
+
+### Added
+- Cross-source root cause investigation in the `perfana-report` Claude Code skill — automatically fetches traces, flamegraphs, and Dynatrace problems when data sources are connected
+- Investigation playbook reference mapping 15 hypothesis types to targeted MCP tool calls with evidence quality criteria
+- Enhanced report template with Investigation section: distributed traces, CPU profiling hotspots, Dynatrace infrastructure problems, dashboard snapshots, evidence chain, and confidence levels
+- Graceful degradation when sources are unavailable — investigation gaps are noted in the report, analysis continues
+
 ## [0.2.0] - 2026-03-23
 
 ### Added

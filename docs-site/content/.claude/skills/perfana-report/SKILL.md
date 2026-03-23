@@ -2,11 +2,14 @@
 name: perfana-report
 description: >
   Use this skill to analyse a Perfana performance test run and generate a comprehensive
-  standardised performance test report written directly into Obsidian. Trigger when the user
-  says things like "analyse test run", "generate a Perfana report", "write a performance test
-  report", "create a report for run X", "analyse PerfanaWebshop-acc-loadTest-XXXXX",
-  or "report on the latest load test". Also trigger when the user asks to compare a run
-  to a baseline or summarise test results. Requires Perfana MCP and Obsidian Local REST API.
+  standardised performance test report written directly into Obsidian. Includes automatic
+  cross-source root cause investigation when data sources (Tempo traces, Pyroscope flamegraphs,
+  Dynatrace problems) are connected. Trigger when the user says things like "analyse test run",
+  "generate a Perfana report", "write a performance test report", "create a report for run X",
+  "analyse PerfanaWebshop-acc-loadTest-XXXXX", "report on the latest load test",
+  "find root cause", "why did performance regress", or "investigate regression".
+  Also trigger when the user asks to compare a run to a baseline or summarise test results.
+  Requires Perfana MCP and Obsidian Local REST API.
 context: fork
 disable-model-invocation: true
 ---
@@ -14,6 +17,7 @@ disable-model-invocation: true
 # Perfana performance test report
 
 Fetches all Perfana data for a test run, classifies regressions, derives hypotheses,
+investigates root causes across connected data sources (traces, flamegraphs, infrastructure),
 and writes a standardised Markdown report to an Obsidian vault.
 
 ## Step 1 — Resolve inputs
@@ -62,10 +66,90 @@ For each entry in `get_error_analysis.topErrorsByTransaction`, call:
 perfana:get_error_details { testRunId, transactionName, samplerName, url }
 ```
 
-## Step 4 — Classify regressions and derive hypotheses
+## Step 3.5 — Quick classify from check results and adapt data
+
+Before investigating, identify what regressed so you know where to look.
+
+From `get_check_results`: list all **failed** SLO checks. Note the dashboard and metric.
+
+From `get_adapt_results`: list all entries with `conclusion == "regression"`. Group by
+the classification table in `references/classification-rules.md`. For each group, note
+which services/transactions are affected (extract from `metric_name` and `dashboard`).
+
+This produces a **hypothesis list** — e.g.:
+- "Transaction latency regression in checkout-service (p95 +35%)"
+- "JVM GC pressure on afterburner-fe (G1GC old-gen promotion +500%)"
+- "Error rate spike on payment-gateway (503s up 200%)"
+
+Each hypothesis will drive targeted investigation in the next step.
+
+## Step 3.6 — Discover connected sources and investigate
+
+First, discover what data sources are available:
+
+```
+perfana:list_connected_sources  { testRunId }
+```
+
+This returns `{grafana, tempo, pyroscope, dynatrace}` with `available: true/false` for each.
+
+Then, read `references/investigation-playbook.md` for the full mapping of hypothesis
+types to investigation tool calls.
+
+For each hypothesis from Step 3.5, call the tools prescribed by the playbook —
+but **only if the required source is available**. Run calls for independent hypotheses
+in parallel.
+
+If a tool call returns an error or empty data:
+- Log which source was unavailable and why
+- Skip that investigation branch
+- Note the gap: "Tempo traces were not available — trace-level analysis was skipped"
+- **Never abort the entire analysis because one source failed**
+
+If `list_connected_sources` shows no sources available at all, skip to Step 4 and note:
+"No external data sources connected — investigation based on Perfana metrics only."
+
+## Step 3.7 — Correlate evidence across sources
+
+Cross-reference the investigation results to strengthen or weaken each hypothesis.
+
+**Correlation patterns to check:**
+
+1. **Trace ↔ Flamegraph:** Do the slowest traces point to the same service/method that
+   appears as a hotspot in the flamegraph? If yes → **High confidence**.
+
+2. **Metric ↔ Trace:** Does the timing of the metric regression (from Adapt) match the
+   duration of slow traces? If traces show 2s calls and the metric regressed by 2s → **High confidence**.
+
+3. **Dynatrace ↔ Metric:** Did a Dynatrace problem start at the same time as the regression?
+   If a "CPU saturation" problem coincides with a CPU metric regression → **High confidence**.
+
+4. **Config ↔ Everything:** Did a config change (from `get_config_diff`) coincide with the
+   regression? If thread pool size was halved and connection pool metrics regressed → **High confidence**.
+
+5. **Flamegraph ↔ GC:** Does the flamegraph show GC-related methods (containing `gc`, `G1`,
+   `safepoint`, `cleanup`) as hotspots? If yes and JVM memory metrics regressed → **High confidence**.
+
+**Assign confidence to each hypothesis:**
+
+| Level | Criteria |
+|---|---|
+| **High** | Corroborating evidence from 2+ independent sources |
+| **Medium** | Evidence from 1 source with plausible mechanism |
+| **Low** | Hypothesis consistent with symptoms but no direct evidence |
+
+Pick the **single most likely root cause** — the hypothesis with the highest confidence
+and most corroborating evidence. The report should be opinionated, not a list of "could be"s.
+
+## Step 4 — Classify regressions and derive hypotheses (enhanced with investigation)
 
 Read `references/classification-rules.md` for the full classification table and
 hypothesis guide. Apply to all regressions and differences from `get_adapt_results`.
+
+Enrich each hypothesis with the investigation evidence from Steps 3.6–3.7:
+- Attach the confidence level (High/Medium/Low) from the correlation step
+- Include specific evidence references (e.g., "trace abc123 shows 2.1s in OrderService.process()")
+- Note which sources contributed evidence and which were unavailable
 
 Compute derived metrics:
 - **p99 tail overshoot** = `p99_response_time − active_threshold` (from `get_transaction_stats`)
@@ -97,6 +181,15 @@ Expect HTTP 200 or 204. Confirm to the user:
 | `get_config_diff` no result | Write "Config diff unavailable" in report; continue |
 | `get_transaction_stats` no result | Use Apdex from `get_check_results`; omit p99 column |
 | No `is_control_group` run found | Use most recent completed run as baseline; note the assumption |
+| `list_connected_sources` error | Skip investigation entirely; note "Data source discovery failed" in report |
+| `get_slow_traces` empty result | Write "No slow traces found in test run time window" in Investigation section |
+| `get_error_traces` empty result | Write "No error traces found" in Investigation section |
+| `get_flamegraph` error (service not found) | Write "Pyroscope data unavailable for service X — available: Y, Z" in report |
+| `get_hotspots` empty result | Write "No CPU hotspots detected" in Investigation section |
+| `get_dynatrace_problems` empty result | Write "No Dynatrace problems detected during test window" — this is a positive signal |
+| `get_trace_detail` error | Skip that trace; continue with remaining traces |
+| `get_grafana_dashboard_snapshot` error | Fall back to individual `get_metric_trends` calls; if those fail too, note gap |
+| No sources connected at all | Skip Steps 3.6–3.7; write "No external data sources connected" in report |
 | Obsidian 401 | Re-read `data.json`; key may have rotated |
 | Obsidian connection refused | Check Obsidian is open and Local REST API plugin is enabled |
 | Path spaces | URL-encode spaces as `%20` in the PUT path |
