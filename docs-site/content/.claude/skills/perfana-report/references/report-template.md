@@ -169,22 +169,130 @@ attributable solely to the code change.
 
 ---
 
+## Cross-source investigation
+
+> **Data sources:** Grafana {{✅ or ❌}} · Tempo {{✅ or ❌}} · Pyroscope {{✅ or ❌}} · Dynatrace {{✅ or ❌}}
+> **Confidence:** {{High / Medium / Low}}
+
+{{if no sources connected}}
+_No external data sources connected — investigation based on Perfana metrics only._
+{{end}}
+
+{{if tempo available and traces found}}
+### Distributed traces
+
+**Slowest traces** (top {{traceCount}}):
+
+| Trace ID | Duration | Root service | Root operation |
+|---|---|---|---|
+{{for each slowTrace}}
+| `{{traceId}}` | {{durationMs}}ms | {{rootServiceName}} | {{rootTraceName}} |
+{{end}}
+
+{{if traceDetail investigated}}
+**Trace drill-down** — `{{traceId}}` ({{durationMs}}ms):
+
+| Span | Service | Duration | % of trace |
+|---|---|---|---|
+{{for top 5 spans by duration}}
+| {{operationName}} | {{serviceName}} | {{durationMs}}ms | {{pctOfTrace}}% |
+{{end}}
+
+> {{traceInsight — 1-2 sentences: what the trace breakdown reveals}}
+{{end}}
+
+{{if errorTraces found}}
+**Error traces** ({{errorTraceCount}} errors):
+
+| Trace ID | Duration | Service | Error |
+|---|---|---|---|
+{{for each errorTrace, max 5}}
+| `{{traceId}}` | {{durationMs}}ms | {{rootServiceName}} | {{rootTraceName}} |
+{{end}}
+{{end}}
+{{end}}
+
+{{if pyroscope available and hotspots found}}
+### CPU profiling (Pyroscope)
+
+**Top hotspots** for `{{serviceName}}`:
+
+| Method | Samples | % CPU |
+|---|---|---|
+{{for each hotspot, top 10}}
+| `{{function}}` | {{samples}} | {{percentage}}% |
+{{end}}
+
+> {{flamegraphInsight — 1-2 sentences: what the CPU profile reveals}}
+{{end}}
+
+{{if dynatrace available}}
+### Infrastructure problems (Dynatrace)
+
+{{if problems found}}
+| Problem | Severity | Status | Duration | Affected |
+|---|---|---|---|---|
+{{for each problem}}
+| {{title}} | {{severityLevel}} | {{status}} | {{startTime}} – {{endTime}} | {{affectedEntities}} |
+{{end}}
+{{else}}
+_No Dynatrace problems detected during the test window — infrastructure was healthy._
+{{end}}
+{{end}}
+
+{{if grafana dashboard snapshots}}
+### Dashboard snapshots
+
+{{for each snapshot}}
+**{{dashboardName}}:**
+
+| Panel | Metric | Avg | Min | Max | Last |
+|---|---|---|---|---|---|
+{{for each panel and metric}}
+| {{panelTitle}} | `{{metricName}}` | {{avg}} | {{min}} | {{max}} | {{last}} |
+{{end}}
+{{end}}
+{{end}}
+
+{{if any source was unavailable}}
+### Investigation gaps
+
+{{for each unavailable source}}
+- **{{sourceName}}:** {{reason why unavailable or empty}}
+{{end}}
+{{end}}
+
+---
+
 ## Root cause & recommendations
 
-### Root cause
+### Root cause (confidence: {{High / Medium / Low}})
 
-{{rootCauseNarrative — 2-4 sentences linking the code change, the top compute
-kernel regressions, and the JVM GC data}}
+{{rootCauseNarrative — 2-4 paragraphs:
+  1. What regressed (from Adapt/SLO checks)
+  2. Investigation evidence (from traces, flamegraph, Dynatrace)
+  3. Correlation across sources (which evidence points agree)
+  4. Most likely cause with confidence level and reasoning}}
+
+### Evidence chain
+
+| Source | Finding | Supports hypothesis? |
+|---|---|---|
+{{for each piece of evidence used}}
+| {{source: Adapt/Traces/Flamegraph/Dynatrace/Config}} | {{one-line finding}} | {{Yes ✅ / Partial ⚠️ / No ❌}} |
+{{end}}
 
 ### Recommendations
 
-1. **Profile the compute hotspot** — Run Pyroscope on `afterburner-fe` with profiler
-   `process_cpu:cpu:nanoseconds:cpu:nanoseconds` during a load test.
-2. **Review commit `{{gitCommitDelta}}`** — Inspect for intermediate object allocations.
-3. **Consider async/lazy execution** — Move the computation off the request thread.
-4. **Re-run with fix** — Validate against baseline `{{baselineRunId}}`.
-5. **Preserve improvements** — {{improvementCount}} error rate improvements introduced;
-   ensure these are not lost in a rollback.
+{{Generate 3-5 specific recommendations based on the investigation evidence.
+When investigation data is available, recommendations should be concrete:
+"Profile method X" instead of "Profile the compute hotspot".
+"Investigate trace abc123 showing 2.1s in OrderService" instead of generic advice.}}
+
+1. {{recommendation 1 — most impactful action}}
+2. {{recommendation 2}}
+3. {{recommendation 3}}
+{{if more}} 4-5. {{additional recommendations}} {{end}}
 
 ---
 
@@ -207,5 +315,5 @@ kernel regressions, and the JVM GC data}}
 
 ---
 
-_Report generated {{reportTimestamp}} by Claude Code · Perfana report skill v1.0_
+_Report generated {{reportTimestamp}} by Claude Code · Perfana report skill v2.0 (with cross-source investigation)_
 ````
