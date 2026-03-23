@@ -1,0 +1,46 @@
+name: Claude Code Review
+
+on:
+  pull_request:
+    types: [opened, synchronize]
+  issue_comment:
+    types: [created]
+
+jobs:
+  review:
+    if: >
+      (github.event_name == 'pull_request') ||
+      (github.event_name == 'issue_comment' &&
+       github.event.issue.pull_request &&
+       contains(github.event.comment.body, '@claude'))
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pull-requests: write
+      issues: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - uses: anthropics/claude-code-action@v1
+        with:
+          anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
+          prompt: |
+            Review this pull request against the project's coding standards.
+
+            Read CLAUDE.md for project context, conventions, and architecture.
+            Read apps/api/CODING_RULES.md for backend standards.
+            Read apps/web/CODING_RULES.md for frontend standards.
+
+            Check for:
+            1. Convention violations (auth patterns, error handling, naming)
+            2. Security issues (missing auth, injection, hardcoded secrets)
+            3. Architecture drift (wrong module structure, missing Swagger decorators)
+            4. Test coverage gaps (new code without tests)
+            5. TypeScript type safety issues
+
+            Post findings as review comments on specific lines.
+            Use severity levels: red circle for must fix, yellow circle for nit, info for informational.
+            If everything looks good, approve with a brief summary.
+          claude_args: "--max-turns 5"
