@@ -2,6 +2,7 @@ import { Injectable, Logger, NotFoundException, BadRequestException, BadGatewayE
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import axios from 'axios';
+import { TempoService } from '../../tempo/tempo.service';
 
 const DOWNSTREAM_TIMEOUT_MS = 10_000;
 import {
@@ -131,6 +132,7 @@ export class TestRunsDataSourcesService {
     private readonly dynatraceConfigRepo: Repository<DynatraceConfig>,
     @InjectRepository(DsMetricStatistics)
     private readonly metricStatisticsRepo: Repository<DsMetricStatistics>,
+    private readonly tempoService: TempoService,
   ) {}
 
   // ─── Private helpers ──────────────────────────────────────────────────────
@@ -177,11 +179,17 @@ export class TestRunsDataSourcesService {
     sutId: string,
     testEnvironment?: string,
   ): Promise<TracingService[]> {
-    const where: Record<string, unknown> = { systemUnderTestId: sutId };
-    if (testEnvironment) {
-      where.testEnvironment = testEnvironment;
-    }
-    return this.tracingServiceRepo.find({ where });
+    // Find all tracing services for this SUT, then filter.
+    // Entries with empty/null test_environment apply to ALL environments.
+    const all = await this.tracingServiceRepo.find({
+      where: { systemUnderTestId: sutId },
+    });
+
+    if (!testEnvironment) return all;
+
+    return all.filter(
+      ts => !ts.testEnvironment || ts.testEnvironment === '' || ts.testEnvironment === testEnvironment,
+    );
   }
 
   /**
@@ -205,15 +213,23 @@ export class TestRunsDataSourcesService {
     };
 
     const profileType = profileTypeMap[profilerLabel] ?? profilerLabel;
-    const query = `${profileType}{service_name="${application}"}`;
+
+    // Try with service_name label first. If that returns no data, fall back
+    // to querying without service_name filter (JFR agents may not set this label).
+    const queryWithLabel = `${profileType}{service_name="${application}"}`;
+    const queryWithout = `${profileType}{}`;
+
     const fromSeconds = Math.floor(fromMs / 1000);
     const untilSeconds = Math.floor(untilMs / 1000);
     const baseUrl = backendUrl.replace(/\/$/, '');
-    const url = `${baseUrl}/pyroscope/render?query=${encodeURIComponent(query)}&from=${fromSeconds}&until=${untilSeconds}&format=json`;
+
+    // Try with service_name first
+    let query = queryWithLabel;
+    let url = `${baseUrl}/pyroscope/render?query=${encodeURIComponent(query)}&from=${fromSeconds}&until=${untilSeconds}&format=json`;
 
     this.logger.debug(`Fetching Pyroscope profile: ${url}`);
 
-    const response = await fetch(url, {
+    let response = await fetch(url, {
       method: 'GET',
       headers: { 'Content-Type': 'application/json' },
       signal: AbortSignal.timeout(DOWNSTREAM_TIMEOUT_MS),
@@ -224,7 +240,29 @@ export class TestRunsDataSourcesService {
       throw new Error(`Pyroscope API error ${response.status}: ${errorText}`);
     }
 
-    return response.json() as Promise<PyroscopeProfile>;
+    // Check if the response has data. If not, retry without service_name filter
+    // (JFR agents don't always set service_name as a label)
+    let data = await response.json() as PyroscopeProfile;
+    if (data.flamebearer?.numTicks === 0 && query !== queryWithout) {
+      this.logger.debug(`No data with service_name filter, retrying without: ${queryWithout}`);
+      query = queryWithout;
+      url = `${baseUrl}/pyroscope/render?query=${encodeURIComponent(query)}&from=${fromSeconds}&until=${untilSeconds}&format=json`;
+
+      response = await fetch(url, {
+        method: 'GET',
+        headers: { 'Content-Type': 'application/json' },
+        signal: AbortSignal.timeout(DOWNSTREAM_TIMEOUT_MS),
+      });
+
+      if (!response.ok) {
+        const errorText = await response.text();
+        throw new Error(`Pyroscope API error ${response.status}: ${errorText}`);
+      }
+
+      data = await response.json() as PyroscopeProfile;
+    }
+
+    return data;
   }
 
   /**
@@ -284,11 +322,12 @@ export class TestRunsDataSourcesService {
   }
 
   /**
-   * Validate that a traceId is a hex string (Tempo trace IDs are 16-32 hex chars).
+   * Validate that a traceId is a hex string. Tempo trace IDs vary in length
+   * (can be shorter than 16 chars depending on the backend).
    */
   private validateTraceId(traceId: string): void {
-    if (!/^[a-f0-9]{16,32}$/i.test(traceId)) {
-      throw new BadRequestException(`Invalid trace ID format: ${traceId}. Expected 16-32 hex characters.`);
+    if (!/^[a-f0-9]+$/i.test(traceId)) {
+      throw new BadRequestException(`Invalid trace ID format: ${traceId}. Expected hex characters only.`);
     }
   }
 
@@ -440,6 +479,11 @@ export class TestRunsDataSourcesService {
 
   /**
    * Search Tempo for the slowest traces within the test run time window.
+   *
+   * Two modes:
+   * - With scenario+transaction: uses TempoService.searchTraces() which filters by
+   *   perfana-test-run-id and perfana-request-name span attributes (precise, same as UI)
+   * - Without: does a broad time-window search with optional service filter
    */
   async getSlowTraces(
     testRunId: string,
@@ -447,6 +491,8 @@ export class TestRunsDataSourcesService {
     limit: number,
     _userId: string,
     _roles: string[],
+    scenario?: string,
+    transaction?: string,
   ): Promise<TraceSearchResult[]> {
     const testRun = await this.loadTestRunWithSut(testRunId);
     const sut = testRun.systemUnderTest;
@@ -467,20 +513,57 @@ export class TestRunsDataSourcesService {
     const start = this.requireStartTime(testRun);
     const endTime = testRun.endTime ? new Date(testRun.endTime) : new Date();
 
+    // If scenario and transaction are provided, use TempoService for precise filtering
+    // via perfana-test-run-id and perfana-request-name span attributes
+    if (scenario && transaction && service) {
+      try {
+        const result = await this.tempoService.searchTraces({
+          tracingInstanceId: instance.id,
+          serviceName: this.sanitizeServiceName(service),
+          testRunId: testRun.testRunId,
+          scenario,
+          transaction,
+          startTime: start.toISOString(),
+          endTime: endTime.toISOString(),
+          limit: Math.min(limit * 3, 100),
+        });
+
+        const traces: TraceSearchResult[] = result.traces.map(t => ({
+          traceId: t.traceId,
+          durationMs: t.durationMs,
+          startTimeUnixNano: t.startTimeUnixNano,
+          spanCount: t.spanCount,
+          rootServiceName: t.rootServiceName,
+          rootTraceName: t.rootTraceName ?? '',
+        }));
+
+        traces.sort((a, b) => b.durationMs - a.durationMs);
+        return traces.slice(0, limit);
+      } catch (err) {
+        const msg = err && typeof err === 'object' && 'message' in err ? (err as Error).message : 'Unknown error';
+        this.logger.error(`Failed to search Tempo via TempoService: ${msg}`);
+        return [];
+      }
+    }
+
+    // Broad time-window search (no perfana-specific attributes)
     const startSeconds = Math.floor(start.getTime() / 1000);
     const endSeconds = Math.floor(endTime.getTime() / 1000);
 
-    // Build TraceQL — sort by duration (slowest first)
     const conditions: string[] = [];
     if (service) {
       conditions.push(`resource.service.name="${this.sanitizeServiceName(service)}"`);
     }
-    const traceQL = conditions.length > 0
-      ? `{${conditions.join(' && ')}} | sort(duration) | limit(${limit})`
-      : `{} | sort(duration) | limit(${limit})`;
+    const traceQL = conditions.length > 0 ? `{${conditions.join(' && ')}}` : undefined;
 
     const baseUrl = instance.tracingApiUrl.replace(/\/$/, '');
-    const searchUrl = `${baseUrl}/api/search?q=${encodeURIComponent(traceQL)}&start=${startSeconds}&end=${endSeconds}&limit=${limit}`;
+    const params = new URLSearchParams({
+      start: String(startSeconds),
+      end: String(endSeconds),
+      limit: String(Math.min(limit * 3, 100)),
+    });
+    if (traceQL) params.set('q', traceQL);
+    const searchUrl = `${baseUrl}/api/search?${params}`;
 
     this.logger.debug(`Slow traces search: ${searchUrl}`);
 
@@ -498,7 +581,10 @@ export class TestRunsDataSourcesService {
       }
 
       const data = await response.json() as Record<string, unknown>;
-      return this.parseTempoSearchResponse(data);
+      const traces = this.parseTempoSearchResponse(data);
+
+      traces.sort((a, b) => b.durationMs - a.durationMs);
+      return traces.slice(0, limit);
     } catch (err) {
       const msg = err && typeof err === 'object' && 'message' in err ? (err as Error).message : 'Unknown error';
       this.logger.error(`Failed to search Tempo for slow traces: ${msg}`);
@@ -515,6 +601,8 @@ export class TestRunsDataSourcesService {
     limit: number,
     _userId: string,
     _roles: string[],
+    _scenario?: string,
+    _transaction?: string,
   ): Promise<TraceSearchResult[]> {
     const testRun = await this.loadTestRunWithSut(testRunId);
     const sut = testRun.systemUnderTest;
@@ -543,7 +631,13 @@ export class TestRunsDataSourcesService {
     const traceQL = `{${conditions.join(' && ')}}`;
 
     const baseUrl = instance.tracingApiUrl.replace(/\/$/, '');
-    const searchUrl = `${baseUrl}/api/search?q=${encodeURIComponent(traceQL)}&start=${startSeconds}&end=${endSeconds}&limit=${limit}`;
+    const params = new URLSearchParams({
+      q: traceQL,
+      start: String(startSeconds),
+      end: String(endSeconds),
+      limit: String(limit),
+    });
+    const searchUrl = `${baseUrl}/api/search?${params}`;
 
     this.logger.debug(`Error traces search: ${searchUrl}`);
 
@@ -571,6 +665,7 @@ export class TestRunsDataSourcesService {
 
   /**
    * Fetch full trace detail from Tempo.
+   * Uses the existing TempoService which handles OTLP/Jaeger response parsing.
    */
   async getTraceDetail(
     testRunId: string,
@@ -590,30 +685,20 @@ export class TestRunsDataSourcesService {
 
     // eslint-disable-next-line @typescript-eslint/no-non-null-assertion
     const instance = tracingServices[0]!.tracingInstance;
-    if (!instance?.tracingApiUrl) {
+    if (!instance) {
       throw new NotFoundException(`Tracing instance has no API URL configured`);
     }
 
-    const baseUrl = instance.tracingApiUrl.replace(/\/$/, '');
-    const traceUrl = `${baseUrl}/api/traces/${traceId}`;
-
-    this.logger.debug(`Fetching trace detail: ${traceUrl}`);
-
     try {
-      const response = await fetch(traceUrl, {
-        method: 'GET',
-        headers: { Accept: 'application/json' },
-        signal: AbortSignal.timeout(DOWNSTREAM_TIMEOUT_MS),
-      });
-
-      if (!response.ok) {
-        throw new BadGatewayException(`Tempo returned ${response.status} for trace ${traceId}`);
-      }
-
-      const data = await response.json() as Record<string, unknown>;
-      return this.parseTempoTraceResponse(traceId, data);
+      const detail = await this.tempoService.getTraceDetails(instance.id, traceId);
+      return {
+        traceId: detail.traceId,
+        spans: detail.spans,
+        durationMs: detail.durationMs,
+        spanCount: detail.spanCount,
+      };
     } catch (err) {
-      if (err instanceof BadGatewayException || err instanceof BadRequestException) throw err;
+      if (err instanceof BadRequestException) throw err;
       const msg = err && typeof err === 'object' && 'message' in err ? (err as Error).message : 'Unknown error';
       throw new BadGatewayException(`Failed to fetch trace from Tempo: ${msg}`);
     }
@@ -918,47 +1003,4 @@ export class TestRunsDataSourcesService {
     return results;
   }
 
-  private parseTempoTraceResponse(traceId: string, data: Record<string, unknown>): TraceDetailsResult {
-    const spans: unknown[] = [];
-    let minStartNs = BigInt(Number.MAX_SAFE_INTEGER);
-    let maxEndNs = BigInt(0);
-
-    const resourceSpans = (data.resourceSpans as unknown[]) ?? (data.batches as unknown[]) ?? [];
-
-    for (const resourceSpan of resourceSpans) {
-      const rs = resourceSpan as Record<string, unknown>;
-      const scopeSpans = (rs.scopeSpans as unknown[]) ?? (rs.instrumentationLibrarySpans as unknown[]) ?? [];
-
-      for (const scopeSpan of scopeSpans) {
-        const ss = scopeSpan as Record<string, unknown>;
-        const spanList = (ss.spans as unknown[]) ?? [];
-
-        for (const span of spanList) {
-          spans.push(span);
-          const s = span as Record<string, unknown>;
-
-          if (typeof s.startTimeUnixNano === 'string' || typeof s.startTimeUnixNano === 'bigint') {
-            const start = BigInt(s.startTimeUnixNano as string);
-            if (start < minStartNs) minStartNs = start;
-          }
-          if (typeof s.endTimeUnixNano === 'string' || typeof s.endTimeUnixNano === 'bigint') {
-            const end = BigInt(s.endTimeUnixNano as string);
-            if (end > maxEndNs) maxEndNs = end;
-          }
-        }
-      }
-    }
-
-    const durationMs =
-      spans.length > 0
-        ? Number(maxEndNs - minStartNs) / 1_000_000
-        : 0;
-
-    return {
-      traceId,
-      spans,
-      durationMs,
-      spanCount: spans.length,
-    };
-  }
 }

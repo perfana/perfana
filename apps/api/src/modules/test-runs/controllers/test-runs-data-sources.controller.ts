@@ -95,6 +95,8 @@ export class TestRunsDataSourcesController {
       'Results are sorted by duration descending.',
   })
   @ApiQuery({ name: 'service', required: false, type: String, description: 'Filter by service name (resource.service.name)' })
+  @ApiQuery({ name: 'scenario', required: false, type: String, description: 'Filter by scenario name (from perfana-request-name tag, e.g. "Checkout")' })
+  @ApiQuery({ name: 'transaction', required: false, type: String, description: 'Filter by transaction name (from perfana-request-name tag, e.g. "T04_Payment_Processing")' })
   @ApiQuery({ name: 'limit', required: false, type: Number, description: 'Maximum number of traces to return (default: 20, max: 100)' })
   @ApiResponse({
     status: 200,
@@ -119,11 +121,13 @@ export class TestRunsDataSourcesController {
     @Param('testRunId') testRunId: string,
     @UserCtx() ctx: UserContext,
     @Query('service') service?: string,
+    @Query('scenario') scenario?: string,
+    @Query('transaction') transaction?: string,
     @Query('limit', new DefaultValuePipe(20), ParseIntPipe) limit = 20,
   ): Promise<TraceSearchResult[]> {
     const safeLimit = Math.min(Math.max(1, limit), 100);
-    this.logger.debug(`Getting slow traces for test run ${testRunId}, service=${service}, limit=${safeLimit}`);
-    return this.dataSourcesService.getSlowTraces(testRunId, service, safeLimit, ctx.userId, ctx.roles);
+    this.logger.debug(`Getting slow traces for test run ${testRunId}, service=${service}, scenario=${scenario}, transaction=${transaction}, limit=${safeLimit}`);
+    return this.dataSourcesService.getSlowTraces(testRunId, service, safeLimit, ctx.userId, ctx.roles, scenario, transaction);
   }
 
   @Get(':testRunId/traces/errors')
@@ -134,6 +138,8 @@ export class TestRunsDataSourcesController {
       'Searches Tempo for traces with error status recorded during the test run time window.',
   })
   @ApiQuery({ name: 'service', required: false, type: String, description: 'Filter by service name' })
+  @ApiQuery({ name: 'scenario', required: false, type: String, description: 'Filter by scenario name' })
+  @ApiQuery({ name: 'transaction', required: false, type: String, description: 'Filter by transaction name' })
   @ApiQuery({ name: 'limit', required: false, type: Number, description: 'Maximum number of traces (default: 20, max: 100)' })
   @ApiResponse({
     status: 200,
@@ -145,11 +151,12 @@ export class TestRunsDataSourcesController {
     @Param('testRunId') testRunId: string,
     @UserCtx() ctx: UserContext,
     @Query('service') service?: string,
+    @Query('scenario') scenario?: string,
+    @Query('transaction') transaction?: string,
     @Query('limit', new DefaultValuePipe(20), ParseIntPipe) limit = 20,
   ): Promise<TraceSearchResult[]> {
     const safeLimit = Math.min(Math.max(1, limit), 100);
-    this.logger.debug(`Getting error traces for test run ${testRunId}, service=${service}, limit=${safeLimit}`);
-    return this.dataSourcesService.getErrorTraces(testRunId, service, safeLimit, ctx.userId, ctx.roles);
+    return this.dataSourcesService.getErrorTraces(testRunId, service, safeLimit, ctx.userId, ctx.roles, scenario, transaction);
   }
 
   @Get(':testRunId/traces/:traceId')
