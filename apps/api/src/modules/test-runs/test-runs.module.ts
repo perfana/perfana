@@ -3,6 +3,7 @@ import { TypeOrmModule } from '@nestjs/typeorm';
 import {
   TestRunsController,
   TestRunsAnalysisController,
+  TestRunsDataSourcesController,
   TestRunsMetricsTransactionController,
   TestRunsMetricsApdexController,
   TestRunsComparisonController,
@@ -30,6 +31,7 @@ import { TestRunsBaselineApdexService } from './services/test-runs-baseline-apde
 import { TestRunsStaleDetectionService } from './services/test-runs-stale-detection.service';
 import { TestRunsStaleDetectionSchedulerService } from './services/test-runs-stale-detection-scheduler.service';
 import { TestRunsErrorAnalysisService } from './services/test-runs-error-analysis.service';
+import { TestRunsDataSourcesService } from './services/test-runs-data-sources.service';
 import { CreateTestRunHandler } from './handlers/create-test-run.handler';
 import { UpdateTestRunHandler } from './handlers/update-test-run.handler';
 import { DeleteTestRunHandler } from './handlers/delete-test-run.handler';
@@ -68,7 +70,13 @@ import {
   DynatraceQuery,
   ApplicationDashboard,
   TestRunView,
-  SparseMetricExclusion
+  SparseMetricExclusion,
+  TracingService,
+  TracingInstance,
+  PyroscopeInstance,
+  MetricsSource,
+  DynatraceConfig,
+  GrafanaInstance,
 } from '../../entities';
 import {
   TestRunRepository,
@@ -98,7 +106,14 @@ import {
       DynatraceQuery,
       ApplicationDashboard,
       TestRunView,
-      SparseMetricExclusion
+      SparseMetricExclusion,
+      // Entities required by TestRunsDataSourcesService
+      TracingService,
+      TracingInstance,
+      PyroscopeInstance,
+      MetricsSource,
+      DynatraceConfig,
+      GrafanaInstance,
     ]),
     SystemsUnderTestModule,
     DataScienceModule,
@@ -110,6 +125,7 @@ import {
     // Specific routes MUST come before parameterized routes
     // TestRunsController has @Get(':testRunId') which matches anything
     TestRunsAnalysisController,
+    TestRunsDataSourcesController,
     TestRunsMetricsTransactionController,
     TestRunsMetricsApdexController,
     TestRunsComparisonController,
@@ -153,6 +169,7 @@ import {
     TestRunsStaleDetectionService,
     TestRunsStaleDetectionSchedulerService,
     TestRunsErrorAnalysisService,
+    TestRunsDataSourcesService,
     TestRunRepository,
     TestRunConfigurationRepository,
     TestRunsGateway, // WebSocket gateway for realtime updates
