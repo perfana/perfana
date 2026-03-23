@@ -44,4 +44,4 @@ jobs:
             Post findings as review comments on specific lines.
             Use severity levels: red circle for must fix, yellow circle for nit, info for informational.
             If everything looks good, approve with a brief summary.
-          claude_args: "--max-turns 5"
+          claude_args: "--max-turns 10"
