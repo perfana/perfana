@@ -67,6 +67,12 @@ for i in $(seq 1 60); do
   sleep 2
 done
 
+# Seed sample data (optional — skip with SKIP_SEED=1)
+if [ "${SKIP_SEED:-}" != "1" ]; then
+  info "Seeding sample data..."
+  npx tsx scripts/seed.ts || warn "Seed failed — you can run it later with 'make seed'"
+fi
+
 echo ""
 info "Setup complete! Run 'npm run dev' to start all services."
 echo ""
