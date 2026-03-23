@@ -63,3 +63,21 @@ This enforces: PR required, 1 review required, CI must pass, branch must be up t
 **Depends on:** Phase 2 (API with Swagger) and Phase 5 (frontend with generated client).
 
 **Blocked by:** Nothing — natural addition during Phase 6 CI setup.
+
+---
+
+## Publish MCP server to npm as `@perfana/mcp`
+
+**What:** Publish the MCP server package to npm so users can run `npx @perfana/mcp` instead of cloning the repo and building from source.
+
+**Why:** Lowers the barrier to entry for AI-powered performance analysis. Users of Claude Desktop, Cursor, or any MCP client can add Perfana in one line of config instead of dealing with git clone + npm install + build.
+
+**Pros:** Better adoption, standard distribution channel, version pinning via semver.
+
+**Cons:** Requires npm org setup, CI publish pipeline, and keeping published version in sync with repo.
+
+**Context:** The MCP server at `apps/mcp/` is already a standalone package with its own `package.json`. Main work is adding a prepublish build step, setting `"bin"` in package.json, and configuring CI to publish on release tags.
+
+**Depends on:** Phase 2A MCP expansion (want to publish with the full tool set, not the current 14-tool subset).
+
+**Blocked by:** Nothing technical — just timing.
