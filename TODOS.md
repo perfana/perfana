@@ -6,29 +6,9 @@ Completed in Phase 3.3.5. Golden-file tests exist at `apps/worker/src/test/golde
 
 ---
 
-## Fix 2 broken worker unit tests (Phase 3 regression)
+## ~~Fix 2 broken worker unit tests (Phase 3 regression)~~ ✅ DONE
 
-**What:** Two worker unit tests fail after Phase 3 MetricsSource changes:
-
-1. `ChecksPipeline.test.ts` — "should execute with metric filter and log appropriately"
-   - The test expects a log message matching `StringContaining{...}` but the log format changed when `metricsSourceId` was added to the `ChecksInput` interface and logging in Phase 3.6.
-   - Fix: update the expected log message pattern to include `metricsSourceId`.
-
-2. `StatisticsPipeline.test.ts` — "should calculate last_value from most recent timestamp"
-   - The test snapshots the SQL string and expects `(array_agg(value ORDER BY time DESC))` but the SQL was modified in Phase 3.3 to include `metrics_source_id` in the column list, shifting the SQL structure.
-   - Fix: update the expected SQL substring to match the new column order.
-
-**Why:** Broken tests erode confidence in the test suite. These are unit tests that validate correct behavior — they should pass.
-
-**Pros:** Restores full test suite to green. Prevents the broken window effect.
-
-**Cons:** None — trivial fixes.
-
-**Context:** Both failures are from Phase 3 changes that modified SQL and logging but didn't update the corresponding unit test assertions. The pipeline behavior is correct (validated by golden-file tests and real data); only the test expectations are stale.
-
-**Depends on:** Nothing.
-
-**Blocked by:** Nothing.
+Already fixed. Worker test suite passes: 904 passed, 0 failures (verified 2026-03-23).
 
 ---
 
