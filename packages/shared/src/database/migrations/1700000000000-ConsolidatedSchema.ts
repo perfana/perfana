@@ -1,6 +1,5 @@
 import { MigrationInterface, QueryRunner } from 'typeorm';
-import { readFileSync } from 'fs';
-import { join } from 'path';
+import { SCHEMA_SQL } from './schema-sql';
 
 /**
  * Consolidated Schema Migration
@@ -43,10 +42,7 @@ export class ConsolidatedSchema1700000000000 implements MigrationInterface {
     // ─── Phase 1: Execute schema dump ───
     console.log('Phase 1: Executing schema dump...');
 
-    const schemaPath = join(__dirname, '../../../../../database/schema_dump.sql');
-    const schema = readFileSync(schemaPath, 'utf8');
-
-    const statements = this.splitStatements(schema);
+    const statements = this.splitStatements(SCHEMA_SQL);
 
     // Filter out statements that should not be executed:
     // 1. TimescaleDB internal triggers (auto-created with hypertables)
