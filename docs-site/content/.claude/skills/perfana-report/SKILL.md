@@ -72,14 +72,21 @@ Before investigating, identify what regressed so you know where to look.
 
 From `get_check_results`: list all **failed** SLO checks. Note the dashboard and metric.
 
-From `get_adapt_results`: list all entries with `conclusion == "regression"`. Group by
-the classification table in `references/classification-rules.md`. For each group, note
-which services/transactions are affected (extract from `metric_name` and `dashboard`).
+From `get_adapt_results`: list all entries with `conclusion == "regression"`. Do two groupings:
+
+1. **Group by classification** (from `references/classification-rules.md`) to identify hypothesis types.
+2. **Group by `dashboard` field** to identify which data sources contributed regressions.
+   Each dashboard represents a different source — e.g. "Performance test metrics Checkout"
+   is JMeter data, "JVM memory management G1GC afterburner-fe" is Grafana JVM monitoring,
+   "Docker container metrics" is Grafana infrastructure. Cross-source regressions that align
+   (e.g. compute subrequests regressed in JMeter AND CPU spiked in Docker AND GC increased
+   in JVM) give **High confidence** without needing traces or flamegraphs.
 
 This produces a **hypothesis list** — e.g.:
 - "Transaction latency regression in checkout-service (p95 +35%)"
 - "JVM GC pressure on afterburner-fe (G1GC old-gen promotion +500%)"
 - "Error rate spike on payment-gateway (503s up 200%)"
+- "Causal chain: compute regressions (JMeter) → CPU +124% (Docker) → GC +193% (JVM)"
 
 Each hypothesis will drive targeted investigation in the next step.
 
@@ -115,19 +122,28 @@ Cross-reference the investigation results to strengthen or weaken each hypothesi
 
 **Correlation patterns to check:**
 
-1. **Trace ↔ Flamegraph:** Do the slowest traces point to the same service/method that
+1. **Adapt cross-source causal chain:** Group regressions from `get_adapt_results` by their
+   `dashboard` field — each dashboard represents a different data source (performance test
+   metrics = JMeter/Gatling, JVM memory = Grafana JVM dashboard, Docker container = Grafana
+   infra, Hikari = Grafana connection pool, etc.). Look for causal chains across sources:
+   - Compute subrequest regressions (perf test) → CPU spike (Docker container) → GC pressure (JVM) → **High confidence**
+   - Latency regression (perf test) → connection pool saturation (Hikari) → **High confidence**
+   - Error rate spike (perf test) + CPU spike (Docker) + Dynatrace problem → **High confidence**
+   This correlation is available from Adapt data alone — no traces or flamegraphs needed.
+
+2. **Trace ↔ Flamegraph:** Do the slowest traces point to the same service/method that
    appears as a hotspot in the flamegraph? If yes → **High confidence**.
 
-2. **Metric ↔ Trace:** Does the timing of the metric regression (from Adapt) match the
+3. **Metric ↔ Trace:** Does the timing of the metric regression (from Adapt) match the
    duration of slow traces? If traces show 2s calls and the metric regressed by 2s → **High confidence**.
 
-3. **Dynatrace ↔ Metric:** Did a Dynatrace problem start at the same time as the regression?
+4. **Dynatrace ↔ Metric:** Did a Dynatrace problem start at the same time as the regression?
    If a "CPU saturation" problem coincides with a CPU metric regression → **High confidence**.
 
-4. **Config ↔ Everything:** Did a config change (from `get_config_diff`) coincide with the
+5. **Config ↔ Everything:** Did a config change (from `get_config_diff`) coincide with the
    regression? If thread pool size was halved and connection pool metrics regressed → **High confidence**.
 
-5. **Flamegraph ↔ GC:** Does the flamegraph show GC-related methods (containing `gc`, `G1`,
+6. **Flamegraph ↔ GC:** Does the flamegraph show GC-related methods (containing `gc`, `G1`,
    `safepoint`, `cleanup`) as hotspots? If yes and JVM memory metrics regressed → **High confidence**.
 
 **Assign confidence to each hypothesis:**
