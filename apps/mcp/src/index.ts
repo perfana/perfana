@@ -336,14 +336,16 @@ server.tool(
 
 server.tool(
   'get_slow_traces',
-  'Get the slowest distributed traces from Tempo/Jaeger for a test run, sorted by duration. Useful for identifying which requests took the longest and drilling into span-level bottlenecks.',
+  'Get the slowest distributed traces from Tempo/Jaeger for a test run, sorted by duration. When scenario+transaction+service are provided, uses Perfana request-name tags for precise filtering (same traces shown in the UI). Without them, does a broad time-window search.',
   {
     testRunId: z.string().describe('The test run ID'),
-    service: z.string().optional().describe('Filter by service name (optional — omit to search all services)'),
+    service: z.string().optional().describe('Filter by service name (required when using scenario/transaction)'),
+    scenario: z.string().optional().describe('Scenario name from get_adapt_results (e.g. "Checkout", "BrowseAndSearch")'),
+    transaction: z.string().optional().describe('Transaction name from get_adapt_results (e.g. "T04_Payment_Processing")'),
     limit: z.number().optional().default(10).describe('Number of traces to return (default: 10, max: 50)'),
   },
-  safeTool(async ({ testRunId, service, limit }) => {
-    const traces = await client.getSlowTraces(testRunId, service, Math.min(limit, 50));
+  safeTool(async ({ testRunId, service, scenario, transaction, limit }) => {
+    const traces = await client.getSlowTraces(testRunId, service, Math.min(limit, 50), scenario, transaction);
     return { content: [{ type: 'text', text: JSON.stringify(traces, null, 2) }] };
   }),
 );
@@ -382,14 +384,16 @@ server.tool(
 
 server.tool(
   'get_error_traces',
-  'Get distributed traces that contain errors from Tempo/Jaeger for a test run. Useful for identifying which requests failed and where the error originated in the service chain.',
+  'Get distributed traces that contain errors from Tempo/Jaeger for a test run. When scenario+transaction+service are provided, uses Perfana request-name tags for precise filtering.',
   {
     testRunId: z.string().describe('The test run ID'),
-    service: z.string().optional().describe('Filter by service name (optional)'),
+    service: z.string().optional().describe('Filter by service name'),
+    scenario: z.string().optional().describe('Scenario name from get_adapt_results'),
+    transaction: z.string().optional().describe('Transaction name from get_adapt_results'),
     limit: z.number().optional().default(10).describe('Number of traces to return (default: 10, max: 50)'),
   },
-  safeTool(async ({ testRunId, service, limit }) => {
-    const traces = await client.getErrorTraces(testRunId, service, Math.min(limit, 50));
+  safeTool(async ({ testRunId, service, scenario, transaction, limit }) => {
+    const traces = await client.getErrorTraces(testRunId, service, Math.min(limit, 50), scenario, transaction);
     return { content: [{ type: 'text', text: JSON.stringify(traces, null, 2) }] };
   }),
 );

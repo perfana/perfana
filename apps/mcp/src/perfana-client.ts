@@ -169,9 +169,13 @@ export class PerfanaClient {
     testRunId: string,
     service?: string,
     limit: number = 10,
+    scenario?: string,
+    transaction?: string,
   ): Promise<TraceSearchResult[]> {
     const params = new URLSearchParams({ limit: String(limit) });
     if (service) params.set('service', service);
+    if (scenario) params.set('scenario', scenario);
+    if (transaction) params.set('transaction', transaction);
     return this.get<TraceSearchResult[]>(
       `/test-runs/${encodeURIComponent(testRunId)}/traces/slow?${params}`,
     );
@@ -181,9 +185,13 @@ export class PerfanaClient {
     testRunId: string,
     service?: string,
     limit: number = 10,
+    scenario?: string,
+    transaction?: string,
   ): Promise<TraceSearchResult[]> {
     const params = new URLSearchParams({ limit: String(limit) });
     if (service) params.set('service', service);
+    if (scenario) params.set('scenario', scenario);
+    if (transaction) params.set('transaction', transaction);
     return this.get<TraceSearchResult[]>(
       `/test-runs/${encodeURIComponent(testRunId)}/traces/errors?${params}`,
     );
