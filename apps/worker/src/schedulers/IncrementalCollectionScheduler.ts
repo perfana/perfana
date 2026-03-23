@@ -89,7 +89,7 @@ export class IncrementalCollectionScheduler {
    */
   private shouldSkipDueToBackoff(sourceKey: string): boolean {
     const failureCount = this.failureCounts.get(sourceKey) ?? 0;
-    if (failureCount === 0) return false;
+    if (failureCount === 0) { return false; }
 
     // Stop retrying entirely after persistent failures
     if (failureCount >= FAILURE_STOP_THRESHOLD) {
@@ -98,7 +98,7 @@ export class IncrementalCollectionScheduler {
 
     // Check if enough time has passed since the last failure
     const lastFailure = this.lastFailureTime.get(sourceKey);
-    if (!lastFailure) return false;
+    if (!lastFailure) { return false; }
 
     const backoffMs = Math.min(BASE_BACKOFF_MS * Math.pow(2, failureCount), MAX_BACKOFF_MS);
     const elapsed = Date.now() - lastFailure;

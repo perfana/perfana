@@ -61,11 +61,6 @@ COPY --from=builder --chown=perfana:perfana /app/packages/shared/dist/database/m
 COPY --from=builder --chown=perfana:perfana /app/packages/shared/dist/entities ./entities/
 COPY --from=builder --chown=perfana:perfana /app/packages/shared/dist/utils ./utils/
 
-# Copy schema_dump.sql to /database/ (required by InitialSchema migration)
-# The migration uses: join(__dirname, '../../../../../database/schema_dump.sql')
-# From /app/migrations, this resolves to /database/schema_dump.sql
-COPY --chown=perfana:perfana database/schema_dump.sql /database/schema_dump.sql
-
 # Create a standalone ormconfig for the container
 COPY --chown=perfana:perfana <<'EOF' ormconfig.js
 const { DataSource } = require('typeorm');

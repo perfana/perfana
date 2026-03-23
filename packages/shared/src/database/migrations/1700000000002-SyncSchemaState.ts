@@ -1,6 +1,5 @@
 import { MigrationInterface, QueryRunner } from 'typeorm';
-import { readFileSync } from 'fs';
-import { join } from 'path';
+import { SCHEMA_SQL } from './schema-sql';
 
 /**
  * Sync Schema State Migration
@@ -43,12 +42,7 @@ export class SyncSchemaState1700000000002 implements MigrationInterface {
     // ─── Phase 1: Apply schema dump idempotently ───
     console.log('SyncSchemaState: Applying schema dump idempotently...');
 
-    const schemaPath = join(
-      __dirname,
-      '../../../../../database/schema_dump.sql',
-    );
-    const schema = readFileSync(schemaPath, 'utf8');
-    const statements = this.splitStatements(schema);
+    const statements = this.splitStatements(SCHEMA_SQL);
 
     const filteredStatements = statements.filter(
       (stmt) =>
