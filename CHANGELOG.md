@@ -4,6 +4,22 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
+## [0.2.2] - 2026-03-24
+
+### Added
+- Server-side ADAPT regression classification in MCP `get_adapt_results` tool — returns pre-classified regressions, dashboard groupings, causal chains, and hypotheses so Claude doesn't need to parse raw data
+- Optional Obsidian output in perfana-report skill — user can choose between Obsidian vault or local `reports/` file
+
+### Changed
+- MCP permissions use wildcard `mcp__perfana__*` instead of individual tool entries — eliminates ~20 approval prompts per report
+- Updated perfana-report skill Step 3.5 to consume pre-processed ADAPT data directly
+
+### Fixed
+- CI Docker build failures (missing curly braces for eslint, dollar escapes in schema-sql)
+- Embedded schema SQL in migrations to eliminate Docker build dependency on pg_dump
+- Trace and Pyroscope bugfixes from demo testing (scenario/transaction filtering, cross-source correlation)
+- Data sources service resilience improvements
+
 ## [0.2.1] - 2026-03-23
 
 ### Added

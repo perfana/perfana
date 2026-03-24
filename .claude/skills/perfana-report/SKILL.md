@@ -26,15 +26,16 @@ Ask for `testRunId` if not provided. Accept optional `baselineRunId`.
 If no baseline, call `perfana:get_recent_runs` and use the most recent run
 where `is_control_group: true` for the same SUT / environment / workload.
 
-## Step 2 — Read Obsidian API key
+## Step 2 — Choose output destination
 
-Read the key from the vault config using the Filesystem MCP:
+Ask the user: **"Write the report to Obsidian or save as a local file?"**
 
-```
-Filesystem:read_text_file  {vaultRoot}/.obsidian/plugins/obsidian-local-rest-api/data.json
-```
-
-Extract `$.apiKey`. See `references/obsidian-api.md` for endpoint details.
+- **Obsidian** → Read the API key from the vault config using the Filesystem MCP:
+  ```
+  Filesystem:read_text_file  {vaultRoot}/.obsidian/plugins/obsidian-local-rest-api/data.json
+  ```
+  Extract `$.apiKey`. See `references/obsidian-api.md` for endpoint details.
+- **Local file** → The report will be written to `./reports/{testRunId}.md` in the current working directory.
 
 ## Step 3 — Fetch all Perfana data in parallel
 
@@ -66,29 +67,23 @@ For each entry in `get_error_analysis.topErrorsByTransaction`, call:
 perfana:get_error_details { testRunId, transactionName, samplerName, url }
 ```
 
-## Step 3.5 — Quick classify from check results and adapt data
+## Step 3.5 — Review pre-classified adapt data
 
-Before investigating, identify what regressed so you know where to look.
+The `get_adapt_results` tool returns **pre-processed** data — no manual parsing needed.
+The response includes:
 
-From `get_check_results`: list all **failed** SLO checks. Note the dashboard and metric.
+- `classifiedRegressions` — each regression already tagged with a classification
+  (Computation kernel, Transaction latency, JVM memory / GC, Container resources, etc.)
+  and a generated hypothesis string
+- `byDashboard` — regressions grouped by dashboard with source type labels
+  (Performance test, JVM monitoring, Infrastructure, Connection pool, etc.)
+- `causalChains` — detected cross-source causal chains with confidence levels
+  (e.g. "Compute regressions → CPU spike → GC pressure" = High confidence)
+- `hypotheses` — deduplicated list of all hypotheses ready for investigation
 
-From `get_adapt_results`: list all entries with `conclusion == "regression"`. Do two groupings:
+From `get_check_results`: also list all **failed** SLO checks. Note the dashboard and metric.
 
-1. **Group by classification** (from `references/classification-rules.md`) to identify hypothesis types.
-2. **Group by `dashboard` field** to identify which data sources contributed regressions.
-   Each dashboard represents a different source — e.g. "Performance test metrics Checkout"
-   is JMeter data, "JVM memory management G1GC afterburner-fe" is Grafana JVM monitoring,
-   "Docker container metrics" is Grafana infrastructure. Cross-source regressions that align
-   (e.g. compute subrequests regressed in JMeter AND CPU spiked in Docker AND GC increased
-   in JVM) give **High confidence** without needing traces or flamegraphs.
-
-This produces a **hypothesis list** — e.g.:
-- "Transaction latency regression in checkout-service (p95 +35%)"
-- "JVM GC pressure on afterburner-fe (G1GC old-gen promotion +500%)"
-- "Error rate spike on payment-gateway (503s up 200%)"
-- "Causal chain: compute regressions (JMeter) → CPU +124% (Docker) → GC +193% (JVM)"
-
-Each hypothesis will drive targeted investigation in the next step.
+Use the `hypotheses` list directly to drive targeted investigation in the next step.
 
 ## Step 3.6 — Discover connected sources and investigate
 
@@ -176,7 +171,9 @@ Compute derived metrics:
 Read `references/report-template.md` and fill every section from the fetched data.
 Write `_No data available_` for any section with no data — never leave placeholders.
 
-## Step 6 — Write to Obsidian
+## Step 6 — Write report to chosen destination
+
+### If Obsidian was chosen:
 
 ```bash
 curl -s -X PUT \
@@ -188,6 +185,13 @@ curl -s -X PUT \
 
 Expect HTTP 200 or 204. Confirm to the user:
 > "Report written to Obsidian at `Performance Reports/{testRunId}.md`"
+
+### If local file was chosen:
+
+Write the report to `./reports/{testRunId}.md` using the Write tool.
+Create the `reports/` directory if it doesn't exist.
+Confirm to the user:
+> "Report written to `reports/{testRunId}.md`"
 
 ## Error handling
 
@@ -207,5 +211,5 @@ Expect HTTP 200 or 204. Confirm to the user:
 | `get_grafana_dashboard_snapshot` error | Fall back to individual `get_metric_trends` calls; if those fail too, note gap |
 | No sources connected at all | Skip Steps 3.6–3.7; write "No external data sources connected" in report |
 | Obsidian 401 | Re-read `data.json`; key may have rotated |
-| Obsidian connection refused | Check Obsidian is open and Local REST API plugin is enabled |
+| Obsidian connection refused | Suggest local file output instead; Obsidian may not be running |
 | Path spaces | URL-encode spaces as `%20` in the PUT path |
