@@ -27,6 +27,7 @@ export interface CodexResult {
   durationMs: number;       // Wall clock time
   sessionId: string | null; // Thread ID for session continuity
   rawLines: string[];       // Raw JSONL lines for debugging
+  stderr: string;           // Stderr output (skill loading errors, auth failures)
 }
 
 // --- JSONL parser (ported from Python in codex/SKILL.md.tmpl) ---
@@ -167,6 +168,7 @@ export async function runCodexSkill(opts: {
       durationMs: Date.now() - startTime,
       sessionId: null,
       rawLines: [],
+      stderr: '',
     };
   }
 
@@ -282,6 +284,7 @@ export async function runCodexSkill(opts: {
       durationMs,
       sessionId: parsed.sessionId,
       rawLines: collectedLines,
+      stderr,
     };
   } finally {
     // Clean up temp HOME
