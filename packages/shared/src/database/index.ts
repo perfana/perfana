@@ -3,6 +3,8 @@
 export { ConsolidatedSchema1700000000000 } from './migrations/1700000000000-ConsolidatedSchema';
 export { CleanupLegacyMigrationRecords1700000000001 } from './migrations/1700000000001-CleanupLegacyMigrationRecords';
 export { SyncSchemaState1700000000002 } from './migrations/1700000000002-SyncSchemaState';
+export { AddTagsHashUniqueIndex1700000000003 } from './migrations/1700000000003-AddTagsHashUniqueIndex';
+export { AddAlertsSupport1700000000004 } from './migrations/1700000000004-AddAlertsSupport';
 export { AddTestRunViews1700000000005 } from './migrations/1700000000005-AddTestRunViews';
 export { RemoveRedundantIndexes1700000000006 } from './migrations/1700000000006-RemoveRedundantIndexes';
 export { DropRedundantDsMetricsIndexes1700000000007 } from './migrations/1700000000007-DropRedundantDsMetricsIndexes';
