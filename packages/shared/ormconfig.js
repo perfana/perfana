@@ -29,6 +29,7 @@ const AppDataSource = new DataSource({
   database: process.env.DB_NAME || 'perfana_native',
   entities: ['dist/entities/**/*.entity.js'],
   migrations: ['dist/database/migrations/**/*.js'],
+  migrationsTableName: 'typeorm_migrations',
   synchronize: false, // Never auto-sync in production
   logging: ['error', 'warn', 'migration'],
 });
