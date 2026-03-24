@@ -215,46 +215,15 @@ export interface ErrorAnalysisResult {
 
 // ─── Adapt results summary helper ──────────────────────────────────────────
 
-export interface AdaptMetricSummary {
-  metric_name: string;
-  dashboard: string;
-  panel: string;
-  unit: string;
-  current: number | null;
-  baseline: number | null;
-  change_pct: number | null;
-  absolute_change: number | null;
-  conclusion: string | null;
-}
+// Re-export types from perfana-client to avoid duplicate definitions
+import type {
+  AdaptMetricSummary,
+  AdaptConclusion,
+  TrackedRegression,
+  TrackedRegressionsResponse,
+} from './perfana-client.js';
 
-export interface AdaptConclusion {
-  test_run_id: string;
-  conclusion: string;
-  control_group_id?: string;
-  updated_at: string;
-  regressions: AdaptMetricSummary[];
-  improvements: AdaptMetricSummary[];
-  differences: AdaptMetricSummary[];
-}
-
-export interface TrackedRegression {
-  id: string;
-  metricName: string;
-  dashboardLabel?: string;
-  panelTitle?: string;
-  unit?: string;
-  status: 'UNRESOLVED' | 'RESOLVED' | 'ACCEPTED';
-  severity: string;
-  percentageChange: number;
-  conclusion?: { label: string; confidence: number };
-  trackedConclusion?: { label: string; confidence: number };
-}
-
-export interface TrackedRegressionsResponse {
-  regressions: TrackedRegression[];
-  unresolvedCount: number;
-  totalTracked: number;
-}
+export type { AdaptMetricSummary, AdaptConclusion, TrackedRegression, TrackedRegressionsResponse };
 
 interface ClassifiedMetric extends AdaptMetricSummary {
   classification: string;
@@ -293,33 +262,36 @@ export interface AdaptSummary {
   hypotheses: string[];
 }
 
+/** Format a percentage change safely, handling null and NaN. */
+function fmtPct(pct: number | null): string {
+  if (pct == null || !Number.isFinite(pct)) return 'unknown change';
+  return `${pct > 0 ? '+' : ''}${pct.toFixed(1)}%`;
+}
+
 function classifyMetric(m: AdaptMetricSummary): { classification: string; hypothesis: string } {
   const mn = m.metric_name.toLowerCase();
   const panel = (m.panel ?? '').toLowerCase();
   const dashboard = (m.dashboard ?? '').toLowerCase();
 
-  if (m.conclusion === 'improvement') {
-    return { classification: 'Improvement', hypothesis: 'The release fixed a previously failing dependency or retry logic.' };
-  }
   if (mn.endsWith('_compute') || mn.endsWith('_processing') || mn.endsWith('_ranking') ||
       mn.endsWith('_engine') || mn.endsWith('_hash') || mn.endsWith('_generate') ||
       mn.includes('/cpu/')) {
-    return { classification: 'Computation kernel', hypothesis: `CPU-bound work regression in compute sub-request: ${m.metric_name} (${m.change_pct != null ? `${m.change_pct > 0 ? '+' : ''}${m.change_pct.toFixed(1)}%` : 'unknown change'})` };
+    return { classification: 'Computation kernel', hypothesis: `CPU-bound work regression in compute sub-request: ${m.metric_name} (${fmtPct(m.change_pct)})` };
   }
   if (panel.includes('transaction rt') || panel.includes('transaction apdex')) {
-    return { classification: 'Transaction latency', hypothesis: `Transaction latency regression: ${m.metric_name} (${m.change_pct != null ? `${m.change_pct > 0 ? '+' : ''}${m.change_pct.toFixed(1)}%` : 'unknown change'})` };
+    return { classification: 'Transaction latency', hypothesis: `Transaction latency regression: ${m.metric_name} (${fmtPct(m.change_pct)})` };
   }
   if (panel.includes('request rt') || panel.includes('request latency')) {
     return { classification: 'Request latency', hypothesis: `Request latency regression in ${m.metric_name}` };
   }
   if (dashboard.includes('jvm memory') || dashboard.includes('g1gc')) {
-    return { classification: 'JVM memory / GC', hypothesis: `JVM GC pressure: ${m.metric_name} (${m.change_pct != null ? `${m.change_pct > 0 ? '+' : ''}${m.change_pct.toFixed(1)}%` : 'unknown change'})` };
+    return { classification: 'JVM memory / GC', hypothesis: `JVM GC pressure: ${m.metric_name} (${fmtPct(m.change_pct)})` };
   }
   if (dashboard.includes('jvm') && (panel.includes('cpu') || panel.includes('threads'))) {
     return { classification: 'JVM CPU / threads', hypothesis: `JVM CPU/thread contention: ${m.metric_name}` };
   }
   if (dashboard.includes('docker container')) {
-    return { classification: 'Container resources', hypothesis: `Container resource spike: ${m.metric_name} (${m.change_pct != null ? `${m.change_pct > 0 ? '+' : ''}${m.change_pct.toFixed(1)}%` : 'unknown change'})` };
+    return { classification: 'Container resources', hypothesis: `Container resource spike: ${m.metric_name} (${fmtPct(m.change_pct)})` };
   }
   if (dashboard.includes('hikari') || dashboard.includes('connection pool')) {
     return { classification: 'DB connection pool', hypothesis: `Connection pool pressure: ${m.metric_name}` };
@@ -341,7 +313,7 @@ function inferSourceType(dashboard: string): string {
   if (d.includes('hikari') || d.includes('connection pool')) return 'Connection pool';
   if (d.includes('http')) return 'HTTP metrics';
   if (d.includes('dynatrace')) return 'Dynatrace';
-  return 'Grafana';
+  return 'Other';
 }
 
 function detectCausalChains(groups: DashboardGroup[]): CausalChain[] {
@@ -389,15 +361,20 @@ export function buildAdaptSummary(
   conclusion: AdaptConclusion,
   tracked: TrackedRegressionsResponse,
 ): AdaptSummary {
+  // Defensive: default to empty arrays if API returns null/undefined
+  const regressions = conclusion.regressions ?? [];
+  const improvements = conclusion.improvements ?? [];
+  const differences = conclusion.differences ?? [];
+
   const classifyAll = (metrics: AdaptMetricSummary[]): ClassifiedMetric[] =>
     metrics.map(m => ({ ...m, ...classifyMetric(m) }));
 
-  const classifiedRegressions = classifyAll(conclusion.regressions);
-  const classifiedImprovements = classifyAll(conclusion.improvements);
+  const classifiedRegressions = classifyAll(regressions);
+  const classifiedImprovements = classifyAll(improvements);
 
   // Group regressions by dashboard
   const dashboardMap = new Map<string, AdaptMetricSummary[]>();
-  for (const r of conclusion.regressions) {
+  for (const r of regressions) {
     const key = r.dashboard || 'Unknown';
     if (!dashboardMap.has(key)) dashboardMap.set(key, []);
     dashboardMap.get(key)!.push(r);
@@ -408,7 +385,7 @@ export function buildAdaptSummary(
       dashboard,
       sourceType: inferSourceType(dashboard),
       regressionCount: metrics.length,
-      topMetrics: metrics
+      topMetrics: [...metrics]
         .sort((a, b) => Math.abs(b.change_pct ?? 0) - Math.abs(a.change_pct ?? 0))
         .slice(0, 5)
         .map(m => ({ metric_name: m.metric_name, change_pct: m.change_pct, panel: m.panel })),
@@ -430,13 +407,13 @@ export function buildAdaptSummary(
     verdict: conclusion.conclusion,
     controlGroupId: conclusion.control_group_id ?? null,
     updatedAt: conclusion.updated_at,
-    totalRegressions: conclusion.regressions.length,
-    totalImprovements: conclusion.improvements.length,
-    totalDifferences: conclusion.differences.length,
+    totalRegressions: regressions.length,
+    totalImprovements: improvements.length,
+    totalDifferences: differences.length,
     trackedRegressions: {
       unresolved: tracked.unresolvedCount,
       total: tracked.totalTracked,
-      items: tracked.regressions,
+      items: tracked.regressions ?? [],
     },
     classifiedRegressions,
     classifiedImprovements,

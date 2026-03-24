@@ -149,10 +149,18 @@ server.tool(
   'Get pre-analysed Adapt regression results for a test run. Returns: overall verdict, classified regressions (computation kernel, transaction latency, JVM GC, container resources, etc.), regressions grouped by dashboard/data-source, detected causal chains across sources, generated hypotheses for investigation, and tracked regression status. This is the primary pass/fail signal — no further parsing needed.',
   { testRunId: z.string().describe('The test run ID') },
   safeTool(async ({ testRunId }) => {
-    const [conclusion, tracked] = await Promise.all([
+    const [conclusionResult, trackedResult] = await Promise.allSettled([
       client.getAdaptConclusion(testRunId),
       client.getTrackedRegressions(testRunId),
     ]);
+
+    if (conclusionResult.status === 'rejected') throw conclusionResult.reason;
+
+    const conclusion = conclusionResult.value;
+    const tracked = trackedResult.status === 'fulfilled'
+      ? trackedResult.value
+      : { regressions: [], unresolvedCount: 0, totalTracked: 0 };
+
     const summary = buildAdaptSummary(conclusion, tracked);
     return {
       content: [
