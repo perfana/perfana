@@ -3,7 +3,7 @@ import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
 import { z } from 'zod';
 import { PerfanaClient } from './perfana-client.js';
-import { diffConfigs, buildComparison, buildPerformanceRanking, buildErrorAnalysis } from './helpers.js';
+import { diffConfigs, buildComparison, buildPerformanceRanking, buildErrorAnalysis, buildAdaptSummary } from './helpers.js';
 import type { RankingDimension } from './helpers.js';
 
 const PERFANA_API_URL = process.env.PERFANA_API_URL ?? 'http://localhost:3001/api';
@@ -146,18 +146,19 @@ server.tool(
 
 server.tool(
   'get_adapt_results',
-  'Get the Adapt regression analysis results for a test run: overall verdict, list of tracked metric regressions (with severity, confidence, % change, and resolution status) compared against the baseline. This is the primary pass/fail signal in Perfana.',
+  'Get pre-analysed Adapt regression results for a test run. Returns: overall verdict, classified regressions (computation kernel, transaction latency, JVM GC, container resources, etc.), regressions grouped by dashboard/data-source, detected causal chains across sources, generated hypotheses for investigation, and tracked regression status. This is the primary pass/fail signal — no further parsing needed.',
   { testRunId: z.string().describe('The test run ID') },
   safeTool(async ({ testRunId }) => {
-    const [conclusion, regressions] = await Promise.all([
+    const [conclusion, tracked] = await Promise.all([
       client.getAdaptConclusion(testRunId),
       client.getTrackedRegressions(testRunId),
     ]);
+    const summary = buildAdaptSummary(conclusion, tracked);
     return {
       content: [
         {
           type: 'text',
-          text: JSON.stringify({ conclusion, regressions }, null, 2),
+          text: JSON.stringify(summary, null, 2),
         },
       ],
     };
