@@ -13,7 +13,7 @@ import {
 } from '../types';
 import { extractYAxisFormat, generateChartName, PERFORMANCE_METRICS_PANEL_UNITS } from '../utils';
 import { getFilteredDashboards, computeAvailableSources, determineSource } from '../utils';
-import { isDynatrace, isPerformanceTest, getSourceType } from '@/lib/metrics-source-utils';
+import { isDynatrace, isGrafana, isPerformanceTest, getSourceType } from '@/lib/metrics-source-utils';
 import { TestRun } from '@/types/test-runs';
 
 interface UseGraphsDataProps {
