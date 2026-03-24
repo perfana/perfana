@@ -40,8 +40,18 @@ export class AddMetricsSourceIdColumns1700000000014 implements MigrationInterfac
       await this.addColumn(queryRunner, table);
     }
 
-    // Compressed hypertables: disable compression, alter, re-enable
+    // Compressed hypertables: decompress all chunks, disable compression, alter, re-enable, recompress
     for (const table of this.compressedHypertables) {
+      // Decompress all compressed chunks first (required by TimescaleDB 2.x columnstore)
+      const chunks = await queryRunner.query(`
+        SELECT chunk_schema, chunk_name
+        FROM timescaledb_information.chunks
+        WHERE hypertable_name = '${table}' AND is_compressed = true
+      `).catch(() => []);
+      for (const chunk of chunks) {
+        await queryRunner.query(`SELECT decompress_chunk('"${chunk.chunk_schema}"."${chunk.chunk_name}"')`);
+      }
+
       await queryRunner.query(
         `ALTER TABLE "${table}" SET (timescaledb.compress = false)`,
       );
@@ -51,6 +61,11 @@ export class AddMetricsSourceIdColumns1700000000014 implements MigrationInterfac
           timescaledb.compress_segmentby = 'test_run_id, application_dashboard_id, panel_id, metric_name',
           timescaledb.compress_orderby = '"time" DESC')`,
       );
+
+      // Recompress chunks
+      for (const chunk of chunks) {
+        await queryRunner.query(`SELECT compress_chunk('"${chunk.chunk_schema}"."${chunk.chunk_name}"')`);
+      }
     }
   }
 
@@ -58,6 +73,15 @@ export class AddMetricsSourceIdColumns1700000000014 implements MigrationInterfac
     const allTables = [...this.compressedHypertables, ...this.regularTables].reverse();
 
     for (const table of this.compressedHypertables) {
+      // Decompress all chunks first
+      const chunks = await queryRunner.query(`
+        SELECT chunk_schema, chunk_name
+        FROM timescaledb_information.chunks
+        WHERE hypertable_name = '${table}' AND is_compressed = true
+      `).catch(() => []);
+      for (const chunk of chunks) {
+        await queryRunner.query(`SELECT decompress_chunk('"${chunk.chunk_schema}"."${chunk.chunk_name}"')`);
+      }
       await queryRunner.query(
         `ALTER TABLE "${table}" SET (timescaledb.compress = false)`,
       );
