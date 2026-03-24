@@ -139,6 +139,25 @@ describe('gen-skill-docs', () => {
     }
   });
 
+  test(`every Codex SKILL.md description stays within ${MAX_SKILL_DESCRIPTION_LENGTH} chars`, () => {
+    const agentsDir = path.join(ROOT, '.agents', 'skills');
+    if (!fs.existsSync(agentsDir)) return; // skip if not generated
+    for (const entry of fs.readdirSync(agentsDir, { withFileTypes: true })) {
+      if (!entry.isDirectory()) continue;
+      const skillMd = path.join(agentsDir, entry.name, 'SKILL.md');
+      if (!fs.existsSync(skillMd)) continue;
+      const content = fs.readFileSync(skillMd, 'utf-8');
+      const description = extractDescription(content);
+      expect(description.length).toBeLessThanOrEqual(MAX_SKILL_DESCRIPTION_LENGTH);
+    }
+  });
+
+  test('package.json version matches VERSION file', () => {
+    const pkg = JSON.parse(fs.readFileSync(path.join(ROOT, 'package.json'), 'utf-8'));
+    const version = fs.readFileSync(path.join(ROOT, 'VERSION'), 'utf-8').trim();
+    expect(pkg.version).toBe(version);
+  });
+
   test('generated files are fresh (match --dry-run)', () => {
     const result = Bun.spawnSync(['bun', 'run', 'scripts/gen-skill-docs.ts', '--dry-run'], {
       cwd: ROOT,
@@ -194,10 +213,18 @@ describe('gen-skill-docs', () => {
     expect(content).toContain('git branch --show-current');
   });
 
-  test('generated SKILL.md contains ELI16 simplification rules', () => {
-    const content = fs.readFileSync(path.join(ROOT, 'SKILL.md'), 'utf-8');
+  test('tier 2+ skills contain ELI16 simplification rules (AskUserQuestion format)', () => {
+    // Root SKILL.md is tier 1 (no AskUserQuestion format). Check a tier 2+ skill instead.
+    const content = fs.readFileSync(path.join(ROOT, 'cso', 'SKILL.md'), 'utf-8');
     expect(content).toContain('No raw function names');
     expect(content).toContain('plain English');
+  });
+
+  test('tier 1 skills do NOT contain AskUserQuestion format', () => {
+    // Use benchmark (tier 1) instead of root — root SKILL.md gets overwritten by Codex test setup
+    const content = fs.readFileSync(path.join(ROOT, 'benchmark', 'SKILL.md'), 'utf-8');
+    expect(content).not.toContain('## AskUserQuestion Format');
+    expect(content).not.toContain('## Completeness Principle');
   });
 
   test('generated SKILL.md contains telemetry line', () => {

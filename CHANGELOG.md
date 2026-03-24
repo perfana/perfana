@@ -4,6 +4,18 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
+## [0.2.3] - 2026-03-24
+
+### Removed
+- 53 obsolete files: backup files (.bak/.backup), unused Dockerfiles (optimized/security/simple/slim), superseded SQL migrations, archived TypeORM migrations, stale planning docs, one-time fix scripts, dead utilities, and build artifacts
+- Old migration archives (`database/migrations/`, `database/migrations_archive/`)
+
+### Fixed
+- Exported previously inert migrations 003 (AddTagsHashUniqueIndex) and 004 (AddAlertsSupport) from `packages/shared/src/database/index.ts`
+
+### Changed
+- Upgraded vendored gstack to v0.11.15.0
+
 ## [0.2.2] - 2026-03-24
 
 ### Added
