@@ -4,6 +4,18 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
+## [0.2.9] - 2026-03-25
+
+### Added
+- Copy-to-clipboard icon next to test run ID in both collapsed and expanded test run info cards
+- Apdex Threshold column in performance analysis transaction tables and sampler tables
+- Per-scenario transaction name filter in performance analysis overview tab
+- Organization-scoped Grafana dashboard filtering — non-admin users only see dashboards from their organization's grafana instances
+
+### Changed
+- Add `organization_id` to frontend `SystemUnderTest` type for org-aware dashboard management
+- Dashboard add dialog now fetches only dashboards from the system's organization grafana instances
+
 ## [0.2.8] - 2026-03-25
 
 ### Fixed

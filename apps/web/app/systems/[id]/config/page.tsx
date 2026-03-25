@@ -161,7 +161,7 @@ export default function SystemConfigurationPage() {
               selectedTags={dashboard.selectedDashboardTags}
               onTagToggle={dashboard.handleDashboardTagToggle}
               onClearTags={dashboard.clearDashboardTags}
-              onAddDashboard={dashboard.handleAddDashboard}
+              onAddDashboard={() => dashboard.handleAddDashboard(system.organization_id)}
               onEditDashboard={dashboard.handleEditDashboard}
               onDeleteDashboard={dashboard.handleDeleteDashboard}
               onBatchDelete={(ids, del) =>

@@ -83,6 +83,7 @@ export interface SystemUnderTest {
   name: string;
   description?: string;
   team_id?: string | null;
+  organization_id?: string | null;
   tracing_service?: string;
   pyroscope_instance_id?: string;
   pyroscope_configurations?: PyroscopeConfiguration[];

@@ -41,6 +41,7 @@ export function SamplerTable({
             <TableCell align="right" sx={{ fontWeight: 700 }}>99th Pct (ms)</TableCell>
             <TableCell align="right" sx={{ fontWeight: 700 }}>Passed</TableCell>
             <TableCell align="right" sx={{ fontWeight: 700 }}>Failed</TableCell>
+            <TableCell align="right" sx={{ fontWeight: 700 }}>Apdex Threshold</TableCell>
             <TableCell align="right" sx={{ fontWeight: 700 }}>Apdex Score</TableCell>
             <TableCell align="center" sx={{ fontWeight: 700 }}>Actions</TableCell>
           </TableRow>
@@ -109,6 +110,9 @@ export function SamplerTable({
                 }}
               >
                 {sampler.failed_count}
+              </TableCell>
+              <TableCell align="right" sx={{ fontFamily: 'monospace' }}>
+                {sampler.active_threshold}ms
               </TableCell>
               <TableCell align="right">
                 <Tooltip

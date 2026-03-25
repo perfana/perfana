@@ -1,6 +1,6 @@
 'use client';
 
-import { Fragment } from 'react';
+import { Fragment, useState } from 'react';
 import {
   Box,
   Typography,
@@ -11,10 +11,14 @@ import {
   TableContainer,
   TableRow,
   Paper,
+  TextField,
+  InputAdornment,
 } from '@mui/material';
 import {
   KeyboardArrowDown,
   KeyboardArrowUp,
+  FilterList,
+  Clear,
 } from '@mui/icons-material';
 import {
   TransactionStat,
@@ -80,6 +84,8 @@ export function TransactionsTable({
   onOpenSamplerActionMenu,
   onOpenSamplerErrors,
 }: TransactionsTableProps) {
+  const [transactionFilters, setTransactionFilters] = useState<Record<string, string>>({});
+
   return (
     <>
       {/* Scenarios section header */}
@@ -114,7 +120,7 @@ export function TransactionsTable({
                   {/* Spacer row between scenario blocks */}
                   {index > 0 && (
                     <TableRow>
-                      <TableCell colSpan={10} sx={{ py: 2, border: 'none' }} />
+                      <TableCell colSpan={11} sx={{ py: 2, border: 'none' }} />
                     </TableRow>
                   )}
 
@@ -128,7 +134,7 @@ export function TransactionsTable({
                       }
                     }}
                   >
-                    <TableCell colSpan={10} sx={{
+                    <TableCell colSpan={11} sx={{
                       backgroundColor: 'rgba(25, 118, 210, 0.06)',
                       fontWeight: 700,
                       fontSize: '0.9rem',
@@ -160,6 +166,37 @@ export function TransactionsTable({
                   {/* Transaction rows for this scenario - Only show when expanded */}
                   {isScenarioExpanded && (
                     <>
+                      {/* Transaction filter */}
+                      <TableRow>
+                        <TableCell colSpan={11} sx={{ py: 1, px: 2, border: 'none', backgroundColor: 'rgba(0, 0, 0, 0.02)' }}>
+                          <TextField
+                            size="small"
+                            placeholder="Filter transactions..."
+                            value={transactionFilters[scenarioName] || ''}
+                            onChange={(e) => setTransactionFilters(prev => ({ ...prev, [scenarioName]: e.target.value }))}
+                            onClick={(e) => e.stopPropagation()}
+                            InputProps={{
+                              startAdornment: (
+                                <InputAdornment position="start">
+                                  <FilterList sx={{ fontSize: 18, color: 'text.secondary' }} />
+                                </InputAdornment>
+                              ),
+                              endAdornment: transactionFilters[scenarioName] ? (
+                                <InputAdornment position="end">
+                                  <IconButton
+                                    size="small"
+                                    onClick={() => setTransactionFilters(prev => ({ ...prev, [scenarioName]: '' }))}
+                                  >
+                                    <Clear sx={{ fontSize: 16 }} />
+                                  </IconButton>
+                                </InputAdornment>
+                              ) : null,
+                            }}
+                            sx={{ width: 300, backgroundColor: 'background.paper', borderRadius: 1 }}
+                          />
+                        </TableCell>
+                      </TableRow>
+
                       {/* Table header row */}
                       <TransactionsTableHeader
                         sortField={sortField}
@@ -168,22 +205,27 @@ export function TransactionsTable({
                       />
 
                       {/* Transaction data rows */}
-                      {scenarioTransactions.map((transaction, txIndex) => (
-                        <TransactionRow
-                          key={`${transaction.transaction_name}-${txIndex}`}
-                          transaction={transaction}
-                          index={txIndex}
-                          isExpanded={expandedRows.has(transaction.transaction_name)}
-                          samples={rowSamples[transaction.transaction_name] || []}
-                          isLoading={loadingSamples[transaction.transaction_name] || false}
-                          error={samplesError[transaction.transaction_name]}
-                          onRowClick={onRowClick}
-                          onOpenActionMenu={onOpenActionMenu}
-                          onOpenTransactionErrors={onOpenTransactionErrors}
-                          onOpenSamplerActionMenu={onOpenSamplerActionMenu}
-                          onOpenSamplerErrors={onOpenSamplerErrors}
-                        />
-                      ))}
+                      {scenarioTransactions
+                        .filter(t => {
+                          const filter = transactionFilters[scenarioName]?.toLowerCase();
+                          return !filter || t.transaction_name.toLowerCase().includes(filter);
+                        })
+                        .map((transaction, txIndex) => (
+                          <TransactionRow
+                            key={`${transaction.transaction_name}-${txIndex}`}
+                            transaction={transaction}
+                            index={txIndex}
+                            isExpanded={expandedRows.has(transaction.transaction_name)}
+                            samples={rowSamples[transaction.transaction_name] || []}
+                            isLoading={loadingSamples[transaction.transaction_name] || false}
+                            error={samplesError[transaction.transaction_name]}
+                            onRowClick={onRowClick}
+                            onOpenActionMenu={onOpenActionMenu}
+                            onOpenTransactionErrors={onOpenTransactionErrors}
+                            onOpenSamplerActionMenu={onOpenSamplerActionMenu}
+                            onOpenSamplerErrors={onOpenSamplerErrors}
+                          />
+                        ))}
                     </>
                   )}
                 </Fragment>

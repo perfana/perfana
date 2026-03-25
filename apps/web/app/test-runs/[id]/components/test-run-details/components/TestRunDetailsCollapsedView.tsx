@@ -1,6 +1,8 @@
 'use client';
 
-import { Box } from '@mui/material';
+import { useState } from 'react';
+import { Box, IconButton, Tooltip } from '@mui/material';
+import { ContentCopy, Check } from '@mui/icons-material';
 import { TestRun } from '@/types/test-runs';
 import KPIDisplay from '../../shared/KPIDisplay';
 import SoftBadge from '../../shared/SoftBadge';
@@ -11,15 +13,33 @@ interface TestRunDetailsCollapsedViewProps {
 }
 
 export function TestRunDetailsCollapsedView({ testRun }: TestRunDetailsCollapsedViewProps) {
+  const [copied, setCopied] = useState(false);
+
+  const handleCopy = (e: React.MouseEvent) => {
+    e.stopPropagation();
+    navigator.clipboard.writeText(testRun.test_run_id);
+    setCopied(true);
+    setTimeout(() => setCopied(false), 2000);
+  };
+
   return (
     <Box sx={{ flexGrow: 1, display: 'flex', flexDirection: 'column', gap: 2.5 }}>
       {/* Primary KPI Display - Test Run ID */}
-      <Box sx={{ py: 1 }}>
+      <Box sx={{ py: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 0.5 }}>
         <KPIDisplay
           value={testRun.test_run_id.split('-').pop() || testRun.test_run_id}
           label="Test Run ID"
           monospace
         />
+        <Tooltip title={copied ? 'Copied!' : 'Copy full test run ID'}>
+          <IconButton
+            size="small"
+            onClick={handleCopy}
+            sx={{ opacity: 0.5, '&:hover': { opacity: 1 }, mt: -2 }}
+          >
+            {copied ? <Check sx={{ fontSize: 16 }} /> : <ContentCopy sx={{ fontSize: 16 }} />}
+          </IconButton>
+        </Tooltip>
       </Box>
 
       {/* Secondary Content - Soft Badges */}

@@ -85,6 +85,9 @@ export function TransactionsTableHeader({
         </TableSortLabel>
       </TableCell>
       <TableCell align="right" sx={{ fontWeight: 700 }}>
+        Apdex Threshold
+      </TableCell>
+      <TableCell align="right" sx={{ fontWeight: 700 }}>
         <TableSortLabel
           active={sortField === 'apdex_score'}
           direction={sortField === 'apdex_score' ? sortOrder : 'asc'}

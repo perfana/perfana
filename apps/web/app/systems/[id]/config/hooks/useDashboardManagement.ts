@@ -38,7 +38,7 @@ interface UseDashboardManagementReturn {
 
   // Actions
   fetchApplicationDashboards: (systemName: string, environment: string) => Promise<void>;
-  handleAddDashboard: () => Promise<void>;
+  handleAddDashboard: (organizationId?: string | null) => Promise<void>;
   handleSubmitDashboard: (
     dashboardId: string,
     label: string,
@@ -127,29 +127,56 @@ export function useDashboardManagement(): UseDashboardManagementReturn {
     }
   }, []);
 
-  // Fetch available Grafana dashboards
-  const fetchAvailableGrafanaDashboards = useCallback(async () => {
+  // Fetch available Grafana dashboards, scoped to the system's organization
+  const fetchAvailableGrafanaDashboards = useCallback(async (organizationId?: string | null) => {
     try {
-      const response = await authenticatedFetch(`/grafana/dashboards`, {
+      // First fetch grafana instances for this organization
+      const instancesUrl = organizationId
+        ? `/grafana-instances?organizationId=${encodeURIComponent(organizationId)}`
+        : `/grafana-instances`;
+      const instancesResponse = await authenticatedFetch(instancesUrl, {
         method: 'GET',
         headers: { 'Content-Type': 'application/json' },
       });
 
-      if (!response.ok) {
-        throw new Error('Failed to fetch available dashboards');
+      if (!instancesResponse.ok) {
+        throw new Error('Failed to fetch grafana instances');
       }
 
-      const data = await response.json();
-      setAvailableGrafanaDashboards(data || []);
+      const instances = await instancesResponse.json();
+
+      if (!instances || instances.length === 0) {
+        setAvailableGrafanaDashboards([]);
+        return;
+      }
+
+      // Fetch dashboards for each instance and combine
+      const allDashboards: GrafanaDashboard[] = [];
+      for (const instance of instances) {
+        const response = await authenticatedFetch(
+          `/grafana/dashboards?grafanaInstanceId=${encodeURIComponent(instance.id)}`,
+          {
+            method: 'GET',
+            headers: { 'Content-Type': 'application/json' },
+          }
+        );
+
+        if (response.ok) {
+          const data = await response.json();
+          if (data) allDashboards.push(...data);
+        }
+      }
+
+      setAvailableGrafanaDashboards(allDashboards);
     } catch (err) {
       // Error fetching available dashboards, silently handle
     }
   }, []);
 
   // Handle add dashboard
-  const handleAddDashboard = useCallback(async () => {
+  const handleAddDashboard = useCallback(async (organizationId?: string | null) => {
     if (availableGrafanaDashboards.length === 0) {
-      await fetchAvailableGrafanaDashboards();
+      await fetchAvailableGrafanaDashboards(organizationId);
     }
     setAddDashboardOpen(true);
   }, [availableGrafanaDashboards.length, fetchAvailableGrafanaDashboards]);

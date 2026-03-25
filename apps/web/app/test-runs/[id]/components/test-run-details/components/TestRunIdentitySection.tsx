@@ -1,15 +1,17 @@
 'use client';
 
+import { useState } from 'react';
 import {
   Box,
   Typography,
   Chip,
   CircularProgress,
   Tooltip,
+  IconButton,
   LinearProgress,
   useTheme,
 } from '@mui/material';
-import { HourglassEmpty, Launch } from '@mui/icons-material';
+import { HourglassEmpty, Launch, ContentCopy, Check } from '@mui/icons-material';
 import { TestRun } from '@/types/test-runs';
 
 interface TestRunIdentitySectionProps {
@@ -19,6 +21,13 @@ interface TestRunIdentitySectionProps {
 export function TestRunIdentitySection({ testRun }: TestRunIdentitySectionProps) {
   const theme = useTheme();
   const isDark = theme.palette.mode === 'dark';
+  const [copied, setCopied] = useState(false);
+
+  const handleCopyTestRunId = () => {
+    navigator.clipboard.writeText(testRun.test_run_id);
+    setCopied(true);
+    setTimeout(() => setCopied(false), 2000);
+  };
   return (
     <Box sx={{
       p: 3,
@@ -66,23 +75,30 @@ export function TestRunIdentitySection({ testRun }: TestRunIdentitySectionProps)
         >
           Test Run ID
         </Typography>
-        <Typography
-          variant="body2"
-          sx={{
-            fontFamily: '"SF Mono", "Monaco", "Cascadia Code", "Roboto Mono", monospace',
-            fontSize: '0.875rem',
-            fontWeight: 500,
-            backgroundColor: isDark ? 'rgba(255, 255, 255, 0.05)' : 'rgba(0, 0, 0, 0.03)',
-            px: 1.5,
-            py: 0.75,
-            borderRadius: 1,
-            border: isDark ? '1px solid rgba(255, 255, 255, 0.1)' : '1px solid rgba(0, 0, 0, 0.06)',
-            display: 'inline-block',
-            color: 'text.primary',
-          }}
-        >
-          {testRun.test_run_id}
-        </Typography>
+        <Box sx={{ display: 'inline-flex', alignItems: 'center', gap: 0.5 }}>
+          <Typography
+            variant="body2"
+            sx={{
+              fontFamily: '"SF Mono", "Monaco", "Cascadia Code", "Roboto Mono", monospace',
+              fontSize: '0.875rem',
+              fontWeight: 500,
+              backgroundColor: isDark ? 'rgba(255, 255, 255, 0.05)' : 'rgba(0, 0, 0, 0.03)',
+              px: 1.5,
+              py: 0.75,
+              borderRadius: 1,
+              border: isDark ? '1px solid rgba(255, 255, 255, 0.1)' : '1px solid rgba(0, 0, 0, 0.06)',
+              display: 'inline-block',
+              color: 'text.primary',
+            }}
+          >
+            {testRun.test_run_id}
+          </Typography>
+          <Tooltip title={copied ? 'Copied!' : 'Copy test run ID'}>
+            <IconButton size="small" onClick={handleCopyTestRunId} sx={{ opacity: 0.5, '&:hover': { opacity: 1 } }}>
+              {copied ? <Check sx={{ fontSize: 16 }} /> : <ContentCopy sx={{ fontSize: 16 }} />}
+            </IconButton>
+          </Tooltip>
+        </Box>
       </Box>
 
       {/* Version */}
