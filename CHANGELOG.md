@@ -11,6 +11,14 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
 - Apdex report transactions table displays the actual threshold used per transaction
 - Overall Apdex threshold display shows "varies per txn" when different transactions use different thresholds
 
+### Removed
+- Stale auto-claude artifacts (`.auto-claude-security.json`, `.auto-claude-status`, `.claude_settings.json`)
+- Completed database migration consolidation docs (`database/DEPLOYMENT_CHECKLIST.md`, `MIGRATION_CONSOLIDATION.md`, `PRODUCTION_DEPLOYMENT_SUMMARY.md`)
+- Unused SonarQube files (`fix-coverage-paths.sh`, `run-sonar-scan.sh`, `sonar-project.properties`)
+
+### Changed
+- Updated `.gitignore` to prevent future accumulation of tool artifacts (`.playwright-mcp/`, `.serena/`, auto-claude files)
+
 ## [0.2.3] - 2026-03-24
 
 ### Removed
