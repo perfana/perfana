@@ -122,6 +122,9 @@ export function TransactionRow({
         }}>
           {errorRate.toFixed(2)}%
         </TableCell>
+        <TableCell align="right" sx={{ fontFamily: 'monospace' }}>
+          {transaction.active_threshold}ms
+        </TableCell>
         <TableCell align="right">
           <Tooltip
             title={
@@ -183,7 +186,7 @@ export function TransactionRow({
 
       {/* Expandable sub-row */}
       <TableRow>
-        <TableCell style={{ paddingBottom: 0, paddingTop: 0 }} colSpan={10}>
+        <TableCell style={{ paddingBottom: 0, paddingTop: 0 }} colSpan={11}>
           <Collapse in={isExpanded} timeout="auto" unmountOnExit>
             <Box sx={{ margin: 2, backgroundColor: 'rgba(0, 0, 0, 0.02)', borderRadius: 2, p: 2 }}>
               {isLoading && (
