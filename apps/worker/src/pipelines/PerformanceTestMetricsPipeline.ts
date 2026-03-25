@@ -94,24 +94,22 @@ export class PerformanceTestMetricsPipeline extends BasePipelineTypeORM {
         );
       }
 
-      // Calculate elapsed time from original test start for bucket size calculation
-      // IMPORTANT: Both incremental and full collection must use the same bucket size
-      // to ensure consistent time bucket alignment and proper UPSERT behavior
+      // Calculate bucket size for time-series aggregation
+      // Incremental collection uses fixed 1s buckets to ensure consistent resolution
+      // throughout the test run regardless of elapsed time.
+      // Full collection uses dynamic bucket sizing based on total test duration.
       const effectiveEndTime = testRun.filter_to_time ?? testRun.end_time;
       const elapsedTimeSeconds = effectiveEndTime
         ? (effectiveEndTime.getTime() - testRun.start_time.getTime()) / 1000
         : 3600; // Default to 1 hour if no end time
 
-      // Use elapsed time from original start_time for bucket size calculation
-      // This ensures incremental and full collection use the same bucket size
-      const bucketSizeSeconds = calculateBucketSize(
-        elapsedTimeSeconds,
-        isIncremental ? 1000 : FULL_COLLECTION_TARGET_DATA_POINTS
-      );
+      const bucketSizeSeconds = isIncremental
+        ? 1 // Fixed 1s buckets for incremental — avoids resolution changes mid-test
+        : calculateBucketSize(elapsedTimeSeconds, FULL_COLLECTION_TARGET_DATA_POINTS);
       const estimatedBuckets = Math.ceil(elapsedTimeSeconds / bucketSizeSeconds);
 
       this.logger.info(
-        `📊 Using ${bucketSizeSeconds}s buckets for ${elapsedTimeSeconds.toFixed(0)}s elapsed time (estimated ${estimatedBuckets} buckets)`
+        `📊 Using ${bucketSizeSeconds}s buckets for ${elapsedTimeSeconds.toFixed(0)}s elapsed time (estimated ${estimatedBuckets} buckets${isIncremental ? ', fixed for incremental' : ''})`
       );
 
       // Load Apdex thresholds
