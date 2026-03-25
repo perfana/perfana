@@ -3737,20 +3737,6 @@ CREATE INDEX "IDX_fbae9e222dde1d3850c895dc5a" ON public.application_dashboards U
 
 
 --
--- Name: ds_compare_config_metric_level_unique; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE UNIQUE INDEX ds_compare_config_metric_level_unique ON public.ds_compare_config USING btree (application_dashboard_id, panel_id, metric_name) WHERE (metric_name IS NOT NULL);
-
-
---
--- Name: ds_compare_config_panel_level_unique; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE UNIQUE INDEX ds_compare_config_panel_level_unique ON public.ds_compare_config USING btree (application_dashboard_id, panel_id) WHERE (metric_name IS NULL);
-
-
---
 -- Name: ds_metrics_time_idx; Type: INDEX; Schema: public; Owner: -
 --
 

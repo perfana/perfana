@@ -19,3 +19,4 @@ export { BackfillMetricsSources1700000000015 } from './migrations/1700000000015-
 export { AddMetricsSourceIdToApplicationDashboard1700000000016 } from './migrations/1700000000016-AddMetricsSourceIdToApplicationDashboard';
 export { MetricsSourceOneToOneAndNullableGrafana1700000000017 } from './migrations/1700000000017-MetricsSourceOneToOneAndNullableGrafana';
 export { MigrateCompareConfigToMetricsSource1700000000018 } from './migrations/1700000000018-MigrateCompareConfigToMetricsSource';
+export { DropNarrowCompareConfigUniqueConstraints1700000000019 } from './migrations/1700000000019-DropNarrowCompareConfigUniqueConstraints';
