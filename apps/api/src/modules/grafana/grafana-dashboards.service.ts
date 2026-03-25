@@ -35,8 +35,7 @@ export interface GrafanaDashboard {
  *
  * Authorization:
  * - All methods accept userId and roles parameters for authorization
- * - Currently GrafanaDashboard entity does not have organization_id, so all data is treated as legacy
- * - When organization_id is added to GrafanaDashboard (Phase 4), authorization checks will be enabled
+ * - findAll filters by organization: users see dashboards in their orgs + unowned (NULL org) dashboards
  * - Global admins bypass all authorization checks
  */
 @Injectable()
@@ -51,25 +50,33 @@ export class GrafanaDashboardsService {
   ) {}
 
   /**
-   * Find all Grafana dashboards
+   * Find all Grafana dashboards accessible to the user.
    *
-   * @param userId - The user ID for authorization
-   * @param roles - The user's roles for authorization checks
-   * @param query - Optional query filters
-   *
-   * Note: GrafanaDashboard entity does not have organization_id yet, so org filtering is not applied.
-   * Full org filtering will be enabled when Phase 4 adds organization_id column.
+   * Non-admin users see dashboards belonging to their organizations plus
+   * dashboards with no organization_id (legacy/shared). Admins see all.
    */
   async findAll(userId: string, roles: string[], query: GrafanaDashboardQuery = {}): Promise<GrafanaDashboard[]> {
     // Log authorization context for debugging
     const isAdmin = this.authzService.isGlobalAdmin(roles);
     this.logger.debug(`findAll: userId=${userId}, isGlobalAdmin=${isAdmin}`);
 
-    // NOTE: Org filtering will be added here when GrafanaDashboard entity has organization_id
-    // For now, all dashboards are returned (treated as legacy data)
-
     try {
       const queryBuilder = this.grafanaDashboardRepo.createQueryBuilder('gd');
+
+      // Organization filtering: non-admin users only see dashboards belonging to
+      // their organizations OR dashboards with no organization (legacy/shared data).
+      if (!isAdmin) {
+        const organizationIds = await this.authzService.getAccessibleOrganizations(userId);
+        if (organizationIds.length > 0) {
+          queryBuilder.andWhere(
+            '(gd.organizationId IS NULL OR gd.organizationId IN (:...orgIds))',
+            { orgIds: organizationIds }
+          );
+        } else {
+          // User has no org memberships — only show unowned dashboards
+          queryBuilder.andWhere('gd.organizationId IS NULL');
+        }
+      }
 
       // Exclude synthetic dashboards created for non-Grafana sources.
       // Join through application_dashboards → metrics_sources to check source_type.
