@@ -4,6 +4,13 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
+## [0.2.4] - 2026-03-25
+
+### Fixed
+- Apdex report card now uses per-transaction threshold overrides from `workload_transaction_apdex_thresholds` instead of a single default threshold
+- Apdex report transactions table displays the actual threshold used per transaction
+- Overall Apdex threshold display shows "varies per txn" when different transactions use different thresholds
+
 ## [0.2.3] - 2026-03-24
 
 ### Removed
