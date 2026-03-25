@@ -182,6 +182,13 @@ sonar-scanner.properties
 
 # Auto Claude data directory
 .auto-claude/
+.auto-claude-security.json
+.auto-claude-status
+.claude_settings.json
+
+# Tool artifacts (screenshots, configs)
+.playwright-mcp/
+.serena/
 
 # Local provisioning data (YAML files mounted at runtime)
 /provisioning/
