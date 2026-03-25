@@ -210,7 +210,7 @@ export class ReportDataFetcherService {
    */
   async getApdexDataFromDatabase(
     testRun: TestRun,
-    apdexThreshold: number,
+    _apdexThreshold: number,
     excludeRampUp: boolean = false,
     userId: string = '',
     roles: string[] = [],
@@ -290,6 +290,7 @@ export class ReportDataFetcherService {
       let weightedP95 = 0;
       let weightedP99 = 0;
       let weightedApdex = 0;
+      const thresholdSet = new Set<number>();
 
       for (const txn of allTransactions) {
         const count = parseInt(txn.total);
@@ -305,6 +306,7 @@ export class ReportDataFetcherService {
         weightedP95 += parseFloat(txn.p95_ms) * count;
         weightedP99 += parseFloat(txn.p99_ms) * count;
         weightedApdex += txnApdex * count;
+        thresholdSet.add(parseInt(txn.active_threshold) || 500);
       }
 
       const overallApdex = totalCount > 0 ? weightedApdex / totalCount : 0;
@@ -368,6 +370,7 @@ export class ReportDataFetcherService {
             fail: parseInt(txn.fail) || 0,
             errPct: txnErrorPct,
             apdex: txnApdex,
+            threshold: parseInt(txn.active_threshold) || 500,
           };
         });
 
@@ -410,7 +413,8 @@ export class ReportDataFetcherService {
           p95Ms: overallP95,
           p99Ms: overallP99,
           apdex: overallApdex,
-          threshold: apdexThreshold,
+          threshold: thresholdSet.size === 1 ? [...thresholdSet][0] : null,
+          thresholdVaries: thresholdSet.size > 1,
         },
         scenarios,
       };

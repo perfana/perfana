@@ -167,7 +167,7 @@ export class ApdexRenderer {
           <div style="background: #f8f9fa; border: 1px solid #e9ecef; border-radius: 8px; padding: 20px;">
             <div style="font-size: 9pt; color: #666; text-transform: uppercase; letter-spacing: 0.05em; margin-bottom: 12px; font-weight: 600;">Overall Apdex Score</div>
             <div style="font-size: 28pt; font-weight: 700; color: #4caf50; font-family: 'Courier New', monospace;">${overallData.apdex.toFixed(3)} <span style="font-size: 12pt; text-transform: uppercase; color: #4caf50;">${apdexRating}</span></div>
-            <div style="font-size: 9pt; color: #666; margin-top: 4px;">T=${overallData.threshold}ms</div>
+            <div style="font-size: 9pt; color: #666; margin-top: 4px;">${overallData.thresholdVaries ? 'T=varies per txn' : `T=${overallData.threshold}ms`}</div>
           </div>
         </div>
       </div>
@@ -257,6 +257,7 @@ export class ApdexRenderer {
         <td style="text-align: right;" class="table-value-pass">${txn.pass}</td>
         <td style="text-align: right;" class="${txn.fail > 0 ? 'table-value-fail' : ''}">${txn.fail}</td>
         <td style="text-align: right;" class="${txn.errPct > 0 ? 'table-value-error-pct' : ''}">${txn.errPct.toFixed(2)}%</td>
+        <td style="text-align: right; font-family: 'Courier New', monospace;">${txn.threshold || 500}ms</td>
         <td style="text-align: right;">
           <span style="font-weight: 600; color: ${apdexColor}; text-transform: uppercase; font-size: 9pt; letter-spacing: 0.05em;">${apdexRating}</span>
         </td>
@@ -277,6 +278,7 @@ export class ApdexRenderer {
             <th style="text-align: right;">Passed</th>
             <th style="text-align: right;">Failed</th>
             <th style="text-align: right;">Errors<br/>%</th>
+            <th style="text-align: right;">Threshold<br/>(ms)</th>
             <th style="text-align: right;">Apdex<br/>Score</th>
           </tr>
         </thead>
