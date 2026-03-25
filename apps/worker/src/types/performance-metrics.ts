@@ -165,6 +165,7 @@ export interface AggregatedMetrics {
 export interface DsMetricsRecord {
   test_run_id: string;
   application_dashboard_id: string;
+  metrics_source_id?: string | null;
   dashboard_uid: string;
   panel_id: number;
   time: Date;

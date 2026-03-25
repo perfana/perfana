@@ -133,6 +133,7 @@ export function createDsMetricsRecord(
   return {
     test_run_id: testRunId,
     application_dashboard_id: dashboard.dashboardId,
+    metrics_source_id: dashboard.metricsSourceId || null,
     dashboard_uid: dashboard.dashboardUid,
     panel_id: panel.panelId,
     time,

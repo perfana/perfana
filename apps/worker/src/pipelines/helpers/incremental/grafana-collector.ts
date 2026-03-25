@@ -183,6 +183,7 @@ export class GrafanaCollector {
       SELECT
         test_run_id,
         application_dashboard_id,
+        metrics_source_id,
         dashboard_uid,
         panel_id,
         panel_title,

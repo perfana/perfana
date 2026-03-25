@@ -35,6 +35,7 @@ export async function transformGrafanaResponseToMetrics(
         const panelDocument = {
           test_run_id: queryResult.panel.test_run_id,
           application_dashboard_id: queryResult.panel.application_dashboard_id,
+          metrics_source_id: queryResult.panel.metrics_source_id,
           dashboard_uid: queryResult.panel.dashboard_uid,
           panel_id: queryResult.panel.panel_id,
           panel_title: queryResult.panel.panel_title,
@@ -387,6 +388,7 @@ function createEmptyMetricsDocument(
   return {
     test_run_id: panel.test_run_id,
     application_dashboard_id: panel.application_dashboard_id,
+    metrics_source_id: panel.metrics_source_id,
     dashboard_uid: panel.dashboard_uid,
     panel_id: panel.panel_id,
     panel_title: panel.panel_title,

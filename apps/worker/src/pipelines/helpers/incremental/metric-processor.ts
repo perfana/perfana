@@ -22,6 +22,7 @@ import { WorkerDatabaseService } from '../../../common/database.service.js';
 export interface FlattenedMetricRecord {
   test_run_id: string;
   application_dashboard_id: string;
+  metrics_source_id?: string | null;
   dashboard_uid: string | null;
   panel_id: string | number;
   panel_title: string;
@@ -76,6 +77,7 @@ export class MetricProcessor {
     const baseData = {
       test_run_id: document.test_run_id,
       application_dashboard_id: document.application_dashboard_id,
+      metrics_source_id: document.metrics_source_id || null,
       dashboard_uid: document.dashboard_uid,
       panel_id: document.panel_id,
       panel_title: document.panel_title,
@@ -136,6 +138,7 @@ export class MetricProcessor {
     const baseData = {
       test_run_id: document.testRunId,
       application_dashboard_id: document.applicationDashboardId,
+      metrics_source_id: document.metricsSourceId || null,
       dashboard_uid: document.dashboardUid,
       panel_id: document.panelId,
       panel_title: document.panelTitle,
@@ -222,6 +225,7 @@ export class MetricProcessor {
     const columns = [
       'test_run_id',
       'application_dashboard_id',
+      'metrics_source_id',
       'dashboard_uid',
       'panel_id',
       'panel_title',
@@ -258,6 +262,7 @@ export class MetricProcessor {
         panel_title = EXCLUDED.panel_title,
         dashboard_label = EXCLUDED.dashboard_label,
         dashboard_uid = EXCLUDED.dashboard_uid,
+        metrics_source_id = COALESCE(EXCLUDED.metrics_source_id, ds_metrics.metrics_source_id),
         benchmark_ids = EXCLUDED.benchmark_ids,
         errors = EXCLUDED.errors,
         timestep = EXCLUDED.timestep,
