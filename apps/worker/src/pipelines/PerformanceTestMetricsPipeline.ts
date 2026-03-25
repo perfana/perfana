@@ -543,9 +543,9 @@ export class PerformanceTestMetricsPipeline extends BasePipelineTypeORM {
 
     // Full collection: plain INSERT (no conflict check), larger batches
     // Incremental: INSERT...ON CONFLICT (upsert), smaller batches for lock safety
-    // PostgreSQL max params: 65535; each record uses 19 params
-    // Plain INSERT: 3000 rows × 19 = 57000 params (under limit, no lock contention)
-    // ON CONFLICT: 1000 rows × 19 = 19000 params (smaller to reduce lock contention)
+    // PostgreSQL max params: 65535; each record uses 20 params
+    // Plain INSERT: 3000 rows × 20 = 60000 params (under limit, no lock contention)
+    // ON CONFLICT: 1000 rows × 20 = 20000 params (smaller to reduce lock contention)
     const batchSize = isIncremental ? 1000 : 3000;
     const maxConcurrentBatches = isIncremental ? 4 : 6;
 
@@ -562,13 +562,14 @@ export class PerformanceTestMetricsPipeline extends BasePipelineTypeORM {
         const placeholders: string[] = [];
 
         batch.forEach((record, idx) => {
-          const base = idx * 19;
+          const base = idx * 20;
           placeholders.push(
-            `($${base + 1}, $${base + 2}, $${base + 3}, $${base + 4}, $${base + 5}, $${base + 6}, $${base + 7}, $${base + 8}, $${base + 9}, $${base + 10}, $${base + 11}, $${base + 12}, $${base + 13}, $${base + 14}, $${base + 15}, $${base + 16}, $${base + 17}, $${base + 18}, $${base + 19})`
+            `($${base + 1}, $${base + 2}, $${base + 3}, $${base + 4}, $${base + 5}, $${base + 6}, $${base + 7}, $${base + 8}, $${base + 9}, $${base + 10}, $${base + 11}, $${base + 12}, $${base + 13}, $${base + 14}, $${base + 15}, $${base + 16}, $${base + 17}, $${base + 18}, $${base + 19}, $${base + 20})`
           );
           values.push(
             record.test_run_id,
             record.application_dashboard_id,
+            record.metrics_source_id || null,
             record.dashboard_uid?.substring(0, 255),
             record.panel_id,
             record.time,
@@ -593,7 +594,7 @@ export class PerformanceTestMetricsPipeline extends BasePipelineTypeORM {
         if (isIncremental) {
           query = `
             INSERT INTO ds_metrics (
-              test_run_id, application_dashboard_id, dashboard_uid, panel_id, time,
+              test_run_id, application_dashboard_id, metrics_source_id, dashboard_uid, panel_id, time,
               metric_name, panel_title, dashboard_label, benchmark_ids, errors,
               timestep, ramp_up, value, unit, created_at,
               organization_id, team_id, created_by, updated_by
@@ -602,6 +603,7 @@ export class PerformanceTestMetricsPipeline extends BasePipelineTypeORM {
             DO UPDATE SET
               value = EXCLUDED.value,
               unit = EXCLUDED.unit,
+              metrics_source_id = COALESCE(EXCLUDED.metrics_source_id, ds_metrics.metrics_source_id),
               updated_at = CURRENT_TIMESTAMP,
               organization_id = EXCLUDED.organization_id,
               team_id = EXCLUDED.team_id,
@@ -610,7 +612,7 @@ export class PerformanceTestMetricsPipeline extends BasePipelineTypeORM {
         } else {
           query = `
             INSERT INTO ds_metrics (
-              test_run_id, application_dashboard_id, dashboard_uid, panel_id, time,
+              test_run_id, application_dashboard_id, metrics_source_id, dashboard_uid, panel_id, time,
               metric_name, panel_title, dashboard_label, benchmark_ids, errors,
               timestep, ramp_up, value, unit, created_at,
               organization_id, team_id, created_by, updated_by

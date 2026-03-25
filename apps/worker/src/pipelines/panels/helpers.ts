@@ -52,6 +52,7 @@ export interface ApplicationDashboard {
   workload?: string;
   dashboard_uid?: string;
   dashboard_label?: string;
+  metrics_source_id?: string;
   variables?: Array<{
     name: string;
     values: string[];
@@ -94,7 +95,7 @@ export async function getApplicationDashboardsForTestRun(
   // In PostgreSQL, we need to find application dashboards that match the test run's system and environment
   let query = `
     SELECT ad.id, ad.dashboard_name as name, ad.system_under_test_id, ad.test_environment,
-           ad.dashboard_uid, ad.dashboard_label, ad.variables
+           ad.dashboard_uid, ad.dashboard_label, ad.variables, ad.metrics_source_id
     FROM application_dashboards ad
     WHERE ad.system_under_test_id = $1
     AND ad.test_environment = $2
@@ -345,6 +346,7 @@ export async function createPanelDocuments(
       const panelDocument = {
         test_run_id: perfanaData.test_run_id,
         application_dashboard_id: appDashboard.id,
+        metrics_source_id: appDashboard.metrics_source_id || null,
         dashboard_uid: dashboard.uid,
         panel_id: panel.id,
         panel_title: panel.title,

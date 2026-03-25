@@ -349,6 +349,7 @@ export class GrafanaClient {
     return {
       test_run_id: panel.test_run_id,
       application_dashboard_id: panel.application_dashboard_id,
+      metrics_source_id: panel.metrics_source_id,
       dashboard_uid: panel.dashboard_uid,
       panel_id: panel.panel_id,
       panel_title: panel.panel_title,
