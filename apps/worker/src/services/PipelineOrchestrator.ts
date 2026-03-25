@@ -626,9 +626,10 @@ ${results.map(r => {
     const batchInput = { testRunIds: [testRunId] };
     const singleInput = { testRunId };
 
-    // Create a timeout promise
+    // Create a timeout promise with cleanup
+    let timeoutHandle: ReturnType<typeof setTimeout>;
     const timeoutPromise = new Promise<PipelineResult>((_, reject) => {
-      setTimeout(() => {
+      timeoutHandle = setTimeout(() => {
         reject(new Error(`Stage ${stageName} timed out after ${timeoutMs}ms`));
       }, timeoutMs);
     });
@@ -698,6 +699,9 @@ ${results.map(r => {
           code: error instanceof Error && error.message.includes('timed out') ? 'TIMEOUT' : 'EXECUTION_ERROR'
         }
       };
+    } finally {
+      // Always clear the timeout to prevent unhandled rejection after Promise.race completes
+      clearTimeout(timeoutHandle!);
     }
   }
 
