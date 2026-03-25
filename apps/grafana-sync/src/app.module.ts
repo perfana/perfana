@@ -25,6 +25,7 @@ import {
   ProfileGrafanaDashboard,
   ProfileBenchmark,
   PyroscopeInstance,
+  MetricsSource,
 } from '@perfana/shared/entities';
 
 @Module({
@@ -59,6 +60,7 @@ import {
           GrafanaInstance,
           GrafanaDashboard,
           ApplicationDashboard,
+          MetricsSource,
           // Core entities (depend on foundation entities)
           SystemUnderTest, // depends on Team, PyroscopeInstance
           TestRun,

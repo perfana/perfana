@@ -4,6 +4,13 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
+## [0.2.6] - 2026-03-25
+
+### Fixed
+- Use fixed 1-second bucket size for incremental performance test metrics collection to prevent resolution changing mid-test (was 1s→5s after ~17 minutes)
+- Delete old performance_test metrics before force re-fetch to avoid mixed-resolution data from prior incremental collection
+- Add `MetricsSource` entity to grafana-sync TypeORM connection to fix startup crash (`ApplicationDashboard#metricsSource was not found`)
+
 ## [0.2.5] - 2026-03-25
 
 ### Fixed

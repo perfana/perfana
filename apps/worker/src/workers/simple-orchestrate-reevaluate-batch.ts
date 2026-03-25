@@ -401,6 +401,17 @@ export function simpleOrchestrateReevaluateBatchWorker() {
               try {
                 let dataPoints = 0;
 
+                // Delete old performance_test metrics before re-collection to avoid
+                // mixed-resolution data from incremental collection (1s early, 5s later)
+                if (status.source_type === 'performance_test') {
+                  const deleteResult = await db.dataSource.query(
+                    `DELETE FROM ds_metrics WHERE test_run_id = $1 AND metrics_source_id IS NOT NULL
+                     AND metrics_source_id IN (SELECT id FROM metrics_sources WHERE source_type = 'performance_test')`,
+                    [testRunId]
+                  );
+                  logger.info(`    🧹 Deleted ${deleteResult?.[1] ?? '?'} old performance_test ds_metrics for ${testRunId}`);
+                }
+
                 if (status.source_type === 'dynatrace') {
                   // Use the full DynatracePipeline — same as the analyze worker's dynatrace-collection stage
                   const dynatracePipeline = new DynatracePipeline(logger);
