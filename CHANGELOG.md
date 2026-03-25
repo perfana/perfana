@@ -4,6 +4,14 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
+## [0.2.7] - 2026-03-25
+
+### Fixed
+- Propagate config scope (metric vs panel) through save dialog so panel-level ADAPT classification and thresholds are correctly applied
+
+### Changed
+- Disable PR Quality Gate, Claude Code Review, and Docker Build CI pipelines on pull requests (manual dispatch only)
+
 ## [0.2.6] - 2026-03-25
 
 ### Fixed

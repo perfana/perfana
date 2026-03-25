@@ -78,7 +78,7 @@ export interface AnomalyTabContentProps {
   showConfigForm: Record<string, boolean>;
   configFormData: Record<string, any>;
   onConfigFormToggle: (rowKey: string) => void;
-  onConfigSave: (rowKey: string, data: any) => void;
+  onConfigSave: (rowKey: string, data: any, scope: 'metric' | 'panel') => void;
   onRefreshAnomalyData?: () => void;
   onDeleteAnomaly: () => void;
   hasDistributedTracing?: boolean;
@@ -141,7 +141,7 @@ export interface AnomalyDetectionExpandedCardProps {
   showConfigForm: Record<string, boolean>;
   onConfigFormToggle: (rowKey: string) => void;
   configFormData: Record<string, any>;
-  onConfigSave: (rowKey: string, data: any) => void;
+  onConfigSave: (rowKey: string, data: any, scope: 'metric' | 'panel') => void;
 
   // Feedback state
   onAcceptResults: () => void;

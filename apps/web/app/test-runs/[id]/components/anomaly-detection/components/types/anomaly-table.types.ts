@@ -49,7 +49,7 @@ export interface AnomalyDetectionTableProps {
   showConfigForm?: Record<string, boolean>;
   configFormData?: Record<string, any>;
   onConfigFormToggle?: (rowKey: string) => void;
-  onConfigSave?: (rowKey: string, data: any) => void;
+  onConfigSave?: (rowKey: string, data: any, scope: 'metric' | 'panel') => void;
 
   // Re-analysis functionality
   onRefreshAnomalyData?: () => void;
