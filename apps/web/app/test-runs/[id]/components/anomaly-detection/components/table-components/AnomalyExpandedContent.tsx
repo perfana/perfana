@@ -44,7 +44,7 @@ interface AnomalyExpandedContentProps {
   selectedTestRunIdForRow?: string;
   onDrawerToggle: () => void;
   onConfigFormToggle: () => void;
-  onConfigSave: (rowKey: string, data: any) => void;
+  onConfigSave: (rowKey: string, data: any, scope: 'metric' | 'panel') => void;
   onSelectTestRun: (testRunId: string) => void;
   onResetSelectedTestRun: () => void;
 }
