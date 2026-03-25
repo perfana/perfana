@@ -1,4 +1,4 @@
-import { Injectable, Logger, NotFoundException } from '@nestjs/common';
+import { Injectable, Logger, NotFoundException, ForbiddenException } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { GrafanaClientService } from './grafana-client.service';
@@ -48,6 +48,20 @@ export class GrafanaDashboardsService {
     private readonly grafanaClientService: GrafanaClientService,
     private readonly authzService: AuthorizationService,
   ) {}
+
+  /**
+   * Verify the user has access to a dashboard by organization membership.
+   * Dashboards with no organization_id (legacy/shared) are accessible to all.
+   */
+  private async verifyOrgAccess(dashboard: GrafanaDashboardEntity, userId: string, roles: string[]): Promise<void> {
+    if (this.authzService.isGlobalAdmin(roles)) return;
+    if (!dashboard.organizationId) return; // Legacy/shared dashboard — accessible to all
+
+    const organizationIds = await this.authzService.getAccessibleOrganizations(userId);
+    if (!organizationIds.includes(dashboard.organizationId)) {
+      throw new ForbiddenException(`Access denied to dashboard ${dashboard.id}`);
+    }
+  }
 
   /**
    * Find all Grafana dashboards accessible to the user.
@@ -176,19 +190,11 @@ export class GrafanaDashboardsService {
   }
 
   /**
-   * Find a single Grafana dashboard by ID
-   *
-   * @param id - The dashboard ID
-   * @param userId - The user ID for authorization
-   * @param roles - The user's roles for authorization checks
-   *
-   * Note: GrafanaDashboard entity does not have organization_id yet, so access checks are not applied.
-   * Full access permission checks will be enabled when Phase 4 adds organization_id column.
+   * Find a single Grafana dashboard by ID.
+   * Non-admin users can only access dashboards in their orgs or unowned dashboards.
    */
   async findOne(id: string, userId: string, roles: string[]): Promise<GrafanaDashboard> {
-    // Log authorization context for debugging
-    const isAdmin = this.authzService.isGlobalAdmin(roles);
-    this.logger.debug(`findOne: id=${id}, userId=${userId}, isGlobalAdmin=${isAdmin}`);
+    this.logger.debug(`findOne: id=${id}, userId=${userId}, isGlobalAdmin=${this.authzService.isGlobalAdmin(roles)}`);
 
     try {
       const result = await this.grafanaDashboardRepo.findOne({ where: { id } });
@@ -197,8 +203,7 @@ export class GrafanaDashboardsService {
         throw new NotFoundException(`Grafana dashboard with ID ${id} not found`);
       }
 
-      // NOTE: Access permission check will be added here when GrafanaDashboard entity has organization_id
-      // For now, all dashboards are accessible (treated as legacy data)
+      await this.verifyOrgAccess(result, userId, roles);
 
       // Debug logging for panel structure
       const hasGrafanaJson = !!result.grafanaJson;
@@ -241,23 +246,10 @@ export class GrafanaDashboardsService {
   }
 
   /**
-   * Create a new Grafana dashboard
-   *
-   * @param createDto - The dashboard creation DTO
-   * @param userId - The user ID for authorization and ownership tracking
-   * @param roles - The user's roles for authorization checks
-   *
-   * Note: GrafanaDashboard entity does not have organization_id or created_by/updated_by yet,
-   * so ownership tracking is not applied. Full ownership assignment will be enabled when
-   * Phase 4 adds the ownership columns.
+   * Create a new Grafana dashboard.
    */
   async create(createDto: CreateGrafanaDashboardDto, userId: string, roles: string[]): Promise<GrafanaDashboard> {
-    // Log authorization context for debugging
-    const isAdmin = this.authzService.isGlobalAdmin(roles);
-    this.logger.debug(`create: userId=${userId}, isGlobalAdmin=${isAdmin}`);
-
-    // NOTE: Permission check will be added here when GrafanaDashboard entity has organization_id
-    // For now, all users can create dashboards (treated as legacy data)
+    this.logger.debug(`create: userId=${userId}, isGlobalAdmin=${this.authzService.isGlobalAdmin(roles)}`);
 
     try {
       // NOTE: Ownership fields (created_by, organization_id) will be set here when Phase 4 adds them
@@ -306,27 +298,15 @@ export class GrafanaDashboardsService {
   }
 
   /**
-   * Update a Grafana dashboard
-   *
-   * @param id - The dashboard ID
-   * @param updateDto - The dashboard update DTO
-   * @param userId - The user ID for authorization
-   * @param roles - The user's roles for authorization checks
-   *
-   * Note: GrafanaDashboard entity does not have organization_id yet, so permission checks are not applied.
-   * Full permission checks will be enabled when Phase 4 adds organization_id column.
+   * Update a Grafana dashboard.
+   * Access check is handled by findOne (verifies org membership).
    */
   async update(id: string, updateDto: UpdateGrafanaDashboardDto, userId: string, roles: string[]): Promise<GrafanaDashboard> {
-    // Log authorization context for debugging
-    const isAdmin = this.authzService.isGlobalAdmin(roles);
-    this.logger.debug(`update: id=${id}, userId=${userId}, isGlobalAdmin=${isAdmin}`);
+    this.logger.debug(`update: id=${id}, userId=${userId}, isGlobalAdmin=${this.authzService.isGlobalAdmin(roles)}`);
 
     try {
-      // First check if the dashboard exists
+      // Verify exists and user has access (org check in findOne)
       await this.findOne(id, userId, roles);
-
-      // NOTE: Modify permission check will be added here when GrafanaDashboard entity has organization_id
-      // For now, all dashboards are updatable (treated as legacy data)
 
       const updateData: Partial<GrafanaDashboardEntity> = {
         updated: new Date()
@@ -383,26 +363,15 @@ export class GrafanaDashboardsService {
   }
 
   /**
-   * Delete a Grafana dashboard
-   *
-   * @param id - The dashboard ID
-   * @param userId - The user ID for authorization
-   * @param roles - The user's roles for authorization checks
-   *
-   * Note: GrafanaDashboard entity does not have organization_id yet, so permission checks are not applied.
-   * Full permission checks will be enabled when Phase 4 adds organization_id column.
+   * Delete a Grafana dashboard.
+   * Access check is handled by findOne (verifies org membership).
    */
   async remove(id: string, userId: string, roles: string[]): Promise<void> {
-    // Log authorization context for debugging
-    const isAdmin = this.authzService.isGlobalAdmin(roles);
-    this.logger.debug(`remove: id=${id}, userId=${userId}, isGlobalAdmin=${isAdmin}`);
+    this.logger.debug(`remove: id=${id}, userId=${userId}, isGlobalAdmin=${this.authzService.isGlobalAdmin(roles)}`);
 
     try {
-      // First check if the dashboard exists
+      // Verify exists and user has access (org check in findOne)
       await this.findOne(id, userId, roles);
-
-      // NOTE: Delete permission check will be added here when GrafanaDashboard entity has organization_id
-      // For now, all dashboards are deletable (treated as legacy data)
 
       await this.grafanaDashboardRepo.delete(id);
 
