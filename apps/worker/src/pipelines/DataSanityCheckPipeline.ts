@@ -165,7 +165,31 @@ export class DataSanityCheckPipeline extends BasePipelineTypeORM {
 
         if (totalStats === 0) {
           // 7. Statistics existence — metrics exist but no statistics
-          reasons.push('Statistics not calculated (metrics exist but no statistics)');
+          // Check if the issue is that all metrics fall within the ramp-up period
+          const rampUpCheckResult = await this.query<{ total: string; ramp_up_only: string }>(
+            `SELECT
+              COUNT(*)::text AS total,
+              COUNT(*) FILTER (WHERE ramp_up = true)::text AS ramp_up_only
+             FROM ds_metrics
+             WHERE test_run_id = $1`,
+            [testRunId]
+          );
+          const totalDataPoints = parseInt(rampUpCheckResult[0]?.total ?? '0', 10);
+          const rampUpOnlyPoints = parseInt(rampUpCheckResult[0]?.ramp_up_only ?? '0', 10);
+
+          if (totalDataPoints > 0 && totalDataPoints === rampUpOnlyPoints) {
+            const rampUpSec = testRun.rampUp ?? 0;
+            const durationSec = testRun.startTime && testRun.endTime
+              ? Math.round((new Date(testRun.endTime).getTime() - new Date(testRun.startTime).getTime()) / 1000)
+              : 0;
+            reasons.push(
+              `No steady-state data: all ${totalDataPoints.toLocaleString()} data points fall within the configured ramp-up period ` +
+              `(${rampUpSec}s ramp-up, ${durationSec}s actual duration). ` +
+              `Reduce the ramp-up value to include data for analysis.`
+            );
+          } else {
+            reasons.push('Statistics not calculated (metrics exist but no statistics)');
+          }
         } else if (totalStats > 0 && allMissing / totalStats > 0.5) {
           const pct = Math.round((allMissing / totalStats) * 100);
           reasons.push(

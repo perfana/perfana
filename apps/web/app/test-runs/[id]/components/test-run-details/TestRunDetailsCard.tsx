@@ -157,7 +157,7 @@ export default function TestRunDetailsCard({
           }}>
             <TestRunIdentitySection testRun={testRun} />
             <TestConfigurationSection testRun={testRun} />
-            <TimingInformationSection testRun={testRun} />
+            <TimingInformationSection testRun={testRun} onTestRunUpdate={onTestRunUpdate} showToast={showToast} />
             <EvaluationResultsSection testRun={testRun} onRefreshTriggered={onRefreshTriggered} showToast={showToast} />
             <AnnotationsTagsSection
               testRun={testRun}

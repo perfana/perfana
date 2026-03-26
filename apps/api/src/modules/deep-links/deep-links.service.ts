@@ -354,17 +354,21 @@ export class DeepLinksService {
       url = url.replace(/\{perfana-start-elasticsearch\}/g, startDate.toISOString());
     }
 
-    if (testRun.end_time) {
-      const endDate = new Date(testRun.end_time);
+    // For running tests (not completed, no end_time), use current time
+    const endDate = testRun.end_time
+      ? new Date(testRun.end_time)
+      : (!testRun.completed ? new Date() : null);
+
+    if (endDate) {
       const endEpochMs = endDate.getTime();
       const endEpochS = Math.round(endEpochMs / 1000);
-      
+
       url = url.replace(/\{perfana-end-epoch-milliseconds\}/g, endEpochMs.toString());
       url = url.replace(/\{perfana-end-epoch-seconds\}/g, endEpochS.toString());
-      
+
       // Dynatrace format (ISO string)
       url = url.replace(/\{perfana-end-dynatrace\}/g, endDate.toISOString());
-      
+
       // Elasticsearch format (ISO string with Z)
       url = url.replace(/\{perfana-end-elasticsearch\}/g, endDate.toISOString());
     }

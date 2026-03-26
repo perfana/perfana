@@ -404,6 +404,7 @@ export default function PerformanceAnalysisCard({
               throughputStats={throughputStats}
               overallApdexScore={overallApdexScore}
               poorApdexTransactions={poorApdexTransactions}
+              testRun={testRun}
             />
           )}
 
@@ -461,7 +462,9 @@ export default function PerformanceAnalysisCard({
                 ) : transactions.length === 0 ? (
                   <Box textAlign="center" py={4}>
                     <Typography variant="body2" color="text.secondary">
-                      No transaction data available for this test run.
+                      {testRun?.reasons_not_valid?.some(r => r.includes('ramp-up') || r.includes('steady-state'))
+                        ? 'No data outside the configured ramp-up period. All data points fall within the ramp-up window and are excluded from analysis. Reduce the ramp-up value in the Test Run Info card to include data.'
+                        : 'No transaction data available for this test run.'}
                     </Typography>
                   </Box>
                 ) : (

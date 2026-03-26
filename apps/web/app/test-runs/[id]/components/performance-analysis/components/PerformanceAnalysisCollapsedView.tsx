@@ -5,6 +5,7 @@ import KPIDisplay from '../../shared/KPIDisplay';
 import SoftBadge from '../../shared/SoftBadge';
 import { TransactionStat, ThroughputStats } from '../types/performance-analysis.types';
 import { formatNumber, getApdexColor, getApdexLabel } from '../utils/performance-formatters';
+import { TestRun } from '@/types/test-runs';
 
 interface PerformanceAnalysisCollapsedViewProps {
   loading: boolean;
@@ -13,6 +14,7 @@ interface PerformanceAnalysisCollapsedViewProps {
   throughputStats: ThroughputStats | null;
   overallApdexScore: number;
   poorApdexTransactions: TransactionStat[];
+  testRun?: TestRun | null;
 }
 
 export function PerformanceAnalysisCollapsedView({
@@ -22,6 +24,7 @@ export function PerformanceAnalysisCollapsedView({
   throughputStats,
   overallApdexScore,
   poorApdexTransactions,
+  testRun,
 }: PerformanceAnalysisCollapsedViewProps) {
   const hasPoorApdexTransactions = poorApdexTransactions.length > 0;
 
@@ -59,7 +62,9 @@ export function PerformanceAnalysisCollapsedView({
       >
         <Box sx={{ py: 1, cursor: 'help' }}>
           <KPIDisplay
-            value={loading ? '—' : error ? 'Error' : transactions.length === 0 ? '—' : getApdexLabel(overallApdexScore)}
+            value={loading ? '—' : error ? 'Error' : transactions.length === 0
+              ? (testRun?.reasons_not_valid?.some(r => r.includes('ramp-up') || r.includes('steady-state')) ? 'Ramp-up' : '—')
+              : getApdexLabel(overallApdexScore)}
             label="Overall Apdex"
             loading={loading}
             color={
@@ -126,7 +131,9 @@ export function PerformanceAnalysisCollapsedView({
         })()}
 
         {!loading && !error && transactions.length === 0 && (
-          <SoftBadge label="No transactions found" color="neutral" />
+          testRun?.reasons_not_valid?.some(r => r.includes('ramp-up') || r.includes('steady-state'))
+            ? <SoftBadge label="Excluded by ramp-up" color="orange" />
+            : <SoftBadge label="No transactions found" color="neutral" />
         )}
       </Box>
     </Box>

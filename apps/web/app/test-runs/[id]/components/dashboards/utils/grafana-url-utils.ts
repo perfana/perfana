@@ -32,19 +32,7 @@ export function calculateEndTime(testRun: TestRun): number | 'now' {
     return testRun.end_time ? new Date(testRun.end_time).getTime() : 'now';
   }
 
-  // Test is not completed - check if it's stale
-  if (testRun.end_time) {
-    const endTime = new Date(testRun.end_time).getTime();
-    const now = new Date().getTime();
-    const thirtySecondsAgo = now - 30000;
-
-    if (endTime < thirtySecondsAgo) {
-      // Test is stale (ended more than 30 seconds ago but not marked complete)
-      return endTime;
-    }
-  }
-
-  // No end time yet or test is still running
+  // Test is not completed — use 'now' so Grafana shows live data
   return 'now';
 }
 

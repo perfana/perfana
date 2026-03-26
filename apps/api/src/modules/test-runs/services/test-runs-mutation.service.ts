@@ -29,6 +29,7 @@ import { UpdateTestRunHandler } from '../handlers/update-test-run.handler';
 import { DeleteTestRunHandler } from '../handlers/delete-test-run.handler';
 import { UpdateTagsHandler } from '../handlers/update-tags.handler';
 import { UpdateAnnotationsHandler } from '../handlers/update-annotations.handler';
+import { UpdateRampUpHandler } from '../handlers/update-ramp-up.handler';
 import { UpdateAdaptConfigHandler } from '../handlers/update-adapt-config.handler';
 import { InitTestHandler } from '../handlers/init-test.handler';
 import { TestRunLookupService } from './test-run-lookup.service';
@@ -53,6 +54,7 @@ export class TestRunsMutationService {
     private readonly deleteTestRunHandler: DeleteTestRunHandler,
     private readonly updateTagsHandler: UpdateTagsHandler,
     private readonly updateAnnotationsHandler: UpdateAnnotationsHandler,
+    private readonly updateRampUpHandler: UpdateRampUpHandler,
     private readonly updateAdaptConfigHandler: UpdateAdaptConfigHandler,
     private readonly initTestHandler: InitTestHandler,
     private readonly lookupService: TestRunLookupService,
@@ -295,6 +297,12 @@ export class TestRunsMutationService {
     // NOTE: Permission check will be added here when TestRun entity has organization_id
 
     return this.updateAnnotationsHandler.execute({ id, annotations });
+  }
+
+  async updateRampUp(id: string, rampUp: number, userId: string, _roles: string[]): Promise<TestRun> {
+    this.logger.debug(`updateRampUp: id=${id}, rampUp=${rampUp}, userId=${userId}`);
+
+    return this.updateRampUpHandler.execute({ id, rampUp });
   }
 
   /**
