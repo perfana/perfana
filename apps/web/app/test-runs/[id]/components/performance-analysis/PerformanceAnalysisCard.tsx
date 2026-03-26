@@ -405,6 +405,8 @@ export default function PerformanceAnalysisCard({
               overallApdexScore={overallApdexScore}
               poorApdexTransactions={poorApdexTransactions}
               testRun={testRun}
+              excludeRampUp={excludeRampUp}
+              onExcludeRampUpChange={setExcludeRampUp}
             />
           )}
 

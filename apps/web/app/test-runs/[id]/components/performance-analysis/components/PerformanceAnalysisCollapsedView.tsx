@@ -1,6 +1,6 @@
 'use client';
 
-import { Box, Divider, Typography, Tooltip } from '@mui/material';
+import { Box, Divider, Typography, Tooltip, Switch, FormControlLabel } from '@mui/material';
 import KPIDisplay from '../../shared/KPIDisplay';
 import SoftBadge from '../../shared/SoftBadge';
 import { TransactionStat, ThroughputStats } from '../types/performance-analysis.types';
@@ -15,6 +15,8 @@ interface PerformanceAnalysisCollapsedViewProps {
   overallApdexScore: number;
   poorApdexTransactions: TransactionStat[];
   testRun?: TestRun | null;
+  excludeRampUp: boolean;
+  onExcludeRampUpChange: (value: boolean) => void;
 }
 
 export function PerformanceAnalysisCollapsedView({
@@ -25,8 +27,22 @@ export function PerformanceAnalysisCollapsedView({
   overallApdexScore,
   poorApdexTransactions,
   testRun,
+  excludeRampUp,
+  onExcludeRampUpChange,
 }: PerformanceAnalysisCollapsedViewProps) {
   const hasPoorApdexTransactions = poorApdexTransactions.length > 0;
+
+  // Determine if the test is currently in the ramp-up phase
+  const isInRampUpPhase = (() => {
+    if (!testRun || testRun.completed || !testRun.start_time || !testRun.ramp_up) return false;
+    const rampUpEndMs = new Date(testRun.start_time).getTime() + testRun.ramp_up * 1000;
+    return Date.now() < rampUpEndMs;
+  })();
+
+  // Show ramp-up state when: reasons_not_valid mentions it OR test is running and in ramp-up phase
+  const isRampUpState = !loading && !error && transactions.length === 0 && (
+    testRun?.reasons_not_valid?.some(r => r.includes('ramp-up') || r.includes('steady-state')) || isInRampUpPhase
+  );
 
   return (
     <Box sx={{ flexGrow: 1, display: 'flex', flexDirection: 'column', gap: 2.5 }}>
@@ -63,7 +79,7 @@ export function PerformanceAnalysisCollapsedView({
         <Box sx={{ py: 1, cursor: 'help' }}>
           <KPIDisplay
             value={loading ? '—' : error ? 'Error' : transactions.length === 0
-              ? (testRun?.reasons_not_valid?.some(r => r.includes('ramp-up') || r.includes('steady-state')) ? 'Ramp-up' : '—')
+              ? (isRampUpState ? 'Ramp-up' : '—')
               : getApdexLabel(overallApdexScore)}
             label="Overall Apdex"
             loading={loading}
@@ -131,8 +147,44 @@ export function PerformanceAnalysisCollapsedView({
         })()}
 
         {!loading && !error && transactions.length === 0 && (
-          testRun?.reasons_not_valid?.some(r => r.includes('ramp-up') || r.includes('steady-state'))
-            ? <SoftBadge label="Excluded by ramp-up" color="orange" />
+          isRampUpState
+            ? (
+              <Box sx={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 1 }}>
+                <SoftBadge label="Excluded by ramp-up" color="orange" />
+                <Tooltip title="Exclude data during ramp-up time period from all statistics" arrow>
+                  <FormControlLabel
+                    control={
+                      <Switch
+                        checked={excludeRampUp}
+                        onChange={(e) => {
+                          e.stopPropagation();
+                          onExcludeRampUpChange(e.target.checked);
+                        }}
+                        size="small"
+                        sx={{
+                          '& .MuiSwitch-switchBase.Mui-checked': {
+                            color: 'primary.main',
+                          },
+                          '& .MuiSwitch-switchBase.Mui-checked + .MuiSwitch-track': {
+                            backgroundColor: 'primary.main',
+                          },
+                        }}
+                      />
+                    }
+                    label="Exclude Ramp-up"
+                    onClick={(e) => e.stopPropagation()}
+                    sx={{
+                      margin: 0,
+                      '& .MuiFormControlLabel-label': {
+                        fontSize: '0.75rem',
+                        fontWeight: 500,
+                        color: 'text.secondary',
+                      },
+                    }}
+                  />
+                </Tooltip>
+              </Box>
+            )
             : <SoftBadge label="No transactions found" color="neutral" />
         )}
       </Box>
