@@ -1,16 +1,70 @@
 'use client';
 
-import { Box, Typography, Divider, useTheme } from '@mui/material';
+import { useState } from 'react';
+import { Box, Typography, Divider, IconButton, TextField, CircularProgress, Tooltip, useTheme } from '@mui/material';
+import { Edit, Save, Cancel } from '@mui/icons-material';
 import { TestRun } from '@/types/test-runs';
+import { authenticatedFetch } from '@/lib/api';
 import { formatDuration } from '../utils/test-run-formatters';
 
 interface TimingInformationSectionProps {
   testRun: TestRun;
+  onTestRunUpdate?: (updatedTestRun: TestRun) => void;
+  showToast?: (message: string) => void;
 }
 
-export function TimingInformationSection({ testRun }: TimingInformationSectionProps) {
+export function TimingInformationSection({ testRun, onTestRunUpdate, showToast }: TimingInformationSectionProps) {
   const theme = useTheme();
   const isDark = theme.palette.mode === 'dark';
+
+  const [isEditingRampUp, setIsEditingRampUp] = useState(false);
+  const [editingRampUp, setEditingRampUp] = useState<string>('');
+  const [rampUpSaving, setRampUpSaving] = useState(false);
+
+  const handleRampUpEdit = () => {
+    setEditingRampUp(String(testRun.ramp_up ?? 0));
+    setIsEditingRampUp(true);
+  };
+
+  const handleRampUpCancel = () => {
+    setIsEditingRampUp(false);
+    setEditingRampUp('');
+  };
+
+  const handleRampUpSave = async () => {
+    const rampUpValue = parseInt(editingRampUp, 10);
+    if (isNaN(rampUpValue) || rampUpValue < 0) {
+      showToast?.('Ramp-up must be a non-negative number (seconds)');
+      return;
+    }
+
+    setRampUpSaving(true);
+    try {
+      const response = await authenticatedFetch(`/test-runs/${testRun.id}/ramp-up`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ rampUp: rampUpValue }),
+      });
+
+      if (!response.ok) {
+        throw new Error('Failed to update ramp-up');
+      }
+
+      const updatedTestRun = { ...testRun, ramp_up: rampUpValue };
+      onTestRunUpdate?.(updatedTestRun);
+      setIsEditingRampUp(false);
+      showToast?.('Ramp-up updated successfully');
+    } catch (error) {
+      console.error('Failed to update ramp-up:', error);
+      showToast?.('Failed to update ramp-up');
+    } finally {
+      setRampUpSaving(false);
+    }
+  };
+
+  // Check if ramp-up exceeds actual duration
+  const rampUpExceedsDuration = testRun.ramp_up != null && testRun.duration != null && testRun.ramp_up > testRun.duration;
+
   return (
     <Box sx={{
       p: 3,
@@ -80,32 +134,78 @@ export function TimingInformationSection({ testRun }: TimingInformationSectionPr
 
       {/* Ramp Up Period */}
       <Box sx={{ mb: 2.5 }}>
-        <Typography
-          variant="caption"
-          sx={{
-            display: 'block',
-            fontSize: '0.75rem',
-            fontWeight: 500,
-            letterSpacing: '0.5px',
-            textTransform: 'uppercase',
-            color: 'text.secondary',
-            mb: 0.75,
-            opacity: 0.8,
-          }}
-        >
-          Ramp Up Period
-        </Typography>
-        <Typography
-          variant="body2"
-          sx={{
-            fontSize: '0.9375rem',
-            fontWeight: 600,
-            color: 'text.primary',
-            lineHeight: 1.4,
-          }}
-        >
-          {formatDuration(testRun.ramp_up)}
-        </Typography>
+        <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 0.75 }}>
+          <Typography
+            variant="caption"
+            sx={{
+              display: 'block',
+              fontSize: '0.75rem',
+              fontWeight: 500,
+              letterSpacing: '0.5px',
+              textTransform: 'uppercase',
+              color: 'text.secondary',
+              opacity: 0.8,
+            }}
+          >
+            Ramp Up Period
+          </Typography>
+          {!isEditingRampUp ? (
+            <Tooltip title="Edit ramp-up period">
+              <IconButton size="small" onClick={handleRampUpEdit} sx={{ p: 0.25 }}>
+                <Edit sx={{ fontSize: 16 }} />
+              </IconButton>
+            </Tooltip>
+          ) : (
+            <Box display="flex" gap={0.5}>
+              <IconButton size="small" onClick={handleRampUpSave} disabled={rampUpSaving} sx={{ p: 0.25 }}>
+                {rampUpSaving ? <CircularProgress size={16} /> : <Save sx={{ fontSize: 16 }} />}
+              </IconButton>
+              <IconButton size="small" onClick={handleRampUpCancel} disabled={rampUpSaving} sx={{ p: 0.25 }}>
+                <Cancel sx={{ fontSize: 16 }} />
+              </IconButton>
+            </Box>
+          )}
+        </Box>
+        {isEditingRampUp ? (
+          <TextField
+            value={editingRampUp}
+            onChange={(e) => setEditingRampUp(e.target.value)}
+            size="small"
+            type="number"
+            inputProps={{ min: 0 }}
+            helperText="Duration in seconds"
+            disabled={rampUpSaving}
+            fullWidth
+            autoFocus
+            onKeyDown={(e) => {
+              if (e.key === 'Enter') handleRampUpSave();
+              if (e.key === 'Escape') handleRampUpCancel();
+            }}
+            sx={{ mt: 0.5 }}
+          />
+        ) : (
+          <>
+            <Typography
+              variant="body2"
+              sx={{
+                fontSize: '0.9375rem',
+                fontWeight: 600,
+                color: rampUpExceedsDuration ? 'warning.main' : 'text.primary',
+                lineHeight: 1.4,
+              }}
+            >
+              {formatDuration(testRun.ramp_up)}
+            </Typography>
+            {rampUpExceedsDuration && (
+              <Typography
+                variant="caption"
+                sx={{ color: 'warning.main', display: 'block', mt: 0.5 }}
+              >
+                Ramp-up exceeds test duration — no steady-state data for analysis
+              </Typography>
+            )}
+          </>
+        )}
       </Box>
 
       <Divider sx={{ my: 2, opacity: 0.4 }} />
