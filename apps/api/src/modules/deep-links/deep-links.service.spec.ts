@@ -541,21 +541,22 @@ describe('DeepLinksService', () => {
         expect(result.isValid).toBe(false);
       });
 
-      it('should not replace time variables when end_time is missing', async () => {
+      it('should resolve end time to current time when end_time is missing and test is not completed', async () => {
         // Arrange
         const deepLink: DeepLink = {
           ...mockDeepLink,
           url: 'https://example.com/?end={perfana-end-epoch-seconds}',
         };
-        const testRunNoEndTime = { ...mockTestRun, end_time: undefined };
+        const testRunNoEndTime = { ...mockTestRun, end_time: undefined, completed: false };
         testRunConfigRepo.find.mockResolvedValue([]);
 
         // Act
         const result = await service.resolveVariables(deepLink, testRunNoEndTime);
 
-        // Assert
-        expect(result.url).toBe('https://example.com/?end={perfana-end-epoch-seconds}');
-        expect(result.isValid).toBe(false);
+        // Assert — end time should be resolved to current time (a number), not left as template
+        expect(result.url).not.toContain('{perfana-end-epoch-seconds}');
+        expect(result.url).toMatch(/end=\d+/);
+        expect(result.isValid).toBe(true);
       });
     });
 
