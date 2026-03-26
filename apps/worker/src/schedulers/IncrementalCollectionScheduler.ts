@@ -72,6 +72,17 @@ export class IncrementalCollectionScheduler {
    */
   private jobIdToSourceKey = new Map<string, string>();
 
+  /**
+   * Tracks which sources have an in-flight (pending or active) job.
+   * Prevents enqueuing redundant jobs when the previous one hasn't completed yet.
+   * Without this, each scheduler tick re-enqueues with fromTime=testStart because
+   * getLastCollectedTime() returns null until the worker commits — causing O(n²)
+   * redundant data fetches that grow with test duration.
+   *
+   * See: 2026-03-26 write starvation post-mortem
+   */
+  private inFlightJobs = new Set<string>();
+
   constructor() {
     this.logger.log('IncrementalCollectionScheduler initialized');
   }
@@ -158,6 +169,12 @@ export class IncrementalCollectionScheduler {
         this.lastFailureTime.delete(key);
       }
     }
+    // Clean up in-flight tracking for this test run
+    for (const key of this.inFlightJobs.keys()) {
+      if (key.startsWith(prefix)) {
+        this.inFlightJobs.delete(key);
+      }
+    }
     // Clean up job ID mappings for this test run
     for (const [jobId, sourceKey] of this.jobIdToSourceKey.entries()) {
       if (sourceKey.startsWith(prefix)) {
@@ -211,6 +228,7 @@ export class IncrementalCollectionScheduler {
         const sourceKey = this.jobIdToSourceKey.get(jobId);
         if (sourceKey) {
           this.recordSuccess(sourceKey);
+          this.inFlightJobs.delete(sourceKey);
           this.jobIdToSourceKey.delete(jobId);
         }
       });
@@ -219,6 +237,7 @@ export class IncrementalCollectionScheduler {
         const sourceKey = this.jobIdToSourceKey.get(jobId);
         if (sourceKey) {
           this.recordFailure(sourceKey);
+          this.inFlightJobs.delete(sourceKey);
           this.jobIdToSourceKey.delete(jobId);
         }
       });
@@ -376,7 +395,19 @@ export class IncrementalCollectionScheduler {
           continue;
         }
 
-        // Get last collected time for this source (for true incremental collection)
+        // Skip if a previous job for this source is still in-flight.
+        // Without this, each tick re-enqueues with fromTime=testStart because
+        // getLastCollectedTime() returns null until the worker commits.
+        if (this.inFlightJobs.has(failureKey)) {
+          this.logger.debug(
+            `Skipping ${sourceType}/${sourceId || 'null'} — previous job still in-flight`
+          );
+          continue;
+        }
+
+        // Get last collected time for this source (for true incremental collection).
+        // Falls back to in-memory toTime from the last enqueued job if DB hasn't been
+        // updated yet (worker still processing), then to testStartTime (first collection).
         const lastCollectedTime = await this.databaseService.getLastCollectedTime(
           testRun.testRunId,
           sourceType,
@@ -402,9 +433,10 @@ export class IncrementalCollectionScheduler {
           removeOnFail: 25,
         });
 
-        // Track job ID for failure/success callbacks
+        // Track job ID for failure/success callbacks and in-flight dedup
         if (job.id) {
           this.jobIdToSourceKey.set(job.id, failureKey);
+          this.inFlightJobs.add(failureKey);
         }
 
         jobsEnqueued++;
@@ -430,6 +462,14 @@ export class IncrementalCollectionScheduler {
 
         // Check backoff before enqueuing
         if (this.shouldSkipDueToBackoff(dtFailureKey)) {
+          continue;
+        }
+
+        // Skip if previous job still in-flight
+        if (this.inFlightJobs.has(dtFailureKey)) {
+          this.logger.debug(
+            `Skipping dynatrace/${row.dynatrace_config_id} — previous job still in-flight`
+          );
           continue;
         }
 
@@ -459,9 +499,10 @@ export class IncrementalCollectionScheduler {
           removeOnFail: 25,
         });
 
-        // Track job ID for failure/success callbacks
+        // Track job ID for failure/success callbacks and in-flight dedup
         if (job.id) {
           this.jobIdToSourceKey.set(job.id, dtFailureKey);
+          this.inFlightJobs.add(dtFailureKey);
         }
 
         jobsEnqueued++;
@@ -475,7 +516,7 @@ export class IncrementalCollectionScheduler {
       // 3. Enqueue a performance test metrics job (with backoff check)
       const perfTestFailureKey = this.buildSourceKey(testRun.testRunId, 'performance_test', null);
 
-      if (!this.shouldSkipDueToBackoff(perfTestFailureKey)) {
+      if (!this.shouldSkipDueToBackoff(perfTestFailureKey) && !this.inFlightJobs.has(perfTestFailureKey)) {
         // Get last collected time for performance test source
         const perfTestLastCollected = await this.databaseService.getLastCollectedTime(
           testRun.testRunId,
@@ -502,9 +543,10 @@ export class IncrementalCollectionScheduler {
           removeOnFail: 25,
         });
 
-        // Track job ID for failure/success callbacks
+        // Track job ID for failure/success callbacks and in-flight dedup
         if (perfJob.id) {
           this.jobIdToSourceKey.set(perfJob.id, perfTestFailureKey);
+          this.inFlightJobs.add(perfTestFailureKey);
         }
 
         jobsEnqueued++;
