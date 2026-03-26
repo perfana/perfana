@@ -130,6 +130,23 @@ export class TestRunsController {
     return this.testRunsService.updateTags(id, body.tags, ctx.userId, ctx.roles);
   }
 
+  @Put(':id/ramp-up')
+  @ApiOperation({ summary: 'Update test run ramp-up period' })
+  @ApiResponse({ status: 200, description: 'Ramp-up updated successfully' })
+  @ApiResponse({ status: 404, description: 'Test run not found' })
+  @ApiResponse({ status: 400, description: 'Invalid request data' })
+  async updateRampUp(
+    @Param('id') id: string,
+    @Body() body: { rampUp: number },
+    @UserCtx() ctx: UserContext,
+  ) {
+    if (body.rampUp === undefined || body.rampUp === null || typeof body.rampUp !== 'number' || body.rampUp < 0) {
+      throw new ValidationException('rampUp must be a non-negative number (seconds)');
+    }
+
+    return this.testRunsService.updateRampUp(id, body.rampUp, ctx.userId, ctx.roles);
+  }
+
   @Delete(':id')
   @ApiOperation({ summary: 'Delete a test run by UUID' })
   @ApiParam({ name: 'id', description: 'Test run UUID', example: '550e8400-e29b-41d4-a716-446655440000' })

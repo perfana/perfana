@@ -13,6 +13,7 @@ import { UpdateTestRunHandler } from '../handlers/update-test-run.handler';
 import { DeleteTestRunHandler } from '../handlers/delete-test-run.handler';
 import { UpdateTagsHandler } from '../handlers/update-tags.handler';
 import { UpdateAnnotationsHandler } from '../handlers/update-annotations.handler';
+import { UpdateRampUpHandler } from '../handlers/update-ramp-up.handler';
 import { UpdateAdaptConfigHandler } from '../handlers/update-adapt-config.handler';
 import { InitTestHandler } from '../handlers/init-test.handler';
 import { TestRunLookupService } from './test-run-lookup.service';
@@ -109,6 +110,7 @@ describe('TestRunsMutationService', () => {
     const mockDeleteHandler = { execute: jest.fn() };
     const mockUpdateTagsHandler = { execute: jest.fn() };
     const mockUpdateAnnotationsHandler = { execute: jest.fn() };
+    const mockUpdateRampUpHandler = { execute: jest.fn() };
     const mockUpdateAdaptConfigHandler = { execute: jest.fn() };
     const mockInitTestHandler = { execute: jest.fn() };
     const mockLookupService = {
@@ -131,6 +133,7 @@ describe('TestRunsMutationService', () => {
         { provide: DeleteTestRunHandler, useValue: mockDeleteHandler },
         { provide: UpdateTagsHandler, useValue: mockUpdateTagsHandler },
         { provide: UpdateAnnotationsHandler, useValue: mockUpdateAnnotationsHandler },
+        { provide: UpdateRampUpHandler, useValue: mockUpdateRampUpHandler },
         { provide: UpdateAdaptConfigHandler, useValue: mockUpdateAdaptConfigHandler },
         { provide: InitTestHandler, useValue: mockInitTestHandler },
         { provide: TestRunLookupService, useValue: mockLookupService },

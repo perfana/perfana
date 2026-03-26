@@ -15,4 +15,5 @@ export * from './update-tags.handler';
 export * from './update-annotations.handler';
 export * from './update-adapt-config.handler';
 export * from './init-test.handler';
+export * from './update-ramp-up.handler';
 export * from './entity-mapper';

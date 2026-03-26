@@ -279,6 +279,10 @@ export class TestRunsService {
     return this.mutationService.updateAnnotations(id, annotations, userId, roles);
   }
 
+  async updateRampUp(id: string, rampUp: number, userId: string, roles: string[]): Promise<TestRun> {
+    return this.mutationService.updateRampUp(id, rampUp, userId, roles);
+  }
+
   async updateAdaptConfig(testRunId: string, differencesAccepted: 'ACCEPTED' | 'DENIED' | 'TBD', userId: string, roles: string[], systemUnderTestId?: string, environment?: string, workload?: string): Promise<TestRun> {
     return this.mutationService.updateAdaptConfig(testRunId, differencesAccepted, userId, roles, systemUnderTestId, environment, workload);
   }
