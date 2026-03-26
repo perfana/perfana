@@ -60,9 +60,24 @@ describe('ControlGroupStatisticsPipeline', () => {
       query: vi.fn()
     };
 
-    // Setup transaction to call the callback with mock entity manager
+    // Setup transaction to call the callback with mock entity manager.
+    // Use a proxy to intercept SET LOCAL calls from withAnalyticsTransaction
+    // so they don't shift mock.calls indices or consume mockResolvedValueOnce chains.
     mockDatabaseService.transaction.mockImplementation(async (callback: any) => {
-      return await callback(mockEntityManager);
+      const proxy = new Proxy(mockEntityManager as any, {
+        get(target: any, prop: string) {
+          if (prop === 'query') {
+            return (...args: any[]) => {
+              if (typeof args[0] === 'string' && args[0].includes('SET LOCAL')) {
+                return Promise.resolve(undefined);
+              }
+              return target.query(...args);
+            };
+          }
+          return target[prop];
+        }
+      });
+      return await callback(proxy);
     });
 
     // Create pipeline instance

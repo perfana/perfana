@@ -128,7 +128,7 @@ export class StatisticsPipeline extends BasePipelineTypeORM {
       // Cleanup stale data before processing
       await this.cleanupStaleApplicationDashboards(['ds_metric_statistics']);
 
-      const result = await this.withTransaction(async (manager: EntityManager) => {
+      const result = await this.withAnalyticsTransaction(async (manager: EntityManager) => {
         return await this.aggregateMetricStatistics(manager, testRunIds);
       });
 

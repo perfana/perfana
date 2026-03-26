@@ -79,13 +79,40 @@ export function createSimpleWorker(
     drainDelay: workerConfig.drainDelay,
   });
 
-  // Wrap processor to ensure DB connection is alive before each job
+  // Wrap processor to ensure DB connection is alive and not overloaded before each job
   const wrappedProcessor = async (job: Job) => {
     try {
       const db = getDatabaseService();
       await db.ensureConnection();
+
+      // Backpressure check: if PostgreSQL has too many active connections,
+      // delay this job to let the database recover. This prevents the
+      // post-test cascade where queued jobs re-saturate the database.
+      // See: 2026-03-26 write starvation post-mortem
+      const BACKPRESSURE_THRESHOLD = 20;
+      const BACKPRESSURE_DELAY_MS = 30_000; // 30 seconds
+      const MAX_BACKPRESSURE_CHECKS = 5;
+
+      for (let check = 0; check < MAX_BACKPRESSURE_CHECKS; check++) {
+        const [{ active_count }] = await db.query<{ active_count: string }>(
+          `SELECT count(*) as active_count FROM pg_stat_activity WHERE state = 'active' AND pid != pg_backend_pid()`
+        );
+        const activeConnections = parseInt(active_count, 10);
+
+        if (activeConnections < BACKPRESSURE_THRESHOLD) {
+          break;
+        }
+
+        logger.warn(`Backpressure: ${activeConnections} active DB connections (threshold: ${BACKPRESSURE_THRESHOLD}). Delaying job ${job.name} by ${BACKPRESSURE_DELAY_MS}ms (check ${check + 1}/${MAX_BACKPRESSURE_CHECKS})`);
+
+        if (check < MAX_BACKPRESSURE_CHECKS - 1) {
+          await new Promise(resolve => setTimeout(resolve, BACKPRESSURE_DELAY_MS));
+        } else {
+          logger.warn(`Backpressure: max checks reached, proceeding with job ${job.name} despite high connection count`);
+        }
+      }
     } catch (error) {
-      logger.warn(`Pre-job DB connection check failed for ${job.name}, proceeding anyway:`, error);
+      logger.warn(`Pre-job health check failed for ${job.name}, proceeding anyway:`, error);
     }
     return processor(job);
   };

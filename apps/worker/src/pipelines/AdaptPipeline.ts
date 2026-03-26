@@ -82,7 +82,7 @@ export class AdaptPipeline extends BasePipelineTypeORM {
       ]);
       subStages.push({ stage: 'cleanup-stale-data', duration: cleanup.duration, rows: cleanup.totalDeleted });
 
-      const result = await this.withTransaction(async (manager: EntityManager) => {
+      const result = await this.withAnalyticsTransaction(async (manager: EntityManager) => {
         let processedRows = 0;
 
         // Validation & setup

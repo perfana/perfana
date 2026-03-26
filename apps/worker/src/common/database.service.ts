@@ -72,6 +72,7 @@ export class WorkerDatabaseService implements OnModuleInit {
 
   constructor(
     @InjectDataSource() public readonly dataSource: DataSource,
+    @InjectDataSource('write') public readonly writeDataSource: DataSource,
     @InjectRepository(TestRun) public readonly testRunRepo: Repository<TestRun>,
     @InjectRepository(ApplicationDashboard) public readonly applicationDashboardRepo: Repository<ApplicationDashboard>,
     @InjectRepository(GrafanaInstance) public readonly grafanaInstanceRepo: Repository<GrafanaInstance>,
@@ -98,25 +99,30 @@ export class WorkerDatabaseService implements OnModuleInit {
   /**
    * Ensure the DataSource is connected, reconnecting if necessary.
    * Called before job execution to avoid operating on a dead connection.
+   * Checks both the main (analytics) and write connection pools.
    */
   async ensureConnection(): Promise<void> {
-    if (!this.dataSource.isInitialized) {
-      this.logger.warn('DataSource not initialized, attempting to initialize...');
-      await this.dataSource.initialize();
-      this.logger.log('DataSource re-initialized successfully');
+    await this.ensureDataSourceConnection(this.dataSource, 'main');
+    await this.ensureDataSourceConnection(this.writeDataSource, 'write');
+  }
+
+  private async ensureDataSourceConnection(ds: DataSource, name: string): Promise<void> {
+    if (!ds.isInitialized) {
+      this.logger.warn(`${name} DataSource not initialized, attempting to initialize...`);
+      await ds.initialize();
+      this.logger.log(`${name} DataSource re-initialized successfully`);
       return;
     }
 
-    // Verify the connection is actually alive with a lightweight query
     try {
-      await this.dataSource.query('SELECT 1');
+      await ds.query('SELECT 1');
     } catch {
-      this.logger.warn('Database connection check failed, attempting to reconnect...');
+      this.logger.warn(`${name} database connection check failed, attempting to reconnect...`);
       try {
-        await this.dataSource.destroy();
+        await ds.destroy();
       } catch { /* ignore destroy errors */ }
-      await this.dataSource.initialize();
-      this.logger.log('Database reconnected successfully');
+      await ds.initialize();
+      this.logger.log(`${name} database reconnected successfully`);
     }
   }
 
@@ -148,6 +154,29 @@ export class WorkerDatabaseService implements OnModuleInit {
    */
   getDataSource(): DataSource {
     return this.dataSource;
+  }
+
+  /**
+   * Execute a raw SQL query using the dedicated write connection pool.
+   * Use this for INSERT/UPDATE operations that must not be starved by analytics.
+   *
+   * See: 2026-03-26 write starvation post-mortem
+   */
+  async writeQuery<T = any>(sql: string, parameters?: any[]): Promise<T[]> {
+    return this.withRetry('writeQuery', async () => {
+      const result = await this.writeDataSource.query(sql, parameters);
+      return result;
+    });
+  }
+
+  /**
+   * Execute write operations within a transaction using the dedicated write pool.
+   * Guarantees write-path connections are never starved by analytical queries.
+   */
+  async writeTransaction<T>(operation: (manager: EntityManager) => Promise<T>): Promise<T> {
+    return this.withRetry('writeTransaction', async () => {
+      return await this.writeDataSource.transaction(operation);
+    });
   }
 
   /**

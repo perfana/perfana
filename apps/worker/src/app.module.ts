@@ -4,7 +4,7 @@ import { TypeOrmModule } from '@nestjs/typeorm';
 import { CommonModule } from './common/common.module.js';
 import { RealtimeModule } from './modules/realtime/realtime.module.js';
 import { SchedulersModule } from './schedulers/schedulers.module.js';
-import { createTypeOrmConfig } from './config/typeorm.config.js';
+import { createTypeOrmConfig, createWriteTypeOrmConfig } from './config/typeorm.config.js';
 
 /**
  * Root Application Module for Worker
@@ -29,8 +29,12 @@ import { createTypeOrmConfig } from './config/typeorm.config.js';
       // This makes env vars available via @nestjs/config as well
     }),
 
-    // TypeORM database connection
+    // TypeORM database connection (analytics/read — main pool)
     TypeOrmModule.forRoot(createTypeOrmConfig()),
+
+    // Dedicated write connection pool — small, never starved by analytical queries
+    // See: 2026-03-26 write starvation post-mortem
+    TypeOrmModule.forRoot(createWriteTypeOrmConfig()),
 
     // Common module with database services and repositories
     CommonModule,

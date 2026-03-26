@@ -116,10 +116,44 @@ export abstract class BasePipelineTypeORM implements Pipeline {
   }
 
   /**
+   * Execute a heavy analytical operation within a transaction with a shorter statement timeout.
+   * Use this for CTEs that scan large tables (Statistics, ControlGroups, ADAPT).
+   *
+   * The timeout is set via SET LOCAL so it only applies within this transaction —
+   * the write path (INSERT INTO ds_metrics) keeps the default 10-minute timeout.
+   *
+   * Default: 120s. Override via ANALYTICS_STATEMENT_TIMEOUT_MS env var.
+   * See: 2026-03-26 write starvation post-mortem
+   */
+  protected async withAnalyticsTransaction<T>(operation: (manager: EntityManager) => Promise<T>): Promise<T> {
+    const timeoutMs = parseInt(process.env.ANALYTICS_STATEMENT_TIMEOUT_MS || '120000', 10);
+
+    return await this.db.transaction(async (manager: EntityManager) => {
+      await manager.query(`SET LOCAL statement_timeout = '${timeoutMs}'`);
+      return operation(manager);
+    });
+  }
+
+  /**
    * Execute raw SQL query (use sparingly - prefer repository methods)
    */
   protected async query<T = any>(sql: string, parameters?: any[]): Promise<T[]> {
     return await this.db.query<T>(sql, parameters);
+  }
+
+  /**
+   * Execute a write operation using the dedicated write connection pool.
+   * Use this for INSERT/UPDATE operations that must not be starved by analytics.
+   */
+  protected async writeQuery<T = any>(sql: string, parameters?: any[]): Promise<T[]> {
+    return await this.db.writeQuery<T>(sql, parameters);
+  }
+
+  /**
+   * Execute write operations within a transaction using the dedicated write pool.
+   */
+  protected async writeTransaction<T>(operation: (manager: EntityManager) => Promise<T>): Promise<T> {
+    return await this.db.writeTransaction(operation);
   }
 
   /**

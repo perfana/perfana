@@ -618,7 +618,8 @@ export class PerformanceTestMetricsPipeline extends BasePipelineTypeORM {
           `;
         }
 
-        await this.db.dataSource.query(query, values);
+        // Use write pool so inserts are never starved by analytics
+        await this.db.writeDataSource.query(query, values);
       };
 
       batchOperations.push(batchInsert);
