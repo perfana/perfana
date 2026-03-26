@@ -25,21 +25,26 @@ export function TestRunDetailsCollapsedView({ testRun }: TestRunDetailsCollapsed
   return (
     <Box sx={{ flexGrow: 1, display: 'flex', flexDirection: 'column', gap: 2.5 }}>
       {/* Primary KPI Display - Test Run ID */}
-      <Box sx={{ py: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 0.5 }}>
+      <Box sx={{ py: 1 }}>
         <KPIDisplay
-          value={testRun.test_run_id.split('-').pop() || testRun.test_run_id}
+          value={
+            <Box sx={{ display: 'inline-flex', alignItems: 'center', justifyContent: 'center', gap: 0.5, width: '100%' }}>
+              <span style={{ fontFamily: 'monospace', fontSize: 'inherit', fontWeight: 'inherit' }}>
+                {testRun.test_run_id.split('-').pop() || testRun.test_run_id}
+              </span>
+              <Tooltip title={copied ? 'Copied!' : 'Copy full test run ID'}>
+                <IconButton
+                  size="small"
+                  onClick={handleCopy}
+                  sx={{ opacity: 0.4, '&:hover': { opacity: 1 }, p: 0.25 }}
+                >
+                  {copied ? <Check sx={{ fontSize: 16 }} /> : <ContentCopy sx={{ fontSize: 16 }} />}
+                </IconButton>
+              </Tooltip>
+            </Box>
+          }
           label="Test Run ID"
-          monospace
         />
-        <Tooltip title={copied ? 'Copied!' : 'Copy full test run ID'}>
-          <IconButton
-            size="small"
-            onClick={handleCopy}
-            sx={{ opacity: 0.5, '&:hover': { opacity: 1 }, mt: -2 }}
-          >
-            {copied ? <Check sx={{ fontSize: 16 }} /> : <ContentCopy sx={{ fontSize: 16 }} />}
-          </IconButton>
-        </Tooltip>
       </Box>
 
       {/* Secondary Content - Soft Badges */}
