@@ -106,7 +106,7 @@ export class ControlGroupStatisticsPipeline extends BasePipelineTypeORM {
       // Cleanup stale data before processing
       await this.cleanupStaleApplicationDashboards(['ds_control_group_statistics']);
 
-      const result = await this.withTransaction(async (manager: EntityManager) => {
+      const result = await this.withAnalyticsTransaction(async (manager: EntityManager) => {
         // Process statistics for each control group
         let totalStatisticsCreated = 0;
 

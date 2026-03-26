@@ -45,11 +45,19 @@ const envSchema = z.object({
   QUEUE_RETRY_DELAY: z.coerce.number().default(30),
 
   // Worker Concurrency Configuration
-  WORKER_ANALYZE_CONCURRENCY: z.coerce.number().default(5),
+  // Reduced from 5 to 2: each analyze job runs heavy CTEs (Statistics, ADAPT)
+  // that hold connections for 1-4 minutes. 5 concurrent jobs saturated PostgreSQL.
+  // See: 2026-03-26 write starvation post-mortem
+  WORKER_ANALYZE_CONCURRENCY: z.coerce.number().default(2),
   WORKER_BATCH_CONCURRENCY: z.coerce.number().default(2),
 
+  // Statement timeout for analytical queries (ms). Heavy CTEs (StatisticsPipeline,
+  // ControlGroupStatisticsPipeline, AdaptPipeline) get this timeout via SET LOCAL.
+  // Prevents queries from holding connections indefinitely under load.
+  ANALYTICS_STATEMENT_TIMEOUT_MS: z.coerce.number().default(120000),
+
   // Performance Tuning
-  DB_POOL_SIZE: z.coerce.number().default(100), // Increased to support 10 concurrent workers (10 workers × 4 connections/job + buffer)
+  DB_POOL_SIZE: z.coerce.number().default(30), // Pool for 2 concurrent analyze jobs + headroom (reduced from 100 after write starvation post-mortem)
   METRICS_BATCH_SIZE: z.coerce.number().default(200),
   METRICS_DUAL_WRITE: z.coerce.boolean().default(false), // Enable dual write to both PostgreSQL and MongoDB during migration
 

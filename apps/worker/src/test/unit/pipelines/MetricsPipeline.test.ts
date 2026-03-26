@@ -124,6 +124,7 @@ describe('MetricsPipeline', () => {
       getTestRunByTestRunId: vi.fn(),
       getDsPanelsByTestRun: vi.fn(),
       transaction: vi.fn((fn) => fn(mockEntityManager)),
+      writeTransaction: vi.fn((fn) => fn(mockEntityManager)),
       query: vi.fn().mockResolvedValue([undefined, 0]) // Mock cleanup query
     };
 
@@ -563,7 +564,7 @@ describe('MetricsPipeline', () => {
 
       await pipeline.execute({ testRunId: 'test-run-001' });
 
-      expect(mockDb.transaction).toHaveBeenCalled();
+      expect(mockDb.writeTransaction).toHaveBeenCalled();
       expect(mockEntityManager.query).toHaveBeenCalledWith(
         expect.stringContaining('INSERT INTO ds_metrics'),
         expect.any(Array)
@@ -657,8 +658,8 @@ describe('MetricsPipeline', () => {
       mockDb.getDsPanelsByTestRun.mockResolvedValue(mockPanels);
       mockGrafanaClient.queryPanelData.mockResolvedValue([mockMetricsDoc]);
 
-      // Mock transaction to actually call the callback
-      mockDb.transaction.mockImplementation(async (fn) => {
+      // Mock writeTransaction to actually call the callback
+      mockDb.writeTransaction.mockImplementation(async (fn) => {
         try {
           return await fn(mockEntityManager);
         } catch (error) {
@@ -672,7 +673,7 @@ describe('MetricsPipeline', () => {
       const result = await pipeline.execute({ testRunId: 'test-run-001' });
 
       expect(result.success).toBe(false);
-      expect(mockDb.transaction).toHaveBeenCalled();
+      expect(mockDb.writeTransaction).toHaveBeenCalled();
     });
   });
 

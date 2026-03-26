@@ -419,7 +419,10 @@ export class MetricsPipeline extends BasePipelineTypeORM {
   private async saveRecordsToDatabase(records: any[]): Promise<void> {
     if (records.length === 0) {return;}
 
-    return this.withTransaction(async (manager: EntityManager) => {
+    // Use the dedicated write connection pool so metric inserts are never
+    // starved by heavy analytical queries on the main pool.
+    // See: 2026-03-26 write starvation post-mortem
+    return this.writeTransaction(async (manager: EntityManager) => {
       if (records.length === 0) {
         this.logger.info('📊 No data records to insert');
         return;

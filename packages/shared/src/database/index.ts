@@ -20,3 +20,4 @@ export { AddMetricsSourceIdToApplicationDashboard1700000000016 } from './migrati
 export { MetricsSourceOneToOneAndNullableGrafana1700000000017 } from './migrations/1700000000017-MetricsSourceOneToOneAndNullableGrafana';
 export { MigrateCompareConfigToMetricsSource1700000000018 } from './migrations/1700000000018-MigrateCompareConfigToMetricsSource';
 export { DropNarrowCompareConfigUniqueConstraints1700000000019 } from './migrations/1700000000019-DropNarrowCompareConfigUniqueConstraints';
+export { TuneAutovacuumForDsMetrics1700000000020 } from './migrations/1700000000020-TuneAutovacuumForDsMetrics';
