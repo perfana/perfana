@@ -4,6 +4,22 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
+## [0.2.10] - 2026-03-26
+
+### Fixed
+- PostgreSQL write starvation prevention — reduced analyze concurrency from 5 to 2, added 120s statement timeout for analytical queries, dedicated write connection pool, backpressure via in-flight job dedup
+- Prevent redundant incremental collection jobs via in-flight deduplication in scheduler
+- Restore test run ID font size in collapsed card after refactor
+
+### Changed
+- Performance analysis collapsed card now shows "Ramp-up" state when test is running and still in ramp-up phase
+- Add "Exclude Ramp-up" toggle to collapsed performance analysis card when in ramp-up state
+- Move copy icon next to "Test Run ID" label in collapsed test run info card
+- Tune PostgreSQL autovacuum for `ds_metrics` table (high-write workload)
+- Worker pool size reduced from 100 to 30 connections to match reduced concurrency
+- Analytical pipelines (Statistics, ControlGroups, ADAPT) use `withAnalyticsTransaction` with SET LOCAL timeout
+- Metric writes (MetricsPipeline, PerformanceTestMetricsPipeline) use dedicated write connection pool
+
 ## [0.2.9] - 2026-03-25
 
 ### Added
