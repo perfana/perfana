@@ -121,7 +121,7 @@ export interface UseEditSLOFormProps {
   open: boolean;
   benchmark: Benchmark | null;
   systemId: string;
-  systemName: string;
+  systemName?: string;
   environment: string;
   workload: string;
 }

@@ -16,7 +16,6 @@ import { isPerformanceTest } from '@/lib/metrics-source-utils';
 export function useAddSLOForm({
   open,
   systemId,
-  systemName,
   environment,
   workload,
 }: UseAddSLOFormProps): UseAddSLOFormReturn {

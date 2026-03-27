@@ -227,9 +227,9 @@ export function useEditSLOForm({
       let matchingDashboard = null;
 
       // First try to match by metrics_source_id (most reliable when available)
-      if ((benchmark as any).metrics_source_id) {
+      if (benchmark.metrics_source_id) {
         matchingDashboard = availableDashboards.find(
-          (dashboard: any) => dashboard.metrics_source_id === (benchmark as any).metrics_source_id
+          (dashboard: any) => dashboard.metrics_source_id === benchmark.metrics_source_id
         );
       }
 
