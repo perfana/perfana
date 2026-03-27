@@ -34,9 +34,9 @@ export class FixAutovacuumThrottling1700000000021 implements MigrationInterface 
     await queryRunner.query(`
       DO $$
       DECLARE
-        chunk_name text;
+        _chunk_fqn text;
       BEGIN
-        FOR chunk_name IN
+        FOR _chunk_fqn IN
           SELECT format('%I.%I', chunk_schema, chunk_name)
           FROM timescaledb_information.chunks
           WHERE hypertable_name = 'ds_metrics'
@@ -46,7 +46,7 @@ export class FixAutovacuumThrottling1700000000021 implements MigrationInterface 
               autovacuum_vacuum_cost_delay = 2,
               autovacuum_vacuum_scale_factor = 0.02,
               autovacuum_analyze_scale_factor = 0.02
-            )', chunk_name
+            )', _chunk_fqn
           );
         END LOOP;
       END $$
@@ -65,9 +65,9 @@ export class FixAutovacuumThrottling1700000000021 implements MigrationInterface 
     await queryRunner.query(`
       DO $$
       DECLARE
-        chunk_name text;
+        _chunk_fqn text;
       BEGIN
-        FOR chunk_name IN
+        FOR _chunk_fqn IN
           SELECT format('%I.%I', chunk_schema, chunk_name)
           FROM timescaledb_information.chunks
           WHERE hypertable_name = 'transactions'
@@ -77,7 +77,7 @@ export class FixAutovacuumThrottling1700000000021 implements MigrationInterface 
               autovacuum_vacuum_cost_delay = 2,
               autovacuum_vacuum_scale_factor = 0.02,
               autovacuum_analyze_scale_factor = 0.02
-            )', chunk_name
+            )', _chunk_fqn
           );
         END LOOP;
       END $$
@@ -97,9 +97,9 @@ export class FixAutovacuumThrottling1700000000021 implements MigrationInterface 
     await queryRunner.query(`
       DO $$
       DECLARE
-        chunk_name text;
+        _chunk_fqn text;
       BEGIN
-        FOR chunk_name IN
+        FOR _chunk_fqn IN
           SELECT format('%I.%I', chunk_schema, chunk_name)
           FROM timescaledb_information.chunks
           WHERE hypertable_name = 'transactions'
@@ -109,7 +109,7 @@ export class FixAutovacuumThrottling1700000000021 implements MigrationInterface 
               autovacuum_vacuum_cost_delay,
               autovacuum_vacuum_scale_factor,
               autovacuum_analyze_scale_factor
-            )', chunk_name
+            )', _chunk_fqn
           );
         END LOOP;
       END $$
@@ -127,9 +127,9 @@ export class FixAutovacuumThrottling1700000000021 implements MigrationInterface 
     await queryRunner.query(`
       DO $$
       DECLARE
-        chunk_name text;
+        _chunk_fqn text;
       BEGIN
-        FOR chunk_name IN
+        FOR _chunk_fqn IN
           SELECT format('%I.%I', chunk_schema, chunk_name)
           FROM timescaledb_information.chunks
           WHERE hypertable_name = 'ds_metrics'
@@ -139,7 +139,7 @@ export class FixAutovacuumThrottling1700000000021 implements MigrationInterface 
               autovacuum_vacuum_cost_delay = 20,
               autovacuum_vacuum_scale_factor = 0.1,
               autovacuum_analyze_scale_factor = 0.1
-            )', chunk_name
+            )', _chunk_fqn
           );
         END LOOP;
       END $$
