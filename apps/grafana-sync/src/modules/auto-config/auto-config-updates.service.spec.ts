@@ -16,7 +16,7 @@ jest.mock('@perfana/shared/entities', () => ({
 
 import { Test, TestingModule } from '@nestjs/testing';
 import { AutoConfigUpdatesService } from './auto-config-updates.service';
-import { MappedTestRun, MappedProfileBenchmark } from './auto-config-finders.service';
+// Use entity types directly instead of mapped interfaces
 import { createMockRepository } from '../../../test/helpers';
 
 describe('AutoConfigUpdatesService', () => {
@@ -457,7 +457,7 @@ describe('AutoConfigUpdatesService', () => {
       it('should add application to usedBySUT array', async () => {
         // Arrange
         const mockDashboard = { id: 'dash-1', usedBySut: ['app1'] };
-        const templateDashboard = { postgresId: 'dash-1' };
+        const templateDashboard = { id: 'dash-1' };
 
         grafanaDashboardRepo.findOne.mockResolvedValue(mockDashboard);
         grafanaDashboardRepo.update.mockResolvedValue({ affected: 1 });
@@ -475,7 +475,7 @@ describe('AutoConfigUpdatesService', () => {
       it('should not add duplicate application', async () => {
         // Arrange
         const mockDashboard = { id: 'dash-1', usedBySut: ['app1'] };
-        const templateDashboard = { _id: 'dash-1' };
+        const templateDashboard = { id: 'dash-1' };
 
         grafanaDashboardRepo.findOne.mockResolvedValue(mockDashboard);
         grafanaDashboardRepo.update.mockResolvedValue({ affected: 1 });
@@ -496,7 +496,7 @@ describe('AutoConfigUpdatesService', () => {
       it('should initialize usedBySUT array when null', async () => {
         // Arrange
         const mockDashboard = { id: 'dash-1', usedBySut: null };
-        const templateDashboard = { postgresId: 'dash-1' };
+        const templateDashboard = { id: 'dash-1' };
 
         grafanaDashboardRepo.findOne.mockResolvedValue(mockDashboard);
         grafanaDashboardRepo.update.mockResolvedValue({ affected: 1 });
@@ -515,7 +515,7 @@ describe('AutoConfigUpdatesService', () => {
     describe('Error Scenarios', () => {
       it('should throw error when dashboard not found', async () => {
         // Arrange
-        const templateDashboard = { postgresId: 'nonexistent' };
+        const templateDashboard = { id: 'nonexistent' };
         grafanaDashboardRepo.findOne.mockResolvedValue(null);
 
         // Act & Assert
@@ -533,39 +533,40 @@ describe('AutoConfigUpdatesService', () => {
         const mockSut = { id: 'sut-1', name: 'my-app' };
         const mockSavedBenchmark = { id: 'benchmark-1' };
 
-        const profileBenchmark: MappedProfileBenchmark = {
+        const profileBenchmark: any = {
           id: 'profile-benchmark-1',
-          profileId: 'profile-1',
-          profileName: 'Production',
-          profileDashboardId: 'dash-1',
-          workloadPattern: 'load-.*',
+          profile_id: 'profile-1',
+          profile: { name: 'Production' },
+          profile_dashboard_id: 'dash-1',
+          workload_pattern: 'load-.*',
           source: 'gatling',
-          grafanaInstance: 'grafana-prod',
-          dashboardUid: 'jvm-uid',
-          panelId: 1,
-          panelTitle: 'Heap Usage',
-          panelType: 'graph',
-          panelDescription: 'Heap memory',
-          evaluateType: 'avg',
-          metricUnit: 'MB',
-          requirementOperator: '<',
-          requirementValue: 1024,
-          excludeRampUpTime: true,
-          averageAll: false,
-          matchPattern: 'heap.*',
-          validateWithDefaultIfNoData: true,
-          validateWithDefaultIfNoDataValue: 0,
+          grafana_instance: 'grafana-prod',
+          dashboard_uid: 'jvm-uid',
+          panel_id: 1,
+          panel_title: 'Heap Usage',
+          panel_type: 'graph',
+          panel_description: 'Heap memory',
+          evaluate_type: 'avg',
+          metric_unit: 'MB',
+          requirement_operator: '<',
+          requirement_value: 1024,
+          exclude_ramp_up_time: true,
+          average_all: false,
+          match_pattern: 'heap.*',
+          validate_with_default_if_no_data: true,
+          validate_with_default_if_no_data_value: 0,
           tags: ['jvm'],
           metadata: {},
-          readOnly: false,
+          read_only: false,
         };
 
-        const testRun: MappedTestRun = {
+        const testRun: any = {
           testRunId: 'test-1',
-          systemUnderTestName: 'my-app',
+          systemUnderTest: { name: 'my-app' },
+          systemUnderTestId: 'sut-id',
           testEnvironment: 'production',
           workload: 'load-test',
-          end: new Date(),
+          endTime: new Date(),
           tags: [],
           variables: [],
         };
@@ -607,27 +608,28 @@ describe('AutoConfigUpdatesService', () => {
         const mockSut = { id: 'sut-1' };
         const mockSavedBenchmark = { id: 'benchmark-1' };
 
-        const profileBenchmark: MappedProfileBenchmark = {
+        const profileBenchmark: any = {
           id: 'pb-1',
-          profileId: 'p-1',
-          profileName: 'Test',
-          profileDashboardId: 'd-1',
-          workloadPattern: 'load',
+          profile_id: 'p-1',
+          profile: { name: 'Test' },
+          profile_dashboard_id: 'd-1',
+          workload_pattern: 'load',
           source: 'jmeter',
-          excludeRampUpTime: false,
-          averageAll: true,
-          validateWithDefaultIfNoData: false,
+          exclude_ramp_up_time: false,
+          average_all: true,
+          validate_with_default_if_no_data: false,
           tags: [],
           metadata: {},
-          readOnly: false,
+          read_only: false,
         };
 
-        const testRun: MappedTestRun = {
+        const testRun: any = {
           testRunId: 'test-1',
-          systemUnderTestName: 'app',
+          systemUnderTest: { name: 'app' },
+          systemUnderTestId: 'sut-id',
           testEnvironment: 'test',
           workload: 'load',
-          end: new Date(),
+          endTime: new Date(),
           tags: [],
           variables: [],
         };
@@ -663,11 +665,12 @@ describe('AutoConfigUpdatesService', () => {
     describe('Error Scenarios', () => {
       it('should throw error when system under test not found', async () => {
         // Arrange
-        const profileBenchmark = { id: 'pb-1' } as MappedProfileBenchmark;
+        const profileBenchmark = { id: 'pb-1' } as any;
         const testRun = {
           testRunId: 'test-1',
-          systemUnderTestName: 'nonexistent',
-        } as MappedTestRun;
+          systemUnderTest: { name: 'nonexistent' },
+          systemUnderTestId: 'sut-id',
+        } as any;
         const applicationDashboard = { id: 'dash-1' } as any;
 
         systemUnderTestRepo.findOne.mockResolvedValue(null);
@@ -684,134 +687,4 @@ describe('AutoConfigUpdatesService', () => {
     });
   });
 
-  describe('insertDeepLinkBasedOnGenericDeepLink', () => {
-    it('should return null and log message', async () => {
-      // Arrange
-      const logSpy = jest.spyOn((service as any).logger, 'log');
-      const testRun = {} as MappedTestRun;
-
-      // Act
-      const result = await service.insertDeepLinkBasedOnGenericDeepLink({}, testRun);
-
-      // Assert
-      expect(result).toEqual({ insertedId: null });
-      expect(logSpy).toHaveBeenCalledWith(
-        'insertDeepLinkBasedOnGenericDeepLink temporarily disabled for genericChecks migration',
-      );
-    });
-  });
-
-  describe('insertReportPanelBasedOnGenericReportPanel', () => {
-    it('should return null and log message', async () => {
-      // Arrange
-      const logSpy = jest.spyOn((service as any).logger, 'log');
-      const testRun = {} as MappedTestRun;
-      const applicationDashboard = {} as any;
-
-      // Act
-      const result = await service.insertReportPanelBasedOnGenericReportPanel(
-        {},
-        testRun,
-        applicationDashboard,
-        0,
-      );
-
-      // Assert
-      expect(result).toEqual({ insertedId: null });
-      expect(logSpy).toHaveBeenCalledWith(
-        'insertReportPanelBasedOnGenericReportPanel temporarily disabled for genericChecks migration',
-      );
-    });
-  });
-
-  describe('variablesNeedUpdate', () => {
-    describe('Happy Path Scenarios', () => {
-      it('should return true when current variables are empty and new variables exist', () => {
-        // Arrange
-        const currentVariables = {};
-        const newVariables = [{ name: 'workload', values: ['load-test'] }];
-
-        // Act
-        const result = service.variablesNeedUpdate(currentVariables, newVariables);
-
-        // Assert
-        expect(result).toBe(true);
-      });
-
-      it('should return false when variables are unchanged', () => {
-        // Arrange
-        const currentVariables = { workload: ['load-test'] };
-        const newVariables = [{ name: 'workload', values: ['load-test'] }];
-
-        // Act
-        const result = service.variablesNeedUpdate(currentVariables, newVariables);
-
-        // Assert
-        expect(result).toBe(false);
-      });
-
-      it('should return true when variable values changed', () => {
-        // Arrange
-        const currentVariables = { workload: ['load-test'] };
-        const newVariables = [{ name: 'workload', values: ['stress-test'] }];
-
-        // Act
-        const result = service.variablesNeedUpdate(currentVariables, newVariables);
-
-        // Assert
-        expect(result).toBe(true);
-      });
-
-      it('should return true when new variable added', () => {
-        // Arrange
-        const currentVariables = { workload: ['load-test'] };
-        const newVariables = [
-          { name: 'workload', values: ['load-test'] },
-          { name: 'env', values: ['production'] },
-        ];
-
-        // Act
-        const result = service.variablesNeedUpdate(currentVariables, newVariables);
-
-        // Assert
-        expect(result).toBe(true);
-      });
-
-      it('should return true when array length differs', () => {
-        // Arrange
-        const currentVariables = { workload: ['load-test'] };
-        const newVariables = [{ name: 'workload', values: ['load-test', 'stress-test'] }];
-
-        // Act
-        const result = service.variablesNeedUpdate(currentVariables, newVariables);
-
-        // Assert
-        expect(result).toBe(true);
-      });
-
-      it('should handle current value as non-array', () => {
-        // Arrange
-        const currentVariables = { workload: 'load-test' };
-        const newVariables = [{ name: 'workload', values: ['load-test'] }];
-
-        // Act
-        const result = service.variablesNeedUpdate(currentVariables, newVariables);
-
-        // Assert
-        expect(result).toBe(false);
-      });
-
-      it('should return false when both are empty', () => {
-        // Arrange
-        const currentVariables = undefined;
-        const newVariables: Array<{ name: string; values: string[] }> = [];
-
-        // Act
-        const result = service.variablesNeedUpdate(currentVariables, newVariables);
-
-        // Assert
-        expect(result).toBe(false);
-      });
-    });
-  });
 });

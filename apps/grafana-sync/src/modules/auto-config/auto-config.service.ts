@@ -1,19 +1,9 @@
-/**
- * Copyright 2025 Perfana Contributors
- *
- * AutoConfigService - Main orchestrator for automatic dashboard configuration.
- * Migrated from: perfana-grafana/auto-config/auto-config-service.js (1,388 lines)
- */
-
 import { Injectable, Logger } from '@nestjs/common';
 import { Cron } from '@nestjs/schedule';
 import { ConfigService } from '@nestjs/config';
-import {
-  AutoConfigFindersService,
-  MappedTestRun,
-  MappedAutoConfigDashboard,
-  MappedProfileBenchmark,
-} from './auto-config-finders.service';
+import { TestRun, ProfileBenchmark, ProfileGrafanaDashboard } from '@perfana/shared/entities';
+import { TestRunFinderService } from './test-run-finder.service';
+import { DashboardFinderService } from './dashboard-finder.service';
 import { DashboardConfiguratorService } from './dashboard-configurator.service';
 import { BenchmarkProcessorService } from './benchmark-processor.service';
 
@@ -24,7 +14,8 @@ export class AutoConfigService {
 
   constructor(
     private configService: ConfigService,
-    private findersService: AutoConfigFindersService,
+    private testRunFinderService: TestRunFinderService,
+    private dashboardFinderService: DashboardFinderService,
     private dashboardConfiguratorService: DashboardConfiguratorService,
     private benchmarkProcessorService: BenchmarkProcessorService,
   ) {
@@ -34,7 +25,7 @@ export class AutoConfigService {
 
   @Cron('*/2 * * * *')
   async handleAutoConfig() {
-    this.logger.log('🔔 Auto-config cron triggered');
+    this.logger.log('Auto-config cron triggered');
     if (this.configService.get('AUTO_CONFIG_ENABLED', 'true') !== 'true') {
       this.logger.warn('Auto-config disabled via AUTO_CONFIG_ENABLED');
       return;
@@ -56,7 +47,6 @@ export class AutoConfigService {
     }
   }
 
-  /** Main auto-config workflow - Process recent test runs and configure dashboards */
   async processAutoConfigDashboards(): Promise<void> {
     this.logger.log('AutoConfig process start');
     try {
@@ -72,62 +62,62 @@ export class AutoConfigService {
     }
   }
 
-  /** Load all required data for auto-config processing */
   private async loadAutoConfigContext() {
     const lastSyncTimestamp = new Date(Date.now() - 5 * 60 * 1000);
-    const recentTestRuns = await this.findersService.findRecentTestRuns(lastSyncTimestamp);
+    const recentTestRuns = await this.testRunFinderService.findRecentTestRuns(lastSyncTimestamp);
 
-    // Log test runs without tags
     recentTestRuns
-      .filter((tr) => !tr.tags || tr.tags.length === 0)
+      .filter((tr) => !(tr.tags || []).length)
       .forEach((tr) =>
         this.logger.log(
           `No AutoConfig process for test run because there are no tags: ${tr.testRunId}`,
         ),
       );
 
-    const testRuns = recentTestRuns.filter((tr) => tr.tags && tr.tags.length > 0);
+    const testRuns = recentTestRuns.filter((tr) => (tr.tags || []).length > 0);
 
-    if (recentTestRuns.length === 0) {
-      this.logger.log('No recent test runs found. AutoConfig processing skipped.');
+    if (testRuns.length === 0) {
+      this.logger.log('No recent test runs with tags found. AutoConfig processing skipped.');
       return null;
     }
 
-    const profiles = await this.findersService.findProfiles();
+    // Collect org IDs from test runs for RBAC-scoped queries
+    const orgIds = [...new Set(testRuns.map(tr => tr.organizationId).filter(Boolean))] as string[];
+    const orgFilter = orgIds.length > 0 ? orgIds : undefined;
+
+    // Load profiles, dashboards and benchmarks in parallel
+    const [profiles, dashboards, benchmarks] = await Promise.all([
+      this.testRunFinderService.findProfiles(orgFilter),
+      this.dashboardFinderService.findAutoConfigGrafanaDashboards(orgFilter),
+      this.testRunFinderService.findProfileBenchmarks(orgFilter),
+    ]);
+
     if (profiles.length === 0) {
       this.logger.log('No profiles found. AutoConfig processing skipped.');
       return null;
     }
 
-    const dashboards = await this.findersService.findAutoConfigGrafanaDashboards();
     if (dashboards.length === 0) {
       this.logger.log('No auto config dashboards found. AutoConfig processing skipped.');
       return null;
     }
-
-    const benchmarks = await this.findersService.findProfileBenchmarks();
-    const deepLinks = await this.findersService.findGenericDeepLinks();
-    const reportPanels = await this.findersService.findGenericReportPanels();
-
-    if (deepLinks.length > 0) this.logger.log('Generic deep links processing temporarily disabled');
-    if (reportPanels.length > 0)
-      this.logger.log('Generic report panels processing temporarily disabled');
 
     return { testRuns, profiles, dashboards, benchmarks };
   }
 
   /** Process a single test run */
   private async processTestRun(
-    testRun: MappedTestRun,
+    testRun: TestRun,
     profiles: any[],
-    autoConfigDashboards: MappedAutoConfigDashboard[],
-    profileBenchmarks: MappedProfileBenchmark[],
+    autoConfigDashboards: ProfileGrafanaDashboard[],
+    profileBenchmarks: ProfileBenchmark[],
   ): Promise<void> {
     try {
       // Filter profiles by organization and tags
+      const testRunTags = testRun.tags || [];
       const testRunProfiles = profiles.filter((profile) => {
         // Filter by tags (existing logic)
-        const hasMatchingTag = testRun.tags.some((tag) => profile.tags?.includes(tag));
+        const hasMatchingTag = testRunTags.some((tag) => profile.tags?.includes(tag));
         if (!hasMatchingTag) return false;
 
         // Filter by organization (RBAC)
@@ -172,9 +162,9 @@ export class AutoConfigService {
 
   /** Process auto config dashboards for a specific test run */
   private async processAutoConfigDashboardsForTestRun(
-    testRun: MappedTestRun,
+    testRun: TestRun,
     profileNames: string[],
-    autoConfigDashboards: MappedAutoConfigDashboard[],
+    autoConfigDashboards: ProfileGrafanaDashboard[],
     testRunVariables: any[],
   ): Promise<void> {
     this.logger.log(`AutoConfig sync for test run: ${testRun.testRunId}`);

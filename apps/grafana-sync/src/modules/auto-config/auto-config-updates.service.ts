@@ -1,13 +1,5 @@
 /**
- * Copyright 2025 Perfana Contributors
- *
- * AutoConfigUpdatesService
- *
- * Migrated from: perfana-grafana/auto-config/auto-config-updates.js (84 lines)
- * Implementation from: perfana-grafana/database/typeorm-autoconfig.js (write operations)
- *
  * Provides database write operations for auto-configuration of Grafana dashboards.
- * All methods preserve the exact logic from the old working implementation.
  */
 
 import { Injectable, Logger } from '@nestjs/common';
@@ -20,13 +12,14 @@ import {
   GrafanaInstance,
   MetricsSource,
   SystemUnderTest,
+  TestRun,
+  ProfileBenchmark,
 } from '@perfana/shared/entities';
 import {
   upsertMetricsSource,
   inferSourceTypeFromDashboardUid,
 } from '@perfana/shared/services/metrics-source-upsert';
-import { MappedTestRun, MappedProfileBenchmark } from './auto-config-finders.service';
-import { DashboardVariables } from './types';
+import { DashboardVariable } from './types';
 
 /**
  * Application dashboard data for insertion
@@ -42,7 +35,7 @@ export interface ApplicationDashboardInsertData {
   dashboardUid: string;
   templateDashboardUid?: string;
   tags?: string[];
-  variables?: DashboardVariables;
+  variables?: DashboardVariable[];
   organizationId?: string; // RBAC: inherit organization from test run
 }
 
@@ -82,9 +75,8 @@ export class AutoConfigUpdatesService {
   }
 
   /**
-   * Insert application dashboard
-   * Migrated from: typeorm-autoconfig.js:45-125
-   * RBAC: Added organization filtering for SystemUnderTest lookup
+   * Insert application dashboard.
+   * RBAC: Filters SystemUnderTest by organization when present.
    */
   async insertApplicationDashboard(
     applicationDashboard: ApplicationDashboardInsertData,
@@ -217,7 +209,6 @@ export class AutoConfigUpdatesService {
 
   /**
    * Update application dashboard variables
-   * Migrated from: typeorm-autoconfig.js:130-145
    */
   async updateApplicationDashboardVariables(
     applicationDashboard: ApplicationDashboard,
@@ -236,7 +227,6 @@ export class AutoConfigUpdatesService {
 
   /**
    * Upsert grafana dashboard
-   * Migrated from: typeorm-autoconfig.js:150-204
    */
   async upsertGrafanaDashboard(
     grafanaDashboard: GrafanaDashboardUpsertData,
@@ -297,14 +287,13 @@ export class AutoConfigUpdatesService {
 
   /**
    * Update template dashboard's usedBySUT field
-   * Migrated from: typeorm-autoconfig.js:209-243
    */
   async updateUsedBySut(
-    templateDashboard: any,
+    templateDashboard: { id: string },
     application: string,
   ): Promise<{ modifiedCount: number }> {
     try {
-      const postgresId = templateDashboard.postgresId || templateDashboard._id;
+      const postgresId = templateDashboard.id;
       this.logger.log(
         `Updating usedBySut for dashboard PostgreSQL ID: ${postgresId}, application: ${application}`,
       );
@@ -338,11 +327,10 @@ export class AutoConfigUpdatesService {
 
   /**
    * Insert benchmark based on profile benchmark
-   * Migrated from: perfana-grafana/auto-config/auto-config-updates.js:123-151
    */
   async insertBenchmarkBasedOnProfileBenchmark(
-    profileBenchmark: MappedProfileBenchmark,
-    testRun: MappedTestRun,
+    profileBenchmark: ProfileBenchmark,
+    testRun: TestRun,
     applicationDashboard: ApplicationDashboard,
   ): Promise<{ insertedId: string; wasCreated?: boolean }> {
     try {
@@ -354,10 +342,11 @@ export class AutoConfigUpdatesService {
       this.logger.log(`Application dashboard ID: ${applicationDashboard.id}`);
 
       // Get system_under_test_id with organization filtering
+      const systemUnderTestName = testRun.systemUnderTest?.name || testRun.systemUnderTestId;
       this.logger.log(
-        `Looking for SUT: ${testRun.systemUnderTestName}, org: ${testRun.organizationId}`,
+        `Looking for SUT: ${systemUnderTestName}, org: ${testRun.organizationId}`,
       );
-      const sutWhere: any = { name: testRun.systemUnderTestName };
+      const sutWhere: any = { name: systemUnderTestName };
       if (testRun.organizationId) {
         // RBAC: Filter by organization to ensure we get the correct SUT for this organization
         sutWhere.organization_id = testRun.organizationId;
@@ -369,7 +358,7 @@ export class AutoConfigUpdatesService {
 
       if (!sut) {
         throw new Error(
-          `System under test '${testRun.systemUnderTestName}' not found for organization ${testRun.organizationId}`,
+          `System under test '${systemUnderTestName}' not found for organization ${testRun.organizationId}`,
         );
       }
 
@@ -390,8 +379,8 @@ export class AutoConfigUpdatesService {
         grafanaInstanceValue = applicationDashboard.grafanaInstance;
       } else if (applicationDashboard.grafanaInstance) {
         grafanaInstanceValue = applicationDashboard.grafanaInstance.label;
-      } else if (profileBenchmark.grafanaInstance) {
-        grafanaInstanceValue = profileBenchmark.grafanaInstance;
+      } else if (profileBenchmark.grafana_instance) {
+        grafanaInstanceValue = profileBenchmark.grafana_instance;
       }
 
       // Prepare benchmark data
@@ -411,28 +400,28 @@ export class AutoConfigUpdatesService {
         dashboard_uid: applicationDashboard.dashboardUid,
         application_dashboard_id: applicationDashboard.id,
         generic_check_id: profileBenchmark.id,
-        panel_title: profileBenchmark.panelTitle,
+        panel_title: profileBenchmark.panel_title,
         configuration: {
-          id: profileBenchmark.panelId?.toString(),
+          id: profileBenchmark.panel_id?.toString(),
           dashboardUid: applicationDashboard.dashboardUid,
-          type: profileBenchmark.panelType,
-          title: profileBenchmark.panelTitle,
-          evaluateType: profileBenchmark.evaluateType,
+          type: profileBenchmark.panel_type,
+          title: profileBenchmark.panel_title,
+          evaluateType: profileBenchmark.evaluate_type,
           requirement: {
-            operator: profileBenchmark.requirementOperator,
-            value: profileBenchmark.requirementValue,
+            operator: profileBenchmark.requirement_operator,
+            value: profileBenchmark.requirement_value,
           },
         },
         // FIX: requirement_operator and requirement_value are NOT generated columns
         // They must be set directly from the profile benchmark
-        requirement_operator: profileBenchmark.requirementOperator,
-        requirement_value: profileBenchmark.requirementValue,
-        metric_unit: profileBenchmark.metricUnit,
-        exclude_ramp_up_time: profileBenchmark.excludeRampUpTime,
-        average_all: profileBenchmark.averageAll,
-        match_pattern: profileBenchmark.matchPattern,
-        validate_with_default_if_no_data: profileBenchmark.validateWithDefaultIfNoData,
-        validate_with_default_if_no_data_value: profileBenchmark.validateWithDefaultIfNoDataValue,
+        requirement_operator: profileBenchmark.requirement_operator,
+        requirement_value: profileBenchmark.requirement_value,
+        metric_unit: profileBenchmark.metric_unit,
+        exclude_ramp_up_time: profileBenchmark.exclude_ramp_up_time,
+        average_all: profileBenchmark.average_all,
+        match_pattern: profileBenchmark.match_pattern,
+        validate_with_default_if_no_data: profileBenchmark.validate_with_default_if_no_data,
+        validate_with_default_if_no_data_value: profileBenchmark.validate_with_default_if_no_data_value,
         tags: profileBenchmark.tags || [],
         enabled: true,
         valid: true,
@@ -476,69 +465,4 @@ export class AutoConfigUpdatesService {
     }
   }
 
-  /**
-   * Insert deep link based on generic deep link - TEMPORARILY DISABLED
-   * Migrated from: typeorm-autoconfig.js:262-267
-   */
-  async insertDeepLinkBasedOnGenericDeepLink(
-    _genericDeepLink: any,
-    _testRun: MappedTestRun,
-  ): Promise<{ insertedId: string | null }> {
-    this.logger.log(
-      'insertDeepLinkBasedOnGenericDeepLink temporarily disabled for genericChecks migration',
-    );
-    return { insertedId: null };
-  }
-
-  /**
-   * Insert report panel based on generic report panel - TEMPORARILY DISABLED
-   * Migrated from: typeorm-autoconfig.js:272-282
-   */
-  async insertReportPanelBasedOnGenericReportPanel(
-    _genericReportPanel: any,
-    _testRun: MappedTestRun,
-    _applicationDashboard: ApplicationDashboard,
-    _index: number,
-  ): Promise<{ insertedId: string | null }> {
-    this.logger.log(
-      'insertReportPanelBasedOnGenericReportPanel temporarily disabled for genericChecks migration',
-    );
-    return { insertedId: null };
-  }
-
-  /**
-   * Check if dashboard variables need updating
-   * Compares current variables with new variables
-   */
-  variablesNeedUpdate(
-    currentVariables: Record<string, any> | undefined,
-    newVariables: Array<{ name: string; values: string[] }>,
-  ): boolean {
-    if (!currentVariables || Object.keys(currentVariables).length === 0) {
-      return newVariables.length > 0;
-    }
-
-    // Check if any variable has different values
-    for (const newVar of newVariables) {
-      const currentValue = currentVariables[newVar.name];
-
-      if (!currentValue) {
-        return true; // New variable added
-      }
-
-      // Compare arrays
-      const currentArray = Array.isArray(currentValue) ? currentValue : [currentValue];
-      const newArray = newVar.values;
-
-      if (currentArray.length !== newArray.length) {
-        return true;
-      }
-
-      if (!currentArray.every((val, index) => val === newArray[index])) {
-        return true;
-      }
-    }
-
-    return false;
-  }
 }

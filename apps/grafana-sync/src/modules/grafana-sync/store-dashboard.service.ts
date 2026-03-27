@@ -3,19 +3,8 @@ import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { GrafanaDashboard, GrafanaInstance } from '@perfana/shared/entities';
 import { GrafanaApiService } from '../grafana-api/grafana-api.service';
+import { PERFANA_TAG, GRAFANA_SEARCH_LIMIT } from '../../config/constants';
 
-/**
- * StoreDashboardService
- *
- * Stores new dashboards from Grafana instances into Perfana database.
- *
- * Process:
- * 1. Fetch all dashboards from Grafana HTTP API
- * 2. Compare with existing dashboards in Perfana DB
- * 3. Store new dashboards that don't exist yet
- *
- * TODO: Port logic from perfana-grafana/src/sync/store-dashboards.ts
- */
 @Injectable()
 export class StoreDashboardService {
   private readonly logger = new Logger(StoreDashboardService.name);
@@ -29,19 +18,19 @@ export class StoreDashboardService {
   ) {}
 
   /**
-   * Add new dashboards from all Grafana instances
-   * Returns count of dashboards added
+   * Add new dashboards from all Grafana instances.
+   * When instances are provided (from the sync orchestrator), avoids re-fetching.
    */
-  async addNewDashboards(): Promise<number> {
+  async addNewDashboards(instances?: GrafanaInstance[]): Promise<number> {
     this.logger.debug('Checking for new dashboards to add...');
 
     let totalAdded = 0;
 
     try {
-      const instances = await this.grafanaInstanceRepo.find();
+      const allInstances = instances ?? await this.grafanaInstanceRepo.find();
 
-      for (const instance of instances) {
-        const added = await this.addNewDashboardsForInstance(instance.id);
+      for (const instance of allInstances) {
+        const added = await this.addNewDashboardsForInstance(instance);
         totalAdded += added;
       }
 
@@ -56,14 +45,14 @@ export class StoreDashboardService {
   }
 
   /**
-   * Find dashboards to add from a Grafana instance
-   * Based on: perfana-grafana/grafana-sync/store-dashboard/get-dashboards-to-add.js
+   * Find dashboards to add from a Grafana instance.
+   * The Grafana API search already filters by the perfana tag, so no
+   * redundant in-memory tag check is needed.
    */
   async getDashboardsToAdd(grafanaInstance: GrafanaInstance): Promise<any[]> {
     this.logger.debug(`Finding dashboards to add for instance: ${grafanaInstance.label}`);
 
     try {
-      // Get stored dashboards for this instance
       const storedDashboards = await this.grafanaDashboardRepo.find({
         where: { grafanaInstanceId: grafanaInstance.id },
         select: ['uid'],
@@ -71,22 +60,14 @@ export class StoreDashboardService {
 
       const storedUids = new Set(storedDashboards.map((d) => d.uid));
 
-      // Fetch dashboards from Grafana with 'perfana' tag
       const grafanaDashboards = await this.grafanaApiService.searchDashboards(grafanaInstance.id, {
-        tag: 'perfana',
-        limit: 5000,
+        tag: PERFANA_TAG,
+        limit: GRAFANA_SEARCH_LIMIT,
       });
 
-      // Filter to only dashboards tagged 'perfana' that aren't stored yet
-      const dashboardsToAdd = grafanaDashboards.filter((dashboard) => {
-        const hasPerfanaTag = dashboard.tags
-          ?.map((tag: string) => tag.toLowerCase())
-          .includes('perfana');
-
-        const notStored = !storedUids.has(dashboard.uid);
-
-        return hasPerfanaTag && notStored;
-      });
+      const dashboardsToAdd = grafanaDashboards.filter(
+        (dashboard) => !storedUids.has(dashboard.uid),
+      );
 
       if (dashboardsToAdd.length > 0) {
         this.logger.log(
@@ -110,50 +91,26 @@ export class StoreDashboardService {
   /**
    * Add new dashboards for a specific Grafana instance
    */
-  private async addNewDashboardsForInstance(instanceId: string): Promise<number> {
+  private async addNewDashboardsForInstance(instance: GrafanaInstance): Promise<number> {
     let addedCount = 0;
 
     try {
-      const instance = await this.grafanaInstanceRepo.findOne({
-        where: { id: instanceId },
-      });
-
-      if (!instance) {
-        this.logger.error(`Grafana instance ${instanceId} not found`);
-        return 0;
-      }
-
-      // Get dashboards to add
       const dashboardsToAdd = await this.getDashboardsToAdd(instance);
 
-      // Store each new dashboard
       for (const dashboard of dashboardsToAdd) {
         await this.storeDashboard(instance, dashboard, false);
         addedCount++;
       }
     } catch (error) {
       const errorMessage = error instanceof Error ? error.stack : String(error);
-      this.logger.error(`Failed to add dashboards for instance ${instanceId}:`, errorMessage);
+      this.logger.error(`Failed to add dashboards for instance ${instance.label}:`, errorMessage);
     }
 
     return addedCount;
   }
 
   /**
-   * Get existing dashboard UIDs for an instance
-   */
-  private async getExistingDashboardUids(instanceId: string): Promise<string[]> {
-    const dashboards = await this.grafanaDashboardRepo.find({
-      where: { grafanaInstanceId: instanceId },
-      select: ['uid'],
-    });
-
-    return dashboards.map((d) => d.uid);
-  }
-
-  /**
    * Store dashboard from Grafana to Perfana database
-   * Based on: perfana-grafana/grafana-sync/store-dashboard/store-dashboard.js
    */
   async storeDashboard(
     grafanaInstance: GrafanaInstance,
