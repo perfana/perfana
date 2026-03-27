@@ -43,14 +43,14 @@ export function useAddSLOForm({
 
   // Fetch Grafana application dashboards
   const fetchSloApplicationDashboards = useCallback(async () => {
-    if (!systemName || !environment) {
+    if (!systemId || !environment) {
       return;
     }
 
     try {
       setDashboardsLoading(true);
       const response = await authenticatedFetch(
-        `/grafana/application-dashboards?system=${encodeURIComponent(systemName)}&environment=${encodeURIComponent(environment)}`,
+        `/grafana/application-dashboards?systemId=${encodeURIComponent(systemId)}&environment=${encodeURIComponent(environment)}`,
         {
           headers: {
             'Content-Type': 'application/json',
@@ -71,7 +71,7 @@ export function useAddSLOForm({
     } finally {
       setDashboardsLoading(false);
     }
-  }, [systemName, environment]);
+  }, [systemId, environment]);
 
   // Fetch Dynatrace dashboards
   const fetchDynatraceDashboardsForSlo = useCallback(async () => {
@@ -129,14 +129,14 @@ export function useAddSLOForm({
 
   // Fetch Performance metrics dashboards
   const fetchPerfMetricsDashboardsForSlo = useCallback(async () => {
-    if (!systemName || !environment) {
+    if (!systemId || !environment) {
       return;
     }
 
     try {
       setDashboardsLoading(true);
       const response = await authenticatedFetch(
-        `/grafana/application-dashboards?system=${encodeURIComponent(systemName)}&environment=${encodeURIComponent(environment)}`,
+        `/grafana/application-dashboards?systemId=${encodeURIComponent(systemId)}&environment=${encodeURIComponent(environment)}`,
         {
           headers: {
             'Content-Type': 'application/json',
@@ -159,7 +159,7 @@ export function useAddSLOForm({
     } finally {
       setDashboardsLoading(false);
     }
-  }, [systemName, environment]);
+  }, [systemId, environment]);
 
   // Fetch Grafana dashboard panels
   const fetchDashboardPanels = useCallback(async (dashboardUid: string) => {
@@ -222,13 +222,13 @@ export function useAddSLOForm({
 
   // Check if Performance metrics data exists
   const checkPerfMetricsDataExists = useCallback(async () => {
-    if (!systemName || !environment) {
+    if (!systemId || !environment) {
       return false;
     }
 
     try {
       const response = await authenticatedFetch(
-        `/grafana/application-dashboards?system=${encodeURIComponent(systemName)}&environment=${encodeURIComponent(environment)}`,
+        `/grafana/application-dashboards?systemId=${encodeURIComponent(systemId)}&environment=${encodeURIComponent(environment)}`,
         {
           headers: {
             'Content-Type': 'application/json',
@@ -246,7 +246,7 @@ export function useAddSLOForm({
       console.error('Error checking Performance metrics data existence:', error);
       return false;
     }
-  }, [systemName, environment]);
+  }, [systemId, environment]);
 
   // Reset form state
   const resetForm = useCallback(() => {
@@ -307,7 +307,7 @@ export function useAddSLOForm({
         setHasPerfMetricsData(perfMetricsDataExists);
 
         // Fetch all available sources upfront for the grouped dropdown
-        if (hasGrafanaData && systemName && environment) {
+        if (hasGrafanaData && systemId && environment) {
           fetchSloApplicationDashboards();
         }
         if (dynatraceDataExists) {
@@ -322,9 +322,8 @@ export function useAddSLOForm({
     }
   }, [
     open,
-    systemName,
-    environment,
     systemId,
+    environment,
     workload,
     fetchSloApplicationDashboards,
     fetchDynatraceDashboardsForSlo,

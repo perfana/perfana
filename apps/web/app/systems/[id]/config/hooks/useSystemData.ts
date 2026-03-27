@@ -12,7 +12,7 @@ import { Benchmark } from '../components/types';
 export type TabId = 'grafana' | 'slo' | 'deep-links' | 'dynatrace' | 'tracing' | 'pyroscope' | 'notifications' | 'templates';
 
 interface UseSystemDataProps {
-  onDashboardsLoad?: (systemName: string, environment: string) => void;
+  onDashboardsLoad?: (systemId: string, environment: string) => void;
   onBenchmarksLoad?: (systemId: string, environment: string, workload: string) => void;
 }
 
@@ -159,7 +159,7 @@ export function useSystemData({
 
           // Load dashboards for the environment
           if (activeTab === 'grafana' && onDashboardsLoad) {
-            onDashboardsLoad(systemData.name, targetEnvironment);
+            onDashboardsLoad(systemId, targetEnvironment);
           }
         }
       }
@@ -228,7 +228,7 @@ export function useSystemData({
 
       // Load dashboards for this environment
       if (activeTab === 'grafana' && onDashboardsLoad) {
-        onDashboardsLoad(system.name, environment);
+        onDashboardsLoad(systemId, environment);
       }
     }
   }, [system, activeTab, onDashboardsLoad]);

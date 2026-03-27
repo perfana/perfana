@@ -104,7 +104,7 @@ export default function SLODialogs({
           }}
           benchmark={selectedSloForEdit}
           systemId={testRun.system_under_test_id}
-          systemName={testRun.system_under_test_id} // TODO: Get actual system name
+          systemName={testRun.system_under_test?.name || testRun.systems_under_test?.name || testRun.system_under_test_id}
           environment={testRun.test_environment}
           workload={testRun.workload}
           onSLOUpdated={handleSloUpdated}

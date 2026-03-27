@@ -59,8 +59,15 @@ export function SLOFormFields({
       {/* Source Selection */}
       <Grid item xs={12}>
         <Autocomplete
-          options={SOURCE_OPTIONS}
+          options={(() => {
+            const currentOption = getSourceOption(sloFormData.source);
+            if (currentOption && !SOURCE_OPTIONS.find(o => o.value === currentOption.value)) {
+              return [...SOURCE_OPTIONS, currentOption];
+            }
+            return SOURCE_OPTIONS;
+          })()}
           getOptionLabel={(option) => option.label}
+          isOptionEqualToValue={(option, value) => option.value === value?.value}
           value={getSourceOption(sloFormData.source)}
           onChange={(_, newValue) => {
             const sourceValue = newValue?.value || '';
@@ -103,8 +110,9 @@ export function SLOFormFields({
       {sloFormData.source === 'grafana' && (
         <Grid item xs={12}>
           <Autocomplete
-            options={availableDashboards}
+            options={availableDashboards.length > 0 ? availableDashboards : (sloFormData.selectedDashboard ? [sloFormData.selectedDashboard] : [])}
             getOptionLabel={(option) => option.dashboard_label || ''}
+            isOptionEqualToValue={(option, value) => option.id === value?.id || option.dashboard_uid === value?.dashboard_uid}
             value={sloFormData.selectedDashboard}
             onChange={(_, newValue) => {
               setSloFormData((prev) => ({
@@ -164,8 +172,9 @@ export function SLOFormFields({
       {sloFormData.source === 'dynatrace' && (
         <Grid item xs={12}>
           <Autocomplete
-            options={availableDynatraceDashboards}
+            options={availableDynatraceDashboards.length > 0 ? availableDynatraceDashboards : (sloFormData.selectedDashboard ? [sloFormData.selectedDashboard] : [])}
             getOptionLabel={(option) => option.dashboardLabel || ''}
+            isOptionEqualToValue={(option, value) => option.dashboardLabel === value?.dashboardLabel}
             value={sloFormData.selectedDashboard}
             onChange={(_, newValue) => {
               setSloFormData((prev) => ({
@@ -225,8 +234,9 @@ export function SLOFormFields({
       {sloFormData.source === 'dynatrace' && sloFormData.selectedDashboard && (
         <Grid item xs={12}>
           <Autocomplete
-            options={availableDynatraceMetrics}
-            getOptionLabel={(option) => option.panelTitle}
+            options={availableDynatraceMetrics.length > 0 ? availableDynatraceMetrics : (sloFormData.selectedPanel ? [sloFormData.selectedPanel] : [])}
+            getOptionLabel={(option) => option.panelTitle || ''}
+            isOptionEqualToValue={(option, value) => option.panelTitle === value?.panelTitle}
             value={sloFormData.selectedPanel}
             onChange={(_, newValue) => {
               setSloFormData((prev) => ({
@@ -281,8 +291,9 @@ export function SLOFormFields({
       {sloFormData.source === 'grafana' && sloFormData.selectedDashboard && (
         <Grid item xs={12}>
           <Autocomplete
-            options={availablePanels}
-            getOptionLabel={(option) => option.title}
+            options={availablePanels.length > 0 ? availablePanels : (sloFormData.selectedPanel ? [sloFormData.selectedPanel] : [])}
+            getOptionLabel={(option) => option.title || ''}
+            isOptionEqualToValue={(option, value) => (option.id != null && value?.id != null) ? String(option.id) === String(value.id) : option.title === value?.title}
             value={sloFormData.selectedPanel}
             onChange={(_, newValue) => {
               setSloFormData((prev) => ({
@@ -331,6 +342,34 @@ export function SLOFormFields({
             }}
           />
         </Grid>
+      )}
+
+      {/* Generic Dashboard/Metric display for non-grafana/dynatrace sources */}
+      {sloFormData.source !== 'grafana' && sloFormData.source !== 'dynatrace' && sloFormData.selectedDashboard && (
+        <>
+          <Grid item xs={12}>
+            <TextField
+              label="Dashboard"
+              value={sloFormData.selectedDashboard?.dashboard_label || sloFormData.selectedDashboard?.dashboardLabel || ''}
+              variant="outlined"
+              fullWidth
+              disabled={true}
+              helperText="Dashboard cannot be changed when editing existing SLO"
+            />
+          </Grid>
+          {sloFormData.selectedPanel && (
+            <Grid item xs={12}>
+              <TextField
+                label="Metric"
+                value={sloFormData.selectedPanel?.title || sloFormData.selectedPanel?.panelTitle || ''}
+                variant="outlined"
+                fullWidth
+                disabled={true}
+                helperText="Metric cannot be changed when editing existing SLO"
+              />
+            </Grid>
+          )}
+        </>
       )}
     </>
   );

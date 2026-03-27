@@ -37,7 +37,7 @@ interface UseDashboardManagementReturn {
   deleteLoading: boolean;
 
   // Actions
-  fetchApplicationDashboards: (systemName: string, environment: string) => Promise<void>;
+  fetchApplicationDashboards: (systemId: string, environment: string) => Promise<void>;
   handleAddDashboard: (organizationId?: string | null) => Promise<void>;
   handleSubmitDashboard: (
     dashboardId: string,
@@ -102,12 +102,12 @@ export function useDashboardManagement(): UseDashboardManagementReturn {
   const [deleteLoading, setDeleteLoading] = useState(false);
 
   // Fetch application dashboards
-  const fetchApplicationDashboards = useCallback(async (systemName: string, environment: string) => {
+  const fetchApplicationDashboards = useCallback(async (systemId: string, environment: string) => {
     try {
       setDashboardsLoading(true);
 
       const response = await authenticatedFetch(
-        `/grafana/application-dashboards?system=${encodeURIComponent(systemName)}&environment=${encodeURIComponent(environment)}`,
+        `/grafana/application-dashboards?systemId=${encodeURIComponent(systemId)}&environment=${encodeURIComponent(environment)}`,
         {
           method: 'GET',
           headers: { 'Content-Type': 'application/json' },

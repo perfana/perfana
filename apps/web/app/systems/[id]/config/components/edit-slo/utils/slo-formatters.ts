@@ -127,9 +127,16 @@ export function getRequirementOperatorOption(value: string): RequirementOperator
  */
 export function getSourceOption(value: string): SourceOption | null {
   if (!value) return null;
+  const knownLabels: Record<string, string> = {
+    grafana: 'Grafana',
+    dynatrace: 'Dynatrace',
+    custom: 'Custom',
+    prometheus: 'Prometheus',
+    influxdb: 'InfluxDB',
+  };
   return {
     value,
-    label: value === 'dynatrace' ? 'Dynatrace' : 'Grafana',
+    label: knownLabels[value] || value.charAt(0).toUpperCase() + value.slice(1),
   };
 }
 
