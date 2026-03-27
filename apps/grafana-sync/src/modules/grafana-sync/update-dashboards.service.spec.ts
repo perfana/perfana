@@ -165,35 +165,7 @@ describe('UpdateDashboardsService', () => {
       expect(result).toHaveLength(0);
     });
 
-    it('should filter out dashboards without perfana tag', async () => {
-      jest.spyOn(dashboardRepo, 'find').mockResolvedValue([]);
-
-      jest.spyOn(grafanaApiService, 'searchDashboards').mockResolvedValue([
-        { uid: 'with-tag', title: 'With Perfana', tags: ['perfana'] },
-        { uid: 'without-tag', title: 'Without Perfana', tags: ['monitoring'] },
-      ]);
-
-      const now = new Date();
-      const thirtyMinutesAgo = new Date(now.getTime() - 30 * 60 * 1000);
-
-      jest.spyOn(grafanaApiService, 'getDashboardByUid').mockResolvedValue({
-        meta: { updated: thirtyMinutesAgo.toISOString() },
-      } as any);
-
-      await service.getDashboardsToUpdate(mockGrafanaInstance as GrafanaInstance);
-
-      // Only perfana-tagged dashboard should be checked (but won't be returned since it's not stored)
-      expect(grafanaApiService.getDashboardByUid).toHaveBeenCalledWith(
-        'test-instance-id',
-        'with-tag',
-      );
-      expect(grafanaApiService.getDashboardByUid).not.toHaveBeenCalledWith(
-        'test-instance-id',
-        'without-tag',
-      );
-    });
-
-    it('should handle case-insensitive perfana tag matching', async () => {
+    it('should process all dashboards returned by API (API already filters by tag)', async () => {
       const now = new Date();
       const thirtyMinutesAgo = new Date(now.getTime() - 30 * 60 * 1000);
       const twoHoursAgo = new Date(now.getTime() - 2 * 60 * 60 * 1000);
@@ -202,10 +174,13 @@ describe('UpdateDashboardsService', () => {
         .spyOn(dashboardRepo, 'find')
         .mockResolvedValue([
           { uid: 'dashboard-1', updated: twoHoursAgo, usedBySut: [] } as GrafanaDashboard,
+          { uid: 'dashboard-2', updated: twoHoursAgo, usedBySut: [] } as GrafanaDashboard,
         ]);
 
+      // API returns only perfana-tagged dashboards
       jest.spyOn(grafanaApiService, 'searchDashboards').mockResolvedValue([
-        { uid: 'dashboard-1', title: 'Dashboard 1', tags: ['PERFANA'] }, // Uppercase
+        { uid: 'dashboard-1', title: 'Dashboard 1', tags: ['perfana'] },
+        { uid: 'dashboard-2', title: 'Dashboard 2', tags: ['perfana'] },
       ]);
 
       jest.spyOn(grafanaApiService, 'getDashboardByUid').mockResolvedValue({
@@ -214,7 +189,10 @@ describe('UpdateDashboardsService', () => {
       } as any);
 
       const result = await service.getDashboardsToUpdate(mockGrafanaInstance as GrafanaInstance);
-      expect(result).toHaveLength(1);
+
+      // Both dashboards should be checked
+      expect(grafanaApiService.getDashboardByUid).toHaveBeenCalledTimes(2);
+      expect(result).toHaveLength(2);
     });
 
     it('should skip dashboards not found in stored dashboards', async () => {

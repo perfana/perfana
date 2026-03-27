@@ -8,7 +8,6 @@ import {
   DashboardUid,
   createDashboardUid,
   AutoConfigDashboard,
-  MappedTestRun,
 } from './dashboard-uid.util';
 import { DashboardVariable } from './types';
 
@@ -56,9 +55,10 @@ describe('DashboardUid', () => {
   });
 
   describe('from (main factory method)', () => {
-    const mockTestRun: MappedTestRun = {
-      systemUnderTestName: 'my-application',
+    const mockTestRun: any = {
+      systemUnderTest: { name: 'my-application' },
       testEnvironment: 'production',
+      systemUnderTestId: 'sut-id',
     };
 
     describe('readOnly: true mode', () => {
@@ -67,7 +67,7 @@ describe('DashboardUid', () => {
           dashboardUid: 'template-uid-123',
           dashboardName: 'Test Dashboard',
           profile: 'profile1',
-          grafana: 'grafana-instance',
+          grafanaLabel: 'grafana-instance',
           readOnly: true,
         };
 
@@ -82,18 +82,20 @@ describe('DashboardUid', () => {
           dashboardUid: 'shared-template',
           dashboardName: 'Shared Dashboard',
           profile: 'profile1',
-          grafana: 'grafana-instance',
+          grafanaLabel: 'grafana-instance',
           readOnly: true,
         };
 
-        const testRun1: MappedTestRun = {
-          systemUnderTestName: 'app1',
+        const testRun1: any = {
+          systemUnderTest: { name: 'app1' },
           testEnvironment: 'prod',
+          systemUnderTestId: 'sut-id',
         };
 
-        const testRun2: MappedTestRun = {
-          systemUnderTestName: 'app2',
+        const testRun2: any = {
+          systemUnderTest: { name: 'app2' },
           testEnvironment: 'dev',
+          systemUnderTestId: 'sut-id',
         };
 
         const uid1 = DashboardUid.from(testRun1, autoConfigDashboard);
@@ -112,7 +114,7 @@ describe('DashboardUid', () => {
           dashboardUid: 'template-uid',
           dashboardName: 'Test Dashboard',
           profile: 'profile1',
-          grafana: 'grafana-instance',
+          grafanaLabel: 'grafana-instance',
           readOnly: false,
         };
 
@@ -122,29 +124,31 @@ describe('DashboardUid', () => {
         expect(result.dashboardUid).toMatch(/^[a-f0-9]{32}$/);
       });
 
-      it('should use systemUnderTestName in hash calculation (CRITICAL)', () => {
+      it('should use systemUnderTest.name in hash calculation (CRITICAL)', () => {
         const autoConfigDashboard: AutoConfigDashboard = {
           dashboardUid: 'template',
           dashboardName: 'Test',
           profile: 'profile1',
-          grafana: 'grafana1',
+          grafanaLabel: 'grafana1',
           readOnly: false,
         };
 
-        const testRun1: MappedTestRun = {
-          systemUnderTestName: 'app1',
+        const testRun1: any = {
+          systemUnderTest: { name: 'app1' },
           testEnvironment: 'prod',
+          systemUnderTestId: 'sut-id',
         };
 
-        const testRun2: MappedTestRun = {
-          systemUnderTestName: 'app2',
+        const testRun2: any = {
+          systemUnderTest: { name: 'app2' },
           testEnvironment: 'prod',
+          systemUnderTestId: 'sut-id',
         };
 
         const uid1 = DashboardUid.from(testRun1, autoConfigDashboard);
         const uid2 = DashboardUid.from(testRun2, autoConfigDashboard);
 
-        // Different systemUnderTestName should produce different UIDs
+        // Different systemUnderTest.name should produce different UIDs
         expect(uid1.dashboardUid).not.toBe(uid2.dashboardUid);
       });
 
@@ -153,18 +157,20 @@ describe('DashboardUid', () => {
           dashboardUid: 'template',
           dashboardName: 'Test',
           profile: 'profile1',
-          grafana: 'grafana1',
+          grafanaLabel: 'grafana1',
           readOnly: false,
         };
 
-        const testRunProd: MappedTestRun = {
-          systemUnderTestName: 'my-app',
+        const testRunProd: any = {
+          systemUnderTest: { name: 'my-app' },
           testEnvironment: 'production',
+          systemUnderTestId: 'sut-id',
         };
 
-        const testRunDev: MappedTestRun = {
-          systemUnderTestName: 'my-app',
+        const testRunDev: any = {
+          systemUnderTest: { name: 'my-app' },
           testEnvironment: 'development',
+          systemUnderTestId: 'sut-id',
         };
 
         const uidProd = DashboardUid.from(testRunProd, autoConfigDashboard);
@@ -178,7 +184,7 @@ describe('DashboardUid', () => {
           dashboardUid: 'template',
           dashboardName: 'Test',
           profile: 'profile1',
-          grafana: 'grafana1',
+          grafanaLabel: 'grafana1',
           readOnly: false,
         };
 
@@ -195,7 +201,7 @@ describe('DashboardUid', () => {
           dashboardUid: 'template',
           dashboardName: 'Test',
           profile: 'profile1',
-          grafana: 'grafana1',
+          grafanaLabel: 'grafana1',
           // readOnly not specified - should default to false
         };
 
@@ -209,16 +215,17 @@ describe('DashboardUid', () => {
   });
 
   describe('legacyFrom (separate dashboard variables)', () => {
-    const mockTestRun: MappedTestRun = {
-      systemUnderTestName: 'my-app',
+    const mockTestRun: any = {
+      systemUnderTest: { name: 'my-app' },
       testEnvironment: 'production',
+      systemUnderTestId: 'sut-id',
     };
 
     const autoConfigDashboard: AutoConfigDashboard = {
       dashboardUid: 'template',
       dashboardName: 'Test Dashboard',
       profile: 'profile1',
-      grafana: 'grafana1',
+      grafanaLabel: 'grafana1',
       createSeparateDashboardForVariable: 'workload',
     };
 
@@ -306,9 +313,10 @@ describe('DashboardUid', () => {
   });
 
   describe('createDashboardUid (convenience function)', () => {
-    const mockTestRun: MappedTestRun = {
-      systemUnderTestName: 'my-app',
+    const mockTestRun: any = {
+      systemUnderTest: { name: 'my-app' },
       testEnvironment: 'production',
+      systemUnderTestId: 'sut-id',
     };
 
     it('should use legacyFrom when createSeparateDashboardForVariable is set', () => {
@@ -316,7 +324,7 @@ describe('DashboardUid', () => {
         dashboardUid: 'template',
         dashboardName: 'Test',
         profile: 'profile1',
-        grafana: 'grafana1',
+        grafanaLabel: 'grafana1',
         createSeparateDashboardForVariable: 'workload',
       };
 
@@ -332,7 +340,7 @@ describe('DashboardUid', () => {
         dashboardUid: 'template-123',
         dashboardName: 'Test',
         profile: 'profile1',
-        grafana: 'grafana1',
+        grafanaLabel: 'grafana1',
         readOnly: true,
       };
 
@@ -351,17 +359,17 @@ describe('DashboardUid', () => {
       // where 20 dashboards were created using readOnly: true mode
       const templateUid = 'perfana-gatling-overview';
 
-      const testRuns: MappedTestRun[] = [
-        { systemUnderTestName: 'app1', testEnvironment: 'prod' },
-        { systemUnderTestName: 'app2', testEnvironment: 'prod' },
-        { systemUnderTestName: 'app3', testEnvironment: 'staging' },
+      const testRuns: any[] = [
+        { systemUnderTest: { name: 'app1' }, testEnvironment: 'prod', systemUnderTestId: 'sut-id' },
+        { systemUnderTest: { name: 'app2' }, testEnvironment: 'prod', systemUnderTestId: 'sut-id' },
+        { systemUnderTest: { name: 'app3' }, testEnvironment: 'staging', systemUnderTestId: 'sut-id' },
       ];
 
       const autoConfigDashboard: AutoConfigDashboard = {
         dashboardUid: templateUid,
         dashboardName: 'Gatling Overview',
         profile: 'profile1',
-        grafana: 'grafana1',
+        grafanaLabel: 'grafana1',
         readOnly: true, // CRITICAL: This was set for the 20 dashboards
       };
 

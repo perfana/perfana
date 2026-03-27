@@ -1,24 +1,16 @@
 import { Module } from '@nestjs/common';
 import { TypeOrmModule } from '@nestjs/typeorm';
 import { AutoConfigService } from './auto-config.service';
-import { AutoConfigFindersService } from './auto-config-finders.service';
 import { AutoConfigUpdatesService } from './auto-config-updates.service';
 import { TestRunFinderService } from './test-run-finder.service';
-import { DashboardFinderService as LegacyDashboardFinderService } from './dashboard-finder.service';
+import { DashboardFinderService } from './dashboard-finder.service';
 import { DashboardConfiguratorService } from './dashboard-configurator.service';
 import { BenchmarkProcessorService } from './benchmark-processor.service';
 import { VariableDiscoveryService } from './variable-discovery.service';
 import { VariableDetectorService } from './variable-detector.service';
 import { VariableMatcherService } from './variable-matcher.service';
 import { GrafanaApiModule } from '../grafana-api/grafana-api.module';
-import {
-  DashboardCreatorService,
-  ApplicationDashboardCreatorService,
-  DashboardFinderService,
-  DashboardStorageService,
-  DashboardVariableHelperService,
-  DashboardProcessorService,
-} from './services';
+import { DashboardProcessorService } from './services';
 import {
   TestRun,
   ApplicationDashboard,
@@ -53,21 +45,14 @@ import {
   ],
   providers: [
     AutoConfigService,
-    AutoConfigFindersService,
     AutoConfigUpdatesService,
     TestRunFinderService,
-    LegacyDashboardFinderService,
+    DashboardFinderService,
     DashboardConfiguratorService,
     BenchmarkProcessorService,
     VariableDiscoveryService,
     VariableDetectorService,
     VariableMatcherService,
-    // New extracted services
-    DashboardCreatorService,
-    ApplicationDashboardCreatorService,
-    DashboardFinderService,
-    DashboardStorageService,
-    DashboardVariableHelperService,
     DashboardProcessorService,
   ],
   exports: [AutoConfigService],

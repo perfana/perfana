@@ -1,5 +1,6 @@
 import { Test, TestingModule } from '@nestjs/testing';
 import { ConfigModule, ConfigService } from '@nestjs/config';
+import { SchedulerRegistry } from '@nestjs/schedule';
 import { GrafanaSyncService } from '../../src/modules/grafana-sync/grafana-sync.service';
 import { StoreDashboardService } from '../../src/modules/grafana-sync/store-dashboard.service';
 import { RestoreDashboardService } from '../../src/modules/grafana-sync/restore-dashboard.service';
@@ -68,6 +69,13 @@ describe('Grafana Sync Integration Tests', () => {
       ],
       providers: [
         GrafanaSyncService,
+        {
+          provide: SchedulerRegistry,
+          useValue: {
+            addInterval: jest.fn(),
+            deleteInterval: jest.fn(),
+          },
+        },
         {
           provide: StoreDashboardService,
           useValue: mockStoreDashboardService,

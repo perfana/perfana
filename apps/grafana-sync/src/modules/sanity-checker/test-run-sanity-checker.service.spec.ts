@@ -298,94 +298,10 @@ describe('TestRunSanityCheckerService', () => {
     });
   });
 
-  describe('checkMissingEndTime', () => {
-    describe('Happy Path Scenarios', () => {
-      it('should log debug message when checking', async () => {
-        // Arrange
-        const debugSpy = jest.spyOn((service as any).logger, 'debug');
-
-        // Act
-        await service.checkMissingEndTime();
-
-        // Assert
-        expect(debugSpy).toHaveBeenCalledWith('Checking for test runs with missing end time...');
-      });
-
-      it('should log warning about not being implemented', async () => {
-        // Arrange
-        const warnSpy = jest.spyOn((service as any).logger, 'warn');
-
-        // Act
-        await service.checkMissingEndTime();
-
-        // Assert
-        expect(warnSpy).toHaveBeenCalledWith(
-          'checkMissingEndTime() not yet implemented - needs port from perfana-grafana',
-        );
-      });
-    });
-
-    describe('Configuration Disabled', () => {
-      it('should skip check when sanity checker is disabled', async () => {
-        // Arrange
-        configService.get.mockReturnValueOnce(false);
-        const debugSpy = jest.spyOn((service as any).logger, 'debug');
-
-        // Act
-        await service.checkMissingEndTime();
-
-        // Assert
-        expect(debugSpy).not.toHaveBeenCalled();
-      });
-    });
-
-    describe('Error Scenarios', () => {
-      it('should handle errors gracefully', async () => {
-        // Arrange
-        const errorSpy = jest.spyOn((service as any).logger, 'error');
-        // Force an error by mocking a method that will be called
-        jest.spyOn((service as any).logger, 'warn').mockImplementation(() => {
-          throw new Error('Unexpected error');
-        });
-
-        // Act
-        await service.checkMissingEndTime();
-
-        // Assert
-        expect(errorSpy).toHaveBeenCalledWith('Missing end time check failed:', expect.any(Error));
-      });
-    });
-  });
-
-  describe('checkOrphanedTestRuns', () => {
-    describe('Happy Path Scenarios', () => {
-      it('should log warning about not being implemented', async () => {
-        // Arrange
-        const warnSpy = jest.spyOn((service as any).logger, 'warn');
-
-        // Act
-        await service.checkOrphanedTestRuns();
-
-        // Assert
-        expect(warnSpy).toHaveBeenCalledWith('checkOrphanedTestRuns() not yet implemented');
-      });
-
-      it('should complete without errors', async () => {
-        // Act & Assert
-        await expect(service.checkOrphanedTestRuns()).resolves.toBeUndefined();
-      });
-    });
-  });
-
   describe('Scheduled Job Configuration', () => {
     it('should have checkStuckTestRuns decorated with @Cron', () => {
       // Verify the method exists and can be called
       expect(typeof service.checkStuckTestRuns).toBe('function');
-    });
-
-    it('should have checkMissingEndTime decorated with @Cron', () => {
-      // Verify the method exists and can be called
-      expect(typeof service.checkMissingEndTime).toBe('function');
     });
   });
 

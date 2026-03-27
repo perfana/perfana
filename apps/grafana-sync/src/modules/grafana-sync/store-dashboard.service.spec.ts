@@ -62,18 +62,17 @@ describe('StoreDashboardService', () => {
       label: 'Test Grafana',
     };
 
-    it('should return dashboards with perfana tag not yet stored', async () => {
-      // Mock stored dashboards (UID: stored-1)
+    it('should return dashboards not yet stored (API already filters by perfana tag)', async () => {
       jest
         .spyOn(dashboardRepo, 'find')
         .mockResolvedValue([{ uid: 'stored-1' } as GrafanaDashboard]);
 
-      // Mock Grafana API returns 4 dashboards
+      // The Grafana API already filters by 'perfana' tag, so all returned
+      // dashboards are assumed to have the tag.
       jest.spyOn(grafanaApiService, 'searchDashboards').mockResolvedValue([
         { uid: 'stored-1', title: 'Already Stored', tags: ['perfana'] },
         { uid: 'new-1', title: 'New Dashboard 1', tags: ['perfana'] },
         { uid: 'new-2', title: 'New Dashboard 2', tags: ['perfana'] },
-        { uid: 'no-tag', title: 'No Perfana Tag', tags: ['other'] },
       ]);
 
       const result = await service.getDashboardsToAdd(mockGrafanaInstance as GrafanaInstance);
@@ -82,7 +81,6 @@ describe('StoreDashboardService', () => {
       expect(result[0].uid).toBe('new-1');
       expect(result[1].uid).toBe('new-2');
 
-      // Verify the correct calls were made
       expect(dashboardRepo.find).toHaveBeenCalledWith({
         where: { grafanaInstanceId: 'test-instance-id' },
         select: ['uid'],
@@ -111,51 +109,11 @@ describe('StoreDashboardService', () => {
       expect(result).toHaveLength(0);
     });
 
-    it('should filter out dashboards without perfana tag', async () => {
-      jest.spyOn(dashboardRepo, 'find').mockResolvedValue([]);
-
-      jest.spyOn(grafanaApiService, 'searchDashboards').mockResolvedValue([
-        { uid: 'with-tag', title: 'With Perfana', tags: ['perfana', 'monitoring'] },
-        { uid: 'without-tag', title: 'Without Perfana', tags: ['monitoring'] },
-        { uid: 'no-tags', title: 'No Tags', tags: [] },
-      ]);
-
-      const result = await service.getDashboardsToAdd(mockGrafanaInstance as GrafanaInstance);
-      expect(result).toHaveLength(1);
-      expect(result[0].uid).toBe('with-tag');
-    });
-
-    it('should handle case-insensitive perfana tag matching', async () => {
-      jest.spyOn(dashboardRepo, 'find').mockResolvedValue([]);
-
-      jest.spyOn(grafanaApiService, 'searchDashboards').mockResolvedValue([
-        { uid: 'lowercase', title: 'Lowercase', tags: ['perfana'] },
-        { uid: 'uppercase', title: 'Uppercase', tags: ['PERFANA'] },
-        { uid: 'mixedcase', title: 'Mixed', tags: ['Perfana'] },
-      ]);
-
-      const result = await service.getDashboardsToAdd(mockGrafanaInstance as GrafanaInstance);
-      expect(result).toHaveLength(3);
-    });
-
     it('should return empty array on error and log error', async () => {
       jest.spyOn(dashboardRepo, 'find').mockRejectedValue(new Error('Database error'));
 
       const result = await service.getDashboardsToAdd(mockGrafanaInstance as GrafanaInstance);
       expect(result).toHaveLength(0);
-    });
-
-    it('should handle dashboards with no tags field', async () => {
-      jest.spyOn(dashboardRepo, 'find').mockResolvedValue([]);
-
-      jest.spyOn(grafanaApiService, 'searchDashboards').mockResolvedValue([
-        { uid: 'no-tags-field', title: 'No Tags Field' }, // No tags property
-        { uid: 'with-tags', title: 'With Tags', tags: ['perfana'] },
-      ]);
-
-      const result = await service.getDashboardsToAdd(mockGrafanaInstance as GrafanaInstance);
-      expect(result).toHaveLength(1);
-      expect(result[0].uid).toBe('with-tags');
     });
   });
 

@@ -1,10 +1,4 @@
 /**
- * Copyright 2025 Perfana Contributors
- *
- * VariableDiscoveryService
- *
- * Migrated from: perfana-grafana/auto-config/get-application-dashboard-variables.js (239 lines)
- *
  * Orchestrates variable discovery for dashboard templates by:
  * - Parsing dashboard JSON for template variables
  * - Delegating to VariableDetectorService for datasource queries
@@ -13,12 +7,11 @@
  */
 
 import { Injectable, Logger } from '@nestjs/common';
-import { MappedGrafanaDashboard, MappedTestRun } from './auto-config-finders.service';
+import { TestRun, GrafanaDashboard, GrafanaInstance } from '@perfana/shared/entities';
 import { DashboardVariable } from './types';
 import {
   VariableDetectorService,
   TemplatingVariable,
-  GrafanaInstanceConfig,
 } from './variable-detector.service';
 import { VariableMatcherService } from './variable-matcher.service';
 
@@ -33,19 +26,19 @@ export class VariableDiscoveryService {
 
   /**
    * Get application dashboard variables from template dashboard
-   * Migrated from: get-application-dashboard-variables.js:38-71
    */
   async getApplicationDashboardVariables(
-    testRun: MappedTestRun,
-    grafanaDashboard: MappedGrafanaDashboard,
+    testRun: TestRun,
+    grafanaDashboard: GrafanaDashboard,
     autoConfigGrafanaDashboard: any,
-    grafanaInstance: GrafanaInstanceConfig,
+    grafanaInstance: GrafanaInstance,
   ): Promise<DashboardVariable[]> {
     // Set base variables for system_under_test and test_environment
+    const systemUnderTestName = testRun.systemUnderTest?.name || testRun.systemUnderTestId;
     const applicationDashboardVariables: DashboardVariable[] = [
       {
         name: 'system_under_test',
-        values: [testRun.systemUnderTestName],
+        values: [systemUnderTestName],
       },
       {
         name: 'test_environment',
@@ -54,8 +47,8 @@ export class VariableDiscoveryService {
     ];
 
     // Filter out templating variable 'system_under_test' and test_environment from Grafana dashboard
-    if (grafanaDashboard.templatingVariables) {
-      const templatingVariables = grafanaDashboard.templatingVariables.filter(
+    if (grafanaDashboard.templatingVariables && grafanaDashboard.templatingVariables.length > 0) {
+      const templatingVariables = (grafanaDashboard.templatingVariables || []).filter(
         (templatingVariable: TemplatingVariable) => {
           return (
             templatingVariable.name !== 'system_under_test' &&
@@ -100,12 +93,11 @@ export class VariableDiscoveryService {
 
   /**
    * Get variable values from data source
-   * Migrated from: get-application-dashboard-variables.js:130-213
    */
   private async getValuesFromDatasource(
-    grafanaInstance: GrafanaInstanceConfig,
-    grafanaDashboard: MappedGrafanaDashboard,
-    testRun: MappedTestRun,
+    grafanaInstance: GrafanaInstance,
+    grafanaDashboard: GrafanaDashboard,
+    testRun: TestRun,
     templatingVariable: TemplatingVariable,
     applicationDashboardVariables: DashboardVariable[],
   ): Promise<void> {
@@ -119,8 +111,9 @@ export class VariableDiscoveryService {
       templatingVariableQuery = '';
     }
 
+    const sutName = testRun.systemUnderTest?.name || testRun.systemUnderTestId;
     let systemUnderTestQuery = templatingVariableQuery
-      .replace('$system_under_test', testRun.systemUnderTestName)
+      .replace('$system_under_test', sutName)
       .replace('$test_environment', testRun.testEnvironment);
 
     // Replace other templating variables in query

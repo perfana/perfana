@@ -5,19 +5,18 @@ import { ConfigService } from '@nestjs/config';
 import { GrafanaDashboard, ApplicationDashboard, GrafanaInstance } from '@perfana/shared/entities';
 import { GrafanaApiService } from '../grafana-api/grafana-api.service';
 import { StoreDashboardService } from './store-dashboard.service';
+import { PERFANA_TAG, GRAFANA_SEARCH_LIMIT } from '../../config/constants';
 
 interface DashboardToUpdate {
-  perfanaDashboard: any; // From search API
-  usedBySUT: string[]; // Systems using this dashboard
+  perfanaDashboard: any;
+  usedBySUT: string[];
 }
 
 /**
- * UpdateDashboardsService
- *
  * Updates existing dashboards when changes are detected.
  *
  * Two update modes:
- * 1. Regular updates - Sync changes from Grafana → Perfana DB
+ * 1. Regular updates - Sync changes from Grafana -> Perfana DB
  * 2. Template propagation - Push changes from template dashboards to instances
  */
 @Injectable()
@@ -37,36 +36,29 @@ export class UpdateDashboardsService {
   ) {}
 
   /**
-   * Find dashboards to update from Grafana instance
-   * Based on: perfana-grafana/grafana-sync/update-dashboards/get-dashboards-to-update.js
+   * Find dashboards to update from Grafana instance.
+   * The Grafana API search already filters by the perfana tag, so no
+   * redundant in-memory tag check is needed.
    */
   async getDashboardsToUpdate(grafanaInstance: GrafanaInstance): Promise<DashboardToUpdate[]> {
     this.logger.debug(`Finding dashboards to update for instance: ${grafanaInstance.label}`);
 
     try {
-      // Get stored dashboards for this instance
       const storedDashboards = await this.grafanaDashboardRepo.find({
         where: { grafanaInstanceId: grafanaInstance.id },
         select: ['uid', 'updated', 'usedBySut'],
       });
 
-      // Fetch all dashboards with 'perfana' tag from Grafana
       const grafanaDashboards = await this.grafanaApiService.searchDashboards(grafanaInstance.id, {
-        tag: 'perfana',
-        limit: 5000,
+        tag: PERFANA_TAG,
+        limit: GRAFANA_SEARCH_LIMIT,
       });
 
-      // Filter to only dashboards with 'perfana' tag
-      const perfanaDashboards = grafanaDashboards.filter((dashboard) =>
-        dashboard.tags?.map((t: string) => t.toLowerCase()).includes('perfana'),
-      );
-
-      // Process dashboards in batches to respect concurrency limits
-      const batchSize = 20; // Same as original PARALLEL_GET_DASHBOARD_CALLS
+      const batchSize = 20;
       const dashboardsToUpdate: DashboardToUpdate[] = [];
 
-      for (let i = 0; i < perfanaDashboards.length; i += batchSize) {
-        const batch = perfanaDashboards.slice(i, i + batchSize);
+      for (let i = 0; i < grafanaDashboards.length; i += batchSize) {
+        const batch = grafanaDashboards.slice(i, i + batchSize);
 
         const batchPromises = batch.map(async (dashboard) => {
           try {
@@ -139,18 +131,18 @@ export class UpdateDashboardsService {
   }
 
   /**
-   * Update dashboards that have changed in Grafana
-   * Returns count of dashboards updated
+   * Update dashboards that have changed in Grafana.
+   * When instances are provided (from the sync orchestrator), avoids re-fetching.
    */
-  async updateDashboards(): Promise<number> {
+  async updateDashboards(instances?: GrafanaInstance[]): Promise<number> {
     this.logger.debug('Checking for dashboard updates...');
 
     let totalUpdated = 0;
 
     try {
-      const instances = await this.grafanaInstanceRepo.find();
+      const allInstances = instances ?? await this.grafanaInstanceRepo.find();
 
-      for (const instance of instances) {
+      for (const instance of allInstances) {
         const updated = await this.updateDashboardsForInstance(instance);
         totalUpdated += updated;
       }
@@ -195,11 +187,8 @@ export class UpdateDashboardsService {
   }
 
   /**
-   * Update template dashboards and propagate changes to instances
-   * Used when GRAFANA_PROPAGATE_TEMPLATE_UPDATES is enabled
-   *
-   * This updates the panels metadata in application_dashboards when
-   * the template dashboard changes (e.g., panel titles, types, formats)
+   * Propagate changes from template dashboards to application dashboards.
+   * Scoped by organization when the instance belongs to one.
    */
   async updateTemplateDashboards(): Promise<number> {
     this.logger.debug('Propagating template dashboard updates...');
@@ -210,16 +199,14 @@ export class UpdateDashboardsService {
       const instances = await this.grafanaInstanceRepo.find();
 
       for (const instance of instances) {
-        // Get dashboards that were updated in the last sync
         const dashboardsToUpdate = await this.getDashboardsToUpdate(instance);
 
         for (const { perfanaDashboard } of dashboardsToUpdate) {
-          // Find application dashboards that use this as a template
-          const appDashboards = await this.applicationDashboardRepo.find({
-            where: {
-              templateDashboardUid: perfanaDashboard.uid,
-            },
-          });
+          const where: any = { templateDashboardUid: perfanaDashboard.uid };
+          if (instance.organizationId) {
+            where.organizationId = instance.organizationId;
+          }
+          const appDashboards = await this.applicationDashboardRepo.find({ where });
 
           if (appDashboards.length === 0) {
             this.logger.debug(

@@ -23,7 +23,7 @@ import { Logger } from '@nestjs/common';
 import { VariableDiscoveryService } from './variable-discovery.service';
 import { VariableDetectorService } from './variable-detector.service';
 import { VariableMatcherService } from './variable-matcher.service';
-import { MappedTestRun, MappedGrafanaDashboard } from './auto-config-finders.service';
+// Use entity types directly via 'as any' for mocks
 
 describe('VariableDiscoveryService', () => {
   let service: VariableDiscoveryService;
@@ -89,34 +89,34 @@ describe('VariableDiscoveryService', () => {
   });
 
   describe('getApplicationDashboardVariables', () => {
-    const mockTestRun: MappedTestRun = {
-      systemUnderTestName: 'my-application',
+    const mockTestRun: any = {
+      systemUnderTest: { name: 'my-application' },
+      systemUnderTestId: 'sut-id',
       testEnvironment: 'production',
       testRunId: 'test-123',
       workload: 'load-test',
-      end: new Date(),
+      endTime: new Date(),
       tags: [],
       variables: [],
     };
 
     const mockGrafanaInstance = {
       label: 'Grafana Production',
-      serverUrl: 'https://grafana.example.com',
-      clientUrl: 'https://grafana.example.com',
+      server_url: 'https://grafana.example.com',
+      client_url: 'https://grafana.example.com',
       apiKey: 'test-key',
-    };
+    } as any;
 
     // Helper to create mock dashboard
-    const createMockDashboard = (templatingVariables: any[] = []): MappedGrafanaDashboard => ({
-      _id: 'dashboard-1',
+    const createMockDashboard = (templatingVariables: any[] = []): any => ({
+      id: 'dashboard-1',
       uid: 'test-uid',
-      grafana: 'grafana-instance',
+      grafanaInstance: { label: 'grafana-instance' },
       name: 'Test Dashboard',
-      id: 1,
-      postgresId: 'postgres-1',
+      grafanaId: 1,
       tags: [],
       grafanaJson: null,
-      usedBySUT: [],
+      usedBySut: [],
       templatingVariables,
     });
 
@@ -403,7 +403,7 @@ describe('VariableDiscoveryService', () => {
     });
 
     it('should replace dynamic placeholders in override values', async () => {
-      const testRunWithVars: MappedTestRun = {
+      const testRunWithVars: any = {
         ...mockTestRun,
         variables: [{ placeholder: '${custom_value}', value: 'replaced-value' }],
       };
@@ -483,7 +483,7 @@ describe('VariableDiscoveryService', () => {
     });
 
     it('should filter variable values with dynamic regex replacement', async () => {
-      const testRunWithVars: MappedTestRun = {
+      const testRunWithVars: any = {
         ...mockTestRun,
         variables: [{ placeholder: '${env}', value: 'prod' }],
       };
@@ -599,33 +599,33 @@ describe('VariableDiscoveryService', () => {
   });
 
   describe('Query Variable Processing', () => {
-    const mockTestRun: MappedTestRun = {
-      systemUnderTestName: 'my-application',
+    const mockTestRun: any = {
+      systemUnderTest: { name: 'my-application' },
+      systemUnderTestId: 'sut-id',
       testEnvironment: 'production',
       testRunId: 'test-123',
       workload: 'load-test',
-      end: new Date(),
+      endTime: new Date(),
       tags: [],
       variables: [],
     };
 
     const mockGrafanaInstance = {
       label: 'Grafana Production',
-      serverUrl: 'https://grafana.example.com',
-      clientUrl: 'https://grafana.example.com',
+      server_url: 'https://grafana.example.com',
+      client_url: 'https://grafana.example.com',
       apiKey: 'test-key',
-    };
+    } as any;
 
-    const createMockDashboard = (templatingVariables: any[] = []): MappedGrafanaDashboard => ({
-      _id: 'dashboard-1',
+    const createMockDashboard = (templatingVariables: any[] = []): any => ({
+      id: 'dashboard-1',
       uid: 'test-uid',
-      grafana: 'grafana-instance',
+      grafanaInstance: { label: 'grafana-instance' },
       name: 'Test Dashboard',
-      id: 1,
-      postgresId: 'postgres-1',
+      grafanaId: 1,
       tags: [],
       grafanaJson: null,
-      usedBySUT: [],
+      usedBySut: [],
       templatingVariables,
     });
 

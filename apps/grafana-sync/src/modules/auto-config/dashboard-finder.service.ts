@@ -1,13 +1,3 @@
-/**
- * Copyright 2025 Perfana Contributors
- *
- * DashboardFinderService
- *
- * Split from: auto-config-finders.service.ts
- * Provides database queries for Grafana and Application dashboards.
- * All methods preserve the exact query logic from the old working implementation.
- */
-
 import { Injectable, Logger } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
@@ -16,54 +6,10 @@ import {
   GrafanaDashboard,
   GrafanaInstance,
   ApplicationDashboard,
+  TestRun,
 } from '@perfana/shared/entities';
-import { MappedTestRun } from './test-run-finder.service';
-
-/**
- * Mapped auto-config dashboard structure
- * Preserves field names from old system
- */
-export interface MappedAutoConfigDashboard {
-  profile: string;
-  dashboardName: string;
-  dashboardUid: string;
-  grafana: string;
-  createSeparateDashboardForVariable?: string;
-  setHardcodedValueForVariables?: Array<{ name: string; values: string[] }>;
-  matchRegexForVariables?: Record<string, string>;
-  readOnly?: boolean;
-}
-
-/**
- * Mapped grafana dashboard structure
- * Preserves MongoDB-style field names for compatibility
- */
-export interface MappedGrafanaDashboard {
-  _id: string;
-  uid: string;
-  grafana: string;
-  name: string;
-  id: number;
-  postgresId: string;
-  tags: string[];
-  grafanaJson: string | null;
-  templateDashboardUid?: string;
-  usedBySUT: string[];
-  templatingVariables: any[];
-}
-
-/**
- * Mapped grafana configuration structure
- */
-export interface MappedGrafanaConfig {
-  label: string;
-  serverUrl: string;
-  clientUrl: string;
-  apiKey?: string;
-  orgId?: number;
-  username?: string;
-  password?: string;
-}
+import { DashboardUid } from './dashboard-uid.util';
+import { DashboardVariable } from './types';
 
 @Injectable()
 export class DashboardFinderService {
@@ -80,41 +26,27 @@ export class DashboardFinderService {
     private applicationDashboardRepo: Repository<ApplicationDashboard>,
   ) {}
 
-  /**
-   * Find all auto config grafana dashboards
-   * Migrated from: typeorm-autoconfig.js:338-361
-   */
-  async findAutoConfigGrafanaDashboards(): Promise<MappedAutoConfigDashboard[]> {
+  async findAutoConfigGrafanaDashboards(organizationIds?: string[]): Promise<ProfileGrafanaDashboard[]> {
     try {
-      const data = await this.profileDashboardRepo.find();
-
-      // Map to MongoDB structure expected by autoconfig
-      const mappedData = data.map((row) => ({
-        profile: row.profile,
-        dashboardName: row.dashboardName,
-        dashboardUid: row.dashboardUid,
-        grafana: row.grafanaLabel,
-        createSeparateDashboardForVariable: row.createSeparateDashboardForVariable,
-        setHardcodedValueForVariables: row.setHardcodedValueForVariables,
-        matchRegexForVariables: row.matchRegexForVariables,
-        readOnly: row.readOnly,
-      }));
-
-      return mappedData;
+      if (organizationIds && organizationIds.length > 0) {
+        return await this.profileDashboardRepo
+          .createQueryBuilder('pgd')
+          .where('(pgd.organization_id IN (:...orgIds) OR pgd.organization_id IS NULL)', {
+            orgIds: organizationIds,
+          })
+          .getMany();
+      }
+      return await this.profileDashboardRepo.find() ?? [];
     } catch (e) {
       this.logger.error('findAutoConfigGrafanaDashboards failed:', e);
       return [];
     }
   }
 
-  /**
-   * Find grafana dashboard by grafana instance and dashboard UIDs (returns null if not found)
-   * Migrated from: typeorm-autoconfig.js:387-438
-   */
   async findGrafanaDashboardOrNull(
     grafana: string,
     dashboardUids: string[],
-  ): Promise<MappedGrafanaDashboard | null> {
+  ): Promise<GrafanaDashboard | null> {
     try {
       const grafanaInstance = await this.grafanaInstanceRepo.findOne({
         where: { label: grafana },
@@ -142,23 +74,10 @@ export class DashboardFinderService {
         );
       }
 
-      // Map to MongoDB structure expected by autoconfig
       const row = data[0];
-      const mappedData: MappedGrafanaDashboard = {
-        _id: row.id,
-        uid: row.uid,
-        grafana: grafana,
-        name: row.name,
-        id: row.grafanaId,
-        postgresId: row.id,
-        tags: row.tags || [],
-        grafanaJson: row.grafanaJson ? JSON.stringify(row.grafanaJson) : null,
-        templateDashboardUid: row.templateDashboardUid,
-        usedBySUT: row.usedBySut || [],
-        templatingVariables: row.templatingVariables || [],
-      };
-
-      return mappedData;
+      // Set grafanaInstance so consumers can access .grafanaInstance.label
+      row.grafanaInstance = grafanaInstance;
+      return row;
     } catch (e) {
       this.logger.error('findGrafanaDashboardOrNull failed:', e);
       throw e;
@@ -167,12 +86,11 @@ export class DashboardFinderService {
 
   /**
    * Find grafana dashboard (throws if not found)
-   * Migrated from: typeorm-autoconfig.js:440-451
    */
   async findGrafanaDashboard(
     grafana: string,
     dashboardUids: string[],
-  ): Promise<MappedGrafanaDashboard> {
+  ): Promise<GrafanaDashboard> {
     const dashboard = await this.findGrafanaDashboardOrNull(grafana, dashboardUids);
     if (!dashboard) {
       throw new Error(
@@ -183,26 +101,26 @@ export class DashboardFinderService {
   }
 
   /**
-   * Find application dashboards for system under test
-   * Migrated from: typeorm-autoconfig.js:510-551
-   * RBAC: Added organization filtering to ensure multi-tenant isolation
+   * Find application dashboards for system under test.
+   * RBAC: Scoped by organization when present on the test run.
    */
   async findApplicationDashboardsForSystemUnderTest(
-    testRun: MappedTestRun,
+    testRun: TestRun,
     grafana: string,
     dashboardUid: string,
     dashboardLabel: string | null = null,
   ): Promise<ApplicationDashboard[]> {
     try {
+      const systemUnderTestName = testRun.systemUnderTest?.name || testRun.systemUnderTestId;
       this.logger.log(
-        `Querying application_dashboards: sut=${testRun.systemUnderTestName}, env=${testRun.testEnvironment}, grafana=${grafana}, uid=${dashboardUid}, label=${dashboardLabel}, org=${testRun.organizationId}`,
+        `Querying application_dashboards: sut=${systemUnderTestName}, env=${testRun.testEnvironment}, grafana=${grafana}, uid=${dashboardUid}, label=${dashboardLabel}, org=${testRun.organizationId}`,
       );
 
       let query = this.applicationDashboardRepo
         .createQueryBuilder('ad')
         .innerJoin('ad.systemUnderTest', 'sut')
         .innerJoin('ad.grafanaInstance', 'gi')
-        .where('sut.name = :sutName', { sutName: testRun.systemUnderTestName })
+        .where('sut.name = :sutName', { sutName: systemUnderTestName })
         .andWhere('ad.testEnvironment = :testEnvironment', {
           testEnvironment: testRun.testEnvironment,
         })
@@ -235,12 +153,11 @@ export class DashboardFinderService {
 
   /**
    * Find existing grafana dashboards by grafana instance and UIDs
-   * Migrated from: typeorm-autoconfig.js:453-478
    */
   async findExistingGrafanaDashboards(
     grafana: string,
     dashboardUids: string[],
-  ): Promise<MappedGrafanaDashboard[]> {
+  ): Promise<GrafanaDashboard[]> {
     try {
       const grafanaInstance = await this.grafanaInstanceRepo.findOne({
         where: { label: grafana },
@@ -258,20 +175,11 @@ export class DashboardFinderService {
         .andWhere('gd.uid IN (:...uids)', { uids: dashboardUids })
         .getMany();
 
-      // Map TypeORM entities to MappedGrafanaDashboard objects
-      return (data || []).map((row) => ({
-        _id: row.id,
-        uid: row.uid,
-        grafana: grafana,
-        name: row.name,
-        id: row.grafanaId,
-        postgresId: row.id,
-        tags: row.tags || [],
-        grafanaJson: row.grafanaJson ? JSON.stringify(row.grafanaJson) : null,
-        templateDashboardUid: row.templateDashboardUid,
-        usedBySUT: row.usedBySut || [],
-        templatingVariables: row.templatingVariables || [],
-      }));
+      // Set grafanaInstance on each row so consumers can access .grafanaInstance.label
+      return (data || []).map((row) => {
+        row.grafanaInstance = grafanaInstance;
+        return row;
+      });
     } catch (e) {
       this.logger.error('findExistingGrafanaDashboards failed:', e);
       throw e;
@@ -280,28 +188,11 @@ export class DashboardFinderService {
 
   /**
    * Find grafana configuration by label
-   * Migrated from: typeorm-autoconfig.js:480-505
    */
-  async findGrafanaConfiguration(grafana: string): Promise<MappedGrafanaConfig | null> {
+  async findGrafanaConfiguration(grafana: string): Promise<GrafanaInstance | null> {
     try {
       const data = await this.grafanaInstanceRepo.findOne({ where: { label: grafana } });
-
-      if (!data) {
-        return null;
-      }
-
-      // Map to MongoDB structure expected by autoconfig
-      const mappedData: MappedGrafanaConfig = {
-        label: data.label,
-        serverUrl: data.server_url || '',
-        clientUrl: data.client_url,
-        apiKey: data.apiKey,
-        orgId: data.orgId ? parseInt(data.orgId, 10) : undefined,
-        username: data.username,
-        password: data.password,
-      };
-
-      return mappedData;
+      return data || null;
     } catch (e) {
       this.logger.error('findGrafanaConfiguration failed:', e);
       return null;
@@ -309,9 +200,8 @@ export class DashboardFinderService {
   }
 
   /**
-   * Find application dashboards by template dashboard UID
-   * Migrated from: typeorm-autoconfig.js:553-579
-   * RBAC: Added organization filtering
+   * Find application dashboards by template dashboard UID.
+   * RBAC: Scoped by organization when provided.
    */
   async findApplicationDashboardsByTemplateDashboardUid(
     dashboardUid: string,
@@ -347,17 +237,109 @@ export class DashboardFinderService {
   }
 
   /**
-   * Find report panel for application dashboard - TEMPORARILY DISABLED
-   * Migrated from: typeorm-autoconfig.js:602-611
+   * Find application dashboards via the generated dashboard uid
    */
-  async findReportPanelForApplicationDashboardOrNull(
-    _applicationDashboard: ApplicationDashboard,
-    _genericReportPanelId: string,
-    _testType: string,
-  ): Promise<any | null> {
-    this.logger.log(
-      'findReportPanelForApplicationDashboardOrNull temporarily disabled for genericChecks migration',
+  async findApplicationDashboards(
+    grafanaFromTemplate: string,
+    testRun: TestRun,
+    autoConfigDashboard: ProfileGrafanaDashboard,
+    applicationDashboardVariables: DashboardVariable[],
+  ): Promise<any[]> {
+    // When createSeparateDashboardForVariable is set, we need to use the variable-specific UID
+    const dashboardUid = this.resolveDashboardUid(
+      testRun,
+      autoConfigDashboard,
+      applicationDashboardVariables,
     );
-    return null;
+
+    // For separate dashboards, we need to find by specific dashboard label
+    const dashboardLabel = this.resolveDashboardLabel(
+      autoConfigDashboard,
+      applicationDashboardVariables,
+    );
+
+    this.logger.log(`Looking for application dashboards with label: "${dashboardLabel}"`);
+
+    let applicationDashboards: any[] = [];
+    if (grafanaFromTemplate) {
+      applicationDashboards = await this.findApplicationDashboardsForSystemUnderTest(
+        testRun,
+        grafanaFromTemplate,
+        dashboardUid,
+        dashboardLabel,
+      );
+    }
+
+    if (applicationDashboards.length > 0) {
+      this.logger.log(`Determined dashboard uid: ${dashboardUid}`);
+    }
+
+    return applicationDashboards;
   }
+
+  /**
+   * Find existing grafana dashboards by resolved UID
+   */
+  async findExistingGrafanaDashboardsByResolvedUid(
+    grafanaTemplateDashboard: GrafanaDashboard,
+    testRun: TestRun,
+    autoConfigDashboard: ProfileGrafanaDashboard,
+    applicationDashboardVariables: DashboardVariable[],
+  ): Promise<any[]> {
+    const dashboardUid = this.resolveDashboardUid(
+      testRun,
+      autoConfigDashboard,
+      applicationDashboardVariables,
+    );
+
+    const grafanaDashboards = await this.findExistingGrafanaDashboards(
+      grafanaTemplateDashboard.grafanaInstance?.label || '',
+      [dashboardUid],
+    );
+
+    return grafanaDashboards;
+  }
+
+  /**
+   * Resolve dashboard UID based on createSeparateDashboardForVariable setting
+   */
+  private resolveDashboardUid(
+    testRun: TestRun,
+    autoConfigDashboard: ProfileGrafanaDashboard,
+    applicationDashboardVariables: DashboardVariable[],
+  ): string {
+    if (autoConfigDashboard.createSeparateDashboardForVariable) {
+      // Use the utility function that includes variables in the UID
+      return DashboardUid.legacyFrom(
+        testRun,
+        autoConfigDashboard,
+        applicationDashboardVariables,
+      ).dashboardUid;
+    } else {
+      return DashboardUid.from(testRun, autoConfigDashboard).dashboardUid;
+    }
+  }
+
+  /**
+   * Resolve dashboard label based on createSeparateDashboardForVariable setting
+   */
+  private resolveDashboardLabel(
+    autoConfigDashboard: ProfileGrafanaDashboard,
+    applicationDashboardVariables: DashboardVariable[],
+  ): string {
+    let dashboardLabel = autoConfigDashboard.dashboardName;
+
+    if (autoConfigDashboard.createSeparateDashboardForVariable) {
+      const separateVariable = applicationDashboardVariables.find(
+        (v) => v.name === autoConfigDashboard.createSeparateDashboardForVariable,
+      );
+      if (separateVariable && separateVariable.values.length > 0) {
+        // For separate dashboards, construct the label with the first variable value
+        dashboardLabel = `${autoConfigDashboard.dashboardName} ${separateVariable.values[0]}`;
+      }
+    }
+
+    return dashboardLabel;
+  }
+
 }

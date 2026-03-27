@@ -1,5 +1,8 @@
 import { Test, TestingModule } from '@nestjs/testing';
 import { ConfigService } from '@nestjs/config';
+import { SchedulerRegistry } from '@nestjs/schedule';
+import { getRepositoryToken } from '@nestjs/typeorm';
+import { GrafanaInstance } from '@perfana/shared/entities';
 import { GrafanaSyncService } from './grafana-sync.service';
 import { StoreDashboardService } from './store-dashboard.service';
 import { RestoreDashboardService } from './restore-dashboard.service';
@@ -12,9 +15,9 @@ describe('GrafanaSyncService', () => {
   let storeDashboardService: jest.Mocked<StoreDashboardService>;
   let restoreDashboardService: jest.Mocked<RestoreDashboardService>;
   let updateDashboardsService: jest.Mocked<UpdateDashboardsService>;
+  let grafanaInstanceRepo: any;
 
   beforeEach(async () => {
-    // Create mock services
     const mockStoreDashboardService = {
       addNewDashboards: jest.fn().mockResolvedValue(5),
     };
@@ -28,6 +31,10 @@ describe('GrafanaSyncService', () => {
       updateTemplateDashboards: jest.fn().mockResolvedValue(undefined),
     };
 
+    const mockGrafanaInstanceRepo = {
+      find: jest.fn().mockResolvedValue([]),
+    };
+
     const module: TestingModule = await Test.createTestingModule({
       providers: [
         GrafanaSyncService,
@@ -36,8 +43,19 @@ describe('GrafanaSyncService', () => {
           useValue: createMockConfigService({
             grafanaSync: {
               propagateTemplateUpdates: false,
+              syncInterval: 30000,
             },
           }),
+        },
+        {
+          provide: SchedulerRegistry,
+          useValue: {
+            addInterval: jest.fn(),
+          },
+        },
+        {
+          provide: getRepositoryToken(GrafanaInstance),
+          useValue: mockGrafanaInstanceRepo,
         },
         {
           provide: StoreDashboardService,
@@ -59,6 +77,7 @@ describe('GrafanaSyncService', () => {
     storeDashboardService = module.get(StoreDashboardService);
     restoreDashboardService = module.get(RestoreDashboardService);
     updateDashboardsService = module.get(UpdateDashboardsService);
+    grafanaInstanceRepo = module.get(getRepositoryToken(GrafanaInstance));
   });
 
   afterEach(() => {

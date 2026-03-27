@@ -5,11 +5,7 @@ import { GrafanaInstance } from '@perfana/shared/entities';
 import { validateUrl, sanitizeUrl } from '@perfana/shared/security';
 
 /**
- * GrafanaApiService
- *
  * Provides Grafana HTTP API access for dashboard management operations.
- * Based on: perfana-grafana/helpers/grafana-api.js
- *
  * Uses simple fetch() for HTTP calls rather than the shared GrafanaClient
  * (which is optimized for panel data querying).
  */
@@ -86,7 +82,6 @@ export class GrafanaApiService {
 
   /**
    * Make HTTP GET request to Grafana API
-   * Based on: grafanaApiGet from helpers/grafana-api.js
    */
   private async get(instance: GrafanaInstance, endpoint: string): Promise<any> {
     const url = this.validateAndConstructUrl(instance, endpoint);
@@ -115,7 +110,6 @@ export class GrafanaApiService {
 
   /**
    * Make HTTP POST request to Grafana API
-   * Based on: grafanaApiPost from helpers/grafana-api.js
    */
   private async post(instance: GrafanaInstance, endpoint: string, data: any): Promise<any> {
     const url = this.validateAndConstructUrl(instance, endpoint);
@@ -149,7 +143,6 @@ export class GrafanaApiService {
 
   /**
    * Make HTTP DELETE request to Grafana API
-   * Based on: grafanaApiDelete from helpers/grafana-api.js
    */
   private async delete(instance: GrafanaInstance, endpoint: string): Promise<any> {
     const url = this.validateAndConstructUrl(instance, endpoint);
@@ -253,7 +246,6 @@ export class GrafanaApiService {
 
   /**
    * Create or find folder in Grafana
-   * Based on: AutoConfigService.createOrFindFolder from perfana-grafana
    */
   async createOrFindFolder(instanceId: string, folderTitle: string): Promise<number> {
     const instance = await this.getInstance(instanceId);

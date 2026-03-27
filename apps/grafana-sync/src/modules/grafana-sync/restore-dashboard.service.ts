@@ -3,23 +3,10 @@ import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { GrafanaDashboard, GrafanaInstance, ApplicationDashboard } from '@perfana/shared/entities';
 import { GrafanaApiService } from '../grafana-api/grafana-api.service';
+import { PERFANA_TEMPLATE_TAG, GRAFANA_SEARCH_LIMIT } from '../../config/constants';
 
 /**
- * RestoreDashboardService
- *
  * Restores missing dashboards from Perfana database back to Grafana instances.
- *
- * Use cases:
- * - Dashboard was accidentally deleted in Grafana
- * - New Grafana instance needs seeding with existing dashboards
- * - Disaster recovery scenarios
- *
- * Process:
- * 1. Fetch all dashboards from Perfana DB for an instance
- * 2. Check which dashboards exist in Grafana
- * 3. Restore missing dashboards via Grafana HTTP API
- *
- * TODO: Port logic from perfana-grafana/src/sync/restore-dashboards.ts
  */
 @Injectable()
 export class RestoreDashboardService {
@@ -36,19 +23,19 @@ export class RestoreDashboardService {
   ) {}
 
   /**
-   * Restore missing dashboards for all Grafana instances
-   * Returns count of dashboards restored
+   * Restore missing dashboards for all Grafana instances.
+   * When instances are provided (from the sync orchestrator), avoids re-fetching.
    */
-  async restoreDashboards(): Promise<number> {
+  async restoreDashboards(instances?: GrafanaInstance[]): Promise<number> {
     this.logger.debug('Checking for missing dashboards to restore...');
 
     let totalRestored = 0;
 
     try {
-      const instances = await this.grafanaInstanceRepo.find();
+      const allInstances = instances ?? await this.grafanaInstanceRepo.find();
 
-      for (const instance of instances) {
-        const restored = await this.restoreDashboardsForInstance(instance.id);
+      for (const instance of allInstances) {
+        const restored = await this.restoreDashboardsForInstance(instance);
         totalRestored += restored;
       }
 
@@ -62,10 +49,6 @@ export class RestoreDashboardService {
     return totalRestored;
   }
 
-  /**
-   * Find dashboards to restore
-   * Based on: perfana-grafana/grafana-sync/restore-dashboard/get-dashboards-to-restore.js
-   */
   async getDashboardsToRestore(grafanaInstance: GrafanaInstance): Promise<GrafanaDashboard[]> {
     this.logger.debug(`Finding dashboards to restore for instance: ${grafanaInstance.label}`);
 
@@ -75,10 +58,9 @@ export class RestoreDashboardService {
         where: { grafanaInstanceId: grafanaInstance.id },
       });
 
-      // Get all dashboard UIDs from Grafana
       const allGrafanaDashboards = await this.grafanaApiService.searchDashboards(
         grafanaInstance.id,
-        { limit: 5000 },
+        { limit: GRAFANA_SEARCH_LIMIT },
       );
 
       // Filter to only actual dashboards (exclude folders)
@@ -105,8 +87,7 @@ export class RestoreDashboardService {
 
           const isUsedByApplications = applicationDashboards.length > 0;
 
-          // Check if it's a template dashboard
-          const isTemplate = missingDashboard.tags?.includes('perfana-template');
+          const isTemplate = missingDashboard.tags?.includes(PERFANA_TEMPLATE_TAG);
 
           // Restore if used by applications OR is a template
           if (isUsedByApplications || isTemplate) {
@@ -142,7 +123,6 @@ export class RestoreDashboardService {
 
   /**
    * Restore a dashboard to Grafana
-   * Based on: perfana-grafana/grafana-sync/restore-dashboard/restore-dashboard.js
    */
   async restoreDashboard(
     grafanaInstance: GrafanaInstance,
@@ -207,33 +187,19 @@ export class RestoreDashboardService {
     }
   }
 
-  /**
-   * Restore missing dashboards for a specific Grafana instance
-   */
-  private async restoreDashboardsForInstance(instanceId: string): Promise<number> {
+  private async restoreDashboardsForInstance(instance: GrafanaInstance): Promise<number> {
     let restoredCount = 0;
 
     try {
-      const instance = await this.grafanaInstanceRepo.findOne({
-        where: { id: instanceId },
-      });
-
-      if (!instance) {
-        this.logger.error(`Grafana instance ${instanceId} not found`);
-        return 0;
-      }
-
-      // Get dashboards to restore
       const dashboardsToRestore = await this.getDashboardsToRestore(instance);
 
-      // Restore each dashboard
       for (const dashboard of dashboardsToRestore) {
         await this.restoreDashboard(instance, dashboard);
         restoredCount++;
       }
     } catch (error) {
       const errorMessage = error instanceof Error ? error.stack : String(error);
-      this.logger.error(`Failed to restore dashboards for instance ${instanceId}:`, errorMessage);
+      this.logger.error(`Failed to restore dashboards for instance ${instance.label}:`, errorMessage);
     }
 
     return restoredCount;

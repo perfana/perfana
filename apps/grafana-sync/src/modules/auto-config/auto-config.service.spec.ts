@@ -21,12 +21,8 @@ jest.mock('@perfana/shared/entities', () => ({
 import { Test, TestingModule } from '@nestjs/testing';
 import { ConfigService } from '@nestjs/config';
 import { AutoConfigService } from './auto-config.service';
-import {
-  AutoConfigFindersService,
-  MappedTestRun,
-  MappedAutoConfigDashboard,
-  MappedProfileBenchmark,
-} from './auto-config-finders.service';
+import { TestRunFinderService } from './test-run-finder.service';
+import { DashboardFinderService } from './dashboard-finder.service';
 import { DashboardConfiguratorService } from './dashboard-configurator.service';
 import { BenchmarkProcessorService } from './benchmark-processor.service';
 import { createMockConfigService } from '../../../test/helpers';
@@ -34,17 +30,19 @@ import { createMockConfigService } from '../../../test/helpers';
 describe('AutoConfigService', () => {
   let service: AutoConfigService;
   let configService: any;
-  let findersService: jest.Mocked<AutoConfigFindersService>;
+  let testRunFinderService: jest.Mocked<TestRunFinderService>;
+  let dashboardFinderService: jest.Mocked<DashboardFinderService>;
   let dashboardConfiguratorService: jest.Mocked<DashboardConfiguratorService>;
   let benchmarkProcessorService: jest.Mocked<BenchmarkProcessorService>;
 
   // Mock data
-  const mockTestRun: MappedTestRun = {
+  const mockTestRun: any = {
     testRunId: 'test-run-1',
-    systemUnderTestName: 'my-app',
+    systemUnderTest: { name: 'my-app' },
+    systemUnderTestId: 'sut-id',
     testEnvironment: 'production',
     workload: 'load-test',
-    end: new Date('2024-01-02T00:00:00.000Z'),
+    endTime: new Date('2024-01-02T00:00:00.000Z'),
     tags: ['profile-1', 'profile-2'],
     variables: [{ name: 'service', value: 'api' }],
     organizationId: undefined,
@@ -58,11 +56,11 @@ describe('AutoConfigService', () => {
     updatedAt: new Date(),
   } as any;
 
-  const mockAutoConfigDashboard: MappedAutoConfigDashboard = {
+  const mockAutoConfigDashboard: any = {
     profile: 'Production Profile',
     dashboardName: 'JVM Overview',
     dashboardUid: 'jvm-overview-uid',
-    grafana: 'grafana-prod',
+    grafanaLabel: 'grafana-prod',
     createSeparateDashboardForVariable: undefined,
     setHardcodedValueForVariables: undefined,
     matchRegexForVariables: undefined,
@@ -73,22 +71,23 @@ describe('AutoConfigService', () => {
     // Create mocked services
     configService = createMockConfigService({ AUTO_CONFIG_ENABLED: 'true' });
 
-    findersService = {
+    testRunFinderService = {
       findRecentTestRuns: jest.fn(),
       findProfiles: jest.fn(),
-      findAutoConfigGrafanaDashboards: jest.fn(),
       findProfileBenchmarks: jest.fn(),
-      findGenericDeepLinks: jest.fn(),
-      findGenericReportPanels: jest.fn(),
+      findBenchmarkForApplicationDashboardOrNull: jest.fn(),
+    } as any;
+
+    dashboardFinderService = {
+      findAutoConfigGrafanaDashboards: jest.fn(),
       findGrafanaDashboardOrNull: jest.fn(),
       findGrafanaDashboard: jest.fn(),
       findGrafanaConfiguration: jest.fn(),
       findApplicationDashboardsForSystemUnderTest: jest.fn(),
       findExistingGrafanaDashboards: jest.fn(),
       findApplicationDashboardsByTemplateDashboardUid: jest.fn(),
-      findBenchmarkForApplicationDashboardOrNull: jest.fn(),
-      findDeepLinkForTestRunOrNull: jest.fn(),
-      findReportPanelForApplicationDashboardOrNull: jest.fn(),
+      findApplicationDashboards: jest.fn(),
+      findExistingGrafanaDashboardsByResolvedUid: jest.fn(),
     } as any;
 
     dashboardConfiguratorService = {
@@ -107,8 +106,12 @@ describe('AutoConfigService', () => {
           useValue: configService,
         },
         {
-          provide: AutoConfigFindersService,
-          useValue: findersService,
+          provide: TestRunFinderService,
+          useValue: testRunFinderService,
+        },
+        {
+          provide: DashboardFinderService,
+          useValue: dashboardFinderService,
         },
         {
           provide: DashboardConfiguratorService,
@@ -135,7 +138,8 @@ describe('AutoConfigService', () => {
 
     it('should have all dependencies injected', () => {
       expect((service as any).configService).toBeDefined();
-      expect((service as any).findersService).toBeDefined();
+      expect((service as any).testRunFinderService).toBeDefined();
+      expect((service as any).dashboardFinderService).toBeDefined();
       expect((service as any).dashboardConfiguratorService).toBeDefined();
       expect((service as any).benchmarkProcessorService).toBeDefined();
     });
@@ -242,20 +246,18 @@ describe('AutoConfigService', () => {
     describe('Happy Path Scenarios', () => {
       it('should process test runs with profiles and dashboards', async () => {
         // Arrange
-        findersService.findRecentTestRuns.mockResolvedValue([mockTestRun]);
-        findersService.findProfiles.mockResolvedValue([mockProfile]);
-        findersService.findAutoConfigGrafanaDashboards.mockResolvedValue([mockAutoConfigDashboard]);
-        findersService.findProfileBenchmarks.mockResolvedValue([]);
-        findersService.findGenericDeepLinks.mockResolvedValue([]);
-        findersService.findGenericReportPanels.mockResolvedValue([]);
+        testRunFinderService.findRecentTestRuns.mockResolvedValue([mockTestRun]);
+        testRunFinderService.findProfiles.mockResolvedValue([mockProfile]);
+        dashboardFinderService.findAutoConfigGrafanaDashboards.mockResolvedValue([mockAutoConfigDashboard]);
+        testRunFinderService.findProfileBenchmarks.mockResolvedValue([]);
 
         // Act
         await service.processAutoConfigDashboards();
 
         // Assert
-        expect(findersService.findRecentTestRuns).toHaveBeenCalled();
-        expect(findersService.findProfiles).toHaveBeenCalled();
-        expect(findersService.findAutoConfigGrafanaDashboards).toHaveBeenCalled();
+        expect(testRunFinderService.findRecentTestRuns).toHaveBeenCalled();
+        expect(testRunFinderService.findProfiles).toHaveBeenCalled();
+        expect(dashboardFinderService.findAutoConfigGrafanaDashboards).toHaveBeenCalled();
         expect(dashboardConfiguratorService.processAutoConfigDashboard).toHaveBeenCalledWith(
           mockTestRun,
           mockAutoConfigDashboard,
@@ -265,17 +267,15 @@ describe('AutoConfigService', () => {
 
       it('should filter test runs without tags and log them', async () => {
         // Arrange
-        const testRunWithoutTags: MappedTestRun = {
+        const testRunWithoutTags = {
           ...mockTestRun,
-          tags: [],
+          tags: [] as string[],
         };
 
-        findersService.findRecentTestRuns.mockResolvedValue([testRunWithoutTags]);
-        findersService.findProfiles.mockResolvedValue([mockProfile]);
-        findersService.findAutoConfigGrafanaDashboards.mockResolvedValue([mockAutoConfigDashboard]);
-        findersService.findProfileBenchmarks.mockResolvedValue([]);
-        findersService.findGenericDeepLinks.mockResolvedValue([]);
-        findersService.findGenericReportPanels.mockResolvedValue([]);
+        testRunFinderService.findRecentTestRuns.mockResolvedValue([testRunWithoutTags]);
+        testRunFinderService.findProfiles.mockResolvedValue([mockProfile]);
+        dashboardFinderService.findAutoConfigGrafanaDashboards.mockResolvedValue([mockAutoConfigDashboard]);
+        testRunFinderService.findProfileBenchmarks.mockResolvedValue([]);
 
         const logSpy = jest.spyOn((service as any).logger, 'log');
 
@@ -291,27 +291,25 @@ describe('AutoConfigService', () => {
 
       it('should process profile benchmarks when available', async () => {
         // Arrange
-        const mockProfileBenchmark: MappedProfileBenchmark = {
+        const mockProfileBenchmark: any = {
           id: 'benchmark-1',
-          profileId: 'profile-1',
-          profileName: 'Production Profile',
-          profileDashboardId: 'dash-1',
-          workloadPattern: 'load-.*',
+          profile_id: 'profile-1',
+          profile: { name: 'Production Profile' },
+          profile_dashboard_id: 'dash-1',
+          workload_pattern: 'load-.*',
           source: 'gatling',
-          excludeRampUpTime: true,
-          averageAll: false,
-          validateWithDefaultIfNoData: false,
+          exclude_ramp_up_time: true,
+          average_all: false,
+          validate_with_default_if_no_data: false,
           tags: [],
           metadata: {},
-          readOnly: false,
+          read_only: false,
         };
 
-        findersService.findRecentTestRuns.mockResolvedValue([mockTestRun]);
-        findersService.findProfiles.mockResolvedValue([mockProfile]);
-        findersService.findAutoConfigGrafanaDashboards.mockResolvedValue([mockAutoConfigDashboard]);
-        findersService.findProfileBenchmarks.mockResolvedValue([mockProfileBenchmark]);
-        findersService.findGenericDeepLinks.mockResolvedValue([]);
-        findersService.findGenericReportPanels.mockResolvedValue([]);
+        testRunFinderService.findRecentTestRuns.mockResolvedValue([mockTestRun]);
+        testRunFinderService.findProfiles.mockResolvedValue([mockProfile]);
+        dashboardFinderService.findAutoConfigGrafanaDashboards.mockResolvedValue([mockAutoConfigDashboard]);
+        testRunFinderService.findProfileBenchmarks.mockResolvedValue([mockProfileBenchmark]);
 
         // Act
         await service.processAutoConfigDashboards();
@@ -327,7 +325,7 @@ describe('AutoConfigService', () => {
       it('should filter profiles by organization_id when test run has organizationId', async () => {
         // Arrange
         const orgId = 'org-123';
-        const testRunWithOrg: MappedTestRun = {
+        const testRunWithOrg: any = {
           ...mockTestRun,
           organizationId: orgId,
         };
@@ -356,16 +354,14 @@ describe('AutoConfigService', () => {
           organizationId: null,
         };
 
-        findersService.findRecentTestRuns.mockResolvedValue([testRunWithOrg]);
-        findersService.findProfiles.mockResolvedValue([
+        testRunFinderService.findRecentTestRuns.mockResolvedValue([testRunWithOrg]);
+        testRunFinderService.findProfiles.mockResolvedValue([
           profileInOrg,
           profileInDifferentOrg,
           profileWithNullOrg,
         ]);
-        findersService.findAutoConfigGrafanaDashboards.mockResolvedValue([mockAutoConfigDashboard]);
-        findersService.findProfileBenchmarks.mockResolvedValue([]);
-        findersService.findGenericDeepLinks.mockResolvedValue([]);
-        findersService.findGenericReportPanels.mockResolvedValue([]);
+        dashboardFinderService.findAutoConfigGrafanaDashboards.mockResolvedValue([mockAutoConfigDashboard]);
+        testRunFinderService.findProfileBenchmarks.mockResolvedValue([]);
 
         const logSpy = jest.spyOn((service as any).logger, 'log');
 
@@ -379,7 +375,7 @@ describe('AutoConfigService', () => {
 
       it('should include all profiles when test run has no organizationId', async () => {
         // Arrange
-        const testRunWithoutOrg: MappedTestRun = {
+        const testRunWithoutOrg: any = {
           ...mockTestRun,
           organizationId: undefined,
         };
@@ -400,12 +396,10 @@ describe('AutoConfigService', () => {
           organizationId: 'org-456',
         };
 
-        findersService.findRecentTestRuns.mockResolvedValue([testRunWithoutOrg]);
-        findersService.findProfiles.mockResolvedValue([profile1, profile2]);
-        findersService.findAutoConfigGrafanaDashboards.mockResolvedValue([mockAutoConfigDashboard]);
-        findersService.findProfileBenchmarks.mockResolvedValue([]);
-        findersService.findGenericDeepLinks.mockResolvedValue([]);
-        findersService.findGenericReportPanels.mockResolvedValue([]);
+        testRunFinderService.findRecentTestRuns.mockResolvedValue([testRunWithoutOrg]);
+        testRunFinderService.findProfiles.mockResolvedValue([profile1, profile2]);
+        dashboardFinderService.findAutoConfigGrafanaDashboards.mockResolvedValue([mockAutoConfigDashboard]);
+        testRunFinderService.findProfileBenchmarks.mockResolvedValue([]);
 
         const logSpy = jest.spyOn((service as any).logger, 'log');
 
@@ -420,7 +414,7 @@ describe('AutoConfigService', () => {
     describe('Edge Cases', () => {
       it('should skip when no recent test runs found', async () => {
         // Arrange
-        findersService.findRecentTestRuns.mockResolvedValue([]);
+        testRunFinderService.findRecentTestRuns.mockResolvedValue([]);
         const logSpy = jest.spyOn((service as any).logger, 'log');
 
         // Act
@@ -428,15 +422,17 @@ describe('AutoConfigService', () => {
 
         // Assert
         expect(logSpy).toHaveBeenCalledWith(
-          'No recent test runs found. AutoConfig processing skipped.',
+          'No recent test runs with tags found. AutoConfig processing skipped.',
         );
-        expect(findersService.findProfiles).not.toHaveBeenCalled();
+        expect(testRunFinderService.findProfiles).not.toHaveBeenCalled();
       });
 
       it('should skip when no profiles found', async () => {
         // Arrange
-        findersService.findRecentTestRuns.mockResolvedValue([mockTestRun]);
-        findersService.findProfiles.mockResolvedValue([]);
+        testRunFinderService.findRecentTestRuns.mockResolvedValue([mockTestRun]);
+        testRunFinderService.findProfiles.mockResolvedValue([]);
+        dashboardFinderService.findAutoConfigGrafanaDashboards.mockResolvedValue([mockAutoConfigDashboard]);
+        testRunFinderService.findProfileBenchmarks.mockResolvedValue([]);
         const logSpy = jest.spyOn((service as any).logger, 'log');
 
         // Act
@@ -444,14 +440,16 @@ describe('AutoConfigService', () => {
 
         // Assert
         expect(logSpy).toHaveBeenCalledWith('No profiles found. AutoConfig processing skipped.');
-        expect(findersService.findAutoConfigGrafanaDashboards).not.toHaveBeenCalled();
+        // With parallel loading, all three queries run concurrently, but processing is skipped
+        expect(dashboardConfiguratorService.processAutoConfigDashboard).not.toHaveBeenCalled();
       });
 
       it('should skip when no auto-config dashboards found', async () => {
         // Arrange
-        findersService.findRecentTestRuns.mockResolvedValue([mockTestRun]);
-        findersService.findProfiles.mockResolvedValue([mockProfile]);
-        findersService.findAutoConfigGrafanaDashboards.mockResolvedValue([]);
+        testRunFinderService.findRecentTestRuns.mockResolvedValue([mockTestRun]);
+        testRunFinderService.findProfiles.mockResolvedValue([mockProfile]);
+        dashboardFinderService.findAutoConfigGrafanaDashboards.mockResolvedValue([]);
+        testRunFinderService.findProfileBenchmarks.mockResolvedValue([]);
         const logSpy = jest.spyOn((service as any).logger, 'log');
 
         // Act
@@ -463,39 +461,20 @@ describe('AutoConfigService', () => {
         );
       });
 
-      it('should log about disabled generic deep links', async () => {
-        // Arrange
-        findersService.findRecentTestRuns.mockResolvedValue([mockTestRun]);
-        findersService.findProfiles.mockResolvedValue([mockProfile]);
-        findersService.findAutoConfigGrafanaDashboards.mockResolvedValue([mockAutoConfigDashboard]);
-        findersService.findProfileBenchmarks.mockResolvedValue([]);
-        findersService.findGenericDeepLinks.mockResolvedValue([{}]);
-        findersService.findGenericReportPanels.mockResolvedValue([]);
-
-        const logSpy = jest.spyOn((service as any).logger, 'log');
-
-        // Act
-        await service.processAutoConfigDashboards();
-
-        // Assert
-        expect(logSpy).toHaveBeenCalledWith('Generic deep links processing temporarily disabled');
-      });
     });
 
     describe('Error Scenarios', () => {
       it('should handle errors for individual dashboards and continue processing', async () => {
         // Arrange
-        const testRun2: MappedTestRun = {
+        const testRun2: any = {
           ...mockTestRun,
           testRunId: 'test-run-2',
         };
 
-        findersService.findRecentTestRuns.mockResolvedValue([mockTestRun, testRun2]);
-        findersService.findProfiles.mockResolvedValue([mockProfile]);
-        findersService.findAutoConfigGrafanaDashboards.mockResolvedValue([mockAutoConfigDashboard]);
-        findersService.findProfileBenchmarks.mockResolvedValue([]);
-        findersService.findGenericDeepLinks.mockResolvedValue([]);
-        findersService.findGenericReportPanels.mockResolvedValue([]);
+        testRunFinderService.findRecentTestRuns.mockResolvedValue([mockTestRun, testRun2]);
+        testRunFinderService.findProfiles.mockResolvedValue([mockProfile]);
+        dashboardFinderService.findAutoConfigGrafanaDashboards.mockResolvedValue([mockAutoConfigDashboard]);
+        testRunFinderService.findProfileBenchmarks.mockResolvedValue([]);
 
         dashboardConfiguratorService.processAutoConfigDashboard
           .mockRejectedValueOnce(new Error('Processing failed'))

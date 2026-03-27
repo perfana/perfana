@@ -6,15 +6,11 @@ import { InjectRepository } from '@nestjs/typeorm';
 import { TestRun } from '@perfana/shared/entities';
 
 /**
- * TestRunSanityCheckerService
- *
  * Checks for stuck or problematic test runs.
  * Runs every 5 minutes to detect:
  * - Test runs in "running" status for too long
  * - Test runs with missing end time
  * - Test runs with invalid state
- *
- * TODO: Port logic from perfana-grafana/src/sanity-checker/test-run-checker.ts
  */
 @Injectable()
 export class TestRunSanityCheckerService {
@@ -72,34 +68,4 @@ export class TestRunSanityCheckerService {
     }
   }
 
-  /**
-   * Check for test runs with missing end time
-   * TODO: Port from perfana-grafana
-   */
-  @Cron('*/10 * * * *')
-  async checkMissingEndTime() {
-    if (!this.configService.get<boolean>('grafanaSync.sanityChecker.testRun.enabled', false)) {
-      return;
-    }
-
-    this.logger.debug('Checking for test runs with missing end time...');
-
-    try {
-      // TODO: Implement check for completed test runs without end time
-      this.logger.warn(
-        'checkMissingEndTime() not yet implemented - needs port from perfana-grafana',
-      );
-    } catch (error) {
-      this.logger.error('Missing end time check failed:', error);
-    }
-  }
-
-  /**
-   * Check for orphaned test runs (no benchmark reference)
-   * TODO: Port from perfana-grafana
-   */
-  async checkOrphanedTestRuns(): Promise<void> {
-    // TODO: Implement orphaned test run detection
-    this.logger.warn('checkOrphanedTestRuns() not yet implemented');
-  }
 }
