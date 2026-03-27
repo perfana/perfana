@@ -4,6 +4,19 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
+## [0.2.13] - 2026-03-27
+
+### Fixed
+- Edit SLO dialog now pre-populates all fields (Source, Dashboard, Metric) from the benchmark's own data instead of relying on a fragile async fetch-and-match chain that failed for non-grafana sources and left the Save button permanently disabled
+- Application dashboard API calls across SLO forms now use `?systemId=` (UUID) instead of `?system=` (name), which the backend silently ignored, causing unfiltered results
+- `systemName` prop in test run SLO card now resolves to the actual system name instead of passing the UUID
+
+### Added
+- 136 unit tests for the Edit SLO form hook, validator utilities, and formatter utilities
+- Generic dashboard/metric display in Edit SLO dialog for non-grafana/dynatrace sources (e.g., custom, prometheus)
+- `metrics_source_id` field added to frontend Benchmark type for proper type safety
+- `getSourceOption` now handles all source types (custom, prometheus, influxdb) instead of defaulting everything to "Grafana"
+
 ## [0.2.12] - 2026-03-27
 
 ### Fixed
