@@ -17,7 +17,6 @@ export function useEditSLOForm({
   open,
   benchmark,
   systemId,
-  systemName,
   environment,
   workload,
 }: UseEditSLOFormProps): UseEditSLOFormReturn {
@@ -42,14 +41,14 @@ export function useEditSLOForm({
 
   // Fetch Grafana application dashboards
   const fetchSloApplicationDashboards = useCallback(async () => {
-    if (!systemName || !environment) {
+    if (!systemId || !environment) {
       return;
     }
 
     try {
       setDashboardsLoading(true);
       const response = await authenticatedFetch(
-        `/grafana/application-dashboards?system=${encodeURIComponent(systemName)}&environment=${encodeURIComponent(environment)}`,
+        `/grafana/application-dashboards?systemId=${encodeURIComponent(systemId)}&environment=${encodeURIComponent(environment)}`,
         {
           headers: {
             'Content-Type': 'application/json',
@@ -70,7 +69,7 @@ export function useEditSLOForm({
     } finally {
       setDashboardsLoading(false);
     }
-  }, [systemName, environment]);
+  }, [systemId, environment]);
 
   // Fetch Dynatrace dashboards
   const fetchDynatraceDashboardsForSlo = useCallback(async () => {
@@ -162,10 +161,44 @@ export function useEditSLOForm({
         effectiveUnitFormat
       );
 
+      // Build synthetic dashboard/panel objects from the benchmark's own data.
+      // Since Source, Dashboard, and Panel fields are disabled in edit mode,
+      // we only need display-compatible objects. The API fetch below may replace
+      // these with richer objects if a match is found.
+      const syntheticDashboard = benchmark.source === 'dynatrace'
+        ? {
+            dashboardLabel: benchmark.dashboard_label || benchmark.config_title?.split(' - ')[0] || 'Dashboard',
+            id: benchmark.application_dashboard_id,
+            dashboard_uid: benchmark.dashboard_uid,
+          }
+        : {
+            id: benchmark.application_dashboard_id,
+            dashboard_uid: benchmark.dashboard_uid,
+            dashboard_label: benchmark.dashboard_label || benchmark.config_title?.split(' - ')[0] || 'Dashboard',
+            dashboard_id: benchmark.dashboard_id,
+            grafanaInstance: benchmark.grafana_instance ? { label: benchmark.grafana_instance } : undefined,
+          };
+
+      const panelTitle = benchmark.source === 'dynatrace'
+        ? (benchmark.config_title?.split(' - ').slice(1).join(' - ') || benchmark.panel_title || benchmark.metric_name || 'Metric')
+        : (benchmark.panel_title || benchmark.metric_name || benchmark.config_title?.split(' - ').slice(1).join(' - ') || 'Metric');
+
+      const syntheticPanel = benchmark.source === 'dynatrace'
+        ? {
+            panelTitle,
+          }
+        : {
+            id: benchmark.configuration?.panelId || benchmark.configuration?.id,
+            title: panelTitle,
+            type: 'timeseries',
+            yAxesFormat: benchmark.configuration?.yAxesFormat,
+            metricUnit: benchmark.configuration?.metricUnit || benchmark.metric_unit,
+          };
+
       setSloFormData({
         source: benchmark.source || 'grafana',
-        selectedDashboard: null, // Will be set after dashboards are loaded
-        selectedPanel: null, // Will be set after panels are loaded
+        selectedDashboard: syntheticDashboard,
+        selectedPanel: syntheticPanel,
         evaluateType: benchmark.evaluate_type || 'avg',
         requirementOperator: benchmark.requirement_operator || 'lt',
         requirementValue: displayRequirementValue,
@@ -177,25 +210,26 @@ export function useEditSLOForm({
         validateWithDefaultIfNoDataValue: displayDefaultValue,
       });
 
-      // Fetch dashboards and auto-select the current one
-      if (benchmark.source === 'grafana' && systemName && environment) {
+      // Also fetch real dashboards in background — if a match is found, it will
+      // replace the synthetic object with a richer one (more metadata for the save payload).
+      if (benchmark.source === 'grafana' && systemId && environment) {
         fetchSloApplicationDashboards();
       } else if (benchmark.source === 'dynatrace' && systemId && environment && workload) {
         fetchDynatraceDashboardsForSlo();
       }
     }
-  }, [open, benchmark, systemName, environment, fetchSloApplicationDashboards, fetchDynatraceDashboardsForSlo, systemId, workload]);
+  }, [open, benchmark, systemId, environment, fetchSloApplicationDashboards, fetchDynatraceDashboardsForSlo, workload]);
 
-  // Auto-select dashboard and panel when Grafana dashboards are loaded
+  // Upgrade synthetic dashboard to real one when Grafana dashboards are loaded
   useEffect(() => {
-    if (availableDashboards.length > 0 && benchmark && !sloFormData.selectedDashboard) {
+    if (availableDashboards.length > 0 && benchmark) {
       // Find the dashboard that matches the benchmark - prioritize metrics_source_id, then application_dashboard_id
       let matchingDashboard = null;
 
       // First try to match by metrics_source_id (most reliable when available)
-      if (benchmark.metrics_source_id) {
+      if ((benchmark as any).metrics_source_id) {
         matchingDashboard = availableDashboards.find(
-          (dashboard: any) => dashboard.metrics_source_id === benchmark.metrics_source_id
+          (dashboard: any) => dashboard.metrics_source_id === (benchmark as any).metrics_source_id
         );
       }
 
@@ -219,19 +253,18 @@ export function useEditSLOForm({
           selectedDashboard: matchingDashboard,
         }));
 
-        // Fetch panels for this dashboard
+        // Fetch panels for this dashboard to upgrade the synthetic panel too
         fetchDashboardPanels(matchingDashboard.dashboard_uid);
       }
     }
-  }, [availableDashboards, benchmark, sloFormData.selectedDashboard, fetchDashboardPanels]);
+  }, [availableDashboards, benchmark, fetchDashboardPanels]);
 
-  // Auto-select Dynatrace dashboard when dashboards are loaded
+  // Upgrade synthetic dashboard to real one when Dynatrace dashboards are loaded
   useEffect(() => {
     if (
       availableDynatraceDashboards.length > 0 &&
       benchmark &&
-      benchmark.source === 'dynatrace' &&
-      !sloFormData.selectedDashboard
+      benchmark.source === 'dynatrace'
     ) {
       // For Dynatrace, try to match by dashboardLabel
       const matchingDashboard = availableDynatraceDashboards.find(
@@ -244,19 +277,18 @@ export function useEditSLOForm({
           selectedDashboard: matchingDashboard,
         }));
 
-        // Fetch metrics for this dashboard
+        // Fetch metrics for this dashboard to upgrade the synthetic panel
         fetchDynatraceMetricsForSlo(matchingDashboard.dashboardLabel);
       }
     }
-  }, [availableDynatraceDashboards, benchmark, sloFormData.selectedDashboard, fetchDynatraceMetricsForSlo]);
+  }, [availableDynatraceDashboards, benchmark, fetchDynatraceMetricsForSlo]);
 
-  // Auto-select Dynatrace metric when metrics are loaded
+  // Upgrade synthetic panel to real one when Dynatrace metrics are loaded
   useEffect(() => {
     if (
       availableDynatraceMetrics.length > 0 &&
       benchmark &&
-      benchmark.source === 'dynatrace' &&
-      !sloFormData.selectedPanel
+      benchmark.source === 'dynatrace'
     ) {
       // Try to match by panel title from config_title
       let matchingMetric = null;
@@ -281,11 +313,11 @@ export function useEditSLOForm({
         }));
       }
     }
-  }, [availableDynatraceMetrics, benchmark, sloFormData.selectedPanel]);
+  }, [availableDynatraceMetrics, benchmark]);
 
-  // Auto-select Grafana panel when panels are loaded
+  // Upgrade synthetic panel to real one when Grafana panels are loaded
   useEffect(() => {
-    if (availablePanels.length > 0 && benchmark && !sloFormData.selectedPanel) {
+    if (availablePanels.length > 0 && benchmark) {
       // Try multiple ways to find the matching panel
       let matchingPanel = null;
 
@@ -335,7 +367,7 @@ export function useEditSLOForm({
         }));
       }
     }
-  }, [availablePanels, benchmark, sloFormData.selectedPanel]);
+  }, [availablePanels, benchmark]);
 
   return {
     sloFormData,
