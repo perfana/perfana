@@ -8,20 +8,7 @@ import {
 import { SvgIconComponent } from '@mui/icons-material';
 import { TestRun } from '@/types/test-runs';
 
-export function formatDuration(seconds?: number): string {
-  if (!seconds || seconds <= 0) return 'N/A';
-  const hours = Math.floor(seconds / 3600);
-  const minutes = Math.floor((seconds % 3600) / 60);
-  const remainingSeconds = seconds % 60;
-
-  if (hours > 0) {
-    return `${hours}h ${minutes}m ${remainingSeconds}s`;
-  } else if (minutes > 0) {
-    return `${minutes}m ${remainingSeconds}s`;
-  } else {
-    return `${remainingSeconds}s`;
-  }
-}
+export { formatDurationClock as formatDuration } from '@/lib/format-units';
 
 export interface EvaluationStatusConfig {
   icon: SvgIconComponent;
