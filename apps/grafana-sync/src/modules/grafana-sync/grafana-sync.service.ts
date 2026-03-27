@@ -1,38 +1,50 @@
-import { Injectable, Logger } from '@nestjs/common';
-import { Cron, Interval } from '@nestjs/schedule';
+import { Injectable, Logger, OnModuleInit, OnModuleDestroy } from '@nestjs/common';
+import { Cron, SchedulerRegistry } from '@nestjs/schedule';
 import { ConfigService } from '@nestjs/config';
+import { InjectRepository } from '@nestjs/typeorm';
+import { Repository } from 'typeorm';
+import { GrafanaInstance } from '@perfana/shared/entities';
 import { StoreDashboardService } from './store-dashboard.service';
 import { RestoreDashboardService } from './restore-dashboard.service';
 import { UpdateDashboardsService } from './update-dashboards.service';
 
 /**
- * GrafanaSyncService
- *
  * Main orchestrator for Grafana dashboard synchronization.
- * Runs periodic sync jobs using @nestjs/schedule decorators.
+ * Runs periodic sync jobs using @nestjs/schedule.
  *
  * Sync operations:
- * 1. Store new dashboards from Grafana → Perfana DB
+ * 1. Store new dashboards from Grafana -> Perfana DB
  * 2. Update existing dashboards with changes
- * 3. Restore missing dashboards from Perfana DB → Grafana
+ * 3. Restore missing dashboards from Perfana DB -> Grafana
  */
 @Injectable()
-export class GrafanaSyncService {
+export class GrafanaSyncService implements OnModuleInit, OnModuleDestroy {
   private readonly logger = new Logger(GrafanaSyncService.name);
   private isSyncing = false;
 
   constructor(
     private configService: ConfigService,
+    private schedulerRegistry: SchedulerRegistry,
+    @InjectRepository(GrafanaInstance)
+    private grafanaInstanceRepo: Repository<GrafanaInstance>,
     private storeDashboardService: StoreDashboardService,
     private restoreDashboardService: RestoreDashboardService,
     private updateDashboardsService: UpdateDashboardsService,
   ) {}
 
-  /**
-   * Main sync job - runs at configured interval
-   * Default: Every 30 seconds (GRAFANA_SYNC_INTERVAL)
-   */
-  @Interval(30000) // 30 seconds - TODO: Make this configurable
+  onModuleInit() {
+    const interval = this.configService.get<number>('grafanaSync.syncInterval', 30000);
+    this.schedulerRegistry.addInterval(
+      'grafana-sync',
+      setInterval(() => this.handleGrafanaSync(), interval),
+    );
+    this.logger.log(`Grafana sync interval set to ${interval}ms`);
+  }
+
+  onModuleDestroy() {
+    this.schedulerRegistry.deleteInterval('grafana-sync');
+  }
+
   async handleGrafanaSync() {
     if (this.isSyncing) {
       this.logger.warn('Sync already in progress, skipping...');
@@ -45,14 +57,11 @@ export class GrafanaSyncService {
 
       const startTime = Date.now();
 
-      // Add new dashboards from Grafana to Perfana DB
-      const addedCount = await this.storeDashboardService.addNewDashboards();
+      const instances = await this.grafanaInstanceRepo.find();
 
-      // Update existing dashboards with changes
-      const updatedCount = await this.updateDashboardsService.updateDashboards();
-
-      // Restore missing dashboards from Perfana DB to Grafana
-      const restoredCount = await this.restoreDashboardService.restoreDashboards();
+      const addedCount = await this.storeDashboardService.addNewDashboards(instances);
+      const updatedCount = await this.updateDashboardsService.updateDashboards(instances);
+      const restoredCount = await this.restoreDashboardService.restoreDashboards(instances);
 
       const duration = Date.now() - startTime;
 
