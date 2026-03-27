@@ -4,6 +4,19 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
+## [0.2.11] - 2026-03-27
+
+### Added
+- Centralized metric formatting utility (`apps/web/lib/format-units.ts`) with 11 functions: `formatDuration`, `formatDurationCompact`, `formatDurationClock`, `formatBytes`, `formatPercentage`, `formatRatioAsPercentage`, `formatChangePercentage`, `formatRate`, `formatNumber`, `formatCompactNumber`, `formatInteger`
+- New `formatRate` function for rate-based metrics (req/s, ops/s, MB/s)
+- 65 unit tests for centralized formatters covering all edge cases (null, undefined, NaN, negative, zero, boundaries)
+- 22 unit tests for test-run-utils (formatDuration, calculateElapsedDuration, calculateProgress, isRecentlyActive)
+
+### Changed
+- AWR formatters (`awr/utils/formatters.ts`) now re-export shared functions from centralized source, eliminating 311 lines of duplication
+- `test-run-utils.ts` and `test-run-formatters.ts` delegate to centralized `formatDurationClock`
+- `HostPropertiesSection.tsx` uses centralized `formatBytes` instead of inline implementation
+
 ## [0.2.10] - 2026-03-26
 
 ### Fixed
