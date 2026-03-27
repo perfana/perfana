@@ -11,6 +11,7 @@ export interface Benchmark {
   dashboard_id?: number;
   dashboard_uid?: string;
   application_dashboard_id?: string;
+  metrics_source_id?: string;
   generic_check_id?: string;
   configuration: any;
   config_title?: string;
