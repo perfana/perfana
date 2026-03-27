@@ -21,3 +21,4 @@ export { MetricsSourceOneToOneAndNullableGrafana1700000000017 } from './migratio
 export { MigrateCompareConfigToMetricsSource1700000000018 } from './migrations/1700000000018-MigrateCompareConfigToMetricsSource';
 export { DropNarrowCompareConfigUniqueConstraints1700000000019 } from './migrations/1700000000019-DropNarrowCompareConfigUniqueConstraints';
 export { TuneAutovacuumForDsMetrics1700000000020 } from './migrations/1700000000020-TuneAutovacuumForDsMetrics';
+export { FixAutovacuumThrottling1700000000021 } from './migrations/1700000000021-FixAutovacuumThrottling';
