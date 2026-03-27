@@ -1,31 +1,19 @@
-/**
- * Copyright 2025 Perfana Contributors
- *
- * DashboardConfiguratorService (Orchestrator)
- *
- * Refactored from 950-line monolithic service to <200-line orchestrator.
- * Delegates to specialized services for all dashboard configuration operations.
- */
-
 import { Injectable, Logger } from '@nestjs/common';
-import {
-  AutoConfigFindersService,
-  MappedTestRun,
-  MappedAutoConfigDashboard,
-} from './auto-config-finders.service';
+import { TestRun, ProfileGrafanaDashboard } from '@perfana/shared/entities';
+import { DashboardFinderService } from './dashboard-finder.service';
 import { VariableDiscoveryService } from './variable-discovery.service';
 import { DashboardVariable } from './types';
-import { DashboardProcessorService, DashboardVariableHelperService } from './services';
+import { DashboardProcessorService } from './services';
+import { PERFANA_TEMPLATE_TAG } from '../../config/constants';
 
 @Injectable()
 export class DashboardConfiguratorService {
   private readonly logger = new Logger(DashboardConfiguratorService.name);
 
   constructor(
-    private readonly findersService: AutoConfigFindersService,
+    private readonly dashboardFinderService: DashboardFinderService,
     private readonly variableDiscoveryService: VariableDiscoveryService,
     private readonly dashboardProcessorService: DashboardProcessorService,
-    private readonly variableHelperService: DashboardVariableHelperService,
   ) {}
 
   /**
@@ -33,8 +21,8 @@ export class DashboardConfiguratorService {
    * CRITICAL: This method contains the readOnly branching logic
    */
   async processAutoConfigDashboard(
-    testRun: MappedTestRun,
-    autoConfigDashboard: MappedAutoConfigDashboard,
+    testRun: TestRun,
+    autoConfigDashboard: ProfileGrafanaDashboard,
     testRunVariables: any[],
   ): Promise<void> {
     this.logger.log(
@@ -46,11 +34,11 @@ export class DashboardConfiguratorService {
     if (!templateDashboard) return;
 
     // Step 2: Get Grafana instance
-    const grafanaInstance = await this.findersService.findGrafanaConfiguration(
-      autoConfigDashboard.grafana,
+    const grafanaInstance = await this.dashboardFinderService.findGrafanaConfiguration(
+      autoConfigDashboard.grafanaLabel,
     );
     if (!grafanaInstance) {
-      this.logger.error(`No grafana instance found for: ${autoConfigDashboard.grafana}`);
+      this.logger.error(`No grafana instance found for: ${autoConfigDashboard.grafanaLabel}`);
       return;
     }
 
@@ -69,7 +57,7 @@ export class DashboardConfiguratorService {
 
     // Step 4: Process dashboards if variables are found
     if (
-      this.variableHelperService.variableValuesFound(
+      this.variableValuesFound(
         applicationDashboardVariables,
         autoConfigDashboard.setHardcodedValueForVariables,
       )
@@ -89,10 +77,10 @@ export class DashboardConfiguratorService {
    * Get and validate template dashboard
    */
   private async getAndValidateTemplateDashboard(
-    autoConfigDashboard: MappedAutoConfigDashboard,
+    autoConfigDashboard: ProfileGrafanaDashboard,
   ): Promise<any | null> {
-    const templateDashboard = await this.findersService.findGrafanaDashboardOrNull(
-      autoConfigDashboard.grafana,
+    const templateDashboard = await this.dashboardFinderService.findGrafanaDashboardOrNull(
+      autoConfigDashboard.grafanaLabel,
       [autoConfigDashboard.dashboardUid],
     );
 
@@ -106,7 +94,7 @@ export class DashboardConfiguratorService {
     // Validate template dashboard
     if (
       !templateDashboard.tags ||
-      !templateDashboard.tags.some((tag) => tag.toLowerCase() === 'perfana-template')
+      !templateDashboard.tags.some((tag) => tag.toLowerCase() === PERFANA_TEMPLATE_TAG)
     ) {
       throw new Error(
         `Expected a template dashboard, it is not: ${autoConfigDashboard.dashboardUid}`,
@@ -126,8 +114,8 @@ export class DashboardConfiguratorService {
    * Process dashboards for all variable combinations
    */
   private async processDashboardsForVariables(
-    testRun: MappedTestRun,
-    autoConfigDashboard: MappedAutoConfigDashboard,
+    testRun: TestRun,
+    autoConfigDashboard: ProfileGrafanaDashboard,
     applicationDashboardVariables: DashboardVariable[],
     testRunVariables: any[],
     grafanaInstance: any,
@@ -147,7 +135,7 @@ export class DashboardConfiguratorService {
 
     // Generate variable sets based on createSeparateDashboardForVariable setting
     const variableListsToProcess =
-      this.variableHelperService.setOfVariablesPerCreateSeparateDashboardForVariable(
+      this.setOfVariablesPerCreateSeparateDashboardForVariable(
         separateVariable,
         applicationDashboardVariables,
       );
@@ -169,5 +157,58 @@ export class DashboardConfiguratorService {
         templateDashboard,
       );
     }
+  }
+
+  /**
+   * Check if variable values have been found
+   */
+  private variableValuesFound(
+    applicationDashboardVariables: DashboardVariable[],
+    setHardcodedValueForVariables: Array<{ name: string; values: string[] }> | undefined,
+  ): boolean {
+    // If there are hardcoded variables, we always have values
+    if (setHardcodedValueForVariables && setHardcodedValueForVariables.length > 0) {
+      return true;
+    }
+
+    // Check if any variables have values
+    return applicationDashboardVariables.some((v) => v.values && v.values.length > 0);
+  }
+
+  /**
+   * Create set of variables per createSeparateDashboardForVariable
+   */
+  private setOfVariablesPerCreateSeparateDashboardForVariable(
+    separateVariable: string | undefined,
+    applicationDashboardVariables: DashboardVariable[],
+  ): Record<string, DashboardVariable[]> {
+    if (!separateVariable) {
+      return { default: applicationDashboardVariables };
+    }
+
+    // Find the separate variable
+    const separateVar = applicationDashboardVariables.find((v) => v.name === separateVariable);
+    if (!separateVar || !separateVar.values || separateVar.values.length === 0) {
+      return { default: applicationDashboardVariables };
+    }
+
+    // Create a set for each value of the separate variable
+    const result: Record<string, DashboardVariable[]> = {};
+    for (const value of separateVar.values) {
+      const key = `${separateVariable}:${value}`;
+      // Filter out the separate variable and create a new list with just this value
+      const filteredVariables = applicationDashboardVariables.filter(
+        (v) => v.name !== separateVariable,
+      );
+      result[key] = [
+        ...filteredVariables,
+        {
+          name: separateVariable,
+          values: [value],
+        },
+      ];
+    }
+
+    return result;
   }
 }

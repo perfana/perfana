@@ -1,20 +1,12 @@
 /**
- * Copyright 2025 Perfana Contributors
- *
- * BenchmarkProcessorService
- *
- * Extracted from: auto-config.service.ts
- *
  * Handles profile benchmark processing for test runs.
  * Creates Benchmark instances from ProfileBenchmark templates.
  */
 
 import { Injectable, Logger } from '@nestjs/common';
-import {
-  AutoConfigFindersService,
-  MappedTestRun,
-  MappedProfileBenchmark,
-} from './auto-config-finders.service';
+import { TestRun, ProfileBenchmark } from '@perfana/shared/entities';
+import { TestRunFinderService } from './test-run-finder.service';
+import { DashboardFinderService } from './dashboard-finder.service';
 import { AutoConfigUpdatesService } from './auto-config-updates.service';
 import { validateRegexPattern } from '@perfana/shared/utils';
 
@@ -23,25 +15,25 @@ export class BenchmarkProcessorService {
   private readonly logger = new Logger(BenchmarkProcessorService.name);
 
   constructor(
-    private findersService: AutoConfigFindersService,
+    private testRunFinderService: TestRunFinderService,
+    private dashboardFinderService: DashboardFinderService,
     private updatesService: AutoConfigUpdatesService,
   ) {}
 
   /**
-   * Process profile benchmarks for a test run
-   * Creates Benchmark instances from ProfileBenchmark templates
-   * Migrated from: perfana-grafana/auto-config/auto-config-service.js:931-985
+   * Process profile benchmarks for a test run.
+   * Creates Benchmark instances from ProfileBenchmark templates.
    */
   async processProfileBenchmarks(
-    testRun: MappedTestRun,
+    testRun: TestRun,
     profileNames: string[],
-    profileBenchmarks: MappedProfileBenchmark[],
+    profileBenchmarks: ProfileBenchmark[],
   ): Promise<void> {
     this.logger.log(`Processing profile benchmarks for test run: ${testRun.testRunId}`);
 
     // Filter profile benchmarks that match the test run's profiles
     const matchingBenchmarks = profileBenchmarks.filter((benchmark) =>
-      profileNames.includes(benchmark.profileName),
+      profileNames.includes(benchmark.profile?.name || 'Unknown'),
     );
 
     this.logger.log(
@@ -59,8 +51,8 @@ export class BenchmarkProcessorService {
    * Process a single profile benchmark
    */
   private async processSingleBenchmark(
-    testRun: MappedTestRun,
-    profileBenchmark: MappedProfileBenchmark,
+    testRun: TestRun,
+    profileBenchmark: ProfileBenchmark,
   ): Promise<void> {
     try {
       // Match workload pattern against test run workload/test type
@@ -69,21 +61,22 @@ export class BenchmarkProcessorService {
       }
 
       this.logger.log(
-        `Processing profile benchmark: ${profileBenchmark.panelTitle || profileBenchmark.id}`,
+        `Processing profile benchmark: ${profileBenchmark.panel_title || profileBenchmark.id}`,
       );
 
       // Find application dashboards that match this profile benchmark's dashboard UID
       // RBAC: Pass organizationId to filter dashboards by organization
+      const systemUnderTestName = testRun.systemUnderTest?.name || testRun.systemUnderTestId;
       const applicationDashboards =
-        await this.findersService.findApplicationDashboardsByTemplateDashboardUid(
-          profileBenchmark.dashboardUid!,
-          testRun.systemUnderTestName,
+        await this.dashboardFinderService.findApplicationDashboardsByTemplateDashboardUid(
+          profileBenchmark.dashboard_uid!,
+          systemUnderTestName,
           testRun.testEnvironment,
           testRun.organizationId,
         );
 
       this.logger.log(
-        `Found ${applicationDashboards.length} application dashboards for dashboard UID ${profileBenchmark.dashboardUid}`,
+        `Found ${applicationDashboards.length} application dashboards for dashboard UID ${profileBenchmark.dashboard_uid}`,
       );
 
       // For each matching application dashboard, create a benchmark if it doesn't exist
@@ -100,15 +93,15 @@ export class BenchmarkProcessorService {
    * Check if test run workload matches the benchmark's workload pattern
    */
   private matchesWorkloadPattern(
-    testRun: MappedTestRun,
-    profileBenchmark: MappedProfileBenchmark,
+    testRun: TestRun,
+    profileBenchmark: ProfileBenchmark,
   ): boolean {
     // Validate regex pattern for ReDoS safety
-    const validationResult = validateRegexPattern(profileBenchmark.workloadPattern, { flags: 'i' });
+    const validationResult = validateRegexPattern(profileBenchmark.workload_pattern, { flags: 'i' });
 
     if (!validationResult.safe || !validationResult.regex) {
       this.logger.warn(
-        `Invalid or unsafe regex pattern in profile benchmark "${profileBenchmark.id}": ${profileBenchmark.workloadPattern} - ${validationResult.error}`,
+        `Invalid or unsafe regex pattern in profile benchmark "${profileBenchmark.id}": ${profileBenchmark.workload_pattern} - ${validationResult.error}`,
       );
       return false;
     }
@@ -117,7 +110,7 @@ export class BenchmarkProcessorService {
 
     if (!validationResult.regex.test(workloadToMatch)) {
       this.logger.log(
-        `Profile benchmark ${profileBenchmark.id} workload pattern '${profileBenchmark.workloadPattern}' does not match workload '${workloadToMatch}', skipping`,
+        `Profile benchmark ${profileBenchmark.id} workload pattern '${profileBenchmark.workload_pattern}' does not match workload '${workloadToMatch}', skipping`,
       );
       return false;
     }
@@ -129,11 +122,11 @@ export class BenchmarkProcessorService {
    * Create benchmark if it doesn't already exist
    */
   private async createBenchmarkIfNotExists(
-    testRun: MappedTestRun,
-    profileBenchmark: MappedProfileBenchmark,
+    testRun: TestRun,
+    profileBenchmark: ProfileBenchmark,
     applicationDashboard: any,
   ): Promise<void> {
-    const existingBenchmark = await this.findersService.findBenchmarkForApplicationDashboardOrNull(
+    const existingBenchmark = await this.testRunFinderService.findBenchmarkForApplicationDashboardOrNull(
       applicationDashboard,
       profileBenchmark.id,
       testRun.workload,
@@ -146,7 +139,7 @@ export class BenchmarkProcessorService {
         applicationDashboard,
       );
       this.logger.log(
-        `Created benchmark for profile benchmark ${profileBenchmark.panelTitle || profileBenchmark.id}`,
+        `Created benchmark for profile benchmark ${profileBenchmark.panel_title || profileBenchmark.id}`,
       );
     } else {
       this.logger.debug(

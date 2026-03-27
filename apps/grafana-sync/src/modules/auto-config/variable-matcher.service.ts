@@ -1,11 +1,4 @@
 /**
- * Copyright 2025 Perfana Contributors
- *
- * VariableMatcherService
- *
- * Extracted from: variable-discovery.service.ts
- * Migrated from: perfana-grafana/auto-config/get-application-dashboard-variables.js
- *
  * Handles variable value filtering and matching:
  * - Override values with hardcoded configurations
  * - Filter values based on regex patterns
@@ -13,7 +6,7 @@
  */
 
 import { Injectable, Logger } from '@nestjs/common';
-import { MappedTestRun } from './auto-config-finders.service';
+import { TestRun } from '@perfana/shared/entities';
 import { DashboardVariable } from './types';
 import { validateRegexPattern } from '@perfana/shared/utils';
 
@@ -31,12 +24,11 @@ export class VariableMatcherService {
 
   /**
    * Override variable values if set in configuration
-   * Migrated from: get-application-dashboard-variables.js:76-99
    */
   overrideValues(
     applicationDashboardVariables: DashboardVariable[],
     overrideValueForVariables: DashboardVariable[] | undefined,
-    testRun: MappedTestRun,
+    testRun: TestRun,
   ): DashboardVariable[] {
     if (overrideValueForVariables && overrideValueForVariables.length > 0) {
       applicationDashboardVariables.forEach((variable, variableIndex) => {
@@ -59,12 +51,11 @@ export class VariableMatcherService {
 
   /**
    * Filter variable values based on regex patterns
-   * Migrated from: get-application-dashboard-variables.js:104-125
    */
   filterValuesOnRegex(
     applicationDashboardVariables: DashboardVariable[],
     autoConfigGrafanaDashboard: any,
-    testRun: MappedTestRun,
+    testRun: TestRun,
   ): DashboardVariable[] {
     if (
       autoConfigGrafanaDashboard.matchRegexForVariables &&
@@ -96,13 +87,12 @@ export class VariableMatcherService {
 
   /**
    * Match value against regex patterns
-   * Migrated from: matchValue.js:19-37
    */
   matchValue(
     matchRegexForVariables: MatchRegexForVariable[],
     applicationDashboardVariableName: string,
     applicationDashboardVariableValue: string,
-    testRun: MappedTestRun,
+    testRun: TestRun,
   ): boolean {
     let valueMatched = false;
 
@@ -129,9 +119,8 @@ export class VariableMatcherService {
 
   /**
    * Replace dynamic variable values with test run variables
-   * Migrated from: replaceDynamicVariableValues.js:17-37
    */
-  replaceDynamicVariableValues(variableValue: string, testRun: MappedTestRun): string {
+  replaceDynamicVariableValues(variableValue: string, testRun: TestRun): string {
     if (testRun.variables) {
       const variableIndex = testRun.variables
         .map((variable: any) => variable.placeholder)
@@ -152,7 +141,6 @@ export class VariableMatcherService {
 
   /**
    * Escape special regex characters
-   * Migrated from: helpers/utils.js:26-28
    */
   escapeRegExp(string: string): string {
     return string.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
