@@ -30,7 +30,7 @@
  * formatDuration(0.0005)  // "500.00 us"
  * formatDuration(0.5)     // "500.00 ms"
  * formatDuration(45)      // "45.00 s"
- * formatDuration(3600)    // "60.00 min"
+ * formatDuration(3600)    // "1.00 hr"
  * formatDuration(null)    // "N/A"
  */
 export function formatDuration(
@@ -128,7 +128,7 @@ export function formatDurationCompact(
  * formatDurationClock(0)    // "N/A"
  */
 export function formatDurationClock(seconds?: number): string {
-  if (!seconds || seconds <= 0) return 'N/A';
+  if (!seconds || seconds <= 0 || !isFinite(seconds)) return 'N/A';
   const hours = Math.floor(seconds / 3600);
   const minutes = Math.floor((seconds % 3600) / 60);
   const remainingSeconds = seconds % 60;
