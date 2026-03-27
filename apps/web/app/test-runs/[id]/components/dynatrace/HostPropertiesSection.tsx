@@ -10,6 +10,7 @@ import {
   OpenInNew
 } from '@mui/icons-material';
 import { HostPropertiesResponse, DynatraceConfig } from '@/lib/dynatrace';
+import { formatBytes } from '@/lib/format-units';
 
 interface HostPropertiesSectionProps {
   properties: HostPropertiesResponse;
@@ -28,11 +29,6 @@ export default function HostPropertiesSection({
 }: HostPropertiesSectionProps) {
   const { properties: props, lastSeenTimestamp } = properties;
 
-  const formatBytes = (bytes?: number): string => {
-    if (!bytes) return 'N/A';
-    const gb = bytes / (1024 ** 3);
-    return `${gb.toFixed(2)} GB`;
-  };
 
   const formatTimestamp = (timestamp?: number): string => {
     if (!timestamp) return 'N/A';

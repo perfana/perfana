@@ -1,4 +1,11 @@
 import { TestRun } from '@/types/test-runs';
+import { formatDurationClock } from '@/lib/format-units';
+
+/**
+ * Format duration in seconds to human-readable string.
+ * Delegates to the centralized formatDurationClock.
+ */
+export const formatDuration = formatDurationClock;
 
 /**
  * Check if a test run is recently active (updated within last 30 seconds)
@@ -21,24 +28,6 @@ export function isRecentlyActive(testRun: TestRun, currentTime?: number): boolea
   }
 
   return false;
-}
-
-/**
- * Format duration in seconds to human-readable string
- */
-export function formatDuration(seconds?: number): string {
-  if (!seconds || seconds <= 0) return 'N/A';
-  const hours = Math.floor(seconds / 3600);
-  const minutes = Math.floor((seconds % 3600) / 60);
-  const remainingSeconds = seconds % 60;
-
-  if (hours > 0) {
-    return `${hours}h ${minutes}m ${remainingSeconds}s`;
-  } else if (minutes > 0) {
-    return `${minutes}m ${remainingSeconds}s`;
-  } else {
-    return `${remainingSeconds}s`;
-  }
 }
 
 /**

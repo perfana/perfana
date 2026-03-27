@@ -1,9 +1,8 @@
 /**
  * AWR Frontend Formatters
  *
- * Display formatting utilities for AWR (Automatic Workload Repository)
- * data visualization in React components. These formatters are optimized
- * for user-friendly display rather than data parsing.
+ * Re-exports shared formatters from @/lib/format-units and adds
+ * AWR-specific formatting (DB time, SQL IDs, Oracle versions, etc.).
  *
  * @example
  * ```tsx
@@ -14,213 +13,25 @@
  * ```
  */
 
-// ==================== Number Formatting ====================
+// Import for local use by AWR-specific functions
+import {
+  formatDuration as _formatDuration,
+  formatCompactNumber as _formatCompactNumber,
+} from '@/lib/format-units';
 
-/**
- * Format a number with thousand separators
- *
- * @param value - Number to format
- * @param decimals - Maximum decimal places (default: 2)
- * @returns Formatted string
- *
- * @example
- * formatNumber(1234567) // "1,234,567"
- * formatNumber(1234.567, 1) // "1,234.6"
- */
-export function formatNumber(
-  value: number | null | undefined,
-  decimals: number = 2,
-): string {
-  if (value === null || value === undefined || isNaN(value)) {
-    return 'N/A';
-  }
-
-  return value.toLocaleString('en-US', {
-    minimumFractionDigits: 0,
-    maximumFractionDigits: decimals,
-  });
-}
-
-/**
- * Format a large number with abbreviated suffix (K, M, G, T)
- *
- * @param value - Number to format
- * @param decimals - Decimal places (default: 1)
- * @returns Abbreviated string
- *
- * @example
- * formatCompactNumber(1500) // "1.5K"
- * formatCompactNumber(2500000) // "2.5M"
- */
-export function formatCompactNumber(
-  value: number | null | undefined,
-  decimals: number = 1,
-): string {
-  if (value === null || value === undefined || isNaN(value)) {
-    return 'N/A';
-  }
-
-  const absValue = Math.abs(value);
-  const sign = value < 0 ? '-' : '';
-
-  if (absValue >= 1_000_000_000_000) {
-    return `${sign}${(absValue / 1_000_000_000_000).toFixed(decimals)}T`;
-  }
-  if (absValue >= 1_000_000_000) {
-    return `${sign}${(absValue / 1_000_000_000).toFixed(decimals)}G`;
-  }
-  if (absValue >= 1_000_000) {
-    return `${sign}${(absValue / 1_000_000).toFixed(decimals)}M`;
-  }
-  if (absValue >= 1_000) {
-    return `${sign}${(absValue / 1_000).toFixed(decimals)}K`;
-  }
-
-  return `${sign}${absValue.toFixed(decimals)}`;
-}
-
-/**
- * Format a number as integer (no decimals)
- *
- * @param value - Number to format
- * @returns Formatted integer string
- */
-export function formatInteger(value: number | null | undefined): string {
-  if (value === null || value === undefined || isNaN(value)) {
-    return 'N/A';
-  }
-
-  return Math.round(value).toLocaleString('en-US');
-}
-
-// ==================== Percentage Formatting ====================
-
-/**
- * Format a percentage value
- *
- * @param value - Percentage value (0-100 scale)
- * @param decimals - Decimal places (default: 1)
- * @param showSymbol - Whether to include % symbol (default: true)
- * @returns Formatted percentage string
- *
- * @example
- * formatPercentage(95.5) // "95.5%"
- * formatPercentage(95.567, 2) // "95.57%"
- */
-export function formatPercentage(
-  value: number | null | undefined,
-  decimals: number = 1,
-  showSymbol: boolean = true,
-): string {
-  if (value === null || value === undefined || isNaN(value)) {
-    return 'N/A';
-  }
-
-  const formatted = value.toFixed(decimals);
-  return showSymbol ? `${formatted}%` : formatted;
-}
-
-/**
- * Format a ratio (0-1) as percentage
- *
- * @param ratio - Ratio value (0-1 scale)
- * @param decimals - Decimal places (default: 1)
- * @returns Formatted percentage string
- *
- * @example
- * formatRatioAsPercentage(0.955) // "95.5%"
- */
-export function formatRatioAsPercentage(
-  ratio: number | null | undefined,
-  decimals: number = 1,
-): string {
-  if (ratio === null || ratio === undefined || isNaN(ratio)) {
-    return 'N/A';
-  }
-
-  return formatPercentage(ratio * 100, decimals);
-}
-
-/**
- * Format a change percentage with sign indicator
- *
- * @param value - Change percentage (can be negative)
- * @param decimals - Decimal places (default: 1)
- * @returns Formatted string with +/- sign
- *
- * @example
- * formatChangePercentage(25.5) // "+25.5%"
- * formatChangePercentage(-10.3) // "-10.3%"
- * formatChangePercentage(0) // "0%"
- */
-export function formatChangePercentage(
-  value: number | null | undefined,
-  decimals: number = 1,
-): string {
-  if (value === null || value === undefined || isNaN(value)) {
-    return 'N/A';
-  }
-
-  const sign = value > 0 ? '+' : '';
-  return `${sign}${value.toFixed(decimals)}%`;
-}
-
-// ==================== Time Formatting ====================
-
-/**
- * Format a duration in seconds with automatic unit selection
- *
- * @param seconds - Time in seconds
- * @param decimals - Decimal places (default: 2)
- * @returns Formatted string with appropriate unit
- *
- * @example
- * formatDuration(0.0005) // "500 us"
- * formatDuration(0.5) // "500 ms"
- * formatDuration(45) // "45.00 s"
- * formatDuration(3600) // "60.00 min"
- */
-export function formatDuration(
-  seconds: number | null | undefined,
-  decimals: number = 2,
-): string {
-  if (seconds === null || seconds === undefined || isNaN(seconds)) {
-    return 'N/A';
-  }
-
-  const absSeconds = Math.abs(seconds);
-  const sign = seconds < 0 ? '-' : '';
-
-  // Microseconds
-  if (absSeconds < 0.001) {
-    const us = absSeconds * 1_000_000;
-    return `${sign}${us.toFixed(decimals)} us`;
-  }
-
-  // Milliseconds
-  if (absSeconds < 1) {
-    const ms = absSeconds * 1000;
-    return `${sign}${ms.toFixed(decimals)} ms`;
-  }
-
-  // Seconds
-  if (absSeconds < 60) {
-    return `${sign}${absSeconds.toFixed(decimals)} s`;
-  }
-
-  // Minutes
-  if (absSeconds < 3600) {
-    return `${sign}${(absSeconds / 60).toFixed(decimals)} min`;
-  }
-
-  // Hours
-  if (absSeconds < 86400) {
-    return `${sign}${(absSeconds / 3600).toFixed(decimals)} hr`;
-  }
-
-  // Days
-  return `${sign}${(absSeconds / 86400).toFixed(decimals)} days`;
-}
+// Re-export shared formatters from centralized source
+export {
+  formatNumber,
+  formatCompactNumber,
+  formatInteger,
+  formatPercentage,
+  formatRatioAsPercentage,
+  formatChangePercentage,
+  formatDuration,
+  formatDurationCompact as formatCompactDuration,
+  formatBytes,
+  formatRate,
+} from '@/lib/format-units';
 
 /**
  * Format DB time in minutes with unit
@@ -250,107 +61,13 @@ export function formatDbTime(
 }
 
 /**
- * Format a compact duration string (e.g., "1h 30m 45s")
- *
- * @param seconds - Time in seconds
- * @returns Compact duration string
- *
- * @example
- * formatCompactDuration(5445) // "1h 30m 45s"
- * formatCompactDuration(125) // "2m 5s"
- */
-export function formatCompactDuration(
-  seconds: number | null | undefined,
-): string {
-  if (seconds === null || seconds === undefined || isNaN(seconds)) {
-    return 'N/A';
-  }
-
-  const absSeconds = Math.abs(seconds);
-  const sign = seconds < 0 ? '-' : '';
-
-  // Sub-second values
-  if (absSeconds < 1) {
-    const ms = absSeconds * 1000;
-    if (ms < 1) {
-      return `${sign}${(ms * 1000).toFixed(0)}us`;
-    }
-    return `${sign}${ms.toFixed(1)}ms`;
-  }
-
-  // Less than a minute
-  if (absSeconds < 60) {
-    return `${sign}${absSeconds.toFixed(1)}s`;
-  }
-
-  // Calculate components
-  const days = Math.floor(absSeconds / 86400);
-  const hours = Math.floor((absSeconds % 86400) / 3600);
-  const mins = Math.floor((absSeconds % 3600) / 60);
-  const secs = Math.floor(absSeconds % 60);
-
-  const parts: string[] = [];
-
-  if (days > 0) parts.push(`${days}d`);
-  if (hours > 0) parts.push(`${hours}h`);
-  if (mins > 0) parts.push(`${mins}m`);
-  if (secs > 0 && days === 0) parts.push(`${secs}s`);
-
-  return sign + parts.join(' ');
-}
-
-/**
- * Format elapsed per execution time
- *
- * @param seconds - Time in seconds per execution
- * @param decimals - Decimal places (default: 3)
- * @returns Formatted string
- *
- * @example
- * formatElapsedPerExec(0.00234) // "2.34 ms"
- * formatElapsedPerExec(1.5) // "1.500 s"
+ * Format elapsed per execution time (AWR-specific convenience wrapper)
  */
 export function formatElapsedPerExec(
   seconds: number | null | undefined,
   decimals: number = 3,
 ): string {
-  return formatDuration(seconds, decimals);
-}
-
-// ==================== Size/Byte Formatting ====================
-
-/**
- * Format bytes with appropriate unit (KB, MB, GB, TB)
- *
- * @param bytes - Size in bytes
- * @param decimals - Decimal places (default: 2)
- * @returns Formatted size string
- *
- * @example
- * formatBytes(1536) // "1.50 KB"
- * formatBytes(1073741824) // "1.00 GB"
- */
-export function formatBytes(
-  bytes: number | null | undefined,
-  decimals: number = 2,
-): string {
-  if (bytes === null || bytes === undefined || isNaN(bytes)) {
-    return 'N/A';
-  }
-
-  if (bytes === 0) return '0 B';
-
-  const absBytes = Math.abs(bytes);
-  const sign = bytes < 0 ? '-' : '';
-
-  const units = ['B', 'KB', 'MB', 'GB', 'TB', 'PB'];
-  const index = Math.min(
-    Math.floor(Math.log(absBytes) / Math.log(1024)),
-    units.length - 1,
-  );
-  const value = absBytes / Math.pow(1024, index);
-
-  return `${sign}${value.toFixed(decimals)} ${units[index]}`;
+  return _formatDuration(seconds, decimals);
 }
 
 /**
@@ -372,7 +89,7 @@ export function formatBlocks(
     return 'N/A';
   }
 
-  const formatted = formatCompactNumber(blocks, decimals);
+  const formatted = _formatCompactNumber(blocks, decimals);
   // Don't add suffix if formatCompactNumber returned N/A
   return formatted === 'N/A' ? formatted : `${formatted} blocks`;
 }
