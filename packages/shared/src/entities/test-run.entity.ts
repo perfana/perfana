@@ -96,6 +96,9 @@ export class TestRun {
   @Column('text', { array: true, name: 'reasons_not_valid', nullable: true })
   reasonsNotValid?: string[];
 
+  @Column('text', { array: true, name: 'data_warnings', nullable: true })
+  dataWarnings?: string[];
+
   @Column('jsonb', { name: 'adapt_config', nullable: true })
   adaptConfig?: AdaptConfig;
 
