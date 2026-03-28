@@ -575,29 +575,38 @@ export class WorkerDatabaseService implements OnModuleInit {
    * @returns The created or updated status
    */
   async upsertCollectionStatus(status: Partial<DsMetricCollectionStatus>): Promise<DsMetricCollectionStatus> {
-    // First try to find existing status
+    // Ensure row exists atomically to avoid duplicate creation with NULL source_id
+    await this.dataSource.query(
+      `INSERT INTO ds_metric_collection_status
+         (test_run_id, source_type, source_id, collected_ranges, failed_ranges, is_complete, total_data_points, created_at, updated_at)
+       VALUES ($1, $2, $3, '[]'::jsonb, '[]'::jsonb, false, 0, NOW(), NOW())
+       ON CONFLICT (test_run_id, source_type, source_id) DO NOTHING`,
+      [status.test_run_id, status.source_type, status.source_id ?? null]
+    );
+
+    // Now find the existing row and update it with the provided fields
     const existing = await this.getCollectionStatus(
       status.test_run_id!,
       status.source_type!,
       status.source_id ?? null
     );
 
-    if (existing) {
-      // Update existing
-      await this.dsMetricCollectionStatusRepo.update(existing.id, status);
-      this.logger.debug(
-        `Updated collection status for test_run=${status.test_run_id}, source=${status.source_type}/${status.source_id ?? 'null'}`
+    if (!existing) {
+      throw new Error(
+        `Failed to get collection status after upsert for test_run=${status.test_run_id}, source=${status.source_type}/${status.source_id ?? 'null'}`
       );
-      return (await this.dsMetricCollectionStatusRepo.findOne({ where: { id: existing.id } }))!;
-    } else {
-      // Create new
-      const newStatus = this.dsMetricCollectionStatusRepo.create(status);
-      const saved = await this.dsMetricCollectionStatusRepo.save(newStatus);
-      this.logger.debug(
-        `Created collection status for test_run=${status.test_run_id}, source=${status.source_type}/${status.source_id ?? 'null'}`
-      );
-      return saved;
     }
+
+    // Apply updates from the partial status
+    const { test_run_id: _trid, source_type: _st, source_id: _sid, id: _id, ...updateFields } = status;
+    if (Object.keys(updateFields).length > 0) {
+      await this.dsMetricCollectionStatusRepo.update(existing.id, updateFields);
+    }
+
+    this.logger.debug(
+      `Upserted collection status for test_run=${status.test_run_id}, source=${status.source_type}/${status.source_id ?? 'null'}`
+    );
+    return (await this.dsMetricCollectionStatusRepo.findOne({ where: { id: existing.id } }))!;
   }
 
   /**
@@ -644,32 +653,23 @@ export class WorkerDatabaseService implements OnModuleInit {
     sourceId: string | null,
     newRange: { from: Date; to: Date }
   ): Promise<void> {
-    let status = await this.getCollectionStatus(testRunId, sourceType, sourceId);
+    // Atomic upsert using INSERT ON CONFLICT to prevent duplicate rows
+    // when source_id IS NULL (PostgreSQL NULL != NULL in older indexes).
+    // The uq_collection_status index with NULLS NOT DISTINCT handles this,
+    // but we also use atomic SQL to avoid read-then-write races.
+    const rangeJson = JSON.stringify({ from: newRange.from.toISOString(), to: newRange.to.toISOString() });
 
-    // Create record if it doesn't exist (UPSERT pattern)
-    if (!status) {
-      status = this.dsMetricCollectionStatusRepo.create({
-        test_run_id: testRunId,
-        source_type: sourceType,
-        source_id: sourceId ?? undefined, // Convert null to undefined for TypeORM
-        collected_ranges: [],
-        failed_ranges: [],
-        is_complete: false,
-        total_data_points: 0,
-      });
-      status = await this.dsMetricCollectionStatusRepo.save(status);
-      this.logger.debug(
-        `Created new collection status for test_run=${testRunId}, source=${sourceType}/${sourceId ?? 'null'}`
-      );
-    }
-
-    // Append to collected_ranges array
-    const updatedRanges = [...(status.collected_ranges || []), newRange];
-
-    await this.dsMetricCollectionStatusRepo.update(status.id, {
-      collected_ranges: updatedRanges,
-      last_collected_at: new Date(),
-    });
+    await this.dataSource.query(
+      `INSERT INTO ds_metric_collection_status
+         (test_run_id, source_type, source_id, collected_ranges, failed_ranges, is_complete, total_data_points, last_collected_at, created_at, updated_at)
+       VALUES ($1, $2, $3, $4::jsonb, '[]'::jsonb, false, 0, NOW(), NOW(), NOW())
+       ON CONFLICT (test_run_id, source_type, source_id)
+       DO UPDATE SET
+         collected_ranges = ds_metric_collection_status.collected_ranges || $4::jsonb,
+         last_collected_at = NOW(),
+         updated_at = NOW()`,
+      [testRunId, sourceType, sourceId, `[${rangeJson}]`]
+    );
 
     this.logger.debug(
       `Updated collected_ranges for test_run=${testRunId}, source=${sourceType}/${sourceId ?? 'null'}, range=${newRange.from.toISOString()}-${newRange.to.toISOString()}`
@@ -692,22 +692,20 @@ export class WorkerDatabaseService implements OnModuleInit {
     range: { from: Date; to: Date },
     error: string
   ): Promise<void> {
-    let status = await this.getCollectionStatus(testRunId, sourceType, sourceId);
+    // Ensure the row exists atomically (no duplicate creation race)
+    await this.dataSource.query(
+      `INSERT INTO ds_metric_collection_status
+         (test_run_id, source_type, source_id, collected_ranges, failed_ranges, is_complete, total_data_points, created_at, updated_at)
+       VALUES ($1, $2, $3, '[]'::jsonb, '[]'::jsonb, false, 0, NOW(), NOW())
+       ON CONFLICT (test_run_id, source_type, source_id) DO NOTHING`,
+      [testRunId, sourceType, sourceId]
+    );
 
-    // Create record if it doesn't exist (UPSERT pattern)
+    // Now read the guaranteed-existing row
+    const status = await this.getCollectionStatus(testRunId, sourceType, sourceId);
     if (!status) {
-      status = this.dsMetricCollectionStatusRepo.create({
-        test_run_id: testRunId,
-        source_type: sourceType,
-        source_id: sourceId ?? undefined, // Convert null to undefined for TypeORM
-        collected_ranges: [],
-        failed_ranges: [],
-        is_complete: false,
-        total_data_points: 0,
-      });
-      status = await this.dsMetricCollectionStatusRepo.save(status);
-      this.logger.debug(
-        `Created new collection status for test_run=${testRunId}, source=${sourceType}/${sourceId ?? 'null'}`
+      throw new Error(
+        `Failed to get collection status after upsert for test_run=${testRunId}, source=${sourceType}/${sourceId ?? 'null'}`
       );
     }
 
@@ -820,14 +818,20 @@ export class WorkerDatabaseService implements OnModuleInit {
     sourceType: string,
     sourceId: string | null
   ): Promise<void> {
-    const where: Record<string, unknown> = {
-      test_run_id: testRunId,
-      source_type: sourceType,
-    };
-    if (sourceId) {
-      where.source_id = sourceId;
+    if (sourceId === null) {
+      // Must use raw SQL to match source_id IS NULL
+      await this.dataSource.query(
+        `DELETE FROM ds_metric_collection_status
+         WHERE test_run_id = $1 AND source_type = $2 AND source_id IS NULL`,
+        [testRunId, sourceType]
+      );
+    } else {
+      await this.dsMetricCollectionStatusRepo.delete({
+        test_run_id: testRunId,
+        source_type: sourceType,
+        source_id: sourceId,
+      });
     }
-    await this.dsMetricCollectionStatusRepo.delete(where);
     this.logger.debug(`Removed collection status for test_run=${testRunId}, source=${sourceType}/${sourceId ?? 'null'}`);
   }
 
