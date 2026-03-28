@@ -241,7 +241,7 @@ export async function createPanelDocuments(
   // Step 2: Fetch datasource info from Grafana API to get numeric IDs
   const { GrafanaClient } = await import('@perfana/shared/services/grafana');
   const { getGrafanaConfig } = await import('../../config/grafana-config-cache.js');
-  const grafanaConfig = getGrafanaConfig();
+  const grafanaConfig = await getGrafanaConfig();
   const grafanaClient = new GrafanaClient(grafanaConfig);
   const datasourceMap = new Map<string, { id: number; uid: string; name: string; type: string }>();
 

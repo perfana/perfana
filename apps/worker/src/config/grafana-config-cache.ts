@@ -7,28 +7,19 @@ const logger = getLogger('grafana-config-cache');
 /**
  * Singleton Grafana Configuration Cache
  *
- * Eliminates per-job database queries by caching Grafana instance config at startup.
- * This reduces DB connection usage from N queries (one per job) to 1 query (at startup).
- *
- * Connection optimization:
- * - Before: Each metrics job held a connection to query grafana_instances table
- * - After: Single query at startup, no connection held during job execution
+ * Caches Grafana instance config to avoid per-job database queries.
+ * If no instance exists at startup, retries on demand when a job needs it,
+ * so instances added after worker boot are picked up automatically.
  */
 let cachedConfig: GrafanaConfig | null = null;
 let cachedInstanceId: string | null = null;
-let initialized = false;
+let loadPromise: Promise<boolean> | null = null;
 
 /**
- * Initialize Grafana config cache from database using TypeORM.
- * Non-fatal: if no Grafana instance is configured, the worker still starts.
- * Jobs that need Grafana will fail individually via getGrafanaConfig().
+ * Load Grafana config from database.
+ * Returns true if config was loaded, false if no valid instance exists.
  */
-export async function initializeGrafanaConfig(): Promise<void> {
-  if (initialized) {
-    return;
-  }
-  initialized = true;
-
+async function loadFromDatabase(): Promise<boolean> {
   try {
     const db = getDatabaseService();
 
@@ -40,13 +31,12 @@ export async function initializeGrafanaConfig(): Promise<void> {
     const grafanaInstance = grafanaInstances[0];
 
     if (!grafanaInstance) {
-      logger.warn('No Grafana instance configured — Grafana-dependent jobs will fail until one is added');
-      return;
+      return false;
     }
 
     if (!grafanaInstance.server_url || !grafanaInstance.apiKey) {
       logger.warn('Grafana instance missing server_url or apiKey — Grafana-dependent jobs will fail');
-      return;
+      return false;
     }
 
     cachedConfig = {
@@ -57,35 +47,58 @@ export async function initializeGrafanaConfig(): Promise<void> {
     cachedInstanceId = grafanaInstance.id;
 
     logger.info(`Grafana config cached: ${cachedConfig.url} (instance: ${cachedInstanceId})`);
+    return true;
   } catch (error) {
-    logger.warn('Failed to load Grafana config — Grafana-dependent jobs will fail:', error);
+    logger.warn('Failed to load Grafana config:', error);
+    return false;
   }
 }
 
 /**
- * Get cached Grafana config (must call initializeGrafanaConfig first)
- * Throws error if config not initialized - this is intentional to catch bugs
+ * Initialize Grafana config cache from database.
+ * Non-fatal: if no Grafana instance is configured, the worker still starts.
+ * The cache will retry on demand when getGrafanaConfig() is called.
  */
-export function getGrafanaConfig(): GrafanaConfig {
+export async function initializeGrafanaConfig(): Promise<void> {
+  if (cachedConfig) {
+    return;
+  }
+
+  const loaded = await loadFromDatabase();
+  if (!loaded) {
+    logger.warn('No Grafana instance configured — Grafana-dependent jobs will fail until one is added');
+  }
+}
+
+/**
+ * Get Grafana config, retrying from database if not yet cached.
+ * This ensures instances added after worker startup are picked up.
+ */
+export async function getGrafanaConfig(): Promise<GrafanaConfig> {
   if (!cachedConfig) {
-    throw new Error('Grafana config not initialized. Call initializeGrafanaConfig() first.');
+    if (!loadPromise) {
+      loadPromise = loadFromDatabase().finally(() => { loadPromise = null; });
+    }
+    await loadPromise;
+  }
+  if (!cachedConfig) {
+    throw new Error('Grafana config not available. No valid Grafana instance found in database.');
   }
   return cachedConfig;
 }
 
 /**
- * Get cached Grafana instance ID (must call initializeGrafanaConfig first)
- * Returns null if no instance is configured
+ * Get cached Grafana instance ID.
+ * Returns null if no instance is configured.
  */
 export function getGrafanaInstanceId(): string | null {
   return cachedInstanceId;
 }
 
 /**
- * Clear cache (useful for testing or config reload)
+ * Clear cache (useful for testing or when Grafana instance config changes)
  */
 export function clearGrafanaConfigCache(): void {
   cachedConfig = null;
   cachedInstanceId = null;
-  initialized = false;
 }

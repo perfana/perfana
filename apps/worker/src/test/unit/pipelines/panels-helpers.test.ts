@@ -20,7 +20,7 @@ import { testRunFixtures, applicationDashboardFixtures, grafanaDashboardFixtures
 
 // Mock the Grafana config module
 vi.mock('../../../config/grafana-config-cache.js', () => ({
-  getGrafanaConfig: vi.fn(() => ({
+  getGrafanaConfig: vi.fn(async () => ({
     grafanaUrl: 'http://localhost:3000',
     grafanaApiKey: 'test-api-key'
   }))
