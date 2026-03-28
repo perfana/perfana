@@ -151,6 +151,7 @@ export class CreateTestRunHandler implements ICommandHandler<CreateTestRunComman
       expired: entity.expired,
       valid: entity.valid,
       reasons_not_valid: entity.reasonsNotValid,
+      data_warnings: entity.dataWarnings,
       adapt_config: entity.adaptConfig,
       variables: entity.variables,
       deep_links: entity.deepLinks,

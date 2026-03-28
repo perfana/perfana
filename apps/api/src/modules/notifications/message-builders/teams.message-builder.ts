@@ -177,6 +177,13 @@ export class TeamsMessageBuilder {
       });
     }
 
+    if (testRun.dataWarnings?.length) {
+      facts.push({
+        name: 'Data Notices',
+        value: `ℹ️ ${testRun.dataWarnings.join('; ')}`,
+      });
+    }
+
     return facts;
   }
 
