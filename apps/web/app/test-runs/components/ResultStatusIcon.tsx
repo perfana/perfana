@@ -156,6 +156,14 @@ export function ResultStatusIcon({ testRun }: ResultStatusIconProps): JSX.Elemen
               Anomaly Detection
             </Typography>
           </Box>
+
+          {testRun.data_warnings && testRun.data_warnings.length > 0 && (
+            <Box sx={{ mt: 0.5, pt: 0.5, borderTop: '1px solid rgba(255, 255, 255, 0.15)' }}>
+              <Typography variant="body2" sx={{ color: 'rgba(255, 255, 255, 0.7)', fontSize: '0.7rem', fontStyle: 'italic' }}>
+                {testRun.data_warnings.length} data warning(s)
+              </Typography>
+            </Box>
+          )}
         </Box>
       )}
     </Box>

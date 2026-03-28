@@ -3,6 +3,7 @@
 import { useState } from 'react';
 import { Box, Typography, Chip, Button, IconButton, Tooltip, useTheme } from '@mui/material';
 import WarningAmberRoundedIcon from '@mui/icons-material/WarningAmberRounded';
+import InfoOutlinedIcon from '@mui/icons-material/InfoOutlined';
 import SyncIcon from '@mui/icons-material/Sync';
 import VisibilityOffIcon from '@mui/icons-material/VisibilityOff';
 import { TestRun } from '@/types/test-runs';
@@ -98,11 +99,23 @@ export function EvaluationResultsSection({ testRun, onRefreshTriggered, showToas
         {/* Anomaly Detection */}
         <AnomalyDetectionSubsection testRun={testRun} />
 
-        {/* Data Quality */}
+        {/* Data Quality Errors */}
         {testRun.valid === false && testRun.reasons_not_valid && testRun.reasons_not_valid.length > 0 && (
           <DataQualitySubsection
             testRun={testRun}
             reasons={testRun.reasons_not_valid}
+            severity="error"
+            onRefreshTriggered={onRefreshTriggered}
+            showToast={showToast}
+          />
+        )}
+
+        {/* Data Quality Warnings (informational) */}
+        {testRun.data_warnings && testRun.data_warnings.length > 0 && (
+          <DataQualitySubsection
+            testRun={testRun}
+            reasons={testRun.data_warnings}
+            severity="warning"
             onRefreshTriggered={onRefreshTriggered}
             showToast={showToast}
           />
@@ -417,6 +430,7 @@ function AnomalyDetectionSubsection({ testRun }: { testRun: TestRun }) {
 interface DataQualitySubsectionProps {
   testRun: TestRun;
   reasons: string[];
+  severity?: 'error' | 'warning';
   onRefreshTriggered?: () => void;
   showToast?: (message: string) => void;
 }
@@ -447,10 +461,13 @@ function parseSparseMetrics(reason: string): Array<{ dashboardLabel: string; met
   }).filter((m): m is { dashboardLabel: string; metricName: string; detail: string } => m !== null);
 }
 
-function DataQualitySubsection({ testRun, reasons, onRefreshTriggered, showToast }: DataQualitySubsectionProps) {
+function DataQualitySubsection({ testRun, reasons, severity = 'error', onRefreshTriggered, showToast }: DataQualitySubsectionProps) {
   const theme = useTheme();
   const isDark = theme.palette.mode === 'dark';
-  const sectionColor = isDark ? '#ffcc80' : '#ff9800';
+  const isWarning = severity === 'warning';
+  const sectionColor = isWarning
+    ? (isDark ? '#90caf9' : '#42a5f5')
+    : (isDark ? '#ffcc80' : '#ff9800');
   const [isRefreshing, setIsRefreshing] = useState(false);
   const [dismissedMetrics, setDismissedMetrics] = useState<Set<string>>(new Set());
   const [reevaluateTriggered, setReevaluateTriggered] = useState(false);
@@ -559,13 +576,20 @@ function DataQualitySubsection({ testRun, reasons, onRefreshTriggered, showToast
   return (
     <Box sx={{
       p: 2.5,
-      backgroundColor: isDark ? 'rgba(255, 152, 0, 0.06)' : 'rgba(255, 152, 0, 0.03)',
+      backgroundColor: isWarning
+        ? (isDark ? 'rgba(33, 150, 243, 0.04)' : 'rgba(33, 150, 243, 0.02)')
+        : (isDark ? 'rgba(255, 152, 0, 0.06)' : 'rgba(255, 152, 0, 0.03)'),
       borderRadius: 2,
-      border: '1px solid rgba(255, 152, 0, 0.2)',
+      border: isWarning
+        ? '1px solid rgba(33, 150, 243, 0.15)'
+        : '1px solid rgba(255, 152, 0, 0.2)',
     }}>
       <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', mb: 2 }}>
         <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
-          <WarningAmberRoundedIcon sx={{ fontSize: '1rem', color: sectionColor }} />
+          {isWarning
+            ? <InfoOutlinedIcon sx={{ fontSize: '1rem', color: sectionColor }} />
+            : <WarningAmberRoundedIcon sx={{ fontSize: '1rem', color: sectionColor }} />
+          }
           <Typography
             variant="caption"
             sx={{
@@ -576,10 +600,11 @@ function DataQualitySubsection({ testRun, reasons, onRefreshTriggered, showToast
               color: sectionColor,
             }}
           >
-            Data Quality Issues
+            {isWarning ? 'Data Notices' : 'Data Quality Issues'}
           </Typography>
         </Box>
 
+        {!isWarning && (
         <Button
           size="small"
           variant="outlined"
@@ -602,6 +627,7 @@ function DataQualitySubsection({ testRun, reasons, onRefreshTriggered, showToast
         >
           {isRefreshing ? 'Starting...' : 'Fetch missing data and re-evaluate'}
         </Button>
+        )}
       </Box>
 
       <Box component="ul" sx={{ m: 0, pl: 2.5, display: 'flex', flexDirection: 'column', gap: 0.75 }}>
