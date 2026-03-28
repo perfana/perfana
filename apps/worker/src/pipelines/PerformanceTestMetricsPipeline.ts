@@ -930,8 +930,8 @@ export class PerformanceTestMetricsPipeline extends BasePipelineTypeORM {
       totalInserted += await this.insertCompareConfigBatch(
         panelLevelConfigs,
         testRunMetadata,
-        // Uses the partial unique index: (application_dashboard_id, panel_id) WHERE metric_name IS NULL
-        `ON CONFLICT (application_dashboard_id, panel_id) WHERE metric_name IS NULL DO NOTHING`
+        // Must match uniq_ds_compare_config_panel index
+        `ON CONFLICT (system_under_test_id, test_environment, workload, application_dashboard_id, panel_id) WHERE metric_name IS NULL DO NOTHING`
       );
     }
 
@@ -940,7 +940,8 @@ export class PerformanceTestMetricsPipeline extends BasePipelineTypeORM {
       totalInserted += await this.insertCompareConfigBatch(
         metricSpecificConfigs,
         testRunMetadata,
-        `ON CONFLICT (application_dashboard_id, panel_id, metric_name) WHERE metric_name IS NOT NULL DO NOTHING`
+        // Must match uniq_ds_compare_config_metric index
+        `ON CONFLICT (system_under_test_id, test_environment, workload, application_dashboard_id, panel_id, metric_name) WHERE metric_name IS NOT NULL DO NOTHING`
       );
     }
 
