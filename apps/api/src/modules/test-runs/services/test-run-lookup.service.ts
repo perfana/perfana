@@ -55,9 +55,9 @@ export class TestRunLookupService {
       // The unique index uq_system_under_test_name_org ensures this is safe.
       await this.dataSource.query(
         `INSERT INTO systems_under_test (name, description, team_id, organization_id, created_by, updated_by, created_at, updated_at)
-         VALUES ($1, $1, $2, $3, $4, $4, NOW(), NOW())
+         VALUES ($1, $2, $3, $4, $5, $6, NOW(), NOW())
          ON CONFLICT (name, organization_id) DO NOTHING`,
-        [name, team?.id ?? null, organizationId, userId],
+        [name, name, team?.id ?? null, organizationId, userId, userId],
       );
 
       // Now read the guaranteed-existing row
@@ -176,10 +176,11 @@ export class TestRunLookupService {
    */
   async getDefaultTeam(): Promise<{ id: string; name: string } | null> {
     try {
-      let team = await this.teamRepo.findOne({
-        select: ['id', 'name'],
-        order: { created_at: 'ASC' },
-      });
+      // Use raw SQL to find the oldest team — TypeORM findOne requires a where clause
+      const teamRows = await this.dataSource.query(
+        `SELECT id, name FROM teams ORDER BY created_at ASC LIMIT 1`
+      );
+      let team = teamRows.length > 0 ? teamRows[0] as { id: string; name: string } : null;
 
       if (!team) {
         // Use INSERT ON CONFLICT for org creation to handle concurrent calls.
@@ -204,13 +205,14 @@ export class TestRunLookupService {
               description: 'Auto-created default team',
               organization_id: org.id,
             });
-            team = await this.teamRepo.save(newTeam);
+            const saved = await this.teamRepo.save(newTeam);
+            team = { id: saved.id, name: saved.name };
           } catch {
             // Concurrent creation, fetch the existing team
-            team = await this.teamRepo.findOne({
-              select: ['id', 'name'],
-              order: { created_at: 'ASC' },
-            });
+            const rows = await this.dataSource.query(
+              `SELECT id, name FROM teams ORDER BY created_at ASC LIMIT 1`
+            );
+            team = rows.length > 0 ? rows[0] as { id: string; name: string } : null;
           }
         }
       }
