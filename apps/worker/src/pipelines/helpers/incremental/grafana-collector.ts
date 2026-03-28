@@ -53,12 +53,12 @@ export class GrafanaCollector {
   /**
    * Initialize Grafana client with cached configuration
    */
-  private initializeGrafanaClient(): void {
+  private async initializeGrafanaClient(): Promise<void> {
     if (this.grafanaClient) {
       return;
     }
 
-    const grafanaConfig = getGrafanaConfig();
+    const grafanaConfig = await getGrafanaConfig();
     this.grafanaClient = new GrafanaClient(grafanaConfig, this.logger);
     this.logger.info(`Initialized Grafana client with URL: ${grafanaConfig.url}`);
   }
@@ -91,7 +91,7 @@ export class GrafanaCollector {
       this.logger.info(`Collecting Grafana metrics for time range`);
 
       // Initialize Grafana client
-      this.initializeGrafanaClient();
+      await this.initializeGrafanaClient();
 
       // Load panels — prefer metricsSourceIds over applicationDashboardIds
       const panels = await this.loadPanels(testRunId, applicationDashboardIds, metricsSourceIds);

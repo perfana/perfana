@@ -4,6 +4,12 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
+## [0.2.14] - 2026-03-28
+
+### Fixed
+- Worker now picks up Grafana instances added after startup instead of permanently caching the empty state from boot time
+- Eliminated thundering herd: concurrent jobs waiting for Grafana config share a single database query via promise deduplication
+
 ## [0.2.13] - 2026-03-27
 
 ### Fixed

@@ -40,11 +40,10 @@ interface MetricsInput {
 export class MetricsPipeline extends BasePipelineTypeORM {
   private grafanaClient: GrafanaClient | null = null;
 
-  private initializeGrafanaClient(): void {
+  private async initializeGrafanaClient(): Promise<void> {
     if (this.grafanaClient) {return;}
 
-    // Use cached Grafana config - no database connection needed
-    const grafanaConfig = getGrafanaConfig();
+    const grafanaConfig = await getGrafanaConfig();
     this.grafanaClient = new GrafanaClient(grafanaConfig, this.logger);
     this.logger.info(`🔗 Initialized Grafana client with URL: ${grafanaConfig.url}`);
   }
@@ -63,7 +62,7 @@ export class MetricsPipeline extends BasePipelineTypeORM {
       await this.cleanupStaleApplicationDashboards(['ds_metrics']);
 
       // Initialize Grafana client with cached configuration (no DB query)
-      this.initializeGrafanaClient();
+      await this.initializeGrafanaClient();
 
       // Load test run and panels using TypeORM
       const testRun = await this.db.getTestRunByTestRunId(testRunId);

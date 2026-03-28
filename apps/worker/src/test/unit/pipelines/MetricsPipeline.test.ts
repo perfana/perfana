@@ -99,7 +99,7 @@ describe('MetricsPipeline', () => {
     vi.mocked(getLogger).mockReturnValue(mockLogger as any);
 
     // Setup mock Grafana config
-    vi.mocked(grafanaConfigCache.getGrafanaConfig).mockReturnValue({
+    vi.mocked(grafanaConfigCache.getGrafanaConfig).mockResolvedValue({
       url: 'http://grafana.test',
       apiKey: 'test-api-key',
       orgId: '1'

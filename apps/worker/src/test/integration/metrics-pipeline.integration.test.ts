@@ -22,7 +22,7 @@ import type { PanelDocument } from '../../types/pipeline.js';
 
 // Mock Grafana configuration cache
 vi.mock('../../config/grafana-config-cache.js', () => ({
-  getGrafanaConfig: vi.fn(() => ({
+  getGrafanaConfig: vi.fn(async () => ({
     url: 'http://localhost:3000',
     token: 'test-token',
     timeout: 30000
