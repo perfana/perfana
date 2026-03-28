@@ -9,12 +9,10 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
-import {
-  TestRun as TestRunEntity,
-  SystemUnderTest as SystemEntity,
-} from '../../../entities';
+import { TestRun as TestRunEntity } from '../../../entities';
 import { ValidationException } from '../../../common/exceptions/business.exception';
 import { InitTestDto, InitTestResponse } from '../dto/init-test.dto';
+import { TestRunLookupService } from '../services/test-run-lookup.service';
 import safeRegex from 'safe-regex';
 
 @Injectable()
@@ -24,8 +22,7 @@ export class InitTestHandler {
   constructor(
     @InjectRepository(TestRunEntity)
     private readonly testRunRepo: Repository<TestRunEntity>,
-    @InjectRepository(SystemEntity)
-    private readonly systemRepo: Repository<SystemEntity>,
+    private readonly lookupService: TestRunLookupService,
   ) {}
 
   async execute(initDto: InitTestDto, userId: string, organizationId: string): Promise<InitTestResponse> {
@@ -40,23 +37,12 @@ export class InitTestHandler {
         throw new ValidationException('Malicious regex detected in test run pattern');
       }
 
-      // Find system under test with organization filtering
-      // This ensures we get the correct counter for this organization's system
-      const systemUnderTest = await this.systemRepo.findOne({
-        where: {
-          name: initDto.systemUnderTest,
-          organization_id: organizationId,
-        },
-        select: ['id'],
-      });
-
-      if (!systemUnderTest) {
-        // System doesn't exist yet - return the first test run ID
-        // The actual system will be created when /api/test is called
-        const testRunId = `${initDto.systemUnderTest}-${initDto.testEnvironment}-${initDto.workload}-00001`;
-        this.logger.log(`System not found for organization ${organizationId}, generated first test run ID: ${testRunId}`);
-        return { testRunId };
-      }
+      // Find or create system under test so subsequent API calls (e.g. /api/config/keys) work
+      const systemUnderTest = await this.lookupService.findOrCreateSystemUnderTest(
+        initDto.systemUnderTest,
+        userId,
+        organizationId,
+      );
 
       const testRuns = await this.testRunRepo
         .createQueryBuilder('tr')
