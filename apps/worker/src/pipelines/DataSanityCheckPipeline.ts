@@ -24,6 +24,7 @@ export class DataSanityCheckPipeline extends BasePipelineTypeORM {
     try {
       this.logger.info(`Running data sanity check for ${testRunId}`);
       const reasons: string[] = [];
+      const warnings: string[] = [];
 
       const testRun = await this.db.getTestRunByTestRunId(testRunId);
       if (!testRun) {
@@ -142,7 +143,7 @@ export class DataSanityCheckPipeline extends BasePipelineTypeORM {
               const suffix = sparseMetrics.length > 3
                 ? ` and ${sparseMetrics.length - 3} more`
                 : '';
-              reasons.push(
+              warnings.push(
                 `Sparse data: ${sparseMetrics.length} metric(s) have fewer than ${minDataPoints} data points — ${examples.join('; ')}${suffix}`
               );
             }
@@ -246,23 +247,32 @@ export class DataSanityCheckPipeline extends BasePipelineTypeORM {
         }
       }
 
-      // Update test run validity
+      // Update test run validity — only hard errors invalidate, warnings are informational
       const valid = reasons.length === 0;
       await this.db.updateTestRunByTestRunId(testRunId, {
         valid,
-        reasonsNotValid: valid ? null : reasons,
-      } as any);
+        reasonsNotValid: (valid ? null : reasons) as any,
+        dataWarnings: (warnings.length > 0 ? warnings : null) as any,
+      });
 
       const duration = Date.now() - startTime;
-      if (valid) {
+      const allIssues = [...reasons, ...warnings];
+      if (allIssues.length === 0) {
         this.logger.info(`Sanity check passed for ${testRunId} in ${duration}ms`);
       } else {
-        this.logger.warn(
-          `Sanity check found ${reasons.length} issue(s) for ${testRunId} in ${duration}ms: ${reasons.join('; ')}`
-        );
+        if (reasons.length > 0) {
+          this.logger.warn(
+            `Sanity check found ${reasons.length} error(s) for ${testRunId} in ${duration}ms: ${reasons.join('; ')}`
+          );
+        }
+        if (warnings.length > 0) {
+          this.logger.info(
+            `Sanity check found ${warnings.length} warning(s) for ${testRunId} in ${duration}ms: ${warnings.join('; ')}`
+          );
+        }
       }
 
-      return this.createSuccessResult({ valid, reasons }, duration);
+      return this.createSuccessResult({ valid, reasons, warnings }, duration);
 
     } catch (err) {
       const duration = Date.now() - startTime;
