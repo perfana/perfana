@@ -50,6 +50,7 @@ export interface TestRun {
   expired?: boolean;
   valid?: boolean;
   reasons_not_valid?: string[];
+  data_warnings?: string[];
   adapt_config?: AdaptConfig;
   variables?: TestRunVariables;
   deep_links?: DeepLinksCollection;

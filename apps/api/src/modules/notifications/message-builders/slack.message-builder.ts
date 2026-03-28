@@ -189,6 +189,10 @@ export class SlackMessageBuilder {
       lines.push(`:warning: *Data Issues:*\n${testRun.reasonsNotValid.map(r => `  - ${r}`).join('\n')}`);
     }
 
+    if (testRun.dataWarnings?.length) {
+      lines.push(`:information_source: *Data Notices:*\n${testRun.dataWarnings.map(r => `  - ${r}`).join('\n')}`);
+    }
+
     return lines.length > 0 ? lines.join('\n') : 'Test run completed';
   }
 

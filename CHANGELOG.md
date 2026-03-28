@@ -4,6 +4,14 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
+## [0.2.15] - 2026-03-28
+
+### Changed
+- Sparse data warnings no longer invalidate test runs — they are now informational "Data Notices" shown alongside results when all SLO checks completed successfully
+- New `data_warnings` column on test runs separates informational warnings from hard validation errors
+- Frontend shows sparse data as blue "Data Notices" section (informational) instead of orange "Data Quality Issues" (error)
+- Slack and Teams notifications include data warnings as "Data Notices" with info icon
+
 ## [0.2.14] - 2026-03-28
 
 ### Fixed

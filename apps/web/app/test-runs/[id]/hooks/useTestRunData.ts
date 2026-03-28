@@ -52,6 +52,7 @@ function normalizeTestRun(updatedTestRun: TestRun): TestRun {
     created_at: rawTestRun.createdAt || updatedTestRun.created_at,
     updated_at: rawTestRun.updatedAt || updatedTestRun.updated_at,
     reasons_not_valid: rawTestRun.reasonsNotValid || updatedTestRun.reasons_not_valid,
+    data_warnings: rawTestRun.dataWarnings || updatedTestRun.data_warnings,
     adapt_config: rawTestRun.adaptConfig || updatedTestRun.adapt_config,
     is_changepoint: rawTestRun.isChangepoint || updatedTestRun.is_changepoint,
     is_control_group: rawTestRun.isControlGroup || updatedTestRun.is_control_group,
@@ -79,7 +80,9 @@ function areTestRunsEqual(a: TestRun | null, b: TestRun | null): boolean {
     a.is_control_group === b.is_control_group &&
     JSON.stringify(a.tags || []) === JSON.stringify(b.tags || []) &&
     JSON.stringify(a.annotations || []) === JSON.stringify(b.annotations || []) &&
-    JSON.stringify(a.deep_links || {}) === JSON.stringify(b.deep_links || {})
+    JSON.stringify(a.deep_links || {}) === JSON.stringify(b.deep_links || {}) &&
+    JSON.stringify(a.reasons_not_valid || []) === JSON.stringify(b.reasons_not_valid || []) &&
+    JSON.stringify(a.data_warnings || []) === JSON.stringify(b.data_warnings || [])
   );
 }
 

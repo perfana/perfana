@@ -23,6 +23,7 @@ export function normalizeTestRun(testRun: TestRun): TestRun {
     created_at: rawTestRun.createdAt || testRun.created_at,
     updated_at: rawTestRun.updatedAt || testRun.updated_at,
     reasons_not_valid: rawTestRun.reasonsNotValid || testRun.reasons_not_valid,
+    data_warnings: rawTestRun.dataWarnings || testRun.data_warnings,
     adapt_config: rawTestRun.adaptConfig || testRun.adapt_config,
     is_changepoint: rawTestRun.isChangepoint || testRun.is_changepoint,
     is_control_group: rawTestRun.isControlGroup || testRun.is_control_group,
