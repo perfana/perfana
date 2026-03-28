@@ -48,30 +48,26 @@ export class TestRunLookupService {
     organizationId: string,
   ): Promise<SystemUnderTest> {
     try {
-      // Find system by BOTH name AND organization (organization-scoped)
-      // This ensures different orgs can have systems with the same name
-      let systemUnderTest = await this.systemRepo.findOne({
-        where: {
-          name,
-          organization_id: organizationId, // ✅ Systems are scoped to organizations
-        },
+      const team = await this.getDefaultTeam();
+
+      // Atomic upsert: INSERT ON CONFLICT to prevent duplicate systems
+      // when concurrent /api/init calls race for the same name+org.
+      // The unique index uq_system_under_test_name_org ensures this is safe.
+      await this.dataSource.query(
+        `INSERT INTO systems_under_test (name, description, team_id, organization_id, created_by, updated_by, created_at, updated_at)
+         VALUES ($1, $1, $2, $3, $4, $4, NOW(), NOW())
+         ON CONFLICT (name, organization_id) DO NOTHING`,
+        [name, team?.id ?? null, organizationId, userId],
+      );
+
+      // Now read the guaranteed-existing row
+      const systemUnderTest = await this.systemRepo.findOne({
+        where: { name, organization_id: organizationId },
         select: ['id', 'name', 'description', 'team_id', 'organization_id', 'created_at', 'updated_at'],
       });
 
       if (!systemUnderTest) {
-        const team = await this.getDefaultTeam();
-        const newSystem = this.systemRepo.create({
-          name,
-          description: name,
-          team_id: team?.id,
-          organization_id: organizationId,
-          created_by: userId,
-          updated_by: userId,
-        });
-        systemUnderTest = await this.systemRepo.save(newSystem);
-        this.logger.log(
-          `Created new system under test: ${name} in organization ${organizationId} by user ${userId}`,
-        );
+        throw new DatabaseException(`Failed to find system under test after upsert: ${name}`);
       }
 
       return {
@@ -93,30 +89,33 @@ export class TestRunLookupService {
    */
   async findOrCreateTestEnvironment(systemUnderTestId: string, name: string): Promise<TestEnvironment> {
     try {
+      // Atomic upsert using existing unique constraint (system_under_test_id, name)
       const result = await this.dataSource.query(
+        `INSERT INTO system_under_test_test_environments (name, system_under_test_id)
+         VALUES ($1, $2)
+         ON CONFLICT (system_under_test_id, name) DO NOTHING
+         RETURNING id, name, system_under_test_id, created_at`,
+        [name, systemUnderTestId],
+      );
+
+      if (result && result.length > 0) {
+        this.logger.log(`Created new test environment: ${name} for system ${systemUnderTestId}`);
+        return result[0];
+      }
+
+      // Row already existed, fetch it
+      const existing = await this.dataSource.query(
         `SELECT id, name, system_under_test_id, created_at
          FROM system_under_test_test_environments
          WHERE system_under_test_id = $1 AND name = $2`,
         [systemUnderTestId, name],
       );
 
-      if (result && result.length > 0) {
-        return result[0];
+      if (!existing || existing.length === 0) {
+        throw new DatabaseException('Failed to find or create test environment');
       }
 
-      const insertResult = await this.dataSource.query(
-        `INSERT INTO system_under_test_test_environments (name, system_under_test_id)
-         VALUES ($1, $2)
-         RETURNING id, name, system_under_test_id, created_at`,
-        [name, systemUnderTestId],
-      );
-
-      if (!insertResult || insertResult.length === 0) {
-        throw new DatabaseException('Failed to create test environment');
-      }
-
-      this.logger.log(`Created new test environment: ${name} for system ${systemUnderTestId}`);
-      return insertResult[0];
+      return existing[0];
     } catch (error) {
       this.logger.error(`Failed to find or create test environment: ${name}`, error);
       throw error;
@@ -132,17 +131,6 @@ export class TestRunLookupService {
     baselineTestRunId?: string,
   ): Promise<Workload> {
     try {
-      const result = await this.dataSource.query(
-        `SELECT id, name, system_under_test_test_environment_id, config, created_at
-         FROM system_under_test_workloads
-         WHERE system_under_test_test_environment_id = $1 AND name = $2`,
-        [testEnvironmentId, name],
-      );
-
-      if (result && result.length > 0) {
-        return result[0];
-      }
-
       const defaultConfig = {
         baseline_test_run_id: baselineTestRunId,
         auto_compare_test_runs: false,
@@ -150,19 +138,33 @@ export class TestRunLookupService {
         difference_score_threshold: 70,
       };
 
-      const insertResult = await this.dataSource.query(
+      // Atomic upsert using existing unique constraint (test_environment_id, name)
+      const result = await this.dataSource.query(
         `INSERT INTO system_under_test_workloads (name, system_under_test_test_environment_id, config)
          VALUES ($1, $2, $3)
+         ON CONFLICT (system_under_test_test_environment_id, name) DO NOTHING
          RETURNING id, name, system_under_test_test_environment_id, config, created_at`,
         [name, testEnvironmentId, JSON.stringify(defaultConfig)],
       );
 
-      if (!insertResult || insertResult.length === 0) {
-        throw new DatabaseException('Failed to create workload');
+      if (result && result.length > 0) {
+        this.logger.log(`Created new workload: ${name} for environment ${testEnvironmentId}`);
+        return result[0];
       }
 
-      this.logger.log(`Created new workload: ${name} for environment ${testEnvironmentId}`);
-      return insertResult[0];
+      // Row already existed, fetch it
+      const existing = await this.dataSource.query(
+        `SELECT id, name, system_under_test_test_environment_id, config, created_at
+         FROM system_under_test_workloads
+         WHERE system_under_test_test_environment_id = $1 AND name = $2`,
+        [testEnvironmentId, name],
+      );
+
+      if (!existing || existing.length === 0) {
+        throw new DatabaseException('Failed to find or create workload');
+      }
+
+      return existing[0];
     } catch (error) {
       this.logger.error(`Failed to find or create workload: ${name}`, error);
       throw error;
@@ -180,26 +182,36 @@ export class TestRunLookupService {
       });
 
       if (!team) {
-        let org = await this.organizationRepo.findOne({
+        // Use INSERT ON CONFLICT for org creation to handle concurrent calls.
+        // organizations has UNIQUE(name), so this is safe.
+        await this.dataSource.query(
+          `INSERT INTO organizations (name, description, created_at, updated_at)
+           VALUES ($1, $2, NOW(), NOW())
+           ON CONFLICT (name) DO NOTHING`,
+          ['Default Organization', 'Auto-created default organization'],
+        );
+
+        const org = await this.organizationRepo.findOne({
+          where: { name: 'Default Organization' },
           select: ['id'],
-          order: { created_at: 'ASC' },
         });
 
-        if (!org) {
-          const newOrg = this.organizationRepo.create({
-            name: 'Default Organization',
-            description: 'Auto-created default organization',
-          });
-          org = await this.organizationRepo.save(newOrg);
-        }
-
         if (org) {
-          const newTeam = this.teamRepo.create({
-            name: 'Default Team',
-            description: 'Auto-created default team',
-            organization_id: org.id,
-          });
-          team = await this.teamRepo.save(newTeam);
+          // Create team, handling possible concurrent creation
+          try {
+            const newTeam = this.teamRepo.create({
+              name: 'Default Team',
+              description: 'Auto-created default team',
+              organization_id: org.id,
+            });
+            team = await this.teamRepo.save(newTeam);
+          } catch {
+            // Concurrent creation, fetch the existing team
+            team = await this.teamRepo.findOne({
+              select: ['id', 'name'],
+              order: { created_at: 'ASC' },
+            });
+          }
         }
       }
 

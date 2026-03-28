@@ -7,9 +7,7 @@
  */
 
 import { Injectable, Logger } from '@nestjs/common';
-import { InjectRepository } from '@nestjs/typeorm';
-import { Repository } from 'typeorm';
-import { TestRun as TestRunEntity } from '../../../entities';
+import { DataSource } from 'typeorm';
 import { ValidationException } from '../../../common/exceptions/business.exception';
 import { InitTestDto, InitTestResponse } from '../dto/init-test.dto';
 import { TestRunLookupService } from '../services/test-run-lookup.service';
@@ -20,8 +18,7 @@ export class InitTestHandler {
   private readonly logger = new Logger(InitTestHandler.name);
 
   constructor(
-    @InjectRepository(TestRunEntity)
-    private readonly testRunRepo: Repository<TestRunEntity>,
+    private readonly dataSource: DataSource,
     private readonly lookupService: TestRunLookupService,
   ) {}
 
@@ -29,8 +26,6 @@ export class InitTestHandler {
     this.logger.debug(`execute: system=${initDto.systemUnderTest}, userId=${userId}, organizationId=${organizationId}`);
 
     try {
-      let counter = 1;
-
       const testRunPattern = `^${initDto.systemUnderTest}-${initDto.testEnvironment}-${initDto.workload}-[0-9]+$`;
 
       if (!safeRegex(testRunPattern)) {
@@ -44,39 +39,27 @@ export class InitTestHandler {
         organizationId,
       );
 
-      const testRuns = await this.testRunRepo
-        .createQueryBuilder('tr')
-        .select('tr.testRunId')
-        .where('tr.systemUnderTestId = :systemId', { systemId: systemUnderTest.id })
-        .andWhere('tr.testEnvironment = :environment', { environment: initDto.testEnvironment })
-        .andWhere('tr.workload = :workload', { workload: initDto.workload })
-        .andWhere('tr.testRunId LIKE :pattern', {
-          pattern: `${initDto.systemUnderTest}-${initDto.testEnvironment}-${initDto.workload}-%`,
-        })
-        .orderBy('tr.testRunId', 'DESC')
-        .limit(100)
-        .getMany();
+      // Use a single atomic SQL query to find the highest counter.
+      // Extracts the numeric suffix, casts to integer, and computes MAX.
+      // This avoids: (1) lexicographic sort issues with counters > 99999,
+      // (2) limit(100) missing higher counters in gaps, (3) race conditions
+      // where two concurrent /api/init calls both read the same max.
+      const prefix = `${initDto.systemUnderTest}-${initDto.testEnvironment}-${initDto.workload}-`;
+      const result = await this.dataSource.query(
+        `SELECT COALESCE(MAX(
+           CAST(SUBSTRING(test_run_id FROM LENGTH($1) + 1) AS INTEGER)
+         ), 0) AS max_counter
+         FROM test_runs
+         WHERE system_under_test_id = $2
+           AND test_environment = $3
+           AND workload = $4
+           AND test_run_id LIKE $5`,
+        [prefix, systemUnderTest.id, initDto.testEnvironment, initDto.workload, `${prefix}%`],
+      );
 
-      if (testRuns.length > 0) {
-        const regex = new RegExp(testRunPattern);
-        let highestCounter = 0;
-
-        for (const testRun of testRuns) {
-          if (regex.test(testRun.testRunId)) {
-            const testRunParts = testRun.testRunId.split('-');
-            const counterPart = testRunParts[testRunParts.length - 1];
-            const currentCounter = parseInt(counterPart ?? '0', 10);
-            if (currentCounter > highestCounter) {
-              highestCounter = currentCounter;
-            }
-          }
-        }
-
-        counter = highestCounter + 1;
-      }
-
+      const counter = (result[0]?.max_counter ?? 0) + 1;
       const formattedCounter = counter.toString().padStart(5, '0');
-      const testRunId = `${initDto.systemUnderTest}-${initDto.testEnvironment}-${initDto.workload}-${formattedCounter}`;
+      const testRunId = `${prefix}${formattedCounter}`;
 
       this.logger.log(`Generated test run ID: ${testRunId}`);
       return { testRunId };

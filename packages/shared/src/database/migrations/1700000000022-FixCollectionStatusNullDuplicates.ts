@@ -11,6 +11,7 @@ import { MigrationInterface, QueryRunner } from 'typeorm';
  * 1. Merge duplicate NULL source_id rows (keep the one marked complete, or the newest)
  * 2. Drop old unique indexes
  * 3. Recreate with NULLS NOT DISTINCT (PostgreSQL 15+)
+ * 4. Add missing unique constraint on systems_under_test (name, organization_id)
  */
 export class FixCollectionStatusNullDuplicates1700000000022 implements MigrationInterface {
   public async up(queryRunner: QueryRunner): Promise<void> {
@@ -106,9 +107,39 @@ export class FixCollectionStatusNullDuplicates1700000000022 implements Migration
       ON ds_metric_collection_status (test_run_id, source_type, source_id)
       NULLS NOT DISTINCT
     `);
+
+    // Step 5: Add unique constraint on systems_under_test (name, organization_id)
+    // to prevent duplicate systems from concurrent /api/init calls.
+    // First dedup any existing duplicates (keep oldest by created_at).
+    await queryRunner.query(`
+      DELETE FROM systems_under_test
+      WHERE id IN (
+        SELECT id FROM (
+          SELECT id,
+            ROW_NUMBER() OVER (
+              PARTITION BY name, organization_id
+              ORDER BY created_at ASC
+            ) AS rn
+          FROM systems_under_test
+          WHERE organization_id IS NOT NULL
+        ) ranked
+        WHERE rn > 1
+      )
+    `);
+
+    await queryRunner.query(`
+      CREATE UNIQUE INDEX "uq_system_under_test_name_org"
+      ON systems_under_test (name, organization_id)
+      NULLS NOT DISTINCT
+    `);
   }
 
   public async down(queryRunner: QueryRunner): Promise<void> {
+    // Drop the systems_under_test unique index
+    await queryRunner.query(`
+      DROP INDEX IF EXISTS "uq_system_under_test_name_org"
+    `);
+
     // Revert to old unique index (without NULLS NOT DISTINCT)
     await queryRunner.query(`
       DROP INDEX IF EXISTS "uq_collection_status"
