@@ -659,6 +659,8 @@ export class WorkerDatabaseService implements OnModuleInit {
     // but we also use atomic SQL to avoid read-then-write races.
     const rangeJson = JSON.stringify({ from: newRange.from.toISOString(), to: newRange.to.toISOString() });
 
+    // Atomic upsert: append to collected_ranges and remove any failed_range
+    // whose from/to matches the successfully re-collected range.
     await this.dataSource.query(
       `INSERT INTO ds_metric_collection_status
          (test_run_id, source_type, source_id, collected_ranges, failed_ranges, is_complete, total_data_points, last_collected_at, created_at, updated_at)
@@ -666,9 +668,15 @@ export class WorkerDatabaseService implements OnModuleInit {
        ON CONFLICT (test_run_id, source_type, source_id)
        DO UPDATE SET
          collected_ranges = ds_metric_collection_status.collected_ranges || $4::jsonb,
+         failed_ranges = COALESCE(
+           (SELECT jsonb_agg(fr)
+            FROM jsonb_array_elements(ds_metric_collection_status.failed_ranges) fr
+            WHERE NOT (fr->>'from' = $5 AND fr->>'to' = $6)),
+           '[]'::jsonb
+         ),
          last_collected_at = NOW(),
          updated_at = NOW()`,
-      [testRunId, sourceType, sourceId, `[${rangeJson}]`]
+      [testRunId, sourceType, sourceId, `[${rangeJson}]`, newRange.from.toISOString(), newRange.to.toISOString()]
     );
 
     this.logger.debug(
@@ -764,6 +772,7 @@ export class WorkerDatabaseService implements OnModuleInit {
 
     const updateData: any = {
       is_complete: true,
+      failed_ranges: [],
       last_collected_at: new Date(),
     };
 
