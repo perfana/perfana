@@ -112,19 +112,18 @@ export const createTypeOrmConfig = (config: DatabaseConfig): TypeOrmModuleOption
  */
 export const parseSslConfig = (
   dbSslValue?: string
-): boolean | { rejectUnauthorized: boolean } => {
+): boolean | { rejectUnauthorized: boolean; ca?: string } => {
   if (!dbSslValue || dbSslValue === 'false') {
     return false;
   }
 
-  if (dbSslValue === 'true') {
-    // SSL enabled but don't validate certificate (for self-signed certs)
-    return { rejectUnauthorized: false };
-  }
-
-  if (dbSslValue === 'require') {
-    // SSL enabled with certificate validation
-    return { rejectUnauthorized: true };
+  if (dbSslValue === 'true' || dbSslValue === 'require') {
+    // SSL enabled with certificate validation by default.
+    // Provide DB_SSL_CA with a PEM-encoded CA certificate for custom CAs.
+    // Set DB_SSL_REJECT_UNAUTHORIZED=false only for self-signed certs in development.
+    const rejectUnauthorized = process.env.DB_SSL_REJECT_UNAUTHORIZED !== 'false';
+    const ca = process.env.DB_SSL_CA;
+    return ca ? { rejectUnauthorized, ca } : { rejectUnauthorized };
   }
 
   return false;

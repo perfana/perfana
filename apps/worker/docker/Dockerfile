@@ -74,9 +74,6 @@ USER perfana
 HEALTHCHECK --interval=30s --timeout=10s --start-period=5s --retries=3 \
     CMD node -e "process.exit(0)" || exit 1
 
-# Expose debugging port (optional)
-EXPOSE 9229
-
 # Set production environment
 ENV NODE_ENV=production
 

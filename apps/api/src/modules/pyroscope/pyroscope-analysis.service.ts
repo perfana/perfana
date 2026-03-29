@@ -4,6 +4,7 @@ import {
   FlamegraphAnalysisResponseDto,
   FlamegraphDiffDto,
 } from './dto/pyroscope-analysis.dto';
+import { validateExternalUrl } from '../../common/security/url-validator';
 
 /**
  * Pyroscope profile structure (flamebearer format)
@@ -187,6 +188,15 @@ export class PyroscopeAnalysisService {
     // Convert milliseconds to seconds for Pyroscope API
     const fromSeconds = Math.floor(from / 1000);
     const untilSeconds = Math.floor(until / 1000);
+
+    // Validate URL to prevent SSRF
+    const urlValidation = validateExternalUrl(pyroscopeUrl);
+    if (!urlValidation.isValid) {
+      throw new HttpException(
+        `Invalid Pyroscope URL: ${urlValidation.error}`,
+        HttpStatus.BAD_REQUEST,
+      );
+    }
 
     // Normalize the base URL (remove trailing slash)
     const baseUrl = pyroscopeUrl.replace(/\/$/, '');

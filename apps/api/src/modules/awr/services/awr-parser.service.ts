@@ -21,6 +21,7 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
+import { validateExternalUrl } from '../../../common/security/url-validator';
 import { AwrReport, ParseStatus } from '../entities/awr-report.entity';
 import { HtmlAwrParser, type HtmlAwrParserOptions } from '../parsers';
 import type {
@@ -315,6 +316,12 @@ export class AwrParserService {
    * Fetch content from external URL (S3, etc.)
    */
   private async fetchContentFromUrl(url: string): Promise<string> {
+    // Validate URL to prevent SSRF
+    const validation = validateExternalUrl(url);
+    if (!validation.isValid) {
+      throw new Error(`Invalid AWR content URL: ${validation.error}`);
+    }
+
     try {
       const response = await fetch(url);
 

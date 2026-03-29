@@ -1,0 +1,2 @@
+# Protect CI/CD workflow files
+/.github/ @perfana/security

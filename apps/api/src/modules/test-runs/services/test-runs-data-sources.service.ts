@@ -3,6 +3,7 @@ import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import axios from 'axios';
 import { TempoService } from '../../tempo/tempo.service';
+import { validateExternalUrl } from '../../../common/security/url-validator';
 
 const DOWNSTREAM_TIMEOUT_MS = 10_000;
 import {
@@ -221,6 +222,13 @@ export class TestRunsDataSourcesService {
 
     const fromSeconds = Math.floor(fromMs / 1000);
     const untilSeconds = Math.floor(untilMs / 1000);
+
+    // Validate URL to prevent SSRF
+    const urlValidation = validateExternalUrl(backendUrl);
+    if (!urlValidation.isValid) {
+      throw new BadRequestException(`Invalid Pyroscope URL: ${urlValidation.error}`);
+    }
+
     const baseUrl = backendUrl.replace(/\/$/, '');
 
     // Try with service_name first
@@ -933,6 +941,13 @@ export class TestRunsDataSourcesService {
       if (!config) continue;
 
       try {
+        // Validate URL to prevent SSRF
+        const urlValidation = validateExternalUrl(config.host);
+        if (!urlValidation.isValid) {
+          this.logger.warn(`Skipping Dynatrace source ${source.sourceConfigId}: ${urlValidation.error}`);
+          continue;
+        }
+
         const baseUrl = config.host.replace(/\/+$/, '');
         const from = startTime.toISOString();
         const to = endTime.toISOString();

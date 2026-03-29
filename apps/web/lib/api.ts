@@ -36,7 +36,6 @@ function getAuthHeaders(): Record<string, string> {
       if (keycloakToken) {
         persistLog('✅ Keycloak token found', {
           tokenLength: keycloakToken.length,
-          tokenStart: keycloakToken.substring(0, 20) + '...'
         });
         return { 'Authorization': `Bearer ${keycloakToken}` };
       } else {
@@ -47,12 +46,11 @@ function getAuthHeaders(): Record<string, string> {
     }
   }
 
-  // Fallback to traditional token
-  const token = localStorage.getItem('perfana_access_token');
+  // Fallback to traditional token (sessionStorage preferred over localStorage for security)
+  const token = sessionStorage.getItem('perfana_access_token') || localStorage.getItem('perfana_access_token');
   persistLog('🔄 Falling back to traditional token', {
     hasToken: !!token,
     tokenLength: token?.length,
-    tokenStart: token ? token.substring(0, 20) + '...' : 'none'
   });
 
   return token ? { 'Authorization': `Bearer ${token}` } : {};
@@ -81,7 +79,7 @@ async function handleAuthError(response: Response): Promise<boolean> {
 
     // Traditional token refresh
     try {
-      const refreshToken = typeof window !== 'undefined' ? localStorage.getItem('perfana_refresh_token') : null;
+      const refreshToken = typeof window !== 'undefined' ? (sessionStorage.getItem('perfana_refresh_token') || localStorage.getItem('perfana_refresh_token')) : null;
       if (refreshToken) {
         const refreshResponse = await fetch(`${env.API_URL}/auth/refresh`, {
           method: 'POST',
@@ -91,8 +89,8 @@ async function handleAuthError(response: Response): Promise<boolean> {
 
         if (refreshResponse.ok) {
           const data = await refreshResponse.json();
-          localStorage.setItem('perfana_access_token', data.session.access_token);
-          localStorage.setItem('perfana_refresh_token', data.session.refresh_token);
+          sessionStorage.setItem('perfana_access_token', data.session.access_token);
+          sessionStorage.setItem('perfana_refresh_token', data.session.refresh_token);
           return true; // Token refreshed successfully
         }
       }

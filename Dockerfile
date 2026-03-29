@@ -358,9 +358,6 @@ COPY --from=runtime-prep --chown=nonroot:nonroot /app ./
 # Environment variables for production
 ENV NODE_ENV=production
 
-# Expose debugging port (optional)
-EXPOSE 9229
-
 # Health check for container orchestration
 HEALTHCHECK --interval=30s --timeout=10s --start-period=5s --retries=3 \
     CMD ["/nodejs/bin/node", "-e", "process.exit(0)"]

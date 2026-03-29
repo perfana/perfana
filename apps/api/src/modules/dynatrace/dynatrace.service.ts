@@ -7,6 +7,7 @@ import { UpdateDynatraceQueryDto } from './dto/update-dynatrace-query.dto';
 import { CreateEntityMappingDto } from './dto/create-entity-mapping.dto';
 import { HostPropertiesResponse, HostMetricsResponse, HostProblemResponse, TimeSeriesData } from './dto/host.dto';
 import { AuthorizationService } from '../../common/services/authorization.service';
+import { validateExternalUrl } from '../../common/security/url-validator';
 import axios from 'axios';
 import { randomUUID } from 'crypto';
 
@@ -40,7 +41,24 @@ export class DynatraceService {
    *   - https://example.com -> https://example.com
    *   - https://example.com/// -> https://example.com
    */
+  /**
+   * Mask sensitive credentials in a Dynatrace config for API responses.
+   * Returns a shallow copy with tokens replaced by '[MASKED]'.
+   */
+  private maskConfig<T extends { apiToken?: string; platformApiToken?: string }>(config: T): T {
+    return {
+      ...config,
+      apiToken: config.apiToken ? '[MASKED]' : undefined,
+      platformApiToken: config.platformApiToken ? '[MASKED]' : undefined,
+    } as T;
+  }
+
   private normalizeUrl(url: string): string {
+    // Validate URL to prevent SSRF before any outbound request
+    const validation = validateExternalUrl(url);
+    if (!validation.isValid) {
+      throw new BadRequestException(`Invalid Dynatrace URL: ${validation.error}`);
+    }
     return url.replace(/\/+$/, '');
   }
 
@@ -68,7 +86,7 @@ export class DynatraceService {
         config.organizationId === organizationId
       );
       this.logger.debug(`Returning ${filteredConfigs.length} Dynatrace configs for org ${organizationId} (from ${allConfigs.length} total)`);
-      return filteredConfigs;
+      return filteredConfigs.map(c => this.maskConfig(c));
     } else if (!isAdmin) {
       // Get accessible organizations for this user
       const accessibleOrganizations = await this.authzService.getAccessibleOrganizations(userId);
@@ -80,10 +98,10 @@ export class DynatraceService {
       );
 
       this.logger.debug(`Returning ${filteredConfigs.length} Dynatrace configs for user ${userId} (from ${allConfigs.length} total)`);
-      return filteredConfigs;
+      return filteredConfigs.map(c => this.maskConfig(c));
     }
 
-    return allConfigs;
+    return allConfigs.map(c => this.maskConfig(c));
   }
 
   /**
@@ -117,7 +135,7 @@ export class DynatraceService {
       }
     }
 
-    return config;
+    return this.maskConfig(config);
   }
 
   /**
@@ -167,7 +185,7 @@ export class DynatraceService {
     });
 
     this.logger.log(`Dynatrace configuration created: ${normalizedHost} by user ${userId}`);
-    return config;
+    return this.maskConfig(config);
   }
 
   /**

@@ -14,7 +14,9 @@ export const AppDataSource = new DataSource({
   username: process.env.DB_USERNAME || 'perfana',
   password: process.env.DB_PASSWORD || 'perfana',
   database: process.env.DB_NAME || 'perfana_native',
-  ssl: process.env.DB_SSL === 'true' ? { rejectUnauthorized: false } : false,
+  ssl: process.env.DB_SSL === 'true'
+    ? { rejectUnauthorized: process.env.DB_SSL_REJECT_UNAUTHORIZED !== 'false', ...(process.env.DB_SSL_CA ? { ca: process.env.DB_SSL_CA } : {}) }
+    : false,
   entities: [],
   migrations: [path.resolve(__dirname, '../../../packages/shared/dist/database/migrations/*.js')],
   synchronize: false,

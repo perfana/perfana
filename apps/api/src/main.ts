@@ -8,6 +8,7 @@ if (typeof globalThis.crypto === 'undefined') {
 import { NestFactory } from '@nestjs/core';
 import { ValidationPipe, Logger } from '@nestjs/common';
 import { SwaggerModule, DocumentBuilder } from '@nestjs/swagger';
+import helmet from 'helmet';
 import { AppModule } from './app.module';
 import { GlobalExceptionFilter } from './common/filters/global-exception.filter';
 import { ConfigService } from '@nestjs/config';
@@ -84,15 +85,19 @@ async function bootstrap() {
         enableImplicitConversion: true,
       },
       exceptionFactory: (errors) => {
-        logger.error('VALIDATION FAILED - RAW ERRORS:', JSON.stringify(errors, null, 2));
-        // Log each constraint in detail
+        // Log field names and constraints only — never log raw values (may contain credentials)
         errors.forEach(err => {
-          logger.error(`Field: ${err.property}, Value: ${JSON.stringify(err.value)}, Constraints:`, err.constraints);
+          logger.error(`Validation failed on field: ${err.property}, Constraints:`, err.constraints);
         });
-        throw new Error(`Validation failed: ${JSON.stringify(errors)}`);
+        throw new Error(`Validation failed: ${errors.map(e => `${e.property}: ${Object.values(e.constraints || {}).join(', ')}`).join('; ')}`);
       },
     })
   );
+
+  // Security headers (Helmet)
+  app.use(helmet({
+    contentSecurityPolicy: false, // Disabled for Swagger UI compatibility; tighten in production
+  }));
 
   // Global exception filter
   app.useGlobalFilters(new GlobalExceptionFilter());

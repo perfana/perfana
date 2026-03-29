@@ -1,6 +1,7 @@
-import { Injectable, Logger } from '@nestjs/common';
+import { Injectable, Logger, BadRequestException } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
+import { validateExternalUrl } from '../../common/security/url-validator';
 import { TracingInstance } from '@perfana/shared';
 import {
   SearchTracesDto,
@@ -41,6 +42,12 @@ export class TempoService {
     // Convert times to Unix seconds (Tempo API uses seconds, not nanoseconds)
     const startSeconds = Math.floor(new Date(dto.startTime).getTime() / 1000);
     const endSeconds = Math.floor(new Date(dto.endTime).getTime() / 1000);
+
+    // Validate URL to prevent SSRF
+    const urlValidation = validateExternalUrl(instance.tracingApiUrl);
+    if (!urlValidation.isValid) {
+      throw new BadRequestException(`Invalid Tempo URL: ${urlValidation.error}`);
+    }
 
     // Build Tempo API URL using the dedicated API URL
     const baseUrl = instance.tracingApiUrl.replace(/\/$/, '');
@@ -91,6 +98,12 @@ export class TempoService {
       throw new Error(
         `Tracing instance "${instance.label}" does not have an API URL configured.`
       );
+    }
+
+    // Validate URL to prevent SSRF
+    const urlValidation = validateExternalUrl(instance.tracingApiUrl);
+    if (!urlValidation.isValid) {
+      throw new BadRequestException(`Invalid Tempo URL: ${urlValidation.error}`);
     }
 
     const baseUrl = instance.tracingApiUrl.replace(/\/$/, '');
@@ -165,6 +178,12 @@ export class TempoService {
           success: false,
           message: `Tracing instance "${instance.label}" does not have an API URL configured.`,
         };
+      }
+
+      // Validate URL to prevent SSRF
+      const urlValidation = validateExternalUrl(instance.tracingApiUrl);
+      if (!urlValidation.isValid) {
+        return { success: false, message: `Invalid Tempo URL: ${urlValidation.error}` };
       }
 
       const baseUrl = instance.tracingApiUrl.replace(/\/$/, '');
