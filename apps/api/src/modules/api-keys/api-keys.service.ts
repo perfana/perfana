@@ -1,4 +1,4 @@
-import { Injectable, Logger } from '@nestjs/common';
+import { Injectable, Logger, ForbiddenException } from '@nestjs/common';
 import { InjectDataSource } from '@nestjs/typeorm';
 import { DataSource, In } from 'typeorm';
 import { ResourceNotFoundException, ValidationException, DatabaseException } from '../../common/exceptions/business.exception';
@@ -44,7 +44,7 @@ export class ApiKeysService {
     // Check if user is org-admin in any organization
     const isOrgAdmin = await this.authzService.isOrgAdminInAnyOrganization(userId);
     if (!isOrgAdmin) {
-      throw new Error('Organization admin privileges required to manage API keys');
+      throw new ForbiddenException('Organization admin privileges required to manage API keys');
     }
   }
 
