@@ -239,7 +239,7 @@ export class TestRunsGateway
     if (!this.isAdmin(client)) {
       try {
         const result = await this.dataSource.query(
-          `SELECT organization_id FROM test_runs WHERE id = $1 OR test_run_id = $1 LIMIT 1`,
+          `SELECT organization_id FROM test_runs WHERE id::text = $1 OR test_run_id = $1 LIMIT 1`,
           [data.testRunId],
         );
         if (result.length > 0 && result[0].organization_id && client.organizationId) {
