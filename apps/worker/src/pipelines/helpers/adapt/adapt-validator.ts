@@ -213,7 +213,7 @@ export class AdaptValidator {
       FROM ds_metric_statistics ms
       LEFT JOIN ds_control_group_statistics cgs ON (
           cgs.control_group_id = ms.test_run_id AND  -- Assumes testRunId equals controlGroupId
-          cgs.application_dashboard_id = ms.application_dashboard_id AND
+          cgs.metrics_source_id IS NOT DISTINCT FROM ms.metrics_source_id AND
           cgs.panel_id = ms.panel_id AND
           cgs.metric_name = ms.metric_name
       )

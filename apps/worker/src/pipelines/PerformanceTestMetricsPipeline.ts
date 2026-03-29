@@ -681,6 +681,7 @@ export class PerformanceTestMetricsPipeline extends BasePipelineTypeORM {
     interface StatRecord {
       test_run_id: string;
       application_dashboard_id: string;
+      metrics_source_id: string | null;
       panel_id: number;
       metric_name: string;
       benchmark_id: string | null;
@@ -777,6 +778,7 @@ export class PerformanceTestMetricsPipeline extends BasePipelineTypeORM {
       statRecords.push({
         test_run_id: first.test_run_id,
         application_dashboard_id: first.application_dashboard_id,
+        metrics_source_id: first.metrics_source_id || null,
         panel_id: first.panel_id,
         metric_name: first.metric_name?.substring(0, 255),
         benchmark_id: first.benchmark_ids?.[0] || null,
@@ -820,7 +822,7 @@ export class PerformanceTestMetricsPipeline extends BasePipelineTypeORM {
       `🧹 Deleted existing ds_metric_statistics for ${testRunId} in ${Date.now() - deleteStart}ms`
     );
 
-    // Bulk INSERT — 35 params per record, batch size 500 = 17500 params (under 65535 limit)
+    // Bulk INSERT — 36 params per record, batch size 500 = 18000 params (under 65535 limit)
     const batchSize = 500;
     let totalInserted = 0;
 
@@ -830,7 +832,7 @@ export class PerformanceTestMetricsPipeline extends BasePipelineTypeORM {
       const placeholders: string[] = [];
 
       batch.forEach((rec, idx) => {
-        const base = idx * 35;
+        const base = idx * 36;
         placeholders.push(
           `($${base + 1}, $${base + 2}, $${base + 3}, $${base + 4}, $${base + 5}, ` +
           `$${base + 6}, $${base + 7}, $${base + 8}, $${base + 9}, $${base + 10}, ` +
@@ -839,7 +841,7 @@ export class PerformanceTestMetricsPipeline extends BasePipelineTypeORM {
           `$${base + 21}, $${base + 22}, $${base + 23}, $${base + 24}, $${base + 25}, ` +
           `$${base + 26}, $${base + 27}, $${base + 28}, $${base + 29}, $${base + 30}, ` +
           `$${base + 31}, $${base + 32}, NOW(), $${base + 33}, $${base + 34}, $${base + 35}, ` +
-          `'worker-pipeline', 'worker-pipeline')`
+          `$${base + 36}, 'worker-pipeline', 'worker-pipeline')`
         );
         values.push(
           rec.test_run_id,                // 1
@@ -877,6 +879,7 @@ export class PerformanceTestMetricsPipeline extends BasePipelineTypeORM {
           rec.test_run_start,             // 33
           rec.organization_id,            // 34
           rec.team_id,                    // 35
+          rec.metrics_source_id,          // 36
         );
       });
 
@@ -889,7 +892,7 @@ export class PerformanceTestMetricsPipeline extends BasePipelineTypeORM {
           q10, q25, q75, q90, q95, q99, percentiles,
           iqr, idr, is_constant, constant_value, all_missing, pct_missing, missing_percentage,
           updated_at, test_run_start, organization_id, team_id,
-          created_by, updated_by
+          metrics_source_id, created_by, updated_by
         ) VALUES ${placeholders.join(', ')}
       `;
 

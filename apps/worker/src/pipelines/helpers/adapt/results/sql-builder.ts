@@ -200,7 +200,7 @@ export class AdaptResultsSQLBuilder {
           FROM test_metrics tm
           LEFT JOIN ds_control_group_statistics cgs ON (
               cgs.control_group_id = tm.control_group_id
-              AND cgs.application_dashboard_id = tm.application_dashboard_id
+              AND cgs.metrics_source_id IS NOT DISTINCT FROM tm.metrics_source_id
               AND cgs.panel_id::text = tm.panel_id
               AND cgs.metric_name = tm.metric_name
           )
