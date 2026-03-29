@@ -58,6 +58,8 @@ export class OrganizationMembersService {
       const deletedCount = result?.[1] ?? 0;
       if (deletedCount > 0) {
         this.logger.log(`Revoked ${deletedCount} API key(s) for user ${userId} in organization ${organizationId}`);
+        // Note: API key validation cache (Redis) will expire via TTL.
+        // Full cache invalidation requires ApiKeyCacheService which is not available here.
       }
     } catch (error) {
       // Log but don't fail the membership removal

@@ -92,7 +92,7 @@ export class TestRunsQueryService {
 
     const orgId = result[0].organization_id;
     // Legacy test runs (null org) are accessible to all authenticated users
-    if (orgId && organizationIds.length > 0 && !organizationIds.includes(orgId)) {
+    if (orgId && !organizationIds.includes(orgId)) {
       throw new ForbiddenException('Access denied to this test run');
     }
   }

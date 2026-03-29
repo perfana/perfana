@@ -244,6 +244,9 @@ export class KeycloakEnhancedAuthGuard implements CanActivate {
 
       // Verify the JWT token (issuer + signature + audience)
       const clientId = this.configService.get('KEYCLOAK_CLIENT_ID');
+      if (!clientId) {
+        this.logger.warn('KEYCLOAK_CLIENT_ID not configured — audience validation disabled');
+      }
       const { payload } = await jwtVerify(token, JWKS, {
         issuer: acceptedIssuers,
         audience: clientId || undefined,

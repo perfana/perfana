@@ -52,7 +52,7 @@ export class DataScienceController {
     if (result.length === 0) return;
 
     const orgId = result[0].organization_id;
-    if (orgId && organizationIds.length > 0 && !organizationIds.includes(orgId)) {
+    if (orgId && !organizationIds.includes(orgId)) {
       throw new ForbiddenException('Access denied to this test run');
     }
   }
