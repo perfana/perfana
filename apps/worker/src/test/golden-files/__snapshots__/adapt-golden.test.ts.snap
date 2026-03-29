@@ -68,7 +68,7 @@ exports[`ADAPT SQL Builder Golden-File Tests > AdaptResultsSQLBuilder > buildAda
           FROM test_metrics tm
           LEFT JOIN ds_control_group_statistics cgs ON (
               cgs.control_group_id = tm.control_group_id
-              AND cgs.metrics_source_id = tm.metrics_source_id
+              AND cgs.application_dashboard_id = tm.application_dashboard_id
               AND cgs.panel_id::text = tm.panel_id
               AND cgs.metric_name = tm.metric_name
           )
@@ -696,7 +696,7 @@ exports[`ADAPT SQL Builder Golden-File Tests > AdaptResultsSQLBuilder > buildAda
           FROM test_metrics tm
           LEFT JOIN ds_control_group_statistics cgs ON (
               cgs.control_group_id = tm.control_group_id
-              AND cgs.metrics_source_id = tm.metrics_source_id
+              AND cgs.application_dashboard_id = tm.application_dashboard_id
               AND cgs.panel_id::text = tm.panel_id
               AND cgs.metric_name = tm.metric_name
           )
