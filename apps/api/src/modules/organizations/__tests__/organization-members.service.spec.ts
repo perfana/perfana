@@ -9,7 +9,7 @@
  */
 
 import { Test, TestingModule } from '@nestjs/testing';
-import { getRepositoryToken } from '@nestjs/typeorm';
+import { getRepositoryToken, getDataSourceToken } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { NotFoundException, ConflictException } from '@nestjs/common';
 import {
@@ -82,6 +82,10 @@ describe('OrganizationMembersService', () => {
           useValue: {
             getUserById: jest.fn(),
           },
+        },
+        {
+          provide: getDataSourceToken(),
+          useValue: { query: jest.fn().mockResolvedValue([null, 0]) },
         },
       ],
     }).compile();

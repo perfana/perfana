@@ -35,10 +35,10 @@ export class TestRunsComparisonController {
   @ApiResponse({ status: 409, description: 'Expected config change already exists' })
   async createExpectedConfigChange(
     @Body() createDto: CreateExpectedConfigChangeDto,
-    @UserCtx() _ctx: UserContext,
+    @UserCtx() ctx: UserContext,
   ) {
     this.logger.debug('Creating expected config change', { createDto });
-    return this.testRunsService.createExpectedConfigChange(createDto);
+    return this.testRunsService.createExpectedConfigChange(createDto, ctx.userId, ctx.roles);
   }
 
   @Delete('expected-config-changes')
@@ -51,7 +51,7 @@ export class TestRunsComparisonController {
     @Query('environment') environment: string,
     @Query('workload') workload: string,
     @Query('configKey') configKey: string,
-    @UserCtx() _ctx: UserContext,
+    @UserCtx() ctx: UserContext,
   ) {
     this.logger.debug('Deleting expected config change', { system, environment, workload, configKey });
 
@@ -59,7 +59,7 @@ export class TestRunsComparisonController {
       throw new ValidationException('System, environment, workload, and configKey are required');
     }
 
-    await this.testRunsService.deleteExpectedConfigChange(system, environment, workload, configKey);
+    await this.testRunsService.deleteExpectedConfigChange(system, environment, workload, configKey, ctx.userId, ctx.roles);
 
     return {
       message: 'Expected config change deleted successfully',
@@ -74,10 +74,10 @@ export class TestRunsComparisonController {
   @ApiResponse({ status: 400, description: 'Invalid parameters' })
   async getSparseMetricExclusions(
     @Query() query: RequiredTestRunQueryDto,
-    @UserCtx() _ctx: UserContext,
+    @UserCtx() ctx: UserContext,
   ) {
     this.logger.debug('Getting sparse metric exclusions', { query });
-    return this.testRunsService.getSparseMetricExclusions(query.system, query.environment, query.workload);
+    return this.testRunsService.getSparseMetricExclusions(query.system, query.environment, query.workload, ctx.userId, ctx.roles);
   }
 
   @Post('sparse-metric-exclusions')
@@ -86,10 +86,10 @@ export class TestRunsComparisonController {
   @ApiResponse({ status: 400, description: 'Invalid request data' })
   async createSparseMetricExclusion(
     @Body() createDto: CreateSparseMetricExclusionDto,
-    @UserCtx() _ctx: UserContext,
+    @UserCtx() ctx: UserContext,
   ) {
     this.logger.debug('Creating sparse metric exclusion', { createDto });
-    return this.testRunsService.createSparseMetricExclusion(createDto);
+    return this.testRunsService.createSparseMetricExclusion(createDto, ctx.userId, ctx.roles);
   }
 
   @Delete('sparse-metric-exclusions')
@@ -103,7 +103,7 @@ export class TestRunsComparisonController {
     @Query('workload') workload: string,
     @Query('dashboardLabel') dashboardLabel: string,
     @Query('metricName') metricName: string,
-    @UserCtx() _ctx: UserContext,
+    @UserCtx() ctx: UserContext,
   ) {
     this.logger.debug('Deleting sparse metric exclusion', { system, environment, workload, dashboardLabel, metricName });
 
@@ -111,7 +111,7 @@ export class TestRunsComparisonController {
       throw new ValidationException('System, environment, workload, dashboardLabel, and metricName are required');
     }
 
-    await this.testRunsService.deleteSparseMetricExclusion(system, environment, workload, dashboardLabel, metricName);
+    await this.testRunsService.deleteSparseMetricExclusion(system, environment, workload, dashboardLabel, metricName, ctx.userId, ctx.roles);
 
     return {
       message: 'Sparse metric exclusion deleted successfully',
@@ -128,7 +128,7 @@ export class TestRunsComparisonController {
     @Query('system') system: string,
     @Query('environment') environment: string,
     @Query('workload') workload: string,
-    @UserCtx() _ctx: UserContext,
+    @UserCtx() ctx: UserContext,
   ) {
     this.logger.debug('Getting latest config keys', { system, environment, workload });
 
@@ -136,7 +136,7 @@ export class TestRunsComparisonController {
       throw new ValidationException('System, environment, and workload are required');
     }
 
-    return this.testRunsService.getLatestConfigKeys(system, environment, workload);
+    return this.testRunsService.getLatestConfigKeys(system, environment, workload, ctx.userId, ctx.roles);
   }
 
   // ==================== Test Run Configs Endpoints ====================

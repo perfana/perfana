@@ -6,6 +6,8 @@ import { ApiKey } from '../../entities';
 import { ResourceNotFoundException, ValidationException } from '../../common/exceptions/business.exception';
 import { CreateApiKeyDto } from './dto/create-api-key.dto';
 import { UserContext } from '../../common/decorators/user-context.decorator';
+import { AuthorizationService } from '../../common/services/authorization.service';
+import { createAuthorizationServiceMock } from '../../../test/mocks/authorization-service.mock';
 
 describe('ApiKeysController', () => {
   let controller: ApiKeysController;
@@ -57,6 +59,10 @@ describe('ApiKeysController', () => {
             warmCaches: jest.fn(),
             getUserOrganizations: jest.fn(),
           },
+        },
+        {
+          provide: AuthorizationService,
+          useValue: createAuthorizationServiceMock(),
         },
       ],
     }).compile();

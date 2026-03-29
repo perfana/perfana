@@ -4,8 +4,8 @@ import {
   NotFoundException,
   ConflictException,
 } from '@nestjs/common';
-import { InjectRepository } from '@nestjs/typeorm';
-import { Repository } from 'typeorm';
+import { InjectRepository, InjectDataSource } from '@nestjs/typeorm';
+import { Repository, DataSource } from 'typeorm';
 import { Organization, OrganizationMember } from '../../entities';
 import { OrganizationRole } from '../../constants/roles.constants';
 import { KeycloakAdminService } from '../auth/keycloak-admin.service';
@@ -42,7 +42,32 @@ export class OrganizationMembersService {
     @InjectRepository(Organization)
     private readonly organizationRepository: Repository<Organization>,
     private readonly keycloakAdminService: KeycloakAdminService,
+    @InjectDataSource() private readonly dataSource: DataSource,
   ) {}
+
+  /**
+   * Revoke API keys created by a user for a specific organization.
+   * Called when a user is removed from an organization to prevent orphaned keys.
+   */
+  private async revokeApiKeysForUser(userId: string, organizationId: string): Promise<void> {
+    try {
+      const result = await this.dataSource.query(
+        `DELETE FROM api_keys WHERE created_by = $1 AND organization_id = $2`,
+        [userId, organizationId],
+      );
+      const deletedCount = result?.[1] ?? 0;
+      if (deletedCount > 0) {
+        this.logger.log(`Revoked ${deletedCount} API key(s) for user ${userId} in organization ${organizationId}`);
+        // Note: API key validation cache (Redis) will expire via TTL.
+        // Full cache invalidation requires ApiKeyCacheService which is not available here.
+      }
+    } catch (error) {
+      // Log but don't fail the membership removal
+      this.logger.error(
+        `Failed to revoke API keys for user ${userId} in organization ${organizationId}: ${error instanceof Error ? error.message : 'Unknown error'}`,
+      );
+    }
+  }
 
   /**
    * Find all members of an organization
@@ -336,6 +361,9 @@ export class OrganizationMembersService {
       const member = await this.findOne(id);
       await this.memberRepository.remove(member);
 
+      // Revoke API keys created by this user for this organization
+      await this.revokeApiKeysForUser(member.user_id, member.organization_id);
+
       this.logger.log(
         `Removed user ${member.user_id} from organization ${member.organization_id}`,
       );
@@ -368,6 +396,9 @@ export class OrganizationMembersService {
       }
 
       await this.memberRepository.remove(member);
+
+      // Revoke API keys created by this user for this organization
+      await this.revokeApiKeysForUser(userId, organizationId);
 
       this.logger.log(
         `Removed user ${userId} from organization ${organizationId}`,

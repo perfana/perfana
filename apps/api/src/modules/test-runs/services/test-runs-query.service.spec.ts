@@ -13,6 +13,7 @@
  * '@/test/helpers/mock-repository.factory'.
  */
 import { Test, TestingModule } from '@nestjs/testing';
+import { getDataSourceToken } from '@nestjs/typeorm';
 import { TestRunsQueryService, TestRun } from './test-runs-query.service';
 import { TestRunsCrudQueryService } from './test-runs-crud-query.service';
 import { TestRunsDashboardQueryService } from './test-runs-dashboard-query.service';
@@ -175,6 +176,10 @@ describe('TestRunsQueryService', () => {
         {
           provide: TestRunsTimeSeriesQueryService,
           useValue: mockTimeSeriesService,
+        },
+        {
+          provide: getDataSourceToken(),
+          useValue: { query: jest.fn().mockResolvedValue([]) },
         },
         {
           provide: AuthorizationService,

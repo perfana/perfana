@@ -58,7 +58,7 @@ export class ReportTemplateController {
   @ApiQuery({ name: 'sortOrder', required: false, description: 'Sort order (default: desc)' })
   @ApiResponse({ status: 200, description: 'Return paginated list of templates', type: TemplateListResponseDto })
   @ApiResponse({ status: 401, description: 'Unauthorized - valid authentication required' })
-  async findAll(@Query() query: ListTemplatesQueryDto): Promise<TemplateListResponseDto> {
+  async findAll(@Query() query: ListTemplatesQueryDto, @UserCtx() _ctx: UserContext): Promise<TemplateListResponseDto> {
     try {
       const result = await this.reportTemplateService.findAll({
         systemId: query.system_id,
@@ -113,6 +113,7 @@ export class ReportTemplateController {
     @Query('system_id') systemId?: string,
     @Query('test_environment') testEnvironment?: string,
     @Query('workload') workload?: string,
+    @UserCtx() _ctx?: UserContext,
   ): Promise<TemplateSummaryDto[]> {
     try {
       // Default to '*' if not provided for wildcard matching
@@ -157,6 +158,7 @@ export class ReportTemplateController {
     @Query('system_id') systemId?: string,
     @Query('test_environment') testEnvironment?: string,
     @Query('workload') workload?: string,
+    @UserCtx() _ctx?: UserContext,
   ): Promise<TemplateDetailDto> {
     try {
       // Default to '*' if not provided for wildcard matching
@@ -315,7 +317,7 @@ export class ReportTemplateController {
   @ApiResponse({ status: 200, description: 'Return the template', type: TemplateDetailDto })
   @ApiResponse({ status: 401, description: 'Unauthorized - valid authentication required' })
   @ApiResponse({ status: 404, description: 'Template not found' })
-  async findOne(@Param('templateId') templateId: string): Promise<TemplateDetailDto> {
+  async findOne(@Param('templateId') templateId: string, @UserCtx() _ctx?: UserContext): Promise<TemplateDetailDto> {
     try {
       const template = await this.reportTemplateService.findById(templateId);
 
@@ -362,6 +364,7 @@ export class ReportTemplateController {
   async update(
     @Param('templateId') templateId: string,
     @Body() dto: UpdateTemplateDto,
+    @UserCtx() _ctx?: UserContext,
   ): Promise<TemplateDetailDto> {
     try {
       const template = await this.reportTemplateService.update(templateId, {
@@ -433,7 +436,7 @@ export class ReportTemplateController {
   @ApiResponse({ status: 204, description: 'Template deleted successfully' })
   @ApiResponse({ status: 401, description: 'Unauthorized - valid authentication required' })
   @ApiResponse({ status: 404, description: 'Template not found' })
-  async delete(@Param('templateId') templateId: string): Promise<void> {
+  async delete(@Param('templateId') templateId: string, @UserCtx() _ctx?: UserContext): Promise<void> {
     try {
       await this.reportTemplateService.delete(templateId);
       this.logger.log(`Template ${templateId} deleted`);
@@ -578,6 +581,7 @@ export class ReportTemplateController {
   async addSection(
     @Param('templateId') templateId: string,
     @Body() dto: AddSectionDto,
+    @UserCtx() _ctx?: UserContext,
   ): Promise<TemplateDetailDto> {
     try {
       const template = await this.reportTemplateService.addSection(templateId, {
@@ -635,6 +639,7 @@ export class ReportTemplateController {
   async removeSection(
     @Param('templateId') templateId: string,
     @Param('sectionIndex') sectionIndex: string,
+    @UserCtx() _ctx?: UserContext,
   ): Promise<TemplateDetailDto> {
     try {
       const sectionOrder = parseInt(sectionIndex, 10);
@@ -688,6 +693,7 @@ export class ReportTemplateController {
   async reorderSections(
     @Param('templateId') templateId: string,
     @Body() dto: ReorderSectionsDto,
+    @UserCtx() _ctx?: UserContext,
   ): Promise<TemplateDetailDto> {
     try {
       const template = await this.reportTemplateService.reorderSections(

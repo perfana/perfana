@@ -88,7 +88,7 @@ export class TestRunsAnalysisController {
     @Query('systemUnderTestId') systemUnderTestId: string,
     @Query('testEnvironment') testEnvironment: string,
     @Query('workload') workload: string,
-    @UserCtx() _ctx: UserContext,
+    @UserCtx() ctx: UserContext,
   ) {
     this.logger.debug('Getting test runs after changepoint', { systemUnderTestId, testEnvironment, workload });
 
@@ -100,6 +100,8 @@ export class TestRunsAnalysisController {
       systemUnderTestId,
       testEnvironment,
       workload,
+      ctx.userId,
+      ctx.roles,
     );
   }
 
@@ -116,7 +118,7 @@ export class TestRunsAnalysisController {
     @Query('testEnvironment') testEnvironment: string,
     @Query('workload') workload: string,
     @Query('baseTestRunId') baseTestRunId: string,
-    @UserCtx() _ctx: UserContext,
+    @UserCtx() ctx: UserContext,
   ) {
     this.logger.debug('Getting test runs more recent than', { systemUnderTestId, testEnvironment, workload, baseTestRunId });
 
@@ -129,6 +131,8 @@ export class TestRunsAnalysisController {
       testEnvironment,
       workload,
       baseTestRunId,
+      ctx.userId,
+      ctx.roles,
     );
   }
 
@@ -139,10 +143,11 @@ export class TestRunsAnalysisController {
   @ApiResponse({ status: 500, description: 'Internal server error' })
   async markAsChangepoint(
     @Body() markChangepointDto: MarkChangepointDto,
-    @UserCtx() _ctx: UserContext,
+    @UserCtx() ctx: UserContext,
   ) {
     this.logger.debug('Marking test run as changepoint', { markChangepointDto });
 
+    await this.testRunsService.verifyTestRunAccess(markChangepointDto.testRunId, ctx.userId, ctx.roles);
     return this.testRunsService.markAsChangepoint(
       markChangepointDto.systemUnderTestId,
       markChangepointDto.testEnvironment,
@@ -158,10 +163,11 @@ export class TestRunsAnalysisController {
   @ApiResponse({ status: 500, description: 'Internal server error' })
   async removeChangepoint(
     @Body() markChangepointDto: MarkChangepointDto,
-    @UserCtx() _ctx: UserContext,
+    @UserCtx() ctx: UserContext,
   ) {
     this.logger.debug('Removing test run changepoint', { markChangepointDto });
 
+    await this.testRunsService.verifyTestRunAccess(markChangepointDto.testRunId, ctx.userId, ctx.roles);
     return this.testRunsService.removeChangepoint(
       markChangepointDto.systemUnderTestId,
       markChangepointDto.testEnvironment,
@@ -256,13 +262,14 @@ export class TestRunsAnalysisController {
   @ApiResponse({ status: 404, description: 'Test run not found' })
   async getAnomalyDetectionResults(
     @Param('testRunId') testRunId: string,
-    @UserCtx() _ctx: UserContext,
+    @UserCtx() ctx: UserContext,
     @Query('system') system?: string,
     @Query('environment') environment?: string,
     @Query('workload') workload?: string,
   ) {
     this.logger.debug('Getting anomaly detection results', { testRunId, system, environment, workload });
 
+    await this.testRunsService.verifyTestRunAccess(testRunId, ctx.userId, ctx.roles);
     return this.testRunsService.getAnomalyDetectionResults(
       testRunId,
       system,
@@ -282,10 +289,11 @@ export class TestRunsAnalysisController {
   async deleteAnomalyData(
     @Param('testRunId') testRunId: string,
     @Body() deleteDto: DeleteAnomalyDto,
-    @UserCtx() _ctx: UserContext,
+    @UserCtx() ctx: UserContext,
   ) {
     this.logger.debug('Deleting anomaly data', { testRunId, deleteDto });
 
+    await this.testRunsService.verifyTestRunAccess(testRunId, ctx.userId, ctx.roles);
     const result = await this.testRunsService.deleteAnomalyData(testRunId, deleteDto);
 
     return {
@@ -307,7 +315,7 @@ export class TestRunsAnalysisController {
     @Query('applicationDashboardId') applicationDashboardId: string,
     @Query('panelId') panelId: string,
     @Query('metricName') metricName: string,
-    @UserCtx() _ctx: UserContext,
+    @UserCtx() ctx: UserContext,
   ) {
     this.logger.debug('Getting DS adapt result', { testRunId, applicationDashboardId, panelId, metricName });
 
@@ -315,6 +323,7 @@ export class TestRunsAnalysisController {
       throw new ValidationException('applicationDashboardId, panelId, and metricName are required');
     }
 
+    await this.testRunsService.verifyTestRunAccess(testRunId, ctx.userId, ctx.roles);
     return this.testRunsService.getDsAdaptResult(
       testRunId,
       applicationDashboardId,

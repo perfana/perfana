@@ -16,7 +16,7 @@ import { TestRunsDashboardQueryService } from './test-runs-dashboard-query.servi
 import { TestRunsPerformanceQueryService } from './test-runs-performance-query.service';
 import { TestRunsTimeSeriesQueryService } from './test-runs-timeseries-query.service';
 import { Repository } from 'typeorm';
-import { getRepositoryToken } from '@nestjs/typeorm';
+import { getRepositoryToken, getDataSourceToken } from '@nestjs/typeorm';
 import {
   TestRun as TestRunEntity,
   SystemUnderTest,
@@ -198,6 +198,10 @@ describe('TestRunsQueryService - getTransactionStats', () => {
         {
           provide: AuthorizationService,
           useValue: createAuthorizationServiceMock(),
+        },
+        {
+          provide: getDataSourceToken(),
+          useValue: { query: jest.fn().mockResolvedValue([]) },
         },
       ],
     }).compile();

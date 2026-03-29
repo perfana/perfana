@@ -7,6 +7,7 @@ import {
   SearchTracesResponseDto,
   TraceDetailsResponseDto,
 } from './dto/tempo.dto';
+import { UserCtx, UserContext } from '../../common/decorators/user-context.decorator';
 
 @ApiTags('tempo')
 @Controller('tempo')
@@ -27,7 +28,7 @@ export class TempoController {
   })
   @ApiResponse({ status: 400, description: 'Invalid request parameters' })
   @ApiResponse({ status: 500, description: 'Failed to search Tempo' })
-  async searchTraces(@Body() dto: SearchTracesDto): Promise<SearchTracesResponseDto> {
+  async searchTraces(@Body() dto: SearchTracesDto, @UserCtx() _ctx: UserContext): Promise<SearchTracesResponseDto> {
     return this.tempoService.searchTraces(dto);
   }
 
@@ -47,6 +48,7 @@ export class TempoController {
   async getTraceDetails(
     @Param('traceId') traceId: string,
     @Body() dto: GetTraceDto,
+    @UserCtx() _ctx: UserContext,
   ): Promise<TraceDetailsResponseDto> {
     return this.tempoService.getTraceDetails(dto.tracingInstanceId, traceId);
   }
@@ -69,6 +71,7 @@ export class TempoController {
   })
   async healthCheck(
     @Body() dto: GetTraceDto,
+    @UserCtx() _ctx: UserContext,
   ): Promise<{ success: boolean; message: string }> {
     return this.tempoService.healthCheck(dto.tracingInstanceId);
   }

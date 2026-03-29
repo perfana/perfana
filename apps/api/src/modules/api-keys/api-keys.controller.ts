@@ -1,16 +1,20 @@
-import { Controller, Get, Post, Delete, Body, Param, Query, BadRequestException } from '@nestjs/common';
+import { Controller, Get, Post, Delete, Body, Param, Query, BadRequestException, ForbiddenException } from '@nestjs/common';
 import { ApiTags, ApiOperation, ApiResponse, ApiBearerAuth } from '@nestjs/swagger';
 import { ApiKeysService } from './api-keys.service';
 import { CreateApiKeyDto, ApiKeyDto, CreateApiKeyResponseDto } from './dto/create-api-key.dto';
 import { AdminOnly } from '../../decorators/admin-only.decorator';
 import { ThrottleConfig } from '../../decorators/throttle-config.decorator';
 import { UserCtx, UserContext } from '../../common/decorators/user-context.decorator';
+import { AuthorizationService } from '../../common/services/authorization.service';
 
 @ApiTags('api-keys')
 @Controller('api-keys')
 @ApiBearerAuth()
 export class ApiKeysController {
-  constructor(private readonly apiKeysService: ApiKeysService) {}
+  constructor(
+    private readonly apiKeysService: ApiKeysService,
+    private readonly authzService: AuthorizationService,
+  ) {}
 
   @Get()
   @ApiOperation({ summary: 'Get all API keys' })
@@ -47,7 +51,14 @@ export class ApiKeysController {
       organizationId = userOrgs[0];
     }
 
-    // At this point, organizationId is guaranteed to be set (either from DTO, context, or database query)
+    // Validate user belongs to the target organization (prevents creating keys for orgs you don't belong to)
+    if (!this.authzService.isGlobalAdmin(ctx.roles)) {
+      const userOrgs = await this.authzService.getAccessibleOrganizations(ctx.userId);
+      if (!userOrgs.includes(organizationId!)) {
+        throw new ForbiddenException('Cannot create API key for an organization you do not belong to');
+      }
+    }
+
     const result = await this.apiKeysService.createApiKey(createDto, ctx.userId, ctx.roles, organizationId!);
 
     return {

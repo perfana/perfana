@@ -195,6 +195,9 @@ export class ApiKeysService {
       // Hash the token
       const hashedToken = await bcrypt.hash(token, this.saltRounds);
 
+      // Prevent privilege escalation: validate requested roles against creator's roles
+      this.validateRequestedRoles(createDto.roles || [], roles);
+
       // Default to empty roles (principle of least privilege) if not provided
       const apiKeyRoles = createDto.roles || [];
 
@@ -245,6 +248,14 @@ export class ApiKeysService {
       const apiKey = await this.apiKeyRepository.findById(id);
       if (!apiKey) {
         throw new ResourceNotFoundException('API key', id);
+      }
+
+      // Verify user has admin access to the key's organization (not just any org)
+      if (!this.authzService.isGlobalAdmin(roles) && apiKey.organization_id) {
+        const userOrgs = await this.authzService.getAccessibleOrganizations(userId);
+        if (!userOrgs.includes(apiKey.organization_id)) {
+          throw new ValidationException('Cannot delete API key from an organization you do not belong to');
+        }
       }
 
       // Invalidate cache before deletion
@@ -399,6 +410,24 @@ export class ApiKeysService {
     } catch (error) {
       this.logger.warn('Failed to update last_used timestamp:', error);
       // Don't throw error as this is not critical
+    }
+  }
+
+  /**
+   * Validate that requested API key roles are a subset of the creator's roles.
+   * Prevents privilege escalation (e.g., org-admin creating a perfana-admin key).
+   */
+  private validateRequestedRoles(requestedRoles: string[], creatorRoles: string[]): void {
+    if (!requestedRoles || requestedRoles.length === 0) return;
+
+    // Global admins can assign any role
+    if (this.authzService.isGlobalAdmin(creatorRoles)) return;
+
+    const disallowed = requestedRoles.filter(r => !creatorRoles.includes(r));
+    if (disallowed.length > 0) {
+      throw new ValidationException(
+        `Cannot assign roles you do not have: ${disallowed.join(', ')}`
+      );
     }
   }
 

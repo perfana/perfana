@@ -165,8 +165,11 @@ export class WebSocketAuthGuard implements CanActivate {
         ];
       }
 
+      // Validate audience to prevent tokens from other Keycloak clients being accepted
+      const clientId = this.configService.get('KEYCLOAK_CLIENT_ID');
       const { payload } = await jwtVerify(token, JWKS, {
         issuer: acceptedIssuers,
+        audience: clientId || undefined,
         clockTolerance: 60,
       });
 

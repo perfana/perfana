@@ -9,6 +9,8 @@ import {
 } from '../../entities';
 import { TrackedRegressionStatus } from './dto/tracked-regression.dto';
 import { createMockRepository, MockRepository } from '../../../test/helpers/mock-repository.factory';
+import { AuthorizationService } from '../../common/services/authorization.service';
+import { createAuthorizationServiceMock } from '../../../test/mocks/authorization-service.mock';
 
 describe('AdaptService', () => {
   let service: AdaptService;
@@ -96,6 +98,10 @@ describe('AdaptService', () => {
         {
           provide: getRepositoryToken(DsAdaptResults),
           useValue: createMockRepository<DsAdaptResults>(),
+        },
+        {
+          provide: AuthorizationService,
+          useValue: createAuthorizationServiceMock(),
         },
       ],
     }).compile();
