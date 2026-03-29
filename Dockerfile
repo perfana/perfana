@@ -187,6 +187,7 @@ COPY --from=builder --chown=nonroot:nonroot /app/apps/web/.next ./apps/web/.next
 COPY --from=builder --chown=nonroot:nonroot /app/apps/web/public ./apps/web/public
 COPY --from=builder --chown=nonroot:nonroot /app/apps/web/package.json ./apps/web/package.json
 COPY --from=builder --chown=nonroot:nonroot /app/apps/web/scripts ./apps/web/scripts
+COPY --from=builder --chown=nonroot:nonroot /app/apps/web/node_modules ./apps/web/node_modules
 COPY --from=builder --chown=nonroot:nonroot /app/apps/api/package.json ./apps/api/package.json
 COPY --from=builder --chown=nonroot:nonroot /app/apps/api/dist ./apps/api/dist
 COPY --from=builder --chown=nonroot:nonroot /app/apps/grafana-sync/package.json ./apps/grafana-sync/package.json
