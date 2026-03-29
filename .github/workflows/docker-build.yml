@@ -35,7 +35,7 @@ jobs:
         uses: actions/checkout@v4
 
       - name: Set up QEMU
-        uses: docker/setup-qemu-action@v3  # TODO: pin to SHA — run: gh api repos/docker/setup-qemu-action/git/ref/tags/v3 --jq '.object.sha'
+        uses: docker/setup-qemu-action@v4  # TODO: pin to SHA — run: gh api repos/docker/setup-qemu-action/git/ref/tags/v3 --jq '.object.sha'
 
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3  # TODO: pin to SHA — run: gh api repos/docker/setup-buildx-action/git/ref/tags/v3 --jq '.object.sha'
@@ -97,7 +97,7 @@ jobs:
         uses: actions/checkout@v4
 
       - name: Set up QEMU
-        uses: docker/setup-qemu-action@v3  # TODO: pin to SHA — run: gh api repos/docker/setup-qemu-action/git/ref/tags/v3 --jq '.object.sha'
+        uses: docker/setup-qemu-action@v4  # TODO: pin to SHA — run: gh api repos/docker/setup-qemu-action/git/ref/tags/v3 --jq '.object.sha'
 
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3  # TODO: pin to SHA — run: gh api repos/docker/setup-buildx-action/git/ref/tags/v3 --jq '.object.sha'
@@ -152,7 +152,7 @@ jobs:
         uses: actions/checkout@v4
 
       - name: Set up QEMU
-        uses: docker/setup-qemu-action@v3  # TODO: pin to SHA — run: gh api repos/docker/setup-qemu-action/git/ref/tags/v3 --jq '.object.sha'
+        uses: docker/setup-qemu-action@v4  # TODO: pin to SHA — run: gh api repos/docker/setup-qemu-action/git/ref/tags/v3 --jq '.object.sha'
 
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3  # TODO: pin to SHA — run: gh api repos/docker/setup-buildx-action/git/ref/tags/v3 --jq '.object.sha'
@@ -212,7 +212,7 @@ jobs:
         uses: actions/checkout@v4
 
       - name: Set up QEMU
-        uses: docker/setup-qemu-action@v3  # TODO: pin to SHA — run: gh api repos/docker/setup-qemu-action/git/ref/tags/v3 --jq '.object.sha'
+        uses: docker/setup-qemu-action@v4  # TODO: pin to SHA — run: gh api repos/docker/setup-qemu-action/git/ref/tags/v3 --jq '.object.sha'
 
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3  # TODO: pin to SHA — run: gh api repos/docker/setup-buildx-action/git/ref/tags/v3 --jq '.object.sha'
@@ -272,7 +272,7 @@ jobs:
         uses: actions/checkout@v4
 
       - name: Set up QEMU
-        uses: docker/setup-qemu-action@v3  # TODO: pin to SHA — run: gh api repos/docker/setup-qemu-action/git/ref/tags/v3 --jq '.object.sha'
+        uses: docker/setup-qemu-action@v4  # TODO: pin to SHA — run: gh api repos/docker/setup-qemu-action/git/ref/tags/v3 --jq '.object.sha'
 
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3  # TODO: pin to SHA — run: gh api repos/docker/setup-buildx-action/git/ref/tags/v3 --jq '.object.sha'
@@ -327,7 +327,7 @@ jobs:
         uses: actions/checkout@v4
 
       - name: Set up QEMU
-        uses: docker/setup-qemu-action@v3  # TODO: pin to SHA — run: gh api repos/docker/setup-qemu-action/git/ref/tags/v3 --jq '.object.sha'
+        uses: docker/setup-qemu-action@v4  # TODO: pin to SHA — run: gh api repos/docker/setup-qemu-action/git/ref/tags/v3 --jq '.object.sha'
 
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3  # TODO: pin to SHA — run: gh api repos/docker/setup-buildx-action/git/ref/tags/v3 --jq '.object.sha'
