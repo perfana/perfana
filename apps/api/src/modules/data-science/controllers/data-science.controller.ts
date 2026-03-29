@@ -9,6 +9,7 @@ import {
   BadRequestException,
   NotFoundException,
   ConflictException,
+  ForbiddenException,
   Logger,
 } from '@nestjs/common';
 import { ApiTags, ApiOperation, ApiResponse, ApiBearerAuth, ApiQuery, ApiBody } from '@nestjs/swagger';
@@ -18,6 +19,8 @@ import { BullMQClientService } from '../services/bullmq-client.service';
 import { BatchRefreshDto, BatchReevaluateDto, AvailableSourcesRequestDto } from '../dto/batch-processing.dto';
 import { JobProgressService } from '../services/job-progress.service';
 import { JobProgressGateway } from '../gateways/job-progress.gateway';
+import { UserCtx, UserContext } from '../../../common/decorators/user-context.decorator';
+import { AuthorizationService } from '../../../common/services/authorization.service';
 
 @ApiTags('data-science')
 @ApiBearerAuth()
@@ -29,9 +32,30 @@ export class DataScienceController {
     private readonly bullmqClient: BullMQClientService,
     private readonly jobProgressService: JobProgressService,
     private readonly jobProgressGateway: JobProgressGateway,
+    private readonly authzService: AuthorizationService,
     @InjectDataSource()
     private readonly dataSource: DataSource,
   ) {}
+
+  /**
+   * Verify the user can access the given test run(s).
+   */
+  private async verifyTestRunAccess(testRunId: string, userId: string, roles: string[]): Promise<void> {
+    if (this.authzService.isGlobalAdmin(roles)) return;
+
+    const organizationIds = await this.authzService.getAccessibleOrganizations(userId);
+
+    const result = await this.dataSource.query(
+      `SELECT organization_id FROM test_runs WHERE id = $1 OR test_run_id = $1 LIMIT 1`,
+      [testRunId],
+    );
+    if (result.length === 0) return;
+
+    const orgId = result[0].organization_id;
+    if (orgId && organizationIds.length > 0 && !organizationIds.includes(orgId)) {
+      throw new ForbiddenException('Access denied to this test run');
+    }
+  }
 
   @Post('analyzeTest/:testRunId')
   @ApiOperation({
@@ -87,6 +111,7 @@ export class DataScienceController {
   @ApiResponse({ status: 500, description: 'Failed to initiate analysis' })
   async analyzeTest(
     @Param('testRunId') testRunId: string,
+    @UserCtx() ctx: UserContext,
     @Query('adapt') adapt?: string,
     @Query('benchmarksOnly') benchmarksOnly?: string
   ) {
@@ -95,6 +120,7 @@ export class DataScienceController {
         throw new BadRequestException('Test run ID is required');
       }
 
+      await this.verifyTestRunAccess(testRunId, ctx.userId, ctx.roles);
       this.logger.log(`Initiating analysis for test run: ${testRunId}`);
 
       // Get test run details to check for locks
@@ -147,8 +173,8 @@ export class DataScienceController {
       };
 
     } catch (error) {
-      // Re-throw ConflictException as-is
-      if (error instanceof ConflictException) {
+      // Re-throw known HTTP exceptions as-is
+      if (error instanceof ConflictException || error instanceof ForbiddenException) {
         throw error;
       }
       const errorMessage = error && typeof error === 'object' && 'message' in error ? (error as Error).message : 'Unknown error';
@@ -312,10 +338,15 @@ export class DataScienceController {
   @ApiResponse({ status: 400, description: 'Invalid request data' })
   @ApiResponse({ status: 409, description: 'One or more jobs blocked by active jobs' })
   @ApiResponse({ status: 500, description: 'Failed to initiate batch processing' })
-  async refreshBatch(@Body() dto: BatchRefreshDto) {
+  async refreshBatch(@Body() dto: BatchRefreshDto, @UserCtx() ctx: UserContext) {
     try {
       if (!dto.testRunIds || dto.testRunIds.length === 0) {
         throw new BadRequestException('testRunIds must be a non-empty array');
+      }
+
+      // Verify access to all test runs
+      for (const testRunId of dto.testRunIds) {
+        await this.verifyTestRunAccess(testRunId, ctx.userId, ctx.roles);
       }
 
       // Deduplicate and limit to reasonable size
@@ -357,7 +388,7 @@ export class DataScienceController {
       };
 
     } catch (error) {
-      if (error instanceof ConflictException) {
+      if (error instanceof ConflictException || error instanceof ForbiddenException) {
         throw error;
       }
       const errorMessage = error && typeof error === 'object' && 'message' in error ? (error as Error).message : 'Unknown error';
@@ -461,10 +492,15 @@ export class DataScienceController {
   @ApiResponse({ status: 400, description: 'Invalid request data' })
   @ApiResponse({ status: 409, description: 'One or more jobs blocked by active jobs' })
   @ApiResponse({ status: 500, description: 'Failed to initiate re-evaluation' })
-  async reevaluateBatch(@Body() dto: BatchReevaluateDto) {
+  async reevaluateBatch(@Body() dto: BatchReevaluateDto, @UserCtx() ctx: UserContext) {
     try {
       if (!dto.testRunIds || dto.testRunIds.length === 0) {
         throw new BadRequestException('testRunIds must be a non-empty array');
+      }
+
+      // Verify access to all test runs
+      for (const testRunId of dto.testRunIds) {
+        await this.verifyTestRunAccess(testRunId, ctx.userId, ctx.roles);
       }
 
       // Deduplicate and limit
@@ -498,7 +534,7 @@ export class DataScienceController {
       return result;
 
     } catch (error) {
-      if (error instanceof ConflictException) {
+      if (error instanceof ConflictException || error instanceof ForbiddenException) {
         throw error;
       }
       const errorMessage = error && typeof error === 'object' && 'message' in error ? (error as Error).message : 'Unknown error';

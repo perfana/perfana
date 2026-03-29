@@ -75,7 +75,8 @@ export class TestRunsErrorsController {
       }
     }
   })
-  async getErrorSummary(@Param('testRunId') testRunId: string) {
+  async getErrorSummary(@Param('testRunId') testRunId: string, @UserCtx() ctx: UserContext) {
+    await this.testRunsService.verifyTestRunAccess(testRunId, ctx.userId, ctx.roles);
     return this.errorAnalysisService.getErrorSummary(testRunId);
   }
 
@@ -102,7 +103,8 @@ export class TestRunsErrorsController {
       }
     }
   })
-  async getErrorsByCode(@Param('testRunId') testRunId: string) {
+  async getErrorsByCode(@Param('testRunId') testRunId: string, @UserCtx() ctx: UserContext) {
+    await this.testRunsService.verifyTestRunAccess(testRunId, ctx.userId, ctx.roles);
     return this.errorAnalysisService.getErrorsByCode(testRunId);
   }
 
@@ -130,7 +132,8 @@ export class TestRunsErrorsController {
       }
     }
   })
-  async getErrorsByTransaction(@Param('testRunId') testRunId: string) {
+  async getErrorsByTransaction(@Param('testRunId') testRunId: string, @UserCtx() ctx: UserContext) {
+    await this.testRunsService.verifyTestRunAccess(testRunId, ctx.userId, ctx.roles);
     return this.errorAnalysisService.getErrorsByTransaction(testRunId);
   }
 
@@ -154,7 +157,8 @@ export class TestRunsErrorsController {
       }
     }
   })
-  async getErrorsOverTime(@Param('testRunId') testRunId: string) {
+  async getErrorsOverTime(@Param('testRunId') testRunId: string, @UserCtx() ctx: UserContext) {
+    await this.testRunsService.verifyTestRunAccess(testRunId, ctx.userId, ctx.roles);
     return this.errorAnalysisService.getErrorsOverTime(testRunId);
   }
 
@@ -180,7 +184,8 @@ export class TestRunsErrorsController {
       }
     }
   })
-  async getErrorsOverTimeByCode(@Param('testRunId') testRunId: string) {
+  async getErrorsOverTimeByCode(@Param('testRunId') testRunId: string, @UserCtx() ctx: UserContext) {
+    await this.testRunsService.verifyTestRunAccess(testRunId, ctx.userId, ctx.roles);
     return this.errorAnalysisService.getErrorsOverTimeByCode(testRunId);
   }
 
@@ -220,7 +225,9 @@ export class TestRunsErrorsController {
     @Query('transaction') transaction: string,
     @Query('sampler') sampler: string,
     @Query('url') url: string,
+    @UserCtx() ctx: UserContext,
   ) {
+    await this.testRunsService.verifyTestRunAccess(testRunId, ctx.userId, ctx.roles);
     return this.errorAnalysisService.getErrorDetails(testRunId, transaction, sampler, url);
   }
 }

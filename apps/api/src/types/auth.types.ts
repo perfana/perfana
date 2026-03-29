@@ -1,5 +1,4 @@
 import { KeycloakUser } from '../modules/auth/keycloak-jwt.service';
-import { QueryRunner } from 'typeorm';
 import { Request } from 'express';
 
 /**
@@ -19,28 +18,12 @@ export interface ApiKeyInfo {
 }
 
 /**
- * Session context set by DatabaseSessionMiddleware
- */
-export interface SessionContext {
-  userId?: string;
-  email?: string;
-  roles?: string[];
-  organizations?: string[];
-  teams?: string[];
-  authType?: string;
-  sessionId?: string;
-  apiKeyId?: string; // ID of the API key if authenticated via API key
-}
-
-/**
  * Extended Express Request interface with authentication information
- * Used by guards and middleware to attach user context
+ * Used by guards to attach user context
  */
 export interface AuthenticatedRequest extends Request {
   user?: KeycloakUser;
   keycloakUser?: KeycloakUser;
   apiKey?: ApiKeyInfo; // API key details if authenticated via API key
   authType?: AuthType;
-  queryRunner?: QueryRunner;
-  sessionContext?: SessionContext;
 }

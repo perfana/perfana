@@ -38,7 +38,7 @@ export class AdaptController {
       throw new ValidationException('testRunId is required');
     }
 
-    return this.adaptService.getTrackedRegressions(testRunId, system, environment, workload, ctx.roles, ctx.organizations);
+    return this.adaptService.getTrackedRegressions(testRunId, system, environment, workload, ctx.userId, ctx.roles);
   }
 
   @Get('tracked-regressions/count')
@@ -58,7 +58,7 @@ export class AdaptController {
       throw new ValidationException('testRunId is required');
     }
 
-    return this.adaptService.getTrackedRegressionsCount(testRunId, ctx.roles, ctx.organizations);
+    return this.adaptService.getTrackedRegressionsCount(testRunId, ctx.userId, ctx.roles);
   }
 
   @Get('conclusion/:testRunId')
@@ -88,7 +88,7 @@ export class AdaptController {
       throw new ValidationException('testRunId is required');
     }
 
-    return this.adaptService.getDsAdaptConclusion(testRunId, ctx.roles, ctx.organizations);
+    return this.adaptService.getDsAdaptConclusion(testRunId, ctx.userId, ctx.roles);
   }
 
   @Get('conclusion/:testRunId/enriched')
@@ -100,7 +100,7 @@ export class AdaptController {
       throw new ValidationException('testRunId is required');
     }
 
-    return this.adaptService.getEnrichedConclusion(testRunId, ctx.roles, ctx.organizations);
+    return this.adaptService.getEnrichedConclusion(testRunId, ctx.userId, ctx.roles);
   }
 
   @Post('tracked-regressions/resolve')
@@ -131,7 +131,7 @@ export class AdaptController {
       throw new ValidationException('resolution is required');
     }
 
-    return this.adaptService.resolveTrackedRegressionsByTestRun(body.trackedTestRunId, body.resolution, ctx.roles, ctx.organizations);
+    return this.adaptService.resolveTrackedRegressionsByTestRun(body.trackedTestRunId, body.resolution, ctx.userId, ctx.roles);
   }
 
   @Post('tracked-regressions/resolve-individual')
@@ -159,7 +159,7 @@ export class AdaptController {
 
     const { regressionId, ...resolutionData } = body;
 
-    return this.adaptService.resolveTrackedRegression(regressionId, resolutionData, ctx.roles, ctx.organizations);
+    return this.adaptService.resolveTrackedRegression(regressionId, resolutionData, ctx.userId, ctx.roles);
   }
 
   @Get('tracked-differences/:metricName')
@@ -213,7 +213,7 @@ export class AdaptController {
       throw new BadRequestException('limit must be a positive number');
     }
 
-    const data = await this.adaptService.getTrackedDifferencesChart(metricName, testRunId, limitNum, ctx.roles, ctx.organizations);
+    const data = await this.adaptService.getTrackedDifferencesChart(metricName, testRunId, limitNum, ctx.userId, ctx.roles);
 
     return { data };
   }
@@ -248,8 +248,8 @@ export class AdaptController {
     const regressions = await this.adaptService.getCorrelatedRegressions(
       trackedRegressionId,
       sourceTestRun,
+      ctx.userId,
       ctx.roles,
-      ctx.organizations,
     );
 
     return { regressions };
@@ -302,7 +302,7 @@ export class AdaptController {
 
     // This would be implemented to get detailed chart data for a specific regression
     // For now, return a basic structure
-    const testRuns = await this.adaptService.getTrackedDifferencesChart(metricName, trackedRegressionId, 50, ctx.roles, ctx.organizations);
+    const testRuns = await this.adaptService.getTrackedDifferencesChart(metricName, trackedRegressionId, 50, ctx.userId, ctx.roles);
 
     return {
       testRuns: testRuns.map(run => ({

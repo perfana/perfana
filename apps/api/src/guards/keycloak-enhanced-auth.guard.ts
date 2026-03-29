@@ -242,9 +242,11 @@ export class KeycloakEnhancedAuthGuard implements CanActivate {
         ];
       }
 
-      // Verify the JWT token (issuer + signature)
+      // Verify the JWT token (issuer + signature + audience)
+      const clientId = this.configService.get('KEYCLOAK_CLIENT_ID');
       const { payload } = await jwtVerify(token, JWKS, {
         issuer: acceptedIssuers,
+        audience: clientId || undefined,
         clockTolerance: 60,
       });
 

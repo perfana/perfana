@@ -75,6 +75,7 @@ const mockServiceFactory = () => ({
   markAsChangepoint: jest.fn(),
   getBaselineCandidates: jest.fn(),
   recordTestRunView: jest.fn().mockResolvedValue(undefined),
+  verifyTestRunAccess: jest.fn().mockResolvedValue(undefined),
 });
 
 // =============================================================================
@@ -760,6 +761,8 @@ describe('TestRunsAnalysisController', () => {
           systemUnderTestId,
           testEnvironment,
           workload,
+          mockUserContext.userId,
+          mockUserContext.roles,
         );
       });
     });
@@ -789,6 +792,8 @@ describe('TestRunsAnalysisController', () => {
           testEnvironment,
           workload,
           baseTestRunId,
+          mockUserContext.userId,
+          mockUserContext.roles,
         );
       });
     });

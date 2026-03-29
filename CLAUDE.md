@@ -222,7 +222,7 @@ All resource entities implement the `OwnedResource` interface with four ownershi
 
 ### Organization Loading in Services
 
-**CRITICAL**: Do NOT rely on `ctx.organizations` from `@UserCtx()` for organization-based access checks. The `DatabaseSessionMiddleware` runs before the auth guard, so `req.sessionContext` is never populated and `ctx.organizations` will always be `[]`.
+**CRITICAL**: Do NOT rely on `ctx.organizations` from `@UserCtx()` for organization-based access checks. The decorator only has access to organizations embedded in the JWT or API key, which may be empty. `ctx.organizations` will often be `[]`.
 
 **Correct pattern**: Services must load organizations themselves using `AuthorizationService.getAccessibleOrganizations(userId)`. Pass `userId` and `roles` from the controller — not `organizationIds`.
 

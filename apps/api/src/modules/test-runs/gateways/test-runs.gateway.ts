@@ -16,6 +16,8 @@ import Redis from 'ioredis';
 import { TestRunEvent, TestRunRooms } from '../types/realtime-events.types';
 import { AuthenticatedSocket } from '../guards/websocket-auth.guard';
 import { ApiKeysService } from '../../api-keys/api-keys.service';
+import { InjectDataSource } from '@nestjs/typeorm';
+import { DataSource } from 'typeorm';
 
 /**
  * WebSocket Gateway for Test Run realtime updates
@@ -64,6 +66,7 @@ export class TestRunsGateway
   constructor(
     private readonly configService: ConfigService,
     private readonly apiKeysService: ApiKeysService,
+    @InjectDataSource() private readonly dataSource: DataSource,
   ) {}
 
   /**
@@ -230,6 +233,24 @@ export class TestRunsGateway
   ) {
     if (!data?.testRunId) {
       return { success: false, error: 'testRunId is required' };
+    }
+
+    // Verify user has access to this test run's organization
+    if (!this.isAdmin(client)) {
+      try {
+        const result = await this.dataSource.query(
+          `SELECT organization_id FROM test_runs WHERE id = $1 OR test_run_id = $1 LIMIT 1`,
+          [data.testRunId],
+        );
+        if (result.length > 0 && result[0].organization_id && client.organizationId) {
+          if (result[0].organization_id !== client.organizationId) {
+            this.logger.warn(`Client ${client.id} denied access to test run ${data.testRunId} (org mismatch)`);
+            return { success: false, error: 'Access denied to this test run' };
+          }
+        }
+      } catch (error) {
+        this.logger.error(`Failed to verify test run access: ${error && typeof error === 'object' && 'message' in error ? (error as Error).message : 'Unknown error'}`);
+      }
     }
 
     const room = TestRunRooms.testRun(data.testRunId);

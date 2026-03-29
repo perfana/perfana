@@ -102,6 +102,16 @@ export class TestRunsService {
     private apdexService: TestRunsApdexService,
   ) {}
 
+  // ========== Authorization ==========
+
+  /**
+   * Verify the current user can access a test run.
+   * Throws ForbiddenException if access denied.
+   */
+  async verifyTestRunAccess(testRunId: string, userId: string, roles: string[]): Promise<void> {
+    return this.queryService.verifyTestRunAccess(testRunId, userId, roles);
+  }
+
   // ========== Query Methods (delegated to QueryService) ==========
 
   async findAllPaginated(userId: string, roles: string[], paginationDto?: PaginationQueryDto, organizationId?: string): Promise<PaginatedResponseDto<TestRun>> {
@@ -314,7 +324,7 @@ export class TestRunsService {
     return this.configService.addTestRunConfigJson(configJsonDto);
   }
 
-  async getLatestConfigKeys(system: string, environment: string, workload: string): Promise<string[]> {
+  async getLatestConfigKeys(system: string, environment: string, workload: string, _userId?: string, _roles?: string[]): Promise<string[]> {
     return this.configService.getLatestConfigKeys(system, environment, workload);
   }
 
@@ -322,25 +332,25 @@ export class TestRunsService {
     return this.configService.getExpectedConfigChanges(system, environment, workload, userId, roles);
   }
 
-  async createExpectedConfigChange(createDto: CreateExpectedConfigChangeDto): Promise<ExpectedConfigChangeDto> {
+  async createExpectedConfigChange(createDto: CreateExpectedConfigChangeDto, _userId?: string, _roles?: string[]): Promise<ExpectedConfigChangeDto> {
     return this.configService.createExpectedConfigChange(createDto);
   }
 
-  async deleteExpectedConfigChange(system: string, environment: string, workload: string, configKey: string): Promise<void> {
+  async deleteExpectedConfigChange(system: string, environment: string, workload: string, configKey: string, _userId?: string, _roles?: string[]): Promise<void> {
     return this.configService.deleteExpectedConfigChange(system, environment, workload, configKey);
   }
 
   // ========== Sparse Metric Exclusion Methods (delegated to ConfigService) ==========
 
-  async getSparseMetricExclusions(system: string, environment: string, workload: string): Promise<SparseMetricExclusionDto[]> {
+  async getSparseMetricExclusions(system: string, environment: string, workload: string, _userId?: string, _roles?: string[]): Promise<SparseMetricExclusionDto[]> {
     return this.configService.getSparseMetricExclusions(system, environment, workload);
   }
 
-  async createSparseMetricExclusion(createDto: CreateSparseMetricExclusionDto): Promise<SparseMetricExclusionDto> {
+  async createSparseMetricExclusion(createDto: CreateSparseMetricExclusionDto, _userId?: string, _roles?: string[]): Promise<SparseMetricExclusionDto> {
     return this.configService.createSparseMetricExclusion(createDto);
   }
 
-  async deleteSparseMetricExclusion(system: string, environment: string, workload: string, dashboardLabel: string, metricName: string): Promise<void> {
+  async deleteSparseMetricExclusion(system: string, environment: string, workload: string, dashboardLabel: string, metricName: string, _userId?: string, _roles?: string[]): Promise<void> {
     return this.configService.deleteSparseMetricExclusion(system, environment, workload, dashboardLabel, metricName);
   }
 
@@ -370,7 +380,7 @@ export class TestRunsService {
     return this.changepointService.isTestRunChangepoint(systemUnderTestId, testEnvironment, workload, testRunId);
   }
 
-  async getTestRunsMoreRecentThan(systemUnderTestId: string, testEnvironment: string, workload: string, baseTestRunId: string): Promise<{ testRunIds: string[] }> {
+  async getTestRunsMoreRecentThan(systemUnderTestId: string, testEnvironment: string, workload: string, baseTestRunId: string, _userId?: string, _roles?: string[]): Promise<{ testRunIds: string[] }> {
     return this.changepointService.getTestRunsMoreRecentThan(systemUnderTestId, testEnvironment, workload, baseTestRunId);
   }
 
@@ -382,7 +392,7 @@ export class TestRunsService {
     return this.changepointService.removeChangepoint(systemUnderTestId, testEnvironment, workload, testRunId);
   }
 
-  async getTestRunsAfterMostRecentChangepoint(systemUnderTestId: string, testEnvironment: string, workload: string): Promise<{ changepointTestRunId?: string; testRunIds: string[] }> {
+  async getTestRunsAfterMostRecentChangepoint(systemUnderTestId: string, testEnvironment: string, workload: string, _userId?: string, _roles?: string[]): Promise<{ changepointTestRunId?: string; testRunIds: string[] }> {
     return this.changepointService.getTestRunsAfterMostRecentChangepoint(systemUnderTestId, testEnvironment, workload);
   }
 

@@ -54,32 +54,23 @@ export const UserCtx = createParamDecorator(
 
     // Extract organizations and teams arrays from different auth sources
     // Priority order:
-    // 1. Session context (has database-loaded organizations from middleware)
-    // 2. API key organization
-    // 3. JWT organizations (if Keycloak starts managing them)
+    // 1. API key organization
+    // 2. JWT organizations (if Keycloak manages them in future)
+    // Note: services should load organizations via AuthorizationService.getAccessibleOrganizations()
     let organizations: string[] = [];
     let teams: string[] = [];
     let organizationId: string | undefined;
 
-    // Check sessionContext FIRST (set by DatabaseSessionMiddleware with DB data)
-    if ((request as any).sessionContext?.organizations?.length > 0) {
-      organizations = (request as any).sessionContext.organizations;
-      teams = (request as any).sessionContext?.teams || [];
-      organizationId = organizations.length > 0 ? organizations[0] : undefined;
-      console.log('UserCtx: Using sessionContext organizations:', organizations);
-    }
     // For API key authentication, use the API key's organization
-    else if (request.apiKey?.organization_id) {
+    if (request.apiKey?.organization_id) {
       organizations = [request.apiKey.organization_id];
       organizationId = request.apiKey.organization_id;
-      console.log('UserCtx: Using API key organization:', organizationId);
     }
     // For JWT authentication, use organizations from token (if Keycloak manages them in future)
     else if (request.user?.organizations && request.user.organizations.length > 0) {
       organizations = request.user.organizations;
       teams = request.user.teams || [];
       organizationId = organizations.length > 0 ? organizations[0] : undefined;
-      console.log('UserCtx: Using JWT organizations:', organizations);
     }
 
     const result = {

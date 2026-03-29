@@ -50,7 +50,10 @@ export class RealtimeGateway implements OnGatewayInit, OnGatewayConnection, OnGa
         };
         this.logger.debug(`User ${keycloakUser.email} connected with socket ${client.id}`);
       } else {
-        this.logger.debug(`Anonymous connection: ${client.id}`);
+        this.logger.warn(`Rejecting unauthenticated WebSocket connection: ${client.id}`);
+        client.emit('auth_error', { message: 'Authentication required' });
+        client.disconnect();
+        return;
       }
 
       client.emit('connection_established', {

@@ -1,4 +1,6 @@
-import { Injectable } from '@nestjs/common';
+import { Injectable, ForbiddenException } from '@nestjs/common';
+import { InjectDataSource } from '@nestjs/typeorm';
+import { DataSource } from 'typeorm';
 import { PaginationQueryDto, PaginatedResponseDto } from '../../../common/dto';
 import { AuthorizationService } from '../../../common/services/authorization.service';
 
@@ -69,7 +71,31 @@ export class TestRunsQueryService {
     private readonly performanceService: TestRunsPerformanceQueryService,
     private readonly timeSeriesService: TestRunsTimeSeriesQueryService,
     private readonly authzService: AuthorizationService,
+    @InjectDataSource() private readonly dataSource: DataSource,
   ) {}
+
+  /**
+   * Lightweight access check for test-run-scoped endpoints.
+   * Verifies the user can access the test run without loading the full record.
+   * Throws ForbiddenException if the test run belongs to an org the user cannot access.
+   */
+  async verifyTestRunAccess(testRunId: string, userId: string, roles: string[]): Promise<void> {
+    if (this.authzService.isGlobalAdmin(roles)) return;
+
+    const organizationIds = await this.authzService.getAccessibleOrganizations(userId);
+
+    const result = await this.dataSource.query(
+      `SELECT organization_id FROM test_runs WHERE id = $1 OR test_run_id = $1 LIMIT 1`,
+      [testRunId],
+    );
+    if (result.length === 0) return; // Let downstream service handle 404
+
+    const orgId = result[0].organization_id;
+    // Legacy test runs (null org) are accessible to all authenticated users
+    if (orgId && organizationIds.length > 0 && !organizationIds.includes(orgId)) {
+      throw new ForbiddenException('Access denied to this test run');
+    }
+  }
 
   // ============================================================================
   // CRUD Operations (delegated to TestRunsCrudQueryService)

@@ -46,8 +46,6 @@ import { EnhancedThrottlerGuard } from './guards/enhanced-throttler.guard';
 import { ThrottlerStorageRedisService } from './guards/throttler-storage-redis.service';
 import { AuditInterceptor } from './common/interceptors/audit.interceptor';
 import { CommonModule } from './common/common.module';
-import { DatabaseSessionMiddleware } from './middleware/db-session.middleware';
-import { MiddlewareConsumer, NestModule } from '@nestjs/common';
 
 @Module({
   imports: [
@@ -144,10 +142,4 @@ import { MiddlewareConsumer, NestModule } from '@nestjs/common';
     },
   ],
 })
-export class AppModule implements NestModule {
-  configure(consumer: MiddlewareConsumer) {
-    consumer
-      .apply(DatabaseSessionMiddleware)
-      .forRoutes('*'); // Apply to all routes
-  }
-}
+export class AppModule {}

@@ -74,8 +74,8 @@ export class JtlUploadController {
       throw new BadRequestException('File must be a .zip archive');
     }
 
-    // Resolve organization: ctx.organizationId is empty for JWT users because
-    // DatabaseSessionMiddleware runs before the auth guard. Load orgs via AuthorizationService.
+    // Resolve organization: ctx.organizationId may be empty for JWT users.
+    // Load orgs via AuthorizationService.
     let organizationId = ctx.organizationId;
     if (!organizationId) {
       const accessibleOrgs = await this.authzService.getAccessibleOrganizations(ctx.userId);
