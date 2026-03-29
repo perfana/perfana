@@ -195,16 +195,17 @@ function patchCspHeaders() {
  * Start the Next.js server
  */
 function startNextServer() {
-  const nextPath = path.join(
-    process.cwd(),
-    '..',
-    '..',
-    'node_modules',
-    'next',
-    'dist',
-    'bin',
-    'next'
-  );
+  // Try workspace-level node_modules first, then root-level
+  const candidates = [
+    path.join(process.cwd(), 'node_modules', 'next', 'dist', 'bin', 'next'),
+    path.join(process.cwd(), '..', '..', 'node_modules', 'next', 'dist', 'bin', 'next'),
+  ];
+
+  const nextPath = candidates.find((p) => fs.existsSync(p));
+  if (!nextPath) {
+    console.error('[start-server] Could not find next binary. Searched:', candidates);
+    process.exit(1);
+  }
 
   console.log(`[start-server] Starting Next.js server...`);
   console.log(`[start-server] PORT=${process.env.PORT || 3000}`);

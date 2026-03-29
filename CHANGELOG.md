@@ -4,6 +4,15 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
+## [0.2.16] - 2026-03-29
+
+### Fixed
+- Resolve Next.js binary path in Docker container — start-server.js now tries workspace-level node_modules first with root fallback
+- Use application_dashboard_id for ADAPT control group statistics join instead of metrics_source_id
+
+### Added
+- /auth-audit skill for multi-tenant authentication and authorization security audits
+
 ## [0.2.15] - 2026-03-28
 
 ### Changed
