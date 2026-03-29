@@ -55,7 +55,7 @@ export class KeycloakEnhancedAuthGuard implements CanActivate {
     const authResult = await this.tryAuthentication(token, request);
 
     if (!authResult.success) {
-      this.logger.warn(`All authentication methods failed for token: ${token.substring(0, 10)}...`);
+      this.logger.warn('All authentication methods failed for provided token');
       throw new UnauthorizedException('Invalid or expired token');
     }
 

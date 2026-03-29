@@ -20,6 +20,7 @@ import {
   AnalyzeFlamegraphDto,
   FlamegraphAnalysisResponseDto,
 } from './dto/pyroscope-analysis.dto';
+import { UserCtx, UserContext } from '../../common/decorators/user-context.decorator';
 
 /**
  * Controller for Pyroscope URL generation and flamegraph analysis
@@ -48,7 +49,7 @@ export class PyroscopeUrlController {
     description: 'Profiler types retrieved successfully',
     type: [ProfilerTypeDto]
   })
-  getProfilerTypes(): ProfilerTypeDto[] {
+  getProfilerTypes(@UserCtx() _ctx: UserContext): ProfilerTypeDto[] {
     try {
       return this.pyroscopeUrlService.getProfilerTypes();
     } catch (error) {
@@ -78,7 +79,8 @@ export class PyroscopeUrlController {
     description: 'Invalid request data'
   })
   generateSingleViewUrl(
-    @Body() generateDto: GenerateSingleViewUrlDto
+    @Body() generateDto: GenerateSingleViewUrlDto,
+    @UserCtx() _ctx: UserContext,
   ): PyroscopeUrlResponseDto {
     try {
       // Validate timestamps
@@ -125,7 +127,8 @@ export class PyroscopeUrlController {
     description: 'Invalid request data'
   })
   generateCompareUrl(
-    @Body() generateDto: GenerateCompareUrlDto
+    @Body() generateDto: GenerateCompareUrlDto,
+    @UserCtx() _ctx: UserContext,
   ): PyroscopeUrlResponseDto {
     try {
       // Validate timestamps
@@ -183,7 +186,8 @@ export class PyroscopeUrlController {
     description: 'Failed to fetch data from Pyroscope API'
   })
   async analyzeFlamegraphs(
-    @Body() analyzeDto: AnalyzeFlamegraphDto
+    @Body() analyzeDto: AnalyzeFlamegraphDto,
+    @UserCtx() _ctx: UserContext,
   ): Promise<FlamegraphAnalysisResponseDto> {
     return await this.pyroscopeAnalysisService.analyzeFlamegraphs(analyzeDto);
   }
