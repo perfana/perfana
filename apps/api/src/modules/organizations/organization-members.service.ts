@@ -9,6 +9,7 @@ import { Repository, DataSource } from 'typeorm';
 import { Organization, OrganizationMember } from '../../entities';
 import { OrganizationRole } from '../../constants/roles.constants';
 import { KeycloakAdminService } from '../auth/keycloak-admin.service';
+import { AuthorizationService } from '../../common/services/authorization.service';
 
 export interface AddOrganizationMemberDto {
   organizationId: string;
@@ -43,6 +44,7 @@ export class OrganizationMembersService {
     private readonly organizationRepository: Repository<Organization>,
     private readonly keycloakAdminService: KeycloakAdminService,
     @InjectDataSource() private readonly dataSource: DataSource,
+    private readonly authorizationService: AuthorizationService,
   ) {}
 
   /**
@@ -336,6 +338,10 @@ export class OrganizationMembersService {
       member.roles = dto.roles;
       await this.memberRepository.save(member);
 
+      // Invalidate authorization cache for the affected user and organization
+      await this.authorizationService.invalidateUserCache(member.user_id);
+      await this.authorizationService.invalidateOrganizationCache(member.organization_id);
+
       this.logger.log(
         `Updated roles for user ${member.user_id} in organization ${member.organization_id}: ${dto.roles.join(', ')}`,
       );
@@ -363,6 +369,10 @@ export class OrganizationMembersService {
 
       // Revoke API keys created by this user for this organization
       await this.revokeApiKeysForUser(member.user_id, member.organization_id);
+
+      // Invalidate authorization cache for the removed user and organization
+      await this.authorizationService.invalidateUserCache(member.user_id);
+      await this.authorizationService.invalidateOrganizationCache(member.organization_id);
 
       this.logger.log(
         `Removed user ${member.user_id} from organization ${member.organization_id}`,
@@ -399,6 +409,10 @@ export class OrganizationMembersService {
 
       // Revoke API keys created by this user for this organization
       await this.revokeApiKeysForUser(userId, organizationId);
+
+      // Invalidate authorization cache for the removed user and organization
+      await this.authorizationService.invalidateUserCache(userId);
+      await this.authorizationService.invalidateOrganizationCache(organizationId);
 
       this.logger.log(
         `Removed user ${userId} from organization ${organizationId}`,

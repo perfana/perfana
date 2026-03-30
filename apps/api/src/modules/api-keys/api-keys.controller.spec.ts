@@ -462,7 +462,7 @@ describe('ApiKeysController', () => {
   });
 
   describe('Happy Path - validate', () => {
-    it('should validate API key and return valid result with key details', async () => {
+    it('should validate API key and return valid result without key metadata', async () => {
       // Arrange
       const token = mockToken;
       service.validateApiKey.mockResolvedValue(mockApiKey as ApiKey);
@@ -470,15 +470,9 @@ describe('ApiKeysController', () => {
       // Act
       const result = await controller.validate(token);
 
-      // Assert
-      expect(result).toEqual({
-        valid: true,
-        apiKey: {
-          id: mockApiKey.id,
-          description: mockApiKey.description,
-          roles: mockApiKey.roles,
-        },
-      });
+      // Assert — only validity status, no key metadata (prevents info disclosure)
+      expect(result).toEqual({ valid: true });
+      expect(result).not.toHaveProperty('apiKey');
       expect(service.validateApiKey).toHaveBeenCalledWith(token);
       expect(service.validateApiKey).toHaveBeenCalledTimes(1);
     });
@@ -492,10 +486,7 @@ describe('ApiKeysController', () => {
       const result = await controller.validate(invalidToken);
 
       // Assert
-      expect(result).toEqual({
-        valid: false,
-        apiKey: null,
-      });
+      expect(result).toEqual({ valid: false });
       expect(service.validateApiKey).toHaveBeenCalledWith(invalidToken);
     });
 
@@ -509,33 +500,7 @@ describe('ApiKeysController', () => {
 
       // Assert
       expect(result.valid).toBe(false);
-      expect(result.apiKey).toBeNull();
-    });
-
-    it('should validate API key with only id, description, and roles in response', async () => {
-      // Arrange
-      const fullApiKey = {
-        ...mockApiKey,
-        apiKey: 'hashed-token',
-        validUntil: new Date('2025-12-31'),
-        createdAt: new Date('2024-01-15'),
-        updatedAt: new Date('2024-01-15'),
-        lastUsed: new Date('2024-01-20'),
-      };
-      service.validateApiKey.mockResolvedValue(fullApiKey as ApiKey);
-
-      // Act
-      const result = await controller.validate(mockToken);
-
-      // Assert
-      expect(result.valid).toBe(true);
-      expect(result.apiKey).toHaveProperty('id');
-      expect(result.apiKey).toHaveProperty('description');
-      expect(result.apiKey).toHaveProperty('roles');
-      expect(result.apiKey).not.toHaveProperty('apiKey');
-      expect(result.apiKey).not.toHaveProperty('validUntil');
-      expect(result.apiKey).not.toHaveProperty('createdAt');
-      expect(result.apiKey).not.toHaveProperty('lastUsed');
+      expect(result).not.toHaveProperty('apiKey');
     });
   });
 
@@ -729,7 +694,7 @@ describe('ApiKeysController', () => {
 
       // Assert
       expect(result.valid).toBe(false);
-      expect(result.apiKey).toBeNull();
+      expect(result).not.toHaveProperty('apiKey');
     });
 
     it('should handle empty token', async () => {
@@ -1015,7 +980,7 @@ describe('ApiKeysController', () => {
       // Only in validate() it filters to id, description, roles
     });
 
-    it('should not expose sensitive data in validation response', async () => {
+    it('should not expose any key metadata in validation response', async () => {
       // Arrange
       const fullApiKey = {
         ...mockApiKey,
@@ -1026,15 +991,12 @@ describe('ApiKeysController', () => {
       // Act
       const result = await controller.validate(mockToken);
 
-      // Assert
-      expect(result.apiKey).not.toHaveProperty('apiKey');
-      expect(result.apiKey).not.toHaveProperty('validUntil');
-      expect(result.apiKey).not.toHaveProperty('createdAt');
-      expect(result.apiKey).not.toHaveProperty('updatedAt');
-      expect(result.apiKey).not.toHaveProperty('lastUsed');
-      expect(result.apiKey).toHaveProperty('id');
-      expect(result.apiKey).toHaveProperty('description');
-      expect(result.apiKey).toHaveProperty('roles');
+      // Assert — validate endpoint only returns validity, no key metadata
+      expect(result).toEqual({ valid: true });
+      expect(result).not.toHaveProperty('apiKey');
+      expect(result).not.toHaveProperty('id');
+      expect(result).not.toHaveProperty('description');
+      expect(result).not.toHaveProperty('roles');
     });
 
     it('should handle SQL injection attempt in ID parameter', async () => {

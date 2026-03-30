@@ -9,6 +9,7 @@ import { Repository } from 'typeorm';
 import { Team, TeamMember } from '../../entities';
 import { TeamRole } from '../../constants/roles.constants';
 import { KeycloakAdminService } from '../auth/keycloak-admin.service';
+import { AuthorizationService } from '../../common/services/authorization.service';
 
 export interface AddTeamMemberDto {
   teamId: string;
@@ -42,6 +43,7 @@ export class TeamMembersService {
     @InjectRepository(Team)
     private readonly teamRepository: Repository<Team>,
     private readonly keycloakAdminService: KeycloakAdminService,
+    private readonly authorizationService: AuthorizationService,
   ) {}
 
   /**
@@ -311,6 +313,10 @@ export class TeamMembersService {
       member.roles = dto.roles;
       await this.memberRepository.save(member);
 
+      // Invalidate authorization cache for the affected user and team
+      await this.authorizationService.invalidateUserCache(member.user_id);
+      await this.authorizationService.invalidateTeamCache(member.team_id);
+
       this.logger.log(
         `Updated roles for user ${member.user_id} in team ${member.team_id}: ${dto.roles.join(', ')}`,
       );
@@ -335,6 +341,10 @@ export class TeamMembersService {
     try {
       const member = await this.findOne(id);
       await this.memberRepository.remove(member);
+
+      // Invalidate authorization cache for the removed user and team
+      await this.authorizationService.invalidateUserCache(member.user_id);
+      await this.authorizationService.invalidateTeamCache(member.team_id);
 
       this.logger.log(
         `Removed user ${member.user_id} from team ${member.team_id}`,
@@ -368,6 +378,10 @@ export class TeamMembersService {
       }
 
       await this.memberRepository.remove(member);
+
+      // Invalidate authorization cache for the removed user and team
+      await this.authorizationService.invalidateUserCache(userId);
+      await this.authorizationService.invalidateTeamCache(teamId);
 
       this.logger.log(
         `Removed user ${userId} from team ${teamId}`,

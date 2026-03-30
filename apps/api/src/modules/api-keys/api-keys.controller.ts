@@ -94,13 +94,9 @@ export class ApiKeysController {
   async validate(@Body('token') token: string) {
     const apiKey = await this.apiKeysService.validateApiKey(token);
 
+    // Only return validity status — no key metadata (prevents info disclosure)
     return {
       valid: !!apiKey,
-      apiKey: apiKey ? {
-        id: apiKey.id,
-        description: apiKey.description,
-        roles: apiKey.roles,
-      } : null,
     };
   }
 

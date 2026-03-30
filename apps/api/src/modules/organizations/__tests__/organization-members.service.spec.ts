@@ -20,6 +20,7 @@ import {
 import { Organization, OrganizationMember } from '@perfana/shared';
 import { OrganizationRole } from '../../../constants/roles.constants';
 import { KeycloakAdminService } from '../../auth/keycloak-admin.service';
+import { AuthorizationService } from '../../../common/services/authorization.service';
 
 describe('OrganizationMembersService', () => {
   let service: OrganizationMembersService;
@@ -86,6 +87,13 @@ describe('OrganizationMembersService', () => {
         {
           provide: getDataSourceToken(),
           useValue: { query: jest.fn().mockResolvedValue([null, 0]) },
+        },
+        {
+          provide: AuthorizationService,
+          useValue: {
+            invalidateUserCache: jest.fn().mockResolvedValue(undefined),
+            invalidateOrganizationCache: jest.fn().mockResolvedValue(undefined),
+          },
         },
       ],
     }).compile();

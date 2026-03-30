@@ -20,6 +20,7 @@ import {
 import { Team, TeamMember } from '@perfana/shared';
 import { TeamRole } from '../../../constants/roles.constants';
 import { KeycloakAdminService } from '../../auth/keycloak-admin.service';
+import { AuthorizationService } from '../../../common/services/authorization.service';
 
 describe('TeamMembersService', () => {
   let service: TeamMembersService;
@@ -77,6 +78,13 @@ describe('TeamMembersService', () => {
           provide: KeycloakAdminService,
           useValue: {
             getUserById: jest.fn(),
+          },
+        },
+        {
+          provide: AuthorizationService,
+          useValue: {
+            invalidateUserCache: jest.fn().mockResolvedValue(undefined),
+            invalidateTeamCache: jest.fn().mockResolvedValue(undefined),
           },
         },
       ],

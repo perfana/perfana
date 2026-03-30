@@ -83,6 +83,49 @@ Remaining (tracked as GitHub issues):
 
 ---
 
+## Phase 7: Codebase Quality Audit
+
+Systematic audit of ~338K lines across 1,100+ source files. Executed in chunks small enough for thorough review, with fixes committed per sub-chunk.
+
+### Chunk 1: API (`apps/api`, ~92K lines)
+
+| Sub-chunk | Modules | Focus | Status |
+|-----------|---------|-------|--------|
+| **1a** Auth & Access | `auth`, `api-keys`, `organizations`, `teams`, `users` | RBAC enforcement, guard consistency, token handling | 🚧 |
+| **1b** Test Runs & Core | `test-runs`, `benchmarks`, `benchmark-results`, `profiles`, `systems-under-test` | Query efficiency, DTO validation, ownership filtering | |
+| **1c** Metrics & Integrations | `metrics`, `metrics-sources`, `grafana`, `dynatrace`, `tempo`, `tracing-*`, `pyroscope` | Source-type consistency, error handling, dead code | |
+| **1d** Analysis & Processing | `adapt`, `data-science`, `trends-presets`, `compare-presets`, `graph-presets`, `events`, `alerts` | Algorithm correctness, unused code, N+1 queries | |
+| **1e** Supporting Modules | `reports`, `deep-links`, `notifications`, `provisioning`, `queue`, `realtime`, `health`, `audit`, `awr` | Dead code, missing auth, consistency | |
+
+### Chunk 2: Frontend (`apps/web`, ~123K lines)
+
+| Sub-chunk | Focus | Status |
+|-----------|-------|--------|
+| **2a** API layer & auth | Missing auth headers, error handling, duplicate fetch logic | |
+| **2b** Pages & components | Accessibility, unused components, prop drilling, performance | |
+| **2c** State & data flow | Client/server component boundaries, caching, re-render issues | |
+
+### Chunk 3: Worker (`apps/worker`, ~34K lines)
+
+Single pass — pipelines, job configs, error handling, transaction safety, dead code.
+
+### Chunk 4: Shared & Infra (`packages/shared` + `apps/grafana-sync`, ~29K lines)
+
+Entities, migrations, grafana-sync service, config patterns.
+
+### Chunk 5: Cross-cutting
+
+Test coverage gaps, dependency audit, security (CSO), consistency between apps.
+
+### Audit Rules
+
+1. Each sub-chunk runs a scoped audit agent
+2. Findings triaged: **fix now** (bugs, security) vs **tech debt** (GitHub issues)
+3. Fixes committed per sub-chunk before moving on
+4. No speculative refactoring — only fix real problems
+
+---
+
 ## What's Next
 
 ### Near-term: Community Readiness

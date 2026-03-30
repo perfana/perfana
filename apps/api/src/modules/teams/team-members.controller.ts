@@ -19,14 +19,15 @@ import {
   ApiBody,
   ApiProperty,
 } from '@nestjs/swagger';
-import { IsNotEmpty, IsString, IsArray } from 'class-validator';
+import { IsNotEmpty, IsString, IsArray, IsIn, ArrayNotEmpty } from 'class-validator';
 import {
   TeamMembersService,
   AddTeamMemberDto,
-  UpdateTeamMemberRolesDto,
 } from './team-members.service';
 import { UserCtx, UserContext } from '../../common/decorators/user-context.decorator';
-import { hasGlobalAdminRole } from '../../constants/roles.constants';
+import { hasGlobalAdminRole, TeamRole } from '../../constants/roles.constants';
+
+const VALID_TEAM_ROLES = Object.values(TeamRole);
 
 /**
  * DTO for adding a member to a team via the API
@@ -37,10 +38,23 @@ class AddMemberRequestDto {
   @IsString()
   userId!: string;
 
-  @ApiProperty({ description: 'Roles to assign to the member', example: ['team-member'] })
-  @IsNotEmpty()
+  @ApiProperty({ description: 'Roles to assign to the member', example: ['team-member'], enum: VALID_TEAM_ROLES })
   @IsArray()
+  @ArrayNotEmpty()
   @IsString({ each: true })
+  @IsIn(VALID_TEAM_ROLES, { each: true })
+  roles!: string[];
+}
+
+/**
+ * DTO for updating team member roles via the API
+ */
+class UpdateTeamMemberRolesDto {
+  @ApiProperty({ description: 'New roles to assign', example: ['team-admin'], enum: VALID_TEAM_ROLES })
+  @IsArray()
+  @ArrayNotEmpty()
+  @IsString({ each: true })
+  @IsIn(VALID_TEAM_ROLES, { each: true })
   roles!: string[];
 }
 

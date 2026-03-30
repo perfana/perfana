@@ -19,14 +19,15 @@ import {
   ApiBody,
   ApiProperty,
 } from '@nestjs/swagger';
-import { IsNotEmpty, IsString, IsArray } from 'class-validator';
+import { IsNotEmpty, IsString, IsArray, IsIn, ArrayNotEmpty } from 'class-validator';
 import {
   OrganizationMembersService,
   AddOrganizationMemberDto,
-  UpdateOrganizationMemberRolesDto,
 } from './organization-members.service';
 import { UserCtx, UserContext } from '../../common/decorators/user-context.decorator';
-import { hasGlobalAdminRole } from '../../constants/roles.constants';
+import { hasGlobalAdminRole, OrganizationRole } from '../../constants/roles.constants';
+
+const VALID_ORG_ROLES = Object.values(OrganizationRole);
 
 /**
  * DTO for adding a member to an organization via the API
@@ -37,10 +38,23 @@ class AddMemberRequestDto {
   @IsString()
   userId!: string;
 
-  @ApiProperty({ description: 'Roles to assign to the member', example: ['org-member'] })
-  @IsNotEmpty()
+  @ApiProperty({ description: 'Roles to assign to the member', example: ['org-member'], enum: VALID_ORG_ROLES })
   @IsArray()
+  @ArrayNotEmpty()
   @IsString({ each: true })
+  @IsIn(VALID_ORG_ROLES, { each: true })
+  roles!: string[];
+}
+
+/**
+ * DTO for updating organization member roles via the API
+ */
+class UpdateOrganizationMemberRolesDto {
+  @ApiProperty({ description: 'New roles to assign', example: ['org-admin'], enum: VALID_ORG_ROLES })
+  @IsArray()
+  @ArrayNotEmpty()
+  @IsString({ each: true })
+  @IsIn(VALID_ORG_ROLES, { each: true })
   roles!: string[];
 }
 
