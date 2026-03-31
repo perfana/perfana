@@ -44,6 +44,7 @@ describe('TestRunsConfigService', () => {
   let testRunConfigRepo: MockRepository<TestRunConfigEntity>;
   let mockDataSource: jest.Mocked<Partial<DataSource>>;
   let mockQueryBuilder: MockSelectQueryBuilder<TestRunConfigEntity>;
+  let authzServiceMock: ReturnType<typeof createAuthorizationServiceMock>;
 
   // Test data fixtures
   const mockSystemUnderTest = {
@@ -114,7 +115,10 @@ describe('TestRunsConfigService', () => {
         },
         {
           provide: AuthorizationService,
-          useValue: createAuthorizationServiceMock(),
+          useFactory: () => {
+            authzServiceMock = createAuthorizationServiceMock();
+            return authzServiceMock;
+          },
         },
       ],
     }).compile();
@@ -210,6 +214,8 @@ describe('TestRunsConfigService', () => {
     });
 
     it('should return empty array for non-admin user with no organization memberships', async () => {
+      authzServiceMock.isGlobalAdmin.mockReturnValue(false);
+      authzServiceMock.getAccessibleOrganizations.mockResolvedValue([]);
       const result = await service.getTestRunConfigs('load-test-2024-01-15-14-30', undefined, undefined, undefined, 'test-user-id', []);
       expect(result).toEqual([]);
     });
@@ -449,6 +455,8 @@ describe('TestRunsConfigService', () => {
     });
 
     it('should return empty array for non-admin user with no organization memberships', async () => {
+      authzServiceMock.isGlobalAdmin.mockReturnValue(false);
+      authzServiceMock.getAccessibleOrganizations.mockResolvedValue([]);
       const result = await service.getExpectedConfigChanges('my-app', 'production', 'load-test', 'regular-user', []);
       expect(result).toEqual([]);
     });
@@ -574,6 +582,8 @@ describe('TestRunsConfigService', () => {
     });
 
     it('should return empty array for non-admin user with no organization memberships', async () => {
+      authzServiceMock.isGlobalAdmin.mockReturnValue(false);
+      authzServiceMock.getAccessibleOrganizations.mockResolvedValue([]);
       const result = await service.getLatestConfigKeys('my-app', 'production', 'load-test', [], []);
       expect(result).toEqual([]);
     });

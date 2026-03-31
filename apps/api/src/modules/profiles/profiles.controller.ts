@@ -1,5 +1,5 @@
 import { Controller, Get, Post, Put, Delete, Param, Body, Query, Logger, HttpException, HttpStatus } from '@nestjs/common';
-import { ApiTags, ApiOperation, ApiResponse, ApiParam } from '@nestjs/swagger';
+import { ApiTags, ApiOperation, ApiResponse, ApiParam, ApiBearerAuth } from '@nestjs/swagger';
 import { ProfilesService } from './profiles.service';
 import { CreateProfileDto, UpdateProfileDto } from './dto/profile.dto';
 import { CreateProfileDashboardDto, UpdateProfileDashboardDto } from './dto/profile-dashboard.dto';
@@ -7,6 +7,7 @@ import { CreateProfileBenchmarkDto, UpdateProfileBenchmarkDto } from './dto/prof
 import { UserCtx, UserContext } from '../../common/decorators/user-context.decorator';
 
 @ApiTags('profiles')
+@ApiBearerAuth()
 @Controller('profiles')
 export class ProfilesController {
   private readonly logger = new Logger(ProfilesController.name);

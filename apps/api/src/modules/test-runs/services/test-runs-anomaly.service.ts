@@ -15,11 +15,6 @@ import { DeleteAnomalyDto } from '../dto/delete-anomaly.dto';
 import { ResourceNotFoundException, DatabaseException, ValidationException } from '../../../common/exceptions/business.exception';
 import { BullMQClientService } from '../../data-science/services/bullmq-client.service';
 
-/**
- * Global admin roles that bypass organization filtering
- */
-const ADMIN_ROLES = ['perfana-admin', 'super-admin', 'admin'];
-
 @Injectable()
 export class TestRunsAnomalyService {
   private readonly logger = new Logger(TestRunsAnomalyService.name);
@@ -36,76 +31,16 @@ export class TestRunsAnomalyService {
   ) {}
 
   /**
-   * Check if a user has global admin role
-   */
-  private isGlobalAdmin(roles: string[]): boolean {
-    return roles.some(role => ADMIN_ROLES.includes(role));
-  }
-
-  /**
-   * Validate that a user has access to a test run via organization membership.
-   * Returns true if access is allowed, false otherwise.
-   * For admin users, always returns true (bypass filtering).
-   * For non-admin users with no organization memberships, returns false.
-   */
-  private async validateTestRunAccess(
-    testRunId: string,
-    roles: string[],
-    organizationIds: string[],
-  ): Promise<boolean> {
-    // Admins bypass all filtering
-    if (this.isGlobalAdmin(roles)) {
-      return true;
-    }
-
-    // Non-admin users with no organization memberships have no access
-    if (organizationIds.length === 0) {
-      return false;
-    }
-
-    // Check if the test run belongs to one of the user's organizations
-    const query = `
-      SELECT 1
-      FROM test_runs tr
-      INNER JOIN systems_under_test sut ON sut.id = tr.system_under_test_id
-      INNER JOIN teams team ON team.id = sut.team_id
-      WHERE tr.test_run_id = $1
-        AND sut.organization_id = ANY($2::uuid[])
-      LIMIT 1
-    `;
-
-    const result = await this.testRunRepo.query(query, [testRunId, organizationIds]);
-    return result && result.length > 0;
-  }
-
-  /**
-   * Get check results for a test run with organization filtering
-   *
-   * @param testRunId - Test run ID
-   * @param _system - System name (optional, for backwards compatibility)
-   * @param _environment - Environment name (optional, for backwards compatibility)
-   * @param _workload - Workload name (optional, for backwards compatibility)
-   * @param roles - User roles from JWT token (for admin bypass)
-   * @param organizationIds - User's accessible organization IDs from JWT token
+   * Get check results for a test run.
+   * Authorization is enforced at the controller level via verifyTestRunAccess.
    */
   async getTestRunCheckResults(
     testRunId: string,
     _system?: string,
     _environment?: string,
     _workload?: string,
-    roles: string[] = [],
-    organizationIds: string[] = [],
   ): Promise<any[]> {
     try {
-      // Validate access if organization filtering is enabled
-      if (roles.length > 0 || organizationIds.length > 0) {
-        const hasAccess = await this.validateTestRunAccess(testRunId, roles, organizationIds);
-        if (!hasAccess) {
-          this.logger.debug(`User denied access to check results for test run ${testRunId}`);
-          return [];
-        }
-      }
-
       // Use raw SQL to query check_results table (no entity)
       const checkResults = await this.dataSource.query(
         `SELECT * FROM check_results WHERE test_run_id = $1 ORDER BY created_at ASC`,
@@ -128,34 +63,17 @@ export class TestRunsAnomalyService {
   }
 
   /**
-   * Get anomaly detection results for a test run with organization filtering
-   *
-   * @param testRunId - Test run ID
-   * @param _system - System name (optional, for backwards compatibility)
-   * @param _environment - Environment name (optional, for backwards compatibility)
-   * @param _workload - Workload name (optional, for backwards compatibility)
-   * @param roles - User roles from JWT token (for admin bypass)
-   * @param organizationIds - User's accessible organization IDs from JWT token
+   * Get anomaly detection results for a test run.
+   * Authorization is enforced at the controller level via verifyTestRunAccess.
    */
   async getAnomalyDetectionResults(
     testRunId: string,
     _system?: string,
     _environment?: string,
     _workload?: string,
-    roles: string[] = [],
-    organizationIds: string[] = [],
   ) {
     try {
       this.logger.log(`Getting anomaly detection results for test run: ${testRunId}`);
-
-      // Validate access if organization filtering is enabled
-      if (roles.length > 0 || organizationIds.length > 0) {
-        const hasAccess = await this.validateTestRunAccess(testRunId, roles, organizationIds);
-        if (!hasAccess) {
-          this.logger.debug(`User denied access to anomaly detection results for test run ${testRunId}`);
-          return [];
-        }
-      }
 
       // Get test run details
       const testRun = await this.testRunRepo.findOne({
@@ -329,30 +247,15 @@ export class TestRunsAnomalyService {
   }
 
   /**
-   * Delete anomaly data for a test run with organization filtering
-   *
-   * @param testRunId - Test run ID
-   * @param deleteDto - Delete anomaly DTO with scope and range
-   * @param roles - User roles from JWT token (for admin bypass)
-   * @param organizationIds - User's accessible organization IDs from JWT token
+   * Delete anomaly data for a test run.
+   * Authorization is enforced at the controller level via verifyTestRunAccess.
    */
   async deleteAnomalyData(
     testRunId: string,
     deleteDto: DeleteAnomalyDto,
-    roles: string[] = [],
-    organizationIds: string[] = [],
   ): Promise<{ deletedCount: number }> {
     try {
       this.logger.log(`Deleting anomaly data for test run: ${testRunId}, scope: ${deleteDto.scope}, range: ${deleteDto.range}`);
-
-      // Validate access if organization filtering is enabled
-      if (roles.length > 0 || organizationIds.length > 0) {
-        const hasAccess = await this.validateTestRunAccess(testRunId, roles, organizationIds);
-        if (!hasAccess) {
-          this.logger.warn(`User denied access to delete anomaly data for test run ${testRunId}`);
-          throw new ResourceNotFoundException('TestRun', testRunId);
-        }
-      }
 
       if (deleteDto.scope === 'metric' && !deleteDto.metricName) {
         throw new ValidationException('Metric name is required when scope is "metric"');
@@ -530,34 +433,17 @@ export class TestRunsAnomalyService {
   }
 
   /**
-   * Get a specific ds_adapt_result with organization filtering
-   *
-   * @param testRunId - Test run ID
-   * @param applicationDashboardId - Application dashboard ID
-   * @param panelId - Panel ID
-   * @param metricName - Metric name
-   * @param roles - User roles from JWT token (for admin bypass)
-   * @param organizationIds - User's accessible organization IDs from JWT token
+   * Get a specific ds_adapt_result.
+   * Authorization is enforced at the controller level via verifyTestRunAccess.
    */
   async getDsAdaptResult(
     testRunId: string,
     applicationDashboardId: string,
     panelId: string,
     metricName: string,
-    roles: string[] = [],
-    organizationIds: string[] = [],
   ) {
     try {
       this.logger.log(`Getting ds_adapt_result for test run: ${testRunId}, metric: ${metricName}`);
-
-      // Validate access if organization filtering is enabled
-      if (roles.length > 0 || organizationIds.length > 0) {
-        const hasAccess = await this.validateTestRunAccess(testRunId, roles, organizationIds);
-        if (!hasAccess) {
-          this.logger.debug(`User denied access to ds_adapt_result for test run ${testRunId}`);
-          throw new ResourceNotFoundException('TestRun', testRunId);
-        }
-      }
 
       const result = await this.dsAdaptResultsRepo.findOne({
         where: {

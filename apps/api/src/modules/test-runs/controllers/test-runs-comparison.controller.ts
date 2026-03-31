@@ -1,5 +1,5 @@
 import { Controller, Get, Delete, Post, Param, Query, Body, Logger } from '@nestjs/common';
-import { ApiTags, ApiOperation, ApiResponse } from '@nestjs/swagger';
+import { ApiTags, ApiOperation, ApiResponse, ApiBearerAuth } from '@nestjs/swagger';
 import { TestRunsService } from '../test-runs.service';
 import { CreateExpectedConfigChangeDto, ExpectedConfigChangeDto } from '../dto/expected-config-change.dto';
 import { CreateSparseMetricExclusionDto, SparseMetricExclusionDto } from '../dto/sparse-metric-exclusion.dto';
@@ -8,6 +8,7 @@ import { ValidationException } from '../../../common/exceptions/business.excepti
 import { UserCtx, UserContext } from '../../../common/decorators/user-context.decorator';
 
 @ApiTags('test-runs-comparison')
+@ApiBearerAuth()
 @Controller('test-runs')
 export class TestRunsComparisonController {
   private readonly logger = new Logger(TestRunsComparisonController.name);

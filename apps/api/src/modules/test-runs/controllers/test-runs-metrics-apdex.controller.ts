@@ -1,5 +1,5 @@
 import { Controller, Get, Put, Delete, Post, Param, Query, Body, BadRequestException, Logger } from '@nestjs/common';
-import { ApiTags, ApiOperation, ApiResponse, ApiQuery, ApiParam } from '@nestjs/swagger';
+import { ApiTags, ApiOperation, ApiResponse, ApiQuery, ApiParam, ApiBearerAuth } from '@nestjs/swagger';
 import { UserCtx, UserContext } from '../../../common/decorators/user-context.decorator';
 import { TestRunsService } from '../test-runs.service';
 import { TestRunsBaselineApdexService } from '../services/test-runs-baseline-apdex.service';
@@ -16,6 +16,7 @@ import {
  * Handles workload-level and transaction-level Apdex thresholds, preview calculations, and baseline applications.
  */
 @ApiTags('test-runs-metrics')
+@ApiBearerAuth()
 @Controller('test-runs')
 export class TestRunsMetricsApdexController {
   private readonly logger = new Logger(TestRunsMetricsApdexController.name);

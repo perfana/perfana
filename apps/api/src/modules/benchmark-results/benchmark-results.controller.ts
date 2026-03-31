@@ -1,13 +1,11 @@
-import { Controller, Get, Param, Logger, HttpException } from '@nestjs/common';
-import { ApiTags, ApiOperation, ApiParam, ApiResponse } from '@nestjs/swagger';
-// import { BenchmarksService } from '../benchmarks/benchmarks.service';
+import { Controller, Get, Param, HttpException } from '@nestjs/common';
+import { ApiTags, ApiOperation, ApiParam, ApiResponse, ApiBearerAuth } from '@nestjs/swagger';
 import { BenchmarkResultResponseDto } from '../benchmarks/dto/benchmark-result.dto';
 
 @ApiTags('benchmark-results')
+@ApiBearerAuth()
 @Controller('benchmark-results')
 export class BenchmarkResultsController {
-  private readonly logger = new Logger(BenchmarkResultsController.name);
-
   @Get(':systemUnderTestId/:testRunId')
   @ApiOperation({
     summary: 'Get consolidated benchmark results for a test run',
@@ -70,22 +68,9 @@ export class BenchmarkResultsController {
     @Param('systemUnderTestId') _systemUnderTestId: string,
     @Param('testRunId') _testRunId: string,
   ): Promise<BenchmarkResultResponseDto> {
-    try {
-      // TODO: Implement getTestRunBenchmarkResults in BenchmarksService
-      throw new HttpException('Not implemented yet', 501);
-      // return await this.benchmarksService.getTestRunBenchmarkResults(
-      //   systemUnderTestId,
-      //   testRunId,
-      // );
-    } catch (error) {
-      // Re-throw HttpExceptions (202, 404, 500) as-is
-      if (error instanceof HttpException) {
-        throw error;
-      }
-
-      // Log and re-throw other errors
-      this.logger.error('Failed to get benchmark results:', error);
-      throw error;
-    }
+    throw new HttpException(
+      'Benchmark results endpoint is not yet implemented. Use GET /benchmarks/:systemUnderTestId for benchmark configuration.',
+      501,
+    );
   }
 }

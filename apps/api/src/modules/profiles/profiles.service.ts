@@ -1,4 +1,4 @@
-import { Injectable, Logger, NotFoundException, BadRequestException } from '@nestjs/common';
+import { Injectable, Logger, NotFoundException, BadRequestException, ForbiddenException } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { Profile, ProfileGrafanaDashboard, ProfileBenchmark, GrafanaInstance, GrafanaDashboard, GenericDeepLink } from '../../entities';
@@ -82,7 +82,7 @@ export class ProfilesService {
     // Check if user is org-admin in any organization
     const isOrgAdmin = await this.authzService.isOrgAdminInAnyOrganization(userId);
     if (!isOrgAdmin) {
-      throw new Error('Organization admin privileges required to manage profiles');
+      throw new ForbiddenException('Organization admin privileges required to manage profiles');
     }
   }
 

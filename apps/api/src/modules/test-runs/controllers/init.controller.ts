@@ -1,11 +1,12 @@
 import { Controller, Post, Body, Logger, BadRequestException } from '@nestjs/common';
-import { ApiTags, ApiOperation, ApiResponse } from '@nestjs/swagger';
+import { ApiTags, ApiOperation, ApiResponse, ApiBearerAuth } from '@nestjs/swagger';
 import { UserCtx, UserContext } from '../../../common/decorators/user-context.decorator';
 import { TestRunsService } from '../test-runs.service';
 import { InitTestDto, InitTestResponse } from '../dto/init-test.dto';
 import { ValidationException } from '../../../common/exceptions/business.exception';
 
 @ApiTags('init')
+@ApiBearerAuth()
 @Controller('init')
 export class InitController {
   private readonly logger = new Logger(InitController.name);

@@ -7,7 +7,7 @@ import {
   ParseIntPipe,
   DefaultValuePipe,
 } from '@nestjs/common';
-import { ApiTags, ApiOperation, ApiResponse, ApiQuery, ApiParam } from '@nestjs/swagger';
+import { ApiTags, ApiOperation, ApiResponse, ApiQuery, ApiParam, ApiBearerAuth } from '@nestjs/swagger';
 import { UserCtx, UserContext } from '../../../common/decorators/user-context.decorator';
 import {
   TestRunsDataSourcesService,
@@ -20,6 +20,7 @@ import {
 } from '../services/test-runs-data-sources.service';
 
 @ApiTags('test-runs')
+@ApiBearerAuth()
 @Controller('test-runs')
 export class TestRunsDataSourcesController {
   private readonly logger = new Logger(TestRunsDataSourcesController.name);
