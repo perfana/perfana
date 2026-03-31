@@ -1,9 +1,11 @@
 import { Controller, Get, Post, Put, Delete, Param, Body, Query, Logger, HttpException, HttpStatus, BadRequestException } from '@nestjs/common';
-import { ApiTags, ApiOperation, ApiResponse, ApiParam, ApiQuery } from '@nestjs/swagger';
-import { TeamsService, CreateTeamDto, UpdateTeamDto } from './teams.service';
+import { ApiTags, ApiOperation, ApiResponse, ApiParam, ApiQuery, ApiBearerAuth } from '@nestjs/swagger';
+import { TeamsService } from './teams.service';
+import { CreateTeamDto, UpdateTeamDto } from './dto/team.dto';
 import { UserCtx, UserContext } from '../../common/decorators/user-context.decorator';
 
 @ApiTags('teams')
+@ApiBearerAuth()
 @Controller('teams')
 export class TeamsController {
   private readonly logger = new Logger(TeamsController.name);

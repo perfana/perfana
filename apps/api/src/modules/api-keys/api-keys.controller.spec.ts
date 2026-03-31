@@ -12,6 +12,7 @@ import { createAuthorizationServiceMock } from '../../../test/mocks/authorizatio
 describe('ApiKeysController', () => {
   let controller: ApiKeysController;
   let service: jest.Mocked<ApiKeysService>;
+  let authzService: jest.Mocked<AuthorizationService>;
 
   const mockUserContext: UserContext = {
     userId: 'test-user-123',
@@ -69,6 +70,7 @@ describe('ApiKeysController', () => {
 
     controller = module.get<ApiKeysController>(ApiKeysController);
     service = module.get(ApiKeysService);
+    authzService = module.get(AuthorizationService);
   });
 
   afterEach(() => {
@@ -235,8 +237,8 @@ describe('ApiKeysController', () => {
         teamId: undefined,
       };
 
-      // Mock getUserOrganizations to return empty array (user has no orgs)
-      (service.getUserOrganizations as jest.Mock).mockResolvedValue([]);
+      // Mock getAccessibleOrganizations to return empty array (user has no orgs)
+      (authzService.getAccessibleOrganizations as jest.Mock).mockResolvedValue([]);
 
       // Act & Assert
       await expect(controller.create(createDto, userContextWithoutOrg)).rejects.toThrow(BadRequestException);

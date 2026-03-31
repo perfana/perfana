@@ -18,6 +18,7 @@ import {
   ApiParam,
   ApiBody,
   ApiProperty,
+  ApiBearerAuth,
 } from '@nestjs/swagger';
 import { IsNotEmpty, IsString, IsArray, IsIn, ArrayNotEmpty } from 'class-validator';
 import {
@@ -59,6 +60,7 @@ class UpdateOrganizationMemberRolesDto {
 }
 
 @ApiTags('organization-members')
+@ApiBearerAuth()
 @Controller()
 export class OrganizationMembersController {
   private readonly logger = new Logger(OrganizationMembersController.name);

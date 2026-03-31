@@ -4,19 +4,7 @@ import { Repository, In } from 'typeorm';
 import { Team } from '../../entities';
 import { AuthorizationService } from '../../common/services/authorization.service';
 import { TeamMembersService } from './team-members.service';
-
-export interface CreateTeamDto {
-  organization_id: string;
-  name: string;
-  description?: string;
-}
-
-export interface UpdateTeamDto {
-  name?: string;
-  description?: string;
-  organization_id?: string;
-  restrict_to_team_members?: boolean;
-}
+import { CreateTeamDto, UpdateTeamDto } from './dto/team.dto';
 
 /**
  * Service responsible for managing teams.

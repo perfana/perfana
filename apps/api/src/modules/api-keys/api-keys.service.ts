@@ -1,6 +1,5 @@
-import { Injectable, Logger } from '@nestjs/common';
-import { InjectDataSource } from '@nestjs/typeorm';
-import { DataSource, In } from 'typeorm';
+import { Injectable, Logger, ForbiddenException } from '@nestjs/common';
+import { In } from 'typeorm';
 import { ResourceNotFoundException, ValidationException, DatabaseException } from '../../common/exceptions/business.exception';
 import * as bcrypt from 'bcryptjs';
 import { v4 as uuidv4 } from 'uuid';
@@ -28,7 +27,6 @@ export class ApiKeysService {
     private readonly apiKeyRepository: ApiKeyRepository,
     private readonly apiKeyCacheService: ApiKeyCacheService,
     private readonly authzService: AuthorizationService,
-    @InjectDataSource() private readonly dataSource: DataSource,
   ) {}
 
   /**
@@ -143,24 +141,6 @@ export class ApiKeysService {
     }
   }
 
-  /**
-   * Get organization IDs that a user belongs to
-   *
-   * @param userId - The user ID (Keycloak sub)
-   * @returns Array of organization IDs
-   */
-  async getUserOrganizations(userId: string): Promise<string[]> {
-    try {
-      const result = await this.dataSource.query(
-        'SELECT organization_id FROM organization_members WHERE user_id = $1',
-        [userId]
-      );
-      return result.map((row: any) => row.organization_id);
-    } catch (error) {
-      this.logger.error(`Failed to get user organizations for ${userId}:`, error);
-      return [];
-    }
-  }
 
   /**
    * Create a new API key

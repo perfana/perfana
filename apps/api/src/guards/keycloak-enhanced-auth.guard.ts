@@ -1,7 +1,7 @@
 import { Injectable, CanActivate, ExecutionContext, UnauthorizedException, ForbiddenException, Logger } from '@nestjs/common';
 import { Reflector } from '@nestjs/core';
-import { ConfigService } from '@nestjs/config';
 import { ApiKeysService } from '../modules/api-keys/api-keys.service';
+import { KeycloakJwtService } from '../modules/auth/keycloak-jwt.service';
 import { IS_PUBLIC_KEY } from '../decorators/public.decorator';
 import { IS_ADMIN_ONLY_KEY } from '../decorators/admin-only.decorator';
 import { KeycloakUser, AuthRequestHeaders, AuthenticatedRequest as AuthRequest } from '../types';
@@ -19,8 +19,8 @@ export class KeycloakEnhancedAuthGuard implements CanActivate {
 
   constructor(
     private readonly reflector: Reflector,
-    private readonly configService: ConfigService,
     private readonly apiKeysService: ApiKeysService,
+    private readonly keycloakJwtService: KeycloakJwtService,
   ) {
     this.logger.log('Keycloak Enhanced Auth Guard initialized');
   }
@@ -135,11 +135,7 @@ export class KeycloakEnhancedAuthGuard implements CanActivate {
    */
   static isAdmin(request: AuthenticatedRequest): boolean {
     if (request.authType === 'keycloak-jwt' && request.user) {
-      // Check for admin role in Keycloak token
       const roles = request.user.roles || [];
-      const logger = new Logger('KeycloakEnhancedAuthGuard');
-      logger.debug(`isAdmin check - authType: ${request.authType}, roles: ${JSON.stringify(roles)}`);
-      logger.debug(`isAdmin check - has perfana-admin: ${roles.includes('perfana-admin')}, has admin: ${roles.includes('admin')}`);
       return roles.includes('perfana-admin') || roles.includes('admin');
     }
 
@@ -210,73 +206,14 @@ export class KeycloakEnhancedAuthGuard implements CanActivate {
   }
 
   /**
-   * Validate Keycloak JWT token using nest-keycloak-connect
+   * Validate Keycloak JWT token by delegating to KeycloakJwtService.
+   * The service holds a singleton JWKS key set (created at startup),
+   * avoiding per-request JWKS instantiation.
    */
   private async validateKeycloakToken(token: string): Promise<KeycloakUser | null> {
     try {
-      // Use the nest-keycloak-connect library's built-in JWT validation
-      // This will validate the token against Keycloak's public keys
-      const keycloakUrl = this.configService.get('KEYCLOAK_URL') || 'http://localhost:8080';
-      const realm = this.configService.get('KEYCLOAK_REALM') || 'perfana-prod';
-
-      // Fetch the public key from Keycloak's JWKS endpoint
-      const jwksUrl = `${keycloakUrl}/realms/${realm}/protocol/openid-connect/certs`;
-
-      // Use jose library for JWT verification (already available in dependencies)
-      const { createRemoteJWKSet, jwtVerify } = await import('jose');
-
-      const JWKS = createRemoteJWKSet(new URL(jwksUrl));
-
-      // Support multiple issuers for Docker container vs localhost access
-      const acceptedIssuersEnv = this.configService.get('KEYCLOAK_ACCEPTED_ISSUERS');
-      let acceptedIssuers: string[];
-
-      if (acceptedIssuersEnv) {
-        // Parse comma-separated list of accepted issuers
-        acceptedIssuers = acceptedIssuersEnv.split(',').map((iss: string) => iss.trim());
-      } else {
-        // Default: accept both internal (keycloak:8080) and external (localhost:8080) issuers
-        acceptedIssuers = [
-          `${keycloakUrl}/realms/${realm}`,
-          `http://localhost:8080/realms/${realm}`,
-        ];
-      }
-
-      // Verify the JWT token (issuer + signature + audience)
-      const clientId = this.configService.get('KEYCLOAK_CLIENT_ID');
-      if (!clientId) {
-        this.logger.warn('KEYCLOAK_CLIENT_ID not configured — audience validation disabled');
-      }
-      const { payload } = await jwtVerify(token, JWKS, {
-        issuer: acceptedIssuers,
-        audience: clientId || undefined,
-        clockTolerance: 60,
-      });
-
-      // Extract roles from realm_access and resource_access
-      const realmRoles = (payload.realm_access as any)?.roles || [];
-      const azp = payload.azp as string | undefined;
-      const clientRoles = (azp && (payload.resource_access as any)?.[azp]?.roles) || [];
-      const allRoles = [...realmRoles, ...clientRoles];
-
-      this.logger.debug(`Extracted roles from JWT: realm=${JSON.stringify(realmRoles)}, client=${JSON.stringify(clientRoles)}, combined=${JSON.stringify(allRoles)}`);
-
-      // Return KeycloakUser with extracted roles
-      return {
-        sub: payload.sub!,
-        email: payload.email as string,
-        preferred_username: payload.preferred_username as string,
-        given_name: payload.given_name as string,
-        family_name: payload.family_name as string,
-        roles: allRoles,
-        organizations: (payload as any).organizations || [],
-        teams: (payload as any).teams || [],
-        sessionId: payload.sid as string,
-        exp: payload.exp,
-        iat: payload.iat,
-        aud: payload.aud,
-        iss: payload.iss,
-      } as KeycloakUser;
+      const user = await this.keycloakJwtService.validateToken(token);
+      return user as KeycloakUser;
     } catch {
       return null;
     }

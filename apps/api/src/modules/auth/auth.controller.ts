@@ -1,4 +1,4 @@
-import { Controller, Get, Logger } from '@nestjs/common';
+import { Controller, Get, Logger, ServiceUnavailableException } from '@nestjs/common';
 import { ApiTags, ApiOperation, ApiResponse, ApiBearerAuth } from '@nestjs/swagger';
 import { Public } from '../../decorators/public.decorator';
 import { CurrentUser } from '../../decorators/current-user.decorator';
@@ -52,7 +52,7 @@ export class AuthController {
           error: error instanceof Error ? error.message : 'Unknown error'
         }
       );
-      throw new Error('Failed to fetch JWKS from Keycloak');
+      throw new ServiceUnavailableException('Failed to fetch JWKS from Keycloak');
     }
   }
 

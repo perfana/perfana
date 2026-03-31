@@ -10,6 +10,7 @@ import { Team, TeamMember } from '../../entities';
 import { TeamRole } from '../../constants/roles.constants';
 import { KeycloakAdminService } from '../auth/keycloak-admin.service';
 import { AuthorizationService } from '../../common/services/authorization.service';
+import { fetchUserInfoMap, UserInfo } from '../../common/utils/user-enrichment';
 
 export interface AddTeamMemberDto {
   teamId: string;
@@ -22,15 +23,7 @@ export interface UpdateTeamMemberRolesDto {
 }
 
 export interface EnrichedTeamMember extends TeamMember {
-  userInfo?: {
-    username: string;
-    email?: string;
-    firstName?: string;
-    lastName?: string;
-    displayName: string;
-    enabled: boolean;
-    emailVerified: boolean;
-  };
+  userInfo?: UserInfo;
 }
 
 @Injectable()
@@ -89,89 +82,13 @@ export class TeamMembersService {
   private async enrichMembersWithUserInfo(
     members: TeamMember[],
   ): Promise<EnrichedTeamMember[]> {
-    // Get unique user IDs
     const userIds = [...new Set(members.map(m => m.user_id))];
+    const userInfoMap = await fetchUserInfoMap(userIds, this.keycloakAdminService, this.logger);
 
-    // Fetch user info from Keycloak for all user IDs
-    const userInfoMap = new Map<string, any>();
-
-    await Promise.all(
-      userIds.map(async (userId) => {
-        try {
-          // Skip API keys (they start with 'api-key:')
-          if (userId.startsWith('api-key:')) {
-            userInfoMap.set(userId, {
-              username: userId,
-              displayName: 'API Key',
-              enabled: true,
-              emailVerified: false,
-            });
-            return;
-          }
-
-          const user = await this.keycloakAdminService.getUserById(userId);
-
-          if (user) {
-            userInfoMap.set(userId, {
-              username: user.username,
-              email: user.email,
-              firstName: user.firstName,
-              lastName: user.lastName,
-              displayName: this.getDisplayName(user),
-              enabled: user.enabled,
-              emailVerified: user.emailVerified,
-            });
-          } else {
-            // User not found in Keycloak (might have been deleted)
-            userInfoMap.set(userId, {
-              username: userId,
-              displayName: userId,
-              enabled: false,
-              emailVerified: false,
-            });
-          }
-        } catch (error) {
-          this.logger.warn(`Failed to fetch user info for ${userId}:`, error);
-          // Fallback to just showing the user ID
-          userInfoMap.set(userId, {
-            username: userId,
-            displayName: userId,
-            enabled: false,
-            emailVerified: false,
-          });
-        }
-      })
-    );
-
-    // Enrich members with user info
     return members.map(member => ({
       ...member,
       userInfo: userInfoMap.get(member.user_id),
     }));
-  }
-
-  /**
-   * Get a human-readable display name for a user
-   */
-  private getDisplayName(user: {
-    firstName?: string;
-    lastName?: string;
-    email?: string;
-    username: string;
-  }): string {
-    if (user.firstName && user.lastName) {
-      return `${user.firstName} ${user.lastName}`;
-    }
-    if (user.firstName) {
-      return user.firstName;
-    }
-    if (user.lastName) {
-      return user.lastName;
-    }
-    if (user.email) {
-      return user.email;
-    }
-    return user.username;
   }
 
   /**
