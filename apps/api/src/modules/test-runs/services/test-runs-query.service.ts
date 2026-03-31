@@ -85,7 +85,7 @@ export class TestRunsQueryService {
     const organizationIds = await this.authzService.getAccessibleOrganizations(userId);
 
     const result = await this.dataSource.query(
-      `SELECT organization_id FROM test_runs WHERE id = $1 OR test_run_id = $1 LIMIT 1`,
+      `SELECT organization_id FROM test_runs WHERE id::text = $1 OR test_run_id = $1 LIMIT 1`,
       [testRunId],
     );
     if (result.length === 0) return; // Let downstream service handle 404
