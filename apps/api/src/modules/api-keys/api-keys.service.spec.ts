@@ -282,6 +282,7 @@ describe('ApiKeysService', () => {
 
     it('should parse TTL correctly for months', async () => {
       // Arrange
+      const now = new Date();
       const createDto = { description: 'Test', ttl: '6M' };
       repository.create.mockResolvedValue(createMockApiKey());
       cacheService.cacheKey.mockResolvedValue(undefined);
@@ -289,15 +290,17 @@ describe('ApiKeysService', () => {
       // Act
       await service.createApiKey(createDto);
 
-      // Assert
+      // Assert — use a captured `now` to avoid month-boundary drift between service and assertion
       const createCall = repository.create.mock.calls[0]?.[0];
       expect(createCall).toBeDefined();
       expect(createCall?.validUntil).toBeInstanceOf(Date);
       if (createCall?.validUntil) {
-        const monthsAdded =
-          ((createCall.validUntil as Date).getFullYear() - new Date().getFullYear()) * 12 +
-          ((createCall.validUntil as Date).getMonth() - new Date().getMonth());
-        expect(monthsAdded).toBe(6);
+        const validUntil = createCall.validUntil as Date;
+        const diffMs = validUntil.getTime() - now.getTime();
+        const diffDays = diffMs / (1000 * 60 * 60 * 24);
+        // 6 months is roughly 180-184 days; allow a generous range
+        expect(diffDays).toBeGreaterThanOrEqual(178);
+        expect(diffDays).toBeLessThanOrEqual(186);
       }
     });
 

@@ -9,6 +9,8 @@ import { Repository, DataSource } from 'typeorm';
 import { Organization, OrganizationMember } from '../../entities';
 import { OrganizationRole } from '../../constants/roles.constants';
 import { KeycloakAdminService } from '../auth/keycloak-admin.service';
+import { AuthorizationService } from '../../common/services/authorization.service';
+import { fetchUserInfoMap, UserInfo } from '../../common/utils/user-enrichment';
 
 export interface AddOrganizationMemberDto {
   organizationId: string;
@@ -21,15 +23,7 @@ export interface UpdateOrganizationMemberRolesDto {
 }
 
 export interface EnrichedOrganizationMember extends OrganizationMember {
-  userInfo?: {
-    username: string;
-    email?: string;
-    firstName?: string;
-    lastName?: string;
-    displayName: string;
-    enabled: boolean;
-    emailVerified: boolean;
-  };
+  userInfo?: UserInfo;
 }
 
 @Injectable()
@@ -43,6 +37,7 @@ export class OrganizationMembersService {
     private readonly organizationRepository: Repository<Organization>,
     private readonly keycloakAdminService: KeycloakAdminService,
     @InjectDataSource() private readonly dataSource: DataSource,
+    private readonly authorizationService: AuthorizationService,
   ) {}
 
   /**
@@ -112,89 +107,13 @@ export class OrganizationMembersService {
   private async enrichMembersWithUserInfo(
     members: OrganizationMember[],
   ): Promise<EnrichedOrganizationMember[]> {
-    // Get unique user IDs
     const userIds = [...new Set(members.map(m => m.user_id))];
+    const userInfoMap = await fetchUserInfoMap(userIds, this.keycloakAdminService, this.logger);
 
-    // Fetch user info from Keycloak for all user IDs
-    const userInfoMap = new Map<string, any>();
-
-    await Promise.all(
-      userIds.map(async (userId) => {
-        try {
-          // Skip API keys (they start with 'api-key:')
-          if (userId.startsWith('api-key:')) {
-            userInfoMap.set(userId, {
-              username: userId,
-              displayName: 'API Key',
-              enabled: true,
-              emailVerified: false,
-            });
-            return;
-          }
-
-          const user = await this.keycloakAdminService.getUserById(userId);
-
-          if (user) {
-            userInfoMap.set(userId, {
-              username: user.username,
-              email: user.email,
-              firstName: user.firstName,
-              lastName: user.lastName,
-              displayName: this.getDisplayName(user),
-              enabled: user.enabled,
-              emailVerified: user.emailVerified,
-            });
-          } else {
-            // User not found in Keycloak (might have been deleted)
-            userInfoMap.set(userId, {
-              username: userId,
-              displayName: userId,
-              enabled: false,
-              emailVerified: false,
-            });
-          }
-        } catch (error) {
-          this.logger.warn(`Failed to fetch user info for ${userId}:`, error);
-          // Fallback to just showing the user ID
-          userInfoMap.set(userId, {
-            username: userId,
-            displayName: userId,
-            enabled: false,
-            emailVerified: false,
-          });
-        }
-      })
-    );
-
-    // Enrich members with user info
     return members.map(member => ({
       ...member,
       userInfo: userInfoMap.get(member.user_id),
     }));
-  }
-
-  /**
-   * Get a human-readable display name for a user
-   */
-  private getDisplayName(user: {
-    firstName?: string;
-    lastName?: string;
-    email?: string;
-    username: string;
-  }): string {
-    if (user.firstName && user.lastName) {
-      return `${user.firstName} ${user.lastName}`;
-    }
-    if (user.firstName) {
-      return user.firstName;
-    }
-    if (user.lastName) {
-      return user.lastName;
-    }
-    if (user.email) {
-      return user.email;
-    }
-    return user.username;
   }
 
   /**
@@ -336,6 +255,10 @@ export class OrganizationMembersService {
       member.roles = dto.roles;
       await this.memberRepository.save(member);
 
+      // Invalidate authorization cache for the affected user and organization
+      await this.authorizationService.invalidateUserCache(member.user_id);
+      await this.authorizationService.invalidateOrganizationCache(member.organization_id);
+
       this.logger.log(
         `Updated roles for user ${member.user_id} in organization ${member.organization_id}: ${dto.roles.join(', ')}`,
       );
@@ -363,6 +286,10 @@ export class OrganizationMembersService {
 
       // Revoke API keys created by this user for this organization
       await this.revokeApiKeysForUser(member.user_id, member.organization_id);
+
+      // Invalidate authorization cache for the removed user and organization
+      await this.authorizationService.invalidateUserCache(member.user_id);
+      await this.authorizationService.invalidateOrganizationCache(member.organization_id);
 
       this.logger.log(
         `Removed user ${member.user_id} from organization ${member.organization_id}`,
@@ -399,6 +326,10 @@ export class OrganizationMembersService {
 
       // Revoke API keys created by this user for this organization
       await this.revokeApiKeysForUser(userId, organizationId);
+
+      // Invalidate authorization cache for the removed user and organization
+      await this.authorizationService.invalidateUserCache(userId);
+      await this.authorizationService.invalidateOrganizationCache(organizationId);
 
       this.logger.log(
         `Removed user ${userId} from organization ${organizationId}`,

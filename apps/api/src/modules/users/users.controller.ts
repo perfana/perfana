@@ -1,7 +1,8 @@
-import { Controller, Get, Query, Logger } from '@nestjs/common';
+import { Controller, Get, Query, Logger, ForbiddenException } from '@nestjs/common';
 import { ApiTags, ApiOperation, ApiResponse, ApiQuery, ApiBearerAuth } from '@nestjs/swagger';
 import { KeycloakAdminService, KeycloakUserInfo } from '../auth/keycloak-admin.service';
 import { UserCtx, UserContext } from '../../common/decorators/user-context.decorator';
+import { AuthorizationService } from '../../common/services/authorization.service';
 import { InjectDataSource } from '@nestjs/typeorm';
 import { DataSource } from 'typeorm';
 
@@ -13,6 +14,7 @@ export class UsersController {
 
   constructor(
     private readonly keycloakAdminService: KeycloakAdminService,
+    private readonly authorizationService: AuthorizationService,
     @InjectDataSource() private readonly dataSource: DataSource,
   ) {}
 
@@ -46,11 +48,20 @@ export class UsersController {
     },
   })
   async searchUsers(
+    @UserCtx() ctx: UserContext,
     @Query('q') search?: string,
     @Query('email') email?: string,
     @Query('username') username?: string,
     @Query('limit') limit?: string,
   ): Promise<(KeycloakUserInfo & { displayName: string })[]> {
+    // Restrict to global admins or org admins (used for adding members to orgs/teams)
+    if (!this.authorizationService.isGlobalAdmin(ctx.roles)) {
+      const isOrgAdmin = await this.authorizationService.isOrgAdminInAnyOrganization(ctx.userId);
+      if (!isOrgAdmin) {
+        throw new ForbiddenException('User search requires organization admin or global admin privileges');
+      }
+    }
+
     this.logger.debug(`Searching users: search="${search}", email="${email}", username="${username}"`);
 
     const maxResults = Math.min(parseInt(limit || '20', 10), 100);

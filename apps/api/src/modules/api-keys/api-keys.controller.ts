@@ -40,9 +40,9 @@ export class ApiKeysController {
     // Use organizationId from request body, or fall back to user's first organization
     let organizationId = createDto.organizationId || ctx.organizationId;
 
-    // If still no organization, query database for user's first organization
+    // If still no organization, query via AuthorizationService (cached)
     if (!organizationId) {
-      const userOrgs = await this.apiKeysService.getUserOrganizations(ctx.userId);
+      const userOrgs = await this.authzService.getAccessibleOrganizations(ctx.userId);
       if (userOrgs.length === 0) {
         throw new BadRequestException(
           'User must belong to an organization to create API keys',
@@ -94,13 +94,9 @@ export class ApiKeysController {
   async validate(@Body('token') token: string) {
     const apiKey = await this.apiKeysService.validateApiKey(token);
 
+    // Only return validity status — no key metadata (prevents info disclosure)
     return {
       valid: !!apiKey,
-      apiKey: apiKey ? {
-        id: apiKey.id,
-        description: apiKey.description,
-        roles: apiKey.roles,
-      } : null,
     };
   }
 

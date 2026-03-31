@@ -22,22 +22,17 @@
 import { Test, TestingModule } from '@nestjs/testing';
 import { ExecutionContext, UnauthorizedException, ForbiddenException } from '@nestjs/common';
 import { Reflector } from '@nestjs/core';
-import { ConfigService } from '@nestjs/config';
 import { KeycloakEnhancedAuthGuard, AuthenticatedRequest } from './keycloak-enhanced-auth.guard';
 import { ApiKeysService } from '../modules/api-keys/api-keys.service';
+import { KeycloakJwtService } from '../modules/auth/keycloak-jwt.service';
 import { KeycloakUser } from '../types';
 import { IS_PUBLIC_KEY } from '../decorators/public.decorator';
 import { IS_ADMIN_ONLY_KEY } from '../decorators/admin-only.decorator';
 
-// Mock jose library for JWT verification
-jest.mock('jose', () => ({
-  createRemoteJWKSet: jest.fn(() => jest.fn()),
-  jwtVerify: jest.fn(),
-}));
-
 describe('KeycloakEnhancedAuthGuard', () => {
   let guard: KeycloakEnhancedAuthGuard;
   let apiKeysService: jest.Mocked<ApiKeysService>;
+  let keycloakJwtService: jest.Mocked<{ validateToken: jest.Mock }>;
   let reflector: jest.Mocked<Reflector>;
 
   // Mock execution context helper
@@ -71,16 +66,9 @@ describe('KeycloakEnhancedAuthGuard', () => {
           },
         },
         {
-          provide: ConfigService,
+          provide: KeycloakJwtService,
           useValue: {
-            get: jest.fn((key: string, defaultValue?: any) => {
-              const config: Record<string, any> = {
-                KEYCLOAK_URL: 'http://localhost:8080',
-                KEYCLOAK_REALM: 'perfana-test',
-                KEYCLOAK_CLIENT_ID: 'perfana-api',
-              };
-              return config[key] || defaultValue;
-            }),
+            validateToken: jest.fn(),
           },
         },
         {
@@ -94,6 +82,7 @@ describe('KeycloakEnhancedAuthGuard', () => {
 
     guard = module.get<KeycloakEnhancedAuthGuard>(KeycloakEnhancedAuthGuard);
     apiKeysService = module.get(ApiKeysService);
+    keycloakJwtService = module.get(KeycloakJwtService);
     reflector = module.get(Reflector);
   });
 
@@ -360,19 +349,17 @@ describe('KeycloakEnhancedAuthGuard', () => {
       const context = createMockExecutionContext({
         authorization: `Bearer ${validJwt}`,
       });
-      const mockJwtPayload = {
-        sub: 'user-123',
-        email: 'user@example.com',
-        preferred_username: 'testuser',
-        realm_access: { roles: ['user'] },
-      };
-
       reflector.getAllAndOverride.mockReturnValue(false);
       apiKeysService.validateApiKey.mockResolvedValue(null); // API key validation fails
 
-      // Mock jose jwtVerify
-      const { jwtVerify } = require('jose');
-      jwtVerify.mockResolvedValue({ payload: mockJwtPayload });
+      keycloakJwtService.validateToken.mockResolvedValue({
+        sub: 'user-123',
+        email: 'user@example.com',
+        preferred_username: 'testuser',
+        roles: ['user'],
+        organizations: [],
+        teams: [],
+      });
 
       // Act
       const result = await guard.canActivate(context);
@@ -392,18 +379,17 @@ describe('KeycloakEnhancedAuthGuard', () => {
       const context = createMockExecutionContext({
         authorization: `Bearer ${validJwt}`,
       });
-      const mockJwtPayload = {
-        sub: 'admin-456',
-        email: 'admin@example.com',
-        preferred_username: 'admin',
-        realm_access: { roles: ['perfana-admin', 'user'] },
-      };
-
       reflector.getAllAndOverride.mockReturnValue(false);
       apiKeysService.validateApiKey.mockResolvedValue(null);
 
-      const { jwtVerify } = require('jose');
-      jwtVerify.mockResolvedValue({ payload: mockJwtPayload });
+      keycloakJwtService.validateToken.mockResolvedValue({
+        sub: 'admin-456',
+        email: 'admin@example.com',
+        preferred_username: 'admin',
+        roles: ['perfana-admin', 'user'],
+        organizations: [],
+        teams: [],
+      });
 
       // Act
       await guard.canActivate(context);
@@ -425,13 +411,12 @@ describe('KeycloakEnhancedAuthGuard', () => {
       reflector.getAllAndOverride.mockReturnValue(false);
       apiKeysService.validateApiKey.mockResolvedValue(null);
 
-      const { jwtVerify } = require('jose');
-      jwtVerify.mockResolvedValue({
-        payload: {
-          sub: 'user-789',
-          email: 'user@example.com',
-          realm_access: { roles: ['user'] },
-        },
+      keycloakJwtService.validateToken.mockResolvedValue({
+        sub: 'user-789',
+        email: 'user@example.com',
+        roles: ['user'],
+        organizations: [],
+        teams: [],
       });
 
       // Act
@@ -439,7 +424,7 @@ describe('KeycloakEnhancedAuthGuard', () => {
 
       // Assert
       expect(result).toBe(true);
-      expect(jwtVerify).toHaveBeenCalled();
+      expect(keycloakJwtService.validateToken).toHaveBeenCalled();
     });
   });
 
@@ -454,8 +439,7 @@ describe('KeycloakEnhancedAuthGuard', () => {
       reflector.getAllAndOverride.mockReturnValue(false);
       apiKeysService.validateApiKey.mockResolvedValue(null);
 
-      const { jwtVerify } = require('jose');
-      jwtVerify.mockRejectedValue(new Error('Invalid signature'));
+      keycloakJwtService.validateToken.mockRejectedValue(new Error('Invalid signature'));
 
       // Act & Assert
       await expect(guard.canActivate(context)).rejects.toThrow(UnauthorizedException);
@@ -471,9 +455,8 @@ describe('KeycloakEnhancedAuthGuard', () => {
       reflector.getAllAndOverride.mockReturnValue(false);
       apiKeysService.validateApiKey.mockResolvedValue(null);
 
-      const { jwtVerify } = require('jose');
       // Reject with non-Error object to test error handling
-      jwtVerify.mockRejectedValue({ code: 'INVALID_TOKEN', details: 'Token malformed' });
+      keycloakJwtService.validateToken.mockRejectedValue({ code: 'INVALID_TOKEN', details: 'Token malformed' });
 
       // Act & Assert
       await expect(guard.canActivate(context)).rejects.toThrow(UnauthorizedException);
@@ -490,9 +473,8 @@ describe('KeycloakEnhancedAuthGuard', () => {
       reflector.getAllAndOverride.mockReturnValue(false);
       apiKeysService.validateApiKey.mockResolvedValue(null);
 
-      const { jwtVerify } = require('jose');
       // Reject with string instead of Error to test error handling path
-      jwtVerify.mockRejectedValue('String error message');
+      keycloakJwtService.validateToken.mockRejectedValue('String error message');
 
       // Act & Assert
       await expect(guard.canActivate(context)).rejects.toThrow(UnauthorizedException);
@@ -509,9 +491,8 @@ describe('KeycloakEnhancedAuthGuard', () => {
       reflector.getAllAndOverride.mockReturnValue(false);
       apiKeysService.validateApiKey.mockResolvedValue(null);
 
-      const { jwtVerify } = require('jose');
       // Reject with null to test error handling path with falsy value
-      jwtVerify.mockRejectedValue(null);
+      keycloakJwtService.validateToken.mockRejectedValue(null);
 
       // Act & Assert
       await expect(guard.canActivate(context)).rejects.toThrow(UnauthorizedException);
@@ -528,8 +509,7 @@ describe('KeycloakEnhancedAuthGuard', () => {
       reflector.getAllAndOverride.mockReturnValue(false);
       apiKeysService.validateApiKey.mockResolvedValue(null);
 
-      const { jwtVerify } = require('jose');
-      jwtVerify.mockRejectedValue(new Error('Token expired'));
+      keycloakJwtService.validateToken.mockRejectedValue(new Error('Token expired'));
 
       // Act & Assert
       await expect(guard.canActivate(context)).rejects.toThrow(UnauthorizedException);
@@ -545,8 +525,7 @@ describe('KeycloakEnhancedAuthGuard', () => {
       reflector.getAllAndOverride.mockReturnValue(false);
       apiKeysService.validateApiKey.mockResolvedValue(null);
 
-      const { jwtVerify } = require('jose');
-      jwtVerify.mockRejectedValue(new Error('Invalid issuer'));
+      keycloakJwtService.validateToken.mockRejectedValue(new Error('Invalid issuer'));
 
       // Act & Assert
       await expect(guard.canActivate(context)).rejects.toThrow(UnauthorizedException);
@@ -562,8 +541,7 @@ describe('KeycloakEnhancedAuthGuard', () => {
       reflector.getAllAndOverride.mockReturnValue(false);
       apiKeysService.validateApiKey.mockResolvedValue(null);
 
-      const { jwtVerify } = require('jose');
-      jwtVerify.mockRejectedValue(new Error('Invalid audience'));
+      keycloakJwtService.validateToken.mockRejectedValue(new Error('Invalid audience'));
 
       // Act & Assert
       await expect(guard.canActivate(context)).rejects.toThrow(UnauthorizedException);
@@ -579,8 +557,7 @@ describe('KeycloakEnhancedAuthGuard', () => {
       reflector.getAllAndOverride.mockReturnValue(false);
       apiKeysService.validateApiKey.mockResolvedValue(null);
 
-      const { jwtVerify } = require('jose');
-      jwtVerify.mockRejectedValue(new Error('JWKS endpoint unreachable'));
+      keycloakJwtService.validateToken.mockRejectedValue(new Error('JWKS endpoint unreachable'));
 
       // Act & Assert
       await expect(guard.canActivate(context)).rejects.toThrow(UnauthorizedException);
@@ -598,9 +575,12 @@ describe('KeycloakEnhancedAuthGuard', () => {
       reflector.getAllAndOverride.mockReturnValue(false);
       apiKeysService.validateApiKey.mockResolvedValue(null); // API key fails
 
-      const { jwtVerify } = require('jose');
-      jwtVerify.mockResolvedValue({
-        payload: { sub: 'user', email: 'user@example.com', realm_access: { roles: ['user'] } },
+      keycloakJwtService.validateToken.mockResolvedValue({
+        sub: 'user',
+        email: 'user@example.com',
+        roles: ['user'],
+        organizations: [],
+        teams: [],
       });
 
       // Act
@@ -609,7 +589,7 @@ describe('KeycloakEnhancedAuthGuard', () => {
       // Assert
       expect(result).toBe(true);
       expect(apiKeysService.validateApiKey).toHaveBeenCalled(); // API key tried first
-      expect(jwtVerify).toHaveBeenCalled(); // JWT tried second
+      expect(keycloakJwtService.validateToken).toHaveBeenCalled(); // JWT tried second
     });
 
     it('should fail when both authentication methods fail', async () => {
@@ -622,8 +602,7 @@ describe('KeycloakEnhancedAuthGuard', () => {
       reflector.getAllAndOverride.mockReturnValue(false);
       apiKeysService.validateApiKey.mockResolvedValue(null);
 
-      const { jwtVerify } = require('jose');
-      jwtVerify.mockRejectedValue(new Error('Invalid token'));
+      keycloakJwtService.validateToken.mockRejectedValue(new Error('Invalid token'));
 
       // Act & Assert
       await expect(guard.canActivate(context)).rejects.toThrow(UnauthorizedException);
@@ -646,9 +625,11 @@ describe('KeycloakEnhancedAuthGuard', () => {
       reflector.getAllAndOverride.mockReturnValue(false);
       apiKeysService.validateApiKey.mockResolvedValue(mockApiKey as any);
 
-      const { jwtVerify } = require('jose');
-      jwtVerify.mockResolvedValue({
-        payload: { sub: 'user', realm_access: { roles: ['user'] } },
+      keycloakJwtService.validateToken.mockResolvedValue({
+        sub: 'user',
+        roles: ['user'],
+        organizations: [],
+        teams: [],
       });
 
       // Act
@@ -658,7 +639,7 @@ describe('KeycloakEnhancedAuthGuard', () => {
       // Assert
       expect(result).toBe(true);
       expect(request.authType).toBe('api-key'); // API key has priority
-      expect(jwtVerify).not.toHaveBeenCalled(); // JWT not tried when API key succeeds
+      expect(keycloakJwtService.validateToken).not.toHaveBeenCalled(); // JWT not tried when API key succeeds
     });
   });
 
@@ -669,13 +650,6 @@ describe('KeycloakEnhancedAuthGuard', () => {
       const context = createMockExecutionContext({
         authorization: `Bearer ${adminJwt}`,
       });
-      const mockAdminPayload = {
-        sub: 'admin-user-123',
-        email: 'admin@example.com',
-        preferred_username: 'admin',
-        realm_access: { roles: ['perfana-admin', 'user'] },
-      };
-
       // Mock: not public, but admin-only
       reflector.getAllAndOverride.mockImplementation((key: string) => {
         if (key === IS_PUBLIC_KEY) return false;
@@ -684,8 +658,14 @@ describe('KeycloakEnhancedAuthGuard', () => {
       });
       apiKeysService.validateApiKey.mockResolvedValue(null);
 
-      const { jwtVerify } = require('jose');
-      jwtVerify.mockResolvedValue({ payload: mockAdminPayload });
+      keycloakJwtService.validateToken.mockResolvedValue({
+        sub: 'admin-user-123',
+        email: 'admin@example.com',
+        preferred_username: 'admin',
+        roles: ['perfana-admin', 'user'],
+        organizations: [],
+        teams: [],
+      });
 
       // Act
       const result = await guard.canActivate(context);
@@ -700,13 +680,6 @@ describe('KeycloakEnhancedAuthGuard', () => {
       const context = createMockExecutionContext({
         authorization: `Bearer ${userJwt}`,
       });
-      const mockRegularPayload = {
-        sub: 'regular-user-456',
-        email: 'user@example.com',
-        preferred_username: 'regularuser',
-        realm_access: { roles: ['user'] },
-      };
-
       // Mock: not public, but admin-only
       reflector.getAllAndOverride.mockImplementation((key: string) => {
         if (key === IS_PUBLIC_KEY) return false;
@@ -715,8 +688,14 @@ describe('KeycloakEnhancedAuthGuard', () => {
       });
       apiKeysService.validateApiKey.mockResolvedValue(null);
 
-      const { jwtVerify } = require('jose');
-      jwtVerify.mockResolvedValue({ payload: mockRegularPayload });
+      keycloakJwtService.validateToken.mockResolvedValue({
+        sub: 'regular-user-456',
+        email: 'user@example.com',
+        preferred_username: 'regularuser',
+        roles: ['user'],
+        organizations: [],
+        teams: [],
+      });
 
       // Act & Assert
       await expect(guard.canActivate(context)).rejects.toThrow(ForbiddenException);
@@ -783,13 +762,6 @@ describe('KeycloakEnhancedAuthGuard', () => {
       const context = createMockExecutionContext({
         authorization: `Bearer ${userJwt}`,
       });
-      const mockRegularPayload = {
-        sub: 'regular-user-789',
-        email: 'user@example.com',
-        preferred_username: 'regularuser',
-        realm_access: { roles: ['user'] },
-      };
-
       // Mock: not public, not admin-only
       reflector.getAllAndOverride.mockImplementation((key: string) => {
         if (key === IS_PUBLIC_KEY) return false;
@@ -798,8 +770,14 @@ describe('KeycloakEnhancedAuthGuard', () => {
       });
       apiKeysService.validateApiKey.mockResolvedValue(null);
 
-      const { jwtVerify } = require('jose');
-      jwtVerify.mockResolvedValue({ payload: mockRegularPayload });
+      keycloakJwtService.validateToken.mockResolvedValue({
+        sub: 'regular-user-789',
+        email: 'user@example.com',
+        preferred_username: 'regularuser',
+        roles: ['user'],
+        organizations: [],
+        teams: [],
+      });
 
       // Act
       const result = await guard.canActivate(context);
@@ -814,13 +792,6 @@ describe('KeycloakEnhancedAuthGuard', () => {
       const context = createMockExecutionContext({
         authorization: `Bearer ${adminJwt}`,
       });
-      const mockAdminPayload = {
-        sub: 'admin-alt-user',
-        email: 'admin-alt@example.com',
-        preferred_username: 'adminalt',
-        realm_access: { roles: ['admin'] }, // Using 'admin' instead of 'perfana-admin'
-      };
-
       // Mock: not public, but admin-only
       reflector.getAllAndOverride.mockImplementation((key: string) => {
         if (key === IS_PUBLIC_KEY) return false;
@@ -829,8 +800,14 @@ describe('KeycloakEnhancedAuthGuard', () => {
       });
       apiKeysService.validateApiKey.mockResolvedValue(null);
 
-      const { jwtVerify } = require('jose');
-      jwtVerify.mockResolvedValue({ payload: mockAdminPayload });
+      keycloakJwtService.validateToken.mockResolvedValue({
+        sub: 'admin-alt-user',
+        email: 'admin-alt@example.com',
+        preferred_username: 'adminalt',
+        roles: ['admin'], // Using 'admin' instead of 'perfana-admin'
+        organizations: [],
+        teams: [],
+      });
 
       // Act
       const result = await guard.canActivate(context);
@@ -1263,103 +1240,47 @@ describe('KeycloakEnhancedAuthGuard', () => {
     });
   });
 
-  describe('Keycloak Custom Issuer Configuration', () => {
-    it('should use custom issuers from environment variable', async () => {
+  describe('Keycloak JWT Delegation', () => {
+    it('should delegate JWT validation to KeycloakJwtService', async () => {
       // Arrange
       const jwt = 'eyJhbGciOiJSUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiJ1c2VyIn0.sig';
       const context = createMockExecutionContext({
         authorization: `Bearer ${jwt}`,
       });
 
-      // Create a new guard instance with custom issuer config
-      const customConfigService = {
-        get: jest.fn((key: string) => {
-          if (key === 'KEYCLOAK_ACCEPTED_ISSUERS') {
-            return 'https://custom.keycloak.com/realms/test, https://another.keycloak.com/realms/test';
-          }
-          if (key === 'KEYCLOAK_URL') return 'http://localhost:8080';
-          if (key === 'KEYCLOAK_REALM') return 'perfana-test';
-          if (key === 'KEYCLOAK_CLIENT_ID') return 'perfana-api';
-          return undefined;
-        }),
-      };
-
-      const customModule = await Test.createTestingModule({
-        providers: [
-          KeycloakEnhancedAuthGuard,
-          { provide: ApiKeysService, useValue: apiKeysService },
-          { provide: ConfigService, useValue: customConfigService },
-          { provide: Reflector, useValue: reflector },
-        ],
-      }).compile();
-
-      const customGuard = customModule.get<KeycloakEnhancedAuthGuard>(KeycloakEnhancedAuthGuard);
-
       reflector.getAllAndOverride.mockReturnValue(false);
       apiKeysService.validateApiKey.mockResolvedValue(null);
 
-      const { jwtVerify } = require('jose');
-      jwtVerify.mockResolvedValue({
-        payload: {
-          sub: 'user-custom',
-          email: 'user@custom.com',
-          realm_access: { roles: ['user'] },
-        },
+      keycloakJwtService.validateToken.mockResolvedValue({
+        sub: 'user-custom',
+        email: 'user@custom.com',
+        roles: ['user'],
+        organizations: [],
+        teams: [],
       });
 
       // Act
-      const result = await customGuard.canActivate(context);
+      const result = await guard.canActivate(context);
 
       // Assert
       expect(result).toBe(true);
-      expect(customConfigService.get).toHaveBeenCalledWith('KEYCLOAK_ACCEPTED_ISSUERS');
+      expect(keycloakJwtService.validateToken).toHaveBeenCalledWith(jwt);
     });
 
-    it('should handle empty custom issuers string', async () => {
+    it('should treat any error from KeycloakJwtService.validateToken as auth failure', async () => {
       // Arrange
       const jwt = 'eyJhbGciOiJSUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiJ1c2VyIn0.sig';
       const context = createMockExecutionContext({
         authorization: `Bearer ${jwt}`,
       });
 
-      const customConfigService = {
-        get: jest.fn((key: string) => {
-          if (key === 'KEYCLOAK_ACCEPTED_ISSUERS') return '   ';
-          if (key === 'KEYCLOAK_URL') return 'http://localhost:8080';
-          if (key === 'KEYCLOAK_REALM') return 'perfana-test';
-          if (key === 'KEYCLOAK_CLIENT_ID') return 'perfana-api';
-          return undefined;
-        }),
-      };
-
-      const customModule = await Test.createTestingModule({
-        providers: [
-          KeycloakEnhancedAuthGuard,
-          { provide: ApiKeysService, useValue: apiKeysService },
-          { provide: ConfigService, useValue: customConfigService },
-          { provide: Reflector, useValue: reflector },
-        ],
-      }).compile();
-
-      const customGuard = customModule.get<KeycloakEnhancedAuthGuard>(KeycloakEnhancedAuthGuard);
-
       reflector.getAllAndOverride.mockReturnValue(false);
       apiKeysService.validateApiKey.mockResolvedValue(null);
 
-      const { jwtVerify } = require('jose');
-      jwtVerify.mockResolvedValue({
-        payload: {
-          sub: 'user-empty-issuer',
-          email: 'user@example.com',
-          realm_access: { roles: ['user'] },
-        },
-      });
+      keycloakJwtService.validateToken.mockRejectedValue(new Error('JWKS fetch failed'));
 
-      // Act
-      const result = await customGuard.canActivate(context);
-
-      // Assert
-      expect(result).toBe(true);
+      // Act & Assert
+      await expect(guard.canActivate(context)).rejects.toThrow(UnauthorizedException);
     });
   });
 
@@ -1374,8 +1295,7 @@ describe('KeycloakEnhancedAuthGuard', () => {
       reflector.getAllAndOverride.mockReturnValue(false);
       apiKeysService.validateApiKey.mockResolvedValue(null);
 
-      const { jwtVerify } = require('jose');
-      jwtVerify.mockRejectedValue(new Error('Token too long'));
+      keycloakJwtService.validateToken.mockRejectedValue(new Error('Token too long'));
 
       // Act & Assert
       await expect(guard.canActivate(context)).rejects.toThrow(UnauthorizedException);
@@ -1391,8 +1311,7 @@ describe('KeycloakEnhancedAuthGuard', () => {
       reflector.getAllAndOverride.mockReturnValue(false);
       apiKeysService.validateApiKey.mockResolvedValue(null);
 
-      const { jwtVerify } = require('jose');
-      jwtVerify.mockRejectedValue(new Error('Invalid format'));
+      keycloakJwtService.validateToken.mockRejectedValue(new Error('Invalid format'));
 
       // Act & Assert
       await expect(guard.canActivate(context)).rejects.toThrow(UnauthorizedException);
@@ -1407,8 +1326,7 @@ describe('KeycloakEnhancedAuthGuard', () => {
       reflector.getAllAndOverride.mockReturnValue(false);
       apiKeysService.validateApiKey.mockResolvedValue(null);
 
-      const { jwtVerify } = require('jose');
-      jwtVerify.mockRejectedValue(new Error('Invalid token'));
+      keycloakJwtService.validateToken.mockRejectedValue(new Error('Invalid token'));
 
       // Act & Assert
       await expect(guard.canActivate(context)).rejects.toThrow(UnauthorizedException);
@@ -1423,8 +1341,7 @@ describe('KeycloakEnhancedAuthGuard', () => {
       reflector.getAllAndOverride.mockReturnValue(false);
       apiKeysService.validateApiKey.mockResolvedValue(null);
 
-      const { jwtVerify } = require('jose');
-      jwtVerify.mockRejectedValue(new Error('Invalid token'));
+      keycloakJwtService.validateToken.mockRejectedValue(new Error('Invalid token'));
 
       // Act & Assert
       await expect(guard.canActivate(context)).rejects.toThrow(UnauthorizedException);
@@ -1440,8 +1357,7 @@ describe('KeycloakEnhancedAuthGuard', () => {
       reflector.getAllAndOverride.mockReturnValue(false);
       apiKeysService.validateApiKey.mockResolvedValue(null);
 
-      const { jwtVerify } = require('jose');
-      jwtVerify.mockRejectedValue(new Error('Invalid'));
+      keycloakJwtService.validateToken.mockRejectedValue(new Error('Invalid'));
 
       // Act & Assert
       try {
@@ -1523,8 +1439,7 @@ describe('KeycloakEnhancedAuthGuard', () => {
       reflector.getAllAndOverride.mockReturnValue(false);
       apiKeysService.validateApiKey.mockResolvedValue(null);
 
-      const { jwtVerify } = require('jose');
-      jwtVerify.mockRejectedValue(new Error('Invalid token'));
+      keycloakJwtService.validateToken.mockRejectedValue(new Error('Invalid token'));
 
       // Act & Assert
       // The second space becomes part of the token, which should fail validation
@@ -1539,8 +1454,7 @@ describe('KeycloakEnhancedAuthGuard', () => {
       reflector.getAllAndOverride.mockReturnValue(false);
       apiKeysService.validateApiKey.mockRejectedValue('String error instead of Error object');
 
-      const { jwtVerify } = require('jose');
-      jwtVerify.mockRejectedValue(new Error('Also failed'));
+      keycloakJwtService.validateToken.mockRejectedValue(new Error('Also failed'));
 
       // Act & Assert
       await expect(guard.canActivate(context)).rejects.toThrow(UnauthorizedException);
@@ -1556,13 +1470,12 @@ describe('KeycloakEnhancedAuthGuard', () => {
       reflector.getAllAndOverride.mockReturnValue(false);
       apiKeysService.validateApiKey.mockResolvedValue(null);
 
-      const { jwtVerify } = require('jose');
-      jwtVerify.mockResolvedValue({
-        payload: {
-          sub: '',
-          email: 'user@example.com',
-          realm_access: { roles: ['user'] },
-        },
+      keycloakJwtService.validateToken.mockResolvedValue({
+        sub: '',
+        email: 'user@example.com',
+        roles: ['user'],
+        organizations: [],
+        teams: [],
       });
 
       // Act
@@ -1618,8 +1531,7 @@ describe('KeycloakEnhancedAuthGuard', () => {
       reflector.getAllAndOverride.mockReturnValue(false);
       apiKeysService.validateApiKey.mockResolvedValue(null);
 
-      const { jwtVerify } = require('jose');
-      jwtVerify.mockRejectedValue(new Error('Invalid token'));
+      keycloakJwtService.validateToken.mockRejectedValue(new Error('Invalid token'));
 
       // Act & Assert
       // "Bearer" becomes the token (second word), which should fail
@@ -1632,8 +1544,7 @@ describe('KeycloakEnhancedAuthGuard', () => {
       reflector.getAllAndOverride.mockReturnValue(false);
       apiKeysService.validateApiKey.mockResolvedValue(null);
 
-      const { jwtVerify } = require('jose');
-      jwtVerify.mockRejectedValue(new Error('Invalid format'));
+      keycloakJwtService.validateToken.mockRejectedValue(new Error('Invalid format'));
 
       // Act & Assert
       await expect(guard.canActivate(context)).rejects.toThrow(UnauthorizedException);

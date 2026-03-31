@@ -1,9 +1,11 @@
 import { Controller, Get, Post, Put, Delete, Param, Body, Logger, HttpException, HttpStatus } from '@nestjs/common';
-import { ApiTags, ApiOperation, ApiResponse, ApiParam } from '@nestjs/swagger';
-import { OrganizationsService, CreateOrganizationDto, UpdateOrganizationDto } from './organizations.service';
+import { ApiTags, ApiOperation, ApiResponse, ApiParam, ApiBearerAuth } from '@nestjs/swagger';
+import { OrganizationsService } from './organizations.service';
+import { CreateOrganizationDto, UpdateOrganizationDto } from './dto/organization.dto';
 import { UserCtx, UserContext } from '../../common/decorators/user-context.decorator';
 
 @ApiTags('organizations')
+@ApiBearerAuth()
 @Controller('organizations')
 export class OrganizationsController {
   private readonly logger = new Logger(OrganizationsController.name);

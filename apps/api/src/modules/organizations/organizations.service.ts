@@ -4,16 +4,7 @@ import { Repository, In, DataSource } from 'typeorm';
 import { Organization } from '../../entities';
 import { AuthorizationService } from '../../common/services/authorization.service';
 import { OrganizationMembersService } from './organization-members.service';
-
-export interface CreateOrganizationDto {
-  name: string;
-  description?: string;
-}
-
-export interface UpdateOrganizationDto {
-  name?: string;
-  description?: string;
-}
+import { CreateOrganizationDto, UpdateOrganizationDto } from './dto/organization.dto';
 
 /**
  * Service responsible for managing organizations.
@@ -330,41 +321,42 @@ export class OrganizationsService {
         }
       }
 
-      // Delete all associated data in the correct order (respecting foreign key constraints)
+      // Delete all associated data in a transaction (prevents partial deletes on failure)
       this.logger.warn(`Cascading delete for organization ${id} - this will delete ALL associated data including test runs!`);
 
-      // For each team, delete all dependent data
-      if (organization.teams && organization.teams.length > 0) {
-        this.logger.debug(`Deleting data for ${organization.teams.length} teams`);
-        for (const team of organization.teams) {
-          // Get all systems_under_test for this team
-          const systems = await this.dataSource.query(
-            'SELECT id FROM systems_under_test WHERE team_id = $1',
-            [team.id]
-          );
+      await this.dataSource.transaction(async (manager) => {
+        // For each team, delete all dependent data
+        if (organization.teams && organization.teams.length > 0) {
+          this.logger.debug(`Deleting data for ${organization.teams.length} teams`);
+          for (const team of organization.teams) {
+            // Get all systems_under_test for this team
+            const systems = await manager.query(
+              'SELECT id FROM systems_under_test WHERE team_id = $1',
+              [team.id]
+            );
 
-          // For each system, delete all test runs and related data
-          for (const system of systems) {
-            // Delete test runs (and their related data will cascade via DB constraints if configured)
-            await this.dataSource.query('DELETE FROM test_runs WHERE system_under_test_id = $1', [system.id]);
+            // For each system, delete all test runs and related data
+            for (const system of systems) {
+              await manager.query('DELETE FROM test_runs WHERE system_under_test_id = $1', [system.id]);
+            }
+
+            // Now delete systems_under_test
+            await manager.query('DELETE FROM systems_under_test WHERE team_id = $1', [team.id]);
+
+            // Delete team members
+            await manager.query('DELETE FROM team_members WHERE team_id = $1', [team.id]);
+
+            // Now safe to delete the team
+            await manager.query('DELETE FROM teams WHERE id = $1', [team.id]);
           }
-
-          // Now delete systems_under_test
-          await this.dataSource.query('DELETE FROM systems_under_test WHERE team_id = $1', [team.id]);
-
-          // Delete team members
-          await this.dataSource.query('DELETE FROM team_members WHERE team_id = $1', [team.id]);
-
-          // Now safe to delete the team
-          await this.dataSource.query('DELETE FROM teams WHERE id = $1', [team.id]);
         }
-      }
 
-      // Delete organization members
-      await this.dataSource.query('DELETE FROM organization_members WHERE organization_id = $1', [id]);
+        // Delete organization members
+        await manager.query('DELETE FROM organization_members WHERE organization_id = $1', [id]);
 
-      // Now safe to delete the organization
-      await this.organizationRepository.remove(organization);
+        // Now safe to delete the organization
+        await manager.getRepository(Organization).remove(organization);
+      });
 
       this.logger.log(`Deleted organization: ${organization.name} (${id}) with all associated data by user ${userId}`);
     } catch (error) {
