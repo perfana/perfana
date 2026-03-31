@@ -1,5 +1,5 @@
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
-import { IsString, IsOptional, IsDateString, IsUUID } from 'class-validator';
+import { IsString, IsOptional, IsDateString, IsUUID, IsInt, Min } from 'class-validator';
 
 export class SearchTracesDto {
   @ApiProperty({ description: 'Tracing instance UUID' })
@@ -37,6 +37,8 @@ export class SearchTracesDto {
 
   @ApiPropertyOptional({ description: 'Maximum number of traces to return' })
   @IsOptional()
+  @IsInt()
+  @Min(1)
   limit?: number;
 }
 

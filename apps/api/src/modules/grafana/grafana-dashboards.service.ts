@@ -497,8 +497,7 @@ export class GrafanaDashboardsService {
 
           } catch (datasourceError) {
             this.logger.error(`Error querying datasource for variable ${variableName}:`, datasourceError);
-            // Fall back to basic mock values if datasource query fails
-            return this.getFallbackValues(variableName, system, environment);
+            return [];
           }
         }
 
@@ -537,40 +536,4 @@ export class GrafanaDashboardsService {
     return query;
   }
 
-  private getFallbackValues(variableName: string, system: string, environment: string): Array<{ label: string; value: string }> {
-    // Provide basic fallback values if datasource queries fail
-    switch (variableName.toLowerCase()) {
-      case 'application':
-      case 'system':
-      case 'system_under_test':
-        return [
-          { label: 'MyAfterburner', value: 'MyAfterburner' },
-          { label: system, value: system }
-        ].filter((item, index, self) => 
-          index === self.findIndex(t => t.value === item.value)
-        );
-
-      case 'environment':
-      case 'test_environment':
-        return [
-          { label: 'acc', value: 'acc' },
-          { label: 'prod', value: 'prod' },
-          { label: environment, value: environment }
-        ].filter((item, index, self) => 
-          index === self.findIndex(t => t.value === item.value)
-        );
-
-      case 'service':
-        return [
-          { label: 'afterburner-fe', value: 'afterburner-fe' },
-          { label: 'afterburner-be', value: 'afterburner-be' }
-        ];
-
-      default:
-        return [
-          { label: `${variableName}-1`, value: `${variableName}-1` },
-          { label: `${variableName}-2`, value: `${variableName}-2` }
-        ];
-    }
-  }
 }

@@ -10,6 +10,8 @@ import {
   Logger,
   HttpException,
   HttpStatus,
+  ForbiddenException,
+  NotFoundException,
 } from '@nestjs/common';
 import { ApiTags, ApiOperation, ApiResponse, ApiParam, ApiQuery, ApiBearerAuth } from '@nestjs/swagger';
 import { GrafanaInstancesService, GrafanaInstance } from './grafana-instances.service';
@@ -99,6 +101,7 @@ export class GrafanaInstancesController {
     try {
       return await this.grafanaInstancesService.create(createDto, ctx.userId, ctx.roles);
     } catch (error) {
+      if (error instanceof ForbiddenException || error instanceof NotFoundException) throw error;
       this.logger.error('Failed to create Grafana instance:', error);
       throw new HttpException(
         (error && typeof error === 'object' && 'message' in error ? (error as Error).message : null) || 'Failed to create Grafana instance',
@@ -121,10 +124,8 @@ export class GrafanaInstancesController {
     try {
       return await this.grafanaInstancesService.update(id, updateDto, ctx.userId, ctx.roles);
     } catch (error) {
+      if (error instanceof ForbiddenException || error instanceof NotFoundException) throw error;
       this.logger.error(`Failed to update Grafana instance ${id}:`, error);
-      if (error && typeof error === 'object' && 'message' in error && (error as Error).message.includes('not found')) {
-        throw new HttpException('Grafana instance not found', HttpStatus.NOT_FOUND);
-      }
       throw new HttpException(
         (error && typeof error === 'object' && 'message' in error ? (error as Error).message : null) || 'Failed to update Grafana instance',
         HttpStatus.BAD_REQUEST,
@@ -146,10 +147,8 @@ export class GrafanaInstancesController {
       await this.grafanaInstancesService.remove(id, ctx.userId, ctx.roles);
       return { message: 'Grafana instance deleted successfully' };
     } catch (error) {
+      if (error instanceof ForbiddenException || error instanceof NotFoundException) throw error;
       this.logger.error(`Failed to delete Grafana instance ${id}:`, error);
-      if (error && typeof error === 'object' && 'message' in error && (error as Error).message.includes('not found')) {
-        throw new HttpException('Grafana instance not found', HttpStatus.NOT_FOUND);
-      }
       throw new HttpException(
         'Failed to delete Grafana instance',
         HttpStatus.INTERNAL_SERVER_ERROR,

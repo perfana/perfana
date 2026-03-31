@@ -9,13 +9,13 @@ import {
   CreateTracingServiceDto,
   UpdateTracingServiceDto,
 } from './dto/create-tracing-service.dto';
-import { AuthorizationService } from '../../common/services/authorization.service';
+// NOTE: AuthorizationService will be re-added when Phase 4 adds organization_id to TracingService
 
 /**
  * Service responsible for managing tracing service configurations.
  *
  * Authorization:
- * - All methods accept userId and roles parameters for authorization
+ * - All methods accept userId and roles parameters for future authorization
  * - Currently TracingService entity does not have organization_id, so all data is treated as legacy
  * - When organization_id is added to TracingService (Phase 4), authorization checks will be enabled
  * - Global admins bypass all authorization checks
@@ -26,7 +26,6 @@ export class TracingServicesService {
 
   constructor(
     private readonly tracingServiceRepository: TracingServiceRepository,
-    private readonly authzService: AuthorizationService,
   ) {}
 
   /**
@@ -51,16 +50,12 @@ export class TracingServicesService {
   async findTracingService(
     systemId: string,
     userId: string,
-    roles: string[],
+    _roles: string[],
     environment?: string,
     workload?: string,
   ): Promise<TracingService | null> {
     try {
-      // Log authorization context for debugging
-      const isAdmin = this.authzService.isGlobalAdmin(roles);
-      this.logger.debug(
-        `findTracingService: systemId=${systemId}, userId=${userId}, isGlobalAdmin=${isAdmin}`,
-      );
+      this.logger.debug(`findTracingService: systemId=${systemId}, userId=${userId}`);
 
       // NOTE: Access permission check will be added here when TracingService entity has organization_id
       // For now, all tracing services are accessible (treated as legacy data)
@@ -89,14 +84,10 @@ export class TracingServicesService {
   async findAllBySystem(
     systemId: string,
     userId: string,
-    roles: string[],
+    _roles: string[],
   ): Promise<TracingService[]> {
     try {
-      // Log authorization context for debugging
-      const isAdmin = this.authzService.isGlobalAdmin(roles);
-      this.logger.debug(
-        `findAllBySystem: systemId=${systemId}, userId=${userId}, isGlobalAdmin=${isAdmin}`,
-      );
+      this.logger.debug(`findAllBySystem: systemId=${systemId}, userId=${userId}`);
 
       // NOTE: Org filtering will be added here when TracingService entity has organization_id
       // For now, all tracing services are returned (treated as legacy data)
@@ -124,14 +115,10 @@ export class TracingServicesService {
   async findOne(
     id: string,
     userId: string,
-    roles: string[],
+    _roles: string[],
   ): Promise<TracingService> {
     try {
-      // Log authorization context for debugging
-      const isAdmin = this.authzService.isGlobalAdmin(roles);
-      this.logger.debug(
-        `findOne: id=${id}, userId=${userId}, isGlobalAdmin=${isAdmin}`,
-      );
+      this.logger.debug(`findOne: id=${id}, userId=${userId}`);
 
       const tracingService = await this.tracingServiceRepository.findById(id);
 
@@ -167,14 +154,10 @@ export class TracingServicesService {
   async createOrUpdate(
     createDto: CreateTracingServiceDto,
     userId: string,
-    roles: string[],
+    _roles: string[],
   ): Promise<TracingService> {
     try {
-      // Log authorization context for debugging
-      const isAdmin = this.authzService.isGlobalAdmin(roles);
-      this.logger.debug(
-        `createOrUpdate: userId=${userId}, isGlobalAdmin=${isAdmin}`,
-      );
+      this.logger.debug(`createOrUpdate: userId=${userId}`);
 
       this.logger.log(
         `Creating/updating tracing service for system ${createDto.systemUnderTestId}, ` +
@@ -234,14 +217,10 @@ export class TracingServicesService {
     id: string,
     updateDto: UpdateTracingServiceDto,
     userId: string,
-    roles: string[],
+    _roles: string[],
   ): Promise<TracingService> {
     try {
-      // Log authorization context for debugging
-      const isAdmin = this.authzService.isGlobalAdmin(roles);
-      this.logger.debug(
-        `update: id=${id}, userId=${userId}, isGlobalAdmin=${isAdmin}`,
-      );
+      this.logger.debug(`update: id=${id}, userId=${userId}`);
 
       // Check if it exists first
       const existing = await this.tracingServiceRepository.findById(id);
@@ -304,13 +283,9 @@ export class TracingServicesService {
    * Note: TracingService entity does not have organization_id yet, so permission checks are not applied.
    * Full permission checks will be enabled when Phase 4 adds organization_id column.
    */
-  async delete(id: string, userId: string, roles: string[]): Promise<void> {
+  async delete(id: string, userId: string, _roles: string[]): Promise<void> {
     try {
-      // Log authorization context for debugging
-      const isAdmin = this.authzService.isGlobalAdmin(roles);
-      this.logger.debug(
-        `delete: id=${id}, userId=${userId}, isGlobalAdmin=${isAdmin}`,
-      );
+      this.logger.debug(`delete: id=${id}, userId=${userId}`);
 
       // Check if it exists first
       const tracingService = await this.tracingServiceRepository.findById(id);

@@ -1,5 +1,5 @@
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
-import { IsString, IsNumber, IsBoolean, IsOptional, IsEnum } from 'class-validator';
+import { IsString, IsNumber, IsBoolean, IsOptional, IsEnum, IsUrl } from 'class-validator';
 
 export enum PyroscopeViewMode {
   SINGLE = 'single',
@@ -22,7 +22,7 @@ export class ProfilerTypeDto {
 
 export class GenerateSingleViewUrlDto {
   @ApiProperty({ description: 'Pyroscope instance URL', example: 'https://pyroscope.example.com' })
-  @IsString()
+  @IsUrl({ require_tld: false })
   pyroscopeUrl!: string;
 
   @ApiProperty({ description: 'Whether this is a standalone Pyroscope instance', example: false })
@@ -53,7 +53,7 @@ export class GenerateSingleViewUrlDto {
 
 export class GenerateCompareUrlDto {
   @ApiProperty({ description: 'Pyroscope instance URL', example: 'https://pyroscope.example.com' })
-  @IsString()
+  @IsUrl({ require_tld: false })
   pyroscopeUrl!: string;
 
   @ApiProperty({ description: 'Whether this is a standalone Pyroscope instance', example: false })

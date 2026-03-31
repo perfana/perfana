@@ -10,9 +10,8 @@ import {
   Logger,
   HttpException,
   HttpStatus,
-  BadRequestException,
 } from '@nestjs/common';
-import { ApiTags, ApiOperation, ApiResponse, ApiParam, ApiQuery } from '@nestjs/swagger';
+import { ApiTags, ApiOperation, ApiResponse, ApiParam, ApiQuery, ApiBearerAuth } from '@nestjs/swagger';
 import { GrafanaDashboardsService, GrafanaDashboard } from './grafana-dashboards.service';
 import {
   CreateGrafanaDashboardDto,
@@ -22,6 +21,7 @@ import {
 import { UserCtx, UserContext } from '../../common/decorators/user-context.decorator';
 
 @ApiTags('grafana/dashboards')
+@ApiBearerAuth()
 @Controller('grafana/dashboards')
 export class GrafanaDashboardsController {
   private readonly logger = new Logger(GrafanaDashboardsController.name);
@@ -87,12 +87,6 @@ export class GrafanaDashboardsController {
     @Body() createDto: CreateGrafanaDashboardDto,
     @UserCtx() ctx: UserContext,
   ): Promise<GrafanaDashboard> {
-    if (!ctx.organizationId) {
-      throw new BadRequestException(
-        'User must belong to an organization to create Grafana dashboards',
-      );
-    }
-
     try {
       return await this.grafanaDashboardsService.create(createDto, ctx.userId, ctx.roles);
     } catch (error) {

@@ -243,17 +243,4 @@ export class TraceQueryService {
     }
   }
 
-  /**
-   * Get the maximum number of traces that will be analyzed
-   */
-  getMaxTracesToAnalyze(): number {
-    return TraceQueryService.MAX_TRACES_TO_ANALYZE;
-  }
-
-  /**
-   * Get the default search limit
-   */
-  getDefaultSearchLimit(): number {
-    return TraceQueryService.DEFAULT_SEARCH_LIMIT;
-  }
 }

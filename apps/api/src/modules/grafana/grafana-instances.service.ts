@@ -1,4 +1,4 @@
-import { Injectable, Logger, NotFoundException } from '@nestjs/common';
+import { Injectable, Logger, NotFoundException, ForbiddenException } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { GrafanaInstance as GrafanaInstanceEntity } from '../../entities';
@@ -50,7 +50,7 @@ export class GrafanaInstancesService {
     // Check if user is org-admin in any organization
     const isOrgAdmin = await this.authzService.isOrgAdminInAnyOrganization(userId);
     if (!isOrgAdmin) {
-      throw new Error('Organization admin privileges required to manage Grafana instances');
+      throw new ForbiddenException('Organization admin privileges required to manage Grafana instances');
     }
   }
 
@@ -249,7 +249,7 @@ export class GrafanaInstancesService {
       if (!isAdmin && entity.organizationId) {
         const canModify = await this.authzService.isOrganizationAdmin(userId, entity.organizationId);
         if (!canModify) {
-          throw new Error('You do not have permission to modify this Grafana instance');
+          throw new ForbiddenException('You do not have permission to modify this Grafana instance');
         }
       }
 
@@ -307,7 +307,7 @@ export class GrafanaInstancesService {
       if (!isAdmin && entity.organizationId) {
         const canModify = await this.authzService.isOrganizationAdmin(userId, entity.organizationId);
         if (!canModify) {
-          throw new Error('You do not have permission to delete this Grafana instance');
+          throw new ForbiddenException('You do not have permission to delete this Grafana instance');
         }
       }
 

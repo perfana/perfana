@@ -1,4 +1,4 @@
-import { Injectable, Logger, NotFoundException } from '@nestjs/common';
+import { Injectable, Logger, NotFoundException, ForbiddenException } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { PyroscopeInstance as PyroscopeInstanceEntity } from '../../entities';
@@ -52,7 +52,7 @@ export class PyroscopeInstancesService {
     // Check if user is org-admin in any organization
     const isOrgAdmin = await this.authzService.isOrgAdminInAnyOrganization(userId);
     if (!isOrgAdmin) {
-      throw new Error('Organization admin privileges required to manage pyroscope instances');
+      throw new ForbiddenException('Organization admin privileges required to manage pyroscope instances');
     }
   }
 
@@ -89,8 +89,14 @@ export class PyroscopeInstancesService {
         .orderBy('pi.created_at', 'DESC');
 
       // Organization filtering
-      if (organizationId) {
-        // Explicit org selected — scope to that org only
+      if (organizationId && !isAdmin) {
+        // Validate user has access to the requested org
+        const accessibleOrganizations = await this.authzService.getAccessibleOrganizations(userId);
+        if (!accessibleOrganizations.includes(organizationId)) {
+          return [];
+        }
+        queryBuilder.andWhere('pi.organization_id = :organizationId', { organizationId });
+      } else if (organizationId && isAdmin) {
         queryBuilder.andWhere('pi.organization_id = :organizationId', { organizationId });
       } else if (!isAdmin) {
         const accessibleOrganizations = await this.authzService.getAccessibleOrganizations(userId);

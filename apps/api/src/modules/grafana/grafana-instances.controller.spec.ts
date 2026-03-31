@@ -1,5 +1,5 @@
 import { Test, TestingModule } from '@nestjs/testing';
-import { HttpException, HttpStatus } from '@nestjs/common';
+import { HttpException, HttpStatus, NotFoundException } from '@nestjs/common';
 import { GrafanaInstancesController } from './grafana-instances.controller';
 import { GrafanaInstancesService, GrafanaInstance } from './grafana-instances.service';
 import { UserContext } from '../../common/decorators/user-context.decorator';
@@ -808,21 +808,14 @@ describe('GrafanaInstancesController', () => {
     });
 
     describe('update', () => {
-      it('should throw 404 HttpException when instance not found', async () => {
+      it('should throw 404 when instance not found', async () => {
         // Arrange
         const instanceId = 'non-existent-id';
         const updateDto = { label: 'Updated Label' };
-        service.update.mockRejectedValue(new Error('Grafana instance with id non-existent-id not found'));
+        service.update.mockRejectedValue(new NotFoundException('Grafana instance with id non-existent-id not found'));
 
         // Act & Assert
-        await expect(controller.update(instanceId, updateDto, mockUserContext)).rejects.toThrow(HttpException);
-        try {
-          await controller.update(instanceId, updateDto, mockUserContext);
-        } catch (error) {
-          expect(error).toBeInstanceOf(HttpException);
-          expect((error as HttpException).getStatus()).toBe(HttpStatus.NOT_FOUND);
-          expect((error as HttpException).message).toBe('Grafana instance not found');
-        }
+        await expect(controller.update(instanceId, updateDto, mockUserContext)).rejects.toThrow(NotFoundException);
       });
 
       it('should throw 400 HttpException for validation errors', async () => {
@@ -876,20 +869,13 @@ describe('GrafanaInstancesController', () => {
     });
 
     describe('remove', () => {
-      it('should throw 404 HttpException when instance not found', async () => {
+      it('should throw 404 when instance not found', async () => {
         // Arrange
         const instanceId = 'non-existent-id';
-        service.remove.mockRejectedValue(new Error('Grafana instance with id non-existent-id not found'));
+        service.remove.mockRejectedValue(new NotFoundException('Grafana instance with id non-existent-id not found'));
 
         // Act & Assert
-        await expect(controller.remove(instanceId, mockUserContext)).rejects.toThrow(HttpException);
-        try {
-          await controller.remove(instanceId, mockUserContext);
-        } catch (error) {
-          expect(error).toBeInstanceOf(HttpException);
-          expect((error as HttpException).getStatus()).toBe(HttpStatus.NOT_FOUND);
-          expect((error as HttpException).message).toBe('Grafana instance not found');
-        }
+        await expect(controller.remove(instanceId, mockUserContext)).rejects.toThrow(NotFoundException);
       });
 
       it('should throw 500 HttpException for other service errors', async () => {

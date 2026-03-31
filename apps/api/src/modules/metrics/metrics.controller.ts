@@ -1,5 +1,5 @@
-import { Controller, Get, Param, NotFoundException, Query, Logger } from '@nestjs/common';
-import { ApiTags, ApiOperation, ApiQuery } from '@nestjs/swagger';
+import { Controller, Get, Param, NotFoundException, BadRequestException, Query, Logger } from '@nestjs/common';
+import { ApiTags, ApiOperation, ApiQuery, ApiBearerAuth } from '@nestjs/swagger';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { MetricsService } from './metrics.service';
@@ -7,6 +7,7 @@ import { Benchmark } from '../../entities';
 import { UserCtx, UserContext } from '../../common/decorators/user-context.decorator';
 
 @ApiTags('metrics')
+@ApiBearerAuth()
 @Controller('metrics')
 export class MetricsController {
   private readonly logger = new Logger(MetricsController.name);
@@ -16,12 +17,6 @@ export class MetricsController {
     @InjectRepository(Benchmark)
     private benchmarkRepo: Repository<Benchmark>,
   ) {}
-
-  @Get()
-  @ApiOperation({ summary: 'Get all metrics' })
-  findAll(@UserCtx() _ctx: UserContext) {
-    return this.metricsService.findAll();
-  }
 
   @Get('ds-metrics/available/:testRunId')
   @ApiOperation({ summary: 'List available dashboards and panels for a test run' })
@@ -43,7 +38,7 @@ export class MetricsController {
     @Query('excludeRampUp') excludeRampUp?: string,
   ) {
     if (!dashboardLabel || !panelTitle) {
-      throw new Error('dashboardLabel and panelTitle are required');
+      throw new BadRequestException('dashboardLabel and panelTitle are required');
     }
 
     return this.metricsService.getMetricTimeSeries(
@@ -70,7 +65,7 @@ export class MetricsController {
   ) {
     const panelIdNumber = parseInt(panelId, 10);
     if (isNaN(panelIdNumber)) {
-      throw new Error('Invalid panel ID');
+      throw new BadRequestException('Invalid panel ID');
     }
 
     let finalApplicationDashboardId: string | undefined = applicationDashboardId;
@@ -87,7 +82,7 @@ export class MetricsController {
         if (!benchmark) {
           this.logger.warn('Could not find benchmark in benchmarks table');
           this.logger.warn('Benchmark ID searched:', benchmarkId);
-        } else if (benchmark) {
+        } else {
           if (benchmark.application_dashboard_id) {
             finalApplicationDashboardId = benchmark.application_dashboard_id;
             this.logger.log(`Found application_dashboard_id: ${finalApplicationDashboardId} for benchmark: ${benchmarkId}`);
@@ -126,12 +121,12 @@ export class MetricsController {
     @Query('metricsSourceId') metricsSourceId?: string,
   ) {
     if ((!applicationDashboardId && !metricsSourceId) || !panelId) {
-      throw new Error('applicationDashboardId (or metricsSourceId) and panelId are required');
+      throw new BadRequestException('applicationDashboardId (or metricsSourceId) and panelId are required');
     }
 
     const panelIdNumber = parseInt(panelId, 10);
     if (isNaN(panelIdNumber)) {
-      throw new Error('Invalid panel ID');
+      throw new BadRequestException('Invalid panel ID');
     }
 
     // Support both single evaluateType and multiple evaluateTypes
@@ -201,12 +196,12 @@ export class MetricsController {
     @Query('metricsSourceId') metricsSourceId?: string,
   ) {
     if (!currentTestRunId || !baselineTestRunId || (!applicationDashboardId && !metricsSourceId) || !panelId) {
-      throw new Error('currentTestRunId, baselineTestRunId, applicationDashboardId (or metricsSourceId), and panelId are required');
+      throw new BadRequestException('currentTestRunId, baselineTestRunId, applicationDashboardId (or metricsSourceId), and panelId are required');
     }
 
     const panelIdNumber = parseInt(panelId, 10);
     if (isNaN(panelIdNumber)) {
-      throw new Error('Invalid panel ID');
+      throw new BadRequestException('Invalid panel ID');
     }
 
     try {
@@ -244,7 +239,7 @@ export class MetricsController {
     @Query('metricsSourceId') metricsSourceId?: string,
   ) {
     if ((!applicationDashboardId && !metricsSourceId) || !panelId || !metricName) {
-      throw new Error('applicationDashboardId (or metricsSourceId), panelId, and metricName are required');
+      throw new BadRequestException('applicationDashboardId (or metricsSourceId), panelId, and metricName are required');
     }
 
     try {
@@ -276,7 +271,7 @@ export class MetricsController {
   ): Promise<string[]> {
     const panelIdNumber = parseInt(panelId, 10);
     if (isNaN(panelIdNumber)) {
-      throw new Error('Invalid panel ID');
+      throw new BadRequestException('Invalid panel ID');
     }
 
     return this.metricsService.getDistinctMetricNames(

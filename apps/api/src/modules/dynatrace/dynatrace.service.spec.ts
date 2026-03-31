@@ -34,6 +34,12 @@ describe('DynatraceService', () => {
     updatedAt: new Date(),
   };
 
+  const mockDynatraceConfigMasked = {
+    ...mockDynatraceConfig,
+    apiToken: '[MASKED]',
+    platformApiToken: '[MASKED]',
+  };
+
   const mockDynatraceQuery = {
     id: 'query-123',
     dynatraceConfigId: 'config-123',
@@ -111,7 +117,7 @@ describe('DynatraceService', () => {
 
         const result = await service.findAll(mockUserId, mockRoles);
 
-        expect(result).toEqual(mockConfigs);
+        expect(result).toEqual([mockDynatraceConfigMasked]);
         expect(repository.findAll).toHaveBeenCalledTimes(1);
       });
 
@@ -130,7 +136,7 @@ describe('DynatraceService', () => {
 
         const result = await service.findByHost('https://example.live.dynatrace.com', mockUserId, mockRoles);
 
-        expect(result).toEqual(mockDynatraceConfig);
+        expect(result).toEqual(mockDynatraceConfigMasked);
         expect(repository.findByHost).toHaveBeenCalledWith('https://example.live.dynatrace.com');
       });
 
@@ -162,7 +168,7 @@ describe('DynatraceService', () => {
 
         const result = await service.create(createDto, mockUserId, mockRoles);
 
-        expect(result).toEqual(mockDynatraceConfig);
+        expect(result).toEqual(mockDynatraceConfigMasked);
         expect(repository.findByHost).toHaveBeenCalledWith('https://example.live.dynatrace.com');
         expect(repository.create).toHaveBeenCalledWith({
           host: 'https://example.live.dynatrace.com',
@@ -208,7 +214,7 @@ describe('DynatraceService', () => {
 
         const result = await service.create(createDto, mockUserId, mockRoles);
 
-        expect(result).toEqual(mockDynatraceConfig);
+        expect(result).toEqual(mockDynatraceConfigMasked);
         expect(repository.create).toHaveBeenCalled();
       });
 
@@ -245,7 +251,7 @@ describe('DynatraceService', () => {
 
         const result = await service.update('config-123', updateDto, mockUserId, mockRoles);
 
-        expect(result).toEqual(updatedConfig);
+        expect(result).toEqual({ ...updatedConfig, apiToken: '[MASKED]', platformApiToken: '[MASKED]' });
         expect(repository.findById).toHaveBeenCalledWith('config-123');
         expect(repository.update).toHaveBeenCalledWith('config-123', {
           perfana_test_run_id_attribute: updateDto.perfanaTestRunIdAttribute,

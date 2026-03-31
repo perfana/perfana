@@ -94,7 +94,6 @@ export class MetricsService {
     if (this.authzService.isGlobalAdmin(roles)) return true;
 
     const organizationIds = await this.authzService.getAccessibleOrganizations(userId);
-    if (organizationIds.length === 0) return false;
 
     const query = `
       SELECT 1
@@ -106,21 +105,6 @@ export class MetricsService {
     `;
     const result = await this.testRunRepo.query(query, [testRunId, organizationIds]);
     return result && result.length > 0;
-  }
-
-  async findAll(): Promise<MetricDataPoint[]> {
-    // TODO: Implement metrics retrieval from Supabase
-    return [];
-  }
-
-  async findOne(_id: string): Promise<MetricDataPoint | null> {
-    // TODO: Implement single metrics retrieval
-    return null;
-  }
-
-  async create(_createDto: Partial<MetricDataPoint>): Promise<MetricDataPoint | null> {
-    // TODO: Implement metrics creation
-    return null;
   }
 
   async findDSMetricsForPanel(testRunId: string, panelId: number, applicationDashboardId?: string, metricName?: string, userId: string = '', roles: string[] = [], metricsSourceId?: string): Promise<MetricDataPoint[] | null> {

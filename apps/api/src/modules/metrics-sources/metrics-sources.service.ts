@@ -1,4 +1,4 @@
-import { Injectable, Logger, NotFoundException } from '@nestjs/common';
+import { Injectable, Logger, NotFoundException, ForbiddenException } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { MetricsSource as MetricsSourceEntity } from '../../entities';
@@ -231,6 +231,14 @@ export class MetricsSourcesService {
         throw new NotFoundException(`MetricsSource with id ${id} not found`);
       }
 
+      // Check org membership for non-admins
+      if (!isAdmin && existing.organizationId) {
+        const accessibleOrgs = await this.authzService.getAccessibleOrganizations(userId);
+        if (!accessibleOrgs.includes(existing.organizationId)) {
+          throw new ForbiddenException('You do not have permission to modify this metrics source');
+        }
+      }
+
       const updateData: Partial<MetricsSourceEntity> = {};
       if (dto.systemUnderTestId !== undefined) updateData.systemUnderTestId = dto.systemUnderTestId;
       if (dto.testEnvironment !== undefined) updateData.testEnvironment = dto.testEnvironment;
@@ -265,6 +273,14 @@ export class MetricsSourcesService {
       const existing = await this.metricsSourceRepo.findOne({ where: { id } });
       if (!existing) {
         throw new NotFoundException(`MetricsSource with id ${id} not found`);
+      }
+
+      // Check org membership for non-admins
+      if (!isAdmin && existing.organizationId) {
+        const accessibleOrgs = await this.authzService.getAccessibleOrganizations(userId);
+        if (!accessibleOrgs.includes(existing.organizationId)) {
+          throw new ForbiddenException('You do not have permission to delete this metrics source');
+        }
       }
 
       await this.metricsSourceRepo.delete(id);

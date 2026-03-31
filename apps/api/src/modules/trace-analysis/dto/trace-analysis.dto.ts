@@ -1,5 +1,5 @@
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
-import { IsString, IsOptional, IsUUID } from 'class-validator';
+import { IsString, IsOptional, IsUUID, IsDateString } from 'class-validator';
 
 export class CompareTracesDto {
   @ApiProperty({ description: 'Current test run ID' })
@@ -32,19 +32,19 @@ export class CompareTracesDto {
   sampler?: string;
 
   @ApiProperty({ description: 'Current test run start time (ISO 8601)' })
-  @IsString()
+  @IsDateString()
   currentStartTime: string;
 
   @ApiProperty({ description: 'Current test run end time (ISO 8601)' })
-  @IsString()
+  @IsDateString()
   currentEndTime: string;
 
   @ApiProperty({ description: 'Baseline test run start time (ISO 8601)' })
-  @IsString()
+  @IsDateString()
   baselineStartTime: string;
 
   @ApiProperty({ description: 'Baseline test run end time (ISO 8601)' })
-  @IsString()
+  @IsDateString()
   baselineEndTime: string;
 }
 
