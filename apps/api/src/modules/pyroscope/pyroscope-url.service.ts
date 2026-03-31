@@ -159,16 +159,6 @@ export class PyroscopeUrlService {
   }
 
   /**
-   * Helper method to convert date string to Unix timestamp in milliseconds
-   *
-   * @param dateString - ISO date string
-   * @returns Unix timestamp in milliseconds
-   */
-  dateToTimestamp(dateString: string): number {
-    return new Date(dateString).getTime();
-  }
-
-  /**
    * Helper method to format Unix timestamp to ISO date string
    *
    * @param timestamp - Unix timestamp in milliseconds

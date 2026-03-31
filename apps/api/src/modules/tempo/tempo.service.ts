@@ -29,7 +29,7 @@ export class TempoService {
 
     // Ensure we have an API URL configured
     if (!instance.tracingApiUrl) {
-      throw new Error(
+      throw new BadRequestException(
         `Tracing instance "${instance.label}" does not have an API URL configured. ` +
         'Please set the tracing_api_url field (e.g., http://tempo:3200).'
       );
@@ -69,7 +69,7 @@ export class TempoService {
       if (!response.ok) {
         const errorText = await response.text();
         this.logger.error(`Tempo search failed: ${response.status} - ${errorText}`);
-        throw new Error(`Tempo search failed: ${response.status}`);
+        throw new BadRequestException(`Tempo search failed: ${response.status}`);
       }
 
       const data = await response.json();
@@ -95,7 +95,7 @@ export class TempoService {
     const instance = await this.getTracingInstance(tracingInstanceId);
 
     if (!instance.tracingApiUrl) {
-      throw new Error(
+      throw new BadRequestException(
         `Tracing instance "${instance.label}" does not have an API URL configured.`
       );
     }
@@ -122,7 +122,7 @@ export class TempoService {
       if (!response.ok) {
         const errorText = await response.text();
         this.logger.error(`Tempo trace fetch failed: ${response.status} - ${errorText}`);
-        throw new Error(`Failed to fetch trace: ${response.status}`);
+        throw new BadRequestException(`Failed to fetch trace: ${response.status}`);
       }
 
       const data = await response.json();

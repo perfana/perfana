@@ -1,4 +1,4 @@
-import { IsString, IsUUID, IsOptional, IsIn } from 'class-validator';
+import { IsString, IsUUID, IsOptional, IsIn, IsNotEmpty } from 'class-validator';
 import { ApiProperty } from '@nestjs/swagger';
 
 export class CreateEntityMappingDto {
@@ -39,6 +39,7 @@ export class CreateEntityMappingDto {
     example: 'HOST-1234567890ABCDEF',
   })
   @IsString()
+  @IsNotEmpty()
   entityId!: string;
 
   @ApiProperty({
@@ -46,6 +47,7 @@ export class CreateEntityMappingDto {
     example: 'prod-server-01',
   })
   @IsString()
+  @IsNotEmpty()
   entityDisplayName!: string;
 
   @ApiProperty({
@@ -53,6 +55,7 @@ export class CreateEntityMappingDto {
     example: 'HOST',
   })
   @IsString()
+  @IsNotEmpty()
   entityType!: string;
 
   @ApiProperty({

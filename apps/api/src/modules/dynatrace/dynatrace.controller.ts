@@ -613,7 +613,7 @@ export class DynatraceController {
     return this.dynatraceService.fetchRequestAttributes(host, ctx.userId, ctx.roles);
   }
 
-  @Get(':id/request-attributes')
+  @Get('configs/:id/request-attributes')
   @ApiOperation({ summary: 'Fetch request attributes for a configured Dynatrace instance' })
   @ApiResponse({
     status: 200,

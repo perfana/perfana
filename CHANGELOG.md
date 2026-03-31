@@ -4,6 +4,32 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
+## [0.2.17] - 2026-03-31
+
+### Fixed
+- Fix RBAC bypass in metrics-sources write path — any authenticated user could update/delete other orgs' metrics sources
+- Fix RBAC bypass in tracing-instances and pyroscope-instances — organizationId query param not validated against user's accessible orgs
+- Fix Dynatrace update endpoint leaking plaintext API token in response (now masked)
+- Remove Dynatrace API token prefix from debug logs (partial credential leak)
+- Fix unreachable Dynatrace route caused by duplicate parameterized path (`GET :id/request-attributes`)
+- Fix Grafana dashboards create endpoint blocking all JWT users (unreliable `ctx.organizationId` guard)
+- Fix metrics `validateTestRunAccess` early-exit blocking access to unscoped test runs for users with no org memberships
+- Replace bare `throw new Error()` with proper NestJS HTTP exceptions (ForbiddenException, BadRequestException) across 6 services
+- Add `@IsUrl()` validation to Pyroscope URL generation DTOs
+- Add `@IsDateString()` validation to trace-analysis time fields
+- Add `@IsInt() @Min(1)` validation to Tempo search limit
+- Add `@IsNotEmpty()` validation to Dynatrace entity mapping DTO fields
+- Add missing `@ApiBearerAuth()` Swagger decorator to metrics and grafana/dashboards controllers
+
+### Removed
+- Remove 3 dead stub methods (findAll/findOne/create) from MetricsService and dead GET /metrics endpoint
+- Remove `getFallbackValues` returning hardcoded demo data (MyAfterburner) on Grafana datasource errors
+- Remove dead DTOs (DashboardRenderRequestDto, DashboardVariableValuesDto)
+- Remove dead `dateToTimestamp` from PyroscopeUrlService
+- Remove dead `getMaxTracesToAnalyze`/`getDefaultSearchLimit` from TraceQueryService
+- Remove unused `isAdmin` assignments from TracingServicesService
+- Remove orphaned JSDoc block and SQL debug logging
+
 ## [0.2.16] - 2026-03-29
 
 ### Fixed

@@ -1387,7 +1387,7 @@ describe('GrafanaDashboardsService', () => {
         expect(result).toEqual([]);
       });
 
-      it('should return fallback values when datasource query fails', async () => {
+      it('should return empty array when datasource query fails', async () => {
         // Arrange
         const dashboardWithQueryVar = {
           ...mockDashboardEntity,
@@ -1416,12 +1416,11 @@ describe('GrafanaDashboardsService', () => {
           mockRoles
         );
 
-        // Assert
-        expect(result).toContainEqual({ label: 'MyAfterburner', value: 'MyAfterburner' });
-        expect(result).toContainEqual({ label: 'TestSystem', value: 'TestSystem' });
+        // Assert - no longer returns demo fallback values
+        expect(result).toEqual([]);
       });
 
-      it('should return fallback values for environment variable on datasource error', async () => {
+      it('should return empty array for environment variable on datasource error', async () => {
         // Arrange
         const dashboardWithEnvVar = {
           ...mockDashboardEntity,
@@ -1450,13 +1449,11 @@ describe('GrafanaDashboardsService', () => {
           mockRoles
         );
 
-        // Assert
-        expect(result).toContainEqual({ label: 'acc', value: 'acc' });
-        expect(result).toContainEqual({ label: 'prod', value: 'prod' });
-        expect(result).toContainEqual({ label: 'production', value: 'production' });
+        // Assert - no longer returns demo fallback values
+        expect(result).toEqual([]);
       });
 
-      it('should return fallback values for service variable on datasource error', async () => {
+      it('should return empty array for service variable on datasource error', async () => {
         // Arrange
         const dashboardWithServiceVar = {
           ...mockDashboardEntity,
@@ -1485,12 +1482,11 @@ describe('GrafanaDashboardsService', () => {
           mockRoles
         );
 
-        // Assert
-        expect(result).toContainEqual({ label: 'afterburner-fe', value: 'afterburner-fe' });
-        expect(result).toContainEqual({ label: 'afterburner-be', value: 'afterburner-be' });
+        // Assert - no longer returns demo fallback values
+        expect(result).toEqual([]);
       });
 
-      it('should return generic fallback values for unknown variable on datasource error', async () => {
+      it('should return empty array for unknown variable on datasource error', async () => {
         // Arrange
         const dashboardWithUnknownVar = {
           ...mockDashboardEntity,
@@ -1519,9 +1515,8 @@ describe('GrafanaDashboardsService', () => {
           mockRoles
         );
 
-        // Assert
-        expect(result).toContainEqual({ label: 'custom_metric-1', value: 'custom_metric-1' });
-        expect(result).toContainEqual({ label: 'custom_metric-2', value: 'custom_metric-2' });
+        // Assert - no longer returns demo fallback values
+        expect(result).toEqual([]);
       });
 
       it('should return empty array for unsupported datasource type', async () => {
@@ -1577,7 +1572,7 @@ describe('GrafanaDashboardsService', () => {
         expect(result).toEqual([]);
       });
 
-      it('should deduplicate fallback values correctly', async () => {
+      it('should return empty array on datasource error (no demo fallback)', async () => {
         // Arrange
         const dashboardWithSystemVar = {
           ...mockDashboardEntity,
@@ -1595,7 +1590,7 @@ describe('GrafanaDashboardsService', () => {
         grafanaClientService.getGrafanaInstance.mockResolvedValue(mockGrafanaInstance as any);
         grafanaClientService.getDatasource.mockRejectedValue(new Error('Query failed'));
 
-        // Act - Pass 'MyAfterburner' as system which matches a default fallback
+        // Act
         const result = await service.getVariableValues(
           mockDashboardEntity.id,
           'application',
@@ -1606,9 +1601,8 @@ describe('GrafanaDashboardsService', () => {
           mockRoles
         );
 
-        // Assert - Should only contain one 'MyAfterburner' entry
-        const afterburnerEntries = result.filter(r => r.value === 'MyAfterburner');
-        expect(afterburnerEntries).toHaveLength(1);
+        // Assert - no longer returns demo fallback values
+        expect(result).toEqual([]);
       });
     });
   });

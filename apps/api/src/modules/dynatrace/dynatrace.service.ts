@@ -1,4 +1,4 @@
-import { Injectable, BadRequestException, ConflictException, NotFoundException, Logger } from '@nestjs/common';
+import { Injectable, BadRequestException, ConflictException, NotFoundException, ForbiddenException, Logger } from '@nestjs/common';
 import { DynatraceRepository } from './dynatrace.repository';
 import { CreateDynatraceConfigDto } from './dto/create-dynatrace-config.dto';
 import { UpdateDynatraceConfigDto } from './dto/update-dynatrace-config.dto';
@@ -33,14 +33,6 @@ export class DynatraceService {
     private readonly authzService: AuthorizationService,
   ) {}
 
-  /**
-   * Normalize Dynatrace URL by removing trailing slashes
-   * This ensures consistency whether users enter URLs with or without trailing slashes
-   * Examples:
-   *   - https://example.com/ -> https://example.com
-   *   - https://example.com -> https://example.com
-   *   - https://example.com/// -> https://example.com
-   */
   /**
    * Mask sensitive credentials in a Dynatrace config for API responses.
    * Returns a shallow copy with tokens replaced by '[MASKED]'.
@@ -214,7 +206,7 @@ export class DynatraceService {
     if (!isAdmin && existing.organizationId) {
       const canModify = await this.authzService.isOrganizationAdmin(userId, existing.organizationId);
       if (!canModify) {
-        throw new Error('You do not have permission to modify this Dynatrace configuration');
+        throw new ForbiddenException('You do not have permission to modify this Dynatrace configuration');
       }
     }
 
@@ -228,7 +220,7 @@ export class DynatraceService {
     });
 
     this.logger.log(`Dynatrace configuration updated: ${id} by user ${userId}`);
-    return updated;
+    return this.maskConfig(updated);
   }
 
   /**
@@ -256,7 +248,7 @@ export class DynatraceService {
     if (!isAdmin && existing.organizationId) {
       const canModify = await this.authzService.isOrganizationAdmin(userId, existing.organizationId);
       if (!canModify) {
-        throw new Error('You do not have permission to delete this Dynatrace configuration');
+        throw new ForbiddenException('You do not have permission to delete this Dynatrace configuration');
       }
     }
 
@@ -377,7 +369,7 @@ export class DynatraceService {
         entityName,
         entitySelector,
         hasToken: !!apiToken,
-        tokenPrefix: apiToken ? apiToken.substring(0, 10) + '...' : 'none'
+        hasTokenLength: apiToken ? apiToken.length : 0
       });
 
       const response = await axios.get(requestUrl, {

@@ -178,11 +178,6 @@ export class ApplicationDashboardsService {
         .orderBy('ad.dashboardName', 'ASC')
         .addOrderBy('ad.dashboardLabel', 'ASC');
 
-      // Log the SQL query for debugging
-      const sql = queryBuilder.getSql();
-      this.logger.debug(`Executing query: ${sql}`);
-      this.logger.debug(`Query parameters: ${JSON.stringify(queryBuilder.getParameters())}`);
-
       const results = await queryBuilder.getMany();
 
       this.logger.debug(`Found ${results.length} application dashboards`);

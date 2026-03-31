@@ -85,47 +85,6 @@ describe('MetricsService', () => {
     jest.clearAllMocks();
   });
 
-  describe('findAll', () => {
-    it('should return empty array (TODO implementation)', async () => {
-      // Arrange - No setup needed for TODO method
-
-      // Act
-      const result = await service.findAll();
-
-      // Assert
-      expect(result).toEqual([]);
-    });
-  });
-
-  describe('findOne', () => {
-    it('should return null (TODO implementation)', async () => {
-      // Arrange - No setup needed for TODO method
-
-      // Act
-      const result = await service.findOne('test-id');
-
-      // Assert
-      expect(result).toBeNull();
-    });
-  });
-
-  describe('create', () => {
-    it('should return null (TODO implementation)', async () => {
-      // Arrange
-      const createDto: Partial<MetricDataPoint> = {
-        time: new Date(),
-        metric_name: 'test_metric',
-        value: 100,
-      };
-
-      // Act
-      const result = await service.create(createDto);
-
-      // Assert
-      expect(result).toBeNull();
-    });
-  });
-
   describe('findDSMetricsForPanel', () => {
     const testRunId = 'test-run-123';
     const panelId = 1;
