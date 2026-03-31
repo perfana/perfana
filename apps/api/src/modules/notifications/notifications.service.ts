@@ -8,7 +8,7 @@ import {
   DatabaseException,
 } from '../../common/exceptions/business.exception';
 import { validateWebhookUrl } from '../../common/security';
-import { AuthorizationService } from '../../common/services/authorization.service';
+// NOTE: AuthorizationService will be re-added when Phase 3 adds org filtering to notifications
 import { CreateNotificationChannelDto, UpdateNotificationChannelDto } from './dto';
 import { SlackMessageBuilder, TeamsMessageBuilder } from './message-builders';
 
@@ -34,7 +34,6 @@ export class NotificationsService {
     @InjectRepository(SystemUnderTest)
     private readonly systemUnderTestRepository: Repository<SystemUnderTest>,
     private readonly configService: ConfigService,
-    private readonly authzService: AuthorizationService,
   ) {
     // Get Perfana URL for deeplinks, fallback to localhost
     this.perfanaUrl = this.configService.get<string>('PERFANA_URL')
@@ -58,12 +57,10 @@ export class NotificationsService {
   async findBySystemId(
     systemId: string,
     userId: string,
-    roles: string[],
+    _roles: string[],
   ): Promise<NotificationChannel[]> {
     try {
-      // Log authorization context for debugging
-      const isAdmin = this.authzService.isGlobalAdmin(roles);
-      this.logger.debug(`findBySystemId: systemId=${systemId}, userId=${userId}, isGlobalAdmin=${isAdmin}`);
+      this.logger.debug(`findBySystemId: systemId=${systemId}, userId=${userId}`);
 
       // NOTE: Org filtering will be added here when NotificationChannel entity has organization_id
       // For now, all notification channels for the system are returned (treated as legacy data)
@@ -91,12 +88,10 @@ export class NotificationsService {
   async findOne(
     id: string,
     userId: string,
-    roles: string[],
+    _roles: string[],
   ): Promise<NotificationChannel> {
     try {
-      // Log authorization context for debugging
-      const isAdmin = this.authzService.isGlobalAdmin(roles);
-      this.logger.debug(`findOne: id=${id}, userId=${userId}, isGlobalAdmin=${isAdmin}`);
+      this.logger.debug(`findOne: id=${id}, userId=${userId}`);
 
       const channel = await this.notificationChannelRepository.findOne({
         where: { id },
@@ -133,12 +128,10 @@ export class NotificationsService {
   async create(
     dto: CreateNotificationChannelDto,
     userId: string,
-    roles: string[],
+    _roles: string[],
   ): Promise<NotificationChannel> {
     try {
-      // Log authorization context for debugging
-      const isAdmin = this.authzService.isGlobalAdmin(roles);
-      this.logger.debug(`create: userId=${userId}, isGlobalAdmin=${isAdmin}`);
+      this.logger.debug(`create: userId=${userId}`);
 
       this.logger.log(
         `Creating notification channel "${dto.name}" for system ${dto.systemUnderTestId} by user ${userId}`
@@ -161,7 +154,8 @@ export class NotificationsService {
         notifyOnFinished: dto.notifyOnFinished ?? true,
         notifyOnFailedOnly: dto.notifyOnFailedOnly ?? false,
         enabled: dto.enabled ?? true,
-        // NOTE: Ownership fields (created_by, organization_id) will be set here when Phase 4 adds them
+        createdBy: userId,
+        updatedBy: userId,
       });
 
       return await this.notificationChannelRepository.save(channel);
@@ -192,9 +186,7 @@ export class NotificationsService {
     roles: string[],
   ): Promise<NotificationChannel> {
     try {
-      // Log authorization context for debugging
-      const isAdmin = this.authzService.isGlobalAdmin(roles);
-      this.logger.debug(`update: id=${id}, userId=${userId}, isGlobalAdmin=${isAdmin}`);
+      this.logger.debug(`update: id=${id}, userId=${userId}`);
 
       const channel = await this.findOne(id, userId, roles);
 
@@ -216,7 +208,7 @@ export class NotificationsService {
       if (dto.notifyOnFinished !== undefined) channel.notifyOnFinished = dto.notifyOnFinished;
       if (dto.notifyOnFailedOnly !== undefined) channel.notifyOnFailedOnly = dto.notifyOnFailedOnly;
       if (dto.enabled !== undefined) channel.enabled = dto.enabled;
-      // NOTE: updated_by will be set here when Phase 4 adds ownership columns
+      channel.updatedBy = userId;
 
       this.logger.log(`Updating notification channel ${id} by user ${userId}`);
 
@@ -246,9 +238,7 @@ export class NotificationsService {
     roles: string[],
   ): Promise<void> {
     try {
-      // Log authorization context for debugging
-      const isAdmin = this.authzService.isGlobalAdmin(roles);
-      this.logger.debug(`delete: id=${id}, userId=${userId}, isGlobalAdmin=${isAdmin}`);
+      this.logger.debug(`delete: id=${id}, userId=${userId}`);
 
       const channel = await this.findOne(id, userId, roles);
 
@@ -279,9 +269,7 @@ export class NotificationsService {
     userId: string,
     roles: string[],
   ): Promise<{ success: boolean; message: string }> {
-    // Log authorization context for debugging
-    const isAdmin = this.authzService.isGlobalAdmin(roles);
-    this.logger.debug(`testChannel: id=${id}, userId=${userId}, isGlobalAdmin=${isAdmin}`);
+    this.logger.debug(`testChannel: id=${id}, userId=${userId}`);
 
     const channel = await this.findOne(id, userId, roles);
 
