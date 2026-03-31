@@ -1,5 +1,5 @@
 import { Controller, Get, Param, Query, DefaultValuePipe, ParseBoolPipe, Logger } from '@nestjs/common';
-import { ApiTags, ApiOperation, ApiResponse, ApiQuery, ApiParam } from '@nestjs/swagger';
+import { ApiTags, ApiOperation, ApiResponse, ApiQuery, ApiParam , ApiBearerAuth } from '@nestjs/swagger';
 import { UserCtx, UserContext } from '../../../common/decorators/user-context.decorator';
 import { TestRunsService } from '../test-runs.service';
 
@@ -8,6 +8,7 @@ import { TestRunsService } from '../test-runs.service';
  * Handles transaction stats, samples, timeseries, virtual users, throughput, and request names.
  */
 @ApiTags('test-runs-metrics')
+@ApiBearerAuth()
 @Controller('test-runs')
 export class TestRunsMetricsTransactionController {
   private readonly logger = new Logger(TestRunsMetricsTransactionController.name);

@@ -4,15 +4,9 @@ import { Repository, DataSource } from 'typeorm';
 import {
   TestRun as TestRunEntity,
   DsChangePoints,
-  SystemUnderTest,
 } from '../../../entities';
-import { DatabaseException, ResourceNotFoundException } from '../../../common/exceptions/business.exception';
+import { DatabaseException } from '../../../common/exceptions/business.exception';
 import { BullMQClientService } from '../../data-science/services/bullmq-client.service';
-
-/**
- * Global admin roles that bypass organization filtering
- */
-const ADMIN_ROLES = ['perfana-admin', 'super-admin', 'admin'];
 
 @Injectable()
 export class TestRunsChangepointService {
@@ -23,48 +17,9 @@ export class TestRunsChangepointService {
     private testRunRepo: Repository<TestRunEntity>,
     @InjectRepository(DsChangePoints)
     private changePointsRepo: Repository<DsChangePoints>,
-    @InjectRepository(SystemUnderTest)
-    private systemRepo: Repository<SystemUnderTest>,
     private bullmqClientService: BullMQClientService,
     private dataSource: DataSource,
   ) {}
-
-  /**
-   * Check if a user has global admin role
-   */
-  private isGlobalAdmin(roles: string[]): boolean {
-    return roles.some(role => ADMIN_ROLES.includes(role));
-  }
-
-  /**
-   * Validate that a user has access to a system under test via organization membership
-   * Returns true if access is granted, false otherwise
-   */
-  private async validateSystemAccess(
-    systemUnderTestId: string,
-    roles: string[],
-    organizationIds: string[],
-  ): Promise<boolean> {
-    // Admins have access to all systems
-    if (this.isGlobalAdmin(roles)) {
-      return true;
-    }
-
-    // Non-admin users with no organization memberships have no access
-    if (organizationIds.length === 0) {
-      return false;
-    }
-
-    // Check if the system belongs to an organization the user has access to
-    const system = await this.systemRepo
-      .createQueryBuilder('sut')
-      .leftJoin('sut.team', 'team')
-      .where('sut.id = :systemId', { systemId: systemUnderTestId })
-      .andWhere('sut.organization_id IN (:...orgIds)', { orgIds: organizationIds })
-      .getOne();
-
-    return !!system;
-  }
 
   /**
    * Get test runs created after a specific changepoint
@@ -141,33 +96,16 @@ export class TestRunsChangepointService {
   }
 
   /**
-   * Get test runs more recent than a base test run
-   *
-   * @param systemUnderTestId - System under test UUID
-   * @param testEnvironment - Test environment name
-   * @param workload - Workload name
-   * @param baseTestRunId - Base test run ID to compare against
-   * @param roles - User roles from JWT token (for admin bypass)
-   * @param organizationIds - User's accessible organization IDs from JWT token
+   * Get test runs more recent than a base test run.
+   * Authorization is enforced at the controller level via verifyTestRunAccess.
    */
   async getTestRunsMoreRecentThan(
     systemUnderTestId: string,
     testEnvironment: string,
     workload: string,
     baseTestRunId: string,
-    roles: string[] = [],
-    organizationIds: string[] = [],
   ): Promise<{ testRunIds: string[] }> {
     try {
-      // Validate access if organization filtering is enabled
-      if (roles.length > 0 || organizationIds.length > 0) {
-        const hasAccess = await this.validateSystemAccess(systemUnderTestId, roles, organizationIds);
-        if (!hasAccess) {
-          this.logger.debug(`User denied access to system ${systemUnderTestId}`);
-          return { testRunIds: [] };
-        }
-      }
-
       // Get the base test run to get its creation date
       const baseTestRun = await this.testRunRepo.findOne({
         where: {
@@ -208,33 +146,16 @@ export class TestRunsChangepointService {
   }
 
   /**
-   * Mark a test run as a changepoint
-   *
-   * @param systemUnderTestId - System under test UUID
-   * @param testEnvironment - Test environment name
-   * @param workload - Workload name
-   * @param testRunId - Test run ID to mark as changepoint
-   * @param roles - User roles from JWT token (for admin bypass)
-   * @param organizationIds - User's accessible organization IDs from JWT token
+   * Mark a test run as a changepoint.
+   * Authorization is enforced at the controller level via verifyTestRunAccess.
    */
   async markAsChangepoint(
     systemUnderTestId: string,
     testEnvironment: string,
     workload: string,
     testRunId: string,
-    roles: string[] = [],
-    organizationIds: string[] = [],
   ): Promise<{ message: string; jobId?: string; jobDetails?: any }> {
     try {
-      // Validate access if organization filtering is enabled
-      if (roles.length > 0 || organizationIds.length > 0) {
-        const hasAccess = await this.validateSystemAccess(systemUnderTestId, roles, organizationIds);
-        if (!hasAccess) {
-          this.logger.warn(`User denied access to mark changepoint for system ${systemUnderTestId}`);
-          throw new ResourceNotFoundException('System', systemUnderTestId);
-        }
-      }
-
       // Check if changepoint already exists
       const existingChangepoint = await this.changePointsRepo.findOne({
         where: {
@@ -342,33 +263,16 @@ export class TestRunsChangepointService {
   }
 
   /**
-   * Remove a test run's changepoint status
-   *
-   * @param systemUnderTestId - System under test UUID
-   * @param testEnvironment - Test environment name
-   * @param workload - Workload name
-   * @param testRunId - Test run ID to remove as changepoint
-   * @param roles - User roles from JWT token (for admin bypass)
-   * @param organizationIds - User's accessible organization IDs from JWT token
+   * Remove a test run's changepoint status.
+   * Authorization is enforced at the controller level via verifyTestRunAccess.
    */
   async removeChangepoint(
     systemUnderTestId: string,
     testEnvironment: string,
     workload: string,
     testRunId: string,
-    roles: string[] = [],
-    organizationIds: string[] = [],
   ): Promise<{ message: string; jobId?: string; jobDetails?: any }> {
     try {
-      // Validate access if organization filtering is enabled
-      if (roles.length > 0 || organizationIds.length > 0) {
-        const hasAccess = await this.validateSystemAccess(systemUnderTestId, roles, organizationIds);
-        if (!hasAccess) {
-          this.logger.warn(`User denied access to remove changepoint for system ${systemUnderTestId}`);
-          throw new ResourceNotFoundException('System', systemUnderTestId);
-        }
-      }
-
       // Check if changepoint exists
       const existingChangepoint = await this.changePointsRepo.findOne({
         where: {
@@ -482,31 +386,15 @@ export class TestRunsChangepointService {
   }
 
   /**
-   * Get test runs after the most recent changepoint for a system/environment/workload
-   *
-   * @param systemUnderTestId - System under test UUID
-   * @param testEnvironment - Test environment name
-   * @param workload - Workload name
-   * @param roles - User roles from JWT token (for admin bypass)
-   * @param organizationIds - User's accessible organization IDs from JWT token
+   * Get test runs after the most recent changepoint for a system/environment/workload.
+   * Authorization is enforced at the controller level via verifyTestRunAccess.
    */
   async getTestRunsAfterMostRecentChangepoint(
     systemUnderTestId: string,
     testEnvironment: string,
     workload: string,
-    roles: string[] = [],
-    organizationIds: string[] = [],
   ): Promise<{ changepointTestRunId?: string; testRunIds: string[] }> {
     try {
-      // Validate access if organization filtering is enabled
-      if (roles.length > 0 || organizationIds.length > 0) {
-        const hasAccess = await this.validateSystemAccess(systemUnderTestId, roles, organizationIds);
-        if (!hasAccess) {
-          this.logger.debug(`User denied access to system ${systemUnderTestId}`);
-          return { testRunIds: [] };
-        }
-      }
-
       // Find the most recent changepoint
       const mostRecentChangepoint = await this.changePointsRepo.findOne({
         where: {

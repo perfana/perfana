@@ -1,5 +1,5 @@
 import { Controller, Get, Delete, Put, Param, Query, Body, ParseUUIDPipe } from '@nestjs/common';
-import { ApiTags, ApiOperation, ApiResponse, ApiQuery, ApiParam } from '@nestjs/swagger';
+import { ApiTags, ApiOperation, ApiResponse, ApiQuery, ApiParam , ApiBearerAuth } from '@nestjs/swagger';
 import { TestRunsService } from '../test-runs.service';
 import { PaginationQueryDto, TestRunQueryDto } from '../../../common/dto';
 import { ValidationException } from '../../../common/exceptions/business.exception';
@@ -21,6 +21,7 @@ import { UserCtx, UserContext } from '../../../common/decorators/user-context.de
  * - InitController: Init endpoint for test run initialization
  */
 @ApiTags('test-runs')
+@ApiBearerAuth()
 @Controller('test-runs')
 export class TestRunsController {
   constructor(private readonly testRunsService: TestRunsService) {}

@@ -1,10 +1,11 @@
 import { Controller, Get, Post, Put, Delete, Query, Param, Body, Logger, HttpException, HttpStatus } from '@nestjs/common';
-import { ApiTags, ApiOperation, ApiQuery, ApiResponse } from '@nestjs/swagger';
+import { ApiTags, ApiOperation, ApiQuery, ApiResponse , ApiBearerAuth } from '@nestjs/swagger';
 import { BenchmarksService } from './benchmarks.service';
 import { CopyBenchmarksDto } from './dto/copy-benchmarks.dto';
 import { UserCtx, UserContext } from '../../common/decorators/user-context.decorator';
 
 @ApiTags('benchmarks')
+@ApiBearerAuth()
 @Controller('benchmarks')
 export class BenchmarksController {
   private readonly logger = new Logger(BenchmarksController.name);

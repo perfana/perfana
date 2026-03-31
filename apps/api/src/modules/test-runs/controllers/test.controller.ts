@@ -1,5 +1,5 @@
 import { Controller, Post, Body, Logger, BadRequestException } from '@nestjs/common';
-import { ApiTags, ApiOperation, ApiResponse } from '@nestjs/swagger';
+import { ApiTags, ApiOperation, ApiResponse , ApiBearerAuth } from '@nestjs/swagger';
 import { UserCtx, UserContext } from '../../../common/decorators/user-context.decorator';
 import { TestRunsService } from '../test-runs.service';
 import { UpdateRunningTestDto } from '../dto/update-running-test.dto';
@@ -7,6 +7,7 @@ import { ValidationException } from '../../../common/exceptions/business.excepti
 import { ThrottleConfig } from '../../../decorators/throttle-config.decorator';
 
 @ApiTags('test')
+@ApiBearerAuth()
 @Controller('test')
 export class TestController {
   private readonly logger = new Logger(TestController.name);

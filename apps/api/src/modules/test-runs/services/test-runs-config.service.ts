@@ -15,11 +15,6 @@ import { ResourceNotFoundException, ValidationException } from '../../../common/
 import { AuthorizationService } from '../../../common/services/authorization.service';
 import safeRegex from 'safe-regex';
 
-/**
- * Global admin roles that bypass organization filtering
- */
-const ADMIN_ROLES = ['perfana-admin', 'super-admin', 'admin'];
-
 export interface TestRun {
   id: string;
   test_run_id: string;
@@ -73,12 +68,6 @@ export class TestRunsConfigService {
     private authzService: AuthorizationService,
   ) {}
 
-  /**
-   * Check if a user has global admin role
-   */
-  private isGlobalAdmin(roles: string[]): boolean {
-    return roles.some(role => ADMIN_ROLES.includes(role));
-  }
 
   async getTestRunConfigs(
     testRunId: string,
@@ -89,7 +78,7 @@ export class TestRunsConfigService {
     roles: string[] = [],
   ): Promise<Array<{key: string; value: string; tags: string[]}>> {
     try {
-      const isAdmin = this.isGlobalAdmin(roles);
+      const isAdmin = this.authzService.isGlobalAdmin(roles);
 
       // Get user's accessible organizations using AuthorizationService
       let organizationIds: string[] = [];
@@ -581,7 +570,7 @@ export class TestRunsConfigService {
     organizationIds: string[] = [],
   ): Promise<string[]> {
     try {
-      const isAdmin = this.isGlobalAdmin(roles);
+      const isAdmin = this.authzService.isGlobalAdmin(roles);
 
       // Non-admin users with no organization memberships see empty results
       if (!isAdmin && organizationIds.length === 0) {
@@ -649,7 +638,7 @@ export class TestRunsConfigService {
     roles: string[] = [],
   ): Promise<ExpectedConfigChangeDto[]> {
     try {
-      const isAdmin = this.isGlobalAdmin(roles);
+      const isAdmin = this.authzService.isGlobalAdmin(roles);
 
       // Get user's accessible organizations using AuthorizationService
       let organizationIds: string[] = [];

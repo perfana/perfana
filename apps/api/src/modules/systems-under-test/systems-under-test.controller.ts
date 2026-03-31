@@ -1,11 +1,12 @@
 import { Controller, Get, Delete, Param, Patch, Body, Query, NotFoundException, Logger, HttpException, HttpStatus } from '@nestjs/common';
-import { ApiTags, ApiOperation, ApiParam, ApiResponse } from '@nestjs/swagger';
+import { ApiTags, ApiOperation, ApiParam, ApiResponse , ApiBearerAuth } from '@nestjs/swagger';
 import { SystemsUnderTestService } from './systems-under-test.service';
 import { DeleteSystemUnderTestHandler } from './handlers/delete-system-under-test.handler';
 import { UpdatePyroscopeConfigDto, UpdateSystemUnderTestDto } from './dto';
 import { UserCtx, UserContext } from '../../common/decorators/user-context.decorator';
 
 @ApiTags('systems-under-test')
+@ApiBearerAuth()
 @Controller('systems-under-test')
 export class SystemsUnderTestController {
   private readonly logger = new Logger(SystemsUnderTestController.name);
