@@ -113,6 +113,7 @@ export class ComparePresetsService {
       const savedPreset = await this.comparePresetRepo.save(preset);
       return this.mapToDto(savedPreset, null, null);
     } catch (error) {
+      if (error instanceof NotFoundException || error instanceof ForbiddenException || error instanceof ResourceNotFoundException) throw error;
       this.logger.error('Failed to create compare preset:', error);
       throw new Error(`Failed to create compare preset: ${error && typeof error === 'object' && 'message' in error ? (error as Error).message : 'Unknown error'}`);
     }
@@ -144,14 +145,17 @@ export class ComparePresetsService {
         }
       }
 
-      // Get both user's own presets and global presets
+      // Get presets — admins see all, others see own + global
       const queryBuilder = this.comparePresetRepo
         .createQueryBuilder('preset')
-        .leftJoinAndSelect('preset.applicationDashboard', 'dashboard')
-        .where('(preset.createdBy = :userId OR preset.isGlobal = :isGlobal)', {
+        .leftJoinAndSelect('preset.applicationDashboard', 'dashboard');
+
+      if (!isAdmin) {
+        queryBuilder.where('(preset.createdBy = :userId OR preset.isGlobal = :isGlobal)', {
           userId,
           isGlobal: true
         });
+      }
 
       // Scope presets to the same SUT/environment/workload
       if (sutContext) {
@@ -383,7 +387,7 @@ export class ComparePresetsService {
 
       return this.mapToDto(updated, updated.applicationDashboard || null, testRunData);
     } catch (error) {
-      if (error instanceof ForbiddenException || error instanceof NotFoundException) {
+      if (error instanceof ForbiddenException || error instanceof NotFoundException || error instanceof ResourceNotFoundException) {
         throw error;
       }
       this.logger.error(`Failed to update compare preset ${id}:`, error);

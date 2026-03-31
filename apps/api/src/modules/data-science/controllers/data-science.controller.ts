@@ -49,7 +49,9 @@ export class DataScienceController {
       `SELECT organization_id FROM test_runs WHERE id::text = $1 OR test_run_id = $1 LIMIT 1`,
       [testRunId],
     );
-    if (result.length === 0) return;
+    if (result.length === 0) {
+      throw new NotFoundException(`Test run ${testRunId} not found`);
+    }
 
     const orgId = result[0].organization_id;
     if (orgId && !organizationIds.includes(orgId)) {
@@ -615,23 +617,8 @@ export class DataScienceController {
       }
     }
   })
-  async getTestRunJobs(@Param('testRunId') testRunId: string) {
-    try {
-      // This would be implemented to query all jobs for a specific test run
-      // For now, return a placeholder implementation
-      this.logger.log(`Retrieving jobs for test run: ${testRunId}`);
-
-      return {
-        testRunId,
-        totalJobs: 0,
-        jobs: [],
-        message: 'Test run jobs endpoint - implementation in progress'
-      };
-    } catch (error) {
-      const errorMessage = error && typeof error === 'object' && 'message' in error ? (error as Error).message : 'Unknown error';
-      this.logger.error(`Failed to get jobs for test run ${testRunId}: ${errorMessage}`);
-      throw new BadRequestException(`Failed to retrieve test run jobs: ${errorMessage}`);
-    }
+  async getTestRunJobs(@Param('testRunId') _testRunId: string) {
+    throw new BadRequestException('Test run jobs endpoint not yet implemented');
   }
 
   @Get('health')
@@ -873,11 +860,17 @@ export class DataScienceController {
   async releaseLock(
     @Param('systemId') systemId: string,
     @Param('env') env: string,
-    @Param('workload') workload: string
+    @Param('workload') workload: string,
+    @UserCtx() ctx: UserContext,
   ) {
     try {
+      // Lock release is an admin operation
+      if (!this.authzService.isGlobalAdmin(ctx.roles)) {
+        throw new ForbiddenException('Admin privileges required to release locks');
+      }
+
       this.logger.warn(
-        `Manual lock release requested for scope: ${systemId}:${env}:${workload}`
+        `Manual lock release requested for scope: ${systemId}:${env}:${workload} by user ${ctx.userId}`
       );
 
       const result = await this.jobProgressService.releaseLock(
@@ -903,7 +896,7 @@ export class DataScienceController {
         previousLock: result.previousLock
       };
     } catch (error) {
-      if (error instanceof NotFoundException) {
+      if (error instanceof NotFoundException || error instanceof ForbiddenException) {
         throw error;
       }
       const errorMessage = error && typeof error === 'object' && 'message' in error ? (error as Error).message : 'Unknown error';

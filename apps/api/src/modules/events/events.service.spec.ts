@@ -249,9 +249,6 @@ describe('EventsService', () => {
         ...mockEvent,
         grafanaAnnotationIds: { 'inst-1:dash-1': 42 },
       });
-      const grafanaInstance = { id: 'inst-1', label: 'Test', client_url: 'http://grafana', orgId: '1', apiKey: 'key' };
-      const grafanaInstanceRepo = module_get_helper();
-      // Since we mocked the GrafanaInstance repo
       eventRepo.remove.mockResolvedValue(undefined);
 
       // Should not throw even if Grafana annotation deletion fails
@@ -260,8 +257,3 @@ describe('EventsService', () => {
     });
   });
 });
-
-// Helper to avoid TypeScript issues with mock
-function module_get_helper() {
-  return {};
-}

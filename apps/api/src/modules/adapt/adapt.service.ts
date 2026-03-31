@@ -153,19 +153,13 @@ export class AdaptService {
   private computeStatus(conclusion?: any, trackedConclusion?: any): TrackedRegressionStatus {
     if (!conclusion || !trackedConclusion) return TrackedRegressionStatus.UNRESOLVED;
 
-    // Check if regression has been resolved
+    // Check if regression has been resolved (any resolution value)
     if (trackedConclusion?.resolved === true) {
       const resolution = trackedConclusion?.resolution?.toLowerCase();
       if (resolution === 'accepted') return TrackedRegressionStatus.ACCEPTED;
       if (resolution === 'denied') return TrackedRegressionStatus.DENIED;
-    }
-
-    // If not resolved, check if it's a regression that needs tracking
-    const conclusionLabel = conclusion?.label?.toLowerCase();
-    const trackedConclusionLabel = trackedConclusion?.label?.toLowerCase();
-
-    if (conclusionLabel === 'regression' || trackedConclusionLabel === 'tracked_regression') {
-      return TrackedRegressionStatus.UNRESOLVED;
+      // Any other resolved state (e.g. 'regression') is treated as accepted
+      return TrackedRegressionStatus.ACCEPTED;
     }
 
     return TrackedRegressionStatus.UNRESOLVED;
