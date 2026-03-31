@@ -5,8 +5,6 @@ import {
   Length,
   IsEnum,
   Matches,
-  IsArray,
-  ArrayMaxSize,
   Max,
   Min,
   IsInt,
@@ -32,16 +30,6 @@ export type AwrFileType = 'html' | 'text';
  */
 export class UploadAwrReportDto {
   @ApiPropertyOptional({
-    description: 'Optional description for the AWR report',
-    example: 'Production AWR report from load test',
-    maxLength: 1000,
-  })
-  @IsOptional()
-  @IsString()
-  @Length(0, 1000, { message: 'Description must not exceed 1000 characters' })
-  description?: string;
-
-  @ApiPropertyOptional({
     description: 'File type override (auto-detected if not provided)',
     example: 'html',
     enum: ['html', 'text'],
@@ -50,19 +38,6 @@ export class UploadAwrReportDto {
   @IsString()
   @IsEnum(['html', 'text'], { message: 'File type must be either html or text' })
   fileType?: AwrFileType;
-
-  @ApiPropertyOptional({
-    description: 'Tags for categorizing the report (max 20)',
-    type: [String],
-    example: ['production', 'load-test', 'weekly'],
-    maxItems: 20,
-  })
-  @IsOptional()
-  @IsArray()
-  @ArrayMaxSize(20, { message: 'Maximum 20 tags allowed' })
-  @IsString({ each: true })
-  @Length(1, 100, { each: true, message: 'Each tag must be between 1 and 100 characters' })
-  tags?: string[];
 }
 
 /**
@@ -90,16 +65,6 @@ export class UploadAwrReportByUrlDto {
   fileName?: string;
 
   @ApiPropertyOptional({
-    description: 'Optional description for the AWR report',
-    example: 'Production AWR report from load test',
-    maxLength: 1000,
-  })
-  @IsOptional()
-  @IsString()
-  @Length(0, 1000, { message: 'Description must not exceed 1000 characters' })
-  description?: string;
-
-  @ApiPropertyOptional({
     description: 'File type (auto-detected if not provided)',
     example: 'html',
     enum: ['html', 'text'],
@@ -108,19 +73,6 @@ export class UploadAwrReportByUrlDto {
   @IsString()
   @IsEnum(['html', 'text'], { message: 'File type must be either html or text' })
   fileType?: AwrFileType;
-
-  @ApiPropertyOptional({
-    description: 'Tags for categorizing the report (max 20)',
-    type: [String],
-    example: ['production', 'load-test', 'weekly'],
-    maxItems: 20,
-  })
-  @IsOptional()
-  @IsArray()
-  @ArrayMaxSize(20, { message: 'Maximum 20 tags allowed' })
-  @IsString({ each: true })
-  @Length(1, 100, { each: true, message: 'Each tag must be between 1 and 100 characters' })
-  tags?: string[];
 }
 
 /**

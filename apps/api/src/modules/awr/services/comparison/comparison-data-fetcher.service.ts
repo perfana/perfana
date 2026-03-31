@@ -185,11 +185,7 @@ export class ComparisonDataFetcherService {
         .addOrderBy('awr.uploadedAt', 'DESC')
         .take(limit);
 
-      const sql = queryBuilder.getSql();
-      this.logger.debug(`[findBaselineReports] Generated SQL: ${sql}`);
-
-      const reports = await queryBuilder.getMany();
-      const total = await queryBuilder.getCount();
+      const [reports, total] = await queryBuilder.getManyAndCount();
 
       this.logger.debug(`[findBaselineReports] Found ${reports.length} reports (total: ${total})`);
 
