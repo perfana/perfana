@@ -1,5 +1,5 @@
 import { Inject, Injectable } from '@nestjs/common';
-import { Queue, Job, JobsOptions } from 'bullmq';
+import { Queue, JobsOptions } from 'bullmq';
 
 @Injectable()
 export class QueueService {
@@ -11,29 +11,8 @@ export class QueueService {
     options: JobsOptions = {}
   ): Promise<string> {
     const job = await this.queue.add(jobName, data, options);
-    return job.id!;
-  }
-
-  async getJobById(jobId: string): Promise<Job | undefined> {
-    return this.queue.getJob(jobId);
-  }
-
-  async cancel(jobId: string): Promise<void> {
-    const job = await this.queue.getJob(jobId);
-    if (job) {
-      await job.remove();
-    }
-  }
-
-  async retry(jobId: string): Promise<void> {
-    const job = await this.queue.getJob(jobId);
-    if (job) {
-      await job.retry();
-    }
-  }
-
-  async getJobs(status: 'completed' | 'failed' | 'delayed' | 'active' | 'waiting' = 'waiting'): Promise<Job[]> {
-    return this.queue.getJobs([status]);
+    if (!job.id) throw new Error('BullMQ failed to assign job ID');
+    return job.id;
   }
 
   async getJobCounts(): Promise<{ waiting: number; active: number; completed: number; failed: number; delayed: number }> {

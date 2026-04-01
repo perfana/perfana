@@ -15,7 +15,7 @@ import { QueueService } from './queue.service';
         const redisUrl = configService.get('REDIS_URL', 'redis://localhost:6379');
 
         logger.log('Initializing Redis client...');
-        logger.log(`Redis URL: ${redisUrl}`);
+        logger.log(`Redis URL: ${redisUrl.replace(/:\/\/[^@]*@/, '://***@')}`);
 
         const redis = new IORedis(redisUrl, {
           maxRetriesPerRequest: 3,
