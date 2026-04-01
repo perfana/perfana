@@ -4,6 +4,21 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
+## [0.2.19] - 2026-04-01
+
+### Fixed
+- Fix REEVALUATE_CHECKS stub pipeline silently returning success without doing any work (now returns failure with warning)
+- Replace console.error with structured pino logger in ChecksPipeline realtime publishing
+- Fix dead batch progress variables in MetricsPipeline (now actually logs batch progress)
+
+### Removed
+- Remove dead createErrorRecord/createEmptyRecord methods from MetricsPipeline
+- Remove dead maybeSetAdaptDifferencesAccepted call and method from ChecksPipeline
+- Remove dead getSettings method and 56-line migration guide from BasePipelineTypeORM
+- Remove dead validateTestRun/hasExistingMetrics exports from worker analyze module
+- Remove dead executeBatchProcessing/executeReevaluationBatch stubs from PipelineOrchestrator
+- Remove unused imports from ChecksPipeline and MetricsPipeline
+
 ## [0.2.18] - 2026-03-31
 
 ### Fixed
