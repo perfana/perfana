@@ -30,6 +30,7 @@ export class AlertTagFiltersController {
     try {
       return await this.filtersService.findAll(ctx.userId, ctx.roles);
     } catch (error) {
+      if (error instanceof HttpException) throw error;
       this.logger.error('Failed to fetch alert tag filters:', error);
       throw new HttpException('Failed to fetch alert tag filters', HttpStatus.INTERNAL_SERVER_ERROR);
     }
@@ -44,9 +45,7 @@ export class AlertTagFiltersController {
     try {
       return await this.filtersService.findOne(id, ctx.userId, ctx.roles);
     } catch (error) {
-      if (error && typeof error === 'object' && 'message' in error && (error as Error).message.includes('not found')) {
-        throw new HttpException('Filter not found', HttpStatus.NOT_FOUND);
-      }
+      if (error instanceof HttpException) throw error;
       this.logger.error(`Failed to fetch alert tag filter ${id}:`, error);
       throw new HttpException('Failed to fetch filter', HttpStatus.INTERNAL_SERVER_ERROR);
     }
@@ -60,6 +59,7 @@ export class AlertTagFiltersController {
     try {
       return await this.filtersService.create(dto, ctx.userId);
     } catch (error) {
+      if (error instanceof HttpException) throw error;
       this.logger.error('Failed to create alert tag filter:', error);
       throw new HttpException(
         (error && typeof error === 'object' && 'message' in error ? (error as Error).message : null) || 'Failed to create filter',
@@ -81,9 +81,7 @@ export class AlertTagFiltersController {
     try {
       return await this.filtersService.update(id, dto, ctx.userId, ctx.roles);
     } catch (error) {
-      if (error && typeof error === 'object' && 'message' in error && (error as Error).message.includes('not found')) {
-        throw new HttpException('Filter not found', HttpStatus.NOT_FOUND);
-      }
+      if (error instanceof HttpException) throw error;
       this.logger.error(`Failed to update alert tag filter ${id}:`, error);
       throw new HttpException(
         (error && typeof error === 'object' && 'message' in error ? (error as Error).message : null) || 'Failed to update filter',
@@ -102,9 +100,7 @@ export class AlertTagFiltersController {
       await this.filtersService.remove(id, ctx.userId, ctx.roles);
       return { message: 'Filter deleted successfully' };
     } catch (error) {
-      if (error && typeof error === 'object' && 'message' in error && (error as Error).message.includes('not found')) {
-        throw new HttpException('Filter not found', HttpStatus.NOT_FOUND);
-      }
+      if (error instanceof HttpException) throw error;
       this.logger.error(`Failed to delete alert tag filter ${id}:`, error);
       throw new HttpException('Failed to delete filter', HttpStatus.INTERNAL_SERVER_ERROR);
     }

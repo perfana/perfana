@@ -4,6 +4,25 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
+## [0.2.18] - 2026-03-31
+
+### Fixed
+- Fix ADAPT `computeStatus` algorithm bug where resolved regressions with non-accepted/denied resolution were incorrectly shown as UNRESOLVED
+- Fix `verifyTestRunAccess` in data-science controller silently passing when test run does not exist (now throws 404)
+- Add admin role check to `DELETE /data/locks` endpoint (any authenticated user could previously force-release job locks)
+- Fix compare-presets admin bypass missing in `findAll` (global admins couldn't see non-global presets from other users)
+- Fix `ResourceNotFoundException` being swallowed as 500 in compare-presets create/update
+- Fix `ForbiddenException` being swallowed as 400 in data-science `releaseLock`
+- Fix HttpException swallowing in events and alert-tag-filters controllers (NotFoundException/ForbiddenException now propagate correctly)
+- Set `createdBy` field in graph-presets for RBAC Phase 2 consistency
+
+### Removed
+- Remove shipped stub endpoint `getTrackedRegressionChart` (returned wrong data with hardcoded zero percentages)
+- Replace stub `getTestRunJobs` with proper 400 error (was returning fake empty data with "implementation in progress")
+- Delete dead DTO files (`batch-reevaluate.dto.ts`, `batch-refresh.dto.ts`) that duplicated `batch-processing.dto.ts`
+- Delete dead entity file `adapt/entities/tracked-regression.entity.ts` (real entity in packages/shared)
+- Remove dead test helper and unused variables in events test suite
+
 ## [0.2.17] - 2026-03-31
 
 ### Fixed

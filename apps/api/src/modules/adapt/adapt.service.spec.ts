@@ -260,8 +260,8 @@ describe('AdaptService', () => {
         expect(response.regressions[0]?.status).toBe(TrackedRegressionStatus.DENIED);
       });
 
-      it('should return UNRESOLVED when resolution is unknown value', async () => {
-        // Arrange
+      it('should return ACCEPTED when resolution is unknown value (resolved=true)', async () => {
+        // Arrange - any resolved regression with non-accepted/denied resolution is treated as accepted
         const result = {
           ...mockTrackedResult,
           tracked_conclusion: {
@@ -279,7 +279,7 @@ describe('AdaptService', () => {
         const response = await service.getTrackedRegressions('test-123', undefined, undefined, undefined, ['admin'], []);
 
         // Assert
-        expect(response.regressions[0]?.status).toBe(TrackedRegressionStatus.UNRESOLVED);
+        expect(response.regressions[0]?.status).toBe(TrackedRegressionStatus.ACCEPTED);
       });
     });
 

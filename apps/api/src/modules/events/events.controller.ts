@@ -34,6 +34,7 @@ export class EventsController {
     try {
       return await this.eventsService.findAll(ctx.userId, ctx.roles, query);
     } catch (error) {
+      if (error instanceof HttpException) throw error;
       this.logger.error('Failed to fetch events:', error);
       throw new HttpException('Failed to fetch events', HttpStatus.INTERNAL_SERVER_ERROR);
     }
@@ -51,9 +52,7 @@ export class EventsController {
     try {
       return await this.eventsService.findByTestRun(testRunId, ctx.userId, ctx.roles);
     } catch (error) {
-      if (error && typeof error === 'object' && 'message' in error && (error as Error).message.includes('not found')) {
-        throw new HttpException((error as Error).message, HttpStatus.NOT_FOUND);
-      }
+      if (error instanceof HttpException) throw error;
       this.logger.error(`Failed to fetch events for test run ${testRunId}:`, error);
       throw new HttpException('Failed to fetch events', HttpStatus.INTERNAL_SERVER_ERROR);
     }
@@ -71,9 +70,7 @@ export class EventsController {
     try {
       return await this.eventsService.findOne(id, ctx.userId, ctx.roles);
     } catch (error) {
-      if (error && typeof error === 'object' && 'message' in error && (error as Error).message.includes('not found')) {
-        throw new HttpException('Event not found', HttpStatus.NOT_FOUND);
-      }
+      if (error instanceof HttpException) throw error;
       this.logger.error(`Failed to fetch event ${id}:`, error);
       throw new HttpException('Failed to fetch event', HttpStatus.INTERNAL_SERVER_ERROR);
     }
@@ -90,9 +87,7 @@ export class EventsController {
     try {
       return await this.eventsService.create(dto, ctx.userId, ctx.roles);
     } catch (error) {
-      if (error && typeof error === 'object' && 'message' in error && (error as Error).message.includes('not found')) {
-        throw new HttpException((error as Error).message, HttpStatus.NOT_FOUND);
-      }
+      if (error instanceof HttpException) throw error;
       this.logger.error('Failed to create event:', error);
       throw new HttpException(
         (error && typeof error === 'object' && 'message' in error ? (error as Error).message : null) || 'Failed to create event',
@@ -114,9 +109,7 @@ export class EventsController {
     try {
       return await this.eventsService.update(id, dto, ctx.userId, ctx.roles);
     } catch (error) {
-      if (error && typeof error === 'object' && 'message' in error && (error as Error).message.includes('not found')) {
-        throw new HttpException('Event not found', HttpStatus.NOT_FOUND);
-      }
+      if (error instanceof HttpException) throw error;
       this.logger.error(`Failed to update event ${id}:`, error);
       throw new HttpException(
         (error && typeof error === 'object' && 'message' in error ? (error as Error).message : null) || 'Failed to update event',
@@ -138,9 +131,7 @@ export class EventsController {
       await this.eventsService.remove(id, ctx.userId, ctx.roles);
       return { message: 'Event deleted successfully' };
     } catch (error) {
-      if (error && typeof error === 'object' && 'message' in error && (error as Error).message.includes('not found')) {
-        throw new HttpException('Event not found', HttpStatus.NOT_FOUND);
-      }
+      if (error instanceof HttpException) throw error;
       this.logger.error(`Failed to delete event ${id}:`, error);
       throw new HttpException('Failed to delete event', HttpStatus.INTERNAL_SERVER_ERROR);
     }

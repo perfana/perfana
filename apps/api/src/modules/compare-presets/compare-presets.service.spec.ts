@@ -203,7 +203,7 @@ describe('ComparePresetsService', () => {
   });
 
   describe('findAll', () => {
-    it('should return user presets and global presets', async () => {
+    it('should return user presets and global presets for non-admin users', async () => {
       // Arrange
       const mockQueryBuilder = {
         leftJoinAndSelect: jest.fn().mockReturnThis(),
@@ -214,8 +214,8 @@ describe('ComparePresetsService', () => {
 
       comparePresetRepo.createQueryBuilder.mockReturnValue(mockQueryBuilder as any);
 
-      // Act
-      const result = await service.findAll(userId, undefined, ['admin']);
+      // Act — use non-admin role to test ownership filter
+      const result = await service.findAll(userId, undefined, ['user']);
 
       // Assert
       expect(mockQueryBuilder.where).toHaveBeenCalledWith(

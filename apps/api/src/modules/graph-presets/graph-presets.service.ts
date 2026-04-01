@@ -56,6 +56,7 @@ export class GraphPresetsService {
         description: createGraphPresetDto.description,
         testRunId: createGraphPresetDto.testRunId,
         userId,
+        createdBy: userId,
         seriesConfig: createGraphPresetDto.seriesConfig as any,
         chartOptions: createGraphPresetDto.chartOptions,
         isGlobal: createGraphPresetDto.isGlobal || false
