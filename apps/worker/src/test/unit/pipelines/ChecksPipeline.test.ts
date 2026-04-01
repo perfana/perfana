@@ -1240,6 +1240,7 @@ describe('ChecksPipeline', () => {
 
       // Assert
       expect(mockLogger.error).toHaveBeenCalledWith(
+        expect.objectContaining({ err: expect.any(Error) }),
         expect.stringContaining('Failed to publish realtime update')
       );
     });

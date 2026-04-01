@@ -110,15 +110,20 @@ registerPipeline({
   successMessage: 'Performance test metrics',
 });
 
-// Reevaluate: stub pipeline (TODO: implement actual logic)
+// Reevaluate: logs a warning instead of silently succeeding
 registerPipeline({
   jobName: JOB_NAMES.REEVALUATE_CHECKS,
   schema: ReevaluateJobSchema,
-  createPipeline: () => ({
-    execute: async (data: any) => ({
-      success: true,
-      data: { testRunId: data.testRunId },
-    }),
+  createPipeline: (logger) => ({
+    execute: async (data: any) => {
+      logger.warn({ testRunId: data.testRunId }, 'REEVALUATE_CHECKS pipeline not yet implemented — job skipped');
+      return {
+        success: false,
+        error: 'REEVALUATE_CHECKS pipeline not yet implemented',
+        data: { testRunId: data.testRunId },
+      };
+    },
   }),
+  softFail: true,
   successMessage: 'Reevaluate',
 });

@@ -705,32 +705,4 @@ ${results.map(r => {
     }
   }
 
-  /**
-   * Execute Batch Processing - Multiple test runs with dependencies
-   * Replicates Python's refresh_batch pattern
-   */
-  async executeBatchProcessing(
-    testRunIds: string[],
-    _options: { adapt?: boolean } = {}
-  ): Promise<string> {
-    this.logger.info(`🔷 Starting batch processing for ${testRunIds.length} test runs`);
-
-    // This will be implemented when we integrate with pg-boss job queuing
-    // For now, return a placeholder
-    throw new Error('Batch processing not yet implemented - requires pg-boss integration');
-  }
-
-  /**
-   * Execute Re-evaluation - Benchmark updates only
-   * Replicates Python's reevaluate_checks_task pattern
-   */
-  async executeReevaluationBatch(
-    testRunIds: string[],
-    _options: { checks?: boolean; adapt?: boolean } = {}
-  ): Promise<string> {
-    this.logger.info(`🔷 Starting re-evaluation for ${testRunIds.length} test runs`);
-
-    // This will be implemented when we have the reevaluate pipeline
-    throw new Error('Re-evaluation not yet implemented - requires reevaluate pipeline');
-  }
 }

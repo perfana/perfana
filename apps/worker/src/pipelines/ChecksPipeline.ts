@@ -7,7 +7,6 @@ import { RequirementChecker, CheckResult as _CheckResult } from './checks/Requir
 import { ApdexCalculator, ApdexCheckResult } from './checks/ApdexCalculator.js';
 import { CheckPipelineError, BenchmarkNotFoundError } from './checks/BaseCheckService.js';
 import { getRealtimePublisher } from '../common/realtime-accessor.js';
-import { getDatabaseService as _getDatabaseService } from '../common/database-accessor.js';
 import { TestRun } from '@perfana/shared';
 
 export interface ChecksInput {
@@ -380,7 +379,6 @@ export class ChecksPipeline extends BasePipelineTypeORM {
       await this.updateConsolidatedResult(manager, testRun.test_run_id, hasBenchmarkFailure);
 
       // --- SET ADAPT DIFFERENCES ACCEPTED TO TBD ---
-      // await this.maybeSetAdaptDifferencesAccepted(manager, testRun.test_run_id);
 
       const duration = Date.now() - startTime;
       this.logger.info(
@@ -573,23 +571,6 @@ export class ChecksPipeline extends BasePipelineTypeORM {
    * - consolidated_result.meetsRequirement is true
    * - adapt_config.mode is not "BASELINE"
    */
-  private async maybeSetAdaptDifferencesAccepted(manager: EntityManager, testRunId: string): Promise<void> {
-    const sql = `
-      UPDATE test_runs
-      SET adapt_config = jsonb_set(
-        COALESCE(adapt_config, '{}'::jsonb),
-        '{differencesAccepted}',
-        '"TBD"'::jsonb
-      ),
-      updated_at = NOW()
-      WHERE test_run_id = $1
-        AND (consolidated_result->>'meetsRequirement')::boolean = true
-        AND COALESCE(adapt_config->>'mode', '') != 'BASELINE'
-    `;
-
-    await manager.query(sql, [testRunId]);
-  }
-
   /**
    * Mark test run as invalid when any pipeline status has ERROR
    */
@@ -747,11 +728,7 @@ export class ChecksPipeline extends BasePipelineTypeORM {
       }
     } catch (error) {
       // Non-blocking: log warning but don't throw
-      console.error(`[ChecksPipeline] Failed to publish realtime update for ${testRunId}:`, error);
-      this.logger.error(`Failed to publish realtime update for ${testRunId}: ${error instanceof Error ? error.message : String(error)}`);
-      if (error instanceof Error && error.stack) {
-        console.error('[ChecksPipeline] Stack trace:', error.stack);
-      }
+      this.logger.error({ err: error }, `Failed to publish realtime update for ${testRunId}`);
     }
   }
 }
