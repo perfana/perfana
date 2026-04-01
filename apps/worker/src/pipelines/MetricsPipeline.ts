@@ -2,7 +2,6 @@ import { EntityManager } from 'typeorm';
 import { BasePipelineTypeORM } from './BasePipelineTypeORM.js';
 import { PipelineResult, PanelDocument, PanelMetricsDocument } from '../types/pipeline.js';
 import { GrafanaClient } from '@perfana/shared/services/grafana';
-import { getLogger as _getLogger } from '../lib/utils/logger.js';
 import { getGrafanaConfig, getGrafanaInstanceId } from '../config/grafana-config-cache.js';
 
 /**
@@ -357,60 +356,6 @@ export class MetricsPipeline extends BasePipelineTypeORM {
   }
 
   /**
-   * Create error record for failed panels
-   */
-  private createErrorRecord(panel: PanelDocument, error: Error): any {
-    return {
-      test_run_id: panel.test_run_id,
-      application_dashboard_id: panel.application_dashboard_id,
-      metrics_source_id: panel.metrics_source_id || null,
-      dashboard_uid: panel.dashboard_uid,
-      panel_id: panel.panel_id,
-      panel_title: panel.panel_title,
-      dashboard_label: panel.dashboard_label,
-      benchmark_ids: panel.benchmark_ids,
-      errors: JSON.stringify([{
-        target_index: 0,
-        message: `Grafana query failed: ${error.message}`,
-        type: 'grafana_error',
-        status_code: undefined
-      }]),
-      metric_name: 'error',
-      time: new Date(),
-      timestep: null,
-      ramp_up: false,
-      value: 0,
-      unit: null,
-      updated_at: new Date(),
-      created_at: new Date()
-    };
-  }
-
-  /**
-   * Create empty record for panels with existing errors
-   */
-  private createEmptyRecord(panel: PanelDocument): any {
-    return {
-      test_run_id: panel.test_run_id,
-      application_dashboard_id: panel.application_dashboard_id,
-      metrics_source_id: panel.metrics_source_id || null,
-      dashboard_uid: panel.dashboard_uid,
-      panel_id: panel.panel_id,
-      panel_title: panel.panel_title,
-      dashboard_label: panel.dashboard_label,
-      benchmark_ids: panel.benchmark_ids,
-      errors: panel.errors ? JSON.stringify(panel.errors) : null,
-      metric_name: 'empty',
-      time: new Date(),
-      timestep: null,
-      ramp_up: false,
-      value: 0,
-      unit: null,
-      updated_at: new Date(),
-      created_at: new Date()
-    };
-  }
-
   /**
    * Save flattened records directly to PostgreSQL with batch processing
    * Simplified version that works with pre-flattened records
@@ -446,8 +391,9 @@ export class MetricsPipeline extends BasePipelineTypeORM {
       await this.insertBatch(manager, batch);
 
       if (records.length > batchSize) {
-        const _batchNum = Math.floor(i / batchSize) + 1;
-        const _totalBatches = Math.ceil(records.length / batchSize);
+        const batchNum = Math.floor(i / batchSize) + 1;
+        const totalBatches = Math.ceil(records.length / batchSize);
+        this.logger.debug(`Inserting batch ${batchNum}/${totalBatches}`);
       }
     }
   }

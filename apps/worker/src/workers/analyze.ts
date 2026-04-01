@@ -222,36 +222,3 @@ export function analyzeTestWorker() {
   };
 }
 
-/**
- * Helper function to validate test run exists in database
- * This replicates the validation done in the Python implementation
- */
-export async function validateTestRun(testRunId: string): Promise<boolean> {
-  try {
-    const db = getDatabaseService();
-    const testRun = await db.testRunRepo.findOne({
-      where: { testRunId }
-    });
-    return testRun !== null;
-  } catch (error) {
-    logger.error('Failed to validate test run:', error);
-    return false;
-  }
-}
-
-/**
- * Helper function to check if test run already has metrics
- * Used to determine if we can skip metrics collection
- */
-export async function hasExistingMetrics(testRunId: string): Promise<boolean> {
-  try {
-    const db = getDatabaseService();
-    const count = await db.dsMetricsRepo.count({
-      where: { test_run_id: testRunId }
-    });
-    return count > 0;
-  } catch (error) {
-    logger.error('Failed to check existing metrics:', error);
-    return false;
-  }
-}

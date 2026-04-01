@@ -15,62 +15,6 @@ import { EntityManager } from 'typeorm';
  * - Performance logging
  * - Error handling
  * - Input validation
- *
- * MIGRATION GUIDE:
- * ===============
- * To migrate a pipeline from raw pg queries to TypeORM:
- *
- * 1. Replace BasePipeline with BasePipelineTypeORM:
- *    ```typescript
- *    // Old:
- *    import { BasePipeline } from './BasePipeline.js';
- *    export class MyPipeline extends BasePipeline { ... }
- *
- *    // New:
- *    import { BasePipelineTypeORM } from './BasePipelineTypeORM.js';
- *    export class MyPipeline extends BasePipelineTypeORM { ... }
- *    ```
- *
- * 2. Update constructor to not require Pool:
- *    ```typescript
- *    // Old:
- *    constructor(db: Pool, logger: Logger) {
- *      super(db, logger);
- *    }
- *
- *    // New:
- *    constructor(logger: Logger) {
- *      super(logger);
- *    }
- *    ```
- *
- * 3. Replace raw SQL queries with repository methods:
- *    ```typescript
- *    // Old:
- *    const result = await client.query(
- *      'SELECT * FROM test_runs WHERE test_run_id = $1',
- *      [testRunId]
- *    );
- *    const testRun = result.rows[0];
- *
- *    // New:
- *    const testRun = await this.db.getTestRunByTestRunId(testRunId);
- *    ```
- *
- * 4. Use TypeORM transactions instead of pg transactions:
- *    ```typescript
- *    // Old:
- *    await this.withTransaction(async (client) => {
- *      await client.query('UPDATE test_runs SET ...');
- *      await client.query('INSERT INTO ds_metrics ...');
- *    });
- *
- *    // New:
- *    await this.withTransaction(async (manager) => {
- *      await this.db.updateTestRun(id, { ... });
- *      await this.db.insertDsMetrics(metrics);
- *    });
- *    ```
  */
 export abstract class BasePipelineTypeORM implements Pipeline {
   protected timer: PerformanceTimer;
@@ -222,22 +166,6 @@ export abstract class BasePipelineTypeORM implements Pipeline {
     }
 
     return testRun;
-  }
-
-  /**
-   * Get configuration settings from environment
-   * Settings are loaded from environment variables via the config system
-   */
-  protected async getSettings(): Promise<Record<string, unknown>> {
-    const { getConfig } = await import('../config/environment.js');
-    const config = getConfig();
-
-    return {
-      GRAFANA_BATCH_SIZE: config.GRAFANA_BATCH_SIZE,
-      GRAFANA_CONCURRENCY: config.GRAFANA_CONCURRENCY,
-      METRICS_DUAL_WRITE: config.METRICS_DUAL_WRITE,
-      POSTGRES_BATCH_SIZE: config.METRICS_BATCH_SIZE,
-    };
   }
 
   /**

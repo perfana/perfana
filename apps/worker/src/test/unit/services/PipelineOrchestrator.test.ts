@@ -677,21 +677,4 @@ describe('PipelineOrchestrator', () => {
     });
   });
 
-  describe('Batch Processing (Not Implemented)', () => {
-    it('should throw error for batch processing', async () => {
-      // Act & Assert
-      await expect(
-        orchestrator.executeBatchProcessing(['test-1', 'test-2'])
-      ).rejects.toThrow('Batch processing not yet implemented');
-    });
-  });
-
-  describe('Re-evaluation (Not Implemented)', () => {
-    it('should throw error for re-evaluation', async () => {
-      // Act & Assert
-      await expect(
-        orchestrator.executeReevaluationBatch(['test-1', 'test-2'])
-      ).rejects.toThrow('Re-evaluation not yet implemented');
-    });
-  });
 });
