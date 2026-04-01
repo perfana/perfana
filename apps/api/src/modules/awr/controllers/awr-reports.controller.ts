@@ -109,7 +109,7 @@ export class AwrReportsController {
     if (!testRun || !testRun.systemUnderTest) return false;
 
     const orgId = testRun.systemUnderTest.organization_id;
-    if (!orgId) return false;
+    if (!orgId) return true; // backward compat: legacy resources accessible to all authed users
 
     return this.authzService.isOrganizationMember(ctx.userId, orgId);
   }
@@ -130,7 +130,8 @@ export class AwrReportsController {
       LIMIT 1
     `;
     const result = await this.testRunRepo.query(query, [reportId]);
-    if (!result || result.length === 0 || !result[0].organization_id) return false;
+    if (!result || result.length === 0) return false;
+    if (!result[0].organization_id) return true; // backward compat: legacy resources accessible to all authed users
 
     return this.authzService.isOrganizationMember(ctx.userId, result[0].organization_id);
   }
@@ -211,7 +212,6 @@ export class AwrReportsController {
       fileType,
       rawContent: file.buffer.toString('utf-8'),
       uploadedBy: userId,
-      description: dto.description,
     };
 
     const uploadResult = await this.awrReportsService.create(createOptions);
@@ -266,7 +266,6 @@ export class AwrReportsController {
       fileType,
       rawContentUrl: dto.url,
       uploadedBy: userId,
-      description: dto.description,
     };
 
     const uploadResult = await this.awrReportsService.create(createOptions);

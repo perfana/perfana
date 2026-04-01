@@ -4,6 +4,23 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
+## [0.2.19] - 2026-03-31
+
+### Fixed
+- Fix AWR reports inaccessible for legacy test runs (null organization_id was denying access instead of granting it per backward-compat policy)
+- Fix AWR baseline report listing returning wrong total count (double-query replaced with single getManyAndCount)
+- Fix duplicate `@Controller('reports')` registration causing non-deterministic routing (removed dead stub controller)
+- Fix deep-links repository throwing bare Error instead of NotFoundException
+- Fix Redis URL credentials exposed in startup logs (now redacted)
+- Add null guard for BullMQ job ID assignment
+- Set createdBy/updatedBy on notification channel create/update (ownership columns existed but were never populated)
+
+### Removed
+- Remove dead stub ReportsController and ReportsService (real implementation in ReportGenerationController)
+- Remove 4 dead methods from QueueService (getJobById, cancel, retry, getJobs)
+- Remove dead DTO fields (tags, description) from AWR upload DTOs that were accepted but never persisted
+- Remove unused isAdmin assignments from notification service methods
+
 ## [0.2.18] - 2026-03-31
 
 ### Fixed

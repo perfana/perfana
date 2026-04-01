@@ -1,4 +1,4 @@
-import { Injectable } from '@nestjs/common';
+import { Injectable, NotFoundException } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { DeepLink as DeepLinkEntity } from '../../entities';
@@ -70,7 +70,7 @@ export class DeepLinksRepository {
 
     const result = await this.deepLinkRepo.findOne({ where: { id } });
     if (!result) {
-      throw new Error(`DeepLink with id ${id} not found after update`);
+      throw new NotFoundException(`DeepLink with id ${id} not found after update`);
     }
 
     return this.mapToDeepLink(result);
