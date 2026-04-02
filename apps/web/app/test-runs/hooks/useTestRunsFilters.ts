@@ -1,30 +1,32 @@
 'use client';
 
-import { useState, useEffect, useMemo } from 'react';
+import { useState, useEffect, useMemo, useCallback } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
+import { authenticatedFetch } from '@/lib/api';
 import { TestRun } from '@/types/test-runs';
 import { FilterState, FilterOptions } from '../types';
 import {
-  filterTestRuns,
-  sortTestRunsByEndTime,
-  separateTestRuns,
-  extractFilterOptions,
   parseFiltersFromParams,
   getSystemName,
   getEnvironment,
 } from '../utils/test-runs-filters';
 
 interface UseTestRunsFiltersProps {
-  testRuns: TestRun[];
+  organizationId?: string | null;
 }
 
-export function useTestRunsFilters({ testRuns }: UseTestRunsFiltersProps) {
+export function useTestRunsFilters({ organizationId }: UseTestRunsFiltersProps) {
   const router = useRouter();
   const searchParams = useSearchParams();
 
   const [systemFilter, setSystemFilter] = useState<string>('');
   const [environmentFilter, setEnvironmentFilter] = useState<string>('');
   const [workloadFilter, setWorkloadFilter] = useState<string>('');
+  const [filterOptions, setFilterOptions] = useState<FilterOptions>({
+    systems: [],
+    environments: [],
+    workloads: [],
+  });
 
   const filters: FilterState = useMemo(() => ({
     system: systemFilter,
@@ -52,23 +54,36 @@ export function useTestRunsFilters({ testRuns }: UseTestRunsFiltersProps) {
     router.replace(newUrl, { scroll: false });
   }, [systemFilter, environmentFilter, workloadFilter, router]);
 
-  // Extract filter options from test runs
-  const filterOptions: FilterOptions = useMemo(
-    () => extractFilterOptions(testRuns, filters),
-    [testRuns, filters]
-  );
+  // Fetch filter options from the API (distinct values across all test runs)
+  const loadFilterOptions = useCallback(async () => {
+    try {
+      const params = new URLSearchParams();
+      if (organizationId) {
+        params.set('organizationId', organizationId);
+      }
+      const url = params.toString()
+        ? `/test-runs/filter-options?${params.toString()}`
+        : '/test-runs/filter-options';
+      const response = await authenticatedFetch(url, {
+        method: 'GET',
+        headers: { 'Content-Type': 'application/json' },
+      });
+      if (response.ok) {
+        const data = await response.json();
+        setFilterOptions({
+          systems: data.systems || [],
+          environments: data.environments || [],
+          workloads: data.workloads || [],
+        });
+      }
+    } catch {
+      // Filter options are non-critical; keep whatever we have
+    }
+  }, [organizationId]);
 
-  // Filter and sort test runs
-  const filteredTestRuns = useMemo(() => {
-    const filtered = filterTestRuns(testRuns, filters);
-    return sortTestRunsByEndTime(filtered);
-  }, [testRuns, filters]);
-
-  // Separate running and completed tests
-  const { running: runningTestRuns, completed: completedTestRuns } = useMemo(
-    () => separateTestRuns(filteredTestRuns),
-    [filteredTestRuns]
-  );
+  useEffect(() => {
+    loadFilterOptions();
+  }, [loadFilterOptions]);
 
   const hasActiveFilters = !!(systemFilter || environmentFilter || workloadFilter);
 
@@ -108,9 +123,6 @@ export function useTestRunsFilters({ testRuns }: UseTestRunsFiltersProps) {
     setWorkloadFilter,
     filters,
     filterOptions,
-    filteredTestRuns,
-    runningTestRuns,
-    completedTestRuns,
     hasActiveFilters,
     resetFilters,
     shareFilters,

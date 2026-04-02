@@ -1,35 +1,54 @@
 'use client';
 
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 import { authenticatedFetch } from '@/lib/api';
 import { TestRun } from '@/types/test-runs';
 import { useTestRunRealtime } from '@/hooks/useTestRunRealtime';
 import { normalizeTestRun } from '../utils/test-runs-filters';
 import { SnackbarState } from '../types';
 
+export interface PaginationState {
+  page: number;
+  pageSize: number;
+  total: number;
+}
+
+export interface ServerFilters {
+  system?: string;
+  environment?: string;
+  workload?: string;
+}
+
 interface UseTestRunsDataProps {
   onSnackbar: (state: SnackbarState) => void;
   organizationId?: string | null;
+  serverFilters?: ServerFilters;
 }
 
-export function useTestRunsData({ onSnackbar, organizationId }: UseTestRunsDataProps) {
+export function useTestRunsData({ onSnackbar, organizationId, serverFilters }: UseTestRunsDataProps) {
   const [testRuns, setTestRuns] = useState<TestRun[]>([]);
   const [loading, setLoading] = useState(true);
+  const [initialLoadDone, setInitialLoadDone] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [currentTime, setCurrentTime] = useState(Date.now());
+  const [pagination, setPagination] = useState<PaginationState>({
+    page: 1,
+    pageSize: 25,
+    total: 0,
+  });
 
-  // Real-time connection
+  // Abort controller for cancelling stale requests
+  const abortControllerRef = useRef<AbortController | null>(null);
+
+  // Real-time connection — with server-side pagination, we only update in-place
+  // for test runs already on the current page. New/deleted runs trigger a re-fetch.
+  const loadTestRunsRef = useRef<() => void>(() => {});
+
   const { connectionStatus: _connectionStatus, isLive: _isLive } = useTestRunRealtime({
     enabled: true,
-    onTestRunCreated: useCallback((testRun: TestRun) => {
-      const normalizedTestRun = normalizeTestRun(testRun);
-      setTestRuns((prevRuns) => {
-        const exists = prevRuns.some(run => run.id === normalizedTestRun.id);
-        if (exists) {
-          return prevRuns;
-        }
-        return [normalizedTestRun, ...prevRuns];
-      });
+    onTestRunCreated: useCallback((_testRun: TestRun) => {
+      // New test run created — re-fetch to get accurate page data and total count
+      loadTestRunsRef.current();
     }, []),
     onTestRunUpdated: useCallback((testRun: TestRun) => {
       const normalizedTestRun = normalizeTestRun(testRun);
@@ -39,7 +58,8 @@ export function useTestRunsData({ onSnackbar, organizationId }: UseTestRunsDataP
         );
 
         if (index === -1) {
-          return [normalizedTestRun, ...prevRuns];
+          // Test run not on current page — ignore
+          return prevRuns;
         }
 
         const newRuns = [...prevRuns];
@@ -47,27 +67,52 @@ export function useTestRunsData({ onSnackbar, organizationId }: UseTestRunsDataP
         return newRuns;
       });
     }, []),
-    onTestRunDeleted: useCallback((testRunId: string) => {
-      setTestRuns((prevRuns) => prevRuns.filter(run => run.test_run_id !== testRunId));
+    onTestRunDeleted: useCallback((_testRunId: string) => {
+      // Deleted run — re-fetch to get accurate page data and total count
+      loadTestRunsRef.current();
     }, []),
-    onTestRunsInitial: useCallback((testRuns: TestRun[]) => {
-      setTestRuns(testRuns);
-      setLoading(false);
+    onTestRunsInitial: useCallback((_testRuns: TestRun[]) => {
+      // Ignore socket initial snapshot — we load via HTTP with pagination
     }, []),
   });
 
-  // Load initial data
-  const loadTestRuns = useCallback(async () => {
+  // Load data with server-side pagination and filtering
+  const loadTestRuns = useCallback(async (pageOverride?: number, pageSizeOverride?: number) => {
+    // Cancel any in-flight request to prevent stale responses
+    abortControllerRef.current?.abort();
+    const controller = new AbortController();
+    abortControllerRef.current = controller;
+
     try {
       setLoading(true);
-      const url = organizationId
-        ? `/test-runs?organizationId=${encodeURIComponent(organizationId)}`
-        : `/test-runs`;
-      const response = await authenticatedFetch(url, {
+      const p = pageOverride ?? pagination.page;
+      const ps = pageSizeOverride ?? pagination.pageSize;
+
+      const params = new URLSearchParams();
+      params.set('page', String(p));
+      params.set('pageSize', String(ps));
+      params.set('sortBy', 'createdAt');
+      params.set('sortOrder', 'DESC');
+
+      if (organizationId) {
+        params.set('organizationId', organizationId);
+      }
+      if (serverFilters?.system) {
+        params.set('system', serverFilters.system);
+      }
+      if (serverFilters?.environment) {
+        params.set('environment', serverFilters.environment);
+      }
+      if (serverFilters?.workload) {
+        params.set('workload', serverFilters.workload);
+      }
+
+      const response = await authenticatedFetch(`/test-runs?${params.toString()}`, {
         method: 'GET',
         headers: {
           'Content-Type': 'application/json',
         },
+        signal: controller.signal,
       });
 
       if (!response.ok) {
@@ -75,18 +120,65 @@ export function useTestRunsData({ onSnackbar, organizationId }: UseTestRunsDataP
       }
 
       const data = await response.json();
-      setTestRuns(Array.isArray(data) ? data : data.data || []);
+
+      // Handle both paginated response and plain array (backward compat)
+      if (data.data && typeof data.total === 'number') {
+        setTestRuns(data.data);
+        setPagination(prev => ({
+          ...prev,
+          page: data.page ?? p,
+          pageSize: data.pageSize ?? ps,
+          total: data.total,
+        }));
+      } else {
+        setTestRuns(Array.isArray(data) ? data : []);
+      }
+
       setError(null);
     } catch (err) {
+      // Ignore abort errors — they're expected when cancelling stale requests
+      if (err instanceof DOMException && err.name === 'AbortError') return;
       setError(err && typeof err === 'object' && 'message' in err
         ? (err as Error).message
         : 'Failed to load test runs');
     } finally {
-      setLoading(false);
+      if (!controller.signal.aborted) {
+        setLoading(false);
+        setInitialLoadDone(true);
+      }
     }
-  }, [organizationId]);
+  }, [organizationId, serverFilters, pagination.page, pagination.pageSize]);
 
-  // Initial load
+  // Keep ref in sync so real-time callbacks can trigger re-fetches
+  loadTestRunsRef.current = loadTestRuns;
+
+  // Pagination controls
+  const setPage = useCallback((page: number) => {
+    setPagination(prev => ({ ...prev, page }));
+  }, []);
+
+  const setPageSize = useCallback((pageSize: number) => {
+    setPagination(prev => ({ ...prev, page: 1, pageSize }));
+  }, []);
+
+  // Reset to page 1 when filters or org change
+  const prevFiltersRef = useRef(serverFilters);
+  const prevOrgRef = useRef(organizationId);
+  useEffect(() => {
+    const filtersChanged =
+      prevFiltersRef.current?.system !== serverFilters?.system ||
+      prevFiltersRef.current?.environment !== serverFilters?.environment ||
+      prevFiltersRef.current?.workload !== serverFilters?.workload;
+    const orgChanged = prevOrgRef.current !== organizationId;
+
+    if (filtersChanged || orgChanged) {
+      prevFiltersRef.current = serverFilters;
+      prevOrgRef.current = organizationId;
+      setPagination(prev => prev.page === 1 ? prev : { ...prev, page: 1 });
+    }
+  }, [serverFilters, organizationId]);
+
+  // Initial load + reload when pagination/filters change
   useEffect(() => {
     loadTestRuns();
   }, [loadTestRuns]);
@@ -190,9 +282,13 @@ export function useTestRunsData({ onSnackbar, organizationId }: UseTestRunsDataP
 
   return {
     testRuns,
-    loading,
+    loading: loading && !initialLoadDone,
+    pageLoading: loading && initialLoadDone,
     error,
     currentTime,
+    pagination,
+    setPage,
+    setPageSize,
     loadTestRuns,
     deleteTestRun,
     monitorJobAndRefresh,

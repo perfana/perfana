@@ -105,6 +105,10 @@ export class TestRunsQueryService {
     return this.crudService.findAllPaginated(userId, roles, paginationDto, organizationId);
   }
 
+  async getFilterOptions(userId: string, roles: string[], organizationId?: string): Promise<{ systems: string[]; environments: string[]; workloads: string[] }> {
+    return this.crudService.getFilterOptions(userId, roles, organizationId);
+  }
+
   async findAll(userId: string, roles: string[]): Promise<TestRun[]> {
     return this.crudService.findAll(userId, roles);
   }

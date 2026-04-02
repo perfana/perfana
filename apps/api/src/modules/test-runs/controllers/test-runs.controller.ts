@@ -35,6 +35,9 @@ export class TestRunsController {
   @ApiQuery({ name: 'pageSize', required: false, type: Number, description: 'Items per page (max 100)', example: 50 })
   @ApiQuery({ name: 'sortBy', required: false, type: String, description: 'Field to sort by', example: 'createdAt', enum: ['createdAt', 'testRunId', 'workload', 'testEnvironment', 'startTime', 'endTime'] })
   @ApiQuery({ name: 'sortOrder', required: false, type: String, description: 'Sort order', example: 'DESC', enum: ['ASC', 'DESC'] })
+  @ApiQuery({ name: 'system', required: false, type: String, description: 'Filter by system under test name' })
+  @ApiQuery({ name: 'environment', required: false, type: String, description: 'Filter by test environment' })
+  @ApiQuery({ name: 'workload', required: false, type: String, description: 'Filter by workload' })
   @ApiResponse({
     status: 200,
     description: 'Returns paginated test runs with metadata',
@@ -57,6 +60,20 @@ export class TestRunsController {
     @UserCtx() ctx: UserContext,
   ) {
     return this.testRunsService.findAllPaginated(ctx.userId, ctx.roles, paginationDto, organizationId);
+  }
+
+  @Get('filter-options')
+  @ApiOperation({
+    summary: 'Get distinct filter options for test runs',
+    description: 'Returns distinct system names, environments, and workloads for populating filter dropdowns.',
+  })
+  @ApiQuery({ name: 'organizationId', required: false, type: String, description: 'Filter by organization' })
+  @ApiResponse({ status: 200, description: 'Filter options retrieved successfully' })
+  async getFilterOptions(
+    @Query('organizationId') organizationId: string | undefined,
+    @UserCtx() ctx: UserContext,
+  ) {
+    return this.testRunsService.getFilterOptions(ctx.userId, ctx.roles, organizationId);
   }
 
   @Get(':testRunId')

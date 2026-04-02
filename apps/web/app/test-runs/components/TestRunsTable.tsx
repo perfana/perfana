@@ -10,7 +10,7 @@ import {
   Tooltip,
   Checkbox,
 } from '@mui/material';
-import { DataGrid, GridColDef } from '@mui/x-data-grid';
+import { DataGrid, GridColDef, GridPaginationModel } from '@mui/x-data-grid';
 import {
   PlayArrow,
   Flag,
@@ -27,6 +27,7 @@ import {
   calculateElapsedDuration,
 } from '../utils';
 import { useOrganizationContext } from '@/lib/contexts/organization-context';
+import { PaginationState } from '../hooks/useTestRunsData';
 
 interface TestRunsTableProps {
   testRuns: TestRun[];
@@ -38,6 +39,10 @@ interface TestRunsTableProps {
   variant: 'running' | 'completed';
   onSelectAll: () => void;
   onSelectOne: (id: string) => void;
+  pagination?: PaginationState;
+  onPageChange?: (page: number) => void;
+  onPageSizeChange?: (pageSize: number) => void;
+  pageLoading?: boolean;
 }
 
 export function TestRunsTable({
@@ -50,6 +55,10 @@ export function TestRunsTable({
   variant,
   onSelectAll,
   onSelectOne,
+  pagination,
+  onPageChange,
+  onPageSizeChange,
+  pageLoading,
 }: TestRunsTableProps) {
   const router = useRouter();
   const { currentOrganizationId } = useOrganizationContext();
@@ -389,6 +398,23 @@ export function TestRunsTable({
   const columns = variant === 'running' ? runningColumns : completedColumns;
   const isRunning = variant === 'running';
 
+  const isServerPaginated = !isRunning && pagination && onPageChange && onPageSizeChange;
+
+  const handlePaginationModelChange = (model: GridPaginationModel) => {
+    if (!isServerPaginated) return;
+    // DataGrid uses 0-indexed pages, API uses 1-indexed
+    const newPage = model.page + 1;
+    const newPageSize = model.pageSize;
+
+    if (newPageSize !== pagination.pageSize) {
+      // Page size change resets to page 1 in the hook
+      onPageSizeChange(newPageSize);
+    }
+    if (newPage !== pagination.page && newPageSize === pagination.pageSize) {
+      onPageChange(newPage);
+    }
+  };
+
   const dataGridSx = {
     border: 0,
     '& .MuiDataGrid-columnHeader': {
@@ -454,7 +480,7 @@ export function TestRunsTable({
     <Card sx={{ flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column' }}>
       <CardContent sx={{ pb: 0, flexShrink: 0 }}>
         <Typography variant="h6" component="h2" mb={2}>
-          Completed Tests ({testRuns.length})
+          Completed Tests {pagination ? `(${pagination.total})` : `(${testRuns.length})`}
         </Typography>
       </CardContent>
       <Box sx={{ flex: 1, width: '100%', minHeight: 0 }}>
@@ -462,10 +488,25 @@ export function TestRunsTable({
           rows={testRuns}
           columns={columns}
           getRowId={(row) => row.id}
-          pageSizeOptions={[10, 25, 50]}
-          initialState={{
-            pagination: { paginationModel: { page: 0, pageSize: 25 } },
-          }}
+          loading={pageLoading}
+          {...(isServerPaginated
+            ? {
+                paginationMode: 'server' as const,
+                rowCount: pagination.total,
+                paginationModel: {
+                  page: pagination.page - 1, // DataGrid is 0-indexed
+                  pageSize: pagination.pageSize,
+                },
+                onPaginationModelChange: handlePaginationModelChange,
+                pageSizeOptions: [10, 25, 50, 100],
+              }
+            : {
+                pageSizeOptions: [10, 25, 50],
+                initialState: {
+                  pagination: { paginationModel: { page: 0, pageSize: 25 } },
+                },
+              }
+          )}
           disableRowSelectionOnClick
           autoPageSize={false}
           disableColumnResize={false}
