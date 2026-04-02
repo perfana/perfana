@@ -1,4 +1,4 @@
-import { IsOptional, IsInt, Min, Max, IsString, IsIn } from 'class-validator';
+import { IsOptional, IsInt, Min, Max, IsString, IsIn, MaxLength } from 'class-validator';
 import { Type } from 'class-transformer';
 import { ApiProperty } from '@nestjs/swagger';
 
@@ -56,4 +56,34 @@ export class PaginationQueryDto {
     example: 'DESC',
   })
   sortOrder?: 'ASC' | 'DESC' = 'DESC';
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(255)
+  @ApiProperty({
+    required: false,
+    description: 'Filter by system under test name (exact match)',
+    example: 'PaymentService',
+  })
+  system?: string;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(255)
+  @ApiProperty({
+    required: false,
+    description: 'Filter by test environment (exact match)',
+    example: 'production',
+  })
+  environment?: string;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(255)
+  @ApiProperty({
+    required: false,
+    description: 'Filter by workload (exact match)',
+    example: 'loadTest',
+  })
+  workload?: string;
 }

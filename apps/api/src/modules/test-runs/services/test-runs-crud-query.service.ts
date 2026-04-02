@@ -159,7 +159,7 @@ export class TestRunsCrudQueryService {
       const isAdmin = this.authzService.isGlobalAdmin(roles);
       this.logger.debug(`findAllPaginated: userId=${userId}, isGlobalAdmin=${isAdmin}, organizationId=${organizationId}`);
 
-      const { page = 1, pageSize = 50, sortBy = 'createdAt', sortOrder = 'DESC' } = paginationDto || {};
+      const { page = 1, pageSize = 50, sortBy = 'createdAt', sortOrder = 'DESC', system, environment, workload } = paginationDto || {};
       const skip = (page - 1) * pageSize;
 
       const allowedSortFields = ['createdAt', 'testRunId', 'workload', 'testEnvironment', 'startTime', 'endTime'];
@@ -171,6 +171,17 @@ export class TestRunsCrudQueryService {
         .orderBy(`tr.${safeSortBy}`, sortOrder)
         .skip(skip)
         .take(pageSize);
+
+      // Apply server-side filters
+      if (system) {
+        queryBuilder.andWhere('sut.name = :system', { system });
+      }
+      if (environment) {
+        queryBuilder.andWhere('tr.testEnvironment = :environment', { environment });
+      }
+      if (workload) {
+        queryBuilder.andWhere('tr.workload = :workload', { workload });
+      }
 
       // Apply organization-based filtering via systems_under_test
       if (organizationId) {
@@ -293,6 +304,94 @@ export class TestRunsCrudQueryService {
     } catch (error) {
       this.logger.error('Error fetching paginated test runs:', error);
       throw new DatabaseException('Failed to fetch test runs', error);
+    }
+  }
+
+  /**
+   * Get distinct filter options (system names, environments, workloads) for the test runs
+   * the user has access to. Used by the frontend to populate filter dropdowns.
+   */
+  async getFilterOptions(userId: string, roles: string[], organizationId?: string): Promise<{ systems: string[]; environments: string[]; workloads: string[] }> {
+    try {
+      const isAdmin = this.authzService.isGlobalAdmin(roles);
+
+      // Pre-fetch team/org access data for non-admin users
+      let orgIds: string[] = [];
+      let userTeamIds: string[] = [];
+      if (!isAdmin) {
+        if (!organizationId) {
+          orgIds = await this.authzService.getAccessibleOrganizations(userId);
+          if (orgIds.length === 0) {
+            return { systems: [], environments: [], workloads: [] };
+          }
+        }
+        userTeamIds = await this.authzService.getAccessibleTeams(userId);
+      }
+
+      const buildBaseQuery = () => {
+        const qb = this.testRunRepo
+          .createQueryBuilder('tr')
+          .leftJoin('tr.systemUnderTest', 'sut');
+
+        if (organizationId) {
+          qb.andWhere('sut.organization_id = :organizationId', { organizationId });
+        }
+        return qb;
+      };
+
+      const applyAccessFilter = (qb: SelectQueryBuilder<any>) => {
+        if (organizationId && !isAdmin) {
+          // Apply team restriction for non-admin users within an org
+          qb.leftJoin('teams', 'team', 'team.id = sut.team_id');
+          qb.andWhere(
+            '(' +
+              'sut.team_id IS NULL' +
+              ' OR team.restrict_to_team_members = false' +
+              (userTeamIds.length > 0
+                ? ' OR sut.team_id IN (:...userTeamIds)'
+                : '') +
+            ')',
+            userTeamIds.length > 0 ? { userTeamIds } : {},
+          );
+        } else if (!organizationId && !isAdmin && orgIds.length > 0) {
+          qb.leftJoin('teams', 'team', 'team.id = sut.team_id');
+          qb.andWhere(
+            '(' +
+              'sut.organization_id IS NULL' +
+              ' OR (sut.team_id IS NULL AND sut.organization_id IN (:...orgIds))' +
+              ' OR (team.restrict_to_team_members = false AND sut.organization_id IN (:...orgIds))' +
+              (userTeamIds.length > 0
+                ? ' OR (sut.team_id IN (:...userTeamIds))'
+                : '') +
+            ')',
+            { orgIds, ...(userTeamIds.length > 0 ? { userTeamIds } : {}) },
+          );
+        }
+      };
+
+      const systemsQb = buildBaseQuery().select('DISTINCT sut.name', 'name').andWhere('sut.name IS NOT NULL');
+      applyAccessFilter(systemsQb);
+
+      const envsQb = buildBaseQuery().select('DISTINCT tr.testEnvironment', 'env').andWhere('tr.testEnvironment IS NOT NULL');
+      applyAccessFilter(envsQb);
+
+      const workloadsQb = buildBaseQuery().select('DISTINCT tr.workload', 'workload').andWhere('tr.workload IS NOT NULL');
+      applyAccessFilter(workloadsQb);
+
+      const [systemRows, envRows, workloadRows] = await Promise.all([
+        systemsQb.orderBy('sut.name', 'ASC').getRawMany(),
+        envsQb.orderBy('tr.testEnvironment', 'ASC').getRawMany(),
+        workloadsQb.orderBy('tr.workload', 'ASC').getRawMany(),
+      ]);
+
+      return {
+        systems: systemRows.map(r => r.name),
+        environments: envRows.map(r => r.env),
+        workloads: workloadRows.map(r => r.workload),
+      };
+    } catch (error) {
+      this.logger.error('Error fetching filter options:', error);
+      throw new DatabaseException('Failed to fetch filter options', error);
     }
   }
 
