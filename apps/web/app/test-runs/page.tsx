@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useCallback } from 'react';
+import { useState, useCallback, useMemo } from 'react';
 import {
   Box,
   Typography,
@@ -31,6 +31,9 @@ import {
   useTestRunsHandlers,
 } from './hooks';
 
+// Utils
+import { separateTestRuns } from './utils/test-runs-filters';
+
 // Components
 import {
   JobProgressBanner,
@@ -47,16 +50,6 @@ export default function TestRunsPage() {
 
   const handleSnackbar = useCallback((state: SnackbarState) => setSnackbar(state), []);
 
-  // Data hook
-  const {
-    testRuns,
-    loading,
-    error,
-    currentTime,
-    loadTestRuns,
-    monitorJobAndRefresh,
-  } = useTestRunsData({ onSnackbar: handleSnackbar, organizationId: currentOrganizationId });
-
   // Filters hook
   const {
     systemFilter,
@@ -66,14 +59,38 @@ export default function TestRunsPage() {
     workloadFilter,
     setWorkloadFilter,
     filterOptions,
-    filteredTestRuns,
-    runningTestRuns,
-    completedTestRuns,
     hasActiveFilters,
     resetFilters,
     shareFilters,
     setFiltersFromTestRun,
-  } = useTestRunsFilters({ testRuns });
+  } = useTestRunsFilters({ organizationId: currentOrganizationId });
+
+  // Server-side filters derived from filter state
+  const serverFilters = useMemo(() => ({
+    system: systemFilter || undefined,
+    environment: environmentFilter || undefined,
+    workload: workloadFilter || undefined,
+  }), [systemFilter, environmentFilter, workloadFilter]);
+
+  // Data hook with server-side pagination and filtering
+  const {
+    testRuns,
+    loading,
+    pageLoading,
+    error,
+    currentTime,
+    pagination,
+    setPage,
+    setPageSize,
+    loadTestRuns,
+    monitorJobAndRefresh,
+  } = useTestRunsData({ onSnackbar: handleSnackbar, organizationId: currentOrganizationId, serverFilters });
+
+  // Split current page data into running and completed
+  const { running: runningTestRuns, completed: completedTestRuns } = useMemo(
+    () => separateTestRuns(testRuns),
+    [testRuns]
+  );
 
   // Handlers hook
   const {
@@ -188,7 +205,7 @@ export default function TestRunsPage() {
           systemFilter={systemFilter}
           environmentFilter={environmentFilter}
           workloadFilter={workloadFilter}
-          filteredTestRuns={filteredTestRuns}
+          filteredTestRuns={testRuns}
           onCompleted={loadTestRuns}
           onFailed={(err: string) => handleSnackbar({ open: true, message: `Job failed: ${err}` })}
         />
@@ -218,7 +235,7 @@ export default function TestRunsPage() {
           environmentFilter={environmentFilter}
           workloadFilter={workloadFilter}
           variant="running"
-          onSelectAll={() => handleSelectAll(filteredTestRuns)}
+          onSelectAll={() => handleSelectAll(testRuns)}
           onSelectOne={handleSelectOne}
         />
       )}
@@ -232,8 +249,12 @@ export default function TestRunsPage() {
         environmentFilter={environmentFilter}
         workloadFilter={workloadFilter}
         variant="completed"
-        onSelectAll={() => handleSelectAll(filteredTestRuns)}
+        onSelectAll={() => handleSelectAll(testRuns)}
         onSelectOne={handleSelectOne}
+        pagination={pagination}
+        onPageChange={setPage}
+        onPageSizeChange={setPageSize}
+        pageLoading={pageLoading}
       />
 
       {/* Toast Notifications */}
