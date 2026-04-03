@@ -256,6 +256,16 @@ export class TestRunsController {
     @Param('id', ParseUUIDPipe) id: string,
     @UserCtx() ctx: UserContext,
   ) {
+    // Check if already queued for deletion (same guard as bulk-delete)
+    const existing = await this.testRunsService.findByIds([id]);
+    if (existing.length === 0) {
+      throw new ValidationException(`Test run not found: ${id}`);
+    }
+    const testRun = existing[0];
+    if (testRun && testRun.deletionStatus) {
+      return { message: 'Test run is already queued for deletion', status: testRun.deletionStatus };
+    }
+
     // Mark as queued
     await this.testRunDeletionProcessor.markQueued([id]);
 
