@@ -85,14 +85,6 @@ export function useDynatraceIntegration({ onSnackbar, organizationId }: UseDynat
     }
   };
 
-  // Auto-refetch when organizationId changes
-  useEffect(() => {
-    if (organizationId) {
-      loadConfigs();
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [organizationId]);
-
   const handleCreate = async (data: CreateDynatraceConfigFormData) => {
     try {
       const createData: CreateDynatraceConfigDto = {

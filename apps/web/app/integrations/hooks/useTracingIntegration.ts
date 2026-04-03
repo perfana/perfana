@@ -63,14 +63,6 @@ export function useTracingIntegration({ onSnackbar, organizationId }: UseTracing
     }
   };
 
-  // Auto-refetch when organizationId changes
-  useEffect(() => {
-    if (organizationId) {
-      loadInstances();
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [organizationId]);
-
   const handleCreate = async (data: CreateTracingInstanceFormData) => {
     try {
       const instance = await createTracingInstance({
