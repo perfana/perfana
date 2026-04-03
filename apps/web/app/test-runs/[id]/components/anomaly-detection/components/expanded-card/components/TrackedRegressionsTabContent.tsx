@@ -20,6 +20,7 @@ export function TrackedRegressionsTabContent({
       testRunId={testRunId}
       testRun={testRun}
       trendsData={trendsData}
+      showToast={showToast}
       onResolve={(trackedTestRunId, resolution) => {
         showToast(`Successfully marked test run ${trackedTestRunId} as ${resolution}`);
         onRefreshAnomalyData?.();

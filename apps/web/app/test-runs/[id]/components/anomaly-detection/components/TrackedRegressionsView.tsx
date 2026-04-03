@@ -40,6 +40,7 @@ interface TrackedRegressionsViewProps {
   onResolve?: (trackedTestRunId: string, resolution: string) => void;
   onMarkChangepoint?: (trackedTestRunId: string) => void;
   trendsData?: Record<string, any[]>;
+  showToast?: (message: string) => void;
 }
 
 export default function TrackedRegressionsView({
@@ -48,17 +49,13 @@ export default function TrackedRegressionsView({
   onResolve,
   onMarkChangepoint,
   trendsData: externalTrendsData,
+  showToast = () => {},
 }: TrackedRegressionsViewProps) {
   const theme = useTheme();
   const [groupedRegressions, setGroupedRegressions] = useState<GroupedTrackedRegressions[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [localTrendsData, setLocalTrendsData] = useState<Record<string, any[]>>({});
-
-  // Simple toast function for now (using console.log)
-  const showToast = (message: string) => {
-    console.log('Toast:', message);
-  };
 
   const { triggerBatchReevaluation } = useBatchReevaluation({
     testRun,
@@ -106,17 +103,6 @@ export default function TrackedRegressionsView({
   };
 
   const processAndGroupRegressions = async (regressions: TrackedRegression[]) => {
-    console.log('Processing regressions - raw data:', regressions.map(r => ({
-      id: r.id,
-      testRunId: r.testRunId,
-      trackedTestRunId: r.trackedTestRunId,
-      testRunStart: r.testRunStart,
-      metricName: r.metricName,
-      updatedAt: r.updatedAt,
-      conclusion: r.conclusion,
-      trackedConclusion: r.trackedConclusion
-    })));
-
     // Check for potential data issues
     const uniqueTrackedTestRunIds = [...new Set(regressions.map(r => r.trackedTestRunId))];
     const startDatesByTrackedId = Object.fromEntries(
@@ -127,8 +113,6 @@ export default function TrackedRegressionsView({
           .map(r => r.testRunStart)
       ])
     );
-    console.log('Start dates by tracked test run ID:', startDatesByTrackedId);
-
     // Group by trackedTestRunId
     const grouped = regressions.reduce((acc, regression) => {
       const key = regression.trackedTestRunId;
@@ -141,7 +125,6 @@ export default function TrackedRegressionsView({
           isResolved: false,
           canResolve: false,
         };
-        console.log(`Created new group for trackedTestRunId: ${key}, testRunStart: ${acc[key].testRunStart}`);
       } else {
         // Validate that all regressions in the same group have consistent testRunStart times
         const existingStart = acc[key].testRunStart;
@@ -149,18 +132,10 @@ export default function TrackedRegressionsView({
         if (existingStart !== newStart) {
           console.warn(`Data inconsistency detected for trackedTestRunId: ${key}. Existing start: ${existingStart}, new start: ${newStart}`);
         }
-        console.log(`Adding to existing group for trackedTestRunId: ${key}, existing start: ${acc[key].testRunStart}, new regression start: ${regression.testRunStart}`);
       }
       acc[key].regressions.push(regression);
       return acc;
     }, {} as Record<string, GroupedTrackedRegressions>);
-
-    console.log('Grouped data:', Object.values(grouped).map(g => ({
-      trackedTestRunId: g.trackedTestRunId,
-      testRunStart: g.testRunStart,
-      regressionsCount: g.regressions.length,
-      regressionIds: g.regressions.map(r => r.id)
-    })));
 
     // Convert to array and sort chronologically (oldest first)
     const groupedArray = Object.values(grouped).sort((a, b) =>
@@ -202,27 +177,12 @@ export default function TrackedRegressionsView({
 
       groups.forEach(group => {
         group.regressions.forEach(regression => {
-          console.log('Regression data debug:', {
-            metricName: regression.metricName,
-            applicationDashboardId: regression.applicationDashboardId,
-            panelId: regression.panelId,
-            testRunId: regression.testRunId,
-            hasApplicationDashboardId: !!regression.applicationDashboardId,
-            hasPanelId: !!regression.panelId
-          });
-
           if (regression.metricName) {
             uniqueMetrics.add(regression.metricName);
             // Store the details for the first occurrence of each metric
             if (!metricDetails.has(regression.metricName)) {
               const dashboardId = regression.applicationDashboardId || regression.testRunId;
               const panelId = regression.panelId || regression.testRunId;
-
-              console.log(`Setting details for metric ${regression.metricName}:`, {
-                applicationDashboardId: dashboardId,
-                panelId: panelId,
-                fallbackToTestRunId: !regression.applicationDashboardId || !regression.panelId
-              });
 
               metricDetails.set(regression.metricName, {
                 applicationDashboardId: dashboardId,
@@ -232,8 +192,6 @@ export default function TrackedRegressionsView({
           }
         });
       });
-
-      console.log('Fetching trends for metrics:', Array.from(uniqueMetrics));
 
       // Fetch trends data for each metric
       const trendsPromises = Array.from(uniqueMetrics).map(async (metricName) => {
@@ -246,18 +204,12 @@ export default function TrackedRegressionsView({
           });
 
           const url = `/metrics/control-group-trends/${testRunId}?${queryParams.toString()}`;
-          console.log(`Fetching trends for metric ${metricName} with URL:`, url);
-          console.log('Query params:', Object.fromEntries(queryParams.entries()));
 
           const response = await authenticatedFetch(url);
-
-          console.log(`Response status for ${metricName}:`, response.status, response.ok);
 
           if (response.ok) {
             const trendsData: any[] = await response.json();
             trendsData.sort((a, b) => new Date(a.test_run_start).getTime() - new Date(b.test_run_start).getTime());
-            console.log(`Fetched ${trendsData.length} data points for metric: ${metricName}`);
-            console.log(`First data point for ${metricName}:`, trendsData[0]);
             return { metricName, data: trendsData };
           } else {
             console.warn(`Failed to fetch trends for metric: ${metricName}`);
@@ -277,7 +229,6 @@ export default function TrackedRegressionsView({
         newTrendsData[metricName] = data;
       });
 
-      console.log('Fetched trends data:', newTrendsData);
       setLocalTrendsData(newTrendsData);
     } catch (error) {
       console.error('Error fetching trends data for metrics:', error);

@@ -26,6 +26,7 @@ import {
   Tab,
   Paper,
   Breadcrumbs,
+  Tooltip,
 } from '@mui/material';
 import {
   Add,
@@ -340,13 +341,16 @@ export default function AlertFiltersPage() {
                       </Typography>
                     </TableCell>
                     <TableCell align="center">
-                      <IconButton
-                        size="small"
-                        onClick={() => { setFilterToDelete(filter); setDeleteOpen(true); }}
-                        sx={{ color: 'error.main', '&:hover': { backgroundColor: 'error.light', color: 'error.contrastText' } }}
-                      >
-                        <DeleteIcon fontSize="small" />
-                      </IconButton>
+                      <Tooltip title="Delete filter">
+                        <IconButton
+                          size="small"
+                          onClick={() => { setFilterToDelete(filter); setDeleteOpen(true); }}
+                          sx={{ color: 'error.main', '&:hover': { backgroundColor: 'error.light', color: 'error.contrastText' } }}
+                          aria-label={`Delete filter for ${filter.tagKey}`}
+                        >
+                          <DeleteIcon fontSize="small" />
+                        </IconButton>
+                      </Tooltip>
                     </TableCell>
                   </TableRow>
                 ))}
