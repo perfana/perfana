@@ -115,15 +115,17 @@ export function RegexRulesSection({
           />
 
           <Tooltip title="Remove regex rule">
-            <IconButton
-              onClick={() => onRemove(index)}
-              disabled={disabled}
-              size="small"
-              color="error"
-              aria-label="Remove regex rule"
-            >
-              <DeleteIcon />
-            </IconButton>
+            <span>
+              <IconButton
+                onClick={() => onRemove(index)}
+                disabled={disabled}
+                size="small"
+                color="error"
+                aria-label="Remove regex rule"
+              >
+                <DeleteIcon />
+              </IconButton>
+            </span>
           </Tooltip>
         </Box>
       ))}

@@ -150,15 +150,17 @@ export function HardcodedVariablesSection({
           />
 
           <Tooltip title="Remove variable">
-            <IconButton
-              onClick={() => onRemove(index)}
-              disabled={disabled}
-              size="small"
-              color="error"
-              aria-label="Remove variable"
-            >
-              <DeleteIcon />
-            </IconButton>
+            <span>
+              <IconButton
+                onClick={() => onRemove(index)}
+                disabled={disabled}
+                size="small"
+                color="error"
+                aria-label="Remove variable"
+              >
+                <DeleteIcon />
+              </IconButton>
+            </span>
           </Tooltip>
         </Box>
       ))}
