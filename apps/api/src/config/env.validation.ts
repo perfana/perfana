@@ -89,9 +89,12 @@ export const envValidationSchema = Joi.object({
     .description('API key cache TTL in seconds (default: 600 = 10 minutes)'),
 
   // Optional CORS Configuration
-  CORS_ORIGIN: Joi.string()
-    .default('http://localhost:3000')
-    .description('CORS allowed origin'),
+  CORS_ALLOWED_ORIGINS: Joi.string()
+    .default('http://localhost:4001')
+    .description('Comma-separated list of allowed CORS origins'),
+  FRONTEND_URL: Joi.string()
+    .default('http://localhost:4001')
+    .description('Frontend URL for CORS fallback and Socket.IO'),
 
   // Optional Logging
   LOG_LEVEL: Joi.string()

@@ -35,6 +35,13 @@ export const validationSchema = Joi.object({
   LOG_LEVEL: Joi.string().valid('error', 'warn', 'log', 'info', 'debug', 'verbose').default('info'),
   NODE_ENV: Joi.string().valid('development', 'production', 'test').default('development'),
 
+  // Encryption (required for reading encrypted Grafana credentials)
+  ENCRYPTION_KEY: Joi.string().pattern(/^[0-9a-fA-F]{64}$/).required()
+    .description('64-character hex string for encrypting/decrypting sensitive data'),
+
+  // Auto-configuration
+  AUTO_CONFIG_ENABLED: Joi.boolean().default(true),
+
   // Application
   PORT: Joi.number().default(3002),
 });
