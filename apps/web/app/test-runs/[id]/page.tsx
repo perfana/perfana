@@ -246,6 +246,17 @@ export default function TestRunDetailsPage() {
 
   return (
     <Box sx={{ backgroundColor: 'background.default', pb: 4 }}>
+      {/* Deletion status banner */}
+      {testRun.deletion_status === 'queued' || testRun.deletion_status === 'deleting' ? (
+        <Alert severity="warning" sx={{ mx: 3, mt: 2 }}>
+          This test run is scheduled for deletion.
+        </Alert>
+      ) : testRun.deletion_status === 'failed' ? (
+        <Alert severity="error" sx={{ mx: 3, mt: 2 }}>
+          Deletion of this test run failed. You can retry from the test runs list.
+        </Alert>
+      ) : null}
+
       {/* Header */}
       <TestRunHeader
         testRun={testRun}

@@ -140,21 +140,28 @@ export function useTestRunsHandlers({
     const idsToDelete = Array.from(selectedTestRunIds);
 
     try {
-      await Promise.all(
-        idsToDelete.map(id =>
-          authenticatedFetch(`/test-runs/${id}`, {
-            method: 'DELETE',
-            headers: { 'Content-Type': 'application/json' },
-          })
-        )
-      );
+      const response = await authenticatedFetch('/test-runs/bulk-delete', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ ids: idsToDelete }),
+      });
 
-      onSnackbar({ open: true, message: `Deleted ${idsToDelete.length} test run(s)` });
+      if (!response.ok) {
+        throw new Error('Failed to queue test runs for deletion');
+      }
+
+      const result = await response.json();
+      const skippedCount = result.skipped?.length || 0;
+      const message = skippedCount > 0
+        ? `Queued ${result.queued} test run(s) for deletion (${skippedCount} already queued)`
+        : `Queued ${result.queued} test run(s) for deletion`;
+
+      onSnackbar({ open: true, message });
       setBatchDeleteDialogOpen(false);
       handleClearSelection();
       await onLoadTestRuns();
     } catch (_err) {
-      onSnackbar({ open: true, message: 'Failed to delete some test runs' });
+      onSnackbar({ open: true, message: 'Failed to delete test runs' });
       setBatchDeleteDialogOpen(false);
     }
   }, [selectedTestRunIds, onSnackbar, handleClearSelection, onLoadTestRuns]);
