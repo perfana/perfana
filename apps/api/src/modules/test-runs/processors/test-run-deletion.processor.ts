@@ -43,6 +43,7 @@ export const TEST_RUN_DELETION_QUEUE_NAME = 'perfana-test-run-deletion';
 export class TestRunDeletionProcessor implements OnModuleInit, OnModuleDestroy {
   private readonly logger = new Logger(TestRunDeletionProcessor.name);
   private redis: IORedis | null = null;
+  private workerRedis: IORedis | null = null;
   private queue: Queue | null = null;
   private worker: Worker | null = null;
   private isRedisAvailable = false;
@@ -79,17 +80,8 @@ export class TestRunDeletionProcessor implements OnModuleInit, OnModuleDestroy {
       });
 
       this.redis.on('error', (error) => {
-        this.logger.warn(`Redis connection error: ${error.message}`);
+        this.logger.error(`Redis connection error: ${error.message}`);
         this.isRedisAvailable = false;
-
-        if (!isDevelopment) {
-          this.logger.error('Redis is required in production mode');
-          throw error;
-        } else {
-          this.logger.warn(
-            'Redis unavailable in development mode - test run deletion processor will be disabled',
-          );
-        }
       });
 
       this.redis.on('close', () => {
@@ -97,8 +89,21 @@ export class TestRunDeletionProcessor implements OnModuleInit, OnModuleDestroy {
         this.isRedisAvailable = false;
       });
 
+      // Separate connection for BullMQ Worker (required by BullMQ docs)
+      this.workerRedis = new IORedis(redisUrl, {
+        maxRetriesPerRequest: null,
+        enableReadyCheck: false,
+        lazyConnect: true,
+        connectTimeout: 10000,
+      });
+
+      this.workerRedis.on('error', (error) => {
+        this.logger.error(`Worker Redis connection error: ${error.message}`);
+      });
+
       try {
         await this.redis.connect();
+        await this.workerRedis.connect();
       } catch (error) {
         if (!isDevelopment) {
           throw error;
@@ -141,11 +146,12 @@ export class TestRunDeletionProcessor implements OnModuleInit, OnModuleDestroy {
       });
 
       // Concurrency: 1 — the critical serialization point that prevents deadlocks
+      // Uses separate Redis connection (BullMQ requires it for blocking commands)
       this.worker = new Worker<TestRunDeletionJobData, TestRunDeletionJobResult>(
         TEST_RUN_DELETION_QUEUE_NAME,
         async (job) => this.processJob(job),
         {
-          connection: this.redis,
+          connection: this.workerRedis!,
           concurrency: 1,
         },
       );
@@ -214,15 +220,11 @@ export class TestRunDeletionProcessor implements OnModuleInit, OnModuleDestroy {
           ? (error as Error).message
           : 'Unknown error';
 
-      // Set failed status — BullMQ may retry, but if all retries fail the
-      // 'failed' event handler above will set it permanently
-      await this.setDeletionStatus(id, 'failed').catch(() => {});
+      this.logger.error(`Deletion failed for test run ${id}: ${errorMessage}`);
 
-      return {
-        success: false,
-        id,
-        errorMessage,
-      };
+      // Re-throw so BullMQ treats this as a failed job and retries (attempts: 3).
+      // The 'failed' event handler sets deletion_status='failed' after all retries exhausted.
+      throw error;
     }
   }
 
@@ -254,7 +256,7 @@ export class TestRunDeletionProcessor implements OnModuleInit, OnModuleDestroy {
     };
 
     const job = await this.queue!.add('delete-test-run', jobData, {
-      jobId: `delete-tr-${id}-${Date.now()}`,
+      jobId: `delete-tr-${id}`,
     });
 
     this.logger.log(`Queued deletion job ${job.id} for test run ${id}`);
@@ -341,6 +343,9 @@ export class TestRunDeletionProcessor implements OnModuleInit, OnModuleDestroy {
       }
       if (this.queue) {
         await this.queue.close();
+      }
+      if (this.workerRedis) {
+        this.workerRedis.disconnect();
       }
       if (this.redis) {
         this.redis.disconnect();

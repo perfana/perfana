@@ -168,7 +168,7 @@ export class TestRunsCrudQueryService {
       const queryBuilder = this.testRunRepo
         .createQueryBuilder('tr')
         .leftJoinAndSelect('tr.systemUnderTest', 'sut')
-        .where('tr.deletionStatus IS NULL')
+        .where("(tr.deletionStatus IS NULL OR tr.deletionStatus = 'failed')")
         .orderBy(`tr.${safeSortBy}`, sortOrder)
         .skip(skip)
         .take(pageSize);
@@ -333,7 +333,7 @@ export class TestRunsCrudQueryService {
         const qb = this.testRunRepo
           .createQueryBuilder('tr')
           .leftJoin('tr.systemUnderTest', 'sut')
-          .where('tr.deletionStatus IS NULL');
+          .where("(tr.deletionStatus IS NULL OR tr.deletionStatus = 'failed')");
 
         if (organizationId) {
           qb.andWhere('sut.organization_id = :organizationId', { organizationId });
@@ -412,7 +412,7 @@ export class TestRunsCrudQueryService {
       const queryBuilder = this.testRunRepo
         .createQueryBuilder('tr')
         .leftJoinAndSelect('tr.systemUnderTest', 'sut')
-        .where('tr.deletionStatus IS NULL')
+        .where("(tr.deletionStatus IS NULL OR tr.deletionStatus = 'failed')")
         .orderBy('tr.createdAt', 'DESC');
 
       // Apply organization-based filtering via systems_under_test
