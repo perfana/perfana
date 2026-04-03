@@ -4,6 +4,24 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
+## [0.2.23.1] - 2026-04-03
+
+### Fixed
+- Add ENCRYPTION_KEY validation to grafana-sync startup (prevents silent runtime crash on encrypted credentials)
+- Align CORS env var: rename CORS_ORIGIN to CORS_ALLOWED_ORIGINS to match what main.ts actually reads
+- Add FRONTEND_URL to API env validation schema
+- Add AUTO_CONFIG_ENABLED with boolean coercion to grafana-sync validation schema
+- Move class-transformer from devDependencies to dependencies in API (required at runtime by ValidationPipe)
+- Align BullMQ to v5 across API and worker (was v4 in worker, causing potential job serialization mismatches)
+- Fix reflect-metadata version skew in grafana-sync (0.2.x to 0.1.x to match all other packages)
+
+### Changed
+- Rename default database from `perfana_native` to `perfana` across all configs, docker-compose, and env examples
+- Align DB_NAME in all .env.example files to match docker-compose POSTGRES_DB value
+
+### Removed
+- 7 unused dependencies from grafana-sync: mysql, moment, bluebird, async, semver, jsonpath-plus, lodash
+
 ## [0.2.23] - 2026-04-03
 
 ### Fixed
