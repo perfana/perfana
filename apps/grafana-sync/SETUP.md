@@ -36,7 +36,7 @@ DB_HOST=localhost
 DB_PORT=5432
 DB_USERNAME=perfana
 DB_PASSWORD=perfana
-DB_NAME=perfana_native  # Same database as API/Worker
+DB_NAME=perfana  # Same database as API/Worker
 
 # Application
 PORT=3002
@@ -115,14 +115,14 @@ entities: [
 
 2. **Verify database name in .env matches the API:**
    ```bash
-   # Should be perfana_native (or whatever API uses)
+   # Should be perfana (or whatever API uses)
    cat apps/api/.env | grep DB_NAME
    cat apps/grafana-sync/.env | grep DB_NAME
    ```
 
 3. **Create database if missing:**
    ```bash
-   psql -h localhost -U perfana -c "CREATE DATABASE perfana_native;"
+   psql -h localhost -U perfana -c "CREATE DATABASE perfana;"
    ```
 
 ### Check if service is running

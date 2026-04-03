@@ -13,7 +13,7 @@ async function runMigrations() {
     port: parseInt(process.env.DB_PORT || '5432', 10),
     username: process.env.DB_USERNAME || 'perfana',
     password: process.env.DB_PASSWORD || 'perfana',
-    database: process.env.DB_NAME || 'perfana_native',
+    database: process.env.DB_NAME || 'perfana',
     ssl: process.env.DB_SSL === 'true'
       ? { rejectUnauthorized: process.env.DB_SSL_REJECT_UNAUTHORIZED !== 'false', ...(process.env.DB_SSL_CA ? { ca: process.env.DB_SSL_CA } : {}) }
       : false,
@@ -26,7 +26,7 @@ async function runMigrations() {
   try {
     console.log('📦 Initializing database connection...');
     await dataSource.initialize();
-    console.log('✅ Connected to database:', process.env.DB_NAME || 'perfana_native');
+    console.log('✅ Connected to database:', process.env.DB_NAME || 'perfana');
 
     console.log('\n🔍 Checking pending migrations...');
     const pendingMigrations = await dataSource.showMigrations();

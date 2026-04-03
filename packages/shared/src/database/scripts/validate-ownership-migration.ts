@@ -524,7 +524,7 @@ async function createDataSource(): Promise<DataSource> {
     port: parseInt(process.env.DB_PORT || '5432', 10),
     username: process.env.DB_USERNAME || 'perfana',
     password: process.env.DB_PASSWORD || 'perfana',
-    database: process.env.DB_NAME || 'perfana_native',
+    database: process.env.DB_NAME || 'perfana',
     synchronize: false,
     logging: false,
   });
@@ -564,7 +564,7 @@ function runDryRun(): void {
   console.log('     - DB_PORT (default: 5432)');
   console.log('     - DB_USERNAME (default: perfana)');
   console.log('     - DB_PASSWORD (default: perfana)');
-  console.log('     - DB_NAME (default: perfana_native)');
+  console.log('     - DB_NAME (default: perfana)');
   console.log('');
 }
 

@@ -14,7 +14,7 @@ async function createAdminApiKey() {
     port: parseInt(process.env.DB_PORT || '5432', 10),
     username: process.env.DB_USERNAME || 'perfana',
     password: process.env.DB_PASSWORD || 'perfana',
-    database: process.env.DB_NAME || 'perfana_native',
+    database: process.env.DB_NAME || 'perfana',
     synchronize: false,
     logging: false,
   });

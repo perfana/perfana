@@ -26,7 +26,7 @@ const AppDataSource = new DataSource({
   port: parseInt(process.env.DB_PORT || '5432'),
   username: process.env.DB_USERNAME || 'perfana',
   password: process.env.DB_PASSWORD || 'perfana',
-  database: process.env.DB_NAME || 'perfana_native',
+  database: process.env.DB_NAME || 'perfana',
   entities: ['dist/entities/**/*.entity.js'],
   migrations: ['dist/database/migrations/**/*.js'],
   migrationsTableName: 'typeorm_migrations',

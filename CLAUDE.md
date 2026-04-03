@@ -384,7 +384,7 @@ The Grafana Sync Service (`apps/grafana-sync`) is a standalone NestJS background
 
 Environment variables for the Grafana Sync Service:
 - `GRAFANA_SYNC_ENABLED` - Enable/disable sync (default: true)
-- `GRAFANA_SYNC_INTERVAL_MINUTES` - Sync interval (default: 60)
+- `GRAFANA_SYNC_INTERVAL` - Sync interval in milliseconds (default: 30000)
 - `AUTO_CONFIG_ENABLED` - Enable auto-configuration (default: true)
 - `SANITY_CHECK_ENABLED` - Enable sanity checks (default: true)
 

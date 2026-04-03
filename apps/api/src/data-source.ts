@@ -13,7 +13,7 @@ export const AppDataSource = new DataSource({
   port: parseInt(process.env.DB_PORT || '5432', 10),
   username: process.env.DB_USERNAME || 'perfana',
   password: process.env.DB_PASSWORD || 'perfana',
-  database: process.env.DB_NAME || 'perfana_native',
+  database: process.env.DB_NAME || 'perfana',
   ssl: process.env.DB_SSL === 'true'
     ? { rejectUnauthorized: process.env.DB_SSL_REJECT_UNAUTHORIZED !== 'false', ...(process.env.DB_SSL_CA ? { ca: process.env.DB_SSL_CA } : {}) }
     : false,

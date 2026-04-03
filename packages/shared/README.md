@@ -39,7 +39,7 @@ npx ts-node -r tsconfig-paths/register run-migrations.ts
 Check which migrations have been applied:
 
 ```bash
-psql -U perfana -d perfana_native -c "SELECT * FROM migrations ORDER BY timestamp;"
+psql -U perfana -d perfana -c "SELECT * FROM migrations ORDER BY timestamp;"
 ```
 
 Expected result after consolidation:

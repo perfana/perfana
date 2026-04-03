@@ -17,7 +17,7 @@ export const createDatabaseConfig = (configService: ConfigService): TypeOrmModul
     port: configService.get<number>('DB_PORT', 5432),
     username: configService.get<string>('DB_USERNAME', 'perfana'),
     password: configService.get<string>('DB_PASSWORD', 'perfana_dev_password'),
-    database: configService.get<string>('DB_NAME', 'perfana_native'),
+    database: configService.get<string>('DB_NAME', 'perfana'),
     ssl: sslConfig,
     nodeEnv: configService.get<string>('NODE_ENV'),
     poolSize: configService.get<number>('DB_POOL_SIZE'),

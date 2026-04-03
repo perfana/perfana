@@ -99,7 +99,7 @@ export const createTypeOrmConfig = (config: DatabaseConfig): TypeOrmModuleOption
       port: config.port || 5432,
       username: config.username || 'perfana',
       password: config.password || 'perfana_dev_password',
-      database: config.database || 'perfana_native',
+      database: config.database || 'perfana',
     };
   }
 };
