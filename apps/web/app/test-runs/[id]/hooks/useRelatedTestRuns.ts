@@ -16,6 +16,10 @@ interface UseRelatedTestRunsReturn {
  */
 export function useRelatedTestRuns(testRunId: string): UseRelatedTestRunsReturn {
   const searchParams = useSearchParams();
+  // Extract primitive values for stable callback dependency
+  const systemParam = searchParams.get('system') ?? '';
+  const environmentParam = searchParams.get('environment') ?? '';
+  const workloadParam = searchParams.get('workload') ?? '';
 
   const [relatedTestRuns, setRelatedTestRuns] = useState<RelatedTestRun[]>([]);
   const [previousTestRun, setPreviousTestRun] = useState<RelatedTestRun | undefined>();
@@ -24,9 +28,9 @@ export function useRelatedTestRuns(testRunId: string): UseRelatedTestRunsReturn 
   const loadRelatedTestRuns = useCallback(async (testRun: TestRun) => {
     try {
       // Prioritize testRun object data over potentially stale query parameters
-      const system = testRun.systems_under_test?.name || searchParams.get('system');
-      const environment = testRun.test_environment || searchParams.get('environment');
-      const workload = testRun.workload || searchParams.get('workload');
+      const system = testRun.systems_under_test?.name || systemParam;
+      const environment = testRun.test_environment || environmentParam;
+      const workload = testRun.workload || workloadParam;
 
       let url = `/test-runs/${testRunId}/related`;
       if (system && environment && workload) {
@@ -61,7 +65,7 @@ export function useRelatedTestRuns(testRunId: string): UseRelatedTestRunsReturn 
     } catch (error) {
       console.error('Failed to load related test runs:', error);
     }
-  }, [testRunId, searchParams]);
+  }, [testRunId, systemParam, environmentParam, workloadParam]);
 
   return {
     relatedTestRuns,

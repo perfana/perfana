@@ -1,6 +1,6 @@
 'use client'
 
-import { createContext, useContext, useState, useEffect, ReactNode } from 'react'
+import { createContext, useContext, useState, useEffect, useCallback, useMemo, ReactNode } from 'react'
 import keycloakAuth from '@/lib/keycloak-auth'
 import { loadRuntimeConfig } from '@/lib/runtime-config'
 
@@ -76,31 +76,31 @@ export function AuthProvider({ children }: AuthProviderProps) {
     }
   }
 
-  const login = async () => {
+  const login = useCallback(async () => {
     await keycloakAuth.login()
-  }
+  }, [])
 
-  const logout = async () => {
+  const logout = useCallback(async () => {
     await keycloakAuth.logout()
     setUser(null)
-  }
+  }, [])
 
-  const hasRole = (role: string): boolean => {
+  const hasRole = useCallback((role: string): boolean => {
     return keycloakAuth.hasRole(role)
-  }
+  }, [])
 
-  const hasAnyRole = (roles: string[]): boolean => {
+  const hasAnyRole = useCallback((roles: string[]): boolean => {
     return keycloakAuth.hasAnyRole(roles)
-  }
+  }, [])
 
-  const value = {
+  const value = useMemo(() => ({
     user,
     isLoading,
     login,
     logout,
     hasRole,
     hasAnyRole,
-  }
+  }), [user, isLoading, login, logout, hasRole, hasAnyRole])
 
   return (
     <AuthContext.Provider value={value}>

@@ -1,7 +1,7 @@
 'use client';
 
 import { useState, useEffect } from 'react';
-import { useRouter, useSearchParams } from 'next/navigation';
+import { useRouter } from 'next/navigation';
 import {
   Container,
   Typography,
@@ -41,7 +41,6 @@ interface System {
 
 export default function SystemsPage() {
   const router = useRouter();
-  const searchParams = useSearchParams();
   const [systems, setSystems] = useState<System[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -85,7 +84,7 @@ export default function SystemsPage() {
     };
 
     fetchSystems();
-  }, [searchParams, currentOrganizationId, isReady, isSelectorReadOnly]);
+  }, [currentOrganizationId, isReady, isSelectorReadOnly]);
 
   if (hasNoOrganizations) {
     return <NoOrganizationMembership />;

@@ -42,7 +42,7 @@ export function useTestRunsFilters({ organizationId }: UseTestRunsFiltersProps) 
     setWorkloadFilter(parsed.workload);
   }, [searchParams]);
 
-  // Update URL when filters change
+  // Update URL when filters change (guard against redundant replaces)
   useEffect(() => {
     const params = new URLSearchParams();
 
@@ -50,8 +50,12 @@ export function useTestRunsFilters({ organizationId }: UseTestRunsFiltersProps) 
     if (environmentFilter) params.set('environment', environmentFilter);
     if (workloadFilter) params.set('workload', workloadFilter);
 
-    const newUrl = params.toString() ? `/test-runs?${params.toString()}` : '/test-runs';
-    router.replace(newUrl, { scroll: false });
+    const newSearch = params.toString() ? `?${params.toString()}` : '';
+    const currentSearch = typeof window !== 'undefined' ? window.location.search : '';
+
+    if (newSearch !== currentSearch) {
+      router.replace(`/test-runs${newSearch}`, { scroll: false });
+    }
   }, [systemFilter, environmentFilter, workloadFilter, router]);
 
   // Fetch filter options from the API (distinct values across all test runs)

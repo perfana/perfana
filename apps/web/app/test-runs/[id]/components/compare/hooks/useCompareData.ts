@@ -94,13 +94,12 @@ export function useCompareData({ testRun, testRunId, compareExpanded }: UseCompa
         const data = await response.json();
         setRelatedTestRuns(data || []);
 
-        const mockStatus: ComparisonStatus = {
+        setComparisonStatus({
           hasBaseline: data.length > 0,
           totalComparisons: Math.min(data.length, 5),
-          differences: Math.floor(Math.random() * 3),
-          status: data.length > 0 ? (Math.random() > 0.7 ? 'warning' : 'success') : 'info'
-        };
-        setComparisonStatus(mockStatus);
+          differences: 0,
+          status: data.length > 0 ? 'success' : 'info'
+        });
       } else {
         setRelatedTestRuns([]);
         setComparisonStatus({ hasBaseline: false, totalComparisons: 0, differences: 0, status: 'info' });
