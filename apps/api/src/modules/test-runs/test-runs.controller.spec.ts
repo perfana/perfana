@@ -71,6 +71,7 @@ const mockServiceFactory = () => ({
   updateTags: jest.fn(),
   removeChangepoint: jest.fn(),
   deleteTestRun: jest.fn(),
+  findByIds: jest.fn().mockResolvedValue([{ id: '550e8400-e29b-41d4-a716-446655440000', deletionStatus: null }]),
   updateAdaptConfig: jest.fn(),
   classifyMetric: jest.fn(),
   markAsChangepoint: jest.fn(),
