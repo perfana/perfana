@@ -431,7 +431,6 @@ export default function TestRunDetailsPage() {
         reportId={reportViewerReportId}
         reportName={testRun?.test_run_id || 'Report'}
         defaultFullscreen={true}
-        onLoad={() => console.log('Report loaded')}
         onError={(error) => showToast(error)}
       />
     </Box>

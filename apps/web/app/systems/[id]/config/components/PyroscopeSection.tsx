@@ -122,16 +122,8 @@ export default function PyroscopeSection({
   };
 
   const handleSave = async () => {
-    console.log('🚀 PyroscopeSection handleSave called', {
-      systemId,
-      selectedInstanceId,
-      configurations,
-      configurationsLength: configurations.length,
-    });
-
     // Validation
     if (selectedInstanceId && configurations.length === 0) {
-      console.log('❌ Validation failed: No combinations');
       setSaveError('At least one application+profiler combination is required when a Pyroscope instance is selected');
       return;
     }
@@ -142,7 +134,6 @@ export default function PyroscopeSection({
         (config) => !config.application.trim() || !config.profiler.trim()
       );
       if (invalidCombinations.length > 0) {
-        console.log('❌ Validation failed: Invalid combinations', invalidCombinations);
         setSaveError('All combinations must have both application name and profiler type selected');
         return;
       }
@@ -157,15 +148,7 @@ export default function PyroscopeSection({
         pyroscope_configurations: selectedInstanceId ? configurations : [],
       };
 
-      console.log('📤 Sending Pyroscope configuration:', {
-        systemId,
-        config,
-        url: `/systems-under-test/${systemId}`,
-      });
-
       const updatedSystem = await updateSystemPyroscopeConfig(systemId, config);
-
-      console.log('✅ Pyroscope configuration saved successfully', updatedSystem);
 
       // Update parent component
       if (onUpdate) {

@@ -76,15 +76,6 @@ export default function TrackedRegressionSection({
   onMarkChangepoint,
   trendsData,
 }: TrackedRegressionSectionProps) {
-  console.log('TrackedRegressionSection debug:', {
-    trackedTestRunId: group.trackedTestRunId,
-    testRunStart: group.testRunStart,
-    regressionsCount: group.regressions.length,
-    regressionTestRunIds: group.regressions.map(r => r.testRunId),
-    uniqueTestRunIds: [...new Set(group.regressions.map(r => r.testRunId))],
-    regressionTrackedTestRunIds: group.regressions.map(r => r.trackedTestRunId),
-    uniqueTrackedTestRunIds: [...new Set(group.regressions.map(r => r.trackedTestRunId))]
-  });
 
   const theme = useTheme();
 
