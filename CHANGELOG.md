@@ -4,6 +4,21 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
+## [0.2.23] - 2026-04-03
+
+### Fixed
+- Fix memory leak in job polling (monitorJobAndRefresh) that continued API calls after page navigation
+- Remove Math.random() from ComparisonStatus that showed non-deterministic data to users
+- Fix URL sync loop in test runs filters that could cause redundant router.replace calls
+- Remove double-fetch in 4 integration hooks that duplicated the page-level data load
+- Remove unused searchParams dependency in systems page that caused spurious refetches
+
+### Changed
+- Memoize AuthContext and SidebarContext provider values to prevent unnecessary re-renders across the app
+- Wrap 6 derived computations in useAnomalyDetection with useMemo (filter, paginate, dropdown options)
+- Replace searchParams object dependencies with primitive string extractions in useTestRunData and useRelatedTestRuns
+- Remove redundant useMemo with JSON.stringify in useTestRunData (upstream equality check already prevents re-renders)
+
 ## [0.2.22] - 2026-04-03
 
 ### Fixed
