@@ -7,6 +7,7 @@ import {
   TextField,
   IconButton,
   Autocomplete,
+  Tooltip,
 } from '@mui/material';
 import { Add as AddIcon, Delete as DeleteIcon } from '@mui/icons-material';
 import { AvailableVariable, DashboardVariable, GrafanaDashboard } from '../types';
@@ -148,14 +149,19 @@ export function HardcodedVariablesSection({
             )}
           />
 
-          <IconButton
-            onClick={() => onRemove(index)}
-            disabled={disabled}
-            size="small"
-            color="error"
-          >
-            <DeleteIcon />
-          </IconButton>
+          <Tooltip title="Remove variable">
+            <span>
+              <IconButton
+                onClick={() => onRemove(index)}
+                disabled={disabled}
+                size="small"
+                color="error"
+                aria-label="Remove variable"
+              >
+                <DeleteIcon />
+              </IconButton>
+            </span>
+          </Tooltip>
         </Box>
       ))}
     </Box>

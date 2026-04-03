@@ -314,22 +314,15 @@ export function TransactionResponseTimesConfigForm({ config, onChange, testRunId
   const [scenarios, setScenarios] = useState<string[]>([]);
   const [loadingScenarios, setLoadingScenarios] = useState(false);
 
-  // Debug: Log when component renders
-  console.log('TransactionResponseTimesConfigForm rendered with testRunId:', testRunId);
-  console.log('Current scenarios:', scenarios);
-
   // Fetch scenarios from transactions table
   useEffect(() => {
-    console.log('useEffect triggered, testRunId:', testRunId);
     if (!testRunId) {
-      console.log('No testRunId, skipping fetch');
       return;
     }
 
     const fetchScenarios = async () => {
       setLoadingScenarios(true);
       try {
-        console.log('Fetching scenarios for testRunId:', testRunId);
         const response = await authenticatedFetch(
           `/test-runs/${testRunId}/transactions`,
           {
@@ -340,8 +333,6 @@ export function TransactionResponseTimesConfigForm({ config, onChange, testRunId
           }
         );
 
-        console.log('Response status:', response.status, response.ok);
-
         if (!response.ok) {
           const errorText = await response.text();
           console.error('Response error:', errorText);
@@ -349,9 +340,6 @@ export function TransactionResponseTimesConfigForm({ config, onChange, testRunId
         }
 
         const transactions = await response.json();
-        console.log('Transactions received:', transactions);
-        console.log('Transactions is array?', Array.isArray(transactions));
-        console.log('Transactions length:', Array.isArray(transactions) ? transactions.length : 'not an array');
 
         if (!Array.isArray(transactions)) {
           console.error('Transactions is not an array:', typeof transactions, transactions);
@@ -367,7 +355,6 @@ export function TransactionResponseTimesConfigForm({ config, onChange, testRunId
 
         // Extract unique scenario names (not transaction names)
         const uniqueScenarios = Array.from(new Set(transactions.map((t: any) => t.scenario_name).filter(Boolean)));
-        console.log('Unique scenarios:', uniqueScenarios);
         setScenarios(uniqueScenarios as string[]);
       } catch (err) {
         console.error('Failed to fetch scenarios:', err);

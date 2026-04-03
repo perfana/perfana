@@ -802,7 +802,6 @@ export function ReportCard({
         shareId={viewerShareId}
         reportName={viewerReportName}
         htmlContent={viewerHtmlContent}
-        onLoad={() => console.log('Report loaded')}
         onError={(error) => handleSnackbar(error, 'error')}
       />
     </Box>

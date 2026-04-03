@@ -7,6 +7,7 @@ import {
   TextField,
   IconButton,
   Autocomplete,
+  Tooltip,
 } from '@mui/material';
 import { Add as AddIcon, Delete as DeleteIcon } from '@mui/icons-material';
 import { AvailableVariable, RegexRule, GrafanaDashboard } from '../types';
@@ -113,14 +114,19 @@ export function RegexRulesSection({
             placeholder="^pattern.*"
           />
 
-          <IconButton
-            onClick={() => onRemove(index)}
-            disabled={disabled}
-            size="small"
-            color="error"
-          >
-            <DeleteIcon />
-          </IconButton>
+          <Tooltip title="Remove regex rule">
+            <span>
+              <IconButton
+                onClick={() => onRemove(index)}
+                disabled={disabled}
+                size="small"
+                color="error"
+                aria-label="Remove regex rule"
+              >
+                <DeleteIcon />
+              </IconButton>
+            </span>
+          </Tooltip>
         </Box>
       ))}
     </Box>

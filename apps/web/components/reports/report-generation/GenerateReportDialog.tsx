@@ -211,19 +211,12 @@ export function GenerateReportDialog({
       setError(null);
 
       try {
-        console.log('[GenerateReportDialog] Fetching templates with scope:', {
-          systemId: scope.systemId,
-          testEnvironment: scope.testEnvironment,
-          workload: scope.workload,
-        });
-
         const summaries = await getTemplateSummaries(
           scope.systemId,
           scope.testEnvironment,
           scope.workload
         );
 
-        console.log('[GenerateReportDialog] Fetched templates:', summaries);
         setTemplates(summaries);
 
         // Don't auto-load template - let user choose

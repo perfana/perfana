@@ -98,7 +98,6 @@ export default function TestRunActionsMenu({
       }
 
       const result = await response.json();
-      console.log('Re-evaluation started:', result);
       onJobTriggered?.();
       onSuccess?.('Re-evaluation started successfully');
     } catch (err) {
@@ -154,7 +153,6 @@ export default function TestRunActionsMenu({
       }
 
       const result = await response.json();
-      console.log('Re-fetch started:', result);
       onJobTriggered?.();
       onSuccess?.('Re-fetch missing data started');
       onRefresh?.();
@@ -187,7 +185,6 @@ export default function TestRunActionsMenu({
       }
 
       const result = await response.json();
-      console.log('Mark changepoint response:', result);
       onSuccess?.(result.message || 'Test run marked as changepoint successfully');
       onRefresh?.();
     } catch (err) {
@@ -220,7 +217,6 @@ export default function TestRunActionsMenu({
       }
 
       const result = await response.json();
-      console.log('Remove changepoint response:', result);
       onSuccess?.(result.message || 'Changepoint removed successfully');
       onRefresh?.();
     } catch (err) {

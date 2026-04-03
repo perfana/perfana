@@ -35,14 +35,6 @@ export default function TrendChart({
   const [plotConfig, setPlotConfig] = useState<any>({});
 
   useEffect(() => {
-    // console.log(`TrendChart useEffect for metric: ${metricName}`, {
-    //   metricName,
-    //   dataLength: data?.length || 0,
-    //   firstDataPoint: data?.[0],
-    //   regressionDetectionTestRunId,
-    //   rowKey
-    // });
-
     if (data && data.length > 0) {
       const { plotData: newPlotData, plotLayout: newPlotLayout, plotConfig: newPlotConfig } =
         createTrendsPlot(data, rowKey, metricName, unit, theme, regressionDetectionTestRunId);

@@ -60,9 +60,6 @@ export function ActionsMenu({ testRun, onDelete, showToast, onRefresh }: Actions
       }
 
       const result = await response.json();
-      console.log('Re-evaluation started:', result);
-      console.log('Skipped stages:', result.skippedStages);
-      console.log('Stages to run:', result.stagesToRun || 'Not specified');
       showToast('Re-evaluation started successfully');
     } catch (err) {
       console.error('Failed to start re-evaluation:', err);
@@ -104,7 +101,6 @@ export function ActionsMenu({ testRun, onDelete, showToast, onRefresh }: Actions
       }
 
       const result = await response.json();
-      console.log('Re-fetch started:', result);
       showToast('Re-fetch missing data started');
     } catch (err) {
       console.error('Failed to start re-fetch:', err);
@@ -115,8 +111,6 @@ export function ActionsMenu({ testRun, onDelete, showToast, onRefresh }: Actions
   };
 
   const monitorJobAndRefresh = async (jobId: string) => {
-    console.log(`Starting job monitoring for jobId: ${jobId}`);
-
     const estimatedJobTime = 30 * 1000; // 30 seconds estimated time
     const maxWaitTime = 2 * 60 * 1000; // 2 minutes max wait
     const checkInterval = 10 * 1000; // Check every 10 seconds
@@ -127,18 +121,13 @@ export function ActionsMenu({ testRun, onDelete, showToast, onRefresh }: Actions
 
     const checkJobStatusWithFallback = async (): Promise<boolean> => {
       try {
-        console.log(`Checking job status for jobId: ${jobId}`);
         const response = await authenticatedFetch(`/data/jobs/${jobId}/status`);
 
         if (response.ok) {
           const jobStatus = await response.json();
-          console.log('Job status response:', jobStatus);
-
           const isCompleted = jobStatus.status === 'completed' ||
                              jobStatus.status === 'failed' ||
                              jobStatus.finished;
-
-          console.log(`Job completion status: ${isCompleted}, status: ${jobStatus.status}, finished: ${jobStatus.finished}`);
 
           if (isCompleted) {
             if (jobStatus.status === 'failed') {
@@ -150,11 +139,8 @@ export function ActionsMenu({ testRun, onDelete, showToast, onRefresh }: Actions
             return true;
           }
         } else {
-          console.log(`Job status API returned ${response.status}, using fallback timing`);
-
           const elapsedTime = Date.now() - startTime;
           if (elapsedTime >= estimatedJobTime) {
-            console.log('Estimated job time elapsed, assuming completion');
             showToast('Re-evaluation likely completed, refreshing view...');
             onRefresh();
             return true;
@@ -167,7 +153,6 @@ export function ActionsMenu({ testRun, onDelete, showToast, onRefresh }: Actions
 
         const elapsedTime = Date.now() - startTime;
         if (elapsedTime >= estimatedJobTime) {
-          console.log('Estimated job time elapsed after error, assuming completion');
           showToast('Re-evaluation likely completed, refreshing view...');
           onRefresh();
           return true;
@@ -216,15 +201,12 @@ export function ActionsMenu({ testRun, onDelete, showToast, onRefresh }: Actions
       }
 
       const result = await response.json();
-      console.log('Mark changepoint response:', result);
       showToast(result.message || 'Test run marked as changepoint successfully');
 
       if (result.jobId) {
-        console.log(`Starting job monitoring for jobId: ${result.jobId}`);
         showToast('Monitoring re-evaluation jobs...');
         monitorJobAndRefresh(result.jobId);
       } else {
-        console.log('No jobId in response, skipping job monitoring');
         setTimeout(() => {
           onRefresh();
         }, 2000);
@@ -256,15 +238,12 @@ export function ActionsMenu({ testRun, onDelete, showToast, onRefresh }: Actions
       }
 
       const result = await response.json();
-      console.log('Remove changepoint response:', result);
       showToast(result.message || 'Changepoint removed successfully');
 
       if (result.jobId) {
-        console.log(`Starting job monitoring for jobId: ${result.jobId}`);
         showToast('Monitoring re-evaluation jobs...');
         monitorJobAndRefresh(result.jobId);
       } else {
-        console.log('No jobId in response, skipping job monitoring');
         setTimeout(() => {
           onRefresh();
         }, 2000);

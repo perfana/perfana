@@ -109,18 +109,9 @@ export function TeamSystemsTab({ teamId }: TeamSystemsTabProps) {
       setError(null);
 
       const updatePayload = { team_id: teamId };
-      console.log('➕ Adding system to team:', {
-        systemId: selectedSystemId,
-        teamId,
-        payload: updatePayload
-      });
-
       const result = await updateSystemUnderTest(selectedSystemId, updatePayload);
 
-      console.log('✅ System updated successfully:', result);
-
       // Refresh the list
-      console.log('🔄 Refreshing system list...');
       await fetchTeamSystems();
 
       setAddDialogOpen(false);
