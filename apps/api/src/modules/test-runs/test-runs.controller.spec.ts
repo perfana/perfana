@@ -10,6 +10,7 @@ import { MarkChangepointDto } from './dto/mark-changepoint.dto';
 import { DeleteAnomalyDto } from './dto/delete-anomaly.dto';
 import { CreateMetricClassificationDto } from './dto/metric-classification.dto';
 import { UserContext } from '../../common/decorators/user-context.decorator';
+import { TestRunDeletionProcessor } from './processors/test-run-deletion.processor';
 
 // Shared mock data fixtures
 const mockTestRun = {
@@ -101,6 +102,16 @@ describe('TestRunsController', () => {
         {
           provide: TestRunsService,
           useValue: mockServiceFactory(),
+        },
+        {
+          provide: TestRunDeletionProcessor,
+          useValue: {
+            isAvailable: jest.fn().mockReturnValue(true),
+            addJob: jest.fn().mockResolvedValue('job-1'),
+            addBulkJobs: jest.fn().mockResolvedValue(['job-1']),
+            markQueued: jest.fn().mockResolvedValue(undefined),
+            processSync: jest.fn().mockResolvedValue({ success: true, id: 'test-id' }),
+          },
         },
       ],
     }).compile();
@@ -293,23 +304,18 @@ describe('TestRunsController', () => {
     });
 
     describe('deleteTestRun', () => {
-      it('should delete a test run by UUID', async () => {
+      it('should queue a test run for deletion by UUID', async () => {
         // Arrange
         const id = mockTestRun.id;
-        service.deleteTestRun.mockResolvedValue(undefined);
 
         // Act
         const result = await controller.deleteTestRun(id, mockUserContext);
 
         // Assert
         expect(result).toEqual({
-          message: 'Test run deleted successfully',
+          message: 'Test run deletion queued',
+          status: 'queued',
         });
-        expect(service.deleteTestRun).toHaveBeenCalledWith(
-          id,
-          mockUserContext.userId,
-          mockUserContext.roles,
-        );
       });
     });
   });
@@ -462,12 +468,11 @@ describe('TestRunsController', () => {
   describe('Response Formatting', () => {
     it('should return properly formatted success message for deleteTestRun', async () => {
       const id = mockTestRun.id;
-      service.deleteTestRun.mockResolvedValue(undefined);
 
       const result = await controller.deleteTestRun(id, mockUserContext);
 
       expect(result).toHaveProperty('message');
-      expect(result.message).toBe('Test run deleted successfully');
+      expect(result.message).toBe('Test run deletion queued');
     });
   });
 
@@ -487,15 +492,11 @@ describe('TestRunsController', () => {
 
     it('should use ParseUUIDPipe for deleteTestRun id parameter', async () => {
       const id = mockTestRun.id;
-      service.deleteTestRun.mockResolvedValue(undefined);
 
-      await controller.deleteTestRun(id, mockUserContext);
+      const result = await controller.deleteTestRun(id, mockUserContext);
 
-      expect(service.deleteTestRun).toHaveBeenCalledWith(
-        id,
-        mockUserContext.userId,
-        mockUserContext.roles,
-      );
+      expect(result).toHaveProperty('message');
+      expect(result.status).toBe('queued');
     });
   });
 });

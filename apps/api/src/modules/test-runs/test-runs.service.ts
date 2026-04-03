@@ -54,6 +54,7 @@ export interface TestRun {
   adapt_config?: AdaptConfig;
   variables?: TestRunVariables;
   deep_links?: DeepLinksCollection;
+  deletion_status?: string;
   created_at: string;
   updated_at: string;
   systems_under_test?: {
@@ -280,6 +281,10 @@ export class TestRunsService {
 
   async initTest(initDto: InitTestDto, userId: string, roles: string[], organizationId: string): Promise<InitTestResponse> {
     return this.mutationService.initTest(initDto, userId, roles, organizationId);
+  }
+
+  async findByIds(ids: string[]): Promise<Array<{ id: string; deletionStatus?: string | null }>> {
+    return this.queryService.findByIds(ids);
   }
 
   async deleteTestRun(id: string, userId: string, roles: string[]): Promise<void> {

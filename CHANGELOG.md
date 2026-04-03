@@ -4,6 +4,24 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
+## [0.2.20] - 2026-04-03
+
+### Fixed
+- Prevent database deadlocks when bulk-deleting test runs with millions of rows in TimescaleDB hypertables
+- Add deadlock retry logic (PostgreSQL 40P01) with linear backoff to deletion handler
+- Set 30-second lock timeout on deletion transactions to fail fast instead of waiting indefinitely
+
+### Added
+- Bulk delete endpoint (`POST /test-runs/bulk-delete`) that queues deletions via BullMQ with concurrency 1
+- Async deletion for single `DELETE /test-runs/:id` endpoint (returns 202 Accepted)
+- `deletion_status` column on test runs for tracking queued/deleting/failed states
+- Deletion status banner on test run detail page for other users viewing a run scheduled for deletion
+- Synchronous fallback when Redis is unavailable
+
+### Changed
+- Frontend bulk delete now sends a single API call instead of N concurrent DELETE requests
+- Test run list automatically filters out runs queued for deletion
+
 ## [0.2.19] - 2026-04-01
 
 ### Fixed

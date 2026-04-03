@@ -1,10 +1,12 @@
-import { Controller, Get, Delete, Put, Param, Query, Body, ParseUUIDPipe } from '@nestjs/common';
-import { ApiTags, ApiOperation, ApiResponse, ApiQuery, ApiParam, ApiBearerAuth } from '@nestjs/swagger';
+import { Controller, Get, Delete, Post, Put, Param, Query, Body, ParseUUIDPipe, HttpCode, HttpStatus, Logger } from '@nestjs/common';
+import { ApiTags, ApiOperation, ApiResponse, ApiQuery, ApiParam, ApiBearerAuth, ApiBody } from '@nestjs/swagger';
 import { TestRunsService } from '../test-runs.service';
 import { PaginationQueryDto, TestRunQueryDto } from '../../../common/dto';
 import { ValidationException } from '../../../common/exceptions/business.exception';
 import { UuidValidationPipe } from '../../../common/pipes';
 import { UserCtx, UserContext } from '../../../common/decorators/user-context.decorator';
+import { BulkDeleteTestRunsDto } from '../dto/bulk-delete-test-runs.dto';
+import { TestRunDeletionProcessor } from '../processors/test-run-deletion.processor';
 
 /**
  * Core CRUD operations for test runs.
@@ -24,7 +26,12 @@ import { UserCtx, UserContext } from '../../../common/decorators/user-context.de
 @ApiBearerAuth()
 @Controller('test-runs')
 export class TestRunsController {
-  constructor(private readonly testRunsService: TestRunsService) {}
+  private readonly logger = new Logger(TestRunsController.name);
+
+  constructor(
+    private readonly testRunsService: TestRunsService,
+    private readonly testRunDeletionProcessor: TestRunDeletionProcessor,
+  ) {}
 
   @Get()
   @ApiOperation({
@@ -74,6 +81,76 @@ export class TestRunsController {
     @UserCtx() ctx: UserContext,
   ) {
     return this.testRunsService.getFilterOptions(ctx.userId, ctx.roles, organizationId);
+  }
+
+  @Post('bulk-delete')
+  @HttpCode(HttpStatus.ACCEPTED)
+  @ApiOperation({
+    summary: 'Queue multiple test runs for deletion',
+    description: 'Queues the specified test runs for asynchronous deletion via a background job queue. Returns immediately with 202 Accepted. Deletions are processed sequentially to prevent database deadlocks.',
+  })
+  @ApiBody({ type: BulkDeleteTestRunsDto })
+  @ApiResponse({ status: 202, description: 'Test runs queued for deletion' })
+  @ApiResponse({ status: 400, description: 'Invalid request or some IDs already queued for deletion' })
+  async bulkDelete(
+    @Body() dto: BulkDeleteTestRunsDto,
+    @UserCtx() ctx: UserContext,
+  ) {
+    // Check which IDs are already queued for deletion
+    const existing = await this.testRunsService.findByIds(dto.ids);
+    const existingIds = new Set(existing.map(tr => tr.id));
+    const notFound = dto.ids.filter(id => !existingIds.has(id));
+
+    if (notFound.length > 0) {
+      throw new ValidationException(`Test runs not found: ${notFound.join(', ')}`);
+    }
+
+    const alreadyQueued = existing
+      .filter(tr => tr.deletionStatus !== null && tr.deletionStatus !== undefined)
+      .map(tr => tr.id);
+
+    // Filter out already-queued IDs
+    const idsToQueue = dto.ids.filter(id => !alreadyQueued.includes(id));
+
+    if (idsToQueue.length === 0) {
+      return {
+        message: 'All specified test runs are already queued for deletion',
+        queued: 0,
+        skipped: alreadyQueued,
+      };
+    }
+
+    // Mark as queued in the database
+    await this.testRunDeletionProcessor.markQueued(idsToQueue);
+
+    if (this.testRunDeletionProcessor.isAvailable()) {
+      // Queue via BullMQ for sequential processing
+      await this.testRunDeletionProcessor.addBulkJobs(idsToQueue, {
+        userId: ctx.userId,
+        roles: ctx.roles,
+        organizationId: ctx.organizationId,
+        teamId: ctx.teamId,
+      });
+
+      this.logger.log(`Queued ${idsToQueue.length} test runs for async deletion by user ${ctx.userId}`);
+    } else {
+      // Redis unavailable — process synchronously one at a time
+      this.logger.warn('Redis unavailable, processing deletions synchronously');
+      for (const id of idsToQueue) {
+        await this.testRunDeletionProcessor.processSync(id, {
+          userId: ctx.userId,
+          organizationId: ctx.organizationId,
+          teamId: ctx.teamId,
+        });
+      }
+    }
+
+    return {
+      message: `Queued ${idsToQueue.length} test run(s) for deletion`,
+      queued: idsToQueue.length,
+      ids: idsToQueue,
+      ...(alreadyQueued.length > 0 ? { skipped: alreadyQueued } : {}),
+    };
   }
 
   @Get(':testRunId')
@@ -166,16 +243,43 @@ export class TestRunsController {
   }
 
   @Delete(':id')
-  @ApiOperation({ summary: 'Delete a test run by UUID' })
+  @HttpCode(HttpStatus.ACCEPTED)
+  @ApiOperation({
+    summary: 'Delete a test run by UUID',
+    description: 'Queues the test run for asynchronous deletion. Falls back to synchronous deletion if Redis is unavailable.',
+  })
   @ApiParam({ name: 'id', description: 'Test run UUID', example: '550e8400-e29b-41d4-a716-446655440000' })
-  @ApiResponse({ status: 200, description: 'Test run deleted successfully' })
+  @ApiResponse({ status: 202, description: 'Test run deletion queued' })
   @ApiResponse({ status: 400, description: 'Invalid UUID format' })
   @ApiResponse({ status: 404, description: 'Test run not found' })
   async deleteTestRun(
     @Param('id', ParseUUIDPipe) id: string,
     @UserCtx() ctx: UserContext,
   ) {
-    await this.testRunsService.deleteTestRun(id, ctx.userId, ctx.roles);
+    // Mark as queued
+    await this.testRunDeletionProcessor.markQueued([id]);
+
+    if (this.testRunDeletionProcessor.isAvailable()) {
+      await this.testRunDeletionProcessor.addJob(id, {
+        userId: ctx.userId,
+        roles: ctx.roles,
+        organizationId: ctx.organizationId,
+        teamId: ctx.teamId,
+      });
+
+      return {
+        message: 'Test run deletion queued',
+        status: 'queued',
+      };
+    }
+
+    // Fallback: synchronous deletion when Redis is unavailable
+    this.logger.warn(`Redis unavailable, deleting test run ${id} synchronously`);
+    await this.testRunDeletionProcessor.processSync(id, {
+      userId: ctx.userId,
+      organizationId: ctx.organizationId,
+      teamId: ctx.teamId,
+    });
 
     return {
       message: 'Test run deleted successfully',

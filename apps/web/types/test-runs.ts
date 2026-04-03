@@ -124,6 +124,7 @@ export interface TestRun {
   adapt_config?: AdaptConfig;
   variables?: TestRunVariables;
   deep_links?: DeepLinks;
+  deletion_status?: string;
   created_at: string;
   updated_at: string;
   systems_under_test?: SystemUnderTest;
