@@ -1,6 +1,7 @@
 'use client';
 
 import { useState, useEffect, useCallback } from 'react';
+import { useAuth } from '@/contexts/auth-context';
 import { ComparePresetsAPI, PresetType } from '@/lib/compare-presets';
 import { ComparePreset } from '../ComparePresetsTable';
 import { PresetFormData } from '../SavePresetModal';
@@ -54,24 +55,12 @@ export function useComparePresets({
   setShowPercentiles,
   fetchDashboardPanels,
 }: UseComparePresetsProps) {
+  const { user } = useAuth();
+  const currentUserId = user?.id;
   const [presets, setPresets] = useState<ComparePreset[]>([]);
   const [presetsLoading, setPresetsLoading] = useState(false);
   const [savePresetModalOpen, setSavePresetModalOpen] = useState(false);
   const [presetsSaving, setPresetsSaving] = useState(false);
-  const [currentUserId, setCurrentUserId] = useState<string | undefined>(undefined);
-
-  // Get current user ID from localStorage
-  useEffect(() => {
-    const token = localStorage.getItem('perfana_access_token');
-    if (token) {
-      try {
-        const payload = JSON.parse(atob(token.split('.')[1]));
-        setCurrentUserId(payload.sub || payload.id);
-      } catch (error) {
-        console.error('Failed to parse user ID from token:', error);
-      }
-    }
-  }, []);
 
   // Load presets
   const fetchPresets = useCallback(async () => {

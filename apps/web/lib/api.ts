@@ -3,55 +3,22 @@ import { env } from './env';
 function getAuthHeaders(): Record<string, string> {
   if (typeof window === 'undefined') return {};
 
-  // Store persistent logs to survive page reloads
-  const persistLog = (message: string, data?: any) => {
-    const timestamp = new Date().toISOString();
-    const logs = JSON.parse(localStorage.getItem('perfana_debug_logs') || '[]');
-    logs.push({ timestamp, message, data });
-    // Keep only last 50 logs
-    if (logs.length > 50) logs.splice(0, logs.length - 50);
-    localStorage.setItem('perfana_debug_logs', JSON.stringify(logs));
-    // console.log(message, data); // Disabled - logs still stored in localStorage
-  };
-
-  persistLog('🔍 getAuthHeaders called', {
-    useKeycloak: env.USE_KEYCLOAK_AUTH,
-    keycloakUrl: env.KEYCLOAK_URL,
-    keycloakRealm: env.KEYCLOAK_REALM,
-    timestamp: new Date().toISOString()
-  });
-
   // Try to get Keycloak token first if enabled
   if (env.USE_KEYCLOAK_AUTH) {
-    persistLog('🔑 Attempting Keycloak authentication...');
     try {
       // Dynamically import keycloak auth to avoid SSR issues
       const keycloakAuth = require('./keycloak-auth').default;
-      persistLog('📦 Keycloak auth module loaded', {
-        isAuthenticated: keycloakAuth.isAuthenticated(),
-        hasToken: !!keycloakAuth.getToken()
-      });
-
       const keycloakToken = keycloakAuth.getToken();
       if (keycloakToken) {
-        persistLog('✅ Keycloak token found', {
-          tokenLength: keycloakToken.length,
-        });
         return { 'Authorization': `Bearer ${keycloakToken}` };
-      } else {
-        persistLog('❌ No Keycloak token available');
       }
     } catch (error) {
-      persistLog('⚠️ Failed to get Keycloak token:', error);
+      console.warn('Failed to get Keycloak token:', error);
     }
   }
 
-  // Fallback to traditional token (sessionStorage preferred over localStorage for security)
-  const token = sessionStorage.getItem('perfana_access_token') || localStorage.getItem('perfana_access_token');
-  persistLog('🔄 Falling back to traditional token', {
-    hasToken: !!token,
-    tokenLength: token?.length,
-  });
+  // Fallback to traditional token (sessionStorage only for security)
+  const token = sessionStorage.getItem('perfana_access_token');
 
   return token ? { 'Authorization': `Bearer ${token}` } : {};
 }
@@ -79,7 +46,7 @@ async function handleAuthError(response: Response): Promise<boolean> {
 
     // Traditional token refresh
     try {
-      const refreshToken = typeof window !== 'undefined' ? (sessionStorage.getItem('perfana_refresh_token') || localStorage.getItem('perfana_refresh_token')) : null;
+      const refreshToken = typeof window !== 'undefined' ? sessionStorage.getItem('perfana_refresh_token') : null;
       if (refreshToken) {
         const refreshResponse = await fetch(`${env.API_URL}/auth/refresh`, {
           method: 'POST',
@@ -99,9 +66,8 @@ async function handleAuthError(response: Response): Promise<boolean> {
     }
 
     // Refresh failed, clear tokens and redirect to signin
-    localStorage.removeItem('perfana_access_token');
-    localStorage.removeItem('perfana_refresh_token');
-    localStorage.removeItem('perfana_user');
+    sessionStorage.removeItem('perfana_access_token');
+    sessionStorage.removeItem('perfana_refresh_token');
 
     if (typeof window !== 'undefined') {
       // Save the current path so we can return after login
@@ -124,26 +90,7 @@ export { getAuthHeaders, handleAuthError };
 
 // Utility function to make an authenticated fetch request with auto-retry on 401
 export async function authenticatedFetch(url: string, options: RequestInit = {}): Promise<Response> {
-  // Store persistent logs to survive page reloads
-  const persistLog = (message: string, data?: any) => {
-    if (typeof window !== 'undefined') {
-      const timestamp = new Date().toISOString();
-      const logs = JSON.parse(localStorage.getItem('perfana_debug_logs') || '[]');
-      logs.push({ timestamp, message, data });
-      // Keep only last 50 logs
-      if (logs.length > 50) logs.splice(0, logs.length - 50);
-      localStorage.setItem('perfana_debug_logs', JSON.stringify(logs));
-    }
-    // console.log(message, data); // Disabled - logs still stored in localStorage
-  };
-
   const fullUrl = url.startsWith('http') ? url : `${env.API_URL}/${url.replace(/^\//, '')}`;
-  persistLog('🔗 authenticatedFetch called:', {
-    originalUrl: url,
-    envApiUrl: env.API_URL,
-    constructedFullUrl: fullUrl,
-    method: options.method || 'GET'
-  });
 
   const requestOptions = {
     ...options,
@@ -153,41 +100,17 @@ export async function authenticatedFetch(url: string, options: RequestInit = {})
     },
   };
 
-  persistLog('📤 Making API request', {
-    url: fullUrl,
-    method: options.method || 'GET',
-    hasAuthHeader: !!(requestOptions.headers as Record<string, string>)?.['Authorization']
-  });
-
   let response = await fetch(fullUrl, requestOptions);
-
-  persistLog('📥 API response received', {
-    url: fullUrl,
-    status: response.status,
-    statusText: response.statusText,
-    ok: response.ok
-  });
 
   // If 401, try to refresh token and retry once
   if (response.status === 401) {
-    persistLog('🔄 401 response, attempting token refresh');
     const refreshed = await handleAuthError(response);
     if (refreshed) {
-      persistLog('✅ Token refreshed, retrying request');
-      // Update headers with new token and retry
       requestOptions.headers = {
         ...requestOptions.headers,
         ...getAuthHeaders(),
       };
       response = await fetch(fullUrl, requestOptions);
-      persistLog('📥 Retry response received', {
-        url: fullUrl,
-        status: response.status,
-        statusText: response.statusText,
-        ok: response.ok
-      });
-    } else {
-      persistLog('❌ Token refresh failed');
     }
   }
 

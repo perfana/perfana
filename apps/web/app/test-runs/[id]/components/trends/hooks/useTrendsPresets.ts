@@ -1,6 +1,7 @@
 'use client';
 
 import { useState, useEffect, useCallback } from 'react';
+import { useAuth } from '@/contexts/auth-context';
 import { authenticatedFetch } from '@/lib/api';
 import { TrendsPresetsAPI, PresetType } from '@/lib/trends-presets';
 import { fetchDynatraceDashboards, fetchDynatraceMetrics, DynatraceDashboard } from '@/lib/dynatrace';
@@ -52,25 +53,13 @@ export function useTrendsPresets({
   setAddedSeries,
   setDynatraceMetrics,
 }: UseTrendsPresetsProps) {
+  const { user } = useAuth();
+  const currentUserId = user?.id;
   const [presets, setPresets] = useState<TrendsPreset[]>([]);
   const [presetsLoading, setPresetsLoading] = useState(false);
   const [savePresetModalOpen, setSavePresetModalOpen] = useState(false);
   const [presetsSaving, setPresetsSaving] = useState(false);
   const [applyingPreset, setApplyingPreset] = useState(false);
-  const [currentUserId, setCurrentUserId] = useState<string | undefined>(undefined);
-
-  // Get current user ID from localStorage
-  useEffect(() => {
-    const token = localStorage.getItem('perfana_access_token');
-    if (token) {
-      try {
-        const payload = JSON.parse(atob(token.split('.')[1]));
-        setCurrentUserId(payload.sub || payload.id);
-      } catch (error) {
-        console.error('Failed to parse user ID from token:', error);
-      }
-    }
-  }, []);
 
   // Load presets and enrich with dashboard_label if missing
   const fetchPresets = useCallback(async () => {

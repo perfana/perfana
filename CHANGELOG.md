@@ -4,6 +4,26 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
+## [0.2.21] - 2026-04-03
+
+### Fixed
+- Remove debug logging that wrote request metadata and auth config to localStorage on every API call (security)
+- Remove localStorage token fallback, use sessionStorage only to prevent XSS token theft (security)
+- Fix `validateApiKey` calling bare `fetch` without authentication headers
+- Fix `instanceof Error` checks in GenerateReportDialog and useDeepLinksData to use safe cross-context pattern
+- Fix `DeleteSystemDialog` using raw fetch instead of `authenticatedFetch` (missing 401 auto-retry)
+- Fix `getPublicReport` and `buildShareUrl` bypassing runtime config (`env.API_URL`) with hardcoded `process.env`
+
+### Changed
+- Migrate 5 hooks from direct localStorage token reads to `useAuth()` context (useTrendsPresets, useComparePresets, useSLOSection, useDashboardsData)
+- Remove redundant manual auth headers from hooks that already use `authenticatedFetch`
+- Update CODING_RULES.md to document correct auth header pattern
+
+### Removed
+- Debug console.log statements from systems.ts, profiles.ts, reports.ts, keycloak-auth.ts
+- Dead debug tools (`public/debug-logs.js`, `public/jwt-debugger.js`) that referenced removed localStorage logging
+- Keycloak init session debug logging from keycloak-auth.ts
+
 ## [0.2.20] - 2026-04-03
 
 ### Fixed

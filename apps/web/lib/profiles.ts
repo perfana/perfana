@@ -164,19 +164,12 @@ export async function updateProfileDashboard(
   dashboardId: string,
   data: UpdateProfileDashboardData
 ): Promise<ProfileDashboard> {
-  console.log('[updateProfileDashboard] Sending data:', JSON.stringify(data, null, 2));
-  console.log('[updateProfileDashboard] setHardcodedValueForVariables:', data.setHardcodedValueForVariables);
-  console.log('[updateProfileDashboard] Is array?', Array.isArray(data.setHardcodedValueForVariables));
-
-  const body = JSON.stringify(data);
-  console.log('[updateProfileDashboard] Stringified body:', body);
-
   const response = await authenticatedFetch(`/profiles/${profileId}/dashboards/${dashboardId}`, {
     method: 'PUT',
     headers: {
       'Content-Type': 'application/json',
     },
-    body,
+    body: JSON.stringify(data),
   });
 
   if (!response.ok) {

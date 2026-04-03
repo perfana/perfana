@@ -19,6 +19,19 @@ import DashboardsSection from '@/app/test-runs/[id]/components/dashboards/Dashbo
 import { authenticatedFetch } from '@/lib/api';
 import { TestRun } from '@/types/test-runs';
 
+// Mock auth context
+jest.mock('@/contexts/auth-context', () => ({
+  ...jest.requireActual('@/contexts/auth-context'),
+  useAuth: () => ({
+    user: { id: 'test-user-id', email: 'test@example.com', created_at: '2026-01-01' },
+    isLoading: false,
+    login: jest.fn(),
+    logout: jest.fn(),
+    hasRole: jest.fn().mockReturnValue(false),
+    hasAnyRole: jest.fn().mockReturnValue(false),
+  }),
+}));
+
 // Mock authenticated fetch
 jest.mock('@/lib/api', () => ({
   authenticatedFetch: jest.fn(),

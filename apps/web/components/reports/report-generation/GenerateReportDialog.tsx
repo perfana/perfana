@@ -230,7 +230,7 @@ export function GenerateReportDialog({
         setShowTemplateSelector(true);
       } catch (err) {
         console.error('[GenerateReportDialog] Failed to fetch templates:', err);
-        setError(err instanceof Error ? err.message : 'Failed to load templates');
+        setError(err && typeof err === 'object' && 'message' in err ? (err as Error).message : 'Failed to load templates');
       } finally {
         setTemplatesLoading(false);
       }
@@ -325,7 +325,7 @@ export function GenerateReportDialog({
       setSections(detail.sections || []);
       setShowTemplateSelector(false);
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to load template');
+      setError(err && typeof err === 'object' && 'message' in err ? (err as Error).message : 'Failed to load template');
     } finally {
       setTemplatesLoading(false);
     }
@@ -350,7 +350,7 @@ export function GenerateReportDialog({
         onClose();
         setIsSubmitting(false);
       } catch (err) {
-        const errorMsg = err instanceof Error ? err.message : 'Failed to save template configuration';
+        const errorMsg = err && typeof err === 'object' && 'message' in err ? (err as Error).message : 'Failed to save template configuration';
         setError(errorMsg);
         setIsSubmitting(false);
       }
@@ -387,7 +387,7 @@ export function GenerateReportDialog({
       setIsSubmitting(false);
       setGenerationStatus('');
     } catch (err) {
-      const errorMsg = err instanceof Error ? err.message : 'Failed to generate report';
+      const errorMsg = err && typeof err === 'object' && 'message' in err ? (err as Error).message : 'Failed to generate report';
       setError(errorMsg);
       onError?.(errorMsg);
       setIsSubmitting(false);

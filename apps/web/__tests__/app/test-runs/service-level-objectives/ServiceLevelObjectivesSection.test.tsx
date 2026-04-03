@@ -25,6 +25,19 @@ import { authenticatedFetch } from '@/lib/api';
 import { TestRun } from '@/types/test-runs';
 import { useSearchParams } from 'next/navigation';
 
+// Mock auth context
+jest.mock('@/contexts/auth-context', () => ({
+  ...jest.requireActual('@/contexts/auth-context'),
+  useAuth: () => ({
+    user: { id: 'test-user-id', email: 'test@example.com', created_at: '2026-01-01' },
+    isLoading: false,
+    login: jest.fn(),
+    logout: jest.fn(),
+    hasRole: jest.fn().mockReturnValue(false),
+    hasAnyRole: jest.fn().mockReturnValue(false),
+  }),
+}));
+
 // Mock authenticated fetch
 jest.mock('@/lib/api', () => ({
   authenticatedFetch: jest.fn(),
@@ -233,7 +246,6 @@ describe('ServiceLevelObjectivesSection', () => {
       await waitFor(() => {
         expect(authenticatedFetch).toHaveBeenCalledWith(
           expect.stringContaining('/check-results'),
-          expect.any(Object)
         );
       });
     });
@@ -244,7 +256,6 @@ describe('ServiceLevelObjectivesSection', () => {
       await waitFor(() => {
         expect(authenticatedFetch).toHaveBeenCalledWith(
           expect.stringContaining('/benchmarks'),
-          expect.any(Object)
         );
       });
     });
@@ -288,7 +299,6 @@ describe('ServiceLevelObjectivesSection', () => {
       await waitFor(() => {
         expect(authenticatedFetch).toHaveBeenCalledWith(
           expect.stringContaining('/test-runs/123/check-results'),
-          expect.any(Object)
         );
       });
     });
@@ -308,7 +318,6 @@ describe('ServiceLevelObjectivesSection', () => {
       await waitFor(() => {
         expect(authenticatedFetch).toHaveBeenCalledWith(
           expect.stringMatching(/system=system-123.*environment=production.*workload=load-test-1/),
-          expect.any(Object)
         );
       });
     });
@@ -369,7 +378,6 @@ describe('ServiceLevelObjectivesSection', () => {
       await waitFor(() => {
         expect(authenticatedFetch).toHaveBeenCalledWith(
           expect.stringMatching(/systemUnderTestId=system-123.*testEnvironment=production.*workload=load-test-1/),
-          expect.any(Object)
         );
       });
     });
@@ -866,7 +874,6 @@ describe('ServiceLevelObjectivesSection', () => {
       await waitFor(() => {
         expect(authenticatedFetch).toHaveBeenCalledWith(
           expect.stringContaining('/data/jobs/'),
-          expect.any(Object)
         );
       });
     });
@@ -964,7 +971,6 @@ describe('ServiceLevelObjectivesSection', () => {
         // handleEditSlo fetches /benchmarks/{benchmarkId}
         expect(authenticatedFetch).toHaveBeenCalledWith(
           expect.stringContaining('/benchmarks/benchmark-'),
-          expect.any(Object)
         );
       });
     });
@@ -1013,7 +1019,6 @@ describe('ServiceLevelObjectivesSection', () => {
         // Should reload check results and benchmarks
         expect(authenticatedFetch).toHaveBeenCalledWith(
           expect.stringContaining('/check-results'),
-          expect.any(Object)
         );
       });
     });
@@ -1166,7 +1171,6 @@ describe('ServiceLevelObjectivesSection', () => {
       await waitFor(() => {
         expect(authenticatedFetch).toHaveBeenCalledWith(
           expect.stringContaining('/check-results'),
-          expect.any(Object)
         );
       });
     });

@@ -27,6 +27,18 @@ import { TrendsPresetsAPI } from '@/lib/trends-presets';
 import { fetchDynatraceDashboards, fetchDynatraceMetrics } from '@/lib/dynatrace';
 
 // Mock dependencies
+jest.mock('@/contexts/auth-context', () => ({
+  ...jest.requireActual('@/contexts/auth-context'),
+  useAuth: () => ({
+    user: { id: 'test-user-id', email: 'test@example.com', created_at: '2026-01-01' },
+    isLoading: false,
+    login: jest.fn(),
+    logout: jest.fn(),
+    hasRole: jest.fn().mockReturnValue(false),
+    hasAnyRole: jest.fn().mockReturnValue(false),
+  }),
+}));
+
 jest.mock('@/lib/api', () => ({
   authenticatedFetch: jest.fn(),
 }));

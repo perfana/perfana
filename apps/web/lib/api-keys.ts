@@ -63,7 +63,7 @@ export async function deleteApiKey(id: string): Promise<void> {
 }
 
 export async function validateApiKey(token: string): Promise<boolean> {
-  const response = await fetch(`/api-keys/validate`, {
+  const response = await authenticatedFetch(`/api-keys/validate`, {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
