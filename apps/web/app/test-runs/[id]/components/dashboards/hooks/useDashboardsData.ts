@@ -58,14 +58,6 @@ export function useDashboardsData({
 
       setDashboardsLoading(true);
 
-      const token = localStorage.getItem('perfana_access_token');
-      const headers: Record<string, string> = {
-        'Content-Type': 'application/json',
-      };
-      if (token) {
-        headers['Authorization'] = `Bearer ${token}`;
-      }
-
       // Fetch application dashboards for this system and environment
       const queryParams = new URLSearchParams({
         systemId: systemId,
@@ -74,7 +66,7 @@ export function useDashboardsData({
 
       const url = `/grafana/application-dashboards?${queryParams.toString()}`;
 
-      const response = await authenticatedFetch(url, { headers });
+      const response = await authenticatedFetch(url);
 
       if (!response.ok) {
         const errorText = await response.text();

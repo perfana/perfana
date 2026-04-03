@@ -296,10 +296,8 @@ error_handling:
       });
 
       // ALTERNATIVE: Manual pattern (use only when authenticatedFetch not suitable)
-      function getAuthHeaders(): Record<string, string> {
-        const token = typeof window !== 'undefined' ? localStorage.getItem('perfana_access_token') : null;
-        return token ? { 'Authorization': `Bearer ${token}` } : {};
-      }
+      // Import getAuthHeaders from '@/lib/api' — never read tokens from storage directly.
+      import { getAuthHeaders } from '@/lib/api';
 
       const response = await fetch(`${env.API_URL}/endpoint`, {
         method: 'GET',

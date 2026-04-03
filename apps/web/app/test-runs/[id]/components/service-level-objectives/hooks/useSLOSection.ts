@@ -181,11 +181,6 @@ export function useSLOSection({
   const loadCheckResults = useCallback(async (testRunId: string) => {
     try {
       setCheckResultsLoading(true);
-      const token = localStorage.getItem('perfana_access_token');
-      const headers: Record<string, string> = {};
-      if (token) {
-        headers['Authorization'] = `Bearer ${token}`;
-      }
 
       const system = searchParams.get('system');
       const environment = searchParams.get('environment');
@@ -197,7 +192,7 @@ export function useSLOSection({
         url += `?${queryParams.toString()}`;
       }
 
-      const response = await authenticatedFetch(url, { headers });
+      const response = await authenticatedFetch(url);
       if (!response.ok) {
         if (response.status === 404) {
           console.warn('Check results not found');
@@ -223,11 +218,6 @@ export function useSLOSection({
 
     try {
       setBenchmarksLoading(true);
-      const token = localStorage.getItem('perfana_access_token');
-      const headers: Record<string, string> = {};
-      if (token) {
-        headers['Authorization'] = `Bearer ${token}`;
-      }
 
       const queryParams = new URLSearchParams({
         systemUnderTestId: testRun.system_under_test_id,
@@ -236,7 +226,7 @@ export function useSLOSection({
       });
 
       const url = `/benchmarks?${queryParams.toString()}`;
-      const response = await authenticatedFetch(url, { headers });
+      const response = await authenticatedFetch(url);
 
       if (!response.ok) {
         if (response.status === 404) {

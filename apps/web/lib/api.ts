@@ -46,7 +46,7 @@ async function handleAuthError(response: Response): Promise<boolean> {
 
     // Traditional token refresh
     try {
-      const refreshToken = typeof window !== 'undefined' ? (sessionStorage.getItem('perfana_refresh_token') || localStorage.getItem('perfana_refresh_token')) : null;
+      const refreshToken = typeof window !== 'undefined' ? sessionStorage.getItem('perfana_refresh_token') : null;
       if (refreshToken) {
         const refreshResponse = await fetch(`${env.API_URL}/auth/refresh`, {
           method: 'POST',
