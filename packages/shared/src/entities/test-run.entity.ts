@@ -108,6 +108,9 @@ export class TestRun {
   @Column('jsonb', { name: 'deep_links', nullable: true })
   deepLinks?: DeepLinksCollection;
 
+  @Column({ name: 'deletion_status', type: 'varchar', length: 20, nullable: true, default: null })
+  deletionStatus?: string | null;
+
   // Ownership tracking (added for multi-tenant support)
   @Column({ type: 'uuid', nullable: true, name: 'organization_id' })
   organizationId?: string;
