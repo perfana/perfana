@@ -97,6 +97,22 @@ export class TestRunsQueryService {
     }
   }
 
+  /**
+   * Find test runs by UUIDs. Returns minimal data for bulk operations.
+   * No authorization — caller is responsible for permission checks.
+   */
+  async findByIds(ids: string[]): Promise<Array<{ id: string; deletionStatus?: string | null }>> {
+    if (ids.length === 0) return [];
+    const rows = await this.dataSource.query(
+      `SELECT id, deletion_status FROM test_runs WHERE id = ANY($1)`,
+      [ids],
+    );
+    return rows.map((r: { id: string; deletion_status: string | null }) => ({
+      id: r.id,
+      deletionStatus: r.deletion_status,
+    }));
+  }
+
   // ============================================================================
   // CRUD Operations (delegated to TestRunsCrudQueryService)
   // ============================================================================

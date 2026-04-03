@@ -43,6 +43,7 @@ import { InitTestHandler } from './handlers/init-test.handler';
 import { TestRunLookupService } from './services/test-run-lookup.service';
 import { JtlParserService } from './services/jtl-parser.service';
 import { JtlImportService } from './services/jtl-import.service';
+import { TestRunDeletionProcessor } from './processors/test-run-deletion.processor';
 import { SystemsUnderTestModule } from '../systems-under-test/systems-under-test.module';
 import { DataScienceModule } from '../data-science/data-science.module';
 import { QueueModule } from '../queue/queue.module';
@@ -178,6 +179,7 @@ import {
     TestRunConfigurationRepository,
     TestRunsGateway, // WebSocket gateway for realtime updates
     WebSocketAuthGuard, // Authentication guard for WebSocket connections
+    TestRunDeletionProcessor, // BullMQ processor for async test run deletion
   ],
   exports: [
     TestRunsService,
@@ -187,6 +189,7 @@ import {
     TestRunRepository,
     TestRunConfigurationRepository,
     TestRunsGateway, // Export for use in other modules if needed
+    TestRunDeletionProcessor, // Export for controllers in this module
   ],
 })
 export class TestRunsModule {}

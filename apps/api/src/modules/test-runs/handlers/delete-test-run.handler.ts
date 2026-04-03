@@ -62,23 +62,47 @@ export class DeleteTestRunHandler implements ICommandHandler<DeleteTestRunComman
       const teamId = testRun.systemUnderTest?.team_id;
       this.logger.log(`Starting cascade deletion for test run ${id} (test_run_id: ${testRunId})`);
 
-      // Perform cascade deletion using raw SQL in a transaction
-      await this.dataSource.transaction(async (transactionalEntityManager) => {
-        const affectedControlGroups = await this.findAffectedControlGroups(transactionalEntityManager, testRunId);
-        const controlGroupIdsToReevaluate = await this.findControlGroupsToReevaluate(
-          transactionalEntityManager,
-          testRun,
-          testRunId
-        );
+      // Perform cascade deletion with deadlock retry logic.
+      // TimescaleDB compressed chunk decompression requires exclusive locks;
+      // concurrent deletions can cause deadlock (PostgreSQL 40P01).
+      const MAX_DEADLOCK_RETRIES = 3;
+      for (let attempt = 1; attempt <= MAX_DEADLOCK_RETRIES; attempt++) {
+        try {
+          await this.dataSource.transaction(async (transactionalEntityManager) => {
+            // Set a lock timeout so we fail fast instead of waiting indefinitely
+            await transactionalEntityManager.query("SET LOCAL lock_timeout = '30s'");
 
-        await this.deleteDependentData(transactionalEntityManager, testRunId, id);
-        await this.updateAffectedControlGroups(transactionalEntityManager, affectedControlGroups, testRunId);
+            const affectedControlGroups = await this.findAffectedControlGroups(transactionalEntityManager, testRunId);
+            const controlGroupIdsToReevaluate = await this.findControlGroupsToReevaluate(
+              transactionalEntityManager,
+              testRun,
+              testRunId
+            );
 
-        if (controlGroupIdsToReevaluate.length > 0) {
-          this.logger.log(`Control groups to re-evaluate: ${controlGroupIdsToReevaluate.join(', ')}`);
-          // Note: Re-evaluation would be triggered here via BullMQ
+            await this.deleteDependentData(transactionalEntityManager, testRunId, id);
+            await this.updateAffectedControlGroups(transactionalEntityManager, affectedControlGroups, testRunId);
+
+            if (controlGroupIdsToReevaluate.length > 0) {
+              this.logger.log(`Control groups to re-evaluate: ${controlGroupIdsToReevaluate.join(', ')}`);
+              // Note: Re-evaluation would be triggered here via BullMQ
+            }
+          });
+          break; // Success — exit retry loop
+        } catch (txError) {
+          const pgCode = txError && typeof txError === 'object' && 'code' in txError
+            ? (txError as { code: string }).code
+            : undefined;
+
+          if (pgCode === '40P01' && attempt < MAX_DEADLOCK_RETRIES) {
+            this.logger.warn(
+              `Deadlock detected (40P01) on attempt ${attempt}/${MAX_DEADLOCK_RETRIES} for test run ${id}, retrying in ${attempt}s...`,
+            );
+            await new Promise((resolve) => setTimeout(resolve, 1000 * attempt));
+            continue;
+          }
+          throw txError;
         }
-      });
+      }
 
       this.logger.log(`Successfully deleted test run ${id}`);
 
