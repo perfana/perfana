@@ -25,7 +25,7 @@ services:
     image: timescale/timescaledb-ha:pg15
     container_name: perfana-postgres
     environment:
-      POSTGRES_DB: perfana_native
+      POSTGRES_DB: perfana
       POSTGRES_USER: perfana
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-perfana}
       POSTGRES_INITDB_ARGS: "--auth-host=scram-sha-256"
@@ -37,7 +37,7 @@ services:
     networks:
       - perfana
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U perfana -d perfana_native"]
+      test: ["CMD-SHELL", "pg_isready -U perfana -d perfana"]
       interval: 10s
       timeout: 5s
       retries: 5
@@ -118,7 +118,7 @@ services:
       DB_PORT: "5432"
       DB_USERNAME: perfana
       DB_PASSWORD: ${POSTGRES_PASSWORD:-perfana}
-      DB_NAME: perfana_native
+      DB_NAME: perfana
       DB_SSL: "false"
     networks:
       - perfana

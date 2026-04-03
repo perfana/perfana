@@ -13,7 +13,7 @@ The following environment variables **must** be set for the application to start
 | `DB_HOST` | string | PostgreSQL database host | `localhost` or `postgres.example.com` |
 | `DB_USERNAME` | string | PostgreSQL database username | `perfana` |
 | `DB_PASSWORD` | string | PostgreSQL database password | `your_secure_password` |
-| `DB_NAME` | string | PostgreSQL database name | `perfana_native` |
+| `DB_NAME` | string | PostgreSQL database name | `perfana` |
 
 ### Keycloak Configuration
 
@@ -75,7 +75,7 @@ DB_HOST=localhost
 DB_PORT=5432
 DB_USERNAME=perfana
 DB_PASSWORD=perfana_dev_password
-DB_NAME=perfana_native
+DB_NAME=perfana
 DB_SSL=false
 
 # Keycloak

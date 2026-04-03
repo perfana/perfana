@@ -24,7 +24,7 @@ END
 $do$;
 
 -- Grant database access to perfana user
-GRANT ALL PRIVILEGES ON DATABASE perfana_native TO perfana;
+GRANT ALL PRIVILEGES ON DATABASE perfana TO perfana;
 GRANT ALL PRIVILEGES ON SCHEMA public TO perfana;
 
 -- Create initial schema structure (based on existing Supabase schema)
