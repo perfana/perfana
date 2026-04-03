@@ -76,7 +76,6 @@ export class TestRunDeletionProcessor implements OnModuleInit, OnModuleDestroy {
       this.redis.on('connect', () => {
         this.logger.log('Redis connected for test run deletion processor');
         this.isRedisAvailable = true;
-        this.initializeQueueAndWorker();
       });
 
       this.redis.on('error', (error) => {
@@ -104,6 +103,7 @@ export class TestRunDeletionProcessor implements OnModuleInit, OnModuleDestroy {
       try {
         await this.redis.connect();
         await this.workerRedis.connect();
+        this.initializeQueueAndWorker();
       } catch (error) {
         if (!isDevelopment) {
           throw error;
