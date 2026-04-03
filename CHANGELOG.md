@@ -4,6 +4,19 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
+## [0.2.22] - 2026-04-03
+
+### Fixed
+- Add accessible labels and tooltips to icon-only delete buttons in profile dashboard forms and alert filters
+- Wire showToast through TrackedRegressionsView so batch re-evaluation and ADAPT config updates produce user-visible feedback instead of silent no-ops
+- Wrap disabled IconButtons in `<span>` for MUI Tooltip compatibility
+
+### Removed
+- 107 lines of debug `console.log` statements across 11 components (SectionConfigs, JobProgressBanner, ActionsMenu, PyroscopeSection, and others)
+- Unused `components/members/` directory (4 files, 766 lines) superseded by `components/organizations/`
+- Unused `OrganizationSwitcher.tsx` (178 lines) superseded by `OrganizationSelector`
+- Placeholder `onLoad` console.log callbacks in ReportCard and test run page
+
 ## [0.2.21] - 2026-04-03
 
 ### Fixed
