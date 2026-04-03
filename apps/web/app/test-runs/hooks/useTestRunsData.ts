@@ -212,14 +212,14 @@ export function useTestRunsData({ onSnackbar, organizationId, serverFilters }: U
     }
   }, [loadTestRuns]);
 
-  // Monitor job and refresh when complete
-  const monitorJobAndRefresh = useCallback(async (jobId: string) => {
+  // Monitor job and refresh when complete — returns cleanup function to cancel polling
+  const monitorJobAndRefresh = useCallback((jobId: string) => {
     const estimatedJobTime = 30 * 1000;
     const maxWaitTime = 2 * 60 * 1000;
     const checkInterval = 10 * 1000;
     const startTime = Date.now();
-
-    await new Promise(resolve => setTimeout(resolve, 5000));
+    let cancelled = false;
+    let timeoutId: ReturnType<typeof setTimeout>;
 
     const checkJobStatusWithFallback = async (): Promise<boolean> => {
       try {
@@ -232,19 +232,23 @@ export function useTestRunsData({ onSnackbar, organizationId, serverFilters }: U
                              jobStatus.finished;
 
           if (isCompleted) {
-            if (jobStatus.status === 'failed') {
-              onSnackbar({ open: true, message: 'Re-evaluation job failed' });
-            } else {
-              onSnackbar({ open: true, message: 'Re-evaluation completed, refreshing view...' });
+            if (!cancelled) {
+              if (jobStatus.status === 'failed') {
+                onSnackbar({ open: true, message: 'Re-evaluation job failed' });
+              } else {
+                onSnackbar({ open: true, message: 'Re-evaluation completed, refreshing view...' });
+              }
+              loadTestRuns();
             }
-            loadTestRuns();
             return true;
           }
         } else {
           const elapsedTime = Date.now() - startTime;
           if (elapsedTime >= estimatedJobTime) {
-            onSnackbar({ open: true, message: 'Re-evaluation likely completed, refreshing view...' });
-            loadTestRuns();
+            if (!cancelled) {
+              onSnackbar({ open: true, message: 'Re-evaluation likely completed, refreshing view...' });
+              loadTestRuns();
+            }
             return true;
           }
         }
@@ -253,8 +257,10 @@ export function useTestRunsData({ onSnackbar, organizationId, serverFilters }: U
       } catch (_error) {
         const elapsedTime = Date.now() - startTime;
         if (elapsedTime >= estimatedJobTime) {
-          onSnackbar({ open: true, message: 'Re-evaluation likely completed, refreshing view...' });
-          loadTestRuns();
+          if (!cancelled) {
+            onSnackbar({ open: true, message: 'Re-evaluation likely completed, refreshing view...' });
+            loadTestRuns();
+          }
           return true;
         }
         return false;
@@ -262,22 +268,30 @@ export function useTestRunsData({ onSnackbar, organizationId, serverFilters }: U
     };
 
     const poll = async () => {
+      if (cancelled) return;
       const isCompleted = await checkJobStatusWithFallback();
 
-      if (isCompleted) {
-        return;
-      }
+      if (cancelled || isCompleted) return;
 
       if (Date.now() - startTime > maxWaitTime) {
-        onSnackbar({ open: true, message: 'Re-evaluation is taking longer than expected, refreshing view...' });
-        loadTestRuns();
+        if (!cancelled) {
+          onSnackbar({ open: true, message: 'Re-evaluation is taking longer than expected, refreshing view...' });
+          loadTestRuns();
+        }
         return;
       }
 
-      setTimeout(poll, checkInterval);
+      timeoutId = setTimeout(poll, checkInterval);
     };
 
-    poll();
+    // Initial delay before first poll
+    timeoutId = setTimeout(poll, 5000);
+
+    // Return cleanup function
+    return () => {
+      cancelled = true;
+      clearTimeout(timeoutId);
+    };
   }, [loadTestRuns, onSnackbar]);
 
   return {
