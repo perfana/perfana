@@ -9,8 +9,8 @@
 
 import { getAuthHeaders, handleAuthError, authenticatedFetch } from '@/lib/api';
 
-// Mock localStorage
-const localStorageMock = (() => {
+// Mock sessionStorage (production code now uses sessionStorage only)
+const sessionStorageMock = (() => {
   let store: Record<string, string> = {};
 
   return {
@@ -27,8 +27,8 @@ const localStorageMock = (() => {
   };
 })();
 
-Object.defineProperty(window, 'localStorage', {
-  value: localStorageMock,
+Object.defineProperty(window, 'sessionStorage', {
+  value: sessionStorageMock,
   writable: true,
 });
 
@@ -72,7 +72,7 @@ global.fetch = jest.fn();
 describe('API Authentication Utilities', () => {
   beforeEach(() => {
     jest.clearAllMocks();
-    localStorageMock.clear();
+    sessionStorageMock.clear();
     mockGetToken.mockReturnValue(undefined);
     mockIsAuthenticated.mockReturnValue(false);
   });
@@ -81,7 +81,7 @@ describe('API Authentication Utilities', () => {
     describe('Traditional Token Authentication', () => {
       it('should return Authorization header with Bearer token when traditional token exists', () => {
         // Arrange
-        localStorageMock.setItem('perfana_access_token', 'traditional-token-123');
+        sessionStorageMock.setItem('perfana_access_token', 'traditional-token-123');
 
         // Act
         const headers = getAuthHeaders();
@@ -125,7 +125,7 @@ describe('API Authentication Utilities', () => {
     describe('401 Unauthorized - Traditional Token Refresh', () => {
       it('should refresh token and return true when refresh succeeds', async () => {
         // Arrange
-        localStorageMock.setItem('perfana_refresh_token', 'refresh-token-abc');
+        sessionStorageMock.setItem('perfana_refresh_token', 'refresh-token-abc');
 
         const mockResponse = new Response(null, { status: 401 });
         const mockRefreshResponse = {
@@ -153,15 +153,14 @@ describe('API Authentication Utilities', () => {
           })
         );
         expect(result).toBe(true);
-        expect(localStorageMock.getItem('perfana_access_token')).toBe('new-access-token');
-        expect(localStorageMock.getItem('perfana_refresh_token')).toBe('new-refresh-token');
+        expect(sessionStorageMock.getItem('perfana_access_token')).toBe('new-access-token');
+        expect(sessionStorageMock.getItem('perfana_refresh_token')).toBe('new-refresh-token');
       });
 
       it('should clear tokens and redirect to signin when refresh fails', async () => {
         // Arrange
-        localStorageMock.setItem('perfana_access_token', 'old-access-token');
-        localStorageMock.setItem('perfana_refresh_token', 'old-refresh-token');
-        localStorageMock.setItem('perfana_user', JSON.stringify({ id: '123' }));
+        sessionStorageMock.setItem('perfana_access_token', 'old-access-token');
+        sessionStorageMock.setItem('perfana_refresh_token', 'old-refresh-token');
 
         const mockResponse = new Response(null, { status: 401 });
         const mockRefreshResponse = {
@@ -176,15 +175,14 @@ describe('API Authentication Utilities', () => {
 
         // Assert
         expect(result).toBe(false);
-        expect(localStorageMock.getItem('perfana_access_token')).toBeNull();
-        expect(localStorageMock.getItem('perfana_refresh_token')).toBeNull();
-        expect(localStorageMock.getItem('perfana_user')).toBeNull();
+        expect(sessionStorageMock.getItem('perfana_access_token')).toBeNull();
+        expect(sessionStorageMock.getItem('perfana_refresh_token')).toBeNull();
         expect(window.location.href).toBe('/signin');
       });
 
       it('should handle network errors during refresh gracefully', async () => {
         // Arrange
-        localStorageMock.setItem('perfana_refresh_token', 'refresh-token-abc');
+        sessionStorageMock.setItem('perfana_refresh_token', 'refresh-token-abc');
 
         const mockResponse = new Response(null, { status: 401 });
         (global.fetch as jest.Mock).mockRejectedValue(new Error('Network error'));
@@ -252,7 +250,7 @@ describe('API Authentication Utilities', () => {
     describe('Successful Requests', () => {
       it('should make authenticated request with auth headers', async () => {
         // Arrange
-        localStorageMock.setItem('perfana_access_token', 'token-123');
+        sessionStorageMock.setItem('perfana_access_token', 'token-123');
         const mockResponse = {
           ok: true,
           status: 200,
@@ -293,7 +291,7 @@ describe('API Authentication Utilities', () => {
 
       it('should preserve custom headers from options', async () => {
         // Arrange
-        localStorageMock.setItem('perfana_access_token', 'token-123');
+        sessionStorageMock.setItem('perfana_access_token', 'token-123');
         const mockResponse = { ok: true, status: 200, statusText: 'OK' };
         (global.fetch as jest.Mock).mockResolvedValue(mockResponse);
 
@@ -348,8 +346,8 @@ describe('API Authentication Utilities', () => {
     describe('401 Auto-Retry Logic', () => {
       it('should retry request once after successful token refresh', async () => {
         // Arrange
-        localStorageMock.setItem('perfana_access_token', 'old-token');
-        localStorageMock.setItem('perfana_refresh_token', 'refresh-token');
+        sessionStorageMock.setItem('perfana_access_token', 'old-token');
+        sessionStorageMock.setItem('perfana_refresh_token', 'refresh-token');
 
         const mock401Response = {
           ok: false,
@@ -386,12 +384,12 @@ describe('API Authentication Utilities', () => {
         // Assert
         expect(global.fetch).toHaveBeenCalledTimes(3);
         expect(response.ok).toBe(true);
-        expect(localStorageMock.getItem('perfana_access_token')).toBe('new-token');
+        expect(sessionStorageMock.getItem('perfana_access_token')).toBe('new-token');
       });
 
       it('should not retry when token refresh fails', async () => {
         // Arrange
-        localStorageMock.setItem('perfana_refresh_token', 'invalid-refresh-token');
+        sessionStorageMock.setItem('perfana_refresh_token', 'invalid-refresh-token');
 
         const mock401Response = {
           ok: false,
@@ -419,8 +417,8 @@ describe('API Authentication Utilities', () => {
 
       it('should use new token in retry request headers', async () => {
         // Arrange
-        localStorageMock.setItem('perfana_access_token', 'old-token');
-        localStorageMock.setItem('perfana_refresh_token', 'refresh-token');
+        sessionStorageMock.setItem('perfana_access_token', 'old-token');
+        sessionStorageMock.setItem('perfana_refresh_token', 'refresh-token');
 
         const mock401Response = { ok: false, status: 401, statusText: 'Unauthorized' };
         const mockRefreshResponse = {

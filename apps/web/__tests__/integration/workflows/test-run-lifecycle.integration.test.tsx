@@ -38,6 +38,19 @@ const mockSearchParams = {
   }),
 };
 
+// Mock auth context
+jest.mock('@/contexts/auth-context', () => ({
+  ...jest.requireActual('@/contexts/auth-context'),
+  useAuth: () => ({
+    user: { id: 'test-user-id', email: 'test@example.com', created_at: '2026-01-01' },
+    isLoading: false,
+    login: jest.fn(),
+    logout: jest.fn(),
+    hasRole: jest.fn().mockReturnValue(false),
+    hasAnyRole: jest.fn().mockReturnValue(false),
+  }),
+}));
+
 // Mock dependencies
 jest.mock('next/navigation', () => ({
   useRouter: jest.fn(() => mockRouter),
@@ -613,7 +626,6 @@ describe('Test Run Lifecycle Workflow Integration', () => {
       await waitFor(() => {
         expect(authenticatedFetch).toHaveBeenCalledWith(
           expect.stringContaining('/check-results'),
-          expect.anything()
         );
       });
     });

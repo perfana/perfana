@@ -28,7 +28,6 @@ const mockAuthenticatedFetch = api.authenticatedFetch as jest.MockedFunction<
   typeof api.authenticatedFetch
 >;
 
-// Mock fetch globally for validateApiKey (doesn't use authenticatedFetch)
 global.fetch = jest.fn();
 
 describe('API Keys Client', () => {
@@ -300,16 +299,16 @@ describe('API Keys Client', () => {
       // Arrange
       const validToken = 'valid-base64-token==';
 
-      (global.fetch as jest.Mock).mockResolvedValue({
+      mockAuthenticatedFetch.mockResolvedValue({
         ok: true,
         json: async () => ({ valid: true }),
-      });
+      } as Response);
 
       // Act
       const isValid = await validateApiKey(validToken);
 
       // Assert
-      expect(global.fetch).toHaveBeenCalledWith('/api-keys/validate', {
+      expect(mockAuthenticatedFetch).toHaveBeenCalledWith('/api-keys/validate', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -323,10 +322,10 @@ describe('API Keys Client', () => {
       // Arrange
       const invalidToken = 'invalid-token';
 
-      (global.fetch as jest.Mock).mockResolvedValue({
+      mockAuthenticatedFetch.mockResolvedValue({
         ok: true,
         json: async () => ({ valid: false }),
-      });
+      } as Response);
 
       // Act
       const isValid = await validateApiKey(invalidToken);
@@ -339,10 +338,10 @@ describe('API Keys Client', () => {
       // Arrange
       const token = 'some-token';
 
-      (global.fetch as jest.Mock).mockResolvedValue({
+      mockAuthenticatedFetch.mockResolvedValue({
         ok: false,
         status: 400,
-      });
+      } as Response);
 
       // Act
       const isValid = await validateApiKey(token);
@@ -355,10 +354,10 @@ describe('API Keys Client', () => {
       // Arrange
       const expiredToken = 'expired-token';
 
-      (global.fetch as jest.Mock).mockResolvedValue({
+      mockAuthenticatedFetch.mockResolvedValue({
         ok: true,
         json: async () => ({ valid: false, reason: 'expired' }),
-      });
+      } as Response);
 
       // Act
       const isValid = await validateApiKey(expiredToken);
@@ -370,10 +369,9 @@ describe('API Keys Client', () => {
     it('should return false when network error occurs', async () => {
       // Arrange
       const token = 'some-token';
-      (global.fetch as jest.Mock).mockRejectedValue(new Error('Network error'));
+      mockAuthenticatedFetch.mockRejectedValue(new Error('Network error'));
 
       // Act & Assert
-      // Note: validateApiKey doesn't throw, it returns false
       await expect(validateApiKey(token)).rejects.toThrow('Network error');
     });
 
@@ -381,12 +379,12 @@ describe('API Keys Client', () => {
       // Arrange
       const token = 'some-token';
 
-      (global.fetch as jest.Mock).mockResolvedValue({
+      mockAuthenticatedFetch.mockResolvedValue({
         ok: true,
         json: async () => {
           throw new Error('Invalid JSON');
         },
-      });
+      } as Response);
 
       // Act & Assert
       await expect(validateApiKey(token)).rejects.toThrow('Invalid JSON');
@@ -417,11 +415,11 @@ describe('API Keys Client', () => {
         json: async () => createdKey,
       } as Response);
 
-      // Mock validate
-      (global.fetch as jest.Mock).mockResolvedValueOnce({
+      // Mock validate (now uses authenticatedFetch)
+      mockAuthenticatedFetch.mockResolvedValueOnce({
         ok: true,
         json: async () => ({ valid: true }),
-      });
+      } as Response);
 
       // Mock delete
       mockAuthenticatedFetch.mockResolvedValueOnce({
