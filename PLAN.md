@@ -109,11 +109,11 @@ Systematic audit of ~338K lines across 1,100+ source files. Executed in chunks s
 
 Single pass — pipelines, job configs, error handling, transaction safety, dead code.
 
-### Chunk 4: Shared & Infra (`packages/shared` + `apps/grafana-sync`, ~29K lines)
+### Chunk 4: Shared & Infra (`packages/shared` + `apps/grafana-sync`, ~29K lines) ✅
 
 Entities, migrations, grafana-sync service, config patterns.
 
-### Chunk 5: Cross-cutting
+### Chunk 5: Cross-cutting ✅
 
 Test coverage gaps, dependency audit, security (CSO), consistency between apps.
 
