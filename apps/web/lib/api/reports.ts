@@ -6,6 +6,7 @@
  */
 
 import { authenticatedFetch } from '../api';
+import { env } from '../env';
 
 // ==================== Type Definitions ====================
 
@@ -726,7 +727,7 @@ export async function disableSharing(reportId: string): Promise<ShareSettingsRes
 export async function getPublicReport(shareId: string): Promise<PublicShareResponse> {
   // Use direct fetch without auth headers for public endpoint
   const response = await fetch(
-    `${process.env.NEXT_PUBLIC_API_URL || 'http://localhost:3001/api'}/reports/share/${shareId}`
+    `${env.API_URL}/reports/share/${shareId}`
   );
 
   if (!response.ok) {
@@ -746,9 +747,7 @@ export async function getPublicReport(shareId: string): Promise<PublicShareRespo
  * Build the full share URL for a report (PDF download, no authentication required)
  */
 export function buildShareUrl(shareId: string): string {
-  const apiUrl = typeof window !== 'undefined'
-    ? (process.env.NEXT_PUBLIC_API_URL || 'http://localhost:3001/api')
-    : (process.env.NEXT_PUBLIC_API_URL || 'http://localhost:3001/api');
+  const apiUrl = env.API_URL;
 
   // Remove /api suffix if present to avoid duplication
   const baseUrl = apiUrl.endsWith('/api') ? apiUrl.slice(0, -4) : apiUrl;
@@ -812,23 +811,13 @@ export async function getTemplateSummaries(
 ): Promise<TemplateSummary[]> {
   const url = `report-templates/summaries?system_id=${encodeURIComponent(systemId)}&test_environment=${encodeURIComponent(testEnvironment)}&workload=${encodeURIComponent(workload)}`;
 
-  console.log('[getTemplateSummaries] Calling API with:', {
-    systemId,
-    testEnvironment,
-    workload,
-    url,
-  });
-
   const response = await authenticatedFetch(url);
 
   if (!response.ok) {
     throw new Error(`Failed to fetch template summaries: ${response.statusText}`);
   }
 
-  const data = await response.json();
-  console.log('[getTemplateSummaries] API response:', data);
-
-  return data;
+  return response.json();
 }
 
 /**

@@ -40,59 +40,27 @@ class KeycloakAuthService {
   }
 
   async init(): Promise<boolean> {
-    // Store debug logs for the current session (cleared when tab closes)
-    const persistLog = (message: string, data?: any) => {
-      const timestamp = new Date().toISOString();
-      const logs = JSON.parse(sessionStorage.getItem('perfana_debug_logs') || '[]');
-      logs.push({ timestamp, message, data });
-      // Keep only last 50 logs
-      if (logs.length > 50) logs.splice(0, logs.length - 50);
-      sessionStorage.setItem('perfana_debug_logs', JSON.stringify(logs));
-      console.log(message, data);
-    };
-
-    persistLog('🚀 Keycloak init() called', {
-      url: env.KEYCLOAK_URL,
-      realm: env.KEYCLOAK_REALM,
-      clientId: env.KEYCLOAK_CLIENT_ID,
-      currentUrl: window.location.href
-    });
-
     try {
       const initConfig = {
         onLoad: 'check-sso' as const,
-        // Disable silent SSO check - causes iframe timeout issues in some environments
-        // silentCheckSsoRedirectUri: window.location.origin + '/silent-check-sso.html',
         silentCheckSsoFallback: false,
         pkceMethod: 'S256' as const,
-        checkLoginIframe: false, // Disable iframe check for better compatibility
+        checkLoginIframe: false,
         enableLogging: true,
         flow: 'standard' as const
       };
 
-      persistLog('🔧 Keycloak init config:', initConfig);
-
       const keycloak = this.getKeycloak();
       const authenticated = await keycloak.init(initConfig);
-
-      persistLog('🔐 Keycloak init result:', {
-        authenticated,
-        token: keycloak.token ? 'present' : 'missing',
-        refreshToken: keycloak.refreshToken ? 'present' : 'missing',
-        subject: keycloak.subject
-      });
 
       if (authenticated) {
         this.setupTokenRefresh();
         this.storeTokens();
-        persistLog('✅ Keycloak authentication successful');
-      } else {
-        persistLog('❌ Keycloak authentication failed or user not authenticated');
       }
 
       return authenticated;
     } catch (error) {
-      persistLog('🚨 Keycloak initialization failed', error);
+      console.warn('Keycloak initialization failed:', error);
       return false;
     }
   }
@@ -103,7 +71,6 @@ class KeycloakAuthService {
       this.getKeycloak().updateToken(30).then(refreshed => {
         if (refreshed) {
           this.storeTokens();
-          console.log('Token refreshed successfully');
         }
       }).catch(() => {
         console.warn('Failed to refresh token, logging out');

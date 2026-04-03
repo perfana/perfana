@@ -42,12 +42,6 @@ export async function updateSystemPyroscopeConfig(
   systemId: string,
   config: UpdateSystemPyroscopeConfigDto
 ): Promise<SystemUnderTest> {
-  console.log('🌐 updateSystemPyroscopeConfig called', {
-    systemId,
-    config,
-    url: `/systems-under-test/${systemId}/pyroscope`,
-  });
-
   const response = await authenticatedFetch(`/systems-under-test/${systemId}/pyroscope`, {
     method: 'PATCH',
     headers: {
@@ -56,23 +50,14 @@ export async function updateSystemPyroscopeConfig(
     body: JSON.stringify(config),
   });
 
-  console.log('📥 Response received', {
-    ok: response.ok,
-    status: response.status,
-    statusText: response.statusText,
-  });
-
   if (!response.ok) {
     const errorData = await response.json().catch(() => ({}));
-    console.error('❌ API error response:', errorData);
     throw new Error(
       errorData.message || `Failed to update Pyroscope configuration: ${response.statusText}`
     );
   }
 
-  const result = await response.json();
-  console.log('✅ API success response:', result);
-  return result;
+  return response.json();
 }
 
 /**
@@ -85,12 +70,6 @@ export async function updateSystemUnderTest(
   systemId: string,
   updateDto: UpdateSystemUnderTestDto
 ): Promise<SystemUnderTest> {
-  console.log('🌐 updateSystemUnderTest called', {
-    systemId,
-    updateDto,
-    url: `/systems-under-test/${systemId}`,
-  });
-
   const response = await authenticatedFetch(`/systems-under-test/${systemId}`, {
     method: 'PATCH',
     headers: {
@@ -99,23 +78,14 @@ export async function updateSystemUnderTest(
     body: JSON.stringify(updateDto),
   });
 
-  console.log('📥 Response received', {
-    ok: response.ok,
-    status: response.status,
-    statusText: response.statusText,
-  });
-
   if (!response.ok) {
     const errorData = await response.json().catch(() => ({}));
-    console.error('❌ API error response:', errorData);
     throw new Error(
       errorData.message || `Failed to update system under test: ${response.statusText}`
     );
   }
 
-  const result = await response.json();
-  console.log('✅ API success response:', result);
-  return result;
+  return response.json();
 }
 
 /**

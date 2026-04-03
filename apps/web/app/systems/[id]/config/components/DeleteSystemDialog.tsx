@@ -8,8 +8,7 @@ import {
   Alert, Table, TableBody, TableCell, TableRow,
 } from '@mui/material';
 import { Warning as WarningIcon } from '@mui/icons-material';
-import { env } from '@/lib/env';
-import { getAuthHeaders } from '@/lib/api';
+import { authenticatedFetch } from '@/lib/api';
 
 interface DeletePreviewCounts {
   testRuns: number;
@@ -80,9 +79,8 @@ export default function DeleteSystemDialog({ open, onClose, systemId, systemName
     setPreviewLoading(true);
     setPreviewError(null);
     try {
-      const response = await fetch(
-        `${env.API_URL}/systems-under-test/${systemId}/delete-preview`,
-        { headers: { 'Content-Type': 'application/json', ...getAuthHeaders() } },
+      const response = await authenticatedFetch(
+        `/systems-under-test/${systemId}/delete-preview`,
       );
       if (!response.ok) {
         throw new Error(`Failed to load preview: ${response.statusText}`);
@@ -113,12 +111,9 @@ export default function DeleteSystemDialog({ open, onClose, systemId, systemName
     setDeleting(true);
     setDeleteError(null);
     try {
-      const response = await fetch(
-        `${env.API_URL}/systems-under-test/${systemId}`,
-        {
-          method: 'DELETE',
-          headers: { 'Content-Type': 'application/json', ...getAuthHeaders() },
-        },
+      const response = await authenticatedFetch(
+        `/systems-under-test/${systemId}`,
+        { method: 'DELETE' },
       );
       if (!response.ok) {
         const body = await response.json().catch(() => null);

@@ -68,7 +68,7 @@ export function useDeepLinksData({
 
         setResolvedLinks(resolved);
       } catch (err) {
-        setError(err instanceof Error ? err.message : 'Failed to fetch deep links');
+        setError(err && typeof err === 'object' && 'message' in err ? (err as Error).message : 'Failed to fetch deep links');
         setResolvedLinks([]);
       } finally {
         setLoading(false);
