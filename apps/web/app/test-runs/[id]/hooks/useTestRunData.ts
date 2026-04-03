@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback, useMemo, useRef } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 import { useSearchParams } from 'next/navigation';
 import { authenticatedFetch } from '@/lib/api';
 import { TestRun } from '@/types/test-runs';
@@ -150,6 +150,12 @@ export function useTestRunData({ testRunId, onLoadComplete }: UseTestRunDataOpti
     },
   });
 
+  // Extract primitive values from searchParams for stable dependencies
+  const system = searchParams.get('system') ?? '';
+  const environment = searchParams.get('environment') ?? '';
+  const workload = searchParams.get('workload') ?? '';
+  const organizationId = searchParams.get('organizationId') ?? '';
+
   // Refresh test run data
   const refreshTestRun = useCallback(async () => {
     try {
@@ -199,26 +205,12 @@ export function useTestRunData({ testRunId, onLoadComplete }: UseTestRunDataOpti
     if (testRunId) {
       loadTestRun();
     }
-  }, [testRunId, searchParams, onLoadComplete]);
-
-  // Memoize testRun to provide stable reference for child components
-  // This prevents unnecessary re-renders when object reference changes but data is the same
-  const memoizedTestRun = useMemo(() => testRun, [
-    testRun?.id,
-    testRun?.test_run_id,
-    testRun?.start_time,
-    testRun?.end_time,
-    testRun?.consolidated_result,
-    testRun?.application_release,
-    testRun?.is_changepoint,
-    testRun?.is_control_group,
-    JSON.stringify(testRun?.tags || []),
-    JSON.stringify(testRun?.annotations || []),
-    JSON.stringify(testRun?.deep_links || {}),
-  ]);
+  // Use primitive param values instead of searchParams object to prevent spurious refetches
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [testRunId, system, environment, workload, organizationId, onLoadComplete]);
 
   return {
-    testRun: memoizedTestRun,
+    testRun,
     loading,
     error,
     setTestRun,

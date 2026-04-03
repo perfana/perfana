@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect, useCallback, useRef, MutableRefObject } from 'react';
+import { useState, useEffect, useCallback, useMemo, useRef, MutableRefObject } from 'react';
 import { useRouter } from 'next/navigation';
 import { TestRun } from '@/types/test-runs';
 import { authenticatedFetch } from '@/lib/api';
@@ -158,7 +158,7 @@ export function useAnomalyDetection({
 
   // Config form state
   const [showConfigForm, setShowConfigForm] = useState<Record<string, boolean>>({});
-  const [configFormData] = useState<Record<string, any>>({});
+  const configFormData: Record<string, any> = {};
 
   // API Functions
   const fetchAnomalyData = useCallback(async () => {
@@ -321,28 +321,28 @@ export function useAnomalyDetection({
     });
   }, [anomalyData, searchQuery, conclusionFilter, classificationFilter, dashboardFilter, panelFilter]);
 
-  const filteredData = getFilteredData();
-  const paginatedData = filteredData.slice(page * rowsPerPage, page * rowsPerPage + rowsPerPage);
+  const filteredData = useMemo(() => getFilteredData(), [getFilteredData]);
+  const paginatedData = useMemo(() => filteredData.slice(page * rowsPerPage, page * rowsPerPage + rowsPerPage), [filteredData, page, rowsPerPage]);
 
   // Dropdown options
-  const conclusionsForDropdown = [...new Set(anomalyData.map(item => item.conclusion_label))];
-  const classificationsForDropdown = [...new Set(
+  const conclusionsForDropdown = useMemo(() => [...new Set(anomalyData.map(item => item.conclusion_label))], [anomalyData]);
+  const classificationsForDropdown = useMemo(() => [...new Set(
     anomalyData.map(item => {
       const classification = item.classification?.toLowerCase();
       return classification && KNOWN_CLASSIFICATIONS.has(classification)
         ? classification
         : 'unclassified';
     })
-  )];
-  const dashboardsForDropdown = [...new Set(
+  )], [anomalyData]);
+  const dashboardsForDropdown = useMemo(() => [...new Set(
     anomalyData.map(item => item.dashboard_label).filter(Boolean)
-  )].sort();
-  const panelsForDropdown = [...new Set(
+  )].sort(), [anomalyData]);
+  const panelsForDropdown = useMemo(() => [...new Set(
     anomalyData
       .filter(item => dashboardFilter === 'all' || item.dashboard_label === dashboardFilter)
       .map(item => item.panel_title)
       .filter(Boolean)
-  )].sort();
+  )].sort(), [anomalyData, dashboardFilter]);
 
   // Wrapper function for adapt config
   const updateAdaptConfig = useCallback(async (differencesAccepted: 'ACCEPTED' | 'DENIED' | 'TBD') => {
