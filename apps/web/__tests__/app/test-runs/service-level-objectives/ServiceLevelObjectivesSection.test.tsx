@@ -874,6 +874,7 @@ describe('ServiceLevelObjectivesSection', () => {
       await waitFor(() => {
         expect(authenticatedFetch).toHaveBeenCalledWith(
           expect.stringContaining('/data/jobs/'),
+          expect.any(Object),
         );
       });
     });
@@ -971,6 +972,7 @@ describe('ServiceLevelObjectivesSection', () => {
         // handleEditSlo fetches /benchmarks/{benchmarkId}
         expect(authenticatedFetch).toHaveBeenCalledWith(
           expect.stringContaining('/benchmarks/benchmark-'),
+          expect.any(Object),
         );
       });
     });
