@@ -12,6 +12,7 @@ import {
   initialSLOFormData,
 } from '../types';
 import { SUPPORTED_PANEL_TYPES, convertDecimalToPercentageForDisplay } from '../utils/slo-validators';
+import { isPerformanceTest } from '@/lib/metrics-source-utils';
 
 export function useEditSLOForm({
   open,
@@ -145,6 +146,36 @@ export function useEditSLOForm({
     }
   }, []);
 
+  // Fetch panels for performance-test dashboards from ds_metric_statistics
+  const fetchPerfMetricsPanels = useCallback(async (applicationDashboardId: string) => {
+    if (!applicationDashboardId) return;
+
+    try {
+      setPanelsLoading(true);
+      const response = await authenticatedFetch(
+        `/metrics/ds-metrics/panels-by-dashboard?applicationDashboardId=${encodeURIComponent(applicationDashboardId)}`,
+        { headers: { 'Content-Type': 'application/json' } }
+      );
+
+      if (response.ok) {
+        const rows: Array<{ panel_id: number; panel_title: string; unit?: string }> = await response.json();
+        const panels = rows.map(row => ({
+          id: row.panel_id,
+          title: row.panel_title,
+          type: 'timeseries',
+        }));
+        setAvailablePanels(panels);
+      } else {
+        setAvailablePanels([]);
+      }
+    } catch (error) {
+      console.error('Error fetching performance test panels:', error);
+      setAvailablePanels([]);
+    } finally {
+      setPanelsLoading(false);
+    }
+  }, []);
+
   // Initialize form when dialog opens with benchmark data
   useEffect(() => {
     if (open && benchmark) {
@@ -254,10 +285,14 @@ export function useEditSLOForm({
         }));
 
         // Fetch panels for this dashboard to upgrade the synthetic panel too
-        fetchDashboardPanels(matchingDashboard.dashboard_uid);
+        if (isPerformanceTest(matchingDashboard)) {
+          fetchPerfMetricsPanels(matchingDashboard.id);
+        } else {
+          fetchDashboardPanels(matchingDashboard.dashboard_uid);
+        }
       }
     }
-  }, [availableDashboards, benchmark, fetchDashboardPanels]);
+  }, [availableDashboards, benchmark, fetchDashboardPanels, fetchPerfMetricsPanels]);
 
   // Upgrade synthetic dashboard to real one when Dynatrace dashboards are loaded
   useEffect(() => {

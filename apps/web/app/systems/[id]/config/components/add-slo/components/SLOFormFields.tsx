@@ -131,8 +131,8 @@ export function SLOFormFields({
       fetchDashboardPanels(newValue.original.dashboard_uid);
     } else if (newValue.sourceType === 'dynatrace' && newValue.original?.dashboardLabel) {
       fetchDynatraceMetricsForSlo(newValue.original.dashboardLabel);
-    } else if (newValue.sourceType === 'performance_test' && newValue.original?.dashboard_uid) {
-      fetchPerfMetricsPanels(newValue.original.dashboard_uid);
+    } else if (newValue.sourceType === 'performance_test' && newValue.original?.id) {
+      fetchPerfMetricsPanels(newValue.original.id);
     }
   };
 

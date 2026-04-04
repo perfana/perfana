@@ -941,6 +941,28 @@ export class MetricsService {
   }
 
   /**
+   * Get distinct panels for an application dashboard from ds_metric_statistics.
+   * Used by SLO dialogs for performance-test dashboards that aren't in Grafana.
+   */
+  async getPanelsByApplicationDashboard(applicationDashboardId: string): Promise<Array<{ panel_id: number; panel_title: string; unit?: string }>> {
+    try {
+      const rows = await this.metricStatisticsRepo
+        .createQueryBuilder('s')
+        .select('DISTINCT s.panel_id', 'panel_id')
+        .addSelect('s.panel_title', 'panel_title')
+        .addSelect('s.unit', 'unit')
+        .where('s.application_dashboard_id = :applicationDashboardId', { applicationDashboardId })
+        .orderBy('s.panel_title')
+        .getRawMany();
+
+      return rows;
+    } catch (error) {
+      this.logger.error(`Failed to get panels for dashboard ${applicationDashboardId}: ${(error as Error).message}`);
+      return [];
+    }
+  }
+
+  /**
    * Get distinct metric names for a specific dashboard and panel
    */
   async getDistinctMetricNames(

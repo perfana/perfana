@@ -260,6 +260,19 @@ export class MetricsController {
     }
   }
 
+  @Get('ds-metrics/panels-by-dashboard')
+  @ApiOperation({ summary: 'Get distinct panels for an application dashboard (from ds_metric_statistics)' })
+  @ApiQuery({ name: 'applicationDashboardId', required: true, description: 'Application dashboard UUID' })
+  async getPanelsByDashboard(
+    @UserCtx() _ctx: UserContext,
+    @Query('applicationDashboardId') applicationDashboardId: string,
+  ) {
+    if (!applicationDashboardId) {
+      throw new BadRequestException('applicationDashboardId is required');
+    }
+    return this.metricsService.getPanelsByApplicationDashboard(applicationDashboardId);
+  }
+
   @Get('ds-metrics/distinct-names')
   @ApiOperation({ summary: 'Get distinct metric names for a dashboard/panel' })
   @ApiQuery({ name: 'metricsSourceId', required: false, description: 'Metrics source UUID (preferred over applicationDashboardId)' })
