@@ -60,7 +60,7 @@
   },
   "devDependencies": {
     "@faker-js/faker": "^10.0.0",
-    "@nestjs/cli": "^10.2.0",
+    "@nestjs/cli": "^11.0.17",
     "@nestjs/schematics": "^10.0.0",
     "@nestjs/testing": "^10.2.0",
     "@testcontainers/postgresql": "^11.11.0",
