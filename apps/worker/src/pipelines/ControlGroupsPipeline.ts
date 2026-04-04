@@ -516,6 +516,8 @@ export class ControlGroupsPipeline extends BasePipelineTypeORM {
         AND (
           -- Include runs that meet requirements
           (consolidated_result->>'meetsRequirement')::boolean = true
+          -- OR include runs with no SLOs configured (meetsRequirement not set)
+          OR consolidated_result->>'meetsRequirement' IS NULL
           -- OR include BASELINE mode runs
           OR (adapt_config->>'mode' = 'BASELINE')
         )

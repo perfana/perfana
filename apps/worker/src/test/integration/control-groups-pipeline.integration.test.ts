@@ -332,6 +332,35 @@ describe('ControlGroupsPipeline Integration Tests', () => {
 
       expect(controlGroup.rows[0].test_runs).toContain('baseline-run');
     });
+
+    test('should include runs with no SLOs configured (NULL consolidated_result)', async () => {
+      // Create a run with no consolidated_result (no SLOs/benchmarks configured)
+      await testDb.query(`
+        INSERT INTO test_runs (
+          test_run_id, system_under_test_id, workload, test_environment,
+          start_time, end_time, consolidated_result, status
+        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+      `, [
+        'no-slo-run',
+        'app-001',
+        'load-test',
+        'production',
+        new Date('2024-01-01T00:00:00Z'),
+        new Date('2024-01-01T01:00:00Z'),
+        null,
+        JSON.stringify({ evaluatingChecks: 'NOT_CONFIGURED' })
+      ]);
+
+      await pipeline.execute({ testRunIds: [testRunId] });
+
+      const controlGroup = await testDb.query(
+        'SELECT test_runs FROM ds_control_groups WHERE control_group_id = $1',
+        [testRunId]
+      );
+
+      // Runs without SLOs should be included in control group
+      expect(controlGroup.rows[0].test_runs).toContain('no-slo-run');
+    });
   });
 
   describe('Changepoint Detection', () => {
