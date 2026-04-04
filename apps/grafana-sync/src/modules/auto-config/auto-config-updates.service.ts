@@ -195,9 +195,14 @@ export class AutoConfigUpdatesService {
           });
         }
 
-        this.logger.log(`Dual-write: MetricsSource ${metricsSourceId} for ApplicationDashboard ${result.id}`);
+        this.logger.log(
+          `Dual-write: MetricsSource ${metricsSourceId} for ApplicationDashboard ${result.id}`,
+        );
       } catch (msError) {
-        this.logger.error(`MetricsSource dual-write failed for ApplicationDashboard ${result.id} (non-blocking):`, msError);
+        this.logger.error(
+          `MetricsSource dual-write failed for ApplicationDashboard ${result.id} (non-blocking):`,
+          msError,
+        );
       }
 
       return { insertedId: result.id };
@@ -343,9 +348,7 @@ export class AutoConfigUpdatesService {
 
       // Get system_under_test_id with organization filtering
       const systemUnderTestName = testRun.systemUnderTest?.name || testRun.systemUnderTestId;
-      this.logger.log(
-        `Looking for SUT: ${systemUnderTestName}, org: ${testRun.organizationId}`,
-      );
+      this.logger.log(`Looking for SUT: ${systemUnderTestName}, org: ${testRun.organizationId}`);
       const sutWhere: any = { name: systemUnderTestName };
       if (testRun.organizationId) {
         // RBAC: Filter by organization to ensure we get the correct SUT for this organization
@@ -421,7 +424,8 @@ export class AutoConfigUpdatesService {
         average_all: profileBenchmark.average_all,
         match_pattern: profileBenchmark.match_pattern,
         validate_with_default_if_no_data: profileBenchmark.validate_with_default_if_no_data,
-        validate_with_default_if_no_data_value: profileBenchmark.validate_with_default_if_no_data_value,
+        validate_with_default_if_no_data_value:
+          profileBenchmark.validate_with_default_if_no_data_value,
         tags: profileBenchmark.tags || [],
         enabled: true,
         valid: true,
@@ -464,5 +468,4 @@ export class AutoConfigUpdatesService {
       throw e;
     }
   }
-
 }

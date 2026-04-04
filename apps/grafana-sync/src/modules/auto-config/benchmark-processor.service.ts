@@ -92,12 +92,11 @@ export class BenchmarkProcessorService {
   /**
    * Check if test run workload matches the benchmark's workload pattern
    */
-  private matchesWorkloadPattern(
-    testRun: TestRun,
-    profileBenchmark: ProfileBenchmark,
-  ): boolean {
+  private matchesWorkloadPattern(testRun: TestRun, profileBenchmark: ProfileBenchmark): boolean {
     // Validate regex pattern for ReDoS safety
-    const validationResult = validateRegexPattern(profileBenchmark.workload_pattern, { flags: 'i' });
+    const validationResult = validateRegexPattern(profileBenchmark.workload_pattern, {
+      flags: 'i',
+    });
 
     if (!validationResult.safe || !validationResult.regex) {
       this.logger.warn(
@@ -126,11 +125,12 @@ export class BenchmarkProcessorService {
     profileBenchmark: ProfileBenchmark,
     applicationDashboard: any,
   ): Promise<void> {
-    const existingBenchmark = await this.testRunFinderService.findBenchmarkForApplicationDashboardOrNull(
-      applicationDashboard,
-      profileBenchmark.id,
-      testRun.workload,
-    );
+    const existingBenchmark =
+      await this.testRunFinderService.findBenchmarkForApplicationDashboardOrNull(
+        applicationDashboard,
+        profileBenchmark.id,
+        testRun.workload,
+      );
 
     if (!existingBenchmark) {
       await this.updatesService.insertBenchmarkBasedOnProfileBenchmark(

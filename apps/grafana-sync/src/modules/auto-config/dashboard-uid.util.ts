@@ -53,10 +53,7 @@ export class DashboardUid {
    * Generate dashboard UID for regular or readOnly dashboards.
    * This is the CRITICAL method that determines UID generation behavior.
    */
-  static from(
-    testRun: TestRun,
-    autoConfigDashboard: AutoConfigDashboard,
-  ): DashboardUid {
+  static from(testRun: TestRun, autoConfigDashboard: AutoConfigDashboard): DashboardUid {
     const dashboardUid = autoConfigDashboard.dashboardUid;
 
     if (autoConfigDashboard.readOnly) {

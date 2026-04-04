@@ -34,10 +34,9 @@ export class TestRunFinderService {
         });
 
       if (organizationIds && organizationIds.length > 0) {
-        qb = qb.andWhere(
-          '(tr.organization_id IN (:...orgIds) OR tr.organization_id IS NULL)',
-          { orgIds: organizationIds },
-        );
+        qb = qb.andWhere('(tr.organization_id IN (:...orgIds) OR tr.organization_id IS NULL)', {
+          orgIds: organizationIds,
+        });
       }
 
       const testRuns = await qb.getMany();
@@ -66,7 +65,7 @@ export class TestRunFinderService {
           })
           .getMany();
       }
-      return await this.profileRepo.find() ?? [];
+      return (await this.profileRepo.find()) ?? [];
     } catch (e) {
       this.logger.error('findProfiles failed:', e);
       return [];
@@ -115,5 +114,4 @@ export class TestRunFinderService {
       return null;
     }
   }
-
 }

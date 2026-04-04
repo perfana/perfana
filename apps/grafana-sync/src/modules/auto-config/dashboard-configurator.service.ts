@@ -134,11 +134,10 @@ export class DashboardConfiguratorService {
     }
 
     // Generate variable sets based on createSeparateDashboardForVariable setting
-    const variableListsToProcess =
-      this.setOfVariablesPerCreateSeparateDashboardForVariable(
-        separateVariable,
-        applicationDashboardVariables,
-      );
+    const variableListsToProcess = this.setOfVariablesPerCreateSeparateDashboardForVariable(
+      separateVariable,
+      applicationDashboardVariables,
+    );
 
     this.logger.log(
       `Variable lists to process: ${Object.keys(variableListsToProcess).length} lists`,

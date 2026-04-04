@@ -32,7 +32,7 @@ export class RestoreDashboardService {
     let totalRestored = 0;
 
     try {
-      const allInstances = instances ?? await this.grafanaInstanceRepo.find();
+      const allInstances = instances ?? (await this.grafanaInstanceRepo.find());
 
       for (const instance of allInstances) {
         const restored = await this.restoreDashboardsForInstance(instance);
@@ -199,7 +199,10 @@ export class RestoreDashboardService {
       }
     } catch (error) {
       const errorMessage = error instanceof Error ? error.stack : String(error);
-      this.logger.error(`Failed to restore dashboards for instance ${instance.label}:`, errorMessage);
+      this.logger.error(
+        `Failed to restore dashboards for instance ${instance.label}:`,
+        errorMessage,
+      );
     }
 
     return restoredCount;

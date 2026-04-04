@@ -26,7 +26,9 @@ export class DashboardFinderService {
     private applicationDashboardRepo: Repository<ApplicationDashboard>,
   ) {}
 
-  async findAutoConfigGrafanaDashboards(organizationIds?: string[]): Promise<ProfileGrafanaDashboard[]> {
+  async findAutoConfigGrafanaDashboards(
+    organizationIds?: string[],
+  ): Promise<ProfileGrafanaDashboard[]> {
     try {
       if (organizationIds && organizationIds.length > 0) {
         return await this.profileDashboardRepo
@@ -36,7 +38,7 @@ export class DashboardFinderService {
           })
           .getMany();
       }
-      return await this.profileDashboardRepo.find() ?? [];
+      return (await this.profileDashboardRepo.find()) ?? [];
     } catch (e) {
       this.logger.error('findAutoConfigGrafanaDashboards failed:', e);
       return [];
@@ -87,10 +89,7 @@ export class DashboardFinderService {
   /**
    * Find grafana dashboard (throws if not found)
    */
-  async findGrafanaDashboard(
-    grafana: string,
-    dashboardUids: string[],
-  ): Promise<GrafanaDashboard> {
+  async findGrafanaDashboard(grafana: string, dashboardUids: string[]): Promise<GrafanaDashboard> {
     const dashboard = await this.findGrafanaDashboardOrNull(grafana, dashboardUids);
     if (!dashboard) {
       throw new Error(
@@ -310,11 +309,8 @@ export class DashboardFinderService {
   ): string {
     if (autoConfigDashboard.createSeparateDashboardForVariable) {
       // Use the utility function that includes variables in the UID
-      return DashboardUid.legacyFrom(
-        testRun,
-        autoConfigDashboard,
-        applicationDashboardVariables,
-      ).dashboardUid;
+      return DashboardUid.legacyFrom(testRun, autoConfigDashboard, applicationDashboardVariables)
+        .dashboardUid;
     } else {
       return DashboardUid.from(testRun, autoConfigDashboard).dashboardUid;
     }
@@ -341,5 +337,4 @@ export class DashboardFinderService {
 
     return dashboardLabel;
   }
-
 }

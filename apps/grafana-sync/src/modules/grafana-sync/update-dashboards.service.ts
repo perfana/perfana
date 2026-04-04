@@ -140,7 +140,7 @@ export class UpdateDashboardsService {
     let totalUpdated = 0;
 
     try {
-      const allInstances = instances ?? await this.grafanaInstanceRepo.find();
+      const allInstances = instances ?? (await this.grafanaInstanceRepo.find());
 
       for (const instance of allInstances) {
         const updated = await this.updateDashboardsForInstance(instance);

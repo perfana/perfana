@@ -248,7 +248,9 @@ describe('AutoConfigService', () => {
         // Arrange
         testRunFinderService.findRecentTestRuns.mockResolvedValue([mockTestRun]);
         testRunFinderService.findProfiles.mockResolvedValue([mockProfile]);
-        dashboardFinderService.findAutoConfigGrafanaDashboards.mockResolvedValue([mockAutoConfigDashboard]);
+        dashboardFinderService.findAutoConfigGrafanaDashboards.mockResolvedValue([
+          mockAutoConfigDashboard,
+        ]);
         testRunFinderService.findProfileBenchmarks.mockResolvedValue([]);
 
         // Act
@@ -274,7 +276,9 @@ describe('AutoConfigService', () => {
 
         testRunFinderService.findRecentTestRuns.mockResolvedValue([testRunWithoutTags]);
         testRunFinderService.findProfiles.mockResolvedValue([mockProfile]);
-        dashboardFinderService.findAutoConfigGrafanaDashboards.mockResolvedValue([mockAutoConfigDashboard]);
+        dashboardFinderService.findAutoConfigGrafanaDashboards.mockResolvedValue([
+          mockAutoConfigDashboard,
+        ]);
         testRunFinderService.findProfileBenchmarks.mockResolvedValue([]);
 
         const logSpy = jest.spyOn((service as any).logger, 'log');
@@ -308,7 +312,9 @@ describe('AutoConfigService', () => {
 
         testRunFinderService.findRecentTestRuns.mockResolvedValue([mockTestRun]);
         testRunFinderService.findProfiles.mockResolvedValue([mockProfile]);
-        dashboardFinderService.findAutoConfigGrafanaDashboards.mockResolvedValue([mockAutoConfigDashboard]);
+        dashboardFinderService.findAutoConfigGrafanaDashboards.mockResolvedValue([
+          mockAutoConfigDashboard,
+        ]);
         testRunFinderService.findProfileBenchmarks.mockResolvedValue([mockProfileBenchmark]);
 
         // Act
@@ -360,7 +366,9 @@ describe('AutoConfigService', () => {
           profileInDifferentOrg,
           profileWithNullOrg,
         ]);
-        dashboardFinderService.findAutoConfigGrafanaDashboards.mockResolvedValue([mockAutoConfigDashboard]);
+        dashboardFinderService.findAutoConfigGrafanaDashboards.mockResolvedValue([
+          mockAutoConfigDashboard,
+        ]);
         testRunFinderService.findProfileBenchmarks.mockResolvedValue([]);
 
         const logSpy = jest.spyOn((service as any).logger, 'log');
@@ -398,7 +406,9 @@ describe('AutoConfigService', () => {
 
         testRunFinderService.findRecentTestRuns.mockResolvedValue([testRunWithoutOrg]);
         testRunFinderService.findProfiles.mockResolvedValue([profile1, profile2]);
-        dashboardFinderService.findAutoConfigGrafanaDashboards.mockResolvedValue([mockAutoConfigDashboard]);
+        dashboardFinderService.findAutoConfigGrafanaDashboards.mockResolvedValue([
+          mockAutoConfigDashboard,
+        ]);
         testRunFinderService.findProfileBenchmarks.mockResolvedValue([]);
 
         const logSpy = jest.spyOn((service as any).logger, 'log');
@@ -431,7 +441,9 @@ describe('AutoConfigService', () => {
         // Arrange
         testRunFinderService.findRecentTestRuns.mockResolvedValue([mockTestRun]);
         testRunFinderService.findProfiles.mockResolvedValue([]);
-        dashboardFinderService.findAutoConfigGrafanaDashboards.mockResolvedValue([mockAutoConfigDashboard]);
+        dashboardFinderService.findAutoConfigGrafanaDashboards.mockResolvedValue([
+          mockAutoConfigDashboard,
+        ]);
         testRunFinderService.findProfileBenchmarks.mockResolvedValue([]);
         const logSpy = jest.spyOn((service as any).logger, 'log');
 
@@ -460,7 +472,6 @@ describe('AutoConfigService', () => {
           'No auto config dashboards found. AutoConfig processing skipped.',
         );
       });
-
     });
 
     describe('Error Scenarios', () => {
@@ -473,7 +484,9 @@ describe('AutoConfigService', () => {
 
         testRunFinderService.findRecentTestRuns.mockResolvedValue([mockTestRun, testRun2]);
         testRunFinderService.findProfiles.mockResolvedValue([mockProfile]);
-        dashboardFinderService.findAutoConfigGrafanaDashboards.mockResolvedValue([mockAutoConfigDashboard]);
+        dashboardFinderService.findAutoConfigGrafanaDashboards.mockResolvedValue([
+          mockAutoConfigDashboard,
+        ]);
         testRunFinderService.findProfileBenchmarks.mockResolvedValue([]);
 
         dashboardConfiguratorService.processAutoConfigDashboard
