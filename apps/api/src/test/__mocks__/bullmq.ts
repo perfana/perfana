@@ -26,6 +26,7 @@ export class Queue {
 }
 
 export class Worker {
+  // eslint-disable-next-line @typescript-eslint/no-empty-function
   constructor(_name: string, _processor: any, _opts?: any) {}
 
   on = jest.fn();
@@ -38,6 +39,7 @@ export class Worker {
 }
 
 export class QueueScheduler {
+  // eslint-disable-next-line @typescript-eslint/no-empty-function
   constructor(_name: string, _opts?: any) {}
 
   on = jest.fn();
@@ -46,6 +48,7 @@ export class QueueScheduler {
 }
 
 export class FlowProducer {
+  // eslint-disable-next-line @typescript-eslint/no-empty-function
   constructor(_opts?: any) {}
 
   add = jest.fn().mockResolvedValue({ job: { id: 'mock-flow-job-id' } });

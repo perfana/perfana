@@ -185,7 +185,7 @@ export class TestRunsController {
 
     // Fire-and-forget: record that the user viewed this test run
     if (result?.id) {
-      this.testRunsService.recordTestRunView(ctx.userId, result.id).catch(() => {});
+      this.testRunsService.recordTestRunView(ctx.userId, result.id).catch(() => { /* fire-and-forget */ });
     }
 
     return result;

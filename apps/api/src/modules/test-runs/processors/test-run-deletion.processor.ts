@@ -303,7 +303,7 @@ export class TestRunDeletionProcessor implements OnModuleInit, OnModuleDestroy {
           ? (error as Error).message
           : 'Unknown error';
 
-      await this.setDeletionStatus(id, 'failed').catch(() => {});
+      await this.setDeletionStatus(id, 'failed').catch(() => { /* best-effort status update */ });
 
       return {
         success: false,

@@ -1,5 +1,4 @@
-/* eslint-disable @typescript-eslint/no-require-imports */
-require('dotenv').config();
+import 'dotenv/config';
 import { DataSource } from 'typeorm';
 import * as path from 'path';
 

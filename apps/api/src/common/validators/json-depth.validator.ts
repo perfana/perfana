@@ -14,7 +14,7 @@ import {
 export class HasValidJsonDepthConstraint implements ValidatorConstraintInterface {
   private readonly maxDepth = 10;
 
-  private getDepth(obj: any, currentDepth: number = 0): number {
+  private getDepth(obj: unknown, currentDepth: number = 0): number {
     if (currentDepth > this.maxDepth) {
       return currentDepth;
     }
@@ -25,9 +25,10 @@ export class HasValidJsonDepthConstraint implements ValidatorConstraintInterface
 
     let maxChildDepth = currentDepth;
 
-    for (const key in obj) {
-      if (obj.hasOwnProperty(key)) {
-        const childDepth = this.getDepth(obj[key], currentDepth + 1);
+    const record = obj as Record<string, unknown>;
+    for (const key in record) {
+      if (Object.hasOwn(record, key)) {
+        const childDepth = this.getDepth(record[key], currentDepth + 1);
         maxChildDepth = Math.max(maxChildDepth, childDepth);
       }
     }
@@ -35,7 +36,7 @@ export class HasValidJsonDepthConstraint implements ValidatorConstraintInterface
     return maxChildDepth;
   }
 
-  validate(json: any): boolean {
+  validate(json: unknown): boolean {
     if (json === null || typeof json !== 'object' || Array.isArray(json)) {
       return false;
     }
@@ -50,7 +51,7 @@ export class HasValidJsonDepthConstraint implements ValidatorConstraintInterface
 }
 
 export function HasValidJsonDepth(validationOptions?: ValidationOptions) {
-  return function (object: Object, propertyName: string) {
+  return function (object: object, propertyName: string) {
     registerDecorator({
       target: object.constructor,
       propertyName: propertyName,

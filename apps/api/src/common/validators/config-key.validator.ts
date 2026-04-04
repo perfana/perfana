@@ -14,7 +14,7 @@ import {
  */
 @ValidatorConstraint({ name: 'isValidConfigKey', async: false })
 export class IsValidConfigKeyConstraint implements ValidatorConstraintInterface {
-  validate(configKey: any): boolean {
+  validate(configKey: unknown): boolean {
     if (typeof configKey !== 'string') {
       return false;
     }
@@ -45,7 +45,7 @@ export class IsValidConfigKeyConstraint implements ValidatorConstraintInterface 
 }
 
 export function IsValidConfigKey(validationOptions?: ValidationOptions) {
-  return function (object: Object, propertyName: string) {
+  return function (object: object, propertyName: string) {
     registerDecorator({
       target: object.constructor,
       propertyName: propertyName,

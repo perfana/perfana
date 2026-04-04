@@ -12,7 +12,7 @@ import {
  */
 @ValidatorConstraint({ name: 'isValidISODate', async: false })
 export class IsValidISODateConstraint implements ValidatorConstraintInterface {
-  validate(dateString: any): boolean {
+  validate(dateString: unknown): boolean {
     if (typeof dateString !== 'string') {
       return false;
     }
@@ -75,7 +75,7 @@ export class IsValidISODateConstraint implements ValidatorConstraintInterface {
 }
 
 export function IsValidISODate(validationOptions?: ValidationOptions) {
-  return function (object: Object, propertyName: string) {
+  return function (object: object, propertyName: string) {
     registerDecorator({
       target: object.constructor,
       propertyName: propertyName,

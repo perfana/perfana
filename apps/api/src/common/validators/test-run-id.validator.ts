@@ -15,7 +15,7 @@ import {
  */
 @ValidatorConstraint({ name: 'isValidTestRunId', async: false })
 export class IsValidTestRunIdConstraint implements ValidatorConstraintInterface {
-  validate(testRunId: any): boolean {
+  validate(testRunId: unknown): boolean {
     if (typeof testRunId !== 'string') {
       return false;
     }
@@ -50,7 +50,7 @@ export class IsValidTestRunIdConstraint implements ValidatorConstraintInterface 
 }
 
 export function IsValidTestRunId(validationOptions?: ValidationOptions) {
-  return function (object: Object, propertyName: string) {
+  return function (object: object, propertyName: string) {
     registerDecorator({
       target: object.constructor,
       propertyName: propertyName,
