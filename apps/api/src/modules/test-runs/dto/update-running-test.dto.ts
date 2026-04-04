@@ -259,4 +259,23 @@ export class UpdateRunningTestDto {
   @ValidateNested({ each: true })
   @Type(() => DeepLinkDto)
   deepLinks?: DeepLinkDto[];
+
+  @ApiPropertyOptional({
+    description: 'ADAPT mode: DEFAULT (regression testing) or SCALING (sizing test)',
+    example: 'SCALING',
+    enum: ['DEFAULT', 'SCALING'],
+  })
+  @IsOptional()
+  @IsString()
+  @Matches(/^(DEFAULT|SCALING)$/, { message: 'adaptMode must be DEFAULT or SCALING' })
+  adaptMode?: string;
+
+  @ApiPropertyOptional({
+    description: 'Baseline test run ID for SCALING mode comparison',
+    example: 'PaymentService-production-loadTest-20240115-103000',
+  })
+  @IsOptional()
+  @IsString()
+  @Length(1, 255, { message: 'baselineTestRunId must be between 1 and 255 characters' })
+  baselineTestRunId?: string;
 }

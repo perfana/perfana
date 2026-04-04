@@ -180,6 +180,9 @@ export class TestRunsMutationService {
       organizationId: existingTestRun?.organization_id || organizationId,
       createdBy: existingTestRun ? undefined : userId,
       updatedBy: userId,
+      // ADAPT mode support (SCALING for sizing tests)
+      adaptMode: d.adaptMode,
+      baselineTestRunId: d.baselineTestRunId,
     };
 
     // Create context for handlers to use in event emission
