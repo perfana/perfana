@@ -185,7 +185,17 @@ export class TestRunsMutationService {
       // ADAPT mode: DTO override > workload config > DEFAULT
       adaptMode: d.adaptMode || workloadConfig?.adaptMode,
       baselineTestRunId: d.baselineTestRunId || workloadConfig?.baselineTestRunId,
+      scalingSessionId: d.scalingSessionId,
     };
+
+    // If scalingSessionId is set, look up session and auto-apply SCALING mode
+    if (common.scalingSessionId && !existingTestRun) {
+      const session = await this.lookupScalingSession(common.scalingSessionId);
+      if (session) {
+        common.adaptMode = common.adaptMode || 'SCALING';
+        common.baselineTestRunId = common.baselineTestRunId || session.baseline_test_run_id;
+      }
+    }
 
     // Create context for handlers to use in event emission
     const context = {
@@ -203,8 +213,38 @@ export class TestRunsMutationService {
       throw new DatabaseException(`Failed to ${existingTestRun ? 'update' : 'create'} test run`);
     }
 
+    // If this is a new test run in a scaling session with no baseline, set it as the baseline
+    if (!existingTestRun && common.scalingSessionId && result.data) {
+      await this.maybeSetSessionBaseline(common.scalingSessionId, result.data.test_run_id);
+    }
+
     this.logger.debug(`Test run ${existingTestRun ? 'updated' : 'created'} by user ${userId}`);
     return result.data;
+  }
+
+  private async lookupScalingSession(id: string): Promise<{ baseline_test_run_id?: string } | null> {
+    try {
+      const result = await this.testRunRepo.manager.query(
+        `SELECT baseline_test_run_id FROM scaling_sessions WHERE id = $1`,
+        [id],
+      );
+      return result?.[0] || null;
+    } catch {
+      return null;
+    }
+  }
+
+  private async maybeSetSessionBaseline(sessionId: string, testRunId: string): Promise<void> {
+    try {
+      // Only set baseline if the session doesn't have one yet
+      await this.testRunRepo.manager.query(
+        `UPDATE scaling_sessions SET baseline_test_run_id = $1, updated_at = NOW()
+         WHERE id = $2 AND baseline_test_run_id IS NULL`,
+        [testRunId, sessionId],
+      );
+    } catch (error) {
+      this.logger.warn(`Failed to set session baseline: ${(error as Error).message}`);
+    }
   }
 
   private async handleCompletedTest(testRun: TestRun): Promise<void> {

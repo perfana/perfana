@@ -278,4 +278,11 @@ export class UpdateRunningTestDto {
   @IsString()
   @Length(1, 255, { message: 'baselineTestRunId must be between 1 and 255 characters' })
   baselineTestRunId?: string;
+
+  @ApiPropertyOptional({
+    description: 'Scaling session UUID to associate this test run with',
+  })
+  @IsOptional()
+  @IsString()
+  scalingSessionId?: string;
 }
