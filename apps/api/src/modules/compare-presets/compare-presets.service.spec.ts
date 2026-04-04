@@ -12,6 +12,7 @@ describe('ComparePresetsService', () => {
   let service: ComparePresetsService;
   let comparePresetRepo: MockRepository<CompareFilterPreset>;
   let testRunRepo: MockRepository<TestRunEntity>;
+  let module: import('@nestjs/testing').TestingModule;
 
   const userId = 'user-uuid';
   const otherUserId = 'other-user-uuid';
@@ -53,7 +54,7 @@ describe('ComparePresetsService', () => {
     const mockComparePresetRepo = createMockRepository<CompareFilterPreset>();
     const mockTestRunRepo = createMockRepository<TestRunEntity>();
 
-    const module: TestingModule = await Test.createTestingModule({
+    module = await Test.createTestingModule({
       providers: [
         ComparePresetsService,
         {
@@ -1546,6 +1547,556 @@ describe('ComparePresetsService', () => {
         expect(result.description).toBeUndefined();
         expect(result.series_search_text).toBeUndefined();
         expect(result.application_dashboard_id).toBeUndefined();
+      });
+    });
+  });
+
+  // ─── Authorization paths (non-admin users, validateTestRunAccess) ─────────
+
+  describe('Authorization and Organization Filtering', () => {
+    // Helper: build the mock query builder used by findOne / update / remove
+    const makeQueryBuilder = (preset: CompareFilterPreset | null) => ({
+      leftJoinAndSelect: jest.fn().mockReturnThis(),
+      where: jest.fn().mockReturnThis(),
+      andWhere: jest.fn().mockReturnThis(),
+      getOne: jest.fn().mockResolvedValue(preset),
+    });
+
+    // Helper: build the mock query builder used by findAll
+    const makeFindAllQueryBuilder = (presets: CompareFilterPreset[]) => ({
+      leftJoinAndSelect: jest.fn().mockReturnThis(),
+      leftJoin: jest.fn().mockReturnThis(),
+      where: jest.fn().mockReturnThis(),
+      andWhere: jest.fn().mockReturnThis(),
+      orderBy: jest.fn().mockReturnThis(),
+      getMany: jest.fn().mockResolvedValue(presets),
+    });
+
+    const mockDate = new Date('2024-01-15T10:00:00.000Z');
+
+    const basePreset: CompareFilterPreset = {
+      id: 'preset-uuid',
+      name: 'Test Preset',
+      presetType: 'generic',
+      showPercentiles: false,
+      isGlobal: false,
+      createdBy: userId,
+      createdAt: mockDate,
+      updatedAt: mockDate,
+    } as CompareFilterPreset;
+
+    describe('validateTestRunAccess (via create)', () => {
+      it('should bypass test-run access check for admin users', async () => {
+        // Arrange
+        const createDto: CreateComparePresetDto = {
+          name: 'Admin Preset',
+          preset_type: PresetType.GENERIC,
+          show_percentiles: false,
+          is_global: false,
+          baseline_test_run_id: 'any-run-id',
+        };
+
+        comparePresetRepo.create.mockReturnValue(basePreset);
+        comparePresetRepo.save.mockResolvedValue(basePreset);
+
+        // Act — admin role bypasses all access checks, testRunRepo.query must not be called
+        await service.create(createDto, userId, ['perfana-admin']);
+
+        // Assert
+        expect(testRunRepo.query).not.toHaveBeenCalled();
+        expect(comparePresetRepo.save).toHaveBeenCalled();
+      });
+
+      it('should deny create when non-admin user has no organization memberships', async () => {
+        // Arrange — authzService returns empty org list
+        const authzService = module.get(AuthorizationService);
+        (authzService.getAccessibleOrganizations as jest.Mock).mockResolvedValueOnce([]);
+
+        const createDto: CreateComparePresetDto = {
+          name: 'Preset',
+          preset_type: PresetType.GENERIC,
+          show_percentiles: false,
+          is_global: false,
+          baseline_test_run_id: 'run-no-access',
+        };
+
+        // Act & Assert
+        await expect(service.create(createDto, userId, ['user'])).rejects.toThrow(
+          /TestRun.*run-no-access/
+        );
+        expect(comparePresetRepo.save).not.toHaveBeenCalled();
+      });
+
+      it('should deny create when test run is not in any of the user organizations', async () => {
+        // Arrange — query returns empty (run belongs to a different org)
+        testRunRepo.query.mockResolvedValue([]);
+
+        const createDto: CreateComparePresetDto = {
+          name: 'Preset',
+          preset_type: PresetType.GENERIC,
+          show_percentiles: false,
+          is_global: false,
+          baseline_test_run_id: 'run-other-org',
+        };
+
+        // Act & Assert
+        await expect(service.create(createDto, userId, ['user'])).rejects.toThrow(
+          /TestRun.*run-other-org/
+        );
+        expect(comparePresetRepo.save).not.toHaveBeenCalled();
+      });
+
+      it('should allow create when non-admin user has access to the baseline test run', async () => {
+        // Arrange — query returns one row confirming org membership
+        testRunRepo.query.mockResolvedValue([{ '?column?': 1 }]);
+
+        const createDto: CreateComparePresetDto = {
+          name: 'Preset',
+          preset_type: PresetType.GENERIC,
+          show_percentiles: false,
+          is_global: false,
+          baseline_test_run_id: 'accessible-run',
+        };
+
+        comparePresetRepo.create.mockReturnValue(basePreset);
+        comparePresetRepo.save.mockResolvedValue(basePreset);
+
+        // Act
+        const result = await service.create(createDto, userId, ['user']);
+
+        // Assert
+        expect(testRunRepo.query).toHaveBeenCalledWith(
+          expect.stringContaining('test_run_id = $1'),
+          ['accessible-run', ['org-1']],
+        );
+        expect(result.id).toBe('preset-uuid');
+      });
+
+      it('should check both baseline and created_for test run access for non-admin', async () => {
+        // Arrange — both test runs are accessible
+        testRunRepo.query.mockResolvedValue([{ '?column?': 1 }]);
+
+        const createDto: CreateComparePresetDto = {
+          name: 'Preset',
+          preset_type: PresetType.GENERIC,
+          show_percentiles: false,
+          is_global: false,
+          baseline_test_run_id: 'baseline-run',
+          created_for_test_run_id: 'context-run',
+        };
+
+        comparePresetRepo.create.mockReturnValue(basePreset);
+        comparePresetRepo.save.mockResolvedValue(basePreset);
+
+        // Act
+        await service.create(createDto, userId, ['user']);
+
+        // Assert — query called twice, once for each run
+        expect(testRunRepo.query).toHaveBeenCalledTimes(2);
+      });
+
+      it('should deny create when created_for test run is inaccessible even if baseline is ok', async () => {
+        // Arrange — first call (baseline) succeeds, second call (created_for) returns empty
+        testRunRepo.query
+          .mockResolvedValueOnce([{ '?column?': 1 }]) // baseline accessible
+          .mockResolvedValueOnce([]);                  // created_for not accessible
+
+        const createDto: CreateComparePresetDto = {
+          name: 'Preset',
+          preset_type: PresetType.GENERIC,
+          show_percentiles: false,
+          is_global: false,
+          baseline_test_run_id: 'baseline-run',
+          created_for_test_run_id: 'inaccessible-context-run',
+        };
+
+        // Act & Assert
+        await expect(service.create(createDto, userId, ['user'])).rejects.toThrow(
+          /TestRun.*inaccessible-context-run/
+        );
+      });
+
+      it('should skip access check when neither baseline nor context run is set', async () => {
+        // Arrange — no test run IDs at all
+        const createDto: CreateComparePresetDto = {
+          name: 'Preset',
+          preset_type: PresetType.GENERIC,
+          show_percentiles: false,
+          is_global: false,
+        };
+
+        comparePresetRepo.create.mockReturnValue(basePreset);
+        comparePresetRepo.save.mockResolvedValue(basePreset);
+
+        // Act
+        await service.create(createDto, userId, ['user']);
+
+        // Assert
+        expect(testRunRepo.query).not.toHaveBeenCalled();
+      });
+    });
+
+    describe('findAll - non-admin access filtering', () => {
+      it('should include user own presets without org check', async () => {
+        // Arrange — non-admin with a preset they own
+        const ownPreset = { ...basePreset, createdBy: userId, isGlobal: false, presetType: 'generic' };
+        comparePresetRepo.createQueryBuilder.mockReturnValue(
+          makeFindAllQueryBuilder([ownPreset]) as ReturnType<typeof makeFindAllQueryBuilder>
+        );
+
+        // Act
+        const result = await service.findAll(userId, undefined, ['user']);
+
+        // Assert
+        expect(result).toHaveLength(1);
+        expect(result[0]?.created_by).toBe(userId);
+        // query should not be called because the preset belongs to the user
+        expect(testRunRepo.query).not.toHaveBeenCalled();
+      });
+
+      it('should include global presets when referenced test runs are accessible', async () => {
+        // Arrange — global preset owned by someone else, baseline accessible
+        const globalPreset: CompareFilterPreset = {
+          ...basePreset,
+          id: 'global-1',
+          createdBy: otherUserId,
+          isGlobal: true,
+          presetType: 'generic',
+          baselineTestRunId: 'run-accessible',
+        } as CompareFilterPreset;
+
+        comparePresetRepo.createQueryBuilder.mockReturnValue(
+          makeFindAllQueryBuilder([globalPreset]) as ReturnType<typeof makeFindAllQueryBuilder>
+        );
+        testRunRepo.query.mockResolvedValue([{ '?column?': 1 }]);
+
+        // Act
+        const result = await service.findAll(userId, undefined, ['user']);
+
+        // Assert
+        expect(result).toHaveLength(1);
+        expect(result[0]?.is_global).toBe(true);
+        expect(testRunRepo.query).toHaveBeenCalled();
+      });
+
+      it('should exclude global presets when baseline test run is inaccessible', async () => {
+        // Arrange — global preset, baseline in a different org
+        const globalPreset: CompareFilterPreset = {
+          ...basePreset,
+          id: 'global-2',
+          createdBy: otherUserId,
+          isGlobal: true,
+          presetType: 'generic',
+          baselineTestRunId: 'run-no-access',
+        } as CompareFilterPreset;
+
+        comparePresetRepo.createQueryBuilder.mockReturnValue(
+          makeFindAllQueryBuilder([globalPreset]) as ReturnType<typeof makeFindAllQueryBuilder>
+        );
+        testRunRepo.query.mockResolvedValue([]); // no access
+
+        // Act
+        const result = await service.findAll(userId, undefined, ['user']);
+
+        // Assert
+        expect(result).toHaveLength(0);
+      });
+
+      it('should exclude global presets when created_for test run is inaccessible', async () => {
+        // Arrange — global preset with accessible baseline but inaccessible created_for
+        const globalPreset: CompareFilterPreset = {
+          ...basePreset,
+          id: 'global-3',
+          createdBy: otherUserId,
+          isGlobal: true,
+          presetType: 'generic',
+          baselineTestRunId: 'run-accessible',
+          createdForTestRunId: 'run-no-access',
+        } as CompareFilterPreset;
+
+        comparePresetRepo.createQueryBuilder.mockReturnValue(
+          makeFindAllQueryBuilder([globalPreset]) as ReturnType<typeof makeFindAllQueryBuilder>
+        );
+        // First call (baseline) ok, second call (created_for) denied
+        testRunRepo.query
+          .mockResolvedValueOnce([{ '?column?': 1 }])
+          .mockResolvedValueOnce([]);
+
+        // Act
+        const result = await service.findAll(userId, undefined, ['user']);
+
+        // Assert
+        expect(result).toHaveLength(0);
+      });
+
+      it('should include global preset without any test run references', async () => {
+        // Arrange — global preset with no baseline/context run IDs
+        const globalPreset: CompareFilterPreset = {
+          ...basePreset,
+          id: 'global-4',
+          createdBy: otherUserId,
+          isGlobal: true,
+          presetType: 'generic',
+          baselineTestRunId: undefined,
+          createdForTestRunId: undefined,
+        } as CompareFilterPreset;
+
+        comparePresetRepo.createQueryBuilder.mockReturnValue(
+          makeFindAllQueryBuilder([globalPreset]) as ReturnType<typeof makeFindAllQueryBuilder>
+        );
+
+        // Act
+        const result = await service.findAll(userId, undefined, ['user']);
+
+        // Assert
+        expect(result).toHaveLength(1);
+        expect(testRunRepo.query).not.toHaveBeenCalled();
+      });
+
+      it('should apply SUT context filter when currentTestRunId is provided', async () => {
+        // Arrange — resolve the current test run to a SUT context
+        const contextTestRun = {
+          systemUnderTestId: 'sut-uuid',
+          testEnvironment: 'production',
+          workload: 'load-test',
+        };
+        testRunRepo.findOne.mockResolvedValueOnce(contextTestRun as TestRunEntity);
+
+        const qb = makeFindAllQueryBuilder([]);
+        comparePresetRepo.createQueryBuilder.mockReturnValue(qb as ReturnType<typeof makeFindAllQueryBuilder>);
+
+        // Act
+        await service.findAll(userId, 'context-run-id', ['admin']);
+
+        // Assert — the query builder should receive a leftJoin for test_runs
+        expect(qb.leftJoin).toHaveBeenCalledWith(
+          'test_runs',
+          'tr',
+          'tr.test_run_id = preset.createdForTestRunId',
+        );
+      });
+
+      it('should not apply SUT context filter when test run is not found', async () => {
+        // Arrange — no matching test run for the given currentTestRunId
+        testRunRepo.findOne.mockResolvedValueOnce(null);
+
+        const qb = makeFindAllQueryBuilder([]);
+        comparePresetRepo.createQueryBuilder.mockReturnValue(qb as ReturnType<typeof makeFindAllQueryBuilder>);
+
+        // Act
+        await service.findAll(userId, 'unknown-run-id', ['admin']);
+
+        // Assert — no SUT context join should be added
+        expect(qb.leftJoin).not.toHaveBeenCalled();
+      });
+
+      it('should apply metricsSourceId filter when provided', async () => {
+        // Arrange
+        const qb = makeFindAllQueryBuilder([]);
+        comparePresetRepo.createQueryBuilder.mockReturnValue(qb as ReturnType<typeof makeFindAllQueryBuilder>);
+
+        // Act
+        await service.findAll(userId, undefined, ['admin'], 'metrics-source-uuid');
+
+        // Assert
+        expect(qb.andWhere).toHaveBeenCalledWith(
+          'preset.metricsSourceId = :metricsSourceId',
+          { metricsSourceId: 'metrics-source-uuid' },
+        );
+      });
+    });
+
+    describe('findOne - non-admin org access check', () => {
+      it('should throw NotFoundException when non-admin accesses global preset with inaccessible baseline', async () => {
+        // Arrange
+        const globalPreset: CompareFilterPreset = {
+          ...basePreset,
+          createdBy: otherUserId,
+          isGlobal: true,
+          baselineTestRunId: 'inaccessible-baseline',
+        } as CompareFilterPreset;
+
+        comparePresetRepo.createQueryBuilder.mockReturnValue(
+          makeQueryBuilder(globalPreset) as ReturnType<typeof makeQueryBuilder>
+        );
+        testRunRepo.query.mockResolvedValue([]); // no access
+
+        // Act & Assert
+        await expect(service.findOne('preset-uuid', userId, ['user'])).rejects.toThrow(
+          new NotFoundException('Compare preset with ID preset-uuid not found')
+        );
+      });
+
+      it('should throw NotFoundException when non-admin accesses global preset with inaccessible created_for run', async () => {
+        // Arrange
+        const globalPreset: CompareFilterPreset = {
+          ...basePreset,
+          createdBy: otherUserId,
+          isGlobal: true,
+          baselineTestRunId: undefined,
+          createdForTestRunId: 'inaccessible-context',
+        } as CompareFilterPreset;
+
+        comparePresetRepo.createQueryBuilder.mockReturnValue(
+          makeQueryBuilder(globalPreset) as ReturnType<typeof makeQueryBuilder>
+        );
+        testRunRepo.query.mockResolvedValue([]); // no access
+
+        // Act & Assert
+        await expect(service.findOne('preset-uuid', userId, ['user'])).rejects.toThrow(
+          new NotFoundException('Compare preset with ID preset-uuid not found')
+        );
+      });
+
+      it('should return global preset when non-admin has full access to all referenced runs', async () => {
+        // Arrange
+        const globalPreset: CompareFilterPreset = {
+          ...basePreset,
+          createdBy: otherUserId,
+          isGlobal: true,
+          baselineTestRunId: 'accessible-baseline',
+          createdForTestRunId: 'accessible-context',
+        } as CompareFilterPreset;
+
+        comparePresetRepo.createQueryBuilder.mockReturnValue(
+          makeQueryBuilder(globalPreset) as ReturnType<typeof makeQueryBuilder>
+        );
+        testRunRepo.query.mockResolvedValue([{ '?column?': 1 }]);
+
+        // Act
+        const result = await service.findOne('preset-uuid', userId, ['user']);
+
+        // Assert
+        expect(result.is_global).toBe(true);
+        expect(testRunRepo.query).toHaveBeenCalledTimes(2);
+      });
+
+      it('should skip org access check for admin users even on global presets owned by others', async () => {
+        // Arrange
+        const globalPreset: CompareFilterPreset = {
+          ...basePreset,
+          createdBy: otherUserId,
+          isGlobal: true,
+          baselineTestRunId: 'some-run',
+        } as CompareFilterPreset;
+
+        comparePresetRepo.createQueryBuilder.mockReturnValue(
+          makeQueryBuilder(globalPreset) as ReturnType<typeof makeQueryBuilder>
+        );
+
+        // Act — admin role bypasses org access check
+        const result = await service.findOne('preset-uuid', userId, ['perfana-admin']);
+
+        // Assert
+        expect(testRunRepo.query).not.toHaveBeenCalled();
+        expect(result.is_global).toBe(true);
+      });
+
+      it('should skip org access check for presets owned by the requesting user', async () => {
+        // Arrange — preset belongs to the requesting user (non-admin)
+        const ownPreset: CompareFilterPreset = {
+          ...basePreset,
+          createdBy: userId,
+          isGlobal: true,
+          baselineTestRunId: 'some-run',
+        } as CompareFilterPreset;
+
+        comparePresetRepo.createQueryBuilder.mockReturnValue(
+          makeQueryBuilder(ownPreset) as ReturnType<typeof makeQueryBuilder>
+        );
+        testRunRepo.findOne.mockResolvedValue({
+          applicationRelease: 'v1.0.0',
+          annotations: [],
+        } as unknown as TestRunEntity);
+
+        // Act
+        const result = await service.findOne('preset-uuid', userId, ['user']);
+
+        // Assert — testRunRepo.query (org check) should not be called
+        expect(testRunRepo.query).not.toHaveBeenCalled();
+        expect(result.created_by).toBe(userId);
+      });
+    });
+
+    describe('update - non-admin baseline test run access check', () => {
+      it('should deny update when non-admin sets a new baseline test run they cannot access', async () => {
+        // Arrange
+        comparePresetRepo.createQueryBuilder.mockReturnValue(
+          makeQueryBuilder(basePreset) as ReturnType<typeof makeQueryBuilder>
+        );
+        testRunRepo.query.mockResolvedValue([]); // no access to new baseline
+
+        const updateDto: UpdateComparePresetDto = {
+          baseline_test_run_id: 'inaccessible-baseline',
+        };
+
+        // Act & Assert
+        await expect(service.update('preset-uuid', updateDto, userId, ['user'])).rejects.toThrow(
+          /TestRun.*inaccessible-baseline/
+        );
+        expect(comparePresetRepo.update).not.toHaveBeenCalled();
+      });
+
+      it('should allow update when non-admin sets an accessible baseline test run', async () => {
+        // Arrange
+        comparePresetRepo.createQueryBuilder.mockReturnValue(
+          makeQueryBuilder(basePreset) as ReturnType<typeof makeQueryBuilder>
+        );
+        testRunRepo.query.mockResolvedValue([{ '?column?': 1 }]); // accessible
+
+        const updatedPreset = { ...basePreset, baselineTestRunId: 'accessible-baseline' };
+        comparePresetRepo.update.mockResolvedValue({} as ReturnType<typeof comparePresetRepo.update>);
+        comparePresetRepo.findOne.mockResolvedValue(updatedPreset);
+
+        const updateDto: UpdateComparePresetDto = {
+          baseline_test_run_id: 'accessible-baseline',
+        };
+
+        // Act
+        const result = await service.update('preset-uuid', updateDto, userId, ['user']);
+
+        // Assert
+        expect(testRunRepo.query).toHaveBeenCalled();
+        expect(comparePresetRepo.update).toHaveBeenCalled();
+        expect(result.baseline_test_run_id).toBe('accessible-baseline');
+      });
+
+      it('should skip baseline access check when baseline_test_run_id is undefined in update', async () => {
+        // Arrange — update that does not touch baseline_test_run_id
+        comparePresetRepo.createQueryBuilder.mockReturnValue(
+          makeQueryBuilder(basePreset) as ReturnType<typeof makeQueryBuilder>
+        );
+        const updatedPreset = { ...basePreset, name: 'New Name' };
+        comparePresetRepo.update.mockResolvedValue({} as ReturnType<typeof comparePresetRepo.update>);
+        comparePresetRepo.findOne.mockResolvedValue(updatedPreset);
+
+        const updateDto: UpdateComparePresetDto = { name: 'New Name' };
+
+        // Act
+        await service.update('preset-uuid', updateDto, userId, ['user']);
+
+        // Assert
+        expect(testRunRepo.query).not.toHaveBeenCalled();
+      });
+
+      it('should bypass baseline access check for admin users during update', async () => {
+        // Arrange
+        comparePresetRepo.createQueryBuilder.mockReturnValue(
+          makeQueryBuilder(basePreset) as ReturnType<typeof makeQueryBuilder>
+        );
+        const updatedPreset = { ...basePreset, baselineTestRunId: 'any-run' };
+        comparePresetRepo.update.mockResolvedValue({} as ReturnType<typeof comparePresetRepo.update>);
+        comparePresetRepo.findOne.mockResolvedValue(updatedPreset);
+
+        const updateDto: UpdateComparePresetDto = {
+          baseline_test_run_id: 'any-run',
+        };
+
+        // Act — admin bypasses org check
+        await service.update('preset-uuid', updateDto, userId, ['perfana-admin']);
+
+        // Assert
+        expect(testRunRepo.query).not.toHaveBeenCalled();
       });
     });
   });
