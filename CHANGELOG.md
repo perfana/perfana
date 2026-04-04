@@ -4,6 +4,16 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
+## [0.2.28.0] - 2026-04-04
+
+### Added
+- Scaling sessions: group related scaling test runs with shared baseline and progression tracking
+- `scaling_sessions` table with CRUD API (POST/GET/PUT /scaling-sessions)
+- Progression endpoint (GET /scaling-sessions/:id/progression) returning metrics, ADAPT conclusions, and load config across all runs in a session
+- Test runs with `scalingSessionId` auto-get SCALING mode and session baseline; first run auto-sets as baseline
+- Scaling Progression card on test run detail page with recharts line chart, metric selector, and run status chips
+- ADAPT Settings tab on system configuration page to toggle Regression/Scaling mode per workload
+
 ## [0.2.27.0] - 2026-04-04
 
 ### Added

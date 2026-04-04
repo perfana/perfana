@@ -101,6 +101,7 @@ export class CreateTestRunHandler implements ICommandHandler<CreateTestRunComman
       } as AdaptConfig,
       startTime: data.startTime || new Date(),
       endTime: data.endTime || new Date(),
+      scalingSessionId: data.scalingSessionId,
       // Ownership tracking (from API key or user context)
       organizationId: data.organizationId,
       teamId: data.teamId,

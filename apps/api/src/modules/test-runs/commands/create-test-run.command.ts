@@ -56,6 +56,8 @@ export interface CreateTestRunData {
   adaptMode?: string;
   /** Baseline test run ID for SCALING mode comparison */
   baselineTestRunId?: string;
+  /** Scaling session UUID */
+  scalingSessionId?: string;
 }
 
 /**
@@ -100,6 +102,7 @@ export class CreateTestRunCommand implements ICommand {
     updatedBy?: string;
     adaptMode?: string;
     baselineTestRunId?: string;
+    scalingSessionId?: string;
   }, options?: MutationOptions): CreateTestRunCommand {
     return new CreateTestRunCommand(
       {
@@ -125,6 +128,7 @@ export class CreateTestRunCommand implements ICommand {
         updatedBy: params.updatedBy,
         adaptMode: params.adaptMode,
         baselineTestRunId: params.baselineTestRunId,
+        scalingSessionId: params.scalingSessionId,
       },
       options,
     );

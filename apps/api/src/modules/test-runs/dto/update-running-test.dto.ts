@@ -7,6 +7,7 @@ import {
   ValidateNested,
   Length,
   IsUrl,
+  IsUUID,
   ArrayMaxSize,
   Matches,
   IsInt,
@@ -278,4 +279,11 @@ export class UpdateRunningTestDto {
   @IsString()
   @Length(1, 255, { message: 'baselineTestRunId must be between 1 and 255 characters' })
   baselineTestRunId?: string;
+
+  @ApiPropertyOptional({
+    description: 'Scaling session UUID to associate this test run with',
+  })
+  @IsOptional()
+  @IsUUID(undefined, { message: 'scalingSessionId must be a valid UUID' })
+  scalingSessionId?: string;
 }

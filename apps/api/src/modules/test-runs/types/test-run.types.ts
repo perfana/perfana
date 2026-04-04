@@ -40,6 +40,7 @@ export interface TestRun {
   adapt_config?: AdaptConfig;
   variables?: TestRunVariables;
   deep_links?: DeepLinksCollection;
+  scaling_session_id?: string;
   deletion_status?: string;
   // Ownership tracking (multi-tenant RBAC)
   organization_id?: string;

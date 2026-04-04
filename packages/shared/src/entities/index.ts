@@ -48,6 +48,7 @@ export * from './graph-preset.entity';
 export * from './organization.entity';
 export * from './profile.entity';
 export * from './pyroscope-instance.entity';
+export * from './scaling-session.entity';
 export * from './system-under-test.entity';
 export * from './team.entity';
 export * from './test-run-configuration.entity';
