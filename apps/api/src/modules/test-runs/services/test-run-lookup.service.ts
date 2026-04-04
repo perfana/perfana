@@ -195,12 +195,18 @@ export class TestRunLookupService {
     const testEnvironmentId = envResult[0].id;
 
     // Merge config update into existing config
-    await this.dataSource.query(
+    const updateResult = await this.dataSource.query(
       `UPDATE system_under_test_workloads
        SET config = COALESCE(config, '{}'::jsonb) || $1::jsonb
        WHERE system_under_test_test_environment_id = $2 AND name = $3`,
       [JSON.stringify(configUpdate), testEnvironmentId, workloadName],
     );
+
+    // updateResult[1] is the affected row count in raw PostgreSQL results
+    const affectedRows = updateResult?.[1] ?? updateResult?.rowCount ?? 0;
+    if (affectedRows === 0) {
+      throw new Error(`Workload '${workloadName}' not found for environment '${testEnvironment}'`);
+    }
 
     this.logger.log(`Updated workload config for ${workloadName} in ${testEnvironment}: ${JSON.stringify(configUpdate)}`);
   }

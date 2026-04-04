@@ -948,11 +948,12 @@ export class MetricsService {
     try {
       const rows = await this.metricStatisticsRepo
         .createQueryBuilder('s')
-        .select('DISTINCT s.panel_id', 'panel_id')
-        .addSelect('s.panel_title', 'panel_title')
-        .addSelect('s.unit', 'unit')
+        .select('s.panel_id', 'panel_id')
+        .addSelect('MIN(s.panel_title)', 'panel_title')
+        .addSelect('MIN(s.unit)', 'unit')
         .where('s.application_dashboard_id = :applicationDashboardId', { applicationDashboardId })
-        .orderBy('s.panel_title')
+        .groupBy('s.panel_id')
+        .orderBy('MIN(s.panel_title)')
         .getRawMany();
 
       return rows;

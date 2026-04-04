@@ -406,14 +406,19 @@ export class ControlGroupsPipeline extends BasePipelineTypeORM {
     const baselineTestRunId = testRun.adapt_config?.baselineTestRunId;
 
     if (baselineTestRunId) {
-      // Explicit baseline: select that specific run
-      const result = await manager.query(
-        `SELECT test_run_id FROM test_runs
+      // Explicit baseline: select that specific run (with RBAC org filter)
+      let query = `SELECT test_run_id FROM test_runs
          WHERE test_run_id = $1
-           AND end_time IS NOT NULL
-         LIMIT 1`,
-        [baselineTestRunId]
-      );
+           AND end_time IS NOT NULL`;
+      const params: any[] = [baselineTestRunId];
+
+      if (testRun.organization_id) {
+        query += ` AND (organization_id = $2 OR organization_id IS NULL)`;
+        params.push(testRun.organization_id);
+      }
+
+      query += ` LIMIT 1`;
+      const result = await manager.query(query, params);
 
       const ids = result.map((row: any) => row.test_run_id);
       this.logger.info(
