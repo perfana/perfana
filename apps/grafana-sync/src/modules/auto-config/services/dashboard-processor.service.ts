@@ -10,12 +10,9 @@ import {
   TestRun,
   ProfileGrafanaDashboard,
   GrafanaDashboard,
-  GrafanaInstance,
   ApplicationDashboard,
 } from '@perfana/shared/entities';
-import {
-  DashboardFinderService,
-} from '../dashboard-finder.service';
+import { DashboardFinderService } from '../dashboard-finder.service';
 import {
   AutoConfigUpdatesService,
   ApplicationDashboardInsertData,
