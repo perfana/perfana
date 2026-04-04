@@ -172,6 +172,62 @@ export class TestRunLookupService {
   }
 
   /**
+   * Update the workload config for a given system/environment/workload.
+   * Merges the provided fields into the existing config JSONB.
+   */
+  async updateWorkloadConfig(
+    systemUnderTestId: string,
+    testEnvironment: string,
+    workloadName: string,
+    configUpdate: Record<string, unknown>,
+  ): Promise<void> {
+    // Look up the test environment ID
+    const envResult = await this.dataSource.query(
+      `SELECT id FROM system_under_test_test_environments
+       WHERE system_under_test_id = $1 AND name = $2`,
+      [systemUnderTestId, testEnvironment],
+    );
+
+    if (!envResult || envResult.length === 0) {
+      throw new Error(`Test environment '${testEnvironment}' not found for system ${systemUnderTestId}`);
+    }
+
+    const testEnvironmentId = envResult[0].id;
+
+    // Merge config update into existing config
+    await this.dataSource.query(
+      `UPDATE system_under_test_workloads
+       SET config = COALESCE(config, '{}'::jsonb) || $1::jsonb
+       WHERE system_under_test_test_environment_id = $2 AND name = $3`,
+      [JSON.stringify(configUpdate), testEnvironmentId, workloadName],
+    );
+
+    this.logger.log(`Updated workload config for ${workloadName} in ${testEnvironment}: ${JSON.stringify(configUpdate)}`);
+  }
+
+  /**
+   * Get the workload config for a given system/environment/workload.
+   */
+  async getWorkloadConfig(
+    systemUnderTestId: string,
+    testEnvironment: string,
+    workloadName: string,
+  ): Promise<Record<string, unknown> | null> {
+    const result = await this.dataSource.query(
+      `SELECT w.config
+       FROM system_under_test_workloads w
+       INNER JOIN system_under_test_test_environments e
+         ON w.system_under_test_test_environment_id = e.id
+       WHERE e.system_under_test_id = $1
+         AND e.name = $2
+         AND w.name = $3`,
+      [systemUnderTestId, testEnvironment, workloadName],
+    );
+
+    return result?.[0]?.config || null;
+  }
+
+  /**
    * Get or create the default team and organization
    */
   async getDefaultTeam(): Promise<{ id: string; name: string } | null> {

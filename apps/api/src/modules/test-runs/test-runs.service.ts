@@ -307,6 +307,14 @@ export class TestRunsService {
     return this.mutationService.updateAdaptConfig(testRunId, differencesAccepted, userId, roles, systemUnderTestId, environment, workload);
   }
 
+  async getWorkloadAdaptSettings(systemUnderTestId: string, testEnvironment: string, workload: string): Promise<Record<string, unknown> | null> {
+    return this.mutationService.getWorkloadConfig(systemUnderTestId, testEnvironment, workload);
+  }
+
+  async updateWorkloadAdaptSettings(systemUnderTestId: string, testEnvironment: string, workload: string, adaptMode: string, baselineTestRunId?: string): Promise<void> {
+    return this.mutationService.updateWorkloadConfig(systemUnderTestId, testEnvironment, workload, adaptMode, baselineTestRunId);
+  }
+
   // ========== Config Methods (delegated to ConfigService) ==========
 
   async getTestRunConfigs(

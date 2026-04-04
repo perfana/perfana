@@ -1,4 +1,4 @@
-import { Controller, Get, Delete, Post, Put, Param, Query, Body, Logger } from '@nestjs/common';
+import { Controller, Get, Delete, Post, Put, Param, Query, Body, Logger, BadRequestException } from '@nestjs/common';
 import { ApiTags, ApiOperation, ApiResponse, ApiQuery, ApiBearerAuth } from '@nestjs/swagger';
 import { TestRunsService } from '../test-runs.service';
 import { CreateMetricClassificationDto, MetricClassificationDto } from '../dto/metric-classification.dto';
@@ -383,5 +383,49 @@ export class TestRunsAnalysisController {
       ctx.userId,
       ctx.roles,
     );
+  }
+
+  // ==================== Workload ADAPT Settings ====================
+
+  @Get('workload-adapt-settings')
+  @ApiOperation({ summary: 'Get ADAPT mode settings for a workload' })
+  @ApiQuery({ name: 'systemUnderTestId', required: true, type: String })
+  @ApiQuery({ name: 'testEnvironment', required: true, type: String })
+  @ApiQuery({ name: 'workload', required: true, type: String })
+  @ApiResponse({ status: 200, description: 'Workload ADAPT settings' })
+  async getWorkloadAdaptSettings(
+    @Query('systemUnderTestId') systemUnderTestId: string,
+    @Query('testEnvironment') testEnvironment: string,
+    @Query('workload') workload: string,
+  ) {
+    if (!systemUnderTestId || !testEnvironment || !workload) {
+      throw new BadRequestException('systemUnderTestId, testEnvironment, and workload are required');
+    }
+
+    const config = await this.testRunsService.getWorkloadAdaptSettings(systemUnderTestId, testEnvironment, workload);
+    return {
+      adaptMode: config?.adaptMode || 'DEFAULT',
+      baselineTestRunId: config?.baselineTestRunId || null,
+    };
+  }
+
+  @Put('workload-adapt-settings')
+  @ApiOperation({ summary: 'Set ADAPT mode for a workload (applies to all new test runs)' })
+  @ApiResponse({ status: 200, description: 'Settings updated' })
+  async updateWorkloadAdaptSettings(
+    @Body() body: { systemUnderTestId: string; testEnvironment: string; workload: string; adaptMode: string; baselineTestRunId?: string },
+  ) {
+    const { systemUnderTestId, testEnvironment, workload, adaptMode, baselineTestRunId } = body;
+
+    if (!systemUnderTestId || !testEnvironment || !workload || !adaptMode) {
+      throw new BadRequestException('systemUnderTestId, testEnvironment, workload, and adaptMode are required');
+    }
+
+    if (!['DEFAULT', 'SCALING'].includes(adaptMode)) {
+      throw new BadRequestException('adaptMode must be DEFAULT or SCALING');
+    }
+
+    await this.testRunsService.updateWorkloadAdaptSettings(systemUnderTestId, testEnvironment, workload, adaptMode, baselineTestRunId);
+    return { success: true, adaptMode, baselineTestRunId: baselineTestRunId || null };
   }
 }
