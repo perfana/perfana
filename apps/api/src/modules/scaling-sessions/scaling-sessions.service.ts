@@ -34,8 +34,50 @@ export class ScalingSessionsService {
     });
 
     const saved = await this.repo.save(session);
+
+    // Auto-set ADAPT mode to SCALING for this workload
+    await this.setWorkloadAdaptMode(dto.systemUnderTestId, dto.testEnvironment, dto.workload, dto.baselineTestRunId);
+
     this.logger.log(`Created scaling session ${saved.id}: ${saved.name}`);
     return saved;
+  }
+
+  /**
+   * Set the workload ADAPT mode to SCALING so future test runs auto-use scaling comparison.
+   */
+  private async setWorkloadAdaptMode(
+    systemUnderTestId: string,
+    testEnvironment: string,
+    workload: string,
+    baselineTestRunId?: string,
+  ): Promise<void> {
+    try {
+      // Update the workload config to SCALING mode
+      // The workload config is stored in the config table or applied via test-runs service
+      await this.dataSource.query(
+        `UPDATE test_runs
+         SET adapt_config = jsonb_set(
+           jsonb_set(
+             COALESCE(adapt_config, '{}'),
+             '{mode}',
+             '"SCALING"'
+           ),
+           '{baselineTestRunId}',
+           COALESCE($4::jsonb, 'null'::jsonb)
+         ),
+         updated_at = NOW()
+         WHERE system_under_test_id = $1
+           AND test_environment = $2
+           AND workload = $3
+           AND scaling_session_id IS NULL
+           AND adapt_config->>'mode' IS DISTINCT FROM 'SCALING'
+           AND end_time IS NULL`,
+        [systemUnderTestId, testEnvironment, workload, baselineTestRunId ? JSON.stringify(baselineTestRunId) : null],
+      );
+      this.logger.log(`Set ADAPT mode to SCALING for ${systemUnderTestId}/${testEnvironment}/${workload}`);
+    } catch (error) {
+      this.logger.warn(`Failed to auto-set ADAPT mode: ${(error as Error).message}`);
+    }
   }
 
   async findAll(
@@ -166,6 +208,57 @@ export class ScalingSessionsService {
         metrics: metricsPerRun[r.test_run_id] || [],
       })),
     };
+  }
+
+  /**
+   * Add a test run to a scaling session.
+   * Sets scaling_session_id on the test run and switches ADAPT mode to SCALING.
+   */
+  async addTestRun(sessionId: string, testRunId: string, userId: string, roles: string[]): Promise<{ success: true }> {
+    const session = await this.findOne(sessionId, userId, roles);
+
+    // Find the test run (by test_run_id string, not UUID)
+    const testRunRows = await this.dataSource.query(
+      `SELECT id, test_run_id, system_under_test_id, test_environment, workload, adapt_config
+       FROM test_runs WHERE test_run_id = $1 LIMIT 1`,
+      [testRunId],
+    );
+    if (testRunRows.length === 0) {
+      throw new ResourceNotFoundException('TestRun', testRunId);
+    }
+    const testRun = testRunRows[0];
+
+    // Verify the test run matches the session's scope
+    if (testRun.system_under_test_id !== session.system_under_test_id ||
+        testRun.test_environment !== session.test_environment ||
+        testRun.workload !== session.workload) {
+      throw new ResourceNotFoundException(
+        'TestRun',
+        `${testRunId} (scope mismatch: test run does not match session system/environment/workload)`,
+      );
+    }
+
+    // Set scaling_session_id and switch adapt_config to SCALING mode
+    const adaptConfig = testRun.adapt_config || {};
+    adaptConfig.mode = 'SCALING';
+    if (session.baseline_test_run_id && !adaptConfig.baselineTestRunId) {
+      adaptConfig.baselineTestRunId = session.baseline_test_run_id;
+    }
+
+    await this.dataSource.query(
+      `UPDATE test_runs
+       SET scaling_session_id = $1, adapt_config = $2, updated_by = $3, updated_at = NOW()
+       WHERE id = $4`,
+      [sessionId, JSON.stringify(adaptConfig), userId, testRun.id],
+    );
+
+    // If session has no baseline yet, set this test run as baseline
+    if (!session.baseline_test_run_id) {
+      await this.setBaseline(sessionId, testRunId);
+    }
+
+    this.logger.log(`Added test run ${testRunId} to scaling session ${sessionId}`);
+    return { success: true };
   }
 
   /**
