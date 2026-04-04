@@ -42,8 +42,12 @@ export interface ProgressionRun {
   end_time?: string;
   completed: boolean;
   meets_requirement: boolean | null;
+  application_release: string | null;
+  annotations: string[];
   load_config: Record<string, string>;
   slo_results: SloResult[];
+  anomaly_summary: Record<string, number>;
+  comment: string;
 }
 
 export interface ProgressionData {

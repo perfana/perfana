@@ -26,7 +26,6 @@ export function ProgressionCollapsedView({ data, loading, currentTestRunId }: Pr
   const { session, runs } = data;
   const currentIndex = runs.findIndex(r => r.test_run_id === currentTestRunId);
 
-  // Count runs where all SLOs passed vs runs with at least one SLO failure
   const passedRuns = runs.filter(r => r.slo_results.length > 0 && r.slo_results.every(s => s.meets_requirement === true)).length;
   const failedRuns = runs.filter(r => r.slo_results.some(s => s.meets_requirement === false)).length;
 
@@ -65,13 +64,6 @@ export function ProgressionCollapsedView({ data, loading, currentTestRunId }: Pr
             label={`${failedRuns} run${failedRuns > 1 ? 's' : ''} SLOs breached`}
             size="small"
             color="error"
-            variant="outlined"
-          />
-        )}
-        {session.linked_benchmarks.length > 0 && (
-          <Chip
-            label={`${session.linked_benchmarks.length} SLO${session.linked_benchmarks.length > 1 ? 's' : ''} tracked`}
-            size="small"
             variant="outlined"
           />
         )}
