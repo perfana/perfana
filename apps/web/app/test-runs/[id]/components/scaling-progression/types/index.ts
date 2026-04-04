@@ -1,3 +1,16 @@
+export interface LinkedBenchmark {
+  id: string;
+  benchmark_type: 'metric' | 'apdex';
+  label: string;
+  requirement_operator?: string;
+  requirement_value?: number;
+  metric_unit?: string;
+  transaction_name?: string;
+  min_apdex_score?: number;
+  apdex_threshold_ms?: number;
+  enabled: boolean;
+}
+
 export interface ScalingSession {
   id: string;
   name: string;
@@ -5,14 +18,22 @@ export interface ScalingSession {
   baseline_test_run_id?: string;
   target_load?: string;
   status: string;
+  linked_benchmarks: LinkedBenchmark[];
 }
 
-export interface ProgressionRunMetric {
-  panel: string;
-  metric: string;
-  median: number | null;
-  p95: number | null;
-  mean: number | null;
+export interface SloResult {
+  benchmark_id: string;
+  benchmark_type: 'metric' | 'apdex';
+  label: string;
+  status: string;
+  meets_requirement: boolean | null;
+  actual_value: number | null;
+  requirement_operator?: string;
+  requirement_value?: number;
+  metric_unit?: string;
+  transaction_name?: string;
+  min_apdex_score?: number;
+  apdex_threshold_ms?: number;
 }
 
 export interface ProgressionRun {
@@ -20,11 +41,9 @@ export interface ProgressionRun {
   start_time: string;
   end_time?: string;
   completed: boolean;
-  adapt_conclusion: string | null;
   meets_requirement: boolean | null;
-  adapt_ok: boolean | null;
   load_config: Record<string, string>;
-  metrics: ProgressionRunMetric[];
+  slo_results: SloResult[];
 }
 
 export interface ProgressionData {

@@ -135,6 +135,7 @@ export default function StartScalingSessionDialog({
           workload: workload,
           baselineTestRunId: testRun.test_run_id,
           targetLoad: targetLoad.trim() || undefined,
+          linkedBenchmarkIds: selectedSloIds.size > 0 ? Array.from(selectedSloIds) : undefined,
         }),
       });
 

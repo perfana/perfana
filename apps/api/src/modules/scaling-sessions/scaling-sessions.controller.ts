@@ -1,6 +1,7 @@
 import { Controller, Get, Post, Put, Param, Query, Body, BadRequestException } from '@nestjs/common';
 import { ApiTags, ApiOperation, ApiResponse, ApiQuery, ApiBearerAuth } from '@nestjs/swagger';
 import { UserCtx, UserContext } from '../../common/decorators/user-context.decorator';
+import { AuthorizationService } from '../../common/services/authorization.service';
 import { ScalingSessionsService } from './scaling-sessions.service';
 import { CreateScalingSessionDto } from './dto/create-scaling-session.dto';
 import { UpdateScalingSessionDto } from './dto/update-scaling-session.dto';
@@ -9,7 +10,10 @@ import { UpdateScalingSessionDto } from './dto/update-scaling-session.dto';
 @ApiBearerAuth()
 @Controller('scaling-sessions')
 export class ScalingSessionsController {
-  constructor(private readonly service: ScalingSessionsService) {}
+  constructor(
+    private readonly service: ScalingSessionsService,
+    private readonly authzService: AuthorizationService,
+  ) {}
 
   @Post()
   @ApiOperation({ summary: 'Create a scaling session' })
@@ -18,10 +22,15 @@ export class ScalingSessionsController {
     @Body() dto: CreateScalingSessionDto,
     @UserCtx() ctx: UserContext,
   ) {
-    if (!ctx.organizationId) {
-      throw new BadRequestException('User must belong to an organization');
+    let organizationId: string = ctx.organizationId || '';
+    if (!organizationId) {
+      const userOrgs = await this.authzService.getAccessibleOrganizations(ctx.userId);
+      if (userOrgs.length === 0) {
+        throw new BadRequestException('User must belong to an organization');
+      }
+      organizationId = userOrgs[0]!;
     }
-    return this.service.create(dto, ctx.userId, ctx.organizationId);
+    return this.service.create(dto, ctx.userId, organizationId);
   }
 
   @Get()

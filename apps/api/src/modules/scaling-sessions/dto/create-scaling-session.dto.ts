@@ -1,4 +1,4 @@
-import { IsNotEmpty, IsString, IsUUID, IsOptional, MaxLength } from 'class-validator';
+import { IsNotEmpty, IsString, IsUUID, IsOptional, MaxLength, IsArray } from 'class-validator';
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 
 export class CreateScalingSessionDto {
@@ -41,4 +41,10 @@ export class CreateScalingSessionDto {
   @IsString()
   @MaxLength(255)
   targetLoad?: string;
+
+  @ApiPropertyOptional({ description: 'Linked benchmark (SLO) IDs that define scaling success', type: [String] })
+  @IsOptional()
+  @IsArray()
+  @IsUUID('4', { each: true })
+  linkedBenchmarkIds?: string[];
 }
