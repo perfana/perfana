@@ -63,21 +63,31 @@ export class AdaptStatusUpdater {
               -- Only set overall when differencesAccepted is 'TBD', otherwise preserve existing value
               CASE
                   WHEN COALESCE((adapt_config->>'differencesAccepted'), 'TBD') = 'TBD' THEN
-                      -- overall should be true only when BOTH meetsRequirement AND adaptTestRunOK are true
-                      CASE WHEN
-                          COALESCE((COALESCE(consolidated_result, '{}'::jsonb)->>'meetsRequirement')::boolean, true) AND
-                          -- Check the adaptTestRunOK value we just set above
-                          CASE
-                              -- For BASELINE mode: Always true per specification
-                              WHEN COALESCE((adapt_config->>'mode'), 'COMPARISON') = 'BASELINE' THEN true
-                              -- Otherwise: true if conclusion != 'REGRESSION'
-                              ELSE NOT EXISTS (
+                      CASE
+                          -- For SCALING mode: overall depends only on adaptTestRunOK (SLOs are irrelevant during scaling)
+                          WHEN COALESCE((adapt_config->>'mode'), 'COMPARISON') = 'SCALING' THEN
+                              CASE WHEN NOT EXISTS (
                                   SELECT 1 FROM ds_adapt_conclusion dac
                                   WHERE dac.test_run_id = test_runs.test_run_id
                                   AND dac.conclusion = 'REGRESSION'
-                              )
-                          END
-                      THEN 'true'::jsonb ELSE 'false'::jsonb END
+                              ) THEN 'true'::jsonb ELSE 'false'::jsonb END
+                          -- For other modes: overall requires BOTH meetsRequirement AND adaptTestRunOK
+                          ELSE
+                              CASE WHEN
+                                  COALESCE((COALESCE(consolidated_result, '{}'::jsonb)->>'meetsRequirement')::boolean, true) AND
+                                  -- Check the adaptTestRunOK value we just set above
+                                  CASE
+                                      -- For BASELINE mode: Always true per specification
+                                      WHEN COALESCE((adapt_config->>'mode'), 'COMPARISON') = 'BASELINE' THEN true
+                                      -- Otherwise: true if conclusion != 'REGRESSION'
+                                      ELSE NOT EXISTS (
+                                          SELECT 1 FROM ds_adapt_conclusion dac
+                                          WHERE dac.test_run_id = test_runs.test_run_id
+                                          AND dac.conclusion = 'REGRESSION'
+                                      )
+                                  END
+                              THEN 'true'::jsonb ELSE 'false'::jsonb END
+                      END
                   ELSE
                       -- Preserve existing overall value when differencesAccepted is not 'TBD'
                       COALESCE(consolidated_result->'overall', 'null'::jsonb)

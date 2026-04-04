@@ -71,7 +71,11 @@ export class UpdateAdaptConfigHandler {
       };
 
       if (differencesAccepted === 'ACCEPTED') {
-        const meetsRequirement = testRun.consolidatedResult?.meetsRequirement ?? true;
+        const adaptMode = testRun.adaptConfig?.mode;
+        // In SCALING mode, overall depends only on adaptTestRunOK (SLOs are irrelevant during scaling)
+        const meetsRequirement = adaptMode === 'SCALING'
+          ? true
+          : (testRun.consolidatedResult?.meetsRequirement ?? true);
         const adaptTestRunOK = true;
         const overall = meetsRequirement && adaptTestRunOK;
 

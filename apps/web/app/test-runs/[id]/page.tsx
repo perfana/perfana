@@ -337,7 +337,7 @@ export default function TestRunDetailsPage() {
               </Box>
               {testRun?.scaling_session_id && (
               <Box sx={cardBoxStyle(expansionState.scalingProgressionExpanded)}>
-                <ScalingProgressionCard testRun={testRun} testRunId={testRunId} expanded={expansionState.scalingProgressionExpanded} onExpand={() => { const wasCollapsed = !expansionState.scalingProgressionExpanded; toggleExpansion('scalingProgressionExpanded'); if (wasCollapsed) scrollToCard('scaling-progression-card-expanded'); }} />
+                <ScalingProgressionCard testRun={testRun} testRunId={testRunId} expanded={expansionState.scalingProgressionExpanded} onExpand={() => { const wasCollapsed = !expansionState.scalingProgressionExpanded; toggleExpansion('scalingProgressionExpanded'); if (wasCollapsed) scrollToCard('scaling-progression-card-expanded'); }} showToast={showToast} onRefresh={refreshTestRun} />
               </Box>
               )}
               <Box sx={cardBoxStyle(expansionState.sloExpanded)}>

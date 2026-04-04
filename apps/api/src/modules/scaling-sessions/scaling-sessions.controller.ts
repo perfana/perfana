@@ -69,4 +69,15 @@ export class ScalingSessionsController {
   ) {
     return this.service.getProgression(id, ctx.userId, ctx.roles);
   }
+
+  @Put(':id/runs/:testRunId')
+  @ApiOperation({ summary: 'Add a test run to a scaling session' })
+  @ApiResponse({ status: 200, description: 'Test run added to session' })
+  async addTestRun(
+    @Param('id') id: string,
+    @Param('testRunId') testRunId: string,
+    @UserCtx() ctx: UserContext,
+  ) {
+    return this.service.addTestRun(id, testRunId, ctx.userId, ctx.roles);
+  }
 }

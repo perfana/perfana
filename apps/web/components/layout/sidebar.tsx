@@ -41,6 +41,7 @@ import {
   DarkMode,
   LightMode,
   Schedule,
+  TrendingUp,
 } from '@mui/icons-material'
 import { ThemePreference } from '@/contexts/theme-context'
 import { GLOBAL_ADMIN_ROLES } from '@/lib/constants/roles'
@@ -68,6 +69,7 @@ const getNavigationItems = (hasRole: (role: string) => boolean, hasAnyRole: (rol
       items: [
         { href: '/', label: 'Home', icon: <Home /> },
         { href: '/test-runs', label: 'Test Runs', icon: <RocketLaunch /> },
+        { href: '/scaling-sessions', label: 'Scaling Sessions', icon: <TrendingUp /> },
       ]
     },
     {
