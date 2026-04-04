@@ -126,10 +126,41 @@ export function useCompareHandlers({
     if (sourceToUse === 'dynatrace') {
       const label = dynatraceDashboardLabel || dashboard.dashboard_label;
       fetchDynatraceMetricsList(label);
+    } else if (sourceToUse === 'performance-metrics') {
+      // Fetch panels from ds_metrics for performance-test dashboards
+      if (testRun) {
+        authenticatedFetch(
+          `/metrics/ds-metrics/available/${testRun.test_run_id}`,
+          { headers: { 'Content-Type': 'application/json' } }
+        ).then(async (response) => {
+          if (response.ok) {
+            const rows: Array<{ dashboard_label: string; panel_title: string; panel_id: number; unit?: string }> = await response.json();
+            const dashboardLabel = dashboard.dashboard_label;
+            const seen = new Set<number>();
+            const panels: Panel[] = [];
+            for (const row of rows) {
+              if (row.dashboard_label === dashboardLabel && !seen.has(row.panel_id)) {
+                seen.add(row.panel_id);
+                panels.push({
+                  id: row.panel_id,
+                  title: row.panel_title,
+                  type: 'timeseries',
+                  applicationDashboardId: dashboard.id,
+                  metricsSourceId: dashboard.metrics_source_id,
+                });
+              }
+            }
+            setPanels(panels);
+          } else {
+            setPanels([]);
+          }
+        }).catch(() => setPanels([]));
+      }
     } else if (dashboard.dashboard_uid) {
       fetchDashboardPanels(dashboard.dashboard_uid);
     }
   }, [
+    testRun,
     setSelectedSource, setSelectedDashboard, setSelectedMetric, setPanels,
     setDynatraceMetrics, setCurrentMetrics, setSelectedMetrics,
     setMetricComparisons, setAvailableMetrics, setSelectedMetricNames,

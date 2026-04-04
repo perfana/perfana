@@ -53,9 +53,16 @@ export interface ConsolidatedResult {
 export interface AdaptConfig {
   /**
    * ADAPT evaluation mode
-   * - DEFAULT: Standard ADAPT analysis
+   * - DEFAULT: Standard regression testing (last 10 successful runs as baseline)
+   * - BASELINE: Marks run as a baseline (always passes ADAPT)
+   * - SCALING: Sizing/scaling test (single previous run as baseline)
    */
-  mode?: 'DEFAULT' | string;
+  mode?: 'DEFAULT' | 'BASELINE' | 'SCALING';
+
+  /**
+   * For SCALING mode: explicit baseline test run to compare against.
+   */
+  baselineTestRunId?: string;
 
   /**
    * Status of difference acceptance

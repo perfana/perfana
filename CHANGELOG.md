@@ -4,6 +4,19 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
+## [0.2.27.0] - 2026-04-04
+
+### Added
+- ADAPT SCALING mode for sizing/scaling tests: compare against a single baseline run instead of last 10 successful runs
+- `adaptMode` and `baselineTestRunId` fields on POST /test for programmatic SCALING mode activation
+- Workload-level ADAPT settings (GET/PUT /test-runs/workload-adapt-settings) so SCALING mode applies automatically to all new runs without plugin changes
+- GET /metrics/ds-metrics/panels-by-dashboard endpoint for querying panels from ds_metric_statistics by application dashboard ID
+- 7 new unit tests for SCALING mode control group selection
+
+### Fixed
+- Panel dropdown empty when selecting "Performance test metrics" dashboards in graphs, trends, and compare cards (was hitting wrong Grafana endpoint)
+- Same panel dropdown bug in Add SLO and Edit SLO dialogs (fetchPerfMetricsPanels now queries ds_metric_statistics instead of Grafana)
+
 ## [0.2.26.0] - 2026-04-04
 
 ### Removed

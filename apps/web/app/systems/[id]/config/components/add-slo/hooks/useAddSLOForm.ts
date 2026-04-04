@@ -190,22 +190,24 @@ export function useAddSLOForm({
     }
   }, []);
 
-  // Fetch Performance metrics panels
-  const fetchPerfMetricsPanels = useCallback(async (dashboardUid: string) => {
-    if (!dashboardUid) return;
+  // Fetch Performance metrics panels from ds_metric_statistics
+  const fetchPerfMetricsPanels = useCallback(async (applicationDashboardId: string) => {
+    if (!applicationDashboardId) return;
 
     try {
       setPanelsLoading(true);
-      const response = await authenticatedFetch(`/grafana/dashboards?uid=${dashboardUid}`, {
-        headers: {
-          'Content-Type': 'application/json',
-        },
-      });
+      const response = await authenticatedFetch(
+        `/metrics/ds-metrics/panels-by-dashboard?applicationDashboardId=${encodeURIComponent(applicationDashboardId)}`,
+        { headers: { 'Content-Type': 'application/json' } }
+      );
 
       if (response.ok) {
-        const dashboardData = await response.json();
-        const dashboard = Array.isArray(dashboardData) ? dashboardData[0] : dashboardData;
-        const panels = dashboard?.panels || [];
+        const rows: Array<{ panel_id: number; panel_title: string; unit?: string }> = await response.json();
+        const panels = rows.map(row => ({
+          id: row.panel_id,
+          title: row.panel_title,
+          type: 'timeseries',
+        }));
         setAvailablePerfMetricsPanels(panels);
       } else {
         console.warn('Failed to fetch Performance metrics panels:', response.statusText);

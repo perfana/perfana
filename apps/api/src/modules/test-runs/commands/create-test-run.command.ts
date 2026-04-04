@@ -52,6 +52,10 @@ export interface CreateTestRunData {
   createdBy?: string;
   /** User ID who last updated the test run */
   updatedBy?: string;
+  /** ADAPT mode: DEFAULT (regression) or SCALING (sizing test) */
+  adaptMode?: string;
+  /** Baseline test run ID for SCALING mode comparison */
+  baselineTestRunId?: string;
 }
 
 /**
@@ -94,6 +98,8 @@ export class CreateTestRunCommand implements ICommand {
     teamId?: string;
     createdBy?: string;
     updatedBy?: string;
+    adaptMode?: string;
+    baselineTestRunId?: string;
   }, options?: MutationOptions): CreateTestRunCommand {
     return new CreateTestRunCommand(
       {
@@ -117,6 +123,8 @@ export class CreateTestRunCommand implements ICommand {
         teamId: params.teamId,
         createdBy: params.createdBy,
         updatedBy: params.updatedBy,
+        adaptMode: params.adaptMode,
+        baselineTestRunId: params.baselineTestRunId,
       },
       options,
     );

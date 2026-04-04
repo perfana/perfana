@@ -85,7 +85,7 @@ export class TestRunsMutationService {
       organizationId,
     );
     const testEnvironment = await this.lookupService.findOrCreateTestEnvironment(systemUnderTest.id, updateDto.testEnvironment);
-    await this.lookupService.findOrCreateWorkload(testEnvironment.id, updateDto.workload, updateDto.testRunId);
+    const workload = await this.lookupService.findOrCreateWorkload(testEnvironment.id, updateDto.workload, updateDto.testRunId);
 
     const existingTestRun = await this.findTestRun(updateDto.testRunId, systemUnderTest.id, updateDto.testEnvironment, updateDto.workload);
 
@@ -102,6 +102,7 @@ export class TestRunsMutationService {
       systemUnderTestId: systemUnderTest.id,
       testEnvironment: updateDto.testEnvironment,
       workload: updateDto.workload,
+      workloadConfig: workload?.config,
       updateDto,
       duration,
       plannedDuration,
@@ -151,6 +152,7 @@ export class TestRunsMutationService {
     systemUnderTestId: string;
     testEnvironment: string;
     workload: string;
+    workloadConfig?: Record<string, any>;
     updateDto: UpdateRunningTestDto;
     duration: number;
     plannedDuration: number;
@@ -158,7 +160,7 @@ export class TestRunsMutationService {
     userId: string;
     organizationId: string;
   }): Promise<TestRun> {
-    const { testRunId, systemUnderTestId, testEnvironment, workload, updateDto: d, duration, plannedDuration, existingTestRun, userId, organizationId } = p;
+    const { testRunId, systemUnderTestId, testEnvironment, workload, workloadConfig, updateDto: d, duration, plannedDuration, existingTestRun, userId, organizationId } = p;
 
     // Ownership tracking - assign API key's organization to test run
     const common = {
@@ -180,6 +182,9 @@ export class TestRunsMutationService {
       organizationId: existingTestRun?.organization_id || organizationId,
       createdBy: existingTestRun ? undefined : userId,
       updatedBy: userId,
+      // ADAPT mode: DTO override > workload config > DEFAULT
+      adaptMode: d.adaptMode || workloadConfig?.adaptMode,
+      baselineTestRunId: d.baselineTestRunId || workloadConfig?.baselineTestRunId,
     };
 
     // Create context for handlers to use in event emission
@@ -336,6 +341,18 @@ export class TestRunsMutationService {
       environment,
       workload,
     });
+  }
+
+  async getWorkloadConfig(systemUnderTestId: string, testEnvironment: string, workload: string): Promise<Record<string, unknown> | null> {
+    return this.lookupService.getWorkloadConfig(systemUnderTestId, testEnvironment, workload);
+  }
+
+  async updateWorkloadConfig(systemUnderTestId: string, testEnvironment: string, workload: string, adaptMode: string, baselineTestRunId?: string): Promise<void> {
+    const configUpdate: Record<string, unknown> = { adaptMode };
+    if (baselineTestRunId !== undefined) {
+      configUpdate.baselineTestRunId = baselineTestRunId;
+    }
+    return this.lookupService.updateWorkloadConfig(systemUnderTestId, testEnvironment, workload, configUpdate);
   }
 
   public mapEntityToTestRun(entity: TestRunEntity): TestRun {

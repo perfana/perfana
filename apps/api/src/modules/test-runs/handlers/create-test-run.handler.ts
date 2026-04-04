@@ -94,7 +94,11 @@ export class CreateTestRunHandler implements ICommandHandler<CreateTestRunComman
       tags: data.tags || [],
       abort: data.abort || false,
       variables: data.variables || [],
-      adaptConfig: { mode: 'DEFAULT', differencesAccepted: 'TBD' } as AdaptConfig,
+      adaptConfig: {
+        mode: data.adaptMode || 'DEFAULT',
+        baselineTestRunId: data.baselineTestRunId,
+        differencesAccepted: 'TBD',
+      } as AdaptConfig,
       startTime: data.startTime || new Date(),
       endTime: data.endTime || new Date(),
       // Ownership tracking (from API key or user context)

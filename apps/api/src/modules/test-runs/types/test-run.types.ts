@@ -302,6 +302,8 @@ export interface Workload {
     auto_compare_test_runs?: boolean;
     auto_create_snapshots?: boolean;
     difference_score_threshold?: number;
+    adaptMode?: string;
+    baselineTestRunId?: string;
   };
   created_at: string;
 }
