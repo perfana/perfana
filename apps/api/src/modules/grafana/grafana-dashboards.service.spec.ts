@@ -1,6 +1,6 @@
 import { Test, TestingModule } from '@nestjs/testing';
 import { getRepositoryToken } from '@nestjs/typeorm';
-import { NotFoundException } from '@nestjs/common';
+import { ForbiddenException, NotFoundException } from '@nestjs/common';
 import { GrafanaDashboardsService } from './grafana-dashboards.service';
 import { GrafanaClientService } from './grafana-client.service';
 import { GrafanaDashboard as GrafanaDashboardEntity } from '../../entities';
@@ -1604,6 +1604,418 @@ describe('GrafanaDashboardsService', () => {
         // Assert - no longer returns demo fallback values
         expect(result).toEqual([]);
       });
+    });
+  });
+
+  // ---------------------------------------------------------------------------
+  // Authorization / org filtering (lines 57-63 and 83-93)
+  // ---------------------------------------------------------------------------
+
+  describe('Authorization and organization filtering', () => {
+    let authzService: ReturnType<typeof createAuthorizationServiceMock>;
+
+    beforeEach(async () => {
+      // Rebuild module with a non-admin authz mock so we can test org filters
+      queryBuilder = createMockQueryBuilder<GrafanaDashboardEntity>();
+      const mockRepository = createMockRepository<GrafanaDashboardEntity>();
+      mockRepository.createQueryBuilder.mockReturnValue(queryBuilder);
+
+      authzService = createAuthorizationServiceMock();
+      // Override: user is NOT a global admin
+      authzService.isGlobalAdmin.mockReturnValue(false);
+
+      const mockGrafanaClient = {
+        getGrafanaInstance: jest.fn(),
+        grafanaCall: jest.fn(),
+        getDatasource: jest.fn(),
+        getInfluxVariableValues: jest.fn(),
+        getPrometheusVariableValues: jest.fn()
+      };
+
+      const module: TestingModule = await Test.createTestingModule({
+        providers: [
+          GrafanaDashboardsService,
+          {
+            provide: getRepositoryToken(GrafanaDashboardEntity),
+            useValue: mockRepository
+          },
+          {
+            provide: GrafanaClientService,
+            useValue: mockGrafanaClient
+          },
+          {
+            provide: AuthorizationService,
+            useValue: authzService,
+          }
+        ]
+      }).compile();
+
+      service = module.get<GrafanaDashboardsService>(GrafanaDashboardsService);
+      repository = module.get(getRepositoryToken(GrafanaDashboardEntity));
+    });
+
+    describe('findAll org filtering for non-admin users', () => {
+      it('should apply org-membership filter when user belongs to organizations', async () => {
+        // Arrange
+        const orgIds = ['org-aaa', 'org-bbb'];
+        authzService.getAccessibleOrganizations.mockResolvedValue(orgIds);
+        queryBuilder.getMany.mockResolvedValue([]);
+
+        // Act
+        await service.findAll(mockUserId, mockRoles);
+
+        // Assert
+        expect(authzService.getAccessibleOrganizations).toHaveBeenCalledWith(mockUserId);
+        expect(queryBuilder.andWhere).toHaveBeenCalledWith(
+          '(gd.organizationId IS NULL OR gd.organizationId IN (:...orgIds))',
+          { orgIds }
+        );
+      });
+
+      it('should restrict to unowned dashboards when user has no org memberships', async () => {
+        // Arrange — getAccessibleOrganizations returns empty array
+        authzService.getAccessibleOrganizations.mockResolvedValue([]);
+        queryBuilder.getMany.mockResolvedValue([]);
+
+        // Act
+        await service.findAll(mockUserId, mockRoles);
+
+        // Assert
+        expect(queryBuilder.andWhere).toHaveBeenCalledWith('gd.organizationId IS NULL');
+      });
+
+      it('should skip org filtering entirely for global admins', async () => {
+        // Arrange — override back to admin for this single test
+        authzService.isGlobalAdmin.mockReturnValue(true);
+        queryBuilder.getMany.mockResolvedValue([]);
+
+        // Act
+        await service.findAll(mockUserId, ['admin']);
+
+        // Assert — getAccessibleOrganizations must NOT be called for admins
+        expect(authzService.getAccessibleOrganizations).not.toHaveBeenCalled();
+        // No org-based andWhere should have been applied
+        const orgWhereCall = (queryBuilder.andWhere as jest.Mock).mock.calls.find(
+          (args: unknown[]) => typeof args[0] === 'string' && args[0].includes('organizationId')
+        );
+        expect(orgWhereCall).toBeUndefined();
+      });
+    });
+
+    describe('verifyOrgAccess via findOne', () => {
+      it('should allow access when dashboard has no organizationId (legacy/shared)', async () => {
+        // Arrange — dashboard with null organizationId, non-admin user
+        const sharedDashboard: GrafanaDashboardEntity = {
+          ...mockDashboardEntity,
+          organizationId: undefined,
+        };
+        repository.findOne.mockResolvedValue(sharedDashboard);
+
+        // Act — should not throw
+        await expect(service.findOne(sharedDashboard.id, mockUserId, mockRoles)).resolves.toBeDefined();
+        // verifyOrgAccess short-circuits, so getAccessibleOrganizations is NOT called
+        expect(authzService.getAccessibleOrganizations).not.toHaveBeenCalled();
+      });
+
+      it('should allow access when user is a member of the dashboard organization', async () => {
+        // Arrange
+        const orgId = 'org-owned';
+        const ownedDashboard: GrafanaDashboardEntity = {
+          ...mockDashboardEntity,
+          organizationId: orgId,
+        };
+        repository.findOne.mockResolvedValue(ownedDashboard);
+        authzService.getAccessibleOrganizations.mockResolvedValue([orgId, 'org-other']);
+
+        // Act — should not throw
+        await expect(service.findOne(ownedDashboard.id, mockUserId, mockRoles)).resolves.toBeDefined();
+      });
+
+      it('should throw an error wrapping ForbiddenException when user is not a member of the dashboard organization', async () => {
+        // Arrange
+        const orgId = 'org-restricted';
+        const restrictedDashboard: GrafanaDashboardEntity = {
+          ...mockDashboardEntity,
+          organizationId: orgId,
+        };
+        repository.findOne.mockResolvedValue(restrictedDashboard);
+        // User belongs to a different org, not the dashboard's org
+        authzService.getAccessibleOrganizations.mockResolvedValue(['org-other']);
+
+        // Note: findOne's catch block only re-throws NotFoundException directly.
+        // ForbiddenException is caught and re-wrapped as a plain Error containing its message.
+        await expect(
+          service.findOne(restrictedDashboard.id, mockUserId, mockRoles)
+        ).rejects.toThrow(`Failed to fetch Grafana dashboard: Access denied to dashboard ${restrictedDashboard.id}`);
+      });
+
+      it('should allow access for global admins regardless of organizationId', async () => {
+        // Arrange — admin bypasses org check
+        authzService.isGlobalAdmin.mockReturnValue(true);
+        const restrictedDashboard: GrafanaDashboardEntity = {
+          ...mockDashboardEntity,
+          organizationId: 'org-restricted',
+        };
+        repository.findOne.mockResolvedValue(restrictedDashboard);
+
+        // Act — should not throw even though user has no accessible orgs
+        authzService.getAccessibleOrganizations.mockResolvedValue([]);
+        await expect(service.findOne(restrictedDashboard.id, mockUserId, ['admin'])).resolves.toBeDefined();
+        // verifyOrgAccess returns immediately for admins
+        expect(authzService.getAccessibleOrganizations).not.toHaveBeenCalled();
+      });
+    });
+  });
+
+  // ---------------------------------------------------------------------------
+  // Panel extraction from grafanaJson (lines 151-152, 218-219)
+  // ---------------------------------------------------------------------------
+
+  describe('Panel extraction from grafanaJson', () => {
+    describe('findAll panel extraction', () => {
+      it('should prefer grafanaJson.dashboard.panels over simplified panels', async () => {
+        // Arrange — entity has both grafanaJson panels and simplified panels
+        const fullPanel = { id: 10, title: 'Full Panel', type: 'timeseries', fieldConfig: {} };
+        const simplifiedPanel = { id: 1, title: 'Simplified Panel', type: 'graph' };
+        const entityWithGrafanaJson: GrafanaDashboardEntity = {
+          ...mockDashboardEntity,
+          grafanaJson: {
+            dashboard: {
+              panels: [fullPanel]
+            }
+          },
+          panels: [simplifiedPanel]
+        };
+        queryBuilder.getMany.mockResolvedValue([entityWithGrafanaJson]);
+
+        // Act
+        const result = await service.findAll(mockUserId, mockRoles);
+
+        // Assert — grafanaJson panels win
+        expect(result[0]?.panels).toEqual([fullPanel]);
+        expect(result[0]?.panels).not.toEqual([simplifiedPanel]);
+      });
+
+      it('should fall back to simplified panels when grafanaJson is absent', async () => {
+        // Arrange
+        const simplifiedPanel = { id: 1, title: 'Simplified Panel', type: 'graph' };
+        const entityWithoutJson: GrafanaDashboardEntity = {
+          ...mockDashboardEntity,
+          grafanaJson: undefined,
+          panels: [simplifiedPanel]
+        };
+        queryBuilder.getMany.mockResolvedValue([entityWithoutJson]);
+
+        // Act
+        const result = await service.findAll(mockUserId, mockRoles);
+
+        // Assert — simplified panels used and yAxesFormat transform applied
+        expect(result[0]?.panels).toEqual([
+          { ...simplifiedPanel, yAxesFormat: undefined }
+        ]);
+      });
+
+      it('should transform y_axes_format to yAxesFormat on simplified panels', async () => {
+        // Arrange
+        const simplifiedPanel = { id: 1, title: 'Graph', type: 'graph', y_axes_format: 'bytes' };
+        const entityWithYAxes: GrafanaDashboardEntity = {
+          ...mockDashboardEntity,
+          grafanaJson: undefined,
+          panels: [simplifiedPanel]
+        };
+        queryBuilder.getMany.mockResolvedValue([entityWithYAxes]);
+
+        // Act
+        const result = await service.findAll(mockUserId, mockRoles);
+
+        // Assert — yAxesFormat is set from y_axes_format
+        expect(result[0]?.panels?.[0]).toEqual(
+          expect.objectContaining({
+            y_axes_format: 'bytes',
+            yAxesFormat: 'bytes',
+          })
+        );
+      });
+
+      it('should log first panel keys when grafanaJson has panels (covers debug log path)', async () => {
+        // Arrange — entity with grafanaJson panels that have multiple keys
+        const fullPanel = { id: 10, title: 'Panel A', type: 'timeseries', datasource: 'influxdb' };
+        const entityWithGrafanaJson: GrafanaDashboardEntity = {
+          ...mockDashboardEntity,
+          grafanaJson: {
+            dashboard: {
+              panels: [fullPanel]
+            }
+          }
+        };
+        queryBuilder.getMany.mockResolvedValue([entityWithGrafanaJson]);
+
+        // Act — the logger.log at line 151-152 is triggered; no assertion on log content,
+        // but we verify the returned panels to confirm the branch executed
+        const result = await service.findAll(mockUserId, mockRoles);
+
+        // Assert
+        expect(result[0]?.panels).toEqual([fullPanel]);
+      });
+
+      it('should handle grafanaJson with empty panels array', async () => {
+        // Arrange
+        const entityWithEmptyJson: GrafanaDashboardEntity = {
+          ...mockDashboardEntity,
+          grafanaJson: {
+            dashboard: {
+              panels: []
+            }
+          },
+          panels: [{ id: 1, title: 'Fallback Panel', type: 'graph' }]
+        };
+        queryBuilder.getMany.mockResolvedValue([entityWithEmptyJson]);
+
+        // Act
+        const result = await service.findAll(mockUserId, mockRoles);
+
+        // Assert — empty array from grafanaJson wins over simplified panels
+        // (falsy-coercion: empty array is truthy, so grafanaJson.dashboard.panels is used)
+        expect(result[0]?.panels).toEqual([]);
+      });
+
+      it('should handle grafanaJson without a dashboard property', async () => {
+        // Arrange
+        const entityWithoutDashboard: GrafanaDashboardEntity = {
+          ...mockDashboardEntity,
+          grafanaJson: { meta: { slug: 'test' } },
+          panels: [{ id: 1, title: 'Simplified', type: 'graph' }]
+        };
+        queryBuilder.getMany.mockResolvedValue([entityWithoutDashboard]);
+
+        // Act
+        const result = await service.findAll(mockUserId, mockRoles);
+
+        // Assert — falls back to simplified panels with transform
+        expect(result[0]?.panels?.[0]).toEqual(
+          expect.objectContaining({ id: 1, title: 'Simplified', type: 'graph' })
+        );
+      });
+    });
+
+    describe('findOne panel extraction', () => {
+      it('should prefer grafanaJson.dashboard.panels over simplified panels', async () => {
+        // Arrange
+        const fullPanel = { id: 99, title: 'Full JSON Panel', type: 'timeseries', targets: [] };
+        const entityWithGrafanaJson: GrafanaDashboardEntity = {
+          ...mockDashboardEntity,
+          grafanaJson: {
+            dashboard: {
+              panels: [fullPanel]
+            }
+          },
+          panels: [{ id: 1, title: 'Simplified', type: 'graph' }]
+        };
+        repository.findOne.mockResolvedValue(entityWithGrafanaJson);
+
+        // Act
+        const result = await service.findOne(entityWithGrafanaJson.id, mockUserId, mockRoles);
+
+        // Assert
+        expect(result.panels).toEqual([fullPanel]);
+      });
+
+      it('should fall back to simplified panels when grafanaJson has no dashboard', async () => {
+        // Arrange
+        const simplifiedPanel = { id: 1, title: 'Simple', type: 'graph' };
+        const entityWithoutDashboard: GrafanaDashboardEntity = {
+          ...mockDashboardEntity,
+          grafanaJson: undefined,
+          panels: [simplifiedPanel]
+        };
+        repository.findOne.mockResolvedValue(entityWithoutDashboard);
+
+        // Act
+        const result = await service.findOne(entityWithoutDashboard.id, mockUserId, mockRoles);
+
+        // Assert
+        expect(result.panels).toEqual([simplifiedPanel]);
+      });
+
+      it('should log first panel structure when grafanaJson has panels (covers debug log path)', async () => {
+        // Arrange — entity with grafanaJson and panels, triggering lines 218-219
+        const fullPanel = { id: 5, title: 'JSON Panel', type: 'timeseries', fieldConfig: { defaults: {} } };
+        const entityWithPanels: GrafanaDashboardEntity = {
+          ...mockDashboardEntity,
+          grafanaJson: {
+            dashboard: {
+              panels: [fullPanel]
+            }
+          }
+        };
+        repository.findOne.mockResolvedValue(entityWithPanels);
+
+        // Act — the logger.log at line 218-219 fires; verify the returned data is correct
+        const result = await service.findOne(entityWithPanels.id, mockUserId, mockRoles);
+
+        // Assert
+        expect(result.panels).toEqual([fullPanel]);
+      });
+    });
+  });
+
+  // ---------------------------------------------------------------------------
+  // create / update with grafanaJson panels (branch coverage for panel resolution)
+  // ---------------------------------------------------------------------------
+
+  describe('create with grafanaJson panels', () => {
+    it('should use grafanaJson.dashboard.panels in the created result when entity has grafanaJson', async () => {
+      // Arrange
+      const fullPanel = { id: 1, title: 'Stored Panel', type: 'timeseries' };
+      const createDto: CreateGrafanaDashboardDto = {
+        grafanaInstanceId: mockDashboardEntity.grafanaInstanceId,
+        grafanaId: mockDashboardEntity.grafanaId,
+        uid: mockDashboardEntity.uid,
+        name: 'Dashboard With Json',
+        panels: []
+      };
+
+      const savedEntity: GrafanaDashboardEntity = {
+        ...mockDashboardEntity,
+        name: 'Dashboard With Json',
+        grafanaJson: { dashboard: { panels: [fullPanel] } },
+        panels: []
+      };
+
+      repository.create.mockReturnValue(savedEntity as unknown as GrafanaDashboardEntity);
+      repository.save.mockResolvedValue(savedEntity);
+
+      // Act
+      const result = await service.create(createDto, mockUserId, mockRoles);
+
+      // Assert — panels come from grafanaJson
+      expect(result.panels).toEqual([fullPanel]);
+    });
+  });
+
+  describe('update with grafanaJson panels', () => {
+    it('should use grafanaJson.dashboard.panels in the updated result when entity has grafanaJson', async () => {
+      // Arrange
+      const fullPanel = { id: 2, title: 'Updated JSON Panel', type: 'timeseries' };
+      const updateDto: UpdateGrafanaDashboardDto = { name: 'Updated' };
+
+      const entityWithGrafanaJson: GrafanaDashboardEntity = {
+        ...mockDashboardEntity,
+        name: 'Updated',
+        grafanaJson: { dashboard: { panels: [fullPanel] } },
+        panels: []
+      };
+
+      repository.findOne
+        .mockResolvedValueOnce(mockDashboardEntity)    // findOne in update's pre-check
+        .mockResolvedValueOnce(entityWithGrafanaJson); // findOne after update
+      repository.update.mockResolvedValue({ affected: 1 } as never);
+
+      // Act
+      const result = await service.update(mockDashboardEntity.id, updateDto, mockUserId, mockRoles);
+
+      // Assert
+      expect(result.panels).toEqual([fullPanel]);
     });
   });
 });
