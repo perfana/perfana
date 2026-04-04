@@ -19,10 +19,13 @@ import { DeepLinksRepository } from './deep-links.repository';
 import { DeepLink } from './entities/deep-link.entity';
 import { CreateDeepLinkDto } from './dto/create-deep-link.dto';
 import { UpdateDeepLinkDto } from './dto/update-deep-link.dto';
+import { CopyDeepLinksDto } from './dto/copy-deep-links.dto';
 import { TestRunConfiguration, TestRun as TestRunEntity, SystemUnderTest } from '../../entities';
+import { ResourceNotFoundException } from '../../common/exceptions/business.exception';
 import {
   createMockRepository,
   MockRepository,
+  MockSelectQueryBuilder,
 } from '../../../test/helpers/mock-repository.factory';
 
 /**
@@ -48,6 +51,8 @@ describe('DeepLinksService', () => {
   let repository: jest.Mocked<DeepLinksRepository>;
   let testRunConfigRepo: MockRepository<TestRunConfiguration>;
   let testRunRepo: MockRepository<TestRunEntity>;
+  let systemRepo: MockRepository<SystemUnderTest>;
+  let systemQueryBuilder: MockSelectQueryBuilder<SystemUnderTest>;
 
   // Mock data factory for deep links
   const createMockDeepLink = (overrides?: Partial<DeepLink>): DeepLink => ({
@@ -117,6 +122,12 @@ describe('DeepLinksService', () => {
     repository = module.get(DeepLinksRepository);
     testRunConfigRepo = module.get(getRepositoryToken(TestRunConfiguration));
     testRunRepo = module.get(getRepositoryToken(TestRunEntity));
+    systemRepo = module.get(getRepositoryToken(SystemUnderTest));
+    // Obtain the shared query builder instance without counting the call against tests.
+    // createQueryBuilder is a jest.fn() that returns the same mock QB every time.
+    systemQueryBuilder = systemRepo.createQueryBuilder() as MockSelectQueryBuilder<SystemUnderTest>;
+    // Reset so the call above does not pollute test assertions.
+    systemRepo.createQueryBuilder.mockClear();
   });
 
   afterEach(() => {
@@ -557,6 +568,28 @@ describe('DeepLinksService', () => {
         expect(result.url).not.toContain('{perfana-end-epoch-seconds}');
         expect(result.url).toMatch(/end=\d+/);
         expect(result.isValid).toBe(true);
+      });
+
+      it('should leave end time variables unresolved when end_time is missing and test is completed', async () => {
+        // Arrange — completed test with no end_time results in null endDate (no substitution)
+        const deepLink: DeepLink = {
+          ...mockDeepLink,
+          url: 'https://example.com/?end={perfana-end-epoch-seconds}',
+        };
+        const completedTestRunNoEndTime = {
+          ...mockTestRun,
+          end_time: undefined,
+          completed: true,
+        };
+        testRunConfigRepo.find.mockResolvedValue([]);
+
+        // Act
+        const result = await service.resolveVariables(deepLink, completedTestRunNoEndTime);
+
+        // Assert — endDate is null so the variable stays unresolved
+        expect(result.url).toBe('https://example.com/?end={perfana-end-epoch-seconds}');
+        expect(result.isValid).toBe(false);
+        expect(result.unresolvedVariables).toContain('{perfana-end-epoch-seconds}');
       });
     });
 
@@ -1175,6 +1208,474 @@ describe('DeepLinksService', () => {
         expect(result).toEqual(genericDeepLink);
         expect(repository.createGeneric).toHaveBeenCalledWith(createDto);
       });
+    });
+  });
+
+  describe('Authorization and Organization Filtering', () => {
+    describe('findBySystemEnvWorkload with roles/organizationIds', () => {
+      it('should bypass access check and return deep links when no roles or organizationIds provided', async () => {
+        // Arrange — no roles, no org IDs: the guard branch is skipped entirely
+        repository.findBySystemEnvWorkload.mockResolvedValue([mockDeepLink]);
+
+        // Act
+        const result = await service.findBySystemEnvWorkload('system-uuid', 'test', 'load');
+
+        // Assert
+        expect(result).toEqual([mockDeepLink]);
+        // systemRepo query builder should never have been invoked
+        expect(systemRepo.createQueryBuilder).not.toHaveBeenCalled();
+      });
+
+      it('should return deep links when admin role bypasses organization check', async () => {
+        // Arrange
+        repository.findBySystemEnvWorkload.mockResolvedValue([mockDeepLink]);
+        // Admin: no DB query needed — validateSystemAccess returns true immediately
+
+        // Act
+        const result = await service.findBySystemEnvWorkload(
+          'system-uuid', 'test', 'load', ['perfana-admin'], [],
+        );
+
+        // Assert
+        expect(result).toEqual([mockDeepLink]);
+        // Should not have queried the system repo (admin bypass)
+        expect(systemRepo.createQueryBuilder).not.toHaveBeenCalled();
+      });
+
+      it('should return deep links when super-admin role bypasses organization check', async () => {
+        // Arrange
+        repository.findBySystemEnvWorkload.mockResolvedValue([mockDeepLink]);
+
+        // Act
+        const result = await service.findBySystemEnvWorkload(
+          'system-uuid', 'test', 'load', ['super-admin'], [],
+        );
+
+        // Assert
+        expect(result).toEqual([mockDeepLink]);
+        expect(systemRepo.createQueryBuilder).not.toHaveBeenCalled();
+      });
+
+      it('should return empty array when non-admin user has no organization memberships', async () => {
+        // Arrange — roles present but no org IDs: validateSystemAccess returns false immediately
+        // (non-admin with empty orgIds)
+
+        // Act
+        const result = await service.findBySystemEnvWorkload(
+          'system-uuid', 'test', 'load', ['user'], [],
+        );
+
+        // Assert
+        expect(result).toEqual([]);
+        expect(repository.findBySystemEnvWorkload).not.toHaveBeenCalled();
+      });
+
+      it('should return deep links when non-admin user belongs to an org that owns the system', async () => {
+        // Arrange
+        systemQueryBuilder.getOne.mockResolvedValue({ id: 'system-uuid' } as SystemUnderTest);
+        repository.findBySystemEnvWorkload.mockResolvedValue([mockDeepLink]);
+
+        // Act
+        const result = await service.findBySystemEnvWorkload(
+          'system-uuid', 'test', 'load', ['user'], ['org-uuid'],
+        );
+
+        // Assert
+        expect(result).toEqual([mockDeepLink]);
+        expect(systemRepo.createQueryBuilder).toHaveBeenCalledWith('sut');
+      });
+
+      it('should return empty array when system does not belong to any of the user org IDs', async () => {
+        // Arrange — getOne returns null: system not found in user's orgs
+        systemQueryBuilder.getOne.mockResolvedValue(null);
+
+        // Act
+        const result = await service.findBySystemEnvWorkload(
+          'system-uuid', 'test', 'load', ['user'], ['other-org-uuid'],
+        );
+
+        // Assert
+        expect(result).toEqual([]);
+        expect(repository.findBySystemEnvWorkload).not.toHaveBeenCalled();
+      });
+
+      it('should enforce access check when only organizationIds are provided (no roles)', async () => {
+        // Arrange — orgIds present but no roles
+        systemQueryBuilder.getOne.mockResolvedValue({ id: 'system-uuid' } as SystemUnderTest);
+        repository.findBySystemEnvWorkload.mockResolvedValue([mockDeepLink]);
+
+        // Act
+        const result = await service.findBySystemEnvWorkload(
+          'system-uuid', 'test', 'load', [], ['org-uuid'],
+        );
+
+        // Assert
+        expect(result).toEqual([mockDeepLink]);
+      });
+    });
+
+    describe('findById with roles/organizationIds', () => {
+      it('should return deep link when admin role bypasses organization check', async () => {
+        // Arrange
+        repository.findById.mockResolvedValue(mockDeepLink);
+
+        // Act
+        const result = await service.findById('deep-link-uuid', ['perfana-admin'], []);
+
+        // Assert
+        expect(result).toEqual(mockDeepLink);
+        expect(systemRepo.createQueryBuilder).not.toHaveBeenCalled();
+      });
+
+      it('should return deep link when non-admin user belongs to the system org', async () => {
+        // Arrange
+        repository.findById.mockResolvedValue(mockDeepLink);
+        systemQueryBuilder.getOne.mockResolvedValue({ id: 'system-uuid' } as SystemUnderTest);
+
+        // Act
+        const result = await service.findById('deep-link-uuid', ['user'], ['org-uuid']);
+
+        // Assert
+        expect(result).toEqual(mockDeepLink);
+      });
+
+      it('should throw ResourceNotFoundException when non-admin user lacks access', async () => {
+        // Arrange
+        repository.findById.mockResolvedValue(mockDeepLink);
+        systemQueryBuilder.getOne.mockResolvedValue(null);
+
+        // Act & Assert
+        await expect(
+          service.findById('deep-link-uuid', ['user'], ['other-org-uuid']),
+        ).rejects.toThrow(ResourceNotFoundException);
+      });
+    });
+
+    describe('create with roles/organizationIds', () => {
+      const createDto: CreateDeepLinkDto = {
+        systemUnderTestId: 'system-uuid',
+        testEnvironment: 'test',
+        workload: 'load',
+        name: 'New Deep Link',
+        url: 'https://example.com/{perfana-test-run-id}',
+      };
+
+      it('should create deep link when admin bypasses organization check', async () => {
+        // Arrange
+        repository.create.mockResolvedValue(mockDeepLink);
+
+        // Act
+        const result = await service.create(createDto, ['perfana-admin'], []);
+
+        // Assert
+        expect(result).toEqual(mockDeepLink);
+        expect(systemRepo.createQueryBuilder).not.toHaveBeenCalled();
+      });
+
+      it('should create deep link when non-admin user has access to the system', async () => {
+        // Arrange
+        systemQueryBuilder.getOne.mockResolvedValue({ id: 'system-uuid' } as SystemUnderTest);
+        repository.create.mockResolvedValue(mockDeepLink);
+
+        // Act
+        const result = await service.create(createDto, ['user'], ['org-uuid']);
+
+        // Assert
+        expect(result).toEqual(mockDeepLink);
+      });
+
+      it('should throw ResourceNotFoundException when non-admin user lacks access to the system', async () => {
+        // Arrange
+        systemQueryBuilder.getOne.mockResolvedValue(null);
+
+        // Act & Assert
+        await expect(
+          service.create(createDto, ['user'], ['other-org-uuid']),
+        ).rejects.toThrow(ResourceNotFoundException);
+
+        expect(repository.create).not.toHaveBeenCalled();
+      });
+    });
+
+    describe('update with roles/organizationIds', () => {
+      it('should update deep link when admin bypasses organization check', async () => {
+        // Arrange
+        const updateDto: UpdateDeepLinkDto = { name: 'Updated' };
+        repository.findById.mockResolvedValue(mockDeepLink);
+        repository.update.mockResolvedValue({ ...mockDeepLink, ...updateDto });
+
+        // Act
+        const result = await service.update('deep-link-uuid', updateDto, ['perfana-admin'], []);
+
+        // Assert
+        expect(result).toEqual({ ...mockDeepLink, ...updateDto });
+        expect(systemRepo.createQueryBuilder).not.toHaveBeenCalled();
+      });
+
+      it('should throw ResourceNotFoundException when non-admin user lacks access during update', async () => {
+        // Arrange
+        const updateDto: UpdateDeepLinkDto = { name: 'Updated' };
+        repository.findById.mockResolvedValue(mockDeepLink);
+        systemQueryBuilder.getOne.mockResolvedValue(null);
+
+        // Act & Assert
+        await expect(
+          service.update('deep-link-uuid', updateDto, ['user'], ['other-org-uuid']),
+        ).rejects.toThrow(ResourceNotFoundException);
+
+        expect(repository.update).not.toHaveBeenCalled();
+      });
+    });
+
+    describe('delete with roles/organizationIds', () => {
+      it('should delete deep link when admin bypasses organization check', async () => {
+        // Arrange
+        repository.findById.mockResolvedValue(mockDeepLink);
+        repository.delete.mockResolvedValue(undefined);
+
+        // Act
+        await service.delete('deep-link-uuid', ['perfana-admin'], []);
+
+        // Assert
+        expect(repository.delete).toHaveBeenCalledWith('deep-link-uuid');
+        expect(systemRepo.createQueryBuilder).not.toHaveBeenCalled();
+      });
+
+      it('should throw ResourceNotFoundException when non-admin user lacks access during delete', async () => {
+        // Arrange
+        repository.findById.mockResolvedValue(mockDeepLink);
+        systemQueryBuilder.getOne.mockResolvedValue(null);
+
+        // Act & Assert
+        await expect(
+          service.delete('deep-link-uuid', ['user'], ['other-org-uuid']),
+        ).rejects.toThrow(ResourceNotFoundException);
+
+        expect(repository.delete).not.toHaveBeenCalled();
+      });
+    });
+  });
+
+  describe('copyToScope', () => {
+    const buildCopyDto = (overrides?: Partial<CopyDeepLinksDto>): CopyDeepLinksDto => ({
+      sourceSystemUnderTestId: 'source-system-uuid',
+      sourceTestEnvironment: 'staging',
+      sourceWorkload: 'load',
+      targetSystemUnderTestId: 'target-system-uuid',
+      targetTestEnvironment: 'production',
+      targetWorkload: 'load',
+      conflictStrategy: 'skip',
+      ...overrides,
+    });
+
+    const sourceLink = {
+      id: 'link-1',
+      systemUnderTestId: 'source-system-uuid',
+      testEnvironment: 'staging',
+      workload: 'load',
+      name: 'Grafana Dashboard',
+      url: 'https://grafana.example.com/{perfana-test-run-id}',
+      tags: ['grafana', 'monitoring'],
+      createdAt: new Date('2024-01-01'),
+      updatedAt: new Date('2024-01-01'),
+    } as DeepLink;
+
+    beforeEach(() => {
+      // Both source and target systems are accessible (admin scenario)
+      systemQueryBuilder.getOne.mockResolvedValue({ id: 'system-uuid' } as SystemUnderTest);
+    });
+
+    it('should copy all source deep links to target scope when no conflicts', async () => {
+      // Arrange
+      const dto = buildCopyDto();
+      repository.findBySystemEnvWorkload
+        .mockResolvedValueOnce([sourceLink])   // source links
+        .mockResolvedValueOnce([]);             // target links (empty)
+      repository.create.mockResolvedValue({
+        ...sourceLink,
+        systemUnderTestId: dto.targetSystemUnderTestId,
+        testEnvironment: dto.targetTestEnvironment,
+      } as DeepLink);
+
+      // Act
+      const result = await service.copyToScope(dto, ['perfana-admin'], []);
+
+      // Assert
+      expect(result).toEqual({ copied: 1, skipped: 0, total: 1 });
+      expect(repository.create).toHaveBeenCalledWith({
+        systemUnderTestId: 'target-system-uuid',
+        testEnvironment: 'production',
+        workload: 'load',
+        name: 'Grafana Dashboard',
+        url: sourceLink.url,
+        tags: ['grafana', 'monitoring'],
+      });
+    });
+
+    it('should skip conflicting deep links when conflictStrategy is skip', async () => {
+      // Arrange
+      const dto = buildCopyDto({ conflictStrategy: 'skip' });
+      const existingTargetLink = { ...sourceLink, id: 'existing-link', systemUnderTestId: 'target-system-uuid' };
+      repository.findBySystemEnvWorkload
+        .mockResolvedValueOnce([sourceLink])
+        .mockResolvedValueOnce([existingTargetLink]);
+
+      // Act
+      const result = await service.copyToScope(dto, ['perfana-admin'], []);
+
+      // Assert
+      expect(result).toEqual({ copied: 0, skipped: 1, total: 1 });
+      expect(repository.create).not.toHaveBeenCalled();
+      expect(repository.update).not.toHaveBeenCalled();
+    });
+
+    it('should overwrite conflicting deep links when conflictStrategy is overwrite', async () => {
+      // Arrange
+      const dto = buildCopyDto({ conflictStrategy: 'overwrite' });
+      const existingTargetLink = {
+        ...sourceLink,
+        id: 'existing-link-id',
+        systemUnderTestId: 'target-system-uuid',
+        url: 'https://old.example.com',
+      };
+      repository.findBySystemEnvWorkload
+        .mockResolvedValueOnce([sourceLink])
+        .mockResolvedValueOnce([existingTargetLink]);
+      repository.update.mockResolvedValue(existingTargetLink as DeepLink);
+
+      // Act
+      const result = await service.copyToScope(dto, ['perfana-admin'], []);
+
+      // Assert
+      expect(result).toEqual({ copied: 1, skipped: 0, total: 1 });
+      expect(repository.update).toHaveBeenCalledWith('existing-link-id', {
+        url: sourceLink.url,
+        tags: ['grafana', 'monitoring'],
+      });
+      expect(repository.create).not.toHaveBeenCalled();
+    });
+
+    it('should copy only specified IDs when ids filter is provided', async () => {
+      // Arrange
+      const link2 = { ...sourceLink, id: 'link-2', name: 'Second Link' };
+      const dto = buildCopyDto({ ids: ['link-1'] });
+      repository.findBySystemEnvWorkload
+        .mockResolvedValueOnce([sourceLink, link2])
+        .mockResolvedValueOnce([]);
+      repository.create.mockResolvedValue(sourceLink);
+
+      // Act
+      const result = await service.copyToScope(dto, ['perfana-admin'], []);
+
+      // Assert
+      // Only link-1 was in ids filter; link-2 was excluded
+      expect(result.total).toBe(1);
+      expect(result.copied).toBe(1);
+      expect(repository.create).toHaveBeenCalledTimes(1);
+      expect(repository.create).toHaveBeenCalledWith(
+        expect.objectContaining({ name: 'Grafana Dashboard' }),
+      );
+    });
+
+    it('should return zero counts when source scope has no deep links', async () => {
+      // Arrange
+      const dto = buildCopyDto();
+      repository.findBySystemEnvWorkload
+        .mockResolvedValueOnce([])
+        .mockResolvedValueOnce([]);
+
+      // Act
+      const result = await service.copyToScope(dto, ['perfana-admin'], []);
+
+      // Assert
+      expect(result).toEqual({ copied: 0, skipped: 0, total: 0 });
+      expect(repository.create).not.toHaveBeenCalled();
+    });
+
+    it('should handle mixed skip and copy in a single operation', async () => {
+      // Arrange
+      const link2 = { ...sourceLink, id: 'link-2', name: 'New Link', tags: [] };
+      const existingLink = { ...sourceLink, id: 'existing-id', systemUnderTestId: 'target-system-uuid' };
+      const dto = buildCopyDto({ conflictStrategy: 'skip' });
+      repository.findBySystemEnvWorkload
+        .mockResolvedValueOnce([sourceLink, link2])
+        .mockResolvedValueOnce([existingLink]); // sourceLink.name already exists in target
+      repository.create.mockResolvedValue(link2 as DeepLink);
+
+      // Act
+      const result = await service.copyToScope(dto, ['perfana-admin'], []);
+
+      // Assert
+      expect(result).toEqual({ copied: 1, skipped: 1, total: 2 });
+    });
+
+    it('should throw ResourceNotFoundException when user lacks access to source system', async () => {
+      // Arrange
+      const dto = buildCopyDto();
+      // Non-admin with no org access to source system
+      systemQueryBuilder.getOne.mockResolvedValue(null);
+
+      // Act & Assert
+      await expect(
+        service.copyToScope(dto, ['user'], ['other-org']),
+      ).rejects.toThrow(ResourceNotFoundException);
+
+      expect(repository.findBySystemEnvWorkload).not.toHaveBeenCalled();
+    });
+
+    it('should throw ResourceNotFoundException when user lacks access to target system', async () => {
+      // Arrange
+      const dto = buildCopyDto();
+      // First call (source system check) succeeds, second call (target system check) fails
+      systemQueryBuilder.getOne
+        .mockResolvedValueOnce({ id: 'source-system-uuid' } as SystemUnderTest)
+        .mockResolvedValueOnce(null);
+
+      // Act & Assert
+      await expect(
+        service.copyToScope(dto, ['user'], ['org-uuid']),
+      ).rejects.toThrow(ResourceNotFoundException);
+
+      expect(repository.findBySystemEnvWorkload).not.toHaveBeenCalled();
+    });
+
+    it('should handle links with no tags array gracefully', async () => {
+      // Arrange — link has tags cast through unknown (simulates DB entity without typed tags)
+      const linkWithoutTags = { ...sourceLink } as unknown as DeepLink;
+      delete (linkWithoutTags as any).tags; // remove tags property
+
+      const dto = buildCopyDto();
+      repository.findBySystemEnvWorkload
+        .mockResolvedValueOnce([linkWithoutTags])
+        .mockResolvedValueOnce([]);
+      repository.create.mockResolvedValue(linkWithoutTags);
+
+      // Act
+      const result = await service.copyToScope(dto, ['perfana-admin'], []);
+
+      // Assert
+      expect(result).toEqual({ copied: 1, skipped: 0, total: 1 });
+      // Tags should default to empty array when missing from source
+      expect(repository.create).toHaveBeenCalledWith(
+        expect.objectContaining({ tags: [] }),
+      );
+    });
+
+    it('should copy all links when ids filter is empty array (no filter applied)', async () => {
+      // Arrange
+      const link2 = { ...sourceLink, id: 'link-2', name: 'Second Link' };
+      const dto = buildCopyDto({ ids: [] }); // empty ids means copy all
+      repository.findBySystemEnvWorkload
+        .mockResolvedValueOnce([sourceLink, link2])
+        .mockResolvedValueOnce([]);
+      repository.create.mockResolvedValue(sourceLink);
+
+      // Act
+      const result = await service.copyToScope(dto, ['perfana-admin'], []);
+
+      // Assert — empty ids array is falsy check passes, all 2 links copied
+      expect(result.total).toBe(2);
+      expect(result.copied).toBe(2);
     });
   });
 });

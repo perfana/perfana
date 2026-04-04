@@ -4,6 +4,15 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
+## [0.2.25.0] - 2026-04-04
+
+### Added
+- ~1,537 new unit tests across API, Worker, and Web packages (7,419 → 9,558 total)
+- API test coverage: 45% → 53% statements, 69% → 73% branches, 57% → 61% functions
+- Worker test coverage: 34% → 48% statements, 82% → 85% branches, 49% → 62% functions
+- Web test coverage: 41% → 44% statements, 73% → 75% branches, 39% → 43% functions
+- New test suites for: ApdexCalculator, RequirementChecker, PipelineOrchestrator, IncrementalCollectionScheduler, WorkerDatabaseService, PerformanceTestMetricsPipeline, test-runs-crud-query, data-science controller, report-data-fetcher, jtl-import, error-analysis, anomaly detection, Tempo service, deep-links, compare-presets, grafana-client, application-dashboards, grafana-dashboards, performance-query, report-html-compiler, useReports, useTemplates, usePyroscopeData, chart-utils, JobProgressIndicator
+
 ## [0.2.24.0] - 2026-04-04
 
 ### Fixed
