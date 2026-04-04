@@ -24,12 +24,10 @@
     "@nestjs/schedule": "^4.0.0",
     "@nestjs/typeorm": "^11.0.0",
     "@perfana/shared": "*",
-    "axios": "^1.14.0",
     "joi": "^18.0.1",
     "pg": "^8.11.3",
     "reflect-metadata": "^0.1.13",
-    "typeorm": "^0.3.27",
-    "winston": "^3.17.0"
+    "typeorm": "^0.3.27"
   },
   "devDependencies": {
     "@nestjs/cli": "^10.2.0",

@@ -82,7 +82,6 @@
   },
   "dependencies": {
     "@nestjs/common": "^10.2.0",
-    "@nestjs/config": "^3.1.0",
     "@nestjs/typeorm": "^11.0.0",
     "ioredis": "^5.8.0",
     "pg": "^8.11.3",
