@@ -198,6 +198,48 @@ export function useTrendsData({ testRun, testRunId, trendsExpanded }: UseTrendsD
     }
   }, []);
 
+  // Load panels for performance-test dashboards from ds_metrics
+  const fetchPerformanceTestPanels = useCallback(async (dashboard: ApplicationDashboard) => {
+    if (!testRun) return;
+
+    try {
+      setPanelsLoading(true);
+      const response = await authenticatedFetch(
+        `/metrics/ds-metrics/available/${testRun.test_run_id}`,
+        { headers: { 'Content-Type': 'application/json' } }
+      );
+
+      if (response.ok) {
+        const rows: Array<{ dashboard_label: string; panel_title: string; panel_id: number; unit?: string; metric_names?: string[] }> = await response.json();
+        // Filter by the selected dashboard's label and deduplicate panels
+        const dashboardLabel = dashboard.dashboard_label;
+        const seen = new Set<number>();
+        const panels: Panel[] = [];
+        for (const row of rows) {
+          if (row.dashboard_label === dashboardLabel && !seen.has(row.panel_id)) {
+            seen.add(row.panel_id);
+            panels.push({
+              id: row.panel_id,
+              title: row.panel_title,
+              type: 'timeseries',
+              yAxesFormat: row.unit || undefined,
+              applicationDashboardId: dashboard.id,
+              metricsSourceId: dashboard.metrics_source_id,
+            });
+          }
+        }
+        setPanels(panels);
+      } else {
+        setPanels([]);
+      }
+    } catch (error) {
+      console.error('Error fetching performance test panels:', error);
+      setPanels([]);
+    } finally {
+      setPanelsLoading(false);
+    }
+  }, [testRun]);
+
   // Load Dynatrace metrics when dashboard selected
   const fetchDynatraceMetricsList = useCallback(async (dashboardLabel: string) => {
     if (!dashboardLabel || !testRun) return;
@@ -494,10 +536,12 @@ export function useTrendsData({ testRun, testRunId, trendsExpanded }: UseTrendsD
     if (sourceToUse === 'dynatrace') {
       const label = dynatraceDashboardLabel || dashboard.dashboard_label;
       fetchDynatraceMetricsList(label);
+    } else if (sourceToUse === 'performance-metrics') {
+      fetchPerformanceTestPanels(dashboard);
     } else if (dashboard.dashboard_uid) {
       fetchDashboardPanels(dashboard.dashboard_uid);
     }
-  }, [fetchDynatraceMetricsList, fetchDashboardPanels]);
+  }, [fetchDynatraceMetricsList, fetchPerformanceTestPanels, fetchDashboardPanels]);
 
   // Handle metric (panel) selection
   const handleMetricSelect = useCallback((metric: Panel | null) => {

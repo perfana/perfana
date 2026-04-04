@@ -239,6 +239,52 @@ export function useGraphsData({ testRun, testRunId, graphsExpanded }: UseGraphsD
   }, [selectedDashboard, testRun]);
 
   /**
+   * Fetch panels for performance-test dashboards from ds_metrics
+   */
+  const fetchPerformanceTestPanels = useCallback(async (dashboard: ApplicationDashboard): Promise<Panel[]> => {
+    if (!testRun) return [];
+
+    try {
+      setPanelsLoading(true);
+      const response = await authenticatedFetch(
+        `/metrics/ds-metrics/available/${testRun.test_run_id}`,
+        { headers: { 'Content-Type': 'application/json' } }
+      );
+
+      if (response.ok) {
+        const rows: Array<{ dashboard_label: string; panel_title: string; panel_id: number; unit?: string }> = await response.json();
+        const dashboardLabel = dashboard.dashboard_label;
+        const seen = new Set<number>();
+        const panels: Panel[] = [];
+        for (const row of rows) {
+          if (row.dashboard_label === dashboardLabel && !seen.has(row.panel_id)) {
+            seen.add(row.panel_id);
+            panels.push({
+              id: row.panel_id,
+              title: row.panel_title,
+              type: 'timeseries',
+              yAxesFormat: row.unit || PERFORMANCE_METRICS_PANEL_UNITS[row.panel_id] || undefined,
+              applicationDashboardId: dashboard.id,
+              metricsSourceId: dashboard.metrics_source_id,
+            });
+          }
+        }
+        setPanels(panels);
+        return panels;
+      } else {
+        setPanels([]);
+        return [];
+      }
+    } catch (error) {
+      console.error('Error fetching performance test panels:', error);
+      setPanels([]);
+      return [];
+    } finally {
+      setPanelsLoading(false);
+    }
+  }, [testRun]);
+
+  /**
    * Fetch available metrics for a selected panel from ds_metrics table
    */
   const fetchPanelMetrics = useCallback(async (dashboardId: string, panelId: number, metricsSourceId?: string) => {
@@ -305,10 +351,12 @@ export function useGraphsData({ testRun, testRunId, graphsExpanded }: UseGraphsD
     if (sourceToUse === 'dynatrace') {
       const dynatraceUid = dashboard.dashboard_uid || `dynatrace-${dashboard.dashboard_label}`;
       fetchDashboardPanels(dynatraceUid, dashboard);
+    } else if (sourceToUse === 'performance-metrics') {
+      fetchPerformanceTestPanels(dashboard);
     } else if (dashboard.dashboard_uid) {
       fetchDashboardPanels(dashboard.dashboard_uid, dashboard);
     }
-  }, [fetchDashboardPanels]);
+  }, [fetchDashboardPanels, fetchPerformanceTestPanels]);
 
   /**
    * Handle panel selection
