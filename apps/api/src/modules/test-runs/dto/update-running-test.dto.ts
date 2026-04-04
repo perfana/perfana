@@ -7,6 +7,7 @@ import {
   ValidateNested,
   Length,
   IsUrl,
+  IsUUID,
   ArrayMaxSize,
   Matches,
   IsInt,
@@ -283,6 +284,6 @@ export class UpdateRunningTestDto {
     description: 'Scaling session UUID to associate this test run with',
   })
   @IsOptional()
-  @IsString()
+  @IsUUID(undefined, { message: 'scalingSessionId must be a valid UUID' })
   scalingSessionId?: string;
 }

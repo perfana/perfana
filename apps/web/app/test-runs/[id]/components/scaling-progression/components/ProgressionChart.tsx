@@ -1,6 +1,6 @@
 'use client';
 
-import { useMemo, useState } from 'react';
+import { useMemo, useState, useEffect } from 'react';
 import { Box, Typography, FormControl, InputLabel, Select, MenuItem, Chip } from '@mui/material';
 import {
   LineChart,
@@ -50,10 +50,17 @@ export function ProgressionChart({ data, currentTestRunId }: Props) {
     return result;
   }, [runs]);
 
-  // Default: select first 3 metrics
-  const [selectedMetrics, setSelectedMetrics] = useState<string[]>(() =>
-    availableMetrics.slice(0, 3).map(m => m.key)
-  );
+  const [selectedMetrics, setSelectedMetrics] = useState<string[]>([]);
+
+  // Sync selected metrics when available metrics change (e.g. refresh, new runs)
+  useEffect(() => {
+    setSelectedMetrics(prev => {
+      const validKeys = new Set(availableMetrics.map(m => m.key));
+      const stillValid = prev.filter(k => validKeys.has(k));
+      if (stillValid.length > 0) return stillValid;
+      return availableMetrics.slice(0, 3).map(m => m.key);
+    });
+  }, [availableMetrics]);
 
   // Build chart data: one data point per run, one field per metric
   const chartData = useMemo(() => {

@@ -108,7 +108,8 @@ export class ScalingSessionsService {
       FROM test_runs tr
       LEFT JOIN ds_adapt_conclusion dac ON dac.test_run_id = tr.test_run_id
       WHERE tr.scaling_session_id = $1
-      ORDER BY tr.start_time ASC`,
+      ORDER BY tr.start_time ASC
+      LIMIT 100`,
       [id],
     );
 

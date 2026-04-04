@@ -190,7 +190,7 @@ export class TestRunsMutationService {
 
     // If scalingSessionId is set, look up session and auto-apply SCALING mode
     if (common.scalingSessionId && !existingTestRun) {
-      const session = await this.lookupScalingSession(common.scalingSessionId);
+      const session = await this.lookupScalingSession(common.scalingSessionId, common.organizationId);
       if (session) {
         common.adaptMode = common.adaptMode || 'SCALING';
         common.baselineTestRunId = common.baselineTestRunId || session.baseline_test_run_id;
@@ -222,28 +222,43 @@ export class TestRunsMutationService {
     return result.data;
   }
 
-  private async lookupScalingSession(id: string): Promise<{ baseline_test_run_id?: string } | null> {
-    try {
-      const result = await this.testRunRepo.manager.query(
-        `SELECT baseline_test_run_id FROM scaling_sessions WHERE id = $1`,
-        [id],
-      );
-      return result?.[0] || null;
-    } catch {
-      return null;
+  private async lookupScalingSession(id: string, organizationId?: string): Promise<{ baseline_test_run_id?: string } | null> {
+    // RBAC: verify session belongs to the same org as the test run
+    let query = `SELECT baseline_test_run_id FROM scaling_sessions WHERE id = $1`;
+    const params: any[] = [id];
+
+    if (organizationId) {
+      query += ` AND (organization_id = $2 OR organization_id IS NULL)`;
+      params.push(organizationId);
     }
+
+    const result = await this.testRunRepo.manager.query(query, params);
+    return result?.[0] || null;
   }
 
-  private async maybeSetSessionBaseline(sessionId: string, testRunId: string): Promise<void> {
+  private async maybeSetSessionBaseline(sessionId: string, testRunId: string): Promise<string | undefined> {
     try {
-      // Only set baseline if the session doesn't have one yet
-      await this.testRunRepo.manager.query(
+      // Atomically set baseline if none exists, return the actual baseline
+      const result = await this.testRunRepo.manager.query(
         `UPDATE scaling_sessions SET baseline_test_run_id = $1, updated_at = NOW()
-         WHERE id = $2 AND baseline_test_run_id IS NULL`,
+         WHERE id = $2 AND baseline_test_run_id IS NULL
+         RETURNING baseline_test_run_id`,
         [testRunId, sessionId],
       );
+
+      if (result?.[0]?.baseline_test_run_id) {
+        return result[0].baseline_test_run_id;
+      }
+
+      // Another run already set the baseline, read it
+      const existing = await this.testRunRepo.manager.query(
+        `SELECT baseline_test_run_id FROM scaling_sessions WHERE id = $1`,
+        [sessionId],
+      );
+      return existing?.[0]?.baseline_test_run_id;
     } catch (error) {
       this.logger.warn(`Failed to set session baseline: ${(error as Error).message}`);
+      return undefined;
     }
   }
 
