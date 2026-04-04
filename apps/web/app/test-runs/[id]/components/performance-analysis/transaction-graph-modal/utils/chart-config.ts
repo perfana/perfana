@@ -46,8 +46,8 @@ export function buildPlotLayout(metricLabel: string, theme?: Theme): Record<stri
   const textColor = theme?.palette.text.primary ?? 'inherit';
   const textSecondary = theme?.palette.text.secondary ?? 'inherit';
   const gridColor = isDark ? 'rgba(255,255,255,0.12)' : 'rgba(0, 0, 0, 0.05)';
-  const plotBgColor = isDark ? 'transparent' : 'rgba(250, 250, 250, 1)';
-  const paperBgColor = isDark ? 'transparent' : 'white';
+  const plotBgColor = isDark ? '#1e1e1e' : 'rgba(250, 250, 250, 1)';
+  const paperBgColor = isDark ? '#121212' : 'white';
   const legendBgColor = isDark ? 'rgba(30, 41, 59, 0.9)' : 'rgba(255, 255, 255, 0.9)';
   const legendBorderColor = isDark ? 'rgba(255, 255, 255, 0.1)' : 'rgba(0, 0, 0, 0.1)';
   const hoverBgColor = isDark ? '#1e293b' : 'white';

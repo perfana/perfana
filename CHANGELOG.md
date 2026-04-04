@@ -4,6 +4,12 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
+## [0.2.29.0] - 2026-04-04
+
+### Fixed
+- Chart PNG export now includes background, title, axes, gridlines, and legend (was transparent/invisible in dark mode, missing in light mode)
+- SLO row hover no longer turns black in light mode (MUI alpha() was replacing alpha channel instead of multiplying)
+
 ## [0.2.28.0] - 2026-04-04
 
 ### Added
