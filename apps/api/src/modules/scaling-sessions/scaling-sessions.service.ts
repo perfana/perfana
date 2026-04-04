@@ -136,7 +136,7 @@ export class ScalingSessionsService {
         tr.application_release,
         tr.annotations,
         (SELECT jsonb_object_agg(key, value)
-         FROM test_run_configurations trc
+         FROM test_run_configs trc
          WHERE trc.test_run_id = tr.id
            AND trc.key IN ('targetConcurrency', 'target_concurrency', 'loadLevel', 'threads', 'vusers')
         ) as load_config
