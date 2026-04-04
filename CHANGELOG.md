@@ -4,6 +4,15 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
+## [0.2.26.0] - 2026-04-04
+
+### Removed
+- 37 unused source files: dead interceptors, services, DTOs, barrel exports, config files, and scripts (-7,794 lines)
+- 28 unused dependencies across 7 package.json files (-106 packages from node_modules)
+
+### Fixed
+- Add missing `date-fns` dependency to web package (was only resolved via hoisting)
+
 ## [0.2.25.0] - 2026-04-04
 
 ### Added
