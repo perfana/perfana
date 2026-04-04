@@ -299,7 +299,7 @@ export function SLOList({
                 '&:hover': {
                   backgroundColor: theme.palette.mode === 'dark'
                     ? alpha(theme.palette.common.white, 0.06)
-                    : alpha(theme.palette.action.hover, 0.8),
+                    : alpha(theme.palette.primary.main, 0.04),
                   transform: 'translateY(-1px)',
                   boxShadow: `0 2px 8px ${alpha(theme.palette.text.primary, 0.08)}`,
                   borderColor: alpha(theme.palette.divider, 0.8)
