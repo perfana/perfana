@@ -42,6 +42,9 @@ export class ScalingSession {
   @Column({ name: 'linked_benchmark_ids', type: 'uuid', array: true, default: '{}' })
   linked_benchmark_ids!: string[];
 
+  @Column({ name: 'run_comments', type: 'jsonb', default: '{}' })
+  run_comments!: Record<string, string>;
+
   @Column({ type: 'varchar', length: 50, default: 'active' })
   status!: string;
 

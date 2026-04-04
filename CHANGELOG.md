@@ -4,19 +4,24 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
-## [0.2.30.0] - 2026-04-04
+## [0.2.31.0] - 2026-04-04
 
 ### Fixed
-- Scaling session creation no longer fails with "User must belong to an organization" for Keycloak JWT users (org now resolved via AuthorizationService fallback)
+- Scaling session creation no longer fails with "User must belong to an organization" for Keycloak JWT users
 
 ### Added
-- SLOs can now be linked to scaling sessions when starting a session, defining what "success" means at each load level
-- Scaling progression view shows per-SLO pass/fail results for each test run instead of generic ADAPT conclusions
-- Progression chart plots SLO actual values across load levels with threshold context
+- Link SLOs to scaling sessions when starting a session to define success criteria at each load level
+- Scaling progression card redesigned as a selectable run list: test run ID (hover shows version + annotations), date, SLO summary, and editable comment per run
+- Selecting a run shows its linked SLO results in a table matching the SLO card pattern (dashboard, metric, requirement, pass/fail)
+- Anomaly detection TLDR section with SoftBadge chips per selected run, clicking deeplinks to anomaly card (new tab for different runs)
+- Per-run comments stored on scaling sessions with inline editing
+
+### Changed
+- Scaling progression now uses check_results for SLO data instead of hardcoded ds_metric_statistics panels
 
 ### Removed
-- ADAPT conclusion column from scaling progression (not meaningful in scaling context)
-- Hardcoded ds_metric_statistics panel queries (replaced by linked SLO check results)
+- Standalone scaling sessions page and sidebar link (scaling lives inside test run details)
+- ADAPT conclusion from scaling progression (not meaningful in scaling context)
 
 ## [0.2.29.0] - 2026-04-04
 

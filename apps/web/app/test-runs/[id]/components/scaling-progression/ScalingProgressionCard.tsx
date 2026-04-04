@@ -157,6 +157,7 @@ export default function ScalingProgressionCard({ testRun, testRunId, expanded, o
             <ProgressionChart
               data={data}
               currentTestRunId={testRunId}
+              onRefresh={refresh}
             />
           )}
           {!data && !loading && !error && (

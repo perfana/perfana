@@ -89,4 +89,15 @@ export class ScalingSessionsController {
   ) {
     return this.service.addTestRun(id, testRunId, ctx.userId, ctx.roles);
   }
+
+  @Put(':id/runs/:testRunId/comment')
+  @ApiOperation({ summary: 'Update comment for a test run in a scaling session' })
+  async updateRunComment(
+    @Param('id') id: string,
+    @Param('testRunId') testRunId: string,
+    @Body() body: { comment: string },
+    @UserCtx() ctx: UserContext,
+  ) {
+    return this.service.updateRunComment(id, testRunId, body.comment || '', ctx.userId, ctx.roles);
+  }
 }

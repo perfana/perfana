@@ -133,6 +133,8 @@ export class ScalingSessionsService {
         tr.end_time,
         tr.completed,
         tr.consolidated_result,
+        tr.application_release,
+        tr.annotations,
         (SELECT jsonb_object_agg(key, value)
          FROM test_run_configurations trc
          WHERE trc.test_run_id = tr.id
@@ -146,6 +148,26 @@ export class ScalingSessionsService {
     );
 
     const runIds = runs.map((r: any) => r.test_run_id);
+
+    // Get anomaly detection summary per run (conclusion label counts)
+    let anomalySummaryPerRun: Record<string, Record<string, number>> = {};
+    if (runIds.length > 0) {
+      const anomalyCounts = await this.dataSource.query(
+        `SELECT
+          dar.test_run_id,
+          COALESCE(dar.conclusion->>'label', 'unknown') as conclusion_label,
+          COUNT(*)::int as count
+        FROM ds_adapt_results dar
+        WHERE dar.test_run_id = ANY($1::varchar[])
+        GROUP BY dar.test_run_id, COALESCE(dar.conclusion->>'label', 'unknown')
+        ORDER BY dar.test_run_id`,
+        [runIds],
+      );
+      for (const row of anomalyCounts) {
+        if (!anomalySummaryPerRun[row.test_run_id]) anomalySummaryPerRun[row.test_run_id] = {};
+        anomalySummaryPerRun[row.test_run_id]![row.conclusion_label] = row.count;
+      }
+    }
     let sloResultsPerRun: Record<string, any[]> = {};
 
     // Get per-benchmark SLO check results for each run
@@ -235,8 +257,12 @@ export class ScalingSessionsService {
         end_time: r.end_time,
         completed: r.completed,
         meets_requirement: r.consolidated_result?.meetsRequirement ?? null,
+        application_release: r.application_release || null,
+        annotations: r.annotations || [],
         load_config: r.load_config || {},
         slo_results: sloResultsPerRun[r.test_run_id] || [],
+        anomaly_summary: anomalySummaryPerRun[r.test_run_id] || {},
+        comment: session.run_comments?.[r.test_run_id] || '',
       })),
     };
   }
@@ -289,6 +315,21 @@ export class ScalingSessionsService {
     }
 
     this.logger.log(`Added test run ${testRunId} to scaling session ${sessionId}`);
+    return { success: true };
+  }
+
+  /**
+   * Update the comment for a specific test run in a scaling session.
+   */
+  async updateRunComment(sessionId: string, testRunId: string, comment: string, userId: string, roles: string[]): Promise<{ success: true }> {
+    const session = await this.findOne(sessionId, userId, roles);
+    const comments = session.run_comments || {};
+    if (comment.trim()) {
+      comments[testRunId] = comment.trim();
+    } else {
+      delete comments[testRunId];
+    }
+    await this.repo.update(sessionId, { run_comments: comments, updated_by: userId });
     return { success: true };
   }
 
