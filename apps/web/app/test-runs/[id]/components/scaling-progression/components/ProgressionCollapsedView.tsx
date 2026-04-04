@@ -25,8 +25,10 @@ export function ProgressionCollapsedView({ data, loading, currentTestRunId }: Pr
 
   const { session, runs } = data;
   const currentIndex = runs.findIndex(r => r.test_run_id === currentTestRunId);
-  const regressionCount = runs.filter(r => r.adapt_conclusion === 'REGRESSION').length;
-  const passCount = runs.filter(r => r.adapt_ok === true).length;
+
+  // Count runs where all SLOs passed vs runs with at least one SLO failure
+  const passedRuns = runs.filter(r => r.slo_results.length > 0 && r.slo_results.every(s => s.meets_requirement === true)).length;
+  const failedRuns = runs.filter(r => r.slo_results.some(s => s.meets_requirement === false)).length;
 
   return (
     <Box sx={{ display: 'flex', flexDirection: 'column', gap: 1, pt: 1 }}>
@@ -48,21 +50,28 @@ export function ProgressionCollapsedView({ data, loading, currentTestRunId }: Pr
             variant="outlined"
           />
         )}
-        {passCount > 0 && (
+        {passedRuns > 0 && (
           <Chip
             icon={<CheckCircleIcon />}
-            label={`${passCount} passed`}
+            label={`${passedRuns} run${passedRuns > 1 ? 's' : ''} SLOs met`}
             size="small"
             color="success"
             variant="outlined"
           />
         )}
-        {regressionCount > 0 && (
+        {failedRuns > 0 && (
           <Chip
             icon={<ErrorIcon />}
-            label={`${regressionCount} regression${regressionCount > 1 ? 's' : ''}`}
+            label={`${failedRuns} run${failedRuns > 1 ? 's' : ''} SLOs breached`}
             size="small"
             color="error"
+            variant="outlined"
+          />
+        )}
+        {session.linked_benchmarks.length > 0 && (
+          <Chip
+            label={`${session.linked_benchmarks.length} SLO${session.linked_benchmarks.length > 1 ? 's' : ''} tracked`}
+            size="small"
             variant="outlined"
           />
         )}
