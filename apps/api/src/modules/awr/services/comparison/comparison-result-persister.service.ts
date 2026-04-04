@@ -13,7 +13,7 @@ import { Injectable, Logger } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { v4 as uuidv4 } from 'uuid';
-import { AwrAnalysis, SeveritySummary } from '../../entities/awr-analysis.entity';
+import { AwrAnalysis, SeveritySummary, type AwrInsight as EntityAwrInsight } from '../../entities/awr-analysis.entity';
 import {
   DatabaseException,
 } from '../../../../common/exceptions/business.exception';
@@ -59,8 +59,8 @@ export class ComparisonResultPersisterService {
         awrReportId: currentReportId,
         baselineReportId,
         analysisType: 'comparison',
-        insights: data.insights as any,
-        severitySummary: data.severitySummary as any,
+        insights: data.insights as unknown as EntityAwrInsight[],
+        severitySummary: data.severitySummary,
         analysisVersion: data.comparisonVersion,
         analyzedAt: new Date(),
       });

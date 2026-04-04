@@ -154,7 +154,7 @@ export class TestRunsChangepointService {
     testEnvironment: string,
     workload: string,
     testRunId: string,
-  ): Promise<{ message: string; jobId?: string; jobDetails?: any }> {
+  ): Promise<{ message: string; jobId?: string; jobDetails?: unknown }> {
     try {
       // Check if changepoint already exists
       const existingChangepoint = await this.changePointsRepo.findOne({
@@ -271,7 +271,7 @@ export class TestRunsChangepointService {
     testEnvironment: string,
     workload: string,
     testRunId: string,
-  ): Promise<{ message: string; jobId?: string; jobDetails?: any }> {
+  ): Promise<{ message: string; jobId?: string; jobDetails?: unknown }> {
     try {
       // Check if changepoint exists
       const existingChangepoint = await this.changePointsRepo.findOne({

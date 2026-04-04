@@ -37,8 +37,8 @@ export interface TestRunUpdatedEvent extends TestRunEventPayload {
   eventType: TestRunEventType.UPDATED;
   changes?: Array<{
     field: string;
-    oldValue: any;
-    newValue: any;
+    oldValue: unknown;
+    newValue: unknown;
   }>;
 }
 

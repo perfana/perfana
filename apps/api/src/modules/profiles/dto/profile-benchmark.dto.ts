@@ -189,7 +189,7 @@ export class CreateProfileBenchmarkDto {
     required: false
   })
   @IsOptional()
-  metadata?: Record<string, any>;
+  metadata?: Record<string, unknown>;
 
   @ApiProperty({
     description: 'Whether this benchmark is read-only',
@@ -388,7 +388,7 @@ export class UpdateProfileBenchmarkDto {
     required: false
   })
   @IsOptional()
-  metadata?: Record<string, any>;
+  metadata?: Record<string, unknown>;
 
   @ApiProperty({
     description: 'Whether this benchmark is read-only',
@@ -547,7 +547,7 @@ export class ProfileBenchmarkResponse {
     description: 'Additional metadata',
     example: { customField: 'value' }
   })
-  metadata!: Record<string, any>;
+  metadata!: Record<string, unknown>;
 
   @ApiProperty({
     description: 'Read-only status',

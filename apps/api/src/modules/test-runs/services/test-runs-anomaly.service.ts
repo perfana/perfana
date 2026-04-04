@@ -15,6 +15,32 @@ import { DeleteAnomalyDto } from '../dto/delete-anomaly.dto';
 import { ResourceNotFoundException, DatabaseException, ValidationException } from '../../../common/exceptions/business.exception';
 import { BullMQClientService } from '../../data-science/services/bullmq-client.service';
 
+/** Raw row returned from check_results SQL query */
+interface CheckResultRow {
+  test_run_id: string;
+  targets: string | unknown;
+  requirement: string | unknown;
+  created_at: string;
+  [key: string]: unknown;
+}
+
+/** Shape of a parsed check result with JSONB fields resolved */
+interface ParsedCheckResult {
+  test_run_id: string;
+  targets: unknown;
+  requirement: unknown;
+  created_at: string;
+  [key: string]: unknown;
+}
+
+/** Fields used when matching adapt results to compare-config entries */
+interface AdaptResultKey {
+  application_dashboard_id: string;
+  panel_id: number;
+  metric_name: string;
+}
+
+
 @Injectable()
 export class TestRunsAnomalyService {
   private readonly logger = new Logger(TestRunsAnomalyService.name);
@@ -39,16 +65,16 @@ export class TestRunsAnomalyService {
     _system?: string,
     _environment?: string,
     _workload?: string,
-  ): Promise<any[]> {
+  ): Promise<ParsedCheckResult[]> {
     try {
       // Use raw SQL to query check_results table (no entity)
-      const checkResults = await this.dataSource.query(
+      const checkResults: CheckResultRow[] = await this.dataSource.query(
         `SELECT * FROM check_results WHERE test_run_id = $1 ORDER BY created_at ASC`,
         [testRunId]
       );
 
       // Parse JSONB fields if they were returned as strings
-      const parsedResults = checkResults.map((result: any) => ({
+      const parsedResults: ParsedCheckResult[] = checkResults.map((result) => ({
         ...result,
         targets: typeof result.targets === 'string' ? JSON.parse(result.targets) : result.targets,
         requirement: typeof result.requirement === 'string' ? JSON.parse(result.requirement) : result.requirement,
@@ -121,122 +147,133 @@ export class TestRunsAnomalyService {
         select: ['application_dashboard_id', 'panel_id', 'metric_name', 'config_data']
       });
 
+      // Helper to extract classification string from config_data JSONB
+      const extractClassification = (configData: Record<string, unknown> | undefined): string | undefined => {
+        if (!configData) return undefined;
+        const mc = configData.metricClassification;
+        if (mc && typeof mc === 'object' && 'classification' in (mc as Record<string, unknown>)) {
+          const classification = (mc as Record<string, unknown>).classification;
+          return typeof classification === 'string' ? classification : undefined;
+        }
+        return undefined;
+      };
+
       // Helper function to extract classification using inheritance hierarchy
-      const getClassification = (adaptResult: any): string => {
+      const getClassification = (adaptResult: AdaptResultKey): string => {
         // 1. Most specific: exact match (application_dashboard_id + panel_id + metric_name)
-        let match = configEntries?.find((config: any) =>
+        let match = configEntries?.find((config) =>
           config.application_dashboard_id === adaptResult.application_dashboard_id &&
           config.panel_id === adaptResult.panel_id &&
           config.metric_name === adaptResult.metric_name
         );
 
-        if (match?.config_data?.metricClassification?.classification) {
-          return match.config_data.metricClassification.classification;
-        }
+        const c1 = extractClassification(match?.config_data);
+        if (c1) return c1;
 
         // 2. Panel-level: application_dashboard_id + panel_id, metric_name = null
-        match = configEntries?.find((config: any) =>
+        match = configEntries?.find((config) =>
           config.application_dashboard_id === adaptResult.application_dashboard_id &&
           config.panel_id === adaptResult.panel_id &&
           config.metric_name === null
         );
 
-        if (match?.config_data?.metricClassification?.classification) {
-          return match.config_data.metricClassification.classification;
-        }
+        const c2 = extractClassification(match?.config_data);
+        if (c2) return c2;
 
         // 3. Dashboard-level: application_dashboard_id only, panel_id = null, metric_name = null
-        match = configEntries?.find((config: any) =>
+        match = configEntries?.find((config) =>
           config.application_dashboard_id === adaptResult.application_dashboard_id &&
           config.panel_id === null &&
           config.metric_name === null
         );
 
-        if (match?.config_data?.metricClassification?.classification) {
-          return match.config_data.metricClassification.classification;
-        }
+        const c3 = extractClassification(match?.config_data);
+        if (c3) return c3;
 
         // 4. Environment-level
-        match = configEntries?.find((config: any) =>
+        match = configEntries?.find((config) =>
           config.application_dashboard_id === null &&
           config.panel_id === null &&
           config.metric_name === null
         );
 
-        if (match?.config_data?.metricClassification?.classification) {
-          return match.config_data.metricClassification.classification;
-        }
+        const c4 = extractClassification(match?.config_data);
+        if (c4) return c4;
 
         return 'unclassified';
       };
 
       // Helper function to get the complete compare_config
-      const getCompareConfig = (adaptResult: any): any => {
+      const getCompareConfig = (adaptResult: AdaptResultKey): Record<string, unknown> | null => {
         // 1. Most specific: exact match
-        let match = configEntries?.find((config: any) =>
+        let match = configEntries?.find((config) =>
           config.application_dashboard_id === adaptResult.application_dashboard_id &&
           config.panel_id === adaptResult.panel_id &&
           config.metric_name === adaptResult.metric_name
         );
 
         if (match?.config_data) {
-          return match.config_data;
+          return match.config_data as Record<string, unknown>;
         }
 
         // 2. Panel-level
-        match = configEntries?.find((config: any) =>
+        match = configEntries?.find((config) =>
           config.application_dashboard_id === adaptResult.application_dashboard_id &&
           config.panel_id === adaptResult.panel_id &&
           config.metric_name === null
         );
 
         if (match?.config_data) {
-          return match.config_data;
+          return match.config_data as Record<string, unknown>;
         }
 
         // 3. Dashboard-level
-        match = configEntries?.find((config: any) =>
+        match = configEntries?.find((config) =>
           config.application_dashboard_id === adaptResult.application_dashboard_id &&
           config.panel_id === null &&
           config.metric_name === null
         );
 
         if (match?.config_data) {
-          return match.config_data;
+          return match.config_data as Record<string, unknown>;
         }
 
         // 4. Environment-level
-        match = configEntries?.find((config: any) =>
+        match = configEntries?.find((config) =>
           config.application_dashboard_id === null &&
           config.panel_id === null &&
           config.metric_name === null
         );
 
         if (match?.config_data) {
-          return match.config_data;
+          return match.config_data as Record<string, unknown>;
         }
 
         return null;
       };
 
-      const results = adaptResults.map((row: any) => ({
-        dashboard_label: row.dashboard_label,
-        panel_title: row.panel_title,
-        metric_name: row.metric_name,
-        unit: row.unit || null,
-        classification: getClassification(row),
-        conclusion_label: (row.conclusion && row.conclusion.label) || 'unknown',
-        test_value: row.statistic?.test || null,
-        control_group_value: row.statistic?.control || null,
-        difference: row.statistic?.diff || null,
-        application_dashboard_id: row.application_dashboard_id,
-        panel_id: row.panel_id,
-        compare_config: getCompareConfig(row),
-        is_stale: row.is_stale || false,
-        stale_reason: row.stale_reason || null,
-        stale_at: row.stale_at || null,
-        config_hash_used: row.config_hash_used || null
-      }));
+      const results = adaptResults.map((row) => {
+        const conclusion = row.conclusion as Record<string, unknown> | null;
+        const statistic = row.statistic as Record<string, unknown> | null;
+        return {
+          dashboard_label: row.dashboard_label,
+          panel_title: row.panel_title,
+          metric_name: row.metric_name,
+          unit: row.unit || null,
+          classification: getClassification(row),
+          conclusion_label: (conclusion && typeof conclusion.label === 'string' ? conclusion.label : 'unknown'),
+          test_value: statistic?.test ?? null,
+          control_group_value: statistic?.control ?? null,
+          difference: statistic?.diff ?? null,
+          application_dashboard_id: row.application_dashboard_id,
+          panel_id: row.panel_id,
+          compare_config: getCompareConfig(row),
+          is_stale: row.is_stale || false,
+          stale_reason: row.stale_reason || null,
+          stale_at: row.stale_at || null,
+          config_hash_used: row.config_hash_used || null,
+        };
+      });
 
       this.logger.log(`Retrieved ${results?.length || 0} anomaly detection results for test run: ${testRunId}`);
       return results;

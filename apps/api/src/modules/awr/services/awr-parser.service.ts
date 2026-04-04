@@ -21,6 +21,7 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
+import type { QueryDeepPartialEntity } from 'typeorm/query-builder/QueryPartialEntity';
 import { validateExternalUrl } from '../../../common/security/url-validator';
 import { AwrReport, ParseStatus } from '../entities/awr-report.entity';
 import { HtmlAwrParser, type HtmlAwrParserOptions } from '../parsers';
@@ -438,7 +439,7 @@ export class AwrParserService {
   ): Promise<void> {
     try {
       const updateData: Partial<AwrReport> = {
-        parsedData: parseResult.data as any,
+        parsedData: parseResult.data as unknown as import('../entities/awr-report.entity').ParsedAwrData | undefined,
         parsedAt: new Date(),
         parseStatus: parseResult.success ? 'completed' : 'failed' as ParseStatus,
       };
@@ -453,7 +454,7 @@ export class AwrParserService {
         Object.assign(updateData, metadata);
       }
 
-      const result = await this.awrReportRepo.update(reportId, updateData as any);
+      const result = await this.awrReportRepo.update(reportId, updateData as QueryDeepPartialEntity<AwrReport>);
 
       if (result.affected === 0) {
         throw new ResourceNotFoundException('AWR Report', reportId);
@@ -480,7 +481,7 @@ export class AwrParserService {
         updateData.parseError = error;
       }
 
-      await this.awrReportRepo.update(reportId, updateData as any);
+      await this.awrReportRepo.update(reportId, updateData as QueryDeepPartialEntity<AwrReport>);
     } catch (err) {
       this.logger.warn(
         `Failed to update status for report ${reportId}: ${this.extractErrorMessage(err)}`,

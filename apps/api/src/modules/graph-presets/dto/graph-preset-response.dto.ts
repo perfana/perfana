@@ -42,7 +42,7 @@ export class GraphPresetResponseDto {
     description: 'Chart customization options',
     example: { showLegend: true, lineWidth: 2 }
   })
-  chartOptions?: Record<string, any>;
+  chartOptions?: Record<string, unknown>;
 
   @ApiProperty({
     description: 'Whether this preset is available to all users',

@@ -4,6 +4,139 @@ import { Repository } from 'typeorm';
 import { TestRun } from '@perfana/shared';
 import { AuthorizationService } from '../../../common/services/authorization.service';
 
+/** Transaction summary for report rendering */
+export interface ReportTransaction {
+  name: string;
+  avgMs: number;
+  p95Ms: number;
+  p99Ms: number;
+  pass: number;
+  fail: number;
+  errPct: number;
+}
+
+/** Transaction with Apdex score for apdex rendering */
+export interface ApdexTransaction extends ReportTransaction {
+  apdex: number;
+  threshold: number;
+}
+
+/** Scenario data with transactions and optional time series */
+export interface ScenarioData {
+  scenario: string;
+  transactions: ReportTransaction[];
+  timeSeries?: Record<string, unknown>[];
+  summary?: {
+    peakTxnsPerSec: number;
+    peakReqsPerSec: number;
+    peakVu: number;
+    avgVu?: number;
+    errors: number;
+    avgMs: number;
+    p95Ms: number;
+    p99Ms: number;
+    apdex: number;
+  };
+}
+
+/** Apdex scenario data with summary and apdex transactions */
+export interface ApdexScenarioData {
+  scenario: string;
+  summary: {
+    peakTxnsPerSec: number;
+    peakReqsPerSec: number;
+    peakVu: number;
+    avgVu?: number;
+    errors: number;
+    avgMs: number;
+    p95Ms: number;
+    p99Ms: number;
+    apdex: number;
+  };
+  transactions: ApdexTransaction[];
+}
+
+/** Overall Apdex metrics */
+export interface ApdexOverallData {
+  peakTxnsPerSec: number;
+  peakReqsPerSec: number;
+  peakActiveUsers: number;
+  avgActiveUsers: number;
+  errorRate: number;
+  failedCount: number;
+  avgMs: number;
+  p95Ms: number;
+  p99Ms: number;
+  apdex: number;
+  threshold: number | null;
+  thresholdVaries: boolean;
+}
+
+/** Full Apdex data returned by getApdexDataFromDatabase */
+export interface ApdexData {
+  overall: ApdexOverallData;
+  scenarios: Record<string, ApdexScenarioData>;
+}
+
+/** Throughput statistics (overall and per-scenario) */
+export interface ThroughputStats {
+  overall: {
+    peak_transactions_per_second: number;
+    peak_requests_per_second: number;
+  };
+  by_scenario: Array<{
+    scenario_name: string;
+    peak_transactions_per_second: number;
+    peak_requests_per_second: number;
+  }>;
+}
+
+/** Virtual user statistics (overall and per-scenario) */
+export interface VirtualUserStats {
+  overall: {
+    peak_active_threads: number;
+    avg_active_threads: number;
+  };
+  by_scenario: Array<{
+    scenario_name: string;
+    peak_active_threads: number;
+    avg_active_threads: number;
+  }>;
+}
+
+/** Raw transaction row from database query */
+interface TransactionRow {
+  transaction_name: string;
+  avg_ms: string;
+  p95_ms: string;
+  p99_ms: string;
+  pass: string;
+  fail: string;
+  total: string;
+}
+
+/** Raw transaction row with Apdex columns from database query */
+interface ApdexTransactionRow extends TransactionRow {
+  scenario_name: string;
+  satisfied: string;
+  tolerating: string;
+  active_threshold: string;
+}
+
+/** Raw throughput scenario row from database query */
+interface ThroughputScenarioRow {
+  scenario_name: string;
+  peak_transactions_per_second: string;
+  peak_requests_per_second: string;
+}
+
+/** Raw virtual user scenario row from database query */
+interface VirtualUserScenarioRow {
+  scenario_name: string;
+  peak_active_threads: string;
+  avg_active_threads: string;
+}
+
 /**
  * Service for fetching report data from database
  *
@@ -111,7 +244,7 @@ export class ReportDataFetcherService {
     scenarioName: string,
     userId: string = '',
     roles: string[] = [],
-  ): Promise<any | null> {
+  ): Promise<ScenarioData | null> {
     try {
       const skipOrgFilter = !userId || this.authzService.isGlobalAdmin(roles);
 
@@ -170,14 +303,14 @@ export class ReportDataFetcherService {
       // Format data for chart rendering
       return {
         scenario: scenarioName,
-        transactions: transactions.map((txn: any) => ({
+        transactions: transactions.map((txn: TransactionRow) => ({
           name: txn.transaction_name,
           avgMs: parseFloat(txn.avg_ms) || 0,
           p95Ms: parseFloat(txn.p95_ms) || 0,
           p99Ms: parseFloat(txn.p99_ms) || 0,
           pass: parseInt(txn.pass) || 0,
           fail: parseInt(txn.fail) || 0,
-          errPct: txn.total > 0 ? ((parseInt(txn.fail) / parseInt(txn.total)) * 100) : 0,
+          errPct: parseInt(txn.total) > 0 ? ((parseInt(txn.fail) / parseInt(txn.total)) * 100) : 0,
         })),
         timeSeries: timeSeriesData,
       };
@@ -214,7 +347,7 @@ export class ReportDataFetcherService {
     excludeRampUp: boolean = false,
     userId: string = '',
     roles: string[] = [],
-  ): Promise<any | null> {
+  ): Promise<ApdexData | null> {
     try {
       const skipOrgFilter = !userId || this.authzService.isGlobalAdmin(roles);
 
@@ -275,7 +408,7 @@ export class ReportDataFetcherService {
         ORDER BY t.scenario_name, t.transaction_name
       `;
 
-      const allTransactions = await this.testRunRepo.query(allTransactionsQuery, queryParams);
+      const allTransactions: ApdexTransactionRow[] = await this.testRunRepo.query(allTransactionsQuery, queryParams);
 
       if (!allTransactions || allTransactions.length === 0) {
         return null;
@@ -322,7 +455,7 @@ export class ReportDataFetcherService {
       const virtualUserStats = await this.getVirtualUserStatsForReport(testRunId, excludeRampUp, cutoffTime, userId, roles);
 
       // Group transactions by scenario and calculate weighted averages
-      const scenarioMap: Record<string, any[]> = {};
+      const scenarioMap: Record<string, ApdexTransactionRow[]> = {};
       for (const txn of allTransactions) {
         const scenarioName = txn.scenario_name || 'Unknown';
         if (!scenarioMap[scenarioName]) {
@@ -331,7 +464,7 @@ export class ReportDataFetcherService {
         scenarioMap[scenarioName].push(txn);
       }
 
-      const scenarios: Record<string, any> = {};
+      const scenarios: Record<string, ApdexScenarioData> = {};
 
       for (const [scenarioName, scenarioTransactions] of Object.entries(scenarioMap)) {
         // Calculate scenario summary using weighted averages (matches Performance Analysis)
@@ -344,7 +477,7 @@ export class ReportDataFetcherService {
         let scenarioWeightedP99 = 0;
         let scenarioWeightedApdex = 0;
 
-        const transactions = scenarioTransactions.map((txn: any) => {
+        const transactions = scenarioTransactions.map((txn: ApdexTransactionRow) => {
           const txnTotal = parseInt(txn.total);
           const txnSatisfied = parseInt(txn.satisfied);
           const txnTolerating = parseInt(txn.tolerating);
@@ -381,8 +514,8 @@ export class ReportDataFetcherService {
         const errorRate = scenarioTotal > 0 ? (scenarioFailed / scenarioTotal) * 100 : 0;
 
         // Get peak metrics for this scenario
-        const scenarioThroughput = throughputStats.by_scenario.find((s: any) => s.scenario_name === scenarioName);
-        const scenarioVirtualUsers = virtualUserStats.by_scenario.find((s: any) => s.scenario_name === scenarioName);
+        const scenarioThroughput = throughputStats.by_scenario.find((s) => s.scenario_name === scenarioName);
+        const scenarioVirtualUsers = virtualUserStats.by_scenario.find((s) => s.scenario_name === scenarioName);
 
         scenarios[scenarioName] = {
           scenario: scenarioName,
@@ -413,7 +546,7 @@ export class ReportDataFetcherService {
           p95Ms: overallP95,
           p99Ms: overallP99,
           apdex: overallApdex,
-          threshold: thresholdSet.size === 1 ? [...thresholdSet][0] : null,
+          threshold: thresholdSet.size === 1 ? ([...thresholdSet][0] ?? null) : null,
           thresholdVaries: thresholdSet.size > 1,
         },
         scenarios,
@@ -440,7 +573,7 @@ export class ReportDataFetcherService {
     cutoffTime: Date | null = null,
     userId: string = '',
     roles: string[] = [],
-  ): Promise<any> {
+  ): Promise<ThroughputStats> {
     try {
       const skipOrgFilter = !userId || this.authzService.isGlobalAdmin(roles);
 
@@ -570,7 +703,7 @@ export class ReportDataFetcherService {
           peak_transactions_per_second: parseInt(transactions.peak_transactions_per_second) || 0,
           peak_requests_per_second: parseInt(requests.peak_requests_per_second) || 0,
         },
-        by_scenario: scenarioResult.map((row: any) => ({
+        by_scenario: (scenarioResult as ThroughputScenarioRow[]).map((row) => ({
           scenario_name: row.scenario_name,
           peak_transactions_per_second: parseInt(row.peak_transactions_per_second) || 0,
           peak_requests_per_second: parseInt(row.peak_requests_per_second) || 0,
@@ -601,7 +734,7 @@ export class ReportDataFetcherService {
     cutoffTime: Date | null = null,
     userId: string = '',
     roles: string[] = [],
-  ): Promise<any> {
+  ): Promise<VirtualUserStats> {
     try {
       const skipOrgFilter = !userId || this.authzService.isGlobalAdmin(roles);
 
@@ -672,7 +805,7 @@ export class ReportDataFetcherService {
           peak_active_threads: parseInt(overall.peak_active_threads) || 0,
           avg_active_threads: parseFloat(overall.avg_active_threads) || 0,
         },
-        by_scenario: scenarioResult.map((row: any) => ({
+        by_scenario: (scenarioResult as VirtualUserScenarioRow[]).map((row) => ({
           scenario_name: row.scenario_name,
           peak_active_threads: parseInt(row.peak_active_threads) || 0,
           avg_active_threads: parseFloat(row.avg_active_threads) || 0,
@@ -694,9 +827,9 @@ export class ReportDataFetcherService {
    * @param scenarioName - Scenario to fetch data for
    * @returns Mock scenario data or null if not found
    */
-  getMockScenarioData(scenarioName: string): any | null {
+  getMockScenarioData(scenarioName: string): ScenarioData | null {
     // Mock data structure matching the PDF example
-    const mockScenarios: Record<string, any> = {
+    const mockScenarios: Record<string, ScenarioData> = {
       BrowseAndSearch: {
         scenario: 'BrowseAndSearch',
         summary: {

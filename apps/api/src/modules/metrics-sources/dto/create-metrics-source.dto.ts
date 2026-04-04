@@ -54,7 +54,7 @@ export class CreateMetricsSourceDto {
 
   @ApiPropertyOptional({ description: 'Additional metadata' })
   @IsOptional()
-  metadata?: Record<string, any>;
+  metadata?: Record<string, unknown>;
 
   @ApiPropertyOptional({ description: 'Organization ID' })
   @IsOptional()

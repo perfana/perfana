@@ -1,8 +1,8 @@
 import { Injectable, NotFoundException, ForbiddenException, Logger, BadRequestException } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository, Brackets } from 'typeorm';
-import { GraphPreset } from '@perfana/shared/entities';
-import { CreateGraphPresetDto } from './dto/create-graph-preset.dto';
+import { GraphPreset, SeriesConfig } from '@perfana/shared/entities';
+import { CreateGraphPresetDto, SeriesConfigDto } from './dto/create-graph-preset.dto';
 import { GraphPresetResponseDto } from './dto/graph-preset-response.dto';
 import { AuthorizationService } from '../../common/services/authorization.service';
 import { TestRun as TestRunEntity } from '../../entities';
@@ -57,7 +57,7 @@ export class GraphPresetsService {
         testRunId: createGraphPresetDto.testRunId,
         userId,
         createdBy: userId,
-        seriesConfig: createGraphPresetDto.seriesConfig as any,
+        seriesConfig: createGraphPresetDto.seriesConfig as unknown as SeriesConfig[],
         chartOptions: createGraphPresetDto.chartOptions,
         isGlobal: createGraphPresetDto.isGlobal || false
       });
@@ -249,7 +249,7 @@ export class GraphPresetsService {
       description: preset.description,
       testRunId: preset.testRunId,
       userId: preset.userId,
-      seriesConfig: preset.seriesConfig as any,
+      seriesConfig: preset.seriesConfig as unknown as SeriesConfigDto[],
       chartOptions: preset.chartOptions,
       isGlobal: preset.isGlobal,
       createdAt: preset.createdAt.toISOString(),

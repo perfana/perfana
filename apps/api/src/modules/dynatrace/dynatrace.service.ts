@@ -1249,7 +1249,7 @@ export class DynatraceService {
       });
 
       // Transform Dynatrace problems to our format
-      const problems: HostProblemResponse[] = (response.data?.problems || []).map((problem: any) => ({
+      const problems: HostProblemResponse[] = (response.data?.problems || []).map((problem: { problemId: string; title: string; status: 'OPEN' | 'RESOLVED'; severityLevel: string; startTime: number; endTime?: number; impactLevel?: string }) => ({
         problemId: problem.problemId,
         title: problem.title,
         status: problem.status,

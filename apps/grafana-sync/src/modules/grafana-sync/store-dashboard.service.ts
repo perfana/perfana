@@ -27,7 +27,7 @@ export class StoreDashboardService {
     let totalAdded = 0;
 
     try {
-      const allInstances = instances ?? await this.grafanaInstanceRepo.find();
+      const allInstances = instances ?? (await this.grafanaInstanceRepo.find());
 
       for (const instance of allInstances) {
         const added = await this.addNewDashboardsForInstance(instance);

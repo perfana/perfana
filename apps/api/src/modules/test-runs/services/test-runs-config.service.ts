@@ -256,7 +256,7 @@ export class TestRunsConfigService {
           return `($${offset + 1}, $${offset + 2}, $${offset + 3}, $${offset + 4}::text[])`;
         }).join(', ');
 
-        const params: any[] = [];
+        const params: (string | number | null)[] = [];
         configsDto.configItems.forEach(item => {
           params.push(testRun.id, item.key, item.value, tagsLiteral);
         });
@@ -276,7 +276,7 @@ export class TestRunsConfigService {
           return `($${offset + 1}, $${offset + 2}, $${offset + 3}, $${offset + 4}::text[])`;
         }).join(', ');
 
-        const params: any[] = [];
+        const params: (string | number | null)[] = [];
         configsDto.configItems.forEach(item => {
           params.push(configsDto.testRunId, item.key, item.value, tagsLiteral);
         });
@@ -308,14 +308,14 @@ export class TestRunsConfigService {
 
       if (stringConfigs.length > 0) {
         // Get IDs of configs to keep
-        const idsToKeep = stringConfigs.map((c: any) => c.id);
+        const idsToKeep = stringConfigs.map((c: { id: string }) => c.id);
 
         // Delete duplicate configs (older ones with same key and tags)
         await this.dataSource.query(
           `DELETE FROM test_run_configs
            WHERE test_run_id_string = $1
            AND test_run_id IS NULL
-           AND id NOT IN (${idsToKeep.map((_: any, idx: number) => `$${idx + 2}`).join(', ')})`,
+           AND id NOT IN (${idsToKeep.map((_: string, idx: number) => `$${idx + 2}`).join(', ')})`,
           [testRunIdString, ...idsToKeep]
         );
 
@@ -501,7 +501,7 @@ export class TestRunsConfigService {
           return `($${offset + 1}, $${offset + 2}, $${offset + 3}, $${offset + 4}::text[])`;
         }).join(', ');
 
-        const params: any[] = [];
+        const params: (string | number | null)[] = [];
         configsToInsert.forEach(item => {
           params.push(item.testRunId, item.key, item.value, tagsLiteral);
         });
@@ -522,12 +522,12 @@ export class TestRunsConfigService {
     }
   }
 
-  private flattenJSON(obj: Record<string, any> = {}, res: Record<string, string> = {}, extraKey = ''): Record<string, string> {
+  private flattenJSON(obj: Record<string, unknown> = {}, res: Record<string, string> = {}, extraKey = ''): Record<string, string> {
     for (const key in obj) {
       if (typeof obj[key] !== 'object' || obj[key] === null) {
         res[extraKey + key] = String(obj[key]);
       } else {
-        this.flattenJSON(obj[key], res, `${extraKey}${key}.`);
+        this.flattenJSON(obj[key] as Record<string, unknown>, res, `${extraKey}${key}.`);
       }
     }
     return res;

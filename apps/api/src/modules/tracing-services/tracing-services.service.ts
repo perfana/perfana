@@ -247,7 +247,7 @@ export class TracingServicesService {
         ...(updateDto.serviceNames && {
           serviceNames: updateDto.serviceNames,
         }),
-      } as any);
+      } as Partial<TracingService>);
 
       this.logger.log(`Tracing service ${id} updated successfully`);
       return await this.tracingServiceRepository.findById(id);

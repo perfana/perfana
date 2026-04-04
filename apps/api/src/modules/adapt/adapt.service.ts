@@ -16,6 +16,41 @@ import {
 } from './dto/tracked-regression.dto';
 import { AuthorizationService } from '../../common/services/authorization.service';
 
+interface TrackedDifferenceChartPoint {
+  testRunId: string;
+  date: Date;
+  value: number;
+  controlGroup: boolean;
+  selectedTestRun: boolean;
+  regression: boolean;
+  thresholds: {
+    upper: number;
+    lower: number;
+  };
+}
+
+export interface EnrichedAdaptConclusion {
+  test_run_id: string;
+  conclusion: string;
+  control_group_id?: string;
+  updated_at: Date;
+  regressions: EnrichedAdaptResult[];
+  improvements: EnrichedAdaptResult[];
+  differences: EnrichedAdaptResult[];
+}
+
+interface EnrichedAdaptResult {
+  metric_name: string;
+  dashboard: string;
+  panel: string;
+  unit?: string;
+  current: unknown;
+  baseline: unknown;
+  change_pct: number | null;
+  absolute_change: unknown;
+  conclusion: unknown;
+}
+
 interface DatabaseTrackedRegression {
   id: string;
   test_run_id: string;
@@ -33,18 +68,18 @@ interface DatabaseTrackedRegression {
   benchmark_ids?: string[];
   test_run_start: string;
   updated_at: string;
-  mean?: any;
-  median?: any;
-  min_value?: any;
-  max_value?: any;
-  std_dev?: any;
-  q95?: any;
-  compare_config?: any;
-  metric_classification?: any;
-  thresholds?: any;
-  checks?: any;
-  conclusion?: any;
-  tracked_conclusion?: any;
+  mean?: Record<string, unknown>;
+  median?: Record<string, unknown>;
+  min_value?: Record<string, unknown>;
+  max_value?: Record<string, unknown>;
+  std_dev?: Record<string, unknown>;
+  q95?: Record<string, unknown>;
+  compare_config?: Record<string, unknown>;
+  metric_classification?: Record<string, unknown>;
+  thresholds?: Record<string, unknown>;
+  checks?: Record<string, unknown>;
+  conclusion?: Record<string, unknown>;
+  tracked_conclusion?: Record<string, unknown>;
 }
 
 @Injectable()
@@ -150,12 +185,14 @@ export class AdaptService {
     };
   }
 
-  private computeStatus(conclusion?: any, trackedConclusion?: any): TrackedRegressionStatus {
+  private computeStatus(conclusion?: Record<string, unknown>, trackedConclusion?: Record<string, unknown>): TrackedRegressionStatus {
     if (!conclusion || !trackedConclusion) return TrackedRegressionStatus.UNRESOLVED;
 
     // Check if regression has been resolved (any resolution value)
     if (trackedConclusion?.resolved === true) {
-      const resolution = trackedConclusion?.resolution?.toLowerCase();
+      const resolution = typeof trackedConclusion?.resolution === 'string'
+        ? trackedConclusion.resolution.toLowerCase()
+        : undefined;
       if (resolution === 'accepted') return TrackedRegressionStatus.ACCEPTED;
       if (resolution === 'denied') return TrackedRegressionStatus.DENIED;
       // Any other resolved state (e.g. 'regression') is treated as accepted
@@ -165,7 +202,7 @@ export class AdaptService {
     return TrackedRegressionStatus.UNRESOLVED;
   }
 
-  private computePercentageChange(mean?: any): number {
+  private computePercentageChange(mean?: Record<string, unknown>): number {
     if (!mean || typeof mean !== 'object') return 0;
 
     if (mean.pctDiff !== undefined) {
@@ -183,7 +220,7 @@ export class AdaptService {
     return 0;
   }
 
-  private computeSeverity(percentageChange: number, conclusion?: any): string {
+  private computeSeverity(percentageChange: number, conclusion?: Record<string, unknown>): string {
     const confidence = Number(conclusion?.confidence || 0);
 
     if (percentageChange >= 50 || confidence >= 0.95) return 'high';
@@ -419,7 +456,7 @@ export class AdaptService {
 
       // Update all tracked regressions for this test run
       for (const regression of trackedRegressions) {
-        const updatedTrackedConclusion = {
+        const updatedTrackedConclusion: Record<string, unknown> = {
           ...regression.tracked_conclusion,
           resolved: true,
           resolution: resolution,
@@ -430,7 +467,7 @@ export class AdaptService {
         await this.trackedResultsRepo.update(
           { id: regression.id },
           {
-            tracked_conclusion: updatedTrackedConclusion as any,
+            tracked_conclusion: updatedTrackedConclusion as DsAdaptTrackedResults['tracked_conclusion'],
             updated_at: new Date()
           }
         );
@@ -494,7 +531,7 @@ export class AdaptService {
       }
 
       // Update the tracked_conclusion to mark as resolved
-      const updatedTrackedConclusion = {
+      const updatedTrackedConclusion: Record<string, unknown> = {
         ...regression.tracked_conclusion,
         resolved: true,
         resolution: resolution.resolution,
@@ -506,7 +543,7 @@ export class AdaptService {
       await this.trackedResultsRepo.update(
         { id: regressionId },
         {
-          tracked_conclusion: updatedTrackedConclusion as any,
+          tracked_conclusion: updatedTrackedConclusion as DsAdaptTrackedResults['tracked_conclusion'],
           updated_at: new Date()
         }
       );
@@ -530,7 +567,7 @@ export class AdaptService {
     limit: number = 50,
     userId: string = '',
     roles: string[] = [],
-  ): Promise<any[]> {
+  ): Promise<TrackedDifferenceChartPoint[]> {
     const isAdmin = this.isGlobalAdmin(roles);
     const organizationIds = isAdmin ? [] : await this.loadAccessibleOrganizations(userId);
     this.logger.log(`Getting tracked differences chart for metric: ${metricName}, testRunId: ${testRunId}, limit: ${limit}${isAdmin ? ' (admin)' : ` (orgs: ${organizationIds.length})`}`);
@@ -557,7 +594,8 @@ export class AdaptService {
       // Transform the data for chart consumption
       const chartData = trackedData.map((item) => {
         const meanValue = this.extractMeanValue(item.mean);
-        const isRegression = item.conclusion?.label?.toLowerCase() === 'regression';
+        const conclusionLabel = item.conclusion?.label;
+        const isRegression = typeof conclusionLabel === 'string' && conclusionLabel.toLowerCase() === 'regression';
         const thresholds = item.thresholds || {};
 
         return {
@@ -568,8 +606,8 @@ export class AdaptService {
           selectedTestRun: item.test_run_id === testRunId,
           regression: isRegression,
           thresholds: {
-            upper: thresholds.upper || meanValue * 1.1,
-            lower: thresholds.lower || meanValue * 0.9,
+            upper: Number(thresholds.upper) || meanValue * 1.1,
+            lower: Number(thresholds.lower) || meanValue * 0.9,
           },
         };
       });
@@ -582,7 +620,7 @@ export class AdaptService {
     }
   }
 
-  private extractMeanValue(mean?: any): number {
+  private extractMeanValue(mean?: Record<string, unknown>): number {
     if (!mean) return 0;
 
     if (typeof mean === 'number') return mean;
@@ -656,7 +694,7 @@ export class AdaptService {
    * Internal method to get DsAdaptConclusion without organization filtering.
    * Used by other methods in this service after they've already validated access.
    */
-  private async getDsAdaptConclusionInternal(testRunId: string): Promise<any> {
+  private async getDsAdaptConclusionInternal(testRunId: string): Promise<DsAdaptConclusion | null> {
     try {
       const conclusion = await this.conclusionRepo.findOne({
         where: { test_run_id: testRunId }
@@ -681,7 +719,7 @@ export class AdaptService {
     testRunId: string,
     userId: string = '',
     roles: string[] = [],
-  ): Promise<any> {
+  ): Promise<DsAdaptConclusion | null> {
     const isAdmin = this.isGlobalAdmin(roles);
     const organizationIds = isAdmin ? [] : await this.loadAccessibleOrganizations(userId);
 
@@ -713,7 +751,7 @@ export class AdaptService {
     testRunId: string,
     userId: string = '',
     roles: string[] = [],
-  ): Promise<any> {
+  ): Promise<EnrichedAdaptConclusion | null> {
     const isAdmin = this.isGlobalAdmin(roles);
     const organizationIds = isAdmin ? [] : await this.loadAccessibleOrganizations(userId);
 
@@ -757,7 +795,7 @@ export class AdaptService {
   /**
    * Resolve an array of ds_adapt_results UUIDs into enriched summaries.
    */
-  private async resolveAdaptResults(ids?: string[]): Promise<any[]> {
+  private async resolveAdaptResults(ids?: string[]): Promise<EnrichedAdaptResult[]> {
     if (!ids || ids.length === 0) {
       return [];
     }

@@ -1,6 +1,6 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Repository, SelectQueryBuilder } from 'typeorm';
+import { Repository, SelectQueryBuilder, ObjectLiteral } from 'typeorm';
 import {
   TestRun as TestRunEntity,
   SystemUnderTest,
@@ -46,7 +46,7 @@ export class TestRunsCrudQueryService {
    * when the team has restrict_to_team_members enabled.
    */
   private async applyTeamRestriction(
-    queryBuilder: SelectQueryBuilder<any>,
+    queryBuilder: SelectQueryBuilder<ObjectLiteral>,
     sutAlias: string,
     userId: string,
   ): Promise<void> {
@@ -341,7 +341,7 @@ export class TestRunsCrudQueryService {
         return qb;
       };
 
-      const applyAccessFilter = (qb: SelectQueryBuilder<any>) => {
+      const applyAccessFilter = (qb: SelectQueryBuilder<ObjectLiteral>) => {
         if (organizationId && !isAdmin) {
           // Apply team restriction for non-admin users within an org
           qb.leftJoin('teams', 'team', 'team.id = sut.team_id');
@@ -910,7 +910,7 @@ export class TestRunsCrudQueryService {
 
       // Only get environment/workload data for accessible systems
       const systemIds = systems.map(s => s.id);
-      let envWorkloadData: any[];
+      let envWorkloadData: TestRunEntity[];
 
       if (systemIds.length === 0) {
         envWorkloadData = [];

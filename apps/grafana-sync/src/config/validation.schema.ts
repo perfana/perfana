@@ -36,7 +36,9 @@ export const validationSchema = Joi.object({
   NODE_ENV: Joi.string().valid('development', 'production', 'test').default('development'),
 
   // Encryption (required for reading encrypted Grafana credentials)
-  ENCRYPTION_KEY: Joi.string().pattern(/^[0-9a-fA-F]{64}$/).required()
+  ENCRYPTION_KEY: Joi.string()
+    .pattern(/^[0-9a-fA-F]{64}$/)
+    .required()
     .description('64-character hex string for encrypting/decrypting sensitive data'),
 
   // Auto-configuration

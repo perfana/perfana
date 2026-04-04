@@ -1,6 +1,7 @@
 import { Injectable } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Repository, LessThan, MoreThan, IsNull } from 'typeorm';
+import { Repository, LessThan, MoreThan, IsNull, FindOptionsWhere } from 'typeorm';
+import type { QueryDeepPartialEntity } from 'typeorm/query-builder/QueryPartialEntity';
 import { TypeOrmBaseRepository } from '../common/repositories/typeorm-base.repository';
 import { ApiKey } from '@perfana/shared/entities';
 import { DatabaseException } from '../common/exceptions/business.exception';
@@ -99,7 +100,7 @@ export class ApiKeyRepository extends TypeOrmBaseRepository<ApiKey> {
 
       return await this.update(id, {
         validUntil: newExpiry
-      } as any);
+      } as QueryDeepPartialEntity<ApiKey>);
     } catch (error) {
       this.logger.error('Failed to extend API key validity:', error);
       throw new DatabaseException('Failed to extend API key validity', error);
@@ -112,7 +113,7 @@ export class ApiKeyRepository extends TypeOrmBaseRepository<ApiKey> {
   async setExpiration(id: string, expirationDate: Date): Promise<ApiKey> {
     return await this.update(id, {
       validUntil: expirationDate
-    } as any);
+    } as QueryDeepPartialEntity<ApiKey>);
   }
 
   /**
@@ -121,7 +122,7 @@ export class ApiKeyRepository extends TypeOrmBaseRepository<ApiKey> {
   async removeExpiration(id: string): Promise<ApiKey> {
     return await this.update(id, {
       validUntil: null
-    } as any);
+    } as unknown as QueryDeepPartialEntity<ApiKey>);
   }
 
   /**
@@ -174,8 +175,8 @@ export class ApiKeyRepository extends TypeOrmBaseRepository<ApiKey> {
 
       const [total, expired, neverExpiring] = await Promise.all([
         this.count(),
-        this.count({ validUntil: LessThan(now) } as any),
-        this.count({ validUntil: IsNull() } as any),
+        this.count({ validUntil: LessThan(now) } as FindOptionsWhere<ApiKey>),
+        this.count({ validUntil: IsNull() } as FindOptionsWhere<ApiKey>),
       ]);
 
       const valid = total - expired;

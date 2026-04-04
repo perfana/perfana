@@ -6,6 +6,7 @@ import {
   ArrayMaxSize,
   ValidateNested,
   IsOptional,
+  ValidationArguments,
   ValidatorConstraint,
   ValidatorConstraintInterface,
   Validate,
@@ -18,10 +19,10 @@ import { IsValidTestRunId, IsSafeRegex, HasValidJsonDepth } from '../../../commo
 
 @ValidatorConstraint({ name: 'workloadOrTestType', async: false })
 class WorkloadOrTestTypeConstraint implements ValidatorConstraintInterface {
-  validate(value: any, validationArguments?: any) {
-    const obj = validationArguments?.object;
+  validate(value: unknown, validationArguments?: ValidationArguments) {
+    const obj = validationArguments?.object as Record<string, unknown> | undefined;
     // Check if workload is provided or if testType is provided (even if workload is empty)
-    return !!(value || obj.testType);
+    return !!(value || obj?.testType);
   }
 
   defaultMessage() {
@@ -324,5 +325,5 @@ export class AddTestRunConfigJsonDto {
   })
   @IsObject()
   @HasValidJsonDepth()
-  json!: Record<string, any>;
+  json!: Record<string, unknown>;
 }

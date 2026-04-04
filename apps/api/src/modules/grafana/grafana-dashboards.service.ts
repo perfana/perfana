@@ -21,8 +21,8 @@ export interface GrafanaDashboard {
   name: string;
   uri?: string;
   templating_variables?: TemplatingVariableDto[];
-  panels?: any[];
-  variables?: any[];
+  panels?: Record<string, unknown>[];
+  variables?: Record<string, unknown>[];
   tags?: string[];
   used_by_sut?: string[];
   updated?: string;
@@ -158,7 +158,7 @@ export class GrafanaDashboardsService {
 
         // If using simplified panels, ensure y_axes_format is transformed to yAxesFormat
         if (panels === row.panels && panels) {
-          panels = panels.map((panel: any) => ({
+          panels = panels.map((panel: Record<string, unknown>) => ({
             ...panel,
             yAxesFormat: panel.y_axes_format
           }));
@@ -449,9 +449,9 @@ export class GrafanaDashboardsService {
             return [];
           }
 
-          const datasourceUid = typeof variable.datasource === 'string' 
-            ? variable.datasource 
-            : variable.datasource.uid;
+          const datasourceUid = typeof variable.datasource === 'string'
+            ? variable.datasource
+            : (variable.datasource.uid as string | undefined);
 
           if (!datasourceUid) {
             this.logger.warn(`No datasource UID found for variable ${variableName}`);

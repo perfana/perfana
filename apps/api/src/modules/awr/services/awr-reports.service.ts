@@ -1,6 +1,7 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository, FindOptionsWhere, ILike } from 'typeorm';
+import type { QueryDeepPartialEntity } from 'typeorm/query-builder/QueryPartialEntity';
 import { AwrReport, ParseStatus, FileType, ParsedAwrData } from '../entities/awr-report.entity';
 import { AwrAnalysis, AwrInsight } from '../entities/awr-analysis.entity';
 import {
@@ -321,7 +322,7 @@ export class AwrReportsService {
         updateData.parseError = error;
       }
 
-      const result = await this.awrReportRepo.update(reportId, updateData as any);
+      const result = await this.awrReportRepo.update(reportId, updateData as QueryDeepPartialEntity<AwrReport>);
 
       if (result.affected === 0) {
         throw new ResourceNotFoundException('AWR Report', reportId);
@@ -359,7 +360,7 @@ export class AwrReportsService {
         Object.assign(updateData, metadata);
       }
 
-      const result = await this.awrReportRepo.update(reportId, updateData as any);
+      const result = await this.awrReportRepo.update(reportId, updateData as QueryDeepPartialEntity<AwrReport>);
 
       if (result.affected === 0) {
         throw new ResourceNotFoundException('AWR Report', reportId);

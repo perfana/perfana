@@ -100,7 +100,7 @@ export class CreateTrendsPresetDto {
   @IsArray()
   @IsOptional()
   @Type(() => Object)
-  series_config?: Record<string, any>[];
+  series_config?: Record<string, unknown>[];
 
   @ApiProperty({
     description: 'Test run ID this preset was created for',

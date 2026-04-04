@@ -461,7 +461,7 @@ export class ProvisioningService implements OnApplicationBootstrap {
         });
 
         // Build config_overrides from threshold fields in the YAML
-        const configOverrides: Record<string, any> = {};
+        const configOverrides: Record<string, number | boolean | string> = {};
         if (item.absThreshold !== undefined) configOverrides.absThreshold = item.absThreshold;
         if (item.ignore !== undefined) configOverrides.ignore = item.ignore;
         if (item.ignoreMeanDiffSmallerThan !== undefined) configOverrides.ignoreMeanDiffSmallerThan = item.ignoreMeanDiffSmallerThan;
@@ -481,14 +481,14 @@ export class ProvisioningService implements OnApplicationBootstrap {
           await this.templateRepo.update(existing.id, {
             ...values,
             updated_by: SYSTEM_ACTOR,
-          });
+          } as Partial<ProvisionedTemplateDsCompareConfig>);
           result.updated++;
         } else {
           await this.templateRepo.insert({
             ...values,
             created_by: SYSTEM_ACTOR,
             updated_by: SYSTEM_ACTOR,
-          });
+          } as Partial<ProvisionedTemplateDsCompareConfig>);
           result.created++;
         }
       } catch (error) {

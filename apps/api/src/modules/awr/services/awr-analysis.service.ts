@@ -17,7 +17,7 @@ import { Injectable, Logger } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { v4 as uuidv4 } from 'uuid';
-import { AwrAnalysis, SeveritySummary } from '../entities/awr-analysis.entity';
+import { AwrAnalysis, SeveritySummary, type AwrInsight as EntityAwrInsight } from '../entities/awr-analysis.entity';
 import { AwrReport } from '../entities/awr-report.entity';
 import {
   ResourceNotFoundException,
@@ -138,7 +138,7 @@ export class AwrAnalysisService {
     }
 
     // Run analysis
-    const result = this.runAnalysis(report.parsedData as any, options);
+    const result = this.runAnalysis(report.parsedData as ParsedAwrData, options);
 
     // Save to database if requested (default: true)
     const shouldSave = options?.saveToDatabase !== false;
@@ -453,8 +453,8 @@ export class AwrAnalysisService {
         awrReportId: reportId,
         analysisType,
         baselineReportId,
-        insights: result.insights as any,
-        severitySummary: result.severitySummary as any,
+        insights: result.insights as unknown as EntityAwrInsight[],
+        severitySummary: result.severitySummary,
         analysisVersion: result.analysisVersion,
         analyzedAt: new Date(),
       });
@@ -596,8 +596,8 @@ export class AwrAnalysisService {
       id: analysisId || uuidv4(), // Generate temp ID if not persisted
       awrReportId: reportId,
       analysisType: 'single',
-      insights: result.insights as any,
-      severitySummary: result.severitySummary as any,
+      insights: result.insights as unknown as EntityAwrInsight[],
+      severitySummary: result.severitySummary,
       analyzedAt: new Date(),
       analysisVersion: result.analysisVersion,
     };

@@ -2,6 +2,7 @@ import { Controller, Get, Post, Put, Delete, Query, Param, Body, Logger, HttpExc
 import { ApiTags, ApiOperation, ApiQuery, ApiResponse, ApiBearerAuth } from '@nestjs/swagger';
 import { BenchmarksService } from './benchmarks.service';
 import { CopyBenchmarksDto } from './dto/copy-benchmarks.dto';
+import { BenchmarkQuery } from './services/benchmark-query.types';
 import { UserCtx, UserContext } from '../../common/decorators/user-context.decorator';
 
 @ApiTags('benchmarks')
@@ -22,7 +23,7 @@ export class BenchmarksController {
   @ApiQuery({ name: 'benchmarkType', required: false, enum: ['metric', 'apdex'], description: 'Filter by benchmark type' })
   @ApiQuery({ name: 'metricsSourceId', required: false, description: 'Filter by metrics source ID' })
   @ApiResponse({ status: 200, description: 'Return all benchmarks' })
-  async findAll(@UserCtx() ctx: UserContext, @Query() query: any) {
+  async findAll(@UserCtx() ctx: UserContext, @Query() query: BenchmarkQuery) {
     try {
       return await this.benchmarksService.findAll(ctx.userId, ctx.roles, query);
     } catch (error) {
@@ -106,7 +107,7 @@ export class BenchmarksController {
     requirementValue: number;
     description?: string;
     tags?: string[];
-    configuration?: any;
+    configuration?: Record<string, unknown>;
   }) {
     try {
       return await this.benchmarksService.create(ctx.userId, ctx.roles, createBenchmarkDto);
@@ -198,7 +199,7 @@ export class BenchmarksController {
     requirementValue?: number;
     description?: string;
     tags?: string[];
-    configuration?: any;
+    configuration?: Record<string, unknown>;
     enabled?: boolean;
     valid?: boolean;
   }) {

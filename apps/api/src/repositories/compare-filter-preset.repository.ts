@@ -95,7 +95,7 @@ export class CompareFilterPresetRepository extends TypeOrmBaseRepository<Compare
    */
   async findByPanel(panelId: number, panelTitle?: string): Promise<CompareFilterPreset[]> {
     try {
-      const where: any = { panelId };
+      const where: { panelId: number; panelTitle?: string } = { panelId };
       if (panelTitle) {
         where.panelTitle = panelTitle;
       }

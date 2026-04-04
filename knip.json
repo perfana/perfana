@@ -1,0 +1,43 @@
+{
+  "$schema": "https://unpkg.com/knip@6/schema.json",
+  "workspaces": {
+    "apps/api": {
+      "entry": ["src/main.ts", "src/data-source.ts"],
+      "project": ["src/**/*.ts"],
+      "ignore": ["src/test/**", "src/**/*.spec.ts", "src/**/*.e2e-spec.ts"],
+      "ignoreDependencies": ["@nestjs/platform-express"]
+    },
+    "apps/web": {
+      "entry": ["app/**/*.{ts,tsx}", "lib/**/*.{ts,tsx}"],
+      "project": ["app/**/*.{ts,tsx}", "lib/**/*.{ts,tsx}"],
+      "ignore": ["__tests__/**"],
+      "jest": false
+    },
+    "apps/worker": {
+      "entry": ["src/main.ts"],
+      "project": ["src/**/*.ts"],
+      "ignore": ["src/test/**"]
+    },
+    "apps/grafana-sync": {
+      "entry": ["src/main.ts"],
+      "project": ["src/**/*.ts"],
+      "ignore": ["src/**/*.spec.ts", "test/**"]
+    },
+    "apps/perfana-report": {
+      "entry": ["src/main.ts"],
+      "project": ["src/**/*.ts"],
+      "ignore": ["src/**/*.spec.ts"]
+    },
+    "packages/shared": {
+      "entry": ["src/index.ts", "src/entities/index.ts", "src/types/index.ts"],
+      "project": ["src/**/*.ts"],
+      "ignore": ["src/**/*.spec.ts"]
+    },
+    "packages/config": {
+      "entry": ["src/index.ts"],
+      "project": ["src/**/*.ts"]
+    }
+  },
+  "ignore": [".claude/**", "docs-site/**", ".eslintrc.js"],
+  "ignoreWorkspaces": ["apps/mcp"]
+}

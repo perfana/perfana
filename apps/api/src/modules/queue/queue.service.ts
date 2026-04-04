@@ -7,7 +7,7 @@ export class QueueService {
 
   async sendJob(
     jobName: string,
-    data: any,
+    data: Record<string, unknown>,
     options: JobsOptions = {}
   ): Promise<string> {
     const job = await this.queue.add(jobName, data, options);

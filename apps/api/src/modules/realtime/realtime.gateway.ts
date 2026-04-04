@@ -80,7 +80,7 @@ export class RealtimeGateway implements OnGatewayInit, OnGatewayConnection, OnGa
   @SubscribeMessage('subscribe_test_runs')
   async handleSubscribeTestRuns(
     @ConnectedSocket() client: Socket,
-    @MessageBody() data: { filters?: any },
+    @MessageBody() data: { filters?: Record<string, unknown> },
   ) {
     try {
       const room = this.realtimeService.getTestRunsRoom(data.filters);
@@ -113,7 +113,7 @@ export class RealtimeGateway implements OnGatewayInit, OnGatewayConnection, OnGa
   @SubscribeMessage('unsubscribe_test_runs')
   async handleUnsubscribeTestRuns(
     @ConnectedSocket() client: Socket,
-    @MessageBody() data: { filters?: any },
+    @MessageBody() data: { filters?: Record<string, unknown> },
   ) {
     try {
       const room = this.realtimeService.getTestRunsRoom(data.filters);

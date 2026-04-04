@@ -12,6 +12,7 @@
  */
 
 import type { CheerioAPI, Cheerio } from 'cheerio';
+import type { Element } from 'domhandler';
 import { findTableByIdentifier, findSectionHeading, parseTableToArray } from '../../utils/html-utils';
 
 /**
@@ -49,7 +50,7 @@ const SQL_TEXT_IDENTIFIERS = [
  * This follows the same pattern as sql-parser.ts which successfully extracts
  * full SQL text from <pre_sqltext> tags.
  */
-function extractSqlEntries($: CheerioAPI, table: Cheerio<any>): SqlTextMap {
+function extractSqlEntries($: CheerioAPI, table: Cheerio<Element>): SqlTextMap {
   const sqlMap: SqlTextMap = {};
 
   // Use the same utility function that sql-parser.ts uses successfully

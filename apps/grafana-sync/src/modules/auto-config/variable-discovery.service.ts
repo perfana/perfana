@@ -9,10 +9,7 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { TestRun, GrafanaDashboard, GrafanaInstance } from '@perfana/shared/entities';
 import { DashboardVariable } from './types';
-import {
-  VariableDetectorService,
-  TemplatingVariable,
-} from './variable-detector.service';
+import { VariableDetectorService, TemplatingVariable } from './variable-detector.service';
 import { VariableMatcherService } from './variable-matcher.service';
 
 @Injectable()

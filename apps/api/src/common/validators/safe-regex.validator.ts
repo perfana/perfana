@@ -25,7 +25,7 @@ export class IsSafeRegexConstraint implements ValidatorConstraintInterface {
     /\(.+\|.+\)[*+]/,
   ];
 
-  validate(pattern: any): boolean {
+  validate(pattern: unknown): boolean {
     if (typeof pattern !== 'string') {
       return false;
     }
@@ -58,7 +58,7 @@ export class IsSafeRegexConstraint implements ValidatorConstraintInterface {
 }
 
 export function IsSafeRegex(validationOptions?: ValidationOptions) {
-  return function (object: Object, propertyName: string) {
+  return function (object: object, propertyName: string) {
     registerDecorator({
       target: object.constructor,
       propertyName: propertyName,

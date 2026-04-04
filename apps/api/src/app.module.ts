@@ -46,6 +46,7 @@ import { EnhancedThrottlerGuard } from './guards/enhanced-throttler.guard';
 import { ThrottlerStorageRedisService } from './guards/throttler-storage-redis.service';
 import { AuditInterceptor } from './common/interceptors/audit.interceptor';
 import { CommonModule } from './common/common.module';
+import IORedis from 'ioredis';
 
 @Module({
   imports: [
@@ -64,7 +65,7 @@ import { CommonModule } from './common/common.module';
     ThrottlerModule.forRootAsync({
       imports: [ConfigModule, QueueModule],
       inject: [ConfigService, 'REDIS_CLIENT'],
-      useFactory: async (configService: ConfigService, redisClient: any) => {
+      useFactory: async (configService: ConfigService, redisClient: IORedis) => {
         const storageService = new ThrottlerStorageRedisService(redisClient);
         return {
           throttlers: [

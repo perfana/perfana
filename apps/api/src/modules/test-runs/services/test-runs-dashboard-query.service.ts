@@ -1,6 +1,6 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Repository, SelectQueryBuilder } from 'typeorm';
+import { Repository, SelectQueryBuilder, ObjectLiteral } from 'typeorm';
 import {
   TestRun as TestRunEntity,
   SystemUnderTest,
@@ -50,7 +50,7 @@ export class TestRunsDashboardQueryService {
    * Filters by systemUnderTest.organization_id directly
    */
   private applyOrganizationFilter(
-    queryBuilder: SelectQueryBuilder<TestRunEntity>,
+    queryBuilder: SelectQueryBuilder<ObjectLiteral>,
     organizationIds: string[],
   ): void {
     queryBuilder
@@ -65,7 +65,7 @@ export class TestRunsDashboardQueryService {
    * Must be called after the SUT alias is already joined.
    */
   private applyTeamRestriction(
-    queryBuilder: SelectQueryBuilder<any>,
+    queryBuilder: SelectQueryBuilder<ObjectLiteral>,
     sutAlias: string,
     userTeamIds: string[],
   ): void {

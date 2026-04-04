@@ -15,7 +15,7 @@ describe('GrafanaSyncService', () => {
   let storeDashboardService: jest.Mocked<StoreDashboardService>;
   let restoreDashboardService: jest.Mocked<RestoreDashboardService>;
   let updateDashboardsService: jest.Mocked<UpdateDashboardsService>;
-  let grafanaInstanceRepo: any;
+  let _grafanaInstanceRepo: any;
 
   beforeEach(async () => {
     const mockStoreDashboardService = {
@@ -77,7 +77,7 @@ describe('GrafanaSyncService', () => {
     storeDashboardService = module.get(StoreDashboardService);
     restoreDashboardService = module.get(RestoreDashboardService);
     updateDashboardsService = module.get(UpdateDashboardsService);
-    grafanaInstanceRepo = module.get(getRepositoryToken(GrafanaInstance));
+    _grafanaInstanceRepo = module.get(getRepositoryToken(GrafanaInstance));
   });
 
   afterEach(() => {

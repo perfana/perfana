@@ -4,6 +4,21 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
+## [0.2.24.0] - 2026-04-04
+
+### Fixed
+- Fix 4 failing web tests (DashboardsSection and ServiceLevelObjectivesSection) where test assertions were out of sync with actual `authenticatedFetch` call signatures
+- Fix broken web linter: update eslint-config-next from v14 to v15, replace deprecated `next lint` with direct ESLint CLI
+- Fix 2 pre-existing grafana-sync lint errors (unused GrafanaInstance import and unused variable)
+
+### Changed
+- Eliminate all 289 API ESLint warnings (274 `no-explicit-any`, 7 `ban-types`, 5 `no-empty-function`, 2 `no-prototype-builtins`, 1 `no-var-requires`) with proper TypeScript types across 88 files
+- Add knip dead code detection tool with workspace-aware configuration
+
+### Added
+- `knip.json` workspace configuration for dead code detection across all packages
+- `npm run knip` script for running dead code analysis
+
 ## [0.2.23.1] - 2026-04-03
 
 ### Fixed

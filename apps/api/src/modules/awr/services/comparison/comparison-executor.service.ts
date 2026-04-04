@@ -9,7 +9,8 @@
  */
 
 import { Injectable, Logger } from '@nestjs/common';
-import { ParsedAwrData } from '../../entities/awr-report.entity';
+import type { ParsedAwrData as EntityParsedAwrData } from '../../entities/awr-report.entity';
+import type { ParsedAwrData } from '../../types/awr-data.types';
 import { ComparisonAnalyzer } from '../../analyzers/comparison-analyzer';
 import {
   AwrAnalysisConfig,
@@ -67,8 +68,8 @@ export class ComparisonExecutorService {
    * @returns Comparison insights and metadata
    */
   executeComparison(
-    currentData: ParsedAwrData,
-    baselineData: ParsedAwrData,
+    currentData: EntityParsedAwrData,
+    baselineData: EntityParsedAwrData,
     options: ComparisonExecutionOptions = {},
   ): ComparisonExecutionResult {
     const startTime = Date.now();
@@ -83,7 +84,7 @@ export class ComparisonExecutorService {
     });
 
     // Run comparison
-    const insights = analyzer.compareReports(currentData as any, baselineData as any);
+    const insights = analyzer.compareReports(currentData as unknown as ParsedAwrData, baselineData as unknown as ParsedAwrData);
 
     const comparisonDurationMs = Date.now() - startTime;
 

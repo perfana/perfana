@@ -17,7 +17,7 @@ export interface MetricsSourceResponse {
   display_label?: string;
   workload?: string;
   tags?: string[];
-  metadata?: Record<string, any>;
+  metadata?: Record<string, unknown>;
   organization_id?: string;
   team_id?: string;
   created_by?: string;

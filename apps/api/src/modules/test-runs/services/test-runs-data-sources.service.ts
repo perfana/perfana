@@ -961,14 +961,14 @@ export class TestRunsDataSourcesService {
           timeout: DYNATRACE_TIMEOUT_MS,
         });
 
-        const problems: DynatraceProblem[] = (response.data?.problems ?? []).map((p: any) => ({
-          problemId: p.problemId,
-          title: p.title,
-          status: p.status,
-          severityLevel: p.severityLevel,
-          startTime: new Date(p.startTime).toISOString(),
-          endTime: p.endTime ? new Date(p.endTime).toISOString() : undefined,
-          impactLevel: p.impactLevel,
+        const problems: DynatraceProblem[] = (response.data?.problems ?? []).map((p: Record<string, unknown>) => ({
+          problemId: p.problemId as string,
+          title: p.title as string,
+          status: p.status as string,
+          severityLevel: p.severityLevel as string,
+          startTime: new Date(p.startTime as string | number).toISOString(),
+          endTime: p.endTime ? new Date(p.endTime as string | number).toISOString() : undefined,
+          impactLevel: p.impactLevel as string,
         }));
 
         allProblems.push(...problems);

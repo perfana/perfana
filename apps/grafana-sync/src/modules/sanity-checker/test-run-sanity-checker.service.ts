@@ -67,5 +67,4 @@ export class TestRunSanityCheckerService {
       this.logger.error('Sanity check failed:', error);
     }
   }
-
 }

@@ -4,11 +4,7 @@
  * Tests the critical UID generation logic for both readOnly and writable dashboards
  */
 
-import {
-  DashboardUid,
-  createDashboardUid,
-  AutoConfigDashboard,
-} from './dashboard-uid.util';
+import { DashboardUid, createDashboardUid, AutoConfigDashboard } from './dashboard-uid.util';
 import { DashboardVariable } from './types';
 
 describe('DashboardUid', () => {
@@ -362,7 +358,11 @@ describe('DashboardUid', () => {
       const testRuns: any[] = [
         { systemUnderTest: { name: 'app1' }, testEnvironment: 'prod', systemUnderTestId: 'sut-id' },
         { systemUnderTest: { name: 'app2' }, testEnvironment: 'prod', systemUnderTestId: 'sut-id' },
-        { systemUnderTest: { name: 'app3' }, testEnvironment: 'staging', systemUnderTestId: 'sut-id' },
+        {
+          systemUnderTest: { name: 'app3' },
+          testEnvironment: 'staging',
+          systemUnderTestId: 'sut-id',
+        },
       ];
 
       const autoConfigDashboard: AutoConfigDashboard = {

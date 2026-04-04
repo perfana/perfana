@@ -103,7 +103,7 @@ export class TemplatingVariableDto {
 
   @ApiPropertyOptional({ description: 'Variable query' })
   @IsOptional()
-  query?: string | { query?: string; [key: string]: any };
+  query?: string | { query?: string; [key: string]: unknown };
 
   @ApiPropertyOptional({ description: 'Variable type' })
   @IsOptional()
@@ -113,7 +113,7 @@ export class TemplatingVariableDto {
   @ApiPropertyOptional({ description: 'Datasource configuration' })
   @IsOptional()
   @IsObject()
-  datasource?: Record<string, any>;
+  datasource?: Record<string, unknown>;
 
   @ApiPropertyOptional({ description: 'Regex filter' })
   @IsOptional()
@@ -123,7 +123,7 @@ export class TemplatingVariableDto {
   @ApiPropertyOptional({ description: 'Variable options' })
   @IsOptional()
   @IsArray()
-  options?: Array<{ text?: string; value: string; [key: string]: any }>;
+  options?: Array<{ text?: string; value: string; [key: string]: unknown }>;
 }
 
 // Dashboard variable structure  
@@ -133,7 +133,7 @@ export class DashboardVariableDto {
   name!: string;
 
   // Allow additional properties for flexibility
-  [key: string]: any;
+  [key: string]: unknown;
 }
 
 export class CreateGrafanaDashboardDto {

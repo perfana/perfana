@@ -5,6 +5,7 @@ import { CompareFilterPreset, ApplicationDashboard, TestRun as TestRunEntity } f
 import { CreateComparePresetDto } from './dto/create-compare-preset.dto';
 import { UpdateComparePresetDto } from './dto/update-compare-preset.dto';
 import { ComparePresetResponseDto } from './dto/compare-preset-response.dto';
+import { PresetType, CompareSeriesConfig } from './dto/create-compare-preset.dto';
 import { ResourceNotFoundException } from '../../common/exceptions/business.exception';
 import { AuthorizationService } from '../../common/services/authorization.service';
 
@@ -349,12 +350,12 @@ export class ComparePresetsService {
       if (updateComparePresetDto.show_percentiles !== undefined) updateData.showPercentiles = updateComparePresetDto.show_percentiles;
       if (updateComparePresetDto.application_dashboard_id !== undefined) updateData.applicationDashboardId = updateComparePresetDto.application_dashboard_id;
       if (updateComparePresetDto.metrics_source_id !== undefined) updateData.metricsSourceId = updateComparePresetDto.metrics_source_id;
-      if ((updateComparePresetDto as any).source !== undefined) updateData.source = (updateComparePresetDto as any).source;
-      if ((updateComparePresetDto as any).dashboard_label !== undefined) updateData.dashboardLabel = (updateComparePresetDto as any).dashboard_label;
+      if (updateComparePresetDto.source !== undefined) updateData.source = updateComparePresetDto.source;
+      if (updateComparePresetDto.dashboard_label !== undefined) updateData.dashboardLabel = updateComparePresetDto.dashboard_label;
       if (updateComparePresetDto.panel_id !== undefined) updateData.panelId = updateComparePresetDto.panel_id;
       if (updateComparePresetDto.panel_title !== undefined) updateData.panelTitle = updateComparePresetDto.panel_title;
       if (updateComparePresetDto.baseline_test_run_id !== undefined) updateData.baselineTestRunId = updateComparePresetDto.baseline_test_run_id;
-      if ((updateComparePresetDto as any).series_config !== undefined) updateData.seriesConfig = (updateComparePresetDto as any).series_config;
+      if (updateComparePresetDto.series_config !== undefined) updateData.seriesConfig = updateComparePresetDto.series_config;
       if (updateComparePresetDto.is_global !== undefined) updateData.isGlobal = updateComparePresetDto.is_global;
 
       await this.comparePresetRepo.update(
@@ -434,7 +435,7 @@ export class ComparePresetsService {
       id: preset.id,
       name: preset.name,
       description: preset.description,
-      preset_type: preset.presetType as any,
+      preset_type: preset.presetType as PresetType,
       series_search_text: preset.seriesSearchText,
       show_percentiles: preset.showPercentiles,
       application_dashboard_id: preset.applicationDashboardId,
@@ -446,7 +447,7 @@ export class ComparePresetsService {
       baseline_application_release: testRun?.applicationRelease,
       baseline_annotations: testRun?.annotations,
       dashboard_label: preset.dashboardLabel || dashboard?.dashboardLabel,
-      series_config: preset.seriesConfig as any,
+      series_config: preset.seriesConfig as CompareSeriesConfig[] | undefined,
       is_global: preset.isGlobal,
       created_by: preset.createdBy || '',
       created_at: preset.createdAt.toISOString(),

@@ -12,6 +12,7 @@
  */
 
 import type { CheerioAPI, Cheerio } from 'cheerio';
+import type { AnyNode, Element } from 'domhandler';
 import { parsePercentage } from '../../utils/number-utils';
 import { findTableByIdentifier } from '../../utils/html-utils';
 
@@ -115,13 +116,13 @@ const TOP_SQL_WITH_ROW_SOURCES_IDENTIFIERS = [
  */
 function parseTopSqlWithEvents(
   $: CheerioAPI,
-  table: Cheerio<any>,
+  table: Cheerio<Element>,
 ): TopSqlWithEvent[] {
   const results: TopSqlWithEvent[] = [];
   const rows = table.find('tr');
 
   // Find header row to determine column indices
-  let headerRow: any = null;
+  let headerRow: AnyNode | null = null;
   rows.each((_i, row) => {
     const cells = $(row).find('th');
     if (cells.length > 0) {
@@ -182,13 +183,13 @@ function parseTopSqlWithEvents(
  */
 function parseTopSqlWithRowSources(
   $: CheerioAPI,
-  table: Cheerio<any>,
+  table: Cheerio<Element>,
 ): TopSqlWithRowSource[] {
   const results: TopSqlWithRowSource[] = [];
   const rows = table.find('tr');
 
   // Find header row
-  let headerRow: any = null;
+  let headerRow: AnyNode | null = null;
   rows.each((_i, row) => {
     const cells = $(row).find('th');
     if (cells.length > 0) {

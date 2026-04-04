@@ -3,6 +3,7 @@ import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { PyroscopeInstance as PyroscopeInstanceEntity } from '../../entities';
 import { AuthorizationService } from '../../common/services/authorization.service';
+import { CreatePyroscopeInstanceDto, UpdatePyroscopeInstanceDto } from './dto/pyroscope-instance.dto';
 
 export interface PyroscopeInstance {
   id: string;
@@ -179,7 +180,7 @@ export class PyroscopeInstancesService {
    * Sets ownership tracking (created_by, updated_by) on the new instance.
    * Requires org-admin privileges.
    */
-  async create(createDto: any, userId: string, roles: string[]): Promise<PyroscopeInstance> {
+  async create(createDto: CreatePyroscopeInstanceDto, userId: string, roles: string[]): Promise<PyroscopeInstance> {
     try {
       // Log authorization context for debugging
       const isAdmin = this.authzService.isGlobalAdmin(roles);
@@ -219,7 +220,7 @@ export class PyroscopeInstancesService {
    * Validates user has permission to modify the instance.
    * Sets updated_by to track who made the change.
    */
-  async update(id: string, updateDto: any, userId: string, roles: string[]): Promise<PyroscopeInstance> {
+  async update(id: string, updateDto: UpdatePyroscopeInstanceDto, userId: string, roles: string[]): Promise<PyroscopeInstance> {
     try {
       // Log authorization context for debugging
       const isAdmin = this.authzService.isGlobalAdmin(roles);

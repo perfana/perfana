@@ -82,7 +82,9 @@ export class AutoConfigService {
     }
 
     // Collect org IDs from test runs for RBAC-scoped queries
-    const orgIds = [...new Set(testRuns.map(tr => tr.organizationId).filter(Boolean))] as string[];
+    const orgIds = [
+      ...new Set(testRuns.map((tr) => tr.organizationId).filter(Boolean)),
+    ] as string[];
     const orgFilter = orgIds.length > 0 ? orgIds : undefined;
 
     // Load profiles, dashboards and benchmarks in parallel

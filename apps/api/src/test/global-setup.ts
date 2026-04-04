@@ -4,7 +4,7 @@ import { DataSource, EntitySchema } from 'typeorm';
 // This ensures all entities are loaded as classes, allowing TypeORM to properly resolve relationships
 const allEntities = require('./test-entities');
 
-type EntityType = Function | string | EntitySchema;
+type EntityType = (new (...args: unknown[]) => unknown) | string | EntitySchema;
 
 /**
  * Global setup for Jest integration tests

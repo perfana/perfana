@@ -17,6 +17,7 @@ import {
 } from '@nestjs/common';
 import { Response } from 'express';
 import { ApiTags, ApiOperation, ApiQuery, ApiResponse, ApiBearerAuth } from '@nestjs/swagger';
+import { AuthenticatedRequest } from '../../../types/auth.types';
 import { ReportGenerationService } from '../services/report-generation.service';
 import { UserCtx, UserContext } from '../../../common/decorators/user-context.decorator';
 import { ReportShareService } from '../services/report-share.service';
@@ -35,6 +36,8 @@ import {
   ReportListResponseDto,
   ReportSummaryDto,
   ReportDetailDto,
+  type ReportStatus,
+  type ReportSectionType,
 } from '../dto';
 
 /**
@@ -103,10 +106,10 @@ export class ReportGenerationController {
   ): Promise<ReportListResponseDto> {
     try {
       const result = await this.reportGenerationService.findByTestRunId(testRunId, {
-        status: query.status as any,
+        status: query.status as ReportStatus | undefined,
         limit: query.limit,
         offset: query.offset,
-        sortBy: query.sortBy as any,
+        sortBy: query.sortBy as 'created_at' | 'name' | 'status' | undefined,
         sortOrder: query.sortOrder,
         userId: ctx.userId,
         roles: ctx.roles,
@@ -119,7 +122,7 @@ export class ReportGenerationController {
           template_name: report.template?.name || 'Unknown Template',
           name: report.name,
           generated_by: report.generated_by,
-          status: report.status as any,
+          status: report.status as ReportStatus,
           share_enabled: report.share_enabled,
           share_id: report.share_id,
           share_view_count: report.share_view_count || 0,
@@ -169,7 +172,7 @@ export class ReportGenerationController {
               template_name: summary.latestReport.template?.name || 'Unknown Template',
               name: summary.latestReport.name,
               generated_by: summary.latestReport.generated_by,
-              status: summary.latestReport.status as any,
+              status: summary.latestReport.status as ReportStatus,
               share_enabled: summary.latestReport.share_enabled,
               share_id: summary.latestReport.share_id,
               share_view_count: summary.latestReport.share_view_count || 0,
@@ -202,7 +205,7 @@ export class ReportGenerationController {
   @ApiResponse({ status: 404, description: 'Test run or template not found' })
   async generateFromTemplate(
     @Body() dto: GenerateReportFromTemplateDto,
-    @Request() req: any,
+    @Request() req: AuthenticatedRequest,
     @UserCtx() ctx: UserContext,
   ): Promise<GenerateReportResponseDto> {
     try {
@@ -244,7 +247,7 @@ export class ReportGenerationController {
       return {
         report_id: report.id,
         job_id: jobId,
-        status: report.status as any,
+        status: report.status as ReportStatus,
         estimated_completion_seconds: 30,
       };
     } catch (error) {
@@ -273,7 +276,7 @@ export class ReportGenerationController {
   @ApiResponse({ status: 404, description: 'Test run not found' })
   async generateAdHoc(
     @Body() dto: GenerateAdHocReportDto,
-    @Request() req: any,
+    @Request() req: AuthenticatedRequest,
     @UserCtx() ctx: UserContext,
   ): Promise<GenerateReportResponseDto> {
     try {
@@ -283,7 +286,7 @@ export class ReportGenerationController {
         testRunId: dto.test_run_id,
         name: dto.name,
         sections: dto.sections.map((s) => ({
-          type: s.type as any,
+          type: s.type as ReportSectionType,
           order: s.order,
           title: s.title,
           config: s.config,
@@ -333,7 +336,7 @@ export class ReportGenerationController {
       return {
         report_id: report.id,
         job_id: jobId,
-        status: report.status as any,
+        status: report.status as ReportStatus,
         estimated_completion_seconds: 30,
       };
     } catch (error) {
@@ -371,7 +374,7 @@ export class ReportGenerationController {
     try {
       const html = await this.reportGenerationService.previewSection(
         {
-          type: dto.section.type as any,
+          type: dto.section.type as ReportSectionType,
           order: dto.section.order,
           title: dto.section.title,
           config: dto.section.config,
@@ -437,7 +440,7 @@ export class ReportGenerationController {
         has_pdf: report.status === 'pdf_complete',
         file_size: report.file_size,
         mime_type: report.mime_type || 'text/html',
-        status: report.status as any,
+        status: report.status as ReportStatus,
         error_code: report.error_code,
         error_message: report.error_message,
         job_id: report.job_id,

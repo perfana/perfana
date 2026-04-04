@@ -1,7 +1,12 @@
 import { Injectable, Logger, NotFoundException } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository, DataSource } from 'typeorm';
-import { CreateApplicationDashboardDto, UpdateApplicationDashboardDto } from './dto/application-dashboard.dto';
+import {
+  CreateApplicationDashboardDto,
+  UpdateApplicationDashboardDto,
+  ApplicationDashboardVariableDto,
+  ReplacedTemplatingVariableDto,
+} from './dto/application-dashboard.dto';
 import { CopyApplicationDashboardsDto } from './dto/copy-application-dashboards.dto';
 import {
   ApplicationDashboard as ApplicationDashboardEntity,
@@ -43,8 +48,8 @@ export interface ApplicationDashboard {
   dashboard_label: string;
   tags?: string[];
   template_dashboard_uid?: string;
-  variables?: any;
-  replaced_templating_variables?: any;
+  variables?: Record<string, unknown>[];
+  replaced_templating_variables?: Record<string, unknown>[];
   snapshot_timeout: number;
   created_at: string;
   updated_at: string;
@@ -202,7 +207,7 @@ export class ApplicationDashboardsService {
           tags: row.tags,
           template_dashboard_uid: row.templateDashboardUid,
           variables: enrichedVariables,
-          replaced_templating_variables: row.replacedTemplatingVariables,
+          replaced_templating_variables: row.replacedTemplatingVariables as Record<string, unknown>[] | undefined,
           snapshot_timeout: row.snapshotTimeout,
           created_at: row.createdAt.toISOString(),
           updated_at: row.updatedAt.toISOString(),
@@ -289,7 +294,7 @@ export class ApplicationDashboardsService {
         tags: result.tags,
         template_dashboard_uid: result.templateDashboardUid,
         variables: enrichedVariables,
-        replaced_templating_variables: result.replacedTemplatingVariables,
+        replaced_templating_variables: result.replacedTemplatingVariables as Record<string, unknown>[] | undefined,
         snapshot_timeout: result.snapshotTimeout,
         created_at: result.createdAt.toISOString(),
         updated_at: result.updatedAt.toISOString(),
@@ -374,8 +379,8 @@ export class ApplicationDashboardsService {
         dashboard_label: resultWithRelations.dashboardLabel,
         tags: resultWithRelations.tags,
         template_dashboard_uid: resultWithRelations.templateDashboardUid,
-        variables: resultWithRelations.variables,
-        replaced_templating_variables: resultWithRelations.replacedTemplatingVariables,
+        variables: resultWithRelations.variables as Record<string, unknown>[] | undefined,
+        replaced_templating_variables: resultWithRelations.replacedTemplatingVariables as Record<string, unknown>[] | undefined,
         snapshot_timeout: resultWithRelations.snapshotTimeout,
         created_at: resultWithRelations.createdAt.toISOString(),
         updated_at: resultWithRelations.updatedAt.toISOString(),
@@ -516,8 +521,8 @@ export class ApplicationDashboardsService {
           existingDash.id,
           {
             tags: dashboard.tags ?? [],
-            variables: dashboard.variables ?? [],
-            replacedTemplatingVariables: dashboard.replaced_templating_variables ?? [],
+            variables: (dashboard.variables ?? []) as unknown as ApplicationDashboardVariableDto[],
+            replacedTemplatingVariables: (dashboard.replaced_templating_variables ?? []) as unknown as ReplacedTemplatingVariableDto[],
             snapshotTimeout: dashboard.snapshot_timeout,
           },
           userId,
@@ -540,8 +545,8 @@ export class ApplicationDashboardsService {
           dashboardLabel: dashboard.dashboard_label,
           tags: dashboard.tags ?? [],
           templateDashboardUid: dashboard.template_dashboard_uid,
-          variables: dashboard.variables ?? [],
-          replacedTemplatingVariables: dashboard.replaced_templating_variables ?? [],
+          variables: (dashboard.variables ?? []) as unknown as ApplicationDashboardVariableDto[],
+          replacedTemplatingVariables: (dashboard.replaced_templating_variables ?? []) as unknown as ReplacedTemplatingVariableDto[],
           snapshotTimeout: dashboard.snapshot_timeout,
         },
         userId,
@@ -766,24 +771,30 @@ export class ApplicationDashboardsService {
    * Enrich application dashboard variables with template metadata from Grafana dashboard
    * @private
    */
-  private enrichVariablesWithTemplateMetadata(variables: any[], grafanaDashboard: any): any[] {
+  private enrichVariablesWithTemplateMetadata(
+    variables: Record<string, unknown>[],
+    grafanaDashboard: GrafanaDashboardEntity | undefined | null,
+  ): Record<string, unknown>[] {
     if (!grafanaDashboard || !variables || variables.length === 0) {
       return variables;
     }
 
     try {
       // Get template variables from grafana_json.dashboard.templating.list
-      const templateVars = grafanaDashboard.grafanaJson?.dashboard?.templating?.list || [];
+      const grafanaJson = grafanaDashboard.grafanaJson as Record<string, unknown> | undefined;
+      const dashboard = grafanaJson?.dashboard as Record<string, unknown> | undefined;
+      const templating = dashboard?.templating as Record<string, unknown> | undefined;
+      const templateVars = (templating?.list as Record<string, unknown>[]) || [];
 
       // Create a map of template variables by name for quick lookup
-      const templateVarMap = new Map();
-      templateVars.forEach((templateVar: any) => {
-        templateVarMap.set(templateVar.name, templateVar);
+      const templateVarMap = new Map<string, Record<string, unknown>>();
+      templateVars.forEach((templateVar: Record<string, unknown>) => {
+        templateVarMap.set(templateVar.name as string, templateVar);
       });
 
       // Enrich each variable with template metadata
-      return variables.map((variable: any) => {
-        const templateVar = templateVarMap.get(variable.name);
+      return variables.map((variable: Record<string, unknown>) => {
+        const templateVar = templateVarMap.get(variable.name as string);
 
         if (templateVar) {
           return {

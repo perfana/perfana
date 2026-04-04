@@ -17,13 +17,13 @@ import { map } from 'rxjs/operators';
  */
 @Injectable()
 export class SnakeCaseInterceptor implements NestInterceptor {
-  intercept(_context: ExecutionContext, next: CallHandler): Observable<any> {
+  intercept(_context: ExecutionContext, next: CallHandler): Observable<unknown> {
     return next.handle().pipe(
       map((data) => this.transformToSnakeCase(data)),
     );
   }
 
-  private transformToSnakeCase(data: any): any {
+  private transformToSnakeCase(data: unknown): unknown {
     if (data === null || data === undefined) {
       return data;
     }
@@ -32,13 +32,14 @@ export class SnakeCaseInterceptor implements NestInterceptor {
       return data.map((item) => this.transformToSnakeCase(item));
     }
 
-    if (typeof data === 'object' && data.constructor === Object) {
-      const transformed: any = {};
+    if (typeof data === 'object' && (data as object).constructor === Object) {
+      const transformed: Record<string, unknown> = {};
 
-      for (const key in data) {
-        if (data.hasOwnProperty(key)) {
+      const obj = data as Record<string, unknown>;
+      for (const key in obj) {
+        if (Object.hasOwn(obj, key)) {
           const snakeKey = this.toSnakeCase(key);
-          transformed[snakeKey] = this.transformToSnakeCase(data[key]);
+          transformed[snakeKey] = this.transformToSnakeCase(obj[key]);
         }
       }
 

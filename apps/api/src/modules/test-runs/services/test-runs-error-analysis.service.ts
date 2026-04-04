@@ -136,12 +136,12 @@ export class TestRunsErrorAnalysisService {
 
     const results = await this.dataSource.query(query, [testRunId]);
 
-    return results.map((row: any) => ({
-      responseCode: row.responseCode,
-      errorCount: parseInt(row.errorCount, 10),
-      avgResponseTime: parseFloat(row.avgResponseTime),
-      minResponseTime: row.minResponseTime,
-      maxResponseTime: row.maxResponseTime,
+    return results.map((row: Record<string, unknown>) => ({
+      responseCode: row.responseCode as string,
+      errorCount: parseInt(String(row.errorCount), 10),
+      avgResponseTime: parseFloat(String(row.avgResponseTime)),
+      minResponseTime: row.minResponseTime as number,
+      maxResponseTime: row.maxResponseTime as number,
     }));
   }
 
@@ -168,13 +168,13 @@ export class TestRunsErrorAnalysisService {
 
     const results = await this.dataSource.query(query, [testRunId]);
 
-    return results.map((row: any) => ({
-      transactionName: row.transactionName,
-      samplerName: row.samplerName,
-      url: row.url,
-      responseCode: row.responseCode,
-      errorCount: parseInt(row.errorCount, 10),
-      avgResponseTime: parseFloat(row.avgResponseTime),
+    return results.map((row: Record<string, unknown>) => ({
+      transactionName: row.transactionName as string,
+      samplerName: row.samplerName as string,
+      url: row.url as string,
+      responseCode: row.responseCode as string,
+      errorCount: parseInt(String(row.errorCount), 10),
+      avgResponseTime: parseFloat(String(row.avgResponseTime)),
     }));
   }
 
@@ -196,9 +196,9 @@ export class TestRunsErrorAnalysisService {
 
     const results = await this.dataSource.query(query, [testRunId]);
 
-    return results.map((row: any) => ({
-      timeBucket: row.timeBucket,
-      errorsPerMinute: parseInt(row.errorsPerMinute, 10),
+    return results.map((row: Record<string, unknown>) => ({
+      timeBucket: row.timeBucket as string,
+      errorsPerMinute: parseInt(String(row.errorsPerMinute), 10),
     }));
   }
 
@@ -225,10 +225,10 @@ export class TestRunsErrorAnalysisService {
     // Group by timeBucket and create dynamic properties for each response code
     const groupedByTime = new Map<string, ErrorOverTimeByCode>();
 
-    results.forEach((row: any) => {
-      const timeBucket = row.timeBucket;
-      const responseCode = row.responseCode;
-      const errorCount = parseInt(row.errorCount, 10);
+    results.forEach((row: Record<string, unknown>) => {
+      const timeBucket = row.timeBucket as string;
+      const responseCode = row.responseCode as string;
+      const errorCount = parseInt(String(row.errorCount), 10);
 
       if (!groupedByTime.has(timeBucket)) {
         groupedByTime.set(timeBucket, { timeBucket });
@@ -284,17 +284,17 @@ export class TestRunsErrorAnalysisService {
       url,
     ]);
 
-    return results.map((row: any) => ({
-      time: row.time,
-      transactionName: row.transactionName,
-      samplerName: row.samplerName,
-      responseCode: row.responseCode,
-      responseTime: row.responseTime,
-      url: row.url,
-      responseMessage: row.responseMessage || '',
-      responseData: row.responseData || '',
-      requestHeaders: row.requestHeaders || '',
-      responseHeaders: row.responseHeaders || '',
+    return results.map((row: Record<string, unknown>) => ({
+      time: row.time as string,
+      transactionName: row.transactionName as string,
+      samplerName: row.samplerName as string,
+      responseCode: row.responseCode as string,
+      responseTime: row.responseTime as number,
+      url: row.url as string,
+      responseMessage: (row.responseMessage as string) || '',
+      responseData: (row.responseData as string) || '',
+      requestHeaders: (row.requestHeaders as string) || '',
+      responseHeaders: (row.responseHeaders as string) || '',
     }));
   }
 }

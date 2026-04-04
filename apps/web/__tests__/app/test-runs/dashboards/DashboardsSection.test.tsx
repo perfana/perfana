@@ -218,7 +218,6 @@ describe('DashboardsSection', () => {
       await waitFor(() => {
         expect(authenticatedFetch).toHaveBeenCalledWith(
           expect.stringContaining('/grafana/application-dashboards'),
-          expect.any(Object)
         );
       });
     });
@@ -271,11 +270,9 @@ describe('DashboardsSection', () => {
       await waitFor(() => {
         expect(authenticatedFetch).toHaveBeenCalledWith(
           expect.stringContaining('systemId=system-123'),
-          expect.any(Object)
         );
         expect(authenticatedFetch).toHaveBeenCalledWith(
           expect.stringContaining('environment=production'),
-          expect.any(Object)
         );
       });
     });

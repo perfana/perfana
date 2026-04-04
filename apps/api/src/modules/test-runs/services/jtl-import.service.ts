@@ -215,7 +215,7 @@ export class JtlImportService {
       const batch = requests.slice(i, i + BATCH_SIZE);
 
       const values: string[] = [];
-      const params: any[] = [];
+      const params: (string | number | boolean | Date | null)[] = [];
       let paramIdx = 1;
 
       for (const row of batch) {
@@ -271,7 +271,7 @@ export class JtlImportService {
       const batch = transactions.slice(i, i + BATCH_SIZE);
 
       const values: string[] = [];
-      const params: any[] = [];
+      const params: (string | number | boolean | Date | null)[] = [];
       let paramIdx = 1;
 
       for (const row of batch) {
@@ -319,7 +319,7 @@ export class JtlImportService {
       const batch = errors.slice(i, i + BATCH_SIZE);
 
       const values: string[] = [];
-      const params: any[] = [];
+      const params: (string | number | boolean | Date | null)[] = [];
       let paramIdx = 1;
 
       for (const row of batch) {
@@ -374,7 +374,7 @@ export class JtlImportService {
       const batch = virtualUsers.slice(i, i + BATCH_SIZE);
 
       const values: string[] = [];
-      const params: any[] = [];
+      const params: (string | number | boolean | Date | null)[] = [];
       let paramIdx = 1;
 
       for (const row of batch) {
@@ -489,7 +489,7 @@ export class JtlImportService {
       const batch = patterns.slice(i, i + BATCH_SIZE);
 
       const values: string[] = [];
-      const params: any[] = [];
+      const params: (string | number | boolean | Date | null)[] = [];
       let paramIdx = 1;
 
       for (const [hash, { normalized, example, firstSeen }] of batch) {

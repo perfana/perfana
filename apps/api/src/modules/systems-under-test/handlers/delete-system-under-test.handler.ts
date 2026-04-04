@@ -49,7 +49,7 @@ export class DeleteSystemUnderTestHandler {
     const systemName = sut[0].name;
 
     // Count all related resources
-    const countQuery = async (sql: string, params: any[] = [sutId]): Promise<number> => {
+    const countQuery = async (sql: string, params: string[] = [sutId]): Promise<number> => {
       const result = await this.dataSource.query(sql, params);
       return parseInt(result[0]?.count ?? '0', 10);
     };
@@ -357,7 +357,7 @@ export class DeleteSystemUnderTestHandler {
     manager: EntityManager,
     label: string,
     sql: string,
-    params?: any[],
+    params?: string[],
   ): Promise<number> {
     const result = await manager.query(sql, params);
     const count = result?.[1] ?? 0;

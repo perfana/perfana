@@ -73,7 +73,7 @@ export class PyroscopeInstancesController {
   @ApiResponse({ status: 200, description: 'Connection test result' })
   @ApiResponse({ status: 400, description: 'Connection test failed' })
   async testConnectionWithParams(
-    @Body() testDto: any,
+    @Body() testDto: { pyroscopeUrl: string },
     @UserCtx() ctx: UserContext,
   ): Promise<{ success: boolean; message: string }> {
     try {

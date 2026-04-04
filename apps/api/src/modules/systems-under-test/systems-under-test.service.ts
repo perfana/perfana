@@ -424,7 +424,7 @@ export class SystemsUnderTestService {
       }
 
       // Build update object, handling null values explicitly for TypeORM
-      const updateData: any = {};
+      const updateData: Record<string, string | null | undefined> = {};
       if (updateDto.name !== undefined) updateData.name = updateDto.name;
       if (updateDto.description !== undefined) updateData.description = updateDto.description;
       if (updateDto.tracing_service !== undefined) updateData.tracing_service = updateDto.tracing_service;

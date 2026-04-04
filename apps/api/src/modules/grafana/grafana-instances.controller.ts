@@ -75,7 +75,7 @@ export class GrafanaInstancesController {
   @ApiResponse({ status: 200, description: 'Connection test result' })
   @ApiResponse({ status: 400, description: 'Connection test failed' })
   async testConnectionWithParams(
-    @Body() testDto: any,
+    @Body() testDto: { clientUrl: string; serverUrl?: string; orgId: string; apiKey?: string; username?: string; password?: string },
     @UserCtx() ctx: UserContext,
   ): Promise<{ success: boolean; message: string }> {
     try {

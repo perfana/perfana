@@ -686,5 +686,4 @@ describe('AutoConfigUpdatesService', () => {
       });
     });
   });
-
 });

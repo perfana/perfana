@@ -90,11 +90,11 @@ export interface OTelSpan {
     code: number;
     message?: string;
   };
-  attributes?: Record<string, any>;
+  attributes?: Record<string, string | number | boolean>;
   events?: Array<{
     timeUnixNano: string;
     name: string;
-    attributes?: Record<string, any>;
+    attributes?: Record<string, string | number | boolean | null>;
   }>;
 }
 
