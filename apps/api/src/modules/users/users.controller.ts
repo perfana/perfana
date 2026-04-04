@@ -127,7 +127,15 @@ export class UsersController {
       },
     },
   })
-  async getCurrentUserContext(@UserCtx() ctx: UserContext): Promise<any> {
+  async getCurrentUserContext(@UserCtx() ctx: UserContext): Promise<{
+    userId: string;
+    email?: string;
+    currentOrganizationId?: string;
+    currentTeamId?: string;
+    organizations: Array<{ organizationId: string; name: string; roles: string[] }>;
+    teams: Array<{ teamId: string; name: string; roles: string[] }>;
+    requiresOrganizationSelection: boolean;
+  }> {
     try {
       // Get detailed organization memberships with names and roles
       const orgMemberships = await this.dataSource.query(
@@ -154,12 +162,12 @@ export class UsersController {
         email: ctx.email,
         currentOrganizationId: ctx.organizationId,
         currentTeamId: ctx.teamId,
-        organizations: orgMemberships.map((om: any) => ({
+        organizations: orgMemberships.map((om: { organization_id: string; name: string; roles?: string[] }) => ({
           organizationId: om.organization_id,
           name: om.name,
           roles: om.roles || [],
         })),
-        teams: teamMemberships.map((tm: any) => ({
+        teams: teamMemberships.map((tm: { team_id: string; name: string; roles?: string[] }) => ({
           teamId: tm.team_id,
           name: tm.name,
           roles: tm.roles || [],

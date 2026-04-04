@@ -13,7 +13,7 @@ import {
   NotFoundException,
 } from '@nestjs/common';
 import { ApiTags, ApiOperation, ApiResponse, ApiParam, ApiQuery, ApiBearerAuth } from '@nestjs/swagger';
-import { MetricsSourcesService, MetricsSourceResponse } from './metrics-sources.service';
+import { MetricsSourcesService, MetricsSourceResponse, MetricsSourceQuery } from './metrics-sources.service';
 import { CreateMetricsSourceDto } from './dto/create-metrics-source.dto';
 import { UpdateMetricsSourceDto } from './dto/update-metrics-source.dto';
 import { UserCtx, UserContext } from '../../common/decorators/user-context.decorator';
@@ -37,7 +37,7 @@ export class MetricsSourcesController {
   @ApiQuery({ name: 'tags', required: false, description: 'Filter by tags (comma-separated)' })
   @ApiResponse({ status: 200, description: 'Return all matching metrics sources' })
   async findAll(
-    @Query() query: any,
+    @Query() query: MetricsSourceQuery & { tags?: string | string[] },
     @UserCtx() ctx: UserContext,
   ): Promise<MetricsSourceResponse[]> {
     try {

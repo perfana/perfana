@@ -86,5 +86,5 @@ export class StoreHostPropertiesDto {
   })
   @IsObject()
   @IsNotEmpty()
-  properties!: Record<string, any>;
+  properties!: Record<string, unknown>;
 }

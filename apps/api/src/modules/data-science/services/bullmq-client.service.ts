@@ -289,7 +289,7 @@ export class BullMQClientService implements OnModuleDestroy {
       const skipStages: string[] = ['dynatrace-collection', 'panels-processing', 'metrics-collection'];
 
       // Create a single orchestration job that handles the sequencing
-      const jobData: any = {
+      const jobData: Record<string, unknown> = {
         testRunIds: testRunIds,
         batchId: reevalBatchId,
         checks: includeChecks,
@@ -357,7 +357,7 @@ export class BullMQClientService implements OnModuleDestroy {
   /**
    * Get job status from any queue
    */
-  async getJobStatus(jobId: string): Promise<any> {
+  async getJobStatus(jobId: string): Promise<Record<string, unknown>> {
     this.checkRedisAvailability();
 
     const queueNames = ['perfana-analyze', 'perfana-batch'];
@@ -538,7 +538,7 @@ export class BullMQClientService implements OnModuleDestroy {
    * Generic method to add a job to the batch queue
    * Used for custom job types like 're-evaluate-adapt-conclusion'
    */
-  async addJob(jobName: string, jobData: any, options: any = {}): Promise<string> {
+  async addJob(jobName: string, jobData: Record<string, unknown>, options: Record<string, unknown> = {}): Promise<string> {
     try {
       this.checkRedisAvailability();
       this.logger.log(`Adding job '${jobName}' to batch queue`);

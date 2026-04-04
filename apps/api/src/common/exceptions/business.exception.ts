@@ -2,7 +2,7 @@ import { HttpException, HttpStatus } from '@nestjs/common';
 
 export interface BusinessExceptionDetails {
   code: string;
-  details?: any;
+  details?: unknown;
   field?: string;
 }
 
@@ -14,7 +14,7 @@ export class BusinessException extends HttpException {
     message: string,
     public readonly code: string,
     status: HttpStatus = HttpStatus.BAD_REQUEST,
-    public readonly details?: any,
+    public readonly details?: unknown,
   ) {
     super(
       {
@@ -45,7 +45,7 @@ export class ResourceNotFoundException extends BusinessException {
  * Exception for validation errors
  */
 export class ValidationException extends BusinessException {
-  constructor(message: string, validationErrors?: any[]) {
+  constructor(message: string, validationErrors?: unknown[]) {
     super(
       message,
       'VALIDATION_ERROR',
@@ -89,7 +89,7 @@ export class ForbiddenException extends BusinessException {
  * Exception for database operation failures
  */
 export class DatabaseException extends BusinessException {
-  constructor(message: string, originalError?: any) {
+  constructor(message: string, originalError?: unknown) {
     super(
       message,
       'DATABASE_ERROR',
@@ -103,7 +103,7 @@ export class DatabaseException extends BusinessException {
  * Exception for external service failures
  */
 export class ExternalServiceException extends BusinessException {
-  constructor(service: string, message: string, originalError?: any) {
+  constructor(service: string, message: string, originalError?: unknown) {
     super(
       `External service '${service}' error: ${message}`,
       'EXTERNAL_SERVICE_ERROR',

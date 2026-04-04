@@ -28,6 +28,7 @@ import {
   TemplateDetailDto,
   TemplateSummaryDto,
 } from '../dto';
+import { ReportSectionType } from '@perfana/shared';
 
 /**
  * Controller for report template CRUD and management operations.
@@ -82,7 +83,7 @@ export class ReportTemplateController {
             description: template.description,
             created_by: template.created_by || '',
             section_count: sections.length,
-            section_types: sectionTypes as any,
+            section_types: sectionTypes as ReportSectionType[],
             is_default: template.is_default,
             created_at: template.created_at,
             updated_at: template.updated_at,
@@ -256,7 +257,7 @@ export class ReportTemplateController {
         testEnvironment: dto.test_environment,
         workload: dto.workload,
         sections: dto.sections.map((s) => ({
-          type: s.type as any,
+          type: s.type as ReportSectionType,
           order: s.order,
           title: s.title,
           config: s.config,
@@ -371,7 +372,7 @@ export class ReportTemplateController {
         name: dto.name,
         description: dto.description,
         sections: dto.sections?.map((s) => ({
-          type: s.type as any,
+          type: s.type as ReportSectionType,
           order: s.order,
           title: s.title,
           config: s.config,
@@ -585,7 +586,7 @@ export class ReportTemplateController {
   ): Promise<TemplateDetailDto> {
     try {
       const template = await this.reportTemplateService.addSection(templateId, {
-        type: dto.type as any,
+        type: dto.type as ReportSectionType,
         order: dto.order,
         title: dto.title,
         config: dto.config,

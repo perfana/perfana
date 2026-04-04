@@ -976,7 +976,7 @@ export class MetricsService {
   /**
    * List available dashboards and panels for a test run.
    */
-  async getAvailableDashboards(testRunId: string, userId: string, roles: string[]): Promise<any[]> {
+  async getAvailableDashboards(testRunId: string, userId: string, roles: string[]): Promise<Record<string, unknown>[]> {
     const hasAccess = await this.validateTestRunAccess(testRunId, userId, roles);
     if (!hasAccess) {
       return [];

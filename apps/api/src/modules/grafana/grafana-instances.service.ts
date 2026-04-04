@@ -2,6 +2,7 @@ import { Injectable, Logger, NotFoundException, ForbiddenException } from '@nest
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { GrafanaInstance as GrafanaInstanceEntity } from '../../entities';
+import { CreateGrafanaInstanceDto, UpdateGrafanaInstanceDto } from './dto/grafana-instance.dto';
 import { AuthorizationService } from '../../common/services/authorization.service';
 
 export interface GrafanaInstance {
@@ -88,7 +89,7 @@ export class GrafanaInstancesService {
    * Filters results to only show instances that belong to organizations the user is a member of.
    * Global admins see all instances. Legacy instances with null organization_id are accessible to all users.
    */
-  async findAll(userId: string, roles: string[], query?: any, organizationId?: string): Promise<GrafanaInstance[]> {
+  async findAll(userId: string, roles: string[], query?: { label?: string; snapshotInstance?: boolean }, organizationId?: string): Promise<GrafanaInstance[]> {
     try {
       // Log authorization context for debugging
       const isAdmin = this.authzService.isGlobalAdmin(roles);
@@ -187,7 +188,7 @@ export class GrafanaInstancesService {
    * Sets ownership tracking (created_by, updated_by).
    * TODO: Set organization_id from user's primary/selected organization when UI supports org selection
    */
-  async create(createDto: any, userId: string, roles: string[]): Promise<GrafanaInstance> {
+  async create(createDto: CreateGrafanaInstanceDto, userId: string, roles: string[]): Promise<GrafanaInstance> {
     try {
       // Log authorization context for debugging
       const isAdmin = this.authzService.isGlobalAdmin(roles);
@@ -199,11 +200,11 @@ export class GrafanaInstancesService {
       const entity = this.grafanaInstanceRepo.create({
         label: createDto.label,
         client_url: createDto.clientUrl,
-        server_url: createDto.serverUrl || null,
+        server_url: createDto.serverUrl || undefined,
         orgId: createDto.orgId,
-        apiKey: createDto.apiKey || null,
-        username: createDto.username || null,
-        password: createDto.password || null,
+        apiKey: createDto.apiKey || undefined,
+        username: createDto.username || undefined,
+        password: createDto.password || undefined,
         snapshotInstance: createDto.snapshotInstance || false,
         createdBy: userId,
         updatedBy: userId,
@@ -230,7 +231,7 @@ export class GrafanaInstancesService {
    *
    * Validates that the user has permission to modify the instance based on organization membership.
    */
-  async update(id: string, updateDto: any, userId: string, roles: string[]): Promise<GrafanaInstance> {
+  async update(id: string, updateDto: UpdateGrafanaInstanceDto, userId: string, roles: string[]): Promise<GrafanaInstance> {
     try {
       // Log authorization context for debugging
       const isAdmin = this.authzService.isGlobalAdmin(roles);

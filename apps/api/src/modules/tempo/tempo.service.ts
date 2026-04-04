@@ -241,34 +241,37 @@ export class TempoService {
   /**
    * Parse Tempo search response into our DTO format
    */
-  private parseSearchResponse(data: any): TraceSearchResultDto[] {
+  private parseSearchResponse(data: Record<string, unknown>): TraceSearchResultDto[] {
     const traces: TraceSearchResultDto[] = [];
 
     // Tempo returns traces in different formats depending on version
-    const traceList = data.traces || data.batches || [];
+    const traceList = (data.traces || data.batches || []) as Record<string, unknown>[];
 
     for (const trace of traceList) {
-      const traceId = trace.traceID || trace.traceId;
+      const traceId = (trace.traceID || trace.traceId) as string | undefined;
       if (!traceId) continue;
 
       // Duration can be in different formats
       let durationMs = 0;
       if (trace.durationMs) {
-        durationMs = trace.durationMs;
+        durationMs = trace.durationMs as number;
       } else if (trace.durationNanos) {
-        durationMs = trace.durationNanos / 1_000_000;
+        durationMs = (trace.durationNanos as number) / 1_000_000;
       } else if (trace.duration) {
+        const dur = trace.duration as number;
         // Duration might be in nanoseconds or milliseconds
-        durationMs = trace.duration > 1_000_000_000 ? trace.duration / 1_000_000 : trace.duration;
+        durationMs = dur > 1_000_000_000 ? dur / 1_000_000 : dur;
       }
+
+      const spans = trace.spans as unknown[] | undefined;
 
       traces.push({
         traceId,
         durationMs,
-        startTimeUnixNano: trace.startTimeUnixNano || String(trace.startTime || '0'),
-        spanCount: trace.spanCount || trace.spans?.length || 0,
-        rootServiceName: trace.rootServiceName || trace.serviceName || '',
-        rootTraceName: trace.rootTraceName || trace.name || '',
+        startTimeUnixNano: (trace.startTimeUnixNano as string) || String(trace.startTime || '0'),
+        spanCount: (trace.spanCount as number) || spans?.length || 0,
+        rootServiceName: (trace.rootServiceName as string) || (trace.serviceName as string) || '',
+        rootTraceName: (trace.rootTraceName as string) || (trace.name as string) || '',
       });
     }
 
@@ -278,20 +281,20 @@ export class TempoService {
   /**
    * Parse Tempo trace response into our DTO format
    */
-  private parseTraceResponse(traceId: string, data: any): TraceDetailsResponseDto {
+  private parseTraceResponse(traceId: string, data: Record<string, unknown>): TraceDetailsResponseDto {
     const spans: OTelSpan[] = [];
 
     // Tempo can return data in OTLP or Jaeger format
     // Handle OTLP format (resourceSpans -> scopeSpans -> spans)
     if (data.resourceSpans || data.batches) {
-      const resourceSpans = data.resourceSpans || data.batches || [];
+      const resourceSpans = (data.resourceSpans || data.batches || []) as Record<string, unknown>[];
 
       for (const resourceSpan of resourceSpans) {
-        const serviceName = this.extractServiceName(resourceSpan.resource);
+        const serviceName = this.extractServiceName(resourceSpan.resource as Record<string, unknown> | undefined);
 
-        const scopeSpans = resourceSpan.scopeSpans || resourceSpan.instrumentationLibrarySpans || [];
+        const scopeSpans = (resourceSpan.scopeSpans || resourceSpan.instrumentationLibrarySpans || []) as Record<string, unknown>[];
         for (const scopeSpan of scopeSpans) {
-          const spanList = scopeSpan.spans || [];
+          const spanList = (scopeSpan.spans || []) as Record<string, unknown>[];
           for (const span of spanList) {
             spans.push(this.convertOTLPSpan(span, serviceName));
           }
@@ -323,12 +326,15 @@ export class TempoService {
   /**
    * Extract service name from OTLP resource
    */
-  private extractServiceName(resource: any): string {
+  private extractServiceName(resource: Record<string, unknown> | undefined): string {
     if (!resource?.attributes) return 'unknown';
 
-    for (const attr of resource.attributes) {
+    const attributes = resource.attributes as Array<{ key: string; value?: Record<string, unknown> }>;
+    for (const attr of attributes) {
       if (attr.key === 'service.name') {
-        return attr.value?.stringValue || attr.value?.Value?.StringValue || 'unknown';
+        const val = attr.value;
+        const nestedVal = val?.Value as Record<string, unknown> | undefined;
+        return (val?.stringValue as string) || (nestedVal?.StringValue as string) || 'unknown';
       }
     }
 
@@ -338,56 +344,62 @@ export class TempoService {
   /**
    * Convert OTLP span format to our internal format
    */
-  private convertOTLPSpan(span: any, serviceName: string): OTelSpan {
-    const startTimeUnixNano = span.startTimeUnixNano || String(span.startTime || '0');
-    const endTimeUnixNano = span.endTimeUnixNano || String(span.endTime || '0');
+  private convertOTLPSpan(span: Record<string, unknown>, serviceName: string): OTelSpan {
+    const startTimeUnixNano = (span.startTimeUnixNano as string) || String(span.startTime || '0');
+    const endTimeUnixNano = (span.endTimeUnixNano as string) || String(span.endTime || '0');
 
     // Calculate duration in nanoseconds
     const durationNanos =
       BigInt(endTimeUnixNano) - BigInt(startTimeUnixNano);
 
     // Convert attributes to a simple object
-    const attributes: Record<string, any> = {};
+    const attributes: Record<string, string | number | boolean> = {};
     if (span.attributes) {
-      for (const attr of span.attributes) {
+      const spanAttrs = span.attributes as Array<{ key: string; value?: Record<string, unknown> }>;
+      for (const attr of spanAttrs) {
+        const val = attr.value;
+        const nestedVal = val?.Value as Record<string, unknown> | undefined;
         const value =
-          attr.value?.stringValue ||
-          attr.value?.intValue ||
-          attr.value?.boolValue ||
-          attr.value?.doubleValue ||
-          attr.value?.Value?.StringValue ||
-          attr.value?.Value?.IntValue ||
+          val?.stringValue ||
+          val?.intValue ||
+          val?.boolValue ||
+          val?.doubleValue ||
+          nestedVal?.StringValue ||
+          nestedVal?.IntValue ||
           null;
         if (value !== null) {
-          attributes[attr.key] = value;
+          attributes[attr.key] = value as string | number | boolean;
         }
       }
     }
 
+    const spanStatus = span.status as Record<string, unknown> | undefined;
+    const spanEvents = span.events as Array<Record<string, unknown>> | undefined;
+
     return {
-      traceId: span.traceId || '',
-      spanId: span.spanId || '',
-      parentSpanId: span.parentSpanId || undefined,
-      operationName: span.name || '',
+      traceId: (span.traceId as string) || '',
+      spanId: (span.spanId as string) || '',
+      parentSpanId: (span.parentSpanId as string) || undefined,
+      operationName: (span.name as string) || '',
       serviceName,
       startTimeUnixNano,
       endTimeUnixNano,
       durationNanos: Number(durationNanos),
-      status: span.status
+      status: spanStatus
         ? {
-            code: span.status.code || 0,
-            message: span.status.message,
+            code: (spanStatus.code as number) || 0,
+            message: spanStatus.message as string | undefined,
           }
         : undefined,
       attributes,
-      events: span.events?.map((event: any) => ({
-        timeUnixNano: event.timeUnixNano || String(event.time || '0'),
-        name: event.name || '',
+      events: spanEvents?.map((event) => ({
+        timeUnixNano: (event.timeUnixNano as string) || String(event.time || '0'),
+        name: (event.name as string) || '',
         attributes: event.attributes
           ? Object.fromEntries(
-              event.attributes.map((a: any) => [
+              (event.attributes as Array<{ key: string; value?: Record<string, unknown> }>).map((a) => [
                 a.key,
-                a.value?.stringValue || a.value?.intValue || null,
+                (a.value?.stringValue || a.value?.intValue || null) as string | number | boolean | null,
               ]),
             )
           : undefined,

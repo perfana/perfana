@@ -437,7 +437,7 @@ export class ReportTemplateService {
         updateData.is_default = options.isDefault;
       }
 
-      await this.templateRepo.update(templateId, updateData as any);
+      await this.templateRepo.update(templateId, updateData as Record<string, unknown>);
 
       const updatedTemplate = await this.findById(templateId);
 

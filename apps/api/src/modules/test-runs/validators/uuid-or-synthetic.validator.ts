@@ -16,7 +16,7 @@ export const PERF_TEST_APP_DASHBOARD_ID = '00000000-0000-0000-0000-000000000001'
 
 @ValidatorConstraint({ async: false })
 export class IsUuidOrSyntheticConstraint implements ValidatorConstraintInterface {
-  validate(value: any, _args: ValidationArguments) {
+  validate(value: unknown, _args: ValidationArguments) {
     if (typeof value !== 'string') {
       return false;
     }
@@ -42,7 +42,7 @@ export class IsUuidOrSyntheticConstraint implements ValidatorConstraintInterface
  * @param validationOptions - Standard class-validator validation options
  */
 export function IsUuidOrSynthetic(validationOptions?: ValidationOptions) {
-  return function (object: Object, propertyName: string) {
+  return function (object: object, propertyName: string) {
     registerDecorator({
       target: object.constructor,
       propertyName: propertyName,

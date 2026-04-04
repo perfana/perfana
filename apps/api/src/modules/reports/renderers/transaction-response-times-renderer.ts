@@ -1,7 +1,14 @@
 import { Injectable } from '@nestjs/common';
 import { TestRun, ReportSectionConfig } from '@perfana/shared';
 import { ReportUtilsService } from '../services/report-utils.service';
-import { ReportDataFetcherService } from '../services/report-data-fetcher.service';
+import { ReportDataFetcherService, ScenarioData, ReportTransaction } from '../services/report-data-fetcher.service';
+
+/** Time series row from database query */
+interface TimeSeriesRow {
+  transaction_name: string;
+  time_bucket: string;
+  avg_response_time: string;
+}
 
 /**
  * Renderer for Transaction Response Times section
@@ -82,13 +89,13 @@ export class TransactionResponseTimesRenderer {
   /**
    * Render response times chart with SVG line chart
    */
-  renderResponseTimesChart(scenarioData: any): string {
+  renderResponseTimesChart(scenarioData: ScenarioData): string {
     const chartTitle = `Response Times Over Time - ${scenarioData.scenario}`;
     const colors = ['#4285f4', '#ea8c55', '#db524e', '#6aa84f', '#9c50b6', '#46bdc6', '#ea6c3d'];
 
     // Generate legend items for each transaction
     const legendItems = scenarioData.transactions
-      .map((txn: any, idx: number) => {
+      .map((txn: ReportTransaction, idx: number) => {
         const color = colors[idx % colors.length];
         return `
           <span style="display: inline-flex; align-items: center; margin-right: 16px; font-size: 9pt; color: #666;">
@@ -111,20 +118,21 @@ export class TransactionResponseTimesRenderer {
 
     // Group time series data by transaction name
     const dataByTransaction: Map<string, Array<{ time: Date; value: number }>> = new Map();
-    timeSeriesData.forEach((row: any) => {
-      if (!dataByTransaction.has(row.transaction_name)) {
-        dataByTransaction.set(row.transaction_name, []);
+    timeSeriesData.forEach((row: unknown) => {
+      const tsRow = row as TimeSeriesRow;
+      if (!dataByTransaction.has(tsRow.transaction_name)) {
+        dataByTransaction.set(tsRow.transaction_name, []);
       }
-      dataByTransaction.get(row.transaction_name)!.push({
-        time: new Date(row.time_bucket),
-        value: parseFloat(row.avg_response_time) || 0,
+      dataByTransaction.get(tsRow.transaction_name)!.push({
+        time: new Date(tsRow.time_bucket),
+        value: parseFloat(tsRow.avg_response_time) || 0,
       });
     });
 
     // Get unique time buckets for X-axis
-    const uniqueTimes = Array.from(new Set(timeSeriesData.map((row: any) => row.time_bucket)))
+    const uniqueTimes = Array.from(new Set(timeSeriesData.map((row: unknown) => (row as TimeSeriesRow).time_bucket)))
       .sort()
-      .map((t: any) => new Date(t));
+      .map((t) => new Date(t as string));
 
     const timePoints = uniqueTimes.length;
 
@@ -142,7 +150,7 @@ export class TransactionResponseTimesRenderer {
 
     // Create data points array for each transaction
     const dataPoints: number[][] = [];
-    scenarioData.transactions.forEach((txn: any) => {
+    scenarioData.transactions.forEach((txn: ReportTransaction) => {
       const transactionData = dataByTransaction.get(txn.name) || [];
       const points = uniqueTimes.map((time) => {
         const dataPoint = transactionData.find(
@@ -263,12 +271,12 @@ export class TransactionResponseTimesRenderer {
   /**
    * Render transactions table with blue header styling
    */
-  renderTransactionsTable(scenarioData: any): string {
+  renderTransactionsTable(scenarioData: ScenarioData): string {
     const { transactions } = scenarioData;
 
     const tableRows = transactions
       .map(
-        (txn: any) => {
+        (txn: ReportTransaction) => {
           const rowBg = txn.fail > 0 ? '#fff8f8' : 'white';
           return `
       <tr style="background: ${rowBg};">

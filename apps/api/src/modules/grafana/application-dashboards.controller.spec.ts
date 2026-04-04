@@ -1031,8 +1031,8 @@ describe('ApplicationDashboardsController', () => {
     it('should handle empty string tags', async () => {
       // Arrange
       const query = { tags: '' };
-      // Empty string is falsy, so it won't be parsed
-      const expectedQuery = { tags: '' };
+      // Empty string is split and filtered, resulting in empty array
+      const expectedQuery = { tags: [] as string[] };
       service.findAll.mockResolvedValue([]);
 
       // Act

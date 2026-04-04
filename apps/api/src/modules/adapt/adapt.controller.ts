@@ -202,7 +202,7 @@ export class AdaptController {
     @UserCtx() ctx: UserContext,
     @Query('testRunId') testRunId: string,
     @Query('limit') limit?: string,
-  ): Promise<{ data: any[] }> {
+  ): Promise<{ data: unknown[] }> {
     if (!metricName || !testRunId) {
       throw new ValidationException('metricName and testRunId are required');
     }

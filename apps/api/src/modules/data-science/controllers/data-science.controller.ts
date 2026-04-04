@@ -18,6 +18,7 @@ import { DataSource } from 'typeorm';
 import { BullMQClientService } from '../services/bullmq-client.service';
 import { BatchRefreshDto, BatchReevaluateDto, AvailableSourcesRequestDto } from '../dto/batch-processing.dto';
 import { JobProgressService } from '../services/job-progress.service';
+import type { JobProgress } from '@perfana/shared/types';
 import { JobProgressGateway } from '../gateways/job-progress.gateway';
 import { UserCtx, UserContext } from '../../../common/decorators/user-context.decorator';
 import { AuthorizationService } from '../../../common/services/authorization.service';
@@ -944,9 +945,9 @@ export class DataScienceController {
    */
   private async checkBatchForBlockedJobs(testRunIds: string[]): Promise<Array<{
     testRunId: string;
-    blockInfo: any;
+    blockInfo: { reason?: string; existingJobId?: string; existingJobProgress?: JobProgress | null; scopeKey?: string };
   }>> {
-    const blockedJobs: Array<{ testRunId: string; blockInfo: any }> = [];
+    const blockedJobs: Array<{ testRunId: string; blockInfo: { reason?: string; existingJobId?: string; existingJobProgress?: JobProgress | null; scopeKey?: string } }> = [];
 
     for (const testRunId of testRunIds) {
       const scopeData = await this.getTestRunScope(testRunId);

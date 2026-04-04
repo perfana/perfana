@@ -95,7 +95,7 @@ export class TrendsFilterPresetRepository extends TypeOrmBaseRepository<TrendsFi
    */
   async findByPanel(panelId: number, panelTitle?: string): Promise<TrendsFilterPreset[]> {
     try {
-      const where: any = { panelId };
+      const where: { panelId: number; panelTitle?: string } = { panelId };
       if (panelTitle) {
         where.panelTitle = panelTitle;
       }

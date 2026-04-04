@@ -366,7 +366,7 @@ export class TestRunsService {
   // ========== Anomaly Methods (delegated to AnomalyService) ==========
   // Note: Anomaly methods don't require authorization yet (will be added when entity has org_id)
 
-  async getTestRunCheckResults(testRunId: string, system?: string, environment?: string, workload?: string): Promise<any[]> {
+  async getTestRunCheckResults(testRunId: string, system?: string, environment?: string, workload?: string): Promise<Record<string, unknown>[]> {
     return this.anomalyService.getTestRunCheckResults(testRunId, system, environment, workload);
   }
 
@@ -393,11 +393,11 @@ export class TestRunsService {
     return this.changepointService.getTestRunsMoreRecentThan(systemUnderTestId, testEnvironment, workload, baseTestRunId);
   }
 
-  async markAsChangepoint(systemUnderTestId: string, testEnvironment: string, workload: string, testRunId: string): Promise<{ message: string; jobId?: string; jobDetails?: any }> {
+  async markAsChangepoint(systemUnderTestId: string, testEnvironment: string, workload: string, testRunId: string): Promise<{ message: string; jobId?: string; jobDetails?: unknown }> {
     return this.changepointService.markAsChangepoint(systemUnderTestId, testEnvironment, workload, testRunId);
   }
 
-  async removeChangepoint(systemUnderTestId: string, testEnvironment: string, workload: string, testRunId: string): Promise<{ message: string; jobId?: string; jobDetails?: any }> {
+  async removeChangepoint(systemUnderTestId: string, testEnvironment: string, workload: string, testRunId: string): Promise<{ message: string; jobId?: string; jobDetails?: unknown }> {
     return this.changepointService.removeChangepoint(systemUnderTestId, testEnvironment, workload, testRunId);
   }
 

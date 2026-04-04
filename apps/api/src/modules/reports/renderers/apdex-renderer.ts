@@ -1,7 +1,7 @@
 import { Injectable } from '@nestjs/common';
 import { TestRun, ReportSectionConfig } from '@perfana/shared';
 import { ReportUtilsService } from '../services/report-utils.service';
-import { ReportDataFetcherService } from '../services/report-data-fetcher.service';
+import { ReportDataFetcherService, ApdexOverallData, ApdexScenarioData, ApdexTransaction } from '../services/report-data-fetcher.service';
 
 /**
  * Renderer for Apdex section
@@ -109,7 +109,7 @@ export class ApdexRenderer {
   /**
    * Render overall Apdex metrics grid
    */
-  renderApdexOverallMetrics(overallData: any): string {
+  renderApdexOverallMetrics(overallData: ApdexOverallData): string {
     const apdexRating = this.utils.getApdexRating(overallData.apdex);
 
     return `
@@ -177,7 +177,7 @@ export class ApdexRenderer {
   /**
    * Render individual scenario section for Apdex
    */
-  renderApdexScenario(scenarioData: any, apdexThreshold: number): string {
+  renderApdexScenario(scenarioData: ApdexScenarioData, apdexThreshold: number): string {
     const apdexRating = this.utils.getApdexRating(scenarioData.summary.apdex);
 
     return `
@@ -241,10 +241,10 @@ export class ApdexRenderer {
   /**
    * Render transactions table with Apdex column
    */
-  renderApdexTransactionsTable(transactions: any[], _apdexThreshold: number): string {
+  renderApdexTransactionsTable(transactions: ApdexTransaction[], _apdexThreshold: number): string {
     const tableRows = transactions
       .map(
-        (txn: any) => {
+        (txn: ApdexTransaction) => {
           const apdexRating = this.utils.getApdexRating(txn.apdex);
           const apdexColor = txn.apdex >= 0.94 ? '#4caf50' : txn.apdex >= 0.85 ? '#66bb6a' : txn.apdex >= 0.70 ? '#ff9800' : '#f44336';
 

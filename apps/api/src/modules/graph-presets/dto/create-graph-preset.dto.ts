@@ -112,7 +112,7 @@ export class CreateGraphPresetDto {
     example: { showLegend: true, lineWidth: 2 }
   })
   @IsOptional()
-  chartOptions?: Record<string, any>;
+  chartOptions?: Record<string, unknown>;
 
   @ApiProperty({
     description: 'Whether this preset should be available to all users',

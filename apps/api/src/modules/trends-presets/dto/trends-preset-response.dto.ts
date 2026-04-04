@@ -77,7 +77,7 @@ export class TrendsPresetResponseDto {
     description: 'Array of series configurations for multi-series trends',
     example: [{ dashboardId: 'abc', panelId: 1, metricName: 'response_time', source: 'grafana' }]
   })
-  series_config?: Record<string, any>[];
+  series_config?: Record<string, unknown>[];
 
   @ApiProperty({
     description: 'Whether this preset is available to all users',

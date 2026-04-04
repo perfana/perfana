@@ -101,7 +101,7 @@ export class TracingServiceRepository extends TypeOrmBaseRepository<TracingServi
     workload: string | null,
   ): Promise<TracingService | null> {
     try {
-      const where: any = {
+      const where: Record<string, unknown> = {
         systemUnderTestId: systemId,
       };
 

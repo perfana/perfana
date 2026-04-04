@@ -545,7 +545,7 @@ export class ProfilesService {
         this.logger.debug(
           `Updating setHardcodedValueForVariables: ${JSON.stringify(dashboard.setHardcodedValueForVariables)} -> ${JSON.stringify(newValue)}`
         );
-        dashboard.setHardcodedValueForVariables = newValue as any;
+        dashboard.setHardcodedValueForVariables = newValue as DashboardVariable[] | null;
       }
       if (updateDto.matchRegexForVariables !== undefined) {
         // Convert empty objects to null for proper deletion
@@ -558,7 +558,7 @@ export class ProfilesService {
         this.logger.debug(
           `Updating matchRegexForVariables: ${JSON.stringify(dashboard.matchRegexForVariables)} -> ${JSON.stringify(newValue)}`
         );
-        dashboard.matchRegexForVariables = newValue as any;
+        dashboard.matchRegexForVariables = newValue as Record<string, string> | null;
       }
       if (updateDto.readOnly !== undefined) {
         dashboard.readOnly = updateDto.readOnly;

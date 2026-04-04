@@ -52,7 +52,7 @@ export class GrafanaClientService {
     };
   }
 
-  async grafanaCall(grafanaInstance: GrafanaInstance, endpoint: string): Promise<any> {
+  async grafanaCall(grafanaInstance: GrafanaInstance, endpoint: string): Promise<unknown> {
     const baseUrl = grafanaInstance.server_url || grafanaInstance.client_url;
 
     // Validate URL to prevent SSRF attacks
@@ -157,7 +157,7 @@ export class GrafanaClientService {
     }
 
     const apiUrl = `${baseUrl}/api/annotations`;
-    const body: Record<string, any> = {
+    const body: Record<string, unknown> = {
       time: params.time,
       text: params.text,
     };
@@ -227,7 +227,7 @@ export class GrafanaClientService {
   async getDatasource(grafanaInstance: GrafanaInstance, datasourceUid: string): Promise<GrafanaDatasource> {
     try {
       const endpoint = `/api/datasources/uid/${datasourceUid}`;
-      const datasource = await this.grafanaCall(grafanaInstance, endpoint);
+      const datasource = await this.grafanaCall(grafanaInstance, endpoint) as GrafanaDatasource;
       return datasource;
     } catch (error) {
       this.logger.error(`Error getting datasource ${datasourceUid}:`, error);
@@ -245,16 +245,16 @@ export class GrafanaClientService {
       const encodedQuery = encodeURIComponent(query);
       const queryUrl = `/api/datasources/proxy/${datasource.id}/query?db=${datasource.database}&q=${encodedQuery}`;
       
-      const response = await this.grafanaCall(grafanaInstance, queryUrl);
+      const response = await this.grafanaCall(grafanaInstance, queryUrl) as Record<string, unknown>;
       const variableValues: string[] = [];
 
       if (response.results) {
-        response.results.forEach((result: any) => {
+        (response.results as Record<string, unknown>[]).forEach((result: Record<string, unknown>) => {
           if (result.series) {
-            result.series.forEach((serie: any) => {
+            (result.series as Record<string, unknown>[]).forEach((serie: Record<string, unknown>) => {
               if (serie.values) {
-                serie.values.forEach((value: any) => {
-                  const variableValue = value.length === 1 ? value[0] : value[1];
+                (serie.values as string[][]).forEach((value: string[]) => {
+                  const variableValue: string = (value.length === 1 ? value[0] : value[1]) ?? '';
                   let valueAfterRegex = '';
 
                   if (regex && regex !== '') {
@@ -314,10 +314,10 @@ export class GrafanaClientService {
           
           queryUrl = `/api/datasources/proxy/${datasource.id}/api/v1/series?match[]=${encodeURIComponent(metric)}&start=${startTime}&end=${endTime}`;
           
-          const response = await this.grafanaCall(grafanaInstance, queryUrl);
-          
+          const response = await this.grafanaCall(grafanaInstance, queryUrl) as Record<string, unknown>;
+
           if (response && response.data && labelName) {
-            response.data.forEach((item: any) => {
+            (response.data as Record<string, string>[]).forEach((item: Record<string, string>) => {
               if (item[labelName]) {
                 variableValues.push(item[labelName]);
               }
@@ -327,10 +327,10 @@ export class GrafanaClientService {
       } else {
         // Simple label values query
         queryUrl = `/api/datasources/proxy/${datasource.id}/api/v1/label/${encodeURIComponent(query)}/values`;
-        const response = await this.grafanaCall(grafanaInstance, queryUrl);
-        
+        const response = await this.grafanaCall(grafanaInstance, queryUrl) as Record<string, unknown>;
+
         if (response && response.data) {
-          response.data.forEach((value: string) => {
+          (response.data as string[]).forEach((value: string) => {
             variableValues.push(value);
           });
         }

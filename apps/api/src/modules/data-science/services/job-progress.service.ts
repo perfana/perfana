@@ -197,7 +197,7 @@ export class JobProgressService implements OnModuleInit, OnModuleDestroy {
   /**
    * Handle incoming Redis events
    */
-  private handleRedisEvent(channel: string, event: any) {
+  private handleRedisEvent(channel: string, event: JobProgressEvent | JobCompletedEvent | JobFailedEvent | JobStuckEvent) {
     switch (channel) {
       case JOB_REDIS_CHANNELS.PROGRESS:
         this.handleProgressEvent(event as JobProgressEvent);

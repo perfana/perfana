@@ -124,7 +124,7 @@ export class KeycloakAdminService {
         }),
       );
 
-      const users: KeycloakUserInfo[] = response.data.map((user: any) => ({
+      const users: KeycloakUserInfo[] = response.data.map((user: Record<string, unknown>) => ({
         id: user.id,
         username: user.username,
         email: user.email,

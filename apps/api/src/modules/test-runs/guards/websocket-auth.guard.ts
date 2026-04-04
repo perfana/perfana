@@ -117,14 +117,15 @@ export class WebSocketAuthGuard implements CanActivate {
       const keycloakUser = await this.validateKeycloakToken(token);
       if (keycloakUser) {
         client.authType = 'keycloak-jwt';
-        client.userId = keycloakUser.sub || keycloakUser.preferred_username;
-        client.email = keycloakUser.email;
-        client.roles = keycloakUser.roles || keycloakUser.realm_access?.roles || [];
+        client.userId = (keycloakUser.sub as string) || (keycloakUser.preferred_username as string);
+        client.email = keycloakUser.email as string | undefined;
+        const realmAccess = keycloakUser.realm_access as Record<string, unknown> | undefined;
+        client.roles = (keycloakUser.roles as string[]) || (realmAccess?.roles as string[]) || [];
 
         // Extract organization and team from token if available
         // These would be custom claims added to Keycloak tokens
-        client.organizationId = keycloakUser.organization_id;
-        client.teamId = keycloakUser.team_id;
+        client.organizationId = keycloakUser.organization_id as string | undefined;
+        client.teamId = keycloakUser.team_id as string | undefined;
 
         this.logger.debug(
           `WebSocket Keycloak JWT authentication successful for user: ${client.userId}`,
@@ -143,7 +144,7 @@ export class WebSocketAuthGuard implements CanActivate {
   /**
    * Validate Keycloak JWT token (mirrors KeycloakEnhancedAuthGuard.validateKeycloakToken)
    */
-  private async validateKeycloakToken(token: string): Promise<any | null> {
+  private async validateKeycloakToken(token: string): Promise<Record<string, unknown> | null> {
     try {
       const keycloakUrl = this.configService.get('KEYCLOAK_URL') || 'http://localhost:8080';
       const realm = this.configService.get('KEYCLOAK_REALM') || 'perfana-prod';

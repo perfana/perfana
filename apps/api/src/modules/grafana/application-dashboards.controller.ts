@@ -23,6 +23,12 @@ import {
 import { CreateApplicationDashboardDto, UpdateApplicationDashboardDto } from './dto/application-dashboard.dto';
 import { CopyApplicationDashboardsDto } from './dto/copy-application-dashboards.dto';
 import { UserCtx, UserContext } from '../../common/decorators/user-context.decorator';
+import { ApplicationDashboardQuery } from './application-dashboards.service';
+
+/** Raw query shape from NestJS @Query() — tags may arrive as a comma-separated string */
+interface ApplicationDashboardRawQuery extends Omit<ApplicationDashboardQuery, 'tags'> {
+  tags?: string | string[];
+}
 
 class BatchDeleteInfoDto {
   ids!: string[];
@@ -48,16 +54,19 @@ export class ApplicationDashboardsController {
   @ApiQuery({ name: 'tags', required: false, description: 'Filter by tags (comma-separated)' })
   @ApiResponse({ status: 200, description: 'Return all application dashboards' })
   async findAll(
-    @Query() query: any,
+    @Query() query: ApplicationDashboardRawQuery,
     @UserCtx() ctx: UserContext,
   ): Promise<ApplicationDashboard[]> {
     try {
       // Parse tags if provided as comma-separated string
-      if (query.tags && typeof query.tags === 'string') {
-        query.tags = query.tags.split(',').map((tag: string) => tag.trim()).filter((tag: string) => tag.length > 0);
-      }
+      const parsedQuery: ApplicationDashboardQuery = {
+        ...query,
+        tags: typeof query.tags === 'string'
+          ? query.tags.split(',').map((tag: string) => tag.trim()).filter((tag: string) => tag.length > 0)
+          : query.tags,
+      };
 
-      return await this.applicationDashboardsService.findAll(ctx.userId, ctx.roles, query);
+      return await this.applicationDashboardsService.findAll(ctx.userId, ctx.roles, parsedQuery);
     } catch (error) {
       this.logger.error('Failed to fetch application dashboards:', error);
       throw new HttpException(

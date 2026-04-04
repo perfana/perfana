@@ -9,7 +9,7 @@
 
 import * as cheerio from 'cheerio';
 import type { CheerioAPI, Cheerio } from 'cheerio';
-import type { Element } from 'domhandler';
+import type { Element, AnyNode } from 'domhandler';
 
 // ==================== Types ====================
 
@@ -130,10 +130,10 @@ export function findSectionHeading(
 
   if (bodyText.toLowerCase().includes(searchText)) {
     // Find all elements and check their direct text content
-    const candidates = $('body').find('*').filter(function(this: any) {
-      const elem = $(this);
+    const candidates = $('body').find('*').filter(function(this: AnyNode) {
+      const elem = $(this as Element);
       // Get only direct text nodes, not nested text
-      const directText = elem.contents().filter(function(this: any) {
+      const directText = elem.contents().filter(function(this: AnyNode) {
         return this.type === 'text';
       }).text().trim();
 

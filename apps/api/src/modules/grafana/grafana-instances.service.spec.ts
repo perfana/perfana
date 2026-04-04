@@ -401,8 +401,8 @@ describe('GrafanaInstancesService', () => {
         server_url: 'https://grafana-internal.new.com',
         orgId: 'org-456',
         apiKey: 'new-api-key',
-        username: null,
-        password: null,
+        username: undefined,
+        password: undefined,
         snapshotInstance: false,
         createdBy: mockUserId,
         updatedBy: mockUserId,
@@ -434,11 +434,11 @@ describe('GrafanaInstancesService', () => {
       expect(repository.create).toHaveBeenCalledWith({
         label: 'API Key Grafana',
         client_url: 'https://grafana.apikey.com',
-        server_url: null,
+        server_url: undefined,
         orgId: 'org-789',
         apiKey: 'secure-api-key-xyz',
-        username: null,
-        password: null,
+        username: undefined,
+        password: undefined,
         snapshotInstance: false,
         createdBy: mockUserId,
         updatedBy: mockUserId,
@@ -468,9 +468,9 @@ describe('GrafanaInstancesService', () => {
       expect(repository.create).toHaveBeenCalledWith({
         label: 'Basic Auth Grafana',
         client_url: 'https://grafana.basicauth.com',
-        server_url: null,
+        server_url: undefined,
         orgId: 'org-101',
-        apiKey: null,
+        apiKey: undefined,
         username: 'admin',
         password: 'encrypted-pass',
         snapshotInstance: false,
@@ -545,7 +545,7 @@ describe('GrafanaInstancesService', () => {
 
       // Assert
       expect(repository.create).toHaveBeenCalledWith(
-        expect.objectContaining({ server_url: null })
+        expect.objectContaining({ server_url: undefined })
       );
     });
 
@@ -592,9 +592,9 @@ describe('GrafanaInstancesService', () => {
       // Assert
       expect(repository.create).toHaveBeenCalledWith(
         expect.objectContaining({
-          apiKey: null,
-          username: null,
-          password: null,
+          apiKey: undefined,
+          username: undefined,
+          password: undefined,
         })
       );
     });

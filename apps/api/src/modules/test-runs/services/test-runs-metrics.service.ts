@@ -193,7 +193,7 @@ export class TestRunsMetricsService {
         this.logger.log(`Created new metric classification for: ${sanitizeString(createDto.dashboardLabel) || 'no-dashboard'}/${sanitizeString(createDto.panelTitle) || 'no-panel'}/${sanitizeString(createDto.metricName) || 'panel-wide'}`);
       }
 
-      return result as any;
+      return result as unknown as MetricClassificationDto;
     } catch (error) {
       this.logger.error(`Failed to classify metric for ${testRunId}:`, error);
       if (error instanceof ResourceNotFoundException) {
@@ -438,7 +438,8 @@ export class TestRunsMetricsService {
 
       await this.dsCompareConfigRepo.update(
         { id },
-        { config_data: updateDto.configData }
+        // Entity config_data is Record<string, any> from shared package
+        { config_data: updateDto.configData as Record<string, unknown> as DsCompareConfig['config_data'] }
       );
 
       const result = await this.dsCompareConfigRepo.findOne({
@@ -529,7 +530,7 @@ export class TestRunsMetricsService {
       if (!matchingTemplates) continue;
 
       for (const template of matchingTemplates) {
-        const compareConfigWhere: Record<string, any> = {
+        const compareConfigWhere: Record<string, string | number | undefined> = {
           system_under_test_id: systemUnderTestId,
           test_environment: testEnvironment,
           workload,
@@ -548,7 +549,7 @@ export class TestRunsMetricsService {
           // Build config_data matching actual DB schema:
           // { thresholds, metricClassification, defaultValueIfControlGroupMissing }
           const overrides = template.config_overrides ?? {};
-          const configData: Record<string, any> = {
+          const configData: Record<string, unknown> = {
             thresholds: {
               aggregation: 'mean',
               iqrThreshold: 2,

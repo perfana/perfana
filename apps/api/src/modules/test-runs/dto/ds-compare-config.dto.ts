@@ -64,7 +64,7 @@ export class CreateDsCompareConfigDto {
     }
   })
   @IsObject()
-  configData!: Record<string, any>;
+  configData!: Record<string, unknown>;
 }
 
 export class UpdateDsCompareConfigDto {
@@ -85,7 +85,7 @@ export class UpdateDsCompareConfigDto {
     }
   })
   @IsObject()
-  configData!: Record<string, any>;
+  configData!: Record<string, unknown>;
 }
 
 export class DsCompareConfigDto {
@@ -148,7 +148,7 @@ export class DsCompareConfigDto {
       defaultValueIfControlGroupMissing: 0
     }
   })
-  configData!: Record<string, any>;
+  configData!: Record<string, unknown>;
 
   @ApiProperty({
     description: 'Timestamp when this configuration was created',

@@ -92,7 +92,7 @@ export class EnhancedThrottlerGuard {
    * Extract IP address from request
    * Handles proxies and load balancers correctly
    */
-  private getRequestIP(req: Record<string, any>): string {
+  private getRequestIP(req: Record<string, unknown>): string {
     const headers = req.headers as Record<string, string | string[] | undefined>;
 
     // Check common proxy headers

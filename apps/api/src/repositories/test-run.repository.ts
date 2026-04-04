@@ -352,7 +352,7 @@ export class TestRunRepository extends TypeOrmBaseRepository<TestRun> {
     // Whitelist of allowed JSONB status fields to prevent SQL injection
     const allowedFields = ['evaluatingAdapt'] as const;
 
-    if (!allowedFields.includes(fieldName as any)) {
+    if (!(allowedFields as readonly string[]).includes(fieldName)) {
       throw new ValidationException(
         `Invalid status field: '${fieldName}'. Allowed fields: ${allowedFields.join(', ')}`
       );

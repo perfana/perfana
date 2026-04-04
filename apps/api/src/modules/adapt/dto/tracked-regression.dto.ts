@@ -80,51 +80,51 @@ export class TrackedRegressionDto {
 
   @ApiProperty({ description: 'Statistical measures', required: false })
   @IsOptional()
-  mean?: any;
+  mean?: Record<string, unknown>;
 
   @ApiProperty({ description: 'Statistical measures', required: false })
   @IsOptional()
-  median?: any;
+  median?: Record<string, unknown>;
 
   @ApiProperty({ description: 'Statistical measures', required: false })
   @IsOptional()
-  minValue?: any;
+  minValue?: Record<string, unknown>;
 
   @ApiProperty({ description: 'Statistical measures', required: false })
   @IsOptional()
-  maxValue?: any;
+  maxValue?: Record<string, unknown>;
 
   @ApiProperty({ description: 'Statistical measures', required: false })
   @IsOptional()
-  stdDev?: any;
+  stdDev?: Record<string, unknown>;
 
   @ApiProperty({ description: 'Statistical measures', required: false })
   @IsOptional()
-  q95?: any;
+  q95?: Record<string, unknown>;
 
   @ApiProperty({ description: 'Compare configuration', required: false })
   @IsOptional()
-  compareConfig?: any;
+  compareConfig?: Record<string, unknown>;
 
   @ApiProperty({ description: 'Metric classification', required: false })
   @IsOptional()
-  metricClassification?: any;
+  metricClassification?: Record<string, unknown>;
 
   @ApiProperty({ description: 'Thresholds configuration', required: false })
   @IsOptional()
-  thresholds?: any;
+  thresholds?: Record<string, unknown>;
 
   @ApiProperty({ description: 'Checks configuration', required: false })
   @IsOptional()
-  checks?: any;
+  checks?: Record<string, unknown>;
 
   @ApiProperty({ description: 'Conclusion data from anomaly detection', required: false })
   @IsOptional()
-  conclusion?: any;
+  conclusion?: Record<string, unknown>;
 
   @ApiProperty({ description: 'Tracked conclusion data', required: false })
   @IsOptional()
-  trackedConclusion?: any;
+  trackedConclusion?: Record<string, unknown>;
 
   // Computed fields for UI
   @ApiProperty({ description: 'Computed regression status', required: false })

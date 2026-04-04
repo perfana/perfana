@@ -2,18 +2,18 @@
 // Must be before any other imports that might use crypto
 import * as nodeCrypto from 'crypto';
 if (typeof globalThis.crypto === 'undefined') {
-  (globalThis as any).crypto = nodeCrypto.webcrypto;
+  (globalThis as Record<string, unknown>).crypto = nodeCrypto.webcrypto;
 }
 
 import { NestFactory } from '@nestjs/core';
-import { ValidationPipe, Logger } from '@nestjs/common';
+import { ValidationPipe, Logger, INestApplication } from '@nestjs/common';
 import { SwaggerModule, DocumentBuilder } from '@nestjs/swagger';
 import helmet from 'helmet';
 import { AppModule } from './app.module';
 import { GlobalExceptionFilter } from './common/filters/global-exception.filter';
 import { ConfigService } from '@nestjs/config';
 import { IoAdapter } from '@nestjs/platform-socket.io';
-import { ServerOptions } from 'socket.io';
+import { Server, ServerOptions } from 'socket.io';
 
 /**
  * Custom Socket.IO adapter with CORS configuration
@@ -21,13 +21,13 @@ import { ServerOptions } from 'socket.io';
  */
 class SocketIOAdapter extends IoAdapter {
   constructor(
-    app: any,
+    app: INestApplication,
     private configService: ConfigService,
   ) {
     super(app);
   }
 
-  createIOServer(port: number, options?: ServerOptions): any {
+  createIOServer(port: number, options?: ServerOptions): Server {
     // Support multiple frontend origins for development
     const corsAllowedOrigins = this.configService.get('CORS_ALLOWED_ORIGINS');
     const frontendUrl = this.configService.get('FRONTEND_URL') || 'http://localhost:4001';

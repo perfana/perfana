@@ -470,13 +470,14 @@ export class TestRunsGateway
       const keycloakUser = await this.validateKeycloakToken(token);
       if (keycloakUser) {
         socket.authType = 'keycloak-jwt';
-        socket.userId = keycloakUser.sub || keycloakUser.preferred_username;
-        socket.email = keycloakUser.email;
-        socket.roles = keycloakUser.roles || keycloakUser.realm_access?.roles || [];
+        socket.userId = (keycloakUser.sub as string) || (keycloakUser.preferred_username as string);
+        socket.email = keycloakUser.email as string | undefined;
+        const realmAccess = keycloakUser.realm_access as Record<string, unknown> | undefined;
+        socket.roles = (keycloakUser.roles as string[]) || (realmAccess?.roles as string[]) || [];
 
         // Extract organization and team from token if available
-        socket.organizationId = keycloakUser.organization_id;
-        socket.teamId = keycloakUser.team_id;
+        socket.organizationId = keycloakUser.organization_id as string | undefined;
+        socket.teamId = keycloakUser.team_id as string | undefined;
 
         this.logger.debug(
           `WebSocket Keycloak JWT authentication successful for user: ${socket.userId}`,
@@ -495,7 +496,7 @@ export class TestRunsGateway
   /**
    * Validate Keycloak JWT token
    */
-  private async validateKeycloakToken(token: string): Promise<any | null> {
+  private async validateKeycloakToken(token: string): Promise<Record<string, unknown> | null> {
     try {
       const keycloakUrl = this.configService.get('KEYCLOAK_URL') || 'http://localhost:8080';
       const realm = this.configService.get('KEYCLOAK_REALM') || 'perfana-prod';

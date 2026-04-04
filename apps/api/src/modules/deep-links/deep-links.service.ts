@@ -13,6 +13,25 @@ import { TestRunConfiguration, TestRun as TestRunEntity, SystemUnderTest } from 
 import { ResourceNotFoundException } from '../../common/exceptions/business.exception';
 
 /**
+ * Test run data used for deep link variable resolution.
+ * Properties use snake_case to match raw SQL query result column names.
+ */
+interface TestRunVariableData {
+  id?: string;
+  test_run_id?: string;
+  system_under_test_id?: string;
+  system_name?: string;
+  systems_under_test?: { name?: string };
+  test_environment?: string;
+  workload?: string;
+  ci_build_results_url?: string;
+  start_time?: string | Date;
+  end_time?: string | Date;
+  completed?: boolean;
+  tags?: string[];
+}
+
+/**
  * Global admin roles that bypass organization filtering
  */
 const ADMIN_ROLES = ['perfana-admin', 'super-admin', 'admin'];
@@ -237,10 +256,10 @@ export class DeepLinksService {
     const existingNameSet = new Set(existingLinks.map(l => l.name));
 
     for (const link of sourceLinks) {
-      // Cast to any to work around stale compiled declaration in @perfana/shared/entities
-      // The 'tags' column exists in the source entity and in the database
-      const linkAny = link as any;
-      const linkTags: string[] = Array.isArray(linkAny.tags) ? linkAny.tags : [];
+      // Cast to access 'tags' column which exists in the source entity and in the database
+      // but may not be in the compiled @perfana/shared type declarations
+      const linkRecord = link as unknown as Record<string, unknown>;
+      const linkTags: string[] = Array.isArray(linkRecord.tags) ? linkRecord.tags as string[] : [];
       const nameExists = existingNameSet.has(link.name);
 
       if (nameExists && dto.conflictStrategy === 'skip') {
@@ -278,7 +297,7 @@ export class DeepLinksService {
 
   async resolveVariables(
     deepLink: DeepLink,
-    testRun: any,
+    testRun: TestRunVariableData,
   ): Promise<ResolvedDeepLink> {
     let resolvedUrl = deepLink.url;
     const unresolvedVariables: string[] = [];
@@ -320,7 +339,7 @@ export class DeepLinksService {
     }
   }
 
-  private replaceStandardVariables(url: string, testRun: any): string {
+  private replaceStandardVariables(url: string, testRun: TestRunVariableData): string {
     // System/Environment/Workload variables
     // Use system_name if available (from joined query), otherwise fall back to system_under_test_id
     const systemName = testRun.system_name || testRun.systems_under_test?.name || testRun.system_under_test_id || '';
@@ -376,7 +395,7 @@ export class DeepLinksService {
     return url;
   }
 
-  private async replaceConfigVariables(url: string, testRun: any): Promise<string> {
+  private async replaceConfigVariables(url: string, testRun: TestRunVariableData): Promise<string> {
     try {
       // Get configuration variables for this test run using the UUID id (TypeORM)
       const configs = await this.testRunConfigRepo.find({
@@ -400,7 +419,7 @@ export class DeepLinksService {
     }
   }
 
-  private async replaceReferenceVariables(url: string, testRun: any): Promise<string> {
+  private async replaceReferenceVariables(url: string, testRun: TestRunVariableData): Promise<string> {
     try {
       // Get previous test run
       if (url.includes('{perfana-previous-test-run-id}')) {
