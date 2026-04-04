@@ -38,9 +38,9 @@ function generatePlotProps(
   const isDark = theme.palette.mode === 'dark';
   const textColor = theme.palette.text.primary;
   const textSecondary = theme.palette.text.secondary;
-  const bgColor = isDark ? 'transparent' : theme.palette.background.paper;
+  const bgColor = isDark ? '#121212' : theme.palette.background.paper;
   const hoverBgColor = isDark ? '#1e293b' : theme.palette.background.paper;
-  const plotBgColor = isDark ? 'transparent' : theme.palette.grey[50];
+  const plotBgColor = isDark ? '#1e1e1e' : theme.palette.grey[50];
   const gridColor = isDark ? 'rgba(255,255,255,0.12)' : '#e0e0e0';
 
   // Find global min/max for unit conversion logic (similar to SLOChart)
@@ -290,7 +290,7 @@ function generatePlotProps(
       format: 'png',
       filename: `${metricName}_comparison`,
       height: 480,
-      width: null,
+      width: 1200,
       scale: 2
     },
     modeBarButtonsToAdd: [

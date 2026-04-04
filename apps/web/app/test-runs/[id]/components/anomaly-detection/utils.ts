@@ -416,8 +416,8 @@ export const createTrendsPlot = (
   const textColor = theme?.palette?.text?.primary || (isDark ? '#e0e0e0' : '#000');
   const textSecondary = theme?.palette?.text?.secondary || (isDark ? '#aaa' : '#666');
   const paperBgColor = isDark ? '#1e293b' : (theme?.palette?.background?.paper || '#fff');
-  const bgColor = isDark ? 'transparent' : paperBgColor;
-  const plotBgColor = isDark ? 'transparent' : (theme?.palette?.grey?.[50] || '#f5f5f5');
+  const bgColor = isDark ? '#121212' : paperBgColor;
+  const plotBgColor = isDark ? '#1e1e1e' : (theme?.palette?.grey?.[50] || '#f5f5f5');
   const gridColor = isDark ? 'rgba(255,255,255,0.12)' : '#e0e0e0';
 
   const layout = {
@@ -515,7 +515,7 @@ export const createTrendsPlot = (
       format: 'png' as const,
       filename: `${sortedData[0]?.panel_title || 'trends'}_control_group`,
       height: 400,
-      width: null,
+      width: 1200,
       scale: 2
     },
   };

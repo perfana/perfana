@@ -80,7 +80,7 @@ export default function HostPerformanceGraphs({
       format: 'png' as const,
       filename: `${hostDisplayName || 'host'}_${metricName.toLowerCase().replace(/\s+/g, '_')}`,
       height: 300,
-      width: null as any,
+      width: 1200,
       scale: 2
     },
   });

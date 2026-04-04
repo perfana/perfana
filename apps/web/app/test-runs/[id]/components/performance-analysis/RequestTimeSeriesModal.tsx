@@ -283,8 +283,8 @@ export default function RequestTimeSeriesModal({
       b: 70,
     },
     autosize: true,
-    plot_bgcolor: isDark ? 'transparent' : 'rgba(250, 250, 250, 1)',
-    paper_bgcolor: isDark ? 'transparent' : 'white',
+    plot_bgcolor: isDark ? '#1e1e1e' : 'rgba(250, 250, 250, 1)',
+    paper_bgcolor: isDark ? '#121212' : 'white',
     font: {
       color: textColor,
     },

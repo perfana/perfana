@@ -489,8 +489,8 @@ export function buildChartConfig(chartName: string | undefined): Record<string, 
     toImageButtonOptions: {
       format: 'png',
       filename: chartName ? chartName.toLowerCase().replace(/\s+/g, '_') : 'custom_metrics_chart',
-      height: 500,
-      width: null,
+      height: 600,
+      width: 1200,
       scale: 2
     },
     modeBarButtonsToAdd: [
@@ -508,8 +508,8 @@ export function buildChartConfig(chartName: string | undefined): Record<string, 
           // eslint-disable-next-line @typescript-eslint/no-explicit-any
           const blobPromise = (window as any).Plotly.toImage(gd, {
             format: 'png',
-            width: plotlyGd._fullLayout?.width || 800,
-            height: plotlyGd._fullLayout?.height || 500,
+            width: plotlyGd._fullLayout?.width || 1200,
+            height: plotlyGd._fullLayout?.height || 600,
             scale: 2
           }).then((dataUrl: string) => {
             // Convert data URL to blob synchronously via atob

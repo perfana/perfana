@@ -81,8 +81,8 @@ export function extractChartThemeColors(theme: Theme): ChartThemeColors {
   return {
     textColor: theme.palette.text.primary,
     textSecondary: theme.palette.text.secondary,
-    bgColor: isDark ? 'transparent' : theme.palette.background.paper,
-    plotBgColor: isDark ? 'transparent' : theme.palette.grey[50],
+    bgColor: isDark ? '#121212' : theme.palette.background.paper,
+    plotBgColor: isDark ? '#1e1e1e' : theme.palette.grey[50],
     gridColor: isDark ? 'rgba(255, 255, 255, 0.12)' : '#e0e0e0',
     dividerColor: theme.palette.divider,
     fontFamily: theme.typography.fontFamily as string,
