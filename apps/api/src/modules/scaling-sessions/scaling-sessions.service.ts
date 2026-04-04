@@ -43,7 +43,8 @@ export class ScalingSessionsService {
   }
 
   /**
-   * Set the workload ADAPT mode to SCALING so future test runs auto-use scaling comparison.
+   * Set the workload-level ADAPT mode to SCALING so future test runs auto-use scaling comparison.
+   * Updates the workload config JSONB on system_under_test_workloads (same path as PUT /test-runs/workload-adapt-settings).
    */
   private async setWorkloadAdaptMode(
     systemUnderTestId: string,
@@ -52,31 +53,22 @@ export class ScalingSessionsService {
     baselineTestRunId?: string,
   ): Promise<void> {
     try {
-      // Update the workload config to SCALING mode
-      // The workload config is stored in the config table or applied via test-runs service
+      const configUpdate: Record<string, unknown> = { adaptMode: 'SCALING' };
+      if (baselineTestRunId) configUpdate.baselineTestRunId = baselineTestRunId;
+
       await this.dataSource.query(
-        `UPDATE test_runs
-         SET adapt_config = jsonb_set(
-           jsonb_set(
-             COALESCE(adapt_config, '{}'),
-             '{mode}',
-             '"SCALING"'
-           ),
-           '{baselineTestRunId}',
-           COALESCE($4::jsonb, 'null'::jsonb)
-         ),
-         updated_at = NOW()
-         WHERE system_under_test_id = $1
-           AND test_environment = $2
-           AND workload = $3
-           AND scaling_session_id IS NULL
-           AND adapt_config->>'mode' IS DISTINCT FROM 'SCALING'
-           AND end_time IS NULL`,
-        [systemUnderTestId, testEnvironment, workload, baselineTestRunId ? JSON.stringify(baselineTestRunId) : null],
+        `UPDATE system_under_test_workloads w
+         SET config = COALESCE(w.config, '{}'::jsonb) || $4::jsonb
+         FROM system_under_test_test_environments e
+         WHERE e.system_under_test_id = $1
+           AND e.name = $2
+           AND w.system_under_test_test_environment_id = e.id
+           AND w.name = $3`,
+        [systemUnderTestId, testEnvironment, workload, JSON.stringify(configUpdate)],
       );
-      this.logger.log(`Set ADAPT mode to SCALING for ${systemUnderTestId}/${testEnvironment}/${workload}`);
+      this.logger.log(`Set workload ADAPT mode to SCALING for ${systemUnderTestId}/${testEnvironment}/${workload}`);
     } catch (error) {
-      this.logger.warn(`Failed to auto-set ADAPT mode: ${(error as Error).message}`);
+      this.logger.warn(`Failed to auto-set workload ADAPT mode: ${(error as Error).message}`);
     }
   }
 
