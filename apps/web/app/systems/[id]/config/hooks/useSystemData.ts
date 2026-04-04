@@ -9,7 +9,7 @@ import { fetchTracingInstances } from '@/lib/distributed-tracing';
 import { fetchPyroscopeInstances } from '@/lib/pyroscope';
 import { Benchmark } from '../components/types';
 
-export type TabId = 'grafana' | 'slo' | 'deep-links' | 'dynatrace' | 'tracing' | 'pyroscope' | 'notifications' | 'templates';
+export type TabId = 'grafana' | 'slo' | 'deep-links' | 'dynatrace' | 'tracing' | 'pyroscope' | 'notifications' | 'templates' | 'adapt-settings';
 
 interface UseSystemDataProps {
   onDashboardsLoad?: (systemId: string, environment: string) => void;

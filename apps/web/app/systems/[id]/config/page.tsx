@@ -17,6 +17,7 @@ import {
   Memory as MemoryIcon,
   Notifications as NotificationsIcon,
   Description as DescriptionIcon,
+  TuneRounded as TuneIcon,
 } from '@mui/icons-material';
 
 // Hooks
@@ -33,6 +34,7 @@ import DistributedTracingSection from './components/DistributedTracingSection';
 import PyroscopeSection from './components/PyroscopeSection';
 import NotificationsSection from './components/NotificationsSection';
 import ReportingTemplatesSection from './components/ReportingTemplatesSection';
+import AdaptSettingsSection from './components/AdaptSettingsSection';
 import ConfigDialogs from './components/ConfigDialogs';
 import TemplateManagementDialog from './components/TemplateManagementDialog';
 import DeleteSystemDialog from './components/DeleteSystemDialog';
@@ -144,6 +146,7 @@ export default function SystemConfigurationPage() {
             {systemData.hasPyroscope && <Tab value="pyroscope" icon={<MemoryIcon />} label="Pyroscope" />}
             <Tab value="notifications" icon={<NotificationsIcon />} label="Notifications" />
             <Tab value="templates" icon={<DescriptionIcon />} label="Reporting Templates" />
+            <Tab value="adapt-settings" icon={<TuneIcon />} label="ADAPT Settings" />
           </Tabs>
         </Box>
 
@@ -248,6 +251,13 @@ export default function SystemConfigurationPage() {
               onBatchDelete={async (ids) => {
                 await template.handleBatchDelete(ids);
               }}
+            />
+          )}
+          {activeTab === 'adapt-settings' && (
+            <AdaptSettingsSection
+              systemId={systemId}
+              selectedEnvironment={selectedEnvironment}
+              selectedWorkload={selectedWorkload}
             />
           )}
         </Box>
