@@ -27,6 +27,7 @@ export class ScalingSessionsService {
       workload: dto.workload,
       baseline_test_run_id: dto.baselineTestRunId,
       target_load: dto.targetLoad,
+      linked_benchmark_ids: dto.linkedBenchmarkIds || [],
       status: 'active',
       organization_id: organizationId,
       created_by: userId,
@@ -131,52 +132,80 @@ export class ScalingSessionsService {
         tr.start_time,
         tr.end_time,
         tr.completed,
-        tr.adapt_config,
         tr.consolidated_result,
-        dac.conclusion as adapt_conclusion,
         (SELECT jsonb_object_agg(key, value)
          FROM test_run_configurations trc
          WHERE trc.test_run_id = tr.id
            AND trc.key IN ('targetConcurrency', 'target_concurrency', 'loadLevel', 'threads', 'vusers')
         ) as load_config
       FROM test_runs tr
-      LEFT JOIN ds_adapt_conclusion dac ON dac.test_run_id = tr.test_run_id
       WHERE tr.scaling_session_id = $1
       ORDER BY tr.start_time ASC
       LIMIT 100`,
       [id],
     );
 
-    // Get key metrics per run from ds_metric_statistics
     const runIds = runs.map((r: any) => r.test_run_id);
-    let metricsPerRun: Record<string, any> = {};
+    let sloResultsPerRun: Record<string, any[]> = {};
 
-    if (runIds.length > 0) {
-      const metrics = await this.dataSource.query(
+    // Get per-benchmark SLO check results for each run
+    if (runIds.length > 0 && session.linked_benchmark_ids.length > 0) {
+      const checkResults = await this.dataSource.query(
         `SELECT
-          s.test_run_id,
-          s.panel_title,
-          s.metric_name,
-          s.median,
-          s.p95,
-          s.mean
-        FROM ds_metric_statistics s
-        WHERE s.test_run_id = ANY($1::varchar[])
-          AND s.panel_title IN ('Response Times', 'Throughput', 'Requests response times', 'Request Duration')
-        ORDER BY s.test_run_id, s.panel_title, s.metric_name`,
-        [runIds],
+          cr.test_run_id,
+          cr.benchmark_id,
+          cr.status,
+          cr.meets_requirement,
+          cr.panel_title,
+          cr.metric_name,
+          cr.metric_unit,
+          cr.evaluate_type,
+          cr.requirement,
+          cr.panel_average,
+          b.benchmark_type,
+          b.config_title,
+          b.requirement_operator,
+          b.requirement_value,
+          b.transaction_name,
+          b.min_apdex_score,
+          b.apdex_threshold_ms
+        FROM check_results cr
+        JOIN benchmarks b ON b.id::text = cr.benchmark_id
+        WHERE cr.test_run_id = ANY($1::varchar[])
+          AND b.id = ANY($2::uuid[])
+        ORDER BY cr.test_run_id, b.config_title, cr.panel_title`,
+        [runIds, session.linked_benchmark_ids],
       );
 
-      for (const m of metrics) {
-        if (!metricsPerRun[m.test_run_id]) metricsPerRun[m.test_run_id] = [];
-        metricsPerRun[m.test_run_id].push({
-          panel: m.panel_title,
-          metric: m.metric_name,
-          median: m.median,
-          p95: m.p95,
-          mean: m.mean,
+      for (const cr of checkResults) {
+        if (!sloResultsPerRun[cr.test_run_id]) sloResultsPerRun[cr.test_run_id] = [];
+        sloResultsPerRun[cr.test_run_id]!.push({
+          benchmark_id: cr.benchmark_id,
+          benchmark_type: cr.benchmark_type,
+          label: cr.config_title || cr.panel_title || cr.metric_name || 'SLO',
+          status: cr.status,
+          meets_requirement: cr.meets_requirement,
+          actual_value: cr.panel_average != null ? Number(cr.panel_average) : null,
+          requirement_operator: cr.requirement_operator,
+          requirement_value: cr.requirement_value != null ? Number(cr.requirement_value) : null,
+          metric_unit: cr.metric_unit,
+          transaction_name: cr.transaction_name,
+          min_apdex_score: cr.min_apdex_score != null ? Number(cr.min_apdex_score) : null,
+          apdex_threshold_ms: cr.apdex_threshold_ms,
         });
       }
+    }
+
+    // Load linked benchmark definitions for the session header
+    let linkedBenchmarks: any[] = [];
+    if (session.linked_benchmark_ids.length > 0) {
+      linkedBenchmarks = await this.dataSource.query(
+        `SELECT id, benchmark_type, config_title, panel_title, requirement_operator, requirement_value,
+                metric_unit, transaction_name, min_apdex_score, apdex_threshold_ms, enabled
+         FROM benchmarks WHERE id = ANY($1::uuid[])
+         ORDER BY config_title, panel_title`,
+        [session.linked_benchmark_ids],
+      );
     }
 
     return {
@@ -187,17 +216,27 @@ export class ScalingSessionsService {
         baseline_test_run_id: session.baseline_test_run_id,
         target_load: session.target_load,
         status: session.status,
+        linked_benchmarks: linkedBenchmarks.map((b: any) => ({
+          id: b.id,
+          benchmark_type: b.benchmark_type,
+          label: b.config_title || b.panel_title || 'SLO',
+          requirement_operator: b.requirement_operator,
+          requirement_value: b.requirement_value != null ? Number(b.requirement_value) : null,
+          metric_unit: b.metric_unit,
+          transaction_name: b.transaction_name,
+          min_apdex_score: b.min_apdex_score != null ? Number(b.min_apdex_score) : null,
+          apdex_threshold_ms: b.apdex_threshold_ms,
+          enabled: b.enabled,
+        })),
       },
       runs: runs.map((r: any) => ({
         test_run_id: r.test_run_id,
         start_time: r.start_time,
         end_time: r.end_time,
         completed: r.completed,
-        adapt_conclusion: r.adapt_conclusion || null,
-        meets_requirement: r.consolidated_result?.meetsRequirement || null,
-        adapt_ok: r.consolidated_result?.adaptTestRunOK || null,
+        meets_requirement: r.consolidated_result?.meetsRequirement ?? null,
         load_config: r.load_config || {},
-        metrics: metricsPerRun[r.test_run_id] || [],
+        slo_results: sloResultsPerRun[r.test_run_id] || [],
       })),
     };
   }

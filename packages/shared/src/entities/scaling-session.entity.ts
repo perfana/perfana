@@ -39,6 +39,9 @@ export class ScalingSession {
   @Column({ name: 'target_load', type: 'varchar', length: 255, nullable: true })
   target_load?: string;
 
+  @Column({ name: 'linked_benchmark_ids', type: 'uuid', array: true, default: '{}' })
+  linked_benchmark_ids!: string[];
+
   @Column({ type: 'varchar', length: 50, default: 'active' })
   status!: string;
 
