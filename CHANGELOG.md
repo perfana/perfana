@@ -4,6 +4,15 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
+## [0.2.32.0] - 2026-04-05
+
+### Fixed
+- SCALING mode test runs now correctly included in control groups after BASELINE mode rename (data migration converts existing SCALING runs)
+- Data sanity check no longer falsely flags changepoint runs as missing ADAPT results
+
+### Changed
+- ControlGroupsPipeline accepts both BASELINE and SCALING modes for backward compatibility during migration rollout
+
 ## [0.2.31.0] - 2026-04-04
 
 ### Fixed
