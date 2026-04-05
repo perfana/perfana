@@ -4,6 +4,11 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
+## [0.2.32.2] - 2026-04-05
+
+### Removed
+- 46 stale AI-generated report and summary markdown files across api, grafana-sync, web, worker, and docs
+
 ## [0.2.32.1] - 2026-04-05
 
 ### Fixed
