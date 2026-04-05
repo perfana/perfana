@@ -54,9 +54,9 @@ The skill reads the API key automatically from:
 {vaultRoot}/.obsidian/plugins/obsidian-local-rest-api/data.json
 ```
 
-### 3. Filesystem MCP (optional)
+### 3. Obsidian vault path
 
-To auto-read the Obsidian API key, the skill uses the Filesystem MCP. If not available, you can pass the API key manually.
+The skill reads the Obsidian API key from `{vaultRoot}/.obsidian/plugins/obsidian-local-rest-api/data.json` using the Read tool. If it cannot find your vault, it will ask you for the path.
 
 ## Installation
 

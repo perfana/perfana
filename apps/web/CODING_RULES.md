@@ -1,430 +1,96 @@
-# Next.js & Claude Code: Best-in-Class Coding Rules
+# Perfana Web — Coding Rules
 
-## 🎯 Core Principles
+Perfana-specific development standards for `apps/web`. For general project context, see [CLAUDE.md](../../CLAUDE.md).
 
-```yaml
-core_principles:
-  type_safety_first: "Always use TypeScript with strict mode enabled"
-  performance_by_default: "Optimize for Core Web Vitals from the start"
-  accessibility_always: "WCAG 2.1 AA compliance minimum"
-  security_conscious: "Follow OWASP guidelines"
-  test_coverage: "Maintain minimum 80% test coverage"
+## Project Structure
+
+```
+apps/web/
+  app/                     # Next.js App Router pages
+    test-runs/             # Test run list + detail pages
+    integrations/          # Grafana, Dynatrace, Tracing config
+    settings/              # API keys, notifications, profiles
+    systems/               # Systems under test management
+    reports/               # Report templates + generated reports
+    signin/ signup/        # Auth pages (Keycloak-backed)
+    api/                   # Next.js API routes (proxy)
+    layout.tsx             # Root layout with providers
+    providers.tsx          # MUI theme, Keycloak, Socket.IO
+  components/
+    ui/                    # Reusable UI primitives (buttons, dialogs, tables)
+    dashboard/             # Grafana dashboard display components
+    layout/                # App shell, sidebar, header
+    organizations/         # Org picker, membership UI
+    teams/                 # Team management UI
+  lib/
+    api.ts                 # authenticatedFetch() + getAuthHeaders()
+    keycloak-auth.ts       # Keycloak JS adapter wrapper
+    env.ts                 # Runtime environment config
+    hooks/                 # Custom React hooks
+    constants/             # Shared constants
+    *.ts                   # Domain-specific API client modules
 ```
 
-## 📁 Project Structure
+## Authentication — API Calls
 
-```yaml
-project_structure:
-  src:
-    app: "Next.js 13+ App Router"
-    routes:
-      auth: "(auth)/ - Route groups for authentication"
-      api: "api/ - API routes"
-      dynamic: "[dynamic]/ - Dynamic routes"
-    components:
-      ui: "Reusable UI components"
-      features: "Feature-specific components"
-      layouts: "Layout components"
-    lib:
-      api: "API client functions"
-      db: "Database utilities"
-      utils: "Helper functions"
-    hooks: "Custom React hooks"
-    services: "Business logic and external services"
-    types: "TypeScript type definitions"
-    styles: "Global styles and CSS modules"
-    config: "Configuration files"
+Every API call from the frontend **must** include authentication headers. Use `authenticatedFetch()` from `lib/api.ts` — it handles token injection, 401 refresh, and base URL prepending automatically.
+
+```typescript
+// PREFERRED: authenticatedFetch (handles everything)
+import { authenticatedFetch } from '@/lib/api';
+
+const response = await authenticatedFetch('/test-runs', { method: 'GET' });
+
+// FALLBACK: manual headers (only when authenticatedFetch doesn't fit)
+import { getAuthHeaders } from '@/lib/api';
+
+const response = await fetch(`${env.API_URL}/endpoint`, {
+  headers: { 'Content-Type': 'application/json', ...getAuthHeaders() },
+});
 ```
 
-## 🔧 TypeScript Configuration
+**Never** read tokens from `sessionStorage` or `localStorage` directly — always go through `lib/api.ts`.
 
-```yaml
-typescript_config:
-  tsconfig_requirements:
-    strict: true
-    noUncheckedIndexedAccess: true
-    noImplicitAny: true
-    strictNullChecks: true
-    strictFunctionTypes: true
-    strictBindCallApply: true
-    strictPropertyInitialization: true
-    noImplicitThis: true
-    alwaysStrict: true
-    noUnusedLocals: true
-    noUnusedParameters: true
-    noImplicitReturns: true
-    noFallthroughCasesInSwitch: true
-    forceConsistentCasingInFileNames: true
+## Styling Stack
 
-  type_definition_rules:
-    - "Define explicit return types for all functions"
-    - "Use unknown instead of any when type is truly unknown"
-    - "Create dedicated type files for shared types"
-    - "Use discriminated unions for complex state"
-    - "Prefer interfaces for object shapes, types for unions/intersections"
-```
+Perfana uses **MUI (Material UI)** as the primary component library, supplemented with **Radix UI** primitives and **Tailwind CSS** utilities.
 
-## ⚛️ React & Next.js Patterns
+- Use MUI components (`Button`, `TextField`, `Dialog`, `DataGrid`, etc.) for standard UI
+- Use Radix primitives (`Select`, `Popover`, `Tooltip`) when MUI lacks the component
+- Use Tailwind utilities for layout spacing and quick overrides
+- Theme is configured in `providers.tsx` — use `theme.palette` tokens, not hardcoded colors
 
-```yaml
-react_nextjs_patterns:
-  component_structure:
-    interface_definition: "Define explicit props interface"
-    default_props: "Use default parameters in function signature"
-    type_safety: "Explicit types for all props and handlers"
-    example: |
-      interface ButtonProps {
-        variant: 'primary' | 'secondary';
-        size?: 'sm' | 'md' | 'lg';
-        onClick?: (event: React.MouseEvent<HTMLButtonElement>) => void;
-        children: React.ReactNode;
-        disabled?: boolean;
-        className?: string;
-      }
+## Component Patterns
 
-  server_vs_client_components:
-    default: "Default to Server Components"
-    client_usage: "Use 'use client' only when necessary (interactivity, browser APIs, hooks)"
-    composition: "Compose Server and Client Components properly"
-    restrictions: "Never pass functions as props from Server to Client Components"
+- **Server Components** are the default. Add `'use client'` only when the component needs interactivity, browser APIs, or React hooks.
+- **Data fetching** happens client-side via `authenticatedFetch()` (the API requires auth headers from the browser session).
+- **Page components** live in `app/<route>/page.tsx`. Feature-specific components live in `app/<route>/components/`.
+- **Shared components** live in `components/`. Domain-specific API functions live in `lib/<domain>.ts`.
 
-  data_fetching_rules:
-    server_preferred: "Server Component preferred for data fetching"
-    client_side: "Client Component only for client-side data needs"
-    caching: "Use ISR with appropriate revalidation times"
-    error_handling: "Always handle loading and error states"
-```
+## Environment Variables
 
-## 🎨 Styling Guidelines
+Frontend env vars are defined in `lib/env.ts`:
 
-```yaml
-styling_guidelines:
-  css_modules_tailwind:
-    approach: "CSS Modules with Tailwind utility classes"
-    class_composition: "Use cn() utility for conditional classes"
-    module_usage: "@apply directive for component styles"
+| Variable | Purpose |
+|----------|---------|
+| `NEXT_PUBLIC_API_URL` | Backend API base URL (default: `http://localhost:3001/api`) |
+| `NEXT_PUBLIC_KEYCLOAK_URL` | Keycloak server URL |
+| `NEXT_PUBLIC_KEYCLOAK_REALM` | Keycloak realm (default: `perfana-prod`) |
+| `NEXT_PUBLIC_KEYCLOAK_CLIENT_ID` | Keycloak client ID |
+| `NEXT_PUBLIC_USE_KEYCLOAK_AUTH` | Enable/disable Keycloak (default: `true`) |
 
-  design_system_tokens:
-    - "Use CSS variables for design tokens"
-    - "Implement dark mode with CSS variables"
-    - "Create consistent spacing scale"
-    - "Use semantic color naming"
-```
+## Testing
 
-## 🧪 Testing Standards
+- Framework: **Jest** with React Testing Library
+- Config: `apps/web/jest.config.js`
+- Run: `cd apps/web && npx jest`
+- Tests live alongside components with `.spec.ts` or `.test.ts` suffix
 
-```yaml
-testing_standards:
-  testing_stack:
-    unit_tests: "Vitest or Jest"
-    component_tests: "React Testing Library"
-    e2e_tests: "Playwright"
-    api_tests: "Supertest or MSW"
+## Common Mistakes
 
-  test_requirements:
-    - "Test user interactions and accessibility"
-    - "Mock external dependencies"
-    - "Test error states and loading states"
-    - "Maintain minimum 80% code coverage"
-    - "Write descriptive test names"
-
-  test_structure:
-    location: "__tests__/ directory alongside source files"
-    naming: "Component.test.tsx for component tests"
-    describe_blocks: "Group related tests logically"
-    assertions: "Use specific, meaningful assertions"
-```
-
-## 🚀 Performance Optimization
-
-```yaml
-performance_optimization:
-  image_optimization:
-    component: "Always use Next.js Image component"
-    priority: "Set priority for above-the-fold images"
-    placeholder: "Use blur placeholder for better UX"
-    responsive: "Provide multiple sizes for responsive images"
-
-  bundle_optimization:
-    - "Use dynamic imports for heavy components"
-    - "Implement code splitting strategically"
-    - "Lazy load non-critical components"
-    - "Use next/dynamic with ssr: false for client-only components"
-
-  caching_strategy:
-    isr: "revalidate: 3600 # ISR: revalidate every hour"
-    dynamic: "dynamic: 'force-dynamic' # For dynamic routes"
-    static: "fetchCache: 'force-cache' # For static data"
-```
-
-## 🔒 Security Guidelines
-
-```yaml
-security_guidelines:
-  input_validation:
-    library: "Use zod for schema validation"
-    sanitization: "Sanitize output with DOMPurify"
-    validation_location: "Validate on both client and server"
-
-  authentication_authorization:
-    - "Use NextAuth.js or Clerk for authentication"
-    - "Implement proper session management"
-    - "Use middleware for route protection"
-    - "Never expose sensitive data in client components"
-
-  environment_variables:
-    validation: "Use zod for environment variable validation"
-    naming: "NEXT_PUBLIC_ prefix for client-accessible vars"
-    secrets: "Never commit secrets to repository"
-    validation_example: |
-      const envSchema = z.object({
-        DATABASE_URL: z.string().url(),
-        NEXT_PUBLIC_API_URL: z.string().url(),
-        SECRET_KEY: z.string().min(32)
-      });
-```
-
-## ♿ Accessibility Standards
-
-```yaml
-accessibility_standards:
-  aria_semantic_html:
-    - "Use semantic HTML elements"
-    - "Provide proper ARIA labels"
-    - "Implement proper heading hierarchy"
-    - "Use role attributes appropriately"
-
-  keyboard_navigation:
-    - "Ensure all interactive elements are keyboard accessible"
-    - "Implement proper focus management"
-    - "Use skip links for navigation"
-    - "Test with keyboard only"
-
-  form_accessibility:
-    - "Associate labels with form controls"
-    - "Provide error messages with aria-describedby"
-    - "Use fieldsets for grouped form controls"
-    - "Implement proper form validation feedback"
-```
-
-## 📝 Documentation Standards
-
-```yaml
-documentation_standards:
-  component_documentation:
-    jsdoc: "Use JSDoc for component documentation"
-    examples: "Provide usage examples"
-    props: "Document all props and their types"
-    example: |
-      /**
-       * Button component with multiple variants and sizes
-       * @example
-       * ```tsx
-       * <Button variant="primary" size="lg" onClick={handleClick}>
-       *   Click me
-       * </Button>
-       * ```
-       */
-
-  api_documentation:
-    - "Document parameters and return types"
-    - "List possible exceptions"
-    - "Provide usage examples"
-    - "Document side effects"
-```
-
-## 📋 Git Commit Conventions
-
-```yaml
-git_commit_conventions:
-  format: "<type>(<scope>): <subject>"
-  types:
-    feat: "New feature"
-    fix: "Bug fix"
-    docs: "Documentation changes"
-    style: "Code formatting changes"
-    refactor: "Code refactoring"
-    perf: "Performance improvements"
-    test: "Adding or updating tests"
-    build: "Build system changes"
-    ci: "CI/CD changes"
-    chore: "Other changes"
-
-  examples:
-    - "feat(auth): add OAuth2 integration"
-    - "fix(ui): resolve button hover state issue"
-    - "docs(readme): update installation instructions"
-    - "perf(images): optimize hero image loading"
-```
-
-## 🔄 Error Handling
-
-```yaml
-error_handling:
-  error_boundaries:
-    location: "app/error.tsx for Next.js error boundaries"
-    client_directive: "Use 'use client' for error boundaries"
-    reset_functionality: "Provide reset functionality"
-
-  api_error_handling:
-    custom_errors: "Create custom error classes"
-    consistent_responses: "Return consistent error response format"
-    logging: "Log unexpected errors for debugging"
-    status_codes: "Use appropriate HTTP status codes"
-
-  api_client_patterns:
-    base_url_pattern: "Always use environment variable pattern for API base URL"
-    example: |
-      const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:3001/api';
-      
-      // PREFERRED: Use authenticatedFetch for all API calls
-      import { authenticatedFetch } from '@/lib/api';
-
-      // Automatically handles authentication and API_URL prepending
-      const response = await authenticatedFetch('/grafana/dashboards/variable-values', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({
-          grafanaDashboardId: dashboard.id,
-          variableName: variable.name,
-          system: systemName,
-          environment: environment,
-          existingVariables: variableValues
-        }),
-      });
-
-      // ALTERNATIVE: Manual pattern (use only when authenticatedFetch not suitable)
-      // Import getAuthHeaders from '@/lib/api' — never read tokens from storage directly.
-      import { getAuthHeaders } from '@/lib/api';
-
-      const response = await fetch(`${env.API_URL}/endpoint`, {
-        method: 'GET',
-        headers: {
-          'Content-Type': 'application/json',
-          ...getAuthHeaders(),
-        },
-      });
-    authentication_headers: "PREFERRED: Use authenticatedFetch() - automatically handles auth headers and token refresh"
-    error_handling: "authenticatedFetch() handles 401 responses with automatic token refresh"
-    consistency: "ALWAYS use authenticatedFetch() with relative URLs (e.g., '/endpoint') - never hardcode URLs"
-    fallback: "Use manual getAuthHeaders() pattern only when authenticatedFetch is not suitable"
-
-  error_types:
-    validation: "ValidationError for input validation failures"
-    authentication: "UnauthorizedError for auth failures"
-    not_found: "NotFoundError for missing resources"
-    api: "APIError for general API failures"
-```
-
-## 🎯 Code Review Checklist
-
-```yaml
-code_review_checklist:
-  typescript:
-    - "TypeScript strict mode passes without errors"
-    - "All functions have explicit return types"
-    - "Components are properly typed with interfaces"
-
-  react_nextjs:
-    - "Error boundaries are implemented where needed"
-    - "Loading and error states are handled"
-    - "Server/Client components are used appropriately"
-
-  forms_validation:
-    - "Forms have proper validation and error messages"
-    - "User input is validated on both client and server"
-
-  api_patterns:
-    - "API base URL uses environment variable pattern"
-    - "Authentication headers included in all API calls"
-    - "No hardcoded localhost URLs or relative API paths"
-
-  performance:
-    - "Images use Next.js Image component"
-    - "Unnecessary re-renders are prevented"
-    - "Large bundles are code-split"
-
-  accessibility:
-    - "Keyboard navigation works"
-    - "ARIA labels are present"
-    - "Color contrast meets WCAG standards"
-
-  security:
-    - "User input is validated and sanitized"
-    - "Sensitive data is not exposed to client"
-    - "Authentication is properly implemented"
-
-  testing:
-    - "Tests are written and passing"
-    - "Edge cases are covered"
-    - "Error states are tested"
-
-  documentation:
-    - "Documentation is updated"
-    - "Complex logic is documented inline"
-    - "Component props are documented"
-
-  quality:
-    - "Console has no errors or warnings"
-    - "Code follows consistent formatting"
-    - "Conventional commits are used"
-```
-
-## 🤖 Claude Code Specific Instructions
-
-```yaml
-claude_code_instructions:
-  workflow:
-    - "Always start with understanding the existing codebase structure"
-    - "Follow these rules strictly - no exceptions"
-    - "Write tests alongside implementation"
-    - "Commit frequently with conventional commits"
-
-  communication:
-    - "Ask for clarification when requirements are ambiguous"
-    - "Provide reasoning for architectural decisions"
-    - "Suggest performance optimizations proactively"
-    - "Flag potential security issues immediately"
-
-  development_approach:
-    - "Ensure accessibility from the start, not as an afterthought"
-    - "Document complex logic inline"
-    - "Quality over speed - better to write less code that follows all standards"
-    - "Optimize for maintainability and readability"
-
-  best_practices:
-    - "Use TypeScript strict mode always"
-    - "Implement proper error handling"
-    - "Write self-documenting code"
-    - "Follow established patterns in the codebase"
-    - "Test edge cases and error conditions"
-```
-
-## 📊 Quality Gates
-
-```yaml
-quality_gates:
-  before_commit:
-    - "All TypeScript compilation errors resolved"
-    - "All tests passing"
-    - "ESLint/Prettier formatting applied"
-    - "No console.log statements in production code"
-
-  before_merge:
-    - "Code review completed"
-    - "All quality checks passing"
-    - "Documentation updated"
-    - "Breaking changes documented"
-
-  continuous_monitoring:
-    - "Bundle size within acceptable limits"
-    - "Core Web Vitals scores maintained"
-    - "Accessibility audit passing"
-    - "Security scan results clean"
-```
-
----
-
-**Remember**: Quality over speed. It's better to write less code that follows all these standards than more code that doesn't.
+| Mistake | Fix |
+|---------|-----|
+| Missing auth headers in fetch | Use `authenticatedFetch()` from `@/lib/api` |
+| Hardcoded `localhost:3001` | Use `env.API_URL` from `@/lib/env` |
+| `'use client'` on a page that doesn't need it | Only add when using hooks, event handlers, or browser APIs |
+| Importing MUI wrong | Use `@mui/material/ComponentName` path imports for tree-shaking |

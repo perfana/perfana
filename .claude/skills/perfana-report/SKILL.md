@@ -30,11 +30,12 @@ where `is_control_group: true` for the same SUT / environment / workload.
 
 Ask the user: **"Write the report to Obsidian or save as a local file?"**
 
-- **Obsidian** → Read the API key from the vault config using the Filesystem MCP:
+- **Obsidian** → Read the API key from the vault config using the Read tool:
   ```
-  Filesystem:read_text_file  {vaultRoot}/.obsidian/plugins/obsidian-local-rest-api/data.json
+  Read file: {vaultRoot}/.obsidian/plugins/obsidian-local-rest-api/data.json
   ```
   Extract `$.apiKey`. See `references/obsidian-api.md` for endpoint details.
+  If the vault root is unknown, check common locations: `~/Documents/Obsidian`, `~/Obsidian`, or ask the user.
 - **Local file** → The report will be written to `./reports/{testRunId}.md` in the current working directory.
 
 ## Step 3 — Fetch all Perfana data in parallel

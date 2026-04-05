@@ -1,5 +1,7 @@
 # Engineering Plan: Perfana
 
+> **Status: Archived.** Phases 1-4, 6, and OS Launch are complete. Phase 5 is deferred. Phase 7 (audit) is complete. This plan is kept for historical reference — active work is tracked in GitHub Issues.
+
 ## Status Summary
 
 | Phase | Description | Status |

@@ -88,6 +88,46 @@ cd apps/api
 npx typeorm migration:generate -d src/config/typeorm.config.ts src/migrations/YourMigrationName
 ```
 
+## CI/CD Pipeline
+
+### GitHub Actions Workflows
+
+| Workflow | Trigger | What it does |
+|----------|---------|-------------|
+| **PR Quality Gate** (`pr-quality-gate.yml`) | Manual / PR | Runs type-check and test suite across all apps (API, web, worker, shared, grafana-sync) |
+| **Claude Code Review** (`claude-review.yml`) | PR comment with `/review` | AI-powered code review using Claude |
+| **Docker Build** (`docker-build.yml`) | Push to `main`/`develop`, version tags | Builds and pushes Docker images for all services |
+| **Deploy Documentation** (`docs.yml`) | Push to `main` (docs-site changes) | Builds and deploys the documentation site |
+
+### Running Checks Locally
+
+Before opening a PR, run these locally:
+
+```bash
+npm run type-check    # TypeScript compilation across all apps
+npm run test          # Full test suite (API: Jest, Worker: Vitest, Web: Jest)
+npm run lint          # ESLint across all apps
+npm run build         # Production build
+```
+
+Individual app tests:
+
+```bash
+cd apps/api && npx jest              # API tests (Jest)
+cd apps/worker && npx vitest run     # Worker tests (Vitest)
+cd apps/web && npx jest              # Frontend tests (Jest)
+cd apps/grafana-sync && npx jest     # Grafana sync tests (Jest)
+```
+
+### Docker
+
+Build images locally:
+
+```bash
+docker compose -f docker-compose.infra.yml up -d   # Infrastructure (Postgres, Redis, Keycloak)
+npm run dev                                          # Development servers
+```
+
 ## Authentication
 
 Perfana uses Keycloak for authentication. The dev environment includes a pre-configured Keycloak instance with a test user. See `CLAUDE.md` for details on the dual auth system (JWT + API keys).

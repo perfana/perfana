@@ -1,5 +1,7 @@
 # @perfana/mcp
 
+> Back to [CLAUDE.md](../../CLAUDE.md) for project-wide context.
+
 MCP server that exposes Perfana test run data to Claude Desktop (or any MCP-compatible client).
 
 ## Tools

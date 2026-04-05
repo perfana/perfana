@@ -1,5 +1,7 @@
 # Perfana Report PDF Generation Service
 
+> Back to [CLAUDE.md](../../CLAUDE.md) for project-wide context.
+
 Standalone NestJS service for generating PDF reports from HTML content using Puppeteer.
 
 ## Overview
