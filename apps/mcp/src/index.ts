@@ -47,7 +47,7 @@ server.tool(
 
 server.tool(
   'get_transaction_stats',
-  'Get transaction-level performance statistics for a test run: response times (avg, p50, p90, p95, p99), throughput, error rates, and Apdex scores',
+  'Get transaction-level performance statistics for a test run: response times (avg, p95, p99), throughput (passed/failed counts), error rates, and Apdex scores',
   {
     testRunId: z.string().describe('The test run ID'),
     sinceMinutes: z

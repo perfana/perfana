@@ -1,16 +1,52 @@
 {
   "name": "@perfana/mcp",
   "version": "0.1.0",
-  "private": true,
-  "description": "Perfana MCP server — exposes test run data to Claude Desktop",
+  "description": "Perfana MCP server — exposes test run data to Claude Desktop and other MCP-compatible AI clients",
   "type": "module",
   "main": "dist/index.js",
+  "bin": {
+    "perfana-mcp": "dist/index.js"
+  },
+  "files": [
+    "dist/**/*.js",
+    "dist/**/*.d.ts",
+    "dist/**/*.map",
+    "!dist/**/*.test.js",
+    "!dist/**/*.test.d.ts",
+    "!dist/**/*.test.js.map",
+    "!dist/**/*.test.d.ts.map",
+    "README.md"
+  ],
   "scripts": {
     "dev": "tsc --watch",
     "build": "tsc",
     "start": "node dist/index.js",
     "type-check": "tsc --noEmit",
-    "test": "node --test dist/helpers.test.js dist/perfana-client.test.js"
+    "test": "node --test dist/helpers.test.js dist/perfana-client.test.js",
+    "prepublishOnly": "npm run build"
+  },
+  "keywords": [
+    "mcp",
+    "model-context-protocol",
+    "perfana",
+    "performance-testing",
+    "observability",
+    "claude",
+    "ai",
+    "llm"
+  ],
+  "license": "Apache-2.0",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/perfana/perfana.git",
+    "directory": "apps/mcp"
+  },
+  "homepage": "https://github.com/perfana/perfana/tree/main/apps/mcp#readme",
+  "bugs": {
+    "url": "https://github.com/perfana/perfana/issues"
+  },
+  "engines": {
+    "node": ">=18.0.0"
   },
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.7.0",
@@ -19,5 +55,8 @@
   "devDependencies": {
     "typescript": "^5.3.3",
     "@types/node": "^20.11.0"
+  },
+  "publishConfig": {
+    "access": "public"
   }
 }
