@@ -356,6 +356,7 @@ export class TestRunsAnalysisController {
       systemUnderTestId,
       environment,
       workload,
+      updateDto.mode,
     );
   }
 
@@ -405,7 +406,6 @@ export class TestRunsAnalysisController {
     const config = await this.testRunsService.getWorkloadAdaptSettings(systemUnderTestId, testEnvironment, workload);
     return {
       adaptMode: config?.adaptMode || 'DEFAULT',
-      baselineTestRunId: config?.baselineTestRunId || null,
     };
   }
 
@@ -413,19 +413,19 @@ export class TestRunsAnalysisController {
   @ApiOperation({ summary: 'Set ADAPT mode for a workload (applies to all new test runs)' })
   @ApiResponse({ status: 200, description: 'Settings updated' })
   async updateWorkloadAdaptSettings(
-    @Body() body: { systemUnderTestId: string; testEnvironment: string; workload: string; adaptMode: string; baselineTestRunId?: string },
+    @Body() body: { systemUnderTestId: string; testEnvironment: string; workload: string; adaptMode: string },
   ) {
-    const { systemUnderTestId, testEnvironment, workload, adaptMode, baselineTestRunId } = body;
+    const { systemUnderTestId, testEnvironment, workload, adaptMode } = body;
 
     if (!systemUnderTestId || !testEnvironment || !workload || !adaptMode) {
       throw new BadRequestException('systemUnderTestId, testEnvironment, workload, and adaptMode are required');
     }
 
-    if (!['DEFAULT', 'SCALING'].includes(adaptMode)) {
-      throw new BadRequestException('adaptMode must be DEFAULT or SCALING');
+    if (!['DEFAULT', 'BASELINE'].includes(adaptMode)) {
+      throw new BadRequestException('adaptMode must be DEFAULT or BASELINE');
     }
 
-    await this.testRunsService.updateWorkloadAdaptSettings(systemUnderTestId, testEnvironment, workload, adaptMode, baselineTestRunId);
-    return { success: true, adaptMode, baselineTestRunId: baselineTestRunId || null };
+    await this.testRunsService.updateWorkloadAdaptSettings(systemUnderTestId, testEnvironment, workload, adaptMode);
+    return { success: true, adaptMode };
   }
 }

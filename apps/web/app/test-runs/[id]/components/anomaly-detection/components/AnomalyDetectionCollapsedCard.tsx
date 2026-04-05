@@ -341,6 +341,14 @@ export default function AnomalyDetectionCollapsedCard({
               />
             )}
 
+            {/* Baseline Mode Badge */}
+            {testRun?.adapt_config?.mode === 'BASELINE' && (
+              <SoftBadge
+                label="Baseline mode"
+                color="blue"
+              />
+            )}
+
             {/* Changepoint Badge */}
             {testRun?.is_changepoint && (
               <SoftBadge

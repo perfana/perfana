@@ -184,18 +184,7 @@ export class TestRunsMutationService {
       updatedBy: userId,
       // ADAPT mode: DTO override > workload config > DEFAULT
       adaptMode: d.adaptMode || workloadConfig?.adaptMode,
-      baselineTestRunId: d.baselineTestRunId || workloadConfig?.baselineTestRunId,
-      scalingSessionId: d.scalingSessionId,
     };
-
-    // If scalingSessionId is set, look up session and auto-apply SCALING mode
-    if (common.scalingSessionId && !existingTestRun) {
-      const session = await this.lookupScalingSession(common.scalingSessionId, common.organizationId);
-      if (session) {
-        common.adaptMode = common.adaptMode || 'SCALING';
-        common.baselineTestRunId = common.baselineTestRunId || session.baseline_test_run_id;
-      }
-    }
 
     // Create context for handlers to use in event emission
     const context = {
@@ -213,53 +202,8 @@ export class TestRunsMutationService {
       throw new DatabaseException(`Failed to ${existingTestRun ? 'update' : 'create'} test run`);
     }
 
-    // If this is a new test run in a scaling session with no baseline, set it as the baseline
-    if (!existingTestRun && common.scalingSessionId && result.data) {
-      await this.maybeSetSessionBaseline(common.scalingSessionId, result.data.test_run_id);
-    }
-
     this.logger.debug(`Test run ${existingTestRun ? 'updated' : 'created'} by user ${userId}`);
     return result.data;
-  }
-
-  private async lookupScalingSession(id: string, organizationId?: string): Promise<{ baseline_test_run_id?: string } | null> {
-    // RBAC: verify session belongs to the same org as the test run
-    let query = `SELECT baseline_test_run_id FROM scaling_sessions WHERE id = $1`;
-    const params: any[] = [id];
-
-    if (organizationId) {
-      query += ` AND (organization_id = $2 OR organization_id IS NULL)`;
-      params.push(organizationId);
-    }
-
-    const result = await this.testRunRepo.manager.query(query, params);
-    return result?.[0] || null;
-  }
-
-  private async maybeSetSessionBaseline(sessionId: string, testRunId: string): Promise<string | undefined> {
-    try {
-      // Atomically set baseline if none exists, return the actual baseline
-      const result = await this.testRunRepo.manager.query(
-        `UPDATE scaling_sessions SET baseline_test_run_id = $1, updated_at = NOW()
-         WHERE id = $2 AND baseline_test_run_id IS NULL
-         RETURNING baseline_test_run_id`,
-        [testRunId, sessionId],
-      );
-
-      if (result?.[0]?.baseline_test_run_id) {
-        return result[0].baseline_test_run_id;
-      }
-
-      // Another run already set the baseline, read it
-      const existing = await this.testRunRepo.manager.query(
-        `SELECT baseline_test_run_id FROM scaling_sessions WHERE id = $1`,
-        [sessionId],
-      );
-      return existing?.[0]?.baseline_test_run_id;
-    } catch (error) {
-      this.logger.warn(`Failed to set session baseline: ${(error as Error).message}`);
-      return undefined;
-    }
   }
 
   private async handleCompletedTest(testRun: TestRun): Promise<void> {
@@ -383,7 +327,8 @@ export class TestRunsMutationService {
     _roles: string[],
     systemUnderTestId?: string,
     environment?: string,
-    workload?: string
+    workload?: string,
+    mode?: 'DEFAULT' | 'BASELINE',
   ): Promise<TestRun> {
     this.logger.debug(`updateAdaptConfig: testRunId=${testRunId}, userId=${userId}`);
 
@@ -392,6 +337,7 @@ export class TestRunsMutationService {
     return this.updateAdaptConfigHandler.execute({
       testRunId,
       differencesAccepted,
+      mode,
       systemUnderTestId,
       environment,
       workload,
@@ -402,11 +348,8 @@ export class TestRunsMutationService {
     return this.lookupService.getWorkloadConfig(systemUnderTestId, testEnvironment, workload);
   }
 
-  async updateWorkloadConfig(systemUnderTestId: string, testEnvironment: string, workload: string, adaptMode: string, baselineTestRunId?: string): Promise<void> {
+  async updateWorkloadConfig(systemUnderTestId: string, testEnvironment: string, workload: string, adaptMode: string): Promise<void> {
     const configUpdate: Record<string, unknown> = { adaptMode };
-    if (baselineTestRunId !== undefined) {
-      configUpdate.baselineTestRunId = baselineTestRunId;
-    }
     return this.lookupService.updateWorkloadConfig(systemUnderTestId, testEnvironment, workload, configUpdate);
   }
 

@@ -54,15 +54,9 @@ export interface AdaptConfig {
   /**
    * ADAPT evaluation mode
    * - DEFAULT: Standard regression testing (last 10 successful runs as baseline)
-   * - BASELINE: Marks run as a baseline (always passes ADAPT)
-   * - SCALING: Sizing/scaling test (single previous run as baseline)
+   * - BASELINE: Marks run as a baseline (always included in control group, auto-accepted)
    */
-  mode?: 'DEFAULT' | 'BASELINE' | 'SCALING';
-
-  /**
-   * For SCALING mode: explicit baseline test run to compare against.
-   */
-  baselineTestRunId?: string;
+  mode?: 'DEFAULT' | 'BASELINE';
 
   /**
    * Status of difference acceptance

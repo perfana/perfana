@@ -1,5 +1,5 @@
-import { ApiProperty } from '@nestjs/swagger';
-import { IsString, IsIn } from 'class-validator';
+import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
+import { IsString, IsIn, IsOptional } from 'class-validator';
 
 export class UpdateAdaptConfigDto {
   @ApiProperty({
@@ -10,4 +10,14 @@ export class UpdateAdaptConfigDto {
   @IsString()
   @IsIn(['ACCEPTED', 'DENIED', 'TBD'])
   differencesAccepted!: 'ACCEPTED' | 'DENIED' | 'TBD';
+
+  @ApiPropertyOptional({
+    description: 'ADAPT mode to set (DEFAULT or BASELINE)',
+    enum: ['DEFAULT', 'BASELINE'],
+    example: 'DEFAULT'
+  })
+  @IsOptional()
+  @IsString()
+  @IsIn(['DEFAULT', 'BASELINE'])
+  mode?: 'DEFAULT' | 'BASELINE';
 }

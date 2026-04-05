@@ -59,7 +59,6 @@ export class TestRunsMapperService {
       adapt_config: entity.adaptConfig,
       variables: entity.variables,
       deep_links: entity.deepLinks,
-      scaling_session_id: entity.scalingSessionId,
       deletion_status: entity.deletionStatus || undefined,
       created_at: entity.createdAt.toISOString(),
       updated_at: entity.updatedAt.toISOString(),

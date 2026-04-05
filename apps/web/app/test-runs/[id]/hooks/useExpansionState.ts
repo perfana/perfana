@@ -60,7 +60,6 @@ export function useExpansionState(): UseExpansionStateReturn {
     awrExpanded: false,
     reportExpanded: false,
     eventsExpanded: false,
-    scalingProgressionExpanded: false,
   });
 
   const [anomalyState, setAnomalyState] = useState<AnomalyState>({

@@ -111,9 +111,6 @@ export class TestRun {
   @Column({ name: 'deletion_status', type: 'varchar', length: 20, nullable: true, default: null })
   deletionStatus?: string | null;
 
-  @Column({ name: 'scaling_session_id', type: 'uuid', nullable: true })
-  scalingSessionId?: string;
-
   // Ownership tracking (added for multi-tenant support)
   @Column({ type: 'uuid', nullable: true, name: 'organization_id' })
   organizationId?: string;

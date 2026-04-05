@@ -308,8 +308,25 @@ export function TestRunsTable({
         flex: 0.6,
         maxWidth: 100,
         renderCell: (params) => (
-          <Box sx={{ display: 'flex', justifyContent: 'center', alignItems: 'center', height: '100%' }}>
-            {params.row.is_changepoint ? (
+          <Box sx={{ display: 'flex', justifyContent: 'center', alignItems: 'center', height: '100%', gap: 0.5 }}>
+            {params.row.adapt_config?.mode === 'BASELINE' ? (
+              <Tooltip title="Baseline mode — always accepted into control group">
+                <Box sx={{
+                  px: 0.75,
+                  py: 0.25,
+                  borderRadius: 1,
+                  fontSize: '0.65rem',
+                  fontWeight: 700,
+                  letterSpacing: '0.03em',
+                  textTransform: 'uppercase',
+                  bgcolor: 'info.main',
+                  color: 'info.contrastText',
+                  lineHeight: 1.4,
+                }}>
+                  BL
+                </Box>
+              </Tooltip>
+            ) : params.row.is_changepoint ? (
               <Tooltip title="Marked as changepoint">
                 <Flag sx={{ color: '#1976d2', fontSize: '20px' }} />
               </Tooltip>

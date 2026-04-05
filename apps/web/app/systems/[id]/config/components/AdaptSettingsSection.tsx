@@ -3,7 +3,7 @@
 import { useState, useEffect, useCallback } from 'react';
 import {
   Box, Typography, FormControl, InputLabel, Select, MenuItem, Button,
-  CircularProgress, Alert, Paper, TextField,
+  CircularProgress, Alert, Paper,
 } from '@mui/material';
 import SaveIcon from '@mui/icons-material/Save';
 import { authenticatedFetch } from '@/lib/api';
@@ -16,7 +16,6 @@ interface Props {
 
 export default function AdaptSettingsSection({ systemId, selectedEnvironment, selectedWorkload }: Props) {
   const [adaptMode, setAdaptMode] = useState<string>('DEFAULT');
-  const [baselineTestRunId, setBaselineTestRunId] = useState<string>('');
   const [loading, setLoading] = useState(false);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -41,7 +40,6 @@ export default function AdaptSettingsSection({ systemId, selectedEnvironment, se
       if (response.ok) {
         const data = await response.json();
         setAdaptMode(data.adaptMode || 'DEFAULT');
-        setBaselineTestRunId(data.baselineTestRunId || '');
       }
     } catch (err) {
       setError('Failed to load ADAPT settings');
@@ -69,7 +67,6 @@ export default function AdaptSettingsSection({ systemId, selectedEnvironment, se
           testEnvironment: selectedEnvironment,
           workload: selectedWorkload,
           adaptMode,
-          ...(adaptMode === 'SCALING' && baselineTestRunId ? { baselineTestRunId } : {}),
         }),
       });
 
@@ -109,7 +106,7 @@ export default function AdaptSettingsSection({ systemId, selectedEnvironment, se
       <Typography variant="body2" color="text.secondary" sx={{ mb: 3 }}>
         Controls how performance comparisons work for new test runs in this workload.
         <strong> Regression</strong> mode compares against the last 10 successful runs (default).
-        <strong> Scaling</strong> mode compares against a single baseline run, for sizing/scaling tests where load increases between runs.
+        <strong> Baseline</strong> mode marks all new test runs as accepted variability, so they are always included in the control group regardless of SLO results.
       </Typography>
 
       {error && <Alert severity="error" sx={{ mb: 2 }}>{error}</Alert>}
@@ -121,26 +118,12 @@ export default function AdaptSettingsSection({ systemId, selectedEnvironment, se
           <Select
             value={adaptMode}
             label="ADAPT Mode"
-            onChange={(e) => {
-              setAdaptMode(e.target.value);
-              if (e.target.value === 'DEFAULT') setBaselineTestRunId('');
-            }}
+            onChange={(e) => setAdaptMode(e.target.value)}
           >
             <MenuItem value="DEFAULT">Regression (compare against last 10 successful runs)</MenuItem>
-            <MenuItem value="SCALING">Scaling (compare against single baseline run)</MenuItem>
+            <MenuItem value="BASELINE">Baseline (always accept into control group)</MenuItem>
           </Select>
         </FormControl>
-
-        {adaptMode === 'SCALING' && (
-          <TextField
-            label="Baseline Test Run ID (optional)"
-            value={baselineTestRunId}
-            onChange={(e) => setBaselineTestRunId(e.target.value)}
-            placeholder="e.g. PaymentService-prod-loadTest-100users"
-            helperText="If empty, each run compares against the most recent prior run. Set this to always compare against a specific low-load baseline."
-            fullWidth
-          />
-        )}
 
         <Button
           variant="contained"

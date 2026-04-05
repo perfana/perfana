@@ -93,6 +93,7 @@ interface UseAnomalyDetectionReturn {
   handleAcceptResults: () => void;
   handleDenyResults: () => void;
   updateAdaptConfig: (differencesAccepted: 'ACCEPTED' | 'DENIED' | 'TBD') => Promise<void>;
+  disableBaselineMode: () => Promise<void>;
   fetchAnomalyData: () => Promise<void>;
   handleConclusionFilterChange: (newFilter: string) => void;
   handleSearchChange: (e: React.ChangeEvent<HTMLInputElement>) => void;
@@ -347,6 +348,14 @@ export function useAnomalyDetection({
   // Wrapper function for adapt config
   const updateAdaptConfig = useCallback(async (differencesAccepted: 'ACCEPTED' | 'DENIED' | 'TBD') => {
     const success = await updateAdaptConfigHook(testRunId, differencesAccepted);
+    if (success && !onTestRunUpdate) {
+      router.refresh();
+    }
+  }, [updateAdaptConfigHook, testRunId, onTestRunUpdate, router]);
+
+  // Switch from BASELINE mode to DEFAULT mode
+  const disableBaselineMode = useCallback(async () => {
+    const success = await updateAdaptConfigHook(testRunId, 'TBD', 'DEFAULT');
     if (success && !onTestRunUpdate) {
       router.refresh();
     }
@@ -649,6 +658,7 @@ export function useAnomalyDetection({
     handleAcceptResults,
     handleDenyResults,
     updateAdaptConfig,
+    disableBaselineMode,
     fetchAnomalyData,
     handleConclusionFilterChange,
     handleSearchChange,

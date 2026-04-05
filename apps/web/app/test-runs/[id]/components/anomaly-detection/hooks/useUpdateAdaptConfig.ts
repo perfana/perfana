@@ -10,7 +10,8 @@ interface UseUpdateAdaptConfigOptions {
 export function useUpdateAdaptConfig({ testRun, showToast, onTestRunUpdate }: UseUpdateAdaptConfigOptions) {
   const updateAdaptConfig = async (
     testRunId: string,
-    differencesAccepted: 'ACCEPTED' | 'DENIED' | 'TBD'
+    differencesAccepted: 'ACCEPTED' | 'DENIED' | 'TBD',
+    mode?: 'DEFAULT' | 'BASELINE',
   ) => {
     if (!testRun) return;
 
@@ -20,18 +21,25 @@ export function useUpdateAdaptConfig({ testRun, showToast, onTestRunUpdate }: Us
       if (testRun.test_environment) queryParams.set('environment', testRun.test_environment);
       if (testRun.workload) queryParams.set('workload', testRun.workload);
 
+      const body: Record<string, string> = { differencesAccepted };
+      if (mode !== undefined) body.mode = mode;
+
       const response = await authenticatedFetch(
         `/test-runs/${testRunId}/adapt-config?${queryParams.toString()}`,
         {
           method: 'PUT',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ differencesAccepted }),
+          body: JSON.stringify(body),
         }
       );
 
       if (response.ok) {
         const updatedTestRun = await response.json();
-        const message = differencesAccepted === 'DENIED'
+        const message = mode === 'DEFAULT'
+          ? 'Switched to regression mode'
+          : mode === 'BASELINE'
+          ? 'Switched to baseline mode'
+          : differencesAccepted === 'DENIED'
           ? 'Marked as regression'
           : differencesAccepted === 'ACCEPTED'
           ? 'Marked as variability'

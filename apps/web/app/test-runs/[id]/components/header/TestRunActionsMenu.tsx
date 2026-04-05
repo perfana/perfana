@@ -14,14 +14,13 @@ import {
   Tooltip,
   Divider,
 } from '@mui/material';
-import { MoreVert, Sync, PlaylistAddCheck, Delete as DeleteIcon, Flag, TrendingUp, PlaylistAdd } from '@mui/icons-material';
+import { MoreVert, Sync, PlaylistAddCheck, Delete as DeleteIcon, Flag, LayersClear } from '@mui/icons-material';
 import { useRouter } from 'next/navigation';
 import { authenticatedFetch } from '@/lib/api';
 import { TestRun } from '@/types/test-runs';
 import { useJobProgress } from '@/hooks/useJobProgress';
 import { RefreshMissingDataDialog, RefreshSources } from '@/components/dialogs/RefreshSourcesDialog';
 import { AvailableSources, fetchAvailableSources, getTestRunScope } from '@/lib/refresh-sources';
-import StartScalingSessionDialog from '../scaling-session/StartScalingSessionDialog';
 
 interface TestRunActionsMenuProps {
   testRun: TestRun;
@@ -47,9 +46,6 @@ export default function TestRunActionsMenu({
   const [refreshDialogOpen, setRefreshDialogOpen] = useState(false);
   const [availableSources, setAvailableSources] = useState<AvailableSources | undefined>(undefined);
   const [isLoading, setIsLoading] = useState(false);
-  const [scalingDialogOpen, setScalingDialogOpen] = useState(false);
-  const [activeScalingSession, setActiveScalingSession] = useState<{ id: string; name: string } | null>(null);
-  const [scalingSessionChecked, setScalingSessionChecked] = useState(false);
   const open = Boolean(anchorEl);
 
   // Check for active jobs that would block actions
@@ -62,63 +58,6 @@ export default function TestRunActionsMenu({
 
   // Determine if actions should be disabled
   const actionsDisabled = isLoading || isRunning || isBlocked || isStuck;
-
-  // Check for active scaling session for this scope
-  React.useEffect(() => {
-    if (testRun.scaling_session_id) {
-      // Already in a session
-      setScalingSessionChecked(true);
-      return;
-    }
-    const systemId = testRun.system_under_test_id || (testRun.systems_under_test as any)?.id;
-    if (!systemId || !testRun.test_environment || !testRun.workload) return;
-
-    const params = new URLSearchParams({
-      systemUnderTestId: systemId,
-      testEnvironment: testRun.test_environment,
-      workload: testRun.workload,
-      status: 'active',
-    });
-    authenticatedFetch(`/scaling-sessions?${params}`, { method: 'GET' })
-      .then(r => r.ok ? r.json() : [])
-      .then((sessions: any[]) => {
-        if (sessions.length > 0) {
-          setActiveScalingSession({ id: sessions[0].id, name: sessions[0].name });
-        } else {
-          setActiveScalingSession(null);
-        }
-        setScalingSessionChecked(true);
-      })
-      .catch(() => setScalingSessionChecked(true));
-  }, [testRun]);
-
-  const handleAddToScalingSession = async () => {
-    if (!activeScalingSession) return;
-    handleClose();
-    try {
-      setIsLoading(true);
-      const response = await authenticatedFetch(
-        `/scaling-sessions/${activeScalingSession.id}/runs/${testRun.test_run_id}`,
-        { method: 'PUT' },
-      );
-      if (!response.ok) {
-        const err = await response.json().catch(() => ({}));
-        throw new Error(err.message || 'Failed to add to session');
-      }
-      onSuccess?.(`Added to scaling session "${activeScalingSession.name}"`);
-      onRefresh?.();
-    } catch (err) {
-      const msg = err && typeof err === 'object' && 'message' in err ? (err as Error).message : 'Failed to add to session';
-      onError?.(msg);
-    } finally {
-      setIsLoading(false);
-    }
-  };
-
-  const handleStartScalingSession = () => {
-    handleClose();
-    setScalingDialogOpen(true);
-  };
 
   const handleClick = (event: React.MouseEvent<HTMLButtonElement>) => {
     event.stopPropagation();
@@ -289,6 +228,33 @@ export default function TestRunActionsMenu({
     }
   };
 
+  const handleDisableBaselineMode = async () => {
+    handleClose();
+    try {
+      setIsLoading(true);
+      const queryParams = new URLSearchParams();
+      if (testRun.system_under_test_id) queryParams.set('systemUnderTestId', testRun.system_under_test_id);
+      if (testRun.test_environment) queryParams.set('environment', testRun.test_environment);
+      if (testRun.workload) queryParams.set('workload', testRun.workload);
+
+      const response = await authenticatedFetch(
+        `/test-runs/${testRun.test_run_id}/adapt-config?${queryParams.toString()}`,
+        {
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ differencesAccepted: 'TBD', mode: 'DEFAULT' }),
+        },
+      );
+      if (!response.ok) throw new Error('Failed to update');
+      onSuccess?.('Switched to regression mode');
+      onRefresh?.();
+    } catch (err) {
+      onError?.('Failed to disable baseline mode');
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
   const handleDeleteClick = () => {
     setDeleteDialogOpen(true);
     handleClose();
@@ -435,24 +401,15 @@ export default function TestRunActionsMenu({
             )}
           </span>
         </Tooltip>
-        {/* Scaling session actions */}
-        {scalingSessionChecked && !testRun.scaling_session_id && (
+        {testRun.adapt_config?.mode === 'BASELINE' && (
           <>
             <Divider />
-            {activeScalingSession ? (
-              <MenuItem onClick={handleAddToScalingSession} disabled={isLoading}>
-                <PlaylistAdd sx={{ mr: 1.5, fontSize: '1.2rem' }} />
-                Add to "{activeScalingSession.name}"
-              </MenuItem>
-            ) : (
-              <MenuItem onClick={handleStartScalingSession} disabled={isLoading}>
-                <TrendingUp sx={{ mr: 1.5, fontSize: '1.2rem' }} />
-                Start Scaling Session
-              </MenuItem>
-            )}
+            <MenuItem onClick={handleDisableBaselineMode} disabled={isLoading}>
+              <LayersClear sx={{ mr: 1.5, fontSize: '1.2rem' }} />
+              Disable Baseline Mode
+            </MenuItem>
           </>
         )}
-
         <Divider />
         <MenuItem onClick={handleDeleteClick} disabled={isLoading} sx={{ color: 'error.main' }}>
           <DeleteIcon sx={{ mr: 1.5, fontSize: '1.2rem' }} />
@@ -490,14 +447,6 @@ export default function TestRunActionsMenu({
         availableSources={availableSources}
       />
 
-      <StartScalingSessionDialog
-        open={scalingDialogOpen}
-        onClose={() => setScalingDialogOpen(false)}
-        testRun={testRun}
-        onSuccess={(msg) => onSuccess?.(msg)}
-        onError={(msg) => onError?.(msg)}
-        onSessionCreated={() => onRefresh?.()}
-      />
     </>
   );
 }

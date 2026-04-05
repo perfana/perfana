@@ -382,91 +382,11 @@ export class ControlGroupsPipeline extends BasePipelineTypeORM {
     changePoint: { test_run_id: string; start_time: Date } | null
   ): Promise<string[]> {
 
-    const adaptMode = testRun.adapt_config?.mode;
-
-    // SCALING mode: use single baseline run instead of last 10 successful
-    if (adaptMode === 'SCALING') {
-      return this.findScalingBaselineRun(manager, testRun);
-    }
-
-    // DEFAULT mode: existing behavior — last 10 successful runs
     return this.findDefaultControlTestRuns(manager, testRun, changePoint);
   }
 
   /**
-   * SCALING mode: find a single baseline run for comparison.
-   * If baselineTestRunId is set, use that specific run (no tuple filter — user explicitly chose it).
-   * Otherwise, select the most recent prior run in the same (system, workload, env) tuple.
-   */
-  private async findScalingBaselineRun(
-    manager: EntityManager,
-    testRun: any
-  ): Promise<string[]> {
-
-    const baselineTestRunId = testRun.adapt_config?.baselineTestRunId;
-
-    if (baselineTestRunId) {
-      // Explicit baseline: select that specific run (with RBAC org filter)
-      let query = `SELECT test_run_id FROM test_runs
-         WHERE test_run_id = $1
-           AND end_time IS NOT NULL`;
-      const params: any[] = [baselineTestRunId];
-
-      if (testRun.organization_id) {
-        query += ` AND (organization_id = $2 OR organization_id IS NULL)`;
-        params.push(testRun.organization_id);
-      }
-
-      query += ` LIMIT 1`;
-      const result = await manager.query(query, params);
-
-      const ids = result.map((row: any) => row.test_run_id);
-      this.logger.info(
-        ids.length > 0
-          ? `SCALING mode: using explicit baseline ${baselineTestRunId}`
-          : `SCALING mode: explicit baseline ${baselineTestRunId} not found`
-      );
-      return ids;
-    }
-
-    // No explicit baseline: select most recent prior run
-    let query = `
-      SELECT DISTINCT test_run_id, start_time
-      FROM test_runs
-      WHERE system_under_test_id = $1
-        AND workload = $2
-        AND test_environment = $3
-        AND test_run_id != $4
-        AND start_time < $5
-        AND end_time IS NOT NULL
-        AND (adapt_config->>'differencesAccepted' IS NULL OR adapt_config->>'differencesAccepted' != 'DENIED')
-    `;
-
-    const queryParams: any[] = [
-      testRun.system_under_test_id,
-      testRun.workload,
-      testRun.test_environment,
-      testRun.test_run_id,
-      testRun.start_time
-    ];
-
-    // RBAC: Filter by organization (backward compatible with NULL)
-    if (testRun.organization_id) {
-      query += ` AND (organization_id = $${queryParams.length + 1} OR organization_id IS NULL)\n`;
-      queryParams.push(testRun.organization_id);
-    }
-
-    query += ` ORDER BY start_time DESC LIMIT 1`;
-
-    const result = await manager.query(query, queryParams);
-    const ids = result.map((row: any) => row.test_run_id);
-
-    this.logger.info(`SCALING mode: found ${ids.length} baseline run(s) for test run ${testRun.test_run_id}`);
-    return ids;
-  }
-
-  /**
-   * DEFAULT mode: find last 10 successful control runs (existing behavior)
+   * Find last 10 successful control runs
    */
   private async findDefaultControlTestRuns(
     manager: EntityManager,
