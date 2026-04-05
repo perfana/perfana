@@ -19,14 +19,14 @@ export class AutoConfigService {
     private dashboardConfiguratorService: DashboardConfiguratorService,
     private benchmarkProcessorService: BenchmarkProcessorService,
   ) {
-    const enabled = this.configService.get('AUTO_CONFIG_ENABLED', 'true');
+    const enabled = this.configService.get<boolean>('AUTO_CONFIG_ENABLED', true);
     this.logger.log(`AutoConfigService initialized - AUTO_CONFIG_ENABLED: ${enabled}`);
   }
 
   @Cron('*/2 * * * *')
   async handleAutoConfig() {
     this.logger.log('Auto-config cron triggered');
-    if (this.configService.get('AUTO_CONFIG_ENABLED', 'true') !== 'true') {
+    if (!this.configService.get<boolean>('AUTO_CONFIG_ENABLED', true)) {
       this.logger.warn('Auto-config disabled via AUTO_CONFIG_ENABLED');
       return;
     }
