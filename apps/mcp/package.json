@@ -1,6 +1,6 @@
 {
   "name": "@perfana/mcp",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "Perfana MCP server — exposes test run data to Claude Desktop and other MCP-compatible AI clients",
   "type": "module",
   "main": "dist/index.js",
