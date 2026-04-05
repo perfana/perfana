@@ -1,7 +1,5 @@
 # @perfana/mcp
 
-> Back to [CLAUDE.md](../../CLAUDE.md) for project-wide context.
-
 MCP server that exposes Perfana test run data to Claude Desktop (or any MCP-compatible client).
 
 ## Tools
@@ -33,15 +31,7 @@ MCP server that exposes Perfana test run data to Claude Desktop (or any MCP-comp
 
 ## Setup
 
-### 1. Build
-
-```bash
-cd apps/mcp
-npm install
-npm run build
-```
-
-### 2. Configure Claude Desktop
+### 1. Configure Claude Desktop
 
 Add to `~/Library/Application Support/Claude/claude_desktop_config.json`:
 
@@ -49,16 +39,18 @@ Add to `~/Library/Application Support/Claude/claude_desktop_config.json`:
 {
   "mcpServers": {
     "perfana": {
-      "command": "node",
-      "args": ["/absolute/path/to/perfana/apps/mcp/dist/index.js"],
+      "command": "npx",
+      "args": ["-y", "@perfana/mcp"],
       "env": {
         "PERFANA_API_URL": "http://localhost:3001/api",
-        "PERFANA_API_KEY": ""
+        "PERFANA_API_KEY": "YOUR_PERFANA_API_KEY"
       }
     }
   }
 }
 ```
+
+Generate an API key in Perfana under **Settings → API Keys**.
 
 ### 3. (Optional) Add Obsidian MCP
 
@@ -94,4 +86,4 @@ For root cause analysis, a typical agent workflow is:
 | Variable | Default | Description |
 |---|---|---|
 | `PERFANA_API_URL` | `http://localhost:3001/api` | Base URL of the Perfana API |
-| `PERFANA_API_KEY` | _(empty)_ | Perfana API key — sent as `Authorization: Bearer <key>`. Generate one in Perfana under Settings → API Keys. |
+| `PERFANA_API_KEY` | _(required)_ | Perfana API key — sent as `Authorization: Bearer <key>`. Generate one in Perfana under **Settings → API Keys**. |
