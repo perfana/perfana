@@ -1,3 +1,26 @@
+// Types re-exported from perfana-client (single source of truth)
+import type {
+  TransactionStats,
+  ErrorSummary,
+  ErrorByCode,
+  ErrorByTransaction,
+  AdaptMetricSummary,
+  AdaptConclusion,
+  TrackedRegression,
+  TrackedRegressionsResponse,
+} from './perfana-client.js';
+
+export type {
+  TransactionStats,
+  ErrorSummary,
+  ErrorByCode,
+  ErrorByTransaction,
+  AdaptMetricSummary,
+  AdaptConclusion,
+  TrackedRegression,
+  TrackedRegressionsResponse,
+};
+
 // ─── Config diff helper ───────────────────────────────────────────────────────
 
 export interface ConfigItem {
@@ -40,22 +63,6 @@ export function diffConfigs(current: ConfigItem[], baseline: ConfigItem[]): Conf
   }
 
   return { added, removed, changed, unchanged };
-}
-
-// ─── Transaction stats (matches API response) ───────────────────────────────
-
-export interface TransactionStats {
-  transaction_name: string;
-  scenario_name: string;
-  avg_response_time: number;
-  p95_response_time: number;
-  p99_response_time: number;
-  passed_count: number;
-  failed_count: number;
-  total_count: number;
-  ranking: number;
-  apdex_score: number;
-  active_threshold: number;
 }
 
 // ─── Comparison helper ────────────────────────────────────────────────────────
@@ -180,32 +187,6 @@ export function buildPerformanceRanking(
 
 // ─── Error analysis helper ───────────────────────────────────────────────────
 
-export interface ErrorSummary {
-  totalErrors: number;
-  uniqueResponseCodes: number;
-  transactionsWithErrors: number;
-  uniqueErrorUrls: number;
-  totalRequests: number;
-  errorRate: number;
-}
-
-export interface ErrorByCode {
-  responseCode: string;
-  errorCount: number;
-  avgResponseTime: number;
-  minResponseTime?: number;
-  maxResponseTime?: number;
-}
-
-export interface ErrorByTransaction {
-  transactionName: string;
-  samplerName: string;
-  url: string;
-  responseCode: string;
-  errorCount: number;
-  avgResponseTime: number;
-}
-
 export interface ErrorAnalysisResult {
   testRunId: string;
   summary: ErrorSummary;
@@ -213,17 +194,21 @@ export interface ErrorAnalysisResult {
   topErrorsByTransaction: ErrorByTransaction[];
 }
 
+export function buildErrorAnalysis(
+  testRunId: string,
+  summary: ErrorSummary,
+  byCode: ErrorByCode[],
+  byTransaction: ErrorByTransaction[],
+): ErrorAnalysisResult {
+  return {
+    testRunId,
+    summary,
+    errorsByCode: byCode,
+    topErrorsByTransaction: byTransaction.slice(0, 20),
+  };
+}
+
 // ─── Adapt results summary helper ──────────────────────────────────────────
-
-// Re-export types from perfana-client to avoid duplicate definitions
-import type {
-  AdaptMetricSummary,
-  AdaptConclusion,
-  TrackedRegression,
-  TrackedRegressionsResponse,
-} from './perfana-client.js';
-
-export type { AdaptMetricSummary, AdaptConclusion, TrackedRegression, TrackedRegressionsResponse };
 
 interface ClassifiedMetric extends AdaptMetricSummary {
   classification: string;
@@ -420,21 +405,5 @@ export function buildAdaptSummary(
     byDashboard,
     causalChains,
     hypotheses: [...hypothesisSet],
-  };
-}
-
-// ─── Error analysis helper ───────────────────────────────────────────────────
-
-export function buildErrorAnalysis(
-  testRunId: string,
-  summary: ErrorSummary,
-  byCode: ErrorByCode[],
-  byTransaction: ErrorByTransaction[],
-): ErrorAnalysisResult {
-  return {
-    testRunId,
-    summary,
-    errorsByCode: byCode,
-    topErrorsByTransaction: byTransaction.slice(0, 20),
   };
 }
