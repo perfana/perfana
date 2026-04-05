@@ -95,17 +95,17 @@ const result = await this.dataSource.query(
 
 ## Testing
 
-- Test runner: **Vitest** everywhere
-- Test files: co-located as `*.test.ts` next to source
+- Test runner: **Vitest** (worker), **Jest** (api, web, grafana-sync)
+- Test files: co-located as `*.spec.ts` or `*.test.ts` next to source
 - Naming: `should [expected behavior] when [condition]`
 - Integration tests: use Testcontainers for Postgres/Redis
 - Never `expect(x).toBeDefined()` alone — test what the code DOES
 
 ## Logging
 
-- **Pino** everywhere. No `console.log`, no NestJS `Logger`.
-- Structured JSON logs with correlation IDs.
-- Import: `import { logger } from '@perfana/config';`
+- **API/Grafana-sync**: NestJS `Logger` (e.g., `private readonly logger = new Logger(MyService.name)`)
+- **Worker**: Pino via `@perfana/config`
+- No `console.log` in production code. Structured JSON logs with context.
 
 ## TypeScript
 

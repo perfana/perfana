@@ -1,114 +1,74 @@
-# Perfana DS Worker
+# Perfana Worker
 
-Node.js worker application for processing Perfana DS pipeline jobs.
-
-## Overview
-
-This is the Node.js implementation of the Perfana DS pipeline system, migrated from Python/FastAPI/Celery/MongoDB to Node.js/pg-boss/PostgreSQL architecture.
+Background job processing service using **BullMQ** with Redis for queue management and PostgreSQL for data storage.
 
 ## Architecture
 
-- **Pure Worker Design**: No HTTP endpoints, only job processing via pg-boss
-- **PostgreSQL-centric**: All data and job coordination through PostgreSQL
-- **Pipeline-based**: 7 core pipelines for performance data processing
+- **Queue System**: BullMQ v5 with Redis (multi-queue: critical, processing, background, batch, delayed)
+- **Pipeline Pattern**: All pipelines extend `BasePipelineTypeORM` — provides DB access, transactions, structured logging
+- **Registration**: Pipelines registered declaratively in `src/workers/pipeline-registrations.ts`
 
-## Pipeline Components
+## Pipelines
 
-1. **Metrics Pipeline** - Grafana data extraction (core component)
-2. **Statistics Pipeline** - Statistical aggregations
-3. **ADAPT Pipeline** - Automated difference analysis
-4. **Control Groups Pipeline** - Baseline comparison groups
-5. **Checks Pipeline** - Performance requirement evaluation
-6. **Panels Pipeline** - Dashboard panel processing
-7. **Dynatrace Pipeline** - External monitoring data
+| Pipeline | Job Name | Purpose |
+|---|---|---|
+| MetricsPipeline | `metrics-collection` | Grafana data extraction |
+| StatisticsPipeline | `statistics-calculation` | Statistical aggregations |
+| AdaptPipeline | `adapt-analysis` | ADAPT regression detection |
+| ControlGroupsPipeline | `control-groups-pipeline` | Baseline comparison groups |
+| ControlGroupStatisticsPipeline | `control-group-statistics` | Control group stats |
+| ChecksPipeline | `checks-evaluation` | Performance requirement evaluation |
+| PanelsPipeline | `panels-processing` | Dashboard panel processing |
+| DynatracePipeline | `dynatrace-collection` | Dynatrace monitoring data |
+| PerformanceTestMetricsPipeline | `performance-test-metrics` | Perf test source metrics |
+| ReevaluateChecksPipeline | `reevaluate-checks` | Re-evaluate check results |
+
+### Complex Workers (custom logic)
+
+- `analyzeTestWorker` — orchestrates full test analysis (`analyze-test`)
+- `incrementalMetricsWorker` — incremental metric collection (`collect-metrics-incremental`)
+- `simpleOrchestrateReevaluateBatchWorker` — batch re-evaluation orchestration
 
 ## Quick Start
 
-1. **Install dependencies**:
-   ```bash
-   npm install
-   ```
+```bash
+npm install
+npm run dev        # Development with watch
+npm run build      # Production build
+npm start          # Run built output
+```
 
-2. **Configure environment**:
-   ```bash
-   cp .env.example .env
-   # Edit .env with your database and Grafana settings
-   ```
+## Environment
 
-3. **Build the application**:
-   ```bash
-   npm run build
-   ```
+Uses the same database env vars as the API service:
+- `DB_HOST`, `DB_PORT`, `DB_USERNAME`, `DB_PASSWORD`, `DB_NAME`
 
-4. **Run in development**:
-   ```bash
-   npm run dev
-   ```
+Grafana URLs and API tokens are fetched from the `grafana_instances` table.
 
-5. **Run in production**:
-   ```bash
-   npm start
-   ```
+## Adding a Pipeline
 
-## Environment Configuration
+1. Create a class in `src/pipelines/` extending `BasePipelineTypeORM`
+2. Add a job name to `JOB_NAMES` in `src/types/jobs.ts` (+ Zod schema, queue config)
+3. Register in `src/workers/pipeline-registrations.ts` via `registerPipeline()`
 
-Required environment variables (same as API and grafana-sync services):
+See [Tutorial 2 in CLAUDE.md](../../CLAUDE.md) for the full walkthrough.
 
-- `DB_HOST` - PostgreSQL database host
-- `DB_PORT` - PostgreSQL database port (default: 5432)
-- `DB_USERNAME` - PostgreSQL database username
-- `DB_PASSWORD` - PostgreSQL database password
-- `DB_NAME` - PostgreSQL database name
+## Key Base Class Methods
 
-Note: Grafana URL and API token are fetched from the `grafana_instances` table in the database.
-
-See `.env.example` for complete configuration options.
-
-## Job Processing
-
-The worker processes jobs queued by the Perfana DS API service:
-
-- `analyze-test` - Complete test analysis pipeline
-- `metrics-collection` - Grafana metrics extraction
-- `statistics-pipeline` - Statistical calculations
-- `adapt-pipeline` - ADAPT analysis
-- And others...
-
-## Development Status
-
-✅ **Completed**:
-- Project structure and configuration
-- Core worker application with pg-boss integration
-- Database service and connection pooling
-- Job handler registration system
-- Pipeline orchestration framework
-- Comprehensive logging and error handling
-- **MetricsPipeline implementation** (core Grafana integration)
-- **Complete Grafana API client** with batching, formatting, and response processing
-- Basic testing framework and Docker development setup
-
-📋 **Next Steps**:
-- Implement remaining pipeline services (Statistics, ADAPT, Checks, Control Groups, etc.)
-- Add comprehensive unit and integration tests
-- Performance optimization and benchmarking
-- Production deployment configuration
-
-## References
-
-- **Python Source**: `/Users/daniel/workspace/perfana-ds`
-- **Migration Specs**: `../` (specification documents)
-- **Architecture Plan**: `../NODEJS_WORKER_ARCHITECTURE_PLAN.md`
+```typescript
+// BasePipelineTypeORM provides:
+abstract execute(input: unknown): Promise<PipelineResult>
+protected withTransaction<T>(op: (manager: EntityManager) => Promise<T>): Promise<T>
+protected query<T>(sql: string, params?: any[]): Promise<T[]>
+protected writeQuery<T>(sql: string, params?: any[]): Promise<T[]>
+protected logPerformance(operation: string, startTime: number, details?: Record<string, unknown>): void
+protected logError(error: Error, context?: Record<string, unknown>): void
+```
 
 ## Testing
 
-```bash
-npm test                    # Unit tests
-npm run test:integration   # Integration tests
-```
-
-## Docker
-
-```bash
-docker build -t perfana-ds-worker .
-docker run perfana-ds-worker
-```
+- **Framework**: Vitest
+- **Unit tests**: `src/test/unit/` — `npx vitest run`
+- **Integration tests**: `src/test/integration/` — `npm run test:integration`
+- **Real-world tests**: `src/test/integration/real-world/` — `npm run test:real-world` (requires production DB)
+- **Config**: `vitest.config.ts` (unit), `vitest.integration.config.ts` (integration)
