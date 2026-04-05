@@ -19,6 +19,7 @@ import { mapEntityToTestRun } from './entity-mapper';
 export interface UpdateAdaptConfigData {
   testRunId: string;
   differencesAccepted: 'ACCEPTED' | 'DENIED' | 'TBD';
+  mode?: 'DEFAULT' | 'BASELINE';
   systemUnderTestId?: string;
   environment?: string;
   workload?: string;
@@ -64,6 +65,7 @@ export class UpdateAdaptConfigHandler {
       const updatedAdaptConfig: AdaptConfig = {
         ...(testRun.adaptConfig || {}),
         differencesAccepted,
+        ...(data.mode !== undefined ? { mode: data.mode } : {}),
       };
 
       const updateData: Partial<TestRunEntity> = {
@@ -71,11 +73,7 @@ export class UpdateAdaptConfigHandler {
       };
 
       if (differencesAccepted === 'ACCEPTED') {
-        const adaptMode = testRun.adaptConfig?.mode;
-        // In SCALING mode, overall depends only on adaptTestRunOK (SLOs are irrelevant during scaling)
-        const meetsRequirement = adaptMode === 'SCALING'
-          ? true
-          : (testRun.consolidatedResult?.meetsRequirement ?? true);
+        const meetsRequirement = testRun.consolidatedResult?.meetsRequirement ?? true;
         const adaptTestRunOK = true;
         const overall = meetsRequirement && adaptTestRunOK;
 

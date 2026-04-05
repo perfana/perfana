@@ -7,7 +7,6 @@ import {
   ValidateNested,
   Length,
   IsUrl,
-  IsUUID,
   ArrayMaxSize,
   Matches,
   IsInt,
@@ -262,28 +261,12 @@ export class UpdateRunningTestDto {
   deepLinks?: DeepLinkDto[];
 
   @ApiPropertyOptional({
-    description: 'ADAPT mode: DEFAULT (regression testing) or SCALING (sizing test)',
-    example: 'SCALING',
-    enum: ['DEFAULT', 'SCALING'],
+    description: 'ADAPT mode: DEFAULT (regression testing) or BASELINE (always accepted into control group)',
+    example: 'BASELINE',
+    enum: ['DEFAULT', 'BASELINE'],
   })
   @IsOptional()
   @IsString()
-  @Matches(/^(DEFAULT|SCALING)$/, { message: 'adaptMode must be DEFAULT or SCALING' })
+  @Matches(/^(DEFAULT|BASELINE)$/, { message: 'adaptMode must be DEFAULT or BASELINE' })
   adaptMode?: string;
-
-  @ApiPropertyOptional({
-    description: 'Baseline test run ID for SCALING mode comparison',
-    example: 'PaymentService-production-loadTest-20240115-103000',
-  })
-  @IsOptional()
-  @IsString()
-  @Length(1, 255, { message: 'baselineTestRunId must be between 1 and 255 characters' })
-  baselineTestRunId?: string;
-
-  @ApiPropertyOptional({
-    description: 'Scaling session UUID to associate this test run with',
-  })
-  @IsOptional()
-  @IsUUID(undefined, { message: 'scalingSessionId must be a valid UUID' })
-  scalingSessionId?: string;
 }

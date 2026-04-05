@@ -304,16 +304,16 @@ export class TestRunsService {
     return this.mutationService.updateRampUp(id, rampUp, userId, roles);
   }
 
-  async updateAdaptConfig(testRunId: string, differencesAccepted: 'ACCEPTED' | 'DENIED' | 'TBD', userId: string, roles: string[], systemUnderTestId?: string, environment?: string, workload?: string): Promise<TestRun> {
-    return this.mutationService.updateAdaptConfig(testRunId, differencesAccepted, userId, roles, systemUnderTestId, environment, workload);
+  async updateAdaptConfig(testRunId: string, differencesAccepted: 'ACCEPTED' | 'DENIED' | 'TBD', userId: string, roles: string[], systemUnderTestId?: string, environment?: string, workload?: string, mode?: 'DEFAULT' | 'BASELINE'): Promise<TestRun> {
+    return this.mutationService.updateAdaptConfig(testRunId, differencesAccepted, userId, roles, systemUnderTestId, environment, workload, mode);
   }
 
   async getWorkloadAdaptSettings(systemUnderTestId: string, testEnvironment: string, workload: string): Promise<Record<string, unknown> | null> {
     return this.mutationService.getWorkloadConfig(systemUnderTestId, testEnvironment, workload);
   }
 
-  async updateWorkloadAdaptSettings(systemUnderTestId: string, testEnvironment: string, workload: string, adaptMode: string, baselineTestRunId?: string): Promise<void> {
-    return this.mutationService.updateWorkloadConfig(systemUnderTestId, testEnvironment, workload, adaptMode, baselineTestRunId);
+  async updateWorkloadAdaptSettings(systemUnderTestId: string, testEnvironment: string, workload: string, adaptMode: string): Promise<void> {
+    return this.mutationService.updateWorkloadConfig(systemUnderTestId, testEnvironment, workload, adaptMode);
   }
 
   // ========== Config Methods (delegated to ConfigService) ==========

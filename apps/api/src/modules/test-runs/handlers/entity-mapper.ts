@@ -41,7 +41,6 @@ export function mapEntityToTestRun(entity: TestRunEntity): TestRun {
     adapt_config: entity.adaptConfig,
     variables: entity.variables,
     deep_links: entity.deepLinks,
-    scaling_session_id: entity.scalingSessionId,
     // Ownership tracking (multi-tenant RBAC)
     organization_id: entity.organizationId,
     team_id: entity.teamId,
