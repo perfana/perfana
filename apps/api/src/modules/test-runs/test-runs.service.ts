@@ -54,7 +54,6 @@ export interface TestRun {
   adapt_config?: AdaptConfig;
   variables?: TestRunVariables;
   deep_links?: DeepLinksCollection;
-  scaling_session_id?: string;
   deletion_status?: string;
   created_at: string;
   updated_at: string;
