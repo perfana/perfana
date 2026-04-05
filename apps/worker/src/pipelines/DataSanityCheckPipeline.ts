@@ -234,15 +234,21 @@ export class DataSanityCheckPipeline extends BasePipelineTypeORM {
       // 8. ADAPT results check — only flag when control group baselines exist
       //    (no baselines = changepoint or first test run, 0 results is expected)
       if (testRun.adaptConfig && testRun.status?.evaluatingAdapt === 'COMPLETED') {
-        const adaptResult = await this.query<{ adapt_count: string; baseline_count: string }>(
+        const adaptResult = await this.query<{ adapt_count: string; baseline_count: string; is_changepoint: string }>(
           `SELECT
             (SELECT COUNT(*)::text FROM ds_adapt_results WHERE test_run_id = $1) AS adapt_count,
-            (SELECT COUNT(*)::text FROM ds_control_group_statistics WHERE test_run_id = $1) AS baseline_count`,
-          [testRunId]
+            (SELECT COUNT(*)::text FROM ds_control_group_statistics WHERE test_run_id = $1) AS baseline_count,
+            (SELECT COUNT(*)::text FROM ds_change_points
+             WHERE test_run_id = $1
+               AND system_under_test_id = $2
+               AND test_environment = $3
+               AND workload = $4) AS is_changepoint`,
+          [testRunId, testRun.systemUnderTestId, testRun.testEnvironment, testRun.workload]
         );
         const adaptCount = parseInt(adaptResult[0]?.adapt_count ?? '0', 10);
         const baselineCount = parseInt(adaptResult[0]?.baseline_count ?? '0', 10);
-        if (adaptCount === 0 && baselineCount > 0) {
+        const isChangepoint = parseInt(adaptResult[0]?.is_changepoint ?? '0', 10) > 0;
+        if (adaptCount === 0 && baselineCount > 0 && !isChangepoint) {
           reasons.push('ADAPT analysis completed but no results found');
         }
       }
