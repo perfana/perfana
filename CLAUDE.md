@@ -79,31 +79,23 @@ npm run dev
 
 ### Frontend API Client Requirements
 
-**MANDATORY**: All frontend API calls MUST include authentication headers:
+**MANDATORY**: All frontend API calls MUST include authentication headers. Use `authenticatedFetch()` from `lib/api.ts` — it handles token injection, 401 refresh, and base URL prepending automatically.
 
 ```typescript
-import keycloakAuth from '@/lib/keycloak-auth';
+// PREFERRED: authenticatedFetch (handles everything)
+import { authenticatedFetch } from '@/lib/api';
 
-function getAuthHeaders(): Record<string, string> {
-  const token = keycloakAuth.getToken();
-  return token ? { 'Authorization': `Bearer ${token}` } : {};
-}
+const response = await authenticatedFetch('/test-runs', { method: 'GET' });
 
-// Example API call
-const response = await fetch(`/endpoint`, {
-  method: 'GET',
-  headers: {
-    'Content-Type': 'application/json',
-    ...getAuthHeaders(),
-  },
+// FALLBACK: manual headers (only when authenticatedFetch doesn't fit)
+import { getAuthHeaders } from '@/lib/api';
+
+const response = await fetch(`${env.API_URL}/endpoint`, {
+  headers: { 'Content-Type': 'application/json', ...getAuthHeaders() },
 });
-
-// Handle 401 responses - Keycloak handles token refresh automatically
-if (response.status === 401) {
-  // Redirect to Keycloak login
-  await keycloakAuth.login();
-}
 ```
+
+**Never** import from `@/lib/keycloak-auth` directly or read tokens from `sessionStorage`/`localStorage` — always go through `lib/api.ts`.
 
 ### API Endpoints
 
@@ -232,6 +224,7 @@ This is how `test-runs` and all working services implement it.
 - `NEXT_PUBLIC_KEYCLOAK_URL` - Keycloak server URL
 - `NEXT_PUBLIC_KEYCLOAK_REALM` - Keycloak realm name
 - `NEXT_PUBLIC_KEYCLOAK_CLIENT_ID` - Keycloak client ID
+- `NEXT_PUBLIC_USE_KEYCLOAK_AUTH` - Enable/disable Keycloak auth (default: `true`)
 
 ## Common Patterns
 
@@ -422,7 +415,7 @@ Run with: `cd apps/worker && npx vitest run`
 1. Create a directory under `apps/web/app/` following Next.js App Router conventions
 2. Add `page.tsx` for the route (see existing pages: `apps/web/app/test-runs/page.tsx`, `apps/web/app/settings/page.tsx`)
 3. For dynamic routes, use `[id]/page.tsx` (see `apps/web/app/test-runs/[id]/page.tsx`)
-4. All API calls must include auth headers -- use `getAuthHeaders()` from `@/lib/keycloak-auth`
+4. All API calls must include auth headers -- use `authenticatedFetch()` from `@/lib/api`
 
 #### Add a Database Migration
 
