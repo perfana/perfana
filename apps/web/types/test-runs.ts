@@ -34,6 +34,8 @@ export interface ConsolidatedResult {
 
 export interface AdaptConfig {
   enabled: boolean;
+  mode?: 'DEFAULT' | 'BASELINE';
+  differencesAccepted?: 'TBD' | 'ACCEPTED' | 'DENIED';
   baselineTestRunId?: string;
   benchmarkOperator?: 'lt' | 'lte' | 'gt' | 'gte';
   tolerancePercentage?: number;
@@ -124,7 +126,6 @@ export interface TestRun {
   adapt_config?: AdaptConfig;
   variables?: TestRunVariables;
   deep_links?: DeepLinks;
-  scaling_session_id?: string;
   deletion_status?: string;
   created_at: string;
   updated_at: string;

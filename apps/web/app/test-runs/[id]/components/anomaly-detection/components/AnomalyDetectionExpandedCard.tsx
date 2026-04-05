@@ -148,6 +148,7 @@ export default function AnomalyDetectionExpandedCard(props: AnomalyDetectionExpa
             onMarkAsRegression={handleMarkAsRegression}
             onMarkAsVariability={handleMarkAsVariability}
             onMarkAsChangepoint={markAsChangepoint}
+            onDisableBaselineMode={props.disableBaselineMode}
             paginatedData={paginatedData}
             page={page}
             rowsPerPage={rowsPerPage}

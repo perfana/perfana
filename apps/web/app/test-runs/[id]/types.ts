@@ -39,7 +39,6 @@ export interface ExpansionState {
   awrExpanded: boolean;
   reportExpanded: boolean;
   eventsExpanded: boolean;
-  scalingProgressionExpanded: boolean;
 }
 
 /**

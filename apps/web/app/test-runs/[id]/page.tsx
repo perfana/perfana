@@ -37,7 +37,6 @@ import EventsCard from './components/events/EventsCard';
 import GraphsCard from './components/graphs/GraphsCard';
 import AwrReportCard from './components/awr/AwrReportCard';
 import ReportCard from './components/reporting/ReportCard';
-import ScalingProgressionCard from './components/scaling-progression/ScalingProgressionCard';
 import { JobProgressIndicator } from '@/components/job-progress/JobProgressIndicator';
 import { GenerateReportDialog } from '@/components/reports/report-generation/GenerateReportDialog';
 import { HtmlReportViewerModal } from '@/components/reports/HtmlReportViewerModal';
@@ -335,11 +334,6 @@ export default function TestRunDetailsPage() {
               <Box sx={cardBoxStyle(expansionState.performanceExpanded)}>
                 <PerformanceAnalysisCard testRunId={testRunId} testRun={testRun} realtimeTrigger={realtimeTrigger} expanded={expansionState.performanceExpanded} onExpand={() => { const wasCollapsed = !expansionState.performanceExpanded; toggleExpansion('performanceExpanded'); if (wasCollapsed) scrollToCard('performance-analysis-card-expanded'); }} showToast={showToast} hasDistributedTracing={configurationStatus.hasDistributedTracing} hasDynatrace={configurationStatus.hasDynatrace} onDrillDownToDistributedTracing={onDrillDownToDistributedTracing} onDrillDownToDynatrace={onDrillDownToDynatrace} />
               </Box>
-              {testRun?.scaling_session_id && (
-              <Box sx={cardBoxStyle(expansionState.scalingProgressionExpanded)}>
-                <ScalingProgressionCard testRun={testRun} testRunId={testRunId} expanded={expansionState.scalingProgressionExpanded} onExpand={() => { const wasCollapsed = !expansionState.scalingProgressionExpanded; toggleExpansion('scalingProgressionExpanded'); if (wasCollapsed) scrollToCard('scaling-progression-card-expanded'); }} showToast={showToast} onRefresh={refreshTestRun} />
-              </Box>
-              )}
               <Box sx={cardBoxStyle(expansionState.sloExpanded)}>
                 <ServiceLevelObjectivesSection testRun={testRun} testRunId={testRunId} sloExpanded={expansionState.sloExpanded} setSloExpanded={(val) => { const wasCollapsed = !expansionState.sloExpanded; setExpansion('sloExpanded', val); if (wasCollapsed && val) scrollToCard('slo-section-expanded'); }} hasDistributedTracing={configurationStatus.hasDistributedTracing} hasDynatrace={configurationStatus.hasDynatrace} onDrillDownToDistributedTracing={onDrillDownToDistributedTracing} onDrillDownToDynatrace={onDrillDownToDynatrace} />
               </Box>

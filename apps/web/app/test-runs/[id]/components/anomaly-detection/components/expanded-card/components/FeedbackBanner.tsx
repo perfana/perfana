@@ -63,11 +63,50 @@ const feedbackConfigs: Record<Exclude<FeedbackState, null>, FeedbackConfig> = {
  */
 export function FeedbackBanner({
   feedbackState,
+  isBaselineMode,
+  onDisableBaselineMode,
   onMarkAsRegression,
   onMarkAsVariability,
   onMarkAsChangepoint,
 }: FeedbackBannerProps) {
   const theme = useTheme();
+
+  // Show baseline mode banner
+  if (isBaselineMode) {
+    return (
+      <Alert
+        severity="info"
+        sx={{
+          ...alertStyles.base,
+        }}
+      >
+        <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', width: '100%' }}>
+          <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+            <Chip
+              label="Baseline mode"
+              size="small"
+              color="info"
+              sx={{ fontWeight: 600 }}
+            />
+            <Typography variant="body2" sx={{ fontWeight: 500 }}>
+              This test run is automatically accepted as variability and always included in the control group
+            </Typography>
+          </Box>
+          {onDisableBaselineMode && (
+            <Button
+              variant="outlined"
+              size="small"
+              color="info"
+              onClick={onDisableBaselineMode}
+              sx={{ ml: 2, whiteSpace: 'nowrap' }}
+            >
+              Switch to Regression mode
+            </Button>
+          )}
+        </Box>
+      </Alert>
+    );
+  }
 
   if (!feedbackState) {
     return null;

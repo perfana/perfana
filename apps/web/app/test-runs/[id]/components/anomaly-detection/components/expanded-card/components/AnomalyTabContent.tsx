@@ -33,6 +33,7 @@ export function AnomalyTabContent({
   onMarkAsRegression,
   onMarkAsVariability,
   onMarkAsChangepoint,
+  onDisableBaselineMode,
   paginatedData,
   page,
   rowsPerPage,
@@ -100,6 +101,8 @@ export function AnomalyTabContent({
 
       <FeedbackBanner
         feedbackState={feedbackState}
+        isBaselineMode={testRun?.adapt_config?.mode === 'BASELINE'}
+        onDisableBaselineMode={onDisableBaselineMode}
         onMarkAsRegression={onMarkAsRegression}
         onMarkAsVariability={onMarkAsVariability}
         onMarkAsChangepoint={onMarkAsChangepoint}

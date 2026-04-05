@@ -101,6 +101,7 @@ export default function AnomalyDetectionSection({
     handleAcceptResults,
     handleDenyResults,
     updateAdaptConfig,
+    disableBaselineMode,
     fetchAnomalyData,
     handleConclusionFilterChange,
     handleSearchChange,
@@ -172,6 +173,7 @@ export default function AnomalyDetectionSection({
       onAcceptResults={handleAcceptResults}
       onDenyResults={handleDenyResults}
       updateAdaptConfig={updateAdaptConfig}
+      disableBaselineMode={disableBaselineMode}
       onCollapse={handleCollapse}
       showToast={showToast}
       onRefreshAnomalyData={fetchAnomalyData}

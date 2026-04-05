@@ -27,6 +27,8 @@ export interface ExpandedCardHeaderProps {
  */
 export interface FeedbackBannerProps {
   feedbackState: FeedbackState;
+  isBaselineMode?: boolean;
+  onDisableBaselineMode?: () => Promise<void>;
   onMarkAsRegression: () => Promise<void>;
   onMarkAsVariability: () => Promise<void>;
   onMarkAsChangepoint: () => void;
@@ -57,6 +59,7 @@ export interface AnomalyTabContentProps {
   onMarkAsRegression: () => Promise<void>;
   onMarkAsVariability: () => Promise<void>;
   onMarkAsChangepoint: () => void;
+  onDisableBaselineMode?: () => Promise<void>;
   // Table props
   paginatedData: AnomalyData[];
   page: number;
@@ -147,6 +150,7 @@ export interface AnomalyDetectionExpandedCardProps {
   onAcceptResults: () => void;
   onDenyResults: () => void;
   updateAdaptConfig: (status: AdaptConfigStatus) => void;
+  disableBaselineMode?: () => Promise<void>;
 
   // UI handlers
   onCollapse: () => void;
