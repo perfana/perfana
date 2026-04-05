@@ -4,6 +4,11 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
+## [0.2.32.1] - 2026-04-05
+
+### Fixed
+- Changepoint flag now visible in test run list for BASELINE mode runs (previously hidden by mutually exclusive rendering)
+
 ## [0.2.32.0] - 2026-04-05
 
 ### Fixed

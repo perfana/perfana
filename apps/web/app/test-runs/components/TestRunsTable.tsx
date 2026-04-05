@@ -309,7 +309,7 @@ export function TestRunsTable({
         maxWidth: 100,
         renderCell: (params) => (
           <Box sx={{ display: 'flex', justifyContent: 'center', alignItems: 'center', height: '100%', gap: 0.5 }}>
-            {params.row.adapt_config?.mode === 'BASELINE' ? (
+            {params.row.adapt_config?.mode === 'BASELINE' && (
               <Tooltip title="Baseline mode — always accepted into control group">
                 <Box sx={{
                   px: 0.75,
@@ -326,11 +326,12 @@ export function TestRunsTable({
                   BL
                 </Box>
               </Tooltip>
-            ) : params.row.is_changepoint ? (
+            )}
+            {params.row.is_changepoint ? (
               <Tooltip title="Marked as changepoint">
                 <Flag sx={{ color: '#1976d2', fontSize: '20px' }} />
               </Tooltip>
-            ) : params.row.is_control_group ? (
+            ) : params.row.is_control_group && params.row.adapt_config?.mode !== 'BASELINE' ? (
               <Tooltip title="In control group for most recent test run">
                 <AutoAwesomeMotionTwoTone sx={{ color: '#9c27b0', fontSize: '20px' }} />
               </Tooltip>
