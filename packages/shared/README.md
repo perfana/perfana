@@ -1,5 +1,7 @@
 # @perfana/shared
 
+> Back to [CLAUDE.md](../../CLAUDE.md) for project-wide context.
+
 Shared TypeScript types, utilities, and database migrations for the Perfana platform.
 
 ## Overview

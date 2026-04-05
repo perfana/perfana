@@ -1,5 +1,7 @@
 # Perfana Worker
 
+> Back to [CLAUDE.md](../../CLAUDE.md) for project-wide context.
+
 Background job processing service using **BullMQ** with Redis for queue management and PostgreSQL for data storage.
 
 ## Architecture

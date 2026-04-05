@@ -26,7 +26,7 @@ npm run dev:grafana-sync
 
 The service requires a `.env` file in `apps/grafana-sync/`. A template file has been created for you:
 
-**Location:** `/Users/daniel/workspace/perfana-next-gen/apps/grafana-sync/.env`
+**Location:** `apps/grafana-sync/.env`
 
 ### Required Environment Variables
 

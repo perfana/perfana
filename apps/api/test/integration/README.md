@@ -145,7 +145,7 @@ Provides utilities for integration testing:
 ### Run All Integration Tests
 
 ```bash
-cd /Users/daniel/workspace/perfana-next-gen/apps/api
+cd apps/api
 npm run test:e2e
 ```
 

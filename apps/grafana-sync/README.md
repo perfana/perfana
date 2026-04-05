@@ -1,5 +1,7 @@
 # Grafana Sync Service
 
+> Back to [CLAUDE.md](../../CLAUDE.md) for project-wide context.
+
 A NestJS-based background service that synchronizes Grafana dashboards with the Perfana platform, provides automatic configuration detection, and performs sanity checks.
 
 ## Overview
