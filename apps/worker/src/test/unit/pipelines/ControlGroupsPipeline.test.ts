@@ -1155,7 +1155,7 @@ describe('ControlGroupsPipeline', () => {
 
       // Assert
       expect(mockManager.query).toHaveBeenCalledWith(
-        expect.stringContaining("adapt_config->>'mode' = 'BASELINE'"),
+        expect.stringContaining("adapt_config->>'mode' IN ('BASELINE', 'SCALING')"),
         expect.any(Array)
       );
     });

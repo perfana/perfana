@@ -438,8 +438,8 @@ export class ControlGroupsPipeline extends BasePipelineTypeORM {
           (consolidated_result->>'meetsRequirement')::boolean = true
           -- OR include runs with no SLOs configured (meetsRequirement not set)
           OR consolidated_result->>'meetsRequirement' IS NULL
-          -- OR include BASELINE mode runs
-          OR (adapt_config->>'mode' = 'BASELINE')
+          -- OR include BASELINE mode runs (SCALING is legacy alias for BASELINE)
+          OR (adapt_config->>'mode' IN ('BASELINE', 'SCALING'))
         )
       )
     `;
