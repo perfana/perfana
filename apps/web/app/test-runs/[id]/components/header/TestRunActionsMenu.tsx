@@ -401,7 +401,7 @@ export default function TestRunActionsMenu({
             )}
           </span>
         </Tooltip>
-        {(testRun.adapt_config as any)?.mode === 'BASELINE' && (
+        {testRun.adapt_config?.mode === 'BASELINE' && (
           <>
             <Divider />
             <MenuItem onClick={handleDisableBaselineMode} disabled={isLoading}>
