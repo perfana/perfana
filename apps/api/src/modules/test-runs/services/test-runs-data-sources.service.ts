@@ -1,6 +1,6 @@
 import { Injectable, Logger, NotFoundException, BadRequestException, BadGatewayException } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Repository } from 'typeorm';
+import { In, Repository } from 'typeorm';
 import axios from 'axios';
 import { TempoService } from '../../tempo/tempo.service';
 import { validateExternalUrl } from '../../../common/security/url-validator';
@@ -440,30 +440,25 @@ export class TestRunsDataSourcesService {
       }
     }
 
-    // ── Dynatrace (MetricsSource → DynatraceConfig) ────────────────────────
+    // ── Dynatrace (metrics_sources → dynatrace_configs) ───────────────────
+    // MetricsSource rows with source_type='dynatrace' are created automatically
+    // when DynatraceQuery rows are saved, keyed by (sut, env, workload, configId).
     const dynatraceSources = await this.metricsSourceRepo.find({
       where: {
         systemUnderTestId: sut.id,
-        sourceType: 'dynatrace',
         testEnvironment: testRun.testEnvironment,
+        workload: testRun.workload,
+        sourceType: 'dynatrace',
       },
     });
 
+    const uniqueConfigIds = [...new Set(dynatraceSources.map(s => s.sourceConfigId).filter(Boolean))] as string[];
     const dynatraceConfigs: Array<{ id: string; label: string; host: string }> = [];
 
-    for (const source of dynatraceSources) {
-      if (!source.sourceConfigId) continue;
-
-      const config = await this.dynatraceConfigRepo.findOne({
-        where: { id: source.sourceConfigId },
-      });
-
-      if (config) {
-        dynatraceConfigs.push({
-          id: config.id,
-          label: config.label,
-          host: config.host,
-        });
+    if (uniqueConfigIds.length > 0) {
+      const configs = await this.dynatraceConfigRepo.findBy({ id: In(uniqueConfigIds) });
+      for (const config of configs) {
+        dynatraceConfigs.push({ id: config.id, label: config.label, host: config.host });
       }
     }
 
