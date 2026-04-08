@@ -36,8 +36,8 @@ export class DynatraceRepository {
    * Upsert a MetricsSource row for a Dynatrace config + SUT/env/workload combination.
    * Returns the MetricsSource id so it can be stored on the DynatraceQuery row.
    *
-   * One row per (systemUnderTestId, testEnvironment, workload, dynatraceConfigId).
-   * Uses INSERT ... ON CONFLICT DO NOTHING so concurrent calls are safe.
+   * Uses INSERT ... ON CONFLICT DO NOTHING via TypeORM upsert so concurrent calls
+   * are safe — only one row is ever written for a given (sut, env, workload, configId).
    */
   private async ensureMetricsSourceExists(
     systemUnderTestId: string,
@@ -46,33 +46,34 @@ export class DynatraceRepository {
     dynatraceConfigId: string,
     configLabel: string,
   ): Promise<string> {
-    const existing = await this.metricsSourceRepo.findOne({
-      where: {
+    await this.metricsSourceRepo.upsert(
+      {
         systemUnderTestId,
         testEnvironment,
         workload,
         sourceType: 'dynatrace',
+        sourceConfigId: dynatraceConfigId,
         externalRef: dynatraceConfigId,
+        displayName: configLabel,
+        displayLabel: workload,
+      },
+      {
+        conflictPaths: ['systemUnderTestId', 'testEnvironment', 'sourceType', 'externalRef', 'displayName', 'displayLabel'],
+        skipUpdateIfNoValuesChanged: true,
+      },
+    );
+
+    const row = await this.metricsSourceRepo.findOneOrFail({
+      where: {
+        systemUnderTestId,
+        testEnvironment,
+        sourceType: 'dynatrace',
+        externalRef: dynatraceConfigId,
+        displayLabel: workload,
       },
     });
 
-    if (existing) {
-      return existing.id;
-    }
-
-    const source = this.metricsSourceRepo.create({
-      systemUnderTestId,
-      testEnvironment,
-      workload,
-      sourceType: 'dynatrace',
-      sourceConfigId: dynatraceConfigId,
-      externalRef: dynatraceConfigId,
-      displayName: configLabel,
-      displayLabel: workload,
-    });
-
-    const saved = await this.metricsSourceRepo.save(source);
-    return saved.id;
+    return row.id;
   }
 
   private generatePanelId(dashboardLabel: string, panelTitle: string): number {
@@ -350,9 +351,25 @@ export class DynatraceRepository {
   }
 
   async bulkCreateQueryWithSharedUuid(dtoList: CreateDynatraceQueryDto[], applicationDashboardId: string) {
-    // All DTOs in a bulk import share the same config/sut/env/workload — resolve MetricsSource once.
+    // All DTOs in a bulk import must share the same config/sut/env/workload — we resolve
+    // MetricsSource once from the first DTO and apply it to all rows.
     const firstDto = dtoList[0];
     let metricsSourceId: string | undefined;
+
+    if (dtoList.length > 1) {
+      const mismatch = dtoList.find(
+        dto =>
+          dto.dynatraceConfigId !== firstDto.dynatraceConfigId ||
+          dto.systemUnderTestId !== firstDto.systemUnderTestId ||
+          dto.testEnvironment !== firstDto.testEnvironment ||
+          dto.workload !== firstDto.workload,
+      );
+      if (mismatch) {
+        throw new Error(
+          'bulkCreateQueryWithSharedUuid: all DTOs must share the same dynatraceConfigId, systemUnderTestId, testEnvironment, and workload',
+        );
+      }
+    }
 
     if (firstDto) {
       const config = await this.configRepo.findOne({ where: { id: firstDto.dynatraceConfigId } });

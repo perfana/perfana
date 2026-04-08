@@ -103,7 +103,7 @@ describe('TestRunsDataSourcesService — getConnectedSources (Dynatrace)', () =>
   it('returns dynatrace.available: true when a MetricsSource row exists for the SUT/env/workload', async () => {
     testRunRepo.findOne.mockResolvedValue(makeTestRun());
     metricsSourceRepo.find.mockResolvedValue([makeMetricsSource()]);
-    dynatraceConfigRepo.findOne.mockResolvedValue(makeDynatraceConfig());
+    dynatraceConfigRepo.findBy.mockResolvedValue([makeDynatraceConfig()]);
 
     const result = await service.getConnectedSources(TEST_RUN_UUID, 'user-1', []);
 
@@ -132,12 +132,13 @@ describe('TestRunsDataSourcesService — getConnectedSources (Dynatrace)', () =>
       makeMetricsSource({ id: 'ms-1' }),
       makeMetricsSource({ id: 'ms-2' }),
     ]);
-    dynatraceConfigRepo.findOne.mockResolvedValue(makeDynatraceConfig());
+    dynatraceConfigRepo.findBy.mockResolvedValue([makeDynatraceConfig()]);
 
     const result = await service.getConnectedSources(TEST_RUN_UUID, 'user-1', []);
 
     expect(result.dynatrace.configs).toHaveLength(1);
-    expect(dynatraceConfigRepo.findOne).toHaveBeenCalledTimes(1);
+    // deduplication means only one unique configId → findBy called once with a single-element array
+    expect(dynatraceConfigRepo.findBy).toHaveBeenCalledTimes(1);
   });
 
   it('queries metrics_sources by SUT id, environment, workload, and source_type=dynatrace', async () => {

@@ -1,6 +1,6 @@
 import { Injectable, Logger, NotFoundException, BadRequestException, BadGatewayException } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Repository } from 'typeorm';
+import { In, Repository } from 'typeorm';
 import axios from 'axios';
 import { TempoService } from '../../tempo/tempo.service';
 import { validateExternalUrl } from '../../../common/security/url-validator';
@@ -452,23 +452,13 @@ export class TestRunsDataSourcesService {
       },
     });
 
-    const seenDynatraceConfigIds = new Set<string>();
+    const uniqueConfigIds = [...new Set(dynatraceSources.map(s => s.sourceConfigId).filter(Boolean))] as string[];
     const dynatraceConfigs: Array<{ id: string; label: string; host: string }> = [];
 
-    for (const source of dynatraceSources) {
-      if (!source.sourceConfigId || seenDynatraceConfigIds.has(source.sourceConfigId)) continue;
-      seenDynatraceConfigIds.add(source.sourceConfigId);
-
-      const config = await this.dynatraceConfigRepo.findOne({
-        where: { id: source.sourceConfigId },
-      });
-
-      if (config) {
-        dynatraceConfigs.push({
-          id: config.id,
-          label: config.label,
-          host: config.host,
-        });
+    if (uniqueConfigIds.length > 0) {
+      const configs = await this.dynatraceConfigRepo.findBy({ id: In(uniqueConfigIds) });
+      for (const config of configs) {
+        dynatraceConfigs.push({ id: config.id, label: config.label, host: config.host });
       }
     }
 
