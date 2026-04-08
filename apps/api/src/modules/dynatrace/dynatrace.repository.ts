@@ -356,7 +356,7 @@ export class DynatraceRepository {
     const firstDto = dtoList[0];
     let metricsSourceId: string | undefined;
 
-    if (dtoList.length > 1) {
+    if (firstDto && dtoList.length > 1) {
       const mismatch = dtoList.find(
         dto =>
           dto.dynatraceConfigId !== firstDto.dynatraceConfigId ||
