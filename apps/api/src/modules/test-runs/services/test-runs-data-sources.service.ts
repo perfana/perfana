@@ -440,19 +440,24 @@ export class TestRunsDataSourcesService {
       }
     }
 
-    // ── Dynatrace (MetricsSource → DynatraceConfig) ────────────────────────
+    // ── Dynatrace (metrics_sources → dynatrace_configs) ───────────────────
+    // MetricsSource rows with source_type='dynatrace' are created automatically
+    // when DynatraceQuery rows are saved, keyed by (sut, env, workload, configId).
     const dynatraceSources = await this.metricsSourceRepo.find({
       where: {
         systemUnderTestId: sut.id,
-        sourceType: 'dynatrace',
         testEnvironment: testRun.testEnvironment,
+        workload: testRun.workload,
+        sourceType: 'dynatrace',
       },
     });
 
+    const seenDynatraceConfigIds = new Set<string>();
     const dynatraceConfigs: Array<{ id: string; label: string; host: string }> = [];
 
     for (const source of dynatraceSources) {
-      if (!source.sourceConfigId) continue;
+      if (!source.sourceConfigId || seenDynatraceConfigIds.has(source.sourceConfigId)) continue;
+      seenDynatraceConfigIds.add(source.sourceConfigId);
 
       const config = await this.dynatraceConfigRepo.findOne({
         where: { id: source.sourceConfigId },

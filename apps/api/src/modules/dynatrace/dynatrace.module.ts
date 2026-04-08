@@ -12,6 +12,7 @@ import {
   DynatraceEntityMapping,
   DsPanels,
   DsMetrics,
+  MetricsSource,
 } from '../../entities';
 
 @Module({
@@ -24,6 +25,7 @@ import {
       DynatraceEntityMapping,
       DsPanels,
       DsMetrics,
+      MetricsSource,
     ]),
     CommonModule, // Provides AuthorizationService for RBAC
   ],
