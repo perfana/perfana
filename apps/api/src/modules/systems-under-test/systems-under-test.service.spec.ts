@@ -1,5 +1,5 @@
 import { Test, TestingModule } from '@nestjs/testing';
-import { SystemsUnderTestService, CreateSystemUnderTestDto, UpdateSystemUnderTestDto } from './systems-under-test.service';
+import { SystemsUnderTestService, LegacyCreateSystemUnderTestDto as CreateSystemUnderTestDto, UpdateSystemUnderTestDto } from './systems-under-test.service';
 import { getRepositoryToken } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { SystemUnderTest as SystemUnderTestEntity, PyroscopeInstance } from '../../entities';
@@ -614,6 +614,70 @@ describe('SystemsUnderTestService', () => {
       await service.findAll('admin-user', adminRoles);
 
       expect(mockAuthzService.isGlobalAdmin).toHaveBeenCalledWith(adminRoles);
+    });
+  });
+
+  describe('createSut', () => {
+    const createDto = {
+      name: 'new-service',
+      description: 'A new service',
+      organizationId: 'org-123',
+    };
+    const createdSut = { ...mockSystemUnderTest, name: 'new-service', id: 'new-id', organization_id: 'org-123' } as SystemUnderTestEntity;
+
+    beforeEach(() => {
+      // Mock the entity manager transaction used by createSut
+      (repository as any).manager = {
+        transaction: jest.fn().mockImplementation(async (fn: any) => {
+          const mockManager = {
+            create: jest.fn().mockImplementation((_Entity: any, data: any) => ({ ...data, id: 'new-id' })),
+            save: jest.fn().mockImplementation(async (entity: any) => ({ ...entity, id: entity.id ?? 'new-id' })),
+          };
+          await fn(mockManager);
+        }),
+      };
+    });
+
+    it('should create a new SUT without environments', async () => {
+      repository.findOne.mockResolvedValueOnce(null); // idempotency check
+      repository.findOne.mockResolvedValueOnce(createdSut); // findOne after create
+      mockAuthzService.isOrganizationMember.mockResolvedValue(true);
+
+      const result = await service.createSut(createDto, testUserId, adminRoles);
+
+      expect((repository as any).manager.transaction).toHaveBeenCalled();
+      expect(result.name).toBe('new-service');
+    });
+
+    it('should return existing SUT with conflict flag when name+org already exists', async () => {
+      const existingSut = { ...mockSystemUnderTest, organization_id: 'org-123' } as SystemUnderTestEntity;
+      repository.findOne.mockResolvedValueOnce(existingSut); // idempotency check
+      repository.findOne.mockResolvedValueOnce(existingSut); // findOne auth check
+      mockAuthzService.isOrganizationMember.mockResolvedValue(true);
+
+      const result = await service.createSut(createDto, testUserId, adminRoles);
+
+      expect((repository as any).manager.transaction).not.toHaveBeenCalled();
+      expect(result.conflict).toBe(true);
+    });
+
+    it('should verify org membership before creating (non-admin)', async () => {
+      mockAuthzService.isGlobalAdmin.mockReturnValue(false);
+      mockAuthzService.isOrganizationMember.mockResolvedValue(false);
+
+      await expect(service.createSut(createDto, testUserId, testRoles)).rejects.toThrow(NotFoundException);
+      expect((repository as any).manager.transaction).not.toHaveBeenCalled();
+    });
+
+    it('should skip org check for global admins', async () => {
+      // isGlobalAdmin defaults to true in mock
+      repository.findOne.mockResolvedValueOnce(null);
+      repository.findOne.mockResolvedValueOnce(createdSut);
+
+      const result = await service.createSut(createDto, testUserId, adminRoles);
+
+      expect(mockAuthzService.isOrganizationMember).not.toHaveBeenCalled();
+      expect(result.name).toBe('new-service');
     });
   });
 });

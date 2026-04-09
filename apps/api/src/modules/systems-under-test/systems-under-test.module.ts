@@ -3,12 +3,12 @@ import { TypeOrmModule } from '@nestjs/typeorm';
 import { SystemsUnderTestController } from './systems-under-test.controller';
 import { SystemsUnderTestService } from './systems-under-test.service';
 import { DeleteSystemUnderTestHandler } from './handlers/delete-system-under-test.handler';
-import { SystemUnderTest, TestRun, PyroscopeInstance } from '../../entities';
+import { SystemUnderTest, SystemUnderTestTestEnvironment, SystemUnderTestWorkload, TestRun, PyroscopeInstance } from '../../entities';
 import { CommonModule } from '../../common/common.module';
 
 @Module({
   imports: [
-    TypeOrmModule.forFeature([SystemUnderTest, TestRun, PyroscopeInstance]),
+    TypeOrmModule.forFeature([SystemUnderTest, SystemUnderTestTestEnvironment, SystemUnderTestWorkload, TestRun, PyroscopeInstance]),
     CommonModule,
   ],
   controllers: [SystemsUnderTestController],
