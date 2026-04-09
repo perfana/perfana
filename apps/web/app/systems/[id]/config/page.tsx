@@ -136,6 +136,8 @@ export default function SystemConfigurationPage() {
             value={activeTab}
             onChange={(_, v: TabId) => systemData.handleTabChange(v)}
             aria-label="configuration sections"
+            variant="scrollable"
+            scrollButtons="auto"
             sx={{ px: 3 }}
           >
             <Tab value="grafana" icon={<MonitorHeartIcon />} label="Grafana dashboards" />
