@@ -49,6 +49,8 @@ export * from './organization.entity';
 export * from './profile.entity';
 export * from './pyroscope-instance.entity';
 export * from './system-under-test.entity';
+export * from './system-under-test-test-environment.entity';
+export * from './system-under-test-workload.entity';
 export * from './team.entity';
 export * from './test-run-configuration.entity';
 export * from './test-run-view.entity';
