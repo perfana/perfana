@@ -69,7 +69,7 @@ describe('AutoConfigService', () => {
 
   beforeEach(async () => {
     // Create mocked services
-    configService = createMockConfigService({ AUTO_CONFIG_ENABLED: 'true' });
+    configService = createMockConfigService({ AUTO_CONFIG_ENABLED: true });
 
     testRunFinderService = {
       findRecentTestRuns: jest.fn(),
@@ -153,7 +153,7 @@ describe('AutoConfigService', () => {
     describe('Happy Path Scenarios', () => {
       it('should process auto-config when enabled and not processing', async () => {
         // Arrange
-        configService.get.mockReturnValue('true');
+        configService.get.mockReturnValue(true);
         jest.spyOn(service, 'processAutoConfigDashboards').mockResolvedValue();
 
         // Act
@@ -165,7 +165,7 @@ describe('AutoConfigService', () => {
 
       it('should set isProcessing flag during execution', async () => {
         // Arrange
-        configService.get.mockReturnValue('true');
+        configService.get.mockReturnValue(true);
         let processingDuringExecution = false;
 
         jest.spyOn(service, 'processAutoConfigDashboards').mockImplementation(async () => {
@@ -184,7 +184,7 @@ describe('AutoConfigService', () => {
     describe('Edge Cases', () => {
       it('should skip when auto-config is disabled', async () => {
         // Arrange
-        configService.get.mockReturnValue('false');
+        configService.get.mockReturnValue(false);
         jest.spyOn(service, 'processAutoConfigDashboards').mockResolvedValue();
 
         // Act
@@ -196,7 +196,7 @@ describe('AutoConfigService', () => {
 
       it('should skip when already processing', async () => {
         // Arrange
-        configService.get.mockReturnValue('true');
+        configService.get.mockReturnValue(true);
         (service as any).isProcessing = true;
         jest.spyOn(service, 'processAutoConfigDashboards').mockResolvedValue();
         const warnSpy = jest.spyOn((service as any).logger, 'warn');
@@ -213,7 +213,7 @@ describe('AutoConfigService', () => {
     describe('Error Scenarios', () => {
       it('should handle errors and reset processing flag', async () => {
         // Arrange
-        configService.get.mockReturnValue('true');
+        configService.get.mockReturnValue(true);
         const error = new Error('Processing failed');
         jest.spyOn(service, 'processAutoConfigDashboards').mockRejectedValue(error);
         const errorSpy = jest.spyOn((service as any).logger, 'error');
@@ -228,7 +228,7 @@ describe('AutoConfigService', () => {
 
       it('should handle non-Error exceptions', async () => {
         // Arrange
-        configService.get.mockReturnValue('true');
+        configService.get.mockReturnValue(true);
         jest.spyOn(service, 'processAutoConfigDashboards').mockRejectedValue('String error');
         const errorSpy = jest.spyOn((service as any).logger, 'error');
 
