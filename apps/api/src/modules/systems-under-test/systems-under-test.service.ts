@@ -1,8 +1,14 @@
 import { Injectable, Logger, NotFoundException, BadRequestException } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
-import { SystemUnderTest as SystemUnderTestEntity, PyroscopeInstance } from '../../entities';
-import { UpdatePyroscopeConfigDto } from './dto';
+import {
+  SystemUnderTest as SystemUnderTestEntity,
+  SystemUnderTestTestEnvironment,
+  SystemUnderTestWorkload,
+  PyroscopeInstance,
+} from '../../entities';
+// SystemUnderTestTestEnvironment and SystemUnderTestWorkload are used in transaction manager.create()
+import { CreateSystemUnderTestDto, UpdatePyroscopeConfigDto } from './dto';
 import { AuthorizationService } from '../../common/services/authorization.service';
 
 export interface SystemSummary {
@@ -23,7 +29,7 @@ export interface SystemSummary {
   created_at: string;
 }
 
-export interface CreateSystemUnderTestDto {
+export interface LegacyCreateSystemUnderTestDto {
   name: string;
   description?: string;
   team_id?: string;
@@ -57,6 +63,84 @@ export class SystemsUnderTestService {
     private readonly pyroscopeInstanceRepo: Repository<PyroscopeInstance>,
     private readonly authzService: AuthorizationService,
   ) {}
+
+  /**
+   * Create a new system under test with optional pre-seeded environments and workloads.
+   *
+   * Idempotent: if a SUT with the same name + organizationId already exists, returns it
+   * together with a `conflict: true` flag so callers can distinguish upsert from create.
+   */
+  async createSut(
+    dto: CreateSystemUnderTestDto,
+    userId: string,
+    roles: string[],
+  ): Promise<SystemUnderTestEntity & { conflict?: boolean }> {
+    try {
+      const isAdmin = this.authzService.isGlobalAdmin(roles);
+
+      // Verify org membership before doing any DB work (non-admins only)
+      if (!isAdmin) {
+        const isMember = await this.authzService.isOrganizationMember(userId, dto.organizationId);
+        if (!isMember) {
+          throw new NotFoundException(`Organization ${dto.organizationId} not found or access denied`);
+        }
+      }
+
+      // Idempotency check
+      const existing = await this.systemRepo.findOne({
+        where: { name: dto.name, organization_id: dto.organizationId },
+        relations: ['team'],
+      });
+
+      if (existing) {
+        this.logger.log(`createSut: SUT '${dto.name}' already exists in org ${dto.organizationId} — returning existing`);
+        const verified = await this.findOne(existing.id, userId, roles);
+        return Object.assign(verified, { conflict: true });
+      }
+
+      // Create SUT + environments + workloads in a single transaction
+      let createdId: string;
+      await this.systemRepo.manager.transaction(async (manager) => {
+        const system = manager.create(SystemUnderTestEntity, {
+          name: dto.name,
+          description: dto.description ?? '',
+          organization_id: dto.organizationId,
+          team_id: dto.teamId,
+          created_by: userId,
+          updated_by: userId,
+        });
+        const savedSystem = await manager.save(system);
+        createdId = savedSystem.id;
+        this.logger.log(`createSut: Created SUT '${savedSystem.name}' (${savedSystem.id})`);
+
+        if (dto.environments && dto.environments.length > 0) {
+          for (const envDto of dto.environments) {
+            const env = manager.create(SystemUnderTestTestEnvironment, {
+              system_under_test_id: savedSystem.id,
+              name: envDto.name,
+            });
+            const savedEnv = await manager.save(env);
+
+            if (envDto.workloads && envDto.workloads.length > 0) {
+              for (const workloadDto of envDto.workloads) {
+                const workload = manager.create(SystemUnderTestWorkload, {
+                  system_under_test_test_environment_id: savedEnv.id,
+                  name: workloadDto.name,
+                });
+                await manager.save(workload);
+              }
+            }
+          }
+        }
+      });
+
+      return await this.findOne(createdId!, userId, roles);
+    } catch (error) {
+      if (error instanceof NotFoundException) throw error;
+      this.logger.error('Failed to create system under test', error instanceof Error ? error.stack : error);
+      throw error;
+    }
+  }
 
   /**
    * Find all systems under test with organization filtering
@@ -353,7 +437,7 @@ export class SystemsUnderTestService {
    * Assigns ownership (created_by, updated_by) and organization_id on creation.
    */
   async create(
-    createDto: CreateSystemUnderTestDto,
+    createDto: LegacyCreateSystemUnderTestDto,
     userId: string,
     roles: string[],
     organizationId?: string,

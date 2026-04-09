@@ -1,8 +1,8 @@
-import { Controller, Get, Delete, Param, Patch, Body, Query, NotFoundException, Logger, HttpException, HttpStatus } from '@nestjs/common';
+import { Controller, Get, Post, Delete, Param, Patch, Body, Query, NotFoundException, Logger, HttpException, HttpStatus } from '@nestjs/common';
 import { ApiTags, ApiOperation, ApiParam, ApiResponse, ApiBearerAuth } from '@nestjs/swagger';
 import { SystemsUnderTestService } from './systems-under-test.service';
 import { DeleteSystemUnderTestHandler } from './handlers/delete-system-under-test.handler';
-import { UpdatePyroscopeConfigDto, UpdateSystemUnderTestDto } from './dto';
+import { CreateSystemUnderTestDto, UpdatePyroscopeConfigDto, UpdateSystemUnderTestDto } from './dto';
 import { UserCtx, UserContext } from '../../common/decorators/user-context.decorator';
 
 @ApiTags('systems-under-test')
@@ -15,6 +15,25 @@ export class SystemsUnderTestController {
     private readonly systemsUnderTestService: SystemsUnderTestService,
     private readonly deleteHandler: DeleteSystemUnderTestHandler,
   ) {}
+
+  @Post()
+  @ApiOperation({ summary: 'Create a system under test with optional pre-seeded environments and workloads' })
+  @ApiResponse({ status: 201, description: 'System under test created successfully' })
+  @ApiResponse({ status: 409, description: 'System under test with this name already exists in the organization' })
+  async create(@Body() createDto: CreateSystemUnderTestDto, @UserCtx() ctx: UserContext) {
+    try {
+      const result = await this.systemsUnderTestService.createSut(createDto, ctx.userId, ctx.roles);
+      if (result.conflict) {
+        const { conflict: _, ...sut } = result;
+        throw new HttpException({ message: 'System under test already exists', sut }, HttpStatus.CONFLICT);
+      }
+      return result;
+    } catch (error) {
+      if (error instanceof HttpException) throw error;
+      this.logger.error('Failed to create system under test:', error);
+      throw new HttpException('Failed to create system under test', HttpStatus.INTERNAL_SERVER_ERROR);
+    }
+  }
 
   @Get()
   @ApiOperation({ summary: 'Get all systems under test' })

@@ -239,6 +239,23 @@ catch (err) {
 }
 ```
 
+### Idempotent Provisioning Endpoints
+
+Some endpoints are designed for CI/CD pre-provisioning. They return the existing resource with HTTP 409 instead of failing, so pipeline scripts can call them unconditionally:
+
+```typescript
+// Service returns a conflict flag instead of throwing
+if (existing) return { ...existing, conflict: true };
+
+// Controller converts the flag to a 409 with the resource body
+if (result.conflict) {
+  const { conflict: _, ...resource } = result;
+  throw new HttpException({ message: 'Already exists', resource }, HttpStatus.CONFLICT);
+}
+```
+
+Example: `POST /api/systems-under-test` — creates the SUT (with optional environments and workloads) or returns the existing one with 409.
+
 ### Common Issues
 
 1. **"Failed to fetch"** → Missing `...getAuthHeaders()` in fetch calls

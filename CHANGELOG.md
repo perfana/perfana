@@ -4,6 +4,11 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
+## [0.2.34.0] - 2026-04-09
+
+### Added
+- `POST /api/systems-under-test` lets you fully provision a System Under Test before the first load test run. Pass `name`, `organizationId`, and an optional `environments` array (each with `workloads`) to create the SUT, test environments, and workloads in a single atomic request. All subsequent configuration endpoints — ADAPT settings, tracing, Pyroscope, Dynatrace mappings — work immediately after. Re-sending the same `name` + `organizationId` is safe: returns the existing SUT with a 409 status so CI/CD scripts can call it idempotently.
+
 ## [0.2.33.1] - 2026-04-09
 
 ### Fixed
