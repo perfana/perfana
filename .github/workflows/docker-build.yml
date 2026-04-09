@@ -77,7 +77,7 @@ jobs:
             type=raw,value=${{ needs.read-version.outputs.version }}
 
       - name: Build and push
-        uses: docker/build-push-action@v5  # TODO: pin to SHA — run: gh api repos/docker/build-push-action/git/ref/tags/v5 --jq '.object.sha'
+        uses: docker/build-push-action@v7  # TODO: pin to SHA — run: gh api repos/docker/build-push-action/git/ref/tags/v5 --jq '.object.sha'
         with:
           context: .
           file: ./Dockerfile
@@ -141,7 +141,7 @@ jobs:
             type=raw,value=${{ needs.read-version.outputs.version }}
 
       - name: Build and push
-        uses: docker/build-push-action@v5  # TODO: pin to SHA — run: gh api repos/docker/build-push-action/git/ref/tags/v5 --jq '.object.sha'
+        uses: docker/build-push-action@v7  # TODO: pin to SHA — run: gh api repos/docker/build-push-action/git/ref/tags/v5 --jq '.object.sha'
         with:
           context: .
           file: ./Dockerfile
@@ -198,7 +198,7 @@ jobs:
             type=raw,value=${{ needs.read-version.outputs.version }}
 
       - name: Build and push
-        uses: docker/build-push-action@v5  # TODO: pin to SHA — run: gh api repos/docker/build-push-action/git/ref/tags/v5 --jq '.object.sha'
+        uses: docker/build-push-action@v7  # TODO: pin to SHA — run: gh api repos/docker/build-push-action/git/ref/tags/v5 --jq '.object.sha'
         with:
           context: .
           file: ./Dockerfile
@@ -260,7 +260,7 @@ jobs:
             type=raw,value=${{ needs.read-version.outputs.version }}
 
       - name: Build and push
-        uses: docker/build-push-action@v5  # TODO: pin to SHA — run: gh api repos/docker/build-push-action/git/ref/tags/v5 --jq '.object.sha'
+        uses: docker/build-push-action@v7  # TODO: pin to SHA — run: gh api repos/docker/build-push-action/git/ref/tags/v5 --jq '.object.sha'
         with:
           context: .
           file: ./Dockerfile
@@ -322,7 +322,7 @@ jobs:
             type=raw,value=${{ needs.read-version.outputs.version }}
 
       - name: Build and push
-        uses: docker/build-push-action@v5  # TODO: pin to SHA — run: gh api repos/docker/build-push-action/git/ref/tags/v5 --jq '.object.sha'
+        uses: docker/build-push-action@v7  # TODO: pin to SHA — run: gh api repos/docker/build-push-action/git/ref/tags/v5 --jq '.object.sha'
         with:
           context: .
           file: ./Dockerfile
@@ -379,7 +379,7 @@ jobs:
             type=raw,value=${{ needs.read-version.outputs.version }}
 
       - name: Build and push
-        uses: docker/build-push-action@v5  # TODO: pin to SHA — run: gh api repos/docker/build-push-action/git/ref/tags/v5 --jq '.object.sha'
+        uses: docker/build-push-action@v7  # TODO: pin to SHA — run: gh api repos/docker/build-push-action/git/ref/tags/v5 --jq '.object.sha'
         with:
           context: .
           file: ./Dockerfile.migrations
