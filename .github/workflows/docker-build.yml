@@ -64,7 +64,7 @@ jobs:
 
       - name: Extract metadata
         id: meta
-        uses: docker/metadata-action@v5  # TODO: pin to SHA — run: gh api repos/docker/metadata-action/git/ref/tags/v5 --jq '.object.sha'
+        uses: docker/metadata-action@v6  # TODO: pin to SHA — run: gh api repos/docker/metadata-action/git/ref/tags/v5 --jq '.object.sha'
         with:
           images: ${{ env.IMAGE_PREFIX }}/perfana-web
           tags: |
@@ -128,7 +128,7 @@ jobs:
 
       - name: Extract metadata
         id: meta
-        uses: docker/metadata-action@v5  # TODO: pin to SHA — run: gh api repos/docker/metadata-action/git/ref/tags/v5 --jq '.object.sha'
+        uses: docker/metadata-action@v6  # TODO: pin to SHA — run: gh api repos/docker/metadata-action/git/ref/tags/v5 --jq '.object.sha'
         with:
           images: ${{ env.IMAGE_PREFIX }}/perfana-api
           tags: |
@@ -185,7 +185,7 @@ jobs:
 
       - name: Extract metadata
         id: meta
-        uses: docker/metadata-action@v5  # TODO: pin to SHA — run: gh api repos/docker/metadata-action/git/ref/tags/v5 --jq '.object.sha'
+        uses: docker/metadata-action@v6  # TODO: pin to SHA — run: gh api repos/docker/metadata-action/git/ref/tags/v5 --jq '.object.sha'
         with:
           images: ${{ env.IMAGE_PREFIX }}/perfana-worker
           tags: |
@@ -247,7 +247,7 @@ jobs:
 
       - name: Extract metadata
         id: meta
-        uses: docker/metadata-action@v5  # TODO: pin to SHA — run: gh api repos/docker/metadata-action/git/ref/tags/v5 --jq '.object.sha'
+        uses: docker/metadata-action@v6  # TODO: pin to SHA — run: gh api repos/docker/metadata-action/git/ref/tags/v5 --jq '.object.sha'
         with:
           images: ${{ env.IMAGE_PREFIX }}/perfana-grafana-sync
           tags: |
@@ -309,7 +309,7 @@ jobs:
 
       - name: Extract metadata
         id: meta
-        uses: docker/metadata-action@v5  # TODO: pin to SHA — run: gh api repos/docker/metadata-action/git/ref/tags/v5 --jq '.object.sha'
+        uses: docker/metadata-action@v6  # TODO: pin to SHA — run: gh api repos/docker/metadata-action/git/ref/tags/v5 --jq '.object.sha'
         with:
           images: ${{ env.IMAGE_PREFIX }}/perfana-report
           tags: |
@@ -366,7 +366,7 @@ jobs:
 
       - name: Extract metadata
         id: meta
-        uses: docker/metadata-action@v5  # TODO: pin to SHA — run: gh api repos/docker/metadata-action/git/ref/tags/v5 --jq '.object.sha'
+        uses: docker/metadata-action@v6  # TODO: pin to SHA — run: gh api repos/docker/metadata-action/git/ref/tags/v5 --jq '.object.sha'
         with:
           images: ${{ env.IMAGE_PREFIX }}/perfana-migration
           tags: |
