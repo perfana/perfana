@@ -190,12 +190,16 @@ COPY --from=builder --chown=nonroot:nonroot /app/apps/web/scripts ./apps/web/scr
 COPY --from=builder --chown=nonroot:nonroot /app/apps/web/node_modules ./apps/web/node_modules
 COPY --from=builder --chown=nonroot:nonroot /app/apps/api/package.json ./apps/api/package.json
 COPY --from=builder --chown=nonroot:nonroot /app/apps/api/dist ./apps/api/dist
+COPY --from=builder --chown=nonroot:nonroot /app/apps/api/node_modules ./apps/api/node_modules
 COPY --from=builder --chown=nonroot:nonroot /app/apps/grafana-sync/package.json ./apps/grafana-sync/package.json
 COPY --from=builder --chown=nonroot:nonroot /app/apps/grafana-sync/dist ./apps/grafana-sync/dist
+COPY --from=builder --chown=nonroot:nonroot /app/apps/grafana-sync/node_modules ./apps/grafana-sync/node_modules
 COPY --from=builder --chown=nonroot:nonroot /app/apps/worker/package.json ./apps/worker/package.json
 COPY --from=builder --chown=nonroot:nonroot /app/apps/worker/dist ./apps/worker/dist
+COPY --from=builder --chown=nonroot:nonroot /app/apps/worker/node_modules ./apps/worker/node_modules
 COPY --from=builder --chown=nonroot:nonroot /app/apps/perfana-report/package.json ./apps/perfana-report/package.json
 COPY --from=builder --chown=nonroot:nonroot /app/apps/perfana-report/dist ./apps/perfana-report/dist
+COPY --from=builder --chown=nonroot:nonroot /app/apps/perfana-report/node_modules ./apps/perfana-report/node_modules
 COPY --from=builder --chown=nonroot:nonroot /app/node_modules ./node_modules
 COPY --from=builder --chown=nonroot:nonroot /app/packages/shared/dist ./packages/shared/dist
 COPY --from=builder --chown=nonroot:nonroot /app/packages/shared/package.json ./packages/shared/package.json
