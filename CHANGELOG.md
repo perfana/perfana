@@ -4,6 +4,11 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
+## [0.2.35.0] - 2026-04-11
+
+### Fixed
+- The `perfana-api` Docker image no longer fails with `Cannot find module 'axios'` on startup. The root cause was that npm's hoisting algorithm placed axios in `apps/api/node_modules/` instead of the root `node_modules/`, making it unreachable by `@nestjs/axios` at runtime. Adding axios as a root-level dependency forces correct hoisting. Workers, grafana-sync, and perfana-report retain their own nested `node_modules` COPY lines since they have other production packages that still require separate handling.
+
 ## [0.2.34.0] - 2026-04-09
 
 ### Added
