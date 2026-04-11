@@ -390,6 +390,16 @@ export function simpleOrchestrateReevaluateBatchWorker() {
 
             logger.info(`  ${testRunId}: force re-fetching ${sourcesToRefetch.length} sources over [${fromTime.toISOString()} - ${toTime.toISOString()}]`);
 
+            // Refresh panel documents BEFORE metric collection so newly-added dashboards
+            // (e.g. a dashboard linked to a SUT after the original collection ran) are included
+            const panelsPipeline = new PanelsPipeline(logger);
+            const panelsResult = await panelsPipeline.execute({ testRunId });
+            if (panelsResult.success) {
+              logger.info(`    Panels refreshed for ${testRunId}`);
+            } else {
+              logger.warn(`    Panels refresh failed for ${testRunId}: ${panelsResult.error?.message ?? 'unknown error'}`);
+            }
+
             // Reset collected_ranges and is_complete for selected sources
             for (const status of sourcesToRefetch) {
               await db.resetCollectionStatus(testRunId, status.source_type, status.source_id ?? null);
@@ -444,15 +454,6 @@ export function simpleOrchestrateReevaluateBatchWorker() {
                 const errorMsg = err instanceof Error ? err.message : String(err);
                 logger.error(`    ❌ Force re-fetch failed for ${status.source_type}/${status.source_id ?? 'null'}: ${errorMsg}`);
               }
-            }
-
-            // After metrics collection, refresh panel documents so new dashboards are reflected
-            try {
-              const panelsPipeline = new PanelsPipeline(logger);
-              await panelsPipeline.execute({ testRunId });
-              logger.info(`    Panels refreshed for ${testRunId}`);
-            } catch (panelsErr) {
-              logger.warn(`    Panels refresh failed for ${testRunId}: ${panelsErr instanceof Error ? panelsErr.message : panelsErr}`);
             }
 
             if (testRunReceivedData) { testRunsWithNewData++; }
