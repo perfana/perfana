@@ -392,12 +392,12 @@ export function simpleOrchestrateReevaluateBatchWorker() {
 
             // Refresh panel documents BEFORE metric collection so newly-added dashboards
             // (e.g. a dashboard linked to a SUT after the original collection ran) are included
-            try {
-              const panelsPipeline = new PanelsPipeline(logger);
-              await panelsPipeline.execute({ testRunId });
+            const panelsPipeline = new PanelsPipeline(logger);
+            const panelsResult = await panelsPipeline.execute({ testRunId });
+            if (panelsResult.success) {
               logger.info(`    Panels refreshed for ${testRunId}`);
-            } catch (panelsErr) {
-              logger.warn(`    Panels refresh failed for ${testRunId}: ${panelsErr instanceof Error ? panelsErr.message : panelsErr}`);
+            } else {
+              logger.warn(`    Panels refresh failed for ${testRunId}: ${panelsResult.error?.message ?? 'unknown error'}`);
             }
 
             // Reset collected_ranges and is_complete for selected sources
