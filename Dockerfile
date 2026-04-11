@@ -190,7 +190,6 @@ COPY --from=builder --chown=nonroot:nonroot /app/apps/web/scripts ./apps/web/scr
 COPY --from=builder --chown=nonroot:nonroot /app/apps/web/node_modules ./apps/web/node_modules
 COPY --from=builder --chown=nonroot:nonroot /app/apps/api/package.json ./apps/api/package.json
 COPY --from=builder --chown=nonroot:nonroot /app/apps/api/dist ./apps/api/dist
-COPY --from=builder --chown=nonroot:nonroot /app/apps/api/node_modules ./apps/api/node_modules
 COPY --from=builder --chown=nonroot:nonroot /app/apps/grafana-sync/package.json ./apps/grafana-sync/package.json
 COPY --from=builder --chown=nonroot:nonroot /app/apps/grafana-sync/dist ./apps/grafana-sync/dist
 COPY --from=builder --chown=nonroot:nonroot /app/apps/grafana-sync/node_modules ./apps/grafana-sync/node_modules
