@@ -94,13 +94,13 @@ export class ReportHtmlCompilerService {
       case 'text_block':
         return this.textBlockRenderer.renderTextBlockSection(section);
       case 'slo':
-        return this.sloRenderer.renderSloSection(section, testRun);
+        return await this.sloRenderer.renderSloSection(section, testRun);
       case 'apdex':
         return await this.apdexRenderer.renderApdexSection(section, testRun, userId, roles);
       case 'transaction_response_times':
         return await this.transactionResponseTimesRenderer.renderTransactionResponseTimesSection(section, testRun, userId, roles);
       case 'regressions':
-        return this.regressionsRenderer.renderRegressionsSection(section, testRun);
+        return await this.regressionsRenderer.renderRegressionsSection(section, testRun);
       case 'awr':
         return this.awrRenderer.renderAwrSection(section, testRun);
       case 'trends':

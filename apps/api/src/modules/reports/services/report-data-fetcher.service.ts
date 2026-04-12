@@ -11,6 +11,21 @@ export interface SloSummary {
   total: number;
 }
 
+/** Individual SLO check result for the SLO renderer */
+export interface SloCheckResult {
+  benchmark_id: string;
+  panel_title: string | null;
+  metric_name: string | null;
+  metric_unit: string | null;
+  evaluate_type: string;
+  source: string;
+  dashboard_label: string | null;
+  requirement_operator: string | null;
+  requirement_value: number | null;
+  panel_average: number | null;
+  meets_requirement: boolean | null;
+}
+
 /** Anomaly detection summary for header renderer */
 export interface AnomalySummary {
   conclusion: string;
@@ -116,6 +131,40 @@ export interface VirtualUserStats {
     peak_active_threads: number;
     avg_active_threads: number;
   }>;
+}
+
+/** Per-metric regression/improvement detail for report rendering */
+export interface RegressionsMetric {
+  dashboardLabel: string;
+  panelTitle: string;
+  metricName: string;
+  unit: string | null;
+  conclusionLabel: string;
+  testValue: number | null;
+  controlValue: number | null;
+  difference: number | null;
+  differencePercent: number | null;
+}
+
+/** Full regressions data for report rendering */
+export interface RegressionsData {
+  conclusion: string;
+  regressionCount: number;
+  improvementCount: number;
+  totalMetrics: number;
+  regressions: RegressionsMetric[];
+  improvements: RegressionsMetric[];
+  noDifference: RegressionsMetric[];
+}
+
+/** Raw ADAPT result row from database query */
+interface AdaptResultRow {
+  dashboard_label: string;
+  panel_title: string;
+  metric_name: string;
+  unit: string | null;
+  conclusion: Record<string, unknown> | null;
+  statistic: Record<string, unknown> | null;
 }
 
 /** Raw transaction row from database query */
@@ -1040,6 +1089,38 @@ export class ReportDataFetcherService {
   }
 
   /**
+   * Get detailed SLO check results for a test run.
+   * Returns individual check results with requirement/actual value for the SLO renderer.
+   */
+  async getSloCheckResults(testRunId: string): Promise<SloCheckResult[]> {
+    try {
+      const rows: SloCheckResult[] = await this.dataSource.query(
+        `SELECT
+          cr.benchmark_id,
+          cr.panel_title,
+          cr.metric_name,
+          cr.metric_unit,
+          cr.evaluate_type,
+          cr.source,
+          cr.dashboard_label,
+          cr.requirement->>'operator' AS requirement_operator,
+          (cr.requirement->>'value')::numeric AS requirement_value,
+          cr.panel_average,
+          cr.meets_requirement
+        FROM check_results cr
+        WHERE cr.test_run_id = $1
+        ORDER BY cr.meets_requirement ASC NULLS LAST, cr.evaluate_type, cr.panel_title`,
+        [testRunId],
+      );
+
+      return rows;
+    } catch (error) {
+      this.logger.warn(`Failed to get SLO check results for ${testRunId}: ${(error as Error).message}`);
+      return [];
+    }
+  }
+
+  /**
    * Get SLO check result summary for a test run.
    * Queries check_results table and counts passed/failed using the meets_requirement column.
    */
@@ -1074,6 +1155,82 @@ export class ReportDataFetcherService {
    * Get anomaly detection summary for a test run.
    * Queries ds_adapt_conclusion table for conclusion and regression/improvement counts.
    */
+  /**
+   * Get detailed regression/improvement data for a test run.
+   * Queries ds_adapt_conclusion for summary and ds_adapt_results for per-metric details.
+   */
+  async getRegressionsData(testRunId: string): Promise<RegressionsData | null> {
+    try {
+      // Get overall conclusion
+      const conclusionRows: {
+        conclusion: string;
+        regressions: string[] | null;
+        improvements: string[] | null;
+      }[] = await this.dataSource.query(
+        `SELECT conclusion, regressions, improvements FROM ds_adapt_conclusion WHERE test_run_id = $1 LIMIT 1`,
+        [testRunId],
+      );
+
+      const conclusionRow = conclusionRows[0];
+      if (!conclusionRow) return null;
+
+      // Get per-metric ADAPT results with conclusion and statistic data
+      const resultRows: AdaptResultRow[] = await this.dataSource.query(
+        `SELECT
+          dashboard_label,
+          panel_title,
+          metric_name,
+          unit,
+          conclusion,
+          statistic
+        FROM ds_adapt_results
+        WHERE test_run_id = $1
+        ORDER BY dashboard_label ASC, panel_title ASC, metric_name ASC`,
+        [testRunId],
+      );
+
+      const metrics: RegressionsMetric[] = resultRows.map((row) => {
+        const conclusion = row.conclusion as Record<string, unknown> | null;
+        const statistic = row.statistic as Record<string, unknown> | null;
+        const conclusionLabel = conclusion && typeof conclusion.label === 'string'
+          ? conclusion.label : 'unknown';
+        const testValue = statistic?.test != null ? Number(statistic.test) : null;
+        const controlValue = statistic?.control != null ? Number(statistic.control) : null;
+        const diff = statistic?.diff != null ? Number(statistic.diff) : null;
+
+        return {
+          dashboardLabel: row.dashboard_label,
+          panelTitle: row.panel_title,
+          metricName: row.metric_name,
+          unit: row.unit || null,
+          conclusionLabel,
+          testValue,
+          controlValue,
+          difference: diff,
+          differencePercent: controlValue && controlValue !== 0 && diff != null
+            ? (diff / Math.abs(controlValue)) * 100
+            : null,
+        };
+      });
+
+      const regressions = metrics.filter((m) => m.conclusionLabel === 'regression');
+      const improvements = metrics.filter((m) => m.conclusionLabel === 'improvement');
+
+      return {
+        conclusion: conclusionRow.conclusion,
+        regressionCount: conclusionRow.regressions?.length ?? regressions.length,
+        improvementCount: conclusionRow.improvements?.length ?? improvements.length,
+        totalMetrics: metrics.length,
+        regressions,
+        improvements,
+        noDifference: metrics.filter((m) => m.conclusionLabel === 'no_difference'),
+      };
+    } catch (error) {
+      this.logger.warn(`Failed to get regressions data for ${testRunId}: ${(error as Error).message}`);
+      return null;
+    }
+  }
+
   async getAnomalySummary(testRunId: string): Promise<AnomalySummary | null> {
     try {
       const rows: { conclusion: string; regressions: string[] | null; improvements: string[] | null }[] =
