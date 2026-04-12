@@ -13,7 +13,7 @@
 
 import { Test, TestingModule } from '@nestjs/testing';
 import { getRepositoryToken } from '@nestjs/typeorm';
-import { Repository } from 'typeorm';
+import { Repository, DataSource } from 'typeorm';
 import { TestRun } from '@perfana/shared';
 import { ReportDataFetcherService } from './report-data-fetcher.service';
 import { AuthorizationService } from '../../../common/services/authorization.service';
@@ -85,6 +85,10 @@ describe('ReportDataFetcherService', () => {
         {
           provide: AuthorizationService,
           useValue: authzService,
+        },
+        {
+          provide: DataSource,
+          useValue: { query: jest.fn().mockResolvedValue([]) },
         },
       ],
     }).compile();

@@ -1,6 +1,6 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Repository } from 'typeorm';
+import { Repository, DataSource } from 'typeorm';
 import { TestRun } from '@perfana/shared';
 import { AuthorizationService } from '../../../common/services/authorization.service';
 
@@ -104,6 +104,65 @@ export interface VirtualUserStats {
   }>;
 }
 
+/** AWR report summary for report rendering */
+export interface AwrReportSummary {
+  id: string;
+  dbName: string | null;
+  instanceName: string | null;
+  dbEdition: string | null;
+  dbRelease: string | null;
+  hostName: string | null;
+  platform: string | null;
+  cpus: number | null;
+  cores: number | null;
+  memoryGb: number | null;
+  beginTime: string | null;
+  endTime: string | null;
+  elapsedMinutes: number | null;
+  dbTimeMinutes: number | null;
+  parsedData: Record<string, unknown> | null;
+}
+
+/** AWR insight for report rendering */
+export interface AwrInsightSummary {
+  severity: string;
+  category: string;
+  title: string;
+  description: string;
+  recommendation: string | null;
+  value: number | null;
+  unit: string | null;
+}
+
+/** Full AWR data for report rendering */
+export interface AwrData {
+  reports: AwrReportSummary[];
+  insights: AwrInsightSummary[];
+  severitySummary: { critical: number; warning: number; info: number; total: number };
+}
+
+/** Per-metric comparison detail for report rendering */
+export interface ComparisonMetric {
+  dashboardLabel: string;
+  panelTitle: string;
+  metricName: string;
+  unit: string | null;
+  currentValue: number | null;
+  baselineValue: number | null;
+  difference: number | null;
+  differencePercent: number | null;
+  conclusion: string;
+}
+
+/** Full comparisons data for report rendering */
+export interface ComparisonsData {
+  metrics: ComparisonMetric[];
+  regressionCount: number;
+  improvementCount: number;
+  noDifferenceCount: number;
+  totalMetrics: number;
+}
+
 /** Raw transaction row from database query */
 interface TransactionRow {
   transaction_name: string;
@@ -160,6 +219,7 @@ export class ReportDataFetcherService {
     @InjectRepository(TestRun)
     private readonly testRunRepo: Repository<TestRun>,
     private readonly authzService: AuthorizationService,
+    private readonly dataSource: DataSource,
   ) {}
 
   /**
@@ -1022,5 +1082,174 @@ export class ReportDataFetcherService {
     };
 
     return mockScenarios[scenarioName] || null;
+  }
+
+  /**
+   * Get AWR data for a test run
+   * Fetches AWR reports and their analysis insights
+   */
+  async getAwrData(testRunId: string): Promise<AwrData | null> {
+    try {
+      const reportRows: Array<{
+        id: string;
+        db_name: string | null;
+        instance_name: string | null;
+        db_edition: string | null;
+        db_release: string | null;
+        host_name: string | null;
+        platform: string | null;
+        cpus: number | null;
+        cores: number | null;
+        memory_gb: string | null;
+        begin_time: string | null;
+        end_time: string | null;
+        elapsed_minutes: string | null;
+        db_time_minutes: string | null;
+        parsed_data: Record<string, unknown> | null;
+      }> = await this.dataSource.query(
+        `SELECT id, db_name, instance_name, db_edition, db_release,
+                host_name, platform, cpus, cores, memory_gb,
+                begin_time, end_time, elapsed_minutes, db_time_minutes,
+                parsed_data
+         FROM awr_reports
+         WHERE test_run_id = $1 AND parse_status = 'completed'
+         ORDER BY begin_time ASC`,
+        [testRunId],
+      );
+
+      if (reportRows.length === 0) return null;
+
+      const reportIds = reportRows.map((r) => r.id);
+
+      // Fetch analysis insights for all reports
+      const analysisRows: Array<{
+        insights: Array<{
+          severity: string;
+          category: string;
+          title: string;
+          description: string;
+          recommendation?: string;
+          value?: number;
+          unit?: string;
+        }> | null;
+        severity_summary: { critical: number; warning: number; info: number; total: number } | null;
+      }> = await this.dataSource.query(
+        `SELECT insights, severity_summary
+         FROM awr_analysis
+         WHERE awr_report_id = ANY($1)
+         ORDER BY analyzed_at DESC`,
+        [reportIds],
+      );
+
+      const allInsights: AwrInsightSummary[] = [];
+      let severitySummary = { critical: 0, warning: 0, info: 0, total: 0 };
+
+      for (const row of analysisRows) {
+        if (row.severity_summary) {
+          severitySummary = {
+            critical: severitySummary.critical + (row.severity_summary.critical || 0),
+            warning: severitySummary.warning + (row.severity_summary.warning || 0),
+            info: severitySummary.info + (row.severity_summary.info || 0),
+            total: severitySummary.total + (row.severity_summary.total || 0),
+          };
+        }
+        if (row.insights) {
+          for (const insight of row.insights) {
+            allInsights.push({
+              severity: insight.severity,
+              category: insight.category,
+              title: insight.title,
+              description: insight.description,
+              recommendation: insight.recommendation || null,
+              value: insight.value ?? null,
+              unit: insight.unit || null,
+            });
+          }
+        }
+      }
+
+      const reports: AwrReportSummary[] = reportRows.map((r) => ({
+        id: r.id,
+        dbName: r.db_name,
+        instanceName: r.instance_name,
+        dbEdition: r.db_edition,
+        dbRelease: r.db_release,
+        hostName: r.host_name,
+        platform: r.platform,
+        cpus: r.cpus,
+        cores: r.cores,
+        memoryGb: r.memory_gb != null ? Number(r.memory_gb) : null,
+        beginTime: r.begin_time,
+        endTime: r.end_time,
+        elapsedMinutes: r.elapsed_minutes != null ? Number(r.elapsed_minutes) : null,
+        dbTimeMinutes: r.db_time_minutes != null ? Number(r.db_time_minutes) : null,
+        parsedData: r.parsed_data,
+      }));
+
+      return { reports, insights: allInsights, severitySummary };
+    } catch (error) {
+      this.logger.warn(`Failed to get AWR data for ${testRunId}: ${(error as Error).message}`);
+      return null;
+    }
+  }
+
+  /**
+   * Get comparisons data for a test run
+   * Fetches ADAPT results comparing current run vs control group
+   */
+  async getComparisonsData(testRunId: string, baselineTestRunId?: string): Promise<ComparisonsData | null> {
+    try {
+      const resultRows: Array<{
+        dashboard_label: string;
+        panel_title: string;
+        metric_name: string;
+        unit: string | null;
+        conclusion: Record<string, unknown> | null;
+        statistic: Record<string, unknown> | null;
+      }> = await this.dataSource.query(
+        `SELECT dashboard_label, panel_title, metric_name, unit, conclusion, statistic
+         FROM ds_adapt_results
+         WHERE test_run_id = $1
+         ORDER BY dashboard_label ASC, panel_title ASC, metric_name ASC`,
+        [testRunId],
+      );
+
+      if (resultRows.length === 0) return null;
+
+      const metrics: ComparisonMetric[] = resultRows.map((row) => {
+        const conclusion = row.conclusion as Record<string, unknown> | null;
+        const statistic = row.statistic as Record<string, unknown> | null;
+        const conclusionLabel = conclusion && typeof conclusion.label === 'string'
+          ? conclusion.label : 'unknown';
+        const testValue = statistic?.test != null ? Number(statistic.test) : null;
+        const controlValue = statistic?.control != null ? Number(statistic.control) : null;
+        const diff = statistic?.diff != null ? Number(statistic.diff) : null;
+        const diffPct = controlValue && controlValue !== 0 && diff != null
+          ? (diff / Math.abs(controlValue)) * 100 : null;
+
+        return {
+          dashboardLabel: row.dashboard_label,
+          panelTitle: row.panel_title,
+          metricName: row.metric_name,
+          unit: row.unit || null,
+          currentValue: testValue,
+          baselineValue: controlValue,
+          difference: diff,
+          differencePercent: diffPct,
+          conclusion: conclusionLabel,
+        };
+      });
+
+      return {
+        metrics,
+        regressionCount: metrics.filter((m) => m.conclusion === 'regression').length,
+        improvementCount: metrics.filter((m) => m.conclusion === 'improvement').length,
+        noDifferenceCount: metrics.filter((m) => m.conclusion === 'no_difference').length,
+        totalMetrics: metrics.length,
+      };
+    } catch (error) {
+      this.logger.warn(`Failed to get comparisons data for ${testRunId}: ${(error as Error).message}`);
+      return null;
+    }
   }
 }
