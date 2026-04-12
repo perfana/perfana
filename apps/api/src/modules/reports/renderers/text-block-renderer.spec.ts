@@ -1,7 +1,7 @@
 import { Test, TestingModule } from '@nestjs/testing';
 import { TextBlockRenderer } from './text-block-renderer';
 import { ReportUtilsService } from '../services/report-utils.service';
-import type { ReportSectionConfig } from '@perfana/shared';
+import { ReportSectionConfig } from '@perfana/shared';
 
 describe('TextBlockRenderer', () => {
   let renderer: TextBlockRenderer;

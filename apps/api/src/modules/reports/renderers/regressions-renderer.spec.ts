@@ -2,7 +2,7 @@ import { Test, TestingModule } from '@nestjs/testing';
 import { RegressionsRenderer } from './regressions-renderer';
 import { ReportUtilsService } from '../services/report-utils.service';
 import { ReportDataFetcherService } from '../services/report-data-fetcher.service';
-import type { ReportSectionConfig, TestRun } from '@perfana/shared';
+import { ReportSectionConfig, TestRun } from '@perfana/shared';
 
 // ---------------------------------------------------------------------------
 // Helpers

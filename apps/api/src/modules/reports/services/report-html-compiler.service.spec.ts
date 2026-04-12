@@ -21,11 +21,11 @@ import { TrendsRenderer } from '../renderers/trends-renderer';
 import { ComparisonsRenderer } from '../renderers/comparisons-renderer';
 import { GraphsRenderer } from '../renderers/graphs-renderer';
 import { PlaceholderRenderer } from '../renderers/placeholder-renderer';
-import type {
+import {
   ReportSectionConfig,
   ReportStyling,
 } from '@perfana/shared';
-import type { TestRun, GeneratedReport } from '../../../entities';
+import { TestRun, GeneratedReport } from '../../../entities';
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -299,8 +299,8 @@ describe('ReportHtmlCompilerService', () => {
         const sections = [makeSection('header', 0), makeSection('slo', 1)];
         await service.renderSections(sections, testRun, null);
 
-        expect(headerRenderer.renderHeaderSection).toHaveBeenCalledWith(sections[0], testRun);
-        expect(sloRenderer.renderSloSection).toHaveBeenCalledWith(sections[1], testRun);
+        expect(headerRenderer.renderHeaderSection).toHaveBeenCalledWith(sections[0], testRun, '', []);
+        expect(sloRenderer.renderSloSection).toHaveBeenCalledWith(sections[1], testRun, '', []);
       });
 
       it('should concatenate multiple section outputs joined by newline', async () => {
