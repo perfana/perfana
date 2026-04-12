@@ -4,6 +4,20 @@ import { Repository, DataSource } from 'typeorm';
 import { TestRun } from '@perfana/shared';
 import { AuthorizationService } from '../../../common/services/authorization.service';
 
+/** SLO check result summary for header renderer */
+export interface SloSummary {
+  passed: number;
+  failed: number;
+  total: number;
+}
+
+/** Anomaly detection summary for header renderer */
+export interface AnomalySummary {
+  conclusion: string;
+  regressionCount: number;
+  improvementCount: number;
+}
+
 /** Transaction summary for report rendering */
 export interface ReportTransaction {
   name: string;
@@ -1194,6 +1208,37 @@ export class ReportDataFetcherService {
   }
 
   /**
+   * Get SLO check result summary for a test run.
+   * Queries check_results table and counts passed/failed using the meets_requirement column.
+   */
+  async getSloSummary(testRunId: string): Promise<SloSummary | null> {
+    try {
+      const rows: { meets_requirement: boolean | null }[] = await this.dataSource.query(
+        `SELECT meets_requirement FROM check_results WHERE test_run_id = $1`,
+        [testRunId],
+      );
+
+      if (rows.length === 0) return null;
+
+      let passed = 0;
+      let failed = 0;
+
+      for (const row of rows) {
+        if (row.meets_requirement === true) {
+          passed++;
+        } else {
+          failed++;
+        }
+      }
+
+      return { passed, failed, total: passed + failed };
+    } catch (error) {
+      this.logger.warn(`Failed to get SLO summary for ${testRunId}: ${(error as Error).message}`);
+      return null;
+    }
+  }
+
+  /**
    * Get comparisons data for a test run
    * Fetches ADAPT results comparing current run vs control group
    */
@@ -1249,6 +1294,32 @@ export class ReportDataFetcherService {
       };
     } catch (error) {
       this.logger.warn(`Failed to get comparisons data for ${testRunId}: ${(error as Error).message}`);
+      return null;
+    }
+  }
+
+  /**
+   * Get anomaly detection summary for a test run.
+   * Queries ds_adapt_conclusion table for conclusion and regression/improvement counts.
+   */
+  async getAnomalySummary(testRunId: string): Promise<AnomalySummary | null> {
+    try {
+      const rows: { conclusion: string; regressions: string[] | null; improvements: string[] | null }[] =
+        await this.dataSource.query(
+          `SELECT conclusion, regressions, improvements FROM ds_adapt_conclusion WHERE test_run_id = $1 LIMIT 1`,
+          [testRunId],
+        );
+
+      const row = rows[0];
+      if (!row) return null;
+
+      return {
+        conclusion: row.conclusion,
+        regressionCount: row.regressions?.length ?? 0,
+        improvementCount: row.improvements?.length ?? 0,
+      };
+    } catch (error) {
+      this.logger.warn(`Failed to get anomaly summary for ${testRunId}: ${(error as Error).message}`);
       return null;
     }
   }

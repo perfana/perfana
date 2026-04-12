@@ -90,7 +90,7 @@ export class ReportHtmlCompilerService {
 
     switch (section.type) {
       case 'header':
-        return this.headerRenderer.renderHeaderSection(section, testRun);
+        return await this.headerRenderer.renderHeaderSection(section, testRun);
       case 'text_block':
         return this.textBlockRenderer.renderTextBlockSection(section);
       case 'slo':

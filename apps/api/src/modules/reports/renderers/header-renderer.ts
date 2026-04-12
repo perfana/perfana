@@ -1,6 +1,7 @@
 import { Injectable } from '@nestjs/common';
 import { TestRun, ReportSectionConfig } from '@perfana/shared';
 import { ReportUtilsService } from '../services/report-utils.service';
+import { ReportDataFetcherService } from '../services/report-data-fetcher.service';
 
 /**
  * Renderer for header section
@@ -9,12 +10,15 @@ import { ReportUtilsService } from '../services/report-utils.service';
  */
 @Injectable()
 export class HeaderRenderer {
-  constructor(private readonly utils: ReportUtilsService) {}
+  constructor(
+    private readonly utils: ReportUtilsService,
+    private readonly dataFetcher: ReportDataFetcherService,
+  ) {}
 
   /**
    * Render header section - Cover page and Test Run Summary
    */
-  renderHeaderSection(section: ReportSectionConfig, testRun: TestRun | null): string {
+  async renderHeaderSection(section: ReportSectionConfig, testRun: TestRun | null): Promise<string> {
     const config = section.config || {};
     const title = (config.title as string) || 'Performance Test Report';
     const subtitle = config.subtitle as string;
@@ -42,9 +46,17 @@ export class HeaderRenderer {
 
     const durationFormatted = testRun?.duration ? this.utils.formatDuration(testRun.duration) : '1h 23m';
 
-    // Mock data for badges - TODO: fetch from test run status/results
-    const sloStatus = '662/871 PASSED';
-    const anomalyCount = 5;
+    // Fetch real SLO and anomaly data
+    const sloSummary = testRun ? await this.dataFetcher.getSloSummary(testRun.testRunId) : null;
+    const anomalySummary = testRun ? await this.dataFetcher.getAnomalySummary(testRun.testRunId) : null;
+
+    const sloStatus = sloSummary
+      ? `${sloSummary.passed}/${sloSummary.total} PASSED`
+      : 'No SLO data';
+    const sloAllPassed = sloSummary ? sloSummary.failed === 0 : false;
+
+    const anomalyCount = anomalySummary?.regressionCount ?? 0;
+    const anomalyConclusion = anomalySummary?.conclusion ?? 'no_data';
 
     let html = '';
 
@@ -124,11 +136,11 @@ export class HeaderRenderer {
             </div>
             <div class="info-item">
               <div class="info-label">SLO Status</div>
-              <div class="info-value"><span class="badge badge-error">${sloStatus}</span></div>
+              <div class="info-value"><span class="badge ${sloAllPassed ? 'badge-success' : 'badge-error'}">${sloStatus}</span></div>
             </div>
             <div class="info-item">
               <div class="info-label">Anomaly Detection</div>
-              <div class="info-value"><span class="badge badge-warning">${anomalyCount} ANOMALIES DETECTED</span></div>
+              <div class="info-value"><span class="badge ${anomalyCount > 0 ? 'badge-warning' : 'badge-success'}">${anomalyCount > 0 ? `${anomalyCount} REGRESSION${anomalyCount !== 1 ? 'S' : ''} DETECTED` : anomalyConclusion === 'no_data' ? 'No data' : 'NO REGRESSIONS'}</span></div>
             </div>
           </div>
 

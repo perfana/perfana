@@ -64,6 +64,7 @@ describe('ReportDataFetcherService', () => {
   let service: ReportDataFetcherService;
   let testRunRepo: jest.Mocked<Pick<Repository<TestRun>, 'query'>>;
   let authzService: jest.Mocked<Pick<AuthorizationService, 'isGlobalAdmin' | 'getAccessibleOrganizations'>>;
+  let dataSource: { query: jest.Mock };
 
   beforeEach(async () => {
     testRunRepo = {
@@ -73,6 +74,10 @@ describe('ReportDataFetcherService', () => {
     authzService = {
       isGlobalAdmin: jest.fn().mockReturnValue(false),
       getAccessibleOrganizations: jest.fn().mockResolvedValue([]),
+    };
+
+    dataSource = {
+      query: jest.fn().mockResolvedValue([]),
     };
 
     const module: TestingModule = await Test.createTestingModule({
@@ -88,7 +93,7 @@ describe('ReportDataFetcherService', () => {
         },
         {
           provide: DataSource,
-          useValue: { query: jest.fn().mockResolvedValue([]) },
+          useValue: dataSource,
         },
       ],
     }).compile();

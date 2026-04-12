@@ -52,71 +52,45 @@ export class ReportShareController {
     @Res({ passthrough: true }) res: Response,
   ): Promise<StreamableFile> {
     try {
-      // Validate share link and get report content
-      const publicReport = await this.reportShareService.getPublicReport(params.shareId);
+      // Serve pre-generated PDF from database
+      const result = await this.reportShareService.getPublicReportPdf(params.shareId);
 
-      this.logger.log(`Generating PDF for public share: ${publicReport.reportId}`);
+      if (!result) {
+        throw new HttpException(
+          'PDF has not been generated for this report yet',
+          HttpStatus.NOT_FOUND,
+        );
+      }
 
-      // Import puppeteer dynamically to avoid startup overhead
-      const puppeteer = await import('puppeteer');
+      // Sanitize filename
+      const sanitizedName = result.reportName
+        .replace(/[^a-z0-9\s-]/gi, '_')
+        .replace(/\s+/g, '_')
+        .toLowerCase();
 
-      const browser = await puppeteer.launch({
-        headless: true,
-        args: ['--no-sandbox', '--disable-setuid-sandbox'],
+      // Set content type and disposition
+      res.set({
+        'Content-Type': 'application/pdf',
+        'Content-Disposition': `attachment; filename="${sanitizedName}.pdf"`,
+        'Content-Length': result.pdfData.length.toString(),
       });
 
-      try {
-        const page = await browser.newPage();
+      this.logger.log(
+        `Serving pre-generated PDF for public share ${params.shareId}, size: ${result.pdfData.length} bytes`,
+      );
 
-        // Set content and wait for network to be idle
-        await page.setContent(publicReport.htmlContent, {
-          waitUntil: 'networkidle0',
-        });
-
-        // Generate PDF
-        const pdfBuffer = await page.pdf({
-          format: 'A4',
-          printBackground: true,
-          margin: {
-            top: '20px',
-            right: '20px',
-            bottom: '20px',
-            left: '20px',
-          },
-        });
-
-        await browser.close();
-
-        // Sanitize filename
-        const sanitizedName = publicReport.reportName
-          .replace(/[^a-z0-9\s-]/gi, '_')
-          .replace(/\s+/g, '_')
-          .toLowerCase();
-
-        // Set content type and disposition
-        res.set({
-          'Content-Type': 'application/pdf',
-          'Content-Disposition': `attachment; filename="${sanitizedName}.pdf"`,
-          'Content-Length': pdfBuffer.length.toString(),
-        });
-
-        this.logger.log(
-          `PDF generated successfully for public share ${params.shareId}, size: ${pdfBuffer.length} bytes`,
-        );
-
-        return new StreamableFile(Buffer.from(pdfBuffer));
-      } catch (pdfError) {
-        await browser.close();
-        throw pdfError;
-      }
+      return new StreamableFile(result.pdfData);
     } catch (error) {
+      if (error instanceof HttpException) {
+        throw error;
+      }
+
       // Handle specific error types from the service
       const errorMessage =
         error && typeof error === 'object' && 'message' in error
           ? (error as Error).message
           : 'Unknown error';
 
-      // ResourceNotFoundException and ValidationException from service
       if (
         errorMessage.includes('not found') ||
         errorMessage.includes('Shared Report') ||
@@ -128,9 +102,9 @@ export class ReportShareController {
         throw new HttpException(errorMessage, HttpStatus.NOT_FOUND);
       }
 
-      this.logger.error(`Failed to generate PDF for public share ${params.shareId}:`, error);
+      this.logger.error(`Failed to serve PDF for public share ${params.shareId}:`, error);
       throw new HttpException(
-        'Failed to generate PDF for shared report',
+        'Failed to download PDF for shared report',
         HttpStatus.INTERNAL_SERVER_ERROR,
       );
     }

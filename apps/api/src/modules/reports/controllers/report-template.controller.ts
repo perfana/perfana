@@ -365,7 +365,7 @@ export class ReportTemplateController {
   async update(
     @Param('templateId') templateId: string,
     @Body() dto: UpdateTemplateDto,
-    @UserCtx() _ctx?: UserContext,
+    @UserCtx() ctx?: UserContext,
   ): Promise<TemplateDetailDto> {
     try {
       const template = await this.reportTemplateService.update(templateId, {
@@ -388,6 +388,7 @@ export class ReportTemplateController {
             }
           : undefined,
         isDefault: dto.is_default,
+        updatedBy: ctx?.userId,
       });
 
       this.logger.log(`Template ${templateId} updated`);
