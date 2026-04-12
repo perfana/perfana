@@ -118,7 +118,7 @@ describe('ReportHtmlCompilerService', () => {
         {
           provide: RegressionsRenderer,
           useValue: {
-            renderRegressionsSection: jest.fn().mockReturnValue('<div>regressions</div>'),
+            renderRegressionsSection: jest.fn().mockResolvedValue('<div>regressions</div>'),
           },
         },
         {
