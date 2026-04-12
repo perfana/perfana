@@ -40,6 +40,7 @@ export interface UpdateTemplateOptions {
   sections?: ReportSectionConfig[];
   styling?: ReportStyling;
   isDefault?: boolean;
+  updatedBy?: string;
 }
 
 /**
@@ -435,6 +436,9 @@ export class ReportTemplateService {
       }
       if (options.isDefault !== undefined) {
         updateData.is_default = options.isDefault;
+      }
+      if (options.updatedBy) {
+        updateData.updatedBy = options.updatedBy;
       }
 
       await this.templateRepo.update(templateId, updateData as Record<string, unknown>);

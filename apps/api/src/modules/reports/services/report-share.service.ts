@@ -365,6 +365,47 @@ export class ReportShareService {
   }
 
   /**
+   * Get pre-generated PDF for a publicly shared report.
+   * Returns the stored PDF data if available, null if PDF has not been generated yet.
+   */
+  async getPublicReportPdf(
+    shareId: string,
+  ): Promise<{ reportName: string; pdfData: Buffer } | null> {
+    const validation = await this.validateShareLink(shareId);
+
+    if (!validation.isValid) {
+      switch (validation.errorCode) {
+        case 'NOT_FOUND':
+          throw new ResourceNotFoundException('Shared Report', shareId);
+        case 'SHARING_DISABLED':
+          throw new ValidationException('Sharing is not enabled for this report');
+        case 'EXPIRED':
+          throw new ValidationException('This share link has expired');
+        case 'NO_CONTENT':
+          throw new ValidationException('Report content is not yet available');
+        default:
+          throw new ValidationException('Unable to access shared report');
+      }
+    }
+
+    const report = validation.report!;
+
+    // Increment view count asynchronously
+    this.incrementViewCount(report.id).catch((err) =>
+      this.logger.warn(`Failed to increment view count for report ${report.id}: ${err}`),
+    );
+
+    if (!report.pdf_data) {
+      return null;
+    }
+
+    return {
+      reportName: report.name,
+      pdfData: report.pdf_data,
+    };
+  }
+
+  /**
    * Increment the view count for a report
    * @param reportId - Report UUID
    */
