@@ -1197,7 +1197,7 @@ export class ReportDataFetcherService {
    * Get comparisons data for a test run
    * Fetches ADAPT results comparing current run vs control group
    */
-  async getComparisonsData(testRunId: string, baselineTestRunId?: string): Promise<ComparisonsData | null> {
+  async getComparisonsData(testRunId: string, _baselineTestRunId?: string): Promise<ComparisonsData | null> {
     try {
       const resultRows: Array<{
         dashboard_label: string;
