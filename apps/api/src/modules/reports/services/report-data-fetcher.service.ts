@@ -1314,8 +1314,8 @@ export class ReportDataFetcherService {
    */
   async getSloCheckResults(
     testRunId: string,
-    userId: string = '',
-    roles: string[] = [],
+    _userId: string = '',
+    _roles: string[] = [],
   ): Promise<SloCheckResult[]> {
     try {
       const rows: SloCheckResult[] = await this.dataSource.query(
@@ -1350,8 +1350,8 @@ export class ReportDataFetcherService {
    */
   async getSloSummary(
     testRunId: string,
-    userId: string = '',
-    roles: string[] = [],
+    _userId: string = '',
+    _roles: string[] = [],
   ): Promise<SloSummary> {
     try {
       const rows: { meets_requirement: boolean | null }[] = await this.dataSource.query(
@@ -1443,8 +1443,8 @@ export class ReportDataFetcherService {
    */
   async getRegressionsData(
     testRunId: string,
-    userId: string = '',
-    roles: string[] = [],
+    _userId: string = '',
+    _roles: string[] = [],
   ): Promise<RegressionsData | null> {
     try {
       // Get overall conclusion
@@ -1519,8 +1519,8 @@ export class ReportDataFetcherService {
 
   async getAnomalySummary(
     testRunId: string,
-    userId: string = '',
-    roles: string[] = [],
+    _userId: string = '',
+    _roles: string[] = [],
   ): Promise<AnomalySummary> {
     try {
       const rows: { conclusion: string; regressions: string[] | null; improvements: string[] | null }[] =
