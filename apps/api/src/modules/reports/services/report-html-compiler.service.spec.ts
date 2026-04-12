@@ -100,7 +100,7 @@ describe('ReportHtmlCompilerService', () => {
         {
           provide: SloRenderer,
           useValue: {
-            renderSloSection: jest.fn().mockReturnValue('<div>slo</div>'),
+            renderSloSection: jest.fn().mockResolvedValue('<div>slo</div>'),
           },
         },
         {
@@ -118,7 +118,7 @@ describe('ReportHtmlCompilerService', () => {
         {
           provide: RegressionsRenderer,
           useValue: {
-            renderRegressionsSection: jest.fn().mockReturnValue('<div>regressions</div>'),
+            renderRegressionsSection: jest.fn().mockResolvedValue('<div>regressions</div>'),
           },
         },
         {
@@ -326,7 +326,7 @@ describe('ReportHtmlCompilerService', () => {
 
         headerRenderer.renderHeaderSection.mockReturnValue('<div>HEADER</div>');
         textBlockRenderer.renderTextBlockSection.mockReturnValue('<div>TEXT</div>');
-        sloRenderer.renderSloSection.mockReturnValue('<div>SLO</div>');
+        sloRenderer.renderSloSection.mockResolvedValue('<div>SLO</div>');
 
         const result = await service.renderSections(sections, null, null);
 
@@ -382,7 +382,7 @@ describe('ReportHtmlCompilerService', () => {
         headerRenderer.renderHeaderSection.mockImplementation(() => {
           throw new Error('header failed');
         });
-        sloRenderer.renderSloSection.mockReturnValue('<div>slo-ok</div>');
+        sloRenderer.renderSloSection.mockResolvedValue('<div>slo-ok</div>');
 
         const sections = [makeSection('header', 0), makeSection('slo', 1)];
         const result = await service.renderSections(sections, null, null);
@@ -831,7 +831,7 @@ describe('ReportHtmlCompilerService', () => {
       headerRenderer.renderHeaderSection.mockReturnValue(
         '<div class="cover-page"><h1>Test</h1></div>',
       );
-      sloRenderer.renderSloSection.mockReturnValue(
+      sloRenderer.renderSloSection.mockResolvedValue(
         '<section><h2>SLO Results</h2><p>All passed</p></section>',
       );
 
@@ -853,7 +853,7 @@ describe('ReportHtmlCompilerService', () => {
     });
 
     it('should produce a valid preview document for a single section', async () => {
-      sloRenderer.renderSloSection.mockReturnValue('<p>SLO data here</p>');
+      sloRenderer.renderSloSection.mockResolvedValue('<p>SLO data here</p>');
 
       const section = makeSection('slo', 0);
       const sectionHtml = await service.renderSections([section], makeTestRun(), null);
