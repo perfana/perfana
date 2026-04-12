@@ -104,7 +104,7 @@ export class ReportHtmlCompilerService {
       case 'awr':
         return this.awrRenderer.renderAwrSection(section, testRun);
       case 'trends':
-        return this.trendsRenderer.renderTrendsSection(section, testRun);
+        return await this.trendsRenderer.renderTrendsSection(section, testRun, userId, roles);
       case 'comparisons':
         return this.comparisonsRenderer.renderComparisonsSection(section, testRun);
       case 'graphs':

@@ -123,6 +123,26 @@ interface ApdexTransactionRow extends TransactionRow {
   active_threshold: string;
 }
 
+/** A single historical test run summary for trends */
+export interface TrendRunSummary {
+  testRunId: string;
+  startTime: Date;
+  applicationRelease: string | null;
+  duration: number | null;
+  avgMs: number;
+  p95Ms: number;
+  p99Ms: number;
+  errorRate: number;
+  totalTransactions: number;
+  consolidatedResult: unknown | null;
+}
+
+/** Trends data: current run + historical runs for comparison */
+export interface TrendsData {
+  currentRun: TrendRunSummary;
+  previousRuns: TrendRunSummary[];
+}
+
 /** Raw throughput scenario row from database query */
 interface ThroughputScenarioRow {
   scenario_name: string;
@@ -1022,5 +1042,108 @@ export class ReportDataFetcherService {
     };
 
     return mockScenarios[scenarioName] || null;
+  }
+
+  /**
+   * Get trends data: fetch historical test runs with the same system/environment/workload
+   * and compute summary metrics for each run so the trends renderer can show progression.
+   *
+   * @param testRun - Current test run
+   * @param maxRuns - Maximum number of historical runs to include (default 10)
+   * @param userId - User ID for org filtering
+   * @param roles - User roles for admin bypass
+   * @returns TrendsData with current and previous run summaries, or null
+   */
+  async getTrendsData(
+    testRun: TestRun,
+    maxRuns: number = 10,
+    userId: string = '',
+    roles: string[] = [],
+  ): Promise<TrendsData | null> {
+    try {
+      const skipOrgFilter = !userId || this.authzService.isGlobalAdmin(roles);
+
+      let organizationIds: string[] = [];
+      if (!skipOrgFilter) {
+        organizationIds = await this.authzService.getAccessibleOrganizations(userId);
+      }
+
+      const orgFilter = !skipOrgFilter
+        ? this.buildOrganizationFilterClause(5, organizationIds, 'tr')
+        : { clause: '', params: [] };
+
+      // Fetch recent completed runs for the same system/environment/workload
+      const query = `
+        SELECT
+          tr.test_run_id,
+          tr.start_time,
+          tr.application_release,
+          tr.duration,
+          tr.consolidated_result,
+          COALESCE(txn_stats.avg_ms, 0) as avg_ms,
+          COALESCE(txn_stats.p95_ms, 0) as p95_ms,
+          COALESCE(txn_stats.p99_ms, 0) as p99_ms,
+          COALESCE(txn_stats.error_rate, 0) as error_rate,
+          COALESCE(txn_stats.total_transactions, 0) as total_transactions
+        FROM test_runs tr
+        JOIN systems_under_test sut ON sut.id = tr.system_under_test_id
+        LEFT JOIN LATERAL (
+          SELECT
+            ROUND(AVG(t.response_time)::numeric, 2) as avg_ms,
+            ROUND(PERCENTILE_CONT(0.95) WITHIN GROUP (ORDER BY t.response_time)::numeric, 2) as p95_ms,
+            ROUND(PERCENTILE_CONT(0.99) WITHIN GROUP (ORDER BY t.response_time)::numeric, 2) as p99_ms,
+            CASE WHEN COUNT(*) > 0
+              THEN ROUND((COUNT(CASE WHEN t.success = false THEN 1 END)::numeric / COUNT(*)::numeric) * 100, 2)
+              ELSE 0
+            END as error_rate,
+            COUNT(*)::integer as total_transactions
+          FROM transactions t
+          WHERE t.test_run_id = tr.test_run_id
+        ) txn_stats ON true
+        WHERE tr.system_under_test_id = $1
+          AND tr.test_environment = $2
+          AND tr.workload = $3
+          AND tr.completed = true
+          AND tr.is_stale = false
+          AND tr.start_time <= $4
+          ${orgFilter.clause}
+        ORDER BY tr.start_time DESC
+        LIMIT ${maxRuns + 1}
+      `;
+
+      const rows = await this.testRunRepo.query(query, [
+        testRun.systemUnderTestId,
+        testRun.testEnvironment,
+        testRun.workload,
+        testRun.startTime || new Date(),
+        ...orgFilter.params,
+      ]);
+
+      if (!rows || rows.length === 0) {
+        return null;
+      }
+
+      const mapRow = (row: Record<string, unknown>): TrendRunSummary => ({
+        testRunId: row.test_run_id as string,
+        startTime: new Date(row.start_time as string),
+        applicationRelease: (row.application_release as string) || null,
+        duration: row.duration ? parseInt(row.duration as string) : null,
+        avgMs: parseFloat(row.avg_ms as string) || 0,
+        p95Ms: parseFloat(row.p95_ms as string) || 0,
+        p99Ms: parseFloat(row.p99_ms as string) || 0,
+        errorRate: parseFloat(row.error_rate as string) || 0,
+        totalTransactions: parseInt(row.total_transactions as string) || 0,
+        consolidatedResult: row.consolidated_result ?? null,
+      });
+
+      // First row is the current (or most recent) run
+      const currentRun = mapRow(rows[0]);
+      const previousRuns = rows.slice(1).map(mapRow);
+
+      return { currentRun, previousRuns };
+    } catch (error) {
+      this.logger.error('Failed to fetch trends data:', error);
+      return null;
+    }
   }
 }
