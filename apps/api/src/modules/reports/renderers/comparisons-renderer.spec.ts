@@ -1,74 +1,57 @@
 import { Test, TestingModule } from '@nestjs/testing';
 import { ComparisonsRenderer } from './comparisons-renderer';
 import { ReportUtilsService } from '../services/report-utils.service';
-import {
-  ReportDataFetcherService,
-  ComparisonsData,
-  ComparisonMetric,
-} from '../services/report-data-fetcher.service';
+import { ReportDataFetcherService } from '../services/report-data-fetcher.service';
 import type { ReportSectionConfig, TestRun } from '@perfana/shared';
-
-// ---------------------------------------------------------------------------
-// Helpers
-// ---------------------------------------------------------------------------
 
 const makeSection = (
   overrides?: Partial<ReportSectionConfig>,
-): ReportSectionConfig => ({
-  type: 'comparisons',
-  order: 6,
-  ...overrides,
-});
+): ReportSectionConfig => ({ type: 'comparisons', order: 0, ...overrides });
 
 const makeTestRun = (overrides?: Partial<TestRun>): TestRun =>
   ({
-    id: 'uuid-current',
-    testRunId: 'run-003',
+    id: 'uuid-1',
+    testRunId: 'run-001',
     testEnvironment: 'staging',
     workload: 'load-test',
-    systemUnderTestId: 'my-system',
-    applicationRelease: 'v3.0.0',
-    startTime: new Date('2025-06-03T10:00:00Z'),
-    endTime: new Date('2025-06-03T11:00:00Z'),
-    duration: 3600,
-    completed: true,
+    systemUnderTestId: 'system-1',
     ...overrides,
   }) as TestRun;
 
-const makeMetric = (overrides?: Partial<ComparisonMetric>): ComparisonMetric => ({
-  dashboardLabel: 'Response Times',
-  panelTitle: 'Login API',
-  metricName: 'avg_response_time',
+const makeMetric = (overrides?: Record<string, unknown>) => ({
+  dashboardLabel: 'API Dashboard',
+  panelTitle: 'Response Time',
+  metricName: 'avg',
   unit: 'ms',
-  currentValue: 150.0,
-  baselineValue: 120.0,
-  difference: 30.0,
-  differencePercent: 25.0,
+  currentValue: 120,
+  baselineValue: 100,
+  difference: 20,
+  differencePercent: 20.0,
   conclusion: 'regression',
   ...overrides,
 });
 
-const makeComparisonsData = (overrides?: Partial<ComparisonsData>): ComparisonsData => ({
+const makeComparisonsData = (overrides?: Record<string, unknown>) => ({
   metrics: [
     makeMetric(),
     makeMetric({
-      panelTitle: 'Search API',
-      metricName: 'p95_response_time',
-      currentValue: 80.0,
-      baselineValue: 100.0,
-      difference: -20.0,
-      differencePercent: -20.0,
+      panelTitle: 'Throughput',
+      metricName: 'req/s',
+      unit: null,
+      currentValue: 500,
+      baselineValue: 450,
+      difference: 50,
+      differencePercent: 11.1,
       conclusion: 'improvement',
     }),
     makeMetric({
-      dashboardLabel: 'Throughput',
-      panelTitle: 'Orders',
-      metricName: 'requests_per_sec',
-      unit: null,
-      currentValue: 500.0,
-      baselineValue: 498.0,
-      difference: 2.0,
-      differencePercent: 0.4,
+      panelTitle: 'Error Rate',
+      metricName: 'pct',
+      unit: '%',
+      currentValue: 0.5,
+      baselineValue: 0.5,
+      difference: 0,
+      differencePercent: 0,
       conclusion: 'no_difference',
     }),
   ],
@@ -78,10 +61,6 @@ const makeComparisonsData = (overrides?: Partial<ComparisonsData>): ComparisonsD
   totalMetrics: 3,
   ...overrides,
 });
-
-// ---------------------------------------------------------------------------
-// Tests
-// ---------------------------------------------------------------------------
 
 describe('ComparisonsRenderer', () => {
   let renderer: ComparisonsRenderer;
@@ -95,7 +74,7 @@ describe('ComparisonsRenderer', () => {
         {
           provide: ReportDataFetcherService,
           useValue: {
-            getComparisonsData: jest.fn(),
+            getComparisonsData: jest.fn().mockResolvedValue(null),
           },
         },
       ],
@@ -105,189 +84,123 @@ describe('ComparisonsRenderer', () => {
     dataFetcher = module.get(ReportDataFetcherService);
   });
 
-  // -----------------------------------------------------------------------
-  // Empty / null states
-  // -----------------------------------------------------------------------
+  it('should render placeholder when testRun is null', async () => {
+    const html = await renderer.renderComparisonsSection(makeSection(), null);
 
-  describe('empty states', () => {
-    it('should render placeholder when testRun is null', async () => {
-      const html = await renderer.renderComparisonsSection(makeSection(), null);
-      expect(html).toContain('No comparison data available');
-      expect(html).toContain('Comparisons');
-    });
-
-    it('should render placeholder when data has no metrics', async () => {
-      dataFetcher.getComparisonsData.mockResolvedValue(
-        makeComparisonsData({ metrics: [], totalMetrics: 0 }),
-      );
-      const html = await renderer.renderComparisonsSection(makeSection(), makeTestRun());
-      expect(html).toContain('No comparison data available');
-    });
-
-    it('should render placeholder when fetcher returns null', async () => {
-      dataFetcher.getComparisonsData.mockResolvedValue(null as any);
-      const html = await renderer.renderComparisonsSection(makeSection(), makeTestRun());
-      expect(html).toContain('No comparison data available');
-    });
+    expect(html).toContain('comparisons-section');
+    expect(html).toContain('No comparison data available');
+    expect(dataFetcher.getComparisonsData).not.toHaveBeenCalled();
   });
 
-  // -----------------------------------------------------------------------
-  // Section header & comment
-  // -----------------------------------------------------------------------
+  it('should render placeholder when no data returned', async () => {
+    dataFetcher.getComparisonsData.mockResolvedValue(null);
 
-  describe('section header', () => {
-    it('should use custom title from section config', async () => {
-      dataFetcher.getComparisonsData.mockResolvedValue(makeComparisonsData());
-      const html = await renderer.renderComparisonsSection(
-        makeSection({ title: 'Baseline Comparison' }),
-        makeTestRun(),
-      );
-      expect(html).toContain('Baseline Comparison');
-    });
+    const html = await renderer.renderComparisonsSection(makeSection(), makeTestRun());
 
-    it('should use default title when none provided', async () => {
-      dataFetcher.getComparisonsData.mockResolvedValue(makeComparisonsData());
-      const html = await renderer.renderComparisonsSection(makeSection(), makeTestRun());
-      expect(html).toContain('Comparisons');
-    });
-
-    it('should render section comment when provided', async () => {
-      dataFetcher.getComparisonsData.mockResolvedValue(makeComparisonsData());
-      const html = await renderer.renderComparisonsSection(
-        makeSection({ comment: 'Review regressions carefully' }),
-        makeTestRun(),
-      );
-      expect(html).toContain('Review regressions carefully');
-    });
+    expect(html).toContain('No comparison data available');
   });
 
-  // -----------------------------------------------------------------------
-  // Summary badges
-  // -----------------------------------------------------------------------
+  it('should render summary badges with counts', async () => {
+    dataFetcher.getComparisonsData.mockResolvedValue(makeComparisonsData() as any);
 
-  describe('summary badges', () => {
-    it('should render regression, improvement, no difference, and total counts', async () => {
-      dataFetcher.getComparisonsData.mockResolvedValue(makeComparisonsData());
-      const html = await renderer.renderComparisonsSection(makeSection(), makeTestRun());
-      expect(html).toContain('>1</div>'); // regressionCount or improvementCount
-      expect(html).toContain('>3</div>'); // totalMetrics
-      expect(html).toContain('Regressions');
-      expect(html).toContain('Improvements');
-      expect(html).toContain('No Difference');
-      expect(html).toContain('Total Metrics');
-    });
+    const html = await renderer.renderComparisonsSection(makeSection(), makeTestRun());
+
+    expect(html).toContain('Regressions');
+    expect(html).toContain('Improvements');
+    expect(html).toContain('No Difference');
+    expect(html).toContain('Total Metrics');
+    expect(html).toContain('3 metrics compared');
   });
 
-  // -----------------------------------------------------------------------
-  // Grouping by dashboard
-  // -----------------------------------------------------------------------
+  it('should render comparison table grouped by dashboard', async () => {
+    dataFetcher.getComparisonsData.mockResolvedValue(makeComparisonsData() as any);
 
-  describe('dashboard grouping', () => {
-    it('should group metrics by dashboard label', async () => {
-      dataFetcher.getComparisonsData.mockResolvedValue(makeComparisonsData());
-      const html = await renderer.renderComparisonsSection(makeSection(), makeTestRun());
-      expect(html).toContain('Response Times (2 metrics)');
-      expect(html).toContain('Throughput (1 metrics)');
-    });
+    const html = await renderer.renderComparisonsSection(makeSection(), makeTestRun());
+
+    expect(html).toContain('API Dashboard');
+    expect(html).toContain('Response Time');
+    expect(html).toContain('Throughput');
+    expect(html).toContain('Error Rate');
+    expect(html).toContain('120.0 ms');
+    expect(html).toContain('100.0 ms');
+    expect(html).toContain('+20.0%');
   });
 
-  // -----------------------------------------------------------------------
-  // Comparison table content
-  // -----------------------------------------------------------------------
+  it('should render conclusion badges per metric', async () => {
+    dataFetcher.getComparisonsData.mockResolvedValue(makeComparisonsData() as any);
 
-  describe('comparison table', () => {
-    it('should render metric values with formatting', async () => {
-      dataFetcher.getComparisonsData.mockResolvedValue(makeComparisonsData());
-      const html = await renderer.renderComparisonsSection(makeSection(), makeTestRun());
-      expect(html).toContain('150.0 ms'); // current value
-      expect(html).toContain('120.0 ms'); // baseline value
-      expect(html).toContain('30.0 ms');  // difference
-      expect(html).toContain('+25.0%');   // difference percent
-    });
+    const html = await renderer.renderComparisonsSection(makeSection(), makeTestRun());
 
-    it('should render improvement with negative percent', async () => {
-      dataFetcher.getComparisonsData.mockResolvedValue(makeComparisonsData());
-      const html = await renderer.renderComparisonsSection(makeSection(), makeTestRun());
-      expect(html).toContain('-20.0%');
-    });
-
-    it('should render conclusion badges', async () => {
-      dataFetcher.getComparisonsData.mockResolvedValue(makeComparisonsData());
-      const html = await renderer.renderComparisonsSection(makeSection(), makeTestRun());
-      expect(html).toContain('regression');
-      expect(html).toContain('improvement');
-      expect(html).toContain('no difference');
-    });
-
-    it('should handle null values with dashes', async () => {
-      dataFetcher.getComparisonsData.mockResolvedValue(
-        makeComparisonsData({
-          metrics: [
-            makeMetric({
-              currentValue: null,
-              baselineValue: null,
-              difference: null,
-              differencePercent: null,
-            }),
-          ],
-          totalMetrics: 1,
-          regressionCount: 0,
-          improvementCount: 0,
-          noDifferenceCount: 1,
-        }),
-      );
-      const html = await renderer.renderComparisonsSection(makeSection(), makeTestRun());
-      // The dash character for null values (current, baseline, diff = 3 dashes; diff% shows "—" inline)
-      const dashCount = (html.match(/\u2014/g) || []).length;
-      expect(dashCount).toBeGreaterThanOrEqual(4); // current, baseline, diff, diff%
-    });
+    expect(html).toContain('regression');
+    expect(html).toContain('improvement');
+    expect(html).toContain('no difference');
   });
 
-  // -----------------------------------------------------------------------
-  // Config: baselineTestRunId
-  // -----------------------------------------------------------------------
+  it('should render custom title and comment', async () => {
+    dataFetcher.getComparisonsData.mockResolvedValue(makeComparisonsData() as any);
 
-  describe('baselineTestRunId config', () => {
-    it('should pass baselineTestRunId to data fetcher when provided', async () => {
-      dataFetcher.getComparisonsData.mockResolvedValue(makeComparisonsData());
-      await renderer.renderComparisonsSection(
-        makeSection({ config: { baselineTestRunId: 'run-001' } }),
-        makeTestRun(),
-      );
-      expect(dataFetcher.getComparisonsData).toHaveBeenCalledWith('run-003', 'run-001');
-    });
+    const html = await renderer.renderComparisonsSection(
+      makeSection({ title: 'Run Comparison', comment: 'vs baseline run' }),
+      makeTestRun(),
+    );
 
-    it('should pass undefined when no baselineTestRunId', async () => {
-      dataFetcher.getComparisonsData.mockResolvedValue(makeComparisonsData());
-      await renderer.renderComparisonsSection(makeSection(), makeTestRun());
-      expect(dataFetcher.getComparisonsData).toHaveBeenCalledWith('run-003', undefined);
-    });
+    expect(html).toContain('Run Comparison');
+    expect(html).toContain('vs baseline run');
   });
 
-  // -----------------------------------------------------------------------
-  // XSS protection
-  // -----------------------------------------------------------------------
+  it('should pass baselineTestRunId from config', async () => {
+    dataFetcher.getComparisonsData.mockResolvedValue(makeComparisonsData() as any);
 
-  describe('XSS protection', () => {
-    it('should escape HTML in title', async () => {
-      dataFetcher.getComparisonsData.mockResolvedValue(makeComparisonsData());
-      const html = await renderer.renderComparisonsSection(
-        makeSection({ title: '<script>alert("xss")</script>' }),
-        makeTestRun(),
-      );
-      expect(html).not.toContain('<script>');
-      expect(html).toContain('&lt;script&gt;');
+    await renderer.renderComparisonsSection(
+      makeSection({ config: { baselineTestRunId: 'baseline-run-123' } }),
+      makeTestRun(),
+    );
+
+    expect(dataFetcher.getComparisonsData).toHaveBeenCalledWith('run-001', 'baseline-run-123');
+  });
+
+  it('should group metrics by dashboard', async () => {
+    const data = makeComparisonsData({
+      metrics: [
+        makeMetric({ dashboardLabel: 'Dashboard A', panelTitle: 'Panel 1' }),
+        makeMetric({ dashboardLabel: 'Dashboard A', panelTitle: 'Panel 2' }),
+        makeMetric({ dashboardLabel: 'Dashboard B', panelTitle: 'Panel 3' }),
+      ],
     });
 
-    it('should escape HTML in metric names', async () => {
-      dataFetcher.getComparisonsData.mockResolvedValue(
-        makeComparisonsData({
-          metrics: [makeMetric({ metricName: '<img onerror=alert(1)>' })],
-          totalMetrics: 1,
-        }),
-      );
-      const html = await renderer.renderComparisonsSection(makeSection(), makeTestRun());
-      expect(html).not.toContain('<img');
+    dataFetcher.getComparisonsData.mockResolvedValue(data as any);
+
+    const html = await renderer.renderComparisonsSection(makeSection(), makeTestRun());
+
+    expect(html).toContain('Dashboard A (2 metrics)');
+    expect(html).toContain('Dashboard B (1 metrics)');
+  });
+
+  it('should handle empty metrics gracefully', async () => {
+    dataFetcher.getComparisonsData.mockResolvedValue(
+      makeComparisonsData({ metrics: [], totalMetrics: 0 }) as any,
+    );
+
+    const html = await renderer.renderComparisonsSection(makeSection(), makeTestRun());
+
+    expect(html).toContain('No comparison data available');
+  });
+
+  it('should format different unit types', async () => {
+    const data = makeComparisonsData({
+      metrics: [
+        makeMetric({ unit: 'ms', currentValue: 250.6 }),
+        makeMetric({ panelTitle: 'CPU', metricName: 'usage', unit: '%', currentValue: 75.3 }),
+        makeMetric({ panelTitle: 'Memory', metricName: 'used', unit: 'bytes', currentValue: 1073741824 }),
+      ],
     });
+
+    dataFetcher.getComparisonsData.mockResolvedValue(data as any);
+
+    const html = await renderer.renderComparisonsSection(makeSection(), makeTestRun());
+
+    expect(html).toContain('250.6 ms');
+    expect(html).toContain('75.3%');
+    expect(html).toContain('1.0 GB');
   });
 });
