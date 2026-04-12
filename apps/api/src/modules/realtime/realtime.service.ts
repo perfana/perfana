@@ -45,7 +45,7 @@ export class RealtimeService extends RealtimePublisherService {
     private testRunsGateway: TestRunsGateway,
     private notificationsService: NotificationsService,
   ) {
-    const redisUrl = configService.get<string>('REDIS_URL', 'redis://localhost:6380');
+    const redisUrl = configService.get<string>('REDIS_URL', 'redis://localhost:6379');
     const redisPassword = configService.get<string>('REDIS_PASSWORD', 'redis_dev_password');
 
     // Initialize parent publisher service
