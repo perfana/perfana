@@ -4,6 +4,23 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
+## [0.2.36.0] - 2026-04-12
+
+### Added
+- **Full report rendering pipeline with real data.** All seven report section renderers now fetch live data instead of returning stubs or mock values:
+  - **SLO renderer** queries `check_results` and renders a pass/fail table with per-metric requirement vs actual values.
+  - **Regressions renderer** fetches ADAPT results and renders a sorted table of regressions and improvements with conclusion icons.
+  - **AWR renderer** reads parsed AWR reports and analysis insights from `awr_reports` / `awr_analysis` and renders a severity-grouped summary.
+  - **Trends renderer** queries historical test runs with the same system/environment/workload and renders a sparkline-style progression table.
+  - **Comparisons renderer** fetches `ds_adapt_results` and renders a side-by-side metric comparison with difference percentages.
+  - **Graphs renderer** reads time-series data from `ds_metrics` and renders inline SVG charts for each panel.
+  - **Header renderer** now shows real SLO pass/fail counts and regression detection status instead of placeholder badges.
+- **`ReportDataFetcherService`** gains nine new methods: `getSloCheckResults`, `getSloSummary`, `getRegressionsData`, `getAnomalySummary`, `getAwrData`, `getComparisonsData`, `getTrendsData`, `getMetricsTimeSeries`, and `getAvailableMetricsPanels`. All support `userId` / `roles` parameters for org-level access filtering.
+- **`getTrendsData`** and **`getMetricsTimeSeries`** auto-discover available panels from `ds_metrics` when no explicit panel selector is provided.
+
+### Fixed
+- `getTrendsData` clamps the `maxRuns` parameter to a validated integer (1–50) before interpolating into SQL, preventing runaway queries from uncapped values.
+
 ## [0.2.35.0] - 2026-04-11
 
 ### Fixed

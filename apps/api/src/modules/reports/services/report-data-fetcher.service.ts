@@ -1554,6 +1554,7 @@ export class ReportDataFetcherService {
     roles: string[] = [],
   ): Promise<TrendsData | null> {
     try {
+      const safeMaxRuns = Math.max(1, Math.min(Math.floor(maxRuns), 50));
       const skipOrgFilter = !userId || this.authzService.isGlobalAdmin(roles);
 
       let organizationIds: string[] = [];
@@ -1601,7 +1602,7 @@ export class ReportDataFetcherService {
           AND tr.start_time <= $4
           ${orgFilter.clause}
         ORDER BY tr.start_time DESC
-        LIMIT ${maxRuns + 1}
+        LIMIT ${safeMaxRuns + 1}
       `;
 
       const rows = await this.testRunRepo.query(query, [
