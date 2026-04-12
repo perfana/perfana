@@ -70,15 +70,41 @@ export class ReportGenerationController {
   @ApiQuery({ name: 'sortOrder', required: false, description: 'Sort order (default: desc)' })
   @ApiResponse({ status: 200, description: 'Return paginated list of reports', type: ReportListResponseDto })
   @ApiResponse({ status: 401, description: 'Unauthorized - valid authentication required' })
-  async findAll(@Query() query: ListReportsQueryDto): Promise<ReportListResponseDto> {
+  async findAll(
+    @Query() query: ListReportsQueryDto,
+    @UserCtx() ctx?: UserContext,
+  ): Promise<ReportListResponseDto> {
     try {
-      // When no testRunId specified, we return all reports with pagination
-      // This is a placeholder - actual implementation would need a different service method
-      return {
-        items: [],
-        total: 0,
-        offset: query.offset || 0,
+      const result = await this.reportGenerationService.findAll({
+        status: query.status as ReportStatus,
         limit: query.limit || 50,
+        offset: query.offset || 0,
+        sortBy: query.sortBy as 'created_at' | 'name' | 'status',
+        sortOrder: query.sortOrder as 'asc' | 'desc',
+        userId: ctx?.userId,
+        roles: ctx?.roles,
+      });
+
+      return {
+        items: result.items.map((report) => ({
+          id: report.id,
+          name: report.name,
+          status: report.status as ReportStatus,
+          test_run_id: report.test_run_id,
+          template_name: report.template?.name || '',
+          generated_by: report.generated_by,
+          share_enabled: report.share_enabled,
+          share_id: report.share_id,
+          share_view_count: report.share_view_count,
+          download_count: report.download_count || 0,
+          has_pdf: !!report.pdf_data,
+          file_size: report.file_metadata?.fileSize as number | undefined,
+          created_at: report.created_at,
+          updated_at: report.updated_at,
+        })),
+        total: result.total,
+        offset: result.offset,
+        limit: result.limit,
       };
     } catch (error) {
       this.logger.error('Failed to fetch reports:', error);
@@ -686,8 +712,7 @@ export class ReportGenerationController {
 
       this.logger.log(`PDF served successfully for report ${reportId}, size: ${report.pdf_data.length} bytes`);
 
-      // TODO: Track download count
-      // await this.reportGenerationService.incrementDownloadCount(reportId);
+      await this.reportGenerationService.incrementDownloadCount(reportId);
 
       return new StreamableFile(report.pdf_data);
 

@@ -65,17 +65,29 @@ export class PdfService {
     }
 
     // Generate PDF from HTML
-    const pdfBuffer = await this.generatePdfFromHtml(report.html_content, report.name);
+    const result = await this.generatePdfFromHtml(report.html_content, report.name);
 
-    this.logger.log(`PDF generated successfully for report ${reportId}, size: ${this.formatFileSize(pdfBuffer.length)}`);
+    // Populate file_metadata with page count and Puppeteer version
+    const fileMetadata: Record<string, unknown> = {};
+    if (result.pageCount != null) fileMetadata.pageCount = result.pageCount;
+    if (result.puppeteerVersion != null) fileMetadata.puppeteerVersion = result.puppeteerVersion;
 
-    return pdfBuffer;
+    if (Object.keys(fileMetadata).length > 0) {
+      await this.reportRepo.update(reportId, {
+        file_metadata: fileMetadata as any,
+      });
+      this.logger.log(`Updated file_metadata for report ${reportId}: ${JSON.stringify(fileMetadata)}`);
+    }
+
+    this.logger.log(`PDF generated successfully for report ${reportId}, size: ${this.formatFileSize(result.buffer.length)}`);
+
+    return result.buffer;
   }
 
   /**
    * Generate PDF from HTML content using Puppeteer
    */
-  private async generatePdfFromHtml(htmlContent: string, reportName: string): Promise<Buffer> {
+  private async generatePdfFromHtml(htmlContent: string, reportName: string): Promise<{ buffer: Buffer; pageCount: number | null; puppeteerVersion: string | null }> {
     let page = null;
 
     try {
@@ -128,9 +140,20 @@ export class PdfService {
         ),
       ]);
 
-      this.logger.debug(`PDF generated successfully, size: ${pdfBuffer.length} bytes`);
+      // Get page count from Puppeteer metrics
+      const pageCount = await page.evaluate(() => {
+        // CSS page-break elements define page boundaries; approximate via content height / A4 height
+        const body = document.body;
+        const totalHeight = Math.max(body.scrollHeight, body.offsetHeight);
+        const a4HeightPx = 1123; // A4 at 96 DPI minus margins (~297mm - 40mm margins)
+        return Math.max(1, Math.ceil(totalHeight / a4HeightPx));
+      }).catch(() => null);
 
-      return Buffer.from(pdfBuffer);
+      const browserVersion = await page.browser().version().catch(() => null);
+
+      this.logger.debug(`PDF generated successfully, size: ${pdfBuffer.length} bytes, ~${pageCount} pages`);
+
+      return { buffer: Buffer.from(pdfBuffer), pageCount, puppeteerVersion: browserVersion };
     } finally {
       // Clean up page (but keep browser in pool)
       if (page) {

@@ -21,11 +21,11 @@ import { TrendsRenderer } from '../renderers/trends-renderer';
 import { ComparisonsRenderer } from '../renderers/comparisons-renderer';
 import { GraphsRenderer } from '../renderers/graphs-renderer';
 import { PlaceholderRenderer } from '../renderers/placeholder-renderer';
-import type {
+import {
   ReportSectionConfig,
   ReportStyling,
 } from '@perfana/shared';
-import type { TestRun, GeneratedReport } from '../../../entities';
+import { TestRun, GeneratedReport } from '../../../entities';
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -88,7 +88,7 @@ describe('ReportHtmlCompilerService', () => {
         {
           provide: HeaderRenderer,
           useValue: {
-            renderHeaderSection: jest.fn().mockReturnValue('<div>header</div>'),
+            renderHeaderSection: jest.fn().mockResolvedValue('<div>header</div>'),
           },
         },
         {
@@ -100,7 +100,7 @@ describe('ReportHtmlCompilerService', () => {
         {
           provide: SloRenderer,
           useValue: {
-            renderSloSection: jest.fn().mockReturnValue('<div>slo</div>'),
+            renderSloSection: jest.fn().mockResolvedValue('<div>slo</div>'),
           },
         },
         {
@@ -118,25 +118,25 @@ describe('ReportHtmlCompilerService', () => {
         {
           provide: RegressionsRenderer,
           useValue: {
-            renderRegressionsSection: jest.fn().mockReturnValue('<div>regressions</div>'),
+            renderRegressionsSection: jest.fn().mockResolvedValue('<div>regressions</div>'),
           },
         },
         {
           provide: AwrRenderer,
           useValue: {
-            renderAwrSection: jest.fn().mockReturnValue('<div>awr</div>'),
+            renderAwrSection: jest.fn().mockResolvedValue('<div>awr</div>'),
           },
         },
         {
           provide: TrendsRenderer,
           useValue: {
-            renderTrendsSection: jest.fn().mockReturnValue('<div>trends</div>'),
+            renderTrendsSection: jest.fn().mockResolvedValue('<div>trends</div>'),
           },
         },
         {
           provide: ComparisonsRenderer,
           useValue: {
-            renderComparisonsSection: jest.fn().mockReturnValue('<div>comparisons</div>'),
+            renderComparisonsSection: jest.fn().mockResolvedValue('<div>comparisons</div>'),
           },
         },
         {
@@ -299,8 +299,8 @@ describe('ReportHtmlCompilerService', () => {
         const sections = [makeSection('header', 0), makeSection('slo', 1)];
         await service.renderSections(sections, testRun, null);
 
-        expect(headerRenderer.renderHeaderSection).toHaveBeenCalledWith(sections[0], testRun);
-        expect(sloRenderer.renderSloSection).toHaveBeenCalledWith(sections[1], testRun);
+        expect(headerRenderer.renderHeaderSection).toHaveBeenCalledWith(sections[0], testRun, '', []);
+        expect(sloRenderer.renderSloSection).toHaveBeenCalledWith(sections[1], testRun, '', []);
       });
 
       it('should concatenate multiple section outputs joined by newline', async () => {
@@ -324,9 +324,9 @@ describe('ReportHtmlCompilerService', () => {
           makeSection('text_block', 1),
         ];
 
-        headerRenderer.renderHeaderSection.mockReturnValue('<div>HEADER</div>');
+        headerRenderer.renderHeaderSection.mockResolvedValue('<div>HEADER</div>');
         textBlockRenderer.renderTextBlockSection.mockReturnValue('<div>TEXT</div>');
-        sloRenderer.renderSloSection.mockReturnValue('<div>SLO</div>');
+        sloRenderer.renderSloSection.mockResolvedValue('<div>SLO</div>');
 
         const result = await service.renderSections(sections, null, null);
 
@@ -382,7 +382,7 @@ describe('ReportHtmlCompilerService', () => {
         headerRenderer.renderHeaderSection.mockImplementation(() => {
           throw new Error('header failed');
         });
-        sloRenderer.renderSloSection.mockReturnValue('<div>slo-ok</div>');
+        sloRenderer.renderSloSection.mockResolvedValue('<div>slo-ok</div>');
 
         const sections = [makeSection('header', 0), makeSection('slo', 1)];
         const result = await service.renderSections(sections, null, null);
@@ -828,10 +828,10 @@ describe('ReportHtmlCompilerService', () => {
 
   describe('End-to-End: renderSections into compileHtml', () => {
     it('should produce a complete HTML document from multiple sections', async () => {
-      headerRenderer.renderHeaderSection.mockReturnValue(
+      headerRenderer.renderHeaderSection.mockResolvedValue(
         '<div class="cover-page"><h1>Test</h1></div>',
       );
-      sloRenderer.renderSloSection.mockReturnValue(
+      sloRenderer.renderSloSection.mockResolvedValue(
         '<section><h2>SLO Results</h2><p>All passed</p></section>',
       );
 
@@ -853,7 +853,7 @@ describe('ReportHtmlCompilerService', () => {
     });
 
     it('should produce a valid preview document for a single section', async () => {
-      sloRenderer.renderSloSection.mockReturnValue('<p>SLO data here</p>');
+      sloRenderer.renderSloSection.mockResolvedValue('<p>SLO data here</p>');
 
       const section = makeSection('slo', 0);
       const sectionHtml = await service.renderSections([section], makeTestRun(), null);

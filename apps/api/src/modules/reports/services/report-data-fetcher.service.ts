@@ -1,8 +1,37 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Repository } from 'typeorm';
+import { Repository, DataSource } from 'typeorm';
 import { TestRun } from '@perfana/shared';
 import { AuthorizationService } from '../../../common/services/authorization.service';
+
+/** SLO check result summary for header renderer */
+export interface SloSummary {
+  passed: number;
+  failed: number;
+  total: number;
+}
+
+/** Individual SLO check result for the SLO renderer */
+export interface SloCheckResult {
+  benchmark_id: string;
+  panel_title: string | null;
+  metric_name: string | null;
+  metric_unit: string | null;
+  evaluate_type: string;
+  source: string;
+  dashboard_label: string | null;
+  requirement_operator: string | null;
+  requirement_value: number | null;
+  panel_average: number | null;
+  meets_requirement: boolean | null;
+}
+
+/** Anomaly detection summary for header renderer */
+export interface AnomalySummary {
+  conclusion: string;
+  regressionCount: number;
+  improvementCount: number;
+}
 
 /** Transaction summary for report rendering */
 export interface ReportTransaction {
@@ -104,6 +133,99 @@ export interface VirtualUserStats {
   }>;
 }
 
+/** AWR report summary for report rendering */
+export interface AwrReportSummary {
+  id: string;
+  dbName: string | null;
+  instanceName: string | null;
+  dbEdition: string | null;
+  dbRelease: string | null;
+  hostName: string | null;
+  platform: string | null;
+  cpus: number | null;
+  cores: number | null;
+  memoryGb: number | null;
+  beginTime: string | null;
+  endTime: string | null;
+  elapsedMinutes: number | null;
+  dbTimeMinutes: number | null;
+  parsedData: Record<string, unknown> | null;
+}
+
+/** AWR insight for report rendering */
+export interface AwrInsightSummary {
+  severity: string;
+  category: string;
+  title: string;
+  description: string;
+  recommendation: string | null;
+  value: number | null;
+  unit: string | null;
+}
+
+/** Full AWR data for report rendering */
+export interface AwrData {
+  reports: AwrReportSummary[];
+  insights: AwrInsightSummary[];
+  severitySummary: { critical: number; warning: number; info: number; total: number };
+}
+
+/** Per-metric comparison detail for report rendering (comparisons section) */
+export interface ComparisonMetric {
+  dashboardLabel: string;
+  panelTitle: string;
+  metricName: string;
+  unit: string | null;
+  currentValue: number | null;
+  baselineValue: number | null;
+  difference: number | null;
+  differencePercent: number | null;
+  conclusion: string;
+}
+
+/** Full comparisons data for report rendering */
+export interface ComparisonsData {
+  metrics: ComparisonMetric[];
+  regressionCount: number;
+  improvementCount: number;
+  noDifferenceCount: number;
+  totalMetrics: number;
+}
+
+/** Per-metric regression/improvement detail for report rendering (regressions section) */
+export interface RegressionsMetric {
+  dashboardLabel: string;
+  panelTitle: string;
+  metricName: string;
+  unit: string | null;
+  conclusionLabel: string;
+  testValue: number | null;
+  controlValue: number | null;
+  difference: number | null;
+  differencePercent: number | null;
+}
+
+/** Full regressions data for report rendering */
+export interface RegressionsData {
+  conclusion: string;
+  regressionCount: number;
+  improvementCount: number;
+  totalMetrics: number;
+  regressions: RegressionsMetric[];
+  improvements: RegressionsMetric[];
+  noDifference?: RegressionsMetric[];
+}
+
+/** Raw ADAPT result row from database query */
+interface AdaptResultRow {
+  dashboard_label: string;
+  panel_title: string;
+  metric_name: string;
+  unit: string | null;
+  conclusion: Record<string, unknown> | null;
+  statistic: Record<string, unknown> | null;
+}
+
 /** Raw transaction row from database query */
 interface TransactionRow {
   transaction_name: string;
@@ -121,6 +243,58 @@ interface ApdexTransactionRow extends TransactionRow {
   satisfied: string;
   tolerating: string;
   active_threshold: string;
+}
+
+/** A single historical test run summary for trends */
+export interface TrendRunSummary {
+  testRunId: string;
+  startTime: Date;
+  applicationRelease: string | null;
+  duration: number | null;
+  avgMs: number;
+  p95Ms: number;
+  p99Ms: number;
+  errorRate: number;
+  totalTransactions: number;
+  consolidatedResult: unknown | null;
+}
+
+/** Trends data: current run + historical runs for comparison */
+export interface TrendsData {
+  currentRun: TrendRunSummary;
+  previousRuns: TrendRunSummary[];
+}
+
+/** Panel selector for metrics time-series queries */
+export interface MetricsPanelSelector {
+  dashboardLabel?: string;
+  panelTitle?: string;
+  metricName?: string;
+}
+
+/** A single data point in a metrics time series */
+export interface MetricsDataPoint {
+  time: Date;
+  value: number | null;
+}
+
+/** Time-series data for one panel/metric combination */
+export interface MetricsTimeSeriesPanel {
+  panelTitle: string;
+  dashboardLabel: string;
+  metricName: string;
+  unit: string;
+  dataPoints: MetricsDataPoint[];
+}
+
+/** Raw metrics row from database query */
+interface MetricsTimeSeriesRow {
+  time: string;
+  value: number | null;
+  metric_name: string;
+  panel_title: string;
+  dashboard_label: string;
+  unit: string;
 }
 
 /** Raw throughput scenario row from database query */
@@ -160,6 +334,7 @@ export class ReportDataFetcherService {
     @InjectRepository(TestRun)
     private readonly testRunRepo: Repository<TestRun>,
     private readonly authzService: AuthorizationService,
+    private readonly dataSource: DataSource,
   ) {}
 
   /**
@@ -1022,5 +1197,594 @@ export class ReportDataFetcherService {
     };
 
     return mockScenarios[scenarioName] || null;
+  }
+
+  /**
+   * Get AWR data for a test run
+   * Fetches AWR reports and their analysis insights
+   */
+  async getAwrData(testRunId: string): Promise<AwrData | null> {
+    try {
+      const reportRows: Array<{
+        id: string;
+        db_name: string | null;
+        instance_name: string | null;
+        db_edition: string | null;
+        db_release: string | null;
+        host_name: string | null;
+        platform: string | null;
+        cpus: number | null;
+        cores: number | null;
+        memory_gb: string | null;
+        begin_time: string | null;
+        end_time: string | null;
+        elapsed_minutes: string | null;
+        db_time_minutes: string | null;
+        parsed_data: Record<string, unknown> | null;
+      }> = await this.dataSource.query(
+        `SELECT id, db_name, instance_name, db_edition, db_release,
+                host_name, platform, cpus, cores, memory_gb,
+                begin_time, end_time, elapsed_minutes, db_time_minutes,
+                parsed_data
+         FROM awr_reports
+         WHERE test_run_id = $1 AND parse_status = 'completed'
+         ORDER BY begin_time ASC`,
+        [testRunId],
+      );
+
+      if (reportRows.length === 0) return null;
+
+      const reportIds = reportRows.map((r) => r.id);
+
+      // Fetch analysis insights for all reports
+      const analysisRows: Array<{
+        insights: Array<{
+          severity: string;
+          category: string;
+          title: string;
+          description: string;
+          recommendation?: string;
+          value?: number;
+          unit?: string;
+        }> | null;
+        severity_summary: { critical: number; warning: number; info: number; total: number } | null;
+      }> = await this.dataSource.query(
+        `SELECT insights, severity_summary
+         FROM awr_analysis
+         WHERE awr_report_id = ANY($1)
+         ORDER BY analyzed_at DESC`,
+        [reportIds],
+      );
+
+      const allInsights: AwrInsightSummary[] = [];
+      let severitySummary = { critical: 0, warning: 0, info: 0, total: 0 };
+
+      for (const row of analysisRows) {
+        if (row.severity_summary) {
+          severitySummary = {
+            critical: severitySummary.critical + (row.severity_summary.critical || 0),
+            warning: severitySummary.warning + (row.severity_summary.warning || 0),
+            info: severitySummary.info + (row.severity_summary.info || 0),
+            total: severitySummary.total + (row.severity_summary.total || 0),
+          };
+        }
+        if (row.insights) {
+          for (const insight of row.insights) {
+            allInsights.push({
+              severity: insight.severity,
+              category: insight.category,
+              title: insight.title,
+              description: insight.description,
+              recommendation: insight.recommendation || null,
+              value: insight.value ?? null,
+              unit: insight.unit || null,
+            });
+          }
+        }
+      }
+
+      const reports: AwrReportSummary[] = reportRows.map((r) => ({
+        id: r.id,
+        dbName: r.db_name,
+        instanceName: r.instance_name,
+        dbEdition: r.db_edition,
+        dbRelease: r.db_release,
+        hostName: r.host_name,
+        platform: r.platform,
+        cpus: r.cpus,
+        cores: r.cores,
+        memoryGb: r.memory_gb != null ? Number(r.memory_gb) : null,
+        beginTime: r.begin_time,
+        endTime: r.end_time,
+        elapsedMinutes: r.elapsed_minutes != null ? Number(r.elapsed_minutes) : null,
+        dbTimeMinutes: r.db_time_minutes != null ? Number(r.db_time_minutes) : null,
+        parsedData: r.parsed_data,
+      }));
+
+      return { reports, insights: allInsights, severitySummary };
+    } catch (error) {
+      this.logger.warn(`Failed to get AWR data for ${testRunId}: ${(error as Error).message}`);
+      return null;
+    }
+  }
+
+  /**
+   * Get detailed SLO check results for a test run.
+   * Returns individual check results with requirement/actual value for the SLO renderer.
+   */
+  async getSloCheckResults(
+    testRunId: string,
+    userId: string = '',
+    roles: string[] = [],
+  ): Promise<SloCheckResult[]> {
+    try {
+      const rows: SloCheckResult[] = await this.dataSource.query(
+        `SELECT
+          cr.benchmark_id,
+          cr.panel_title,
+          cr.metric_name,
+          cr.metric_unit,
+          cr.evaluate_type,
+          cr.source,
+          cr.dashboard_label,
+          cr.requirement->>'operator' AS requirement_operator,
+          (cr.requirement->>'value')::numeric AS requirement_value,
+          cr.panel_average,
+          cr.meets_requirement
+        FROM check_results cr
+        WHERE cr.test_run_id = $1
+        ORDER BY cr.meets_requirement ASC NULLS LAST, cr.evaluate_type, cr.panel_title`,
+        [testRunId],
+      );
+
+      return rows;
+    } catch (error) {
+      this.logger.warn(`Failed to get SLO check results for ${testRunId}: ${(error as Error).message}`);
+      return [];
+    }
+  }
+
+  /**
+   * Get SLO check result summary for a test run.
+   * Queries check_results table and counts passed/failed using the meets_requirement column.
+   */
+  async getSloSummary(
+    testRunId: string,
+    userId: string = '',
+    roles: string[] = [],
+  ): Promise<SloSummary> {
+    try {
+      const rows: { meets_requirement: boolean | null }[] = await this.dataSource.query(
+        `SELECT meets_requirement FROM check_results WHERE test_run_id = $1`,
+        [testRunId],
+      );
+
+      let passed = 0;
+      let failed = 0;
+
+      for (const row of rows) {
+        if (row.meets_requirement === true) {
+          passed++;
+        } else {
+          failed++;
+        }
+      }
+
+      return { passed, failed, total: passed + failed };
+    } catch (error) {
+      this.logger.warn(`Failed to get SLO summary for ${testRunId}: ${(error as Error).message}`);
+      return { passed: 0, failed: 0, total: 0 };
+    }
+  }
+
+  /**
+   * Get comparisons data for a test run
+   * Fetches ADAPT results comparing current run vs control group
+   */
+  async getComparisonsData(testRunId: string, _baselineTestRunId?: string): Promise<ComparisonsData | null> {
+    try {
+      const resultRows: Array<{
+        dashboard_label: string;
+        panel_title: string;
+        metric_name: string;
+        unit: string | null;
+        conclusion: Record<string, unknown> | null;
+        statistic: Record<string, unknown> | null;
+      }> = await this.dataSource.query(
+        `SELECT dashboard_label, panel_title, metric_name, unit, conclusion, statistic
+         FROM ds_adapt_results
+         WHERE test_run_id = $1
+         ORDER BY dashboard_label ASC, panel_title ASC, metric_name ASC`,
+        [testRunId],
+      );
+
+      if (resultRows.length === 0) return null;
+
+      const metrics: ComparisonMetric[] = resultRows.map((row) => {
+        const conclusion = row.conclusion as Record<string, unknown> | null;
+        const statistic = row.statistic as Record<string, unknown> | null;
+        const conclusionLabel = conclusion && typeof conclusion.label === 'string'
+          ? conclusion.label : 'unknown';
+        const testValue = statistic?.test != null ? Number(statistic.test) : null;
+        const controlValue = statistic?.control != null ? Number(statistic.control) : null;
+        const diff = statistic?.diff != null ? Number(statistic.diff) : null;
+        const diffPct = controlValue && controlValue !== 0 && diff != null
+          ? (diff / Math.abs(controlValue)) * 100 : null;
+
+        return {
+          dashboardLabel: row.dashboard_label,
+          panelTitle: row.panel_title,
+          metricName: row.metric_name,
+          unit: row.unit || null,
+          currentValue: testValue,
+          baselineValue: controlValue,
+          difference: diff,
+          differencePercent: diffPct,
+          conclusion: conclusionLabel,
+        };
+      });
+
+      return {
+        metrics,
+        regressionCount: metrics.filter((m) => m.conclusion === 'regression').length,
+        improvementCount: metrics.filter((m) => m.conclusion === 'improvement').length,
+        noDifferenceCount: metrics.filter((m) => m.conclusion === 'no_difference').length,
+        totalMetrics: metrics.length,
+      };
+    } catch (error) {
+      this.logger.warn(`Failed to get comparisons data for ${testRunId}: ${(error as Error).message}`);
+      return null;
+    }
+  }
+
+  /**
+   * Get detailed regression/improvement data for a test run.
+   * Queries ds_adapt_conclusion for summary and ds_adapt_results for per-metric details.
+   */
+  async getRegressionsData(
+    testRunId: string,
+    userId: string = '',
+    roles: string[] = [],
+  ): Promise<RegressionsData | null> {
+    try {
+      // Get overall conclusion
+      const conclusionRows: {
+        conclusion: string;
+        regressions: string[] | null;
+        improvements: string[] | null;
+      }[] = await this.dataSource.query(
+        `SELECT conclusion, regressions, improvements FROM ds_adapt_conclusion WHERE test_run_id = $1 LIMIT 1`,
+        [testRunId],
+      );
+
+      const conclusionRow = conclusionRows[0];
+      if (!conclusionRow) return null;
+
+      // Get per-metric ADAPT results with conclusion and statistic data
+      const resultRows: AdaptResultRow[] = await this.dataSource.query(
+        `SELECT
+          dashboard_label,
+          panel_title,
+          metric_name,
+          unit,
+          conclusion,
+          statistic
+        FROM ds_adapt_results
+        WHERE test_run_id = $1
+        ORDER BY dashboard_label ASC, panel_title ASC, metric_name ASC`,
+        [testRunId],
+      );
+
+      const metrics: RegressionsMetric[] = resultRows.map((row) => {
+        const conclusion = row.conclusion as Record<string, unknown> | null;
+        const statistic = row.statistic as Record<string, unknown> | null;
+        const conclusionLabel = conclusion && typeof conclusion.label === 'string'
+          ? conclusion.label : 'unknown';
+        const testValue = statistic?.test != null ? Number(statistic.test) : null;
+        const controlValue = statistic?.control != null ? Number(statistic.control) : null;
+        const diff = statistic?.diff != null ? Number(statistic.diff) : null;
+
+        return {
+          dashboardLabel: row.dashboard_label,
+          panelTitle: row.panel_title,
+          metricName: row.metric_name,
+          unit: row.unit || null,
+          conclusionLabel,
+          testValue,
+          controlValue,
+          difference: diff,
+          differencePercent: controlValue && controlValue !== 0 && diff != null
+            ? (diff / Math.abs(controlValue)) * 100
+            : null,
+        };
+      });
+
+      const regressions = metrics.filter((m) => m.conclusionLabel === 'regression');
+      const improvements = metrics.filter((m) => m.conclusionLabel === 'improvement');
+
+      return {
+        conclusion: conclusionRow.conclusion,
+        regressionCount: conclusionRow.regressions?.length ?? regressions.length,
+        improvementCount: conclusionRow.improvements?.length ?? improvements.length,
+        totalMetrics: metrics.length,
+        regressions,
+        improvements,
+        noDifference: metrics.filter((m) => m.conclusionLabel === 'no_difference'),
+      };
+    } catch (error) {
+      this.logger.warn(`Failed to get regressions data for ${testRunId}: ${(error as Error).message}`);
+      return null;
+    }
+  }
+
+  async getAnomalySummary(
+    testRunId: string,
+    userId: string = '',
+    roles: string[] = [],
+  ): Promise<AnomalySummary> {
+    try {
+      const rows: { conclusion: string; regressions: string[] | null; improvements: string[] | null }[] =
+        await this.dataSource.query(
+          `SELECT conclusion, regressions, improvements FROM ds_adapt_conclusion WHERE test_run_id = $1 LIMIT 1`,
+          [testRunId],
+        );
+
+      const row = rows[0];
+      if (!row) return { conclusion: 'no_data', regressionCount: 0, improvementCount: 0 };
+
+      return {
+        conclusion: row.conclusion,
+        regressionCount: row.regressions?.length ?? 0,
+        improvementCount: row.improvements?.length ?? 0,
+      };
+    } catch (error) {
+      this.logger.warn(`Failed to get anomaly summary for ${testRunId}: ${(error as Error).message}`);
+      return { conclusion: 'unknown', regressionCount: 0, improvementCount: 0 };
+    }
+  }
+
+  /**
+   * Get trends data: fetch historical test runs with the same system/environment/workload
+   * and compute summary metrics for each run so the trends renderer can show progression.
+   */
+  async getTrendsData(
+    testRun: TestRun,
+    maxRuns: number = 10,
+    userId: string = '',
+    roles: string[] = [],
+  ): Promise<TrendsData | null> {
+    try {
+      const safeMaxRuns = Math.max(1, Math.min(Math.floor(maxRuns), 50));
+      const skipOrgFilter = !userId || this.authzService.isGlobalAdmin(roles);
+
+      let organizationIds: string[] = [];
+      if (!skipOrgFilter) {
+        organizationIds = await this.authzService.getAccessibleOrganizations(userId);
+      }
+
+      const orgFilter = !skipOrgFilter
+        ? this.buildOrganizationFilterClause(5, organizationIds, 'tr')
+        : { clause: '', params: [] };
+
+      // Fetch recent completed runs for the same system/environment/workload
+      const query = `
+        SELECT
+          tr.test_run_id,
+          tr.start_time,
+          tr.application_release,
+          tr.duration,
+          tr.consolidated_result,
+          COALESCE(txn_stats.avg_ms, 0) as avg_ms,
+          COALESCE(txn_stats.p95_ms, 0) as p95_ms,
+          COALESCE(txn_stats.p99_ms, 0) as p99_ms,
+          COALESCE(txn_stats.error_rate, 0) as error_rate,
+          COALESCE(txn_stats.total_transactions, 0) as total_transactions
+        FROM test_runs tr
+        JOIN systems_under_test sut ON sut.id = tr.system_under_test_id
+        LEFT JOIN LATERAL (
+          SELECT
+            ROUND(AVG(t.response_time)::numeric, 2) as avg_ms,
+            ROUND(PERCENTILE_CONT(0.95) WITHIN GROUP (ORDER BY t.response_time)::numeric, 2) as p95_ms,
+            ROUND(PERCENTILE_CONT(0.99) WITHIN GROUP (ORDER BY t.response_time)::numeric, 2) as p99_ms,
+            CASE WHEN COUNT(*) > 0
+              THEN ROUND((COUNT(CASE WHEN t.success = false THEN 1 END)::numeric / COUNT(*)::numeric) * 100, 2)
+              ELSE 0
+            END as error_rate,
+            COUNT(*)::integer as total_transactions
+          FROM transactions t
+          WHERE t.test_run_id = tr.test_run_id
+        ) txn_stats ON true
+        WHERE tr.system_under_test_id = $1
+          AND tr.test_environment = $2
+          AND tr.workload = $3
+          AND tr.completed = true
+          AND tr.is_stale = false
+          AND tr.start_time <= $4
+          ${orgFilter.clause}
+        ORDER BY tr.start_time DESC
+        LIMIT ${safeMaxRuns + 1}
+      `;
+
+      const rows = await this.testRunRepo.query(query, [
+        testRun.systemUnderTestId,
+        testRun.testEnvironment,
+        testRun.workload,
+        testRun.startTime || new Date(),
+        ...orgFilter.params,
+      ]);
+
+      if (!rows || rows.length === 0) {
+        return null;
+      }
+
+      const mapRow = (row: Record<string, unknown>): TrendRunSummary => ({
+        testRunId: row.test_run_id as string,
+        startTime: new Date(row.start_time as string),
+        applicationRelease: (row.application_release as string) || null,
+        duration: row.duration ? parseInt(row.duration as string) : null,
+        avgMs: parseFloat(row.avg_ms as string) || 0,
+        p95Ms: parseFloat(row.p95_ms as string) || 0,
+        p99Ms: parseFloat(row.p99_ms as string) || 0,
+        errorRate: parseFloat(row.error_rate as string) || 0,
+        totalTransactions: parseInt(row.total_transactions as string) || 0,
+        consolidatedResult: row.consolidated_result ?? null,
+      });
+
+      // First row is the current (or most recent) run
+      const currentRun = mapRow(rows[0]);
+      const previousRuns = rows.slice(1).map(mapRow);
+
+      return { currentRun, previousRuns };
+    } catch (error) {
+      this.logger.error('Failed to fetch trends data:', error);
+      return null;
+    }
+  }
+
+  /**
+   * Fetch time-series metric data from ds_metrics for graph rendering.
+   */
+  async getMetricsTimeSeries(
+    testRunId: string,
+    panels: MetricsPanelSelector[],
+    excludeRampUp: boolean = true,
+    userId: string = '',
+    roles: string[] = [],
+  ): Promise<MetricsTimeSeriesPanel[]> {
+    try {
+      if (!panels || panels.length === 0) {
+        return [];
+      }
+
+      const skipOrgFilter = !userId || this.authzService.isGlobalAdmin(roles);
+      let organizationIds: string[] = [];
+      if (!skipOrgFilter) {
+        organizationIds = await this.authzService.getAccessibleOrganizations(userId);
+      }
+
+      const results: MetricsTimeSeriesPanel[] = [];
+
+      for (const panel of panels) {
+        const conditions: string[] = ['dm.test_run_id = $1'];
+        const params: unknown[] = [testRunId];
+        let paramIdx = 2;
+
+        if (panel.dashboardLabel) {
+          conditions.push(`dm.dashboard_label = $${paramIdx}`);
+          params.push(panel.dashboardLabel);
+          paramIdx++;
+        }
+        if (panel.panelTitle) {
+          conditions.push(`dm.panel_title = $${paramIdx}`);
+          params.push(panel.panelTitle);
+          paramIdx++;
+        }
+        if (panel.metricName) {
+          conditions.push(`dm.metric_name = $${paramIdx}`);
+          params.push(panel.metricName);
+          paramIdx++;
+        }
+        if (excludeRampUp) {
+          conditions.push('(dm.ramp_up IS NULL OR dm.ramp_up = false)');
+        }
+
+        // Org filter via test_runs join
+        if (!skipOrgFilter) {
+          const orgFilter = this.buildOrganizationFilterClause(paramIdx, organizationIds, 'tr');
+          if (orgFilter.clause) {
+            conditions.push(`EXISTS (SELECT 1 FROM test_runs tr WHERE tr.test_run_id = dm.test_run_id ${orgFilter.clause})`);
+            params.push(...orgFilter.params);
+          }
+        }
+
+        const query = `
+          SELECT
+            dm.time,
+            dm.value,
+            dm.metric_name,
+            dm.panel_title,
+            dm.dashboard_label,
+            dm.unit
+          FROM ds_metrics dm
+          WHERE ${conditions.join(' AND ')}
+          ORDER BY dm.time ASC
+        `;
+
+        const rows: MetricsTimeSeriesRow[] = await this.testRunRepo.query(query, params);
+
+        if (rows.length > 0) {
+          const firstRow = rows[0]!;
+          const panelTitle = panel.panelTitle || firstRow.panel_title || 'Untitled Panel';
+          const dashboardLabel = panel.dashboardLabel || firstRow.dashboard_label || '';
+          const metricName = panel.metricName || firstRow.metric_name || '';
+          const unit = firstRow.unit || '';
+
+          results.push({
+            panelTitle,
+            dashboardLabel,
+            metricName,
+            unit,
+            dataPoints: rows.map((row) => ({
+              time: new Date(row.time),
+              value: row.value !== null && row.value !== undefined ? parseFloat(String(row.value)) : null,
+            })),
+          });
+        }
+      }
+
+      return results;
+    } catch (error) {
+      this.logger.error('Failed to fetch metrics time series:', error);
+      return [];
+    }
+  }
+
+  /**
+   * Auto-discover available panels for a test run from ds_metrics.
+   * Used when no explicit panel selection is provided.
+   */
+  async getAvailableMetricsPanels(
+    testRunId: string,
+    userId: string = '',
+    roles: string[] = [],
+  ): Promise<MetricsPanelSelector[]> {
+    try {
+      const skipOrgFilter = !userId || this.authzService.isGlobalAdmin(roles);
+      let orgClause = '';
+      const params: unknown[] = [testRunId];
+
+      if (!skipOrgFilter) {
+        const organizationIds = await this.authzService.getAccessibleOrganizations(userId);
+        const orgFilter = this.buildOrganizationFilterClause(2, organizationIds, 'tr');
+        if (orgFilter.clause) {
+          orgClause = `AND EXISTS (SELECT 1 FROM test_runs tr WHERE tr.test_run_id = dm.test_run_id ${orgFilter.clause})`;
+          params.push(...orgFilter.params);
+        }
+      }
+
+      const query = `
+        SELECT DISTINCT
+          dm.dashboard_label,
+          dm.panel_title,
+          dm.metric_name
+        FROM ds_metrics dm
+        WHERE dm.test_run_id = $1
+          ${orgClause}
+        ORDER BY dm.dashboard_label ASC, dm.panel_title ASC, dm.metric_name ASC
+        LIMIT 20
+      `;
+
+      const rows: Array<{ dashboard_label: string; panel_title: string; metric_name: string }> =
+        await this.testRunRepo.query(query, params);
+
+      return rows.map((row) => ({
+        dashboardLabel: row.dashboard_label || '',
+        panelTitle: row.panel_title || '',
+        metricName: row.metric_name || '',
+      }));
+    } catch (error) {
+      this.logger.error('Failed to discover metrics panels:', error);
+      return [];
+    }
   }
 }

@@ -1,6 +1,7 @@
 import { Injectable } from '@nestjs/common';
 import { TestRun, ReportSectionConfig } from '@perfana/shared';
 import { ReportUtilsService } from '../services/report-utils.service';
+import { ReportDataFetcherService } from '../services/report-data-fetcher.service';
 
 /**
  * Renderer for header section
@@ -9,12 +10,20 @@ import { ReportUtilsService } from '../services/report-utils.service';
  */
 @Injectable()
 export class HeaderRenderer {
-  constructor(private readonly utils: ReportUtilsService) {}
+  constructor(
+    private readonly utils: ReportUtilsService,
+    private readonly dataFetcher: ReportDataFetcherService,
+  ) {}
 
   /**
    * Render header section - Cover page and Test Run Summary
    */
-  renderHeaderSection(section: ReportSectionConfig, testRun: TestRun | null): string {
+  async renderHeaderSection(
+    section: ReportSectionConfig,
+    testRun: TestRun | null,
+    userId: string = '',
+    roles: string[] = [],
+  ): Promise<string> {
     const config = section.config || {};
     const title = (config.title as string) || 'Performance Test Report';
     const subtitle = config.subtitle as string;
@@ -42,9 +51,33 @@ export class HeaderRenderer {
 
     const durationFormatted = testRun?.duration ? this.utils.formatDuration(testRun.duration) : '1h 23m';
 
-    // Mock data for badges - TODO: fetch from test run status/results
-    const sloStatus = '662/871 PASSED';
-    const anomalyCount = 5;
+    // Fetch real SLO and anomaly data
+    let sloStatusHtml: string;
+    let anomalyStatusHtml: string;
+
+    if (testRun) {
+      const [sloSummary, anomalySummary] = await Promise.all([
+        this.dataFetcher.getSloSummary(testRun.testRunId, userId, roles),
+        this.dataFetcher.getAnomalySummary(testRun.testRunId, userId, roles),
+      ]);
+
+      if (sloSummary.total === 0) {
+        sloStatusHtml = '<span class="badge badge-info">No SLO data</span>';
+      } else if (sloSummary.failed === 0) {
+        sloStatusHtml = `<span class="badge badge-success">${sloSummary.passed}/${sloSummary.total} PASSED</span>`;
+      } else {
+        sloStatusHtml = `<span class="badge badge-error">${sloSummary.passed}/${sloSummary.total} PASSED</span>`;
+      }
+
+      if (anomalySummary.regressionCount > 0) {
+        anomalyStatusHtml = `<span class="badge badge-warning">${anomalySummary.regressionCount} REGRESSIONS DETECTED</span>`;
+      } else {
+        anomalyStatusHtml = '<span class="badge badge-success">NO REGRESSIONS</span>';
+      }
+    } else {
+      sloStatusHtml = '<span class="badge badge-info">No SLO data</span>';
+      anomalyStatusHtml = '<span class="badge badge-info">No anomaly data</span>';
+    }
 
     let html = '';
 
@@ -124,11 +157,11 @@ export class HeaderRenderer {
             </div>
             <div class="info-item">
               <div class="info-label">SLO Status</div>
-              <div class="info-value"><span class="badge badge-error">${sloStatus}</span></div>
+              <div class="info-value">${sloStatusHtml}</div>
             </div>
             <div class="info-item">
               <div class="info-label">Anomaly Detection</div>
-              <div class="info-value"><span class="badge badge-warning">${anomalyCount} ANOMALIES DETECTED</span></div>
+              <div class="info-value">${anomalyStatusHtml}</div>
             </div>
           </div>
 

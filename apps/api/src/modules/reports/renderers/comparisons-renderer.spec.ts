@@ -1,0 +1,206 @@
+import { Test, TestingModule } from '@nestjs/testing';
+import { ComparisonsRenderer } from './comparisons-renderer';
+import { ReportUtilsService } from '../services/report-utils.service';
+import { ReportDataFetcherService } from '../services/report-data-fetcher.service';
+import { ReportSectionConfig, TestRun } from '@perfana/shared';
+
+const makeSection = (
+  overrides?: Partial<ReportSectionConfig>,
+): ReportSectionConfig => ({ type: 'comparisons', order: 0, ...overrides });
+
+const makeTestRun = (overrides?: Partial<TestRun>): TestRun =>
+  ({
+    id: 'uuid-1',
+    testRunId: 'run-001',
+    testEnvironment: 'staging',
+    workload: 'load-test',
+    systemUnderTestId: 'system-1',
+    ...overrides,
+  }) as TestRun;
+
+const makeMetric = (overrides?: Record<string, unknown>) => ({
+  dashboardLabel: 'API Dashboard',
+  panelTitle: 'Response Time',
+  metricName: 'avg',
+  unit: 'ms',
+  currentValue: 120,
+  baselineValue: 100,
+  difference: 20,
+  differencePercent: 20.0,
+  conclusion: 'regression',
+  ...overrides,
+});
+
+const makeComparisonsData = (overrides?: Record<string, unknown>) => ({
+  metrics: [
+    makeMetric(),
+    makeMetric({
+      panelTitle: 'Throughput',
+      metricName: 'req/s',
+      unit: null,
+      currentValue: 500,
+      baselineValue: 450,
+      difference: 50,
+      differencePercent: 11.1,
+      conclusion: 'improvement',
+    }),
+    makeMetric({
+      panelTitle: 'Error Rate',
+      metricName: 'pct',
+      unit: '%',
+      currentValue: 0.5,
+      baselineValue: 0.5,
+      difference: 0,
+      differencePercent: 0,
+      conclusion: 'no_difference',
+    }),
+  ],
+  regressionCount: 1,
+  improvementCount: 1,
+  noDifferenceCount: 1,
+  totalMetrics: 3,
+  ...overrides,
+});
+
+describe('ComparisonsRenderer', () => {
+  let renderer: ComparisonsRenderer;
+  let dataFetcher: jest.Mocked<ReportDataFetcherService>;
+
+  beforeEach(async () => {
+    const module: TestingModule = await Test.createTestingModule({
+      providers: [
+        ComparisonsRenderer,
+        ReportUtilsService,
+        {
+          provide: ReportDataFetcherService,
+          useValue: {
+            getComparisonsData: jest.fn().mockResolvedValue(null),
+          },
+        },
+      ],
+    }).compile();
+
+    renderer = module.get(ComparisonsRenderer);
+    dataFetcher = module.get(ReportDataFetcherService);
+  });
+
+  it('should render placeholder when testRun is null', async () => {
+    const html = await renderer.renderComparisonsSection(makeSection(), null);
+
+    expect(html).toContain('comparisons-section');
+    expect(html).toContain('No comparison data available');
+    expect(dataFetcher.getComparisonsData).not.toHaveBeenCalled();
+  });
+
+  it('should render placeholder when no data returned', async () => {
+    dataFetcher.getComparisonsData.mockResolvedValue(null);
+
+    const html = await renderer.renderComparisonsSection(makeSection(), makeTestRun());
+
+    expect(html).toContain('No comparison data available');
+  });
+
+  it('should render summary badges with counts', async () => {
+    dataFetcher.getComparisonsData.mockResolvedValue(makeComparisonsData() as any);
+
+    const html = await renderer.renderComparisonsSection(makeSection(), makeTestRun());
+
+    expect(html).toContain('Regressions');
+    expect(html).toContain('Improvements');
+    expect(html).toContain('No Difference');
+    expect(html).toContain('Total Metrics');
+    expect(html).toContain('3 metrics compared');
+  });
+
+  it('should render comparison table grouped by dashboard', async () => {
+    dataFetcher.getComparisonsData.mockResolvedValue(makeComparisonsData() as any);
+
+    const html = await renderer.renderComparisonsSection(makeSection(), makeTestRun());
+
+    expect(html).toContain('API Dashboard');
+    expect(html).toContain('Response Time');
+    expect(html).toContain('Throughput');
+    expect(html).toContain('Error Rate');
+    expect(html).toContain('120.0 ms');
+    expect(html).toContain('100.0 ms');
+    expect(html).toContain('+20.0%');
+  });
+
+  it('should render conclusion badges per metric', async () => {
+    dataFetcher.getComparisonsData.mockResolvedValue(makeComparisonsData() as any);
+
+    const html = await renderer.renderComparisonsSection(makeSection(), makeTestRun());
+
+    expect(html).toContain('regression');
+    expect(html).toContain('improvement');
+    expect(html).toContain('no difference');
+  });
+
+  it('should render custom title and comment', async () => {
+    dataFetcher.getComparisonsData.mockResolvedValue(makeComparisonsData() as any);
+
+    const html = await renderer.renderComparisonsSection(
+      makeSection({ title: 'Run Comparison', comment: 'vs baseline run' }),
+      makeTestRun(),
+    );
+
+    expect(html).toContain('Run Comparison');
+    expect(html).toContain('vs baseline run');
+  });
+
+  it('should pass baselineTestRunId from config', async () => {
+    dataFetcher.getComparisonsData.mockResolvedValue(makeComparisonsData() as any);
+
+    await renderer.renderComparisonsSection(
+      makeSection({ config: { baselineTestRunId: 'baseline-run-123' } }),
+      makeTestRun(),
+    );
+
+    expect(dataFetcher.getComparisonsData).toHaveBeenCalledWith('run-001', 'baseline-run-123');
+  });
+
+  it('should group metrics by dashboard', async () => {
+    const data = makeComparisonsData({
+      metrics: [
+        makeMetric({ dashboardLabel: 'Dashboard A', panelTitle: 'Panel 1' }),
+        makeMetric({ dashboardLabel: 'Dashboard A', panelTitle: 'Panel 2' }),
+        makeMetric({ dashboardLabel: 'Dashboard B', panelTitle: 'Panel 3' }),
+      ],
+    });
+
+    dataFetcher.getComparisonsData.mockResolvedValue(data as any);
+
+    const html = await renderer.renderComparisonsSection(makeSection(), makeTestRun());
+
+    expect(html).toContain('Dashboard A (2 metrics)');
+    expect(html).toContain('Dashboard B (1 metrics)');
+  });
+
+  it('should handle empty metrics gracefully', async () => {
+    dataFetcher.getComparisonsData.mockResolvedValue(
+      makeComparisonsData({ metrics: [], totalMetrics: 0 }) as any,
+    );
+
+    const html = await renderer.renderComparisonsSection(makeSection(), makeTestRun());
+
+    expect(html).toContain('No comparison data available');
+  });
+
+  it('should format different unit types', async () => {
+    const data = makeComparisonsData({
+      metrics: [
+        makeMetric({ unit: 'ms', currentValue: 250.6 }),
+        makeMetric({ panelTitle: 'CPU', metricName: 'usage', unit: '%', currentValue: 75.3 }),
+        makeMetric({ panelTitle: 'Memory', metricName: 'used', unit: 'bytes', currentValue: 1073741824 }),
+      ],
+    });
+
+    dataFetcher.getComparisonsData.mockResolvedValue(data as any);
+
+    const html = await renderer.renderComparisonsSection(makeSection(), makeTestRun());
+
+    expect(html).toContain('250.6 ms');
+    expect(html).toContain('75.3%');
+    expect(html).toContain('1.0 GB');
+  });
+});

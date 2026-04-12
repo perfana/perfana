@@ -449,6 +449,60 @@ export class ReportGenerationService {
    * @param options - Query options including roles and organizationIds for authorization
    * @returns Paginated report list
    */
+  /**
+   * Find all reports with optional filtering and pagination.
+   * Applies organization-based access control.
+   */
+  async findAll(options?: ListReportsQueryOptions): Promise<ReportListResponse> {
+    try {
+      const roles = options?.roles || [];
+      const userId = options?.userId || '';
+      const isAdmin = this.isGlobalAdmin(roles);
+
+      let organizationIds: string[] = [];
+      if (!isAdmin) {
+        if (userId) {
+          organizationIds = await this.authzService.getAccessibleOrganizations(userId);
+        }
+        if (organizationIds.length === 0) {
+          this.logger.debug('User has no organization memberships, returning empty report list');
+          return { items: [], total: 0, offset: options?.offset || 0, limit: options?.limit || 50 };
+        }
+      }
+
+      const limit = options?.limit || 50;
+      const offset = options?.offset || 0;
+      const sortBy = options?.sortBy || 'created_at';
+      const sortOrder = options?.sortOrder || 'desc';
+
+      const queryBuilder = this.reportRepo
+        .createQueryBuilder('report')
+        .leftJoinAndSelect('report.template', 'template');
+
+      if (!isAdmin) {
+        this.applyReportOrganizationFilter(queryBuilder, organizationIds, 'report');
+      }
+
+      if (options?.status) {
+        queryBuilder.andWhere('report.status = :status', { status: options.status });
+      }
+
+      queryBuilder
+        .orderBy(`report.${sortBy}`, sortOrder.toUpperCase() as 'ASC' | 'DESC')
+        .skip(offset)
+        .take(limit);
+
+      const [items, total] = await queryBuilder.getManyAndCount();
+
+      this.logger.log(`Retrieved ${items.length} reports (total: ${total})${isAdmin ? ' (admin)' : ` (orgs: ${organizationIds.length})`}`);
+
+      return { items, total, offset, limit };
+    } catch (error) {
+      this.logger.error(`Failed to list all reports: ${(error as Error).message}`);
+      throw new DatabaseException('Failed to list reports', error);
+    }
+  }
+
   async findByTestRunId(
     testRunId: string,
     options?: ListReportsQueryOptions,
@@ -820,6 +874,20 @@ export class ReportGenerationService {
       }
       this.logger.error(`Failed to delete report: ${(error as Error).message}`);
       throw new DatabaseException('Failed to delete report', error);
+    }
+  }
+
+  // ==================== Download Tracking ====================
+
+  /**
+   * Increment the download count for a report
+   * @param reportId - Report UUID
+   */
+  async incrementDownloadCount(reportId: string): Promise<void> {
+    try {
+      await this.reportRepo.increment({ id: reportId }, 'download_count', 1);
+    } catch (error) {
+      this.logger.warn(`Failed to increment download count for ${reportId}: ${(error as Error).message}`);
     }
   }
 

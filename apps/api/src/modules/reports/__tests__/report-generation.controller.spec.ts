@@ -152,12 +152,14 @@ describe('ReportGenerationController', () => {
           provide: ReportGenerationService,
           useValue: {
             findById: jest.fn(),
+            findAll: jest.fn(),
             findByTestRunId: jest.fn(),
             getSummary: jest.fn(),
             createFromTemplate: jest.fn(),
             createAdHocReport: jest.fn(),
             updateStatus: jest.fn(),
             incrementRetryCount: jest.fn(),
+            incrementDownloadCount: jest.fn(),
             delete: jest.fn(),
             updateJobId: jest.fn(),
           },
@@ -216,6 +218,12 @@ describe('ReportGenerationController', () => {
     it('should return empty paginated list', async () => {
       // Arrange
       const query: ListReportsQueryDto = {};
+      reportGenerationService.findAll.mockResolvedValue({
+        items: [],
+        total: 0,
+        offset: 0,
+        limit: 50,
+      });
 
       // Act
       const result = await controller.findAll(query);
@@ -227,11 +235,18 @@ describe('ReportGenerationController', () => {
         offset: 0,
         limit: 50,
       });
+      expect(reportGenerationService.findAll).toHaveBeenCalled();
     });
 
     it('should use query parameters for pagination', async () => {
       // Arrange
       const query: ListReportsQueryDto = { limit: 20, offset: 10 };
+      reportGenerationService.findAll.mockResolvedValue({
+        items: [],
+        total: 0,
+        offset: 10,
+        limit: 20,
+      });
 
       // Act
       const result = await controller.findAll(query);

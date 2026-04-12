@@ -90,25 +90,25 @@ export class ReportHtmlCompilerService {
 
     switch (section.type) {
       case 'header':
-        return this.headerRenderer.renderHeaderSection(section, testRun);
+        return await this.headerRenderer.renderHeaderSection(section, testRun, userId, roles);
       case 'text_block':
         return this.textBlockRenderer.renderTextBlockSection(section);
       case 'slo':
-        return this.sloRenderer.renderSloSection(section, testRun);
+        return await this.sloRenderer.renderSloSection(section, testRun, userId, roles);
       case 'apdex':
         return await this.apdexRenderer.renderApdexSection(section, testRun, userId, roles);
       case 'transaction_response_times':
         return await this.transactionResponseTimesRenderer.renderTransactionResponseTimesSection(section, testRun, userId, roles);
       case 'regressions':
-        return this.regressionsRenderer.renderRegressionsSection(section, testRun);
+        return await this.regressionsRenderer.renderRegressionsSection(section, testRun, userId, roles);
       case 'awr':
-        return this.awrRenderer.renderAwrSection(section, testRun);
+        return await this.awrRenderer.renderAwrSection(section, testRun);
       case 'trends':
-        return this.trendsRenderer.renderTrendsSection(section, testRun);
+        return await this.trendsRenderer.renderTrendsSection(section, testRun, userId, roles);
       case 'comparisons':
-        return this.comparisonsRenderer.renderComparisonsSection(section, testRun);
+        return await this.comparisonsRenderer.renderComparisonsSection(section, testRun);
       case 'graphs':
-        return this.graphsRenderer.renderGraphsSection(section, testRun);
+        return await this.graphsRenderer.renderGraphsSection(section, testRun, userId, roles);
       default:
         return this.placeholderRenderer.renderPlaceholderSection(sectionTitle, section.type);
     }
