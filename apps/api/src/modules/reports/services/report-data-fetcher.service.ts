@@ -1623,6 +1623,30 @@ export class ReportDataFetcherService {
     } catch (error) {
       this.logger.error('Failed to fetch trends data:', error);
       return null;
+    }
+  }
+
+  /**
+   * Fetch time-series metric data from ds_metrics for graph rendering.
+   */
+  async getMetricsTimeSeries(
+    testRunId: string,
+    panels: MetricsPanelSelector[],
+    excludeRampUp: boolean = true,
+    userId: string = '',
+    roles: string[] = [],
+  ): Promise<MetricsTimeSeriesPanel[]> {
+    try {
+      if (!panels || panels.length === 0) {
+        return [];
+      }
+
+      const skipOrgFilter = !userId || this.authzService.isGlobalAdmin(roles);
+      let organizationIds: string[] = [];
+      if (!skipOrgFilter) {
+        organizationIds = await this.authzService.getAccessibleOrganizations(userId);
+      }
+
       const results: MetricsTimeSeriesPanel[] = [];
 
       for (const panel of panels) {
