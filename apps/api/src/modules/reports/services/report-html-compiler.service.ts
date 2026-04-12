@@ -90,17 +90,17 @@ export class ReportHtmlCompilerService {
 
     switch (section.type) {
       case 'header':
-        return await this.headerRenderer.renderHeaderSection(section, testRun);
+        return await this.headerRenderer.renderHeaderSection(section, testRun, userId, roles);
       case 'text_block':
         return this.textBlockRenderer.renderTextBlockSection(section);
       case 'slo':
-        return await this.sloRenderer.renderSloSection(section, testRun);
+        return await this.sloRenderer.renderSloSection(section, testRun, userId, roles);
       case 'apdex':
         return await this.apdexRenderer.renderApdexSection(section, testRun, userId, roles);
       case 'transaction_response_times':
         return await this.transactionResponseTimesRenderer.renderTransactionResponseTimesSection(section, testRun, userId, roles);
       case 'regressions':
-        return await this.regressionsRenderer.renderRegressionsSection(section, testRun);
+        return await this.regressionsRenderer.renderRegressionsSection(section, testRun, userId, roles);
       case 'awr':
         return await this.awrRenderer.renderAwrSection(section, testRun);
       case 'trends':

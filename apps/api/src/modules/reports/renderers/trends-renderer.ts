@@ -30,7 +30,7 @@ export class TrendsRenderer {
     const config = section.config || {};
     const title = section.title || 'Performance Trends';
     const comment = section.comment;
-    const maxRuns = (config.maxRuns as number) || 10;
+    const maxRuns = typeof config.maxRuns === 'number' ? config.maxRuns : 10;
 
     if (!testRun) {
       return this.renderNoDataSection(title, comment, 'No test run data available for trends analysis.');
@@ -46,10 +46,8 @@ export class TrendsRenderer {
     const allRuns = [...trendsData.previousRuns].reverse();
     allRuns.push(trendsData.currentRun);
 
-    // Calculate trend direction comparing current vs previous run
-    const previousRun = trendsData.previousRuns[0]!; // Most recent previous (guard above ensures length > 0)
+    const previousRun = trendsData.previousRuns[0]!;
     const currentRun = trendsData.currentRun;
-
     const styling = this.utils.getDefaultStyling();
 
     return `
@@ -111,13 +109,13 @@ export class TrendsRenderer {
 
     if (delta.direction === 'flat') {
       trendColor = '#666';
-      trendIcon = '&#x2194;'; // ↔
+      trendIcon = '&#x2194;';
     } else if (delta.direction === 'up') {
       trendColor = lowerIsBetter ? '#f44336' : '#4caf50';
-      trendIcon = '&#x25B2;'; // ▲
+      trendIcon = '&#x25B2;';
     } else {
       trendColor = lowerIsBetter ? '#4caf50' : '#f44336';
-      trendIcon = '&#x25BC;'; // ▼
+      trendIcon = '&#x25BC;';
     }
 
     const sign = delta.percent > 0 ? '+' : '';
@@ -185,7 +183,10 @@ export class TrendsRenderer {
     `;
   }
 
-  private calculateDelta(
+  /**
+   * Calculate delta between current and previous values
+   */
+  calculateDelta(
     current: number,
     previous: number,
   ): { percent: number; direction: 'up' | 'down' | 'flat' } {
@@ -196,7 +197,7 @@ export class TrendsRenderer {
       return { percent: 100, direction: 'up' };
     }
 
-    const percent = ((current - previous) / previous) * 100;
+    const percent = ((current - previous) / Math.abs(previous)) * 100;
 
     if (Math.abs(percent) < 0.5) {
       return { percent: 0, direction: 'flat' };

@@ -18,7 +18,12 @@ export class HeaderRenderer {
   /**
    * Render header section - Cover page and Test Run Summary
    */
-  async renderHeaderSection(section: ReportSectionConfig, testRun: TestRun | null): Promise<string> {
+  async renderHeaderSection(
+    section: ReportSectionConfig,
+    testRun: TestRun | null,
+    userId: string = '',
+    roles: string[] = [],
+  ): Promise<string> {
     const config = section.config || {};
     const title = (config.title as string) || 'Performance Test Report';
     const subtitle = config.subtitle as string;
@@ -47,16 +52,32 @@ export class HeaderRenderer {
     const durationFormatted = testRun?.duration ? this.utils.formatDuration(testRun.duration) : '1h 23m';
 
     // Fetch real SLO and anomaly data
-    const sloSummary = testRun ? await this.dataFetcher.getSloSummary(testRun.testRunId) : null;
-    const anomalySummary = testRun ? await this.dataFetcher.getAnomalySummary(testRun.testRunId) : null;
+    let sloStatusHtml: string;
+    let anomalyStatusHtml: string;
 
-    const sloStatus = sloSummary
-      ? `${sloSummary.passed}/${sloSummary.total} PASSED`
-      : 'No SLO data';
-    const sloAllPassed = sloSummary ? sloSummary.failed === 0 : false;
+    if (testRun) {
+      const [sloSummary, anomalySummary] = await Promise.all([
+        this.dataFetcher.getSloSummary(testRun.testRunId, userId, roles),
+        this.dataFetcher.getAnomalySummary(testRun.testRunId, userId, roles),
+      ]);
 
-    const anomalyCount = anomalySummary?.regressionCount ?? 0;
-    const anomalyConclusion = anomalySummary?.conclusion ?? 'no_data';
+      if (sloSummary.total === 0) {
+        sloStatusHtml = '<span class="badge badge-info">No SLO data</span>';
+      } else if (sloSummary.failed === 0) {
+        sloStatusHtml = `<span class="badge badge-success">${sloSummary.passed}/${sloSummary.total} PASSED</span>`;
+      } else {
+        sloStatusHtml = `<span class="badge badge-error">${sloSummary.passed}/${sloSummary.total} PASSED</span>`;
+      }
+
+      if (anomalySummary.regressionCount > 0) {
+        anomalyStatusHtml = `<span class="badge badge-warning">${anomalySummary.regressionCount} REGRESSIONS DETECTED</span>`;
+      } else {
+        anomalyStatusHtml = '<span class="badge badge-success">NO REGRESSIONS</span>';
+      }
+    } else {
+      sloStatusHtml = '<span class="badge badge-info">No SLO data</span>';
+      anomalyStatusHtml = '<span class="badge badge-info">No anomaly data</span>';
+    }
 
     let html = '';
 
@@ -136,11 +157,11 @@ export class HeaderRenderer {
             </div>
             <div class="info-item">
               <div class="info-label">SLO Status</div>
-              <div class="info-value"><span class="badge ${sloAllPassed ? 'badge-success' : 'badge-error'}">${sloStatus}</span></div>
+              <div class="info-value">${sloStatusHtml}</div>
             </div>
             <div class="info-item">
               <div class="info-label">Anomaly Detection</div>
-              <div class="info-value"><span class="badge ${anomalyCount > 0 ? 'badge-warning' : 'badge-success'}">${anomalyCount > 0 ? `${anomalyCount} REGRESSION${anomalyCount !== 1 ? 'S' : ''} DETECTED` : anomalyConclusion === 'no_data' ? 'No data' : 'NO REGRESSIONS'}</span></div>
+              <div class="info-value">${anomalyStatusHtml}</div>
             </div>
           </div>
 

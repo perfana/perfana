@@ -22,6 +22,8 @@ export class SloRenderer {
   async renderSloSection(
     section: ReportSectionConfig,
     testRun: TestRun | null,
+    userId: string = '',
+    roles: string[] = [],
   ): Promise<string> {
     const title = section.title || 'SLO Results';
     const comment = section.comment;
@@ -31,14 +33,16 @@ export class SloRenderer {
     if (!testRun) {
       return `
         <section class="slo-section">
-          <div style="padding: 20px; background: #fff3e0; border-radius: 4px; border-left: 4px solid #ff9800;">
-            <p style="margin: 0; color: #666;">No test run data available for SLO section.</p>
+          <h2>${this.utils.escapeHtml(title)}</h2>
+          ${comment ? `<div class="section-comment">${this.utils.escapeHtml(comment)}</div>` : ''}
+          <div class="slo-results">
+            <p class="placeholder-message">No test run data available for SLO analysis.</p>
           </div>
         </section>
       `;
     }
 
-    const checkResults = await this.dataFetcher.getSloCheckResults(testRun.id);
+    let checkResults = await this.dataFetcher.getSloCheckResults(testRun.testRunId, userId, roles);
 
     // Apply optional type filter
     const filtered = filterType

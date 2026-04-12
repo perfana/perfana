@@ -88,7 +88,7 @@ describe('ReportHtmlCompilerService', () => {
         {
           provide: HeaderRenderer,
           useValue: {
-            renderHeaderSection: jest.fn().mockReturnValue('<div>header</div>'),
+            renderHeaderSection: jest.fn().mockResolvedValue('<div>header</div>'),
           },
         },
         {
@@ -124,19 +124,19 @@ describe('ReportHtmlCompilerService', () => {
         {
           provide: AwrRenderer,
           useValue: {
-            renderAwrSection: jest.fn().mockReturnValue('<div>awr</div>'),
+            renderAwrSection: jest.fn().mockResolvedValue('<div>awr</div>'),
           },
         },
         {
           provide: TrendsRenderer,
           useValue: {
-            renderTrendsSection: jest.fn().mockReturnValue('<div>trends</div>'),
+            renderTrendsSection: jest.fn().mockResolvedValue('<div>trends</div>'),
           },
         },
         {
           provide: ComparisonsRenderer,
           useValue: {
-            renderComparisonsSection: jest.fn().mockReturnValue('<div>comparisons</div>'),
+            renderComparisonsSection: jest.fn().mockResolvedValue('<div>comparisons</div>'),
           },
         },
         {
@@ -324,7 +324,7 @@ describe('ReportHtmlCompilerService', () => {
           makeSection('text_block', 1),
         ];
 
-        headerRenderer.renderHeaderSection.mockReturnValue('<div>HEADER</div>');
+        headerRenderer.renderHeaderSection.mockResolvedValue('<div>HEADER</div>');
         textBlockRenderer.renderTextBlockSection.mockReturnValue('<div>TEXT</div>');
         sloRenderer.renderSloSection.mockResolvedValue('<div>SLO</div>');
 
@@ -828,7 +828,7 @@ describe('ReportHtmlCompilerService', () => {
 
   describe('End-to-End: renderSections into compileHtml', () => {
     it('should produce a complete HTML document from multiple sections', async () => {
-      headerRenderer.renderHeaderSection.mockReturnValue(
+      headerRenderer.renderHeaderSection.mockResolvedValue(
         '<div class="cover-page"><h1>Test</h1></div>',
       );
       sloRenderer.renderSloSection.mockResolvedValue(

@@ -213,7 +213,7 @@ export interface RegressionsData {
   totalMetrics: number;
   regressions: RegressionsMetric[];
   improvements: RegressionsMetric[];
-  noDifference: RegressionsMetric[];
+  noDifference?: RegressionsMetric[];
 }
 
 /** Raw ADAPT result row from database query */
@@ -1312,7 +1312,11 @@ export class ReportDataFetcherService {
    * Get detailed SLO check results for a test run.
    * Returns individual check results with requirement/actual value for the SLO renderer.
    */
-  async getSloCheckResults(testRunId: string): Promise<SloCheckResult[]> {
+  async getSloCheckResults(
+    testRunId: string,
+    userId: string = '',
+    roles: string[] = [],
+  ): Promise<SloCheckResult[]> {
     try {
       const rows: SloCheckResult[] = await this.dataSource.query(
         `SELECT
@@ -1344,14 +1348,16 @@ export class ReportDataFetcherService {
    * Get SLO check result summary for a test run.
    * Queries check_results table and counts passed/failed using the meets_requirement column.
    */
-  async getSloSummary(testRunId: string): Promise<SloSummary | null> {
+  async getSloSummary(
+    testRunId: string,
+    userId: string = '',
+    roles: string[] = [],
+  ): Promise<SloSummary> {
     try {
       const rows: { meets_requirement: boolean | null }[] = await this.dataSource.query(
         `SELECT meets_requirement FROM check_results WHERE test_run_id = $1`,
         [testRunId],
       );
-
-      if (rows.length === 0) return null;
 
       let passed = 0;
       let failed = 0;
@@ -1367,7 +1373,7 @@ export class ReportDataFetcherService {
       return { passed, failed, total: passed + failed };
     } catch (error) {
       this.logger.warn(`Failed to get SLO summary for ${testRunId}: ${(error as Error).message}`);
-      return null;
+      return { passed: 0, failed: 0, total: 0 };
     }
   }
 
@@ -1435,7 +1441,11 @@ export class ReportDataFetcherService {
    * Get detailed regression/improvement data for a test run.
    * Queries ds_adapt_conclusion for summary and ds_adapt_results for per-metric details.
    */
-  async getRegressionsData(testRunId: string): Promise<RegressionsData | null> {
+  async getRegressionsData(
+    testRunId: string,
+    userId: string = '',
+    roles: string[] = [],
+  ): Promise<RegressionsData | null> {
     try {
       // Get overall conclusion
       const conclusionRows: {
@@ -1507,7 +1517,11 @@ export class ReportDataFetcherService {
     }
   }
 
-  async getAnomalySummary(testRunId: string): Promise<AnomalySummary | null> {
+  async getAnomalySummary(
+    testRunId: string,
+    userId: string = '',
+    roles: string[] = [],
+  ): Promise<AnomalySummary> {
     try {
       const rows: { conclusion: string; regressions: string[] | null; improvements: string[] | null }[] =
         await this.dataSource.query(
@@ -1516,7 +1530,7 @@ export class ReportDataFetcherService {
         );
 
       const row = rows[0];
-      if (!row) return null;
+      if (!row) return { conclusion: 'no_data', regressionCount: 0, improvementCount: 0 };
 
       return {
         conclusion: row.conclusion,
@@ -1525,7 +1539,7 @@ export class ReportDataFetcherService {
       };
     } catch (error) {
       this.logger.warn(`Failed to get anomaly summary for ${testRunId}: ${(error as Error).message}`);
-      return null;
+      return { conclusion: 'unknown', regressionCount: 0, improvementCount: 0 };
     }
   }
 

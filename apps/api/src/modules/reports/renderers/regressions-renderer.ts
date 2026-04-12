@@ -25,16 +25,28 @@ export class RegressionsRenderer {
   async renderRegressionsSection(
     section: ReportSectionConfig,
     testRun: TestRun | null,
+    userId: string = '',
+    roles: string[] = [],
   ): Promise<string> {
     const config = section.config || {};
-    const showImprovements = config.showImprovements === true;
-    const maxRows = typeof config.maxRows === 'number' ? config.maxRows : 50;
     const title = section.title || 'Regressions';
     const comment = section.comment;
+    const showImprovements = config.showImprovements === true;
+    const maxRows = typeof config.maxRows === 'number' ? config.maxRows : 50;
 
-    const data = testRun
-      ? await this.dataFetcher.getRegressionsData(testRun.testRunId)
-      : null;
+    if (!testRun) {
+      return `
+        <section class="regressions-section">
+          <h2>${this.utils.escapeHtml(title)}</h2>
+          ${comment ? `<div class="section-comment">${this.utils.escapeHtml(comment)}</div>` : ''}
+          <div class="regressions-results">
+            <p class="placeholder-message">No ADAPT regression analysis data available for this test run.</p>
+          </div>
+        </section>
+      `;
+    }
+
+    const data = await this.dataFetcher.getRegressionsData(testRun.testRunId, userId, roles);
 
     if (!data) {
       return `
