@@ -108,7 +108,7 @@ export class ReportHtmlCompilerService {
       case 'comparisons':
         return this.comparisonsRenderer.renderComparisonsSection(section, testRun);
       case 'graphs':
-        return this.graphsRenderer.renderGraphsSection(section, testRun);
+        return await this.graphsRenderer.renderGraphsSection(section, testRun, userId, roles);
       default:
         return this.placeholderRenderer.renderPlaceholderSection(sectionTitle, section.type);
     }

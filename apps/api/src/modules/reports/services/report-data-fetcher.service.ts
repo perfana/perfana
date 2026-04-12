@@ -123,6 +123,38 @@ interface ApdexTransactionRow extends TransactionRow {
   active_threshold: string;
 }
 
+/** Panel selector for metrics time-series queries */
+export interface MetricsPanelSelector {
+  dashboardLabel?: string;
+  panelTitle?: string;
+  metricName?: string;
+}
+
+/** A single data point in a metrics time series */
+export interface MetricsDataPoint {
+  time: Date;
+  value: number | null;
+}
+
+/** Time-series data for one panel/metric combination */
+export interface MetricsTimeSeriesPanel {
+  panelTitle: string;
+  dashboardLabel: string;
+  metricName: string;
+  unit: string;
+  dataPoints: MetricsDataPoint[];
+}
+
+/** Raw metrics row from database query */
+interface MetricsTimeSeriesRow {
+  time: string;
+  value: number | null;
+  metric_name: string;
+  panel_title: string;
+  dashboard_label: string;
+  unit: string;
+}
+
 /** Raw throughput scenario row from database query */
 interface ThroughputScenarioRow {
   scenario_name: string;
@@ -1022,5 +1054,159 @@ export class ReportDataFetcherService {
     };
 
     return mockScenarios[scenarioName] || null;
+  }
+
+  /**
+   * Fetch time-series metric data from ds_metrics for graph rendering.
+   *
+   * @param testRunId - Test run ID
+   * @param panels - Array of panel selectors (dashboardLabel, panelTitle, metricName)
+   * @param excludeRampUp - Whether to exclude ramp-up data points (default true)
+   * @param userId - User ID for org filtering
+   * @param roles - User roles for admin bypass
+   * @returns Array of MetricsTimeSeriesPanel (one per panel with data points)
+   */
+  async getMetricsTimeSeries(
+    testRunId: string,
+    panels: MetricsPanelSelector[],
+    excludeRampUp: boolean = true,
+    userId: string = '',
+    roles: string[] = [],
+  ): Promise<MetricsTimeSeriesPanel[]> {
+    try {
+      if (!panels || panels.length === 0) {
+        return [];
+      }
+
+      const skipOrgFilter = !userId || this.authzService.isGlobalAdmin(roles);
+      let organizationIds: string[] = [];
+      if (!skipOrgFilter) {
+        organizationIds = await this.authzService.getAccessibleOrganizations(userId);
+      }
+
+      const results: MetricsTimeSeriesPanel[] = [];
+
+      for (const panel of panels) {
+        const conditions: string[] = ['dm.test_run_id = $1'];
+        const params: unknown[] = [testRunId];
+        let paramIdx = 2;
+
+        if (panel.dashboardLabel) {
+          conditions.push(`dm.dashboard_label = $${paramIdx}`);
+          params.push(panel.dashboardLabel);
+          paramIdx++;
+        }
+        if (panel.panelTitle) {
+          conditions.push(`dm.panel_title = $${paramIdx}`);
+          params.push(panel.panelTitle);
+          paramIdx++;
+        }
+        if (panel.metricName) {
+          conditions.push(`dm.metric_name = $${paramIdx}`);
+          params.push(panel.metricName);
+          paramIdx++;
+        }
+        if (excludeRampUp) {
+          conditions.push('(dm.ramp_up IS NULL OR dm.ramp_up = false)');
+        }
+
+        // Org filter via test_runs join
+        if (!skipOrgFilter) {
+          const orgFilter = this.buildOrganizationFilterClause(paramIdx, organizationIds, 'tr');
+          if (orgFilter.clause) {
+            conditions.push(`EXISTS (SELECT 1 FROM test_runs tr WHERE tr.test_run_id = dm.test_run_id ${orgFilter.clause})`);
+            params.push(...orgFilter.params);
+          }
+        }
+
+        const query = `
+          SELECT
+            dm.time,
+            dm.value,
+            dm.metric_name,
+            dm.panel_title,
+            dm.dashboard_label,
+            dm.unit
+          FROM ds_metrics dm
+          WHERE ${conditions.join(' AND ')}
+          ORDER BY dm.time ASC
+        `;
+
+        const rows: MetricsTimeSeriesRow[] = await this.testRunRepo.query(query, params);
+
+        if (rows.length > 0) {
+          const firstRow = rows[0]!;
+          const panelTitle = panel.panelTitle || firstRow.panel_title || 'Untitled Panel';
+          const dashboardLabel = panel.dashboardLabel || firstRow.dashboard_label || '';
+          const metricName = panel.metricName || firstRow.metric_name || '';
+          const unit = firstRow.unit || '';
+
+          results.push({
+            panelTitle,
+            dashboardLabel,
+            metricName,
+            unit,
+            dataPoints: rows.map((row) => ({
+              time: new Date(row.time),
+              value: row.value !== null && row.value !== undefined ? parseFloat(String(row.value)) : null,
+            })),
+          });
+        }
+      }
+
+      return results;
+    } catch (error) {
+      this.logger.error('Failed to fetch metrics time series:', error);
+      return [];
+    }
+  }
+
+  /**
+   * Auto-discover available panels for a test run from ds_metrics.
+   * Used when no explicit panel selection is provided.
+   */
+  async getAvailableMetricsPanels(
+    testRunId: string,
+    userId: string = '',
+    roles: string[] = [],
+  ): Promise<MetricsPanelSelector[]> {
+    try {
+      const skipOrgFilter = !userId || this.authzService.isGlobalAdmin(roles);
+      let orgClause = '';
+      const params: unknown[] = [testRunId];
+
+      if (!skipOrgFilter) {
+        const organizationIds = await this.authzService.getAccessibleOrganizations(userId);
+        const orgFilter = this.buildOrganizationFilterClause(2, organizationIds, 'tr');
+        if (orgFilter.clause) {
+          orgClause = `AND EXISTS (SELECT 1 FROM test_runs tr WHERE tr.test_run_id = dm.test_run_id ${orgFilter.clause})`;
+          params.push(...orgFilter.params);
+        }
+      }
+
+      const query = `
+        SELECT DISTINCT
+          dm.dashboard_label,
+          dm.panel_title,
+          dm.metric_name
+        FROM ds_metrics dm
+        WHERE dm.test_run_id = $1
+          ${orgClause}
+        ORDER BY dm.dashboard_label ASC, dm.panel_title ASC, dm.metric_name ASC
+        LIMIT 20
+      `;
+
+      const rows: Array<{ dashboard_label: string; panel_title: string; metric_name: string }> =
+        await this.testRunRepo.query(query, params);
+
+      return rows.map((row) => ({
+        dashboardLabel: row.dashboard_label || '',
+        panelTitle: row.panel_title || '',
+        metricName: row.metric_name || '',
+      }));
+    } catch (error) {
+      this.logger.error('Failed to discover metrics panels:', error);
+      return [];
+    }
   }
 }
