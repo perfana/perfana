@@ -785,12 +785,14 @@
       "secret": "",
       "redirectUris": [
         "http://localhost:3000/*",
+        "http://localhost:4000/*",
         "http://localhost:4001/*",
         "https://app.perfana.io/*",
         "https://*.perfana.dev/*"
       ],
       "webOrigins": [
         "http://localhost:3000",
+        "http://localhost:4000",
         "http://localhost:4001",
         "https://app.perfana.io",
         "https://*.perfana.dev"
@@ -914,7 +916,7 @@
     "xRobotsTag": "none",
     "xFrameOptions": "SAMEORIGIN",
     "xXSSProtection": "1; mode=block",
-    "contentSecurityPolicy": "frame-src 'self' http://localhost:3000 http://localhost:4001; frame-ancestors 'self' http://localhost:3000 http://localhost:4001; object-src 'none';",
+    "contentSecurityPolicy": "frame-src 'self' http://localhost:3000 http://localhost:4000 http://localhost:4001; frame-ancestors 'self' http://localhost:3000 http://localhost:4000 http://localhost:4001; object-src 'none';",
     "strictTransportSecurity": "max-age=31536000; includeSubDomains"
   },
   "smtpServer": {},

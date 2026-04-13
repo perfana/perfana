@@ -5,7 +5,7 @@
   "description": "Perfana Next.js frontend application",
   "scripts": {
     "build": "next build",
-    "dev": "next dev -p 4001",
+    "dev": "next dev -p 4000",
     "start": "next start",
     "lint": "eslint app lib --ext .ts,.tsx",
     "test": "jest",
