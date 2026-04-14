@@ -96,7 +96,7 @@ export class AddWorkloadToEvents1776148518354 implements MigrationInterface {
         await queryRunner.query(`DROP INDEX "public"."idx_systems_under_test_org_created"`);
         await queryRunner.query(`DROP INDEX "public"."idx_systems_under_test_pyroscope_configurations"`);
         await queryRunner.query(`DROP INDEX "public"."idx_systems_under_test_pyroscope_instance"`);
-        await queryRunner.query(`DROP INDEX "public"."uq_system_under_test_name_org"`);
+        await queryRunner.query(`DROP INDEX IF EXISTS "public"."uq_system_under_test_name_org"`);
         await queryRunner.query(`DROP INDEX "public"."idx_grafana_instances_label"`);
         await queryRunner.query(`DROP INDEX "public"."idx_grafana_instances_organization_id"`);
         await queryRunner.query(`DROP INDEX "public"."idx_grafana_instances_snapshot"`);
