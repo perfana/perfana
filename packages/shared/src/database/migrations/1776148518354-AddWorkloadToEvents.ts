@@ -402,6 +402,12 @@ export class AddWorkloadToEvents1776148518354 implements MigrationInterface {
         await queryRunner.query(`COMMENT ON TABLE "system_under_test_test_environments" IS NULL`);
         await queryRunner.query(`COMMENT ON TABLE "system_under_test_workloads" IS NULL`);
         await queryRunner.query(`COMMENT ON TABLE "ds_metric_collection_status" IS NULL`);
+        // Drop RLS policies that reference the ownership columns we're about to remove.
+        // PostgreSQL refuses to drop a column if a policy depends on it (SQLSTATE 2BP01).
+        await queryRunner.query(`DROP POLICY IF EXISTS rls_url_patterns_select ON "url_patterns"`);
+        await queryRunner.query(`DROP POLICY IF EXISTS rls_url_patterns_insert ON "url_patterns"`);
+        await queryRunner.query(`DROP POLICY IF EXISTS rls_url_patterns_update ON "url_patterns"`);
+        await queryRunner.query(`DROP POLICY IF EXISTS rls_url_patterns_delete ON "url_patterns"`);
         await queryRunner.query(`ALTER TABLE "url_patterns" DROP COLUMN "organization_id"`);
         await queryRunner.query(`ALTER TABLE "url_patterns" DROP COLUMN "team_id"`);
         await queryRunner.query(`ALTER TABLE "url_patterns" DROP COLUMN "created_by"`);
@@ -411,6 +417,10 @@ export class AddWorkloadToEvents1776148518354 implements MigrationInterface {
         await queryRunner.query(`ALTER TABLE "test_run_configs" DROP COLUMN "created_by"`);
         await queryRunner.query(`ALTER TABLE "test_run_configs" DROP COLUMN "updated_by"`);
         await queryRunner.query(`ALTER TABLE "test_runs" DROP COLUMN "scaling_session_id"`);
+        await queryRunner.query(`DROP POLICY IF EXISTS rls_generated_reports_select ON "generated_reports"`);
+        await queryRunner.query(`DROP POLICY IF EXISTS rls_generated_reports_insert ON "generated_reports"`);
+        await queryRunner.query(`DROP POLICY IF EXISTS rls_generated_reports_update ON "generated_reports"`);
+        await queryRunner.query(`DROP POLICY IF EXISTS rls_generated_reports_delete ON "generated_reports"`);
         await queryRunner.query(`ALTER TABLE "generated_reports" DROP COLUMN "organization_id"`);
         await queryRunner.query(`ALTER TABLE "generated_reports" DROP COLUMN "team_id"`);
         await queryRunner.query(`ALTER TABLE "generated_reports" DROP COLUMN "created_by"`);
