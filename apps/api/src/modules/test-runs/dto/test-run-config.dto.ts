@@ -10,7 +10,7 @@ import {
   Matches,
 } from 'class-validator';
 import { Type } from 'class-transformer';
-import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
+import { ApiProperty } from '@nestjs/swagger';
 import { IsValidTestRunId, IsSafeRegex, HasValidJsonDepth } from '../../../common/validators';
 
 export class TestRunConfigItemDto {

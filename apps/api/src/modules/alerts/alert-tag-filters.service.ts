@@ -55,7 +55,7 @@ export class AlertTagFiltersService {
       tagValue: dto.tagValue,
       systemUnderTestId: dto.systemUnderTestId,
       testEnvironment: dto.testEnvironment,
-      testType: dto.workload,
+      workload: dto.workload,
       organizationId: dto.organizationId,
       createdBy: userId,
       updatedBy: userId,
