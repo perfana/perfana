@@ -491,10 +491,10 @@ describe('TestRunsService', () => {
       it('should delegate to mutationService.updateAdaptConfig', async () => {
         mockMutationService.updateAdaptConfig!.mockResolvedValue(mockTestRun);
 
-        const result = await service.updateAdaptConfig('test-run-id', 'ACCEPTED', 'system', 'env', 'workload', testUserId, testRoles);
+        const result = await service.updateAdaptConfig('test-run-id', 'ACCEPTED', testUserId, testRoles, 'system', 'env', 'workload');
 
         expect(mockMutationService.updateAdaptConfig).toHaveBeenCalledWith(
-          'test-run-id', 'ACCEPTED', 'system', 'env', 'workload', testUserId, testRoles
+          'test-run-id', 'ACCEPTED', testUserId, testRoles, 'system', 'env', 'workload', undefined
         );
         expect(result).toEqual(mockTestRun);
       });
