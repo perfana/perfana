@@ -4,6 +4,14 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
+## [0.2.36.1] - 2026-04-14
+
+### Fixed
+- `alert-tag-filters.service.ts`: wrong property name `testType` used when creating alert tag filter entities (should be `workload` after the rename in 0.2.36.0).
+- `test-run-config.dto.ts`: unused `ApiPropertyOptional` import causing TypeScript build error.
+- `test-runs.controller.spec.ts` / `test-runs.service.spec.ts`: `updateAdaptConfig` test assertions had wrong argument order and were missing the `mode` parameter, causing test failures after the API was extended.
+- `jest.config.js`: `phase5-migration-validation.test.ts` (a DB integration test requiring a live database) was being picked up by the unit test runner, causing spurious failures in CI.
+
 ## [0.2.36.0] - 2026-04-12
 
 ### Added
