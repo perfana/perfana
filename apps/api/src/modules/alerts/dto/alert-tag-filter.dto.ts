@@ -34,11 +34,11 @@ export class CreateAlertTagFilterDto {
   @MaxLength(255)
   testEnvironment?: string;
 
-  @ApiPropertyOptional({ description: 'Test type (for abort filters)' })
+  @ApiPropertyOptional({ description: 'Workload (for abort filters)' })
   @IsOptional()
   @IsString()
   @MaxLength(255)
-  testType?: string;
+  workload?: string;
 
   @ApiPropertyOptional({ description: 'Organization ID' })
   @IsOptional()
@@ -82,9 +82,9 @@ export class UpdateAlertTagFilterDto {
   @MaxLength(255)
   testEnvironment?: string;
 
-  @ApiPropertyOptional({ description: 'Test type' })
+  @ApiPropertyOptional({ description: 'Workload' })
   @IsOptional()
   @IsString()
   @MaxLength(255)
-  testType?: string;
+  workload?: string;
 }

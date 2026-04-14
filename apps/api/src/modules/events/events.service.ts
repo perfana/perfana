@@ -140,6 +140,7 @@ export class EventsService {
       description: dto.description,
       systemUnderTestId: sut.id,
       testEnvironment: dto.testEnvironment,
+      workload: dto.workload,
       timestamp: dto.timestamp ? new Date(dto.timestamp) : new Date(),
       source: dto.source || 'manual',
       tags: dto.tags,

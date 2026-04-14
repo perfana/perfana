@@ -26,7 +26,7 @@ export class AlertTagFilter {
   testEnvironment?: string;
 
   @Column({ name: 'test_type', type: 'varchar', length: 255, nullable: true })
-  testType?: string;
+  workload?: string;
 
   // Ownership tracking (RBAC)
   @Column({ type: 'uuid', nullable: true, name: 'organization_id' })

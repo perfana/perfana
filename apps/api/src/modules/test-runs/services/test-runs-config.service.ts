@@ -172,12 +172,12 @@ export class TestRunsConfigService {
 
       // Validate system under test exists
       const systemUnderTest = await this.systemRepo.findOne({
-        where: { name: configDto.application },
+        where: { name: configDto.systemUnderTest },
         select: ['id']
       });
 
       if (!systemUnderTest) {
-        throw new ResourceNotFoundException('System under test', configDto.application);
+        throw new ResourceNotFoundException('System under test', configDto.systemUnderTest);
       }
 
       // Try to find test run by test_run_id
@@ -190,7 +190,7 @@ export class TestRunsConfigService {
         // Validate test run belongs to the specified system
         if (testRun.systemUnderTestId !== systemUnderTest.id) {
           throw new ValidationException(
-            `Test run ${configDto.testRunId} does not belong to system ${configDto.application}`
+            `Test run ${configDto.testRunId} does not belong to system ${configDto.systemUnderTest}`
           );
         }
         // Test run exists, use UUID foreign key with proper upsert
@@ -225,12 +225,12 @@ export class TestRunsConfigService {
     try {
       // Validate system under test exists
       const systemUnderTest = await this.systemRepo.findOne({
-        where: { name: configsDto.application },
+        where: { name: configsDto.systemUnderTest },
         select: ['id']
       });
 
       if (!systemUnderTest) {
-        throw new ResourceNotFoundException('System under test', configsDto.application);
+        throw new ResourceNotFoundException('System under test', configsDto.systemUnderTest);
       }
 
       // Try to find test run
@@ -246,7 +246,7 @@ export class TestRunsConfigService {
         // Validate test run belongs to the specified system
         if (testRun.systemUnderTestId !== systemUnderTest.id) {
           throw new ValidationException(
-            `Test run ${configsDto.testRunId} does not belong to system ${configsDto.application}`
+            `Test run ${configsDto.testRunId} does not belong to system ${configsDto.systemUnderTest}`
           );
         }
         // Test run exists, use UUID foreign key with proper upsert
@@ -446,12 +446,12 @@ export class TestRunsConfigService {
 
       // Find system under test
       const systemUnderTest = await this.systemRepo.findOne({
-        where: { name: configJsonDto.application },
+        where: { name: configJsonDto.systemUnderTest },
         select: ['id']
       });
 
       if (!systemUnderTest) {
-        throw new ResourceNotFoundException('System under test', configJsonDto.application);
+        throw new ResourceNotFoundException('System under test', configJsonDto.systemUnderTest);
       }
 
       // Find test run

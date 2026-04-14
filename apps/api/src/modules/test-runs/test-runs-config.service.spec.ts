@@ -223,7 +223,7 @@ describe('TestRunsConfigService', () => {
 
   describe('addTestRunConfig', () => {
     const mockConfigDto: AddTestRunConfigDto = {
-      application: 'my-app',
+      systemUnderTest: 'my-app',
       testEnvironment: 'production',
       workload: 'load-test',
       testRunId: 'load-test-2024-01-15-14-30',
@@ -286,7 +286,7 @@ describe('TestRunsConfigService', () => {
 
   describe('addTestRunConfigs', () => {
     const mockConfigsDto: AddTestRunConfigsDto = {
-      application: 'my-app',
+      systemUnderTest: 'my-app',
       testEnvironment: 'production',
       workload: 'load-test',
       testRunId: 'load-test-2024-01-15-14-30',
@@ -334,7 +334,7 @@ describe('TestRunsConfigService', () => {
 
   describe('addTestRunConfigJson', () => {
     const mockJsonConfigDto: AddTestRunConfigJsonDto = {
-      application: 'my-app',
+      systemUnderTest: 'my-app',
       testEnvironment: 'production',
       workload: 'load-test',
       testRunId: 'load-test-2024-01-15-14-30',
@@ -643,7 +643,7 @@ describe('TestRunsConfigService', () => {
     describe('flattenJSON behavior', () => {
       it('should flatten nested JSON correctly through addTestRunConfigJson', async () => {
         const nestedJson: AddTestRunConfigJsonDto = {
-          application: 'my-app',
+          systemUnderTest: 'my-app',
           testEnvironment: 'production',
           workload: 'load-test',
           testRunId: 'load-test-2024-01-15-14-30',
@@ -672,7 +672,7 @@ describe('TestRunsConfigService', () => {
     describe('escapeRegExp behavior', () => {
       it('should properly escape regex special characters in includes', async () => {
         const dtoWithSpecialChars: AddTestRunConfigJsonDto = {
-          application: 'my-app',
+          systemUnderTest: 'my-app',
           testEnvironment: 'production',
           workload: 'load-test',
           testRunId: 'load-test-2024-01-15-14-30',

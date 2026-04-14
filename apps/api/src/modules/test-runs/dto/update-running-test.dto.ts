@@ -79,22 +79,6 @@ export class UpdateRunningTestDto {
   })
   workload!: string;
 
-  @ApiPropertyOptional({
-    description: 'Legacy test type field (deprecated, use workload instead)',
-    deprecated: true,
-    example: 'loadTest'
-  })
-  @IsOptional()
-  @IsString()
-  @Length(1, 255)
-  @Transform(({ value, obj }) => {
-    if (value && !obj.workload) {
-      obj.workload = value;
-    }
-    return undefined;
-  })
-  testType?: string;
-
   @ApiProperty({
     description: 'Test environment name',
     example: 'production'
@@ -142,7 +126,7 @@ export class UpdateRunningTestDto {
   duration?: number | string;
 
   @ApiPropertyOptional({
-    description: 'Ramp up duration in seconds',
+    description: 'Analysis start offset in seconds (initial period excluded from analysis)',
     example: '300'
   })
   @IsOptional()
@@ -153,10 +137,10 @@ export class UpdateRunningTestDto {
     }
     return value;
   })
-  @IsInt({ message: 'Ramp up duration must be an integer' })
-  @Min(0, { message: 'Ramp up duration must be non-negative' })
-  @Max(86400, { message: 'Ramp up duration must not exceed 1 day (86400 seconds)' })
-  rampUp?: number | string;
+  @IsInt({ message: 'Analysis start offset must be an integer' })
+  @Min(0, { message: 'Analysis start offset must be non-negative' })
+  @Max(86400, { message: 'Analysis start offset must not exceed 1 day (86400 seconds)' })
+  analysisStartOffset?: number | string;
 
   @ApiProperty({
     description: 'Unique test run identifier',

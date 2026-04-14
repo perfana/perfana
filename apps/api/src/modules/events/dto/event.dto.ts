@@ -21,6 +21,12 @@ export class CreateEventDto {
   @MaxLength(255)
   testEnvironment!: string;
 
+  @ApiPropertyOptional({ description: 'Workload name' })
+  @IsOptional()
+  @IsString()
+  @MaxLength(255)
+  workload?: string;
+
   @ApiPropertyOptional({ description: 'Event timestamp (ISO 8601). Defaults to now if omitted.' })
   @IsOptional()
   @IsDateString()
