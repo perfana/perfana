@@ -907,6 +907,7 @@ describe('TestRunsAnalysisController', () => {
           undefined,
           undefined,
           undefined,
+          undefined,
         );
       });
     });
@@ -1075,6 +1076,7 @@ describe('TestRunsAnalysisController', () => {
         systemUnderTestId,
         environment,
         workload,
+        undefined,
       );
     });
 

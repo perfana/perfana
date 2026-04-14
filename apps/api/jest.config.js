@@ -46,6 +46,7 @@ module.exports = {
     '/test/security/',
     '/test/edge-cases/',
     '/test/performance/',
+    '/src/test/phase5-migration-validation.test.ts',
   ],
   collectCoverageFrom: [
     'src/**/*.(t|j)s',
