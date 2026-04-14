@@ -20,7 +20,7 @@ export interface TestRun {
   end_time?: string;
   duration?: number;
   planned_duration?: number;
-  ramp_up?: number;
+  analysis_start_offset?: number;
   completed: boolean;
   abort?: boolean;
   is_stale?: boolean;

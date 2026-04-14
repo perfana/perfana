@@ -12,7 +12,7 @@ export interface JtlImportOptions {
   systemUnderTest: string;
   testEnvironment: string;
   workload: string;
-  rampUp?: number;
+  analysisStartOffset?: number;
   configs?: Array<{ key: string; value: string }>;
   userId: string;
   roles: string[];
@@ -83,7 +83,7 @@ export class JtlImportService {
         start: overallStartTime.toISOString(),
         end: overallEndTime.toISOString(),
         duration,
-        rampUp: options.rampUp || 0,
+        analysisStartOffset: options.analysisStartOffset || 0,
         completed: false,
         tags: [
           'source:jtl-upload',
@@ -181,7 +181,7 @@ export class JtlImportService {
         start: overallStartTime.toISOString(),
         end: overallEndTime.toISOString(),
         duration,
-        rampUp: options.rampUp || 0,
+        analysisStartOffset: options.analysisStartOffset || 0,
         completed: true,
         tags: [
           'source:jtl-upload',

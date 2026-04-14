@@ -55,7 +55,7 @@ export class AlertTagFiltersService {
       tagValue: dto.tagValue,
       systemUnderTestId: dto.systemUnderTestId,
       testEnvironment: dto.testEnvironment,
-      testType: dto.testType,
+      testType: dto.workload,
       organizationId: dto.organizationId,
       createdBy: userId,
       updatedBy: userId,
@@ -73,7 +73,7 @@ export class AlertTagFiltersService {
     if (dto.tagValue !== undefined) filter.tagValue = dto.tagValue;
     if (dto.systemUnderTestId !== undefined) filter.systemUnderTestId = dto.systemUnderTestId;
     if (dto.testEnvironment !== undefined) filter.testEnvironment = dto.testEnvironment;
-    if (dto.testType !== undefined) filter.testType = dto.testType;
+    if (dto.workload !== undefined) filter.workload = dto.workload;
     filter.updatedBy = userId;
 
     return this.filterRepo.save(filter);

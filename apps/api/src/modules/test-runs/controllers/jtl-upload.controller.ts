@@ -51,7 +51,7 @@ export class JtlUploadController {
         systemUnderTest: { type: 'string', description: 'System under test name' },
         testEnvironment: { type: 'string', description: 'Test environment name' },
         workload: { type: 'string', description: 'Workload name' },
-        rampUp: { type: 'string', description: 'Ramp-up time in seconds' },
+        analysisStartOffset: { type: 'string', description: 'Analysis start offset in seconds' },
         configs: { type: 'string', description: 'Optional JSON: [{key, value}]' },
       },
       required: ['file', 'systemUnderTest', 'testEnvironment', 'workload'],
@@ -108,13 +108,13 @@ export class JtlUploadController {
         `for ${dto.systemUnderTest}/${dto.testEnvironment}/${dto.workload} by user ${ctx.userId}`,
     );
 
-    const rampUp = dto.rampUp ? parseInt(dto.rampUp, 10) : 0;
+    const analysisStartOffset = dto.analysisStartOffset ? parseInt(dto.analysisStartOffset, 10) : 0;
 
     const result = await this.jtlImportService.importJtl(file.buffer, {
       systemUnderTest: dto.systemUnderTest,
       testEnvironment: dto.testEnvironment,
       workload: dto.workload,
-      rampUp: isNaN(rampUp) ? 0 : rampUp,
+      analysisStartOffset: isNaN(analysisStartOffset) ? 0 : analysisStartOffset,
       configs,
       userId: ctx.userId,
       roles: ctx.roles,

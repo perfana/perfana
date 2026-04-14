@@ -42,7 +42,7 @@ export function JtlUploadDialog({
   const [systemUnderTest, setSystemUnderTest] = useState<string>('');
   const [testEnvironment, setTestEnvironment] = useState<string>('');
   const [workload, setWorkload] = useState<string>('');
-  const [rampUp, setRampUp] = useState<string>('');
+  const [analysisStartOffset, setAnalysisStartOffset] = useState<string>('');
   const [configs, setConfigs] = useState<ConfigPair[]>([]);
   const [uploading, setUploading] = useState(false);
   const [result, setResult] = useState<{ success: boolean; message: string; testRunId?: string } | null>(null);
@@ -52,7 +52,7 @@ export function JtlUploadDialog({
     setSystemUnderTest('');
     setTestEnvironment('');
     setWorkload('');
-    setRampUp('');
+    setAnalysisStartOffset('');
     setConfigs([]);
     setResult(null);
   }, []);
@@ -106,8 +106,8 @@ export function JtlUploadDialog({
       formData.append('testEnvironment', testEnvironment.trim());
       formData.append('workload', workload.trim());
 
-      if (rampUp.trim()) {
-        formData.append('rampUp', rampUp.trim());
+      if (analysisStartOffset.trim()) {
+        formData.append('analysisStartOffset', analysisStartOffset.trim());
       }
 
       const validConfigs = configs.filter((c) => c.key.trim() && c.value.trim());
@@ -217,13 +217,13 @@ export function JtlUploadDialog({
             )}
           />
 
-          {/* Ramp-Up Time */}
+          {/* Analysis Start Offset */}
           <TextField
-            label="Ramp-up time (seconds)"
+            label="Analysis start offset (seconds)"
             type="number"
             size="small"
-            value={rampUp}
-            onChange={(e) => setRampUp(e.target.value)}
+            value={analysisStartOffset}
+            onChange={(e) => setAnalysisStartOffset(e.target.value)}
             disabled={uploading}
             helperText="Excluded from performance analysis"
             slotProps={{ htmlInput: { min: 0 } }}

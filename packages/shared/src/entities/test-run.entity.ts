@@ -49,7 +49,7 @@ export class TestRun {
   plannedDuration?: number;
 
   @Column({ name: 'ramp_up', type: 'integer', nullable: true })
-  rampUp?: number;
+  analysisStartOffset?: number;
 
   @Column({ type: 'boolean', nullable: true, default: false })
   completed?: boolean;

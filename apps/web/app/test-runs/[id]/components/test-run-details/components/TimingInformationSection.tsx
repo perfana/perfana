@@ -17,53 +17,53 @@ export function TimingInformationSection({ testRun, onTestRunUpdate, showToast }
   const theme = useTheme();
   const isDark = theme.palette.mode === 'dark';
 
-  const [isEditingRampUp, setIsEditingRampUp] = useState(false);
-  const [editingRampUp, setEditingRampUp] = useState<string>('');
-  const [rampUpSaving, setRampUpSaving] = useState(false);
+  const [isEditingAnalysisStartOffset, setIsEditingAnalysisStartOffset] = useState(false);
+  const [editingAnalysisStartOffset, setEditingAnalysisStartOffset] = useState<string>('');
+  const [analysisStartOffsetSaving, setAnalysisStartOffsetSaving] = useState(false);
 
-  const handleRampUpEdit = () => {
-    setEditingRampUp(String(testRun.ramp_up ?? 0));
-    setIsEditingRampUp(true);
+  const handleAnalysisStartOffsetEdit = () => {
+    setEditingAnalysisStartOffset(String(testRun.analysis_start_offset ?? 0));
+    setIsEditingAnalysisStartOffset(true);
   };
 
-  const handleRampUpCancel = () => {
-    setIsEditingRampUp(false);
-    setEditingRampUp('');
+  const handleAnalysisStartOffsetCancel = () => {
+    setIsEditingAnalysisStartOffset(false);
+    setEditingAnalysisStartOffset('');
   };
 
-  const handleRampUpSave = async () => {
-    const rampUpValue = parseInt(editingRampUp, 10);
-    if (isNaN(rampUpValue) || rampUpValue < 0) {
-      showToast?.('Ramp-up must be a non-negative number (seconds)');
+  const handleAnalysisStartOffsetSave = async () => {
+    const analysisStartOffsetValue = parseInt(editingAnalysisStartOffset, 10);
+    if (isNaN(analysisStartOffsetValue) || analysisStartOffsetValue < 0) {
+      showToast?.('Analysis start offset must be a non-negative number (seconds)');
       return;
     }
 
-    setRampUpSaving(true);
+    setAnalysisStartOffsetSaving(true);
     try {
-      const response = await authenticatedFetch(`/test-runs/${testRun.id}/ramp-up`, {
+      const response = await authenticatedFetch(`/test-runs/${testRun.id}/analysis-start-offset`, {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ rampUp: rampUpValue }),
+        body: JSON.stringify({ analysisStartOffset: analysisStartOffsetValue }),
       });
 
       if (!response.ok) {
-        throw new Error('Failed to update ramp-up');
+        throw new Error('Failed to update analysis start offset');
       }
 
-      const updatedTestRun = { ...testRun, ramp_up: rampUpValue };
+      const updatedTestRun = { ...testRun, analysis_start_offset: analysisStartOffsetValue };
       onTestRunUpdate?.(updatedTestRun);
-      setIsEditingRampUp(false);
-      showToast?.('Ramp-up updated successfully');
+      setIsEditingAnalysisStartOffset(false);
+      showToast?.('Analysis start offset updated successfully');
     } catch (error) {
-      console.error('Failed to update ramp-up:', error);
-      showToast?.('Failed to update ramp-up');
+      console.error('Failed to update analysis start offset:', error);
+      showToast?.('Failed to update analysis start offset');
     } finally {
-      setRampUpSaving(false);
+      setAnalysisStartOffsetSaving(false);
     }
   };
 
-  // Check if ramp-up exceeds actual duration
-  const rampUpExceedsDuration = testRun.ramp_up != null && testRun.duration != null && testRun.ramp_up > testRun.duration;
+  // Check if analysis start offset exceeds actual duration
+  const analysisStartOffsetExceedsDuration = testRun.analysis_start_offset != null && testRun.duration != null && testRun.analysis_start_offset > testRun.duration;
 
   return (
     <Box sx={{
@@ -132,7 +132,7 @@ export function TimingInformationSection({ testRun, onTestRunUpdate, showToast }
         </Box>
       </Box>
 
-      {/* Ramp Up Period */}
+      {/* Analysis Start Offset */}
       <Box sx={{ mb: 2.5 }}>
         <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 0.75 }}>
           <Typography
@@ -147,39 +147,39 @@ export function TimingInformationSection({ testRun, onTestRunUpdate, showToast }
               opacity: 0.8,
             }}
           >
-            Ramp Up Period
+            Analysis Start Offset
           </Typography>
-          {!isEditingRampUp ? (
-            <Tooltip title="Edit ramp-up period">
-              <IconButton size="small" onClick={handleRampUpEdit} sx={{ p: 0.25 }}>
+          {!isEditingAnalysisStartOffset ? (
+            <Tooltip title="Edit analysis start offset">
+              <IconButton size="small" onClick={handleAnalysisStartOffsetEdit} sx={{ p: 0.25 }}>
                 <Edit sx={{ fontSize: 16 }} />
               </IconButton>
             </Tooltip>
           ) : (
             <Box display="flex" gap={0.5}>
-              <IconButton size="small" onClick={handleRampUpSave} disabled={rampUpSaving} sx={{ p: 0.25 }}>
-                {rampUpSaving ? <CircularProgress size={16} /> : <Save sx={{ fontSize: 16 }} />}
+              <IconButton size="small" onClick={handleAnalysisStartOffsetSave} disabled={analysisStartOffsetSaving} sx={{ p: 0.25 }}>
+                {analysisStartOffsetSaving ? <CircularProgress size={16} /> : <Save sx={{ fontSize: 16 }} />}
               </IconButton>
-              <IconButton size="small" onClick={handleRampUpCancel} disabled={rampUpSaving} sx={{ p: 0.25 }}>
+              <IconButton size="small" onClick={handleAnalysisStartOffsetCancel} disabled={analysisStartOffsetSaving} sx={{ p: 0.25 }}>
                 <Cancel sx={{ fontSize: 16 }} />
               </IconButton>
             </Box>
           )}
         </Box>
-        {isEditingRampUp ? (
+        {isEditingAnalysisStartOffset ? (
           <TextField
-            value={editingRampUp}
-            onChange={(e) => setEditingRampUp(e.target.value)}
+            value={editingAnalysisStartOffset}
+            onChange={(e) => setEditingAnalysisStartOffset(e.target.value)}
             size="small"
             type="number"
             inputProps={{ min: 0 }}
             helperText="Duration in seconds"
-            disabled={rampUpSaving}
+            disabled={analysisStartOffsetSaving}
             fullWidth
             autoFocus
             onKeyDown={(e) => {
-              if (e.key === 'Enter') handleRampUpSave();
-              if (e.key === 'Escape') handleRampUpCancel();
+              if (e.key === 'Enter') handleAnalysisStartOffsetSave();
+              if (e.key === 'Escape') handleAnalysisStartOffsetCancel();
             }}
             sx={{ mt: 0.5 }}
           />
@@ -190,18 +190,18 @@ export function TimingInformationSection({ testRun, onTestRunUpdate, showToast }
               sx={{
                 fontSize: '0.9375rem',
                 fontWeight: 600,
-                color: rampUpExceedsDuration ? 'warning.main' : 'text.primary',
+                color: analysisStartOffsetExceedsDuration ? 'warning.main' : 'text.primary',
                 lineHeight: 1.4,
               }}
             >
-              {formatDuration(testRun.ramp_up)}
+              {formatDuration(testRun.analysis_start_offset)}
             </Typography>
-            {rampUpExceedsDuration && (
+            {analysisStartOffsetExceedsDuration && (
               <Typography
                 variant="caption"
                 sx={{ color: 'warning.main', display: 'block', mt: 0.5 }}
               >
-                Ramp-up exceeds test duration — no steady-state data for analysis
+                Analysis start offset exceeds test duration — no steady-state data for analysis
               </Typography>
             )}
           </>

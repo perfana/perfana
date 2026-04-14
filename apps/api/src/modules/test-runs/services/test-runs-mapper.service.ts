@@ -39,7 +39,7 @@ export class TestRunsMapperService {
       end_time: entity.endTime?.toISOString(),
       duration: entity.duration,
       planned_duration: entity.plannedDuration,
-      ramp_up: entity.rampUp,
+      analysis_start_offset: entity.analysisStartOffset,
       completed: entity.completed || false,
       abort: entity.abort,
       is_stale: entity.isStale,

@@ -64,9 +64,9 @@ describe('TestRunConfig DTOs', () => {
 
   describe('AddTestRunConfigDto', () => {
     const validDto = {
-      application: 'my-app',
+      systemUnderTest: 'my-app',
       testEnvironment: 'production',
-      testType: 'load-test',
+      workload: 'load-test',
       testRunId: 'load-test-2024-01-15-14-30',
       tags: ['performance', 'production'],
       key: 'jvm.heap.size',
@@ -80,15 +80,15 @@ describe('TestRunConfig DTOs', () => {
       expect(errors).toHaveLength(0);
     });
 
-    it('should reject missing application', async () => {
+    it('should reject missing systemUnderTest', async () => {
       const dto = plainToClass(AddTestRunConfigDto, {
         ...validDto,
-        application: undefined
+        systemUnderTest: undefined
       });
 
       const errors = await validate(dto);
       expect(errors).toHaveLength(1);
-      expect(errors[0]?.property).toBe('application');
+      expect(errors[0]?.property).toBe('systemUnderTest');
     });
 
     it('should reject invalid tags (non-array)', async () => {
@@ -116,9 +116,9 @@ describe('TestRunConfig DTOs', () => {
 
   describe('AddTestRunConfigsDto', () => {
     const validDto = {
-      application: 'my-app',
+      systemUnderTest: 'my-app',
       testEnvironment: 'production',
-      testType: 'load-test',
+      workload: 'load-test',
       testRunId: 'load-test-2024-01-15-14-30',
       tags: ['performance', 'production'],
       configItems: [
@@ -176,7 +176,7 @@ describe('TestRunConfig DTOs', () => {
 
   describe('AddTestRunConfigJsonDto', () => {
     const validDto = {
-      application: 'my-app',
+      systemUnderTest: 'my-app',
       testEnvironment: 'production',
       workload: 'load-test',
       testRunId: 'load-test-2024-01-15-14-30',

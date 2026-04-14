@@ -322,8 +322,8 @@ function convertToLongFormat(dataFrame: any[], unit?: string | null, testRun?: a
           const startTime = new Date(testRun.start_time);
           timestep = (recordTime.getTime() - startTime.getTime()) / 1000; // seconds since test start
 
-          const rampUpSeconds = testRun.ramp_up || 0;
-          ramp_up = timestep < rampUpSeconds;
+          const analysisStartOffsetSeconds = testRun.ramp_up || 0;
+          ramp_up = timestep < analysisStartOffsetSeconds;
         }
 
         // Add unit field to each record (Python format_result.py:160-161)

@@ -6,29 +6,12 @@ import {
   ArrayMaxSize,
   ValidateNested,
   IsOptional,
-  ValidationArguments,
-  ValidatorConstraint,
-  ValidatorConstraintInterface,
-  Validate,
   Length,
   Matches,
 } from 'class-validator';
-import { Type, Transform } from 'class-transformer';
+import { Type } from 'class-transformer';
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import { IsValidTestRunId, IsSafeRegex, HasValidJsonDepth } from '../../../common/validators';
-
-@ValidatorConstraint({ name: 'workloadOrTestType', async: false })
-class WorkloadOrTestTypeConstraint implements ValidatorConstraintInterface {
-  validate(value: unknown, validationArguments?: ValidationArguments) {
-    const obj = validationArguments?.object as Record<string, unknown> | undefined;
-    // Check if workload is provided or if testType is provided (even if workload is empty)
-    return !!(value || obj?.testType);
-  }
-
-  defaultMessage() {
-    return 'Either workload or testType must be provided';
-  }
-}
 
 export class TestRunConfigItemDto {
   @ApiProperty({
@@ -49,15 +32,15 @@ export class TestRunConfigItemDto {
 
 export class AddTestRunConfigDto {
   @ApiProperty({
-    description: 'Application name (system under test)',
+    description: 'System under test name',
     example: 'my-app'
   })
   @IsString()
-  @Length(1, 255, { message: 'Application name must be between 1 and 255 characters' })
+  @Length(1, 255, { message: 'System under test name must be between 1 and 255 characters' })
   @Matches(/^[a-zA-Z0-9._-]+$/, {
-    message: 'Application name must contain only alphanumeric characters, dots, hyphens, and underscores'
+    message: 'System under test name must contain only alphanumeric characters, dots, hyphens, and underscores'
   })
-  application!: string;
+  systemUnderTest!: string;
 
   @ApiProperty({
     description: 'Test environment',
@@ -80,23 +63,7 @@ export class AddTestRunConfigDto {
   @Matches(/^[a-zA-Z0-9._-]+$/, {
     message: 'Workload must contain only alphanumeric characters, dots, hyphens, and underscores'
   })
-  @Validate(WorkloadOrTestTypeConstraint)
   workload?: string;
-
-  @ApiPropertyOptional({
-    description: 'Legacy test type field (deprecated, use workload instead)',
-    example: 'load-test'
-  })
-  @IsOptional()
-  @IsString()
-  @Length(1, 255)
-  @Transform(({ value, obj }) => {
-    if (value && !obj.workload) {
-      obj.workload = value;
-    }
-    return undefined;
-  })
-  testType?: string;
 
   @ApiProperty({
     description: 'Test run ID',
@@ -135,15 +102,15 @@ export class AddTestRunConfigDto {
 
 export class AddTestRunConfigsDto {
   @ApiProperty({
-    description: 'Application name (system under test)',
+    description: 'System under test name',
     example: 'my-app'
   })
   @IsString()
-  @Length(1, 255, { message: 'Application name must be between 1 and 255 characters' })
+  @Length(1, 255, { message: 'System under test name must be between 1 and 255 characters' })
   @Matches(/^[a-zA-Z0-9._-]+$/, {
-    message: 'Application name must contain only alphanumeric characters, dots, hyphens, and underscores'
+    message: 'System under test name must contain only alphanumeric characters, dots, hyphens, and underscores'
   })
-  application!: string;
+  systemUnderTest!: string;
 
   @ApiProperty({
     description: 'Test environment',
@@ -166,23 +133,7 @@ export class AddTestRunConfigsDto {
   @Matches(/^[a-zA-Z0-9._-]+$/, {
     message: 'Workload must contain only alphanumeric characters, dots, hyphens, and underscores'
   })
-  @Validate(WorkloadOrTestTypeConstraint)
   workload?: string;
-
-  @ApiPropertyOptional({
-    description: 'Legacy test type field (deprecated, use workload instead)',
-    example: 'load-test'
-  })
-  @IsOptional()
-  @IsString()
-  @Length(1, 255)
-  @Transform(({ value, obj }) => {
-    if (value && !obj.workload) {
-      obj.workload = value;
-    }
-    return undefined;
-  })
-  testType?: string;
 
   @ApiProperty({
     description: 'Test run ID',
@@ -221,15 +172,15 @@ export class AddTestRunConfigsDto {
 
 export class AddTestRunConfigJsonDto {
   @ApiProperty({
-    description: 'Application name (system under test)',
+    description: 'System under test name',
     example: 'my-app'
   })
   @IsString()
-  @Length(1, 255, { message: 'Application name must be between 1 and 255 characters' })
+  @Length(1, 255, { message: 'System under test name must be between 1 and 255 characters' })
   @Matches(/^[a-zA-Z0-9._-]+$/, {
-    message: 'Application name must contain only alphanumeric characters, dots, hyphens, and underscores'
+    message: 'System under test name must contain only alphanumeric characters, dots, hyphens, and underscores'
   })
-  application!: string;
+  systemUnderTest!: string;
 
   @ApiProperty({
     description: 'Test environment',
@@ -252,21 +203,6 @@ export class AddTestRunConfigJsonDto {
     message: 'Workload must contain only alphanumeric characters, dots, hyphens, and underscores'
   })
   workload!: string;
-
-  @ApiPropertyOptional({
-    description: 'Legacy test type field (deprecated, use workload instead)',
-    example: 'load-test'
-  })
-  @IsOptional()
-  @IsString()
-  @Length(1, 255)
-  @Transform(({ value, obj }) => {
-    if (value && !obj.workload) {
-      obj.workload = value;
-    }
-    return undefined;
-  })
-  testType?: string;
 
   @ApiProperty({
     description: 'Test run ID',

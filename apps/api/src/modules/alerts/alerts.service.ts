@@ -205,7 +205,7 @@ export class AlertsService {
       // Check SUT/env/workload scope
       if (filter.systemUnderTestId && filter.systemUnderTestId !== sut.id) continue;
       if (filter.testEnvironment && filter.testEnvironment !== testEnvironment) continue;
-      if (filter.testType && !workloads.has(filter.testType)) continue;
+      if (filter.workload && !workloads.has(filter.workload)) continue;
 
       const tagValue = result[filter.tagKey];
       if (tagValue === undefined) continue;
@@ -246,7 +246,7 @@ export class AlertsService {
       const abortMessage = `Alert abort: ${parsed.title} (tag ${filter.tagKey}=${tagValue || '*'} from ${source})`;
 
       for (const testRun of testRuns) {
-        if (filter.testType && testRun.workload !== filter.testType) continue;
+        if (filter.workload && testRun.workload !== filter.workload) continue;
 
         try {
           await this.testRunRepo.update(testRun.id, {

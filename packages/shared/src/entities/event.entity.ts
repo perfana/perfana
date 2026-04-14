@@ -22,6 +22,9 @@ export class Event {
   @Column({ name: 'test_environment', type: 'varchar', length: 255 })
   testEnvironment!: string;
 
+  @Column({ type: 'varchar', length: 255, nullable: true })
+  workload?: string;
+
   @Column({ type: 'timestamp with time zone' })
   timestamp!: Date;
 

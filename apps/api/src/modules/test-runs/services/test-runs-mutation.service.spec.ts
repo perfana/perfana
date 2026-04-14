@@ -13,7 +13,7 @@ import { UpdateTestRunHandler } from '../handlers/update-test-run.handler';
 import { DeleteTestRunHandler } from '../handlers/delete-test-run.handler';
 import { UpdateTagsHandler } from '../handlers/update-tags.handler';
 import { UpdateAnnotationsHandler } from '../handlers/update-annotations.handler';
-import { UpdateRampUpHandler } from '../handlers/update-ramp-up.handler';
+import { UpdateAnalysisStartOffsetHandler } from '../handlers/update-analysis-start-offset.handler';
 import { UpdateAdaptConfigHandler } from '../handlers/update-adapt-config.handler';
 import { InitTestHandler } from '../handlers/init-test.handler';
 import { TestRunLookupService } from './test-run-lookup.service';
@@ -47,7 +47,7 @@ describe('TestRunsMutationService', () => {
       endTime: new Date(now.getTime() + 3600000),
       duration: 3600,
       plannedDuration: 3600,
-      rampUp: 300,
+      analysisStartOffset: 300,
       completed: true,
       abort: false,
       status: { evaluatingAdapt: 'COMPLETED' },
@@ -84,7 +84,7 @@ describe('TestRunsMutationService', () => {
     end_time: entity.endTime?.toISOString(),
     duration: entity.duration,
     planned_duration: entity.plannedDuration,
-    ramp_up: entity.rampUp,
+    analysis_start_offset: entity.analysisStartOffset,
     completed: entity.completed || false,
     abort: entity.abort,
     status: entity.status,
@@ -110,7 +110,7 @@ describe('TestRunsMutationService', () => {
     const mockDeleteHandler = { execute: jest.fn() };
     const mockUpdateTagsHandler = { execute: jest.fn() };
     const mockUpdateAnnotationsHandler = { execute: jest.fn() };
-    const mockUpdateRampUpHandler = { execute: jest.fn() };
+    const mockUpdateAnalysisStartOffsetHandler = { execute: jest.fn() };
     const mockUpdateAdaptConfigHandler = { execute: jest.fn() };
     const mockInitTestHandler = { execute: jest.fn() };
     const mockLookupService = {
@@ -133,7 +133,7 @@ describe('TestRunsMutationService', () => {
         { provide: DeleteTestRunHandler, useValue: mockDeleteHandler },
         { provide: UpdateTagsHandler, useValue: mockUpdateTagsHandler },
         { provide: UpdateAnnotationsHandler, useValue: mockUpdateAnnotationsHandler },
-        { provide: UpdateRampUpHandler, useValue: mockUpdateRampUpHandler },
+        { provide: UpdateAnalysisStartOffsetHandler, useValue: mockUpdateAnalysisStartOffsetHandler },
         { provide: UpdateAdaptConfigHandler, useValue: mockUpdateAdaptConfigHandler },
         { provide: InitTestHandler, useValue: mockInitTestHandler },
         { provide: TestRunLookupService, useValue: mockLookupService },
@@ -211,7 +211,7 @@ describe('TestRunsMutationService', () => {
       version: '1.2.3',
       start: '2024-01-15T10:00:00Z',
       duration: '3600',
-      rampUp: '300',
+      analysisStartOffset: '300',
       tags: ['performance'],
       annotations: 'baseline test',
     });

@@ -102,7 +102,7 @@ export class MetricsPipeline extends BasePipelineTypeORM {
         test_environment: testRun.testEnvironment,
         start_time: testRun.startTime,
         end_time: testRun.endTime,
-        ramp_up: testRun.rampUp || 0,
+        ramp_up: testRun.analysisStartOffset || 0,
         created_at: testRun.createdAt,
         updated_at: testRun.updatedAt,
         organization_id: testRun.organizationId || null,

@@ -253,12 +253,12 @@ export function calculateRampUpEndIndex(
   testRun: TestRun | null,
   sortedTimestamps: string[]
 ): number {
-  if (!testRun?.ramp_up || sortedTimestamps.length === 0) {
+  if (!testRun?.analysis_start_offset || sortedTimestamps.length === 0) {
     return 0;
   }
 
   const testStartTime = new Date(sortedTimestamps[0]).getTime();
-  const rampUpEndTime = testStartTime + (testRun.ramp_up * 1000); // Convert seconds to ms
+  const rampUpEndTime = testStartTime + (testRun.analysis_start_offset * 1000); // Convert seconds to ms
 
   // Find the index of the first timestamp after ramp-up period
   const rampUpEndIndex = sortedTimestamps.findIndex(ts =>

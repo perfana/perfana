@@ -92,7 +92,7 @@ describe('TestRunsQueryService', () => {
       end_time: now,
       duration: 3600,
       planned_duration: 3600,
-      ramp_up: 300,
+      analysis_start_offset: 300,
       completed: true,
       abort: false,
       status: { evaluatingAdapt: 'COMPLETED' },

@@ -37,7 +37,7 @@ import { UpdateTestRunHandler } from './handlers/update-test-run.handler';
 import { DeleteTestRunHandler } from './handlers/delete-test-run.handler';
 import { UpdateTagsHandler } from './handlers/update-tags.handler';
 import { UpdateAnnotationsHandler } from './handlers/update-annotations.handler';
-import { UpdateRampUpHandler } from './handlers/update-ramp-up.handler';
+import { UpdateAnalysisStartOffsetHandler } from './handlers/update-analysis-start-offset.handler';
 import { UpdateAdaptConfigHandler } from './handlers/update-adapt-config.handler';
 import { InitTestHandler } from './handlers/init-test.handler';
 import { TestRunLookupService } from './services/test-run-lookup.service';
@@ -156,7 +156,7 @@ import {
     DeleteTestRunHandler,
     UpdateTagsHandler,
     UpdateAnnotationsHandler,
-    UpdateRampUpHandler,
+    UpdateAnalysisStartOffsetHandler,
     UpdateAdaptConfigHandler,
     InitTestHandler,
     // Helper services

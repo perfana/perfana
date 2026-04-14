@@ -48,7 +48,7 @@ describe('Test Runs API Integration Tests', () => {
         CIBuildResultsUrl: 'https://jenkins.example.com/build/123',
         start: new Date().toISOString(),
         duration: 3600,
-        rampUp: 300,
+        analysisStartOffset: 300,
       };
 
       const response = await context.request

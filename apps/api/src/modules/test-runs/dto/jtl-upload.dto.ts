@@ -36,12 +36,12 @@ export class JtlUploadDto {
   workload!: string;
 
   @ApiPropertyOptional({
-    description: 'Ramp-up time in seconds (excluded from performance analysis)',
+    description: 'Analysis start offset in seconds (excluded from performance analysis)',
     example: '30',
   })
   @IsOptional()
   @IsString()
-  rampUp?: string;
+  analysisStartOffset?: string;
 
   @ApiPropertyOptional({
     description: 'Optional JSON string: Array<{key: string, value: string}>',

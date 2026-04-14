@@ -131,9 +131,9 @@ export class BenchmarkCalculatorService {
 
       // Exclude ramp-up time if configured
       if (excludeRampUp && testRun.ramp_up && testRun.start_time) {
-        const rampUpEndTime = new Date(new Date(testRun.start_time).getTime() + testRun.ramp_up * 1000);
+        const analysisStartTime = new Date(new Date(testRun.start_time).getTime() + testRun.ramp_up * 1000);
         conditions.push(`time >= $${paramIndex}`);
-        queryParams.push(rampUpEndTime);
+        queryParams.push(analysisStartTime);
         paramIndex++;
       }
 

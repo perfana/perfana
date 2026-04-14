@@ -225,21 +225,21 @@ export class TestRunsController {
     return this.testRunsService.updateTags(id, body.tags, ctx.userId, ctx.roles);
   }
 
-  @Put(':id/ramp-up')
-  @ApiOperation({ summary: 'Update test run ramp-up period' })
-  @ApiResponse({ status: 200, description: 'Ramp-up updated successfully' })
+  @Put(':id/analysis-start-offset')
+  @ApiOperation({ summary: 'Update test run analysis start offset' })
+  @ApiResponse({ status: 200, description: 'Analysis start offset updated successfully' })
   @ApiResponse({ status: 404, description: 'Test run not found' })
   @ApiResponse({ status: 400, description: 'Invalid request data' })
-  async updateRampUp(
+  async updateAnalysisStartOffset(
     @Param('id') id: string,
-    @Body() body: { rampUp: number },
+    @Body() body: { analysisStartOffset: number },
     @UserCtx() ctx: UserContext,
   ) {
-    if (body.rampUp === undefined || body.rampUp === null || typeof body.rampUp !== 'number' || body.rampUp < 0) {
-      throw new ValidationException('rampUp must be a non-negative number (seconds)');
+    if (body.analysisStartOffset === undefined || body.analysisStartOffset === null || typeof body.analysisStartOffset !== 'number' || body.analysisStartOffset < 0) {
+      throw new ValidationException('analysisStartOffset must be a non-negative number (seconds)');
     }
 
-    return this.testRunsService.updateRampUp(id, body.rampUp, ctx.userId, ctx.roles);
+    return this.testRunsService.updateAnalysisStartOffset(id, body.analysisStartOffset, ctx.userId, ctx.roles);
   }
 
   @Delete(':id')

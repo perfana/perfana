@@ -141,7 +141,7 @@ export default function GraphsChart({
       tickLabels,
       sortedTimestamps.length,
       rampUpEndIndex,
-      Boolean(testRun?.ramp_up),
+      Boolean(testRun?.analysis_start_offset),
       containerWidth
     );
 

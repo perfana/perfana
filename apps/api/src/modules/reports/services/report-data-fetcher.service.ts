@@ -399,8 +399,8 @@ export class ReportDataFetcherService {
 
     if (result[0]?.start_time && result[0]?.ramp_up) {
       const startTime = new Date(result[0].start_time);
-      const rampUpSeconds = parseInt(result[0].ramp_up);
-      return new Date(startTime.getTime() + rampUpSeconds * 1000);
+      const analysisStartOffsetSeconds = parseInt(result[0].ramp_up);
+      return new Date(startTime.getTime() + analysisStartOffsetSeconds * 1000);
     }
 
     return null;
