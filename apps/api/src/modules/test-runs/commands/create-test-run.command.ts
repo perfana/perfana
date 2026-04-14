@@ -26,8 +26,8 @@ export interface CreateTestRunData {
   duration: number;
   /** Planned test duration in seconds */
   plannedDuration: number;
-  /** Ramp-up duration in seconds */
-  rampUp?: number;
+  /** Analysis start offset in seconds (initial period excluded from analysis) */
+  analysisStartOffset?: number;
   /** Whether the test is completed */
   completed: boolean;
   /** CI build results URL */
@@ -83,7 +83,7 @@ export class CreateTestRunCommand implements ICommand {
     applicationRelease?: string;
     duration: number;
     plannedDuration: number;
-    rampUp?: number;
+    analysisStartOffset?: number;
     completed: boolean;
     ciBuildResultsUrl?: string;
     annotations?: string[];
@@ -107,7 +107,7 @@ export class CreateTestRunCommand implements ICommand {
         applicationRelease: params.applicationRelease,
         duration: params.duration,
         plannedDuration: params.plannedDuration,
-        rampUp: params.rampUp,
+        analysisStartOffset: params.analysisStartOffset,
         completed: params.completed,
         ciBuildResultsUrl: params.ciBuildResultsUrl,
         annotations: params.annotations,

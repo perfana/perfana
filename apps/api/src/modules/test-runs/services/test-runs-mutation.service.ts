@@ -29,7 +29,7 @@ import { UpdateTestRunHandler } from '../handlers/update-test-run.handler';
 import { DeleteTestRunHandler } from '../handlers/delete-test-run.handler';
 import { UpdateTagsHandler } from '../handlers/update-tags.handler';
 import { UpdateAnnotationsHandler } from '../handlers/update-annotations.handler';
-import { UpdateRampUpHandler } from '../handlers/update-ramp-up.handler';
+import { UpdateAnalysisStartOffsetHandler } from '../handlers/update-analysis-start-offset.handler';
 import { UpdateAdaptConfigHandler } from '../handlers/update-adapt-config.handler';
 import { InitTestHandler } from '../handlers/init-test.handler';
 import { TestRunLookupService } from './test-run-lookup.service';
@@ -54,7 +54,7 @@ export class TestRunsMutationService {
     private readonly deleteTestRunHandler: DeleteTestRunHandler,
     private readonly updateTagsHandler: UpdateTagsHandler,
     private readonly updateAnnotationsHandler: UpdateAnnotationsHandler,
-    private readonly updateRampUpHandler: UpdateRampUpHandler,
+    private readonly updateAnalysisStartOffsetHandler: UpdateAnalysisStartOffsetHandler,
     private readonly updateAdaptConfigHandler: UpdateAdaptConfigHandler,
     private readonly initTestHandler: InitTestHandler,
     private readonly lookupService: TestRunLookupService,
@@ -142,7 +142,7 @@ export class TestRunsMutationService {
   }
 
   private calculateDurations(dto: UpdateRunningTestDto, existing?: TestRun | null) {
-    const planned = dto.duration ? parseInt(String(dto.duration)) + parseInt(String(dto.rampUp || '0')) : existing?.planned_duration ?? -1;
+    const planned = dto.duration ? parseInt(String(dto.duration)) + parseInt(String(dto.analysisStartOffset || '0')) : existing?.planned_duration ?? -1;
     const duration = dto.end && dto.start ? Math.floor((new Date(dto.end).getTime() - new Date(dto.start).getTime()) / 1000) : existing?.start_time ? Math.floor((Date.now() - new Date(existing.start_time).getTime()) / 1000) : 0;
     return { duration, plannedDuration: planned };
   }
@@ -171,7 +171,7 @@ export class TestRunsMutationService {
       applicationRelease: d.version,
       duration,
       plannedDuration,
-      rampUp: d.rampUp ? parseInt(String(d.rampUp)) : undefined,
+      analysisStartOffset: d.analysisStartOffset ? parseInt(String(d.analysisStartOffset)) : undefined,
       completed: d.completed,
       ciBuildResultsUrl: d.CIBuildResultsUrl || d.buildResultsUrl,
       annotations: d.annotations ? [d.annotations] : [],
@@ -303,10 +303,10 @@ export class TestRunsMutationService {
     return this.updateAnnotationsHandler.execute({ id, annotations });
   }
 
-  async updateRampUp(id: string, rampUp: number, userId: string, _roles: string[]): Promise<TestRun> {
-    this.logger.debug(`updateRampUp: id=${id}, rampUp=${rampUp}, userId=${userId}`);
+  async updateAnalysisStartOffset(id: string, analysisStartOffset: number, userId: string, _roles: string[]): Promise<TestRun> {
+    this.logger.debug(`updateAnalysisStartOffset: id=${id}, analysisStartOffset=${analysisStartOffset}, userId=${userId}`);
 
-    return this.updateRampUpHandler.execute({ id, rampUp });
+    return this.updateAnalysisStartOffsetHandler.execute({ id, analysisStartOffset });
   }
 
   /**

@@ -34,7 +34,7 @@ export interface TestRun {
   end_time?: string;
   duration?: number;
   planned_duration?: number;
-  ramp_up?: number;
+  analysis_start_offset?: number;
   completed: boolean;
   abort?: boolean;
   is_stale?: boolean;
@@ -299,8 +299,8 @@ export class TestRunsService {
     return this.mutationService.updateAnnotations(id, annotations, userId, roles);
   }
 
-  async updateRampUp(id: string, rampUp: number, userId: string, roles: string[]): Promise<TestRun> {
-    return this.mutationService.updateRampUp(id, rampUp, userId, roles);
+  async updateAnalysisStartOffset(id: string, analysisStartOffset: number, userId: string, roles: string[]): Promise<TestRun> {
+    return this.mutationService.updateAnalysisStartOffset(id, analysisStartOffset, userId, roles);
   }
 
   async updateAdaptConfig(testRunId: string, differencesAccepted: 'ACCEPTED' | 'DENIED' | 'TBD', userId: string, roles: string[], systemUnderTestId?: string, environment?: string, workload?: string, mode?: 'DEFAULT' | 'BASELINE'): Promise<TestRun> {

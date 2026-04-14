@@ -126,7 +126,7 @@ describe('TestRuns DTOs', () => {
       start: '2024-01-15T14:30:00.000Z',
       end: '2024-01-15T15:00:00.000Z',
       duration: '1800',
-      rampUp: '300',
+      analysisStartOffset: '300',
       CIBuildResultsUrl: 'https://jenkins.example.com/build/123',
       annotations: 'Performance baseline test',
       abort: false,
@@ -240,7 +240,7 @@ describe('TestRuns DTOs', () => {
     // Test optional fields
     describe('Optional fields validation', () => {
       it('should validate optional string fields', async () => {
-        // Note: 'duration' and 'rampUp' accept both string and number via @Transform
+        // Note: 'duration' and 'analysisStartOffset' accept both string and number via @Transform
         // So we exclude them from this string-only validation test
         const stringFields = ['version', 'start', 'end', 'CIBuildResultsUrl', 'annotations', 'abortMessage'];
 
@@ -409,7 +409,7 @@ describe('TestRuns DTOs', () => {
         const dto = plainToClass(UpdateRunningTestDto, {
           ...validDto,
           duration: '1800',
-          rampUp: '300'
+          analysisStartOffset: '300'
         });
 
         const errors = await validate(dto);

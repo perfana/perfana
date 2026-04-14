@@ -28,7 +28,7 @@ describe('TestController', () => {
     end_time: undefined,
     duration: 0,
     planned_duration: 3900,
-    ramp_up: 300,
+    analysis_start_offset: 300,
     completed: false,
     abort: false,
     application_release: '1.2.3',
@@ -82,7 +82,7 @@ describe('TestController', () => {
           version: '1.2.3',
           start: '2024-01-15T10:30:00.000Z',
           duration: '3600',
-          rampUp: '300',
+          analysisStartOffset: '300',
           CIBuildResultsUrl: 'https://jenkins.example.com/job/payment-service/123',
           annotations: 'Testing new payment gateway with increased load',
           tags: ['performance', 'production', 'payment-gateway'],
@@ -203,7 +203,7 @@ describe('TestController', () => {
           start: '2024-01-15T10:30:00.000Z',
           end: '2024-01-15T11:30:00.000Z',
           duration: '3600',
-          rampUp: '300',
+          analysisStartOffset: '300',
           CIBuildResultsUrl: 'https://jenkins.example.com/job/payment-service/123',
           annotations: 'Full test with all fields',
           tags: ['performance', 'production'],
@@ -585,7 +585,7 @@ describe('TestController', () => {
         expect(result.duration).toBe(0);
       });
 
-      it('should handle test run with zero rampUp', async () => {
+      it('should handle test run with zero analysisStartOffset', async () => {
         // Arrange
         const updateDto: UpdateRunningTestDto = {
           systemUnderTest: 'PaymentService',
@@ -593,7 +593,7 @@ describe('TestController', () => {
           testEnvironment: 'production',
           testRunId: 'PaymentService-production-loadTest-001',
           completed: false,
-          rampUp: '0',
+          analysisStartOffset: '0',
         };
         service.updateRunningTest.mockResolvedValue(mockTestRun);
 
@@ -706,16 +706,16 @@ describe('TestController', () => {
         expect(result).toEqual(mockTestRun);
       });
 
-      it('should handle maximum rampUp (1 day)', async () => {
+      it('should handle maximum analysisStartOffset (1 day)', async () => {
         // Arrange
-        const maxRampUp = '86400'; // 1 day in seconds
+        const maxAnalysisStartOffset = '86400'; // 1 day in seconds
         const updateDto: UpdateRunningTestDto = {
           systemUnderTest: 'PaymentService',
           workload: 'loadTest',
           testEnvironment: 'production',
           testRunId: 'PaymentService-production-loadTest-001',
           completed: false,
-          rampUp: maxRampUp,
+          analysisStartOffset: maxAnalysisStartOffset,
         };
         service.updateRunningTest.mockResolvedValue(mockTestRun);
 
@@ -839,7 +839,7 @@ describe('TestController', () => {
           version: '2.1.5',
           start: '2024-01-15T14:30:22.000Z',
           duration: '1800',
-          rampUp: '180',
+          analysisStartOffset: '180',
           CIBuildResultsUrl: 'https://jenkins.example.com/job/shopping-cart/456',
           annotations: 'Stress test for Black Friday preparation',
           tags: ['gatling', 'stress', 'staging', 'black-friday'],
@@ -880,7 +880,7 @@ describe('TestController', () => {
           start: '2024-01-15T09:00:00.000Z',
           end: '2024-01-15T10:00:00.000Z',
           duration: '3600',
-          rampUp: '300',
+          analysisStartOffset: '300',
           CIBuildResultsUrl: 'https://jenkins.example.com/job/payment-api/789',
           annotations: 'Production load test - peak hours simulation',
           tags: ['jmeter', 'load', 'production', 'payment'],
@@ -909,7 +909,7 @@ describe('TestController', () => {
           version: '1.0.0-alpha',
           start: '2024-01-15T08:00:00.000Z',
           duration: '300',
-          rampUp: '30',
+          analysisStartOffset: '30',
           annotations: 'Smoke test for new user authentication flow',
           tags: ['k6', 'smoke', 'development', 'auth'],
           variables: [

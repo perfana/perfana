@@ -1,8 +1,9 @@
 /**
- * Handler for updating test run ramp-up value.
+ * Handler for updating test run analysis start offset value.
  *
- * Allows users to adjust the ramp-up period (in seconds) for a test run.
- * This is useful when the configured ramp-up exceeds the actual test duration,
+ * Allows users to adjust the analysis start offset (in seconds) for a test run.
+ * This is the initial period excluded from statistical analysis.
+ * This is useful when the configured analysis start offset exceeds the actual test duration,
  * causing all data points to be excluded from statistical analysis.
  */
 
@@ -16,14 +17,14 @@ import { TestRunsGateway } from '../gateways/test-runs.gateway';
 import { TestRunEventType } from '../types/realtime-events.types';
 import { mapEntityToTestRun } from './entity-mapper';
 
-export interface UpdateRampUpData {
+export interface UpdateAnalysisStartOffsetData {
   id: string;
-  rampUp: number;
+  analysisStartOffset: number;
 }
 
 @Injectable()
-export class UpdateRampUpHandler {
-  private readonly logger = new Logger(UpdateRampUpHandler.name);
+export class UpdateAnalysisStartOffsetHandler {
+  private readonly logger = new Logger(UpdateAnalysisStartOffsetHandler.name);
 
   constructor(
     @InjectRepository(TestRunEntity)
@@ -32,8 +33,8 @@ export class UpdateRampUpHandler {
     private readonly testRunsGateway: TestRunsGateway,
   ) {}
 
-  async execute(data: UpdateRampUpData): Promise<TestRun> {
-    const { id, rampUp } = data;
+  async execute(data: UpdateAnalysisStartOffsetData): Promise<TestRun> {
+    const { id, analysisStartOffset } = data;
 
     try {
       const testRunEntity = await this.testRunRepo.findOne({
@@ -49,7 +50,7 @@ export class UpdateRampUpHandler {
         `UPDATE test_runs
          SET ramp_up = $1, updated_at = CURRENT_TIMESTAMP
          WHERE id = $2`,
-        [rampUp, id],
+        [analysisStartOffset, id],
       );
 
       const updatedEntity = await this.testRunRepo.findOne({
@@ -61,14 +62,14 @@ export class UpdateRampUpHandler {
         throw new ResourceNotFoundException('TestRun', id);
       }
 
-      this.logger.log(`Updated ramp-up to ${rampUp}s for test run ${id}`);
+      this.logger.log(`Updated analysis start offset to ${analysisStartOffset}s for test run ${id}`);
       const testRun = mapEntityToTestRun(updatedEntity);
 
       this.emitUpdateEvent(testRun, updatedEntity.systemUnderTest?.team_id);
 
       return testRun;
     } catch (error) {
-      this.logger.error(`Failed to update ramp-up for test run ${id}:`, error);
+      this.logger.error(`Failed to update analysis start offset for test run ${id}:`, error);
       throw error;
     }
   }

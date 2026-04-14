@@ -68,7 +68,7 @@ const DEFAULT_OPTIONS: JtlImportOptions = {
   systemUnderTest: 'PaymentService',
   testEnvironment: 'production',
   workload: 'loadTest',
-  rampUp: 60,
+  analysisStartOffset: 60,
   configs: [],
   userId: 'user-001',
   roles: ['user'],
@@ -185,24 +185,24 @@ describe('JtlImportService', () => {
         expect(secondCall.completed).toBe(true);
       });
 
-      it('should pass rampUp from options to updateRunningTest', async () => {
+      it('should pass analysisStartOffset from options to updateRunningTest', async () => {
         jtlParserService.parseZip.mockReturnValue([makeScenario()]);
 
-        await service.importJtl(Buffer.from(''), { ...DEFAULT_OPTIONS, rampUp: 120 });
+        await service.importJtl(Buffer.from(''), { ...DEFAULT_OPTIONS, analysisStartOffset: 120 });
 
         const firstCall = mutationService.updateRunningTest.mock.calls[0][0];
-        expect(firstCall.rampUp).toBe(120);
+        expect(firstCall.analysisStartOffset).toBe(120);
       });
 
-      it('should default rampUp to 0 when not provided', async () => {
-        const optionsWithoutRampUp = { ...DEFAULT_OPTIONS };
-        delete optionsWithoutRampUp.rampUp;
+      it('should default analysisStartOffset to 0 when not provided', async () => {
+        const optionsWithoutAnalysisStartOffset = { ...DEFAULT_OPTIONS };
+        delete optionsWithoutAnalysisStartOffset.analysisStartOffset;
         jtlParserService.parseZip.mockReturnValue([makeScenario()]);
 
-        await service.importJtl(Buffer.from(''), optionsWithoutRampUp);
+        await service.importJtl(Buffer.from(''), optionsWithoutAnalysisStartOffset);
 
         const firstCall = mutationService.updateRunningTest.mock.calls[0][0];
-        expect(firstCall.rampUp).toBe(0);
+        expect(firstCall.analysisStartOffset).toBe(0);
       });
 
       it('should add source:jtl-upload and scenario tags to test run', async () => {
