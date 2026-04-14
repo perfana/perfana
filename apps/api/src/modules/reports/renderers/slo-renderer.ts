@@ -42,7 +42,7 @@ export class SloRenderer {
       `;
     }
 
-    let checkResults = await this.dataFetcher.getSloCheckResults(testRun.testRunId, userId, roles);
+    const checkResults = await this.dataFetcher.getSloCheckResults(testRun.testRunId, userId, roles);
 
     // Apply optional type filter
     const filtered = filterType

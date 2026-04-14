@@ -53,7 +53,7 @@ describe('TestRunDetailsCard', () => {
     start_time: '2024-01-15T10:00:00Z',
     end_time: '2024-01-15T11:00:00Z',
     duration: 3600,
-    ramp_up: 300,
+    analysis_start_offset: 300,
     completed: true,
     abort: false,
     tags: ['performance', 'regression'],

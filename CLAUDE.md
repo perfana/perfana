@@ -499,3 +499,10 @@ Key routing rules:
 - Design system, brand → invoke design-consultation
 - Visual audit, design polish → invoke design-review
 - Architecture review → invoke plan-eng-review
+
+## Health Stack
+
+- typecheck: turbo run type-check
+- lint: turbo run lint
+- test: turbo run test
+- deadcode: npx knip

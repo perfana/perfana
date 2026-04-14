@@ -4,6 +4,14 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
+## [0.2.36.2] - 2026-04-14
+
+### Fixed
+- `AddWorkloadToEvents` migration: drop RLS policies on `url_patterns` and `generated_reports` before removing ownership columns. PostgreSQL refuses non-CASCADE column drops when policies depend on the column (SQLSTATE 2BP01), causing the migration to fail on a fresh database.
+- `chart-utils.test.ts`: update `calculateRampUpEndIndex` tests to use `analysis_start_offset` (renamed from `ramp_up` in 0.2.36.0), and update `buildChartConfig` height assertion from 500 to 600.
+- `TestRunDetailsCard.test.tsx`: update mock test run to use `analysis_start_offset` instead of `ramp_up`, fixing two failing duration-formatting tests.
+- `slo-renderer.ts`: `let` → `const` for `checkResults` (no reassignment).
+
 ## [0.2.36.1] - 2026-04-14
 
 ### Fixed

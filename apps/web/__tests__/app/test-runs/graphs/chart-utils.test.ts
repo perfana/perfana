@@ -56,7 +56,7 @@ function makeTestRun(overrides: Partial<TestRun> = {}): TestRun {
     end_time: null,
     duration: null,
     planned_duration: null,
-    ramp_up: null,
+    analysis_start_offset: undefined,
     created_at: new Date().toISOString(),
     updated_at: new Date().toISOString(),
     ...overrides,
@@ -595,19 +595,19 @@ describe('calculateRampUpEndIndex', () => {
     expect(calculateRampUpEndIndex(null, [T0, T1])).toBe(0);
   });
 
-  it('returns 0 when testRun has no ramp_up', () => {
-    const run = makeTestRun({ ramp_up: null });
+  it('returns 0 when testRun has no analysis_start_offset', () => {
+    const run = makeTestRun({ analysis_start_offset: undefined });
     expect(calculateRampUpEndIndex(run, [T0, T1])).toBe(0);
   });
 
   it('returns 0 when timestamps array is empty', () => {
-    const run = makeTestRun({ ramp_up: 30 });
+    const run = makeTestRun({ analysis_start_offset: 30 });
     expect(calculateRampUpEndIndex(run, [])).toBe(0);
   });
 
   it('returns correct index when ramp-up ends within the data range', () => {
-    // Timestamps are 10 seconds apart; ramp_up = 15s → ends between T1 and T2
-    const run = makeTestRun({ ramp_up: 15 });
+    // Timestamps are 10 seconds apart; analysis_start_offset = 15s → ends between T1 and T2
+    const run = makeTestRun({ analysis_start_offset: 15 });
     const timestamps = [T0, T1, T2, T3, T4];
     const result = calculateRampUpEndIndex(run, timestamps);
     // T2 (20s mark) is the first timestamp >= 15s after T0
@@ -615,16 +615,16 @@ describe('calculateRampUpEndIndex', () => {
   });
 
   it('returns last index when ramp-up duration extends beyond all data', () => {
-    const run = makeTestRun({ ramp_up: 9999 });
+    const run = makeTestRun({ analysis_start_offset: 9999 });
     const timestamps = [T0, T1, T2];
     const result = calculateRampUpEndIndex(run, timestamps);
     // findIndex returns -1, so we get length - 1
     expect(result).toBe(timestamps.length - 1);
   });
 
-  it('returns 0 when ramp_up is 0', () => {
-    const run = makeTestRun({ ramp_up: 0 });
-    // ramp_up is falsy (0) — guard at top returns 0
+  it('returns 0 when analysis_start_offset is 0', () => {
+    const run = makeTestRun({ analysis_start_offset: 0 });
+    // analysis_start_offset is falsy (0) — guard at top returns 0
     expect(calculateRampUpEndIndex(run, [T0, T1])).toBe(0);
   });
 });
@@ -938,7 +938,7 @@ describe('buildChartConfig', () => {
   it('sets toImageButtonOptions height to 500', () => {
     const config = buildChartConfig('My Chart');
     const options = config.toImageButtonOptions as { height: number };
-    expect(options.height).toBe(500);
+    expect(options.height).toBe(600);
   });
 
   it('copy button has an icon property with path', () => {

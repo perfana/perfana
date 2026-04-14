@@ -402,6 +402,12 @@ export class AddWorkloadToEvents1776148518354 implements MigrationInterface {
         await queryRunner.query(`COMMENT ON TABLE "system_under_test_test_environments" IS NULL`);
         await queryRunner.query(`COMMENT ON TABLE "system_under_test_workloads" IS NULL`);
         await queryRunner.query(`COMMENT ON TABLE "ds_metric_collection_status" IS NULL`);
+        // Drop RLS policies that reference the ownership columns we're about to remove.
+        // PostgreSQL refuses to drop a column if a policy depends on it (SQLSTATE 2BP01).
+        await queryRunner.query(`DROP POLICY IF EXISTS rls_url_patterns_select ON "url_patterns"`);
+        await queryRunner.query(`DROP POLICY IF EXISTS rls_url_patterns_insert ON "url_patterns"`);
+        await queryRunner.query(`DROP POLICY IF EXISTS rls_url_patterns_update ON "url_patterns"`);
+        await queryRunner.query(`DROP POLICY IF EXISTS rls_url_patterns_delete ON "url_patterns"`);
         await queryRunner.query(`ALTER TABLE "url_patterns" DROP COLUMN "organization_id"`);
         await queryRunner.query(`ALTER TABLE "url_patterns" DROP COLUMN "team_id"`);
         await queryRunner.query(`ALTER TABLE "url_patterns" DROP COLUMN "created_by"`);
@@ -411,6 +417,10 @@ export class AddWorkloadToEvents1776148518354 implements MigrationInterface {
         await queryRunner.query(`ALTER TABLE "test_run_configs" DROP COLUMN "created_by"`);
         await queryRunner.query(`ALTER TABLE "test_run_configs" DROP COLUMN "updated_by"`);
         await queryRunner.query(`ALTER TABLE "test_runs" DROP COLUMN "scaling_session_id"`);
+        await queryRunner.query(`DROP POLICY IF EXISTS rls_generated_reports_select ON "generated_reports"`);
+        await queryRunner.query(`DROP POLICY IF EXISTS rls_generated_reports_insert ON "generated_reports"`);
+        await queryRunner.query(`DROP POLICY IF EXISTS rls_generated_reports_update ON "generated_reports"`);
+        await queryRunner.query(`DROP POLICY IF EXISTS rls_generated_reports_delete ON "generated_reports"`);
         await queryRunner.query(`ALTER TABLE "generated_reports" DROP COLUMN "organization_id"`);
         await queryRunner.query(`ALTER TABLE "generated_reports" DROP COLUMN "team_id"`);
         await queryRunner.query(`ALTER TABLE "generated_reports" DROP COLUMN "created_by"`);
@@ -522,6 +532,14 @@ export class AddWorkloadToEvents1776148518354 implements MigrationInterface {
         await queryRunner.query(`ALTER TABLE "ds_adapt_tracked_results" ADD CONSTRAINT "FK_99502c9ad78012d701393338ff4" FOREIGN KEY ("metrics_source_id") REFERENCES "metrics_sources"("id") ON DELETE NO ACTION ON UPDATE NO ACTION`);
         await queryRunner.query(`ALTER TABLE "ds_adapt_results" ADD CONSTRAINT "FK_e47e2ef0c139c6b0d1c3a8fb709" FOREIGN KEY ("metrics_source_id") REFERENCES "metrics_sources"("id") ON DELETE NO ACTION ON UPDATE NO ACTION`);
         await queryRunner.query(`ALTER TABLE "compare_filter_presets" ADD CONSTRAINT "FK_889845191bd344571f4fbad48ea" FOREIGN KEY ("metrics_source_id") REFERENCES "metrics_sources"("id") ON DELETE NO ACTION ON UPDATE NO ACTION`);
+
+        // Re-create unique constraints that were dropped above but are still required by the
+        // INSERT … ON CONFLICT upserts in TestRunLookupService. Without these, any call to
+        // POST /api/init fails with SQLSTATE 42P10 "there is no unique or exclusion constraint
+        // matching the ON CONFLICT specification".
+        await queryRunner.query(`CREATE UNIQUE INDEX "uq_system_under_test_name_org" ON "systems_under_test" ("name", "organization_id")`);
+        await queryRunner.query(`ALTER TABLE "system_under_test_test_environments" ADD CONSTRAINT "system_under_test_test_environments_system_under_test_id_name_k" UNIQUE ("system_under_test_id", "name")`);
+        await queryRunner.query(`ALTER TABLE "system_under_test_workloads" ADD CONSTRAINT "application_test_types_application_test_environment_id_name_key" UNIQUE ("system_under_test_test_environment_id", "name")`);
     }
 
     public async down(queryRunner: QueryRunner): Promise<void> {
