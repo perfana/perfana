@@ -108,8 +108,8 @@ export function buildNewRequestMetricName(
 /**
  * Create a ds_metrics record
  *
- * @param testRunStartTime - Test run start time (optional, for ramp-up calculation)
- * @param rampUpTime - Ramp-up duration in seconds (optional, for ramp-up calculation)
+ * @param testRunStartTime - Test run start time (optional, for analysis start offset calculation)
+ * @param analysisStartOffsetTime - Analysis start offset in seconds (optional, for ramp-up calculation)
  */
 export function createDsMetricsRecord(
   testRunId: string,
@@ -121,13 +121,13 @@ export function createDsMetricsRecord(
   unit: string | null,
   timestep: number,
   testRunStartTime?: Date,
-  rampUpTime?: number
+  analysisStartOffsetTime?: number
 ): DsMetricsRecord {
   // Calculate ramp_up flag based on timing if available
   let isRampUp = false;
-  if (testRunStartTime && rampUpTime !== undefined) {
+  if (testRunStartTime && analysisStartOffsetTime !== undefined) {
     const elapsedSeconds = (time.getTime() - testRunStartTime.getTime()) / 1000;
-    isRampUp = elapsedSeconds < rampUpTime;
+    isRampUp = elapsedSeconds < analysisStartOffsetTime;
   }
 
   return {

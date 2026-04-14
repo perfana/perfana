@@ -46,7 +46,7 @@ export interface FlattenedMetricRecord {
  */
 export interface TestRunContext {
   startTime?: Date;
-  rampUp?: number;
+  analysisStartOffset?: number;
   organizationId?: string | null;
   teamId?: string | null;
 }
@@ -105,8 +105,8 @@ export class MetricProcessor {
         const elapsedSeconds = (recordTime.getTime() - testRun.startTime.getTime()) / 1000;
         timestep = elapsedSeconds;
 
-        if (testRun.rampUp !== undefined) {
-          isRampUp = elapsedSeconds < testRun.rampUp;
+        if (testRun.analysisStartOffset !== undefined) {
+          isRampUp = elapsedSeconds < testRun.analysisStartOffset;
         }
       }
 
@@ -166,8 +166,8 @@ export class MetricProcessor {
         const elapsedSeconds = (recordTime.getTime() - testRun.startTime.getTime()) / 1000;
         timestep = elapsedSeconds;
 
-        if (testRun.rampUp !== undefined) {
-          isRampUp = elapsedSeconds < testRun.rampUp;
+        if (testRun.analysisStartOffset !== undefined) {
+          isRampUp = elapsedSeconds < testRun.analysisStartOffset;
         }
       }
 

@@ -401,7 +401,7 @@ export class PerformanceTestMetricsPipeline extends BasePipelineTypeORM {
       test_environment: testRun.testEnvironment,
       workload: testRun.workload,
       start_time: testRun.startTime,
-      ramp_up_time: testRun.rampUp || 0,
+      ramp_up_time: testRun.analysisStartOffset || 0,
       end_time: testRun.endTime || null,
       organization_id: testRun.organizationId || null,
       team_id: testRun.teamId || null,

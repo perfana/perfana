@@ -266,7 +266,7 @@ export class DataProcessor {
     timestamp: Date,
     testRun?: any
   ): { timestep: number; rampUp: boolean } {
-    // Note: TypeORM entity uses camelCase (startTime, rampUp) not snake_case
+    // Note: TypeORM entity uses camelCase (startTime, analysisStartOffset) not snake_case
     if (!testRun) {
       logger.warn('calculateTimestepAndRampUp: testRun is undefined or null');
       return { timestep: 0.0, rampUp: false };
@@ -286,8 +286,8 @@ export class DataProcessor {
     // Round to integer for cleaner display
     const roundedTimestep = Math.round(timestep);
 
-    const rampUpSeconds = testRun.rampUp || testRun.ramp_up || 0;
-    const rampUp = roundedTimestep < rampUpSeconds;
+    const analysisStartOffsetSeconds = testRun.analysisStartOffset || testRun.ramp_up || 0;
+    const rampUp = roundedTimestep < analysisStartOffsetSeconds;
 
     return { timestep: roundedTimestep, rampUp };
   }

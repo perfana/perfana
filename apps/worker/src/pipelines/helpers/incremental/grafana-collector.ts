@@ -29,7 +29,7 @@ interface TestRunData {
   testEnvironment: string;
   startTime?: Date;
   endTime?: Date;
-  rampUp?: number;
+  analysisStartOffset?: number;
   createdAt?: Date;
   updatedAt?: Date;
   organizationId?: string | null;
@@ -115,7 +115,7 @@ export class GrafanaCollector {
         test_environment: testRun.testEnvironment,
         start_time: fromTime, // Override with incremental time range
         end_time: toTime, // Override with incremental time range
-        ramp_up: testRun.rampUp || 0,
+        ramp_up: testRun.analysisStartOffset || 0,
         created_at: testRun.createdAt,
         updated_at: testRun.updatedAt,
       };
@@ -133,7 +133,7 @@ export class GrafanaCollector {
       // Process metrics documents using batch processor
       const testRunContext: TestRunContext = {
         startTime: testRun.startTime,
-        rampUp: testRun.rampUp,
+        analysisStartOffset: testRun.analysisStartOffset,
         organizationId: testRun.organizationId || null,
         teamId: testRun.teamId || null,
       };

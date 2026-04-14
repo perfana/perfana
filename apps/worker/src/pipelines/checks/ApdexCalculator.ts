@@ -128,7 +128,7 @@ export class ApdexCalculator extends BaseCheckService {
       conditions.push('success = true');
     }
 
-    // Exclude ramp-up time if configured
+    // Exclude analysis start offset period if configured
     if (excludeRampUp && testRun.ramp_up && testRun.start_time) {
       const rampUpEndTime = new Date(testRun.start_time.getTime() + testRun.ramp_up * 1000);
       conditions.push(`time >= $${paramIndex}`);

@@ -102,15 +102,15 @@ function generatePlotProps(
         break;
       }
     }
-    // Fallback: Calculate from testRun.ramp_up (seconds) and bucket_size
-    if (rampUpEndIndex === null && testRun?.ramp_up && testRun?.start_time && sortedCurrentMetrics.length >= 2) {
+    // Fallback: Calculate from testRun.analysis_start_offset (seconds) and bucket_size
+    if (rampUpEndIndex === null && testRun?.analysis_start_offset && testRun?.start_time && sortedCurrentMetrics.length >= 2) {
       const firstTime = new Date(sortedCurrentMetrics[0].time).getTime();
       const secondTime = new Date(sortedCurrentMetrics[1].time).getTime();
       const bucketSizeMs = secondTime - firstTime;
       const bucketSizeSeconds = bucketSizeMs / 1000;
 
-      // Calculate ramp-up end index, constrained to actual data length
-      const calculatedIndex = Math.floor(testRun.ramp_up / bucketSizeSeconds);
+      // Calculate analysis start offset end index, constrained to actual data length
+      const calculatedIndex = Math.floor(testRun.analysis_start_offset / bucketSizeSeconds);
       rampUpEndIndex = Math.min(calculatedIndex, sortedCurrentMetrics.length - 1);
     }
   }

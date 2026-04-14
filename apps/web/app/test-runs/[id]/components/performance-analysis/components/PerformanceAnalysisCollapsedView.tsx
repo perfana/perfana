@@ -32,10 +32,10 @@ export function PerformanceAnalysisCollapsedView({
 }: PerformanceAnalysisCollapsedViewProps) {
   const hasPoorApdexTransactions = poorApdexTransactions.length > 0;
 
-  // Determine if the test is currently in the ramp-up phase
+  // Determine if the test is currently in the analysis start offset phase
   const isInRampUpPhase = (() => {
-    if (!testRun || testRun.completed || !testRun.start_time || !testRun.ramp_up) return false;
-    const rampUpEndMs = new Date(testRun.start_time).getTime() + testRun.ramp_up * 1000;
+    if (!testRun || testRun.completed || !testRun.start_time || !testRun.analysis_start_offset) return false;
+    const rampUpEndMs = new Date(testRun.start_time).getTime() + testRun.analysis_start_offset * 1000;
     return Date.now() < rampUpEndMs;
   })();
 

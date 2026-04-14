@@ -61,7 +61,7 @@ const createMockTestRun = (overrides: Record<string, unknown> = {}) => ({
   workload: 'loadTest',
   startTime: new Date('2024-01-01T00:00:00Z'),
   endTime: new Date('2024-01-01T01:00:00Z'),
-  rampUp: 60,
+  analysisStartOffset: 60,
   organizationId: 'org-uuid-001',
   teamId: 'team-uuid-001',
   ...overrides,
@@ -1119,7 +1119,7 @@ describe('PerformanceTestMetricsPipeline', () => {
 
   describe('Edge Cases', () => {
     it('should handle a test run with zero ramp_up time', async () => {
-      const run = createMockTestRun({ rampUp: 0 });
+      const run = createMockTestRun({ analysisStartOffset: 0 });
       mockDatabaseService.getTestRunByTestRunId.mockResolvedValue(run);
       mockDataSource.query.mockResolvedValue([]);
 

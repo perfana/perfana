@@ -179,7 +179,7 @@ export class DataSanityCheckPipeline extends BasePipelineTypeORM {
           const rampUpOnlyPoints = parseInt(rampUpCheckResult[0]?.ramp_up_only ?? '0', 10);
 
           if (totalDataPoints > 0 && totalDataPoints === rampUpOnlyPoints) {
-            const rampUpSec = testRun.rampUp ?? 0;
+            const rampUpSec = testRun.analysisStartOffset ?? 0;
             const durationSec = testRun.startTime && testRun.endTime
               ? Math.round((new Date(testRun.endTime).getTime() - new Date(testRun.startTime).getTime()) / 1000)
               : 0;

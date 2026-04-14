@@ -728,13 +728,13 @@ describe.skip('Data Integrity - Database Integration', () => {
         startTime: new Date(),
         duration: 3600,
         plannedDuration: 3000,
-        rampUp: 300,
+        analysisStartOffset: 300,
       });
       cleanup.testRuns.push(testRun.id);
 
       expect(testRun.duration).toBe(3600);
       expect(testRun.plannedDuration).toBe(3000);
-      expect(testRun.rampUp).toBe(300);
+      expect(testRun.analysisStartOffset).toBe(300);
     });
 
     it('should handle varchar length limits', async () => {

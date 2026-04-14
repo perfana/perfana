@@ -44,7 +44,7 @@ function normalizeTestRun(updatedTestRun: TestRun): TestRun {
     start_time: rawTestRun.startTime || updatedTestRun.start_time,
     end_time: rawTestRun.endTime || updatedTestRun.end_time,
     planned_duration: rawTestRun.plannedDuration || updatedTestRun.planned_duration,
-    ramp_up: rawTestRun.rampUp || updatedTestRun.ramp_up,
+    analysis_start_offset: rawTestRun.analysisStartOffset || updatedTestRun.analysis_start_offset,
     consolidated_result: rawTestRun.consolidatedResult || updatedTestRun.consolidated_result,
     application_release: rawTestRun.applicationRelease || updatedTestRun.application_release,
     ci_build_results_url: rawTestRun.ciBuildResultsUrl || updatedTestRun.ci_build_results_url,

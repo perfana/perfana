@@ -52,7 +52,7 @@ function createMockTestRun(overrides: Record<string, unknown> = {}) {
     workload: 'frontend',
     startTime: new Date('2026-04-04T07:00:00Z'),
     endTime: new Date('2026-04-04T07:06:00Z'),
-    rampUp: 60,
+    analysisStartOffset: 60,
     adaptConfig: { mode: 'DEFAULT', differencesAccepted: 'TBD' },
     status: { evaluatingAdapt: 'COMPLETED', evaluatingChecks: 'COMPLETED' },
     ...overrides,
