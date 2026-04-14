@@ -532,6 +532,14 @@ export class AddWorkloadToEvents1776148518354 implements MigrationInterface {
         await queryRunner.query(`ALTER TABLE "ds_adapt_tracked_results" ADD CONSTRAINT "FK_99502c9ad78012d701393338ff4" FOREIGN KEY ("metrics_source_id") REFERENCES "metrics_sources"("id") ON DELETE NO ACTION ON UPDATE NO ACTION`);
         await queryRunner.query(`ALTER TABLE "ds_adapt_results" ADD CONSTRAINT "FK_e47e2ef0c139c6b0d1c3a8fb709" FOREIGN KEY ("metrics_source_id") REFERENCES "metrics_sources"("id") ON DELETE NO ACTION ON UPDATE NO ACTION`);
         await queryRunner.query(`ALTER TABLE "compare_filter_presets" ADD CONSTRAINT "FK_889845191bd344571f4fbad48ea" FOREIGN KEY ("metrics_source_id") REFERENCES "metrics_sources"("id") ON DELETE NO ACTION ON UPDATE NO ACTION`);
+
+        // Re-create unique constraints that were dropped above but are still required by the
+        // INSERT … ON CONFLICT upserts in TestRunLookupService. Without these, any call to
+        // POST /api/init fails with SQLSTATE 42P10 "there is no unique or exclusion constraint
+        // matching the ON CONFLICT specification".
+        await queryRunner.query(`CREATE UNIQUE INDEX "uq_system_under_test_name_org" ON "systems_under_test" ("name", "organization_id")`);
+        await queryRunner.query(`ALTER TABLE "system_under_test_test_environments" ADD CONSTRAINT "system_under_test_test_environments_system_under_test_id_name_k" UNIQUE ("system_under_test_id", "name")`);
+        await queryRunner.query(`ALTER TABLE "system_under_test_workloads" ADD CONSTRAINT "application_test_types_application_test_environment_id_name_key" UNIQUE ("system_under_test_test_environment_id", "name")`);
     }
 
     public async down(queryRunner: QueryRunner): Promise<void> {
