@@ -215,18 +215,7 @@ describe('ProfileBenchmarksTable', () => {
       expect(screen.getByText('Response Time')).toBeInTheDocument();
     });
 
-    it('should render dashboard label below metric', () => {
-      render(
-        <ProfileBenchmarksTable
-          {...defaultProps}
-          benchmarks={[mockBenchmark]}
-        />
-      );
-
-      expect(screen.getByText('JMeter Overview')).toBeInTheDocument();
-    });
-
-    it('should render grafana instance below dashboard', () => {
+    it('should render grafana instance below metric', () => {
       render(
         <ProfileBenchmarksTable
           {...defaultProps}
