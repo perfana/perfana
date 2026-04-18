@@ -85,7 +85,7 @@ export default function AddDashboardDialog({
     }));
   };
 
-  const fetchVariableOptions = async (variable: any, dashboard: GrafanaDashboard) => {
+  const fetchVariableOptions = async (variable: unknown, dashboard: GrafanaDashboard) => {
     try {
       const response = await authenticatedFetch(`/grafana/dashboards/variable-values`, {
         method: 'POST',
@@ -138,7 +138,7 @@ export default function AddDashboardDialog({
     }
   };
 
-  const preSelectVariableValue = (variableName: string, options: any[]) => {
+  const preSelectVariableValue = (variableName: string, options: unknown[]) => {
     // Check if this variable should be pre-selected based on configuration scope
     let preSelectedValue: string | null = null;
     

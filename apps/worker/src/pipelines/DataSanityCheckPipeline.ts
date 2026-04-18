@@ -257,8 +257,8 @@ export class DataSanityCheckPipeline extends BasePipelineTypeORM {
       const valid = reasons.length === 0;
       await this.db.updateTestRunByTestRunId(testRunId, {
         valid,
-        reasonsNotValid: (valid ? null : reasons) as any,
-        dataWarnings: (warnings.length > 0 ? warnings : null) as any,
+        reasonsNotValid: (valid ? null : reasons) as unknown,
+        dataWarnings: (warnings.length > 0 ? warnings : null) as unknown,
       });
 
       const duration = Date.now() - startTime;

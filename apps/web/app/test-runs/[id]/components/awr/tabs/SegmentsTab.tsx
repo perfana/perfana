@@ -114,7 +114,7 @@ const SEGMENT_TYPE_CONFIGS: SegmentTypeConfig[] = [
 
 // ==================== Helper Functions ====================
 
-function getSegmentData(report: any, segmentType: SegmentType): SegmentStatistic[] {
+function getSegmentData(report: unknown, segmentType: SegmentType): SegmentStatistic[] {
   const segmentStats = report?.parsedData?.segmentStatistics;
   if (!segmentStats) return [];
 
@@ -130,7 +130,7 @@ function getSegmentData(report: any, segmentType: SegmentType): SegmentStatistic
   return segmentStats[mapping[segmentType]] || [];
 }
 
-function getTotalValue(report: any, segmentType: SegmentType): number | undefined {
+function getTotalValue(report: unknown, segmentType: SegmentType): number | undefined {
   const segmentStats = report?.parsedData?.segmentStatistics;
   if (!segmentStats) return undefined;
 

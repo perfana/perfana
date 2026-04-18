@@ -29,7 +29,7 @@ interface AnomalyTableRowProps {
   isExpanded: boolean;
   isLast: boolean;
   testRunId: string;
-  drawerData: Record<string, any>;
+  drawerData: Record<string, unknown>;
   onToggleExpanded: () => void;
   onOpenActionMenu: (event: React.MouseEvent<HTMLElement>) => void;
   onStaleChipClick: () => void;
@@ -196,7 +196,7 @@ export function AnomalyTableRow({
         <Chip
           label={row.conclusion_label}
           size="small"
-          color={getConclusionColor(row.conclusion_label) as any}
+          color={getConclusionColor(row.conclusion_label) as unknown}
           variant="filled"
           icon={row.is_stale ? (
             <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.25 }}>

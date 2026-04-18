@@ -75,7 +75,7 @@ export default function HostPerformanceGraphs({
     responsive: true,
     displayModeBar: true,
     displaylogo: false,
-    modeBarButtonsToRemove: ['pan2d', 'lasso2d', 'select2d', 'autoScale2d', 'zoom2d', 'zoomIn2d', 'zoomOut2d', 'resetScale2d'] as any,
+    modeBarButtonsToRemove: ['pan2d', 'lasso2d', 'select2d', 'autoScale2d', 'zoom2d', 'zoomIn2d', 'zoomOut2d', 'resetScale2d'] as unknown,
     toImageButtonOptions: {
       format: 'png' as const,
       filename: `${hostDisplayName || 'host'}_${metricName.toLowerCase().replace(/\s+/g, '_')}`,

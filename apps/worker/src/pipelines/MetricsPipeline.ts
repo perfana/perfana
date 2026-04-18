@@ -86,7 +86,7 @@ export class MetricsPipeline extends BasePipelineTypeORM {
           dashboard_label: panel.dashboard_label || '', // Provide default empty string
           benchmark_ids: panel.benchmark_ids || null,
           panel: panel.panel,
-          errors: panel.errors as any || null, // Type assertion needed for compatibility
+          errors: panel.errors as unknown || null, // Type assertion needed for compatibility
           requests: typeof panel.requests === 'string' ? JSON.parse(panel.requests || '[]') : (panel.requests || []),
           updated_at: panel.updated_at
         }));
@@ -182,7 +182,7 @@ export class MetricsPipeline extends BasePipelineTypeORM {
       const duration = Date.now() - startTime;
 
       this.logError(error as Error, {
-        testRunId: (input as any)?.testRunId,
+        testRunId: (input as unknown)?.testRunId,
         duration
       });
 
@@ -191,7 +191,7 @@ export class MetricsPipeline extends BasePipelineTypeORM {
       return this.createErrorResult(
         error as Error,
         'METRICS_COLLECTION_ERROR',
-        { testRunId: (input as any)?.testRunId },
+        { testRunId: (input as unknown)?.testRunId },
         duration
       );
     }
@@ -205,7 +205,7 @@ export class MetricsPipeline extends BasePipelineTypeORM {
       throw new Error('Invalid input: must be an object');
     }
 
-    const { testRunId, benchmarksOnly, panelDocuments } = input as any;
+    const { testRunId, benchmarksOnly, panelDocuments } = input as unknown;
 
     if (!testRunId || typeof testRunId !== 'string') {
       throw new Error('Invalid input: testRunId is required and must be a string');
@@ -223,7 +223,7 @@ export class MetricsPipeline extends BasePipelineTypeORM {
    * Get panel metrics as flattened records directly
    * Simplified version that bypasses intermediate PanelMetricsDocument step
    */
-  private async getPanelMetricsAsRecords(testRun: any, panels: PanelDocument[]): Promise<any[]> {
+  private async getPanelMetricsAsRecords(testRun: unknown, panels: PanelDocument[]): Promise<any[]> {
     // Separate panels with/without errors for different processing (Python pattern)
     const panelsWithoutErrors = panels.filter(panel =>
       panel.errors === null || panel.errors === undefined
@@ -232,7 +232,7 @@ export class MetricsPipeline extends BasePipelineTypeORM {
       panel.errors !== null && panel.errors !== undefined
     );
 
-    const allRecords: any[] = [];
+    const allRecords: unknown[] = [];
 
     // Process panels without errors - query Grafana and transform to records
     if (panelsWithoutErrors.length > 0) {
@@ -295,7 +295,7 @@ export class MetricsPipeline extends BasePipelineTypeORM {
    * Helper method for the new direct flattening approach
    * @param testRun - Test run information including start_time and ramp_up duration
    */
-  private flattenSingleDocument(document: PanelMetricsDocument, testRun: any): any[] {
+  private flattenSingleDocument(document: PanelMetricsDocument, testRun: unknown): unknown[] {
     const baseData = {
       test_run_id: document.test_run_id,
       application_dashboard_id: document.application_dashboard_id,
@@ -313,7 +313,7 @@ export class MetricsPipeline extends BasePipelineTypeORM {
       updated_by: 'worker-pipeline',
     };
 
-    const flattened: any[] = [];
+    const flattened: unknown[] = [];
     const dataRecords = document.data || [];
 
     if (dataRecords.length > 0) {
@@ -360,7 +360,7 @@ export class MetricsPipeline extends BasePipelineTypeORM {
    * Save flattened records directly to PostgreSQL with batch processing
    * Simplified version that works with pre-flattened records
    */
-  private async saveRecordsToDatabase(records: any[]): Promise<void> {
+  private async saveRecordsToDatabase(records: unknown[]): Promise<void> {
     if (records.length === 0) {return;}
 
     // Use the dedicated write connection pool so metric inserts are never
@@ -383,7 +383,7 @@ export class MetricsPipeline extends BasePipelineTypeORM {
    * Batch insert records to PostgreSQL
    * Conservative batch size for parameter limit compliance
    */
-  private async batchInsertRecords(manager: EntityManager, records: any[]): Promise<void> {
+  private async batchInsertRecords(manager: EntityManager, records: unknown[]): Promise<void> {
     const batchSize = DB_INSERT_BATCH_SIZE;
 
     for (let i = 0; i < records.length; i += batchSize) {
@@ -401,7 +401,7 @@ export class MetricsPipeline extends BasePipelineTypeORM {
   /**
    * Insert a single batch of records using UPSERT pattern (matches Python TimescaleDB implementation)
    */
-  private async insertBatch(manager: EntityManager, batch: any[]): Promise<void> {
+  private async insertBatch(manager: EntityManager, batch: unknown[]): Promise<void> {
     if (batch.length === 0) {return;}
 
 

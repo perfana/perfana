@@ -76,7 +76,7 @@ export class DataAggregator extends BaseCheckService {
         'panel_id = $3'
       ];
 
-      const queryParams: any[] = [
+      const queryParams: unknown[] = [
         filterCriteria.test_run_id,
         filterCriteria.application_dashboard_id,
         filterCriteria.panel_id
@@ -122,7 +122,7 @@ export class DataAggregator extends BaseCheckService {
 
       const result = await this.manager.query(metricStatisticsSql, queryParams);
 
-      const metricStatistics: MetricStatistic[] = result.map((row: any) => ({
+      const metricStatistics: MetricStatistic[] = result.map((row: unknown) => ({
         metric_name: row.metric_name,
         mean: row.mean,
         median: row.median,

@@ -65,7 +65,7 @@ export function createSimpleQueue(queueName: SimpleQueueName): Queue {
  */
 export function createSimpleWorker(
   queueName: SimpleQueueName,
-  processor: (job: Job) => Promise<any>
+  processor: (job: Job) => Promise<unknown>
 ): Worker {
   // Get worker configuration
   const workerConfig = getWorkerConfig(queueName);
@@ -122,13 +122,13 @@ export function createSimpleWorker(
     queueName,
     wrappedProcessor,
     {
-      connection: connection as any,              // Regular connection for commands
-      blockingConnection: blockingConnection as any,      // CRITICAL: Separate connection for BRPOPLPUSH
+      connection: connection as unknown,              // Regular connection for commands
+      blockingConnection: blockingConnection as unknown,      // CRITICAL: Separate connection for BRPOPLPUSH
       concurrency: workerConfig.concurrency,
       // NO limiter configuration!
       settings: {
         drainDelay: workerConfig.drainDelay, // MUST be > 50ms for blocking mode
-      } as any,
+      } as unknown,
     }
   );
 
@@ -145,11 +145,11 @@ export function createSimpleWorker(
     logger.error(`Job ${job?.id} failed in ${queueName}:`, err);
   });
 
-  worker.on('completed', (job: any) => {
+  worker.on('completed', (job: unknown) => {
     logger.info(`Job ${job.id} completed in ${queueName}`);
   });
 
-  worker.on('stalled', (job: any) => {
+  worker.on('stalled', (job: unknown) => {
     logger.warn(`Job ${job.id} stalled in ${queueName}`);
   });
 
@@ -164,7 +164,7 @@ export function createSimpleWorker(
 export async function addSimpleJob(
   queue: Queue,
   jobName: string,
-  data: any
+  data: unknown
 ): Promise<void> {
   const options = getJobOptions(jobName);
 

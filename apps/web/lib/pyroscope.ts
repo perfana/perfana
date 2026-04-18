@@ -27,7 +27,7 @@ export interface PyroscopeInstanceQuery {
 }
 
 // Transform snake_case API response to camelCase
-function transformPyroscopeInstance(data: any): PyroscopeInstance {
+function transformPyroscopeInstance(data: unknown): PyroscopeInstance {
   return {
     id: data.id,
     label: data.label,

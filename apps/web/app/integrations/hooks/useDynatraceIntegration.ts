@@ -39,7 +39,7 @@ export function useDynatraceIntegration({ onSnackbar, organizationId }: UseDynat
   const [selectedRequestNameAttribute, setSelectedRequestNameAttribute] = useState<string>('');
 
   const form = useForm<CreateDynatraceConfigFormData>({
-    resolver: zodResolver(createDynatraceConfigSchema) as any,
+    resolver: zodResolver(createDynatraceConfigSchema) as unknown,
     defaultValues: {
       label: '',
       host: '',

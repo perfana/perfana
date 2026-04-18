@@ -53,7 +53,7 @@ export function createRedisConnection(): Redis {
     logger.info('✅ Redis ready');
   });
 
-  redis.on('error', (error: any) => {
+  redis.on('error', (error: unknown) => {
     // Filter out command timeout errors from BullMQ polling - these are normal behavior
     if (error.message?.includes('Command timed out')) {
       logger.debug('Redis command timeout during BullMQ polling (normal behavior)', {

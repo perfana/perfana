@@ -23,7 +23,7 @@ export interface Benchmark {
   dashboard_uid: string;
   dashboard_label: string;
   application_dashboard_id: string;
-  configuration: any;
+  configuration: unknown;
   requirement_operator?: string;
   requirement_value?: number;
   validate_with_default_if_no_data: boolean;
@@ -97,7 +97,7 @@ export class BenchmarkMatcher extends BaseCheckService {
       )`
     ];
 
-    const queryParams: any[] = [
+    const queryParams: unknown[] = [
       testRun.system_under_test_id,
       testRun.test_environment,
       testRun.workload
@@ -162,7 +162,7 @@ export class BenchmarkMatcher extends BaseCheckService {
 
     // Convert rows to Benchmark objects and validate
     // Based on benchmark_matcher.py:66-88
-    const benchmarks: Benchmark[] = result.map((row: any) => ({
+    const benchmarks: Benchmark[] = result.map((row: unknown) => ({
       id: row.id,
       system_under_test_id: row.system_under_test_id,
       test_environment: row.test_environment,

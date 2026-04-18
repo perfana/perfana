@@ -108,9 +108,9 @@ export function createEventAnnotations(events: PerfanaEvent[]) {
 }
 
 export function mergeEventShapesIntoLayout(
-  layout: Record<string, any>,
+  layout: Record<string, unknown>,
   events: PerfanaEvent[],
-): Record<string, any> {
+): Record<string, unknown> {
   if (!events || events.length === 0) return layout;
 
   return {
@@ -147,16 +147,16 @@ function findClosestIndex(eventMs: number, sortedMs: number[]): number | null {
  * sortedTimestamps: the chart's sorted timestamp strings from buildTimestampMapping.
  */
 export function mergeEventShapesIntoIndexedLayout(
-  layout: Record<string, any>,
+  layout: Record<string, unknown>,
   events: PerfanaEvent[],
   sortedTimestamps: string[],
-): Record<string, any> {
+): Record<string, unknown> {
   if (!events || events.length === 0 || sortedTimestamps.length === 0) return layout;
 
   const sortedMs = sortedTimestamps.map(ts => new Date(ts).getTime());
 
-  const shapes: Record<string, any>[] = [];
-  const annotations: Record<string, any>[] = [];
+  const shapes: Record<string, unknown>[] = [];
+  const annotations: Record<string, unknown>[] = [];
 
   for (const event of events) {
     const eventMs = new Date(event.timestamp).getTime();

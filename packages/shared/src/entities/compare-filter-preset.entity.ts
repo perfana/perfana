@@ -53,7 +53,7 @@ export class CompareFilterPreset {
   dashboardLabel?: string;
 
   @Column({ name: 'series_config', type: 'jsonb', nullable: true })
-  seriesConfig?: Record<string, any>[];
+  seriesConfig?: Record<string, unknown>[];
 
   @Column({ name: 'created_for_test_run_id', type: 'varchar', length: 255, nullable: true })
   createdForTestRunId?: string;

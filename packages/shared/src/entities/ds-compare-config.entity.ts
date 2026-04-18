@@ -15,7 +15,7 @@ export class DsCompareConfig {
   panel_id!: number;
 
   @Column({ type: 'jsonb' })
-  config_data!: Record<string, any>;
+  config_data!: Record<string, unknown>;
 
   @Column({ type: 'uuid', nullable: true })
   organization_id?: string;

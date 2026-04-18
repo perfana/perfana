@@ -98,7 +98,7 @@ export class BatchProcessor {
    * @returns Batch processing result with statistics
    */
   async processGrafanaDocuments(
-    documents: any[],
+    documents: unknown[],
     testRun: TestRunContext
   ): Promise<BatchProcessResult> {
     return this.processDocuments(documents, testRun, 'Grafana', (doc) =>
@@ -117,7 +117,7 @@ export class BatchProcessor {
    * @returns Batch processing result with statistics
    */
   async processDynatraceDocuments(
-    documents: any[],
+    documents: unknown[],
     testRun: TestRunContext
   ): Promise<BatchProcessResult> {
     return this.processDocuments(documents, testRun, 'Dynatrace', (doc) =>
@@ -142,10 +142,10 @@ export class BatchProcessor {
    * @returns Batch processing result with statistics
    */
   private async processDocuments(
-    documents: any[],
+    documents: unknown[],
     testRun: TestRunContext,
     source: MetricSource,
-    flattenFn: (doc: any) => FlattenedMetricRecord[]
+    flattenFn: (doc: unknown) => FlattenedMetricRecord[]
   ): Promise<BatchProcessResult> {
     const result: BatchProcessResult = {
       totalRecords: 0,
@@ -205,10 +205,10 @@ export class BatchProcessor {
    * @returns Batch result for this batch only
    */
   private async processSingleBatch(
-    batch: any[],
+    batch: unknown[],
     testRun: TestRunContext,
     source: MetricSource,
-    flattenFn: (doc: any) => FlattenedMetricRecord[]
+    flattenFn: (doc: unknown) => FlattenedMetricRecord[]
   ): Promise<BatchProcessResult> {
     const result: BatchProcessResult = {
       totalRecords: 0,
@@ -280,7 +280,7 @@ export class BatchProcessor {
    * @param doc - Document to identify
    * @returns String identifier for the document
    */
-  private getDocumentIdentifier(doc: any): string {
+  private getDocumentIdentifier(doc: unknown): string {
     // Try various common ID fields
     const panelId = doc.panel_id || doc.panelId;
     const panelTitle = doc.panel_title || doc.panelTitle;

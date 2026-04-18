@@ -57,7 +57,7 @@ export class PanelsPipeline extends BasePipelineTypeORM {
       // Helpers expect pool.query() to return {rows: [...]}
       // but WorkerDatabaseService.query() returns the array directly
       const poolAdapter = {
-        query: async (sql: string, params?: any[]) => {
+        query: async (sql: string, params?: unknown[]) => {
           const rows = await this.db.query(sql, params);
           return { rows };
         }
@@ -65,14 +65,14 @@ export class PanelsPipeline extends BasePipelineTypeORM {
 
       // Find application dashboards using helper (helpers use pool.query() for raw SQL)
       stepStart = Date.now();
-      const applicationDashboards = await getApplicationDashboardsForTestRun(poolAdapter as any, testRunAdapter as any);
+      const applicationDashboards = await getApplicationDashboardsForTestRun(poolAdapter as unknown, testRunAdapter as unknown);
       const appDashTime = Date.now() - stepStart;
       this.logger.info(`🎯 Found ${applicationDashboards.length} application dashboards: ${appDashTime}ms`);
 
       // Find grafana dashboards
       stepStart = Date.now();
       const grafanaDashboards = await getGrafanaDashboardsForApplicationDashboards(
-        poolAdapter as any,
+        poolAdapter as unknown,
         applicationDashboards
       );
       const grafanaDashTime = Date.now() - stepStart;
@@ -80,7 +80,7 @@ export class PanelsPipeline extends BasePipelineTypeORM {
 
       // Find benchmarks
       stepStart = Date.now();
-      const benchmarks = await getBenchmarksForTestRun(poolAdapter as any, testRunAdapter as any);
+      const benchmarks = await getBenchmarksForTestRun(poolAdapter as unknown, testRunAdapter as unknown);
       const benchmarksTime = Date.now() - stepStart;
       this.logger.info(`🎯 Found ${benchmarks.length} benchmarks: ${benchmarksTime}ms`);
 
@@ -88,7 +88,7 @@ export class PanelsPipeline extends BasePipelineTypeORM {
       stepStart = Date.now();
       const perfanaData: PerfanaData = {
         test_run_id: testRunId,
-        test_run: testRunAdapter as any,
+        test_run: testRunAdapter as unknown,
         application_dashboards: applicationDashboards,
         benchmarks: benchmarks,
         dashboards: grafanaDashboards
@@ -162,7 +162,7 @@ export class PanelsPipeline extends BasePipelineTypeORM {
     }
   }
 
-  private async insertPanelDocuments(manager: EntityManager, panelDocuments: any[], testRun: any): Promise<void> {
+  private async insertPanelDocuments(manager: EntityManager, panelDocuments: unknown[], testRun: unknown): Promise<void> {
     if (panelDocuments.length === 0) {return;}
 
     const columns = [
@@ -213,7 +213,7 @@ export class PanelsPipeline extends BasePipelineTypeORM {
       return false;
     }
 
-    const inputObj = input as any;
+    const inputObj = input as unknown;
     return typeof inputObj.testRunId === 'string' && inputObj.testRunId.length > 0;
   }
 }

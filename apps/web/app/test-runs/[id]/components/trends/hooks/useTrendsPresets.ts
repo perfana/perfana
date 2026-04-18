@@ -32,7 +32,7 @@ interface UseTrendsPresetsProps {
   setSelectedMetric: (metric: Panel | null) => void;
   setEvaluateType: (type: string) => void;
   setAddedSeries: (series: TrendsSeries[] | ((prev: TrendsSeries[]) => TrendsSeries[])) => void;
-  setDynatraceMetrics: (fn: (prev: any[]) => any[]) => void;
+  setDynatraceMetrics: (fn: (prev: unknown[]) => any[]) => void;
 }
 
 export function useTrendsPresets({
@@ -102,7 +102,7 @@ export function useTrendsPresets({
       setApplyingPreset(true);
 
       // Apply source if present in preset (defaults to grafana for backwards compatibility)
-      const presetSource = (preset as any).source || 'grafana';
+      const presetSource = (preset as unknown).source || 'grafana';
       setSelectedSource(presetSource);
 
       if (preset.application_dashboard_id) {
@@ -175,7 +175,7 @@ export function useTrendsPresets({
 
                 setTimeout(() => {
                   setDynatraceMetrics(currentMetrics => {
-                    const metric = currentMetrics.find((m: any) => m.panelTitle === preset.panel_title);
+                    const metric = currentMetrics.find((m: unknown) => m.panelTitle === preset.panel_title);
                     if (metric) {
                       setSelectedMetric({
                         id: metric.panelId,
@@ -209,12 +209,12 @@ export function useTrendsPresets({
       // Restore series config if present
       if (preset.series_config && Array.isArray(preset.series_config) && preset.series_config.length > 0) {
         // Filter out invalid entries (e.g. empty arrays, entries missing required fields)
-        const validConfigs = preset.series_config.filter((config: any) =>
+        const validConfigs = preset.series_config.filter((config: unknown) =>
           config && typeof config === 'object' && !Array.isArray(config) &&
           config.dashboardId && config.panelId != null && config.metricName
         );
         if (validConfigs.length > 0) {
-          const restoredSeries: TrendsSeries[] = validConfigs.map((config: any) => ({
+          const restoredSeries: TrendsSeries[] = validConfigs.map((config: unknown) => ({
             id: `${config.dashboardId}-${config.panelId}-${config.metricName}-${Date.now()}-${Math.random()}`,
             dashboardId: config.dashboardId,
             dashboardLabel: config.dashboardLabel,

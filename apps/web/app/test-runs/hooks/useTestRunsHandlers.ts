@@ -183,7 +183,7 @@ export function useTestRunsHandlers({
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          systemUnderTestId: testRun.system_under_test_id || (testRun.systems_under_test as any)?.id,
+          systemUnderTestId: testRun.system_under_test_id || (testRun.systems_under_test as unknown)?.id,
           testEnvironment: testRun.test_environment,
           workload: testRun.workload,
           testRunId: testRun.test_run_id,
@@ -222,7 +222,7 @@ export function useTestRunsHandlers({
         method: 'DELETE',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          systemUnderTestId: testRun.system_under_test_id || (testRun.systems_under_test as any)?.id,
+          systemUnderTestId: testRun.system_under_test_id || (testRun.systems_under_test as unknown)?.id,
           testEnvironment: testRun.test_environment,
           workload: testRun.workload,
           testRunId: testRun.test_run_id,

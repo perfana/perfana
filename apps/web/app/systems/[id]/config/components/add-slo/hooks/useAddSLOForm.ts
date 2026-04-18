@@ -146,7 +146,7 @@ export function useAddSLOForm({
       if (response.ok) {
         const dashboardsData = await response.json();
         // Filter for performance-test-metrics dashboards only
-        const perfMetricsDashboards = dashboardsData.filter((d: any) => isPerformanceTest(d));
+        const perfMetricsDashboards = dashboardsData.filter((d: unknown) => isPerformanceTest(d));
         setAvailablePerfMetricsDashboards(perfMetricsDashboards);
       } else {
         console.warn('Failed to fetch Performance metrics dashboards:', response.statusText);
@@ -176,7 +176,7 @@ export function useAddSLOForm({
         const dashboardData = await response.json();
         const dashboard = Array.isArray(dashboardData) ? dashboardData[0] : dashboardData;
         const filteredPanels =
-          dashboard?.panels?.filter((panel: any) => SUPPORTED_PANEL_TYPES.includes(panel.type)) || [];
+          dashboard?.panels?.filter((panel: unknown) => SUPPORTED_PANEL_TYPES.includes(panel.type)) || [];
         setAvailablePanels(filteredPanels);
       } else {
         console.warn('Failed to fetch dashboard panels:', response.statusText);
@@ -239,7 +239,7 @@ export function useAddSLOForm({
 
       if (response.ok) {
         const dashboardsData = await response.json();
-        const perfMetricsDashboards = dashboardsData.filter((d: any) => isPerformanceTest(d));
+        const perfMetricsDashboards = dashboardsData.filter((d: unknown) => isPerformanceTest(d));
         return perfMetricsDashboards.length > 0;
       }
       return false;

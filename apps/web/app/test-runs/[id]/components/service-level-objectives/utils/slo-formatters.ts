@@ -11,12 +11,12 @@ export function formatMetricUnit(metricUnit?: string): string {
 }
 
 // Helper function to check if a check result is an Apdex SLO
-export function isApdexResult(result: any): boolean {
+export function isApdexResult(result: unknown): boolean {
   return result.panel_type === 'apdex' || result.evaluate_type === 'apdex';
 }
 
 // Helper function to format Apdex requirement
-export function formatApdexRequirement(requirement: any): string {
+export function formatApdexRequirement(requirement: unknown): string {
   if (!requirement || typeof requirement !== 'object') {
     return 'No requirement specified';
   }
@@ -48,7 +48,7 @@ export function formatApdexScore(score: number | string | null | undefined): str
 }
 
 // Helper function to determine if a check result is stale
-export function isCheckResultStale(checkResult: any, benchmark: any): boolean {
+export function isCheckResultStale(checkResult: unknown, benchmark: unknown): boolean {
   if (!checkResult.created_at || !benchmark?.updated_at) {
     return false;
   }
@@ -61,7 +61,7 @@ export function isCheckResultStale(checkResult: any, benchmark: any): boolean {
 }
 
 // Helper function to format requirement as human readable text
-export function formatRequirement(requirement: any, evaluateType?: string, metricUnit?: string): string {
+export function formatRequirement(requirement: unknown, evaluateType?: string, metricUnit?: string): string {
   if (!requirement || typeof requirement !== 'object') {
     return 'No requirement specified';
   }

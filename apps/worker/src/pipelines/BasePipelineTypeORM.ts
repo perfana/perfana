@@ -81,7 +81,7 @@ export abstract class BasePipelineTypeORM implements Pipeline {
   /**
    * Execute raw SQL query (use sparingly - prefer repository methods)
    */
-  protected async query<T = any>(sql: string, parameters?: any[]): Promise<T[]> {
+  protected async query<T = any>(sql: string, parameters?: unknown[]): Promise<T[]> {
     return await this.db.query<T>(sql, parameters);
   }
 
@@ -89,7 +89,7 @@ export abstract class BasePipelineTypeORM implements Pipeline {
    * Execute a write operation using the dedicated write connection pool.
    * Use this for INSERT/UPDATE operations that must not be starved by analytics.
    */
-  protected async writeQuery<T = any>(sql: string, parameters?: any[]): Promise<T[]> {
+  protected async writeQuery<T = any>(sql: string, parameters?: unknown[]): Promise<T[]> {
     return await this.db.writeQuery<T>(sql, parameters);
   }
 
@@ -230,7 +230,7 @@ export abstract class BasePipelineTypeORM implements Pipeline {
   /**
    * Log timing summary for this pipeline
    */
-  protected logTimingSummary(additionalContext?: Record<string, any>): void {
+  protected logTimingSummary(additionalContext?: Record<string, unknown>): void {
     this.timer.logSummary(additionalContext);
   }
 }

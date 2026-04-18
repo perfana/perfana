@@ -105,7 +105,7 @@ export default function EditDynatraceQueryDialog({
         matchMetricPattern: query.matchMetricPattern || '',
         omitGroupByVariableFromMetricName: query.omitGroupByVariableFromMetricName || [],
         templateVariables: query.templateVariables || {},
-        metricUnit: (query as any).metricUnit || 'ms',
+        metricUnit: (query as unknown).metricUnit || 'ms',
       });
 
       // Initialize variable values from existing data
@@ -142,7 +142,7 @@ export default function EditDynatraceQueryDialog({
   }, [formData.query]);
 
 
-  const handleInputChange = (field: keyof UpdateDynatraceQueryDto, value: any) => {
+  const handleInputChange = (field: keyof UpdateDynatraceQueryDto, value: unknown) => {
     setFormData(prev => {
       const updated = {
         ...prev,

@@ -48,7 +48,7 @@ export class ProvisionedTemplateDsCompareConfig {
   metric_classification?: string;
 
   @Column({ type: 'jsonb', nullable: true })
-  config_overrides?: Record<string, any>;
+  config_overrides?: Record<string, unknown>;
 
   @Column({ type: 'uuid', nullable: true })
   organization_id?: string;

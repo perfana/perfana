@@ -4,7 +4,7 @@ import { ThresholdComparisonData } from '../types';
 /**
  * Format a number for display
  */
-export function formatNumber(value: any): string {
+export function formatNumber(value: unknown): string {
   // Handle null, undefined, or non-numeric values
   if (value === null || value === undefined || value === '' || isNaN(Number(value))) {
     return '-';
@@ -73,7 +73,7 @@ export function getConfigSourceInfo(configSource?: string): {
 /**
  * Generate threshold comparison data for display in detail drawer
  */
-export function generateThresholdData(drawerData: any, unit?: string): ThresholdComparisonData[] {
+export function generateThresholdData(drawerData: unknown, unit?: string): ThresholdComparisonData[] {
   const thresholds: ThresholdComparisonData[] = [];
 
   if (drawerData.checks && drawerData.statistic && drawerData.compare_config) {

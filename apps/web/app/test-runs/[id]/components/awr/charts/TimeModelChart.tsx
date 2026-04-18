@@ -334,7 +334,7 @@ function BarChartView({ data, height }: BarChartViewProps) {
           width={90}
         />
         <RechartsTooltip
-          formatter={(value: number, name: string, props: any) => {
+          formatter={(value: number, name: string, props: unknown) => {
             const percent = props.payload.percent || 0;
             return [
               `${formatDuration(value)} (${formatPercentage(percent)})`,

@@ -56,7 +56,7 @@ export const getClassificationDisplayInfo = (classification: string) => {
   }
 };
 
-export const formatNumber = (value: any) => {
+export const formatNumber = (value: unknown) => {
   // Handle null, undefined, or non-numeric values
   if (value === null || value === undefined || value === '' || isNaN(Number(value))) {
     return '-';
@@ -97,7 +97,7 @@ export const formatDifference = (testValue?: number, controlValue?: number, diff
 };
 
 // Generate threshold comparison data
-export const generateThresholdData = (drawerData: any, unit?: string) => {
+export const generateThresholdData = (drawerData: unknown, unit?: string) => {
   const thresholds = [];
 
   if (drawerData.checks && drawerData.statistic && drawerData.compare_config) {

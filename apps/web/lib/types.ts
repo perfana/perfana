@@ -33,5 +33,5 @@ export interface MetricsSource {
   display_label?: string;
   workload?: string;
   tags?: string[];
-  metadata?: Record<string, any>;
+  metadata?: Record<string, unknown>;
 }

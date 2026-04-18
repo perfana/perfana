@@ -30,10 +30,10 @@ export class DsControlGroups {
   last_datetime?: Date;
 
   @Column({ type: 'jsonb', default: {} })
-  metric_filters!: Record<string, any>;
+  metric_filters!: Record<string, unknown>;
 
   @Column({ type: 'jsonb', nullable: true })
-  change_point?: Record<string, any>;
+  change_point?: Record<string, unknown>;
 
   @Column({ type: 'uuid', nullable: true })
   organization_id?: string;

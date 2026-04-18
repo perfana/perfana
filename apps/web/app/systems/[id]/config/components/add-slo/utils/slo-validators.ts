@@ -139,6 +139,6 @@ export function processPercentunitValue(value: string, unitFormat: string | unde
 /**
  * Get the effective unit format from a panel
  */
-export function getEffectiveUnitFormat(selectedPanel: any): string | undefined {
+export function getEffectiveUnitFormat(selectedPanel: unknown): string | undefined {
   return selectedPanel?.yAxesFormat || selectedPanel?.metricUnit;
 }

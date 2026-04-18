@@ -97,7 +97,7 @@ export default function PyroscopeSection({
     setIsDirty(hasChanges);
   }, [selectedInstanceId, configurations, systemUnderTest]);
 
-  const handleInstanceChange = (event: any) => {
+  const handleInstanceChange = (event: unknown) => {
     setSelectedInstanceId(event.target.value);
   };
 

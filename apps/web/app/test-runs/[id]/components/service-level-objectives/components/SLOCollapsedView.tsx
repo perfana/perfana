@@ -12,11 +12,11 @@ import SoftBadge from '../../shared/SoftBadge';
 import { isCheckResultStale } from '../utils/slo-formatters';
 
 interface SLOCollapsedViewProps {
-  checkResults: any[];
+  checkResults: unknown[];
   checkResultsLoading: boolean;
-  benchmarks: any[];
+  benchmarks: unknown[];
   benchmarksLoading: boolean;
-  testRun: any;
+  testRun: unknown;
 }
 
 export function SLOCollapsedView({
@@ -64,9 +64,9 @@ function KPISection({
   benchmarks,
   benchmarksLoading,
 }: {
-  checkResults: any[];
+  checkResults: unknown[];
   checkResultsLoading: boolean;
-  benchmarks: any[];
+  benchmarks: unknown[];
   benchmarksLoading: boolean;
 }) {
   if (checkResultsLoading || benchmarksLoading) {
@@ -118,11 +118,11 @@ function BadgeSection({
   benchmarksLoading,
   testRun,
 }: {
-  checkResults: any[];
+  checkResults: unknown[];
   checkResultsLoading: boolean;
-  benchmarks: any[];
+  benchmarks: unknown[];
   benchmarksLoading: boolean;
-  testRun: any;
+  testRun: unknown;
 }) {
   if (checkResultsLoading || benchmarksLoading) {
     return <SoftBadge label="Loading..." color="blue" />;
@@ -171,8 +171,8 @@ function CollapsedBadges({
   checkResults,
   benchmarks,
 }: {
-  checkResults: any[];
-  benchmarks: any[];
+  checkResults: unknown[];
+  benchmarks: unknown[];
 }) {
   const passedCount = checkResults.filter(r => r.meets_requirement === true).length;
   const failedCount = checkResults.filter(r => r.meets_requirement === false).length;

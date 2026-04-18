@@ -44,8 +44,8 @@ interface TrackedRegression {
   unit?: string;
   testRunStart: Date;
   updatedAt: Date;
-  conclusion?: any;
-  trackedConclusion?: any;
+  conclusion?: unknown;
+  trackedConclusion?: unknown;
   // Additional test run info
   version?: string;
   annotations?: string;

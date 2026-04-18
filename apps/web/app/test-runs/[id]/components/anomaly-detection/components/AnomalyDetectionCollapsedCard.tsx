@@ -28,7 +28,7 @@ interface AnomalyDetectionCollapsedCardProps {
   onExpand: (tabIndex?: number) => void;
   onDelete?: () => void;
   testRun: any | null;
-  dsAdaptConclusion?: any;
+  dsAdaptConclusion?: unknown;
 }
 
 export default function AnomalyDetectionCollapsedCard({

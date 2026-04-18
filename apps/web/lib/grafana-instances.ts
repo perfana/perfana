@@ -36,7 +36,7 @@ export interface GrafanaInstanceQuery {
 }
 
 // Transform snake_case API response to camelCase
-function transformGrafanaInstance(data: any): GrafanaInstance {
+function transformGrafanaInstance(data: unknown): GrafanaInstance {
   return {
     id: data.id,
     label: data.label,

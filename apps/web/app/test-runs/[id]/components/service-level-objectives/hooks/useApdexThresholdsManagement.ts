@@ -14,7 +14,7 @@ import {
 interface UseApdexThresholdsManagementProps {
   open: boolean;
   testRunId: string;
-  apdexCheckResult: any;
+  apdexCheckResult: unknown;
   onSuccess: () => void;
   onClose: () => void;
 }

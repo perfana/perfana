@@ -54,9 +54,9 @@ export interface PanelDocument {
   panel_id: number;
   panel_title: string;
   dashboard_label: string;
-  benchmark_ids?: any[] | null; // JSONB array
-  panel: any; // JSONB panel definition from Grafana
-  query_variables?: any; // JSONB query variables
+  benchmark_ids?: unknown[] | null; // JSONB array
+  panel: unknown; // JSONB panel definition from Grafana
+  query_variables?: unknown; // JSONB query variables
   datasource_type?: string | null;
   requests?: GrafanaRequest[]; // JSONB array of requests
   errors?: Array<{
@@ -66,7 +66,7 @@ export interface PanelDocument {
     type: string;
     detail?: string;
   }> | null; // JSONB errors
-  warnings?: any[] | null; // JSONB warnings
+  warnings?: unknown[] | null; // JSONB warnings
   updated_at?: Date;
   created_at?: Date;
 }

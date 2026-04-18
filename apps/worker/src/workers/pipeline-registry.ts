@@ -16,7 +16,7 @@ import { type JobResult } from '../types/jobs.js';
 import { type ZodSchema } from 'zod';
 
 interface PipelineInstance {
-  execute: (input: any) => Promise<any>;
+  execute: (input: unknown) => Promise<unknown>;
   validateInput?: (data: unknown) => boolean;
 }
 
@@ -25,9 +25,9 @@ export interface PipelineRegistration {
   /** Zod validation schema. When omitted, job.data is passed through as-is. */
   schema?: ZodSchema;
   /** Factory to create the pipeline with a logger. */
-  createPipeline: (logger: any) => PipelineInstance;
+  createPipeline: (logger: unknown) => PipelineInstance;
   /** Optional transform applied to job.data (after schema validation) before pipeline.execute(). */
-  transformInput?: (data: any) => any;
+  transformInput?: (data: unknown) => any;
   /** Human-readable pipeline name for log/error messages. */
   successMessage: string;
   /**
@@ -51,8 +51,8 @@ function formatError(error: unknown): string {
   if (!error) { return 'Unknown error'; }
   if (typeof error === 'string') { return error; }
   if (error instanceof Error) { return error.message; }
-  if (typeof error === 'object' && 'message' in error && typeof (error as any).message === 'string') {
-    return (error as any).message;
+  if (typeof error === 'object' && 'message' in error && typeof (error as unknown).message === 'string') {
+    return (error as unknown).message;
   }
   return JSON.stringify(error);
 }
@@ -70,7 +70,7 @@ export function createProcessorFromRegistry(): Record<string, (job: { data: unkn
 
       try {
         // Step 1: Validate input
-        let validatedData: any;
+        let validatedData: unknown;
         if (reg.schema) {
           validatedData = reg.schema.parse(job.data);
         } else {

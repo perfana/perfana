@@ -113,7 +113,7 @@ export class ApdexCalculator extends BaseCheckService {
 
     // Build WHERE clause
     const conditions: string[] = ['test_run_id = $1'];
-    const queryParams: any[] = [testRun.test_run_id];
+    const queryParams: unknown[] = [testRun.test_run_id];
     let paramIndex = 2;
 
     // Filter by transaction if specified
@@ -219,7 +219,7 @@ export class ApdexCalculator extends BaseCheckService {
           AND wtat.workload = $3
           AND wtat.transaction_name = $4
       `;
-      const txParams: any[] = [systemUnderTestId, testEnvironment, workload, transactionName];
+      const txParams: unknown[] = [systemUnderTestId, testEnvironment, workload, transactionName];
 
       if (organizationId) {
         txQuery += `          AND (wtat.organization_id = $5 OR wtat.organization_id IS NULL)\n`;
@@ -251,7 +251,7 @@ export class ApdexCalculator extends BaseCheckService {
         AND wat.test_environment = $2
         AND wat.workload = $3
     `;
-    const wlParams: any[] = [systemUnderTestId, testEnvironment, workload];
+    const wlParams: unknown[] = [systemUnderTestId, testEnvironment, workload];
 
     if (organizationId) {
       wlQuery += `        AND (wat.organization_id = $4 OR wat.organization_id IS NULL)\n`;
@@ -565,7 +565,7 @@ export class ApdexCalculator extends BaseCheckService {
       ORDER BY transaction_name
     `, [testRunId]);
 
-    return result.map((row: any) => row.transaction_name);
+    return result.map((row: unknown) => row.transaction_name);
   }
 
   /**
@@ -580,7 +580,7 @@ export class ApdexCalculator extends BaseCheckService {
       ORDER BY scenario_name, transaction_name
     `, [testRunId]);
 
-    return result.map((row: any) => ({
+    return result.map((row: unknown) => ({
       transaction_name: row.transaction_name,
       scenario_name: row.scenario_name,
     }));

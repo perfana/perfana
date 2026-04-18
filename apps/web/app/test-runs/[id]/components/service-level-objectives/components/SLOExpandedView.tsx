@@ -14,11 +14,11 @@ import {} from '../hooks';
 import { SortField, SortDirection, SamplerStat } from '../types';
 
 interface SLOExpandedViewProps {
-  testRun: any;
+  testRun: unknown;
   testRunId: string;
-  checkResults: any[];
+  checkResults: unknown[];
   checkResultsLoading: boolean;
-  benchmarks: any[];
+  benchmarks: unknown[];
   benchmarksLoading: boolean;
   expandedSloRows: Set<string>;
   sloFilter: 'all' | 'failed';
@@ -42,10 +42,10 @@ interface SLOExpandedViewProps {
   toggleTransactionExpanded: (transactionKey: string, transactionName: string) => Promise<void>;
   handleOpenRequestActionMenu: (event: React.MouseEvent<HTMLElement>, transactionName: string, scenarioName: string | undefined, samplerName: string) => void;
   handleOpenApdexActionMenu: (event: React.MouseEvent<HTMLElement>, transactionName: string, scenarioName: string | undefined, threshold: number) => void;
-  handleEditSlo: (checkResult: any) => Promise<void>;
+  handleEditSlo: (checkResult: unknown) => Promise<void>;
   handleReEvaluate: (panelId: number, applicationDashboardId?: string, metricName?: string) => Promise<void>;
-  handleOpenApdexThresholdsDialog: (result: any, event: React.MouseEvent) => void;
-  getCheckResultKey: (result: any) => string;
+  handleOpenApdexThresholdsDialog: (result: unknown, event: React.MouseEvent) => void;
+  getCheckResultKey: (result: unknown) => string;
 }
 
 export function SLOExpandedView({

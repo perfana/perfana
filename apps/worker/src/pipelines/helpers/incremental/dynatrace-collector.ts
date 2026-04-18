@@ -169,7 +169,7 @@ export class DynatraceCollector {
         AND dq.workload = $3
     `;
 
-    const params: any[] = [testRun.systemUnderTestId, testRun.testEnvironment, testRun.workload];
+    const params: unknown[] = [testRun.systemUnderTestId, testRun.testEnvironment, testRun.workload];
     let nextParamIndex = 4;
 
     if (dynatraceConfigId) {
@@ -193,7 +193,7 @@ export class DynatraceCollector {
   /**
    * Group queries by Dynatrace config ID
    */
-  private groupQueriesByConfig(queryConfigs: any[]): Map<string, DynatraceQueryConfig[]> {
+  private groupQueriesByConfig(queryConfigs: unknown[]): Map<string, DynatraceQueryConfig[]> {
     const queriesByConfig = new Map<string, DynatraceQueryConfig[]>();
 
     for (const config of queryConfigs) {

@@ -64,7 +64,7 @@ export class PerformanceTestCollector {
       }
 
       // Extract metrics count from pipeline result
-      const pipelineData = result.data as any;
+      const pipelineData = result.data as unknown;
       const metricsCreated = pipelineData?.metricsCreated ?? 0;
 
       this.logger.info(

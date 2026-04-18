@@ -50,11 +50,11 @@ export class PerformanceTestMetricsPipeline extends BasePipelineTypeORM {
   constructor(logger: Logger) {
     super(logger);
     // Initialize processors (will be instantiated with dataSource in execute)
-    this.dashboardManager = null as any;
-    this.requestsProcessor = null as any;
-    this.transactionsProcessor = null as any;
-    this.errorsProcessor = null as any;
-    this.virtualUsersProcessor = null as any;
+    this.dashboardManager = null as unknown;
+    this.requestsProcessor = null as unknown;
+    this.transactionsProcessor = null as unknown;
+    this.errorsProcessor = null as unknown;
+    this.virtualUsersProcessor = null as unknown;
   }
 
   /**
@@ -335,7 +335,7 @@ export class PerformanceTestMetricsPipeline extends BasePipelineTypeORM {
       throw new Error('Invalid input: expected object');
     }
 
-    const { testRunId, fromTime, toTime } = input as any;
+    const { testRunId, fromTime, toTime } = input as unknown;
 
     if (!testRunId || typeof testRunId !== 'string') {
       throw new Error('Invalid input: testRunId is required and must be a string');
@@ -430,7 +430,7 @@ export class PerformanceTestMetricsPipeline extends BasePipelineTypeORM {
        WHERE system_under_test_id = $1
          AND test_environment = $2
          AND workload = $3`;
-    const workloadThresholdParams: any[] = [systemUnderTestId, testEnvironment, workload];
+    const workloadThresholdParams: unknown[] = [systemUnderTestId, testEnvironment, workload];
 
     if (organizationId) {
       workloadThresholdQuery += `\n         AND (organization_id = $4 OR organization_id IS NULL)`;
@@ -457,7 +457,7 @@ export class PerformanceTestMetricsPipeline extends BasePipelineTypeORM {
         AND benchmark_type = 'apdex'
         AND apdex_threshold_ms IS NOT NULL`;
 
-    const benchmarkParams: any[] = [systemUnderTestId, testEnvironment, workload];
+    const benchmarkParams: unknown[] = [systemUnderTestId, testEnvironment, workload];
 
     if (organizationId) {
       benchmarkQuery += `\n        AND (organization_id = $4 OR organization_id IS NULL)`;
@@ -482,7 +482,7 @@ export class PerformanceTestMetricsPipeline extends BasePipelineTypeORM {
        WHERE system_under_test_id = $1
          AND test_environment = $2
          AND workload = $3`;
-    const txThresholdParams: any[] = [systemUnderTestId, testEnvironment, workload];
+    const txThresholdParams: unknown[] = [systemUnderTestId, testEnvironment, workload];
 
     if (organizationId) {
       txThresholdQuery += `\n         AND (organization_id = $4 OR organization_id IS NULL)`;
@@ -556,7 +556,7 @@ export class PerformanceTestMetricsPipeline extends BasePipelineTypeORM {
       // Create a function for this batch insert
       const batchInsert = async () => {
         // Build VALUES clause for batch insert
-        const values: any[] = [];
+        const values: unknown[] = [];
         const placeholders: string[] = [];
 
         batch.forEach((record, idx) => {
@@ -828,7 +828,7 @@ export class PerformanceTestMetricsPipeline extends BasePipelineTypeORM {
 
     for (let i = 0; i < statRecords.length; i += batchSize) {
       const batch = statRecords.slice(i, i + batchSize);
-      const values: any[] = [];
+      const values: unknown[] = [];
       const placeholders: string[] = [];
 
       batch.forEach((rec, idx) => {
@@ -965,7 +965,7 @@ export class PerformanceTestMetricsPipeline extends BasePipelineTypeORM {
     for (let i = 0; i < configs.length; i += batchSize) {
       const batch = configs.slice(i, i + batchSize);
 
-      const values: any[] = [];
+      const values: unknown[] = [];
       const placeholders: string[] = [];
 
       batch.forEach((config, idx) => {
@@ -1050,7 +1050,7 @@ export class PerformanceTestMetricsPipeline extends BasePipelineTypeORM {
 
       // Single query to update all dashboards at once (eliminates N+1 loop)
       const result = await this.db.dataSource.query<
-        Array<{ id: string; uid: string; panels: any[] }>
+        Array<{ id: string; uid: string; panels: unknown[] }>
       >(
         `UPDATE grafana_dashboards gd
          SET panels = panel_updates.panels

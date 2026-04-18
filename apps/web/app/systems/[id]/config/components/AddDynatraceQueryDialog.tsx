@@ -139,7 +139,7 @@ export default function AddDynatraceQueryDialog({
   }, [systemId, environment, workload]);
 
 
-  const handleInputChange = (field: keyof CreateDynatraceQueryDto, value: any) => {
+  const handleInputChange = (field: keyof CreateDynatraceQueryDto, value: unknown) => {
     setFormData(prev => {
       const updated = {
         ...prev,

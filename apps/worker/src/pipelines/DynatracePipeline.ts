@@ -39,7 +39,7 @@ export class DynatracePipeline extends BasePipelineTypeORM {
   private dataProcessor: DataProcessor;
   private config = getConfig();
 
-  constructor(logger: any) {
+  constructor(logger: unknown) {
     super(logger);
     // DynatraceRepository migrated to use TypeORM WorkerDatabaseService
     this.repository = new DynatraceRepository(this.db);
@@ -49,10 +49,10 @@ export class DynatracePipeline extends BasePipelineTypeORM {
 
   validateInput(input: unknown): boolean {
     if (!input || typeof input !== 'object') {return false;}
-    const typedInput = input as any;
+    const typedInput = input as unknown;
     return Array.isArray(typedInput.testRunIds) &&
            typedInput.testRunIds.length > 0 &&
-           typedInput.testRunIds.every((id: any) => typeof id === 'string');
+           typedInput.testRunIds.every((id: unknown) => typeof id === 'string');
   }
 
   async execute(input: unknown): Promise<PipelineResult> {
@@ -288,7 +288,7 @@ export class DynatracePipeline extends BasePipelineTypeORM {
   private async storePanelDocuments(
     panelDocuments: PanelDocument[],
     _testRunId: string,
-    testRun?: any
+    testRun?: unknown
   ): Promise<void> {
     if (panelDocuments.length === 0) {
       this.logger.info('No panel documents to store');
@@ -355,7 +355,7 @@ export class DynatracePipeline extends BasePipelineTypeORM {
   private async storeMetricsDocuments(
     metricsDocuments: PanelMetricsDocument[],
     _testRunId: string,
-    testRun?: any
+    testRun?: unknown
   ): Promise<void> {
     if (metricsDocuments.length === 0) {
       this.logger.info('No metrics documents to store');

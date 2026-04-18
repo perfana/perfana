@@ -33,7 +33,7 @@ import {
 type EventListeners = {
   connectionStateChange: ((state: ConnectionState) => void)[];
   error: ((error: WebSocketError) => void)[];
-  [key: string]: ((...args: any[]) => void)[];
+  [key: string]: ((...args: unknown[]) => void)[];
 };
 
 /**
@@ -394,7 +394,7 @@ class SocketManager {
   /**
    * Emit an event to the server
    */
-  emit(event: string, data?: any): void {
+  emit(event: string, data?: unknown): void {
     if (!this.socket || !this.isConnected()) {
       // console.warn(`[Socket] Cannot emit ${event}: not connected`);
       return;

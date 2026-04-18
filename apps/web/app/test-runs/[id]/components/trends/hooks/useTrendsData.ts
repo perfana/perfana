@@ -178,7 +178,7 @@ export function useTrendsData({ testRun, testRunId, trendsExpanded }: UseTrendsD
         const dashboardData = await response.json();
         const dashboard = Array.isArray(dashboardData) ? dashboardData[0] : dashboardData;
 
-        const filteredPanels = dashboard?.panels?.filter((panel: any) =>
+        const filteredPanels = dashboard?.panels?.filter((panel: unknown) =>
           SUPPORTED_PANEL_TYPES.includes(panel.type)
         ) || [];
 

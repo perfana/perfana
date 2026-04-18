@@ -48,7 +48,7 @@ describe('MetricCollectionGapService', () => {
         testRunId: 'test-run-1',
         startTime: new Date('2024-01-01T10:00:00Z'),
         endTime: new Date('2024-01-01T11:00:00Z'),
-      } as any;
+      } as unknown;
 
       mockDatabaseService.getTestRunByTestRunId.mockResolvedValue(testRun);
       mockDatabaseService.getAllCollectionStatuses.mockResolvedValue([]);
@@ -63,7 +63,7 @@ describe('MetricCollectionGapService', () => {
         testRunId: 'test-run-1',
         startTime: new Date('2024-01-01T10:00:00Z'),
         endTime: new Date('2024-01-01T11:00:00Z'),
-      } as any;
+      } as unknown;
 
       const collectionStatus: Partial<DsMetricCollectionStatus> = {
         test_run_id: 'test-run-1',
@@ -101,7 +101,7 @@ describe('MetricCollectionGapService', () => {
         testRunId: 'test-run-1',
         startTime: new Date('2024-01-01T10:00:00Z'),
         endTime: new Date('2024-01-01T11:00:00Z'),
-      } as any;
+      } as unknown;
 
       const collectionStatus: Partial<DsMetricCollectionStatus> = {
         test_run_id: 'test-run-1',
@@ -149,8 +149,8 @@ describe('MetricCollectionGapService', () => {
 
     it('should return false when some statuses are incomplete', async () => {
       const statuses: Partial<DsMetricCollectionStatus>[] = [
-        { is_complete: true } as any,
-        { is_complete: false } as any,
+        { is_complete: true } as unknown,
+        { is_complete: false } as unknown,
       ];
 
       mockDatabaseService.getAllCollectionStatuses.mockResolvedValue(
@@ -164,8 +164,8 @@ describe('MetricCollectionGapService', () => {
 
     it('should return true when all statuses are complete', async () => {
       const statuses: Partial<DsMetricCollectionStatus>[] = [
-        { is_complete: true } as any,
-        { is_complete: true } as any,
+        { is_complete: true } as unknown,
+        { is_complete: true } as unknown,
       ];
 
       mockDatabaseService.getAllCollectionStatuses.mockResolvedValue(
@@ -193,7 +193,7 @@ describe('MetricCollectionGapService', () => {
             },
           ],
           last_collected_at: new Date('2024-01-01T09:00:00Z'),
-        } as any,
+        } as unknown,
       ];
 
       mockDatabaseService.getIncompleteCollectionStatuses.mockResolvedValue(
@@ -235,7 +235,7 @@ describe('MetricCollectionGapService', () => {
         testRunId: 'test-run-1',
         startTime: new Date('2024-01-01T10:00:00Z'),
         endTime: new Date('2024-01-01T11:00:00Z'),
-      } as any;
+      } as unknown;
 
       mockDatabaseService.getTestRunByTestRunId.mockResolvedValue(testRun);
       mockDatabaseService.getAllCollectionStatuses.mockResolvedValue([]);
@@ -250,7 +250,7 @@ describe('MetricCollectionGapService', () => {
         testRunId: 'test-run-1',
         startTime: new Date('2024-01-01T10:00:00Z'),
         endTime: new Date('2024-01-01T11:00:00Z'), // 1 hour = 3600000ms
-      } as any;
+      } as unknown;
 
       const collectionStatus: Partial<DsMetricCollectionStatus> = {
         test_run_id: 'test-run-1',

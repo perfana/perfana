@@ -21,12 +21,12 @@ interface SLOFormFieldsProps {
   setValidationErrors: React.Dispatch<React.SetStateAction<ValidationErrors>>;
   dashboardsLoading: boolean;
   panelsLoading: boolean;
-  availableDashboards: any[];
-  availablePanels: any[];
-  availableDynatraceDashboards: any[];
-  availableDynatraceMetrics: any[];
-  availablePerfMetricsDashboards: any[];
-  availablePerfMetricsPanels: any[];
+  availableDashboards: unknown[];
+  availablePanels: unknown[];
+  availableDynatraceDashboards: unknown[];
+  availableDynatraceMetrics: unknown[];
+  availablePerfMetricsDashboards: unknown[];
+  availablePerfMetricsPanels: unknown[];
   _dataSourceAvailability: DataSourceAvailability;
   systemName: string;
   environment: string;
@@ -113,7 +113,7 @@ export function SLOFormFields({
   }, [availableDashboards, availablePerfMetricsDashboards, availableDynatraceDashboards]);
 
   // Handle unified dashboard selection — route to correct source handler
-  const handleUnifiedDashboardSelect = (_: any, newValue: UnifiedDashboard | null) => {
+  const handleUnifiedDashboardSelect = (_: unknown, newValue: UnifiedDashboard | null) => {
     if (!newValue) {
       setSloFormData((prev) => ({ ...prev, selectedDashboard: null, selectedPanel: null }));
       return;

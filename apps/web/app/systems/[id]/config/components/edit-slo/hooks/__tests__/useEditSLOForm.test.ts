@@ -56,7 +56,7 @@ function makeResponse(data: unknown, ok = true): Response {
     statusText: ok ? 'OK' : 'Internal Server Error',
     json: () => Promise.resolve(data),
     text: () => Promise.resolve(JSON.stringify(data)),
-    headers: { get: () => null } as any,
+    headers: { get: () => null } as unknown,
     clone: function () { return this; },
   } as unknown as Response;
 }

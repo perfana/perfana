@@ -74,7 +74,7 @@ export interface ControlGroupStatisticsInput {
 export class ControlGroupStatisticsPipeline extends BasePipelineTypeORM {
   validateInput(input: unknown): boolean {
     if (!input || typeof input !== 'object') {return false;}
-    const typedInput = input as any;
+    const typedInput = input as unknown;
 
     // Must have either controlGroupIds or testRunIds
     const hasControlGroupIds = Array.isArray(typedInput.controlGroupIds) &&

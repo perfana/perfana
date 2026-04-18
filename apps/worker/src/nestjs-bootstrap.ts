@@ -67,7 +67,7 @@ export function getNestJSContext(): INestApplicationContext | null {
  * Get a service from the NestJS application context
  * Throws error if context not initialized
  */
-export function getService<T>(serviceClass: new (...args: any[]) => T): T {
+export function getService<T>(serviceClass: new (...args: unknown[]) => T): T {
   if (!appContext) {
     throw new Error('NestJS application context not initialized. Call bootstrapNestJS() first.');
   }

@@ -5,8 +5,8 @@ import { Benchmark } from '../../types';
  */
 export interface SLOFormData {
   source: string;
-  selectedDashboard: any;
-  selectedPanel: any;
+  selectedDashboard: unknown;
+  selectedPanel: unknown;
   evaluateType: string;
   requirementOperator: string;
   requirementValue: string;
@@ -64,12 +64,12 @@ export interface LoadingStates {
  * Available options from API responses
  */
 export interface AvailableOptions {
-  availableDashboards: any[];
-  availablePanels: any[];
-  availableDynatraceDashboards: any[];
-  availableDynatraceMetrics: any[];
-  availablePerfMetricsDashboards: any[];
-  availablePerfMetricsPanels: any[];
+  availableDashboards: unknown[];
+  availablePanels: unknown[];
+  availableDynatraceDashboards: unknown[];
+  availableDynatraceMetrics: unknown[];
+  availablePerfMetricsDashboards: unknown[];
+  availablePerfMetricsPanels: unknown[];
 }
 
 /**

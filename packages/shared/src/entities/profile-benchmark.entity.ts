@@ -88,7 +88,7 @@ export class ProfileBenchmark {
   tags!: string[];
 
   @Column({ type: 'jsonb', default: '{}' })
-  metadata!: Record<string, any>;
+  metadata!: Record<string, unknown>;
 
   @Column({ type: 'boolean', default: false })
   read_only?: boolean;

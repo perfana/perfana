@@ -214,7 +214,7 @@ export default function SavePresetModal({
 
   const [errors, setErrors] = useState<{[key: string]: string}>({});
 
-  const handleInputChange = (field: keyof PresetFormData, value: any) => {
+  const handleInputChange = (field: keyof PresetFormData, value: unknown) => {
     setFormData(prev => ({ ...prev, [field]: value }));
     // Clear error when user starts typing
     if (errors[field]) {

@@ -70,13 +70,14 @@ export class ConsolidatedSchema1700000000000 implements MigrationInterface {
               `  Executed ${executed}/${filteredStatements.length} statements...`,
             );
           }
-        } catch (error: any) {
+        } catch (error: unknown) {
           // Skip "already exists" errors to make migration idempotent:
           // 42P07 = relation/index already exists
           // 42710 = object already exists (constraints, triggers)
           // 42723 = function already exists with same argument types
           const alreadyExistsCodes = ['42P07', '42710', '42723'];
-          if (alreadyExistsCodes.includes(error?.code)) {
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          if (alreadyExistsCodes.includes((error as any)?.code)) {
             executed++;
             continue;
           }

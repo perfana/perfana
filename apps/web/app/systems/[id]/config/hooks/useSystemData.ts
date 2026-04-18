@@ -124,9 +124,9 @@ export function useSystemData({
       setSystem(systemData);
 
       // Extract environments and workloads from system data
-      const environments = (systemData as any).environments;
+      const environments = (systemData as unknown).environments;
       if (environments && Array.isArray(environments)) {
-        const envNames = environments.map((env: any) => env.environment);
+        const envNames = environments.map((env: unknown) => env.environment);
         setAvailableEnvironments(envNames);
 
         // Read URL params to check if scope was provided
@@ -144,7 +144,7 @@ export function useSystemData({
 
         // Populate workloads for the target environment
         if (targetEnvironment) {
-          const envData = environments.find((e: any) => e.environment === targetEnvironment);
+          const envData = environments.find((e: unknown) => e.environment === targetEnvironment);
           if (envData?.workloads) {
             setAvailableWorkloads(envData.workloads);
 
@@ -222,8 +222,8 @@ export function useSystemData({
 
     if (environment && system) {
       // Find workloads for selected environment
-      const systemEnvs = (system as any).environments;
-      const selectedEnvData = systemEnvs?.find((env: any) => env.environment === environment);
+      const systemEnvs = (system as unknown).environments;
+      const selectedEnvData = systemEnvs?.find((env: unknown) => env.environment === environment);
       if (selectedEnvData?.workloads) {
         setAvailableWorkloads(selectedEnvData.workloads);
       }

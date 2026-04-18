@@ -11,9 +11,9 @@ export interface GrafanaDashboard {
   slug?: string;
   name: string;
   uri?: string;
-  templatingVariables?: any[];
-  panels?: any[];
-  variables?: any[];
+  templatingVariables?: unknown[];
+  panels?: unknown[];
+  variables?: unknown[];
   tags?: string[];
   usedBySut?: string[];
   updated?: string;
@@ -30,7 +30,7 @@ export interface GrafanaDashboardQuery {
 }
 
 // Transform snake_case API response to camelCase
-function transformGrafanaDashboard(data: any): GrafanaDashboard {
+function transformGrafanaDashboard(data: unknown): GrafanaDashboard {
   return {
     id: data.id,
     grafanaInstanceId: data.grafana_instance_id || data.grafanaInstanceId,

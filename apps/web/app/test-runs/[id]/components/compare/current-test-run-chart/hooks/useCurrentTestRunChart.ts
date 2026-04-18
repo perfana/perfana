@@ -40,9 +40,9 @@ interface UseCurrentTestRunChartReturn {
   loading: boolean;
   error: string | null;
   metricsData: MetricDataPoint[];
-  plotData: any[];
-  plotLayout: any;
-  plotConfig: any;
+  plotData: unknown[];
+  plotLayout: unknown;
+  plotConfig: unknown;
   hasData: boolean;
   chartHeight: number;
 }
@@ -160,7 +160,7 @@ export function useCurrentTestRunChart({
       }
     });
 
-    const traces: any[] = [];
+    const traces: unknown[] = [];
 
     if (x.length > 0) {
       // Main metric trace

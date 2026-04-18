@@ -372,14 +372,14 @@ describe('event-lines Utility Functions', () => {
 
       it('should return unchanged layout when events is null', () => {
         const layout = { title: 'My Chart' };
-        const result = mergeEventShapesIntoLayout(layout, null as any);
+        const result = mergeEventShapesIntoLayout(layout, null as unknown);
 
         expect(result).toEqual(layout);
       });
 
       it('should return unchanged layout when events is undefined', () => {
         const layout = { title: 'My Chart' };
-        const result = mergeEventShapesIntoLayout(layout, undefined as any);
+        const result = mergeEventShapesIntoLayout(layout, undefined as unknown);
 
         expect(result).toEqual(layout);
       });

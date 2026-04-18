@@ -73,7 +73,7 @@ export class MetricProcessor {
    * @param testRun - Test run context for timestep calculations
    * @returns Array of flattened metric records
    */
-  flattenGrafanaMetricsDocument(document: any, testRun: TestRunContext): FlattenedMetricRecord[] {
+  flattenGrafanaMetricsDocument(document: unknown, testRun: TestRunContext): FlattenedMetricRecord[] {
     const baseData = {
       test_run_id: document.test_run_id,
       application_dashboard_id: document.application_dashboard_id,
@@ -134,7 +134,7 @@ export class MetricProcessor {
    * @param testRun - Test run context for timestep calculations
    * @returns Array of flattened metric records
    */
-  flattenDynatraceMetricsDocument(document: any, testRun: TestRunContext): FlattenedMetricRecord[] {
+  flattenDynatraceMetricsDocument(document: unknown, testRun: TestRunContext): FlattenedMetricRecord[] {
     const baseData = {
       test_run_id: document.testRunId,
       application_dashboard_id: document.applicationDashboardId,
@@ -293,7 +293,7 @@ export class MetricProcessor {
    * @param variables - Map of variable names to values
    * @returns Query string with variables replaced
    */
-  replaceTemplateVariables(query: string, variables: Record<string, any>): string {
+  replaceTemplateVariables(query: string, variables: Record<string, unknown>): string {
     let processedQuery = query;
 
     for (const [key, value] of Object.entries(variables)) {
@@ -352,13 +352,13 @@ export class MetricProcessor {
    * @returns True if the document has errors and should be skipped
    */
   processDocumentErrors(
-    document: any,
+    document: unknown,
     source: string,
     errors: string[]
   ): boolean {
     if (document.errors && document.errors.length > 0) {
       const errorMessages = document.errors
-        .map((e: any) => e.message || JSON.stringify(e))
+        .map((e: unknown) => e.message || JSON.stringify(e))
         .join('; ');
       const panelId = document.panel_id || document.panelId;
       const panelTitle = document.panel_title || document.panelTitle;
@@ -378,7 +378,7 @@ export class MetricProcessor {
    * @param source - Source identifier for logging
    * @returns True if the document has no data and should be skipped
    */
-  isEmptyDocument(document: any, source: string): boolean {
+  isEmptyDocument(document: unknown, source: string): boolean {
     if (!document.data || document.data.length === 0) {
       const panelId = document.panel_id || document.panelId;
       const panelTitle = document.panel_title || document.panelTitle;

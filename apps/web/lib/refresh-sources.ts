@@ -17,7 +17,7 @@ export interface AvailableSources {
  */
 export function getTestRunScope(testRun: TestRun): TestRunScope {
   return {
-    systemUnderTestId: testRun.system_under_test_id || (testRun.systems_under_test as any)?.id || '',
+    systemUnderTestId: testRun.system_under_test_id || (testRun.systems_under_test as unknown)?.id || '',
     testEnvironment: testRun.test_environment || '',
     workload: testRun.workload || '',
   };

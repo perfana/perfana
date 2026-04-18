@@ -32,7 +32,7 @@ async function resetStuckStatuses(specificTestRunId?: string) {
       )
     `;
 
-    const params: any[] = [];
+    const params: unknown[] = [];
 
     if (specificTestRunId) {
       whereClause += ` AND test_run_id = $1`;

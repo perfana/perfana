@@ -172,7 +172,7 @@ export class DataProcessor {
    * Extract grouping field values from a DQL response record
    * For Metrics API v2 queries (no 'by:' clause), also extracts dt.entity.* dimension values
    */
-  private getGroupingFieldValues(record: Record<string, any>, query: string): string[] {
+  private getGroupingFieldValues(record: Record<string, unknown>, query: string): string[] {
     try {
       const groupingFields = this.parseDqlGroupingFields(query);
 
@@ -264,7 +264,7 @@ export class DataProcessor {
    */
   private calculateTimestepAndRampUp(
     timestamp: Date,
-    testRun?: any
+    testRun?: unknown
   ): { timestep: number; rampUp: boolean } {
     // Note: TypeORM entity uses camelCase (startTime, analysisStartOffset) not snake_case
     if (!testRun) {
@@ -295,7 +295,7 @@ export class DataProcessor {
   /**
    * Parse timestamp from DQL record
    */
-  private parseTimestamp(record: Record<string, any>, testRunEnd?: Date): { timestamp: Date; fieldName: string | null } {
+  private parseTimestamp(record: Record<string, unknown>, testRunEnd?: Date): { timestamp: Date; fieldName: string | null } {
     // Check for various timestamp field patterns
     const timestampFields = [
       'timestamp',
@@ -346,7 +346,7 @@ export class DataProcessor {
   /**
    * Parse timestamp value from various formats
    */
-  private parseTimestampValue(value: any): Date {
+  private parseTimestampValue(value: unknown): Date {
     if (typeof value === 'string') {
       return new Date(value);
     } else if (typeof value === 'number') {
@@ -373,7 +373,7 @@ export class DataProcessor {
     queryResults: DynatraceQueryResult[],
     testRunId: string,
     testRunEnd?: Date,
-    testRun?: any
+    testRun?: unknown
   ): Promise<{ panelDocuments: PanelDocument[]; metricsDocuments: PanelMetricsDocument[] }> {
     logger.info(`Processing ${queryResults.length} query results into panel and metrics documents`);
 
@@ -497,7 +497,7 @@ export class DataProcessor {
     result: DynatraceQueryResult,
     testRunId: string,
     testRunEnd?: Date,
-    testRun?: any
+    testRun?: unknown
   ): PanelMetricsDocument | null {
     try {
       const { tileId, tileTitle, result: dqlResult, query, matchMetricPattern, omitGroupByVariableFromMetricName, metricName: explicitMetricName } = result;

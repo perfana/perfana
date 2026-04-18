@@ -152,7 +152,7 @@ export class TestRunsMutationService {
     systemUnderTestId: string;
     testEnvironment: string;
     workload: string;
-    workloadConfig?: Record<string, any>;
+    workloadConfig?: Record<string, unknown>;
     updateDto: UpdateRunningTestDto;
     duration: number;
     plannedDuration: number;

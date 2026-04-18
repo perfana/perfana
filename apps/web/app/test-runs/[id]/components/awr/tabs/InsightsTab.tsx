@@ -368,7 +368,7 @@ export function InsightsTab({
     const sqlTextMap = new Map<string, string>();
 
     // Check all SQL statement arrays for fullSqlText
-    const topSql = report.parsedData.topSql as any;
+    const topSql = report.parsedData.topSql as unknown;
     const sqlArrays = [
       topSql.byElapsedTime,
       topSql.byCpuTime,

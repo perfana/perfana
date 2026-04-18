@@ -21,8 +21,8 @@ interface TrackedRegression {
   unit?: string;
   testRunStart: Date;
   updatedAt: Date;
-  conclusion?: any;
-  trackedConclusion?: any;
+  conclusion?: unknown;
+  trackedConclusion?: unknown;
 }
 
 interface GroupedTrackedRegressions {
@@ -208,7 +208,7 @@ export default function TrackedRegressionsView({
           const response = await authenticatedFetch(url);
 
           if (response.ok) {
-            const trendsData: any[] = await response.json();
+            const trendsData: unknown[] = await response.json();
             trendsData.sort((a, b) => new Date(a.test_run_start).getTime() - new Date(b.test_run_start).getTime());
             return { metricName, data: trendsData };
           } else {

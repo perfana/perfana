@@ -10,7 +10,7 @@ export interface TimingEntry {
   startTime: number;
   endTime?: number;
   duration?: number;
-  metadata?: Record<string, any>;
+  metadata?: Record<string, unknown>;
 }
 
 export class PerformanceTimer {
@@ -27,7 +27,7 @@ export class PerformanceTimer {
   /**
    * Start timing an operation
    */
-  start(operation: string, metadata?: Record<string, any>): void {
+  start(operation: string, metadata?: Record<string, unknown>): void {
     const fullOperation = this.getFullOperationName(operation);
 
     this.timings.set(fullOperation, {
@@ -44,7 +44,7 @@ export class PerformanceTimer {
   /**
    * End timing an operation and log the duration
    */
-  end(operation: string, metadata?: Record<string, any>): number {
+  end(operation: string, metadata?: Record<string, unknown>): number {
     const fullOperation = this.getFullOperationName(operation);
     const timing = this.timings.get(fullOperation);
 
@@ -86,7 +86,7 @@ export class PerformanceTimer {
   async measure<T>(
     operation: string,
     fn: () => Promise<T>,
-    metadata?: Record<string, any>
+    metadata?: Record<string, unknown>
   ): Promise<T> {
     this.start(operation, metadata);
     try {
@@ -105,7 +105,7 @@ export class PerformanceTimer {
   measureSync<T>(
     operation: string,
     fn: () => T,
-    metadata?: Record<string, any>
+    metadata?: Record<string, unknown>
   ): T {
     this.start(operation, metadata);
     try {
@@ -162,7 +162,7 @@ export class PerformanceTimer {
   /**
    * Log a comprehensive timing summary
    */
-  logSummary(additionalContext?: Record<string, any>): void {
+  logSummary(additionalContext?: Record<string, unknown>): void {
     const summary = this.getSummary();
     const timings = this.getTimings().filter(t => t.duration !== undefined);
 

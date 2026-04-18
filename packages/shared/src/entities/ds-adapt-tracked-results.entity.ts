@@ -62,67 +62,67 @@ export class DsAdaptTrackedResults {
   updated_at!: Date;
 
   @Column({ type: 'jsonb', nullable: true })
-  mean?: Record<string, any>;
+  mean?: Record<string, number>;
 
   @Column({ type: 'jsonb', nullable: true })
-  median?: Record<string, any>;
+  median?: Record<string, number>;
 
   @Column({ type: 'jsonb', nullable: true })
-  min_value?: Record<string, any>;
+  min_value?: Record<string, number>;
 
   @Column({ type: 'jsonb', nullable: true })
-  max_value?: Record<string, any>;
+  max_value?: Record<string, number>;
 
   @Column({ type: 'jsonb', nullable: true })
-  std_dev?: Record<string, any>;
+  std_dev?: Record<string, number>;
 
   @Column({ type: 'jsonb', nullable: true })
-  q10?: Record<string, any>;
+  q10?: Record<string, number>;
 
   @Column({ type: 'jsonb', nullable: true })
-  q25?: Record<string, any>;
+  q25?: Record<string, number>;
 
   @Column({ type: 'jsonb', nullable: true })
-  q75?: Record<string, any>;
+  q75?: Record<string, number>;
 
   @Column({ type: 'jsonb', nullable: true })
-  q90?: Record<string, any>;
+  q90?: Record<string, number>;
 
   @Column({ type: 'jsonb', nullable: true })
-  q95?: Record<string, any>;
+  q95?: Record<string, number>;
 
   @Column({ type: 'jsonb', nullable: true })
-  q99?: Record<string, any>;
+  q99?: Record<string, number>;
 
   @Column({ type: 'jsonb', nullable: true })
-  iqr?: Record<string, any>;
+  iqr?: Record<string, number>;
 
   @Column({ type: 'jsonb', nullable: true })
-  idr?: Record<string, any>;
+  idr?: Record<string, number>;
 
   @Column({ type: 'jsonb', nullable: true })
-  count?: Record<string, any>;
+  count?: Record<string, number>;
 
   @Column({ type: 'jsonb', nullable: true })
-  n_missing?: Record<string, any>;
+  n_missing?: Record<string, number>;
 
   @Column({ type: 'jsonb', nullable: true })
-  n_non_zero?: Record<string, any>;
+  n_non_zero?: Record<string, number>;
 
   @Column({ type: 'jsonb', nullable: true })
-  pct_missing?: Record<string, any>;
+  pct_missing?: Record<string, number>;
 
   @Column({ type: 'jsonb', nullable: true })
-  is_constant?: Record<string, any>;
+  is_constant?: Record<string, number>;
 
   @Column({ type: 'jsonb', nullable: true })
-  all_missing?: Record<string, any>;
+  all_missing?: Record<string, number>;
 
   @Column({ type: 'jsonb', nullable: true })
-  last_value?: Record<string, any>;
+  last_value?: Record<string, number>;
 
   @Column({ type: 'jsonb', nullable: true })
-  exists_flags?: Record<string, any>;
+  exists_flags?: Record<string, unknown>;
 
   @Column({ type: 'boolean', default: false })
   uses_default_value!: boolean;
@@ -131,28 +131,28 @@ export class DsAdaptTrackedResults {
   default_value?: number;
 
   @Column({ type: 'jsonb', nullable: true })
-  compare_config?: Record<string, any>;
+  compare_config?: Record<string, unknown>;
 
   @Column({ type: 'jsonb', nullable: true })
-  metric_classification?: Record<string, any>;
+  metric_classification?: Record<string, unknown>;
 
   @Column({ type: 'jsonb', nullable: true })
-  statistic?: Record<string, any>;
+  statistic?: Record<string, unknown>;
 
   @Column({ type: 'jsonb', nullable: true })
-  conditions?: Record<string, any>;
+  conditions?: Record<string, unknown>;
 
   @Column({ type: 'jsonb', nullable: true })
-  thresholds?: Record<string, any>;
+  thresholds?: Record<string, unknown>;
 
   @Column({ type: 'jsonb', nullable: true })
-  checks?: Record<string, any>;
+  checks?: Record<string, unknown>;
 
   @Column({ type: 'jsonb', nullable: true })
-  conclusion?: Record<string, any>;
+  conclusion?: Record<string, unknown>;
 
   @Column({ type: 'jsonb', nullable: true })
-  tracked_conclusion?: Record<string, any>;
+  tracked_conclusion?: Record<string, unknown>;
 
   @Column({ type: 'uuid', nullable: true })
   metrics_source_id?: string;

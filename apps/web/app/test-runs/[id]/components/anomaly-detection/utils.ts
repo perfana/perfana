@@ -2,7 +2,7 @@ import { formatValueWithUnit } from '@/lib/units';
 import { MetricTrendData, ConfigSourceInfo} from './types';
 
 // Data formatting functions
-export const formatNumber = (value: any): string => {
+export const formatNumber = (value: unknown): string => {
   if (value === null || value === undefined || value === '' || isNaN(Number(value))) {
     return '-';
   }
@@ -120,7 +120,7 @@ export const createTrendsPlot = (
   rowKey: string,
   metricName: string,
   unit?: string,
-  theme?: any,
+  theme?: unknown,
   regressionDetectionTestRunId?: string
 ) => {
   // console.log(`createTrendsPlot called for metric: ${metricName}`, {
@@ -526,7 +526,7 @@ export const createTrendsPlot = (
   }
 
   if (regressionAnnotation) {
-    const layoutAny = layout as any;
+    const layoutAny = layout as unknown;
     if (!layoutAny.annotations) {
       layoutAny.annotations = [];
     }
@@ -537,7 +537,7 @@ export const createTrendsPlot = (
 };
 
 // Threshold generation functions
-export const generateThresholdData = (drawerData: any, unit?: string) => {
+export const generateThresholdData = (drawerData: unknown, unit?: string) => {
   const thresholds = [];
 
   if (drawerData.checks && drawerData.statistic && drawerData.compare_config) {

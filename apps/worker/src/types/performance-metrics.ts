@@ -173,7 +173,7 @@ export interface DsMetricsRecord {
   panel_title: string | null;
   dashboard_label: string | null;
   benchmark_ids: string[] | null;
-  errors: Record<string, any> | null;
+  errors: Record<string, unknown> | null;
   timestep: number | null;
   ramp_up: boolean;
   value: number;

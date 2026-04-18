@@ -37,10 +37,10 @@ export class ChecksPipeline extends BasePipelineTypeORM {
 
   validateInput(input: unknown): boolean {
     if (!input || typeof input !== 'object') {return false;}
-    const typedInput = input as any;
+    const typedInput = input as unknown;
     return Array.isArray(typedInput.testRunIds) &&
            typedInput.testRunIds.length > 0 &&
-           typedInput.testRunIds.every((id: any) => typeof id === 'string');
+           typedInput.testRunIds.every((id: unknown) => typeof id === 'string');
   }
 
   async execute(input: unknown): Promise<PipelineResult> {
@@ -141,10 +141,10 @@ export class ChecksPipeline extends BasePipelineTypeORM {
           await this.withTransaction(async (manager: EntityManager) => {
             // Initialize services with this transaction's manager
             // Note: These services still use PoolClient internally, but EntityManager is compatible for query operations
-            const benchmarkMatcher = new BenchmarkMatcher(this.logger, manager as any);
-            const dataAggregator = new DataAggregator(this.logger, manager as any);
-            const requirementChecker = new RequirementChecker(this.logger, manager as any);
-            const apdexCalculator = new ApdexCalculator(this.logger, manager as any);
+            const benchmarkMatcher = new BenchmarkMatcher(this.logger, manager as unknown);
+            const dataAggregator = new DataAggregator(this.logger, manager as unknown);
+            const requirementChecker = new RequirementChecker(this.logger, manager as unknown);
+            const apdexCalculator = new ApdexCalculator(this.logger, manager as unknown);
 
             // Load test run
             const testRunData = await this.loadTestRunForChecks(manager, testRunId);
@@ -224,7 +224,7 @@ export class ChecksPipeline extends BasePipelineTypeORM {
       panelId?: number;
       metricName?: string;
     }
-  ): Promise<{ processed_benchmarks: number; created_check_results: number; failed_benchmarks: any[] }> {
+  ): Promise<{ processed_benchmarks: number; created_check_results: number; failed_benchmarks: unknown[] }> {
     const startTime = Date.now();
     this.logger.info(`Processing test run ${testRun.test_run_id}`);
 
@@ -289,7 +289,7 @@ export class ChecksPipeline extends BasePipelineTypeORM {
             checkResults.push({
               status: apdexResult.status,
               meets_requirement: apdexResult.meets_requirement,
-            } as any);
+            } as unknown);
             results.created_check_results += 1;
 
             this.logger.info(
@@ -466,7 +466,7 @@ export class ChecksPipeline extends BasePipelineTypeORM {
     }
   ): Promise<void> {
     const whereClauses = ['test_run_id = $1'];
-    const queryParams: any[] = [testRunId];
+    const queryParams: unknown[] = [testRunId];
 
     // Add filter conditions if provided — prefer metricsSourceId over applicationDashboardId
     if (metricFilter?.metricsSourceId) {
@@ -492,10 +492,10 @@ export class ChecksPipeline extends BasePipelineTypeORM {
   private async updateTestRunStatus(
     manager: EntityManager,
     testRunId: string,
-    statusUpdates: Record<string, any>
+    statusUpdates: Record<string, unknown>
   ): Promise<void> {
     // Build a single JSONB update by chaining jsonb_set operations
-    const values: any[] = [testRunId];
+    const values: unknown[] = [testRunId];
     let statusExpression = 'COALESCE(status, \'{}\'::jsonb)';
     let paramIndex = 2;
 
@@ -613,7 +613,7 @@ export class ChecksPipeline extends BasePipelineTypeORM {
   ): Promise<void> {
     // For workload-level SLOs, store per-transaction breakdown in targets
     // For transaction-specific SLOs, store single transaction result
-    let targets: any[];
+    let targets: unknown[];
 
     if (apdexResult.transaction_results && apdexResult.transaction_results.length > 0) {
       // Workload-level SLO: store each transaction as a target

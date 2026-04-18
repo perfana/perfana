@@ -29,7 +29,7 @@ export class AdaptStatusUpdater {
    * @param testRunIds - Test run IDs to update status for
    */
   async updateFinalStatus(manager: EntityManager, testRunIds: string[]): Promise<void> {
-    const placeholders = testRunIds.map((_: any, i: number) => `$${i + 1}`).join(', ');
+    const placeholders = testRunIds.map((_: unknown, i: number) => `$${i + 1}`).join(', ');
 
     // Update evaluation status and consolidated result based on conclusions
     await manager.query(
@@ -121,7 +121,7 @@ export class AdaptStatusUpdater {
       this.logger.info(
         `Tracked regression processing found ${trackedRegResults.length} test run(s) with historical regressions:`
       );
-      trackedRegResults.forEach((row: any) => {
+      trackedRegResults.forEach((row: unknown) => {
         this.logger.info(
           `  - Test run ${row.test_run_id}: ${row.tracked_count} tracked regression(s) (conclusion: ${row.conclusion})`
         );

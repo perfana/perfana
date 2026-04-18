@@ -147,7 +147,7 @@ export default function GraphsChart({
 
     // Merge event annotations into layout
     if (events && events.length > 0) {
-      layout = mergeEventShapesIntoIndexedLayout(layout as Record<string, any>, events, sortedTimestamps);
+      layout = mergeEventShapesIntoIndexedLayout(layout as Record<string, unknown>, events, sortedTimestamps);
     }
 
     // Build config

@@ -43,7 +43,7 @@ function createAnalyzeQueueProcessor() {
     [JOB_NAMES.INCREMENTAL_COLLECTION]: incrementalMetricsWorker(),
   };
 
-  return async (job: any) => {
+  return async (job: unknown) => {
     const processor = processors[job.name as keyof typeof processors];
 
     if (!processor) {
@@ -69,7 +69,7 @@ function createBatchQueueProcessor() {
     [JOB_NAMES.ORCHESTRATE_REEVALUATE_BATCH]: simpleOrchestrateReevaluateBatchWorker(), // Simplified orchestrator
   };
 
-  return async (job: any) => {
+  return async (job: unknown) => {
     const processor = processors[job.name as keyof typeof processors];
 
     if (!processor) {

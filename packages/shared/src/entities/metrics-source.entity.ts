@@ -78,7 +78,7 @@ export class MetricsSource {
   tags?: string[];
 
   @Column({ name: 'metadata', type: 'jsonb', nullable: true })
-  metadata?: Record<string, any>;
+  metadata?: Record<string, unknown>;
 
   @Column({ type: 'uuid', nullable: true, name: 'organization_id' })
   organizationId?: string;

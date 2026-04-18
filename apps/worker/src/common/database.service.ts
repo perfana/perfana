@@ -46,8 +46,8 @@ const TRANSIENT_ERRORS = [
 
 function isTransientError(error: unknown): boolean {
   if (!error || typeof error !== 'object') { return false; }
-  const msg = 'message' in error ? String((error as any).message) : '';
-  const code = 'code' in error ? String((error as any).code) : '';
+  const msg = 'message' in error ? String((error as unknown).message) : '';
+  const code = 'code' in error ? String((error as unknown).code) : '';
   return TRANSIENT_ERRORS.some(t => msg.includes(t) || code === t);
 }
 
@@ -130,7 +130,7 @@ export class WorkerDatabaseService implements OnModuleInit {
    * Execute raw SQL query with retry logic for transient connection errors.
    * Use sparingly - prefer TypeORM query builder when possible.
    */
-  async query<T = any>(sql: string, parameters?: any[]): Promise<T[]> {
+  async query<T = any>(sql: string, parameters?: unknown[]): Promise<T[]> {
     return this.withRetry('query', async () => {
       const result = await this.dataSource.query(sql, parameters);
       this.logger.debug(`Executed raw query with ${Array.isArray(result) ? result.length : 0} results`);
@@ -162,7 +162,7 @@ export class WorkerDatabaseService implements OnModuleInit {
    *
    * See: 2026-03-26 write starvation post-mortem
    */
-  async writeQuery<T = any>(sql: string, parameters?: any[]): Promise<T[]> {
+  async writeQuery<T = any>(sql: string, parameters?: unknown[]): Promise<T[]> {
     return this.withRetry('writeQuery', async () => {
       const result = await this.writeDataSource.query(sql, parameters);
       return result;
@@ -424,7 +424,7 @@ export class WorkerDatabaseService implements OnModuleInit {
   ): Promise<void> {
     for (let i = 0; i < items.length; i += chunkSize) {
       const chunk = items.slice(i, i + chunkSize);
-      await repo.insert(chunk as any);
+      await repo.insert(chunk as unknown);
     }
     this.logger.debug(`Inserted ${items.length} ${entityName} records`);
   }

@@ -134,7 +134,7 @@ export class GrafanaClient {
    */
   async queryPanelData(
     panels: PanelDocument[],
-    testRun?: any,
+    testRun?: unknown,
     timeRangeOverride?: TimeRangeOverride
   ): Promise<PanelMetricsDocument[]> {
     const startTime = Date.now();
@@ -191,13 +191,13 @@ export class GrafanaClient {
    * Execute batched requests with controlled concurrency
    * Implements the concurrent execution pattern from Python
    */
-  private async executeBatchedRequests(requestBatches: RequestBatch[]): Promise<any[]> {
+  private async executeBatchedRequests(requestBatches: RequestBatch[]): Promise<unknown[]> {
     const concurrencyLimit = this.grafanaConfig.concurrency || 30;
 
     this.logger.info(`🚀 Executing ${requestBatches.length} batches with concurrency limit ${concurrencyLimit}`);
 
     // Execute requests in chunks to control concurrency
-    const responses: any[] = [];
+    const responses: unknown[] = [];
 
     for (let i = 0; i < requestBatches.length; i += concurrencyLimit) {
       const chunk = requestBatches.slice(i, i + concurrencyLimit);
@@ -324,6 +324,7 @@ export class GrafanaClient {
       });
 
       if (statusCode === 200) {
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
         const data = await body.json() as any;
         return {
           id: data.id,
@@ -354,7 +355,7 @@ export class GrafanaClient {
       panel_id: panel.panel_id,
       panel_title: panel.panel_title,
       dashboard_label: panel.dashboard_label,
-      benchmark_ids: panel.benchmark_ids,
+      benchmark_ids: (panel.benchmark_ids as string[]) || null,
       errors: [{
         target_index: 0,
         message: `Internal client error when making request to Grafana: ${error.message}`,

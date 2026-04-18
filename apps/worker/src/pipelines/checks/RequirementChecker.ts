@@ -34,7 +34,7 @@ export interface CheckResult {
   exclude_ramp_up_time: boolean;
   ramp_up: number | null;
   match_pattern: string | null;
-  requirement: any;
+  requirement: unknown;
   panel_average: number | null;
   meets_requirement: boolean | null;
   targets: CheckResultTarget[];

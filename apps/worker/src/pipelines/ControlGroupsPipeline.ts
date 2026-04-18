@@ -30,10 +30,10 @@ export interface ControlGroup {
 export class ControlGroupsPipeline extends BasePipelineTypeORM {
   validateInput(input: unknown): boolean {
     if (!input || typeof input !== 'object') {return false;}
-    const typedInput = input as any;
+    const typedInput = input as unknown;
     return Array.isArray(typedInput.testRunIds) &&
            typedInput.testRunIds.length > 0 &&
-           typedInput.testRunIds.every((id: any) => typeof id === 'string');
+           typedInput.testRunIds.every((id: unknown) => typeof id === 'string');
   }
 
   async execute(input: unknown): Promise<PipelineResult> {
@@ -124,7 +124,7 @@ export class ControlGroupsPipeline extends BasePipelineTypeORM {
       const result = await manager.query(checkQuery, [testRunIds]);
 
       // Check each test run's status
-      const notReadyRuns = result.filter((row: any) => {
+      const notReadyRuns = result.filter((row: unknown) => {
         const checksStatus = row.checks_status;
         const comparisonsStatus = row.comparisons_status;
         const adaptStatus = row.adapt_status;
@@ -327,7 +327,7 @@ export class ControlGroupsPipeline extends BasePipelineTypeORM {
    */
   private async detectChangePoint(
     manager: EntityManager,
-    testRun: any
+    testRun: unknown
   ): Promise<{ test_run_id: string; start_time: Date } | null> {
 
     let changePointQuery = `
@@ -342,7 +342,7 @@ export class ControlGroupsPipeline extends BasePipelineTypeORM {
         AND tr.start_time <= $4
     `;
 
-    const changePointParams: any[] = [
+    const changePointParams: unknown[] = [
       testRun.system_under_test_id,
       testRun.workload,
       testRun.test_environment,
@@ -378,7 +378,7 @@ export class ControlGroupsPipeline extends BasePipelineTypeORM {
    */
   private async findControlTestRuns(
     manager: EntityManager,
-    testRun: any,
+    testRun: unknown,
     changePoint: { test_run_id: string; start_time: Date } | null
   ): Promise<string[]> {
 
@@ -390,7 +390,7 @@ export class ControlGroupsPipeline extends BasePipelineTypeORM {
    */
   private async findDefaultControlTestRuns(
     manager: EntityManager,
-    testRun: any,
+    testRun: unknown,
     changePoint: { test_run_id: string; start_time: Date } | null
   ): Promise<string[]> {
 
@@ -407,7 +407,7 @@ export class ControlGroupsPipeline extends BasePipelineTypeORM {
         AND end_time IS NOT NULL
     `;
 
-    const queryParams: any[] = [
+    const queryParams: unknown[] = [
       testRun.system_under_test_id,
       testRun.workload,
       testRun.test_environment,
@@ -452,7 +452,7 @@ export class ControlGroupsPipeline extends BasePipelineTypeORM {
 
     const result = await manager.query(controlRunQuery, queryParams);
 
-    const controlTestRunIds = result.map((row: any) => row.test_run_id);
+    const controlTestRunIds = result.map((row: unknown) => row.test_run_id);
 
     this.logger.info(`Found ${controlTestRunIds.length} control test runs for test run ${testRun.test_run_id}`);
 
