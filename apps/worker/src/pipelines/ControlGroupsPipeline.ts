@@ -28,15 +28,15 @@ export interface ControlGroup {
 }
 
 export class ControlGroupsPipeline extends BasePipelineTypeORM {
-  validateInput(input: unknown): boolean {
+  validateInput(input: any): boolean {
     if (!input || typeof input !== 'object') {return false;}
-    const typedInput = input as unknown;
+    const typedInput = input as any;
     return Array.isArray(typedInput.testRunIds) &&
            typedInput.testRunIds.length > 0 &&
-           typedInput.testRunIds.every((id: unknown) => typeof id === 'string');
+           typedInput.testRunIds.every((id: any) => typeof id === 'string');
   }
 
-  async execute(input: unknown): Promise<PipelineResult> {
+  async execute(input: any): Promise<PipelineResult> {
     const startTime = Date.now();
 
     if (!this.validateInput(input)) {
@@ -121,10 +121,10 @@ export class ControlGroupsPipeline extends BasePipelineTypeORM {
         WHERE test_run_id = ANY($1::varchar[])
       `;
 
-      const result = await manager.query(checkQuery, [testRunIds]);
+      const result = await manager.query(checkQuery, [testRunIds]) as any;
 
       // Check each test run's status
-      const notReadyRuns = result.filter((row: unknown) => {
+      const notReadyRuns = result.filter((row: any) => {
         const checksStatus = row.checks_status;
         const comparisonsStatus = row.comparisons_status;
         const adaptStatus = row.adapt_status;
@@ -231,21 +231,21 @@ export class ControlGroupsPipeline extends BasePipelineTypeORM {
       WHERE test_run_id = $1
     `;
 
-    const testRunResult = await manager.query(testRunQuery, [testRunId]);
+    const testRunResult = await manager.query(testRunQuery, [testRunId]) as any;
     if (testRunResult.length === 0) {
       throw new Error(`Test run not found: ${testRunId}`);
     }
 
-    const testRun = testRunResult[0];
+    const testRun = testRunResult[0] as any;
 
     // Control group ID is the same as test run ID (following Python pattern)
     const controlGroupId = testRunId;
 
     // Check for changepoint first (matching Python changepoint detection)
-    const changePoint = await this.detectChangePoint(manager, testRun);
+    const changePoint = await this.detectChangePoint(manager, testRun as any);
 
     // Find control test runs (shared across ALL metrics for this test run)
-    const controlTestRuns = await this.findControlTestRuns(manager, testRun, changePoint);
+    const controlTestRuns = await this.findControlTestRuns(manager, testRun as any, changePoint as any);
 
     // Calculate first and last datetime from control runs
     let firstDatetime: Date | null = null;
@@ -259,7 +259,7 @@ export class ControlGroupsPipeline extends BasePipelineTypeORM {
         FROM test_runs
         WHERE test_run_id = ANY($1::varchar[])
       `;
-      const dateResult = await manager.query(dateQuery, [controlTestRuns]);
+      const dateResult = await manager.query(dateQuery, [controlTestRuns]) as any;
       if (dateResult.length > 0) {
         firstDatetime = dateResult[0].first_datetime;
         lastDatetime = dateResult[0].last_datetime;
@@ -329,6 +329,7 @@ export class ControlGroupsPipeline extends BasePipelineTypeORM {
     manager: EntityManager,
     testRun: unknown
   ): Promise<{ test_run_id: string; start_time: Date } | null> {
+    const tr = testRun as any;
 
     let changePointQuery = `
       SELECT
@@ -342,27 +343,27 @@ export class ControlGroupsPipeline extends BasePipelineTypeORM {
         AND tr.start_time <= $4
     `;
 
-    const changePointParams: unknown[] = [
-      testRun.system_under_test_id,
-      testRun.workload,
-      testRun.test_environment,
-      testRun.start_time
+    const changePointParams: any[] = [
+      tr.system_under_test_id,
+      tr.workload,
+      tr.test_environment,
+      tr.start_time
     ];
 
     // RBAC: Filter change points by organization (backward compatible with NULL)
-    if (testRun.organization_id) {
+    if (tr.organization_id) {
       changePointQuery += `        AND (cp.organization_id = $5 OR cp.organization_id IS NULL)\n`;
-      changePointParams.push(testRun.organization_id);
+      changePointParams.push(tr.organization_id);
     }
 
     changePointQuery += `      ORDER BY tr.start_time DESC
       LIMIT 1
     `;
 
-    const result = await manager.query(changePointQuery, changePointParams);
+    const result = await manager.query(changePointQuery, changePointParams) as any;
 
     if (result.length > 0) {
-      this.logger.info(`Found changepoint for test run ${testRun.test_run_id}: ${result[0].test_run_id}`);
+      this.logger.info(`Found changepoint for test run ${tr.test_run_id}: ${result[0].test_run_id}`);
       return {
         test_run_id: result[0].test_run_id,
         start_time: result[0].start_time
@@ -393,6 +394,7 @@ export class ControlGroupsPipeline extends BasePipelineTypeORM {
     testRun: unknown,
     changePoint: { test_run_id: string; start_time: Date } | null
   ): Promise<string[]> {
+    const tr = testRun as any;
 
     let controlRunQuery = `
       SELECT DISTINCT
@@ -407,12 +409,12 @@ export class ControlGroupsPipeline extends BasePipelineTypeORM {
         AND end_time IS NOT NULL
     `;
 
-    const queryParams: unknown[] = [
-      testRun.system_under_test_id,
-      testRun.workload,
-      testRun.test_environment,
-      testRun.test_run_id,
-      testRun.start_time
+    const queryParams: any[] = [
+      tr.system_under_test_id,
+      tr.workload,
+      tr.test_environment,
+      tr.test_run_id,
+      tr.start_time
     ];
 
     // Add changepoint constraint if exists
@@ -423,9 +425,9 @@ export class ControlGroupsPipeline extends BasePipelineTypeORM {
     }
 
     // RBAC: Filter control runs by organization (backward compatible with NULL)
-    if (testRun.organization_id) {
+    if (tr.organization_id) {
       controlRunQuery += `        AND (organization_id = $${queryParams.length + 1} OR organization_id IS NULL)\n`;
-      queryParams.push(testRun.organization_id);
+      queryParams.push(tr.organization_id);
     }
 
     // Add ADAPT filtering (matching Python logic)
@@ -450,15 +452,15 @@ export class ControlGroupsPipeline extends BasePipelineTypeORM {
       LIMIT 10
     `;
 
-    const result = await manager.query(controlRunQuery, queryParams);
+    const result = await manager.query(controlRunQuery, queryParams) as any;
 
-    const controlTestRunIds = result.map((row: unknown) => row.test_run_id);
+    const controlTestRunIds = result.map((row: any) => row.test_run_id);
 
-    this.logger.info(`Found ${controlTestRunIds.length} control test runs for test run ${testRun.test_run_id}`);
+    this.logger.info(`Found ${controlTestRunIds.length} control test runs for test run ${tr.test_run_id}`);
 
     // If this is a changepoint test run, it will have 0 control runs (expected behavior)
-    if (changePoint && changePoint.test_run_id === testRun.test_run_id) {
-      this.logger.info(`Test run ${testRun.test_run_id} is a changepoint, returning empty control group`);
+    if (changePoint && changePoint.test_run_id === tr.test_run_id) {
+      this.logger.info(`Test run ${tr.test_run_id} is a changepoint, returning empty control group`);
       return [];
     }
 

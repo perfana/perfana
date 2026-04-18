@@ -70,9 +70,10 @@ export class RequirementChecker extends BaseCheckService {
       // Check if requirement config exists
       // Based on requirement_checker.py:88-124
       const hasRequirement = this.hasValidRequirement(benchmark);
+      const config = benchmark.configuration as any;
 
       if (!hasRequirement) {
-        const panelId = benchmark.configuration?.panelId;
+        const panelId = config?.panelId;
         this.logger.warn(
           `No valid requirement config for benchmark ${benchmark.id}, panel ${panelId}, skipping CheckResults creation`
         );
@@ -85,7 +86,7 @@ export class RequirementChecker extends BaseCheckService {
       // Based on requirement_checker.py:134-141
       // Using safe-regex validation to prevent ReDoS attacks
       let regex: RegExp | null = null;
-      const matchPattern = benchmark.configuration?.matchPattern;
+      const matchPattern = config?.matchPattern;
       if (matchPattern) {
         const result = validateRegexPattern(matchPattern);
         if (result.safe && result.regex) {
@@ -150,10 +151,10 @@ export class RequirementChecker extends BaseCheckService {
       );
 
       // Extract panel configuration
-      const panelId = benchmark.configuration?.id || null;
-      const panelType = benchmark.configuration?.type || 'graph';
+      const panelId = config?.id || null;
+      const panelType = config?.type || 'graph';
       const panelTitle = this.stripPanelTitlePrefix(benchmark.panel_title || '');
-      const panelYAxesFormat = benchmark.configuration?.yAxesFormat || null;
+      const panelYAxesFormat = config?.yAxesFormat || null;
 
       // Create CheckResult document
       // Based on requirement_checker.py:187-231

@@ -346,7 +346,7 @@ export class DataProcessor {
   /**
    * Parse timestamp value from various formats
    */
-  private parseTimestampValue(value: unknown): Date {
+  private parseTimestampValue(value: any): Date {
     if (typeof value === 'string') {
       return new Date(value);
     } else if (typeof value === 'number') {

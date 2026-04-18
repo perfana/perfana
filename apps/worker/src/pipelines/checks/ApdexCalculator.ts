@@ -563,9 +563,9 @@ export class ApdexCalculator extends BaseCheckService {
       WHERE test_run_id = $1
         AND transaction_name IS NOT NULL
       ORDER BY transaction_name
-    `, [testRunId]);
+    `, [testRunId]) as any;
 
-    return result.map((row: unknown) => row.transaction_name);
+    return result.map((row: any) => row.transaction_name);
   }
 
   /**
@@ -578,9 +578,9 @@ export class ApdexCalculator extends BaseCheckService {
       WHERE test_run_id = $1
         AND transaction_name IS NOT NULL
       ORDER BY scenario_name, transaction_name
-    `, [testRunId]);
+    `, [testRunId]) as any;
 
-    return result.map((row: unknown) => ({
+    return result.map((row: any) => ({
       transaction_name: row.transaction_name,
       scenario_name: row.scenario_name,
     }));

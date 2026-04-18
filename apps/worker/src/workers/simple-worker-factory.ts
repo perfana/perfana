@@ -122,13 +122,13 @@ export function createSimpleWorker(
     queueName,
     wrappedProcessor,
     {
-      connection: connection as unknown,              // Regular connection for commands
-      blockingConnection: blockingConnection as unknown,      // CRITICAL: Separate connection for BRPOPLPUSH
+      connection: connection as any,              // Regular connection for commands
+      blockingConnection: blockingConnection as any,      // CRITICAL: Separate connection for BRPOPLPUSH
       concurrency: workerConfig.concurrency,
       // NO limiter configuration!
       settings: {
         drainDelay: workerConfig.drainDelay, // MUST be > 50ms for blocking mode
-      } as unknown,
+      } as any,
     }
   );
 
@@ -145,11 +145,11 @@ export function createSimpleWorker(
     logger.error(`Job ${job?.id} failed in ${queueName}:`, err);
   });
 
-  worker.on('completed', (job: unknown) => {
+  worker.on('completed', (job: any) => {
     logger.info(`Job ${job.id} completed in ${queueName}`);
   });
 
-  worker.on('stalled', (job: unknown) => {
+  worker.on('stalled', (job: any) => {
     logger.warn(`Job ${job.id} stalled in ${queueName}`);
   });
 

@@ -151,7 +151,7 @@ export class BenchmarkMatcher extends BaseCheckService {
       WHERE ${whereClauses.join('\n        AND ')}
     `;
 
-    const result = await this.manager.query(benchmarksSql, queryParams);
+    const result = await this.manager.query(benchmarksSql, queryParams) as any;
 
     if (result.length === 0) {
       throw new BenchmarkNotFoundError(
@@ -162,7 +162,7 @@ export class BenchmarkMatcher extends BaseCheckService {
 
     // Convert rows to Benchmark objects and validate
     // Based on benchmark_matcher.py:66-88
-    const benchmarks: Benchmark[] = result.map((row: unknown) => ({
+    const benchmarks: Benchmark[] = result.map((row: any) => ({
       id: row.id,
       system_under_test_id: row.system_under_test_id,
       test_environment: row.test_environment,

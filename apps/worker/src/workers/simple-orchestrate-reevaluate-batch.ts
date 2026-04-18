@@ -279,7 +279,7 @@ export function simpleOrchestrateReevaluateBatchWorker() {
       // Initialize progress reporter
       progressReporter = new ProgressReporter(
         redis,
-        job as unknown,
+        job as any,
         testRunInfo,
         'reevaluate' as JobType,
         stages
@@ -378,7 +378,7 @@ export function simpleOrchestrateReevaluateBatchWorker() {
 
                 if (discoveredSources.length > 0) {
                   logger.info(`  ${testRunId}: discovered ${discoveredSources.length} new sources: ${discoveredSources.map(s => `${s.source_type}/${s.source_id ?? 'null'}`).join(', ')}`);
-                  sourcesToRefetch = [...sourcesToRefetch, ...discoveredSources] as unknown;
+                  sourcesToRefetch = [...sourcesToRefetch, ...discoveredSources] as any;
                 }
               }
             }
@@ -426,7 +426,7 @@ export function simpleOrchestrateReevaluateBatchWorker() {
                   // Use the full DynatracePipeline — same as the analyze worker's dynatrace-collection stage
                   const dynatracePipeline = new DynatracePipeline(logger);
                   const result = await dynatracePipeline.execute({ testRunIds: [testRunId] });
-                  dataPoints = (result.data as unknown)?.totalMetrics ?? (result.data as unknown)?.totalDataPoints ?? (result.data as unknown)?.metricsCollected ?? 0;
+                  dataPoints = (result.data as any)?.totalMetrics ?? (result.data as any)?.totalDataPoints ?? (result.data as any)?.metricsCollected ?? 0;
                 } else {
                   // Grafana and performance_test use incremental pipeline with full time range
                   const result = await incrementalPipeline.execute({
@@ -438,7 +438,7 @@ export function simpleOrchestrateReevaluateBatchWorker() {
                     collectPerformanceTestMetrics: status.source_type === 'performance_test',
                     ...(status.source_type === 'grafana' && status.source_id ? { grafanaInstanceId: status.source_id } : {}),
                   });
-                  dataPoints = (result.data as unknown)?.totalDataPoints as number || 0;
+                  dataPoints = (result.data as any)?.totalDataPoints as number || 0;
                 }
 
                 logger.info(`    ${status.source_type}/${status.source_id ?? 'null'}: ${dataPoints} data points collected`);
@@ -549,7 +549,7 @@ export function simpleOrchestrateReevaluateBatchWorker() {
           let filteredCount = 0;
           for (const [_trId, gapInfo] of testRunGaps) {
             const before = gapInfo.gaps.length;
-            gapInfo.gaps = gapInfo.gaps.filter((g: unknown) => enabledSourceTypes.has(g.sourceType));
+            gapInfo.gaps = gapInfo.gaps.filter((g: any) => enabledSourceTypes.has(g.sourceType));
             filteredCount += before - gapInfo.gaps.length;
           }
 
@@ -577,8 +577,8 @@ export function simpleOrchestrateReevaluateBatchWorker() {
 
             for (const gap of gapInfo.gaps) {
               const allRanges = [
-                ...gap.missingRanges.map((r: unknown) => ({ from: r.from, to: r.to, type: 'missing' as const })),
-                ...gap.failedRanges.map((r: unknown) => ({ from: r.from, to: r.to, type: 'retry' as const })),
+                ...gap.missingRanges.map((r: any) => ({ from: r.from, to: r.to, type: 'missing' as const })),
+                ...gap.failedRanges.map((r: any) => ({ from: r.from, to: r.to, type: 'retry' as const })),
               ];
 
               for (const range of allRanges) {
@@ -597,7 +597,7 @@ export function simpleOrchestrateReevaluateBatchWorker() {
                     ...(gap.sourceType === 'dynatrace' && gap.sourceId ? { dynatraceConfigId: gap.sourceId } : {}),
                   });
 
-                  const dataPoints = (result.data as unknown)?.totalDataPoints as number || 0;
+                  const dataPoints = (result.data as any)?.totalDataPoints as number || 0;
                   if (dataPoints > 0) { testRunReceivedData = true; }
 
                   actions.push({
@@ -647,7 +647,7 @@ export function simpleOrchestrateReevaluateBatchWorker() {
             gapAnalysisDetails.push({
               testRunId,
               sourcesAnalyzed: gapInfo.gaps.length,
-              gapsFound: gapInfo.gaps.reduce((sum: number, g: unknown) => sum + g.missingRanges.length + g.failedRanges.length, 0),
+              gapsFound: gapInfo.gaps.reduce((sum: number, g: any) => sum + g.missingRanges.length + g.failedRanges.length, 0),
               coverageBefore: gapInfo.coverageBefore,
               coverageAfter,
               actions,

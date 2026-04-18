@@ -39,23 +39,23 @@ export class DynatracePipeline extends BasePipelineTypeORM {
   private dataProcessor: DataProcessor;
   private config = getConfig();
 
-  constructor(logger: unknown) {
-    super(logger);
+  constructor(logger: any) {
+    super(logger as any);
     // DynatraceRepository migrated to use TypeORM WorkerDatabaseService
     this.repository = new DynatraceRepository(this.db);
     this.queryConstructor = new QueryConstructor(this.repository);
     this.dataProcessor = new DataProcessor();
   }
 
-  validateInput(input: unknown): boolean {
+  validateInput(input: any): boolean {
     if (!input || typeof input !== 'object') {return false;}
-    const typedInput = input as unknown;
+    const typedInput = input as any;
     return Array.isArray(typedInput.testRunIds) &&
            typedInput.testRunIds.length > 0 &&
-           typedInput.testRunIds.every((id: unknown) => typeof id === 'string');
+           typedInput.testRunIds.every((id: any) => typeof id === 'string');
   }
 
-  async execute(input: unknown): Promise<PipelineResult> {
+  async execute(input: any): Promise<PipelineResult> {
     const startTime = Date.now();
 
     if (!this.validateInput(input)) {
@@ -120,7 +120,7 @@ export class DynatracePipeline extends BasePipelineTypeORM {
     this.logger.info(`Processing Dynatrace DQL queries for test run ${testRunId}`);
 
     // Step 1: Load test run details
-    const testRun = await this.loadTestRun(testRunId);
+    const testRun = await this.loadTestRun(testRunId) as any;
 
     // Step 2: Construct queries from database configurations
     const queries = await this.queryConstructor.constructQueriesFromDatabase({
@@ -288,7 +288,7 @@ export class DynatracePipeline extends BasePipelineTypeORM {
   private async storePanelDocuments(
     panelDocuments: PanelDocument[],
     _testRunId: string,
-    testRun?: unknown
+    testRun?: any
   ): Promise<void> {
     if (panelDocuments.length === 0) {
       this.logger.info('No panel documents to store');
@@ -337,8 +337,8 @@ export class DynatracePipeline extends BasePipelineTypeORM {
             doc.errors ? JSON.stringify(doc.errors) : null,
             doc.warnings ? JSON.stringify(doc.warnings) : null,
             new Date(),
-            testRun.organizationId || null,
-            testRun.teamId || null,
+            testRun?.organizationId || null,
+            testRun?.teamId || null,
             'worker-pipeline',
             'worker-pipeline'
           ]

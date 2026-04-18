@@ -50,17 +50,17 @@ export class PerformanceTestMetricsPipeline extends BasePipelineTypeORM {
   constructor(logger: Logger) {
     super(logger);
     // Initialize processors (will be instantiated with dataSource in execute)
-    this.dashboardManager = null as unknown;
-    this.requestsProcessor = null as unknown;
-    this.transactionsProcessor = null as unknown;
-    this.errorsProcessor = null as unknown;
-    this.virtualUsersProcessor = null as unknown;
+    this.dashboardManager = null as any;
+    this.requestsProcessor = null as any;
+    this.transactionsProcessor = null as any;
+    this.errorsProcessor = null as any;
+    this.virtualUsersProcessor = null as any;
   }
 
   /**
    * Execute the performance test metrics pipeline
    */
-  async execute(input: unknown): Promise<PipelineResult> {
+  async execute(input: any): Promise<PipelineResult> {
     const startTime = Date.now();
 
     try {
@@ -330,12 +330,12 @@ export class PerformanceTestMetricsPipeline extends BasePipelineTypeORM {
   /**
    * Validate and parse input
    */
-  private validateAndParseInput(input: unknown): PerformanceTestMetricsInput {
+  private validateAndParseInput(input: any): PerformanceTestMetricsInput {
     if (!input || typeof input !== 'object') {
       throw new Error('Invalid input: expected object');
     }
 
-    const { testRunId, fromTime, toTime } = input as unknown;
+    const { testRunId, fromTime, toTime } = input as any;
 
     if (!testRunId || typeof testRunId !== 'string') {
       throw new Error('Invalid input: testRunId is required and must be a string');

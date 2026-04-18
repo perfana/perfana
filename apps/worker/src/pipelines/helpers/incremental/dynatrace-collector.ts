@@ -197,32 +197,33 @@ export class DynatraceCollector {
     const queriesByConfig = new Map<string, DynatraceQueryConfig[]>();
 
     for (const config of queryConfigs) {
-      const configId = config.dynatrace_config_id;
+      const c = config as any;
+      const configId = c.dynatrace_config_id;
       if (!queriesByConfig.has(configId)) {
         queriesByConfig.set(configId, []);
       }
 
       // Process query: replace template variables and clean time range
-      let processedQuery = config.query;
-      if (config.template_variables && Object.keys(config.template_variables).length > 0) {
-        processedQuery = this.metricProcessor.replaceTemplateVariables(processedQuery, config.template_variables);
+      let processedQuery = c.query;
+      if (c.template_variables && Object.keys(c.template_variables).length > 0) {
+        processedQuery = this.metricProcessor.replaceTemplateVariables(processedQuery, c.template_variables);
       }
       processedQuery = this.metricProcessor.cleanTimeRangeFromQuery(processedQuery);
 
       // Convert database row to DynatraceQueryConfig
       const queryConfig: DynatraceQueryConfig = {
-        tileId: config.id,
-        tileTitle: config.panel_title,
+        tileId: c.id,
+        tileTitle: c.panel_title,
         query: processedQuery,
         visualization: 'timeseries',
-        dashboardLabel: config.dashboard_label,
-        applicationDashboardId: config.application_dashboard_id,
+        dashboardLabel: c.dashboard_label,
+        applicationDashboardId: c.application_dashboard_id,
         querySettings: {},
-        matchMetricPattern: config.match_metric_pattern,
-        omitGroupByVariableFromMetricName: config.omit_group_by_variable_from_metric_name || [],
-        panelId: config.panel_id,
-        metricName: config.metric_name,
-        dynatraceConfigId: config.dynatrace_config_id,
+        matchMetricPattern: c.match_metric_pattern,
+        omitGroupByVariableFromMetricName: c.omit_group_by_variable_from_metric_name || [],
+        panelId: c.panel_id,
+        metricName: c.metric_name,
+        dynatraceConfigId: c.dynatrace_config_id,
       };
 
       queriesByConfig.get(configId)!.push(queryConfig);

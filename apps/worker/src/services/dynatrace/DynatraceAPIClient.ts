@@ -325,7 +325,7 @@ export class DynatraceAPIClient {
    *   ]
    * }
    */
-  private transformMetricsAPIResultToDQL(metricsResult: unknown): any {
+  private transformMetricsAPIResultToDQL(metricsResult: any): any {
     logger.info(`🔄 Transforming Metrics API v2 response to DQL-like format...`);
 
     const records: unknown[] = [];
@@ -682,7 +682,7 @@ export class DynatraceAPIClient {
         }
       );
 
-      const data = await response.body.json() as unknown;
+      const data = await response.body.json() as any;
 
       if (response.statusCode === 200) {
         logger.info(`✓ Metrics API v2 query completed successfully`);
@@ -692,7 +692,7 @@ export class DynatraceAPIClient {
         if (data.result && Array.isArray(data.result)) {
           logger.info(`📈 Response contains ${data.result.length} metric(s)`);
           data.result.forEach((metric: unknown, idx: number) => {
-            const dataPointCount = metric.data?.reduce((sum: number, d: unknown) => sum + (d.values?.length || 0), 0) || 0;
+            const dataPointCount = metric.data?.reduce((sum: number, d: any) => sum + (d.values?.length || 0), 0) || 0;
             logger.info(`  Metric ${idx + 1}: ${metric.metricId || 'unknown'} - ${dataPointCount} data points`);
           });
         }

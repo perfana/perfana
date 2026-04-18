@@ -52,7 +52,7 @@ export class IncrementalMetricsPipeline extends BasePipelineTypeORM {
   /**
    * Execute incremental metrics collection
    */
-  async execute(input: unknown): Promise<PipelineResult> {
+  async execute(input: any): Promise<PipelineResult> {
     const startTime = Date.now();
 
     // Validate input

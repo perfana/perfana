@@ -16,8 +16,8 @@ import { type JobResult } from '../types/jobs.js';
 import { type ZodSchema } from 'zod';
 
 interface PipelineInstance {
-  execute: (input: unknown) => Promise<unknown>;
-  validateInput?: (data: unknown) => boolean;
+  execute: (input: any) => Promise<unknown>;
+  validateInput?: (data: any) => boolean;
 }
 
 export interface PipelineRegistration {
@@ -25,9 +25,9 @@ export interface PipelineRegistration {
   /** Zod validation schema. When omitted, job.data is passed through as-is. */
   schema?: ZodSchema;
   /** Factory to create the pipeline with a logger. */
-  createPipeline: (logger: unknown) => PipelineInstance;
+  createPipeline: (logger: any) => PipelineInstance;
   /** Optional transform applied to job.data (after schema validation) before pipeline.execute(). */
-  transformInput?: (data: unknown) => any;
+  transformInput?: (data: any) => any;
   /** Human-readable pipeline name for log/error messages. */
   successMessage: string;
   /**
@@ -47,12 +47,12 @@ export function registerPipeline(reg: PipelineRegistration): void {
  * Safely convert an error value to a readable string.
  * Fixes the [object Object] bug in error messages.
  */
-function formatError(error: unknown): string {
+function formatError(error: any): string {
   if (!error) { return 'Unknown error'; }
   if (typeof error === 'string') { return error; }
   if (error instanceof Error) { return error.message; }
-  if (typeof error === 'object' && 'message' in error && typeof (error as unknown).message === 'string') {
-    return (error as unknown).message;
+  if (typeof error === 'object' && 'message' in error && typeof (error as any).message === 'string') {
+    return (error as any).message;
   }
   return JSON.stringify(error);
 }

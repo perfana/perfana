@@ -44,10 +44,11 @@ const TRANSIENT_ERRORS = [
   '08004', // sqlserver_rejected_establishment_of_sqlconnection
 ];
 
-function isTransientError(error: unknown): boolean {
+function isTransientError(error: any): boolean {
   if (!error || typeof error !== 'object') { return false; }
-  const msg = 'message' in error ? String((error as unknown).message) : '';
-  const code = 'code' in error ? String((error as unknown).code) : '';
+  const err = error as any;
+  const msg = 'message' in error ? String(err.message) : '';
+  const code = 'code' in error ? String(err.code) : '';
   return TRANSIENT_ERRORS.some(t => msg.includes(t) || code === t);
 }
 
@@ -424,7 +425,7 @@ export class WorkerDatabaseService implements OnModuleInit {
   ): Promise<void> {
     for (let i = 0; i < items.length; i += chunkSize) {
       const chunk = items.slice(i, i + chunkSize);
-      await repo.insert(chunk as unknown);
+      await repo.insert(chunk as any);
     }
     this.logger.debug(`Inserted ${items.length} ${entityName} records`);
   }
@@ -502,7 +503,7 @@ export class WorkerDatabaseService implements OnModuleInit {
   }
 
   async insertDsAdaptConclusion(conclusion: Partial<DsAdaptConclusion>): Promise<void> {
-    await this.dsAdaptConclusionRepo.insert(conclusion);
+    await this.dsAdaptConclusionRepo.insert(conclusion as any);
     this.logger.debug(`Inserted ds_adapt_conclusion for test run: ${conclusion.test_run_id}`);
   }
 

@@ -57,7 +57,8 @@ export class DataAggregator extends BaseCheckService {
   ): Promise<AggregationResult> {
     try {
       // Extract panel_id from configuration.id (matches Python benchmark.panel.id)
-      const panelId = benchmark.configuration?.id;
+      const config = benchmark.configuration as any;
+      const panelId = config?.id;
       if (!panelId) {
         throw new DataAggregationError(`No panel ID found in benchmark ${benchmark.id} configuration`);
       }
@@ -120,9 +121,9 @@ export class DataAggregator extends BaseCheckService {
           )
       `;
 
-      const result = await this.manager.query(metricStatisticsSql, queryParams);
+      const result = await this.manager.query(metricStatisticsSql, queryParams) as any;
 
-      const metricStatistics: MetricStatistic[] = result.map((row: unknown) => ({
+      const metricStatistics: MetricStatistic[] = result.map((row: any) => ({
         metric_name: row.metric_name,
         mean: row.mean,
         median: row.median,

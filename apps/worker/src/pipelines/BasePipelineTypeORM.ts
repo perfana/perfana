@@ -31,12 +31,12 @@ export abstract class BasePipelineTypeORM implements Pipeline {
   /**
    * Abstract method that must be implemented by each pipeline
    */
-  abstract execute(input: unknown): Promise<PipelineResult>;
+  abstract execute(input: any): Promise<PipelineResult>;
 
   /**
    * Optional input validation - override in specific pipelines
    */
-  validateInput?(input: unknown): boolean;
+  validateInput?(input: any): boolean;
 
   /**
    * Optional cleanup method - override if pipeline needs cleanup

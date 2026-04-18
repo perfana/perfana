@@ -105,15 +105,15 @@ export interface MetricStatisticsResult {
  */
 export class StatisticsPipeline extends BasePipelineTypeORM {
 
-  validateInput(input: unknown): boolean {
+  validateInput(input: any): boolean {
     if (!input || typeof input !== 'object') {return false;}
-    const typedInput = input as unknown;
+    const typedInput = input as any;
     return Array.isArray(typedInput.testRunIds) &&
            typedInput.testRunIds.length > 0 &&
-           typedInput.testRunIds.every((id: unknown) => typeof id === 'string');
+           typedInput.testRunIds.every((id: any) => typeof id === 'string');
   }
 
-  async execute(input: unknown): Promise<PipelineResult> {
+  async execute(input: any): Promise<PipelineResult> {
     const startTime = Date.now();
 
     if (!this.validateInput(input)) {

@@ -121,7 +121,7 @@ export class AdaptStatusUpdater {
       this.logger.info(
         `Tracked regression processing found ${trackedRegResults.length} test run(s) with historical regressions:`
       );
-      trackedRegResults.forEach((row: unknown) => {
+      trackedRegResults.forEach((row: any) => {
         this.logger.info(
           `  - Test run ${row.test_run_id}: ${row.tracked_count} tracked regression(s) (conclusion: ${row.conclusion})`
         );

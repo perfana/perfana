@@ -460,17 +460,8 @@ export class TestRunsConfigService {
         select: ['id']
       });
 
-      if (!testRun) {
-        throw new ResourceNotFoundException('Test run', configJsonDto.testRunId);
-      }
-
       // Filter configs based on include/exclude patterns
-      const configsToInsert: Array<{
-        testRunId: string;
-        key: string;
-        value: string;
-        tags: string[];
-      }> = [];
+      const filteredPairs: Array<{ key: string; value: string }> = [];
 
       keyValuePairs.forEach((keyValuePair) => {
         const matchesInclude = configJsonDto.includes.some((whitelistMatch) =>
@@ -483,39 +474,56 @@ export class TestRunsConfigService {
           );
 
           if (!matchesExclude) {
-            configsToInsert.push({
-              testRunId: testRun.id,
-              key: keyValuePair.key,
-              value: keyValuePair.value,
-              tags: configJsonDto.tags
-            });
+            filteredPairs.push({ key: keyValuePair.key, value: keyValuePair.value });
           }
         }
       });
 
-      if (configsToInsert.length > 0) {
-        // Use raw SQL with ON CONFLICT to properly handle upsert with tags_hash(tags)
-        const tagsLiteral = this.toPostgresArray(configJsonDto.tags);
-        const values = configsToInsert.map((_item, idx) => {
-          const offset = idx * 4;
-          return `($${offset + 1}, $${offset + 2}, $${offset + 3}, $${offset + 4}::text[])`;
-        }).join(', ');
+      const tagsLiteral = this.toPostgresArray(configJsonDto.tags);
 
-        const params: (string | number | null)[] = [];
-        configsToInsert.forEach(item => {
-          params.push(item.testRunId, item.key, item.value, tagsLiteral);
-        });
+      if (filteredPairs.length > 0) {
+        if (testRun) {
+          // Test run exists — upsert with UUID FK
+          const values = filteredPairs.map((_item, idx) => {
+            const offset = idx * 4;
+            return `($${offset + 1}, $${offset + 2}, $${offset + 3}, $${offset + 4}::text[])`;
+          }).join(', ');
 
-        await this.dataSource.query(
-          `INSERT INTO test_run_configs (test_run_id, key, value, tags)
-           VALUES ${values}
-           ON CONFLICT (test_run_id, key, tags_hash(tags))
-           DO UPDATE SET value = EXCLUDED.value`,
-          params
-        );
+          const params: (string | number | null)[] = [];
+          filteredPairs.forEach(item => {
+            params.push(testRun.id, item.key, item.value, tagsLiteral);
+          });
+
+          await this.dataSource.query(
+            `INSERT INTO test_run_configs (test_run_id, key, value, tags)
+             VALUES ${values}
+             ON CONFLICT (test_run_id, key, tags_hash(tags))
+             DO UPDATE SET value = EXCLUDED.value`,
+            params
+          );
+          this.logger.log(`${filteredPairs.length} test run configs upserted from JSON for ${configJsonDto.testRunId}`);
+        } else {
+          // Test run doesn't exist yet — store with string ID for later association
+          const values = filteredPairs.map((_item, idx) => {
+            const offset = idx * 4;
+            return `($${offset + 1}, $${offset + 2}, $${offset + 3}, $${offset + 4}::text[])`;
+          }).join(', ');
+
+          const params: (string | number | null)[] = [];
+          filteredPairs.forEach(item => {
+            params.push(configJsonDto.testRunId, item.key, item.value, tagsLiteral);
+          });
+
+          await this.dataSource.query(
+            `INSERT INTO test_run_configs (test_run_id_string, key, value, tags)
+             VALUES ${values}`,
+            params
+          );
+          this.logger.log(`${filteredPairs.length} test run configs stored from JSON for future test run ${configJsonDto.testRunId}`);
+        }
+      } else {
+        this.logger.log(`No matching configs to insert from JSON for ${configJsonDto.testRunId}`);
       }
-
-      this.logger.log(`${configsToInsert.length} test run configs upserted from JSON for ${configJsonDto.testRunId}`);
     } catch (error) {
       this.logger.error('Failed to add test run config from JSON:', error);
       throw error;

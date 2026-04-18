@@ -47,7 +47,7 @@ export class MetricsPipeline extends BasePipelineTypeORM {
     this.logger.info(`🔗 Initialized Grafana client with URL: ${grafanaConfig.url}`);
   }
 
-  async execute(input: unknown): Promise<PipelineResult> {
+  async execute(input: any): Promise<PipelineResult> {
     const startTime = Date.now();
 
     try {
@@ -86,7 +86,7 @@ export class MetricsPipeline extends BasePipelineTypeORM {
           dashboard_label: panel.dashboard_label || '', // Provide default empty string
           benchmark_ids: panel.benchmark_ids || null,
           panel: panel.panel,
-          errors: panel.errors as unknown || null, // Type assertion needed for compatibility
+          errors: panel.errors as any || null, // Type assertion needed for compatibility
           requests: typeof panel.requests === 'string' ? JSON.parse(panel.requests || '[]') : (panel.requests || []),
           updated_at: panel.updated_at
         }));
@@ -182,7 +182,7 @@ export class MetricsPipeline extends BasePipelineTypeORM {
       const duration = Date.now() - startTime;
 
       this.logError(error as Error, {
-        testRunId: (input as unknown)?.testRunId,
+        testRunId: (input as any)?.testRunId,
         duration
       });
 
@@ -191,7 +191,7 @@ export class MetricsPipeline extends BasePipelineTypeORM {
       return this.createErrorResult(
         error as Error,
         'METRICS_COLLECTION_ERROR',
-        { testRunId: (input as unknown)?.testRunId },
+        { testRunId: (input as any)?.testRunId },
         duration
       );
     }
@@ -200,12 +200,12 @@ export class MetricsPipeline extends BasePipelineTypeORM {
   /**
    * Validate and parse input parameters
    */
-  private validateAndParseInput(input: unknown): MetricsInput {
+  private validateAndParseInput(input: any): MetricsInput {
     if (!input || typeof input !== 'object') {
       throw new Error('Invalid input: must be an object');
     }
 
-    const { testRunId, benchmarksOnly, panelDocuments } = input as unknown;
+    const { testRunId, benchmarksOnly, panelDocuments } = input as any;
 
     if (!testRunId || typeof testRunId !== 'string') {
       throw new Error('Invalid input: testRunId is required and must be a string');
@@ -295,7 +295,7 @@ export class MetricsPipeline extends BasePipelineTypeORM {
    * Helper method for the new direct flattening approach
    * @param testRun - Test run information including start_time and ramp_up duration
    */
-  private flattenSingleDocument(document: PanelMetricsDocument, testRun: unknown): unknown[] {
+  private flattenSingleDocument(document: PanelMetricsDocument, testRun: any): unknown[] {
     const baseData = {
       test_run_id: document.test_run_id,
       application_dashboard_id: document.application_dashboard_id,

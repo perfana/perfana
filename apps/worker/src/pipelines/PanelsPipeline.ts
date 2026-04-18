@@ -65,14 +65,14 @@ export class PanelsPipeline extends BasePipelineTypeORM {
 
       // Find application dashboards using helper (helpers use pool.query() for raw SQL)
       stepStart = Date.now();
-      const applicationDashboards = await getApplicationDashboardsForTestRun(poolAdapter as unknown, testRunAdapter as unknown);
+      const applicationDashboards = await getApplicationDashboardsForTestRun(poolAdapter as any, testRunAdapter as any);
       const appDashTime = Date.now() - stepStart;
       this.logger.info(`🎯 Found ${applicationDashboards.length} application dashboards: ${appDashTime}ms`);
 
       // Find grafana dashboards
       stepStart = Date.now();
       const grafanaDashboards = await getGrafanaDashboardsForApplicationDashboards(
-        poolAdapter as unknown,
+        poolAdapter as any,
         applicationDashboards
       );
       const grafanaDashTime = Date.now() - stepStart;
@@ -80,7 +80,7 @@ export class PanelsPipeline extends BasePipelineTypeORM {
 
       // Find benchmarks
       stepStart = Date.now();
-      const benchmarks = await getBenchmarksForTestRun(poolAdapter as unknown, testRunAdapter as unknown);
+      const benchmarks = await getBenchmarksForTestRun(poolAdapter as any, testRunAdapter as any);
       const benchmarksTime = Date.now() - stepStart;
       this.logger.info(`🎯 Found ${benchmarks.length} benchmarks: ${benchmarksTime}ms`);
 
@@ -88,7 +88,7 @@ export class PanelsPipeline extends BasePipelineTypeORM {
       stepStart = Date.now();
       const perfanaData: PerfanaData = {
         test_run_id: testRunId,
-        test_run: testRunAdapter as unknown,
+        test_run: testRunAdapter as any,
         application_dashboards: applicationDashboards,
         benchmarks: benchmarks,
         dashboards: grafanaDashboards
@@ -162,7 +162,7 @@ export class PanelsPipeline extends BasePipelineTypeORM {
     }
   }
 
-  private async insertPanelDocuments(manager: EntityManager, panelDocuments: unknown[], testRun: unknown): Promise<void> {
+  private async insertPanelDocuments(manager: EntityManager, panelDocuments: unknown[], testRun: any): Promise<void> {
     if (panelDocuments.length === 0) {return;}
 
     const columns = [
@@ -208,12 +208,12 @@ export class PanelsPipeline extends BasePipelineTypeORM {
     await manager.query(insertQuery, params);
   }
 
-  validateInput(input: unknown): boolean {
+  validateInput(input: any): boolean {
     if (!input || typeof input !== 'object') {
       return false;
     }
 
-    const inputObj = input as unknown;
+    const inputObj = input as any;
     return typeof inputObj.testRunId === 'string' && inputObj.testRunId.length > 0;
   }
 }
