@@ -154,7 +154,7 @@ export const createTrendsPlot = (
   });
 
   let conversionFactor = 1;
-  let _adjustedYAxesFormat = unit || '';
+  let adjustedYAxesFormat = unit || '';
   let yAxisLabel = 'Value';
   let unitSuffix = '';
 
