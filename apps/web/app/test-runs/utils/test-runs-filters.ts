@@ -6,7 +6,7 @@ import { FilterState, FilterOptions } from '../types';
  * This is needed because real-time events may use camelCase
  */
 export function normalizeTestRun(testRun: TestRun): TestRun {
-  const rawTestRun = testRun as any;
+  const rawTestRun = testRun as unknown;
   return {
     ...testRun,
     test_run_id: rawTestRun.testRunId || testRun.test_run_id,
@@ -35,14 +35,14 @@ export function normalizeTestRun(testRun: TestRun): TestRun {
  * Extract system name from a test run (supports both camelCase and snake_case)
  */
 export function getSystemName(testRun: TestRun): string | undefined {
-  return (testRun as any).systemUnderTest?.name || testRun.systems_under_test?.name;
+  return (testRun as unknown).systemUnderTest?.name || testRun.systems_under_test?.name;
 }
 
 /**
  * Extract environment from a test run (supports both camelCase and snake_case)
  */
 export function getEnvironment(testRun: TestRun): string | undefined {
-  return (testRun as any).testEnvironment || testRun.test_environment;
+  return (testRun as unknown).testEnvironment || testRun.test_environment;
 }
 
 /**
@@ -67,8 +67,8 @@ export function filterTestRuns(testRuns: TestRun[], filters: FilterState): TestR
  */
 export function sortTestRunsByEndTime(testRuns: TestRun[]): TestRun[] {
   return [...testRuns].sort((a, b) => {
-    const aTime = ((a as any).endTime || a.end_time) ? new Date((a as any).endTime || a.end_time).getTime() : 0;
-    const bTime = ((b as any).endTime || b.end_time) ? new Date((b as any).endTime || b.end_time).getTime() : 0;
+    const aTime = ((a as unknown).endTime || a.end_time) ? new Date((a as unknown).endTime || a.end_time).getTime() : 0;
+    const bTime = ((b as unknown).endTime || b.end_time) ? new Date((b as unknown).endTime || b.end_time).getTime() : 0;
     return bTime - aTime;
   });
 }

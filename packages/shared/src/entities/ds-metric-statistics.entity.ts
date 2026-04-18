@@ -39,7 +39,7 @@ export class DsMetricStatistics {
   std_dev?: number;
 
   @Column({ type: 'jsonb', nullable: true })
-  percentiles?: Record<string, any>;
+  percentiles?: Record<string, unknown>;
 
   @Column({ type: 'double precision', nullable: true })
   iqr?: number;

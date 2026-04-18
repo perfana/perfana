@@ -62,7 +62,7 @@ export class Benchmark {
   generic_check_id?: string;
 
   @Column({ type: 'jsonb', default: '{}' })
-  configuration!: Record<string, any>;
+  configuration!: Record<string, unknown>;
 
   @Column({ type: 'varchar', nullable: true })
   config_title?: string;
@@ -172,7 +172,7 @@ export class Benchmark {
   include_failed_requests!: boolean;
 
   @Column({ type: 'jsonb', default: '{}' })
-  metadata!: Record<string, any>;
+  metadata!: Record<string, unknown>;
 
   // Ownership tracking (RBAC Phase 2)
   @Column({ type: 'uuid', nullable: true, name: 'organization_id' })

@@ -77,7 +77,7 @@ export interface DynatraceAPIConfig {
 interface DQLQueryResponse {
   requestToken: string;
   state: 'RUNNING' | 'SUCCEEDED' | 'FAILED';
-  result?: any;
+  result?: unknown;
   error?: {
     code: string;
     message: string;
@@ -285,7 +285,7 @@ export class DynatraceAPIClient {
     query: string,
     startTime?: Date,
     endTime?: Date
-  ): Promise<any> {
+  ): Promise<unknown> {
     const useMetricsAPI = this.isMetricSelector(query);
 
     if (useMetricsAPI) {
@@ -328,7 +328,7 @@ export class DynatraceAPIClient {
   private transformMetricsAPIResultToDQL(metricsResult: any): any {
     logger.info(`🔄 Transforming Metrics API v2 response to DQL-like format...`);
 
-    const records: any[] = [];
+    const records: unknown[] = [];
 
     if (!metricsResult.result || metricsResult.result.length === 0) {
       logger.warn('Empty Metrics API v2 result');
@@ -379,7 +379,7 @@ export class DynatraceAPIClient {
     query: string,
     startTime?: Date,
     endTime?: Date
-  ): Promise<any> {
+  ): Promise<unknown> {
     await this.semaphore.acquire();
 
     try {
@@ -427,7 +427,7 @@ export class DynatraceAPIClient {
 
         // Construct payload according to Dynatrace API spec
         // Times should be in payload, NOT in the query string
-        const payload: Record<string, any> = {
+        const payload: Record<string, unknown> = {
           query,
           timezone,
           fetchTimeoutSeconds: DQL_FETCH_TIMEOUT_SECONDS
@@ -518,7 +518,7 @@ export class DynatraceAPIClient {
    * Uses time-based timeout instead of fixed poll attempts to handle variable query durations
    * Each individual poll request has a 30s timeout to prevent hanging
    */
-  private async pollDQLQueryResult(requestToken: string): Promise<any> {
+  private async pollDQLQueryResult(requestToken: string): Promise<unknown> {
     const startTime = Date.now();
     const maxWaitMs = this.config.maxPollWaitMs!;
     const pollInterval = this.config.pollInterval!;
@@ -645,7 +645,7 @@ export class DynatraceAPIClient {
     metricSelector: string,
     startTime?: Date,
     endTime?: Date
-  ): Promise<any> {
+  ): Promise<unknown> {
     await this.semaphore.acquire();
 
     try {
@@ -691,9 +691,10 @@ export class DynatraceAPIClient {
         // Log summary of response structure
         if (data.result && Array.isArray(data.result)) {
           logger.info(`📈 Response contains ${data.result.length} metric(s)`);
-          data.result.forEach((metric: any, idx: number) => {
-            const dataPointCount = metric.data?.reduce((sum: number, d: any) => sum + (d.values?.length || 0), 0) || 0;
-            logger.info(`  Metric ${idx + 1}: ${metric.metricId || 'unknown'} - ${dataPointCount} data points`);
+          data.result.forEach((metric: unknown, idx: number) => {
+            const m = metric as any;
+            const dataPointCount = m.data?.reduce((sum: number, d: any) => sum + (d.values?.length || 0), 0) || 0;
+            logger.info(`  Metric ${idx + 1}: ${m.metricId || 'unknown'} - ${dataPointCount} data points`);
           });
         }
 

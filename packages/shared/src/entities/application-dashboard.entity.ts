@@ -53,10 +53,10 @@ export class ApplicationDashboard {
   templateDashboardUid?: string;
 
   @Column({ name: 'variables', type: 'jsonb', nullable: true })
-  variables?: Record<string, any>;
+  variables?: Record<string, unknown>;
 
   @Column({ name: 'replaced_templating_variables', type: 'jsonb', nullable: true })
-  replacedTemplatingVariables?: Record<string, any>;
+  replacedTemplatingVariables?: Record<string, unknown>;
 
   @Column({ name: 'snapshot_timeout', type: 'integer', default: 4 })
   snapshotTimeout!: number;
@@ -98,5 +98,5 @@ export class ApplicationDashboard {
 
   @ManyToOne('MetricsSource')
   @JoinColumn({ name: 'metrics_source_id' })
-  metricsSource?: any;
+  metricsSource?: unknown;
 }

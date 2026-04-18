@@ -26,7 +26,7 @@ describe('MetricCollectionGapService', () => {
 
     // Directly instantiate the service with the mock
     service = new MetricCollectionGapService(
-      mockDatabaseService as unknown as WorkerDatabaseService
+      mockDatabaseService as any as WorkerDatabaseService
     );
   });
 

@@ -71,7 +71,7 @@ export function useApdexConfigDialog({
       const response = await authenticatedFetch(`/benchmarks?${params}`);
       if (response.ok) {
         const benchmarks = await response.json();
-        const matchingSlo = benchmarks.find((b: any) =>
+        const matchingSlo = benchmarks.find((b: unknown) =>
           transactionName ? b.transaction_name === transactionName : !b.transaction_name
         );
 

@@ -31,19 +31,19 @@ export class TruncatedQueryLogger implements TypeOrmLogger {
     return query.substring(0, this.maxQueryLength) + `... [truncated, total ${query.length} chars]`;
   }
 
-  logQuery(query: string, _parameters?: any[], _queryRunner?: QueryRunner): void {
+  logQuery(query: string, _parameters?: unknown[], _queryRunner?: QueryRunner): void {
     if (!this.logLevel.has('query')) return;
     console.log(`query: ${this.truncateQuery(query)}`);
   }
 
-  logQueryError(error: string | Error, query: string, _parameters?: any[], _queryRunner?: QueryRunner): void {
+  logQueryError(error: string | Error, query: string, _parameters?: unknown[], _queryRunner?: QueryRunner): void {
     if (!this.logLevel.has('error')) return;
     const errorMessage = error instanceof Error ? error.message : error;
     console.error(`query failed: ${this.truncateQuery(query)}`);
     console.error(`error: ${errorMessage}`);
   }
 
-  logQuerySlow(time: number, query: string, _parameters?: any[], _queryRunner?: QueryRunner): void {
+  logQuerySlow(time: number, query: string, _parameters?: unknown[], _queryRunner?: QueryRunner): void {
     if (!this.logLevel.has('warn')) return;
     console.warn(`slow query (${time}ms): ${this.truncateQuery(query)}`);
   }
@@ -58,7 +58,7 @@ export class TruncatedQueryLogger implements TypeOrmLogger {
     console.log(`migration: ${message}`);
   }
 
-  log(level: 'log' | 'info' | 'warn', message: any, _queryRunner?: QueryRunner): void {
+  log(level: 'log' | 'info' | 'warn', message: unknown, _queryRunner?: QueryRunner): void {
     if (!this.logLevel.has(level)) return;
     switch (level) {
       case 'warn':

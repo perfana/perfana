@@ -81,8 +81,8 @@ export function buildFailedTrace(
 export function buildSamplerTraces(
   data: TimeSeriesResponse,
   selectedMetric: MetricType
-): any[] {
-  const traces: any[] = [];
+): unknown[] {
+  const traces: unknown[] = [];
   let colorIndex = 0;
 
   Object.entries(data.sampler_data).forEach(([samplerName, samplerData]) => {
@@ -119,10 +119,10 @@ export function generatePlotlyData(
   transactionName: string,
   selectedMetric: MetricType,
   aggregationSeconds: number
-): any[] {
+): unknown[] {
   if (!data) return [];
 
-  const traces: any[] = [];
+  const traces: unknown[] = [];
 
   // Transaction-level traces
   if (data.transaction_data && data.transaction_data.length > 0) {

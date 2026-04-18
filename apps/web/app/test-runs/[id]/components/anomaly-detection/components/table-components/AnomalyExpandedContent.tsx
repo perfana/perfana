@@ -37,14 +37,14 @@ interface AnomalyExpandedContentProps {
   trendsLoading: boolean;
   chartKey: number;
   drawerOpen: boolean;
-  drawerData: any;
+  drawerData: unknown;
   drawerLoading: boolean;
   showConfigForm: boolean;
   showToast?: (message: string) => void;
   selectedTestRunIdForRow?: string;
   onDrawerToggle: () => void;
   onConfigFormToggle: () => void;
-  onConfigSave: (rowKey: string, data: any, scope: 'metric' | 'panel') => Promise<void>;
+  onConfigSave: (rowKey: string, data: unknown, scope: 'metric' | 'panel') => Promise<void>;
   onSelectTestRun: (testRunId: string) => void;
   onResetSelectedTestRun: () => void;
 }
@@ -160,8 +160,8 @@ export function AnomalyExpandedContent({
                     config={plotConfig}
                     style={{ width: '100%', height: '100%' }}
                     useResizeHandler={true}
-                    onInitialized={(figure: any, graphDiv: any) => {
-                      graphDiv.on('plotly_click', (data: any) => {
+                    onInitialized={(figure: unknown, graphDiv: unknown) => {
+                      graphDiv.on('plotly_click', (data: unknown) => {
                         if (data.points && data.points.length > 0) {
                           const clickedPoint = data.points[0];
                           const clickedTestRunId = clickedPoint.customdata?.testRunId;
@@ -174,7 +174,7 @@ export function AnomalyExpandedContent({
                         }
                       });
 
-                      graphDiv.on('plotly_hover', (data: any) => {
+                      graphDiv.on('plotly_hover', (data: unknown) => {
                         if (data.points && data.points.length > 0) {
                           if (graphDiv.style) {
                             graphDiv.style.cursor = 'pointer';
@@ -250,7 +250,7 @@ export function AnomalyExpandedContent({
               panelId={row.panel_id}
               metricName={row.metric_name}
               testRun={(() => {
-                const effectiveTestRunId = selectedTestRunIdForRow || testRunId;
+                const _effectiveTestRunId = selectedTestRunIdForRow || testRunId;
                 if (selectedTestRunIdForRow && trendsData) {
                   const selectedTrendData = trendsData.find(t => t.test_run_id === selectedTestRunIdForRow);
                   if (selectedTrendData) {

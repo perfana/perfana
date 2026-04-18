@@ -33,9 +33,9 @@ export interface UseSLOSectionProps {
 
 export interface UseSLOSectionReturn {
   // Core data
-  checkResults: any[];
+  checkResults: unknown[];
   checkResultsLoading: boolean;
-  benchmarks: any[];
+  benchmarks: unknown[];
   benchmarksLoading: boolean;
 
   // UI state
@@ -61,11 +61,11 @@ export interface UseSLOSectionReturn {
 
   // Dialog state
   editSloDialogOpen: boolean;
-  selectedSloForEdit: any;
+  selectedSloForEdit: unknown;
   apdexConfigDialogOpen: boolean;
   selectedTransactionForApdex: TransactionForApdex | null;
   apdexThresholdsDialogOpen: boolean;
-  selectedApdexResultForThresholds: any;
+  selectedApdexResultForThresholds: unknown;
 
   // Refs
   cardRef: React.RefObject<HTMLDivElement>;
@@ -91,24 +91,24 @@ export interface UseSLOSectionReturn {
   handleCloseApdexActionMenu: () => void;
 
   // Dialog actions
-  handleEditSlo: (checkResult: any) => Promise<void>;
-  handleSloUpdated: (updatedSlo: any) => void;
+  handleEditSlo: (checkResult: unknown) => Promise<void>;
+  handleSloUpdated: (updatedSlo: unknown) => void;
   handleOpenApdexConfigDialog: (transactionName: string, currentThreshold: number, event: React.MouseEvent) => void;
   handleApdexConfigSuccess: () => void;
   setApdexConfigDialogOpen: (open: boolean) => void;
   setSelectedTransactionForApdex: (data: TransactionForApdex | null) => void;
-  handleOpenApdexThresholdsDialog: (result: any, event: React.MouseEvent) => void;
+  handleOpenApdexThresholdsDialog: (result: unknown, event: React.MouseEvent) => void;
   handleApdexThresholdsSuccess: () => void;
   setApdexThresholdsDialogOpen: (open: boolean) => void;
-  setSelectedApdexResultForThresholds: (result: any) => void;
+  setSelectedApdexResultForThresholds: (result: unknown) => void;
   setEditSloDialogOpen: (open: boolean) => void;
-  setSelectedSloForEdit: (slo: any) => void;
+  setSelectedSloForEdit: (slo: unknown) => void;
 
   // Re-evaluation
   handleReEvaluate: (panelId: number, applicationDashboardId?: string, metricName?: string, metricsSourceId?: string) => Promise<void>;
 
   // Utilities
-  getCheckResultKey: (result: any) => string;
+  getCheckResultKey: (result: unknown) => string;
 }
 
 export function useSLOSection({
@@ -165,7 +165,7 @@ export function useSLOSection({
   const prevStatusRef = useRef<TestRunStatus | null>(null);
 
   // Generate a unique key for each check result based on its properties
-  const getCheckResultKey = useCallback((result: any): string => {
+  const getCheckResultKey = useCallback((result: unknown): string => {
     if (result.panel_type === 'apdex' || result.evaluate_type === 'apdex') {
       const benchmarkId = result.benchmark_id || 'unknown';
       const panelTitle = result.panel_title || 'unknown';
@@ -419,7 +419,7 @@ export function useSLOSection({
   }, []);
 
   // Edit SLO handler
-  const handleEditSlo = useCallback(async (checkResult: any) => {
+  const handleEditSlo = useCallback(async (checkResult: unknown) => {
     try {
       const benchmarkId = checkResult.benchmark_id;
       if (!benchmarkId) {
@@ -471,7 +471,7 @@ export function useSLOSection({
   }, []);
 
   // SLO updated handler
-  const handleSloUpdated = useCallback((updatedSlo: any) => {
+  const handleSloUpdated = useCallback((_updatedSlo: unknown) => {
     loadCheckResults(testRunId);
     loadBenchmarks();
     setEditSloDialogOpen(false);
@@ -491,7 +491,7 @@ export function useSLOSection({
   }, [testRunId, loadCheckResults]);
 
   // Apdex thresholds dialog handlers
-  const handleOpenApdexThresholdsDialog = useCallback((result: any, event: React.MouseEvent) => {
+  const handleOpenApdexThresholdsDialog = useCallback((result: unknown, event: React.MouseEvent) => {
     event.stopPropagation();
     setSelectedApdexResultForThresholds(result);
     setApdexThresholdsDialogOpen(true);

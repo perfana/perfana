@@ -41,7 +41,7 @@ export function getMetricLabel(metric: MetricType): string {
   return METRIC_OPTIONS.find(m => m.value === metric)?.label || 'Average';
 }
 
-export function buildPlotLayout(metricLabel: string, theme?: Theme): Record<string, any> {
+export function buildPlotLayout(metricLabel: string, theme?: Theme): Record<string, unknown> {
   const isDark = theme?.palette.mode === 'dark';
   const textColor = theme?.palette.text.primary ?? 'inherit';
   const textSecondary = theme?.palette.text.secondary ?? 'inherit';
@@ -131,7 +131,7 @@ export function buildPlotConfig(
   transactionName: string,
   metricLabel: string,
   showToast: (message: string) => void
-): Record<string, any> {
+): Record<string, unknown> {
   return {
     responsive: true,
     displayModeBar: true,
@@ -157,17 +157,17 @@ export function buildPlotConfig(
             path: 'M768 1664h896v-640h-416q-40 0-68-28t-28-68v-416h-384v1152zm256-1440v-64q0-13-9.5-22.5t-22.5-9.5h-704q-13 0-22.5 9.5t-9.5 22.5v64q0 13 9.5 22.5t22.5 9.5h704q13 0 22.5-9.5t9.5-22.5zm256 672h299l-299-299v299zm512 128v672q0 40-28 68t-68 28h-960q-40 0-68-28t-28-68v-160h-544q-40 0-68-28t-28-68v-1344q0-40 28-68t68-28h1088q40 0 68 28t28 68v328q21 13 36 28l408 408q28 28 48 76t20 88z',
             transform: 'scale(0.8)'
           },
-          click: function(gd: any) {
+          click: function(gd: unknown) {
             copyChartToClipboard(gd, showToast);
           }
         }
       ]
-    ] as any,
+    ] as unknown,
   };
 }
 
-function copyChartToClipboard(gd: any, showToast: (message: string) => void): void {
-  (window as any).Plotly.toImage(gd, {
+function copyChartToClipboard(gd: unknown, showToast: (message: string) => void): void {
+  (window as unknown).Plotly.toImage(gd, {
     format: 'png',
     width: gd._fullLayout.width || 800,
     height: gd._fullLayout.height || 400,

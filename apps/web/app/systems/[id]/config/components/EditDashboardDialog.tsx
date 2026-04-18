@@ -42,7 +42,7 @@ export default function EditDashboardDialog({
   // Helper function for auth headers
 
   // Function to fetch variable options from Grafana
-  const fetchVariableOptions = async (variable: any, dashboard: ApplicationDashboard) => {
+  const fetchVariableOptions = async (variable: unknown, dashboard: ApplicationDashboard) => {
     if (!systemName || !selectedEnvironment) {
       console.warn('Missing systemName or selectedEnvironment for variable options fetch');
       return;
@@ -104,7 +104,7 @@ export default function EditDashboardDialog({
       // Initialize variable values from dashboard
       const initialVariableValues: Record<string, string[]> = {};
       if (dashboard.variables && Array.isArray(dashboard.variables)) {
-        dashboard.variables.forEach((variable: any) => {
+        dashboard.variables.forEach((variable: unknown) => {
           initialVariableValues[variable.name] = variable.values || [];
         });
       }
@@ -114,7 +114,7 @@ export default function EditDashboardDialog({
       
       // Fetch variable options from Grafana
       if (dashboard.variables && Array.isArray(dashboard.variables) && systemName && selectedEnvironment) {
-        dashboard.variables.forEach(async (variable: any) => {
+        dashboard.variables.forEach(async (variable: unknown) => {
           await fetchVariableOptions(variable, dashboard);
         });
       }
@@ -169,7 +169,7 @@ export default function EditDashboardDialog({
                 Dashboard Variables
               </Typography>
               
-              {dashboard.variables.map((variable: any, index: number) => {
+              {dashboard.variables.map((variable: unknown, index: number) => {
                 const currentValues = variableValues[variable.name] || variable.values || [];
                 const options = variableOptions[variable.name] || [];
                 const isLoading = loadingVariables[variable.name] || false;

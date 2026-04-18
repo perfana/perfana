@@ -5,7 +5,7 @@
  */
 
 import { useState, useEffect, useCallback } from 'react';
-import { useTheme, alpha } from '@mui/material';
+import { useTheme} from '@mui/material';
 import { authenticatedFetch } from '@/lib/api';
 import type {
   DSMetric,
@@ -14,7 +14,7 @@ import type {
   TestRunInfo,
 } from '../types';
 import {
-  DEFAULT_CHART_HEIGHT,
+  _DEFAULT_CHART_HEIGHT,
   METRIC_COLOR_PALETTE,
   groupDataByMetricName,
   findGlobalDataRange,
@@ -40,9 +40,9 @@ interface UseSLOMetricsChartReturn {
   loading: boolean;
   error: string | null;
   metricsData: DSMetric | MetricDataPoint[] | null;
-  plotData: any[];
-  plotLayout: any;
-  plotConfig: any;
+  plotData: unknown[];
+  plotLayout: unknown;
+  plotConfig: unknown;
   metricName: string;
   hasData: boolean;
 }
@@ -161,7 +161,7 @@ export function useSLOMetricsChart({
     const lastRampUpTimestamp = new Date(testRunStart.getTime() + rampUpSeconds * 1000);
 
     // Create traces for each metric
-    const metricTraces: any[] = [];
+    const metricTraces: unknown[] = [];
     let colorIndex = 0;
     let hasTimeSeriesData = false;
 
@@ -200,7 +200,7 @@ export function useSLOMetricsChart({
     });
 
     // Add requirement line if we have a requirement value
-    const data: any[] = adjustedRequirement
+    const data: unknown[] = adjustedRequirement
       ? [
           ...metricTraces,
           buildRequirementTrace(

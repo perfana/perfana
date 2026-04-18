@@ -109,7 +109,7 @@ export default function PerformanceAnalysisCard({
     configDialogOpen,
     setConfigDialogOpen,
     selectedTransaction,
-    handleOpenTransactionConfig,
+    _handleOpenTransactionConfig,
     handleConfigSuccess,
     apdexMenuAnchor,
     handleOpenApdexMenu,

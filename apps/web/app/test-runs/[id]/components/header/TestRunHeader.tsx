@@ -1,5 +1,5 @@
 import React from 'react';
-import { Box, Typography, Button, Chip, IconButton, Tooltip, Divider } from '@mui/material';
+import { Box, Typography, Button, IconButton, Tooltip, Divider } from '@mui/material';
 import { ArrowBack, NavigateBefore, NavigateNext } from '@mui/icons-material';
 import { useRouter } from 'next/navigation';
 import { TestRun } from '@/types/test-runs';

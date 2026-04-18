@@ -29,7 +29,7 @@ export class AdaptStatusUpdater {
    * @param testRunIds - Test run IDs to update status for
    */
   async updateFinalStatus(manager: EntityManager, testRunIds: string[]): Promise<void> {
-    const placeholders = testRunIds.map((_: any, i: number) => `$${i + 1}`).join(', ');
+    const placeholders = testRunIds.map((_: unknown, i: number) => `$${i + 1}`).join(', ');
 
     // Update evaluation status and consolidated result based on conclusions
     await manager.query(

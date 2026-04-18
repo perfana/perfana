@@ -5,10 +5,10 @@ import { TestRun } from '@/types/test-runs';
 
 export interface CompleteTestRunData {
   testRun: TestRun;
-  relatedTestRuns: any[];
-  configs: any[];
-  expectedConfigChanges: any[];
-  applicationDashboards: any[];
+  relatedTestRuns: unknown[];
+  configs: unknown[];
+  expectedConfigChanges: unknown[];
+  applicationDashboards: unknown[];
   anomalyDetection: any | null;
   checkResults: any | null;
 }

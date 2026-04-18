@@ -36,19 +36,20 @@ export interface GrafanaInstanceQuery {
 }
 
 // Transform snake_case API response to camelCase
-function transformGrafanaInstance(data: any): GrafanaInstance {
+function transformGrafanaInstance(data: unknown): GrafanaInstance {
+  const typedData = data as Record<string, unknown>;
   return {
-    id: data.id,
-    label: data.label,
-    clientUrl: data.client_url || data.clientUrl,
-    serverUrl: data.server_url || data.serverUrl,
-    orgId: data.org_id || data.orgId,
-    apiKey: data.api_key || data.apiKey,
-    username: data.username,
-    password: data.password,
-    snapshotInstance: data.snapshot_instance ?? data.snapshotInstance ?? false,
-    createdAt: data.created_at || data.createdAt,
-    updatedAt: data.updated_at || data.updatedAt,
+    id: typedData.id as string,
+    label: typedData.label as string,
+    clientUrl: (typedData.client_url || typedData.clientUrl) as string,
+    serverUrl: (typedData.server_url || typedData.serverUrl) as string | undefined,
+    orgId: (typedData.org_id || typedData.orgId) as string,
+    apiKey: (typedData.api_key || typedData.apiKey) as string | undefined,
+    username: typedData.username as string | undefined,
+    password: typedData.password as string | undefined,
+    snapshotInstance: (typedData.snapshot_instance ?? typedData.snapshotInstance ?? false) as boolean,
+    createdAt: (typedData.created_at || typedData.createdAt) as string,
+    updatedAt: (typedData.updated_at || typedData.updatedAt) as string,
   };
 }
 

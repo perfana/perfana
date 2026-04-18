@@ -2,7 +2,7 @@
 
 import { useState, useEffect, useCallback } from 'react';
 import { authenticatedFetch } from '@/lib/api';
-import { GraphPresetsAPI, GraphPreset, SeriesConfig as APISeriesConfig } from '@/lib/graph-presets';
+import { GraphPresetsAPI, GraphPreset } from '@/lib/graph-presets';
 import { GraphPresetFormData } from '../SaveGraphPresetModal';
 import { SeriesConfig, MetricDataPoint } from '../types';
 import { convertToSeriesConfigDto, convertFromAPISeriesConfig, extractYAxisFormat } from '../utils';

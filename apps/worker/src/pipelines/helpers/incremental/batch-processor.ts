@@ -98,7 +98,7 @@ export class BatchProcessor {
    * @returns Batch processing result with statistics
    */
   async processGrafanaDocuments(
-    documents: any[],
+    documents: unknown[],
     testRun: TestRunContext
   ): Promise<BatchProcessResult> {
     return this.processDocuments(documents, testRun, 'Grafana', (doc) =>
@@ -117,7 +117,7 @@ export class BatchProcessor {
    * @returns Batch processing result with statistics
    */
   async processDynatraceDocuments(
-    documents: any[],
+    documents: unknown[],
     testRun: TestRunContext
   ): Promise<BatchProcessResult> {
     return this.processDocuments(documents, testRun, 'Dynatrace', (doc) =>
@@ -142,7 +142,7 @@ export class BatchProcessor {
    * @returns Batch processing result with statistics
    */
   private async processDocuments(
-    documents: any[],
+    documents: unknown[],
     testRun: TestRunContext,
     source: MetricSource,
     flattenFn: (doc: any) => FlattenedMetricRecord[]
@@ -205,7 +205,7 @@ export class BatchProcessor {
    * @returns Batch result for this batch only
    */
   private async processSingleBatch(
-    batch: any[],
+    batch: unknown[],
     testRun: TestRunContext,
     source: MetricSource,
     flattenFn: (doc: any) => FlattenedMetricRecord[]
@@ -281,10 +281,11 @@ export class BatchProcessor {
    * @returns String identifier for the document
    */
   private getDocumentIdentifier(doc: any): string {
+    const d = doc as any;
     // Try various common ID fields
-    const panelId = doc.panel_id || doc.panelId;
-    const panelTitle = doc.panel_title || doc.panelTitle;
-    const dashboardLabel = doc.dashboard_label || doc.dashboardLabel;
+    const panelId = d.panel_id || d.panelId;
+    const panelTitle = d.panel_title || d.panelTitle;
+    const dashboardLabel = d.dashboard_label || d.dashboardLabel;
 
     if (panelId && panelTitle) {
       return `${panelId} (${panelTitle})`;

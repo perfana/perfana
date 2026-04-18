@@ -25,7 +25,7 @@ export function useEditSLOForm({
   const [sloFormData, setSloFormData] = useState<SLOFormData>(initialSLOFormData);
 
   // Loading states
-  const [sloFormLoading, setSloFormLoading] = useState(false);
+  const [sloFormLoading, _setSloFormLoading] = useState(false);
   const [dashboardsLoading, setDashboardsLoading] = useState(false);
   const [panelsLoading, setPanelsLoading] = useState(false);
 
@@ -131,7 +131,7 @@ export function useEditSLOForm({
 
         // Filter panels by supported types
         const filteredPanels =
-          dashboard?.panels?.filter((panel: any) => SUPPORTED_PANEL_TYPES.includes(panel.type)) || [];
+          dashboard?.panels?.filter((panel: unknown) => SUPPORTED_PANEL_TYPES.includes(panel.type)) || [];
 
         setAvailablePanels(filteredPanels);
       } else {
@@ -258,9 +258,9 @@ export function useEditSLOForm({
       let matchingDashboard = null;
 
       // First try to match by metrics_source_id (most reliable when available)
-      if ((benchmark as any).metrics_source_id) {
+      if ((benchmark as unknown).metrics_source_id) {
         matchingDashboard = availableDashboards.find(
-          (dashboard: any) => dashboard.metrics_source_id === (benchmark as any).metrics_source_id
+          (dashboard: unknown) => dashboard.metrics_source_id === (benchmark as unknown).metrics_source_id
         );
       }
 

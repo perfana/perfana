@@ -61,7 +61,7 @@ export function PanelSelectField({
           />
         )}
         renderOption={(props, option) => {
-          const { key, ...otherProps } = props;
+          const { key: _key, ...otherProps } = props;
           return (
             <Box component="li" key={option.id} {...otherProps}>
               <Box>

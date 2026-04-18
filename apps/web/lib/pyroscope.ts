@@ -27,15 +27,16 @@ export interface PyroscopeInstanceQuery {
 }
 
 // Transform snake_case API response to camelCase
-function transformPyroscopeInstance(data: any): PyroscopeInstance {
+function transformPyroscopeInstance(data: unknown): PyroscopeInstance {
+  const typedData = data as Record<string, unknown>;
   return {
-    id: data.id,
-    label: data.label,
-    pyroscopeUrl: data.pyroscope_url || data.pyroscopeUrl,
-    backendUrl: data.backend_url || data.backendUrl,
-    pyroscopeStandAlone: data.pyroscope_stand_alone ?? data.pyroscopeStandAlone ?? false,
-    createdAt: data.created_at || data.createdAt,
-    updatedAt: data.updated_at || data.updatedAt,
+    id: typedData.id as string,
+    label: typedData.label as string,
+    pyroscopeUrl: (typedData.pyroscope_url || typedData.pyroscopeUrl) as string,
+    backendUrl: (typedData.backend_url || typedData.backendUrl) as string | undefined,
+    pyroscopeStandAlone: (typedData.pyroscope_stand_alone ?? typedData.pyroscopeStandAlone ?? false) as boolean,
+    createdAt: (typedData.created_at || typedData.createdAt) as string,
+    updatedAt: (typedData.updated_at || typedData.updatedAt) as string,
   };
 }
 

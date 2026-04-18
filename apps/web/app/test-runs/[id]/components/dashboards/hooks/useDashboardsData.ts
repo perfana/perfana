@@ -11,14 +11,14 @@ import { buildGrafanaIframeUrl } from '../utils';
 
 interface UseDashboardsDataProps {
   testRun: TestRun;
-  testRunId: string;
+  _testRunId: string;
   dashboardsExpanded: boolean;
   onDashboardsExpand: () => void;
 }
 
 export function useDashboardsData({
   testRun,
-  testRunId,
+  _testRunId,
   dashboardsExpanded,
   onDashboardsExpand,
 }: UseDashboardsDataProps) {

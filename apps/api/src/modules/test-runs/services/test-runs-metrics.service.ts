@@ -439,7 +439,7 @@ export class TestRunsMetricsService {
       await this.dsCompareConfigRepo.update(
         { id },
         // Entity config_data is Record<string, any> from shared package
-        { config_data: updateDto.configData as Record<string, unknown> as DsCompareConfig['config_data'] }
+        { config_data: updateDto.configData as any } as any
       );
 
       const result = await this.dsCompareConfigRepo.findOne({

@@ -66,9 +66,9 @@ export default function AnomalyDetectionSection({
     classificationFilter,
     setClassificationFilter,
     dashboardFilter,
-    setDashboardFilter,
+    _setDashboardFilter,
     panelFilter,
-    setPanelFilter,
+    _setPanelFilter,
     // Row state
     expandedRows,
     trendsData,

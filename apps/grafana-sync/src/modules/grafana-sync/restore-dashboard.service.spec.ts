@@ -276,10 +276,11 @@ describe('RestoreDashboardService', () => {
     });
 
     it('should use General folder (0) if no folderId in meta', async () => {
+      const grafanaJsonData = mockDashboard.grafanaJson as any;
       const dashboardWithoutFolder: Partial<GrafanaDashboard> = {
         ...mockDashboard,
         grafanaJson: {
-          dashboard: mockDashboard.grafanaJson.dashboard,
+          dashboard: grafanaJsonData.dashboard,
           meta: {},
         },
       };

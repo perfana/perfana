@@ -33,10 +33,10 @@ import {
 } from '../utils/slo-formatters';
 
 interface SLOListProps {
-  testRun: any;
+  testRun: unknown;
   testRunId: string;
-  checkResults: any[];
-  benchmarks: any[];
+  checkResults: unknown[];
+  benchmarks: unknown[];
   expandedSloRows: Set<string>;
   sloFilter: 'all' | 'failed';
   searchText: string;
@@ -59,10 +59,10 @@ interface SLOListProps {
   toggleTransactionExpanded: (transactionKey: string, transactionName: string) => Promise<void>;
   handleOpenRequestActionMenu: (event: React.MouseEvent<HTMLElement>, transactionName: string, scenarioName: string | undefined, samplerName: string) => void;
   handleOpenApdexActionMenu: (event: React.MouseEvent<HTMLElement>, transactionName: string, scenarioName: string | undefined, threshold: number) => void;
-  handleEditSlo: (checkResult: any) => Promise<void>;
+  handleEditSlo: (checkResult: unknown) => Promise<void>;
   handleReEvaluate: (panelId: number, applicationDashboardId?: string, metricName?: string) => Promise<void>;
-  handleOpenApdexThresholdsDialog: (result: any, event: React.MouseEvent) => void;
-  getCheckResultKey: (result: any) => string;
+  handleOpenApdexThresholdsDialog: (result: unknown, event: React.MouseEvent) => void;
+  getCheckResultKey: (result: unknown) => string;
 }
 
 export function SLOList({

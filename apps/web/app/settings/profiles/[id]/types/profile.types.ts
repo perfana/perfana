@@ -1,4 +1,3 @@
-import { Profile, ProfileDashboard } from '@/lib/profiles';
 import { ProfileBenchmark } from '@/lib/profile-benchmarks';
 
 /**

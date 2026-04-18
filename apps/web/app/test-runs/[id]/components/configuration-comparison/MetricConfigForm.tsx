@@ -14,11 +14,11 @@ import {
   Button,
   Alert,
   CircularProgress,
-  Divider,
+  _Divider,
   Paper,
   Grid
 } from '@mui/material';
-import { authenticatedFetch } from '@/lib/api';
+import {} from '@/lib/api';
 
 export interface MetricConfigData {
   rowKey: string;
@@ -207,7 +207,7 @@ export default function MetricConfigForm({
   }
 
   // Use defaults for currentConfig if not available
-  const effectiveConfig = configData.currentConfig || {
+  const _effectiveConfig = configData.currentConfig || {
     metricClassification: {
       classification: 'unclassified',
       higherIsBetter: false

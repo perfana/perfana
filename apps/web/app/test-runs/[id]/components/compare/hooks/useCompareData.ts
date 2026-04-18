@@ -17,7 +17,7 @@ import {
 } from '../types';
 import { calculatePercentageDifference } from '../utils/compare-utils';
 import { TestRun } from '@/types/test-runs';
-import { isGrafana, isPerformanceTest, getSourceType } from '@/lib/metrics-source-utils';
+import { isGrafana, isPerformanceTest} from '@/lib/metrics-source-utils';
 
 interface UseCompareDataProps {
   testRun: TestRun | null;

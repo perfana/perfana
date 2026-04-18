@@ -481,14 +481,14 @@ export class ProvisioningService implements OnApplicationBootstrap {
           await this.templateRepo.update(existing.id, {
             ...values,
             updated_by: SYSTEM_ACTOR,
-          } as Partial<ProvisionedTemplateDsCompareConfig>);
+          } as any);
           result.updated++;
         } else {
           await this.templateRepo.insert({
             ...values,
             created_by: SYSTEM_ACTOR,
             updated_by: SYSTEM_ACTOR,
-          } as Partial<ProvisionedTemplateDsCompareConfig>);
+          } as any);
           result.created++;
         }
       } catch (error) {

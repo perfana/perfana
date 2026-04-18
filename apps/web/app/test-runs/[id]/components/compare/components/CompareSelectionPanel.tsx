@@ -201,7 +201,7 @@ export function CompareSelectionPanel({
             />
           )}
           renderOption={(props, option) => {
-            const { key, ...otherProps } = props;
+            const { _key, ...otherProps } = props;
             const { color } = getSourceDisplayInfo(option);
             return (
               <Box component="li" key={option.id} {...otherProps} sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
@@ -253,7 +253,7 @@ export function CompareSelectionPanel({
               />
             )}
             renderOption={(props, option) => {
-              const { key, ...otherProps } = props;
+              const { _key, ...otherProps } = props;
               return (
                 <Box component="li" key={option.id} {...otherProps}>
                   <Typography variant="body1">{option.title}</Typography>

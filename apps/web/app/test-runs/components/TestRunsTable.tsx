@@ -71,7 +71,7 @@ export function TestRunsTable({
     }
 
     const params: Record<string, string> = {
-      system: testRun.systems_under_test?.name || (testRun as any).systemUnderTest || '',
+      system: testRun.systems_under_test?.name || (testRun as unknown).systemUnderTest || '',
       environment: testRun.test_environment || '',
       workload: testRun.workload || '',
     };
@@ -486,7 +486,7 @@ export function TestRunsTable({
             hideFooterSelectedRowCount
             hideFooter={testRuns.length <= 5}
             disableVirtualization={false}
-            onRowClick={(params, event) => handleRowClick(params.row, event as any)}
+            onRowClick={(params, event) => handleRowClick(params.row, event as unknown)}
             sx={dataGridSx}
           />
         </Box>
@@ -530,7 +530,7 @@ export function TestRunsTable({
           disableColumnResize={false}
           hideFooterSelectedRowCount
           disableVirtualization={false}
-          onRowClick={(params, event) => handleRowClick(params.row, event as any)}
+          onRowClick={(params, event) => handleRowClick(params.row, event as unknown)}
           sx={dataGridSx}
         />
       </Box>

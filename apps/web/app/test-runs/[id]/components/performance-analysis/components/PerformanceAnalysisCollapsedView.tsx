@@ -4,7 +4,7 @@ import { Box, Divider, Typography, Tooltip, Switch, FormControlLabel } from '@mu
 import KPIDisplay from '../../shared/KPIDisplay';
 import SoftBadge from '../../shared/SoftBadge';
 import { TransactionStat, ThroughputStats } from '../types/performance-analysis.types';
-import { formatNumber, getApdexColor, getApdexLabel } from '../utils/performance-formatters';
+import { formatNumber, getApdexLabel } from '../utils/performance-formatters';
 import { TestRun } from '@/types/test-runs';
 
 interface PerformanceAnalysisCollapsedViewProps {

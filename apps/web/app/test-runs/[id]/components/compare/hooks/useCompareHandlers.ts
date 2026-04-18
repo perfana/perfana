@@ -32,13 +32,13 @@ interface UseCompareHandlersProps {
   setSelectedDashboard: (dashboard: ApplicationDashboard | null) => void;
   setSelectedMetric: (metric: Panel | null) => void;
   setPanels: (panels: Panel[]) => void;
-  setDynatraceMetrics: (metrics: any[]) => void;
+  setDynatraceMetrics: (metrics: unknown[]) => void;
   setAvailableMetrics: (metrics: string[]) => void;
   setSelectedMetricNames: (names: string[]) => void;
   setAddedSeries: (series: CompareSeries[] | ((prev: CompareSeries[]) => CompareSeries[])) => void;
-  setMetricComparisons: (comparisons: any[]) => void;
-  setCurrentMetrics: (metrics: any[]) => void;
-  setSelectedMetrics: (metrics: any[]) => void;
+  setMetricComparisons: (comparisons: unknown[]) => void;
+  setCurrentMetrics: (metrics: unknown[]) => void;
+  setSelectedMetrics: (metrics: unknown[]) => void;
   setShowGraphs: (graphs: Record<string, boolean> | ((prev: Record<string, boolean>) => Record<string, boolean>)) => void;
   setGraphData: (data: Record<string, GraphData> | ((prev: Record<string, GraphData>) => Record<string, GraphData>)) => void;
   setGraphLoading: (loading: Record<string, boolean> | ((prev: Record<string, boolean>) => Record<string, boolean>)) => void;

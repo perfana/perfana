@@ -169,10 +169,10 @@ describe('StoreDashboardService', () => {
       expect(result.name).toBe('New Dashboard');
       expect(result.datasourceType).toBe('prometheus');
       expect(result.panels).toHaveLength(1);
-      expect(result.panels[0].title).toBe('CPU Usage');
-      expect(result.panels[0].y_axes_format).toBe('percent');
+      expect((result.panels as any[])[0].title).toBe('CPU Usage');
+      expect((result.panels as any[])[0].y_axes_format).toBe('percent');
       expect(result.templatingVariables).toHaveLength(1);
-      expect(result.templatingVariables[0].name).toBe('system_under_test');
+      expect((result.templatingVariables as any[])[0].name).toBe('system_under_test');
       expect(result.variables).toHaveLength(1);
     });
 
@@ -325,7 +325,7 @@ describe('StoreDashboardService', () => {
         false,
       );
 
-      expect(result.panels[0].y_axes_format).toBe('ms');
+      expect((result.panels as any[])[0].y_axes_format).toBe('ms');
     });
   });
 

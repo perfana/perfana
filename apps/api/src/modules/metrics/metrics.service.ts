@@ -481,13 +481,13 @@ export class MetricsService {
               value = record.median ?? null;
               break;
             case 'q90':
-              value = record.percentiles?.p90 ?? null;
+              value = (record.percentiles?.p90 as number | undefined) ?? null;
               break;
             case 'q95':
-              value = record.percentiles?.p95 ?? null;
+              value = (record.percentiles?.p95 as number | undefined) ?? null;
               break;
             case 'q99':
-              value = record.percentiles?.p99 ?? null;
+              value = (record.percentiles?.p99 as number | undefined) ?? null;
               break;
             default:
               value = null;
@@ -625,11 +625,11 @@ export class MetricsService {
         // Extract the value based on the evaluate type
         let value: number | null = null;
         if (evaluateType === 'q90' && record.percentiles) {
-          value = record.percentiles.p90 ?? null;
+          value = (record.percentiles as any).p90 ?? null;
         } else if (evaluateType === 'q95' && record.percentiles) {
-          value = record.percentiles.p95 ?? null;
+          value = (record.percentiles as any).p95 ?? null;
         } else if (evaluateType === 'q99' && record.percentiles) {
-          value = record.percentiles.p99 ?? null;
+          value = (record.percentiles as any).p99 ?? null;
         } else {
           // For non-percentile columns, use the direct column value
           const recordData = record as unknown as Record<string, number | undefined | null>;
@@ -879,7 +879,7 @@ export class MetricsService {
           const testRun = testRunMap.get(item.test_run_id!);
 
           // Parse the statistic.test value - it could be a string or number
-          const testValue = item.statistic?.test ? parseFloat(item.statistic.test) : 0;
+          const testValue = item.statistic?.test ? parseFloat(String(item.statistic.test)) : 0;
 
           return {
             test_run_id: item.test_run_id!,
@@ -900,8 +900,8 @@ export class MetricsService {
             annotations: Array.isArray(testRun?.annotations)
               ? testRun.annotations.join(', ')
               : testRun?.annotations || null
-          };
-        });
+          } as any;
+        }) as any;
 
     } catch (error) {
       this.logger.error('Error in findControlGroupTrends:', error);

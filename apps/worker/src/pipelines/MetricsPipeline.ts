@@ -47,7 +47,7 @@ export class MetricsPipeline extends BasePipelineTypeORM {
     this.logger.info(`🔗 Initialized Grafana client with URL: ${grafanaConfig.url}`);
   }
 
-  async execute(input: unknown): Promise<PipelineResult> {
+  async execute(input: any): Promise<PipelineResult> {
     const startTime = Date.now();
 
     try {
@@ -200,7 +200,7 @@ export class MetricsPipeline extends BasePipelineTypeORM {
   /**
    * Validate and parse input parameters
    */
-  private validateAndParseInput(input: unknown): MetricsInput {
+  private validateAndParseInput(input: any): MetricsInput {
     if (!input || typeof input !== 'object') {
       throw new Error('Invalid input: must be an object');
     }
@@ -223,7 +223,7 @@ export class MetricsPipeline extends BasePipelineTypeORM {
    * Get panel metrics as flattened records directly
    * Simplified version that bypasses intermediate PanelMetricsDocument step
    */
-  private async getPanelMetricsAsRecords(testRun: any, panels: PanelDocument[]): Promise<any[]> {
+  private async getPanelMetricsAsRecords(testRun: unknown, panels: PanelDocument[]): Promise<any[]> {
     // Separate panels with/without errors for different processing (Python pattern)
     const panelsWithoutErrors = panels.filter(panel =>
       panel.errors === null || panel.errors === undefined
@@ -232,7 +232,7 @@ export class MetricsPipeline extends BasePipelineTypeORM {
       panel.errors !== null && panel.errors !== undefined
     );
 
-    const allRecords: any[] = [];
+    const allRecords: unknown[] = [];
 
     // Process panels without errors - query Grafana and transform to records
     if (panelsWithoutErrors.length > 0) {
@@ -295,7 +295,7 @@ export class MetricsPipeline extends BasePipelineTypeORM {
    * Helper method for the new direct flattening approach
    * @param testRun - Test run information including start_time and ramp_up duration
    */
-  private flattenSingleDocument(document: PanelMetricsDocument, testRun: any): any[] {
+  private flattenSingleDocument(document: PanelMetricsDocument, testRun: any): unknown[] {
     const baseData = {
       test_run_id: document.test_run_id,
       application_dashboard_id: document.application_dashboard_id,
@@ -313,7 +313,7 @@ export class MetricsPipeline extends BasePipelineTypeORM {
       updated_by: 'worker-pipeline',
     };
 
-    const flattened: any[] = [];
+    const flattened: unknown[] = [];
     const dataRecords = document.data || [];
 
     if (dataRecords.length > 0) {
@@ -360,7 +360,7 @@ export class MetricsPipeline extends BasePipelineTypeORM {
    * Save flattened records directly to PostgreSQL with batch processing
    * Simplified version that works with pre-flattened records
    */
-  private async saveRecordsToDatabase(records: any[]): Promise<void> {
+  private async saveRecordsToDatabase(records: unknown[]): Promise<void> {
     if (records.length === 0) {return;}
 
     // Use the dedicated write connection pool so metric inserts are never
@@ -383,7 +383,7 @@ export class MetricsPipeline extends BasePipelineTypeORM {
    * Batch insert records to PostgreSQL
    * Conservative batch size for parameter limit compliance
    */
-  private async batchInsertRecords(manager: EntityManager, records: any[]): Promise<void> {
+  private async batchInsertRecords(manager: EntityManager, records: unknown[]): Promise<void> {
     const batchSize = DB_INSERT_BATCH_SIZE;
 
     for (let i = 0; i < records.length; i += batchSize) {
@@ -401,7 +401,7 @@ export class MetricsPipeline extends BasePipelineTypeORM {
   /**
    * Insert a single batch of records using UPSERT pattern (matches Python TimescaleDB implementation)
    */
-  private async insertBatch(manager: EntityManager, batch: any[]): Promise<void> {
+  private async insertBatch(manager: EntityManager, batch: unknown[]): Promise<void> {
     if (batch.length === 0) {return;}
 
 
@@ -450,13 +450,14 @@ export class MetricsPipeline extends BasePipelineTypeORM {
     };
 
     // Flatten parameters for prepared statement, truncating strings to column limits
-    const params = batch.flatMap(record =>
-      columns.map(col => {
-        const val = record[col];
+    const params = batch.flatMap(record => {
+      const r = record as any;
+      return columns.map(col => {
+        const val = r[col];
         const limit = varcharLimits[col];
         return (limit && typeof val === 'string') ? val.substring(0, limit) : val;
-      })
-    );
+      });
+    });
 
     await manager.query(sql, params);
   }

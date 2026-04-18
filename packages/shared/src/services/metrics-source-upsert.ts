@@ -14,7 +14,7 @@ export interface UpsertMetricsSourceParams {
   organizationId?: string;
   teamId?: string;
   createdBy?: string;
-  metadata?: Record<string, any>;
+  metadata?: Record<string, unknown>;
 }
 
 /**
@@ -31,25 +31,28 @@ export async function upsertMetricsSource(
   repo: Repository<MetricsSource>,
   params: UpsertMetricsSourceParams,
 ): Promise<string> {
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const values: any = {
+    systemUnderTestId: params.systemUnderTestId,
+    testEnvironment: params.testEnvironment,
+    sourceType: params.sourceType,
+    sourceConfigId: params.sourceConfigId ?? undefined,
+    externalRef: params.externalRef ?? undefined,
+    displayName: params.displayName,
+    displayLabel: params.displayLabel ?? undefined,
+    workload: params.workload ?? undefined,
+    tags: params.tags ?? [],
+    metadata: params.metadata ?? undefined,
+    organizationId: params.organizationId ?? undefined,
+    teamId: params.teamId ?? undefined,
+    createdBy: params.createdBy ?? undefined,
+  };
+
   const result = await repo
     .createQueryBuilder()
     .insert()
     .into(MetricsSource)
-    .values({
-      systemUnderTestId: params.systemUnderTestId,
-      testEnvironment: params.testEnvironment,
-      sourceType: params.sourceType,
-      sourceConfigId: params.sourceConfigId ?? undefined,
-      externalRef: params.externalRef ?? undefined,
-      displayName: params.displayName,
-      displayLabel: params.displayLabel ?? undefined,
-      workload: params.workload ?? undefined,
-      tags: params.tags ?? [],
-      metadata: params.metadata ?? undefined,
-      organizationId: params.organizationId ?? undefined,
-      teamId: params.teamId ?? undefined,
-      createdBy: params.createdBy ?? undefined,
-    })
+    .values(values)
     .orUpdate(
       [
         'workload',

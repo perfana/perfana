@@ -33,10 +33,10 @@ export interface SLODialogsProps {
 
   // Edit SLO dialog
   editSloDialogOpen: boolean;
-  selectedSloForEdit: any;
+  selectedSloForEdit: unknown;
   setEditSloDialogOpen: (open: boolean) => void;
-  setSelectedSloForEdit: (slo: any) => void;
-  handleSloUpdated: (updatedSlo: any) => void;
+  setSelectedSloForEdit: (slo: unknown) => void;
+  handleSloUpdated: (updatedSlo: unknown) => void;
 
   // Apdex action menu
   apdexActionMenuAnchor: HTMLElement | null;
@@ -57,9 +57,9 @@ export interface SLODialogsProps {
 
   // Apdex thresholds dialog
   apdexThresholdsDialogOpen: boolean;
-  selectedApdexResultForThresholds: any;
+  selectedApdexResultForThresholds: unknown;
   setApdexThresholdsDialogOpen: (open: boolean) => void;
-  setSelectedApdexResultForThresholds: (result: any) => void;
+  setSelectedApdexResultForThresholds: (result: unknown) => void;
   handleApdexThresholdsSuccess: () => void;
 }
 

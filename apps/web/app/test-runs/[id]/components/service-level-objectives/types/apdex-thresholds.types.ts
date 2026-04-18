@@ -44,7 +44,7 @@ export interface ApdexThresholdsManagementDialogProps {
   open: boolean;
   onClose: () => void;
   testRunId: string;
-  apdexCheckResult: any;
+  apdexCheckResult: unknown;
   onSuccess: () => void;
 }
 

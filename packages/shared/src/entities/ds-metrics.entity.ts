@@ -32,7 +32,7 @@ export class DsMetrics {
   benchmark_ids?: string[];
 
   @Column({ type: 'jsonb', nullable: true })
-  errors?: Record<string, any>;
+  errors?: Record<string, unknown>;
 
   @Column({ type: 'double precision', nullable: true })
   timestep?: number;

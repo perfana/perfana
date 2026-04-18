@@ -26,7 +26,7 @@ import { getConclusionColor } from '../../helpers';
 import { formatNumber, getConfigSourceInfo, generateThresholdData } from '../utils';
 
 interface StatisticalDrawerContentProps {
-  drawerData: any;
+  drawerData: unknown;
   drawerLoading: boolean;
   row: AnomalyData;
 }
@@ -138,7 +138,7 @@ export function StatisticalDrawerContent({
             <Chip
               label={drawerData.conclusion.label}
               size="small"
-              color={getConclusionColor(drawerData.conclusion.label) as any}
+              color={getConclusionColor(drawerData.conclusion.label) as unknown}
               variant="filled"
               sx={{ height: '28px', fontSize: '0.75rem' }}
             />

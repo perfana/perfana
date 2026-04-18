@@ -84,7 +84,7 @@ export default function DashboardSection({
   const [batchDeleteDialogOpen, setBatchDeleteDialogOpen] = useState(false);
   const [batchDeleteInfo, setBatchDeleteInfo] = useState<BatchDeleteInfo | null>(null);
   const [batchDeleteFromGrafana, setBatchDeleteFromGrafana] = useState(false);
-  const [batchDeleteLoading, setBatchDeleteLoading] = useState(false);
+  const [_batchDeleteLoading, setBatchDeleteLoading] = useState(false);
   const [copyDialogOpen, setCopyDialogOpen] = useState(false);
   const [copySuccess, setCopySuccess] = useState<string | null>(null);
 

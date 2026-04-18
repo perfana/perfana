@@ -6,7 +6,7 @@ export interface GrafanaQuery {
     uid: string;
     type: string;
   };
-  [key: string]: any;
+  [key: string]: unknown;
 }
 
 export interface GrafanaRequest {
@@ -29,9 +29,9 @@ export interface PanelDocument {
   panel_id: number;
   panel_title: string;
   dashboard_label: string;
-  benchmark_ids?: any[] | null;
-  panel: any;
-  query_variables?: any;
+  benchmark_ids?: unknown[] | null;
+  panel: unknown;
+  query_variables?: unknown;
   datasource_type?: string | null;
   requests?: GrafanaRequest[];
   errors?: Array<{
@@ -41,7 +41,7 @@ export interface PanelDocument {
     type: string;
     detail?: string;
   }> | null;
-  warnings?: any[] | null;
+  warnings?: unknown[] | null;
 }
 
 export interface MetricsRecord {
@@ -75,32 +75,32 @@ export interface PanelMetricsDocument {
 
 // Logger interface for dependency injection
 export interface Logger {
-  debug(message: string, ...args: any[]): void;
-  info(message: string, ...args: any[]): void;
-  warn(message: string, ...args: any[]): void;
-  error(message: string, ...args: any[]): void;
+  debug(message: string, ...args: unknown[]): void;
+  info(message: string, ...args: unknown[]): void;
+  warn(message: string, ...args: unknown[]): void;
+  error(message: string, ...args: unknown[]): void;
 }
 
 // Default console logger implementation
 export class ConsoleLogger implements Logger {
   constructor(private module?: string) {}
 
-  debug(message: string, ...args: any[]): void {
+  debug(message: string, ...args: unknown[]): void {
     const prefix = this.module ? `[${this.module}]` : '';
     console.debug(prefix, message, ...args);
   }
 
-  info(message: string, ...args: any[]): void {
+  info(message: string, ...args: unknown[]): void {
     const prefix = this.module ? `[${this.module}]` : '';
     console.info(prefix, message, ...args);
   }
 
-  warn(message: string, ...args: any[]): void {
+  warn(message: string, ...args: unknown[]): void {
     const prefix = this.module ? `[${this.module}]` : '';
     console.warn(prefix, message, ...args);
   }
 
-  error(message: string, ...args: any[]): void {
+  error(message: string, ...args: unknown[]): void {
     const prefix = this.module ? `[${this.module}]` : '';
     console.error(prefix, message, ...args);
   }

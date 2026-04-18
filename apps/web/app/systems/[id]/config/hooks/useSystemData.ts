@@ -2,12 +2,12 @@
 
 import { useState, useEffect, useCallback } from 'react';
 import { useParams, useSearchParams } from 'next/navigation';
-import { SystemUnderTest, ApplicationDashboard } from '@/lib/types';
+import { SystemUnderTest} from '@/lib/types';
 import { authenticatedFetch } from '@/lib/api';
 import { fetchDynatraceConfigs } from '@/lib/dynatrace';
 import { fetchTracingInstances } from '@/lib/distributed-tracing';
 import { fetchPyroscopeInstances } from '@/lib/pyroscope';
-import { Benchmark } from '../components/types';
+import {} from '../components/types';
 
 export type TabId = 'grafana' | 'slo' | 'deep-links' | 'dynatrace' | 'tracing' | 'pyroscope' | 'notifications' | 'templates' | 'adapt-settings';
 
@@ -124,9 +124,9 @@ export function useSystemData({
       setSystem(systemData);
 
       // Extract environments and workloads from system data
-      const environments = (systemData as any).environments;
+      const environments = (systemData as unknown).environments;
       if (environments && Array.isArray(environments)) {
-        const envNames = environments.map((env: any) => env.environment);
+        const envNames = environments.map((env: unknown) => env.environment);
         setAvailableEnvironments(envNames);
 
         // Read URL params to check if scope was provided
@@ -144,7 +144,7 @@ export function useSystemData({
 
         // Populate workloads for the target environment
         if (targetEnvironment) {
-          const envData = environments.find((e: any) => e.environment === targetEnvironment);
+          const envData = environments.find((e: unknown) => e.environment === targetEnvironment);
           if (envData?.workloads) {
             setAvailableWorkloads(envData.workloads);
 
@@ -222,8 +222,8 @@ export function useSystemData({
 
     if (environment && system) {
       // Find workloads for selected environment
-      const systemEnvs = (system as any).environments;
-      const selectedEnvData = systemEnvs?.find((env: any) => env.environment === environment);
+      const systemEnvs = (system as unknown).environments;
+      const selectedEnvData = systemEnvs?.find((env: unknown) => env.environment === environment);
       if (selectedEnvData?.workloads) {
         setAvailableWorkloads(selectedEnvData.workloads);
       }

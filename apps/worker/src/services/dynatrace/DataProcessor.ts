@@ -172,7 +172,7 @@ export class DataProcessor {
    * Extract grouping field values from a DQL response record
    * For Metrics API v2 queries (no 'by:' clause), also extracts dt.entity.* dimension values
    */
-  private getGroupingFieldValues(record: Record<string, any>, query: string): string[] {
+  private getGroupingFieldValues(record: Record<string, unknown>, query: string): string[] {
     try {
       const groupingFields = this.parseDqlGroupingFields(query);
 
@@ -264,7 +264,7 @@ export class DataProcessor {
    */
   private calculateTimestepAndRampUp(
     timestamp: Date,
-    testRun?: any
+    testRun?: unknown
   ): { timestep: number; rampUp: boolean } {
     // Note: TypeORM entity uses camelCase (startTime, analysisStartOffset) not snake_case
     if (!testRun) {
@@ -272,11 +272,12 @@ export class DataProcessor {
       return { timestep: 0.0, rampUp: false };
     }
 
+    const tr = testRun as any;
     // Check for startTime in both camelCase (TypeORM entity) and snake_case (raw query)
-    const startTimeValue = testRun.startTime || testRun.start_time;
+    const startTimeValue = tr.startTime || tr.start_time;
 
     if (!startTimeValue) {
-      logger.warn(`calculateTimestepAndRampUp: testRun has no startTime or start_time. Available properties: ${Object.keys(testRun).join(', ')}`);
+      logger.warn(`calculateTimestepAndRampUp: testRun has no startTime or start_time. Available properties: ${Object.keys(tr).join(', ')}`);
       return { timestep: 0.0, rampUp: false };
     }
 
@@ -286,7 +287,7 @@ export class DataProcessor {
     // Round to integer for cleaner display
     const roundedTimestep = Math.round(timestep);
 
-    const analysisStartOffsetSeconds = testRun.analysisStartOffset || testRun.ramp_up || 0;
+    const analysisStartOffsetSeconds = tr.analysisStartOffset || tr.ramp_up || 0;
     const rampUp = roundedTimestep < analysisStartOffsetSeconds;
 
     return { timestep: roundedTimestep, rampUp };
@@ -295,7 +296,7 @@ export class DataProcessor {
   /**
    * Parse timestamp from DQL record
    */
-  private parseTimestamp(record: Record<string, any>, testRunEnd?: Date): { timestamp: Date; fieldName: string | null } {
+  private parseTimestamp(record: Record<string, unknown>, testRunEnd?: Date): { timestamp: Date; fieldName: string | null } {
     // Check for various timestamp field patterns
     const timestampFields = [
       'timestamp',
@@ -320,14 +321,14 @@ export class DataProcessor {
 
     // Check if timeframe object exists
     if ('timeframe' in record && typeof record.timeframe === 'object') {
-      const timeframe = record.timeframe;
-      if (timeframe.start) {
+      const timeframe = record.timeframe as any;
+      if (timeframe?.start) {
         return {
           timestamp: this.parseTimestampValue(timeframe.start),
           fieldName: 'timeframe.start'
         };
       }
-      if (timeframe.end) {
+      if (timeframe?.end) {
         return {
           timestamp: this.parseTimestampValue(timeframe.end),
           fieldName: 'timeframe.end'
@@ -373,7 +374,7 @@ export class DataProcessor {
     queryResults: DynatraceQueryResult[],
     testRunId: string,
     testRunEnd?: Date,
-    testRun?: any
+    testRun?: unknown
   ): Promise<{ panelDocuments: PanelDocument[]; metricsDocuments: PanelMetricsDocument[] }> {
     logger.info(`Processing ${queryResults.length} query results into panel and metrics documents`);
 
@@ -497,7 +498,7 @@ export class DataProcessor {
     result: DynatraceQueryResult,
     testRunId: string,
     testRunEnd?: Date,
-    testRun?: any
+    testRun?: unknown
   ): PanelMetricsDocument | null {
     try {
       const { tileId, tileTitle, result: dqlResult, query, matchMetricPattern, omitGroupByVariableFromMetricName, metricName: explicitMetricName } = result;
@@ -508,17 +509,18 @@ export class DataProcessor {
 
       // Debug: Log the entire DQL result structure
       logger.info(`📊 Processing DQL/Metrics result for tile ${tileId} (${tileTitle})`);
+      const dr = dqlResult as any;
       logger.debug(`DQL result structure for tile ${tileId}:`, {
-        hasResult: !!dqlResult,
-        resultKeys: dqlResult ? Object.keys(dqlResult) : [],
-        recordsType: dqlResult?.records ? typeof dqlResult.records : 'undefined',
-        recordsLength: dqlResult?.records?.length || 0
+        hasResult: !!dr,
+        resultKeys: dr ? Object.keys(dr) : [],
+        recordsType: dr?.records ? typeof dr.records : 'undefined',
+        recordsLength: dr?.records?.length || 0
       });
 
       // Extract records from DQL result
-      const records = dqlResult?.records || [];
+      const records = dr?.records || [];
       if (records.length === 0) {
-        logger.warn(`No records found in DQL result for tile ${tileId}. Full result:`, JSON.stringify(dqlResult, null, 2));
+        logger.warn(`No records found in DQL result for tile ${tileId}. Full result:`, JSON.stringify(dr, null, 2));
         return null;
       }
 

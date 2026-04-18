@@ -31,13 +31,13 @@ export class GrafanaDashboard {
   uri?: string;
 
   @Column({ name: 'templating_variables', type: 'jsonb', nullable: true })
-  templatingVariables?: any[];
+  templatingVariables?: unknown[];
 
   @Column({ type: 'jsonb' })
-  panels!: any[];
+  panels!: unknown[];
 
   @Column({ type: 'jsonb', nullable: true })
-  variables?: any[];
+  variables?: unknown[];
 
   @Column({ type: 'text', array: true, nullable: true })
   tags?: string[];
@@ -52,16 +52,16 @@ export class GrafanaDashboard {
   templateProfile?: string;
 
   @Column({ name: 'template_test_run_variables', type: 'jsonb', nullable: true })
-  templateTestRunVariables?: any;
+  templateTestRunVariables?: unknown;
 
   @Column({ name: 'template_create_date', type: 'timestamp with time zone', nullable: true })
   templateCreateDate?: Date;
 
   @Column({ name: 'application_dashboard_variables', type: 'jsonb', nullable: true })
-  applicationDashboardVariables?: any;
+  applicationDashboardVariables?: unknown;
 
   @Column({ name: 'grafana_json', type: 'jsonb', nullable: true })
-  grafanaJson?: any;
+  grafanaJson?: unknown;
 
   @Column({ type: 'timestamp with time zone', nullable: true })
   updated?: Date;

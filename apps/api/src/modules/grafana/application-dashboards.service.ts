@@ -351,13 +351,13 @@ export class ApplicationDashboardsService {
         variables: (createDto.variables || []).filter(v => v && !Array.isArray(v) && typeof v.name === 'string'),
         replacedTemplatingVariables: createDto.replacedTemplatingVariables || [],
         snapshotTimeout: createDto.snapshotTimeout || 4
-      });
+      } as any);
 
       const result = await this.appDashboardRepo.save(applicationDashboard);
 
       // Fetch with relations
       const resultWithRelations = await this.appDashboardRepo.findOne({
-        where: { id: result.id },
+        where: { id: (result as any).id },
         relations: ['grafanaInstance', 'systemUnderTest']
       });
 
@@ -440,12 +440,12 @@ export class ApplicationDashboardsService {
       if (updateDto.dashboardLabel !== undefined) updateData.dashboardLabel = updateDto.dashboardLabel;
       if (updateDto.tags !== undefined) updateData.tags = updateDto.tags;
       if (updateDto.templateDashboardUid !== undefined) updateData.templateDashboardUid = updateDto.templateDashboardUid;
-      if (updateDto.variables !== undefined) updateData.variables = updateDto.variables.filter(v => v && !Array.isArray(v) && typeof v.name === 'string');
-      if (updateDto.replacedTemplatingVariables !== undefined) updateData.replacedTemplatingVariables = updateDto.replacedTemplatingVariables;
+      if (updateDto.variables !== undefined) updateData.variables = updateDto.variables.filter(v => v && !Array.isArray(v) && typeof v.name === 'string') as any;
+      if (updateDto.replacedTemplatingVariables !== undefined) updateData.replacedTemplatingVariables = updateDto.replacedTemplatingVariables as any;
       if (updateDto.snapshotTimeout !== undefined) updateData.snapshotTimeout = updateDto.snapshotTimeout;
 
       // Update with TypeORM
-      await this.appDashboardRepo.update(id, updateData);
+      await this.appDashboardRepo.update(id, updateData as any);
 
       // Fetch the updated record with relations
       const result = await this.findOne(id, userId, roles);

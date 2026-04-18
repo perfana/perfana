@@ -53,7 +53,7 @@ import {
   Code as SqlIcon,
 } from '@mui/icons-material';
 import { SqlTextViewer } from './SqlTextViewer';
-import type { SqlStatementCardProps, SqlStatementMetrics } from '../types';
+import type { SqlStatementCardProps} from '../types';
 import {
   formatDuration,
   formatNumber,

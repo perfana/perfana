@@ -2,17 +2,16 @@
 
 import { useCallback } from 'react';
 import { authenticatedFetch } from '@/lib/api';
-import { SLOFormData, UseAddSLOHandlersProps, UseAddSLOHandlersReturn } from '../types';
+import {  UseAddSLOHandlersProps, UseAddSLOHandlersReturn } from '../types';
 import {
   validateSLOForm,
   isFormValid as checkFormValid,
-  processPercentunitValue,
   parseValueWithUnit,
 } from '../utils/slo-validators';
 
 export function useAddSLOHandlers({
   systemId,
-  systemName,
+  _systemName,
   environment,
   workload,
   sloFormData,

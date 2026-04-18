@@ -324,7 +324,7 @@ export function InsightsList({
    * Handle severity filter change
    */
   const handleSeverityChange = useCallback(
-    (event: any): void => {
+    (event: unknown): void => {
       const value = event.target.value as InsightSeverity[];
       setFilters({ ...filters, severities: value.length > 0 ? value : undefined });
     },
@@ -335,7 +335,7 @@ export function InsightsList({
    * Handle category filter change
    */
   const handleCategoryChange = useCallback(
-    (event: any): void => {
+    (event: unknown): void => {
       const value = event.target.value as InsightCategory[];
       setFilters({ ...filters, categories: value.length > 0 ? value : undefined });
     },

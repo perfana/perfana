@@ -135,7 +135,7 @@ export function validatePrioritySystemAtStartup(): boolean {
 /**
  * Get priority configuration summary for monitoring
  */
-export function getPriorityConfigSummary(): Record<string, any> {
+export function getPriorityConfigSummary(): Record<string, unknown> {
   const validation = validatePrioritySystem();
 
   return {

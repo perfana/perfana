@@ -52,11 +52,11 @@ import {
   Delete as DeleteIcon,
   Refresh as RefreshIcon,
   Assessment as AssessmentIcon,
-  Download as DownloadIcon,
+  Download as _DownloadIcon,
 } from '@mui/icons-material';
 import {
   type ReportListItem,
-  type ReportStatus,
+  type _ReportStatus,
   getReportStatusLabel,
   getReportStatusColor,
   isCompletedStatus,

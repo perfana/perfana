@@ -88,7 +88,7 @@ export class CompareConfigCache {
 
     // Build insert values from cache
     const configInsertValues: string[] = [];
-    const configInsertParams: any[] = [];
+    const configInsertParams: unknown[] = [];
     let paramIndex = 1;
 
     for (const [key, config] of configCache.entries()) {

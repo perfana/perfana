@@ -30,7 +30,7 @@ export class DsAdaptConclusion {
   conclusion!: string;
 
   @Column({ type: 'jsonb' })
-  details!: Record<string, any>;
+  details!: Record<string, unknown>;
 
   @Column({ type: 'uuid', nullable: true })
   organization_id?: string;

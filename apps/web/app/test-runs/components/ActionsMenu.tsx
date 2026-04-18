@@ -59,7 +59,7 @@ export function ActionsMenu({ testRun, onDelete, showToast, onRefresh }: Actions
         throw new Error('Failed to start re-evaluation');
       }
 
-      const result = await response.json();
+      const _result = await response.json();
       showToast('Re-evaluation started successfully');
     } catch (err) {
       console.error('Failed to start re-evaluation:', err);
@@ -100,7 +100,7 @@ export function ActionsMenu({ testRun, onDelete, showToast, onRefresh }: Actions
         throw new Error('Failed to start re-fetch');
       }
 
-      const result = await response.json();
+      const _result = await response.json();
       showToast('Re-fetch missing data started');
     } catch (err) {
       console.error('Failed to start re-fetch:', err);
@@ -189,7 +189,7 @@ export function ActionsMenu({ testRun, onDelete, showToast, onRefresh }: Actions
           'Content-Type': 'application/json',
         },
         body: JSON.stringify({
-          systemUnderTestId: testRun.system_under_test_id || (testRun.systems_under_test as any)?.id,
+          systemUnderTestId: testRun.system_under_test_id || (testRun.systems_under_test as unknown)?.id,
           testEnvironment: testRun.test_environment,
           workload: testRun.workload,
           testRunId: testRun.test_run_id,
@@ -226,7 +226,7 @@ export function ActionsMenu({ testRun, onDelete, showToast, onRefresh }: Actions
           'Content-Type': 'application/json',
         },
         body: JSON.stringify({
-          systemUnderTestId: testRun.system_under_test_id || (testRun.systems_under_test as any)?.id,
+          systemUnderTestId: testRun.system_under_test_id || (testRun.systems_under_test as unknown)?.id,
           testEnvironment: testRun.test_environment,
           workload: testRun.workload,
           testRunId: testRun.test_run_id,

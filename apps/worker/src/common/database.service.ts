@@ -44,10 +44,11 @@ const TRANSIENT_ERRORS = [
   '08004', // sqlserver_rejected_establishment_of_sqlconnection
 ];
 
-function isTransientError(error: unknown): boolean {
+function isTransientError(error: any): boolean {
   if (!error || typeof error !== 'object') { return false; }
-  const msg = 'message' in error ? String((error as any).message) : '';
-  const code = 'code' in error ? String((error as any).code) : '';
+  const err = error as any;
+  const msg = 'message' in error ? String(err.message) : '';
+  const code = 'code' in error ? String(err.code) : '';
   return TRANSIENT_ERRORS.some(t => msg.includes(t) || code === t);
 }
 
@@ -130,7 +131,7 @@ export class WorkerDatabaseService implements OnModuleInit {
    * Execute raw SQL query with retry logic for transient connection errors.
    * Use sparingly - prefer TypeORM query builder when possible.
    */
-  async query<T = any>(sql: string, parameters?: any[]): Promise<T[]> {
+  async query<T = any>(sql: string, parameters?: unknown[]): Promise<T[]> {
     return this.withRetry('query', async () => {
       const result = await this.dataSource.query(sql, parameters);
       this.logger.debug(`Executed raw query with ${Array.isArray(result) ? result.length : 0} results`);
@@ -162,7 +163,7 @@ export class WorkerDatabaseService implements OnModuleInit {
    *
    * See: 2026-03-26 write starvation post-mortem
    */
-  async writeQuery<T = any>(sql: string, parameters?: any[]): Promise<T[]> {
+  async writeQuery<T = any>(sql: string, parameters?: unknown[]): Promise<T[]> {
     return this.withRetry('writeQuery', async () => {
       const result = await this.writeDataSource.query(sql, parameters);
       return result;
@@ -502,7 +503,7 @@ export class WorkerDatabaseService implements OnModuleInit {
   }
 
   async insertDsAdaptConclusion(conclusion: Partial<DsAdaptConclusion>): Promise<void> {
-    await this.dsAdaptConclusionRepo.insert(conclusion);
+    await this.dsAdaptConclusionRepo.insert(conclusion as any);
     this.logger.debug(`Inserted ds_adapt_conclusion for test run: ${conclusion.test_run_id}`);
   }
 

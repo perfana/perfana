@@ -27,8 +27,8 @@ interface UnresolvedRegression {
   unit?: string;
   testRunStart: Date;
   updatedAt: Date;
-  conclusion?: any;
-  trackedConclusion?: any;
+  conclusion?: unknown;
+  trackedConclusion?: unknown;
   // Additional test run info
   version?: string;
   annotations?: string;
@@ -43,7 +43,7 @@ interface UnresolvedRegression {
 
 interface UnresolvedRegressionTableProps {
   regressions: UnresolvedRegression[];
-  trendsData?: any;
+  trendsData?: unknown;
 }
 
 export default function UnresolvedRegressionTable({ regressions, trendsData }: UnresolvedRegressionTableProps) {

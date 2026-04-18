@@ -18,7 +18,7 @@ export interface DynatraceQueryConfigFromDb {
   query: string;  // renamed from dqlQuery - contains DQL or Metrics API v2 selector
   matchMetricPattern?: string | null;
   omitGroupByVariableFromMetricName?: string[];
-  templateVariables?: Record<string, any>;
+  templateVariables?: Record<string, unknown>;
   applicationDashboardId: string;
   metricsSourceId?: string;
   panelId?: number | null;
@@ -48,7 +48,7 @@ export interface DynatraceQueryConfig {
   dashboardLabel: string;
   applicationDashboardId: string;
   metricsSourceId?: string;
-  querySettings: Record<string, any>;
+  querySettings: Record<string, unknown>;
   matchMetricPattern?: string | null;
   omitGroupByVariableFromMetricName?: string[];
   panelId?: number | null;
@@ -69,7 +69,7 @@ export interface DynatraceQueryResult {
   metricsSourceId?: string;
   panelId?: number | null;
   metricName?: string | null;  // Explicit metric name for storage (e.g., "CPU Usage")
-  result: any;
+  result: unknown;
   error: string | null;
 }
 
@@ -93,7 +93,7 @@ export interface PanelMetricsDocument {
   panelTitle: string;
   dashboardLabel: string;
   data: MetricRecord[];
-  errors: any[];
+  errors: unknown[];
   benchmarkIds: string[];
 }
 

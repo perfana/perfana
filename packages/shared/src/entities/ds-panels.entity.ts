@@ -29,22 +29,22 @@ export class DsPanels {
   benchmark_ids?: string[];
 
   @Column({ type: 'jsonb', nullable: true })
-  panel?: Record<string, any>;
+  panel?: Record<string, unknown>;
 
   @Column({ type: 'jsonb', nullable: true })
-  query_variables?: Record<string, any>;
+  query_variables?: Record<string, unknown>;
 
   @Column({ type: 'varchar', nullable: true })
   datasource_type?: string;
 
   @Column({ type: 'jsonb', nullable: true })
-  requests?: Record<string, any>;
+  requests?: Record<string, unknown>;
 
   @Column({ type: 'jsonb', nullable: true })
-  errors?: Record<string, any>;
+  errors?: Record<string, unknown>;
 
   @Column({ type: 'jsonb', nullable: true })
-  warnings?: Record<string, any>;
+  warnings?: Record<string, unknown>;
 
   @Column({ type: 'uuid', nullable: true })
   organization_id?: string;

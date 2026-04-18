@@ -7,7 +7,7 @@ import {
   CircularProgress,
 } from '@mui/material';
 import dynamic from 'next/dynamic';
-import { TrendsSeries, MetricStatistic, GRAFANA_UNITS } from '../types';
+import { TrendsSeries, MetricStatistic} from '../types';
 import { TrendsAddedSeriesList } from './TrendsAddedSeriesList';
 
 const Plot = dynamic(() => import('react-plotly.js'), { ssr: false });
@@ -16,9 +16,9 @@ interface TrendsChartProps {
   addedSeries: TrendsSeries[];
   metricsData: MetricStatistic[];
   metricsLoading: boolean;
-  plotData: any[];
-  plotLayout: any;
-  plotConfig: any;
+  plotData: unknown[];
+  plotLayout: unknown;
+  plotConfig: unknown;
   onRemoveSeries: (seriesId: string) => void;
   onClearAllSeries: () => void;
   onUpdateSeriesUnit: (seriesId: string, newUnit: string | null) => void;

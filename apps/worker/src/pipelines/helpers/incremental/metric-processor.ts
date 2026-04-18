@@ -73,17 +73,18 @@ export class MetricProcessor {
    * @param testRun - Test run context for timestep calculations
    * @returns Array of flattened metric records
    */
-  flattenGrafanaMetricsDocument(document: any, testRun: TestRunContext): FlattenedMetricRecord[] {
+  flattenGrafanaMetricsDocument(document: unknown, testRun: TestRunContext): FlattenedMetricRecord[] {
+    const doc = document as any;
     const baseData = {
-      test_run_id: document.test_run_id,
-      application_dashboard_id: document.application_dashboard_id,
-      metrics_source_id: document.metrics_source_id || null,
-      dashboard_uid: document.dashboard_uid,
-      panel_id: document.panel_id,
-      panel_title: document.panel_title,
-      dashboard_label: document.dashboard_label,
-      benchmark_ids: document.benchmark_ids,
-      errors: document.errors ? JSON.stringify(document.errors) : null,
+      test_run_id: doc.test_run_id,
+      application_dashboard_id: doc.application_dashboard_id,
+      metrics_source_id: doc.metrics_source_id || null,
+      dashboard_uid: doc.dashboard_uid,
+      panel_id: doc.panel_id,
+      panel_title: doc.panel_title,
+      dashboard_label: doc.dashboard_label,
+      benchmark_ids: doc.benchmark_ids,
+      errors: doc.errors ? JSON.stringify(doc.errors) : null,
       organization_id: testRun.organizationId || null,
       team_id: testRun.teamId || null,
       created_by: 'worker-pipeline' as const,
@@ -91,14 +92,15 @@ export class MetricProcessor {
     };
 
     const flattened: FlattenedMetricRecord[] = [];
-    const dataRecords = document.data || [];
+    const dataRecords = doc.data || [];
 
     for (const record of dataRecords) {
-      const recordTime = new Date(record.time);
+      const r = record as any;
+      const recordTime = new Date(r.time);
 
       // Recalculate timestep based on ORIGINAL test run start time
       // This ensures consistent timesteps across all incremental collections
-      let timestep: number | null = record.timestep;
+      let timestep: number | null = r.timestep;
       let isRampUp = false;
 
       if (testRun.startTime) {
@@ -112,12 +114,12 @@ export class MetricProcessor {
 
       flattened.push({
         ...baseData,
-        metric_name: record.metric_name,
-        time: record.time,
+        metric_name: r.metric_name,
+        time: r.time,
         timestep: timestep,
         ramp_up: isRampUp,
-        value: record.value,
-        unit: record.unit || null,
+        value: r.value,
+        unit: r.unit || null,
       });
     }
 
@@ -134,17 +136,18 @@ export class MetricProcessor {
    * @param testRun - Test run context for timestep calculations
    * @returns Array of flattened metric records
    */
-  flattenDynatraceMetricsDocument(document: any, testRun: TestRunContext): FlattenedMetricRecord[] {
+  flattenDynatraceMetricsDocument(document: unknown, testRun: TestRunContext): FlattenedMetricRecord[] {
+    const doc = document as any;
     const baseData = {
-      test_run_id: document.testRunId,
-      application_dashboard_id: document.applicationDashboardId,
-      metrics_source_id: document.metricsSourceId || null,
-      dashboard_uid: document.dashboardUid,
-      panel_id: document.panelId,
-      panel_title: document.panelTitle,
-      dashboard_label: document.dashboardLabel,
-      benchmark_ids: document.benchmarkIds || null,
-      errors: document.errors ? JSON.stringify(document.errors) : null,
+      test_run_id: doc.testRunId,
+      application_dashboard_id: doc.applicationDashboardId,
+      metrics_source_id: doc.metricsSourceId || null,
+      dashboard_uid: doc.dashboardUid,
+      panel_id: doc.panelId,
+      panel_title: doc.panelTitle,
+      dashboard_label: doc.dashboardLabel,
+      benchmark_ids: doc.benchmarkIds || null,
+      errors: doc.errors ? JSON.stringify(doc.errors) : null,
       organization_id: testRun.organizationId || null,
       team_id: testRun.teamId || null,
       created_by: 'worker-pipeline' as const,
@@ -152,14 +155,15 @@ export class MetricProcessor {
     };
 
     const flattened: FlattenedMetricRecord[] = [];
-    const dataRecords = document.data || [];
+    const dataRecords = doc.data || [];
 
     for (const record of dataRecords) {
-      const recordTime = new Date(record.time);
+      const record_any = record as any;
+      const recordTime = new Date(record_any.time);
 
       // Recalculate timestep based on ORIGINAL test run start time
       // This ensures consistent timesteps across all incremental collections
-      let timestep: number | null = record.timestep;
+      let timestep: number | null = record_any.timestep;
       let isRampUp = false;
 
       if (testRun.startTime) {
@@ -173,12 +177,12 @@ export class MetricProcessor {
 
       flattened.push({
         ...baseData,
-        metric_name: record.metricName,
-        time: record.time,
+        metric_name: record_any.metricName,
+        time: record_any.time,
         timestep: timestep,
         ramp_up: isRampUp,
-        value: record.value,
-        unit: record.unit || null,
+        value: record_any.value,
+        unit: record_any.unit || null,
       });
     }
 
@@ -293,7 +297,7 @@ export class MetricProcessor {
    * @param variables - Map of variable names to values
    * @returns Query string with variables replaced
    */
-  replaceTemplateVariables(query: string, variables: Record<string, any>): string {
+  replaceTemplateVariables(query: string, variables: Record<string, unknown>): string {
     let processedQuery = query;
 
     for (const [key, value] of Object.entries(variables)) {
@@ -352,16 +356,17 @@ export class MetricProcessor {
    * @returns True if the document has errors and should be skipped
    */
   processDocumentErrors(
-    document: any,
+    document: unknown,
     source: string,
     errors: string[]
   ): boolean {
-    if (document.errors && document.errors.length > 0) {
-      const errorMessages = document.errors
+    const doc = document as any;
+    if (doc.errors && doc.errors.length > 0) {
+      const errorMessages = doc.errors
         .map((e: any) => e.message || JSON.stringify(e))
         .join('; ');
-      const panelId = document.panel_id || document.panelId;
-      const panelTitle = document.panel_title || document.panelTitle;
+      const panelId = doc.panel_id || doc.panelId;
+      const panelTitle = doc.panel_title || doc.panelTitle;
       this.logger.warn(
         `Skipping ${source} panel ${panelId} (${panelTitle}): ${errorMessages}`
       );
@@ -378,10 +383,11 @@ export class MetricProcessor {
    * @param source - Source identifier for logging
    * @returns True if the document has no data and should be skipped
    */
-  isEmptyDocument(document: any, source: string): boolean {
-    if (!document.data || document.data.length === 0) {
-      const panelId = document.panel_id || document.panelId;
-      const panelTitle = document.panel_title || document.panelTitle;
+  isEmptyDocument(document: unknown, source: string): boolean {
+    const doc = document as any;
+    if (!doc.data || doc.data.length === 0) {
+      const panelId = doc.panel_id || doc.panelId;
+      const panelTitle = doc.panel_title || doc.panelTitle;
       this.logger.warn(
         `Skipping ${source} panel ${panelId} (${panelTitle}) - no data in time range`
       );

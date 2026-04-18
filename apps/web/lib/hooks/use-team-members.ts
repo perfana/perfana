@@ -15,8 +15,7 @@ import {
   updateTeamMemberRoles,
   removeTeamMember,
   removeTeamMemberByUser,
-  getMyTeamMemberships,
-  TeamMember,
+  getMyTeamMemberships, TeamMember,
   AddTeamMemberDto,
   UpdateTeamMemberRolesDto,
 } from '../api/team-members';

@@ -21,7 +21,7 @@ export class DsTrackedDifferences {
   benchmark_id?: string;
 
   @Column({ type: 'jsonb' })
-  difference_data!: Record<string, any>;
+  difference_data!: Record<string, unknown>;
 
   @Column({ type: 'uuid', nullable: true })
   organization_id?: string;
