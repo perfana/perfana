@@ -124,18 +124,19 @@ export function useSystemData({
       setSystem(systemData);
 
       // Extract environments and workloads from system data
-      if (systemData.environments) {
-        const environments = systemData.environments.map((env: any) => env.environment);
-        setAvailableEnvironments(environments);
+      const environments = (systemData as any).environments;
+      if (environments && Array.isArray(environments)) {
+        const envNames = environments.map((env: any) => env.environment);
+        setAvailableEnvironments(envNames);
 
         // Read URL params to check if scope was provided
         const envParam = searchParams.get('environment');
         const workloadParam = searchParams.get('workload');
 
         // Use URL param environment if provided and valid, otherwise auto-select first
-        const targetEnvironment = (envParam && environments.includes(envParam))
+        const targetEnvironment = (envParam && envNames.includes(envParam))
           ? envParam
-          : (!selectedEnvironment && environments.length > 0 ? environments[0] : selectedEnvironment);
+          : (!selectedEnvironment && envNames.length > 0 ? envNames[0] : selectedEnvironment);
 
         if (targetEnvironment && targetEnvironment !== selectedEnvironment) {
           setSelectedEnvironment(targetEnvironment);
@@ -143,7 +144,7 @@ export function useSystemData({
 
         // Populate workloads for the target environment
         if (targetEnvironment) {
-          const envData = systemData.environments.find((e: any) => e.environment === targetEnvironment);
+          const envData = environments.find((e: any) => e.environment === targetEnvironment);
           if (envData?.workloads) {
             setAvailableWorkloads(envData.workloads);
 
@@ -221,7 +222,8 @@ export function useSystemData({
 
     if (environment && system) {
       // Find workloads for selected environment
-      const selectedEnvData = system.environments?.find(env => env.environment === environment);
+      const systemEnvs = (system as any).environments;
+      const selectedEnvData = systemEnvs?.find((env: any) => env.environment === environment);
       if (selectedEnvData?.workloads) {
         setAvailableWorkloads(selectedEnvData.workloads);
       }
@@ -231,7 +233,7 @@ export function useSystemData({
         onDashboardsLoad(systemId, environment);
       }
     }
-  }, [system, activeTab, onDashboardsLoad]);
+  }, [system, activeTab, onDashboardsLoad, systemId]);
 
   // Handle workload selection
   const handleWorkloadChange = useCallback((workload: string) => {

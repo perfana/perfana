@@ -262,16 +262,16 @@ function LoadingState() {
   return (
     <Box sx={{ p: 3 }}>
       <Grid container spacing={3}>
-        <Grid item xs={12} md={4}>
+        <Grid size={{ xs: 12, md: 4 }}>
           <Skeleton variant="rectangular" height={200} sx={{ borderRadius: 1 }} />
         </Grid>
-        <Grid item xs={12} md={4}>
+        <Grid size={{ xs: 12, md: 4 }}>
           <Skeleton variant="rectangular" height={200} sx={{ borderRadius: 1 }} />
         </Grid>
-        <Grid item xs={12} md={4}>
+        <Grid size={{ xs: 12, md: 4 }}>
           <Skeleton variant="rectangular" height={200} sx={{ borderRadius: 1 }} />
         </Grid>
-        <Grid item xs={12}>
+        <Grid size={{ xs: 12 }}>
           <Skeleton variant="rectangular" height={300} sx={{ borderRadius: 1 }} />
         </Grid>
       </Grid>
@@ -399,7 +399,7 @@ export function OverviewTab({
         <Grid container spacing={SECTION_SPACING}>
           {/* Database Info */}
           {database && (
-            <Grid item xs={12} md={4}>
+            <Grid size={{ xs: 12, md: 4 }}>
               <Paper
                 elevation={0}
                 sx={{
@@ -434,7 +434,7 @@ export function OverviewTab({
 
           {/* Host Info */}
           {host && (
-            <Grid item xs={12} md={4}>
+            <Grid size={{ xs: 12, md: 4 }}>
               <Paper
                 elevation={0}
                 sx={{
@@ -463,7 +463,7 @@ export function OverviewTab({
 
           {/* Snapshot Info */}
           {snapshot && (
-            <Grid item xs={12} md={4}>
+            <Grid size={{ xs: 12, md: 4 }}>
               <Paper
                 elevation={0}
                 sx={{
@@ -505,7 +505,7 @@ export function OverviewTab({
       <Box sx={{ mt: SECTION_SPACING }}>
         <Grid container spacing={SECTION_SPACING}>
           {/* Load Profile Chart */}
-          <Grid item xs={12} lg={7}>
+          <Grid size={{ xs: 12, lg: 7 }}>
             <Paper
               elevation={0}
               sx={{
@@ -542,7 +542,7 @@ export function OverviewTab({
           </Grid>
 
           {/* Time Model Chart */}
-          <Grid item xs={12} lg={5}>
+          <Grid size={{ xs: 12, lg: 5 }}>
             <Paper
               elevation={0}
               sx={{
@@ -597,7 +597,7 @@ export function OverviewTab({
             </Typography>
             <Grid container spacing={2}>
               {loadProfileData?.dbTimePerSecond !== undefined && (
-                <Grid item xs={6} sm={3}>
+                <Grid size={{ xs: 6, sm: 3 }}>
                   <Typography variant="h5" fontWeight={600} color="primary">
                     {formatNumber(loadProfileData.dbTimePerSecond, 2)}
                   </Typography>
@@ -607,7 +607,7 @@ export function OverviewTab({
                 </Grid>
               )}
               {loadProfileData?.dbCpuPerSecond !== undefined && (
-                <Grid item xs={6} sm={3}>
+                <Grid size={{ xs: 6, sm: 3 }}>
                   <Typography variant="h5" fontWeight={600} color="success.main">
                     {formatNumber(loadProfileData.dbCpuPerSecond, 2)}
                   </Typography>
@@ -617,7 +617,7 @@ export function OverviewTab({
                 </Grid>
               )}
               {loadProfileData?.transactionsPerSecond !== undefined && (
-                <Grid item xs={6} sm={3}>
+                <Grid size={{ xs: 6, sm: 3 }}>
                   <Typography variant="h5" fontWeight={600} color="secondary.main">
                     {formatNumber(loadProfileData.transactionsPerSecond, 1)}
                   </Typography>
@@ -627,7 +627,7 @@ export function OverviewTab({
                 </Grid>
               )}
               {loadProfileData?.logicalReadsPerSecond !== undefined && (
-                <Grid item xs={6} sm={3}>
+                <Grid size={{ xs: 6, sm: 3 }}>
                   <Typography variant="h5" fontWeight={600} color="info.main">
                     {formatNumber(loadProfileData.logicalReadsPerSecond, 0)}
                   </Typography>

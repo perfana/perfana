@@ -29,7 +29,7 @@ export const CorrelationAnalysis: React.FC<CorrelationAnalysisProps> = ({
       </Typography>
 
       <Grid container spacing={2}>
-        <Grid item xs={12} md={6}>
+        <Grid size={{ xs: 12, md: 6 }}>
           <FormControl size="small" fullWidth>
             <InputLabel>Select Metric to Analyze</InputLabel>
             <Select
@@ -62,7 +62,7 @@ export const CorrelationAnalysis: React.FC<CorrelationAnalysisProps> = ({
           </FormControl>
         </Grid>
 
-        <Grid item xs={12} md={6}>
+        <Grid size={{ xs: 12, md: 6 }}>
           <Typography variant="body2" sx={{ mb: 1, fontWeight: 600 }}>
             Regressions Detected Together:
           </Typography>

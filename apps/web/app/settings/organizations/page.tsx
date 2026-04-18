@@ -106,7 +106,7 @@ export default function OrganizationsPage() {
       ) : (
         <Grid container spacing={3}>
           {organizations.map((org) => (
-            <Grid item xs={12} sm={6} md={4} key={org.id}>
+            <Grid size={{ xs: 12, sm: 6, md: 4 }} key={org.id}>
               <OrganizationCard
                 organization={org}
                 isSelected={org.id === currentOrganizationId}

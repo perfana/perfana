@@ -513,7 +513,7 @@ export function SectionPalette({
             <Collapse in={!showCategories || isExpanded}>
               <Grid container spacing={1}>
                 {categorySections.map((section) => (
-                  <Grid item xs={12} sm={6} md={4} key={section.type}>
+                  <Grid size={{ xs: 12, sm: 6, md: 4 }} key={section.type}>
                     {renderSectionCard(section)}
                   </Grid>
                 ))}

@@ -42,7 +42,7 @@ export default function EnvironmentWorkloadSelector({
         Configuration Scope
       </Typography>
       <Grid container spacing={3}>
-        <Grid item xs={12} md={6}>
+        <Grid size={{ xs: 12, md: 6 }}>
           <FormControl fullWidth sx={{ minWidth: 250 }} disabled={disabled}>
             <InputLabel id="environment-select-label">Environment</InputLabel>
             <Select
@@ -72,7 +72,7 @@ export default function EnvironmentWorkloadSelector({
           </FormControl>
         </Grid>
         
-        <Grid item xs={12} md={6}>
+        <Grid size={{ xs: 12, md: 6 }}>
           <FormControl fullWidth sx={{ minWidth: 250 }} disabled={!selectedEnvironment || disabled}>
             <InputLabel id="workload-select-label">Workload</InputLabel>
             <Select

@@ -4,6 +4,7 @@
 
 import { TestRun } from '@/types/test-runs';
 import { AnomalyData } from '../../../types';
+import { DeleteOptions } from '../../DeleteAnomalyDialog';
 
 /**
  * Feedback state for anomaly detection
@@ -81,9 +82,9 @@ export interface AnomalyTabContentProps {
   showConfigForm: Record<string, boolean>;
   configFormData: Record<string, any>;
   onConfigFormToggle: (rowKey: string) => void;
-  onConfigSave: (rowKey: string, data: any, scope: 'metric' | 'panel') => void;
+  onConfigSave: (rowKey: string, data: any, scope: 'metric' | 'panel') => Promise<void>;
   onRefreshAnomalyData?: () => void;
-  onDeleteAnomaly: () => void;
+  onDeleteAnomaly: (anomaly: AnomalyData, options: DeleteOptions) => Promise<void>;
   hasDistributedTracing?: boolean;
   hasDynatrace?: boolean;
   onDrillDownToDistributedTracing?: (filters: { scenario?: string; transaction?: string; sampler?: string }) => void;
@@ -110,6 +111,7 @@ export interface AnomalyDetectionExpandedCardProps {
   data: AnomalyData[];
   loading: boolean;
   error?: string;
+  trackedCount: number;
 
   // Filter state
   searchQuery: string;
@@ -144,7 +146,7 @@ export interface AnomalyDetectionExpandedCardProps {
   showConfigForm: Record<string, boolean>;
   onConfigFormToggle: (rowKey: string) => void;
   configFormData: Record<string, any>;
-  onConfigSave: (rowKey: string, data: any, scope: 'metric' | 'panel') => void;
+  onConfigSave: (rowKey: string, data: any, scope: 'metric' | 'panel') => Promise<void>;
 
   // Feedback state
   onAcceptResults: () => void;
@@ -178,7 +180,7 @@ export interface AnomalyDetectionExpandedCardProps {
   handlePanelFilterChange: (e: any) => void;
   paginatedData: AnomalyData[];
   toggleRowExpanded: (rowKey: string) => void;
-  onDeleteAnomaly: () => void;
+  onDeleteAnomaly: (anomaly: AnomalyData, options: DeleteOptions) => Promise<void>;
 
   // Drill-down functionality
   hasDistributedTracing?: boolean;

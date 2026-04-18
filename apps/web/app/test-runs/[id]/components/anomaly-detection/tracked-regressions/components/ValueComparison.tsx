@@ -14,7 +14,7 @@ export const ValueComparison: React.FC<ValueComparisonProps> = ({ regression }) 
 
   return (
     <Grid container spacing={2} sx={{ mb: 3 }}>
-      <Grid item xs={4}>
+      <Grid size={{ xs: 4 }}>
         <Typography variant="body2" color="text.secondary">
           Baseline Value
         </Typography>
@@ -22,7 +22,7 @@ export const ValueComparison: React.FC<ValueComparisonProps> = ({ regression }) 
           {formatValueWithUnit(regression.baselineValue, regression.unit)}
         </Typography>
       </Grid>
-      <Grid item xs={4}>
+      <Grid size={{ xs: 4 }}>
         <Typography variant="body2" color="text.secondary">
           Current Value
         </Typography>
@@ -30,7 +30,7 @@ export const ValueComparison: React.FC<ValueComparisonProps> = ({ regression }) 
           {formatValueWithUnit(regression.currentValue, regression.unit)}
         </Typography>
       </Grid>
-      <Grid item xs={4}>
+      <Grid size={{ xs: 4 }}>
         <Typography variant="body2" color="text.secondary">
           Change
         </Typography>

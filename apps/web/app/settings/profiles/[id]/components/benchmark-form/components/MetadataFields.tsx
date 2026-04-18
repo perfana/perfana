@@ -24,7 +24,7 @@ export function MetadataFields({
   return (
     <>
       {/* Workload Pattern */}
-      <Grid item xs={12}>
+      <Grid size={{ xs: 12 }}>
         <TextField
           fullWidth
           label="Workload Pattern (Regex)"
@@ -36,7 +36,7 @@ export function MetadataFields({
       </Grid>
 
       {/* Tags */}
-      <Grid item xs={12}>
+      <Grid size={{ xs: 12 }}>
         <Autocomplete
           multiple
           freeSolo

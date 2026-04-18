@@ -38,7 +38,7 @@ export default function AnomalyDetectionTable({
   showToast,
   showConfigForm = {},
   onConfigFormToggle = () => {},
-  onConfigSave = () => {},
+  onConfigSave = async () => {},
   onRefreshAnomalyData,
   onDeleteAnomaly,
   hasDistributedTracing = false,
@@ -133,7 +133,7 @@ export default function AnomalyDetectionTable({
                 selectedTestRunIdForRow={handlers.selectedTestRunId[rowKey]}
                 onDrawerToggle={() => onDrawerToggle(rowKey)}
                 onConfigFormToggle={() => onConfigFormToggle(rowKey)}
-                onConfigSave={handlers.handleConfigSave}
+                onConfigSave={async (rk, data, scope) => handlers.handleConfigSave(rk, data, scope)}
                 onSelectTestRun={(id) => handlers.handleSelectTestRun(rowKey, id)}
                 onResetSelectedTestRun={() => handlers.handleResetSelectedTestRun(rowKey)}
               />

@@ -1,8 +1,9 @@
 'use client';
 
 import React from 'react';
-import { Box, CircularProgress, Typography, useTheme } from '@mui/material';
+import { Box, CircularProgress, Typography, useTheme, type Theme } from '@mui/material';
 import dynamic from 'next/dynamic';
+import { Layout, Config } from 'plotly.js';
 import { GraphData, Panel, RelatedTestRun } from '../types/compare.types';
 import { TestRun } from '@/types/test-runs';
 
@@ -28,7 +29,7 @@ function generatePlotProps(
   selectedMetric: Panel | null,
   testRun: TestRun | null,
   relatedTestRuns: RelatedTestRun[],
-  theme: ReturnType<typeof useTheme>,
+  theme: Theme,
   showToast: (message: string) => void
 ) {
   // Find the baseline test run for timestep calculation
@@ -92,6 +93,10 @@ function generatePlotProps(
     new Date(a.time).getTime() - new Date(b.time).getTime()
   );
 
+  // Calculate modes based on data size
+  const baselineMode: 'lines+markers' | 'lines' = sortedBaselineMetrics.length < 50 ? 'lines+markers' : 'lines';
+  const currentMode: 'lines+markers' | 'lines' = sortedCurrentMetrics.length < 50 ? 'lines+markers' : 'lines';
+
   // Calculate ramp-up end index from sorted data
   let rampUpEndIndex: number | null = null;
   if (sortedCurrentMetrics.length > 0) {
@@ -124,7 +129,7 @@ function generatePlotProps(
       x: baselineX,
       y: sortedBaselineMetrics.map(d => d.value * conversionFactor),
       type: 'scatter' as const,
-      mode: (sortedBaselineMetrics.length < 50 ? 'lines+markers' : 'lines') as const,
+      mode: baselineMode,
       name: `Baseline (${data.baselineTestRunId})`,
       line: {
         color: '#FF6B35',
@@ -149,7 +154,7 @@ function generatePlotProps(
       x: currentX,
       y: sortedCurrentMetrics.map(d => d.value * conversionFactor),
       type: 'scatter' as const,
-      mode: (sortedCurrentMetrics.length < 50 ? 'lines+markers' : 'lines') as const,
+      mode: currentMode,
       name: `Current (${data.currentTestRunId})`,
       line: {
         color: '#2E86AB',
@@ -398,8 +403,8 @@ export default function ComparisonPlot({
     <Box sx={{ height: 480, width: '100%' }}>
       <Plot
         data={plotProps.data}
-        layout={plotProps.layout}
-        config={plotProps.config}
+        layout={plotProps.layout as unknown as Partial<Layout>}
+        config={plotProps.config as unknown as Partial<Config>}
         style={{ width: '100%', height: '480px' }}
       />
     </Box>

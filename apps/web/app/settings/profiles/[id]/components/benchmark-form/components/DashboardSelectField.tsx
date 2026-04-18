@@ -27,7 +27,7 @@ export function DashboardSelectField({
   error,
 }: DashboardSelectFieldProps) {
   return (
-    <Grid item xs={12}>
+    <Grid size={{ xs: 12 }}>
       <Autocomplete
         options={profileDashboards}
         getOptionLabel={(option) => `${option.dashboardName} (${option.grafanaLabel})`}

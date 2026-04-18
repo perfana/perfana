@@ -57,7 +57,7 @@ export function SLOFormFields({
   return (
     <>
       {/* Source Selection */}
-      <Grid item xs={12}>
+      <Grid size={{ xs: 12 }}>
         <Autocomplete
           options={(() => {
             const currentOption = getSourceOption(sloFormData.source);
@@ -108,7 +108,7 @@ export function SLOFormFields({
 
       {/* Grafana Dashboard Selection */}
       {sloFormData.source === 'grafana' && (
-        <Grid item xs={12}>
+        <Grid size={{ xs: 12 }}>
           <Autocomplete
             options={availableDashboards.length > 0 ? availableDashboards : (sloFormData.selectedDashboard ? [sloFormData.selectedDashboard] : [])}
             getOptionLabel={(option) => option.dashboard_label || ''}
@@ -170,7 +170,7 @@ export function SLOFormFields({
 
       {/* Dynatrace Dashboard Selection */}
       {sloFormData.source === 'dynatrace' && (
-        <Grid item xs={12}>
+        <Grid size={{ xs: 12 }}>
           <Autocomplete
             options={availableDynatraceDashboards.length > 0 ? availableDynatraceDashboards : (sloFormData.selectedDashboard ? [sloFormData.selectedDashboard] : [])}
             getOptionLabel={(option) => option.dashboardLabel || ''}
@@ -232,7 +232,7 @@ export function SLOFormFields({
 
       {/* Dynatrace Metrics Selection */}
       {sloFormData.source === 'dynatrace' && sloFormData.selectedDashboard && (
-        <Grid item xs={12}>
+        <Grid size={{ xs: 12 }}>
           <Autocomplete
             options={availableDynatraceMetrics.length > 0 ? availableDynatraceMetrics : (sloFormData.selectedPanel ? [sloFormData.selectedPanel] : [])}
             getOptionLabel={(option) => option.panelTitle || ''}
@@ -289,7 +289,7 @@ export function SLOFormFields({
 
       {/* Grafana Panel Selection */}
       {sloFormData.source === 'grafana' && sloFormData.selectedDashboard && (
-        <Grid item xs={12}>
+        <Grid size={{ xs: 12 }}>
           <Autocomplete
             options={availablePanels.length > 0 ? availablePanels : (sloFormData.selectedPanel ? [sloFormData.selectedPanel] : [])}
             getOptionLabel={(option) => option.title || ''}
@@ -347,7 +347,7 @@ export function SLOFormFields({
       {/* Generic Dashboard/Metric display for non-grafana/dynatrace sources */}
       {sloFormData.source !== 'grafana' && sloFormData.source !== 'dynatrace' && sloFormData.selectedDashboard && (
         <>
-          <Grid item xs={12}>
+          <Grid size={{ xs: 12 }}>
             <TextField
               label="Dashboard"
               value={sloFormData.selectedDashboard?.dashboard_label || sloFormData.selectedDashboard?.dashboardLabel || ''}
@@ -358,7 +358,7 @@ export function SLOFormFields({
             />
           </Grid>
           {sloFormData.selectedPanel && (
-            <Grid item xs={12}>
+            <Grid size={{ xs: 12 }}>
               <TextField
                 label="Metric"
                 value={sloFormData.selectedPanel?.title || sloFormData.selectedPanel?.panelTitle || ''}

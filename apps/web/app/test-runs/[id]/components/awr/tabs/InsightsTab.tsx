@@ -75,7 +75,7 @@ function LoadingState() {
     <Box sx={{ p: 2 }}>
       <Grid container spacing={2} sx={{ mb: 3 }}>
         {[1, 2, 3].map((i) => (
-          <Grid item xs={12} md={4} key={i}>
+          <Grid size={{ xs: 12, md: 4 }} key={i}>
             <Skeleton variant="rectangular" height={80} sx={{ borderRadius: 1 }} />
           </Grid>
         ))}
@@ -502,7 +502,7 @@ export function InsightsTab({
       {/* Severity Summary Cards */}
       <Grid container spacing={2} sx={{ mb: 3 }}>
         {SEVERITY_ORDER.map((severity) => (
-          <Grid item xs={12} sm={4} key={severity}>
+          <Grid size={{ xs: 12, sm: 4 }} key={severity}>
             <SeveritySummaryCard
               severity={severity}
               count={summary.bySeverity[severity]}

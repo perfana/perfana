@@ -75,7 +75,7 @@ export const TrackedRegressionsTab: React.FC<TrackedRegressionsTabProps> = ({
       {/* Tracked Regressions List - Ordered by Date (Oldest First) */}
       <Grid container spacing={2}>
         {trackedRegressions.map((regression, index) => (
-          <Grid item xs={12} key={regression.id}>
+          <Grid size={{ xs: 12 }} key={regression.id}>
             <TrackedRegressionCard
               regression={regression}
               expanded={expandedCards[regression.id] || false}

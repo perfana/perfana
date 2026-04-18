@@ -526,10 +526,11 @@ export const createTrendsPlot = (
   }
 
   if (regressionAnnotation) {
-    if (!layout.annotations) {
-      layout.annotations = [];
+    const layoutAny = layout as any;
+    if (!layoutAny.annotations) {
+      layoutAny.annotations = [];
     }
-    layout.annotations.push(regressionAnnotation);
+    layoutAny.annotations.push(regressionAnnotation);
   }
 
   return { plotData: traces, plotLayout: layout, plotConfig: config };

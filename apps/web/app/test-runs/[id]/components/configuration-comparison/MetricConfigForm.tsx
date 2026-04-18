@@ -305,7 +305,7 @@ export default function MetricConfigForm({
           Metric Classification
         </Typography>
         <Grid container spacing={2}>
-          <Grid item xs={12} md={8}>
+          <Grid size={{ xs: 12, md: 8 }}>
             <FormControl fullWidth>
               <InputLabel>Classification Category</InputLabel>
               <Select
@@ -322,7 +322,7 @@ export default function MetricConfigForm({
               </Select>
             </FormControl>
           </Grid>
-          <Grid item xs={12} md={4}>
+          <Grid size={{ xs: 12, md: 4 }}>
             <FormControlLabel
               control={
                 <Switch
@@ -362,7 +362,7 @@ export default function MetricConfigForm({
 
         {/* Threshold Values */}
         <Grid container spacing={1.5}>
-          <Grid item xs={12} md={4}>
+          <Grid size={{ xs: 12, md: 4 }}>
             <TextField
               fullWidth
               label="Percentage Threshold (%)"
@@ -374,7 +374,7 @@ export default function MetricConfigForm({
               helperText="Percentage change threshold"
             />
           </Grid>
-          <Grid item xs={12} md={4}>
+          <Grid size={{ xs: 12, md: 4 }}>
             <TextField
               fullWidth
               label="IQR Threshold"
@@ -386,7 +386,7 @@ export default function MetricConfigForm({
               helperText="Interquartile range multiplier"
             />
           </Grid>
-          <Grid item xs={12} md={4}>
+          <Grid size={{ xs: 12, md: 4 }}>
             <TextField
               fullWidth
               label="Absolute Threshold"

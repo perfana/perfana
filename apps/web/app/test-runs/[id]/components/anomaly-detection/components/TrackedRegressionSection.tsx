@@ -192,7 +192,7 @@ export default function TrackedRegressionSection({
                 alignItems: 'flex-start'
               }}>
                 <Grid container spacing={2} sx={{ flex: 1 }}>
-                  <Grid item xs={12} sm={4}>
+                  <Grid size={{ xs: 12, sm: 4 }}>
                     <Box>
                       <Typography variant="caption" color="text.secondary" sx={{ display: 'block' }}>
                         Start Date
@@ -204,7 +204,7 @@ export default function TrackedRegressionSection({
                   </Grid>
 
                   {group.regressions[0].version && (
-                    <Grid item xs={12} sm={4}>
+                    <Grid size={{ xs: 12, sm: 4 }}>
                       <Box>
                         <Typography variant="caption" color="text.secondary" sx={{ display: 'block' }}>
                           Version
@@ -217,7 +217,7 @@ export default function TrackedRegressionSection({
                   )}
 
                   {group.regressions[0].annotations && (
-                    <Grid item xs={12} sm={group.regressions[0].version ? 4 : 8}>
+                    <Grid size={{ xs: 12, sm: group.regressions[0].version ? 4 : 8 }}>
                       <Box sx={{ flex: 1 }}>
                         <Typography variant="caption" color="text.secondary" sx={{ display: 'block' }}>
                           Annotations

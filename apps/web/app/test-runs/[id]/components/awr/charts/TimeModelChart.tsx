@@ -368,13 +368,13 @@ function BreakdownView({ data, dbTime }: BreakdownViewProps) {
 
   return (
     <Grid container spacing={1} sx={{ mt: 1 }}>
-      <Grid item xs={12}>
+      <Grid size={{ xs: 12 }}>
         <Typography variant="subtitle2" sx={{ mb: 1 }}>
           Total DB Time: {formatDbTime(dbTime / 60)} ({formatDuration(dbTime)})
         </Typography>
       </Grid>
       {data.map((segment) => (
-        <Grid item xs={6} sm={4} key={segment.name}>
+        <Grid size={{ xs: 6, sm: 4 }} key={segment.name}>
           <Paper
             sx={{
               p: 1.5,

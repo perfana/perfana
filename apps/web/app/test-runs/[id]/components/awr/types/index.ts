@@ -14,6 +14,11 @@
  * ```
  */
 
+import type {
+  ParseStatus,
+  UploadAwrReportResponse,
+} from '@/lib/api/awr-reports';
+
 // Re-export API types for convenience
 export type {
   // Report types
@@ -188,6 +193,14 @@ export interface AwrTabBaseProps {
 }
 
 /**
+ * Props for the Overview tab
+ */
+export interface OverviewTabProps extends AwrTabBaseProps {
+  /** Report data to display (optional - will fetch if not provided) */
+  report?: import('@/lib/api/awr-reports').AwrReport;
+}
+
+/**
  * Props for the Top SQL tab
  */
 export interface TopSqlTabProps extends AwrTabBaseProps {
@@ -254,7 +267,7 @@ export interface InsightCardProps {
   /** Show SQL link if applicable */
   showSqlLink?: boolean;
   /** Callback when SQL ID is clicked */
-  onSqlClick?: (sqlId: string) => void;
+  onSqlClick?: (sqlId: string, sqlText?: string) => void;
   /** Compact display mode */
   compact?: boolean;
 }
@@ -857,8 +870,3 @@ export const CATEGORY_CONFIGS: CategoryDisplayConfig[] = [
   },
 ];
 
-// ==================== Upload Response Types ====================
-
-// Re-export the UploadAwrReportResponse for convenience
-import type { UploadAwrReportResponse } from '@/lib/api/awr-reports';
-export type { UploadAwrReportResponse };

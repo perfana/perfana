@@ -165,11 +165,6 @@ export default function DashboardTable({
                     <Typography variant="body2" fontWeight="medium">
                       {dashboard.dashboard_name}
                     </Typography>
-                    {dashboard.grafana_instance?.label && (
-                      <Typography variant="caption" color="text.secondary" display="block">
-                        Grafana: {dashboard.grafana_instance.label}
-                      </Typography>
-                    )}
                   </Box>
                 </TableCell>
                 <TableCell>
@@ -225,11 +220,8 @@ export default function DashboardTable({
                       {dashboard.variables
                         .filter(variable => variable && !Array.isArray(variable) && typeof variable.name === 'string' && !['system_under_test', 'test_environment'].includes(variable.name))
                         .map((variable, index) => {
-                          // Display "All" for empty values when includeAll is true
+                          // Display variable values
                           let displayValue = Array.isArray(variable.values) ? variable.values.join(', ') : variable.values;
-                          if ((!displayValue || displayValue === '') && variable.includeAll === true) {
-                            displayValue = 'All';
-                          }
                           return (
                             <Typography key={index} variant="caption">
                               <strong>{variable.name}:</strong> {displayValue || '(empty)'}
@@ -290,23 +282,9 @@ export default function DashboardTable({
                       <Tooltip title="View in Grafana">
                         <IconButton
                           size="small"
+                          disabled
                           onClick={() => {
-                            if (dashboard.grafana_instance?.client_url && dashboard.dashboard_uid) {
-                              let grafanaUrl = `${dashboard.grafana_instance.client_url}/d/${dashboard.dashboard_uid}`;
-                              const queryParts: string[] = [];
-                              if (dashboard.variables && dashboard.variables.length > 0) {
-                                dashboard.variables
-                                  .filter(v => v && !Array.isArray(v) && v.name && v.values)
-                                  .forEach(v => (Array.isArray(v.values) ? v.values : [v.values]).forEach(
-                                    val => queryParts.push(`var-${encodeURIComponent(v.name)}=${encodeURIComponent(val)}`)
-                                  ));
-                              }
-                              queryParts.push(`theme=${mode}`);
-                              grafanaUrl += `?${queryParts.join('&')}`;
-                              window.open(grafanaUrl, '_blank');
-                            } else {
-                              console.warn('Missing Grafana URL or dashboard UID');
-                            }
+                            // Grafana instance details need to be loaded separately
                           }}
                         >
                           <MonitorHeartIcon />

@@ -115,7 +115,7 @@ export default function TestRunsPage() {
     testRuns,
     onSnackbar: handleSnackbar,
     onLoadTestRuns: loadTestRuns,
-    onMonitorJob: monitorJobAndRefresh,
+    onMonitorJob: async (jobId: string) => { monitorJobAndRefresh(jobId); },
     onSetFiltersFromTestRun: setFiltersFromTestRun,
   });
 

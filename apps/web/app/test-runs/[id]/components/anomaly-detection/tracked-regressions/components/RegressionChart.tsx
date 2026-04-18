@@ -3,6 +3,7 @@
 import React from 'react';
 import { Box, Typography, useTheme } from '@mui/material';
 import dynamic from 'next/dynamic';
+import { Layout, Config } from 'plotly.js';
 import { PlotData } from '../types';
 import { createChartLayout, createChartConfig } from '../utils';
 
@@ -38,9 +39,9 @@ export const RegressionChart: React.FC<RegressionChartProps> = ({
         borderColor: 'divider'
       }}>
         <Plot
-          data={chartData}
-          layout={layout}
-          config={config}
+          data={chartData as any}
+          layout={layout as Partial<Layout>}
+          config={config as unknown as Partial<Config>}
           style={{ width: '100%' }}
         />
       </Box>

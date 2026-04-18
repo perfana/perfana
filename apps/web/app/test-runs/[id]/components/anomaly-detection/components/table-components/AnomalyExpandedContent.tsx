@@ -44,7 +44,7 @@ interface AnomalyExpandedContentProps {
   selectedTestRunIdForRow?: string;
   onDrawerToggle: () => void;
   onConfigFormToggle: () => void;
-  onConfigSave: (rowKey: string, data: any, scope: 'metric' | 'panel') => void;
+  onConfigSave: (rowKey: string, data: any, scope: 'metric' | 'panel') => Promise<void>;
   onSelectTestRun: (testRunId: string) => void;
   onResetSelectedTestRun: () => void;
 }
@@ -256,15 +256,13 @@ export function AnomalyExpandedContent({
                   if (selectedTrendData) {
                     return {
                       start_time: selectedTrendData.test_run_start,
-                      end_time: undefined,
-                      ramp_up_seconds: undefined
+                      end_time: undefined
                     };
                   }
                 }
                 return testRun ? {
                   start_time: testRun.start_time,
-                  end_time: testRun.end_time || undefined,
-                  ramp_up_seconds: testRun.ramp_up_seconds || undefined
+                  end_time: testRun.end_time || undefined
                 } : undefined;
               })()}
               thresholds={trendsData && trendsData.length > 0 ? trendsData.find(t => t.test_run_id === (selectedTestRunIdForRow || testRunId))?.thresholds : undefined}

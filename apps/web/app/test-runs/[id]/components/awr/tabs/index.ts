@@ -45,6 +45,7 @@ export { WaitEventsTab, default as WaitEventsTabDefault } from './WaitEventsTab'
 export { SegmentsTab, default as SegmentsTabDefault } from './SegmentsTab';
 export { InsightsTab, default as InsightsTabDefault } from './InsightsTab';
 export { CompareTab, default as CompareTabDefault } from './CompareTab';
+export { OverviewTab, default as OverviewTabDefault } from './OverviewTab';
 
 // ==================== Type Re-exports ====================
 
@@ -53,6 +54,7 @@ export type {
   AwrTabId,
   AwrTabConfig,
   AwrTabBaseProps,
+  OverviewTabProps,
   TopSqlTabProps,
   WaitEventsTabProps,
   SegmentsTabProps,

@@ -53,11 +53,11 @@ interface ConfigDialogsProps {
 
   // Dashboard handlers
   onAddDashboardClose: () => void;
-  onAddDashboardSubmit: (dashboardId: string, label: string, variables: VariableValue[]) => void;
+  onAddDashboardSubmit: (dashboardId: string, label: string, variables: VariableValue[]) => Promise<void>;
   onEditDashboardClose: () => void;
-  onEditDashboardSubmit: (label: string, variables: VariableValue[]) => void;
+  onEditDashboardSubmit: (label: string, variables: VariableValue[]) => Promise<void>;
   onDeleteDashboardClose: () => void;
-  onDeleteDashboardConfirm: () => void;
+  onDeleteDashboardConfirm: () => Promise<void>;
   onDeleteFromGrafanaChange: (value: boolean) => void;
 
   // SLO handlers

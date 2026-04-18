@@ -352,9 +352,9 @@ export default function TestRunDetailsPage() {
           {activeTab === 1 && (
             <Box sx={gridStyle}>
               <DynatraceCard testRun={testRun} expanded={expansionState.dynatraceExpanded} onExpand={() => { const wasCollapsed = !expansionState.dynatraceExpanded; toggleExpansion('dynatraceExpanded'); if (wasCollapsed) scrollToCard('dynatrace-card-expanded'); }} initialFilters={drillDownFilters.dynatrace} onConfigurationStatus={setHasDynatrace} />
-              <DistributedTracingCard testRun={testRun} expanded={expansionState.distributedTracingExpanded} onExpand={() => { const wasCollapsed = !expansionState.distributedTracingExpanded; toggleExpansion('distributedTracingExpanded'); if (wasCollapsed) scrollToCard('distributed-tracing-card-expanded'); }} initialFilters={drillDownFilters.distributedTracing} onConfigurationStatus={setHasDistributedTracing} />
+              <DistributedTracingCard testRun={testRun as any} expanded={expansionState.distributedTracingExpanded} onExpand={() => { const wasCollapsed = !expansionState.distributedTracingExpanded; toggleExpansion('distributedTracingExpanded'); if (wasCollapsed) scrollToCard('distributed-tracing-card-expanded'); }} initialFilters={drillDownFilters.distributedTracing} onConfigurationStatus={setHasDistributedTracing} />
               {(testRun?.systems_under_test?.pyroscope_instance_id || testRun?.system_under_test?.pyroscope_instance_id) && (
-                <PyroscopeCard testRun={testRun} expanded={expansionState.pyroscopeExpanded} onExpand={() => { const wasCollapsed = !expansionState.pyroscopeExpanded; toggleExpansion('pyroscopeExpanded'); if (wasCollapsed) scrollToCard('pyroscope-card-expanded'); }} />
+                <PyroscopeCard testRun={testRun as any} expanded={expansionState.pyroscopeExpanded} onExpand={() => { const wasCollapsed = !expansionState.pyroscopeExpanded; toggleExpansion('pyroscopeExpanded'); if (wasCollapsed) scrollToCard('pyroscope-card-expanded'); }} />
               )}
               <Box sx={cardBoxStyle(expansionState.awrExpanded)}>
                 <AwrReportCard testRun={testRun} expanded={expansionState.awrExpanded} onExpand={() => { const wasCollapsed = !expansionState.awrExpanded; toggleExpansion('awrExpanded'); if (wasCollapsed) scrollToCard('awr-report-card-expanded'); }} />
