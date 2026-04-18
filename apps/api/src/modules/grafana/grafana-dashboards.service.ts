@@ -140,21 +140,21 @@ export class GrafanaDashboardsService {
       if (results.length > 0 && results[0]) {
         const first = results[0];
         const hasGrafanaJson = !!first.grafanaJson;
-        const hasDashboard = !!first.grafanaJson?.dashboard;
-        const hasPanels = !!first.grafanaJson?.dashboard?.panels;
-        const panelsLength = first.grafanaJson?.dashboard?.panels?.length || 0;
+        const hasDashboard = !!(first.grafanaJson as any)?.dashboard;
+        const hasPanels = !!(first.grafanaJson as any)?.dashboard?.panels;
+        const panelsLength = (first.grafanaJson as any)?.dashboard?.panels?.length || 0;
         const simplePanelsLength = first.panels?.length || 0;
 
         this.logger.log(`findAll first result ${first.uid}: grafanaJson=${hasGrafanaJson}, dashboard=${hasDashboard}, panels=${hasPanels}, panelsCount=${panelsLength}, simplePanelsCount=${simplePanelsLength}`);
 
-        if (hasPanels && panelsLength > 0 && first.grafanaJson?.dashboard?.panels?.[0]) {
-          this.logger.log(`First panel keys: ${Object.keys(first.grafanaJson.dashboard.panels[0]).join(', ')}`);
+        if (hasPanels && panelsLength > 0 && (first.grafanaJson as any)?.dashboard?.panels?.[0]) {
+          this.logger.log(`First panel keys: ${Object.keys((first.grafanaJson as any).dashboard.panels[0]).join(', ')}`);
         }
       }
 
       return results.map(row => {
         // Try to get full panels from grafanaJson first, fallback to simplified panels
-        let panels = row.grafanaJson?.dashboard?.panels || row.panels;
+        let panels = (row.grafanaJson as any)?.dashboard?.panels || row.panels;
 
         // If using simplified panels, ensure y_axes_format is transformed to yAxesFormat
         if (panels === row.panels && panels) {
@@ -173,15 +173,15 @@ export class GrafanaDashboardsService {
           slug: row.slug,
           name: row.name,
           uri: row.uri,
-          templating_variables: row.templatingVariables,
+          templating_variables: row.templatingVariables as any,
           panels,
-          variables: row.variables,
+          variables: row.variables as any,
           tags: row.tags,
           used_by_sut: row.usedBySut,
           updated: row.updated?.toISOString(),
           created_at: row.createdAt.toISOString(),
           updated_at: row.createdAt.toISOString() // Note: no updated_at column in entity
-        };
+        } as any;
       });
     } catch (error) {
       this.logger.error('Error fetching Grafana dashboards:', error);
@@ -207,15 +207,15 @@ export class GrafanaDashboardsService {
 
       // Debug logging for panel structure
       const hasGrafanaJson = !!result.grafanaJson;
-      const hasDashboard = !!result.grafanaJson?.dashboard;
-      const hasPanels = !!result.grafanaJson?.dashboard?.panels;
-      const panelsLength = result.grafanaJson?.dashboard?.panels?.length || 0;
+      const hasDashboard = !!(result.grafanaJson as any)?.dashboard;
+      const hasPanels = !!(result.grafanaJson as any)?.dashboard?.panels;
+      const panelsLength = (result.grafanaJson as any)?.dashboard?.panels?.length || 0;
       const simplePanelsLength = result.panels?.length || 0;
 
       this.logger.log(`Dashboard ${result.uid}: grafanaJson=${hasGrafanaJson}, dashboard=${hasDashboard}, panels=${hasPanels}, panelsCount=${panelsLength}, simplePanelsCount=${simplePanelsLength}`);
 
       if (hasPanels && panelsLength > 0) {
-        this.logger.log(`First panel structure: ${JSON.stringify(result.grafanaJson.dashboard.panels[0]).substring(0, 200)}`);
+        this.logger.log(`First panel structure: ${JSON.stringify((result.grafanaJson as any).dashboard.panels[0]).substring(0, 200)}`);
       }
 
       return {
@@ -227,9 +227,9 @@ export class GrafanaDashboardsService {
         slug: result.slug,
         name: result.name,
         uri: result.uri,
-        templating_variables: result.templatingVariables,
-        panels: result.grafanaJson?.dashboard?.panels || result.panels,
-        variables: result.variables,
+        templating_variables: result.templatingVariables as any,
+        panels: (result.grafanaJson as any)?.dashboard?.panels || result.panels,
+        variables: result.variables as any,
         tags: result.tags,
         used_by_sut: result.usedBySut,
         updated: result.updated?.toISOString(),
@@ -282,15 +282,15 @@ export class GrafanaDashboardsService {
         slug: result.slug,
         name: result.name,
         uri: result.uri,
-        templating_variables: result.templatingVariables,
-        panels: result.grafanaJson?.dashboard?.panels || result.panels,
-        variables: result.variables,
+        templating_variables: result.templatingVariables as any,
+        panels: (result.grafanaJson as any)?.dashboard?.panels || result.panels,
+        variables: result.variables as any,
         tags: result.tags,
         used_by_sut: result.usedBySut,
         updated: result.updated?.toISOString(),
         created_at: result.createdAt.toISOString(),
         updated_at: result.createdAt.toISOString()
-      };
+      } as any;
     } catch (error) {
       this.logger.error('Error creating Grafana dashboard:', error);
       throw error;
@@ -327,7 +327,7 @@ export class GrafanaDashboardsService {
       if (updateDto.usedBySut !== undefined) updateData.usedBySut = updateDto.usedBySut;
 
       // Update with TypeORM
-      await this.grafanaDashboardRepo.update(id, updateData);
+      await this.grafanaDashboardRepo.update(id, updateData as any);
 
       // Fetch the updated record
       const result = await this.grafanaDashboardRepo.findOne({ where: { id } });
@@ -347,15 +347,15 @@ export class GrafanaDashboardsService {
         slug: result.slug,
         name: result.name,
         uri: result.uri,
-        templating_variables: result.templatingVariables,
-        panels: result.grafanaJson?.dashboard?.panels || result.panels,
-        variables: result.variables,
+        templating_variables: result.templatingVariables as any,
+        panels: (result.grafanaJson as any)?.dashboard?.panels || result.panels,
+        variables: result.variables as any,
         tags: result.tags,
         used_by_sut: result.usedBySut,
         updated: result.updated?.toISOString(),
         created_at: result.createdAt.toISOString(),
         updated_at: result.createdAt.toISOString()
-      };
+      } as any;
     } catch (error) {
       this.logger.error(`Error updating Grafana dashboard ${id}:`, error);
       throw error;

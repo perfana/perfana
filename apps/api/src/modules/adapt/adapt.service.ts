@@ -467,9 +467,9 @@ export class AdaptService {
         await this.trackedResultsRepo.update(
           { id: regression.id },
           {
-            tracked_conclusion: updatedTrackedConclusion as DsAdaptTrackedResults['tracked_conclusion'],
+            tracked_conclusion: updatedTrackedConclusion as any,
             updated_at: new Date()
-          }
+          } as any
         );
 
         resolvedCount++;
@@ -543,9 +543,9 @@ export class AdaptService {
       await this.trackedResultsRepo.update(
         { id: regressionId },
         {
-          tracked_conclusion: updatedTrackedConclusion as DsAdaptTrackedResults['tracked_conclusion'],
+          tracked_conclusion: updatedTrackedConclusion as any,
           updated_at: new Date()
-        }
+        } as any
       );
 
       return {
@@ -816,7 +816,7 @@ export class AdaptService {
       current: r.mean?.test ?? null,
       baseline: r.mean?.control ?? null,
       change_pct: r.mean?.pctDiff != null
-        ? Math.round(r.mean.pctDiff * 1000) / 10
+        ? Math.round((r.mean.pctDiff as number) * 1000) / 10
         : null,
       absolute_change: r.mean?.absDiff ?? null,
       conclusion: r.conclusion?.label ?? null,

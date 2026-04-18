@@ -105,14 +105,14 @@ export class ComparePresetsService {
         panelId: createComparePresetDto.panel_id,
         panelTitle: createComparePresetDto.panel_title,
         baselineTestRunId: createComparePresetDto.baseline_test_run_id,
-        seriesConfig: createComparePresetDto.series_config,
+        seriesConfig: createComparePresetDto.series_config as any,
         createdForTestRunId: createComparePresetDto.created_for_test_run_id,
         isGlobal: createComparePresetDto.is_global || false,
         createdBy: userId
-      });
+      } as any);
 
       const savedPreset = await this.comparePresetRepo.save(preset);
-      return this.mapToDto(savedPreset, null, null);
+      return this.mapToDto((savedPreset as unknown) as CompareFilterPreset, null, null);
     } catch (error) {
       if (error instanceof NotFoundException || error instanceof ForbiddenException || error instanceof ResourceNotFoundException) throw error;
       this.logger.error('Failed to create compare preset:', error);
@@ -355,12 +355,12 @@ export class ComparePresetsService {
       if (updateComparePresetDto.panel_id !== undefined) updateData.panelId = updateComparePresetDto.panel_id;
       if (updateComparePresetDto.panel_title !== undefined) updateData.panelTitle = updateComparePresetDto.panel_title;
       if (updateComparePresetDto.baseline_test_run_id !== undefined) updateData.baselineTestRunId = updateComparePresetDto.baseline_test_run_id;
-      if (updateComparePresetDto.series_config !== undefined) updateData.seriesConfig = updateComparePresetDto.series_config;
+      if (updateComparePresetDto.series_config !== undefined) updateData.seriesConfig = updateComparePresetDto.series_config as any;
       if (updateComparePresetDto.is_global !== undefined) updateData.isGlobal = updateComparePresetDto.is_global;
 
       await this.comparePresetRepo.update(
         { id, createdBy: userId },
-        updateData
+        updateData as any
       );
 
       // Fetch updated preset

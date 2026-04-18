@@ -253,7 +253,7 @@ export class MetricsSourcesService {
       if (dto.organizationId !== undefined) updateData.organizationId = dto.organizationId;
       if (dto.teamId !== undefined) updateData.teamId = dto.teamId;
 
-      await this.metricsSourceRepo.update(id, updateData);
+      await this.metricsSourceRepo.update(id, updateData as any);
 
       const result = await this.findOne(id, userId, roles);
       this.logger.log(`Updated metrics source: ${result.display_name} (${result.id}) by user: ${userId}`);
