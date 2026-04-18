@@ -11,6 +11,7 @@ import { SwaggerModule, DocumentBuilder } from '@nestjs/swagger';
 import helmet from 'helmet';
 import { AppModule } from './app.module';
 import { GlobalExceptionFilter } from './common/filters/global-exception.filter';
+import { ValidationException } from './common/exceptions/business.exception';
 import { ConfigService } from '@nestjs/config';
 import { IoAdapter } from '@nestjs/platform-socket.io';
 import { Server, ServerOptions } from 'socket.io';
@@ -89,7 +90,8 @@ async function bootstrap() {
         errors.forEach(err => {
           logger.error(`Validation failed on field: ${err.property}, Constraints:`, err.constraints);
         });
-        throw new Error(`Validation failed: ${errors.map(e => `${e.property}: ${Object.values(e.constraints || {}).join(', ')}`).join('; ')}`);
+        const message = `Validation failed: ${errors.map(e => `${e.property}: ${Object.values(e.constraints || {}).join(', ')}`).join('; ')}`;
+        return new ValidationException(message, errors);
       },
     })
   );
