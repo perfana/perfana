@@ -41,7 +41,7 @@ export function createTrendsPlot(
 
   // Unit conversion logic from SLO graph
   let conversionFactor = 1;
-  let adjustedYAxesFormat = unit || '';
+  let _adjustedYAxesFormat = unit || '';
   let yAxisLabel = 'Value';
   let unitSuffix = '';
 

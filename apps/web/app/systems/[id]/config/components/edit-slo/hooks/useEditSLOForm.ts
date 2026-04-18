@@ -25,7 +25,7 @@ export function useEditSLOForm({
   const [sloFormData, setSloFormData] = useState<SLOFormData>(initialSLOFormData);
 
   // Loading states
-  const [sloFormLoading, setSloFormLoading] = useState(false);
+  const [sloFormLoading, _setSloFormLoading] = useState(false);
   const [dashboardsLoading, setDashboardsLoading] = useState(false);
   const [panelsLoading, setPanelsLoading] = useState(false);
 

@@ -13,7 +13,7 @@ import {
   createApiKeySchema,
   type CreateApiKeyFormData,
 } from '@/lib/validations';
-import { SnackbarState, UseApiKeysProps } from '../types';
+import { UseApiKeysProps } from '../types';
 import { useOrganizationContext } from '@/lib/contexts/organization-context';
 
 export function useApiKeys({ onSnackbar }: UseApiKeysProps) {

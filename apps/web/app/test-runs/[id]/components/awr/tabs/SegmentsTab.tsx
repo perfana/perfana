@@ -10,7 +10,7 @@
  * ```tsx
  * <SegmentsTab
  *   reportId="report-uuid"
- *   testRunId="test-run-uuid"
+ *   _testRunId="test-run-uuid"
  *   initialSegmentType="tableScans"
  * />
  * ```
@@ -153,7 +153,7 @@ export function SegmentsTab({
   reportId,
   testRunId,
   initialSegmentType = 'tableScans',
-  onSnackbar,
+  _onSnackbar,
 }: SegmentsTabProps) {
   const theme = useTheme();
   const [selectedType, setSelectedType] = useState<SegmentType>(initialSegmentType);

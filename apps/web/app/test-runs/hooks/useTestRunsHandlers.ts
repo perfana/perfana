@@ -5,8 +5,8 @@ import { authenticatedFetch } from '@/lib/api';
 import { TestRun } from '@/types/test-runs';
 import { RefreshSources } from '@/components/dialogs/RefreshSourcesDialog';
 import { AvailableSources, fetchAvailableSources, getTestRunScope } from '@/lib/refresh-sources';
-import { SnackbarState, SelectionState, RefreshDialogState } from '../types';
-import { allSameScope, getSystemName, getEnvironment } from '../utils/test-runs-filters';
+import { SnackbarState} from '../types';
+import { allSameScope} from '../utils/test-runs-filters';
 
 interface UseTestRunsHandlersProps {
   testRuns: TestRun[];

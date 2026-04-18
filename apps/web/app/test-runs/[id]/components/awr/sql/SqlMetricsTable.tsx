@@ -44,13 +44,13 @@ import {
 } from '@mui/material';
 import {
   Code as SqlIcon,
-  ArrowUpward as AscIcon,
-  ArrowDownward as DescIcon,
+  ArrowUpward as _AscIcon,
+  ArrowDownward as _DescIcon,
 } from '@mui/icons-material';
 import type {
   SqlMetricsTableProps,
   SqlSortField,
-  SortDirection,
+  _SortDirection,
   SqlStatementDisplay,
 } from '../types';
 import {

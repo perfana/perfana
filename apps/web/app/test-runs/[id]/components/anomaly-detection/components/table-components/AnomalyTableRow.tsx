@@ -19,12 +19,12 @@ import {
 import { AnomalyData } from '../../types';
 import { formatValueWithUnit } from '@/lib/units';
 import { getConclusionColor, getClassificationDisplayInfo } from '../../helpers';
-import { formatDifference, isPerformanceTestMetricsDashboard } from '../utils';
+import { formatDifference} from '../utils';
 import StaleTooltipContent from '../StaleTooltipContent';
 
 interface AnomalyTableRowProps {
   row: AnomalyData;
-  rowKey: string;
+  _rowKey: string;
   index: number;
   isExpanded: boolean;
   isLast: boolean;

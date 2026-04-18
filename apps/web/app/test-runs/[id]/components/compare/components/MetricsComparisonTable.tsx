@@ -47,7 +47,7 @@ interface MetricsComparisonTableProps {
   testRun: TestRun | null;
   relatedTestRuns: RelatedTestRun[];
   showToast: (message: string) => void;
-  addedSeries: CompareSeries[];
+  _addedSeries: CompareSeries[];
 }
 
 export default function MetricsComparisonTable({

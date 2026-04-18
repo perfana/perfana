@@ -8,7 +8,7 @@
  */
 export function generateConfigHash(config: any): string {
   // Remove volatile fields that shouldn't affect the hash
-  const { last_modified_at, config_hash, ...relevantConfig } = config || {};
+  const { _last_modified_at, _config_hash, ...relevantConfig } = config || {};
 
   // Sort keys for consistent ordering
   const normalized = JSON.stringify(relevantConfig, Object.keys(relevantConfig).sort());

@@ -119,7 +119,7 @@ export function useDynatraceIntegration({ onSnackbar, organizationId }: UseDynat
     }
   };
 
-  const handleUpdate = async (data: CreateDynatraceConfigFormData) => {
+  const handleUpdate = async (_data: CreateDynatraceConfigFormData) => {
     if (!selectedConfig) return;
 
     try {

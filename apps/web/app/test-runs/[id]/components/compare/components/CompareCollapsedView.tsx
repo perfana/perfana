@@ -8,7 +8,7 @@ import { DataSource, RelatedTestRun } from '../types';
 
 interface CompareCollapsedViewProps {
   presets: ComparePreset[];
-  presetsLoading: boolean;
+  _presetsLoading: boolean;
   loading: boolean;
   availableSources: DataSource[];
   relatedTestRuns: RelatedTestRun[];

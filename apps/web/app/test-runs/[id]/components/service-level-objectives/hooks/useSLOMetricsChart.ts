@@ -5,7 +5,7 @@
  */
 
 import { useState, useEffect, useCallback } from 'react';
-import { useTheme, alpha } from '@mui/material';
+import { useTheme} from '@mui/material';
 import { authenticatedFetch } from '@/lib/api';
 import type {
   DSMetric,
@@ -14,7 +14,7 @@ import type {
   TestRunInfo,
 } from '../types';
 import {
-  DEFAULT_CHART_HEIGHT,
+  _DEFAULT_CHART_HEIGHT,
   METRIC_COLOR_PALETTE,
   groupDataByMetricName,
   findGlobalDataRange,

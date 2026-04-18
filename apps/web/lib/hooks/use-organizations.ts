@@ -14,7 +14,7 @@ import {
   createOrganization,
   updateOrganization,
   deleteOrganization,
-  Organization,
+  _Organization,
   CreateOrganizationDto,
   UpdateOrganizationDto,
 } from '../api/organizations';

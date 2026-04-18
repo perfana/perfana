@@ -11,7 +11,7 @@ import { buildGrafanaIframeUrl } from '../utils';
 
 interface UseDashboardsDataProps {
   testRun: TestRun;
-  testRunId: string;
+  _testRunId: string;
   dashboardsExpanded: boolean;
   onDashboardsExpand: () => void;
 }

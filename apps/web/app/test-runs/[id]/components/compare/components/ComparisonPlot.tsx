@@ -33,7 +33,7 @@ function generatePlotProps(
   showToast: (message: string) => void
 ) {
   // Find the baseline test run for timestep calculation
-  const baselineTestRun = relatedTestRuns.find(tr => tr.test_run_id === data.baselineTestRunId);
+  const _baselineTestRun = relatedTestRuns.find(tr => tr.test_run_id === data.baselineTestRunId);
 
   // Theme colors matching SLO styling
   const isDark = theme.palette.mode === 'dark';
@@ -61,7 +61,7 @@ function generatePlotProps(
 
   // Unit conversion logic from SLOChart
   const panelYAxesFormat = selectedMetric?.yAxesFormat;
-  let adjustedYAxesFormat = panelYAxesFormat;
+  let _adjustedYAxesFormat = panelYAxesFormat;
   let yAxisLabel = 'Value';
   let conversionFactor = 1;
 

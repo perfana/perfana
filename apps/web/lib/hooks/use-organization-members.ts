@@ -16,7 +16,7 @@ import {
   removeOrganizationMember,
   removeOrganizationMemberByUser,
   getMyOrganizationMemberships,
-  OrganizationMember,
+  _OrganizationMember,
   AddOrganizationMemberDto,
   UpdateOrganizationMemberRolesDto,
 } from '../api/organization-members';
@@ -26,7 +26,7 @@ import { organizationsKeys } from './use-organizations';
 export const organizationMembersKeys = {
   all: ['organization-members'] as const,
   lists: () => [...organizationMembersKeys.all, 'list'] as const,
-  list: (organizationId: string) =>
+  list: (_organizationId: string) =>
     [...organizationMembersKeys.lists(), { organizationId }] as const,
   details: () => [...organizationMembersKeys.all, 'detail'] as const,
   detail: (id: string) => [...organizationMembersKeys.details(), id] as const,

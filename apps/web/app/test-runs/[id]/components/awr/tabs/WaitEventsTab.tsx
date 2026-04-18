@@ -10,9 +10,9 @@
  * ```tsx
  * <WaitEventsTab
  *   reportId="report-uuid"
- *   testRunId="test-run-uuid"
+ *   _testRunId="test-run-uuid"
  *   groupByClass={true}
- *   onSnackbar={(msg, sev) => showSnackbar(msg, sev)}
+ *   _onSnackbar={(msg, sev) => showSnackbar(msg, sev)}
  * />
  * ```
  */
@@ -22,7 +22,7 @@ import {
   Box,
   Typography,
   Paper,
-  Grid,
+  _Grid,
   Table,
   TableBody,
   TableCell,

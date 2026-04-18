@@ -48,7 +48,7 @@ export default function TrackedRegressionsView({
   testRun,
   onResolve,
   onMarkChangepoint,
-  trendsData: externalTrendsData,
+  trendsData: _externalTrendsData,
   showToast = () => {},
 }: TrackedRegressionsViewProps) {
   const theme = useTheme();
@@ -105,7 +105,7 @@ export default function TrackedRegressionsView({
   const processAndGroupRegressions = async (regressions: TrackedRegression[]) => {
     // Check for potential data issues
     const uniqueTrackedTestRunIds = [...new Set(regressions.map(r => r.trackedTestRunId))];
-    const startDatesByTrackedId = Object.fromEntries(
+    const _startDatesByTrackedId = Object.fromEntries(
       uniqueTrackedTestRunIds.map(id => [
         id,
         regressions
@@ -143,7 +143,7 @@ export default function TrackedRegressionsView({
     );
 
     // Calculate redetection counts and resolution eligibility
-    groupedArray.forEach((group, index) => {
+    groupedArray.forEach((group, _index) => {
       // Count how many test runs have redetected these regressions
       const uniqueTestRuns = new Set(group.regressions.map(r => r.testRunId));
       group.redetectionCount = uniqueTestRuns.size;

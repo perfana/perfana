@@ -2,10 +2,10 @@
 
 import { useCallback } from 'react';
 import { authenticatedFetch } from '@/lib/api';
-import { Benchmark } from '../../types';
+import {} from '../../types';
 import {
-  SLOFormData,
-  ValidationErrors,
+  _SLOFormData,
+  _ValidationErrors,
   SaveDialogOption,
   UseEditSLOHandlersProps,
   UseEditSLOHandlersReturn,
@@ -19,12 +19,12 @@ export function useEditSLOHandlers({
   environment,
   workload,
   sloFormData,
-  setSloFormData,
-  validationErrors,
+  _setSloFormData,
+  _validationErrors,
   setValidationErrors,
   setSloFormLoading,
   setShowSaveDialog,
-  saveDialogOption,
+  _saveDialogOption,
   setSaveDialogOption,
   onSLOUpdated,
   onClose,

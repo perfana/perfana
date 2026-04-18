@@ -14,7 +14,6 @@ import {
 } from '@mui/material';
 
 // Types
-import { Benchmark } from './types';
 import { AddSLODialogProps } from './add-slo/types';
 
 // Hooks
@@ -39,7 +38,7 @@ export default function AddSLODialog({
     validationErrors,
     setValidationErrors,
     loadingStates,
-    setLoadingStates,
+    _setLoadingStates,
     availableOptions,
     dataSourceAvailability,
     fetchDashboardPanels,

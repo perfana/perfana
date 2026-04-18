@@ -20,13 +20,13 @@ interface UseComparePresetsProps {
   showToast: (message: string) => void;
 
   // Data hook state
-  selectedSource: DataSource;
-  addedSeries: CompareSeries[];
+  _selectedSource: DataSource;
+  _addedSeries: CompareSeries[];
   dashboards: ApplicationDashboard[];
   relatedTestRuns: RelatedTestRun[];
 
   // State setters
-  setSelectedSource: (source: DataSource) => void;
+  _setSelectedSource: (source: DataSource) => void;
   setSelectedDashboard: (dashboard: ApplicationDashboard | null) => void;
   setSelectedMetric: (metric: Panel | null) => void;
   setAddedSeries: (series: CompareSeries[] | ((prev: CompareSeries[]) => CompareSeries[])) => void;

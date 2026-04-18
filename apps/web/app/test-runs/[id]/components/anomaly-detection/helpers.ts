@@ -103,8 +103,8 @@ export const generateThresholdData = (drawerData: any, unit?: string) => {
   if (drawerData.checks && drawerData.statistic && drawerData.compare_config) {
     // Get primary statistic values
     const testValue = drawerData.statistic?.test || 0;
-    const controlValue = drawerData.statistic?.control || 0;
-    const observedDiff = drawerData.statistic?.diff || 0;
+    const _controlValue = drawerData.statistic?.control || 0;
+    const _observedDiff = drawerData.statistic?.diff || 0;
 
     const config = drawerData.compare_config;
     const checks = drawerData.checks || {};
@@ -197,10 +197,10 @@ export const generateThresholdData = (drawerData: any, unit?: string) => {
     // Get primary statistic values
     const testValue = drawerData.statistic?.test || 0;
     const controlValue = drawerData.statistic?.control || 0;
-    const observedDiff = drawerData.statistic?.diff || 0;
+    const _observedDiff = drawerData.statistic?.diff || 0;
 
     // Calculate percentage difference if control value exists
-    const percentageDiff = controlValue !== 0
+    const _percentageDiff = controlValue !== 0
       ? ((testValue - controlValue) / Math.abs(controlValue)) * 100
       : 0;
 

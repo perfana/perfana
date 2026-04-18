@@ -4,7 +4,7 @@ import { Box, CircularProgress, Typography, useTheme } from '@mui/material';
 import { DEFAULT_CHART_HEIGHT } from '../../utils/slo-chart-utils';
 
 export function ChartLoadingState() {
-  const theme = useTheme();
+  const _theme = useTheme();
 
   return (
     <Box

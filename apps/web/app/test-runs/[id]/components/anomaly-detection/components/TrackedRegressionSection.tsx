@@ -6,7 +6,7 @@ import {
   Card,
   CardContent,
   Typography,
-  Chip,
+  _Chip,
   Divider,
   Alert,
   Button,
@@ -20,16 +20,16 @@ import {
 } from '@mui/material';
 import { alpha } from '@mui/material/styles';
 import {
-  Timeline as TimelineIcon,
+  Timeline as _TimelineIcon,
   TrendingUp as TrendingUpIcon,
   CheckCircle as CheckCircleIcon,
-  Block as BlockIcon,
-  ChangeHistory as ChangeHistoryIcon,
+  Block as _BlockIcon,
+  ChangeHistory as _ChangeHistoryIcon,
   OpenInNew as OpenInNewIcon,
-  Apps as AppsIcon,
-  Speed as SpeedIcon,
-  Computer as ComputerIcon,
-  Public as PublicIcon,
+  Apps as _AppsIcon,
+  Speed as _SpeedIcon,
+  Computer as _ComputerIcon,
+  Public as _PublicIcon,
 } from '@mui/icons-material';
 import UnresolvedRegressionTable from './TrackedRegressionTable';
 import Link from 'next/link';
@@ -140,17 +140,17 @@ export default function TrackedRegressionSection({
     setConfirmDialog({ open: false, action: null, title: '', message: '' });
   };
 
-  const getStatusColor = () => {
+  const _getStatusColor = () => {
     if (group.isResolved) return 'success';
     return 'error';
   };
 
-  const getStatusIcon = () => {
+  const _getStatusIcon = () => {
     if (group.isResolved) return <CheckCircleIcon />;
     return <TrendingUpIcon />;
   };
 
-  const getStatusText = () => {
+  const _getStatusText = () => {
     if (group.isResolved) return 'Resolved';
     return `${group.regressions.length} Active Regression${group.regressions.length !== 1 ? 's' : ''}`;
   };

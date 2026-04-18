@@ -24,7 +24,6 @@ import {
   getUnitChipLabel,
   isUnitChipPrimary,
 } from '../utils/slo-formatters';
-import { parseValueWithUnit } from '../utils/slo-validators';
 
 interface SLOThresholdConfigProps {
   sloFormData: SLOFormData;

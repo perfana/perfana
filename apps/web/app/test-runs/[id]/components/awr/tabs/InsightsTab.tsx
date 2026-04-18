@@ -10,7 +10,7 @@
  * ```tsx
  * <InsightsTab
  *   reportId="report-uuid"
- *   testRunId="test-run-uuid"
+ *   _testRunId="test-run-uuid"
  *   showComparisonInsights={false}
  *   onSnackbar={(msg, sev) => showSnackbar(msg, sev)}
  * />
@@ -53,9 +53,9 @@ import type {
   InsightFilters,
   InsightSeverity,
   InsightCategory,
-  AwrInsight,
+  _AwrInsight,
 } from '../types';
-import { InsightsList, SeverityBadge } from '../insights';
+import { InsightsList} from '../insights';
 import { SqlTextViewer } from '../sql';
 import {
   getSeverityColor,
@@ -158,7 +158,7 @@ function EmptyState() {
 interface SeveritySummaryCardProps {
   severity: InsightSeverity;
   count: number;
-  total: number;
+  _total: number;
   onClick?: () => void;
   selected?: boolean;
 }
@@ -333,7 +333,7 @@ export function InsightsTab({
   const {
     analysis,
     insights: rawInsights,
-    severitySummary,
+    _severitySummary,
     loading,
     error,
     refetch,
@@ -341,8 +341,8 @@ export function InsightsTab({
     isReanalyzing,
     hasAnalysis,
     filterInsights,
-    getInsightsBySeverity,
-    getInsightsByCategory,
+    _getInsightsBySeverity,
+    _getInsightsByCategory,
   } = useAwrAnalysis(reportId, {
     onSnackbar,
   });

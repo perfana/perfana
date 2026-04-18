@@ -21,7 +21,7 @@ import {
 export function useConfigComparison({
   testRun,
   testRunId,
-  configExpanded,
+  _configExpanded,
   showToast,
 }: UseConfigComparisonProps) {
   const searchParams = useSearchParams();

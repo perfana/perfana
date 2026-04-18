@@ -471,7 +471,7 @@ export function useSLOSection({
   }, []);
 
   // SLO updated handler
-  const handleSloUpdated = useCallback((updatedSlo: any) => {
+  const handleSloUpdated = useCallback((_updatedSlo: any) => {
     loadCheckResults(testRunId);
     loadBenchmarks();
     setEditSloDialogOpen(false);

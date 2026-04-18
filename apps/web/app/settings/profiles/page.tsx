@@ -7,7 +7,6 @@ import {
   Typography,
   Card,
   CardContent,
-  Divider,
   CircularProgress,
   Alert,
   Table,
@@ -96,7 +95,7 @@ export default function ProfilesPage() {
     }
   };
 
-  const formatDate = (dateString: string) => {
+  const _formatDate = (dateString: string) => {
     return new Date(dateString).toLocaleString();
   };
 

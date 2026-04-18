@@ -202,7 +202,7 @@ export function getThemedChipStyles(status: 'pass' | 'fail' | 'error', isStale: 
 /**
  * @deprecated Use getThemedChipStyles with theme parameter instead
  */
-export function getChipStyles(status: 'pass' | 'fail' | 'error', isStale: boolean) {
+export function getChipStyles(status: 'pass' | 'fail' | 'error', _isStale: boolean) {
   // Fallback using static colors - components should migrate to getThemedChipStyles
   return {
     ...statusChipBaseSx,

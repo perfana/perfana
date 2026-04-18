@@ -216,7 +216,7 @@ export default function TestRunDetailsPage() {
   if (error) {
     return (
       <Box sx={{ minHeight: '100vh', display: 'flex', alignItems: 'center', justifyContent: 'center', backgroundColor: 'background.default', p: 3 }}>
-        <Alert severity="error" sx={{ maxWidth: 600 }}>{error}</Alert>
+        <Alert _severity="error" sx={{ maxWidth: 600 }}>{error}</Alert>
       </Box>
     );
   }
@@ -377,7 +377,7 @@ export default function TestRunDetailsPage() {
                     if (wasCollapsed) scrollToCard('report-card-expanded');
                   }}
                   onGenerateReport={() => setGenerateReportDialogOpen(true)}
-                  onSnackbar={(message, severity) => showToast(message)}
+                  onSnackbar={(message, _severity) => showToast(message)}
                   refreshTrigger={reportRefreshTrigger}
                 />
               </Box>
@@ -409,7 +409,7 @@ export default function TestRunDetailsPage() {
             testEnvironment: testRun.test_environment || '',
             workload: testRun.workload || '',
           }}
-          onSuccess={(reportId, jobId) => {
+          onSuccess={(reportId, _jobId) => {
             setGenerateReportDialogOpen(false);
             showToast('Generating report...');
             // Start polling for report completion

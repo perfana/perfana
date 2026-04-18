@@ -74,9 +74,9 @@ import {
   generatePdf,
   downloadPdf,
   updateShareSettings,
-  enableSharing,
-  disableSharing,
-  getShareSettings,
+  _enableSharing,
+  _disableSharing,
+  _getShareSettings,
   type ReportListItem,
   type ReportListResponse,
   type ReportSummary,
@@ -678,7 +678,7 @@ export function useGenerateReport(
   // Template generation mutation
   const templateMutation = useMutation({
     mutationFn: generateReportFromTemplate,
-    onSuccess: async (data) => {
+    onSuccess: async (_data) => {
       onNotify?.('Report generation started', 'success');
       if (testRunId) {
         await queryClient.invalidateQueries({
@@ -700,7 +700,7 @@ export function useGenerateReport(
   // Ad-hoc generation mutation
   const adHocMutation = useMutation({
     mutationFn: generateAdHocReport,
-    onSuccess: async (data) => {
+    onSuccess: async (_data) => {
       onNotify?.('Ad-hoc report generation started', 'success');
       if (testRunId) {
         await queryClient.invalidateQueries({

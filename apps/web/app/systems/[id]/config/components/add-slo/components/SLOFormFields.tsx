@@ -11,8 +11,8 @@ import {
   ListSubheader,
 } from '@mui/material';
 import { SLOFormData, ValidationErrors, DataSourceAvailability } from '../types';
-import { getSourceOptions, getSourceOption } from '../utils/slo-formatters';
-import { getSourceType, getSourceDisplayInfo, isGrafana, isPerformanceTest, SOURCE_DISPLAY } from '@/lib/metrics-source-utils';
+import {} from '../utils/slo-formatters';
+import { SOURCE_DISPLAY } from '@/lib/metrics-source-utils';
 
 interface SLOFormFieldsProps {
   sloFormData: SLOFormData;
@@ -27,10 +27,10 @@ interface SLOFormFieldsProps {
   availableDynatraceMetrics: any[];
   availablePerfMetricsDashboards: any[];
   availablePerfMetricsPanels: any[];
-  dataSourceAvailability: DataSourceAvailability;
+  _dataSourceAvailability: DataSourceAvailability;
   systemName: string;
   environment: string;
-  workload: string;
+  _workload: string;
   handleSourceChange: (sourceValue: string) => void;
   fetchDashboardPanels: (dashboardUid: string) => Promise<void>;
   fetchPerfMetricsPanels: (dashboardUid: string) => Promise<void>;
@@ -50,10 +50,10 @@ export function SLOFormFields({
   availableDynatraceMetrics,
   availablePerfMetricsDashboards,
   availablePerfMetricsPanels,
-  dataSourceAvailability,
+  _dataSourceAvailability,
   systemName,
   environment,
-  workload,
+  _workload,
   handleSourceChange,
   fetchDashboardPanels,
   fetchPerfMetricsPanels,
@@ -194,7 +194,7 @@ export function SLOFormFields({
             </li>
           )}
           renderOption={(props, option) => {
-            const { key, ...otherProps } = props;
+            const { key: _key, ...otherProps } = props;
             return (
               <Box component="li" key={option.id} {...otherProps} sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
                 <Box aria-hidden="true" sx={{ width: 6, height: 6, borderRadius: '50%', bgcolor: option.color, flexShrink: 0 }} />
@@ -245,7 +245,7 @@ export function SLOFormFields({
               />
             )}
             renderOption={(props, option) => {
-              const { key, ...otherProps } = props;
+              const { key: _key, ...otherProps } = props;
               return (
                 <Box component="li" key={`panel-${option.id}`} {...otherProps}>
                   <Box>
@@ -302,7 +302,7 @@ export function SLOFormFields({
               />
             )}
             renderOption={(props, option) => {
-              const { key, ...otherProps } = props;
+              const { key: _key, ...otherProps } = props;
               return (
                 <Box component="li" key={key} {...otherProps}>
                   <Box>
@@ -360,7 +360,7 @@ export function SLOFormFields({
               />
             )}
             renderOption={(props, option) => {
-              const { key, ...otherProps } = props;
+              const { key: _key, ...otherProps } = props;
               return (
                 <Box component="li" key={`perf-panel-${option.id}`} {...otherProps}>
                   <Box>

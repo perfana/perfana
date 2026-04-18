@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect, useMemo } from 'react';
+import { useState, useEffect} from 'react';
 import { useTheme } from '@mui/material';
 import { MetricStatistic, TrendsSeries, Panel } from '../types';
 import { getYAxisConfig } from '../utils';

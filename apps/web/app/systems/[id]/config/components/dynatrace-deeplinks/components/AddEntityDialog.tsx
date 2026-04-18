@@ -211,7 +211,7 @@ export function AddEntityDialog({
               />
             )}
             renderOption={(props, option) => {
-              const { key, ...otherProps } = props;
+              const { _key, ...otherProps } = props;
               return (
                 <Box component="li" key={option.entityId} {...otherProps}>
                   <Box>

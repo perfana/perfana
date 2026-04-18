@@ -59,7 +59,7 @@ export function ActionsMenu({ testRun, onDelete, showToast, onRefresh }: Actions
         throw new Error('Failed to start re-evaluation');
       }
 
-      const result = await response.json();
+      const _result = await response.json();
       showToast('Re-evaluation started successfully');
     } catch (err) {
       console.error('Failed to start re-evaluation:', err);
@@ -100,7 +100,7 @@ export function ActionsMenu({ testRun, onDelete, showToast, onRefresh }: Actions
         throw new Error('Failed to start re-fetch');
       }
 
-      const result = await response.json();
+      const _result = await response.json();
       showToast('Re-fetch missing data started');
     } catch (err) {
       console.error('Failed to start re-fetch:', err);

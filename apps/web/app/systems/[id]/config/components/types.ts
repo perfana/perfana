@@ -1,4 +1,4 @@
-import { SystemUnderTest } from '@/lib/types';
+import {} from '@/lib/types';
 export type { ApplicationDashboard } from '@/lib/types';
 
 export interface Benchmark {

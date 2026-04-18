@@ -4,7 +4,7 @@ import { useState, useEffect, useCallback } from 'react';
 import { useAuth } from '@/contexts/auth-context';
 import { authenticatedFetch } from '@/lib/api';
 import { TrendsPresetsAPI, PresetType } from '@/lib/trends-presets';
-import { fetchDynatraceDashboards, fetchDynatraceMetrics, DynatraceDashboard } from '@/lib/dynatrace';
+import { fetchDynatraceDashboards} from '@/lib/dynatrace';
 import { TrendsPreset } from '../TrendsPresetsTable';
 import { PresetFormData } from '../SaveTrendsPresetModal';
 import {

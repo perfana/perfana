@@ -16,7 +16,7 @@
  * ```
  */
 
-import React, { useState, useMemo, useCallback } from 'react';
+import React, { useState, useCallback } from 'react';
 import {
   Box,
   Typography,
@@ -65,9 +65,9 @@ import type {
   AvailableBaseline,
   ChangeDirection,
 } from '../types';
-import { SqlStatementCard, SqlMetricsTable, SqlTextViewer } from '../sql';
+import {, SqlTextViewer } from '../sql';
 import { InsightsList } from '../insights';
-import { LoadProfileChart } from '../charts';
+import {} from '../charts';
 import {
   formatNumber,
   formatPercentage,
@@ -197,7 +197,7 @@ function BaselineSelector({
   loading,
   error,
 }: BaselineSelectorProps) {
-  const theme = useTheme();
+  const _theme = useTheme();
 
   if (loading) {
     return <Skeleton variant="rectangular" height={56} sx={{ borderRadius: 1 }} />;
@@ -317,7 +317,7 @@ interface SummaryCardProps {
   icon: React.ReactNode;
 }
 
-function SummaryCard({ title, value, label, color, icon }: SummaryCardProps) {
+function SummaryCard({ title, value, _label, color, icon }: SummaryCardProps) {
   const theme = useTheme();
 
   return (

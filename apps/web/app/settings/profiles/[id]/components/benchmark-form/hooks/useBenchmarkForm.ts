@@ -214,7 +214,7 @@ export function useBenchmarkForm({
 
     if (validationErrors.selectedDashboard) {
       setValidationErrors(prev => {
-        const { selectedDashboard, ...rest } = prev;
+        const { selectedDashboard: _selectedDashboard, ...rest } = prev;
         return rest;
       });
     }
@@ -238,7 +238,7 @@ export function useBenchmarkForm({
 
     if (validationErrors.selectedPanel) {
       setValidationErrors(prev => {
-        const { selectedPanel, ...rest } = prev;
+        const { selectedPanel: _selectedPanel, ...rest } = prev;
         return rest;
       });
     }
@@ -252,7 +252,7 @@ export function useBenchmarkForm({
       setFormLoading(true);
       setError('');
 
-      const parsedRequirementValue = parseValueWithUnit(formData.requirementValue);
+      const _parsedRequirementValue = parseValueWithUnit(formData.requirementValue);
       const isPercentUnit = formData.selectedPanel?.yAxesFormat === 'percentunit';
       const processedRequirementValue = processPercentUnitValue(formData.requirementValue, isPercentUnit);
       const processedDefaultValue = formData.validateWithDefaultIfNoData

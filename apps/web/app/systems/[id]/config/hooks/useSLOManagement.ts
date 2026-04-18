@@ -199,7 +199,7 @@ export function useSLOManagement(): UseSLOManagementReturn {
   }, [fetchBenchmarks]);
 
   // Handle view SLO
-  const handleViewSLO = useCallback((benchmark: Benchmark) => {
+  const handleViewSLO = useCallback((_benchmark: Benchmark) => {
     // TODO: Implement View SLO details
     alert('View SLO functionality is not yet implemented in the refactored version. Please use the original page for now.');
   }, []);

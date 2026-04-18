@@ -6,15 +6,15 @@ import {
   Typography,
   IconButton,
   Tooltip,
-  CircularProgress,
+  _CircularProgress,
 } from '@mui/material';
 import { alpha, useTheme } from '@mui/material/styles';
 import {
   ExpandMore,
-  WarningAmber,
+  _WarningAmber,
   Delete,
-  CheckCircle,
-  Error as ErrorIcon,
+  _CheckCircle,
+  Error as _ErrorIcon,
 } from '@mui/icons-material';
 import { AnomalyData } from '../types';
 import KPIDisplay from '../../shared/KPIDisplay';
@@ -23,7 +23,7 @@ import SoftBadge from '../../shared/SoftBadge';
 interface AnomalyDetectionCollapsedCardProps {
   data: AnomalyData[];
   loading: boolean;
-  conclusionFilter: string;
+  _conclusionFilter: string;
   setConclusionFilter: (value: string) => void;
   onExpand: (tabIndex?: number) => void;
   onDelete?: () => void;
@@ -43,7 +43,7 @@ export default function AnomalyDetectionCollapsedCard({
 }: AnomalyDetectionCollapsedCardProps) {
   const theme = useTheme();
   const cardRef = useRef<HTMLDivElement>(null);
-  const pendingConclusionRef = useRef<string | null>(null);
+  const _pendingConclusionRef = useRef<string | null>(null);
 
   const handleAnomalyExpand = () => {
     const wasCollapsed = true;

@@ -22,7 +22,7 @@ interface UseGraphsDataProps {
   graphsExpanded: boolean;
 }
 
-export function useGraphsData({ testRun, testRunId, graphsExpanded }: UseGraphsDataProps) {
+export function useGraphsData({ testRun, testRunId, _graphsExpanded }: UseGraphsDataProps) {
   // Source selection state
   const [selectedSource, setSelectedSource] = useState<DataSource>('grafana');
   const [availableSources, setAvailableSources] = useState<DataSource[]>([]);

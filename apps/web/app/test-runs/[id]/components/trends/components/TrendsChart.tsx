@@ -7,7 +7,7 @@ import {
   CircularProgress,
 } from '@mui/material';
 import dynamic from 'next/dynamic';
-import { TrendsSeries, MetricStatistic, GRAFANA_UNITS } from '../types';
+import { TrendsSeries, MetricStatistic} from '../types';
 import { TrendsAddedSeriesList } from './TrendsAddedSeriesList';
 
 const Plot = dynamic(() => import('react-plotly.js'), { ssr: false });

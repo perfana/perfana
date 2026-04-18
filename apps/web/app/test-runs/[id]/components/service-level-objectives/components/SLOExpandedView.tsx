@@ -10,7 +10,7 @@ import {
 import { alpha } from '@mui/material/styles';
 import { MonitorHeart, Add } from '@mui/icons-material';
 import { SLOList } from './SLOList';
-import { UseSLOSectionReturn } from '../hooks';
+import {} from '../hooks';
 import { SortField, SortDirection, SamplerStat } from '../types';
 
 interface SLOExpandedViewProps {
