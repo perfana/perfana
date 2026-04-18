@@ -67,7 +67,12 @@ export function useApiKeys({ onSnackbar }: UseApiKeysProps) {
 
   const handleCreateKey = async (data: CreateApiKeyFormData) => {
     try {
-      const result = await createApiKey(data);
+      const requestData = {
+        description: data.description || '',
+        ttl: data.ttl || '30d',
+        organizationId: currentOrganizationId || data.organizationId,
+      };
+      const result = await createApiKey(requestData);
       setApiKeys([result.apiKey, ...apiKeys]);
       setCreatedToken(result.token);
       setCreateDialogOpen(false);

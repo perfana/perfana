@@ -10,9 +10,10 @@ import {
 } from '@mui/material';
 import { BookmarkBorder } from '@mui/icons-material';
 
-import { SeriesConfig } from '../types';
+import { SeriesConfig, ApplicationDashboard, Panel, MetricDataPoint, DataSource } from '../types';
 import type { TestRun } from '@/types/test-runs';
 import type { PerfanaEvent } from '@/lib/events';
+import type { GraphPreset } from '@/lib/graph-presets';
 import { GraphsSeriesList } from './GraphsSeriesList';
 import { GraphsSelectionControls } from './GraphsSelectionControls';
 import GraphsChart from '../GraphsChart';
@@ -21,24 +22,24 @@ import GraphPresetsTable from '../GraphPresetsTable';
 interface GraphsExpandedContentProps {
   testRun: TestRun;
   // Presets
-  presets: unknown[];
+  presets: GraphPreset[];
   presetsLoading: boolean;
   currentUserId?: string;
-  onLoadPreset: (presetId: string) => void;
+  onLoadPreset: (preset: GraphPreset) => Promise<void>;
   onDeletePreset: (presetId: string) => void;
   onDeleteAllPresets: () => void;
   onOpenSavePresetModal: () => void;
   // Selection controls
-  selectedDashboard: string;
-  allDashboards: unknown[];
+  selectedDashboard: ApplicationDashboard | null;
+  allDashboards: ApplicationDashboard[];
   dashboardsLoading: boolean;
   dynatraceDashboardsLoading: boolean;
-  onDashboardSelect: (dashboardId: string) => void;
-  selectedPanel: string;
-  panels: unknown[];
+  onDashboardSelect: (dashboard: ApplicationDashboard | null, source?: DataSource) => void;
+  selectedPanel: Panel | null;
+  panels: Panel[];
   panelsLoading: boolean;
-  onPanelSelect: (panelId: string) => void;
-  metrics: unknown[];
+  onPanelSelect: (panel: Panel | null) => void;
+  metrics: string[];
   metricsLoading: boolean;
   selectedMetrics: string[];
   setSelectedMetrics: (metrics: string[]) => void;
@@ -47,7 +48,7 @@ interface GraphsExpandedContentProps {
   chartName: string;
   setChartName: (name: string) => void;
   addedSeries: SeriesConfig[];
-  seriesData: Record<string, unknown>;
+  seriesData: Map<string, MetricDataPoint[]>;
   chartDataLoading: boolean;
   onRemoveSeries: (seriesId: string) => void;
   onUpdateSeriesUnit: (seriesId: string, unit: string) => void;

@@ -284,7 +284,7 @@ export default function SaveGraphPresetModal({
                         }}
                       />
                       <Chip
-                        label={config.dashboard_label || 'Dashboard'}
+                        label={config.dashboardLabel || 'Dashboard'}
                         size="small"
                         sx={{
                           background: 'linear-gradient(135deg, rgba(25, 118, 210, 0.08) 0%, rgba(30, 136, 229, 0.12) 100%)',
@@ -293,7 +293,7 @@ export default function SaveGraphPresetModal({
                         }}
                       />
                       <Chip
-                        label={config.panel_title}
+                        label={config.panelTitle}
                         size="small"
                         sx={{
                           background: 'linear-gradient(135deg, rgba(156, 39, 176, 0.08) 0%, rgba(171, 71, 188, 0.12) 100%)',
@@ -301,9 +301,9 @@ export default function SaveGraphPresetModal({
                           color: '#9c27b0'
                         }}
                       />
-                      {config.series_name && (
+                      {config.metricName && (
                         <Chip
-                          label={`Filter: "${config.series_name}"`}
+                          label={`Metric: "${config.metricName}"`}
                           size="small"
                           sx={{
                             background: 'linear-gradient(135deg, rgba(46, 125, 50, 0.08) 0%, rgba(76, 175, 80, 0.12) 100%)',

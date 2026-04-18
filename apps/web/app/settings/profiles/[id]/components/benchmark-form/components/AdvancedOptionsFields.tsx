@@ -50,7 +50,7 @@ export function AdvancedOptionsFields({
   return (
     <>
       {/* Exclude Ramp-up Time */}
-      <Grid item xs={12} md={6}>
+      <Grid size={{ xs: 12, md: 6 }}>
         <FormControlLabel
           control={
             <Checkbox
@@ -67,7 +67,7 @@ export function AdvancedOptionsFields({
       </Grid>
 
       {/* Average All Values */}
-      <Grid item xs={12} md={6}>
+      <Grid size={{ xs: 12, md: 6 }}>
         <FormControlLabel
           control={
             <Checkbox
@@ -84,7 +84,7 @@ export function AdvancedOptionsFields({
       </Grid>
 
       {/* Match Pattern */}
-      <Grid item xs={12} md={6}>
+      <Grid size={{ xs: 12, md: 6 }}>
         <TextField
           fullWidth
           label="Match Pattern"
@@ -96,7 +96,7 @@ export function AdvancedOptionsFields({
       </Grid>
 
       {/* Use Default If No Data */}
-      <Grid item xs={12} md={6}>
+      <Grid size={{ xs: 12, md: 6 }}>
         <FormControlLabel
           control={
             <Checkbox
@@ -114,7 +114,7 @@ export function AdvancedOptionsFields({
 
       {/* Default Value If No Data */}
       {validateWithDefaultIfNoData && (
-        <Grid item xs={12} md={6}>
+        <Grid size={{ xs: 12, md: 6 }}>
           <TextField
             fullWidth
             label="Default Value If No Data"

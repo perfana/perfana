@@ -139,7 +139,7 @@ export function SLOFormFields({
   return (
     <>
       {/* Unified Dashboard Selection — grouped by source type */}
-      <Grid item xs={12}>
+      <Grid size={{ xs: 12 }}>
         <Autocomplete
           options={allDashboardsMerged}
           getOptionLabel={(option) => option.label}
@@ -207,7 +207,7 @@ export function SLOFormFields({
 
       {/* Grafana Panel Selection */}
       {sloFormData.source === 'grafana' && sloFormData.selectedDashboard && (
-        <Grid item xs={12}>
+        <Grid size={{ xs: 12 }}>
           <Autocomplete
             options={availablePanels}
             getOptionLabel={(option) => option.title}
@@ -265,7 +265,7 @@ export function SLOFormFields({
 
       {/* Dynatrace Metrics Selection */}
       {sloFormData.source === 'dynatrace' && sloFormData.selectedDashboard && (
-        <Grid item xs={12}>
+        <Grid size={{ xs: 12 }}>
           <Autocomplete
             options={availableDynatraceMetrics}
             getOptionLabel={(option) => option.panelTitle}
@@ -322,7 +322,7 @@ export function SLOFormFields({
 
       {/* Performance Metrics Panel Selection */}
       {sloFormData.source === 'performance-metrics' && sloFormData.selectedDashboard && (
-        <Grid item xs={12}>
+        <Grid size={{ xs: 12 }}>
           <Autocomplete
             options={availablePerfMetricsPanels}
             getOptionLabel={(option) => option.title || ''}

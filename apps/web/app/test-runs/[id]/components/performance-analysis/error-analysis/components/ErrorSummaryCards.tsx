@@ -68,7 +68,7 @@ export function ErrorSummaryCards({ summary }: ErrorSummaryCardsProps) {
   return (
     <Grid container spacing={2} sx={{ mb: 3, width: '100%' }}>
       {/* Error Rate Card */}
-      <Grid item xs={12} sm={6} md={2.4} sx={{ flex: { md: '1 1 0' }, minWidth: 0 }}>
+      <Grid size={{ xs: 12, sm: 6, md: 2.4 }} sx={{ flex: { md: '1 1 0' }, minWidth: 0 }}>
         <SummaryCard
           value={summary.errorRate !== undefined ? `${summary.errorRate.toFixed(2)}%` : 'N/A'}
           label="Request Error Rate"
@@ -83,7 +83,7 @@ export function ErrorSummaryCards({ summary }: ErrorSummaryCardsProps) {
       </Grid>
 
       {/* Total Errors */}
-      <Grid item xs={12} sm={6} md={2.4} sx={{ flex: { md: '1 1 0' }, minWidth: 0 }}>
+      <Grid size={{ xs: 12, sm: 6, md: 2.4 }} sx={{ flex: { md: '1 1 0' }, minWidth: 0 }}>
         <SummaryCard
           value={summary.totalErrors.toLocaleString()}
           label="Total Errors"
@@ -95,7 +95,7 @@ export function ErrorSummaryCards({ summary }: ErrorSummaryCardsProps) {
       </Grid>
 
       {/* Unique Error Codes */}
-      <Grid item xs={12} sm={6} md={2.4} sx={{ flex: { md: '1 1 0' }, minWidth: 0 }}>
+      <Grid size={{ xs: 12, sm: 6, md: 2.4 }} sx={{ flex: { md: '1 1 0' }, minWidth: 0 }}>
         <SummaryCard
           value={summary.uniqueResponseCodes}
           label="Unique Error Codes"
@@ -107,7 +107,7 @@ export function ErrorSummaryCards({ summary }: ErrorSummaryCardsProps) {
       </Grid>
 
       {/* Affected Transactions */}
-      <Grid item xs={12} sm={6} md={2.4} sx={{ flex: { md: '1 1 0' }, minWidth: 0 }}>
+      <Grid size={{ xs: 12, sm: 6, md: 2.4 }} sx={{ flex: { md: '1 1 0' }, minWidth: 0 }}>
         <SummaryCard
           value={summary.transactionsWithErrors}
           label="Affected Transactions"
@@ -119,7 +119,7 @@ export function ErrorSummaryCards({ summary }: ErrorSummaryCardsProps) {
       </Grid>
 
       {/* Unique Error URLs */}
-      <Grid item xs={12} sm={6} md={2.4} sx={{ flex: { md: '1 1 0' }, minWidth: 0 }}>
+      <Grid size={{ xs: 12, sm: 6, md: 2.4 }} sx={{ flex: { md: '1 1 0' }, minWidth: 0 }}>
         <SummaryCard
           value={summary.uniqueErrorUrls}
           label="Unique Error URLs"

@@ -14,6 +14,11 @@
  * ```
  */
 
+import type {
+  ParseStatus,
+  UploadAwrReportResponse,
+} from '@/lib/api/awr-reports';
+
 // Re-export API types for convenience
 export type {
   // Report types
@@ -185,6 +190,14 @@ export interface AwrTabBaseProps {
   testRunId: string;
   /** Callback for snackbar notifications */
   onSnackbar?: (message: string, severity: SnackbarSeverity) => void;
+}
+
+/**
+ * Props for the Overview tab
+ */
+export interface OverviewTabProps extends AwrTabBaseProps {
+  /** Report data to display (optional - will fetch if not provided) */
+  report?: import('@/lib/api/awr-reports').AwrReport;
 }
 
 /**
@@ -857,8 +870,3 @@ export const CATEGORY_CONFIGS: CategoryDisplayConfig[] = [
   },
 ];
 
-// ==================== Upload Response Types ====================
-
-// Re-export the UploadAwrReportResponse for convenience
-import type { UploadAwrReportResponse } from '@/lib/api/awr-reports';
-export type { UploadAwrReportResponse };

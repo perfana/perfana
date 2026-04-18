@@ -29,7 +29,7 @@ export function PanelSelectField({
   dashboardName,
 }: PanelSelectFieldProps) {
   return (
-    <Grid item xs={12}>
+    <Grid size={{ xs: 12 }}>
       <Autocomplete
         options={panels}
         getOptionLabel={(option) => option.title}

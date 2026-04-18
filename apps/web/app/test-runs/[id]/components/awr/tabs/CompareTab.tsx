@@ -429,7 +429,7 @@ function SqlChangesView({
                 />
               </Box>
               <Grid container spacing={2}>
-                <Grid item xs={6} sm={3}>
+                <Grid size={{ xs: 6, sm: 3 }}>
                   <Typography variant="caption" color="text.secondary">Elapsed Time</Typography>
                   <Typography variant="body2" fontFamily="monospace" fontWeight={500}>
                     {formatDuration(item.current.elapsedTime ?? 0)}
@@ -446,7 +446,7 @@ function SqlChangesView({
                     </Typography>
                   )}
                 </Grid>
-                <Grid item xs={6} sm={3}>
+                <Grid size={{ xs: 6, sm: 3 }}>
                   <Typography variant="caption" color="text.secondary">CPU Time</Typography>
                   <Typography variant="body2" fontFamily="monospace" fontWeight={500}>
                     {formatDuration(item.current.cpuTime ?? 0)}
@@ -463,7 +463,7 @@ function SqlChangesView({
                     </Typography>
                   )}
                 </Grid>
-                <Grid item xs={6} sm={3}>
+                <Grid size={{ xs: 6, sm: 3 }}>
                   <Typography variant="caption" color="text.secondary">Buffer Gets</Typography>
                   <Typography variant="body2" fontFamily="monospace" fontWeight={500}>
                     {formatNumber(item.current.bufferGets ?? 0, 0)}
@@ -480,7 +480,7 @@ function SqlChangesView({
                     </Typography>
                   )}
                 </Grid>
-                <Grid item xs={6} sm={3}>
+                <Grid size={{ xs: 6, sm: 3 }}>
                   <Typography variant="caption" color="text.secondary">Executions</Typography>
                   <Typography variant="body2" fontFamily="monospace" fontWeight={500}>
                     {formatNumber(item.current.executions ?? 0, 0)}
@@ -651,7 +651,7 @@ function LoadProfileComparisonView({ metrics }: LoadProfileComparisonViewProps) 
             : theme.palette.text.secondary;
 
           return (
-            <Grid item xs={12} sm={6} md={4} key={metric.name}>
+            <Grid size={{ xs: 12, sm: 6, md: 4 }} key={metric.name}>
               <Paper
                 elevation={0}
                 sx={{
@@ -789,7 +789,7 @@ export function CompareTab({
         }}
       >
         <Grid container spacing={2} alignItems="center">
-          <Grid item xs={12} md={9}>
+          <Grid size={{ xs: 12, md: 9 }}>
             <BaselineSelector
               baselines={baselines}
               selectedId={selectedBaselineId}
@@ -798,7 +798,7 @@ export function CompareTab({
               error={baselinesError}
             />
           </Grid>
-          <Grid item xs={12} md={3}>
+          <Grid size={{ xs: 12, md: 3 }}>
             <Button
               variant="contained"
               fullWidth
@@ -870,7 +870,7 @@ export function CompareTab({
 
           {/* Summary Cards */}
           <Grid container spacing={2} sx={{ mb: 3 }}>
-            <Grid item xs={6} sm={3}>
+            <Grid size={{ xs: 6, sm: 3 }}>
               <SummaryCard
                 title="SQL Regressions"
                 value={sqlRegressions.length}
@@ -879,7 +879,7 @@ export function CompareTab({
                 icon={<TrendingDownIcon />}
               />
             </Grid>
-            <Grid item xs={6} sm={3}>
+            <Grid size={{ xs: 6, sm: 3 }}>
               <SummaryCard
                 title="SQL Improvements"
                 value={sqlImprovements.length}
@@ -888,7 +888,7 @@ export function CompareTab({
                 icon={<TrendingUpIcon />}
               />
             </Grid>
-            <Grid item xs={6} sm={3}>
+            <Grid size={{ xs: 6, sm: 3 }}>
               <SummaryCard
                 title="Wait Increases"
                 value={waitEventIncreases.length}
@@ -897,7 +897,7 @@ export function CompareTab({
                 icon={<WarningIcon />}
               />
             </Grid>
-            <Grid item xs={6} sm={3}>
+            <Grid size={{ xs: 6, sm: 3 }}>
               <SummaryCard
                 title="New SQL"
                 value={newSqlStatements.length}
@@ -947,7 +947,7 @@ export function CompareTab({
 
                   {/* Quick stats */}
                   <Grid container spacing={2} sx={{ mt: 2 }}>
-                    <Grid item xs={12} md={4}>
+                    <Grid size={{ xs: 12, md: 4 }}>
                       <Paper
                         elevation={0}
                         sx={{
@@ -964,7 +964,7 @@ export function CompareTab({
                         </Typography>
                       </Paper>
                     </Grid>
-                    <Grid item xs={12} md={4}>
+                    <Grid size={{ xs: 12, md: 4 }}>
                       <Paper
                         elevation={0}
                         sx={{
@@ -981,7 +981,7 @@ export function CompareTab({
                         </Typography>
                       </Paper>
                     </Grid>
-                    <Grid item xs={12} md={4}>
+                    <Grid size={{ xs: 12, md: 4 }}>
                       <Paper
                         elevation={0}
                         sx={{

@@ -362,12 +362,7 @@ export function GenerateReportDialog({
         test_run_id: testRunId,
         name: `Report - ${new Date().toLocaleString()}`,
         sections,
-        styling: {
-          paper_format: 'a4',
-          page_orientation: 'portrait',
-          include_toc: false,
-          include_executive_summary: false,
-        },
+        styling: {},
         save_as_template: saveAsTemplate,
         template_name: saveAsTemplate ? templateName.trim() : undefined,
       });
@@ -838,7 +833,7 @@ function LayoutSectionCard({ id, section, index, onDelete, onConfigChange, onMov
     const sectionConfig = {
       ...(section.config || {}),
       ...(section.comment !== undefined && { comment: section.comment }),
-    };
+    } as any;
 
     switch (section.type) {
       case 'header':

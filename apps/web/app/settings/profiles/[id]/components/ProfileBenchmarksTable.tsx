@@ -196,11 +196,6 @@ export default function ProfileBenchmarksTable({
                     <Typography variant="body2" fontWeight="medium">
                       {benchmark.panelTitle || 'Unnamed Metric'}
                     </Typography>
-                    {benchmark.dashboardLabel && (
-                      <Typography variant="caption" color="text.secondary" display="block">
-                        {benchmark.dashboardLabel}
-                      </Typography>
-                    )}
                     {benchmark.grafanaInstance && (
                       <Typography variant="caption" color="text.secondary" display="block">
                         {benchmark.grafanaInstance}

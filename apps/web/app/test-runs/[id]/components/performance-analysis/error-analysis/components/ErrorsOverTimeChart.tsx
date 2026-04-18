@@ -49,7 +49,7 @@ export function ErrorsOverTimeChart({
   return (
     <Grid container spacing={2} sx={{ mb: 3, width: '100%' }}>
       {/* Errors Over Time Chart */}
-      <Grid item xs={12} md={9.6} sx={{ flex: { md: '1 1 80%' }, minWidth: 0 }}>
+      <Grid size={{ xs: 12, md: 9.6 }} sx={{ flex: { md: '1 1 80%' }, minWidth: 0 }}>
         <Paper
           sx={{
             p: 3,
@@ -134,7 +134,7 @@ export function ErrorsOverTimeChart({
       </Grid>
 
       {/* Errors by Code */}
-      <Grid item xs={12} md={2.4} sx={{ flex: { md: '1 1 20%' }, minWidth: 0 }}>
+      <Grid size={{ xs: 12, md: 2.4 }} sx={{ flex: { md: '1 1 20%' }, minWidth: 0 }}>
         <ErrorsByCodeTable errorsByCode={errorsByCode} />
       </Grid>
     </Grid>

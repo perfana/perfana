@@ -151,19 +151,19 @@ export function ErrorDetailsDialog({
       <DialogContent dividers sx={{ p: 3 }}>
         <Box>
           <Grid container spacing={3}>
-            <Grid item xs={12} sm={6}>
+            <Grid size={{ xs: 12, sm: 6 }}>
               <DetailLabel label="Transaction" />
               <Typography variant="body1" sx={{ fontWeight: 600, mb: 2 }}>
                 {selectedError.transactionName}
               </Typography>
             </Grid>
-            <Grid item xs={12} sm={6}>
+            <Grid size={{ xs: 12, sm: 6 }}>
               <DetailLabel label="Sampler" />
               <Typography variant="body1" sx={{ fontWeight: 600, mb: 2 }}>
                 {selectedError.samplerName}
               </Typography>
             </Grid>
-            <Grid item xs={12} sm={6}>
+            <Grid size={{ xs: 12, sm: 6 }}>
               <DetailLabel label="Response Code" />
               <FancyChip
                 label={selectedError.responseCode}
@@ -171,7 +171,7 @@ export function ErrorDetailsDialog({
                 sx={{ mb: 2 }}
               />
             </Grid>
-            <Grid item xs={12} sm={6}>
+            <Grid size={{ xs: 12, sm: 6 }}>
               <DetailLabel label="Response Time" />
               <Typography
                 variant="body1"
@@ -184,7 +184,7 @@ export function ErrorDetailsDialog({
                 {selectedError.responseTime} ms
               </Typography>
             </Grid>
-            <Grid item xs={12}>
+            <Grid size={{ xs: 12 }}>
               <DetailLabel label="Timestamp" />
               <Typography
                 variant="body1"
@@ -196,7 +196,7 @@ export function ErrorDetailsDialog({
                 {new Date(selectedError.time).toLocaleString()}
               </Typography>
             </Grid>
-            <Grid item xs={12}>
+            <Grid size={{ xs: 12 }}>
               <DetailLabel label="URL" />
               <CodeBlock
                 content={selectedError.url}
@@ -206,7 +206,7 @@ export function ErrorDetailsDialog({
               />
             </Grid>
             {selectedError.responseMessage && (
-              <Grid item xs={12}>
+              <Grid size={{ xs: 12 }}>
                 <DetailLabel label="Response Message" />
                 <CodeBlock
                   content={selectedError.responseMessage}
@@ -217,7 +217,7 @@ export function ErrorDetailsDialog({
               </Grid>
             )}
             {selectedError.responseData && (
-              <Grid item xs={12}>
+              <Grid size={{ xs: 12 }}>
                 <DetailLabel label="Response Data" />
                 <CodeBlock
                   content={selectedError.responseData}
@@ -227,13 +227,13 @@ export function ErrorDetailsDialog({
               </Grid>
             )}
             {selectedError.requestHeaders && (
-              <Grid item xs={12}>
+              <Grid size={{ xs: 12 }}>
                 <DetailLabel label="Request Headers" />
                 <CodeBlock content={selectedError.requestHeaders} />
               </Grid>
             )}
             {selectedError.responseHeaders && (
-              <Grid item xs={12}>
+              <Grid size={{ xs: 12 }}>
                 <DetailLabel label="Response Headers" />
                 <CodeBlock content={selectedError.responseHeaders} />
               </Grid>

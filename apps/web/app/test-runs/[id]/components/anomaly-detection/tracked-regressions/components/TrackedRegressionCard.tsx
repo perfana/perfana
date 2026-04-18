@@ -52,7 +52,7 @@ export const TrackedRegressionCard: React.FC<TrackedRegressionCardProps> = ({
     >
       <CardContent>
         <Grid container alignItems="center" spacing={2}>
-          <Grid item xs={12} md={8}>
+          <Grid size={{ xs: 12, md: 8 }}>
             <RegressionHeader
               regression={regression}
               expanded={expanded}
@@ -63,7 +63,7 @@ export const TrackedRegressionCard: React.FC<TrackedRegressionCardProps> = ({
             />
           </Grid>
 
-          <Grid item xs={12} md={4}>
+          <Grid size={{ xs: 12, md: 4 }}>
             <Box sx={{ display: 'flex', justifyContent: 'flex-end', gap: 1 }}>
               <RegressionActionButtons
                 regressionId={regression.id}

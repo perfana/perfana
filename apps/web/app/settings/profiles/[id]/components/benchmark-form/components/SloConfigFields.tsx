@@ -68,7 +68,7 @@ export function SloConfigFields({
   return (
     <>
       {/* Evaluation Type */}
-      <Grid item xs={12}>
+      <Grid size={{ xs: 12 }}>
         <Autocomplete
           options={EVALUATION_TYPES}
           getOptionLabel={(option) => option.label}
@@ -101,7 +101,7 @@ export function SloConfigFields({
       </Grid>
 
       {/* Requirement Operator */}
-      <Grid item xs={12}>
+      <Grid size={{ xs: 12 }}>
         <Autocomplete
           options={REQUIREMENT_OPERATORS}
           getOptionLabel={(option) => option.label}
@@ -134,7 +134,7 @@ export function SloConfigFields({
       </Grid>
 
       {/* Requirement Value */}
-      <Grid item xs={12}>
+      <Grid size={{ xs: 12 }}>
         <TextField
           fullWidth
           label="Requirement Value"

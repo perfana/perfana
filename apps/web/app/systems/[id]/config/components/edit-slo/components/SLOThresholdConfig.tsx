@@ -54,7 +54,7 @@ export function SLOThresholdConfig({
   return (
     <>
       {/* Evaluate Type */}
-      <Grid item xs={12}>
+      <Grid size={{ xs: 12 }}>
         <Autocomplete
           options={EVALUATE_TYPE_OPTIONS}
           getOptionLabel={(option) => option.label}
@@ -92,7 +92,7 @@ export function SLOThresholdConfig({
       </Grid>
 
       {/* Requirement Operator */}
-      <Grid item xs={12}>
+      <Grid size={{ xs: 12 }}>
         <Autocomplete
           options={REQUIREMENT_OPERATOR_OPTIONS}
           getOptionLabel={(option) => option.label}
@@ -130,7 +130,7 @@ export function SLOThresholdConfig({
       </Grid>
 
       {/* Requirement Value */}
-      <Grid item xs={12}>
+      <Grid size={{ xs: 12 }}>
         <TextField
           fullWidth
           label="Requirement Value"
@@ -169,7 +169,7 @@ export function SLOThresholdConfig({
       </Grid>
 
       {/* Tags */}
-      <Grid item xs={12}>
+      <Grid size={{ xs: 12 }}>
         <Autocomplete
           multiple
           freeSolo
@@ -197,7 +197,7 @@ export function SLOThresholdConfig({
 
       {/* Advanced Options */}
       {/* Exclude Ramp-up Time */}
-      <Grid item xs={12} md={6}>
+      <Grid size={{ xs: 12, md: 6 }}>
         <FormControlLabel
           control={
             <Checkbox
@@ -214,7 +214,7 @@ export function SLOThresholdConfig({
       </Grid>
 
       {/* Average All Values */}
-      <Grid item xs={12} md={6}>
+      <Grid size={{ xs: 12, md: 6 }}>
         <FormControlLabel
           control={
             <Checkbox
@@ -231,7 +231,7 @@ export function SLOThresholdConfig({
       </Grid>
 
       {/* Match Pattern */}
-      <Grid item xs={12} md={6}>
+      <Grid size={{ xs: 12, md: 6 }}>
         <TextField
           fullWidth
           label="Match Pattern"
@@ -243,7 +243,7 @@ export function SLOThresholdConfig({
       </Grid>
 
       {/* Use Default If No Data */}
-      <Grid item xs={12} md={6}>
+      <Grid size={{ xs: 12, md: 6 }}>
         <FormControlLabel
           control={
             <Checkbox
@@ -263,7 +263,7 @@ export function SLOThresholdConfig({
 
       {/* Default Value If No Data */}
       {sloFormData.validateWithDefaultIfNoData && (
-        <Grid item xs={12} md={6}>
+        <Grid size={{ xs: 12, md: 6 }}>
           <TextField
             fullWidth
             label="Default Value If No Data"
