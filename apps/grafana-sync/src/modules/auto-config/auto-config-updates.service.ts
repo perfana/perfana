@@ -151,7 +151,8 @@ export class AutoConfigUpdatesService {
         dashboardUid: applicationDashboard.dashboardUid,
         templateDashboardUid: applicationDashboard.templateDashboardUid,
         tags: applicationDashboard.tags || [],
-        variables: (applicationDashboard.variables as unknown as Record<string, unknown> | null) || null,
+        variables:
+          (applicationDashboard.variables as unknown as Record<string, unknown> | null) || null,
         organizationId: applicationDashboard.organizationId || null, // RBAC: inherit from test run
       };
 

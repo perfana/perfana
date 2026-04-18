@@ -8,7 +8,7 @@
  */
 export function generateConfigHash(config: unknown): string {
   // Remove volatile fields that shouldn't affect the hash
-  const { _last_modified_at, _config_hash, ...relevantConfig } = config || {};
+  const { _last_modified_at, _config_hash, ...relevantConfig } = (config as Record<string, unknown>) || {};
 
   // Sort keys for consistent ordering
   const normalized = JSON.stringify(relevantConfig, Object.keys(relevantConfig).sort());
@@ -55,11 +55,12 @@ export function isResultStale(
  * Used to detect meaningful changes that require re-analysis
  */
 export function generateThresholdHash(thresholds: unknown): string {
+  const typedThresholds = thresholds as Record<string, unknown>;
   const relevantFields = {
-    aggregation: thresholds?.aggregation,
-    percentageThreshold: thresholds?.percentageThreshold,
-    iqrThreshold: thresholds?.iqrThreshold,
-    absoluteThreshold: thresholds?.absoluteThreshold
+    aggregation: typedThresholds?.aggregation,
+    percentageThreshold: typedThresholds?.percentageThreshold,
+    iqrThreshold: typedThresholds?.iqrThreshold,
+    absoluteThreshold: typedThresholds?.absoluteThreshold
   };
 
   return generateConfigHash(relevantFields);

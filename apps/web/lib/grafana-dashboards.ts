@@ -31,23 +31,24 @@ export interface GrafanaDashboardQuery {
 
 // Transform snake_case API response to camelCase
 function transformGrafanaDashboard(data: unknown): GrafanaDashboard {
+  const typedData = data as Record<string, unknown>;
   return {
-    id: data.id,
-    grafanaInstanceId: data.grafana_instance_id || data.grafanaInstanceId,
-    grafanaId: data.grafana_id || data.grafanaId,
-    datasourceType: data.datasource_type || data.datasourceType,
-    uid: data.uid,
-    slug: data.slug,
-    name: data.name,
-    uri: data.uri,
-    templatingVariables: data.templating_variables || data.templatingVariables,
-    panels: data.panels,
-    variables: data.variables,
-    tags: data.tags || [],
-    usedBySut: data.used_by_sut || data.usedBySut || [],
-    updated: data.updated,
-    createdAt: data.created_at || data.createdAt,
-    updatedAt: data.updated_at || data.updatedAt,
+    id: typedData.id as string,
+    grafanaInstanceId: (typedData.grafana_instance_id || typedData.grafanaInstanceId) as string,
+    grafanaId: (typedData.grafana_id || typedData.grafanaId) as number,
+    datasourceType: (typedData.datasource_type || typedData.datasourceType) as string | undefined,
+    uid: typedData.uid as string,
+    slug: typedData.slug as string | undefined,
+    name: typedData.name as string,
+    uri: typedData.uri as string | undefined,
+    templatingVariables: (typedData.templating_variables || typedData.templatingVariables) as unknown[] | undefined,
+    panels: typedData.panels as unknown[] | undefined,
+    variables: typedData.variables as unknown[] | undefined,
+    tags: (typedData.tags || []) as string[],
+    usedBySut: (typedData.used_by_sut || typedData.usedBySut || []) as string[],
+    updated: typedData.updated as string | undefined,
+    createdAt: (typedData.created_at || typedData.createdAt) as string,
+    updatedAt: (typedData.updated_at || typedData.updatedAt) as string,
   };
 }
 
