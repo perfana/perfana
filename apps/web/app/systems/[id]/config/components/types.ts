@@ -1,4 +1,4 @@
-import {} from '@/lib/types';
+import { SystemUnderTest } from '@/lib/types';
 export type { ApplicationDashboard } from '@/lib/types';
 
 export interface Benchmark {
@@ -14,7 +14,7 @@ export interface Benchmark {
   application_dashboard_id?: string;
   metrics_source_id?: string;
   generic_check_id?: string;
-  configuration: unknown;
+  configuration: any;
   config_title?: string;
   config_id?: string;
   evaluate_type?: string;
@@ -56,7 +56,7 @@ export interface GrafanaDashboard {
   uri: string;
   datasource_type: string;
   tags: string[];
-  panels?: unknown[];
+  panels?: any[];
   templating_variables?: Array<{
     name: string;
     type: string;

@@ -44,13 +44,13 @@ export interface AnomalyTabContentProps {
   searchQuery: string;
   handleSearchChange: (e: React.ChangeEvent<HTMLInputElement>) => void;
   conclusionFilter: string;
-  handleConclusionFilterChange: (e: unknown) => void;
+  handleConclusionFilterChange: (e: any) => void;
   classificationFilter: string;
-  handleClassificationFilterChange: (e: unknown) => void;
+  handleClassificationFilterChange: (e: any) => void;
   dashboardFilter: string;
-  handleDashboardFilterChange: (e: unknown) => void;
+  handleDashboardFilterChange: (e: any) => void;
   panelFilter: string;
-  handlePanelFilterChange: (e: unknown) => void;
+  handlePanelFilterChange: (e: any) => void;
   conclusionsForDropdown: string[];
   classificationsForDropdown: string[];
   dashboardsForDropdown: string[];
@@ -76,13 +76,13 @@ export interface AnomalyTabContentProps {
   chartKey: Record<string, number>;
   drawerOpen: Record<string, boolean>;
   onDrawerToggle: (rowKey: string) => void;
-  drawerData: Record<string, unknown>;
+  drawerData: Record<string, any>;
   drawerLoading: Record<string, boolean>;
   showToast: (message: string) => void;
   showConfigForm: Record<string, boolean>;
-  configFormData: Record<string, unknown>;
+  configFormData: Record<string, any>;
   onConfigFormToggle: (rowKey: string) => void;
-  onConfigSave: (rowKey: string, data: unknown, scope: 'metric' | 'panel') => Promise<void>;
+  onConfigSave: (rowKey: string, data: any, scope: 'metric' | 'panel') => Promise<void>;
   onRefreshAnomalyData?: () => void;
   onDeleteAnomaly: (anomaly: AnomalyData, options: DeleteOptions) => Promise<void>;
   hasDistributedTracing?: boolean;
@@ -134,7 +134,7 @@ export interface AnomalyDetectionExpandedCardProps {
   // Drawer state
   drawerOpen: Record<string, boolean>;
   onDrawerToggle: (rowKey: string) => void;
-  drawerData: Record<string, unknown>;
+  drawerData: Record<string, any>;
   drawerLoading: Record<string, boolean>;
 
   // Trends state
@@ -145,8 +145,8 @@ export interface AnomalyDetectionExpandedCardProps {
   // Configuration state
   showConfigForm: Record<string, boolean>;
   onConfigFormToggle: (rowKey: string) => void;
-  configFormData: Record<string, unknown>;
-  onConfigSave: (rowKey: string, data: unknown, scope: 'metric' | 'panel') => Promise<void>;
+  configFormData: Record<string, any>;
+  onConfigSave: (rowKey: string, data: any, scope: 'metric' | 'panel') => Promise<void>;
 
   // Feedback state
   onAcceptResults: () => void;
@@ -172,12 +172,12 @@ export interface AnomalyDetectionExpandedCardProps {
   panelsForDropdown: string[];
   filteredData: AnomalyData[];
   handleSearchChange: (e: React.ChangeEvent<HTMLInputElement>) => void;
-  handleConclusionFilterChange: (e: unknown) => void;
-  handleClassificationFilterChange: (e: unknown) => void;
+  handleConclusionFilterChange: (e: any) => void;
+  handleClassificationFilterChange: (e: any) => void;
   dashboardFilter: string;
-  handleDashboardFilterChange: (e: unknown) => void;
+  handleDashboardFilterChange: (e: any) => void;
   panelFilter: string;
-  handlePanelFilterChange: (e: unknown) => void;
+  handlePanelFilterChange: (e: any) => void;
   paginatedData: AnomalyData[];
   toggleRowExpanded: (rowKey: string) => void;
   onDeleteAnomaly: (anomaly: AnomalyData, options: DeleteOptions) => Promise<void>;

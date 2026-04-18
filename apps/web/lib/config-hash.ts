@@ -8,7 +8,8 @@
  */
 export function generateConfigHash(config: unknown): string {
   // Remove volatile fields that shouldn't affect the hash
-  const { _last_modified_at, _config_hash, ...relevantConfig } = (config as Record<string, unknown>) || {};
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
+  const { last_modified_at, config_hash, ...relevantConfig } = (config as Record<string, unknown>) || {};
 
   // Sort keys for consistent ordering
   const normalized = JSON.stringify(relevantConfig, Object.keys(relevantConfig).sort());

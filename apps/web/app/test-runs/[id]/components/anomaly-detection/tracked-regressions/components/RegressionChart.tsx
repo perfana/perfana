@@ -39,7 +39,7 @@ export const RegressionChart: React.FC<RegressionChartProps> = ({
         borderColor: 'divider'
       }}>
         <Plot
-          data={chartData as unknown}
+          data={chartData as any}
           layout={layout as Partial<Layout>}
           config={config as unknown as Partial<Config>}
           style={{ width: '100%' }}

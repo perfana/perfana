@@ -4,6 +4,12 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
+## [0.2.38.0] - 2026-04-18
+
+### Fixed
+- `config-hash.ts`: volatile field exclusion was broken by the lint cleanup pass, which prefixed `last_modified_at` and `config_hash` with underscores (ESLint unused-vars) while the actual config object uses the non-prefixed names. Hashes now correctly exclude these fields so config comparisons ignore timestamp and hash metadata.
+- Anomaly detection, AWR insights, `useSystemData`: kept `as any` casts where `as unknown` (introduced by an overlapping lint pass) would prevent TypeScript from accessing properties directly — `unknown` requires explicit type narrowing before property access.
+
 ## [0.2.37.0] - 2026-04-18
 
 ### Fixed

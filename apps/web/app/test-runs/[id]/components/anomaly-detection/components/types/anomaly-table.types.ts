@@ -11,7 +11,7 @@ export interface ConfigSetting {
 export interface StaleTooltipContentProps {
   row: AnomalyData;
   testRunId: string;
-  drawerData?: Record<string, unknown>;
+  drawerData?: Record<string, any>;
   rowIndex: number;
 }
 
@@ -41,15 +41,15 @@ export interface AnomalyDetectionTableProps {
   chartKey: Record<string, number>;
   drawerOpen: Record<string, boolean>;
   onDrawerToggle: (rowKey: string) => void;
-  drawerData: Record<string, unknown>;
+  drawerData: Record<string, any>;
   drawerLoading: Record<string, boolean>;
   showToast?: (message: string) => void;
 
   // Additional drawer and config functionality
   showConfigForm?: Record<string, boolean>;
-  configFormData?: Record<string, unknown>;
+  configFormData?: Record<string, any>;
   onConfigFormToggle?: (rowKey: string) => void;
-  onConfigSave?: (rowKey: string, data: unknown, scope: 'metric' | 'panel') => Promise<void>;
+  onConfigSave?: (rowKey: string, data: any, scope: 'metric' | 'panel') => Promise<void>;
 
   // Re-analysis functionality
   onRefreshAnomalyData?: () => void;
@@ -75,7 +75,7 @@ export interface ThresholdComparisonData {
 }
 
 export interface TrendsPlotData {
-  plotData: unknown[];
-  plotLayout: unknown;
-  plotConfig: unknown;
+  plotData: any[];
+  plotLayout: any;
+  plotConfig: any;
 }
