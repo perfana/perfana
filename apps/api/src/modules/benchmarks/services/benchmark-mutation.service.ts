@@ -178,7 +178,7 @@ export class BenchmarkMutationService {
       // Track who updated the resource
       updateData.updated_by = userId;
 
-      await this.benchmarkRepo.update(id, updateData);
+      await this.benchmarkRepo.update(id, updateData as any);
 
       const result = await this.benchmarkRepo.findOne({
         where: { id },
@@ -323,7 +323,7 @@ export class BenchmarkMutationService {
           enabled: benchmark.enabled,
           valid: benchmark.valid,
           updated_by: userId,
-        });
+        } as any);
         copied++;
         continue;
       }
@@ -474,7 +474,7 @@ export class BenchmarkMutationService {
       // Track who updated the resource
       updateData.updated_by = userId;
 
-      await this.benchmarkRepo.update(id, updateData);
+      await this.benchmarkRepo.update(id, updateData as any);
 
       const result = await this.benchmarkRepo.findOne({
         where: { id },

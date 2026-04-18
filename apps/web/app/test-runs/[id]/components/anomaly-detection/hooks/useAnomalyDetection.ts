@@ -35,7 +35,7 @@ interface UseAnomalyDetectionReturn {
   anomalyData: AnomalyData[];
   loading: boolean;
   error: string | undefined;
-  dsAdaptConclusion: any;
+  dsAdaptConclusion: unknown;
   trackedCount: number;
 
   // Tab state
@@ -63,13 +63,13 @@ interface UseAnomalyDetectionReturn {
 
   // Drawer state
   drawerOpen: Record<string, boolean>;
-  drawerData: Record<string, any>;
+  drawerData: Record<string, unknown>;
   drawerLoading: Record<string, boolean>;
   chartKey: Record<string, number>;
 
   // Config form state
   showConfigForm: Record<string, boolean>;
-  configFormData: Record<string, any>;
+  configFormData: Record<string, unknown>;
 
   // Derived data
   filteredData: AnomalyData[];
@@ -88,7 +88,7 @@ interface UseAnomalyDetectionReturn {
   handleRowToggle: (rowKey: string) => void;
   handleDrawerToggle: (rowKey: string) => void;
   handleConfigFormToggle: (rowKey: string) => void;
-  handleConfigSave: (rowKey: string, configData: any, scope: 'metric' | 'panel') => Promise<void>;
+  handleConfigSave: (rowKey: string, configData: unknown, scope: 'metric' | 'panel') => Promise<void>;
   handleDeleteAnomaly: (anomaly: AnomalyData, options: { scope: 'metric' | 'panel'; range: 'current-test-run' | 'all-test-runs' }) => Promise<void>;
   handleAcceptResults: () => void;
   handleDenyResults: () => void;
@@ -97,10 +97,10 @@ interface UseAnomalyDetectionReturn {
   fetchAnomalyData: () => Promise<void>;
   handleConclusionFilterChange: (newFilter: string) => void;
   handleSearchChange: (e: React.ChangeEvent<HTMLInputElement>) => void;
-  handleConclusionFilterForForm: (e: any) => void;
-  handleClassificationFilterChange: (e: any) => void;
-  handleDashboardFilterChange: (e: any) => void;
-  handlePanelFilterChange: (e: any) => void;
+  handleConclusionFilterForForm: (e: unknown) => void;
+  handleClassificationFilterChange: (e: unknown) => void;
+  handleDashboardFilterChange: (e: unknown) => void;
+  handlePanelFilterChange: (e: unknown) => void;
 }
 
 export function useAnomalyDetection({
@@ -153,13 +153,13 @@ export function useAnomalyDetection({
 
   // Drawer state
   const [drawerOpen, setDrawerOpen] = useState<Record<string, boolean>>({});
-  const [drawerData, setDrawerData] = useState<Record<string, any>>({});
+  const [drawerData, setDrawerData] = useState<Record<string, unknown>>({});
   const [drawerLoading, setDrawerLoading] = useState<Record<string, boolean>>({});
   const [chartKey, setChartKey] = useState<Record<string, number>>({});
 
   // Config form state
   const [showConfigForm, setShowConfigForm] = useState<Record<string, boolean>>({});
-  const configFormData: Record<string, any> = {};
+  const configFormData: Record<string, unknown> = {};
 
   // API Functions
   const fetchAnomalyData = useCallback(async () => {
@@ -439,7 +439,7 @@ export function useAnomalyDetection({
     setShowConfigForm(prev => ({ ...prev, [rowKey]: !prev[rowKey] }));
   }, []);
 
-  const handleConfigSave = useCallback(async (rowKey: string, configData: any, scope: 'metric' | 'panel') => {
+  const handleConfigSave = useCallback(async (rowKey: string, configData: unknown, scope: 'metric' | 'panel') => {
     try {
       const rowIndex = parseInt(rowKey.split('_').pop() || '0');
       const item = paginatedData[rowIndex];
@@ -559,23 +559,23 @@ export function useAnomalyDetection({
     setPage(0);
   }, []);
 
-  const handleConclusionFilterForForm = useCallback((e: any) => {
+  const handleConclusionFilterForForm = useCallback((e: unknown) => {
     setConclusionFilter(e.target.value);
     setPage(0);
   }, [setConclusionFilter]);
 
-  const handleClassificationFilterChange = useCallback((e: any) => {
+  const handleClassificationFilterChange = useCallback((e: unknown) => {
     setClassificationFilter(e.target.value);
     setPage(0);
   }, []);
 
-  const handleDashboardFilterChange = useCallback((e: any) => {
+  const handleDashboardFilterChange = useCallback((e: unknown) => {
     setDashboardFilter(e.target.value);
     setPanelFilter('all'); // Reset panel when dashboard changes
     setPage(0);
   }, []);
 
-  const handlePanelFilterChange = useCallback((e: any) => {
+  const handlePanelFilterChange = useCallback((e: unknown) => {
     setPanelFilter(e.target.value);
     setPage(0);
   }, []);

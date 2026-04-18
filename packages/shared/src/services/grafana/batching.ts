@@ -8,7 +8,7 @@ export interface RequestBatch {
     endpoint: string;
     method: string;
     request_body: {
-      queries: any[];
+      queries: unknown[];
       from: string;
       to: string;
     };
@@ -76,12 +76,14 @@ export function batchPanelQueries(
 
       // Determine time range: use override if provided, otherwise use stored panel request times
       const firstRequest = panel.requests[0];
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const requestBody = firstRequest.request_body as any;
       const fromTime = timeRangeOverride
         ? String(timeRangeOverride.from.getTime())
-        : ((firstRequest.request_body as any).from_ || (firstRequest.request_body as any).from);
+        : (requestBody.from_ || requestBody.from);
       const toTime = timeRangeOverride
         ? String(timeRangeOverride.to.getTime())
-        : (firstRequest.request_body as any).to;
+        : requestBody.to;
 
       // Create new batch request with time range
       currentBatch = {
@@ -148,7 +150,7 @@ export function batchPanelQueries(
 
 export interface ProcessedPanelResult {
   panel: PanelDocument;
-  data: any | null;
+  data: unknown | null;
   errors: Array<{
     target_index: number;
     status_code?: number;
@@ -170,7 +172,7 @@ export interface ProcessedPanelResult {
  */
 export function processBatchedResponses(
   requestBatches: RequestBatch[],
-  responses: any[]
+  responses: unknown[]
 ): ProcessedPanelResult[] {
   const results: ProcessedPanelResult[] = [];
   const processedPanels = new Set<string>(); // Track processed panels to avoid duplicates
@@ -204,8 +206,10 @@ export function processBatchedResponses(
 
       try {
         // 1. Client-side HTTP errors (network, timeout, etc.)
-        if (response.error || !response.response) {
-          const error = response.error || new Error('Unknown client error');
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        const responseAny = response as any;
+        if (responseAny.error || !responseAny.response) {
+          const error = responseAny.error || new Error('Unknown client error');
 
           results.push({
             panel,
@@ -220,9 +224,9 @@ export function processBatchedResponses(
           continue;
         }
 
-        const jsonResponse = response.response;
+        const jsonResponse = responseAny.response;
         // eslint-disable-next-line @typescript-eslint/no-unused-vars
-        const _statusCode = response.status;
+        const _statusCode = responseAny.status;
 
 
 

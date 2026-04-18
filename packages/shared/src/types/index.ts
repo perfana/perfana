@@ -22,7 +22,7 @@ export interface DataSource {
   organizationId: string;
   sourceType: string;
   instanceName: string;
-  connectionConfig: Record<string, any>;
+  connectionConfig: Record<string, unknown>;
   supportsRealTime: boolean;
   supportsHistorical: boolean;
   queryRateLimit?: number;
@@ -40,9 +40,9 @@ export interface DsQuery {
   sourceInstance: string;
   queryName?: string;
   queryHash: string;
-  queryDefinition: Record<string, any>;
-  queryParameters?: Record<string, any>;
-  targetReference?: Record<string, any>;
+  queryDefinition: Record<string, unknown>;
+  queryParameters?: Record<string, unknown>;
+  targetReference?: Record<string, unknown>;
   expectedMetrics?: string[];
   executionTimeout: number;
   avgExecutionTimeMs?: number;
@@ -62,7 +62,7 @@ export interface DsMetric {
   metricPath?: string;
   value: number;
   unit?: string;
-  dimensions?: Record<string, any>;
+  dimensions?: Record<string, unknown>;
   isRampUp: boolean;
   timestep?: number;
   collectedAt: Date;
@@ -82,11 +82,11 @@ export interface CheckResult {
   excludeRampUpTime: boolean;
   sourceType?: string;
   sourceInstance?: string;
-  sourceReference?: Record<string, any>;
-  requirement: Record<string, any>;
+  sourceReference?: Record<string, unknown>;
+  requirement: Record<string, unknown>;
   panelAverage: number;
   meets_requirement: boolean;
-  targets?: Record<string, any>;
+  targets?: Record<string, unknown>;
   status?: string;
   message?: string;
   evaluatedAt: Date;
@@ -101,7 +101,7 @@ export interface CompareResult {
   label?: string;
   sourceType?: string;
   sourceInstance?: string;
-  sourceReference?: Record<string, any>;
+  sourceReference?: Record<string, unknown>;
   panelTitle?: string;
   panelId?: string;
   panelType?: string;
@@ -114,6 +114,6 @@ export interface CompareResult {
   benchmarkBaselineTestRunOk: boolean;
   status?: string;
   message?: string;
-  targets?: Record<string, any>;
+  targets?: Record<string, unknown>;
   evaluatedAt: Date;
 }

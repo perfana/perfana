@@ -798,11 +798,11 @@ export class DashboardProcessorService {
       applicationDashboards.forEach((applicationDashboard) => {
         const variables = applicationDashboard.variables;
 
-        if (!variables) {
+        if (!variables || !Array.isArray(variables)) {
           return;
         }
 
-        const variable = variables.find(
+        const variable = (variables as unknown as DashboardVariable[] | undefined)?.find(
           (v: DashboardVariable) =>
             v.name === autoConfigDashboard.createSeparateDashboardForVariable,
         );

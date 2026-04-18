@@ -60,7 +60,7 @@ export default function SignUpPage() {
 
       // Redirect to sign in page with success message
       router.push('/signin?message=Account created successfully. Please sign in.')
-    } catch (err: any) {
+    } catch (err: unknown) {
       setFormError('root', {
         message: err.message || 'An error occurred during sign up'
       })

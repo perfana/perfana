@@ -90,7 +90,7 @@ export default function SaveGraphPresetModal({
     }
   }, [open, currentSeriesConfig, defaultName]);
 
-  const handleInputChange = (field: keyof GraphPresetFormData, value: any) => {
+  const handleInputChange = (field: keyof GraphPresetFormData, value: unknown) => {
     setFormData(prev => ({ ...prev, [field]: value }));
     // Clear error when user starts typing
     if (errors[field]) {

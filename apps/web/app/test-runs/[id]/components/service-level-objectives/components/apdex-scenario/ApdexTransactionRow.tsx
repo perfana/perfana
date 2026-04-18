@@ -15,7 +15,7 @@ import type { ApdexTransactionRowProps } from '../../types';
 
 export function ApdexTransactionRow({
   target,
-  transactionKey,
+  _transactionKey,
   isExpanded,
   isLastRow,
   isEvenRow,

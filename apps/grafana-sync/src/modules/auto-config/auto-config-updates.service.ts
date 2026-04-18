@@ -140,7 +140,7 @@ export class AutoConfigUpdatesService {
         },
       });
 
-      const dashboard = {
+      const dashboard: Partial<ApplicationDashboard> = {
         systemUnderTestId: sut.id,
         testEnvironment: applicationDashboard.testEnvironment,
         grafanaInstanceId: grafanaInstance.id,
@@ -151,7 +151,8 @@ export class AutoConfigUpdatesService {
         dashboardUid: applicationDashboard.dashboardUid,
         templateDashboardUid: applicationDashboard.templateDashboardUid,
         tags: applicationDashboard.tags || [],
-        variables: applicationDashboard.variables || null,
+        variables:
+          (applicationDashboard.variables as unknown as Record<string, unknown> | null) || null,
         organizationId: applicationDashboard.organizationId || null, // RBAC: inherit from test run
       };
 
@@ -163,11 +164,11 @@ export class AutoConfigUpdatesService {
         result = await this.applicationDashboardRepo.save({
           ...dashboard,
           id: existingDashboard.id,
-        });
+        } as ApplicationDashboard);
       } else {
         // Insert new dashboard
         this.logger.log('Inserting new dashboard data:', dashboard);
-        result = await this.applicationDashboardRepo.save(dashboard);
+        result = await this.applicationDashboardRepo.save(dashboard as ApplicationDashboard);
       }
 
       this.logger.log(`Successfully upserted application dashboard with ID: ${result.id}`);

@@ -344,7 +344,7 @@ export function simpleOrchestrateReevaluateBatchWorker() {
               });
 
               if (testRunFull) {
-                const discoveredSources: Array<{ source_type: string; source_id?: string; is_complete: boolean; collected_ranges: any[] }> = [];
+                const discoveredSources: Array<{ source_type: string; source_id?: string; is_complete: boolean; collected_ranges: unknown[] }> = [];
 
                 // Discover Grafana instances
                 if (enabledSourceTypes.has('grafana') && !sourcesToRefetch.some(s => s.source_type === 'grafana')) {
@@ -511,7 +511,7 @@ export function simpleOrchestrateReevaluateBatchWorker() {
         await progressReporter?.startStage('gap-analysis');
 
         let totalGaps = 0;
-        const testRunGaps = new Map<string, { gaps: any[]; coverageBefore: number }>();
+        const testRunGaps = new Map<string, { gaps: unknown[]; coverageBefore: number }>();
 
         for (let i = 0; i < testRunIds.length; i++) {
           const testRunId = testRunIds[i];
@@ -576,9 +576,10 @@ export function simpleOrchestrateReevaluateBatchWorker() {
             let testRunReceivedData = false;
 
             for (const gap of gapInfo.gaps) {
+              const g = gap as any;
               const allRanges = [
-                ...gap.missingRanges.map((r: any) => ({ from: r.from, to: r.to, type: 'missing' as const })),
-                ...gap.failedRanges.map((r: any) => ({ from: r.from, to: r.to, type: 'retry' as const })),
+                ...g.missingRanges.map((r: any) => ({ from: r.from, to: r.to, type: 'missing' as const })),
+                ...g.failedRanges.map((r: any) => ({ from: r.from, to: r.to, type: 'retry' as const })),
               ];
 
               for (const range of allRanges) {
@@ -590,19 +591,19 @@ export function simpleOrchestrateReevaluateBatchWorker() {
                     testRunId,
                     fromTime: fromDate,
                     toTime: toDate,
-                    collectGrafanaMetrics: gap.sourceType === 'grafana',
-                    collectDynatraceMetrics: gap.sourceType === 'dynatrace',
-                    collectPerformanceTestMetrics: gap.sourceType === 'performance_test',
-                    ...(gap.sourceType === 'grafana' && gap.sourceId ? { grafanaInstanceId: gap.sourceId } : {}),
-                    ...(gap.sourceType === 'dynatrace' && gap.sourceId ? { dynatraceConfigId: gap.sourceId } : {}),
+                    collectGrafanaMetrics: g.sourceType === 'grafana',
+                    collectDynatraceMetrics: g.sourceType === 'dynatrace',
+                    collectPerformanceTestMetrics: g.sourceType === 'performance_test',
+                    ...(g.sourceType === 'grafana' && g.sourceId ? { grafanaInstanceId: g.sourceId } : {}),
+                    ...(g.sourceType === 'dynatrace' && g.sourceId ? { dynatraceConfigId: g.sourceId } : {}),
                   });
 
                   const dataPoints = (result.data as any)?.totalDataPoints as number || 0;
                   if (dataPoints > 0) { testRunReceivedData = true; }
 
                   actions.push({
-                    sourceType: gap.sourceType,
-                    sourceId: gap.sourceId,
+                    sourceType: g.sourceType,
+                    sourceId: g.sourceId,
                     rangeFrom: fromDate.toISOString(),
                     rangeTo: toDate.toISOString(),
                     status: dataPoints > 0 ? 'collected' : 'no-data',
@@ -610,10 +611,10 @@ export function simpleOrchestrateReevaluateBatchWorker() {
                   });
                 } catch (err) {
                   const errorMsg = err instanceof Error ? err.message : String(err);
-                  logger.error(`  ❌ Gap fill failed for ${gap.sourceType}/${gap.sourceId ?? 'null'}: ${errorMsg}`);
+                  logger.error(`  ❌ Gap fill failed for ${g.sourceType}/${g.sourceId ?? 'null'}: ${errorMsg}`);
                   actions.push({
-                    sourceType: gap.sourceType,
-                    sourceId: gap.sourceId,
+                    sourceType: g.sourceType,
+                    sourceId: g.sourceId,
                     rangeFrom: fromDate.toISOString(),
                     rangeTo: toDate.toISOString(),
                     status: 'failed',
@@ -624,13 +625,13 @@ export function simpleOrchestrateReevaluateBatchWorker() {
               }
 
               // Mark source complete if all ranges succeeded
-              const sourceActions = actions.filter(a => a.sourceType === gap.sourceType && a.sourceId === gap.sourceId);
+              const sourceActions = actions.filter(a => a.sourceType === g.sourceType && a.sourceId === g.sourceId);
               const allSucceeded = sourceActions.every(a => a.status !== 'failed');
               if (allSucceeded) {
                 try {
-                  await gapService.markSourceComplete(testRunId, gap.sourceType, gap.sourceId);
+                  await gapService.markSourceComplete(testRunId, g.sourceType, g.sourceId);
                 } catch (markErr) {
-                  logger.warn(`Non-fatal: failed to mark source complete for ${testRunId} ${gap.sourceType}/${gap.sourceId ?? 'null'}: ${markErr}`);
+                  logger.warn(`Non-fatal: failed to mark source complete for ${testRunId} ${g.sourceType}/${g.sourceId ?? 'null'}: ${markErr}`);
                 }
               }
 
@@ -647,7 +648,7 @@ export function simpleOrchestrateReevaluateBatchWorker() {
             gapAnalysisDetails.push({
               testRunId,
               sourcesAnalyzed: gapInfo.gaps.length,
-              gapsFound: gapInfo.gaps.reduce((sum: number, g: any) => sum + g.missingRanges.length + g.failedRanges.length, 0),
+              gapsFound: gapInfo.gaps.reduce((sum: number, gi: any) => sum + gi.missingRanges.length + gi.failedRanges.length, 0),
               coverageBefore: gapInfo.coverageBefore,
               coverageAfter,
               actions,

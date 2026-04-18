@@ -32,7 +32,7 @@ import {
   IconButton,
   Tooltip,
   Button,
-  Collapse,
+  _Collapse,
   alpha,
 } from '@mui/material';
 import {
@@ -43,7 +43,7 @@ import {
   Fullscreen as FullscreenIcon,
   FullscreenExit as FullscreenExitIcon,
 } from '@mui/icons-material';
-import type { SqlTextViewerProps, SnackbarSeverity } from '../types';
+import type { SqlTextViewerProps} from '../types';
 
 // ==================== SQL Keyword Highlighting ====================
 
@@ -248,7 +248,7 @@ export function SqlTextViewer({
   /**
    * Memoized highlighted content
    */
-  const highlightedContent = useMemo((): JSX.Element | JSX.Element[] => {
+  const _highlightedContent = useMemo((): JSX.Element | JSX.Element[] => {
     if (highlightSyntax) {
       return highlightSql(processedSql);
     }

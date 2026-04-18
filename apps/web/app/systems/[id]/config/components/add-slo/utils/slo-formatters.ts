@@ -155,7 +155,7 @@ export function getSourceOption(value: string): SourceOption | null {
 /**
  * Get placeholder text for requirement value input
  */
-export function getRequirementValuePlaceholder(selectedPanel: any): string {
+export function getRequirementValuePlaceholder(selectedPanel: unknown): string {
   const effectiveUnitFormat = getEffectiveUnitFormat(selectedPanel);
   if (effectiveUnitFormat) {
     const unit = getUnit(effectiveUnitFormat);
@@ -167,7 +167,7 @@ export function getRequirementValuePlaceholder(selectedPanel: any): string {
 /**
  * Get helper text for requirement value input
  */
-export function getRequirementValueHelperText(value: string, selectedPanel: any): string {
+export function getRequirementValueHelperText(value: string, selectedPanel: unknown): string {
   const detectedUnit = getDetectedUnit(value);
   const effectiveUnitFormat = getEffectiveUnitFormat(selectedPanel);
   const expectedUnit = effectiveUnitFormat ? getUnit(effectiveUnitFormat) : null;
@@ -183,7 +183,7 @@ export function getRequirementValueHelperText(value: string, selectedPanel: any)
 /**
  * Get the unit chip label for a value
  */
-export function getUnitChipLabel(value: string, selectedPanel: any): string | null {
+export function getUnitChipLabel(value: string, selectedPanel: unknown): string | null {
   const parsed = parseValueWithUnit(value);
   const effectiveUnitFormat = getEffectiveUnitFormat(selectedPanel);
   const panelUnit = effectiveUnitFormat ? getUnit(effectiveUnitFormat) : null;

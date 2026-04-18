@@ -23,21 +23,22 @@ const NO_ANOMALY_DETECTION_MARKER = 'no-anomaly-detection';
  * 1. Panels with "grafana" datasource
  * 2. Panels with unsupported types
  */
-function shouldStorePanel(panel: any, datasourceType: string | null): boolean {
+function shouldStorePanel(panel: unknown, datasourceType: string | null): boolean {
+  const p = panel as any;
   // Filter 1: Skip panels with "grafana" datasource
   if (datasourceType === 'grafana') {
-    logger.debug(`Skipping panel ${panel.id} (${panel.title}): grafana datasource`);
+    logger.debug(`Skipping panel ${p.id} (${p.title}): grafana datasource`);
     return false;
   }
 
-  if (panel.datasource === 'grafana' || panel.datasource?.uid === 'grafana') {
-    logger.debug(`Skipping panel ${panel.id} (${panel.title}): grafana datasource`);
+  if (p.datasource === 'grafana' || p.datasource?.uid === 'grafana') {
+    logger.debug(`Skipping panel ${p.id} (${p.title}): grafana datasource`);
     return false;
   }
 
   // Filter 2: Skip panels with unsupported types
-  if (!SUPPORTED_PANEL_TYPES.includes(panel.type)) {
-    logger.debug(`Skipping panel ${panel.id} (${panel.title}): unsupported type '${panel.type}'`);
+  if (!SUPPORTED_PANEL_TYPES.includes(p.type)) {
+    logger.debug(`Skipping panel ${p.id} (${p.title}): unsupported type '${p.type}'`);
     return false;
   }
 
@@ -63,7 +64,7 @@ export interface GrafanaDashboard {
   id: string;
   uid: string;
   title: string;
-  dashboard: any; // JSONB dashboard definition
+  dashboard: unknown; // JSONB dashboard definition
   application_dashboard_id: string;
   tags?: string[];
 }
@@ -74,7 +75,7 @@ export interface Benchmark {
   system_under_test_id: string;
   test_environment?: string;
   workload?: string;
-  requirements?: any;
+  requirements?: unknown;
 }
 
 export interface PerfanaData {
@@ -101,7 +102,7 @@ export async function getApplicationDashboardsForTestRun(
     AND ad.test_environment = $2
   `;
 
-  const params: any[] = [
+  const params: unknown[] = [
     testRun.system_under_test_id,
     testRun.test_environment
   ];
@@ -184,7 +185,7 @@ export async function getBenchmarksForTestRun(
     AND workload = $3
   `;
 
-  const params: any[] = [
+  const params: unknown[] = [
     testRun.system_under_test_id,
     testRun.test_environment,
     testRun.workload
@@ -204,28 +205,31 @@ export async function getBenchmarksForTestRun(
 export async function createPanelDocuments(
   perfanaData: PerfanaData,
   systemUnderTestName: string
-): Promise<any[]> {
+): Promise<unknown[]> {
   const logger = getLogger('panels-helpers');
 
   // Step 1: Collect all unique datasource UIDs from panels
   const datasourceUids = new Set<string>();
   for (const dashboard of perfanaData.dashboards) {
-    if (!dashboard.dashboard || !dashboard.dashboard.dashboard || !dashboard.dashboard.dashboard.panels) {
+    const db = dashboard as any;
+    if (!db.dashboard || !db.dashboard.dashboard || !db.dashboard.dashboard.panels) {
       continue;
     }
-    for (const panel of dashboard.dashboard.dashboard.panels) {
-      if (panel.targets) {
-        for (const target of panel.targets) {
-          if (target.datasource) {
+    for (const panel of (db.dashboard.dashboard.panels as any[])) {
+      const p = panel as any;
+      if (p.targets) {
+        for (const target of (p.targets as any[])) {
+          const t = target as any;
+          if (t.datasource) {
             let uid: string | undefined;
-            if (typeof target.datasource === 'object' && target.datasource.uid) {
-              uid = target.datasource.uid;
-            } else if (typeof target.datasource === 'string') {
-              uid = target.datasource;
+            if (typeof t.datasource === 'object' && t.datasource.uid) {
+              uid = t.datasource.uid;
+            } else if (typeof t.datasource === 'string') {
+              uid = t.datasource;
             }
             // Fall back to panel-level datasource when target has corrupted datasource
-            if (!uid && panel.datasource && typeof panel.datasource === 'object' && panel.datasource.uid) {
-              uid = panel.datasource.uid;
+            if (!uid && p.datasource && typeof p.datasource === 'object' && p.datasource.uid) {
+              uid = p.datasource.uid;
             }
             if (uid && uid !== 'grafana') {
               datasourceUids.add(uid);
@@ -259,25 +263,26 @@ export async function createPanelDocuments(
     }
   }
 
-  const panelDocuments: any[] = [];
+  const panelDocuments: unknown[] = [];
 
   // Process all dashboards and create panel documents
   for (const dashboard of perfanaData.dashboards) {
+    const d = dashboard as any;
 
-    if (!dashboard.dashboard || !dashboard.dashboard.dashboard || !dashboard.dashboard.dashboard.panels) {
+    if (!d.dashboard || !d.dashboard.dashboard || !d.dashboard.dashboard.panels) {
       continue;
     }
 
     // Filter 1: Skip dashboards with "no-anomaly-detection" tag
-    if (dashboard.tags && dashboard.tags.includes(NO_ANOMALY_DETECTION_MARKER)) {
-      logger.info(`⏭️ Skipping dashboard ${dashboard.uid} (${dashboard.title}): has "${NO_ANOMALY_DETECTION_MARKER}" tag`);
+    if (d.tags && d.tags.includes(NO_ANOMALY_DETECTION_MARKER)) {
+      logger.info(`⏭️ Skipping dashboard ${d.uid} (${d.title}): has "${NO_ANOMALY_DETECTION_MARKER}" tag`);
       continue;
     }
 
 
     // Find ALL corresponding application dashboards (multiple can have same dashboard_uid)
     const matchingAppDashboards = perfanaData.application_dashboards.filter(
-      ad => ad.dashboard_uid === dashboard.uid
+      ad => ad.dashboard_uid === d.uid
     );
 
 
@@ -287,14 +292,15 @@ export async function createPanelDocuments(
 
     // Create panels for each matching application dashboard
     for (const appDashboard of matchingAppDashboards) {
-      for (const panel of dashboard.dashboard.dashboard.panels) {
-      if (!panel.id || !panel.title) {
+      for (const panel of d.dashboard.dashboard.panels) {
+        const p = panel as any;
+      if (!p.id || !p.title) {
         continue;
       }
 
       // Filter 2: Skip panels with "no-anomaly-detection" in description
-      if (panel.description && panel.description.toLowerCase().includes(NO_ANOMALY_DETECTION_MARKER)) {
-        logger.debug(`Skipping panel ${panel.id} (${panel.title}): has "${NO_ANOMALY_DETECTION_MARKER}" in description`);
+      if (p.description && p.description.toLowerCase().includes(NO_ANOMALY_DETECTION_MARKER)) {
+        logger.debug(`Skipping panel ${p.id} (${p.title}): has "${NO_ANOMALY_DETECTION_MARKER}" in description`);
         continue;
       }
 
@@ -312,34 +318,34 @@ export async function createPanelDocuments(
         perfanaData.test_run,
         systemUnderTestName,
         appDashboard,
-        dashboard.dashboard.dashboard.templating?.list || []
+        d.dashboard.dashboard.templating?.list || []
       );
 
       // Create Grafana API request with variable substitution
-      const requests = await createPanelRequests(panel, queryVariables, perfanaData.test_run, datasourceMap);
+      const requests = await createPanelRequests(p, queryVariables, perfanaData.test_run, datasourceMap);
 
 
       // Extract datasource type - handle both string and object datasource formats
       let datasourceType = null;
-      if (panel.datasource) {
-        if (typeof panel.datasource === 'string') {
+      if (p.datasource) {
+        if (typeof p.datasource === 'string') {
           // Datasource is a string name - need to look it up (for now, set as unknown)
           datasourceType = 'unknown';
-        } else if (panel.datasource.type) {
-          datasourceType = panel.datasource.type;
+        } else if (p.datasource.type) {
+          datasourceType = p.datasource.type;
         }
       }
 
       // Check for datasource in targets as fallback
-      if (!datasourceType && panel.targets && panel.targets.length > 0) {
-        const firstTarget = panel.targets[0];
+      if (!datasourceType && p.targets && p.targets.length > 0) {
+        const firstTarget = p.targets[0] as any;
         if (firstTarget.datasource?.type) {
           datasourceType = firstTarget.datasource.type;
         }
       }
 
       // CRITICAL: Filter out panels that should not be stored
-      if (!shouldStorePanel(panel, datasourceType)) {
+      if (!shouldStorePanel(p, datasourceType)) {
         continue;
       }
 
@@ -347,12 +353,12 @@ export async function createPanelDocuments(
         test_run_id: perfanaData.test_run_id,
         application_dashboard_id: appDashboard.id,
         metrics_source_id: appDashboard.metrics_source_id || null,
-        dashboard_uid: dashboard.uid,
-        panel_id: panel.id,
-        panel_title: panel.title,
+        dashboard_uid: d.uid,
+        panel_id: p.id,
+        panel_title: p.title,
         dashboard_label: appDashboard.dashboard_label,
         benchmark_ids: benchmarkIds.length > 0 ? benchmarkIds : null,
-        panel: panel, // Store full panel definition
+        panel: p, // Store full panel definition
         query_variables: queryVariables, // Resolved variable values
         datasource_type: datasourceType,
         requests: requests, // Pre-built Grafana API requests
@@ -376,7 +382,7 @@ function generateTemplateVariablesFromAppDashboard(
   testRun: TestRun,
   systemUnderTestName: string,
   applicationDashboard: ApplicationDashboard,
-  templateVariables: any[]
+  templateVariables: unknown[]
 ): Record<string, string> {
   const logger = getLogger('panels-helpers');
 
@@ -393,8 +399,9 @@ function generateTemplateVariablesFromAppDashboard(
   const templateVarMap = new Map<string, any>();
   if (templateVariables && Array.isArray(templateVariables)) {
     for (const templateVar of templateVariables) {
-      if (templateVar.name) {
-        templateVarMap.set(templateVar.name, templateVar);
+      const tv = templateVar as any;
+      if (tv.name) {
+        templateVarMap.set(tv.name, tv);
       }
     }
   }
@@ -456,7 +463,7 @@ function _generateTemplateVariables(
   testRun: TestRun,
   systemUnderTestName: string,
   dashboardTitle: string,
-  templateVariables: any[]
+  templateVariables: unknown[]
 ): Record<string, string> {
   const queryVariables: Record<string, string> = {
     // Base test run variables - using exact names from the mock script
@@ -487,8 +494,9 @@ function _generateTemplateVariables(
   // Process actual template variables from dashboard definition
   if (templateVariables && Array.isArray(templateVariables)) {
     for (const templateVar of templateVariables) {
-      if (templateVar.name && templateVar.current?.value) {
-        queryVariables[templateVar.name] = templateVar.current.value;
+      const tv = templateVar as any;
+      if (tv.name && tv.current?.value) {
+        queryVariables[tv.name] = tv.current.value;
       }
     }
   }
@@ -501,19 +509,20 @@ function _generateTemplateVariables(
  * Implements the request building logic from the original Python implementation
  */
 async function createPanelRequests(
-  panel: any,
+  panel: unknown,
   queryVariables: Record<string, string>,
   testRun: TestRun,
   datasourceMap: Map<string, { id: number; uid: string; name: string; type: string }>
 ): Promise<any[]> {
-  if (!panel.targets || panel.targets.length === 0) {
+  const p = panel as any;
+  if (!p.targets || p.targets.length === 0) {
     return [];
   }
 
   const requests = [];
 
-  for (let targetIndex = 0; targetIndex < panel.targets.length; targetIndex++) {
-    const target = panel.targets[targetIndex];
+  for (let targetIndex = 0; targetIndex < p.targets.length; targetIndex++) {
+    const target = p.targets[targetIndex];
 
 
     // Substitute variables in the target query
@@ -532,12 +541,12 @@ async function createPanelRequests(
       // Fall back to panel-level datasource when target datasource is corrupted
       // (e.g. a string like "Mimir" spread into {"0":"M","1":"i",...} by a buggy dashboard import)
       if (!uid && typeof substitutedTarget.datasource === 'object' && !substitutedTarget.datasource.uid) {
-        const panelDs = panel.datasource;
+        const panelDs = p.datasource;
         if (panelDs && typeof panelDs === 'object' && panelDs.uid) {
           uid = panelDs.uid;
           // Fix the target datasource so the query uses the correct datasource
           substitutedTarget.datasource = { uid: panelDs.uid, type: panelDs.type || 'prometheus' };
-          logger.warn(`⚠️ Panel ${panel.id} target[${targetIndex}] has corrupted datasource, falling back to panel datasource: ${uid}`);
+          logger.warn(`⚠️ Panel ${p.id} target[${targetIndex}] has corrupted datasource, falling back to panel datasource: ${uid}`);
         }
       }
 
@@ -555,8 +564,8 @@ async function createPanelRequests(
     }
 
     // Debug logging for specific panels (can be removed after debugging)
-    // if (panel.id === 106) {
-    //   logger.info(`📝 Panel ${panel.id} substituted target[${targetIndex}]:`);
+    // if (p.id === 106) {
+    //   logger.info(`📝 Panel ${p.id} substituted target[${targetIndex}]:`);
     //   logger.info(`   expr: ${substitutedTarget.expr || 'undefined'}`);
     //   logger.info(`   datasource: ${JSON.stringify(substitutedTarget.datasource) || 'undefined'}`);
     //   logger.info(`   datasourceId: ${substitutedTarget.datasourceId || 'undefined'}`);
@@ -585,7 +594,7 @@ async function createPanelRequests(
 /**
  * Substitute template variables in a Grafana target query
  */
-function substituteVariablesInTarget(target: any, queryVariables: Record<string, string>, _panel?: any): any {
+function substituteVariablesInTarget(target: unknown, queryVariables: Record<string, string>, _panel?: unknown): any {
   const substitutedTarget = JSON.parse(JSON.stringify(target)); // Deep clone
 
   // For Prometheus queries, ensure proper interval/step settings
@@ -612,7 +621,7 @@ function substituteVariablesInTarget(target: any, queryVariables: Record<string,
   delete substitutedTarget.maxDataPoints;
 
   // Substitute variables in all string fields recursively
-  function substituteInObject(obj: any): any {
+  function substituteInObject(obj: unknown): any {
     if (typeof obj === 'string') {
       let result = obj;
       for (const [key, value] of Object.entries(queryVariables)) {
@@ -642,8 +651,11 @@ function substituteVariablesInTarget(target: any, queryVariables: Record<string,
   const result = substituteInObject(substitutedTarget);
 
   // Debug logging for final step values (can be removed after debugging)
-  // if (panel && panel.id === 106) {
-  //   logger.info(`🏁 Panel ${panel.id} final step: ${result.step}`);
+  // if (_panel) {
+  //   const p = _panel as any;
+  //   if (p.id === 106) {
+  //     logger.info(`🏁 Panel ${p.id} final step: ${result.step}`);
+  //   }
   // }
 
   // After substitution, ensure interval is reasonable for Prometheus queries

@@ -17,7 +17,7 @@ export interface DataSanityCheckInput {
  */
 export class DataSanityCheckPipeline extends BasePipelineTypeORM {
 
-  async execute(input: unknown): Promise<PipelineResult> {
+  async execute(input: any): Promise<PipelineResult> {
     const startTime = Date.now();
     const { testRunId } = input as DataSanityCheckInput;
 

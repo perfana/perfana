@@ -12,10 +12,9 @@ import { useAuth } from '@/contexts/auth-context';
 import { Box, Typography } from '@mui/material';
 import { Business } from '@mui/icons-material';
 import { NoOrganizationMembership } from '@/components/NoOrganizationMembership';
-import { NoOrganizationsExist } from '@/components/NoOrganizationsExist';
 
 export default function HomePage() {
-  const { currentOrganizationId, isReady, isSelectorReadOnly, hasNoOrganizations, isAdmin, organizations } = useOrganizationContext();
+  const { currentOrganizationId, isReady, isSelectorReadOnly, hasNoOrganizations } = useOrganizationContext();
   const { user } = useAuth();
   const { pinnedSystemIds, togglePin } = usePinnedSystems({
     userId: user?.id,
@@ -33,7 +32,6 @@ export default function HomePage() {
     customTimeRange,
     setCustomTimeRange,
     refresh,
-    isLive,
   } = useDashboardData({
     organizationId: currentOrganizationId,
   });

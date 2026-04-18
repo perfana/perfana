@@ -1,6 +1,5 @@
 import { useEffect } from 'react';
 import {
-  Box,
   Paper,
   Grid,
   FormControl,

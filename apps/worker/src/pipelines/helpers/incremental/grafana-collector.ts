@@ -196,7 +196,7 @@ export class GrafanaCollector {
       WHERE test_run_id = $1
     `;
 
-    const params: any[] = [testRunId];
+    const params: unknown[] = [testRunId];
 
     // Prefer metricsSourceIds over applicationDashboardIds for filtering
     if (metricsSourceIds && metricsSourceIds.length > 0) {

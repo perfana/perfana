@@ -35,7 +35,7 @@ export interface ChecksPipelineResult {
  */
 export class ChecksPipeline extends BasePipelineTypeORM {
 
-  validateInput(input: unknown): boolean {
+  validateInput(input: any): boolean {
     if (!input || typeof input !== 'object') {return false;}
     const typedInput = input as any;
     return Array.isArray(typedInput.testRunIds) &&
@@ -43,7 +43,7 @@ export class ChecksPipeline extends BasePipelineTypeORM {
            typedInput.testRunIds.every((id: any) => typeof id === 'string');
   }
 
-  async execute(input: unknown): Promise<PipelineResult> {
+  async execute(input: any): Promise<PipelineResult> {
     const startTime = Date.now();
 
     try {
@@ -224,7 +224,7 @@ export class ChecksPipeline extends BasePipelineTypeORM {
       panelId?: number;
       metricName?: string;
     }
-  ): Promise<{ processed_benchmarks: number; created_check_results: number; failed_benchmarks: any[] }> {
+  ): Promise<{ processed_benchmarks: number; created_check_results: number; failed_benchmarks: unknown[] }> {
     const startTime = Date.now();
     this.logger.info(`Processing test run ${testRun.test_run_id}`);
 
@@ -466,7 +466,7 @@ export class ChecksPipeline extends BasePipelineTypeORM {
     }
   ): Promise<void> {
     const whereClauses = ['test_run_id = $1'];
-    const queryParams: any[] = [testRunId];
+    const queryParams: unknown[] = [testRunId];
 
     // Add filter conditions if provided — prefer metricsSourceId over applicationDashboardId
     if (metricFilter?.metricsSourceId) {
@@ -492,10 +492,10 @@ export class ChecksPipeline extends BasePipelineTypeORM {
   private async updateTestRunStatus(
     manager: EntityManager,
     testRunId: string,
-    statusUpdates: Record<string, any>
+    statusUpdates: Record<string, unknown>
   ): Promise<void> {
     // Build a single JSONB update by chaining jsonb_set operations
-    const values: any[] = [testRunId];
+    const values: unknown[] = [testRunId];
     let statusExpression = 'COALESCE(status, \'{}\'::jsonb)';
     let paramIndex = 2;
 
@@ -613,7 +613,7 @@ export class ChecksPipeline extends BasePipelineTypeORM {
   ): Promise<void> {
     // For workload-level SLOs, store per-transaction breakdown in targets
     // For transaction-specific SLOs, store single transaction result
-    let targets: any[];
+    let targets: unknown[];
 
     if (apdexResult.transaction_results && apdexResult.transaction_results.length > 0) {
       // Workload-level SLO: store each transaction as a target

@@ -20,13 +20,13 @@ interface UseComparePresetsProps {
   showToast: (message: string) => void;
 
   // Data hook state
-  selectedSource: DataSource;
-  addedSeries: CompareSeries[];
+  _selectedSource: DataSource;
+  _addedSeries: CompareSeries[];
   dashboards: ApplicationDashboard[];
   relatedTestRuns: RelatedTestRun[];
 
   // State setters
-  setSelectedSource: (source: DataSource) => void;
+  _setSelectedSource: (source: DataSource) => void;
   setSelectedDashboard: (dashboard: ApplicationDashboard | null) => void;
   setSelectedMetric: (metric: Panel | null) => void;
   setAddedSeries: (series: CompareSeries[] | ((prev: CompareSeries[]) => CompareSeries[])) => void;
@@ -42,11 +42,11 @@ export function useComparePresets({
   testRun,
   testRunId,
   showToast,
-  selectedSource,
-  addedSeries,
+  _selectedSource,
+  _addedSeries,
   dashboards,
   relatedTestRuns,
-  setSelectedSource,
+  _setSelectedSource,
   setSelectedDashboard,
   setSelectedMetric,
   setAddedSeries,
@@ -93,7 +93,7 @@ export function useComparePresets({
           panelTitle: config.panelTitle,
           metricName: config.metricName,
           source: config.source as DataSource,
-          metricsSourceId: (config as any).metricsSourceId
+          metricsSourceId: (config as unknown).metricsSourceId
         }));
         setAddedSeries(restoredSeries);
       }

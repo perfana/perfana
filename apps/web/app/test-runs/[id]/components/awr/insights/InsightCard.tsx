@@ -49,11 +49,11 @@ import {
   ChangeCircle as PlanChangeIcon,
 } from '@mui/icons-material';
 import { SeverityBadge } from './SeverityBadge';
-import type { InsightCardProps, InsightSeverity, InsightCategory } from '../types';
+import type { InsightCardProps, InsightCategory } from '../types';
 import {
   getSeverityColors,
   getCategoryLabel,
-  getCategoryIcon,
+  _getCategoryIcon,
   getCategoryColor,
   getImpactScoreColor,
   getImpactScoreLabel,

@@ -63,7 +63,7 @@ export default function DashboardTable({
   onSelectAll,
   onSelectOne
 }: DashboardTableProps) {
-  const { mode } = useThemeMode();
+  const { _mode } = useThemeMode();
 
   const getFilteredDashboards = () => {
     // First, filter out artificial dashboards (created by performance-metrics pipeline)

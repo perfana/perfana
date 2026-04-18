@@ -13,7 +13,6 @@ import {
   Alert,
   CircularProgress,
   Chip,
-  Grid,
   FormControl,
   InputLabel,
   Select,
@@ -25,7 +24,6 @@ import {
 } from '@mui/icons-material';
 
 import { CreateDynatraceQueryDto, DynatraceConfig, fetchDynatraceConfigs } from '../../../../../lib/dynatrace';
-import { getUnit } from '../../../../../lib/units';
 
 interface AddDynatraceQueryDialogProps {
   open: boolean;
@@ -141,7 +139,7 @@ export default function AddDynatraceQueryDialog({
   }, [systemId, environment, workload]);
 
 
-  const handleInputChange = (field: keyof CreateDynatraceQueryDto, value: any) => {
+  const handleInputChange = (field: keyof CreateDynatraceQueryDto, value: unknown) => {
     setFormData(prev => {
       const updated = {
         ...prev,

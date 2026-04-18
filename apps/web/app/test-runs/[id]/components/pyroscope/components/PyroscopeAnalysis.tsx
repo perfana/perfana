@@ -44,7 +44,7 @@ function FunctionChangeItem({
   isRegression: boolean;
 }) {
   const color = isRegression ? 'error' : 'success';
-  const bgColor = isRegression ? 'rgba(211, 47, 47, 0.05)' : 'rgba(76, 175, 80, 0.05)';
+  const _bgColor = isRegression ? 'rgba(211, 47, 47, 0.05)' : 'rgba(76, 175, 80, 0.05)';
   const hoverBgColor = isRegression ? 'rgba(211, 47, 47, 0.08)' : 'rgba(76, 175, 80, 0.08)';
   const badgeType = isRegression ? 'NEW' : 'REMOVED';
   const showBadge = isRegression ? change.changeType === 'new' : change.changeType === 'removed';

@@ -16,7 +16,7 @@ const _logger: Logger = new ConsoleLogger('grafana-formatter');
  */
 export async function transformGrafanaResponseToMetrics(
   queryResults: ProcessedPanelResult[],
-  testRun?: any
+  testRun?: unknown
 ): Promise<PanelMetricsDocument[]> {
   const results: PanelMetricsDocument[] = [];
 
@@ -32,15 +32,17 @@ export async function transformGrafanaResponseToMetrics(
       const metricsData = await transformPanelData(queryResult, testRun);
 
       if (metricsData && metricsData.length > 0) {
-        const panelDocument = {
-          test_run_id: queryResult.panel.test_run_id,
-          application_dashboard_id: queryResult.panel.application_dashboard_id,
-          metrics_source_id: queryResult.panel.metrics_source_id,
-          dashboard_uid: queryResult.panel.dashboard_uid,
-          panel_id: queryResult.panel.panel_id,
-          panel_title: queryResult.panel.panel_title,
-          dashboard_label: queryResult.panel.dashboard_label,
-          benchmark_ids: queryResult.panel.benchmark_ids,
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        const qrpanel = queryResult.panel as any;
+        const panelDocument: PanelMetricsDocument = {
+          test_run_id: qrpanel.test_run_id,
+          application_dashboard_id: qrpanel.application_dashboard_id,
+          metrics_source_id: qrpanel.metrics_source_id,
+          dashboard_uid: qrpanel.dashboard_uid,
+          panel_id: qrpanel.panel_id,
+          panel_title: qrpanel.panel_title,
+          dashboard_label: qrpanel.dashboard_label,
+          benchmark_ids: qrpanel.benchmark_ids,
           errors: null,
           data: metricsData,
           updated_at: new Date()
@@ -67,8 +69,9 @@ export async function transformGrafanaResponseToMetrics(
  * Transform individual panel data from Grafana response format to metrics records
  * Replicates Python's query_response_to_dataframe function (format_result.py:58-111)
  */
-async function transformPanelData(queryResult: ProcessedPanelResult, testRun?: any): Promise<MetricsRecord[]> {
-  const prometheusResponse = queryResult.data;
+async function transformPanelData(queryResult: ProcessedPanelResult, testRun?: unknown): Promise<MetricsRecord[]> {
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const prometheusResponse = queryResult.data as any;
   // eslint-disable-next-line @typescript-eslint/no-unused-vars
   const _panelId = queryResult.panel.panel_id;
   // eslint-disable-next-line @typescript-eslint/no-unused-vars
@@ -76,16 +79,21 @@ async function transformPanelData(queryResult: ProcessedPanelResult, testRun?: a
 
   // Extract unit from panel configuration - exact Python logic (format_result.py:144-151)
   // Python: hasattr(panel_query_response, 'panel') and panel_query_response.panel
-  const databasePanel = queryResult.panel.panel; // This is the JSONB panel field from ds_panels table
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const qrp = queryResult.panel as any;
+  const databasePanel = qrp.panel; // This is the JSONB panel field from ds_panels table
   let unit: string | null = null;
 
   // Python equivalent: field_config = getattr(panel_query_response.panel, 'fieldConfig', {})
   if (databasePanel && typeof databasePanel === 'object') {
-    const fieldConfig = databasePanel.fieldConfig;
+    const dpObj = databasePanel as Record<string, unknown>;
+    const fieldConfig = dpObj.fieldConfig;
     if (fieldConfig && typeof fieldConfig === 'object') {
-      const defaults = fieldConfig.defaults;
+      const fcObj = fieldConfig as Record<string, unknown>;
+      const defaults = fcObj.defaults;
       if (defaults && typeof defaults === 'object') {
-        unit = defaults.unit || null;
+        const defaultsObj = defaults as Record<string, unknown>;
+        unit = (defaultsObj.unit as string) || null;
       }
     }
   }
@@ -94,7 +102,7 @@ async function transformPanelData(queryResult: ProcessedPanelResult, testRun?: a
     return [];
   }
 
-  const allFrames: any[] = [];
+  const allFrames: unknown[] = [];
 
   // Extract frames from all result keys (refIds)
 
@@ -103,13 +111,13 @@ async function transformPanelData(queryResult: ProcessedPanelResult, testRun?: a
       continue;
     }
 
-    const resultData = result as any;
+    const resultData = result as Record<string, unknown>;
 
     // Check for frames in the result
     if (resultData.frames && Array.isArray(resultData.frames)) {
       for (const frame of resultData.frames) {
         if (frame && typeof frame === 'object') {
-          allFrames.push({ ...frame, refId }); // Include refId for tracking
+          allFrames.push({ ...(frame as Record<string, unknown>), refId }); // Include refId for tracking
         }
       }
     }
@@ -121,7 +129,7 @@ async function transformPanelData(queryResult: ProcessedPanelResult, testRun?: a
   }
 
   // Transform each frame to tabular data
-  const transformedFrames: any[][] = [];
+  const transformedFrames: unknown[][] = [];
 
   for (const frame of allFrames) {
     try {
@@ -137,7 +145,7 @@ async function transformPanelData(queryResult: ProcessedPanelResult, testRun?: a
 
           // Apply Python's astype(object).pipe(lambda d: d.where(d.notnull(), None)) logic
           const normalizedFrame = timestampTransformed.map(row => {
-            const normalizedRow: any = {};
+            const normalizedRow: Record<string, unknown> = {};
             for (const [key, value] of Object.entries(row)) {
               if (value instanceof Date) {
                 normalizedRow[key] = value;
@@ -165,7 +173,7 @@ async function transformPanelData(queryResult: ProcessedPanelResult, testRun?: a
   }
 
   // Combine all frames and reshape to long format (pandas melt equivalent)
-  const combinedData = transformedFrames.flat();
+  const combinedData = transformedFrames.flat() as Record<string, unknown>[];
 
   // Use passed test run info for timestep calculation
   const longFormatData = convertToLongFormat(combinedData, unit, testRun);
@@ -189,16 +197,24 @@ async function transformPanelData(queryResult: ProcessedPanelResult, testRun?: a
  * Create DataFrame-like structure from Grafana frames
  * Replicates Python's create_dataframe_from_frames logic
  */
-function createDataFrameFromFrames(frame: any): any[] {
+function createDataFrameFromFrames(frame: unknown): Record<string, unknown>[] {
   // EXACTLY match Python implementation: format_result.py:52-55
   // Python: pd.DataFrame(dict(zip(get_columns_from_frame(frames), frames["data"]["values"])))
 
-  if (!frame.schema?.fields || !frame.data?.values) {
+  if (!frame || typeof frame !== 'object') {
     return [];
   }
 
-  const fields = frame.schema.fields;
-  const values = frame.data.values;
+  const f = frame as Record<string, unknown>;
+  const schema = f.schema as Record<string, unknown> | undefined;
+  const data = f.data as Record<string, unknown> | undefined;
+
+  if (!schema || !data || !Array.isArray(schema.fields) || !Array.isArray(data.values)) {
+    return [];
+  }
+
+  const fields = schema.fields;
+  const values = data.values;
 
   // Ensure we have matching field and value arrays
   if (!Array.isArray(fields) || !Array.isArray(values) || fields.length !== values.length) {
@@ -218,9 +234,9 @@ function createDataFrameFromFrames(frame: any): any[] {
   }
 
   // Convert columnar data to row-based data - mimicking pandas DataFrame creation
-  const rows: any[] = [];
+  const rows: Record<string, unknown>[] = [];
   for (let rowIndex = 0; rowIndex < dataLength; rowIndex++) {
-    const row: any = {};
+    const row: Record<string, unknown> = {};
 
     for (let fieldIndex = 0; fieldIndex < fields.length; fieldIndex++) {
       const fieldName = columnNames[fieldIndex];
@@ -238,17 +254,27 @@ function createDataFrameFromFrames(frame: any): any[] {
  * Remove string columns from DataFrame (keep only numeric data)
  * Replicates Python's string column filtering logic
  */
-function removeStringColumns(dataFrame: any[], frame: any): any[] {
+function removeStringColumns(dataFrame: Record<string, unknown>[], frame: unknown): Record<string, unknown>[] {
   // EXACTLY match Python implementation: format_result.py:71-82
-  if (!frame.schema?.fields) {
+  if (!frame || typeof frame !== 'object') {
+    return dataFrame;
+  }
+
+  const f = frame as Record<string, unknown>;
+  if (!f.schema || typeof f.schema !== 'object') {
+    return dataFrame;
+  }
+
+  const schema = f.schema as Record<string, unknown>;
+  if (!schema.fields || !Array.isArray(schema.fields)) {
     return dataFrame;
   }
 
   // Python logic: Find string column indices based on schema field types
   const stringColumnIndices: number[] = [];
-  for (let i = 0; i < frame.schema.fields.length; i++) {
-    const schemaField = frame.schema.fields[i];
-    if (schemaField.type && schemaField.type.toLowerCase() === 'string') {
+  for (let i = 0; i < schema.fields.length; i++) {
+    const schemaField = schema.fields[i] as Record<string, unknown>;
+    if (schemaField.type && String(schemaField.type).toLowerCase() === 'string') {
       stringColumnIndices.push(i);
     }
   }
@@ -258,8 +284,10 @@ function removeStringColumns(dataFrame: any[], frame: any): any[] {
   }
 
   // Get column names using same logic as createDataFrameFromFrames
-  const columnNames = frame.schema.fields.map((field: any) => {
-    return (field.config && field.config.displayNameFromDS) ? field.config.displayNameFromDS : field.name;
+  const columnNames = schema.fields.map((field: unknown) => {
+    const fieldObj = field as Record<string, unknown>;
+    const config = fieldObj.config as Record<string, unknown> | undefined;
+    return (config && config.displayNameFromDS) ? String(config.displayNameFromDS) : String(fieldObj.name);
   });
 
   // Get string column names based on indices
@@ -267,7 +295,7 @@ function removeStringColumns(dataFrame: any[], frame: any): any[] {
 
   // Filter out string columns - Python: df_from_frames.drop(columns=string_columns)
   return dataFrame.map(row => {
-    const filteredRow: any = {};
+    const filteredRow: Record<string, unknown> = {};
     for (const [key, value] of Object.entries(row)) {
       if (!stringColumns.includes(key)) {
         filteredRow[key] = value;
@@ -281,9 +309,9 @@ function removeStringColumns(dataFrame: any[], frame: any): any[] {
  * Transform timestamps from milliseconds to Date objects
  * Replicates Python's transform_dataframe_timestamps function
  */
-function transformTimestamps(dataFrame: any[]): any[] {
+function transformTimestamps(dataFrame: Record<string, unknown>[]): Record<string, unknown>[] {
   return dataFrame.map(row => {
-    const transformedRow: any = {};
+    const transformedRow: Record<string, unknown> = {};
 
     for (const [key, value] of Object.entries(row)) {
       if (key.toLowerCase() === 'time' && typeof value === 'number') {
@@ -302,7 +330,7 @@ function transformTimestamps(dataFrame: any[]): any[] {
  * Convert wide format to long format (equivalent to pandas melt)
  * Replicates Python's DataFrame.melt operation (format_result.py:92-93)
  */
-function convertToLongFormat(dataFrame: any[], unit?: string | null, testRun?: any): MetricsRecord[] {
+function convertToLongFormat(dataFrame: Record<string, unknown>[], unit?: string | null, testRun?: unknown): MetricsRecord[] {
   const longFormatData: MetricsRecord[] = [];
 
   for (const row of dataFrame) {
@@ -312,18 +340,21 @@ function convertToLongFormat(dataFrame: any[], unit?: string | null, testRun?: a
     for (const [metricName, value] of Object.entries(metrics)) {
       // Allow null values in intermediate processing (Python keeps nulls until final cleanup)
       if (value !== undefined) {
-        const recordTime = time || new Date();
+        const recordTime = (time instanceof Date) ? time : new Date();
 
         // Calculate timestep and ramp_up using add_metric_metadata_to_dataframe logic
         let timestep: number | null = null;
         let ramp_up = false;
 
-        if (testRun && testRun.start_time) {
-          const startTime = new Date(testRun.start_time);
-          timestep = (recordTime.getTime() - startTime.getTime()) / 1000; // seconds since test start
+        if (testRun && typeof testRun === 'object') {
+          const tr = testRun as Record<string, unknown>;
+          if (tr.start_time) {
+            const startTime = new Date(tr.start_time as string | number);
+            timestep = (recordTime.getTime() - startTime.getTime()) / 1000; // seconds since test start
 
-          const analysisStartOffsetSeconds = testRun.ramp_up || 0;
-          ramp_up = timestep < analysisStartOffsetSeconds;
+            const analysisStartOffsetSeconds = (tr.ramp_up as number) || 0;
+            ramp_up = timestep < analysisStartOffsetSeconds;
+          }
         }
 
         // Add unit field to each record (Python format_result.py:160-161)
@@ -382,19 +413,27 @@ function sortAndDeduplicate(data: MetricsRecord[]): MetricsRecord[] {
 }
 
 function createEmptyMetricsDocument(
-  panel: any,
-  errors: any[] | null
+  panel: unknown,
+  errors: unknown[] | null
 ): PanelMetricsDocument {
+  const p = panel as Record<string, unknown>;
+  const typedErrors = (errors as Array<{
+    target_index: number;
+    status_code?: number;
+    message: string;
+    type: string;
+    detail?: string;
+  }>) || null;
   return {
-    test_run_id: panel.test_run_id,
-    application_dashboard_id: panel.application_dashboard_id,
-    metrics_source_id: panel.metrics_source_id,
-    dashboard_uid: panel.dashboard_uid,
-    panel_id: panel.panel_id,
-    panel_title: panel.panel_title,
-    dashboard_label: panel.dashboard_label,
-    benchmark_ids: panel.benchmark_ids,
-    errors: errors,
+    test_run_id: p.test_run_id as string,
+    application_dashboard_id: p.application_dashboard_id as string,
+    metrics_source_id: p.metrics_source_id as string | undefined,
+    dashboard_uid: p.dashboard_uid as string,
+    panel_id: p.panel_id as number,
+    panel_title: p.panel_title as string,
+    dashboard_label: p.dashboard_label as string,
+    benchmark_ids: p.benchmark_ids as string[] | null | undefined,
+    errors: typedErrors,
     data: [],
     updated_at: new Date()
   };

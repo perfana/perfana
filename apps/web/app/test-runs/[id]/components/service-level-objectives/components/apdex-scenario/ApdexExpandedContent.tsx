@@ -77,7 +77,7 @@ function ThemeAwareStatCards({ target }: { target: any }) {
 
 export function ApdexExpandedContent({
   target,
-  transactionKey,
+  _transactionKey,
   isLastRow,
   scenario,
   transactionSamples,

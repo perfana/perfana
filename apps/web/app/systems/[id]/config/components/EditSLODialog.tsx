@@ -14,7 +14,6 @@ import {
 } from '@mui/material';
 
 // Types
-import { Benchmark } from './types';
 import { EditSLODialogProps } from './edit-slo/types';
 
 // Hooks

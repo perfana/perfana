@@ -4,6 +4,13 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
+## [0.2.37.0] - 2026-04-18
+
+### Fixed
+- `POST /api/config/json`: no longer returns 404 when the test run doesn't exist yet. Configs are now stored with a string-based test run ID and associated once the test run is created — consistent with the behavior of `POST /config/key` and `POST /config/keys`. This fixes a timing window where CI/CD pipelines sending config before the test run record is written received a 404.
+- Worker: resolved 92 TypeScript type errors introduced during the `any` cleanup refactor. Casts are now scoped to point-of-access rather than widening entire function signatures.
+- Swagger: removed stale 404 response from `POST /config/json` — that status code is no longer returned by the endpoint.
+
 ## [0.2.36.2] - 2026-04-14
 
 ### Fixed

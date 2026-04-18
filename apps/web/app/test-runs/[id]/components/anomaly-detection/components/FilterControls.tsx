@@ -18,19 +18,19 @@ interface FilterControlsProps {
   searchQuery: string;
   handleSearchChange: (e: React.ChangeEvent<HTMLInputElement>) => void;
   conclusionFilter: string;
-  handleConclusionFilterChange: (e: any) => void;
+  handleConclusionFilterChange: (e: unknown) => void;
   classificationFilter: string;
-  handleClassificationFilterChange: (e: any) => void;
+  handleClassificationFilterChange: (e: unknown) => void;
   dashboardFilter: string;
-  handleDashboardFilterChange: (e: any) => void;
+  handleDashboardFilterChange: (e: unknown) => void;
   panelFilter: string;
-  handlePanelFilterChange: (e: any) => void;
+  handlePanelFilterChange: (e: unknown) => void;
   conclusionsForDropdown: string[];
   classificationsForDropdown: string[];
   dashboardsForDropdown: string[];
   panelsForDropdown: string[];
-  filteredData: any[];
-  anomalyData: any[];
+  filteredData: unknown[];
+  anomalyData: unknown[];
 }
 
 export default function FilterControls({

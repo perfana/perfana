@@ -211,8 +211,8 @@ export class ControlGroupProcessor {
       panelId?: number;
       metricName?: string;
     } | undefined
-  ): any[] {
-    const params: any[] = [];
+  ): unknown[] {
+    const params: unknown[] = [];
 
     if (metricFilter?.applicationDashboardId) {
       params.push(metricFilter.applicationDashboardId);

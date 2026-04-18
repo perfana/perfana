@@ -20,7 +20,7 @@ export default function OverallTestMetrics({
 }: OverallTestMetricsProps) {
   // Calculate metrics
   const totalRequests = transactions.reduce((sum, t) => sum + t.total_count, 0);
-  const totalPassed = transactions.reduce((sum, t) => sum + t.passed_count, 0);
+  const _totalPassed = transactions.reduce((sum, t) => sum + t.passed_count, 0);
   const totalFailed = transactions.reduce((sum, t) => sum + t.failed_count, 0);
   const errorRate = totalRequests > 0 ? (totalFailed / totalRequests) * 100 : 0;
 

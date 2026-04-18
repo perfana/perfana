@@ -16,8 +16,8 @@ import { type JobResult } from '../types/jobs.js';
 import { type ZodSchema } from 'zod';
 
 interface PipelineInstance {
-  execute: (input: any) => Promise<any>;
-  validateInput?: (data: unknown) => boolean;
+  execute: (input: any) => Promise<unknown>;
+  validateInput?: (data: any) => boolean;
 }
 
 export interface PipelineRegistration {
@@ -47,12 +47,12 @@ export function registerPipeline(reg: PipelineRegistration): void {
  * Safely convert an error value to a readable string.
  * Fixes the [object Object] bug in error messages.
  */
-function formatError(error: unknown): string {
+function formatError(error: any): string {
   if (!error) { return 'Unknown error'; }
   if (typeof error === 'string') { return error; }
   if (error instanceof Error) { return error.message; }
-  if (typeof error === 'object' && 'message' in error && typeof (error as any).message === 'string') {
-    return (error as any).message;
+  if (typeof error === 'object' && 'message' in error && typeof error.message === 'string') {
+    return error.message;
   }
   return JSON.stringify(error);
 }
@@ -70,7 +70,7 @@ export function createProcessorFromRegistry(): Record<string, (job: { data: unkn
 
       try {
         // Step 1: Validate input
-        let validatedData: any;
+        let validatedData: unknown;
         if (reg.schema) {
           validatedData = reg.schema.parse(job.data);
         } else {
@@ -91,10 +91,11 @@ export function createProcessorFromRegistry(): Record<string, (job: { data: unkn
 
         // Step 4: Execute
         const result = await pipeline.execute(pipelineInput);
+        const r = result as any;
 
         // Step 5: Handle result
-        if (!result.success) {
-          const errorMsg = formatError(result.error);
+        if (!r.success) {
+          const errorMsg = formatError(r.error);
 
           if (reg.softFail) {
             return {
@@ -105,14 +106,14 @@ export function createProcessorFromRegistry(): Record<string, (job: { data: unkn
           }
 
           // Log full error details for pipelines that may have object errors
-          pipelineLogger.error({ error: result.error }, `${reg.successMessage} failed with details`);
+          pipelineLogger.error({ error: r.error }, `${reg.successMessage} failed with details`);
           throw new Error(`${reg.successMessage} failed: ${errorMsg}`);
         }
 
         return {
           status: 'success',
           message: `${reg.successMessage} completed`,
-          data: result.data as Record<string, unknown> | undefined,
+          data: r.data as Record<string, unknown> | undefined,
         };
       } catch (error) {
         if (reg.softFail) {

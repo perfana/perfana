@@ -336,7 +336,7 @@ export default function Top10ListsUrls({ testRunId }: Top10ListsUrlsProps) {
               <Typography
                 variant="h6"
                 sx={{ fontWeight: 700, fontSize: '1rem' }}
-                title={(dimension as any).description}
+                title={(dimension as unknown).description}
               >
                 {dimension.title}
               </Typography>
@@ -358,7 +358,7 @@ export default function Top10ListsUrls({ testRunId }: Top10ListsUrlsProps) {
                         URL
                       </TableSortLabel>
                     </TableCell>
-                    {(dimension as any).showErrorCount && (
+                    {(dimension as unknown).showErrorCount && (
                       <TableCell sx={{ fontWeight: 700, width: '10%', textAlign: 'right' }}>
                         Errors
                       </TableCell>
@@ -386,7 +386,7 @@ export default function Top10ListsUrls({ testRunId }: Top10ListsUrlsProps) {
                     const sortedData = sortData(dimension.data, index, dimension.valueField);
                     return sortedData.length === 0 ? (
                       <TableRow>
-                        <TableCell colSpan={(dimension as any).showErrorCount ? 4 : 3} sx={{ textAlign: 'center', py: 3 }}>
+                        <TableCell colSpan={(dimension as unknown).showErrorCount ? 4 : 3} sx={{ textAlign: 'center', py: 3 }}>
                           <Typography variant="body2" color="text.secondary">
                             No data available
                           </Typography>
@@ -429,7 +429,7 @@ export default function Top10ListsUrls({ testRunId }: Top10ListsUrlsProps) {
                           >
                             {item.url}
                           </TableCell>
-                          {(dimension as any).showErrorCount && (
+                          {(dimension as unknown).showErrorCount && (
                             <TableCell
                               sx={{
                                 textAlign: 'right',

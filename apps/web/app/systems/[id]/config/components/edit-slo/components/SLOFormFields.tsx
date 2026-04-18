@@ -19,10 +19,10 @@ interface SLOFormFieldsProps {
   setValidationErrors: React.Dispatch<React.SetStateAction<ValidationErrors>>;
   dashboardsLoading: boolean;
   panelsLoading: boolean;
-  availableDashboards: any[];
-  availablePanels: any[];
-  availableDynatraceDashboards: any[];
-  availableDynatraceMetrics: any[];
+  availableDashboards: unknown[];
+  availablePanels: unknown[];
+  availableDynatraceDashboards: unknown[];
+  availableDynatraceMetrics: unknown[];
   fetchSloApplicationDashboards: () => Promise<void>;
   fetchDynatraceDashboardsForSlo: () => Promise<void>;
   fetchDashboardPanels: (dashboardUid: string) => Promise<void>;

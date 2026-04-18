@@ -65,7 +65,7 @@ export function createSimpleQueue(queueName: SimpleQueueName): Queue {
  */
 export function createSimpleWorker(
   queueName: SimpleQueueName,
-  processor: (job: Job) => Promise<any>
+  processor: (job: Job) => Promise<unknown>
 ): Worker {
   // Get worker configuration
   const workerConfig = getWorkerConfig(queueName);
@@ -164,7 +164,7 @@ export function createSimpleWorker(
 export async function addSimpleJob(
   queue: Queue,
   jobName: string,
-  data: any
+  data: unknown
 ): Promise<void> {
   const options = getJobOptions(jobName);
 

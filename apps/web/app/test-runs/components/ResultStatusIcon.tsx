@@ -9,7 +9,7 @@ interface ResultStatusIconProps {
 
 export function ResultStatusIcon({ testRun }: ResultStatusIconProps): JSX.Element {
   // Check if any pipeline stage is IN_PROGRESS
-  const status = testRun.status as any;
+  const status = testRun.status as unknown;
   const isInProgress =
     status?.evaluatingChecks === 'IN_PROGRESS' ||
     status?.evaluatingComparisons === 'IN_PROGRESS' ||

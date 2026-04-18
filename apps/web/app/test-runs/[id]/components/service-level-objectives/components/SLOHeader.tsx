@@ -69,7 +69,7 @@ export function SLOCollapsedHeader({
 }
 
 interface ExpandedHeaderProps {
-  testRun: any;
+  testRun: unknown;
   onCollapse: () => void;
 }
 

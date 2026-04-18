@@ -54,7 +54,7 @@ import type {
   SnackbarSeverity,
 } from '../types';
 import { SqlMetricsTable, SqlTextViewer } from '../sql';
-import { formatNumber, formatSqlId } from '../utils';
+import { formatSqlId } from '../utils';
 
 // ==================== Constants ====================
 

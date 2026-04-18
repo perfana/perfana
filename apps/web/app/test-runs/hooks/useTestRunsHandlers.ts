@@ -5,8 +5,8 @@ import { authenticatedFetch } from '@/lib/api';
 import { TestRun } from '@/types/test-runs';
 import { RefreshSources } from '@/components/dialogs/RefreshSourcesDialog';
 import { AvailableSources, fetchAvailableSources, getTestRunScope } from '@/lib/refresh-sources';
-import { SnackbarState, SelectionState, RefreshDialogState } from '../types';
-import { allSameScope, getSystemName, getEnvironment } from '../utils/test-runs-filters';
+import { SnackbarState} from '../types';
+import { allSameScope} from '../utils/test-runs-filters';
 
 interface UseTestRunsHandlersProps {
   testRuns: TestRun[];
@@ -183,7 +183,7 @@ export function useTestRunsHandlers({
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          systemUnderTestId: testRun.system_under_test_id || (testRun.systems_under_test as any)?.id,
+          systemUnderTestId: testRun.system_under_test_id || (testRun.systems_under_test as unknown)?.id,
           testEnvironment: testRun.test_environment,
           workload: testRun.workload,
           testRunId: testRun.test_run_id,
@@ -222,7 +222,7 @@ export function useTestRunsHandlers({
         method: 'DELETE',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          systemUnderTestId: testRun.system_under_test_id || (testRun.systems_under_test as any)?.id,
+          systemUnderTestId: testRun.system_under_test_id || (testRun.systems_under_test as unknown)?.id,
           testEnvironment: testRun.test_environment,
           workload: testRun.workload,
           testRunId: testRun.test_run_id,

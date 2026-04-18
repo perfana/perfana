@@ -4,10 +4,7 @@ import { useState, useEffect, useCallback, useMemo } from 'react';
 import {
   UseDashboardFormProps,
   DashboardFormData,
-  GrafanaDashboard,
-  RegexRule,
   AvailableVariable,
-  DashboardVariable,
 } from '../types';
 
 const INITIAL_FORM_DATA: DashboardFormData = {

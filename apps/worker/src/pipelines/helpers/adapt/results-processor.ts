@@ -111,7 +111,7 @@ export class ResultsProcessor {
     testRunIds: string[],
     metricFilter?: MetricFilter
   ): Promise<number> {
-    const placeholders = testRunIds.map((_: any, i: number) => `$${i + 1}`).join(', ');
+    const placeholders = testRunIds.map((_: unknown, i: number) => `$${i + 1}`).join(', ');
 
     // Get system_under_test_id, test_environment, and workload for config lookup
     const testRunInfo = await manager.query(
@@ -168,7 +168,7 @@ export class ResultsProcessor {
     );
 
     // Build query parameters array: testRunIds, defaultConfig, then optional filter params
-    const queryParams: any[] = [...testRunIds, JSON.stringify(defaultConfig)];
+    const queryParams: unknown[] = [...testRunIds, JSON.stringify(defaultConfig)];
 
     if (metricFilter?.applicationDashboardId) {
       queryParams.push(metricFilter.applicationDashboardId);
@@ -198,7 +198,7 @@ export class ResultsProcessor {
    * @returns Number of conclusions generated
    */
   async generateConclusions(manager: EntityManager, testRunIds: string[]): Promise<number> {
-    const placeholders = testRunIds.map((_: any, i: number) => `$${i + 1}`).join(', ');
+    const placeholders = testRunIds.map((_: unknown, i: number) => `$${i + 1}`).join(', ');
 
     const conclusionSQL = this.resultsSQLBuilder.buildConclusionSQL(placeholders);
 
@@ -233,7 +233,7 @@ export class ResultsProcessor {
       `Re-evaluating tracked results for ${testRunIds.length} test run(s) (MongoDB-style re-evaluation)`
     );
 
-    const placeholders = testRunIds.map((_: any, i: number) => `$${i + 1}`).join(', ');
+    const placeholders = testRunIds.map((_: unknown, i: number) => `$${i + 1}`).join(', ');
 
     // Get system info for config lookup
     const testRunInfo = await manager.query(

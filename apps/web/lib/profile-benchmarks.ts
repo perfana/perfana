@@ -25,7 +25,7 @@ export interface ProfileBenchmark {
   validateWithDefaultIfNoData: boolean;
   validateWithDefaultIfNoDataValue?: number;
   tags: string[];
-  metadata: Record<string, any>;
+  metadata: Record<string, unknown>;
   readOnly?: boolean;
   createdAt: string;
   updatedAt: string;
@@ -54,7 +54,7 @@ export interface CreateProfileBenchmarkData {
   validateWithDefaultIfNoData?: boolean;
   validateWithDefaultIfNoDataValue?: number;
   tags?: string[];
-  metadata?: Record<string, any>;
+  metadata?: Record<string, unknown>;
 }
 
 /**

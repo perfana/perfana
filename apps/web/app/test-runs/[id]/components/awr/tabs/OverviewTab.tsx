@@ -10,8 +10,8 @@
  * ```tsx
  * <OverviewTab
  *   reportId="report-uuid"
- *   testRunId="test-run-uuid"
- *   onSnackbar={(msg, sev) => showSnackbar(msg, sev)}
+ *   _testRunId="test-run-uuid"
+ *   _onSnackbar={(msg, sev) => showSnackbar(msg, sev)}
  * />
  * ```
  */
@@ -345,9 +345,9 @@ function EmptyState() {
  */
 export function OverviewTab({
   reportId,
-  testRunId,
+  _testRunId,
   report: providedReport,
-  onSnackbar,
+  _onSnackbar,
 }: OverviewTabProps) {
   const theme = useTheme();
 

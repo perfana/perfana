@@ -51,7 +51,7 @@ export default function TestRunActionsMenu({
   // Check for active jobs that would block actions
   const { isRunning, isBlocked, isStuck, blockingInfo, progress } = useJobProgress({
     testRunId: testRun.test_run_id,
-    systemUnderTestId: testRun.system_under_test_id || (testRun.systems_under_test as any)?.id,
+    systemUnderTestId: testRun.system_under_test_id || (testRun.systems_under_test as unknown)?.id,
     testEnvironment: testRun.test_environment,
     workload: testRun.workload,
   });
@@ -97,7 +97,7 @@ export default function TestRunActionsMenu({
         throw new Error('Failed to start re-evaluation');
       }
 
-      const result = await response.json();
+      const _result = await response.json();
       onJobTriggered?.();
       onSuccess?.('Re-evaluation started successfully');
     } catch (err) {
@@ -152,7 +152,7 @@ export default function TestRunActionsMenu({
         throw new Error('Failed to start re-fetch');
       }
 
-      const result = await response.json();
+      const _result = await response.json();
       onJobTriggered?.();
       onSuccess?.('Re-fetch missing data started');
       onRefresh?.();
@@ -173,7 +173,7 @@ export default function TestRunActionsMenu({
           'Content-Type': 'application/json',
         },
         body: JSON.stringify({
-          systemUnderTestId: testRun.system_under_test_id || (testRun.systems_under_test as any)?.id,
+          systemUnderTestId: testRun.system_under_test_id || (testRun.systems_under_test as unknown)?.id,
           testEnvironment: testRun.test_environment,
           workload: testRun.workload,
           testRunId: testRun.test_run_id,
@@ -205,7 +205,7 @@ export default function TestRunActionsMenu({
           'Content-Type': 'application/json',
         },
         body: JSON.stringify({
-          systemUnderTestId: testRun.system_under_test_id || (testRun.systems_under_test as any)?.id,
+          systemUnderTestId: testRun.system_under_test_id || (testRun.systems_under_test as unknown)?.id,
           testEnvironment: testRun.test_environment,
           workload: testRun.workload,
           testRunId: testRun.test_run_id,

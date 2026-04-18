@@ -72,7 +72,7 @@ export interface ControlGroupStatisticsInput {
  * information (non-null dashboard_uid and metrics_source_id preferred).
  */
 export class ControlGroupStatisticsPipeline extends BasePipelineTypeORM {
-  validateInput(input: unknown): boolean {
+  validateInput(input: any): boolean {
     if (!input || typeof input !== 'object') {return false;}
     const typedInput = input as any;
 
@@ -85,7 +85,7 @@ export class ControlGroupStatisticsPipeline extends BasePipelineTypeORM {
     return hasControlGroupIds || hasTestRunIds;
   }
 
-  async execute(input: unknown): Promise<PipelineResult> {
+  async execute(input: any): Promise<PipelineResult> {
     const startTime = Date.now();
 
     if (!this.validateInput(input)) {

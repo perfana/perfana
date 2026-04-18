@@ -20,7 +20,7 @@ import { EntityMappingsTable, AddEntityDialog } from './dynatrace-deeplinks/comp
 
 export default function DynatraceDeeplinkSection({
   systemId,
-  systemName,
+  _systemName,
   selectedEnvironment,
   selectedWorkload,
 }: DynatraceDeeplinkSectionProps) {

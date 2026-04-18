@@ -152,7 +152,7 @@ export class TestRunsMutationService {
     systemUnderTestId: string;
     testEnvironment: string;
     workload: string;
-    workloadConfig?: Record<string, any>;
+    workloadConfig?: Record<string, unknown>;
     updateDto: UpdateRunningTestDto;
     duration: number;
     plannedDuration: number;
@@ -183,7 +183,7 @@ export class TestRunsMutationService {
       createdBy: existingTestRun ? undefined : userId,
       updatedBy: userId,
       // ADAPT mode: DTO override > workload config > DEFAULT
-      adaptMode: d.adaptMode || workloadConfig?.adaptMode,
+      adaptMode: (d.adaptMode as string | undefined) || (workloadConfig?.adaptMode as string | undefined),
     };
 
     // Create context for handlers to use in event emission

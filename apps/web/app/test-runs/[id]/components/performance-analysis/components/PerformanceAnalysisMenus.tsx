@@ -9,14 +9,14 @@ import {
 import {
   Settings as SettingsIcon,
   ShowChart as ShowChartIcon,
-  MoreVert as MoreVertIcon,
+  MoreVert as _MoreVertIcon,
   Info as InfoIcon,
   Error as ErrorIcon,
   AccountTree as AccountTreeIcon,
   Insights as InsightsIcon,
   Assessment as AssessmentIcon,
 } from '@mui/icons-material';
-import { TransactionStat, SamplerStat, DrillDownFilters } from '../types/performance-analysis.types';
+import { TransactionStat, DrillDownFilters } from '../types/performance-analysis.types';
 import { SamplerActionMenuData } from '../hooks/usePerformanceAnalysisHandlers';
 
 interface PerformanceAnalysisMenusProps {

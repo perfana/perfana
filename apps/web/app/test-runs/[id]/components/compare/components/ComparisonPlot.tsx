@@ -33,7 +33,7 @@ function generatePlotProps(
   showToast: (message: string) => void
 ) {
   // Find the baseline test run for timestep calculation
-  const baselineTestRun = relatedTestRuns.find(tr => tr.test_run_id === data.baselineTestRunId);
+  const _baselineTestRun = relatedTestRuns.find(tr => tr.test_run_id === data.baselineTestRunId);
 
   // Theme colors matching SLO styling
   const isDark = theme.palette.mode === 'dark';
@@ -61,7 +61,7 @@ function generatePlotProps(
 
   // Unit conversion logic from SLOChart
   const panelYAxesFormat = selectedMetric?.yAxesFormat;
-  let adjustedYAxesFormat = panelYAxesFormat;
+  let _adjustedYAxesFormat = panelYAxesFormat;
   let yAxisLabel = 'Value';
   let conversionFactor = 1;
 
@@ -307,9 +307,9 @@ function generatePlotProps(
           path: 'M768 1664h896v-640h-416q-40 0-68-28t-28-68v-416h-384v1152zm256-1440v-64q0-13-9.5-22.5t-22.5-9.5h-704q-13 0-22.5 9.5t-9.5 22.5v64q0 13 9.5 22.5t22.5 9.5h704q13 0 22.5-9.5t9.5-22.5zm256 672h299l-299-299v299zm512 128v672q0 40-28 68t-68 28h-960q-40 0-68-28t-28-68v-160h-544q-40 0-68-28t-28-68v-1344q0-40 28-68t68-28h1088q40 0 68 28t28 68v328q21 13 36 28l408 408q28 28 48 76t20 88z',
           transform: 'scale(0.8)'
         },
-        click: function(gd: any) {
+        click: function(gd: unknown) {
           // Convert plot to PNG blob and copy to clipboard
-          (window as any).Plotly.toImage(gd, {
+          (window as unknown).Plotly.toImage(gd, {
             format: 'png',
             width: gd._fullLayout.width || 800,
             height: gd._fullLayout.height || 480,
@@ -334,7 +334,7 @@ function generatePlotProps(
                 console.log('Chart copied to clipboard successfully');
                 showToast(`Chart "${metricName}" copied to clipboard`);
               })
-              .catch((err: any) => {
+              .catch((err: unknown) => {
                 console.warn('Failed to copy to clipboard:', err);
                 // Fallback: trigger download
                 const a = document.createElement('a');
@@ -345,7 +345,7 @@ function generatePlotProps(
                 document.body.removeChild(a);
                 showToast(`Clipboard not supported - Chart downloaded instead`);
               });
-          }).catch((err: any) => {
+          }).catch((err: unknown) => {
             console.error('Failed to generate image:', err);
             showToast('Failed to copy chart - please try again');
           });

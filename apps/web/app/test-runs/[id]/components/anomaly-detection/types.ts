@@ -71,7 +71,7 @@ export interface ConfigSourceInfo {
 }
 
 export interface DrawerData {
-  [key: string]: any;
+  [key: string]: unknown;
 }
 
 export interface TrendsData {
@@ -79,7 +79,7 @@ export interface TrendsData {
 }
 
 export interface ConfigFormData {
-  [key: string]: any;
+  [key: string]: unknown;
 }
 
 export interface ThresholdsFormData {

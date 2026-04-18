@@ -58,9 +58,8 @@ export class ConfigController {
 
   @Post('/json')
   @ApiOperation({ summary: 'Add test run configuration from JSON with include/exclude patterns' })
-  @ApiResponse({ status: 200, description: 'Test run config json added' })
+  @ApiResponse({ status: 200, description: 'Test run config json added (stored immediately if test run exists, or queued for future association if not)' })
   @ApiResponse({ status: 400, description: 'Validation error or malicious regex detected' })
-  @ApiResponse({ status: 404, description: 'Test run not found' })
   @ApiResponse({ status: 500, description: 'Internal server error' })
   async addTestRunConfigJson(@Body() configJsonDto: AddTestRunConfigJsonDto) {
     this.logger.debug('Adding test run config from JSON', {

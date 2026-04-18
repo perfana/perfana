@@ -12,7 +12,7 @@ interface UseAnomalyTableHandlersProps {
   showToast?: (message: string) => void;
   onRefreshAnomalyData?: () => void;
   onDeleteAnomaly?: (anomaly: AnomalyData, options: DeleteOptions) => Promise<void>;
-  onConfigSave?: (rowKey: string, data: any, scope: 'metric' | 'panel') => void;
+  onConfigSave?: (rowKey: string, data: unknown, scope: 'metric' | 'panel') => void;
 }
 
 export function useAnomalyTableHandlers({
@@ -36,7 +36,7 @@ export function useAnomalyTableHandlers({
   const [configSaveDialogOpen, setConfigSaveDialogOpen] = useState(false);
   const [pendingConfigSave, setPendingConfigSave] = useState<{
     rowKey: string;
-    data: any;
+    data: unknown;
     scope: 'metric' | 'panel';
   } | null>(null);
   const [configSaveLoading, setConfigSaveLoading] = useState(false);
@@ -186,7 +186,7 @@ export function useAnomalyTableHandlers({
   }, [testRun, testRunId, showToast, pollJobCompletion]);
 
   // Config save with dialog
-  const handleConfigSave = useCallback((rowKey: string, data: any, scope: 'metric' | 'panel') => {
+  const handleConfigSave = useCallback((rowKey: string, data: unknown, scope: 'metric' | 'panel') => {
     setPendingConfigSave({ rowKey, data, scope });
     setConfigSaveDialogOpen(true);
   }, []);

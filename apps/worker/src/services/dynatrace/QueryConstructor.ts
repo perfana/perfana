@@ -93,7 +93,7 @@ export class QueryConstructor {
    * Replace template variables in DQL query with actual values
    * Example: $Cluster -> "other-k8s-2025-10-06-1759743420"
    */
-  private replaceTemplateVariables(query: string, variables: Record<string, any>): string {
+  private replaceTemplateVariables(query: string, variables: Record<string, unknown>): string {
     let processedQuery = query;
 
     for (const [key, value] of Object.entries(variables)) {

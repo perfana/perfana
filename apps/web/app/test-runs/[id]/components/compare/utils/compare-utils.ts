@@ -1,4 +1,4 @@
-import { Panel, RelatedTestRun } from '../types/compare.types';
+import { RelatedTestRun } from '../types/compare.types';
 
 /**
  * Calculate percentage difference between current and baseline values

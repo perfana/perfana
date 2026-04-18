@@ -61,7 +61,7 @@ export class ErrorsProcessor {
       SELECT COALESCE(scenario_name, 'default') as scenario_name, COUNT(*) as error_count
       FROM requests_error
       WHERE test_run_id = $1 AND time >= $2`;
-    const params: any[] = [testRunId, filterFromTime];
+    const params: unknown[] = [testRunId, filterFromTime];
 
     if (hasFilterEndTime) {
       query += ` AND time <= $3`;
@@ -224,7 +224,7 @@ export class VirtualUsersProcessor {
         COUNT(*) FILTER (WHERE active_threads IS NOT NULL) as active_thread_count
       FROM virtual_users
       WHERE test_run_id = $1 AND time >= $2`;
-    const params: any[] = [testRunId, filterFromTime];
+    const params: unknown[] = [testRunId, filterFromTime];
 
     if (hasFilterEndTime) {
       query += ` AND time <= $3`;

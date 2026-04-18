@@ -55,7 +55,7 @@ export default function SignInPage() {
   const handleKeycloakLogin = async () => {
     try {
       await login()
-    } catch (err: any) {
+    } catch (err: unknown) {
       setFormError('root', {
         message: err.message || 'Keycloak login failed'
       })

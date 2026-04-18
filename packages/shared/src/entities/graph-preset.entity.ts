@@ -12,7 +12,7 @@ export interface SeriesConfig {
 
 export interface ChartOptions {
   // Future customization options
-  [key: string]: any;
+  [key: string]: unknown;
 }
 
 @Entity('graph_presets')

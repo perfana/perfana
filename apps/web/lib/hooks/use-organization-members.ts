@@ -15,8 +15,7 @@ import {
   updateOrganizationMemberRoles,
   removeOrganizationMember,
   removeOrganizationMemberByUser,
-  getMyOrganizationMemberships,
-  OrganizationMember,
+  getMyOrganizationMemberships, OrganizationMember,
   AddOrganizationMemberDto,
   UpdateOrganizationMemberRolesDto,
 } from '../api/organization-members';

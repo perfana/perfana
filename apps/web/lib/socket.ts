@@ -33,7 +33,7 @@ import {
 type EventListeners = {
   connectionStateChange: ((state: ConnectionState) => void)[];
   error: ((error: WebSocketError) => void)[];
-  [key: string]: ((...args: any[]) => void)[];
+  [key: string]: ((...args: unknown[]) => void)[];
 };
 
 /**
@@ -126,7 +126,7 @@ class SocketManager {
         });
 
         // Then listen for backend's custom 'connected' event (after auth)
-        this.socket!.once('connected', (payload) => {
+        this.socket!.once('connected', (_payload) => {
           // console.log('[Socket] Authenticated and ready:', payload);
           clearTimeout(timeout);
           resolve();
@@ -179,11 +179,11 @@ class SocketManager {
     if (!this.socket) return;
 
     // Connection events (backend emits 'connected')
-    this.socket.on('connected', (payload: ConnectionEstablishedPayload) => {
+    this.socket.on('connected', (_payload: ConnectionEstablishedPayload) => {
       // console.log('[Socket] Connection established:', payload);
     });
 
-    this.socket.on('connect_error', (error) => {
+    this.socket.on('connect_error', (_error) => {
       // console.error('[Socket] Connection error:', error);
       this.setConnectionState('error');
       this.scheduleReconnect();
@@ -265,7 +265,7 @@ class SocketManager {
 
     this.reconnectTimer = setTimeout(() => {
       this.reconnectAttempts++;
-      this.connect().catch((error) => {
+      this.connect().catch((_error) => {
         // console.error('[Socket] Reconnection failed:', error);
       });
     }, delay);
@@ -394,7 +394,7 @@ class SocketManager {
   /**
    * Emit an event to the server
    */
-  emit(event: string, data?: any): void {
+  emit(event: string, data?: unknown): void {
     if (!this.socket || !this.isConnected()) {
       // console.warn(`[Socket] Cannot emit ${event}: not connected`);
       return;

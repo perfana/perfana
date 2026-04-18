@@ -293,7 +293,7 @@ export class DynatraceRepository {
       }
     }
 
-    await this.queryRepo.update(id, updateData);
+    await this.queryRepo.update(id, updateData as any);
 
     const result = await this.queryRepo.findOne({ where: { id } });
     if (!result) {

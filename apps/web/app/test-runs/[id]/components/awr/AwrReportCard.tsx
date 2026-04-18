@@ -4,7 +4,7 @@
  * AWR Report Card Component
  *
  * Main orchestrator component for AWR (Automatic Workload Repository) report
- * analysis. Displays a collapsible card with upload functionality, tabbed
+ * _analysis. Displays a collapsible card with upload functionality, tabbed
  * interface for different analysis views, and report management.
  *
  * Features:
@@ -61,7 +61,7 @@ import type {
   SnackbarSeverity,
   AwrTabConfig,
 } from './types';
-import { useAwrReports, useInvalidateAwrReports } from './hooks/useAwrReports';
+import { useAwrReports} from './hooks/useAwrReports';
 import { useAwrAnalysis } from './hooks/useAwrAnalysis';
 import { deleteAwrReport } from '@/lib/api/awr-reports';
 import {
@@ -79,7 +79,7 @@ import SoftBadge from '../shared/SoftBadge';
 // ==================== Constants ====================
 
 const TAB_CONFIGS: AwrTabConfig[] = [
-  { id: 'insights', label: 'Insights' },
+  { id: '_insights', label: 'Insights' },
   { id: 'top-sql', label: 'Top SQL' },
   { id: 'wait-events', label: 'Wait Events' },
   { id: 'segments', label: 'Segments' },
@@ -137,13 +137,13 @@ export function AwrReportCard({
 
   // Fetch analysis for the selected report
   const {
-    analysis,
-    insights,
+    _analysis,
+    _insights,
     severitySummary,
     criticalCount,
     warningCount,
     infoCount,
-    loading: analysisLoading,
+    loading: _analysisLoading,
     hasCriticalIssues,
   } = useAwrAnalysis(effectiveReportId || '', {
     enabled: !!effectiveReportId && expanded,

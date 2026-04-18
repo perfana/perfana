@@ -23,7 +23,7 @@ import { CompareCollapsedView, CompareExpandedContent } from './components';
 import SavePresetModal from './SavePresetModal';
 
 // Utils
-import { COMPARE_ACCENT_COLOR } from './utils/compare-utils';
+import {} from './utils/compare-utils';
 
 export default function CompareCard({
   testRun,

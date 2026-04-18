@@ -52,7 +52,7 @@ export class DynatraceRepository {
         AND dq.workload = $3
     `;
 
-    const params: any[] = [systemUnderTestId, testEnvironment, workload];
+    const params: unknown[] = [systemUnderTestId, testEnvironment, workload];
 
     if (dashboardLabel) {
       query += ' AND dq.dashboard_label = $4';

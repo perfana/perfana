@@ -22,7 +22,7 @@
  * ```
  */
 
-import { useState, useRef, useCallback, useMemo, useEffect } from 'react';
+import { useState, useRef, useCallback, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
 import {
   Box,
@@ -67,7 +67,7 @@ import {
   getReportStatusLabel,
   getReportStatusColor,
   isCompletedStatus,
-  isFailedStatus,
+  _isFailedStatus,
   buildShareUrl,
   type ReportSummary,
   type ReportListItem,
@@ -113,7 +113,7 @@ export interface ReportCardProps {
   /** Callback when Generate Report button is clicked */
   onGenerateReport?: () => void;
   /** Callback when View Report is clicked */
-  onViewReport?: (reportId: string) => void;
+  _onViewReport?: (reportId: string) => void;
   /** Callback for snackbar notifications */
   onSnackbar?: (message: string, severity: SnackbarSeverity) => void;
   /** Custom class name */
@@ -132,7 +132,7 @@ export function ReportCard({
   expanded,
   onExpand,
   onGenerateReport,
-  onViewReport,
+  _onViewReport,
   onSnackbar,
   className,
   refreshTrigger = 0,
@@ -373,7 +373,7 @@ export function ReportCard({
   }, [handleSnackbar]);
 
   // Handle download PDF
-  const handleDownloadPdf = useCallback(async (report: ReportListItem) => {
+  const _handleDownloadPdf = useCallback(async (report: ReportListItem) => {
     if (!report.has_pdf) {
       handleSnackbar('PDF not available for this report', 'warning');
       return;
@@ -430,7 +430,7 @@ export function ReportCard({
   };
 
   // Get status badge color for SoftBadge
-  const getStatusBadgeColor = (status: ReportStatus): 'blue' | 'green' | 'red' | 'orange' | 'neutral' => {
+  const _getStatusBadgeColor = (status: ReportStatus): 'blue' | 'green' | 'red' | 'orange' | 'neutral' => {
     switch (status) {
       case 'pending':
       case 'processing':
