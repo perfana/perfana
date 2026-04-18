@@ -18,7 +18,7 @@ interface UseDashboardsDataProps {
 
 export function useDashboardsData({
   testRun,
-  testRunId,
+  _testRunId,
   dashboardsExpanded,
   onDashboardsExpand,
 }: UseDashboardsDataProps) {

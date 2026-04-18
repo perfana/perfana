@@ -34,7 +34,7 @@ interface AnomalyDetectionCollapsedCardProps {
 export default function AnomalyDetectionCollapsedCard({
   data: anomalyData,
   loading,
-  conclusionFilter,
+  _conclusionFilter,
   setConclusionFilter,
   onExpand,
   onDelete,

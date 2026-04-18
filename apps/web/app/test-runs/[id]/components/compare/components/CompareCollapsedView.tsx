@@ -16,7 +16,7 @@ interface CompareCollapsedViewProps {
 
 export function CompareCollapsedView({
   presets,
-  presetsLoading,
+  _presetsLoading,
   loading,
   availableSources,
   relatedTestRuns,

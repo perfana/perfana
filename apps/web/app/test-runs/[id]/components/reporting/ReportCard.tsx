@@ -132,7 +132,7 @@ export function ReportCard({
   expanded,
   onExpand,
   onGenerateReport,
-  onViewReport,
+  _onViewReport,
   onSnackbar,
   className,
   refreshTrigger = 0,

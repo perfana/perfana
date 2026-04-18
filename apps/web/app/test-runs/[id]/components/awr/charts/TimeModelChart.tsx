@@ -230,7 +230,7 @@ function PieChartView({ data, height, isDonut, dbTime }: PieChartViewProps) {
 
   // Custom label
   const renderLabel = ({
-    name,
+    _name,
     percent,
   }: {
     name: string;

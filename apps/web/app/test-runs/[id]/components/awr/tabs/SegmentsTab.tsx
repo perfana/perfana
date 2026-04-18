@@ -151,7 +151,7 @@ function getTotalValue(report: any, segmentType: SegmentType): number | undefine
 
 export function SegmentsTab({
   reportId,
-  testRunId,
+  _testRunId,
   initialSegmentType = 'tableScans',
   _onSnackbar,
 }: SegmentsTabProps) {

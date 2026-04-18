@@ -345,9 +345,9 @@ function EmptyState() {
  */
 export function OverviewTab({
   reportId,
-  testRunId,
+  _testRunId,
   report: providedReport,
-  onSnackbar,
+  _onSnackbar,
 }: OverviewTabProps) {
   const theme = useTheme();
 

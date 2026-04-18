@@ -67,7 +67,7 @@ export default function MetricsComparisonTable({
   testRun,
   relatedTestRuns,
   showToast,
-  addedSeries
+  _addedSeries
 }: MetricsComparisonTableProps) {
   const visibleColumns = getVisibleColumns(showPercentiles);
   const gridTemplateColumns = getGridTemplateColumns(showPercentiles);

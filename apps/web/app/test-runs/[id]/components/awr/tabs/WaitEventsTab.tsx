@@ -511,10 +511,10 @@ function WaitClassGroup({
  */
 export function WaitEventsTab({
   reportId,
-  testRunId,
+  _testRunId,
   groupByClass: initialGroupByClass = true,
   showBackgroundEvents: initialShowBackground = false,
-  onSnackbar,
+  _onSnackbar,
 }: WaitEventsTabProps) {
   const theme = useTheme();
 

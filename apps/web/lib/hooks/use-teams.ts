@@ -14,8 +14,7 @@ import {
   getTeam,
   createTeam,
   updateTeam,
-  deleteTeam,
-  _Team,
+  deleteTeam, Team,
   CreateTeamDto,
   UpdateTeamDto,
 } from '../api/teams';

@@ -137,8 +137,8 @@ export function AwrReportCard({
 
   // Fetch analysis for the selected report
   const {
-    analysis,
-    insights,
+    _analysis,
+    _insights,
     severitySummary,
     criticalCount,
     warningCount,

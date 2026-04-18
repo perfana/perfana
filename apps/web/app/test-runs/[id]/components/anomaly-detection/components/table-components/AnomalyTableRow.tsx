@@ -38,7 +38,7 @@ interface AnomalyTableRowProps {
 
 export function AnomalyTableRow({
   row,
-  rowKey,
+  _rowKey,
   index,
   isExpanded,
   isLast,

@@ -166,7 +166,7 @@ interface SeveritySummaryCardProps {
 function SeveritySummaryCard({
   severity,
   count,
-  total,
+  _total,
   onClick,
   selected,
 }: SeveritySummaryCardProps) {
@@ -309,7 +309,7 @@ function PendingAnalysisState({
  */
 export function InsightsTab({
   reportId,
-  testRunId,
+  _testRunId,
   initialFilters,
   showComparisonInsights = false,
   onSnackbar,
