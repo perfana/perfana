@@ -324,7 +324,7 @@ export function InsightsList({
    * Handle severity filter change
    */
   const handleSeverityChange = useCallback(
-    (event: React.ChangeEvent<{ value: unknown }>): void => {
+    (event: any): void => {
       const value = event.target.value as InsightSeverity[];
       setFilters({ ...filters, severities: value.length > 0 ? value : undefined });
     },
@@ -335,7 +335,7 @@ export function InsightsList({
    * Handle category filter change
    */
   const handleCategoryChange = useCallback(
-    (event: React.ChangeEvent<{ value: unknown }>): void => {
+    (event: any): void => {
       const value = event.target.value as InsightCategory[];
       setFilters({ ...filters, categories: value.length > 0 ? value : undefined });
     },
@@ -428,7 +428,7 @@ export function InsightsList({
             labelId="severity-filter-label"
             multiple
             value={filters.severities || []}
-            onChange={handleSeverityChange as React.ChangeEventHandler<HTMLInputElement>}
+            onChange={handleSeverityChange}
             input={<OutlinedInput label="Severity" />}
             renderValue={(selected) => (
               <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 0.5 }}>
@@ -470,7 +470,7 @@ export function InsightsList({
             labelId="category-filter-label"
             multiple
             value={filters.categories || []}
-            onChange={handleCategoryChange as React.ChangeEventHandler<HTMLInputElement>}
+            onChange={handleCategoryChange}
             input={<OutlinedInput label="Category" />}
             renderValue={(selected) => (
               <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 0.5 }}>

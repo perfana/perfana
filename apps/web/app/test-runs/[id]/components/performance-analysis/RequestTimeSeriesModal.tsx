@@ -2,6 +2,7 @@
 
 import { useState, useEffect } from 'react';
 import dynamic from 'next/dynamic';
+import { Config } from 'plotly.js';
 import {
   Dialog,
   DialogTitle,
@@ -479,8 +480,8 @@ export default function RequestTimeSeriesModal({
           <Box sx={{ width: '100%', height: '550px' }}>
             <Plot
               data={generatePlotlyData()}
-              layout={plotLayout}
-              config={plotConfig}
+              layout={plotLayout as any}
+              config={plotConfig as Partial<Config>}
               style={{ width: '100%', height: '100%' }}
               useResizeHandler
             />

@@ -27,6 +27,15 @@ export interface ComparePreset {
   preset_type: 'generic' | 'specific';
   series_search_text?: string;
   show_percentiles: boolean;
+  series_config?: Array<{
+    dashboardId: string;
+    dashboardLabel: string;
+    panelId: number;
+    panelTitle: string;
+    metricName: string;
+    source: string;
+    metricsSourceId?: string;
+  }>;
   application_dashboard_id?: string;
   dashboard_label?: string;
   panel_id?: number;

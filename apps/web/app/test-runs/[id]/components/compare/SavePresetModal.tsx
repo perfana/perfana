@@ -32,6 +32,7 @@ export interface CompareSeries {
   panelTitle: string;
   metricName: string;
   source: 'grafana' | 'dynatrace' | 'performance-metrics';
+  metricsSourceId?: string;
 }
 
 interface SavePresetModalProps {

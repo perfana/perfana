@@ -119,7 +119,7 @@ export default function TrackedRegressionsView({
       if (!acc[key]) {
         acc[key] = {
           trackedTestRunId: key,
-          testRunStart: regression.testRunStart instanceof Date ? regression.testRunStart.toISOString() : regression.testRunStart.toString(),
+          testRunStart: regression.testRunStart instanceof Date ? regression.testRunStart.toISOString() : String(regression.testRunStart),
           regressions: [],
           redetectionCount: 0,
           isResolved: false,
@@ -128,7 +128,7 @@ export default function TrackedRegressionsView({
       } else {
         // Validate that all regressions in the same group have consistent testRunStart times
         const existingStart = acc[key].testRunStart;
-        const newStart = regression.testRunStart instanceof Date ? regression.testRunStart.toISOString() : regression.testRunStart.toString();
+        const newStart = regression.testRunStart instanceof Date ? regression.testRunStart.toISOString() : String(regression.testRunStart);
         if (existingStart !== newStart) {
           console.warn(`Data inconsistency detected for trackedTestRunId: ${key}. Existing start: ${existingStart}, new start: ${newStart}`);
         }

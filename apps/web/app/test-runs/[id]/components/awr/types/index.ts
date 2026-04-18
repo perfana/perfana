@@ -267,7 +267,7 @@ export interface InsightCardProps {
   /** Show SQL link if applicable */
   showSqlLink?: boolean;
   /** Callback when SQL ID is clicked */
-  onSqlClick?: (sqlId: string) => void;
+  onSqlClick?: (sqlId: string, sqlText?: string) => void;
   /** Compact display mode */
   compact?: boolean;
 }

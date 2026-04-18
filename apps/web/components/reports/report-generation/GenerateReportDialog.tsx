@@ -68,6 +68,7 @@ import {
   type TemplateDetail,
   type ReportSectionConfig,
   type ReportSectionType,
+  type ReportStyling,
   REPORT_SECTION_TYPES,
 } from '@/lib/api/reports';
 import {

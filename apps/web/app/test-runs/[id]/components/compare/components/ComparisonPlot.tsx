@@ -3,6 +3,7 @@
 import React from 'react';
 import { Box, CircularProgress, Typography, useTheme, type Theme } from '@mui/material';
 import dynamic from 'next/dynamic';
+import { Layout, Config } from 'plotly.js';
 import { GraphData, Panel, RelatedTestRun } from '../types/compare.types';
 import { TestRun } from '@/types/test-runs';
 
@@ -402,8 +403,8 @@ export default function ComparisonPlot({
     <Box sx={{ height: 480, width: '100%' }}>
       <Plot
         data={plotProps.data}
-        layout={plotProps.layout}
-        config={plotProps.config}
+        layout={plotProps.layout as unknown as Partial<Layout>}
+        config={plotProps.config as unknown as Partial<Config>}
         style={{ width: '100%', height: '480px' }}
       />
     </Box>

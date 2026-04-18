@@ -294,7 +294,8 @@ export function useTrendsPresets({
                 panelTitle: presetData.panel_title || '',
                 metricName,
                 source: selectedSource,
-                yAxisFormat: undefined
+                yAxisFormat: '',
+                metricsSourceId: ''
               }));
             }
           }

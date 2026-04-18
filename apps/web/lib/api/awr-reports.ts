@@ -252,6 +252,7 @@ export interface SqlComparisonItem {
     cpuTime?: number;
     bufferGets?: number;
     diskReads?: number;
+    executions?: number;
   };
   isSignificantRegression: boolean;
   isSignificantImprovement: boolean;
@@ -375,7 +376,7 @@ export interface ComparisonSummary {
   waitEventDecreases: number;
   dbTimeChangePercent?: number;
   transactionRateChangePercent?: number;
-  overallStatus: 'improved' | 'regressed' | 'stable';
+  overallStatus: 'improved' | 'regressed' | 'stable' | 'unknown';
 }
 
 /**
