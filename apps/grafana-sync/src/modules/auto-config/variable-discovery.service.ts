@@ -45,14 +45,15 @@ export class VariableDiscoveryService {
 
     // Filter out templating variable 'system_under_test' and test_environment from Grafana dashboard
     if (grafanaDashboard.templatingVariables && grafanaDashboard.templatingVariables.length > 0) {
-      const templatingVariables = (grafanaDashboard.templatingVariables || []).filter(
-        (templatingVariable: TemplatingVariable) => {
-          return (
-            templatingVariable.name !== 'system_under_test' &&
-            templatingVariable.name !== 'test_environment'
-          );
-        },
-      );
+      const templatingVariables = (grafanaDashboard.templatingVariables || [])
+        .filter(
+          (v): v is TemplatingVariable =>
+            v &&
+            typeof v === 'object' &&
+            'name' in v &&
+            (v as TemplatingVariable).name !== 'system_under_test' &&
+            (v as TemplatingVariable).name !== 'test_environment',
+        );
 
       // Process each templating variable
       for (const templatingVariable of templatingVariables) {

@@ -8,11 +8,9 @@ import {
   Button,
   CircularProgress,
   Alert,
-  Grid
-  Link as
+  Grid,
 } from '@mui/material';
 import { Add } from '@mui/icons-material';
-import from 'next/link';
 import { useOrganizations } from '@/lib/hooks/use-organizations';
 import { useOrganizationContext } from '@/lib/contexts/organization-context';
 import {

@@ -1,9 +1,9 @@
-import { useState, useEffect, useCallback} from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import { useSearchParams } from 'next/navigation';
 import { authenticatedFetch } from '@/lib/api';
 import { TestRun } from '@/types/test-runs';
 import { useTestRunRealtime } from '@/hooks/useTestRunRealtime';
-import {, EditingState } from '../types';
+import { EditingState } from '../types';
 
 /**
  * Fetch a single test run with optional query parameters

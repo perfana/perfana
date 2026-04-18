@@ -42,7 +42,7 @@ import {
 } from 'recharts';
 import type { WaitEventsChartProps, WaitEventChartData } from '../types';
 import { WAIT_CLASS_COLORS } from '../types';
-import {, formatPercentage, formatDuration } from '../utils/formatters';
+import { formatPercentage, formatDuration } from '../utils/formatters';
 
 // ==================== Constants ====================
 

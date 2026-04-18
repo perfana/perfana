@@ -13,6 +13,7 @@ import {
   InputLabel,
   Select,
   MenuItem,
+  Link,
 } from '@mui/material';
 import { Add, FilterList } from '@mui/icons-material';
 import NextLink from 'next/link';
@@ -179,9 +180,9 @@ export default function TeamsPage() {
       {organizations.length === 0 && (
         <Alert severity="info" sx={{ mb: 3 }}>
           You need to create an organization before you can create teams.{' '}
-          <MuiLink component={NextLink} href="/settings/organizations">
+          <Link component={NextLink} href="/settings/organizations">
             Go to Organizations
-          </MuiLink>
+          </Link>
         </Alert>
       )}
 

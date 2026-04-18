@@ -65,9 +65,8 @@ import type {
   AvailableBaseline,
   ChangeDirection,
 } from '../types';
-import {, SqlTextViewer } from '../sql';
+import { SqlTextViewer } from '../sql';
 import { InsightsList } from '../insights';
-import {} from '../charts';
 import {
   formatNumber,
   formatPercentage,
@@ -317,7 +316,7 @@ interface SummaryCardProps {
   icon: React.ReactNode;
 }
 
-function SummaryCard({ title, value, _label, color, icon }: SummaryCardProps) {
+function SummaryCard({ title, value, color, icon }: SummaryCardProps) {
   const theme = useTheme();
 
   return (
