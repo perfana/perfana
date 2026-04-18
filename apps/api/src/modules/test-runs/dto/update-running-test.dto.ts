@@ -116,14 +116,14 @@ export class UpdateRunningTestDto {
   @Transform(({ value }) => {
     if (typeof value === 'string') {
       const parsed = parseInt(value, 10);
-      return isNaN(parsed) ? value : parsed;
+      return isNaN(parsed) ? undefined : parsed;
     }
     return value;
   })
   @IsInt({ message: 'Duration must be an integer' })
   @Min(0, { message: 'Duration must be non-negative' })
   @Max(86400 * 7, { message: 'Duration must not exceed 7 days (604800 seconds)' })
-  duration?: number | string;
+  duration?: number;
 
   @ApiPropertyOptional({
     description: 'Analysis start offset in seconds (initial period excluded from analysis)',
@@ -133,14 +133,14 @@ export class UpdateRunningTestDto {
   @Transform(({ value }) => {
     if (typeof value === 'string') {
       const parsed = parseInt(value, 10);
-      return isNaN(parsed) ? value : parsed;
+      return isNaN(parsed) ? undefined : parsed;
     }
     return value;
   })
   @IsInt({ message: 'Analysis start offset must be an integer' })
   @Min(0, { message: 'Analysis start offset must be non-negative' })
   @Max(86400, { message: 'Analysis start offset must not exceed 1 day (86400 seconds)' })
-  analysisStartOffset?: number | string;
+  analysisStartOffset?: number;
 
   @ApiProperty({
     description: 'Unique test run identifier',
