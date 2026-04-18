@@ -374,12 +374,16 @@ describe('TestRunsConfigService', () => {
       );
     });
 
-    it('should throw ResourceNotFoundException when test run not found', async () => {
+    it('should store configs with string ID when test run does not exist yet', async () => {
       systemRepo.findOne.mockResolvedValue(mockSystemUnderTest as any);
       testRunRepo.findOne.mockResolvedValue(null);
+      mockDataSource.query!.mockResolvedValue([]);
 
-      await expect(service.addTestRunConfigJson(mockJsonConfigDto)).rejects.toThrow(
-        ResourceNotFoundException,
+      await service.addTestRunConfigJson(mockJsonConfigDto);
+
+      expect(mockDataSource.query).toHaveBeenCalledWith(
+        expect.stringContaining('test_run_id_string'),
+        expect.arrayContaining([mockJsonConfigDto.testRunId]),
       );
     });
 

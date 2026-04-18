@@ -213,19 +213,21 @@ export async function createPanelDocuments(
     if (!dashboard.dashboard || !dashboard.dashboard.dashboard || !dashboard.dashboard.dashboard.panels) {
       continue;
     }
-    for (const panel of dashboard.dashboard.dashboard.panels) {
-      if (panel.targets) {
-        for (const target of panel.targets) {
-          if (target.datasource) {
+    for (const panel of (dashboard.dashboard.dashboard.panels as any[])) {
+      const p = panel as any;
+      if (p.targets) {
+        for (const target of (p.targets as any[])) {
+          const t = target as any;
+          if (t.datasource) {
             let uid: string | undefined;
-            if (typeof target.datasource === 'object' && target.datasource.uid) {
-              uid = target.datasource.uid;
-            } else if (typeof target.datasource === 'string') {
-              uid = target.datasource;
+            if (typeof t.datasource === 'object' && t.datasource.uid) {
+              uid = t.datasource.uid;
+            } else if (typeof t.datasource === 'string') {
+              uid = t.datasource;
             }
             // Fall back to panel-level datasource when target has corrupted datasource
-            if (!uid && panel.datasource && typeof panel.datasource === 'object' && panel.datasource.uid) {
-              uid = panel.datasource.uid;
+            if (!uid && p.datasource && typeof p.datasource === 'object' && p.datasource.uid) {
+              uid = p.datasource.uid;
             }
             if (uid && uid !== 'grafana') {
               datasourceUids.add(uid);
