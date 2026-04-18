@@ -183,27 +183,30 @@ export class PanelsPipeline extends BasePipelineTypeORM {
     `;
 
     // Flatten all parameters into a single array
-    const params = panelDocuments.flatMap(doc => [
-      doc.test_run_id,
-      doc.application_dashboard_id,
-      doc.metrics_source_id || null,
-      doc.dashboard_uid,
-      doc.panel_id,
-      doc.panel_title,
-      doc.dashboard_label,
-      doc.benchmark_ids, // Pass array directly to PostgreSQL (text[] column)
-      JSON.stringify(doc.panel),
-      JSON.stringify(doc.query_variables),
-      doc.datasource_type,
-      JSON.stringify(doc.requests),
-      JSON.stringify(doc.errors),
-      JSON.stringify(doc.warnings),
-      doc.updated_at,
-      testRun.organizationId || null,
-      testRun.teamId || null,
-      'worker-pipeline',
-      'worker-pipeline'
-    ]);
+    const params = panelDocuments.flatMap(doc => {
+      const d = doc as any;
+      return [
+        d.test_run_id,
+        d.application_dashboard_id,
+        d.metrics_source_id || null,
+        d.dashboard_uid,
+        d.panel_id,
+        d.panel_title,
+        d.dashboard_label,
+        d.benchmark_ids, // Pass array directly to PostgreSQL (text[] column)
+        JSON.stringify(d.panel),
+        JSON.stringify(d.query_variables),
+        d.datasource_type,
+        JSON.stringify(d.requests),
+        JSON.stringify(d.errors),
+        JSON.stringify(d.warnings),
+        d.updated_at,
+        testRun.organizationId || null,
+        testRun.teamId || null,
+        'worker-pipeline',
+        'worker-pipeline'
+      ];
+    });
 
     await manager.query(insertQuery, params);
   }

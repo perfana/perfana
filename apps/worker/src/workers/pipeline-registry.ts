@@ -91,10 +91,11 @@ export function createProcessorFromRegistry(): Record<string, (job: { data: unkn
 
         // Step 4: Execute
         const result = await pipeline.execute(pipelineInput);
+        const r = result as any;
 
         // Step 5: Handle result
-        if (!result.success) {
-          const errorMsg = formatError(result.error);
+        if (!r.success) {
+          const errorMsg = formatError(r.error);
 
           if (reg.softFail) {
             return {
@@ -105,14 +106,14 @@ export function createProcessorFromRegistry(): Record<string, (job: { data: unkn
           }
 
           // Log full error details for pipelines that may have object errors
-          pipelineLogger.error({ error: result.error }, `${reg.successMessage} failed with details`);
+          pipelineLogger.error({ error: r.error }, `${reg.successMessage} failed with details`);
           throw new Error(`${reg.successMessage} failed: ${errorMsg}`);
         }
 
         return {
           status: 'success',
           message: `${reg.successMessage} completed`,
-          data: result.data as Record<string, unknown> | undefined,
+          data: r.data as Record<string, unknown> | undefined,
         };
       } catch (error) {
         if (reg.softFail) {

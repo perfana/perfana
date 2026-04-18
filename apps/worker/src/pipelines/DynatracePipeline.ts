@@ -422,8 +422,8 @@ export class DynatracePipeline extends BasePipelineTypeORM {
               metric.rampUp,
               metric.value,
               metric.unit || null,
-              testRun?.organizationId || null,
-              testRun?.teamId || null,
+              (testRun as any)?.organizationId || null,
+              (testRun as any)?.teamId || null,
               'worker-pipeline',
               'worker-pipeline'
             ]

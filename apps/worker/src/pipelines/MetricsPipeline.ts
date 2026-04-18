@@ -450,13 +450,14 @@ export class MetricsPipeline extends BasePipelineTypeORM {
     };
 
     // Flatten parameters for prepared statement, truncating strings to column limits
-    const params = batch.flatMap(record =>
-      columns.map(col => {
-        const val = record[col];
+    const params = batch.flatMap(record => {
+      const r = record as any;
+      return columns.map(col => {
+        const val = r[col];
         const limit = varcharLimits[col];
         return (limit && typeof val === 'string') ? val.substring(0, limit) : val;
-      })
-    );
+      });
+    });
 
     await manager.query(sql, params);
   }

@@ -692,8 +692,9 @@ export class DynatraceAPIClient {
         if (data.result && Array.isArray(data.result)) {
           logger.info(`📈 Response contains ${data.result.length} metric(s)`);
           data.result.forEach((metric: unknown, idx: number) => {
-            const dataPointCount = metric.data?.reduce((sum: number, d: any) => sum + (d.values?.length || 0), 0) || 0;
-            logger.info(`  Metric ${idx + 1}: ${metric.metricId || 'unknown'} - ${dataPointCount} data points`);
+            const m = metric as any;
+            const dataPointCount = m.data?.reduce((sum: number, d: any) => sum + (d.values?.length || 0), 0) || 0;
+            logger.info(`  Metric ${idx + 1}: ${m.metricId || 'unknown'} - ${dataPointCount} data points`);
           });
         }
 
