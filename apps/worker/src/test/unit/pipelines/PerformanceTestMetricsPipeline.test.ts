@@ -319,7 +319,7 @@ describe('PerformanceTestMetricsPipeline', () => {
       await pipeline.execute({ testRunId: 'tr-001' });
 
       const sutLookupCalls = mockDataSource.query.mock.calls.filter(
-        (call: any[]) => String(call[0]).includes('FROM system_under_test')
+        (call: any[]) => /FROM\s+systems?_under_test\b/.test(String(call[0]))
       );
       expect(sutLookupCalls.length).toBe(0);
     });
