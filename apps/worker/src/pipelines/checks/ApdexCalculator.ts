@@ -208,13 +208,11 @@ export class ApdexCalculator extends BaseCheckService {
 
     // 1. Transaction-specific threshold takes highest priority
     if (transactionName) {
-      // Query supports both UUID and name format for system_under_test_id
       // RBAC: Filter by organization (backward compatible with NULL)
       let txQuery = `
         SELECT wtat.apdex_threshold
         FROM workload_transaction_apdex_thresholds wtat
-        LEFT JOIN systems_under_test sut ON sut.name = wtat.system_under_test_id
-        WHERE (wtat.system_under_test_id = $1 OR sut.id = $1::uuid)
+        WHERE wtat.system_under_test_id = $1::uuid
           AND wtat.test_environment = $2
           AND wtat.workload = $3
           AND wtat.transaction_name = $4
@@ -241,13 +239,11 @@ export class ApdexCalculator extends BaseCheckService {
     }
 
     // 3. Workload-level threshold
-    // Query supports both UUID and name format for system_under_test_id
     // RBAC: Filter by organization (backward compatible with NULL)
     let wlQuery = `
       SELECT wat.apdex_threshold
       FROM workload_apdex_thresholds wat
-      LEFT JOIN systems_under_test sut ON sut.name = wat.system_under_test_id
-      WHERE (wat.system_under_test_id = $1 OR sut.id = $1::uuid)
+      WHERE wat.system_under_test_id = $1::uuid
         AND wat.test_environment = $2
         AND wat.workload = $3
     `;
