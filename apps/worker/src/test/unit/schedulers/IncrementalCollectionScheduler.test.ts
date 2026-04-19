@@ -1048,4 +1048,84 @@ describe('IncrementalCollectionScheduler', () => {
       expect(queueEvents).toBeDefined();
     });
   });
+
+  // -------------------------------------------------------------------------
+  // BullMQ jobId deduplication (issue #136, Defect C)
+  // -------------------------------------------------------------------------
+
+  describe('jobId deduplication', () => {
+    it('should attach a deterministic time-bucketed jobId on every enqueue', async () => {
+      // Arrange: one test run with a Grafana source, a Dynatrace config, and
+      // the implicit performance_test source — covers all three enqueue sites.
+      (scheduler as unknown as { databaseService: typeof mockDb }).databaseService = mockDb;
+      const testRun = makeTestRun({ testRunId: 'run-dedup-1' });
+      mockTestRunRepo.find.mockResolvedValue([testRun]);
+      mockApplicationDashboardRepo.find.mockResolvedValue([
+        makeApplicationDashboard({ grafanaInstanceId: 'g-1' }),
+      ]);
+      mockDataSource.query.mockResolvedValue([{ dynatrace_config_id: 'dt-1' }]);
+
+      // Freeze time so the 60 s bucket is predictable across the tick.
+      vi.useFakeTimers();
+      vi.setSystemTime(new Date('2026-04-19T14:07:30Z'));
+      const expectedBucket = Math.floor(Date.parse('2026-04-19T14:07:30Z') / 60_000);
+
+      try {
+        // Act
+        await scheduler.handleCron();
+
+        // Assert: jobId is set on every call, follows the dedup template,
+        // and pins to the expected 60 s bucket.
+        expect(mockQueueAdd).toHaveBeenCalledTimes(3);
+        const sourceIds = new Set<string>();
+        for (const call of mockQueueAdd.mock.calls) {
+          const options = call[2];
+          expect(options).toHaveProperty('jobId');
+          const [prefix, testRunId, _sourceType, sourceId, bucket] = (options.jobId as string).split(':');
+          expect(prefix).toBe('incremental');
+          expect(testRunId).toBe('run-dedup-1');
+          expect(Number(bucket)).toBe(expectedBucket);
+          sourceIds.add(sourceId);
+        }
+        // Each of the three sources produced a distinct jobId.
+        expect(sourceIds.size).toBe(3);
+      } finally {
+        vi.useRealTimers();
+      }
+    });
+
+    it('should reuse the same jobId for the same source within a minute bucket', async () => {
+      // Arrange
+      (scheduler as unknown as { databaseService: typeof mockDb }).databaseService = mockDb;
+
+      // Invoke the private helper directly — we only care that two calls
+      // within the same 60 s bucket produce an identical ID so BullMQ's
+      // server-side dedup collapses them. This is the mechanism that
+      // prevents the 20+ starts/second blast radius seen in #136.
+      vi.useFakeTimers();
+      try {
+        vi.setSystemTime(new Date('2026-04-19T14:07:00Z'));
+        const first = (scheduler as unknown as {
+          buildDedupJobId: (t: string, s: string, id: string | null) => string;
+        }).buildDedupJobId('run-x', 'performance_test', null);
+
+        vi.setSystemTime(new Date('2026-04-19T14:07:59.999Z'));
+        const second = (scheduler as unknown as {
+          buildDedupJobId: (t: string, s: string, id: string | null) => string;
+        }).buildDedupJobId('run-x', 'performance_test', null);
+
+        expect(first).toBe(second);
+
+        // A subsequent bucket yields a distinct id so the next natural tick
+        // still enqueues — we don't want dedup to silently starve real work.
+        vi.setSystemTime(new Date('2026-04-19T14:08:00Z'));
+        const third = (scheduler as unknown as {
+          buildDedupJobId: (t: string, s: string, id: string | null) => string;
+        }).buildDedupJobId('run-x', 'performance_test', null);
+        expect(third).not.toBe(first);
+      } finally {
+        vi.useRealTimers();
+      }
+    });
+  });
 });

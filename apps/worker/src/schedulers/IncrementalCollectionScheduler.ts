@@ -95,6 +95,26 @@ export class IncrementalCollectionScheduler {
   }
 
   /**
+   * Build a BullMQ jobId that dedupes at queue submission.
+   *
+   * A stable identifier per (test_run_id, source_type, source_id) would be ideal
+   * but BullMQ refuses to re-add a jobId that still lives in the completed list
+   * (bounded by `removeOnComplete: 100`), so an always-stable ID would break the
+   * natural 60 s re-enqueue cadence. A time bucket matching the cron cadence
+   * (60 s) is the middle ground: duplicate submissions within one bucket are
+   * collapsed to one job; the next tick lands in a fresh bucket and runs as
+   * expected. Acts as a durable complement to the in-memory `inFlightJobs`
+   * check, which is lost on worker restart. See issue #136, Defect C.
+   */
+  private buildDedupJobId(testRunId: string, sourceType: string, sourceId: string | null): string {
+    const bucket = Math.floor(Date.now() / 60_000);
+    // Use '' as the empty-source sentinel to match the migration (see
+    // 1776700000000) — keeps a single canonical form across the scheduler,
+    // the worker upsert path, and the database column.
+    return `incremental:${testRunId}:${sourceType}:${sourceId ?? ''}:${bucket}`;
+  }
+
+  /**
    * Check if a source should be skipped due to backoff.
    * Returns true if the source is in backoff and should NOT be enqueued.
    */
@@ -427,6 +447,7 @@ export class IncrementalCollectionScheduler {
         };
 
         const job = await queue.add(JOB_NAMES.INCREMENTAL_COLLECTION, jobPayload, {
+          jobId: this.buildDedupJobId(testRun.testRunId, sourceType, sourceId),
           attempts: maxAttempts,
           backoff: { type: 'exponential', delay: 2000 },
           removeOnComplete: 100,
@@ -493,6 +514,7 @@ export class IncrementalCollectionScheduler {
         };
 
         const job = await queue.add(JOB_NAMES.INCREMENTAL_COLLECTION, jobPayload, {
+          jobId: this.buildDedupJobId(testRun.testRunId, 'dynatrace', row.dynatrace_config_id),
           attempts: maxAttempts,
           backoff: { type: 'exponential', delay: 2000 },
           removeOnComplete: 100,
@@ -537,6 +559,7 @@ export class IncrementalCollectionScheduler {
         };
 
         const perfJob = await queue.add(JOB_NAMES.INCREMENTAL_COLLECTION, perfTestPayload, {
+          jobId: this.buildDedupJobId(testRun.testRunId, 'performance_test', null),
           attempts: maxAttempts,
           backoff: { type: 'exponential', delay: 2000 },
           removeOnComplete: 100,
