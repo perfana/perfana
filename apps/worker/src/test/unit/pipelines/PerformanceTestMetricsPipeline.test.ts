@@ -310,7 +310,7 @@ describe('PerformanceTestMetricsPipeline', () => {
       expect(result.error?.message).toContain('no start time');
     });
 
-    it('should resolve systemUnderTestId when it is already a UUID', async () => {
+    it('should not query the systems_under_test table for SUT id (uuid is taken from testRun)', async () => {
       const run = createMockTestRun();
       mockDatabaseService.getTestRunByTestRunId.mockResolvedValue(run);
       mockDataSource.query.mockResolvedValue([]);
@@ -318,40 +318,10 @@ describe('PerformanceTestMetricsPipeline', () => {
 
       await pipeline.execute({ testRunId: 'tr-001' });
 
-      // When systemUnderTestId is a UUID the pipeline should NOT query the
-      // system_under_test table by name (it queries by WHERE name = $1)
-      const sutNameLookupCalls = mockDataSource.query.mock.calls.filter(
-        (call: any[]) => String(call[0]).includes('FROM system_under_test WHERE name')
+      const sutLookupCalls = mockDataSource.query.mock.calls.filter(
+        (call: any[]) => String(call[0]).includes('FROM system_under_test')
       );
-      expect(sutNameLookupCalls.length).toBe(0);
-    });
-
-    it('should query system_under_test table when systemUnderTestId looks like a name', async () => {
-      const run = createMockTestRun({ systemUnderTestId: 'my-app-service' }); // not a UUID
-      mockDatabaseService.getTestRunByTestRunId.mockResolvedValue(run);
-      mockDataSource.query.mockResolvedValueOnce([{ id: 'resolved-uuid' }]); // SUT lookup
-      mockDataSource.query.mockResolvedValue([]); // all other DB calls
-      mockWriteDataSource.query.mockResolvedValue([]);
-
-      await pipeline.execute({ testRunId: 'tr-name-sut' });
-
-      const sutQueryCall = mockDataSource.query.mock.calls.find(
-        (call: any[]) => String(call[0]).includes('system_under_test')
-      );
-      expect(sutQueryCall).toBeDefined();
-      expect(sutQueryCall[1]).toContain('my-app-service');
-    });
-
-    it('should return failure when systemUnderTestId name lookup yields no results', async () => {
-      const run = createMockTestRun({ systemUnderTestId: 'unknown-service' });
-      mockDatabaseService.getTestRunByTestRunId.mockResolvedValue(run);
-      // SUT name lookup returns empty
-      mockDataSource.query.mockResolvedValueOnce([]);
-
-      const result = await pipeline.execute({ testRunId: 'tr-bad-sut' });
-
-      expect(result.success).toBe(false);
-      expect(result.error?.message).toContain('System under test not found');
+      expect(sutLookupCalls.length).toBe(0);
     });
   });
 
