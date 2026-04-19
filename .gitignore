@@ -208,3 +208,4 @@ infra/loadtest
 infra/jmeter
 # infra/dynatrace-mock  # Now tracked — WireMock mappings for Dynatrace mock containers
 .claude/skills/gstack/
+.claude/worktrees/
