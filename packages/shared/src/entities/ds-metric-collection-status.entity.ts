@@ -12,7 +12,7 @@ export interface FailedRange extends TimeRange {
 }
 
 @Entity('ds_metric_collection_status')
-@Index(['test_run_id', 'source_type', 'source_id'], { unique: true })
+@Index('uq_ds_metric_collection_status_source', ['test_run_id', 'source_type', 'source_id'], { unique: true })
 export class DsMetricCollectionStatus {
   @PrimaryGeneratedColumn('uuid')
   id!: string;
@@ -23,8 +23,11 @@ export class DsMetricCollectionStatus {
   @Column({ type: 'varchar', length: 50 })
   source_type!: string; // 'grafana' | 'dynatrace' | 'performance_test'
 
-  @Column({ type: 'varchar', length: 255, nullable: true })
-  source_id?: string; // grafana_instance_id, dynatrace_config_id, or null for perf_test
+  // Non-nullable with '' sentinel for sources that have no natural id
+  // (performance_test). NULL source_id caused ON CONFLICT misses and row
+  // explosion — see migration 1776700000000.
+  @Column({ type: 'varchar', length: 255, default: '' })
+  source_id!: string;
 
   @Column('jsonb', { default: '[]' })
   collected_ranges!: TimeRange[];
