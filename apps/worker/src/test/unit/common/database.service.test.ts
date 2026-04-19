@@ -1205,20 +1205,27 @@ describe('WorkerDatabaseService', () => {
   // -------------------------------------------------------------------------
 
   describe('getCollectionStatus()', () => {
-    it('should use query builder with IS NULL when sourceId is null', async () => {
-      // Arrange
+    it('should normalize null sourceId to empty string on findOne', async () => {
+      // After issue #136 the column is NOT NULL with '' as the sentinel for
+      // sources without a natural id (e.g. performance_test). Callers that
+      // still pass `null` get normalized here so we stop tripping the ON
+      // CONFLICT clause that expects NULL = NULL to mean "same row" — which
+      // PostgreSQL's standard btree unique semantics emphatically do not.
       const { service, dsMetricCollectionStatusRepo } = buildService();
-      const qb = makeQueryBuilder();
-      dsMetricCollectionStatusRepo.createQueryBuilder.mockReturnValue(qb);
       const statusRow = { id: 'cs-1', test_run_id: 'run-001' };
-      qb.getOne.mockResolvedValue(statusRow);
+      dsMetricCollectionStatusRepo.findOne.mockResolvedValue(statusRow);
 
       // Act
       const result = await service.getCollectionStatus('run-001', 'grafana', null);
 
       // Assert
-      expect(dsMetricCollectionStatusRepo.createQueryBuilder).toHaveBeenCalledWith('status');
-      expect(qb.andWhere).toHaveBeenCalledWith('status.source_id IS NULL');
+      expect(dsMetricCollectionStatusRepo.findOne).toHaveBeenCalledWith({
+        where: {
+          test_run_id: 'run-001',
+          source_type: 'grafana',
+          source_id: '',
+        },
+      });
       expect(result).toEqual(statusRow);
     });
 
@@ -1416,8 +1423,10 @@ describe('WorkerDatabaseService', () => {
       );
     });
 
-    it('should work with null sourceId', async () => {
-      // Arrange
+    it('should normalize null sourceId to empty string in the upsert parameters', async () => {
+      // performance_test callers pass sourceId=null; after issue #136 the
+      // column is NOT NULL so we must rewrite to '' before the query to keep
+      // ON CONFLICT matching the existing row rather than inserting a new one.
       const { service, dataSource } = buildService();
       const from = new Date('2024-01-01T00:00:00Z');
       const to = new Date('2024-01-01T01:00:00Z');
@@ -1428,8 +1437,30 @@ describe('WorkerDatabaseService', () => {
       // Assert
       expect(dataSource.query).toHaveBeenCalledWith(
         expect.any(String),
-        expect.arrayContaining(['run-001', 'grafana', null])
+        expect.arrayContaining(['run-001', 'grafana', ''])
       );
+      const [, params] = dataSource.query.mock.calls[0] as [string, unknown[]];
+      expect(params).not.toContain(null);
+    });
+
+    it('should prune failed_ranges fully covered by any collected range on every upsert', async () => {
+      // Issue #136, Defect B: stale failed_ranges never cleared even though the
+      // sanity check kept counting them. The atomic upsert must include a
+      // NOT EXISTS subquery over the concatenated (old || new) collected_ranges
+      // so any failed entry whose window is covered by a later wider success is
+      // dropped in the same statement.
+      const { service, dataSource } = buildService();
+      const from = new Date('2024-01-01T00:00:00Z');
+      const to = new Date('2024-01-01T01:00:00Z');
+
+      await service.updateCollectedRanges('run-001', 'grafana', 'src-1', { from, to });
+
+      const [sql] = dataSource.query.mock.calls[0] as [string];
+      expect(sql).toMatch(/jsonb_array_elements\(ds_metric_collection_status\.failed_ranges\)/);
+      expect(sql).toMatch(
+        /jsonb_array_elements\(ds_metric_collection_status\.collected_ranges \|\| \$4::jsonb\)/
+      );
+      expect(sql).toMatch(/NOT EXISTS/);
     });
   });
 
@@ -1600,18 +1631,22 @@ describe('WorkerDatabaseService', () => {
   // -------------------------------------------------------------------------
 
   describe('removeCollectionStatus()', () => {
-    it('should use raw SQL delete when sourceId is null', async () => {
-      // Arrange
-      const { service, dataSource } = buildService();
+    it('should normalize null sourceId to empty string and go through repo.delete', async () => {
+      // After issue #136 source_id is NOT NULL — the raw SQL "IS NULL" branch
+      // is obsolete. Callers that still pass `null` get normalized to '' so
+      // the indexed delete still hits the same row.
+      const { service, dsMetricCollectionStatusRepo, dataSource } = buildService();
 
       // Act
       await service.removeCollectionStatus('run-001', 'grafana', null);
 
       // Assert
-      expect(dataSource.query).toHaveBeenCalledWith(
-        expect.stringContaining('DELETE FROM ds_metric_collection_status'),
-        ['run-001', 'grafana']
-      );
+      expect(dsMetricCollectionStatusRepo.delete).toHaveBeenCalledWith({
+        test_run_id: 'run-001',
+        source_type: 'grafana',
+        source_id: '',
+      });
+      expect(dataSource.query).not.toHaveBeenCalled();
     });
 
     it('should use repo.delete when sourceId is a string', async () => {

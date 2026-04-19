@@ -515,7 +515,7 @@ export class WorkerDatabaseService implements OnModuleInit {
    * Get collection status for a specific source
    * @param testRunId - The test run ID
    * @param sourceType - Type of source ('grafana', 'dynatrace', 'performance_test')
-   * @param sourceId - Source identifier (or null for performance_test)
+   * @param sourceId - Source identifier. '' (or null) for sources without a natural id, e.g. performance_test.
    * @returns Collection status or null if not found
    */
   async getCollectionStatus(
@@ -523,23 +523,13 @@ export class WorkerDatabaseService implements OnModuleInit {
     sourceType: string,
     sourceId: string | null
   ): Promise<DsMetricCollectionStatus | null> {
-    const where: any = {
-      test_run_id: testRunId,
-      source_type: sourceType,
-    };
-
-    // Handle null sourceId properly (TypeORM requires explicit null handling)
-    if (sourceId === null) {
-      return await this.dsMetricCollectionStatusRepo
-        .createQueryBuilder('status')
-        .where('status.test_run_id = :testRunId', { testRunId })
-        .andWhere('status.source_type = :sourceType', { sourceType })
-        .andWhere('status.source_id IS NULL')
-        .getOne();
-    } else {
-      where.source_id = sourceId;
-      return await this.dsMetricCollectionStatusRepo.findOne({ where });
-    }
+    return await this.dsMetricCollectionStatusRepo.findOne({
+      where: {
+        test_run_id: testRunId,
+        source_type: sourceType,
+        source_id: sourceId ?? '',
+      },
+    });
   }
 
   /**
@@ -576,25 +566,27 @@ export class WorkerDatabaseService implements OnModuleInit {
    * @returns The created or updated status
    */
   async upsertCollectionStatus(status: Partial<DsMetricCollectionStatus>): Promise<DsMetricCollectionStatus> {
-    // Ensure row exists atomically to avoid duplicate creation with NULL source_id
+    const sourceId = status.source_id ?? '';
+
+    // Ensure row exists atomically using the canonical unique key.
     await this.dataSource.query(
       `INSERT INTO ds_metric_collection_status
          (test_run_id, source_type, source_id, collected_ranges, failed_ranges, is_complete, total_data_points, created_at, updated_at)
        VALUES ($1, $2, $3, '[]'::jsonb, '[]'::jsonb, false, 0, NOW(), NOW())
        ON CONFLICT (test_run_id, source_type, source_id) DO NOTHING`,
-      [status.test_run_id, status.source_type, status.source_id ?? null]
+      [status.test_run_id, status.source_type, sourceId]
     );
 
     // Now find the existing row and update it with the provided fields
     const existing = await this.getCollectionStatus(
       status.test_run_id!,
       status.source_type!,
-      status.source_id ?? null
+      sourceId
     );
 
     if (!existing) {
       throw new Error(
-        `Failed to get collection status after upsert for test_run=${status.test_run_id}, source=${status.source_type}/${status.source_id ?? 'null'}`
+        `Failed to get collection status after upsert for test_run=${status.test_run_id}, source=${status.source_type}/${sourceId || 'empty'}`
       );
     }
 
@@ -605,7 +597,7 @@ export class WorkerDatabaseService implements OnModuleInit {
     }
 
     this.logger.debug(
-      `Upserted collection status for test_run=${status.test_run_id}, source=${status.source_type}/${status.source_id ?? 'null'}`
+      `Upserted collection status for test_run=${status.test_run_id}, source=${status.source_type}/${sourceId || 'empty'}`
     );
     return (await this.dsMetricCollectionStatusRepo.findOne({ where: { id: existing.id } }))!;
   }
@@ -654,14 +646,15 @@ export class WorkerDatabaseService implements OnModuleInit {
     sourceId: string | null,
     newRange: { from: Date; to: Date }
   ): Promise<void> {
-    // Atomic upsert using INSERT ON CONFLICT to prevent duplicate rows
-    // when source_id IS NULL (PostgreSQL NULL != NULL in older indexes).
-    // The uq_collection_status index with NULLS NOT DISTINCT handles this,
-    // but we also use atomic SQL to avoid read-then-write races.
+    const normalizedSourceId = sourceId ?? '';
     const rangeJson = JSON.stringify({ from: newRange.from.toISOString(), to: newRange.to.toISOString() });
 
-    // Atomic upsert: append to collected_ranges and remove any failed_range
-    // whose from/to matches the successfully re-collected range.
+    // Atomic upsert: append to collected_ranges and drop any failed_range
+    // whose [from, to] window is fully covered by ANY entry in the now-current
+    // collected_ranges (existing || new). Prior versions only dropped exact
+    // from/to matches, so retries with wider windows left stale entries in
+    // failed_ranges forever — which the sanity check kept counting as
+    // "failed collection ranges". See issue #136, Defect B.
     await this.dataSource.query(
       `INSERT INTO ds_metric_collection_status
          (test_run_id, source_type, source_id, collected_ranges, failed_ranges, is_complete, total_data_points, last_collected_at, created_at, updated_at)
@@ -672,16 +665,21 @@ export class WorkerDatabaseService implements OnModuleInit {
          failed_ranges = COALESCE(
            (SELECT jsonb_agg(fr)
             FROM jsonb_array_elements(ds_metric_collection_status.failed_ranges) fr
-            WHERE NOT (fr->>'from' = $5 AND fr->>'to' = $6)),
+            WHERE NOT EXISTS (
+              SELECT 1
+              FROM jsonb_array_elements(ds_metric_collection_status.collected_ranges || $4::jsonb) cr
+              WHERE (cr->>'from')::timestamptz <= (fr->>'from')::timestamptz
+                AND (cr->>'to')::timestamptz   >= (fr->>'to')::timestamptz
+            )),
            '[]'::jsonb
          ),
          last_collected_at = NOW(),
          updated_at = NOW()`,
-      [testRunId, sourceType, sourceId, `[${rangeJson}]`, newRange.from.toISOString(), newRange.to.toISOString()]
+      [testRunId, sourceType, normalizedSourceId, `[${rangeJson}]`]
     );
 
     this.logger.debug(
-      `Updated collected_ranges for test_run=${testRunId}, source=${sourceType}/${sourceId ?? 'null'}, range=${newRange.from.toISOString()}-${newRange.to.toISOString()}`
+      `Updated collected_ranges for test_run=${testRunId}, source=${sourceType}/${normalizedSourceId || 'empty'}, range=${newRange.from.toISOString()}-${newRange.to.toISOString()}`
     );
   }
 
@@ -701,20 +699,22 @@ export class WorkerDatabaseService implements OnModuleInit {
     range: { from: Date; to: Date },
     error: string
   ): Promise<void> {
+    const normalizedSourceId = sourceId ?? '';
+
     // Ensure the row exists atomically (no duplicate creation race)
     await this.dataSource.query(
       `INSERT INTO ds_metric_collection_status
          (test_run_id, source_type, source_id, collected_ranges, failed_ranges, is_complete, total_data_points, created_at, updated_at)
        VALUES ($1, $2, $3, '[]'::jsonb, '[]'::jsonb, false, 0, NOW(), NOW())
        ON CONFLICT (test_run_id, source_type, source_id) DO NOTHING`,
-      [testRunId, sourceType, sourceId]
+      [testRunId, sourceType, normalizedSourceId]
     );
 
     // Now read the guaranteed-existing row
-    const status = await this.getCollectionStatus(testRunId, sourceType, sourceId);
+    const status = await this.getCollectionStatus(testRunId, sourceType, normalizedSourceId);
     if (!status) {
       throw new Error(
-        `Failed to get collection status after upsert for test_run=${testRunId}, source=${sourceType}/${sourceId ?? 'null'}`
+        `Failed to get collection status after upsert for test_run=${testRunId}, source=${sourceType}/${normalizedSourceId || 'empty'}`
       );
     }
 
@@ -828,20 +828,11 @@ export class WorkerDatabaseService implements OnModuleInit {
     sourceType: string,
     sourceId: string | null
   ): Promise<void> {
-    if (sourceId === null) {
-      // Must use raw SQL to match source_id IS NULL
-      await this.dataSource.query(
-        `DELETE FROM ds_metric_collection_status
-         WHERE test_run_id = $1 AND source_type = $2 AND source_id IS NULL`,
-        [testRunId, sourceType]
-      );
-    } else {
-      await this.dsMetricCollectionStatusRepo.delete({
-        test_run_id: testRunId,
-        source_type: sourceType,
-        source_id: sourceId,
-      });
-    }
+    await this.dsMetricCollectionStatusRepo.delete({
+      test_run_id: testRunId,
+      source_type: sourceType,
+      source_id: sourceId ?? '',
+    });
     this.logger.debug(`Removed collection status for test_run=${testRunId}, source=${sourceType}/${sourceId ?? 'null'}`);
   }
 
