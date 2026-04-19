@@ -913,6 +913,31 @@ describe('TestRunsPerformanceQueryService', () => {
       });
     });
 
+    describe('SQL structure (query shape regressions)', () => {
+      it('joins workload_apdex_thresholds on sut.id (no name OR id::text OR-join) without transactionName', async () => {
+        mockQuerySequence([RAW_ERROR_ROW]);
+
+        await service.getTransactionErrors(TEST_RUN_ID, undefined, undefined, ADMIN_ROLES, []);
+
+        const call = (testRunRepo.query as jest.Mock).mock.calls[0];
+        expect(call[0]).toContain('wat.system_under_test_id = sut.id');
+        expect(call[0]).not.toContain('sut.name OR');
+        expect(call[0]).not.toContain('sut.id::text');
+      });
+
+      it('joins both threshold tables on sut.id when transactionName provided', async () => {
+        mockQuerySequence([RAW_ERROR_ROW]);
+
+        await service.getTransactionErrors(TEST_RUN_ID, 'checkout', undefined, ADMIN_ROLES, []);
+
+        const call = (testRunRepo.query as jest.Mock).mock.calls[0];
+        expect(call[0]).toContain('wat.system_under_test_id = sut.id');
+        expect(call[0]).toContain('wtat.system_under_test_id = sut.id');
+        expect(call[0]).not.toContain('sut.name OR');
+        expect(call[0]).not.toContain('sut.id::text');
+      });
+    });
+
     describe('data mapping', () => {
       it('maps all fields correctly from raw row', async () => {
         mockQuerySequence([RAW_ERROR_ROW]);

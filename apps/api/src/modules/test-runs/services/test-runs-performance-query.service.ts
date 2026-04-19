@@ -494,10 +494,10 @@ export class TestRunsPerformanceQueryService {
       // threshold join so Apdex in the errors modal reflects the configured threshold, not hardcoded 500ms.
       const thresholdTransactionJoin = transactionName
         ? `LEFT JOIN workload_transaction_apdex_thresholds wtat
-            ON (wtat.system_under_test_id = sut.name OR wtat.system_under_test_id = sut.id::text)
-            AND wtat.test_environment = tr.test_environment
-            AND wtat.workload = tr.workload
-            AND wtat.transaction_name = $2`
+            ON  wtat.system_under_test_id = sut.id
+            AND wtat.test_environment    = tr.test_environment
+            AND wtat.workload            = tr.workload
+            AND wtat.transaction_name    = $2`
         : '';
       const thresholdCoalesce = transactionName
         ? 'COALESCE(wtat.apdex_threshold, wat.apdex_threshold, 500)'
@@ -509,9 +509,9 @@ export class TestRunsPerformanceQueryService {
           FROM test_runs tr
           LEFT JOIN systems_under_test sut ON sut.id = tr.system_under_test_id
           LEFT JOIN workload_apdex_thresholds wat
-            ON (wat.system_under_test_id = sut.name OR wat.system_under_test_id = sut.id::text)
-            AND wat.test_environment = tr.test_environment
-            AND wat.workload = tr.workload
+            ON  wat.system_under_test_id = sut.id
+            AND wat.test_environment    = tr.test_environment
+            AND wat.workload            = tr.workload
           ${thresholdTransactionJoin}
           WHERE tr.test_run_id = $1
           LIMIT 1
