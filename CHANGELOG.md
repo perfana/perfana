@@ -4,6 +4,12 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
+## [0.2.39.0] - 2026-04-19
+
+### Fixed
+- Analyze pipeline no longer aborts on SQLSTATE 42P10 (`INSERT … ON CONFLICT` without matching unique index). A new migration (`1776600000000-AddDsUniqueIndexesForUpserts`) restores the nine `ds_*` unique indexes that `AddWorkloadToEvents1776148518354.up()` dropped without recreating — covering `ds_metrics`, `ds_compare_config` (panel + metric partials), `ds_control_groups`, `ds_metric_statistics`, `ds_control_group_statistics`, `ds_adapt_results`, `ds_adapt_conclusion`, and `ds_adapt_tracked_results`. Checks, ADAPT, and stats now populate on baseline runs (#132).
+- `IncrementalMetricsPipeline.execute` now propagates per-collector failures as a pipeline-level error (`INCREMENTAL_COLLECTOR_FAILED`) instead of hiding them behind an overall `success: true`. Before, a collector that caught an upsert failure internally (e.g. the 42P10 above) still let `ds_metric_collection_status` get marked `is_complete=true, total_data_points=0` — so reanalyze saw no gap and left `ds_metrics` empty forever. Affected runs now re-collect from scratch on the next analyze.
+
 ## [0.2.38.0] - 2026-04-18
 
 ### Fixed
