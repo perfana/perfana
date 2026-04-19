@@ -4,6 +4,24 @@ import { IncrementalCollectionJobSchema, type IncrementalCollectionJob as _Incre
 import { IncrementalMetricsPipeline } from '../pipelines/IncrementalMetricsPipeline.js';
 import { PerformanceTestMetricsPipeline as _PerformanceTestMetricsPipeline } from '../pipelines/PerformanceTestMetricsPipeline.js';
 import { getDatabaseService } from '../common/database-accessor.js';
+import { randomBytes } from 'node:crypto';
+import { acquireRedisConnection, releaseRedisConnection } from '../config/redis-pool.js';
+import { JobLockService } from '../services/JobLockService.js';
+
+/**
+ * Per-test_run_id lock key for performance-test incremental collection.
+ * Prevents overlapping ticks of `collectPerformanceTestMetrics` for the same
+ * test run from racing on `ds_metric_statistics`. See issue #134.
+ *
+ * TTL = 15 min: deliberately tighter than `JOB_DEFAULTS.LOCK_TTL_SECONDS` (30
+ * min, which targets long analysis jobs). A single perf-test incremental tick
+ * should not exceed a few minutes even under load (the incident in #134 saw a
+ * pathological 97 s DELETE); 15 min gives generous headroom while ensuring a
+ * crashed worker releases the lock reasonably fast so the next scheduler tick
+ * can proceed.
+ */
+const PERF_TEST_LOCK_PREFIX = 'job:lock:perf-test-metrics:';
+const PERF_TEST_LOCK_TTL_SECONDS = 15 * 60;
 
 const logger = getLogger('incremental-metrics-worker');
 
@@ -92,7 +110,8 @@ export function incrementalMetricsWorker() {
           result = await collectPerformanceTestMetrics(
             testRunId,
             new Date(fromTime),
-            new Date(toTime)
+            new Date(toTime),
+            job.id
           );
           break;
 
@@ -379,22 +398,59 @@ async function collectDynatraceMetrics(
  *
  * Uses IncrementalMetricsPipeline to collect JMeter/Gatling/k6 metrics with time-range filtering.
  *
+ * Concurrency: guarded by a per-test_run_id Redis lock. If another tick is already
+ * running for the same test run, this call returns success with `dataPoints: 0` and
+ * skips advancing the collected range, so the scheduler retries on its next tick.
+ * This prevents the DELETE+INSERT race on `ds_metric_statistics` (issue #134).
+ *
  * @param testRunId - Test run identifier
  * @param fromTime - Start of time range
  * @param toTime - End of time range
+ * @param ownerToken - Unique token (BullMQ job id) used for lock ownership.
+ *   When undefined (e.g. a non-BullMQ caller), a `${testRunId}:${now}` token
+ *   is generated locally. Centralizing the fallback here avoids each call
+ *   site reinventing it and risking non-unique tokens.
  * @returns Collection result
  */
 async function collectPerformanceTestMetrics(
   testRunId: string,
   fromTime: Date,
-  toTime: Date
+  toTime: Date,
+  ownerToken?: string
 ): Promise<CollectionResult> {
-  logger.info({
-    testRunId,
-    timeRange: `${fromTime.toISOString()} to ${toTime.toISOString()}`,
-  }, 'Collecting performance test metrics for time range');
+  const lockKey = `${PERF_TEST_LOCK_PREFIX}${testRunId}`;
+  // 8 random bytes appended so two concurrent fallback tokens computed in the
+  // same millisecond cannot collide on the release path.
+  const token = ownerToken ?? `${testRunId}:${Date.now()}:${randomBytes(8).toString('hex')}`;
+
+  let redis: Awaited<ReturnType<typeof acquireRedisConnection>> | null = null;
+  let lockService: JobLockService | null = null;
+  let lockAcquired = false;
 
   try {
+    redis = await acquireRedisConnection();
+    lockService = new JobLockService(redis);
+    lockAcquired = await lockService.acquireKeyLock(
+      lockKey,
+      token,
+      PERF_TEST_LOCK_TTL_SECONDS
+    );
+
+    if (!lockAcquired) {
+      logger.warn({
+        testRunId,
+        lockKey,
+      }, '⏭️  Skipping performance test metrics tick — another invocation is already in flight');
+      // Return success with 0 dataPoints so the worker does NOT advance the
+      // collected range; the next scheduler tick will pick up where we left off.
+      return { success: true, dataPoints: 0 };
+    }
+
+    logger.info({
+      testRunId,
+      timeRange: `${fromTime.toISOString()} to ${toTime.toISOString()}`,
+    }, 'Collecting performance test metrics for time range');
+
     const pipeline = new IncrementalMetricsPipeline(logger);
 
     // Execute incremental collection with time range and performance test-only filtering
@@ -437,5 +493,28 @@ async function collectPerformanceTestMetrics(
       success: false,
       error: error instanceof Error ? error.message : String(error),
     };
+  } finally {
+    if (lockAcquired && lockService) {
+      try {
+        await lockService.releaseKeyLock(lockKey, token);
+      } catch (releaseError) {
+        logger.warn({
+          testRunId,
+          error: releaseError instanceof Error ? releaseError.message : String(releaseError),
+        }, 'Failed to release perf-test metrics lock — TTL will reclaim');
+      }
+    }
+    if (redis) {
+      try {
+        releaseRedisConnection(redis);
+      } catch (poolError) {
+        // Connection-pool release shouldn't normally throw, but if it does
+        // we want a log line — silent swallowing here would hide a leak.
+        logger.warn({
+          testRunId,
+          error: poolError instanceof Error ? poolError.message : String(poolError),
+        }, 'Failed to release Redis connection back to pool');
+      }
+    }
   }
 }

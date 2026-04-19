@@ -703,7 +703,7 @@ describe('PerformanceTestMetricsPipeline', () => {
       );
     });
 
-    it('should DELETE existing statistics before INSERT', async () => {
+    it('should NOT issue a DELETE before the upsert (issue #134)', async () => {
       mockRequestsProcessorInstance.process.mockResolvedValue(createProcessorResult(1));
 
       await pipeline.execute({ testRunId: 'tr-001' });
@@ -711,10 +711,10 @@ describe('PerformanceTestMetricsPipeline', () => {
       const deleteStatsCalls = mockDataSource.query.mock.calls.filter(
         (call: any[]) => String(call[0]).includes('DELETE FROM ds_metric_statistics')
       );
-      expect(deleteStatsCalls.length).toBe(1);
+      expect(deleteStatsCalls.length).toBe(0);
     });
 
-    it('should INSERT statistics after computing them', async () => {
+    it('should UPSERT statistics with ON CONFLICT DO UPDATE on the unique key (issue #134)', async () => {
       mockRequestsProcessorInstance.process.mockResolvedValue(createProcessorResult(1));
 
       await pipeline.execute({ testRunId: 'tr-001' });
@@ -723,6 +723,26 @@ describe('PerformanceTestMetricsPipeline', () => {
         (call: any[]) => String(call[0]).includes('INSERT INTO ds_metric_statistics')
       );
       expect(insertStatsCalls.length).toBeGreaterThan(0);
+
+      const sql = String(insertStatsCalls[0][0]);
+      // Normalize whitespace so future SQL reformatting doesn't break us.
+      const normalized = sql.replace(/\s+/g, ' ');
+      // Idempotent against the uniq_ds_metric_statistics index added in #132.
+      expect(normalized).toContain(
+        'ON CONFLICT (test_run_id, application_dashboard_id, panel_id, metric_name)'
+      );
+      expect(normalized).toContain('DO UPDATE SET');
+      // Sanity-check that the refresh covers the volatile stat columns.
+      expect(normalized).toMatch(/count\s*=\s*EXCLUDED\.count/);
+      expect(normalized).toMatch(/mean\s*=\s*EXCLUDED\.mean/);
+      expect(normalized).toMatch(/updated_at\s*=\s*NOW\(\)/);
+      // Inverse contract: created_by must NOT be in DO UPDATE — the original
+      // creator's identity is preserved across overlapping ticks. A future
+      // edit that mechanically adds `created_by = EXCLUDED.created_by` would
+      // silently rewrite ownership; this guard catches that regression.
+      expect(normalized).not.toMatch(/created_by\s*=\s*EXCLUDED\.created_by/);
+      // updated_by IS expected to refresh (records who last touched it).
+      expect(normalized).toMatch(/updated_by\s*=\s*EXCLUDED\.updated_by/);
     });
 
     it('should group metrics by (test_run_id, application_dashboard_id, panel_id, metric_name)', async () => {
@@ -735,6 +755,30 @@ describe('PerformanceTestMetricsPipeline', () => {
         compareConfigs: [],
       };
       mockRequestsProcessorInstance.process.mockResolvedValue(sameGroupMetrics);
+
+      await pipeline.execute({ testRunId: 'tr-001' });
+
+      expect(mockLogger.info).toHaveBeenCalledWith(
+        expect.stringContaining('1 metric groups')
+      );
+    });
+
+    it('should dedupe metric_names that collide after 255-char truncation (issue #134)', async () => {
+      // Two metric names whose first 255 chars are identical but tails differ.
+      // Storage truncates to 255 chars, so both would persist with the same
+      // metric_name. If grouping used the raw name (untruncated), we would
+      // emit two stat records with the same persisted key — and Postgres would
+      // throw `cardinality_violation` on the bulk INSERT ... ON CONFLICT
+      // DO UPDATE because a single statement cannot affect the same row twice.
+      const prefix = 'T01_Homepage_Load.' + 'x'.repeat(240); // total 258 chars; first 255 identical
+      const collidingMetrics = {
+        metrics: [
+          createMockMetric({ metric_name: prefix + 'A', value: 100 }),
+          createMockMetric({ metric_name: prefix + 'B', value: 200 }),
+        ],
+        compareConfigs: [],
+      };
+      mockRequestsProcessorInstance.process.mockResolvedValue(collidingMetrics);
 
       await pipeline.execute({ testRunId: 'tr-001' });
 

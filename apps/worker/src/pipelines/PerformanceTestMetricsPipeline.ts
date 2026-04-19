@@ -661,10 +661,19 @@ export class PerformanceTestMetricsPipeline extends BasePipelineTypeORM {
       return;
     }
 
-    // Group by (test_run_id, application_dashboard_id, panel_id, metric_name)
+    // Group by (test_run_id, application_dashboard_id, panel_id, metric_name).
+    // CRITICAL: truncate metric_name to 255 chars in the key so it matches what
+    // is actually stored (line ~783). Two metrics whose first 255 chars match
+    // would otherwise produce two stat records with the same persisted key, and
+    // the bulk INSERT ... ON CONFLICT DO UPDATE would then trip Postgres's
+    // `cardinality_violation` ("ON CONFLICT DO UPDATE command cannot affect
+    // row a second time"). Pre-#134 the same collision tripped a duplicate-key
+    // error against uniq_ds_metric_statistics — this is a sibling defect, not
+    // a new one, but the upsert form makes it easier to surface.
     const groups = new Map<string, DsMetricsRecord[]>();
     for (const m of filtered) {
-      const key = `${m.test_run_id}|${m.application_dashboard_id}|${m.panel_id}|${m.metric_name}`;
+      const truncatedMetricName = m.metric_name?.substring(0, 255) ?? '';
+      const key = `${m.test_run_id}|${m.application_dashboard_id}|${m.panel_id}|${truncatedMetricName}`;
       let group = groups.get(key);
       if (!group) {
         group = [];
@@ -812,17 +821,11 @@ export class PerformanceTestMetricsPipeline extends BasePipelineTypeORM {
       });
     }
 
-    // Delete existing statistics for this test run
-    const deleteStart = Date.now();
-    await this.db.dataSource.query(
-      `DELETE FROM ds_metric_statistics WHERE test_run_id = $1`,
-      [testRunId]
-    );
-    this.logger.info(
-      `🧹 Deleted existing ds_metric_statistics for ${testRunId} in ${Date.now() - deleteStart}ms`
-    );
-
-    // Bulk INSERT — 36 params per record, batch size 500 = 18000 params (under 65535 limit)
+    // Bulk UPSERT — 36 params per record, batch size 500 = 18000 params (under 65535 limit).
+    // ON CONFLICT (test_run_id, application_dashboard_id, panel_id, metric_name) DO UPDATE
+    // is required: IncrementalCollectionScheduler can fire overlapping ticks for the same
+    // test_run_id, and the prior DELETE+INSERT pattern (which could take 90+ s under load)
+    // raced and tripped uniq_ds_metric_statistics. See issue #134.
     const batchSize = 500;
     let totalInserted = 0;
 
@@ -894,6 +897,42 @@ export class PerformanceTestMetricsPipeline extends BasePipelineTypeORM {
           updated_at, test_run_start, organization_id, team_id,
           metrics_source_id, created_by, updated_by
         ) VALUES ${placeholders.join(', ')}
+        ON CONFLICT (test_run_id, application_dashboard_id, panel_id, metric_name)
+        DO UPDATE SET
+          benchmark_id        = EXCLUDED.benchmark_id,
+          dashboard_uid       = EXCLUDED.dashboard_uid,
+          dashboard_label     = EXCLUDED.dashboard_label,
+          panel_title         = EXCLUDED.panel_title,
+          unit                = EXCLUDED.unit,
+          count               = EXCLUDED.count,
+          mean                = EXCLUDED.mean,
+          median              = EXCLUDED.median,
+          min_value           = EXCLUDED.min_value,
+          max_value           = EXCLUDED.max_value,
+          std_dev             = EXCLUDED.std_dev,
+          last_value          = EXCLUDED.last_value,
+          n_missing           = EXCLUDED.n_missing,
+          n_non_zero          = EXCLUDED.n_non_zero,
+          q10                 = EXCLUDED.q10,
+          q25                 = EXCLUDED.q25,
+          q75                 = EXCLUDED.q75,
+          q90                 = EXCLUDED.q90,
+          q95                 = EXCLUDED.q95,
+          q99                 = EXCLUDED.q99,
+          percentiles         = EXCLUDED.percentiles,
+          iqr                 = EXCLUDED.iqr,
+          idr                 = EXCLUDED.idr,
+          is_constant         = EXCLUDED.is_constant,
+          constant_value      = EXCLUDED.constant_value,
+          all_missing         = EXCLUDED.all_missing,
+          pct_missing         = EXCLUDED.pct_missing,
+          missing_percentage  = EXCLUDED.missing_percentage,
+          updated_at          = NOW(),
+          test_run_start      = EXCLUDED.test_run_start,
+          organization_id     = EXCLUDED.organization_id,
+          team_id             = EXCLUDED.team_id,
+          metrics_source_id   = EXCLUDED.metrics_source_id,
+          updated_by          = EXCLUDED.updated_by
       `;
 
       await this.db.dataSource.query(query, values);
@@ -901,7 +940,7 @@ export class PerformanceTestMetricsPipeline extends BasePipelineTypeORM {
     }
 
     this.logger.info(
-      `✅ In-memory statistics: ${totalInserted} records inserted in ${Date.now() - statsStart}ms`
+      `✅ In-memory statistics: ${totalInserted} records upserted in ${Date.now() - statsStart}ms`
     );
   }
 
