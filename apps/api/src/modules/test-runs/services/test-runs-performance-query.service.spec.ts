@@ -618,7 +618,8 @@ describe('TestRunsPerformanceQueryService', () => {
         const result = await service.getTransactionSamples(TEST_RUN_ID, TRANSACTION, true, ADMIN_ROLES, []);
 
         expect(result).toHaveLength(1);
-        expect(testRunRepo.query).toHaveBeenCalledTimes(2);
+        // 3 calls: ramp-up lookup + SET LOCAL work_mem + samples query
+        expect(testRunRepo.query).toHaveBeenCalledTimes(3);
       });
 
       it('does not fetch cutoff when excludeRampUp is false', async () => {
@@ -626,8 +627,8 @@ describe('TestRunsPerformanceQueryService', () => {
 
         await service.getTransactionSamples(TEST_RUN_ID, TRANSACTION, false, ADMIN_ROLES, []);
 
-        // Only 1 query — no ramp-up lookup
-        expect(testRunRepo.query).toHaveBeenCalledTimes(1);
+        // 2 calls — SET LOCAL work_mem + samples query (no ramp-up lookup)
+        expect(testRunRepo.query).toHaveBeenCalledTimes(2);
       });
     });
 
@@ -637,7 +638,10 @@ describe('TestRunsPerformanceQueryService', () => {
 
         await service.getTransactionSamples(TEST_RUN_ID, TRANSACTION, false, ADMIN_ROLES, [], 45);
 
-        const samplerCall = (testRunRepo.query as jest.Mock).mock.calls[0];
+        // Skip the SET LOCAL prelude — find the samples query
+        const samplerCall = (testRunRepo.query as jest.Mock).mock.calls.find(([sql]: [string]) =>
+          sql.includes('approx_percentile')
+        )!;
         expect(samplerCall[0]).toContain("interval '1 minute'");
         // Params: [testRunId, transactionName, excludeRampUp, cutoffTime, sinceMinutes]
         expect(samplerCall[1]).toHaveLength(5);
@@ -649,7 +653,9 @@ describe('TestRunsPerformanceQueryService', () => {
 
         await service.getTransactionSamples(TEST_RUN_ID, TRANSACTION, false, USER_ROLES, ORG_IDS, 15);
 
-        const samplerCall = (testRunRepo.query as jest.Mock).mock.calls[0];
+        const samplerCall = (testRunRepo.query as jest.Mock).mock.calls.find(([sql]: [string]) =>
+          sql.includes('approx_percentile')
+        )!;
         // Params: [testRunId, transactionName, excludeRampUp, cutoffTime, sinceMinutes, orgIds]
         expect(samplerCall[1]).toHaveLength(6);
         expect(samplerCall[1][4]).toBe(15);
@@ -661,10 +667,67 @@ describe('TestRunsPerformanceQueryService', () => {
 
         await service.getTransactionSamples(TEST_RUN_ID, TRANSACTION, false, USER_ROLES, ORG_IDS);
 
-        const samplerCall = (testRunRepo.query as jest.Mock).mock.calls[0];
+        const samplerCall = (testRunRepo.query as jest.Mock).mock.calls.find(([sql]: [string]) =>
+          sql.includes('approx_percentile')
+        )!;
         // Params: [testRunId, transactionName, excludeRampUp, cutoffTime, orgIds]
         expect(samplerCall[1]).toHaveLength(5);
         expect(samplerCall[1][4]).toEqual(ORG_IDS);
+      });
+    });
+
+    describe('SQL structure (query shape regressions)', () => {
+      it('uses approx_percentile + percentile_agg (no PERCENTILE_CONT)', async () => {
+        mockQuerySequence([RAW_SAMPLER_ROW]);
+
+        await service.getTransactionSamples(TEST_RUN_ID, TRANSACTION, false, ADMIN_ROLES, []);
+
+        const samplerCall = (testRunRepo.query as jest.Mock).mock.calls.find(([sql]: [string]) =>
+          sql.includes('approx_percentile')
+        )!;
+        expect(samplerCall[0]).toContain('percentile_agg(r.response_time::double precision)');
+        expect(samplerCall[0]).toContain('approx_percentile(0.95, a.pct_agg)');
+        expect(samplerCall[0]).toContain('approx_percentile(0.99, a.pct_agg)');
+        expect(samplerCall[0]).toContain('approx_percentile_rank');
+        expect(samplerCall[0]).not.toContain('PERCENTILE_CONT');
+      });
+
+      it('joins apdex thresholds on sut.id (no name OR id::text OR-join)', async () => {
+        mockQuerySequence([RAW_SAMPLER_ROW]);
+
+        await service.getTransactionSamples(TEST_RUN_ID, TRANSACTION, false, ADMIN_ROLES, []);
+
+        const samplerCall = (testRunRepo.query as jest.Mock).mock.calls.find(([sql]: [string]) =>
+          sql.includes('approx_percentile')
+        )!;
+        expect(samplerCall[0]).toContain('wat.system_under_test_id = sut.id');
+        expect(samplerCall[0]).toContain('wtat.system_under_test_id = sut.id');
+        expect(samplerCall[0]).not.toContain('sut.name OR');
+        expect(samplerCall[0]).not.toContain('sut.id::text');
+      });
+
+      it('joins url_patterns on a.url_hash (no leftover sg.url_hash typo)', async () => {
+        mockQuerySequence([RAW_SAMPLER_ROW]);
+
+        await service.getTransactionSamples(TEST_RUN_ID, TRANSACTION, false, ADMIN_ROLES, []);
+
+        const samplerCall = (testRunRepo.query as jest.Mock).mock.calls.find(([sql]: [string]) =>
+          sql.includes('approx_percentile')
+        )!;
+        expect(samplerCall[0]).toContain('a.url_hash');
+        expect(samplerCall[0]).not.toContain('sg.url_hash');
+      });
+
+      it('wraps query in a transaction with SET LOCAL work_mem', async () => {
+        mockQuerySequence([RAW_SAMPLER_ROW]);
+
+        await service.getTransactionSamples(TEST_RUN_ID, TRANSACTION, false, ADMIN_ROLES, []);
+
+        expect(testRunRepo.manager.transaction).toHaveBeenCalledTimes(1);
+        const setLocalCall = (testRunRepo.query as jest.Mock).mock.calls.find(([sql]: [string]) =>
+          /SET\s+LOCAL\s+work_mem/i.test(sql)
+        );
+        expect(setLocalCall).toBeDefined();
       });
     });
 
