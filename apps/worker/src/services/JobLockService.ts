@@ -313,6 +313,56 @@ export class JobLockService {
   }
 
   /**
+   * Try to acquire a generic key-based lock.
+   *
+   * Unlike `acquireLock`, this does NOT use the SUT/env/workload tuple — it locks
+   * an arbitrary key (e.g. `job:lock:perf-test-metrics:<test_run_id>`). Used by
+   * incremental collection to prevent overlapping ticks for the same test run
+   * (issue #134). Returns `true` only when the caller now owns the lock.
+   *
+   * The caller passes an `ownerToken` (the BullMQ job id is a good choice). The
+   * matching `releaseKeyLock` will only delete the key if the value still matches,
+   * so a slow caller cannot accidentally release a successor's lock.
+   */
+  async acquireKeyLock(
+    lockKey: string,
+    ownerToken: string,
+    ttlSeconds: number = JOB_DEFAULTS.LOCK_TTL_SECONDS
+  ): Promise<boolean> {
+    try {
+      const result = await this.redis.set(lockKey, ownerToken, 'EX', ttlSeconds, 'NX');
+      return result === 'OK';
+    } catch (error) {
+      logger.error(`Failed to acquire key lock: ${lockKey}`, error);
+      throw error;
+    }
+  }
+
+  /**
+   * Release a generic key-based lock previously acquired with `acquireKeyLock`.
+   *
+   * GET-then-DEL with an ownership check. There is a narrow race between the
+   * GET and the DEL, but it is bounded by a single Redis round-trip while the
+   * default lock TTL is 30 min, so a successor lock being deleted out from
+   * under its owner is vanishingly unlikely in practice. A racy release is
+   * also benign: the successor's work still runs to completion; the only cost
+   * is that the next scheduler tick will be able to start instead of waiting.
+   */
+  async releaseKeyLock(lockKey: string, ownerToken: string): Promise<boolean> {
+    try {
+      const current = await this.redis.get(lockKey);
+      if (current !== ownerToken) {
+        return false;
+      }
+      const deleted = await this.redis.del(lockKey);
+      return deleted === 1;
+    } catch (error) {
+      logger.error(`Failed to release key lock: ${lockKey}`, error);
+      return false;
+    }
+  }
+
+  /**
    * Force release a lock (used by stuck job scanner)
    * WARNING: This bypasses ownership checks and should only be used for cleanup
    *
