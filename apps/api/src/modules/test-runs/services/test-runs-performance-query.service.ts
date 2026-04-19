@@ -84,7 +84,13 @@ export class TestRunsPerformanceQueryService {
   }
 
   /**
-   * Get transaction performance statistics for a test run
+   * Get transaction performance statistics for a test run.
+   *
+   * Percentiles (p95/p99) and Apdex are computed via TimescaleDB toolkit's
+   * `percentile_agg` (uddsketch) + `approx_percentile` / `approx_percentile_rank`.
+   * Expected error vs exact `PERCENTILE_CONT`: <1% at p95/p99 for the response-time
+   * distribution shapes Perfana sees. The tradeoff buys us a single-pass O(n)
+   * aggregation instead of an O(n log n) full sort that spilled to disk on large runs.
    *
    * @param testRunId - Test run ID (UUID or test_run_id string)
    * @param excludeRampUp - Whether to exclude ramp-up period from statistics
@@ -132,49 +138,88 @@ export class TestRunsPerformanceQueryService {
         ? `AND sut.organization_id = ANY($${orgParamIndex}::uuid[])`
         : '';
 
+      // Aggregate transactions FIRST, then join threshold tables against the
+      // post-group result (tens of rows) instead of the ungrouped row stream.
+      // p95/p99 come from a single percentile_agg tdigest per group; Apdex uses
+      // approx_percentile_rank on the same sketch — one pass, no full sort.
       const query = `
-        WITH transaction_stats AS (
+        WITH agg AS (
           SELECT
             t.transaction_name,
             t.scenario_name,
-            COUNT(*) as total_count,
-            COUNT(CASE WHEN t.success THEN 1 END) as passed_count,
-            COUNT(CASE WHEN NOT t.success THEN 1 END) as failed_count,
-            ROUND(AVG(t.response_time)::numeric, 2) as avg_response_time,
-            ROUND(PERCENTILE_CONT(0.95) WITHIN GROUP (ORDER BY t.response_time)::numeric, 2) as p95_response_time,
-            ROUND(PERCENTILE_CONT(0.99) WITHIN GROUP (ORDER BY t.response_time)::numeric, 2) as p99_response_time,
-            ROUND((AVG(t.response_time) * COUNT(*))::numeric, 2) as impact_score,
-            COALESCE(wtat.apdex_threshold, wat.apdex_threshold, 500) as active_threshold,
-            ROUND(
-              (
-                COUNT(CASE WHEN t.response_time <= COALESCE(wtat.apdex_threshold, wat.apdex_threshold, 500) THEN 1 END)::numeric +
-                (COUNT(CASE WHEN t.response_time > COALESCE(wtat.apdex_threshold, wat.apdex_threshold, 500) AND t.response_time <= (COALESCE(wtat.apdex_threshold, wat.apdex_threshold, 500) * 4) THEN 1 END)::numeric / 2)
-              ) / NULLIF(COUNT(*)::numeric, 0),
-              3
-            ) as apdex_score
+            tr.system_under_test_id,
+            tr.test_environment,
+            tr.workload,
+            COUNT(*)                                              AS total_count,
+            COUNT(*) FILTER (WHERE t.success)                     AS passed_count,
+            COUNT(*) FILTER (WHERE NOT t.success)                 AS failed_count,
+            ROUND(AVG(t.response_time)::numeric, 2)               AS avg_response_time,
+            percentile_agg(t.response_time::double precision)     AS pct_agg,
+            ROUND((AVG(t.response_time) * COUNT(*))::numeric, 2)  AS impact_score
           FROM transactions t
-          LEFT JOIN test_runs tr ON tr.test_run_id = t.test_run_id
-          LEFT JOIN systems_under_test sut ON sut.id = tr.system_under_test_id
-          LEFT JOIN teams team ON team.id = sut.team_id
-          LEFT JOIN workload_apdex_thresholds wat
-            ON (wat.system_under_test_id = sut.name OR wat.system_under_test_id = sut.id::text)
-            AND wat.test_environment = tr.test_environment
-            AND wat.workload = tr.workload
-          LEFT JOIN workload_transaction_apdex_thresholds wtat
-            ON (wtat.system_under_test_id = sut.name OR wtat.system_under_test_id = sut.id::text)
-            AND wtat.test_environment = tr.test_environment
-            AND wtat.workload = tr.workload
-            AND wtat.transaction_name = t.transaction_name
+          JOIN test_runs tr ON tr.test_run_id = t.test_run_id
+          JOIN systems_under_test sut ON sut.id = tr.system_under_test_id
           WHERE t.test_run_id = $1
             AND ($2::boolean = false OR $3::timestamptz IS NULL OR t.time >= $3::timestamptz)
             ${windowFilter}
             ${orgFilterClause}
-          GROUP BY t.transaction_name, t.scenario_name, wtat.apdex_threshold, wat.apdex_threshold
+          GROUP BY t.transaction_name, t.scenario_name, tr.system_under_test_id, tr.test_environment, tr.workload
+        ),
+        thresholds AS (
+          SELECT
+            a.transaction_name,
+            a.scenario_name,
+            COALESCE(wtat.apdex_threshold, wat.apdex_threshold, 500) AS active_threshold
+          FROM agg a
+          LEFT JOIN workload_apdex_thresholds wat
+            ON  wat.system_under_test_id = a.system_under_test_id
+            AND wat.test_environment     = a.test_environment
+            AND wat.workload             = a.workload
+          LEFT JOIN workload_transaction_apdex_thresholds wtat
+            ON  wtat.system_under_test_id = a.system_under_test_id
+            AND wtat.test_environment     = a.test_environment
+            AND wtat.workload             = a.workload
+            AND wtat.transaction_name     = a.transaction_name
+        ),
+        scored AS (
+          SELECT
+            a.transaction_name,
+            a.scenario_name,
+            a.total_count,
+            a.passed_count,
+            a.failed_count,
+            a.avg_response_time,
+            ROUND(approx_percentile(0.95, a.pct_agg)::numeric, 2) AS p95_response_time,
+            ROUND(approx_percentile(0.99, a.pct_agg)::numeric, 2) AS p99_response_time,
+            a.impact_score,
+            th.active_threshold,
+            ROUND(
+              (
+                approx_percentile_rank(th.active_threshold::double precision, a.pct_agg)
+                + (approx_percentile_rank((th.active_threshold * 4)::double precision, a.pct_agg)
+                   - approx_percentile_rank(th.active_threshold::double precision, a.pct_agg)) / 2
+              )::numeric,
+              3
+            ) AS apdex_score
+          FROM agg a
+          JOIN thresholds th
+            ON  th.transaction_name = a.transaction_name
+            AND th.scenario_name IS NOT DISTINCT FROM a.scenario_name
         )
         SELECT
-          *,
-          RANK() OVER (ORDER BY impact_score DESC) as ranking
-        FROM transaction_stats
+          transaction_name,
+          scenario_name,
+          total_count,
+          passed_count,
+          failed_count,
+          avg_response_time,
+          p95_response_time,
+          p99_response_time,
+          impact_score,
+          active_threshold,
+          apdex_score,
+          RANK() OVER (ORDER BY impact_score DESC) AS ranking
+        FROM scored
         ORDER BY transaction_name ASC
       `;
 
@@ -191,7 +236,12 @@ export class TestRunsPerformanceQueryService {
           ? [resolvedTestRunId, excludeRampUp, cutoffTime, organizationIds]
           : [resolvedTestRunId, excludeRampUp, cutoffTime];
       }
-      const result = await this.testRunRepo.query(query, queryParams);
+      // Wrap in a transaction so SET LOCAL work_mem applies only to this query
+      // (reverts at COMMIT — global default unaffected).
+      const result = await this.testRunRepo.manager.transaction(async (em) => {
+        await em.query(`SET LOCAL work_mem = '512MB'`);
+        return em.query(query, queryParams);
+      });
 
       this.logger.log(`Retrieved ${result.length} transaction stats for test run: ${resolvedTestRunId}`);
 
@@ -215,7 +265,10 @@ export class TestRunsPerformanceQueryService {
   }
 
   /**
-   * Get sampler statistics for a specific transaction
+   * Get sampler statistics for a specific transaction.
+   *
+   * Same precision tradeoff as `getTransactionStats`: percentiles and Apdex use
+   * the TimescaleDB toolkit tdigest sketch (<1% expected error at p95/p99).
    *
    * @param testRunId - Test run ID (UUID or test_run_id string)
    * @param transactionName - Transaction name to get samples for
@@ -257,86 +310,87 @@ export class TestRunsPerformanceQueryService {
         ? `AND sut.organization_id = ANY($${orgParamIndexSamples}::uuid[])`
         : '';
 
+      // Aggregate requests_raw FIRST per (sampler_name, scenario_name, SUT, env)
+      // using a percentile_agg tdigest. p95/p99 come from approx_percentile on
+      // the sketch; Apdex uses approx_percentile_rank on the same sketch so the
+      // threshold join happens exactly once (threshold_config CTE) and is
+      // CROSS JOINed onto the post-group result.
       const query = `
         WITH threshold_config AS (
-          SELECT
-            COALESCE(wtat.apdex_threshold, wat.apdex_threshold, 500) as active_threshold
+          SELECT COALESCE(wtat.apdex_threshold, wat.apdex_threshold, 500) AS active_threshold
           FROM test_runs tr
-          LEFT JOIN systems_under_test sut ON sut.id = tr.system_under_test_id
-          LEFT JOIN teams team ON team.id = sut.team_id
+          JOIN systems_under_test sut ON sut.id = tr.system_under_test_id
           LEFT JOIN workload_apdex_thresholds wat
-            ON (wat.system_under_test_id = sut.name OR wat.system_under_test_id = sut.id::text)
-            AND wat.test_environment = tr.test_environment
-            AND wat.workload = tr.workload
+            ON  wat.system_under_test_id = sut.id
+            AND wat.test_environment     = tr.test_environment
+            AND wat.workload             = tr.workload
           LEFT JOIN workload_transaction_apdex_thresholds wtat
-            ON (wtat.system_under_test_id = sut.name OR wtat.system_under_test_id = sut.id::text)
-            AND wtat.test_environment = tr.test_environment
-            AND wtat.workload = tr.workload
-            AND wtat.transaction_name = $2
+            ON  wtat.system_under_test_id = sut.id
+            AND wtat.test_environment     = tr.test_environment
+            AND wtat.workload             = tr.workload
+            AND wtat.transaction_name     = $2
           WHERE tr.test_run_id = $1
             ${orgFilterClause}
           LIMIT 1
         ),
-        sampler_groups AS (
+        agg AS (
           SELECT
             r.sampler_name,
             r.scenario_name,
             r.system_under_test,
             r.test_environment,
-            (ARRAY_AGG(r.url_hash ORDER BY r.time DESC) FILTER (WHERE r.url_hash IS NOT NULL))[1] as url_hash,
-            AVG(r.response_time)::numeric(10,2) as avg_response_time,
-            MIN(r.response_time) as min_response_time,
-            MAX(r.response_time) as max_response_time,
-            PERCENTILE_CONT(0.95) WITHIN GROUP (ORDER BY r.response_time)::numeric(10,2) as p95_response_time,
-            PERCENTILE_CONT(0.99) WITHIN GROUP (ORDER BY r.response_time)::numeric(10,2) as p99_response_time,
-            SUM(CASE WHEN r.success = true THEN 1 ELSE 0 END) as passed_count,
-            SUM(CASE WHEN r.success = false THEN 1 ELSE 0 END) as failed_count,
-            COUNT(*) as total_count,
-            AVG(r.response_latency)::numeric(10,2) as avg_latency,
-            AVG(r.response_connect_time)::numeric(10,2) as avg_connect_time,
-            SUM(r.request_size) as total_request_size,
-            SUM(r.response_size) as total_response_size,
-            tc.active_threshold,
-            ROUND(
-              (
-                COUNT(CASE WHEN r.response_time <= tc.active_threshold THEN 1 END)::numeric +
-                (COUNT(CASE WHEN r.response_time > tc.active_threshold AND r.response_time <= (tc.active_threshold * 4) THEN 1 END)::numeric / 2)
-              ) / NULLIF(COUNT(*)::numeric, 0),
-              3
-            ) as apdex_score
+            (ARRAY_AGG(r.url_hash ORDER BY r.time DESC) FILTER (WHERE r.url_hash IS NOT NULL))[1] AS url_hash,
+            AVG(r.response_time)::numeric(10,2)               AS avg_response_time,
+            MIN(r.response_time)                              AS min_response_time,
+            MAX(r.response_time)                              AS max_response_time,
+            percentile_agg(r.response_time::double precision) AS pct_agg,
+            SUM(CASE WHEN r.success THEN 1 ELSE 0 END)        AS passed_count,
+            SUM(CASE WHEN NOT r.success THEN 1 ELSE 0 END)    AS failed_count,
+            COUNT(*)                                          AS total_count,
+            AVG(r.response_latency)::numeric(10,2)            AS avg_latency,
+            AVG(r.response_connect_time)::numeric(10,2)       AS avg_connect_time,
+            SUM(r.request_size)                               AS total_request_size,
+            SUM(r.response_size)                              AS total_response_size
           FROM requests_raw r
-          CROSS JOIN threshold_config tc
           WHERE r.test_run_id = $1
             AND r.transaction_name = $2
             AND ($3::boolean = false OR $4::timestamptz IS NULL OR r.time >= $4::timestamptz)
             ${windowFilterSamples}
-          GROUP BY r.sampler_name, r.scenario_name, r.system_under_test, r.test_environment, tc.active_threshold
+          GROUP BY r.sampler_name, r.scenario_name, r.system_under_test, r.test_environment
         )
         SELECT
-          sg.sampler_name,
-          sg.scenario_name,
-          sg.url_hash,
-          LOWER(up.normalized_url) as url_pattern,
-          sg.avg_response_time,
-          sg.min_response_time,
-          sg.max_response_time,
-          sg.p95_response_time,
-          sg.p99_response_time,
-          sg.passed_count,
-          sg.failed_count,
-          sg.total_count,
-          sg.avg_latency,
-          sg.avg_connect_time,
-          sg.total_request_size,
-          sg.total_response_size,
-          sg.apdex_score,
-          sg.active_threshold
-        FROM sampler_groups sg
+          a.sampler_name,
+          a.scenario_name,
+          a.url_hash,
+          LOWER(up.normalized_url) AS url_pattern,
+          a.avg_response_time,
+          a.min_response_time,
+          a.max_response_time,
+          ROUND(approx_percentile(0.95, a.pct_agg)::numeric, 2) AS p95_response_time,
+          ROUND(approx_percentile(0.99, a.pct_agg)::numeric, 2) AS p99_response_time,
+          a.passed_count,
+          a.failed_count,
+          a.total_count,
+          a.avg_latency,
+          a.avg_connect_time,
+          a.total_request_size,
+          a.total_response_size,
+          tc.active_threshold,
+          ROUND(
+            (
+              approx_percentile_rank(tc.active_threshold::double precision, a.pct_agg)
+              + (approx_percentile_rank((tc.active_threshold * 4)::double precision, a.pct_agg)
+                 - approx_percentile_rank(tc.active_threshold::double precision, a.pct_agg)) / 2
+            )::numeric,
+            3
+          ) AS apdex_score
+        FROM agg a
+        CROSS JOIN threshold_config tc
         LEFT JOIN url_patterns up
-          ON sg.url_hash = up.url_hash
-          AND sg.system_under_test = up.system_under_test
-          AND sg.test_environment = up.test_environment
-        ORDER BY sg.total_count DESC
+          ON  a.url_hash         = up.url_hash
+          AND a.system_under_test = up.system_under_test
+          AND a.test_environment  = up.test_environment
+        ORDER BY a.total_count DESC
       `;
 
       let queryParams: unknown[];
@@ -349,7 +403,11 @@ export class TestRunsPerformanceQueryService {
           ? [testRunId, transactionName, excludeRampUp, cutoffTime, organizationIds]
           : [testRunId, transactionName, excludeRampUp, cutoffTime];
       }
-      const result = await this.testRunRepo.query(query, queryParams);
+      // Wrap in a transaction so SET LOCAL work_mem applies only to this query.
+      const result = await this.testRunRepo.manager.transaction(async (em) => {
+        await em.query(`SET LOCAL work_mem = '512MB'`);
+        return em.query(query, queryParams);
+      });
 
       this.logger.log(`Retrieved ${result.length} aggregated samplers for transaction: ${transactionName}`);
 
@@ -445,10 +503,10 @@ export class TestRunsPerformanceQueryService {
       // threshold join so Apdex in the errors modal reflects the configured threshold, not hardcoded 500ms.
       const thresholdTransactionJoin = transactionName
         ? `LEFT JOIN workload_transaction_apdex_thresholds wtat
-            ON (wtat.system_under_test_id = sut.name OR wtat.system_under_test_id = sut.id::text)
-            AND wtat.test_environment = tr.test_environment
-            AND wtat.workload = tr.workload
-            AND wtat.transaction_name = $2`
+            ON  wtat.system_under_test_id = sut.id
+            AND wtat.test_environment    = tr.test_environment
+            AND wtat.workload            = tr.workload
+            AND wtat.transaction_name    = $2`
         : '';
       const thresholdCoalesce = transactionName
         ? 'COALESCE(wtat.apdex_threshold, wat.apdex_threshold, 500)'
@@ -460,9 +518,9 @@ export class TestRunsPerformanceQueryService {
           FROM test_runs tr
           LEFT JOIN systems_under_test sut ON sut.id = tr.system_under_test_id
           LEFT JOIN workload_apdex_thresholds wat
-            ON (wat.system_under_test_id = sut.name OR wat.system_under_test_id = sut.id::text)
-            AND wat.test_environment = tr.test_environment
-            AND wat.workload = tr.workload
+            ON  wat.system_under_test_id = sut.id
+            AND wat.test_environment    = tr.test_environment
+            AND wat.workload            = tr.workload
           ${thresholdTransactionJoin}
           WHERE tr.test_run_id = $1
           LIMIT 1

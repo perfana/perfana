@@ -375,29 +375,9 @@ export class PerformanceTestMetricsPipeline extends BasePipelineTypeORM {
       throw new Error(`Test run ${testRunId} has no start time`);
     }
 
-    // Get system_under_test ID - first try to get it from the testRun
-    let systemUnderTestId = testRun.systemUnderTestId;
-
-    // If systemUnderTestId looks like a name (not a UUID), query for the actual ID
-    const uuidRegex =
-      /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
-    if (!uuidRegex.test(systemUnderTestId)) {
-      // systemUnderTestId is actually a name, query for the UUID
-      const sutResult = await this.db.dataSource.query<Array<{ id: string }>>(
-        `SELECT id FROM system_under_test WHERE name = $1 LIMIT 1`,
-        [systemUnderTestId]
-      );
-
-      if (sutResult.length === 0) {
-        throw new Error(`System under test not found with name: ${systemUnderTestId}`);
-      }
-
-      systemUnderTestId = sutResult[0].id;
-    }
-
     return {
       test_run_id: testRun.testRunId,
-      system_under_test_id: systemUnderTestId,
+      system_under_test_id: testRun.systemUnderTestId,
       test_environment: testRun.testEnvironment,
       workload: testRun.workload,
       start_time: testRun.startTime,
