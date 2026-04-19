@@ -84,7 +84,13 @@ export class TestRunsPerformanceQueryService {
   }
 
   /**
-   * Get transaction performance statistics for a test run
+   * Get transaction performance statistics for a test run.
+   *
+   * Percentiles (p95/p99) and Apdex are computed via TimescaleDB toolkit's
+   * `percentile_agg` (uddsketch) + `approx_percentile` / `approx_percentile_rank`.
+   * Expected error vs exact `PERCENTILE_CONT`: <1% at p95/p99 for the response-time
+   * distribution shapes Perfana sees. The tradeoff buys us a single-pass O(n)
+   * aggregation instead of an O(n log n) full sort that spilled to disk on large runs.
    *
    * @param testRunId - Test run ID (UUID or test_run_id string)
    * @param excludeRampUp - Whether to exclude ramp-up period from statistics
@@ -259,7 +265,10 @@ export class TestRunsPerformanceQueryService {
   }
 
   /**
-   * Get sampler statistics for a specific transaction
+   * Get sampler statistics for a specific transaction.
+   *
+   * Same precision tradeoff as `getTransactionStats`: percentiles and Apdex use
+   * the TimescaleDB toolkit tdigest sketch (<1% expected error at p95/p99).
    *
    * @param testRunId - Test run ID (UUID or test_run_id string)
    * @param transactionName - Transaction name to get samples for
