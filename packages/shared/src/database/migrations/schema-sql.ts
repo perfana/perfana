@@ -2641,7 +2641,7 @@ CREATE TABLE public.virtual_users (
 
 CREATE TABLE public.workload_apdex_thresholds (
     id uuid DEFAULT gen_random_uuid() NOT NULL,
-    system_under_test_id text NOT NULL,
+    system_under_test_id uuid NOT NULL,
     test_environment text NOT NULL,
     workload text NOT NULL,
     apdex_threshold integer DEFAULT 500 NOT NULL,
@@ -2661,7 +2661,7 @@ CREATE TABLE public.workload_apdex_thresholds (
 
 CREATE TABLE public.workload_transaction_apdex_thresholds (
     id uuid DEFAULT gen_random_uuid() NOT NULL,
-    system_under_test_id text NOT NULL,
+    system_under_test_id uuid NOT NULL,
     test_environment text NOT NULL,
     workload text NOT NULL,
     transaction_name text NOT NULL,
@@ -7708,6 +7708,22 @@ ALTER TABLE ONLY public.test_runs
 
 ALTER TABLE ONLY public.trends_filter_presets
     ADD CONSTRAINT trends_filter_presets_application_dashboard_id_fkey FOREIGN KEY (application_dashboard_id) REFERENCES public.application_dashboards(id) ON DELETE SET NULL;
+
+
+--
+-- Name: workload_apdex_thresholds fk_workload_apdex_thresholds_system_under_test; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.workload_apdex_thresholds
+    ADD CONSTRAINT fk_workload_apdex_thresholds_system_under_test FOREIGN KEY (system_under_test_id) REFERENCES public.systems_under_test(id) ON DELETE CASCADE;
+
+
+--
+-- Name: workload_transaction_apdex_thresholds fk_workload_transaction_apdex_thresholds_system_under_test; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.workload_transaction_apdex_thresholds
+    ADD CONSTRAINT fk_workload_transaction_apdex_thresholds_system_under_test FOREIGN KEY (system_under_test_id) REFERENCES public.systems_under_test(id) ON DELETE CASCADE;
 
 
 --
