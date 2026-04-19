@@ -568,11 +568,11 @@ export class ReportDataFetcherService {
         LEFT JOIN test_runs tr ON tr.test_run_id = t.test_run_id
         LEFT JOIN systems_under_test sut ON sut.id = tr.system_under_test_id
         LEFT JOIN workload_apdex_thresholds wat
-          ON wat.system_under_test_id = sut.name
+          ON wat.system_under_test_id = sut.id
           AND wat.test_environment = tr.test_environment
           AND wat.workload = tr.workload
         LEFT JOIN workload_transaction_apdex_thresholds wtat
-          ON wtat.system_under_test_id = sut.name
+          ON wtat.system_under_test_id = sut.id
           AND wtat.test_environment = tr.test_environment
           AND wtat.workload = tr.workload
           AND wtat.transaction_name = t.transaction_name
