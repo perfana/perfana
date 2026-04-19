@@ -4,6 +4,14 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
+## [0.2.40.0] - 2026-04-19
+
+### Fixed
+- Performance-test runs no longer flip to `valid = false` with `"Data collection coverage … / failed collection ranges"` after a baseline test. Two compounding issues were causing every overlapping incremental tick of the same `test_run_id` to crash on `duplicate key value violates unique constraint "uniq_ds_metric_statistics"` (the index restored in #132): `PerformanceTestMetricsPipeline.computeAndSaveStatistics` did `DELETE` then plain `INSERT` (slow under load — a 97-second DELETE was observed in #134 — leaving a wide window for the next scheduler tick to start before the first finished), and `IncrementalCollectionScheduler` ticks for the same run were not mutually exclusive. The DELETE+INSERT is now a single `INSERT … ON CONFLICT (test_run_id, application_dashboard_id, panel_id, metric_name) DO UPDATE SET …` (idempotent, atomic, no inter-statement window), and `collectPerformanceTestMetrics` now acquires a per-`test_run_id` Redis lock (`job:lock:perf-test-metrics:<id>`, 15-minute TTL); a tick that finds the lock held returns success-with-zero-data-points so the next tick retries the same window. Affected runs now reach `valid = true` on a clean stack (#134).
+
+### Changed
+- Intra-batch metric grouping in `computeAndSaveStatistics` now truncates `metric_name` to 255 characters when forming the group key so it matches what is persisted. Previously, two metrics whose first 255 characters were identical produced two stat records that collided on the persisted unique key, which under the new upsert form would have raised Postgres's `cardinality_violation` ("ON CONFLICT DO UPDATE command cannot affect row a second time").
+
 ## [0.2.39.0] - 2026-04-19
 
 ### Fixed
