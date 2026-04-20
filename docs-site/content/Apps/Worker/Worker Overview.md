@@ -25,16 +25,17 @@ The Worker service is the core processing engine for performance analysis. It ru
 
 | Job | Queue | Description |
 |---|---|---|
-| `analyze-test` | perfana-analyze | Main pipeline (9 stages) |
+| `analyze-test` | perfana-analyze | Main pipeline (10 stages) |
 | `metrics-collection` | perfana-analyze | Grafana/Dynatrace data extraction |
 | `statistics-pipeline` | perfana-analyze | Statistical aggregations |
 | `checks-evaluation` | perfana-analyze | SLO threshold evaluation |
 | `adapt-analysis` | perfana-analyze | Regression detection (768MB) |
+| `transaction-stats-rollup` | perfana-analyze | Per-test-run transaction/sampler tdigest rollup |
 | `reevaluate-checks` | perfana-analyze | Re-run checks with updated benchmarks |
 | `collect-metrics-incremental` | perfana-analyze | Real-time collection for running tests |
 | `orchestrate-reevaluate-batch` | perfana-batch | Complex batch operations |
 
-## Analysis Pipeline (9 Stages)
+## Analysis Pipeline (10 Stages)
 
 When a test run completes, the `PipelineOrchestrator` executes these stages sequentially:
 
@@ -48,32 +49,37 @@ Stage 2: Panels Processing
 Stage 3: Performance Test Metrics
   └── Extracts JMeter/Gatling/k6 raw metrics
 
-Stage 4: Metrics Collection
+Stage 4: Transaction Stats Rollup
+  └── Pre-computes per-run transaction + sampler aggregates (count, tdigest, impact score)
+  └── Stores in test_run_transaction_stats / test_run_sampler_stats
+  └── Soft-fail: remaining stages continue if this times out
+
+Stage 5: Metrics Collection
   └── Pulls time-series data from Grafana/Prometheus/InfluxDB
   └── Stores in ds_metrics hypertable
 
-Stage 5: Statistics Calculation
+Stage 6: Statistics Calculation
   └── Computes p50, p95, p99, min, max, mean, stddev
   └── Stores in ds_metric_statistics
 
-Stage 6: Checks Evaluation
+Stage 7: Checks Evaluation
   └── Evaluates SLO thresholds → check_results
   └── Compares against baselines → compare_results
 
-Stage 7: Control Groups
+Stage 8: Control Groups
   └── Groups similar historical test runs
 
-Stage 8: Control Group Statistics
+Stage 9: Control Group Statistics
   └── Aggregates statistics across control group
 
-Stage 9: ADAPT Analysis
+Stage 10: ADAPT Analysis (optional — skipped when adapt=false)
   └── Automated regression detection
   └── Stores in ds_adapt_results
 ```
 
 ## Pipeline Implementations
 
-10 pipeline classes in `apps/worker/src/pipelines/`:
+11 pipeline classes in `apps/worker/src/pipelines/`:
 
 | Pipeline | Purpose |
 |---|---|
@@ -86,13 +92,14 @@ Stage 9: ADAPT Analysis
 | `PanelsPipeline` | Create dashboard panel documents |
 | `DynatracePipeline` | Dynatrace synthetic metrics |
 | `PerformanceTestMetricsPipeline` | JMeter/LoadRunner raw metrics |
+| `TransactionStatsRollupPipeline` | Per-test-run tdigest rollup for transactions / samplers (backs `/test-runs/:id/transactions`) |
 | `IncrementalMetricsPipeline` | Metrics for running tests |
 
 ## Key Services
 
 | Service | Purpose |
 |---|---|
-| `PipelineOrchestrator` | Coordinates all 10 pipeline implementations |
+| `PipelineOrchestrator` | Coordinates all 11 pipeline implementations |
 | `JobLockService` | Prevents concurrent jobs on same scope |
 | `ProgressReporter` | Redis pub/sub for real-time UI progress |
 | `StuckJobScanner` | Scans every 2 min for jobs stuck >10 min |

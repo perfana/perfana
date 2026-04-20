@@ -52,7 +52,7 @@ When a test run completes, the API enqueues an `analyze-test` job to the Worker:
 API enqueues job ──▶ Redis (BullMQ) ──▶ Worker picks up
   │
   ▼
-PipelineOrchestrator executes 9 stages sequentially:
+PipelineOrchestrator executes 10 stages sequentially:
 
 Stage 1: Dynatrace Collection
   └── Fetches service/host metrics from Dynatrace API
@@ -63,26 +63,31 @@ Stage 2: Panels Processing
 Stage 3: Performance Test Metrics
   └── Extracts JMeter/Gatling raw metrics
 
-Stage 4: Metrics Collection
+Stage 4: Transaction Stats Rollup
+  └── Pre-computes per-run transaction + sampler aggregates (count, tdigest, impact score)
+  └── Stores in test_run_transaction_stats / test_run_sampler_stats
+  └── Backs /test-runs/:id/transactions — p95/p99/Apdex computed at read time via approx_percentile on the stored tdigest
+
+Stage 5: Metrics Collection
   └── Pulls time-series data from Grafana/Prometheus/InfluxDB
   └── Stores in ds_metrics hypertable
 
-Stage 5: Statistics Calculation
+Stage 6: Statistics Calculation
   └── Computes p50, p95, p99, min, max, mean, stddev
   └── Stores in ds_metric_statistics
 
-Stage 6: Checks Evaluation
+Stage 7: Checks Evaluation
   └── Evaluates SLO thresholds (check_results)
   └── Compares against baselines (compare_results)
 
-Stage 7: Control Groups
+Stage 8: Control Groups
   └── Groups similar historical test runs
   └── Identifies baseline candidates
 
-Stage 8: Control Group Statistics
+Stage 9: Control Group Statistics
   └── Aggregates statistics across control group
 
-Stage 9: ADAPT Analysis
+Stage 10: ADAPT Analysis
   └── Automated regression detection algorithm
   └── Stores results in ds_adapt_results
 ```

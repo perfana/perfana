@@ -47,7 +47,7 @@ The test run gets an aggregate ADAPT conclusion based on all metric results.
 
 ## Pipeline Execution
 
-ADAPT runs as **Stage 9** of the analysis pipeline (see [[Worker Overview]]):
+ADAPT runs as **Stage 10** of the analysis pipeline (see [[Worker Overview]]):
 
 ```
 Previous stages collect metrics and compute statistics

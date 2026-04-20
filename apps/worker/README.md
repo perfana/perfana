@@ -23,6 +23,7 @@ Background job processing service using **BullMQ** with Redis for queue manageme
 | PanelsPipeline | `panels-processing` | Dashboard panel processing |
 | DynatracePipeline | `dynatrace-collection` | Dynatrace monitoring data |
 | PerformanceTestMetricsPipeline | `performance-test-metrics` | Perf test source metrics |
+| TransactionStatsRollupPipeline | `transaction-stats-rollup` | Per-test-run tdigest rollup for transactions/samplers (#150, #151) |
 | ReevaluateChecksPipeline | `reevaluate-checks` | Re-evaluate check results |
 
 ### Complex Workers (custom logic)
