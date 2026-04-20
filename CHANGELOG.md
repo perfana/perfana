@@ -4,6 +4,18 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
+## [0.2.41.0] - 2026-04-20
+
+### Added
+- Per-test-run pre-computed stats rollup. Two new tables, `test_run_transaction_stats` and `test_run_sampler_stats`, hold transaction- and sampler-level aggregates (counts, tdigest, impact score) for completed runs. Rows are keyed on `(test_run_id, transaction_name, [sampler_name,] scenario_name, ramp_up_excluded)` so both full-run and ramp-up-excluded variants are available. p95/p99 and Apdex are computed at read time via `approx_percentile` / `approx_percentile_rank` on the stored tdigest against the *current* threshold, so editing `workload_apdex_thresholds` takes effect immediately with no recompute.
+- New `transaction-stats-rollup` stage in the `analyze-test` pipeline (runs after `performance-test-metrics`). Single-scan `FILTER` + `UNION ALL` computes both variants per group. The stage is soft-fail: if rollup times out or errors, ADAPT / statistics / checks continue and the dashboard falls back to live aggregation. DELETE-before-INSERT guarantees the rollup always reflects current raw data — no stale rows after ramp-up edits or raw-row changes. Statement timeout raised to 10 minutes for the initial population on large runs (the live query it replaces was measured at 135–213s).
+- Backfill script `apps/worker/scripts/backfill-test-run-stats-rollup.ts`. Resumable, batched, rate-limited. Enqueues the same pipeline as the finalization stage so there is one canonical code path. Supports `--dry-run`.
+
+### Changed
+- `TestRunsPerformanceQueryService.getTransactionStats` and `getTransactionSamples` now read from the rollup when it exists, falling back to live aggregation for in-progress runs, un-backfilled runs, or `sinceMinutes` windows. No DTO change. Measured impact: the 140s `stream_download_segment` sampler query (issue #151, 11.35M rows in `requests_raw`) becomes a single rollup-row read. The Top 10 Transactions tab, Top 10 Requests tab, and Overview-row expand (all three defaulting to `excludeRampUp=true`) now serve from the rollup on completed runs.
+- Editing `analysisStartOffset` on a completed run re-enqueues the rollup job with a deterministic `jobId`, so rapid successive edits coalesce into a single pending job. The pipeline re-reads the current `analysisStartOffset` at execute time, so last-write-wins is correct regardless of processing order.
+- Test-run deletion now cleans up the rollup tables alongside `ds_*` and hypertables.
+
 ## [0.2.40.0] - 2026-04-19
 
 ### Fixed

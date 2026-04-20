@@ -167,7 +167,7 @@ describe('analyzeTestWorker', () => {
       expect(result.message).toContain('completed for test run test-run-123');
       expect(result.data).toMatchObject({
         testRunId: 'test-run-123',
-        stages: 10, // 8 base stages + ADAPT + data-sanity-check
+        stages: 11, // 9 base stages (incl. transaction-stats-rollup) + ADAPT + data-sanity-check
         adapt: true,
         benchmarksOnly: false,
       });
@@ -227,7 +227,7 @@ describe('analyzeTestWorker', () => {
         }),
         expect.any(Object) // ProgressReporter
       );
-      expect(result.data.stages).toBe(9); // 8 base stages + data-sanity-check, without ADAPT
+      expect(result.data.stages).toBe(10); // 9 base stages (incl. transaction-stats-rollup) + data-sanity-check, without ADAPT
     });
 
     it('should execute with default options when not provided', async () => {
@@ -432,6 +432,7 @@ describe('analyzeTestWorker', () => {
         'dynatrace-collection',
         'panels-processing',
         'performance-test-metrics',
+        'transaction-stats-rollup',
         'metrics-collection',
         'statistics-calculation',
         'checks-evaluation',
@@ -464,6 +465,7 @@ describe('analyzeTestWorker', () => {
         'dynatrace-collection',
         'panels-processing',
         'performance-test-metrics',
+        'transaction-stats-rollup',
         'metrics-collection',
         'statistics-calculation',
         'checks-evaluation',

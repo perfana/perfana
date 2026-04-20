@@ -84,6 +84,282 @@ export class TestRunsPerformanceQueryService {
   }
 
   /**
+   * Check whether pre-computed transaction stats exist for a test run
+   * (test_run_transaction_stats is populated by TransactionStatsRollupPipeline
+   * at finalization). When false, the live-aggregation path runs instead.
+   */
+  private async hasTransactionRollup(testRunId: string): Promise<boolean> {
+    const result = await this.testRunRepo.query(
+      `SELECT 1 FROM test_run_transaction_stats WHERE test_run_id = $1 LIMIT 1`,
+      [testRunId],
+    );
+    return result.length > 0;
+  }
+
+  /**
+   * Check whether pre-computed sampler stats exist for a (test_run, transaction)
+   * pair. When false, the live-aggregation path over requests_raw runs instead.
+   */
+  private async hasSamplerRollup(testRunId: string, transactionName: string): Promise<boolean> {
+    const result = await this.testRunRepo.query(
+      `SELECT 1 FROM test_run_sampler_stats
+       WHERE test_run_id = $1 AND transaction_name = $2 LIMIT 1`,
+      [testRunId, transactionName],
+    );
+    return result.length > 0;
+  }
+
+  /**
+   * Fast-path transaction stats read: pull pre-computed tdigest + counts from
+   * test_run_transaction_stats, then join current thresholds and compute
+   * Apdex / p95 / p99 at read time. Threshold edits take effect immediately;
+   * no rollup recompute needed.
+   *
+   * See: issues #150, #151.
+   */
+  private async getTransactionStatsFromRollup(
+    resolvedTestRunId: string,
+    excludeRampUp: boolean,
+    isAdmin: boolean,
+    organizationIds: string[],
+  ): Promise<TransactionStats[]> {
+    const orgFilterClause = !isAdmin
+      ? `AND sut.organization_id = ANY($3::uuid[])`
+      : '';
+
+    const query = `
+      WITH agg AS (
+        SELECT
+          trs.transaction_name,
+          NULLIF(trs.scenario_name, '')              AS scenario_name,
+          trs.system_under_test_id,
+          trs.test_environment,
+          trs.workload,
+          trs.total_count,
+          trs.passed_count,
+          trs.failed_count,
+          trs.avg_response_time,
+          trs.pct_agg,
+          trs.impact_score
+        FROM test_run_transaction_stats trs
+        JOIN test_runs tr ON tr.test_run_id = trs.test_run_id
+        JOIN systems_under_test sut ON sut.id = tr.system_under_test_id
+        WHERE trs.test_run_id = $1
+          AND trs.ramp_up_excluded = $2
+          AND trs.total_count > 0
+          ${orgFilterClause}
+      ),
+      thresholds AS (
+        SELECT
+          a.transaction_name,
+          a.scenario_name,
+          COALESCE(wtat.apdex_threshold, wat.apdex_threshold, 500) AS active_threshold
+        FROM agg a
+        LEFT JOIN workload_apdex_thresholds wat
+          ON  wat.system_under_test_id = a.system_under_test_id
+          AND wat.test_environment     = a.test_environment
+          AND wat.workload             = a.workload
+        LEFT JOIN workload_transaction_apdex_thresholds wtat
+          ON  wtat.system_under_test_id = a.system_under_test_id
+          AND wtat.test_environment     = a.test_environment
+          AND wtat.workload             = a.workload
+          AND wtat.transaction_name     = a.transaction_name
+      ),
+      scored AS (
+        SELECT
+          a.transaction_name,
+          a.scenario_name,
+          a.total_count,
+          a.passed_count,
+          a.failed_count,
+          a.avg_response_time,
+          ROUND(approx_percentile(0.95, a.pct_agg)::numeric, 2) AS p95_response_time,
+          ROUND(approx_percentile(0.99, a.pct_agg)::numeric, 2) AS p99_response_time,
+          a.impact_score,
+          th.active_threshold,
+          ROUND(
+            (
+              approx_percentile_rank(th.active_threshold::double precision, a.pct_agg)
+              + (approx_percentile_rank((th.active_threshold * 4)::double precision, a.pct_agg)
+                 - approx_percentile_rank(th.active_threshold::double precision, a.pct_agg)) / 2
+            )::numeric,
+            3
+          ) AS apdex_score
+        FROM agg a
+        JOIN thresholds th
+          ON  th.transaction_name = a.transaction_name
+          AND th.scenario_name IS NOT DISTINCT FROM a.scenario_name
+      )
+      SELECT
+        transaction_name,
+        scenario_name,
+        total_count,
+        passed_count,
+        failed_count,
+        avg_response_time,
+        p95_response_time,
+        p99_response_time,
+        impact_score,
+        active_threshold,
+        apdex_score,
+        RANK() OVER (ORDER BY impact_score DESC) AS ranking
+      FROM scored
+      ORDER BY transaction_name ASC
+    `;
+
+    const params: unknown[] = !isAdmin
+      ? [resolvedTestRunId, excludeRampUp, organizationIds]
+      : [resolvedTestRunId, excludeRampUp];
+
+    const result = await this.testRunRepo.query(query, params);
+
+    this.logger.log(
+      `Retrieved ${result.length} transaction stats (rollup) for test run: ${resolvedTestRunId} (excludeRampUp: ${excludeRampUp})`,
+    );
+
+    return result.map((row: Record<string, unknown>) => ({
+      transaction_name: row.transaction_name as string,
+      scenario_name: (row.scenario_name as string) || undefined,
+      avg_response_time: this.mapper.parseFloat(row.avg_response_time),
+      p95_response_time: this.mapper.parseFloat(row.p95_response_time),
+      p99_response_time: this.mapper.parseFloat(row.p99_response_time),
+      passed_count: this.mapper.parseInt(row.passed_count),
+      failed_count: this.mapper.parseInt(row.failed_count),
+      total_count: this.mapper.parseInt(row.total_count),
+      ranking: this.mapper.parseFloat(row.ranking),
+      apdex_score: this.mapper.parseFloat(row.apdex_score),
+      active_threshold: this.mapper.parseInt(row.active_threshold, 500),
+    }));
+  }
+
+  /**
+   * Fast-path sampler stats read: pulls pre-computed tdigest + counts from
+   * test_run_sampler_stats filtered by `ramp_up_excluded`, joins current
+   * threshold + url_patterns, and computes Apdex / p95 / p99 at read time.
+   *
+   * Replaces the 140s live query for `stream_download_segment` (#151).
+   */
+  private async getTransactionSamplesFromRollup(
+    resolvedTestRunId: string,
+    transactionName: string,
+    excludeRampUp: boolean,
+    isAdmin: boolean,
+    organizationIds: string[],
+  ): Promise<SamplerStats[]> {
+    const orgFilterClause = !isAdmin
+      ? `AND sut.organization_id = ANY($4::uuid[])`
+      : '';
+
+    const query = `
+      WITH threshold_config AS (
+        SELECT COALESCE(wtat.apdex_threshold, wat.apdex_threshold, 500) AS active_threshold
+        FROM test_runs tr
+        JOIN systems_under_test sut ON sut.id = tr.system_under_test_id
+        LEFT JOIN workload_apdex_thresholds wat
+          ON  wat.system_under_test_id = sut.id
+          AND wat.test_environment     = tr.test_environment
+          AND wat.workload             = tr.workload
+        LEFT JOIN workload_transaction_apdex_thresholds wtat
+          ON  wtat.system_under_test_id = sut.id
+          AND wtat.test_environment     = tr.test_environment
+          AND wtat.workload             = tr.workload
+          AND wtat.transaction_name     = $2
+        WHERE tr.test_run_id = $1
+          ${orgFilterClause}
+        LIMIT 1
+      ),
+      agg AS (
+        SELECT
+          trss.sampler_name,
+          NULLIF(trss.scenario_name, '')  AS scenario_name,
+          trss.system_under_test,
+          trss.test_environment,
+          trss.url_hash,
+          trss.avg_response_time,
+          trss.min_response_time,
+          trss.max_response_time,
+          trss.pct_agg,
+          trss.passed_count,
+          trss.failed_count,
+          trss.total_count,
+          trss.avg_latency,
+          trss.avg_connect_time,
+          trss.total_request_size,
+          trss.total_response_size
+        FROM test_run_sampler_stats trss
+        WHERE trss.test_run_id = $1
+          AND trss.transaction_name = $2
+          AND trss.ramp_up_excluded = $3
+          AND trss.total_count > 0
+      )
+      SELECT
+        a.sampler_name,
+        a.scenario_name,
+        a.url_hash,
+        LOWER(up.normalized_url) AS url_pattern,
+        a.avg_response_time,
+        a.min_response_time,
+        a.max_response_time,
+        ROUND(approx_percentile(0.95, a.pct_agg)::numeric, 2) AS p95_response_time,
+        ROUND(approx_percentile(0.99, a.pct_agg)::numeric, 2) AS p99_response_time,
+        a.passed_count,
+        a.failed_count,
+        a.total_count,
+        a.avg_latency,
+        a.avg_connect_time,
+        a.total_request_size,
+        a.total_response_size,
+        tc.active_threshold,
+        ROUND(
+          (
+            approx_percentile_rank(tc.active_threshold::double precision, a.pct_agg)
+            + (approx_percentile_rank((tc.active_threshold * 4)::double precision, a.pct_agg)
+               - approx_percentile_rank(tc.active_threshold::double precision, a.pct_agg)) / 2
+          )::numeric,
+          3
+        ) AS apdex_score
+      FROM agg a
+      CROSS JOIN threshold_config tc
+      LEFT JOIN url_patterns up
+        ON  a.url_hash         = up.url_hash
+        AND a.system_under_test = up.system_under_test
+        AND a.test_environment  = up.test_environment
+      ORDER BY a.total_count DESC
+    `;
+
+    const params: unknown[] = !isAdmin
+      ? [resolvedTestRunId, transactionName, excludeRampUp, organizationIds]
+      : [resolvedTestRunId, transactionName, excludeRampUp];
+
+    const result = await this.testRunRepo.query(query, params);
+
+    this.logger.log(
+      `Retrieved ${result.length} aggregated samplers (rollup) for transaction: ${transactionName} (excludeRampUp: ${excludeRampUp})`,
+    );
+
+    return result.map((row: Record<string, unknown>) => ({
+      sampler_name: row.sampler_name as string,
+      scenario_name: (row.scenario_name as string) || undefined,
+      avg_response_time: this.mapper.parseFloat(row.avg_response_time),
+      min_response_time: this.mapper.parseInt(row.min_response_time),
+      max_response_time: this.mapper.parseInt(row.max_response_time),
+      p95_response_time: this.mapper.parseFloat(row.p95_response_time),
+      p99_response_time: this.mapper.parseFloat(row.p99_response_time),
+      passed_count: this.mapper.parseInt(row.passed_count),
+      failed_count: this.mapper.parseInt(row.failed_count),
+      total_count: this.mapper.parseInt(row.total_count),
+      avg_latency: this.mapper.parseFloat(row.avg_latency),
+      avg_connect_time: this.mapper.parseFloat(row.avg_connect_time),
+      total_request_size: this.mapper.parseInt(row.total_request_size),
+      total_response_size: this.mapper.parseInt(row.total_response_size),
+      apdex_score: this.mapper.parseFloat(row.apdex_score),
+      active_threshold: this.mapper.parseInt(row.active_threshold, 500),
+      url_hash: (row.url_hash as string) || null,
+      url_pattern: (row.url_pattern as string) || null,
+    }));
+  }
+
+  /**
    * Get transaction performance statistics for a test run.
    *
    * Percentiles (p95/p99) and Apdex are computed via TimescaleDB toolkit's
@@ -118,6 +394,23 @@ export class TestRunsPerformanceQueryService {
       // Resolve UUID to test_run_id if necessary
       const resolvedTestRunId = await this.resolveTestRunId(testRunId);
       this.logger.debug(`Resolved test run ID: ${testRunId} -> ${resolvedTestRunId}`);
+
+      // Fast path: if the rollup stage has written rows for this test run
+      // (completed runs only) AND sinceMinutes is not set (the rollup is
+      // whole-test-run only), read from the rollup table. Dashboard latency
+      // drops from seconds-to-minutes to <100ms.
+      // See: issues #150, #151.
+      if (sinceMinutes == null) {
+        const hasRollup = await this.hasTransactionRollup(resolvedTestRunId);
+        if (hasRollup) {
+          return await this.getTransactionStatsFromRollup(
+            resolvedTestRunId,
+            excludeRampUp,
+            isAdmin,
+            organizationIds,
+          );
+        }
+      }
 
       const cutoffTime = await this.getRampUpCutoffTime(resolvedTestRunId, excludeRampUp);
 
@@ -295,7 +588,25 @@ export class TestRunsPerformanceQueryService {
 
       this.logger.log(`Getting aggregated sampler stats for transaction: ${transactionName} in test run: ${testRunId}${isAdmin ? ' (admin)' : ` (orgs: ${organizationIds.length})`}`);
 
-      const cutoffTime = await this.getRampUpCutoffTime(testRunId, excludeRampUp);
+      const resolvedTestRunId = await this.resolveTestRunId(testRunId);
+
+      // Fast path: rollup (#150, #151). Covers the common case hit by the
+      // Overview-tab row expand and the Top 10 Requests tab — exactly the
+      // 140s query case captured in #151 for `stream_download_segment`.
+      if (sinceMinutes == null) {
+        const hasRollup = await this.hasSamplerRollup(resolvedTestRunId, transactionName);
+        if (hasRollup) {
+          return await this.getTransactionSamplesFromRollup(
+            resolvedTestRunId,
+            transactionName,
+            excludeRampUp,
+            isAdmin,
+            organizationIds,
+          );
+        }
+      }
+
+      const cutoffTime = await this.getRampUpCutoffTime(resolvedTestRunId, excludeRampUp);
 
       // Param layout: $1=testRunId, $2=transactionName, $3=excludeRampUp, $4=cutoffTime,
       //   $5=sinceMinutes (when provided), $5 or $6=orgIds (non-admin)
@@ -396,12 +707,12 @@ export class TestRunsPerformanceQueryService {
       let queryParams: unknown[];
       if (sinceMinutes != null) {
         queryParams = !isAdmin
-          ? [testRunId, transactionName, excludeRampUp, cutoffTime, sinceMinutes, organizationIds]
-          : [testRunId, transactionName, excludeRampUp, cutoffTime, sinceMinutes];
+          ? [resolvedTestRunId, transactionName, excludeRampUp, cutoffTime, sinceMinutes, organizationIds]
+          : [resolvedTestRunId, transactionName, excludeRampUp, cutoffTime, sinceMinutes];
       } else {
         queryParams = !isAdmin
-          ? [testRunId, transactionName, excludeRampUp, cutoffTime, organizationIds]
-          : [testRunId, transactionName, excludeRampUp, cutoffTime];
+          ? [resolvedTestRunId, transactionName, excludeRampUp, cutoffTime, organizationIds]
+          : [resolvedTestRunId, transactionName, excludeRampUp, cutoffTime];
       }
       // Wrap in a transaction so SET LOCAL work_mem applies only to this query.
       const result = await this.testRunRepo.manager.transaction(async (em) => {

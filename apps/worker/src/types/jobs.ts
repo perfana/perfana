@@ -146,6 +146,10 @@ export const IncrementalCollectionJobSchema = z.object({
   maxAttempts: z.number().int().min(1).default(5),
 });
 
+export const TransactionStatsRollupJobSchema = z.object({
+  testRunId: z.string().min(1),
+});
+
 // Inferred types from schemas
 export type AnalyzeTestJob = z.infer<typeof AnalyzeTestJobSchema>;
 export type BatchProcessingJob = z.infer<typeof BatchProcessingJobSchema>;
@@ -160,6 +164,7 @@ export type BatchFlowJob = z.infer<typeof BatchFlowJobSchema>;
 export type ReevaluationBatchJob = z.infer<typeof ReevaluationBatchJobSchema>;
 export type OrchestrateReevaluateBatchJob = z.infer<typeof OrchestrateReevaluateBatchJobSchema>;
 export type IncrementalCollectionJob = z.infer<typeof IncrementalCollectionJobSchema>;
+export type TransactionStatsRollupJob = z.infer<typeof TransactionStatsRollupJobSchema>;
 
 // Job names as constants
 export const JOB_NAMES = {
@@ -183,6 +188,9 @@ export const JOB_NAMES = {
 
   // Incremental collection for in-progress test runs
   INCREMENTAL_COLLECTION: 'collect-metrics-incremental',
+
+  // Per-test-run transaction/sampler stats rollup (#150, #151)
+  TRANSACTION_STATS_ROLLUP: 'transaction-stats-rollup',
 } as const;
 
 export type JobName = typeof JOB_NAMES[keyof typeof JOB_NAMES];
@@ -298,6 +306,11 @@ export const JOB_QUEUE_CONFIGS: Record<JobName, JobQueueConfig> = {
   [JOB_NAMES.INCREMENTAL_COLLECTION]: {
     teamSize: 4,
     teamConcurrency: 2,
+    batchSize: 1,
+  },
+  [JOB_NAMES.TRANSACTION_STATS_ROLLUP]: {
+    teamSize: 3, // CPU + IO heavy (tdigest aggregation over millions of rows)
+    teamConcurrency: 1,
     batchSize: 1,
   },
 };
@@ -497,6 +510,20 @@ export const ENHANCED_JOB_CONFIGS: Record<string, EnhancedJobOptions> = {
       memory_mb: 256,
       cpu_cores: 1,
       io_intensive: true                // API calls to Grafana/Dynatrace
+    }
+  },
+
+  'transaction-stats-rollup': {
+    pipeline_stage: 4,                  // After performance-test-metrics, before statistics-calculation
+    timeout: 600000,                    // 10 minutes (aggregation over 10M+ rows)
+    attempts: 3,
+    backoff: { type: 'exponential', delay: 5000 },
+    removeOnComplete: 50,
+    removeOnFail: 15,
+    resource_requirements: {
+      memory_mb: 512,                   // work_mem = 512MB during aggregation
+      cpu_cores: 2,
+      io_intensive: true                // Heavy reads from requests_raw / transactions
     }
   }
 };

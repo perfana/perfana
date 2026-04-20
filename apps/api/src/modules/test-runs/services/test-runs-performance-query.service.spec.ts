@@ -197,6 +197,19 @@ describe('TestRunsPerformanceQueryService', () => {
     typeof sql === 'string' && /SET\s+LOCAL\s+work_mem/i.test(sql);
 
   /**
+   * The rollup fast-path (#150, #151) issues a `SELECT 1 FROM
+   * test_run_transaction_stats … LIMIT 1` (and a sampler sibling) existence
+   * check before deciding whether to read the rollup or fall back to live
+   * aggregation. Existing tests that mock only the live-query result expect
+   * the fall-through path — so treat the existence check as "no rollup" by
+   * default. Tests that specifically exercise the rollup hit path opt in via
+   * `mockWithRollupHit(...)`.
+   */
+  const isRollupExistenceCheck = (sql: unknown): boolean =>
+    typeof sql === 'string' &&
+    /SELECT\s+1\s+FROM\s+test_run_(transaction|sampler)_stats/i.test(sql);
+
+  /**
    * Configures testRunRepo.query so that the first call (UUID lookup) returns
    * the given test_run_id, and all subsequent calls return the provided rows.
    * `SET LOCAL work_mem` preludes are treated as no-op steps.
@@ -209,6 +222,7 @@ describe('TestRunsPerformanceQueryService', () => {
     let idx = 0;
     (testRunRepo.query as jest.Mock).mockImplementation(async (sql: unknown) => {
       if (isSetLocalWorkMem(sql)) return [];
+      if (isRollupExistenceCheck(sql)) return [];
       if (!uuidServed) {
         uuidServed = true;
         return [{ test_run_id: resolvedTestRunId }];
@@ -228,9 +242,27 @@ describe('TestRunsPerformanceQueryService', () => {
     let idx = 0;
     (testRunRepo.query as jest.Mock).mockImplementation(async (sql: unknown) => {
       if (isSetLocalWorkMem(sql)) return [];
+      if (isRollupExistenceCheck(sql)) return [];
       const r = results[idx] ?? [];
       idx++;
       return r;
+    });
+  }
+
+  /**
+   * Rollup hit path: the existence check returns a non-empty result, so the
+   * service uses the pre-computed rollup tables. Followed by a single query
+   * returning the mapped rows.
+   *
+   * Param `rollupRows` feeds the `FROM test_run_(transaction|sampler)_stats`
+   * SELECT that produces Apdex + p95/p99 on the stored tdigest.
+   */
+  function mockWithRollupHit(rollupRows: unknown[]) {
+    (testRunRepo.query as jest.Mock).mockImplementation(async (sql: unknown) => {
+      if (isSetLocalWorkMem(sql)) return [];
+      if (isRollupExistenceCheck(sql)) return [{ '?column?': 1 }];
+      // Everything else: the rollup read (no UUID lookup for plain test_run_id).
+      return rollupRows;
     });
   }
 
@@ -345,10 +377,10 @@ describe('TestRunsPerformanceQueryService', () => {
 
         // Assert
         expect(result).toHaveLength(1);
-        // 3 calls: ramp-up lookup + SET LOCAL work_mem + stats query
-        expect(testRunRepo.query).toHaveBeenCalledTimes(3);
-        const rampUpCall = (testRunRepo.query as jest.Mock).mock.calls[0];
-        expect(rampUpCall[0]).toContain('SELECT start_time, ramp_up');
+        // 4 calls: rollup existence check + ramp-up lookup + SET LOCAL work_mem + stats query
+        expect(testRunRepo.query).toHaveBeenCalledTimes(4);
+        const calls = (testRunRepo.query as jest.Mock).mock.calls;
+        expect(calls.some(([sql]) => (sql as string).includes('SELECT start_time, ramp_up'))).toBe(true);
       });
 
       it('passes null cutoff when excludeRampUp is false', async () => {
@@ -573,6 +605,96 @@ describe('TestRunsPerformanceQueryService', () => {
         ).rejects.toThrow(DatabaseException);
       });
     });
+
+    // ---------------------------------------------------------------------
+    // Rollup fast path (#150, #151)
+    // ---------------------------------------------------------------------
+
+    describe('rollup fast path', () => {
+      it('reads from test_run_transaction_stats when a rollup row exists', async () => {
+        mockWithRollupHit([RAW_TRANSACTION_ROW]);
+
+        const result = await service.getTransactionStats(TEST_RUN_ID, false, ADMIN_ROLES, []);
+
+        expect(result).toHaveLength(1);
+        expect(result[0].transaction_name).toBe('checkout');
+
+        const queryCalls = (testRunRepo.query as jest.Mock).mock.calls;
+        const rollupRead = queryCalls.find(([sql]) =>
+          typeof sql === 'string' && /FROM\s+test_run_transaction_stats\s+trs/i.test(sql),
+        );
+        expect(rollupRead).toBeDefined();
+        // No SET LOCAL work_mem needed for the rollup path — reads are tiny.
+        const hasSetLocal = queryCalls.some(([sql]) =>
+          typeof sql === 'string' && /SET\s+LOCAL\s+work_mem/i.test(sql),
+        );
+        expect(hasSetLocal).toBe(false);
+      });
+
+      it('passes excludeRampUp through as ramp_up_excluded param', async () => {
+        mockWithRollupHit([RAW_TRANSACTION_ROW]);
+
+        await service.getTransactionStats(TEST_RUN_ID, true, ADMIN_ROLES, []);
+
+        const queryCalls = (testRunRepo.query as jest.Mock).mock.calls;
+        const rollupCall = queryCalls.find(([sql]) =>
+          typeof sql === 'string' && /FROM\s+test_run_transaction_stats\s+trs/i.test(sql),
+        )!;
+        const params = rollupCall[1] as unknown[];
+        // $1 = testRunId, $2 = ramp_up_excluded
+        expect(params[0]).toBe(TEST_RUN_ID);
+        expect(params[1]).toBe(true);
+      });
+
+      it('falls back to live aggregation when no rollup row exists', async () => {
+        mockQuerySequence([RAW_TRANSACTION_ROW]); // existence check returns []
+
+        const result = await service.getTransactionStats(TEST_RUN_ID, false, ADMIN_ROLES, []);
+
+        expect(result).toHaveLength(1);
+        const queryCalls = (testRunRepo.query as jest.Mock).mock.calls;
+        // Live path does run SET LOCAL work_mem + live transactions query.
+        const hasSetLocal = queryCalls.some(([sql]) =>
+          typeof sql === 'string' && /SET\s+LOCAL\s+work_mem/i.test(sql),
+        );
+        expect(hasSetLocal).toBe(true);
+      });
+
+      it('bypasses the rollup when sinceMinutes is set (window not servable)', async () => {
+        // Even if a rollup row exists, sinceMinutes forces the live path.
+        // Make the existence check match a hit so we prove sinceMinutes wins.
+        let sawExistenceCheck = false;
+        (testRunRepo.query as jest.Mock).mockImplementation(async (sql: unknown) => {
+          if (isSetLocalWorkMem(sql)) return [];
+          if (isRollupExistenceCheck(sql)) {
+            sawExistenceCheck = true;
+            return [{ '?column?': 1 }];
+          }
+          return [RAW_TRANSACTION_ROW];
+        });
+
+        await service.getTransactionStats(TEST_RUN_ID, false, ADMIN_ROLES, [], 5);
+
+        // Existence check should not have been reached because sinceMinutes
+        // short-circuits the rollup path before checking.
+        expect(sawExistenceCheck).toBe(false);
+      });
+
+      it('binds organizationIds to $3 when caller is non-admin', async () => {
+        mockWithRollupHit([RAW_TRANSACTION_ROW]);
+
+        await service.getTransactionStats(TEST_RUN_ID, false, USER_ROLES, ORG_IDS);
+
+        const rollupCall = (testRunRepo.query as jest.Mock).mock.calls.find(([sql]) =>
+          typeof sql === 'string' && /FROM\s+test_run_transaction_stats\s+trs/i.test(sql),
+        )!;
+        const [sql, params] = rollupCall;
+        expect(sql).toMatch(/organization_id\s*=\s*ANY\(\$3::uuid\[\]\)/i);
+        expect(params[0]).toBe(TEST_RUN_ID);
+        expect(params[1]).toBe(false);
+        expect(params[2]).toEqual(ORG_IDS);
+      });
+    });
   });
 
   // =========================================================================
@@ -618,8 +740,8 @@ describe('TestRunsPerformanceQueryService', () => {
         const result = await service.getTransactionSamples(TEST_RUN_ID, TRANSACTION, true, ADMIN_ROLES, []);
 
         expect(result).toHaveLength(1);
-        // 3 calls: ramp-up lookup + SET LOCAL work_mem + samples query
-        expect(testRunRepo.query).toHaveBeenCalledTimes(3);
+        // 4 calls: rollup existence check + ramp-up lookup + SET LOCAL work_mem + samples query
+        expect(testRunRepo.query).toHaveBeenCalledTimes(4);
       });
 
       it('does not fetch cutoff when excludeRampUp is false', async () => {
@@ -627,8 +749,8 @@ describe('TestRunsPerformanceQueryService', () => {
 
         await service.getTransactionSamples(TEST_RUN_ID, TRANSACTION, false, ADMIN_ROLES, []);
 
-        // 2 calls — SET LOCAL work_mem + samples query (no ramp-up lookup)
-        expect(testRunRepo.query).toHaveBeenCalledTimes(2);
+        // 3 calls — rollup existence check + SET LOCAL work_mem + samples query (no ramp-up lookup)
+        expect(testRunRepo.query).toHaveBeenCalledTimes(3);
       });
     });
 
@@ -815,6 +937,98 @@ describe('TestRunsPerformanceQueryService', () => {
         await expect(
           service.getTransactionSamples(TEST_RUN_ID, TRANSACTION, false, ADMIN_ROLES, [])
         ).rejects.toThrow('Failed to retrieve transaction sampler statistics');
+      });
+    });
+
+    // ---------------------------------------------------------------------
+    // Rollup fast path (#150, #151)
+    // ---------------------------------------------------------------------
+
+    describe('rollup fast path', () => {
+      const TRANSACTION = 'checkout';
+
+      it('reads from test_run_sampler_stats when a rollup row exists', async () => {
+        mockWithRollupHit([RAW_SAMPLER_ROW]);
+
+        const result = await service.getTransactionSamples(
+          TEST_RUN_ID, TRANSACTION, false, ADMIN_ROLES, [],
+        );
+
+        expect(result).toHaveLength(1);
+        expect(result[0].sampler_name).toBe('POST /checkout');
+
+        const queryCalls = (testRunRepo.query as jest.Mock).mock.calls;
+        const rollupRead = queryCalls.find(([sql]) =>
+          typeof sql === 'string' && /FROM\s+test_run_sampler_stats\s+trss/i.test(sql),
+        );
+        expect(rollupRead).toBeDefined();
+      });
+
+      it('passes excludeRampUp through as ramp_up_excluded ($3)', async () => {
+        mockWithRollupHit([RAW_SAMPLER_ROW]);
+
+        await service.getTransactionSamples(
+          TEST_RUN_ID, TRANSACTION, true, ADMIN_ROLES, [],
+        );
+
+        const queryCalls = (testRunRepo.query as jest.Mock).mock.calls;
+        const rollupCall = queryCalls.find(([sql]) =>
+          typeof sql === 'string' && /FROM\s+test_run_sampler_stats\s+trss/i.test(sql),
+        )!;
+        const params = rollupCall[1] as unknown[];
+        expect(params[0]).toBe(TEST_RUN_ID);
+        expect(params[1]).toBe(TRANSACTION);
+        expect(params[2]).toBe(true);
+      });
+
+      it('falls back to live aggregation when no rollup row exists', async () => {
+        mockQuerySequence([RAW_SAMPLER_ROW]);
+
+        const result = await service.getTransactionSamples(
+          TEST_RUN_ID, TRANSACTION, false, ADMIN_ROLES, [],
+        );
+
+        expect(result).toHaveLength(1);
+        const hasSetLocal = (testRunRepo.query as jest.Mock).mock.calls.some(([sql]) =>
+          typeof sql === 'string' && /SET\s+LOCAL\s+work_mem/i.test(sql),
+        );
+        expect(hasSetLocal).toBe(true);
+      });
+
+      it('bypasses the rollup when sinceMinutes is set', async () => {
+        let sawExistenceCheck = false;
+        (testRunRepo.query as jest.Mock).mockImplementation(async (sql: unknown) => {
+          if (isSetLocalWorkMem(sql)) return [];
+          if (isRollupExistenceCheck(sql)) {
+            sawExistenceCheck = true;
+            return [{ '?column?': 1 }];
+          }
+          return [RAW_SAMPLER_ROW];
+        });
+
+        await service.getTransactionSamples(
+          TEST_RUN_ID, TRANSACTION, false, ADMIN_ROLES, [], 10,
+        );
+
+        expect(sawExistenceCheck).toBe(false);
+      });
+
+      it('binds organizationIds to $4 when caller is non-admin', async () => {
+        mockWithRollupHit([RAW_SAMPLER_ROW]);
+
+        await service.getTransactionSamples(
+          TEST_RUN_ID, TRANSACTION, true, USER_ROLES, ORG_IDS,
+        );
+
+        const rollupCall = (testRunRepo.query as jest.Mock).mock.calls.find(([sql]) =>
+          typeof sql === 'string' && /FROM\s+test_run_sampler_stats\s+trss/i.test(sql),
+        )!;
+        const [sql, params] = rollupCall;
+        expect(sql).toMatch(/organization_id\s*=\s*ANY\(\$4::uuid\[\]\)/i);
+        expect(params[0]).toBe(TEST_RUN_ID);
+        expect(params[1]).toBe(TRANSACTION);
+        expect(params[2]).toBe(true);
+        expect(params[3]).toEqual(ORG_IDS);
       });
     });
   });

@@ -12,6 +12,7 @@ import { ControlGroupStatisticsPipeline } from '../pipelines/ControlGroupStatist
 import { PanelsPipeline } from '../pipelines/PanelsPipeline.js';
 import { DynatracePipeline } from '../pipelines/DynatracePipeline.js';
 import { PerformanceTestMetricsPipeline } from '../pipelines/PerformanceTestMetricsPipeline.js';
+import { TransactionStatsRollupPipeline } from '../pipelines/TransactionStatsRollupPipeline.js';
 import { IncrementalMetricsPipeline } from '../pipelines/IncrementalMetricsPipeline.js';
 
 // Import services
@@ -40,6 +41,7 @@ export class PipelineOrchestrator {
   private panelsPipeline: PanelsPipeline;
   private dynatracePipeline: DynatracePipeline;
   private performanceTestMetricsPipeline: PerformanceTestMetricsPipeline;
+  private transactionStatsRollupPipeline: TransactionStatsRollupPipeline;
   private incrementalMetricsPipeline: IncrementalMetricsPipeline;
   private gapService: MetricCollectionGapService;
   private databaseService: WorkerDatabaseService;
@@ -59,6 +61,7 @@ export class PipelineOrchestrator {
     this.panelsPipeline = new PanelsPipeline(logger);
     this.dynatracePipeline = new DynatracePipeline(logger);
     this.performanceTestMetricsPipeline = new PerformanceTestMetricsPipeline(logger);
+    this.transactionStatsRollupPipeline = new TransactionStatsRollupPipeline(logger);
     this.incrementalMetricsPipeline = new IncrementalMetricsPipeline(logger);
 
     // Initialize services
@@ -648,6 +651,40 @@ ${results.map(r => {
 
       case 'performance-test-metrics':
         executionPromise = this.performanceTestMetricsPipeline.execute(singleInput);
+        break;
+
+      case 'transaction-stats-rollup':
+        // Soft-fail: a rollup miss doesn't break the dashboard (the API falls
+        // back to live aggregation when rollup rows are missing), so a failure
+        // here must NOT abort the rest of analyze-test (ADAPT, statistics,
+        // checks). Log the error and return success to the orchestrator.
+        // See: issues #150, #151.
+        executionPromise = this.transactionStatsRollupPipeline.execute(singleInput)
+          .then(result => {
+            if (!result.success) {
+              this.logger.warn(
+                `transaction-stats-rollup failed but continuing (dashboard will fall back to live aggregation): ${result.error?.message ?? 'unknown error'}`
+              );
+              return {
+                success: true,
+                data: {
+                  skipped: 'rollup-failed',
+                  reason: result.error?.message ?? 'unknown error',
+                },
+              } satisfies PipelineResult;
+            }
+            return result;
+          })
+          .catch(err => {
+            const msg = err instanceof Error ? err.message : String(err);
+            this.logger.warn(
+              `transaction-stats-rollup threw but continuing: ${msg}`
+            );
+            return {
+              success: true,
+              data: { skipped: 'rollup-threw', reason: msg },
+            } satisfies PipelineResult;
+          });
         break;
 
       case 'metrics-collection':

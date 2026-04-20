@@ -306,7 +306,27 @@ export class TestRunsMutationService {
   async updateAnalysisStartOffset(id: string, analysisStartOffset: number, userId: string, _roles: string[]): Promise<TestRun> {
     this.logger.debug(`updateAnalysisStartOffset: id=${id}, analysisStartOffset=${analysisStartOffset}, userId=${userId}`);
 
-    return this.updateAnalysisStartOffsetHandler.execute({ id, analysisStartOffset });
+    const result = await this.updateAnalysisStartOffsetHandler.execute({ id, analysisStartOffset });
+
+    // Editing ramp-up on a completed run invalidates the `ramp_up_excluded=true`
+    // rows in test_run_transaction_stats / test_run_sampler_stats — they were
+    // computed against the previous cutoff. Re-enqueue the rollup job so the
+    // dashboard shows numbers consistent with the new ramp-up setting.
+    // See: issues #150, #151.
+    if (result?.completed && result?.test_run_id) {
+      try {
+        await this.bullmqClientService.enqueueTransactionStatsRollup(result.test_run_id);
+      } catch (err) {
+        this.logger.error(
+          `Failed to re-enqueue stats rollup after ramp-up edit for ${result.test_run_id}:`,
+          err,
+        );
+        // Intentionally swallowed — the mutation itself succeeded, and the
+        // dashboard falls back to live aggregation if the rollup is stale.
+      }
+    }
+
+    return result;
   }
 
   /**
