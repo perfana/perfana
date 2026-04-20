@@ -104,7 +104,10 @@ describe('TestRunsMutationService', () => {
   beforeEach(async () => {
     const mockTestRunRepo = createMockRepository<TestRunEntity>();
 
-    const mockBullmqClientService = { analyzeTest: jest.fn() };
+    const mockBullmqClientService = {
+      analyzeTest: jest.fn(),
+      enqueueTransactionStatsRollup: jest.fn(),
+    };
     const mockCreateHandler = { execute: jest.fn() };
     const mockUpdateHandler = { execute: jest.fn() };
     const mockDeleteHandler = { execute: jest.fn() };
@@ -352,6 +355,75 @@ describe('TestRunsMutationService', () => {
 
       expect(updateAnnotationsHandler.execute).toHaveBeenCalledWith({ id: 'test-uuid-123', annotations: ['annotation1'] });
       expect(result).toBeDefined();
+    });
+  });
+
+  describe('updateAnalysisStartOffset', () => {
+    // The rollup re-enqueue hook here is the whole point of issue #150/#151
+    // invalidation logic: editing ramp-up on a completed run invalidates the
+    // `ramp_up_excluded=true` rows in test_run_transaction_stats.
+
+    let updateAnalysisStartOffsetHandler: jest.Mocked<{ execute: jest.Mock }>;
+
+    beforeEach(() => {
+      updateAnalysisStartOffsetHandler = (service as unknown as {
+        updateAnalysisStartOffsetHandler: jest.Mocked<{ execute: jest.Mock }>;
+      }).updateAnalysisStartOffsetHandler;
+    });
+
+    it('delegates to the handler with { id, analysisStartOffset }', async () => {
+      const mockTestRun = createMockTestRun(createMockTestRunEntity());
+      updateAnalysisStartOffsetHandler.execute.mockResolvedValue(mockTestRun);
+      bullmqClientService.enqueueTransactionStatsRollup.mockResolvedValue('job-1');
+
+      await service.updateAnalysisStartOffset('test-uuid-123', 60, mockUserId, mockRoles);
+
+      expect(updateAnalysisStartOffsetHandler.execute).toHaveBeenCalledWith({
+        id: 'test-uuid-123',
+        analysisStartOffset: 60,
+      });
+    });
+
+    it('re-enqueues the rollup job when the updated test run is completed', async () => {
+      const mockTestRun = createMockTestRun(
+        createMockTestRunEntity({ completed: true, testRunId: 'run-42' }),
+      );
+      updateAnalysisStartOffsetHandler.execute.mockResolvedValue(mockTestRun);
+      bullmqClientService.enqueueTransactionStatsRollup.mockResolvedValue('job-1');
+
+      await service.updateAnalysisStartOffset('test-uuid-123', 60, mockUserId, mockRoles);
+
+      expect(bullmqClientService.enqueueTransactionStatsRollup).toHaveBeenCalledWith('run-42');
+    });
+
+    it('does NOT re-enqueue rollup when the run is not completed', async () => {
+      const mockTestRun = createMockTestRun(
+        createMockTestRunEntity({ completed: false }),
+      );
+      updateAnalysisStartOffsetHandler.execute.mockResolvedValue(mockTestRun);
+
+      await service.updateAnalysisStartOffset('test-uuid-123', 60, mockUserId, mockRoles);
+
+      expect(bullmqClientService.enqueueTransactionStatsRollup).not.toHaveBeenCalled();
+    });
+
+    it('swallows enqueue failures so the mutation still returns (dashboard falls back)', async () => {
+      const mockTestRun = createMockTestRun(
+        createMockTestRunEntity({ completed: true, testRunId: 'run-99' }),
+      );
+      updateAnalysisStartOffsetHandler.execute.mockResolvedValue(mockTestRun);
+      bullmqClientService.enqueueTransactionStatsRollup.mockRejectedValue(
+        new Error('Redis unreachable'),
+      );
+
+      // Must not throw — the mutation itself succeeded.
+      const result = await service.updateAnalysisStartOffset(
+        'test-uuid-123', 60, mockUserId, mockRoles,
+      );
+
+      expect(result).toBeDefined();
+      expect(result.test_run_id).toBe('run-99');
+      expect(bullmqClientService.enqueueTransactionStatsRollup).toHaveBeenCalledWith('run-99');
     });
   });
 

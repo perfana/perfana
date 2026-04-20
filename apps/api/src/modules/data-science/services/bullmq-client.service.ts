@@ -550,11 +550,15 @@ export class BullMQClientService implements OnModuleDestroy {
       this.checkRedisAvailability();
       this.logger.log(`Enqueuing transaction-stats-rollup for test run: ${testRunId}`);
 
+      // Deterministic jobId so rapid successive edits coalesce into one
+      // pending job instead of stacking up. The pipeline re-reads
+      // `analysisStartOffset` from the DB at execute time, so whichever
+      // enqueue "wins" the race will still compute against the latest value.
       const job = await this.analysisQueue!.add(
         'transaction-stats-rollup',
         { testRunId, initiatedBy: 'api', timestamp: new Date().toISOString() },
         {
-          jobId: `rollup-${testRunId}-${Date.now()}`,
+          jobId: `rollup-${testRunId}`,
           attempts: 3,
           backoff: { type: 'exponential', delay: 5000 },
           removeOnComplete: 50,

@@ -131,6 +131,34 @@ describe('TransactionStatsRollupPipeline', () => {
       expect(sqlCalls.some(s => /INSERT INTO test_run_sampler_stats/i.test(s))).toBe(true);
     });
 
+    it('sets a 10-minute statement_timeout (longer than the live query it replaces)', async () => {
+      mockDb.getTestRunByTestRunId.mockResolvedValue(makeTestRun());
+      wireTransaction({ tx: 1, sampler: 1 });
+
+      await pipeline.execute({ testRunId: 'run-001' });
+
+      const sqlCalls = mockManagerQuery.mock.calls.map(([sql]) => sql as string);
+      expect(sqlCalls.some(s => /SET LOCAL statement_timeout\s*=\s*'600000'/i.test(s))).toBe(true);
+    });
+
+    it('DELETEs stale rows before INSERTing so ramp-up edits cannot leave stale data', async () => {
+      mockDb.getTestRunByTestRunId.mockResolvedValue(makeTestRun());
+      wireTransaction({ tx: 1, sampler: 1 });
+
+      await pipeline.execute({ testRunId: 'run-001' });
+
+      const sqlCalls = mockManagerQuery.mock.calls.map(([sql]) => sql as string);
+      const deleteTxIdx = sqlCalls.findIndex(s => /DELETE FROM test_run_transaction_stats/i.test(s));
+      const insertTxIdx = sqlCalls.findIndex(s => /INSERT INTO test_run_transaction_stats/i.test(s));
+      const deleteSamplerIdx = sqlCalls.findIndex(s => /DELETE FROM test_run_sampler_stats/i.test(s));
+      const insertSamplerIdx = sqlCalls.findIndex(s => /INSERT INTO test_run_sampler_stats/i.test(s));
+
+      expect(deleteTxIdx).toBeGreaterThanOrEqual(0);
+      expect(insertTxIdx).toBeGreaterThan(deleteTxIdx);
+      expect(deleteSamplerIdx).toBeGreaterThanOrEqual(0);
+      expect(insertSamplerIdx).toBeGreaterThan(deleteSamplerIdx);
+    });
+
     it('computes cutoff = start_time + analysisStartOffset seconds and passes it as $2', async () => {
       mockDb.getTestRunByTestRunId.mockResolvedValue(
         makeTestRun({

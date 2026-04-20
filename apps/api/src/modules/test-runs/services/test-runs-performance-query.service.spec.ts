@@ -679,6 +679,21 @@ describe('TestRunsPerformanceQueryService', () => {
         // short-circuits the rollup path before checking.
         expect(sawExistenceCheck).toBe(false);
       });
+
+      it('binds organizationIds to $3 when caller is non-admin', async () => {
+        mockWithRollupHit([RAW_TRANSACTION_ROW]);
+
+        await service.getTransactionStats(TEST_RUN_ID, false, USER_ROLES, ORG_IDS);
+
+        const rollupCall = (testRunRepo.query as jest.Mock).mock.calls.find(([sql]) =>
+          typeof sql === 'string' && /FROM\s+test_run_transaction_stats\s+trs/i.test(sql),
+        )!;
+        const [sql, params] = rollupCall;
+        expect(sql).toMatch(/organization_id\s*=\s*ANY\(\$3::uuid\[\]\)/i);
+        expect(params[0]).toBe(TEST_RUN_ID);
+        expect(params[1]).toBe(false);
+        expect(params[2]).toEqual(ORG_IDS);
+      });
     });
   });
 
@@ -996,6 +1011,24 @@ describe('TestRunsPerformanceQueryService', () => {
         );
 
         expect(sawExistenceCheck).toBe(false);
+      });
+
+      it('binds organizationIds to $4 when caller is non-admin', async () => {
+        mockWithRollupHit([RAW_SAMPLER_ROW]);
+
+        await service.getTransactionSamples(
+          TEST_RUN_ID, TRANSACTION, true, USER_ROLES, ORG_IDS,
+        );
+
+        const rollupCall = (testRunRepo.query as jest.Mock).mock.calls.find(([sql]) =>
+          typeof sql === 'string' && /FROM\s+test_run_sampler_stats\s+trss/i.test(sql),
+        )!;
+        const [sql, params] = rollupCall;
+        expect(sql).toMatch(/organization_id\s*=\s*ANY\(\$4::uuid\[\]\)/i);
+        expect(params[0]).toBe(TEST_RUN_ID);
+        expect(params[1]).toBe(TRANSACTION);
+        expect(params[2]).toBe(true);
+        expect(params[3]).toEqual(ORG_IDS);
       });
     });
   });

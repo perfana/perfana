@@ -654,7 +654,37 @@ ${results.map(r => {
         break;
 
       case 'transaction-stats-rollup':
-        executionPromise = this.transactionStatsRollupPipeline.execute(singleInput);
+        // Soft-fail: a rollup miss doesn't break the dashboard (the API falls
+        // back to live aggregation when rollup rows are missing), so a failure
+        // here must NOT abort the rest of analyze-test (ADAPT, statistics,
+        // checks). Log the error and return success to the orchestrator.
+        // See: issues #150, #151.
+        executionPromise = this.transactionStatsRollupPipeline.execute(singleInput)
+          .then(result => {
+            if (!result.success) {
+              this.logger.warn(
+                `transaction-stats-rollup failed but continuing (dashboard will fall back to live aggregation): ${result.error?.message ?? 'unknown error'}`
+              );
+              return {
+                success: true,
+                data: {
+                  skipped: 'rollup-failed',
+                  reason: result.error?.message ?? 'unknown error',
+                },
+              } satisfies PipelineResult;
+            }
+            return result;
+          })
+          .catch(err => {
+            const msg = err instanceof Error ? err.message : String(err);
+            this.logger.warn(
+              `transaction-stats-rollup threw but continuing: ${msg}`
+            );
+            return {
+              success: true,
+              data: { skipped: 'rollup-threw', reason: msg },
+            } satisfies PipelineResult;
+          });
         break;
 
       case 'metrics-collection':

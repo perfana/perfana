@@ -97,11 +97,38 @@ export class TransactionStatsRollupPipeline extends BasePipelineTypeORM {
         `🎯 Rolling up transaction stats for ${testRunId} (ramp_up=${rampUpSeconds}s, cutoff=${cutoff.toISOString()})`
       );
 
-      const result = await this.withAnalyticsTransaction(async (manager) => {
+      // Use `db.transaction` directly (NOT `withAnalyticsTransaction`): the
+      // default 120s analytics budget is LESS than the live query this rollup
+      // replaces (measured 135–213s for 11M-row `stream_download_segment`),
+      // so the rollup would time out before it finishes on the exact runs
+      // that most need it. Give it 10 minutes — it's a background job.
+      const rollupTimeoutMs = parseInt(
+        process.env.ROLLUP_STATEMENT_TIMEOUT_MS || '600000', 10,
+      );
+
+      const result = await this.db.transaction(async (manager) => {
+        await manager.query(`SET LOCAL statement_timeout = '${rollupTimeoutMs}'`);
         // work_mem boost matches the current online query (see
         // TestRunsPerformanceQueryService). Needed for the tdigest
         // aggregation over millions of rows per test run.
         await manager.query(`SET LOCAL work_mem = '512MB'`);
+
+        // DELETE before INSERT: UPSERT alone can't evict groups that no
+        // longer exist. Two scenarios where stale rows would otherwise
+        // survive: (a) updateAnalysisStartOffset increases ramp_up so a
+        // group that had filtered rows no longer does — the `WHERE total_excl
+        // > 0` clause in the INSERT skips it, and the old row sticks around
+        // with pre-edit numbers; (b) a rerun after `transactions` /
+        // `requests_raw` rows were deleted or merged. Wiping all rows for
+        // this test_run_id first guarantees the rollup reflects current data.
+        await manager.query(
+          `DELETE FROM test_run_transaction_stats WHERE test_run_id = $1`,
+          [testRunId],
+        );
+        await manager.query(
+          `DELETE FROM test_run_sampler_stats WHERE test_run_id = $1`,
+          [testRunId],
+        );
 
         const txResult = await manager.query<RollupRowCount[]>(
           TRANSACTION_ROLLUP_SQL,
@@ -260,11 +287,11 @@ const SAMPLER_ROLLUP_SQL = `
       COUNT(*)                                                                  AS total_full,
       SUM(CASE WHEN r.success THEN 1 ELSE 0 END)                                AS passed_full,
       SUM(CASE WHEN NOT r.success THEN 1 ELSE 0 END)                            AS failed_full,
-      AVG(r.response_time)::numeric(10,2)                                       AS avg_full,
+      ROUND(AVG(r.response_time)::numeric, 2)                                   AS avg_full,
       MIN(r.response_time)                                                      AS min_full,
       MAX(r.response_time)                                                      AS max_full,
-      AVG(r.response_latency)::numeric(10,2)                                    AS lat_full,
-      AVG(r.response_connect_time)::numeric(10,2)                               AS conn_full,
+      ROUND(AVG(r.response_latency)::numeric, 2)                                AS lat_full,
+      ROUND(AVG(r.response_connect_time)::numeric, 2)                           AS conn_full,
       SUM(r.request_size)                                                       AS req_size_full,
       SUM(r.response_size)                                                      AS resp_size_full,
       percentile_agg(r.response_time::double precision)                         AS pct_full,
@@ -273,11 +300,11 @@ const SAMPLER_ROLLUP_SQL = `
         FILTER (WHERE r.time >= $2)                                             AS passed_excl,
       SUM(CASE WHEN NOT r.success THEN 1 ELSE 0 END)
         FILTER (WHERE r.time >= $2)                                             AS failed_excl,
-      (AVG(r.response_time) FILTER (WHERE r.time >= $2))::numeric(10,2)         AS avg_excl,
+      ROUND((AVG(r.response_time) FILTER (WHERE r.time >= $2))::numeric, 2)     AS avg_excl,
       MIN(r.response_time) FILTER (WHERE r.time >= $2)                          AS min_excl,
       MAX(r.response_time) FILTER (WHERE r.time >= $2)                          AS max_excl,
-      (AVG(r.response_latency) FILTER (WHERE r.time >= $2))::numeric(10,2)      AS lat_excl,
-      (AVG(r.response_connect_time) FILTER (WHERE r.time >= $2))::numeric(10,2) AS conn_excl,
+      ROUND((AVG(r.response_latency) FILTER (WHERE r.time >= $2))::numeric, 2)  AS lat_excl,
+      ROUND((AVG(r.response_connect_time) FILTER (WHERE r.time >= $2))::numeric, 2) AS conn_excl,
       SUM(r.request_size)  FILTER (WHERE r.time >= $2)                          AS req_size_excl,
       SUM(r.response_size) FILTER (WHERE r.time >= $2)                          AS resp_size_excl,
       percentile_agg(r.response_time::double precision) FILTER (WHERE r.time >= $2) AS pct_excl
