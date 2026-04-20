@@ -12,6 +12,7 @@ import { ControlGroupStatisticsPipeline } from '../pipelines/ControlGroupStatist
 import { PanelsPipeline } from '../pipelines/PanelsPipeline.js';
 import { DynatracePipeline } from '../pipelines/DynatracePipeline.js';
 import { PerformanceTestMetricsPipeline } from '../pipelines/PerformanceTestMetricsPipeline.js';
+import { TransactionStatsRollupPipeline } from '../pipelines/TransactionStatsRollupPipeline.js';
 import { IncrementalMetricsPipeline } from '../pipelines/IncrementalMetricsPipeline.js';
 
 // Import services
@@ -40,6 +41,7 @@ export class PipelineOrchestrator {
   private panelsPipeline: PanelsPipeline;
   private dynatracePipeline: DynatracePipeline;
   private performanceTestMetricsPipeline: PerformanceTestMetricsPipeline;
+  private transactionStatsRollupPipeline: TransactionStatsRollupPipeline;
   private incrementalMetricsPipeline: IncrementalMetricsPipeline;
   private gapService: MetricCollectionGapService;
   private databaseService: WorkerDatabaseService;
@@ -59,6 +61,7 @@ export class PipelineOrchestrator {
     this.panelsPipeline = new PanelsPipeline(logger);
     this.dynatracePipeline = new DynatracePipeline(logger);
     this.performanceTestMetricsPipeline = new PerformanceTestMetricsPipeline(logger);
+    this.transactionStatsRollupPipeline = new TransactionStatsRollupPipeline(logger);
     this.incrementalMetricsPipeline = new IncrementalMetricsPipeline(logger);
 
     // Initialize services
@@ -648,6 +651,10 @@ ${results.map(r => {
 
       case 'performance-test-metrics':
         executionPromise = this.performanceTestMetricsPipeline.execute(singleInput);
+        break;
+
+      case 'transaction-stats-rollup':
+        executionPromise = this.transactionStatsRollupPipeline.execute(singleInput);
         break;
 
       case 'metrics-collection':

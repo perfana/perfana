@@ -102,18 +102,19 @@ export function analyzeTestWorker() {
         scope: `${testRunInfo.systemUnderTestId}:${testRunInfo.testEnvironment}:${testRunInfo.workload}`,
       });
 
-      // Define the complete 9-stage pipeline for analyze-test
+      // Define the complete 10-stage pipeline for analyze-test
       const stages = [
-        'dynatrace-collection',     // Step 1: External data collection (DQL metrics)
-        'panels-processing',        // Step 2: Panel document creation
-        'performance-test-metrics', // Step 3: Performance test metrics extraction (raw test data)
-        'metrics-collection',       // Step 4: CORE metrics from Grafana
-        'statistics-calculation',   // Step 5: Statistical aggregations
-        'checks-evaluation',        // Step 6: Performance evaluation (prerequisite for control groups)
-        'control-groups-creation',  // Step 7: Control groups creation (after checks)
-        'control-group-statistics', // Step 8: Control group statistics calculation
-        ...(adapt ? ['adapt-analysis'] : []),  // Step 9: ADAPT (if enabled)
-        'data-sanity-check',                     // Step 10: Data sanity validation
+        'dynatrace-collection',       // Step 1: External data collection (DQL metrics)
+        'panels-processing',          // Step 2: Panel document creation
+        'performance-test-metrics',   // Step 3: Performance test metrics extraction (raw test data)
+        'transaction-stats-rollup',   // Step 4: Per-test-run transaction/sampler stats rollup (#150, #151)
+        'metrics-collection',         // Step 5: CORE metrics from Grafana
+        'statistics-calculation',     // Step 6: Statistical aggregations
+        'checks-evaluation',          // Step 7: Performance evaluation (prerequisite for control groups)
+        'control-groups-creation',    // Step 8: Control groups creation (after checks)
+        'control-group-statistics',   // Step 9: Control group statistics calculation
+        ...(adapt ? ['adapt-analysis'] : []),  // Step 10: ADAPT (if enabled)
+        'data-sanity-check',          // Step 11: Data sanity validation
       ];
 
       // Initialize progress reporter

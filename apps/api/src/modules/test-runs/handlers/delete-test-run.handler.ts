@@ -197,6 +197,9 @@ export class DeleteTestRunHandler implements ICommandHandler<DeleteTestRunComman
       { table: 'ds_metric_collection_status', param: testRunId, label: 'metric collection status' },
       { table: 'ds_panels', param: testRunId, label: 'panels' },
       { table: 'ds_metrics', param: testRunId, label: 'metrics' },
+      // Per-test-run transaction / sampler stats rollup (#150, #151)
+      { table: 'test_run_transaction_stats', param: testRunId, label: 'transaction stats rollup' },
+      { table: 'test_run_sampler_stats', param: testRunId, label: 'sampler stats rollup' },
       // Performance test data tables (TimescaleDB hypertables)
       { table: 'transactions', param: testRunId, label: 'performance test transactions' },
       { table: 'requests_raw', param: testRunId, label: 'performance test requests' },

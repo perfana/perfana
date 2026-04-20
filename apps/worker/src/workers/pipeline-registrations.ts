@@ -15,6 +15,7 @@ import {
   ControlGroupsJobSchema,
   ChecksJobSchema,
   ReevaluateJobSchema,
+  TransactionStatsRollupJobSchema,
 } from '../types/jobs.js';
 
 // Local schema (not in jobs.ts)
@@ -39,6 +40,7 @@ import { ControlGroupsPipeline } from '../pipelines/ControlGroupsPipeline.js';
 import { ControlGroupStatisticsPipeline } from '../pipelines/ControlGroupStatisticsPipeline.js';
 import { DynatracePipeline } from '../pipelines/DynatracePipeline.js';
 import { PerformanceTestMetricsPipeline } from '../pipelines/PerformanceTestMetricsPipeline.js';
+import { TransactionStatsRollupPipeline } from '../pipelines/TransactionStatsRollupPipeline.js';
 
 // ── Standard schema-validated pipelines ──────────────────────────────
 
@@ -108,6 +110,15 @@ registerPipeline({
   jobName: JOB_NAMES.PERFORMANCE_TEST_METRICS,
   createPipeline: (logger) => new PerformanceTestMetricsPipeline(logger),
   successMessage: 'Performance test metrics',
+});
+
+// Transaction stats rollup (#150, #151): per-test-run aggregates written to
+// test_run_transaction_stats + test_run_sampler_stats at finalization.
+registerPipeline({
+  jobName: JOB_NAMES.TRANSACTION_STATS_ROLLUP,
+  schema: TransactionStatsRollupJobSchema,
+  createPipeline: (logger) => new TransactionStatsRollupPipeline(logger),
+  successMessage: 'Transaction stats rollup',
 });
 
 // Reevaluate: logs a warning instead of silently succeeding

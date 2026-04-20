@@ -85,6 +85,7 @@ export const JOB_TO_QUEUE_MAP: Record<string, SimpleQueueName> = {
   'performance-test-metrics': SIMPLE_QUEUES.ANALYZE,
   'dynatrace-collection': SIMPLE_QUEUES.ANALYZE,
   'reevaluate-checks': SIMPLE_QUEUES.ANALYZE,
+  'transaction-stats-rollup': SIMPLE_QUEUES.ANALYZE,
 
   // Batch processing → perfana-batch
   'batch-analysis': SIMPLE_QUEUES.BATCH,

@@ -535,6 +535,44 @@ export class BullMQClientService implements OnModuleDestroy {
   }
 
   /**
+   * Enqueue a standalone transaction-stats-rollup job (#150, #151).
+   *
+   * Used by:
+   *   - Backfill: populate rollup tables for existing completed runs.
+   *   - `updateAnalysisStartOffset`: recompute `ramp_up_excluded=true` rows
+   *     after the user edits ramp-up on a completed run.
+   *
+   * The rollup also runs as part of the main `analyze-test` pipeline at
+   * finalization — this method is only for out-of-band invocations.
+   */
+  async enqueueTransactionStatsRollup(testRunId: string): Promise<string> {
+    try {
+      this.checkRedisAvailability();
+      this.logger.log(`Enqueuing transaction-stats-rollup for test run: ${testRunId}`);
+
+      const job = await this.analysisQueue!.add(
+        'transaction-stats-rollup',
+        { testRunId, initiatedBy: 'api', timestamp: new Date().toISOString() },
+        {
+          jobId: `rollup-${testRunId}-${Date.now()}`,
+          attempts: 3,
+          backoff: { type: 'exponential', delay: 5000 },
+          removeOnComplete: 50,
+          removeOnFail: 15,
+        },
+      );
+
+      this.logger.log(`Rollup job created with ID: ${job.id}`);
+      return job.id!;
+    } catch (error) {
+      const errorMessage = error && typeof error === 'object' && 'message' in error
+        ? (error as Error).message : 'Unknown error';
+      this.logger.error(`Failed to enqueue rollup for ${testRunId}: ${errorMessage}`);
+      throw error;
+    }
+  }
+
+  /**
    * Generic method to add a job to the batch queue
    * Used for custom job types like 're-evaluate-adapt-conclusion'
    */
