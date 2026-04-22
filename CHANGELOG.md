@@ -4,6 +4,11 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
+## [0.2.41.1] - 2026-04-22
+
+### Fixed
+- JTL upload (and every other `INSERT … ON CONFLICT (test_run_id, key, tags_hash(tags))` upsert in `TestRunsConfigService`) no longer fails with PostgreSQL SQLSTATE 42P10 ("there is no unique or exclusion constraint matching the ON CONFLICT specification"). New migration `1776900000000-RestoreTestRunConfigsTagsHashUniqueIndex` restores the functional unique index on `test_run_configs (test_run_id, key, tags_hash(tags))` that `AddWorkloadToEvents1776148518354.up()` dropped without recreating — TypeORM's auto-generator can't represent expression-based indexes, so it silently removed it. Same migration also restores the companion `idx_dynatrace_entity_mappings_unique` on `(system_under_test_id, COALESCE(test_environment,''), COALESCE(workload,''), entity_id)` — no live `ON CONFLICT` depends on it today, but losing it removed the data-integrity guarantee against duplicate dynatrace entity mappings per SUT/env/workload. Both blocks are idempotent (`CREATE OR REPLACE` / `IF NOT EXISTS`); the dynatrace block fails loudly with the offending duplicate count if any exist. Closes the audit hole left by `AddMissingUniqueConstraints` (#125), `AddDsUniqueIndexesForUpserts` (#132), and `RequireNonNullSourceIdOnCollectionStatus` — those caught the plain-column uniques the same auto-gen pattern dropped; this one catches the two functional indexes.
+
 ## [0.2.41.0] - 2026-04-20
 
 ### Added
