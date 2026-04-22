@@ -61,7 +61,6 @@ function generatePlotProps(
 
   // Unit conversion logic from SLOChart
   const panelYAxesFormat = selectedMetric?.yAxesFormat;
-  let _adjustedYAxesFormat = panelYAxesFormat;
   let yAxisLabel = 'Value';
   let conversionFactor = 1;
 
@@ -73,13 +72,11 @@ function generatePlotProps(
   // If unit is 'seconds' and all data points are under 1, convert to 'ms'
   else if (panelYAxesFormat === 's' && globalMaxDataPoint && globalMaxDataPoint < 1) {
     conversionFactor = 1000;
-    adjustedYAxesFormat = 'ms';
     yAxisLabel = 'ms';
   }
   // If unit is 'ms' and all data points are over 1000, convert to 'sec'
   else if (panelYAxesFormat === 'ms' && globalMinDataPoint && globalMinDataPoint > 1000) {
     conversionFactor = 1 / 1000;
-    adjustedYAxesFormat = 's';
     yAxisLabel = 's';
   } else if (panelYAxesFormat) {
     yAxisLabel = panelYAxesFormat;

@@ -4,6 +4,11 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
+## [0.2.41.2] - 2026-04-22
+
+### Fixed
+- Anomaly-detection trends plots and compare-runs charts no longer throw `ReferenceError: adjustedYAxesFormat is not defined` when the plotted unit triggers automatic conversion (seconds with all values under 1, or milliseconds with all values over 1000). Regression from the PR #130 lint cleanup, which prefixed the `adjustedYAxesFormat` `let` declaration with `_` but left the reassignments unprefixed — ReferenceError in strict mode. Variable was dead code (never read anywhere), so removed entirely in `trends-plot-utils.ts` and `ComparisonPlot.tsx` rather than renamed back.
+
 ## [0.2.41.1] - 2026-04-22
 
 ### Fixed

@@ -41,7 +41,6 @@ export function createTrendsPlot(
 
   // Unit conversion logic from SLO graph
   let conversionFactor = 1;
-  let _adjustedYAxesFormat = unit || '';
   let yAxisLabel = 'Value';
   let unitSuffix = '';
 
@@ -54,14 +53,12 @@ export function createTrendsPlot(
   // If unit is 'seconds' and all data points are under 1, convert to 'ms'
   else if (unit === 's' && globalMaxDataPoint && globalMaxDataPoint < 1) {
     conversionFactor = 1000;
-    adjustedYAxesFormat = 'ms';
     yAxisLabel = 'Time (ms)';
     unitSuffix = ' ms';
   }
   // If unit is 'ms' and all data points are over 1000, convert to 'sec'
   else if (unit === 'ms' && globalMinDataPoint && globalMinDataPoint > 1000) {
     conversionFactor = 1/1000;
-    adjustedYAxesFormat = 's';
     yAxisLabel = 'Time (s)';
     unitSuffix = ' s';
   } else if (unit === 's') {
