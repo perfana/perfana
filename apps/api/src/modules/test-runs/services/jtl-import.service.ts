@@ -155,8 +155,6 @@ export class JtlImportService {
       await this.insertUrlPatterns(
         options.systemUnderTest,
         options.testEnvironment,
-        options.organizationId,
-        options.userId,
         urlsWithData,
       );
     }
@@ -464,8 +462,6 @@ export class JtlImportService {
   private async insertUrlPatterns(
     systemUnderTest: string,
     testEnvironment: string,
-    organizationId: string,
-    userId: string,
     urlsWithTime: Array<{ url: string; time: Date }>,
   ): Promise<void> {
     // Deduplicate by url_hash, keeping the earliest time and first URL as example
@@ -494,7 +490,7 @@ export class JtlImportService {
 
       for (const [hash, { normalized, example, firstSeen }] of batch) {
         values.push(
-          `($${paramIdx}, $${paramIdx + 1}, $${paramIdx + 2}, $${paramIdx + 3}, $${paramIdx + 4}, $${paramIdx + 5}, $${paramIdx + 6}, $${paramIdx + 7}, $${paramIdx + 8})`,
+          `($${paramIdx}, $${paramIdx + 1}, $${paramIdx + 2}, $${paramIdx + 3}, $${paramIdx + 4}, $${paramIdx + 5})`,
         );
         params.push(
           hash,              // url_hash
@@ -503,16 +499,13 @@ export class JtlImportService {
           normalized,        // normalized_url
           example,           // original_example
           firstSeen,         // first_seen
-          organizationId,    // organization_id
-          userId,            // created_by
-          userId,            // updated_by
         );
-        paramIdx += 9;
+        paramIdx += 6;
       }
 
       await this.dataSource.query(
         `INSERT INTO url_patterns (url_hash, system_under_test, test_environment,
-          normalized_url, original_example, first_seen, organization_id, created_by, updated_by)
+          normalized_url, original_example, first_seen)
          VALUES ${values.join(', ')}
          ON CONFLICT (url_hash, system_under_test, test_environment) DO NOTHING`,
         params,

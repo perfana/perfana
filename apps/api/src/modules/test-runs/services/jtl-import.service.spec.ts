@@ -706,8 +706,8 @@ describe('JtlImportService', () => {
 
       const insertCalls = (dataSource.query as jest.Mock).mock.calls;
       const [, params] = insertCalls.find((c: [string, ...unknown[]]) => c[0].includes('INSERT INTO url_patterns'));
-      // Only 1 deduplicated pattern → 9 params per row × 1 = 9
-      expect(params).toHaveLength(9);
+      // Only 1 deduplicated pattern → 6 params per row × 1 = 6
+      expect(params).toHaveLength(6);
     });
 
     it('should not deduplicate URLs with distinct normalized forms', async () => {
@@ -722,8 +722,8 @@ describe('JtlImportService', () => {
 
       const insertCalls = (dataSource.query as jest.Mock).mock.calls;
       const [, params] = insertCalls.find((c: [string, ...unknown[]]) => c[0].includes('INSERT INTO url_patterns'));
-      // 2 distinct patterns → 9 params per row × 2 = 18
-      expect(params).toHaveLength(18);
+      // 2 distinct patterns → 6 params per row × 2 = 12
+      expect(params).toHaveLength(12);
     });
 
     it('should replace numeric path segments with {id}', async () => {
@@ -1049,7 +1049,7 @@ describe('JtlImportService', () => {
       const insertCalls = (dataSource.query as jest.Mock).mock.calls;
       const [, params] = insertCalls.find((c: [string, ...unknown[]]) => c[0].includes('INSERT INTO url_patterns'));
       // Both normalize to http://example.com/api/users/{id} → deduplicated to 1 pattern
-      expect(params).toHaveLength(9);
+      expect(params).toHaveLength(6);
     });
   });
 });
