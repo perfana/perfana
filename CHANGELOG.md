@@ -4,6 +4,12 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
+## [0.2.43.0] - 2026-04-23
+
+### Fixed
+- Creating an API key with a description that already exists no longer surfaces as an opaque 500 from the GlobalExceptionFilter (`QueryFailedError: api_keys_description_key`). New migration `1777100000000-ApiKeyDescriptionUniquePerOrg` replaces the global `UNIQUE(description)` constraint on `api_keys` with a composite `UNIQUE(organization_id, description)` so common names like `CI`, `Jenkins`, or `Grafana sync` can be reused across organizations. `ApiKeysService.createApiKey` now pre-checks for an existing key in the target organization and throws `ConflictException` (HTTP 409) with the message `An API key with description "X" already exists in this organization.`; the rare concurrent-create race that still hits the unique index is translated to the same 409 from the catch block, and `isUniqueDescriptionViolation` checks both the top-level and `driverError`-wrapped pg fields so the translation never falls through to a 500 on alternative TypeORM driver shapes. Frontend `useApiKeys` routes the 409 to the description field (`form.setError('description', ...)`) instead of the generic root alert, so the user sees exactly which field to fix. Closes #117.
+- `ApiKeysService.validateApiKey` no longer rejects legitimate API keys when two organizations share a description. The previous flow cached keys by description alone and the DB fallback used `.find()` to pick the first matching row — both assumed globally-unique descriptions, which the per-org migration above invalidates. The lookup now treats the cached key as a hint (bcrypt-verified, with fall-through to DB on mismatch), and the DB fallback scans every same-description candidate with bcrypt, skipping expired rows. Without this, the per-org uniqueness change would have caused intermittent 401s on validate calls. The DTO `organizationId` field is also now `@IsUUID()` instead of `@IsString()` so non-UUID input is rejected at the validation layer rather than producing a confusing 500 from the pg type cast. Three new regression tests cover the cross-org collision and the `driverError` race translation; two pre-existing validateApiKey tests were updated to mock the DB fallback path that the new code now reaches.
+
 ## [0.2.42.0] - 2026-04-23
 
 ### Added

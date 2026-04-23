@@ -13,6 +13,7 @@ import {
   createApiKey,
   deleteApiKey,
   validateApiKey,
+  ApiKeyRequestError,
   type ApiKey,
   type CreateApiKeyRequest,
   type CreateApiKeyResponse,
@@ -203,6 +204,32 @@ describe('API Keys Client', () => {
 
       // Act & Assert
       await expect(createApiKey(requestData)).rejects.toThrow('Failed to create API key');
+    });
+
+    it('should throw ApiKeyRequestError with status 409 on duplicate description', async () => {
+      // Arrange — issue #117: backend now returns 409 when the same
+      // description is reused within the same organization.
+      const requestData: CreateApiKeyRequest = {
+        description: 'CI',
+        ttl: '30d',
+      };
+
+      mockAuthenticatedFetch.mockResolvedValue({
+        ok: false,
+        status: 409,
+        json: async () => ({
+          message: 'An API key with description "CI" already exists in this organization.',
+        }),
+      } as Response);
+
+      // Act & Assert
+      await expect(createApiKey(requestData)).rejects.toBeInstanceOf(
+        ApiKeyRequestError,
+      );
+      await expect(createApiKey(requestData)).rejects.toMatchObject({
+        status: 409,
+        message: expect.stringMatching(/already exists in this organization/),
+      });
     });
 
     it('should handle unauthorized errors (401)', async () => {

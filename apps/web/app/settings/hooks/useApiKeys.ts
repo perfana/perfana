@@ -8,6 +8,7 @@ import {
   createApiKey,
   deleteApiKey,
   ApiKey,
+  ApiKeyRequestError,
 } from '@/lib/api-keys';
 import {
   createApiKeySchema,
@@ -83,12 +84,17 @@ export function useApiKeys({ onSnackbar }: UseApiKeysProps) {
         severity: 'success',
       });
     } catch (err) {
-      form.setError('root', {
-        message:
-          err && typeof err === 'object' && 'message' in err
-            ? (err as Error).message
-            : 'Failed to create API key',
-      });
+      const message =
+        err && typeof err === 'object' && 'message' in err
+          ? (err as Error).message
+          : 'Failed to create API key';
+      // Surface duplicate-description conflicts inline on the description
+      // field so the user sees exactly which field to fix (issue #117).
+      if (err instanceof ApiKeyRequestError && err.status === 409) {
+        form.setError('description', { message });
+      } else {
+        form.setError('root', { message });
+      }
     }
   };
 

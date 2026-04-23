@@ -20,6 +20,7 @@ import {
   ValidationException,
   DatabaseException,
 } from '../../common/exceptions/business.exception';
+import { ConflictException } from '@nestjs/common';
 import * as bcrypt from 'bcryptjs';
 import { createAuthorizationServiceMock } from '../../../test/mocks/authorization-service.mock';
 import { AuthorizationService } from '../../common/services/authorization.service';
@@ -57,6 +58,7 @@ describe('ApiKeysService', () => {
             delete: jest.fn(),
             updateLastUsed: jest.fn(),
             searchByDescription: jest.fn(),
+            findByOrganizationAndDescription: jest.fn().mockResolvedValue(null),
             findRecentlyCreated: jest.fn(),
           },
         },
@@ -358,6 +360,55 @@ describe('ApiKeysService', () => {
 
       // Act & Assert
       await expect(service.createApiKey(createDto)).rejects.toThrow(DatabaseException);
+    });
+
+    it('should throw ConflictException when description already exists in the same organization', async () => {
+      // Arrange — issue #117: a duplicate description in the same org used to
+      // surface as a 500 from the global UNIQUE(description) constraint.
+      const createDto = { description: 'CI', ttl: '30d' };
+      const existing = createMockApiKey({ description: 'CI' });
+      repository.findByOrganizationAndDescription.mockResolvedValue(existing);
+
+      // Act & Assert
+      await expect(service.createApiKey(createDto)).rejects.toThrow(ConflictException);
+      await expect(service.createApiKey(createDto)).rejects.toThrow(
+        /already exists in this organization/,
+      );
+      expect(repository.create).not.toHaveBeenCalled();
+    });
+
+    it('should translate a 23505 unique-violation race into a ConflictException', async () => {
+      // Arrange — pre-check passes (returns null), but a concurrent request
+      // wins the INSERT race and the DB raises the unique-violation.
+      const createDto = { description: 'CI', ttl: '30d' };
+      repository.findByOrganizationAndDescription.mockResolvedValue(null);
+      const dbError = Object.assign(new Error('duplicate key'), {
+        code: '23505',
+        constraint: 'api_keys_organization_id_description_key',
+      });
+      repository.create.mockRejectedValue(dbError);
+
+      // Act & Assert
+      await expect(service.createApiKey(createDto)).rejects.toThrow(ConflictException);
+    });
+
+    it('should translate a 23505 race even when wrapped as TypeORM driverError', async () => {
+      // Arrange — TypeORM's QueryFailedError can hoist the pg fields, but on
+      // some driver/version combos `code`/`constraint` only live on
+      // `driverError`. The translator must check both shapes so it never
+      // silently falls through to a 500.
+      const createDto = { description: 'CI', ttl: '30d' };
+      repository.findByOrganizationAndDescription.mockResolvedValue(null);
+      const wrapped = Object.assign(new Error('QueryFailedError: duplicate key'), {
+        driverError: {
+          code: '23505',
+          constraint: 'api_keys_organization_id_description_key',
+        },
+      });
+      repository.create.mockRejectedValue(wrapped);
+
+      // Act & Assert
+      await expect(service.createApiKey(createDto)).rejects.toThrow(ConflictException);
     });
   });
 
@@ -822,6 +873,10 @@ describe('ApiKeysService', () => {
 
       cacheService.getCachedValidationResult.mockResolvedValue(null);
       cacheService.getCachedKey.mockResolvedValue(mockApiKey);
+      // After issue #117 fix, an expired cached key triggers a DB fallback
+      // scan. The DB returns the same expired row, which is also skipped, so
+      // no candidate matches and the negative result is cached.
+      repository.searchByDescription.mockResolvedValue([mockApiKey]);
       cacheService.cacheValidationResult.mockResolvedValue(undefined);
 
       // Act
@@ -1032,6 +1087,10 @@ describe('ApiKeysService', () => {
 
       cacheService.getCachedValidationResult.mockResolvedValue(null);
       cacheService.getCachedKey.mockResolvedValue(mockApiKey);
+      // After issue #117 fix, a cache hit with bcrypt mismatch falls through
+      // to a DB scan over every same-description candidate. The DB returns
+      // the same row, bcrypt fails again, no candidate matches → cache false.
+      repository.searchByDescription.mockResolvedValue([mockApiKey]);
       (bcrypt.compare as jest.Mock).mockResolvedValue(false);
       cacheService.cacheValidationResult.mockResolvedValue(undefined);
 
@@ -1185,6 +1244,81 @@ describe('ApiKeysService', () => {
       // Assert
       expect(result).toBe(mockApiKey1);
       expect(repository.searchByDescription).toHaveBeenCalledWith('Production Key');
+    });
+
+    it('should pick the right key when two organizations share a description (issue #117 regression)', async () => {
+      // Arrange — descriptions are now unique per ORG, not globally. Two orgs
+      // can both have an API key called "CI". validateApiKey decodes only the
+      // description from the token, so it must scan ALL candidates and bcrypt-
+      // compare each, not just take the first row from the DB.
+      const token = Buffer.from('CI Pipeline#uuid-orgB').toString('base64');
+      const orgAKey = createMockApiKey({
+        id: 'orgA-key',
+        description: 'CI Pipeline',
+        apiKey: 'hash-for-orgA-token',
+        organization_id: 'org-A',
+      } as Partial<ApiKey>);
+      const orgBKey = createMockApiKey({
+        id: 'orgB-key',
+        description: 'CI Pipeline',
+        apiKey: 'hash-for-orgB-token',
+        organization_id: 'org-B',
+      } as Partial<ApiKey>);
+
+      cacheService.getCachedValidationResult.mockResolvedValue(null);
+      cacheService.getCachedKey.mockResolvedValue(null);
+      // DB returns Org A's key first — would be silently picked by the old
+      // .find() implementation, causing a bcrypt mismatch and false rejection.
+      repository.searchByDescription.mockResolvedValue([orgAKey, orgBKey]);
+      // bcrypt only matches against Org B's hash
+      (bcrypt.compare as jest.Mock).mockImplementation(async (_token, hash) =>
+        hash === 'hash-for-orgB-token',
+      );
+      repository.updateLastUsed.mockResolvedValue(undefined);
+      cacheService.cacheKey.mockResolvedValue(undefined);
+      cacheService.cacheValidationResult.mockResolvedValue(undefined);
+
+      // Act
+      const result = await service.validateApiKey(token);
+
+      // Assert — Org B's key is returned even though Org A's was returned first
+      expect(result).toBe(orgBKey);
+      expect(cacheService.cacheKey).toHaveBeenCalledWith(orgBKey);
+    });
+
+    it('should fall through to DB scan when cached key belongs to a different org with the same description', async () => {
+      // Arrange — Org A's "CI" key is cached. A user from Org B presents their
+      // (different) "CI" token. The cache hit must NOT reject the request: the
+      // service should fall through to a DB scan and find Org B's key.
+      const token = Buffer.from('CI Pipeline#uuid-orgB').toString('base64');
+      const orgAKey = createMockApiKey({
+        id: 'orgA-key',
+        description: 'CI Pipeline',
+        apiKey: 'hash-for-orgA-token',
+        organization_id: 'org-A',
+      } as Partial<ApiKey>);
+      const orgBKey = createMockApiKey({
+        id: 'orgB-key',
+        description: 'CI Pipeline',
+        apiKey: 'hash-for-orgB-token',
+        organization_id: 'org-B',
+      } as Partial<ApiKey>);
+
+      cacheService.getCachedValidationResult.mockResolvedValue(null);
+      cacheService.getCachedKey.mockResolvedValue(orgAKey); // wrong org cached
+      repository.searchByDescription.mockResolvedValue([orgAKey, orgBKey]);
+      (bcrypt.compare as jest.Mock).mockImplementation(async (_token, hash) =>
+        hash === 'hash-for-orgB-token',
+      );
+      repository.updateLastUsed.mockResolvedValue(undefined);
+      cacheService.cacheKey.mockResolvedValue(undefined);
+      cacheService.cacheValidationResult.mockResolvedValue(undefined);
+
+      // Act
+      const result = await service.validateApiKey(token);
+
+      // Assert — Org B's key is found via DB fallback even though Org A's was cached
+      expect(result).toBe(orgBKey);
     });
 
     it('should handle empty result from searchByDescription', async () => {

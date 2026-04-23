@@ -19,6 +19,15 @@ export interface CreateApiKeyResponse {
   token: string;
 }
 
+export class ApiKeyRequestError extends Error {
+  readonly status: number;
+  constructor(message: string, status: number) {
+    super(message);
+    this.name = 'ApiKeyRequestError';
+    this.status = status;
+  }
+}
+
 export async function fetchApiKeys(organizationId?: string): Promise<ApiKey[]> {
   const url = organizationId
     ? `/api-keys?organizationId=${encodeURIComponent(organizationId)}`
@@ -44,8 +53,11 @@ export async function createApiKey(data: CreateApiKeyRequest): Promise<CreateApi
   });
 
   if (!response.ok) {
-    const error = await response.json();
-    throw new Error(error.message || 'Failed to create API key');
+    const error = await response.json().catch(() => ({}));
+    throw new ApiKeyRequestError(
+      error.message || 'Failed to create API key',
+      response.status,
+    );
   }
 
   return response.json();
