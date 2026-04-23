@@ -36,6 +36,7 @@ export class ApiKeysController {
   @ApiResponse({ status: 201, description: 'API key created successfully', type: CreateApiKeyResponseDto })
   @ApiResponse({ status: 400, description: 'Invalid input data' })
   @ApiResponse({ status: 403, description: 'Organization admin privileges required' })
+  @ApiResponse({ status: 409, description: 'An API key with this description already exists in the organization' })
   async create(@Body() createDto: CreateApiKeyDto, @UserCtx() ctx: UserContext) {
     // Use organizationId from request body, or fall back to user's first organization
     let organizationId = createDto.organizationId || ctx.organizationId;
