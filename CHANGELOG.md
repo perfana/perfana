@@ -4,6 +4,11 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
+## [0.2.42.0] - 2026-04-23
+
+### Added
+- Composite `(system_under_test, test_environment, scenario_name, time DESC)` indexes on the `requests_error`, `requests_raw`, and `transactions` hypertables (migration `1777000000000-AddCompositeSutEnvScenIndexes`). Grafana panels filter these tables by `system_under_test`, `test_environment`, and `scenario_name` over a bounded time window; without a matching composite, the planner fell back to a parallel index-scan on `time` followed by a row-by-row filter — measured at ~57 s to return zero rows against a 30-minute window of a ~10 M-row weekly chunk when the scenario didn't match. The indexes were applied manually on `performance-praegus` on 2026-04-19 to relieve live pain; this migration formalizes them so fresh installs and other environments get them automatically. Idempotent (`CREATE INDEX IF NOT EXISTS`); storage footprint is ~300 MB per hypertable at current production size. The original plan called for `WITH (timescaledb.transaction_per_chunk)` to keep writes flowing on other chunks during the build, but TimescaleDB rejects that option inside a transaction block and TypeORM wraps all migrations in one, so it's documented as a manual step for large pre-existing environments while production remains unaffected (indexes already in place). Closes #137.
+
 ## [0.2.41.2] - 2026-04-22
 
 ### Fixed
