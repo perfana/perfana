@@ -235,16 +235,25 @@ export class ApiKeysService {
 
   /**
    * Pg unique_violation (SQLSTATE 23505) on the composite description index.
+   * TypeORM normally hoists pg's `code`/`constraint` onto the QueryFailedError
+   * itself, but some driver/version combos surface them only on the wrapped
+   * `driverError`. Check both shapes so the race-translation never silently
+   * falls through to a 500.
    */
   private isUniqueDescriptionViolation(error: unknown): boolean {
     if (!error || typeof error !== 'object') return false;
-    const code = (error as { code?: string }).code;
-    const constraint = (error as { constraint?: string }).constraint;
+    const top = error as { code?: string; constraint?: string; driverError?: { code?: string; constraint?: string } };
+    const code = top.code ?? top.driverError?.code;
+    const constraint = top.constraint ?? top.driverError?.constraint;
     return (
       code === '23505' &&
       (constraint === 'api_keys_organization_id_description_key' ||
         constraint === 'api_keys_description_key')
     );
+  }
+
+  private isExpired(validUntil: Date | null | undefined): boolean {
+    return !!validUntil && new Date(validUntil) <= new Date();
   }
 
   /**
@@ -337,53 +346,57 @@ export class ApiKeysService {
         return null;
       }
 
-      // Step 2: Check API key cache by description
-      let apiKeyDoc = await this.apiKeyCacheService.getCachedKey(description);
+      // Step 2: Check API key cache by description.
+      // NB: cache is keyed by description only, but descriptions are now unique
+      // PER ORGANIZATION (not globally — see migration 1777100000000). When two
+      // orgs share a description, the cache will hold whichever key got cached
+      // first; that key's bcrypt hash will not match the other org's token. We
+      // treat the cached key as a hint, not a verdict: if it doesn't match, we
+      // fall through to a full DB scan over every candidate with that
+      // description and bcrypt-compare each one.
+      const cachedCandidate = await this.apiKeyCacheService.getCachedKey(description);
+      let apiKeyDoc: ApiKey | null = null;
 
-      // Step 3: If cache miss, query database with targeted query (not all keys!)
-      if (!apiKeyDoc) {
-        apiKeyDoc = await this.apiKeyRepository.searchByDescription(description)
-          .then(keys => keys.find(key => key.description === description) || null);
-
-        if (!apiKeyDoc) {
-          // Don't log as error - this is expected when JWT tokens are passed to this method
-          // Cache the negative result to avoid repeated lookups
-          await this.apiKeyCacheService.cacheValidationResult(token, false, 300); // Cache for 5 minutes
-          return null;
-        }
-
-        // Cache the API key for future requests
-        await this.apiKeyCacheService.cacheKey(apiKeyDoc);
+      if (cachedCandidate && this.isExpired(cachedCandidate.validUntil)) {
+        // Cached key is expired — ignore it and let DB scan find a fresh one.
+      } else if (cachedCandidate && (await bcrypt.compare(token, cachedCandidate.apiKey))) {
+        apiKeyDoc = cachedCandidate;
       }
 
-      // Step 4: Check if key is expired
-      if (apiKeyDoc.validUntil && new Date(apiKeyDoc.validUntil) <= new Date()) {
-        this.logger.error(`API key expired for description: ${description}`);
-        // Cache the negative result
+      // Step 3: If cached key did not match, scan the DB for every key with
+      // this description and bcrypt-compare each. Picking only the first row
+      // (the pre-RBAC behaviour) is now incorrect because descriptions can
+      // legitimately collide across organizations.
+      if (!apiKeyDoc) {
+        const candidates = (await this.apiKeyRepository.searchByDescription(description))
+          .filter(key => key.description === description);
+
+        for (const candidate of candidates) {
+          if (this.isExpired(candidate.validUntil)) continue;
+          if (await bcrypt.compare(token, candidate.apiKey)) {
+            apiKeyDoc = candidate;
+            // Cache the matching key. If a later validation for a different
+            // org's same-description key wins the cache slot, this one will
+            // re-resolve via the DB scan above — slower but correct.
+            await this.apiKeyCacheService.cacheKey(apiKeyDoc);
+            break;
+          }
+        }
+      }
+
+      if (!apiKeyDoc) {
+        // No candidate matched — likely an expired key or a JWT misrouted here.
         await this.apiKeyCacheService.cacheValidationResult(token, false, 300);
         return null;
       }
 
-      // Step 5: Compare hashed token (expensive bcrypt operation)
-      const isValid = await bcrypt.compare(token, apiKeyDoc.apiKey);
-
-      // Step 6: Cache validation result
-      if (isValid) {
-        // Cache positive validation result
-        await this.apiKeyCacheService.cacheValidationResult(token, true);
-
-        // Update last_used timestamp (non-blocking)
-        this.updateLastUsed(apiKeyDoc.id).catch(err => {
-          this.logger.warn(`Failed to update last_used: ${err && typeof err === 'object' && 'message' in err ? (err as Error).message : 'Unknown error'}`);
-        });
-
-        return apiKeyDoc;
-      } else {
-        // Cache negative validation result
-        await this.apiKeyCacheService.cacheValidationResult(token, false, 300);
-      }
-
-      return null;
+      // bcrypt already passed in either the cache or DB-scan branch above.
+      // Cache the positive result and fire-and-forget the last-used update.
+      await this.apiKeyCacheService.cacheValidationResult(token, true);
+      this.updateLastUsed(apiKeyDoc.id).catch(err => {
+        this.logger.warn(`Failed to update last_used: ${err && typeof err === 'object' && 'message' in err ? (err as Error).message : 'Unknown error'}`);
+      });
+      return apiKeyDoc;
     } catch (error) {
       this.logger.error('Error validating API key:', error);
       return null;

@@ -1,4 +1,4 @@
-import { IsNotEmpty, IsString, Matches, IsArray, IsOptional, ArrayMinSize } from 'class-validator';
+import { IsNotEmpty, IsString, Matches, IsArray, IsOptional, ArrayMinSize, IsUUID } from 'class-validator';
 import { ApiProperty } from '@nestjs/swagger';
 
 export class CreateApiKeyDto {
@@ -39,7 +39,7 @@ export class CreateApiKeyDto {
     required: false,
   })
   @IsOptional()
-  @IsString()
+  @IsUUID()
   organizationId?: string;
 }
 

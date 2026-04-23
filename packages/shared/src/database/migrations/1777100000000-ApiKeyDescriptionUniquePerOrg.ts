@@ -58,7 +58,10 @@ export class ApiKeyDescriptionUniquePerOrg1777100000000
     if (globalDupCheck[0]?.dup_count > 0) {
       throw new Error(
         `Cannot restore api_keys_description_key: ${globalDupCheck[0].dup_count} ` +
-          `duplicate descriptions exist across organizations. Dedupe before reverting.`,
+          `duplicate descriptions exist across organizations. Restoring the global ` +
+          `unique constraint requires deleting one of each duplicate row, which would ` +
+          `revoke active API keys and break authentication for the affected orgs. ` +
+          `Resolve manually before reverting.`,
       );
     }
 
