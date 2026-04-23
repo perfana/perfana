@@ -147,6 +147,20 @@ export class ApiKeyRepository extends TypeOrmBaseRepository<ApiKey> {
   }
 
   /**
+   * Find an API key by exact description within an organization.
+   * Used to surface a clean ConflictException before hitting the
+   * (organization_id, description) unique index on INSERT.
+   */
+  async findByOrganizationAndDescription(
+    organizationId: string,
+    description: string,
+  ): Promise<ApiKey | null> {
+    return await this.repository.findOne({
+      where: { organization_id: organizationId, description },
+    });
+  }
+
+  /**
    * Search API keys by description
    */
   async searchByDescription(searchTerm: string): Promise<ApiKey[]> {

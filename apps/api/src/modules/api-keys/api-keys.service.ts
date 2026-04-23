@@ -1,4 +1,4 @@
-import { Injectable, Logger, ForbiddenException } from '@nestjs/common';
+import { Injectable, Logger, ForbiddenException, ConflictException } from '@nestjs/common';
 import { In } from 'typeorm';
 import { ResourceNotFoundException, ValidationException, DatabaseException } from '../../common/exceptions/business.exception';
 import * as bcrypt from 'bcryptjs';
@@ -164,6 +164,20 @@ export class ApiKeysService {
       // Check if user is org-admin in any organization
       await this.requireOrgAdmin(userId, roles);
 
+      // Pre-check for duplicate description within the same organization.
+      // The (organization_id, description) unique index is the source of
+      // truth, but checking here lets us return a friendly 409 instead of
+      // letting the DB raise QueryFailedError → 500.
+      const existing = await this.apiKeyRepository.findByOrganizationAndDescription(
+        organizationId,
+        createDto.description,
+      );
+      if (existing) {
+        throw new ConflictException(
+          `An API key with description "${createDto.description}" already exists in this organization.`,
+        );
+      }
+
       const uuid = uuidv4();
 
       // Create token in format: base64(description#uuid)
@@ -203,9 +217,34 @@ export class ApiKeysService {
 
       return { apiKey, token };
     } catch (error) {
+      // Don't log expected validation/conflict errors as service-level failures.
+      if (error instanceof ConflictException) {
+        throw error;
+      }
+      // Defense in depth for the rare race where two concurrent creates both
+      // pass the pre-check: translate the unique-index violation into 409.
+      if (this.isUniqueDescriptionViolation(error)) {
+        throw new ConflictException(
+          `An API key with description "${createDto.description}" already exists in this organization.`,
+        );
+      }
       this.logger.error('Failed to create API key:', error);
       throw error;
     }
+  }
+
+  /**
+   * Pg unique_violation (SQLSTATE 23505) on the composite description index.
+   */
+  private isUniqueDescriptionViolation(error: unknown): boolean {
+    if (!error || typeof error !== 'object') return false;
+    const code = (error as { code?: string }).code;
+    const constraint = (error as { constraint?: string }).constraint;
+    return (
+      code === '23505' &&
+      (constraint === 'api_keys_organization_id_description_key' ||
+        constraint === 'api_keys_description_key')
+    );
   }
 
   /**

@@ -20,6 +20,7 @@ import {
   ValidationException,
   DatabaseException,
 } from '../../common/exceptions/business.exception';
+import { ConflictException } from '@nestjs/common';
 import * as bcrypt from 'bcryptjs';
 import { createAuthorizationServiceMock } from '../../../test/mocks/authorization-service.mock';
 import { AuthorizationService } from '../../common/services/authorization.service';
@@ -57,6 +58,7 @@ describe('ApiKeysService', () => {
             delete: jest.fn(),
             updateLastUsed: jest.fn(),
             searchByDescription: jest.fn(),
+            findByOrganizationAndDescription: jest.fn().mockResolvedValue(null),
             findRecentlyCreated: jest.fn(),
           },
         },
@@ -358,6 +360,36 @@ describe('ApiKeysService', () => {
 
       // Act & Assert
       await expect(service.createApiKey(createDto)).rejects.toThrow(DatabaseException);
+    });
+
+    it('should throw ConflictException when description already exists in the same organization', async () => {
+      // Arrange — issue #117: a duplicate description in the same org used to
+      // surface as a 500 from the global UNIQUE(description) constraint.
+      const createDto = { description: 'CI', ttl: '30d' };
+      const existing = createMockApiKey({ description: 'CI' });
+      repository.findByOrganizationAndDescription.mockResolvedValue(existing);
+
+      // Act & Assert
+      await expect(service.createApiKey(createDto)).rejects.toThrow(ConflictException);
+      await expect(service.createApiKey(createDto)).rejects.toThrow(
+        /already exists in this organization/,
+      );
+      expect(repository.create).not.toHaveBeenCalled();
+    });
+
+    it('should translate a 23505 unique-violation race into a ConflictException', async () => {
+      // Arrange — pre-check passes (returns null), but a concurrent request
+      // wins the INSERT race and the DB raises the unique-violation.
+      const createDto = { description: 'CI', ttl: '30d' };
+      repository.findByOrganizationAndDescription.mockResolvedValue(null);
+      const dbError = Object.assign(new Error('duplicate key'), {
+        code: '23505',
+        constraint: 'api_keys_organization_id_description_key',
+      });
+      repository.create.mockRejectedValue(dbError);
+
+      // Act & Assert
+      await expect(service.createApiKey(createDto)).rejects.toThrow(ConflictException);
     });
   });
 
