@@ -238,21 +238,22 @@ export function useSystemData({
   // Handle workload selection
   const handleWorkloadChange = useCallback((workload: string) => {
     setSelectedWorkload(workload);
-
-    if (selectedEnvironment && workload && activeTab === 'slo' && onBenchmarksLoad) {
-      onBenchmarksLoad(systemId, selectedEnvironment, workload);
-    }
-  }, [systemId, selectedEnvironment, activeTab, onBenchmarksLoad]);
+  }, []);
 
   // Tab change handler
   const handleTabChange = useCallback((newValue: TabId) => {
     setActiveTab(newValue);
+  }, []);
 
-    // Load data for the selected tab
-    if (newValue === 'slo' && selectedEnvironment && selectedWorkload && systemId && onBenchmarksLoad) {
+  // Load SLO benchmarks whenever the SLO tab is active and scope is set.
+  // Reactive rather than imperative so URL-driven mount (?tab=slo) works the
+  // same as a tab click: the click and the URL both resolve to the same
+  // (activeTab, env, workload) triple that this effect watches.
+  useEffect(() => {
+    if (activeTab === 'slo' && systemId && selectedEnvironment && selectedWorkload && onBenchmarksLoad) {
       onBenchmarksLoad(systemId, selectedEnvironment, selectedWorkload);
     }
-  }, [systemId, selectedEnvironment, selectedWorkload, onBenchmarksLoad]);
+  }, [activeTab, systemId, selectedEnvironment, selectedWorkload, onBenchmarksLoad]);
 
   return {
     systemId,

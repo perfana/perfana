@@ -56,7 +56,7 @@ interface SLOListProps {
   setSloFilter: (filter: 'all' | 'failed') => void;
   setIsFilterManuallySet: (value: boolean) => void;
   setSearchText: (text: string) => void;
-  toggleTransactionExpanded: (transactionKey: string, transactionName: string) => Promise<void>;
+  toggleTransactionExpanded: (transactionKey: string, transactionName: string, excludeRampUp: boolean) => Promise<void>;
   handleOpenRequestActionMenu: (event: React.MouseEvent<HTMLElement>, transactionName: string, scenarioName: string | undefined, samplerName: string) => void;
   handleOpenApdexActionMenu: (event: React.MouseEvent<HTMLElement>, transactionName: string, scenarioName: string | undefined, threshold: number) => void;
   handleEditSlo: (checkResult: unknown) => Promise<void>;
