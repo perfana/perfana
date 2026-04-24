@@ -4,6 +4,11 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
+## [0.2.43.1] - 2026-04-24
+
+### Changed
+- Per-table autovacuum tuning for `url_patterns` (migration `1777200000000-TuneAutovacuumForUrlPatterns`). Sets `autovacuum_vacuum_scale_factor=0.05`, `autovacuum_analyze_scale_factor=0.05`, and `autovacuum_vacuum_cost_limit=1000` so the table is vacuumed/analyzed sooner on smaller batches and each batch drains faster. Under global defaults (cost limit 200), a `VACUUM ANALYZE url_patterns` (~2.9 GB on busy tenants) ran long enough to overlap with autovacuum on `requests_raw` chunks, saturating disk I/O and blocking foreground dashboard queries on `IO:DataFileRead`. Shrinking the contention window avoids the storm without touching global defaults or any other table. Closes #142.
+
 ## [0.2.43.0] - 2026-04-23
 
 ### Fixed
