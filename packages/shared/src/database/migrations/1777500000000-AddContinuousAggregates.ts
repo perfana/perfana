@@ -10,11 +10,8 @@ import { MigrationInterface, QueryRunner } from 'typeorm';
  *
  * Hierarchy: 5s rolls from the raw hypertable, 1m rolls from 5s, 5m rolls from
  * 1m. Associative aggregates (count, sum, avg-via-sum/count, min, max,
- * percentile_agg tdigest) make this safe.
- *
- * `transaction = false` because `CREATE MATERIALIZED VIEW … WITH
- * (timescaledb.continuous)` and `add_continuous_aggregate_policy` both reject
- * transaction context. TypeORM will not wrap `up` / `down` in BEGIN/COMMIT.
+ * percentile_agg tdigest) make this safe on TimescaleDB toolkit ≥ 1.15 via
+ * `rollup(tdigest)`.
  *
  * Related: issue #147. Overlaps with #139 (approx_percentile) and #150/#151
  * (per-test-run rollup table). This plan is dashboard-facing; #150/#151 is
@@ -22,10 +19,6 @@ import { MigrationInterface, QueryRunner } from 'typeorm';
  */
 export class AddContinuousAggregates1777500000000 implements MigrationInterface {
   name = 'AddContinuousAggregates1777500000000';
-
-  // Opt out of TypeORM's auto-transaction. Required because CAGG DDL and
-  // `add_continuous_aggregate_policy` cannot run inside a transaction block.
-  public transaction = false as const;
 
   public async up(_queryRunner: QueryRunner): Promise<void> {
     // Filled in by Tasks 2–6.
