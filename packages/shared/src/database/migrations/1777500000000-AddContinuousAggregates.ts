@@ -263,6 +263,28 @@ export class AddContinuousAggregates1777500000000 implements MigrationInterface 
       `);
       console.log(`  Refresh policy on ${p.view}: every ${p.schedule}, window ${p.start} → ${p.end}`);
     }
+
+    // --- retention policies --------------------------------------------------
+    // CAGGs hold data for 90 days. Intentionally longer than any retention that
+    // may later be added to the raw hypertables, so long-term trend panels
+    // survive raw-data pruning. Raw hypertables currently have no retention
+    // policy; if introduced later, re-evaluate CAGG retention.
+
+    const caggViews = [
+      'requests_raw_5s',   'requests_raw_1m',   'requests_raw_5m',
+      'transactions_5s',   'transactions_1m',   'transactions_5m',
+      'requests_error_5s', 'requests_error_1m', 'requests_error_5m',
+    ];
+
+    for (const view of caggViews) {
+      await queryRunner.query(`
+        SELECT add_retention_policy('${view}',
+          drop_after    => INTERVAL '90 days',
+          if_not_exists => TRUE
+        );
+      `);
+      console.log(`  Retention policy on ${view}: drop after 90 days`);
+    }
   }
 
   public async down(_queryRunner: QueryRunner): Promise<void> {
