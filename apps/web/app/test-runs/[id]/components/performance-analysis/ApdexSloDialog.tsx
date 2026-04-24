@@ -66,6 +66,7 @@ export default function ApdexSloDialog({
   const [loadingTestRun, setLoadingTestRun] = useState(false);
   const [existingSlo, setExistingSlo] = useState<ExistingSlo | null>(null);
   const [loadingSlo, setLoadingSlo] = useState(false);
+  const [sloCheckFailed, setSloCheckFailed] = useState(false);
 
   // Fetch test run details when dialog opens
   useEffect(() => {
@@ -79,6 +80,7 @@ export default function ApdexSloDialog({
       setExcludeRampUpTime(true);
       setTestRunDetails(null);
       setExistingSlo(null);
+      setSloCheckFailed(false);
 
       // Fetch test run details for SLO creation
       fetchTestRunDetails();
@@ -115,8 +117,12 @@ export default function ApdexSloDialog({
   const checkExistingSlo = async () => {
     if (!testRunDetails) return;
 
+    const sloCheckErrorMessage =
+      'Failed to check for an existing Apdex SLO. Please retry before saving to avoid creating a duplicate.';
+
     try {
       setLoadingSlo(true);
+      setSloCheckFailed(false);
       // Query benchmarks to find existing Apdex SLO for this configuration
       const params = new URLSearchParams({
         systemUnderTestId: testRunDetails.system_under_test_id,
@@ -126,29 +132,35 @@ export default function ApdexSloDialog({
       });
 
       const response = await authenticatedFetch(`/benchmarks?${params}`);
-      if (response.ok) {
-        const benchmarks = await response.json();
-        // Find workload-level SLO (no transaction_name)
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        const matchingSlo = benchmarks.find((b: any) => !b.transaction_name);
+      if (!response.ok) {
+        setError(sloCheckErrorMessage);
+        setSloCheckFailed(true);
+        return;
+      }
 
-        if (matchingSlo) {
-          setExistingSlo({
-            id: matchingSlo.id,
-            min_apdex_score: matchingSlo.min_apdex_score || 0.85,
-            include_failed_requests: matchingSlo.include_failed_requests || false,
-            exclude_ramp_up_time: matchingSlo.exclude_ramp_up_time !== false,
-            enabled: matchingSlo.enabled !== false,
-            apdex_threshold_ms: matchingSlo.apdex_threshold_ms,
-          });
-          setEnableSlo(matchingSlo.enabled !== false);
-          setMinApdexScore(matchingSlo.min_apdex_score || 0.85);
-          setIncludeFailedRequests(matchingSlo.include_failed_requests || false);
-          setExcludeRampUpTime(matchingSlo.exclude_ramp_up_time !== false);
-        }
+      const benchmarks = await response.json();
+      // Find workload-level SLO (no transaction_name)
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const matchingSlo = benchmarks.find((b: any) => !b.transaction_name);
+
+      if (matchingSlo) {
+        setExistingSlo({
+          id: matchingSlo.id,
+          min_apdex_score: matchingSlo.min_apdex_score || 0.85,
+          include_failed_requests: matchingSlo.include_failed_requests || false,
+          exclude_ramp_up_time: matchingSlo.exclude_ramp_up_time !== false,
+          enabled: matchingSlo.enabled !== false,
+          apdex_threshold_ms: matchingSlo.apdex_threshold_ms,
+        });
+        setEnableSlo(matchingSlo.enabled !== false);
+        setMinApdexScore(matchingSlo.min_apdex_score || 0.85);
+        setIncludeFailedRequests(matchingSlo.include_failed_requests || false);
+        setExcludeRampUpTime(matchingSlo.exclude_ramp_up_time !== false);
       }
     } catch (err) {
       console.error('Error checking existing SLO:', err);
+      setError(sloCheckErrorMessage);
+      setSloCheckFailed(true);
     } finally {
       setLoadingSlo(false);
     }
@@ -163,6 +175,15 @@ export default function ApdexSloDialog({
 
     if (!testRunDetails) {
       setError('Test run details not loaded');
+      return;
+    }
+
+    // Block save when the existence check failed — otherwise we could create a
+    // duplicate SLO record (issue #171 Bug B).
+    if (sloCheckFailed) {
+      setError(
+        'Cannot save: failed to check for an existing Apdex SLO. Please close and reopen the dialog.',
+      );
       return;
     }
 
@@ -439,7 +460,9 @@ export default function ApdexSloDialog({
         <Button
           onClick={handleSave}
           variant="contained"
-          disabled={loading || success || loadingTestRun || !testRunDetails}
+          disabled={
+            loading || success || loadingTestRun || !testRunDetails || sloCheckFailed
+          }
           startIcon={loading && <CircularProgress size={16} />}
         >
           {loading ? 'Saving...' : 'Save'}

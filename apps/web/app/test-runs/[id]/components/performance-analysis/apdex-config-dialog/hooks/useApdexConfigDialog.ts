@@ -34,6 +34,7 @@ export function useApdexConfigDialog({
   const [loadingTestRun, setLoadingTestRun] = useState(false);
   const [existingSlo, setExistingSlo] = useState<ExistingSlo | null>(null);
   const [loadingSlo, setLoadingSlo] = useState(false);
+  const [sloCheckFailed, setSloCheckFailed] = useState(false);
 
   const isTransactionLevel = !!transactionName;
 
@@ -60,8 +61,12 @@ export function useApdexConfigDialog({
   const checkExistingSlo = useCallback(async () => {
     if (!testRunDetails) return;
 
+    const sloCheckErrorMessage =
+      'Failed to check for an existing Apdex SLO. Please retry before saving to avoid creating a duplicate.';
+
     try {
       setLoadingSlo(true);
+      setSloCheckFailed(false);
       const params = new URLSearchParams({
         systemUnderTestId: testRunDetails.system_under_test_id,
         testEnvironment: testRunDetails.test_environment,
@@ -70,28 +75,33 @@ export function useApdexConfigDialog({
       });
 
       const response = await authenticatedFetch(`/benchmarks?${params}`);
-      if (response.ok) {
-        const benchmarks = await response.json();
-        const matchingSlo = benchmarks.find((b: unknown) =>
-          transactionName ? b.transaction_name === transactionName : !b.transaction_name
-        );
+      if (!response.ok) {
+        setError(sloCheckErrorMessage);
+        setSloCheckFailed(true);
+        return;
+      }
 
-        if (matchingSlo) {
-          setExistingSlo({
-            id: matchingSlo.id,
-            min_apdex_score: matchingSlo.min_apdex_score || 0.85,
-            include_failed_requests: matchingSlo.include_failed_requests || false,
-            exclude_ramp_up_time: matchingSlo.exclude_ramp_up_time !== false,
-            enabled: matchingSlo.enabled !== false,
-          });
-          setEnableSlo(matchingSlo.enabled !== false);
-          setMinApdexScore(matchingSlo.min_apdex_score || 0.85);
-          setIncludeFailedRequests(matchingSlo.include_failed_requests || false);
-          setExcludeRampUpTime(matchingSlo.exclude_ramp_up_time !== false);
-        }
+      const benchmarks = await response.json();
+      const matchingSlo = benchmarks.find((b: unknown) =>
+        transactionName ? b.transaction_name === transactionName : !b.transaction_name
+      );
+
+      if (matchingSlo) {
+        setExistingSlo({
+          id: matchingSlo.id,
+          min_apdex_score: matchingSlo.min_apdex_score || 0.85,
+          include_failed_requests: matchingSlo.include_failed_requests || false,
+          exclude_ramp_up_time: matchingSlo.exclude_ramp_up_time !== false,
+          enabled: matchingSlo.enabled !== false,
+        });
+        setEnableSlo(matchingSlo.enabled !== false);
+        setMinApdexScore(matchingSlo.min_apdex_score || 0.85);
+        setIncludeFailedRequests(matchingSlo.include_failed_requests || false);
+        setExcludeRampUpTime(matchingSlo.exclude_ramp_up_time !== false);
       }
     } catch (err) {
-      // Silently handle - SLO check is optional
+      setError(sloCheckErrorMessage);
+      setSloCheckFailed(true);
     } finally {
       setLoadingSlo(false);
     }
@@ -108,9 +118,13 @@ export function useApdexConfigDialog({
       setExcludeRampUpTime(true);
       setTestRunDetails(null);
       setExistingSlo(null);
+      setSloCheckFailed(false);
       fetchTestRunDetails();
     }
-  }, [open, currentThreshold, fetchTestRunDetails]);
+    // `testRunId` is listed explicitly (Bug A guard) so a URL-level testRunId
+    // swap while the dialog stays open never leaks the previous run's state,
+    // even if an upstream memoization breaks fetchTestRunDetails identity.
+  }, [open, currentThreshold, fetchTestRunDetails, testRunId]);
 
   useEffect(() => {
     if (testRunDetails && open) {
@@ -122,6 +136,15 @@ export function useApdexConfigDialog({
     const thresholdError = validateThreshold(threshold);
     if (thresholdError) {
       setError(thresholdError);
+      return;
+    }
+
+    // Block SLO save when the existence check failed — otherwise we could
+    // create a duplicate SLO record (issue #171 Bug B).
+    if (!isTransactionLevel && sloCheckFailed) {
+      setError(
+        'Cannot save: failed to check for an existing Apdex SLO. Please close and reopen the dialog.',
+      );
       return;
     }
 
@@ -168,7 +191,7 @@ export function useApdexConfigDialog({
     } finally {
       setLoading(false);
     }
-  }, [threshold, enableSlo, minApdexScore, includeFailedRequests, excludeRampUpTime, existingSlo, isTransactionLevel, testRunId, transactionName, testRunDetails, onSuccess, onClose]);
+  }, [threshold, enableSlo, minApdexScore, includeFailedRequests, excludeRampUpTime, existingSlo, isTransactionLevel, sloCheckFailed, testRunId, transactionName, testRunDetails, onSuccess, onClose]);
 
   const handleSloUpdate = async (thresholdValue: number) => {
     if (enableSlo) {
@@ -263,6 +286,7 @@ export function useApdexConfigDialog({
     loadingTestRun,
     existingSlo,
     loadingSlo,
+    sloCheckFailed,
     setThreshold,
     setEnableSlo,
     setMinApdexScore,

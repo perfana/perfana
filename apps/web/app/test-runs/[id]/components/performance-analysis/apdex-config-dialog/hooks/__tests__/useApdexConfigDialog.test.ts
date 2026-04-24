@@ -325,3 +325,170 @@ describe('useApdexConfigDialog - excludeRampUpTime', () => {
     });
   });
 });
+
+describe('useApdexConfigDialog - testRunId change while open (issue #171 Bug A)', () => {
+  beforeEach(() => {
+    jest.clearAllMocks();
+  });
+
+  it('re-fetches and resets state when testRunId changes while open=true', async () => {
+    const testRun1 = {
+      system_under_test_id: 'sut-1',
+      system_name: 'sut-1',
+      test_environment: 'staging',
+      workload: 'peak',
+    };
+    const testRun2 = {
+      system_under_test_id: 'sut-2',
+      system_name: 'sut-2',
+      test_environment: 'prod',
+      workload: 'baseline',
+    };
+
+    mockFetch.mockImplementation((url: string) => {
+      if (url === '/test-runs/run-1') return Promise.resolve(jsonResponse(testRun1));
+      if (url === '/test-runs/run-2') return Promise.resolve(jsonResponse(testRun2));
+      if (url.startsWith('/benchmarks?') && url.includes('sut-1')) {
+        return Promise.resolve(
+          jsonResponse([
+            {
+              id: 'slo-run-1',
+              min_apdex_score: 0.85,
+              include_failed_requests: false,
+              exclude_ramp_up_time: false,
+              enabled: true,
+            },
+          ]),
+        );
+      }
+      if (url.startsWith('/benchmarks?') && url.includes('sut-2')) {
+        return Promise.resolve(jsonResponse([]));
+      }
+      return Promise.resolve({
+        ok: false,
+        json: () => Promise.reject(new Error(`Unstubbed URL in test: ${url}`)),
+      } as unknown as Response);
+    });
+
+    const { result, rerender } = renderHook(
+      (props: typeof defaultProps) => useApdexConfigDialog(props),
+      { initialProps: defaultProps },
+    );
+
+    // Wait for run-1's existing SLO to load
+    await waitFor(() => expect(result.current.existingSlo).not.toBeNull());
+    expect(result.current.existingSlo?.id).toBe('slo-run-1');
+    expect(result.current.excludeRampUpTime).toBe(false);
+
+    // Swap to run-2 while open=true (URL-level navigation while dialog stays mounted)
+    rerender({ ...defaultProps, testRunId: 'run-2' });
+
+    // testRunDetails must point at run-2
+    await waitFor(() =>
+      expect(result.current.testRunDetails?.system_under_test_id).toBe('sut-2'),
+    );
+
+    // existingSlo and excludeRampUpTime must reset — no leak from run-1
+    await waitFor(() => expect(result.current.existingSlo).toBeNull());
+    expect(result.current.excludeRampUpTime).toBe(true);
+  });
+});
+
+describe('useApdexConfigDialog - checkExistingSlo error handling (issue #171 Bug B)', () => {
+  const testRunDetails = {
+    system_under_test_id: 'sut-1',
+    system_name: 'my-sut',
+    systems_under_test: { name: 'my-sut' },
+    test_environment: 'staging',
+    workload: 'peak',
+  };
+
+  beforeEach(() => {
+    jest.clearAllMocks();
+  });
+
+  it('surfaces an error when /benchmarks? returns ok=false', async () => {
+    mockFetch.mockImplementation((url: string) => {
+      if (url.startsWith('/test-runs/')) {
+        return Promise.resolve(jsonResponse(testRunDetails));
+      }
+      if (url.startsWith('/benchmarks?')) {
+        return Promise.resolve({
+          ok: false,
+          json: () => Promise.resolve({ message: 'Server error' }),
+        } as unknown as Response);
+      }
+      return Promise.resolve({
+        ok: false,
+        json: () => Promise.reject(new Error(`Unstubbed URL: ${url}`)),
+      } as unknown as Response);
+    });
+
+    const { result } = renderHook(() => useApdexConfigDialog(defaultProps));
+
+    await waitFor(() => expect(result.current.error).not.toBeNull());
+    expect(result.current.error).toMatch(/existing (apdex )?slo/i);
+    expect(result.current.loadingSlo).toBe(false);
+  });
+
+  it('surfaces an error when /benchmarks? rejects', async () => {
+    mockFetch.mockImplementation((url: string) => {
+      if (url.startsWith('/test-runs/')) {
+        return Promise.resolve(jsonResponse(testRunDetails));
+      }
+      if (url.startsWith('/benchmarks?')) {
+        return Promise.reject(new Error('Network failure'));
+      }
+      return Promise.resolve({
+        ok: false,
+        json: () => Promise.reject(new Error(`Unstubbed URL: ${url}`)),
+      } as unknown as Response);
+    });
+
+    const { result } = renderHook(() => useApdexConfigDialog(defaultProps));
+
+    await waitFor(() => expect(result.current.error).not.toBeNull());
+    expect(result.current.error).toMatch(/existing (apdex )?slo/i);
+  });
+
+  it('blocks save (no POST to /benchmarks/apdex) when the SLO check failed', async () => {
+    mockFetch.mockImplementation((url: string) => {
+      if (url.startsWith('/test-runs/')) {
+        return Promise.resolve(jsonResponse(testRunDetails));
+      }
+      if (url.startsWith('/benchmarks?')) {
+        return Promise.resolve({
+          ok: false,
+          json: () => Promise.resolve({}),
+        } as unknown as Response);
+      }
+      return Promise.resolve({
+        ok: false,
+        json: () => Promise.reject(new Error(`Unstubbed URL: ${url}`)),
+      } as unknown as Response);
+    });
+
+    const { result } = renderHook(() => useApdexConfigDialog(defaultProps));
+
+    await waitFor(() => expect(result.current.error).not.toBeNull());
+
+    // Subsequent calls (threshold PUT, apdex POST) would succeed if they were made
+    mockFetch.mockResolvedValue(jsonResponse({ ok: true }));
+
+    act(() => {
+      result.current.setEnableSlo(true);
+    });
+
+    await act(async () => {
+      await result.current.handleSave();
+    });
+
+    const apdexPost = mockFetch.mock.calls.find(
+      ([url, init]) =>
+        typeof url === 'string' &&
+        url === '/benchmarks/apdex' &&
+        (init as RequestInit | undefined)?.method === 'POST',
+    );
+    expect(apdexPost).toBeUndefined();
+  });
+});

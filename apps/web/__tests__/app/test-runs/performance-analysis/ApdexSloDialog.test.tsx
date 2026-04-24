@@ -175,6 +175,37 @@ describe('ApdexSloDialog - excludeRampUpTime toggle', () => {
     expect(body.apdexThresholdMs).toBe(500);
   });
 
+  it('surfaces an error when the existing SLO check fails (issue #171 Bug B)', async () => {
+    // /test-runs/ resolves, /benchmarks? errors out
+    mockFetch.mockImplementation((url: string) => {
+      if (url.startsWith('/test-runs/')) return Promise.resolve(jsonResponse(testRun));
+      if (url.startsWith('/benchmarks?')) {
+        return Promise.resolve({
+          ok: false,
+          json: () => Promise.resolve({ message: 'Server error' }),
+        } as unknown as Response);
+      }
+      return Promise.resolve({
+        ok: false,
+        json: () => Promise.reject(new Error(`Unstubbed URL in test: ${url}`)),
+      } as unknown as Response);
+    });
+
+    render(
+      <ApdexSloDialog
+        open
+        onClose={onClose}
+        testRunId="run-1"
+        currentThreshold={500}
+        onSuccess={onSuccess}
+      />,
+    );
+
+    await waitFor(() => {
+      expect(screen.getByText(/existing (apdex )?slo/i)).toBeInTheDocument();
+    });
+  });
+
   it('sends excludeRampUpTime in the PUT body when updating an existing SLO', async () => {
     routeFetch({
       '/test-runs/': testRun,
