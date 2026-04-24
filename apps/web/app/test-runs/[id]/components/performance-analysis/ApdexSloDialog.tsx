@@ -29,6 +29,7 @@ interface ExistingSlo {
   id: string;
   min_apdex_score: number;
   include_failed_requests: boolean;
+  exclude_ramp_up_time: boolean;
   enabled: boolean;
   apdex_threshold_ms?: number;
 }
@@ -60,6 +61,7 @@ export default function ApdexSloDialog({
   const [enableSlo, setEnableSlo] = useState(false);
   const [minApdexScore, setMinApdexScore] = useState<number>(0.85);
   const [includeFailedRequests, setIncludeFailedRequests] = useState(false);
+  const [excludeRampUpTime, setExcludeRampUpTime] = useState(true);
   const [testRunDetails, setTestRunDetails] = useState<TestRunDetails | null>(null);
   const [loadingTestRun, setLoadingTestRun] = useState(false);
   const [existingSlo, setExistingSlo] = useState<ExistingSlo | null>(null);
@@ -74,6 +76,7 @@ export default function ApdexSloDialog({
       setEnableSlo(false);
       setMinApdexScore(0.85);
       setIncludeFailedRequests(false);
+      setExcludeRampUpTime(true);
       setTestRunDetails(null);
       setExistingSlo(null);
 
@@ -134,12 +137,14 @@ export default function ApdexSloDialog({
             id: matchingSlo.id,
             min_apdex_score: matchingSlo.min_apdex_score || 0.85,
             include_failed_requests: matchingSlo.include_failed_requests || false,
+            exclude_ramp_up_time: matchingSlo.exclude_ramp_up_time !== false,
             enabled: matchingSlo.enabled !== false,
             apdex_threshold_ms: matchingSlo.apdex_threshold_ms,
           });
           setEnableSlo(matchingSlo.enabled !== false);
           setMinApdexScore(matchingSlo.min_apdex_score || 0.85);
           setIncludeFailedRequests(matchingSlo.include_failed_requests || false);
+          setExcludeRampUpTime(matchingSlo.exclude_ramp_up_time !== false);
         }
       }
     } catch (err) {
@@ -177,6 +182,7 @@ export default function ApdexSloDialog({
               minApdexScore: minApdexScore,
               apdexThresholdMs: currentThreshold,
               includeFailedRequests: includeFailedRequests,
+              excludeRampUpTime: excludeRampUpTime,
               enabled: true,
             }),
           });
@@ -199,7 +205,7 @@ export default function ApdexSloDialog({
               minApdexScore: minApdexScore,
               apdexThresholdMs: currentThreshold,
               includeFailedRequests: includeFailedRequests,
-              excludeRampUpTime: true,
+              excludeRampUpTime: excludeRampUpTime,
             }),
           });
 
@@ -209,7 +215,8 @@ export default function ApdexSloDialog({
           }
         }
       } else if (existingSlo) {
-        // Disable existing SLO when toggle is off
+        // Disable existing SLO when toggle is off, preserving any
+        // excludeRampUpTime edit the user made in the same save.
         const updateResponse = await authenticatedFetch(`/benchmarks/apdex/${existingSlo.id}`, {
           method: 'PUT',
           headers: {
@@ -217,11 +224,13 @@ export default function ApdexSloDialog({
           },
           body: JSON.stringify({
             enabled: false,
+            excludeRampUpTime,
           }),
         });
 
         if (!updateResponse.ok) {
-          console.warn('Failed to disable SLO');
+          const errorData = await updateResponse.json();
+          throw new Error(errorData.message || 'Failed to disable Apdex SLO');
         }
       }
 
@@ -372,6 +381,27 @@ export default function ApdexSloDialog({
               />
               <Typography variant="caption" color="text.secondary" display="block" sx={{ ml: 4, mb: 2 }}>
                 When disabled, only successful requests count toward the Apdex score
+              </Typography>
+
+              {/* Exclude Ramp-Up Time */}
+              <FormControlLabel
+                control={
+                  <Switch
+                    size="small"
+                    checked={excludeRampUpTime}
+                    onChange={(e) => setExcludeRampUpTime(e.target.checked)}
+                    disabled={loading}
+                  />
+                }
+                label={
+                  <Typography variant="body2">
+                    Exclude ramp-up period from calculation
+                  </Typography>
+                }
+                sx={{ mb: 1 }}
+              />
+              <Typography variant="caption" color="text.secondary" display="block" sx={{ ml: 4, mb: 2 }}>
+                When enabled, requests issued during the ramp-up phase are ignored
               </Typography>
 
               {/* Scope info */}
