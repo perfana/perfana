@@ -35,6 +35,7 @@ export interface ApdexConfigState {
   loadingTestRun: boolean;
   existingSlo: ExistingSlo | null;
   loadingSlo: boolean;
+  sloCheckFailed: boolean;
 }
 
 export interface ApdexConfigActions {

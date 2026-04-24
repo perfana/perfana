@@ -39,6 +39,7 @@ export default function ApdexConfigDialog({
     loadingTestRun,
     existingSlo,
     loadingSlo,
+    sloCheckFailed,
     setThreshold,
     setEnableSlo,
     setMinApdexScore,
@@ -152,7 +153,7 @@ export default function ApdexConfigDialog({
         <Button
           onClick={handleSave}
           variant="contained"
-          disabled={loading || success}
+          disabled={loading || success || (!isTransactionLevel && sloCheckFailed)}
           startIcon={loading && <CircularProgress size={16} />}
         >
           {loading ? 'Saving...' : 'Save'}
