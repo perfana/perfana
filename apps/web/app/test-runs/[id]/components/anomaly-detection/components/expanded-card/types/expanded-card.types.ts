@@ -5,6 +5,7 @@
 import { TestRun } from '@/types/test-runs';
 import { AnomalyData } from '../../../types';
 import { DeleteOptions } from '../../DeleteAnomalyDialog';
+import type { AnomalySortKey, SortDirection, DiffSortMode } from '../../../hooks/useAnomalyDetection';
 
 /**
  * Feedback state for anomaly detection
@@ -89,6 +90,12 @@ export interface AnomalyTabContentProps {
   hasDynatrace?: boolean;
   onDrillDownToDistributedTracing?: (filters: { scenario?: string; transaction?: string; sampler?: string }) => void;
   onDrillDownToDynatrace?: (filters: { scenario?: string; transaction?: string; sampler?: string }) => void;
+  // Sort state
+  sortBy: AnomalySortKey | null;
+  sortDirection: SortDirection;
+  diffSortMode: DiffSortMode;
+  onSortChange: (key: AnomalySortKey) => void;
+  onDiffSortModeChange: (mode: DiffSortMode) => void;
 }
 
 /**
@@ -187,4 +194,11 @@ export interface AnomalyDetectionExpandedCardProps {
   hasDynatrace?: boolean;
   onDrillDownToDistributedTracing?: (filters: { scenario?: string; transaction?: string; sampler?: string }) => void;
   onDrillDownToDynatrace?: (filters: { scenario?: string; transaction?: string; sampler?: string }) => void;
+
+  // Sort state
+  sortBy: AnomalySortKey | null;
+  sortDirection: SortDirection;
+  diffSortMode: DiffSortMode;
+  onSortChange: (key: AnomalySortKey) => void;
+  onDiffSortModeChange: (mode: DiffSortMode) => void;
 }

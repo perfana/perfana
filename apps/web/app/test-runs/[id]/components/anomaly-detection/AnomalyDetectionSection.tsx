@@ -69,6 +69,12 @@ export default function AnomalyDetectionSection({
     _setDashboardFilter,
     panelFilter,
     _setPanelFilter,
+    // Sort state
+    sortBy,
+    sortDirection,
+    diffSortMode,
+    handleSortChange,
+    handleDiffSortModeChange,
     // Row state
     expandedRows,
     trendsData,
@@ -194,6 +200,11 @@ export default function AnomalyDetectionSection({
       panelsForDropdown={panelsForDropdown}
       paginatedData={paginatedData}
       toggleRowExpanded={handleRowToggle}
+      sortBy={sortBy}
+      sortDirection={sortDirection}
+      diffSortMode={diffSortMode}
+      onSortChange={handleSortChange}
+      onDiffSortModeChange={handleDiffSortModeChange}
       hasDistributedTracing={hasDistributedTracing}
       hasDynatrace={hasDynatrace}
       onDrillDownToDistributedTracing={onDrillDownToDistributedTracing}

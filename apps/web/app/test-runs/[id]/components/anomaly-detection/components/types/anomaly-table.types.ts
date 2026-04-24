@@ -1,6 +1,7 @@
 import { AnomalyData, MetricTrendData } from '../../types';
 import { TestRun } from '@/types/test-runs';
 import { DeleteOptions } from '../DeleteAnomalyDialog';
+import type { AnomalySortKey, SortDirection, DiffSortMode } from '../../hooks/useAnomalyDetection';
 
 export interface ConfigSetting {
   key: string;
@@ -62,6 +63,13 @@ export interface AnomalyDetectionTableProps {
   hasDynatrace?: boolean;
   onDrillDownToDistributedTracing?: (filters: DrillDownFilters) => void;
   onDrillDownToDynatrace?: (filters: DrillDownFilters) => void;
+
+  // Sort state
+  sortBy: AnomalySortKey | null;
+  sortDirection: SortDirection;
+  diffSortMode: DiffSortMode;
+  onSortChange: (key: AnomalySortKey) => void;
+  onDiffSortModeChange: (mode: DiffSortMode) => void;
 }
 
 export interface ThresholdComparisonData {

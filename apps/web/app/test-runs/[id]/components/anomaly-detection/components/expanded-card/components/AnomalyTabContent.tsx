@@ -61,6 +61,11 @@ export function AnomalyTabContent({
   hasDynatrace,
   onDrillDownToDistributedTracing,
   onDrillDownToDynatrace,
+  sortBy,
+  sortDirection,
+  diffSortMode,
+  onSortChange,
+  onDiffSortModeChange,
 }: AnomalyTabContentProps) {
   if (loading) {
     return (
@@ -137,6 +142,11 @@ export function AnomalyTabContent({
         hasDynatrace={hasDynatrace}
         onDrillDownToDistributedTracing={onDrillDownToDistributedTracing}
         onDrillDownToDynatrace={onDrillDownToDynatrace}
+        sortBy={sortBy}
+        sortDirection={sortDirection}
+        diffSortMode={diffSortMode}
+        onSortChange={onSortChange}
+        onDiffSortModeChange={onDiffSortModeChange}
       />
     </>
   );

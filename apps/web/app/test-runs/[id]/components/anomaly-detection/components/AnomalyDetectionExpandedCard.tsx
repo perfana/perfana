@@ -70,6 +70,11 @@ export default function AnomalyDetectionExpandedCard(props: AnomalyDetectionExpa
     hasDynatrace,
     onDrillDownToDistributedTracing,
     onDrillDownToDynatrace,
+    sortBy,
+    sortDirection,
+    diffSortMode,
+    onSortChange,
+    onDiffSortModeChange,
   } = props;
 
   // Get actions from hook
@@ -176,6 +181,11 @@ export default function AnomalyDetectionExpandedCard(props: AnomalyDetectionExpa
             hasDynatrace={hasDynatrace}
             onDrillDownToDistributedTracing={onDrillDownToDistributedTracing}
             onDrillDownToDynatrace={onDrillDownToDynatrace}
+            sortBy={sortBy}
+            sortDirection={sortDirection}
+            diffSortMode={diffSortMode}
+            onSortChange={onSortChange}
+            onDiffSortModeChange={onDiffSortModeChange}
           />
         )}
 
