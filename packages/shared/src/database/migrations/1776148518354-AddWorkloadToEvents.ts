@@ -425,6 +425,10 @@ export class AddWorkloadToEvents1776148518354 implements MigrationInterface {
         await queryRunner.query(`ALTER TABLE "generated_reports" DROP COLUMN "team_id"`);
         await queryRunner.query(`ALTER TABLE "generated_reports" DROP COLUMN "created_by"`);
         await queryRunner.query(`ALTER TABLE "generated_reports" DROP COLUMN "updated_by"`);
+        await queryRunner.query(`DROP POLICY IF EXISTS rls_api_keys_select ON "api_keys"`);
+        await queryRunner.query(`DROP POLICY IF EXISTS rls_api_keys_insert ON "api_keys"`);
+        await queryRunner.query(`DROP POLICY IF EXISTS rls_api_keys_update ON "api_keys"`);
+        await queryRunner.query(`DROP POLICY IF EXISTS rls_api_keys_delete ON "api_keys"`);
         await queryRunner.query(`ALTER TABLE "api_keys" DROP COLUMN "team_id"`);
         await queryRunner.query(`ALTER TABLE "events" ADD "workload" character varying(255)`);
         await queryRunner.query(`ALTER TABLE "organizations" DROP CONSTRAINT "organizations_name_key"`);
@@ -467,21 +471,22 @@ export class AddWorkloadToEvents1776148518354 implements MigrationInterface {
         await queryRunner.query(`COMMENT ON COLUMN "ds_metric_collection_status"."total_data_points" IS NULL`);
         await queryRunner.query(`ALTER TABLE "ds_control_groups" DROP CONSTRAINT "ds_control_groups_control_group_id_key"`);
         await queryRunner.query(`ALTER TABLE "ds_adapt_conclusion" DROP CONSTRAINT "ds_adapt_conclusion_test_run_id_key"`);
+        // audit_logs: convert text columns to varchar(N) in place. Previous version
+        // used DROP COLUMN + ADD pattern, which destroyed all existing rows and
+        // failed on populated DBs because the new columns were declared NOT NULL
+        // without a default. ALTER COLUMN ... TYPE preserves data; the existing
+        // NOT NULL constraints on user_id/action/resource_type are kept by
+        // PostgreSQL across the type change.
         await queryRunner.query(`DROP INDEX "public"."idx_audit_logs_user_id"`);
-        await queryRunner.query(`ALTER TABLE "audit_logs" DROP COLUMN "user_id"`);
-        await queryRunner.query(`ALTER TABLE "audit_logs" ADD "user_id" character varying(255) NOT NULL`);
-        await queryRunner.query(`ALTER TABLE "audit_logs" DROP COLUMN "user_email"`);
-        await queryRunner.query(`ALTER TABLE "audit_logs" ADD "user_email" character varying(255)`);
         await queryRunner.query(`DROP INDEX "public"."idx_audit_logs_action"`);
-        await queryRunner.query(`ALTER TABLE "audit_logs" DROP COLUMN "action"`);
-        await queryRunner.query(`ALTER TABLE "audit_logs" ADD "action" character varying(50) NOT NULL`);
-        await queryRunner.query(`ALTER TABLE "audit_logs" DROP COLUMN "resource_type"`);
-        await queryRunner.query(`ALTER TABLE "audit_logs" ADD "resource_type" character varying(100) NOT NULL`);
-        await queryRunner.query(`ALTER TABLE "audit_logs" DROP COLUMN "resource_id"`);
-        await queryRunner.query(`ALTER TABLE "audit_logs" ADD "resource_id" character varying(255)`);
+        await queryRunner.query(`ALTER TABLE "audit_logs" ALTER COLUMN "user_id" TYPE character varying(255)`);
+        await queryRunner.query(`ALTER TABLE "audit_logs" ALTER COLUMN "user_email" TYPE character varying(255)`);
+        await queryRunner.query(`ALTER TABLE "audit_logs" ALTER COLUMN "action" TYPE character varying(50)`);
+        await queryRunner.query(`ALTER TABLE "audit_logs" ALTER COLUMN "resource_type" TYPE character varying(100)`);
+        await queryRunner.query(`ALTER TABLE "audit_logs" ALTER COLUMN "resource_id" TYPE character varying(255)`);
+        await queryRunner.query(`ALTER TABLE "audit_logs" ALTER COLUMN "ip_address" TYPE character varying(45)`);
+        await queryRunner.query(`UPDATE "audit_logs" SET "success" = true WHERE "success" IS NULL`);
         await queryRunner.query(`ALTER TABLE "audit_logs" ALTER COLUMN "success" SET NOT NULL`);
-        await queryRunner.query(`ALTER TABLE "audit_logs" DROP COLUMN "ip_address"`);
-        await queryRunner.query(`ALTER TABLE "audit_logs" ADD "ip_address" character varying(45)`);
         await queryRunner.query(`ALTER TABLE "api_keys" DROP CONSTRAINT "api_keys_description_key"`);
         await queryRunner.query(`COMMENT ON COLUMN "api_keys"."organization_id" IS NULL`);
         await queryRunner.query(`COMMENT ON COLUMN "api_keys"."created_by" IS NULL`);
@@ -593,20 +598,16 @@ export class AddWorkloadToEvents1776148518354 implements MigrationInterface {
         await queryRunner.query(`COMMENT ON COLUMN "api_keys"."created_by" IS 'User ID (Keycloak sub) who created this API key'`);
         await queryRunner.query(`COMMENT ON COLUMN "api_keys"."organization_id" IS 'Organization this API key belongs to. NULL only allowed for legacy keys (global admin only).'`);
         await queryRunner.query(`ALTER TABLE "api_keys" ADD CONSTRAINT "api_keys_description_key" UNIQUE ("description")`);
-        await queryRunner.query(`ALTER TABLE "audit_logs" DROP COLUMN "ip_address"`);
-        await queryRunner.query(`ALTER TABLE "audit_logs" ADD "ip_address" text`);
+        // Reverse of in-place audit_logs ALTER COLUMN ... TYPE varchar(N).
+        // Restores text type and the original nullability.
         await queryRunner.query(`ALTER TABLE "audit_logs" ALTER COLUMN "success" DROP NOT NULL`);
-        await queryRunner.query(`ALTER TABLE "audit_logs" DROP COLUMN "resource_id"`);
-        await queryRunner.query(`ALTER TABLE "audit_logs" ADD "resource_id" text`);
-        await queryRunner.query(`ALTER TABLE "audit_logs" DROP COLUMN "resource_type"`);
-        await queryRunner.query(`ALTER TABLE "audit_logs" ADD "resource_type" text NOT NULL`);
-        await queryRunner.query(`ALTER TABLE "audit_logs" DROP COLUMN "action"`);
-        await queryRunner.query(`ALTER TABLE "audit_logs" ADD "action" text NOT NULL`);
+        await queryRunner.query(`ALTER TABLE "audit_logs" ALTER COLUMN "ip_address" TYPE text`);
+        await queryRunner.query(`ALTER TABLE "audit_logs" ALTER COLUMN "resource_id" TYPE text`);
+        await queryRunner.query(`ALTER TABLE "audit_logs" ALTER COLUMN "resource_type" TYPE text`);
+        await queryRunner.query(`ALTER TABLE "audit_logs" ALTER COLUMN "action" TYPE text`);
         await queryRunner.query(`CREATE INDEX "idx_audit_logs_action" ON "audit_logs" ("action") `);
-        await queryRunner.query(`ALTER TABLE "audit_logs" DROP COLUMN "user_email"`);
-        await queryRunner.query(`ALTER TABLE "audit_logs" ADD "user_email" text`);
-        await queryRunner.query(`ALTER TABLE "audit_logs" DROP COLUMN "user_id"`);
-        await queryRunner.query(`ALTER TABLE "audit_logs" ADD "user_id" text NOT NULL`);
+        await queryRunner.query(`ALTER TABLE "audit_logs" ALTER COLUMN "user_email" TYPE text`);
+        await queryRunner.query(`ALTER TABLE "audit_logs" ALTER COLUMN "user_id" TYPE text`);
         await queryRunner.query(`CREATE INDEX "idx_audit_logs_user_id" ON "audit_logs" ("user_id") `);
         await queryRunner.query(`ALTER TABLE "ds_adapt_conclusion" ADD CONSTRAINT "ds_adapt_conclusion_test_run_id_key" UNIQUE ("test_run_id")`);
         await queryRunner.query(`ALTER TABLE "ds_control_groups" ADD CONSTRAINT "ds_control_groups_control_group_id_key" UNIQUE ("control_group_id")`);
@@ -650,6 +651,12 @@ export class AddWorkloadToEvents1776148518354 implements MigrationInterface {
         await queryRunner.query(`ALTER TABLE "organizations" ADD CONSTRAINT "organizations_name_key" UNIQUE ("name")`);
         await queryRunner.query(`ALTER TABLE "events" DROP COLUMN "workload"`);
         await queryRunner.query(`ALTER TABLE "api_keys" ADD "team_id" uuid`);
+        // Restore the original 3-arg api_keys RLS policies that this migration's
+        // up() dropped before removing team_id. Mirrors the schema-sql.ts bootstrap.
+        await queryRunner.query(`CREATE POLICY rls_api_keys_select ON "api_keys" FOR SELECT USING (can_access_resource(organization_id, team_id, (created_by)::text))`);
+        await queryRunner.query(`CREATE POLICY rls_api_keys_insert ON "api_keys" FOR INSERT WITH CHECK (true)`);
+        await queryRunner.query(`CREATE POLICY rls_api_keys_update ON "api_keys" FOR UPDATE USING (can_modify_resource(organization_id, team_id, (created_by)::text))`);
+        await queryRunner.query(`CREATE POLICY rls_api_keys_delete ON "api_keys" FOR DELETE USING (can_modify_resource(organization_id, team_id, (created_by)::text))`);
         await queryRunner.query(`ALTER TABLE "generated_reports" ADD "updated_by" character varying(255)`);
         await queryRunner.query(`ALTER TABLE "generated_reports" ADD "created_by" character varying(255)`);
         await queryRunner.query(`ALTER TABLE "generated_reports" ADD "team_id" uuid`);
