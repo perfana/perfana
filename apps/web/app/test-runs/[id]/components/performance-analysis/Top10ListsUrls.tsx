@@ -75,9 +75,10 @@ type SortOrder = 'asc' | 'desc';
 
 interface Top10ListsUrlsProps {
   testRunId: string;
+  selectedScenarios?: string[];
 }
 
-export default function Top10ListsUrls({ testRunId }: Top10ListsUrlsProps) {
+export default function Top10ListsUrls({ testRunId, selectedScenarios = [] }: Top10ListsUrlsProps) {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [samplers, setSamplers] = useState<Array<SamplerStat & { transaction_name: string }>>([]);
@@ -168,7 +169,16 @@ export default function Top10ListsUrls({ testRunId }: Top10ListsUrlsProps) {
       failedCount: number;
     }>();
 
-    samplers.forEach(sampler => {
+    const filteredSamplers = selectedScenarios.length === 0
+      ? samplers
+      : samplers.filter(s => {
+          const label = s.scenario_name && s.scenario_name.length > 0
+            ? s.scenario_name
+            : 'No Scenario';
+          return selectedScenarios.includes(label);
+        });
+
+    filteredSamplers.forEach(sampler => {
       const url = sampler.url_pattern || sampler.sampler_name || 'Unknown';
 
       if (!urlMap.has(url)) {

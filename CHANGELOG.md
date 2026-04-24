@@ -4,6 +4,11 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
+## [0.2.47.0] - 2026-04-24
+
+### Added
+- Scenario filter above the Performance Analysis card tabs, styled to match the Grafana Dashboards tag filter. Select one or more scenarios to scope every tab (Overview, Top 10 Transactions, Top 10 Requests, Top 10 URLs, Error Analysis) to just those scenarios; empty selection is a no-op and shows everything. Chips are derived from the loaded transactions, so only scenarios that actually exist in this run appear. A "No Scenario" chip is rendered only when the run contains rows with null/empty `scenario_name`. On the Overview tab, filtering recomputes the `Overall Test Metrics` panel (weighted avg/p95/p99 response time, apdex, error rate, peak throughput, peak virtual users) from the filtered transactions and from the matching `by_scenario` entries on throughput/VU stats, so the "overall" aggregates reflect only the selected scenarios. Top 10 tabs filter samplers/transactions before aggregation into dimensions, so rankings (slowest, highest throughput, highest impact, highest error rate) recompute against the filtered pool. For Error Analysis, the five `/api/test-runs/:id/error-analysis/{summary,by-code,by-transaction,over-time,over-time-by-code}` endpoints accept an optional `scenarios` query parameter (comma-separated scenario names; the sentinel `__NO_SCENARIO__` matches `scenario_name IS NULL`) and the service applies `AND (scenario_name = ANY($list) OR scenario_name IS NULL)` to `requests_error` — and the corresponding `requests_raw` count used for the overall error rate — when the parameter is present. The frontend hook refetches when the selection changes; the details endpoint is unchanged (still keyed by transaction/sampler/url).
+
 ## [0.2.46.0] - 2026-04-24
 
 ### Added

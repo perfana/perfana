@@ -1,6 +1,6 @@
 'use client';
 
-import { useRef } from 'react';
+import { useMemo, useRef, useState, useCallback } from 'react';
 import {
   Box,
   Card,
@@ -32,7 +32,14 @@ import {
   PerformanceAnalysisDialogs,
   PerformanceAnalysisMenus,
   OverallTestMetrics,
+  ScenarioFilter,
 } from './components';
+import {
+  deriveAvailableScenarios,
+  matchesSelectedScenarios,
+  filterThroughputStats,
+  filterVirtualUserStats,
+} from './utils/scenario-filter';
 import { LiveWindowSelector } from './components/LiveWindowSelector';
 import Top10ListsTable from './Top10ListsTable';
 import Top10ListsRequests from './Top10ListsRequests';
@@ -68,6 +75,13 @@ export default function PerformanceAnalysisCard({
 }: PerformanceAnalysisCardProps) {
   const cardRef = useRef<HTMLDivElement>(null);
 
+  const [selectedScenarios, setSelectedScenarios] = useState<string[]>([]);
+  const toggleScenarioFilter = useCallback((scenario: string) => {
+    setSelectedScenarios((prev) =>
+      prev.includes(scenario) ? prev.filter((s) => s !== scenario) : [...prev, scenario],
+    );
+  }, []);
+
   // Events data for chart annotations
   const { events } = useEventsData(testRunId);
 
@@ -101,6 +115,34 @@ export default function PerformanceAnalysisCard({
     sinceMinutes,
     setSinceMinutes,
   } = usePerformanceAnalysisData({ testRunId, testRun, realtimeTrigger });
+
+  const availableScenarios = useMemo(
+    () => deriveAvailableScenarios(transactions),
+    [transactions],
+  );
+
+  const filteredTransactions = useMemo(
+    () => transactions.filter((t) => matchesSelectedScenarios(t.scenario_name, selectedScenarios)),
+    [transactions, selectedScenarios],
+  );
+
+  const filteredScenarioGroups = useMemo<[string, typeof transactions][]>(
+    () =>
+      scenarioGroups.filter(([scenarioName]) =>
+        selectedScenarios.length === 0 || selectedScenarios.includes(scenarioName),
+      ),
+    [scenarioGroups, selectedScenarios],
+  );
+
+  const filteredThroughputStats = useMemo(
+    () => filterThroughputStats(throughputStats, selectedScenarios),
+    [throughputStats, selectedScenarios],
+  );
+
+  const filteredVirtualUserStats = useMemo(
+    () => filterVirtualUserStats(virtualUserStats, selectedScenarios),
+    [virtualUserStats, selectedScenarios],
+  );
 
   // Handlers hook
   const {
@@ -414,6 +456,17 @@ export default function PerformanceAnalysisCard({
           <Collapse in={expanded}>
             <Divider sx={{ my: 2 }} />
 
+            {/* Scenario filter — applies to all tabs */}
+            {availableScenarios.length > 1 && (
+              <ScenarioFilter
+                availableScenarios={availableScenarios}
+                selectedScenarios={selectedScenarios}
+                onToggle={toggleScenarioFilter}
+                totalItems={transactions.length}
+                filteredItems={filteredTransactions.length}
+              />
+            )}
+
             {/* Tabs */}
             <Box sx={{ mb: 2 }}>
               <Tabs
@@ -441,11 +494,11 @@ export default function PerformanceAnalysisCard({
             {activeTab === 0 && (
               <>
                 {/* Aggregated Test Metrics */}
-                {!loading && !error && transactions.length > 0 && (
+                {!loading && !error && filteredTransactions.length > 0 && (
                   <OverallTestMetrics
-                    transactions={transactions}
-                    throughputStats={throughputStats}
-                    virtualUserStats={virtualUserStats}
+                    transactions={filteredTransactions}
+                    throughputStats={filteredThroughputStats}
+                    virtualUserStats={filteredVirtualUserStats}
                     testLevelThreshold={testLevelThreshold}
                   />
                 )}
@@ -469,12 +522,18 @@ export default function PerformanceAnalysisCard({
                         : 'No transaction data available for this test run.'}
                     </Typography>
                   </Box>
+                ) : filteredTransactions.length === 0 ? (
+                  <Box textAlign="center" py={4}>
+                    <Typography variant="body2" color="text.secondary">
+                      No transactions match the selected scenarios.
+                    </Typography>
+                  </Box>
                 ) : (
                   <TransactionsTable
-                    scenarioGroups={scenarioGroups}
-                    transactions={transactions}
-                    throughputStats={throughputStats}
-                    virtualUserStats={virtualUserStats}
+                    scenarioGroups={filteredScenarioGroups}
+                    transactions={filteredTransactions}
+                    throughputStats={filteredThroughputStats}
+                    virtualUserStats={filteredVirtualUserStats}
                     sortField={sortField}
                     sortOrder={sortOrder}
                     onSort={handleSort}
@@ -498,6 +557,7 @@ export default function PerformanceAnalysisCard({
             {activeTab === 1 && (
               <Top10ListsTable
                 testRunId={testRunId}
+                selectedScenarios={selectedScenarios}
                 hasDistributedTracing={hasDistributedTracing}
                 hasDynatrace={hasDynatrace}
                 onDrillDownToDistributedTracing={onDrillDownToDistributedTracing}
@@ -509,6 +569,7 @@ export default function PerformanceAnalysisCard({
             {activeTab === 2 && (
               <Top10ListsRequests
                 testRunId={testRunId}
+                selectedScenarios={selectedScenarios}
                 hasDistributedTracing={hasDistributedTracing}
                 hasDynatrace={hasDynatrace}
                 onDrillDownToDistributedTracing={onDrillDownToDistributedTracing}
@@ -518,12 +579,12 @@ export default function PerformanceAnalysisCard({
 
             {/* Tab Panel 3: Top 10 Lists URLs */}
             {activeTab === 3 && (
-              <Top10ListsUrls testRunId={testRunId} />
+              <Top10ListsUrls testRunId={testRunId} selectedScenarios={selectedScenarios} />
             )}
 
             {/* Tab Panel 4: Error Analysis */}
             {activeTab === 4 && (
-              <ErrorAnalysisCard testRunId={testRunId} />
+              <ErrorAnalysisCard testRunId={testRunId} selectedScenarios={selectedScenarios} />
             )}
           </Collapse>
         </CardContent>
