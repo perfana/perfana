@@ -208,11 +208,18 @@ export function useApdexConfigDialog({
         }
       }
     } else if (existingSlo) {
-      await authenticatedFetch(`/benchmarks/apdex/${existingSlo.id}`, {
+      const disableResponse = await authenticatedFetch(`/benchmarks/apdex/${existingSlo.id}`, {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ enabled: false }),
+        body: JSON.stringify({
+          enabled: false,
+          excludeRampUpTime,
+        }),
       });
+      if (!disableResponse.ok) {
+        const errorData = await disableResponse.json();
+        throw new Error(errorData.message || 'Failed to disable Apdex SLO');
+      }
     }
   };
 

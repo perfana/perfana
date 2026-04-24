@@ -215,7 +215,8 @@ export default function ApdexSloDialog({
           }
         }
       } else if (existingSlo) {
-        // Disable existing SLO when toggle is off
+        // Disable existing SLO when toggle is off, preserving any
+        // excludeRampUpTime edit the user made in the same save.
         const updateResponse = await authenticatedFetch(`/benchmarks/apdex/${existingSlo.id}`, {
           method: 'PUT',
           headers: {
@@ -223,11 +224,13 @@ export default function ApdexSloDialog({
           },
           body: JSON.stringify({
             enabled: false,
+            excludeRampUpTime,
           }),
         });
 
         if (!updateResponse.ok) {
-          console.warn('Failed to disable SLO');
+          const errorData = await updateResponse.json();
+          throw new Error(errorData.message || 'Failed to disable Apdex SLO');
         }
       }
 
