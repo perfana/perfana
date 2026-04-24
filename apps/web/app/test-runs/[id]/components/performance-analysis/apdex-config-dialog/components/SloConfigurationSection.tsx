@@ -21,6 +21,8 @@ interface SloConfigurationSectionProps {
   setMinApdexScore: (value: number) => void;
   includeFailedRequests: boolean;
   setIncludeFailedRequests: (value: boolean) => void;
+  excludeRampUpTime: boolean;
+  setExcludeRampUpTime: (value: boolean) => void;
   loading: boolean;
   loadingTestRun: boolean;
   loadingSlo: boolean;
@@ -35,6 +37,8 @@ export function SloConfigurationSection({
   setMinApdexScore,
   includeFailedRequests,
   setIncludeFailedRequests,
+  excludeRampUpTime,
+  setExcludeRampUpTime,
   loading,
   loadingTestRun,
   loadingSlo,
@@ -131,6 +135,24 @@ export function SloConfigurationSection({
           />
           <Typography variant="caption" color="text.secondary" display="block" sx={{ ml: 4 }}>
             When disabled, only successful requests count toward the Apdex score
+          </Typography>
+
+          <FormControlLabel
+            control={
+              <Switch
+                size="small"
+                checked={excludeRampUpTime}
+                onChange={(e) => setExcludeRampUpTime(e.target.checked)}
+                disabled={loading}
+              />
+            }
+            label={
+              <Typography variant="body2">Exclude ramp-up period from calculation</Typography>
+            }
+            sx={{ mt: 2 }}
+          />
+          <Typography variant="caption" color="text.secondary" display="block" sx={{ ml: 4 }}>
+            When enabled, requests issued during the ramp-up phase are ignored
           </Typography>
 
           <Alert severity="info" sx={{ mt: 2 }}>

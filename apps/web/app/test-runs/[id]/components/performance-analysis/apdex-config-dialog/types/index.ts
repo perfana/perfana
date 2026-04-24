@@ -9,6 +9,7 @@ export interface ExistingSlo {
   id: string;
   min_apdex_score: number;
   include_failed_requests: boolean;
+  exclude_ramp_up_time: boolean;
   enabled: boolean;
 }
 
@@ -29,6 +30,7 @@ export interface ApdexConfigState {
   enableSlo: boolean;
   minApdexScore: number;
   includeFailedRequests: boolean;
+  excludeRampUpTime: boolean;
   testRunDetails: TestRunDetails | null;
   loadingTestRun: boolean;
   existingSlo: ExistingSlo | null;
@@ -40,6 +42,7 @@ export interface ApdexConfigActions {
   setEnableSlo: (value: boolean) => void;
   setMinApdexScore: (value: number) => void;
   setIncludeFailedRequests: (value: boolean) => void;
+  setExcludeRampUpTime: (value: boolean) => void;
   handleSave: () => Promise<void>;
   handleDelete: () => Promise<void>;
 }

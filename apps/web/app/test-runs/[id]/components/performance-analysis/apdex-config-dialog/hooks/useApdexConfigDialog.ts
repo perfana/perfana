@@ -29,6 +29,7 @@ export function useApdexConfigDialog({
   const [enableSlo, setEnableSlo] = useState(false);
   const [minApdexScore, setMinApdexScore] = useState<number>(0.85);
   const [includeFailedRequests, setIncludeFailedRequests] = useState(false);
+  const [excludeRampUpTime, setExcludeRampUpTime] = useState(true);
   const [testRunDetails, setTestRunDetails] = useState<TestRunDetails | null>(null);
   const [loadingTestRun, setLoadingTestRun] = useState(false);
   const [existingSlo, setExistingSlo] = useState<ExistingSlo | null>(null);
@@ -80,11 +81,13 @@ export function useApdexConfigDialog({
             id: matchingSlo.id,
             min_apdex_score: matchingSlo.min_apdex_score || 0.85,
             include_failed_requests: matchingSlo.include_failed_requests || false,
+            exclude_ramp_up_time: matchingSlo.exclude_ramp_up_time !== false,
             enabled: matchingSlo.enabled !== false,
           });
           setEnableSlo(matchingSlo.enabled !== false);
           setMinApdexScore(matchingSlo.min_apdex_score || 0.85);
           setIncludeFailedRequests(matchingSlo.include_failed_requests || false);
+          setExcludeRampUpTime(matchingSlo.exclude_ramp_up_time !== false);
         }
       }
     } catch (err) {
@@ -102,6 +105,7 @@ export function useApdexConfigDialog({
       setEnableSlo(false);
       setMinApdexScore(0.85);
       setIncludeFailedRequests(false);
+      setExcludeRampUpTime(true);
       setTestRunDetails(null);
       setExistingSlo(null);
       fetchTestRunDetails();
@@ -164,7 +168,7 @@ export function useApdexConfigDialog({
     } finally {
       setLoading(false);
     }
-  }, [threshold, enableSlo, minApdexScore, isTransactionLevel, testRunId, transactionName, testRunDetails, onSuccess, onClose]);
+  }, [threshold, enableSlo, minApdexScore, includeFailedRequests, excludeRampUpTime, existingSlo, isTransactionLevel, testRunId, transactionName, testRunDetails, onSuccess, onClose]);
 
   const handleSloUpdate = async (thresholdValue: number) => {
     if (enableSlo) {
@@ -176,6 +180,7 @@ export function useApdexConfigDialog({
             minApdexScore,
             apdexThresholdMs: thresholdValue,
             includeFailedRequests,
+            excludeRampUpTime,
             enabled: true,
           }),
         });
@@ -194,7 +199,7 @@ export function useApdexConfigDialog({
             minApdexScore,
             apdexThresholdMs: thresholdValue,
             includeFailedRequests,
-            excludeRampUpTime: true,
+            excludeRampUpTime,
           }),
         });
         if (!createResponse.ok) {
@@ -246,6 +251,7 @@ export function useApdexConfigDialog({
     enableSlo,
     minApdexScore,
     includeFailedRequests,
+    excludeRampUpTime,
     testRunDetails,
     loadingTestRun,
     existingSlo,
@@ -254,6 +260,7 @@ export function useApdexConfigDialog({
     setEnableSlo,
     setMinApdexScore,
     setIncludeFailedRequests,
+    setExcludeRampUpTime,
     handleSave,
     handleDelete,
   };

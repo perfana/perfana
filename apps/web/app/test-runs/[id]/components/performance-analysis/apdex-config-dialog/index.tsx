@@ -34,6 +34,7 @@ export default function ApdexConfigDialog({
     enableSlo,
     minApdexScore,
     includeFailedRequests,
+    excludeRampUpTime,
     testRunDetails,
     loadingTestRun,
     existingSlo,
@@ -42,6 +43,7 @@ export default function ApdexConfigDialog({
     setEnableSlo,
     setMinApdexScore,
     setIncludeFailedRequests,
+    setExcludeRampUpTime,
     handleSave,
     handleDelete,
   } = useApdexConfigDialog({
@@ -108,6 +110,8 @@ export default function ApdexConfigDialog({
                 setMinApdexScore={setMinApdexScore}
                 includeFailedRequests={includeFailedRequests}
                 setIncludeFailedRequests={setIncludeFailedRequests}
+                excludeRampUpTime={excludeRampUpTime}
+                setExcludeRampUpTime={setExcludeRampUpTime}
                 loading={loading}
                 loadingTestRun={loadingTestRun}
                 loadingSlo={loadingSlo}
