@@ -287,7 +287,19 @@ export class AddContinuousAggregates1777500000000 implements MigrationInterface 
     }
   }
 
-  public async down(_queryRunner: QueryRunner): Promise<void> {
-    // Filled in by Task 7.
+  public async down(queryRunner: QueryRunner): Promise<void> {
+    // Drop in reverse hierarchy order: 5m depends on 1m, 1m on 5s, 5s on raw.
+    // `DROP MATERIALIZED VIEW ... CASCADE` also removes the associated
+    // refresh and retention policies, so no separate policy-drop step needed.
+    const views = [
+      'requests_raw_5m',   'requests_raw_1m',   'requests_raw_5s',
+      'transactions_5m',   'transactions_1m',   'transactions_5s',
+      'requests_error_5m', 'requests_error_1m', 'requests_error_5s',
+    ];
+
+    for (const view of views) {
+      await queryRunner.query(`DROP MATERIALIZED VIEW IF EXISTS ${view} CASCADE`);
+      console.log(`  Dropped ${view}`);
+    }
   }
 }
