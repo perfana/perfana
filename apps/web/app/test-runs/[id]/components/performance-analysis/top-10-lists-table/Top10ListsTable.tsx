@@ -11,6 +11,7 @@ import type { Top10ListsTableProps } from './types';
 
 export default function Top10ListsTable({
   testRunId,
+  selectedScenarios = [],
   hasDistributedTracing = false,
   hasDynatrace = false,
   onDrillDownToDistributedTracing,
@@ -28,7 +29,7 @@ export default function Top10ListsTable({
     actionMenuData,
     handleOpenActionMenu,
     handleCloseActionMenu,
-  } = useTop10TableData({ testRunId });
+  } = useTop10TableData({ testRunId, selectedScenarios });
 
   const hasDrillDownOptions = hasDistributedTracing || hasDynatrace;
 

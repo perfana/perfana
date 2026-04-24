@@ -2,6 +2,42 @@ import { Injectable, Logger } from '@nestjs/common';
 import { InjectDataSource } from '@nestjs/typeorm';
 import { DataSource } from 'typeorm';
 
+export const NO_SCENARIO_SENTINEL = '__NO_SCENARIO__';
+
+/**
+ * Builds a SQL fragment + params for filtering by scenario_name.
+ * Returns { clause: '', params: [] } when no scenarios are selected (no filter).
+ *
+ * The frontend can pass NO_SCENARIO_SENTINEL to include rows with NULL scenario_name.
+ * startIndex is the $N position to use for the first new param (1-based).
+ */
+function buildScenarioFilter(
+  scenarios: string[] | undefined,
+  startIndex: number,
+): { clause: string; params: unknown[] } {
+  if (!scenarios || scenarios.length === 0) {
+    return { clause: '', params: [] };
+  }
+
+  const includeNull = scenarios.includes(NO_SCENARIO_SENTINEL);
+  const namedScenarios = scenarios.filter((s) => s !== NO_SCENARIO_SENTINEL);
+
+  const conditions: string[] = [];
+  const params: unknown[] = [];
+
+  if (namedScenarios.length > 0) {
+    conditions.push(`scenario_name = ANY($${startIndex})`);
+    params.push(namedScenarios);
+  }
+  if (includeNull) {
+    conditions.push(`scenario_name IS NULL`);
+  }
+
+  if (conditions.length === 0) return { clause: '', params: [] };
+
+  return { clause: ` AND (${conditions.join(' OR ')})`, params };
+}
+
 export interface ErrorSummary {
   totalErrors: number;
   uniqueResponseCodes: number;
@@ -63,9 +99,10 @@ export class TestRunsErrorAnalysisService {
   /**
    * Get error summary statistics for a test run
    */
-  async getErrorSummary(testRunId: string): Promise<ErrorSummary> {
+  async getErrorSummary(testRunId: string, scenarios?: string[]): Promise<ErrorSummary> {
     this.logger.log(`Getting error summary for test run: ${testRunId}`);
 
+    const { clause, params } = buildScenarioFilter(scenarios, 2);
     const query = `
       SELECT
         COUNT(*) as "totalErrors",
@@ -73,10 +110,10 @@ export class TestRunsErrorAnalysisService {
         COUNT(DISTINCT transaction_name) as "transactionsWithErrors",
         COUNT(DISTINCT url) as "uniqueErrorUrls"
       FROM requests_error
-      WHERE test_run_id = $1
+      WHERE test_run_id = $1${clause}
     `;
 
-    const result = await this.dataSource.query(query, [testRunId]);
+    const result = await this.dataSource.query(query, [testRunId, ...params]);
 
     if (!result || result.length === 0) {
       return {
@@ -96,12 +133,16 @@ export class TestRunsErrorAnalysisService {
 
     // Optionally calculate error rate if we have requests_raw data
     try {
+      const rawFilter = buildScenarioFilter(scenarios, 2);
       const totalRequestsQuery = `
         SELECT COUNT(*) as total
         FROM requests_raw
-        WHERE test_run_id = $1
+        WHERE test_run_id = $1${rawFilter.clause}
       `;
-      const totalRequestsResult = await this.dataSource.query(totalRequestsQuery, [testRunId]);
+      const totalRequestsResult = await this.dataSource.query(
+        totalRequestsQuery,
+        [testRunId, ...rawFilter.params],
+      );
 
       if (totalRequestsResult && totalRequestsResult.length > 0) {
         const totalRequests = parseInt(totalRequestsResult[0].total, 10);
@@ -118,9 +159,10 @@ export class TestRunsErrorAnalysisService {
   /**
    * Get errors grouped by response code
    */
-  async getErrorsByCode(testRunId: string): Promise<ErrorByCode[]> {
+  async getErrorsByCode(testRunId: string, scenarios?: string[]): Promise<ErrorByCode[]> {
     this.logger.log(`Getting errors by code for test run: ${testRunId}`);
 
+    const { clause, params } = buildScenarioFilter(scenarios, 2);
     const query = `
       SELECT
         response_code as "responseCode",
@@ -129,12 +171,12 @@ export class TestRunsErrorAnalysisService {
         MIN(response_time) as "minResponseTime",
         MAX(response_time) as "maxResponseTime"
       FROM requests_error
-      WHERE test_run_id = $1
+      WHERE test_run_id = $1${clause}
       GROUP BY response_code
       ORDER BY "errorCount" DESC
     `;
 
-    const results = await this.dataSource.query(query, [testRunId]);
+    const results = await this.dataSource.query(query, [testRunId, ...params]);
 
     return results.map((row: Record<string, unknown>) => ({
       responseCode: row.responseCode as string,
@@ -148,9 +190,10 @@ export class TestRunsErrorAnalysisService {
   /**
    * Get errors grouped by transaction/sampler/url
    */
-  async getErrorsByTransaction(testRunId: string): Promise<ErrorByTransaction[]> {
+  async getErrorsByTransaction(testRunId: string, scenarios?: string[]): Promise<ErrorByTransaction[]> {
     this.logger.log(`Getting errors by transaction for test run: ${testRunId}`);
 
+    const { clause, params } = buildScenarioFilter(scenarios, 2);
     const query = `
       SELECT
         transaction_name as "transactionName",
@@ -160,13 +203,13 @@ export class TestRunsErrorAnalysisService {
         COUNT(*) as "errorCount",
         ROUND(AVG(response_time)) as "avgResponseTime"
       FROM requests_error
-      WHERE test_run_id = $1
+      WHERE test_run_id = $1${clause}
       GROUP BY transaction_name, sampler_name, url, response_code
       ORDER BY "errorCount" DESC
       LIMIT 100
     `;
 
-    const results = await this.dataSource.query(query, [testRunId]);
+    const results = await this.dataSource.query(query, [testRunId, ...params]);
 
     return results.map((row: Record<string, unknown>) => ({
       transactionName: row.transactionName as string,
@@ -181,20 +224,21 @@ export class TestRunsErrorAnalysisService {
   /**
    * Get errors over time (grouped by minute)
    */
-  async getErrorsOverTime(testRunId: string): Promise<ErrorOverTime[]> {
+  async getErrorsOverTime(testRunId: string, scenarios?: string[]): Promise<ErrorOverTime[]> {
     this.logger.log(`Getting errors over time for test run: ${testRunId}`);
 
+    const { clause, params } = buildScenarioFilter(scenarios, 2);
     const query = `
       SELECT
         DATE_TRUNC('minute', time) as "timeBucket",
         COUNT(*) as "errorsPerMinute"
       FROM requests_error
-      WHERE test_run_id = $1
+      WHERE test_run_id = $1${clause}
       GROUP BY "timeBucket"
       ORDER BY "timeBucket"
     `;
 
-    const results = await this.dataSource.query(query, [testRunId]);
+    const results = await this.dataSource.query(query, [testRunId, ...params]);
 
     return results.map((row: Record<string, unknown>) => ({
       timeBucket: row.timeBucket as string,
@@ -205,21 +249,22 @@ export class TestRunsErrorAnalysisService {
   /**
    * Get errors over time grouped by response code (for multi-line chart)
    */
-  async getErrorsOverTimeByCode(testRunId: string): Promise<ErrorOverTimeByCode[]> {
+  async getErrorsOverTimeByCode(testRunId: string, scenarios?: string[]): Promise<ErrorOverTimeByCode[]> {
     this.logger.log(`Getting errors over time by code for test run: ${testRunId}`);
 
+    const { clause, params } = buildScenarioFilter(scenarios, 2);
     const query = `
       SELECT
         DATE_TRUNC('minute', time) as "timeBucket",
         response_code as "responseCode",
         COUNT(*) as "errorCount"
       FROM requests_error
-      WHERE test_run_id = $1
+      WHERE test_run_id = $1${clause}
       GROUP BY "timeBucket", response_code
       ORDER BY "timeBucket", response_code
     `;
 
-    const results = await this.dataSource.query(query, [testRunId]);
+    const results = await this.dataSource.query(query, [testRunId, ...params]);
 
     // Transform results into the format needed for the chart
     // Group by timeBucket and create dynamic properties for each response code

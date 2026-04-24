@@ -1,7 +1,8 @@
 'use client';
 
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useMemo } from 'react';
 import { authenticatedFetch } from '@/lib/api';
+import { NO_SCENARIO_LABEL } from '../../components/ScenarioFilter';
 import {
   ErrorSummary,
   ErrorByCode,
@@ -11,8 +12,11 @@ import {
   ErrorDetail,
 } from '../types';
 
+const NO_SCENARIO_SENTINEL = '__NO_SCENARIO__';
+
 export interface UseErrorAnalysisDataProps {
   testRunId: string;
+  selectedScenarios?: string[];
 }
 
 export interface UseErrorAnalysisDataReturn {
@@ -41,10 +45,22 @@ export interface UseErrorAnalysisDataReturn {
 
 export function useErrorAnalysisData({
   testRunId,
+  selectedScenarios = [],
 }: UseErrorAnalysisDataProps): UseErrorAnalysisDataReturn {
   // Loading and error states
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+
+  // Stable scenario query string — rebuilds only when contents change
+  const scenariosQueryKey = [...selectedScenarios].sort().join(',');
+  const scenariosQuery = useMemo(() => {
+    if (selectedScenarios.length === 0) return '';
+    const sentinels = selectedScenarios.map((s) =>
+      s === NO_SCENARIO_LABEL ? NO_SCENARIO_SENTINEL : s,
+    );
+    return `?scenarios=${encodeURIComponent(sentinels.join(','))}`;
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [scenariosQueryKey]);
 
   // Data states
   const [summary, setSummary] = useState<ErrorSummary | null>(null);
@@ -65,7 +81,7 @@ export function useErrorAnalysisData({
 
       // Fetch summary
       const summaryResponse = await authenticatedFetch(
-        `test-runs/${testRunId}/error-analysis/summary`
+        `test-runs/${testRunId}/error-analysis/summary${scenariosQuery}`
       );
       if (!summaryResponse.ok) throw new Error('Failed to fetch error summary');
       const summaryData = await summaryResponse.json();
@@ -73,7 +89,7 @@ export function useErrorAnalysisData({
 
       // Fetch errors by code
       const byCodeResponse = await authenticatedFetch(
-        `test-runs/${testRunId}/error-analysis/by-code`
+        `test-runs/${testRunId}/error-analysis/by-code${scenariosQuery}`
       );
       if (!byCodeResponse.ok) throw new Error('Failed to fetch errors by code');
       const byCodeData = await byCodeResponse.json();
@@ -81,7 +97,7 @@ export function useErrorAnalysisData({
 
       // Fetch errors by transaction
       const byTransactionResponse = await authenticatedFetch(
-        `test-runs/${testRunId}/error-analysis/by-transaction`
+        `test-runs/${testRunId}/error-analysis/by-transaction${scenariosQuery}`
       );
       if (!byTransactionResponse.ok) throw new Error('Failed to fetch errors by transaction');
       const byTransactionData = await byTransactionResponse.json();
@@ -89,7 +105,7 @@ export function useErrorAnalysisData({
 
       // Fetch errors over time
       const overTimeResponse = await authenticatedFetch(
-        `test-runs/${testRunId}/error-analysis/over-time`
+        `test-runs/${testRunId}/error-analysis/over-time${scenariosQuery}`
       );
       if (!overTimeResponse.ok) throw new Error('Failed to fetch errors over time');
       const overTimeData = await overTimeResponse.json();
@@ -98,7 +114,7 @@ export function useErrorAnalysisData({
       // Fetch errors over time grouped by code (optional endpoint)
       try {
         const overTimeByCodeResponse = await authenticatedFetch(
-          `test-runs/${testRunId}/error-analysis/over-time-by-code`
+          `test-runs/${testRunId}/error-analysis/over-time-by-code${scenariosQuery}`
         );
         if (overTimeByCodeResponse.ok) {
           const overTimeByCodeData = await overTimeByCodeResponse.json();
@@ -120,9 +136,9 @@ export function useErrorAnalysisData({
     } finally {
       setLoading(false);
     }
-  }, [testRunId]);
+  }, [testRunId, scenariosQuery]);
 
-  // Initial fetch
+  // Initial fetch + refetch when scenarios change
   useEffect(() => {
     if (testRunId) {
       fetchErrorAnalysis();

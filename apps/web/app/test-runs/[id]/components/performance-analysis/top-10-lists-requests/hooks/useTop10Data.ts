@@ -22,6 +22,7 @@ import React from 'react';
 
 export interface UseTop10DataProps {
   testRunId: string;
+  selectedScenarios?: string[];
 }
 
 export interface UseTop10DataReturn {
@@ -50,7 +51,7 @@ export interface UseTop10DataReturn {
   handleCloseActionMenu: () => void;
 }
 
-export function useTop10Data({ testRunId }: UseTop10DataProps): UseTop10DataReturn {
+export function useTop10Data({ testRunId, selectedScenarios = [] }: UseTop10DataProps): UseTop10DataReturn {
   // Loading and error states
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -135,8 +136,16 @@ export function useTop10Data({ testRunId }: UseTop10DataProps): UseTop10DataRetu
     fetchData();
   }, [fetchData]);
 
-  // Prepare data
-  const top10Data = prepareTop10Data(samplers, testDuration);
+  // Prepare data (filtered by scenario if any selected)
+  const allTop10Data = prepareTop10Data(samplers, testDuration);
+  const top10Data = selectedScenarios.length === 0
+    ? allTop10Data
+    : allTop10Data.filter((item) => {
+        const label = item.scenarioName && item.scenarioName.length > 0
+          ? item.scenarioName
+          : 'No Scenario';
+        return selectedScenarios.includes(label);
+      });
 
   // Build dimensions configuration
   const dimensions: Top10Dimension[] = [

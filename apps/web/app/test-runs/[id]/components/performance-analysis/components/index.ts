@@ -10,3 +10,4 @@ export { PerformanceAnalysisMenus } from './PerformanceAnalysisMenus';
 export { default as OverallTestMetrics } from './OverallTestMetrics';
 export { default as TransactionDetailsModal } from './TransactionDetailsModal';
 export { default as SamplerDetailsModal } from './SamplerDetailsModal';
+export { ScenarioFilter, NO_SCENARIO_LABEL } from './ScenarioFilter';

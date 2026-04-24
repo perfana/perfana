@@ -26,6 +26,7 @@ import React from 'react';
 
 export interface UseTop10TableDataProps {
   testRunId: string;
+  selectedScenarios?: string[];
 }
 
 export interface UseTop10TableDataReturn {
@@ -47,7 +48,7 @@ export interface UseTop10TableDataReturn {
   handleCloseActionMenu: () => void;
 }
 
-export function useTop10TableData({ testRunId }: UseTop10TableDataProps): UseTop10TableDataReturn {
+export function useTop10TableData({ testRunId, selectedScenarios = [] }: UseTop10TableDataProps): UseTop10TableDataReturn {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [transactions, setTransactions] = useState<TransactionStat[]>([]);
@@ -93,7 +94,15 @@ export function useTop10TableData({ testRunId }: UseTop10TableDataProps): UseTop
     fetchData();
   }, [fetchData]);
 
-  const top10Data = prepareTop10TransactionData(transactions, testDuration);
+  const allTop10Data = prepareTop10TransactionData(transactions, testDuration);
+  const top10Data = selectedScenarios.length === 0
+    ? allTop10Data
+    : allTop10Data.filter((item) => {
+        const label = item.scenarioName && item.scenarioName.length > 0
+          ? item.scenarioName
+          : 'No Scenario';
+        return selectedScenarios.includes(label);
+      });
 
   const dimensions: Top10TableDimension[] = [
     {

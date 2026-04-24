@@ -4,6 +4,12 @@ import { UserCtx, UserContext } from '../../../common/decorators/user-context.de
 import { TestRunsService } from '../test-runs.service';
 import { TestRunsErrorAnalysisService } from '../services/test-runs-error-analysis.service';
 
+function parseScenarios(scenarios?: string): string[] | undefined {
+  if (!scenarios) return undefined;
+  const parts = scenarios.split(',').map((s) => s.trim()).filter((s) => s.length > 0);
+  return parts.length > 0 ? parts : undefined;
+}
+
 @ApiTags('test-runs-errors')
 @ApiBearerAuth()
 @Controller('test-runs')
@@ -61,6 +67,7 @@ export class TestRunsErrorsController {
     description: 'Returns aggregated error statistics including total errors, unique error codes, affected transactions, and error rate'
   })
   @ApiParam({ name: 'testRunId', description: 'Test run ID', type: String })
+  @ApiQuery({ name: 'scenarios', required: false, description: 'Comma-separated scenario names to filter by. Use __NO_SCENARIO__ to include rows with no scenario.', type: String })
   @ApiResponse({
     status: 200,
     description: 'Error summary retrieved successfully',
@@ -76,9 +83,13 @@ export class TestRunsErrorsController {
       }
     }
   })
-  async getErrorSummary(@Param('testRunId') testRunId: string, @UserCtx() ctx: UserContext) {
+  async getErrorSummary(
+    @Param('testRunId') testRunId: string,
+    @UserCtx() ctx: UserContext,
+    @Query('scenarios') scenarios?: string,
+  ) {
     await this.testRunsService.verifyTestRunAccess(testRunId, ctx.userId, ctx.roles);
-    return this.errorAnalysisService.getErrorSummary(testRunId);
+    return this.errorAnalysisService.getErrorSummary(testRunId, parseScenarios(scenarios));
   }
 
   @Get(':testRunId/error-analysis/by-code')
@@ -87,6 +98,7 @@ export class TestRunsErrorsController {
     description: 'Returns error statistics grouped by HTTP response code'
   })
   @ApiParam({ name: 'testRunId', description: 'Test run ID', type: String })
+  @ApiQuery({ name: 'scenarios', required: false, description: 'Comma-separated scenario names to filter by. Use __NO_SCENARIO__ to include rows with no scenario.', type: String })
   @ApiResponse({
     status: 200,
     description: 'Errors by code retrieved successfully',
@@ -104,9 +116,13 @@ export class TestRunsErrorsController {
       }
     }
   })
-  async getErrorsByCode(@Param('testRunId') testRunId: string, @UserCtx() ctx: UserContext) {
+  async getErrorsByCode(
+    @Param('testRunId') testRunId: string,
+    @UserCtx() ctx: UserContext,
+    @Query('scenarios') scenarios?: string,
+  ) {
     await this.testRunsService.verifyTestRunAccess(testRunId, ctx.userId, ctx.roles);
-    return this.errorAnalysisService.getErrorsByCode(testRunId);
+    return this.errorAnalysisService.getErrorsByCode(testRunId, parseScenarios(scenarios));
   }
 
   @Get(':testRunId/error-analysis/by-transaction')
@@ -115,6 +131,7 @@ export class TestRunsErrorsController {
     description: 'Returns error statistics grouped by transaction name, sampler name, and URL'
   })
   @ApiParam({ name: 'testRunId', description: 'Test run ID', type: String })
+  @ApiQuery({ name: 'scenarios', required: false, description: 'Comma-separated scenario names to filter by. Use __NO_SCENARIO__ to include rows with no scenario.', type: String })
   @ApiResponse({
     status: 200,
     description: 'Errors by transaction retrieved successfully',
@@ -133,9 +150,13 @@ export class TestRunsErrorsController {
       }
     }
   })
-  async getErrorsByTransaction(@Param('testRunId') testRunId: string, @UserCtx() ctx: UserContext) {
+  async getErrorsByTransaction(
+    @Param('testRunId') testRunId: string,
+    @UserCtx() ctx: UserContext,
+    @Query('scenarios') scenarios?: string,
+  ) {
     await this.testRunsService.verifyTestRunAccess(testRunId, ctx.userId, ctx.roles);
-    return this.errorAnalysisService.getErrorsByTransaction(testRunId);
+    return this.errorAnalysisService.getErrorsByTransaction(testRunId, parseScenarios(scenarios));
   }
 
   @Get(':testRunId/error-analysis/over-time')
@@ -144,6 +165,7 @@ export class TestRunsErrorsController {
     description: 'Returns time-series data of errors per minute'
   })
   @ApiParam({ name: 'testRunId', description: 'Test run ID', type: String })
+  @ApiQuery({ name: 'scenarios', required: false, description: 'Comma-separated scenario names to filter by. Use __NO_SCENARIO__ to include rows with no scenario.', type: String })
   @ApiResponse({
     status: 200,
     description: 'Errors over time retrieved successfully',
@@ -158,9 +180,13 @@ export class TestRunsErrorsController {
       }
     }
   })
-  async getErrorsOverTime(@Param('testRunId') testRunId: string, @UserCtx() ctx: UserContext) {
+  async getErrorsOverTime(
+    @Param('testRunId') testRunId: string,
+    @UserCtx() ctx: UserContext,
+    @Query('scenarios') scenarios?: string,
+  ) {
     await this.testRunsService.verifyTestRunAccess(testRunId, ctx.userId, ctx.roles);
-    return this.errorAnalysisService.getErrorsOverTime(testRunId);
+    return this.errorAnalysisService.getErrorsOverTime(testRunId, parseScenarios(scenarios));
   }
 
   @Get(':testRunId/error-analysis/over-time-by-code')
@@ -169,6 +195,7 @@ export class TestRunsErrorsController {
     description: 'Returns time-series data of errors per minute grouped by response code for multi-line charts'
   })
   @ApiParam({ name: 'testRunId', description: 'Test run ID', type: String })
+  @ApiQuery({ name: 'scenarios', required: false, description: 'Comma-separated scenario names to filter by. Use __NO_SCENARIO__ to include rows with no scenario.', type: String })
   @ApiResponse({
     status: 200,
     description: 'Errors over time by code retrieved successfully',
@@ -185,9 +212,13 @@ export class TestRunsErrorsController {
       }
     }
   })
-  async getErrorsOverTimeByCode(@Param('testRunId') testRunId: string, @UserCtx() ctx: UserContext) {
+  async getErrorsOverTimeByCode(
+    @Param('testRunId') testRunId: string,
+    @UserCtx() ctx: UserContext,
+    @Query('scenarios') scenarios?: string,
+  ) {
     await this.testRunsService.verifyTestRunAccess(testRunId, ctx.userId, ctx.roles);
-    return this.errorAnalysisService.getErrorsOverTimeByCode(testRunId);
+    return this.errorAnalysisService.getErrorsOverTimeByCode(testRunId, parseScenarios(scenarios));
   }
 
   @Get(':testRunId/error-analysis/details')

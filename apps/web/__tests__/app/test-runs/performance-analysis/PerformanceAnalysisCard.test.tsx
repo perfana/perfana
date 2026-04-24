@@ -139,9 +139,9 @@ describe('PerformanceAnalysisCard', () => {
   const expandScenario = async (scenarioName: string) => {
     const user = userEvent.setup();
 
-    // Wait for scenario to appear
+    // Wait for scenario to appear (may appear both in filter chips and table row)
     await waitFor(() => {
-      expect(screen.getByText(scenarioName)).toBeInTheDocument();
+      expect(screen.getAllByText(scenarioName).length).toBeGreaterThan(0);
     }, { timeout: 5000 });
 
     // Find all rows and locate the scenario row
