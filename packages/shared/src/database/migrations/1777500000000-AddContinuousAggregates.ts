@@ -20,8 +20,94 @@ import { MigrationInterface, QueryRunner } from 'typeorm';
 export class AddContinuousAggregates1777500000000 implements MigrationInterface {
   name = 'AddContinuousAggregates1777500000000';
 
-  public async up(_queryRunner: QueryRunner): Promise<void> {
-    // Filled in by Tasks 2–6.
+  public async up(queryRunner: QueryRunner): Promise<void> {
+    // --- requests_raw family -------------------------------------------------
+
+    await queryRunner.query(`
+      CREATE MATERIALIZED VIEW IF NOT EXISTS requests_raw_5s
+      WITH (timescaledb.continuous) AS
+      SELECT
+        time_bucket('5 seconds'::interval, time)          AS bucket,
+        system_under_test,
+        test_environment,
+        scenario_name,
+        sampler_name,
+        transaction_name,
+        location,
+        count(*)                                           AS n,
+        count(*) FILTER (WHERE success)                    AS n_ok,
+        count(*) FILTER (WHERE NOT success)                AS n_err,
+        avg(response_time)                                 AS avg_rt,
+        min(response_time)                                 AS min_rt,
+        max(response_time)                                 AS max_rt,
+        avg(response_connect_time)                         AS avg_connect,
+        avg(response_latency)                              AS avg_latency,
+        sum(response_size)::bigint                         AS bytes_in,
+        sum(request_size)::bigint                          AS bytes_out,
+        avg(response_size)                                 AS avg_response_size,
+        percentile_agg(response_time::double precision)    AS pct_agg
+      FROM requests_raw
+      GROUP BY 1, 2, 3, 4, 5, 6, 7
+      WITH NO DATA;
+    `);
+
+    await queryRunner.query(`
+      CREATE MATERIALIZED VIEW IF NOT EXISTS requests_raw_1m
+      WITH (timescaledb.continuous) AS
+      SELECT
+        time_bucket('1 minute'::interval, bucket)          AS bucket,
+        system_under_test,
+        test_environment,
+        scenario_name,
+        sampler_name,
+        transaction_name,
+        location,
+        sum(n)::bigint                                     AS n,
+        sum(n_ok)::bigint                                  AS n_ok,
+        sum(n_err)::bigint                                 AS n_err,
+        sum(avg_rt * n) / NULLIF(sum(n), 0)                AS avg_rt,
+        min(min_rt)                                        AS min_rt,
+        max(max_rt)                                        AS max_rt,
+        sum(avg_connect * n) / NULLIF(sum(n), 0)           AS avg_connect,
+        sum(avg_latency * n) / NULLIF(sum(n), 0)           AS avg_latency,
+        sum(bytes_in)::bigint                              AS bytes_in,
+        sum(bytes_out)::bigint                             AS bytes_out,
+        sum(avg_response_size * n) / NULLIF(sum(n), 0)     AS avg_response_size,
+        rollup(pct_agg)                                    AS pct_agg
+      FROM requests_raw_5s
+      GROUP BY 1, 2, 3, 4, 5, 6, 7
+      WITH NO DATA;
+    `);
+
+    await queryRunner.query(`
+      CREATE MATERIALIZED VIEW IF NOT EXISTS requests_raw_5m
+      WITH (timescaledb.continuous) AS
+      SELECT
+        time_bucket('5 minutes'::interval, bucket)         AS bucket,
+        system_under_test,
+        test_environment,
+        scenario_name,
+        sampler_name,
+        transaction_name,
+        location,
+        sum(n)::bigint                                     AS n,
+        sum(n_ok)::bigint                                  AS n_ok,
+        sum(n_err)::bigint                                 AS n_err,
+        sum(avg_rt * n) / NULLIF(sum(n), 0)                AS avg_rt,
+        min(min_rt)                                        AS min_rt,
+        max(max_rt)                                        AS max_rt,
+        sum(avg_connect * n) / NULLIF(sum(n), 0)           AS avg_connect,
+        sum(avg_latency * n) / NULLIF(sum(n), 0)           AS avg_latency,
+        sum(bytes_in)::bigint                              AS bytes_in,
+        sum(bytes_out)::bigint                             AS bytes_out,
+        sum(avg_response_size * n) / NULLIF(sum(n), 0)     AS avg_response_size,
+        rollup(pct_agg)                                    AS pct_agg
+      FROM requests_raw_1m
+      GROUP BY 1, 2, 3, 4, 5, 6, 7
+      WITH NO DATA;
+    `);
+
+    console.log('  Created requests_raw_5s / requests_raw_1m / requests_raw_5m');
   }
 
   public async down(_queryRunner: QueryRunner): Promise<void> {
