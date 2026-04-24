@@ -55,6 +55,7 @@ export default function ApdexScenarioTable({
 
   const defaultThreshold = result.requirement?.threshold_ms || 500;
   const totalTargets = result.targets.length;
+  const excludeRampUp = result.exclude_ramp_up_time !== false;
   let globalIdx = 0;
 
   return (
@@ -105,7 +106,7 @@ export default function ApdexScenarioTable({
                       isEvenRow={idx % 2 === 0}
                       defaultThreshold={defaultThreshold}
                       scenario={target.scenario_name || scenario}
-                      onToggle={() => onToggleTransaction(transactionKey, transactionName)}
+                      onToggle={() => onToggleTransaction(transactionKey, transactionName, excludeRampUp)}
                       onOpenActionMenu={(e) => onOpenApdexActionMenu(
                         e,
                         transactionName,
@@ -126,6 +127,7 @@ export default function ApdexScenarioTable({
                         error={transactionSamplesError[transactionKey]}
                         hasDistributedTracing={hasDistributedTracing}
                         hasDynatrace={hasDynatrace}
+                        excludeRampUp={excludeRampUp}
                         onOpenRequestActionMenu={onOpenRequestActionMenu}
                       />
                     </Collapse>

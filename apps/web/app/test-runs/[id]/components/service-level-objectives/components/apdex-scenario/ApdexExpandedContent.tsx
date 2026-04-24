@@ -85,6 +85,7 @@ export function ApdexExpandedContent({
   error,
   hasDistributedTracing,
   hasDynatrace,
+  excludeRampUp,
   onOpenRequestActionMenu,
 }: ApdexExpandedContentProps) {
   const transactionName = target.transaction_name || target.target || '';
@@ -144,6 +145,7 @@ export function ApdexExpandedContent({
             scenarioName={scenario}
             hasDistributedTracing={hasDistributedTracing}
             hasDynatrace={hasDynatrace}
+            excludeRampUp={excludeRampUp}
             onOpenRequestActionMenu={onOpenRequestActionMenu}
           />
         )}

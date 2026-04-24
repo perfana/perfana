@@ -19,9 +19,12 @@ export function useTestRunsFilters({ organizationId }: UseTestRunsFiltersProps) 
   const router = useRouter();
   const searchParams = useSearchParams();
 
-  const [systemFilter, setSystemFilter] = useState<string>('');
-  const [environmentFilter, setEnvironmentFilter] = useState<string>('');
-  const [workloadFilter, setWorkloadFilter] = useState<string>('');
+  // Lazy-init from URL so the state-to-URL sync effect below doesn't wipe
+  // incoming ?system=...&environment=...&workload=... params before the
+  // URL-to-state effect can run.
+  const [systemFilter, setSystemFilter] = useState<string>(() => searchParams?.get('system') || '');
+  const [environmentFilter, setEnvironmentFilter] = useState<string>(() => searchParams?.get('environment') || '');
+  const [workloadFilter, setWorkloadFilter] = useState<string>(() => searchParams?.get('workload') || '');
   const [filterOptions, setFilterOptions] = useState<FilterOptions>({
     systems: [],
     environments: [],

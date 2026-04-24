@@ -82,7 +82,7 @@ export interface UseSLOSectionReturn {
   setSelectedTarget: React.Dispatch<React.SetStateAction<Map<string, string>>>;
 
   // Transaction actions
-  toggleTransactionExpanded: (transactionKey: string, transactionName: string) => Promise<void>;
+  toggleTransactionExpanded: (transactionKey: string, transactionName: string, excludeRampUp: boolean) => Promise<void>;
 
   // Menu actions
   handleOpenRequestActionMenu: (event: React.MouseEvent<HTMLElement>, transactionName: string, scenarioName: string | undefined, samplerName: string) => void;
@@ -341,7 +341,7 @@ export function useSLOSection({
   }, []);
 
   // Toggle transaction expanded
-  const toggleTransactionExpanded = useCallback(async (transactionKey: string, transactionName: string) => {
+  const toggleTransactionExpanded = useCallback(async (transactionKey: string, transactionName: string, excludeRampUp: boolean) => {
     const isExpanding = !expandedTransactions.has(transactionKey);
 
     setExpandedTransactions(prev => {
@@ -359,8 +359,9 @@ export function useSLOSection({
       setTransactionSamplesError(prev => ({ ...prev, [transactionKey]: '' }));
 
       try {
+        const query = excludeRampUp ? '?excludeRampUp=true' : '';
         const response = await authenticatedFetch(
-          `/test-runs/${testRunId}/transactions/${encodeURIComponent(transactionName)}/samples`,
+          `/test-runs/${testRunId}/transactions/${encodeURIComponent(transactionName)}/samples${query}`,
           { method: 'GET', headers: { 'Content-Type': 'application/json' } }
         );
 

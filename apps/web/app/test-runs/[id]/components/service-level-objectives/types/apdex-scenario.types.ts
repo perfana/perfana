@@ -37,6 +37,7 @@ export interface ApdexResult {
   requirement?: {
     threshold_ms?: number;
   };
+  exclude_ramp_up_time?: boolean;
 }
 
 export interface ApdexScenarioTableProps {
@@ -45,7 +46,7 @@ export interface ApdexScenarioTableProps {
   sortConfig: Map<string, SortConfig>;
   onSort: (resultKey: string, field: SortConfig['field']) => void;
   expandedTransactions: Set<string>;
-  onToggleTransaction: (transactionKey: string, transactionName: string) => void;
+  onToggleTransaction: (transactionKey: string, transactionName: string, excludeRampUp: boolean) => void;
   transactionSamples: Record<string, TransactionSample[]>;
   loadingTransactionSamples: Record<string, boolean>;
   transactionSamplesError: Record<string, string>;
@@ -103,6 +104,7 @@ export interface ApdexExpandedContentProps {
   error?: string;
   hasDistributedTracing: boolean;
   hasDynatrace: boolean;
+  excludeRampUp: boolean;
   onOpenRequestActionMenu: (
     e: React.MouseEvent<HTMLElement>,
     transactionName: string,
@@ -118,6 +120,7 @@ export interface RequestsBreakdownTableProps {
   scenarioName: string;
   hasDistributedTracing: boolean;
   hasDynatrace: boolean;
+  excludeRampUp: boolean;
   onOpenRequestActionMenu: (
     e: React.MouseEvent<HTMLElement>,
     transactionName: string,
