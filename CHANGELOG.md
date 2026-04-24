@@ -4,6 +4,11 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
+## [0.2.45.0] - 2026-04-24
+
+### Added
+- Space-partition dimension `by_hash('system_under_test', 4)` added to the `requests_raw`, `requests_error`, and `transactions` hypertables (migration `1777300000000-AddSpaceDimensionToRequestHypertables`). Scope is new-chunk behavior only — existing chunks keep their single-partition layout, so the practical win lands as traffic rolls forward and new chunks are created. The benefit is strongest on deployments with several concurrently-active SUTs: the planner can prune non-matching hash buckets on SUT-filtered queries before touching chunk data, and per-chunk decompression on aggregation queries is scoped to a single hash bucket instead of mixing rows from every SUT in the chunk. Operators wanting retroactive partitioning on existing chunks must follow the documented offline rebuild procedure (`docs-site/content/Operations/Hypertable Space Rebuild.md`); most installs can ignore the rebuild and still pick up the benefit over time. The partition count defaults to 4 and is overridable at migration time via `HYPERTABLE_SPACE_PARTITIONS` (range 1–64); adjust later with `set_number_partitions()` rather than re-running the migration. Idempotent via `if_not_exists => TRUE` plus an explicit check against `timescaledb_information.dimensions`; each table is wrapped in a savepoint so an older-TimescaleDB-version rejection on one table (e.g. compressed-chunk edge cases) doesn't abort the rest of the migration. Compression settings (segmentby `test_run_id, transaction_name`) are unaffected — space partitioning sits at chunk-boundary level and is orthogonal to per-chunk columnar layout. Closes #145.
+
 ## [0.2.44.0] - 2026-04-24
 
 ### Added

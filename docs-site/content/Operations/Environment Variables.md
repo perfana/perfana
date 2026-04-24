@@ -50,6 +50,7 @@ All configuration is managed through environment variables, loaded from `.env.lo
 | `NODE_ENV` | `development` | Environment mode |
 | `SWAGGER_ENABLED` | `true` | Enable Swagger docs |
 | `CORS_ORIGINS` | `http://localhost:3000` | Allowed CORS origins |
+| `HYPERTABLE_SPACE_PARTITIONS` | `4` | Hash partition count applied to `system_under_test` on `requests_raw`, `requests_error`, `transactions` on fresh installs. Read once at migration time; range 2–64, defaults to 4. (`1` is rejected — it's functionally identical to no space dimension but leaves permanent dimension metadata on the hypertable.) See [[Hypertable Space Rebuild]]. |
 
 ## Frontend
 
