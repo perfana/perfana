@@ -45,6 +45,11 @@ export default function AnomalyDetectionTable({
   hasDynatrace = false,
   onDrillDownToDistributedTracing,
   onDrillDownToDynatrace,
+  sortBy,
+  sortDirection,
+  diffSortMode,
+  onSortChange,
+  onDiffSortModeChange,
 }: AnomalyDetectionTableProps) {
   const handlers = useAnomalyTableHandlers({
     testRunId,
@@ -69,7 +74,13 @@ export default function AnomalyDetectionTable({
         borderColor: alpha(theme.palette.primary.main, 0.15)
       })}>
         {/* Table Header */}
-        <AnomalyTableHeader />
+        <AnomalyTableHeader
+          sortBy={sortBy}
+          sortDirection={sortDirection}
+          diffSortMode={diffSortMode}
+          onSortChange={onSortChange}
+          onDiffSortModeChange={onDiffSortModeChange}
+        />
 
         {/* No Results Message */}
         {paginatedData.length === 0 && filteredData.length === 0 && (

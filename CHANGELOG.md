@@ -4,6 +4,11 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
+## [0.2.44.0] - 2026-04-24
+
+### Added
+- Sortable column headers in the Anomaly Detection results table. Click Dashboard, Panel, Metric, Classification, Conclusion, Test Value, Control Group, or Difference to sort ascending; click again to reverse. Unsorted columns show a neutral indicator; the active column shows an up/down arrow. The Difference column has an extra **Abs / %** toggle so you can sort on either the raw difference or the percentage change relative to the control group (`(diff / control) * 100`). Sorting runs before pagination so page 1 always shows the top of the sort; changing sort or mode resets to page 1. Rows with missing values or a zero control group sort to the end regardless of direction. Headers are keyboard-accessible (Enter/Space), focus-visible, and carry tooltip hints.
+
 ## [0.2.43.1] - 2026-04-24
 
 ### Changed

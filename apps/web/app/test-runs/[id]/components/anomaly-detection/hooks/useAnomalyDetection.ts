@@ -16,6 +16,37 @@ const KNOWN_CLASSIFICATIONS = new Set([
   'business_metric', 'infrastructure_metric', 'application_metric'
 ]);
 
+export type AnomalySortKey =
+  | 'dashboard_label'
+  | 'panel_title'
+  | 'metric_name'
+  | 'classification'
+  | 'conclusion_label'
+  | 'test_value'
+  | 'control_group_value'
+  | 'difference';
+
+export type SortDirection = 'asc' | 'desc';
+export type DiffSortMode = 'absolute' | 'percentage';
+
+const NUMERIC_SORT_KEYS: ReadonlySet<AnomalySortKey> = new Set([
+  'test_value',
+  'control_group_value',
+  'difference',
+]);
+
+function toNumberOrNaN(value: string | null | undefined): number {
+  if (value === null || value === undefined || value === '') return NaN;
+  return parseFloat(value);
+}
+
+function getDifferencePercentage(item: AnomalyData): number {
+  const diff = toNumberOrNaN(item.difference);
+  const control = toNumberOrNaN(item.control_group_value);
+  if (isNaN(diff) || isNaN(control) || control === 0) return NaN;
+  return (diff / control) * 100;
+}
+
 interface UseAnomalyDetectionProps {
   testRun: TestRun | null;
   testRunId: string;
@@ -55,6 +86,13 @@ interface UseAnomalyDetectionReturn {
   setDashboardFilter: (filter: string) => void;
   panelFilter: string;
   setPanelFilter: (filter: string) => void;
+
+  // Sort state
+  sortBy: AnomalySortKey | null;
+  sortDirection: SortDirection;
+  diffSortMode: DiffSortMode;
+  handleSortChange: (key: AnomalySortKey) => void;
+  handleDiffSortModeChange: (mode: DiffSortMode) => void;
 
   // Row state
   expandedRows: Set<string>;
@@ -145,6 +183,11 @@ export function useAnomalyDetection({
   const [classificationFilter, setClassificationFilter] = useState<string>('all');
   const [dashboardFilter, setDashboardFilter] = useState<string>('all');
   const [panelFilter, setPanelFilter] = useState<string>('all');
+
+  // Sort state
+  const [sortBy, setSortBy] = useState<AnomalySortKey | null>(null);
+  const [sortDirection, setSortDirection] = useState<SortDirection>('asc');
+  const [diffSortMode, setDiffSortMode] = useState<DiffSortMode>('absolute');
 
   // Row interaction state
   const [expandedRows, setExpandedRows] = useState<Set<string>>(new Set());
@@ -323,7 +366,63 @@ export function useAnomalyDetection({
   }, [anomalyData, searchQuery, conclusionFilter, classificationFilter, dashboardFilter, panelFilter]);
 
   const filteredData = useMemo(() => getFilteredData(), [getFilteredData]);
-  const paginatedData = useMemo(() => filteredData.slice(page * rowsPerPage, page * rowsPerPage + rowsPerPage), [filteredData, page, rowsPerPage]);
+
+  const sortedData = useMemo(() => {
+    if (!sortBy) return filteredData;
+    const multiplier = sortDirection === 'asc' ? 1 : -1;
+    const isNumeric = NUMERIC_SORT_KEYS.has(sortBy);
+
+    const getNumericValue = (item: AnomalyData): number => {
+      if (sortBy === 'difference' && diffSortMode === 'percentage') {
+        return getDifferencePercentage(item);
+      }
+      return toNumberOrNaN(item[sortBy as 'test_value' | 'control_group_value' | 'difference']);
+    };
+
+    const getStringValue = (item: AnomalyData): string => {
+      const raw = item[sortBy as Exclude<AnomalySortKey, 'test_value' | 'control_group_value' | 'difference'>];
+      return (raw ?? '').toString().toLowerCase();
+    };
+
+    return [...filteredData].sort((a, b) => {
+      if (isNumeric) {
+        const aVal = getNumericValue(a);
+        const bVal = getNumericValue(b);
+        const aNaN = isNaN(aVal);
+        const bNaN = isNaN(bVal);
+        if (aNaN && bNaN) return 0;
+        if (aNaN) return 1;  // NaN always sorts to the end
+        if (bNaN) return -1;
+        return (aVal - bVal) * multiplier;
+      }
+      const aVal = getStringValue(a);
+      const bVal = getStringValue(b);
+      if (aVal < bVal) return -1 * multiplier;
+      if (aVal > bVal) return 1 * multiplier;
+      return 0;
+    });
+  }, [filteredData, sortBy, sortDirection, diffSortMode]);
+
+  const paginatedData = useMemo(() => sortedData.slice(page * rowsPerPage, page * rowsPerPage + rowsPerPage), [sortedData, page, rowsPerPage]);
+
+  const handleSortChange = useCallback((key: AnomalySortKey) => {
+    setSortBy(prev => {
+      if (prev === key) {
+        setSortDirection(d => (d === 'asc' ? 'desc' : 'asc'));
+        return prev;
+      }
+      setSortDirection('asc');
+      return key;
+    });
+    setPage(0);
+  }, []);
+
+  const handleDiffSortModeChange = useCallback((mode: DiffSortMode) => {
+    setDiffSortMode(mode);
+    if (sortBy === 'difference') {
+      setPage(0);
+    }
+  }, [sortBy]);
 
   // Dropdown options
   const conclusionsForDropdown = useMemo(() => [...new Set(anomalyData.map(item => item.conclusion_label))], [anomalyData]);
@@ -620,6 +719,13 @@ export function useAnomalyDetection({
     setDashboardFilter,
     panelFilter,
     setPanelFilter,
+
+    // Sort state
+    sortBy,
+    sortDirection,
+    diffSortMode,
+    handleSortChange,
+    handleDiffSortModeChange,
 
     // Row state
     expandedRows,
