@@ -108,6 +108,73 @@ export class AddContinuousAggregates1777500000000 implements MigrationInterface 
     `);
 
     console.log('  Created requests_raw_5s / requests_raw_1m / requests_raw_5m');
+
+    // --- transactions family -------------------------------------------------
+
+    await queryRunner.query(`
+      CREATE MATERIALIZED VIEW IF NOT EXISTS transactions_5s
+      WITH (timescaledb.continuous) AS
+      SELECT
+        time_bucket('5 seconds'::interval, time)          AS bucket,
+        system_under_test,
+        test_environment,
+        scenario_name,
+        transaction_name,
+        count(*)                                           AS n,
+        count(*) FILTER (WHERE success)                    AS n_ok,
+        count(*) FILTER (WHERE NOT success)                AS n_err,
+        avg(response_time)                                 AS avg_rt,
+        min(response_time)                                 AS min_rt,
+        max(response_time)                                 AS max_rt,
+        percentile_agg(response_time::double precision)    AS pct_agg
+      FROM transactions
+      GROUP BY 1, 2, 3, 4, 5
+      WITH NO DATA;
+    `);
+
+    await queryRunner.query(`
+      CREATE MATERIALIZED VIEW IF NOT EXISTS transactions_1m
+      WITH (timescaledb.continuous) AS
+      SELECT
+        time_bucket('1 minute'::interval, bucket)          AS bucket,
+        system_under_test,
+        test_environment,
+        scenario_name,
+        transaction_name,
+        sum(n)::bigint                                     AS n,
+        sum(n_ok)::bigint                                  AS n_ok,
+        sum(n_err)::bigint                                 AS n_err,
+        sum(avg_rt * n) / NULLIF(sum(n), 0)                AS avg_rt,
+        min(min_rt)                                        AS min_rt,
+        max(max_rt)                                        AS max_rt,
+        rollup(pct_agg)                                    AS pct_agg
+      FROM transactions_5s
+      GROUP BY 1, 2, 3, 4, 5
+      WITH NO DATA;
+    `);
+
+    await queryRunner.query(`
+      CREATE MATERIALIZED VIEW IF NOT EXISTS transactions_5m
+      WITH (timescaledb.continuous) AS
+      SELECT
+        time_bucket('5 minutes'::interval, bucket)         AS bucket,
+        system_under_test,
+        test_environment,
+        scenario_name,
+        transaction_name,
+        sum(n)::bigint                                     AS n,
+        sum(n_ok)::bigint                                  AS n_ok,
+        sum(n_err)::bigint                                 AS n_err,
+        sum(avg_rt * n) / NULLIF(sum(n), 0)                AS avg_rt,
+        min(min_rt)                                        AS min_rt,
+        max(max_rt)                                        AS max_rt,
+        rollup(pct_agg)                                    AS pct_agg
+      FROM transactions_1m
+      GROUP BY 1, 2, 3, 4, 5
+      WITH NO DATA;
+    `);
+
+    console.log('  Created transactions_5s / transactions_1m / transactions_5m');
   }
 
   public async down(_queryRunner: QueryRunner): Promise<void> {
