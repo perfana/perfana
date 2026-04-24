@@ -233,6 +233,36 @@ export class AddContinuousAggregates1777500000000 implements MigrationInterface 
     `);
 
     console.log('  Created requests_error_5s / requests_error_1m / requests_error_5m');
+
+    // --- refresh policies ----------------------------------------------------
+    // 5s CAGGs refresh every 30 s from raw. `end_offset` of 1 minute keeps the
+    // refresh job out of the current chunk's write path. Hierarchical views
+    // (1m, 5m) use a larger start_offset so their source CAGG has been
+    // refreshed first.
+
+    const refreshPolicies = [
+      { view: 'requests_raw_5s',   start: '1 hour',  end: '1 minute',  schedule: '30 seconds' },
+      { view: 'requests_raw_1m',   start: '2 hours', end: '2 minutes', schedule: '1 minute' },
+      { view: 'requests_raw_5m',   start: '1 day',   end: '5 minutes', schedule: '5 minutes' },
+      { view: 'transactions_5s',   start: '1 hour',  end: '1 minute',  schedule: '30 seconds' },
+      { view: 'transactions_1m',   start: '2 hours', end: '2 minutes', schedule: '1 minute' },
+      { view: 'transactions_5m',   start: '1 day',   end: '5 minutes', schedule: '5 minutes' },
+      { view: 'requests_error_5s', start: '1 hour',  end: '1 minute',  schedule: '30 seconds' },
+      { view: 'requests_error_1m', start: '2 hours', end: '2 minutes', schedule: '1 minute' },
+      { view: 'requests_error_5m', start: '1 day',   end: '5 minutes', schedule: '5 minutes' },
+    ];
+
+    for (const p of refreshPolicies) {
+      await queryRunner.query(`
+        SELECT add_continuous_aggregate_policy('${p.view}',
+          start_offset      => INTERVAL '${p.start}',
+          end_offset        => INTERVAL '${p.end}',
+          schedule_interval => INTERVAL '${p.schedule}',
+          if_not_exists     => TRUE
+        );
+      `);
+      console.log(`  Refresh policy on ${p.view}: every ${p.schedule}, window ${p.start} → ${p.end}`);
+    }
   }
 
   public async down(_queryRunner: QueryRunner): Promise<void> {
