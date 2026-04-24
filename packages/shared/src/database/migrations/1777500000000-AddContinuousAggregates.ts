@@ -175,6 +175,64 @@ export class AddContinuousAggregates1777500000000 implements MigrationInterface 
     `);
 
     console.log('  Created transactions_5s / transactions_1m / transactions_5m');
+
+    // --- requests_error family -----------------------------------------------
+
+    await queryRunner.query(`
+      CREATE MATERIALIZED VIEW IF NOT EXISTS requests_error_5s
+      WITH (timescaledb.continuous) AS
+      SELECT
+        time_bucket('5 seconds'::interval, time)          AS bucket,
+        system_under_test,
+        test_environment,
+        scenario_name,
+        sampler_name,
+        transaction_name,
+        node_name,
+        response_code,
+        count(*)                                           AS n
+      FROM requests_error
+      GROUP BY 1, 2, 3, 4, 5, 6, 7, 8
+      WITH NO DATA;
+    `);
+
+    await queryRunner.query(`
+      CREATE MATERIALIZED VIEW IF NOT EXISTS requests_error_1m
+      WITH (timescaledb.continuous) AS
+      SELECT
+        time_bucket('1 minute'::interval, bucket)          AS bucket,
+        system_under_test,
+        test_environment,
+        scenario_name,
+        sampler_name,
+        transaction_name,
+        node_name,
+        response_code,
+        sum(n)::bigint                                     AS n
+      FROM requests_error_5s
+      GROUP BY 1, 2, 3, 4, 5, 6, 7, 8
+      WITH NO DATA;
+    `);
+
+    await queryRunner.query(`
+      CREATE MATERIALIZED VIEW IF NOT EXISTS requests_error_5m
+      WITH (timescaledb.continuous) AS
+      SELECT
+        time_bucket('5 minutes'::interval, bucket)         AS bucket,
+        system_under_test,
+        test_environment,
+        scenario_name,
+        sampler_name,
+        transaction_name,
+        node_name,
+        response_code,
+        sum(n)::bigint                                     AS n
+      FROM requests_error_1m
+      GROUP BY 1, 2, 3, 4, 5, 6, 7, 8
+      WITH NO DATA;
+    `);
+
+    console.log('  Created requests_error_5s / requests_error_1m / requests_error_5m');
   }
 
   public async down(_queryRunner: QueryRunner): Promise<void> {
