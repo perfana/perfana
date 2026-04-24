@@ -6607,13 +6607,6 @@ CREATE INDEX idx_url_patterns_created_by ON public.url_patterns USING btree (cre
 
 
 --
--- Name: idx_url_patterns_normalized_url; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX idx_url_patterns_normalized_url ON public.url_patterns USING btree (normalized_url);
-
-
---
 -- Name: idx_url_patterns_organization_id; Type: INDEX; Schema: public; Owner: -
 --
 
