@@ -4,6 +4,11 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
+## [0.2.47.1] - 2026-04-26
+
+### Changed
+- Pilot of a `withOrgFilter(userId, roles, authzService)` helper for the recurring "if global admin, return everything; else filter by accessible org IDs" pattern (`apps/api/src/common/utils/with-org-filter.ts`). Migrates one method — `DynatraceService.findAll` — as proof-of-pattern; the other Bucket A sites enumerated by the 2026-04-26 codebase audit (`docs/superpowers/audits/2026-04-26-audit-decisions.md`) stay on the original inline pattern and can adopt incrementally per-service. The audit's site re-verification on `dynatrace.service.ts` found 1 truly-canonical bypass-filter site of the 25 originally flagged; the other 24 were debug-log captures or per-resource guards left untouched. No behaviour change — debug logs preserve their `isGlobalAdmin=true/false` semantics by deriving the boolean from `orgIds === null`. Tests: 3 new helper tests cover admin/non-admin/empty-membership cases; full `apps/api` suite (4256 tests) green; type-check and lint clean.
+
 ## [0.2.47.0] - 2026-04-24
 
 ### Added
