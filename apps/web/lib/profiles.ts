@@ -238,24 +238,6 @@ export async function createProfile(data: CreateProfileData): Promise<Profile> {
 }
 
 /**
- * Updates an existing profile
- */
-export async function updateProfile(id: string, data: UpdateProfileData): Promise<Profile> {
-  const response = await authenticatedFetch(`/profiles/${id}`, {
-    method: 'PUT',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(data),
-  });
-
-  if (!response.ok) {
-    const error = await response.json();
-    throw new Error(error.message || 'Failed to update profile');
-  }
-
-  return response.json();
-}
-
-/**
  * Deletes a profile
  */
 export async function deleteProfile(id: string): Promise<void> {

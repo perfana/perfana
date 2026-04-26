@@ -167,23 +167,3 @@ export async function compareTraces(
   return response.json();
 }
 
-/**
- * Check Tempo health
- */
-export async function checkTempoHealth(
-  tracingInstanceId: string
-): Promise<{ success: boolean; message: string }> {
-  const response = await authenticatedFetch('/tempo/health', {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-    },
-    body: JSON.stringify({ tracingInstanceId }),
-  });
-
-  if (!response.ok) {
-    return { success: false, message: `Health check failed: ${response.status}` };
-  }
-
-  return response.json();
-}
