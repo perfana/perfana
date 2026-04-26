@@ -7,6 +7,7 @@ import { UpdateDynatraceQueryDto } from './dto/update-dynatrace-query.dto';
 import { CreateEntityMappingDto } from './dto/create-entity-mapping.dto';
 import { HostPropertiesResponse, HostMetricsResponse, HostProblemResponse, TimeSeriesData } from './dto/host.dto';
 import { AuthorizationService } from '../../common/services/authorization.service';
+import { withOrgFilter } from '../../common/utils/with-org-filter';
 import { validateExternalUrl } from '../../common/security/url-validator';
 import axios from 'axios';
 import { randomUUID } from 'crypto';
@@ -64,9 +65,9 @@ export class DynatraceService {
    * Global admins see all configurations. Legacy configs with null organization_id are accessible to all users.
    */
   async findAll(userId: string, roles: string[], organizationId?: string) {
-    // Log authorization context for debugging
-    const isAdmin = this.authzService.isGlobalAdmin(roles);
-    this.logger.debug(`findAll: userId=${userId}, isGlobalAdmin=${isAdmin}, organizationId=${organizationId}`);
+    // Resolve accessible org IDs: null means global admin (no filter needed)
+    const orgIds = await withOrgFilter(userId, roles, this.authzService);
+    this.logger.debug(`findAll: userId=${userId}, isGlobalAdmin=${orgIds === null}, organizationId=${organizationId}`);
 
     // Get all configs first
     const allConfigs = await this.repository.findAll();
@@ -79,14 +80,11 @@ export class DynatraceService {
       );
       this.logger.debug(`Returning ${filteredConfigs.length} Dynatrace configs for org ${organizationId} (from ${allConfigs.length} total)`);
       return filteredConfigs.map(c => this.maskConfig(c));
-    } else if (!isAdmin) {
-      // Get accessible organizations for this user
-      const accessibleOrganizations = await this.authzService.getAccessibleOrganizations(userId);
-      this.logger.debug(`User ${userId} has access to ${accessibleOrganizations.length} organizations`);
-
-      // Filter to only show configs from accessible organizations OR legacy configs (null organization_id)
+    } else if (orgIds !== null) {
+      // Non-admin: filter to accessible organizations OR legacy configs (null organization_id)
+      this.logger.debug(`User ${userId} has access to ${orgIds.length} organizations`);
       const filteredConfigs = allConfigs.filter(config =>
-        !config.organizationId || accessibleOrganizations.includes(config.organizationId)
+        !config.organizationId || orgIds.includes(config.organizationId)
       );
 
       this.logger.debug(`Returning ${filteredConfigs.length} Dynatrace configs for user ${userId} (from ${allConfigs.length} total)`);
