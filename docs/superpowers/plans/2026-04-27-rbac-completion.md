@@ -470,6 +470,8 @@ git commit -m "feat(api): add pure CapabilitiesService that maps roles to capabi
 - Modify: `apps/api/src/common/services/authorization.service.spec.ts`
 - Modify: `apps/api/src/common/common.module.ts` (or wherever `AuthorizationService` is provided — verify during execution).
 
+**Signature decision (locked):** `getCapabilities(userId, roles, organizationId, teamId?)`. `roles` are the system roles from the JWT/API key, passed in by the caller. The service does NOT reach into request context — keeping it side-effect-free at this boundary makes it trivially testable and works identically for JWT- and API-key-authenticated calls (both flow through `KeycloakEnhancedAuthGuard.getRoles()` already). The controller in Task 3a.4 extracts `ctx.roles` via `@UserCtx()` and passes them through.
+
 - [ ] **Step 1: Write the failing test**
 
 Append to `apps/api/src/common/services/__tests__/authorization.service.spec.ts`:
@@ -480,30 +482,29 @@ describe('getCapabilities', () => {
   // doesn't inject CapabilitiesService, add it to the providers array of the
   // testing module setup.
 
-  it('returns global-admin capabilities when user has perfana-admin role', async () => {
-    // Arrange: user with global admin role, no org context required
-    const caps = await service.getCapabilities('user-1', null);
+  it('returns global-admin capabilities when caller passes perfana-admin', async () => {
+    const caps = await service.getCapabilities('user-1', ['perfana-admin'], null);
     expect(caps).toContain('integration:dynatrace:update');
     expect(caps).toContain('system:manage-users');
   });
 
   it('returns org-admin capabilities for an org-admin in the given org', async () => {
     // Arrange: user has organization_members row with role org-admin in 'org-a'
-    const caps = await service.getCapabilities('user-2', 'org-a');
+    const caps = await service.getCapabilities('user-2', ['perfana-user'], 'org-a');
     expect(caps).toContain('integration:dynatrace:update');
     expect(caps).toContain('org:manage-members');
     expect(caps).not.toContain('system:manage-users');
   });
 
   it('returns empty set when user has no membership in the org', async () => {
-    const caps = await service.getCapabilities('outsider', 'org-a');
+    const caps = await service.getCapabilities('outsider', ['perfana-user'], 'org-a');
     expect(caps).toEqual([]);
   });
 
   it('caches results: second call hits Redis, not the DB', async () => {
-    await service.getCapabilities('user-2', 'org-a');
-    const dbSpy = jest.spyOn(orgMemberRepository, 'find');
-    await service.getCapabilities('user-2', 'org-a');
+    await service.getCapabilities('user-2', ['perfana-user'], 'org-a');
+    const dbSpy = jest.spyOn(orgMemberRepository, 'findOne');
+    await service.getCapabilities('user-2', ['perfana-user'], 'org-a');
     expect(dbSpy).not.toHaveBeenCalled();
   });
 });
@@ -521,24 +522,31 @@ Expected: FAIL — `getCapabilities is not a function`.
 
 - [ ] **Step 3: Implement `getCapabilities`**
 
-In `apps/api/src/common/services/authorization.service.ts`, add a constructor injection of `CapabilitiesService` and append:
+In `apps/api/src/common/services/authorization.service.ts`, inject `CapabilitiesService` into the constructor and append:
 
 ```typescript
 import { CapabilitiesService } from './capabilities.service';
 import { CapabilityValue } from '../../constants/capabilities.constants';
+import { OrganizationRole, TeamRole } from '../../constants/roles.constants';
 
 // ... existing class body ...
 
   /**
    * Compute the user's flat capability set for the given organization context.
-   * Returns global-admin capabilities (every defined capability) when the user
-   * holds a system-admin role from the JWT.
+   * Returns global-admin capabilities (every defined capability) when the caller
+   * passes a system-admin role.
    *
-   * Cached by `(userId, organizationId)`; cache is invalidated on membership change
-   * via the existing `invalidateMembershipCache` flow.
+   * Cached by `(userId, organizationId, teamId)`; cache is invalidated on
+   * membership change via the existing `invalidateMembershipCache` flow.
+   *
+   * @param userId   User identity (Keycloak sub or `api-key:{id}`).
+   * @param roles    System roles from the JWT/API key (pass `ctx.roles` from `@UserCtx()`).
+   * @param organizationId  Organization scope, or `null` for global-only resolution.
+   * @param teamId   Optional team scope.
    */
   async getCapabilities(
     userId: string,
+    roles: string[],
     organizationId: string | null,
     teamId?: string | null,
   ): Promise<CapabilityValue[]> {
@@ -546,14 +554,13 @@ import { CapabilityValue } from '../../constants/capabilities.constants';
     const cached = await this.getCachedCapabilities(cacheKey);
     if (cached !== null) return cached;
 
-    const systemRoles = await this.loadSystemRoles(userId);
     const orgRoles = organizationId
       ? await this.loadOrgRoles(userId, organizationId)
       : [];
     const teamRoles = teamId ? await this.loadTeamRoles(userId, teamId) : [];
 
     const caps = this.capabilitiesService.compute({
-      systemRoles,
+      systemRoles: roles,
       orgRoles,
       teamRoles,
     });
@@ -586,14 +593,6 @@ import { CapabilityValue } from '../../constants/capabilities.constants';
     }
   }
 
-  private async loadSystemRoles(userId: string): Promise<string[]> {
-    // System roles come from the JWT, not the DB. Callers pass them in via
-    // a cached-per-request context. For the cache miss path we re-derive
-    // from the current request via a thread-local/AsyncLocalStorage helper
-    // initialized by the auth guard. See loadSystemRolesFromContext().
-    return this.loadSystemRolesFromContext(userId);
-  }
-
   private async loadOrgRoles(
     userId: string,
     organizationId: string,
@@ -612,7 +611,7 @@ import { CapabilityValue } from '../../constants/capabilities.constants';
   }
 ```
 
-> **Implementation note for the engineer:** `loadSystemRolesFromContext` is the one piece that needs care — system roles come from the JWT/API key, not from the DB. The simplest approach is to require callers to pass them: change the signature to `getCapabilities(userId, roles, organizationId, teamId?)`. That way the service stays pure-DB-aware and the controller does the JWT extraction (which it already does via `@UserCtx()`). **Refactor the spec and impl to use that signature** — `loadSystemRolesFromContext` is a placeholder that you should replace with the explicit-pass pattern before committing.
+> **Note for the engineer:** Do not introduce any `loadSystemRoles` helper or AsyncLocalStorage reach-back. Roles flow in as a parameter, full stop. If a caller can't easily get them, fix the caller — they probably already have `@UserCtx()` available.
 
 - [ ] **Step 4: Run test to verify it passes**
 
@@ -1075,34 +1074,70 @@ Every owned resource has a non-null `organization_id`. The "any authenticated us
 - Modify (later): `packages/shared/src/entities/dynatrace-config.entity.ts` — remove `nullable: true`.
 - Modify (later): `apps/api/src/modules/dynatrace/dynatrace.service.ts` — delete the `if (existing.organizationId)` branches in `update()` and `delete()`.
 
-Backfill migration sketch:
+**Chunking rule (mandatory for every Phase 4 backfill):** every backfill UPDATE on a table with >100k rows MUST run in chunks of 1,000 rows with a short `pg_sleep` between batches. A single unbounded `UPDATE … WHERE organization_id IS NULL` will hold an exclusive lock for minutes on hot tables (Test Runs is the obvious worst case but Application Dashboards, Grafana Dashboards, and Reports are all in the danger zone) and will block production traffic or time out under autovacuum contention. Even the small-table cases (Profiles, Notification Channels, Graph Presets) use the chunked pattern below — uniform shape, easier to copy-paste-adapt, no judgment call about "is this table big enough."
+
+Backfill migration sketch (chunked, copy this pattern verbatim for every entity):
 
 ```typescript
 import { MigrationInterface, QueryRunner } from 'typeorm';
 
 export class BackfillDynatraceConfigOrganizationId1700000000000 implements MigrationInterface {
   public async up(queryRunner: QueryRunner): Promise<void> {
-    // 1) Ensure an "Unowned" fallback org exists
+    // 1) Ensure an "Unowned" fallback org exists. This is a backstop — every
+    // row that lands in this org should be reported back to the caller and
+    // either reassigned or deleted before Phase 4 closes.
     await queryRunner.query(`
       INSERT INTO organizations (id, name, created_at, updated_at)
       VALUES ('00000000-0000-0000-0000-000000000001', 'Unowned (migration fallback)', NOW(), NOW())
       ON CONFLICT (id) DO NOTHING
     `);
 
-    // 2) Backfill from creator's first org membership
+    // 2) Chunked backfill. Loops 1k rows at a time, sleeps 100ms between
+    // batches to give autovacuum and concurrent writes room. SKIP LOCKED
+    // means a row another transaction is editing is left for the next pass
+    // instead of blocking. Idempotent — re-running is a no-op once every
+    // row has organization_id set.
     await queryRunner.query(`
-      UPDATE dynatrace_configs c
-      SET organization_id = COALESCE(
-        (
-          SELECT organization_id
-          FROM organization_members
-          WHERE user_id = c.created_by
-          LIMIT 1
-        ),
-        '00000000-0000-0000-0000-000000000001'
-      )
-      WHERE organization_id IS NULL
+      DO $$
+      DECLARE
+        rows_updated INTEGER := 1;
+      BEGIN
+        WHILE rows_updated > 0 LOOP
+          WITH chunk AS (
+            SELECT id
+            FROM dynatrace_configs
+            WHERE organization_id IS NULL
+            LIMIT 1000
+            FOR UPDATE SKIP LOCKED
+          )
+          UPDATE dynatrace_configs c
+          SET organization_id = COALESCE(
+            (
+              SELECT organization_id
+              FROM organization_members
+              WHERE user_id = c.created_by
+              LIMIT 1
+            ),
+            '00000000-0000-0000-0000-000000000001'
+          )
+          FROM chunk
+          WHERE c.id = chunk.id;
+          GET DIAGNOSTICS rows_updated = ROW_COUNT;
+          PERFORM pg_sleep(0.1);
+        END LOOP;
+      END $$;
     `);
+
+    // 3) Report how many rows landed in the "Unowned" backstop. Engineers
+    // running this migration should grep the migration output for this
+    // line and follow up if the count is non-zero.
+    const unownedCount = await queryRunner.query(`
+      SELECT COUNT(*)::int AS n
+      FROM dynatrace_configs
+      WHERE organization_id = '00000000-0000-0000-0000-000000000001'
+    `);
+    // eslint-disable-next-line no-console
+    console.log(`[backfill] dynatrace_configs in Unowned org: ${unownedCount[0].n}`);
   }
 
   public async down(queryRunner: QueryRunner): Promise<void> {
