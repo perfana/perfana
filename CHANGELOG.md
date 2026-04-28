@@ -4,6 +4,13 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
+## [0.2.47.3] - 2026-04-28
+
+### Added
+- **Per-resource `_permissions` field on Dynatrace config responses (RBAC Phase 3b pilot).** `GET /api/dynatrace`, `GET /api/dynatrace/:id`, and `GET /api/dynatrace/host/:host` now include `_permissions: { update: boolean, delete: boolean }` on every returned config. The boolean is computed server-side from the requesting user's capability set for the config's organization (`integration:dynatrace:update` / `integration:dynatrace:delete`); legacy configs with `organization_id IS NULL` short-circuit to `update: true, delete: true` to match existing service-level behavior (the Phase-4 escape hatch closes when `organization_id` becomes NOT NULL). Capability lookups are batched per unique organization across the result set, so a `findAll` returning N configs across M unique orgs costs M Redis hits, not N. The frontend (Phase 3b consumer, FE.1/FE.2/FE.3) reads this field directly to gate Configure/Delete buttons without a round-trip to `/me/permissions`. Pilot scope: Dynatrace only — Grafana, Pyroscope, and Tracing integrations stay on the original pattern until they adopt incrementally.
+- New `attachPermissions(resource | resources, permissionsMap)` serializer at `apps/api/src/common/serializers/with-permissions.serializer.ts`. Generic, supports single resource and array overloads, immutable input. Reused by every future endpoint that exposes per-row permissions.
+- `_permissions` field added to `DynatraceConfigDto` with `@ApiPropertyOptional` Swagger decoration so the Swagger UI at `/api/docs` reflects the field on `GET /api/dynatrace` and `GET /api/dynatrace/:id` responses.
+
 ## [0.2.47.2] - 2026-04-28
 
 ### Added
