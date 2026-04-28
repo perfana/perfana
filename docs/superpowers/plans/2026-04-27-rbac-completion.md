@@ -869,7 +869,283 @@ git add apps/api/src/common/services/authorization.service.ts apps/api/src/commo
 git commit -m "feat(api): invalidate capability cache on membership changes"
 ```
 
-### Task 3a.6: Phase 3a integration smoke test + ship
+### Task 3a.6: Migration tooling (lint + burndown + drift check + date gate)
+
+The capabilities API is foundation; without scaffolding, Phase 3c (rolling capabilities through the 102 deferred Bucket A sites + 14 Bucket B sites + removing the 13 local `private isGlobalAdmin()` wrappers) becomes the half-shipped pattern that haunts the codebase forever. This task installs five mechanisms that make Phase 3c self-driving instead of dependent on someone remembering to do it.
+
+**Files:**
+- Create: `apps/api/eslint-rules/no-direct-is-global-admin.js` — custom ESLint rule.
+- Create: `apps/api/eslint-rules/no-direct-is-global-admin.spec.js` — rule tests.
+- Modify: `apps/api/.eslintrc.js` (or `eslint.config.mjs` — verify during execution) — register the rule + grandfathered file allowlist.
+- Create: `apps/api/.rbac-migration-allowlist.json` — generated from the audit log; lists the 116 files that legally still call `authzService.isGlobalAdmin(...)` directly. Shrinks as Phase 3c progresses.
+- Modify: `docs/superpowers/audits/2026-04-26-audit-decisions.md` — add a "Migration progress" section at the top.
+- Create: `CONTRIBUTING.md` (if missing) or modify it — add an "RBAC migration" section.
+- Create: `docs/superpowers/scheduled-agents/rbac-drift-check.md` — instructions for the recurring `/schedule` agent that catches drift the lint rule misses.
+- Modify: `CLAUDE.md` — update the "Phase 3" status row to reference the burndown.
+
+- [ ] **Step 1: Generate the grandfathered allowlist from the audit log**
+
+```bash
+# Extract every file path from the audit log that has at least one Bucket A or Bucket B site.
+# This becomes the lint rule's allowlist — these files are exempt until they're migrated.
+node <<'JS' > apps/api/.rbac-migration-allowlist.json
+const fs = require('fs');
+const log = fs.readFileSync('docs/superpowers/audits/2026-04-26-audit-decisions.md', 'utf8');
+const re = /`(apps\/api\/src\/[^:`]+\.ts)/g;
+const paths = new Set([...log.matchAll(re)].map((m) => m[1]));
+console.log(JSON.stringify(Array.from(paths).sort(), null, 2));
+JS
+wc -l apps/api/.rbac-migration-allowlist.json
+```
+
+Expected: ~116 unique file paths (one per file containing a Bucket A or B site), sorted alphabetically.
+
+- [ ] **Step 2: Write the failing lint-rule test**
+
+Create `apps/api/eslint-rules/no-direct-is-global-admin.spec.js`:
+
+```javascript
+const { RuleTester } = require('eslint');
+const rule = require('./no-direct-is-global-admin');
+
+const ruleTester = new RuleTester({
+  parser: require.resolve('@typescript-eslint/parser'),
+  parserOptions: { ecmaVersion: 2022, sourceType: 'module' },
+});
+
+ruleTester.run('no-direct-is-global-admin', rule, {
+  valid: [
+    // The AuthorizationService itself is allowed to define and use isGlobalAdmin.
+    {
+      filename: 'apps/api/src/common/services/authorization.service.ts',
+      code: `class A { isGlobalAdmin(roles) { return roles.includes('admin'); } }`,
+    },
+    // Capabilities-based check is the new pattern, never flagged.
+    {
+      filename: 'apps/api/src/modules/foo/foo.service.ts',
+      code: `class B { check(caps) { return caps.includes('foo:bar'); } }`,
+    },
+    // Grandfathered file (from .rbac-migration-allowlist.json) — flagged but tolerated.
+    {
+      filename: 'apps/api/src/modules/dynatrace/dynatrace.service.ts',
+      code: `class C { x(roles) { return this.authzService.isGlobalAdmin(roles); } }`,
+    },
+  ],
+  invalid: [
+    // New file (not on allowlist) using the old pattern → fail.
+    {
+      filename: 'apps/api/src/modules/newfeature/newfeature.service.ts',
+      code: `class D { x(roles) { return this.authzService.isGlobalAdmin(roles); } }`,
+      errors: [
+        {
+          messageId: 'noDirectIsGlobalAdmin',
+          data: { file: 'apps/api/src/modules/newfeature/newfeature.service.ts' },
+        },
+      ],
+    },
+  ],
+});
+```
+
+- [ ] **Step 3: Run test to verify it fails**
+
+```bash
+cd apps/api && npx jest eslint-rules/no-direct-is-global-admin.spec.js
+```
+
+Expected: FAIL — rule does not exist.
+
+- [ ] **Step 4: Implement the rule**
+
+Create `apps/api/eslint-rules/no-direct-is-global-admin.js`:
+
+```javascript
+const fs = require('fs');
+const path = require('path');
+
+let allowlist = null;
+function loadAllowlist(cwd) {
+  if (allowlist !== null) return allowlist;
+  try {
+    const p = path.join(cwd, 'apps/api/.rbac-migration-allowlist.json');
+    allowlist = new Set(JSON.parse(fs.readFileSync(p, 'utf8')));
+  } catch {
+    allowlist = new Set();
+  }
+  return allowlist;
+}
+
+const AUTHORIZATION_SERVICE = 'apps/api/src/common/services/authorization.service.ts';
+
+module.exports = {
+  meta: {
+    type: 'problem',
+    docs: {
+      description:
+        'Forbid new direct calls to authzService.isGlobalAdmin(). Use AuthorizationService.getCapabilities() or the @RequiresCapability decorator. Grandfathered files (from the 2026-04-26 audit) are allowed via apps/api/.rbac-migration-allowlist.json.',
+    },
+    messages: {
+      noDirectIsGlobalAdmin:
+        'Direct authzService.isGlobalAdmin() is deprecated. Use getCapabilities() or @RequiresCapability. See docs/superpowers/audits/2026-04-26-audit-decisions.md. To migrate this file, remove it from .rbac-migration-allowlist.json.',
+    },
+    schema: [],
+  },
+  create(context) {
+    const filename = context.getFilename();
+    const cwd = context.getCwd ? context.getCwd() : process.cwd();
+    const relPath = path.relative(cwd, filename);
+
+    // The AuthorizationService itself is allowed.
+    if (relPath === AUTHORIZATION_SERVICE) return {};
+
+    // Grandfathered files: tolerate (they're on the burndown list).
+    const allow = loadAllowlist(cwd);
+    if (allow.has(relPath)) return {};
+
+    return {
+      // Match `<anything>.isGlobalAdmin(...)` calls.
+      "CallExpression[callee.property.name='isGlobalAdmin']"(node) {
+        context.report({ node, messageId: 'noDirectIsGlobalAdmin' });
+      },
+    };
+  },
+};
+```
+
+- [ ] **Step 5: Register the rule**
+
+Modify `apps/api/.eslintrc.js` (or whichever ESLint config the API uses — verify with `ls apps/api/.eslint*` and `ls apps/api/eslint*` during execution):
+
+```javascript
+// Add to the existing config
+module.exports = {
+  // ... existing config ...
+  rules: {
+    // ... existing rules ...
+    'local/no-direct-is-global-admin': 'error',
+  },
+  plugins: {
+    // ... existing plugins ...
+    local: { rules: { 'no-direct-is-global-admin': require('./eslint-rules/no-direct-is-global-admin') } },
+  },
+};
+```
+
+If the project uses flat config (`eslint.config.mjs`), the equivalent is:
+
+```javascript
+import noDirectIsGlobalAdmin from './eslint-rules/no-direct-is-global-admin.js';
+
+export default [
+  {
+    plugins: { local: { rules: { 'no-direct-is-global-admin': noDirectIsGlobalAdmin } } },
+    rules: { 'local/no-direct-is-global-admin': 'error' },
+  },
+];
+```
+
+- [ ] **Step 6: Run test to verify it passes**
+
+```bash
+cd apps/api && npx jest eslint-rules/no-direct-is-global-admin.spec.js
+```
+
+Expected: 4 passing.
+
+- [ ] **Step 7: Run lint against the API to verify the allowlist is correct**
+
+```bash
+cd apps/api && npm run lint
+```
+
+Expected: zero NEW lint errors. The grandfathered files don't trigger the rule because they're on the allowlist. If a non-allowlisted file fails, the audit log missed it — add it to the allowlist (and the audit log) and re-run.
+
+- [ ] **Step 8: Add the burndown section to the audit log**
+
+Modify `docs/superpowers/audits/2026-04-26-audit-decisions.md` — insert at the top, immediately after the H1:
+
+```markdown
+## Migration progress
+
+Phase 3c rolls capabilities through every site listed below. Update these counts on every PR that migrates a site (subtract from the "remaining" column, add to the "migrated" column). When all reach 0 / N, mark Phase 3 as Completed in CLAUDE.md.
+
+| Bucket | Total | Migrated | Remaining | % done |
+| --- | ---: | ---: | ---: | ---: |
+| A — bypass filter | 127 | 1 | 126 | 0.8% |
+| B — bypass guard | 14 | 0 | 14 | 0% |
+| Local `private isGlobalAdmin()` wrappers | 13 | 0 | 13 | 0% |
+
+**Lint enforcement:** `apps/api/.rbac-migration-allowlist.json` lists every file currently exempt from the `no-direct-is-global-admin` lint rule. When a site is migrated, remove its file from the allowlist (the file may have multiple sites — only remove when the LAST one is migrated). Allowlist size IS the burndown.
+
+**Date-bound revisit:** by **2026-08-01**, Phase 3c migration must be at least 50% complete (Bucket A + B combined: 70+ sites migrated). If not, re-evaluate the architecture or the priorities. "We forgot about it" is the failure mode this gate prevents.
+
+**Drift check:** a `/schedule` agent runs every 2 weeks (see `docs/superpowers/scheduled-agents/rbac-drift-check.md`) and opens a PR if it finds new direct `isGlobalAdmin` usage outside the allowlist. The lint rule should make this redundant; the agent catches anything that snuck in via dependencies or merge conflicts.
+```
+
+- [ ] **Step 9: Add the CONTRIBUTING.md rule**
+
+If `CONTRIBUTING.md` doesn't exist, create it with this section. If it does, append the section.
+
+```markdown
+## RBAC migration (in progress until 2026-08-01)
+
+When you modify any file listed in `apps/api/.rbac-migration-allowlist.json`, migrate its `isGlobalAdmin` sites to the capabilities API as part of the same PR. The lint rule (`local/no-direct-is-global-admin`) blocks new sites; the allowlist tolerates existing ones. Migration patterns:
+
+- **Bucket A (filter bypass):** use `withOrgFilter` (`apps/api/src/common/utils/with-org-filter.ts`).
+- **Bucket B (guard):** use the `@RequiresCapability(...)` decorator.
+- **Bucket C (mixed):** check `docs/superpowers/audits/2026-04-26-audit-decisions.md` — these aren't always migratable. If yours is in C and resists migration, leave a comment on the call site explaining why.
+
+After migrating a site, remove its file from `apps/api/.rbac-migration-allowlist.json` (when the LAST site in that file is migrated) and update the burndown table in the audit log.
+```
+
+- [ ] **Step 10: Document the drift-check schedule**
+
+Create `docs/superpowers/scheduled-agents/rbac-drift-check.md`:
+
+````markdown
+# RBAC Drift Check
+
+**Cadence:** every 2 weeks.
+
+**Trigger:** `/schedule "every 2 weeks: run docs/superpowers/scheduled-agents/rbac-drift-check.md"`.
+
+**Job:** audit `apps/api/src` for direct `isGlobalAdmin` usage outside the AuthorizationService and the grandfathered allowlist. Catches drift the ESLint rule missed (new dependencies bringing the pattern in, merge conflicts that re-introduced a removed call, etc.).
+
+**Steps:**
+
+1. Read `apps/api/.rbac-migration-allowlist.json`.
+2. Run:
+   ```bash
+   rg -l "this\.authzService\.isGlobalAdmin\(" apps/api/src --type ts -g '!*.spec.ts' \
+     | grep -vFf <(jq -r '.[]' apps/api/.rbac-migration-allowlist.json)
+   ```
+3. If the output is non-empty, those are NEW sites that snuck past the lint rule. For each:
+   - Open a PR migrating the site (use the existing `withOrgFilter` / `@RequiresCapability` patterns).
+   - If the migration isn't trivial, add the file to the allowlist with a comment explaining why and open a follow-up issue.
+4. Also report the burndown numbers: count remaining allowlist entries, compare to the previous run's count. If the prior 14 days show zero progress, raise it as a stalled-migration concern.
+
+**Stop condition:** allowlist reaches empty AND audit log burndown shows 0/127 + 0/14. Disable the schedule.
+````
+
+- [ ] **Step 11: Update CLAUDE.md status table**
+
+Modify the RBAC Implementation Status table in `CLAUDE.md`:
+
+```markdown
+| Phase 3 | Service-layer authorization enforcement | In progress (foundation shipped 2026-04-28; per-service rollout tracked in `docs/superpowers/audits/2026-04-26-audit-decisions.md` — burndown 0% / target 50% by 2026-08-01) |
+```
+
+- [ ] **Step 12: Commit**
+
+```bash
+git add apps/api/eslint-rules apps/api/.eslintrc.js apps/api/eslint.config.mjs apps/api/.rbac-migration-allowlist.json docs/superpowers/audits/2026-04-26-audit-decisions.md docs/superpowers/scheduled-agents/rbac-drift-check.md CONTRIBUTING.md CLAUDE.md
+git status --short  # verify only intended files are staged
+git commit -m "feat(api): set up RBAC migration tooling (lint rule + burndown + drift check)"
+```
+
+(Stage only the files that exist after Steps 5/9 — if `CONTRIBUTING.md` already existed, the `git add` of it is fine; if not, it's now created. Same for which ESLint config file got modified.)
+
+### Task 3a.7: Phase 3a integration smoke test + ship
 
 **Files:**
 - Test only.
@@ -1337,18 +1613,21 @@ When ready, brainstorm + create a separate plan: `docs/superpowers/plans/<date>-
 ## Done criteria (whole plan)
 
 - `GET /api/users/me/permissions` returns the user's full capability set (global + per-org). Cached, invalidated correctly.
-- Every Bucket A site uses `withOrgFilter`; every Bucket B site uses `@RequiresCapability`. Local wrappers deleted.
+- **Migration tooling installed (Phase 3a):** custom ESLint rule `local/no-direct-is-global-admin` blocks new direct `isGlobalAdmin` usage outside the AuthorizationService and the grandfathered allowlist; `apps/api/.rbac-migration-allowlist.json` exists; the audit log has a "Migration progress" burndown table; CONTRIBUTING.md documents the adjacent-migration rule; the drift-check `/schedule` agent is set up and running every 2 weeks.
+- **Date-bound revisit gate hit (2026-08-01):** Bucket A + B combined burndown is at least 50% (≥70 sites migrated). If the gate is missed, the team explicitly re-evaluates the architecture or priorities — no silent drift.
+- Every Bucket A site uses `withOrgFilter`; every Bucket B site uses `@RequiresCapability`. Local wrappers deleted. The migration allowlist file is empty.
 - Every owned resource has `organization_id NOT NULL` (Phase 4 complete for all entities except, optionally, Test Runs as a separate operation).
 - Frontend gates Configure/Delete on Integration cards via `<RequiresPermission>`. The Dynatrace UX gap is closed.
 - `apps/web/` contains zero direct `user.roles` reads outside `usePermissions`.
-- `CLAUDE.md` "RBAC Implementation Status" table updated: Phase 3 = ✅ Completed, Phase 4 = ✅ Completed (or partial if Test Runs deferred).
+- `CLAUDE.md` "RBAC Implementation Status" table updated: Phase 3 = Completed, Phase 4 = Completed (or partial if Test Runs deferred).
 
 ## Sequencing
 
-1. **Phase 3a** — single PR. Foundation. Nothing else can ship without this.
+1. **Phase 3a** — single PR (7 tasks: 6 capability-API tasks + 1 migration-tooling task). Foundation + scaffolding for the rollout. Nothing else can ship without this — and the ESLint rule blocks new sites of the old pattern from the moment 3a merges.
 2. **Phase 3b pilot** — single PR for Dynatrace. Lets the frontend phase pilot ship.
 3. **Frontend Phase FE.1 + FE.2 + FE.3 (Integrations pilot)** — single PR, depends on 3a + 3b. Closes the immediate UX gap.
 4. **Phase 4** — N PRs, one per entity cluster. Can run in parallel with Phase 3c + Phase 3b rollout to other integrations once the pattern is in place.
-5. **Phase 3c rollout** — N PRs, one per service group. References the audit log; expand the sub-plan per group.
+5. **Phase 3c rollout** — N PRs, one per service group. References the audit log + the burndown; expand the sub-plan per group. CONTRIBUTING.md rule + lint allowlist mean migrations also drip in via adjacent feature work, so the explicit per-group PRs only need to cover whatever's left over by the date gate.
 6. **Frontend FE.4 / FE.5** — incremental, as UI surfaces are touched.
-7. **Phase 5** — separate plan, later.
+7. **2026-08-01 — Phase 3 revisit gate.** Audit burndown numbers. If <50% complete, hold a 30-minute scope conversation: keep going, descope, or rip the half-shipped pattern back out.
+8. **Phase 5** — separate plan, later.
