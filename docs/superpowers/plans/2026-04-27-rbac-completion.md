@@ -2008,3 +2008,21 @@ When ready, brainstorm + create a separate plan: `docs/superpowers/plans/<date>-
 6. **Frontend FE.4 / FE.5** — incremental, as UI surfaces are touched.
 7. **2026-08-01 — Phase 3 revisit gate.** Audit burndown numbers. If <50% complete, hold a 30-minute scope conversation: keep going, descope, or rip the half-shipped pattern back out.
 8. **Phase 5** — separate plan, later.
+
+---
+
+## GSTACK REVIEW REPORT
+
+| Review | Trigger | Why | Runs | Status | Findings |
+|---|---|---|---|---|---|
+| CEO Review | `/plan-ceo-review` | Scope & strategy | 0 | — | not run |
+| Codex Review | `/codex review` | Independent 2nd opinion | 0 | — | offered, declined |
+| Eng Review | `/plan-eng-review` | Architecture, code quality, tests, performance (required) | 1 | CLEAR | 10 issues found across 4 sections, all patched (3 arch / 4 code-quality / 3 perf); 22 test cases added, raising coverage from 46% to ~93%; 1 outstanding gap captured under Failure modes |
+| Design Review | `/plan-design-review` | UI/UX gaps | 0 | — | not run (no visual UI in scope) |
+| DX Review | `/plan-devex-review` | Developer experience gaps | 0 | — | not run |
+
+**Earlier review pass** (`/review` on the plan diff before this eng review): caught 3 criticals (C1 signature drift, C2 placeholder helper, C3 unbatched backfill) + 7 importants + 6 nits. Criticals patched in commit `3b9b9b4`.
+
+**UNRESOLVED:** 1 — `@RequiresCapability` guard needs an integration test (boots minimal NestJS app, real DB membership, real Redis, asserts grant/deny + WARN log). Recommended landing site is Task 3c.1's spec when Phase 3c is expanded into a sub-plan. Not blocking for the Phase 3a PR.
+
+**VERDICT:** ENG CLEARED — ready to implement on option B scope (Phase 3a + Frontend FE.1-FE.3, 3 PRs).
