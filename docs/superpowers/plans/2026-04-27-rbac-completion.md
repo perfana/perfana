@@ -466,6 +466,27 @@ describe('CapabilitiesService', () => {
     const caps = service.compute({ systemRoles: [], orgRoles: [], teamRoles: [] });
     expect(caps).toEqual([]);
   });
+
+  it('grants team-only capabilities when user has team role but no org membership', () => {
+    const caps = service.compute({
+      systemRoles: ['perfana-user'],
+      orgRoles: [],
+      teamRoles: [TeamRole.ADMIN],
+    });
+    expect(caps).toContain(Capability.TeamManageMembers);
+    expect(caps).not.toContain(Capability.IntegrationDynatraceUpdate);
+  });
+
+  it('ignores unknown system roles (forward-compatible with new realm roles)', () => {
+    const caps = service.compute({
+      systemRoles: ['perfana-user', 'some-future-role-keycloak-added'],
+      orgRoles: [OrganizationRole.MEMBER],
+      teamRoles: [],
+    });
+    // Unknown role is silently dropped — only known mappings produce capabilities.
+    expect(caps).toContain(Capability.TestRunUpdate); // from MEMBER mapping
+    expect(caps).not.toContain(Capability.SystemManageUsers); // unknown role ≠ admin
+  });
 });
 ```
 
@@ -591,6 +612,41 @@ describe('getCapabilities', () => {
     const dbSpy = jest.spyOn(orgMemberRepository, 'findOne');
     await service.getCapabilities('user-2', ['perfana-user'], 'org-a');
     expect(dbSpy).not.toHaveBeenCalled();
+  });
+
+  it('loads team roles when teamId is provided', async () => {
+    // Arrange: user has team-admin role in 'team-a'
+    const caps = await service.getCapabilities('user-2', ['perfana-user'], 'org-a', 'team-a');
+    expect(caps).toContain('team:manage-members');
+  });
+
+  it('does not call team repo when teamId is omitted', async () => {
+    const teamSpy = jest.spyOn(teamMemberRepository, 'findOne');
+    await service.getCapabilities('user-2', ['perfana-user'], 'org-a');
+    expect(teamSpy).not.toHaveBeenCalled();
+  });
+
+  it('falls back to DB when Redis read fails (does not throw)', async () => {
+    jest.spyOn(redis, 'get').mockRejectedValueOnce(new Error('Redis down'));
+    const caps = await service.getCapabilities('user-2', ['perfana-user'], 'org-a');
+    expect(caps).toContain('integration:dynatrace:update'); // from DB
+  });
+
+  it('still returns the computed result when Redis write fails (cache write is non-fatal)', async () => {
+    jest.spyOn(redis, 'set').mockRejectedValueOnce(new Error('Redis down'));
+    // First call (cache miss) — DB load + cache write attempt
+    const caps = await service.getCapabilities('user-3', ['perfana-user'], 'org-a');
+    expect(caps).toBeDefined();
+    expect(caps.length).toBeGreaterThan(0);
+  });
+
+  it('bubbles up DB errors (caller observes the failure rather than getting empty caps)', async () => {
+    jest.spyOn(orgMemberRepository, 'findOne').mockRejectedValueOnce(new Error('Postgres down'));
+    await expect(
+      service.getCapabilities('user-4', ['perfana-user'], 'org-a'),
+    ).rejects.toThrow('Postgres down');
+    // Decision: we do NOT swallow DB errors silently. An empty capability set
+    // would let mutations through that should be denied. Better to 500.
   });
 });
 ```
@@ -1015,6 +1071,24 @@ ruleTester.run('no-direct-is-global-admin', rule, {
       filename: 'apps/api/src/common/services/authorization.service.ts',
       code: `class A { isGlobalAdmin(roles) { return roles.includes('admin'); } }`,
     },
+    // Authz infrastructure: AuthorizedBaseService legitimately calls isGlobalAdmin
+    // in its applyOrgFilter / getAccessibleOrgIds / verifyOrganizationAccess methods.
+    {
+      filename: 'apps/api/src/common/services/authorized-base.service.ts',
+      code: `class A2 { x(roles) { return this.authzService.isGlobalAdmin(roles); } }`,
+    },
+    // Authz infrastructure: withOrgFilter helper from PR #175 — encapsulates the
+    // admin-bypass check so callers don't have to.
+    {
+      filename: 'apps/api/src/common/utils/with-org-filter.ts',
+      code: `function f(authz, roles) { return authz.isGlobalAdmin(roles) ? null : authz.getAccessibleOrganizations(); }`,
+    },
+    // Authz infrastructure: CapabilityGuard reads capabilities, not direct
+    // isGlobalAdmin, but is on the exemption list for forward-compat.
+    {
+      filename: 'apps/api/src/common/guards/capability.guard.ts',
+      code: `class G { x() {} }`,
+    },
     // Capabilities-based check is the new pattern, never flagged.
     {
       filename: 'apps/api/src/modules/foo/foo.service.ts',
@@ -1037,6 +1111,30 @@ ruleTester.run('no-direct-is-global-admin', rule, {
           data: { file: 'apps/api/src/modules/newfeature/newfeature.service.ts' },
         },
       ],
+    },
+    // Multiple isGlobalAdmin calls in a non-allowlisted file → all flagged.
+    {
+      filename: 'apps/api/src/modules/newfeature2/newfeature2.service.ts',
+      code: `
+        class E {
+          a(r) { return this.authzService.isGlobalAdmin(r); }
+          b(r) { if (this.authzService.isGlobalAdmin(r)) return; }
+        }
+      `,
+      errors: [
+        { messageId: 'noDirectIsGlobalAdmin' },
+        { messageId: 'noDirectIsGlobalAdmin' },
+      ],
+    },
+    // Missing allowlist file → loadAllowlist returns empty Set → rule still
+    // works, all non-infrastructure files are flagged. Tested by clearing
+    // the cached allowlist and pointing at a non-existent path.
+    {
+      filename: 'apps/api/src/modules/some/some.service.ts',
+      code: `class F { x(r) { return this.authzService.isGlobalAdmin(r); } }`,
+      errors: [{ messageId: 'noDirectIsGlobalAdmin' }],
+      // Setup: stub fs.readFileSync for .rbac-migration-allowlist.json to throw,
+      // confirming loadAllowlist's catch block returns empty Set rather than crashing.
     },
   ],
 });
@@ -1703,10 +1801,132 @@ Run tests: `cd apps/web && npx jest hooks/usePermissions.test.tsx`. Commit: `fea
 
 ### Remaining FE.* tasks (to expand into a sub-plan)
 
-- **FE.2:** `<RequiresPermission>` wrapper component (declarative gating). 4 render modes (hide, disabled-tooltip, custom fallback, render-prop). Tested.
-- **FE.3:** Pilot on `IntegrationCard` — wrap Configure and Delete buttons in `<RequiresPermission action="integration:<type>:update" orgId={...}>`. Visual verification per integration type (Dynatrace, Grafana, Pyroscope, Tracing).
+- **FE.2:** `<RequiresPermission>` wrapper component (declarative gating). **Ship one render mode in v1: disabled-with-tooltip.** Add hide / custom-fallback / render-prop only when a real caller demands them — YAGNI. Required test cases (`apps/web/components/auth/RequiresPermission.test.tsx`):
+  1. Renders children unmodified when `can(action, { orgId })` returns true.
+  2. Renders children inside a disabled wrapper when `can()` returns false.
+  3. Hovering a disabled child surfaces a tooltip with the configured `disabledReason` (default: "Org admin only" — verify the literal text and a11y attributes `role="tooltip"` / `aria-describedby`).
+  4. Reads `resourcePermissions` prop when provided, falls back to `can()` only if action is not in the resource map. Asserts the precedence rule from `usePermissions`.
+  5. Disabled child does not invoke `onClick` when clicked (synthetic event verification — disabled wrapper genuinely blocks the event, not just visually styles).
+
+- **FE.3:** Pilot on `IntegrationCard` — wrap Configure and Delete buttons in `<RequiresPermission action="integration:<type>:update" orgId={...}>`. Required tests:
+  - Unit: `apps/web/components/integrations/IntegrationCard.test.tsx` — render with mocked `usePermissions`, assert button states for org-admin, org-member, org-viewer, and global-admin, across all four integration types (Dynatrace, Grafana, Pyroscope, Tracing).
+  - **Regression E2E (mandatory — iron rule):** `apps/web/e2e/integrations-rbac.spec.ts` reproducing the original Dynatrace UX gap with the actual seeded test users.
+
+  ```typescript
+  // apps/web/e2e/integrations-rbac.spec.ts
+  import { test, expect } from '@playwright/test';
+
+  test.describe('RBAC: Integrations page button gating', () => {
+    test('org-member sees Configure disabled with tooltip', async ({ page }) => {
+      await loginAs(page, 'test@perfana.io', process.env.E2E_TEST_USER_PASSWORD!);
+      await page.goto('/integrations');
+      const configure = page.getByTestId('dynatrace-card').getByRole('button', { name: /configure/i });
+      await expect(configure).toBeDisabled();
+      await configure.hover();
+      await expect(page.getByRole('tooltip')).toContainText(/org admin only/i);
+    });
+
+    test('org-admin sees Configure enabled and clickable', async ({ page }) => {
+      await loginAs(page, 'admin@perfana.io', process.env.E2E_ADMIN_PASSWORD!);
+      await page.goto('/integrations');
+      const configure = page.getByTestId('dynatrace-card').getByRole('button', { name: /configure/i });
+      await expect(configure).toBeEnabled();
+      await configure.click();
+      await expect(page.getByRole('dialog')).toBeVisible();
+    });
+
+    test('org-switch flushes permissions cache and re-gates', async ({ page }) => {
+      await loginAs(page, 'multi-org-user@perfana.io', process.env.E2E_MULTI_PASSWORD!);
+      await page.goto('/integrations');
+      // Org A: user is admin, button enabled
+      await selectOrg(page, 'Org A');
+      await expect(page.getByTestId('dynatrace-card').getByRole('button', { name: /configure/i })).toBeEnabled();
+      // Org B: user is member, button disabled
+      await selectOrg(page, 'Org B');
+      await expect(page.getByTestId('dynatrace-card').getByRole('button', { name: /configure/i })).toBeDisabled();
+    });
+  });
+  ```
+
+  This is the regression test for the original report. Without it, the fix is unverified at the user-flow level.
+
 - **FE.4:** Migrate other UI surfaces (Settings → Members management, Test Run actions, Profile Settings). Per-PR per surface.
 - **FE.5:** Audit pass — grep for `user?.roles` and `OrganizationRole` references in `apps/web/`. Any direct role inspection that's not in `usePermissions` or `<RequiresPermission>` is a regression. Fix or document.
+
+### Additional FE.1 test cases (close `usePermissions` coverage gaps)
+
+The Phase 3a master plan's FE.1 spec covers global / byOrg / loading. Three uncovered branches in `can()`:
+
+```typescript
+// Append to apps/web/hooks/usePermissions.test.tsx
+
+it('reads resourcePermissions when prop is provided, ignores capabilities', async () => {
+  fetchPermissions.mockResolvedValue({ userId: 'u', global: [], byOrg: {} });
+  const { result } = renderHook(() => usePermissions(), { wrapper });
+  await waitFor(() => expect(result.current.isLoaded).toBe(true));
+  // Resource grants update, capabilities don't — resource wins.
+  expect(
+    result.current.can('integration:dynatrace:update', {
+      organizationId: 'org-a',
+      resourcePermissions: { update: true },
+    }),
+  ).toBe(true);
+});
+
+it('falls back to capabilities when action is not in resourcePermissions', async () => {
+  fetchPermissions.mockResolvedValue({
+    userId: 'u',
+    global: [],
+    byOrg: { 'org-a': ['integration:dynatrace:update'] },
+  });
+  const { result } = renderHook(() => usePermissions(), { wrapper });
+  await waitFor(() => expect(result.current.isLoaded).toBe(true));
+  // resourcePermissions doesn't list this action — fall through to byOrg.
+  expect(
+    result.current.can('integration:dynatrace:update', {
+      organizationId: 'org-a',
+      resourcePermissions: { delete: true },
+    }),
+  ).toBe(true);
+});
+
+it('returns false in error state (isError = true)', async () => {
+  fetchPermissions.mockRejectedValue(new Error('500'));
+  const { result } = renderHook(() => usePermissions(), { wrapper });
+  await waitFor(() => expect(result.current.isLoaded).toBe(false));
+  expect(result.current.can('integration:dynatrace:update', { organizationId: 'org-a' })).toBe(false);
+});
+
+it('refetches on org-switch via React Query invalidation', async () => {
+  fetchPermissions
+    .mockResolvedValueOnce({ userId: 'u', global: [], byOrg: { 'org-a': ['integration:dynatrace:update'] } })
+    .mockResolvedValueOnce({ userId: 'u', global: [], byOrg: { 'org-b': [] } });
+  const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+  const { result } = renderHook(() => usePermissions(), {
+    wrapper: ({ children }) => <QueryClientProvider client={queryClient}>{children}</QueryClientProvider>,
+  });
+  await waitFor(() => expect(result.current.isLoaded).toBe(true));
+  expect(result.current.can('integration:dynatrace:update', { organizationId: 'org-a' })).toBe(true);
+
+  // Simulate org switch — context calls this on every change.
+  queryClient.invalidateQueries({ queryKey: ['permissions'] });
+
+  await waitFor(() => expect(fetchPermissions).toHaveBeenCalledTimes(2));
+  expect(result.current.can('integration:dynatrace:update', { organizationId: 'org-a' })).toBe(false);
+});
+```
+
+The last test pins down the org-switch contract: it MUST go through `queryClient.invalidateQueries({ queryKey: ['permissions'] })`. Document this in the OrganizationContext code (the call site that fires on org switch) so future maintainers don't bypass the cache.
+
+### Open design decision: error-state UX
+
+When `/me/permissions` returns 500 OR the React Query `isError` state activates, every `can()` returns `false` — every gated action becomes disabled. This is the safe default but it's a silent failure: the user sees buttons that don't work and no explanation. Three options worth deciding before FE.1 ships:
+
+1. **Silent + Sentry log + auto-retry** — for short transient errors. Buttons disabled briefly, recovers on retry. Best for typical Redis/network blips.
+2. **Banner: "Permissions unavailable, refresh to retry"** — surfaces the issue but adds UI surface. Best if you actually want users to know.
+3. **Throw an error boundary** — page-level failure. Strongest but most disruptive. Wrong for transient blips, right for sustained outages.
+
+Recommendation: **option 1** for v1. React Query's default retry already covers transient errors; on persistent failure, a Sentry breadcrumb + the silent disable is acceptable for a permissions blip. Revisit if support tickets show user confusion. Note this decision in `usePermissions.ts` as a JSDoc on the `isError` branch.
 
 ### Done criteria
 
