@@ -4,6 +4,11 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
+## [0.2.47.6] - 2026-04-28
+
+### Fixed
+- **`RestoreRlsPoliciesPostTeamIdRemoval` migration failed on `url_patterns`** with `column "organization_id" does not exist`. The migration's `replacePolicies` helper hardcoded `organization_id, (created_by)::text` references on every policy expression, but `AddWorkloadToEvents` (1776148518354) had previously dropped both columns from `url_patterns` AND `generated_reports` — only `api_keys` retained them. Reworked `replacePolicies` to take per-operation SQL expressions explicitly. `api_keys` keeps the ownership-based 2-arg policies. `url_patterns` (deduplication cache, no per-row ownership) and `generated_reports` (lost ownership in AddWorkloadToEvents, pending Phase 4 restoration) both ship with permissive read/insert and admin-only update/delete: defense-in-depth without referencing columns that don't exist. Fix is forward-compatible: production envs that recorded the migration as completed (somehow) skip it; envs where it failed (the common case) re-run cleanly because every operation is `DROP POLICY IF EXISTS` + `CREATE POLICY` and `CREATE OR REPLACE FUNCTION` for the helpers.
+
 ## [0.2.47.5] - 2026-04-28
 
 ### Added

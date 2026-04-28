@@ -54,15 +54,40 @@ export class RestoreRlsPoliciesPostTeamIdRemoval1777400000000
         $$
     `);
 
+    // api_keys retains organization_id + created_by — use the ownership-based
+    // 2-arg policies introduced above.
     await this.replacePolicies(queryRunner, 'api_keys', {
+      selectUsing: 'public.can_access_resource(organization_id, (created_by)::text)',
       insertCheck: 'true',
+      updateUsing: 'public.can_modify_resource(organization_id, (created_by)::text)',
+      deleteUsing: 'public.can_modify_resource(organization_id, (created_by)::text)',
     });
+
+    // url_patterns is a deduplication cache keyed on (url_hash, system_under_test,
+    // test_environment) — AddWorkloadToEvents (1776148518354) dropped its
+    // organization_id and created_by columns. The original 3-arg policies on this
+    // table referenced those columns; the new policies cannot. Defense-in-depth on
+    // a table with no ownership data is permissive: anyone authenticated can read
+    // and insert (worker processes write these during metric ingestion); only
+    // global admins can mutate or delete (cleanup only).
     await this.replacePolicies(queryRunner, 'url_patterns', {
-      insertCheck:
-        '(public.is_global_admin() OR public.can_access_resource(organization_id, (created_by)::text))',
-    });
-    await this.replacePolicies(queryRunner, 'generated_reports', {
+      selectUsing: 'true',
       insertCheck: 'true',
+      updateUsing: 'public.is_global_admin()',
+      deleteUsing: 'public.is_global_admin()',
+    });
+
+    // generated_reports also lost organization_id + created_by in
+    // AddWorkloadToEvents. Until those columns are restored (Phase 4 of the RBAC
+    // rollout, when organization_id becomes NOT NULL on every owned resource),
+    // policies fall back to the same permissive shape: read-anywhere, mutate
+    // restricted to global admins. Phase 4 should re-introduce ownership and
+    // tighten these to org-scoped policies.
+    await this.replacePolicies(queryRunner, 'generated_reports', {
+      selectUsing: 'true',
+      insertCheck: 'true',
+      updateUsing: 'public.is_global_admin()',
+      deleteUsing: 'public.is_global_admin()',
     });
   }
 
@@ -89,7 +114,12 @@ export class RestoreRlsPoliciesPostTeamIdRemoval1777400000000
   private async replacePolicies(
     queryRunner: QueryRunner,
     table: string,
-    opts: { insertCheck: string },
+    opts: {
+      selectUsing: string;
+      insertCheck: string;
+      updateUsing: string;
+      deleteUsing: string;
+    },
   ): Promise<void> {
     for (const op of ['select', 'insert', 'update', 'delete']) {
       await queryRunner.query(
@@ -98,7 +128,7 @@ export class RestoreRlsPoliciesPostTeamIdRemoval1777400000000
     }
     await queryRunner.query(
       `CREATE POLICY rls_${table}_select ON "${table}" FOR SELECT ` +
-        `USING (public.can_access_resource(organization_id, (created_by)::text))`,
+        `USING (${opts.selectUsing})`,
     );
     await queryRunner.query(
       `CREATE POLICY rls_${table}_insert ON "${table}" FOR INSERT ` +
@@ -106,11 +136,11 @@ export class RestoreRlsPoliciesPostTeamIdRemoval1777400000000
     );
     await queryRunner.query(
       `CREATE POLICY rls_${table}_update ON "${table}" FOR UPDATE ` +
-        `USING (public.can_modify_resource(organization_id, (created_by)::text))`,
+        `USING (${opts.updateUsing})`,
     );
     await queryRunner.query(
       `CREATE POLICY rls_${table}_delete ON "${table}" FOR DELETE ` +
-        `USING (public.can_modify_resource(organization_id, (created_by)::text))`,
+        `USING (${opts.deleteUsing})`,
     );
   }
 }
