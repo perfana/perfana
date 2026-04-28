@@ -2,6 +2,7 @@ import { Module } from '@nestjs/common';
 import { TypeOrmModule } from '@nestjs/typeorm';
 import { OrganizationMember, TeamMember, Team, ApiKey } from '@perfana/shared/entities';
 import { AuthorizationService } from './services/authorization.service';
+import { CapabilitiesService } from './services/capabilities.service';
 import { QueueModule } from '../modules/queue/queue.module';
 
 /**
@@ -10,6 +11,7 @@ import { QueueModule } from '../modules/queue/queue.module';
  * This module provides:
  * - AuthorizationService: Centralized permission checking with Redis caching
  *   for organization/team membership-based access control.
+ * - CapabilitiesService: Pure role-to-capability mapping (stateless, no I/O).
  *
  * Note: This module previously contained NativeDatabaseService and DatabaseFactoryService
  * which were deprecated and removed in favor of direct repository usage.
@@ -22,7 +24,7 @@ import { QueueModule } from '../modules/queue/queue.module';
     TypeOrmModule.forFeature([OrganizationMember, TeamMember, Team, ApiKey]),
     QueueModule, // Provides REDIS_CLIENT for AuthorizationService caching
   ],
-  providers: [AuthorizationService],
-  exports: [AuthorizationService],
+  providers: [AuthorizationService, CapabilitiesService],
+  exports: [AuthorizationService, CapabilitiesService],
 })
 export class CommonModule {}
