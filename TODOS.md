@@ -52,6 +52,30 @@ scenario; if not, a `bun run scripts/bench-me-permissions.ts` ad-hoc script
 that fires 100 sequential requests and prints the histogram is enough for
 a one-off check.
 
+### Extend `_permissions` enrichment to Dynatrace sub-resources
+
+**Priority:** P3
+**Origin:** PR #187 / v0.2.47.8 (RBAC Phase 3 follow-up).
+**Depends on:** Nothing — sub-resources already have `organizationId` on the
+DTO (added in this PR) and `getCapabilities` is in place.
+**Why:** PR #187 closed the *backend* authz bypass on `dynatrace_queries` and
+`dynatrace_entity_mappings` — non-admins now correctly get 403 on PATCH/DELETE.
+But the *frontend* doesn't know to disable those buttons, so the user only
+discovers the denial after clicking and seeing an error. Same UX gap that
+Phase 3b closed for the parent `DynatraceConfig`.
+**What:** Mirror the Phase 3b pattern on the read endpoints for queries and
+entity mappings: `attachPermissions(row, { update: …, delete: … })` with the
+booleans computed from `getCapabilities(userId, roles, row.organizationId)`.
+Frontend already has `<RequiresPermission>` wired — wrap the
+update/delete buttons in the query editor and entity-mapping list.
+**Where to start:** `apps/api/src/modules/dynatrace/dynatrace.service.ts` —
+the read methods (`findAllQuery`, `findQueryById`, `findQueryBySystemAndEnvironment`,
+`getEntityMappings`, `getEntityMappingById`) still have stale "treated as
+legacy data" TODO comments. Reuse the batched `capsByOrg` pattern from
+`findAll` (lines 105-121). Frontend wrappers go in the same place that
+already handles the parent config — `apps/web/app/integrations/components/`
+and any DQL query / entity-mapping editor pages.
+
 ---
 
 ## Completed
