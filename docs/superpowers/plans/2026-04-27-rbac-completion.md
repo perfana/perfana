@@ -691,14 +691,25 @@ import { OrganizationRole, TeamRole } from '../../constants/roles.constants';
     organizationId: string | null,
     teamId?: string | null,
   ): Promise<CapabilityValue[]> {
-    const cacheKey = `auth:capabilities:${userId}:${organizationId ?? '_'}:${teamId ?? '_'}`;
+    // Versioned cache key strategy (NOT a `redis.keys('pattern')` invalidation).
+    // KEYS blocks the entire Redis instance — never safe in production. Instead,
+    // each user has a per-user "capabilities-version" counter; the cache key
+    // includes that version. Invalidation just INCR's the counter, which makes
+    // every old key for that user unreachable. Stale entries time out via TTL.
+    const version = await this.getCapabilitiesVersion(userId);
+    const cacheKey = `auth:capabilities:${userId}:${organizationId ?? '_'}:${teamId ?? '_'}:v${version}`;
+
     const cached = await this.getCachedCapabilities(cacheKey);
     if (cached !== null) return cached;
 
-    const orgRoles = organizationId
-      ? await this.loadOrgRoles(userId, organizationId)
-      : [];
-    const teamRoles = teamId ? await this.loadTeamRoles(userId, teamId) : [];
+    // Cold path: load org+team roles in parallel (one Postgres round-trip
+    // instead of two when both are scoped).
+    const [orgRoles, teamRoles] = await Promise.all([
+      organizationId
+        ? this.loadOrgRoles(userId, organizationId)
+        : Promise.resolve([] as OrganizationRole[]),
+      teamId ? this.loadTeamRoles(userId, teamId) : Promise.resolve([] as TeamRole[]),
+    ]);
 
     const caps = this.capabilitiesService.compute({
       systemRoles: roles,
@@ -708,6 +719,21 @@ import { OrganizationRole, TeamRole } from '../../constants/roles.constants';
 
     await this.cacheCapabilities(cacheKey, caps);
     return caps;
+  }
+
+  /**
+   * Per-user capability cache version. Bumped on every membership change to
+   * make every existing cache entry for this user unreachable. Default 1 if
+   * the counter doesn't exist yet (first-ever lookup).
+   */
+  private async getCapabilitiesVersion(userId: string): Promise<number> {
+    if (!this.enableCache) return 1;
+    try {
+      const v = await this.redis.get(`auth:capabilities-version:${userId}`);
+      return v ? parseInt(v, 10) : 1;
+    } catch {
+      return 1; // Redis down → cache disabled implicitly via the cache helpers
+    }
   }
 
   private async getCachedCapabilities(
@@ -728,6 +754,12 @@ import { OrganizationRole, TeamRole } from '../../constants/roles.constants';
   ): Promise<void> {
     if (!this.enableCache) return;
     try {
+      // Reuse the existing TTL the AuthorizationService already configures
+      // for `auth:org-membership:*` keys. Using a separate value here would
+      // create inconsistent staleness windows (a user removed from an org
+      // could see stale capabilities for capabilities-TTL seconds AFTER
+      // their membership cache was invalidated). Verify the source field
+      // during execution: `grep cacheTtl apps/api/src/common/services/authorization.service.ts`.
       await this.redis.set(cacheKey, JSON.stringify(caps), 'EX', this.cacheTtlSeconds);
     } catch {
       /* cache failures are non-fatal */
@@ -984,7 +1016,7 @@ cd apps/api && npx jest src/common/services/__tests__/authorization.service.spec
 
 Expected: FAIL — invalidation doesn't touch capability keys.
 
-- [ ] **Step 3: Extend invalidation**
+- [ ] **Step 3: Extend invalidation (versioned-key strategy, NOT `redis.keys()`)**
 
 In `authorization.service.ts`, find `invalidateMembershipCache` and append:
 
@@ -992,18 +1024,25 @@ In `authorization.service.ts`, find `invalidateMembershipCache` and append:
   async invalidateMembershipCache(userId: string, organizationId?: string): Promise<void> {
     // ... existing membership-key deletions ...
 
-    // Capabilities depend on memberships — flush per-user capability keys.
-    const pattern = organizationId
-      ? `auth:capabilities:${userId}:${organizationId}:*`
-      : `auth:capabilities:${userId}:*`;
+    // Bump the per-user capabilities version. Every cache key for this user
+    // includes the version, so incrementing it makes all existing entries
+    // unreachable in O(1). They expire via the existing TTL — no scan, no
+    // mass DEL, no production impact.
+    //
+    // We ignore the organizationId argument here: bumping the version
+    // invalidates ALL of this user's capability caches (across all orgs and
+    // teams), which is the correct behavior for any membership change. A
+    // user added to org A may also see permissions changes in their other
+    // orgs (e.g., team-admin status that depends on org context).
     try {
-      const keys = await this.redis.keys(pattern);
-      if (keys.length > 0) await this.redis.del(...keys);
+      await this.redis.incr(`auth:capabilities-version:${userId}`);
     } catch {
-      /* non-fatal */
+      /* non-fatal — fall back to TTL */
     }
   }
 ```
+
+**Why not `redis.keys()`:** `KEYS pattern` is O(N) over the entire keyspace and BLOCKS the Redis instance during the scan. With a multi-tenant cache (BullMQ queues + membership cache + capabilities cache + application caches all share Redis), a 100k-key keyspace means every other Redis client freezes for the duration of every membership change. Versioned keys avoid the scan entirely. The cost is one extra `GET auth:capabilities-version:{userId}` per cold-cache lookup — negligible (single round-trip, microseconds, can be pipelined with the value `GET`).
 
 - [ ] **Step 4: Run test to verify it passes**
 
