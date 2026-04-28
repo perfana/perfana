@@ -86,6 +86,10 @@ They compose. A controller checks the capability via `@RequiresCapability` to au
 
 **`getAccessibleOrgIds(userId, roles)` returns `string[] | undefined`** (admin → undefined, non-admin → array). It's NOT being deprecated. It's the right primitive for the `withOrgFilter`-style "should I add a `WHERE organization_id IN (...)` clause" decision, and it's used inside `getCapabilities` to load the org-scoped role data.
 
+### Auth-method-agnostic by construction
+
+`getCapabilities(userId, roles, organizationId, teamId?)` takes `roles` as a parameter, not from request context. `KeycloakEnhancedAuthGuard.getRoles()` (`apps/api/src/guards/keycloak-enhanced-auth.guard.ts:185-191`) already unifies JWT (`request.user.roles` from Keycloak `realm_access` + client roles) and API key (`request.apiKey.roles`) into a single array. The capability mapping treats both identically — an admin API key gets the same capabilities as an admin JWT. No special-casing in the controller, the service, or the cache. The controller pulls `ctx.roles` via `@UserCtx()` and passes them through; everything downstream is auth-method-blind.
+
 ### Request flow
 
 ```
@@ -317,8 +321,18 @@ const orgAdminExtras: CapabilityValue[] = [
 /**
  * Role → capability mapping.
  * Each role grants the union of its mapped capabilities.
+ *
+ * The type constraint ensures every role enum value has an entry (compile error
+ * if a role is missed) and that array entries are valid CapabilityValue references
+ * (compile error on a typo like 'integration:dynatrce:updte').
  */
-export const ROLE_CAPABILITIES = {
+type CapabilitySet = readonly CapabilityValue[];
+type RoleCapabilityMap = {
+  organization: Record<OrganizationRole, CapabilitySet>;
+  team: Record<TeamRole, CapabilitySet>;
+};
+
+export const ROLE_CAPABILITIES: RoleCapabilityMap = {
   organization: {
     [OrganizationRole.ADMIN]: [
       ...integrationCrud,
@@ -1056,14 +1070,22 @@ function loadAllowlist(cwd) {
   return allowlist;
 }
 
-const AUTHORIZATION_SERVICE = 'apps/api/src/common/services/authorization.service.ts';
+// Authz infrastructure: these files legitimately call authzService.isGlobalAdmin
+// because that IS their job (encapsulating the admin-bypass check so that callers
+// don't have to). Permanently exempt — never on the burndown.
+const INFRASTRUCTURE_FILES = new Set([
+  'apps/api/src/common/services/authorization.service.ts',     // defines isGlobalAdmin
+  'apps/api/src/common/services/authorized-base.service.ts',   // applyOrgFilter, getAccessibleOrgIds, verifyOrganizationAccess
+  'apps/api/src/common/utils/with-org-filter.ts',              // shipped in PR #175 — the helper the migration uses
+  'apps/api/src/common/guards/capability.guard.ts',            // CapabilityGuard reads getCapabilities (added in Phase 3c)
+]);
 
 module.exports = {
   meta: {
     type: 'problem',
     docs: {
       description:
-        'Forbid new direct calls to authzService.isGlobalAdmin(). Use AuthorizationService.getCapabilities() or the @RequiresCapability decorator. Grandfathered files (from the 2026-04-26 audit) are allowed via apps/api/.rbac-migration-allowlist.json.',
+        'Forbid new direct calls to authzService.isGlobalAdmin(). Use AuthorizationService.getCapabilities() or the @RequiresCapability decorator. Grandfathered files (from the 2026-04-26 audit) are allowed via apps/api/.rbac-migration-allowlist.json. Authz infrastructure files (AuthorizationService, AuthorizedBaseService, withOrgFilter, CapabilityGuard) are permanently exempt — they implement the helpers the migration uses.',
     },
     messages: {
       noDirectIsGlobalAdmin:
@@ -1076,8 +1098,8 @@ module.exports = {
     const cwd = context.getCwd ? context.getCwd() : process.cwd();
     const relPath = path.relative(cwd, filename);
 
-    // The AuthorizationService itself is allowed.
-    if (relPath === AUTHORIZATION_SERVICE) return {};
+    // Authz infrastructure: permanent exemption.
+    if (INFRASTRUCTURE_FILES.has(relPath)) return {};
 
     // Grandfathered files: tolerate (they're on the burndown list).
     const allow = loadAllowlist(cwd);
@@ -1389,6 +1411,21 @@ export class FooController {
 ```
 
 When `PATCH /foo/abc` arrives with body `{ organizationId: 'org-a', ... }`, the guard checks the user has `integration:dynatrace:update` in `org-a`. If not → 403.
+
+**Telemetry on deny (mandatory).** A capability denial is real ops signal in a multi-tenant system: misconfigured user, attack, deployment regression, missing membership backfill. With zero telemetry, you only learn about it from support tickets. Inside the deny path, BEFORE the throw:
+
+```typescript
+this.logger.warn(
+  `Capability denied: capability=${requiredCapability} userId=${ctx.userId} orgId=${orgId ?? 'null'} route=${request.method} ${request.url}`,
+);
+// If perfana has Prometheus metrics infrastructure (verify during execution):
+this.metrics?.increment('auth_capability_denied_total', { capability: requiredCapability });
+throw new ForbiddenException(`Missing capability: ${requiredCapability}`);
+```
+
+The structured log is the minimum. Bumping a counter is bonus if `MetricsService` (or equivalent) is already wired in the project — verify by grepping `apps/api/src` for an existing metrics provider before adding the line. If none exists, ship the WARN log alone; don't introduce new infrastructure for one counter.
+
+The matching test asserts the WARN was emitted with the right shape. Ops can grep for `Capability denied:` in production logs to spot patterns; pair with an alert on per-user rate spikes if your log pipeline supports it.
 
 ### Remaining 3c tasks (to expand into a sub-plan)
 
