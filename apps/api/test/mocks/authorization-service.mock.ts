@@ -71,6 +71,15 @@ export const createAuthorizationServiceMock = () => ({
    * Default: returns true (allows admin operations in tests)
    */
   isOrgAdminInAnyOrganization: jest.fn().mockResolvedValue(true),
+
+  /**
+   * Get capabilities for a user in an org/team scope.
+   * Default: returns all integration capabilities (org-admin equivalent).
+   */
+  getCapabilities: jest.fn().mockResolvedValue([
+    'integration:dynatrace:update',
+    'integration:dynatrace:delete',
+  ]),
 });
 
 /**
@@ -88,4 +97,5 @@ export const createRestrictiveAuthorizationServiceMock = () => ({
   getAccessibleTeams: jest.fn().mockResolvedValue([]),
   canViewTeamResources: jest.fn().mockResolvedValue({ allowed: false, reason: 'Mock: access denied' }),
   isOrgAdminInAnyOrganization: jest.fn().mockResolvedValue(false),
+  getCapabilities: jest.fn().mockResolvedValue([]),
 });
