@@ -32,6 +32,8 @@ import {
   PyroscopeExpandedContent,
   TracingExpandedContent,
 } from './expanded-content';
+import { RequiresPermission } from '@/components/auth/RequiresPermission';
+import { useOrganizationContext } from '@/lib/contexts/organization-context';
 
 interface IntegrationCardProps {
   card: IntegrationCardType;
@@ -52,6 +54,7 @@ export function IntegrationCardComponent({
   onConnect,
   onSnackbar,
 }: IntegrationCardProps) {
+  const { currentOrganizationId } = useOrganizationContext();
   const isGrafanaInstance = card.integrationType === 'grafana' && card.instanceData;
   const isDynatraceInstance = card.integrationType === 'dynatrace' && card.instanceData;
   const isPyroscopeInstance = card.integrationType === 'pyroscope' && card.instanceData;
@@ -230,23 +233,35 @@ export function IntegrationCardComponent({
                 width: '100%',
                 gap: 1,
               }}>
-                <Button
-                  size="small"
-                  variant="outlined"
-                  startIcon={<Settings />}
-                  onClick={onSettings}
+                <RequiresPermission
+                  action={`integration:${card.integrationType}:update`}
+                  orgId={currentOrganizationId ?? undefined}
+                  resourcePermissions={(card.instanceData as unknown as Record<string, unknown>)?._permissions as Record<string, boolean> | undefined}
                 >
-                  Configure
-                </Button>
-                <Button
-                  size="small"
-                  variant="outlined"
-                  color="error"
-                  startIcon={<Delete />}
-                  onClick={onDelete}
+                  <Button
+                    size="small"
+                    variant="outlined"
+                    startIcon={<Settings />}
+                    onClick={onSettings}
+                  >
+                    Configure
+                  </Button>
+                </RequiresPermission>
+                <RequiresPermission
+                  action={`integration:${card.integrationType}:delete`}
+                  orgId={currentOrganizationId ?? undefined}
+                  resourcePermissions={(card.instanceData as unknown as Record<string, unknown>)?._permissions as Record<string, boolean> | undefined}
                 >
-                  Delete
-                </Button>
+                  <Button
+                    size="small"
+                    variant="outlined"
+                    color="error"
+                    startIcon={<Delete />}
+                    onClick={onDelete}
+                  >
+                    Delete
+                  </Button>
+                </RequiresPermission>
               </Box>
             ) : card.status === 'connected' ? (
               <Box sx={{
