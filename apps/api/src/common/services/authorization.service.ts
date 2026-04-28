@@ -721,6 +721,17 @@ export class AuthorizationService {
         `Failed to invalidate user cache: ${error && typeof error === 'object' && 'message' in error ? (error as Error).message : 'Unknown error'}`,
       );
     }
+
+    // Bump the per-user capabilities version. Every capability cache key for
+    // this user embeds the version, so incrementing it makes all existing
+    // entries unreachable in O(1) — no KEYS scan, no mass DEL. Stale entries
+    // expire via their existing TTL. Non-fatal: if Redis is down the TTL
+    // will eventually expire the stale capabilities entries.
+    try {
+      await this.redis.incr(`auth:capabilities-version:${userId}`);
+    } catch {
+      /* non-fatal — fall back to TTL */
+    }
   }
 
   /**

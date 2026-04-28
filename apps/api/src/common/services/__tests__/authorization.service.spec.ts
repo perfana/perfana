@@ -77,6 +77,7 @@ describe('AuthorizationService', () => {
       setex: jest.fn(),
       del: jest.fn(),
       scan: jest.fn(),
+      incr: jest.fn(),
     };
 
     const module: TestingModule = await Test.createTestingModule({
@@ -139,6 +140,7 @@ describe('AuthorizationService', () => {
     redis.setex.mockResolvedValue('OK');
     redis.del.mockResolvedValue(1);
     redis.scan.mockResolvedValue(['0', []]);
+    redis.incr.mockResolvedValue(1);
   });
 
   afterEach(() => {
@@ -1553,6 +1555,27 @@ describe('AuthorizationService', () => {
       ).rejects.toThrow('Postgres down');
       // Decision: we do NOT swallow DB errors silently. An empty capability set
       // would let mutations through that should be denied. Better to 500.
+    });
+
+    it('invalidates capability cache when membership changes', async () => {
+      // Arrange: first call populates cache (cache miss → DB hit → cache write)
+      redis.get.mockResolvedValue(null);
+      organizationMemberRepository.findOne.mockResolvedValue({
+        user_id: 'user-2',
+        organization_id: 'org-a',
+        roles: [OrganizationRole.ADMIN],
+      } as OrganizationMember);
+      teamMemberRepository.findOne.mockResolvedValue(null);
+      await service.getCapabilities('user-2', ['perfana-user'], 'org-a');
+
+      // Act: simulate a membership change — the version counter must be bumped
+      // so that every cached capabilities key for this user becomes unreachable.
+      await service.invalidateUserCache('user-2');
+
+      // Assert: invalidateUserCache must have called redis.incr on the
+      // per-user capabilities-version key. We don't assert the exact version
+      // value — that would couple the test to the version counter's start value.
+      expect(redis.incr).toHaveBeenCalledWith('auth:capabilities-version:user-2');
     });
   });
 
