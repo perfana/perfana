@@ -19,6 +19,7 @@ import {
   CachedUserContext,
   AuthorizationResult,
 } from '../authorization.service';
+import { CapabilitiesService } from '../capabilities.service';
 import { OrganizationMember, TeamMember, Team, ApiKey } from '@perfana/shared/entities';
 import { OwnedResource } from '@perfana/shared/entities';
 import { OrganizationRole, TeamRole } from '../../../constants/roles.constants';
@@ -76,11 +77,13 @@ describe('AuthorizationService', () => {
       setex: jest.fn(),
       del: jest.fn(),
       scan: jest.fn(),
+      incr: jest.fn(),
     };
 
     const module: TestingModule = await Test.createTestingModule({
       providers: [
         AuthorizationService,
+        CapabilitiesService,
         {
           provide: 'REDIS_CLIENT',
           useValue: redis,
@@ -137,6 +140,7 @@ describe('AuthorizationService', () => {
     redis.setex.mockResolvedValue('OK');
     redis.del.mockResolvedValue(1);
     redis.scan.mockResolvedValue(['0', []]);
+    redis.incr.mockResolvedValue(1);
   });
 
   afterEach(() => {
@@ -1301,6 +1305,7 @@ describe('AuthorizationService', () => {
       const module: TestingModule = await Test.createTestingModule({
         providers: [
           AuthorizationService,
+          CapabilitiesService,
           {
             provide: 'REDIS_CLIENT',
             useValue: noCacheRedis,
@@ -1355,6 +1360,7 @@ describe('AuthorizationService', () => {
         await Test.createTestingModule({
           providers: [
             AuthorizationService,
+            CapabilitiesService,
             {
               provide: 'REDIS_CLIENT',
               useValue: noCacheRedis,
@@ -1426,6 +1432,150 @@ describe('AuthorizationService', () => {
 
       // Assert
       expect(noCacheRedis.scan).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('getCapabilities', () => {
+    // Reuses the test bed already wired up in this file. CapabilitiesService is
+    // injected into AuthorizationService and provided in the module below.
+
+    it('returns global-admin capabilities when caller passes perfana-admin', async () => {
+      // No DB setup needed — global-admin short-circuits before any DB call.
+      const caps = await service.getCapabilities('user-1', ['perfana-admin'], null);
+      expect(caps).toContain('integration:dynatrace:update');
+      expect(caps).toContain('system:manage-users');
+    });
+
+    it('returns org-admin capabilities for an org-admin in the given org', async () => {
+      // Arrange: version key returns null (default 1), capabilities cache miss, DB has org-admin
+      redis.get.mockResolvedValue(null);
+      organizationMemberRepository.findOne.mockResolvedValue({
+        user_id: 'user-2',
+        organization_id: 'org-a',
+        roles: [OrganizationRole.ADMIN],
+      } as OrganizationMember);
+      teamMemberRepository.findOne.mockResolvedValue(null);
+
+      const caps = await service.getCapabilities('user-2', ['perfana-user'], 'org-a');
+      expect(caps).toContain('integration:dynatrace:update');
+      expect(caps).toContain('org:manage-members');
+      expect(caps).not.toContain('system:manage-users');
+    });
+
+    it('returns empty set when user has no membership in the org', async () => {
+      redis.get.mockResolvedValue(null);
+      organizationMemberRepository.findOne.mockResolvedValue(null);
+      teamMemberRepository.findOne.mockResolvedValue(null);
+
+      const caps = await service.getCapabilities('outsider', ['perfana-user'], 'org-a');
+      expect(caps).toEqual([]);
+    });
+
+    it('caches results: second call hits Redis, not the DB', async () => {
+      // Simulate Redis already holding a valid cache entry for this user/org combo.
+      // Both the version key and the caps key resolve to a hit.
+      const cachedCaps = JSON.stringify(['integration:dynatrace:update', 'org:manage-members']);
+      redis.get
+        .mockResolvedValueOnce('1')        // getCapabilitiesVersion → version is 1
+        .mockResolvedValueOnce(cachedCaps); // getCachedCapabilities → cache hit
+
+      const dbSpy = jest.spyOn(organizationMemberRepository, 'findOne');
+      const caps = await service.getCapabilities('user-2', ['perfana-user'], 'org-a');
+
+      expect(dbSpy).not.toHaveBeenCalled();
+      expect(caps).toContain('integration:dynatrace:update');
+    });
+
+    it('loads team roles when teamId is provided', async () => {
+      redis.get.mockResolvedValue(null);
+      organizationMemberRepository.findOne.mockResolvedValue({
+        user_id: 'user-2',
+        organization_id: 'org-a',
+        roles: [OrganizationRole.MEMBER],
+      } as OrganizationMember);
+      teamMemberRepository.findOne.mockResolvedValue({
+        user_id: 'user-2',
+        team_id: 'team-a',
+        roles: [TeamRole.ADMIN],
+      } as TeamMember);
+
+      const caps = await service.getCapabilities('user-2', ['perfana-user'], 'org-a', 'team-a');
+      expect(caps).toContain('team:manage-members');
+    });
+
+    it('does not call team repo when teamId is omitted', async () => {
+      redis.get.mockResolvedValue(null);
+      organizationMemberRepository.findOne.mockResolvedValue({
+        user_id: 'user-2',
+        organization_id: 'org-a',
+        roles: [OrganizationRole.MEMBER],
+      } as OrganizationMember);
+
+      const teamSpy = jest.spyOn(teamMemberRepository, 'findOne');
+      await service.getCapabilities('user-2', ['perfana-user'], 'org-a');
+      expect(teamSpy).not.toHaveBeenCalled();
+    });
+
+    it('falls back to DB when Redis read fails (does not throw)', async () => {
+      jest.spyOn(redis, 'get').mockRejectedValue(new Error('Redis down'));
+      organizationMemberRepository.findOne.mockResolvedValue({
+        user_id: 'user-2',
+        organization_id: 'org-a',
+        roles: [OrganizationRole.ADMIN],
+      } as OrganizationMember);
+      teamMemberRepository.findOne.mockResolvedValue(null);
+      redis.setex.mockResolvedValue('OK');
+
+      const caps = await service.getCapabilities('user-2', ['perfana-user'], 'org-a');
+      expect(caps).toContain('integration:dynatrace:update'); // from DB
+    });
+
+    it('still returns the computed result when Redis write fails (cache write is non-fatal)', async () => {
+      redis.get.mockResolvedValue(null);
+      organizationMemberRepository.findOne.mockResolvedValue({
+        user_id: 'user-3',
+        organization_id: 'org-a',
+        roles: [OrganizationRole.ADMIN],
+      } as OrganizationMember);
+      teamMemberRepository.findOne.mockResolvedValue(null);
+      redis.setex.mockRejectedValue(new Error('Redis down'));
+
+      // First call (cache miss) — DB load + cache write attempt
+      const caps = await service.getCapabilities('user-3', ['perfana-user'], 'org-a');
+      expect(caps).toBeDefined();
+      expect(caps.length).toBeGreaterThan(0);
+    });
+
+    it('bubbles up DB errors (caller observes the failure rather than getting empty caps)', async () => {
+      redis.get.mockResolvedValue(null);
+      jest.spyOn(organizationMemberRepository, 'findOne').mockRejectedValue(new Error('Postgres down'));
+
+      await expect(
+        service.getCapabilities('user-4', ['perfana-user'], 'org-a'),
+      ).rejects.toThrow('Postgres down');
+      // Decision: we do NOT swallow DB errors silently. An empty capability set
+      // would let mutations through that should be denied. Better to 500.
+    });
+
+    it('invalidates capability cache when membership changes', async () => {
+      // Arrange: first call populates cache (cache miss → DB hit → cache write)
+      redis.get.mockResolvedValue(null);
+      organizationMemberRepository.findOne.mockResolvedValue({
+        user_id: 'user-2',
+        organization_id: 'org-a',
+        roles: [OrganizationRole.ADMIN],
+      } as OrganizationMember);
+      teamMemberRepository.findOne.mockResolvedValue(null);
+      await service.getCapabilities('user-2', ['perfana-user'], 'org-a');
+
+      // Act: simulate a membership change — the version counter must be bumped
+      // so that every cached capabilities key for this user becomes unreachable.
+      await service.invalidateUserCache('user-2');
+
+      // Assert: invalidateUserCache must have called redis.incr on the
+      // per-user capabilities-version key. We don't assert the exact version
+      // value — that would couple the test to the version counter's start value.
+      expect(redis.incr).toHaveBeenCalledWith('auth:capabilities-version:user-2');
     });
   });
 

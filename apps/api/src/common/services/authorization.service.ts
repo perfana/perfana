@@ -16,6 +16,8 @@ import {
   OrganizationRole,
   TeamRole,
 } from '../../constants/roles.constants';
+import { CapabilitiesService } from './capabilities.service';
+import { CapabilityValue } from '../../constants/capabilities.constants';
 
 /**
  * Cached user context with organization and team memberships
@@ -89,6 +91,7 @@ export class AuthorizationService {
     private readonly teamRepository: Repository<Team>,
     @InjectRepository(ApiKey)
     private readonly apiKeyRepository: Repository<ApiKey>,
+    private readonly capabilitiesService: CapabilitiesService,
   ) {
     // Default TTL: 5 minutes (300 seconds)
     // Shorter than API key cache since membership changes should reflect faster
@@ -718,6 +721,17 @@ export class AuthorizationService {
         `Failed to invalidate user cache: ${error && typeof error === 'object' && 'message' in error ? (error as Error).message : 'Unknown error'}`,
       );
     }
+
+    // Bump the per-user capabilities version. Every capability cache key for
+    // this user embeds the version, so incrementing it makes all existing
+    // entries unreachable in O(1) — no KEYS scan, no mass DEL. Stale entries
+    // expire via their existing TTL. Non-fatal: if Redis is down the TTL
+    // will eventually expire the stale capabilities entries.
+    try {
+      await this.redis.incr(`auth:capabilities-version:${userId}`);
+    } catch {
+      /* non-fatal — fall back to TTL */
+    }
   }
 
   /**
@@ -869,6 +883,120 @@ export class AuthorizationService {
       );
       return false;
     }
+  }
+
+  // ============================================
+  // Capabilities
+  // ============================================
+
+  /**
+   * Compute the user's flat capability set for the given organization context.
+   * Returns global-admin capabilities (every defined capability) when the caller
+   * passes a system-admin role.
+   *
+   * Cached by `(userId, organizationId, teamId)`; cache is invalidated on
+   * membership change via the existing `invalidateMembershipCache` flow.
+   *
+   * @param userId   User identity (Keycloak sub or `api-key:{id}`).
+   * @param roles    System roles from the JWT/API key (pass `ctx.roles` from `@UserCtx()`).
+   * @param organizationId  Organization scope, or `null` for global-only resolution.
+   * @param teamId   Optional team scope.
+   */
+  async getCapabilities(
+    userId: string,
+    roles: string[],
+    organizationId: string | null,
+    teamId?: string | null,
+  ): Promise<CapabilityValue[]> {
+    // Versioned cache key strategy (NOT a `redis.keys('pattern')` invalidation).
+    // KEYS blocks the entire Redis instance — never safe in production. Instead,
+    // each user has a per-user "capabilities-version" counter; the cache key
+    // includes that version. Invalidation just INCR's the counter, which makes
+    // every old key for that user unreachable. Stale entries time out via TTL.
+    const version = await this.getCapabilitiesVersion(userId);
+    const cacheKey = `auth:capabilities:${userId}:${organizationId ?? '_'}:${teamId ?? '_'}:v${version}`;
+
+    const cached = await this.getCachedCapabilities(cacheKey);
+    if (cached !== null) return cached;
+
+    // Cold path: load org+team roles in parallel (one Postgres round-trip
+    // instead of two when both are scoped).
+    const [orgRoles, teamRoles] = await Promise.all([
+      organizationId
+        ? this.loadOrgRoles(userId, organizationId)
+        : Promise.resolve([] as OrganizationRole[]),
+      teamId ? this.loadTeamRoles(userId, teamId) : Promise.resolve([] as TeamRole[]),
+    ]);
+
+    const caps = this.capabilitiesService.compute({
+      systemRoles: roles,
+      orgRoles,
+      teamRoles,
+    });
+
+    await this.cacheCapabilities(cacheKey, caps);
+    return caps;
+  }
+
+  /**
+   * Per-user capability cache version. Bumped on every membership change to
+   * make every existing cache entry for this user unreachable. Default 1 if
+   * the counter doesn't exist yet (first-ever lookup).
+   */
+  private async getCapabilitiesVersion(userId: string): Promise<number> {
+    if (!this.enableCache) return 1;
+    try {
+      const v = await this.redis.get(`auth:capabilities-version:${userId}`);
+      return v ? parseInt(v, 10) : 1;
+    } catch {
+      return 1; // Redis down → cache disabled implicitly via the cache helpers
+    }
+  }
+
+  private async getCachedCapabilities(
+    cacheKey: string,
+  ): Promise<CapabilityValue[] | null> {
+    if (!this.enableCache) return null;
+    try {
+      const raw = await this.redis.get(cacheKey);
+      return raw ? (JSON.parse(raw) as CapabilityValue[]) : null;
+    } catch {
+      return null;
+    }
+  }
+
+  private async cacheCapabilities(
+    cacheKey: string,
+    caps: CapabilityValue[],
+  ): Promise<void> {
+    if (!this.enableCache) return;
+    try {
+      // Reuse the existing TTL the AuthorizationService already configures
+      // for `auth:org-membership:*` keys. Using a separate value here would
+      // create inconsistent staleness windows (a user removed from an org
+      // could see stale capabilities for capabilities-TTL seconds AFTER
+      // their membership cache was invalidated).
+      await this.redis.setex(cacheKey, this.defaultTtl, JSON.stringify(caps));
+    } catch {
+      /* cache failures are non-fatal */
+    }
+  }
+
+  private async loadOrgRoles(
+    userId: string,
+    organizationId: string,
+  ): Promise<OrganizationRole[]> {
+    const member = await this.organizationMemberRepository.findOne({
+      where: { user_id: userId, organization_id: organizationId },
+    });
+    return (member?.roles ?? []) as OrganizationRole[];
+  }
+
+  private async loadTeamRoles(userId: string, teamId: string): Promise<TeamRole[]> {
+    const member = await this.teamMemberRepository.findOne({
+      where: { user_id: userId, team_id: teamId },
+    });
+    return (member?.roles ?? []) as TeamRole[];
   }
 
   // ============================================
