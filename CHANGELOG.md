@@ -4,6 +4,16 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
+## [0.2.47.8] - 2026-04-28
+
+### Security / Fixed
+- **Authorization bypass on Dynatrace DQL queries and entity mappings (RBAC Phase 3 follow-up).** `PATCH /api/dynatrace/queries/:id`, `DELETE /api/dynatrace/queries/:id`, and `DELETE /api/dynatrace/entities/mappings/:id` had no authorization check — any authenticated user (org-member, org-viewer, even outside the parent config's org) could update or delete any DQL query or entity mapping. Confirmed in production logs: an org-member user successfully ran `[DynatraceService] Dynatrace DQL query 5715d100-… deleted successfully` against a query owned by a different ownership context. The Phase 3b pilot only covered the parent `DynatraceConfig` endpoints; the sub-resources retained stale `// Phase 4 will add organization_id` TODOs even though the columns had already been added by the broader ownership migration. **Backend change:** `updateQuery`, `deleteQuery`, `deleteEntityMapping` now load the row, verify the caller has `Capability.IntegrationDynatraceUpdate` / `IntegrationDynatraceDelete` for `existing.organizationId`, and reject pre-backfill rows (org_id IS NULL) for non-admins. Global admins still bypass via `getCapabilities` returning the global cap set. Three new regression tests in `dynatrace.service.spec.ts` cover member-deny / org-null-deny / member-deny-on-delete shapes.
+- **DQL query and entity-mapping creates now persist `organization_id` / `created_by` / `updated_by`.** `createQuery`, `createQuerySmart`, `bulkImportQuery`, `createEntityMapping` previously created rows with `organization_id = NULL` (8/8 queries and 4/4 mappings in the demo DB had null org_id at fix time). New rows derive `organization_id` from the parent `DynatraceConfig` and capture the authenticated user as creator/updater. The repository surface now takes an optional `QueryOwnership` tuple and the parent-config + capability check is centralized in `DynatraceService.requireDynatraceMutationCapability` so the four create paths can't drift. Service-layer test fixtures were updated to mock the parent-config lookup; existing test coverage now asserts the ownership tuple is forwarded to the repository.
+- **Backfill migration `BackfillDynatraceQueryAndMappingOwnership1777600000000`.** UPDATEs every `dynatrace_queries` and `dynatrace_entity_mappings` row that has `organization_id IS NULL`, joining on the parent config to inherit `organization_id`, `team_id`, `created_by`, `updated_by`. Without this, the new mutation guards would still let everyone touch existing rows because they're all on the legacy null-org path. Idempotent: only updates null rows. `down()` is a no-op by design — reverting would re-open the security gap; re-running `up()` after a mistaken `down` is safe.
+
+### Notes
+- The DQL query and entity-mapping DTO mappers now expose `organizationId`, `createdBy`, `updatedBy` so service-level guards can read them off the loaded row without bypassing the DTO layer. This is also a pre-requisite for the upcoming `_permissions` enrichment on these endpoints (Phase 3b extension to sub-resources, not in this release).
+
 ## [0.2.47.7] - 2026-04-28
 
 ### Changed

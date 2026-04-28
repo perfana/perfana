@@ -58,6 +58,60 @@ export class DynatraceService {
   }
 
   /**
+   * Resolve the parent DynatraceConfig's organizationId and verify the caller
+   * has IntegrationDynatraceUpdate capability there. Used by every create/bulk
+   * path that mints DQL queries or entity mappings under a config — keeps the
+   * child rows from being created with `organization_id IS NULL` (which would
+   * trip the legacy hatch in the mutation/delete paths).
+   *
+   * Global admins skip the capability check (still picks up the parent's org
+   * so the row is correctly scoped). Legacy configs with no organizationId
+   * are tolerated for global admins only — non-admins are denied so they
+   * cannot create child rows that would be globally mutable forever after.
+   *
+   * @returns The resolved organizationId (may be undefined for legacy
+   *   admin-only configs); the caller forwards it as the persisted ownership.
+   */
+  private async requireDynatraceMutationCapability(
+    dynatraceConfigId: string,
+    userId: string,
+    roles: string[],
+    isAdmin: boolean,
+    op: 'create' | 'update' | 'delete',
+  ): Promise<string | undefined> {
+    const parentConfig = await this.repository.findById(dynatraceConfigId);
+    if (!parentConfig) {
+      throw new NotFoundException(`Dynatrace configuration with ID ${dynatraceConfigId} not found`);
+    }
+
+    if (isAdmin) {
+      return parentConfig.organizationId;
+    }
+
+    if (!parentConfig.organizationId) {
+      throw new ForbiddenException(
+        `You do not have permission to ${op} resources under this Dynatrace configuration`,
+      );
+    }
+
+    const requiredCapability =
+      op === 'delete'
+        ? Capability.IntegrationDynatraceDelete
+        : Capability.IntegrationDynatraceUpdate;
+    const caps = await this.authzService.getCapabilities(
+      userId,
+      roles,
+      parentConfig.organizationId,
+    );
+    if (!caps.includes(requiredCapability)) {
+      throw new ForbiddenException(
+        `You do not have permission to ${op} resources under this Dynatrace configuration`,
+      );
+    }
+    return parentConfig.organizationId;
+  }
+
+  /**
    * Find all Dynatrace configurations
    *
    * @param userId - The user ID for authorization
@@ -647,11 +701,17 @@ export class DynatraceService {
    * Phase 4 adds the ownership columns.
    */
   async createQuery(dto: CreateDynatraceQueryDto, userId: string, roles: string[]) {
-    // Log authorization context for debugging
     const isAdmin = this.authzService.isGlobalAdmin(roles);
     this.logger.debug(`createQuery: userId=${userId}, isGlobalAdmin=${isAdmin}`);
 
-    // Ensure artificial dashboard exists before creating query
+    const parentOrgId = await this.requireDynatraceMutationCapability(
+      dto.dynatraceConfigId,
+      userId,
+      roles,
+      isAdmin,
+      'create',
+    );
+
     if (dto.systemUnderTestId && dto.testEnvironment && dto.dashboardLabel && dto.applicationDashboardId) {
       await this.repository.ensureArtificialDashboardExists(
         dto.systemUnderTestId,
@@ -662,9 +722,11 @@ export class DynatraceService {
       );
     }
 
-    // NOTE: created_by, updated_by, organization_id will be set when Phase 4 adds those columns
-
-    return this.repository.createQuery(dto);
+    return this.repository.createQuery(dto, {
+      organizationId: parentOrgId,
+      createdBy: userId,
+      updatedBy: userId,
+    });
   }
 
   /**
@@ -679,23 +741,26 @@ export class DynatraceService {
    * Phase 4 adds the ownership columns.
    */
   async createQuerySmart(dto: CreateDynatraceQueryDto, userId: string, roles: string[]) {
-    // Log authorization context for debugging
     const isAdmin = this.authzService.isGlobalAdmin(roles);
     this.logger.debug(`createQuerySmart: userId=${userId}, isGlobalAdmin=${isAdmin}`);
 
-    // Check if there's already a record with the same dashboard_label
+    const parentOrgId = await this.requireDynatraceMutationCapability(
+      dto.dynatraceConfigId,
+      userId,
+      roles,
+      isAdmin,
+      'create',
+    );
+
     const existingUuid = await this.repository.findDashboardByLabel(dto.dashboardLabel);
 
     let applicationDashboardId: string;
     if (existingUuid) {
-      // Use existing UUID for this dashboard label
       applicationDashboardId = existingUuid;
     } else {
-      // Generate new UUID for this dashboard label
       applicationDashboardId = randomUUID();
     }
 
-    // Ensure artificial dashboard exists before creating query
     if (dto.systemUnderTestId && dto.testEnvironment && dto.dashboardLabel) {
       await this.repository.ensureArtificialDashboardExists(
         dto.systemUnderTestId,
@@ -706,9 +771,11 @@ export class DynatraceService {
       );
     }
 
-    // NOTE: created_by, updated_by, organization_id will be set when Phase 4 adds those columns
-
-    return this.repository.createQueryWithSharedUuid(dto, applicationDashboardId);
+    return this.repository.createQueryWithSharedUuid(dto, applicationDashboardId, {
+      organizationId: parentOrgId,
+      createdBy: userId,
+      updatedBy: userId,
+    });
   }
 
   /**
@@ -724,7 +791,6 @@ export class DynatraceService {
    * Phase 4 adds the ownership columns.
    */
   async bulkImportQuery(dtoList: CreateDynatraceQueryDto[], userId: string, roles: string[], generateSharedUuid = true) {
-    // Log authorization context for debugging
     const isAdmin = this.authzService.isGlobalAdmin(roles);
     this.logger.debug(`bulkImportQuery: count=${dtoList.length}, userId=${userId}, isGlobalAdmin=${isAdmin}`);
 
@@ -732,14 +798,23 @@ export class DynatraceService {
       return [];
     }
 
+    // bulkCreate path requires the same parent config across all DTOs (the
+    // repository enforces this). Validate the caller's mutation capability
+    // against that single parent up front so we fail fast on a single 403
+    // instead of writing some rows before discovering the gap.
+    const firstDto = dtoList[0]!;
+    const parentOrgId = await this.requireDynatraceMutationCapability(
+      firstDto.dynatraceConfigId,
+      userId,
+      roles,
+      isAdmin,
+      'create',
+    );
+
     if (generateSharedUuid) {
-      // Generate one UUID for all metrics in this import
       const sharedUuid = randomUUID();
 
-      // Get the first DTO to extract common fields
-      const firstDto = dtoList[0];
-      if (firstDto && firstDto.systemUnderTestId && firstDto.testEnvironment && firstDto.dashboardLabel) {
-        // Ensure artificial dashboard exists before creating queries
+      if (firstDto.systemUnderTestId && firstDto.testEnvironment && firstDto.dashboardLabel) {
         await this.repository.ensureArtificialDashboardExists(
           firstDto.systemUnderTestId,
           firstDto.testEnvironment,
@@ -749,11 +824,12 @@ export class DynatraceService {
         );
       }
 
-      // NOTE: created_by, updated_by, organization_id will be set when Phase 4 adds those columns
-
-      return this.repository.bulkCreateQueryWithSharedUuid(dtoList, sharedUuid);
+      return this.repository.bulkCreateQueryWithSharedUuid(dtoList, sharedUuid, {
+        organizationId: parentOrgId,
+        createdBy: userId,
+        updatedBy: userId,
+      });
     } else {
-      // Create individual entries using the smart logic for each
       const results = [];
       for (const dto of dtoList) {
         const result = await this.createQuerySmart(dto, userId, roles);
@@ -775,22 +851,38 @@ export class DynatraceService {
    * Full permission checks will be enabled when Phase 4 adds organization_id column.
    */
   async updateQuery(id: string, dto: UpdateDynatraceQueryDto, userId: string, roles: string[]) {
-    // Log authorization context for debugging
     const isAdmin = this.authzService.isGlobalAdmin(roles);
     this.logger.debug(`updateQuery: id=${id}, userId=${userId}, isGlobalAdmin=${isAdmin}`);
 
-    // Check if the DQL query exists
     const existing = await this.repository.findQueryById(id);
     if (!existing) {
       throw new NotFoundException(`Dynatrace DQL query with ID ${id} not found`);
     }
 
-    // NOTE: Permission check will be added here when DynatraceQuery entity has organization_id
-    // For now, all queries are modifiable (treated as legacy data)
-    // NOTE: updated_by will be set when Phase 4 adds that column
+    // Capability check scoped to the row's org. Pre-backfill rows have
+    // organizationId === null; we deny those for non-admins so that the
+    // backfill migration (1777600000000) is the only path that re-opens them.
+    // Global admins retain bypass via getCapabilities returning every cap.
+    if (!isAdmin) {
+      if (!existing.organizationId) {
+        throw new ForbiddenException(
+          'You do not have permission to modify this Dynatrace query',
+        );
+      }
+      const caps = await this.authzService.getCapabilities(
+        userId,
+        roles,
+        existing.organizationId,
+      );
+      if (!caps.includes(Capability.IntegrationDynatraceUpdate)) {
+        throw new ForbiddenException(
+          'You do not have permission to modify this Dynatrace query',
+        );
+      }
+    }
 
-    const updated = await this.repository.updateQuery(id, dto);
-    this.logger.log(`Dynatrace DQL query updated: ${id}`);
+    const updated = await this.repository.updateQuery(id, dto, { updatedBy: userId });
+    this.logger.log(`Dynatrace DQL query updated: ${id} by user ${userId}`);
     return updated;
   }
 
@@ -805,21 +897,34 @@ export class DynatraceService {
    * Full permission checks will be enabled when Phase 4 adds organization_id column.
    */
   async deleteQuery(id: string, userId: string, roles: string[]) {
-    // Log authorization context for debugging
     const isAdmin = this.authzService.isGlobalAdmin(roles);
     this.logger.debug(`deleteQuery: id=${id}, userId=${userId}, isGlobalAdmin=${isAdmin}`);
 
-    // Check if the DQL query exists
     const existing = await this.repository.findQueryById(id);
     if (!existing) {
       throw new NotFoundException(`Dynatrace DQL query with ID ${id} not found`);
     }
 
-    // NOTE: Delete permission check will be added here when DynatraceQuery entity has organization_id
-    // For now, all queries are deletable (treated as legacy data)
+    if (!isAdmin) {
+      if (!existing.organizationId) {
+        throw new ForbiddenException(
+          'You do not have permission to delete this Dynatrace query',
+        );
+      }
+      const caps = await this.authzService.getCapabilities(
+        userId,
+        roles,
+        existing.organizationId,
+      );
+      if (!caps.includes(Capability.IntegrationDynatraceDelete)) {
+        throw new ForbiddenException(
+          'You do not have permission to delete this Dynatrace query',
+        );
+      }
+    }
 
     await this.repository.deleteQuery(id);
-    this.logger.log(`Dynatrace DQL query ${id} deleted successfully`);
+    this.logger.log(`Dynatrace DQL query ${id} deleted successfully by user ${userId}`);
   }
 
   // SLO Support Methods
@@ -937,17 +1042,26 @@ export class DynatraceService {
    * Phase 4 adds the ownership columns.
    */
   async createEntityMapping(dto: CreateEntityMappingDto, userId: string, roles: string[]) {
-    // Log authorization context for debugging
     const isAdmin = this.authzService.isGlobalAdmin(roles);
     this.logger.debug(`createEntityMapping: userId=${userId}, isGlobalAdmin=${isAdmin}`);
 
+    const parentOrgId = await this.requireDynatraceMutationCapability(
+      dto.dynatraceConfigId,
+      userId,
+      roles,
+      isAdmin,
+      'create',
+    );
+
     try {
-      // NOTE: created_by, updated_by, organization_id will be set when Phase 4 adds those columns
-      const result = await this.repository.createEntityMapping(dto);
-      this.logger.log(`Dynatrace entity mapping created: ${result.id}`);
+      const result = await this.repository.createEntityMapping(dto, {
+        organizationId: parentOrgId,
+        createdBy: userId,
+        updatedBy: userId,
+      });
+      this.logger.log(`Dynatrace entity mapping created: ${result.id} by user ${userId}`);
       return result;
     } catch (error) {
-      // Check if this is a duplicate entity mapping error
       if (error && typeof error === 'object' && 'message' in error) {
         const message = (error as Error).message;
         if (message.includes('already mapped')) {
@@ -969,7 +1083,6 @@ export class DynatraceService {
    * Full permission checks will be enabled when Phase 4 adds organization_id column.
    */
   async deleteEntityMapping(id: string, userId: string, roles: string[]) {
-    // Log authorization context for debugging
     const isAdmin = this.authzService.isGlobalAdmin(roles);
     this.logger.debug(`deleteEntityMapping: id=${id}, userId=${userId}, isGlobalAdmin=${isAdmin}`);
 
@@ -978,11 +1091,26 @@ export class DynatraceService {
       throw new NotFoundException(`Dynatrace entity mapping with ID ${id} not found`);
     }
 
-    // NOTE: Delete permission check will be added here when DynatraceEntityMapping entity has organization_id
-    // For now, all mappings are deletable (treated as legacy data)
+    if (!isAdmin) {
+      if (!existing.organizationId) {
+        throw new ForbiddenException(
+          'You do not have permission to delete this Dynatrace entity mapping',
+        );
+      }
+      const caps = await this.authzService.getCapabilities(
+        userId,
+        roles,
+        existing.organizationId,
+      );
+      if (!caps.includes(Capability.IntegrationDynatraceDelete)) {
+        throw new ForbiddenException(
+          'You do not have permission to delete this Dynatrace entity mapping',
+        );
+      }
+    }
 
     await this.repository.deleteEntityMapping(id);
-    this.logger.log(`Dynatrace entity mapping ${id} deleted successfully`);
+    this.logger.log(`Dynatrace entity mapping ${id} deleted successfully by user ${userId}`);
   }
 
   // Metric Names for Dynatrace Card
