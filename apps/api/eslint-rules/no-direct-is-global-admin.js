@@ -62,7 +62,7 @@ module.exports = {
     },
     messages: {
       noDirectIsGlobalAdmin:
-        'Direct authzService.isGlobalAdmin() is deprecated. Use getCapabilities() or @RequiresCapability. See docs/superpowers/audits/2026-04-26-audit-decisions.md. To migrate this file, remove it from .rbac-migration-allowlist.json.',
+        'Direct authzService.isGlobalAdmin() is deprecated. Use getCapabilities() or @RequiresCapability. See docs-site/content/Architecture/Capabilities and RBAC.md (or the rendered version on the internal docs site). To migrate this file, remove it from .rbac-migration-allowlist.json.',
     },
     schema: [],
   },
