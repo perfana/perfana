@@ -10,6 +10,7 @@ import { BadRequestException, ConflictException, NotFoundException } from '@nest
 import axios from 'axios';
 import { createAuthorizationServiceMock } from '../../../test/mocks/authorization-service.mock';
 import { AuthorizationService } from '../../common/services/authorization.service';
+import { Capability } from '../../constants/capabilities.constants';
 
 jest.mock('axios');
 const mockedAxios = axios as jest.Mocked<typeof axios>;
@@ -117,7 +118,9 @@ describe('DynatraceService', () => {
 
         const result = await service.findAll(mockUserId, mockRoles);
 
-        expect(result).toEqual([mockDynatraceConfigMasked]);
+        expect(result).toHaveLength(1);
+        expect(result[0]).toEqual(expect.objectContaining(mockDynatraceConfigMasked));
+        expect(result[0]).toHaveProperty('_permissions');
         expect(repository.findAll).toHaveBeenCalledTimes(1);
       });
 
@@ -136,7 +139,8 @@ describe('DynatraceService', () => {
 
         const result = await service.findByHost('https://example.live.dynatrace.com', mockUserId, mockRoles);
 
-        expect(result).toEqual(mockDynatraceConfigMasked);
+        expect(result).toEqual(expect.objectContaining(mockDynatraceConfigMasked));
+        expect(result).toHaveProperty('_permissions');
         expect(repository.findByHost).toHaveBeenCalledWith('https://example.live.dynatrace.com');
       });
 
@@ -958,6 +962,127 @@ describe('DynatraceService', () => {
 
         expect(result).toEqual(mockMetricNames);
         expect(repository.getMetricNames).toHaveBeenCalledWith(undefined);
+      });
+    });
+  });
+
+  describe('returns _permissions per config', () => {
+    const orgId = 'org-abc';
+
+    const configWithOrg = {
+      ...mockDynatraceConfig,
+      organizationId: orgId,
+    };
+
+    const configNullOrg = {
+      ...mockDynatraceConfig,
+      id: 'config-legacy',
+      organizationId: null,
+    };
+
+    let authzService: ReturnType<typeof createAuthorizationServiceMock>;
+
+    beforeEach(async () => {
+      // Re-create module so we can grab the authzService reference with getCapabilities mock
+      const module: TestingModule = await Test.createTestingModule({
+        providers: [
+          DynatraceService,
+          {
+            provide: DynatraceRepository,
+            useValue: mockRepositoryFactory(),
+          },
+          {
+            provide: AuthorizationService,
+            useValue: createAuthorizationServiceMock(),
+          },
+        ],
+      }).compile();
+
+      service = module.get<DynatraceService>(DynatraceService);
+      repository = module.get(DynatraceRepository);
+      authzService = module.get(AuthorizationService) as any;
+    });
+
+    describe('findAll', () => {
+      it('org-admin: every config gets update=true and delete=true', async () => {
+        authzService.isGlobalAdmin.mockReturnValue(false);
+        authzService.getAccessibleOrganizations.mockResolvedValue([orgId]);
+        authzService.getCapabilities.mockResolvedValue([
+          Capability.IntegrationDynatraceUpdate,
+          Capability.IntegrationDynatraceDelete,
+        ]);
+        repository.findAll.mockResolvedValue([configWithOrg]);
+
+        const result = await service.findAll(mockUserId, mockRoles);
+
+        expect(result).toHaveLength(1);
+        expect(result[0]._permissions).toEqual({ update: true, delete: true });
+      });
+
+      it('org-member: configs in their org get update=false and delete=false', async () => {
+        authzService.isGlobalAdmin.mockReturnValue(false);
+        authzService.getAccessibleOrganizations.mockResolvedValue([orgId]);
+        // org-member has no integration mutation capabilities
+        authzService.getCapabilities.mockResolvedValue([]);
+        repository.findAll.mockResolvedValue([configWithOrg]);
+
+        const result = await service.findAll(mockUserId, mockRoles);
+
+        expect(result).toHaveLength(1);
+        expect(result[0]._permissions).toEqual({ update: false, delete: false });
+      });
+
+      it('global admin: every config gets update=true and delete=true', async () => {
+        authzService.isGlobalAdmin.mockReturnValue(true);
+        // getCapabilities should not be called for global admin — test the result shape
+        repository.findAll.mockResolvedValue([configWithOrg]);
+
+        const result = await service.findAll(mockUserId, ['perfana-admin']);
+
+        expect(result).toHaveLength(1);
+        expect(result[0]._permissions).toEqual({ update: true, delete: true });
+      });
+
+      it('null-org (legacy) config always gets update=true and delete=true regardless of role', async () => {
+        authzService.isGlobalAdmin.mockReturnValue(false);
+        authzService.getAccessibleOrganizations.mockResolvedValue([orgId]);
+        // No integration capabilities — yet legacy config must still be editable
+        authzService.getCapabilities.mockResolvedValue([]);
+        repository.findAll.mockResolvedValue([configWithOrg, configNullOrg]);
+
+        const result = await service.findAll(mockUserId, mockRoles);
+
+        const withOrg = result.find(c => c.id === configWithOrg.id);
+        const legacy = result.find(c => c.id === configNullOrg.id);
+
+        expect(withOrg!._permissions).toEqual({ update: false, delete: false });
+        expect(legacy!._permissions).toEqual({ update: true, delete: true });
+      });
+    });
+
+    describe('findByHost', () => {
+      it('returns a config with _permissions shape', async () => {
+        authzService.isGlobalAdmin.mockReturnValue(false);
+        authzService.isOrganizationMember.mockResolvedValue(true);
+        authzService.getCapabilities.mockResolvedValue([
+          Capability.IntegrationDynatraceUpdate,
+          Capability.IntegrationDynatraceDelete,
+        ]);
+        repository.findByHost.mockResolvedValue(configWithOrg);
+
+        const result = await service.findByHost(configWithOrg.host, mockUserId, mockRoles);
+
+        expect(result._permissions).toEqual({ update: true, delete: true });
+      });
+
+      it('null-org (legacy) config returned by findByHost always gets update=true and delete=true', async () => {
+        authzService.isGlobalAdmin.mockReturnValue(false);
+        authzService.getCapabilities.mockResolvedValue([]);
+        repository.findByHost.mockResolvedValue(configNullOrg);
+
+        const result = await service.findByHost(configNullOrg.host, mockUserId, mockRoles);
+
+        expect(result._permissions).toEqual({ update: true, delete: true });
       });
     });
   });

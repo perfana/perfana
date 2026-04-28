@@ -9,6 +9,8 @@ import { HostPropertiesResponse, HostMetricsResponse, HostProblemResponse, TimeS
 import { AuthorizationService } from '../../common/services/authorization.service';
 import { withOrgFilter } from '../../common/utils/with-org-filter';
 import { validateExternalUrl } from '../../common/security/url-validator';
+import { attachPermissions } from '../../common/serializers/with-permissions.serializer';
+import { Capability } from '../../constants/capabilities.constants';
 import axios from 'axios';
 import { randomUUID } from 'crypto';
 
@@ -67,31 +69,56 @@ export class DynatraceService {
   async findAll(userId: string, roles: string[], organizationId?: string) {
     // Resolve accessible org IDs: null means global admin (no filter needed)
     const orgIds = await withOrgFilter(userId, roles, this.authzService);
-    this.logger.debug(`findAll: userId=${userId}, isGlobalAdmin=${orgIds === null}, organizationId=${organizationId}`);
+    const isGlobalAdmin = orgIds === null;
+    this.logger.debug(`findAll: userId=${userId}, isGlobalAdmin=${isGlobalAdmin}, organizationId=${organizationId}`);
 
     // Get all configs first
     const allConfigs = await this.repository.findAll();
 
     // Apply organization filtering
+    let filteredConfigs: typeof allConfigs;
     if (organizationId) {
       // Explicit org selected — scope to that org only
-      const filteredConfigs = allConfigs.filter(config =>
+      filteredConfigs = allConfigs.filter(config =>
         config.organizationId === organizationId
       );
       this.logger.debug(`Returning ${filteredConfigs.length} Dynatrace configs for org ${organizationId} (from ${allConfigs.length} total)`);
-      return filteredConfigs.map(c => this.maskConfig(c));
     } else if (orgIds !== null) {
       // Non-admin: filter to accessible organizations OR legacy configs (null organization_id)
       this.logger.debug(`User ${userId} has access to ${orgIds.length} organizations`);
-      const filteredConfigs = allConfigs.filter(config =>
+      filteredConfigs = allConfigs.filter(config =>
         !config.organizationId || orgIds.includes(config.organizationId)
       );
-
       this.logger.debug(`Returning ${filteredConfigs.length} Dynatrace configs for user ${userId} (from ${allConfigs.length} total)`);
-      return filteredConfigs.map(c => this.maskConfig(c));
+    } else {
+      filteredConfigs = allConfigs;
     }
 
-    return allConfigs.map(c => this.maskConfig(c));
+    // Batch capability lookup: M Redis hits for M unique org IDs (not N per config)
+    if (isGlobalAdmin) {
+      // Global admin can always update/delete everything
+      return filteredConfigs.map(c =>
+        attachPermissions(this.maskConfig(c), { update: true, delete: true })
+      );
+    }
+
+    const uniqueOrgIds = Array.from(
+      new Set(filteredConfigs.map(c => c.organizationId).filter((id): id is string => id != null))
+    );
+    const capsResults = await Promise.all(
+      uniqueOrgIds.map(orgId => this.authzService.getCapabilities(userId, roles, orgId))
+    );
+    const capsByOrg = new Map<string, string[]>();
+    uniqueOrgIds.forEach((orgId, i) => capsByOrg.set(orgId, capsResults[i] as string[]));
+
+    return filteredConfigs.map(c => {
+      const caps = c.organizationId ? (capsByOrg.get(c.organizationId) ?? []) : [];
+      const isLegacy = c.organizationId == null;
+      return attachPermissions(this.maskConfig(c), {
+        update: isLegacy || caps.includes(Capability.IntegrationDynatraceUpdate),
+        delete: isLegacy || caps.includes(Capability.IntegrationDynatraceDelete),
+      });
+    });
   }
 
   /**
@@ -125,7 +152,17 @@ export class DynatraceService {
       }
     }
 
-    return this.maskConfig(config);
+    // Attach _permissions: global admin or legacy null-org configs can always mutate;
+    // otherwise derive from per-org capabilities.
+    if (isAdmin || config.organizationId == null) {
+      return attachPermissions(this.maskConfig(config), { update: true, delete: true });
+    }
+
+    const caps = await this.authzService.getCapabilities(userId, roles, config.organizationId) as string[];
+    return attachPermissions(this.maskConfig(config), {
+      update: caps.includes(Capability.IntegrationDynatraceUpdate),
+      delete: caps.includes(Capability.IntegrationDynatraceDelete),
+    });
   }
 
   /**
