@@ -6,7 +6,7 @@ import { UpdateDynatraceConfigDto } from './dto/update-dynatrace-config.dto';
 import { CreateDynatraceQueryDto } from './dto/create-dynatrace-query.dto';
 import { UpdateDynatraceQueryDto } from './dto/update-dynatrace-query.dto';
 import { CreateEntityMappingDto } from './dto/create-entity-mapping.dto';
-import { BadRequestException, ConflictException, NotFoundException } from '@nestjs/common';
+import { BadRequestException, ConflictException, ForbiddenException, NotFoundException } from '@nestjs/common';
 import axios from 'axios';
 import { createAuthorizationServiceMock } from '../../../test/mocks/authorization-service.mock';
 import { AuthorizationService } from '../../common/services/authorization.service';
@@ -31,6 +31,7 @@ describe('DynatraceService', () => {
     platformApiToken: 'platform-token',
     perfanaTestRunIdAttribute: 'perfana-test-run-id',
     perfanaRequestNameAttribute: 'perfana-request-name',
+    organizationId: 'org-123',
     createdAt: new Date(),
     updatedAt: new Date(),
   };
@@ -56,6 +57,7 @@ describe('DynatraceService', () => {
     omitGroupByVariableFromMetricName: [],
     templateVariables: {},
     applicationDashboardId: 'dash-123',
+    organizationId: 'org-123',
     createdAt: new Date(),
     updatedAt: new Date(),
     dynatraceConfig: undefined,
@@ -648,12 +650,20 @@ describe('DynatraceService', () => {
       };
 
       it('should create new query', async () => {
+        repository.findById.mockResolvedValue(mockDynatraceConfig);
         repository.createQuery.mockResolvedValue(mockDynatraceQuery);
 
         const result = await service.createQuery(createQueryDto, mockUserId, mockRoles);
 
         expect(result).toEqual(mockDynatraceQuery);
-        expect(repository.createQuery).toHaveBeenCalledWith(createQueryDto);
+        expect(repository.createQuery).toHaveBeenCalledWith(
+          createQueryDto,
+          expect.objectContaining({
+            organizationId: 'org-123',
+            createdBy: mockUserId,
+            updatedBy: mockUserId,
+          }),
+        );
       });
     });
 
@@ -673,6 +683,7 @@ describe('DynatraceService', () => {
 
       it('should reuse existing UUID when dashboard label exists', async () => {
         const existingUuid = 'existing-uuid-123';
+        repository.findById.mockResolvedValue(mockDynatraceConfig);
         repository.findDashboardByLabel.mockResolvedValue(existingUuid);
         repository.createQueryWithSharedUuid.mockResolvedValue(mockDynatraceQuery);
 
@@ -680,10 +691,19 @@ describe('DynatraceService', () => {
 
         expect(result).toEqual(mockDynatraceQuery);
         expect(repository.findDashboardByLabel).toHaveBeenCalledWith('Performance Dashboard');
-        expect(repository.createQueryWithSharedUuid).toHaveBeenCalledWith(createQueryDto, existingUuid);
+        expect(repository.createQueryWithSharedUuid).toHaveBeenCalledWith(
+          createQueryDto,
+          existingUuid,
+          expect.objectContaining({
+            organizationId: 'org-123',
+            createdBy: mockUserId,
+            updatedBy: mockUserId,
+          }),
+        );
       });
 
       it('should generate new UUID when dashboard label does not exist', async () => {
+        repository.findById.mockResolvedValue(mockDynatraceConfig);
         repository.findDashboardByLabel.mockResolvedValue(null);
         repository.createQueryWithSharedUuid.mockResolvedValue(mockDynatraceQuery);
 
@@ -692,7 +712,12 @@ describe('DynatraceService', () => {
         expect(result).toEqual(mockDynatraceQuery);
         expect(repository.createQueryWithSharedUuid).toHaveBeenCalledWith(
           createQueryDto,
-          expect.any(String)
+          expect.any(String),
+          expect.objectContaining({
+            organizationId: 'org-123',
+            createdBy: mockUserId,
+            updatedBy: mockUserId,
+          }),
         );
       });
     });
@@ -720,6 +745,7 @@ describe('DynatraceService', () => {
       });
 
       it('should generate shared UUID for all metrics by default', async () => {
+        repository.findById.mockResolvedValue(mockDynatraceConfig);
         repository.bulkCreateQueryWithSharedUuid.mockResolvedValue([mockDynatraceQuery]);
 
         const result = await service.bulkImportQuery(dtoList, mockUserId, mockRoles, true);
@@ -727,11 +753,17 @@ describe('DynatraceService', () => {
         expect(result).toEqual([mockDynatraceQuery]);
         expect(repository.bulkCreateQueryWithSharedUuid).toHaveBeenCalledWith(
           dtoList,
-          expect.any(String)
+          expect.any(String),
+          expect.objectContaining({
+            organizationId: 'org-123',
+            createdBy: mockUserId,
+            updatedBy: mockUserId,
+          }),
         );
       });
 
       it('should use smart logic for individual entries when generateSharedUuid is false', async () => {
+        repository.findById.mockResolvedValue(mockDynatraceConfig);
         repository.findDashboardByLabel.mockResolvedValue(null);
         repository.createQueryWithSharedUuid.mockResolvedValue(mockDynatraceQuery);
 
@@ -756,7 +788,11 @@ describe('DynatraceService', () => {
         const result = await service.updateQuery('query-123', updateQueryDto, mockUserId, mockRoles);
 
         expect(result).toEqual(updatedQuery);
-        expect(repository.updateQuery).toHaveBeenCalledWith('query-123', updateQueryDto);
+        expect(repository.updateQuery).toHaveBeenCalledWith(
+          'query-123',
+          updateQueryDto,
+          expect.objectContaining({ updatedBy: mockUserId }),
+        );
       });
 
       it('should throw NotFoundException when query not found', async () => {
@@ -765,6 +801,35 @@ describe('DynatraceService', () => {
         await expect(service.updateQuery('nonexistent', updateQueryDto, mockUserId, mockRoles)).rejects.toThrow(
           NotFoundException
         );
+      });
+
+      it('should throw ForbiddenException when caller lacks IntegrationDynatraceUpdate cap in the query org', async () => {
+        // Regression: org-non-admins were able to PATCH /api/dynatrace/queries/:id
+        // because updateQuery had a Phase-4 TODO instead of a real auth check.
+        repository.findQueryById.mockResolvedValue(mockDynatraceQuery);
+        const authz = service['authzService'] as unknown as {
+          isGlobalAdmin: jest.Mock;
+          getCapabilities: jest.Mock;
+        };
+        authz.isGlobalAdmin.mockReturnValueOnce(false);
+        authz.getCapabilities.mockResolvedValueOnce([]); // member with no integration caps
+
+        await expect(
+          service.updateQuery('query-123', updateQueryDto, mockUserId, mockRoles),
+        ).rejects.toThrow(ForbiddenException);
+        expect(repository.updateQuery).not.toHaveBeenCalled();
+      });
+
+      it('should throw ForbiddenException when row has null organizationId for non-admins', async () => {
+        // Pre-backfill rows are explicitly denied — only the backfill migration
+        // (1777600000000) should re-open them by setting organizationId.
+        repository.findQueryById.mockResolvedValue({ ...mockDynatraceQuery, organizationId: undefined });
+        const authz = service['authzService'] as unknown as { isGlobalAdmin: jest.Mock };
+        authz.isGlobalAdmin.mockReturnValueOnce(false);
+
+        await expect(
+          service.updateQuery('query-123', updateQueryDto, mockUserId, mockRoles),
+        ).rejects.toThrow(ForbiddenException);
       });
     });
 
@@ -782,6 +847,24 @@ describe('DynatraceService', () => {
         repository.findQueryById.mockResolvedValue(null);
 
         await expect(service.deleteQuery('nonexistent', mockUserId, mockRoles)).rejects.toThrow(NotFoundException);
+      });
+
+      it('should throw ForbiddenException when caller lacks IntegrationDynatraceDelete cap in the query org', async () => {
+        // Regression: the original investigation log showed user 41f76071
+        // (org-member) successfully deleting a DQL query because deleteQuery
+        // skipped the auth check entirely.
+        repository.findQueryById.mockResolvedValue(mockDynatraceQuery);
+        const authz = service['authzService'] as unknown as {
+          isGlobalAdmin: jest.Mock;
+          getCapabilities: jest.Mock;
+        };
+        authz.isGlobalAdmin.mockReturnValueOnce(false);
+        authz.getCapabilities.mockResolvedValueOnce([]);
+
+        await expect(
+          service.deleteQuery('query-123', mockUserId, mockRoles),
+        ).rejects.toThrow(ForbiddenException);
+        expect(repository.deleteQuery).not.toHaveBeenCalled();
       });
     });
   });
@@ -889,15 +972,24 @@ describe('DynatraceService', () => {
           createdAt: new Date(),
           updatedAt: new Date(),
         };
+        repository.findById.mockResolvedValue(mockDynatraceConfig);
         repository.createEntityMapping.mockResolvedValue(mockMapping as any);
 
         const result = await service.createEntityMapping(createMappingDto, mockUserId, mockRoles);
 
         expect(result).toEqual(mockMapping);
-        expect(repository.createEntityMapping).toHaveBeenCalledWith(createMappingDto);
+        expect(repository.createEntityMapping).toHaveBeenCalledWith(
+          createMappingDto,
+          expect.objectContaining({
+            organizationId: 'org-123',
+            createdBy: mockUserId,
+            updatedBy: mockUserId,
+          }),
+        );
       });
 
       it('should throw ConflictException for duplicate mapping', async () => {
+        repository.findById.mockResolvedValue(mockDynatraceConfig);
         repository.createEntityMapping.mockRejectedValue(
           new Error('Entity already mapped to this system/environment/workload')
         );

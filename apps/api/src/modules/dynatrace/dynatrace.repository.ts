@@ -12,6 +12,21 @@ import { UpdateDynatraceQueryDto } from './dto/update-dynatrace-query.dto';
 import { CreateEntityMappingDto } from './dto/create-entity-mapping.dto';
 import { generateDeterministicUuid } from '../../utils/uuid-generator';
 
+/**
+ * Optional ownership tuple passed by the service layer when creating /
+ * updating DQL queries and entity mappings. Lets the repository persist
+ * `organization_id`, `created_by`, `updated_by` so the rows aren't created
+ * with the "legacy null org" hatch that historically left them globally
+ * mutable. The service derives `organizationId` from the parent
+ * `DynatraceConfig` (the only resource that has the org assignment) and
+ * passes the authenticated user as creator/updater.
+ */
+export interface QueryOwnership {
+  organizationId?: string;
+  createdBy?: string;
+  updatedBy?: string;
+}
+
 @Injectable()
 export class DynatraceRepository {
   private readonly logger = new Logger(DynatraceRepository.name);
@@ -215,6 +230,9 @@ export class DynatraceRepository {
         label: entity.dynatraceConfig.label,
         dynatraceType: entity.dynatraceConfig.dynatraceType,
       } : undefined,
+      organizationId: entity.organizationId,
+      createdBy: entity.createdBy,
+      updatedBy: entity.updatedBy,
       createdAt: entity.createdAt,
       updatedAt: entity.updatedAt,
     };
@@ -229,7 +247,7 @@ export class DynatraceRepository {
     return result ? this.mapEntityToDtoFields(result) : null;
   }
 
-  async createQuery(dto: CreateDynatraceQueryDto) {
+  async createQuery(dto: CreateDynatraceQueryDto, ownership?: QueryOwnership) {
     const panelId = dto.panelId || this.generatePanelId(dto.dashboardLabel, dto.panelTitle);
 
     const config = await this.configRepo.findOne({ where: { id: dto.dynatraceConfigId } });
@@ -258,16 +276,22 @@ export class DynatraceRepository {
       omitGroupByVariableFromMetricName: dto.omitGroupByVariableFromMetricName,
       templateVariables: dto.templateVariables,
       metricUnit: dto.metricUnit,
-      metricName: dto.metricName
+      metricName: dto.metricName,
+      organizationId: ownership?.organizationId ?? config?.organizationId,
+      createdBy: ownership?.createdBy,
+      updatedBy: ownership?.updatedBy ?? ownership?.createdBy,
     });
 
     const result = await this.queryRepo.save(query);
     return this.mapEntityToDtoFields(result);
   }
 
-  async updateQuery(id: string, dto: UpdateDynatraceQueryDto) {
+  async updateQuery(id: string, dto: UpdateDynatraceQueryDto, ownership?: QueryOwnership) {
     const updateData: Partial<DynatraceQuery> = {};
 
+    if (ownership?.updatedBy !== undefined) {
+      updateData.updatedBy = ownership.updatedBy;
+    }
     if (dto.dynatraceConfigId !== undefined) updateData.dynatraceConfigId = dto.dynatraceConfigId;
     if (dto.systemUnderTestId !== undefined) updateData.systemUnderTestId = dto.systemUnderTestId;
     if (dto.testEnvironment !== undefined) updateData.testEnvironment = dto.testEnvironment;
@@ -314,7 +338,11 @@ export class DynatraceRepository {
     return result?.applicationDashboardId || null;
   }
 
-  async createQueryWithSharedUuid(dto: CreateDynatraceQueryDto, applicationDashboardId: string) {
+  async createQueryWithSharedUuid(
+    dto: CreateDynatraceQueryDto,
+    applicationDashboardId: string,
+    ownership?: QueryOwnership,
+  ) {
     const panelId = dto.panelId || this.generatePanelId(dto.dashboardLabel, dto.panelTitle);
 
     const config = await this.configRepo.findOne({ where: { id: dto.dynatraceConfigId } });
@@ -343,18 +371,26 @@ export class DynatraceRepository {
       omitGroupByVariableFromMetricName: dto.omitGroupByVariableFromMetricName,
       templateVariables: dto.templateVariables,
       metricUnit: dto.metricUnit,
-      metricName: dto.metricName
+      metricName: dto.metricName,
+      organizationId: ownership?.organizationId ?? config?.organizationId,
+      createdBy: ownership?.createdBy,
+      updatedBy: ownership?.updatedBy ?? ownership?.createdBy,
     });
 
     const result = await this.queryRepo.save(query);
     return this.mapEntityToDtoFields(result);
   }
 
-  async bulkCreateQueryWithSharedUuid(dtoList: CreateDynatraceQueryDto[], applicationDashboardId: string) {
+  async bulkCreateQueryWithSharedUuid(
+    dtoList: CreateDynatraceQueryDto[],
+    applicationDashboardId: string,
+    ownership?: QueryOwnership,
+  ) {
     // All DTOs in a bulk import must share the same config/sut/env/workload — we resolve
     // MetricsSource once from the first DTO and apply it to all rows.
     const firstDto = dtoList[0];
     let metricsSourceId: string | undefined;
+    let parentOrgId: string | undefined;
 
     if (firstDto && dtoList.length > 1) {
       const mismatch = dtoList.find(
@@ -381,6 +417,7 @@ export class DynatraceRepository {
           firstDto.dynatraceConfigId,
           config.label,
         );
+        parentOrgId = config.organizationId;
       }
     }
 
@@ -399,7 +436,10 @@ export class DynatraceRepository {
       omitGroupByVariableFromMetricName: dto.omitGroupByVariableFromMetricName,
       templateVariables: dto.templateVariables,
       metricUnit: dto.metricUnit,
-      metricName: dto.metricName
+      metricName: dto.metricName,
+      organizationId: ownership?.organizationId ?? parentOrgId,
+      createdBy: ownership?.createdBy,
+      updatedBy: ownership?.updatedBy ?? ownership?.createdBy,
     }));
 
     const results = await this.queryRepo.save(querys);
@@ -490,7 +530,16 @@ export class DynatraceRepository {
     return result ? this.mapEntityMappingToDtoFields(result) : null;
   }
 
-  async createEntityMapping(dto: CreateEntityMappingDto) {
+  async createEntityMapping(dto: CreateEntityMappingDto, ownership?: QueryOwnership) {
+    let parentOrgId: string | undefined;
+    if (!ownership?.organizationId) {
+      const parentConfig = await this.configRepo.findOne({
+        where: { id: dto.dynatraceConfigId },
+        select: ['organizationId'],
+      });
+      parentOrgId = parentConfig?.organizationId;
+    }
+
     const mapping = this.entityMappingRepo.create({
       dynatraceConfigId: dto.dynatraceConfigId,
       systemUnderTestId: dto.systemUnderTestId,
@@ -499,7 +548,10 @@ export class DynatraceRepository {
       entityId: dto.entityId,
       entityDisplayName: dto.entityDisplayName,
       entityType: dto.entityType,
-      level: dto.level
+      level: dto.level,
+      organizationId: ownership?.organizationId ?? parentOrgId,
+      createdBy: ownership?.createdBy,
+      updatedBy: ownership?.updatedBy ?? ownership?.createdBy,
     });
 
     try {
@@ -539,6 +591,9 @@ export class DynatraceRepository {
       entityDisplayName: entity.entityDisplayName,
       entityType: entity.entityType,
       level: entity.level,
+      organizationId: entity.organizationId,
+      createdBy: entity.createdBy,
+      updatedBy: entity.updatedBy,
       createdAt: entity.createdAt,
       updatedAt: entity.updatedAt,
     };
