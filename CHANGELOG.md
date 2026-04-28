@@ -4,6 +4,17 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
+## [0.2.47.5] - 2026-04-28
+
+### Added
+- **`@RequiresCapability` decorator + `CapabilityGuard` (RBAC Phase 3c foundation).** The decorator at `apps/api/src/common/decorators/requires-capability.decorator.ts` stores the required capability + an org-id source (`{ orgIdParam, orgIdFromBody, orgIdFromQuery }`) as Reflector metadata. The guard at `apps/api/src/common/guards/capability.guard.ts` reads the metadata, extracts userId + roles via `KeycloakEnhancedAuthGuard.getUserId/.getRoles` (auth-method-agnostic — works for both JWT and API key callers), resolves the org ID from the configured request source, calls `AuthorizationService.getCapabilities(userId, roles, orgId)`, and either grants the request or emits a structured WARN log (`Capability denied: capability=… userId=… orgId=… route=…`) and throws `ForbiddenException`. DB failures from `getCapabilities` deliberately bubble up as 500 — silent empty caps would let mutations through that should be denied. With this in place, controllers gating Bucket B sites (the 14 `if (!isGlobalAdmin) throw ForbiddenException` patterns the audit log enumerates) can now use `@RequiresCapability(Capability.X, { orgIdParam: '…' })` declaratively at the controller boundary instead of inlining the check inside the service.
+- **CapabilityGuard integration test** at `apps/api/src/common/guards/capability.guard.integration.spec.ts` boots a minimal NestJS app, registers `CapabilityGuard` via `APP_GUARD`, and fires real HTTP requests through a test controller decorated with `@RequiresCapability`. Real Reflector, real metadata, real decorator, real guard, real Logger spy, real supertest. Only `AuthorizationService.getCapabilities` is mocked (its own coverage lives in the unit specs from Phase 3a). Closes the one outstanding gap from `/plan-eng-review`'s Failure modes section: the guard's full pipeline (metadata → extraction → authz → log → throw) is now end-to-end verified, not just unit-tested in isolation.
+
+### Notes for migration
+- Phase 3c per-service rollout begins after this PR. The migration recipe is in `docs-site/content/Architecture/Capabilities and RBAC.md`: Bucket A sites use `withOrgFilter`; Bucket B sites use the new `@RequiresCapability` decorator at the controller boundary; Bucket C sites consult the audit log case-by-case. The `local/no-direct-is-global-admin` lint rule still blocks new direct `isGlobalAdmin()` usage outside `INFRASTRUCTURE_FILES` and the grandfathered `apps/api/.rbac-migration-allowlist.json`.
+- The audit log's "Migration progress" burndown table tracks Bucket A / Bucket B / local-wrapper progress. When a service file is migrated, remove its entry from the allowlist and update the burndown counts.
+- Date-bound revisit gate is **2026-08-01**: if the burndown isn't ≥50% by then, the team explicitly re-evaluates.
+
 ## [0.2.47.4] - 2026-04-28
 
 ### Added
