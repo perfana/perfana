@@ -1,4 +1,4 @@
-import { Controller, Get, Post, Delete, Body, Param, Query, BadRequestException, ForbiddenException } from '@nestjs/common';
+import { Controller, Get, Post, Delete, Body, Param, Query, BadRequestException } from '@nestjs/common';
 import { ApiTags, ApiOperation, ApiResponse, ApiBearerAuth } from '@nestjs/swagger';
 import { ApiKeysService } from './api-keys.service';
 import { CreateApiKeyDto, ApiKeyDto, CreateApiKeyResponseDto } from './dto/create-api-key.dto';
@@ -38,10 +38,13 @@ export class ApiKeysController {
   @ApiResponse({ status: 403, description: 'Organization admin privileges required' })
   @ApiResponse({ status: 409, description: 'An API key with this description already exists in the organization' })
   async create(@Body() createDto: CreateApiKeyDto, @UserCtx() ctx: UserContext) {
-    // Use organizationId from request body, or fall back to user's first organization
+    // Resolve target organization. Body wins; otherwise fall back to user-context
+    // org; otherwise fall back to the user's first accessible org. The service
+    // performs the actual capability check (`Capability.ApiKeyCreate` for the
+    // resolved org), so we don't pre-gate here — we only need to ensure
+    // the caller has *somewhere* to create the key.
     let organizationId = createDto.organizationId || ctx.organizationId;
 
-    // If still no organization, query via AuthorizationService (cached)
     if (!organizationId) {
       const userOrgs = await this.authzService.getAccessibleOrganizations(ctx.userId);
       if (userOrgs.length === 0) {
@@ -50,14 +53,6 @@ export class ApiKeysController {
         );
       }
       organizationId = userOrgs[0];
-    }
-
-    // Validate user belongs to the target organization (prevents creating keys for orgs you don't belong to)
-    if (!this.authzService.isGlobalAdmin(ctx.roles)) {
-      const userOrgs = await this.authzService.getAccessibleOrganizations(ctx.userId);
-      if (!userOrgs.includes(organizationId!)) {
-        throw new ForbiddenException('Cannot create API key for an organization you do not belong to');
-      }
     }
 
     const result = await this.apiKeysService.createApiKey(createDto, ctx.userId, ctx.roles, organizationId!);
@@ -82,7 +77,7 @@ export class ApiKeysController {
   @ApiResponse({ status: 404, description: 'API key not found' })
   async delete(@Param('id') id: string, @UserCtx() ctx: UserContext) {
     await this.apiKeysService.deleteApiKey(id, ctx.userId, ctx.roles);
-    
+
     return {
       message: 'API key deleted successfully',
     };

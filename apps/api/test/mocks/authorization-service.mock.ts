@@ -1,3 +1,5 @@
+import { GLOBAL_ADMIN_CAPABILITIES } from '../../src/constants/capabilities.constants';
+
 /**
  * Mock for AuthorizationService used in unit tests
  *
@@ -74,12 +76,11 @@ export const createAuthorizationServiceMock = () => ({
 
   /**
    * Get capabilities for a user in an org/team scope.
-   * Default: returns all integration capabilities (org-admin equivalent).
+   * Default: returns the global-admin capability set so most tests pass without
+   * per-test overrides. Tests that exercise capability denial should swap in
+   * `createRestrictiveAuthorizationServiceMock` or override `getCapabilities`.
    */
-  getCapabilities: jest.fn().mockResolvedValue([
-    'integration:dynatrace:update',
-    'integration:dynatrace:delete',
-  ]),
+  getCapabilities: jest.fn().mockResolvedValue(GLOBAL_ADMIN_CAPABILITIES),
 });
 
 /**

@@ -4,6 +4,17 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
+## [0.2.47.7] - 2026-04-28
+
+### Changed
+- **`api-keys` migrated to the capabilities API (RBAC Phase 3c, first per-service pilot).** Removed all direct `authzService.isGlobalAdmin()` calls from `apps/api/src/modules/api-keys/api-keys.service.ts` and `api-keys.controller.ts`; both files dropped from `apps/api/.rbac-migration-allowlist.json` (allowlist 40 → 38). Authorization now flows through `AuthorizationService.getCapabilities(userId, roles, organizationId)` and three new capabilities — `Capability.ApiKeyRead` / `ApiKeyCreate` / `ApiKeyDelete` — wired into `ROLE_CAPABILITIES`: org-admins get all three, org-members and org-viewers get `ApiKeyRead` only, global admins inherit everything via `GLOBAL_ADMIN_CAPABILITIES`. **Behaviour change:** create and delete are now scoped to the *target* organization (not "any org you admin"). Previously a user who was org-admin in org A but only org-member in org B could create/delete keys in B because `requireOrgAdmin` was satisfied by ANY admin role; the new `getCapabilities(userId, roles, targetOrgId)` check denies that path. Read paths return empty (not 403) when the caller lacks `ApiKeyRead` in the requested org, preserving the "don't leak org existence" property of the previous implementation. The "is global admin" check uses `Capability.SystemManageGlobalSettings` as the canonical marker — that capability is only granted via `GLOBAL_ADMIN_CAPABILITIES` so its presence is a stable proxy without re-introducing a deprecated `isGlobalAdmin()` call.
+- **Privilege-escalation guard refactored.** `validateRequestedRoles(requestedRoles, creatorRoles, isGlobalAdmin)` now takes the admin bypass as an explicit pre-computed flag instead of calling `authzService.isGlobalAdmin(creatorRoles)` inline; the caller computes `isGlobalAdmin` once via `getCapabilities` and passes it down. Keeps the method synchronous and trivially testable while removing the deprecated call.
+- **Default `AuthorizationService` test mock now returns `GLOBAL_ADMIN_CAPABILITIES` from `getCapabilities()`** instead of a hand-curated two-element list. Reflects the mock's stated "allows all operations" intent and means newly-migrated services get permissive defaults out of the box without per-test overrides. The restrictive mock (`createRestrictiveAuthorizationServiceMock`) still returns `[]` for capability-denial tests.
+
+### Notes
+- Migration recipe followed: bucket B sites (controller-boundary "is admin?" gates) replaced with `getCapabilities` checks scoped to the target organization. The `@RequiresCapability` decorator was evaluated for the controller layer but skipped for this pilot because most api-keys endpoints derive the org from the persisted resource (after a DB lookup), not from the request — service-layer capability checks are the correct fit for that shape. Future pilots with body/param-resolved org IDs will use the decorator.
+- All 4311 api unit tests pass; 74 in `api-keys.service.spec.ts` and 59 in `api-keys.controller.spec.ts` exercised. Lint (with `no-direct-is-global-admin` enforced) clean across api-keys files.
+
 ## [0.2.47.6] - 2026-04-28
 
 ### Fixed
