@@ -9,7 +9,7 @@
     "start": "node dist/main.js",
     "start:debug": "nest start --debug --watch",
     "start:prod": "node dist/main",
-    "lint": "eslint \"{src,apps,libs,test}/**/*.ts\" --fix --max-warnings 300",
+    "lint": "eslint \"{src,apps,libs,test}/**/*.ts\" --rulesdir eslint-rules --fix --max-warnings 300",
     "pretest": "ts-node --project tsconfig.setup.json -r tsconfig-paths/register src/test/setup-database.ts",
     "test": "jest",
     "test:unit": "jest --config jest.unit.config.js",

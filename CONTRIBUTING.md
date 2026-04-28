@@ -138,6 +138,16 @@ Perfana uses Keycloak for authentication. The dev environment includes a pre-con
 - Check `CLAUDE.md` for architecture and conventions
 - Check existing module READMEs for module-specific patterns
 
+## RBAC migration (in progress until 2026-08-01)
+
+When you modify any file listed in `apps/api/.rbac-migration-allowlist.json`, migrate its `isGlobalAdmin` sites to the capabilities API as part of the same PR. The lint rule (`no-direct-is-global-admin`) blocks new sites; the allowlist tolerates existing ones. Migration patterns:
+
+- **Bucket A (filter bypass):** use `withOrgFilter` (`apps/api/src/common/utils/with-org-filter.ts`).
+- **Bucket B (guard):** use the `@RequiresCapability(...)` decorator.
+- **Bucket C (mixed):** check `docs/superpowers/audits/2026-04-26-audit-decisions.md` — these aren't always migratable. If yours is in C and resists migration, leave a comment on the call site explaining why.
+
+After migrating a site, remove its file from `apps/api/.rbac-migration-allowlist.json` (when the LAST site in that file is migrated) and update the burndown table in the audit log.
+
 ## License
 
 By contributing, you agree that your contributions will be licensed under the Apache License 2.0.

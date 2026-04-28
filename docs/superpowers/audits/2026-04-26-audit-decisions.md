@@ -1,5 +1,23 @@
 # Audit Decisions — 2026-04-26
 
+## Migration progress
+
+Phase 3c rolls capabilities through every site listed below. Update these counts on every PR that migrates a site (subtract from the "remaining" column, add to the "migrated" column). When all reach 0 / N, mark Phase 3 as Completed in CLAUDE.md.
+
+| Bucket | Total | Migrated | Remaining | % done |
+| --- | ---: | ---: | ---: | ---: |
+| A — bypass filter | 127 | 1 | 126 | 0.8% |
+| B — bypass guard | 14 | 0 | 14 | 0% |
+| Local `private isGlobalAdmin()` wrappers | 13 | 0 | 13 | 0% |
+
+**Lint enforcement:** `apps/api/.rbac-migration-allowlist.json` lists every file currently exempt from the `no-direct-is-global-admin` lint rule (40 files as of 2026-04-28). When a site is migrated, remove its file from the allowlist (the file may have multiple sites — only remove when the LAST one is migrated). Allowlist size IS the burndown.
+
+**Date-bound revisit:** by **2026-08-01**, Phase 3c migration must be at least 50% complete (Bucket A + B combined: 70+ sites migrated). If not, re-evaluate the architecture or the priorities. "We forgot about it" is the failure mode this gate prevents.
+
+**Drift check:** a `/schedule` agent runs every 2 weeks (see `docs/superpowers/scheduled-agents/rbac-drift-check.md`) and opens a PR if it finds new direct `isGlobalAdmin` usage outside the allowlist. The lint rule should make this redundant; the agent catches anything that snuck in via dependencies or merge conflicts.
+
+---
+
 ## Codebase Audit: `isGlobalAdmin` Bucket A Sites
 
 **Audit date:** 2026-04-26  
