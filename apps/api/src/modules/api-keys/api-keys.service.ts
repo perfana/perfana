@@ -8,15 +8,20 @@ import { ApiKeyRepository } from '../../repositories/api-key.repository';
 import { ApiKey } from '../../entities';
 import { ApiKeyCacheService } from './api-key-cache.service';
 import { AuthorizationService } from '../../common/services/authorization.service';
+import { Capability } from '../../constants/capabilities.constants';
 
 /**
  * Service responsible for managing API keys.
  *
- * Authorization:
- * - All methods accept userId and roles parameters for authorization
- * - Currently ApiKey entity does not have organization_id, so all data is treated as legacy
- * - When organization_id is added to ApiKey (Phase 4), authorization checks will be enabled
- * - Global admins bypass all authorization checks
+ * Authorization model (Phase 3c capability-based):
+ * - Read paths gate on `Capability.ApiKeyRead` for the target organization.
+ * - Create/delete gate on `Capability.ApiKeyCreate` / `ApiKeyDelete` for the
+ *   target organization. Note this is *target-org scoped*: a user who is
+ *   org-admin in org A but only org-member in org B cannot mutate keys in B.
+ * - Global admins receive every capability via `getCapabilities(_, _, null)`.
+ *
+ * Capability resolution lives in `AuthorizationService.getCapabilities`, which
+ * caches per-user/per-org capability sets and invalidates on membership change.
  */
 @Injectable()
 export class ApiKeysService {
@@ -30,20 +35,15 @@ export class ApiKeysService {
   ) {}
 
   /**
-   * Check if user is org-admin in any of their organizations
-   * @throws Error if user is not an org-admin
+   * Resolve whether the caller has *global* admin reach (no org context).
+   * `SystemManageGlobalSettings` is only ever granted to system-roles in
+   * `GLOBAL_ADMIN_ROLES` (see capabilities.constants.ts), so its presence is
+   * the canonical "are you a global admin" check without bypassing the
+   * capability layer.
    */
-  private async requireOrgAdmin(userId: string, roles: string[]): Promise<void> {
-    // Global admins always have access
-    if (this.authzService.isGlobalAdmin(roles)) {
-      return;
-    }
-
-    // Check if user is org-admin in any organization
-    const isOrgAdmin = await this.authzService.isOrgAdminInAnyOrganization(userId);
-    if (!isOrgAdmin) {
-      throw new ForbiddenException('Organization admin privileges required to manage API keys');
-    }
+  private async isGlobalAdminUser(userId: string, roles: string[]): Promise<boolean> {
+    const caps = await this.authzService.getCapabilities(userId, roles, null);
+    return caps.includes(Capability.SystemManageGlobalSettings);
   }
 
   /**
@@ -51,86 +51,96 @@ export class ApiKeysService {
    *
    * @param userId - The user ID for authorization
    * @param roles - The user's roles for authorization checks
+   * @param organizationId - Optional explicit org filter
    *
-   * Note: ApiKey entity does not have organization_id yet, so org filtering is not applied.
-   * Full org filtering will be enabled when Phase 4 adds organization_id column.
+   * Behavior:
+   * - With `organizationId`: returns keys for that org if caller has `ApiKeyRead`
+   *   there; otherwise empty (we do not 403 here to avoid leaking org existence).
+   * - Without `organizationId`:
+   *     - Global admin → all keys.
+   *     - Otherwise → keys in every org where the caller has `ApiKeyRead`.
    */
   async findAll(userId: string, roles: string[], organizationId?: string): Promise<ApiKey[]> {
-    const isAdmin = this.authzService.isGlobalAdmin(roles);
-    this.logger.log(`[findAll] START - userId=${userId}, isGlobalAdmin=${isAdmin}, organizationId=${organizationId}`);
-
-    // Resolve which org IDs to filter by
-    let orgIds: string[];
     if (organizationId) {
-      // Explicit org selected — always filter, even for admins
-      orgIds = [organizationId];
-    } else if (isAdmin) {
-      // Admin without explicit org — no filter, see all
+      const caps = await this.authzService.getCapabilities(userId, roles, organizationId);
+      if (!caps.includes(Capability.ApiKeyRead)) {
+        this.logger.log(`[findAll] No ApiKeyRead in org ${organizationId} for user ${userId} - returning empty`);
+        return [];
+      }
       const apiKeys = await this.apiKeyRepository.findAll({
-        order: { createdAt: 'DESC' }
+        where: { organization_id: organizationId },
+        order: { createdAt: 'DESC' },
       });
-      this.logger.log(`[findAll] ADMIN PATH (all orgs) - Returning ${apiKeys.length} API keys`);
+      this.logger.log(`[findAll] org-scoped (org=${organizationId}) - returning ${apiKeys.length} API keys`);
       return apiKeys;
-    } else {
-      // Non-admin without explicit org — filter by accessible orgs
-      orgIds = await this.authzService.getAccessibleOrganizations(userId);
     }
 
-    if (orgIds.length === 0) {
-      this.logger.log(`[findAll] User has no organizations - returning empty array`);
+    if (await this.isGlobalAdminUser(userId, roles)) {
+      const apiKeys = await this.apiKeyRepository.findAll({
+        order: { createdAt: 'DESC' },
+      });
+      this.logger.log(`[findAll] global-admin - returning ${apiKeys.length} API keys`);
+      return apiKeys;
+    }
+
+    const accessibleOrgIds = await this.authzService.getAccessibleOrganizations(userId);
+    if (accessibleOrgIds.length === 0) {
+      this.logger.log(`[findAll] User ${userId} has no organizations - returning empty`);
+      return [];
+    }
+
+    // Filter to orgs where the caller actually has ApiKeyRead. In the current
+    // role mapping every org role grants ApiKeyRead, but checking is forward-
+    // compatible with future role-shaping (e.g. revoking the cap on viewers).
+    const capsByOrg = await Promise.all(
+      accessibleOrgIds.map(orgId => this.authzService.getCapabilities(userId, roles, orgId)),
+    );
+    const readableOrgIds = accessibleOrgIds.filter((_, i) =>
+      (capsByOrg[i] ?? []).includes(Capability.ApiKeyRead),
+    );
+
+    if (readableOrgIds.length === 0) {
+      this.logger.log(`[findAll] User ${userId} has no ApiKeyRead capability in any org - returning empty`);
       return [];
     }
 
     const apiKeys = await this.apiKeyRepository.findAll({
-      where: {
-        organization_id: In(orgIds)
-      },
-      order: { createdAt: 'DESC' }
+      where: { organization_id: In(readableOrgIds) },
+      order: { createdAt: 'DESC' },
     });
-
-    this.logger.log(`[findAll] FILTERED RESULT - Returning ${apiKeys.length} API keys (orgs: ${orgIds.join(',')})`);
+    this.logger.log(`[findAll] member-scoped (orgs=${readableOrgIds.join(',')}) - returning ${apiKeys.length} API keys`);
     return apiKeys;
   }
 
   /**
    * Find a single API key by ID
    *
-   * @param id - The API key ID
-   * @param userId - The user ID for authorization
-   * @param roles - The user's roles for authorization checks
-   *
-   * Note: ApiKey entity does not have organization_id yet, so access checks are not applied.
-   * Full access permission checks will be enabled when Phase 4 adds organization_id column.
+   * Resource-level capability check: only callers with `ApiKeyRead` in the
+   * key's organization may see it. Legacy keys (null organization_id) are
+   * visible only to global admins.
    */
   async findOne(id: string, userId: string, roles: string[]): Promise<ApiKey> {
     try {
-      // Log authorization context for debugging
-      const isAdmin = this.authzService.isGlobalAdmin(roles);
-      this.logger.log(`[findOne] START - id=${id}, userId=${userId}, isGlobalAdmin=${isAdmin}`);
-
       const apiKey = await this.apiKeyRepository.findById(id);
-
       if (!apiKey) {
         throw new ResourceNotFoundException('API key', id);
       }
 
-      // Check organization access for non-admin users
-      if (!isAdmin) {
-        // If API key has no organization (legacy data), only admins can access
-        if (!apiKey.organization_id) {
-          this.logger.warn(`[findOne] Access denied: user ${userId} attempted to access API key ${id} with NULL organization_id`);
+      if (!apiKey.organization_id) {
+        // Legacy data — only global admins see it. Otherwise pretend it doesn't
+        // exist so we don't leak that a legacy key with this ID is in the DB.
+        if (!(await this.isGlobalAdminUser(userId, roles))) {
+          this.logger.warn(`[findOne] user ${userId} attempted to access legacy API key ${id}`);
           throw new ResourceNotFoundException('API key', id);
         }
-
-        // Check if user is member of the API key's organization
-        const isMember = await this.authzService.isOrganizationMember(userId, apiKey.organization_id);
-        if (!isMember) {
-          this.logger.warn(`[findOne] Access denied: user ${userId} attempted to access API key ${id} in organization ${apiKey.organization_id}`);
-          throw new ResourceNotFoundException('API key', id);
-        }
+        return apiKey;
       }
 
-      this.logger.log(`[findOne] Access granted for API key ${id}`);
+      const caps = await this.authzService.getCapabilities(userId, roles, apiKey.organization_id);
+      if (!caps.includes(Capability.ApiKeyRead)) {
+        this.logger.warn(`[findOne] user ${userId} lacks ApiKeyRead in org ${apiKey.organization_id} for key ${id}`);
+        throw new ResourceNotFoundException('API key', id);
+      }
       return apiKey;
     } catch (error) {
       if (error instanceof ResourceNotFoundException) {
@@ -145,10 +155,9 @@ export class ApiKeysService {
   /**
    * Create a new API key
    *
-   * @param createDto - The API key creation DTO
-   * @param userId - The user ID for authorization and ownership tracking
-   * @param roles - The user's roles for authorization checks
-   * @param organizationId - The organization ID to associate with the API key
+   * Authorization: caller must have `Capability.ApiKeyCreate` for the target
+   * organization (target-org scoped, so org-admin in org A cannot create keys
+   * in org B even when they are also a member of B).
    */
   async createApiKey(
     createDto: CreateApiKeyDto,
@@ -157,12 +166,12 @@ export class ApiKeysService {
     organizationId: string,
   ): Promise<{ apiKey: ApiKey; token: string }> {
     try {
-      // Log authorization context for debugging
-      const isAdmin = this.authzService.isGlobalAdmin(roles);
-      this.logger.debug(`createApiKey: userId=${userId}, isGlobalAdmin=${isAdmin}`);
-
-      // Check if user is org-admin in any organization
-      await this.requireOrgAdmin(userId, roles);
+      const caps = await this.authzService.getCapabilities(userId, roles, organizationId);
+      if (!caps.includes(Capability.ApiKeyCreate)) {
+        throw new ForbiddenException(
+          'Organization admin privileges required to create API keys for this organization',
+        );
+      }
 
       // Pre-check for duplicate description within the same organization.
       // The (organization_id, description) unique index is the source of
@@ -190,7 +199,8 @@ export class ApiKeysService {
       const hashedToken = await bcrypt.hash(token, this.saltRounds);
 
       // Prevent privilege escalation: validate requested roles against creator's roles
-      this.validateRequestedRoles(createDto.roles || [], roles);
+      const callerIsGlobalAdmin = await this.isGlobalAdminUser(userId, roles);
+      this.validateRequestedRoles(createDto.roles || [], roles, callerIsGlobalAdmin);
 
       // Default to empty roles (principle of least privilege) if not provided
       const apiKeyRoles = createDto.roles || [];
@@ -218,7 +228,7 @@ export class ApiKeysService {
       return { apiKey, token };
     } catch (error) {
       // Don't log expected validation/conflict errors as service-level failures.
-      if (error instanceof ConflictException) {
+      if (error instanceof ConflictException || error instanceof ForbiddenException) {
         throw error;
       }
       // Defense in depth for the rare race where two concurrent creates both
@@ -259,30 +269,29 @@ export class ApiKeysService {
   /**
    * Delete an API key
    *
-   * @param id - The API key ID
-   * @param userId - The user ID for authorization
-   * @param roles - The user's roles for authorization checks
+   * Authorization: caller must have `Capability.ApiKeyDelete` for the key's
+   * organization. Legacy keys (null organization_id) are deletable only by
+   * global admins.
    */
   async deleteApiKey(id: string, userId: string, roles: string[]): Promise<void> {
     try {
-      // Log authorization context for debugging
-      const isAdmin = this.authzService.isGlobalAdmin(roles);
-      this.logger.log(`[deleteApiKey] START - id=${id}, userId=${userId}, isGlobalAdmin=${isAdmin}`);
-
-      // Check if user is org-admin in any organization
-      await this.requireOrgAdmin(userId, roles);
-
-      // Check if it exists first
       const apiKey = await this.apiKeyRepository.findById(id);
       if (!apiKey) {
         throw new ResourceNotFoundException('API key', id);
       }
 
-      // Verify user has admin access to the key's organization (not just any org)
-      if (!this.authzService.isGlobalAdmin(roles) && apiKey.organization_id) {
-        const userOrgs = await this.authzService.getAccessibleOrganizations(userId);
-        if (!userOrgs.includes(apiKey.organization_id)) {
-          throw new ValidationException('Cannot delete API key from an organization you do not belong to');
+      if (!apiKey.organization_id) {
+        if (!(await this.isGlobalAdminUser(userId, roles))) {
+          throw new ForbiddenException(
+            'Only global admins can delete legacy API keys (no organization)',
+          );
+        }
+      } else {
+        const caps = await this.authzService.getCapabilities(userId, roles, apiKey.organization_id);
+        if (!caps.includes(Capability.ApiKeyDelete)) {
+          throw new ForbiddenException(
+            'Organization admin privileges required to delete API keys in this organization',
+          );
         }
       }
 
@@ -291,8 +300,14 @@ export class ApiKeysService {
       await this.apiKeyCacheService.invalidateAllValidationResults();
 
       await this.apiKeyRepository.delete(id);
-      this.logger.log(`[deleteApiKey] API key ${id} deleted successfully by user: ${userId}`);
+      this.logger.log(`[deleteApiKey] API key ${id} deleted by user: ${userId}`);
     } catch (error) {
+      if (
+        error instanceof ResourceNotFoundException ||
+        error instanceof ForbiddenException
+      ) {
+        throw error;
+      }
       this.logger.error('Failed to delete API key:', error);
       throw error;
     }
@@ -338,7 +353,7 @@ export class ApiKeysService {
 
         // Additional validation: description should be readable text (printable ASCII/UTF-8)
         // Check for minimum length and that it contains only valid characters
-        const hasInvalidChars = !description || description.length < 3 || !/^[\t\n\r\x20-\x7E\u0080-\uFFFF]+$/.test(description);
+        const hasInvalidChars = !description || description.length < 3 || !/^[\t\n\r\x20-\x7E-￿]+$/.test(description);
         if (hasInvalidChars) {
           return null;
         }
@@ -448,14 +463,21 @@ export class ApiKeysService {
   /**
    * Validate that requested API key roles are a subset of the creator's roles.
    * Prevents privilege escalation (e.g., org-admin creating a perfana-admin key).
+   *
+   * Global admins bypass this check (they can assign any role). The bypass is
+   * computed by the caller via the capability layer (`isGlobalAdminUser`) and
+   * passed in as a flag — this method stays synchronous and trivially testable.
    */
-  private validateRequestedRoles(requestedRoles: string[], creatorRoles: string[]): void {
+  private validateRequestedRoles(
+    requestedRoles: string[],
+    creatorRoles: string[],
+    isGlobalAdmin: boolean,
+  ): void {
     if (!requestedRoles || requestedRoles.length === 0) return;
+    if (isGlobalAdmin) return;
 
-    // Global admins can assign any role
-    if (this.authzService.isGlobalAdmin(creatorRoles)) return;
-
-    const disallowed = requestedRoles.filter(r => !creatorRoles.includes(r));
+    const safeCreatorRoles = creatorRoles ?? [];
+    const disallowed = requestedRoles.filter(r => !safeCreatorRoles.includes(r));
     if (disallowed.length > 0) {
       throw new ValidationException(
         `Cannot assign roles you do not have: ${disallowed.join(', ')}`

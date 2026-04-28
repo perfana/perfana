@@ -44,6 +44,11 @@ export const Capability = {
   TeamDelete: 'team:delete',
   TeamManageMembers: 'team:manage-members',
 
+  // API keys (org-scoped — only org-admins can issue/revoke)
+  ApiKeyRead: 'api-key:read',
+  ApiKeyCreate: 'api-key:create',
+  ApiKeyDelete: 'api-key:delete',
+
   // System-level (global admin only)
   SystemAuditRead: 'system:audit-read',
   SystemManageUsers: 'system:manage-users',
@@ -90,6 +95,9 @@ const orgAdminExtras: CapabilityValue[] = [
   Capability.SutManage,
   Capability.DashboardManage,
   Capability.TestRunDelete,
+  Capability.ApiKeyRead,
+  Capability.ApiKeyCreate,
+  Capability.ApiKeyDelete,
 ];
 
 /**
@@ -119,10 +127,12 @@ export const ROLE_CAPABILITIES: RoleCapabilityMap = {
       Capability.BenchmarkManage,
       Capability.SutManage,
       Capability.DashboardManage,
+      Capability.ApiKeyRead,
     ],
     [OrganizationRole.VIEWER]: [
       ...integrationReadOnly,
       Capability.TestRunRead,
+      Capability.ApiKeyRead,
     ],
   },
   team: {
