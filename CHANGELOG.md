@@ -4,6 +4,11 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
+## [0.2.47.4] - 2026-04-28
+
+### Added
+- **RBAC frontend pilot — closes the Dynatrace integration UX gap (RBAC Phase 3 frontend, FE.1 + FE.2 + FE.3).** New `usePermissions()` React Query hook (`apps/web/hooks/usePermissions.ts`) fetches `GET /api/users/me/permissions` once per session, caches with `staleTime: Infinity`, and exposes `can(action, ctx?)` with `resourcePermissions` precedence over capabilities. New `<RequiresPermission action orgId resourcePermissions disabledReason>` wrapper component (`apps/web/components/auth/RequiresPermission.tsx`) renders children disabled-with-tooltip when the capability check fails — the v1 ships a single render mode (the speculative hide / custom-fallback / render-prop modes were dropped per the eng-review YAGNI finding). The Configure and Delete buttons on every IntegrationCard (`apps/web/app/integrations/components/IntegrationCard.tsx`) are now wrapped: org-non-admins see disabled buttons with an "Org admin only" tooltip instead of clickable buttons that 403 on submit. **The original report — `test@perfana.io` (org-member + org-viewer) clicking Configure on a Dynatrace card and getting a silent 403 — is now closed at the UX level.** When the page-level data flow surfaces `instanceData._permissions` from the Phase 3b server hint, the wrapper picks up the per-row answer automatically (no further frontend changes needed); until then it falls back gracefully to capability-based decisions via `usePermissions().can()`. 19 new tests across the three components: 7 for `usePermissions` (3 baseline + 4 from the eng review covering resourcePermissions precedence, error-state, and org-switch React Query invalidation), 7 for `RequiresPermission`, 5 for `IntegrationCard` including the regression case for the original bug.
+
 ## [0.2.47.3] - 2026-04-28
 
 ### Added
