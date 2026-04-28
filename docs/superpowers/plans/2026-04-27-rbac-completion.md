@@ -74,6 +74,77 @@ Out of scope for this plan. Tracked for a separate plan once Phase 3 + 4 are sta
 
 This is the foundation. Every other phase depends on the capability strings, the mapping service, and the `/me/permissions` endpoint. Built in TDD, single PR.
 
+### Architecture boundary: capabilities vs resource ACL
+
+`AuthorizationService` ends up with two related-but-distinct authorization surfaces. They are complements, not competitors. Use this rule when deciding which to call:
+
+- **Capabilities** answer **"can I do action X in scope Y?"** — used for menu and button gating, route guards, and pre-fetch decisions where the specific resource isn't loaded yet. Capabilities are computed from `(systemRoles, orgRoles, teamRoles)` and cached per `(userId, organizationId, teamId)`. The `@RequiresCapability(...)` decorator + `CapabilityGuard` enforce them at the controller boundary.
+
+- **Resource ACL** (`canAccessResource(userId, resourceOrgId)` / `canModifyResource(userId, resourceOrgId)`) answers **"can this user touch this specific row?"** — used inside services AFTER a resource has been loaded, when ownership and team-scope data are known. The methods return booleans; admin bypass is implicit (a global admin always returns `true`).
+
+They compose. A controller checks the capability via `@RequiresCapability` to authorize the **intent** ("you are allowed to update integrations in this org"); the service calls `canModifyResource` after loading the row to authorize the **target** ("you are allowed to update *this* integration, given its organization and ownership"). Neither replaces the other. Don't try to fold capabilities into `canAccessResource` — capabilities are about action vocabulary; ACL is about row ownership. Different jobs.
+
+**`getAccessibleOrgIds(userId, roles)` returns `string[] | undefined`** (admin → undefined, non-admin → array). It's NOT being deprecated. It's the right primitive for the `withOrgFilter`-style "should I add a `WHERE organization_id IN (...)` clause" decision, and it's used inside `getCapabilities` to load the org-scoped role data.
+
+### Request flow
+
+```
+  HTTP request (JWT or API key in header)
+        │
+        ▼
+  KeycloakEnhancedAuthGuard ────► request.user.roles = [...]
+        │                          (system roles from JWT or API key)
+        ▼
+  Controller method
+        │  @UserCtx() → ctx.userId, ctx.roles
+        │  @RequiresCapability('foo:bar') → CapabilityGuard.canActivate()
+        ▼                                         │
+  CapabilityGuard.canActivate()                   │
+        │                                         │
+        ▼                                         │
+  AuthorizationService.getCapabilities(           │
+    userId, roles, organizationId, teamId         │
+  )                                               │
+        │  ┌──────────────────────────┐           │
+        ├─►│ Redis                    │ HIT ──────┘
+        │  │ auth:capabilities        │  return cached array
+        │  │   :{userId}:{orgId}:{tm} │
+        │  └──────────────────────────┘
+        │      MISS
+        │      ▼
+        │  ┌──────────────────────────┐
+        │  │ Postgres                 │
+        │  │ organization_members     │
+        │  │ team_members             │
+        │  └──────────────────────────┘
+        │      │  orgRoles, teamRoles
+        │      ▼
+        │  CapabilitiesService.compute({
+        │    systemRoles, orgRoles, teamRoles
+        │  })  ← pure, stateless
+        │      │
+        │      ▼  CapabilityValue[]
+        │  Cache write (TTL = cacheTtlSeconds) + return
+        ▼
+  Capability check: caps.includes('foo:bar')
+        │
+        ├─ true  → service method runs
+        │           │
+        │           ▼
+        │     (optional) canAccessResource()/canModifyResource()
+        │     for per-row check after the resource is loaded
+        │           │
+        │           ▼
+        │     200 + (optional) _permissions field on response
+        │           (Phase 3b adds the field; capability still drives the boolean)
+        │
+        └─ false → ForbiddenException
+                   + WARN log: capability=foo:bar userId=... orgId=...
+                   + counter: auth_capability_denied_total (Phase 3c telemetry)
+```
+
+Cache invalidation flows the other way: `OrganizationMembersService` / `TeamMembersService` call `AuthorizationService.invalidateMembershipCache(userId, organizationId?)` on every write, which `redis.del()`s the matching `auth:capabilities:*` keys (Task 3a.5).
+
 ### Task 3a.1: Define capability constants
 
 **Files:**
@@ -759,13 +830,23 @@ export class UsersPermissionsController {
       'every org the user belongs to. The frontend uses this to gate UI actions.',
   })
   async getMyPermissions(@UserCtx() ctx: UserContext): Promise<PermissionsResponseDto> {
-    const global = await this.authzService.getCapabilities(ctx.userId, ctx.roles, null);
-
     const orgIds = await this.authzService.getAccessibleOrganizations(ctx.userId);
+
+    // Fan out the per-org capability lookups in parallel. Each call hits Redis
+    // (cached) or Postgres (cold cache). Serial would be N round-trips for a
+    // user with N orgs; Promise.all keeps p99 at one round-trip's latency
+    // regardless of org count.
+    const [global, ...orgCaps] = await Promise.all([
+      this.authzService.getCapabilities(ctx.userId, ctx.roles, null),
+      ...orgIds.map((orgId) =>
+        this.authzService.getCapabilities(ctx.userId, ctx.roles, orgId),
+      ),
+    ]);
+
     const byOrg: Record<string, string[]> = {};
-    for (const orgId of orgIds) {
-      byOrg[orgId] = await this.authzService.getCapabilities(ctx.userId, ctx.roles, orgId);
-    }
+    orgIds.forEach((orgId, i) => {
+      byOrg[orgId] = orgCaps[i];
+    });
 
     return { userId: ctx.userId, global, byOrg };
   }
