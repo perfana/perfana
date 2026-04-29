@@ -6,11 +6,11 @@ Phase 3c rolls capabilities through every site listed below. Update these counts
 
 | Bucket | Total | Migrated | Remaining | % done |
 | --- | ---: | ---: | ---: | ---: |
-| A — bypass filter | 127 | 22 | 105 | 17.3% |
+| A — bypass filter | 127 | 25 | 102 | 19.7% |
 | B — bypass guard | 14 | 0 | 14 | 0% |
 | Local `private isGlobalAdmin()` wrappers | 13 | 1 | 12 | 7.7% |
 
-**Lint enforcement:** `apps/api/.rbac-migration-allowlist.json` lists every file currently exempt from the `no-direct-is-global-admin` lint rule (40 files as of 2026-04-28). When a site is migrated, remove its file from the allowlist (the file may have multiple sites — only remove when the LAST one is migrated). Allowlist size IS the burndown.
+**Lint enforcement:** `apps/api/.rbac-migration-allowlist.json` lists every file currently exempt from the `no-direct-is-global-admin` lint rule (36 files as of 2026-04-29). When a site is migrated, remove its file from the allowlist (the file may have multiple sites — only remove when the LAST one is migrated). Allowlist size IS the burndown.
 
 **Date-bound revisit:** by **2026-08-01**, Phase 3c migration must be at least 50% complete (Bucket A + B combined: 70+ sites migrated). If not, re-evaluate the architecture or the priorities. "We forgot about it" is the failure mode this gate prevents.
 
@@ -486,3 +486,69 @@ The existing `report-generation.service.spec.ts` mock for `AuthorizationService`
 ### Allowlist disposition
 
 This file **EXITS the allowlist** — zero direct `isGlobalAdmin` references after the migration. **Second file to fully exit** the allowlist since Phase 3c began. Allowlist size: 37 → 36.
+
+---
+
+## Phase C8 — Single file: `metrics-sources.service.ts`
+
+**Audit date:** 2026-04-29
+**Scope:** Single-file migration. Mid-density target outside the test-runs hot path: 6 `isGlobalAdmin` call sites across CRUD methods, 5 `getAccessibleOrganizations` calls. Same module shape as `grafana-instances.service.ts` (CRUD + per-resource throw guards).
+**File re-verified:** `apps/api/src/modules/metrics-sources/metrics-sources.service.ts`
+
+### Site Classification
+
+| Line | Method | Classification | Action |
+|------|--------|---------------|--------|
+| 53 | `findAll` | **CANONICAL** Bucket A — `if (!isAdmin) { load orgs; if empty → org_id IS NULL; else IN (orgs) OR NULL }` | Migrate |
+| 112 | `findOne` | **CANONICAL** Bucket A — single-row variant of the same shape | Migrate |
+| 151 | `findByApplicationDashboardId` | **CANONICAL** Bucket A — same shape, sub-select on dashboard_uid | Migrate |
+| 185 | `create` | DEBUG-LOG-ONLY — `isAdmin` only interpolated into `logger.debug`, no branch | Leave |
+| 225 | `update` | PER-RESOURCE — `if (!isAdmin && existing.organizationId)` calls `accessibleOrgs.includes(...)`, throws ForbiddenException | Leave |
+| 269 | `delete` | PER-RESOURCE — same per-resource throw guard shape as `update` | Leave |
+
+**Canonical count: 3 of 6 (50%).** The remaining 3 sites are 1 debug-log capture and 2 per-resource throw guards — same disposition as the dynatrace, grafana, and pyroscope/tracing bundles.
+
+### Migration shape
+
+All 3 canonical sites share the identical "include null-org rows" filter block — important for backward compat with legacy null-`organization_id` rows (Phase 4 will close the null-org gap, at which point this branch becomes deletable):
+
+```typescript
+// before
+const isAdmin = this.authzService.isGlobalAdmin(roles);
+this.logger.debug(`...isGlobalAdmin=${isAdmin}`);
+if (!isAdmin) {
+  const accessibleOrgs = await this.authzService.getAccessibleOrganizations(userId);
+  if (accessibleOrgs.length === 0) qb.andWhere('ms.organizationId IS NULL');
+  else qb.andWhere('(ms.organizationId IN (:...orgIds) OR ms.organizationId IS NULL)', { orgIds: accessibleOrgs });
+}
+
+// after
+const orgIds = await withOrgFilter(userId, roles, this.authzService);
+this.logger.debug(`...isGlobalAdmin=${orgIds === null}`);
+if (orgIds !== null) {
+  if (orgIds.length === 0) qb.andWhere('ms.organizationId IS NULL');
+  else qb.andWhere('(ms.organizationId IN (:...orgIds) OR ms.organizationId IS NULL)', { orgIds });
+}
+```
+
+The `orgIds === null` predicate preserves the original `isGlobalAdmin=true|false` debug-log semantics exactly. Null-org-row inclusion behavior is unchanged.
+
+### Test Results
+
+| Test run | Result |
+|----------|--------|
+| `cd apps/api && npx jest src/modules/metrics-sources` | 34 passed (2 suites) |
+| `cd apps/api && npx jest` (full suite) | 4314 passed, 20 skipped (pre-existing), 0 failed |
+| `npm run type-check` | 8/8 tasks successful, 0 errors |
+| `npm run lint` (`@perfana/api`) | 0 errors, 59 pre-existing warnings (none introduced) |
+
+The existing spec uses `createAuthorizationServiceMock()` whose `isGlobalAdmin` defaults to `true` — so `withOrgFilter` returns `null` and the filter branch is skipped, matching the prior behavior. No spec changes were needed.
+
+### Files changed
+
+- `apps/api/src/modules/metrics-sources/metrics-sources.service.ts` — import + 3 method migrations
+- `docs/superpowers/audits/2026-04-26-audit-decisions.md` — this file
+
+### Allowlist disposition
+
+The file **remains** in `.rbac-migration-allowlist.json` — the 3 non-canonical `isGlobalAdmin` sites (debug-log-only at 185, per-resource guards at 225 and 269) still trip the lint rule. Same disposition as the dynatrace, grafana, and pyroscope/tracing bundles.

@@ -3,6 +3,7 @@ import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { MetricsSource as MetricsSourceEntity } from '../../entities';
 import { AuthorizationService } from '../../common/services/authorization.service';
+import { withOrgFilter } from '../../common/utils/with-org-filter';
 import { CreateMetricsSourceDto } from './dto/create-metrics-source.dto';
 import { UpdateMetricsSourceDto } from './dto/update-metrics-source.dto';
 
@@ -50,22 +51,21 @@ export class MetricsSourcesService {
   ) {}
 
   async findAll(userId: string, roles: string[], query: MetricsSourceQuery = {}): Promise<MetricsSourceResponse[]> {
-    const isAdmin = this.authzService.isGlobalAdmin(roles);
-    this.logger.debug(`findAll: userId=${userId}, isGlobalAdmin=${isAdmin}`);
+    const orgIds = await withOrgFilter(userId, roles, this.authzService);
+    this.logger.debug(`findAll: userId=${userId}, isGlobalAdmin=${orgIds === null}`);
 
     try {
       const qb = this.metricsSourceRepo
         .createQueryBuilder('ms')
         .leftJoinAndSelect('ms.systemUnderTest', 'sut');
 
-      if (!isAdmin) {
-        const accessibleOrgs = await this.authzService.getAccessibleOrganizations(userId);
-        if (accessibleOrgs.length === 0) {
+      if (orgIds !== null) {
+        if (orgIds.length === 0) {
           qb.andWhere('ms.organizationId IS NULL');
         } else {
           qb.andWhere(
             '(ms.organizationId IN (:...orgIds) OR ms.organizationId IS NULL)',
-            { orgIds: accessibleOrgs },
+            { orgIds },
           );
         }
       }
@@ -109,8 +109,8 @@ export class MetricsSourcesService {
   }
 
   async findOne(id: string, userId: string, roles: string[]): Promise<MetricsSourceResponse> {
-    const isAdmin = this.authzService.isGlobalAdmin(roles);
-    this.logger.debug(`findOne: id=${id}, userId=${userId}, isGlobalAdmin=${isAdmin}`);
+    const orgIds = await withOrgFilter(userId, roles, this.authzService);
+    this.logger.debug(`findOne: id=${id}, userId=${userId}, isGlobalAdmin=${orgIds === null}`);
 
     try {
       const qb = this.metricsSourceRepo
@@ -118,14 +118,13 @@ export class MetricsSourcesService {
         .leftJoinAndSelect('ms.systemUnderTest', 'sut')
         .where('ms.id = :id', { id });
 
-      if (!isAdmin) {
-        const accessibleOrgs = await this.authzService.getAccessibleOrganizations(userId);
-        if (accessibleOrgs.length === 0) {
+      if (orgIds !== null) {
+        if (orgIds.length === 0) {
           qb.andWhere('ms.organizationId IS NULL');
         } else {
           qb.andWhere(
             '(ms.organizationId IN (:...orgIds) OR ms.organizationId IS NULL)',
-            { orgIds: accessibleOrgs },
+            { orgIds },
           );
         }
       }
@@ -148,7 +147,7 @@ export class MetricsSourcesService {
     userId: string,
     roles: string[],
   ): Promise<MetricsSourceResponse | null> {
-    const isAdmin = this.authzService.isGlobalAdmin(roles);
+    const orgIds = await withOrgFilter(userId, roles, this.authzService);
     this.logger.debug(`findByApplicationDashboardId: adId=${applicationDashboardId}, userId=${userId}`);
 
     try {
@@ -159,14 +158,13 @@ export class MetricsSourcesService {
           adId: applicationDashboardId,
         });
 
-      if (!isAdmin) {
-        const accessibleOrgs = await this.authzService.getAccessibleOrganizations(userId);
-        if (accessibleOrgs.length === 0) {
+      if (orgIds !== null) {
+        if (orgIds.length === 0) {
           qb.andWhere('ms.organizationId IS NULL');
         } else {
           qb.andWhere(
             '(ms.organizationId IN (:...orgIds) OR ms.organizationId IS NULL)',
-            { orgIds: accessibleOrgs },
+            { orgIds },
           );
         }
       }
