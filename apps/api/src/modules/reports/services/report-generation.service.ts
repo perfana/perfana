@@ -8,6 +8,7 @@ import {
   ReportStatus,
   ReportSectionConfig,
   ReportStyling,
+  OwnedResource,
 } from '@perfana/shared';
 import {
   ResourceNotFoundException,
@@ -16,14 +17,10 @@ import {
   InvalidStateException,
 } from '../../../common/exceptions/business.exception';
 import { AuthorizationService } from '../../../common/services/authorization.service';
+import { withOrgFilter } from '../../../common/utils/with-org-filter';
 import { ReportGenerationValidatorService } from './report-generation-validator.service';
 import { ReportUtilsService } from './report-utils.service';
 import { ReportHtmlCompilerService } from './report-html-compiler.service';
-
-/**
- * Global admin roles that bypass organization filtering
- */
-const ADMIN_ROLES = ['perfana-admin', 'super-admin', 'admin'];
 
 // ==================== Interfaces ====================
 
@@ -133,13 +130,6 @@ export class ReportGenerationService {
   // ==================== Authorization Helpers ====================
 
   /**
-   * Check if a user has global admin role
-   */
-  private isGlobalAdmin(roles: string[]): boolean {
-    return roles.some(role => ADMIN_ROLES.includes(role));
-  }
-
-  /**
    * Apply organization filtering to a report query builder.
    * Uses test_run.organization_id directly with backward compatibility for legacy data (NULL org).
    */
@@ -165,8 +155,6 @@ export class ReportGenerationService {
     userId: string,
     roles: string[],
   ): Promise<{ accessible: boolean; testRun: TestRun | null }> {
-    const isAdmin = this.isGlobalAdmin(roles);
-
     const testRun = await this.testRunRepo.findOne({
       where: { id: testRunId },
       relations: ['systemUnderTest', 'systemUnderTest.team'],
@@ -177,30 +165,24 @@ export class ReportGenerationService {
     }
 
     // Internal/system calls (no userId) bypass auth — authorization was checked at the controller boundary
-    // Admins can access all test runs
-    if (!userId || isAdmin) {
+    if (!userId) {
       return { accessible: true, testRun };
     }
 
-    // Check if test run's organization is in user's accessible organizations
-    const testRunOrgId = testRun.organizationId;
+    // Delegate to AuthorizationService.canAccessResource which handles:
+    //   1. Global admin bypass
+    //   2. Legacy null-org bypass
+    //   3. Organization membership check
+    // team_id is intentionally omitted — preserves the prior behavior of not checking
+    // team membership for test run access (only org membership). created_by is unused
+    // by canAccessResource (only canModifyResource reads it).
+    const result = await this.authzService.canAccessResource(userId, roles, {
+      organization_id: testRun.organizationId,
+      created_by: '',
+    } as OwnedResource);
 
-    // Legacy test runs (null organization_id) are accessible to all authenticated users for backward compatibility
-    if (!testRunOrgId) {
-      this.logger.debug(`Test run ${testRunId} has no organization_id (legacy), allowing access`);
-      return { accessible: true, testRun };
-    }
-
-    // Load organizations from database via AuthorizationService (like test-runs service does)
-    const organizationIds = await this.authzService.getAccessibleOrganizations(userId);
-
-    if (organizationIds.length === 0) {
-      this.logger.debug('User has no organization memberships, denying access to test run');
-      return { accessible: false, testRun: null };
-    }
-
-    if (!organizationIds.includes(testRunOrgId)) {
-      this.logger.debug(`User not a member of organization ${testRunOrgId}, denying access to test run ${testRunId}`);
+    if (!result.allowed) {
+      this.logger.debug(`Access denied for user ${userId} to test run ${testRunId}: ${result.reason}`);
       return { accessible: false, testRun: null };
     }
 
@@ -216,8 +198,6 @@ export class ReportGenerationService {
     userId: string,
     roles: string[],
   ): Promise<{ accessible: boolean; report: GeneratedReport | null }> {
-    const isAdmin = this.isGlobalAdmin(roles);
-
     const report = await this.reportRepo.findOne({
       where: { id: reportId },
       relations: ['template', 'test_run'],
@@ -228,25 +208,22 @@ export class ReportGenerationService {
     }
 
     // Internal/system calls (no userId) bypass auth — authorization was checked at the controller boundary
-    // Admins can access all reports
-    if (!userId || isAdmin) {
+    if (!userId) {
       return { accessible: true, report };
     }
 
-    // Use test_run.organization_id directly (not via systemUnderTest → team chain)
-    const reportOrgId = report.test_run?.organizationId;
+    // Use test_run.organization_id directly (not via systemUnderTest → team chain).
+    // Delegate to AuthorizationService.canAccessResource for admin bypass + legacy
+    // null-org bypass + org membership check. team_id is omitted to preserve the
+    // prior behavior of not checking team membership for report access. created_by
+    // is unused by canAccessResource (only canModifyResource reads it).
+    const result = await this.authzService.canAccessResource(userId, roles, {
+      organization_id: report.test_run?.organizationId,
+      created_by: '',
+    } as OwnedResource);
 
-    // Legacy reports (null organization_id) are accessible to all authenticated users for backward compatibility
-    if (!reportOrgId) {
-      this.logger.debug(`Report ${reportId} has no organization_id (legacy), allowing access`);
-      return { accessible: true, report };
-    }
-
-    // Load organizations from database via AuthorizationService
-    const organizationIds = await this.authzService.getAccessibleOrganizations(userId);
-
-    if (!organizationIds.includes(reportOrgId)) {
-      this.logger.debug(`User not a member of organization ${reportOrgId}, denying access to report ${reportId}`);
+    if (!result.allowed) {
+      this.logger.debug(`Access denied for user ${userId} to report ${reportId}: ${result.reason}`);
       return { accessible: false, report: null };
     }
 
@@ -457,17 +434,12 @@ export class ReportGenerationService {
     try {
       const roles = options?.roles || [];
       const userId = options?.userId || '';
-      const isAdmin = this.isGlobalAdmin(roles);
 
-      let organizationIds: string[] = [];
-      if (!isAdmin) {
-        if (userId) {
-          organizationIds = await this.authzService.getAccessibleOrganizations(userId);
-        }
-        if (organizationIds.length === 0) {
-          this.logger.debug('User has no organization memberships, returning empty report list');
-          return { items: [], total: 0, offset: options?.offset || 0, limit: options?.limit || 50 };
-        }
+      // Resolve accessible org IDs: null means global admin (no filter needed)
+      const orgIds = await withOrgFilter(userId, roles, this.authzService);
+      if (orgIds !== null && orgIds.length === 0) {
+        this.logger.debug('User has no organization memberships, returning empty report list');
+        return { items: [], total: 0, offset: options?.offset || 0, limit: options?.limit || 50 };
       }
 
       const limit = options?.limit || 50;
@@ -479,8 +451,8 @@ export class ReportGenerationService {
         .createQueryBuilder('report')
         .leftJoinAndSelect('report.template', 'template');
 
-      if (!isAdmin) {
-        this.applyReportOrganizationFilter(queryBuilder, organizationIds, 'report');
+      if (orgIds !== null) {
+        this.applyReportOrganizationFilter(queryBuilder, orgIds, 'report');
       }
 
       if (options?.status) {
@@ -494,7 +466,7 @@ export class ReportGenerationService {
 
       const [items, total] = await queryBuilder.getManyAndCount();
 
-      this.logger.log(`Retrieved ${items.length} reports (total: ${total})${isAdmin ? ' (admin)' : ` (orgs: ${organizationIds.length})`}`);
+      this.logger.log(`Retrieved ${items.length} reports (total: ${total})${orgIds === null ? ' (admin)' : ` (orgs: ${orgIds.length})`}`);
 
       return { items, total, offset, limit };
     } catch (error) {
@@ -510,18 +482,12 @@ export class ReportGenerationService {
     try {
       const roles = options?.roles || [];
       const userId = options?.userId || '';
-      const isAdmin = this.isGlobalAdmin(roles);
 
-      // Load organizations from database for non-admin users
-      let organizationIds: string[] = [];
-      if (!isAdmin) {
-        if (userId) {
-          organizationIds = await this.authzService.getAccessibleOrganizations(userId);
-        }
-        if (organizationIds.length === 0) {
-          this.logger.debug('User has no organization memberships, returning empty report list');
-          return { items: [], total: 0, offset: options?.offset || 0, limit: options?.limit || 10 };
-        }
+      // Resolve accessible org IDs: null means global admin (no filter needed)
+      const orgIds = await withOrgFilter(userId, roles, this.authzService);
+      if (orgIds !== null && orgIds.length === 0) {
+        this.logger.debug('User has no organization memberships, returning empty report list');
+        return { items: [], total: 0, offset: options?.offset || 0, limit: options?.limit || 10 };
       }
 
       const limit = options?.limit || 10;
@@ -535,8 +501,8 @@ export class ReportGenerationService {
         .where('report.test_run_id = :testRunId', { testRunId });
 
       // Apply organization filtering for non-admin users
-      if (!isAdmin) {
-        this.applyReportOrganizationFilter(queryBuilder, organizationIds, 'report');
+      if (orgIds !== null) {
+        this.applyReportOrganizationFilter(queryBuilder, orgIds, 'report');
       }
 
       if (options?.status) {
@@ -550,7 +516,7 @@ export class ReportGenerationService {
 
       const [items, total] = await queryBuilder.getManyAndCount();
 
-      this.logger.log(`Retrieved ${items.length} reports for test run ${testRunId}${isAdmin ? ' (admin)' : ` (orgs: ${organizationIds.length})`}`);
+      this.logger.log(`Retrieved ${items.length} reports for test run ${testRunId}${orgIds === null ? ' (admin)' : ` (orgs: ${orgIds.length})`}`);
 
       return { items, total, offset, limit };
     } catch (error) {
@@ -572,26 +538,19 @@ export class ReportGenerationService {
     roles: string[] = [],
   ): Promise<ReportSummaryResponse> {
     try {
-      const isAdmin = this.isGlobalAdmin(roles);
-
-      // Load organizations from database for non-admin users
-      let organizationIds: string[] = [];
-      if (!isAdmin) {
-        if (userId) {
-          organizationIds = await this.authzService.getAccessibleOrganizations(userId);
-        }
-        if (organizationIds.length === 0) {
-          this.logger.debug('User has no organization memberships, returning empty report summary');
-          return {
-            totalReports: 0,
-            completedReports: 0,
-            pendingReports: 0,
-            failedReports: 0,
-            latestReport: undefined,
-            totalDownloads: 0,
-            totalShareViews: 0,
-          };
-        }
+      // Resolve accessible org IDs: null means global admin (no filter needed)
+      const orgIds = await withOrgFilter(userId, roles, this.authzService);
+      if (orgIds !== null && orgIds.length === 0) {
+        this.logger.debug('User has no organization memberships, returning empty report summary');
+        return {
+          totalReports: 0,
+          completedReports: 0,
+          pendingReports: 0,
+          failedReports: 0,
+          latestReport: undefined,
+          totalDownloads: 0,
+          totalShareViews: 0,
+        };
       }
 
       // First, try to find the test run to get its UUID
@@ -603,8 +562,8 @@ export class ReportGenerationService {
         .where('(tr.id = :testRunId OR tr.test_run_id = CAST(:testRunId AS text))', { testRunId });
 
       // Apply organization filtering for non-admin users
-      if (!isAdmin) {
-        testRunQuery.andWhere('sut.organization_id IN (:...orgIds)', { orgIds: organizationIds });
+      if (orgIds !== null) {
+        testRunQuery.andWhere('sut.organization_id IN (:...orgIds)', { orgIds });
       }
 
       const testRun = await testRunQuery.getOne();
@@ -637,7 +596,7 @@ export class ReportGenerationService {
       const totalDownloads = reports.reduce((sum, r) => sum + (r.download_count || 0), 0);
       const totalShareViews = reports.reduce((sum, r) => sum + (r.share_view_count || 0), 0);
 
-      this.logger.log(`Retrieved report summary for test run ${testRunId}: ${totalReports} total${isAdmin ? ' (admin)' : ` (orgs: ${organizationIds.length})`}`);
+      this.logger.log(`Retrieved report summary for test run ${testRunId}: ${totalReports} total${orgIds === null ? ' (admin)' : ` (orgs: ${orgIds.length})`}`);
 
       return {
         totalReports,
@@ -668,18 +627,11 @@ export class ReportGenerationService {
     roles: string[] = [],
   ): Promise<GeneratedReport[]> {
     try {
-      const isAdmin = this.isGlobalAdmin(roles);
-
-      // Load organizations from database for non-admin users
-      let organizationIds: string[] = [];
-      if (!isAdmin) {
-        if (userId) {
-          organizationIds = await this.authzService.getAccessibleOrganizations(userId);
-        }
-        if (organizationIds.length === 0) {
-          this.logger.debug('User has no organization memberships, returning empty pending reports list');
-          return [];
-        }
+      // Resolve accessible org IDs: null means global admin (no filter needed)
+      const orgIds = await withOrgFilter(userId, roles, this.authzService);
+      if (orgIds !== null && orgIds.length === 0) {
+        this.logger.debug('User has no organization memberships, returning empty pending reports list');
+        return [];
       }
 
       const queryBuilder = this.reportRepo
@@ -689,8 +641,8 @@ export class ReportGenerationService {
         .where('report.status = :status', { status: 'pending' });
 
       // Apply organization filtering for non-admin users
-      if (!isAdmin) {
-        this.applyReportOrganizationFilter(queryBuilder, organizationIds, 'report');
+      if (orgIds !== null) {
+        this.applyReportOrganizationFilter(queryBuilder, orgIds, 'report');
       }
 
       queryBuilder
@@ -699,7 +651,7 @@ export class ReportGenerationService {
 
       const reports = await queryBuilder.getMany();
 
-      this.logger.log(`Retrieved ${reports.length} pending reports${isAdmin ? ' (admin)' : ` (orgs: ${organizationIds.length})`}`);
+      this.logger.log(`Retrieved ${reports.length} pending reports${orgIds === null ? ' (admin)' : ` (orgs: ${orgIds.length})`}`);
 
       return reports;
     } catch (error) {

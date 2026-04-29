@@ -150,6 +150,7 @@ describe('ReportGenerationService', () => {
           useValue: {
             isGlobalAdmin: jest.fn().mockReturnValue(true),
             getAccessibleOrganizations: jest.fn().mockResolvedValue(['org-1']),
+            canAccessResource: jest.fn().mockResolvedValue({ allowed: true, reason: 'mocked' }),
           },
         },
         {
