@@ -15,6 +15,7 @@ import {
 } from '@nestjs/common';
 import { ApiTags, ApiOperation, ApiQuery, ApiResponse, ApiBearerAuth, ApiParam } from '@nestjs/swagger';
 import { UserCtx, UserContext } from '../../../common/decorators/user-context.decorator';
+import { AuthorizationService } from '../../../common/services/authorization.service';
 import { ReportTemplateService } from '../services/report-template.service';
 import { CopyReportTemplatesDto } from '../dto/copy-report-templates.dto';
 import {
@@ -42,7 +43,20 @@ import { ReportSectionType } from '@perfana/shared';
 export class ReportTemplateController {
   private readonly logger = new Logger(ReportTemplateController.name);
 
-  constructor(private readonly reportTemplateService: ReportTemplateService) {}
+  constructor(
+    private readonly reportTemplateService: ReportTemplateService,
+    private readonly authzService: AuthorizationService,
+  ) {}
+
+  private async ensureUserHasOrganization(ctx: UserContext, action: string): Promise<void> {
+    if (ctx.organizationId) return;
+    const userOrgs = await this.authzService.getAccessibleOrganizations(ctx.userId);
+    if (userOrgs.length === 0) {
+      throw new BadRequestException(
+        `User must belong to an organization to ${action} report templates`,
+      );
+    }
+  }
 
   // ==================== Template Listing ====================
 
@@ -217,9 +231,7 @@ export class ReportTemplateController {
     @Body() dto: CopyReportTemplatesDto,
     @UserCtx() ctx: UserContext,
   ): Promise<{ copied: number; skipped: number; total: number }> {
-    if (!ctx.organizationId) {
-      throw new BadRequestException('User must belong to an organization to copy report templates');
-    }
+    await this.ensureUserHasOrganization(ctx, 'copy');
 
     try {
       return await this.reportTemplateService.copyToScope(dto, ctx.userId);
@@ -240,11 +252,7 @@ export class ReportTemplateController {
     @Body() dto: CreateTemplateDto,
     @UserCtx() ctx: UserContext,
   ): Promise<TemplateDetailDto> {
-    if (!ctx.organizationId) {
-      throw new BadRequestException(
-        'User must belong to an organization to create report templates',
-      );
-    }
+    await this.ensureUserHasOrganization(ctx, 'create');
 
     try {
       const createdBy = ctx.userId;
@@ -475,11 +483,7 @@ export class ReportTemplateController {
     @Body() dto: DuplicateTemplateDto,
     @UserCtx() ctx: UserContext,
   ): Promise<TemplateDetailDto> {
-    if (!ctx.organizationId) {
-      throw new BadRequestException(
-        'User must belong to an organization to duplicate report templates',
-      );
-    }
+    await this.ensureUserHasOrganization(ctx, 'duplicate');
 
     try {
       const createdBy = ctx.userId;
