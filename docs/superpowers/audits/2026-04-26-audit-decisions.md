@@ -6,9 +6,9 @@ Phase 3c rolls capabilities through every site listed below. Update these counts
 
 | Bucket | Total | Migrated | Remaining | % done |
 | --- | ---: | ---: | ---: | ---: |
-| A — bypass filter | 127 | 18 | 109 | 14.2% |
+| A — bypass filter | 127 | 22 | 105 | 17.3% |
 | B — bypass guard | 14 | 0 | 14 | 0% |
-| Local `private isGlobalAdmin()` wrappers | 13 | 0 | 13 | 0% |
+| Local `private isGlobalAdmin()` wrappers | 13 | 1 | 12 | 7.7% |
 
 **Lint enforcement:** `apps/api/.rbac-migration-allowlist.json` lists every file currently exempt from the `no-direct-is-global-admin` lint rule (40 files as of 2026-04-28). When a site is migrated, remove its file from the allowlist (the file may have multiple sites — only remove when the LAST one is migrated). Allowlist size IS the burndown.
 
@@ -415,3 +415,74 @@ private async resolveOrgFilter(userId, roles, paramStartIndex, testRunAlias = 't
 ### Allowlist disposition
 
 This file **EXITS the allowlist** — the 8 migrated sites were the only `isGlobalAdmin` calls in the file. After this PR, the file has zero direct `isGlobalAdmin` references, so the lint rule's exemption can be removed. **First file to fully exit the allowlist** since the Phase 3c rollout began. Allowlist size: 38 → 37.
+
+---
+
+## Phase C7 — Single file: `report-generation.service.ts` — first multi-bucket migration
+
+**Audit date:** 2026-04-29
+**Scope:** Single-file migration, sibling to the just-merged `report-data-fetcher.service.ts` (PR #192). Touches **three different audit buckets** in one PR — first PR to reduce the "Local wrappers" counter from its 0/13 starting point.
+**File re-verified:** `apps/api/src/modules/reports/services/report-generation.service.ts`
+
+### Site Classification
+
+Total `isGlobalAdmin` references: 7. Two distinct shape categories:
+
+**Local wrapper (1 site)**
+| Line | Type | Action |
+|------|------|--------|
+| 138 | `private isGlobalAdmin(roles)` returning `roles.some(role => ADMIN_ROLES.includes(role))` | **Remove** — duplicates `authzService.isGlobalAdmin`. The local `ADMIN_ROLES = ['perfana-admin','super-admin','admin']` constant (line 26) was the wrapper's only consumer; remove that too. |
+
+**Per-resource ACL helpers (2 sites)**
+| Line | Method | Original shape | Migration |
+|------|--------|---------------|-----------|
+| 168 | `isTestRunAccessible` | Loaded testRun, then `if (!userId \|\| isAdmin) return accessible; if (!testRunOrgId) return accessible; load orgs; check membership` | **Migrate to `AuthorizationService.canAccessResource`.** Preserves `!userId` short-circuit explicitly (canAccessResource would deny anonymous calls). Passes `team_id: undefined` to preserve the prior behavior of not checking team membership. |
+| 219 | `isReportAccessible` | Same shape, `report.test_run.organizationId` as the org | Same migration via `canAccessResource`. |
+
+**List-filter Bucket A (4 sites)**
+| Line | Method | Variant | Migration |
+|------|--------|---------|-----------|
+| 460 | `findAll` | `if (!isAdmin) { load orgs; if empty → empty list; else apply filter }` | `withOrgFilter` + `orgIds === null` for admin, `orgIds.length === 0` for empty-list early exit |
+| 513 | `findByTestRunId` | Same | Same |
+| 575 | `getSummary` | Same but returns empty summary object | Same |
+| 671 | `getPendingReports` | Same but returns empty array | Same |
+
+**Canonical Bucket A: 4. Local wrapper: 1. Per-resource ACL refactors: 2.**
+
+### Migration approach: 3-tier strategy
+
+1. **Wrapper removal.** Delete the private `isGlobalAdmin` method and the `ADMIN_ROLES` constant. Both unused after the per-resource helpers migrate to `canAccessResource`.
+
+2. **Per-resource → `AuthorizationService.canAccessResource`.** The two private helpers `isTestRunAccessible` / `isReportAccessible` previously inlined the admin/legacy/membership checks. They now delegate to `canAccessResource` which already implements all three. Each helper preserves a `!userId` short-circuit (anonymous calls bypass auth — preserved from the original semantics, since `canAccessResource` would deny when it can't find the user in any org). `team_id` is intentionally omitted to preserve the prior behavior of not checking team membership for these resources.
+
+3. **List-filter sites → `withOrgFilter`.** The 4 sites use the standard `orgIds === null` (admin) / `orgIds.length === 0` (empty-list early exit) pattern. The internal `applyReportOrganizationFilter` query-builder helper takes `organizationIds: string[]` so we pass `orgIds` (now `string[] | null`) directly when non-null.
+
+### Test fixture update
+
+The existing `report-generation.service.spec.ts` mock for `AuthorizationService` had `isGlobalAdmin` and `getAccessibleOrganizations` but lacked `canAccessResource`. Added: `canAccessResource: jest.fn().mockResolvedValue({ allowed: true, reason: 'mocked' })`. 10 spec failures (all in `findById`/`updateStatus`/`storeHtmlContent`/`incrementRetryCount`/`delete`/`generateHtml` — methods routed through `isReportAccessible` or `isTestRunAccessible`) became 10 passes. No production-code change driven by this — spec just needed to mock the now-called method.
+
+### Test Results
+
+| Test run | Result |
+|----------|--------|
+| `cd apps/api && npx jest src/modules/reports` | 446 passed (16 suites) |
+| `cd apps/api && npx jest` (full suite) | 4314 passed, 20 skipped (pre-existing), 0 failed |
+| `npm run type-check` | 8/8 tasks successful, 0 errors |
+| `npm run lint` (`@perfana/api`) | 0 errors, 59 pre-existing warnings (none introduced) |
+
+### Net diff
+
+- Lines removed: 119
+- Lines added: 71 (including the 1-line spec mock update)
+- **Net -48 lines** — biggest reduction yet, driven by replacing two inlined per-resource ACL helpers with delegation to the centralized `canAccessResource`
+
+### Files changed
+
+- `apps/api/src/modules/reports/services/report-generation.service.ts` — wrapper removal + 2 per-resource refactors + 4 list-filter migrations
+- `apps/api/src/modules/reports/__tests__/report-generation.service.spec.ts` — add `canAccessResource` mock
+- `apps/api/.rbac-migration-allowlist.json` — remove the file entry
+- `docs/superpowers/audits/2026-04-26-audit-decisions.md` — this file
+
+### Allowlist disposition
+
+This file **EXITS the allowlist** — zero direct `isGlobalAdmin` references after the migration. **Second file to fully exit** the allowlist since Phase 3c began. Allowlist size: 37 → 36.

@@ -4,6 +4,11 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
+## [0.2.47.14] - 2026-04-29
+
+### Refactored
+- **Phase 3c — `ReportGenerationService` fully migrated; second file to exit the allowlist.** First multi-bucket migration in the Phase 3c rollout — touches three audit categories in one PR. Migrates 4 canonical Bucket A "filter bypass" sites (`findAll`, `findByTestRunId`, `getSummary`, `getPendingReports`) to `withOrgFilter`. Removes the local `private isGlobalAdmin()` wrapper (line 138) plus its `ADMIN_ROLES` constant — first reduction of the "Local wrappers" audit counter from its 0/13 starting point. Refactors the two private per-resource ACL helpers (`isTestRunAccessible`, `isReportAccessible`) to delegate to `AuthorizationService.canAccessResource`, which already implements the admin / legacy-null-org / org-membership check. Both helpers preserve a `!userId` short-circuit so internal/system calls still bypass auth as before. `team_id` is intentionally omitted from the `OwnedResource` payload to preserve the prior behavior of not checking team membership for these resources. The existing spec needed only a one-line mock update (added `canAccessResource: jest.fn().mockResolvedValue({ allowed: true, reason: 'mocked' })` alongside the existing `isGlobalAdmin` and `getAccessibleOrganizations` mocks); 446 reports tests pass. The file now has zero direct `isGlobalAdmin` references and has been **removed from `.rbac-migration-allowlist.json`** — second file to exit the allowlist since Phase 3c began. Allowlist size: 37 → 36. Net diff: -48 lines. Audit progress: Bucket A migrated 18 → 22 of 127 (17.3%); Local wrappers migrated 0 → 1 of 13 (7.7%). See `docs/superpowers/audits/2026-04-26-audit-decisions.md` for the full per-site classification.
+
 ## [0.2.47.13] - 2026-04-29
 
 ### Refactored
