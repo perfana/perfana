@@ -3,6 +3,7 @@ import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { Event, SystemUnderTest, ApplicationDashboard, GrafanaInstance, TestRun } from '../../entities';
 import { AuthorizationService } from '../../common/services/authorization.service';
+import { withOrgFilter } from '../../common/utils/with-org-filter';
 import { GrafanaClientService } from '../grafana/grafana-client.service';
 import { CreateEventDto, UpdateEventDto, EventQueryDto } from './dto/event.dto';
 
@@ -24,15 +25,14 @@ export class EventsService {
   ) {}
 
   async findAll(userId: string, roles: string[], query?: EventQueryDto): Promise<Event[]> {
-    const isAdmin = this.authzService.isGlobalAdmin(roles);
+    const orgIds = await withOrgFilter(userId, roles, this.authzService);
 
     const qb = this.eventRepo
       .createQueryBuilder('e')
       .leftJoinAndSelect('e.systemUnderTest', 'sut')
       .orderBy('e.timestamp', 'DESC');
 
-    if (!isAdmin) {
-      const orgIds = await this.authzService.getAccessibleOrganizations(userId);
+    if (orgIds !== null) {
       qb.andWhere(
         '(e.organization_id IN (:...orgIds) OR e.organization_id IS NULL)',
         { orgIds: orgIds.length > 0 ? orgIds : ['00000000-0000-0000-0000-000000000000'] },
@@ -68,7 +68,7 @@ export class EventsService {
       throw new NotFoundException(`Test run ${testRunId} not found`);
     }
 
-    const isAdmin = this.authzService.isGlobalAdmin(roles);
+    const orgIds = await withOrgFilter(userId, roles, this.authzService);
 
     const qb = this.eventRepo
       .createQueryBuilder('e')
@@ -89,8 +89,7 @@ export class EventsService {
     // Filter out auto-generated test start/end events
     qb.andWhere("e.title NOT IN ('Test start', 'Test end')");
 
-    if (!isAdmin) {
-      const orgIds = await this.authzService.getAccessibleOrganizations(userId);
+    if (orgIds !== null) {
       qb.andWhere(
         '(e.organization_id IN (:...orgIds) OR e.organization_id IS NULL)',
         { orgIds: orgIds.length > 0 ? orgIds : ['00000000-0000-0000-0000-000000000000'] },
