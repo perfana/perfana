@@ -4,6 +4,11 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
+## [0.2.47.15] - 2026-04-29
+
+### Fixed
+- **Empty modal when configuring sections on a new report template.** From the System Under Test config view, opening Reporting Templates → Create Template → Configure Sections rendered a blank dialog (only the title bar and Cancel button). The `GenerateReportDialog` mounted in `template-builder` mode initialized `showTemplateSelector` to `true` regardless of mode, and the template-fetch `useEffect` short-circuits in template-builder mode, so the flag never flipped. The render gates then hid both the section builder and the Save Configuration button. Fix initializes `showTemplateSelector` to `!isTemplateBuilder` at `apps/web/components/reports/report-generation/GenerateReportDialog.tsx:194` so the builder UI shows immediately when entering template-builder mode. The default report-generation flow (no `mode` prop) is unaffected. All 50 tests in `apps/web/__tests__/components/reports/GenerateReportDialog.test.tsx` pass.
+
 ## [0.2.47.14] - 2026-04-29
 
 ### Refactored

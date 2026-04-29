@@ -191,7 +191,7 @@ export function GenerateReportDialog({
   const [templates, setTemplates] = useState<TemplateSummary[]>([]);
   const [selectedTemplate, setSelectedTemplate] = useState<TemplateDetail | null>(null);
   const [templatesLoading, setTemplatesLoading] = useState(false);
-  const [showTemplateSelector, setShowTemplateSelector] = useState(true);
+  const [showTemplateSelector, setShowTemplateSelector] = useState(!isTemplateBuilder);
 
   // Report builder state
   const [sections, setSections] = useState<ReportSectionConfig[]>(initialSections);
