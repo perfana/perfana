@@ -4,6 +4,11 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
+## [0.2.47.22] - 2026-04-29
+
+### Refactored
+- **RBAC Phase 3c — `awr-reports.controller.ts` migration (Phase C12).** First Phase 3c PR to migrate Bucket B (per-resource access guard) sites instead of Bucket A (list-filter) sites. Both private guards `validateTestRunAccess` and `validateReportAccess` previously inlined the admin / legacy-null-org / `isOrganizationMember` policy chain. Migrated to delegate to `AuthorizationService.canAccessResource` (same C7 pattern), which centralizes the three policy branches in one place. The resource lookups (TypeORM relation + raw SQL chain) are unchanged — only the policy decision moves out. File exits the lint allowlist (fifth file to do so since Phase 3c began; allowlist 34 → 33). Burndown: Bucket B 0 → 2 of 14 (14.3%) — first Bucket B progress. All 402 awr tests + full 4314-test API suite pass; 0 type errors; 0 lint errors. Net +5 lines (the only Phase 3c migration so far that grew the file — the growth is the explanatory comment block in front of the `canAccessResource` call).
+
 ## [0.2.47.21] - 2026-04-29
 
 ### Refactored
