@@ -6,11 +6,11 @@ Phase 3c rolls capabilities through every site listed below. Update these counts
 
 | Bucket | Total | Migrated | Remaining | % done |
 | --- | ---: | ---: | ---: | ---: |
-| A — bypass filter | 127 | 25 | 102 | 19.7% |
+| A — bypass filter | 127 | 28 | 99 | 22.0% |
 | B — bypass guard | 14 | 0 | 14 | 0% |
 | Local `private isGlobalAdmin()` wrappers | 13 | 1 | 12 | 7.7% |
 
-**Lint enforcement:** `apps/api/.rbac-migration-allowlist.json` lists every file currently exempt from the `no-direct-is-global-admin` lint rule (36 files as of 2026-04-29). When a site is migrated, remove its file from the allowlist (the file may have multiple sites — only remove when the LAST one is migrated). Allowlist size IS the burndown.
+**Lint enforcement:** `apps/api/.rbac-migration-allowlist.json` lists every file currently exempt from the `no-direct-is-global-admin` lint rule (35 files as of 2026-04-29). When a site is migrated, remove its file from the allowlist (the file may have multiple sites — only remove when the LAST one is migrated). Allowlist size IS the burndown.
 
 **Date-bound revisit:** by **2026-08-01**, Phase 3c migration must be at least 50% complete (Bucket A + B combined: 70+ sites migrated). If not, re-evaluate the architecture or the priorities. "We forgot about it" is the failure mode this gate prevents.
 
@@ -552,3 +552,81 @@ The existing spec uses `createAuthorizationServiceMock()` whose `isGlobalAdmin` 
 ### Allowlist disposition
 
 The file **remains** in `.rbac-migration-allowlist.json` — the 3 non-canonical `isGlobalAdmin` sites (debug-log-only at 185, per-resource guards at 225 and 269) still trip the lint rule. Same disposition as the dynatrace, grafana, and pyroscope/tracing bundles.
+
+---
+
+## Phase C9 — Single file: `metrics/metrics.service.ts`
+
+**Audit date:** 2026-04-29
+**Scope:** Single-file migration, third file to fully exit the allowlist since Phase 3c began. Signal scan flagged 100% canonical density (3 `isGlobalAdmin` sites paired 1:1 with `getAccessibleOrganizations`) — same density signature as the C6 `report-data-fetcher.service.ts` win.
+**File re-verified:** `apps/api/src/modules/metrics/metrics.service.ts`
+
+### Site Classification
+
+| Line | Method | Classification | Action |
+|------|--------|---------------|--------|
+| 94 | `validateTestRunAccess` (private) | **CANONICAL** Bucket A — admin returns true; non-admin loads orgs and runs SQL existence check filtering by `org_id = ANY($) OR IS NULL` | Migrate |
+| 340 | `findDSMetricStatisticsMultiple` | **CANONICAL** Bucket A — early-empty exit + `IN (orgs) OR NULL` filter on test-run query | Migrate |
+| 526 | `findDSMetricStatistics` | **CANONICAL** Bucket A — singular variant of 340, identical shape | Migrate |
+
+**Canonical count: 3 of 3 (100%).** Every site was a list-filter / access-check bypass — no debug-log-only, no per-resource throw guards, no custom guard helpers.
+
+### Migration shape
+
+Site 1 (`validateTestRunAccess`) is the cleanest pattern in Phase 3c so far: a 2-step check that maps directly onto `withOrgFilter`'s null/array contract.
+
+```typescript
+// before
+if (this.authzService.isGlobalAdmin(roles)) return true;
+const organizationIds = await this.authzService.getAccessibleOrganizations(userId);
+const result = await this.testRunRepo.query(query, [testRunId, organizationIds]);
+return result && result.length > 0;
+
+// after
+const orgIds = await withOrgFilter(userId, roles, this.authzService);
+if (orgIds === null) return true;
+const result = await this.testRunRepo.query(query, [testRunId, orgIds]);
+return result && result.length > 0;
+```
+
+For the empty-orgs case, the SQL `org_id = ANY($::uuid[])` against `[]` matches no rows — only `org_id IS NULL` rows pass. Behavior preserved exactly.
+
+Sites 2 and 3 share the early-empty-exit shape used in C7's `findAll`/`findByTestRunId`/`getSummary`/`getPendingReports`:
+
+```typescript
+// before
+const isAdmin = this.authzService.isGlobalAdmin(roles);
+if (!isAdmin) {
+  const organizationIds = await this.authzService.getAccessibleOrganizations(userId);
+  if (organizationIds.length === 0) return [];
+  queryBuilder.andWhere('(sut.organization_id IN (:...orgIds) OR sut.organization_id IS NULL)', { orgIds: organizationIds });
+}
+
+// after
+const orgIds = await withOrgFilter(userId, roles, this.authzService);
+if (orgIds !== null) {
+  if (orgIds.length === 0) return [];
+  queryBuilder.andWhere('(sut.organization_id IN (:...orgIds) OR sut.organization_id IS NULL)', { orgIds });
+}
+```
+
+### Test Results
+
+| Test run | Result |
+|----------|--------|
+| `cd apps/api && npx jest src/modules/metrics` | 80 passed, 10 skipped (pre-existing) |
+| `cd apps/api && npx jest` (full suite) | 4314 passed, 20 skipped (pre-existing), 0 failed |
+| `npm run type-check` | 8/8 tasks successful, 0 errors |
+| `npm run lint` (`@perfana/api`) | 0 errors, 59 pre-existing warnings (none introduced) |
+
+The existing `metrics.service.spec.ts` uses `createAuthorizationServiceMock()` whose `isGlobalAdmin` defaults to `true` — `withOrgFilter` returns `null` and the filter branch is skipped. No spec changes were needed.
+
+### Files changed
+
+- `apps/api/src/modules/metrics/metrics.service.ts` — import + 3 site migrations
+- `apps/api/.rbac-migration-allowlist.json` — remove the file entry
+- `docs/superpowers/audits/2026-04-26-audit-decisions.md` — this file
+
+### Allowlist disposition
+
+This file **EXITS the allowlist** — zero direct `isGlobalAdmin` references after the migration. **Third file to fully exit** the allowlist since Phase 3c began (after C6 `report-data-fetcher.service.ts` and C7 `report-generation.service.ts`). Allowlist size: 36 → 35.

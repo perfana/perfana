@@ -11,6 +11,7 @@ import {
   ApplicationDashboard,
 } from '../../entities';
 import { AuthorizationService } from '../../common/services/authorization.service';
+import { withOrgFilter } from '../../common/utils/with-org-filter';
 
 export interface MetricDataPoint {
   time: Date;
@@ -91,9 +92,8 @@ export class MetricsService {
     userId: string,
     roles: string[],
   ): Promise<boolean> {
-    if (this.authzService.isGlobalAdmin(roles)) return true;
-
-    const organizationIds = await this.authzService.getAccessibleOrganizations(userId);
+    const orgIds = await withOrgFilter(userId, roles, this.authzService);
+    if (orgIds === null) return true;
 
     const query = `
       SELECT 1
@@ -103,7 +103,7 @@ export class MetricsService {
         AND (sut.organization_id = ANY($2::uuid[]) OR sut.organization_id IS NULL)
       LIMIT 1
     `;
-    const result = await this.testRunRepo.query(query, [testRunId, organizationIds]);
+    const result = await this.testRunRepo.query(query, [testRunId, orgIds]);
     return result && result.length > 0;
   }
 
@@ -337,7 +337,7 @@ export class MetricsService {
     metricsSourceId?: string,
   ): Promise<MetricStatisticResult[]> {
     try {
-      const isAdmin = this.authzService.isGlobalAdmin(roles);
+      const orgIds = await withOrgFilter(userId, roles, this.authzService);
 
       // First, get test_run_ids that match the criteria from test_runs table
       const queryBuilder = this.testRunRepo
@@ -357,12 +357,11 @@ export class MetricsService {
         ]);
 
       // Add organization filtering for non-admin users
-      if (!isAdmin) {
-        const organizationIds = await this.authzService.getAccessibleOrganizations(userId);
-        if (organizationIds.length === 0) {
+      if (orgIds !== null) {
+        if (orgIds.length === 0) {
           return [];
         }
-        queryBuilder.andWhere('(sut.organization_id IN (:...orgIds) OR sut.organization_id IS NULL)', { orgIds: organizationIds });
+        queryBuilder.andWhere('(sut.organization_id IN (:...orgIds) OR sut.organization_id IS NULL)', { orgIds });
       }
 
       // Add system/environment/workload filtering
@@ -523,7 +522,7 @@ export class MetricsService {
     metricsSourceId?: string,
   ): Promise<MetricStatisticResult[]> {
     try {
-      const isAdmin = this.authzService.isGlobalAdmin(roles);
+      const orgIds = await withOrgFilter(userId, roles, this.authzService);
 
       // First, get test_run_ids that match the criteria from test_runs table
       const queryBuilder = this.testRunRepo
@@ -543,12 +542,11 @@ export class MetricsService {
         ]);
 
       // Add organization filtering for non-admin users
-      if (!isAdmin) {
-        const organizationIds = await this.authzService.getAccessibleOrganizations(userId);
-        if (organizationIds.length === 0) {
+      if (orgIds !== null) {
+        if (orgIds.length === 0) {
           return [];
         }
-        queryBuilder.andWhere('(sut.organization_id IN (:...orgIds) OR sut.organization_id IS NULL)', { orgIds: organizationIds });
+        queryBuilder.andWhere('(sut.organization_id IN (:...orgIds) OR sut.organization_id IS NULL)', { orgIds });
       }
 
       // Add system/environment/workload filtering
