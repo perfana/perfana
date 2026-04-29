@@ -4,6 +4,11 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
+## [0.2.47.11] - 2026-04-29
+
+### Refactored
+- **Phase 3c — Pyroscope + Tracing instances bundle migrated to `withOrgFilter`.** `PyroscopeInstancesService.findAll` and `TracingInstancesService.findAll` now resolve list-filter org scope via the shared `withOrgFilter` helper. Both methods previously had a 3-branch organization-filtering shape (`organizationId && !isAdmin` / `organizationId && isAdmin` / `!isAdmin`) where the first branch made an extra `getAccessibleOrganizations` call to validate the requested org. Migrating collapses this to 2 branches and eliminates the duplicate call — same input/output for all 5 call shapes (admin / non-admin × with-orgId / no-orgId / no-access-orgId). Behavior is unchanged. Audit progress: Bucket A migrated 5 → 7 of 127 (5.5%). See `docs/superpowers/audits/2026-04-26-audit-decisions.md` for the full per-site classification.
+
 ## [0.2.47.10] - 2026-04-29
 
 ### Refactored
