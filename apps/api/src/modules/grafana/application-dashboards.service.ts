@@ -14,6 +14,7 @@ import {
 } from '../../entities';
 import { GrafanaClientService } from './grafana-client.service';
 import { AuthorizationService } from '../../common/services/authorization.service';
+import { withOrgFilter } from '../../common/utils/with-org-filter';
 
 export interface DeleteInfo {
   canDeleteFromGrafana: boolean;
@@ -109,9 +110,9 @@ export class ApplicationDashboardsService {
    * Non-admin users only see dashboards from their accessible organizations or legacy (NULL org_id) dashboards.
    */
   async findAll(userId: string, roles: string[], query: ApplicationDashboardQuery = {}): Promise<ApplicationDashboard[]> {
-    // Log authorization context for debugging
-    const isAdmin = this.authzService.isGlobalAdmin(roles);
-    this.logger.debug(`findAll: userId=${userId}, isGlobalAdmin=${isAdmin}`);
+    // Resolve accessible org IDs: null means global admin (no filter needed)
+    const orgIds = await withOrgFilter(userId, roles, this.authzService);
+    this.logger.debug(`findAll: userId=${userId}, isGlobalAdmin=${orgIds === null}`);
 
     try {
       // Build TypeORM query with relations
@@ -122,20 +123,19 @@ export class ApplicationDashboardsService {
         .leftJoinAndSelect('ad.grafanaDashboard', 'gd');
 
       // Apply organization filtering (unless user is global admin)
-      if (!isAdmin) {
-        const accessibleOrgs = await this.authzService.getAccessibleOrganizations(userId);
-        this.logger.debug(`Applying org filter for non-admin user. Accessible orgs: ${JSON.stringify(accessibleOrgs)}`);
+      if (orgIds !== null) {
+        this.logger.debug(`Applying org filter for non-admin user. Accessible orgs: ${JSON.stringify(orgIds)}`);
 
-        if (accessibleOrgs.length === 0) {
+        if (orgIds.length === 0) {
           // User has no organization access - only show legacy (NULL) dashboards
           this.logger.debug('No accessible orgs - filtering to NULL organization_id only');
           queryBuilder.andWhere('ad.organizationId IS NULL');
         } else {
           // User has org access - show their org dashboards + legacy (NULL) dashboards
-          this.logger.debug(`Adding WHERE clause: organizationId IN (${accessibleOrgs.join(', ')}) OR organizationId IS NULL`);
+          this.logger.debug(`Adding WHERE clause: organizationId IN (${orgIds.join(', ')}) OR organizationId IS NULL`);
           queryBuilder.andWhere(
             '(ad.organizationId IN (:...orgIds) OR ad.organizationId IS NULL)',
-            { orgIds: accessibleOrgs }
+            { orgIds }
           );
         }
       } else {
@@ -240,9 +240,9 @@ export class ApplicationDashboardsService {
    * from their organizations or legacy (NULL org_id) dashboards. Global admins see all.
    */
   async findOne(id: string, userId: string, roles: string[]): Promise<ApplicationDashboard> {
-    // Log authorization context for debugging
-    const isAdmin = this.authzService.isGlobalAdmin(roles);
-    this.logger.debug(`findOne: id=${id}, userId=${userId}, isGlobalAdmin=${isAdmin}`);
+    // Resolve accessible org IDs: null means global admin (no filter needed)
+    const orgIds = await withOrgFilter(userId, roles, this.authzService);
+    this.logger.debug(`findOne: id=${id}, userId=${userId}, isGlobalAdmin=${orgIds === null}`);
 
     try {
       // Build query with organization filtering
@@ -254,17 +254,15 @@ export class ApplicationDashboardsService {
         .where('ad.id = :id', { id });
 
       // Apply organization filtering (unless user is global admin)
-      if (!isAdmin) {
-        const accessibleOrgs = await this.authzService.getAccessibleOrganizations(userId);
-
-        if (accessibleOrgs.length === 0) {
+      if (orgIds !== null) {
+        if (orgIds.length === 0) {
           // User has no organization access - only legacy (NULL) dashboards
           queryBuilder.andWhere('ad.organizationId IS NULL');
         } else {
           // User has org access - their org dashboards + legacy (NULL) dashboards
           queryBuilder.andWhere(
             '(ad.organizationId IN (:...orgIds) OR ad.organizationId IS NULL)',
-            { orgIds: accessibleOrgs }
+            { orgIds }
           );
         }
       }

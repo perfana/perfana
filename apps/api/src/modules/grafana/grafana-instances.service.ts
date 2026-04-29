@@ -4,6 +4,7 @@ import { Repository } from 'typeorm';
 import { GrafanaInstance as GrafanaInstanceEntity } from '../../entities';
 import { CreateGrafanaInstanceDto, UpdateGrafanaInstanceDto } from './dto/grafana-instance.dto';
 import { AuthorizationService } from '../../common/services/authorization.service';
+import { withOrgFilter } from '../../common/utils/with-org-filter';
 
 export interface GrafanaInstance {
   id: string;
@@ -91,9 +92,9 @@ export class GrafanaInstancesService {
    */
   async findAll(userId: string, roles: string[], query?: { label?: string; snapshotInstance?: boolean }, organizationId?: string): Promise<GrafanaInstance[]> {
     try {
-      // Log authorization context for debugging
-      const isAdmin = this.authzService.isGlobalAdmin(roles);
-      this.logger.debug(`findAll: userId=${userId}, isGlobalAdmin=${isAdmin}, organizationId=${organizationId}`);
+      // Resolve accessible org IDs: null means global admin (no filter needed)
+      const orgIds = await withOrgFilter(userId, roles, this.authzService);
+      this.logger.debug(`findAll: userId=${userId}, isGlobalAdmin=${orgIds === null}, organizationId=${organizationId}`);
 
       const queryBuilder = this.grafanaInstanceRepo
         .createQueryBuilder('gi')
@@ -103,15 +104,12 @@ export class GrafanaInstancesService {
       if (organizationId) {
         // Explicit org selected — scope to that org only
         queryBuilder.andWhere('gi.organization_id = :organizationId', { organizationId });
-      } else if (!isAdmin) {
-        // Get accessible organizations for this user
-        const accessibleOrganizations = await this.authzService.getAccessibleOrganizations(userId);
-        this.logger.debug(`User ${userId} has access to ${accessibleOrganizations.length} organizations`);
-
-        // Filter to only show instances from accessible organizations OR legacy instances (null organization_id)
+      } else if (orgIds !== null) {
+        // Non-admin: filter to accessible organizations OR legacy instances (null organization_id)
+        this.logger.debug(`User ${userId} has access to ${orgIds.length} organizations`);
         queryBuilder.andWhere(
           '(gi.organization_id IN (:...orgIds) OR gi.organization_id IS NULL)',
-          { orgIds: accessibleOrganizations.length > 0 ? accessibleOrganizations : ['00000000-0000-0000-0000-000000000000'] }
+          { orgIds: orgIds.length > 0 ? orgIds : ['00000000-0000-0000-0000-000000000000'] }
         );
       }
 
