@@ -4,6 +4,11 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
+## [0.2.47.20] - 2026-04-29
+
+### Refactored
+- **RBAC Phase 3c — `events.service.ts` migration (Phase C10).** Migrated 2 canonical Bucket A list-filter sites (`findAll`, `findByTestRun`) from the `if (!isAdmin) { load orgs; filter }` pattern to `withOrgFilter` + `orgIds === null` sentinel. The 1 per-resource throw guard at `findOne` (line 112) is left in place — same disposition as the C8 metrics-sources bundle. File remains in the allowlist. Burndown: Bucket A 33 → 35 of 127 (27.6%). All 19 events tests + full 4314-test API suite pass; 0 type errors; 0 lint errors.
+
 ## [0.2.47.19] - 2026-04-29
 
 ### Refactored

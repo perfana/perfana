@@ -6,7 +6,7 @@ Phase 3c rolls capabilities through every site listed below. Update these counts
 
 | Bucket | Total | Migrated | Remaining | % done |
 | --- | ---: | ---: | ---: | ---: |
-| A — bypass filter | 127 | 33 | 94 | 26.0% |
+| A — bypass filter | 127 | 35 | 92 | 27.6% |
 | B — bypass guard | 14 | 0 | 14 | 0% |
 | Local `private isGlobalAdmin()` wrappers | 13 | 2 | 11 | 15.4% |
 
@@ -634,3 +634,66 @@ The existing `adapt.service.spec.ts` uses `createAuthorizationServiceMock()` who
 ### Allowlist disposition
 
 This file **EXITS the allowlist** — zero direct `isGlobalAdmin` references after the migration. **Third file to fully exit** the allowlist since Phase 3c began (after `report-data-fetcher.service.ts` in C6 and `report-generation.service.ts` in C7). Allowlist size: 36 → 35.
+
+---
+
+## Phase C10 — Single file: `events.service.ts`
+
+**Audit date:** 2026-04-29
+**Scope:** Single-file migration. Mid-density target: 3 `isGlobalAdmin` call sites, 2 `getAccessibleOrganizations` calls. Same module shape as `metrics-sources.service.ts` (CRUD + per-resource throw guard) — the C8 migration's twin.
+**File re-verified:** `apps/api/src/modules/events/events.service.ts`
+
+### Site Classification
+
+| Line | Method | Classification | Action |
+|------|--------|---------------|--------|
+| 27 | `findAll` | **CANONICAL** Bucket A — `if (!isAdmin) { load orgs; filter org_id IN (...) OR IS NULL }` | Migrate |
+| 71 | `findByTestRun` | **CANONICAL** Bucket A — same shape, scoped to a test run's SUT/environment time window | Migrate |
+| 113 | `findOne` | PER-RESOURCE — `if (!isAdmin && event.organizationId)` calls `isOrganizationMember`, throws NotFoundException | Leave |
+
+**Canonical count: 2 of 3 (66%).** The remaining site is a per-resource throw guard — same disposition as the dynatrace, grafana, pyroscope/tracing, and metrics-sources bundles.
+
+### Migration shape
+
+Both canonical sites had an identical "include null-org rows" filter block with a sentinel-UUID hack for empty org lists (Postgres `IN ()` is invalid; passing the all-zeros UUID guarantees no match):
+
+```typescript
+// before
+const isAdmin = this.authzService.isGlobalAdmin(roles);
+if (!isAdmin) {
+  const orgIds = await this.authzService.getAccessibleOrganizations(userId);
+  qb.andWhere(
+    '(e.organization_id IN (:...orgIds) OR e.organization_id IS NULL)',
+    { orgIds: orgIds.length > 0 ? orgIds : ['00000000-0000-0000-0000-000000000000'] },
+  );
+}
+
+// after
+const orgIds = await withOrgFilter(userId, roles, this.authzService);
+if (orgIds !== null) {
+  qb.andWhere(
+    '(e.organization_id IN (:...orgIds) OR e.organization_id IS NULL)',
+    { orgIds: orgIds.length > 0 ? orgIds : ['00000000-0000-0000-0000-000000000000'] },
+  );
+}
+```
+
+Same body, just `orgIds` lifted out of the conditional. Null-org-row inclusion behavior unchanged. Sentinel-UUID hack preserved.
+
+### Test Results
+
+| Test run | Result |
+|----------|--------|
+| `cd apps/api && npx jest src/modules/events` | 19 passed (2 suites) |
+| `cd apps/api && npx jest` (full suite) | 4314 passed, 20 skipped (pre-existing), 0 failed |
+| `npm run type-check` (`@perfana/api`) | 0 errors |
+| `npm run lint` (`@perfana/api`) | 0 errors, 59 pre-existing warnings (none introduced) |
+
+### Files changed
+
+- `apps/api/src/modules/events/events.service.ts` — import + 2 method migrations
+- `docs/superpowers/audits/2026-04-26-audit-decisions.md` — this file
+
+### Allowlist disposition
+
+The file **remains** in `.rbac-migration-allowlist.json` — the per-resource throw guard at line 113 (now 112 after the migration's net line reduction) still trips the lint rule. Same disposition as the metrics-sources bundle (C8); when Phase 3 introduces a generalized per-resource guard refactor (e.g., delegate to `canAccessResource`), this file can fully exit then.
