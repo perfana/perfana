@@ -4,6 +4,11 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
+## [0.2.47.23] - 2026-04-29
+
+### Refactored
+- **RBAC Phase 3c — `alert-tag-filters.service.ts` migration (Phase C13).** First Phase 3c PR to apply both migration tools (`withOrgFilter` and `canAccessResource`) to a single file. The `findAll` method (Bucket A list-filter) migrated to `withOrgFilter` + sentinel; the `findOne` method (Bucket B per-resource guard) migrated to `canAccessResource`. Demonstrates that one PR can cleanly use both tools when the file has both shapes — a useful precedent for future multi-bucket files where forcing one tool everywhere would either duplicate centralized policy (`withOrgFilter` for per-resource) or create N+1 query regressions (`canAccessResource` per-row). File exits the lint allowlist (sixth file to do so; allowlist 33 → 32). Burndown: Bucket A 40 → 41 of 127 (32.3%); Bucket B 2 → 3 of 14 (21.4%). All 4314 API tests pass; 0 type errors; 0 lint errors. Net +5 lines.
+
 ## [0.2.47.22] - 2026-04-29
 
 ### Refactored

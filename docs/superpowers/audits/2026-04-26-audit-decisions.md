@@ -6,11 +6,11 @@ Phase 3c rolls capabilities through every site listed below. Update these counts
 
 | Bucket | Total | Migrated | Remaining | % done |
 | --- | ---: | ---: | ---: | ---: |
-| A — bypass filter | 127 | 40 | 87 | 31.5% |
-| B — bypass guard | 14 | 2 | 12 | 14.3% |
+| A — bypass filter | 127 | 41 | 86 | 32.3% |
+| B — bypass guard | 14 | 3 | 11 | 21.4% |
 | Local `private isGlobalAdmin()` wrappers | 13 | 2 | 11 | 15.4% |
 
-**Lint enforcement:** `apps/api/.rbac-migration-allowlist.json` lists every file currently exempt from the `no-direct-is-global-admin` lint rule (33 files as of 2026-04-29). When a site is migrated, remove its file from the allowlist (the file may have multiple sites — only remove when the LAST one is migrated). Allowlist size IS the burndown.
+**Lint enforcement:** `apps/api/.rbac-migration-allowlist.json` lists every file currently exempt from the `no-direct-is-global-admin` lint rule (32 files as of 2026-04-29). When a site is migrated, remove its file from the allowlist (the file may have multiple sites — only remove when the LAST one is migrated). Allowlist size IS the burndown.
 
 **Date-bound revisit:** by **2026-08-01**, Phase 3c migration must be at least 50% complete (Bucket A + B combined: 70+ sites migrated). If not, re-evaluate the architecture or the priorities. "We forgot about it" is the failure mode this gate prevents.
 
@@ -839,3 +839,61 @@ The AWR module has no controller-level tests — the existing 402 tests cover pa
 ### Allowlist disposition
 
 This file **EXITS the allowlist** — zero direct `isGlobalAdmin` references after the migration. **Fifth file to fully exit** the allowlist since Phase 3c began (after `report-data-fetcher.service.ts` C6, `report-generation.service.ts` C7, `adapt.service.ts` C9, and `compare-presets.service.ts` C11). Allowlist size: 34 → 33.
+
+---
+
+## Phase C13 — Single file: `alert-tag-filters.service.ts` — first single-file migration to use BOTH `withOrgFilter` and `canAccessResource`
+
+**Audit date:** 2026-04-29
+**Scope:** Single-file migration. Small file (87 lines) with one Bucket A list-filter site and one Bucket B per-resource guard site. **First Phase 3c PR to apply both migration tools — `withOrgFilter` and `canAccessResource` — to a single file in one PR.** Useful as a reference for future multi-bucket files where both shapes coexist.
+**File re-verified:** `apps/api/src/modules/alerts/alert-tag-filters.service.ts`
+
+### Site Classification
+
+| Line | Method | Bucket | Tool |
+|------|--------|--------|------|
+| 17 | `findAll` | **A** — list-filter `if (!isAdmin) { load orgs; filter org_id IN OR IS NULL }` | `withOrgFilter` |
+| 40 | `findOne` | **B** — per-resource guard `if (!isGlobalAdmin && filter.organizationId) { isOrganizationMember; throw }` | `canAccessResource` |
+
+**Both sites migrated. File fully exits the allowlist.**
+
+### Migration shape
+
+**Bucket A site (`findAll`):** Same pattern as C8 metrics-sources, C10 events. The `org_id IN (...) OR IS NULL` clause and the empty-orgs sentinel-UUID hack are preserved verbatim — only the outer admin gate changes from `if (!isAdmin)` to `if (orgIds !== null)`.
+
+**Bucket B site (`findOne`):** Same pattern as C12 awr-reports. The original code had a subtlety: `if (!isGlobalAdmin(roles) && filter.organizationId)` — the `&& filter.organizationId` short-circuit meant filters with `null` org were allowed for non-admins (legacy backward compat by accident, since the membership check was skipped entirely). `canAccessResource` codifies this explicitly via its "Resource has no organization (legacy data)" branch — same observable behavior, different code structure.
+
+### Why split tools across the file
+
+For files where one method does list filtering and another does per-resource access, using one tool everywhere is the wrong call:
+
+- Forcing `findOne` to use `withOrgFilter` would require manually re-implementing the org-membership-check logic against `orgIds`. That's exactly what `canAccessResource` already does, and duplicating it loses the centralization benefit.
+- Forcing `findAll` to use `canAccessResource` per-row would turn a single SQL query with an `IN (...)` filter into N+1 membership checks. That's a real regression.
+
+The buckets exist for a reason. C13 demonstrates that one PR can cleanly use both.
+
+### Test Results
+
+| Test run | Result |
+|----------|--------|
+| `cd apps/api && npx jest` (full suite) | 4314 passed, 20 skipped (pre-existing), 0 failed |
+| `npm run type-check` (`@perfana/api`) | 0 errors |
+| `npm run lint` (`@perfana/api`) | 0 errors, 59 pre-existing warnings (none introduced) |
+
+The alerts module has no `.spec.ts` files; the alert-tag-filters service is exercised in production via its controller endpoints but not unit-tested directly. No spec changes needed.
+
+### Net diff
+
+- Lines removed: 8
+- Lines added: 13
+- **Net +5 lines.** Same shape and same growth-magnitude as C12 awr-reports — the explanatory comment block in front of the `canAccessResource` call adds the lines. Acceptable trade for centralized policy.
+
+### Files changed
+
+- `apps/api/src/modules/alerts/alert-tag-filters.service.ts` — imports + 2 site migrations
+- `apps/api/.rbac-migration-allowlist.json` — remove the file entry
+- `docs/superpowers/audits/2026-04-26-audit-decisions.md` — this file
+
+### Allowlist disposition
+
+This file **EXITS the allowlist** — zero direct `isGlobalAdmin` references after the migration. **Sixth file to fully exit** the allowlist since Phase 3c began (after `report-data-fetcher.service.ts` C6, `report-generation.service.ts` C7, `adapt.service.ts` C9, `compare-presets.service.ts` C11, and `awr-reports.controller.ts` C12). Allowlist size: 33 → 32.
