@@ -4,6 +4,11 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
+## [0.2.47.13] - 2026-04-29
+
+### Refactored
+- **Phase 3c — `ReportDataFetcherService` fully migrated to `withOrgFilter`; first file to exit the allowlist.** All 8 `isGlobalAdmin` sites in this 1810-line service were canonical Bucket A "filter bypass" sites — 100% canonical density, the strongest signal seen in the Phase 3c rollout. Adds a private `resolveOrgFilter(userId, roles, paramStart, alias)` helper that wraps `withOrgFilter` + the existing `buildOrganizationFilterClause`, used at 4 single-derivation sites (collapses each 11-line block to a single line). The 4 remaining sites use inline `withOrgFilter` directly: 2 share `orgIds` across multiple filter clauses (`getThroughputStats` triple-derivation, `getVirtualUserStats` double-derivation), 1 uses dynamic per-iteration paramIdx in a loop (`getMetricsTimeSeries`), 1 has a custom `EXISTS(...)` clause shape (`getAvailableMetricsPanels`). Behavior is unchanged — the `!userId` short-circuit (internal/system call bypass) is preserved everywhere. Net diff: -29 lines despite adding the new helper (76 removed, 47 added). The file now contains zero direct `isGlobalAdmin` references and has been **removed from `.rbac-migration-allowlist.json`** — first file to exit the allowlist since Phase 3c began. Allowlist size: 38 → 37. Audit progress: Bucket A migrated 10 → 18 of 127 (14.2%). See `docs/superpowers/audits/2026-04-26-audit-decisions.md` for the full per-site classification.
+
 ## [0.2.47.12] - 2026-04-29
 
 ### Refactored

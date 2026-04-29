@@ -6,7 +6,7 @@ Phase 3c rolls capabilities through every site listed below. Update these counts
 
 | Bucket | Total | Migrated | Remaining | % done |
 | --- | ---: | ---: | ---: | ---: |
-| A — bypass filter | 127 | 10 | 117 | 7.9% |
+| A — bypass filter | 127 | 18 | 109 | 14.2% |
 | B — bypass guard | 14 | 0 | 14 | 0% |
 | Local `private isGlobalAdmin()` wrappers | 13 | 0 | 13 | 0% |
 
@@ -335,3 +335,83 @@ Also fixed: `findAll` previously logged ` (admin)` vs ` (filtered by organizatio
 ### Allowlist disposition
 
 The file **remains** in `.rbac-migration-allowlist.json` — the 2 non-canonical `isGlobalAdmin` sites (per-resource guard at line 138, debug-log-only at line 290) still trip the lint rule. Same disposition as every prior Phase 3c migration.
+
+---
+
+## Phase C6 — Single file: `report-data-fetcher.service.ts`
+
+**Audit date:** 2026-04-29
+**Scope:** Single-file migration. The signal scan flagged this file as the **highest-density target outside test-runs hot path** — every `isGlobalAdmin` site paired 1:1 with a `getAccessibleOrganizations` call (8/8 = 100% canonical density), the strongest signal seen so far in Phase 3c.
+**File re-verified:** `apps/api/src/modules/reports/services/report-data-fetcher.service.ts`
+
+### Site Classification
+
+All 8 `isGlobalAdmin` sites are **CANONICAL Bucket A — `skipOrgFilter` variant.** The shape across all 8 was uniform:
+
+```typescript
+const skipOrgFilter = !userId || this.authzService.isGlobalAdmin(roles);
+let organizationIds: string[] = [];
+if (!skipOrgFilter) {
+  organizationIds = await this.authzService.getAccessibleOrganizations(userId);
+}
+const orgFilter = !skipOrgFilter
+  ? this.buildOrganizationFilterClause(N, organizationIds, alias)
+  : { clause: '', params: [] };
+```
+
+The `!userId` short-circuit captures internal/system calls (anonymous/non-user-context invocations bypass org filtering). The `isGlobalAdmin(roles)` short-circuit is the standard admin bypass.
+
+| Line | Method | Variant | Action |
+|------|--------|---------|--------|
+| 381 | `getRampUpCutoffTime` | Single derivation, paramStart=2 | Migrate via `resolveOrgFilter` |
+| 424 | `getScenarioDataFromDatabase` | Single derivation, paramStart=3 | Migrate via `resolveOrgFilter` |
+| 527 | `getApdexData` | Single derivation, paramStart=4 | Migrate via `resolveOrgFilter` |
+| 753 | `getThroughputStats` | **Triple derivation** (orgFilter + orgFilterCte + orgFilterJoin), shared organizationIds, paramStart=4 | Migrate inline via `withOrgFilter` |
+| 914 | `getVirtualUserStats` | **Double derivation** (orgFilter + orgFilterJoinClause), shared organizationIds, paramStart=4 | Migrate inline via `withOrgFilter` |
+| 1558 | `getRecentTestRuns` | Single derivation, paramStart=5 | Migrate via `resolveOrgFilter` |
+| 1679 | `getMetricsTimeSeries` | Loop over panels with dynamic paramIdx per iteration | Migrate inline via `withOrgFilter` |
+| 1772 | `getAvailableMetricsPanels` | Custom `EXISTS(...)` orgClause shape, organizationIds resolved inside the `if` block, paramStart=2 | Migrate inline via `withOrgFilter` |
+
+**Canonical count: 8 of 8 (100%).** Every site was a list-filter bypass — no debug-log-only, no per-resource guards, no custom guard helpers.
+
+### Migration approach
+
+Two-tier strategy:
+
+1. **New private helper `resolveOrgFilter(userId, roles, paramStart, alias)`** — wraps `withOrgFilter` + the existing `buildOrganizationFilterClause` for the most common case (single derivation + no special clause shape). Returns `{ clause, params }` directly. Used at 4 sites (single-derivation, no custom shape).
+
+2. **Inline `withOrgFilter`** at 4 sites that don't fit `resolveOrgFilter`'s assumption: multi-derivation sites that share `orgIds` across multiple filter clauses (753, 914), and sites with custom clause shapes (1679 loop, 1772 EXISTS). These replace `skipOrgFilter` with `orgIds === null` and reuse `orgIds` as needed.
+
+`resolveOrgFilter` (helper, ~11 lines):
+```typescript
+private async resolveOrgFilter(userId, roles, paramStartIndex, testRunAlias = 'tr') {
+  if (!userId) return { clause: '', params: [] };
+  const orgIds = await withOrgFilter(userId, roles, this.authzService);
+  if (orgIds === null) return { clause: '', params: [] };
+  return this.buildOrganizationFilterClause(paramStartIndex, orgIds, testRunAlias);
+}
+```
+
+### Test Results
+
+| Test run | Result |
+|----------|--------|
+| `cd apps/api && npx jest src/modules/reports` | 446 passed (16 suites) |
+| `cd apps/api && npx jest` (full suite) | 4314 passed, 20 skipped (pre-existing), 0 failed |
+| `npm run type-check` | 8/8 tasks successful, 0 errors |
+| `npm run lint` (`@perfana/api`) | 0 errors, 59 pre-existing warnings (none introduced) |
+
+### Net diff
+
+- Lines removed: 76
+- Lines added: 47 (including the 17-line `resolveOrgFilter` helper)
+- **Net -29 lines** despite adding the new helper
+
+### Files changed
+
+- `apps/api/src/modules/reports/services/report-data-fetcher.service.ts` — import + new `resolveOrgFilter` helper + 8 site migrations
+- `docs/superpowers/audits/2026-04-26-audit-decisions.md` — this file
+
+### Allowlist disposition
+
+This file **EXITS the allowlist** — the 8 migrated sites were the only `isGlobalAdmin` calls in the file. After this PR, the file has zero direct `isGlobalAdmin` references, so the lint rule's exemption can be removed. **First file to fully exit the allowlist** since the Phase 3c rollout began. Allowlist size: 38 → 37.

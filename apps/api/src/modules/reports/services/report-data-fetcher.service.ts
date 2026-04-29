@@ -3,6 +3,7 @@ import { InjectRepository } from '@nestjs/typeorm';
 import { Repository, DataSource } from 'typeorm';
 import { TestRun } from '@perfana/shared';
 import { AuthorizationService } from '../../../common/services/authorization.service';
+import { withOrgFilter } from '../../../common/utils/with-org-filter';
 
 /** SLO check result summary for header renderer */
 export interface SloSummary {
@@ -362,6 +363,25 @@ export class ReportDataFetcherService {
   }
 
   /**
+   * Resolve an organization filter clause for a query, accounting for anonymous
+   * (no userId — internal/system calls) and global-admin bypass paths.
+   *
+   * Returns an empty clause when filtering should be skipped (anonymous OR admin),
+   * and the org-scoped clause + params otherwise.
+   */
+  private async resolveOrgFilter(
+    userId: string,
+    roles: string[],
+    paramStartIndex: number,
+    testRunAlias: string = 'tr',
+  ): Promise<{ clause: string; params: string[] }> {
+    if (!userId) return { clause: '', params: [] };
+    const orgIds = await withOrgFilter(userId, roles, this.authzService);
+    if (orgIds === null) return { clause: '', params: [] };
+    return this.buildOrganizationFilterClause(paramStartIndex, orgIds, testRunAlias);
+  }
+
+  /**
    * Get ramp-up cutoff time for a test run
    * @param testRunId - Test run ID
    * @param excludeRampUp - Whether to exclude ramp-up period
@@ -378,16 +398,7 @@ export class ReportDataFetcherService {
     if (!excludeRampUp) return null;
 
     // Internal/system calls (no userId) or admin users bypass org filtering
-    const skipOrgFilter = !userId || this.authzService.isGlobalAdmin(roles);
-
-    let organizationIds: string[] = [];
-    if (!skipOrgFilter) {
-      organizationIds = await this.authzService.getAccessibleOrganizations(userId);
-    }
-
-    const orgFilter = !skipOrgFilter
-      ? this.buildOrganizationFilterClause(2, organizationIds, 'tr')
-      : { clause: '', params: [] };
+    const orgFilter = await this.resolveOrgFilter(userId, roles, 2, 'tr');
 
     const query = `
       SELECT tr.start_time, tr.ramp_up
@@ -421,17 +432,8 @@ export class ReportDataFetcherService {
     roles: string[] = [],
   ): Promise<ScenarioData | null> {
     try {
-      const skipOrgFilter = !userId || this.authzService.isGlobalAdmin(roles);
-
-      let organizationIds: string[] = [];
-      if (!skipOrgFilter) {
-        organizationIds = await this.authzService.getAccessibleOrganizations(userId);
-      }
-
       // Build organization filter for test_run validation
-      const orgFilter = !skipOrgFilter
-        ? this.buildOrganizationFilterClause(3, organizationIds, 'tr')
-        : { clause: '', params: [] };
+      const orgFilter = await this.resolveOrgFilter(userId, roles, 3, 'tr');
 
       // Query transactions for this test run and scenario with organization filtering
       const query = `
@@ -524,13 +526,6 @@ export class ReportDataFetcherService {
     roles: string[] = [],
   ): Promise<ApdexData | null> {
     try {
-      const skipOrgFilter = !userId || this.authzService.isGlobalAdmin(roles);
-
-      let organizationIds: string[] = [];
-      if (!skipOrgFilter) {
-        organizationIds = await this.authzService.getAccessibleOrganizations(userId);
-      }
-
       const testRunId = testRun.testRunId;
 
       // Get ramp-up cutoff time if needed (pass userId/roles for org filtering)
@@ -539,9 +534,7 @@ export class ReportDataFetcherService {
       // Build organization filter for queries
       // Base params are: [testRunId, excludeRampUp, cutoffTime] = indices 1, 2, 3
       // Organization params start at index 4
-      const orgFilter = !skipOrgFilter
-        ? this.buildOrganizationFilterClause(4, organizationIds, 'tr')
-        : { clause: '', params: [] };
+      const orgFilter = await this.resolveOrgFilter(userId, roles, 4, 'tr');
 
       // Note: apdexThreshold parameter no longer used in query - we fetch per-transaction thresholds from DB
       const queryParams = cutoffTime
@@ -750,28 +743,23 @@ export class ReportDataFetcherService {
     roles: string[] = [],
   ): Promise<ThroughputStats> {
     try {
-      const skipOrgFilter = !userId || this.authzService.isGlobalAdmin(roles);
-
-      // Load organizations from AuthorizationService for non-admin/non-system users
-      let organizationIds: string[] = [];
-      if (!skipOrgFilter) {
-        organizationIds = await this.authzService.getAccessibleOrganizations(userId);
-      }
+      // Internal/system calls (no userId) or admin users bypass org filtering
+      const orgIds = userId ? await withOrgFilter(userId, roles, this.authzService) : null;
 
       // Build organization filter for test_run validation
       // Base params are: [testRunId, excludeRampUp, cutoffTime] = indices 1, 2, 3
       // Organization params start at index 4
-      const orgFilter = !skipOrgFilter
-        ? this.buildOrganizationFilterClause(4, organizationIds, 'tr')
+      const orgFilter = orgIds !== null
+        ? this.buildOrganizationFilterClause(4, orgIds, 'tr')
         : { clause: '', params: [] };
 
       // Build the org filter CTE clause using tr.organization_id directly
-      const orgFilterCte = !skipOrgFilter
-        ? organizationIds.length > 0
+      const orgFilterCte = orgIds !== null
+        ? orgIds.length > 0
           ? `, org_filter AS (
               SELECT tr.test_run_id FROM test_runs tr
               WHERE tr.test_run_id = $1
-                AND (tr.organization_id IN (${organizationIds.map((_, i) => `$${4 + i}`).join(', ')}) OR tr.organization_id IS NULL)
+                AND (tr.organization_id IN (${orgIds.map((_, i) => `$${4 + i}`).join(', ')}) OR tr.organization_id IS NULL)
             )`
           : `, org_filter AS (
               SELECT tr.test_run_id FROM test_runs tr
@@ -779,7 +767,7 @@ export class ReportDataFetcherService {
             )`
         : '';
 
-      const orgFilterJoin = !skipOrgFilter
+      const orgFilterJoin = orgIds !== null
         ? 'AND EXISTS (SELECT 1 FROM org_filter)'
         : '';
 
@@ -911,28 +899,23 @@ export class ReportDataFetcherService {
     roles: string[] = [],
   ): Promise<VirtualUserStats> {
     try {
-      const skipOrgFilter = !userId || this.authzService.isGlobalAdmin(roles);
-
-      // Load organizations from AuthorizationService for non-admin/non-system users
-      let organizationIds: string[] = [];
-      if (!skipOrgFilter) {
-        organizationIds = await this.authzService.getAccessibleOrganizations(userId);
-      }
+      // Internal/system calls (no userId) or admin users bypass org filtering
+      const orgIds = userId ? await withOrgFilter(userId, roles, this.authzService) : null;
 
       // Build organization filter for test_run validation
       // Base params are: [testRunId, excludeRampUp, cutoffTime] = indices 1, 2, 3
       // Organization params start at index 4
-      const orgFilter = !skipOrgFilter
-        ? this.buildOrganizationFilterClause(4, organizationIds, 'tr')
+      const orgFilter = orgIds !== null
+        ? this.buildOrganizationFilterClause(4, orgIds, 'tr')
         : { clause: '', params: [] };
 
       // Build organization filter using tr.organization_id directly
-      const orgFilterJoinClause = !skipOrgFilter
-        ? organizationIds.length > 0
+      const orgFilterJoinClause = orgIds !== null
+        ? orgIds.length > 0
           ? `AND EXISTS (
               SELECT 1 FROM test_runs tr
               WHERE tr.test_run_id = vu.test_run_id
-                AND (tr.organization_id IN (${organizationIds.map((_, i) => `$${4 + i}`).join(', ')}) OR tr.organization_id IS NULL)
+                AND (tr.organization_id IN (${orgIds.map((_, i) => `$${4 + i}`).join(', ')}) OR tr.organization_id IS NULL)
             )`
           : `AND EXISTS (
               SELECT 1 FROM test_runs tr
@@ -1555,16 +1538,7 @@ export class ReportDataFetcherService {
   ): Promise<TrendsData | null> {
     try {
       const safeMaxRuns = Math.max(1, Math.min(Math.floor(maxRuns), 50));
-      const skipOrgFilter = !userId || this.authzService.isGlobalAdmin(roles);
-
-      let organizationIds: string[] = [];
-      if (!skipOrgFilter) {
-        organizationIds = await this.authzService.getAccessibleOrganizations(userId);
-      }
-
-      const orgFilter = !skipOrgFilter
-        ? this.buildOrganizationFilterClause(5, organizationIds, 'tr')
-        : { clause: '', params: [] };
+      const orgFilter = await this.resolveOrgFilter(userId, roles, 5, 'tr');
 
       // Fetch recent completed runs for the same system/environment/workload
       const query = `
@@ -1656,11 +1630,8 @@ export class ReportDataFetcherService {
         return [];
       }
 
-      const skipOrgFilter = !userId || this.authzService.isGlobalAdmin(roles);
-      let organizationIds: string[] = [];
-      if (!skipOrgFilter) {
-        organizationIds = await this.authzService.getAccessibleOrganizations(userId);
-      }
+      // Internal/system calls (no userId) or admin users bypass org filtering
+      const orgIds = userId ? await withOrgFilter(userId, roles, this.authzService) : null;
 
       const results: MetricsTimeSeriesPanel[] = [];
 
@@ -1689,8 +1660,8 @@ export class ReportDataFetcherService {
         }
 
         // Org filter via test_runs join
-        if (!skipOrgFilter) {
-          const orgFilter = this.buildOrganizationFilterClause(paramIdx, organizationIds, 'tr');
+        if (orgIds !== null) {
+          const orgFilter = this.buildOrganizationFilterClause(paramIdx, orgIds, 'tr');
           if (orgFilter.clause) {
             conditions.push(`EXISTS (SELECT 1 FROM test_runs tr WHERE tr.test_run_id = dm.test_run_id ${orgFilter.clause})`);
             params.push(...orgFilter.params);
@@ -1749,13 +1720,13 @@ export class ReportDataFetcherService {
     roles: string[] = [],
   ): Promise<MetricsPanelSelector[]> {
     try {
-      const skipOrgFilter = !userId || this.authzService.isGlobalAdmin(roles);
+      // Internal/system calls (no userId) or admin users bypass org filtering
+      const orgIds = userId ? await withOrgFilter(userId, roles, this.authzService) : null;
       let orgClause = '';
       const params: unknown[] = [testRunId];
 
-      if (!skipOrgFilter) {
-        const organizationIds = await this.authzService.getAccessibleOrganizations(userId);
-        const orgFilter = this.buildOrganizationFilterClause(2, organizationIds, 'tr');
+      if (orgIds !== null) {
+        const orgFilter = this.buildOrganizationFilterClause(2, orgIds, 'tr');
         if (orgFilter.clause) {
           orgClause = `AND EXISTS (SELECT 1 FROM test_runs tr WHERE tr.test_run_id = dm.test_run_id ${orgFilter.clause})`;
           params.push(...orgFilter.params);
