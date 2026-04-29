@@ -6,7 +6,7 @@ Phase 3c rolls capabilities through every site listed below. Update these counts
 
 | Bucket | Total | Migrated | Remaining | % done |
 | --- | ---: | ---: | ---: | ---: |
-| A — bypass filter | 127 | 5 | 122 | 3.9% |
+| A — bypass filter | 127 | 7 | 120 | 5.5% |
 | B — bypass guard | 14 | 0 | 14 | 0% |
 | Local `private isGlobalAdmin()` wrappers | 13 | 0 | 13 | 0% |
 
@@ -208,3 +208,84 @@ The `orgIds === null` predicate preserves the previous `isGlobalAdmin=true|false
 ### Allowlist disposition
 
 The 3 Grafana service files **remain** in `.rbac-migration-allowlist.json`. Per the migration rule, files only exit the allowlist once the LAST direct `isGlobalAdmin` call has been removed; the 18 non-canonical sites identified above (debug-log captures, per-resource guards, custom-guard helpers) are out of scope for this PR. Same disposition as `dynatrace.service.ts` after the pilot.
+
+---
+
+## Phase C4 — Bundle: Pyroscope + Tracing instances
+
+**Audit date:** 2026-04-29
+**Scope:** Two single-service modules sharing the same "instance" CRUD shape as `grafana-instances.service.ts`. Migrated as one PR.
+**Files re-verified:**
+- `apps/api/src/modules/pyroscope/pyroscope-instances.service.ts`
+- `apps/api/src/modules/tracing-instances/tracing-instances.service.ts`
+
+### Site Classification Tables
+
+**`pyroscope-instances.service.ts`** (8 lines flagged):
+
+| Line | Method | Classification | Action |
+|------|--------|---------------|--------|
+| 49 | `requireOrgAdmin` (private) | CUSTOM-GUARD-HELPER — admin-bypass inside a private "any-org admin" guard | Leave |
+| 85 | `findAll` | **CANONICAL** Bucket A | Migrate |
+| 144 | `findOne` | PER-RESOURCE — `if (!isAdmin && entity.organizationId)` checks accessible orgs, throws NotFoundException | Leave |
+| 186 | `create` | DEBUG-LOG-ONLY (org-admin guard handled by `requireOrgAdmin`) | Leave |
+| 226 | `update` | PER-RESOURCE — same per-resource org check as `findOne` | Leave |
+| 280 | `remove` | PER-RESOURCE — same shape as `update` | Leave |
+| 325 | `testConnection` | DEBUG-LOG-ONLY | Leave |
+| 362 | `testConnectionWithParams` | DEBUG-LOG-ONLY | Leave |
+
+**`tracing-instances.service.ts`** (8 lines flagged):
+
+| Line | Method | Classification | Action |
+|------|--------|---------------|--------|
+| 40 | `requireOrgAdmin` (private) | CUSTOM-GUARD-HELPER — admin-bypass inside a private "any-org admin" guard | Leave |
+| 77 | `findAll` | **CANONICAL** Bucket A | Migrate |
+| 136 | `findOne` | PER-RESOURCE | Leave |
+| 178 | `create` | DEBUG-LOG-ONLY | Leave |
+| 219 | `update` | PER-RESOURCE | Leave |
+| 274 | `remove` | PER-RESOURCE | Leave |
+| 319 | `testConnection` | DEBUG-LOG-ONLY | Leave |
+| 356 | `testConnectionWithParams` | DEBUG-LOG-ONLY | Leave |
+
+**Canonical count: 2 of 16.** The remaining 14 sites are debug-log-only captures, per-resource throw guards, or admin-bypass branches inside private custom guard helpers — same disposition as the dynatrace and grafana migrations.
+
+### Migration shape
+
+Both `findAll` methods had a 3-branch pattern (`organizationId && !isAdmin` / `organizationId && isAdmin` / `!isAdmin`) where the first branch made an extra `getAccessibleOrganizations` call to validate the requested org. Migrating to `withOrgFilter` collapsed this to 2 branches and eliminated the duplicate call:
+
+```typescript
+// before — 3 branches, 2 calls to getAccessibleOrganizations
+const isAdmin = this.authzService.isGlobalAdmin(roles);
+if (organizationId && !isAdmin) { /* validate access via accessibleOrganizations.includes */ filter; }
+else if (organizationId && isAdmin) { filter; }
+else if (!isAdmin) { /* load accessibleOrganizations again */ filter to accessible orgs; }
+
+// after — 2 branches, 1 call
+const orgIds = await withOrgFilter(userId, roles, this.authzService);
+if (organizationId) {
+  if (orgIds !== null && !orgIds.includes(organizationId)) return [];
+  filter;
+} else if (orgIds !== null) { filter to orgIds; }
+```
+
+Behavior verified by tracing the 5 input cases (admin / non-admin × with-orgId / no-orgId / no-access-orgId) — output matches the original branch logic exactly.
+
+### Test Results
+
+| Test run | Result |
+|----------|--------|
+| `cd apps/api && npx jest` (full suite) | 4314 passed, 20 skipped (pre-existing), 0 failed |
+| `npm run type-check` | 8/8 tasks successful, 0 errors |
+| `npm run lint` (`@perfana/api`) | 0 errors, 59 pre-existing warnings (none introduced) |
+
+Note: neither `pyroscope-instances` nor `tracing-instances` has dedicated `.spec.ts` files. Coverage gap is pre-existing and out of scope; the broader API suite covers AuthorizationService and the helper.
+
+### Files changed
+
+- `apps/api/src/modules/pyroscope/pyroscope-instances.service.ts` — import + `findAll` migration
+- `apps/api/src/modules/tracing-instances/tracing-instances.service.ts` — import + `findAll` migration
+- `docs/superpowers/audits/2026-04-26-audit-decisions.md` — this file
+
+### Allowlist disposition
+
+Both files **remain** in `.rbac-migration-allowlist.json` — the 14 non-canonical `isGlobalAdmin` sites still trip the lint rule. Same disposition as the dynatrace and grafana bundles.

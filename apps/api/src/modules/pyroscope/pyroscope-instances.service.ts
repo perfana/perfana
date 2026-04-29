@@ -3,6 +3,7 @@ import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { PyroscopeInstance as PyroscopeInstanceEntity } from '../../entities';
 import { AuthorizationService } from '../../common/services/authorization.service';
+import { withOrgFilter } from '../../common/utils/with-org-filter';
 import { CreatePyroscopeInstanceDto, UpdatePyroscopeInstanceDto } from './dto/pyroscope-instance.dto';
 
 export interface PyroscopeInstance {
@@ -81,31 +82,28 @@ export class PyroscopeInstancesService {
    */
   async findAll(userId: string, roles: string[], query?: PyroscopeInstanceQuery, organizationId?: string): Promise<PyroscopeInstance[]> {
     try {
-      // Log authorization context for debugging
-      const isAdmin = this.authzService.isGlobalAdmin(roles);
-      this.logger.debug(`findAll: userId=${userId}, isGlobalAdmin=${isAdmin}, organizationId=${organizationId}`);
+      // Resolve accessible org IDs: null means global admin (no filter needed)
+      const orgIds = await withOrgFilter(userId, roles, this.authzService);
+      this.logger.debug(`findAll: userId=${userId}, isGlobalAdmin=${orgIds === null}, organizationId=${organizationId}`);
 
       const queryBuilder = this.pyroscopeInstanceRepo
         .createQueryBuilder('pi')
         .orderBy('pi.created_at', 'DESC');
 
       // Organization filtering
-      if (organizationId && !isAdmin) {
-        // Validate user has access to the requested org
-        const accessibleOrganizations = await this.authzService.getAccessibleOrganizations(userId);
-        if (!accessibleOrganizations.includes(organizationId)) {
+      if (organizationId) {
+        // Non-admin must have access to the requested org; admin always allowed
+        if (orgIds !== null && !orgIds.includes(organizationId)) {
           return [];
         }
         queryBuilder.andWhere('pi.organization_id = :organizationId', { organizationId });
-      } else if (organizationId && isAdmin) {
-        queryBuilder.andWhere('pi.organization_id = :organizationId', { organizationId });
-      } else if (!isAdmin) {
-        const accessibleOrganizations = await this.authzService.getAccessibleOrganizations(userId);
+      } else if (orgIds !== null) {
+        // Non-admin: filter to accessible orgs OR legacy instances (null organization_id)
         queryBuilder.andWhere(
           '(pi.organization_id IN (:...orgIds) OR pi.organization_id IS NULL)',
           {
-            orgIds: accessibleOrganizations.length > 0
-              ? accessibleOrganizations
+            orgIds: orgIds.length > 0
+              ? orgIds
               : ['00000000-0000-0000-0000-000000000000'] // Dummy UUID when user has no orgs
           }
         );
