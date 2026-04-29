@@ -3,6 +3,8 @@ import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { AlertTagFilter } from '../../entities';
 import { AuthorizationService } from '../../common/services/authorization.service';
+import { withOrgFilter } from '../../common/utils/with-org-filter';
+import { OwnedResource } from '@perfana/shared';
 import { CreateAlertTagFilterDto, UpdateAlertTagFilterDto } from './dto/alert-tag-filter.dto';
 
 @Injectable()
@@ -14,14 +16,13 @@ export class AlertTagFiltersService {
   ) {}
 
   async findAll(userId: string, roles: string[]): Promise<AlertTagFilter[]> {
-    const isAdmin = this.authzService.isGlobalAdmin(roles);
+    const orgIds = await withOrgFilter(userId, roles, this.authzService);
 
     const qb = this.filterRepo
       .createQueryBuilder('f')
       .orderBy('f.created_at', 'DESC');
 
-    if (!isAdmin) {
-      const orgIds = await this.authzService.getAccessibleOrganizations(userId);
+    if (orgIds !== null) {
       qb.andWhere(
         '(f.organization_id IN (:...orgIds) OR f.organization_id IS NULL)',
         { orgIds: orgIds.length > 0 ? orgIds : ['00000000-0000-0000-0000-000000000000'] },
@@ -37,11 +38,15 @@ export class AlertTagFiltersService {
       throw new NotFoundException(`Alert tag filter ${id} not found`);
     }
 
-    if (!this.authzService.isGlobalAdmin(roles) && filter.organizationId) {
-      const hasAccess = await this.authzService.isOrganizationMember(userId, filter.organizationId);
-      if (!hasAccess) {
-        throw new NotFoundException(`Alert tag filter ${id} not found`);
-      }
+    // Delegate the admin / legacy-null-org / membership decision to AuthorizationService.
+    // team_id is omitted to preserve the prior behavior of not checking team membership for
+    // alert tag filters. created_by is unused by canAccessResource (only canModifyResource reads it).
+    const result = await this.authzService.canAccessResource(userId, roles, {
+      organization_id: filter.organizationId,
+      created_by: '',
+    } as OwnedResource);
+    if (!result.allowed) {
+      throw new NotFoundException(`Alert tag filter ${id} not found`);
     }
 
     return filter;
