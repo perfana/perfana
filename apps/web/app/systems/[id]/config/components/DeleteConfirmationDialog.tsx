@@ -29,6 +29,7 @@ interface DeleteConfirmationDialogProps {
   itemName?: string;
   loading?: boolean;
   grafanaOption?: GrafanaDeleteOption;
+  error?: string | null;
 }
 
 export default function DeleteConfirmationDialog({
@@ -40,6 +41,7 @@ export default function DeleteConfirmationDialog({
   itemName,
   loading = false,
   grafanaOption,
+  error = null,
 }: DeleteConfirmationDialogProps) {
   const handleConfirm = async () => {
     await onConfirm();
@@ -49,6 +51,11 @@ export default function DeleteConfirmationDialog({
     <Dialog open={open} onClose={onClose} maxWidth="sm" fullWidth>
       <DialogTitle>{title}</DialogTitle>
       <DialogContent>
+        {error && (
+          <Alert severity="error" sx={{ mb: 2 }}>
+            {error}
+          </Alert>
+        )}
         <Typography>
           {message}
         </Typography>

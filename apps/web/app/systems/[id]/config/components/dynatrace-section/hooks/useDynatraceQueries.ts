@@ -30,6 +30,7 @@ export function useDynatraceQueries({
   const [queries, setQueries] = useState<DynatraceQueryLocal[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [actionError, setActionError] = useState<string | null>(null);
 
   // Dialog states
   const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
@@ -94,6 +95,7 @@ export function useDynatraceQueries({
 
   // Add query handlers
   const handleAddQuery = useCallback(() => {
+    setActionError(null);
     setAddDialogOpen(true);
   }, []);
 
@@ -101,12 +103,12 @@ export function useDynatraceQueries({
     async (data: CreateDynatraceQueryDto) => {
       try {
         setAddLoading(true);
-        setError(null);
+        setActionError(null);
         await createDynatraceQuery(data);
         await fetchQueries();
         setAddDialogOpen(false);
       } catch (err) {
-        setError(
+        setActionError(
           err && typeof err === 'object' && 'message' in err
             ? (err as Error).message
             : 'Failed to create Dynatrace query'
@@ -120,6 +122,7 @@ export function useDynatraceQueries({
 
   // Import handlers
   const handleImportDashboard = useCallback(() => {
+    setActionError(null);
     setImportDialogOpen(true);
   }, []);
 
@@ -133,6 +136,7 @@ export function useDynatraceQueries({
     ) => {
       try {
         setImportLoading(true);
+        setActionError(null);
 
         // Check for existing records with the same dashboard_label
         const existingQuery = queries.find(
@@ -168,7 +172,7 @@ export function useDynatraceQueries({
         await fetchQueries();
         setImportDialogOpen(false);
       } catch (err) {
-        setError(
+        setActionError(
           err && typeof err === 'object' && 'message' in err
             ? (err as Error).message
             : 'Failed to import queries'
@@ -183,6 +187,7 @@ export function useDynatraceQueries({
   // Edit handlers
   const handleEditQuery = useCallback(async (query: DynatraceQueryLocal) => {
     try {
+      setActionError(null);
       const fullQuery = await fetchDynatraceQueryById(query.id);
       setEditingQuery(fullQuery);
       setEditDialogOpen(true);
@@ -195,13 +200,13 @@ export function useDynatraceQueries({
     async (id: string, data: UpdateDynatraceQueryDto) => {
       try {
         setEditLoading(true);
-        setError(null);
+        setActionError(null);
         await updateDynatraceQuery(id, data);
         await fetchQueries();
         setEditDialogOpen(false);
         setEditingQuery(null);
       } catch (err) {
-        setError(
+        setActionError(
           err && typeof err === 'object' && 'message' in err
             ? (err as Error).message
             : 'Failed to update Dynatrace query'
@@ -215,6 +220,7 @@ export function useDynatraceQueries({
 
   // Delete handlers
   const handleDeleteQuery = useCallback((query: DynatraceQueryLocal) => {
+    setActionError(null);
     setDeletingQuery(query);
     setDeleteDialogOpen(true);
   }, []);
@@ -224,13 +230,13 @@ export function useDynatraceQueries({
 
     try {
       setDeleteLoading(true);
-      setError(null);
+      setActionError(null);
       await deleteDynatraceQuery(deletingQuery.id);
       await fetchQueries();
       setDeleteDialogOpen(false);
       setDeletingQuery(null);
     } catch (err) {
-      setError(
+      setActionError(
         err && typeof err === 'object' && 'message' in err
           ? (err as Error).message
           : 'Failed to delete Dynatrace query'
@@ -267,6 +273,7 @@ export function useDynatraceQueries({
 
   // Batch delete handlers
   const handleBatchDeleteClick = useCallback(() => {
+    setActionError(null);
     setBatchDeleteDialogOpen(true);
   }, []);
 
@@ -275,13 +282,13 @@ export function useDynatraceQueries({
 
     try {
       setDeleteLoading(true);
-      setError(null);
+      setActionError(null);
       await Promise.all(idsToDelete.map((id) => deleteDynatraceQuery(id)));
       await fetchQueries();
       setBatchDeleteDialogOpen(false);
       handleClearSelection();
     } catch (err) {
-      setError(
+      setActionError(
         err && typeof err === 'object' && 'message' in err
           ? (err as Error).message
           : 'Failed to delete some Dynatrace queries'
@@ -292,23 +299,28 @@ export function useDynatraceQueries({
   }, [selectedQueryIds, fetchQueries, handleClearSelection]);
 
   const handleBatchDeleteCancel = useCallback(() => {
+    setActionError(null);
     setBatchDeleteDialogOpen(false);
   }, []);
 
   // Dialog closers
   const closeDeleteDialog = useCallback(() => {
+    setActionError(null);
     setDeleteDialogOpen(false);
   }, []);
 
   const closeImportDialog = useCallback(() => {
+    setActionError(null);
     setImportDialogOpen(false);
   }, []);
 
   const closeAddDialog = useCallback(() => {
+    setActionError(null);
     setAddDialogOpen(false);
   }, []);
 
   const closeEditDialog = useCallback(() => {
+    setActionError(null);
     setEditDialogOpen(false);
     setEditingQuery(null);
   }, []);
@@ -318,6 +330,7 @@ export function useDynatraceQueries({
     queries,
     loading,
     error,
+    actionError,
     selectedQueryIds,
 
     // Dialog states

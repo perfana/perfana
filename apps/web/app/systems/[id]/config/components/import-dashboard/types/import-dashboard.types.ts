@@ -24,6 +24,7 @@ export interface ImportDashboardDialogProps {
   systemName: string;
   environment: string;
   loading?: boolean;
+  submitError?: string | null;
 }
 
 export interface ParseResult {

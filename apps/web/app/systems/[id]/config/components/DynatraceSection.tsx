@@ -176,6 +176,11 @@ export default function DynatraceSection({
           >
             <DialogTitle>Delete Multiple Dynatrace Queries</DialogTitle>
             <DialogContent>
+              {dynatraceQueries.actionError && (
+                <Alert severity="error" sx={{ mb: 2 }}>
+                  {dynatraceQueries.actionError}
+                </Alert>
+              )}
               <DialogContentText>
                 Are you sure you want to delete {dynatraceQueries.selectedQueryIds.size} quer
                 {dynatraceQueries.selectedQueryIds.size > 1 ? 'ies' : 'y'}? This action cannot be
@@ -223,6 +228,7 @@ export default function DynatraceSection({
         systemName={systemName}
         environment={selectedEnvironment}
         loading={dynatraceQueries.importLoading}
+        submitError={dynatraceQueries.actionError}
       />
 
       {/* Add Query Dialog */}
@@ -234,6 +240,7 @@ export default function DynatraceSection({
         environment={selectedEnvironment}
         workload={selectedWorkload}
         loading={dynatraceQueries.addLoading}
+        submitError={dynatraceQueries.actionError}
       />
 
       {/* Edit Query Dialog */}
@@ -243,6 +250,7 @@ export default function DynatraceSection({
         onEdit={dynatraceQueries.handleEditQuerySubmit}
         query={dynatraceQueries.editingQuery}
         loading={dynatraceQueries.editLoading}
+        submitError={dynatraceQueries.actionError}
       />
 
       {/* Delete Confirmation Dialog */}
@@ -254,6 +262,7 @@ export default function DynatraceSection({
         message="Are you sure you want to delete this Dynatrace query? This action cannot be undone."
         itemName={dynatraceQueries.deletingQuery?.panelTitle}
         loading={dynatraceQueries.deleteLoading}
+        error={dynatraceQueries.actionError}
       />
     </Paper>
   );
