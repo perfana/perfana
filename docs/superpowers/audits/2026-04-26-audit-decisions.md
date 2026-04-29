@@ -6,7 +6,7 @@ Phase 3c rolls capabilities through every site listed below. Update these counts
 
 | Bucket | Total | Migrated | Remaining | % done |
 | --- | ---: | ---: | ---: | ---: |
-| A — bypass filter | 127 | 7 | 120 | 5.5% |
+| A — bypass filter | 127 | 10 | 117 | 7.9% |
 | B — bypass guard | 14 | 0 | 14 | 0% |
 | Local `private isGlobalAdmin()` wrappers | 13 | 0 | 13 | 0% |
 
@@ -289,3 +289,49 @@ Note: neither `pyroscope-instances` nor `tracing-instances` has dedicated `.spec
 ### Allowlist disposition
 
 Both files **remain** in `.rbac-migration-allowlist.json` — the 14 non-canonical `isGlobalAdmin` sites still trip the lint rule. Same disposition as the dynatrace and grafana bundles.
+
+---
+
+## Phase C5 — Single file: `benchmark-query.service.ts`
+
+**Audit date:** 2026-04-29
+**Scope:** Single-file migration. The signal scan (`isGlobalAdmin` × `getAccessibleOrganizations` co-occurrence) flagged this file as the highest-density canonical Bucket A target outside the already-migrated services.
+**File re-verified:** `apps/api/src/modules/benchmarks/services/benchmark-query.service.ts`
+
+### Site Classification
+
+| Line | Method | Classification | Action |
+|------|--------|---------------|--------|
+| 48 | `findAll` | **CANONICAL** Bucket A — `if (!isAdmin) { load orgs; filter by sut.organization_id }` | Migrate |
+| 138 | `findOne` | PER-RESOURCE — `if (!isAdmin)` checks `isOrganizationMember` for the loaded row's SUT, returns null on deny | Leave |
+| 191 | `getSystemEnvironmentsAndWorkloads` | **CANONICAL** Bucket A — same shape as `findAll`, scoped to a single SUT | Migrate |
+| 242 | `getBenchmarkTagSyncStatus` | **CANONICAL** Bucket A — admin-vs-non-admin split with raw SQL parameterized by `orgIds` | Migrate |
+| 290 | `syncTagsWithApplicationDashboards` | DEBUG-LOG-ONLY (Phase 4 stub — operates on all benchmarks via stored procedure) | Leave |
+
+**Canonical count: 3 of 5.** Highest density per-file in this Phase 3c rollout so far (60% canonical vs ~5–25% in earlier bundles).
+
+### Migration shape
+
+The `findAll` and `getSystemEnvironmentsAndWorkloads` migrations follow the established pattern (swap `isAdmin = isGlobalAdmin / if (!isAdmin) { load orgs; filter }` → `orgIds = await withOrgFilter(...) / if (orgIds !== null) { filter }`).
+
+The `getBenchmarkTagSyncStatus` migration is the more interesting case: it has separate non-admin and admin code paths (raw SQL with `orgIds` parameter for non-admin, simpler raw SQL for admin). The `orgIds === null` predicate cleanly maps the original `if (!isAdmin)` branch to `if (orgIds !== null)` — no semantic change, the admin path on the `else`-equivalent runs unchanged.
+
+Also fixed: `findAll` previously logged ` (admin)` vs ` (filtered by organizations)` based on the now-removed `isAdmin` variable. Replaced with `orgIds === null` for the same observable behavior.
+
+### Test Results
+
+| Test run | Result |
+|----------|--------|
+| `cd apps/api && npx jest src/modules/benchmarks` | 116 passed (2 suites) |
+| `cd apps/api && npx jest` (full suite) | 4314 passed, 20 skipped (pre-existing), 0 failed |
+| `npm run type-check` | 8/8 tasks successful, 0 errors |
+| `npm run lint` (`@perfana/api`) | 0 errors, 59 pre-existing warnings (none introduced) |
+
+### Files changed
+
+- `apps/api/src/modules/benchmarks/services/benchmark-query.service.ts` — import + 3 method migrations
+- `docs/superpowers/audits/2026-04-26-audit-decisions.md` — this file
+
+### Allowlist disposition
+
+The file **remains** in `.rbac-migration-allowlist.json` — the 2 non-canonical `isGlobalAdmin` sites (per-resource guard at line 138, debug-log-only at line 290) still trip the lint rule. Same disposition as every prior Phase 3c migration.

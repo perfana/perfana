@@ -4,6 +4,11 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
+## [0.2.47.12] - 2026-04-29
+
+### Refactored
+- **Phase 3c — `BenchmarkQueryService` migrated to `withOrgFilter`.** Three canonical Bucket A "filter bypass" sites migrated: `findAll`, `getSystemEnvironmentsAndWorkloads`, and `getBenchmarkTagSyncStatus`. Highest density per-file in this rollout so far (3 of 5 isGlobalAdmin sites canonical, 60%). The `getBenchmarkTagSyncStatus` migration also collapsed an admin-vs-non-admin code split — both branches now share the same query path with the `orgIds === null` predicate gating org-scoped filtering. Behavior is unchanged. The per-resource guard in `findOne` and the Phase 4-stub `syncTagsWithApplicationDashboards` debug log stay inline, so the file remains in `.rbac-migration-allowlist.json`. Audit progress: Bucket A migrated 7 → 10 of 127 (7.9%). See `docs/superpowers/audits/2026-04-26-audit-decisions.md` for the full per-site classification.
+
 ## [0.2.47.11] - 2026-04-29
 
 ### Refactored
