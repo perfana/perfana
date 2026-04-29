@@ -8,6 +8,7 @@ import { ComparePresetResponseDto } from './dto/compare-preset-response.dto';
 import { PresetType, CompareSeriesConfig } from './dto/create-compare-preset.dto';
 import { ResourceNotFoundException } from '../../common/exceptions/business.exception';
 import { AuthorizationService } from '../../common/services/authorization.service';
+import { withOrgFilter } from '../../common/utils/with-org-filter';
 
 @Injectable()
 export class ComparePresetsService {
@@ -23,22 +24,18 @@ export class ComparePresetsService {
 
   /**
    * Validate that the user has access to a test run via organization membership.
-   * Loads organizations via AuthorizationService (not from ctx.organizations which is always empty).
+   * `orgIds === null` is the global-admin sentinel from `withOrgFilter` (bypass).
+   * `orgIds.length === 0` means a non-admin with no memberships (no access).
    */
   private async validateTestRunAccess(
     testRunId: string,
-    userId: string,
-    roles: string[],
+    orgIds: string[] | null,
   ): Promise<boolean> {
-    // Admins bypass all filtering
-    if (this.authzService.isGlobalAdmin(roles)) {
+    if (orgIds === null) {
       return true;
     }
 
-    const organizationIds = await this.authzService.getAccessibleOrganizations(userId);
-
-    // Non-admin users with no organization memberships have no access
-    if (organizationIds.length === 0) {
+    if (orgIds.length === 0) {
       return false;
     }
 
@@ -52,7 +49,7 @@ export class ComparePresetsService {
       LIMIT 1
     `;
 
-    const result = await this.testRunRepo.query(query, [testRunId, organizationIds]);
+    const result = await this.testRunRepo.query(query, [testRunId, orgIds]);
     return result && result.length > 0;
   }
 
@@ -61,18 +58,17 @@ export class ComparePresetsService {
     userId: string,
     roles: string[] = [],
   ): Promise<ComparePresetResponseDto> {
-    const isAdmin = this.authzService.isGlobalAdmin(roles);
-    this.logger.log(`Creating compare preset: ${createComparePresetDto.name}${isAdmin ? ' (admin)' : ''}`);
+    const orgIds = await withOrgFilter(userId, roles, this.authzService);
+    this.logger.log(`Creating compare preset: ${createComparePresetDto.name}${orgIds === null ? ' (admin)' : ''}`);
 
     try {
       // Validate access to referenced test runs for non-admin users
-      if (!isAdmin) {
+      if (orgIds !== null) {
         // Check baseline test run access
         if (createComparePresetDto.baseline_test_run_id) {
           const hasAccess = await this.validateTestRunAccess(
             createComparePresetDto.baseline_test_run_id,
-            userId,
-            roles,
+            orgIds,
           );
           if (!hasAccess) {
             throw new ResourceNotFoundException('TestRun', createComparePresetDto.baseline_test_run_id);
@@ -83,8 +79,7 @@ export class ComparePresetsService {
         if (createComparePresetDto.created_for_test_run_id) {
           const hasAccess = await this.validateTestRunAccess(
             createComparePresetDto.created_for_test_run_id,
-            userId,
-            roles,
+            orgIds,
           );
           if (!hasAccess) {
             throw new ResourceNotFoundException('TestRun', createComparePresetDto.created_for_test_run_id);
@@ -126,8 +121,8 @@ export class ComparePresetsService {
     roles: string[] = [],
     metricsSourceId?: string,
   ): Promise<ComparePresetResponseDto[]> {
-    const isAdmin = this.authzService.isGlobalAdmin(roles);
-    this.logger.log(`Fetching compare presets for user: ${userId}${isAdmin ? ' (admin)' : ''}`);
+    const orgIds = await withOrgFilter(userId, roles, this.authzService);
+    this.logger.log(`Fetching compare presets for user: ${userId}${orgIds === null ? ' (admin)' : ''}`);
 
     try {
       // Resolve SUT context from the provided testRunId
@@ -151,7 +146,7 @@ export class ComparePresetsService {
         .createQueryBuilder('preset')
         .leftJoinAndSelect('preset.applicationDashboard', 'dashboard');
 
-      if (!isAdmin) {
+      if (orgIds !== null) {
         queryBuilder.where('(preset.createdBy = :userId OR preset.isGlobal = :isGlobal)', {
           userId,
           isGlobal: true
@@ -193,7 +188,7 @@ export class ComparePresetsService {
       }
 
       // For non-admin users, filter out global presets that reference test runs from other organizations
-      if (!isAdmin) {
+      if (orgIds !== null) {
         const accessCheckedData: CompareFilterPreset[] = [];
         for (const preset of filteredData) {
           // User's own presets are always visible
@@ -206,11 +201,11 @@ export class ComparePresetsService {
           let hasAccess = true;
 
           if (preset.baselineTestRunId) {
-            hasAccess = await this.validateTestRunAccess(preset.baselineTestRunId, userId, roles);
+            hasAccess = await this.validateTestRunAccess(preset.baselineTestRunId, orgIds);
           }
 
           if (hasAccess && preset.createdForTestRunId) {
-            hasAccess = await this.validateTestRunAccess(preset.createdForTestRunId, userId, roles);
+            hasAccess = await this.validateTestRunAccess(preset.createdForTestRunId, orgIds);
           }
 
           if (hasAccess) {
@@ -253,8 +248,8 @@ export class ComparePresetsService {
     userId: string,
     roles: string[] = [],
   ): Promise<ComparePresetResponseDto> {
-    const isAdmin = this.authzService.isGlobalAdmin(roles);
-    this.logger.log(`Fetching compare preset: ${id}${isAdmin ? ' (admin)' : ''}`);
+    const orgIds = await withOrgFilter(userId, roles, this.authzService);
+    this.logger.log(`Fetching compare preset: ${id}${orgIds === null ? ' (admin)' : ''}`);
 
     try {
       const preset = await this.comparePresetRepo
@@ -272,16 +267,16 @@ export class ComparePresetsService {
       }
 
       // For non-admin users accessing global presets, verify organization access to referenced test runs
-      if (!isAdmin && preset.createdBy !== userId) {
+      if (orgIds !== null && preset.createdBy !== userId) {
         if (preset.baselineTestRunId) {
-          const hasAccess = await this.validateTestRunAccess(preset.baselineTestRunId, userId, roles);
+          const hasAccess = await this.validateTestRunAccess(preset.baselineTestRunId, orgIds);
           if (!hasAccess) {
             throw new NotFoundException(`Compare preset with ID ${id} not found`);
           }
         }
 
         if (preset.createdForTestRunId) {
-          const hasAccess = await this.validateTestRunAccess(preset.createdForTestRunId, userId, roles);
+          const hasAccess = await this.validateTestRunAccess(preset.createdForTestRunId, orgIds);
           if (!hasAccess) {
             throw new NotFoundException(`Compare preset with ID ${id} not found`);
           }
@@ -317,8 +312,8 @@ export class ComparePresetsService {
     userId: string,
     roles: string[] = [],
   ): Promise<ComparePresetResponseDto> {
-    const isAdmin = this.authzService.isGlobalAdmin(roles);
-    this.logger.log(`Updating compare preset: ${id}${isAdmin ? ' (admin)' : ''}`);
+    const orgIds = await withOrgFilter(userId, roles, this.authzService);
+    this.logger.log(`Updating compare preset: ${id}${orgIds === null ? ' (admin)' : ''}`);
 
     try {
       // First check if user owns this preset
@@ -328,12 +323,11 @@ export class ComparePresetsService {
       }
 
       // Validate access to new test run references for non-admin users
-      if (!isAdmin) {
+      if (orgIds !== null) {
         if (updateComparePresetDto.baseline_test_run_id !== undefined && updateComparePresetDto.baseline_test_run_id) {
           const hasAccess = await this.validateTestRunAccess(
             updateComparePresetDto.baseline_test_run_id,
-            userId,
-            roles,
+            orgIds,
           );
           if (!hasAccess) {
             throw new ResourceNotFoundException('TestRun', updateComparePresetDto.baseline_test_run_id);
@@ -401,8 +395,7 @@ export class ComparePresetsService {
     userId: string,
     roles: string[] = [],
   ): Promise<void> {
-    const isAdmin = this.authzService.isGlobalAdmin(roles);
-    this.logger.log(`Deleting compare preset: ${id}${isAdmin ? ' (admin)' : ''}`);
+    this.logger.log(`Deleting compare preset: ${id}`);
 
     try {
       // First check if user owns this preset (organization filtering handled in findOne)
