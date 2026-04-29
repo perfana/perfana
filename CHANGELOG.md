@@ -4,6 +4,11 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
+## [0.2.47.21] - 2026-04-29
+
+### Refactored
+- **RBAC Phase 3c — `compare-presets.service.ts` migration (Phase C11).** Heterogeneous single-file migration: refactored `validateTestRunAccess(testRunId, userId, roles)` → `(testRunId, orgIds: string[] | null)` to use the C9 sentinel pattern, then migrated all 5 method-level `isGlobalAdmin` sites — 4 via `withOrgFilter` (`create`, `findAll`, `findOne`, `update`) and 1 via log-tag removal (`remove`, where `isAdmin` was used solely for ` (admin)` log decoration with no behavioral consequence). Incidental optimization: the `findAll` per-row access loop now reuses one `orgIds` value across all iterations instead of re-evaluating `isGlobalAdmin` + cache-fetching `getAccessibleOrganizations` per global preset. File exits the lint allowlist (fourth file to do so since Phase 3c began; allowlist 35 → 34). Burndown: Bucket A 35 → 40 of 127 (31.5%). All 121 compare-presets tests + full 4314-test API suite pass; 0 type errors; 0 lint errors. Net -7 lines.
+
 ## [0.2.47.20] - 2026-04-29
 
 ### Refactored

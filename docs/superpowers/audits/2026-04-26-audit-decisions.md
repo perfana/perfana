@@ -6,11 +6,11 @@ Phase 3c rolls capabilities through every site listed below. Update these counts
 
 | Bucket | Total | Migrated | Remaining | % done |
 | --- | ---: | ---: | ---: | ---: |
-| A — bypass filter | 127 | 35 | 92 | 27.6% |
+| A — bypass filter | 127 | 40 | 87 | 31.5% |
 | B — bypass guard | 14 | 0 | 14 | 0% |
 | Local `private isGlobalAdmin()` wrappers | 13 | 2 | 11 | 15.4% |
 
-**Lint enforcement:** `apps/api/.rbac-migration-allowlist.json` lists every file currently exempt from the `no-direct-is-global-admin` lint rule (35 files as of 2026-04-29). When a site is migrated, remove its file from the allowlist (the file may have multiple sites — only remove when the LAST one is migrated). Allowlist size IS the burndown.
+**Lint enforcement:** `apps/api/.rbac-migration-allowlist.json` lists every file currently exempt from the `no-direct-is-global-admin` lint rule (34 files as of 2026-04-29). When a site is migrated, remove its file from the allowlist (the file may have multiple sites — only remove when the LAST one is migrated). Allowlist size IS the burndown.
 
 **Date-bound revisit:** by **2026-08-01**, Phase 3c migration must be at least 50% complete (Bucket A + B combined: 70+ sites migrated). If not, re-evaluate the architecture or the priorities. "We forgot about it" is the failure mode this gate prevents.
 
@@ -697,3 +697,73 @@ Same body, just `orgIds` lifted out of the conditional. Null-org-row inclusion b
 ### Allowlist disposition
 
 The file **remains** in `.rbac-migration-allowlist.json` — the per-resource throw guard at line 113 (now 112 after the migration's net line reduction) still trips the lint rule. Same disposition as the metrics-sources bundle (C8); when Phase 3 introduces a generalized per-resource guard refactor (e.g., delegate to `canAccessResource`), this file can fully exit then.
+
+---
+
+## Phase C11 — Single file: `compare-presets.service.ts`
+
+**Audit date:** 2026-04-29
+**Scope:** Single-file migration. 6 `isGlobalAdmin` references (1 helper-internal + 5 method-level). The methods use `isAdmin` for varied combinations of log decoration, list-filter WHERE clauses, per-resource throw guards, and per-row access loops — making this the most heterogeneous single-file migration in the C-series so far.
+**File re-verified:** `apps/api/src/modules/compare-presets/compare-presets.service.ts`
+
+### Site Classification
+
+| Line | Method | Role of `isAdmin` | Migration approach |
+|------|--------|-------------------|--------------------|
+| 34 | `validateTestRunAccess` (helper) | Internal admin bypass + load-orgs + SQL filter | **Refactor signature** to `(testRunId, orgIds: string[] | null)` — same C9 adapt pattern |
+| 64 | `create` | Log decoration + skip per-resource validates for admins | `withOrgFilter` + `orgIds === null` |
+| 129 | `findAll` | Log + WHERE clause (admins see all presets) + per-row access loop over global presets | `withOrgFilter`, reuse `orgIds` across loop iterations (small optimization vs the prior code which re-called `getAccessibleOrganizations` per iteration through the helper) |
+| 256 | `findOne` | Log + per-resource validate skip (only check non-owned globals for non-admins) | `withOrgFilter` |
+| 320 | `update` | Log + per-resource validate skip for new test run reference | `withOrgFilter` |
+| 404 | `remove` | **Log decoration only** — no behavioral branch | **Drop the ` (admin)` log tag** rather than add a wasteful `withOrgFilter` call |
+
+**All 6 sites migrated. File fully exits the allowlist.**
+
+### Migration approach: 3-tier strategy
+
+1. **Helper signature change** (line 34). Same as the C9 adapt pilot: `validateTestRunAccess(testRunId, userId, roles)` → `validateTestRunAccess(testRunId, orgIds: string[] | null)`. Internal dispatch is now sentinel-driven.
+
+2. **Standard `withOrgFilter` migration** (4 sites: 64, 129, 256, 320). Replace `const isAdmin = isGlobalAdmin(roles); ...; if (!isAdmin)` with `const orgIds = await withOrgFilter(...); ...; if (orgIds !== null)`. Log lines key on `orgIds === null`. The 2 `validateTestRunAccess` calls at each site become `(testRunId, orgIds)`.
+
+3. **Log-only site treatment** (line 404). The `remove` method's `isAdmin` was used solely for ` (admin)` log tag decoration — no behavioral consequence. Adding a `withOrgFilter` call here for the sole purpose of preserving the tag would be a wasted async call (and still triggers a `getAccessibleOrganizations` for non-admins). The pragmatic choice: drop the log tag. Loses minimal diagnostic value (the actual access decision happens in `findOne` which is called from `remove` and would surface its own admin tag). This is the first "drop the log tag" decision in the C-series — worth flagging as a precedent for similar log-only sites in future migrations.
+
+### Per-row loop optimization (incidental)
+
+The pre-migration `findAll` called `validateTestRunAccess(presetId, userId, roles)` inside a `for (const preset of filteredData)` loop. Each call re-evaluated `isGlobalAdmin(roles)` and re-fetched `getAccessibleOrganizations(userId)` from cache. Post-migration, the caller computes `orgIds` once outside the loop and passes the same value into each `validateTestRunAccess(presetId, orgIds)` call. Cache lookups are now bypassed entirely inside the loop.
+
+For workloads with many global presets per user, this is a small but real reduction in `AuthorizationService` traffic. Not the goal of this migration — but a free side-benefit of the sentinel pattern.
+
+### Test fixture compatibility
+
+The existing `compare-presets.service.spec.ts` has explicit `validateTestRunAccess (via create)` test coverage at line 1588 covering the admin bypass, non-admin with orgs, and non-admin with empty orgs paths. The mock `AuthorizationService` defaults `isGlobalAdmin` to a role-based implementation and `getAccessibleOrganizations` to `['org-1']`. Post-migration:
+
+- Admin path: `isGlobalAdmin` returns `true` → `withOrgFilter` returns `null` → `validateTestRunAccess(testRunId, null)` returns `true`. ✅
+- Non-admin with orgs: `isGlobalAdmin` returns `false` → `withOrgFilter` returns `['org-1']` → `validateTestRunAccess` runs SQL with those orgs. ✅
+- Non-admin no orgs: `isGlobalAdmin` returns `false` → `withOrgFilter` returns `[]` → `validateTestRunAccess(testRunId, [])` returns `false`. ✅
+
+All 121 compare-presets tests pass without spec changes.
+
+### Test Results
+
+| Test run | Result |
+|----------|--------|
+| `cd apps/api && npx jest src/modules/compare-presets` | 121 passed (2 suites) |
+| `cd apps/api && npx jest` (full suite) | 4314 passed, 20 skipped (pre-existing), 0 failed |
+| `npm run type-check` (`@perfana/api`) | 0 errors |
+| `npm run lint` (`@perfana/api`) | 0 errors, 59 pre-existing warnings (none introduced) |
+
+### Net diff
+
+- Lines removed: 35
+- Lines added: 28
+- **Net -7 lines.** Modest size reduction; the heterogeneous shape (5 different uses of `isAdmin` across 5 methods) limits the per-line wins compared to the more uniform C9/C10 migrations.
+
+### Files changed
+
+- `apps/api/src/modules/compare-presets/compare-presets.service.ts` — import + helper refactor + 5 site migrations (1 with log-tag drop)
+- `apps/api/.rbac-migration-allowlist.json` — remove the file entry
+- `docs/superpowers/audits/2026-04-26-audit-decisions.md` — this file
+
+### Allowlist disposition
+
+This file **EXITS the allowlist** — zero direct `isGlobalAdmin` references after the migration. **Fourth file to fully exit** the allowlist since Phase 3c began (after `report-data-fetcher.service.ts` C6, `report-generation.service.ts` C7, and `adapt.service.ts` C9). Allowlist size: 35 → 34.

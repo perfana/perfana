@@ -3,7 +3,6 @@
   "apps/api/src/modules/awr/controllers/awr-reports.controller.ts",
   "apps/api/src/modules/benchmarks/services/benchmark-mutation.service.ts",
   "apps/api/src/modules/benchmarks/services/benchmark-query.service.ts",
-  "apps/api/src/modules/compare-presets/compare-presets.service.ts",
   "apps/api/src/modules/data-science/controllers/data-science.controller.ts",
   "apps/api/src/modules/deep-links/deep-links.controller.ts",
   "apps/api/src/modules/deep-links/deep-links.service.ts",
