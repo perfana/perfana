@@ -4,6 +4,11 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
+## [0.2.47.18] - 2026-04-29
+
+### Fixed
+- **Creating a report template from System Under Test config returned 400 "User must belong to an organization to create report templates" even for organization admins.** `ReportTemplateController` gated `create`, `copy`, and `duplicate` on `ctx.organizationId`, but that value only populates from the JWT or API key. Keycloak JWTs don't carry org membership in this project (organizations live in the database), so every Keycloak-authenticated user — including org admins — saw `ctx.organizationId === undefined` and hit the 400. Fix injects `AuthorizationService` into the controller and falls back to `getAccessibleOrganizations(ctx.userId)` when `ctx.organizationId` is empty, matching the pattern already used in `ApiKeysController`. All 446 reports module tests pass.
+
 ## [0.2.47.15] - 2026-04-29
 
 ### Fixed
