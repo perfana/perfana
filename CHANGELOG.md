@@ -4,6 +4,11 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
+## [0.2.47.19] - 2026-04-29
+
+### Refactored
+- **RBAC Phase 3c — `adapt.service.ts` migration (PR #198 candidate).** Multi-bucket migration: removed two trivial passthrough wrappers (`private isGlobalAdmin`, `private loadAccessibleOrganizations`), refactored `validateTestRunAccess(testRunId, isAdmin, orgIds[])` → `(testRunId, orgIds: string[] | null)` to use the `null = admin` sentinel from `withOrgFilter`, and migrated all 8 `isGlobalAdmin` call sites in `getTrackedRegressions`, `getTrackedRegressionsCount`, `resolveTrackedRegressionsByTestRun`, `resolveTrackedRegression`, `getTrackedDifferencesChart`, `getCorrelatedRegressions`, `getDsAdaptConclusion`, `getEnrichedConclusion`. File exits the lint allowlist (third file to do so since Phase 3c began; allowlist 36 → 35). Burndown: Bucket A 25 → 33 of 127 (26.0%), Local wrappers 1 → 2 of 13 (15.4%). All 93 adapt tests + full 4314-test API suite pass; 0 lint errors; 0 type errors.
+
 ## [0.2.47.18] - 2026-04-29
 
 ### Fixed

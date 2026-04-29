@@ -6,11 +6,11 @@ Phase 3c rolls capabilities through every site listed below. Update these counts
 
 | Bucket | Total | Migrated | Remaining | % done |
 | --- | ---: | ---: | ---: | ---: |
-| A — bypass filter | 127 | 25 | 102 | 19.7% |
+| A — bypass filter | 127 | 33 | 94 | 26.0% |
 | B — bypass guard | 14 | 0 | 14 | 0% |
-| Local `private isGlobalAdmin()` wrappers | 13 | 1 | 12 | 7.7% |
+| Local `private isGlobalAdmin()` wrappers | 13 | 2 | 11 | 15.4% |
 
-**Lint enforcement:** `apps/api/.rbac-migration-allowlist.json` lists every file currently exempt from the `no-direct-is-global-admin` lint rule (36 files as of 2026-04-29). When a site is migrated, remove its file from the allowlist (the file may have multiple sites — only remove when the LAST one is migrated). Allowlist size IS the burndown.
+**Lint enforcement:** `apps/api/.rbac-migration-allowlist.json` lists every file currently exempt from the `no-direct-is-global-admin` lint rule (35 files as of 2026-04-29). When a site is migrated, remove its file from the allowlist (the file may have multiple sites — only remove when the LAST one is migrated). Allowlist size IS the burndown.
 
 **Date-bound revisit:** by **2026-08-01**, Phase 3c migration must be at least 50% complete (Bucket A + B combined: 70+ sites migrated). If not, re-evaluate the architecture or the priorities. "We forgot about it" is the failure mode this gate prevents.
 
@@ -552,3 +552,85 @@ The existing spec uses `createAuthorizationServiceMock()` whose `isGlobalAdmin` 
 ### Allowlist disposition
 
 The file **remains** in `.rbac-migration-allowlist.json` — the 3 non-canonical `isGlobalAdmin` sites (debug-log-only at 185, per-resource guards at 225 and 269) still trip the lint rule. Same disposition as the dynatrace, grafana, and pyroscope/tracing bundles.
+
+---
+
+## Phase C9 — Single file: `adapt.service.ts` — second multi-bucket migration
+
+**Audit date:** 2026-04-29
+**Scope:** Single-file migration. The signal scan flagged this file as the highest-density target with a local wrapper still in place — 8 `isGlobalAdmin` call sites all routed through a private `isGlobalAdmin` wrapper, every site paired 1:1 with a `loadAccessibleOrganizations` (also a local wrapper) call. **8/8 = 100% canonical density**, matching the strongest signal seen so far in Phase 3c.
+**File re-verified:** `apps/api/src/modules/adapt/adapt.service.ts`
+
+### Site Classification
+
+Total `isGlobalAdmin` references: 9 (1 wrapper definition + 8 call sites). Two distinct shape categories:
+
+**Local wrapper (1 site)**
+| Line | Type | Action |
+|------|------|--------|
+| 104 | `private isGlobalAdmin(roles)` returning `this.authzService.isGlobalAdmin(roles)` | **Remove** — trivial passthrough. The sibling `private loadAccessibleOrganizations(userId)` (line 111) is the same shape (passthrough to `authzService.getAccessibleOrganizations`); both are removed together since both lose all callers after the migration. |
+
+**Per-resource access guards (8 sites)**
+
+The shape across all 8 sites was uniform — a per-resource guard built on top of `validateTestRunAccess`:
+
+```typescript
+const isAdmin = this.isGlobalAdmin(roles);
+const organizationIds = isAdmin ? [] : await this.loadAccessibleOrganizations(userId);
+this.logger.log(`... ${isAdmin ? ' (admin)' : ` (orgs: ${organizationIds.length})`}`);
+if (!isAdmin && organizationIds.length === 0) return EMPTY;
+const hasAccess = await this.validateTestRunAccess(testRunId, isAdmin, organizationIds);
+if (!hasAccess) return EMPTY;
+```
+
+`validateTestRunAccess` itself was a SQL helper: `isAdmin → return true`, `orgIds.length === 0 → return false`, else run a `SELECT 1 FROM test_runs WHERE org_id = ANY($2)` parameterized query. The list-filter happens *inside* the helper — it's effectively Bucket A list-filter, not Bucket B throw-guard.
+
+| Line | Method | Variant | Action |
+|------|--------|---------|--------|
+| 282 | `getTrackedRegressions` | Standard shape | Migrate via `withOrgFilter` |
+| 385 | `getTrackedRegressionsCount` | Standard shape | Same |
+| 418 | `resolveTrackedRegressionsByTestRun` | Standard shape (returns `{success: false, ...}`) | Same |
+| 499 | `resolveTrackedRegression` | Pre-load lookup before validate; reuses `regression.test_run_id` | Same |
+| 571 | `getTrackedDifferencesChart` | Standard shape (returns `[]`) | Same |
+| 639 | `getCorrelatedRegressions` | Standard shape (returns `[]`) | Same |
+| 723 | `getDsAdaptConclusion` | Standard shape (returns `null`) | Same |
+| 755 | `getEnrichedConclusion` | Standard shape (returns `null`) | Same |
+
+**Canonical Bucket A: 8. Local wrappers removed: 1 + 1 sibling (`loadAccessibleOrganizations`).**
+
+### Migration approach: 2-step refactor
+
+1. **Wrapper removal.** Delete `private isGlobalAdmin` and `private loadAccessibleOrganizations`. Both are trivial passthroughs with no other callers after step 2.
+
+2. **`validateTestRunAccess` signature change.** Change `(testRunId, isAdmin: boolean, organizationIds: string[])` → `(testRunId, orgIds: string[] | null)`. Internally, the dispatch is now sentinel-driven: `orgIds === null` → admin bypass, `orgIds.length === 0` → deny, else SQL filter. This collapses two parameters into one and matches `withOrgFilter`'s return contract directly — the helper's caller can pass through `orgIds` without unpacking.
+
+3. **8 site migrations.** Standard pattern: replace the 3-line preamble (`isAdmin = ...; organizationIds = isAdmin ? [] : ...; logger.log(...)`) with a single-line `orgIds = await withOrgFilter(...)` and a log line keyed off `orgIds === null`. The early-exit predicate `!isAdmin && organizationIds.length === 0` becomes `orgIds !== null && orgIds.length === 0`, preserving the `null → never early-exit` admin bypass exactly. The `validateTestRunAccess(testRunId, isAdmin, organizationIds)` call becomes `validateTestRunAccess(testRunId, orgIds)`.
+
+### Test fixture compatibility
+
+The existing `adapt.service.spec.ts` uses `createAuthorizationServiceMock()` whose `isGlobalAdmin` defaults to `true`. Post-migration, `withOrgFilter` evaluates that mock first and returns `null` — same effective admin behavior. The 93 pre-existing tests pass unchanged (none of them mock or assert against `loadAccessibleOrganizations` or the now-removed local `isGlobalAdmin`).
+
+### Test Results
+
+| Test run | Result |
+|----------|--------|
+| `cd apps/api && npx jest src/modules/adapt` | 93 passed (1 suite) |
+| `cd apps/api && npx jest` (full suite) | 4314 passed, 20 skipped (pre-existing), 0 failed |
+| `npm run type-check` | 8/8 tasks successful, 0 errors |
+| `npm run lint` (`@perfana/api`) | 0 errors, 59 pre-existing warnings (none introduced) |
+
+### Net diff
+
+- Lines removed: 63 (the two wrapper bodies + per-site preambles)
+- Lines added: 37 (single-line `withOrgFilter` calls + new `validateTestRunAccess` signature + log-line updates)
+- **Net -26 lines.** Smaller than C6/C7 because the per-site preamble was already terser here (3 lines vs. 6 in `report-data-fetcher`), so the `string[] | null` sentinel had less code to collapse. Same root-cause shape, different starting point.
+
+### Files changed
+
+- `apps/api/src/modules/adapt/adapt.service.ts` — 2 wrapper removals + `validateTestRunAccess` signature refactor + 8 site migrations
+- `apps/api/.rbac-migration-allowlist.json` — remove the file entry
+- `docs/superpowers/audits/2026-04-26-audit-decisions.md` — this file
+
+### Allowlist disposition
+
+This file **EXITS the allowlist** — zero direct `isGlobalAdmin` references after the migration. **Third file to fully exit** the allowlist since Phase 3c began (after `report-data-fetcher.service.ts` in C6 and `report-generation.service.ts` in C7). Allowlist size: 36 → 35.

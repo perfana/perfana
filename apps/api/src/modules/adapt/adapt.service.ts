@@ -15,6 +15,7 @@ import {
   TrackedRegressionStatus
 } from './dto/tracked-regression.dto';
 import { AuthorizationService } from '../../common/services/authorization.service';
+import { withOrgFilter } from '../../common/utils/with-org-filter';
 
 interface TrackedDifferenceChartPoint {
   testRunId: string;
@@ -99,41 +100,22 @@ export class AdaptService {
   ) {}
 
   /**
-   * Check if a user has global admin role
-   */
-  private isGlobalAdmin(roles: string[]): boolean {
-    return this.authzService.isGlobalAdmin(roles);
-  }
-
-  /**
-   * Load accessible organizations for a user from the database via AuthorizationService.
-   */
-  private async loadAccessibleOrganizations(userId: string): Promise<string[]> {
-    return this.authzService.getAccessibleOrganizations(userId);
-  }
-
-  /**
    * Validate that the user has access to a test run via organization membership.
-   * Returns true if access is allowed, false otherwise.
-   * For admin users, always returns true (bypass filtering).
-   * For non-admin users with no organization memberships, returns false.
+   * `orgIds === null` is the global-admin sentinel from `withOrgFilter` (bypass).
+   * `orgIds.length === 0` means a non-admin with no memberships (no access).
    */
   private async validateTestRunAccess(
     testRunId: string,
-    isAdmin: boolean,
-    organizationIds: string[],
+    orgIds: string[] | null,
   ): Promise<boolean> {
-    // Admins bypass all filtering
-    if (isAdmin) {
+    if (orgIds === null) {
       return true;
     }
 
-    // Non-admin users with no organization memberships have no access
-    if (organizationIds.length === 0) {
+    if (orgIds.length === 0) {
       return false;
     }
 
-    // Check if the test run belongs to one of the user's organizations
     // LEFT JOIN teams because team_id can be NULL (system not assigned to a team)
     const query = `
       SELECT 1
@@ -145,7 +127,7 @@ export class AdaptService {
       LIMIT 1
     `;
 
-    const result = await this.testRunRepo.query(query, [testRunId, organizationIds]);
+    const result = await this.testRunRepo.query(query, [testRunId, orgIds]);
     return result && result.length > 0;
   }
 
@@ -279,12 +261,11 @@ export class AdaptService {
     userId: string = '',
     roles: string[] = [],
   ): Promise<TrackedRegressionsResponseDto> {
-    const isAdmin = this.isGlobalAdmin(roles);
-    const organizationIds = isAdmin ? [] : await this.loadAccessibleOrganizations(userId);
-    this.logger.log(`Getting tracked regressions for test run: ${testRunId}${isAdmin ? ' (admin)' : ` (orgs: ${organizationIds.length})`}`, { system, environment, workload });
+    const orgIds = await withOrgFilter(userId, roles, this.authzService);
+    this.logger.log(`Getting tracked regressions for test run: ${testRunId}${orgIds === null ? ' (admin)' : ` (orgs: ${orgIds.length})`}`, { system, environment, workload });
 
     // Non-admin users with no organization memberships see empty results
-    if (!isAdmin && organizationIds.length === 0) {
+    if (orgIds !== null && orgIds.length === 0) {
       return {
         regressions: [],
         unresolvedCount: 0,
@@ -293,7 +274,7 @@ export class AdaptService {
     }
 
     // Validate organization access for non-admin users
-    const hasAccess = await this.validateTestRunAccess(testRunId, isAdmin, organizationIds);
+    const hasAccess = await this.validateTestRunAccess(testRunId, orgIds);
     if (!hasAccess) {
       return {
         regressions: [],
@@ -382,18 +363,17 @@ export class AdaptService {
     userId: string = '',
     roles: string[] = [],
   ): Promise<TrackedRegressionsCountDto> {
-    const isAdmin = this.isGlobalAdmin(roles);
-    const organizationIds = isAdmin ? [] : await this.loadAccessibleOrganizations(userId);
-    this.logger.log(`Getting tracked regressions count for test run: ${testRunId}${isAdmin ? ' (admin)' : ` (orgs: ${organizationIds.length})`}`);
+    const orgIds = await withOrgFilter(userId, roles, this.authzService);
+    this.logger.log(`Getting tracked regressions count for test run: ${testRunId}${orgIds === null ? ' (admin)' : ` (orgs: ${orgIds.length})`}`);
 
     try {
       // Non-admin users with no organization memberships see zero count
-      if (!isAdmin && organizationIds.length === 0) {
+      if (orgIds !== null && orgIds.length === 0) {
         return { count: 0 };
       }
 
       // Validate organization access for non-admin users
-      const hasAccess = await this.validateTestRunAccess(testRunId, isAdmin, organizationIds);
+      const hasAccess = await this.validateTestRunAccess(testRunId, orgIds);
       if (!hasAccess) {
         return { count: 0 };
       }
@@ -415,13 +395,12 @@ export class AdaptService {
     userId: string = '',
     roles: string[] = [],
   ): Promise<{ success: boolean; message: string; resolvedCount: number }> {
-    const isAdmin = this.isGlobalAdmin(roles);
-    const organizationIds = isAdmin ? [] : await this.loadAccessibleOrganizations(userId);
-    this.logger.log(`Resolving tracked regressions for test run: ${trackedTestRunId} as ${resolution}${isAdmin ? ' (admin)' : ` (orgs: ${organizationIds.length})`}`);
+    const orgIds = await withOrgFilter(userId, roles, this.authzService);
+    this.logger.log(`Resolving tracked regressions for test run: ${trackedTestRunId} as ${resolution}${orgIds === null ? ' (admin)' : ` (orgs: ${orgIds.length})`}`);
 
     try {
       // Non-admin users with no organization memberships cannot resolve regressions
-      if (!isAdmin && organizationIds.length === 0) {
+      if (orgIds !== null && orgIds.length === 0) {
         return {
           success: false,
           message: `No tracked regressions found for test run ${trackedTestRunId}`,
@@ -430,7 +409,7 @@ export class AdaptService {
       }
 
       // Validate organization access for non-admin users
-      const hasAccess = await this.validateTestRunAccess(trackedTestRunId, isAdmin, organizationIds);
+      const hasAccess = await this.validateTestRunAccess(trackedTestRunId, orgIds);
       if (!hasAccess) {
         return {
           success: false,
@@ -496,13 +475,12 @@ export class AdaptService {
     userId: string = '',
     roles: string[] = [],
   ): Promise<{ success: boolean; message: string }> {
-    const isAdmin = this.isGlobalAdmin(roles);
-    const organizationIds = isAdmin ? [] : await this.loadAccessibleOrganizations(userId);
-    this.logger.log(`Resolving tracked regression: ${regressionId} as ${resolution.resolution}${isAdmin ? ' (admin)' : ` (orgs: ${organizationIds.length})`}`);
+    const orgIds = await withOrgFilter(userId, roles, this.authzService);
+    this.logger.log(`Resolving tracked regression: ${regressionId} as ${resolution.resolution}${orgIds === null ? ' (admin)' : ` (orgs: ${orgIds.length})`}`);
 
     try {
       // Non-admin users with no organization memberships cannot resolve regressions
-      if (!isAdmin && organizationIds.length === 0) {
+      if (orgIds !== null && orgIds.length === 0) {
         return {
           success: false,
           message: `Regression ${regressionId} not found`,
@@ -522,7 +500,7 @@ export class AdaptService {
       }
 
       // Validate organization access based on the regression's test_run_id
-      const hasAccess = await this.validateTestRunAccess(regression.test_run_id, isAdmin, organizationIds);
+      const hasAccess = await this.validateTestRunAccess(regression.test_run_id, orgIds);
       if (!hasAccess) {
         return {
           success: false,
@@ -568,18 +546,17 @@ export class AdaptService {
     userId: string = '',
     roles: string[] = [],
   ): Promise<TrackedDifferenceChartPoint[]> {
-    const isAdmin = this.isGlobalAdmin(roles);
-    const organizationIds = isAdmin ? [] : await this.loadAccessibleOrganizations(userId);
-    this.logger.log(`Getting tracked differences chart for metric: ${metricName}, testRunId: ${testRunId}, limit: ${limit}${isAdmin ? ' (admin)' : ` (orgs: ${organizationIds.length})`}`);
+    const orgIds = await withOrgFilter(userId, roles, this.authzService);
+    this.logger.log(`Getting tracked differences chart for metric: ${metricName}, testRunId: ${testRunId}, limit: ${limit}${orgIds === null ? ' (admin)' : ` (orgs: ${orgIds.length})`}`);
 
     try {
       // Non-admin users with no organization memberships see empty results
-      if (!isAdmin && organizationIds.length === 0) {
+      if (orgIds !== null && orgIds.length === 0) {
         return [];
       }
 
       // Validate organization access for non-admin users
-      const hasAccess = await this.validateTestRunAccess(testRunId, isAdmin, organizationIds);
+      const hasAccess = await this.validateTestRunAccess(testRunId, orgIds);
       if (!hasAccess) {
         return [];
       }
@@ -636,18 +613,17 @@ export class AdaptService {
     userId: string = '',
     roles: string[] = [],
   ): Promise<TrackedRegressionDto[]> {
-    const isAdmin = this.isGlobalAdmin(roles);
-    const organizationIds = isAdmin ? [] : await this.loadAccessibleOrganizations(userId);
-    this.logger.log(`Getting correlated regressions for: ${trackedRegressionId} from test run: ${sourceTestRunId}${isAdmin ? ' (admin)' : ` (orgs: ${organizationIds.length})`}`);
+    const orgIds = await withOrgFilter(userId, roles, this.authzService);
+    this.logger.log(`Getting correlated regressions for: ${trackedRegressionId} from test run: ${sourceTestRunId}${orgIds === null ? ' (admin)' : ` (orgs: ${orgIds.length})`}`);
 
     try {
       // Non-admin users with no organization memberships see empty results
-      if (!isAdmin && organizationIds.length === 0) {
+      if (orgIds !== null && orgIds.length === 0) {
         return [];
       }
 
       // Validate organization access for non-admin users
-      const hasAccess = await this.validateTestRunAccess(sourceTestRunId, isAdmin, organizationIds);
+      const hasAccess = await this.validateTestRunAccess(sourceTestRunId, orgIds);
       if (!hasAccess) {
         return [];
       }
@@ -720,17 +696,16 @@ export class AdaptService {
     userId: string = '',
     roles: string[] = [],
   ): Promise<DsAdaptConclusion | null> {
-    const isAdmin = this.isGlobalAdmin(roles);
-    const organizationIds = isAdmin ? [] : await this.loadAccessibleOrganizations(userId);
+    const orgIds = await withOrgFilter(userId, roles, this.authzService);
 
     try {
       // Non-admin users with no organization memberships see null
-      if (!isAdmin && organizationIds.length === 0) {
+      if (orgIds !== null && orgIds.length === 0) {
         return null;
       }
 
       // Validate organization access for non-admin users
-      const hasAccess = await this.validateTestRunAccess(testRunId, isAdmin, organizationIds);
+      const hasAccess = await this.validateTestRunAccess(testRunId, orgIds);
       if (!hasAccess) {
         return null;
       }
@@ -752,15 +727,14 @@ export class AdaptService {
     userId: string = '',
     roles: string[] = [],
   ): Promise<EnrichedAdaptConclusion | null> {
-    const isAdmin = this.isGlobalAdmin(roles);
-    const organizationIds = isAdmin ? [] : await this.loadAccessibleOrganizations(userId);
+    const orgIds = await withOrgFilter(userId, roles, this.authzService);
 
     try {
-      if (!isAdmin && organizationIds.length === 0) {
+      if (orgIds !== null && orgIds.length === 0) {
         return null;
       }
 
-      const hasAccess = await this.validateTestRunAccess(testRunId, isAdmin, organizationIds);
+      const hasAccess = await this.validateTestRunAccess(testRunId, orgIds);
       if (!hasAccess) {
         return null;
       }
