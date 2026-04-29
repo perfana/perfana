@@ -19,7 +19,6 @@
   "apps/api/src/modules/organizations/organizations.service.ts",
   "apps/api/src/modules/profiles/profiles.service.ts",
   "apps/api/src/modules/pyroscope/pyroscope-instances.service.ts",
-  "apps/api/src/modules/reports/services/report-data-fetcher.service.ts",
   "apps/api/src/modules/reports/services/report-generation.service.ts",
   "apps/api/src/modules/systems-under-test/systems-under-test.service.ts",
   "apps/api/src/modules/teams/teams.service.ts",

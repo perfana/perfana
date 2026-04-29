@@ -1,6 +1,6 @@
 {
   "name": "perfana",
-  "version": "0.2.47.12",
+  "version": "0.2.47.13",
   "private": true,
   "description": "Open-source performance analysis platform",
   "workspaces": [
