@@ -7,10 +7,10 @@ Phase 3c rolls capabilities through every site listed below. Update these counts
 | Bucket | Total | Migrated | Remaining | % done |
 | --- | ---: | ---: | ---: | ---: |
 | A — bypass filter | 127 | 40 | 87 | 31.5% |
-| B — bypass guard | 14 | 0 | 14 | 0% |
+| B — bypass guard | 14 | 2 | 12 | 14.3% |
 | Local `private isGlobalAdmin()` wrappers | 13 | 2 | 11 | 15.4% |
 
-**Lint enforcement:** `apps/api/.rbac-migration-allowlist.json` lists every file currently exempt from the `no-direct-is-global-admin` lint rule (34 files as of 2026-04-29). When a site is migrated, remove its file from the allowlist (the file may have multiple sites — only remove when the LAST one is migrated). Allowlist size IS the burndown.
+**Lint enforcement:** `apps/api/.rbac-migration-allowlist.json` lists every file currently exempt from the `no-direct-is-global-admin` lint rule (33 files as of 2026-04-29). When a site is migrated, remove its file from the allowlist (the file may have multiple sites — only remove when the LAST one is migrated). Allowlist size IS the burndown.
 
 **Date-bound revisit:** by **2026-08-01**, Phase 3c migration must be at least 50% complete (Bucket A + B combined: 70+ sites migrated). If not, re-evaluate the architecture or the priorities. "We forgot about it" is the failure mode this gate prevents.
 
@@ -767,3 +767,75 @@ All 121 compare-presets tests pass without spec changes.
 ### Allowlist disposition
 
 This file **EXITS the allowlist** — zero direct `isGlobalAdmin` references after the migration. **Fourth file to fully exit** the allowlist since Phase 3c began (after `report-data-fetcher.service.ts` C6, `report-generation.service.ts` C7, and `adapt.service.ts` C9). Allowlist size: 35 → 34.
+
+---
+
+## Phase C12 — Single file: `awr-reports.controller.ts` — first pure Bucket B migration
+
+**Audit date:** 2026-04-29
+**Scope:** Single-file migration. **First Phase 3c PR to migrate Bucket B (bypass guard) sites** rather than Bucket A (bypass filter). Both `isGlobalAdmin` references in this file are inside private per-resource access guard helpers (`if (isGlobalAdmin) return true; ... membership check`) — the canonical Bucket B shape, not the list-filter Bucket A shape `withOrgFilter` was designed for.
+**File re-verified:** `apps/api/src/modules/awr/controllers/awr-reports.controller.ts`
+
+### Site Classification
+
+| Line | Helper | Shape |
+|------|--------|-------|
+| 102 | `validateTestRunAccess` | Per-resource guard: admin bypass → SQL lookup of test run's SUT → null-org backward compat → `isOrganizationMember` |
+| 121 | `validateReportAccess` | Same shape, raw SQL chain `awr_reports → test_runs → systems_under_test` to find org_id |
+
+**Both sites: Bucket B (per-resource access guards). 2 of 14 Bucket B sites migrated codebase-wide.**
+
+### Migration approach: delegate to `canAccessResource`
+
+`AuthorizationService.canAccessResource(userId, roles, resource: OwnedResource)` already implements all three branches the helpers were inlining:
+
+1. Global admin bypass (returns `{allowed: true, reason: 'global admin'}`)
+2. Legacy null-org backward compat (returns `{allowed: true, reason: 'no organization'}`)
+3. Organization membership check (returns `{allowed: <bool>, reason: ...}`)
+
+Each helper now:
+
+1. Loads the resource (test run via repo, report via raw SQL — same lookups as before)
+2. Calls `canAccessResource(ctx.userId, ctx.roles, { organization_id: <looked-up>, created_by: '' } as OwnedResource)`
+3. Returns `result.allowed`
+
+Same shape as the C7 `report-generation` per-resource refactors — uses the C7-established `created_by: '' as OwnedResource` cast pattern (the `OwnedResource` interface requires `created_by: string`, but `canAccessResource` only reads it from `canModifyResource`'s code path; passing `''` is safe and the cast satisfies TypeScript).
+
+### Why this is Bucket B, not Bucket A
+
+`withOrgFilter` returns the user's accessible org IDs (or `null` for admin) and is designed for **list filtering** — turning a "WHERE org_id IN (...) OR org_id IS NULL" filter into a sentinel-driven branch. These helpers do something different: they **already know the resource ID**, look up its org, and check the user's membership against that single org. The "list of accessible orgs" abstraction adds nothing here — the question is "is the user a member of THIS org?", not "what orgs can the user see?".
+
+`canAccessResource` is the right tool. Same lookup pattern; the centralized service handles all three policy branches the helpers were inlining manually.
+
+### Optimization: drop the unused upfront `isGlobalAdmin` check
+
+Pre-migration, each helper started with `if (isGlobalAdmin(roles)) return true;` to short-circuit before doing the resource lookup. Post-migration, the resource lookup happens unconditionally and `canAccessResource` does the admin check after. For admin users this trades a single role array check (zero I/O) for a database lookup — a small regression for the admin happy path.
+
+The trade-off is intentional and matches C7's pattern. The clarity win (one centralized auth policy across the codebase) outweighs the per-call cost, and the admin lookup is fast (single-row by primary key, repository-cached). If admin-bypass-before-lookup proves measurable in a hot path, `canAccessResource` itself can be refactored to take a deferred resource loader — but that change should be made in the centralized service, not duplicated in every per-resource helper.
+
+### Test Results
+
+| Test run | Result |
+|----------|--------|
+| `cd apps/api && npx jest src/modules/awr` | 402 passed (9 suites) |
+| `cd apps/api && npx jest` (full suite) | 4314 passed, 20 skipped (pre-existing), 0 failed |
+| `npm run type-check` (`@perfana/api`) | 0 errors |
+| `npm run lint` (`@perfana/api`) | 0 errors, 59 pre-existing warnings (none introduced) |
+
+The AWR module has no controller-level tests — the existing 402 tests cover parsers, analyzers, and utilities. The two helpers are exercised in production via the controller's endpoint methods but not unit-tested directly. No spec changes needed.
+
+### Net diff
+
+- Lines removed: 13
+- Lines added: 18
+- **Net +5 lines.** First Phase 3c migration that grew the file. The growth comes from the explanatory comment block in front of the `canAccessResource` call (clarifying why `team_id` is omitted and `created_by` is empty — this is the same pattern as C7's report-generation refactor). The migration trades a few lines of inline policy for a centralized delegation; the lookup logic stays the same. Net cost is acceptable in exchange for one fewer place where the admin / null-org / membership policy is hand-rolled.
+
+### Files changed
+
+- `apps/api/src/modules/awr/controllers/awr-reports.controller.ts` — import `OwnedResource` + 2 helper migrations
+- `apps/api/.rbac-migration-allowlist.json` — remove the file entry
+- `docs/superpowers/audits/2026-04-26-audit-decisions.md` — this file
+
+### Allowlist disposition
+
+This file **EXITS the allowlist** — zero direct `isGlobalAdmin` references after the migration. **Fifth file to fully exit** the allowlist since Phase 3c began (after `report-data-fetcher.service.ts` C6, `report-generation.service.ts` C7, `adapt.service.ts` C9, and `compare-presets.service.ts` C11). Allowlist size: 34 → 33.

@@ -45,6 +45,7 @@ import { UserCtx, UserContext } from '../../../common/decorators/user-context.de
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { TestRun } from '../../../entities';
+import { OwnedResource } from '@perfana/shared';
 import { AuthorizationService } from '../../../common/services/authorization.service';
 import { AwrReportsService, CreateAwrReportOptions } from '../services/awr-reports.service';
 import { AwrParserService } from '../services/awr-parser.service';
@@ -99,8 +100,6 @@ export class AwrReportsController {
     testRunId: string,
     ctx: UserContext,
   ): Promise<boolean> {
-    if (this.authzService.isGlobalAdmin(ctx.roles)) return true;
-
     // Look up the test run's organization via its system under test
     const testRun = await this.testRunRepo.findOne({
       where: { id: testRunId },
@@ -108,18 +107,21 @@ export class AwrReportsController {
     });
     if (!testRun || !testRun.systemUnderTest) return false;
 
-    const orgId = testRun.systemUnderTest.organization_id;
-    if (!orgId) return true; // backward compat: legacy resources accessible to all authed users
-
-    return this.authzService.isOrganizationMember(ctx.userId, orgId);
+    // Delegate the admin / legacy-null-org / membership decision to AuthorizationService.
+    // team_id is omitted to preserve the prior behavior of not checking team membership
+    // for AWR resources. created_by is unused by canAccessResource (only canModifyResource
+    // reads it).
+    const result = await this.authzService.canAccessResource(ctx.userId, ctx.roles, {
+      organization_id: testRun.systemUnderTest.organization_id,
+      created_by: '',
+    } as OwnedResource);
+    return result.allowed;
   }
 
   private async validateReportAccess(
     reportId: string,
     ctx: UserContext,
   ): Promise<boolean> {
-    if (this.authzService.isGlobalAdmin(ctx.roles)) return true;
-
     // Look up the report's organization via test_run → system_under_test
     const query = `
       SELECT sut.organization_id
@@ -129,11 +131,14 @@ export class AwrReportsController {
       WHERE ar.id = $1
       LIMIT 1
     `;
-    const result = await this.testRunRepo.query(query, [reportId]);
-    if (!result || result.length === 0) return false;
-    if (!result[0].organization_id) return true; // backward compat: legacy resources accessible to all authed users
+    const rows = await this.testRunRepo.query(query, [reportId]);
+    if (!rows || rows.length === 0) return false;
 
-    return this.authzService.isOrganizationMember(ctx.userId, result[0].organization_id);
+    const result = await this.authzService.canAccessResource(ctx.userId, ctx.roles, {
+      organization_id: rows[0].organization_id,
+      created_by: '',
+    } as OwnedResource);
+    return result.allowed;
   }
 
   // ==================== Test Run Scoped Endpoints ====================
