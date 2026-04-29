@@ -4,6 +4,11 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
+## [0.2.47.9] - 2026-04-29
+
+### Fixed
+- **Dynatrace query dialogs now show the permission error inline.** When a non-admin user tried to add, edit, or delete a Dynatrace query, the API correctly returned `You do not have permission to modify this Dynatrace query`, but the dialog stayed open and the error rendered in the section *behind* the dialog where the user couldn't see it. The `useDynatraceQueries` hook now tracks a separate `actionError` for create/update/delete failures and passes it into the open dialog (Add, Edit, Import, Delete, Batch Delete). The list-level `error` remains for fetch failures only. Each dialog closes with `setActionError(null)` so stale errors don't bleed across opens.
+
 ## [0.2.47.8] - 2026-04-28
 
 ### Security / Fixed

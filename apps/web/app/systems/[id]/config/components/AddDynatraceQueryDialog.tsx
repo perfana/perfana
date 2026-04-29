@@ -33,6 +33,7 @@ interface AddDynatraceQueryDialogProps {
   environment: string;
   workload: string;
   loading?: boolean;
+  submitError?: string | null;
 }
 
 export default function AddDynatraceQueryDialog({
@@ -43,6 +44,7 @@ export default function AddDynatraceQueryDialog({
   environment,
   workload,
   loading = false,
+  submitError = null,
 }: AddDynatraceQueryDialogProps) {
   const [dynatraceConfigs, setDynatraceConfigs] = useState<DynatraceConfig[]>([]);
   const [loadingConfigs, setLoadingConfigs] = useState(false);
@@ -242,9 +244,9 @@ export default function AddDynatraceQueryDialog({
       </DialogTitle>
 
       <DialogContent>
-        {error && (
+        {(submitError || error) && (
           <Alert severity="error" sx={{ mb: 3 }}>
-            {error}
+            {submitError || error}
           </Alert>
         )}
 

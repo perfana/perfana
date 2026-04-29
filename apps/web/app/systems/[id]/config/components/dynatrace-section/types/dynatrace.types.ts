@@ -59,6 +59,7 @@ export interface UseDynatraceQueriesReturn {
   queries: DynatraceQueryLocal[];
   loading: boolean;
   error: string | null;
+  actionError: string | null;
   selectedQueryIds: Set<string>;
 
   // Dialog states

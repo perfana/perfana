@@ -30,6 +30,7 @@ export default function ImportDashboardDialog({
   systemName: _systemName,
   environment: _environment,
   loading = false,
+  submitError = null,
 }: ImportDashboardDialogProps) {
   const {
     // Dynatrace configs state
@@ -111,9 +112,9 @@ export default function ImportDashboardDialog({
           onFileSelect={handleFileSelect}
         />
 
-        {error && (
+        {(submitError || error) && (
           <Alert severity="error" sx={{ mb: 3 }}>
-            {error}
+            {submitError || error}
           </Alert>
         )}
 

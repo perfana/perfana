@@ -31,6 +31,7 @@ interface EditDynatraceQueryDialogProps {
   onEdit: (id: string, data: UpdateDynatraceQueryDto) => void;
   query: DynatraceQuery | null;
   loading?: boolean;
+  submitError?: string | null;
 }
 
 export default function EditDynatraceQueryDialog({
@@ -39,6 +40,7 @@ export default function EditDynatraceQueryDialog({
   onEdit,
   query,
   loading = false,
+  submitError = null,
 }: EditDynatraceQueryDialogProps) {
   const [dynatraceConfigs, setDynatraceConfigs] = useState<DynatraceConfig[]>([]);
   const [loadingConfigs, setLoadingConfigs] = useState(false);
@@ -250,9 +252,9 @@ export default function EditDynatraceQueryDialog({
       </DialogTitle>
 
       <DialogContent>
-        {error && (
+        {(submitError || error) && (
           <Alert severity="error" sx={{ mb: 3 }}>
-            {error}
+            {submitError || error}
           </Alert>
         )}
 
