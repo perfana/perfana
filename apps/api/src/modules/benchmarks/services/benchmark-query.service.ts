@@ -9,6 +9,7 @@ import {
 } from './benchmark-query.types';
 import { BenchmarkMapper } from './benchmark.mapper';
 import { AuthorizationService } from '../../../common/services/authorization.service';
+import { withOrgFilter } from '../../../common/utils/with-org-filter';
 
 /**
  * Service responsible for benchmark query and validation operations.
@@ -44,17 +45,16 @@ export class BenchmarkQueryService {
    */
   async findAll(userId: string, roles: string[], query: BenchmarkQuery = {}): Promise<Benchmark[]> {
     try {
-      // Log authorization context for debugging
-      const isAdmin = this.authzService.isGlobalAdmin(roles);
-      this.logger.log(`[findAll] START - userId=${userId}, isGlobalAdmin=${isAdmin}`);
+      // Resolve accessible org IDs: null means global admin (no filter needed)
+      const orgIds = await withOrgFilter(userId, roles, this.authzService);
+      this.logger.log(`[findAll] START - userId=${userId}, isGlobalAdmin=${orgIds === null}`);
 
       const queryBuilder = this.benchmarkRepo
         .createQueryBuilder('b')
         .leftJoinAndSelect('b.system_under_test', 'sut');
 
       // Apply organization filtering for non-admin users
-      if (!isAdmin) {
-        const orgIds = await this.authzService.getAccessibleOrganizations(userId);
+      if (orgIds !== null) {
         this.logger.log(`[findAll] NON-ADMIN PATH - User ${userId} has access to organizations: ${orgIds.join(', ')}`);
 
         // Filter by system_under_test organization_id, including legacy systems with null org_id
@@ -113,7 +113,7 @@ export class BenchmarkQueryService {
 
       const results = await queryBuilder.getMany();
 
-      this.logger.log(`[findAll] Found ${results.length} benchmarks${isAdmin ? ' (admin)' : ` (filtered by organizations)`}`);
+      this.logger.log(`[findAll] Found ${results.length} benchmarks${orgIds === null ? ' (admin)' : ` (filtered by organizations)`}`);
 
       return results.map(row => BenchmarkMapper.mapEntityToBenchmark(row));
     } catch (error) {
@@ -187,9 +187,9 @@ export class BenchmarkQueryService {
     workloads: string[];
   }> {
     try {
-      // Log authorization context for debugging
-      const isAdmin = this.authzService.isGlobalAdmin(roles);
-      this.logger.log(`[getSystemEnvironmentsAndWorkloads] START - systemId=${systemUnderTestId}, userId=${userId}, isGlobalAdmin=${isAdmin}`);
+      // Resolve accessible org IDs: null means global admin (no filter needed)
+      const orgIds = await withOrgFilter(userId, roles, this.authzService);
+      this.logger.log(`[getSystemEnvironmentsAndWorkloads] START - systemId=${systemUnderTestId}, userId=${userId}, isGlobalAdmin=${orgIds === null}`);
 
       const queryBuilder = this.benchmarkRepo
         .createQueryBuilder('b')
@@ -200,8 +200,7 @@ export class BenchmarkQueryService {
         .andWhere('b.valid = :valid', { valid: true });
 
       // Apply organization filtering for non-admin users
-      if (!isAdmin) {
-        const orgIds = await this.authzService.getAccessibleOrganizations(userId);
+      if (orgIds !== null) {
         // Include legacy systems with null org_id for backward compatibility
         if (orgIds.length === 0) {
           queryBuilder.andWhere('sut.organization_id IS NULL');
@@ -238,14 +237,12 @@ export class BenchmarkQueryService {
    */
   async getBenchmarkTagSyncStatus(userId: string, roles: string[]): Promise<BenchmarkTagSyncStatus[]> {
     try {
-      // Log authorization context for debugging
-      const isAdmin = this.authzService.isGlobalAdmin(roles);
-      this.logger.log(`[getBenchmarkTagSyncStatus] START - userId=${userId}, isGlobalAdmin=${isAdmin}`);
+      // Resolve accessible org IDs: null means global admin (no filter needed)
+      const orgIds = await withOrgFilter(userId, roles, this.authzService);
+      this.logger.log(`[getBenchmarkTagSyncStatus] START - userId=${userId}, isGlobalAdmin=${orgIds === null}`);
 
       // For non-admin users, filter by organization
-      if (!isAdmin) {
-        const orgIds = await this.authzService.getAccessibleOrganizations(userId);
-
+      if (orgIds !== null) {
         // Include legacy systems with null org_id for backward compatibility
         const result = await this.dataSource.query(`
           SELECT bts.*
