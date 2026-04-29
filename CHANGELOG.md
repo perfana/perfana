@@ -4,6 +4,11 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
+## [0.2.47.10] - 2026-04-29
+
+### Refactored
+- **Phase 3c — Grafana services bundle migrated to `withOrgFilter`.** Three services (`GrafanaInstancesService`, `GrafanaDashboardsService`, `ApplicationDashboardsService`) now resolve list-filter org scope via the shared `withOrgFilter` helper introduced in PR #175 (the dynatrace pilot). 4 canonical Bucket A sites migrated: `findAll` in all three services plus `findOne` in `ApplicationDashboardsService`. Behavior is unchanged — `orgIds === null` preserves the previous `isGlobalAdmin === true` semantics exactly, including in the existing debug logs. Per-resource throw guards, custom guard helpers (`requireOrgAdmin`, `verifyOrgAccess`), and debug-log-only `isGlobalAdmin` captures stay inline (same disposition as the dynatrace pilot). Audit progress: Bucket A migrated 1 → 5 of 127 (3.9%). See `docs/superpowers/audits/2026-04-26-audit-decisions.md` for the full per-site classification.
+
 ## [0.2.47.9] - 2026-04-29
 
 ### Fixed

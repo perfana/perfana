@@ -10,6 +10,7 @@ import {
 } from './dto/grafana-dashboard.dto';
 import { GrafanaDashboard as GrafanaDashboardEntity } from '../../entities';
 import { AuthorizationService } from '../../common/services/authorization.service';
+import { withOrgFilter } from '../../common/utils/with-org-filter';
 
 export interface GrafanaDashboard {
   id: string;
@@ -70,21 +71,20 @@ export class GrafanaDashboardsService {
    * dashboards with no organization_id (legacy/shared). Admins see all.
    */
   async findAll(userId: string, roles: string[], query: GrafanaDashboardQuery = {}): Promise<GrafanaDashboard[]> {
-    // Log authorization context for debugging
-    const isAdmin = this.authzService.isGlobalAdmin(roles);
-    this.logger.debug(`findAll: userId=${userId}, isGlobalAdmin=${isAdmin}`);
+    // Resolve accessible org IDs: null means global admin (no filter needed)
+    const orgIds = await withOrgFilter(userId, roles, this.authzService);
+    this.logger.debug(`findAll: userId=${userId}, isGlobalAdmin=${orgIds === null}`);
 
     try {
       const queryBuilder = this.grafanaDashboardRepo.createQueryBuilder('gd');
 
       // Organization filtering: non-admin users only see dashboards belonging to
       // their organizations OR dashboards with no organization (legacy/shared data).
-      if (!isAdmin) {
-        const organizationIds = await this.authzService.getAccessibleOrganizations(userId);
-        if (organizationIds.length > 0) {
+      if (orgIds !== null) {
+        if (orgIds.length > 0) {
           queryBuilder.andWhere(
             '(gd.organizationId IS NULL OR gd.organizationId IN (:...orgIds))',
-            { orgIds: organizationIds }
+            { orgIds }
           );
         } else {
           // User has no org memberships — only show unowned dashboards

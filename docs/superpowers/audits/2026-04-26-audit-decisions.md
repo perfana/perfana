@@ -6,7 +6,7 @@ Phase 3c rolls capabilities through every site listed below. Update these counts
 
 | Bucket | Total | Migrated | Remaining | % done |
 | --- | ---: | ---: | ---: | ---: |
-| A — bypass filter | 127 | 1 | 126 | 0.8% |
+| A — bypass filter | 127 | 5 | 122 | 3.9% |
 | B — bypass guard | 14 | 0 | 14 | 0% |
 | Local `private isGlobalAdmin()` wrappers | 13 | 0 | 13 | 0% |
 
@@ -118,3 +118,93 @@ Debug log preserves `isGlobalAdmin=true/false` semantics: `orgIds === null` is `
 The 102 remaining canonical Bucket A sites in 20+ other services are **not** touched by this PR. They continue to use the original `isAdmin = isGlobalAdmin / if (!isAdmin) { load orgs; filter }` pattern which is correct and safe. Future PRs can adopt `withOrgFilter` incrementally per-service without risk.
 
 The audit's 127-site count reflected all `isGlobalAdmin` occurrences codebase-wide, including debug-log-only captures like those in this file. The actual "canonical list-filter bypass" count across the full codebase is lower than 127; a service-by-service re-verification (as done here for dynatrace) is recommended before each per-service migration PR.
+
+---
+
+## Phase C3 — Bundle: Grafana services
+
+**Audit date:** 2026-04-29
+**Scope:** Three Grafana-domain services migrated as a single bundle PR following the dynatrace pilot pattern.
+**Files re-verified:**
+- `apps/api/src/modules/grafana/grafana-instances.service.ts`
+- `apps/api/src/modules/grafana/grafana-dashboards.service.ts`
+- `apps/api/src/modules/grafana/application-dashboards.service.ts`
+
+### Site Classification Tables
+
+**`grafana-instances.service.ts`** (8 lines flagged):
+
+| Line | Method | Classification | Action |
+|------|--------|---------------|--------|
+| 47 | `requireOrgAdmin` (private) | CUSTOM-GUARD-HELPER — admin-bypass inside a private "any-org admin" guard | Leave |
+| 95 | `findAll` | **CANONICAL** Bucket A | Migrate |
+| 149 | `findOne` | PER-RESOURCE — `if (!isAdmin && entity.organizationId)` calls `isOrganizationMember`, throws NotFoundException | Leave |
+| 194 | `create` | DEBUG-LOG-ONLY | Leave |
+| 237 | `update` | PER-RESOURCE — `if (!isAdmin && entity.organizationId)` calls `isOrganizationAdmin`, throws ForbiddenException | Leave |
+| 295 | `remove` | PER-RESOURCE — same per-resource admin guard shape as `update` | Leave |
+| 340 | `testConnection` | DEBUG-LOG-ONLY | Leave |
+| 384 | `testConnectionWithParams` | DEBUG-LOG-ONLY | Leave |
+
+**`grafana-dashboards.service.ts`** (7 lines flagged):
+
+| Line | Method | Classification | Action |
+|------|--------|---------------|--------|
+| 57 | `verifyOrgAccess` (private) | CUSTOM-GUARD-HELPER — admin-bypass inside per-resource throw helper | Leave |
+| 74 | `findAll` | **CANONICAL** Bucket A | Migrate |
+| 197 | `findOne` | DEBUG-LOG-ONLY | Leave |
+| 252 | `create` | DEBUG-LOG-ONLY | Leave |
+| 305 | `update` | DEBUG-LOG-ONLY | Leave |
+| 370 | `remove` | DEBUG-LOG-ONLY | Leave |
+| 409 | `getVariableValues` | DEBUG-LOG-ONLY | Leave |
+
+**`application-dashboards.service.ts`** (7 lines flagged):
+
+| Line | Method | Classification | Action |
+|------|--------|---------------|--------|
+| 113 | `findAll` | **CANONICAL** Bucket A | Migrate |
+| 244 | `findOne` | **CANONICAL** Bucket A — single-row variant uses the same `isAdmin / load orgs / WHERE org_id IN (...)` shape | Migrate |
+| 334 | `create` | DEBUG-LOG-ONLY (Phase 4 stub) | Leave |
+| 417 | `update` | DEBUG-LOG-ONLY (Phase 4 stub) | Leave |
+| 575 | `getDeleteInfo` | DEBUG-LOG-ONLY (Phase 4 stub) | Leave |
+| 637 | `getBatchDeleteInfo` | DEBUG-LOG-ONLY (Phase 4 stub) | Leave |
+| 683 | `delete` | DEBUG-LOG-ONLY (Phase 4 stub) | Leave |
+
+**Canonical count: 4 of 22.** The remaining 18 lines are debug-log-only captures (interpolated into `logger.debug`), per-resource throw guards (post-load org membership checks), or admin-bypass branches inside private custom guard helpers — same categorization the dynatrace pilot established.
+
+### Migrations applied
+
+All four migrations follow the dynatrace pilot shape:
+
+```typescript
+// before
+const isAdmin = this.authzService.isGlobalAdmin(roles);
+this.logger.debug(`...isGlobalAdmin=${isAdmin}`);
+// ... if (!isAdmin) { load orgs; filter }
+
+// after
+const orgIds = await withOrgFilter(userId, roles, this.authzService);
+this.logger.debug(`...isGlobalAdmin=${orgIds === null}`);
+// ... if (orgIds !== null) { filter using orgIds }
+```
+
+The `orgIds === null` predicate preserves the previous `isGlobalAdmin=true|false` debug-log semantics exactly — the helper returns `null` iff the user is a global admin.
+
+### Test Results
+
+| Test run | Result |
+|----------|--------|
+| `cd apps/api && npx jest src/modules/grafana` | 491 passed (7 suites) |
+| `cd apps/api && npx jest` (full suite) | 4314 passed, 20 skipped (pre-existing), 0 failed |
+| `npm run type-check` | 8/8 tasks successful, 0 errors |
+| `npm run lint` (`@perfana/api`) | 0 errors, 59 pre-existing warnings (none introduced) |
+
+### Files changed
+
+- `apps/api/src/modules/grafana/grafana-instances.service.ts` — import + `findAll` migration
+- `apps/api/src/modules/grafana/grafana-dashboards.service.ts` — import + `findAll` migration
+- `apps/api/src/modules/grafana/application-dashboards.service.ts` — import + `findAll` + `findOne` migration
+- `docs/superpowers/audits/2026-04-26-audit-decisions.md` — this file
+
+### Allowlist disposition
+
+The 3 Grafana service files **remain** in `.rbac-migration-allowlist.json`. Per the migration rule, files only exit the allowlist once the LAST direct `isGlobalAdmin` call has been removed; the 18 non-canonical sites identified above (debug-log captures, per-resource guards, custom-guard helpers) are out of scope for this PR. Same disposition as `dynatrace.service.ts` after the pilot.
