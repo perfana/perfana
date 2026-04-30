@@ -1,5 +1,4 @@
 [
-  "apps/api/src/modules/data-science/controllers/data-science.controller.ts",
   "apps/api/src/modules/deep-links/deep-links.controller.ts",
   "apps/api/src/modules/deep-links/deep-links.service.ts",
   "apps/api/src/modules/dynatrace/dynatrace.service.ts",
@@ -20,6 +19,5 @@
   "apps/api/src/modules/test-runs/services/test-runs-query.service.ts",
   "apps/api/src/modules/test-runs/services/test-runs-stale-detection.service.ts",
   "apps/api/src/modules/test-runs/services/test-runs-timeseries-query.service.ts",
-  "apps/api/src/modules/trends-presets/trends-presets.service.ts",
-  "apps/api/src/modules/users/users.controller.ts"
+  "apps/api/src/modules/trends-presets/trends-presets.service.ts"
 ]
