@@ -7,10 +7,10 @@ Phase 3c rolls capabilities through every site listed below. Update these counts
 | Bucket | Total | Migrated | Remaining | % done |
 | --- | ---: | ---: | ---: | ---: |
 | A — bypass filter | 127 | 41 | 86 | 32.3% |
-| B — bypass guard | 14 | 3 | 11 | 21.4% |
+| B — bypass guard | 14 | 4 | 10 | 28.6% |
 | Local `private isGlobalAdmin()` wrappers | 13 | 2 | 11 | 15.4% |
 
-**Lint enforcement:** `apps/api/.rbac-migration-allowlist.json` lists every file currently exempt from the `no-direct-is-global-admin` lint rule (32 files as of 2026-04-29). When a site is migrated, remove its file from the allowlist (the file may have multiple sites — only remove when the LAST one is migrated). Allowlist size IS the burndown.
+**Lint enforcement:** `apps/api/.rbac-migration-allowlist.json` lists every file currently exempt from the `no-direct-is-global-admin` lint rule (31 files as of 2026-04-30). When a site is migrated, remove its file from the allowlist (the file may have multiple sites — only remove when the LAST one is migrated). Allowlist size IS the burndown.
 
 **Date-bound revisit:** by **2026-08-01**, Phase 3c migration must be at least 50% complete (Bucket A + B combined: 70+ sites migrated). If not, re-evaluate the architecture or the priorities. "We forgot about it" is the failure mode this gate prevents.
 
@@ -897,3 +897,97 @@ The alerts module has no `.spec.ts` files; the alert-tag-filters service is exer
 ### Allowlist disposition
 
 This file **EXITS the allowlist** — zero direct `isGlobalAdmin` references after the migration. **Sixth file to fully exit** the allowlist since Phase 3c began (after `report-data-fetcher.service.ts` C6, `report-generation.service.ts` C7, `adapt.service.ts` C9, `compare-presets.service.ts` C11, and `awr-reports.controller.ts` C12). Allowlist size: 33 → 32.
+
+---
+
+## Phase C14 — Single file: `events.service.ts` finish — first split-PR finish
+
+**Audit date:** 2026-04-30
+**Scope:** Single-file finishing migration. C10 migrated the 2 Bucket A list-filter sites (`findAll`, `findByTestRun`) and left 1 Bucket B per-resource guard at `findOne` line 112. C14 closes that last site, fully exiting the file from the allowlist. **First Phase 3c PR to "finish" a file that an earlier C-series PR partially migrated** — establishes a precedent for low-cost follow-up PRs that complete files left partially-migrated by earlier work.
+**File re-verified:** `apps/api/src/modules/events/events.service.ts`
+
+### Site Classification
+
+| Line | Method | Bucket | Tool |
+|------|--------|--------|------|
+| 112 | `findOne` | **B** — per-resource guard `if (!isGlobalAdmin && event.organizationId) { isOrganizationMember; throw }` | `canAccessResource` |
+
+**Single site migrated. File fully exits the allowlist.**
+
+### Migration shape
+
+Same pattern as C12 awr-reports and C13 alert-tag-filters' `findOne`:
+
+```typescript
+// before
+if (!this.authzService.isGlobalAdmin(roles) && event.organizationId) {
+  const hasAccess = await this.authzService.isOrganizationMember(userId, event.organizationId);
+  if (!hasAccess) {
+    throw new NotFoundException(`Event ${id} not found`);
+  }
+}
+
+// after
+const result = await this.authzService.canAccessResource(userId, roles, {
+  organization_id: event.organizationId,
+  created_by: '',
+} as OwnedResource);
+if (!result.allowed) {
+  throw new NotFoundException(`Event ${id} not found`);
+}
+```
+
+Same `&& filter.organizationId` short-circuit-as-backward-compat semantics as C13 — `canAccessResource` codifies it via "Resource has no organization (legacy data)" branch.
+
+### Spec update required
+
+Unlike C12 (no controller spec) and C13 (no alerts spec), `events.service.ts` has 4 explicit `findOne` tests in `events.service.spec.ts`:
+
+1. "should return event for global admin" — used `isGlobalAdmin.mockReturnValue(true)`. Post-migration the call goes through `canAccessResource` instead. Default mock `canAccessResource: jest.fn().mockResolvedValue({ allowed: true, reason: 'mocked' })` makes this pass without explicit setup.
+
+2. "should throw NotFoundException if event not found" — unchanged (event-not-found case throws before the auth check).
+
+3. "should check org membership for non-admin" — was asserting `isOrganizationMember` was called with `('user-1', mockEvent.organizationId)`. Updated to assert `canAccessResource` was called with `('user-1', ['user'], { organization_id: mockEvent.organizationId, ... })`.
+
+4. "should throw NotFoundException for non-admin without org access" — was mocking `isOrganizationMember.mockResolvedValue(false)`. Updated to mock `canAccessResource.mockResolvedValue({ allowed: false, reason: 'denied' })`.
+
+The base `AuthorizationService` mock provider (line 82) gained `canAccessResource: jest.fn().mockResolvedValue({ allowed: true, reason: 'mocked' })` so the default path works without explicit setup.
+
+### "Finish" PR precedent
+
+C-series PRs so far have either fully migrated a file (C6/C7/C9/C11/C12/C13) or partially migrated it and left some sites in the allowlist (C8 metrics-sources, C10 events). The "left some sites" disposition was always pragmatic: the partial migration covered the canonical Bucket A list-filter sites, but per-resource Bucket B sites were deferred until the `canAccessResource` pattern was established (C12).
+
+C14 closes the loop. With `canAccessResource` now established as the standard tool for per-resource guards (C12, C13), partially-migrated files can be cheaply finished. The pattern is:
+
+1. Find a file that's still in the allowlist with a single Bucket B site remaining
+2. Migrate the site to `canAccessResource`
+3. Update spec mocks to expect `canAccessResource` instead of `isOrganizationMember`
+4. File exits the allowlist
+
+This makes "finishing" partially-migrated files a fast follow-up category. After C14, the partially-migrated files in the allowlist are: `metrics-sources.service.ts` (3 sites: 1 debug-log, 2 per-resource), `dynatrace.service.ts` (24 debug-log + per-resource sites), `grafana/application-dashboards.service.ts`, `grafana/grafana-dashboards.service.ts`, `grafana/grafana-instances.service.ts`, `pyroscope/pyroscope-instances.service.ts`, `tracing-instances/tracing-instances.service.ts`, `benchmark-query.service.ts`. Each is a candidate for a future "finish" PR following the C14 precedent.
+
+### Test Results
+
+| Test run | Result |
+|----------|--------|
+| `cd apps/api && npx jest src/modules/events` | 19 passed (2 suites) |
+| `cd apps/api && npx jest` (full suite) | 4314 passed, 20 skipped (pre-existing), 0 failed |
+| `npm run type-check` (`@perfana/api`) | 0 errors |
+| `npm run lint` (`@perfana/api`) | 0 errors, 59 pre-existing warnings (none introduced) |
+
+### Net diff
+
+- Lines removed: 5
+- Lines added: 10
+- **Net +5 lines** (service). Plus +5/-3 in the spec for the mock additions and assertion updates.
+
+### Files changed
+
+- `apps/api/src/modules/events/events.service.ts` — import `OwnedResource` + 1 site migration
+- `apps/api/src/modules/events/events.service.spec.ts` — add `canAccessResource` mock + update 2 `findOne` test assertions
+- `apps/api/.rbac-migration-allowlist.json` — remove the file entry
+- `docs/superpowers/audits/2026-04-26-audit-decisions.md` — this file
+
+### Allowlist disposition
+
+This file **EXITS the allowlist** — zero direct `isGlobalAdmin` references after the migration. **Seventh file to fully exit** the allowlist since Phase 3c began (after C6, C7, C9, C11, C12, and C13). Allowlist size: 32 → 31.

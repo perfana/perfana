@@ -4,6 +4,11 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
+## [0.2.47.24] - 2026-04-30
+
+### Refactored
+- **RBAC Phase 3c — finish `events.service.ts` migration (Phase C14).** First Phase 3c PR to "finish" a file that an earlier C-series PR (C10) partially migrated. C10 migrated the 2 Bucket A list-filter sites and left 1 Bucket B per-resource guard at `findOne` line 112. C14 closes that last site via `canAccessResource` (same pattern as C12 awr-reports and C13 alert-tag-filters). Spec updated: 2 `findOne` test assertions migrated from `isOrganizationMember` to `canAccessResource`; base mock provider gained `canAccessResource: jest.fn().mockResolvedValue({ allowed: true, reason: 'mocked' })`. File exits the lint allowlist (seventh file to do so; allowlist 32 → 31). Burndown: Bucket B 3 → 4 of 14 (28.6%). Establishes the "finish PR" precedent — partially-migrated files in the allowlist are now cheap follow-up targets. All 19 events tests + full 4314-test API suite pass; 0 type errors; 0 lint errors. Net +5 lines.
+
 ## [0.2.47.23] - 2026-04-29
 
 ### Refactored
