@@ -1,6 +1,4 @@
 [
-  "apps/api/src/modules/deep-links/deep-links.controller.ts",
-  "apps/api/src/modules/deep-links/deep-links.service.ts",
   "apps/api/src/modules/dynatrace/dynatrace.service.ts",
   "apps/api/src/modules/graph-presets/graph-presets.service.ts",
   "apps/api/src/modules/metrics/metrics.service.ts",

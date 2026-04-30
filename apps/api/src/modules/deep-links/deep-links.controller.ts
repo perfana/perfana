@@ -9,12 +9,10 @@ import {
   Query,
   ParseUUIDPipe,
   NotFoundException,
-  BadRequestException,
 } from '@nestjs/common';
 import { ApiTags, ApiOperation, ApiResponse, ApiQuery, ApiBearerAuth } from '@nestjs/swagger';
 import { DeepLinksService } from './deep-links.service';
 import { TestRunsService } from '../test-runs/test-runs.service';
-import { AuthorizationService } from '../../common/services/authorization.service';
 import { DeepLink, GenericDeepLink } from '@perfana/shared/entities';
 import { ResolvedDeepLink } from './entities/deep-link.entity';
 import { CreateDeepLinkDto } from './dto/create-deep-link.dto';
@@ -30,7 +28,6 @@ export class DeepLinksController {
   constructor(
     private readonly deepLinksService: DeepLinksService,
     private readonly testRunsService: TestRunsService,
-    private readonly authzService: AuthorizationService,
   ) {}
 
   @Get()
@@ -46,13 +43,12 @@ export class DeepLinksController {
     @Query('workload') workload: string,
     @UserCtx() ctx: UserContext,
   ): Promise<DeepLink[]> {
-    const organizationIds = await this.authzService.getAccessibleOrganizations(ctx.userId);
     return this.deepLinksService.findBySystemEnvWorkload(
       systemUnderTestId,
       testEnvironment,
       workload,
+      ctx.userId,
       ctx.roles,
-      organizationIds,
     );
   }
 
@@ -65,8 +61,7 @@ export class DeepLinksController {
     @Param('id', ParseUUIDPipe) id: string,
     @UserCtx() ctx: UserContext,
   ): Promise<DeepLink> {
-    const organizationIds = await this.authzService.getAccessibleOrganizations(ctx.userId);
-    return this.deepLinksService.findById(id, ctx.roles, organizationIds);
+    return this.deepLinksService.findById(id, ctx.userId, ctx.roles);
   }
 
   @Post()
@@ -78,15 +73,7 @@ export class DeepLinksController {
     @Body() createDto: CreateDeepLinkDto,
     @UserCtx() ctx: UserContext,
   ): Promise<DeepLink> {
-    const isAdmin = this.authzService.isGlobalAdmin(ctx.roles);
-    const organizationIds = isAdmin ? [] : await this.authzService.getAccessibleOrganizations(ctx.userId);
-    if (!isAdmin && organizationIds.length === 0) {
-      throw new BadRequestException(
-        'User must belong to an organization to create deep links',
-      );
-    }
-
-    return this.deepLinksService.create(createDto, ctx.roles, organizationIds);
+    return this.deepLinksService.create(createDto, ctx.userId, ctx.roles);
   }
 
   @Post('copy')
@@ -98,13 +85,7 @@ export class DeepLinksController {
     @Body() dto: CopyDeepLinksDto,
     @UserCtx() ctx: UserContext,
   ): Promise<{ copied: number; skipped: number; total: number }> {
-    const isAdmin = this.authzService.isGlobalAdmin(ctx.roles);
-    const organizationIds = isAdmin ? [] : await this.authzService.getAccessibleOrganizations(ctx.userId);
-    if (!isAdmin && organizationIds.length === 0) {
-      throw new BadRequestException('User must belong to an organization to copy deep links');
-    }
-
-    return this.deepLinksService.copyToScope(dto, ctx.roles, organizationIds);
+    return this.deepLinksService.copyToScope(dto, ctx.userId, ctx.roles);
   }
 
   @Put(':id')
@@ -117,8 +98,7 @@ export class DeepLinksController {
     @Body() updateDto: UpdateDeepLinkDto,
     @UserCtx() ctx: UserContext,
   ): Promise<DeepLink> {
-    const organizationIds = await this.authzService.getAccessibleOrganizations(ctx.userId);
-    return this.deepLinksService.update(id, updateDto, ctx.roles, organizationIds);
+    return this.deepLinksService.update(id, updateDto, ctx.userId, ctx.roles);
   }
 
   @Delete(':id')
@@ -130,8 +110,7 @@ export class DeepLinksController {
     @Param('id', ParseUUIDPipe) id: string,
     @UserCtx() ctx: UserContext,
   ): Promise<void> {
-    const organizationIds = await this.authzService.getAccessibleOrganizations(ctx.userId);
-    return this.deepLinksService.delete(id, ctx.roles, organizationIds);
+    return this.deepLinksService.delete(id, ctx.userId, ctx.roles);
   }
 
   @Get(':id/resolve')
@@ -145,8 +124,7 @@ export class DeepLinksController {
     @Query('testRunId') testRunId: string,
     @UserCtx() ctx: UserContext,
   ): Promise<ResolvedDeepLink> {
-    const organizationIds = await this.authzService.getAccessibleOrganizations(ctx.userId);
-    const deepLink = await this.deepLinksService.findById(id, ctx.roles, organizationIds);
+    const deepLink = await this.deepLinksService.findById(id, ctx.userId, ctx.roles);
 
     // Get the test run directly from the database
     const testRun = await this.testRunsService.getTestRunByTestRunId(testRunId, ctx.userId, ctx.roles);
@@ -175,18 +153,7 @@ export class DeepLinksController {
   @ApiResponse({ status: 401, description: 'Unauthorized' })
   async createGenericDeepLink(
     @Body() createDto: CreateGenericDeepLinkDto,
-    @UserCtx() ctx: UserContext,
   ): Promise<GenericDeepLink> {
-    const isAdmin = this.authzService.isGlobalAdmin(ctx.roles);
-    if (!isAdmin) {
-      const organizationIds = await this.authzService.getAccessibleOrganizations(ctx.userId);
-      if (organizationIds.length === 0) {
-        throw new BadRequestException(
-          'User must belong to an organization to create generic deep links',
-        );
-      }
-    }
-
     return this.deepLinksService.createGeneric(createDto);
   }
 }

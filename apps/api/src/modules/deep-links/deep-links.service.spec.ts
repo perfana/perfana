@@ -22,10 +22,11 @@ import { UpdateDeepLinkDto } from './dto/update-deep-link.dto';
 import { CopyDeepLinksDto } from './dto/copy-deep-links.dto';
 import { TestRunConfiguration, TestRun as TestRunEntity, SystemUnderTest } from '../../entities';
 import { ResourceNotFoundException } from '../../common/exceptions/business.exception';
+import { AuthorizationService } from '../../common/services/authorization.service';
+import { createAuthorizationServiceMock } from '../../../test/mocks/authorization-service.mock';
 import {
   createMockRepository,
   MockRepository,
-  MockSelectQueryBuilder,
 } from '../../../test/helpers/mock-repository.factory';
 
 /**
@@ -52,7 +53,7 @@ describe('DeepLinksService', () => {
   let testRunConfigRepo: MockRepository<TestRunConfiguration>;
   let testRunRepo: MockRepository<TestRunEntity>;
   let systemRepo: MockRepository<SystemUnderTest>;
-  let systemQueryBuilder: MockSelectQueryBuilder<SystemUnderTest>;
+  let authzService: ReturnType<typeof createAuthorizationServiceMock>;
 
   // Mock data factory for deep links
   const createMockDeepLink = (overrides?: Partial<DeepLink>): DeepLink => ({
@@ -96,6 +97,8 @@ describe('DeepLinksService', () => {
     const mockTestRunRepository = createMockRepository<TestRunEntity>();
     const mockSystemUnderTestRepository = createMockRepository<SystemUnderTest>();
 
+    const mockAuthzService = createAuthorizationServiceMock();
+
     const module: TestingModule = await Test.createTestingModule({
       providers: [
         DeepLinksService,
@@ -115,6 +118,10 @@ describe('DeepLinksService', () => {
           provide: getRepositoryToken(SystemUnderTest),
           useValue: mockSystemUnderTestRepository,
         },
+        {
+          provide: AuthorizationService,
+          useValue: mockAuthzService,
+        },
       ],
     }).compile();
 
@@ -123,11 +130,13 @@ describe('DeepLinksService', () => {
     testRunConfigRepo = module.get(getRepositoryToken(TestRunConfiguration));
     testRunRepo = module.get(getRepositoryToken(TestRunEntity));
     systemRepo = module.get(getRepositoryToken(SystemUnderTest));
-    // Obtain the shared query builder instance without counting the call against tests.
-    // createQueryBuilder is a jest.fn() that returns the same mock QB every time.
-    systemQueryBuilder = systemRepo.createQueryBuilder() as MockSelectQueryBuilder<SystemUnderTest>;
-    // Reset so the call above does not pollute test assertions.
-    systemRepo.createQueryBuilder.mockClear();
+    authzService = mockAuthzService;
+    // Default: validateSystemAccess loads a system. canAccessResource allows by default.
+    systemRepo.findOne.mockResolvedValue({
+      id: 'system-uuid',
+      organization_id: 'org-uuid',
+      created_by: 'creator',
+    } as SystemUnderTest);
   });
 
   afterEach(() => {
@@ -1212,9 +1221,9 @@ describe('DeepLinksService', () => {
   });
 
   describe('Authorization and Organization Filtering', () => {
-    describe('findBySystemEnvWorkload with roles/organizationIds', () => {
-      it('should bypass access check and return deep links when no roles or organizationIds provided', async () => {
-        // Arrange — no roles, no org IDs: the guard branch is skipped entirely
+    describe('findBySystemEnvWorkload with userId/roles', () => {
+      it('should bypass access check and return deep links when no userId or roles provided', async () => {
+        // Arrange — no userId, no roles: the guard branch is skipped entirely
         repository.findBySystemEnvWorkload.mockResolvedValue([mockDeepLink]);
 
         // Act
@@ -1222,136 +1231,75 @@ describe('DeepLinksService', () => {
 
         // Assert
         expect(result).toEqual([mockDeepLink]);
-        // systemRepo query builder should never have been invoked
-        expect(systemRepo.createQueryBuilder).not.toHaveBeenCalled();
+        expect(authzService.canAccessResource).not.toHaveBeenCalled();
       });
 
-      it('should return deep links when admin role bypasses organization check', async () => {
-        // Arrange
-        repository.findBySystemEnvWorkload.mockResolvedValue([mockDeepLink]);
-        // Admin: no DB query needed — validateSystemAccess returns true immediately
-
-        // Act
-        const result = await service.findBySystemEnvWorkload(
-          'system-uuid', 'test', 'load', ['perfana-admin'], [],
-        );
-
-        // Assert
-        expect(result).toEqual([mockDeepLink]);
-        // Should not have queried the system repo (admin bypass)
-        expect(systemRepo.createQueryBuilder).not.toHaveBeenCalled();
-      });
-
-      it('should return deep links when super-admin role bypasses organization check', async () => {
-        // Arrange
+      it('should return deep links when canAccessResource allows', async () => {
         repository.findBySystemEnvWorkload.mockResolvedValue([mockDeepLink]);
 
-        // Act
         const result = await service.findBySystemEnvWorkload(
-          'system-uuid', 'test', 'load', ['super-admin'], [],
+          'system-uuid', 'test', 'load', 'user-uuid', ['user'],
         );
 
-        // Assert
         expect(result).toEqual([mockDeepLink]);
-        expect(systemRepo.createQueryBuilder).not.toHaveBeenCalled();
+        expect(authzService.canAccessResource).toHaveBeenCalled();
       });
 
-      it('should return empty array when non-admin user has no organization memberships', async () => {
-        // Arrange — roles present but no org IDs: validateSystemAccess returns false immediately
-        // (non-admin with empty orgIds)
+      it('should return empty array when canAccessResource denies', async () => {
+        authzService.canAccessResource.mockResolvedValue({ allowed: false, reason: 'denied' });
 
-        // Act
         const result = await service.findBySystemEnvWorkload(
-          'system-uuid', 'test', 'load', ['user'], [],
+          'system-uuid', 'test', 'load', 'user-uuid', ['user'],
         );
 
-        // Assert
         expect(result).toEqual([]);
         expect(repository.findBySystemEnvWorkload).not.toHaveBeenCalled();
       });
 
-      it('should return deep links when non-admin user belongs to an org that owns the system', async () => {
-        // Arrange
-        systemQueryBuilder.getOne.mockResolvedValue({ id: 'system-uuid' } as SystemUnderTest);
-        repository.findBySystemEnvWorkload.mockResolvedValue([mockDeepLink]);
+      it('should return empty array when system does not exist', async () => {
+        systemRepo.findOne.mockResolvedValue(null);
 
-        // Act
         const result = await service.findBySystemEnvWorkload(
-          'system-uuid', 'test', 'load', ['user'], ['org-uuid'],
+          'system-uuid', 'test', 'load', 'user-uuid', ['user'],
         );
 
-        // Assert
-        expect(result).toEqual([mockDeepLink]);
-        expect(systemRepo.createQueryBuilder).toHaveBeenCalledWith('sut');
-      });
-
-      it('should return empty array when system does not belong to any of the user org IDs', async () => {
-        // Arrange — getOne returns null: system not found in user's orgs
-        systemQueryBuilder.getOne.mockResolvedValue(null);
-
-        // Act
-        const result = await service.findBySystemEnvWorkload(
-          'system-uuid', 'test', 'load', ['user'], ['other-org-uuid'],
-        );
-
-        // Assert
         expect(result).toEqual([]);
         expect(repository.findBySystemEnvWorkload).not.toHaveBeenCalled();
       });
 
-      it('should enforce access check when only organizationIds are provided (no roles)', async () => {
-        // Arrange — orgIds present but no roles
-        systemQueryBuilder.getOne.mockResolvedValue({ id: 'system-uuid' } as SystemUnderTest);
+      it('should enforce access check when only roles are provided (no userId)', async () => {
         repository.findBySystemEnvWorkload.mockResolvedValue([mockDeepLink]);
 
-        // Act
         const result = await service.findBySystemEnvWorkload(
-          'system-uuid', 'test', 'load', [], ['org-uuid'],
+          'system-uuid', 'test', 'load', '', ['user'],
         );
 
-        // Assert
         expect(result).toEqual([mockDeepLink]);
+        expect(authzService.canAccessResource).toHaveBeenCalled();
       });
     });
 
-    describe('findById with roles/organizationIds', () => {
-      it('should return deep link when admin role bypasses organization check', async () => {
-        // Arrange
+    describe('findById with userId/roles', () => {
+      it('should return deep link when canAccessResource allows', async () => {
         repository.findById.mockResolvedValue(mockDeepLink);
 
-        // Act
-        const result = await service.findById('deep-link-uuid', ['perfana-admin'], []);
+        const result = await service.findById('deep-link-uuid', 'user-uuid', ['user']);
 
-        // Assert
         expect(result).toEqual(mockDeepLink);
-        expect(systemRepo.createQueryBuilder).not.toHaveBeenCalled();
+        expect(authzService.canAccessResource).toHaveBeenCalled();
       });
 
-      it('should return deep link when non-admin user belongs to the system org', async () => {
-        // Arrange
+      it('should throw ResourceNotFoundException when canAccessResource denies', async () => {
         repository.findById.mockResolvedValue(mockDeepLink);
-        systemQueryBuilder.getOne.mockResolvedValue({ id: 'system-uuid' } as SystemUnderTest);
+        authzService.canAccessResource.mockResolvedValue({ allowed: false, reason: 'denied' });
 
-        // Act
-        const result = await service.findById('deep-link-uuid', ['user'], ['org-uuid']);
-
-        // Assert
-        expect(result).toEqual(mockDeepLink);
-      });
-
-      it('should throw ResourceNotFoundException when non-admin user lacks access', async () => {
-        // Arrange
-        repository.findById.mockResolvedValue(mockDeepLink);
-        systemQueryBuilder.getOne.mockResolvedValue(null);
-
-        // Act & Assert
         await expect(
-          service.findById('deep-link-uuid', ['user'], ['other-org-uuid']),
+          service.findById('deep-link-uuid', 'user-uuid', ['user']),
         ).rejects.toThrow(ResourceNotFoundException);
       });
     });
 
-    describe('create with roles/organizationIds', () => {
+    describe('create with userId/roles', () => {
       const createDto: CreateDeepLinkDto = {
         systemUnderTestId: 'system-uuid',
         testEnvironment: 'test',
@@ -1360,95 +1308,66 @@ describe('DeepLinksService', () => {
         url: 'https://example.com/{perfana-test-run-id}',
       };
 
-      it('should create deep link when admin bypasses organization check', async () => {
-        // Arrange
+      it('should create deep link when canAccessResource allows', async () => {
         repository.create.mockResolvedValue(mockDeepLink);
 
-        // Act
-        const result = await service.create(createDto, ['perfana-admin'], []);
+        const result = await service.create(createDto, 'user-uuid', ['user']);
 
-        // Assert
         expect(result).toEqual(mockDeepLink);
-        expect(systemRepo.createQueryBuilder).not.toHaveBeenCalled();
+        expect(authzService.canAccessResource).toHaveBeenCalled();
       });
 
-      it('should create deep link when non-admin user has access to the system', async () => {
-        // Arrange
-        systemQueryBuilder.getOne.mockResolvedValue({ id: 'system-uuid' } as SystemUnderTest);
-        repository.create.mockResolvedValue(mockDeepLink);
+      it('should throw ResourceNotFoundException when canAccessResource denies', async () => {
+        authzService.canAccessResource.mockResolvedValue({ allowed: false, reason: 'denied' });
 
-        // Act
-        const result = await service.create(createDto, ['user'], ['org-uuid']);
-
-        // Assert
-        expect(result).toEqual(mockDeepLink);
-      });
-
-      it('should throw ResourceNotFoundException when non-admin user lacks access to the system', async () => {
-        // Arrange
-        systemQueryBuilder.getOne.mockResolvedValue(null);
-
-        // Act & Assert
         await expect(
-          service.create(createDto, ['user'], ['other-org-uuid']),
+          service.create(createDto, 'user-uuid', ['user']),
         ).rejects.toThrow(ResourceNotFoundException);
 
         expect(repository.create).not.toHaveBeenCalled();
       });
     });
 
-    describe('update with roles/organizationIds', () => {
-      it('should update deep link when admin bypasses organization check', async () => {
-        // Arrange
+    describe('update with userId/roles', () => {
+      it('should update deep link when canAccessResource allows', async () => {
         const updateDto: UpdateDeepLinkDto = { name: 'Updated' };
         repository.findById.mockResolvedValue(mockDeepLink);
         repository.update.mockResolvedValue({ ...mockDeepLink, ...updateDto });
 
-        // Act
-        const result = await service.update('deep-link-uuid', updateDto, ['perfana-admin'], []);
+        const result = await service.update('deep-link-uuid', updateDto, 'user-uuid', ['user']);
 
-        // Assert
         expect(result).toEqual({ ...mockDeepLink, ...updateDto });
-        expect(systemRepo.createQueryBuilder).not.toHaveBeenCalled();
       });
 
-      it('should throw ResourceNotFoundException when non-admin user lacks access during update', async () => {
-        // Arrange
+      it('should throw ResourceNotFoundException when canAccessResource denies during update', async () => {
         const updateDto: UpdateDeepLinkDto = { name: 'Updated' };
         repository.findById.mockResolvedValue(mockDeepLink);
-        systemQueryBuilder.getOne.mockResolvedValue(null);
+        authzService.canAccessResource.mockResolvedValue({ allowed: false, reason: 'denied' });
 
-        // Act & Assert
         await expect(
-          service.update('deep-link-uuid', updateDto, ['user'], ['other-org-uuid']),
+          service.update('deep-link-uuid', updateDto, 'user-uuid', ['user']),
         ).rejects.toThrow(ResourceNotFoundException);
 
         expect(repository.update).not.toHaveBeenCalled();
       });
     });
 
-    describe('delete with roles/organizationIds', () => {
-      it('should delete deep link when admin bypasses organization check', async () => {
-        // Arrange
+    describe('delete with userId/roles', () => {
+      it('should delete deep link when canAccessResource allows', async () => {
         repository.findById.mockResolvedValue(mockDeepLink);
         repository.delete.mockResolvedValue(undefined);
 
-        // Act
-        await service.delete('deep-link-uuid', ['perfana-admin'], []);
+        await service.delete('deep-link-uuid', 'user-uuid', ['user']);
 
-        // Assert
         expect(repository.delete).toHaveBeenCalledWith('deep-link-uuid');
-        expect(systemRepo.createQueryBuilder).not.toHaveBeenCalled();
       });
 
-      it('should throw ResourceNotFoundException when non-admin user lacks access during delete', async () => {
-        // Arrange
+      it('should throw ResourceNotFoundException when canAccessResource denies during delete', async () => {
         repository.findById.mockResolvedValue(mockDeepLink);
-        systemQueryBuilder.getOne.mockResolvedValue(null);
+        authzService.canAccessResource.mockResolvedValue({ allowed: false, reason: 'denied' });
 
-        // Act & Assert
         await expect(
-          service.delete('deep-link-uuid', ['user'], ['other-org-uuid']),
+          service.delete('deep-link-uuid', 'user-uuid', ['user']),
         ).rejects.toThrow(ResourceNotFoundException);
 
         expect(repository.delete).not.toHaveBeenCalled();
@@ -1480,10 +1399,8 @@ describe('DeepLinksService', () => {
       updatedAt: new Date('2024-01-01'),
     } as DeepLink;
 
-    beforeEach(() => {
-      // Both source and target systems are accessible (admin scenario)
-      systemQueryBuilder.getOne.mockResolvedValue({ id: 'system-uuid' } as SystemUnderTest);
-    });
+    // Default systemRepo.findOne + canAccessResource mocks (set in top-level beforeEach)
+    // ensure both source and target systems are accessible.
 
     it('should copy all source deep links to target scope when no conflicts', async () => {
       // Arrange
@@ -1498,7 +1415,7 @@ describe('DeepLinksService', () => {
       } as DeepLink);
 
       // Act
-      const result = await service.copyToScope(dto, ['perfana-admin'], []);
+      const result = await service.copyToScope(dto, 'admin-uuid', ['perfana-admin']);
 
       // Assert
       expect(result).toEqual({ copied: 1, skipped: 0, total: 1 });
@@ -1521,7 +1438,7 @@ describe('DeepLinksService', () => {
         .mockResolvedValueOnce([existingTargetLink]);
 
       // Act
-      const result = await service.copyToScope(dto, ['perfana-admin'], []);
+      const result = await service.copyToScope(dto, 'admin-uuid', ['perfana-admin']);
 
       // Assert
       expect(result).toEqual({ copied: 0, skipped: 1, total: 1 });
@@ -1544,7 +1461,7 @@ describe('DeepLinksService', () => {
       repository.update.mockResolvedValue(existingTargetLink as DeepLink);
 
       // Act
-      const result = await service.copyToScope(dto, ['perfana-admin'], []);
+      const result = await service.copyToScope(dto, 'admin-uuid', ['perfana-admin']);
 
       // Assert
       expect(result).toEqual({ copied: 1, skipped: 0, total: 1 });
@@ -1565,7 +1482,7 @@ describe('DeepLinksService', () => {
       repository.create.mockResolvedValue(sourceLink);
 
       // Act
-      const result = await service.copyToScope(dto, ['perfana-admin'], []);
+      const result = await service.copyToScope(dto, 'admin-uuid', ['perfana-admin']);
 
       // Assert
       // Only link-1 was in ids filter; link-2 was excluded
@@ -1585,7 +1502,7 @@ describe('DeepLinksService', () => {
         .mockResolvedValueOnce([]);
 
       // Act
-      const result = await service.copyToScope(dto, ['perfana-admin'], []);
+      const result = await service.copyToScope(dto, 'admin-uuid', ['perfana-admin']);
 
       // Assert
       expect(result).toEqual({ copied: 0, skipped: 0, total: 0 });
@@ -1603,37 +1520,32 @@ describe('DeepLinksService', () => {
       repository.create.mockResolvedValue(link2 as DeepLink);
 
       // Act
-      const result = await service.copyToScope(dto, ['perfana-admin'], []);
+      const result = await service.copyToScope(dto, 'admin-uuid', ['perfana-admin']);
 
       // Assert
       expect(result).toEqual({ copied: 1, skipped: 1, total: 2 });
     });
 
     it('should throw ResourceNotFoundException when user lacks access to source system', async () => {
-      // Arrange
       const dto = buildCopyDto();
-      // Non-admin with no org access to source system
-      systemQueryBuilder.getOne.mockResolvedValue(null);
+      authzService.canAccessResource.mockResolvedValue({ allowed: false, reason: 'denied' });
 
-      // Act & Assert
       await expect(
-        service.copyToScope(dto, ['user'], ['other-org']),
+        service.copyToScope(dto, 'user-uuid', ['user']),
       ).rejects.toThrow(ResourceNotFoundException);
 
       expect(repository.findBySystemEnvWorkload).not.toHaveBeenCalled();
     });
 
     it('should throw ResourceNotFoundException when user lacks access to target system', async () => {
-      // Arrange
       const dto = buildCopyDto();
-      // First call (source system check) succeeds, second call (target system check) fails
-      systemQueryBuilder.getOne
-        .mockResolvedValueOnce({ id: 'source-system-uuid' } as SystemUnderTest)
-        .mockResolvedValueOnce(null);
+      // First check (source) succeeds, second (target) denies.
+      authzService.canAccessResource
+        .mockResolvedValueOnce({ allowed: true, reason: 'ok' })
+        .mockResolvedValueOnce({ allowed: false, reason: 'denied' });
 
-      // Act & Assert
       await expect(
-        service.copyToScope(dto, ['user'], ['org-uuid']),
+        service.copyToScope(dto, 'user-uuid', ['user']),
       ).rejects.toThrow(ResourceNotFoundException);
 
       expect(repository.findBySystemEnvWorkload).not.toHaveBeenCalled();
@@ -1651,7 +1563,7 @@ describe('DeepLinksService', () => {
       repository.create.mockResolvedValue(linkWithoutTags);
 
       // Act
-      const result = await service.copyToScope(dto, ['perfana-admin'], []);
+      const result = await service.copyToScope(dto, 'admin-uuid', ['perfana-admin']);
 
       // Assert
       expect(result).toEqual({ copied: 1, skipped: 0, total: 1 });
@@ -1671,7 +1583,7 @@ describe('DeepLinksService', () => {
       repository.create.mockResolvedValue(sourceLink);
 
       // Act
-      const result = await service.copyToScope(dto, ['perfana-admin'], []);
+      const result = await service.copyToScope(dto, 'admin-uuid', ['perfana-admin']);
 
       // Assert — empty ids array is falsy check passes, all 2 links copied
       expect(result.total).toBe(2);

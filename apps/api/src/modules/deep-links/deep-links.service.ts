@@ -11,6 +11,8 @@ import { CreateGenericDeepLinkDto } from './dto/create-generic-deep-link.dto';
 import { CopyDeepLinksDto } from './dto/copy-deep-links.dto';
 import { TestRunConfiguration, TestRun as TestRunEntity, SystemUnderTest } from '../../entities';
 import { ResourceNotFoundException } from '../../common/exceptions/business.exception';
+import { AuthorizationService } from '../../common/services/authorization.service';
+import type { OwnedResource } from '@perfana/shared';
 
 /**
  * Test run data used for deep link variable resolution.
@@ -31,11 +33,6 @@ interface TestRunVariableData {
   tags?: string[];
 }
 
-/**
- * Global admin roles that bypass organization filtering
- */
-const ADMIN_ROLES = ['perfana-admin', 'super-admin', 'admin'];
-
 @Injectable()
 export class DeepLinksService {
   private readonly logger = new Logger(DeepLinksService.name);
@@ -48,43 +45,29 @@ export class DeepLinksService {
     private readonly testRunRepo: Repository<TestRunEntity>,
     @InjectRepository(SystemUnderTest)
     private readonly systemRepo: Repository<SystemUnderTest>,
+    private readonly authzService: AuthorizationService,
   ) {}
 
   /**
-   * Check if a user has global admin role
-   */
-  private isGlobalAdmin(roles: string[]): boolean {
-    return roles.some(role => ADMIN_ROLES.includes(role));
-  }
-
-  /**
-   * Validate that a user has access to a system under test via organization membership
-   * Returns true if access is granted, false otherwise
+   * Validate that a user has access to a system under test.
+   * Returns true if access is granted, false otherwise.
    */
   private async validateSystemAccess(
     systemUnderTestId: string,
+    userId: string,
     roles: string[],
-    organizationIds: string[],
   ): Promise<boolean> {
-    // Admins have access to all systems
-    if (this.isGlobalAdmin(roles)) {
-      return true;
-    }
-
-    // Non-admin users with no organization memberships have no access
-    if (organizationIds.length === 0) {
+    const system = await this.systemRepo.findOne({ where: { id: systemUnderTestId } });
+    if (!system) {
       return false;
     }
 
-    // Check if the system belongs to an organization the user has access to
-    const system = await this.systemRepo
-      .createQueryBuilder('sut')
-      .leftJoin('sut.team', 'team')
-      .where('sut.id = :systemId', { systemId: systemUnderTestId })
-      .andWhere('sut.organization_id IN (:...orgIds)', { orgIds: organizationIds })
-      .getOne();
+    const result = await this.authzService.canAccessResource(userId, roles, {
+      organization_id: system.organization_id,
+      created_by: system.created_by ?? '',
+    } as OwnedResource);
 
-    return !!system;
+    return result.allowed;
   }
 
   /**
@@ -93,19 +76,19 @@ export class DeepLinksService {
    * @param systemUnderTestId - System under test UUID
    * @param testEnvironment - Test environment name
    * @param workload - Workload name
-   * @param roles - User roles from JWT token (for admin bypass)
-   * @param organizationIds - User's accessible organization IDs from JWT token
+   * @param userId - User ID for authorization checks
+   * @param roles - User roles for authorization checks
    */
   async findBySystemEnvWorkload(
     systemUnderTestId: string,
     testEnvironment: string,
     workload: string,
+    userId: string = '',
     roles: string[] = [],
-    organizationIds: string[] = [],
   ): Promise<DeepLink[]> {
-    // Validate access if organization filtering is enabled
-    if (roles.length > 0 || organizationIds.length > 0) {
-      const hasAccess = await this.validateSystemAccess(systemUnderTestId, roles, organizationIds);
+    // Validate access if authorization context provided
+    if (userId !== '' || roles.length > 0) {
+      const hasAccess = await this.validateSystemAccess(systemUnderTestId, userId, roles);
       if (!hasAccess) {
         this.logger.debug(`User denied access to deep links for system ${systemUnderTestId}`);
         return [];
@@ -123,22 +106,22 @@ export class DeepLinksService {
    * Find a deep link by ID with organization filtering
    *
    * @param id - Deep link UUID
-   * @param roles - User roles from JWT token (for admin bypass)
-   * @param organizationIds - User's accessible organization IDs from JWT token
+   * @param userId - User ID for authorization checks
+   * @param roles - User roles for authorization checks
    */
   async findById(
     id: string,
+    userId: string = '',
     roles: string[] = [],
-    organizationIds: string[] = [],
   ): Promise<DeepLink> {
     const deepLink = await this.repository.findById(id);
     if (!deepLink) {
       throw new NotFoundException(`Deep link with ID ${id} not found`);
     }
 
-    // Validate access if organization filtering is enabled
-    if (roles.length > 0 || organizationIds.length > 0) {
-      const hasAccess = await this.validateSystemAccess(deepLink.systemUnderTestId, roles, organizationIds);
+    // Validate access if authorization context provided
+    if (userId !== '' || roles.length > 0) {
+      const hasAccess = await this.validateSystemAccess(deepLink.systemUnderTestId, userId, roles);
       if (!hasAccess) {
         this.logger.debug(`User denied access to deep link ${id}`);
         throw new ResourceNotFoundException('DeepLink', id);
@@ -152,17 +135,17 @@ export class DeepLinksService {
    * Create a new deep link with organization filtering
    *
    * @param dto - Create deep link DTO
-   * @param roles - User roles from JWT token (for admin bypass)
-   * @param organizationIds - User's accessible organization IDs from JWT token
+   * @param userId - User ID for authorization checks
+   * @param roles - User roles for authorization checks
    */
   async create(
     dto: CreateDeepLinkDto,
+    userId: string = '',
     roles: string[] = [],
-    organizationIds: string[] = [],
   ): Promise<DeepLink> {
-    // Validate access if organization filtering is enabled
-    if (roles.length > 0 || organizationIds.length > 0) {
-      const hasAccess = await this.validateSystemAccess(dto.systemUnderTestId, roles, organizationIds);
+    // Validate access if authorization context provided
+    if (userId !== '' || roles.length > 0) {
+      const hasAccess = await this.validateSystemAccess(dto.systemUnderTestId, userId, roles);
       if (!hasAccess) {
         this.logger.warn(`User denied access to create deep link for system ${dto.systemUnderTestId}`);
         throw new ResourceNotFoundException('System', dto.systemUnderTestId);
@@ -177,16 +160,16 @@ export class DeepLinksService {
    *
    * @param id - Deep link UUID
    * @param dto - Update deep link DTO
-   * @param roles - User roles from JWT token (for admin bypass)
-   * @param organizationIds - User's accessible organization IDs from JWT token
+   * @param userId - User ID for authorization checks
+   * @param roles - User roles for authorization checks
    */
   async update(
     id: string,
     dto: UpdateDeepLinkDto,
+    userId: string = '',
     roles: string[] = [],
-    organizationIds: string[] = [],
   ): Promise<DeepLink> {
-    await this.findById(id, roles, organizationIds); // Check if exists and has access
+    await this.findById(id, userId, roles); // Check if exists and has access
     return this.repository.update(id, dto);
   }
 
@@ -194,15 +177,15 @@ export class DeepLinksService {
    * Delete a deep link with organization filtering
    *
    * @param id - Deep link UUID
-   * @param roles - User roles from JWT token (for admin bypass)
-   * @param organizationIds - User's accessible organization IDs from JWT token
+   * @param userId - User ID for authorization checks
+   * @param roles - User roles for authorization checks
    */
   async delete(
     id: string,
+    userId: string = '',
     roles: string[] = [],
-    organizationIds: string[] = [],
   ): Promise<void> {
-    await this.findById(id, roles, organizationIds); // Check if exists and has access
+    await this.findById(id, userId, roles); // Check if exists and has access
     return this.repository.delete(id);
   }
 
@@ -215,17 +198,17 @@ export class DeepLinksService {
    */
   async copyToScope(
     dto: CopyDeepLinksDto,
+    userId: string,
     roles: string[],
-    organizationIds: string[],
   ): Promise<{ copied: number; skipped: number; total: number }> {
     // Validate access to source system
-    const hasSourceAccess = await this.validateSystemAccess(dto.sourceSystemUnderTestId, roles, organizationIds);
+    const hasSourceAccess = await this.validateSystemAccess(dto.sourceSystemUnderTestId, userId, roles);
     if (!hasSourceAccess) {
       throw new ResourceNotFoundException('System', dto.sourceSystemUnderTestId);
     }
 
     // Validate access to target system
-    const hasTargetAccess = await this.validateSystemAccess(dto.targetSystemUnderTestId, roles, organizationIds);
+    const hasTargetAccess = await this.validateSystemAccess(dto.targetSystemUnderTestId, userId, roles);
     if (!hasTargetAccess) {
       throw new ResourceNotFoundException('System', dto.targetSystemUnderTestId);
     }
