@@ -4,6 +4,7 @@ import { Repository } from 'typeorm';
 import { PyroscopeInstance as PyroscopeInstanceEntity } from '../../entities';
 import { AuthorizationService } from '../../common/services/authorization.service';
 import { withOrgFilter } from '../../common/utils/with-org-filter';
+import { OwnedResource } from '@perfana/shared';
 import { CreatePyroscopeInstanceDto, UpdatePyroscopeInstanceDto } from './dto/pyroscope-instance.dto';
 
 export interface PyroscopeInstance {
@@ -42,18 +43,13 @@ export class PyroscopeInstancesService {
   ) {}
 
   /**
-   * Check if user is org-admin in any of their organizations
-   * @throws Error if user is not an org-admin
+   * Check if user is org-admin in any of their organizations.
+   * Delegates the global-admin / any-org-admin policy to AuthorizationService.canAdministerAnyOrganization.
+   * @throws ForbiddenException if user is not authorized
    */
   private async requireOrgAdmin(userId: string, roles: string[]): Promise<void> {
-    // Global admins always have access
-    if (this.authzService.isGlobalAdmin(roles)) {
-      return;
-    }
-
-    // Check if user is org-admin in any organization
-    const isOrgAdmin = await this.authzService.isOrgAdminInAnyOrganization(userId);
-    if (!isOrgAdmin) {
+    const result = await this.authzService.canAdministerAnyOrganization(userId, roles);
+    if (!result.allowed) {
       throw new ForbiddenException('Organization admin privileges required to manage pyroscope instances');
     }
   }
@@ -138,9 +134,7 @@ export class PyroscopeInstancesService {
    */
   async findOne(id: string, userId: string, roles: string[]): Promise<PyroscopeInstance> {
     try {
-      // Log authorization context for debugging
-      const isAdmin = this.authzService.isGlobalAdmin(roles);
-      this.logger.debug(`findOne: id=${id}, userId=${userId}, isGlobalAdmin=${isAdmin}`);
+      this.logger.debug(`findOne: id=${id}, userId=${userId}`);
 
       const entity = await this.pyroscopeInstanceRepo.findOne({
         where: { id }
@@ -150,12 +144,15 @@ export class PyroscopeInstancesService {
         throw new NotFoundException(`Pyroscope instance with id ${id} not found`);
       }
 
-      // Check access permission based on organization
-      if (!isAdmin && entity.organizationId) {
-        const accessibleOrganizations = await this.authzService.getAccessibleOrganizations(userId);
-        if (!accessibleOrganizations.includes(entity.organizationId)) {
-          throw new NotFoundException(`Pyroscope instance with id ${id} not found`);
-        }
+      // Delegate the admin / legacy-null-org / membership decision to AuthorizationService.
+      // team_id is omitted to preserve the prior behavior of not checking team membership.
+      // created_by is unused by canAccessResource.
+      const accessResult = await this.authzService.canAccessResource(userId, roles, {
+        organization_id: entity.organizationId,
+        created_by: '',
+      } as OwnedResource);
+      if (!accessResult.allowed) {
+        throw new NotFoundException(`Pyroscope instance with id ${id} not found`);
       }
 
       return this.mapEntityToDto(entity);
@@ -180,9 +177,7 @@ export class PyroscopeInstancesService {
    */
   async create(createDto: CreatePyroscopeInstanceDto, userId: string, roles: string[]): Promise<PyroscopeInstance> {
     try {
-      // Log authorization context for debugging
-      const isAdmin = this.authzService.isGlobalAdmin(roles);
-      this.logger.debug(`create: userId=${userId}, isGlobalAdmin=${isAdmin}`);
+      this.logger.debug(`create: userId=${userId}`);
 
       // Check if user is org-admin in any organization
       await this.requireOrgAdmin(userId, roles);
@@ -220,9 +215,7 @@ export class PyroscopeInstancesService {
    */
   async update(id: string, updateDto: UpdatePyroscopeInstanceDto, userId: string, roles: string[]): Promise<PyroscopeInstance> {
     try {
-      // Log authorization context for debugging
-      const isAdmin = this.authzService.isGlobalAdmin(roles);
-      this.logger.debug(`update: id=${id}, userId=${userId}, isGlobalAdmin=${isAdmin}`);
+      this.logger.debug(`update: id=${id}, userId=${userId}`);
 
       // Check if user is org-admin in any organization
       await this.requireOrgAdmin(userId, roles);
@@ -233,12 +226,15 @@ export class PyroscopeInstancesService {
         throw new NotFoundException(`Pyroscope instance with id ${id} not found`);
       }
 
-      // Check modification permission based on organization
-      if (!isAdmin && entity.organizationId) {
-        const accessibleOrganizations = await this.authzService.getAccessibleOrganizations(userId);
-        if (!accessibleOrganizations.includes(entity.organizationId)) {
-          throw new NotFoundException(`Pyroscope instance with id ${id} not found`);
-        }
+      // The original guard used getAccessibleOrganizations + accessibleOrganizations.includes(orgId), which
+      // is read-membership semantics — same shape as canAccessResource (NOT canModifyResource, which would
+      // tighten to org-admin role). Preserves prior observable behavior.
+      const accessResult = await this.authzService.canAccessResource(userId, roles, {
+        organization_id: entity.organizationId,
+        created_by: '',
+      } as OwnedResource);
+      if (!accessResult.allowed) {
+        throw new NotFoundException(`Pyroscope instance with id ${id} not found`);
       }
 
       // Update only provided fields
@@ -274,9 +270,7 @@ export class PyroscopeInstancesService {
    */
   async remove(id: string, userId: string, roles: string[]): Promise<void> {
     try {
-      // Log authorization context for debugging
-      const isAdmin = this.authzService.isGlobalAdmin(roles);
-      this.logger.debug(`remove: id=${id}, userId=${userId}, isGlobalAdmin=${isAdmin}`);
+      this.logger.debug(`remove: id=${id}, userId=${userId}`);
 
       // Check if user is org-admin in any organization
       await this.requireOrgAdmin(userId, roles);
@@ -287,12 +281,13 @@ export class PyroscopeInstancesService {
         throw new NotFoundException(`Pyroscope instance with id ${id} not found`);
       }
 
-      // Check deletion permission based on organization
-      if (!isAdmin && entity.organizationId) {
-        const accessibleOrganizations = await this.authzService.getAccessibleOrganizations(userId);
-        if (!accessibleOrganizations.includes(entity.organizationId)) {
-          throw new NotFoundException(`Pyroscope instance with id ${id} not found`);
-        }
+      // Same access shape as update — see comment there for the canAccessResource rationale.
+      const accessResult = await this.authzService.canAccessResource(userId, roles, {
+        organization_id: entity.organizationId,
+        created_by: '',
+      } as OwnedResource);
+      if (!accessResult.allowed) {
+        throw new NotFoundException(`Pyroscope instance with id ${id} not found`);
       }
 
       await this.pyroscopeInstanceRepo.remove(entity);
@@ -319,9 +314,7 @@ export class PyroscopeInstancesService {
    */
   async testConnection(id: string, userId: string, roles: string[]): Promise<{ success: boolean; message: string }> {
     try {
-      // Log authorization context for debugging
-      const isAdmin = this.authzService.isGlobalAdmin(roles);
-      this.logger.debug(`testConnection: id=${id}, userId=${userId}, isGlobalAdmin=${isAdmin}`);
+      this.logger.debug(`testConnection: id=${id}, userId=${userId}`);
 
       const instance = await this.findOne(id, userId, roles);
 
@@ -353,12 +346,10 @@ export class PyroscopeInstancesService {
   async testConnectionWithParams(
     params: { pyroscopeUrl: string },
     userId: string,
-    roles: string[],
+    _roles: string[],
   ): Promise<{ success: boolean; message: string }> {
     try {
-      // Log authorization context for debugging
-      const isAdmin = this.authzService.isGlobalAdmin(roles);
-      this.logger.debug(`testConnectionWithParams: userId=${userId}, isGlobalAdmin=${isAdmin}`);
+      this.logger.debug(`testConnectionWithParams: userId=${userId}`);
 
       // TODO: Implement actual Pyroscope connection test with provided parameters
       // For now, just validate that required fields are present

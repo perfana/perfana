@@ -7,10 +7,10 @@ Phase 3c rolls capabilities through every site listed below. Update these counts
 | Bucket | Total | Migrated | Remaining | % done |
 | --- | ---: | ---: | ---: | ---: |
 | A — bypass filter | 127 | 41 | 86 | 32.3% |
-| B — bypass guard | 14 | 6 | 8 | 42.9% |
-| Local `private isGlobalAdmin()` wrappers | 13 | 2 | 11 | 15.4% |
+| B — bypass guard | 14 | 13 | 1 | 92.9% |
+| Local `private isGlobalAdmin()` wrappers | 13 | 5 | 8 | 38.5% |
 
-**Lint enforcement:** `apps/api/.rbac-migration-allowlist.json` lists every file currently exempt from the `no-direct-is-global-admin` lint rule (30 files as of 2026-04-30). When a site is migrated, remove its file from the allowlist (the file may have multiple sites — only remove when the LAST one is migrated). Allowlist size IS the burndown.
+**Lint enforcement:** `apps/api/.rbac-migration-allowlist.json` lists every file currently exempt from the `no-direct-is-global-admin` lint rule (24 files as of 2026-04-30). When a site is migrated, remove its file from the allowlist (the file may have multiple sites — only remove when the LAST one is migrated). Allowlist size IS the burndown.
 
 **Date-bound revisit:** by **2026-08-01**, Phase 3c migration must be at least 50% complete (Bucket A + B combined: 70+ sites migrated). If not, re-evaluate the architecture or the priorities. "We forgot about it" is the failure mode this gate prevents.
 
@@ -1069,3 +1069,130 @@ The shared mock fix did not break any of the 10 consuming specs — confirmed by
 ### Allowlist disposition
 
 This file **EXITS the allowlist** — zero direct `isGlobalAdmin` references after the migration. **Eighth file to fully exit** the allowlist since Phase 3c began (after C6, C7, C9, C11, C12, C13, and C14). Allowlist size: 31 → 30.
+
+---
+
+## Phase C16 — Bundle: 6 files exiting in one PR + new `canAdministerAnyOrganization` primitive
+
+**Audit date:** 2026-04-30
+**Scope:** **Largest single C-series PR.** Bundles all six "finish" candidates remaining from C2–C8 partial migrations into one PR. Six files exit the allowlist simultaneously. Also introduces a new `AuthorizationService.canAdministerAnyOrganization` method to centralize the "global admin OR any-org admin" pattern that three services were re-implementing.
+**Files migrated:**
+
+- `apps/api/src/modules/benchmarks/services/benchmark-query.service.ts` (C5 leftovers)
+- `apps/api/src/modules/grafana/application-dashboards.service.ts` (C3 leftovers, debug-log only)
+- `apps/api/src/modules/grafana/grafana-dashboards.service.ts` (C3 leftovers)
+- `apps/api/src/modules/grafana/grafana-instances.service.ts` (C3 leftovers)
+- `apps/api/src/modules/pyroscope/pyroscope-instances.service.ts` (C4 leftovers)
+- `apps/api/src/modules/tracing-instances/tracing-instances.service.ts` (C4 leftovers)
+
+### New primitive: `AuthorizationService.canAdministerAnyOrganization(userId, roles)`
+
+The C2–C4 instance services (`grafana-instances`, `pyroscope-instances`, `tracing-instances`) each had a private `requireOrgAdmin` helper with identical shape:
+
+```typescript
+private async requireOrgAdmin(userId: string, roles: string[]): Promise<void> {
+  if (this.authzService.isGlobalAdmin(roles)) return;
+  const isOrgAdmin = await this.authzService.isOrgAdminInAnyOrganization(userId);
+  if (!isOrgAdmin) throw new ForbiddenException(...);
+}
+```
+
+This is the "global admin OR any-org admin" pattern — used to gate write operations that aren't scoped to a specific organization yet (CRUD on instance/source services where the resource doesn't carry the user's org). The duplicated logic was three subtly-different inline implementations of the same policy.
+
+C16 adds `AuthorizationService.canAdministerAnyOrganization(userId, roles): Promise<AuthorizationResult>` that centralizes this. Each `requireOrgAdmin` helper collapses to:
+
+```typescript
+private async requireOrgAdmin(userId: string, roles: string[]): Promise<void> {
+  const result = await this.authzService.canAdministerAnyOrganization(userId, roles);
+  if (!result.allowed) throw new ForbiddenException(...);
+}
+```
+
+The shared mock factory (`apps/api/test/mocks/authorization-service.mock.ts`) was updated to include `canAdministerAnyOrganization` in both happy and restrictive variants, with the same `{ allowed, reason }` shape established in C15.
+
+### Site Classification (across all 6 files)
+
+| File | Sites Migrated | Tools Used |
+|------|---------------|------------|
+| benchmark-query | findOne (per-resource) + syncTagsWithApplicationDashboards (log-tag drop) | `canAccessResource` + log-tag drop |
+| application-dashboards | 5 debug-log-only sites (`create`, `update`, `getDeleteInfo`, `getBatchDeleteInfo`, `delete`) | log-tag drop only |
+| grafana-dashboards | `verifyOrgAccess` helper + 5 debug-log sites | `canAccessResource` + log-tag drop |
+| grafana-instances | `requireOrgAdmin` helper + `findOne` + `update` + `remove` + 2 testConnection log-drops | `canAdministerAnyOrganization`, `canAccessResource`, **`canModifyResource`** (org-admin role check), log-tag drop |
+| pyroscope-instances | `requireOrgAdmin` + `findOne` + `update` + `remove` + 2 testConnection log-drops | `canAdministerAnyOrganization`, `canAccessResource` (member-level, NOT canModifyResource — see below), log-tag drop |
+| tracing-instances | Same shape as pyroscope | Same |
+
+### Why grafana-instances uses `canModifyResource` but pyroscope/tracing use `canAccessResource`
+
+This is the most subtle decision in C16 and worth documenting. The pre-migration `update`/`remove` per-resource guards differed across the three instance services:
+
+- **`grafana-instances.service.ts`**: `if (!isAdmin && entity.organizationId) { isOrganizationAdmin(userId, entity.organizationId) }` — admin-of-the-org required. Migrate to `canModifyResource` (which checks org-admin role).
+- **`pyroscope-instances.service.ts`** and **`tracing-instances.service.ts`**: `if (!isAdmin && entity.organizationId) { getAccessibleOrganizations + accessibleOrganizations.includes(orgId) }` — member-of-the-org sufficient. Migrate to `canAccessResource` (which checks org membership at any role).
+
+**Preserving observable semantics is the priority.** Tightening pyroscope/tracing to `canModifyResource` would deny modify access to non-admin org members who can currently modify these resources. That's a behavior change deferred for separate discussion (likely Phase 4 or a dedicated review). Inline comments document the choice at each call site so future reviewers understand why two seemingly-identical migrations use different tools.
+
+### Spec update required: grafana-dashboards "deny" path
+
+The `findOne` deny test at `grafana-dashboards.service.spec.ts:1734` was asserting that `getAccessibleOrganizations.mockResolvedValue(['org-other'])` would deny access to a dashboard in `org-restricted`. Post-migration, the deny verdict comes directly from `canAccessResource` instead. Updated to:
+
+```typescript
+authzService.canAccessResource.mockResolvedValue({
+  allowed: false,
+  reason: `User ${mockUserId} does not have access to this resource`,
+});
+```
+
+The other three tests in the same describe block (legacy null org, member access, admin bypass) all pass unchanged — the default `canAccessResource: { allowed: true }` mock from `createAuthorizationServiceMock()` covers them.
+
+### Subtle near-miss: variable shadowing + parameter rename slip
+
+Two real bugs caught during verification, both worth noting:
+
+1. **Variable shadowing in `metrics-sources` (C15) reprised here**: I introduced `const result = await canAccessResource(...)` while a `const result = await this.findOne(...)` was already in scope. TypeScript caught it but Jest's babel-mode parse error surfaced first as a misleading "Missing semicolon" in dependent specs. Renamed to `accessResult` / `modifyResult` proactively across all C16 files.
+
+2. **`_roles` rename slip in `application-dashboards` `update`**: I aggressively renamed unused `roles` → `_roles` for the 5 debug-log-only methods. But `update`'s body still called `this.findOne(id, userId, roles)` later. Tests caught it as `ReferenceError: roles is not defined`. Reverted that one rename. The audit pattern: only rename `roles` → `_roles` when **no other body reference exists** — including downstream method calls.
+
+### Test Results
+
+| Test run | Result |
+|----------|--------|
+| `cd apps/api && npx jest src/modules/grafana` | 491 passed (7 suites) |
+| `cd apps/api && npx jest src/modules/benchmarks` | passed |
+| `cd apps/api && npx jest src/modules/pyroscope` (no spec) | n/a |
+| `cd apps/api && npx jest src/modules/tracing-instances` (no spec) | n/a |
+| `cd apps/api && npx jest` (full suite) | 4314 passed, 20 skipped (pre-existing), 0 failed |
+| `npm run type-check` (`@perfana/api`) | 0 errors |
+| `npm run lint` (`@perfana/api`) | 0 errors, 59 pre-existing warnings (none introduced) |
+
+### Net diff (per file)
+
+- `authorization.service.ts`: +40 / -0 = +40 (new method)
+- `authorization-service.mock.ts`: +8 / -0 = +8 (new mock entry in both factories)
+- `benchmark-query.service.ts`: +14 / -18 = -4
+- `application-dashboards.service.ts`: +8 / -18 = -10
+- `grafana-dashboards.service.ts`: +15 / -13 = +2
+- `grafana-dashboards.service.spec.ts`: +5 / -2 = +3
+- `grafana-instances.service.ts`: +38 / -50 = -12
+- `pyroscope-instances.service.ts`: +38 / -47 = -9
+- `tracing-instances.service.ts`: +38 / -48 = -10
+- `.rbac-migration-allowlist.json`: 0 / -6 = -6 (six file entries removed)
+- **Total: +204 / -202 = net +2 lines**
+
+The new method body and explanatory comment blocks balance against the deleted inline policy code and dropped log tags. **First C-series migration to net flat at the line level despite touching 6 production files plus the auth service plus the mock factory plus a spec.** The new abstraction pulled its weight.
+
+### Files changed (10 total)
+
+- `apps/api/src/common/services/authorization.service.ts` — add `canAdministerAnyOrganization`
+- `apps/api/src/modules/benchmarks/services/benchmark-query.service.ts`
+- `apps/api/src/modules/grafana/application-dashboards.service.ts`
+- `apps/api/src/modules/grafana/grafana-dashboards.service.ts`
+- `apps/api/src/modules/grafana/grafana-dashboards.service.spec.ts` — update deny-path test mock
+- `apps/api/src/modules/grafana/grafana-instances.service.ts`
+- `apps/api/src/modules/pyroscope/pyroscope-instances.service.ts`
+- `apps/api/src/modules/tracing-instances/tracing-instances.service.ts`
+- `apps/api/test/mocks/authorization-service.mock.ts` — add `canAdministerAnyOrganization` in both factories
+- `apps/api/.rbac-migration-allowlist.json` — remove 6 entries
+- `docs/superpowers/audits/2026-04-26-audit-decisions.md` — this file
+
+### Allowlist disposition
+
+**Six files EXIT the allowlist simultaneously.** Cumulative exits since Phase 3c began: 8 → **14**. Allowlist size: 30 → **24**. Bucket B: 6 → 13 of 14 (92.9%) — Bucket B is now nearly complete; the lone remaining Bucket B site is `users.controller.ts`, which is a privilege-gate (admin OR org-admin) rather than a resource access check, and may need a different abstraction.

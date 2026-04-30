@@ -1,7 +1,7 @@
 import { Injectable, Logger, NotFoundException, ForbiddenException } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
-import { TracingInstance as TracingInstanceEntity } from '@perfana/shared';
+import { TracingInstance as TracingInstanceEntity, OwnedResource } from '@perfana/shared';
 import { AuthorizationService } from '../../common/services/authorization.service';
 import { withOrgFilter } from '../../common/utils/with-org-filter';
 import {
@@ -33,18 +33,13 @@ export class TracingInstancesService {
   ) {}
 
   /**
-   * Check if user is org-admin in any of their organizations
-   * @throws Error if user is not an org-admin
+   * Check if user is org-admin in any of their organizations.
+   * Delegates the global-admin / any-org-admin policy to AuthorizationService.canAdministerAnyOrganization.
+   * @throws ForbiddenException if user is not authorized
    */
   private async requireOrgAdmin(userId: string, roles: string[]): Promise<void> {
-    // Global admins always have access
-    if (this.authzService.isGlobalAdmin(roles)) {
-      return;
-    }
-
-    // Check if user is org-admin in any organization
-    const isOrgAdmin = await this.authzService.isOrgAdminInAnyOrganization(userId);
-    if (!isOrgAdmin) {
+    const result = await this.authzService.canAdministerAnyOrganization(userId, roles);
+    if (!result.allowed) {
       throw new ForbiddenException('Organization admin privileges required to manage tracing instances');
     }
   }
@@ -130,9 +125,7 @@ export class TracingInstancesService {
    */
   async findOne(id: string, userId: string, roles: string[]): Promise<TracingInstanceResponseDto> {
     try {
-      // Log authorization context for debugging
-      const isAdmin = this.authzService.isGlobalAdmin(roles);
-      this.logger.debug(`findOne: id=${id}, userId=${userId}, isGlobalAdmin=${isAdmin}`);
+      this.logger.debug(`findOne: id=${id}, userId=${userId}`);
 
       const entity = await this.tracingInstanceRepo.findOne({
         where: { id }
@@ -142,12 +135,15 @@ export class TracingInstancesService {
         throw new NotFoundException(`Tracing instance with id ${id} not found`);
       }
 
-      // Check access permission based on organization
-      if (!isAdmin && entity.organizationId) {
-        const accessibleOrganizations = await this.authzService.getAccessibleOrganizations(userId);
-        if (!accessibleOrganizations.includes(entity.organizationId)) {
-          throw new NotFoundException(`Tracing instance with id ${id} not found`);
-        }
+      // Delegate the admin / legacy-null-org / membership decision to AuthorizationService.
+      // team_id is omitted to preserve the prior behavior of not checking team membership.
+      // created_by is unused by canAccessResource.
+      const accessResult = await this.authzService.canAccessResource(userId, roles, {
+        organization_id: entity.organizationId,
+        created_by: '',
+      } as OwnedResource);
+      if (!accessResult.allowed) {
+        throw new NotFoundException(`Tracing instance with id ${id} not found`);
       }
 
       return this.mapEntityToDto(entity);
@@ -172,9 +168,7 @@ export class TracingInstancesService {
    */
   async create(createDto: CreateTracingInstanceDto, userId: string, roles: string[]): Promise<TracingInstanceResponseDto> {
     try {
-      // Log authorization context for debugging
-      const isAdmin = this.authzService.isGlobalAdmin(roles);
-      this.logger.debug(`create: userId=${userId}, isGlobalAdmin=${isAdmin}`);
+      this.logger.debug(`create: userId=${userId}`);
 
       // Check if user is org-admin in any organization
       await this.requireOrgAdmin(userId, roles);
@@ -213,9 +207,7 @@ export class TracingInstancesService {
    */
   async update(id: string, updateDto: UpdateTracingInstanceDto, userId: string, roles: string[]): Promise<TracingInstanceResponseDto> {
     try {
-      // Log authorization context for debugging
-      const isAdmin = this.authzService.isGlobalAdmin(roles);
-      this.logger.debug(`update: id=${id}, userId=${userId}, isGlobalAdmin=${isAdmin}`);
+      this.logger.debug(`update: id=${id}, userId=${userId}`);
 
       // Check if user is org-admin in any organization
       await this.requireOrgAdmin(userId, roles);
@@ -226,12 +218,15 @@ export class TracingInstancesService {
         throw new NotFoundException(`Tracing instance with id ${id} not found`);
       }
 
-      // Check modification permission based on organization
-      if (!isAdmin && entity.organizationId) {
-        const accessibleOrganizations = await this.authzService.getAccessibleOrganizations(userId);
-        if (!accessibleOrganizations.includes(entity.organizationId)) {
-          throw new NotFoundException(`Tracing instance with id ${id} not found`);
-        }
+      // The original guard used getAccessibleOrganizations + accessibleOrganizations.includes(orgId), which
+      // is read-membership semantics — same shape as canAccessResource (NOT canModifyResource, which would
+      // tighten to org-admin role). Preserves prior observable behavior.
+      const accessResult = await this.authzService.canAccessResource(userId, roles, {
+        organization_id: entity.organizationId,
+        created_by: '',
+      } as OwnedResource);
+      if (!accessResult.allowed) {
+        throw new NotFoundException(`Tracing instance with id ${id} not found`);
       }
 
       // Update only provided fields
@@ -268,9 +263,7 @@ export class TracingInstancesService {
    */
   async remove(id: string, userId: string, roles: string[]): Promise<void> {
     try {
-      // Log authorization context for debugging
-      const isAdmin = this.authzService.isGlobalAdmin(roles);
-      this.logger.debug(`remove: id=${id}, userId=${userId}, isGlobalAdmin=${isAdmin}`);
+      this.logger.debug(`remove: id=${id}, userId=${userId}`);
 
       // Check if user is org-admin in any organization
       await this.requireOrgAdmin(userId, roles);
@@ -281,12 +274,13 @@ export class TracingInstancesService {
         throw new NotFoundException(`Tracing instance with id ${id} not found`);
       }
 
-      // Check deletion permission based on organization
-      if (!isAdmin && entity.organizationId) {
-        const accessibleOrganizations = await this.authzService.getAccessibleOrganizations(userId);
-        if (!accessibleOrganizations.includes(entity.organizationId)) {
-          throw new NotFoundException(`Tracing instance with id ${id} not found`);
-        }
+      // Same access shape as update — see comment there for the canAccessResource rationale.
+      const accessResult = await this.authzService.canAccessResource(userId, roles, {
+        organization_id: entity.organizationId,
+        created_by: '',
+      } as OwnedResource);
+      if (!accessResult.allowed) {
+        throw new NotFoundException(`Tracing instance with id ${id} not found`);
       }
 
       await this.tracingInstanceRepo.remove(entity);
@@ -313,9 +307,7 @@ export class TracingInstancesService {
    */
   async testConnection(id: string, userId: string, roles: string[]): Promise<{ success: boolean; message: string }> {
     try {
-      // Log authorization context for debugging
-      const isAdmin = this.authzService.isGlobalAdmin(roles);
-      this.logger.debug(`testConnection: id=${id}, userId=${userId}, isGlobalAdmin=${isAdmin}`);
+      this.logger.debug(`testConnection: id=${id}, userId=${userId}`);
 
       const instance = await this.findOne(id, userId, roles);
 
@@ -347,12 +339,10 @@ export class TracingInstancesService {
   async testConnectionWithParams(
     params: TestConnectionDto,
     userId: string,
-    roles: string[],
+    _roles: string[],
   ): Promise<{ success: boolean; message: string }> {
     try {
-      // Log authorization context for debugging
-      const isAdmin = this.authzService.isGlobalAdmin(roles);
-      this.logger.debug(`testConnectionWithParams: userId=${userId}, isGlobalAdmin=${isAdmin}`);
+      this.logger.debug(`testConnectionWithParams: userId=${userId}`);
 
       // Validate required fields
       if (!params.tracingUrl) {

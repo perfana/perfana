@@ -5,6 +5,7 @@ import { GrafanaInstance as GrafanaInstanceEntity } from '../../entities';
 import { CreateGrafanaInstanceDto, UpdateGrafanaInstanceDto } from './dto/grafana-instance.dto';
 import { AuthorizationService } from '../../common/services/authorization.service';
 import { withOrgFilter } from '../../common/utils/with-org-filter';
+import { OwnedResource } from '@perfana/shared';
 
 export interface GrafanaInstance {
   id: string;
@@ -40,18 +41,13 @@ export class GrafanaInstancesService {
   ) {}
 
   /**
-   * Check if user is org-admin in any of their organizations
-   * @throws ForbiddenException if user is not an org-admin
+   * Check if user is org-admin in any of their organizations.
+   * Delegates the global-admin / any-org-admin policy to AuthorizationService.canAdministerAnyOrganization.
+   * @throws ForbiddenException if user is not authorized
    */
   private async requireOrgAdmin(userId: string, roles: string[]): Promise<void> {
-    // Global admins always have access
-    if (this.authzService.isGlobalAdmin(roles)) {
-      return;
-    }
-
-    // Check if user is org-admin in any organization
-    const isOrgAdmin = await this.authzService.isOrgAdminInAnyOrganization(userId);
-    if (!isOrgAdmin) {
+    const result = await this.authzService.canAdministerAnyOrganization(userId, roles);
+    if (!result.allowed) {
       throw new ForbiddenException('Organization admin privileges required to manage Grafana instances');
     }
   }
@@ -143,9 +139,7 @@ export class GrafanaInstancesService {
    */
   async findOne(id: string, userId: string, roles: string[]): Promise<GrafanaInstance> {
     try {
-      // Log authorization context for debugging
-      const isAdmin = this.authzService.isGlobalAdmin(roles);
-      this.logger.debug(`findOne: id=${id}, userId=${userId}, isGlobalAdmin=${isAdmin}`);
+      this.logger.debug(`findOne: id=${id}, userId=${userId}`);
 
       const entity = await this.grafanaInstanceRepo.findOne({
         where: { id }
@@ -155,15 +149,15 @@ export class GrafanaInstancesService {
         throw new NotFoundException(`Grafana instance with id ${id} not found`);
       }
 
-      // Check access permissions (unless global admin)
-      if (!isAdmin) {
-        // Legacy data (null organization_id) is accessible to all users
-        if (entity.organizationId) {
-          const hasAccess = await this.authzService.isOrganizationMember(userId, entity.organizationId);
-          if (!hasAccess) {
-            throw new NotFoundException(`Grafana instance with id ${id} not found`);
-          }
-        }
+      // Delegate the admin / legacy-null-org / membership decision to AuthorizationService.
+      // team_id is omitted to preserve the prior behavior of not checking team membership.
+      // created_by is unused by canAccessResource.
+      const accessResult = await this.authzService.canAccessResource(userId, roles, {
+        organization_id: entity.organizationId,
+        created_by: '',
+      } as OwnedResource);
+      if (!accessResult.allowed) {
+        throw new NotFoundException(`Grafana instance with id ${id} not found`);
       }
 
       return this.mapEntityToDto(entity);
@@ -188,9 +182,7 @@ export class GrafanaInstancesService {
    */
   async create(createDto: CreateGrafanaInstanceDto, userId: string, roles: string[]): Promise<GrafanaInstance> {
     try {
-      // Log authorization context for debugging
-      const isAdmin = this.authzService.isGlobalAdmin(roles);
-      this.logger.log(`[create] START - userId=${userId}, isGlobalAdmin=${isAdmin}`);
+      this.logger.log(`[create] START - userId=${userId}`);
 
       // Check if user is org-admin in any organization
       await this.requireOrgAdmin(userId, roles);
@@ -231,9 +223,7 @@ export class GrafanaInstancesService {
    */
   async update(id: string, updateDto: UpdateGrafanaInstanceDto, userId: string, roles: string[]): Promise<GrafanaInstance> {
     try {
-      // Log authorization context for debugging
-      const isAdmin = this.authzService.isGlobalAdmin(roles);
-      this.logger.log(`[update] START - id=${id}, userId=${userId}, isGlobalAdmin=${isAdmin}`);
+      this.logger.log(`[update] START - id=${id}, userId=${userId}`);
 
       // Check if user is org-admin in any organization
       await this.requireOrgAdmin(userId, roles);
@@ -244,12 +234,15 @@ export class GrafanaInstancesService {
         throw new NotFoundException(`Grafana instance with id ${id} not found`);
       }
 
-      // Check modification permissions (unless global admin)
-      if (!isAdmin && entity.organizationId) {
-        const canModify = await this.authzService.isOrganizationAdmin(userId, entity.organizationId);
-        if (!canModify) {
-          throw new ForbiddenException('You do not have permission to modify this Grafana instance');
-        }
+      // Delegate the admin / legacy-null-org / org-admin decision to AuthorizationService.
+      // canModifyResource handles: global admin bypass, legacy null-org bypass, creator-of-resource,
+      // org-admin role check, team-admin role check.
+      const modifyResult = await this.authzService.canModifyResource(userId, roles, {
+        organization_id: entity.organizationId,
+        created_by: entity.createdBy ?? '',
+      } as OwnedResource);
+      if (!modifyResult.allowed) {
+        throw new ForbiddenException('You do not have permission to modify this Grafana instance');
       }
 
       // Update only provided fields
@@ -289,9 +282,7 @@ export class GrafanaInstancesService {
    */
   async remove(id: string, userId: string, roles: string[]): Promise<void> {
     try {
-      // Log authorization context for debugging
-      const isAdmin = this.authzService.isGlobalAdmin(roles);
-      this.logger.log(`[remove] START - id=${id}, userId=${userId}, isGlobalAdmin=${isAdmin}`);
+      this.logger.log(`[remove] START - id=${id}, userId=${userId}`);
 
       // Check if user is org-admin in any organization
       await this.requireOrgAdmin(userId, roles);
@@ -302,12 +293,13 @@ export class GrafanaInstancesService {
         throw new NotFoundException(`Grafana instance with id ${id} not found`);
       }
 
-      // Check modification permissions (unless global admin)
-      if (!isAdmin && entity.organizationId) {
-        const canModify = await this.authzService.isOrganizationAdmin(userId, entity.organizationId);
-        if (!canModify) {
-          throw new ForbiddenException('You do not have permission to delete this Grafana instance');
-        }
+      // Same access shape as update — see comment there for the rationale of canModifyResource.
+      const modifyResult = await this.authzService.canModifyResource(userId, roles, {
+        organization_id: entity.organizationId,
+        created_by: entity.createdBy ?? '',
+      } as OwnedResource);
+      if (!modifyResult.allowed) {
+        throw new ForbiddenException('You do not have permission to delete this Grafana instance');
       }
 
       await this.grafanaInstanceRepo.remove(entity);
@@ -334,9 +326,7 @@ export class GrafanaInstancesService {
    */
   async testConnection(id: string, userId: string, roles: string[]): Promise<{ success: boolean; message: string }> {
     try {
-      // Log authorization context for debugging
-      const isAdmin = this.authzService.isGlobalAdmin(roles);
-      this.logger.debug(`testConnection: id=${id}, userId=${userId}, isGlobalAdmin=${isAdmin}`);
+      this.logger.debug(`testConnection: id=${id}, userId=${userId}`);
 
       const instance = await this.findOne(id, userId, roles);
 
@@ -375,12 +365,10 @@ export class GrafanaInstancesService {
       password?: string;
     },
     userId: string,
-    roles: string[],
+    _roles: string[],
   ): Promise<{ success: boolean; message: string }> {
     try {
-      // Log authorization context for debugging
-      const isAdmin = this.authzService.isGlobalAdmin(roles);
-      this.logger.debug(`testConnectionWithParams: userId=${userId}, isGlobalAdmin=${isAdmin}`);
+      this.logger.debug(`testConnectionWithParams: userId=${userId}`);
 
       // TODO: Implement actual Grafana connection test with provided parameters
       // For now, just validate that required fields are present

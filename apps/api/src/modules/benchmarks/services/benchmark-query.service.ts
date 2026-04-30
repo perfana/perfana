@@ -10,6 +10,7 @@ import {
 import { BenchmarkMapper } from './benchmark.mapper';
 import { AuthorizationService } from '../../../common/services/authorization.service';
 import { withOrgFilter } from '../../../common/utils/with-org-filter';
+import { OwnedResource } from '@perfana/shared';
 
 /**
  * Service responsible for benchmark query and validation operations.
@@ -134,9 +135,7 @@ export class BenchmarkQueryService {
    */
   async findOne(id: string, userId: string, roles: string[]): Promise<Benchmark | null> {
     try {
-      // Log authorization context for debugging
-      const isAdmin = this.authzService.isGlobalAdmin(roles);
-      this.logger.log(`[findOne] START - id=${id}, userId=${userId}, isGlobalAdmin=${isAdmin}`);
+      this.logger.log(`[findOne] START - id=${id}, userId=${userId}`);
 
       const result = await this.benchmarkRepo.findOne({
         where: { id },
@@ -148,17 +147,16 @@ export class BenchmarkQueryService {
         return null;
       }
 
-      // Check organization access for non-admin users
-      if (!isAdmin) {
-        // Legacy systems without organization_id are accessible to all authenticated users
-        if (result.system_under_test?.organization_id) {
-          // Check if user is member of the system's organization
-          const isMember = await this.authzService.isOrganizationMember(userId, result.system_under_test.organization_id);
-          if (!isMember) {
-            this.logger.warn(`[findOne] Access denied: user ${userId} attempted to access benchmark ${id} in organization ${result.system_under_test.organization_id}`);
-            return null;
-          }
-        }
+      // Delegate the admin / legacy-null-org / membership decision to AuthorizationService.
+      // team_id is omitted to preserve the prior behavior of not checking team membership.
+      // created_by is unused by canAccessResource.
+      const accessResult = await this.authzService.canAccessResource(userId, roles, {
+        organization_id: result.system_under_test?.organization_id,
+        created_by: '',
+      } as OwnedResource);
+      if (!accessResult.allowed) {
+        this.logger.warn(`[findOne] Access denied: user ${userId} attempted to access benchmark ${id} (${accessResult.reason})`);
+        return null;
       }
 
       this.logger.log(`[findOne] Access granted for benchmark ${id}`);
@@ -281,11 +279,9 @@ export class BenchmarkQueryService {
    * Note: This is an administrative operation that affects all benchmarks.
    * Authorization filtering will be added when Phase 4 adds organization_id column.
    */
-  async syncTagsWithApplicationDashboards(userId: string, roles: string[]): Promise<void> {
+  async syncTagsWithApplicationDashboards(userId: string, _roles: string[]): Promise<void> {
     try {
-      // Log authorization context for debugging
-      const isAdmin = this.authzService.isGlobalAdmin(roles);
-      this.logger.debug(`syncTagsWithApplicationDashboards: userId=${userId}, isGlobalAdmin=${isAdmin}`);
+      this.logger.debug(`syncTagsWithApplicationDashboards: userId=${userId}`);
 
       // Call the PostgreSQL stored procedure to sync benchmark tags with application dashboard tags
       await this.dataSource.query('SELECT sync_benchmark_tags_with_application_dashboards()');

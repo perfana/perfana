@@ -1739,8 +1739,11 @@ describe('GrafanaDashboardsService', () => {
           organizationId: orgId,
         };
         repository.findOne.mockResolvedValue(restrictedDashboard);
-        // User belongs to a different org, not the dashboard's org
-        authzService.getAccessibleOrganizations.mockResolvedValue(['org-other']);
+        // canAccessResource (post-C16) returns the deny verdict directly
+        authzService.canAccessResource.mockResolvedValue({
+          allowed: false,
+          reason: `User ${mockUserId} does not have access to this resource`,
+        });
 
         // Note: findOne's catch block only re-throws NotFoundException directly.
         // ForbiddenException is caught and re-wrapped as a plain Error containing its message.
