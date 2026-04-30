@@ -7,10 +7,12 @@ Phase 3c rolls capabilities through every site listed below. Update these counts
 | Bucket | Total | Migrated | Remaining | % done |
 | --- | ---: | ---: | ---: | ---: |
 | A — bypass filter | 127 | 41 | 86 | 32.3% |
-| B — bypass guard | 14 | 13 | 1 | 92.9% |
+| B — bypass guard | 17 | 16 | 1 | 94.1% |
 | Local `private isGlobalAdmin()` wrappers | 13 | 5 | 8 | 38.5% |
 
 **Lint enforcement:** `apps/api/.rbac-migration-allowlist.json` lists every file currently exempt from the `no-direct-is-global-admin` lint rule (24 files as of 2026-04-30). When a site is migrated, remove its file from the allowlist (the file may have multiple sites — only remove when the LAST one is migrated). Allowlist size IS the burndown.
+
+**Bucket B total adjusted upward by 3 in C17:** the original 2026-04-26 audit classified dynatrace's per-resource sites at `findByHost`/`update`/`delete` as "Leave" (deferred until `canAccessResource`/`canModifyResource` was established). C17 closes those 3 — so the running total now reflects them as in-scope.
 
 **Date-bound revisit:** by **2026-08-01**, Phase 3c migration must be at least 50% complete (Bucket A + B combined: 70+ sites migrated). If not, re-evaluate the architecture or the priorities. "We forgot about it" is the failure mode this gate prevents.
 
@@ -1196,3 +1198,78 @@ The new method body and explanatory comment blocks balance against the deleted i
 ### Allowlist disposition
 
 **Six files EXIT the allowlist simultaneously.** Cumulative exits since Phase 3c began: 8 → **14**. Allowlist size: 30 → **24**. Bucket B: 6 → 13 of 14 (92.9%) — Bucket B is now nearly complete; the lone remaining Bucket B site is `users.controller.ts`, which is a privilege-gate (admin OR org-admin) rather than a resource access check, and may need a different abstraction.
+
+---
+
+## Phase C17 — Partial migration: `dynatrace.service.ts` per-resource sites only
+
+**Audit date:** 2026-04-30
+**Scope:** Partial migration. The original C2 pilot intentionally migrated only `findAll` (1 site of 25) and deferred the rest, classifying 3 sites as PER-RESOURCE ("Leave") and 21 as DEBUG-LOG-ONLY ("Leave"). C17 closes the 3 PER-RESOURCE sites now that `canAccessResource`/`canModifyResource` is established. The 21 debug-log-only sites are **not** touched in this PR — see "Why partial" below.
+**File re-verified:** `apps/api/src/modules/dynatrace/dynatrace.service.ts` (1500+ lines)
+
+### Site Classification
+
+| Line | Method | Migration approach |
+|------|--------|--------------------|
+| 188 | `findByHost` | `canAccessResource` (per-resource read guard, throws NotFoundException) |
+| 282 | `update` | `canModifyResource` (per-resource org-admin check, throws ForbiddenException) |
+| 322 | `delete` | `canModifyResource` (same as update) |
+
+**3 sites migrated. ~21 debug-log-only sites and ~5 internal `isAdmin`-passing sites unchanged.** File **stays in the allowlist.**
+
+### Subtle: preserving the `isAdmin` derivation in `findByHost`
+
+`findByHost` uses `isAdmin` downstream at line 211 (post-migration):
+
+```typescript
+if (isAdmin || config.organizationId == null) {
+  return attachPermissions(this.maskConfig(config), { update: true, delete: true });
+}
+// otherwise derive from per-org capabilities
+```
+
+This is a different branching question than per-resource access — it's "what permissions does this user have on this resource for the response payload?". The original code short-circuited admin/null-org to "all mutations allowed" and otherwise looked up capabilities.
+
+The migration preserves this exactly by deriving `isAdmin` from the just-computed `accessResult`:
+
+```typescript
+const isAdmin = accessResult.reason === 'User has global admin privileges';
+```
+
+This is a brittle string-match bridge — a future refactor should expose `isGlobalAdmin` more cleanly via `AuthorizationResult` (e.g. `result.isGlobalAdmin: boolean`), but that's a separate concern from C17's scope. Documented inline so the next maintainer doesn't have to figure it out.
+
+### Why partial: the bulk-drop cautionary tale
+
+Initial attempt: a perl one-shot to drop the 21 debug-log-only sites in bulk by matching the `const isAdmin = ...; this.logger.debug(...isGlobalAdmin=${isAdmin}...);` pattern. **The script worked but was too aggressive** — it removed `const isAdmin = ...` declarations that had **downstream usages** in the same scope:
+
+- Line 211 (`findByHost`): `if (isAdmin || config.organizationId == null)` — the permissions-attach branch
+- Lines 705, 744, 802, 1038: `requireDynatraceMutationCapability(... isAdmin ...)` — a private helper that takes `isAdmin: boolean` to bypass capability checks
+- Lines 857, 898, 1079: more `if (!isAdmin)` blocks scattered through the queries module
+
+After the bulk drop, those references became `ReferenceError: isAdmin is not defined`. Reverted and re-scoped C17 to **just the 3 per-resource sites**.
+
+The remaining 21 debug-log-only sites are now mixed with non-trivial `isAdmin` users. To finish the file in a future PR, each one needs to be classified (truly debug-log-only vs has-downstream-use) and migrated individually. This is more work than a "finish PR" should be — the file may need a dedicated multi-PR cleanup or a deeper refactor of `requireDynatraceMutationCapability` to drop its `isAdmin` parameter entirely.
+
+**Lesson for future bulk drops:** the `const isAdmin = ...; debug(...);` pattern only matches if `isAdmin` is *truly local-only*. Verify with a downstream-reference check before running the script. The C16 dynatrace-style files (grafana-instances, pyroscope-instances, etc.) had this property because their `isAdmin` was always confined to the immediate method scope; this file has cross-method helper plumbing that does not.
+
+### Test Results
+
+| Test run | Result |
+|----------|--------|
+| `cd apps/api && npx jest src/modules/dynatrace` | 114 passed (2 suites) |
+| `cd apps/api && npx jest` (full suite) | 4314 passed, 20 skipped (pre-existing), 0 failed |
+| `npm run type-check` (`@perfana/api`) | 0 errors |
+| `npm run lint` (`@perfana/api`) | 0 errors, 59 pre-existing warnings (none introduced) |
+
+### Net diff
+
+- `dynatrace.service.ts`: +30 / -30 = **net 0 lines.** Migrating 3 inline policy blocks to `canAccessResource`/`canModifyResource` calls + explanatory comments roughly balanced the deleted `const isAdmin` lines and old `if`-blocks.
+
+### Files changed
+
+- `apps/api/src/modules/dynatrace/dynatrace.service.ts` — import `OwnedResource` + 3 site migrations (`findByHost`, `update`, `delete`)
+- `docs/superpowers/audits/2026-04-26-audit-decisions.md` — this file
+
+### Allowlist disposition
+
+The file **remains** in `.rbac-migration-allowlist.json` — 21 debug-log-only sites + 5 internal `isAdmin`-passing sites still trip the lint rule. Allowlist size unchanged at 24. Burndown: Bucket B 13 → 16 of 17 (94.1%) (total adjusted upward by 3 to account for dynatrace's per-resource sites that were originally classified as "Leave" but are now in-scope after `canAccessResource`/`canModifyResource` was established).

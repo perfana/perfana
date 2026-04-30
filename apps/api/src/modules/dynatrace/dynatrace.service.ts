@@ -8,6 +8,7 @@ import { CreateEntityMappingDto } from './dto/create-entity-mapping.dto';
 import { HostPropertiesResponse, HostMetricsResponse, HostProblemResponse, TimeSeriesData } from './dto/host.dto';
 import { AuthorizationService } from '../../common/services/authorization.service';
 import { withOrgFilter } from '../../common/utils/with-org-filter';
+import { OwnedResource } from '@perfana/shared';
 import { validateExternalUrl } from '../../common/security/url-validator';
 import { attachPermissions } from '../../common/serializers/with-permissions.serializer';
 import { Capability } from '../../constants/capabilities.constants';
@@ -186,25 +187,24 @@ export class DynatraceService {
    * @throws NotFoundException if config doesn't exist or user doesn't have access
    */
   async findByHost(host: string, userId: string, roles: string[]) {
-    // Log authorization context for debugging
-    const isAdmin = this.authzService.isGlobalAdmin(roles);
-    this.logger.debug(`findByHost: host=${host}, userId=${userId}, isGlobalAdmin=${isAdmin}`);
+    this.logger.debug(`findByHost: host=${host}, userId=${userId}`);
 
     const config = await this.repository.findByHost(host);
     if (!config) {
       throw new NotFoundException(`Dynatrace configuration for host ${host} not found`);
     }
 
-    // Check access permissions (unless global admin)
-    if (!isAdmin) {
-      // Legacy data (null organization_id) is accessible to all users
-      if (config.organizationId) {
-        const hasAccess = await this.authzService.isOrganizationMember(userId, config.organizationId);
-        if (!hasAccess) {
-          throw new NotFoundException(`Dynatrace configuration for host ${host} not found`);
-        }
-      }
+    // Delegate the admin / legacy-null-org / membership decision to AuthorizationService.
+    // team_id is omitted to preserve the prior behavior of not checking team membership.
+    // created_by is unused by canAccessResource.
+    const accessResult = await this.authzService.canAccessResource(userId, roles, {
+      organization_id: config.organizationId,
+      created_by: '',
+    } as OwnedResource);
+    if (!accessResult.allowed) {
+      throw new NotFoundException(`Dynatrace configuration for host ${host} not found`);
     }
+    const isAdmin = accessResult.reason === 'User has global admin privileges';
 
     // Attach _permissions: global admin or legacy null-org configs can always mutate;
     // otherwise derive from per-org capabilities.
@@ -281,9 +281,7 @@ export class DynatraceService {
    * Full permission checks will be enabled when Phase 4 adds organization_id column.
    */
   async update(id: string, dto: UpdateDynatraceConfigDto, userId: string, roles: string[]) {
-    // Log authorization context for debugging
-    const isAdmin = this.authzService.isGlobalAdmin(roles);
-    this.logger.debug(`update: id=${id}, userId=${userId}, isGlobalAdmin=${isAdmin}`);
+    this.logger.debug(`update: id=${id}, userId=${userId}`);
 
     // Check if the configuration exists
     const existing = await this.repository.findById(id);
@@ -291,12 +289,15 @@ export class DynatraceService {
       throw new NotFoundException(`Dynatrace configuration with ID ${id} not found`);
     }
 
-    // Check modification permissions (unless global admin)
-    if (!isAdmin && existing.organizationId) {
-      const canModify = await this.authzService.isOrganizationAdmin(userId, existing.organizationId);
-      if (!canModify) {
-        throw new ForbiddenException('You do not have permission to modify this Dynatrace configuration');
-      }
+    // Delegate the admin / legacy-null-org / org-admin decision to AuthorizationService.
+    // canModifyResource handles: global admin bypass, legacy null-org bypass, creator-of-resource,
+    // org-admin role check, team-admin role check.
+    const modifyResult = await this.authzService.canModifyResource(userId, roles, {
+      organization_id: existing.organizationId,
+      created_by: existing.createdBy ?? '',
+    } as OwnedResource);
+    if (!modifyResult.allowed) {
+      throw new ForbiddenException('You do not have permission to modify this Dynatrace configuration');
     }
 
     // Update the configuration with the provided attributes
@@ -323,9 +324,7 @@ export class DynatraceService {
    * Full permission checks will be enabled when Phase 4 adds organization_id column.
    */
   async delete(id: string, userId: string, roles: string[]) {
-    // Log authorization context for debugging
-    const isAdmin = this.authzService.isGlobalAdmin(roles);
-    this.logger.debug(`delete: id=${id}, userId=${userId}, isGlobalAdmin=${isAdmin}`);
+    this.logger.debug(`delete: id=${id}, userId=${userId}`);
 
     // Check if the configuration exists and validate permissions
     const existing = await this.repository.findById(id);
@@ -333,12 +332,13 @@ export class DynatraceService {
       throw new NotFoundException(`Dynatrace configuration with ID ${id} not found`);
     }
 
-    // Check modification permissions (unless global admin)
-    if (!isAdmin && existing.organizationId) {
-      const canModify = await this.authzService.isOrganizationAdmin(userId, existing.organizationId);
-      if (!canModify) {
-        throw new ForbiddenException('You do not have permission to delete this Dynatrace configuration');
-      }
+    // Same access shape as update — see comment there for the canModifyResource rationale.
+    const modifyResult = await this.authzService.canModifyResource(userId, roles, {
+      organization_id: existing.organizationId,
+      created_by: existing.createdBy ?? '',
+    } as OwnedResource);
+    if (!modifyResult.allowed) {
+      throw new ForbiddenException('You do not have permission to delete this Dynatrace configuration');
     }
 
     await this.repository.delete(id);
