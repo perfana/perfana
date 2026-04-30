@@ -13,11 +13,7 @@ import {
 import { TestRunsApdexService } from './test-runs-apdex.service';
 import { ResourceNotFoundException } from '../../../common/exceptions/business.exception';
 import { AuthorizationService } from '../../../common/services/authorization.service';
-
-/**
- * Global admin roles that bypass organization filtering
- */
-const ADMIN_ROLES = ['perfana-admin', 'super-admin', 'admin'];
+import type { OwnedResource } from '@perfana/shared';
 
 /**
  * Raw test run data from SQL query (snake_case)
@@ -75,13 +71,6 @@ export class TestRunsBaselineApdexService {
   ) {}
 
   /**
-   * Check if a user has global admin role
-   */
-  private isGlobalAdmin(roles: string[]): boolean {
-    return roles.some(role => ADMIN_ROLES.includes(role));
-  }
-
-  /**
    * Validate that the user has access to the specified system under test
    * @throws ResourceNotFoundException if system not found or access is denied (hides resource existence)
    */
@@ -90,26 +79,17 @@ export class TestRunsBaselineApdexService {
     userId: string,
     roles: string[],
   ): Promise<void> {
-    const isAdmin = this.isGlobalAdmin(roles);
-
-    // Build query with organization filtering
-    const systemQuery = this.systemRepo.createQueryBuilder('sut')
-      .where('sut.id = :id', { id: systemUnderTestId })
-      .select(['sut.id']);
-
-    // Apply organization filter for non-admin users
-    if (!isAdmin) {
-      const organizationIds = await this.authzService.getAccessibleOrganizations(userId);
-      if (organizationIds.length === 0) {
-        this.logger.debug('User has no organization memberships, access denied');
-        throw new ResourceNotFoundException('System', systemUnderTestId);
-      }
-      systemQuery.andWhere('sut.organization_id IN (:...orgIds)', { orgIds: organizationIds });
+    const system = await this.systemRepo.findOne({ where: { id: systemUnderTestId } });
+    if (!system) {
+      throw new ResourceNotFoundException('System', systemUnderTestId);
     }
 
-    const system = await systemQuery.getOne();
+    const result = await this.authzService.canAccessResource(userId, roles, {
+      organization_id: system.organization_id,
+      created_by: system.created_by ?? '',
+    } as OwnedResource);
 
-    if (!system) {
+    if (!result.allowed) {
       throw new ResourceNotFoundException('System', systemUnderTestId);
     }
   }
