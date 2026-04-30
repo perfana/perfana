@@ -7,11 +7,8 @@ import { QueueService } from '../../queue/queue.service';
 import { TestRunsGateway } from '../gateways/test-runs.gateway';
 import { TestRunEventType } from '../types/realtime-events.types';
 import { mapEntityToTestRun } from '../handlers/entity-mapper';
-
-/**
- * Global admin roles that bypass organization filtering
- */
-const ADMIN_ROLES = ['perfana-admin', 'super-admin', 'admin'];
+import { AuthorizationService } from '../../../common/services/authorization.service';
+import { withOrgFilter } from '../../../common/utils/with-org-filter';
 
 @Injectable()
 export class TestRunsStaleDetectionService {
@@ -24,6 +21,7 @@ export class TestRunsStaleDetectionService {
     private queueService: QueueService,
     private configService: ConfigService,
     private testRunsGateway: TestRunsGateway,
+    private readonly authzService: AuthorizationService,
   ) {
     // Get stale timeout from environment with default of 2 minutes
     this.staleTimeoutMinutes = this.configService.get<number>('STALE_TIMEOUT_MINUTES', 2);
@@ -159,29 +157,22 @@ export class TestRunsStaleDetectionService {
   }
 
   /**
-   * Check if a user has global admin role
-   */
-  private isGlobalAdmin(roles: string[]): boolean {
-    return roles.some(role => ADMIN_ROLES.includes(role));
-  }
-
-  /**
    * Get statistics about stale test runs with optional organization filtering
    *
-   * @param roles - User roles from JWT token (for admin bypass)
-   * @param organizationIds - User's accessible organization IDs from JWT token
+   * @param userId - User ID for authorization checks
+   * @param roles - User roles for authorization checks
    */
   async getStaleTestRunStats(
+    userId: string = '',
     roles: string[] = [],
-    organizationIds: string[] = [],
   ): Promise<{
     totalStale: number;
     staleInLast24Hours: number;
   }> {
-    const isAdmin = this.isGlobalAdmin(roles);
+    const orgIds = await withOrgFilter(userId, roles, this.authzService);
 
     // Non-admin users with no organization memberships see zeros
-    if (!isAdmin && organizationIds.length === 0) {
+    if (orgIds !== null && orgIds.length === 0) {
       this.logger.debug('User has no organization memberships, returning zero stale stats');
       return {
         totalStale: 0,
@@ -196,11 +187,11 @@ export class TestRunsStaleDetectionService {
       .createQueryBuilder('tr')
       .where('tr.isStale = :isStale', { isStale: true });
 
-    if (!isAdmin) {
+    if (orgIds !== null) {
       totalStaleQuery
         .leftJoin('tr.systemUnderTest', 'sut')
         .leftJoin('sut.team', 'team')
-        .andWhere('sut.organization_id IN (:...orgIds)', { orgIds: organizationIds });
+        .andWhere('sut.organization_id IN (:...orgIds)', { orgIds });
     }
 
     const totalStale = await totalStaleQuery.getCount();
@@ -211,17 +202,17 @@ export class TestRunsStaleDetectionService {
       .where('tr.isStale = :isStale', { isStale: true })
       .andWhere('tr.staleDetectedAt >= :oneDayAgo', { oneDayAgo });
 
-    if (!isAdmin) {
+    if (orgIds !== null) {
       staleInLast24HoursQuery
         .leftJoin('tr.systemUnderTest', 'sut')
         .leftJoin('sut.team', 'team')
-        .andWhere('sut.organization_id IN (:...orgIds)', { orgIds: organizationIds });
+        .andWhere('sut.organization_id IN (:...orgIds)', { orgIds });
     }
 
     const staleInLast24Hours = await staleInLast24HoursQuery.getCount();
 
     this.logger.debug(
-      `Stale stats: total=${totalStale}, last24h=${staleInLast24Hours}${isAdmin ? ' (admin)' : ` (orgs: ${organizationIds.length})`}`
+      `Stale stats: total=${totalStale}, last24h=${staleInLast24Hours}${orgIds === null ? ' (admin)' : ` (orgs: ${orgIds.length})`}`
     );
 
     return {

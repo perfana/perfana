@@ -349,8 +349,7 @@ export class TestRunsQueryService {
     aggregationSeconds?: number,
     excludeRampUp?: boolean
   ): Promise<TransactionTimeSeriesData> {
-    const organizationIds = await this.authzService.getAccessibleOrganizations(userId);
-    return this.timeSeriesService.getTransactionTimeSeries(testRunId, transactionName, aggregationSeconds, excludeRampUp, roles, organizationIds);
+    return this.timeSeriesService.getTransactionTimeSeries(testRunId, transactionName, userId, roles, aggregationSeconds, excludeRampUp);
   }
 
   async getSamplerTimeSeries(
@@ -362,7 +361,6 @@ export class TestRunsQueryService {
     aggregationSeconds?: number,
     excludeRampUp?: boolean
   ): Promise<TimeSeriesDataPoint[]> {
-    const organizationIds = await this.authzService.getAccessibleOrganizations(userId);
-    return this.timeSeriesService.getSamplerTimeSeries(testRunId, transactionName, samplerName, aggregationSeconds, excludeRampUp, roles, organizationIds);
+    return this.timeSeriesService.getSamplerTimeSeries(testRunId, transactionName, samplerName, userId, roles, aggregationSeconds, excludeRampUp);
   }
 }

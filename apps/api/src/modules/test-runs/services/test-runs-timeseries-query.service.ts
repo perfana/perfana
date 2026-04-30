@@ -4,12 +4,9 @@ import { Repository } from 'typeorm';
 import { TestRun as TestRunEntity } from '../../../entities';
 import { DatabaseException, ResourceNotFoundException } from '../../../common/exceptions/business.exception';
 import { TestRunsMapperService } from './test-runs-mapper.service';
+import { AuthorizationService } from '../../../common/services/authorization.service';
 import { TimeSeriesDataPoint, TransactionTimeSeriesData } from '../types/test-run.types';
-
-/**
- * Global admin roles that bypass organization filtering
- */
-const ADMIN_ROLES = ['perfana-admin', 'super-admin', 'admin'];
+import type { OwnedResource } from '@perfana/shared';
 
 /**
  * Service responsible for time series data queries
@@ -23,46 +20,35 @@ export class TestRunsTimeSeriesQueryService {
     @InjectRepository(TestRunEntity)
     private readonly testRunRepo: Repository<TestRunEntity>,
     private readonly mapper: TestRunsMapperService,
+    private readonly authzService: AuthorizationService,
   ) {}
 
   /**
-   * Check if a user has global admin role
-   */
-  private isGlobalAdmin(roles: string[]): boolean {
-    return roles.some(role => ADMIN_ROLES.includes(role));
-  }
-
-  /**
    * Validate that the testRunId belongs to an organization the user has access to.
-   * Returns the test run if access is allowed, otherwise throws ResourceNotFoundException.
+   * Throws ResourceNotFoundException to hide existence on access denial.
    */
   private async validateOrganizationAccess(
     testRunId: string,
+    userId: string,
     roles: string[],
-    organizationIds: string[],
   ): Promise<void> {
-    const isAdmin = this.isGlobalAdmin(roles);
-
-    // Admin users bypass organization filtering
-    if (isAdmin) {
-      return;
-    }
-
-    // Non-admin users with no organization memberships cannot access any data
-    if (organizationIds.length === 0) {
+    const result = await this.testRunRepo.query(
+      `SELECT sut.organization_id, sut.created_by
+       FROM test_runs tr
+       INNER JOIN systems_under_test sut ON sut.id = tr.system_under_test_id
+       WHERE tr.test_run_id = $1 LIMIT 1`,
+      [testRunId],
+    );
+    if (!result || result.length === 0) {
       throw new ResourceNotFoundException('TestRun', testRunId);
     }
 
-    // Query test run with organization filter through system_under_test
-    const testRun = await this.testRunRepo
-      .createQueryBuilder('tr')
-      .leftJoin('tr.systemUnderTest', 'sut')
-      .where('tr.testRunId = :testRunId', { testRunId })
-      .andWhere('sut.organization_id IN (:...orgIds)', { orgIds: organizationIds })
-      .select(['tr.id'])
-      .getOne();
+    const accessResult = await this.authzService.canAccessResource(userId, roles, {
+      organization_id: result[0].organization_id,
+      created_by: result[0].created_by ?? '',
+    } as OwnedResource);
 
-    if (!testRun) {
+    if (!accessResult.allowed) {
       throw new ResourceNotFoundException('TestRun', testRunId);
     }
   }
@@ -113,22 +99,22 @@ export class TestRunsTimeSeriesQueryService {
    *
    * @param testRunId - The test run ID to query
    * @param transactionName - The transaction name to filter by
+   * @param userId - User ID for authorization checks
+   * @param roles - User roles for authorization checks
    * @param aggregationSeconds - Aggregation bucket size in seconds
    * @param excludeRampUp - Whether to exclude ramp-up period from results
-   * @param roles - User roles from JWT token (for admin bypass)
-   * @param organizationIds - User's accessible organization IDs from JWT token
    */
   async getTransactionTimeSeries(
     testRunId: string,
     transactionName: string,
+    userId: string,
+    roles: string[],
     aggregationSeconds: number = 1,
     excludeRampUp: boolean = false,
-    roles: string[] = [],
-    organizationIds: string[] = [],
   ): Promise<TransactionTimeSeriesData> {
     try {
       // Validate organization access before processing
-      await this.validateOrganizationAccess(testRunId, roles, organizationIds);
+      await this.validateOrganizationAccess(testRunId, userId, roles);
 
       this.logger.log(`Getting time-series data for transaction: ${transactionName} with ${aggregationSeconds}s aggregation (excludeRampUp: ${excludeRampUp})`);
 
@@ -294,23 +280,23 @@ export class TestRunsTimeSeriesQueryService {
    * @param testRunId - The test run ID to query
    * @param transactionName - The transaction name to filter by
    * @param samplerName - The sampler name to filter by
+   * @param userId - User ID for authorization checks
+   * @param roles - User roles for authorization checks
    * @param aggregationSeconds - Aggregation bucket size in seconds
    * @param excludeRampUp - Whether to exclude ramp-up period from results
-   * @param roles - User roles from JWT token (for admin bypass)
-   * @param organizationIds - User's accessible organization IDs from JWT token
    */
   async getSamplerTimeSeries(
     testRunId: string,
     transactionName: string,
     samplerName: string,
+    userId: string,
+    roles: string[],
     aggregationSeconds: number = 5,
     excludeRampUp: boolean = false,
-    roles: string[] = [],
-    organizationIds: string[] = [],
   ): Promise<TimeSeriesDataPoint[]> {
     try {
       // Validate organization access before processing
-      await this.validateOrganizationAccess(testRunId, roles, organizationIds);
+      await this.validateOrganizationAccess(testRunId, userId, roles);
 
       this.logger.log(`Getting time-series data for sampler: ${samplerName} in transaction: ${transactionName} with ${aggregationSeconds}s aggregation (excludeRampUp: ${excludeRampUp})`);
 
