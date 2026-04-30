@@ -4,6 +4,11 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
+## [0.2.47.27] - 2026-04-30
+
+### Refactored
+- **RBAC Phase 3c — `dynatrace.service.ts` partial migration (Phase C17).** Migrated the 3 per-resource sites originally classified "Leave" in C2's pilot (`findByHost` → `canAccessResource`, `update` and `delete` → `canModifyResource`). The 21 debug-log-only sites + 5 internal `isAdmin`-passing sites remain — file stays in the allowlist for now. Initial bulk-drop attempt was aborted: a perl one-shot for the debug-log pattern matched too aggressively and broke 5 sites that referenced `isAdmin` downstream (e.g. the `attachPermissions` branch at line 211, and the `requireDynatraceMutationCapability` helper that takes `isAdmin: boolean`). Reverted and re-scoped to just the 3 standard per-resource migrations. Burndown: Bucket B 13 → 16 of 17 (94.1%) — total adjusted upward by 3 to count dynatrace's per-resource sites. Allowlist unchanged at 24 files. All 114 dynatrace tests + full 4314-test API suite pass; 0 type errors; 0 lint errors. Net 0 lines (single file, +30/-30). Documented the bulk-drop cautionary tale in the audit doc as a lesson for future migrations.
+
 ## [0.2.47.26] - 2026-04-30
 
 ### Added
