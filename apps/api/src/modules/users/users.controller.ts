@@ -55,11 +55,9 @@ export class UsersController {
     @Query('limit') limit?: string,
   ): Promise<(KeycloakUserInfo & { displayName: string })[]> {
     // Restrict to global admins or org admins (used for adding members to orgs/teams)
-    if (!this.authorizationService.isGlobalAdmin(ctx.roles)) {
-      const isOrgAdmin = await this.authorizationService.isOrgAdminInAnyOrganization(ctx.userId);
-      if (!isOrgAdmin) {
-        throw new ForbiddenException('User search requires organization admin or global admin privileges');
-      }
+    const adminCheck = await this.authorizationService.canAdministerAnyOrganization(ctx.userId, ctx.roles);
+    if (!adminCheck.allowed) {
+      throw new ForbiddenException('User search requires organization admin or global admin privileges');
     }
 
     this.logger.debug(`Searching users: search="${search}", email="${email}", username="${username}"`);

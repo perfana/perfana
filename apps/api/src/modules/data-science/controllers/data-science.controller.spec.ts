@@ -105,6 +105,7 @@ const makeJobProgressGatewayMock = () => ({
 const makeAuthzServiceMock = () => ({
   isGlobalAdmin: jest.fn().mockReturnValue(false),
   getAccessibleOrganizations: jest.fn().mockResolvedValue(['org-456']),
+  canAccessResource: jest.fn().mockResolvedValue({ allowed: true, reason: 'Mock: access allowed' }),
 });
 
 const makeDataSourceMock = () => ({
@@ -267,21 +268,22 @@ describe('DataScienceController', () => {
         );
       });
 
-      it('should bypass access check for global admin', async () => {
-        const { controller, authzService, dataSource } = await buildModule({
-          authzService: { isGlobalAdmin: jest.fn().mockReturnValue(true) },
-        });
+      it('should grant access for global admin', async () => {
+        // verifyTestRunAccess now always loads the test_runs row, then defers
+        // to canAccessResource (which short-circuits for global admins internally).
+        const { controller, authzService, dataSource } = await buildModule();
 
-        dataSource.query.mockResolvedValueOnce([{
-          system_under_test_id: 'sys-001',
-          test_environment: 'production',
-          workload: 'loadTest',
-        }]);
+        dataSource.query
+          .mockResolvedValueOnce([{ organization_id: 'restricted-org', created_by: 'someone' }])
+          .mockResolvedValueOnce([{
+            system_under_test_id: 'sys-001',
+            test_environment: 'production',
+            workload: 'loadTest',
+          }]);
 
         await controller.analyzeTest('MyApp-prod-loadTest-001', mockAdminContext, undefined, undefined);
 
-        // getAccessibleOrganizations should NOT be called for global admin
-        expect(authzService.getAccessibleOrganizations).not.toHaveBeenCalled();
+        expect(authzService.canAccessResource).toHaveBeenCalled();
       });
     });
 
@@ -318,13 +320,11 @@ describe('DataScienceController', () => {
       it('should throw ForbiddenException when user lacks org access', async () => {
         const { controller, dataSource } = await buildModule({
           authzService: {
-            isGlobalAdmin: jest.fn().mockReturnValue(false),
-            getAccessibleOrganizations: jest.fn().mockResolvedValue(['other-org']),
+            canAccessResource: jest.fn().mockResolvedValue({ allowed: false, reason: 'denied' }),
           },
         });
 
-        // Test run belongs to 'restricted-org' which is not in user's list
-        dataSource.query.mockResolvedValueOnce([{ organization_id: 'restricted-org' }]);
+        dataSource.query.mockResolvedValueOnce([{ organization_id: 'restricted-org', created_by: 'someone' }]);
 
         await expect(
           controller.analyzeTest('MyApp-prod-loadTest-001', mockUserContext, undefined, undefined),
@@ -632,12 +632,11 @@ describe('DataScienceController', () => {
       it('should throw ForbiddenException when user lacks access to a test run', async () => {
         const { controller, dataSource } = await buildModule({
           authzService: {
-            isGlobalAdmin: jest.fn().mockReturnValue(false),
-            getAccessibleOrganizations: jest.fn().mockResolvedValue(['other-org']),
+            canAccessResource: jest.fn().mockResolvedValue({ allowed: false, reason: 'denied' }),
           },
         });
 
-        dataSource.query.mockResolvedValueOnce([{ organization_id: 'restricted-org' }]);
+        dataSource.query.mockResolvedValueOnce([{ organization_id: 'restricted-org', created_by: 'someone' }]);
 
         const dto: BatchRefreshDto = { testRunIds: ['run-1'] };
 
@@ -1060,15 +1059,8 @@ describe('DataScienceController', () => {
     });
 
     describe('Error Scenarios', () => {
-      it('should throw ForbiddenException when non-admin tries to release lock', async () => {
-        const { controller } = await buildModule({
-          authzService: { isGlobalAdmin: jest.fn().mockReturnValue(false) },
-        });
-
-        await expect(
-          controller.releaseLock('sys-001', 'production', 'loadTest', mockUserContext),
-        ).rejects.toThrow(ForbiddenException);
-      });
+      // Admin-only gate moved to @AdminOnly() decorator — enforced by KeycloakEnhancedAuthGuard.
+      // Coverage for that gate lives in keycloak-enhanced-auth.guard.spec.ts.
 
       it('should throw BadRequestException on service error during release', async () => {
         const { controller, jobProgressService } = await buildModule({

@@ -22,6 +22,8 @@ import type { JobProgress } from '@perfana/shared/types';
 import { JobProgressGateway } from '../gateways/job-progress.gateway';
 import { UserCtx, UserContext } from '../../../common/decorators/user-context.decorator';
 import { AuthorizationService } from '../../../common/services/authorization.service';
+import { AdminOnly } from '../../../decorators/admin-only.decorator';
+import type { OwnedResource } from '@perfana/shared';
 
 @ApiTags('data-science')
 @ApiBearerAuth()
@@ -42,20 +44,20 @@ export class DataScienceController {
    * Verify the user can access the given test run(s).
    */
   private async verifyTestRunAccess(testRunId: string, userId: string, roles: string[]): Promise<void> {
-    if (this.authzService.isGlobalAdmin(roles)) return;
-
-    const organizationIds = await this.authzService.getAccessibleOrganizations(userId);
-
     const result = await this.dataSource.query(
-      `SELECT organization_id FROM test_runs WHERE id::text = $1 OR test_run_id = $1 LIMIT 1`,
+      `SELECT organization_id, created_by FROM test_runs WHERE id::text = $1 OR test_run_id = $1 LIMIT 1`,
       [testRunId],
     );
     if (result.length === 0) {
       throw new NotFoundException(`Test run ${testRunId} not found`);
     }
 
-    const orgId = result[0].organization_id;
-    if (orgId && !organizationIds.includes(orgId)) {
+    const accessResult = await this.authzService.canAccessResource(userId, roles, {
+      organization_id: result[0].organization_id,
+      created_by: result[0].created_by ?? '',
+    } as OwnedResource);
+
+    if (!accessResult.allowed) {
       throw new ForbiddenException('Access denied to this test run');
     }
   }
@@ -825,6 +827,7 @@ export class DataScienceController {
   }
 
   @Delete('locks/:systemId/:env/:workload')
+  @AdminOnly()
   @ApiOperation({
     summary: 'Manually release a lock for a scope',
     description: 'Force-releases a lock for a stuck job. Use with caution - only when a job is truly stuck and blocking other operations.'
@@ -865,11 +868,6 @@ export class DataScienceController {
     @UserCtx() ctx: UserContext,
   ) {
     try {
-      // Lock release is an admin operation
-      if (!this.authzService.isGlobalAdmin(ctx.roles)) {
-        throw new ForbiddenException('Admin privileges required to release locks');
-      }
-
       this.logger.warn(
         `Manual lock release requested for scope: ${systemId}:${env}:${workload} by user ${ctx.userId}`
       );
