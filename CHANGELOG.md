@@ -4,6 +4,11 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
+## [0.2.47.25] - 2026-04-30
+
+### Refactored
+- **RBAC Phase 3c — finish `metrics-sources.service.ts` migration (Phase C15).** Second "finish PR" following the C14 precedent. C8 (PR #195) migrated the 3 Bucket A list-filter sites and left `create` (debug-log only), `update`, `delete` (per-resource throw guards). C15 closes all 3: `create` drops the `(admin)` log tag (C11 precedent), `update` and `delete` delegate to `AuthorizationService.canAccessResource`. Also fixes a latent bug in the shared `createAuthorizationServiceMock` factory: `canAccessResource` and `canModifyResource` were mocked as boolean (`mockResolvedValue(true)`) but the real methods return `AuthorizationResult` (`{ allowed, reason }`). Bug was dormant — no consumer of the shared factory had exercised these methods until now. Fix lands in this PR; all 10 consumers benefit. File exits the lint allowlist (eighth file to do so; allowlist 31 → 30). Burndown: Bucket B 4 → 6 of 14 (42.9%) — biggest single-PR Bucket B gain so far. All 34 metrics-sources tests + full 4314-test API suite pass; 0 type errors; 0 lint errors.
+
 ## [0.2.47.24] - 2026-04-30
 
 ### Refactored

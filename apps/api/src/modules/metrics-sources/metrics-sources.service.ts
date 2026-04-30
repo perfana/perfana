@@ -4,6 +4,7 @@ import { Repository } from 'typeorm';
 import { MetricsSource as MetricsSourceEntity } from '../../entities';
 import { AuthorizationService } from '../../common/services/authorization.service';
 import { withOrgFilter } from '../../common/utils/with-org-filter';
+import { OwnedResource } from '@perfana/shared';
 import { CreateMetricsSourceDto } from './dto/create-metrics-source.dto';
 import { UpdateMetricsSourceDto } from './dto/update-metrics-source.dto';
 
@@ -179,9 +180,8 @@ export class MetricsSourcesService {
     }
   }
 
-  async create(dto: CreateMetricsSourceDto, userId: string, roles: string[]): Promise<MetricsSourceResponse> {
-    const isAdmin = this.authzService.isGlobalAdmin(roles);
-    this.logger.debug(`create: userId=${userId}, isGlobalAdmin=${isAdmin}`);
+  async create(dto: CreateMetricsSourceDto, userId: string, _roles: string[]): Promise<MetricsSourceResponse> {
+    this.logger.debug(`create: userId=${userId}`);
 
     try {
       const entity = this.metricsSourceRepo.create({
@@ -220,8 +220,7 @@ export class MetricsSourcesService {
   }
 
   async update(id: string, dto: UpdateMetricsSourceDto, userId: string, roles: string[]): Promise<MetricsSourceResponse> {
-    const isAdmin = this.authzService.isGlobalAdmin(roles);
-    this.logger.debug(`update: id=${id}, userId=${userId}, isGlobalAdmin=${isAdmin}`);
+    this.logger.debug(`update: id=${id}, userId=${userId}`);
 
     try {
       const existing = await this.metricsSourceRepo.findOne({ where: { id } });
@@ -229,12 +228,17 @@ export class MetricsSourcesService {
         throw new NotFoundException(`MetricsSource with id ${id} not found`);
       }
 
-      // Check org membership for non-admins
-      if (!isAdmin && existing.organizationId) {
-        const accessibleOrgs = await this.authzService.getAccessibleOrganizations(userId);
-        if (!accessibleOrgs.includes(existing.organizationId)) {
-          throw new ForbiddenException('You do not have permission to modify this metrics source');
-        }
+      // Delegate the admin / legacy-null-org / membership decision to AuthorizationService.
+      // The original guard used getAccessibleOrganizations + accessibleOrgs.includes(orgId), which
+      // is read-membership semantics — same shape as canAccessResource (NOT canModifyResource,
+      // which would tighten access to org-admin role). team_id is omitted to preserve the prior
+      // behavior of not checking team membership. created_by is unused by canAccessResource.
+      const accessResult = await this.authzService.canAccessResource(userId, roles, {
+        organization_id: existing.organizationId,
+        created_by: '',
+      } as OwnedResource);
+      if (!accessResult.allowed) {
+        throw new ForbiddenException('You do not have permission to modify this metrics source');
       }
 
       const updateData: Partial<MetricsSourceEntity> = {};
@@ -264,8 +268,7 @@ export class MetricsSourcesService {
   }
 
   async delete(id: string, userId: string, roles: string[]): Promise<void> {
-    const isAdmin = this.authzService.isGlobalAdmin(roles);
-    this.logger.debug(`delete: id=${id}, userId=${userId}, isGlobalAdmin=${isAdmin}`);
+    this.logger.debug(`delete: id=${id}, userId=${userId}`);
 
     try {
       const existing = await this.metricsSourceRepo.findOne({ where: { id } });
@@ -273,12 +276,13 @@ export class MetricsSourcesService {
         throw new NotFoundException(`MetricsSource with id ${id} not found`);
       }
 
-      // Check org membership for non-admins
-      if (!isAdmin && existing.organizationId) {
-        const accessibleOrgs = await this.authzService.getAccessibleOrganizations(userId);
-        if (!accessibleOrgs.includes(existing.organizationId)) {
-          throw new ForbiddenException('You do not have permission to delete this metrics source');
-        }
+      // Same access shape as update — see comment there for the rationale of canAccessResource over canModifyResource.
+      const result = await this.authzService.canAccessResource(userId, roles, {
+        organization_id: existing.organizationId,
+        created_by: '',
+      } as OwnedResource);
+      if (!result.allowed) {
+        throw new ForbiddenException('You do not have permission to delete this metrics source');
       }
 
       await this.metricsSourceRepo.delete(id);

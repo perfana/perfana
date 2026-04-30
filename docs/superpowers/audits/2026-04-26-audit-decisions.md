@@ -7,10 +7,10 @@ Phase 3c rolls capabilities through every site listed below. Update these counts
 | Bucket | Total | Migrated | Remaining | % done |
 | --- | ---: | ---: | ---: | ---: |
 | A — bypass filter | 127 | 41 | 86 | 32.3% |
-| B — bypass guard | 14 | 4 | 10 | 28.6% |
+| B — bypass guard | 14 | 6 | 8 | 42.9% |
 | Local `private isGlobalAdmin()` wrappers | 13 | 2 | 11 | 15.4% |
 
-**Lint enforcement:** `apps/api/.rbac-migration-allowlist.json` lists every file currently exempt from the `no-direct-is-global-admin` lint rule (31 files as of 2026-04-30). When a site is migrated, remove its file from the allowlist (the file may have multiple sites — only remove when the LAST one is migrated). Allowlist size IS the burndown.
+**Lint enforcement:** `apps/api/.rbac-migration-allowlist.json` lists every file currently exempt from the `no-direct-is-global-admin` lint rule (30 files as of 2026-04-30). When a site is migrated, remove its file from the allowlist (the file may have multiple sites — only remove when the LAST one is migrated). Allowlist size IS the burndown.
 
 **Date-bound revisit:** by **2026-08-01**, Phase 3c migration must be at least 50% complete (Bucket A + B combined: 70+ sites migrated). If not, re-evaluate the architecture or the priorities. "We forgot about it" is the failure mode this gate prevents.
 
@@ -991,3 +991,81 @@ This makes "finishing" partially-migrated files a fast follow-up category. After
 ### Allowlist disposition
 
 This file **EXITS the allowlist** — zero direct `isGlobalAdmin` references after the migration. **Seventh file to fully exit** the allowlist since Phase 3c began (after C6, C7, C9, C11, C12, and C13). Allowlist size: 32 → 31.
+
+---
+
+## Phase C15 — Single file: `metrics-sources.service.ts` finish (+ shared mock fix)
+
+**Audit date:** 2026-04-30
+**Scope:** Second "finish PR" following the C14 precedent. C8 (PR #195) migrated the 3 Bucket A list-filter sites in `metrics-sources.service.ts` and left 3 sites: `create` (debug-log only), `update` and `delete` (per-resource throw guards). C15 closes all 3, fully exiting the file. **Also fixes a latent bug in the shared `createAuthorizationServiceMock` factory** that was previously dormant — `canAccessResource` and `canModifyResource` were mocked as boolean (`mockResolvedValue(true)`), but the real methods return `AuthorizationResult` (`{ allowed, reason }`).
+**Files re-verified:** `apps/api/src/modules/metrics-sources/metrics-sources.service.ts`, `apps/api/test/mocks/authorization-service.mock.ts`
+
+### Site Classification
+
+| Line | Method | Role of `isAdmin` | Migration approach |
+|------|--------|-------------------|--------------------|
+| 183 | `create` | **Log decoration only** — no behavioral consequence | Drop the ` (admin)` log tag (C11 precedent), rename `roles` → `_roles` |
+| 223 | `update` | Log decoration + per-resource guard via `getAccessibleOrganizations + accessibleOrgs.includes(orgId)` | Drop log tag + delegate guard to `canAccessResource` |
+| 267 | `delete` | Same as `update` | Same |
+
+**All 3 sites migrated. File fully exits the allowlist.**
+
+### Why `canAccessResource`, not `canModifyResource`
+
+The original guards in `update` and `delete` used `getAccessibleOrganizations + accessibleOrgs.includes(orgId)` — i.e., "is the user a member of any role in this org?" That's read-membership semantics. `canAccessResource` matches this exactly. `canModifyResource` would tighten to org-admin or team-admin, which would be a behavior change. C15 preserves the existing semantics, deferring the org-admin tightening to a separate decision (likely Phase 4 or a dedicated audit).
+
+This is the first single-file C-series migration where the choice between `canAccessResource` and `canModifyResource` was ambiguous from the call site (write operation, but member-level guard). The decision is documented inline in the code so future reviewers don't have to re-derive it.
+
+### Shared mock fix (latent bug)
+
+`apps/api/test/mocks/authorization-service.mock.ts` exports `createAuthorizationServiceMock()` used by 10+ specs. Two of its methods were mocked with the wrong return shape:
+
+```typescript
+// before (wrong shape)
+canAccessResource: jest.fn().mockResolvedValue(true),
+canModifyResource: jest.fn().mockResolvedValue(true),
+
+// after (matches AuthorizationResult)
+canAccessResource: jest.fn().mockResolvedValue({ allowed: true, reason: 'Mock: access allowed' }),
+canModifyResource: jest.fn().mockResolvedValue({ allowed: true, reason: 'Mock: modify allowed' }),
+```
+
+The `restrictiveAuthorizationServiceMock` factory had the same bug for the `false` case — also fixed.
+
+The bug was dormant because no consumer of the shared factory was exercising `canAccessResource` or `canModifyResource` until this PR. C7 and C14 (`report-generation` and `events`) used custom inline mocks with the correct shape, so they sidestepped the bug. C15 is the first migration to use the shared factory through one of these methods, so the fix lands here. All 10 consumers benefit going forward.
+
+### Test fixture compatibility
+
+`metrics-sources.service.spec.ts` uses `createAuthorizationServiceMock()` directly. With the shared mock fixed, the default `canAccessResource: { allowed: true, ... }` covers the admin happy path for all `update`/`delete` tests without per-test overrides. Pre-existing tests (34 in metrics-sources, including 4 update + 3 delete tests) pass unchanged — the mock now correctly conveys that the migrated `canAccessResource` calls succeed for the default-admin test setup.
+
+### Subtle near-miss: shadow `result` variable
+
+The `update` method already has a `const result = await this.findOne(id, ...)` near the end. Initially the migration introduced a second `const result = await this.authzService.canAccessResource(...)` earlier in the same try-block — TypeScript caught the duplicate declaration immediately, but Jest surfaced it first as a parse error in dependent specs. Renamed the new variable to `accessResult` to avoid the shadow.
+
+### Test Results
+
+| Test run | Result |
+|----------|--------|
+| `cd apps/api && npx jest src/modules/metrics-sources` | 34 passed (2 suites) |
+| `cd apps/api && npx jest` (full suite) | 4314 passed, 20 skipped (pre-existing), 0 failed |
+| `npm run type-check` (`@perfana/api`) | 0 errors |
+| `npm run lint` (`@perfana/api`) | 0 errors, 59 pre-existing warnings (none introduced) |
+
+The shared mock fix did not break any of the 10 consuming specs — confirmed by the full-suite green result.
+
+### Net diff
+
+- `metrics-sources.service.ts`: +23 / -19 = **net +4 lines**
+- `authorization-service.mock.ts`: +8 / -6 = **net +2 lines**
+- **Total net +6 lines.** Same growth pattern as C12/C13/C14 — the explanatory comment block in front of `canAccessResource` is the dominant driver.
+
+### Files changed
+
+- `apps/api/src/modules/metrics-sources/metrics-sources.service.ts` — import `OwnedResource` + 3 site migrations (1 log-tag drop + 2 `canAccessResource` delegations)
+- `apps/api/test/mocks/authorization-service.mock.ts` — fix `canAccessResource` and `canModifyResource` mock shapes in both happy and restrictive factories
+- `apps/api/.rbac-migration-allowlist.json` — remove the file entry
+- `docs/superpowers/audits/2026-04-26-audit-decisions.md` — this file
+
+### Allowlist disposition
+
+This file **EXITS the allowlist** — zero direct `isGlobalAdmin` references after the migration. **Eighth file to fully exit** the allowlist since Phase 3c began (after C6, C7, C9, C11, C12, C13, and C14). Allowlist size: 31 → 30.
