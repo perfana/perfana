@@ -4,6 +4,7 @@ import { Repository } from 'typeorm';
 import { Event, SystemUnderTest, ApplicationDashboard, GrafanaInstance, TestRun } from '../../entities';
 import { AuthorizationService } from '../../common/services/authorization.service';
 import { withOrgFilter } from '../../common/utils/with-org-filter';
+import { OwnedResource } from '@perfana/shared';
 import { GrafanaClientService } from '../grafana/grafana-client.service';
 import { CreateEventDto, UpdateEventDto, EventQueryDto } from './dto/event.dto';
 
@@ -109,11 +110,15 @@ export class EventsService {
       throw new NotFoundException(`Event ${id} not found`);
     }
 
-    if (!this.authzService.isGlobalAdmin(roles) && event.organizationId) {
-      const hasAccess = await this.authzService.isOrganizationMember(userId, event.organizationId);
-      if (!hasAccess) {
-        throw new NotFoundException(`Event ${id} not found`);
-      }
+    // Delegate the admin / legacy-null-org / membership decision to AuthorizationService.
+    // team_id is omitted to preserve the prior behavior of not checking team membership for
+    // events. created_by is unused by canAccessResource (only canModifyResource reads it).
+    const result = await this.authzService.canAccessResource(userId, roles, {
+      organization_id: event.organizationId,
+      created_by: '',
+    } as OwnedResource);
+    if (!result.allowed) {
+      throw new NotFoundException(`Event ${id} not found`);
     }
 
     return event;

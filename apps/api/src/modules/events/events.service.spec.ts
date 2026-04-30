@@ -83,6 +83,7 @@ describe('EventsService', () => {
             isGlobalAdmin: jest.fn(),
             getAccessibleOrganizations: jest.fn(),
             isOrganizationMember: jest.fn(),
+            canAccessResource: jest.fn().mockResolvedValue({ allowed: true, reason: 'mocked' }),
           },
         },
         {
@@ -189,18 +190,20 @@ describe('EventsService', () => {
     });
 
     it('should check org membership for non-admin', async () => {
-      authzService.isGlobalAdmin.mockReturnValue(false);
       eventRepo.findOne.mockResolvedValue(mockEvent);
-      authzService.isOrganizationMember.mockResolvedValue(true);
+      authzService.canAccessResource.mockResolvedValue({ allowed: true, reason: 'org member' });
       const result = await service.findOne(mockEvent.id, 'user-1', ['user']);
       expect(result).toEqual(mockEvent);
-      expect(authzService.isOrganizationMember).toHaveBeenCalledWith('user-1', mockEvent.organizationId);
+      expect(authzService.canAccessResource).toHaveBeenCalledWith(
+        'user-1',
+        ['user'],
+        expect.objectContaining({ organization_id: mockEvent.organizationId }),
+      );
     });
 
     it('should throw NotFoundException for non-admin without org access', async () => {
-      authzService.isGlobalAdmin.mockReturnValue(false);
       eventRepo.findOne.mockResolvedValue(mockEvent);
-      authzService.isOrganizationMember.mockResolvedValue(false);
+      authzService.canAccessResource.mockResolvedValue({ allowed: false, reason: 'denied' });
       await expect(service.findOne(mockEvent.id, 'user-1', ['user']))
         .rejects.toThrow(NotFoundException);
     });
