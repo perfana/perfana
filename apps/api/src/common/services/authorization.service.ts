@@ -399,6 +399,46 @@ export class AuthorizationService {
   }
 
   /**
+   * Check if a user can administer any organization — either via global admin
+   * privileges or via org-admin membership in at least one organization.
+   *
+   * Returns the same {allowed, reason} shape as canAccessResource/canModifyResource
+   * so callers can use a uniform pattern.
+   *
+   * Useful for write operations that aren't scoped to a specific organization yet
+   * (e.g. CRUD gates on services like grafana-instances, pyroscope-instances,
+   * tracing-instances).
+   *
+   * @param userId - The user ID to check
+   * @param globalRoles - The user's global roles from JWT
+   * @returns AuthorizationResult with allowed status and reason
+   */
+  async canAdministerAnyOrganization(
+    userId: string,
+    globalRoles: string[] | null | undefined,
+  ): Promise<AuthorizationResult> {
+    if (this.isGlobalAdmin(globalRoles)) {
+      return {
+        allowed: true,
+        reason: 'User has global admin privileges',
+      };
+    }
+
+    const isOrgAdmin = await this.isOrgAdminInAnyOrganization(userId);
+    if (isOrgAdmin) {
+      return {
+        allowed: true,
+        reason: `User ${userId} is org-admin in at least one organization`,
+      };
+    }
+
+    return {
+      allowed: false,
+      reason: `User ${userId} is not a global admin and not an org-admin in any organization`,
+    };
+  }
+
+  /**
    * Get all organization IDs a user has access to.
    * Results are cached for performance.
    *

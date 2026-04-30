@@ -4,6 +4,14 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
+## [0.2.47.26] - 2026-04-30
+
+### Added
+- **`AuthorizationService.canAdministerAnyOrganization(userId, roles)`** — new policy primitive returning `AuthorizationResult` ({ allowed, reason }) that combines global-admin bypass + `isOrgAdminInAnyOrganization` membership check. Centralizes the "global admin OR any-org admin" pattern that 3 services were re-implementing in private `requireOrgAdmin` helpers. Both shared mock factories (`createAuthorizationServiceMock` happy + `createRestrictiveAuthorizationServiceMock`) gained the method.
+
+### Refactored
+- **RBAC Phase 3c — finish bundle (Phase C16).** Largest single C-series PR: 6 files exit the lint allowlist simultaneously. `benchmark-query.service.ts` (C5 leftovers) + `grafana/application-dashboards.service.ts` (C3) + `grafana/grafana-dashboards.service.ts` (C3) + `grafana/grafana-instances.service.ts` (C3) + `pyroscope/pyroscope-instances.service.ts` (C4) + `tracing-instances/tracing-instances.service.ts` (C4) all migrated to use `canAccessResource` (per-resource read), `canModifyResource` (per-resource org-admin write — grafana-instances only), `canAdministerAnyOrganization` (new "any-org admin" gate for the requireOrgAdmin helpers in the 3 instance services), and log-tag drops (10+ debug-log-only sites). Subtle: pyroscope/tracing keep `canAccessResource` for update/remove (preserving member-level write semantics), only grafana-instances tightens to `canModifyResource` (preserving its existing org-admin role check). Files exit allowlist en masse: 8 → **14 files exited cumulatively**; allowlist 30 → **24**. Burndown: Bucket B 6 → 13 of 14 (92.9%) — Bucket B is now nearly complete, only `users.controller.ts` (privilege gate, different shape) remains. All 4314 API tests pass; 0 type errors; 0 lint errors. Net +2 lines across all 10 changed files — the new abstraction (`canAdministerAnyOrganization`) and explanatory comment blocks balance the deleted inline policy code.
+
 ## [0.2.47.25] - 2026-04-30
 
 ### Refactored

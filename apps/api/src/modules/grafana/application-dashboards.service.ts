@@ -327,10 +327,8 @@ export class ApplicationDashboardsService {
    * so ownership tracking is not applied. Full ownership assignment will be enabled when
    * Phase 4 adds the ownership columns.
    */
-  async create(createDto: CreateApplicationDashboardDto, userId: string, roles: string[]): Promise<ApplicationDashboard> {
-    // Log authorization context for debugging
-    const isAdmin = this.authzService.isGlobalAdmin(roles);
-    this.logger.debug(`create: userId=${userId}, isGlobalAdmin=${isAdmin}`);
+  async create(createDto: CreateApplicationDashboardDto, userId: string, _roles: string[]): Promise<ApplicationDashboard> {
+    this.logger.debug(`create: userId=${userId}`);
 
     // NOTE: Ownership fields (created_by, organization_id) will be set here when Phase 4 adds them
 
@@ -411,9 +409,7 @@ export class ApplicationDashboardsService {
    * Full permission checks will be enabled when Phase 4 adds organization_id column.
    */
   async update(id: string, updateDto: UpdateApplicationDashboardDto, userId: string, roles: string[]): Promise<ApplicationDashboard> {
-    // Log authorization context for debugging
-    const isAdmin = this.authzService.isGlobalAdmin(roles);
-    this.logger.debug(`update: id=${id}, userId=${userId}, isGlobalAdmin=${isAdmin}`);
+    this.logger.debug(`update: id=${id}, userId=${userId}`);
 
     try {
       // First check if the dashboard exists
@@ -568,10 +564,8 @@ export class ApplicationDashboardsService {
    * Note: ApplicationDashboard entity does not have organization_id yet, so access checks are not applied.
    * Full access permission checks will be enabled when Phase 4 adds organization_id column.
    */
-  async getDeleteInfo(id: string, userId: string, roles: string[]): Promise<DeleteInfo> {
-    // Log authorization context for debugging
-    const isAdmin = this.authzService.isGlobalAdmin(roles);
-    this.logger.debug(`getDeleteInfo: id=${id}, userId=${userId}, isGlobalAdmin=${isAdmin}`);
+  async getDeleteInfo(id: string, userId: string, _roles: string[]): Promise<DeleteInfo> {
+    this.logger.debug(`getDeleteInfo: id=${id}, userId=${userId}`);
 
     // NOTE: Access permission check will be added here when ApplicationDashboard entity has organization_id
     // For now, all application dashboards are accessible (treated as legacy data)
@@ -631,9 +625,7 @@ export class ApplicationDashboardsService {
    * Full access permission checks will be enabled when Phase 4 adds organization_id column.
    */
   async getBatchDeleteInfo(ids: string[], userId: string, roles: string[]): Promise<BatchDeleteInfo> {
-    // Log authorization context for debugging
-    const isAdmin = this.authzService.isGlobalAdmin(roles);
-    this.logger.debug(`getBatchDeleteInfo: count=${ids.length}, userId=${userId}, isGlobalAdmin=${isAdmin}`);
+    this.logger.debug(`getBatchDeleteInfo: count=${ids.length}, userId=${userId}`);
 
     // NOTE: Access permission check will be added here when ApplicationDashboard entity has organization_id
     // For now, all application dashboards are accessible (treated as legacy data)
@@ -676,10 +668,8 @@ export class ApplicationDashboardsService {
    * Note: ApplicationDashboard entity does not have organization_id yet, so permission checks are not applied.
    * Full permission checks will be enabled when Phase 4 adds organization_id column.
    */
-  async delete(id: string, deleteFromGrafana: boolean, userId: string, roles: string[]): Promise<DeleteResult> {
-    // Log authorization context for debugging
-    const isAdmin = this.authzService.isGlobalAdmin(roles);
-    this.logger.debug(`delete: id=${id}, deleteFromGrafana=${deleteFromGrafana}, userId=${userId}, isGlobalAdmin=${isAdmin}`);
+  async delete(id: string, deleteFromGrafana: boolean, userId: string, _roles: string[]): Promise<DeleteResult> {
+    this.logger.debug(`delete: id=${id}, deleteFromGrafana=${deleteFromGrafana}, userId=${userId}`);
 
     try {
       // First check if the dashboard exists and load related data

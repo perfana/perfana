@@ -11,6 +11,7 @@ import {
 import { GrafanaDashboard as GrafanaDashboardEntity } from '../../entities';
 import { AuthorizationService } from '../../common/services/authorization.service';
 import { withOrgFilter } from '../../common/utils/with-org-filter';
+import { OwnedResource } from '@perfana/shared';
 
 export interface GrafanaDashboard {
   id: string;
@@ -53,13 +54,16 @@ export class GrafanaDashboardsService {
   /**
    * Verify the user has access to a dashboard by organization membership.
    * Dashboards with no organization_id (legacy/shared) are accessible to all.
+   * Delegates the admin / legacy-null-org / membership decision to AuthorizationService.
+   * team_id is omitted to preserve the prior behavior of not checking team membership.
+   * created_by is unused by canAccessResource.
    */
   private async verifyOrgAccess(dashboard: GrafanaDashboardEntity, userId: string, roles: string[]): Promise<void> {
-    if (this.authzService.isGlobalAdmin(roles)) return;
-    if (!dashboard.organizationId) return; // Legacy/shared dashboard — accessible to all
-
-    const organizationIds = await this.authzService.getAccessibleOrganizations(userId);
-    if (!organizationIds.includes(dashboard.organizationId)) {
+    const result = await this.authzService.canAccessResource(userId, roles, {
+      organization_id: dashboard.organizationId,
+      created_by: '',
+    } as OwnedResource);
+    if (!result.allowed) {
       throw new ForbiddenException(`Access denied to dashboard ${dashboard.id}`);
     }
   }
@@ -194,7 +198,7 @@ export class GrafanaDashboardsService {
    * Non-admin users can only access dashboards in their orgs or unowned dashboards.
    */
   async findOne(id: string, userId: string, roles: string[]): Promise<GrafanaDashboard> {
-    this.logger.debug(`findOne: id=${id}, userId=${userId}, isGlobalAdmin=${this.authzService.isGlobalAdmin(roles)}`);
+    this.logger.debug(`findOne: id=${id}, userId=${userId}`);
 
     try {
       const result = await this.grafanaDashboardRepo.findOne({ where: { id } });
@@ -248,8 +252,8 @@ export class GrafanaDashboardsService {
   /**
    * Create a new Grafana dashboard.
    */
-  async create(createDto: CreateGrafanaDashboardDto, userId: string, roles: string[]): Promise<GrafanaDashboard> {
-    this.logger.debug(`create: userId=${userId}, isGlobalAdmin=${this.authzService.isGlobalAdmin(roles)}`);
+  async create(createDto: CreateGrafanaDashboardDto, userId: string, _roles: string[]): Promise<GrafanaDashboard> {
+    this.logger.debug(`create: userId=${userId}`);
 
     try {
       // NOTE: Ownership fields (created_by, organization_id) will be set here when Phase 4 adds them
@@ -302,7 +306,7 @@ export class GrafanaDashboardsService {
    * Access check is handled by findOne (verifies org membership).
    */
   async update(id: string, updateDto: UpdateGrafanaDashboardDto, userId: string, roles: string[]): Promise<GrafanaDashboard> {
-    this.logger.debug(`update: id=${id}, userId=${userId}, isGlobalAdmin=${this.authzService.isGlobalAdmin(roles)}`);
+    this.logger.debug(`update: id=${id}, userId=${userId}`);
 
     try {
       // Verify exists and user has access (org check in findOne)
@@ -367,7 +371,7 @@ export class GrafanaDashboardsService {
    * Access check is handled by findOne (verifies org membership).
    */
   async remove(id: string, userId: string, roles: string[]): Promise<void> {
-    this.logger.debug(`remove: id=${id}, userId=${userId}, isGlobalAdmin=${this.authzService.isGlobalAdmin(roles)}`);
+    this.logger.debug(`remove: id=${id}, userId=${userId}`);
 
     try {
       // Verify exists and user has access (org check in findOne)
@@ -405,9 +409,7 @@ export class GrafanaDashboardsService {
     userId: string,
     roles: string[],
   ): Promise<Array<{ label: string; value: string }>> {
-    // Log authorization context for debugging
-    const isAdmin = this.authzService.isGlobalAdmin(roles);
-    this.logger.debug(`getVariableValues: dashboardId=${grafanaDashboardId}, variable=${variableName}, userId=${userId}, isGlobalAdmin=${isAdmin}`);
+    this.logger.debug(`getVariableValues: dashboardId=${grafanaDashboardId}, variable=${variableName}, userId=${userId}`);
 
     try {
       // Get the dashboard and its templating variables (access check happens in findOne)

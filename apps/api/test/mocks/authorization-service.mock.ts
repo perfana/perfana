@@ -77,6 +77,13 @@ export const createAuthorizationServiceMock = () => ({
   isOrgAdminInAnyOrganization: jest.fn().mockResolvedValue(true),
 
   /**
+   * Check if user can administer any organization (global admin or any-org admin).
+   * Default: returns { allowed: true, reason: ... } — matches the real
+   * AuthorizationService return shape (AuthorizationResult).
+   */
+  canAdministerAnyOrganization: jest.fn().mockResolvedValue({ allowed: true, reason: 'Mock: admin allowed' }),
+
+  /**
    * Get capabilities for a user in an org/team scope.
    * Default: returns the global-admin capability set so most tests pass without
    * per-test overrides. Tests that exercise capability denial should swap in
@@ -100,5 +107,6 @@ export const createRestrictiveAuthorizationServiceMock = () => ({
   getAccessibleTeams: jest.fn().mockResolvedValue([]),
   canViewTeamResources: jest.fn().mockResolvedValue({ allowed: false, reason: 'Mock: access denied' }),
   isOrgAdminInAnyOrganization: jest.fn().mockResolvedValue(false),
+  canAdministerAnyOrganization: jest.fn().mockResolvedValue({ allowed: false, reason: 'Mock: admin denied' }),
   getCapabilities: jest.fn().mockResolvedValue([]),
 });
