@@ -79,6 +79,8 @@ describe('MetricsService', () => {
     changePointsRepo = module.get(getRepositoryToken(DsChangePoints));
     adaptResultsRepo = module.get(getRepositoryToken(DsAdaptResults));
     testRunRepo = module.get(getRepositoryToken(TestRunEntity));
+    // Default: validateTestRunAccess loads a row (canAccessResource mock allows by default)
+    testRunRepo.query.mockResolvedValue([{ organization_id: 'org-1', created_by: 'creator' }]);
   });
 
   afterEach(() => {

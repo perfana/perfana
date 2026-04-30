@@ -11,6 +11,8 @@ import {
   ApplicationDashboard,
 } from '../../entities';
 import { AuthorizationService } from '../../common/services/authorization.service';
+import { withOrgFilter } from '../../common/utils/with-org-filter';
+import type { OwnedResource } from '@perfana/shared';
 
 export interface MetricDataPoint {
   time: Date;
@@ -91,20 +93,20 @@ export class MetricsService {
     userId: string,
     roles: string[],
   ): Promise<boolean> {
-    if (this.authzService.isGlobalAdmin(roles)) return true;
+    const result = await this.testRunRepo.query(
+      `SELECT sut.organization_id, sut.created_by
+       FROM test_runs tr
+       INNER JOIN systems_under_test sut ON sut.id = tr.system_under_test_id
+       WHERE tr.test_run_id = $1 LIMIT 1`,
+      [testRunId],
+    );
+    if (!result || result.length === 0) return false;
 
-    const organizationIds = await this.authzService.getAccessibleOrganizations(userId);
-
-    const query = `
-      SELECT 1
-      FROM test_runs tr
-      INNER JOIN systems_under_test sut ON sut.id = tr.system_under_test_id
-      WHERE tr.test_run_id = $1
-        AND (sut.organization_id = ANY($2::uuid[]) OR sut.organization_id IS NULL)
-      LIMIT 1
-    `;
-    const result = await this.testRunRepo.query(query, [testRunId, organizationIds]);
-    return result && result.length > 0;
+    const accessResult = await this.authzService.canAccessResource(userId, roles, {
+      organization_id: result[0].organization_id,
+      created_by: result[0].created_by ?? '',
+    } as OwnedResource);
+    return accessResult.allowed;
   }
 
   async findDSMetricsForPanel(testRunId: string, panelId: number, applicationDashboardId?: string, metricName?: string, userId: string = '', roles: string[] = [], metricsSourceId?: string): Promise<MetricDataPoint[] | null> {
@@ -337,7 +339,7 @@ export class MetricsService {
     metricsSourceId?: string,
   ): Promise<MetricStatisticResult[]> {
     try {
-      const isAdmin = this.authzService.isGlobalAdmin(roles);
+      const orgIds = await withOrgFilter(userId, roles, this.authzService);
 
       // First, get test_run_ids that match the criteria from test_runs table
       const queryBuilder = this.testRunRepo
@@ -356,13 +358,12 @@ export class MetricsService {
           'sut.name'
         ]);
 
-      // Add organization filtering for non-admin users
-      if (!isAdmin) {
-        const organizationIds = await this.authzService.getAccessibleOrganizations(userId);
-        if (organizationIds.length === 0) {
+      // Add organization filtering for non-admin users (orgIds === null means admin)
+      if (orgIds !== null) {
+        if (orgIds.length === 0) {
           return [];
         }
-        queryBuilder.andWhere('(sut.organization_id IN (:...orgIds) OR sut.organization_id IS NULL)', { orgIds: organizationIds });
+        queryBuilder.andWhere('(sut.organization_id IN (:...orgIds) OR sut.organization_id IS NULL)', { orgIds });
       }
 
       // Add system/environment/workload filtering
@@ -523,7 +524,7 @@ export class MetricsService {
     metricsSourceId?: string,
   ): Promise<MetricStatisticResult[]> {
     try {
-      const isAdmin = this.authzService.isGlobalAdmin(roles);
+      const orgIds = await withOrgFilter(userId, roles, this.authzService);
 
       // First, get test_run_ids that match the criteria from test_runs table
       const queryBuilder = this.testRunRepo
@@ -542,13 +543,12 @@ export class MetricsService {
           'sut.name'
         ]);
 
-      // Add organization filtering for non-admin users
-      if (!isAdmin) {
-        const organizationIds = await this.authzService.getAccessibleOrganizations(userId);
-        if (organizationIds.length === 0) {
+      // Add organization filtering for non-admin users (orgIds === null means admin)
+      if (orgIds !== null) {
+        if (orgIds.length === 0) {
           return [];
         }
-        queryBuilder.andWhere('(sut.organization_id IN (:...orgIds) OR sut.organization_id IS NULL)', { orgIds: organizationIds });
+        queryBuilder.andWhere('(sut.organization_id IN (:...orgIds) OR sut.organization_id IS NULL)', { orgIds });
       }
 
       // Add system/environment/workload filtering
