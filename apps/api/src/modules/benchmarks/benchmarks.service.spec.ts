@@ -36,6 +36,7 @@ describe('BenchmarksService', () => {
   let mutationService: BenchmarkMutationService;
   let benchmarkRepo: MockRepository<BenchmarkEntity>;
   let appDashboardRepo: MockRepository<ApplicationDashboardEntity>;
+  let systemRepo: MockRepository<SystemUnderTest>;
   let dataSource: jest.Mocked<DataSource>;
   let benchmarkQueryBuilder: MockSelectQueryBuilder<BenchmarkEntity>;
 
@@ -145,9 +146,12 @@ describe('BenchmarksService', () => {
     mutationService = module.get<BenchmarkMutationService>(BenchmarkMutationService);
     benchmarkRepo = module.get(getRepositoryToken(BenchmarkEntity));
     appDashboardRepo = module.get(getRepositoryToken(ApplicationDashboardEntity));
+    systemRepo = module.get(getRepositoryToken(SystemUnderTest));
     dataSource = module.get(getDataSourceToken());
 
     jest.clearAllMocks();
+    // Default: validateSystemAccess finds the system. canAccessResource mock allows by default.
+    systemRepo.findOne.mockResolvedValue({ id: 'system-uuid', organization_id: 'org-1', created_by: 'creator' } as any);
   });
 
   afterEach(() => {

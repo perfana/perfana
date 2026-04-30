@@ -6,6 +6,7 @@ import { BenchmarkQueryService } from './benchmark-query.service';
 import { BenchmarkTagHelper } from './benchmark-tag.helper';
 import { BenchmarkMapper } from './benchmark.mapper';
 import { AuthorizationService } from '../../../common/services/authorization.service';
+import type { OwnedResource } from '@perfana/shared';
 import type { Benchmark } from './benchmark-query.types';
 import type {
   CreateBenchmarkDto,
@@ -52,21 +53,17 @@ export class BenchmarkMutationService {
    * @throws ForbiddenException if user doesn't have access
    */
   private async validateSystemAccess(systemId: string, userId: string, roles: string[]): Promise<void> {
-    const isAdmin = this.authzService.isGlobalAdmin(roles);
-    if (isAdmin) return; // Admins have access to all systems
-
     const system = await this.systemRepo.findOne({ where: { id: systemId } });
     if (!system) {
       throw new ForbiddenException(`System under test ${systemId} not found`);
     }
 
-    // Legacy systems without organization_id are accessible to all authenticated users
-    if (!system.organization_id) {
-      return;
-    }
+    const result = await this.authzService.canAccessResource(userId, roles, {
+      organization_id: system.organization_id,
+      created_by: system.created_by ?? '',
+    } as OwnedResource);
 
-    const isMember = await this.authzService.isOrganizationMember(userId, system.organization_id);
-    if (!isMember) {
+    if (!result.allowed) {
       throw new ForbiddenException('You do not have access to this system');
     }
   }
@@ -82,10 +79,6 @@ export class BenchmarkMutationService {
    */
   async create(userId: string, roles: string[], dto: CreateBenchmarkDto): Promise<Benchmark> {
     try {
-      // Log authorization context for debugging
-      const isAdmin = this.authzService.isGlobalAdmin(roles);
-      this.logger.log(`[create] START - userId=${userId}, isGlobalAdmin=${isAdmin}, systemId=${dto.systemUnderTestId}`);
-
       // Validate user has access to the system
       await this.validateSystemAccess(dto.systemUnderTestId, userId, roles);
 
@@ -156,10 +149,6 @@ export class BenchmarkMutationService {
    */
   async update(id: string, userId: string, roles: string[], dto: UpdateBenchmarkDto): Promise<Benchmark | null> {
     try {
-      // Log authorization context for debugging
-      const isAdmin = this.authzService.isGlobalAdmin(roles);
-      this.logger.debug(`update: id=${id}, userId=${userId}, isGlobalAdmin=${isAdmin}`);
-
       const existing = await this.queryService.findOne(id, userId, roles);
       if (!existing) return null;
 
@@ -206,10 +195,6 @@ export class BenchmarkMutationService {
    */
   async delete(id: string, userId: string, roles: string[]): Promise<boolean> {
     try {
-      // Log authorization context for debugging
-      const isAdmin = this.authzService.isGlobalAdmin(roles);
-      this.logger.log(`[delete] START - id=${id}, userId=${userId}, isGlobalAdmin=${isAdmin}`);
-
       // Check if user has access to this benchmark (via findOne which checks organization)
       const existing = await this.queryService.findOne(id, userId, roles);
       if (!existing) {
@@ -384,10 +369,6 @@ export class BenchmarkMutationService {
    */
   async createApdexSlo(userId: string, roles: string[], dto: CreateApdexSloDto): Promise<Benchmark> {
     try {
-      // Log authorization context for debugging
-      const isAdmin = this.authzService.isGlobalAdmin(roles);
-      this.logger.log(`[createApdexSlo] START - userId=${userId}, isGlobalAdmin=${isAdmin}, systemId=${dto.systemUnderTestId}`);
-
       if (dto.minApdexScore < 0 || dto.minApdexScore > 1) {
         throw new Error('minApdexScore must be between 0 and 1');
       }
@@ -447,10 +428,6 @@ export class BenchmarkMutationService {
    */
   async updateApdexSlo(id: string, userId: string, roles: string[], dto: UpdateApdexSloDto): Promise<Benchmark | null> {
     try {
-      // Log authorization context for debugging
-      const isAdmin = this.authzService.isGlobalAdmin(roles);
-      this.logger.log(`[updateApdexSlo] START - id=${id}, userId=${userId}, isGlobalAdmin=${isAdmin}`);
-
       // Check access via queryService.findOne (which validates organization access)
       const existing = await this.queryService.findOne(id, userId, roles);
       if (!existing) {
