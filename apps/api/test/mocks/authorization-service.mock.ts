@@ -46,15 +46,17 @@ export const createAuthorizationServiceMock = () => ({
 
   /**
    * Check if user can access a specific resource
-   * Default: returns true (allows access in tests)
+   * Default: returns { allowed: true, reason: ... } — matches the real
+   * AuthorizationService return shape (AuthorizationResult).
    */
-  canAccessResource: jest.fn().mockResolvedValue(true),
+  canAccessResource: jest.fn().mockResolvedValue({ allowed: true, reason: 'Mock: access allowed' }),
 
   /**
    * Check if user can modify a specific resource
-   * Default: returns true (allows modifications in tests)
+   * Default: returns { allowed: true, reason: ... } — matches the real
+   * AuthorizationService return shape (AuthorizationResult).
    */
-  canModifyResource: jest.fn().mockResolvedValue(true),
+  canModifyResource: jest.fn().mockResolvedValue({ allowed: true, reason: 'Mock: modify allowed' }),
 
   /**
    * Get list of team IDs the user can access
@@ -93,8 +95,8 @@ export const createRestrictiveAuthorizationServiceMock = () => ({
   isOrganizationAdmin: jest.fn().mockResolvedValue(false),
   isTeamMember: jest.fn().mockResolvedValue(false),
   isTeamAdmin: jest.fn().mockResolvedValue(false),
-  canAccessResource: jest.fn().mockResolvedValue(false),
-  canModifyResource: jest.fn().mockResolvedValue(false),
+  canAccessResource: jest.fn().mockResolvedValue({ allowed: false, reason: 'Mock: access denied' }),
+  canModifyResource: jest.fn().mockResolvedValue({ allowed: false, reason: 'Mock: modify denied' }),
   getAccessibleTeams: jest.fn().mockResolvedValue([]),
   canViewTeamResources: jest.fn().mockResolvedValue({ allowed: false, reason: 'Mock: access denied' }),
   isOrgAdminInAnyOrganization: jest.fn().mockResolvedValue(false),
