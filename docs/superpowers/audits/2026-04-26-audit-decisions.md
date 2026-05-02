@@ -1566,3 +1566,83 @@ The file **EXITS** the allowlist — zero direct `isGlobalAdmin` references afte
 C28 generalizes the C26/C27 pattern one level up: when the parent of the leaf service is a service that did not previously inject `AuthorizationService`, the boundary push requires adding the dependency. Reusing `withOrgFilter` rather than calling `authzService.isGlobalAdmin` directly is the key trick — the lint rule and the burndown both treat `withOrgFilter` as the approved indirection, so the parent stays clean without entering the allowlist itself.
 
 The remaining test-runs sub-service with the same shape is `test-runs-crud-query.service.ts` — its 17 sites mix org and team filtering and use `this.authzService.isGlobalAdmin` directly (no wrapper). C29 likely lands as a dedicated PR with care taken around `withTeamFilter` integration.
+
+---
+
+## Phase C29 — `test-runs-crud-query.service.ts` full migration with `withOrgFilter` + `withTeamFilter` integration
+
+**Audit date:** 2026-05-02
+**Scope:** Single-file migration of the largest remaining test-runs sub-service. Drops all 12 direct `authzService.isGlobalAdmin` / `getAccessibleOrganizations` / `getAccessibleTeams` call sites in `apps/api/src/modules/test-runs/services/test-runs-crud-query.service.ts` (1153 lines pre-edit) and pushes admin / org-list / team-list resolution up to `TestRunsQueryService`, exiting the file from the allowlist (8 → **7**). Eighth and final test-runs sub-service to be migrated. Same `roles → isAdmin` boundary-swap pattern as C26/C27/C28, but extended with `organizationIds` / `userTeamIds` array parameters because the file's list-filter methods need both. Mirrors the dashboard-query (C26) parameter shape exactly.
+
+### Site classification
+
+| Method | Type | Migration |
+|--------|------|-----------|
+| `applyTeamRestriction` | private helper | Signature swapped from `(qb, alias, userId): Promise<void>` to `(qb, alias, userTeamIds): void`; the inner `await getAccessibleTeams(userId)` call is gone (parent pre-resolves). Now synchronous. |
+| `findAllPaginated` | list-filter | `(userId, roles, paginationDto?, orgId?)` → `(isAdmin, organizationIds, userTeamIds, paginationDto?, orgId?)`. Inner `getAccessibleOrganizations` and `getAccessibleTeams` calls deleted. |
+| `getFilterOptions` | list-filter | `(userId, roles, orgId?)` → `(isAdmin, organizationIds, userTeamIds, orgId?)`. Same shape. |
+| `findAll` (DEPRECATED) | list-filter | `(userId, roles)` → `(isAdmin, organizationIds)`. No team filter (preserves existing behavior). |
+| `findByTestRunId` | per-resource | `(testRunId, userId, roles)` → `(testRunId, userId, isAdmin)`. Per-resource `isOrganizationMember` / `canViewTeamResources` calls preserved (those aren't direct `isGlobalAdmin` calls). |
+| `findOne` | per-resource | Same shape as `findByTestRunId`. |
+| `getTestRunByTestRunId` | per-resource | Same shape; returns `null` instead of throwing. |
+| `findByTestRunIdAndParams` | list-filter | `(testRunId, sys, env, wl, userId, roles, orgId?)` → `(testRunId, sys, env, wl, isAdmin, organizationIds, userTeamIds, orgId?)`. Inner `getAccessibleOrganizations` deleted; `applyTeamRestriction` call updated to pass pre-resolved `userTeamIds`. |
+| `getRelatedTestRuns` | passthrough | `(testRunId, userId, roles, sys?, env?, wl?)` → `(testRunId, isAdmin, organizationIds, userTeamIds, sys?, env?, wl?)`. Forwards to `findByTestRunIdAndParams` with new signature. |
+| `getSystemsSummary` | list-filter | `(userId, roles, orgId?)` → `(isAdmin, organizationIds, userTeamIds, orgId?)`. Inner org/team fetches deleted. |
+| `getAllTags` | list-filter | `(userId, roles)` → `(isAdmin, organizationIds)`. No team filter (test_runs has no team_id, only org filtering applies). |
+| `getAllAnnotations` | list-filter | Same as `getAllTags`. |
+| `getBaselineCandidates` | unauth | `(sutId, env, wl, userId, _roles, exclude?, limit?)` → `(sutId, env, wl, exclude?, limit?)`. The `userId` and `_roles` parameters were unused (pre-existing `// NOTE: Organization filtering will be added here when TestRun entity has organization_id`); dropped both. |
+| `getRequestNames` | passthrough | `(testRunId, userId, roles, panelDescription?)` → `(testRunId, userId, isAdmin, panelDescription?)`. Forwards to `findByTestRunId`. |
+
+### Parent facade change (`test-runs-query.service.ts`)
+
+`TestRunsQueryService` already had `resolveOrganizationIds` (returns `{ orgIds, isAdmin }`) and `resolveTeamIds` (returns `string[]`) helpers from C25; C29 only adds a small `resolveIsAdmin` helper for the per-resource methods that need only the boolean:
+
+```typescript
+private async resolveIsAdmin(userId: string, roles: string[]): Promise<boolean> {
+  return (await withOrgFilter(userId, roles, this.authzService)) === null;
+}
+```
+
+Each of the 14 crud-query delegations is updated to compute and forward the right primitives. List-filter methods compute both `{ orgIds, isAdmin }` and `userTeamIds`; per-resource methods compute only `isAdmin`. The `withOrgFilter` indirection keeps the parent clean — it remains outside the lint allowlist as a structural infrastructure file.
+
+### Test changes
+
+**`test-runs-crud-query.service.spec.ts`** (1832 lines pre-edit) — fully rewritten to match the new signatures. Removed the `adminRoles`/`userRoles` constants; tests now call methods directly with `true`/`false` for `isAdmin` and explicit `[]`/`['org-1']` arrays for `organizationIds`/`userTeamIds`. Per-resource tests still set `authzService.isOrganizationMember`/`canViewTeamResources` mocks (those calls still happen inside the service). 95 tests pass (down 0 — every prior test has a corresponding new-signature test).
+
+**`test-runs-query.service.spec.ts`** (parent facade spec) — 14 delegation assertions updated. Default `createAuthorizationServiceMock()` returns `isGlobalAdmin = true` and empty arrays for `getAccessibleOrganizations`/`getAccessibleTeams`, so `resolveOrganizationIds`/`resolveTeamIds` collapse to `{ orgIds: [], isAdmin: true }` and `[]`; assertions now expect `(true, [], [], …)` where they previously expected `(userId, ['user'], …)`.
+
+### Test results
+
+| Test run | Result |
+|----------|--------|
+| `npx jest src/modules/test-runs` | 759 passed (19 suites) — unchanged from C28 |
+| `npx jest` (full API suite) | 4302 passed, 20 skipped (pre-existing), 0 failed |
+| `npx tsc --noEmit` (apps/api) | 0 errors |
+| `npm run lint` (`@perfana/api`) | 0 errors, 59 pre-existing warnings (none introduced) |
+
+### Net diff
+
+- `test-runs-crud-query.service.ts`: ~−40 lines (12 inline `getAccessibleOrganizations`/`Teams` calls + 12 inline `isGlobalAdmin` calls + various redundant `userId` debug-log lines deleted; signature parameter changes net to a small reduction)
+- `test-runs-query.service.ts`: ~+25 lines (14 delegations now call `resolveOrganizationIds`/`resolveTeamIds`/`resolveIsAdmin`; new `resolveIsAdmin` helper added)
+- `test-runs-crud-query.service.spec.ts`: rewritten (similar size, 95 tests, signature-aligned)
+- `test-runs-query.service.spec.ts`: 14 delegation assertions updated
+- `.rbac-migration-allowlist.json`: −1 line
+
+### Files changed
+
+- `apps/api/src/modules/test-runs/services/test-runs-crud-query.service.ts` — drop all direct `authzService.isGlobalAdmin`/`getAccessibleOrganizations`/`getAccessibleTeams` calls, simplify `applyTeamRestriction`, swap signatures across 12 methods
+- `apps/api/src/modules/test-runs/services/test-runs-query.service.ts` — 14 delegations now compute and forward `isAdmin`/`organizationIds`/`userTeamIds`; new `resolveIsAdmin` helper
+- `apps/api/src/modules/test-runs/services/test-runs-crud-query.service.spec.ts` — rewritten for new signatures
+- `apps/api/src/modules/test-runs/services/test-runs-query.service.spec.ts` — 14 delegation assertions updated
+- `apps/api/.rbac-migration-allowlist.json` — remove `test-runs-crud-query.service.ts`
+- `docs/superpowers/audits/2026-04-26-audit-decisions.md` — this file
+
+### Allowlist disposition
+
+The file **EXITS** the allowlist — zero direct `isGlobalAdmin` references after the migration. Allowlist size: 8 → **7**. Burndown: Bucket A 56 → 64 of 127 (8 of the migrated sites count against Bucket A — `findAllPaginated`, `getFilterOptions`, `findAll`, `findByTestRunIdAndParams`, `getSystemsSummary`, `getAllTags`, `getAllAnnotations`, plus the team-filter site in `findAllPaginated` shared logic). Bucket B unchanged (per-resource sites in this file already used `isOrganizationMember` and `canViewTeamResources`, not direct `isGlobalAdmin`).
+
+### Pattern note: full `withOrgFilter` + `withTeamFilter` boundary push
+
+C29 is the first Phase 3c migration to push **both** org and team list resolution up the call stack in a single PR. C25 introduced `withTeamFilter` and used it in the parent facade only; C26–C28 did `roles → isAdmin` boundary swaps without pushing the array params. C29 generalizes by passing the pre-resolved `organizationIds: string[]` and `userTeamIds: string[]` arrays alongside `isAdmin: boolean` — matching the shape that dashboard-query already used since C26. The benefit beyond exiting the allowlist: the sub-service no longer issues redundant authz lookups (e.g. `findAllPaginated` previously called `getAccessibleOrganizations` and `getAccessibleTeams` inline; now both come from the parent's single `resolveOrganizationIds` + `resolveTeamIds` calls per request). Cache-hit on Redis means the savings are observably small, but the architectural simplification is meaningful.
+
+With C29, all 8 test-runs services are migrated. Remaining allowlist (7 files): `dynatrace.service.ts`, `graph-presets.service.ts`, `organizations.service.ts`, `profiles.service.ts`, `systems-under-test.service.ts`, `teams.service.ts`, `trends-presets.service.ts`. Next candidates by complexity: `graph-presets.service.ts` and `trends-presets.service.ts` (both list-filter heavy, smaller surface than crud-query).

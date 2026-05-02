@@ -123,27 +123,35 @@ export class TestRunsQueryService {
   // ============================================================================
 
   async findAllPaginated(userId: string, roles: string[], paginationDto?: PaginationQueryDto, organizationId?: string): Promise<PaginatedResponseDto<TestRun>> {
-    return this.crudService.findAllPaginated(userId, roles, paginationDto, organizationId);
+    const { orgIds, isAdmin } = await this.resolveOrganizationIds(userId, roles, organizationId);
+    const userTeamIds = await this.resolveTeamIds(userId, roles);
+    return this.crudService.findAllPaginated(isAdmin, orgIds, userTeamIds, paginationDto, organizationId);
   }
 
   async getFilterOptions(userId: string, roles: string[], organizationId?: string): Promise<{ systems: string[]; environments: string[]; workloads: string[] }> {
-    return this.crudService.getFilterOptions(userId, roles, organizationId);
+    const { orgIds, isAdmin } = await this.resolveOrganizationIds(userId, roles, organizationId);
+    const userTeamIds = await this.resolveTeamIds(userId, roles);
+    return this.crudService.getFilterOptions(isAdmin, orgIds, userTeamIds, organizationId);
   }
 
   async findAll(userId: string, roles: string[]): Promise<TestRun[]> {
-    return this.crudService.findAll(userId, roles);
+    const { orgIds, isAdmin } = await this.resolveOrganizationIds(userId, roles);
+    return this.crudService.findAll(isAdmin, orgIds);
   }
 
   async findByTestRunId(testRunId: string, userId: string, roles: string[]): Promise<TestRun> {
-    return this.crudService.findByTestRunId(testRunId, userId, roles);
+    const isAdmin = await this.resolveIsAdmin(userId, roles);
+    return this.crudService.findByTestRunId(testRunId, userId, isAdmin);
   }
 
   async findOne(id: string, userId: string, roles: string[]): Promise<TestRun> {
-    return this.crudService.findOne(id, userId, roles);
+    const isAdmin = await this.resolveIsAdmin(userId, roles);
+    return this.crudService.findOne(id, userId, isAdmin);
   }
 
   async getTestRunByTestRunId(testRunId: string, userId: string, roles: string[]): Promise<TestRun | null> {
-    return this.crudService.getTestRunByTestRunId(testRunId, userId, roles);
+    const isAdmin = await this.resolveIsAdmin(userId, roles);
+    return this.crudService.getTestRunByTestRunId(testRunId, userId, isAdmin);
   }
 
   async findByTestRunIdAndParams(
@@ -155,7 +163,9 @@ export class TestRunsQueryService {
     roles: string[],
     organizationId?: string,
   ): Promise<TestRun> {
-    return this.crudService.findByTestRunIdAndParams(testRunId, systemName, environment, workload, userId, roles, organizationId);
+    const { orgIds, isAdmin } = await this.resolveOrganizationIds(userId, roles, organizationId);
+    const userTeamIds = await this.resolveTeamIds(userId, roles);
+    return this.crudService.findByTestRunIdAndParams(testRunId, systemName, environment, workload, isAdmin, orgIds, userTeamIds, organizationId);
   }
 
   async getRelatedTestRuns(
@@ -166,19 +176,25 @@ export class TestRunsQueryService {
     environment?: string,
     workload?: string
   ): Promise<RelatedTestRun[]> {
-    return this.crudService.getRelatedTestRuns(testRunId, userId, roles, system, environment, workload);
+    const { orgIds, isAdmin } = await this.resolveOrganizationIds(userId, roles);
+    const userTeamIds = await this.resolveTeamIds(userId, roles);
+    return this.crudService.getRelatedTestRuns(testRunId, isAdmin, orgIds, userTeamIds, system, environment, workload);
   }
 
   async getSystemsSummary(userId: string, roles: string[], organizationId?: string): Promise<SystemsSummary[]> {
-    return this.crudService.getSystemsSummary(userId, roles, organizationId);
+    const { orgIds, isAdmin } = await this.resolveOrganizationIds(userId, roles, organizationId);
+    const userTeamIds = await this.resolveTeamIds(userId, roles);
+    return this.crudService.getSystemsSummary(isAdmin, orgIds, userTeamIds, organizationId);
   }
 
   async getAllTags(userId: string, roles: string[]): Promise<string[]> {
-    return this.crudService.getAllTags(userId, roles);
+    const { orgIds, isAdmin } = await this.resolveOrganizationIds(userId, roles);
+    return this.crudService.getAllTags(isAdmin, orgIds);
   }
 
   async getAllAnnotations(userId: string, roles: string[]): Promise<string[]> {
-    return this.crudService.getAllAnnotations(userId, roles);
+    const { orgIds, isAdmin } = await this.resolveOrganizationIds(userId, roles);
+    return this.crudService.getAllAnnotations(isAdmin, orgIds);
   }
 
   async isTestRunChangepoint(
@@ -203,16 +219,17 @@ export class TestRunsQueryService {
     systemUnderTestId: string,
     testEnvironment: string,
     workload: string,
-    userId: string,
-    roles: string[],
+    _userId: string,
+    _roles: string[],
     excludeTestRunId?: string,
     limit?: number
   ): Promise<TestRun[]> {
-    return this.crudService.getBaselineCandidates(systemUnderTestId, testEnvironment, workload, userId, roles, excludeTestRunId, limit);
+    return this.crudService.getBaselineCandidates(systemUnderTestId, testEnvironment, workload, excludeTestRunId, limit);
   }
 
   async getRequestNames(testRunId: string, userId: string, roles: string[], panelDescription?: string): Promise<string[]> {
-    return this.crudService.getRequestNames(testRunId, userId, roles, panelDescription);
+    const isAdmin = await this.resolveIsAdmin(userId, roles);
+    return this.crudService.getRequestNames(testRunId, userId, isAdmin, panelDescription);
   }
 
   // ============================================================================
@@ -291,6 +308,16 @@ export class TestRunsQueryService {
   private async resolveTeamIds(userId: string, roles: string[]): Promise<string[]> {
     const teamIds = await withTeamFilter(userId, roles, this.authzService);
     return teamIds ?? [];
+  }
+
+  /**
+   * Resolve admin state for per-resource methods that don't need org/team lists.
+   * `withOrgFilter` returns `null` iff the user is a global admin; we collapse that
+   * to a boolean and forward it. This is the canonical indirection for the
+   * `no-direct-is-global-admin` lint rule.
+   */
+  private async resolveIsAdmin(userId: string, roles: string[]): Promise<boolean> {
+    return (await withOrgFilter(userId, roles, this.authzService)) === null;
   }
 
   // ============================================================================
