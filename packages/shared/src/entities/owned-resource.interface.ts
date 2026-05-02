@@ -65,3 +65,30 @@ export interface OwnedResource {
 export function createdByUser(resource: OwnedResource, userId: string): boolean {
   return resource.created_by === userId;
 }
+
+/**
+ * Static prop convention for audit-loggable owned resources.
+ *
+ * Each `OwnedResource` entity class SHOULD declare:
+ *   static auditableFields = ['name', 'organization_id', ...] as const;
+ *
+ * Phase 5a default: nothing logged unless declared. Sensitive fields
+ * (token hashes, secrets, credentials) are NEVER added to this list.
+ *
+ * Type guard: use `getAuditableFields(EntityClass)` to read at runtime.
+ */
+export interface AuditableEntityClass<T extends OwnedResource = OwnedResource> {
+  auditableFields?: readonly (keyof T & string)[];
+}
+
+/**
+ * Read the auditableFields static prop from an entity class.
+ *
+ * @param entityClass - The entity class to inspect
+ * @returns The readonly array of auditable field names, or null if not declared
+ */
+export function getAuditableFields<T extends OwnedResource>(
+  entityClass: AuditableEntityClass<T>
+): readonly (keyof T & string)[] | null {
+  return entityClass.auditableFields ?? null;
+}
