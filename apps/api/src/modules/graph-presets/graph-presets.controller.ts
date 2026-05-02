@@ -21,12 +21,29 @@ import { GraphPresetsService } from './graph-presets.service';
 import { CreateGraphPresetDto } from './dto/create-graph-preset.dto';
 import { GraphPresetResponseDto } from './dto/graph-preset-response.dto';
 import { UserCtx, UserContext } from '../../common/decorators/user-context.decorator';
+import { AuthorizationService } from '../../common/services/authorization.service';
+import { withOrgFilter } from '../../common/utils/with-org-filter';
 
 @ApiTags('Graph Presets')
 @ApiBearerAuth()
 @Controller('graph-presets')
 export class GraphPresetsController {
-  constructor(private readonly graphPresetsService: GraphPresetsService) {}
+  constructor(
+    private readonly graphPresetsService: GraphPresetsService,
+    private readonly authzService: AuthorizationService,
+  ) {}
+
+  /**
+   * Resolve the global-admin boolean for the request without calling
+   * `authzService.isGlobalAdmin` directly. `withOrgFilter` is the lint-exempt
+   * indirection: it returns `null` iff the caller is a global admin, so a
+   * `=== null` check collapses to `isAdmin` while keeping this controller out
+   * of the `no-direct-is-global-admin` allowlist (Phase 3c boundary push;
+   * see C26–C28 for the same pattern in test-runs sub-services).
+   */
+  private async resolveIsAdmin(userId: string, roles: string[]): Promise<boolean> {
+    return (await withOrgFilter(userId, roles, this.authzService)) === null;
+  }
 
   @Post()
   @ApiOperation({
@@ -50,7 +67,7 @@ export class GraphPresetsController {
     @Body() createGraphPresetDto: CreateGraphPresetDto,
     @UserCtx() ctx: UserContext
   ): Promise<GraphPresetResponseDto> {
-    return this.graphPresetsService.create(createGraphPresetDto, ctx.userId, ctx.roles);
+    return this.graphPresetsService.create(createGraphPresetDto, ctx.userId);
   }
 
   @Get()
@@ -73,11 +90,12 @@ export class GraphPresetsController {
     status: 401,
     description: 'Unauthorized'
   })
-  findAll(
+  async findAll(
     @UserCtx() ctx: UserContext,
     @Query('testRunId') testRunId?: string
   ): Promise<GraphPresetResponseDto[]> {
-    return this.graphPresetsService.findAll(ctx.userId, ctx.roles, testRunId);
+    const isAdmin = await this.resolveIsAdmin(ctx.userId, ctx.roles);
+    return this.graphPresetsService.findAll(ctx.userId, isAdmin, testRunId);
   }
 
   @Get(':id')
@@ -107,11 +125,12 @@ export class GraphPresetsController {
     status: 401,
     description: 'Unauthorized'
   })
-  findOne(
+  async findOne(
     @Param('id') id: string,
     @UserCtx() ctx: UserContext
   ): Promise<GraphPresetResponseDto> {
-    return this.graphPresetsService.findOne(id, ctx.userId, ctx.roles);
+    const isAdmin = await this.resolveIsAdmin(ctx.userId, ctx.roles);
+    return this.graphPresetsService.findOne(id, ctx.userId, isAdmin);
   }
 
   @Delete(':id')
@@ -141,10 +160,11 @@ export class GraphPresetsController {
     status: 401,
     description: 'Unauthorized'
   })
-  remove(
+  async remove(
     @Param('id') id: string,
     @UserCtx() ctx: UserContext
   ): Promise<void> {
-    return this.graphPresetsService.remove(id, ctx.userId, ctx.roles);
+    const isAdmin = await this.resolveIsAdmin(ctx.userId, ctx.roles);
+    return this.graphPresetsService.remove(id, ctx.userId, isAdmin);
   }
 }

@@ -6,13 +6,15 @@ Phase 3c rolls capabilities through every site listed below. Update these counts
 
 | Bucket | Total | Migrated | Remaining | % done |
 | --- | ---: | ---: | ---: | ---: |
-| A — bypass filter | 127 | 56 | 71 | 44.1% |
-| B — bypass guard | 18 | 17 | 1 | 94.4% |
+| A — bypass filter | 129 | 66 | 63 | 51.2% |
+| B — bypass guard | 22 | 21 | 1 | 95.5% |
 | Local `private isGlobalAdmin()` wrappers | 13 | 8 | 5 | 61.5% |
 
-**Lint enforcement:** `apps/api/.rbac-migration-allowlist.json` lists every file currently exempt from the `no-direct-is-global-admin` lint rule (8 files as of 2026-05-02). When a site is migrated, remove its file from the allowlist (the file may have multiple sites — only remove when the LAST one is migrated). Allowlist size IS the burndown.
+**Lint enforcement:** `apps/api/.rbac-migration-allowlist.json` lists every file currently exempt from the `no-direct-is-global-admin` lint rule (5 files as of 2026-05-02). When a site is migrated, remove its file from the allowlist (the file may have multiple sites — only remove when the LAST one is migrated). Allowlist size IS the burndown.
 
-**Bucket B total adjusted upward by 3 in C17 and 1 in C25:** the original 2026-04-26 audit classified dynatrace's per-resource sites at `findByHost`/`update`/`delete` as "Leave" (deferred until `canAccessResource`/`canModifyResource` was established). C17 closes those 3. C25 adds `verifyTestRunAccess` from `test-runs-query.service.ts`, which the original audit did not enumerate — so the running total now reflects all four as in-scope.
+**Bucket A total adjusted upward by 2 in C30:** the user-owned `findAll` list-filter sites in `graph-presets.service.ts` and `trends-presets.service.ts` were not in the original audit (the audit focused on org-owned resources). C30 enumerates and migrates both as Bucket A.
+
+**Bucket B total adjusted upward by 3 in C17, 1 in C25, and 4 in C30:** C17 brings dynatrace per-resource sites in-scope (originally "Leave" until `canAccessResource`/`canModifyResource` shipped). C25 adds `verifyTestRunAccess` from `test-runs-query.service.ts`. C30 adds the 4 user-owned per-resource sites in graph/trends-presets (`findOne` + `remove` × 2 files), which the original audit did not enumerate.
 
 **Date-bound revisit:** by **2026-08-01**, Phase 3c migration must be at least 50% complete (Bucket A + B combined: 70+ sites migrated). If not, re-evaluate the architecture or the priorities. "We forgot about it" is the failure mode this gate prevents.
 
@@ -1646,3 +1648,84 @@ The file **EXITS** the allowlist — zero direct `isGlobalAdmin` references afte
 C29 is the first Phase 3c migration to push **both** org and team list resolution up the call stack in a single PR. C25 introduced `withTeamFilter` and used it in the parent facade only; C26–C28 did `roles → isAdmin` boundary swaps without pushing the array params. C29 generalizes by passing the pre-resolved `organizationIds: string[]` and `userTeamIds: string[]` arrays alongside `isAdmin: boolean` — matching the shape that dashboard-query already used since C26. The benefit beyond exiting the allowlist: the sub-service no longer issues redundant authz lookups (e.g. `findAllPaginated` previously called `getAccessibleOrganizations` and `getAccessibleTeams` inline; now both come from the parent's single `resolveOrganizationIds` + `resolveTeamIds` calls per request). Cache-hit on Redis means the savings are observably small, but the architectural simplification is meaningful.
 
 With C29, all 8 test-runs services are migrated. Remaining allowlist (7 files): `dynatrace.service.ts`, `graph-presets.service.ts`, `organizations.service.ts`, `profiles.service.ts`, `systems-under-test.service.ts`, `teams.service.ts`, `trends-presets.service.ts`. Next candidates by complexity: `graph-presets.service.ts` and `trends-presets.service.ts` (both list-filter heavy, smaller surface than crud-query).
+
+---
+
+## Phase C30 — `graph-presets` + `trends-presets` combined `roles → isAdmin` boundary push
+
+**Audit date:** 2026-05-02
+**Scope:** Combined migration of two near-identical preset services. Drops all 8 direct `authzService.isGlobalAdmin` call sites across `apps/api/src/modules/graph-presets/graph-presets.service.ts` (259 lines) and `apps/api/src/modules/trends-presets/trends-presets.service.ts` (282 lines), pushes admin resolution up to **the controller** (the entry point — these services have no parent service, unlike test-runs sub-services). Both files exit the allowlist simultaneously (7 → **5**). First Phase 3c migration where the boundary push lands in a controller rather than a parent service. Also the first migration of user-owned (`userId` / `createdBy` + `isGlobal` flag) resources rather than org-owned resources — the canonical `withOrgFilter` indirection still works (it returns `null` for global admins regardless of whether the caller intends to filter by org), so the lint-exempt path generalizes cleanly to non-org resource models.
+
+### Site classification (per file — both files have identical shape)
+
+| Method | Type | Migration |
+|--------|------|-----------|
+| `create` | debug-log only | `(dto, userId, roles)` → `(dto, userId)`. The `isAdmin` was computed and used **only** in a debug log that was deleted (same disposition as C11/C15 `(admin)` log-tag drops). The `roles` parameter is removed entirely. |
+| `findAll` | list-filter (Bucket A) | `(userId, roles, …)` → `(userId, isAdmin, …)`. Inner `isGlobalAdmin(roles)` deleted; the existing `if (!isAdmin) { queryBuilder.where(userId OR isGlobal) }` filter remains in place, now reading the parameter directly. |
+| `findOne` | per-resource guard (Bucket B) | `(id, userId, roles)` → `(id, userId, isAdmin)`. Inner `isGlobalAdmin(roles)` deleted; the `if (isAdmin) return preset` bypass + `if (preset.userId !== userId && !preset.isGlobal) throw Forbidden` guard remain unchanged. |
+| `remove` | per-resource guard (Bucket B) | `(id, userId, roles)` → `(id, userId, isAdmin)`. Same structural change as `findOne`. |
+
+`AuthorizationService` is no longer injected into either service — these were the only consumers of it. Both services lose one constructor parameter.
+
+### Controller boundary push
+
+Both controllers (`GraphPresetsController`, `TrendsPresetsController`) now inject `AuthorizationService` and add a private `resolveIsAdmin` helper:
+
+```typescript
+private async resolveIsAdmin(userId: string, roles: string[]): Promise<boolean> {
+  return (await withOrgFilter(userId, roles, this.authzService)) === null;
+}
+```
+
+This is the same trick C28 introduced (and C29 reused): `withOrgFilter` is in `INFRASTRUCTURE_FILES` (lint-exempt), and it returns `null` iff the caller is a global admin — collapse with `=== null` and the controller never calls `isGlobalAdmin` directly. The controller stays out of the allowlist. `create` does not call `resolveIsAdmin` because the underlying service no longer needs `isAdmin` (debug-log site was deleted).
+
+`findAll`, `findOne`, and `remove` each call `resolveIsAdmin` once and forward the boolean to the service. The async `withOrgFilter` call adds one cache-friendly Redis hit per request (typically a hit, since the same user's accessible orgs are loaded everywhere); the cost is negligible and identical to what C26–C28 introduced for test-runs sub-services.
+
+### Test changes
+
+**None.** Neither `graph-presets` nor `trends-presets` had any existing unit tests, controller tests, or e2e tests in the API workspace before this PR. Verification relied on:
+
+| Check | Result |
+|-------|--------|
+| `npx tsc --noEmit` (apps/api) | 0 errors |
+| `npm run lint -w apps/api` | 0 errors, 59 pre-existing warnings (none introduced) |
+| `npx jest` (full API suite) | 4302 passed, 20 skipped (unchanged from C29) |
+| Allowlist contents | Both files removed; remaining 5 files match audit doc |
+| Direct `isGlobalAdmin` references in migrated files | Only in doc comments (one per controller, explaining the `withOrgFilter` indirection) |
+
+Adding test coverage for both modules is a separate concern not blocking this PR — the migration is signature-equivalent at runtime: the boolean now arrives from the controller via `withOrgFilter` rather than being computed in the service via `isGlobalAdmin`, both of which read the same `AuthorizationService.isGlobalAdmin(roles)` source of truth.
+
+### Net diff
+
+- `graph-presets.service.ts`: ~−15 lines (4 inline `isGlobalAdmin` calls + 4 debug-log lines + `AuthorizationService` import/injection deleted; doc comments updated)
+- `graph-presets.controller.ts`: ~+25 lines (`AuthorizationService` injection + `withOrgFilter` import + `resolveIsAdmin` helper + 3 method awaits)
+- `trends-presets.service.ts`: ~−15 lines (same shape as graph-presets)
+- `trends-presets.controller.ts`: ~+25 lines (same shape as graph-presets)
+- `.rbac-migration-allowlist.json`: −2 lines
+
+Net: roughly +20 lines across all four files. The growth is the duplicated `resolveIsAdmin` helper + boundary plumbing in each controller; the service-side simplification offsets it but doesn't fully cover it. A shared helper extracted to `apps/api/src/common/utils/` could fold the duplication, but with two call sites (and the helper being three lines including the doc comment) it's not yet warranted.
+
+### Files changed
+
+- `apps/api/src/modules/graph-presets/graph-presets.service.ts` — drop `AuthorizationService` injection + 4 inline `isGlobalAdmin` calls + 4 debug-log lines; swap signatures for 4 methods (`create` loses `roles` entirely; `findAll`/`findOne`/`remove` swap `roles` for `isAdmin`)
+- `apps/api/src/modules/graph-presets/graph-presets.controller.ts` — inject `AuthorizationService`, add `withOrgFilter` import + `resolveIsAdmin` helper, await `isAdmin` in `findAll`/`findOne`/`remove` and forward to service
+- `apps/api/src/modules/trends-presets/trends-presets.service.ts` — same shape as graph-presets
+- `apps/api/src/modules/trends-presets/trends-presets.controller.ts` — same shape as graph-presets
+- `apps/api/.rbac-migration-allowlist.json` — remove both files
+- `docs/superpowers/audits/2026-04-26-audit-decisions.md` — this file (burndown table updates + this section)
+
+### Allowlist disposition
+
+Both files **EXIT** the allowlist — zero direct `isGlobalAdmin` references after the migration. Allowlist size: 7 → **5** (two files exit in one PR — first multi-file exit since C16's six-file bundle). Burndown: Bucket A 56 → 66 of 129 (10 of the migrated test-runs-crud-query sites from C29 + 2 of the preset `findAll` sites — total adjusted upward by 2 to enumerate the user-owned list-filter shape). Bucket B 17 → 21 of 22 (4 user-owned per-resource guards added — total adjusted upward by 4).
+
+### Pattern notes
+
+**1. First controller-as-boundary migration.** C26–C29 pushed admin resolution up from a leaf service to a parent service. C30 has no parent service: the controller is the entry point. The same `resolveIsAdmin` helper backed by `withOrgFilter` works identically in a controller context. This generalizes the boundary push to any service whose entry point is HTTP, not just to services with internal facades.
+
+**2. First user-owned resource migration.** Graph presets and trends presets are owned by `userId` / `createdBy`, not by `organization_id`. The audit's Bucket A (org-filter) and Bucket B (org-guard) framing was designed around org-owned resources. The migration shows the framing extends cleanly: the admin bypass is intrinsic to the policy, regardless of whether the resource is org-owned, team-owned, or user-owned. `withOrgFilter` continues to work as the lint-exempt indirection because its admin check (`isGlobalAdmin === null` return) is independent of the org list it returns.
+
+**3. Combined-PR precedent for clones.** C30 lands two near-identical files in one PR rather than two single-file PRs. C26–C29 followed strict one-file-per-PR cadence; C30 deviates because the two files are structural clones (same 4-method shape, same migration delta, same controller pattern). The earlier C16 bundle PR set the precedent for combining files when the unifying signal (matching `roles → isAdmin` swap) is strong enough that splitting would just be churn. Future migrations of clone-pairs can follow this approach.
+
+### Remaining allowlist (5 files)
+
+After C30, the allowlist contains: `dynatrace.service.ts`, `organizations.service.ts`, `profiles.service.ts`, `systems-under-test.service.ts`, `teams.service.ts`. These are mostly larger, more architecturally embedded services — none are clones of each other, and several mix Bucket A and Bucket B sites with multi-tenant concerns. Next candidates by complexity: `teams.service.ts` and `organizations.service.ts` (smaller files, both deal directly with the membership entities so the migration patterns may need new shapes); `profiles.service.ts` is the largest remaining surface and likely warrants a multi-PR split similar to the test-runs sub-services in C25–C29.

@@ -4,14 +4,13 @@ import { Repository, Brackets } from 'typeorm';
 import { TrendsFilterPreset, ApplicationDashboard, TestRun as TestRunEntity } from '../../entities';
 import { CreateTrendsPresetDto } from './dto/create-trends-preset.dto';
 import { TrendsPresetResponseDto } from './dto/trends-preset-response.dto';
-import { AuthorizationService } from '../../common/services/authorization.service';
 
 /**
  * Service responsible for managing trends filter presets.
  *
  * Authorization:
- * - All methods accept userId and roles parameters for authorization
- * - TrendsFilterPreset entity has createdBy field for ownership
+ * - All read/delete methods accept an `isAdmin` boolean resolved by the controller
+ * - TrendsFilterPreset entity has `createdBy` for ownership and `isGlobal` for shared presets
  * - Global admins bypass all authorization checks
  * - Regular users can only access their own presets and global presets
  * - Regular users can only delete their own presets
@@ -25,26 +24,19 @@ export class TrendsPresetsService {
     private trendsPresetRepo: Repository<TrendsFilterPreset>,
     @InjectRepository(TestRunEntity)
     private testRunRepo: Repository<TestRunEntity>,
-    private readonly authzService: AuthorizationService,
   ) {}
 
   /**
-   * Create a new trends preset
+   * Create a new trends preset.
    *
    * @param createTrendsPresetDto - The preset creation DTO
    * @param userId - The user ID for ownership tracking
-   * @param roles - The user's roles for authorization checks (unused for create, but included for consistency)
    */
   async create(
     createTrendsPresetDto: CreateTrendsPresetDto,
     userId: string,
-    roles: string[] = []
   ): Promise<TrendsPresetResponseDto> {
     try {
-      // Log authorization context for debugging
-      const isAdmin = this.authzService.isGlobalAdmin(roles);
-      this.logger.debug(`create: userId=${userId}, isGlobalAdmin=${isAdmin}`);
-
       const preset = this.trendsPresetRepo.create({
         name: createTrendsPresetDto.name,
         description: createTrendsPresetDto.description,
@@ -72,22 +64,18 @@ export class TrendsPresetsService {
   }
 
   /**
-   * Find all trends presets accessible to the user
+   * Find all trends presets accessible to the user.
    *
    * @param userId - The user ID for authorization
-   * @param roles - The user's roles for authorization checks
+   * @param isAdmin - Whether the caller is a global admin (resolved by controller)
    * @param currentTestRunId - Optional test run ID to filter specific presets
    *
    * Authorization:
    * - Global admins see all presets
    * - Regular users see their own presets and global presets
    */
-  async findAll(userId: string, roles: string[] = [], currentTestRunId?: string, metricsSourceId?: string): Promise<TrendsPresetResponseDto[]> {
+  async findAll(userId: string, isAdmin: boolean, currentTestRunId?: string, metricsSourceId?: string): Promise<TrendsPresetResponseDto[]> {
     try {
-      // Log authorization context for debugging
-      const isAdmin = this.authzService.isGlobalAdmin(roles);
-      this.logger.debug(`findAll: userId=${userId}, isGlobalAdmin=${isAdmin}, currentTestRunId=${currentTestRunId || 'none'}`);
-
       // Resolve SUT context from the provided testRunId
       let sutContext: { systemUnderTestId: string; testEnvironment: string; workload: string } | null = null;
       if (currentTestRunId) {
@@ -162,22 +150,18 @@ export class TrendsPresetsService {
   }
 
   /**
-   * Find a single trends preset by ID
+   * Find a single trends preset by ID.
    *
    * @param id - The preset ID
    * @param userId - The user ID for authorization
-   * @param roles - The user's roles for authorization checks
+   * @param isAdmin - Whether the caller is a global admin (resolved by controller)
    *
    * Authorization:
    * - Global admins can access any preset
    * - Regular users can access their own presets or global presets
    */
-  async findOne(id: string, userId: string, roles: string[] = []): Promise<TrendsPresetResponseDto> {
+  async findOne(id: string, userId: string, isAdmin: boolean): Promise<TrendsPresetResponseDto> {
     try {
-      // Log authorization context for debugging
-      const isAdmin = this.authzService.isGlobalAdmin(roles);
-      this.logger.debug(`findOne: id=${id}, userId=${userId}, isGlobalAdmin=${isAdmin}`);
-
       // First fetch the preset without filtering to properly handle 404 vs 403
       const preset = await this.trendsPresetRepo
         .createQueryBuilder('preset')
@@ -211,22 +195,18 @@ export class TrendsPresetsService {
   }
 
   /**
-   * Delete a trends preset
+   * Delete a trends preset.
    *
    * @param id - The preset ID
    * @param userId - The user ID for authorization
-   * @param roles - The user's roles for authorization checks
+   * @param isAdmin - Whether the caller is a global admin (resolved by controller)
    *
    * Authorization:
    * - Global admins can delete any preset
    * - Regular users can only delete their own presets
    */
-  async remove(id: string, userId: string, roles: string[] = []): Promise<void> {
+  async remove(id: string, userId: string, isAdmin: boolean): Promise<void> {
     try {
-      // Log authorization context for debugging
-      const isAdmin = this.authzService.isGlobalAdmin(roles);
-      this.logger.debug(`remove: id=${id}, userId=${userId}, isGlobalAdmin=${isAdmin}`);
-
       // First check if preset exists
       const preset = await this.trendsPresetRepo.findOne({
         where: { id }
