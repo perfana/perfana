@@ -149,8 +149,11 @@ const RAW_SCENARIO_THROUGHPUT = {
 const UUID = 'e8f37dc1-9d9c-4e25-837d-14aa69ac4b17';
 const TEST_RUN_ID = 'PerfanaWebshop-acc-loadTest-00012';
 const ORG_IDS = ['org-uuid-1', 'org-uuid-2'];
-const ADMIN_ROLES = ['perfana-admin'];
-const USER_ROLES = ['user'];
+// `isAdmin` boolean — the sub-service no longer reasons about role names; the
+// facade resolves admin status before delegating. See Phase C27 in
+// docs/superpowers/audits/2026-04-26-audit-decisions.md.
+const IS_ADMIN = true;
+const NOT_ADMIN = false;
 
 // ---------------------------------------------------------------------------
 // Test suite
@@ -275,7 +278,7 @@ describe('TestRunsPerformanceQueryService', () => {
       it('returns empty array for non-admin with no org memberships', async () => {
         // Arrange – no repo calls expected
         // Act
-        const result = await service.getTransactionStats(TEST_RUN_ID, false, USER_ROLES, []);
+        const result = await service.getTransactionStats(TEST_RUN_ID, false, NOT_ADMIN, []);
 
         // Assert
         expect(result).toEqual([]);
@@ -287,7 +290,7 @@ describe('TestRunsPerformanceQueryService', () => {
         mockQuerySequence([RAW_TRANSACTION_ROW]);
 
         // Act
-        const result = await service.getTransactionStats(TEST_RUN_ID, false, ADMIN_ROLES, []);
+        const result = await service.getTransactionStats(TEST_RUN_ID, false, IS_ADMIN, []);
 
         // Assert
         expect(result).toHaveLength(1);
@@ -299,26 +302,13 @@ describe('TestRunsPerformanceQueryService', () => {
         mockQuerySequence([RAW_TRANSACTION_ROW]);
 
         // Act
-        const result = await service.getTransactionStats(TEST_RUN_ID, false, USER_ROLES, ORG_IDS);
+        const result = await service.getTransactionStats(TEST_RUN_ID, false, NOT_ADMIN, ORG_IDS);
 
         // Assert
         expect(result).toHaveLength(1);
         expect(testRunRepo.query).toHaveBeenCalled();
       });
 
-      it('recognises super-admin role as admin', async () => {
-        mockQuerySequence([RAW_TRANSACTION_ROW]);
-
-        const result = await service.getTransactionStats(TEST_RUN_ID, false, ['super-admin'], []);
-        expect(result).toHaveLength(1);
-      });
-
-      it('recognises admin role as admin', async () => {
-        mockQuerySequence([RAW_TRANSACTION_ROW]);
-
-        const result = await service.getTransactionStats(TEST_RUN_ID, false, ['admin'], []);
-        expect(result).toHaveLength(1);
-      });
     });
 
     describe('UUID resolution', () => {
@@ -327,7 +317,7 @@ describe('TestRunsPerformanceQueryService', () => {
         mockWithUuidResolution(TEST_RUN_ID, [RAW_TRANSACTION_ROW]);
 
         // Act
-        const result = await service.getTransactionStats(UUID, false, ADMIN_ROLES, []);
+        const result = await service.getTransactionStats(UUID, false, IS_ADMIN, []);
 
         // Assert
         expect(result).toHaveLength(1);
@@ -342,7 +332,7 @@ describe('TestRunsPerformanceQueryService', () => {
         mockQuerySequence([RAW_TRANSACTION_ROW]);
 
         // Act
-        await service.getTransactionStats(TEST_RUN_ID, false, ADMIN_ROLES, []);
+        await service.getTransactionStats(TEST_RUN_ID, false, IS_ADMIN, []);
 
         // Assert – UUID lookup query is NOT issued (only 1 query: the stats query)
         const allCalls = (testRunRepo.query as jest.Mock).mock.calls;
@@ -357,7 +347,7 @@ describe('TestRunsPerformanceQueryService', () => {
         (testRunRepo.query as jest.Mock).mockResolvedValueOnce([]);
 
         await expect(
-          service.getTransactionStats(UUID, false, ADMIN_ROLES, [])
+          service.getTransactionStats(UUID, false, IS_ADMIN, [])
         ).rejects.toThrow(DatabaseException);
       });
     });
@@ -373,7 +363,7 @@ describe('TestRunsPerformanceQueryService', () => {
         );
 
         // Act
-        const result = await service.getTransactionStats(TEST_RUN_ID, true, ADMIN_ROLES, []);
+        const result = await service.getTransactionStats(TEST_RUN_ID, true, IS_ADMIN, []);
 
         // Assert
         expect(result).toHaveLength(1);
@@ -388,7 +378,7 @@ describe('TestRunsPerformanceQueryService', () => {
         mockQuerySequence([RAW_TRANSACTION_ROW]);
 
         // Act
-        await service.getTransactionStats(TEST_RUN_ID, false, ADMIN_ROLES, []);
+        await service.getTransactionStats(TEST_RUN_ID, false, IS_ADMIN, []);
 
         // Assert – stats query receives $3 = null (cutoffTime)
         const statsCalls = (testRunRepo.query as jest.Mock).mock.calls;
@@ -406,7 +396,7 @@ describe('TestRunsPerformanceQueryService', () => {
           [RAW_TRANSACTION_ROW],
         );
 
-        const result = await service.getTransactionStats(TEST_RUN_ID, true, ADMIN_ROLES, []);
+        const result = await service.getTransactionStats(TEST_RUN_ID, true, IS_ADMIN, []);
         expect(result).toHaveLength(1);
       });
     });
@@ -415,7 +405,7 @@ describe('TestRunsPerformanceQueryService', () => {
       it('includes window filter when sinceMinutes is provided (admin)', async () => {
         mockQuerySequence([RAW_TRANSACTION_ROW]);
 
-        await service.getTransactionStats(TEST_RUN_ID, false, ADMIN_ROLES, [], 60);
+        await service.getTransactionStats(TEST_RUN_ID, false, IS_ADMIN, [], 60);
 
         const statsCall = (testRunRepo.query as jest.Mock).mock.calls.find(([sql]: [string]) =>
           sql.includes('approx_percentile')
@@ -429,7 +419,7 @@ describe('TestRunsPerformanceQueryService', () => {
       it('includes window filter and org filter for non-admin with sinceMinutes', async () => {
         mockQuerySequence([RAW_TRANSACTION_ROW]);
 
-        await service.getTransactionStats(TEST_RUN_ID, false, USER_ROLES, ORG_IDS, 30);
+        await service.getTransactionStats(TEST_RUN_ID, false, NOT_ADMIN, ORG_IDS, 30);
 
         const statsCall = (testRunRepo.query as jest.Mock).mock.calls.find(([sql]: [string]) =>
           sql.includes('approx_percentile')
@@ -443,7 +433,7 @@ describe('TestRunsPerformanceQueryService', () => {
       it('omits window filter when sinceMinutes is undefined (admin)', async () => {
         mockQuerySequence([RAW_TRANSACTION_ROW]);
 
-        await service.getTransactionStats(TEST_RUN_ID, false, ADMIN_ROLES, [], undefined);
+        await service.getTransactionStats(TEST_RUN_ID, false, IS_ADMIN, [], undefined);
 
         const statsCall = (testRunRepo.query as jest.Mock).mock.calls.find(([sql]: [string]) =>
           sql.includes('approx_percentile')
@@ -457,7 +447,7 @@ describe('TestRunsPerformanceQueryService', () => {
       it('uses approx_percentile + percentile_agg (no PERCENTILE_CONT)', async () => {
         mockQuerySequence([RAW_TRANSACTION_ROW]);
 
-        await service.getTransactionStats(TEST_RUN_ID, false, ADMIN_ROLES, []);
+        await service.getTransactionStats(TEST_RUN_ID, false, IS_ADMIN, []);
 
         const statsCall = (testRunRepo.query as jest.Mock).mock.calls.find(([sql]: [string]) =>
           sql.includes('approx_percentile')
@@ -472,7 +462,7 @@ describe('TestRunsPerformanceQueryService', () => {
       it('joins apdex thresholds on sut.id (no name OR id::text OR-join)', async () => {
         mockQuerySequence([RAW_TRANSACTION_ROW]);
 
-        await service.getTransactionStats(TEST_RUN_ID, false, ADMIN_ROLES, []);
+        await service.getTransactionStats(TEST_RUN_ID, false, IS_ADMIN, []);
 
         const statsCall = (testRunRepo.query as jest.Mock).mock.calls.find(([sql]: [string]) =>
           sql.includes('approx_percentile')
@@ -486,7 +476,7 @@ describe('TestRunsPerformanceQueryService', () => {
       it('wraps query in a transaction with SET LOCAL work_mem', async () => {
         mockQuerySequence([RAW_TRANSACTION_ROW]);
 
-        await service.getTransactionStats(TEST_RUN_ID, false, ADMIN_ROLES, []);
+        await service.getTransactionStats(TEST_RUN_ID, false, IS_ADMIN, []);
 
         expect(testRunRepo.manager.transaction).toHaveBeenCalledTimes(1);
         const setLocalCall = (testRunRepo.query as jest.Mock).mock.calls.find(([sql]: [string]) =>
@@ -500,7 +490,7 @@ describe('TestRunsPerformanceQueryService', () => {
       it('maps all fields from raw DB row correctly', async () => {
         mockQuerySequence([RAW_TRANSACTION_ROW]);
 
-        const result = await service.getTransactionStats(TEST_RUN_ID, false, ADMIN_ROLES, []);
+        const result = await service.getTransactionStats(TEST_RUN_ID, false, IS_ADMIN, []);
 
         expect(result).toHaveLength(1);
         const row = result[0];
@@ -520,7 +510,7 @@ describe('TestRunsPerformanceQueryService', () => {
       it('maps null scenario_name to undefined', async () => {
         mockQuerySequence([{ ...RAW_TRANSACTION_ROW, scenario_name: null }]);
 
-        const result = await service.getTransactionStats(TEST_RUN_ID, false, ADMIN_ROLES, []);
+        const result = await service.getTransactionStats(TEST_RUN_ID, false, IS_ADMIN, []);
 
         expect(result[0].scenario_name).toBeUndefined();
       });
@@ -528,7 +518,7 @@ describe('TestRunsPerformanceQueryService', () => {
       it('maps empty string scenario_name to undefined', async () => {
         mockQuerySequence([{ ...RAW_TRANSACTION_ROW, scenario_name: '' }]);
 
-        const result = await service.getTransactionStats(TEST_RUN_ID, false, ADMIN_ROLES, []);
+        const result = await service.getTransactionStats(TEST_RUN_ID, false, IS_ADMIN, []);
 
         expect(result[0].scenario_name).toBeUndefined();
       });
@@ -542,7 +532,7 @@ describe('TestRunsPerformanceQueryService', () => {
           apdex_score: null,
         }]);
 
-        const result = await service.getTransactionStats(TEST_RUN_ID, false, ADMIN_ROLES, []);
+        const result = await service.getTransactionStats(TEST_RUN_ID, false, IS_ADMIN, []);
 
         expect(result[0].avg_response_time).toBe(0);
         expect(result[0].p95_response_time).toBe(0);
@@ -553,7 +543,7 @@ describe('TestRunsPerformanceQueryService', () => {
       it('defaults null active_threshold to 500', async () => {
         mockQuerySequence([{ ...RAW_TRANSACTION_ROW, active_threshold: null }]);
 
-        const result = await service.getTransactionStats(TEST_RUN_ID, false, ADMIN_ROLES, []);
+        const result = await service.getTransactionStats(TEST_RUN_ID, false, IS_ADMIN, []);
 
         expect(result[0].active_threshold).toBe(500);
       });
@@ -561,7 +551,7 @@ describe('TestRunsPerformanceQueryService', () => {
       it('returns empty array when no rows found', async () => {
         mockQuerySequence([]);
 
-        const result = await service.getTransactionStats(TEST_RUN_ID, false, ADMIN_ROLES, []);
+        const result = await service.getTransactionStats(TEST_RUN_ID, false, IS_ADMIN, []);
 
         expect(result).toEqual([]);
       });
@@ -570,7 +560,7 @@ describe('TestRunsPerformanceQueryService', () => {
         const row2 = { ...RAW_TRANSACTION_ROW, transaction_name: 'login' };
         mockQuerySequence([RAW_TRANSACTION_ROW, row2]);
 
-        const result = await service.getTransactionStats(TEST_RUN_ID, false, ADMIN_ROLES, []);
+        const result = await service.getTransactionStats(TEST_RUN_ID, false, IS_ADMIN, []);
 
         expect(result).toHaveLength(2);
         expect(result[0].transaction_name).toBe('checkout');
@@ -583,7 +573,7 @@ describe('TestRunsPerformanceQueryService', () => {
         (testRunRepo.query as jest.Mock).mockRejectedValueOnce(new Error('connection refused'));
 
         await expect(
-          service.getTransactionStats(TEST_RUN_ID, false, ADMIN_ROLES, [])
+          service.getTransactionStats(TEST_RUN_ID, false, IS_ADMIN, [])
         ).rejects.toThrow(DatabaseException);
       });
 
@@ -591,7 +581,7 @@ describe('TestRunsPerformanceQueryService', () => {
         (testRunRepo.query as jest.Mock).mockRejectedValueOnce(new Error('timeout'));
 
         await expect(
-          service.getTransactionStats(TEST_RUN_ID, false, ADMIN_ROLES, [])
+          service.getTransactionStats(TEST_RUN_ID, false, IS_ADMIN, [])
         ).rejects.toThrow('Failed to retrieve transaction statistics');
       });
 
@@ -601,7 +591,7 @@ describe('TestRunsPerformanceQueryService', () => {
         );
 
         await expect(
-          service.getTransactionStats(TEST_RUN_ID, false, ADMIN_ROLES, [])
+          service.getTransactionStats(TEST_RUN_ID, false, IS_ADMIN, [])
         ).rejects.toThrow(DatabaseException);
       });
     });
@@ -614,7 +604,7 @@ describe('TestRunsPerformanceQueryService', () => {
       it('reads from test_run_transaction_stats when a rollup row exists', async () => {
         mockWithRollupHit([RAW_TRANSACTION_ROW]);
 
-        const result = await service.getTransactionStats(TEST_RUN_ID, false, ADMIN_ROLES, []);
+        const result = await service.getTransactionStats(TEST_RUN_ID, false, IS_ADMIN, []);
 
         expect(result).toHaveLength(1);
         expect(result[0].transaction_name).toBe('checkout');
@@ -634,7 +624,7 @@ describe('TestRunsPerformanceQueryService', () => {
       it('passes excludeRampUp through as ramp_up_excluded param', async () => {
         mockWithRollupHit([RAW_TRANSACTION_ROW]);
 
-        await service.getTransactionStats(TEST_RUN_ID, true, ADMIN_ROLES, []);
+        await service.getTransactionStats(TEST_RUN_ID, true, IS_ADMIN, []);
 
         const queryCalls = (testRunRepo.query as jest.Mock).mock.calls;
         const rollupCall = queryCalls.find(([sql]) =>
@@ -649,7 +639,7 @@ describe('TestRunsPerformanceQueryService', () => {
       it('falls back to live aggregation when no rollup row exists', async () => {
         mockQuerySequence([RAW_TRANSACTION_ROW]); // existence check returns []
 
-        const result = await service.getTransactionStats(TEST_RUN_ID, false, ADMIN_ROLES, []);
+        const result = await service.getTransactionStats(TEST_RUN_ID, false, IS_ADMIN, []);
 
         expect(result).toHaveLength(1);
         const queryCalls = (testRunRepo.query as jest.Mock).mock.calls;
@@ -673,7 +663,7 @@ describe('TestRunsPerformanceQueryService', () => {
           return [RAW_TRANSACTION_ROW];
         });
 
-        await service.getTransactionStats(TEST_RUN_ID, false, ADMIN_ROLES, [], 5);
+        await service.getTransactionStats(TEST_RUN_ID, false, IS_ADMIN, [], 5);
 
         // Existence check should not have been reached because sinceMinutes
         // short-circuits the rollup path before checking.
@@ -683,7 +673,7 @@ describe('TestRunsPerformanceQueryService', () => {
       it('binds organizationIds to $3 when caller is non-admin', async () => {
         mockWithRollupHit([RAW_TRANSACTION_ROW]);
 
-        await service.getTransactionStats(TEST_RUN_ID, false, USER_ROLES, ORG_IDS);
+        await service.getTransactionStats(TEST_RUN_ID, false, NOT_ADMIN, ORG_IDS);
 
         const rollupCall = (testRunRepo.query as jest.Mock).mock.calls.find(([sql]) =>
           typeof sql === 'string' && /FROM\s+test_run_transaction_stats\s+trs/i.test(sql),
@@ -706,7 +696,7 @@ describe('TestRunsPerformanceQueryService', () => {
 
     describe('authorization', () => {
       it('returns empty array for non-admin with no org memberships', async () => {
-        const result = await service.getTransactionSamples(TEST_RUN_ID, TRANSACTION, false, USER_ROLES, []);
+        const result = await service.getTransactionSamples(TEST_RUN_ID, TRANSACTION, false, NOT_ADMIN, []);
 
         expect(result).toEqual([]);
         expect(testRunRepo.query).not.toHaveBeenCalled();
@@ -715,7 +705,7 @@ describe('TestRunsPerformanceQueryService', () => {
       it('queries database for admin with empty org list', async () => {
         mockQuerySequence([RAW_SAMPLER_ROW]);
 
-        const result = await service.getTransactionSamples(TEST_RUN_ID, TRANSACTION, false, ADMIN_ROLES, []);
+        const result = await service.getTransactionSamples(TEST_RUN_ID, TRANSACTION, false, IS_ADMIN, []);
 
         expect(result).toHaveLength(1);
       });
@@ -723,7 +713,7 @@ describe('TestRunsPerformanceQueryService', () => {
       it('queries database for non-admin with org memberships', async () => {
         mockQuerySequence([RAW_SAMPLER_ROW]);
 
-        const result = await service.getTransactionSamples(TEST_RUN_ID, TRANSACTION, false, USER_ROLES, ORG_IDS);
+        const result = await service.getTransactionSamples(TEST_RUN_ID, TRANSACTION, false, NOT_ADMIN, ORG_IDS);
 
         expect(result).toHaveLength(1);
       });
@@ -737,7 +727,7 @@ describe('TestRunsPerformanceQueryService', () => {
           [RAW_SAMPLER_ROW],
         );
 
-        const result = await service.getTransactionSamples(TEST_RUN_ID, TRANSACTION, true, ADMIN_ROLES, []);
+        const result = await service.getTransactionSamples(TEST_RUN_ID, TRANSACTION, true, IS_ADMIN, []);
 
         expect(result).toHaveLength(1);
         // 4 calls: rollup existence check + ramp-up lookup + SET LOCAL work_mem + samples query
@@ -747,7 +737,7 @@ describe('TestRunsPerformanceQueryService', () => {
       it('does not fetch cutoff when excludeRampUp is false', async () => {
         mockQuerySequence([RAW_SAMPLER_ROW]);
 
-        await service.getTransactionSamples(TEST_RUN_ID, TRANSACTION, false, ADMIN_ROLES, []);
+        await service.getTransactionSamples(TEST_RUN_ID, TRANSACTION, false, IS_ADMIN, []);
 
         // 3 calls — rollup existence check + SET LOCAL work_mem + samples query (no ramp-up lookup)
         expect(testRunRepo.query).toHaveBeenCalledTimes(3);
@@ -758,7 +748,7 @@ describe('TestRunsPerformanceQueryService', () => {
       it('appends sinceMinutes param for admin', async () => {
         mockQuerySequence([RAW_SAMPLER_ROW]);
 
-        await service.getTransactionSamples(TEST_RUN_ID, TRANSACTION, false, ADMIN_ROLES, [], 45);
+        await service.getTransactionSamples(TEST_RUN_ID, TRANSACTION, false, IS_ADMIN, [], 45);
 
         // Skip the SET LOCAL prelude — find the samples query
         const samplerCall = (testRunRepo.query as jest.Mock).mock.calls.find(([sql]: [string]) =>
@@ -773,7 +763,7 @@ describe('TestRunsPerformanceQueryService', () => {
       it('appends orgIds after sinceMinutes for non-admin', async () => {
         mockQuerySequence([RAW_SAMPLER_ROW]);
 
-        await service.getTransactionSamples(TEST_RUN_ID, TRANSACTION, false, USER_ROLES, ORG_IDS, 15);
+        await service.getTransactionSamples(TEST_RUN_ID, TRANSACTION, false, NOT_ADMIN, ORG_IDS, 15);
 
         const samplerCall = (testRunRepo.query as jest.Mock).mock.calls.find(([sql]: [string]) =>
           sql.includes('approx_percentile')
@@ -787,7 +777,7 @@ describe('TestRunsPerformanceQueryService', () => {
       it('places orgIds at position 5 when sinceMinutes absent (non-admin)', async () => {
         mockQuerySequence([RAW_SAMPLER_ROW]);
 
-        await service.getTransactionSamples(TEST_RUN_ID, TRANSACTION, false, USER_ROLES, ORG_IDS);
+        await service.getTransactionSamples(TEST_RUN_ID, TRANSACTION, false, NOT_ADMIN, ORG_IDS);
 
         const samplerCall = (testRunRepo.query as jest.Mock).mock.calls.find(([sql]: [string]) =>
           sql.includes('approx_percentile')
@@ -802,7 +792,7 @@ describe('TestRunsPerformanceQueryService', () => {
       it('uses approx_percentile + percentile_agg (no PERCENTILE_CONT)', async () => {
         mockQuerySequence([RAW_SAMPLER_ROW]);
 
-        await service.getTransactionSamples(TEST_RUN_ID, TRANSACTION, false, ADMIN_ROLES, []);
+        await service.getTransactionSamples(TEST_RUN_ID, TRANSACTION, false, IS_ADMIN, []);
 
         const samplerCall = (testRunRepo.query as jest.Mock).mock.calls.find(([sql]: [string]) =>
           sql.includes('approx_percentile')
@@ -817,7 +807,7 @@ describe('TestRunsPerformanceQueryService', () => {
       it('joins apdex thresholds on sut.id (no name OR id::text OR-join)', async () => {
         mockQuerySequence([RAW_SAMPLER_ROW]);
 
-        await service.getTransactionSamples(TEST_RUN_ID, TRANSACTION, false, ADMIN_ROLES, []);
+        await service.getTransactionSamples(TEST_RUN_ID, TRANSACTION, false, IS_ADMIN, []);
 
         const samplerCall = (testRunRepo.query as jest.Mock).mock.calls.find(([sql]: [string]) =>
           sql.includes('approx_percentile')
@@ -831,7 +821,7 @@ describe('TestRunsPerformanceQueryService', () => {
       it('joins url_patterns on a.url_hash (no leftover sg.url_hash typo)', async () => {
         mockQuerySequence([RAW_SAMPLER_ROW]);
 
-        await service.getTransactionSamples(TEST_RUN_ID, TRANSACTION, false, ADMIN_ROLES, []);
+        await service.getTransactionSamples(TEST_RUN_ID, TRANSACTION, false, IS_ADMIN, []);
 
         const samplerCall = (testRunRepo.query as jest.Mock).mock.calls.find(([sql]: [string]) =>
           sql.includes('approx_percentile')
@@ -843,7 +833,7 @@ describe('TestRunsPerformanceQueryService', () => {
       it('wraps query in a transaction with SET LOCAL work_mem', async () => {
         mockQuerySequence([RAW_SAMPLER_ROW]);
 
-        await service.getTransactionSamples(TEST_RUN_ID, TRANSACTION, false, ADMIN_ROLES, []);
+        await service.getTransactionSamples(TEST_RUN_ID, TRANSACTION, false, IS_ADMIN, []);
 
         expect(testRunRepo.manager.transaction).toHaveBeenCalledTimes(1);
         const setLocalCall = (testRunRepo.query as jest.Mock).mock.calls.find(([sql]: [string]) =>
@@ -857,7 +847,7 @@ describe('TestRunsPerformanceQueryService', () => {
       it('maps all fields correctly from raw row', async () => {
         mockQuerySequence([RAW_SAMPLER_ROW]);
 
-        const result = await service.getTransactionSamples(TEST_RUN_ID, TRANSACTION, false, ADMIN_ROLES, []);
+        const result = await service.getTransactionSamples(TEST_RUN_ID, TRANSACTION, false, IS_ADMIN, []);
 
         expect(result).toHaveLength(1);
         const row = result[0];
@@ -884,7 +874,7 @@ describe('TestRunsPerformanceQueryService', () => {
       it('maps null url_hash and url_pattern to null', async () => {
         mockQuerySequence([{ ...RAW_SAMPLER_ROW, url_hash: null, url_pattern: null }]);
 
-        const result = await service.getTransactionSamples(TEST_RUN_ID, TRANSACTION, false, ADMIN_ROLES, []);
+        const result = await service.getTransactionSamples(TEST_RUN_ID, TRANSACTION, false, IS_ADMIN, []);
 
         expect(result[0].url_hash).toBeNull();
         expect(result[0].url_pattern).toBeNull();
@@ -893,7 +883,7 @@ describe('TestRunsPerformanceQueryService', () => {
       it('maps null scenario_name to undefined', async () => {
         mockQuerySequence([{ ...RAW_SAMPLER_ROW, scenario_name: null }]);
 
-        const result = await service.getTransactionSamples(TEST_RUN_ID, TRANSACTION, false, ADMIN_ROLES, []);
+        const result = await service.getTransactionSamples(TEST_RUN_ID, TRANSACTION, false, IS_ADMIN, []);
 
         expect(result[0].scenario_name).toBeUndefined();
       });
@@ -901,7 +891,7 @@ describe('TestRunsPerformanceQueryService', () => {
       it('returns empty array when no samplers found', async () => {
         mockQuerySequence([]);
 
-        const result = await service.getTransactionSamples(TEST_RUN_ID, TRANSACTION, false, ADMIN_ROLES, []);
+        const result = await service.getTransactionSamples(TEST_RUN_ID, TRANSACTION, false, IS_ADMIN, []);
 
         expect(result).toEqual([]);
       });
@@ -914,7 +904,7 @@ describe('TestRunsPerformanceQueryService', () => {
           apdex_score: null,
         }]);
 
-        const result = await service.getTransactionSamples(TEST_RUN_ID, TRANSACTION, false, ADMIN_ROLES, []);
+        const result = await service.getTransactionSamples(TEST_RUN_ID, TRANSACTION, false, IS_ADMIN, []);
 
         expect(result[0].avg_response_time).toBe(0);
         expect(result[0].avg_latency).toBe(0);
@@ -927,7 +917,7 @@ describe('TestRunsPerformanceQueryService', () => {
         (testRunRepo.query as jest.Mock).mockRejectedValueOnce(new Error('db error'));
 
         await expect(
-          service.getTransactionSamples(TEST_RUN_ID, TRANSACTION, false, ADMIN_ROLES, [])
+          service.getTransactionSamples(TEST_RUN_ID, TRANSACTION, false, IS_ADMIN, [])
         ).rejects.toThrow(DatabaseException);
       });
 
@@ -935,7 +925,7 @@ describe('TestRunsPerformanceQueryService', () => {
         (testRunRepo.query as jest.Mock).mockRejectedValueOnce(new Error('timeout'));
 
         await expect(
-          service.getTransactionSamples(TEST_RUN_ID, TRANSACTION, false, ADMIN_ROLES, [])
+          service.getTransactionSamples(TEST_RUN_ID, TRANSACTION, false, IS_ADMIN, [])
         ).rejects.toThrow('Failed to retrieve transaction sampler statistics');
       });
     });
@@ -951,7 +941,7 @@ describe('TestRunsPerformanceQueryService', () => {
         mockWithRollupHit([RAW_SAMPLER_ROW]);
 
         const result = await service.getTransactionSamples(
-          TEST_RUN_ID, TRANSACTION, false, ADMIN_ROLES, [],
+          TEST_RUN_ID, TRANSACTION, false, IS_ADMIN, [],
         );
 
         expect(result).toHaveLength(1);
@@ -968,7 +958,7 @@ describe('TestRunsPerformanceQueryService', () => {
         mockWithRollupHit([RAW_SAMPLER_ROW]);
 
         await service.getTransactionSamples(
-          TEST_RUN_ID, TRANSACTION, true, ADMIN_ROLES, [],
+          TEST_RUN_ID, TRANSACTION, true, IS_ADMIN, [],
         );
 
         const queryCalls = (testRunRepo.query as jest.Mock).mock.calls;
@@ -985,7 +975,7 @@ describe('TestRunsPerformanceQueryService', () => {
         mockQuerySequence([RAW_SAMPLER_ROW]);
 
         const result = await service.getTransactionSamples(
-          TEST_RUN_ID, TRANSACTION, false, ADMIN_ROLES, [],
+          TEST_RUN_ID, TRANSACTION, false, IS_ADMIN, [],
         );
 
         expect(result).toHaveLength(1);
@@ -1007,7 +997,7 @@ describe('TestRunsPerformanceQueryService', () => {
         });
 
         await service.getTransactionSamples(
-          TEST_RUN_ID, TRANSACTION, false, ADMIN_ROLES, [], 10,
+          TEST_RUN_ID, TRANSACTION, false, IS_ADMIN, [], 10,
         );
 
         expect(sawExistenceCheck).toBe(false);
@@ -1017,7 +1007,7 @@ describe('TestRunsPerformanceQueryService', () => {
         mockWithRollupHit([RAW_SAMPLER_ROW]);
 
         await service.getTransactionSamples(
-          TEST_RUN_ID, TRANSACTION, true, USER_ROLES, ORG_IDS,
+          TEST_RUN_ID, TRANSACTION, true, NOT_ADMIN, ORG_IDS,
         );
 
         const rollupCall = (testRunRepo.query as jest.Mock).mock.calls.find(([sql]) =>
@@ -1040,7 +1030,7 @@ describe('TestRunsPerformanceQueryService', () => {
   describe('getTransactionErrors', () => {
     describe('authorization', () => {
       it('returns empty array for non-admin with no org memberships', async () => {
-        const result = await service.getTransactionErrors(TEST_RUN_ID, undefined, undefined, USER_ROLES, []);
+        const result = await service.getTransactionErrors(TEST_RUN_ID, undefined, undefined, NOT_ADMIN, []);
 
         expect(result).toEqual([]);
         expect(testRunRepo.query).not.toHaveBeenCalled();
@@ -1049,7 +1039,7 @@ describe('TestRunsPerformanceQueryService', () => {
       it('queries database for admin with empty org list', async () => {
         mockQuerySequence([RAW_ERROR_ROW]);
 
-        const result = await service.getTransactionErrors(TEST_RUN_ID, undefined, undefined, ADMIN_ROLES, []);
+        const result = await service.getTransactionErrors(TEST_RUN_ID, undefined, undefined, IS_ADMIN, []);
 
         expect(result).toHaveLength(1);
       });
@@ -1057,7 +1047,7 @@ describe('TestRunsPerformanceQueryService', () => {
       it('queries database for non-admin with org memberships', async () => {
         mockQuerySequence([RAW_ERROR_ROW]);
 
-        const result = await service.getTransactionErrors(TEST_RUN_ID, undefined, undefined, USER_ROLES, ORG_IDS);
+        const result = await service.getTransactionErrors(TEST_RUN_ID, undefined, undefined, NOT_ADMIN, ORG_IDS);
 
         expect(result).toHaveLength(1);
       });
@@ -1067,7 +1057,7 @@ describe('TestRunsPerformanceQueryService', () => {
       it('resolves UUID before querying', async () => {
         mockWithUuidResolution(TEST_RUN_ID, [RAW_ERROR_ROW]);
 
-        const result = await service.getTransactionErrors(UUID, undefined, undefined, ADMIN_ROLES, []);
+        const result = await service.getTransactionErrors(UUID, undefined, undefined, IS_ADMIN, []);
 
         expect(result).toHaveLength(1);
         const firstCall = (testRunRepo.query as jest.Mock).mock.calls[0];
@@ -1079,7 +1069,7 @@ describe('TestRunsPerformanceQueryService', () => {
       it('builds query without transaction or sampler filter', async () => {
         mockQuerySequence([RAW_ERROR_ROW]);
 
-        await service.getTransactionErrors(TEST_RUN_ID, undefined, undefined, ADMIN_ROLES, []);
+        await service.getTransactionErrors(TEST_RUN_ID, undefined, undefined, IS_ADMIN, []);
 
         const call = (testRunRepo.query as jest.Mock).mock.calls[0];
         // Params should only contain testRunId (no extra filters)
@@ -1089,7 +1079,7 @@ describe('TestRunsPerformanceQueryService', () => {
       it('appends transaction filter param when transactionName provided', async () => {
         mockQuerySequence([RAW_ERROR_ROW]);
 
-        await service.getTransactionErrors(TEST_RUN_ID, 'checkout', undefined, ADMIN_ROLES, []);
+        await service.getTransactionErrors(TEST_RUN_ID, 'checkout', undefined, IS_ADMIN, []);
 
         const call = (testRunRepo.query as jest.Mock).mock.calls[0];
         expect(call[1]).toContain('checkout');
@@ -1099,7 +1089,7 @@ describe('TestRunsPerformanceQueryService', () => {
       it('appends sampler filter param when samplerName provided', async () => {
         mockQuerySequence([RAW_ERROR_ROW]);
 
-        await service.getTransactionErrors(TEST_RUN_ID, undefined, 'POST /checkout', ADMIN_ROLES, []);
+        await service.getTransactionErrors(TEST_RUN_ID, undefined, 'POST /checkout', IS_ADMIN, []);
 
         const call = (testRunRepo.query as jest.Mock).mock.calls[0];
         expect(call[1]).toContain('POST /checkout');
@@ -1109,7 +1099,7 @@ describe('TestRunsPerformanceQueryService', () => {
       it('appends both transaction and sampler filter params', async () => {
         mockQuerySequence([RAW_ERROR_ROW]);
 
-        await service.getTransactionErrors(TEST_RUN_ID, 'checkout', 'POST /checkout', ADMIN_ROLES, []);
+        await service.getTransactionErrors(TEST_RUN_ID, 'checkout', 'POST /checkout', IS_ADMIN, []);
 
         const call = (testRunRepo.query as jest.Mock).mock.calls[0];
         expect(call[1]).toContain('checkout');
@@ -1120,7 +1110,7 @@ describe('TestRunsPerformanceQueryService', () => {
       it('appends orgIds as last param for non-admin', async () => {
         mockQuerySequence([RAW_ERROR_ROW]);
 
-        await service.getTransactionErrors(TEST_RUN_ID, 'checkout', undefined, USER_ROLES, ORG_IDS);
+        await service.getTransactionErrors(TEST_RUN_ID, 'checkout', undefined, NOT_ADMIN, ORG_IDS);
 
         const call = (testRunRepo.query as jest.Mock).mock.calls[0];
         expect(call[1][call[1].length - 1]).toEqual(ORG_IDS);
@@ -1131,7 +1121,7 @@ describe('TestRunsPerformanceQueryService', () => {
       it('joins workload_apdex_thresholds on sut.id (no name OR id::text OR-join) without transactionName', async () => {
         mockQuerySequence([RAW_ERROR_ROW]);
 
-        await service.getTransactionErrors(TEST_RUN_ID, undefined, undefined, ADMIN_ROLES, []);
+        await service.getTransactionErrors(TEST_RUN_ID, undefined, undefined, IS_ADMIN, []);
 
         const call = (testRunRepo.query as jest.Mock).mock.calls[0];
         expect(call[0]).toContain('wat.system_under_test_id = sut.id');
@@ -1142,7 +1132,7 @@ describe('TestRunsPerformanceQueryService', () => {
       it('joins both threshold tables on sut.id when transactionName provided', async () => {
         mockQuerySequence([RAW_ERROR_ROW]);
 
-        await service.getTransactionErrors(TEST_RUN_ID, 'checkout', undefined, ADMIN_ROLES, []);
+        await service.getTransactionErrors(TEST_RUN_ID, 'checkout', undefined, IS_ADMIN, []);
 
         const call = (testRunRepo.query as jest.Mock).mock.calls[0];
         expect(call[0]).toContain('wat.system_under_test_id = sut.id');
@@ -1156,7 +1146,7 @@ describe('TestRunsPerformanceQueryService', () => {
       it('maps all fields correctly from raw row', async () => {
         mockQuerySequence([RAW_ERROR_ROW]);
 
-        const result = await service.getTransactionErrors(TEST_RUN_ID, undefined, undefined, ADMIN_ROLES, []);
+        const result = await service.getTransactionErrors(TEST_RUN_ID, undefined, undefined, IS_ADMIN, []);
 
         expect(result).toHaveLength(1);
         const row = result[0];
@@ -1179,7 +1169,7 @@ describe('TestRunsPerformanceQueryService', () => {
       it('falls back to url field when sample_url is null', async () => {
         mockQuerySequence([{ ...RAW_ERROR_ROW, sample_url: null }]);
 
-        const result = await service.getTransactionErrors(TEST_RUN_ID, undefined, undefined, ADMIN_ROLES, []);
+        const result = await service.getTransactionErrors(TEST_RUN_ID, undefined, undefined, IS_ADMIN, []);
 
         expect(result[0].url).toBe('http://example.com/checkout');
       });
@@ -1187,7 +1177,7 @@ describe('TestRunsPerformanceQueryService', () => {
       it('maps null url_hash and url_pattern to null', async () => {
         mockQuerySequence([{ ...RAW_ERROR_ROW, url_hash: null, url_pattern: null }]);
 
-        const result = await service.getTransactionErrors(TEST_RUN_ID, undefined, undefined, ADMIN_ROLES, []);
+        const result = await service.getTransactionErrors(TEST_RUN_ID, undefined, undefined, IS_ADMIN, []);
 
         expect(result[0].url_hash).toBeNull();
         expect(result[0].url_pattern).toBeNull();
@@ -1196,7 +1186,7 @@ describe('TestRunsPerformanceQueryService', () => {
       it('defaults null sample_response_data to empty string', async () => {
         mockQuerySequence([{ ...RAW_ERROR_ROW, sample_response_data: null }]);
 
-        const result = await service.getTransactionErrors(TEST_RUN_ID, undefined, undefined, ADMIN_ROLES, []);
+        const result = await service.getTransactionErrors(TEST_RUN_ID, undefined, undefined, IS_ADMIN, []);
 
         expect(result[0].sample_response_data).toBe('');
       });
@@ -1204,7 +1194,7 @@ describe('TestRunsPerformanceQueryService', () => {
       it('returns empty array when no errors found', async () => {
         mockQuerySequence([]);
 
-        const result = await service.getTransactionErrors(TEST_RUN_ID, undefined, undefined, ADMIN_ROLES, []);
+        const result = await service.getTransactionErrors(TEST_RUN_ID, undefined, undefined, IS_ADMIN, []);
 
         expect(result).toEqual([]);
       });
@@ -1215,7 +1205,7 @@ describe('TestRunsPerformanceQueryService', () => {
         (testRunRepo.query as jest.Mock).mockRejectedValueOnce(new Error('db error'));
 
         await expect(
-          service.getTransactionErrors(TEST_RUN_ID, undefined, undefined, ADMIN_ROLES, [])
+          service.getTransactionErrors(TEST_RUN_ID, undefined, undefined, IS_ADMIN, [])
         ).rejects.toThrow(DatabaseException);
       });
 
@@ -1223,7 +1213,7 @@ describe('TestRunsPerformanceQueryService', () => {
         (testRunRepo.query as jest.Mock).mockRejectedValueOnce(new Error('timeout'));
 
         await expect(
-          service.getTransactionErrors(TEST_RUN_ID, undefined, undefined, ADMIN_ROLES, [])
+          service.getTransactionErrors(TEST_RUN_ID, undefined, undefined, IS_ADMIN, [])
         ).rejects.toThrow('Failed to retrieve transaction errors');
       });
     });
@@ -1272,7 +1262,7 @@ describe('TestRunsPerformanceQueryService', () => {
 
     describe('authorization', () => {
       it('returns empty struct for non-admin with no org memberships', async () => {
-        const result = await service.getVirtualUserStats(TEST_RUN_ID, false, USER_ROLES, []);
+        const result = await service.getVirtualUserStats(TEST_RUN_ID, false, NOT_ADMIN, []);
 
         expect(result).toEqual({
           overall: {
@@ -1292,7 +1282,7 @@ describe('TestRunsPerformanceQueryService', () => {
       it('queries database for admin with empty org list', async () => {
         mockVuQueries([RAW_VU_OVERALL], [RAW_VU_SCENARIO]);
 
-        const result = await service.getVirtualUserStats(TEST_RUN_ID, false, ADMIN_ROLES, []);
+        const result = await service.getVirtualUserStats(TEST_RUN_ID, false, IS_ADMIN, []);
 
         expect(result.overall.peak_active_threads).toBe(100);
         expect(result.by_scenario).toHaveLength(1);
@@ -1301,7 +1291,7 @@ describe('TestRunsPerformanceQueryService', () => {
       it('queries database for non-admin with org memberships', async () => {
         mockVuQueries([RAW_VU_OVERALL], []);
 
-        const result = await service.getVirtualUserStats(TEST_RUN_ID, false, USER_ROLES, ORG_IDS);
+        const result = await service.getVirtualUserStats(TEST_RUN_ID, false, NOT_ADMIN, ORG_IDS);
 
         expect(result.overall.peak_active_threads).toBe(100);
       });
@@ -1318,7 +1308,7 @@ describe('TestRunsPerformanceQueryService', () => {
           return [RAW_VU_SCENARIO]; // by_scenario
         });
 
-        const result = await service.getVirtualUserStats(UUID, false, ADMIN_ROLES, []);
+        const result = await service.getVirtualUserStats(UUID, false, IS_ADMIN, []);
 
         expect(result.overall.peak_active_threads).toBe(100);
         const firstCall = (testRunRepo.query as jest.Mock).mock.calls[0];
@@ -1335,7 +1325,7 @@ describe('TestRunsPerformanceQueryService', () => {
           [RAW_VU_SCENARIO],
         );
 
-        await service.getVirtualUserStats(TEST_RUN_ID, true, ADMIN_ROLES, []);
+        await service.getVirtualUserStats(TEST_RUN_ID, true, IS_ADMIN, []);
 
         // 3 calls: ramp-up + 2 parallel VU queries
         expect(testRunRepo.query).toHaveBeenCalledTimes(3);
@@ -1346,7 +1336,7 @@ describe('TestRunsPerformanceQueryService', () => {
       it('maps overall stats correctly', async () => {
         mockVuQueries([RAW_VU_OVERALL], []);
 
-        const result = await service.getVirtualUserStats(TEST_RUN_ID, false, ADMIN_ROLES, []);
+        const result = await service.getVirtualUserStats(TEST_RUN_ID, false, IS_ADMIN, []);
 
         const o = result.overall;
         expect(o.peak_active_threads).toBe(100);
@@ -1361,7 +1351,7 @@ describe('TestRunsPerformanceQueryService', () => {
       it('maps by_scenario stats correctly', async () => {
         mockVuQueries([RAW_VU_OVERALL], [RAW_VU_SCENARIO]);
 
-        const result = await service.getVirtualUserStats(TEST_RUN_ID, false, ADMIN_ROLES, []);
+        const result = await service.getVirtualUserStats(TEST_RUN_ID, false, IS_ADMIN, []);
 
         expect(result.by_scenario).toHaveLength(1);
         const s = result.by_scenario[0];
@@ -1374,7 +1364,7 @@ describe('TestRunsPerformanceQueryService', () => {
       it('returns zero-filled overall when DB returns empty result', async () => {
         mockVuQueries([], []);
 
-        const result = await service.getVirtualUserStats(TEST_RUN_ID, false, ADMIN_ROLES, []);
+        const result = await service.getVirtualUserStats(TEST_RUN_ID, false, IS_ADMIN, []);
 
         expect(result.overall.peak_active_threads).toBe(0);
         expect(result.overall.total_data_points).toBe(0);
@@ -1383,7 +1373,7 @@ describe('TestRunsPerformanceQueryService', () => {
       it('returns empty by_scenario array when no scenarios', async () => {
         mockVuQueries([RAW_VU_OVERALL], []);
 
-        const result = await service.getVirtualUserStats(TEST_RUN_ID, false, ADMIN_ROLES, []);
+        const result = await service.getVirtualUserStats(TEST_RUN_ID, false, IS_ADMIN, []);
 
         expect(result.by_scenario).toEqual([]);
       });
@@ -1395,7 +1385,7 @@ describe('TestRunsPerformanceQueryService', () => {
           avg_active_threads: null,
         }], []);
 
-        const result = await service.getVirtualUserStats(TEST_RUN_ID, false, ADMIN_ROLES, []);
+        const result = await service.getVirtualUserStats(TEST_RUN_ID, false, IS_ADMIN, []);
 
         expect(result.overall.peak_active_threads).toBe(0);
         expect(result.overall.avg_active_threads).toBe(0);
@@ -1407,7 +1397,7 @@ describe('TestRunsPerformanceQueryService', () => {
         (testRunRepo.query as jest.Mock).mockRejectedValueOnce(new Error('db error'));
 
         await expect(
-          service.getVirtualUserStats(TEST_RUN_ID, false, ADMIN_ROLES, [])
+          service.getVirtualUserStats(TEST_RUN_ID, false, IS_ADMIN, [])
         ).rejects.toThrow(DatabaseException);
       });
 
@@ -1415,7 +1405,7 @@ describe('TestRunsPerformanceQueryService', () => {
         (testRunRepo.query as jest.Mock).mockRejectedValueOnce(new Error('timeout'));
 
         await expect(
-          service.getVirtualUserStats(TEST_RUN_ID, false, ADMIN_ROLES, [])
+          service.getVirtualUserStats(TEST_RUN_ID, false, IS_ADMIN, [])
         ).rejects.toThrow('Failed to retrieve virtual user statistics');
       });
     });
@@ -1462,7 +1452,7 @@ describe('TestRunsPerformanceQueryService', () => {
 
     describe('authorization', () => {
       it('returns empty struct for non-admin with no org memberships', async () => {
-        const result = await service.getThroughputStats(TEST_RUN_ID, false, USER_ROLES, []);
+        const result = await service.getThroughputStats(TEST_RUN_ID, false, NOT_ADMIN, []);
 
         expect(result).toEqual({
           overall: {
@@ -1481,7 +1471,7 @@ describe('TestRunsPerformanceQueryService', () => {
           [RAW_SCENARIO_THROUGHPUT],
         );
 
-        const result = await service.getThroughputStats(TEST_RUN_ID, false, ADMIN_ROLES, []);
+        const result = await service.getThroughputStats(TEST_RUN_ID, false, IS_ADMIN, []);
 
         expect(result.overall.peak_transactions_per_second).toBe(120);
         expect(result.overall.peak_requests_per_second).toBe(350);
@@ -1491,7 +1481,7 @@ describe('TestRunsPerformanceQueryService', () => {
       it('queries database for non-admin with org memberships', async () => {
         mockThroughputQueries([RAW_TRANSACTIONS_TPS], [RAW_REQUESTS_RPS], []);
 
-        const result = await service.getThroughputStats(TEST_RUN_ID, false, USER_ROLES, ORG_IDS);
+        const result = await service.getThroughputStats(TEST_RUN_ID, false, NOT_ADMIN, ORG_IDS);
 
         expect(result.overall.peak_transactions_per_second).toBe(120);
       });
@@ -1508,7 +1498,7 @@ describe('TestRunsPerformanceQueryService', () => {
           return [RAW_SCENARIO_THROUGHPUT];
         });
 
-        await service.getThroughputStats(UUID, false, ADMIN_ROLES, []);
+        await service.getThroughputStats(UUID, false, IS_ADMIN, []);
 
         const firstCall = (testRunRepo.query as jest.Mock).mock.calls[0];
         expect(firstCall[0]).toContain('WHERE id = $1');
@@ -1525,7 +1515,7 @@ describe('TestRunsPerformanceQueryService', () => {
           [],
         );
 
-        await service.getThroughputStats(TEST_RUN_ID, true, ADMIN_ROLES, []);
+        await service.getThroughputStats(TEST_RUN_ID, true, IS_ADMIN, []);
 
         // 4 calls: ramp-up + 3 parallel throughput queries
         expect(testRunRepo.query).toHaveBeenCalledTimes(4);
@@ -1536,7 +1526,7 @@ describe('TestRunsPerformanceQueryService', () => {
       it('maps overall throughput correctly', async () => {
         mockThroughputQueries([RAW_TRANSACTIONS_TPS], [RAW_REQUESTS_RPS], []);
 
-        const result = await service.getThroughputStats(TEST_RUN_ID, false, ADMIN_ROLES, []);
+        const result = await service.getThroughputStats(TEST_RUN_ID, false, IS_ADMIN, []);
 
         expect(result.overall.peak_transactions_per_second).toBe(120);
         expect(result.overall.peak_requests_per_second).toBe(350);
@@ -1549,7 +1539,7 @@ describe('TestRunsPerformanceQueryService', () => {
           [RAW_SCENARIO_THROUGHPUT],
         );
 
-        const result = await service.getThroughputStats(TEST_RUN_ID, false, ADMIN_ROLES, []);
+        const result = await service.getThroughputStats(TEST_RUN_ID, false, IS_ADMIN, []);
 
         expect(result.by_scenario).toHaveLength(1);
         const s = result.by_scenario[0];
@@ -1561,7 +1551,7 @@ describe('TestRunsPerformanceQueryService', () => {
       it('returns zero overall when DB returns empty result', async () => {
         mockThroughputQueries([], [], []);
 
-        const result = await service.getThroughputStats(TEST_RUN_ID, false, ADMIN_ROLES, []);
+        const result = await service.getThroughputStats(TEST_RUN_ID, false, IS_ADMIN, []);
 
         expect(result.overall.peak_transactions_per_second).toBe(0);
         expect(result.overall.peak_requests_per_second).toBe(0);
@@ -1570,7 +1560,7 @@ describe('TestRunsPerformanceQueryService', () => {
       it('returns empty by_scenario array when no scenarios', async () => {
         mockThroughputQueries([RAW_TRANSACTIONS_TPS], [RAW_REQUESTS_RPS], []);
 
-        const result = await service.getThroughputStats(TEST_RUN_ID, false, ADMIN_ROLES, []);
+        const result = await service.getThroughputStats(TEST_RUN_ID, false, IS_ADMIN, []);
 
         expect(result.by_scenario).toEqual([]);
       });
@@ -1582,7 +1572,7 @@ describe('TestRunsPerformanceQueryService', () => {
           [],
         );
 
-        const result = await service.getThroughputStats(TEST_RUN_ID, false, ADMIN_ROLES, []);
+        const result = await service.getThroughputStats(TEST_RUN_ID, false, IS_ADMIN, []);
 
         expect(result.overall.peak_transactions_per_second).toBe(0);
         expect(result.overall.peak_requests_per_second).toBe(0);
@@ -1594,7 +1584,7 @@ describe('TestRunsPerformanceQueryService', () => {
         (testRunRepo.query as jest.Mock).mockRejectedValueOnce(new Error('db error'));
 
         await expect(
-          service.getThroughputStats(TEST_RUN_ID, false, ADMIN_ROLES, [])
+          service.getThroughputStats(TEST_RUN_ID, false, IS_ADMIN, [])
         ).rejects.toThrow(DatabaseException);
       });
 
@@ -1602,46 +1592,9 @@ describe('TestRunsPerformanceQueryService', () => {
         (testRunRepo.query as jest.Mock).mockRejectedValueOnce(new Error('timeout'));
 
         await expect(
-          service.getThroughputStats(TEST_RUN_ID, false, ADMIN_ROLES, [])
+          service.getThroughputStats(TEST_RUN_ID, false, IS_ADMIN, [])
         ).rejects.toThrow('Failed to retrieve throughput statistics');
       });
-    });
-  });
-
-  // =========================================================================
-  // Cross-cutting: isGlobalAdmin
-  // =========================================================================
-
-  describe('role-based admin detection', () => {
-    it('treats perfana-admin role as admin and bypasses org filtering', async () => {
-      mockQuerySequence([RAW_TRANSACTION_ROW]);
-      const result = await service.getTransactionStats(TEST_RUN_ID, false, ['perfana-admin'], []);
-      expect(result).toHaveLength(1);
-    });
-
-    it('treats super-admin role as admin and bypasses org filtering', async () => {
-      mockQuerySequence([RAW_TRANSACTION_ROW]);
-      const result = await service.getTransactionStats(TEST_RUN_ID, false, ['super-admin'], []);
-      expect(result).toHaveLength(1);
-    });
-
-    it('treats admin role as admin and bypasses org filtering', async () => {
-      mockQuerySequence([RAW_TRANSACTION_ROW]);
-      const result = await service.getTransactionStats(TEST_RUN_ID, false, ['admin'], []);
-      expect(result).toHaveLength(1);
-    });
-
-    it('treats mixed roles including perfana-admin as admin', async () => {
-      mockQuerySequence([RAW_TRANSACTION_ROW]);
-      const result = await service.getTransactionStats(TEST_RUN_ID, false, ['user', 'perfana-admin'], []);
-      expect(result).toHaveLength(1);
-    });
-
-    it('treats unknown roles as non-admin and requires org memberships', async () => {
-      const result = await service.getTransactionStats(TEST_RUN_ID, false, ['viewer', 'reporter'], []);
-
-      expect(result).toEqual([]);
-      expect(testRunRepo.query).not.toHaveBeenCalled();
     });
   });
 
@@ -1654,7 +1607,7 @@ describe('TestRunsPerformanceQueryService', () => {
       const parseFloatSpy = jest.spyOn(mapper, 'parseFloat');
       mockQuerySequence([RAW_TRANSACTION_ROW]);
 
-      await service.getTransactionStats(TEST_RUN_ID, false, ADMIN_ROLES, []);
+      await service.getTransactionStats(TEST_RUN_ID, false, IS_ADMIN, []);
 
       // parseFloat called for avg, p95, p99, ranking, apdex_score
       expect(parseFloatSpy).toHaveBeenCalledTimes(5);
@@ -1664,7 +1617,7 @@ describe('TestRunsPerformanceQueryService', () => {
       const parseIntSpy = jest.spyOn(mapper, 'parseInt');
       mockQuerySequence([RAW_TRANSACTION_ROW]);
 
-      await service.getTransactionStats(TEST_RUN_ID, false, ADMIN_ROLES, []);
+      await service.getTransactionStats(TEST_RUN_ID, false, IS_ADMIN, []);
 
       // parseInt called for total_count, passed_count, failed_count, active_threshold
       expect(parseIntSpy).toHaveBeenCalledTimes(4);

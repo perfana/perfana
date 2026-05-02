@@ -6,11 +6,11 @@ Phase 3c rolls capabilities through every site listed below. Update these counts
 
 | Bucket | Total | Migrated | Remaining | % done |
 | --- | ---: | ---: | ---: | ---: |
-| A — bypass filter | 127 | 46 | 81 | 36.2% |
+| A — bypass filter | 127 | 51 | 76 | 40.2% |
 | B — bypass guard | 18 | 17 | 1 | 94.4% |
-| Local `private isGlobalAdmin()` wrappers | 13 | 6 | 7 | 46.2% |
+| Local `private isGlobalAdmin()` wrappers | 13 | 7 | 6 | 53.8% |
 
-**Lint enforcement:** `apps/api/.rbac-migration-allowlist.json` lists every file currently exempt from the `no-direct-is-global-admin` lint rule (10 files as of 2026-05-02). When a site is migrated, remove its file from the allowlist (the file may have multiple sites — only remove when the LAST one is migrated). Allowlist size IS the burndown.
+**Lint enforcement:** `apps/api/.rbac-migration-allowlist.json` lists every file currently exempt from the `no-direct-is-global-admin` lint rule (9 files as of 2026-05-02). When a site is migrated, remove its file from the allowlist (the file may have multiple sites — only remove when the LAST one is migrated). Allowlist size IS the burndown.
 
 **Bucket B total adjusted upward by 3 in C17 and 1 in C25:** the original 2026-04-26 audit classified dynatrace's per-resource sites at `findByHost`/`update`/`delete` as "Leave" (deferred until `canAccessResource`/`canModifyResource` was established). C17 closes those 3. C25 adds `verifyTestRunAccess` from `test-runs-query.service.ts`, which the original audit did not enumerate — so the running total now reflects all four as in-scope.
 
@@ -1395,3 +1395,91 @@ The file **EXITS** the allowlist — zero direct `isGlobalAdmin` references afte
 ### Pattern note: `roles → isAdmin` at the parent boundary
 
 This is the **first Phase 3c migration** to push the admin-resolution boundary up to the facade and out of a sub-service. Three other test-runs sub-services (`test-runs-performance-query.service.ts`, `test-runs-metrics.service.ts`, plus the standalone `test-runs-crud-query.service.ts`) carry the same `private isGlobalAdmin` wrapper or direct calls and are good candidates for the same treatment in future PRs. The win is that each sub-service drops a dependency on the role-list shape entirely — boolean in, query out.
+
+---
+
+## Phase C27 — Single file: `test-runs-performance-query.service.ts` finish + `roles → isAdmin` parameter swap
+
+**Audit date:** 2026-05-02
+**Scope:** Single-file migration. Drops the `private isGlobalAdmin` wrapper from `apps/api/src/modules/test-runs/services/test-runs-performance-query.service.ts` (1227 lines pre-edit) plus its 5 internal call sites, exiting the file from the allowlist (10 → **9**). Direct sequel to C26 — same `roles → isAdmin` boundary-swap pattern, applied to the second of the three test-runs sub-services that the C26 phase note named as candidates. Touches `test-runs-query.service.ts` (parent facade) for the 5 perf-query delegations.
+
+### Site classification
+
+| Line (pre-edit) | Method | Migration |
+|------|--------|-----------|
+| 18 | `const ADMIN_ROLES = ...` | Module-level constant deleted (only consumer was the wrapper). |
+| 37 | `private isGlobalAdmin(roles)` | **Wrapper deleted.** No longer needed — admin is now a parameter. |
+| 384 | `getTransactionStats` | **Signature changed:** 3rd positional parameter `roles: string[] = []` → `isAdmin: boolean = false`. The internal `const isAdmin = this.isGlobalAdmin(roles);` line is deleted; the rest of the body uses the param directly. |
+| 581 | `getTransactionSamples` | Same shape as above (4th positional parameter — `transactionName` is added before `excludeRampUp`). |
+| 768 | `getTransactionErrors` | Same shape (4th positional parameter — `transactionName?` and `samplerName?` come before). |
+| 956 | `getVirtualUserStats` | Same shape (3rd positional parameter). |
+| 1082 | `getThroughputStats` | Same shape (3rd positional parameter). |
+
+The sub-service no longer needs to know anything about roles — only whether the caller has the global-admin bypass. Same cleanest-fit reasoning as C26: roles → admin lookup belongs at the facade boundary, not at every leaf service.
+
+### Parent facade change (`test-runs-query.service.ts`)
+
+The 5 perf-query delegations (`getTransactionStats`, `getTransactionSamples`, `getTransactionErrors`, `getVirtualUserStats`, `getThroughputStats`) were already calling `this.authzService.getAccessibleOrganizations(userId)` directly to get an org list, then forwarding `roles` for the sub-service to compute `isAdmin`. After C26 introduced the `resolveOrganizationIds` helper (returns `{ orgIds, isAdmin }` derived from `withOrgFilter`), the cleanest move is to reuse it here too:
+
+```typescript
+// Before
+const organizationIds = await this.authzService.getAccessibleOrganizations(userId);
+return this.performanceService.getTransactionStats(testRunId, excludeRampUp, roles, organizationIds, sinceMinutes);
+
+// After
+const { orgIds, isAdmin } = await this.resolveOrganizationIds(userId, roles);
+return this.performanceService.getTransactionStats(testRunId, excludeRampUp, isAdmin, orgIds, sinceMinutes);
+```
+
+The semantic is unchanged: for admins, the sub-service ignores `organizationIds` (the `if (isAdmin) { /* skip filter */ }` branch wins); for non-admins, the org list is still loaded the same way (`withOrgFilter` calls `getAccessibleOrganizations` internally). The only behavioral difference would be for an admin who is *also* a member of orgs — `withOrgFilter` returns `null` (collapsed to `[]`) instead of the user's actual org list — but the sub-service never reads `organizationIds` for admins, so no observable change.
+
+### Test changes
+
+**`test-runs-performance-query.service.spec.ts`** (the sub-service's own spec):
+- Replaced the spec's `ADMIN_ROLES = ['perfana-admin']` / `USER_ROLES = ['user']` constants with `IS_ADMIN = true` / `NOT_ADMIN = false` (98 call sites updated by `replace_all`, no semantic change — the boolean now represents what the wrapper used to compute).
+- **Deleted 7 tests** that exercised role-string membership in the now-deleted wrapper:
+  - 2 tests in the `authorization` block (`recognises super-admin role as admin`, `recognises admin role as admin`)
+  - The entire `role-based admin detection` describe block (5 tests)
+  These tests asserted that specific role strings (`'super-admin'`, `'admin'`, `'perfana-admin'`, mixed arrays) trigger the admin branch — knowledge that has moved to the facade. The facade's `resolveOrganizationIds` is covered by `withOrgFilter`'s own spec (which is already in place for C26's helper) and by `AuthorizationService.isGlobalAdmin`'s spec.
+
+**`test-runs-query.service.spec.ts`** (facade spec):
+- 5 `toHaveBeenCalledWith` delegation assertions updated: 4th positional argument changed from `mockRoles` (a `['user']` array) to `true` (the boolean the mock's `isGlobalAdmin` resolves to — `createAuthorizationServiceMock()` returns `true` by default).
+
+**`test-runs-query.service.getTransactionStats.spec.ts`** (focused facade spec):
+- 9 `toHaveBeenCalledWith` assertions updated: same `mockRoles → true` substitution. Three positional shapes covered: `(testRunId, undefined, ..., [], undefined)`, `(testRunId, true, ..., [], undefined)`, `(testRunId, false, ..., [], undefined)`.
+
+### Test results
+
+| Test run | Result |
+|----------|--------|
+| `npx jest src/modules/test-runs` | 759 passed (19 suites) — 7 fewer than C26's 766 because of the deleted role-recognition tests |
+| `npx jest` (full API suite) | 4302 passed, 20 skipped (pre-existing), 0 failed |
+| `npm run type-check` (workspace) | 8/8 tasks successful, 0 errors |
+| `npm run lint` (`@perfana/api`) | 0 errors, 59 pre-existing warnings (none introduced) |
+
+### Net diff
+
+- `test-runs-performance-query.service.ts`: -22 lines (ADMIN_ROLES const + comment + wrapper + 5× `const isAdmin = this.isGlobalAdmin(roles);`; jsdoc lines updated `@param roles` → `@param isAdmin` net 0)
+- `test-runs-query.service.ts`: 5× delegation rewritten — net 0 (each delegation is the same line count, just different content)
+- `test-runs-performance-query.service.spec.ts`: -50 lines net (constants renamed in place; 7 tests deleted)
+- `test-runs-query.service.spec.ts`: 5 assertion edits, net 0
+- `test-runs-query.service.getTransactionStats.spec.ts`: 9 assertion edits, net 0
+- `.rbac-migration-allowlist.json`: -1 line
+
+### Files changed
+
+- `apps/api/src/modules/test-runs/services/test-runs-performance-query.service.ts` — drop wrapper + ADMIN_ROLES, swap `roles → isAdmin` in 5 method signatures
+- `apps/api/src/modules/test-runs/services/test-runs-query.service.ts` — 5 perf-query delegations switched to `resolveOrganizationIds`/pass `isAdmin`
+- `apps/api/src/modules/test-runs/services/test-runs-performance-query.service.spec.ts` — constants renamed to booleans, 7 wrapper-behavior tests deleted
+- `apps/api/src/modules/test-runs/services/test-runs-query.service.spec.ts` — 5 delegation assertions updated to boolean
+- `apps/api/src/modules/test-runs/services/test-runs-query.service.getTransactionStats.spec.ts` — 9 delegation assertions updated to boolean
+- `apps/api/.rbac-migration-allowlist.json` — remove `test-runs-performance-query.service.ts`
+- `docs/superpowers/audits/2026-04-26-audit-decisions.md` — this file
+
+### Allowlist disposition
+
+The file **EXITS** the allowlist — zero direct `isGlobalAdmin` references after the migration (the wrapper is gone, callers receive a boolean). Allowlist size: 10 → **9**. Burndown: Bucket A 46 → 51 of 127 (5 of the wrapper sites count against Bucket A — they were the list-filter shape inside the wrapper); Local wrappers 6 → 7 of 13 (the 7th wrapper-bearing file to lose its wrapper).
+
+### Pattern note: second application of C26's `roles → isAdmin` boundary swap
+
+C26 set the precedent with `test-runs-dashboard-query.service.ts`; C27 confirms it generalizes cleanly. The two remaining test-runs sub-services with the same shape (`test-runs-metrics.service.ts` — has the wrapper; `test-runs-crud-query.service.ts` — uses `this.authzService.isGlobalAdmin` directly without a wrapper) are next candidates. The crud-query file is materially harder because its 17 sites mix org and team filtering at most call sites — likely a dedicated PR with care taken on the `withTeamFilter` integration. Metrics is a near-clone of perf-query and should be straightforward.

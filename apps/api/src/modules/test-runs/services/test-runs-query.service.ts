@@ -304,8 +304,8 @@ export class TestRunsQueryService {
     excludeRampUp?: boolean,
     sinceMinutes?: number,
   ): Promise<TransactionStats[]> {
-    const organizationIds = await this.authzService.getAccessibleOrganizations(userId);
-    return this.performanceService.getTransactionStats(testRunId, excludeRampUp, roles, organizationIds, sinceMinutes);
+    const { orgIds, isAdmin } = await this.resolveOrganizationIds(userId, roles);
+    return this.performanceService.getTransactionStats(testRunId, excludeRampUp, isAdmin, orgIds, sinceMinutes);
   }
 
   async getTransactionSamples(
@@ -316,8 +316,8 @@ export class TestRunsQueryService {
     excludeRampUp?: boolean,
     sinceMinutes?: number,
   ): Promise<SamplerStats[]> {
-    const organizationIds = await this.authzService.getAccessibleOrganizations(userId);
-    return this.performanceService.getTransactionSamples(testRunId, transactionName, excludeRampUp, roles, organizationIds, sinceMinutes);
+    const { orgIds, isAdmin } = await this.resolveOrganizationIds(userId, roles);
+    return this.performanceService.getTransactionSamples(testRunId, transactionName, excludeRampUp, isAdmin, orgIds, sinceMinutes);
   }
 
   async getTransactionErrors(
@@ -327,8 +327,8 @@ export class TestRunsQueryService {
     transactionName?: string,
     samplerName?: string
   ): Promise<ErrorStats[]> {
-    const organizationIds = await this.authzService.getAccessibleOrganizations(userId);
-    return this.performanceService.getTransactionErrors(testRunId, transactionName, samplerName, roles, organizationIds);
+    const { orgIds, isAdmin } = await this.resolveOrganizationIds(userId, roles);
+    return this.performanceService.getTransactionErrors(testRunId, transactionName, samplerName, isAdmin, orgIds);
   }
 
   async getVirtualUserStats(
@@ -337,8 +337,8 @@ export class TestRunsQueryService {
     roles: string[],
     excludeRampUp?: boolean
   ): Promise<VirtualUserStats> {
-    const organizationIds = await this.authzService.getAccessibleOrganizations(userId);
-    return this.performanceService.getVirtualUserStats(testRunId, excludeRampUp, roles, organizationIds);
+    const { orgIds, isAdmin } = await this.resolveOrganizationIds(userId, roles);
+    return this.performanceService.getVirtualUserStats(testRunId, excludeRampUp, isAdmin, orgIds);
   }
 
   async getThroughputStats(
@@ -347,8 +347,8 @@ export class TestRunsQueryService {
     roles: string[],
     excludeRampUp?: boolean
   ): Promise<ThroughputStats> {
-    const organizationIds = await this.authzService.getAccessibleOrganizations(userId);
-    return this.performanceService.getThroughputStats(testRunId, excludeRampUp, roles, organizationIds);
+    const { orgIds, isAdmin } = await this.resolveOrganizationIds(userId, roles);
+    return this.performanceService.getThroughputStats(testRunId, excludeRampUp, isAdmin, orgIds);
   }
 
   // ============================================================================

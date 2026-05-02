@@ -227,7 +227,7 @@ describe('TestRunsQueryService - getTransactionStats', () => {
       // Assert
       expect(result).toEqual(expectedTransformedData);
       expect(performanceQueryService.getTransactionStats).toHaveBeenCalledTimes(1);
-      expect(performanceQueryService.getTransactionStats).toHaveBeenCalledWith(testRunId, undefined, mockRoles, [], undefined);
+      expect(performanceQueryService.getTransactionStats).toHaveBeenCalledWith(testRunId, undefined, true, [], undefined);
     });
 
     it('should delegate to performance query service', async () => {
@@ -239,7 +239,7 @@ describe('TestRunsQueryService - getTransactionStats', () => {
       await service.getTransactionStats(testRunId, mockUserId, mockRoles);
 
       // Assert - Verify delegation to performance service
-      expect(performanceQueryService.getTransactionStats).toHaveBeenCalledWith(testRunId, undefined, mockRoles, [], undefined);
+      expect(performanceQueryService.getTransactionStats).toHaveBeenCalledWith(testRunId, undefined, true, [], undefined);
     });
 
     it('should handle single transaction correctly', async () => {
@@ -370,7 +370,7 @@ describe('TestRunsQueryService - getTransactionStats', () => {
 
       // Assert
       expect(result).toEqual(expectedTransformedData);
-      expect(performanceQueryService.getTransactionStats).toHaveBeenCalledWith(testRunId, undefined, mockRoles, [], undefined);
+      expect(performanceQueryService.getTransactionStats).toHaveBeenCalledWith(testRunId, undefined, true, [], undefined);
     });
 
     it('should handle test run with custom test_run_id format', async () => {
@@ -383,7 +383,7 @@ describe('TestRunsQueryService - getTransactionStats', () => {
 
       // Assert
       expect(result).toEqual(expectedTransformedData);
-      expect(performanceQueryService.getTransactionStats).toHaveBeenCalledWith(testRunId, undefined, mockRoles, [], undefined);
+      expect(performanceQueryService.getTransactionStats).toHaveBeenCalledWith(testRunId, undefined, true, [], undefined);
     });
 
     it('should handle transactions with zero counts', async () => {
@@ -569,7 +569,7 @@ describe('TestRunsQueryService - getTransactionStats', () => {
       await service.getTransactionStats(testRunId, mockUserId, mockRoles);
 
       // Assert
-      expect(performanceQueryService.getTransactionStats).toHaveBeenCalledWith(testRunId, undefined, mockRoles, [], undefined);
+      expect(performanceQueryService.getTransactionStats).toHaveBeenCalledWith(testRunId, undefined, true, [], undefined);
     });
 
     it('should pass excludeRampUp parameter to performance service', async () => {
@@ -581,7 +581,7 @@ describe('TestRunsQueryService - getTransactionStats', () => {
       await service.getTransactionStats(testRunId, mockUserId, mockRoles, true);
 
       // Assert
-      expect(performanceQueryService.getTransactionStats).toHaveBeenCalledWith(testRunId, true, mockRoles, [], undefined);
+      expect(performanceQueryService.getTransactionStats).toHaveBeenCalledWith(testRunId, true, true, [], undefined);
     });
 
     it('should return result from performance service unchanged', async () => {
@@ -620,7 +620,7 @@ describe('TestRunsQueryService - getTransactionStats', () => {
       await service.getTransactionStats(testRunId, mockUserId, mockRoles);
 
       // Assert - Performance service should receive the input and handle SQL injection prevention
-      expect(performanceQueryService.getTransactionStats).toHaveBeenCalledWith(testRunId, undefined, mockRoles, [], undefined);
+      expect(performanceQueryService.getTransactionStats).toHaveBeenCalledWith(testRunId, undefined, true, [], undefined);
     });
 
     it('should pass empty testRunId to performance service', async () => {
@@ -632,7 +632,7 @@ describe('TestRunsQueryService - getTransactionStats', () => {
       await service.getTransactionStats(testRunId, mockUserId, mockRoles);
 
       // Assert
-      expect(performanceQueryService.getTransactionStats).toHaveBeenCalledWith(testRunId, undefined, mockRoles, [], undefined);
+      expect(performanceQueryService.getTransactionStats).toHaveBeenCalledWith(testRunId, undefined, true, [], undefined);
     });
 
     it('should pass excludeRampUp false to performance service', async () => {
@@ -644,7 +644,7 @@ describe('TestRunsQueryService - getTransactionStats', () => {
       await service.getTransactionStats(testRunId, mockUserId, mockRoles, false);
 
       // Assert
-      expect(performanceQueryService.getTransactionStats).toHaveBeenCalledWith(testRunId, false, mockRoles, [], undefined);
+      expect(performanceQueryService.getTransactionStats).toHaveBeenCalledWith(testRunId, false, true, [], undefined);
     });
   });
 
