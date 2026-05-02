@@ -4,15 +4,14 @@ import { Repository, Brackets } from 'typeorm';
 import { GraphPreset, SeriesConfig } from '@perfana/shared/entities';
 import { CreateGraphPresetDto, SeriesConfigDto } from './dto/create-graph-preset.dto';
 import { GraphPresetResponseDto } from './dto/graph-preset-response.dto';
-import { AuthorizationService } from '../../common/services/authorization.service';
 import { TestRun as TestRunEntity } from '../../entities';
 
 /**
  * Service responsible for managing graph presets.
  *
  * Authorization:
- * - All methods accept userId and roles parameters for authorization
- * - GraphPreset entity has userId field for ownership
+ * - All read/delete methods accept an `isAdmin` boolean resolved by the controller
+ * - GraphPreset entity has `userId` for ownership and `isGlobal` for shared presets
  * - Global admins bypass all authorization checks
  * - Regular users can only access their own presets and global presets
  * - Regular users can only delete their own presets
@@ -26,27 +25,19 @@ export class GraphPresetsService {
     private graphPresetRepo: Repository<GraphPreset>,
     @InjectRepository(TestRunEntity)
     private testRunRepo: Repository<TestRunEntity>,
-    private readonly authzService: AuthorizationService,
   ) {}
 
   /**
-   * Create a new graph preset
+   * Create a new graph preset.
    *
    * @param createGraphPresetDto - The preset creation DTO
    * @param userId - The user ID for ownership tracking
-   * @param roles - The user's roles for authorization checks (unused for create, but included for consistency)
    */
   async create(
     createGraphPresetDto: CreateGraphPresetDto,
     userId: string,
-    roles: string[] = []
   ): Promise<GraphPresetResponseDto> {
     try {
-      // Log authorization context for debugging
-      const isAdmin = this.authzService.isGlobalAdmin(roles);
-      this.logger.debug(`create: userId=${userId}, isGlobalAdmin=${isAdmin}`);
-
-      // Validate series config is not empty
       if (!createGraphPresetDto.seriesConfig || createGraphPresetDto.seriesConfig.length === 0) {
         throw new BadRequestException('Series configuration cannot be empty');
       }
@@ -75,22 +66,18 @@ export class GraphPresetsService {
   }
 
   /**
-   * Find all graph presets accessible to the user
+   * Find all graph presets accessible to the user.
    *
    * @param userId - The user ID for authorization
-   * @param roles - The user's roles for authorization checks
+   * @param isAdmin - Whether the caller is a global admin (resolved by controller)
    * @param testRunId - Optional test run ID to filter presets
    *
    * Authorization:
    * - Global admins see all presets
    * - Regular users see their own presets and global presets
    */
-  async findAll(userId: string, roles: string[] = [], testRunId?: string): Promise<GraphPresetResponseDto[]> {
+  async findAll(userId: string, isAdmin: boolean, testRunId?: string): Promise<GraphPresetResponseDto[]> {
     try {
-      // Log authorization context for debugging
-      const isAdmin = this.authzService.isGlobalAdmin(roles);
-      this.logger.debug(`findAll: userId=${userId}, isGlobalAdmin=${isAdmin}, testRunId=${testRunId || 'none'}`);
-
       // Resolve SUT context from the provided testRunId
       let sutContext: { systemUnderTestId: string; testEnvironment: string; workload: string } | null = null;
       if (testRunId) {
@@ -149,22 +136,18 @@ export class GraphPresetsService {
   }
 
   /**
-   * Find a single graph preset by ID
+   * Find a single graph preset by ID.
    *
    * @param id - The preset ID
    * @param userId - The user ID for authorization
-   * @param roles - The user's roles for authorization checks
+   * @param isAdmin - Whether the caller is a global admin (resolved by controller)
    *
    * Authorization:
    * - Global admins can access any preset
    * - Regular users can access their own presets or global presets
    */
-  async findOne(id: string, userId: string, roles: string[] = []): Promise<GraphPresetResponseDto> {
+  async findOne(id: string, userId: string, isAdmin: boolean): Promise<GraphPresetResponseDto> {
     try {
-      // Log authorization context for debugging
-      const isAdmin = this.authzService.isGlobalAdmin(roles);
-      this.logger.debug(`findOne: id=${id}, userId=${userId}, isGlobalAdmin=${isAdmin}`);
-
       // First fetch the preset without filtering to properly handle 404 vs 403
       const preset = await this.graphPresetRepo.findOne({
         where: { id }
@@ -196,22 +179,18 @@ export class GraphPresetsService {
   }
 
   /**
-   * Delete a graph preset
+   * Delete a graph preset.
    *
    * @param id - The preset ID
    * @param userId - The user ID for authorization
-   * @param roles - The user's roles for authorization checks
+   * @param isAdmin - Whether the caller is a global admin (resolved by controller)
    *
    * Authorization:
    * - Global admins can delete any preset
    * - Regular users can only delete their own presets
    */
-  async remove(id: string, userId: string, roles: string[] = []): Promise<void> {
+  async remove(id: string, userId: string, isAdmin: boolean): Promise<void> {
     try {
-      // Log authorization context for debugging
-      const isAdmin = this.authzService.isGlobalAdmin(roles);
-      this.logger.debug(`remove: id=${id}, userId=${userId}, isGlobalAdmin=${isAdmin}`);
-
       // First check if preset exists
       const preset = await this.graphPresetRepo.findOne({
         where: { id }

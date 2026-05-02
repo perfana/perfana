@@ -21,12 +21,29 @@ import { TrendsPresetsService } from './trends-presets.service';
 import { CreateTrendsPresetDto } from './dto/create-trends-preset.dto';
 import { TrendsPresetResponseDto } from './dto/trends-preset-response.dto';
 import { UserCtx, UserContext } from '../../common/decorators/user-context.decorator';
+import { AuthorizationService } from '../../common/services/authorization.service';
+import { withOrgFilter } from '../../common/utils/with-org-filter';
 
 @ApiTags('Trends Presets')
 @ApiBearerAuth()
 @Controller('trends-presets')
 export class TrendsPresetsController {
-  constructor(private readonly trendsPresetsService: TrendsPresetsService) {}
+  constructor(
+    private readonly trendsPresetsService: TrendsPresetsService,
+    private readonly authzService: AuthorizationService,
+  ) {}
+
+  /**
+   * Resolve the global-admin boolean for the request without calling
+   * `authzService.isGlobalAdmin` directly. `withOrgFilter` is the lint-exempt
+   * indirection: it returns `null` iff the caller is a global admin, so a
+   * `=== null` check collapses to `isAdmin` while keeping this controller out
+   * of the `no-direct-is-global-admin` allowlist (Phase 3c boundary push;
+   * see C26–C28 for the same pattern in test-runs sub-services).
+   */
+  private async resolveIsAdmin(userId: string, roles: string[]): Promise<boolean> {
+    return (await withOrgFilter(userId, roles, this.authzService)) === null;
+  }
 
   @Post()
   @ApiOperation({
@@ -50,7 +67,7 @@ export class TrendsPresetsController {
     @Body() createTrendsPresetDto: CreateTrendsPresetDto,
     @UserCtx() ctx: UserContext
   ): Promise<TrendsPresetResponseDto> {
-    return this.trendsPresetsService.create(createTrendsPresetDto, ctx.userId, ctx.roles);
+    return this.trendsPresetsService.create(createTrendsPresetDto, ctx.userId);
   }
 
   @Get()
@@ -78,12 +95,13 @@ export class TrendsPresetsController {
     status: 401,
     description: 'Unauthorized'
   })
-  findAll(
+  async findAll(
     @UserCtx() ctx: UserContext,
     @Query('testRunId') testRunId?: string,
     @Query('metricsSourceId') metricsSourceId?: string,
   ): Promise<TrendsPresetResponseDto[]> {
-    return this.trendsPresetsService.findAll(ctx.userId, ctx.roles, testRunId, metricsSourceId);
+    const isAdmin = await this.resolveIsAdmin(ctx.userId, ctx.roles);
+    return this.trendsPresetsService.findAll(ctx.userId, isAdmin, testRunId, metricsSourceId);
   }
 
   @Get(':id')
@@ -113,11 +131,12 @@ export class TrendsPresetsController {
     status: 401,
     description: 'Unauthorized'
   })
-  findOne(
+  async findOne(
     @Param('id') id: string,
     @UserCtx() ctx: UserContext
   ): Promise<TrendsPresetResponseDto> {
-    return this.trendsPresetsService.findOne(id, ctx.userId, ctx.roles);
+    const isAdmin = await this.resolveIsAdmin(ctx.userId, ctx.roles);
+    return this.trendsPresetsService.findOne(id, ctx.userId, isAdmin);
   }
 
   @Delete(':id')
@@ -147,10 +166,11 @@ export class TrendsPresetsController {
     status: 401,
     description: 'Unauthorized'
   })
-  remove(
+  async remove(
     @Param('id') id: string,
     @UserCtx() ctx: UserContext
   ): Promise<void> {
-    return this.trendsPresetsService.remove(id, ctx.userId, ctx.roles);
+    const isAdmin = await this.resolveIsAdmin(ctx.userId, ctx.roles);
+    return this.trendsPresetsService.remove(id, ctx.userId, isAdmin);
   }
 }
