@@ -6,11 +6,16 @@ Phase 3c rolls capabilities through every site listed below. Update these counts
 
 | Bucket | Total | Migrated | Remaining | % done |
 | --- | ---: | ---: | ---: | ---: |
-| A — bypass filter | 131 | 70 | 61 | 53.4% |
+| A — bypass filter (lint-only)¹ | 131 | 70 | 61 | 53.4% |
+| A — bypass filter (strict)² | 127 | 64 | 63 | 50.4% |
 | B — bypass guard | 43 | 43 | 0 | 100.0% |
 | Local `private isGlobalAdmin()` wrappers | 13 | 8 | 5 | 61.5% |
 
-**Lint enforcement:** `apps/api/.rbac-migration-allowlist.json` lists every file currently exempt from the `no-direct-is-global-admin` lint rule. **As of C35 (2026-05-02) the allowlist is empty — the per-file lint burndown is complete.** No service file in `apps/api` directly calls `authzService.isGlobalAdmin` outside the permanent infrastructure exemption (`AuthorizationService`, `AuthorizedBaseService`, `withOrgFilter`, `withTeamFilter`, `CapabilityGuard`). New direct calls anywhere else will fail lint. Remaining Bucket A sites (61 / 131) and local wrappers (5 / 13) are tracked for cleanup but do not block Phase 3c's lint-enforcement goal.
+¹ **Lint-only metric** (the running total all C-series PRs increment): a Bucket A site counts as migrated when its containing file has zero direct `authzService.isGlobalAdmin` call sites. Six C30–C33 sites count as migrated under this metric while still calling `getAccessibleOrganizations` directly inside the service body — see C36 for the recount.
+
+² **Strict metric** (what C2–C29 effectively measured): a Bucket A site counts as migrated when its list-filter shape uses `withOrgFilter` / `withTeamFilter`. Subtracts C30's +2 and C31's +2 enumeration adjustments (those sites were not in the original audit and never moved to `withOrgFilter`), and subtracts the 2 in-audit sites C32/C33 only boundary-pushed (`systems-under-test.service.ts:155 findAll`, `profiles.service.ts:108 findAll`). The 6 specific files still on the legacy shape: `teams.service.ts:48`, `organizations.service.ts:48`, `systems-under-test.service.ts:155`, `profiles.service.ts:108`, `graph-presets.service.ts:101`, `trends-presets.service.ts:100`.
+
+**Lint enforcement:** `apps/api/.rbac-migration-allowlist.json` lists every file currently exempt from the `no-direct-is-global-admin` lint rule. **As of C35 (2026-05-02) the allowlist is empty — the per-file lint burndown is complete.** No service file in `apps/api` directly calls `authzService.isGlobalAdmin` outside the permanent infrastructure exemption (`AuthorizationService`, `AuthorizedBaseService`, `withOrgFilter`, `withTeamFilter`, `CapabilityGuard`). New direct calls anywhere else will fail lint. Remaining Bucket A sites under the lint-only metric (61 / 131) and local wrappers (5 / 13) are tracked for cleanup but do not block Phase 3c's lint-enforcement goal.
 
 **Bucket A total adjusted upward by 2 in C30 and 2 in C31:** C30 enumerates the user-owned `findAll` list-filter sites in `graph-presets.service.ts` and `trends-presets.service.ts` that were not in the original audit (which focused on org-owned resources). C31 enumerates the membership-filtered `findAll` sites in `teams.service.ts` and `organizations.service.ts` — these are filtered by org membership rather than `organization_id IN (...)` and were not in the original audit either.
 
@@ -1716,7 +1721,7 @@ Net: roughly +20 lines across all four files. The growth is the duplicated `reso
 
 ### Allowlist disposition
 
-Both files **EXIT** the allowlist — zero direct `isGlobalAdmin` references after the migration. Allowlist size: 7 → **5** (two files exit in one PR — first multi-file exit since C16's six-file bundle). Burndown: Bucket A 56 → 66 of 129 (10 of the migrated test-runs-crud-query sites from C29 + 2 of the preset `findAll` sites — total adjusted upward by 2 to enumerate the user-owned list-filter shape). Bucket B 17 → 21 of 22 (4 user-owned per-resource guards added — total adjusted upward by 4).
+Both files **EXIT** the allowlist — zero direct `isGlobalAdmin` references after the migration. Allowlist size: 7 → **5** (two files exit in one PR — first multi-file exit since C16's six-file bundle). Burndown: Bucket A 64 → 66 of 129 (the 8 C29 test-runs-crud-query sites are already in the 64 baseline; this PR adds 2 preset `findAll` sites — total adjusted upward by 2 to enumerate the user-owned list-filter shape). Bucket B 17 → 21 of 22 (4 user-owned per-resource guards added — total adjusted upward by 4).
 
 ### Pattern notes
 
@@ -2312,3 +2317,116 @@ The remaining Bucket A sites (61 of 131) and local `private isGlobalAdmin()` wra
 C2 → C35 spans 34 PRs over 7 days (2026-04-26 → 2026-05-02). The lint allowlist started at 38 files (the original C2 enumeration after de-duplicating debug-log-only false positives) and reached 0 at C35. Bucket B (per-resource guards) hit 100%. Bucket A (list-filter sites) is at 53.4% — sites are migrated to `withOrgFilter` indirection where applicable, but the audit's full enumeration count includes sites that don't trip the lint rule and are therefore not blocking.
 
 The Phase 3c lint-enforcement goal is met. Future work is internal code-quality cleanup of the remaining Bucket A sites and local wrappers, plus the Phase 4 ownership-column migrations on the dynatrace entities (which will let several debug-log-only sites pick up real per-resource `canAccessResource`/`canModifyResource` checks). Neither blocks shipping or further development. The `/schedule` agent at `docs/superpowers/scheduled-agents/rbac-drift-check.md` continues to run every 2 weeks as a safety net against new direct `isGlobalAdmin` usage that bypasses the lint rule.
+
+---
+
+## Phase C36 — Bucket A burndown recount (no code changes)
+
+**Scope:** Documentation-only. Audits the per-phase Bucket A migration deltas C2 → C35, identifies a definition shift between C2–C29 and C30–C33, and reconciles the running total against current code. **No service code, no test code, no lint rule changes** — only this audit doc and `CLAUDE.md` are touched.
+
+### Trigger
+
+Stepping back from the C35 finish, the user expected the Bucket A burndown to be substantially further along than the headline `70 / 131 (53.4%)` suggested — closer to "90%+ done" given that the allowlist had reached zero. A grep for the canonical `if (!isAdmin)` shape returned only 17 sites in `apps/api/src`, far below the 61 the table claimed remained. That gap motivated the recount.
+
+### Finding 1 — The 70 / 131 / 61 numbers are arithmetically consistent
+
+Walking the per-phase deltas:
+
+| Cumulative end-of-phase | Bucket A migrated | Bucket A total |
+|---|---:|---:|
+| C2 → C13 | 40 | 127 |
+| C16 (six-file bundle) | 40 + ? | 127 |
+| C18–C24 (audit-blind range) | ~43 | 127 |
+| C26 (`test-runs-dashboard-query`) | 46 | 127 |
+| C27 (`test-runs-performance-query`) | 51 | 127 |
+| C28 (`test-runs-metrics`) | 56 | 127 |
+| C29 (`test-runs-crud-query`) | 64 | 127 |
+| C30 (`graph-presets` + `trends-presets`) | 66 | 129 (+2 adjustment) |
+| C31 (`teams` + `organizations`) | 68 | 131 (+2 adjustment) |
+| C32 (`systems-under-test`) | 69 | 131 |
+| C33 (`profiles`) | 70 | 131 |
+| C34–C35 (`dynatrace` finish) | 70 | 131 |
+
+The 70 / 131 line at the top of this doc is correct under the metric every C-series PR used to compute its delta. The "131 minus 70 equals 61" arithmetic is sound.
+
+(Incidental: a typo at the original C30 entry — `Bucket A 56 → 66 of 129 (10 of the migrated test-runs-crud-query sites from C29 + 2 of the preset findAll sites)` — has been fixed to read `64 → 66 (the 8 C29 sites are already in the 64 baseline; this PR adds 2 preset findAll sites)`. End state 66 was always correct; the path was misstated.)
+
+### Finding 2 — The metric shifted between C29 and C30
+
+C2 through C29 counted a Bucket A site as migrated when **two** conditions held:
+1. The file dropped to zero direct `authzService.isGlobalAdmin` call sites.
+2. The list-filter shape moved to `withOrgFilter` / `withTeamFilter` (or, equivalently, the file's `findAll` queries no longer called `getAccessibleOrganizations` directly).
+
+C30 through C33 weakened condition 2 to "the file passes `isAdmin` as a parameter from the controller, regardless of what the inner branch does." Six current `findAll` sites count as migrated under the lint-only metric while still calling `getAccessibleOrganizations` directly inside the service body:
+
+| File | Method | Line | C# PR | Shape |
+|---|---|---:|---|---|
+| `apps/api/src/modules/teams/teams.service.ts` | `findAll` | 48 | C31 (added) | `if (isAdmin) return all; else { getAccessibleOrganizations; In(orgs) }` |
+| `apps/api/src/modules/organizations/organizations.service.ts` | `findAll` | 48 | C31 (added) | `if (isAdmin) return all; else { getAccessibleOrganizations; filter membership }` |
+| `apps/api/src/modules/systems-under-test/systems-under-test.service.ts` | `findAll` | 155 | C32 (in audit) | `if (!isAdmin) { getAccessibleOrganizations; filter org_id IN } ` |
+| `apps/api/src/modules/profiles/profiles.service.ts` | `findAll` | 108 | C33 (in audit) | `else if (!isAdmin) { getAccessibleOrganizations; filter org_id IN }` |
+| `apps/api/src/modules/graph-presets/graph-presets.service.ts` | `findAll` | 101 | C30 (added) | `if (!isAdmin) { qb.where(userId OR isGlobal) }` (user-owned, not org-owned) |
+| `apps/api/src/modules/trends-presets/trends-presets.service.ts` | `findAll` | 100 | C30 (added) | `if (!isAdmin) { qb.where(userId OR isGlobal) }` (user-owned, not org-owned) |
+
+The first four are the canonical org-filtered shape — each could be rewritten to `withOrgFilter` with a small diff. The last two (graph/trends-presets) are user-owned filters that don't have an org-list equivalent; they would not benefit from `withOrgFilter` and the boundary push is the only reasonable migration.
+
+### Finding 3 — Strict count is 64 / 127 (50.4%)
+
+Subtracting the 4 enumeration-adjustment sites added in C30 / C31 (which were never on the strict path) and the 2 in-audit sites C32 / C33 only boundary-pushed:
+
+| Definition | Total | Migrated | Remaining | % |
+|---|---:|---:|---:|---:|
+| Lint-only (running total) | 131 | 70 | 61 | 53.4% |
+| Strict (uses `withOrgFilter` / `withTeamFilter`) | 127 | 64 | 63 | 50.4% |
+
+Both numbers now appear in the migration progress table at the top of this doc with footnotes.
+
+### Finding 4 — `if (!isAdmin)` site count cross-check
+
+`grep -rn "if (!isAdmin)" apps/api/src --include="*.ts" | grep -v spec | grep -v test` returns 17 hits. Classification:
+
+| File:line | Shape | Counts as |
+|---|---|---|
+| `organizations.service.ts` 111, 156, 242, 293 | per-resource throw guards | Bucket B (already counted) |
+| `teams.service.ts` 111, 151, 193, 257, 269, 321 | per-resource throw guards | Bucket B (already counted) |
+| `organization-members.controller.ts:89` | admin-role helper | not in scope |
+| `team-members.controller.ts:89` | admin-role helper | not in scope |
+| `graph-presets.service.ts:101` | list-filter (user-owned) | Bucket A (lint-only migrated, strict legacy) |
+| `graph-presets.service.ts:204` | per-resource guard | Bucket B (already counted) |
+| `trends-presets.service.ts:100` | list-filter (user-owned) | Bucket A (lint-only migrated, strict legacy) |
+| `trends-presets.service.ts:220` | per-resource guard | Bucket B (already counted) |
+| `profiles.service.ts:108` | list-filter (org-owned) | Bucket A (lint-only migrated, strict legacy) |
+
+Plus 3 inverted-polarity (`if (isAdmin)`) list-filters not caught by the grep:
+- `teams.service.ts:48 findAll` (Bucket A — strict legacy)
+- `organizations.service.ts:48 findAll` (Bucket A — strict legacy)
+- `systems-under-test.service.ts:155 findAll` (Bucket A — strict legacy)
+
+Total Bucket A list-filters in current code = 6, matching Finding 2. No phantom sites.
+
+### Decision
+
+1. The migration progress table now shows both lint-only and strict counts, with footnotes explaining the metric shift. The lint-only number remains the running total because every prior C-series PR incremented against it; switching the running total mid-stream would be more confusing than maintaining both.
+2. The C30 entry typo at line 1719 is corrected.
+3. **No code changes.** The 6 strict-legacy sites do not trip the lint rule and are non-blocking. Whether to convert them to `withOrgFilter` (4 of 6 are eligible) or leave them is a separate scope decision tracked in the closing section below.
+4. CLAUDE.md's Phase 3 status line is updated to reference both metrics.
+
+### Pattern notes
+
+**1. Running totals across long migrations need explicit metric definitions.** The C2 → C29 sequence implicitly used the strict definition because every file in scope had `withOrgFilter` as the natural target. Once C30 introduced files where the strict target wasn't available (user-owned filters in graph/trends-presets) or where the boundary push was the only meaningful change (teams/organizations findAll passing through membership filtering rather than `org_id IN (...)`), the metric quietly broadened. Future multi-PR audits should define the metric in writing at the start, not infer it from the diff shape of the first few PRs.
+
+**2. The user's "90%+ done" expectation was off, and the headline number was the reason.** A user reading "70 / 131 — 53.4%" while looking at an empty allowlist will naturally assume the remaining 61 are about to disappear. In fact, 6 of the 70 already-migrated sites are still on the legacy shape, and the remaining 61 break down into roughly: ~5 user-owned list-filters (no `withOrgFilter` equivalent), several debug-log-only sites in `dynatrace.service.ts` that need Phase 4 to do anything more, and per-resource shapes that already have correct enforcement. Treating "53.4%" as "53.4% of the work" overstated the remaining surface; treating "lint-enforced + Bucket B 100% + 6 known-strict-legacy sites" as the real status is more honest.
+
+**3. The +4 adjustments in C30 / C31 should have been more visible.** C30 and C31 each adjusted Bucket A's *total* upward by 2 to enumerate previously unscoped shapes — the audit doc's header notes record this. But the adjustment was simultaneously applied to *migrated* (the same site shows up in both columns of the same PR), which mathematically accomplishes nothing for the percentage but inflates both numbers. Future enumeration adjustments should be recorded as "added to remaining, not yet migrated" — adjust the total and let the next PR migrate the new sites separately.
+
+### Allowlist disposition
+
+No change. The allowlist remains empty; the lint rule is unaffected.
+
+### Test plan
+
+- [x] Read every Phase C# section 2 → 35 in this doc and verify the migrated count claim against the linked file's current code (subagent walk).
+- [x] Verify the 6 strict-legacy `findAll` sites in current code, line numbers and shapes.
+- [x] Cross-check `grep "if (!isAdmin)"` against the per-phase migrated tallies — 17 hits classify cleanly.
+- [x] Confirm the typo correction at the C30 entry doesn't change the C30 end-state (66 / 129) — only the path.
+- [x] No service code changed; no test runs required.
