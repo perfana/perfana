@@ -227,9 +227,9 @@ export class TestRunsQueryService {
     to?: string,
     organizationId?: string,
   ): Promise<DashboardStatistics> {
-    const organizationIds = await this.resolveOrganizationIds(userId, roles, organizationId);
+    const { orgIds, isAdmin } = await this.resolveOrganizationIds(userId, roles, organizationId);
     const userTeamIds = await this.resolveTeamIds(userId, roles);
-    return this.dashboardService.getDashboardStatistics(timePeriod, from, to, roles, organizationIds, userTeamIds);
+    return this.dashboardService.getDashboardStatistics(timePeriod, from, to, isAdmin, orgIds, userTeamIds);
   }
 
   async getRecentFailures(
@@ -241,9 +241,9 @@ export class TestRunsQueryService {
     to?: string,
     organizationId?: string,
   ): Promise<RecentFailure[]> {
-    const organizationIds = await this.resolveOrganizationIds(userId, roles, organizationId);
+    const { orgIds, isAdmin } = await this.resolveOrganizationIds(userId, roles, organizationId);
     const userTeamIds = await this.resolveTeamIds(userId, roles);
-    return this.dashboardService.getRecentFailures(limit, timePeriod, from, to, roles, organizationIds, userTeamIds, userId);
+    return this.dashboardService.getRecentFailures(limit, timePeriod, from, to, isAdmin, orgIds, userTeamIds, userId);
   }
 
   async recordTestRunView(userId: string, testRunId: string): Promise<void> {
@@ -251,26 +251,33 @@ export class TestRunsQueryService {
   }
 
   async getDashboardSystemsSummary(userId: string, roles: string[], organizationId?: string): Promise<SystemSummary[]> {
-    const organizationIds = await this.resolveOrganizationIds(userId, roles, organizationId);
+    const { orgIds, isAdmin } = await this.resolveOrganizationIds(userId, roles, organizationId);
     const userTeamIds = await this.resolveTeamIds(userId, roles);
-    return this.dashboardService.getDashboardSystemsSummary(roles, organizationIds, userTeamIds);
+    return this.dashboardService.getDashboardSystemsSummary(isAdmin, orgIds, userTeamIds);
   }
 
   /**
-   * Resolve organization IDs for filtering:
+   * Resolve organization IDs for filtering and surface the admin flag together:
    * - Explicit org selected → [organizationId] (always filter, even for admins)
    * - Non-admin without explicit org → load accessible orgs from authz service
    * - Admin without explicit org → [] (empty = no filter, see all)
    *
-   * `withOrgFilter` returns `null` for global admins; we collapse it to `[]` so the
-   * downstream sub-services keep their `string[] = empty means no filter` contract.
+   * `withOrgFilter` returns `null` for global admins; the sub-services use `isAdmin`
+   * for early-exit (non-admin with empty orgs returns zero/empty) and team-filter
+   * gating (admins skip the team-membership restriction). Returning the flag here
+   * means callers don't have to call `withOrgFilter` a second time just to learn it.
    */
-  private async resolveOrganizationIds(userId: string, roles: string[], organizationId?: string): Promise<string[]> {
+  private async resolveOrganizationIds(
+    userId: string,
+    roles: string[],
+    organizationId?: string,
+  ): Promise<{ orgIds: string[]; isAdmin: boolean }> {
+    const accessible = await withOrgFilter(userId, roles, this.authzService);
+    const isAdmin = accessible === null;
     if (organizationId) {
-      return [organizationId];
+      return { orgIds: [organizationId], isAdmin };
     }
-    const orgIds = await withOrgFilter(userId, roles, this.authzService);
-    return orgIds ?? [];
+    return { orgIds: accessible ?? [], isAdmin };
   }
 
   /**
