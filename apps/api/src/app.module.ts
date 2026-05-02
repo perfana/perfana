@@ -44,7 +44,8 @@ import { KeycloakEnhancedAuthGuard } from './guards/keycloak-enhanced-auth.guard
 import { RolesGuard } from './guards/roles.guard';
 import { EnhancedThrottlerGuard } from './guards/enhanced-throttler.guard';
 import { ThrottlerStorageRedisService } from './guards/throttler-storage-redis.service';
-import { AuditInterceptor } from './common/interceptors/audit.interceptor';
+import { AuditContextInterceptor } from './common/interceptors/audit-context.interceptor';
+import { RequestContextModule } from './common/context/request-context.module';
 import { CommonModule } from './common/common.module';
 import IORedis from 'ioredis';
 
@@ -85,6 +86,7 @@ import IORedis from 'ioredis';
     }),
     QueueModule, // Provides REDIS_CLIENT
     CommonModule,
+    RequestContextModule,
     AuthModule,
     OrganizationsModule,
     TeamsModule,
@@ -136,10 +138,10 @@ import IORedis from 'ioredis';
       provide: APP_GUARD,
       useClass: EnhancedThrottlerGuard,
     },
-    // Global audit interceptor (logs all CRUD operations)
+    // Global audit context interceptor (populates CLS store; service-layer logs)
     {
       provide: APP_INTERCEPTOR,
-      useClass: AuditInterceptor,
+      useClass: AuditContextInterceptor,
     },
   ],
 })
