@@ -830,8 +830,7 @@ export class DynatraceService {
    * Full permission checks will be enabled when Phase 4 adds organization_id column.
    */
   async updateQuery(id: string, dto: UpdateDynatraceQueryDto, userId: string, roles: string[]) {
-    const isAdmin = this.authzService.isGlobalAdmin(roles);
-    this.logger.debug(`updateQuery: id=${id}, userId=${userId}, isGlobalAdmin=${isAdmin}`);
+    this.logger.debug(`updateQuery: id=${id}, userId=${userId}`);
 
     const existing = await this.repository.findQueryById(id);
     if (!existing) {
@@ -839,25 +838,20 @@ export class DynatraceService {
     }
 
     // Capability check scoped to the row's org. Pre-backfill rows have
-    // organizationId === null; we deny those for non-admins so that the
-    // backfill migration (1777600000000) is the only path that re-opens them.
-    // Global admins retain bypass via getCapabilities returning every cap.
-    if (!isAdmin) {
-      if (!existing.organizationId) {
-        throw new ForbiddenException(
-          'You do not have permission to modify this Dynatrace query',
-        );
-      }
-      const caps = await this.authzService.getCapabilities(
-        userId,
-        roles,
-        existing.organizationId,
+    // organizationId === null; getCapabilities(userId, roles, null) returns
+    // [] for non-admins (so the cap check fails and they're denied) but
+    // returns GLOBAL_ADMIN_CAPABILITIES for admins (so the cap check passes).
+    // The backfill migration (1777600000000) is the only path that re-opens
+    // null-org rows for non-admins.
+    const caps = await this.authzService.getCapabilities(
+      userId,
+      roles,
+      existing.organizationId ?? null,
+    );
+    if (!caps.includes(Capability.IntegrationDynatraceUpdate)) {
+      throw new ForbiddenException(
+        'You do not have permission to modify this Dynatrace query',
       );
-      if (!caps.includes(Capability.IntegrationDynatraceUpdate)) {
-        throw new ForbiddenException(
-          'You do not have permission to modify this Dynatrace query',
-        );
-      }
     }
 
     const updated = await this.repository.updateQuery(id, dto, { updatedBy: userId });
@@ -876,30 +870,23 @@ export class DynatraceService {
    * Full permission checks will be enabled when Phase 4 adds organization_id column.
    */
   async deleteQuery(id: string, userId: string, roles: string[]) {
-    const isAdmin = this.authzService.isGlobalAdmin(roles);
-    this.logger.debug(`deleteQuery: id=${id}, userId=${userId}, isGlobalAdmin=${isAdmin}`);
+    this.logger.debug(`deleteQuery: id=${id}, userId=${userId}`);
 
     const existing = await this.repository.findQueryById(id);
     if (!existing) {
       throw new NotFoundException(`Dynatrace DQL query with ID ${id} not found`);
     }
 
-    if (!isAdmin) {
-      if (!existing.organizationId) {
-        throw new ForbiddenException(
-          'You do not have permission to delete this Dynatrace query',
-        );
-      }
-      const caps = await this.authzService.getCapabilities(
-        userId,
-        roles,
-        existing.organizationId,
+    // See updateQuery for the null-org / admin-bypass semantics.
+    const caps = await this.authzService.getCapabilities(
+      userId,
+      roles,
+      existing.organizationId ?? null,
+    );
+    if (!caps.includes(Capability.IntegrationDynatraceDelete)) {
+      throw new ForbiddenException(
+        'You do not have permission to delete this Dynatrace query',
       );
-      if (!caps.includes(Capability.IntegrationDynatraceDelete)) {
-        throw new ForbiddenException(
-          'You do not have permission to delete this Dynatrace query',
-        );
-      }
     }
 
     await this.repository.deleteQuery(id);
@@ -1057,30 +1044,23 @@ export class DynatraceService {
    * Full permission checks will be enabled when Phase 4 adds organization_id column.
    */
   async deleteEntityMapping(id: string, userId: string, roles: string[]) {
-    const isAdmin = this.authzService.isGlobalAdmin(roles);
-    this.logger.debug(`deleteEntityMapping: id=${id}, userId=${userId}, isGlobalAdmin=${isAdmin}`);
+    this.logger.debug(`deleteEntityMapping: id=${id}, userId=${userId}`);
 
     const existing = await this.repository.getEntityMappingById(id);
     if (!existing) {
       throw new NotFoundException(`Dynatrace entity mapping with ID ${id} not found`);
     }
 
-    if (!isAdmin) {
-      if (!existing.organizationId) {
-        throw new ForbiddenException(
-          'You do not have permission to delete this Dynatrace entity mapping',
-        );
-      }
-      const caps = await this.authzService.getCapabilities(
-        userId,
-        roles,
-        existing.organizationId,
+    // See updateQuery for the null-org / admin-bypass semantics.
+    const caps = await this.authzService.getCapabilities(
+      userId,
+      roles,
+      existing.organizationId ?? null,
+    );
+    if (!caps.includes(Capability.IntegrationDynatraceDelete)) {
+      throw new ForbiddenException(
+        'You do not have permission to delete this Dynatrace entity mapping',
       );
-      if (!caps.includes(Capability.IntegrationDynatraceDelete)) {
-        throw new ForbiddenException(
-          'You do not have permission to delete this Dynatrace entity mapping',
-        );
-      }
     }
 
     await this.repository.deleteEntityMapping(id);

@@ -7,14 +7,14 @@ Phase 3c rolls capabilities through every site listed below. Update these counts
 | Bucket | Total | Migrated | Remaining | % done |
 | --- | ---: | ---: | ---: | ---: |
 | A — bypass filter | 131 | 70 | 61 | 53.4% |
-| B — bypass guard | 43 | 42 | 1 | 97.7% |
+| B — bypass guard | 43 | 43 | 0 | 100.0% |
 | Local `private isGlobalAdmin()` wrappers | 13 | 8 | 5 | 61.5% |
 
-**Lint enforcement:** `apps/api/.rbac-migration-allowlist.json` lists every file currently exempt from the `no-direct-is-global-admin` lint rule (1 file as of 2026-05-02). When a site is migrated, remove its file from the allowlist (the file may have multiple sites — only remove when the LAST one is migrated). Allowlist size IS the burndown.
+**Lint enforcement:** `apps/api/.rbac-migration-allowlist.json` lists every file currently exempt from the `no-direct-is-global-admin` lint rule. **As of C35 (2026-05-02) the allowlist is empty — the per-file lint burndown is complete.** No service file in `apps/api` directly calls `authzService.isGlobalAdmin` outside the permanent infrastructure exemption (`AuthorizationService`, `AuthorizedBaseService`, `withOrgFilter`, `withTeamFilter`, `CapabilityGuard`). New direct calls anywhere else will fail lint. Remaining Bucket A sites (61 / 131) and local wrappers (5 / 13) are tracked for cleanup but do not block Phase 3c's lint-enforcement goal.
 
 **Bucket A total adjusted upward by 2 in C30 and 2 in C31:** C30 enumerates the user-owned `findAll` list-filter sites in `graph-presets.service.ts` and `trends-presets.service.ts` that were not in the original audit (which focused on org-owned resources). C31 enumerates the membership-filtered `findAll` sites in `teams.service.ts` and `organizations.service.ts` — these are filtered by org membership rather than `organization_id IN (...)` and were not in the original audit either.
 
-**Bucket B total adjusted upward by 3 in C17, 1 in C25, 4 in C30, 10 in C31, 6 in C32, 1 in C33, and 4 in C34:** C17 brings dynatrace per-resource sites in-scope (originally "Leave" until `canAccessResource`/`canModifyResource` shipped). C25 adds `verifyTestRunAccess` from `test-runs-query.service.ts`. C30 adds the 4 user-owned per-resource sites in graph/trends-presets. C31 enumerates 10 per-resource guard sites across `teams.service.ts` and `organizations.service.ts`. C32 enumerates 6 per-resource guard sites in `systems-under-test.service.ts` (`createSut`, `findOne`, `findSystemSummary`, `findByName`, `update`, `remove`) — the file's per-resource shape was not in the original audit's enumeration despite C31's prediction that "no upward adjustment expected". C33 promotes the `requireOrgAdmin` custom-guard-helper in `profiles.service.ts` from its original "Leave" classification (line 143 of the C2 enumeration) to a counted Bucket B site, since the migration removes its inline `isGlobalAdmin` call. C34 promotes the 4 helper-passing sites in `dynatrace.service.ts` (`createQuery`, `createQuerySmart`, `bulkImportQuery`, `createEntityMapping`) from their original DEBUG-LOG-ONLY classification (lines 616, 648, 693, 906 of the C2 enumeration) — they were also forwarding `isAdmin` to `requireDynatraceMutationCapability` for the capability bypass, which the C2 enumeration missed; the helper refactor removes that pathway and the inline `isGlobalAdmin` call sites with it.
+**Bucket B total adjusted upward by 3 in C17, 1 in C25, 4 in C30, 10 in C31, 6 in C32, 1 in C33, and 4 in C34:** C17 brings dynatrace per-resource sites in-scope (originally "Leave" until `canAccessResource`/`canModifyResource` shipped). C25 adds `verifyTestRunAccess` from `test-runs-query.service.ts`. C30 adds the 4 user-owned per-resource sites in graph/trends-presets. C31 enumerates 10 per-resource guard sites across `teams.service.ts` and `organizations.service.ts`. C32 enumerates 6 per-resource guard sites in `systems-under-test.service.ts` (`createSut`, `findOne`, `findSystemSummary`, `findByName`, `update`, `remove`) — the file's per-resource shape was not in the original audit's enumeration despite C31's prediction that "no upward adjustment expected". C33 promotes the `requireOrgAdmin` custom-guard-helper in `profiles.service.ts` from its original "Leave" classification (line 143 of the C2 enumeration) to a counted Bucket B site, since the migration removes its inline `isGlobalAdmin` call. C34 promotes the 4 helper-passing sites in `dynatrace.service.ts` (`createQuery`, `createQuerySmart`, `bulkImportQuery`, `createEntityMapping`) from their original DEBUG-LOG-ONLY classification (lines 616, 648, 693, 906 of the C2 enumeration) — they were also forwarding `isAdmin` to `requireDynatraceMutationCapability` for the capability bypass, which the C2 enumeration missed; the helper refactor removes that pathway and the inline `isGlobalAdmin` call sites with it. **C35 closes the last remaining Bucket B site (`updateQuery` / `deleteQuery` / `deleteEntityMapping` collapsed to the same `getCapabilities` short-circuit pattern as C34's helper refactor) and the allowlist is empty.**
 
 **Date-bound revisit:** by **2026-08-01**, Phase 3c migration must be at least 50% complete (Bucket A + B combined: 70+ sites migrated). If not, re-evaluate the architecture or the priorities. "We forgot about it" is the failure mode this gate prevents.
 
@@ -2193,3 +2193,122 @@ After C34, the file has 3 direct `isGlobalAdmin` call sites left (verified by `g
 - Line 1060 — `deleteEntityMapping`: same shape
 
 All three are per-resource mutation guards with capability semantics — the same `getCapabilities` short-circuit argument from the helper refactor applies. **C35** will collapse all three to direct `getCapabilities` calls (or to `canModifyResource` if the entities pick up `organization_id` columns first), drop the 3 `isGlobalAdmin` sites, and **EXIT the allowlist** — the last file in Phase 3c's per-file lint burndown.
+
+---
+
+## Phase C35 — `dynatrace.service.ts` finish (allowlist exit)
+
+**Date:** 2026-05-02
+**Branch:** `rbac/3c-dynatrace-c35`
+**Related:** Phase 3c, C2 (pilot), C17 (per-resource sites), C34 (helper refactor + bulk debug-log drop)
+
+**Scope:** Single-file finishing migration. Drops the last 3 direct `authzService.isGlobalAdmin` call sites in `dynatrace.service.ts` (`updateQuery`, `deleteQuery`, `deleteEntityMapping`) by collapsing each `if (!isAdmin) { if (!existing.organizationId) throw; … getCapabilities check … }` block to a single unconditional `getCapabilities` check, relying on the same `CapabilitiesService.compute` admin short-circuit that C34 used for the helper refactor. **File EXITS the allowlist. Allowlist size: 1 → 0.** First time the allowlist is empty since the lint rule shipped in C2. Phase 3c's per-file lint burndown is complete.
+
+### Per-method migration
+
+All 3 sites had identical shape:
+
+**Before:**
+```typescript
+const isAdmin = this.authzService.isGlobalAdmin(roles);
+this.logger.debug(`<methodName>: …, isGlobalAdmin=${isAdmin}`);
+
+const existing = await this.repository.<find>(id);
+if (!existing) throw new NotFoundException(/* … */);
+
+if (!isAdmin) {
+  if (!existing.organizationId) {
+    throw new ForbiddenException(/* … */);
+  }
+  const caps = await this.authzService.getCapabilities(
+    userId,
+    roles,
+    existing.organizationId,
+  );
+  if (!caps.includes(Capability.IntegrationDynatraceUpdate /* or Delete */)) {
+    throw new ForbiddenException(/* … */);
+  }
+}
+```
+
+**After:**
+```typescript
+this.logger.debug(`<methodName>: …`);
+
+const existing = await this.repository.<find>(id);
+if (!existing) throw new NotFoundException(/* … */);
+
+// See updateQuery for the null-org / admin-bypass semantics.
+const caps = await this.authzService.getCapabilities(
+  userId,
+  roles,
+  existing.organizationId ?? null,
+);
+if (!caps.includes(Capability.IntegrationDynatraceUpdate /* or Delete */)) {
+  throw new ForbiddenException(/* … */);
+}
+```
+
+The four-cell semantic matrix (admin × null-org, admin × scoped-org, non-admin × null-org, non-admin × scoped-org) is preserved exactly:
+
+- Admin + null-org: `getCapabilities(userId, roles, null)` short-circuits in `CapabilitiesService.compute` to `GLOBAL_ADMIN_CAPABILITIES` regardless of org scope → cap check passes (was: `if (!isAdmin)` skipped → passes).
+- Admin + scoped-org: same admin short-circuit → passes (was: `if (!isAdmin)` skipped → passes).
+- Non-admin + null-org: `getCapabilities(userId, roles, null)` → empty cap set (no orgRoles loaded; non-admin systemRoles contribute none) → cap check fails → ForbiddenException (was: `if (!existing.organizationId) throw` → ForbiddenException).
+- Non-admin + scoped-org: `getCapabilities(userId, roles, existing.organizationId)` → org-scoped caps → check passes/fails based on real cap set (was: same).
+
+The `updateQuery` migration carries an explanatory comment about the null-org semantic (since it's the first instance); `deleteQuery` and `deleteEntityMapping` reference it back ("See updateQuery for the null-org / admin-bypass semantics.") to avoid repeating the explanation.
+
+### Spec update
+
+The pre-existing test `'should throw ForbiddenException when row has null organizationId for non-admins'` (`dynatrace.service.spec.ts:823`) relied on the old `if (!existing.organizationId) throw` shortcut: it mocked `isGlobalAdmin → false`, the production code's `if (!isAdmin)` block fired, and the inner `if (!existing.organizationId)` threw. Under C35, the production code no longer has that shortcut — it always calls `getCapabilities` and trusts its result to be `[]` for non-admins on null-org scope. The test now also mocks `getCapabilities → []` to simulate that production behavior (which `CapabilitiesService.compute` produces naturally for non-admin systemRoles + empty orgRoles). One-line spec change; semantics preserved.
+
+### Allowlist exit + lint-rule spec update
+
+`apps/api/.rbac-migration-allowlist.json` becomes `[]`. The lint rule (`apps/api/eslint-rules/no-direct-is-global-admin.js`) still loads the file and applies the per-file allowlist check — the mechanism is preserved for any future regression PR that needs to grandfather a file temporarily. The rule's spec (`no-direct-is-global-admin.spec.js`) had a fixture asserting `dynatrace.service.ts` was tolerated despite the old pattern; that fixture is removed (Phase 3c emptied the real allowlist; no per-file grandfathered fixture remains). A short comment in its place documents that the read-path mechanism is intentionally retained for future use.
+
+### Verification
+
+| Check | Result |
+|-------|--------|
+| `npx jest src/modules/dynatrace` | 114 passed (2 suites), 0 failed |
+| `npx jest` (full @perfana/api) | 4302 passed, 20 skipped, 0 failed — same baseline as C34 |
+| `npm run type-check` (workspace) | 0 errors across all 8 packages |
+| `npm run lint` (@perfana/api) | 0 errors, 59 pre-existing warnings unchanged |
+| `grep -c 'isGlobalAdmin' apps/api/src/modules/dynatrace/dynatrace.service.ts` | 0 direct call sites; only the `isGlobalAdmin` *variable* in `findAll` (set from `withOrgFilter` result) and the `accessResult.reason === 'User has global admin privileges'` derivation in `findByHost` remain — neither trips the lint rule |
+| `cat apps/api/.rbac-migration-allowlist.json` | `[]` |
+
+### Files changed
+
+- `apps/api/src/modules/dynatrace/dynatrace.service.ts` — 3 if-block migrations (`updateQuery`, `deleteQuery`, `deleteEntityMapping`)
+- `apps/api/src/modules/dynatrace/dynatrace.service.spec.ts` — 1 test mock update (add `getCapabilities → []` to the null-org-non-admin test)
+- `apps/api/.rbac-migration-allowlist.json` — emptied to `[]`
+- `apps/api/eslint-rules/no-direct-is-global-admin.spec.js` — remove the dynatrace allowlist-exemption fixture
+- `docs/superpowers/audits/2026-04-26-audit-decisions.md` — this file (burndown table updates + this section)
+
+### Allowlist disposition
+
+File **EXITS** the allowlist. Allowlist size: 1 → **0**. Burndown: Bucket B 42 → 43 of 43 (3 if-block sites migrated; the C2 enumeration did count these as Bucket B at lines 197, 238 — wait, those were classified as PER-RESOURCE / "Leave" originally and brought into Bucket B by C17's adjustment of +3 for the dynatrace per-resource sites; C25's +1, C30's +4, C31's +10, C32's +6, C33's +1, and C34's +4 then brought the total to 43). Bucket B reaches **100.0%**. Allowlist reaches **0** for the first time since the lint rule shipped in C2.
+
+### Why this is the correct stopping point for the lint burndown
+
+The lint rule's job is to prevent *new* direct `isGlobalAdmin` calls in `apps/api/src/modules/**`. With the allowlist empty:
+
+- Any new file that adds a direct `isGlobalAdmin` call fails lint and cannot land.
+- Any existing file that grew a new direct `isGlobalAdmin` call (e.g. via merge conflict or refactor) fails lint and cannot land.
+- Authz infrastructure files (`AuthorizationService`, `AuthorizedBaseService`, `withOrgFilter`, `withTeamFilter`, `CapabilityGuard`) remain permanently exempt because they implement the helpers that *encapsulate* the admin-bypass check — that is their job.
+
+The remaining Bucket A sites (61 of 131) and local `private isGlobalAdmin()` wrappers (5 of 13) are *internal* burndown items: they aren't direct `isGlobalAdmin` calls (they use approved indirections like `withOrgFilter` for filtering or local wrapper methods that compute admin-status without calling `authzService.isGlobalAdmin` directly). They don't trip the lint rule. Closing them is a code-quality cleanup with no enforcement pressure — Phase 3c's *enforcement* goal is met at C35.
+
+### Pattern notes
+
+**1. The `getCapabilities` short-circuit is the universal Bucket B closer.** C34 used it for the helper refactor (1 call site for 4 callers); C35 uses it for the 3 if-block guards directly. The same correctness argument — `CapabilitiesService.compute` returns `GLOBAL_ADMIN_CAPABILITIES` for any global admin systemRole regardless of org/team scope — covers both shapes. Future Bucket B migrations with capability semantics (rather than ownership semantics) can use the same pattern.
+
+**2. The 4-cell semantic matrix is the right verification framing.** Each Bucket B migration has 4 cases: admin × null-org, admin × scoped-org, non-admin × null-org, non-admin × scoped-org. The migration is correct iff each cell preserves its prior outcome (allow / deny / throw). This framing caught the spec test failure: the test was exercising the non-admin × null-org cell, and the production code's enforcement mechanism for that cell changed (from `if (!existing.organizationId) throw` to `getCapabilities(... null) → []`). The spec just needed to mock the new mechanism.
+
+**3. Allowlist size as the burndown is no longer the right metric — it's the lower bound.** With the allowlist empty, the lint rule prevents regressions. The remaining Bucket A and local-wrapper counts are internal cleanup items, not enforcement items. CLAUDE.md's "burndown 0% / target 50% by 2026-08-01" line is now stale on two axes: the burndown is at 100% for lint enforcement, and at 64.4% for combined Bucket A+B sites. Phase 3 status should advance from "in progress" to "lint-enforced; remaining cleanup tracked".
+
+### Phase 3c completion summary
+
+C2 → C35 spans 34 PRs over 7 days (2026-04-26 → 2026-05-02). The lint allowlist started at 38 files (the original C2 enumeration after de-duplicating debug-log-only false positives) and reached 0 at C35. Bucket B (per-resource guards) hit 100%. Bucket A (list-filter sites) is at 53.4% — sites are migrated to `withOrgFilter` indirection where applicable, but the audit's full enumeration count includes sites that don't trip the lint rule and are therefore not blocking.
+
+The Phase 3c lint-enforcement goal is met. Future work is internal code-quality cleanup of the remaining Bucket A sites and local wrappers, plus the Phase 4 ownership-column migrations on the dynatrace entities (which will let several debug-log-only sites pick up real per-resource `canAccessResource`/`canModifyResource` checks). Neither blocks shipping or further development. The `/schedule` agent at `docs/superpowers/scheduled-agents/rbac-drift-check.md` continues to run every 2 weeks as a safety net against new direct `isGlobalAdmin` usage that bypasses the lint rule.

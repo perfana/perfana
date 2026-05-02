@@ -115,7 +115,7 @@ Perfana implements a multi-tenant RBAC system for fine-grained access control ac
 |-------|-------------|--------|
 | Phase 1 | Role definitions & constants | ✅ Completed |
 | Phase 2 | Membership & ownership infrastructure | ✅ Completed |
-| Phase 3 | Service-layer authorization enforcement | In progress (foundation shipped 2026-04-28; per-service rollout tracked in `docs/superpowers/audits/2026-04-26-audit-decisions.md` — burndown 0% / target 50% by 2026-08-01) |
+| Phase 3 | Service-layer authorization enforcement | ✅ Lint-enforced (2026-05-02 — `.rbac-migration-allowlist.json` is empty; Bucket B 100%, combined A+B 64.4%; remaining Bucket A list-filter cleanup tracked in `docs/superpowers/audits/2026-04-26-audit-decisions.md`) |
 | Phase 4 | Data migration for existing resources | 🚧 TODO |
 | Phase 5 | Row-level security & audit logging | 🚧 TODO |
 

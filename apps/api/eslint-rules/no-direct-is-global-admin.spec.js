@@ -36,11 +36,10 @@ ruleTester.run('no-direct-is-global-admin', rule, {
       filename: 'apps/api/src/modules/foo/foo.service.ts',
       code: `class B { check(caps) { return caps.includes('foo:bar'); } }`,
     },
-    // Grandfathered file (from .rbac-migration-allowlist.json) — flagged but tolerated.
-    {
-      filename: 'apps/api/src/modules/dynatrace/dynatrace.service.ts',
-      code: `class C { x(roles) { return this.authzService.isGlobalAdmin(roles); } }`,
-    },
+    // Phase 3c emptied .rbac-migration-allowlist.json — no per-file
+    // grandfathered fixture remains. The allowlist read path stays in the rule
+    // (loadCache + allowlist.has check) so a future regression that re-adds
+    // files can be exempted without re-introducing the rule logic.
   ],
   invalid: [
     // New file (not on allowlist) using the old pattern → fail.
