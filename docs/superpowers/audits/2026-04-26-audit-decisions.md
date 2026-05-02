@@ -6,11 +6,11 @@ Phase 3c rolls capabilities through every site listed below. Update these counts
 
 | Bucket | Total | Migrated | Remaining | % done |
 | --- | ---: | ---: | ---: | ---: |
-| A — bypass filter | 127 | 51 | 76 | 40.2% |
+| A — bypass filter | 127 | 56 | 71 | 44.1% |
 | B — bypass guard | 18 | 17 | 1 | 94.4% |
-| Local `private isGlobalAdmin()` wrappers | 13 | 7 | 6 | 53.8% |
+| Local `private isGlobalAdmin()` wrappers | 13 | 8 | 5 | 61.5% |
 
-**Lint enforcement:** `apps/api/.rbac-migration-allowlist.json` lists every file currently exempt from the `no-direct-is-global-admin` lint rule (9 files as of 2026-05-02). When a site is migrated, remove its file from the allowlist (the file may have multiple sites — only remove when the LAST one is migrated). Allowlist size IS the burndown.
+**Lint enforcement:** `apps/api/.rbac-migration-allowlist.json` lists every file currently exempt from the `no-direct-is-global-admin` lint rule (8 files as of 2026-05-02). When a site is migrated, remove its file from the allowlist (the file may have multiple sites — only remove when the LAST one is migrated). Allowlist size IS the burndown.
 
 **Bucket B total adjusted upward by 3 in C17 and 1 in C25:** the original 2026-04-26 audit classified dynatrace's per-resource sites at `findByHost`/`update`/`delete` as "Leave" (deferred until `canAccessResource`/`canModifyResource` was established). C17 closes those 3. C25 adds `verifyTestRunAccess` from `test-runs-query.service.ts`, which the original audit did not enumerate — so the running total now reflects all four as in-scope.
 
@@ -1483,3 +1483,86 @@ The file **EXITS** the allowlist — zero direct `isGlobalAdmin` references afte
 ### Pattern note: second application of C26's `roles → isAdmin` boundary swap
 
 C26 set the precedent with `test-runs-dashboard-query.service.ts`; C27 confirms it generalizes cleanly. The two remaining test-runs sub-services with the same shape (`test-runs-metrics.service.ts` — has the wrapper; `test-runs-crud-query.service.ts` — uses `this.authzService.isGlobalAdmin` directly without a wrapper) are next candidates. The crud-query file is materially harder because its 17 sites mix org and team filtering at most call sites — likely a dedicated PR with care taken on the `withTeamFilter` integration. Metrics is a near-clone of perf-query and should be straightforward.
+
+---
+
+## Phase C28 — `test-runs-metrics.service.ts` finish + boundary push to `TestRunsService`
+
+**Audit date:** 2026-05-02
+**Scope:** Single-file migration. Drops the local `private isGlobalAdmin` wrapper (and `ADMIN_ROLES` constant) from `apps/api/src/modules/test-runs/services/test-runs-metrics.service.ts` plus its 5 internal call sites, exiting the file from the allowlist (9 → **8**). Same `roles → isAdmin` boundary-swap pattern as C26/C27, but the parent here is `TestRunsService` (the outer facade) rather than `TestRunsQueryService`, so the boundary push touches a service that did not previously inject `AuthorizationService`.
+
+### Site classification
+
+| Line (pre-edit) | Method | Migration |
+|------|--------|-----------|
+| 19 | `const ADMIN_ROLES = [...]` | Module-level constant deleted (only consumer was the wrapper). |
+| 28 | `private isGlobalAdmin(roles)` | **Wrapper deleted.** No longer needed — admin is now a parameter. |
+| 36 | `private resolveOrganizationIds(userId, roles)` | Helper signature simplified to `(userId)` only — admin guarding is now a caller responsibility. |
+| 62 | `classifyMetric` | **Signature changed:** 7th positional parameter `roles: string[] = []` → `isAdmin: boolean = false`. The internal `const isAdmin = this.isGlobalAdmin(roles);` line is deleted; the rest of the body uses the param directly. |
+| 206 | `createOrUpdateDsCompareConfig` | Same shape (3rd positional parameter). The two internal recursive calls (`getDsCompareConfig`, `updateDsCompareConfig`) now forward `isAdmin` instead of `roles`. |
+| 304 | `getDsCompareConfig` | Same shape (8th positional parameter). |
+| 398 | `updateDsCompareConfig` | Same shape (4th positional parameter). |
+| 599 | `deleteDsCompareConfig` | Same shape (3rd positional parameter). |
+
+`applyGoldenPathClassifications` is unchanged — it took no `roles` argument (it's called from `TestRunsMutationService` for completed test runs, no per-user authz).
+
+### Parent facade change (`test-runs.service.ts`)
+
+`TestRunsService` did not previously inject `AuthorizationService`. C28 adds it as the 8th constructor dep (after the 7 sub-services) and a new `private resolveIsAdmin(userId, roles)` helper that delegates to the existing `withOrgFilter` utility — `withOrgFilter` returns `null` iff the user is a global admin, so `=== null` collapses cleanly to a boolean. Reusing `withOrgFilter` (rather than calling `this.authzService.isGlobalAdmin(roles)` directly) keeps `TestRunsService` itself out of the allowlist: the `no-direct-is-global-admin` lint rule fires on direct `authzService.isGlobalAdmin` calls, but `withOrgFilter` is the canonical approved indirection.
+
+```typescript
+// Before (5×)
+async classifyMetric(testRunId, ..., userId?, roles?) {
+  return this.metricsService.classifyMetric(..., userId, roles);
+}
+
+// After (5×)
+async classifyMetric(testRunId, ..., userId?, roles?) {
+  const isAdmin = await this.resolveIsAdmin(userId ?? '', roles ?? []);
+  return this.metricsService.classifyMetric(..., userId, isAdmin);
+}
+```
+
+The semantic is unchanged: for admins, the metrics sub-service skips org filtering (the `if (isAdmin) { /* skip */ }` branch wins); for non-admins, the metrics service still loads its own org list internally via the (now simplified) `resolveOrganizationIds(userId)` helper. The minor inefficiency — for non-admins, `withOrgFilter` calls `getAccessibleOrganizations(userId)` at the parent and the metrics service calls it again internally — is the cost of keeping the metrics sub-service self-contained for org loading. A future PR could push `orgIds` through the parameters to dedupe; for now the duplicate call hits Redis cache and is observably negligible.
+
+### Test changes
+
+**`test-runs-metrics.service.spec.ts`** — unchanged. The existing spec only tests `applyGoldenPathClassifications` (which takes no roles); none of the boundary-swapped methods had test coverage in this file.
+
+**`test-runs.service.spec.ts`** (parent facade spec):
+- `AuthorizationService` was already provided by `createAuthorizationServiceMock()` in the existing test setup (the mock's default `isGlobalAdmin` returns `true`, so `withOrgFilter` returns `null`, so `resolveIsAdmin` returns `true`).
+- 2 `toHaveBeenCalledWith` delegation assertions updated: 8th positional argument changed from `undefined` (the old `roles` value) to `true` (the boolean the mock resolves to).
+
+### Test results
+
+| Test run | Result |
+|----------|--------|
+| `npx jest src/modules/test-runs` | 759 passed (19 suites) — unchanged from C27 |
+| `npx jest` (full API suite) | 4302 passed, 20 skipped (pre-existing), 0 failed |
+| `npm run type-check` (workspace) | 8/8 tasks successful, 0 errors |
+| `npm run lint` (`@perfana/api`) | 0 errors, 59 pre-existing warnings (none introduced) |
+
+### Net diff
+
+- `test-runs-metrics.service.ts`: -16 lines (ADMIN_ROLES const + comment + wrapper + roles parameter on resolveOrganizationIds + 5× `const isAdmin = this.isGlobalAdmin(roles);`)
+- `test-runs.service.ts`: +12 lines (1 import + 1 constructor dep + 1 helper method + 5× `const isAdmin = await this.resolveIsAdmin(...);` lines)
+- `test-runs.service.spec.ts`: 2 assertion edits, net 0
+- `.rbac-migration-allowlist.json`: -1 line
+
+### Files changed
+
+- `apps/api/src/modules/test-runs/services/test-runs-metrics.service.ts` — drop wrapper + ADMIN_ROLES, simplify `resolveOrganizationIds` signature, swap `roles → isAdmin` in 5 method signatures
+- `apps/api/src/modules/test-runs/test-runs.service.ts` — inject `AuthorizationService`, add `resolveIsAdmin` helper, 5 metrics delegations call it
+- `apps/api/src/modules/test-runs/test-runs.service.spec.ts` — 2 delegation assertions updated to boolean
+- `apps/api/.rbac-migration-allowlist.json` — remove `test-runs-metrics.service.ts`
+- `docs/superpowers/audits/2026-04-26-audit-decisions.md` — this file
+
+### Allowlist disposition
+
+The file **EXITS** the allowlist — zero direct `isGlobalAdmin` references after the migration (the wrapper is gone, callers receive a boolean). Allowlist size: 9 → **8**. Burndown: Bucket A 51 → 56 of 127 (5 of the wrapper sites count against Bucket A — same shape as C27); Local wrappers 7 → 8 of 13 (the 8th wrapper-bearing file to lose its wrapper).
+
+### Pattern note: third application of C26's `roles → isAdmin` boundary swap
+
+C28 generalizes the C26/C27 pattern one level up: when the parent of the leaf service is a service that did not previously inject `AuthorizationService`, the boundary push requires adding the dependency. Reusing `withOrgFilter` rather than calling `authzService.isGlobalAdmin` directly is the key trick — the lint rule and the burndown both treat `withOrgFilter` as the approved indirection, so the parent stays clean without entering the allowlist itself.
+
+The remaining test-runs sub-service with the same shape is `test-runs-crud-query.service.ts` — its 17 sites mix org and team filtering and use `this.authzService.isGlobalAdmin` directly (no wrapper). C29 likely lands as a dedicated PR with care taken around `withTeamFilter` integration.

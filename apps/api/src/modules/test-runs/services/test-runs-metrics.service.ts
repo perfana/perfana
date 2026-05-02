@@ -13,30 +13,16 @@ import { CreateDsCompareConfigDto, UpdateDsCompareConfigDto, DsCompareConfigDto 
 import { ResourceNotFoundException, DatabaseException } from '../../../common/exceptions/business.exception';
 import { AuthorizationService } from '../../../common/services/authorization.service';
 
-/**
- * Global admin roles that bypass organization filtering
- */
-const ADMIN_ROLES = ['perfana-admin', 'super-admin', 'admin'];
-
 @Injectable()
 export class TestRunsMetricsService {
   private readonly logger = new Logger(TestRunsMetricsService.name);
 
   /**
-   * Check if a user has global admin role
+   * Resolve organization IDs for a non-admin user via AuthorizationService.
+   * Returns the accessible org list, or an empty array if resolution fails.
+   * Callers must guard with `isAdmin` before calling — admins skip org filtering entirely.
    */
-  private isGlobalAdmin(roles: string[]): boolean {
-    return roles.some(role => ADMIN_ROLES.includes(role));
-  }
-
-  /**
-   * Resolve organization IDs for a user via AuthorizationService.
-   * Returns the organizationIds array, or an empty array if resolution fails.
-   */
-  private async resolveOrganizationIds(userId: string, roles: string[]): Promise<string[]> {
-    if (this.isGlobalAdmin(roles)) {
-      return []; // Admins bypass org filtering, empty array is fine
-    }
+  private async resolveOrganizationIds(userId: string): Promise<string[]> {
     try {
       return await this.authorizationService.getAccessibleOrganizations(userId);
     } catch (error) {
@@ -66,13 +52,12 @@ export class TestRunsMetricsService {
     environment?: string,
     workload?: string,
     userId: string = '',
-    roles: string[] = [],
+    isAdmin: boolean = false,
   ): Promise<MetricClassificationDto> {
     try {
       this.logger.log(`Classifying metric for test run: ${testRunId}`);
 
-      const isAdmin = this.isGlobalAdmin(roles);
-      const organizationIds = isAdmin ? [] : await this.resolveOrganizationIds(userId, roles);
+      const organizationIds = isAdmin ? [] : await this.resolveOrganizationIds(userId);
 
       // Non-admin users with no organization memberships cannot classify metrics
       if (!isAdmin && organizationIds.length === 0) {
@@ -206,11 +191,10 @@ export class TestRunsMetricsService {
   async createOrUpdateDsCompareConfig(
     createDto: CreateDsCompareConfigDto,
     userId: string = '',
-    roles: string[] = [],
+    isAdmin: boolean = false,
   ): Promise<DsCompareConfigDto> {
     try {
-      const isAdmin = this.isGlobalAdmin(roles);
-      const organizationIds = isAdmin ? [] : await this.resolveOrganizationIds(userId, roles);
+      const organizationIds = isAdmin ? [] : await this.resolveOrganizationIds(userId);
 
       // Non-admin users with no organization memberships cannot create/update configs
       if (!isAdmin && organizationIds.length === 0) {
@@ -256,12 +240,12 @@ export class TestRunsMetricsService {
         createDto.panelId,
         createDto.metricName,
         userId,
-        roles,
+        isAdmin,
       ).catch(() => null);
 
       if (existingConfig) {
         // Update existing configuration
-        return this.updateDsCompareConfig(existingConfig.id, { configData: createDto.configData }, userId, roles);
+        return this.updateDsCompareConfig(existingConfig.id, { configData: createDto.configData }, userId, isAdmin);
       }
 
       // Create new configuration
@@ -309,11 +293,10 @@ export class TestRunsMetricsService {
     panelId: string,
     metricName?: string,
     userId: string = '',
-    roles: string[] = [],
+    isAdmin: boolean = false,
   ): Promise<DsCompareConfigDto> {
     try {
-      const isAdmin = this.isGlobalAdmin(roles);
-      const organizationIds = isAdmin ? [] : await this.resolveOrganizationIds(userId, roles);
+      const organizationIds = isAdmin ? [] : await this.resolveOrganizationIds(userId);
 
       // Non-admin users with no organization memberships cannot access configs
       if (!isAdmin && organizationIds.length === 0) {
@@ -399,11 +382,10 @@ export class TestRunsMetricsService {
     id: string,
     updateDto: UpdateDsCompareConfigDto,
     userId: string = '',
-    roles: string[] = [],
+    isAdmin: boolean = false,
   ): Promise<DsCompareConfigDto> {
     try {
-      const isAdmin = this.isGlobalAdmin(roles);
-      const organizationIds = isAdmin ? [] : await this.resolveOrganizationIds(userId, roles);
+      const organizationIds = isAdmin ? [] : await this.resolveOrganizationIds(userId);
 
       // Non-admin users with no organization memberships cannot update configs
       if (!isAdmin && organizationIds.length === 0) {
@@ -599,11 +581,10 @@ export class TestRunsMetricsService {
   async deleteDsCompareConfig(
     id: string,
     userId: string = '',
-    roles: string[] = [],
+    isAdmin: boolean = false,
   ): Promise<void> {
     try {
-      const isAdmin = this.isGlobalAdmin(roles);
-      const organizationIds = isAdmin ? [] : await this.resolveOrganizationIds(userId, roles);
+      const organizationIds = isAdmin ? [] : await this.resolveOrganizationIds(userId);
 
       // Non-admin users with no organization memberships cannot delete configs
       if (!isAdmin && organizationIds.length === 0) {
