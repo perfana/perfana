@@ -65,10 +65,13 @@ export class DynatraceService {
    * child rows from being created with `organization_id IS NULL` (which would
    * trip the legacy hatch in the mutation/delete paths).
    *
-   * Global admins skip the capability check (still picks up the parent's org
-   * so the row is correctly scoped). Legacy configs with no organizationId
-   * are tolerated for global admins only — non-admins are denied so they
-   * cannot create child rows that would be globally mutable forever after.
+   * Admin bypass is handled implicitly by `getCapabilities`: global admins
+   * receive the full GLOBAL_ADMIN_CAPABILITIES set regardless of the org scope
+   * (CapabilitiesService.compute short-circuits on the systemRoles check), so
+   * the capability lookup passes for them whether the parent has an org or
+   * not. Non-admins under a legacy null-org config get an empty cap set and
+   * are properly denied — preserving the original "non-admins cannot mint
+   * rows under admin-only configs" rule without a separate `isAdmin` branch.
    *
    * @returns The resolved organizationId (may be undefined for legacy
    *   admin-only configs); the caller forwards it as the persisted ownership.
@@ -77,22 +80,11 @@ export class DynatraceService {
     dynatraceConfigId: string,
     userId: string,
     roles: string[],
-    isAdmin: boolean,
     op: 'create' | 'update' | 'delete',
   ): Promise<string | undefined> {
     const parentConfig = await this.repository.findById(dynatraceConfigId);
     if (!parentConfig) {
       throw new NotFoundException(`Dynatrace configuration with ID ${dynatraceConfigId} not found`);
-    }
-
-    if (isAdmin) {
-      return parentConfig.organizationId;
-    }
-
-    if (!parentConfig.organizationId) {
-      throw new ForbiddenException(
-        `You do not have permission to ${op} resources under this Dynatrace configuration`,
-      );
     }
 
     const requiredCapability =
@@ -102,7 +94,7 @@ export class DynatraceService {
     const caps = await this.authzService.getCapabilities(
       userId,
       roles,
-      parentConfig.organizationId,
+      parentConfig.organizationId ?? null,
     );
     if (!caps.includes(requiredCapability)) {
       throw new ForbiddenException(
@@ -230,10 +222,9 @@ export class DynatraceService {
    * so ownership tracking is not applied. Full ownership assignment will be enabled when
    * Phase 4 adds the ownership columns.
    */
-  async create(dto: CreateDynatraceConfigDto, userId: string, roles: string[]) {
+  async create(dto: CreateDynatraceConfigDto, userId: string, _roles: string[]) {
     // Log authorization context for debugging
-    const isAdmin = this.authzService.isGlobalAdmin(roles);
-    this.logger.debug(`create: userId=${userId}, isGlobalAdmin=${isAdmin}`);
+    this.logger.debug(`create: userId=${userId}`);
 
     // Normalize URL by removing trailing slash for consistency
     const normalizedHost = this.normalizeUrl(dto.host);
@@ -401,10 +392,9 @@ export class DynatraceService {
    * Note: DynatraceConfig entity does not have organization_id yet, so access checks are not applied.
    * Full access permission checks will be enabled when Phase 4 adds organization_id column.
    */
-  async fetchEntities(userId: string, roles: string[], entityType?: string, entityName?: string, dynatraceConfigId?: string) {
+  async fetchEntities(userId: string, _roles: string[], entityType?: string, entityName?: string, dynatraceConfigId?: string) {
     // Log authorization context for debugging
-    const isAdmin = this.authzService.isGlobalAdmin(roles);
-    this.logger.debug(`fetchEntities: userId=${userId}, isGlobalAdmin=${isAdmin}, dynatraceConfigId=${dynatraceConfigId}`);
+    this.logger.debug(`fetchEntities: userId=${userId}, dynatraceConfigId=${dynatraceConfigId}`);
 
     let config;
 
@@ -545,10 +535,9 @@ export class DynatraceService {
    * Note: DynatraceConfig entity does not have organization_id yet, so access checks are not applied.
    * Full access permission checks will be enabled when Phase 4 adds organization_id column.
    */
-  async fetchRequestAttributes(host: string, userId: string, roles: string[]) {
+  async fetchRequestAttributes(host: string, userId: string, _roles: string[]) {
     // Log authorization context for debugging
-    const isAdmin = this.authzService.isGlobalAdmin(roles);
-    this.logger.debug(`fetchRequestAttributes: host=${host}, userId=${userId}, isGlobalAdmin=${isAdmin}`);
+    this.logger.debug(`fetchRequestAttributes: host=${host}, userId=${userId}`);
 
     // Normalize URL by removing trailing slash for consistency
     const normalizedHost = this.normalizeUrl(host);
@@ -604,8 +593,7 @@ export class DynatraceService {
    */
   async getRequestAttributesForConfig(id: string, userId: string, roles: string[]) {
     // Log authorization context for debugging
-    const isAdmin = this.authzService.isGlobalAdmin(roles);
-    this.logger.debug(`getRequestAttributesForConfig: id=${id}, userId=${userId}, isGlobalAdmin=${isAdmin}`);
+    this.logger.debug(`getRequestAttributesForConfig: id=${id}, userId=${userId}`);
 
     // Get the configuration
     const config = await this.repository.findById(id);
@@ -631,10 +619,9 @@ export class DynatraceService {
    * Note: DynatraceQuery entity does not have organization_id yet, so org filtering is not applied.
    * Full org filtering will be enabled when Phase 4 adds organization_id column.
    */
-  async findAllQuery(userId: string, roles: string[]) {
+  async findAllQuery(userId: string, _roles: string[]) {
     // Log authorization context for debugging
-    const isAdmin = this.authzService.isGlobalAdmin(roles);
-    this.logger.debug(`findAllQuery: userId=${userId}, isGlobalAdmin=${isAdmin}`);
+    this.logger.debug(`findAllQuery: userId=${userId}`);
 
     // NOTE: Org filtering will be added here when DynatraceQuery entity has organization_id
     // For now, all queries are returned (treated as legacy data)
@@ -653,10 +640,9 @@ export class DynatraceService {
    * Note: DynatraceQuery entity does not have organization_id yet, so access checks are not applied.
    * Full access permission checks will be enabled when Phase 4 adds organization_id column.
    */
-  async findQueryBySystemAndEnvironment(systemId: string, environment: string, workload: string, userId: string, roles: string[]) {
+  async findQueryBySystemAndEnvironment(systemId: string, environment: string, workload: string, userId: string, _roles: string[]) {
     // Log authorization context for debugging
-    const isAdmin = this.authzService.isGlobalAdmin(roles);
-    this.logger.debug(`findQueryBySystemAndEnvironment: systemId=${systemId}, environment=${environment}, workload=${workload}, userId=${userId}, isGlobalAdmin=${isAdmin}`);
+    this.logger.debug(`findQueryBySystemAndEnvironment: systemId=${systemId}, environment=${environment}, workload=${workload}, userId=${userId}`);
 
     // NOTE: Access permission check will be added here when DynatraceQuery entity has organization_id
     // For now, all queries are accessible (treated as legacy data)
@@ -673,10 +659,9 @@ export class DynatraceService {
    * Note: DynatraceQuery entity does not have organization_id yet, so access checks are not applied.
    * Full access permission checks will be enabled when Phase 4 adds organization_id column.
    */
-  async findQueryById(id: string, userId: string, roles: string[]) {
+  async findQueryById(id: string, userId: string, _roles: string[]) {
     // Log authorization context for debugging
-    const isAdmin = this.authzService.isGlobalAdmin(roles);
-    this.logger.debug(`findQueryById: id=${id}, userId=${userId}, isGlobalAdmin=${isAdmin}`);
+    this.logger.debug(`findQueryById: id=${id}, userId=${userId}`);
 
     const query = await this.repository.findQueryById(id);
     if (!query) {
@@ -701,14 +686,12 @@ export class DynatraceService {
    * Phase 4 adds the ownership columns.
    */
   async createQuery(dto: CreateDynatraceQueryDto, userId: string, roles: string[]) {
-    const isAdmin = this.authzService.isGlobalAdmin(roles);
-    this.logger.debug(`createQuery: userId=${userId}, isGlobalAdmin=${isAdmin}`);
+    this.logger.debug(`createQuery: userId=${userId}`);
 
     const parentOrgId = await this.requireDynatraceMutationCapability(
       dto.dynatraceConfigId,
       userId,
       roles,
-      isAdmin,
       'create',
     );
 
@@ -741,14 +724,12 @@ export class DynatraceService {
    * Phase 4 adds the ownership columns.
    */
   async createQuerySmart(dto: CreateDynatraceQueryDto, userId: string, roles: string[]) {
-    const isAdmin = this.authzService.isGlobalAdmin(roles);
-    this.logger.debug(`createQuerySmart: userId=${userId}, isGlobalAdmin=${isAdmin}`);
+    this.logger.debug(`createQuerySmart: userId=${userId}`);
 
     const parentOrgId = await this.requireDynatraceMutationCapability(
       dto.dynatraceConfigId,
       userId,
       roles,
-      isAdmin,
       'create',
     );
 
@@ -791,8 +772,7 @@ export class DynatraceService {
    * Phase 4 adds the ownership columns.
    */
   async bulkImportQuery(dtoList: CreateDynatraceQueryDto[], userId: string, roles: string[], generateSharedUuid = true) {
-    const isAdmin = this.authzService.isGlobalAdmin(roles);
-    this.logger.debug(`bulkImportQuery: count=${dtoList.length}, userId=${userId}, isGlobalAdmin=${isAdmin}`);
+    this.logger.debug(`bulkImportQuery: count=${dtoList.length}, userId=${userId}`);
 
     if (dtoList.length === 0) {
       return [];
@@ -807,7 +787,6 @@ export class DynatraceService {
       firstDto.dynatraceConfigId,
       userId,
       roles,
-      isAdmin,
       'create',
     );
 
@@ -941,10 +920,9 @@ export class DynatraceService {
    * Note: DynatraceQuery entity does not have organization_id yet, so access checks are not applied.
    * Full access permission checks will be enabled when Phase 4 adds organization_id column.
    */
-  async getDistinctDashboardLabels(systemId: string, environment: string, workload: string, userId: string, roles: string[]) {
+  async getDistinctDashboardLabels(systemId: string, environment: string, workload: string, userId: string, _roles: string[]) {
     // Log authorization context for debugging
-    const isAdmin = this.authzService.isGlobalAdmin(roles);
-    this.logger.debug(`getDistinctDashboardLabels: systemId=${systemId}, environment=${environment}, workload=${workload}, userId=${userId}, isGlobalAdmin=${isAdmin}`);
+    this.logger.debug(`getDistinctDashboardLabels: systemId=${systemId}, environment=${environment}, workload=${workload}, userId=${userId}`);
 
     // NOTE: Access permission check will be added here when DynatraceQuery entity has organization_id
     // For now, all dashboards are accessible (treated as legacy data)
@@ -975,10 +953,9 @@ export class DynatraceService {
    * Note: DynatraceQuery entity does not have organization_id yet, so access checks are not applied.
    * Full access permission checks will be enabled when Phase 4 adds organization_id column.
    */
-  async getPanelTitlesForDashboard(systemId: string, environment: string, workload: string, dashboardLabel: string, userId: string, roles: string[]) {
+  async getPanelTitlesForDashboard(systemId: string, environment: string, workload: string, dashboardLabel: string, userId: string, _roles: string[]) {
     // Log authorization context for debugging
-    const isAdmin = this.authzService.isGlobalAdmin(roles);
-    this.logger.debug(`getPanelTitlesForDashboard: systemId=${systemId}, environment=${environment}, workload=${workload}, dashboardLabel=${dashboardLabel}, userId=${userId}, isGlobalAdmin=${isAdmin}`);
+    this.logger.debug(`getPanelTitlesForDashboard: systemId=${systemId}, environment=${environment}, workload=${workload}, dashboardLabel=${dashboardLabel}, userId=${userId}`);
 
     // NOTE: Access permission check will be added here when DynatraceQuery entity has organization_id
     // For now, all panels are accessible (treated as legacy data)
@@ -1020,10 +997,9 @@ export class DynatraceService {
    * Note: DynatraceEntityMapping entity does not have organization_id yet, so org filtering is not applied.
    * Full org filtering will be enabled when Phase 4 adds organization_id column.
    */
-  async getEntityMappings(userId: string, roles: string[], systemId?: string, environment?: string, workload?: string) {
+  async getEntityMappings(userId: string, _roles: string[], systemId?: string, environment?: string, workload?: string) {
     // Log authorization context for debugging
-    const isAdmin = this.authzService.isGlobalAdmin(roles);
-    this.logger.debug(`getEntityMappings: userId=${userId}, isGlobalAdmin=${isAdmin}, systemId=${systemId}, environment=${environment}, workload=${workload}`);
+    this.logger.debug(`getEntityMappings: userId=${userId}, systemId=${systemId}, environment=${environment}, workload=${workload}`);
 
     // NOTE: Org filtering will be added here when DynatraceEntityMapping entity has organization_id
     // For now, all mappings are returned (treated as legacy data)
@@ -1042,14 +1018,12 @@ export class DynatraceService {
    * Phase 4 adds the ownership columns.
    */
   async createEntityMapping(dto: CreateEntityMappingDto, userId: string, roles: string[]) {
-    const isAdmin = this.authzService.isGlobalAdmin(roles);
-    this.logger.debug(`createEntityMapping: userId=${userId}, isGlobalAdmin=${isAdmin}`);
+    this.logger.debug(`createEntityMapping: userId=${userId}`);
 
     const parentOrgId = await this.requireDynatraceMutationCapability(
       dto.dynatraceConfigId,
       userId,
       roles,
-      isAdmin,
       'create',
     );
 
@@ -1125,10 +1099,9 @@ export class DynatraceService {
    * Note: This queries Dynatrace metrics which do not have organization_id yet, so org filtering is not applied.
    * Full org filtering will be enabled when Phase 4 adds organization_id column.
    */
-  async getMetricNames(userId: string, roles: string[], testRunId?: string) {
+  async getMetricNames(userId: string, _roles: string[], testRunId?: string) {
     // Log authorization context for debugging
-    const isAdmin = this.authzService.isGlobalAdmin(roles);
-    this.logger.debug(`getMetricNames: userId=${userId}, isGlobalAdmin=${isAdmin}, testRunId=${testRunId}`);
+    this.logger.debug(`getMetricNames: userId=${userId}, testRunId=${testRunId}`);
 
     // NOTE: Org filtering will be added here when metrics have organization_id
     // For now, all metrics are returned (treated as legacy data)
@@ -1155,10 +1128,9 @@ export class DynatraceService {
    * Note: DynatraceConfig entity does not have organization_id yet, so access checks are not applied.
    * Full access permission checks will be enabled when Phase 4 adds organization_id column.
    */
-  async fetchHostProperties(hostId: string, dynatraceConfigId: string, userId: string, roles: string[]): Promise<HostPropertiesResponse> {
+  async fetchHostProperties(hostId: string, dynatraceConfigId: string, userId: string, _roles: string[]): Promise<HostPropertiesResponse> {
     // Log authorization context for debugging
-    const isAdmin = this.authzService.isGlobalAdmin(roles);
-    this.logger.debug(`fetchHostProperties: hostId=${hostId}, dynatraceConfigId=${dynatraceConfigId}, userId=${userId}, isGlobalAdmin=${isAdmin}`);
+    this.logger.debug(`fetchHostProperties: hostId=${hostId}, dynatraceConfigId=${dynatraceConfigId}, userId=${userId}`);
 
     const config = await this.repository.findById(dynatraceConfigId);
     if (!config) {
@@ -1234,11 +1206,10 @@ export class DynatraceService {
     endTime: Date,
     dynatraceConfigId: string,
     userId: string,
-    roles: string[]
+    _roles: string[]
   ): Promise<HostMetricsResponse> {
     // Log authorization context for debugging
-    const isAdmin = this.authzService.isGlobalAdmin(roles);
-    this.logger.debug(`fetchHostMetrics: hostId=${hostId}, dynatraceConfigId=${dynatraceConfigId}, userId=${userId}, isGlobalAdmin=${isAdmin}`);
+    this.logger.debug(`fetchHostMetrics: hostId=${hostId}, dynatraceConfigId=${dynatraceConfigId}, userId=${userId}`);
 
     const config = await this.repository.findById(dynatraceConfigId);
     if (!config) {
@@ -1379,11 +1350,10 @@ export class DynatraceService {
     endTime: Date,
     dynatraceConfigId: string,
     userId: string,
-    roles: string[]
+    _roles: string[]
   ): Promise<HostProblemResponse[]> {
     // Log authorization context for debugging
-    const isAdmin = this.authzService.isGlobalAdmin(roles);
-    this.logger.debug(`fetchHostProblems: hostId=${hostId}, dynatraceConfigId=${dynatraceConfigId}, userId=${userId}, isGlobalAdmin=${isAdmin}`);
+    this.logger.debug(`fetchHostProblems: hostId=${hostId}, dynatraceConfigId=${dynatraceConfigId}, userId=${userId}`);
 
     const config = await this.repository.findById(dynatraceConfigId);
     if (!config) {
@@ -1476,8 +1446,7 @@ export class DynatraceService {
     roles: string[]
   ): Promise<void> {
     // Log authorization context for debugging
-    const isAdmin = this.authzService.isGlobalAdmin(roles);
-    this.logger.debug(`createHostMetricQueries: dynatraceConfigId=${dynatraceConfigId}, hostId=${hostId}, userId=${userId}, isGlobalAdmin=${isAdmin}`);
+    this.logger.debug(`createHostMetricQueries: dynatraceConfigId=${dynatraceConfigId}, hostId=${hostId}, userId=${userId}`);
     // Each host gets its own dashboard label (Dashboard: Dynatrace host metrics {hostName})
     const dashboardLabel = `Dynatrace host metrics ${hostDisplayName}`;
 

@@ -7,14 +7,14 @@ Phase 3c rolls capabilities through every site listed below. Update these counts
 | Bucket | Total | Migrated | Remaining | % done |
 | --- | ---: | ---: | ---: | ---: |
 | A — bypass filter | 131 | 70 | 61 | 53.4% |
-| B — bypass guard | 39 | 38 | 1 | 97.4% |
+| B — bypass guard | 43 | 42 | 1 | 97.7% |
 | Local `private isGlobalAdmin()` wrappers | 13 | 8 | 5 | 61.5% |
 
 **Lint enforcement:** `apps/api/.rbac-migration-allowlist.json` lists every file currently exempt from the `no-direct-is-global-admin` lint rule (1 file as of 2026-05-02). When a site is migrated, remove its file from the allowlist (the file may have multiple sites — only remove when the LAST one is migrated). Allowlist size IS the burndown.
 
 **Bucket A total adjusted upward by 2 in C30 and 2 in C31:** C30 enumerates the user-owned `findAll` list-filter sites in `graph-presets.service.ts` and `trends-presets.service.ts` that were not in the original audit (which focused on org-owned resources). C31 enumerates the membership-filtered `findAll` sites in `teams.service.ts` and `organizations.service.ts` — these are filtered by org membership rather than `organization_id IN (...)` and were not in the original audit either.
 
-**Bucket B total adjusted upward by 3 in C17, 1 in C25, 4 in C30, 10 in C31, 6 in C32, and 1 in C33:** C17 brings dynatrace per-resource sites in-scope (originally "Leave" until `canAccessResource`/`canModifyResource` shipped). C25 adds `verifyTestRunAccess` from `test-runs-query.service.ts`. C30 adds the 4 user-owned per-resource sites in graph/trends-presets. C31 enumerates 10 per-resource guard sites across `teams.service.ts` and `organizations.service.ts`. C32 enumerates 6 per-resource guard sites in `systems-under-test.service.ts` (`createSut`, `findOne`, `findSystemSummary`, `findByName`, `update`, `remove`) — the file's per-resource shape was not in the original audit's enumeration despite C31's prediction that "no upward adjustment expected". C33 promotes the `requireOrgAdmin` custom-guard-helper in `profiles.service.ts` from its original "Leave" classification (line 143 of the C2 enumeration) to a counted Bucket B site, since the migration removes its inline `isGlobalAdmin` call.
+**Bucket B total adjusted upward by 3 in C17, 1 in C25, 4 in C30, 10 in C31, 6 in C32, 1 in C33, and 4 in C34:** C17 brings dynatrace per-resource sites in-scope (originally "Leave" until `canAccessResource`/`canModifyResource` shipped). C25 adds `verifyTestRunAccess` from `test-runs-query.service.ts`. C30 adds the 4 user-owned per-resource sites in graph/trends-presets. C31 enumerates 10 per-resource guard sites across `teams.service.ts` and `organizations.service.ts`. C32 enumerates 6 per-resource guard sites in `systems-under-test.service.ts` (`createSut`, `findOne`, `findSystemSummary`, `findByName`, `update`, `remove`) — the file's per-resource shape was not in the original audit's enumeration despite C31's prediction that "no upward adjustment expected". C33 promotes the `requireOrgAdmin` custom-guard-helper in `profiles.service.ts` from its original "Leave" classification (line 143 of the C2 enumeration) to a counted Bucket B site, since the migration removes its inline `isGlobalAdmin` call. C34 promotes the 4 helper-passing sites in `dynatrace.service.ts` (`createQuery`, `createQuerySmart`, `bulkImportQuery`, `createEntityMapping`) from their original DEBUG-LOG-ONLY classification (lines 616, 648, 693, 906 of the C2 enumeration) — they were also forwarding `isAdmin` to `requireDynatraceMutationCapability` for the capability bypass, which the C2 enumeration missed; the helper refactor removes that pathway and the inline `isGlobalAdmin` call sites with it.
 
 **Date-bound revisit:** by **2026-08-01**, Phase 3c migration must be at least 50% complete (Bucket A + B combined: 70+ sites migrated). If not, re-evaluate the architecture or the priorities. "We forgot about it" is the failure mode this gate prevents.
 
@@ -2042,3 +2042,154 @@ After C33, the allowlist contains: `dynatrace.service.ts` (1566 lines). Likely s
 - **C34–C35:** `dynatrace.service.ts` finish. C17 already migrated the per-resource sites; the remaining surface is the larger CRUD + tile-management shape (~13 debug-log-only sites + some Bucket B per-resource shape). Multi-PR split likely given the file's size.
 
 Phase 3c's user-facing surface is now structurally complete. The only remaining file is dynatrace, an internal integration service whose tile-management surface is called from a non-controller boundary. The boundary-push pattern still applies; the "boundary" will likely be the parent service that orchestrates the worker pipeline calls.
+
+---
+
+## Phase C34 — `dynatrace.service.ts` helper refactor + bulk debug-log drop
+
+**Date:** 2026-05-02
+**Branch:** `rbac/3c-dynatrace-c34`
+**Related:** Phase 3c, C2 (pilot), C17 (per-resource sites)
+
+**Scope:** Single-file partial migration. Drops 19 of the 22 remaining direct `authzService.isGlobalAdmin` call sites in `apps/api/src/modules/dynatrace/dynatrace.service.ts` via two coordinated changes: (1) refactor `requireDynatraceMutationCapability` to drop its `isAdmin` parameter (its 4 callers stop computing `isGlobalAdmin`), and (2) bulk-drop the 15 verified pure-debug-only sites whose downstream usage is now empty. File **stays** in the allowlist — the 3 remaining `if (!isAdmin)` mutation guards (`updateQuery`, `deleteQuery`, `deleteEntityMapping`) are deferred to C35.
+
+This is the first dynatrace-finishing PR since C17 (which closed only the 3 per-resource sites). C17 attempted a bulk drop of all debug-log-only sites and reverted because some `const isAdmin` declarations had downstream uses (`requireDynatraceMutationCapability`'s `isAdmin: boolean` parameter, plus the 3 `if (!isAdmin)` mutation guards). C34 surgically eliminates the helper-parameter pathway first, which makes the 4 helper-callers' `const isAdmin` declarations safe to drop alongside the 15 truly-local debug-log-only sites — the bulk drop that was unsafe in C17 becomes safe after the helper refactor.
+
+### Site classification
+
+The 22 remaining direct `isGlobalAdmin` call sites at C34 entry:
+
+| Bucket | Count | Sites |
+|--------|------:|-------|
+| Helper-parameter sites (originally DEBUG-LOG-ONLY in C2; promoted to Bucket B) | 4 | `createQuery`, `createQuerySmart`, `bulkImportQuery`, `createEntityMapping` — each computes `isAdmin` and forwards it to `requireDynatraceMutationCapability` |
+| Pure DEBUG-LOG-ONLY (no downstream `isAdmin` use) | 15 | `create`, `fetchEntities`, `fetchRequestAttributes`, `getRequestAttributesForConfig`, `findAllQuery`, `findQueryBySystemAndEnvironment`, `findQueryById`, `getDistinctDashboardLabels`, `getPanelTitlesForDashboard`, `getEntityMappings`, `getMetricNames`, `fetchHostProperties`, `fetchHostMetrics`, `fetchHostProblems`, `createHostMetricQueries` |
+| `if (!isAdmin)` mutation guards (per-resource Bucket B) | 3 | `updateQuery`, `deleteQuery`, `deleteEntityMapping` — each has a downstream `if (!isAdmin) { … capability check … }` block that needs `canModifyResource`-style migration |
+
+C34 closes 19 sites (the first 2 rows). C35 will close the remaining 3 mutation guards.
+
+### Helper refactor
+
+**Before:**
+```typescript
+private async requireDynatraceMutationCapability(
+  dynatraceConfigId: string,
+  userId: string,
+  roles: string[],
+  isAdmin: boolean,
+  op: 'create' | 'update' | 'delete',
+): Promise<string | undefined> {
+  const parentConfig = await this.repository.findById(dynatraceConfigId);
+  if (!parentConfig) throw new NotFoundException(/* … */);
+
+  if (isAdmin) return parentConfig.organizationId;
+
+  if (!parentConfig.organizationId) throw new ForbiddenException(/* … */);
+
+  const requiredCapability = op === 'delete'
+    ? Capability.IntegrationDynatraceDelete
+    : Capability.IntegrationDynatraceUpdate;
+  const caps = await this.authzService.getCapabilities(userId, roles, parentConfig.organizationId);
+  if (!caps.includes(requiredCapability)) throw new ForbiddenException(/* … */);
+  return parentConfig.organizationId;
+}
+```
+
+**After:**
+```typescript
+private async requireDynatraceMutationCapability(
+  dynatraceConfigId: string,
+  userId: string,
+  roles: string[],
+  op: 'create' | 'update' | 'delete',
+): Promise<string | undefined> {
+  const parentConfig = await this.repository.findById(dynatraceConfigId);
+  if (!parentConfig) throw new NotFoundException(/* … */);
+
+  const requiredCapability = op === 'delete'
+    ? Capability.IntegrationDynatraceDelete
+    : Capability.IntegrationDynatraceUpdate;
+  const caps = await this.authzService.getCapabilities(
+    userId,
+    roles,
+    parentConfig.organizationId ?? null,
+  );
+  if (!caps.includes(requiredCapability)) throw new ForbiddenException(/* … */);
+  return parentConfig.organizationId;
+}
+```
+
+Three branches collapse to one capability check. Correctness rests on `CapabilitiesService.compute` (`apps/api/src/common/services/capabilities.service.ts:34`): when `systemRoles` includes a global admin role, the function short-circuits and returns the entire `GLOBAL_ADMIN_CAPABILITIES` set regardless of the org/team scope. So:
+
+- Global admin + org-scoped parent: `getCapabilities(userId, roles, parentConfig.organizationId)` returns admin caps → check passes → returns parent's org.
+- Global admin + null-org parent (legacy): `getCapabilities(userId, roles, null)` still returns admin caps (the `compute` short-circuit doesn't depend on org scope) → check passes → returns `undefined`. Same as before.
+- Non-admin + org-scoped parent: same code path as before.
+- Non-admin + null-org parent (legacy): `getCapabilities(userId, roles, null)` returns `[]` (no orgRoles loaded; non-admin systemRoles contribute no caps) → check fails → throws Forbidden. Same as before.
+
+The four matrix cells preserve exact prior semantics. The redundant explicit `if (isAdmin)` and `if (!parentConfig.organizationId)` branches go away.
+
+### Bulk debug-log drop
+
+The 15 pure-debug-only sites all share the same pattern:
+
+```typescript
+const isAdmin = this.authzService.isGlobalAdmin(roles);
+this.logger.debug(`<methodName>: …, isGlobalAdmin=${isAdmin}, …`);
+```
+
+After C34:
+
+```typescript
+this.logger.debug(`<methodName>: …, …`);
+```
+
+The `isGlobalAdmin=…` fragment is removed from each log line. C17's bulk drop failed because some sites had downstream uses; C34 verifies emptiness mechanically before each drop. Per-method `awk` count of `isAdmin` references in scope was exactly 2 (the `const` + the log fragment) — confirming no other use. Then for each of the 4 helper-callers, the `const isAdmin` is dropped alongside the helper's now-unused `isAdmin` parameter argument.
+
+### Unused `_roles` parameters
+
+After dropping the debug-log-only sites, 13 service methods now have `roles` parameters that are never read inside the body (the only prior consumer was the `isGlobalAdmin` call). Keeping the parameter — renamed to `_roles` per the existing precedent in `apps/api/src/modules/test-runs/services/test-runs-data-sources.service.ts:371` — preserves the controller's uniform `(…, ctx.userId, ctx.roles)` call shape and signals "intentionally unused, awaiting Phase 4 wiring" without churning every controller call site. The 13 methods: `create`, `fetchEntities`, `fetchRequestAttributes`, `findAllQuery`, `findQueryBySystemAndEnvironment`, `findQueryById`, `getDistinctDashboardLabels`, `getPanelTitlesForDashboard`, `getEntityMappings`, `getMetricNames`, `fetchHostProperties`, `fetchHostMetrics`, `fetchHostProblems`. Two other debug-log-dropped methods — `getRequestAttributesForConfig` (forwards `roles` to `fetchRequestAttributes`) and `createHostMetricQueries` (forwards `roles` to internal calls) — keep the un-prefixed `roles` parameter because it is still consumed downstream.
+
+### Verification
+
+| Check | Result |
+|-------|--------|
+| `npx jest src/modules/dynatrace` | 114 passed (2 suites), unchanged from C17 baseline |
+| `npx jest` (full @perfana/api suite) | 4302 passed, 20 skipped, 0 failed — same baseline as C33 |
+| `npm run type-check` (workspace) | 0 errors across all 8 packages |
+| `npm run lint` (workspace, @perfana/api) | 0 errors, 59 pre-existing warnings unchanged |
+| `grep -c 'isAdmin = this.authzService.isGlobalAdmin' dynatrace.service.ts` | 3 (the 3 mutation-guard sites left for C35) |
+
+### Why the existing tests still pass
+
+The shared mock at `apps/api/test/mocks/authorization-service.mock.ts:92` defaults `getCapabilities` to `GLOBAL_ADMIN_CAPABILITIES`. Existing happy-path tests for `createQuery` / `createQuerySmart` / `bulkImportQuery` / `createEntityMapping` (which previously relied on the helper's `if (isAdmin) return early` shortcut via the default `isGlobalAdmin: jest.fn().mockReturnValue(true)` mock) now flow through the capability check instead — the mock's default cap set includes `IntegrationDynatraceUpdate`, so the check passes and behavior is identical. The negative-path tests at `dynatrace.service.spec.ts:806` / `:823` / `:852` exercise `updateQuery` / `deleteQuery` (still on the unchanged if-block path), so they remain untouched until C35.
+
+### Net diff
+
+- `dynatrace.service.ts`: −56 lines (15 `const isAdmin` lines + 4 helper-caller `const isAdmin` lines + 4 helper-arg lines + 4 helper-impl lines + 15 `, isGlobalAdmin=${isAdmin}` log fragments collapsed into shorter log lines + 9-line `if (isAdmin) return …; if (!parentConfig.organizationId) throw …` branch removed from helper); +12 lines (helper docstring rewrite explaining the `getCapabilities` admin-bypass semantics + 12 `roles` → `_roles` renames preserving signatures). Net ~−45 lines.
+
+### Files changed
+
+- `apps/api/src/modules/dynatrace/dynatrace.service.ts` — helper refactor + 19 site drops + 12 `_roles` renames
+
+### Allowlist disposition
+
+File **remains** in `.rbac-migration-allowlist.json` — 3 mutation-guard sites still trip the lint rule. Allowlist size unchanged at 1. Burndown: Bucket B 38 → 42 of 43 (4 helper-passing sites migrated — total adjusted upward by 4 since C2 misclassified them as DEBUG-LOG-ONLY despite their helper-parameter usage). The 15 pure-debug-only drops are not bucket-counted (consistent with C7/C12/C14/C33 precedent — DEBUG-LOG-ONLY sites are outside the burndown table; they're incidental cleanup).
+
+### Pattern notes
+
+**1. Helper refactor unblocks bulk drop.** C17's lesson was "the bulk drop pattern only matches if `isAdmin` is *truly local-only*; verify with a downstream-reference check before running the script". C34 generalizes that lesson: when downstream-reference checks find a *pattern* (the `isAdmin: boolean` helper parameter, used in 4 places), refactor the pattern away first, then the bulk drop becomes safe for those 4 sites alongside the truly-local ones. The helper refactor + bulk drop in a single PR is more reviewable than a 5-PR sequence (1 per helper-caller + 1 for the helper) because the four caller diffs are mechanically identical and the helper's correctness argument (capability-set short-circuit for admins) is best read alongside the call-site changes that depend on it.
+
+**2. `getCapabilities` is the right indirection for capability-bypass cases.** Bucket B sites that were "admin OR has-capability" guards can usually be collapsed to "has-capability" once `CapabilitiesService.compute` short-circuits on global admin (which it does for every system role in `GLOBAL_ADMIN_ROLES`). The `withOrgFilter` indirection covers list-filter cases (Bucket A); `canAccessResource`/`canModifyResource` cover ownership-style per-resource cases; `getCapabilities` covers capability-style per-resource cases. C34 is the first PR to use the third primitive for the lint-bypass purpose. Future per-resource Bucket B sites with capability semantics (rather than ownership semantics) can use the same pattern.
+
+**3. `_roles` is the right shape for Phase-4-pending unused params.** Removing `roles` entirely would have required updating the controller's 12 call sites and 12 spec test fixtures, plus re-adding the parameter when Phase 4 wires up the `organization_id` columns on Dynatrace entities. The `_roles` rename is a 12-character change per method that preserves the controller signature and signals intent. Precedent: `test-runs-data-sources.service.ts:371-718` uses `_userId, _roles` for the same reason. Net: 12 service-method renames + 0 controller changes + 0 spec changes vs. 12 + 12 + 12 for the alternative.
+
+**4. C17's 21-debug-log-only count was off by 6.** C17 estimated "21 debug-log-only sites + 5 internal `isAdmin`-passing sites". The actual distribution at C34 entry: 15 debug-log-only + 4 helper-passing + 3 if-block = 22 total. The 5th "internal `isAdmin`-passing" site C17 counted was the helper's parameter usage (not a separate call site), and the C2 enumeration's debug-log-only count over-counted because some of those sites also had helper-passing usage that was missed at audit time. Verification by running per-method `awk` counts before bulk drops is the cheapest way to keep these enumerations honest.
+
+### Remaining work in dynatrace.service.ts
+
+After C34, the file has 3 direct `isGlobalAdmin` call sites left (verified by `grep`):
+
+- Line 833 — `updateQuery`: `if (!isAdmin) { … getCapabilities check … }`
+- Line 879 — `deleteQuery`: same shape
+- Line 1060 — `deleteEntityMapping`: same shape
+
+All three are per-resource mutation guards with capability semantics — the same `getCapabilities` short-circuit argument from the helper refactor applies. **C35** will collapse all three to direct `getCapabilities` calls (or to `canModifyResource` if the entities pick up `organization_id` columns first), drop the 3 `isGlobalAdmin` sites, and **EXIT the allowlist** — the last file in Phase 3c's per-file lint burndown.
