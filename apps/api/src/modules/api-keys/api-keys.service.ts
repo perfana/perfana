@@ -126,16 +126,6 @@ export class ApiKeysService {
         throw new ResourceNotFoundException('API key', id);
       }
 
-      if (!apiKey.organization_id) {
-        // Legacy data — only global admins see it. Otherwise pretend it doesn't
-        // exist so we don't leak that a legacy key with this ID is in the DB.
-        if (!(await this.isGlobalAdminUser(userId, roles))) {
-          this.logger.warn(`[findOne] user ${userId} attempted to access legacy API key ${id}`);
-          throw new ResourceNotFoundException('API key', id);
-        }
-        return apiKey;
-      }
-
       const caps = await this.authzService.getCapabilities(userId, roles, apiKey.organization_id);
       if (!caps.includes(Capability.ApiKeyRead)) {
         this.logger.warn(`[findOne] user ${userId} lacks ApiKeyRead in org ${apiKey.organization_id} for key ${id}`);
@@ -280,19 +270,11 @@ export class ApiKeysService {
         throw new ResourceNotFoundException('API key', id);
       }
 
-      if (!apiKey.organization_id) {
-        if (!(await this.isGlobalAdminUser(userId, roles))) {
-          throw new ForbiddenException(
-            'Only global admins can delete legacy API keys (no organization)',
-          );
-        }
-      } else {
-        const caps = await this.authzService.getCapabilities(userId, roles, apiKey.organization_id);
-        if (!caps.includes(Capability.ApiKeyDelete)) {
-          throw new ForbiddenException(
-            'Organization admin privileges required to delete API keys in this organization',
-          );
-        }
+      const caps = await this.authzService.getCapabilities(userId, roles, apiKey.organization_id);
+      if (!caps.includes(Capability.ApiKeyDelete)) {
+        throw new ForbiddenException(
+          'Organization admin privileges required to delete API keys in this organization',
+        );
       }
 
       // Invalidate cache before deletion

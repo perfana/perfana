@@ -58,7 +58,6 @@ export interface AuthorizationResult {
  * - Resource ownership tracking
  * - Configurable TTL for cached permissions
  * - Cache invalidation on membership changes
- * - Backward compatibility for legacy data (null organization_id allows access)
  *
  * Authorization Hierarchy:
  * 1. Global Admin (perfana-admin, admin) - Full access to all resources
@@ -125,9 +124,8 @@ export class AuthorizationService {
    *
    * Access is granted if any of these conditions are met:
    * 1. User has global admin role
-   * 2. Resource has no organization (legacy data - backward compatibility)
-   * 3. User is a member of the resource's organization
-   * 4. User is a member of the resource's team
+   * 2. User is a member of the resource's organization
+   * 3. User is a member of the resource's team
    *
    * @param userId - The user ID to check
    * @param globalRoles - The user's global roles from JWT
@@ -144,14 +142,6 @@ export class AuthorizationService {
       return {
         allowed: true,
         reason: 'User has global admin privileges',
-      };
-    }
-
-    // Legacy data without organization - allow access for backward compatibility
-    if (!resource.organization_id) {
-      return {
-        allowed: true,
-        reason: 'Resource has no organization (legacy data)',
       };
     }
 
@@ -190,10 +180,9 @@ export class AuthorizationService {
    *
    * Modification is granted if any of these conditions are met:
    * 1. User has global admin role
-   * 2. Resource has no organization (legacy data - backward compatibility)
-   * 3. User is the resource creator (createdBy matches userId)
-   * 4. User is an organization admin (org-admin)
-   * 5. User is a team admin (team-admin) for the resource's team
+   * 2. User is the resource creator (createdBy matches userId)
+   * 3. User is an organization admin (org-admin)
+   * 4. User is a team admin (team-admin) for the resource's team
    *
    * @param userId - The user ID to check
    * @param globalRoles - The user's global roles from JWT
@@ -210,14 +199,6 @@ export class AuthorizationService {
       return {
         allowed: true,
         reason: 'User has global admin privileges',
-      };
-    }
-
-    // Legacy data without organization - allow modification for backward compatibility
-    if (!resource.organization_id) {
-      return {
-        allowed: true,
-        reason: 'Resource has no organization (legacy data)',
       };
     }
 

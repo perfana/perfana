@@ -94,7 +94,7 @@ export class DynatraceService {
     const caps = await this.authzService.getCapabilities(
       userId,
       roles,
-      parentConfig.organizationId ?? null,
+      parentConfig.organizationId,
     );
     if (!caps.includes(requiredCapability)) {
       throw new ForbiddenException(
@@ -131,11 +131,9 @@ export class DynatraceService {
       );
       this.logger.debug(`Returning ${filteredConfigs.length} Dynatrace configs for org ${organizationId} (from ${allConfigs.length} total)`);
     } else if (orgIds !== null) {
-      // Non-admin: filter to accessible organizations OR legacy configs (null organization_id)
+      // Non-admin: filter to accessible organizations
       this.logger.debug(`User ${userId} has access to ${orgIds.length} organizations`);
-      filteredConfigs = allConfigs.filter(config =>
-        !config.organizationId || orgIds.includes(config.organizationId)
-      );
+      filteredConfigs = allConfigs.filter(config => orgIds.includes(config.organizationId));
       this.logger.debug(`Returning ${filteredConfigs.length} Dynatrace configs for user ${userId} (from ${allConfigs.length} total)`);
     } else {
       filteredConfigs = allConfigs;
@@ -149,9 +147,7 @@ export class DynatraceService {
       );
     }
 
-    const uniqueOrgIds = Array.from(
-      new Set(filteredConfigs.map(c => c.organizationId).filter((id): id is string => id != null))
-    );
+    const uniqueOrgIds = Array.from(new Set(filteredConfigs.map(c => c.organizationId)));
     const capsResults = await Promise.all(
       uniqueOrgIds.map(orgId => this.authzService.getCapabilities(userId, roles, orgId))
     );
@@ -159,11 +155,10 @@ export class DynatraceService {
     uniqueOrgIds.forEach((orgId, i) => capsByOrg.set(orgId, capsResults[i] as string[]));
 
     return filteredConfigs.map(c => {
-      const caps = c.organizationId ? (capsByOrg.get(c.organizationId) ?? []) : [];
-      const isLegacy = c.organizationId == null;
+      const caps = capsByOrg.get(c.organizationId) ?? [];
       return attachPermissions(this.maskConfig(c), {
-        update: isLegacy || caps.includes(Capability.IntegrationDynatraceUpdate),
-        delete: isLegacy || caps.includes(Capability.IntegrationDynatraceDelete),
+        update: caps.includes(Capability.IntegrationDynatraceUpdate),
+        delete: caps.includes(Capability.IntegrationDynatraceDelete),
       });
     });
   }
@@ -186,7 +181,7 @@ export class DynatraceService {
       throw new NotFoundException(`Dynatrace configuration for host ${host} not found`);
     }
 
-    // Delegate the admin / legacy-null-org / membership decision to AuthorizationService.
+    // Delegate the admin / membership decision to AuthorizationService.
     // team_id is omitted to preserve the prior behavior of not checking team membership.
     // created_by is unused by canAccessResource.
     const accessResult = await this.authzService.canAccessResource(userId, roles, {
@@ -198,9 +193,7 @@ export class DynatraceService {
     }
     const isAdmin = accessResult.reason === 'User has global admin privileges';
 
-    // Attach _permissions: global admin or legacy null-org configs can always mutate;
-    // otherwise derive from per-org capabilities.
-    if (isAdmin || config.organizationId == null) {
+    if (isAdmin) {
       return attachPermissions(this.maskConfig(config), { update: true, delete: true });
     }
 
@@ -846,7 +839,7 @@ export class DynatraceService {
     const caps = await this.authzService.getCapabilities(
       userId,
       roles,
-      existing.organizationId ?? null,
+      existing.organizationId,
     );
     if (!caps.includes(Capability.IntegrationDynatraceUpdate)) {
       throw new ForbiddenException(
@@ -881,7 +874,7 @@ export class DynatraceService {
     const caps = await this.authzService.getCapabilities(
       userId,
       roles,
-      existing.organizationId ?? null,
+      existing.organizationId,
     );
     if (!caps.includes(Capability.IntegrationDynatraceDelete)) {
       throw new ForbiddenException(
@@ -1055,7 +1048,7 @@ export class DynatraceService {
     const caps = await this.authzService.getCapabilities(
       userId,
       roles,
-      existing.organizationId ?? null,
+      existing.organizationId,
     );
     if (!caps.includes(Capability.IntegrationDynatraceDelete)) {
       throw new ForbiddenException(

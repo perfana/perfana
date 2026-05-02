@@ -1142,21 +1142,6 @@ describe('DynatraceService', () => {
         expect(result[0]._permissions).toEqual({ update: true, delete: true });
       });
 
-      it('null-org (legacy) config always gets update=true and delete=true regardless of role', async () => {
-        authzService.isGlobalAdmin.mockReturnValue(false);
-        authzService.getAccessibleOrganizations.mockResolvedValue([orgId]);
-        // No integration capabilities — yet legacy config must still be editable
-        authzService.getCapabilities.mockResolvedValue([]);
-        repository.findAll.mockResolvedValue([configWithOrg, configNullOrg]);
-
-        const result = await service.findAll(mockUserId, mockRoles);
-
-        const withOrg = result.find(c => c.id === configWithOrg.id);
-        const legacy = result.find(c => c.id === configNullOrg.id);
-
-        expect(withOrg!._permissions).toEqual({ update: false, delete: false });
-        expect(legacy!._permissions).toEqual({ update: true, delete: true });
-      });
     });
 
     describe('findByHost', () => {
@@ -1174,15 +1159,6 @@ describe('DynatraceService', () => {
         expect(result._permissions).toEqual({ update: true, delete: true });
       });
 
-      it('null-org (legacy) config returned by findByHost always gets update=true and delete=true', async () => {
-        authzService.isGlobalAdmin.mockReturnValue(false);
-        authzService.getCapabilities.mockResolvedValue([]);
-        repository.findByHost.mockResolvedValue(configNullOrg);
-
-        const result = await service.findByHost(configNullOrg.host, mockUserId, mockRoles);
-
-        expect(result._permissions).toEqual({ update: true, delete: true });
-      });
     });
   });
 });

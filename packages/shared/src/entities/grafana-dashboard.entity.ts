@@ -67,8 +67,8 @@ export class GrafanaDashboard {
   updated?: Date;
 
   // Ownership tracking (RBAC Phase 2)
-  @Column({ type: 'uuid', nullable: true, name: 'organization_id' })
-  organizationId?: string;
+  @Column({ type: 'uuid', name: 'organization_id' })
+  organizationId!: string;
 
   @Column({ type: 'uuid', nullable: true, name: 'team_id' })
   teamId?: string;

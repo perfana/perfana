@@ -22,8 +22,8 @@ export class ApiKey {
   @Column({ name: 'valid_until', type: 'timestamp with time zone', nullable: true })
   validUntil?: Date;
 
-  @Column({ name: 'organization_id', type: 'uuid', nullable: true })
-  organization_id?: string;
+  @Column({ name: 'organization_id', type: 'uuid' })
+  organization_id!: string;
 
   @Column({ name: 'created_by', type: 'varchar', length: 255, nullable: true })
   created_by?: string;
