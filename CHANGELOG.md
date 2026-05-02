@@ -4,6 +4,12 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
+## [0.2.47.50] - 2026-05-02
+
+### Added
+- **RBAC Phase 5a — partitioned `audit_logs` storage layer (PR2).** Greenfield migration drops the existing non-partitioned `audit_logs` table (scaffolding-era data with no production value, per the spec) and recreates it as a Postgres-native partitioned table (`PARTITION BY RANGE (timestamp)`) with a composite `(id, timestamp)` primary key. Five secondary indexes (timestamp DESC, user_id, organization_id partial, resource_type+id partial, action) are created at the parent and inherited automatically onto every child partition. The migration bootstraps three monthly child partitions (current month + next 2 months) via `audit_logs_YYYY_MM` naming. Retention becomes a `DROP PARTITION` operation (~instantaneous) instead of a slow `DELETE WHERE timestamp < ...`.
+- **`AuditPartitionManager` daily scheduler (worker).** Runs at 03:00 UTC via `@Cron(CronExpression.EVERY_DAY_AT_3AM, { timeZone: 'UTC' })`. Two responsibilities, both idempotent: (1) ensure partitions exist for the current month + next 2 months (`CREATE TABLE IF NOT EXISTS`); (2) drop partitions older than `AUDIT_RETENTION_MONTHS` (env var, default 24). Strict regex `/^audit_logs_(\d{4})_(\d{2})$/` filters out non-date-shaped tables (`audit_logs_default`, `audit_logs_archive_2023`) so only legitimate monthly partitions are eligible for drop. Errors are caught and logged at the `cron()` level so a transient DB blip never crashes the worker. Registered in `SchedulersModule` alongside `IncrementalCollectionScheduler`.
+
 ## [0.2.47.49] - 2026-05-02
 
 ### Added
