@@ -200,15 +200,18 @@ describe('TestRunsQueryService', () => {
   });
 
   describe('CRUD Operations (delegated to TestRunsCrudQueryService)', () => {
+    // The default authzService mock returns isGlobalAdmin=true, so the parent's
+    // resolveOrganizationIds/resolveTeamIds collapse to: isAdmin=true, orgIds=[], userTeamIds=[].
+
     describe('findAllPaginated', () => {
-      it('should delegate to crudService.findAllPaginated', async () => {
+      it('should delegate to crudService.findAllPaginated with resolved isAdmin/orgIds/userTeamIds', async () => {
         const mockTestRuns = [createMockTestRun()];
         const mockResponse = new PaginatedResponseDto(mockTestRuns, 100, 1, 50);
         crudService.findAllPaginated.mockResolvedValue(mockResponse);
 
         const result = await service.findAllPaginated(mockUserId, mockRoles, { page: 1, pageSize: 50 });
 
-        expect(crudService.findAllPaginated).toHaveBeenCalledWith(mockUserId, mockRoles, { page: 1, pageSize: 50 }, undefined);
+        expect(crudService.findAllPaginated).toHaveBeenCalledWith(true, [], [], { page: 1, pageSize: 50 }, undefined);
         expect(result.data).toHaveLength(1);
         expect(result.total).toBe(100);
       });
@@ -225,49 +228,49 @@ describe('TestRunsQueryService', () => {
     });
 
     describe('findAll', () => {
-      it('should delegate to crudService.findAll', async () => {
+      it('should delegate to crudService.findAll with resolved isAdmin/orgIds', async () => {
         const mockTestRuns = [createMockTestRun()];
         crudService.findAll.mockResolvedValue(mockTestRuns);
 
         const result = await service.findAll(mockUserId, mockRoles);
 
-        expect(crudService.findAll).toHaveBeenCalledWith(mockUserId, mockRoles);
+        expect(crudService.findAll).toHaveBeenCalledWith(true, []);
         expect(result).toHaveLength(1);
       });
     });
 
     describe('findByTestRunId', () => {
-      it('should delegate to crudService.findByTestRunId', async () => {
+      it('should delegate to crudService.findByTestRunId with resolved isAdmin', async () => {
         const mockTestRun = createMockTestRun();
         crudService.findByTestRunId.mockResolvedValue(mockTestRun);
 
         const result = await service.findByTestRunId('PaymentService-production-loadTest-001', mockUserId, mockRoles);
 
-        expect(crudService.findByTestRunId).toHaveBeenCalledWith('PaymentService-production-loadTest-001', mockUserId, mockRoles);
+        expect(crudService.findByTestRunId).toHaveBeenCalledWith('PaymentService-production-loadTest-001', mockUserId, true);
         expect(result.test_run_id).toBe('PaymentService-production-loadTest-001');
       });
     });
 
     describe('findOne', () => {
-      it('should delegate to crudService.findOne', async () => {
+      it('should delegate to crudService.findOne with resolved isAdmin', async () => {
         const mockTestRun = createMockTestRun();
         crudService.findOne.mockResolvedValue(mockTestRun);
 
         const result = await service.findOne('test-run-uuid-123', mockUserId, mockRoles);
 
-        expect(crudService.findOne).toHaveBeenCalledWith('test-run-uuid-123', mockUserId, mockRoles);
+        expect(crudService.findOne).toHaveBeenCalledWith('test-run-uuid-123', mockUserId, true);
         expect(result.id).toBe('test-run-uuid-123');
       });
     });
 
     describe('getTestRunByTestRunId', () => {
-      it('should delegate to crudService.getTestRunByTestRunId', async () => {
+      it('should delegate to crudService.getTestRunByTestRunId with resolved isAdmin', async () => {
         const mockTestRun = createMockTestRun();
         crudService.getTestRunByTestRunId.mockResolvedValue(mockTestRun);
 
         const result = await service.getTestRunByTestRunId('PaymentService-production-loadTest-001', mockUserId, mockRoles);
 
-        expect(crudService.getTestRunByTestRunId).toHaveBeenCalledWith('PaymentService-production-loadTest-001', mockUserId, mockRoles);
+        expect(crudService.getTestRunByTestRunId).toHaveBeenCalledWith('PaymentService-production-loadTest-001', mockUserId, true);
         expect(result).not.toBeNull();
       });
 
@@ -281,7 +284,7 @@ describe('TestRunsQueryService', () => {
     });
 
     describe('findByTestRunIdAndParams', () => {
-      it('should delegate to crudService.findByTestRunIdAndParams', async () => {
+      it('should delegate to crudService.findByTestRunIdAndParams with resolved isAdmin/orgIds/userTeamIds', async () => {
         const mockTestRun = createMockTestRun();
         crudService.findByTestRunIdAndParams.mockResolvedValue(mockTestRun);
 
@@ -299,8 +302,9 @@ describe('TestRunsQueryService', () => {
           'PaymentService',
           'production',
           'loadTest',
-          mockUserId,
-          mockRoles,
+          true,
+          [],
+          [],
           undefined,
         );
         expect(result.test_run_id).toBe('PaymentService-production-loadTest-001');
@@ -308,7 +312,7 @@ describe('TestRunsQueryService', () => {
     });
 
     describe('getRelatedTestRuns', () => {
-      it('should delegate to crudService.getRelatedTestRuns', async () => {
+      it('should delegate to crudService.getRelatedTestRuns with resolved isAdmin/orgIds/userTeamIds', async () => {
         const mockRelatedRuns = [
           { test_run_id: 'related-001', created_at: new Date().toISOString(), completed: true },
         ];
@@ -316,13 +320,13 @@ describe('TestRunsQueryService', () => {
 
         const result = await service.getRelatedTestRuns('PaymentService-production-loadTest-001', mockUserId, mockRoles);
 
-        expect(crudService.getRelatedTestRuns).toHaveBeenCalledWith('PaymentService-production-loadTest-001', mockUserId, mockRoles, undefined, undefined, undefined);
+        expect(crudService.getRelatedTestRuns).toHaveBeenCalledWith('PaymentService-production-loadTest-001', true, [], [], undefined, undefined, undefined);
         expect(result).toHaveLength(1);
       });
     });
 
     describe('getSystemsSummary', () => {
-      it('should delegate to crudService.getSystemsSummary', async () => {
+      it('should delegate to crudService.getSystemsSummary with resolved isAdmin/orgIds/userTeamIds', async () => {
         const mockSummary = [
           { id: 'system-1', name: 'PaymentService', environments: [], created_at: new Date().toISOString() },
         ];
@@ -330,31 +334,31 @@ describe('TestRunsQueryService', () => {
 
         const result = await service.getSystemsSummary(mockUserId, mockRoles);
 
-        expect(crudService.getSystemsSummary).toHaveBeenCalledWith(mockUserId, mockRoles, undefined);
+        expect(crudService.getSystemsSummary).toHaveBeenCalledWith(true, [], [], undefined);
         expect(result).toHaveLength(1);
       });
     });
 
     describe('getAllTags', () => {
-      it('should delegate to crudService.getAllTags', async () => {
+      it('should delegate to crudService.getAllTags with resolved isAdmin/orgIds', async () => {
         const mockTags = ['performance', 'baseline', 'regression'];
         crudService.getAllTags.mockResolvedValue(mockTags);
 
         const result = await service.getAllTags(mockUserId, mockRoles);
 
-        expect(crudService.getAllTags).toHaveBeenCalledWith(mockUserId, mockRoles);
+        expect(crudService.getAllTags).toHaveBeenCalledWith(true, []);
         expect(result).toEqual(mockTags);
       });
     });
 
     describe('getAllAnnotations', () => {
-      it('should delegate to crudService.getAllAnnotations', async () => {
+      it('should delegate to crudService.getAllAnnotations with resolved isAdmin/orgIds', async () => {
         const mockAnnotations = ['test annotation', 'another annotation'];
         crudService.getAllAnnotations.mockResolvedValue(mockAnnotations);
 
         const result = await service.getAllAnnotations(mockUserId, mockRoles);
 
-        expect(crudService.getAllAnnotations).toHaveBeenCalledWith(mockUserId, mockRoles);
+        expect(crudService.getAllAnnotations).toHaveBeenCalledWith(true, []);
         expect(result).toEqual(mockAnnotations);
       });
     });
@@ -382,25 +386,25 @@ describe('TestRunsQueryService', () => {
     });
 
     describe('getBaselineCandidates', () => {
-      it('should delegate to crudService.getBaselineCandidates', async () => {
+      it('should delegate to crudService.getBaselineCandidates without auth params', async () => {
         const mockCandidates = [createMockTestRun()];
         crudService.getBaselineCandidates.mockResolvedValue(mockCandidates);
 
         const result = await service.getBaselineCandidates('system-1', 'production', 'loadTest', mockUserId, mockRoles);
 
-        expect(crudService.getBaselineCandidates).toHaveBeenCalledWith('system-1', 'production', 'loadTest', mockUserId, mockRoles, undefined, undefined);
+        expect(crudService.getBaselineCandidates).toHaveBeenCalledWith('system-1', 'production', 'loadTest', undefined, undefined);
         expect(result).toHaveLength(1);
       });
     });
 
     describe('getRequestNames', () => {
-      it('should delegate to crudService.getRequestNames', async () => {
+      it('should delegate to crudService.getRequestNames with resolved isAdmin', async () => {
         const mockNames = ['request-1', 'request-2'];
         crudService.getRequestNames.mockResolvedValue(mockNames);
 
         const result = await service.getRequestNames('test-run-001', mockUserId, mockRoles);
 
-        expect(crudService.getRequestNames).toHaveBeenCalledWith('test-run-001', mockUserId, mockRoles, undefined);
+        expect(crudService.getRequestNames).toHaveBeenCalledWith('test-run-001', mockUserId, true, undefined);
         expect(result).toEqual(mockNames);
       });
     });

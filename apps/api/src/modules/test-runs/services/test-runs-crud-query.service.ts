@@ -18,10 +18,16 @@ import { AuthorizationService } from '../../../common/services/authorization.ser
  * Handles: findAll, findOne, findByTestRunId, pagination, and related queries
  *
  * Authorization:
- * - All query methods accept userId and roles parameters for authorization
- * - Currently TestRun entity does not have organization_id, so all data is treated as legacy
- * - When organization_id is added to TestRun (Phase 4), authorization filtering will be enabled
- * - Global admins bypass all authorization checks
+ * - List-filter methods accept pre-resolved `isAdmin`, `organizationIds`, and
+ *   `userTeamIds` from the parent facade (TestRunsQueryService) so they don't
+ *   call `authzService.isGlobalAdmin` / `getAccessibleOrganizations` /
+ *   `getAccessibleTeams` themselves. The parent uses `withOrgFilter` /
+ *   `withTeamFilter` to compute these once.
+ * - Per-resource methods (`findByTestRunId`, `findOne`, `getTestRunByTestRunId`)
+ *   still call `isOrganizationMember` / `canViewTeamResources` directly because
+ *   those are individual-resource lookups, not list filters.
+ * - TestRun entity does not have organization_id; access is checked via the
+ *   joined SystemUnderTest's `organization_id` / `team_id`.
  */
 @Injectable()
 export class TestRunsCrudQueryService {
@@ -41,17 +47,16 @@ export class TestRunsCrudQueryService {
   ) {}
 
   /**
-   * Apply team-level access restriction to a query builder.
+   * Apply team-level access restriction to a query builder using a pre-resolved
+   * `userTeamIds` array (computed by the parent via `withTeamFilter`).
    * Ensures non-admin users can only see resources from teams they belong to
    * when the team has restrict_to_team_members enabled.
    */
-  private async applyTeamRestriction(
+  private applyTeamRestriction(
     queryBuilder: SelectQueryBuilder<ObjectLiteral>,
     sutAlias: string,
-    userId: string,
-  ): Promise<void> {
-    const userTeamIds = await this.authzService.getAccessibleTeams(userId);
-
+    userTeamIds: string[],
+  ): void {
     queryBuilder.leftJoin('teams', 'team', `team.id = ${sutAlias}.team_id`);
     queryBuilder.andWhere(
       '(' +
@@ -146,18 +151,24 @@ export class TestRunsCrudQueryService {
   /**
    * OPTIMIZED: Paginated query with single database round-trip
    *
-   * @param userId - The user ID for authorization checks
-   * @param roles - The user's roles for authorization checks
+   * @param isAdmin - Whether the caller has global admin privileges (resolved by the parent
+   *   facade via `withOrgFilter`)
+   * @param organizationIds - User's accessible organization IDs (resolved by the parent via
+   *   `withOrgFilter`); used only when `organizationId` is not explicitly set
+   * @param userTeamIds - User's accessible team IDs (resolved by the parent via `withTeamFilter`);
+   *   admins receive `[]`
    * @param paginationDto - Pagination options
-   *
-   * Note: TestRun entity does not have organization_id yet, so all data is accessible.
-   * Authorization filtering will be enabled when Phase 4 adds organization_id column.
+   * @param organizationId - Optional explicit organization scope
    */
-  async findAllPaginated(userId: string, roles: string[], paginationDto?: PaginationQueryDto, organizationId?: string): Promise<PaginatedResponseDto<TestRun>> {
+  async findAllPaginated(
+    isAdmin: boolean,
+    organizationIds: string[],
+    userTeamIds: string[],
+    paginationDto?: PaginationQueryDto,
+    organizationId?: string,
+  ): Promise<PaginatedResponseDto<TestRun>> {
     try {
-      // Log authorization context for debugging
-      const isAdmin = this.authzService.isGlobalAdmin(roles);
-      this.logger.debug(`findAllPaginated: userId=${userId}, isGlobalAdmin=${isAdmin}, organizationId=${organizationId}`);
+      this.logger.debug(`findAllPaginated: isAdmin=${isAdmin}, organizationId=${organizationId}`);
 
       const { page = 1, pageSize = 50, sortBy = 'createdAt', sortOrder = 'DESC', system, environment, workload } = paginationDto || {};
       const skip = (page - 1) * pageSize;
@@ -190,19 +201,14 @@ export class TestRunsCrudQueryService {
         queryBuilder.andWhere('sut.organization_id = :organizationId', { organizationId });
         // Apply team restriction for non-admin users
         if (!isAdmin) {
-          await this.applyTeamRestriction(queryBuilder, 'sut', userId);
+          this.applyTeamRestriction(queryBuilder, 'sut', userTeamIds);
         }
       } else if (!isAdmin) {
         // Non-admin users can only see test runs from systems in their organizations
-        const orgIds = await this.authzService.getAccessibleOrganizations(userId);
-
-        if (orgIds.length === 0) {
+        if (organizationIds.length === 0) {
           // User has no organization memberships - return empty result
           return new PaginatedResponseDto([], 0, page, pageSize);
         }
-
-        // Get user's team memberships for team-restriction filtering
-        const userTeamIds = await this.authzService.getAccessibleTeams(userId);
 
         // Join teams table for restriction check
         queryBuilder.leftJoin('teams', 'team', 'team.id = sut.team_id');
@@ -217,7 +223,7 @@ export class TestRunsCrudQueryService {
               ? ' OR (sut.team_id IN (:...userTeamIds))'                                // direct team member
               : '') +
           ')',
-          { orgIds, ...(userTeamIds.length > 0 ? { userTeamIds } : {}) },
+          { orgIds: organizationIds, ...(userTeamIds.length > 0 ? { userTeamIds } : {}) },
         );
       }
       // Admin without organizationId: no filter (backward compat)
@@ -311,22 +317,22 @@ export class TestRunsCrudQueryService {
   /**
    * Get distinct filter options (system names, environments, workloads) for the test runs
    * the user has access to. Used by the frontend to populate filter dropdowns.
+   *
+   * @param isAdmin - Whether the caller has global admin privileges (resolved by the parent)
+   * @param organizationIds - User's accessible organization IDs (resolved by the parent)
+   * @param userTeamIds - User's accessible team IDs (resolved by the parent); admins receive `[]`
+   * @param organizationId - Optional explicit organization scope
    */
-  async getFilterOptions(userId: string, roles: string[], organizationId?: string): Promise<{ systems: string[]; environments: string[]; workloads: string[] }> {
+  async getFilterOptions(
+    isAdmin: boolean,
+    organizationIds: string[],
+    userTeamIds: string[],
+    organizationId?: string,
+  ): Promise<{ systems: string[]; environments: string[]; workloads: string[] }> {
     try {
-      const isAdmin = this.authzService.isGlobalAdmin(roles);
-
-      // Pre-fetch team/org access data for non-admin users
-      let orgIds: string[] = [];
-      let userTeamIds: string[] = [];
-      if (!isAdmin) {
-        if (!organizationId) {
-          orgIds = await this.authzService.getAccessibleOrganizations(userId);
-          if (orgIds.length === 0) {
-            return { systems: [], environments: [], workloads: [] };
-          }
-        }
-        userTeamIds = await this.authzService.getAccessibleTeams(userId);
+      // Non-admin without explicit org and no accessible orgs → nothing to show
+      if (!isAdmin && !organizationId && organizationIds.length === 0) {
+        return { systems: [], environments: [], workloads: [] };
       }
 
       const buildBaseQuery = () => {
@@ -355,7 +361,7 @@ export class TestRunsCrudQueryService {
             ')',
             userTeamIds.length > 0 ? { userTeamIds } : {},
           );
-        } else if (!organizationId && !isAdmin && orgIds.length > 0) {
+        } else if (!organizationId && !isAdmin && organizationIds.length > 0) {
           qb.leftJoin('teams', 'team', 'team.id = sut.team_id');
           qb.andWhere(
             '(' +
@@ -366,7 +372,7 @@ export class TestRunsCrudQueryService {
                 ? ' OR (sut.team_id IN (:...userTeamIds))'
                 : '') +
             ')',
-            { orgIds, ...(userTeamIds.length > 0 ? { userTeamIds } : {}) },
+            { orgIds: organizationIds, ...(userTeamIds.length > 0 ? { userTeamIds } : {}) },
           );
         }
       };
@@ -400,14 +406,12 @@ export class TestRunsCrudQueryService {
   /**
    * DEPRECATED: Use findAllPaginated() instead
    *
-   * @param userId - The user ID for authorization checks
-   * @param roles - The user's roles for authorization checks
+   * @param isAdmin - Whether the caller has global admin privileges (resolved by the parent)
+   * @param organizationIds - User's accessible organization IDs (resolved by the parent)
    */
-  async findAll(userId: string, roles: string[]): Promise<TestRun[]> {
+  async findAll(isAdmin: boolean, organizationIds: string[]): Promise<TestRun[]> {
     try {
-      // Log authorization context for debugging
-      const isAdmin = this.authzService.isGlobalAdmin(roles);
-      this.logger.debug(`findAll: userId=${userId}, isGlobalAdmin=${isAdmin}`);
+      this.logger.debug(`findAll: isAdmin=${isAdmin}`);
 
       const queryBuilder = this.testRunRepo
         .createQueryBuilder('tr')
@@ -417,14 +421,12 @@ export class TestRunsCrudQueryService {
 
       // Apply organization-based filtering via systems_under_test
       if (!isAdmin) {
-        const orgIds = await this.authzService.getAccessibleOrganizations(userId);
-
-        if (orgIds.length === 0) {
+        if (organizationIds.length === 0) {
           return [];
         }
 
         // Filter by organization_id through the systems_under_test relationship
-        queryBuilder.andWhere('sut.organization_id IN (:...orgIds)', { orgIds });
+        queryBuilder.andWhere('sut.organization_id IN (:...orgIds)', { orgIds: organizationIds });
       }
 
       const testRunEntities = await queryBuilder.getMany();
@@ -481,13 +483,12 @@ export class TestRunsCrudQueryService {
    * Find a test run by its testRunId.
    *
    * @param testRunId - The test run identifier
-   * @param userId - The user ID for authorization checks
-   * @param roles - The user's roles for authorization checks
+   * @param userId - The user ID (used for per-resource membership/team-access checks)
+   * @param isAdmin - Whether the caller has global admin privileges (resolved by the parent)
    */
-  async findByTestRunId(testRunId: string, userId: string, roles: string[]): Promise<TestRun> {
+  async findByTestRunId(testRunId: string, userId: string, isAdmin: boolean): Promise<TestRun> {
     try {
-      // Log authorization context for debugging
-      this.logger.debug(`findByTestRunId: testRunId=${testRunId}, userId=${userId}, isGlobalAdmin=${this.authzService.isGlobalAdmin(roles)}`);
+      this.logger.debug(`findByTestRunId: testRunId=${testRunId}, userId=${userId}, isAdmin=${isAdmin}`);
 
       const testRunEntity = await this.testRunRepo.findOne({
         where: { testRunId },
@@ -499,7 +500,6 @@ export class TestRunsCrudQueryService {
       }
 
       // Check organization-based access via systems_under_test
-      const isAdmin = this.authzService.isGlobalAdmin(roles);
       if (!isAdmin && testRunEntity.systemUnderTest) {
         const systemOrgId = testRunEntity.systemUnderTest.organization_id;
 
@@ -549,12 +549,12 @@ export class TestRunsCrudQueryService {
    * Find a test run by its UUID.
    *
    * @param id - The test run UUID
-   * @param userId - The user ID for authorization checks
-   * @param roles - The user's roles for authorization checks
+   * @param userId - The user ID (used for per-resource membership/team-access checks)
+   * @param isAdmin - Whether the caller has global admin privileges (resolved by the parent)
    */
-  async findOne(id: string, userId: string, roles: string[]): Promise<TestRun> {
+  async findOne(id: string, userId: string, isAdmin: boolean): Promise<TestRun> {
     try {
-      this.logger.debug(`findOne: id=${id}, userId=${userId}, isGlobalAdmin=${this.authzService.isGlobalAdmin(roles)}`);
+      this.logger.debug(`findOne: id=${id}, userId=${userId}, isAdmin=${isAdmin}`);
 
       const testRunEntity = await this.testRunRepo.findOne({
         where: { id },
@@ -566,7 +566,6 @@ export class TestRunsCrudQueryService {
       }
 
       // Check organization-based access via systems_under_test
-      const isAdmin = this.authzService.isGlobalAdmin(roles);
       if (!isAdmin && testRunEntity.systemUnderTest) {
         const systemOrgId = testRunEntity.systemUnderTest.organization_id;
 
@@ -616,12 +615,12 @@ export class TestRunsCrudQueryService {
    * Get a test run by its testRunId, returning null if not found.
    *
    * @param testRunId - The test run identifier
-   * @param userId - The user ID for authorization checks
-   * @param roles - The user's roles for authorization checks
+   * @param userId - The user ID (used for per-resource membership/team-access checks)
+   * @param isAdmin - Whether the caller has global admin privileges (resolved by the parent)
    */
-  async getTestRunByTestRunId(testRunId: string, userId: string, roles: string[]): Promise<TestRun | null> {
+  async getTestRunByTestRunId(testRunId: string, userId: string, isAdmin: boolean): Promise<TestRun | null> {
     try {
-      this.logger.debug(`getTestRunByTestRunId: testRunId=${testRunId}, userId=${userId}`);
+      this.logger.debug(`getTestRunByTestRunId: testRunId=${testRunId}, userId=${userId}, isAdmin=${isAdmin}`);
 
       const testRunEntity = await this.testRunRepo.findOne({
         where: { testRunId },
@@ -633,7 +632,6 @@ export class TestRunsCrudQueryService {
       }
 
       // Check organization-based access via systems_under_test
-      const isAdmin = this.authzService.isGlobalAdmin(roles);
       if (!isAdmin && testRunEntity.systemUnderTest) {
         const systemOrgId = testRunEntity.systemUnderTest.organization_id;
 
@@ -686,8 +684,9 @@ export class TestRunsCrudQueryService {
    * @param systemName - The system under test name
    * @param environment - The test environment
    * @param workload - The workload name
-   * @param userId - The user ID for authorization checks
-   * @param roles - The user's roles for authorization checks
+   * @param isAdmin - Whether the caller has global admin privileges (resolved by the parent)
+   * @param organizationIds - User's accessible organization IDs (resolved by the parent)
+   * @param userTeamIds - User's accessible team IDs (resolved by the parent); admins receive `[]`
    * @param organizationId - Optional organization ID to scope the lookup
    */
   async findByTestRunIdAndParams(
@@ -695,14 +694,13 @@ export class TestRunsCrudQueryService {
     systemName: string,
     environment: string,
     workload: string,
-    userId: string,
-    roles: string[],
+    isAdmin: boolean,
+    organizationIds: string[],
+    userTeamIds: string[],
     organizationId?: string,
   ): Promise<TestRun> {
     try {
-      this.logger.debug(`findByTestRunIdAndParams: testRunId=${testRunId}, userId=${userId}, organizationId=${organizationId}`);
-
-      const isAdmin = this.authzService.isGlobalAdmin(roles);
+      this.logger.debug(`findByTestRunIdAndParams: testRunId=${testRunId}, isAdmin=${isAdmin}, organizationId=${organizationId}`);
 
       // Single query: join test_run with system_under_test by name
       const queryBuilder = this.testRunRepo
@@ -720,20 +718,19 @@ export class TestRunsCrudQueryService {
         queryBuilder.andWhere('sut.organization_id = :organizationId', { organizationId });
       } else if (!isAdmin) {
         // Non-admin without explicit org: filter by accessible orgs
-        const orgIds = await this.authzService.getAccessibleOrganizations(userId);
-        if (orgIds.length === 0) {
+        if (organizationIds.length === 0) {
           throw new ResourceNotFoundException('System under test', systemName);
         }
         queryBuilder.andWhere(
           '(sut.organization_id IN (:...orgIds) OR sut.organization_id IS NULL)',
-          { orgIds }
+          { orgIds: organizationIds }
         );
       }
       // Admin without organizationId: no org filter (backward compat for API key access)
 
       // Apply team restriction for non-admin users
       if (!isAdmin) {
-        await this.applyTeamRestriction(queryBuilder, 'sut', userId);
+        this.applyTeamRestriction(queryBuilder, 'sut', userTeamIds);
       }
 
       const testRunEntity = await queryBuilder.getOne();
@@ -765,26 +762,36 @@ export class TestRunsCrudQueryService {
    * Get related test runs for a given test run.
    *
    * @param testRunId - The test run identifier
-   * @param userId - The user ID for authorization checks
-   * @param roles - The user's roles for authorization checks
+   * @param isAdmin - Whether the caller has global admin privileges (resolved by the parent)
+   * @param organizationIds - User's accessible organization IDs (resolved by the parent)
+   * @param userTeamIds - User's accessible team IDs (resolved by the parent); admins receive `[]`
    * @param system - Optional system name filter
    * @param environment - Optional environment filter
    * @param workload - Optional workload filter
    */
   async getRelatedTestRuns(
     testRunId: string,
-    userId: string,
-    roles: string[],
+    isAdmin: boolean,
+    organizationIds: string[],
+    userTeamIds: string[],
     system?: string,
     environment?: string,
-    workload?: string
+    workload?: string,
   ): Promise<RelatedTestRun[]> {
     try {
-      this.logger.debug(`getRelatedTestRuns: testRunId=${testRunId}, userId=${userId}`);
+      this.logger.debug(`getRelatedTestRuns: testRunId=${testRunId}, isAdmin=${isAdmin}`);
 
       let currentTestRun: TestRun | undefined;
       if (system && environment && workload) {
-        currentTestRun = await this.findByTestRunIdAndParams(testRunId, system, environment, workload, userId, roles);
+        currentTestRun = await this.findByTestRunIdAndParams(
+          testRunId,
+          system,
+          environment,
+          workload,
+          isAdmin,
+          organizationIds,
+          userTeamIds,
+        );
       } else {
         const testRunEntity = await this.testRunRepo.findOne({
           where: { testRunId },
@@ -843,13 +850,19 @@ export class TestRunsCrudQueryService {
   /**
    * Get a summary of all systems with their environments and workloads.
    *
-   * @param userId - The user ID for authorization checks
-   * @param roles - The user's roles for authorization checks
+   * @param isAdmin - Whether the caller has global admin privileges (resolved by the parent)
+   * @param organizationIds - User's accessible organization IDs (resolved by the parent)
+   * @param userTeamIds - User's accessible team IDs (resolved by the parent); admins receive `[]`
+   * @param organizationId - Optional explicit organization scope
    */
-  async getSystemsSummary(userId: string, roles: string[], organizationId?: string): Promise<SystemsSummary[]> {
+  async getSystemsSummary(
+    isAdmin: boolean,
+    organizationIds: string[],
+    userTeamIds: string[],
+    organizationId?: string,
+  ): Promise<SystemsSummary[]> {
     try {
-      const isAdmin = this.authzService.isGlobalAdmin(roles);
-      this.logger.log(`[getSystemsSummary] START - userId=${userId}, isGlobalAdmin=${isAdmin}, organizationId=${organizationId}`);
+      this.logger.log(`[getSystemsSummary] START - isAdmin=${isAdmin}, organizationId=${organizationId}`);
 
       let systems: SystemUnderTest[];
       if (organizationId) {
@@ -860,7 +873,7 @@ export class TestRunsCrudQueryService {
           .orderBy('system.name', 'ASC');
         // Apply team restriction for non-admin users
         if (!isAdmin) {
-          await this.applyTeamRestriction(qb, 'system', userId);
+          this.applyTeamRestriction(qb, 'system', userTeamIds);
         }
         systems = await qb.getMany();
         this.logger.log(`[getSystemsSummary] ORG-SCOPED PATH - Returning ${systems.length} systems for org ${organizationId}`);
@@ -871,18 +884,13 @@ export class TestRunsCrudQueryService {
         });
         this.logger.log(`[getSystemsSummary] ADMIN PATH - Returning ${systems.length} systems (all systems)`);
       } else {
-        // Get user's accessible organizations
-        const orgIds = await this.authzService.getAccessibleOrganizations(userId);
-        this.logger.log(`[getSystemsSummary] NON-ADMIN PATH - User ${userId} has access to organizations: ${orgIds.join(', ')}`);
+        this.logger.log(`[getSystemsSummary] NON-ADMIN PATH - accessible organizations: ${organizationIds.join(', ')}`);
 
         // If user has no organizations, return empty array
-        if (orgIds.length === 0) {
+        if (organizationIds.length === 0) {
           this.logger.log(`[getSystemsSummary] User has no organizations - returning empty array`);
           return [];
         }
-
-        // Get user's team memberships for team-restriction filtering
-        const userTeamIds = await this.authzService.getAccessibleTeams(userId);
 
         // Filter systems by organization + team restriction
         const qb = this.systemRepo
@@ -896,13 +904,13 @@ export class TestRunsCrudQueryService {
                 ? ' OR (system.team_id IN (:...userTeamIds))'
                 : '') +
             ')',
-            { orgIds, ...(userTeamIds.length > 0 ? { userTeamIds } : {}) },
+            { orgIds: organizationIds, ...(userTeamIds.length > 0 ? { userTeamIds } : {}) },
           )
           .orderBy('system.name', 'ASC');
 
         systems = await qb.getMany();
 
-        this.logger.log(`[getSystemsSummary] FILTERED RESULT - Returning ${systems.length} systems from organizations: ${orgIds.join(', ')}`);
+        this.logger.log(`[getSystemsSummary] FILTERED RESULT - Returning ${systems.length} systems from organizations: ${organizationIds.join(', ')}`);
         systems.forEach(s => {
           this.logger.log(`  - System: ${s.name} (id: ${s.id}, org: ${s.organization_id})`);
         });
@@ -968,13 +976,12 @@ export class TestRunsCrudQueryService {
   /**
    * Get all unique tags from test runs.
    *
-   * @param userId - The user ID for authorization checks
-   * @param roles - The user's roles for authorization checks
+   * @param isAdmin - Whether the caller has global admin privileges (resolved by the parent)
+   * @param organizationIds - User's accessible organization IDs (resolved by the parent)
    */
-  async getAllTags(userId: string, roles: string[]): Promise<string[]> {
+  async getAllTags(isAdmin: boolean, organizationIds: string[]): Promise<string[]> {
     try {
-      const isAdmin = this.authzService.isGlobalAdmin(roles);
-      this.logger.log(`[getAllTags] START - userId=${userId}, isGlobalAdmin=${isAdmin}`);
+      this.logger.log(`[getAllTags] START - isAdmin=${isAdmin}`);
 
       const queryBuilder = this.testRunRepo
         .createQueryBuilder('tr')
@@ -984,10 +991,9 @@ export class TestRunsCrudQueryService {
 
       // Apply organization filtering for non-admin users
       if (!isAdmin) {
-        const orgIds = await this.authzService.getAccessibleOrganizations(userId);
-        this.logger.log(`[getAllTags] NON-ADMIN PATH - User ${userId} has access to organizations: ${orgIds.join(', ')}`);
+        this.logger.log(`[getAllTags] NON-ADMIN PATH - accessible organizations: ${organizationIds.join(', ')}`);
 
-        if (orgIds.length === 0) {
+        if (organizationIds.length === 0) {
           this.logger.log(`[getAllTags] User has no organizations - returning empty array`);
           return [];
         }
@@ -995,7 +1001,7 @@ export class TestRunsCrudQueryService {
         // Filter via systems_under_test JOIN since test_runs doesn't have organization_id
         queryBuilder
           .leftJoin('systems_under_test', 'sut', 'sut.id = tr.systemUnderTestId')
-          .andWhere('sut.organization_id IN (:...orgIds)', { orgIds });
+          .andWhere('sut.organization_id IN (:...orgIds)', { orgIds: organizationIds });
       }
 
       const result = await queryBuilder.getRawMany();
@@ -1012,13 +1018,12 @@ export class TestRunsCrudQueryService {
   /**
    * Get all unique annotations from test runs.
    *
-   * @param userId - The user ID for authorization checks
-   * @param roles - The user's roles for authorization checks
+   * @param isAdmin - Whether the caller has global admin privileges (resolved by the parent)
+   * @param organizationIds - User's accessible organization IDs (resolved by the parent)
    */
-  async getAllAnnotations(userId: string, roles: string[]): Promise<string[]> {
+  async getAllAnnotations(isAdmin: boolean, organizationIds: string[]): Promise<string[]> {
     try {
-      const isAdmin = this.authzService.isGlobalAdmin(roles);
-      this.logger.log(`[getAllAnnotations] START - userId=${userId}, isGlobalAdmin=${isAdmin}`);
+      this.logger.log(`[getAllAnnotations] START - isAdmin=${isAdmin}`);
 
       const queryBuilder = this.testRunRepo
         .createQueryBuilder('tr')
@@ -1028,10 +1033,9 @@ export class TestRunsCrudQueryService {
 
       // Apply organization filtering for non-admin users
       if (!isAdmin) {
-        const orgIds = await this.authzService.getAccessibleOrganizations(userId);
-        this.logger.log(`[getAllAnnotations] NON-ADMIN PATH - User ${userId} has access to organizations: ${orgIds.join(', ')}`);
+        this.logger.log(`[getAllAnnotations] NON-ADMIN PATH - accessible organizations: ${organizationIds.join(', ')}`);
 
-        if (orgIds.length === 0) {
+        if (organizationIds.length === 0) {
           this.logger.log(`[getAllAnnotations] User has no organizations - returning empty array`);
           return [];
         }
@@ -1039,7 +1043,7 @@ export class TestRunsCrudQueryService {
         // Filter via systems_under_test JOIN since test_runs doesn't have organization_id
         queryBuilder
           .leftJoin('systems_under_test', 'sut', 'sut.id = tr.systemUnderTestId')
-          .andWhere('sut.organization_id IN (:...orgIds)', { orgIds });
+          .andWhere('sut.organization_id IN (:...orgIds)', { orgIds: organizationIds });
       }
 
       const result = await queryBuilder.getRawMany();
@@ -1059,8 +1063,6 @@ export class TestRunsCrudQueryService {
    * @param systemUnderTestId - The system under test ID
    * @param testEnvironment - The test environment
    * @param workload - The workload name
-   * @param userId - The user ID for authorization checks
-   * @param roles - The user's roles for authorization checks
    * @param excludeTestRunId - Optional test run ID to exclude
    * @param limit - Maximum number of results
    */
@@ -1068,13 +1070,11 @@ export class TestRunsCrudQueryService {
     systemUnderTestId: string,
     testEnvironment: string,
     workload: string,
-    userId: string,
-    _roles: string[],
     excludeTestRunId?: string,
     limit: number = 50
   ): Promise<TestRun[]> {
     try {
-      this.logger.debug(`getBaselineCandidates: systemUnderTestId=${systemUnderTestId}, userId=${userId}`);
+      this.logger.debug(`getBaselineCandidates: systemUnderTestId=${systemUnderTestId}`);
 
       // NOTE: Organization filtering will be added here when TestRun entity has organization_id
 
@@ -1106,15 +1106,15 @@ export class TestRunsCrudQueryService {
    * Get request names for a test run.
    *
    * @param testRunId - The test run identifier
-   * @param userId - The user ID for authorization checks
-   * @param roles - The user's roles for authorization checks
+   * @param userId - The user ID (forwarded to per-resource access checks)
+   * @param isAdmin - Whether the caller has global admin privileges (resolved by the parent)
    * @param panelDescription - Optional panel description filter
    */
-  async getRequestNames(testRunId: string, userId: string, roles: string[], panelDescription?: string): Promise<string[]> {
+  async getRequestNames(testRunId: string, userId: string, isAdmin: boolean, panelDescription?: string): Promise<string[]> {
     try {
-      this.logger.debug(`getRequestNames: testRunId=${testRunId}, userId=${userId}`);
+      this.logger.debug(`getRequestNames: testRunId=${testRunId}, userId=${userId}, isAdmin=${isAdmin}`);
 
-      const testRun = await this.findByTestRunId(testRunId, userId, roles);
+      const testRun = await this.findByTestRunId(testRunId, userId, isAdmin);
 
       if (panelDescription) {
         const query = `

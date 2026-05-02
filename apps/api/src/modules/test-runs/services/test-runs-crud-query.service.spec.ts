@@ -17,6 +17,12 @@
  * - getAllAnnotations
  * - getBaselineCandidates
  * - getRequestNames
+ *
+ * Authorization model: list-filter methods take pre-resolved `isAdmin`,
+ * `organizationIds`, and `userTeamIds` (computed by the parent
+ * TestRunsQueryService via `withOrgFilter`/`withTeamFilter`). Per-resource
+ * methods take `isAdmin` and still call `isOrganizationMember` /
+ * `canViewTeamResources` directly for individual-resource access checks.
  */
 
 import { Test, TestingModule } from '@nestjs/testing';
@@ -40,7 +46,6 @@ import {
 } from '../../../../test/helpers/mock-repository.factory';
 import {
   createAuthorizationServiceMock,
-  createRestrictiveAuthorizationServiceMock,
 } from '../../../../test/mocks/authorization-service.mock';
 
 // ---------------------------------------------------------------------------
@@ -171,8 +176,6 @@ describe('TestRunsCrudQueryService', () => {
   let systemQb: MockSelectQueryBuilder<SystemUnderTest>;
 
   const userId = 'user-uuid-456';
-  const adminRoles = ['perfana-admin'];
-  const userRoles = ['user'];
 
   beforeEach(async () => {
     testRunQb = createMockQueryBuilder<TestRunEntity>();
@@ -409,7 +412,7 @@ describe('TestRunsCrudQueryService', () => {
       changePointsQb.getMany.mockResolvedValue([]);
       controlGroupsQb.getMany.mockResolvedValue([]);
 
-      const result = await service.findAllPaginated(userId, adminRoles);
+      const result = await service.findAllPaginated(true, [], []);
 
       expect(result).toBeInstanceOf(PaginatedResponseDto);
       expect(result.data).toHaveLength(1);
@@ -422,7 +425,7 @@ describe('TestRunsCrudQueryService', () => {
       changePointsQb.getMany.mockResolvedValue([]);
 
       const pagination: PaginationQueryDto = { page: 1, pageSize: 10, system: 'PaymentService' };
-      await service.findAllPaginated(userId, adminRoles, pagination);
+      await service.findAllPaginated(true, [], [], pagination);
 
       expect(testRunQb.andWhere).toHaveBeenCalledWith('sut.name = :system', { system: 'PaymentService' });
     });
@@ -432,7 +435,7 @@ describe('TestRunsCrudQueryService', () => {
       changePointsQb.getMany.mockResolvedValue([]);
 
       const pagination: PaginationQueryDto = { page: 1, pageSize: 10, environment: 'staging' };
-      await service.findAllPaginated(userId, adminRoles, pagination);
+      await service.findAllPaginated(true, [], [], pagination);
 
       expect(testRunQb.andWhere).toHaveBeenCalledWith(
         'tr.testEnvironment = :environment',
@@ -445,17 +448,16 @@ describe('TestRunsCrudQueryService', () => {
       changePointsQb.getMany.mockResolvedValue([]);
 
       const pagination: PaginationQueryDto = { page: 1, pageSize: 10, workload: 'soak' };
-      await service.findAllPaginated(userId, adminRoles, pagination);
+      await service.findAllPaginated(true, [], [], pagination);
 
       expect(testRunQb.andWhere).toHaveBeenCalledWith('tr.workload = :workload', { workload: 'soak' });
     });
 
     it('should apply organization scoping when organizationId is provided', async () => {
-      authzService.isGlobalAdmin.mockReturnValue(true);
       testRunQb.getManyAndCount.mockResolvedValue([[], 0]);
       changePointsQb.getMany.mockResolvedValue([]);
 
-      await service.findAllPaginated(userId, adminRoles, undefined, 'org-uuid-123');
+      await service.findAllPaginated(true, [], [], undefined, 'org-uuid-123');
 
       expect(testRunQb.andWhere).toHaveBeenCalledWith(
         'sut.organization_id = :organizationId',
@@ -464,10 +466,7 @@ describe('TestRunsCrudQueryService', () => {
     });
 
     it('should return empty result for non-admin with no organization memberships', async () => {
-      authzService.isGlobalAdmin.mockReturnValue(false);
-      authzService.getAccessibleOrganizations.mockResolvedValue([]);
-
-      const result = await service.findAllPaginated(userId, userRoles);
+      const result = await service.findAllPaginated(false, [], []);
 
       expect(result).toBeInstanceOf(PaginatedResponseDto);
       expect(result.data).toHaveLength(0);
@@ -476,13 +475,10 @@ describe('TestRunsCrudQueryService', () => {
     });
 
     it('should apply org + team access filtering for non-admin users', async () => {
-      authzService.isGlobalAdmin.mockReturnValue(false);
-      authzService.getAccessibleOrganizations.mockResolvedValue(['org-1', 'org-2']);
-      authzService.getAccessibleTeams.mockResolvedValue(['team-1']);
       testRunQb.getManyAndCount.mockResolvedValue([[], 0]);
       changePointsQb.getMany.mockResolvedValue([]);
 
-      await service.findAllPaginated(userId, userRoles);
+      await service.findAllPaginated(false, ['org-1', 'org-2'], ['team-1']);
 
       // Should join teams table and apply complex where clause
       expect(testRunQb.leftJoin).toHaveBeenCalledWith('teams', 'team', 'team.id = sut.team_id');
@@ -505,7 +501,7 @@ describe('TestRunsCrudQueryService', () => {
       changePointsQb.getMany.mockResolvedValue([changePoint]);
       controlGroupsQb.getMany.mockResolvedValue([]);
 
-      const result = await service.findAllPaginated(userId, adminRoles);
+      const result = await service.findAllPaginated(true, [], []);
 
       expect(result.data[0].is_changepoint).toBe(true);
     });
@@ -527,7 +523,7 @@ describe('TestRunsCrudQueryService', () => {
       changePointsQb.getMany.mockResolvedValue([]);
       controlGroupsQb.getMany.mockResolvedValue([controlGroup]);
 
-      const result = await service.findAllPaginated(userId, adminRoles);
+      const result = await service.findAllPaginated(true, [], []);
 
       expect(result.data[0].is_control_group).toBe(true);
     });
@@ -536,7 +532,7 @@ describe('TestRunsCrudQueryService', () => {
       testRunQb.getManyAndCount.mockResolvedValue([[], 0]);
       changePointsQb.getMany.mockResolvedValue([]);
 
-      await service.findAllPaginated(userId, adminRoles, { page: 1, pageSize: 10 });
+      await service.findAllPaginated(true, [], [], { page: 1, pageSize: 10 });
 
       expect(testRunQb.orderBy).toHaveBeenCalledWith('tr.createdAt', 'DESC');
     });
@@ -545,7 +541,7 @@ describe('TestRunsCrudQueryService', () => {
       testRunQb.getManyAndCount.mockResolvedValue([[], 0]);
       changePointsQb.getMany.mockResolvedValue([]);
 
-      await service.findAllPaginated(userId, adminRoles, {
+      await service.findAllPaginated(true, [], [], {
         page: 1,
         pageSize: 10,
         sortBy: 'injectedField; DROP TABLE test_runs;--',
@@ -559,7 +555,7 @@ describe('TestRunsCrudQueryService', () => {
       testRunQb.getManyAndCount.mockResolvedValue([[], 0]);
       changePointsQb.getMany.mockResolvedValue([]);
 
-      await service.findAllPaginated(userId, adminRoles, { page: 3, pageSize: 20 });
+      await service.findAllPaginated(true, [], [], { page: 3, pageSize: 20 });
 
       expect(testRunQb.skip).toHaveBeenCalledWith(40); // (3-1)*20
       expect(testRunQb.take).toHaveBeenCalledWith(20);
@@ -568,13 +564,13 @@ describe('TestRunsCrudQueryService', () => {
     it('should throw DatabaseException on unexpected error', async () => {
       testRunQb.getManyAndCount.mockRejectedValue(new Error('Unexpected DB error'));
 
-      await expect(service.findAllPaginated(userId, adminRoles)).rejects.toThrow(DatabaseException);
+      await expect(service.findAllPaginated(true, [], [])).rejects.toThrow(DatabaseException);
     });
 
     it('should not query changepoints when test run list is empty', async () => {
       testRunQb.getManyAndCount.mockResolvedValue([[], 0]);
 
-      await service.findAllPaginated(userId, adminRoles);
+      await service.findAllPaginated(true, [], []);
 
       // changePointsRepo.createQueryBuilder should not have been called for getMany
       expect(changePointsQb.getMany).not.toHaveBeenCalled();
@@ -588,8 +584,6 @@ describe('TestRunsCrudQueryService', () => {
   describe('getFilterOptions', () => {
     beforeEach(() => {
       // Three separate query builders needed for systems / envs / workloads
-      // The service calls createQueryBuilder multiple times via buildBaseQuery()
-      // We need to handle this: each call returns a fresh mock
       let callCount = 0;
       const qbs = [
         createMockQueryBuilder<TestRunEntity>(),
@@ -615,9 +609,6 @@ describe('TestRunsCrudQueryService', () => {
     });
 
     it('should return distinct systems, environments, and workloads for admin', async () => {
-      authzService.isGlobalAdmin.mockReturnValue(true);
-
-      // Override with data-returning mocks
       let callCount = 0;
       const results = [
         [{ name: 'PaymentService' }, { name: 'OrderService' }],
@@ -636,7 +627,7 @@ describe('TestRunsCrudQueryService', () => {
         return qb;
       });
 
-      const result = await service.getFilterOptions(userId, adminRoles);
+      const result = await service.getFilterOptions(true, [], []);
 
       expect(result.systems).toEqual(['PaymentService', 'OrderService']);
       expect(result.environments).toEqual(['production', 'staging']);
@@ -644,17 +635,12 @@ describe('TestRunsCrudQueryService', () => {
     });
 
     it('should return empty arrays for non-admin with no organization memberships', async () => {
-      authzService.isGlobalAdmin.mockReturnValue(false);
-      authzService.getAccessibleOrganizations.mockResolvedValue([]);
-
-      const result = await service.getFilterOptions(userId, userRoles);
+      const result = await service.getFilterOptions(false, [], []);
 
       expect(result).toEqual({ systems: [], environments: [], workloads: [] });
     });
 
     it('should scope by organizationId when provided', async () => {
-      authzService.isGlobalAdmin.mockReturnValue(true);
-
       let qbIndex = 0;
       const qbs = Array.from({ length: 6 }, () => {
         const qb = createMockQueryBuilder<TestRunEntity>();
@@ -668,7 +654,7 @@ describe('TestRunsCrudQueryService', () => {
       });
       testRunRepo.createQueryBuilder.mockImplementation(() => qbs[qbIndex++ % qbs.length]);
 
-      await service.getFilterOptions(userId, adminRoles, 'org-uuid-123');
+      await service.getFilterOptions(true, [], [], 'org-uuid-123');
 
       // Each query builder should have the org filter applied
       const orgWhereCall = qbs[0].andWhere.mock.calls.find(
@@ -678,12 +664,11 @@ describe('TestRunsCrudQueryService', () => {
     });
 
     it('should throw DatabaseException on unexpected error', async () => {
-      authzService.isGlobalAdmin.mockReturnValue(true);
       testRunRepo.createQueryBuilder.mockImplementation(() => {
         throw new Error('DB failure');
       });
 
-      await expect(service.getFilterOptions(userId, adminRoles)).rejects.toThrow(DatabaseException);
+      await expect(service.getFilterOptions(true, [], [])).rejects.toThrow(DatabaseException);
     });
   });
 
@@ -693,8 +678,6 @@ describe('TestRunsCrudQueryService', () => {
 
   describe('findAll', () => {
     it('should return all test runs for admin users', async () => {
-      authzService.isGlobalAdmin.mockReturnValue(true);
-
       const entity = createMockTestRunEntity();
       const mapped = createMockMappedTestRun(entity);
       mapper.mapEntityToTestRun.mockReturnValue(mapped as any);
@@ -703,31 +686,25 @@ describe('TestRunsCrudQueryService', () => {
       changePointsQb.getMany.mockResolvedValue([]);
       controlGroupsQb.getMany.mockResolvedValue([]);
 
-      const result = await service.findAll(userId, adminRoles);
+      const result = await service.findAll(true, []);
 
       expect(result).toHaveLength(1);
       expect(result[0].test_run_id).toBe(entity.testRunId);
     });
 
     it('should return empty array for non-admin with no organizations', async () => {
-      authzService.isGlobalAdmin.mockReturnValue(false);
-      authzService.getAccessibleOrganizations.mockResolvedValue([]);
-
-      const result = await service.findAll(userId, userRoles);
+      const result = await service.findAll(false, []);
 
       expect(result).toEqual([]);
       expect(testRunQb.getMany).not.toHaveBeenCalled();
     });
 
     it('should filter by organization_id for non-admin users', async () => {
-      authzService.isGlobalAdmin.mockReturnValue(false);
-      authzService.getAccessibleOrganizations.mockResolvedValue(['org-1']);
-
       testRunQb.getMany.mockResolvedValue([]);
       changePointsQb.getMany.mockResolvedValue([]);
       controlGroupsQb.getMany.mockResolvedValue([]);
 
-      await service.findAll(userId, userRoles);
+      await service.findAll(false, ['org-1']);
 
       expect(testRunQb.andWhere).toHaveBeenCalledWith(
         'sut.organization_id IN (:...orgIds)',
@@ -736,8 +713,6 @@ describe('TestRunsCrudQueryService', () => {
     });
 
     it('should correctly annotate changepoints in the result', async () => {
-      authzService.isGlobalAdmin.mockReturnValue(true);
-
       const entity = createMockTestRunEntity();
       const mapped = createMockMappedTestRun(entity);
       mapper.mapEntityToTestRun.mockReturnValue(mapped as any);
@@ -753,14 +728,12 @@ describe('TestRunsCrudQueryService', () => {
       changePointsQb.getMany.mockResolvedValue([cp]);
       controlGroupsQb.getMany.mockResolvedValue([]);
 
-      const result = await service.findAll(userId, adminRoles);
+      const result = await service.findAll(true, []);
 
       expect(result[0].is_changepoint).toBe(true);
     });
 
     it('should correctly annotate control group members in the result', async () => {
-      authzService.isGlobalAdmin.mockReturnValue(true);
-
       const entity = createMockTestRunEntity({ completed: true });
       const mapped = createMockMappedTestRun(entity);
       mapper.mapEntityToTestRun.mockReturnValue(mapped as any);
@@ -777,16 +750,15 @@ describe('TestRunsCrudQueryService', () => {
       changePointsQb.getMany.mockResolvedValue([]);
       controlGroupsQb.getMany.mockResolvedValue([cg]);
 
-      const result = await service.findAll(userId, adminRoles);
+      const result = await service.findAll(true, []);
 
       expect(result[0].is_control_group).toBe(true);
     });
 
     it('should throw DatabaseException on unexpected error', async () => {
-      authzService.isGlobalAdmin.mockReturnValue(true);
       testRunQb.getMany.mockRejectedValue(new Error('DB error'));
 
-      await expect(service.findAll(userId, adminRoles)).rejects.toThrow(DatabaseException);
+      await expect(service.findAll(true, [])).rejects.toThrow(DatabaseException);
     });
   });
 
@@ -796,15 +768,13 @@ describe('TestRunsCrudQueryService', () => {
 
   describe('findByTestRunId', () => {
     it('should return a test run for admin by testRunId', async () => {
-      authzService.isGlobalAdmin.mockReturnValue(true);
-
       const entity = createMockTestRunEntity();
       const mapped = createMockMappedTestRun(entity);
       mapper.mapEntityToTestRun.mockReturnValue(mapped as any);
       testRunRepo.findOne.mockResolvedValue(entity);
       changePointsRepo.findOne.mockResolvedValue(null);
 
-      const result = await service.findByTestRunId(entity.testRunId, userId, adminRoles);
+      const result = await service.findByTestRunId(entity.testRunId, userId, true);
 
       expect(result.test_run_id).toBe(entity.testRunId);
       expect(testRunRepo.findOne).toHaveBeenCalledWith({
@@ -817,13 +787,11 @@ describe('TestRunsCrudQueryService', () => {
       testRunRepo.findOne.mockResolvedValue(null);
 
       await expect(
-        service.findByTestRunId('non-existent', userId, adminRoles),
+        service.findByTestRunId('non-existent', userId, true),
       ).rejects.toThrow(ResourceNotFoundException);
     });
 
     it('should throw ResourceNotFoundException for non-admin accessing system without org', async () => {
-      authzService.isGlobalAdmin.mockReturnValue(false);
-
       const entity = createMockTestRunEntity({
         systemUnderTest: {
           id: 'system-uuid-123',
@@ -836,24 +804,22 @@ describe('TestRunsCrudQueryService', () => {
       testRunRepo.findOne.mockResolvedValue(entity);
 
       await expect(
-        service.findByTestRunId(entity.testRunId, userId, userRoles),
+        service.findByTestRunId(entity.testRunId, userId, false),
       ).rejects.toThrow(ResourceNotFoundException);
     });
 
     it('should throw ResourceNotFoundException for non-admin not in org', async () => {
-      authzService.isGlobalAdmin.mockReturnValue(false);
       authzService.isOrganizationMember.mockResolvedValue(false);
 
       const entity = createMockTestRunEntity();
       testRunRepo.findOne.mockResolvedValue(entity);
 
       await expect(
-        service.findByTestRunId(entity.testRunId, userId, userRoles),
+        service.findByTestRunId(entity.testRunId, userId, false),
       ).rejects.toThrow(ResourceNotFoundException);
     });
 
     it('should throw ResourceNotFoundException for non-admin blocked by team restriction', async () => {
-      authzService.isGlobalAdmin.mockReturnValue(false);
       authzService.isOrganizationMember.mockResolvedValue(true);
       authzService.canViewTeamResources.mockResolvedValue({ allowed: false, reason: 'restricted' });
 
@@ -861,20 +827,18 @@ describe('TestRunsCrudQueryService', () => {
       testRunRepo.findOne.mockResolvedValue(entity);
 
       await expect(
-        service.findByTestRunId(entity.testRunId, userId, userRoles),
+        service.findByTestRunId(entity.testRunId, userId, false),
       ).rejects.toThrow(ResourceNotFoundException);
     });
 
     it('should set is_changepoint=true when test run is a changepoint', async () => {
-      authzService.isGlobalAdmin.mockReturnValue(true);
-
       const entity = createMockTestRunEntity();
       const mapped = createMockMappedTestRun(entity);
       mapper.mapEntityToTestRun.mockReturnValue(mapped as any);
       testRunRepo.findOne.mockResolvedValue(entity);
       changePointsRepo.findOne.mockResolvedValue(createMockChangePoint());
 
-      const result = await service.findByTestRunId(entity.testRunId, userId, adminRoles);
+      const result = await service.findByTestRunId(entity.testRunId, userId, true);
 
       expect(result.is_changepoint).toBe(true);
     });
@@ -883,7 +847,7 @@ describe('TestRunsCrudQueryService', () => {
       testRunRepo.findOne.mockRejectedValue(new Error('Network error'));
 
       await expect(
-        service.findByTestRunId('some-id', userId, adminRoles),
+        service.findByTestRunId('some-id', userId, true),
       ).rejects.toThrow(DatabaseException);
     });
   });
@@ -894,15 +858,13 @@ describe('TestRunsCrudQueryService', () => {
 
   describe('findOne', () => {
     it('should return a test run by UUID for admin', async () => {
-      authzService.isGlobalAdmin.mockReturnValue(true);
-
       const entity = createMockTestRunEntity();
       const mapped = createMockMappedTestRun(entity);
       mapper.mapEntityToTestRun.mockReturnValue(mapped as any);
       testRunRepo.findOne.mockResolvedValue(entity);
       changePointsRepo.findOne.mockResolvedValue(null);
 
-      const result = await service.findOne(entity.id, userId, adminRoles);
+      const result = await service.findOne(entity.id, userId, true);
 
       expect(result.id).toBe(entity.id);
       expect(testRunRepo.findOne).toHaveBeenCalledWith({
@@ -914,14 +876,12 @@ describe('TestRunsCrudQueryService', () => {
     it('should throw ResourceNotFoundException when UUID not found', async () => {
       testRunRepo.findOne.mockResolvedValue(null);
 
-      await expect(service.findOne('missing-uuid', userId, adminRoles)).rejects.toThrow(
+      await expect(service.findOne('missing-uuid', userId, true)).rejects.toThrow(
         ResourceNotFoundException,
       );
     });
 
     it('should throw ResourceNotFoundException for non-admin accessing system without org', async () => {
-      authzService.isGlobalAdmin.mockReturnValue(false);
-
       const entity = createMockTestRunEntity({
         systemUnderTest: {
           id: 'system-uuid-123',
@@ -933,46 +893,42 @@ describe('TestRunsCrudQueryService', () => {
 
       testRunRepo.findOne.mockResolvedValue(entity);
 
-      await expect(service.findOne(entity.id, userId, userRoles)).rejects.toThrow(
+      await expect(service.findOne(entity.id, userId, false)).rejects.toThrow(
         ResourceNotFoundException,
       );
     });
 
     it('should throw ResourceNotFoundException for non-admin not in org', async () => {
-      authzService.isGlobalAdmin.mockReturnValue(false);
       authzService.isOrganizationMember.mockResolvedValue(false);
 
       const entity = createMockTestRunEntity();
       testRunRepo.findOne.mockResolvedValue(entity);
 
-      await expect(service.findOne(entity.id, userId, userRoles)).rejects.toThrow(
+      await expect(service.findOne(entity.id, userId, false)).rejects.toThrow(
         ResourceNotFoundException,
       );
     });
 
     it('should throw ResourceNotFoundException for non-admin blocked by team restriction', async () => {
-      authzService.isGlobalAdmin.mockReturnValue(false);
       authzService.isOrganizationMember.mockResolvedValue(true);
       authzService.canViewTeamResources.mockResolvedValue({ allowed: false, reason: 'restricted' });
 
       const entity = createMockTestRunEntity();
       testRunRepo.findOne.mockResolvedValue(entity);
 
-      await expect(service.findOne(entity.id, userId, userRoles)).rejects.toThrow(
+      await expect(service.findOne(entity.id, userId, false)).rejects.toThrow(
         ResourceNotFoundException,
       );
     });
 
     it('should set is_changepoint=true when test run is a changepoint', async () => {
-      authzService.isGlobalAdmin.mockReturnValue(true);
-
       const entity = createMockTestRunEntity();
       const mapped = createMockMappedTestRun(entity);
       mapper.mapEntityToTestRun.mockReturnValue(mapped as any);
       testRunRepo.findOne.mockResolvedValue(entity);
       changePointsRepo.findOne.mockResolvedValue(createMockChangePoint());
 
-      const result = await service.findOne(entity.id, userId, adminRoles);
+      const result = await service.findOne(entity.id, userId, true);
 
       expect(result.is_changepoint).toBe(true);
     });
@@ -980,7 +936,7 @@ describe('TestRunsCrudQueryService', () => {
     it('should throw DatabaseException on unexpected error', async () => {
       testRunRepo.findOne.mockRejectedValue(new Error('DB error'));
 
-      await expect(service.findOne('some-id', userId, adminRoles)).rejects.toThrow(DatabaseException);
+      await expect(service.findOne('some-id', userId, true)).rejects.toThrow(DatabaseException);
     });
   });
 
@@ -990,15 +946,13 @@ describe('TestRunsCrudQueryService', () => {
 
   describe('getTestRunByTestRunId', () => {
     it('should return a test run when found and accessible', async () => {
-      authzService.isGlobalAdmin.mockReturnValue(true);
-
       const entity = createMockTestRunEntity();
       const mapped = createMockMappedTestRun(entity);
       mapper.mapEntityToTestRun.mockReturnValue(mapped as any);
       testRunRepo.findOne.mockResolvedValue(entity);
       changePointsRepo.findOne.mockResolvedValue(null);
 
-      const result = await service.getTestRunByTestRunId(entity.testRunId, userId, adminRoles);
+      const result = await service.getTestRunByTestRunId(entity.testRunId, userId, true);
 
       expect(result).not.toBeNull();
       expect(result?.test_run_id).toBe(entity.testRunId);
@@ -1007,14 +961,12 @@ describe('TestRunsCrudQueryService', () => {
     it('should return null when test run not found', async () => {
       testRunRepo.findOne.mockResolvedValue(null);
 
-      const result = await service.getTestRunByTestRunId('missing-id', userId, adminRoles);
+      const result = await service.getTestRunByTestRunId('missing-id', userId, true);
 
       expect(result).toBeNull();
     });
 
     it('should return null for non-admin when system has no org', async () => {
-      authzService.isGlobalAdmin.mockReturnValue(false);
-
       const entity = createMockTestRunEntity({
         systemUnderTest: {
           id: 'system-uuid-123',
@@ -1026,46 +978,42 @@ describe('TestRunsCrudQueryService', () => {
 
       testRunRepo.findOne.mockResolvedValue(entity);
 
-      const result = await service.getTestRunByTestRunId(entity.testRunId, userId, userRoles);
+      const result = await service.getTestRunByTestRunId(entity.testRunId, userId, false);
 
       expect(result).toBeNull();
     });
 
     it('should return null for non-admin not in org', async () => {
-      authzService.isGlobalAdmin.mockReturnValue(false);
       authzService.isOrganizationMember.mockResolvedValue(false);
 
       const entity = createMockTestRunEntity();
       testRunRepo.findOne.mockResolvedValue(entity);
 
-      const result = await service.getTestRunByTestRunId(entity.testRunId, userId, userRoles);
+      const result = await service.getTestRunByTestRunId(entity.testRunId, userId, false);
 
       expect(result).toBeNull();
     });
 
     it('should return null for non-admin blocked by team restriction', async () => {
-      authzService.isGlobalAdmin.mockReturnValue(false);
       authzService.isOrganizationMember.mockResolvedValue(true);
       authzService.canViewTeamResources.mockResolvedValue({ allowed: false, reason: 'restricted' });
 
       const entity = createMockTestRunEntity();
       testRunRepo.findOne.mockResolvedValue(entity);
 
-      const result = await service.getTestRunByTestRunId(entity.testRunId, userId, userRoles);
+      const result = await service.getTestRunByTestRunId(entity.testRunId, userId, false);
 
       expect(result).toBeNull();
     });
 
     it('should populate system_name from systems_under_test', async () => {
-      authzService.isGlobalAdmin.mockReturnValue(true);
-
       const entity = createMockTestRunEntity();
       const mapped = createMockMappedTestRun(entity);
       mapper.mapEntityToTestRun.mockReturnValue(mapped as any);
       testRunRepo.findOne.mockResolvedValue(entity);
       changePointsRepo.findOne.mockResolvedValue(null);
 
-      const result = await service.getTestRunByTestRunId(entity.testRunId, userId, adminRoles);
+      const result = await service.getTestRunByTestRunId(entity.testRunId, userId, true);
 
       expect(result?.system_name).toBe('PaymentService');
     });
@@ -1073,7 +1021,7 @@ describe('TestRunsCrudQueryService', () => {
     it('should return null and not throw on database error', async () => {
       testRunRepo.findOne.mockRejectedValue(new Error('Connection reset'));
 
-      const result = await service.getTestRunByTestRunId('some-id', userId, adminRoles);
+      const result = await service.getTestRunByTestRunId('some-id', userId, true);
 
       expect(result).toBeNull();
     });
@@ -1085,8 +1033,6 @@ describe('TestRunsCrudQueryService', () => {
 
   describe('findByTestRunIdAndParams', () => {
     it('should return a test run matching all params for admin', async () => {
-      authzService.isGlobalAdmin.mockReturnValue(true);
-
       const entity = createMockTestRunEntity();
       const mapped = createMockMappedTestRun(entity);
       mapper.mapEntityToTestRun.mockReturnValue(mapped as any);
@@ -1099,8 +1045,9 @@ describe('TestRunsCrudQueryService', () => {
         'PaymentService',
         'production',
         'loadTest',
-        userId,
-        adminRoles,
+        true,
+        [],
+        [],
       );
 
       expect(result.test_run_id).toBe(entity.testRunId);
@@ -1119,8 +1066,6 @@ describe('TestRunsCrudQueryService', () => {
     });
 
     it('should apply explicit organizationId filter', async () => {
-      authzService.isGlobalAdmin.mockReturnValue(true);
-
       const entity = createMockTestRunEntity();
       const mapped = createMockMappedTestRun(entity);
       mapper.mapEntityToTestRun.mockReturnValue(mapped as any);
@@ -1133,8 +1078,9 @@ describe('TestRunsCrudQueryService', () => {
         'PaymentService',
         'production',
         'loadTest',
-        userId,
-        adminRoles,
+        true,
+        [],
+        [],
         'org-uuid-123',
       );
 
@@ -1145,7 +1091,6 @@ describe('TestRunsCrudQueryService', () => {
     });
 
     it('should throw ResourceNotFoundException when test run not found', async () => {
-      authzService.isGlobalAdmin.mockReturnValue(true);
       testRunQb.getOne.mockResolvedValue(null);
 
       await expect(
@@ -1154,33 +1099,28 @@ describe('TestRunsCrudQueryService', () => {
           'SomeSystem',
           'env',
           'workload',
-          userId,
-          adminRoles,
+          true,
+          [],
+          [],
         ),
       ).rejects.toThrow(ResourceNotFoundException);
     });
 
     it('should throw ResourceNotFoundException for non-admin with no org memberships', async () => {
-      authzService.isGlobalAdmin.mockReturnValue(false);
-      authzService.getAccessibleOrganizations.mockResolvedValue([]);
-
       await expect(
         service.findByTestRunIdAndParams(
           'test-run-id',
           'SomeSystem',
           'env',
           'workload',
-          userId,
-          userRoles,
+          false,
+          [],
+          [],
         ),
       ).rejects.toThrow(ResourceNotFoundException);
     });
 
     it('should apply org-based filter for non-admin without explicit orgId', async () => {
-      authzService.isGlobalAdmin.mockReturnValue(false);
-      authzService.getAccessibleOrganizations.mockResolvedValue(['org-1', 'org-2']);
-      authzService.getAccessibleTeams.mockResolvedValue([]);
-
       const entity = createMockTestRunEntity();
       const mapped = createMockMappedTestRun(entity);
       mapper.mapEntityToTestRun.mockReturnValue(mapped as any);
@@ -1193,8 +1133,9 @@ describe('TestRunsCrudQueryService', () => {
         'PaymentService',
         'production',
         'loadTest',
-        userId,
-        userRoles,
+        false,
+        ['org-1', 'org-2'],
+        [],
       );
 
       expect(testRunQb.andWhere).toHaveBeenCalledWith(
@@ -1204,8 +1145,6 @@ describe('TestRunsCrudQueryService', () => {
     });
 
     it('should mark test run as changepoint in result', async () => {
-      authzService.isGlobalAdmin.mockReturnValue(true);
-
       const entity = createMockTestRunEntity();
       const mapped = createMockMappedTestRun(entity);
       mapper.mapEntityToTestRun.mockReturnValue(mapped as any);
@@ -1218,8 +1157,9 @@ describe('TestRunsCrudQueryService', () => {
         'PaymentService',
         'production',
         'loadTest',
-        userId,
-        adminRoles,
+        true,
+        [],
+        [],
       );
 
       expect(result.is_changepoint).toBe(true);
@@ -1232,8 +1172,6 @@ describe('TestRunsCrudQueryService', () => {
 
   describe('getRelatedTestRuns', () => {
     it('should return related test runs using system/env/workload params when provided', async () => {
-      authzService.isGlobalAdmin.mockReturnValue(true);
-
       const entity = createMockTestRunEntity();
       const mapped = createMockMappedTestRun(entity);
       mapper.mapEntityToTestRun.mockReturnValue(mapped as any);
@@ -1251,8 +1189,9 @@ describe('TestRunsCrudQueryService', () => {
 
       const result = await service.getRelatedTestRuns(
         entity.testRunId,
-        userId,
-        adminRoles,
+        true,
+        [],
+        [],
         'PaymentService',
         'production',
         'loadTest',
@@ -1270,7 +1209,7 @@ describe('TestRunsCrudQueryService', () => {
       testRunRepo.findOne.mockResolvedValue(entity);
       testRunQb.getMany.mockResolvedValue([]);
 
-      const result = await service.getRelatedTestRuns(entity.testRunId, userId, adminRoles);
+      const result = await service.getRelatedTestRuns(entity.testRunId, true, [], []);
 
       expect(result).toEqual([]);
       expect(testRunRepo.findOne).toHaveBeenCalledWith({
@@ -1283,7 +1222,7 @@ describe('TestRunsCrudQueryService', () => {
       testRunRepo.findOne.mockResolvedValue(null);
 
       await expect(
-        service.getRelatedTestRuns('missing', userId, adminRoles),
+        service.getRelatedTestRuns('missing', true, [], []),
       ).rejects.toThrow(ResourceNotFoundException);
     });
 
@@ -1303,7 +1242,7 @@ describe('TestRunsCrudQueryService', () => {
       });
       testRunQb.getMany.mockResolvedValue([relatedEntity]);
 
-      const result = await service.getRelatedTestRuns(entity.testRunId, userId, adminRoles);
+      const result = await service.getRelatedTestRuns(entity.testRunId, true, [], []);
 
       expect(result[0]).toMatchObject({
         test_run_id: 'related-run-id',
@@ -1320,8 +1259,6 @@ describe('TestRunsCrudQueryService', () => {
 
   describe('getSystemsSummary', () => {
     it('should return all systems for admin users', async () => {
-      authzService.isGlobalAdmin.mockReturnValue(true);
-
       const system: Partial<SystemUnderTest> = {
         id: 'system-uuid-123',
         name: 'PaymentService',
@@ -1330,7 +1267,7 @@ describe('TestRunsCrudQueryService', () => {
       systemRepo.find.mockResolvedValue([system as SystemUnderTest]);
       testRunQb.getMany.mockResolvedValue([]);
 
-      const result = await service.getSystemsSummary(userId, adminRoles);
+      const result = await service.getSystemsSummary(true, [], []);
 
       expect(result).toHaveLength(1);
       expect(result[0].name).toBe('PaymentService');
@@ -1338,17 +1275,12 @@ describe('TestRunsCrudQueryService', () => {
     });
 
     it('should return empty array for non-admin with no org memberships', async () => {
-      authzService.isGlobalAdmin.mockReturnValue(false);
-      authzService.getAccessibleOrganizations.mockResolvedValue([]);
-
-      const result = await service.getSystemsSummary(userId, userRoles);
+      const result = await service.getSystemsSummary(false, [], []);
 
       expect(result).toEqual([]);
     });
 
     it('should scope to organizationId when provided for admin', async () => {
-      authzService.isGlobalAdmin.mockReturnValue(true);
-
       const system: Partial<SystemUnderTest> = {
         id: 'system-uuid-123',
         name: 'PaymentService',
@@ -1357,7 +1289,7 @@ describe('TestRunsCrudQueryService', () => {
       systemQb.getMany.mockResolvedValue([system as SystemUnderTest]);
       testRunQb.getMany.mockResolvedValue([]);
 
-      const result = await service.getSystemsSummary(userId, adminRoles, 'org-uuid-123');
+      const result = await service.getSystemsSummary(true, [], [], 'org-uuid-123');
 
       expect(result).toHaveLength(1);
       expect(systemQb.where).toHaveBeenCalledWith(
@@ -1367,8 +1299,6 @@ describe('TestRunsCrudQueryService', () => {
     });
 
     it('should build environment/workload summary from test runs', async () => {
-      authzService.isGlobalAdmin.mockReturnValue(true);
-
       const system: Partial<SystemUnderTest> = {
         id: 'system-uuid-123',
         name: 'PaymentService',
@@ -1380,15 +1310,13 @@ describe('TestRunsCrudQueryService', () => {
       const testRun2 = createMockTestRunEntity({ testEnvironment: 'staging', workload: 'soak' });
       testRunQb.getMany.mockResolvedValue([testRun1, testRun2]);
 
-      const result = await service.getSystemsSummary(userId, adminRoles);
+      const result = await service.getSystemsSummary(true, [], []);
 
       expect(result[0].environments).toContainEqual({ environment: 'production', workloads: ['loadTest'] });
       expect(result[0].environments).toContainEqual({ environment: 'staging', workloads: ['soak'] });
     });
 
     it('should return empty environments when no test runs exist for a system', async () => {
-      authzService.isGlobalAdmin.mockReturnValue(true);
-
       const system: Partial<SystemUnderTest> = {
         id: 'no-runs-system',
         name: 'EmptySystem',
@@ -1397,29 +1325,24 @@ describe('TestRunsCrudQueryService', () => {
       systemRepo.find.mockResolvedValue([system as SystemUnderTest]);
       testRunQb.getMany.mockResolvedValue([]);
 
-      const result = await service.getSystemsSummary(userId, adminRoles);
+      const result = await service.getSystemsSummary(true, [], []);
 
       expect(result[0].environments).toEqual([]);
     });
 
     it('should apply org + team filtering for non-admin users', async () => {
-      authzService.isGlobalAdmin.mockReturnValue(false);
-      authzService.getAccessibleOrganizations.mockResolvedValue(['org-1']);
-      authzService.getAccessibleTeams.mockResolvedValue(['team-1']);
-
       systemQb.getMany.mockResolvedValue([]);
       testRunQb.getMany.mockResolvedValue([]);
 
-      await service.getSystemsSummary(userId, userRoles);
+      await service.getSystemsSummary(false, ['org-1'], ['team-1']);
 
       expect(systemQb.leftJoin).toHaveBeenCalledWith('teams', 'team', 'team.id = system.team_id');
     });
 
     it('should throw DatabaseException on unexpected error', async () => {
-      authzService.isGlobalAdmin.mockReturnValue(true);
       systemRepo.find.mockRejectedValue(new Error('DB error'));
 
-      await expect(service.getSystemsSummary(userId, adminRoles)).rejects.toThrow(DatabaseException);
+      await expect(service.getSystemsSummary(true, [], [])).rejects.toThrow(DatabaseException);
     });
   });
 
@@ -1429,35 +1352,28 @@ describe('TestRunsCrudQueryService', () => {
 
   describe('getAllTags', () => {
     it('should return sorted list of unique tags for admin', async () => {
-      authzService.isGlobalAdmin.mockReturnValue(true);
       testRunQb.getRawMany.mockResolvedValue([
         { tag: 'performance' },
         { tag: 'baseline' },
         { tag: 'regression' },
       ]);
 
-      const result = await service.getAllTags(userId, adminRoles);
+      const result = await service.getAllTags(true, []);
 
       expect(result).toEqual(['baseline', 'performance', 'regression']);
     });
 
     it('should return empty array for non-admin with no org memberships', async () => {
-      authzService.isGlobalAdmin.mockReturnValue(false);
-      authzService.getAccessibleOrganizations.mockResolvedValue([]);
-
-      const result = await service.getAllTags(userId, userRoles);
+      const result = await service.getAllTags(false, []);
 
       expect(result).toEqual([]);
       expect(testRunQb.getRawMany).not.toHaveBeenCalled();
     });
 
     it('should apply org filter for non-admin with org memberships', async () => {
-      authzService.isGlobalAdmin.mockReturnValue(false);
-      authzService.getAccessibleOrganizations.mockResolvedValue(['org-1']);
-
       testRunQb.getRawMany.mockResolvedValue([]);
 
-      await service.getAllTags(userId, userRoles);
+      await service.getAllTags(false, ['org-1']);
 
       expect(testRunQb.leftJoin).toHaveBeenCalledWith(
         'systems_under_test',
@@ -1471,7 +1387,6 @@ describe('TestRunsCrudQueryService', () => {
     });
 
     it('should filter out null/undefined tag values', async () => {
-      authzService.isGlobalAdmin.mockReturnValue(true);
       testRunQb.getRawMany.mockResolvedValue([
         { tag: 'performance' },
         { tag: null },
@@ -1479,16 +1394,15 @@ describe('TestRunsCrudQueryService', () => {
         { tag: 'baseline' },
       ]);
 
-      const result = await service.getAllTags(userId, adminRoles);
+      const result = await service.getAllTags(true, []);
 
       expect(result).toEqual(['baseline', 'performance']);
     });
 
     it('should re-throw errors from query', async () => {
-      authzService.isGlobalAdmin.mockReturnValue(true);
       testRunQb.getRawMany.mockRejectedValue(new Error('Query error'));
 
-      await expect(service.getAllTags(userId, adminRoles)).rejects.toThrow('Query error');
+      await expect(service.getAllTags(true, [])).rejects.toThrow('Query error');
     });
   });
 
@@ -1498,32 +1412,26 @@ describe('TestRunsCrudQueryService', () => {
 
   describe('getAllAnnotations', () => {
     it('should return sorted list of unique annotations for admin', async () => {
-      authzService.isGlobalAdmin.mockReturnValue(true);
       testRunQb.getRawMany.mockResolvedValue([
         { annotation: 'release candidate' },
         { annotation: 'baseline' },
       ]);
 
-      const result = await service.getAllAnnotations(userId, adminRoles);
+      const result = await service.getAllAnnotations(true, []);
 
       expect(result).toEqual(['baseline', 'release candidate']);
     });
 
     it('should return empty array for non-admin with no org memberships', async () => {
-      authzService.isGlobalAdmin.mockReturnValue(false);
-      authzService.getAccessibleOrganizations.mockResolvedValue([]);
-
-      const result = await service.getAllAnnotations(userId, userRoles);
+      const result = await service.getAllAnnotations(false, []);
 
       expect(result).toEqual([]);
     });
 
     it('should apply org filter for non-admin with org memberships', async () => {
-      authzService.isGlobalAdmin.mockReturnValue(false);
-      authzService.getAccessibleOrganizations.mockResolvedValue(['org-1']);
       testRunQb.getRawMany.mockResolvedValue([]);
 
-      await service.getAllAnnotations(userId, userRoles);
+      await service.getAllAnnotations(false, ['org-1']);
 
       expect(testRunQb.leftJoin).toHaveBeenCalledWith(
         'systems_under_test',
@@ -1537,22 +1445,20 @@ describe('TestRunsCrudQueryService', () => {
     });
 
     it('should filter out null annotation values', async () => {
-      authzService.isGlobalAdmin.mockReturnValue(true);
       testRunQb.getRawMany.mockResolvedValue([
         { annotation: 'baseline' },
         { annotation: null },
       ]);
 
-      const result = await service.getAllAnnotations(userId, adminRoles);
+      const result = await service.getAllAnnotations(true, []);
 
       expect(result).toEqual(['baseline']);
     });
 
     it('should re-throw errors from query', async () => {
-      authzService.isGlobalAdmin.mockReturnValue(true);
       testRunQb.getRawMany.mockRejectedValue(new Error('DB timeout'));
 
-      await expect(service.getAllAnnotations(userId, adminRoles)).rejects.toThrow('DB timeout');
+      await expect(service.getAllAnnotations(true, [])).rejects.toThrow('DB timeout');
     });
   });
 
@@ -1572,8 +1478,6 @@ describe('TestRunsCrudQueryService', () => {
         'system-uuid-123',
         'production',
         'loadTest',
-        userId,
-        adminRoles,
       );
 
       expect(result).toHaveLength(1);
@@ -1602,8 +1506,6 @@ describe('TestRunsCrudQueryService', () => {
         'system-uuid-123',
         'production',
         'loadTest',
-        userId,
-        adminRoles,
         'excluded-run-id',
       );
 
@@ -1620,8 +1522,6 @@ describe('TestRunsCrudQueryService', () => {
         'system-uuid-123',
         'production',
         'loadTest',
-        userId,
-        adminRoles,
       );
 
       const excludeCalls = testRunQb.andWhere.mock.calls.filter(
@@ -1638,8 +1538,6 @@ describe('TestRunsCrudQueryService', () => {
         'system-uuid-123',
         'production',
         'loadTest',
-        userId,
-        adminRoles,
       );
 
       expect(testRunQb.limit).toHaveBeenCalledWith(50);
@@ -1652,8 +1550,6 @@ describe('TestRunsCrudQueryService', () => {
         'system-uuid-123',
         'production',
         'loadTest',
-        userId,
-        adminRoles,
         undefined,
         10,
       );
@@ -1668,8 +1564,6 @@ describe('TestRunsCrudQueryService', () => {
         'system-uuid-123',
         'production',
         'loadTest',
-        userId,
-        adminRoles,
       );
 
       expect(result).toEqual([]);
@@ -1679,7 +1573,7 @@ describe('TestRunsCrudQueryService', () => {
       testRunQb.getMany.mockRejectedValue(new Error('Query failed'));
 
       await expect(
-        service.getBaselineCandidates('system-uuid-123', 'production', 'loadTest', userId, adminRoles),
+        service.getBaselineCandidates('system-uuid-123', 'production', 'loadTest'),
       ).rejects.toThrow(DatabaseException);
     });
   });
@@ -1693,8 +1587,6 @@ describe('TestRunsCrudQueryService', () => {
 
     beforeEach(() => {
       // getRequestNames calls findByTestRunId first
-      authzService.isGlobalAdmin.mockReturnValue(true);
-
       const entity = createMockTestRunEntity();
       const mapped = createMockMappedTestRun(entity);
       mapper.mapEntityToTestRun.mockReturnValue(mapped as any);
@@ -1708,7 +1600,7 @@ describe('TestRunsCrudQueryService', () => {
         { request_name: 'scenario2|transaction2|sampler2' },
       ]);
 
-      const result = await service.getRequestNames(testRunId, userId, adminRoles);
+      const result = await service.getRequestNames(testRunId, userId, true);
 
       expect(result).toEqual([
         'scenario1|transaction1|sampler1',
@@ -1723,7 +1615,7 @@ describe('TestRunsCrudQueryService', () => {
     it('should query ds_panels/ds_metrics when panelDescription is provided', async () => {
       testRunRepo.query.mockResolvedValue([{ metric_name: 'http_request_duration_p95' }]);
 
-      const result = await service.getRequestNames(testRunId, userId, adminRoles, 'Response Time');
+      const result = await service.getRequestNames(testRunId, userId, true, 'Response Time');
 
       expect(result).toEqual(['http_request_duration_p95']);
       // It should use the entity's id (UUID), not testRunId
@@ -1739,7 +1631,7 @@ describe('TestRunsCrudQueryService', () => {
     it('should return empty array when no request names found', async () => {
       testRunRepo.query.mockResolvedValue([]);
 
-      const result = await service.getRequestNames(testRunId, userId, adminRoles);
+      const result = await service.getRequestNames(testRunId, userId, true);
 
       expect(result).toEqual([]);
     });
@@ -1747,7 +1639,7 @@ describe('TestRunsCrudQueryService', () => {
     it('should throw DatabaseException when query fails', async () => {
       testRunRepo.query.mockRejectedValue(new Error('Query timeout'));
 
-      await expect(service.getRequestNames(testRunId, userId, adminRoles)).rejects.toThrow(
+      await expect(service.getRequestNames(testRunId, userId, true)).rejects.toThrow(
         DatabaseException,
       );
     });
@@ -1757,7 +1649,7 @@ describe('TestRunsCrudQueryService', () => {
       // findByTestRunId) in a DatabaseException via its own catch block.
       testRunRepo.findOne.mockResolvedValue(null);
 
-      await expect(service.getRequestNames('missing-run', userId, adminRoles)).rejects.toThrow(
+      await expect(service.getRequestNames('missing-run', userId, true)).rejects.toThrow(
         DatabaseException,
       );
     });
@@ -1769,10 +1661,6 @@ describe('TestRunsCrudQueryService', () => {
 
   describe('applyTeamRestriction (via findByTestRunIdAndParams)', () => {
     it('should join teams table and add team restriction WHERE clause', async () => {
-      authzService.isGlobalAdmin.mockReturnValue(false);
-      authzService.getAccessibleOrganizations.mockResolvedValue(['org-1']);
-      authzService.getAccessibleTeams.mockResolvedValue(['team-1']);
-
       const entity = createMockTestRunEntity();
       const mapped = createMockMappedTestRun(entity);
       mapper.mapEntityToTestRun.mockReturnValue(mapped as any);
@@ -1785,8 +1673,9 @@ describe('TestRunsCrudQueryService', () => {
         'PaymentService',
         'production',
         'loadTest',
-        userId,
-        userRoles,
+        false,
+        ['org-1'],
+        ['team-1'],
       );
 
       expect(testRunQb.leftJoin).toHaveBeenCalledWith('teams', 'team', 'team.id = sut.team_id');
@@ -1800,10 +1689,6 @@ describe('TestRunsCrudQueryService', () => {
     });
 
     it('should not include userTeamIds clause when user has no team memberships', async () => {
-      authzService.isGlobalAdmin.mockReturnValue(false);
-      authzService.getAccessibleOrganizations.mockResolvedValue(['org-1']);
-      authzService.getAccessibleTeams.mockResolvedValue([]); // no teams
-
       const entity = createMockTestRunEntity();
       const mapped = createMockMappedTestRun(entity);
       mapper.mapEntityToTestRun.mockReturnValue(mapped as any);
@@ -1816,8 +1701,9 @@ describe('TestRunsCrudQueryService', () => {
         'PaymentService',
         'production',
         'loadTest',
-        userId,
-        userRoles,
+        false,
+        ['org-1'],
+        [], // no teams
       );
 
       expect(testRunQb.leftJoin).toHaveBeenCalledWith('teams', 'team', 'team.id = sut.team_id');
