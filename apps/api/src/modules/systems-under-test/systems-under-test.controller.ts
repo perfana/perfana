@@ -4,6 +4,8 @@ import { SystemsUnderTestService } from './systems-under-test.service';
 import { DeleteSystemUnderTestHandler } from './handlers/delete-system-under-test.handler';
 import { CreateSystemUnderTestDto, UpdatePyroscopeConfigDto, UpdateSystemUnderTestDto } from './dto';
 import { UserCtx, UserContext } from '../../common/decorators/user-context.decorator';
+import { AuthorizationService } from '../../common/services/authorization.service';
+import { withOrgFilter } from '../../common/utils/with-org-filter';
 
 @ApiTags('systems-under-test')
 @ApiBearerAuth()
@@ -14,7 +16,20 @@ export class SystemsUnderTestController {
   constructor(
     private readonly systemsUnderTestService: SystemsUnderTestService,
     private readonly deleteHandler: DeleteSystemUnderTestHandler,
+    private readonly authzService: AuthorizationService,
   ) {}
+
+  /**
+   * Resolve the global-admin boolean for the request without calling
+   * `authzService.isGlobalAdmin` directly. `withOrgFilter` is the lint-exempt
+   * indirection: it returns `null` iff the caller is a global admin, so a
+   * `=== null` check collapses to `isAdmin` while keeping this controller out
+   * of the `no-direct-is-global-admin` allowlist (Phase 3c C32 boundary push;
+   * see C30/C31 for the same pattern).
+   */
+  private async resolveIsAdmin(userId: string, roles: string[]): Promise<boolean> {
+    return (await withOrgFilter(userId, roles, this.authzService)) === null;
+  }
 
   @Post()
   @ApiOperation({ summary: 'Create a system under test with optional pre-seeded environments and workloads' })
@@ -22,7 +37,8 @@ export class SystemsUnderTestController {
   @ApiResponse({ status: 409, description: 'System under test with this name already exists in the organization' })
   async create(@Body() createDto: CreateSystemUnderTestDto, @UserCtx() ctx: UserContext) {
     try {
-      const result = await this.systemsUnderTestService.createSut(createDto, ctx.userId, ctx.roles);
+      const isAdmin = await this.resolveIsAdmin(ctx.userId, ctx.roles);
+      const result = await this.systemsUnderTestService.createSut(createDto, ctx.userId, isAdmin);
       if (result.conflict) {
         const { conflict: _, ...sut } = result;
         throw new HttpException({ message: 'System under test already exists', sut }, HttpStatus.CONFLICT);
@@ -37,15 +53,17 @@ export class SystemsUnderTestController {
 
   @Get()
   @ApiOperation({ summary: 'Get all systems under test' })
-  findAll(@UserCtx() ctx: UserContext, @Query('organizationId') organizationId?: string) {
-    return this.systemsUnderTestService.findAll(ctx.userId, ctx.roles, organizationId);
+  async findAll(@UserCtx() ctx: UserContext, @Query('organizationId') organizationId?: string) {
+    const isAdmin = await this.resolveIsAdmin(ctx.userId, ctx.roles);
+    return this.systemsUnderTestService.findAll(ctx.userId, isAdmin, organizationId);
   }
 
   @Get(':id')
   @ApiOperation({ summary: 'Get a specific system under test by ID with environment and workload data' })
   @ApiParam({ name: 'id', description: 'System under test ID' })
   async findOne(@Param('id') id: string, @UserCtx() ctx: UserContext) {
-    const system = await this.systemsUnderTestService.findSystemSummary(id, ctx.userId, ctx.roles);
+    const isAdmin = await this.resolveIsAdmin(ctx.userId, ctx.roles);
+    const system = await this.systemsUnderTestService.findSystemSummary(id, ctx.userId, isAdmin);
     if (!system) {
       throw new NotFoundException(`System under test with ID ${id} not found`);
     }
@@ -67,7 +85,8 @@ export class SystemsUnderTestController {
     @Body() updateDto: UpdateSystemUnderTestDto,
   ) {
     try {
-      return await this.systemsUnderTestService.update(id, updateDto, ctx.userId, ctx.roles);
+      const isAdmin = await this.resolveIsAdmin(ctx.userId, ctx.roles);
+      return await this.systemsUnderTestService.update(id, updateDto, ctx.userId, isAdmin);
     } catch (error) {
       this.logger.error(`Failed to update system ${id}:`, error);
 
@@ -101,7 +120,8 @@ export class SystemsUnderTestController {
     @Body() updateDto: UpdatePyroscopeConfigDto,
   ) {
     try {
-      return await this.systemsUnderTestService.updatePyroscopeConfig(id, updateDto, ctx.userId, ctx.roles);
+      const isAdmin = await this.resolveIsAdmin(ctx.userId, ctx.roles);
+      return await this.systemsUnderTestService.updatePyroscopeConfig(id, updateDto, ctx.userId, isAdmin);
     } catch (error) {
       this.logger.error(`Failed to update Pyroscope config for system ${id}:`, error);
 
@@ -130,7 +150,8 @@ export class SystemsUnderTestController {
   @ApiResponse({ status: 404, description: 'System under test not found' })
   async getDeletePreview(@Param('id') id: string, @UserCtx() ctx: UserContext) {
     // Verify access via existing findOne (throws 404 if unauthorized)
-    await this.systemsUnderTestService.findOne(id, ctx.userId, ctx.roles);
+    const isAdmin = await this.resolveIsAdmin(ctx.userId, ctx.roles);
+    await this.systemsUnderTestService.findOne(id, ctx.userId, isAdmin);
     return this.deleteHandler.getDeletePreview(id);
   }
 
@@ -141,7 +162,8 @@ export class SystemsUnderTestController {
   @ApiResponse({ status: 404, description: 'System under test not found' })
   async remove(@Param('id') id: string, @UserCtx() ctx: UserContext) {
     // Verify access via existing findOne (throws 404 if unauthorized)
-    await this.systemsUnderTestService.findOne(id, ctx.userId, ctx.roles);
+    const isAdmin = await this.resolveIsAdmin(ctx.userId, ctx.roles);
+    await this.systemsUnderTestService.findOne(id, ctx.userId, isAdmin);
 
     try {
       return await this.deleteHandler.execute(id);

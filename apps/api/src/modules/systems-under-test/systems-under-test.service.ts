@@ -47,10 +47,10 @@ export interface UpdateSystemUnderTestDto {
  * Service responsible for managing systems under test.
  *
  * Authorization:
- * - All methods accept userId and roles parameters for authorization
- * - Currently SystemUnderTest entity does not have organization_id, so all data is treated as legacy
- * - When organization_id is added to SystemUnderTest (Phase 4), authorization checks will be enabled
- * - Global admins bypass all authorization checks
+ * - Methods accept userId and a pre-resolved isAdmin boolean (resolved at the
+ *   controller boundary via `withOrgFilter`). The service no longer calls
+ *   `authzService.isGlobalAdmin` directly — Phase 3c C32 boundary push.
+ * - Global admins bypass all authorization checks.
  */
 @Injectable()
 export class SystemsUnderTestService {
@@ -73,11 +73,9 @@ export class SystemsUnderTestService {
   async createSut(
     dto: CreateSystemUnderTestDto,
     userId: string,
-    roles: string[],
+    isAdmin: boolean,
   ): Promise<SystemUnderTestEntity & { conflict?: boolean }> {
     try {
-      const isAdmin = this.authzService.isGlobalAdmin(roles);
-
       // Verify org membership before doing any DB work (non-admins only)
       if (!isAdmin) {
         const isMember = await this.authzService.isOrganizationMember(userId, dto.organizationId);
@@ -94,7 +92,7 @@ export class SystemsUnderTestService {
 
       if (existing) {
         this.logger.log(`createSut: SUT '${dto.name}' already exists in org ${dto.organizationId} — returning existing`);
-        const verified = await this.findOne(existing.id, userId, roles);
+        const verified = await this.findOne(existing.id, userId, isAdmin);
         return Object.assign(verified, { conflict: true });
       }
 
@@ -134,7 +132,7 @@ export class SystemsUnderTestService {
         }
       });
 
-      return await this.findOne(createdId!, userId, roles);
+      return await this.findOne(createdId!, userId, isAdmin);
     } catch (error) {
       if (error instanceof NotFoundException) throw error;
       this.logger.error('Failed to create system under test', error instanceof Error ? error.stack : error);
@@ -146,16 +144,15 @@ export class SystemsUnderTestService {
    * Find all systems under test with organization filtering
    *
    * @param userId - The user ID for authorization
-   * @param roles - The user's roles for authorization checks
+   * @param isAdmin - Whether the caller is a global admin (resolved at controller boundary)
    *
    * Returns systems filtered by user's accessible organizations.
    * Global admins see all systems (including those without organization_id).
    * Regular users only see systems in their organizations (systems without organization_id are hidden).
    */
-  async findAll(userId: string, roles: string[], organizationId?: string): Promise<SystemUnderTestEntity[]> {
+  async findAll(userId: string, isAdmin: boolean, organizationId?: string): Promise<SystemUnderTestEntity[]> {
     try {
-      const isAdmin = this.authzService.isGlobalAdmin(roles);
-      this.logger.log(`[findAll] START - userId=${userId}, roles=${JSON.stringify(roles)}, isGlobalAdmin=${isAdmin}, organizationId=${organizationId || 'none'}`);
+      this.logger.log(`[findAll] START - userId=${userId}, isGlobalAdmin=${isAdmin}, organizationId=${organizationId || 'none'}`);
 
       // Three-case org filtering:
       // 1. Explicit organizationId → always filter (even for admins)
@@ -224,16 +221,14 @@ export class SystemsUnderTestService {
    *
    * @param id - The system under test ID
    * @param userId - The user ID for authorization
-   * @param roles - The user's roles for authorization checks
+   * @param isAdmin - Whether the caller is a global admin (resolved at controller boundary)
    *
    * Returns the system if user has access via organization membership.
    * Global admins can access all systems (including those without organization_id).
    * Regular users can only access systems in their organizations (systems without organization_id are denied).
    */
-  async findOne(id: string, userId: string, roles: string[]): Promise<SystemUnderTestEntity> {
+  async findOne(id: string, userId: string, isAdmin: boolean): Promise<SystemUnderTestEntity> {
     try {
-      // Log authorization context for debugging
-      const isAdmin = this.authzService.isGlobalAdmin(roles);
       this.logger.debug(`findOne: id=${id}, userId=${userId}, isGlobalAdmin=${isAdmin}`);
 
       const system = await this.systemRepo.findOne({
@@ -288,15 +283,10 @@ export class SystemsUnderTestService {
    *
    * @param id - The system under test ID
    * @param userId - The user ID for authorization
-   * @param roles - The user's roles for authorization checks
-   *
-   * Note: SystemUnderTest entity does not have organization_id yet, so access checks are not applied.
-   * Full access permission checks will be enabled when Phase 4 adds organization_id column.
+   * @param isAdmin - Whether the caller is a global admin (resolved at controller boundary)
    */
-  async findSystemSummary(id: string, userId: string, roles: string[]): Promise<SystemSummary | null> {
+  async findSystemSummary(id: string, userId: string, isAdmin: boolean): Promise<SystemSummary | null> {
     try {
-      // Log authorization context for debugging
-      const isAdmin = this.authzService.isGlobalAdmin(roles);
       this.logger.debug(`findSystemSummary: id=${id}, userId=${userId}, isGlobalAdmin=${isAdmin}`);
 
       // Use TypeORM to get system with its test runs and team
@@ -374,15 +364,10 @@ export class SystemsUnderTestService {
    *
    * @param name - The system name
    * @param userId - The user ID for authorization
-   * @param roles - The user's roles for authorization checks
-   *
-   * Note: SystemUnderTest entity does not have organization_id yet, so access checks are not applied.
-   * Full access permission checks will be enabled when Phase 4 adds organization_id column.
+   * @param isAdmin - Whether the caller is a global admin (resolved at controller boundary)
    */
-  async findByName(name: string, userId: string, roles: string[]): Promise<SystemUnderTestEntity | null> {
+  async findByName(name: string, userId: string, isAdmin: boolean): Promise<SystemUnderTestEntity | null> {
     try {
-      // Log authorization context for debugging
-      const isAdmin = this.authzService.isGlobalAdmin(roles);
       this.logger.debug(`findByName: name=${name}, userId=${userId}, isGlobalAdmin=${isAdmin}`);
 
       const system = await this.systemRepo.findOne({
@@ -431,7 +416,7 @@ export class SystemsUnderTestService {
    *
    * @param createDto - The create DTO
    * @param userId - The user ID for authorization and ownership tracking
-   * @param roles - The user's roles for authorization checks
+   * @param isAdmin - Whether the caller is a global admin (resolved at controller boundary)
    * @param organizationId - The organization this system belongs to
    *
    * Assigns ownership (created_by, updated_by) and organization_id on creation.
@@ -439,12 +424,10 @@ export class SystemsUnderTestService {
   async create(
     createDto: LegacyCreateSystemUnderTestDto,
     userId: string,
-    roles: string[],
+    isAdmin: boolean,
     organizationId?: string,
   ): Promise<SystemUnderTestEntity> {
     try {
-      // Log authorization context for debugging
-      const isAdmin = this.authzService.isGlobalAdmin(roles);
       this.logger.debug(`create: userId=${userId}, isGlobalAdmin=${isAdmin}, organizationId=${organizationId}`);
 
       // Create system with ownership tracking
@@ -461,7 +444,7 @@ export class SystemsUnderTestService {
         `Created system under test: ${savedSystem.name} (${savedSystem.id}) in org ${organizationId}`,
       );
 
-      return await this.findOne(savedSystem.id, userId, roles);
+      return await this.findOne(savedSystem.id, userId, isAdmin);
     } catch (error) {
       this.logger.error('Failed to create system under test', error instanceof Error ? error.stack : error);
       throw error;
@@ -474,19 +457,17 @@ export class SystemsUnderTestService {
    * @param id - The system under test ID
    * @param updateDto - The update DTO
    * @param userId - The user ID for authorization and ownership tracking
-   * @param roles - The user's roles for authorization checks
+   * @param isAdmin - Whether the caller is a global admin (resolved at controller boundary)
    *
    * Requires user to have access to the system's organization.
    * Updates the updated_by field with the current user.
    */
-  async update(id: string, updateDto: UpdateSystemUnderTestDto, userId: string, roles: string[]): Promise<SystemUnderTestEntity> {
+  async update(id: string, updateDto: UpdateSystemUnderTestDto, userId: string, isAdmin: boolean): Promise<SystemUnderTestEntity> {
     try {
-      // Log authorization context for debugging
-      const isAdmin = this.authzService.isGlobalAdmin(roles);
       this.logger.debug(`update: id=${id}, userId=${userId}, isGlobalAdmin=${isAdmin}`);
 
       // First verify the system exists and user has access
-      const system = await this.findOne(id, userId, roles);
+      const system = await this.findOne(id, userId, isAdmin);
 
       // Check modify permission
       // Global admins can modify anything
@@ -525,7 +506,7 @@ export class SystemsUnderTestService {
 
       this.logger.log(`Updated system under test: ${id} with data: ${JSON.stringify(updateData)}`);
 
-      return await this.findOne(id, userId, roles);
+      return await this.findOne(id, userId, isAdmin);
     } catch (error) {
       this.logger.error(`Failed to update system under test ${id}`, error instanceof Error ? error.stack : error);
       throw error;
@@ -537,17 +518,15 @@ export class SystemsUnderTestService {
    *
    * @param id - The system under test ID
    * @param userId - The user ID for authorization
-   * @param roles - The user's roles for authorization checks
+   * @param isAdmin - Whether the caller is a global admin (resolved at controller boundary)
    *
    * Requires user to have admin access to the system's organization.
    */
-  async remove(id: string, userId: string, roles: string[]): Promise<void> {
+  async remove(id: string, userId: string, isAdmin: boolean): Promise<void> {
     try {
-      // Log authorization context for debugging
-      const isAdmin = this.authzService.isGlobalAdmin(roles);
       this.logger.debug(`remove: id=${id}, userId=${userId}, isGlobalAdmin=${isAdmin}`);
 
-      const system = await this.findOne(id, userId, roles);
+      const system = await this.findOne(id, userId, isAdmin);
 
       // Check delete permission
       // Global admins can delete anything
@@ -583,27 +562,22 @@ export class SystemsUnderTestService {
    * @param id - System under test UUID
    * @param updateDto - Pyroscope configuration update data
    * @param userId - The user ID for authorization and ownership tracking
-   * @param roles - The user's roles for authorization checks
+   * @param isAdmin - Whether the caller is a global admin (resolved at controller boundary)
    * @returns Updated system under test entity
    * @throws NotFoundException if system not found
    * @throws BadRequestException if Pyroscope instance not found or validation fails
-   *
-   * Note: SystemUnderTest entity does not have organization_id yet, so permission checks are not applied.
-   * Full permission checks will be enabled when Phase 4 adds organization_id column.
    */
   async updatePyroscopeConfig(
     id: string,
     updateDto: UpdatePyroscopeConfigDto,
     userId: string,
-    roles: string[],
+    isAdmin: boolean,
   ): Promise<SystemUnderTestEntity> {
     try {
-      // Log authorization context for debugging
-      const isAdmin = this.authzService.isGlobalAdmin(roles);
       this.logger.debug(`updatePyroscopeConfig: id=${id}, userId=${userId}, isGlobalAdmin=${isAdmin}`);
 
       // 1. Find the system
-      const system = await this.findOne(id, userId, roles);
+      const system = await this.findOne(id, userId, isAdmin);
 
       // NOTE: Permission check will be added here when SystemUnderTest entity has organization_id
       // For now, all systems are modifiable (treated as legacy data)
@@ -646,7 +620,7 @@ export class SystemsUnderTestService {
 
       this.logger.log(`Updated Pyroscope config for system: ${system.name} (${id})`);
 
-      return await this.findOne(id, userId, roles);
+      return await this.findOne(id, userId, isAdmin);
     } catch (error) {
       if (error instanceof NotFoundException || error instanceof BadRequestException) {
         throw error;

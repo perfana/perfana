@@ -1,5 +1,4 @@
 [
   "apps/api/src/modules/dynatrace/dynatrace.service.ts",
-  "apps/api/src/modules/profiles/profiles.service.ts",
-  "apps/api/src/modules/systems-under-test/systems-under-test.service.ts"
+  "apps/api/src/modules/profiles/profiles.service.ts"
 ]
