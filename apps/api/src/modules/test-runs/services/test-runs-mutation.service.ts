@@ -36,7 +36,6 @@ import { TestRunLookupService } from './test-run-lookup.service';
 import { TestRunsMetricsService } from './test-runs-metrics.service';
 import { TestRun, SystemUnderTest, TestEnvironment, Workload } from '../types/test-run.types';
 import { mapEntityToTestRun } from '../handlers/entity-mapper';
-import { AuthorizationService } from '../../../common/services/authorization.service';
 
 // Re-export types for backward compatibility
 export { TestRun, SystemUnderTest, TestEnvironment, Workload };
@@ -59,7 +58,6 @@ export class TestRunsMutationService {
     private readonly initTestHandler: InitTestHandler,
     private readonly lookupService: TestRunLookupService,
     private readonly metricsService: TestRunsMetricsService,
-    private readonly authzService: AuthorizationService,
   ) {}
 
   /**
@@ -72,11 +70,11 @@ export class TestRunsMutationService {
   async updateRunningTest(
     updateDto: UpdateRunningTestDto,
     userId: string,
-    roles: string[],
+    _roles: string[],
     organizationId: string,
   ): Promise<TestRun> {
     this.logger.debug(
-      `updateRunningTest: testRunId=${updateDto.testRunId}, userId=${userId}, organizationId=${organizationId}, isGlobalAdmin=${this.authzService.isGlobalAdmin(roles)}`,
+      `updateRunningTest: testRunId=${updateDto.testRunId}, userId=${userId}, organizationId=${organizationId}`,
     );
 
     const systemUnderTest = await this.lookupService.findOrCreateSystemUnderTest(
@@ -244,8 +242,8 @@ export class TestRunsMutationService {
    * @param userId - The user ID for authorization checks
    * @param roles - The user's roles for authorization checks
    */
-  async deleteTestRun(id: string, userId: string, roles: string[]): Promise<void> {
-    this.logger.debug(`deleteTestRun: id=${id}, userId=${userId}, isGlobalAdmin=${this.authzService.isGlobalAdmin(roles)}`);
+  async deleteTestRun(id: string, userId: string, _roles: string[]): Promise<void> {
+    this.logger.debug(`deleteTestRun: id=${id}, userId=${userId}`);
 
     // NOTE: Permission check will be added here when TestRun entity has organization_id
     // For now, all test runs can be deleted (treated as legacy data)

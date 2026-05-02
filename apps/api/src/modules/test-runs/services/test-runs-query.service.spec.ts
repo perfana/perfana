@@ -666,7 +666,7 @@ describe('TestRunsQueryService', () => {
 
         const result = await service.getTransactionTimeSeries('test-run-001', 'checkout', mockUserId, mockRoles, 5, false);
 
-        expect(timeSeriesService.getTransactionTimeSeries).toHaveBeenCalledWith('test-run-001', 'checkout', 5, false, mockRoles, []);
+        expect(timeSeriesService.getTransactionTimeSeries).toHaveBeenCalledWith('test-run-001', 'checkout', mockUserId, mockRoles, 5, false);
         expect(result.transaction_data).toHaveLength(1);
       });
     });
@@ -692,7 +692,7 @@ describe('TestRunsQueryService', () => {
 
         const result = await service.getSamplerTimeSeries('test-run-001', 'checkout', 'GET /api/checkout', mockUserId, mockRoles, 5, false);
 
-        expect(timeSeriesService.getSamplerTimeSeries).toHaveBeenCalledWith('test-run-001', 'checkout', 'GET /api/checkout', 5, false, mockRoles, []);
+        expect(timeSeriesService.getSamplerTimeSeries).toHaveBeenCalledWith('test-run-001', 'checkout', 'GET /api/checkout', mockUserId, mockRoles, 5, false);
         expect(result).toHaveLength(1);
       });
     });
