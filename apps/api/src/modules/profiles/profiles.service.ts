@@ -44,7 +44,9 @@ export interface ProfileDashboardResponse {
  * Service responsible for managing profiles and their associated dashboards and benchmarks.
  *
  * Authorization:
- * - All methods accept userId and roles parameters for authorization
+ * - Methods accept userId and a pre-resolved isAdmin boolean (resolved at the
+ *   controller boundary via `withOrgFilter`). The service no longer calls
+ *   `authzService.isGlobalAdmin` directly — Phase 3c C33 boundary push.
  * - Currently Profile entity does not have organization_id, so all data is treated as legacy
  * - When organization_id is added to Profile (Phase 4), authorization checks will be enabled
  * - Global admins bypass all authorization checks
@@ -73,9 +75,9 @@ export class ProfilesService {
    * Check if user is org-admin in any of their organizations
    * @throws Error if user is not an org-admin
    */
-  private async requireOrgAdmin(userId: string, roles: string[]): Promise<void> {
+  private async requireOrgAdmin(userId: string, isAdmin: boolean): Promise<void> {
     // Global admins always have access
-    if (this.authzService.isGlobalAdmin(roles)) {
+    if (isAdmin) {
       return;
     }
 
@@ -90,14 +92,13 @@ export class ProfilesService {
    * Find all profiles
    *
    * @param userId - The user ID for authorization
-   * @param roles - The user's roles for authorization checks
+   * @param isAdmin - Whether the caller is a global admin (resolved at controller boundary)
    *
    * Note: Profile entity does not have organization_id yet, so org filtering is not applied.
    * Full org filtering will be enabled when Phase 4 adds organization_id column.
    */
-  async findAll(userId: string, roles: string[], organizationId?: string): Promise<ProfileResponse[]> {
+  async findAll(userId: string, isAdmin: boolean, organizationId?: string): Promise<ProfileResponse[]> {
     try {
-      const isAdmin = this.authzService.isGlobalAdmin(roles);
       this.logger.debug(`findAll: userId=${userId}, isGlobalAdmin=${isAdmin}, organizationId=${organizationId}`);
 
       // Resolve which org IDs to filter by
@@ -190,15 +191,13 @@ export class ProfilesService {
    *
    * @param id - The profile ID
    * @param userId - The user ID for authorization
-   * @param roles - The user's roles for authorization checks
+   * @param isAdmin - Whether the caller is a global admin (resolved at controller boundary)
    *
    * Note: Profile entity does not have organization_id yet, so access checks are not applied.
    * Full access permission checks will be enabled when Phase 4 adds organization_id column.
    */
-  async findOne(id: string, userId: string, roles: string[]): Promise<ProfileResponse | null> {
+  async findOne(id: string, userId: string, isAdmin: boolean): Promise<ProfileResponse | null> {
     try {
-      // Log authorization context for debugging
-      const isAdmin = this.authzService.isGlobalAdmin(roles);
       this.logger.debug(`findOne: id=${id}, userId=${userId}, isGlobalAdmin=${isAdmin}`);
 
       const profile = await this.profileRepo.findOne({
@@ -250,15 +249,13 @@ export class ProfilesService {
    *
    * @param id - The profile ID
    * @param userId - The user ID for authorization
-   * @param roles - The user's roles for authorization checks
+   * @param isAdmin - Whether the caller is a global admin (resolved at controller boundary)
    *
    * Note: Profile entity does not have organization_id yet, so access checks are not applied.
    * Full access permission checks will be enabled when Phase 4 adds organization_id column.
    */
-  async findDashboardsByProfileId(id: string, userId: string, roles: string[]): Promise<ProfileDashboardResponse[]> {
+  async findDashboardsByProfileId(id: string, userId: string, isAdmin: boolean): Promise<ProfileDashboardResponse[]> {
     try {
-      // Log authorization context for debugging
-      const isAdmin = this.authzService.isGlobalAdmin(roles);
       this.logger.debug(`findDashboardsByProfileId: id=${id}, userId=${userId}, isGlobalAdmin=${isAdmin}`);
 
       // First, get the profile to get its name
@@ -352,7 +349,7 @@ export class ProfilesService {
    * @param profileId - The profile ID
    * @param createDto - The dashboard creation DTO
    * @param userId - The user ID for authorization and ownership tracking
-   * @param roles - The user's roles for authorization checks
+   * @param isAdmin - Whether the caller is a global admin (resolved at controller boundary)
    *
    * Note: Profile entity does not have organization_id or created_by/updated_by yet,
    * so ownership tracking is not applied. Full ownership assignment will be enabled when
@@ -362,15 +359,13 @@ export class ProfilesService {
     profileId: string,
     createDto: CreateProfileDashboardDto,
     userId: string,
-    roles: string[],
+    isAdmin: boolean,
   ): Promise<ProfileDashboardResponse> {
     try {
-      // Log authorization context for debugging
-      const isAdmin = this.authzService.isGlobalAdmin(roles);
       this.logger.debug(`createDashboard: profileId=${profileId}, userId=${userId}, isGlobalAdmin=${isAdmin}`);
 
       // Check if user is org-admin in any organization
-      await this.requireOrgAdmin(userId, roles);
+      await this.requireOrgAdmin(userId, isAdmin);
 
       // Get the profile to retrieve its name
       const profile = await this.profileRepo.findOne({
@@ -449,7 +444,7 @@ export class ProfilesService {
    * @param dashboardId - The dashboard ID
    * @param updateDto - The dashboard update DTO
    * @param userId - The user ID for authorization and ownership tracking
-   * @param roles - The user's roles for authorization checks
+   * @param isAdmin - Whether the caller is a global admin (resolved at controller boundary)
    *
    * Note: Profile entity does not have organization_id yet, so permission checks are not applied.
    * Full permission checks will be enabled when Phase 4 adds organization_id column.
@@ -459,15 +454,13 @@ export class ProfilesService {
     dashboardId: string,
     updateDto: UpdateProfileDashboardDto,
     userId: string,
-    roles: string[],
+    isAdmin: boolean,
   ): Promise<ProfileDashboardResponse> {
     try {
-      // Log authorization context for debugging
-      const isAdmin = this.authzService.isGlobalAdmin(roles);
       this.logger.debug(`updateDashboard: profileId=${profileId}, dashboardId=${dashboardId}, userId=${userId}, isGlobalAdmin=${isAdmin}`);
 
       // Check if user is org-admin in any organization
-      await this.requireOrgAdmin(userId, roles);
+      await this.requireOrgAdmin(userId, isAdmin);
 
       // Get the profile to retrieve its name
       const profile = await this.profileRepo.findOne({
@@ -633,19 +626,17 @@ export class ProfilesService {
    * @param profileId - The profile ID
    * @param dashboardId - The dashboard ID
    * @param userId - The user ID for authorization
-   * @param roles - The user's roles for authorization checks
+   * @param isAdmin - Whether the caller is a global admin (resolved at controller boundary)
    *
    * Note: Profile entity does not have organization_id yet, so permission checks are not applied.
    * Full permission checks will be enabled when Phase 4 adds organization_id column.
    */
-  async deleteDashboard(profileId: string, dashboardId: string, userId: string, roles: string[]): Promise<void> {
+  async deleteDashboard(profileId: string, dashboardId: string, userId: string, isAdmin: boolean): Promise<void> {
     try {
-      // Log authorization context for debugging
-      const isAdmin = this.authzService.isGlobalAdmin(roles);
       this.logger.debug(`deleteDashboard: profileId=${profileId}, dashboardId=${dashboardId}, userId=${userId}, isGlobalAdmin=${isAdmin}`);
 
       // Check if user is org-admin in any organization
-      await this.requireOrgAdmin(userId, roles);
+      await this.requireOrgAdmin(userId, isAdmin);
 
       // Get the profile to retrieve its name
       const profile = await this.profileRepo.findOne({
@@ -685,15 +676,13 @@ export class ProfilesService {
    *
    * @param profileId - The profile ID
    * @param userId - The user ID for authorization
-   * @param roles - The user's roles for authorization checks
+   * @param isAdmin - Whether the caller is a global admin (resolved at controller boundary)
    *
    * Note: Profile entity does not have organization_id yet, so access checks are not applied.
    * Full access permission checks will be enabled when Phase 4 adds organization_id column.
    */
-  async findBenchmarksByProfileId(profileId: string, userId: string, roles: string[]): Promise<ProfileBenchmarkResponse[]> {
+  async findBenchmarksByProfileId(profileId: string, userId: string, isAdmin: boolean): Promise<ProfileBenchmarkResponse[]> {
     try {
-      // Log authorization context for debugging
-      const isAdmin = this.authzService.isGlobalAdmin(roles);
       this.logger.debug(`findBenchmarksByProfileId: profileId=${profileId}, userId=${userId}, isGlobalAdmin=${isAdmin}`);
 
       // Get the profile to validate it exists
@@ -761,7 +750,7 @@ export class ProfilesService {
    * @param profileId - The profile ID
    * @param createDto - The benchmark creation DTO
    * @param userId - The user ID for authorization and ownership tracking
-   * @param roles - The user's roles for authorization checks
+   * @param isAdmin - Whether the caller is a global admin (resolved at controller boundary)
    *
    * Note: Profile entity does not have organization_id or created_by/updated_by yet,
    * so ownership tracking is not applied. Full ownership assignment will be enabled when
@@ -771,15 +760,13 @@ export class ProfilesService {
     profileId: string,
     createDto: CreateProfileBenchmarkDto,
     userId: string,
-    roles: string[],
+    isAdmin: boolean,
   ): Promise<ProfileBenchmarkResponse> {
     try {
-      // Log authorization context for debugging
-      const isAdmin = this.authzService.isGlobalAdmin(roles);
       this.logger.debug(`createBenchmark: profileId=${profileId}, userId=${userId}, isGlobalAdmin=${isAdmin}`);
 
       // Check if user is org-admin in any organization
-      await this.requireOrgAdmin(userId, roles);
+      await this.requireOrgAdmin(userId, isAdmin);
 
       // Get the profile to validate it exists
       const profile = await this.profileRepo.findOne({
@@ -881,7 +868,7 @@ export class ProfilesService {
    * @param benchmarkId - The benchmark ID
    * @param updateDto - The benchmark update DTO
    * @param userId - The user ID for authorization and ownership tracking
-   * @param roles - The user's roles for authorization checks
+   * @param isAdmin - Whether the caller is a global admin (resolved at controller boundary)
    *
    * Note: Profile entity does not have organization_id yet, so permission checks are not applied.
    * Full permission checks will be enabled when Phase 4 adds organization_id column.
@@ -891,15 +878,13 @@ export class ProfilesService {
     benchmarkId: string,
     updateDto: UpdateProfileBenchmarkDto,
     userId: string,
-    roles: string[],
+    isAdmin: boolean,
   ): Promise<ProfileBenchmarkResponse> {
     try {
-      // Log authorization context for debugging
-      const isAdmin = this.authzService.isGlobalAdmin(roles);
       this.logger.debug(`updateBenchmark: profileId=${profileId}, benchmarkId=${benchmarkId}, userId=${userId}, isGlobalAdmin=${isAdmin}`);
 
       // Check if user is org-admin in any organization
-      await this.requireOrgAdmin(userId, roles);
+      await this.requireOrgAdmin(userId, isAdmin);
 
       // Get the profile to validate it exists
       const profile = await this.profileRepo.findOne({
@@ -1054,19 +1039,17 @@ export class ProfilesService {
    * @param profileId - The profile ID
    * @param benchmarkId - The benchmark ID
    * @param userId - The user ID for authorization
-   * @param roles - The user's roles for authorization checks
+   * @param isAdmin - Whether the caller is a global admin (resolved at controller boundary)
    *
    * Note: Profile entity does not have organization_id yet, so permission checks are not applied.
    * Full permission checks will be enabled when Phase 4 adds organization_id column.
    */
-  async deleteBenchmark(profileId: string, benchmarkId: string, userId: string, roles: string[]): Promise<void> {
+  async deleteBenchmark(profileId: string, benchmarkId: string, userId: string, isAdmin: boolean): Promise<void> {
     try {
-      // Log authorization context for debugging
-      const isAdmin = this.authzService.isGlobalAdmin(roles);
       this.logger.debug(`deleteBenchmark: profileId=${profileId}, benchmarkId=${benchmarkId}, userId=${userId}, isGlobalAdmin=${isAdmin}`);
 
       // Check if user is org-admin in any organization
-      await this.requireOrgAdmin(userId, roles);
+      await this.requireOrgAdmin(userId, isAdmin);
 
       // Get the profile to validate it exists
       const profile = await this.profileRepo.findOne({
@@ -1103,8 +1086,8 @@ export class ProfilesService {
 
   // ─── Profile CRUD ───────────────────────────────────────────────────
 
-  async createProfile(dto: CreateProfileDto, userId: string, roles: string[]): Promise<ProfileResponse> {
-    await this.requireOrgAdmin(userId, roles);
+  async createProfile(dto: CreateProfileDto, userId: string, isAdmin: boolean): Promise<ProfileResponse> {
+    await this.requireOrgAdmin(userId, isAdmin);
 
     // Check uniqueness
     const existing = await this.profileRepo.findOne({ where: { name: dto.name } });
@@ -1138,8 +1121,8 @@ export class ProfilesService {
     };
   }
 
-  async updateProfile(id: string, dto: UpdateProfileDto, userId: string, roles: string[]): Promise<ProfileResponse> {
-    await this.requireOrgAdmin(userId, roles);
+  async updateProfile(id: string, dto: UpdateProfileDto, userId: string, isAdmin: boolean): Promise<ProfileResponse> {
+    await this.requireOrgAdmin(userId, isAdmin);
 
     const profile = await this.profileRepo.findOne({ where: { id } });
     if (!profile) {
@@ -1168,12 +1151,12 @@ export class ProfilesService {
     this.logger.log(`Profile '${saved.name}' updated by ${userId}`);
 
     // Re-fetch counts
-    const full = await this.findOne(id, userId, roles);
+    const full = await this.findOne(id, userId, isAdmin);
     return full!;
   }
 
-  async deleteProfile(id: string, userId: string, roles: string[]): Promise<void> {
-    await this.requireOrgAdmin(userId, roles);
+  async deleteProfile(id: string, userId: string, isAdmin: boolean): Promise<void> {
+    await this.requireOrgAdmin(userId, isAdmin);
 
     const profile = await this.profileRepo.findOne({ where: { id } });
     if (!profile) {

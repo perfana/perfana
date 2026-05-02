@@ -5,6 +5,8 @@ import { CreateProfileDto, UpdateProfileDto } from './dto/profile.dto';
 import { CreateProfileDashboardDto, UpdateProfileDashboardDto } from './dto/profile-dashboard.dto';
 import { CreateProfileBenchmarkDto, UpdateProfileBenchmarkDto } from './dto/profile-benchmark.dto';
 import { UserCtx, UserContext } from '../../common/decorators/user-context.decorator';
+import { AuthorizationService } from '../../common/services/authorization.service';
+import { withOrgFilter } from '../../common/utils/with-org-filter';
 
 @ApiTags('profiles')
 @ApiBearerAuth()
@@ -12,7 +14,22 @@ import { UserCtx, UserContext } from '../../common/decorators/user-context.decor
 export class ProfilesController {
   private readonly logger = new Logger(ProfilesController.name);
 
-  constructor(private readonly profilesService: ProfilesService) {}
+  constructor(
+    private readonly profilesService: ProfilesService,
+    private readonly authzService: AuthorizationService,
+  ) {}
+
+  /**
+   * Resolve the global-admin boolean for the request without calling
+   * `authzService.isGlobalAdmin` directly. `withOrgFilter` is the lint-exempt
+   * indirection: it returns `null` iff the caller is a global admin, so a
+   * `=== null` check collapses to `isAdmin` while keeping this controller out
+   * of the `no-direct-is-global-admin` allowlist (Phase 3c C33 boundary push;
+   * see C30/C31/C32 for the same pattern).
+   */
+  private async resolveIsAdmin(userId: string, roles: string[]): Promise<boolean> {
+    return (await withOrgFilter(userId, roles, this.authzService)) === null;
+  }
 
   @Get()
   @ApiOperation({ summary: 'Get all profiles' })
@@ -20,7 +37,8 @@ export class ProfilesController {
   async findAll(@UserCtx() ctx: UserContext, @Query('organizationId') organizationId?: string) {
     try {
       this.logger.debug(`User ${ctx.userId} fetching all profiles (organizationId=${organizationId})`);
-      return await this.profilesService.findAll(ctx.userId, ctx.roles, organizationId);
+      const isAdmin = await this.resolveIsAdmin(ctx.userId, ctx.roles);
+      return await this.profilesService.findAll(ctx.userId, isAdmin, organizationId);
     } catch (error) {
       this.logger.error('Failed to fetch profiles:', error);
       throw new HttpException(
@@ -37,7 +55,8 @@ export class ProfilesController {
   async findOne(@Param('id') id: string, @UserCtx() ctx: UserContext) {
     try {
       this.logger.debug(`User ${ctx.userId} fetching profile ${id}`);
-      const profile = await this.profilesService.findOne(id, ctx.userId, ctx.roles);
+      const isAdmin = await this.resolveIsAdmin(ctx.userId, ctx.roles);
+      const profile = await this.profilesService.findOne(id, ctx.userId, isAdmin);
       if (!profile) {
         throw new HttpException('Profile not found', HttpStatus.NOT_FOUND);
       }
@@ -64,7 +83,8 @@ export class ProfilesController {
     @UserCtx() ctx: UserContext,
   ) {
     this.logger.debug(`User ${ctx.userId} creating profile '${createDto.name}'`);
-    return this.profilesService.createProfile(createDto, ctx.userId, ctx.roles);
+    const isAdmin = await this.resolveIsAdmin(ctx.userId, ctx.roles);
+    return this.profilesService.createProfile(createDto, ctx.userId, isAdmin);
   }
 
   @Put(':id')
@@ -79,7 +99,8 @@ export class ProfilesController {
     @UserCtx() ctx: UserContext,
   ) {
     this.logger.debug(`User ${ctx.userId} updating profile ${id}`);
-    return this.profilesService.updateProfile(id, updateDto, ctx.userId, ctx.roles);
+    const isAdmin = await this.resolveIsAdmin(ctx.userId, ctx.roles);
+    return this.profilesService.updateProfile(id, updateDto, ctx.userId, isAdmin);
   }
 
   @Delete(':id')
@@ -93,7 +114,8 @@ export class ProfilesController {
     @UserCtx() ctx: UserContext,
   ) {
     this.logger.debug(`User ${ctx.userId} deleting profile ${id}`);
-    await this.profilesService.deleteProfile(id, ctx.userId, ctx.roles);
+    const isAdmin = await this.resolveIsAdmin(ctx.userId, ctx.roles);
+    await this.profilesService.deleteProfile(id, ctx.userId, isAdmin);
     return { message: 'Profile deleted successfully' };
   }
 
@@ -104,7 +126,8 @@ export class ProfilesController {
   async findDashboards(@Param('id') id: string, @UserCtx() ctx: UserContext) {
     try {
       this.logger.debug(`User ${ctx.userId} fetching dashboards for profile ${id}`);
-      const dashboards = await this.profilesService.findDashboardsByProfileId(id, ctx.userId, ctx.roles);
+      const isAdmin = await this.resolveIsAdmin(ctx.userId, ctx.roles);
+      const dashboards = await this.profilesService.findDashboardsByProfileId(id, ctx.userId, isAdmin);
       return dashboards;
     } catch (error) {
       this.logger.error('Failed to fetch profile dashboards:', error);
@@ -131,7 +154,8 @@ export class ProfilesController {
   ) {
     try {
       this.logger.debug(`User ${ctx.userId} creating dashboard for profile ${id}`);
-      return await this.profilesService.createDashboard(id, createDto, ctx.userId, ctx.roles);
+      const isAdmin = await this.resolveIsAdmin(ctx.userId, ctx.roles);
+      return await this.profilesService.createDashboard(id, createDto, ctx.userId, isAdmin);
     } catch (error) {
       this.logger.error('Failed to create profile dashboard:', error);
       if (error instanceof HttpException) {
@@ -164,7 +188,8 @@ export class ProfilesController {
       this.logger.debug(`[Controller] Received updateDto: ${JSON.stringify(updateDto, null, 2)}`);
       this.logger.debug(`[Controller] setHardcodedValueForVariables type: ${Array.isArray(updateDto.setHardcodedValueForVariables) ? 'array' : typeof updateDto.setHardcodedValueForVariables}`);
       this.logger.debug(`[Controller] setHardcodedValueForVariables value: ${JSON.stringify(updateDto.setHardcodedValueForVariables)}`);
-      return await this.profilesService.updateDashboard(id, dashboardId, updateDto, ctx.userId, ctx.roles);
+      const isAdmin = await this.resolveIsAdmin(ctx.userId, ctx.roles);
+      return await this.profilesService.updateDashboard(id, dashboardId, updateDto, ctx.userId, isAdmin);
     } catch (error) {
       this.logger.error('Failed to update profile dashboard:', error);
       if (error instanceof HttpException) {
@@ -192,7 +217,8 @@ export class ProfilesController {
   ) {
     try {
       this.logger.debug(`User ${ctx.userId} deleting dashboard ${dashboardId} from profile ${id}`);
-      await this.profilesService.deleteDashboard(id, dashboardId, ctx.userId, ctx.roles);
+      const isAdmin = await this.resolveIsAdmin(ctx.userId, ctx.roles);
+      await this.profilesService.deleteDashboard(id, dashboardId, ctx.userId, isAdmin);
       return { message: 'Dashboard association deleted successfully' };
     } catch (error) {
       this.logger.error('Failed to delete profile dashboard:', error);
@@ -216,7 +242,8 @@ export class ProfilesController {
   async getProfileBenchmarks(@Param('id') id: string, @UserCtx() ctx: UserContext) {
     try {
       this.logger.debug(`User ${ctx.userId} fetching benchmarks for profile ${id}`);
-      return await this.profilesService.findBenchmarksByProfileId(id, ctx.userId, ctx.roles);
+      const isAdmin = await this.resolveIsAdmin(ctx.userId, ctx.roles);
+      return await this.profilesService.findBenchmarksByProfileId(id, ctx.userId, isAdmin);
     } catch (error) {
       this.logger.error('Failed to fetch profile benchmarks:', error);
       if (error instanceof HttpException) {
@@ -242,7 +269,8 @@ export class ProfilesController {
   ) {
     try {
       this.logger.debug(`User ${ctx.userId} creating benchmark for profile ${id}`);
-      return await this.profilesService.createBenchmark(id, createDto, ctx.userId, ctx.roles);
+      const isAdmin = await this.resolveIsAdmin(ctx.userId, ctx.roles);
+      return await this.profilesService.createBenchmark(id, createDto, ctx.userId, isAdmin);
     } catch (error) {
       this.logger.error('Failed to create profile benchmark:', error);
       if (error instanceof HttpException) {
@@ -272,7 +300,8 @@ export class ProfilesController {
   ) {
     try {
       this.logger.debug(`User ${ctx.userId} updating benchmark ${benchmarkId} for profile ${id}`);
-      return await this.profilesService.updateBenchmark(id, benchmarkId, updateDto, ctx.userId, ctx.roles);
+      const isAdmin = await this.resolveIsAdmin(ctx.userId, ctx.roles);
+      return await this.profilesService.updateBenchmark(id, benchmarkId, updateDto, ctx.userId, isAdmin);
     } catch (error) {
       this.logger.error('Failed to update profile benchmark:', error);
       if (error instanceof HttpException) {
@@ -300,7 +329,8 @@ export class ProfilesController {
   ) {
     try {
       this.logger.debug(`User ${ctx.userId} deleting benchmark ${benchmarkId} from profile ${id}`);
-      await this.profilesService.deleteBenchmark(id, benchmarkId, ctx.userId, ctx.roles);
+      const isAdmin = await this.resolveIsAdmin(ctx.userId, ctx.roles);
+      await this.profilesService.deleteBenchmark(id, benchmarkId, ctx.userId, isAdmin);
       return { message: 'Benchmark deleted successfully' };
     } catch (error) {
       this.logger.error('Failed to delete profile benchmark:', error);

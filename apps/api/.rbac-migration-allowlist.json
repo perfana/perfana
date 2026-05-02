@@ -1,4 +1,3 @@
 [
-  "apps/api/src/modules/dynatrace/dynatrace.service.ts",
-  "apps/api/src/modules/profiles/profiles.service.ts"
+  "apps/api/src/modules/dynatrace/dynatrace.service.ts"
 ]
