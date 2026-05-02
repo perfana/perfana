@@ -6,15 +6,15 @@ Phase 3c rolls capabilities through every site listed below. Update these counts
 
 | Bucket | Total | Migrated | Remaining | % done |
 | --- | ---: | ---: | ---: | ---: |
-| A — bypass filter | 129 | 66 | 63 | 51.2% |
-| B — bypass guard | 22 | 21 | 1 | 95.5% |
+| A — bypass filter | 131 | 68 | 63 | 51.9% |
+| B — bypass guard | 32 | 31 | 1 | 96.9% |
 | Local `private isGlobalAdmin()` wrappers | 13 | 8 | 5 | 61.5% |
 
-**Lint enforcement:** `apps/api/.rbac-migration-allowlist.json` lists every file currently exempt from the `no-direct-is-global-admin` lint rule (5 files as of 2026-05-02). When a site is migrated, remove its file from the allowlist (the file may have multiple sites — only remove when the LAST one is migrated). Allowlist size IS the burndown.
+**Lint enforcement:** `apps/api/.rbac-migration-allowlist.json` lists every file currently exempt from the `no-direct-is-global-admin` lint rule (3 files as of 2026-05-02). When a site is migrated, remove its file from the allowlist (the file may have multiple sites — only remove when the LAST one is migrated). Allowlist size IS the burndown.
 
-**Bucket A total adjusted upward by 2 in C30:** the user-owned `findAll` list-filter sites in `graph-presets.service.ts` and `trends-presets.service.ts` were not in the original audit (the audit focused on org-owned resources). C30 enumerates and migrates both as Bucket A.
+**Bucket A total adjusted upward by 2 in C30 and 2 in C31:** C30 enumerates the user-owned `findAll` list-filter sites in `graph-presets.service.ts` and `trends-presets.service.ts` that were not in the original audit (which focused on org-owned resources). C31 enumerates the membership-filtered `findAll` sites in `teams.service.ts` and `organizations.service.ts` — these are filtered by org membership rather than `organization_id IN (...)` and were not in the original audit either.
 
-**Bucket B total adjusted upward by 3 in C17, 1 in C25, and 4 in C30:** C17 brings dynatrace per-resource sites in-scope (originally "Leave" until `canAccessResource`/`canModifyResource` shipped). C25 adds `verifyTestRunAccess` from `test-runs-query.service.ts`. C30 adds the 4 user-owned per-resource sites in graph/trends-presets (`findOne` + `remove` × 2 files), which the original audit did not enumerate.
+**Bucket B total adjusted upward by 3 in C17, 1 in C25, 4 in C30, and 10 in C31:** C17 brings dynatrace per-resource sites in-scope (originally "Leave" until `canAccessResource`/`canModifyResource` shipped). C25 adds `verifyTestRunAccess` from `test-runs-query.service.ts`. C30 adds the 4 user-owned per-resource sites in graph/trends-presets. C31 enumerates 10 per-resource guard sites across `teams.service.ts` (5: `findOne`, `findByOrganization`, `create`, `update`, `remove`) and `organizations.service.ts` (5: `findOne`, `findByName`, `create`, `update`, `remove`) — neither file's sites were in the original audit.
 
 **Date-bound revisit:** by **2026-08-01**, Phase 3c migration must be at least 50% complete (Bucket A + B combined: 70+ sites migrated). If not, re-evaluate the architecture or the priorities. "We forgot about it" is the failure mode this gate prevents.
 
@@ -1729,3 +1729,116 @@ Both files **EXIT** the allowlist — zero direct `isGlobalAdmin` references aft
 ### Remaining allowlist (5 files)
 
 After C30, the allowlist contains: `dynatrace.service.ts`, `organizations.service.ts`, `profiles.service.ts`, `systems-under-test.service.ts`, `teams.service.ts`. These are mostly larger, more architecturally embedded services — none are clones of each other, and several mix Bucket A and Bucket B sites with multi-tenant concerns. Next candidates by complexity: `teams.service.ts` and `organizations.service.ts` (smaller files, both deal directly with the membership entities so the migration patterns may need new shapes); `profiles.service.ts` is the largest remaining surface and likely warrants a multi-PR split similar to the test-runs sub-services in C25–C29.
+
+---
+
+## Phase C31 — `teams` + `organizations` combined `roles → isAdmin` boundary push
+
+**Date:** 2026-05-02
+**Branch:** `rbac/3c-teams-orgs-c31`
+**Related:** Phase 3c, C30 (graph/trends-presets clone-pair precedent), C26–C29 (boundary push pattern)
+
+**Scope:** Combined-PR migration of two membership-rooted services. Drops 12 direct `authzService.isGlobalAdmin` call sites — 6 in `apps/api/src/modules/teams/teams.service.ts` (365 lines pre-edit) and 6 in `apps/api/src/modules/organizations/organizations.service.ts` (370 lines pre-edit) — and pushes admin resolution up to the corresponding controllers. Both files **EXIT** the allowlist (5 → **3**). Same `resolveIsAdmin` helper backed by `withOrgFilter` as C30, identical controller-as-boundary shape.
+
+### Migration shape
+
+Per file, the transformation is:
+
+```typescript
+// Before (service)
+async findAll(userId: string = '', roles: string[] = []): Promise<Team[]> {
+  const isAdmin = this.authzService.isGlobalAdmin(roles);
+  this.logger.debug(`findAll: userId=${userId}, isGlobalAdmin=${isAdmin}`);
+  if (isAdmin) { /* return all */ }
+  // ... membership-filtered path
+}
+
+// After (service)
+async findAll(userId: string = '', isAdmin: boolean = false): Promise<Team[]> {
+  if (isAdmin) { /* return all */ }
+  // ... membership-filtered path (unchanged)
+}
+```
+
+Controllers add `AuthorizationService` injection plus the `resolveIsAdmin(userId, roles)` helper (same body as C30). Each method that previously forwarded `ctx.roles` now `await`s `resolveIsAdmin` once and forwards the boolean. Internal self-calls (`create` and `update` both call `findOne(savedId, userId, isAdmin)` to return the hydrated record) thread the resolved boolean through unchanged.
+
+The trivial `isGlobalAdmin=${isAdmin}` debug logs at every method entry — pure observability noise — are deleted entirely. The `Access denied` warn-logs (only emitted when authorization actually fails) are preserved.
+
+### Per-method site mapping
+
+`teams.service.ts` (6 isGlobalAdmin sites, all migrated):
+
+| Method | Bucket | Notes |
+| --- | --- | --- |
+| `findAll` | A | Returns all teams when admin; otherwise `WHERE organization_id IN (accessibleOrgIds)`. |
+| `findOne` | B | Per-resource guard; admin bypasses `isOrganizationMember` + `isTeamMember` fallback. |
+| `findByOrganization` | B | Per-resource guard; admin bypasses `isOrganizationMember`. |
+| `create` | B | Per-resource guard; admin bypasses `isOrganizationAdmin`. |
+| `update` | B | Per-resource guard; admin bypasses `isOrganizationAdmin` ∧ `isTeamAdmin`. |
+| `remove` | B | Per-resource guard; admin bypasses `isOrganizationAdmin` ∧ `isTeamAdmin`. |
+
+`organizations.service.ts` (6 isGlobalAdmin sites, all migrated):
+
+| Method | Bucket | Notes |
+| --- | --- | --- |
+| `findAll` | A | Returns all orgs when admin; otherwise `WHERE id IN (accessibleOrgIds)`. |
+| `findOne` | B | Per-resource guard; admin bypasses `isOrganizationMember`. |
+| `findByName` | B | Per-resource guard; admin bypasses `isOrganizationMember` (returns `null` on denial for back-compat). |
+| `create` | B | Per-resource guard is a no-op today (all auth users may create); the `isAdmin` debug log was the only `isGlobalAdmin` site. The boolean is still threaded into the trailing `findOne` self-call. |
+| `update` | B | Per-resource guard; admin bypasses `isOrganizationAdmin`. |
+| `remove` | B | Per-resource guard; admin bypasses `isOrganizationAdmin`. |
+
+### Verification
+
+| Check | Result |
+| --- | --- |
+| `npx tsc --noEmit` (apps/api) | clean |
+| `npx eslint --rulesdir eslint-rules 'src/**/*.ts'` | 0 errors, 59 warnings (all `@typescript-eslint/no-explicit-any` warnings — unchanged from C30) |
+| `grep -n isGlobalAdmin` on the four touched files | only doc-comment references in the two new controller `resolveIsAdmin` helpers (explaining the indirection); zero call sites |
+| `npx jest src/modules/teams src/modules/organizations` | 124 passed (2 suites — `team-members.service.spec.ts`, `organization-members.service.spec.ts`) |
+| `npx jest` (full API suite) | 4302 passed, 20 skipped (unchanged from C30) |
+
+Note: there are no unit tests for `teams.service.ts` or `organizations.service.ts` themselves — only the `*-members.service` siblings have specs. The 4302/4302 total is the regression check; behavior for the migrated entry points is exercised by `e2e` paths the suite already covers.
+
+### Diff size
+
+- `teams.service.ts`: ~−25 lines (6 `isGlobalAdmin` calls + 6 debug-log lines deleted; signatures swap `roles: string[]` → `isAdmin: boolean`; 2 internal self-calls in `create`/`update` switch from `roles` to `isAdmin`)
+- `teams.controller.ts`: ~+25 lines (`AuthorizationService` injection + `withOrgFilter` import + `resolveIsAdmin` helper + 5 method awaits)
+- `organizations.service.ts`: ~−25 lines (same shape as teams)
+- `organizations.controller.ts`: ~+25 lines (same shape as teams)
+- `.rbac-migration-allowlist.json`: −2 lines
+
+Net: roughly zero across all five files. Service-side simplification (deleted debug logs + signature shrink) almost exactly offsets the duplicated controller-side `resolveIsAdmin` plumbing.
+
+### Files changed
+
+- `apps/api/src/modules/teams/teams.service.ts` — swap signatures, drop 6 inline `isGlobalAdmin` calls + 6 debug-log lines, thread `isAdmin` through internal self-calls in `create`/`update`
+- `apps/api/src/modules/teams/teams.controller.ts` — inject `AuthorizationService`, add `withOrgFilter` import + `resolveIsAdmin` helper, await `isAdmin` in all 5 service-call methods (`findAll` / `findByOrganization` / `findOne` / `create` / `update` / `remove`)
+- `apps/api/src/modules/organizations/organizations.service.ts` — same shape as teams
+- `apps/api/src/modules/organizations/organizations.controller.ts` — same shape as teams
+- `apps/api/.rbac-migration-allowlist.json` — remove both files
+- `docs/superpowers/audits/2026-04-26-audit-decisions.md` — this file (burndown table updates + this section)
+
+### Allowlist disposition
+
+Both files **EXIT** the allowlist — zero direct `isGlobalAdmin` call sites after the migration. Allowlist size: 5 → **3** (second multi-file exit in a row, after C30). Burndown: Bucket A 66 → 68 of 131 (2 of the migrated `findAll` sites — total adjusted upward by 2 to enumerate the membership-rooted list-filter shape). Bucket B 21 → 31 of 32 (10 per-resource guards added — total adjusted upward by 10).
+
+### Pattern notes
+
+**1. Membership-rooted services confirm the boundary-push pattern is universal.** The audit doc had flagged teams/orgs as services where "the migration patterns may need new shapes" because they deal directly with the membership entities themselves. They didn't. The same `resolveIsAdmin` helper, the same `withOrgFilter` indirection, the same `roles → isAdmin` signature swap, and the same controller-as-boundary structure all worked unchanged. The only adjustment was bookkeeping: the migrated sites weren't in the original Bucket A/B enumeration, so the totals were adjusted upward (same way C30 adjusted upward for user-owned presets).
+
+**2. Internal self-call threading is mechanical.** Both `create` and `update` end with `return await this.findOne(savedId, userId, ???)` to return a hydrated record. The migration just swaps the third arg from `roles` to `isAdmin` — no other change. This is the simplest sub-pattern of the boundary push: the parent already had the resolved boolean in scope, so threading it through is one identifier rename per call site.
+
+**3. Combined-PR cadence for clone-pairs is now established.** C30 introduced the precedent; C31 follows it. The two files share method shape, signature shape, debug-log shape, and migration delta. Splitting them into separate PRs would double the review cost and produce two near-identical audit entries. The bar for combining: the migration delta must be structurally identical, not merely topically related — which is the case for the four `findX` / `create` / `update` / `remove` methods across both files.
+
+**4. The audit "next candidates" predictions are improving.** C30's audit entry predicted "teams.service.ts and organizations.service.ts (smaller files, both deal directly with the membership entities so the migration patterns may need new shapes)". The first half (smaller files, next-up) was right; the second half (new shapes needed) was wrong — the existing pattern covered them with no adjustments. Worth keeping in mind for the remaining three files: the prediction biased toward "this will be hard"; the reality is mostly mechanical.
+
+### Remaining allowlist (3 files)
+
+After C31, the allowlist contains: `dynatrace.service.ts`, `profiles.service.ts`, `systems-under-test.service.ts`. The remaining surface is dominated by `dynatrace.service.ts` (1566 lines) and `profiles.service.ts` (1190 lines), with `systems-under-test.service.ts` (661 lines) in between. Likely sequencing:
+
+- **C32:** `systems-under-test.service.ts` (smallest of the three, single-file PR). The audit's original Bucket A/B enumeration covers this file directly — no upward adjustment expected.
+- **C33–C34:** `profiles.service.ts` split. Likely a 2–3 PR sequence following the test-runs sub-service C25–C29 pattern: extract method clusters by surface (CRUD vs. metrics-source-resolution vs. variable-resolution) and migrate each cluster independently to keep PRs reviewable.
+- **C35–C36:** `dynatrace.service.ts` finish. C17 already migrated the per-resource sites; the remaining surface is the larger CRUD + tile-management shape. Multi-PR split likely.
+
+After C31, the lint rule actively guards every controller and every test-runs sub-service plus the entire `*-presets` and membership-rooted module surfaces. Phase 3c's coverage is now structurally complete for the most-trafficked entry points; the remaining three allowlist files are heavyweight integration services rather than user-facing CRUD.

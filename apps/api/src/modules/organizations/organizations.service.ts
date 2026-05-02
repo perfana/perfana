@@ -10,9 +10,10 @@ import { CreateOrganizationDto, UpdateOrganizationDto } from './dto/organization
  * Service responsible for managing organizations.
  *
  * Authorization:
- * - All methods accept userId and roles parameters for authorization
- * - AuthorizationService is injected for role-based authorization checks
- * - Global admins can see and manage all organizations
+ * - All methods accept userId and isAdmin parameters for authorization
+ * - AuthorizationService is injected for membership/admin role checks
+ * - Global admins (isAdmin=true) can see and manage all organizations; admin
+ *   resolution is performed at the controller boundary (Phase 3c C31)
  * - Regular users can only see organizations they are members of
  * - Only org admins can update/delete organizations
  *
@@ -38,7 +39,7 @@ export class OrganizationsService {
    * Find all organizations the user has access to.
    *
    * @param userId - The user ID for authorization
-   * @param roles - The user's roles for authorization checks
+   * @param isAdmin - Whether the caller is a global admin (resolved by controller)
    *
    * Authorization:
    * - Global admins see all organizations
@@ -46,13 +47,9 @@ export class OrganizationsService {
    */
   async findAll(
     userId: string = '',
-    roles: string[] = [],
+    isAdmin: boolean = false,
   ): Promise<Organization[]> {
     try {
-      // Log authorization context for debugging
-      const isAdmin = this.authzService.isGlobalAdmin(roles);
-      this.logger.debug(`findAll: userId=${userId}, isGlobalAdmin=${isAdmin}`);
-
       // Global admins see all organizations
       if (isAdmin) {
         return await this.organizationRepository.find({
@@ -89,7 +86,7 @@ export class OrganizationsService {
    *
    * @param id - The organization ID
    * @param userId - The user ID for authorization
-   * @param roles - The user's roles for authorization checks
+   * @param isAdmin - Whether the caller is a global admin (resolved by controller)
    *
    * Authorization:
    * - Global admins can access any organization
@@ -98,13 +95,9 @@ export class OrganizationsService {
   async findOne(
     id: string,
     userId: string = '',
-    roles: string[] = [],
+    isAdmin: boolean = false,
   ): Promise<Organization> {
     try {
-      // Log authorization context for debugging
-      const isAdmin = this.authzService.isGlobalAdmin(roles);
-      this.logger.debug(`findOne: id=${id}, userId=${userId}, isGlobalAdmin=${isAdmin}`);
-
       const organization = await this.organizationRepository.findOne({
         where: { id },
         relations: ['teams'],
@@ -138,7 +131,7 @@ export class OrganizationsService {
    *
    * @param name - The organization name
    * @param userId - The user ID for authorization
-   * @param roles - The user's roles for authorization checks
+   * @param isAdmin - Whether the caller is a global admin (resolved by controller)
    *
    * Authorization:
    * - Global admins can find any organization by name
@@ -147,13 +140,9 @@ export class OrganizationsService {
   async findByName(
     name: string,
     userId: string = '',
-    roles: string[] = [],
+    isAdmin: boolean = false,
   ): Promise<Organization | null> {
     try {
-      // Log authorization context for debugging
-      const isAdmin = this.authzService.isGlobalAdmin(roles);
-      this.logger.debug(`findByName: name=${name}, userId=${userId}, isGlobalAdmin=${isAdmin}`);
-
       const organization = await this.organizationRepository.findOne({
         where: { name },
         relations: ['teams'],
@@ -184,7 +173,7 @@ export class OrganizationsService {
    *
    * @param createDto - The organization creation data
    * @param userId - The user ID for authorization and ownership tracking
-   * @param roles - The user's roles for authorization checks
+   * @param isAdmin - Whether the caller is a global admin (resolved by controller)
    *
    * Authorization:
    * - Currently all authenticated users can create organizations
@@ -195,13 +184,9 @@ export class OrganizationsService {
   async create(
     createDto: CreateOrganizationDto,
     userId: string = '',
-    roles: string[] = [],
+    isAdmin: boolean = false,
   ): Promise<Organization> {
     try {
-      // Log authorization context for debugging
-      const isAdmin = this.authzService.isGlobalAdmin(roles);
-      this.logger.debug(`create: name=${createDto.name}, userId=${userId}, isGlobalAdmin=${isAdmin}`);
-
       const organization = this.organizationRepository.create(createDto);
       const savedOrg = await this.organizationRepository.save(organization);
 
@@ -217,7 +202,7 @@ export class OrganizationsService {
         this.logger.log(`Added user ${userId} as org-admin of organization ${savedOrg.id}`);
       }
 
-      return await this.findOne(savedOrg.id, userId, roles);
+      return await this.findOne(savedOrg.id, userId, isAdmin);
     } catch (error) {
       this.logger.error('Failed to create organization', error instanceof Error ? error.stack : error);
       throw error;
@@ -230,7 +215,7 @@ export class OrganizationsService {
    * @param id - The organization ID
    * @param updateDto - The update data
    * @param userId - The user ID for authorization
-   * @param roles - The user's roles for authorization checks
+   * @param isAdmin - Whether the caller is a global admin (resolved by controller)
    *
    * Authorization:
    * - Global admins can update any organization
@@ -240,13 +225,9 @@ export class OrganizationsService {
     id: string,
     updateDto: UpdateOrganizationDto,
     userId: string = '',
-    roles: string[] = [],
+    isAdmin: boolean = false,
   ): Promise<Organization> {
     try {
-      // Log authorization context for debugging
-      const isAdmin = this.authzService.isGlobalAdmin(roles);
-      this.logger.debug(`update: id=${id}, userId=${userId}, isGlobalAdmin=${isAdmin}`);
-
       // First verify the organization exists
       const organization = await this.organizationRepository.findOne({
         where: { id },
@@ -271,7 +252,7 @@ export class OrganizationsService {
 
       this.logger.log(`Updated organization: ${organization.name} (${id}) by user ${userId}`);
 
-      return await this.findOne(id, userId, roles);
+      return await this.findOne(id, userId, isAdmin);
     } catch (error) {
       if (error instanceof NotFoundException || error instanceof ForbiddenException) {
         throw error;
@@ -286,7 +267,7 @@ export class OrganizationsService {
    *
    * @param id - The organization ID
    * @param userId - The user ID for authorization
-   * @param roles - The user's roles for authorization checks
+   * @param isAdmin - Whether the caller is a global admin (resolved by controller)
    *
    * Authorization:
    * - Global admins can delete any organization
@@ -295,13 +276,9 @@ export class OrganizationsService {
   async remove(
     id: string,
     userId: string = '',
-    roles: string[] = [],
+    isAdmin: boolean = false,
   ): Promise<void> {
     try {
-      // Log authorization context for debugging
-      const isAdmin = this.authzService.isGlobalAdmin(roles);
-      this.logger.debug(`remove: id=${id}, userId=${userId}, isGlobalAdmin=${isAdmin}`);
-
       // First verify the organization exists and load relations
       const organization = await this.organizationRepository.findOne({
         where: { id },

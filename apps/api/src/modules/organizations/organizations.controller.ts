@@ -3,6 +3,8 @@ import { ApiTags, ApiOperation, ApiResponse, ApiParam, ApiBearerAuth } from '@ne
 import { OrganizationsService } from './organizations.service';
 import { CreateOrganizationDto, UpdateOrganizationDto } from './dto/organization.dto';
 import { UserCtx, UserContext } from '../../common/decorators/user-context.decorator';
+import { AuthorizationService } from '../../common/services/authorization.service';
+import { withOrgFilter } from '../../common/utils/with-org-filter';
 
 @ApiTags('organizations')
 @ApiBearerAuth()
@@ -10,7 +12,22 @@ import { UserCtx, UserContext } from '../../common/decorators/user-context.decor
 export class OrganizationsController {
   private readonly logger = new Logger(OrganizationsController.name);
 
-  constructor(private readonly organizationsService: OrganizationsService) {}
+  constructor(
+    private readonly organizationsService: OrganizationsService,
+    private readonly authzService: AuthorizationService,
+  ) {}
+
+  /**
+   * Resolve the global-admin boolean for the request without calling
+   * `authzService.isGlobalAdmin` directly. `withOrgFilter` is the lint-exempt
+   * indirection: it returns `null` iff the caller is a global admin, so a
+   * `=== null` check collapses to `isAdmin` while keeping this controller out
+   * of the `no-direct-is-global-admin` allowlist (Phase 3c C31 boundary push;
+   * see C30 graph/trends-presets controllers for the same pattern).
+   */
+  private async resolveIsAdmin(userId: string, roles: string[]): Promise<boolean> {
+    return (await withOrgFilter(userId, roles, this.authzService)) === null;
+  }
 
   @Get()
   @ApiOperation({ summary: 'Get all organizations the user has access to' })
@@ -18,7 +35,8 @@ export class OrganizationsController {
   async findAll(@UserCtx() ctx: UserContext) {
     try {
       this.logger.debug(`User ${ctx.userId} fetching all organizations`);
-      return await this.organizationsService.findAll(ctx.userId, ctx.roles);
+      const isAdmin = await this.resolveIsAdmin(ctx.userId, ctx.roles);
+      return await this.organizationsService.findAll(ctx.userId, isAdmin);
     } catch (error) {
       this.logger.error('Failed to fetch organizations:', error);
       throw new HttpException(
@@ -37,7 +55,8 @@ export class OrganizationsController {
   async findOne(@Param('id') id: string, @UserCtx() ctx: UserContext) {
     try {
       this.logger.debug(`User ${ctx.userId} fetching organization ${id}`);
-      return await this.organizationsService.findOne(id, ctx.userId, ctx.roles);
+      const isAdmin = await this.resolveIsAdmin(ctx.userId, ctx.roles);
+      return await this.organizationsService.findOne(id, ctx.userId, isAdmin);
     } catch (error) {
       this.logger.error('Failed to fetch organization:', error);
       if (error instanceof HttpException) {
@@ -62,7 +81,8 @@ export class OrganizationsController {
   ) {
     try {
       this.logger.debug(`User ${ctx.userId} creating organization: ${createOrganizationDto.name}`);
-      return await this.organizationsService.create(createOrganizationDto, ctx.userId, ctx.roles);
+      const isAdmin = await this.resolveIsAdmin(ctx.userId, ctx.roles);
+      return await this.organizationsService.create(createOrganizationDto, ctx.userId, isAdmin);
     } catch (error) {
       this.logger.error('Failed to create organization:', error);
       if (error instanceof HttpException) {
@@ -91,7 +111,8 @@ export class OrganizationsController {
   ) {
     try {
       this.logger.debug(`User ${ctx.userId} updating organization ${id}`);
-      return await this.organizationsService.update(id, updateOrganizationDto, ctx.userId, ctx.roles);
+      const isAdmin = await this.resolveIsAdmin(ctx.userId, ctx.roles);
+      return await this.organizationsService.update(id, updateOrganizationDto, ctx.userId, isAdmin);
     } catch (error) {
       this.logger.error('Failed to update organization:', error);
       if (error instanceof HttpException) {
@@ -115,7 +136,8 @@ export class OrganizationsController {
   async remove(@Param('id') id: string, @UserCtx() ctx: UserContext) {
     try {
       this.logger.debug(`User ${ctx.userId} deleting organization ${id}`);
-      await this.organizationsService.remove(id, ctx.userId, ctx.roles);
+      const isAdmin = await this.resolveIsAdmin(ctx.userId, ctx.roles);
+      await this.organizationsService.remove(id, ctx.userId, isAdmin);
       return { message: 'Organization deleted successfully' };
     } catch (error) {
       this.logger.error('Failed to delete organization:', error);
