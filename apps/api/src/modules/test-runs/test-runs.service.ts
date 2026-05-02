@@ -6,6 +6,8 @@ import { TestRunsAnomalyService } from './services/test-runs-anomaly.service';
 import { TestRunsChangepointService } from './services/test-runs-changepoint.service';
 import { TestRunsMetricsService } from './services/test-runs-metrics.service';
 import { TestRunsApdexService } from './services/test-runs-apdex.service';
+import { AuthorizationService } from '../../common/services/authorization.service';
+import { withOrgFilter } from '../../common/utils/with-org-filter';
 import { UpdateRunningTestDto } from './dto/update-running-test.dto';
 import { AddTestRunConfigDto, AddTestRunConfigsDto, AddTestRunConfigJsonDto } from './dto/test-run-config.dto';
 import { InitTestDto, InitTestResponse } from './dto/init-test.dto';
@@ -101,6 +103,7 @@ export class TestRunsService {
     private changepointService: TestRunsChangepointService,
     private metricsService: TestRunsMetricsService,
     private apdexService: TestRunsApdexService,
+    private authzService: AuthorizationService,
   ) {}
 
   // ========== Authorization ==========
@@ -415,24 +418,38 @@ export class TestRunsService {
 
   // ========== Metrics Methods (delegated to MetricsService) ==========
 
+  /**
+   * Resolve admin state at this facade boundary so the metrics sub-service can stay
+   * role-list agnostic. `withOrgFilter` returns `null` iff the user is a global admin;
+   * we forward that boolean. Non-admins still load their org list inside metrics.
+   */
+  private async resolveIsAdmin(userId: string, roles: string[]): Promise<boolean> {
+    return (await withOrgFilter(userId, roles, this.authzService)) === null;
+  }
+
   async classifyMetric(testRunId: string, createDto: CreateMetricClassificationDto, system?: string, environment?: string, workload?: string, userId?: string, roles?: string[]): Promise<MetricClassificationDto> {
-    return this.metricsService.classifyMetric(testRunId, createDto, system, environment, workload, userId, roles);
+    const isAdmin = await this.resolveIsAdmin(userId ?? '', roles ?? []);
+    return this.metricsService.classifyMetric(testRunId, createDto, system, environment, workload, userId, isAdmin);
   }
 
   async createOrUpdateDsCompareConfig(createDto: CreateDsCompareConfigDto, userId: string, roles: string[]): Promise<DsCompareConfigDto> {
-    return this.metricsService.createOrUpdateDsCompareConfig(createDto, userId, roles);
+    const isAdmin = await this.resolveIsAdmin(userId, roles);
+    return this.metricsService.createOrUpdateDsCompareConfig(createDto, userId, isAdmin);
   }
 
   async getDsCompareConfig(systemUnderTestId: string, testEnvironment: string, workload: string, applicationDashboardId: string, panelId: string, metricName?: string, userId?: string, roles?: string[]): Promise<DsCompareConfigDto> {
-    return this.metricsService.getDsCompareConfig(systemUnderTestId, testEnvironment, workload, applicationDashboardId, panelId, metricName, userId, roles);
+    const isAdmin = await this.resolveIsAdmin(userId ?? '', roles ?? []);
+    return this.metricsService.getDsCompareConfig(systemUnderTestId, testEnvironment, workload, applicationDashboardId, panelId, metricName, userId, isAdmin);
   }
 
   async updateDsCompareConfig(id: string, updateDto: UpdateDsCompareConfigDto, userId: string, roles: string[]): Promise<DsCompareConfigDto> {
-    return this.metricsService.updateDsCompareConfig(id, updateDto, userId, roles);
+    const isAdmin = await this.resolveIsAdmin(userId, roles);
+    return this.metricsService.updateDsCompareConfig(id, updateDto, userId, isAdmin);
   }
 
   async deleteDsCompareConfig(id: string, userId: string, roles: string[]): Promise<void> {
-    return this.metricsService.deleteDsCompareConfig(id, userId, roles);
+    const isAdmin = await this.resolveIsAdmin(userId, roles);
+    return this.metricsService.deleteDsCompareConfig(id, userId, isAdmin);
   }
 
   // ========== Apdex Methods (workload-scoped, delegated to ApdexService) ==========

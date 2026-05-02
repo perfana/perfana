@@ -617,7 +617,7 @@ describe('TestRunsService', () => {
         const result = await service.classifyMetric('test-run-id', createDto as any, 'system', 'env', 'workload');
 
         expect(mockMetricsService.classifyMetric).toHaveBeenCalledWith(
-          'test-run-id', createDto, 'system', 'env', 'workload', undefined, undefined
+          'test-run-id', createDto, 'system', 'env', 'workload', undefined, true
         );
         expect(result).toEqual(response);
       });
@@ -631,7 +631,7 @@ describe('TestRunsService', () => {
         const result = await service.getDsCompareConfig('system-id', 'env', 'workload', 'dash-id', 'panel-id', 'metric');
 
         expect(mockMetricsService.getDsCompareConfig).toHaveBeenCalledWith(
-          'system-id', 'env', 'workload', 'dash-id', 'panel-id', 'metric', undefined, undefined
+          'system-id', 'env', 'workload', 'dash-id', 'panel-id', 'metric', undefined, true
         );
         expect(result).toEqual(config);
       });
