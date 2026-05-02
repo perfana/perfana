@@ -89,38 +89,30 @@ export class ProfilesService {
   }
 
   /**
-   * Find all profiles
+   * Find all profiles.
    *
-   * @param userId - The user ID for authorization
-   * @param isAdmin - Whether the caller is a global admin (resolved at controller boundary)
-   *
-   * Note: Profile entity does not have organization_id yet, so org filtering is not applied.
-   * Full org filtering will be enabled when Phase 4 adds organization_id column.
+   * @param organizationIds - Pre-resolved by the controller. `null` = global admin
+   *   without an explicit org filter (return all). Empty array = non-admin with no
+   *   accessible orgs (return nothing). Non-empty array = filter `organization_id IN (...) OR IS NULL`.
+   *   The controller collapses the explicit `?organizationId=` query param into a
+   *   single-element array so this method does not branch on it.
    */
-  async findAll(userId: string, isAdmin: boolean, organizationId?: string): Promise<ProfileResponse[]> {
+  async findAll(organizationIds: string[] | null): Promise<ProfileResponse[]> {
     try {
-      this.logger.debug(`findAll: userId=${userId}, isGlobalAdmin=${isAdmin}, organizationId=${organizationId}`);
+      this.logger.debug(`findAll: organizationIds=${organizationIds === null ? 'null (admin)' : `[${organizationIds.join(',')}]`}`);
 
-      // Resolve which org IDs to filter by
-      let orgIds: string[] | null = null;
-      if (organizationId) {
-        orgIds = [organizationId];
-      } else if (!isAdmin) {
-        orgIds = await this.authzService.getAccessibleOrganizations(userId);
-        if (orgIds.length === 0) {
-          return [];
-        }
+      if (organizationIds !== null && organizationIds.length === 0) {
+        return [];
       }
-      // Admin without explicit org: orgIds = null → no filter
 
       const queryBuilder = this.profileRepo
         .createQueryBuilder('profile')
         .orderBy('profile.name', 'ASC');
 
-      if (orgIds) {
+      if (organizationIds) {
         queryBuilder.where(
           '(profile.organization_id IN (:...orgIds) OR profile.organization_id IS NULL)',
-          { orgIds },
+          { orgIds: organizationIds },
         );
       }
 

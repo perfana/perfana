@@ -37,8 +37,11 @@ export class ProfilesController {
   async findAll(@UserCtx() ctx: UserContext, @Query('organizationId') organizationId?: string) {
     try {
       this.logger.debug(`User ${ctx.userId} fetching all profiles (organizationId=${organizationId})`);
-      const isAdmin = await this.resolveIsAdmin(ctx.userId, ctx.roles);
-      return await this.profilesService.findAll(ctx.userId, isAdmin, organizationId);
+      // Explicit ?organizationId= overrides admin status (preserved from prior behavior).
+      const organizationIds = organizationId
+        ? [organizationId]
+        : await withOrgFilter(ctx.userId, ctx.roles, this.authzService);
+      return await this.profilesService.findAll(organizationIds);
     } catch (error) {
       this.logger.error('Failed to fetch profiles:', error);
       throw new HttpException(

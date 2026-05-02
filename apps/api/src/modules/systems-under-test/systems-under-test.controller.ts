@@ -54,8 +54,12 @@ export class SystemsUnderTestController {
   @Get()
   @ApiOperation({ summary: 'Get all systems under test' })
   async findAll(@UserCtx() ctx: UserContext, @Query('organizationId') organizationId?: string) {
-    const isAdmin = await this.resolveIsAdmin(ctx.userId, ctx.roles);
-    return this.systemsUnderTestService.findAll(ctx.userId, isAdmin, organizationId);
+    // Explicit ?organizationId= overrides admin status (preserved from prior behavior — the team
+    // filter inside findAll still scopes results, so non-members can't see foreign-org systems).
+    const organizationIds = organizationId
+      ? [organizationId]
+      : await withOrgFilter(ctx.userId, ctx.roles, this.authzService);
+    return this.systemsUnderTestService.findAll(organizationIds, ctx.userId);
   }
 
   @Get(':id')

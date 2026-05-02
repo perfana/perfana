@@ -38,20 +38,17 @@ export class OrganizationsService {
   /**
    * Find all organizations the user has access to.
    *
-   * @param userId - The user ID for authorization
-   * @param isAdmin - Whether the caller is a global admin (resolved by controller)
+   * @param organizationIds - Pre-resolved by the controller via `withOrgFilter`.
+   *   `null` = global admin (return all). Empty array = no accessible orgs
+   *   (return nothing). Non-empty array = filter `id IN (...)`.
    *
    * Authorization:
-   * - Global admins see all organizations
+   * - Global admins see all organizations (`organizationIds === null`)
    * - Regular users see only organizations they are members of
    */
-  async findAll(
-    userId: string = '',
-    isAdmin: boolean = false,
-  ): Promise<Organization[]> {
+  async findAll(organizationIds: string[] | null): Promise<Organization[]> {
     try {
-      // Global admins see all organizations
-      if (isAdmin) {
+      if (organizationIds === null) {
         return await this.organizationRepository.find({
           relations: ['teams'],
           order: {
@@ -60,16 +57,12 @@ export class OrganizationsService {
         });
       }
 
-      // Regular users see only their organizations
-      const accessibleOrgIds = await this.authzService.getAccessibleOrganizations(userId);
-
-      if (accessibleOrgIds.length === 0) {
-        this.logger.debug(`User ${userId} has no accessible organizations`);
+      if (organizationIds.length === 0) {
         return [];
       }
 
       return await this.organizationRepository.find({
-        where: { id: In(accessibleOrgIds) },
+        where: { id: In(organizationIds) },
         relations: ['teams'],
         order: {
           created_at: 'DESC',

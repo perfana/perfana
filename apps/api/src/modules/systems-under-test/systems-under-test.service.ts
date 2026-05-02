@@ -141,36 +141,29 @@ export class SystemsUnderTestService {
   }
 
   /**
-   * Find all systems under test with organization filtering
+   * Find all systems under test with organization filtering.
    *
-   * @param userId - The user ID for authorization
-   * @param isAdmin - Whether the caller is a global admin (resolved at controller boundary)
+   * @param organizationIds - Pre-resolved by the controller. `null` = global admin
+   *   without an explicit org filter (return all). Empty array = non-admin with no
+   *   accessible orgs (return nothing). Non-empty array = filter `organization_id IN (...)`.
+   *   The controller collapses the explicit-`?organizationId=` query param into a
+   *   single-element array so this method does not branch on it.
+   * @param userId - Used for the team-restriction filter (separate from org filter).
    *
-   * Returns systems filtered by user's accessible organizations.
-   * Global admins see all systems (including those without organization_id).
-   * Regular users only see systems in their organizations (systems without organization_id are hidden).
+   * Returns systems filtered by `organizationIds`. Global admins (when `organizationIds === null`)
+   * see all systems including those without organization_id; regular users only see systems
+   * in their organizations.
    */
-  async findAll(userId: string, isAdmin: boolean, organizationId?: string): Promise<SystemUnderTestEntity[]> {
+  async findAll(organizationIds: string[] | null, userId: string): Promise<SystemUnderTestEntity[]> {
     try {
-      this.logger.log(`[findAll] START - userId=${userId}, isGlobalAdmin=${isAdmin}, organizationId=${organizationId || 'none'}`);
+      this.logger.log(`[findAll] START - userId=${userId}, organizationIds=${organizationIds === null ? 'null (admin)' : `[${organizationIds.join(',')}]`}`);
 
-      // Three-case org filtering:
-      // 1. Explicit organizationId → always filter (even for admins)
-      // 2. Admin + no explicit org → return all
-      // 3. Non-admin + no explicit org → filter by user's accessible orgs
-      let orgIds: string[] | null = null;
-
-      if (organizationId) {
-        orgIds = [organizationId];
-      } else if (isAdmin) {
-        orgIds = null; // no filtering
-      } else {
-        orgIds = await this.authzService.getAccessibleOrganizations(userId);
-        if (orgIds.length === 0) {
-          this.logger.log(`[findAll] User has no organizations - returning empty array`);
-          return [];
-        }
+      if (organizationIds !== null && organizationIds.length === 0) {
+        this.logger.log(`[findAll] User has no organizations - returning empty array`);
+        return [];
       }
+
+      const orgIds = organizationIds;
 
       if (orgIds === null) {
         // No filtering - admin without explicit org

@@ -261,7 +261,7 @@ describe('ProfilesService', () => {
       profileDashboardRepo.createQueryBuilder.mockReturnValue(dashboardQueryBuilder as any);
 
       // Act
-      const result = await service.findAll(mockUserId, mockIsAdmin);
+      const result = await service.findAll(null);
 
       // Assert
       expect(result).toHaveLength(2);
@@ -299,7 +299,7 @@ describe('ProfilesService', () => {
       profileDashboardRepo.createQueryBuilder.mockReturnValue(dashboardQueryBuilder as any);
 
       // Act
-      const result = await service.findAll(mockUserId, mockIsAdmin);
+      const result = await service.findAll(null);
 
       // Assert
       expect(result).toHaveLength(1);
@@ -324,7 +324,7 @@ describe('ProfilesService', () => {
       profileDashboardRepo.createQueryBuilder.mockReturnValue(dashboardQueryBuilder as any);
 
       // Act
-      const result = await service.findAll(mockUserId, mockIsAdmin);
+      const result = await service.findAll(null);
 
       // Assert
       expect(result).toEqual([]);
@@ -340,7 +340,7 @@ describe('ProfilesService', () => {
       profileRepo.createQueryBuilder.mockReturnValue(profileQueryBuilder as any);
 
       // Act & Assert
-      await expect(service.findAll(mockUserId, mockIsAdmin)).rejects.toThrow('Database connection failed');
+      await expect(service.findAll(null)).rejects.toThrow('Database connection failed');
     });
   });
 

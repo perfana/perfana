@@ -39,13 +39,14 @@ export class TeamsController {
   ) {
     try {
       this.logger.debug(`User ${ctx.userId} fetching all teams`);
-      const isAdmin = await this.resolveIsAdmin(ctx.userId, ctx.roles);
 
       if (organizationId) {
+        const isAdmin = await this.resolveIsAdmin(ctx.userId, ctx.roles);
         return await this.teamsService.findByOrganization(organizationId, ctx.userId, isAdmin);
       }
 
-      return await this.teamsService.findAll(ctx.userId, isAdmin);
+      const organizationIds = await withOrgFilter(ctx.userId, ctx.roles, this.authzService);
+      return await this.teamsService.findAll(organizationIds);
     } catch (error) {
       this.logger.error('Failed to fetch teams:', error);
       if (error instanceof HttpException) {
