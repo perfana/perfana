@@ -6,15 +6,15 @@ Phase 3c rolls capabilities through every site listed below. Update these counts
 
 | Bucket | Total | Migrated | Remaining | % done |
 | --- | ---: | ---: | ---: | ---: |
-| A — bypass filter | 131 | 68 | 63 | 51.9% |
-| B — bypass guard | 32 | 31 | 1 | 96.9% |
+| A — bypass filter | 131 | 69 | 62 | 52.7% |
+| B — bypass guard | 38 | 37 | 1 | 97.4% |
 | Local `private isGlobalAdmin()` wrappers | 13 | 8 | 5 | 61.5% |
 
-**Lint enforcement:** `apps/api/.rbac-migration-allowlist.json` lists every file currently exempt from the `no-direct-is-global-admin` lint rule (3 files as of 2026-05-02). When a site is migrated, remove its file from the allowlist (the file may have multiple sites — only remove when the LAST one is migrated). Allowlist size IS the burndown.
+**Lint enforcement:** `apps/api/.rbac-migration-allowlist.json` lists every file currently exempt from the `no-direct-is-global-admin` lint rule (2 files as of 2026-05-02). When a site is migrated, remove its file from the allowlist (the file may have multiple sites — only remove when the LAST one is migrated). Allowlist size IS the burndown.
 
 **Bucket A total adjusted upward by 2 in C30 and 2 in C31:** C30 enumerates the user-owned `findAll` list-filter sites in `graph-presets.service.ts` and `trends-presets.service.ts` that were not in the original audit (which focused on org-owned resources). C31 enumerates the membership-filtered `findAll` sites in `teams.service.ts` and `organizations.service.ts` — these are filtered by org membership rather than `organization_id IN (...)` and were not in the original audit either.
 
-**Bucket B total adjusted upward by 3 in C17, 1 in C25, 4 in C30, and 10 in C31:** C17 brings dynatrace per-resource sites in-scope (originally "Leave" until `canAccessResource`/`canModifyResource` shipped). C25 adds `verifyTestRunAccess` from `test-runs-query.service.ts`. C30 adds the 4 user-owned per-resource sites in graph/trends-presets. C31 enumerates 10 per-resource guard sites across `teams.service.ts` (5: `findOne`, `findByOrganization`, `create`, `update`, `remove`) and `organizations.service.ts` (5: `findOne`, `findByName`, `create`, `update`, `remove`) — neither file's sites were in the original audit.
+**Bucket B total adjusted upward by 3 in C17, 1 in C25, 4 in C30, 10 in C31, and 6 in C32:** C17 brings dynatrace per-resource sites in-scope (originally "Leave" until `canAccessResource`/`canModifyResource` shipped). C25 adds `verifyTestRunAccess` from `test-runs-query.service.ts`. C30 adds the 4 user-owned per-resource sites in graph/trends-presets. C31 enumerates 10 per-resource guard sites across `teams.service.ts` and `organizations.service.ts`. C32 enumerates 6 per-resource guard sites in `systems-under-test.service.ts` (`createSut`, `findOne`, `findSystemSummary`, `findByName`, `update`, `remove`) — the file's per-resource shape was not in the original audit's enumeration despite C31's prediction that "no upward adjustment expected".
 
 **Date-bound revisit:** by **2026-08-01**, Phase 3c migration must be at least 50% complete (Bucket A + B combined: 70+ sites migrated). If not, re-evaluate the architecture or the priorities. "We forgot about it" is the failure mode this gate prevents.
 
@@ -1842,3 +1842,102 @@ After C31, the allowlist contains: `dynatrace.service.ts`, `profiles.service.ts`
 - **C35–C36:** `dynatrace.service.ts` finish. C17 already migrated the per-resource sites; the remaining surface is the larger CRUD + tile-management shape. Multi-PR split likely.
 
 After C31, the lint rule actively guards every controller and every test-runs sub-service plus the entire `*-presets` and membership-rooted module surfaces. Phase 3c's coverage is now structurally complete for the most-trafficked entry points; the remaining three allowlist files are heavyweight integration services rather than user-facing CRUD.
+
+---
+
+## Phase C32 — `systems-under-test.service.ts` full migration via controller boundary push
+
+**Date:** 2026-05-02
+**Branch:** `rbac/3c-systems-under-test-c32`
+**Related:** Phase 3c, C30/C31 (controller-as-boundary precedent), C26–C29 (boundary push pattern)
+
+**Scope:** Single-file migration. Drops all 9 direct `authzService.isGlobalAdmin` call sites in `apps/api/src/modules/systems-under-test/systems-under-test.service.ts` (661 lines pre-edit) and pushes admin resolution up to `SystemsUnderTestController`. File **EXITS** the allowlist (3 → **2**). Same `resolveIsAdmin` helper backed by `withOrgFilter` as C30/C31, identical controller-as-boundary shape. Smallest of the three remaining allowlist files; cleared in one PR.
+
+### Per-method site mapping
+
+The 9 `isGlobalAdmin` sites split into three classifications:
+
+| Method | Bucket | Notes |
+| --- | --- | --- |
+| `findAll` | A | Returns all systems when admin (no org filter); otherwise composes `accessibleOrgIds` + `accessibleTeamIds` into a 3-OR query (org-level + unrestricted-team + direct-team-membership). |
+| `createSut` | B | Per-resource guard; admin bypasses `isOrganizationMember` before transactional create. Threads `isAdmin` into 2 internal `findOne` self-calls (idempotency-hit return + post-create return). |
+| `findOne` | B | Per-resource guard; admin bypasses `isOrganizationMember` + `canViewTeamResources`. |
+| `findSystemSummary` | B | Per-resource guard with same shape as `findOne` but returns `null` on denial (vs `findOne`'s `NotFoundException`). |
+| `findByName` | B | Per-resource guard with same null-on-denial shape as `findSystemSummary`. |
+| `update` | B | Per-resource guard via `findOne`, plus a duplicated inline `isOrganizationMember` check. Threads `isAdmin` into 2 internal `findOne` self-calls. |
+| `remove` | B | Per-resource guard via `findOne`, plus a duplicated inline `isOrganizationMember` check. Threads `isAdmin` into 1 internal `findOne` self-call. |
+| `create` (legacy) | DEBUG-LOG-ONLY | The `isAdmin` value was only interpolated into a `logger.debug` call; the surrounding write-path has no admin-gated branch. Threads `isAdmin` into 1 internal `findOne` self-call. |
+| `updatePyroscopeConfig` | DEBUG-LOG-ONLY | Same shape as legacy `create` — the value reached only `logger.debug`. Threads `isAdmin` into 2 internal `findOne` self-calls. |
+
+The 2 debug-log-only sites are deleted (the `const isAdmin = isGlobalAdmin(roles)` capture goes away; the `logger.debug` line uses the parameter directly). The 7 functional sites swap `roles: string[]` → `isAdmin: boolean` and drop their inline `isGlobalAdmin` call.
+
+### Migration shape
+
+```typescript
+// Before (service)
+async findOne(id: string, userId: string, roles: string[]): Promise<SystemUnderTestEntity> {
+  const isAdmin = this.authzService.isGlobalAdmin(roles);
+  this.logger.debug(`findOne: id=${id}, userId=${userId}, isGlobalAdmin=${isAdmin}`);
+  // ... per-resource guard using isAdmin
+}
+
+// After (service)
+async findOne(id: string, userId: string, isAdmin: boolean): Promise<SystemUnderTestEntity> {
+  this.logger.debug(`findOne: id=${id}, userId=${userId}, isGlobalAdmin=${isAdmin}`);
+  // ... per-resource guard using isAdmin (unchanged)
+}
+```
+
+Controller adds `AuthorizationService` injection (now 3rd dep after `SystemsUnderTestService` + `DeleteSystemUnderTestHandler`) plus the `resolveIsAdmin(userId, roles)` helper (same body as C30/C31). All 7 service-call methods on the controller (`create` / `findAll` / `findOne` / `update` / `updatePyroscopeConfig` / `getDeletePreview` / `remove`) `await` the helper once and forward the boolean.
+
+### Verification
+
+| Check | Result |
+| --- | --- |
+| `npx tsc --noEmit` (apps/api) | clean |
+| `npx eslint --rulesdir eslint-rules 'src/**/*.ts'` | 0 errors, 59 warnings (all `@typescript-eslint/no-explicit-any` warnings — unchanged from C31) |
+| `grep -n isGlobalAdmin` on the touched files | only the 7 retained `logger.debug` lines (all reference the `isAdmin` *parameter*) plus a doc-comment in the controller's `resolveIsAdmin` helper; zero call sites |
+| `npx jest src/modules/systems-under-test` | 73 passed (2 suites — unchanged from pre-migration) |
+| `npx jest` (full API suite) | 4302 passed, 20 skipped (unchanged from C31) |
+
+### Diff size
+
+- `systems-under-test.service.ts`: ~−18 lines (9 inline `isGlobalAdmin` calls deleted + 2 unused debug-log-only `const isAdmin` captures merged into single-line interpolation; signatures swap `roles: string[]` → `isAdmin: boolean`; 8 internal `findOne` self-calls retargeted)
+- `systems-under-test.controller.ts`: ~+25 lines (`AuthorizationService` injection + `withOrgFilter` import + `resolveIsAdmin` helper + 7 method awaits)
+- `systems-under-test.service.spec.ts`: small touch (rename `testRoles`/`adminRoles` → `testIsAdmin`/`adminIsAdmin`; the 2 `Authorization context` tests reframed to assert the new admin/non-admin lookup paths since `isGlobalAdmin` is no longer called inside the service)
+- `systems-under-test.controller.spec.ts`: small touch (add `AuthorizationService` mock provider + 6 expectation updates from `mockUserContext.roles` to literal `true`)
+- `.rbac-migration-allowlist.json`: −1 line
+
+Net: roughly +5 lines across all 5 files. Slightly positive because the controller plumbing for a 7-method surface is larger than the previous 5-method surfaces in C30/C31.
+
+### Files changed
+
+- `apps/api/src/modules/systems-under-test/systems-under-test.service.ts` — swap signatures, drop 9 inline `isGlobalAdmin` calls, merge 7 `const isAdmin` captures into log lines, thread `isAdmin` through 8 internal `findOne` self-calls
+- `apps/api/src/modules/systems-under-test/systems-under-test.controller.ts` — inject `AuthorizationService`, add `withOrgFilter` import + `resolveIsAdmin` helper, await `isAdmin` in all 7 service-call methods
+- `apps/api/src/modules/systems-under-test/systems-under-test.service.spec.ts` — rename roles fixtures, reframe 2 `isGlobalAdmin`-assertion tests
+- `apps/api/src/modules/systems-under-test/systems-under-test.controller.spec.ts` — add `AuthorizationService` mock provider, update 6 expectations
+- `apps/api/.rbac-migration-allowlist.json` — remove the migrated file
+- `docs/superpowers/audits/2026-04-26-audit-decisions.md` — this file (burndown table updates + this section)
+
+### Allowlist disposition
+
+File **EXITS** the allowlist — zero direct `isGlobalAdmin` call sites after the migration. Allowlist size: 3 → **2**. Burndown: Bucket A 68 → 69 of 131 (1 list-filter site migrated). Bucket B 31 → 37 of 38 (6 per-resource guards migrated — total adjusted upward by 6 since `systems-under-test.service.ts`'s per-resource shape was not in the original audit's enumeration; C31's prediction that "no upward adjustment expected" turned out to be wrong, in the same direction as every prior file-finishing PR).
+
+### Pattern notes
+
+**1. The "no upward adjustment expected" prediction was wrong, again.** C31 closed by predicting that the original audit's Bucket A/B enumeration covered systems-under-test directly. It didn't — 6 per-resource guards needed to be added to the Bucket B total. This is the third audit prediction in a row (C16, C25, C32) that under-counted the unmigrated surface and required upward adjustment. The pattern: the original audit was scoped to the dynatrace pilot and a rough codebase-wide count; per-file re-verification consistently finds more sites than the rough count, especially for per-resource (Bucket B) shapes. Future predictions should default to "expect upward adjustment" unless a per-file scan has already been done.
+
+**2. Three-classification migration in one file.** Every prior C-series file had either Bucket A only, Bucket B only, or A+B mixed — never with debug-log-only as a third class. systems-under-test had all three: 1 Bucket A + 6 Bucket B + 2 debug-log-only. The migration treats them uniformly: the parameter swap (`roles → isAdmin`) is identical across all three, the inline `isGlobalAdmin` call is dropped uniformly, and only the *follow-on* shape differs (Bucket A: filter branch; Bucket B: guard branch; debug-log-only: nothing — just the log line preserved). One PR cleanly closed all three classifications because the migration pattern is universal.
+
+**3. Internal self-call density is high here.** systems-under-test has 8 internal `findOne` self-calls across `createSut` (×2), `create` (×1), `update` (×2), `remove` (×1), `updatePyroscopeConfig` (×2). Each one needed its third arg flipped from `roles` to `isAdmin`. Mechanical, but easy to miss in review — every method that does "save then return hydrated record" is a candidate site. A grep for `this.findOne(.*userId.*roles` would have caught all of them in this file; future migrations of services with similar "save → return findOne" shapes should grep first.
+
+**4. Test reframing is the small-but-required cost.** Two service-spec tests asserted `mockAuthzService.isGlobalAdmin` was called with specific roles. After C32 the service no longer calls `isGlobalAdmin`, so those assertions become tautologies (or compile errors, since the mock's `isGlobalAdmin` is no longer reached from the service code path). The fix: reframe the tests to assert the *behavioral consequence* of admin vs non-admin (admin path bypasses `getAccessibleOrganizations` lookup; non-admin path calls it). This is a more durable assertion shape — it would survive a future refactor that swaps `withOrgFilter` for a different admin-check primitive — and is the right shape going forward for any service whose admin-resolution boundary moves to the controller.
+
+### Remaining allowlist (2 files)
+
+After C32, the allowlist contains: `dynatrace.service.ts` (1566 lines), `profiles.service.ts` (1190 lines). Both are heavyweight integration services. Likely sequencing:
+
+- **C33–C34:** `profiles.service.ts` split. Likely a 2–3 PR sequence following the test-runs sub-service C25–C29 pattern: extract method clusters by surface (CRUD vs. metrics-source-resolution vs. variable-resolution) and migrate each cluster independently to keep PRs reviewable.
+- **C35–C36:** `dynatrace.service.ts` finish. C17 already migrated the per-resource sites; the remaining surface is the larger CRUD + tile-management shape. Multi-PR split likely.
+
+Phase 3c's user-facing CRUD coverage is now essentially complete: every controller-fronted module has had its admin-resolution boundary pushed to the controller. The remaining work is internal integration services where the entry-point shape differs (dynatrace's tile-management surface is internal-only; profiles' metrics-source-resolution is called from worker pipelines, not just HTTP). The boundary-push pattern still applies but the "boundary" may not always be a controller — for profiles, the parent service that orchestrates pipeline calls is the more natural target.

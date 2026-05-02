@@ -5,6 +5,8 @@ import { DeleteSystemUnderTestHandler } from './handlers/delete-system-under-tes
 import { SystemUnderTest as SystemUnderTestEntity } from '../../entities';
 import { NotFoundException } from '@nestjs/common';
 import { UserContext } from '../../common/decorators/user-context.decorator';
+import { AuthorizationService } from '../../common/services/authorization.service';
+import { createAuthorizationServiceMock } from '../../../test/mocks/authorization-service.mock';
 
 describe('SystemsUnderTestController', () => {
   let controller: SystemsUnderTestController;
@@ -77,6 +79,10 @@ describe('SystemsUnderTestController', () => {
             execute: jest.fn(),
           },
         },
+        {
+          provide: AuthorizationService,
+          useValue: createAuthorizationServiceMock(),
+        },
       ],
     }).compile();
 
@@ -96,7 +102,7 @@ describe('SystemsUnderTestController', () => {
       const result = await controller.findAll(mockUserContext);
 
       expect(result).toEqual(mockSystems);
-      expect(service.findAll).toHaveBeenCalledWith(mockUserContext.userId, mockUserContext.roles, undefined);
+      expect(service.findAll).toHaveBeenCalledWith(mockUserContext.userId, true, undefined);
     });
 
     it('should return empty array when no systems exist', async () => {
@@ -169,7 +175,7 @@ describe('SystemsUnderTestController', () => {
       const result = await controller.findOne('sys-123', mockUserContext);
 
       expect(result).toEqual(mockSystemSummary);
-      expect(service.findSystemSummary).toHaveBeenCalledWith('sys-123', mockUserContext.userId, mockUserContext.roles);
+      expect(service.findSystemSummary).toHaveBeenCalledWith('sys-123', mockUserContext.userId, true);
     });
 
     it('should throw NotFoundException when system not found', async () => {
@@ -264,7 +270,7 @@ describe('SystemsUnderTestController', () => {
       const result = await controller.findOne(uuidId, mockUserContext);
 
       expect(result.id).toBe(uuidId);
-      expect(service.findSystemSummary).toHaveBeenCalledWith(uuidId, mockUserContext.userId, mockUserContext.roles);
+      expect(service.findSystemSummary).toHaveBeenCalledWith(uuidId, mockUserContext.userId, true);
     });
 
     it('should handle service errors', async () => {
@@ -283,8 +289,8 @@ describe('SystemsUnderTestController', () => {
       await controller.findAll(mockUserContext);
       await controller.findOne('sys-123', mockUserContext);
 
-      expect(service.findAll).toHaveBeenCalledWith(mockUserContext.userId, mockUserContext.roles, undefined);
-      expect(service.findSystemSummary).toHaveBeenCalledWith('sys-123', mockUserContext.userId, mockUserContext.roles);
+      expect(service.findAll).toHaveBeenCalledWith(mockUserContext.userId, true, undefined);
+      expect(service.findSystemSummary).toHaveBeenCalledWith('sys-123', mockUserContext.userId, true);
     });
 
     it('should not catch and transform service exceptions', async () => {
@@ -414,7 +420,7 @@ describe('SystemsUnderTestController', () => {
       const result = await controller.findAll(mockUserContext);
 
       expect(result).toHaveLength(1000);
-      expect(service.findAll).toHaveBeenCalledWith(mockUserContext.userId, mockUserContext.roles, undefined);
+      expect(service.findAll).toHaveBeenCalledWith(mockUserContext.userId, true, undefined);
     });
 
     it('should handle system with large environment/workload data', async () => {

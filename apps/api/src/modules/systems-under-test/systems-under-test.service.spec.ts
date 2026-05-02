@@ -14,8 +14,12 @@ describe('SystemsUnderTestService', () => {
 
   // Test user context
   const testUserId = 'test-user-id';
-  const testRoles = ['user'];
-  const adminRoles = ['super-admin'];
+  // Most tests exercise the admin path (the previous test suite leaned on the
+  // mock's default `isGlobalAdmin -> true`). After Phase 3c C32 the service no
+  // longer calls `isGlobalAdmin`; callers pass `isAdmin` directly. Tests that
+  // need the non-admin path use `false` inline.
+  const testIsAdmin = true;
+  const adminIsAdmin = true;
 
   const mockSystemUnderTest: SystemUnderTestEntity = {
     id: 'sys-123',
@@ -86,7 +90,7 @@ describe('SystemsUnderTestService', () => {
       const mockSystems = [mockSystemUnderTest];
       repository.find.mockResolvedValue(mockSystems);
 
-      const result = await service.findAll(testUserId, testRoles);
+      const result = await service.findAll(testUserId, testIsAdmin);
 
       expect(result).toEqual(mockSystems);
       expect(repository.find).toHaveBeenCalledWith({
@@ -100,7 +104,7 @@ describe('SystemsUnderTestService', () => {
     it('should return empty array when no systems exist', async () => {
       repository.find.mockResolvedValue([]);
 
-      const result = await service.findAll(testUserId, testRoles);
+      const result = await service.findAll(testUserId, testIsAdmin);
 
       expect(result).toEqual([]);
     });
@@ -109,7 +113,7 @@ describe('SystemsUnderTestService', () => {
       const error = new Error('Database connection failed');
       repository.find.mockRejectedValue(error);
 
-      await expect(service.findAll(testUserId, testRoles)).rejects.toThrow('Database connection failed');
+      await expect(service.findAll(testUserId, testIsAdmin)).rejects.toThrow('Database connection failed');
     });
 
     it('should fetch systems with team relations', async () => {
@@ -127,18 +131,21 @@ describe('SystemsUnderTestService', () => {
       };
       repository.find.mockResolvedValue([systemWithTeam] as SystemUnderTestEntity[]);
 
-      const result = await service.findAll(testUserId, testRoles);
+      const result = await service.findAll(testUserId, testIsAdmin);
 
       expect(result[0]?.team).toBeDefined();
       expect(result[0]?.team?.name).toBe('Backend Team');
     });
 
-    it('should check for global admin role', async () => {
+    it('should bypass org filtering when caller is admin', async () => {
       repository.find.mockResolvedValue([mockSystemUnderTest]);
 
-      await service.findAll(testUserId, adminRoles);
+      const result = await service.findAll(testUserId, adminIsAdmin);
 
-      expect(mockAuthzService.isGlobalAdmin).toHaveBeenCalledWith(adminRoles);
+      // Admin path uses repository.find (no query builder, no org-list lookup)
+      expect(result).toEqual([mockSystemUnderTest]);
+      expect(repository.find).toHaveBeenCalled();
+      expect(mockAuthzService.getAccessibleOrganizations).not.toHaveBeenCalled();
     });
   });
 
@@ -146,7 +153,7 @@ describe('SystemsUnderTestService', () => {
     it('should return a system by ID', async () => {
       repository.findOne.mockResolvedValue(mockSystemUnderTest);
 
-      const result = await service.findOne('sys-123', testUserId, testRoles);
+      const result = await service.findOne('sys-123', testUserId, testIsAdmin);
 
       expect(result).toEqual(mockSystemUnderTest);
       expect(repository.findOne).toHaveBeenCalledWith({
@@ -158,8 +165,8 @@ describe('SystemsUnderTestService', () => {
     it('should throw NotFoundException when system not found', async () => {
       repository.findOne.mockResolvedValue(null);
 
-      await expect(service.findOne('nonexistent', testUserId, testRoles)).rejects.toThrow(NotFoundException);
-      await expect(service.findOne('nonexistent', testUserId, testRoles)).rejects.toThrow(
+      await expect(service.findOne('nonexistent', testUserId, testIsAdmin)).rejects.toThrow(NotFoundException);
+      await expect(service.findOne('nonexistent', testUserId, testIsAdmin)).rejects.toThrow(
         'System under test with ID nonexistent not found'
       );
     });
@@ -168,7 +175,7 @@ describe('SystemsUnderTestService', () => {
       const error = new Error('Database query failed');
       repository.findOne.mockRejectedValue(error);
 
-      await expect(service.findOne('sys-123', testUserId, testRoles)).rejects.toThrow('Database query failed');
+      await expect(service.findOne('sys-123', testUserId, testIsAdmin)).rejects.toThrow('Database query failed');
     });
 
     it('should return system with team relation', async () => {
@@ -184,7 +191,7 @@ describe('SystemsUnderTestService', () => {
       };
       repository.findOne.mockResolvedValue(systemWithTeam);
 
-      const result = await service.findOne('sys-123', testUserId, testRoles);
+      const result = await service.findOne('sys-123', testUserId, testIsAdmin);
 
       expect(result.team).toBeDefined();
       expect(result.team?.name).toBe('Backend Team');
@@ -216,7 +223,7 @@ describe('SystemsUnderTestService', () => {
       ]);
       repository.findOne.mockResolvedValue(systemWithTestRuns);
 
-      const result = await service.findSystemSummary('sys-123', testUserId, testRoles);
+      const result = await service.findSystemSummary('sys-123', testUserId, testIsAdmin);
 
       expect(result).toBeDefined();
       expect(result?.id).toBe('sys-123');
@@ -231,7 +238,7 @@ describe('SystemsUnderTestService', () => {
     it('should return null when system not found', async () => {
       repository.findOne.mockResolvedValue(null);
 
-      const result = await service.findSystemSummary('nonexistent', testUserId, testRoles);
+      const result = await service.findSystemSummary('nonexistent', testUserId, testIsAdmin);
 
       expect(result).toBeNull();
     });
@@ -240,7 +247,7 @@ describe('SystemsUnderTestService', () => {
       const systemWithoutTestRuns = createSystemWithTestRuns([]);
       repository.findOne.mockResolvedValue(systemWithoutTestRuns);
 
-      const result = await service.findSystemSummary('sys-123', testUserId, testRoles);
+      const result = await service.findSystemSummary('sys-123', testUserId, testIsAdmin);
 
       expect(result).toBeDefined();
       expect(result?.environments).toEqual([]);
@@ -254,7 +261,7 @@ describe('SystemsUnderTestService', () => {
       ]);
       repository.findOne.mockResolvedValue(systemWithTestRuns);
 
-      const result = await service.findSystemSummary('sys-123', testUserId, testRoles);
+      const result = await service.findSystemSummary('sys-123', testUserId, testIsAdmin);
 
       expect(result?.environments?.[0]?.environment).toBe('development');
       expect(result?.environments?.[1]?.environment).toBe('production');
@@ -269,7 +276,7 @@ describe('SystemsUnderTestService', () => {
       ]);
       repository.findOne.mockResolvedValue(systemWithTestRuns);
 
-      const result = await service.findSystemSummary('sys-123', testUserId, testRoles);
+      const result = await service.findSystemSummary('sys-123', testUserId, testIsAdmin);
 
       expect(result?.environments?.[0]?.workloads).toEqual([
         'endurance-test',
@@ -286,7 +293,7 @@ describe('SystemsUnderTestService', () => {
       ]);
       repository.findOne.mockResolvedValue(systemWithTestRuns);
 
-      const result = await service.findSystemSummary('sys-123', testUserId, testRoles);
+      const result = await service.findSystemSummary('sys-123', testUserId, testIsAdmin);
 
       expect(result?.environments?.[0]?.workloads).toEqual(['load-test']);
     });
@@ -295,14 +302,14 @@ describe('SystemsUnderTestService', () => {
       const error = new Error('Database query failed');
       repository.findOne.mockRejectedValue(error);
 
-      await expect(service.findSystemSummary('sys-123', testUserId, testRoles)).rejects.toThrow('Database query failed');
+      await expect(service.findSystemSummary('sys-123', testUserId, testIsAdmin)).rejects.toThrow('Database query failed');
     });
 
     it('should include created_at as ISO string', async () => {
       const systemWithTestRuns = createSystemWithTestRuns([]);
       repository.findOne.mockResolvedValue(systemWithTestRuns);
 
-      const result = await service.findSystemSummary('sys-123', testUserId, testRoles);
+      const result = await service.findSystemSummary('sys-123', testUserId, testIsAdmin);
 
       expect(result?.created_at).toBe('2024-01-15T10:00:00.000Z');
     });
@@ -312,7 +319,7 @@ describe('SystemsUnderTestService', () => {
     it('should return system by name', async () => {
       repository.findOne.mockResolvedValue(mockSystemUnderTest);
 
-      const result = await service.findByName('payment-service', testUserId, testRoles);
+      const result = await service.findByName('payment-service', testUserId, testIsAdmin);
 
       expect(result).toEqual(mockSystemUnderTest);
       expect(repository.findOne).toHaveBeenCalledWith({
@@ -324,7 +331,7 @@ describe('SystemsUnderTestService', () => {
     it('should return null when system not found', async () => {
       repository.findOne.mockResolvedValue(null);
 
-      const result = await service.findByName('nonexistent-service', testUserId, testRoles);
+      const result = await service.findByName('nonexistent-service', testUserId, testIsAdmin);
 
       expect(result).toBeNull();
     });
@@ -333,7 +340,7 @@ describe('SystemsUnderTestService', () => {
       const error = new Error('Database query failed');
       repository.findOne.mockRejectedValue(error);
 
-      await expect(service.findByName('payment-service', testUserId, testRoles)).rejects.toThrow('Database query failed');
+      await expect(service.findByName('payment-service', testUserId, testIsAdmin)).rejects.toThrow('Database query failed');
     });
   });
 
@@ -351,7 +358,7 @@ describe('SystemsUnderTestService', () => {
       repository.save.mockResolvedValue(createdSystem);
       repository.findOne.mockResolvedValue(createdSystem);
 
-      const result = await service.create(createDto, testUserId, testRoles);
+      const result = await service.create(createDto, testUserId, testIsAdmin);
 
       expect(result).toEqual(createdSystem);
       expect(repository.create).toHaveBeenCalledWith({
@@ -373,7 +380,7 @@ describe('SystemsUnderTestService', () => {
       repository.save.mockResolvedValue(createdSystem);
       repository.findOne.mockResolvedValue(createdSystem);
 
-      const result = await service.create(minimalDto, testUserId, testRoles);
+      const result = await service.create(minimalDto, testUserId, testIsAdmin);
 
       expect(result).toBeDefined();
       expect(result.name).toBe('minimal-service');
@@ -384,7 +391,7 @@ describe('SystemsUnderTestService', () => {
       repository.create.mockReturnValue(mockSystemUnderTest);
       repository.save.mockRejectedValue(error);
 
-      await expect(service.create(createDto, testUserId, testRoles)).rejects.toThrow('Database insert failed');
+      await expect(service.create(createDto, testUserId, testIsAdmin)).rejects.toThrow('Database insert failed');
     });
 
     it('should fetch created system with relations', async () => {
@@ -403,7 +410,7 @@ describe('SystemsUnderTestService', () => {
       repository.save.mockResolvedValue(createdSystem);
       repository.findOne.mockResolvedValue(systemWithTeam);
 
-      const result = await service.create(createDto, testUserId, testRoles);
+      const result = await service.create(createDto, testUserId, testIsAdmin);
 
       expect(result.team).toBeDefined();
       expect(result.team?.name).toBe('New Team');
@@ -424,7 +431,7 @@ describe('SystemsUnderTestService', () => {
         .mockResolvedValueOnce(updatedSystem); // Second call in findOne (return after update)
       repository.update.mockResolvedValue({ affected: 1, raw: [], generatedMaps: [] });
 
-      const result = await service.update('sys-123', updateDto, testUserId, testRoles);
+      const result = await service.update('sys-123', updateDto, testUserId, testIsAdmin);
 
       expect(result).toEqual(updatedSystem);
       expect(repository.update).toHaveBeenCalled();
@@ -433,7 +440,7 @@ describe('SystemsUnderTestService', () => {
     it('should throw NotFoundException when system not found', async () => {
       repository.findOne.mockResolvedValue(null);
 
-      await expect(service.update('nonexistent', updateDto, testUserId, testRoles)).rejects.toThrow(NotFoundException);
+      await expect(service.update('nonexistent', updateDto, testUserId, testIsAdmin)).rejects.toThrow(NotFoundException);
     });
 
     it('should partially update system', async () => {
@@ -446,7 +453,7 @@ describe('SystemsUnderTestService', () => {
         .mockResolvedValueOnce(updatedSystem);
       repository.update.mockResolvedValue({ affected: 1, raw: [], generatedMaps: [] });
 
-      const result = await service.update('sys-123', partialUpdateDto, testUserId, testRoles);
+      const result = await service.update('sys-123', partialUpdateDto, testUserId, testIsAdmin);
 
       expect(result.description).toBe('Only updating description');
       expect(result.name).toBe(mockSystemUnderTest.name);
@@ -457,7 +464,7 @@ describe('SystemsUnderTestService', () => {
       repository.findOne.mockResolvedValue(mockSystemUnderTest);
       repository.update.mockRejectedValue(error);
 
-      await expect(service.update('sys-123', updateDto, testUserId, testRoles)).rejects.toThrow('Database update failed');
+      await expect(service.update('sys-123', updateDto, testUserId, testIsAdmin)).rejects.toThrow('Database update failed');
     });
   });
 
@@ -466,7 +473,7 @@ describe('SystemsUnderTestService', () => {
       repository.findOne.mockResolvedValue(mockSystemUnderTest);
       repository.remove.mockResolvedValue(mockSystemUnderTest);
 
-      await service.remove('sys-123', testUserId, testRoles);
+      await service.remove('sys-123', testUserId, testIsAdmin);
 
       expect(repository.findOne).toHaveBeenCalledWith({
         where: { id: 'sys-123' },
@@ -478,7 +485,7 @@ describe('SystemsUnderTestService', () => {
     it('should throw NotFoundException when system not found', async () => {
       repository.findOne.mockResolvedValue(null);
 
-      await expect(service.remove('nonexistent', testUserId, testRoles)).rejects.toThrow(NotFoundException);
+      await expect(service.remove('nonexistent', testUserId, testIsAdmin)).rejects.toThrow(NotFoundException);
     });
 
     it('should handle database errors during deletion', async () => {
@@ -486,7 +493,7 @@ describe('SystemsUnderTestService', () => {
       repository.findOne.mockResolvedValue(mockSystemUnderTest);
       repository.remove.mockRejectedValue(error);
 
-      await expect(service.remove('sys-123', testUserId, testRoles)).rejects.toThrow('Database delete failed');
+      await expect(service.remove('sys-123', testUserId, testIsAdmin)).rejects.toThrow('Database delete failed');
     });
   });
 
@@ -500,7 +507,7 @@ describe('SystemsUnderTestService', () => {
       repository.save.mockResolvedValue(createdSystem);
       repository.findOne.mockResolvedValue(createdSystem);
 
-      await service.create(createDto, testUserId, testRoles);
+      await service.create(createDto, testUserId, testIsAdmin);
 
       expect(loggerSpy).toHaveBeenCalledWith(
         expect.stringContaining('Created system under test: test-service')
@@ -516,7 +523,7 @@ describe('SystemsUnderTestService', () => {
         .mockResolvedValueOnce({ ...mockSystemUnderTest, ...updateDto });
       repository.update.mockResolvedValue({ affected: 1, raw: [], generatedMaps: [] });
 
-      await service.update('sys-123', updateDto, testUserId, testRoles);
+      await service.update('sys-123', updateDto, testUserId, testIsAdmin);
 
       expect(loggerSpy).toHaveBeenCalledWith(
         expect.stringContaining('Updated system under test')
@@ -529,7 +536,7 @@ describe('SystemsUnderTestService', () => {
       repository.findOne.mockResolvedValue(mockSystemUnderTest);
       repository.remove.mockResolvedValue(mockSystemUnderTest);
 
-      await service.remove('sys-123', testUserId, testRoles);
+      await service.remove('sys-123', testUserId, testIsAdmin);
 
       expect(loggerSpy).toHaveBeenCalledWith(
         expect.stringContaining('Deleted system under test')
@@ -542,7 +549,7 @@ describe('SystemsUnderTestService', () => {
 
       repository.find.mockRejectedValue(error);
 
-      await expect(service.findAll(testUserId, testRoles)).rejects.toThrow('Test error');
+      await expect(service.findAll(testUserId, testIsAdmin)).rejects.toThrow('Test error');
       expect(loggerSpy).toHaveBeenCalledWith(
         '[findAll] ERROR',
         error.stack
@@ -563,7 +570,7 @@ describe('SystemsUnderTestService', () => {
       repository.save.mockResolvedValue(createdSystem);
       repository.findOne.mockResolvedValue(createdSystem);
 
-      const result = await service.create(createDto, testUserId, testRoles);
+      const result = await service.create(createDto, testUserId, testIsAdmin);
 
       expect(result.description).toBe('');
       expect(result.tracing_service).toBe('');
@@ -578,7 +585,7 @@ describe('SystemsUnderTestService', () => {
       repository.save.mockResolvedValue(createdSystem);
       repository.findOne.mockResolvedValue(createdSystem);
 
-      const result = await service.create(createDto, testUserId, testRoles);
+      const result = await service.create(createDto, testUserId, testIsAdmin);
 
       expect(result.name).toBe(longName);
     });
@@ -592,28 +599,32 @@ describe('SystemsUnderTestService', () => {
       repository.save.mockResolvedValue(createdSystem);
       repository.findOne.mockResolvedValue(createdSystem);
 
-      const result = await service.create(createDto, testUserId, testRoles);
+      const result = await service.create(createDto, testUserId, testIsAdmin);
 
       expect(result.name).toBe(specialName);
     });
   });
 
   describe('Authorization context', () => {
-    it('should pass userId and roles to isGlobalAdmin', async () => {
-      repository.find.mockResolvedValue([mockSystemUnderTest]);
+    // Phase 3c C32: isAdmin is resolved at the controller boundary; the service
+    // no longer calls authzService.isGlobalAdmin. These tests assert that the
+    // admin / non-admin paths produce different lookup behavior.
 
-      await service.findAll(testUserId, testRoles);
+    it('should look up accessible orgs for non-admin findAll', async () => {
+      mockAuthzService.getAccessibleOrganizations.mockResolvedValue(['org-1']);
+      mockAuthzService.getAccessibleTeams.mockResolvedValue([]);
 
-      expect(mockAuthzService.isGlobalAdmin).toHaveBeenCalledWith(testRoles);
+      await service.findAll(testUserId, false);
+
+      expect(mockAuthzService.getAccessibleOrganizations).toHaveBeenCalledWith(testUserId);
     });
 
-    it('should handle admin user context', async () => {
-      mockAuthzService.isGlobalAdmin.mockReturnValue(true);
+    it('should skip org lookup for admin findAll', async () => {
       repository.find.mockResolvedValue([mockSystemUnderTest]);
 
-      await service.findAll('admin-user', adminRoles);
+      await service.findAll('admin-user', adminIsAdmin);
 
-      expect(mockAuthzService.isGlobalAdmin).toHaveBeenCalledWith(adminRoles);
+      expect(mockAuthzService.getAccessibleOrganizations).not.toHaveBeenCalled();
     });
   });
 
@@ -643,7 +654,7 @@ describe('SystemsUnderTestService', () => {
       repository.findOne.mockResolvedValueOnce(createdSut); // findOne after create
       mockAuthzService.isOrganizationMember.mockResolvedValue(true);
 
-      const result = await service.createSut(createDto, testUserId, adminRoles);
+      const result = await service.createSut(createDto, testUserId, adminIsAdmin);
 
       expect((repository as any).manager.transaction).toHaveBeenCalled();
       expect(result.name).toBe('new-service');
@@ -655,26 +666,24 @@ describe('SystemsUnderTestService', () => {
       repository.findOne.mockResolvedValueOnce(existingSut); // findOne auth check
       mockAuthzService.isOrganizationMember.mockResolvedValue(true);
 
-      const result = await service.createSut(createDto, testUserId, adminRoles);
+      const result = await service.createSut(createDto, testUserId, adminIsAdmin);
 
       expect((repository as any).manager.transaction).not.toHaveBeenCalled();
       expect(result.conflict).toBe(true);
     });
 
     it('should verify org membership before creating (non-admin)', async () => {
-      mockAuthzService.isGlobalAdmin.mockReturnValue(false);
       mockAuthzService.isOrganizationMember.mockResolvedValue(false);
 
-      await expect(service.createSut(createDto, testUserId, testRoles)).rejects.toThrow(NotFoundException);
+      await expect(service.createSut(createDto, testUserId, false)).rejects.toThrow(NotFoundException);
       expect((repository as any).manager.transaction).not.toHaveBeenCalled();
     });
 
     it('should skip org check for global admins', async () => {
-      // isGlobalAdmin defaults to true in mock
       repository.findOne.mockResolvedValueOnce(null);
       repository.findOne.mockResolvedValueOnce(createdSut);
 
-      const result = await service.createSut(createDto, testUserId, adminRoles);
+      const result = await service.createSut(createDto, testUserId, adminIsAdmin);
 
       expect(mockAuthzService.isOrganizationMember).not.toHaveBeenCalled();
       expect(result.name).toBe('new-service');
