@@ -6,11 +6,11 @@ Phase 3c rolls capabilities through every site listed below. Update these counts
 
 | Bucket | Total | Migrated | Remaining | % done |
 | --- | ---: | ---: | ---: | ---: |
-| A — bypass filter | 127 | 43 | 84 | 33.9% |
+| A — bypass filter | 127 | 46 | 81 | 36.2% |
 | B — bypass guard | 18 | 17 | 1 | 94.4% |
-| Local `private isGlobalAdmin()` wrappers | 13 | 5 | 8 | 38.5% |
+| Local `private isGlobalAdmin()` wrappers | 13 | 6 | 7 | 46.2% |
 
-**Lint enforcement:** `apps/api/.rbac-migration-allowlist.json` lists every file currently exempt from the `no-direct-is-global-admin` lint rule (11 files as of 2026-05-02). When a site is migrated, remove its file from the allowlist (the file may have multiple sites — only remove when the LAST one is migrated). Allowlist size IS the burndown.
+**Lint enforcement:** `apps/api/.rbac-migration-allowlist.json` lists every file currently exempt from the `no-direct-is-global-admin` lint rule (10 files as of 2026-05-02). When a site is migrated, remove its file from the allowlist (the file may have multiple sites — only remove when the LAST one is migrated). Allowlist size IS the burndown.
 
 **Bucket B total adjusted upward by 3 in C17 and 1 in C25:** the original 2026-04-26 audit classified dynatrace's per-resource sites at `findByHost`/`update`/`delete` as "Leave" (deferred until `canAccessResource`/`canModifyResource` was established). C17 closes those 3. C25 adds `verifyTestRunAccess` from `test-runs-query.service.ts`, which the original audit did not enumerate — so the running total now reflects all four as in-scope.
 
@@ -1325,3 +1325,73 @@ No spec changes required: `test-runs-query.service.spec.ts` uses the shared `cre
 ### Allowlist disposition
 
 The file **EXITS** the allowlist — zero direct `isGlobalAdmin` references after the migration. Allowlist size: 12 → **11**. (The audit doc has detailed phase entries through C17 only; the C18–C24 PRs trimmed the allowlist from 24 down to 12 without writing per-phase sections in this file, so a precise "Nth exit" count would require reading those commit messages.)
+
+
+---
+
+## Phase C26 — Single file: `test-runs-dashboard-query.service.ts` finish + `roles → isAdmin` parameter swap
+
+**Audit date:** 2026-05-02
+**Scope:** Single-file migration. Drops the `private isGlobalAdmin` wrapper from `apps/api/src/modules/test-runs/services/test-runs-dashboard-query.service.ts` (416 lines) plus its 3 internal call sites, exiting the file from the allowlist (11 → **10**). Sixth file in Phase 3c to use the "drop the local wrapper" pattern (after report-data-fetcher C6, report-generation C7, adapt C9, compare-presets C11, and pyroscope/tracing-instances in the C16 bundle). Also touches `test-runs-query.service.ts` (parent facade) — the new `roles → isAdmin` boundary surface lives there.
+
+### Site classification
+
+| Line | Method | Migration |
+|------|--------|-----------|
+| 44 (pre-edit) | `private isGlobalAdmin(roles)` | **Wrapper deleted.** No longer needed — admin is now a parameter. |
+| 104, 254, 332 | `getDashboardStatistics`, `getRecentFailures`, `getDashboardSystemsSummary` | **Signature changed:** 4th positional parameter `roles: string[] = []` becomes `isAdmin: boolean = false`. The internal `const isAdmin = this.isGlobalAdmin(roles);` line in each method is deleted; the rest of the body uses the param directly. |
+| 21 | `const ADMIN_ROLES = ...` | Module-level constant deleted (only consumer was the wrapper). |
+
+The sub-service no longer needs to know anything about roles — only whether the caller has the global-admin bypass. This is the cleanest fit: roles → admin lookup belongs at the boundary (the parent facade), not at every leaf service.
+
+### Parent facade change (`test-runs-query.service.ts`)
+
+`resolveOrganizationIds` now returns `{ orgIds: string[]; isAdmin: boolean }` instead of `string[]`. The `isAdmin` flag is derived from `withOrgFilter`'s null sentinel (`accessible === null`), so no direct `isGlobalAdmin` call is reintroduced. The 3 dashboard delegations destructure the tuple and pass `isAdmin` to the sub-service.
+
+```typescript
+private async resolveOrganizationIds(...): Promise<{ orgIds: string[]; isAdmin: boolean }> {
+  const accessible = await withOrgFilter(userId, roles, this.authzService);
+  const isAdmin = accessible === null;
+  if (organizationId) return { orgIds: [organizationId], isAdmin };
+  return { orgIds: accessible ?? [], isAdmin };
+}
+```
+
+This is a small contract change to a private helper — only 3 call sites in the same file, no external consumers.
+
+### Test changes
+
+`test-runs-query.service.spec.ts` had 6 assertions on the old `dashboardService.<method>(..., testRoles, ...)` shape (`testRoles = ['perfana-admin']`). All 6 updated to `..., true, ...` (the admin-bypass case). No new tests added — the existing coverage exercises both admin and explicit-org branches and now passes after the assertion update.
+
+### Test results
+
+| Test run | Result |
+|----------|--------|
+| `npx jest src/modules/test-runs/services/test-runs-query.service.spec.ts` | 29 passed |
+| `npx jest src/modules/test-runs` | 766 passed (19 suites) |
+| `npx jest` (full API suite) | 4309 passed, 20 skipped (pre-existing), 0 failed |
+| `npm run type-check` (`@perfana/api`) | 0 errors |
+| `npm run lint` (`@perfana/api`) | 0 errors, 59 pre-existing warnings (none introduced) |
+
+### Net diff
+
+- `test-runs-dashboard-query.service.ts`: -16 lines (wrapper + ADMIN_ROLES const + 3 internal isAdmin computations deleted; doc comments updated)
+- `test-runs-query.service.ts`: +9 / -7 = **net +2** (resolveOrganizationIds now returns a tuple; 3 callers destructure it)
+- `test-runs-query.service.spec.ts`: 6 assertion edits, net 0
+- `.rbac-migration-allowlist.json`: -1 line
+
+### Files changed
+
+- `apps/api/src/modules/test-runs/services/test-runs-dashboard-query.service.ts` — drop wrapper + ADMIN_ROLES, swap `roles → isAdmin` in 3 method signatures
+- `apps/api/src/modules/test-runs/services/test-runs-query.service.ts` — `resolveOrganizationIds` returns `{orgIds, isAdmin}`; 3 dashboard delegations updated
+- `apps/api/src/modules/test-runs/services/test-runs-query.service.spec.ts` — 6 assertions updated to the new shape
+- `apps/api/.rbac-migration-allowlist.json` — remove `test-runs-dashboard-query.service.ts`
+- `docs/superpowers/audits/2026-04-26-audit-decisions.md` — this file
+
+### Allowlist disposition
+
+The file **EXITS** the allowlist — zero direct `isGlobalAdmin` references after the migration (the wrapper is gone, callers receive a boolean). Allowlist size: 11 → **10**. Burndown: Bucket A 43 → 46 of 127 (3 of the wrapper sites count against Bucket A — they were the list-filter shape inside the wrapper); Local wrappers 5 → 6 of 13 (the 6th wrapper-bearing file to lose its wrapper).
+
+### Pattern note: `roles → isAdmin` at the parent boundary
+
+This is the **first Phase 3c migration** to push the admin-resolution boundary up to the facade and out of a sub-service. Three other test-runs sub-services (`test-runs-performance-query.service.ts`, `test-runs-metrics.service.ts`, plus the standalone `test-runs-crud-query.service.ts`) carry the same `private isGlobalAdmin` wrapper or direct calls and are good candidates for the same treatment in future PRs. The win is that each sub-service drops a dependency on the role-list shape entirely — boolean in, query out.

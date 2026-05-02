@@ -6,7 +6,6 @@
   "apps/api/src/modules/systems-under-test/systems-under-test.service.ts",
   "apps/api/src/modules/teams/teams.service.ts",
   "apps/api/src/modules/test-runs/services/test-runs-crud-query.service.ts",
-  "apps/api/src/modules/test-runs/services/test-runs-dashboard-query.service.ts",
   "apps/api/src/modules/test-runs/services/test-runs-metrics.service.ts",
   "apps/api/src/modules/test-runs/services/test-runs-performance-query.service.ts",
   "apps/api/src/modules/trends-presets/trends-presets.service.ts"

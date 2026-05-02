@@ -16,11 +16,6 @@ import {
 } from '../types/test-run.types';
 
 /**
- * Global admin roles that bypass organization filtering
- */
-const ADMIN_ROLES = ['perfana-admin', 'super-admin', 'admin'];
-
-/**
  * Service responsible for dashboard statistics and summary queries
  * Handles: getDashboardStatistics, getRecentFailures, getDashboardSystemsSummary
  */
@@ -37,13 +32,6 @@ export class TestRunsDashboardQueryService {
     private readonly testRunViewRepo: Repository<TestRunView>,
     private readonly mapper: TestRunsMapperService,
   ) {}
-
-  /**
-   * Check if a user has global admin role
-   */
-  private isGlobalAdmin(roles: string[]): boolean {
-    return roles.some(role => ADMIN_ROLES.includes(role));
-  }
 
   /**
    * Apply organization filtering to a query builder
@@ -89,22 +77,23 @@ export class TestRunsDashboardQueryService {
    * @param timePeriod - Time period filter
    * @param from - Custom start date (for 'custom' period)
    * @param to - Custom end date (for 'custom' period)
-   * @param roles - User roles from JWT token (for admin bypass)
-   * @param organizationIds - User's accessible organization IDs from JWT token
+   * @param isAdmin - Whether the caller has global admin privileges (resolved by the parent
+   *   facade via `withOrgFilter`); admins skip the team-membership restriction and are not
+   *   subject to the "no orgs → return zeros" early exit.
+   * @param organizationIds - User's accessible organization IDs (or `[organizationId]` if explicit)
    */
   async getDashboardStatistics(
     timePeriod: TimePeriod = '7d',
     from?: string,
     to?: string,
-    roles: string[] = [],
+    isAdmin: boolean = false,
     organizationIds: string[] = [],
     userTeamIds: string[] = [],
   ): Promise<DashboardStatistics> {
     try {
-      const isAdmin = this.isGlobalAdmin(roles);
       const shouldFilter = organizationIds.length > 0;
       const shouldFilterTeams = !isAdmin;
-      this.logger.log(`[getDashboardStatistics] START - timePeriod=${timePeriod}, roles=${JSON.stringify(roles)}, isAdmin=${isAdmin}, organizationIds=${JSON.stringify(organizationIds)}, shouldFilter=${shouldFilter}`);
+      this.logger.log(`[getDashboardStatistics] START - timePeriod=${timePeriod}, isAdmin=${isAdmin}, organizationIds=${JSON.stringify(organizationIds)}, shouldFilter=${shouldFilter}`);
 
       // Non-admin users with no organization memberships see zeros
       if (!isAdmin && !shouldFilter) {
@@ -235,7 +224,7 @@ export class TestRunsDashboardQueryService {
    * @param timePeriod - Time period filter
    * @param from - Custom start date (for 'custom' period)
    * @param to - Custom end date (for 'custom' period)
-   * @param roles - User roles from JWT token (for admin bypass)
+   * @param isAdmin - Whether the caller has global admin privileges (see `getDashboardStatistics`)
    * @param organizationIds - User's accessible organization IDs from JWT token
    * @param userTeamIds - User's accessible team IDs
    * @param userId - Current user ID (for filtering out viewed failures)
@@ -245,13 +234,12 @@ export class TestRunsDashboardQueryService {
     timePeriod: TimePeriod = '7d',
     from?: string,
     to?: string,
-    roles: string[] = [],
+    isAdmin: boolean = false,
     organizationIds: string[] = [],
     userTeamIds: string[] = [],
     userId?: string,
   ): Promise<RecentFailure[]> {
     try {
-      const isAdmin = this.isGlobalAdmin(roles);
       const shouldFilter = organizationIds.length > 0;
       const shouldFilterTeams = !isAdmin;
 
@@ -320,16 +308,15 @@ export class TestRunsDashboardQueryService {
   /**
    * Get systems summary for dashboard with test run counts
    *
-   * @param roles - User roles from JWT token (for admin bypass)
+   * @param isAdmin - Whether the caller has global admin privileges (see `getDashboardStatistics`)
    * @param organizationIds - User's accessible organization IDs from JWT token
    */
   async getDashboardSystemsSummary(
-    roles: string[] = [],
+    isAdmin: boolean = false,
     organizationIds: string[] = [],
     userTeamIds: string[] = [],
   ): Promise<SystemSummary[]> {
     try {
-      const isAdmin = this.isGlobalAdmin(roles);
       const shouldFilter = organizationIds.length > 0;
       const shouldFilterTeams = !isAdmin;
 

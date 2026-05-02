@@ -425,8 +425,8 @@ describe('TestRunsQueryService', () => {
 
         const result = await service.getDashboardStatistics(testUserId, testRoles, '7d');
 
-        // Admin without explicit org → empty organizationIds (no filter), empty teamIds (admin bypass)
-        expect(dashboardService.getDashboardStatistics).toHaveBeenCalledWith('7d', undefined, undefined, testRoles, [], []);
+        // Admin without explicit org → isAdmin=true, empty organizationIds (no filter), empty teamIds (admin bypass)
+        expect(dashboardService.getDashboardStatistics).toHaveBeenCalledWith('7d', undefined, undefined, true, [], []);
         expect(result.totalTests).toBe(100);
       });
 
@@ -444,8 +444,8 @@ describe('TestRunsQueryService', () => {
 
         const result = await service.getDashboardStatistics(testUserId, testRoles, '7d', undefined, undefined, 'org-123');
 
-        // Explicit org → organizationIds = ['org-123'] even for admin, empty teamIds (admin bypass)
-        expect(dashboardService.getDashboardStatistics).toHaveBeenCalledWith('7d', undefined, undefined, testRoles, ['org-123'], []);
+        // Explicit org → organizationIds = ['org-123'] even for admin, isAdmin=true, empty teamIds (admin bypass)
+        expect(dashboardService.getDashboardStatistics).toHaveBeenCalledWith('7d', undefined, undefined, true, ['org-123'], []);
         expect(result.totalTests).toBe(50);
       });
     });
@@ -469,8 +469,8 @@ describe('TestRunsQueryService', () => {
 
         const result = await service.getRecentFailures(testUserId, testRoles, 10, '7d');
 
-        // Admin without explicit org → empty organizationIds (no filter), empty teamIds (admin bypass), userId passed through
-        expect(dashboardService.getRecentFailures).toHaveBeenCalledWith(10, '7d', undefined, undefined, testRoles, [], [], testUserId);
+        // Admin without explicit org → isAdmin=true, empty organizationIds (no filter), empty teamIds (admin bypass), userId passed through
+        expect(dashboardService.getRecentFailures).toHaveBeenCalledWith(10, '7d', undefined, undefined, true, [], [], testUserId);
         expect(result).toHaveLength(1);
       });
 
@@ -479,7 +479,7 @@ describe('TestRunsQueryService', () => {
 
         await service.getRecentFailures(testUserId, testRoles, 10, '7d', undefined, undefined, 'org-456');
 
-        expect(dashboardService.getRecentFailures).toHaveBeenCalledWith(10, '7d', undefined, undefined, testRoles, ['org-456'], [], testUserId);
+        expect(dashboardService.getRecentFailures).toHaveBeenCalledWith(10, '7d', undefined, undefined, true, ['org-456'], [], testUserId);
       });
     });
 
@@ -498,8 +498,8 @@ describe('TestRunsQueryService', () => {
 
         const result = await service.getDashboardSystemsSummary(testUserId, testRoles);
 
-        // Admin without explicit org → empty organizationIds (no filter), empty teamIds (admin bypass)
-        expect(dashboardService.getDashboardSystemsSummary).toHaveBeenCalledWith(testRoles, [], []);
+        // Admin without explicit org → isAdmin=true, empty organizationIds (no filter), empty teamIds (admin bypass)
+        expect(dashboardService.getDashboardSystemsSummary).toHaveBeenCalledWith(true, [], []);
         expect(result).toHaveLength(1);
       });
 
@@ -508,7 +508,7 @@ describe('TestRunsQueryService', () => {
 
         await service.getDashboardSystemsSummary(testUserId, testRoles, 'org-789');
 
-        expect(dashboardService.getDashboardSystemsSummary).toHaveBeenCalledWith(testRoles, ['org-789'], []);
+        expect(dashboardService.getDashboardSystemsSummary).toHaveBeenCalledWith(true, ['org-789'], []);
       });
     });
   });
