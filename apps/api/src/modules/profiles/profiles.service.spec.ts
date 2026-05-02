@@ -110,7 +110,10 @@ describe('ProfilesService', () => {
   } as ProfileBenchmark;
 
   const mockUserId = 'test-user-id';
-  const mockRoles = ['user'];
+  // Tests run as global admin (matches the prior fixture: mockRoles=['user']
+  // combined with the default mock's isGlobalAdmin=true). Phase 3c C33 swap
+  // preserves this behavior by passing isAdmin=true directly.
+  const mockIsAdmin = true;
 
   beforeEach(async () => {
     const mockProfileRepo = {
@@ -258,7 +261,7 @@ describe('ProfilesService', () => {
       profileDashboardRepo.createQueryBuilder.mockReturnValue(dashboardQueryBuilder as any);
 
       // Act
-      const result = await service.findAll(mockUserId, mockRoles);
+      const result = await service.findAll(mockUserId, mockIsAdmin);
 
       // Assert
       expect(result).toHaveLength(2);
@@ -296,7 +299,7 @@ describe('ProfilesService', () => {
       profileDashboardRepo.createQueryBuilder.mockReturnValue(dashboardQueryBuilder as any);
 
       // Act
-      const result = await service.findAll(mockUserId, mockRoles);
+      const result = await service.findAll(mockUserId, mockIsAdmin);
 
       // Assert
       expect(result).toHaveLength(1);
@@ -321,7 +324,7 @@ describe('ProfilesService', () => {
       profileDashboardRepo.createQueryBuilder.mockReturnValue(dashboardQueryBuilder as any);
 
       // Act
-      const result = await service.findAll(mockUserId, mockRoles);
+      const result = await service.findAll(mockUserId, mockIsAdmin);
 
       // Assert
       expect(result).toEqual([]);
@@ -337,7 +340,7 @@ describe('ProfilesService', () => {
       profileRepo.createQueryBuilder.mockReturnValue(profileQueryBuilder as any);
 
       // Act & Assert
-      await expect(service.findAll(mockUserId, mockRoles)).rejects.toThrow('Database connection failed');
+      await expect(service.findAll(mockUserId, mockIsAdmin)).rejects.toThrow('Database connection failed');
     });
   });
 
@@ -348,7 +351,7 @@ describe('ProfilesService', () => {
       profileDashboardRepo.count.mockResolvedValue(5);
 
       // Act
-      const result = await service.findOne('profile-uuid-1', mockUserId, mockRoles);
+      const result = await service.findOne('profile-uuid-1', mockUserId, mockIsAdmin);
 
       // Assert
       expect(result).toEqual({
@@ -376,7 +379,7 @@ describe('ProfilesService', () => {
       profileRepo.findOne.mockResolvedValue(null);
 
       // Act
-      const result = await service.findOne('non-existent-id', mockUserId, mockRoles);
+      const result = await service.findOne('non-existent-id', mockUserId, mockIsAdmin);
 
       // Assert
       expect(result).toBeNull();
@@ -387,7 +390,7 @@ describe('ProfilesService', () => {
       profileRepo.findOne.mockRejectedValue(new Error('Database error'));
 
       // Act
-      const result = await service.findOne('profile-uuid-1', mockUserId, mockRoles);
+      const result = await service.findOne('profile-uuid-1', mockUserId, mockIsAdmin);
 
       // Assert
       expect(result).toBeNull();
@@ -408,7 +411,7 @@ describe('ProfilesService', () => {
       grafanaDashboardRepo.createQueryBuilder.mockReturnValue(queryBuilder as any);
 
       // Act
-      const result = await service.findDashboardsByProfileId('profile-uuid-1', mockUserId, mockRoles);
+      const result = await service.findDashboardsByProfileId('profile-uuid-1', mockUserId, mockIsAdmin);
 
       // Assert
       expect(result).toHaveLength(1);
@@ -437,7 +440,7 @@ describe('ProfilesService', () => {
       profileRepo.findOne.mockResolvedValue(null);
 
       // Act
-      const result = await service.findDashboardsByProfileId('non-existent-id', mockUserId, mockRoles);
+      const result = await service.findDashboardsByProfileId('non-existent-id', mockUserId, mockIsAdmin);
 
       // Assert
       expect(result).toEqual([]);
@@ -450,7 +453,7 @@ describe('ProfilesService', () => {
       grafanaInstanceRepo.find.mockResolvedValue([]);
 
       // Act
-      const result = await service.findDashboardsByProfileId('profile-uuid-1', mockUserId, mockRoles);
+      const result = await service.findDashboardsByProfileId('profile-uuid-1', mockUserId, mockIsAdmin);
 
       // Assert
       expect(result).toEqual([]);
@@ -470,7 +473,7 @@ describe('ProfilesService', () => {
       grafanaDashboardRepo.createQueryBuilder.mockReturnValue(queryBuilder as any);
 
       // Act
-      const result = await service.findDashboardsByProfileId('profile-uuid-1', mockUserId, mockRoles);
+      const result = await service.findDashboardsByProfileId('profile-uuid-1', mockUserId, mockIsAdmin);
 
       // Assert
       expect(result).toHaveLength(1);
@@ -484,7 +487,7 @@ describe('ProfilesService', () => {
       grafanaInstanceRepo.find.mockResolvedValue([]);
 
       // Act
-      const result = await service.findDashboardsByProfileId('profile-uuid-1', mockUserId, mockRoles);
+      const result = await service.findDashboardsByProfileId('profile-uuid-1', mockUserId, mockIsAdmin);
 
       // Assert
       expect(result).toEqual([]);
@@ -497,7 +500,7 @@ describe('ProfilesService', () => {
       profileDashboardRepo.find.mockRejectedValue(new Error('Database error'));
 
       // Act & Assert
-      await expect(service.findDashboardsByProfileId('profile-uuid-1', mockUserId, mockRoles)).rejects.toThrow('Database error');
+      await expect(service.findDashboardsByProfileId('profile-uuid-1', mockUserId, mockIsAdmin)).rejects.toThrow('Database error');
     });
   });
 
@@ -520,7 +523,7 @@ describe('ProfilesService', () => {
       profileDashboardRepo.save.mockResolvedValue(mockProfileDashboard);
 
       // Act
-      const result = await service.createDashboard('profile-uuid-1', createDto, mockUserId, mockRoles);
+      const result = await service.createDashboard('profile-uuid-1', createDto, mockUserId, mockIsAdmin);
 
       // Assert
       expect(result).toEqual({
@@ -554,7 +557,7 @@ describe('ProfilesService', () => {
       profileRepo.findOne.mockResolvedValue(null);
 
       // Act & Assert
-      await expect(service.createDashboard('non-existent-id', createDto, mockUserId, mockRoles)).rejects.toThrow(
+      await expect(service.createDashboard('non-existent-id', createDto, mockUserId, mockIsAdmin)).rejects.toThrow(
         new NotFoundException('Profile non-existent-id not found')
       );
     });
@@ -565,7 +568,7 @@ describe('ProfilesService', () => {
       grafanaInstanceRepo.findOne.mockResolvedValue(null);
 
       // Act & Assert
-      await expect(service.createDashboard('profile-uuid-1', createDto, mockUserId, mockRoles)).rejects.toThrow(
+      await expect(service.createDashboard('profile-uuid-1', createDto, mockUserId, mockIsAdmin)).rejects.toThrow(
         new BadRequestException("Grafana instance with label 'Default' not found")
       );
     });
@@ -577,7 +580,7 @@ describe('ProfilesService', () => {
       grafanaDashboardRepo.findOne.mockResolvedValue(null);
 
       // Act & Assert
-      await expect(service.createDashboard('profile-uuid-1', createDto, mockUserId, mockRoles)).rejects.toThrow(
+      await expect(service.createDashboard('profile-uuid-1', createDto, mockUserId, mockIsAdmin)).rejects.toThrow(
         new BadRequestException(
           "Dashboard with UID 'dashboard-uid-123' not found in Grafana instance 'Default'"
         )
@@ -596,7 +599,7 @@ describe('ProfilesService', () => {
       profileDashboardRepo.save.mockResolvedValue(mockProfileDashboard);
 
       // Act
-      await service.createDashboard('profile-uuid-1', dtoWithoutReadOnly, mockUserId, mockRoles);
+      await service.createDashboard('profile-uuid-1', dtoWithoutReadOnly, mockUserId, mockIsAdmin);
 
       // Assert
       expect(profileDashboardRepo.create).toHaveBeenCalledWith(
@@ -627,7 +630,7 @@ describe('ProfilesService', () => {
       grafanaDashboardRepo.findOne.mockResolvedValue(mockGrafanaDashboard);
 
       // Act
-      const result = await service.updateDashboard('profile-uuid-1', 'profile-dashboard-uuid-1', updateDto, mockUserId, mockRoles);
+      const result = await service.updateDashboard('profile-uuid-1', 'profile-dashboard-uuid-1', updateDto, mockUserId, mockIsAdmin);
 
       // Assert
       expect(result.readOnly).toBe(true);
@@ -645,7 +648,7 @@ describe('ProfilesService', () => {
 
       // Act & Assert
       await expect(
-        service.updateDashboard('non-existent-id', 'dashboard-id', updateDto, mockUserId, mockRoles)
+        service.updateDashboard('non-existent-id', 'dashboard-id', updateDto, mockUserId, mockIsAdmin)
       ).rejects.toThrow(new NotFoundException('Profile non-existent-id not found'));
     });
 
@@ -671,7 +674,7 @@ describe('ProfilesService', () => {
 
       // Act & Assert
       await expect(
-        service.updateDashboard('profile-uuid-1', 'profile-dashboard-uuid-1', dtoWithGrafanaLabel, mockUserId, mockRoles)
+        service.updateDashboard('profile-uuid-1', 'profile-dashboard-uuid-1', dtoWithGrafanaLabel, mockUserId, mockIsAdmin)
       ).rejects.toThrow(new BadRequestException("Grafana instance with label 'NewGrafana' not found"));
     });
 
@@ -685,7 +688,7 @@ describe('ProfilesService', () => {
 
       // Act & Assert
       await expect(
-        service.updateDashboard('profile-uuid-1', 'profile-dashboard-uuid-1', dtoWithDashboardUid, mockUserId, mockRoles)
+        service.updateDashboard('profile-uuid-1', 'profile-dashboard-uuid-1', dtoWithDashboardUid, mockUserId, mockIsAdmin)
       ).rejects.toThrow(
         new BadRequestException(
           "Dashboard with UID 'new-dashboard-uid' not found in Grafana instance 'Default'"
@@ -706,7 +709,7 @@ describe('ProfilesService', () => {
       grafanaDashboardRepo.findOne.mockResolvedValue(mockGrafanaDashboard);
 
       // Act
-      await service.updateDashboard('profile-uuid-1', 'profile-dashboard-uuid-1', dtoWithEmptyArray, mockUserId, mockRoles);
+      await service.updateDashboard('profile-uuid-1', 'profile-dashboard-uuid-1', dtoWithEmptyArray, mockUserId, mockIsAdmin);
 
       // Assert
       expect(profileDashboardRepo.update).toHaveBeenCalledWith(
@@ -730,7 +733,7 @@ describe('ProfilesService', () => {
       grafanaDashboardRepo.findOne.mockResolvedValue(mockGrafanaDashboard);
 
       // Act
-      await service.updateDashboard('profile-uuid-1', 'profile-dashboard-uuid-1', dtoWithEmptyObject, mockUserId, mockRoles);
+      await service.updateDashboard('profile-uuid-1', 'profile-dashboard-uuid-1', dtoWithEmptyObject, mockUserId, mockIsAdmin);
 
       // Assert
       expect(profileDashboardRepo.update).toHaveBeenCalledWith(
@@ -754,7 +757,7 @@ describe('ProfilesService', () => {
       grafanaDashboardRepo.findOne.mockResolvedValue(newDashboard);
 
       // Act
-      await service.updateDashboard('profile-uuid-1', 'profile-dashboard-uuid-1', dtoWithNewUid, mockUserId, mockRoles);
+      await service.updateDashboard('profile-uuid-1', 'profile-dashboard-uuid-1', dtoWithNewUid, mockUserId, mockIsAdmin);
 
       // Assert
       expect(profileDashboardRepo.update).toHaveBeenCalledWith(
@@ -775,7 +778,7 @@ describe('ProfilesService', () => {
 
       // Act & Assert
       await expect(
-        service.updateDashboard('profile-uuid-1', 'profile-dashboard-uuid-1', updateDto, mockUserId, mockRoles)
+        service.updateDashboard('profile-uuid-1', 'profile-dashboard-uuid-1', updateDto, mockUserId, mockIsAdmin)
       ).rejects.toThrow(
         new NotFoundException('Dashboard profile-dashboard-uuid-1 not found after update')
       );
@@ -790,7 +793,7 @@ describe('ProfilesService', () => {
       profileDashboardRepo.remove.mockResolvedValue(mockProfileDashboard);
 
       // Act
-      await service.deleteDashboard('profile-uuid-1', 'profile-dashboard-uuid-1', mockUserId, mockRoles);
+      await service.deleteDashboard('profile-uuid-1', 'profile-dashboard-uuid-1', mockUserId, mockIsAdmin);
 
       // Assert
       expect(profileDashboardRepo.remove).toHaveBeenCalledWith(mockProfileDashboard);
@@ -802,7 +805,7 @@ describe('ProfilesService', () => {
 
       // Act & Assert
       await expect(
-        service.deleteDashboard('non-existent-id', 'dashboard-id', mockUserId, mockRoles)
+        service.deleteDashboard('non-existent-id', 'dashboard-id', mockUserId, mockIsAdmin)
       ).rejects.toThrow(new NotFoundException('Profile non-existent-id not found'));
     });
 
@@ -813,7 +816,7 @@ describe('ProfilesService', () => {
 
       // Act & Assert
       await expect(
-        service.deleteDashboard('profile-uuid-1', 'non-existent-dashboard-id', mockUserId, mockRoles)
+        service.deleteDashboard('profile-uuid-1', 'non-existent-dashboard-id', mockUserId, mockIsAdmin)
       ).rejects.toThrow(
         new NotFoundException('Dashboard non-existent-dashboard-id not found for profile Test Profile')
       );
@@ -827,7 +830,7 @@ describe('ProfilesService', () => {
 
       // Act & Assert
       await expect(
-        service.deleteDashboard('profile-uuid-1', 'profile-dashboard-uuid-1', mockUserId, mockRoles)
+        service.deleteDashboard('profile-uuid-1', 'profile-dashboard-uuid-1', mockUserId, mockIsAdmin)
       ).rejects.toThrow('Database constraint violation');
     });
   });
@@ -839,7 +842,7 @@ describe('ProfilesService', () => {
       profileBenchmarkRepo.find.mockResolvedValue([mockProfileBenchmark]);
 
       // Act
-      const result = await service.findBenchmarksByProfileId('profile-uuid-1', mockUserId, mockRoles);
+      const result = await service.findBenchmarksByProfileId('profile-uuid-1', mockUserId, mockIsAdmin);
 
       // Assert
       expect(result).toHaveLength(1);
@@ -881,7 +884,7 @@ describe('ProfilesService', () => {
       profileRepo.findOne.mockResolvedValue(null);
 
       // Act
-      const result = await service.findBenchmarksByProfileId('non-existent-id', mockUserId, mockRoles);
+      const result = await service.findBenchmarksByProfileId('non-existent-id', mockUserId, mockIsAdmin);
 
       // Assert
       expect(result).toEqual([]);
@@ -893,7 +896,7 @@ describe('ProfilesService', () => {
       profileBenchmarkRepo.find.mockResolvedValue([]);
 
       // Act
-      const result = await service.findBenchmarksByProfileId('profile-uuid-1', mockUserId, mockRoles);
+      const result = await service.findBenchmarksByProfileId('profile-uuid-1', mockUserId, mockIsAdmin);
 
       // Assert
       expect(result).toEqual([]);
@@ -910,7 +913,7 @@ describe('ProfilesService', () => {
       profileBenchmarkRepo.find.mockResolvedValue([benchmarkWithNulls] as ProfileBenchmark[]);
 
       // Act
-      const result = await service.findBenchmarksByProfileId('profile-uuid-1', mockUserId, mockRoles);
+      const result = await service.findBenchmarksByProfileId('profile-uuid-1', mockUserId, mockIsAdmin);
 
       // Assert
       expect(result[0]!.requirementValue).toBeUndefined();
@@ -923,7 +926,7 @@ describe('ProfilesService', () => {
       profileBenchmarkRepo.find.mockRejectedValue(new Error('Database error'));
 
       // Act & Assert
-      await expect(service.findBenchmarksByProfileId('profile-uuid-1', mockUserId, mockRoles)).rejects.toThrow('Database error');
+      await expect(service.findBenchmarksByProfileId('profile-uuid-1', mockUserId, mockIsAdmin)).rejects.toThrow('Database error');
     });
   });
 
@@ -966,7 +969,7 @@ describe('ProfilesService', () => {
       profileBenchmarkRepo.save.mockResolvedValue(newBenchmark as any);
 
       // Act
-      const result = await service.createBenchmark('profile-uuid-1', createDto, mockUserId, mockRoles);
+      const result = await service.createBenchmark('profile-uuid-1', createDto, mockUserId, mockIsAdmin);
 
       // Assert
       expect(result.profileId).toBe('profile-uuid-1');
@@ -987,7 +990,7 @@ describe('ProfilesService', () => {
       profileRepo.findOne.mockResolvedValue(null);
 
       // Act & Assert
-      await expect(service.createBenchmark('non-existent-id', createDto, mockUserId, mockRoles)).rejects.toThrow(
+      await expect(service.createBenchmark('non-existent-id', createDto, mockUserId, mockIsAdmin)).rejects.toThrow(
         new NotFoundException('Profile non-existent-id not found')
       );
     });
@@ -998,7 +1001,7 @@ describe('ProfilesService', () => {
       profileDashboardRepo.findOne.mockResolvedValue(null);
 
       // Act & Assert
-      await expect(service.createBenchmark('profile-uuid-1', createDto, mockUserId, mockRoles)).rejects.toThrow(
+      await expect(service.createBenchmark('profile-uuid-1', createDto, mockUserId, mockIsAdmin)).rejects.toThrow(
         new BadRequestException("Profile dashboard with ID 'profile-dashboard-uuid-1' not found")
       );
     });
@@ -1010,7 +1013,7 @@ describe('ProfilesService', () => {
       profileDashboardRepo.findOne.mockResolvedValue(otherProfileDashboard);
 
       // Act & Assert
-      await expect(service.createBenchmark('profile-uuid-1', createDto, mockUserId, mockRoles)).rejects.toThrow(
+      await expect(service.createBenchmark('profile-uuid-1', createDto, mockUserId, mockIsAdmin)).rejects.toThrow(
         new BadRequestException(
           "Profile dashboard 'profile-dashboard-uuid-1' does not belong to profile 'Test Profile'"
         )
@@ -1039,7 +1042,7 @@ describe('ProfilesService', () => {
       profileBenchmarkRepo.save.mockResolvedValue(newBenchmark as any);
 
       // Act
-      await service.createBenchmark('profile-uuid-1', minimalDto, mockUserId, mockRoles);
+      await service.createBenchmark('profile-uuid-1', minimalDto, mockUserId, mockIsAdmin);
 
       // Assert
       expect(profileBenchmarkRepo.create).toHaveBeenCalledWith(
@@ -1079,7 +1082,7 @@ describe('ProfilesService', () => {
       profileBenchmarkRepo.save.mockResolvedValue(updatedBenchmark as any);
 
       // Act
-      const result = await service.updateBenchmark('profile-uuid-1', 'benchmark-uuid-1', updateDto, mockUserId, mockRoles);
+      const result = await service.updateBenchmark('profile-uuid-1', 'benchmark-uuid-1', updateDto, mockUserId, mockIsAdmin);
 
       // Assert
       expect(result.workloadPattern).toBe('.*updated.*');
@@ -1094,7 +1097,7 @@ describe('ProfilesService', () => {
 
       // Act & Assert
       await expect(
-        service.updateBenchmark('non-existent-id', 'benchmark-id', updateDto, mockUserId, mockRoles)
+        service.updateBenchmark('non-existent-id', 'benchmark-id', updateDto, mockUserId, mockIsAdmin)
       ).rejects.toThrow(new NotFoundException('Profile non-existent-id not found'));
     });
 
@@ -1105,7 +1108,7 @@ describe('ProfilesService', () => {
 
       // Act & Assert
       await expect(
-        service.updateBenchmark('profile-uuid-1', 'non-existent-benchmark-id', updateDto, mockUserId, mockRoles)
+        service.updateBenchmark('profile-uuid-1', 'non-existent-benchmark-id', updateDto, mockUserId, mockIsAdmin)
       ).rejects.toThrow(
         new NotFoundException('Benchmark non-existent-benchmark-id not found for profile Test Profile')
       );
@@ -1120,7 +1123,7 @@ describe('ProfilesService', () => {
 
       // Act & Assert
       await expect(
-        service.updateBenchmark('profile-uuid-1', 'benchmark-uuid-1', dtoWithNewDashboard, mockUserId, mockRoles)
+        service.updateBenchmark('profile-uuid-1', 'benchmark-uuid-1', dtoWithNewDashboard, mockUserId, mockIsAdmin)
       ).rejects.toThrow(new BadRequestException("Profile dashboard with ID 'new-dashboard-id' not found"));
     });
 
@@ -1134,7 +1137,7 @@ describe('ProfilesService', () => {
 
       // Act & Assert
       await expect(
-        service.updateBenchmark('profile-uuid-1', 'benchmark-uuid-1', dtoWithNewDashboard, mockUserId, mockRoles)
+        service.updateBenchmark('profile-uuid-1', 'benchmark-uuid-1', dtoWithNewDashboard, mockUserId, mockIsAdmin)
       ).rejects.toThrow(
         new BadRequestException(
           "Profile dashboard 'other-dashboard-id' does not belong to profile 'Test Profile'"
@@ -1182,7 +1185,7 @@ describe('ProfilesService', () => {
       profileBenchmarkRepo.save.mockResolvedValue(updatedBenchmark as any);
 
       // Act
-      const result = await service.updateBenchmark('profile-uuid-1', 'benchmark-uuid-1', completeUpdateDto, mockUserId, mockRoles);
+      const result = await service.updateBenchmark('profile-uuid-1', 'benchmark-uuid-1', completeUpdateDto, mockUserId, mockIsAdmin);
 
       // Assert
       expect(result.source).toBe('dynatrace');
@@ -1201,7 +1204,7 @@ describe('ProfilesService', () => {
       profileBenchmarkRepo.remove.mockResolvedValue(mockProfileBenchmark);
 
       // Act
-      await service.deleteBenchmark('profile-uuid-1', 'benchmark-uuid-1', mockUserId, mockRoles);
+      await service.deleteBenchmark('profile-uuid-1', 'benchmark-uuid-1', mockUserId, mockIsAdmin);
 
       // Assert
       expect(profileBenchmarkRepo.remove).toHaveBeenCalledWith(mockProfileBenchmark);
@@ -1213,7 +1216,7 @@ describe('ProfilesService', () => {
 
       // Act & Assert
       await expect(
-        service.deleteBenchmark('non-existent-id', 'benchmark-id', mockUserId, mockRoles)
+        service.deleteBenchmark('non-existent-id', 'benchmark-id', mockUserId, mockIsAdmin)
       ).rejects.toThrow(new NotFoundException('Profile non-existent-id not found'));
     });
 
@@ -1224,7 +1227,7 @@ describe('ProfilesService', () => {
 
       // Act & Assert
       await expect(
-        service.deleteBenchmark('profile-uuid-1', 'non-existent-benchmark-id', mockUserId, mockRoles)
+        service.deleteBenchmark('profile-uuid-1', 'non-existent-benchmark-id', mockUserId, mockIsAdmin)
       ).rejects.toThrow(
         new NotFoundException('Benchmark non-existent-benchmark-id not found for profile Test Profile')
       );
@@ -1238,7 +1241,7 @@ describe('ProfilesService', () => {
 
       // Act & Assert
       await expect(
-        service.deleteBenchmark('profile-uuid-1', 'benchmark-uuid-1', mockUserId, mockRoles)
+        service.deleteBenchmark('profile-uuid-1', 'benchmark-uuid-1', mockUserId, mockIsAdmin)
       ).rejects.toThrow('Foreign key constraint violation');
     });
   });
@@ -1252,7 +1255,7 @@ describe('ProfilesService', () => {
       profileBenchmarkRepo.count.mockResolvedValue(0);
 
       // Act
-      const result = await service.findOne('profile-uuid-1', mockUserId, mockRoles);
+      const result = await service.findOne('profile-uuid-1', mockUserId, mockIsAdmin);
 
       // Assert
       expect(result).toBeTruthy();
@@ -1278,7 +1281,7 @@ describe('ProfilesService', () => {
       grafanaDashboardRepo.createQueryBuilder.mockReturnValue(queryBuilder as any);
 
       // Act
-      const result = await service.findDashboardsByProfileId('profile-uuid-1', mockUserId, mockRoles);
+      const result = await service.findDashboardsByProfileId('profile-uuid-1', mockUserId, mockIsAdmin);
 
       // Assert
       expect(result[0]!.setHardcodedValueForVariables).toBeUndefined();
@@ -1296,7 +1299,7 @@ describe('ProfilesService', () => {
       profileBenchmarkRepo.find.mockResolvedValue([benchmarkWithStringNumbers]);
 
       // Act
-      const result = await service.findBenchmarksByProfileId('profile-uuid-1', mockUserId, mockRoles);
+      const result = await service.findBenchmarksByProfileId('profile-uuid-1', mockUserId, mockIsAdmin);
 
       // Assert
       expect(result[0]!.requirementValue).toBe(123.45);
@@ -1314,7 +1317,7 @@ describe('ProfilesService', () => {
       profileBenchmarkRepo.find.mockResolvedValue([benchmarkWithZeros]);
 
       // Act
-      const result = await service.findBenchmarksByProfileId('profile-uuid-1', mockUserId, mockRoles);
+      const result = await service.findBenchmarksByProfileId('profile-uuid-1', mockUserId, mockIsAdmin);
 
       // Assert
       expect(result[0]!.requirementValue).toBe(0);

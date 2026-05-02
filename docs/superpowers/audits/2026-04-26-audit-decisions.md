@@ -6,15 +6,15 @@ Phase 3c rolls capabilities through every site listed below. Update these counts
 
 | Bucket | Total | Migrated | Remaining | % done |
 | --- | ---: | ---: | ---: | ---: |
-| A — bypass filter | 131 | 69 | 62 | 52.7% |
-| B — bypass guard | 38 | 37 | 1 | 97.4% |
+| A — bypass filter | 131 | 70 | 61 | 53.4% |
+| B — bypass guard | 39 | 38 | 1 | 97.4% |
 | Local `private isGlobalAdmin()` wrappers | 13 | 8 | 5 | 61.5% |
 
-**Lint enforcement:** `apps/api/.rbac-migration-allowlist.json` lists every file currently exempt from the `no-direct-is-global-admin` lint rule (2 files as of 2026-05-02). When a site is migrated, remove its file from the allowlist (the file may have multiple sites — only remove when the LAST one is migrated). Allowlist size IS the burndown.
+**Lint enforcement:** `apps/api/.rbac-migration-allowlist.json` lists every file currently exempt from the `no-direct-is-global-admin` lint rule (1 file as of 2026-05-02). When a site is migrated, remove its file from the allowlist (the file may have multiple sites — only remove when the LAST one is migrated). Allowlist size IS the burndown.
 
 **Bucket A total adjusted upward by 2 in C30 and 2 in C31:** C30 enumerates the user-owned `findAll` list-filter sites in `graph-presets.service.ts` and `trends-presets.service.ts` that were not in the original audit (which focused on org-owned resources). C31 enumerates the membership-filtered `findAll` sites in `teams.service.ts` and `organizations.service.ts` — these are filtered by org membership rather than `organization_id IN (...)` and were not in the original audit either.
 
-**Bucket B total adjusted upward by 3 in C17, 1 in C25, 4 in C30, 10 in C31, and 6 in C32:** C17 brings dynatrace per-resource sites in-scope (originally "Leave" until `canAccessResource`/`canModifyResource` shipped). C25 adds `verifyTestRunAccess` from `test-runs-query.service.ts`. C30 adds the 4 user-owned per-resource sites in graph/trends-presets. C31 enumerates 10 per-resource guard sites across `teams.service.ts` and `organizations.service.ts`. C32 enumerates 6 per-resource guard sites in `systems-under-test.service.ts` (`createSut`, `findOne`, `findSystemSummary`, `findByName`, `update`, `remove`) — the file's per-resource shape was not in the original audit's enumeration despite C31's prediction that "no upward adjustment expected".
+**Bucket B total adjusted upward by 3 in C17, 1 in C25, 4 in C30, 10 in C31, 6 in C32, and 1 in C33:** C17 brings dynatrace per-resource sites in-scope (originally "Leave" until `canAccessResource`/`canModifyResource` shipped). C25 adds `verifyTestRunAccess` from `test-runs-query.service.ts`. C30 adds the 4 user-owned per-resource sites in graph/trends-presets. C31 enumerates 10 per-resource guard sites across `teams.service.ts` and `organizations.service.ts`. C32 enumerates 6 per-resource guard sites in `systems-under-test.service.ts` (`createSut`, `findOne`, `findSystemSummary`, `findByName`, `update`, `remove`) — the file's per-resource shape was not in the original audit's enumeration despite C31's prediction that "no upward adjustment expected". C33 promotes the `requireOrgAdmin` custom-guard-helper in `profiles.service.ts` from its original "Leave" classification (line 143 of the C2 enumeration) to a counted Bucket B site, since the migration removes its inline `isGlobalAdmin` call.
 
 **Date-bound revisit:** by **2026-08-01**, Phase 3c migration must be at least 50% complete (Bucket A + B combined: 70+ sites migrated). If not, re-evaluate the architecture or the priorities. "We forgot about it" is the failure mode this gate prevents.
 
@@ -1941,3 +1941,104 @@ After C32, the allowlist contains: `dynatrace.service.ts` (1566 lines), `profile
 - **C35–C36:** `dynatrace.service.ts` finish. C17 already migrated the per-resource sites; the remaining surface is the larger CRUD + tile-management shape. Multi-PR split likely.
 
 Phase 3c's user-facing CRUD coverage is now essentially complete: every controller-fronted module has had its admin-resolution boundary pushed to the controller. The remaining work is internal integration services where the entry-point shape differs (dynatrace's tile-management surface is internal-only; profiles' metrics-source-resolution is called from worker pipelines, not just HTTP). The boundary-push pattern still applies but the "boundary" may not always be a controller — for profiles, the parent service that orchestrates pipeline calls is the more natural target.
+
+---
+
+## Phase C33 — `profiles.service.ts` full migration via controller boundary push (combined PR)
+
+**Date:** 2026-05-02
+**Branch:** `rbac/3c-profiles-c33`
+**Related:** Phase 3c, C30/C31/C32 (controller-as-boundary precedent)
+
+**Scope:** Single-file migration. Drops all 11 direct `authzService.isGlobalAdmin` call sites in `apps/api/src/modules/profiles/profiles.service.ts` (1190 lines pre-edit) and pushes admin resolution up to `ProfilesController`. File **EXITS** the allowlist (2 → **1**). Same `resolveIsAdmin` helper backed by `withOrgFilter` as C30/C31/C32.
+
+The C32 close-out predicted a 2–3 PR split for profiles following the test-runs sub-service pattern. After surveying the file, the split was unnecessary: profiles has a single `ProfilesService` class with three method clusters (Profile CRUD, dashboards sub-resource, benchmarks sub-resource) all fronted by the same controller. The migration is mechanical and the diff fits cleanly into one reviewable PR — so C33 ships the full file in one shot rather than across three (formerly C33/C34/C35).
+
+### Per-method site mapping
+
+The 11 `isGlobalAdmin` sites split into three classifications:
+
+| Method | Bucket | Notes |
+| --- | --- | --- |
+| `findAll` | A | Returns all profiles when admin (no org filter); otherwise filters by `accessibleOrgIds` (with `OR organization_id IS NULL` legacy clause until Phase 4 adds org_id to Profile entity). |
+| `requireOrgAdmin` (private) | B | Custom-guard-helper: admin-bypass, then `isOrgAdminInAnyOrganization` for non-admins. Promoted from "Leave" in the original C2 enumeration. Guards 9 callers (`createDashboard`, `updateDashboard`, `deleteDashboard`, `createBenchmark`, `updateBenchmark`, `deleteBenchmark`, `createProfile`, `updateProfile`, `deleteProfile`). |
+| `findOne` | DEBUG-LOG-ONLY | The `isAdmin` value reached only `logger.debug`; per-resource access checks are blocked behind a Phase 4 `organization_id` column note. |
+| `findDashboardsByProfileId` | DEBUG-LOG-ONLY | Same as `findOne`. |
+| `createDashboard` | DEBUG-LOG-ONLY | Same as `findOne`. (Guard via `requireOrgAdmin` — the `isAdmin` value here is purely for the log line.) |
+| `updateDashboard` | DEBUG-LOG-ONLY | Same as `createDashboard`. |
+| `deleteDashboard` | DEBUG-LOG-ONLY | Same as `createDashboard`. |
+| `findBenchmarksByProfileId` | DEBUG-LOG-ONLY | Same as `findOne`. |
+| `createBenchmark` | DEBUG-LOG-ONLY | Same as `createDashboard`. |
+| `updateBenchmark` | DEBUG-LOG-ONLY | Same as `createDashboard`. |
+| `deleteBenchmark` | DEBUG-LOG-ONLY | Same as `createDashboard`. |
+
+The 9 debug-log-only sites collapse from two lines (`const isAdmin = …; this.logger.debug(...)`) to one (just the log line — `isAdmin` is now the parameter). The 1 Bucket A site (`findAll`) and 1 Bucket B site (`requireOrgAdmin`) drop their inline `isGlobalAdmin` call. All 14 methods that took `roles: string[]` swap to `isAdmin: boolean` (13 user-facing + 1 private helper).
+
+### Migration shape
+
+```typescript
+// Before (service)
+private async requireOrgAdmin(userId: string, roles: string[]): Promise<void> {
+  if (this.authzService.isGlobalAdmin(roles)) return;
+  const isOrgAdmin = await this.authzService.isOrgAdminInAnyOrganization(userId);
+  if (!isOrgAdmin) throw new ForbiddenException(/* ... */);
+}
+
+// After (service)
+private async requireOrgAdmin(userId: string, isAdmin: boolean): Promise<void> {
+  if (isAdmin) return;
+  const isOrgAdmin = await this.authzService.isOrgAdminInAnyOrganization(userId);
+  if (!isOrgAdmin) throw new ForbiddenException(/* ... */);
+}
+```
+
+Controller adds `AuthorizationService` injection (now 2nd dep after `ProfilesService`) plus the `resolveIsAdmin(userId, roles)` helper (same body as C30/C31/C32). All 13 service-call methods on the controller (`findAll` / `findOne` / `create` / `update` / `remove` / `findDashboards` / `createDashboard` / `updateDashboard` / `deleteDashboard` / `getProfileBenchmarks` / `createProfileBenchmark` / `updateProfileBenchmark` / `deleteProfileBenchmark`) `await` the helper once and forward the boolean. The single internal self-call site in `updateProfile` (`this.findOne(id, userId, roles)` after a save) was retargeted to forward `isAdmin`.
+
+### Verification
+
+| Check | Result |
+| --- | --- |
+| `npx tsc --noEmit` (apps/api) | clean |
+| `grep -n isGlobalAdmin` on the touched files | only the 9 retained `logger.debug` lines (all reference the `isAdmin` *parameter*) plus a doc-comment reference in the controller's `resolveIsAdmin` helper and one in the service's class docblock; zero call sites |
+| `npx jest src/modules/profiles/profiles.service.spec.ts src/modules/profiles/profiles.controller.spec.ts` | 106 passed (2 suites — 55 service + 51 controller) |
+
+### Diff size
+
+- `profiles.service.ts`: ~−15 lines (11 inline `isGlobalAdmin` calls deleted + 9 unused debug-log-only `const isAdmin` captures merged into the existing log lines; signatures swap `roles: string[]` → `isAdmin: boolean` on 14 methods; 1 internal `findOne` self-call retargeted)
+- `profiles.controller.ts`: ~+25 lines (`AuthorizationService` injection + `withOrgFilter` import + `resolveIsAdmin` helper + 13 method awaits)
+- `profiles.service.spec.ts`: tiny touch (rename `mockRoles` → `mockIsAdmin` and change fixture from `['user']` to `true` to preserve the prior admin-path behavior — the original mock's `isGlobalAdmin` always returned `true` regardless of input, so all tests were always exercising the admin path; the swap keeps that)
+- `profiles.controller.spec.ts`: small touch (add `AuthorizationService` mock provider + 23 expectation updates from `mockUserContext.roles` to literal `true`)
+- `.rbac-migration-allowlist.json`: −1 line
+
+Net: roughly +10 lines across all 5 files.
+
+### Files changed
+
+- `apps/api/src/modules/profiles/profiles.service.ts` — swap signatures on 14 methods, drop 11 inline `isGlobalAdmin` calls, merge 9 `const isAdmin` captures into existing log lines, retarget 1 internal `findOne` self-call
+- `apps/api/src/modules/profiles/profiles.controller.ts` — inject `AuthorizationService`, add `withOrgFilter` import + `resolveIsAdmin` helper, await `isAdmin` in all 13 service-call methods
+- `apps/api/src/modules/profiles/profiles.service.spec.ts` — rename `mockRoles` → `mockIsAdmin`; change fixture to `true` (preserves prior admin-path test semantics — see Diff size note)
+- `apps/api/src/modules/profiles/profiles.controller.spec.ts` — add `AuthorizationService` mock provider, update 23 expectations
+- `apps/api/.rbac-migration-allowlist.json` — remove the migrated file
+- `docs/superpowers/audits/2026-04-26-audit-decisions.md` — this file (burndown table updates + this section)
+
+### Allowlist disposition
+
+File **EXITS** the allowlist — zero direct `isGlobalAdmin` call sites after the migration. Allowlist size: 2 → **1**. Burndown: Bucket A 69 → 70 of 131 (1 list-filter site migrated). Bucket B 37 → 38 of 39 (1 custom-guard-helper migrated — total adjusted upward by 1 since `requireOrgAdmin` was originally classified as "Leave" / CUSTOM-GUARD-HELPER in the C2 enumeration and not counted as a Bucket B site).
+
+### Pattern notes
+
+**1. The original "split into 3 PRs" prediction was wrong, in the opposite direction this time.** C32 closed by predicting a 2–3 PR split for profiles following the test-runs sub-service C25–C29 pattern. The premise was that profiles' three method clusters (Profile CRUD, dashboards, benchmarks) would benefit from independent PRs — but profiles isn't actually three sub-services like test-runs was; it's a single class with three method clusters all fronted by the same controller. The migration is uniform across all clusters, the diff stays under ~250 lines total, and a combined PR is reviewable. The lesson: predict splits when there's a structural seam (separate service classes, separate controllers, separate concerns), not when there's just a method-cluster pattern.
+
+**2. Debug-log-only is dominant in this file.** 9 of the 11 sites are debug-log-only — the highest debug-log-only proportion of any C-series file so far (systems-under-test had 2 of 9; dynatrace had ~13 of 26). The reason: profiles' per-resource permission checks are blocked behind a Phase 4 `organization_id` column on Profile that doesn't exist yet, so the methods only *log* the admin status rather than acting on it. After Phase 4 lands, several of these sites will likely transition from debug-log-only to per-resource Bucket B; the boundary push done here means that transition will be a service-internal change, with no further controller surgery required.
+
+**3. Custom-guard-helper migration is shape-preserving.** The `requireOrgAdmin` helper had two callers' worth of guard logic (admin-bypass + org-admin-fallback). Its body shape is preserved — only the first conditional changes from `if (this.authzService.isGlobalAdmin(roles))` to `if (isAdmin)`. All 9 callers (createDashboard, updateDashboard, deleteDashboard, createBenchmark, updateBenchmark, deleteBenchmark, createProfile, updateProfile, deleteProfile) just forward `isAdmin` instead of `roles`. This is the smallest possible signature swap for a custom-guard-helper migration.
+
+**4. Test fixture semantics matter.** The service spec's `mockRoles = ['user']` fixture combined with the test mock's default `isGlobalAdmin: jest.fn().mockReturnValue(true)` meant all tests were silently running as admin. Naively swapping to `mockIsAdmin = false` would have changed test semantics (non-admin path exercises `getAccessibleOrganizations` which returns `[]` by default, causing early returns). The correct swap is `mockIsAdmin = true` — preserves the prior admin path. A shorter version of the C32 lesson: when migrating tests, look at what the *mock returns* for `isGlobalAdmin`, not what the fixture *passes in*.
+
+### Remaining allowlist (1 file)
+
+After C33, the allowlist contains: `dynatrace.service.ts` (1566 lines). Likely sequencing:
+
+- **C34–C35:** `dynatrace.service.ts` finish. C17 already migrated the per-resource sites; the remaining surface is the larger CRUD + tile-management shape (~13 debug-log-only sites + some Bucket B per-resource shape). Multi-PR split likely given the file's size.
+
+Phase 3c's user-facing surface is now structurally complete. The only remaining file is dynatrace, an internal integration service whose tile-management surface is called from a non-controller boundary. The boundary-push pattern still applies; the "boundary" will likely be the parent service that orchestrates the worker pipeline calls.
