@@ -50,6 +50,7 @@ const INFRASTRUCTURE_FILES = new Set([
   'apps/api/src/common/services/authorization.service.ts',   // defines isGlobalAdmin
   'apps/api/src/common/services/authorized-base.service.ts', // applyOrgFilter, getAccessibleOrgIds, verifyOrganizationAccess
   'apps/api/src/common/utils/with-org-filter.ts',            // shipped in PR #175 — the helper the migration uses
+  'apps/api/src/common/utils/with-team-filter.ts',           // shipped in Phase 3c C25 — team-membership analog of withOrgFilter
   'apps/api/src/common/guards/capability.guard.ts',          // CapabilityGuard reads getCapabilities (added in Phase 3c)
 ]);
 

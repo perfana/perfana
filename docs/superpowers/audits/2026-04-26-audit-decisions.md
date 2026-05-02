@@ -6,13 +6,13 @@ Phase 3c rolls capabilities through every site listed below. Update these counts
 
 | Bucket | Total | Migrated | Remaining | % done |
 | --- | ---: | ---: | ---: | ---: |
-| A — bypass filter | 127 | 41 | 86 | 32.3% |
-| B — bypass guard | 17 | 16 | 1 | 94.1% |
+| A — bypass filter | 127 | 43 | 84 | 33.9% |
+| B — bypass guard | 18 | 17 | 1 | 94.4% |
 | Local `private isGlobalAdmin()` wrappers | 13 | 5 | 8 | 38.5% |
 
-**Lint enforcement:** `apps/api/.rbac-migration-allowlist.json` lists every file currently exempt from the `no-direct-is-global-admin` lint rule (24 files as of 2026-04-30). When a site is migrated, remove its file from the allowlist (the file may have multiple sites — only remove when the LAST one is migrated). Allowlist size IS the burndown.
+**Lint enforcement:** `apps/api/.rbac-migration-allowlist.json` lists every file currently exempt from the `no-direct-is-global-admin` lint rule (11 files as of 2026-05-02). When a site is migrated, remove its file from the allowlist (the file may have multiple sites — only remove when the LAST one is migrated). Allowlist size IS the burndown.
 
-**Bucket B total adjusted upward by 3 in C17:** the original 2026-04-26 audit classified dynatrace's per-resource sites at `findByHost`/`update`/`delete` as "Leave" (deferred until `canAccessResource`/`canModifyResource` was established). C17 closes those 3 — so the running total now reflects them as in-scope.
+**Bucket B total adjusted upward by 3 in C17 and 1 in C25:** the original 2026-04-26 audit classified dynatrace's per-resource sites at `findByHost`/`update`/`delete` as "Leave" (deferred until `canAccessResource`/`canModifyResource` was established). C17 closes those 3. C25 adds `verifyTestRunAccess` from `test-runs-query.service.ts`, which the original audit did not enumerate — so the running total now reflects all four as in-scope.
 
 **Date-bound revisit:** by **2026-08-01**, Phase 3c migration must be at least 50% complete (Bucket A + B combined: 70+ sites migrated). If not, re-evaluate the architecture or the priorities. "We forgot about it" is the failure mode this gate prevents.
 
@@ -1273,3 +1273,55 @@ The remaining 21 debug-log-only sites are now mixed with non-trivial `isAdmin` u
 ### Allowlist disposition
 
 The file **remains** in `.rbac-migration-allowlist.json` — 21 debug-log-only sites + 5 internal `isAdmin`-passing sites still trip the lint rule. Allowlist size unchanged at 24. Burndown: Bucket B 13 → 16 of 17 (94.1%) (total adjusted upward by 3 to account for dynatrace's per-resource sites that were originally classified as "Leave" but are now in-scope after `canAccessResource`/`canModifyResource` was established).
+
+
+---
+
+## Phase C25 — Single file: `test-runs-query.service.ts` finish + new `withTeamFilter` helper
+
+**Audit date:** 2026-05-02
+**Scope:** Single-file migration. All 3 `isGlobalAdmin` sites in `apps/api/src/modules/test-runs/services/test-runs-query.service.ts` (366 lines) closed in one PR. File **exits the lint allowlist** (12 → 11). First Phase 3c migration to mix all three primitives — `canAccessResource` (one site), `withOrgFilter` (one site), and the new `withTeamFilter` helper introduced in this PR (one site).
+
+### Site Classification
+
+| Line | Method | Migration approach |
+|------|--------|--------------------|
+| 83 | `verifyTestRunAccess` | `canAccessResource` — per-resource read guard. Mirrors `data-science.controller.ts` `verifyTestRunAccess` (already migrated). Loads `organization_id, created_by` from `test_runs`, defers admin/null-org/membership policy to `canAccessResource`. Preserves the silent-return-on-missing behavior so the downstream service still owns the 404. |
+| 264 | `resolveOrganizationIds` (private helper) | `withOrgFilter` — admin → null collapsed to `[]` so the existing sub-service contract (`empty array = no filter`) is preserved. The helper itself stays — it adds the `organizationId` explicit-filter shortcut on top of `withOrgFilter`. |
+| 276 | `resolveTeamIds` (private helper) | `withTeamFilter` (NEW) — symmetric `null` for admin / `string[]` for everyone else. Same null-collapse to `[]` as above. |
+
+### New utility: `withTeamFilter`
+
+File: `apps/api/src/common/utils/with-team-filter.ts` (24 lines incl. doc comment).
+
+Mirror of `withOrgFilter` for team membership. Same structural duck-type for `authzService` (just `isGlobalAdmin` + `getAccessibleTeams`), same `string[] | null` return contract. Permanently exempt from the `no-direct-is-global-admin` lint rule via `INFRASTRUCTURE_FILES` in `apps/api/eslint-rules/no-direct-is-global-admin.js`, alongside `withOrgFilter`. Cost is one new tiny module; benefit is symmetry plus a target for future migrations of the four other call sites that currently use `getAccessibleTeams` directly without an admin bypass (e.g. `test-runs-crud-query.service.ts:53,205,329,885`, `systems-under-test.service.ts:189`).
+
+### Test Results
+
+| Test run | Result |
+|----------|--------|
+| `cd apps/api && npx jest src/modules/test-runs` | 766 passed (19 suites) |
+| `cd apps/api && npx jest` (full suite) | 4309 passed, 20 skipped (pre-existing), 0 failed |
+| `npm run type-check` (`@perfana/api`) | 0 errors |
+| `npm run lint` (`@perfana/api`) | 0 errors, 59 pre-existing warnings (none introduced) |
+
+No spec changes required: `test-runs-query.service.spec.ts` uses the shared `createAuthorizationServiceMock()` factory (which already provides `canAccessResource`/`getAccessibleOrganizations`/`getAccessibleTeams`) and does not assert directly on `verifyTestRunAccess`. The `data-science.controller.spec.ts` mocks reference *its* own `verifyTestRunAccess` private method (which was migrated separately in C19), not the query service one.
+
+### Net diff
+
+- `with-team-filter.ts`: +24 lines (new file)
+- `test-runs-query.service.ts`: +14 / -10 = **net +4 lines** — one extra explanatory comment per migrated helper accounts for most of the growth.
+- `eslint-rules/no-direct-is-global-admin.js`: +1 line (`with-team-filter.ts` added to `INFRASTRUCTURE_FILES`)
+- `.rbac-migration-allowlist.json`: -1 line
+
+### Files changed
+
+- `apps/api/src/common/utils/with-team-filter.ts` — new utility
+- `apps/api/src/modules/test-runs/services/test-runs-query.service.ts` — 3 site migrations
+- `apps/api/eslint-rules/no-direct-is-global-admin.js` — exempt `with-team-filter.ts`
+- `apps/api/.rbac-migration-allowlist.json` — remove `test-runs-query.service.ts`
+- `docs/superpowers/audits/2026-04-26-audit-decisions.md` — this file
+
+### Allowlist disposition
+
+The file **EXITS** the allowlist — zero direct `isGlobalAdmin` references after the migration. Allowlist size: 12 → **11**. (The audit doc has detailed phase entries through C17 only; the C18–C24 PRs trimmed the allowlist from 24 down to 12 without writing per-phase sections in this file, so a precise "Nth exit" count would require reading those commit messages.)
