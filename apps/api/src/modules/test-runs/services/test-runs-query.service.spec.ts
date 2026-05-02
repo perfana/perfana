@@ -534,7 +534,7 @@ describe('TestRunsQueryService', () => {
 
         const result = await service.getTransactionStats('test-run-001', mockUserId, mockRoles, false);
 
-        expect(performanceService.getTransactionStats).toHaveBeenCalledWith('test-run-001', false, mockRoles, [], undefined);
+        expect(performanceService.getTransactionStats).toHaveBeenCalledWith('test-run-001', false, true, [], undefined);
         expect(result).toHaveLength(1);
       });
     });
@@ -566,7 +566,7 @@ describe('TestRunsQueryService', () => {
 
         const result = await service.getTransactionSamples('test-run-001', 'checkout', mockUserId, mockRoles, false);
 
-        expect(performanceService.getTransactionSamples).toHaveBeenCalledWith('test-run-001', 'checkout', false, mockRoles, [], undefined);
+        expect(performanceService.getTransactionSamples).toHaveBeenCalledWith('test-run-001', 'checkout', false, true, [], undefined);
         expect(result).toHaveLength(1);
       });
     });
@@ -594,7 +594,7 @@ describe('TestRunsQueryService', () => {
 
         const result = await service.getTransactionErrors('test-run-001', mockUserId, mockRoles, 'checkout');
 
-        expect(performanceService.getTransactionErrors).toHaveBeenCalledWith('test-run-001', 'checkout', undefined, mockRoles, []);
+        expect(performanceService.getTransactionErrors).toHaveBeenCalledWith('test-run-001', 'checkout', undefined, true, []);
         expect(result).toHaveLength(1);
       });
     });
@@ -617,7 +617,7 @@ describe('TestRunsQueryService', () => {
 
         const result = await service.getVirtualUserStats('test-run-001', mockUserId, mockRoles);
 
-        expect(performanceService.getVirtualUserStats).toHaveBeenCalledWith('test-run-001', undefined, mockRoles, []);
+        expect(performanceService.getVirtualUserStats).toHaveBeenCalledWith('test-run-001', undefined, true, []);
         expect(result.overall.peak_active_threads).toBe(100);
       });
     });
@@ -635,7 +635,7 @@ describe('TestRunsQueryService', () => {
 
         const result = await service.getThroughputStats('test-run-001', mockUserId, mockRoles);
 
-        expect(performanceService.getThroughputStats).toHaveBeenCalledWith('test-run-001', undefined, mockRoles, []);
+        expect(performanceService.getThroughputStats).toHaveBeenCalledWith('test-run-001', undefined, true, []);
         expect(result.overall.peak_transactions_per_second).toBe(100);
       });
     });

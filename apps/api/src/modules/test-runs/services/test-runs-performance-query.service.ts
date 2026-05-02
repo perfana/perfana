@@ -13,11 +13,6 @@ import {
 } from '../types/test-run.types';
 
 /**
- * Global admin roles that bypass organization filtering
- */
-const ADMIN_ROLES = ['perfana-admin', 'super-admin', 'admin'];
-
-/**
  * Service responsible for performance analysis queries
  * Handles: transaction stats, sampler stats, error analysis, virtual users, throughput
  */
@@ -30,13 +25,6 @@ export class TestRunsPerformanceQueryService {
     private readonly testRunRepo: Repository<TestRunEntity>,
     private readonly mapper: TestRunsMapperService,
   ) {}
-
-  /**
-   * Check if a user has global admin role
-   */
-  private isGlobalAdmin(roles: string[]): boolean {
-    return roles.some(role => ADMIN_ROLES.includes(role));
-  }
 
   /**
    * Resolve UUID or test_run_id to the actual test_run_id string
@@ -370,19 +358,17 @@ export class TestRunsPerformanceQueryService {
    *
    * @param testRunId - Test run ID (UUID or test_run_id string)
    * @param excludeRampUp - Whether to exclude ramp-up period from statistics
-   * @param roles - User roles from JWT token (for admin bypass)
-   * @param organizationIds - User's accessible organization IDs from JWT token
+   * @param isAdmin - Whether the caller bypasses organization filtering (resolved at the facade)
+   * @param organizationIds - User's accessible organization IDs (ignored when isAdmin)
    */
   async getTransactionStats(
     testRunId: string,
     excludeRampUp: boolean = false,
-    roles: string[] = [],
+    isAdmin: boolean = false,
     organizationIds: string[] = [],
     sinceMinutes?: number,
   ): Promise<TransactionStats[]> {
     try {
-      const isAdmin = this.isGlobalAdmin(roles);
-
       // Non-admin users with no organization memberships see empty results
       if (!isAdmin && organizationIds.length === 0) {
         this.logger.debug('User has no organization memberships, returning empty transaction stats');
@@ -566,20 +552,18 @@ export class TestRunsPerformanceQueryService {
    * @param testRunId - Test run ID (UUID or test_run_id string)
    * @param transactionName - Transaction name to get samples for
    * @param excludeRampUp - Whether to exclude ramp-up period from statistics
-   * @param roles - User roles from JWT token (for admin bypass)
-   * @param organizationIds - User's accessible organization IDs from JWT token
+   * @param isAdmin - Whether the caller bypasses organization filtering (resolved at the facade)
+   * @param organizationIds - User's accessible organization IDs (ignored when isAdmin)
    */
   async getTransactionSamples(
     testRunId: string,
     transactionName: string,
     excludeRampUp: boolean = false,
-    roles: string[] = [],
+    isAdmin: boolean = false,
     organizationIds: string[] = [],
     sinceMinutes?: number,
   ): Promise<SamplerStats[]> {
     try {
-      const isAdmin = this.isGlobalAdmin(roles);
-
       // Non-admin users with no organization memberships see empty results
       if (!isAdmin && organizationIds.length === 0) {
         this.logger.debug('User has no organization memberships, returning empty sampler stats');
@@ -754,19 +738,17 @@ export class TestRunsPerformanceQueryService {
    * @param testRunId - Test run ID (UUID or test_run_id string)
    * @param transactionName - Optional transaction name to filter by
    * @param samplerName - Optional sampler name to filter by
-   * @param roles - User roles from JWT token (for admin bypass)
-   * @param organizationIds - User's accessible organization IDs from JWT token
+   * @param isAdmin - Whether the caller bypasses organization filtering (resolved at the facade)
+   * @param organizationIds - User's accessible organization IDs (ignored when isAdmin)
    */
   async getTransactionErrors(
     testRunId: string,
     transactionName?: string,
     samplerName?: string,
-    roles: string[] = [],
+    isAdmin: boolean = false,
     organizationIds: string[] = [],
   ): Promise<ErrorStats[]> {
     try {
-      const isAdmin = this.isGlobalAdmin(roles);
-
       // Non-admin users with no organization memberships see empty results
       if (!isAdmin && organizationIds.length === 0) {
         this.logger.debug('User has no organization memberships, returning empty error stats');
@@ -943,18 +925,16 @@ export class TestRunsPerformanceQueryService {
    *
    * @param testRunId - Test run ID (UUID or test_run_id string)
    * @param excludeRampUp - Whether to exclude ramp-up period from statistics
-   * @param roles - User roles from JWT token (for admin bypass)
-   * @param organizationIds - User's accessible organization IDs from JWT token
+   * @param isAdmin - Whether the caller bypasses organization filtering (resolved at the facade)
+   * @param organizationIds - User's accessible organization IDs (ignored when isAdmin)
    */
   async getVirtualUserStats(
     testRunId: string,
     excludeRampUp: boolean = false,
-    roles: string[] = [],
+    isAdmin: boolean = false,
     organizationIds: string[] = [],
   ): Promise<VirtualUserStats> {
     try {
-      const isAdmin = this.isGlobalAdmin(roles);
-
       // Non-admin users with no organization memberships see empty results
       if (!isAdmin && organizationIds.length === 0) {
         this.logger.debug('User has no organization memberships, returning empty virtual user stats');
@@ -1069,18 +1049,16 @@ export class TestRunsPerformanceQueryService {
    *
    * @param testRunId - Test run ID (UUID or test_run_id string)
    * @param excludeRampUp - Whether to exclude ramp-up period from statistics
-   * @param roles - User roles from JWT token (for admin bypass)
-   * @param organizationIds - User's accessible organization IDs from JWT token
+   * @param isAdmin - Whether the caller bypasses organization filtering (resolved at the facade)
+   * @param organizationIds - User's accessible organization IDs (ignored when isAdmin)
    */
   async getThroughputStats(
     testRunId: string,
     excludeRampUp: boolean = false,
-    roles: string[] = [],
+    isAdmin: boolean = false,
     organizationIds: string[] = [],
   ): Promise<ThroughputStats> {
     try {
-      const isAdmin = this.isGlobalAdmin(roles);
-
       // Non-admin users with no organization memberships see empty results
       if (!isAdmin && organizationIds.length === 0) {
         this.logger.debug('User has no organization memberships, returning empty throughput stats');
