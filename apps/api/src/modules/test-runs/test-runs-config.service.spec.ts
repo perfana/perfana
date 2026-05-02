@@ -560,7 +560,7 @@ describe('TestRunsConfigService', () => {
       mockQueryBuilder.getRawMany.mockResolvedValue(mockKeys);
 
       // Pass admin role to bypass organization filtering
-      const result = await service.getLatestConfigKeys('my-app', 'production', 'load-test', ['admin'], []);
+      const result = await service.getLatestConfigKeys('my-app', 'production', 'load-test', 'admin-user', ['admin']);
 
       expect(result).toEqual(['config.key1', 'config.key2']);
       expect(mockQueryBuilder.select).toHaveBeenCalledWith('DISTINCT trc.key', 'key');
@@ -570,7 +570,7 @@ describe('TestRunsConfigService', () => {
       mockLatestQueryBuilder.getOne.mockResolvedValue(null);
 
       // Pass admin role to get proper behavior
-      const result = await service.getLatestConfigKeys('non-existent', 'production', 'load-test', ['admin'], []);
+      const result = await service.getLatestConfigKeys('non-existent', 'production', 'load-test', 'admin-user', ['admin']);
 
       expect(result).toEqual([]);
     });
@@ -580,7 +580,7 @@ describe('TestRunsConfigService', () => {
       testRunRepo.findOne.mockResolvedValue(null);
 
       // Pass admin role to bypass organization filtering
-      const result = await service.getLatestConfigKeys('my-app', 'production', 'load-test', ['admin'], []);
+      const result = await service.getLatestConfigKeys('my-app', 'production', 'load-test', 'admin-user', ['admin']);
 
       expect(result).toEqual([]);
     });
@@ -588,7 +588,7 @@ describe('TestRunsConfigService', () => {
     it('should return empty array for non-admin user with no organization memberships', async () => {
       authzServiceMock.isGlobalAdmin.mockReturnValue(false);
       authzServiceMock.getAccessibleOrganizations.mockResolvedValue([]);
-      const result = await service.getLatestConfigKeys('my-app', 'production', 'load-test', [], []);
+      const result = await service.getLatestConfigKeys('my-app', 'production', 'load-test', 'regular-user', []);
       expect(result).toEqual([]);
     });
   });
