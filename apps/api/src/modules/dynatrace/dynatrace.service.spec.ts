@@ -823,9 +823,16 @@ describe('DynatraceService', () => {
       it('should throw ForbiddenException when row has null organizationId for non-admins', async () => {
         // Pre-backfill rows are explicitly denied — only the backfill migration
         // (1777600000000) should re-open them by setting organizationId.
+        // Post-C35: enforcement is via `getCapabilities(userId, roles, null)` which
+        // returns [] for non-admins in production (CapabilitiesService.compute on
+        // null org + non-admin systemRoles yields no caps from any source).
         repository.findQueryById.mockResolvedValue({ ...mockDynatraceQuery, organizationId: undefined });
-        const authz = service['authzService'] as unknown as { isGlobalAdmin: jest.Mock };
+        const authz = service['authzService'] as unknown as {
+          isGlobalAdmin: jest.Mock;
+          getCapabilities: jest.Mock;
+        };
         authz.isGlobalAdmin.mockReturnValueOnce(false);
+        authz.getCapabilities.mockResolvedValueOnce([]);
 
         await expect(
           service.updateQuery('query-123', updateQueryDto, mockUserId, mockRoles),
