@@ -1,655 +1,183 @@
-/**
- * AuditService Test Suite
- *
- * Comprehensive tests for the audit logging service including:
- * - CRUD operation logging (CREATE, UPDATE, DELETE, ACCESS)
- * - Fire-and-forget pattern validation
- * - Query operations
- * - Edge cases and error handling
- *
- * Part of RBAC Phase 5: Row-Level Security, Audit Logging & Hardening
- * Subtask 6-3: Verify audit logging captures all CRUD operations
- */
-
-import { Test, TestingModule } from '@nestjs/testing';
+import { Test } from '@nestjs/testing';
+import { ClsService } from 'nestjs-cls';
 import { getRepositoryToken } from '@nestjs/typeorm';
-import { Repository, Between, MoreThanOrEqual, LessThanOrEqual } from 'typeorm';
-import { AuditService, CreateAuditLogDto } from './audit.service';
-import { AuditLog, AuditAction } from '@perfana/shared/entities';
+import { Repository } from 'typeorm';
+import { AuditLog, AuditAction, OwnedResource } from '@perfana/shared/entities';
+import { AuditService } from './audit.service';
+import { REQ_CTX, RequestContextStore } from '../../common/context/request-context';
+import { RequestContextModule } from '../../common/context/request-context.module';
 
-describe('AuditService', () => {
+class FakeEntity implements OwnedResource {
+  static auditableFields = ['name', 'description', 'organization_id'] as const;
+  id!: string;
+  name!: string;
+  description?: string;
+  organization_id!: string;
+  team_id?: string;
+  created_by!: string;
+  updated_by?: string;
+}
+
+const ctxStore: RequestContextStore = {
+  userId: 'kc-1',
+  userEmail: 'a@b.c',
+  ipAddress: '10.0.0.1',
+  userAgent: 'Mozilla',
+  requestId: 'req-1',
+  authType: 'keycloak',
+};
+
+describe('AuditService (Phase 5a)', () => {
   let service: AuditService;
-  let repository: jest.Mocked<Repository<AuditLog>>;
-
-  // Mock data factory
-  const createMockAuditLog = (overrides?: Partial<AuditLog>): AuditLog => ({
-    id: '123e4567-e89b-12d3-a456-426614174000',
-    timestamp: new Date('2025-01-01T12:00:00Z'),
-    userId: 'user-123',
-    userEmail: 'test@example.com',
-    organizationId: 'org-123',
-    action: AuditAction.ACCESS,
-    resourceType: 'test-runs',
-    resourceId: 'resource-123',
-    resourceName: 'Test Resource',
-    changes: undefined,
-    metadata: { route: '/api/test-runs', method: 'GET' },
-    success: true,
-    errorMessage: undefined,
-    ipAddress: '127.0.0.1',
-    userAgent: 'Mozilla/5.0',
-    ...overrides,
-  });
-
-  const createMockDto = (overrides?: Partial<CreateAuditLogDto>): CreateAuditLogDto => ({
-    userId: 'user-123',
-    action: AuditAction.ACCESS,
-    resourceType: 'test-runs',
-    success: true,
-    ...overrides,
-  });
+  let repo: jest.Mocked<Repository<AuditLog>>;
+  let cls: ClsService;
 
   beforeEach(async () => {
-    const module: TestingModule = await Test.createTestingModule({
+    repo = {
+      insert: jest.fn().mockResolvedValue({ identifiers: [{ id: 'audit-1' }] }),
+      find: jest.fn().mockResolvedValue([]),
+      findAndCount: jest.fn().mockResolvedValue([[], 0]),
+    } as unknown as jest.Mocked<Repository<AuditLog>>;
+
+    const moduleRef = await Test.createTestingModule({
+      imports: [RequestContextModule],
       providers: [
         AuditService,
-        {
-          provide: getRepositoryToken(AuditLog),
-          useValue: {
-            create: jest.fn(),
-            save: jest.fn(),
-            find: jest.fn(),
-            count: jest.fn(),
-          },
-        },
+        { provide: getRepositoryToken(AuditLog), useValue: repo },
       ],
     }).compile();
 
-    service = module.get<AuditService>(AuditService);
-    repository = module.get(getRepositoryToken(AuditLog));
+    service = moduleRef.get(AuditService);
+    cls = moduleRef.get(ClsService);
   });
 
-  afterEach(() => {
-    jest.clearAllMocks();
-  });
-
-  describe('service initialization', () => {
-    it('should be defined', () => {
-      expect(service).toBeDefined();
-    });
-  });
-
-  describe('log', () => {
-    it('should create and save an audit log entry', async () => {
-      // Arrange
-      const dto = createMockDto();
-      const mockLog = createMockAuditLog();
-      repository.create.mockReturnValue(mockLog);
-      repository.save.mockResolvedValue(mockLog);
-
-      // Act
-      const result = await service.log(dto);
-
-      // Assert
-      expect(result).toEqual(mockLog);
-      expect(repository.create).toHaveBeenCalledWith({
-        userId: dto.userId,
-        userEmail: dto.userEmail,
-        organizationId: dto.organizationId,
-        action: dto.action,
-        resourceType: dto.resourceType,
-        resourceId: dto.resourceId,
-        resourceName: dto.resourceName,
-        changes: dto.changes,
-        metadata: dto.metadata,
-        success: dto.success,
-        errorMessage: dto.errorMessage,
-        ipAddress: dto.ipAddress,
-        userAgent: dto.userAgent,
+  describe('logUpdate', () => {
+    it('writes a row with the diff over auditableFields', (done) => {
+      const before: FakeEntity = Object.assign(new FakeEntity(), {
+        id: 'r-1', name: 'old', description: 'd', organization_id: 'o-1', created_by: 'kc-1',
       });
-      expect(repository.save).toHaveBeenCalledWith(mockLog);
-    });
+      const after: FakeEntity = Object.assign(new FakeEntity(), { ...before, name: 'new' });
 
-    it('should log CREATE action correctly', async () => {
-      // Arrange
-      const dto = createMockDto({
-        action: AuditAction.CREATE,
-        resourceId: 'new-resource-123',
-        resourceName: 'New Test Run',
-        metadata: { route: '/api/test-runs', method: 'POST' },
+      cls.run(() => {
+        cls.set(REQ_CTX, ctxStore);
+        service.logUpdate(before, after);
+        setImmediate(() => {
+          expect(repo.insert).toHaveBeenCalledTimes(1);
+          const row = repo.insert.mock.calls[0][0] as Partial<AuditLog>;
+          expect(row.action).toBe(AuditAction.UPDATE);
+          expect(row.userId).toBe('kc-1');
+          expect(row.organizationId).toBe('o-1');
+          expect(row.changes).toEqual({ before: { name: 'old' }, after: { name: 'new' }, fields: ['name'] });
+          done();
+        });
       });
-      const mockLog = createMockAuditLog({ action: AuditAction.CREATE });
-      repository.create.mockReturnValue(mockLog);
-      repository.save.mockResolvedValue(mockLog);
-
-      // Act
-      const result = await service.log(dto);
-
-      // Assert
-      expect(result?.action).toBe(AuditAction.CREATE);
-      expect(repository.create).toHaveBeenCalledWith(
-        expect.objectContaining({ action: AuditAction.CREATE }),
-      );
     });
 
-    it('should log UPDATE action with changes correctly', async () => {
-      // Arrange
-      const changes = {
-        before: { status: 'running' },
-        after: { status: 'completed' },
-        fields: ['status'],
-      };
-      const dto = createMockDto({
-        action: AuditAction.UPDATE,
-        changes,
+    it('skips insert when no auditableField changed', (done) => {
+      const before = Object.assign(new FakeEntity(), {
+        id: 'r-1', name: 'x', description: 'd', organization_id: 'o-1', created_by: 'kc-1',
       });
-      const mockLog = createMockAuditLog({ action: AuditAction.UPDATE, changes });
-      repository.create.mockReturnValue(mockLog);
-      repository.save.mockResolvedValue(mockLog);
-
-      // Act
-      const result = await service.log(dto);
-
-      // Assert
-      expect(result?.action).toBe(AuditAction.UPDATE);
-      expect(result?.changes).toEqual(changes);
-    });
-
-    it('should log DELETE action correctly', async () => {
-      // Arrange
-      const dto = createMockDto({
-        action: AuditAction.DELETE,
-        resourceId: 'deleted-resource-123',
+      const after = Object.assign(new FakeEntity(), { ...before });
+      cls.run(() => {
+        cls.set(REQ_CTX, ctxStore);
+        service.logUpdate(before, after);
+        setImmediate(() => { expect(repo.insert).not.toHaveBeenCalled(); done(); });
       });
-      const mockLog = createMockAuditLog({ action: AuditAction.DELETE });
-      repository.create.mockReturnValue(mockLog);
-      repository.save.mockResolvedValue(mockLog);
-
-      // Act
-      const result = await service.log(dto);
-
-      // Assert
-      expect(result?.action).toBe(AuditAction.DELETE);
     });
 
-    it('should log ACCESS_DENIED action with error message', async () => {
-      // Arrange
-      const dto = createMockDto({
-        action: AuditAction.ACCESS_DENIED,
-        success: false,
-        errorMessage: 'User not authorized to access this resource',
+    it('warns once when entity has no auditableFields and writes changes:null', (done) => {
+      class Naked implements OwnedResource {
+        id!: string; organization_id!: string; created_by!: string;
+      }
+      const e = Object.assign(new Naked(), { id: 'r-1', organization_id: 'o-1', created_by: 'kc-1' });
+      cls.run(() => {
+        cls.set(REQ_CTX, ctxStore);
+        service.logUpdate(e, e);
+        setImmediate(() => {
+          expect(repo.insert).toHaveBeenCalled();
+          const row = repo.insert.mock.calls[0][0] as Partial<AuditLog>;
+          expect(row.changes).toBeFalsy();
+          done();
+        });
       });
-      const mockLog = createMockAuditLog({
-        action: AuditAction.ACCESS_DENIED,
-        success: false,
-        errorMessage: 'User not authorized to access this resource',
+    });
+
+    it('skips insert when CLS context is missing', (done) => {
+      const e = Object.assign(new FakeEntity(), {
+        id: 'r-1', name: 'x', organization_id: 'o-1', created_by: 'kc-1',
       });
-      repository.create.mockReturnValue(mockLog);
-      repository.save.mockResolvedValue(mockLog);
-
-      // Act
-      const result = await service.log(dto);
-
-      // Assert
-      expect(result?.action).toBe(AuditAction.ACCESS_DENIED);
-      expect(result?.success).toBe(false);
-      expect(result?.errorMessage).toBe('User not authorized to access this resource');
-    });
-
-    it('should capture metadata correctly', async () => {
-      // Arrange
-      const metadata = {
-        route: '/api/test-runs/123',
-        method: 'GET',
-        duration_ms: 150,
-        auth_type: 'keycloak-jwt',
-        request_id: 'req-456',
-      };
-      const dto = createMockDto({ metadata });
-      const mockLog = createMockAuditLog({ metadata });
-      repository.create.mockReturnValue(mockLog);
-      repository.save.mockResolvedValue(mockLog);
-
-      // Act
-      const result = await service.log(dto);
-
-      // Assert
-      expect(result?.metadata).toEqual(metadata);
-    });
-
-    it('should capture IP address and user agent', async () => {
-      // Arrange
-      const dto = createMockDto({
-        ipAddress: '192.168.1.100',
-        userAgent: 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)',
+      cls.run(() => {
+        // intentionally NOT setting REQ_CTX
+        service.logUpdate(e, { ...e, name: 'y' } as FakeEntity);
+        setImmediate(() => { expect(repo.insert).not.toHaveBeenCalled(); done(); });
       });
-      const mockLog = createMockAuditLog({
-        ipAddress: '192.168.1.100',
-        userAgent: 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)',
+    });
+
+    it('never throws when repo.insert rejects', (done) => {
+      repo.insert.mockRejectedValueOnce(new Error('db down'));
+      const before = Object.assign(new FakeEntity(), {
+        id: 'r-1', name: 'a', organization_id: 'o-1', created_by: 'kc-1',
       });
-      repository.create.mockReturnValue(mockLog);
-      repository.save.mockResolvedValue(mockLog);
-
-      // Act
-      const result = await service.log(dto);
-
-      // Assert
-      expect(result?.ipAddress).toBe('192.168.1.100');
-      expect(result?.userAgent).toBe('Mozilla/5.0 (Windows NT 10.0; Win64; x64)');
-    });
-
-    it('should return undefined and not throw on database error (fire-and-forget)', async () => {
-      // Arrange
-      const dto = createMockDto();
-      repository.create.mockReturnValue(createMockAuditLog());
-      repository.save.mockRejectedValue(new Error('Database connection failed'));
-
-      // Act
-      const result = await service.log(dto);
-
-      // Assert
-      expect(result).toBeUndefined();
-      // Should not throw - fire-and-forget pattern
-    });
-  });
-
-  describe('logAccess', () => {
-    it('should log ACCESS action', async () => {
-      // Arrange
-      const mockLog = createMockAuditLog({ action: AuditAction.ACCESS });
-      repository.create.mockReturnValue(mockLog);
-      repository.save.mockResolvedValue(mockLog);
-
-      // Act
-      await service.logAccess('user-123', 'test-runs', 'resource-456');
-
-      // Assert
-      expect(repository.create).toHaveBeenCalledWith(
-        expect.objectContaining({
-          userId: 'user-123',
-          action: AuditAction.ACCESS,
-          resourceType: 'test-runs',
-          resourceId: 'resource-456',
-          success: true,
-        }),
-      );
-    });
-  });
-
-  describe('logAccessDenied', () => {
-    it('should log ACCESS_DENIED action with reason', async () => {
-      // Arrange
-      const mockLog = createMockAuditLog({
-        action: AuditAction.ACCESS_DENIED,
-        success: false,
+      cls.run(() => {
+        cls.set(REQ_CTX, ctxStore);
+        expect(() => service.logUpdate(before, { ...before, name: 'b' } as FakeEntity)).not.toThrow();
+        setImmediate(() => done());
       });
-      repository.create.mockReturnValue(mockLog);
-      repository.save.mockResolvedValue(mockLog);
-
-      // Act
-      await service.logAccessDenied(
-        'user-123',
-        'test-runs',
-        'resource-456',
-        'Insufficient permissions',
-      );
-
-      // Assert
-      expect(repository.create).toHaveBeenCalledWith(
-        expect.objectContaining({
-          userId: 'user-123',
-          action: AuditAction.ACCESS_DENIED,
-          resourceType: 'test-runs',
-          resourceId: 'resource-456',
-          success: false,
-          errorMessage: 'Insufficient permissions',
-        }),
-      );
     });
   });
 
   describe('logCreate', () => {
-    it('should log CREATE action', async () => {
-      // Arrange
-      const mockLog = createMockAuditLog({ action: AuditAction.CREATE });
-      repository.create.mockReturnValue(mockLog);
-      repository.save.mockResolvedValue(mockLog);
-
-      // Act
-      await service.logCreate(
-        'user-123',
-        'test@example.com',
-        'test-runs',
-        'new-resource-123',
-        'New Test Run',
-        'org-123',
-      );
-
-      // Assert
-      expect(repository.create).toHaveBeenCalledWith(
-        expect.objectContaining({
-          userId: 'user-123',
-          userEmail: 'test@example.com',
-          action: AuditAction.CREATE,
-          resourceType: 'test-runs',
-          resourceId: 'new-resource-123',
-          resourceName: 'New Test Run',
-          organizationId: 'org-123',
-          success: true,
-        }),
-      );
-    });
-  });
-
-  describe('logUpdate', () => {
-    it('should log UPDATE action with changes', async () => {
-      // Arrange
-      const changes = {
-        before: { status: 'running' },
-        after: { status: 'completed' },
-        fields: ['status'],
-      };
-      const mockLog = createMockAuditLog({ action: AuditAction.UPDATE, changes });
-      repository.create.mockReturnValue(mockLog);
-      repository.save.mockResolvedValue(mockLog);
-
-      // Act
-      await service.logUpdate(
-        'user-123',
-        'test@example.com',
-        'test-runs',
-        'resource-123',
-        changes,
-        'Test Run',
-        'org-123',
-      );
-
-      // Assert
-      expect(repository.create).toHaveBeenCalledWith(
-        expect.objectContaining({
-          userId: 'user-123',
-          action: AuditAction.UPDATE,
-          changes,
-          success: true,
-        }),
-      );
+    it('writes after-only diff', (done) => {
+      const e = Object.assign(new FakeEntity(), {
+        id: 'r-1', name: 'x', organization_id: 'o-1', created_by: 'kc-1',
+      });
+      cls.run(() => {
+        cls.set(REQ_CTX, ctxStore);
+        service.logCreate(e);
+        setImmediate(() => {
+          const row = repo.insert.mock.calls[0][0] as Partial<AuditLog>;
+          expect(row.action).toBe(AuditAction.CREATE);
+          expect(row.changes).toEqual({ before: {}, after: { name: 'x', organization_id: 'o-1' }, fields: ['name', 'organization_id'] });
+          done();
+        });
+      });
     });
   });
 
   describe('logDelete', () => {
-    it('should log DELETE action', async () => {
-      // Arrange
-      const mockLog = createMockAuditLog({ action: AuditAction.DELETE });
-      repository.create.mockReturnValue(mockLog);
-      repository.save.mockResolvedValue(mockLog);
-
-      // Act
-      await service.logDelete(
-        'user-123',
-        'test@example.com',
-        'test-runs',
-        'deleted-resource-123',
-        'Deleted Test Run',
-        'org-123',
-      );
-
-      // Assert
-      expect(repository.create).toHaveBeenCalledWith(
-        expect.objectContaining({
-          userId: 'user-123',
-          action: AuditAction.DELETE,
-          resourceId: 'deleted-resource-123',
-          success: true,
-        }),
-      );
-    });
-  });
-
-  describe('getResourceAuditLog', () => {
-    it('should return audit logs for a specific resource', async () => {
-      // Arrange
-      const mockLogs = [
-        createMockAuditLog({ action: AuditAction.CREATE }),
-        createMockAuditLog({ action: AuditAction.UPDATE }),
-        createMockAuditLog({ action: AuditAction.DELETE }),
-      ];
-      repository.find.mockResolvedValue(mockLogs);
-
-      // Act
-      const result = await service.getResourceAuditLog('test-runs', 'resource-123');
-
-      // Assert
-      expect(result).toHaveLength(3);
-      expect(repository.find).toHaveBeenCalledWith({
-        where: expect.objectContaining({
-          resourceId: 'resource-123',
-        }),
-        order: { timestamp: 'DESC' },
-        take: 100,
-        skip: 0,
+    it('writes before-only diff', (done) => {
+      const e = Object.assign(new FakeEntity(), {
+        id: 'r-1', name: 'x', organization_id: 'o-1', created_by: 'kc-1',
       });
-    });
-
-    it('should support pagination', async () => {
-      // Arrange
-      repository.find.mockResolvedValue([]);
-
-      // Act
-      await service.getResourceAuditLog('test-runs', 'resource-123', {
-        limit: 10,
-        offset: 20,
-      });
-
-      // Assert
-      expect(repository.find).toHaveBeenCalledWith({
-        where: expect.anything(),
-        order: { timestamp: 'DESC' },
-        take: 10,
-        skip: 20,
+      cls.run(() => {
+        cls.set(REQ_CTX, ctxStore);
+        service.logDelete(e);
+        setImmediate(() => {
+          const row = repo.insert.mock.calls[0][0] as Partial<AuditLog>;
+          expect(row.action).toBe(AuditAction.DELETE);
+          expect(row.changes).toEqual({ before: { name: 'x', organization_id: 'o-1' }, after: {}, fields: ['name', 'organization_id'] });
+          done();
+        });
       });
     });
   });
 
-  describe('getUserAuditLog', () => {
-    it('should return audit logs for a specific user', async () => {
-      // Arrange
-      const mockLogs = [createMockAuditLog(), createMockAuditLog()];
-      repository.find.mockResolvedValue(mockLogs);
-
-      // Act
-      const result = await service.getUserAuditLog('user-123');
-
-      // Assert
-      expect(result).toHaveLength(2);
-      expect(repository.find).toHaveBeenCalledWith({
-        where: expect.objectContaining({
-          userId: 'user-123',
-        }),
-        order: { timestamp: 'DESC' },
-        take: 100,
-        skip: 0,
+  describe('actorOverride', () => {
+    it('overrides CLS values with the explicit override', (done) => {
+      const e = Object.assign(new FakeEntity(), {
+        id: 'r-1', name: 'x', organization_id: 'o-1', created_by: 'system',
       });
-    });
-  });
-
-  describe('getOrganizationAuditLog', () => {
-    it('should return audit logs for a specific organization', async () => {
-      // Arrange
-      const mockLogs = [createMockAuditLog()];
-      repository.find.mockResolvedValue(mockLogs);
-
-      // Act
-      const result = await service.getOrganizationAuditLog('org-123');
-
-      // Assert
-      expect(result).toHaveLength(1);
-      expect(repository.find).toHaveBeenCalledWith({
-        where: expect.objectContaining({
-          organizationId: 'org-123',
-        }),
-        order: { timestamp: 'DESC' },
-        take: 100,
-        skip: 0,
+      cls.run(() => {
+        cls.set(REQ_CTX, ctxStore);
+        service.logCreate(e, { actorOverride: { userId: 'system:grafana-sync', userEmail: null, ipAddress: null } });
+        setImmediate(() => {
+          const row = repo.insert.mock.calls[0][0] as Partial<AuditLog>;
+          expect(row.userId).toBe('system:grafana-sync');
+          expect(row.userEmail).toBeFalsy();
+          expect(row.ipAddress).toBeFalsy();
+          done();
+        });
       });
-    });
-  });
-
-  describe('getAccessDeniedEvents', () => {
-    it('should return only ACCESS_DENIED events', async () => {
-      // Arrange
-      const mockLogs = [
-        createMockAuditLog({ action: AuditAction.ACCESS_DENIED, success: false }),
-        createMockAuditLog({ action: AuditAction.ACCESS_DENIED, success: false }),
-      ];
-      repository.find.mockResolvedValue(mockLogs);
-
-      // Act
-      const result = await service.getAccessDeniedEvents();
-
-      // Assert
-      expect(result).toHaveLength(2);
-      result.forEach((log) => expect(log.action).toBe(AuditAction.ACCESS_DENIED));
-    });
-  });
-
-  describe('getAuditStats', () => {
-    it('should return audit statistics for a time period', async () => {
-      // Arrange
-      const startDate = new Date('2025-01-01');
-      const endDate = new Date('2025-01-31');
-      const mockLogs = [
-        createMockAuditLog({ action: AuditAction.CREATE, success: true }),
-        createMockAuditLog({ action: AuditAction.CREATE, success: true }),
-        createMockAuditLog({ action: AuditAction.UPDATE, success: true }),
-        createMockAuditLog({ action: AuditAction.DELETE, success: false }),
-        createMockAuditLog({ action: AuditAction.ACCESS, success: true }),
-      ];
-      repository.find.mockResolvedValue(mockLogs);
-
-      // Act
-      const result = await service.getAuditStats(startDate, endDate);
-
-      // Assert
-      expect(result.total).toBe(5);
-      expect(result.byAction.CREATE).toBe(2);
-      expect(result.byAction.UPDATE).toBe(1);
-      expect(result.byAction.DELETE).toBe(1);
-      expect(result.byAction.ACCESS).toBe(1);
-      expect(result.successRate).toBe('80.00%');
-    });
-
-    it('should handle empty results', async () => {
-      // Arrange
-      repository.find.mockResolvedValue([]);
-
-      // Act
-      const result = await service.getAuditStats(new Date(), new Date());
-
-      // Assert
-      expect(result.total).toBe(0);
-      expect(result.successRate).toBe('0.00%');
-    });
-  });
-
-  describe('healthCheck', () => {
-    it('should return true when database is accessible', async () => {
-      // Arrange
-      repository.count.mockResolvedValue(10);
-
-      // Act
-      const result = await service.healthCheck();
-
-      // Assert
-      expect(result).toBe(true);
-    });
-
-    it('should return false when database is not accessible', async () => {
-      // Arrange
-      repository.count.mockRejectedValue(new Error('Connection failed'));
-
-      // Act
-      const result = await service.healthCheck();
-
-      // Assert
-      expect(result).toBe(false);
-    });
-  });
-
-  describe('Edge Cases', () => {
-    it('should handle null optional fields', async () => {
-      // Arrange
-      const dto = createMockDto({
-        userEmail: undefined,
-        organizationId: undefined,
-        resourceId: undefined,
-        resourceName: undefined,
-        changes: undefined,
-        metadata: undefined,
-        errorMessage: undefined,
-        ipAddress: undefined,
-        userAgent: undefined,
-      });
-      const mockLog = createMockAuditLog();
-      repository.create.mockReturnValue(mockLog);
-      repository.save.mockResolvedValue(mockLog);
-
-      // Act
-      const result = await service.log(dto);
-
-      // Assert
-      expect(result).toBeDefined();
-    });
-
-    it('should handle very long resource names', async () => {
-      // Arrange
-      const longName = 'A'.repeat(1000);
-      const dto = createMockDto({ resourceName: longName });
-      const mockLog = createMockAuditLog({ resourceName: longName });
-      repository.create.mockReturnValue(mockLog);
-      repository.save.mockResolvedValue(mockLog);
-
-      // Act
-      const result = await service.log(dto);
-
-      // Assert
-      expect(result?.resourceName).toBe(longName);
-    });
-
-    it('should handle special characters in metadata', async () => {
-      // Arrange
-      const metadata = {
-        route: '/api/test<script>alert("xss")</script>',
-        query: 'name=test&value=<>&"',
-      };
-      const dto = createMockDto({ metadata });
-      const mockLog = createMockAuditLog({ metadata });
-      repository.create.mockReturnValue(mockLog);
-      repository.save.mockResolvedValue(mockLog);
-
-      // Act
-      const result = await service.log(dto);
-
-      // Assert
-      expect(result?.metadata).toEqual(metadata);
-    });
-
-    it('should handle concurrent log operations', async () => {
-      // Arrange
-      const mockLog = createMockAuditLog();
-      repository.create.mockReturnValue(mockLog);
-      repository.save.mockResolvedValue(mockLog);
-
-      // Act
-      const results = await Promise.all([
-        service.log(createMockDto({ action: AuditAction.CREATE })),
-        service.log(createMockDto({ action: AuditAction.UPDATE })),
-        service.log(createMockDto({ action: AuditAction.DELETE })),
-        service.log(createMockDto({ action: AuditAction.ACCESS })),
-      ]);
-
-      // Assert
-      expect(results).toHaveLength(4);
-      results.forEach((result) => expect(result).toBeDefined());
     });
   });
 });
