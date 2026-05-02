@@ -1,8 +1,11 @@
 import { Injectable, ForbiddenException } from '@nestjs/common';
 import { InjectDataSource } from '@nestjs/typeorm';
 import { DataSource } from 'typeorm';
+import type { OwnedResource } from '@perfana/shared';
 import { PaginationQueryDto, PaginatedResponseDto } from '../../../common/dto';
 import { AuthorizationService } from '../../../common/services/authorization.service';
+import { withOrgFilter } from '../../../common/utils/with-org-filter';
+import { withTeamFilter } from '../../../common/utils/with-team-filter';
 
 // Import sub-services
 import { TestRunsCrudQueryService } from './test-runs-crud-query.service';
@@ -78,21 +81,23 @@ export class TestRunsQueryService {
    * Lightweight access check for test-run-scoped endpoints.
    * Verifies the user can access the test run without loading the full record.
    * Throws ForbiddenException if the test run belongs to an org the user cannot access.
+   *
+   * Returns silently when the test run is missing — the downstream service handles 404.
+   * `canAccessResource` already short-circuits on global admin and on legacy null-org rows.
    */
   async verifyTestRunAccess(testRunId: string, userId: string, roles: string[]): Promise<void> {
-    if (this.authzService.isGlobalAdmin(roles)) return;
-
-    const organizationIds = await this.authzService.getAccessibleOrganizations(userId);
-
     const result = await this.dataSource.query(
-      `SELECT organization_id FROM test_runs WHERE id::text = $1 OR test_run_id = $1 LIMIT 1`,
+      `SELECT organization_id, created_by FROM test_runs WHERE id::text = $1 OR test_run_id = $1 LIMIT 1`,
       [testRunId],
     );
     if (result.length === 0) return; // Let downstream service handle 404
 
-    const orgId = result[0].organization_id;
-    // Legacy test runs (null org) are accessible to all authenticated users
-    if (orgId && !organizationIds.includes(orgId)) {
+    const accessResult = await this.authzService.canAccessResource(userId, roles, {
+      organization_id: result[0].organization_id,
+      created_by: result[0].created_by ?? '',
+    } as OwnedResource);
+
+    if (!accessResult.allowed) {
       throw new ForbiddenException('Access denied to this test run');
     }
   }
@@ -256,27 +261,29 @@ export class TestRunsQueryService {
    * - Explicit org selected → [organizationId] (always filter, even for admins)
    * - Non-admin without explicit org → load accessible orgs from authz service
    * - Admin without explicit org → [] (empty = no filter, see all)
+   *
+   * `withOrgFilter` returns `null` for global admins; we collapse it to `[]` so the
+   * downstream sub-services keep their `string[] = empty means no filter` contract.
    */
   private async resolveOrganizationIds(userId: string, roles: string[], organizationId?: string): Promise<string[]> {
     if (organizationId) {
       return [organizationId];
     }
-    if (this.authzService.isGlobalAdmin(roles)) {
-      return [];
-    }
-    return this.authzService.getAccessibleOrganizations(userId);
+    const orgIds = await withOrgFilter(userId, roles, this.authzService);
+    return orgIds ?? [];
   }
 
   /**
    * Resolve team IDs for team-restriction filtering:
    * - Admin → [] (empty = no team restriction)
    * - Non-admin → load user's accessible teams
+   *
+   * Same null-collapse as `resolveOrganizationIds`: `withTeamFilter` returns `null` for
+   * global admins, sub-services expect `[]` to mean "no team restriction".
    */
   private async resolveTeamIds(userId: string, roles: string[]): Promise<string[]> {
-    if (this.authzService.isGlobalAdmin(roles)) {
-      return [];
-    }
-    return this.authzService.getAccessibleTeams(userId);
+    const teamIds = await withTeamFilter(userId, roles, this.authzService);
+    return teamIds ?? [];
   }
 
   // ============================================================================
