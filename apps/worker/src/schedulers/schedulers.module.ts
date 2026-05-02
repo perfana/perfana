@@ -2,6 +2,7 @@ import { Module } from '@nestjs/common';
 import { ScheduleModule } from '@nestjs/schedule';
 import { CommonModule } from '../common/common.module.js';
 import { IncrementalCollectionScheduler } from './IncrementalCollectionScheduler.js';
+import { AuditPartitionManager } from './AuditPartitionManager.js';
 
 /**
  * Schedulers Module
@@ -9,6 +10,7 @@ import { IncrementalCollectionScheduler } from './IncrementalCollectionScheduler
  * Provides scheduled tasks for the worker application.
  * Currently includes:
  * - IncrementalCollectionScheduler: Polls for in-progress test runs and triggers incremental metric collection
+ * - AuditPartitionManager: Daily look-ahead partition creation + expired partition drop for audit_logs
  *
  * Uses @nestjs/schedule for cron-based scheduling.
  */
@@ -19,9 +21,11 @@ import { IncrementalCollectionScheduler } from './IncrementalCollectionScheduler
   ],
   providers: [
     IncrementalCollectionScheduler,
+    AuditPartitionManager,
   ],
   exports: [
     IncrementalCollectionScheduler,
+    AuditPartitionManager,
   ],
 })
 export class SchedulersModule {}
