@@ -4,6 +4,17 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
+## [0.2.47.49] - 2026-05-02
+
+### Added
+- **RBAC Phase 5a — audit-completion infrastructure (PR1).** Lays the foundation for service-layer audit logging: `nestjs-cls@^6.2.0` dep, `RequestContextStore` type + `REQ_CTX` symbol, `RequestContextModule` (global ClsModule wrapper with UUIDv4 request-id generator), `AuditContextInterceptor` (replaces the legacy `AuditInterceptor` — populates `{userId, userEmail, ipAddress, userAgent, requestId, authType}` per request, emits ZERO audit rows), `AuditableEntityClass<T>` interface + `getAuditableFields()` helper on `OwnedResource` (per-entity static `auditableFields` allowlist convention; default-nothing-logged for safety), pure-function `pickAuditable / diff / truncateOversizedFields` helpers (with 4 KB per-field cap and `{truncated, originalLength}` marker), and the slim new `AuditService` API (`logCreate(entity)` / `logUpdate(before, after)` / `logDelete(entity)` + `findByFilter` / `findByResource` queries, fire-and-forget `setImmediate` insert pattern, CLS-backed actor envelope, `actorOverride` escape hatch). Phase 5a/PR1 is functionally a no-op at runtime — the infrastructure is dormant until subsequent PRs wire service-layer audit calls. Spec at `docs/superpowers/specs/2026-05-02-rbac-phase5a-audit-completion-design.md`; plan at `docs/superpowers/plans/2026-05-02-rbac-phase5a-audit-completion.md`.
+
+### Changed
+- **`AuditAction` enum trimmed** from 7 values (`CREATE | UPDATE | DELETE | ACCESS | ACCESS_DENIED | LOGIN | LOGOUT`) to 3 (`CREATE | UPDATE | DELETE`). Phase 5a's scope is mutations only; ACCESS / ACCESS_DENIED / LOGIN / LOGOUT are deferred to Phase 5c (security monitoring) when concrete monitoring requirements drive their reintroduction. Verified zero external consumers across `apps/` and `packages/` before the trim.
+
+### Removed
+- **Legacy `AuditInterceptor`** (`apps/api/src/common/interceptors/audit.interceptor.{ts,spec.ts}`). The HTTP-method-based auto-logging (`POST` → CREATE, `GET` → ACCESS, etc.) is gone — service-layer explicit `auditService.log{Create,Update,Delete}` calls (lint-enforced via the upcoming `audit-mutation-must-log` ESLint rule in PR4) replace it. `OLD AuditService` API surface (`log()`, `logAccess()`, `logAccessDenied()`, `getResourceAuditLog()`, `getUserAuditLog()`, `getOrganizationAuditLog()`, `getAccessDeniedEvents()`, `getAuditStats()`, `healthCheck()`, plus the old positional-args `logCreate/Update/Delete`) deleted from `audit.service.ts`. ~960 net lines of dead code removed across the interceptor + service.
+
 ## [0.2.47.27] - 2026-04-30
 
 ### Refactored

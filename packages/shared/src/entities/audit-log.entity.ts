@@ -2,7 +2,9 @@ import { Entity, PrimaryGeneratedColumn, Column, Index } from 'typeorm';
 
 /**
  * Enum for audit log action types
- * Represents the type of operation that was logged
+ * Phase 5a: only mutations are logged. ACCESS / ACCESS_DENIED / LOGIN / LOGOUT
+ * are deferred to Phase 5c (security monitoring) when concrete monitoring
+ * requirements drive their reintroduction.
  */
 export enum AuditAction {
   /** Resource creation */
@@ -11,14 +13,6 @@ export enum AuditAction {
   UPDATE = 'UPDATE',
   /** Resource deletion */
   DELETE = 'DELETE',
-  /** Resource access (read) */
-  ACCESS = 'ACCESS',
-  /** Access denied (unauthorized attempt) */
-  ACCESS_DENIED = 'ACCESS_DENIED',
-  /** User login */
-  LOGIN = 'LOGIN',
-  /** User logout */
-  LOGOUT = 'LOGOUT',
 }
 
 /**
