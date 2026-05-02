@@ -238,19 +238,6 @@ describe('AuthorizationService', () => {
       expect(result.reason).toBe('User has global admin privileges');
     });
 
-    it('should allow access for legacy resources without organization', async () => {
-      // Arrange
-      const globalRoles = ['org-member'];
-      const resource = createMockResource({ organization_id: undefined as any });
-
-      // Act
-      const result = await service.canAccessResource(userId, globalRoles, resource);
-
-      // Assert
-      expect(result.allowed).toBe(true);
-      expect(result.reason).toBe('Resource has no organization (legacy data)');
-    });
-
     it('should allow access for organization member', async () => {
       // Arrange
       const globalRoles = ['org-member'];
@@ -334,19 +321,6 @@ describe('AuthorizationService', () => {
       // Assert
       expect(result.allowed).toBe(true);
       expect(result.reason).toBe('User has global admin privileges');
-    });
-
-    it('should allow modification for legacy resources without organization', async () => {
-      // Arrange
-      const globalRoles = ['org-member'];
-      const resource = createMockResource({ organization_id: undefined as any });
-
-      // Act
-      const result = await service.canModifyResource(userId, globalRoles, resource);
-
-      // Assert
-      expect(result.allowed).toBe(true);
-      expect(result.reason).toBe('Resource has no organization (legacy data)');
     });
 
     it('should allow modification for resource creator', async () => {
@@ -1211,18 +1185,6 @@ describe('AuthorizationService', () => {
       // Assert
       expect(results).toHaveLength(3);
       results.forEach((result) => expect(result.allowed).toBe(true));
-    });
-
-    it('should handle resource with null organizationId', async () => {
-      // Arrange
-      const resource = createMockResource({ organization_id: null as any });
-
-      // Act
-      const result = await service.canAccessResource(userId, [], resource);
-
-      // Assert
-      expect(result.allowed).toBe(true);
-      expect(result.reason).toBe('Resource has no organization (legacy data)');
     });
 
     it('should handle empty string userId', async () => {

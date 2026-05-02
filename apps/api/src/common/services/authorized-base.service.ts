@@ -15,7 +15,6 @@ import { AuthorizationService } from './authorization.service';
  * - Permission checks for read, modify, and delete operations
  * - Automatic ownership assignment on resource creation
  * - Global admin bypass for all authorization checks
- * - Backward compatibility for legacy data (null organization_id)
  *
  * Usage:
  * ```typescript
@@ -64,7 +63,6 @@ export abstract class AuthorizedBaseService<T extends OwnedResource> {
    * Behavior:
    * - Global admins see everything (no filter applied)
    * - Users with no organizations see nothing (WHERE 1 = 0)
-   * - Legacy data (null organization_id) is included for backward compatibility
    *
    * @param queryBuilder - The TypeORM query builder to apply filter to
    * @param userId - The user ID to check organization membership for
@@ -100,12 +98,11 @@ export abstract class AuthorizedBaseService<T extends OwnedResource> {
       this.logger.debug(`User ${userId} has no accessible organizations`);
       queryBuilder.andWhere('1 = 0');
     } else {
-      // Include resources in user's orgs OR legacy data with null organization_id
       this.logger.debug(
         `Applying org filter for user ${userId}: ${orgIds.length} organizations`,
       );
       queryBuilder.andWhere(
-        `(${alias}.organization_id IN (:...orgIds) OR ${alias}.organization_id IS NULL)`,
+        `${alias}.organization_id IN (:...orgIds)`,
         { orgIds },
       );
     }
@@ -120,8 +117,6 @@ export abstract class AuthorizedBaseService<T extends OwnedResource> {
    * use query builders. It returns an array of organization IDs that can
    * be used in TypeORM's In() operator.
    *
-   * Note: This does NOT include legacy data with null organization_id.
-   * For full backward compatibility, use applyOrgFilter with query builder.
    *
    * @param userId - The user ID to check organization membership for
    * @param roles - The user's global roles from JWT or API key
@@ -160,9 +155,8 @@ export abstract class AuthorizedBaseService<T extends OwnedResource> {
    *
    * Throws ForbiddenException if permission is denied. Access is granted if:
    * 1. User has global admin role
-   * 2. Resource has no organization (legacy data)
-   * 3. User is a member of the resource's organization
-   * 4. User is a member of the resource's team
+   * 2. User is a member of the resource's organization
+   * 3. User is a member of the resource's team
    *
    * @param userId - The user ID to check
    * @param roles - The user's global roles from JWT or API key
@@ -201,10 +195,9 @@ export abstract class AuthorizedBaseService<T extends OwnedResource> {
    *
    * Throws ForbiddenException if permission is denied. Modification is granted if:
    * 1. User has global admin role
-   * 2. Resource has no organization (legacy data)
-   * 3. User is the resource creator (createdBy matches userId)
-   * 4. User is an organization admin (org-admin)
-   * 5. User is a team admin (team-admin) for the resource's team
+   * 2. User is the resource creator (createdBy matches userId)
+   * 3. User is an organization admin (org-admin)
+   * 4. User is a team admin (team-admin) for the resource's team
    *
    * @param userId - The user ID to check
    * @param roles - The user's global roles from JWT or API key

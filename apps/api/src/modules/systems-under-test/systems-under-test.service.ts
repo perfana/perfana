@@ -233,14 +233,9 @@ export class SystemsUnderTestService {
         throw new NotFoundException(`System under test with ID ${id} not found`);
       }
 
-      // Global admins can access everything (including systems without organization_id)
+      // Global admins can access everything
       if (isAdmin) {
         return system;
-      }
-
-      // Systems without organization_id are only accessible to global admins
-      if (!system.organization_id) {
-        throw new NotFoundException(`System under test with ID ${id} not found`);
       }
 
       // Check organization access
@@ -294,12 +289,6 @@ export class SystemsUnderTestService {
 
       // Check organization-based access
       if (!isAdmin) {
-        // Systems without organization_id only accessible to global admins
-        if (!system.organization_id) {
-          this.logger.warn(`Access denied: user ${userId} attempted to access system ${id} with NULL organization_id`);
-          return null;
-        }
-
         // Check if user is a member of the system's organization
         const isMember = await this.authzService.isOrganizationMember(userId, system.organization_id);
         if (!isMember) {
@@ -374,12 +363,6 @@ export class SystemsUnderTestService {
 
       // Check organization-based access
       if (!isAdmin) {
-        // Systems without organization_id only accessible to global admins
-        if (!system.organization_id) {
-          this.logger.warn(`Access denied: user ${userId} attempted to access system '${name}' with NULL organization_id`);
-          return null;
-        }
-
         // Check if user is a member of the system's organization
         const isMember = await this.authzService.isOrganizationMember(userId, system.organization_id);
         if (!isMember) {
@@ -466,11 +449,6 @@ export class SystemsUnderTestService {
       // Global admins can modify anything
       // Regular users need organization membership
       if (!isAdmin) {
-        if (!system.organization_id) {
-          // Systems without org are only modifiable by global admins
-          throw new NotFoundException(`System under test with ID ${id} not found`);
-        }
-
         const isMember = await this.authzService.isOrganizationMember(
           userId,
           system.organization_id,
@@ -525,11 +503,6 @@ export class SystemsUnderTestService {
       // Global admins can delete anything
       // Regular users need organization membership
       if (!isAdmin) {
-        if (!system.organization_id) {
-          // Systems without org are only deletable by global admins
-          throw new NotFoundException(`System under test with ID ${id} not found`);
-        }
-
         const isMember = await this.authzService.isOrganizationMember(
           userId,
           system.organization_id,

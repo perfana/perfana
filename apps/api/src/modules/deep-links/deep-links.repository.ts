@@ -111,6 +111,7 @@ export class DeepLinksRepository {
       url: entity.url,
       tags: entity.tags ?? [],
       templateDeepLinkId: entity.templateDeepLinkId,
+      organizationId: entity.organizationId,
       createdAt: entity.createdAt,
       updatedAt: entity.updatedAt,
     };
@@ -122,6 +123,7 @@ export class DeepLinksRepository {
       profile: entity.profile,
       name: entity.name,
       url: entity.url,
+      organizationId: entity.organizationId,
       createdAt: entity.createdAt,
       updatedAt: entity.updatedAt,
     };

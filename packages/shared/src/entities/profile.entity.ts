@@ -28,8 +28,8 @@ export class Profile {
   readOnly?: boolean;
 
   // Ownership tracking (added in Phase 4 for multi-tenant support)
-  @Column({ type: 'uuid', nullable: true, name: 'organization_id' })
-  organizationId?: string;
+  @Column({ type: 'uuid', name: 'organization_id' })
+  organizationId!: string;
 
   @Column({ type: 'uuid', nullable: true, name: 'team_id' })
   teamId?: string;

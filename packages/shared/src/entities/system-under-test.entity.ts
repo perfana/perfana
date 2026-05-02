@@ -15,8 +15,8 @@ export class SystemUnderTest {
   @Column({ type: 'uuid', nullable: true })
   team_id?: string;
 
-  @Column({ type: 'uuid', nullable: true })
-  organization_id?: string;
+  @Column({ type: 'uuid' })
+  organization_id!: string;
 
   @Column({ type: 'varchar', length: 255, nullable: true })
   created_by?: string;

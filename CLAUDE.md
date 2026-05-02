@@ -116,7 +116,7 @@ Perfana implements a multi-tenant RBAC system for fine-grained access control ac
 | Phase 1 | Role definitions & constants | ✅ Completed |
 | Phase 2 | Membership & ownership infrastructure | ✅ Completed |
 | Phase 3 | Service-layer authorization enforcement | ✅ Lint-enforced (2026-05-02 — `.rbac-migration-allowlist.json` is empty; Bucket B 100%, Bucket A 70/131 lint-only (53.4%) or 68/127 strict (53.5%); 2 user-owned preset `findAll` sites are the remaining strict-legacy sites (they filter by row-level ownership and have no `withOrgFilter` equivalent); see `docs/superpowers/audits/2026-04-26-audit-decisions.md` Phase C37) |
-| Phase 4 | Data migration for existing resources | 🚧 TODO |
+| Phase 4 | Data migration for existing resources | ✅ Completed (2026-05-02 — null-org escape hatch closed; `organization_id` is NOT NULL on all 26 owned-resource entities; `audit_logs` and `test_runs` keep nullable for documented reasons; null-org defensive branches deleted from `AuthorizationService`, `AuthorizedBaseService`, `dynatrace.service.ts`, `api-keys.service.ts`, `systems-under-test.service.ts`, `test-runs-crud-query.service.ts`) |
 | Phase 5 | Row-level security & audit logging | 🚧 TODO |
 
 ### Role Hierarchy
@@ -142,7 +142,7 @@ Perfana implements a multi-tenant RBAC system for fine-grained access control ac
 All resource entities implement the `OwnedResource` interface with four ownership columns:
 - `created_by` - User ID (Keycloak sub or api-key:{id}) who created the resource
 - `updated_by` - User ID who last modified the resource
-- `organization_id` - Organization the resource belongs to (nullable for backward compatibility)
+- `organization_id` - Organization the resource belongs to (NOT NULL on all owned-resource entities as of Phase 4; nullable only on `audit_logs` and `test_runs` — the former for system-level events with no org context, the latter because access is checked via the joined `systems_under_test.organization_id` rather than the vestigial `test_runs.organization_id` column)
 - `team_id` - Team the resource belongs to (nullable)
 
 **Entities with Ownership Tracking** (~25 entities):
@@ -198,11 +198,12 @@ async findAll(userId: string, roles: string[]) {
 
 This is how `test-runs` and all working services implement it.
 
-### Backward Compatibility
+### Ownership column nullability
 
-- All ownership columns are **nullable** to support existing data
-- Resources with `null` `organization_id` are accessible to all authenticated users
-- Authorization enforcement is opt-in (Phase 3) and won't break existing functionality
+- `organization_id` is **NOT NULL** on all 26 owned-resource entities (Phase 4, 2026-05-02). The "null org = visible to all authenticated users" backward-compat rule is gone.
+- Exceptions intentionally kept nullable: `audit_logs.organization_id` (system-level events with no org context) and `test_runs.organization_id` (vestigial — TestRun access is checked via the joined SystemUnderTest's `organization_id` per the entity-ownership contract).
+- `team_id` remains nullable on all entities — teams are optional even on owned resources.
+- Authorization enforcement (Phase 3) is now lint-enforced and the data layer (Phase 4) prevents the escape hatch.
 
 ## Environment Configuration
 

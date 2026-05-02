@@ -216,8 +216,7 @@ export class TestRunsCrudQueryService {
         // Filter: org access + team restriction
         queryBuilder.andWhere(
           '(' +
-            'sut.organization_id IS NULL' +                                             // legacy data
-            ' OR (sut.team_id IS NULL AND sut.organization_id IN (:...orgIds))' +       // no team, org access
+            '(sut.team_id IS NULL AND sut.organization_id IN (:...orgIds))' +       // no team, org access
             ' OR (team.restrict_to_team_members = false AND sut.organization_id IN (:...orgIds))' +  // unrestricted team
             (userTeamIds.length > 0
               ? ' OR (sut.team_id IN (:...userTeamIds))'                                // direct team member
@@ -226,7 +225,7 @@ export class TestRunsCrudQueryService {
           { orgIds: organizationIds, ...(userTeamIds.length > 0 ? { userTeamIds } : {}) },
         );
       }
-      // Admin without organizationId: no filter (backward compat)
+      // Admin without organizationId: no filter
 
       const [testRunEntities, total] = await queryBuilder.getManyAndCount();
 

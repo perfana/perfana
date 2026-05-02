@@ -196,7 +196,7 @@ describe('AuthorizedBaseService', () => {
       expect(mockQueryBuilder.andWhere).toHaveBeenCalledWith('1 = 0');
     });
 
-    it('should apply organization filter with orgIds and null handling', async () => {
+    it('should apply organization filter with orgIds', async () => {
       // Arrange
       const roles = ['org-member'];
       const orgIds = ['org-1', 'org-2', 'org-3'];
@@ -213,7 +213,7 @@ describe('AuthorizedBaseService', () => {
       // Assert
       expect(result).toBe(mockQueryBuilder);
       expect(mockQueryBuilder.andWhere).toHaveBeenCalledWith(
-        '(test_entity.organization_id IN (:...orgIds) OR test_entity.organization_id IS NULL)',
+        'test_entity.organization_id IN (:...orgIds)',
         { orgIds },
       );
     });
@@ -234,7 +234,7 @@ describe('AuthorizedBaseService', () => {
 
       // Assert
       expect(customQueryBuilder.andWhere).toHaveBeenCalledWith(
-        `(${customAlias}.organization_id IN (:...orgIds) OR ${customAlias}.organization_id IS NULL)`,
+        `${customAlias}.organization_id IN (:...orgIds)`,
         { orgIds: ['org-1'] },
       );
     });
@@ -250,7 +250,7 @@ describe('AuthorizedBaseService', () => {
 
       // Assert
       expect(mockQueryBuilder.andWhere).toHaveBeenCalledWith(
-        '(test_entity.organization_id IN (:...orgIds) OR test_entity.organization_id IS NULL)',
+        'test_entity.organization_id IN (:...orgIds)',
         { orgIds: [organizationId] },
       );
     });

@@ -29,8 +29,8 @@ export class AlertTagFilter {
   workload?: string;
 
   // Ownership tracking (RBAC)
-  @Column({ type: 'uuid', nullable: true, name: 'organization_id' })
-  organizationId?: string;
+  @Column({ type: 'uuid', name: 'organization_id' })
+  organizationId!: string;
 
   @Column({ type: 'uuid', nullable: true, name: 'team_id' })
   teamId?: string;
