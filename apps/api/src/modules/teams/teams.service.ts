@@ -10,9 +10,10 @@ import { CreateTeamDto, UpdateTeamDto } from './dto/team.dto';
  * Service responsible for managing teams.
  *
  * Authorization:
- * - All methods accept userId and roles parameters for authorization
- * - AuthorizationService is injected for role-based authorization checks
- * - Global admins can see and manage all teams
+ * - All methods accept userId and isAdmin parameters for authorization
+ * - AuthorizationService is injected for membership/admin role checks
+ * - Global admins (isAdmin=true) can see and manage all teams; admin
+ *   resolution is performed at the controller boundary (Phase 3c C31)
  * - Regular users can only see teams belonging to organizations they are members of
  * - Team creation requires org-admin role for new teams
  * - Team updates/deletes require org-admin OR team-admin privileges
@@ -38,7 +39,7 @@ export class TeamsService {
    * Find all teams the user has access to.
    *
    * @param userId - The user ID for authorization
-   * @param roles - The user's roles for authorization checks
+   * @param isAdmin - Whether the caller is a global admin (resolved by controller)
    *
    * Authorization:
    * - Global admins see all teams
@@ -46,13 +47,9 @@ export class TeamsService {
    */
   async findAll(
     userId: string = '',
-    roles: string[] = [],
+    isAdmin: boolean = false,
   ): Promise<Team[]> {
     try {
-      // Log authorization context for debugging
-      const isAdmin = this.authzService.isGlobalAdmin(roles);
-      this.logger.debug(`findAll: userId=${userId}, isGlobalAdmin=${isAdmin}`);
-
       // Global admins see all teams
       if (isAdmin) {
         return await this.teamRepository.find({
@@ -89,7 +86,7 @@ export class TeamsService {
    *
    * @param id - The team ID
    * @param userId - The user ID for authorization
-   * @param roles - The user's roles for authorization checks
+   * @param isAdmin - Whether the caller is a global admin (resolved by controller)
    *
    * Authorization:
    * - Global admins can access any team
@@ -98,13 +95,9 @@ export class TeamsService {
   async findOne(
     id: string,
     userId: string = '',
-    roles: string[] = [],
+    isAdmin: boolean = false,
   ): Promise<Team> {
     try {
-      // Log authorization context for debugging
-      const isAdmin = this.authzService.isGlobalAdmin(roles);
-      this.logger.debug(`findOne: id=${id}, userId=${userId}, isGlobalAdmin=${isAdmin}`);
-
       const team = await this.teamRepository.findOne({
         where: { id },
         relations: ['organization'],
@@ -142,7 +135,7 @@ export class TeamsService {
    *
    * @param organizationId - The organization ID
    * @param userId - The user ID for authorization
-   * @param roles - The user's roles for authorization checks
+   * @param isAdmin - Whether the caller is a global admin (resolved by controller)
    *
    * Authorization:
    * - Global admins can access teams in any organization
@@ -151,13 +144,9 @@ export class TeamsService {
   async findByOrganization(
     organizationId: string,
     userId: string = '',
-    roles: string[] = [],
+    isAdmin: boolean = false,
   ): Promise<Team[]> {
     try {
-      // Log authorization context for debugging
-      const isAdmin = this.authzService.isGlobalAdmin(roles);
-      this.logger.debug(`findByOrganization: orgId=${organizationId}, userId=${userId}, isGlobalAdmin=${isAdmin}`);
-
       // Check authorization (global admins can access any org's teams)
       if (!isAdmin) {
         const isMember = await this.authzService.isOrganizationMember(userId, organizationId);
@@ -188,7 +177,7 @@ export class TeamsService {
    *
    * @param createDto - The team creation data
    * @param userId - The user ID for authorization and ownership tracking
-   * @param roles - The user's roles for authorization checks
+   * @param isAdmin - Whether the caller is a global admin (resolved by controller)
    *
    * Authorization:
    * - Global admins can create teams in any organization
@@ -197,13 +186,9 @@ export class TeamsService {
   async create(
     createDto: CreateTeamDto,
     userId: string = '',
-    roles: string[] = [],
+    isAdmin: boolean = false,
   ): Promise<Team> {
     try {
-      // Log authorization context for debugging
-      const isAdmin = this.authzService.isGlobalAdmin(roles);
-      this.logger.debug(`create: orgId=${createDto.organization_id}, name=${createDto.name}, userId=${userId}, isGlobalAdmin=${isAdmin}`);
-
       // Check authorization - must be global admin or org admin to create teams
       if (!isAdmin) {
         const isOrgAdmin = await this.authzService.isOrganizationAdmin(userId, createDto.organization_id);
@@ -228,7 +213,7 @@ export class TeamsService {
         this.logger.log(`Added user ${userId} as team-admin of team ${savedTeam.id}`);
       }
 
-      return await this.findOne(savedTeam.id, userId, roles);
+      return await this.findOne(savedTeam.id, userId, isAdmin);
     } catch (error) {
       if (error instanceof ForbiddenException) {
         throw error;
@@ -244,7 +229,7 @@ export class TeamsService {
    * @param id - The team ID
    * @param updateDto - The update data
    * @param userId - The user ID for authorization
-   * @param roles - The user's roles for authorization checks
+   * @param isAdmin - Whether the caller is a global admin (resolved by controller)
    *
    * Authorization:
    * - Global admins can update any team
@@ -255,13 +240,9 @@ export class TeamsService {
     id: string,
     updateDto: UpdateTeamDto,
     userId: string = '',
-    roles: string[] = [],
+    isAdmin: boolean = false,
   ): Promise<Team> {
     try {
-      // Log authorization context for debugging
-      const isAdmin = this.authzService.isGlobalAdmin(roles);
-      this.logger.debug(`update: id=${id}, userId=${userId}, isGlobalAdmin=${isAdmin}`);
-
       // First verify the team exists
       const team = await this.teamRepository.findOne({
         where: { id },
@@ -299,7 +280,7 @@ export class TeamsService {
 
       this.logger.log(`Updated team: ${team.name} (${id}) by user ${userId}`);
 
-      return await this.findOne(id, userId, roles);
+      return await this.findOne(id, userId, isAdmin);
     } catch (error) {
       if (error instanceof NotFoundException || error instanceof ForbiddenException) {
         throw error;
@@ -314,7 +295,7 @@ export class TeamsService {
    *
    * @param id - The team ID
    * @param userId - The user ID for authorization
-   * @param roles - The user's roles for authorization checks
+   * @param isAdmin - Whether the caller is a global admin (resolved by controller)
    *
    * Authorization:
    * - Global admins can delete any team
@@ -324,13 +305,9 @@ export class TeamsService {
   async remove(
     id: string,
     userId: string = '',
-    roles: string[] = [],
+    isAdmin: boolean = false,
   ): Promise<void> {
     try {
-      // Log authorization context for debugging
-      const isAdmin = this.authzService.isGlobalAdmin(roles);
-      this.logger.debug(`remove: id=${id}, userId=${userId}, isGlobalAdmin=${isAdmin}`);
-
       // First verify the team exists
       const team = await this.teamRepository.findOne({
         where: { id },
