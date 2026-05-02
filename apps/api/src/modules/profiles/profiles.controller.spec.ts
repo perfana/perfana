@@ -191,7 +191,7 @@ describe('ProfilesController', () => {
 
       // Assert
       expect(result).toEqual(mockProfiles);
-      expect(service.findAll).toHaveBeenCalledWith(mockUserContext.userId, true, undefined);
+      expect(service.findAll).toHaveBeenCalledWith(null);
       expect(service.findAll).toHaveBeenCalledTimes(1);
     });
 
@@ -204,7 +204,7 @@ describe('ProfilesController', () => {
 
       // Assert
       expect(result).toEqual([]);
-      expect(service.findAll).toHaveBeenCalledWith(mockUserContext.userId, true, undefined);
+      expect(service.findAll).toHaveBeenCalledWith(null);
       expect(service.findAll).toHaveBeenCalledTimes(1);
     });
 

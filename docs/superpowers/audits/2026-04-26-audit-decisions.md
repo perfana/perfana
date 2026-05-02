@@ -7,13 +7,13 @@ Phase 3c rolls capabilities through every site listed below. Update these counts
 | Bucket | Total | Migrated | Remaining | % done |
 | --- | ---: | ---: | ---: | ---: |
 | A — bypass filter (lint-only)¹ | 131 | 70 | 61 | 53.4% |
-| A — bypass filter (strict)² | 127 | 64 | 63 | 50.4% |
+| A — bypass filter (strict)² | 127 | 68 | 59 | 53.5% |
 | B — bypass guard | 43 | 43 | 0 | 100.0% |
 | Local `private isGlobalAdmin()` wrappers | 13 | 8 | 5 | 61.5% |
 
 ¹ **Lint-only metric** (the running total all C-series PRs increment): a Bucket A site counts as migrated when its containing file has zero direct `authzService.isGlobalAdmin` call sites. Six C30–C33 sites count as migrated under this metric while still calling `getAccessibleOrganizations` directly inside the service body — see C36 for the recount.
 
-² **Strict metric** (what C2–C29 effectively measured): a Bucket A site counts as migrated when its list-filter shape uses `withOrgFilter` / `withTeamFilter`. Subtracts C30's +2 and C31's +2 enumeration adjustments (those sites were not in the original audit and never moved to `withOrgFilter`), and subtracts the 2 in-audit sites C32/C33 only boundary-pushed (`systems-under-test.service.ts:155 findAll`, `profiles.service.ts:108 findAll`). The 6 specific files still on the legacy shape: `teams.service.ts:48`, `organizations.service.ts:48`, `systems-under-test.service.ts:155`, `profiles.service.ts:108`, `graph-presets.service.ts:101`, `trends-presets.service.ts:100`.
+² **Strict metric** (what C2–C29 effectively measured): a Bucket A site counts as migrated when its list-filter shape uses `withOrgFilter` / `withTeamFilter`. Subtracts C30's +2 and C31's +2 enumeration adjustments (those sites were not in the original audit and never moved to `withOrgFilter`). C37 closed the 4 org-filtered list-filters that C32/C33 had only boundary-pushed (`teams.service.ts:48`, `organizations.service.ts:48`, `systems-under-test.service.ts:155`, `profiles.service.ts:108`); the 2 user-owned preset findAll sites (`graph-presets.service.ts:101`, `trends-presets.service.ts:100`) remain on the legacy shape because they have no `withOrgFilter` equivalent — they filter by row-level ownership, not org membership.
 
 **Lint enforcement:** `apps/api/.rbac-migration-allowlist.json` lists every file currently exempt from the `no-direct-is-global-admin` lint rule. **As of C35 (2026-05-02) the allowlist is empty — the per-file lint burndown is complete.** No service file in `apps/api` directly calls `authzService.isGlobalAdmin` outside the permanent infrastructure exemption (`AuthorizationService`, `AuthorizedBaseService`, `withOrgFilter`, `withTeamFilter`, `CapabilityGuard`). New direct calls anywhere else will fail lint. Remaining Bucket A sites under the lint-only metric (61 / 131) and local wrappers (5 / 13) are tracked for cleanup but do not block Phase 3c's lint-enforcement goal.
 
@@ -2430,3 +2430,95 @@ No change. The allowlist remains empty; the lint rule is unaffected.
 - [x] Cross-check `grep "if (!isAdmin)"` against the per-phase migrated tallies — 17 hits classify cleanly.
 - [x] Confirm the typo correction at the C30 entry doesn't change the C30 end-state (66 / 129) — only the path.
 - [x] No service code changed; no test runs required.
+
+---
+
+## Phase C37 — `withOrgFilter` boundary push for the 4 eligible strict-legacy `findAll` sites
+
+**Scope:** Closes 4 of the 6 strict-legacy `findAll` sites identified in C36. Each controller now calls `withOrgFilter` directly and passes the resolved `organizationIds: string[] | null` into the service. Each service `findAll` drops its inline `getAccessibleOrganizations` call. The 2 remaining strict-legacy sites are user-owned preset filters (`graph-presets.service.ts:101`, `trends-presets.service.ts:100`) that have no org-list equivalent and stay as-is.
+
+### Sites migrated
+
+| File | Method | Before | After |
+|---|---|---|---|
+| `apps/api/src/modules/teams/teams.service.ts` | `findAll(userId, isAdmin)` | inline `if (isAdmin) { all } else { getAccessibleOrganizations; In(orgs) }` | `findAll(organizationIds: string[] \| null)` — pure shape |
+| `apps/api/src/modules/organizations/organizations.service.ts` | `findAll(userId, isAdmin)` | inline `if (isAdmin) { all } else { getAccessibleOrganizations; id IN (orgs) }` | `findAll(organizationIds: string[] \| null)` — pure shape |
+| `apps/api/src/modules/systems-under-test/systems-under-test.service.ts` | `findAll(userId, isAdmin, organizationId?)` | 3-case logic with inline `getAccessibleOrganizations`; team filter still inline | `findAll(organizationIds: string[] \| null, userId)` — controller collapses the explicit `?organizationId=` query param into `[organizationId]`; team filter via `getAccessibleTeams(userId)` is unchanged (separate concern) |
+| `apps/api/src/modules/profiles/profiles.service.ts` | `findAll(userId, isAdmin, organizationId?)` | 3-case logic with inline `getAccessibleOrganizations` | `findAll(organizationIds: string[] \| null)` — controller collapses the explicit `?organizationId=` query param into `[organizationId]` |
+
+### Controllers
+
+Each controller's `findAll` (or its caller, in the case of teams' `?organizationId=` branch) now:
+1. Calls `withOrgFilter(userId, roles, this.authzService)` to resolve `string[] | null`.
+2. Or, when an explicit `?organizationId=` query param is present (SUT, profiles), passes `[organizationId]` directly — preserving prior behavior where the explicit param overrides admin status; the team-restriction filter inside SUT's `findAll` still scopes results so this isn't a privilege-escalation vector.
+3. Passes the resolved value into the service's `findAll`.
+
+The `resolveIsAdmin` helper in each controller is retained because it's still used by the per-resource methods (`findOne`, `update`, `delete`, `create`). Only the `findAll` call site changes.
+
+### Specs updated
+
+The 4 spec files for the affected services / controllers were updated mechanically:
+
+| File | Edits |
+|---|---|
+| `apps/api/src/modules/systems-under-test/systems-under-test.service.spec.ts` | 7 `findAll` call sites updated to new `(organizationIds, userId)` signature. Two tests in `Authorization context` repurposed: "should look up accessible orgs for non-admin findAll" → "should not look up accessible orgs when organizationIds is pre-resolved" (asserts `getAccessibleOrganizations` is **not** called). |
+| `apps/api/src/modules/systems-under-test/systems-under-test.controller.spec.ts` | 5 `expect(service.findAll).toHaveBeenCalledWith(userId, true, undefined)` assertions updated to `(null, userId)`. |
+| `apps/api/src/modules/profiles/profiles.service.spec.ts` | 4 `findAll` call sites updated to new `(organizationIds)` signature. |
+| `apps/api/src/modules/profiles/profiles.controller.spec.ts` | 2 `expect(service.findAll).toHaveBeenCalledWith(userId, true, undefined)` assertions updated to `(null)`. |
+
+No spec changes for `teams.service.ts` or `organizations.service.ts` because no service-level specs exist for those (only `*-members.service.spec.ts`, which doesn't test `findAll` of the parent service).
+
+### Burndown impact
+
+**Lint-only metric:** unchanged at 70 / 131 (53.4%). Every site in this PR was already counted as migrated under the lint-only definition since C30–C33 boundary push.
+
+**Strict metric:** 64 → **68 / 127** (50.4% → **53.5%**). Four of the six strict-legacy sites identified in C36 are now using `withOrgFilter` at the boundary and pure-shape filtering inside the service.
+
+**Remaining strict-legacy sites: 2.** Both are user-owned preset filters:
+
+| File | Reason left |
+|---|---|
+| `apps/api/src/modules/graph-presets/graph-presets.service.ts:101` | `if (!isAdmin) { qb.where(userId OR isGlobal) }` — filters by row-level ownership, not by org membership. No `withOrgFilter` equivalent applies. |
+| `apps/api/src/modules/trends-presets/trends-presets.service.ts:100` | Identical shape to graph-presets. |
+
+The boundary push these files received in C30 (controller computes `isAdmin` and passes it through) is the canonical migration for their shape. Counting them as "strict legacy" was conservative — they're more accurately classified as "migrated as far as their shape supports". A follow-up doc-only PR could promote them to "strict migrated" with the appropriate asterisk.
+
+### Test plan
+
+- [x] `cd apps/api && npx jest src/modules/teams src/modules/organizations src/modules/systems-under-test src/modules/profiles` — **303 passed, 0 failed** (was 17 failed before spec updates).
+- [x] `cd apps/api && npx jest` — **4302 passed, 20 skipped** (unchanged from C35 baseline).
+- [x] `npm run lint` (@perfana/api) — 0 errors, 59 pre-existing `no-explicit-any` warnings (unchanged from C35).
+- [x] `cd apps/api && npx tsc --noEmit` — 0 errors.
+- [x] `grep "getAccessibleOrganizations" apps/api/src/modules/{teams,organizations,systems-under-test,profiles}/**/*.service.ts` — **0 hits** in service code (was 4 before).
+- [x] `cat apps/api/.rbac-migration-allowlist.json` — `[]` (unchanged).
+
+### Files changed
+
+- `apps/api/src/modules/teams/teams.service.ts` (-15 +13 lines)
+- `apps/api/src/modules/teams/teams.controller.ts` (+3 -2 lines)
+- `apps/api/src/modules/organizations/organizations.service.ts` (-15 +12 lines)
+- `apps/api/src/modules/organizations/organizations.controller.ts` (+1 -2 lines)
+- `apps/api/src/modules/systems-under-test/systems-under-test.service.ts` (-12 +10 lines)
+- `apps/api/src/modules/systems-under-test/systems-under-test.controller.ts` (+5 -2 lines)
+- `apps/api/src/modules/profiles/profiles.service.ts` (-13 +11 lines)
+- `apps/api/src/modules/profiles/profiles.controller.ts` (+5 -2 lines)
+- `apps/api/src/modules/systems-under-test/systems-under-test.service.spec.ts` (test updates)
+- `apps/api/src/modules/systems-under-test/systems-under-test.controller.spec.ts` (assertion updates)
+- `apps/api/src/modules/profiles/profiles.service.spec.ts` (test updates)
+- `apps/api/src/modules/profiles/profiles.controller.spec.ts` (assertion updates)
+- `docs/superpowers/audits/2026-04-26-audit-decisions.md` (this section)
+- `CLAUDE.md` (Phase 3 status line)
+
+### Allowlist disposition
+
+No change. Allowlist remains empty. The lint rule was already satisfied for these files since C30–C33; this PR converts the *internals* to the canonical strict shape without changing the lint-rule surface.
+
+### Pattern notes
+
+**1. `withOrgFilter` at the controller boundary is now the established pattern.** Eight files have applied it (test-runs facade in C25–C29, plus the 4 in this PR). The pattern is uniform: controller computes `string[] | null`, service signature accepts it, no inline `getAccessibleOrganizations` lookup. The remaining 2 user-owned preset sites won't fit this pattern — that's the natural stopping point for `withOrgFilter` adoption.
+
+**2. The 3-case `?organizationId=` collapse moves cleanly to the controller.** Both SUT and profiles had the same `if (organizationId) [explicit] else if (isAdmin) [null] else [accessible]` triple inside the service body. Replacing it with `organizationId ? [organizationId] : await withOrgFilter(...)` in the controller produces the same `string[] | null` the service expects, with no behavior change. The service body simplifies because it no longer branches on `isAdmin` — the branch collapses to `organizationIds === null` (admin) vs everything else (filter).
+
+**3. Boundary-push refactors compose cleanly with later strict refactors.** C30–C33 pushed `isAdmin` resolution to the controllers but left the inner branch alone, on the implicit theory that future PRs could finish the job. This PR is that future PR for 4 of 6 sites; the diff per file is ~15 service-side lines + ~3 controller-side lines + spec updates. Total elapsed time from C30 (preset push) to C37 (preset finish for org-filtered cases): three days. The boundary push left the doors open and they were easy to walk through later.
+
+**4. Spec churn is concentrated in `findAll` tests.** None of `findOne` / `update` / `create` / `delete` tests changed because their per-resource signature `(id, userId, isAdmin)` is unchanged — only the list-filter shape was migrated. This is the same pattern as every prior boundary-push PR: `findAll` is the strict-shape target; per-resource methods are a separate Bucket B concern.

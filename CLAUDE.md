@@ -115,7 +115,7 @@ Perfana implements a multi-tenant RBAC system for fine-grained access control ac
 |-------|-------------|--------|
 | Phase 1 | Role definitions & constants | ✅ Completed |
 | Phase 2 | Membership & ownership infrastructure | ✅ Completed |
-| Phase 3 | Service-layer authorization enforcement | ✅ Lint-enforced (2026-05-02 — `.rbac-migration-allowlist.json` is empty; Bucket B 100%, Bucket A 70/131 lint-only (53.4%) or 64/127 strict (50.4%); 6 `findAll` sites still call `getAccessibleOrganizations` directly inside the service body; recount + remaining cleanup tracked in `docs/superpowers/audits/2026-04-26-audit-decisions.md` Phase C36) |
+| Phase 3 | Service-layer authorization enforcement | ✅ Lint-enforced (2026-05-02 — `.rbac-migration-allowlist.json` is empty; Bucket B 100%, Bucket A 70/131 lint-only (53.4%) or 68/127 strict (53.5%); 2 user-owned preset `findAll` sites are the remaining strict-legacy sites (they filter by row-level ownership and have no `withOrgFilter` equivalent); see `docs/superpowers/audits/2026-04-26-audit-decisions.md` Phase C37) |
 | Phase 4 | Data migration for existing resources | 🚧 TODO |
 | Phase 5 | Row-level security & audit logging | 🚧 TODO |
 

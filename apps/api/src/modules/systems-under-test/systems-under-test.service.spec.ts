@@ -90,7 +90,7 @@ describe('SystemsUnderTestService', () => {
       const mockSystems = [mockSystemUnderTest];
       repository.find.mockResolvedValue(mockSystems);
 
-      const result = await service.findAll(testUserId, testIsAdmin);
+      const result = await service.findAll(null, testUserId);
 
       expect(result).toEqual(mockSystems);
       expect(repository.find).toHaveBeenCalledWith({
@@ -104,7 +104,7 @@ describe('SystemsUnderTestService', () => {
     it('should return empty array when no systems exist', async () => {
       repository.find.mockResolvedValue([]);
 
-      const result = await service.findAll(testUserId, testIsAdmin);
+      const result = await service.findAll(null, testUserId);
 
       expect(result).toEqual([]);
     });
@@ -113,7 +113,7 @@ describe('SystemsUnderTestService', () => {
       const error = new Error('Database connection failed');
       repository.find.mockRejectedValue(error);
 
-      await expect(service.findAll(testUserId, testIsAdmin)).rejects.toThrow('Database connection failed');
+      await expect(service.findAll(null, testUserId)).rejects.toThrow('Database connection failed');
     });
 
     it('should fetch systems with team relations', async () => {
@@ -131,7 +131,7 @@ describe('SystemsUnderTestService', () => {
       };
       repository.find.mockResolvedValue([systemWithTeam] as SystemUnderTestEntity[]);
 
-      const result = await service.findAll(testUserId, testIsAdmin);
+      const result = await service.findAll(null, testUserId);
 
       expect(result[0]?.team).toBeDefined();
       expect(result[0]?.team?.name).toBe('Backend Team');
@@ -140,9 +140,9 @@ describe('SystemsUnderTestService', () => {
     it('should bypass org filtering when caller is admin', async () => {
       repository.find.mockResolvedValue([mockSystemUnderTest]);
 
-      const result = await service.findAll(testUserId, adminIsAdmin);
+      const result = await service.findAll(null, testUserId);
 
-      // Admin path uses repository.find (no query builder, no org-list lookup)
+      // Admin path (organizationIds === null) uses repository.find (no query builder, no org-list lookup)
       expect(result).toEqual([mockSystemUnderTest]);
       expect(repository.find).toHaveBeenCalled();
       expect(mockAuthzService.getAccessibleOrganizations).not.toHaveBeenCalled();
@@ -549,7 +549,7 @@ describe('SystemsUnderTestService', () => {
 
       repository.find.mockRejectedValue(error);
 
-      await expect(service.findAll(testUserId, testIsAdmin)).rejects.toThrow('Test error');
+      await expect(service.findAll(null, testUserId)).rejects.toThrow('Test error');
       expect(loggerSpy).toHaveBeenCalledWith(
         '[findAll] ERROR',
         error.stack
@@ -606,23 +606,24 @@ describe('SystemsUnderTestService', () => {
   });
 
   describe('Authorization context', () => {
-    // Phase 3c C32: isAdmin is resolved at the controller boundary; the service
-    // no longer calls authzService.isGlobalAdmin. These tests assert that the
+    // Phase 3c C37: organizationIds is pre-resolved at the controller boundary
+    // (via withOrgFilter); the service no longer calls
+    // authzService.getAccessibleOrganizations. These tests assert that the
     // admin / non-admin paths produce different lookup behavior.
 
-    it('should look up accessible orgs for non-admin findAll', async () => {
-      mockAuthzService.getAccessibleOrganizations.mockResolvedValue(['org-1']);
+    it('should not look up accessible orgs when organizationIds is pre-resolved (non-admin)', async () => {
       mockAuthzService.getAccessibleTeams.mockResolvedValue([]);
 
-      await service.findAll(testUserId, false);
+      await service.findAll(['org-1'], testUserId);
 
-      expect(mockAuthzService.getAccessibleOrganizations).toHaveBeenCalledWith(testUserId);
+      // Service no longer performs the lookup — controller passed orgs in.
+      expect(mockAuthzService.getAccessibleOrganizations).not.toHaveBeenCalled();
     });
 
     it('should skip org lookup for admin findAll', async () => {
       repository.find.mockResolvedValue([mockSystemUnderTest]);
 
-      await service.findAll('admin-user', adminIsAdmin);
+      await service.findAll(null, 'admin-user');
 
       expect(mockAuthzService.getAccessibleOrganizations).not.toHaveBeenCalled();
     });

@@ -35,8 +35,8 @@ export class OrganizationsController {
   async findAll(@UserCtx() ctx: UserContext) {
     try {
       this.logger.debug(`User ${ctx.userId} fetching all organizations`);
-      const isAdmin = await this.resolveIsAdmin(ctx.userId, ctx.roles);
-      return await this.organizationsService.findAll(ctx.userId, isAdmin);
+      const organizationIds = await withOrgFilter(ctx.userId, ctx.roles, this.authzService);
+      return await this.organizationsService.findAll(organizationIds);
     } catch (error) {
       this.logger.error('Failed to fetch organizations:', error);
       throw new HttpException(

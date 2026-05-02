@@ -102,7 +102,7 @@ describe('SystemsUnderTestController', () => {
       const result = await controller.findAll(mockUserContext);
 
       expect(result).toEqual(mockSystems);
-      expect(service.findAll).toHaveBeenCalledWith(mockUserContext.userId, true, undefined);
+      expect(service.findAll).toHaveBeenCalledWith(null, mockUserContext.userId);
     });
 
     it('should return empty array when no systems exist', async () => {
@@ -289,7 +289,7 @@ describe('SystemsUnderTestController', () => {
       await controller.findAll(mockUserContext);
       await controller.findOne('sys-123', mockUserContext);
 
-      expect(service.findAll).toHaveBeenCalledWith(mockUserContext.userId, true, undefined);
+      expect(service.findAll).toHaveBeenCalledWith(null, mockUserContext.userId);
       expect(service.findSystemSummary).toHaveBeenCalledWith('sys-123', mockUserContext.userId, true);
     });
 
@@ -420,7 +420,7 @@ describe('SystemsUnderTestController', () => {
       const result = await controller.findAll(mockUserContext);
 
       expect(result).toHaveLength(1000);
-      expect(service.findAll).toHaveBeenCalledWith(mockUserContext.userId, true, undefined);
+      expect(service.findAll).toHaveBeenCalledWith(null, mockUserContext.userId);
     });
 
     it('should handle system with large environment/workload data', async () => {
