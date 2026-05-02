@@ -341,8 +341,8 @@ export class TestRunsService {
     return this.configService.addTestRunConfigJson(configJsonDto);
   }
 
-  async getLatestConfigKeys(system: string, environment: string, workload: string, _userId?: string, _roles?: string[]): Promise<string[]> {
-    return this.configService.getLatestConfigKeys(system, environment, workload);
+  async getLatestConfigKeys(system: string, environment: string, workload: string, userId?: string, roles: string[] = []): Promise<string[]> {
+    return this.configService.getLatestConfigKeys(system, environment, workload, userId, roles);
   }
 
   async getExpectedConfigChanges(system: string, environment: string, workload: string, userId?: string, roles: string[] = []): Promise<ExpectedConfigChangeDto[]> {

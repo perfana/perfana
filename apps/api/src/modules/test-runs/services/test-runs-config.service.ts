@@ -13,6 +13,7 @@ import { CreateExpectedConfigChangeDto, ExpectedConfigChangeDto } from '../dto/e
 import { CreateSparseMetricExclusionDto, SparseMetricExclusionDto } from '../dto/sparse-metric-exclusion.dto';
 import { ResourceNotFoundException, ValidationException } from '../../../common/exceptions/business.exception';
 import { AuthorizationService } from '../../../common/services/authorization.service';
+import { withOrgFilter } from '../../../common/utils/with-org-filter';
 import safeRegex from 'safe-regex';
 
 export interface TestRun {
@@ -78,23 +79,11 @@ export class TestRunsConfigService {
     roles: string[] = [],
   ): Promise<Array<{key: string; value: string; tags: string[]}>> {
     try {
-      const isAdmin = this.authzService.isGlobalAdmin(roles);
-
-      // Get user's accessible organizations using AuthorizationService
-      let organizationIds: string[] = [];
-      if (!isAdmin) {
-        if (!userId) {
-          this.logger.warn('No userId provided for non-admin user, returning empty config list');
-          return [];
-        }
-
-        organizationIds = await this.authzService.getAccessibleOrganizations(userId);
-
-        // Non-admin users with no organization memberships see empty results
-        if (organizationIds.length === 0) {
-          this.logger.debug('User has no organization memberships, returning empty config list');
-          return [];
-        }
+      const orgIds = await withOrgFilter(userId ?? '', roles, this.authzService);
+      // Non-admin with no org memberships → empty list (preserves existing behavior)
+      if (orgIds !== null && orgIds.length === 0) {
+        this.logger.debug('User has no organization memberships, returning empty config list');
+        return [];
       }
 
       let testRun: TestRunEntity | null = null;
@@ -106,9 +95,8 @@ export class TestRunsConfigService {
           .where('sut.name = :name', { name: system })
           .select(['sut.id']);
 
-        // Apply organization filter for non-admin users
-        if (!isAdmin) {
-          systemQuery.andWhere('sut.organization_id IN (:...orgIds)', { orgIds: organizationIds });
+        if (orgIds !== null) {
+          systemQuery.andWhere('sut.organization_id IN (:...orgIds)', { orgIds });
         }
 
         const systemUnderTest = await systemQuery.getOne();
@@ -135,9 +123,8 @@ export class TestRunsConfigService {
           .where('tr.testRunId = :testRunId', { testRunId })
           .select(['tr.id', 'tr.testRunId']);
 
-        // Apply organization filter for non-admin users
-        if (!isAdmin) {
-          testRunQuery.andWhere('sut.organization_id IN (:...orgIds)', { orgIds: organizationIds });
+        if (orgIds !== null) {
+          testRunQuery.andWhere('sut.organization_id IN (:...orgIds)', { orgIds });
         }
 
         testRun = await testRunQuery.getOne();
@@ -154,7 +141,7 @@ export class TestRunsConfigService {
         order: { key: 'ASC' }
       });
 
-      this.logger.log(`Retrieved ${configs.length} config items for test run: ${testRunId}${isAdmin ? ' (admin)' : ` (orgs: ${organizationIds.length})`}`);
+      this.logger.log(`Retrieved ${configs.length} config items for test run: ${testRunId}${orgIds === null ? ' (admin)' : ` (orgs: ${orgIds.length})`}`);
       return configs.map(c => ({
         key: c.key,
         value: c.value || '',
@@ -574,14 +561,13 @@ export class TestRunsConfigService {
     system: string,
     environment: string,
     workload: string,
+    userId?: string,
     roles: string[] = [],
-    organizationIds: string[] = [],
   ): Promise<string[]> {
     try {
-      const isAdmin = this.authzService.isGlobalAdmin(roles);
-
-      // Non-admin users with no organization memberships see empty results
-      if (!isAdmin && organizationIds.length === 0) {
+      const orgIds = await withOrgFilter(userId ?? '', roles, this.authzService);
+      // Non-admin with no org memberships → empty list
+      if (orgIds !== null && orgIds.length === 0) {
         this.logger.debug('User has no organization memberships, returning empty config keys list');
         return [];
       }
@@ -592,15 +578,14 @@ export class TestRunsConfigService {
         .where('sut.name = :name', { name: system })
         .select(['sut.id']);
 
-      // Apply organization filter for non-admin users
-      if (!isAdmin) {
-        systemQuery.andWhere('sut.organization_id IN (:...orgIds)', { orgIds: organizationIds });
+      if (orgIds !== null) {
+        systemQuery.andWhere('sut.organization_id IN (:...orgIds)', { orgIds });
       }
 
       const systemUnderTest = await systemQuery.getOne();
 
       if (!systemUnderTest) {
-        this.logger.warn(`System under test not found: ${system}${!isAdmin ? ' (or not accessible to user)' : ''}`);
+        this.logger.warn(`System under test not found: ${system}${orgIds !== null ? ' (or not accessible to user)' : ''}`);
         return [];
       }
 
@@ -630,7 +615,7 @@ export class TestRunsConfigService {
 
       const uniqueKeys = configKeys.map(item => item.key);
 
-      this.logger.log(`Found ${uniqueKeys.length} distinct config keys for latest test run of ${system}/${environment}/${workload}${isAdmin ? ' (admin)' : ` (orgs: ${organizationIds.length})`}`);
+      this.logger.log(`Found ${uniqueKeys.length} distinct config keys for latest test run of ${system}/${environment}/${workload}${orgIds === null ? ' (admin)' : ` (orgs: ${orgIds.length})`}`);
       return uniqueKeys;
     } catch (error) {
       this.logger.error(`Failed to get latest config keys for ${system}/${environment}/${workload}:`, error);
@@ -646,23 +631,11 @@ export class TestRunsConfigService {
     roles: string[] = [],
   ): Promise<ExpectedConfigChangeDto[]> {
     try {
-      const isAdmin = this.authzService.isGlobalAdmin(roles);
-
-      // Get user's accessible organizations using AuthorizationService
-      let organizationIds: string[] = [];
-      if (!isAdmin) {
-        if (!userId) {
-          this.logger.warn('No userId provided for non-admin user, returning empty expected config changes list');
-          return [];
-        }
-
-        organizationIds = await this.authzService.getAccessibleOrganizations(userId);
-
-        // Non-admin users with no organization memberships see empty results
-        if (organizationIds.length === 0) {
-          this.logger.debug('User has no organization memberships, returning empty expected config changes list');
-          return [];
-        }
+      const orgIds = await withOrgFilter(userId ?? '', roles, this.authzService);
+      // Non-admin with no org memberships → empty list (preserves existing behavior)
+      if (orgIds !== null && orgIds.length === 0) {
+        this.logger.debug('User has no organization memberships, returning empty expected config changes list');
+        return [];
       }
 
       // Find system under test with organization filtering
@@ -671,15 +644,14 @@ export class TestRunsConfigService {
         .where('sut.name = :name', { name: system })
         .select(['sut.id']);
 
-      // Apply organization filter for non-admin users
-      if (!isAdmin) {
-        systemQuery.andWhere('sut.organization_id IN (:...orgIds)', { orgIds: organizationIds });
+      if (orgIds !== null) {
+        systemQuery.andWhere('sut.organization_id IN (:...orgIds)', { orgIds });
       }
 
       const systemUnderTest = await systemQuery.getOne();
 
       if (!systemUnderTest) {
-        this.logger.warn(`System under test not found: ${system}${!isAdmin ? ' (or not accessible to user)' : ''}`);
+        this.logger.warn(`System under test not found: ${system}${orgIds !== null ? ' (or not accessible to user)' : ''}`);
         return [];
       }
 
@@ -705,7 +677,7 @@ export class TestRunsConfigService {
         updated_at: entity.updated_at.toISOString()
       }));
 
-      this.logger.log(`Retrieved ${dtos.length} expected config changes for ${system}-${environment}-${workload}${isAdmin ? ' (admin)' : ` (orgs: ${organizationIds.length})`}`);
+      this.logger.log(`Retrieved ${dtos.length} expected config changes for ${system}-${environment}-${workload}${orgIds === null ? ' (admin)' : ` (orgs: ${orgIds.length})`}`);
       return dtos;
     } catch (error) {
       this.logger.error(`Failed to get expected config changes:`, error);
