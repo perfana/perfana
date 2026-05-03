@@ -12,7 +12,6 @@
   "apps/api/src/modules/deep-links/deep-links.repository.ts",
   "apps/api/src/modules/deep-links/deep-links.service.ts",
   "apps/api/src/modules/dynatrace/dynatrace.repository.ts",
-  "apps/api/src/modules/dynatrace/dynatrace.service.ts",
   "apps/api/src/modules/events/events.service.ts",
   "apps/api/src/modules/grafana/application-dashboards.service.ts",
   "apps/api/src/modules/grafana/grafana-dashboards.service.ts",

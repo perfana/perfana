@@ -8,10 +8,11 @@ import { CreateEntityMappingDto } from './dto/create-entity-mapping.dto';
 import { HostPropertiesResponse, HostMetricsResponse, HostProblemResponse, TimeSeriesData } from './dto/host.dto';
 import { AuthorizationService } from '../../common/services/authorization.service';
 import { withOrgFilter } from '../../common/utils/with-org-filter';
-import { OwnedResource } from '@perfana/shared';
+import { OwnedResource, DynatraceQuery, DynatraceEntityMapping } from '@perfana/shared';
 import { validateExternalUrl } from '../../common/security/url-validator';
 import { attachPermissions } from '../../common/serializers/with-permissions.serializer';
 import { Capability } from '../../constants/capabilities.constants';
+import { AuditService } from '../audit/audit.service';
 import axios from 'axios';
 import { randomUUID } from 'crypto';
 
@@ -35,6 +36,7 @@ export class DynatraceService {
   constructor(
     private readonly repository: DynatraceRepository,
     private readonly authzService: AuthorizationService,
+    private readonly auditService: AuditService,
   ) {}
 
   /**
@@ -56,6 +58,25 @@ export class DynatraceService {
       throw new BadRequestException(`Invalid Dynatrace URL: ${validation.error}`);
     }
     return url.replace(/\/+$/, '');
+  }
+
+  /**
+   * Wrap a mapped DTO returned from {@link DynatraceRepository}'s query helpers
+   * in an actual {@link DynatraceQuery} instance so that
+   * {@link AuditService.dispatch}'s `ref.constructor.auditableFields` lookup
+   * succeeds. The repository returns plain objects (via `mapEntityToDtoFields`)
+   * for the API response shape; the audit pipeline needs the prototype to
+   * resolve the static auditableFields declaration.
+   */
+  private toQueryAuditRef(dto: object): OwnedResource {
+    return Object.assign(new DynatraceQuery(), dto) as unknown as OwnedResource;
+  }
+
+  /**
+   * Same as {@link toQueryAuditRef} for {@link DynatraceEntityMapping} rows.
+   */
+  private toMappingAuditRef(dto: object): OwnedResource {
+    return Object.assign(new DynatraceEntityMapping(), dto) as unknown as OwnedResource;
   }
 
   /**
@@ -249,6 +270,13 @@ export class DynatraceService {
       organization_id: dto.organizationId || undefined,
     });
 
+    // Phase 5a: DynatraceConfig.organization_id column maps to camelCase property
+    // organizationId, which AuditService.dispatch cannot read off ref directly —
+    // pass organizationIdOverride so the audit row is org-scoped.
+    this.auditService.logCreate(config as unknown as OwnedResource, {
+      organizationIdOverride: config.organizationId,
+    });
+
     this.logger.log(`Dynatrace configuration created: ${normalizedHost} by user ${userId}`);
     return this.maskConfig(config);
   }
@@ -293,6 +321,12 @@ export class DynatraceService {
       updated_by: userId,
     });
 
+    this.auditService.logUpdate(
+      existing as unknown as OwnedResource,
+      updated as unknown as OwnedResource,
+      { organizationIdOverride: existing.organizationId ?? updated.organizationId },
+    );
+
     this.logger.log(`Dynatrace configuration updated: ${id} by user ${userId}`);
     return this.maskConfig(updated);
   }
@@ -324,6 +358,13 @@ export class DynatraceService {
     if (!modifyResult.allowed) {
       throw new ForbiddenException('You do not have permission to delete this Dynatrace configuration');
     }
+
+    // Phase 5a: log DELETE before the row goes away so the diff captures the
+    // pre-delete state. organizationIdOverride bridges the camelCase property
+    // / snake_case column mismatch on DynatraceConfig.
+    this.auditService.logDelete(existing as unknown as OwnedResource, {
+      organizationIdOverride: existing.organizationId,
+    });
 
     await this.repository.delete(id);
     this.logger.log(`Dynatrace configuration ${id} deleted successfully by user ${userId}`);
@@ -698,11 +739,15 @@ export class DynatraceService {
       );
     }
 
-    return this.repository.createQuery(dto, {
+    const result = await this.repository.createQuery(dto, {
       organizationId: parentOrgId,
       createdBy: userId,
       updatedBy: userId,
     });
+    this.auditService.logCreate(this.toQueryAuditRef(result), {
+      organizationIdOverride: result.organizationId,
+    });
+    return result;
   }
 
   /**
@@ -745,11 +790,19 @@ export class DynatraceService {
       );
     }
 
-    return this.repository.createQueryWithSharedUuid(dto, applicationDashboardId, {
-      organizationId: parentOrgId,
-      createdBy: userId,
-      updatedBy: userId,
+    const result = await this.repository.createQueryWithSharedUuid(
+      dto,
+      applicationDashboardId,
+      {
+        organizationId: parentOrgId,
+        createdBy: userId,
+        updatedBy: userId,
+      },
+    );
+    this.auditService.logCreate(this.toQueryAuditRef(result), {
+      organizationIdOverride: result.organizationId,
     });
+    return result;
   }
 
   /**
@@ -796,14 +849,27 @@ export class DynatraceService {
         );
       }
 
-      return this.repository.bulkCreateQueryWithSharedUuid(dtoList, sharedUuid, {
-        organizationId: parentOrgId,
-        createdBy: userId,
-        updatedBy: userId,
-      });
+      const created = await this.repository.bulkCreateQueryWithSharedUuid(
+        dtoList,
+        sharedUuid,
+        {
+          organizationId: parentOrgId,
+          createdBy: userId,
+          updatedBy: userId,
+        },
+      );
+      // One audit row per persisted query — bulk imports are still per-row
+      // history for compliance reconstruction.
+      for (const row of created) {
+        this.auditService.logCreate(this.toQueryAuditRef(row), {
+          organizationIdOverride: row.organizationId,
+        });
+      }
+      return created;
     } else {
       const results = [];
       for (const dto of dtoList) {
+        // createQuerySmart emits its own logCreate per row.
         const result = await this.createQuerySmart(dto, userId, roles);
         results.push(result);
       }
@@ -848,6 +914,11 @@ export class DynatraceService {
     }
 
     const updated = await this.repository.updateQuery(id, dto, { updatedBy: userId });
+    this.auditService.logUpdate(
+      this.toQueryAuditRef(existing),
+      this.toQueryAuditRef(updated),
+      { organizationIdOverride: existing.organizationId ?? updated.organizationId },
+    );
     this.logger.log(`Dynatrace DQL query updated: ${id} by user ${userId}`);
     return updated;
   }
@@ -882,6 +953,9 @@ export class DynatraceService {
       );
     }
 
+    this.auditService.logDelete(this.toQueryAuditRef(existing), {
+      organizationIdOverride: existing.organizationId,
+    });
     await this.repository.deleteQuery(id);
     this.logger.log(`Dynatrace DQL query ${id} deleted successfully by user ${userId}`);
   }
@@ -1013,6 +1087,9 @@ export class DynatraceService {
         createdBy: userId,
         updatedBy: userId,
       });
+      this.auditService.logCreate(this.toMappingAuditRef(result), {
+        organizationIdOverride: parentOrgId,
+      });
       this.logger.log(`Dynatrace entity mapping created: ${result.id} by user ${userId}`);
       return result;
     } catch (error) {
@@ -1056,6 +1133,9 @@ export class DynatraceService {
       );
     }
 
+    this.auditService.logDelete(this.toMappingAuditRef(existing), {
+      organizationIdOverride: existing.organizationId,
+    });
     await this.repository.deleteEntityMapping(id);
     this.logger.log(`Dynatrace entity mapping ${id} deleted successfully by user ${userId}`);
   }

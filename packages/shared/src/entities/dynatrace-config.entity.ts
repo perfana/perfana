@@ -4,6 +4,18 @@ import { stripTrailingSlashTransformer } from '../utils/url-column.transformer';
 
 @Entity('dynatrace_configs')
 export class DynatraceConfig {
+  // Phase 5a audit logging — mutable connection metadata only.
+  // `apiToken` and `platformApiToken` are encrypted credentials and NEVER auditable.
+  // Ownership tracking (organizationId/teamId/createdBy/updatedBy) and timestamps
+  // are excluded; the audit envelope already records actor + org scope.
+  static auditableFields = [
+    'host',
+    'label',
+    'dynatraceType',
+    'perfanaTestRunIdAttribute',
+    'perfanaRequestNameAttribute',
+  ] as const;
+
   @PrimaryGeneratedColumn('uuid')
   id!: string;
 

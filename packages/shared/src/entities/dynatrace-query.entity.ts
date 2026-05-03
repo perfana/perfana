@@ -4,6 +4,26 @@ import { MetricsSource } from './metrics-source.entity';
 
 @Entity('dynatrace_queries')
 export class DynatraceQuery {
+  // Phase 5a audit logging — query definition fields a user can edit.
+  // `metricsSourceId` is derived from a repository-side upsert (not user input)
+  // and is excluded. Ownership tracking and timestamps are also excluded.
+  static auditableFields = [
+    'dynatraceConfigId',
+    'systemUnderTestId',
+    'testEnvironment',
+    'workload',
+    'dashboardLabel',
+    'applicationDashboardId',
+    'panelTitle',
+    'panelId',
+    'query',
+    'matchMetricPattern',
+    'omitGroupByVariableFromMetricName',
+    'templateVariables',
+    'metricUnit',
+    'metricName',
+  ] as const;
+
   @PrimaryGeneratedColumn('uuid')
   id!: string;
 

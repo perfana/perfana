@@ -3,6 +3,20 @@ import { DynatraceConfig } from './dynatrace-config.entity';
 
 @Entity('dynatrace_entity_mappings')
 export class DynatraceEntityMapping {
+  // Phase 5a audit logging — entity-mapping definition fields.
+  // Ownership tracking and timestamps are excluded; the audit envelope
+  // already carries actor + org scope.
+  static auditableFields = [
+    'dynatraceConfigId',
+    'systemUnderTestId',
+    'testEnvironment',
+    'workload',
+    'entityId',
+    'entityDisplayName',
+    'entityType',
+    'level',
+  ] as const;
+
   @PrimaryGeneratedColumn('uuid')
   id!: string;
 
