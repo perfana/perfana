@@ -10,6 +10,27 @@ import { MetricsSource } from './metrics-source.entity';
 @Index(['applicationDashboardId'], { where: 'application_dashboard_id IS NOT NULL' })
 @Index(['createdForTestRunId'], { where: 'created_for_test_run_id IS NOT NULL' })
 export class CompareFilterPreset {
+  // Phase 5a — fields surfaced in audit-log diffs. Ownership / org / team
+  // columns and timestamps are intentionally excluded; they are emitted via
+  // dedicated columns on the audit row.
+  static auditableFields = [
+    'name',
+    'description',
+    'presetType',
+    'seriesSearchText',
+    'showPercentiles',
+    'panelId',
+    'panelTitle',
+    'baselineTestRunId',
+    'applicationDashboardId',
+    'metricsSourceId',
+    'source',
+    'dashboardLabel',
+    'seriesConfig',
+    'createdForTestRunId',
+    'isGlobal',
+  ] as const;
+
   @PrimaryGeneratedColumn('uuid')
   id!: string;
 

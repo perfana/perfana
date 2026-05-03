@@ -2,9 +2,11 @@ import { Injectable, NotFoundException, ForbiddenException, Logger, BadRequestEx
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository, Brackets } from 'typeorm';
 import { GraphPreset, SeriesConfig } from '@perfana/shared/entities';
+import { OwnedResource } from '@perfana/shared';
 import { CreateGraphPresetDto, SeriesConfigDto } from './dto/create-graph-preset.dto';
 import { GraphPresetResponseDto } from './dto/graph-preset-response.dto';
 import { TestRun as TestRunEntity } from '../../entities';
+import { AuditService } from '../audit/audit.service';
 
 /**
  * Service responsible for managing graph presets.
@@ -25,6 +27,7 @@ export class GraphPresetsService {
     private graphPresetRepo: Repository<GraphPreset>,
     @InjectRepository(TestRunEntity)
     private testRunRepo: Repository<TestRunEntity>,
+    private readonly auditService: AuditService,
   ) {}
 
   /**
@@ -54,6 +57,14 @@ export class GraphPresetsService {
       });
 
       const savedPreset = await this.graphPresetRepo.save(preset);
+
+      // Phase 5a: GraphPreset.organization_id maps to camelCase property
+      // organizationId, so AuditService.dispatch cannot read it off ref directly —
+      // pass organizationIdOverride so the audit row is org-scoped.
+      this.auditService.logCreate(savedPreset as unknown as OwnedResource, {
+        organizationIdOverride: savedPreset.organizationId,
+      });
+
       this.logger.debug(`Created graph preset ${savedPreset.id} for user ${userId}`);
       return this.mapToDto(savedPreset);
     } catch (error) {
@@ -208,6 +219,13 @@ export class GraphPresetsService {
           throw new ForbiddenException('You can only delete your own presets');
         }
       }
+
+      // Phase 5a: log DELETE before the row is removed so the diff captures
+      // the pre-delete state. organizationIdOverride bridges the camelCase
+      // property / snake_case column mismatch.
+      this.auditService.logDelete(preset as unknown as OwnedResource, {
+        organizationIdOverride: preset.organizationId,
+      });
 
       await this.graphPresetRepo.delete({ id });
 

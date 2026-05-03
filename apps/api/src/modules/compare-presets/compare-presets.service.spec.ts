@@ -7,11 +7,13 @@ import { CreateComparePresetDto, PresetType } from './dto/create-compare-preset.
 import { UpdateComparePresetDto } from './dto/update-compare-preset.dto';
 import { createMockRepository, MockRepository } from '../../../test/helpers/mock-repository.factory';
 import { AuthorizationService } from '../../common/services/authorization.service';
+import { AuditService } from '../audit/audit.service';
 
 describe('ComparePresetsService', () => {
   let service: ComparePresetsService;
   let comparePresetRepo: MockRepository<CompareFilterPreset>;
   let testRunRepo: MockRepository<TestRunEntity>;
+  let auditService: jest.Mocked<AuditService>;
   let module: import('@nestjs/testing').TestingModule;
 
   const userId = 'user-uuid';
@@ -74,12 +76,21 @@ describe('ComparePresetsService', () => {
             getAccessibleOrganizations: jest.fn().mockResolvedValue(['org-1']),
           },
         },
+        {
+          provide: AuditService,
+          useValue: {
+            logCreate: jest.fn(),
+            logUpdate: jest.fn(),
+            logDelete: jest.fn(),
+          },
+        },
       ],
     }).compile();
 
     service = module.get<ComparePresetsService>(ComparePresetsService);
     comparePresetRepo = module.get(getRepositoryToken(CompareFilterPreset));
     testRunRepo = module.get(getRepositoryToken(TestRunEntity));
+    auditService = module.get(AuditService);
   });
 
   afterEach(() => {
@@ -2098,6 +2109,84 @@ describe('ComparePresetsService', () => {
         // Assert
         expect(testRunRepo.query).not.toHaveBeenCalled();
       });
+    });
+  });
+
+  // -----------------------------------------------------------------
+  // Phase 5a (PR12) — audit-logging invariants
+  // -----------------------------------------------------------------
+  describe('audit logging (Phase 5a, PR12)', () => {
+    const orgId = 'org-1';
+    const auditPreset = {
+      ...mockPreset,
+      organizationId: orgId,
+    } as CompareFilterPreset;
+
+    beforeEach(() => {
+      // Default findOne for the access-check uses createQueryBuilder.
+      const qb = {
+        leftJoinAndSelect: jest.fn().mockReturnThis(),
+        where: jest.fn().mockReturnThis(),
+        andWhere: jest.fn().mockReturnThis(),
+        orderBy: jest.fn().mockReturnThis(),
+        getOne: jest.fn().mockResolvedValue(auditPreset),
+      };
+      comparePresetRepo.createQueryBuilder.mockReturnValue(qb as any);
+    });
+
+    it('logs CREATE with organizationIdOverride from the persisted entity', async () => {
+      const createDto: CreateComparePresetDto = {
+        name: auditPreset.name,
+        description: auditPreset.description,
+        preset_type: PresetType.GENERIC,
+      };
+      comparePresetRepo.create.mockReturnValue(auditPreset);
+      comparePresetRepo.save.mockResolvedValue(auditPreset);
+
+      await service.create(createDto, userId, ['admin']);
+
+      expect(auditService.logCreate).toHaveBeenCalledTimes(1);
+      expect(auditService.logCreate).toHaveBeenCalledWith(
+        auditPreset,
+        { organizationIdOverride: orgId },
+      );
+    });
+
+    it('logs UPDATE with cloned before-snapshot and organizationIdOverride', async () => {
+      const before = { ...auditPreset, name: 'Before' } as CompareFilterPreset;
+      const after = { ...auditPreset, name: 'After' } as CompareFilterPreset;
+      comparePresetRepo.findOne
+        // 1st call inside service.update — before-snapshot
+        .mockResolvedValueOnce(before)
+        // 2nd call inside service.update — refetch after persist
+        .mockResolvedValueOnce(after);
+      comparePresetRepo.update.mockResolvedValue({} as ReturnType<typeof comparePresetRepo.update>);
+
+      await service.update('preset-uuid', { name: 'After' } as UpdateComparePresetDto, userId, ['user']);
+
+      expect(auditService.logUpdate).toHaveBeenCalledTimes(1);
+      const [beforeArg, afterArg, opts] = (auditService.logUpdate as jest.Mock).mock.calls[0];
+      expect(beforeArg).toEqual(expect.objectContaining({ id: 'preset-uuid', name: 'Before' }));
+      expect(afterArg).toEqual(expect.objectContaining({ id: 'preset-uuid', name: 'After' }));
+      expect(opts).toEqual({ organizationIdOverride: orgId });
+    });
+
+    it('logs DELETE before repository.delete', async () => {
+      comparePresetRepo.findOne.mockResolvedValueOnce(auditPreset);
+      comparePresetRepo.delete.mockResolvedValue({} as any);
+
+      await service.remove('preset-uuid', userId, ['user']);
+
+      expect(auditService.logDelete).toHaveBeenCalledTimes(1);
+      expect(auditService.logDelete).toHaveBeenCalledWith(
+        auditPreset,
+        { organizationIdOverride: orgId },
+      );
+      expect(
+        (auditService.logDelete as jest.Mock).mock.invocationCallOrder[0],
+      ).toBeLessThan(
+        (comparePresetRepo.delete as jest.Mock).mock.invocationCallOrder[0],
+      );
     });
   });
 });
