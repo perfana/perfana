@@ -149,3 +149,50 @@ catch (err) {
 - class-transformer for serialization
 - Structured logging via NestJS `Logger`
 - Environment variables validated at startup via ConfigModule
+
+## Audit Logging (Phase 5a)
+
+Service mutations on `OwnedResource` entities must log audit events. The `audit-mutation-must-log` ESLint rule (`apps/api/eslint-rules/audit-mutation-must-log.js`) enforces this.
+
+### Convention
+
+Every mutation method on a service must pair the `repo.save | delete | remove | update | insert` call with an `auditService.log{Create,Update,Delete}` call **in the same method body**:
+
+```typescript
+async update(id: string, dto: UpdateDto, ctx: UserContext): Promise<Foo> {
+  const before = await this.repo.findOneByOrFail({ id });
+  const after = await this.repo.save({ ...before, ...dto });
+  this.auditService.logUpdate(before, after);  // ← required
+  return after;
+}
+
+async delete(id: string): Promise<void> {
+  const before = await this.repo.findOneByOrFail({ id });
+  this.auditService.logDelete(before);          // ← required
+  await this.repo.remove(before);
+}
+```
+
+### `auditableFields` (per-entity)
+
+Each `OwnedResource` entity declares which columns get diffed and recorded. **Default = nothing logged.** Sensitive columns (token hashes, secrets, credentials) are NEVER on this list.
+
+```typescript
+@Entity('foo')
+export class Foo implements OwnedResource {
+  static auditableFields = ['name', 'description', 'organization_id'] as const;
+  // ...
+}
+```
+
+The snapshot test at `packages/shared/src/entities/__tests__/auditable-fields.snapshot.spec.ts` pins the current declarations — adding/removing fields surfaces as a snapshot diff that forces a deliberate "log this" or "redact" review.
+
+### Migration allowlist
+
+Files at `apps/api/.audit-migration-allowlist.json` are grandfathered until migrated. To migrate a service: add the audit calls + `auditableFields` declarations, then remove the file from the allowlist. The `/schedule` agent at `docs/superpowers/scheduled-agents/audit-burndown-drift.md` polls every 2 weeks for new sites that snuck past the lint rule.
+
+### References
+
+- Spec: [`docs/superpowers/specs/2026-05-02-rbac-phase5a-audit-completion-design.md`](../../docs/superpowers/specs/2026-05-02-rbac-phase5a-audit-completion-design.md)
+- Burndown: [`docs/superpowers/audits/2026-05-02-audit-phase5a-decisions.md`](../../docs/superpowers/audits/2026-05-02-audit-phase5a-decisions.md)
+- Plan: [`docs/superpowers/plans/2026-05-02-rbac-phase5a-audit-completion.md`](../../docs/superpowers/plans/2026-05-02-rbac-phase5a-audit-completion.md)

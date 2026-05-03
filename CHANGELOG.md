@@ -4,6 +4,21 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
+## [0.2.47.52] - 2026-05-03
+
+### Added
+- **RBAC Phase 5a — audit migration guard rule + drift detection (PR4).** Lays the Phase-3-style enforcement scaffolding for the upcoming service-layer audit migration:
+  - **`audit-mutation-must-log` ESLint rule** (`apps/api/eslint-rules/audit-mutation-must-log.js`) — flags any service `MethodDefinition` that calls a mutation method (`save`/`delete`/`remove`/`update`/`insert`) on a `repo|Repository|manager` receiver without a paired `auditService.log{Create,Update,Delete}` call in the same method body. Mirrors the structure of `no-direct-is-global-admin`: hardcoded `INFRASTRUCTURE_FILES` (audit service+module, `AuthorizedBaseService`, `TypeOrmBaseRepository`), JSON allowlist (`apps/api/.audit-migration-allowlist.json`), per-method scan with circular-`parent`-safe AST traversal. Registered as `error` in `apps/api/.eslintrc.js`; spec/test files exempt via `overrides`.
+  - **Seed allowlist (50 entries)** generated from a static scan of every service file under `apps/api/src` that mutates an `OwnedResource` entity. Six query-builder sites (`createQueryBuilder().delete()` / `.insert()`) the plan's grep regex didn't match were added after the initial lint surfaced them.
+  - **`auditableFields` snapshot test** (`packages/shared/src/entities/__tests__/auditable-fields.snapshot.spec.ts`) — enumerates every TypeORM entity that owns an `organization_id` column (45 entities) and pins each one's current `auditableFields` declaration. Initially every entity maps to `null`; declarations land in PR 5+. Adding/changing a declaration surfaces as a snapshot diff and forces a deliberate "log this" or "redact" review per Q10.
+  - **Allowlist JSON validity smoke test** (`apps/api/src/__tests__/audit-migration-allowlist.spec.ts`) — every CI run validates the allowlist parses cleanly, every entry resolves to an existing file under `apps/api/src`, no duplicates, POSIX paths only.
+  - **Burndown audit doc** (`docs/superpowers/audits/2026-05-02-audit-phase5a-decisions.md`) — self-contained reference: spec decisions Q1–Q11, the rule's `INFRASTRUCTURE_FILES` set, seed burndown table (56 / 0 / 56), priority migration order. Update on every migration PR.
+  - **Drift `/schedule` agent** (`docs/superpowers/scheduled-agents/audit-burndown-drift.md`) — every 2 weeks re-runs the discovery scan outside the allowlist and surfaces drift the lint rule missed. Stop condition: empty allowlist + 0 new sites for two consecutive runs.
+  - **`apps/api/CODING_RULES.md` "Audit Logging" section** — convention for paired `auditService.log{Create,Update,Delete}` calls + per-entity `auditableFields`, with pointers to the spec/burndown/plan.
+
+### Fixed
+- **PR3 regression:** `apps/api/src/modules/audit/audit-query.controller.ts:47` calls `authzService.isGlobalAdmin(ctx.roles)` directly (the Phase 3c-deprecated pattern). The dormant `PR Quality Gate - Test Suite` workflow has not run since March, so the regression slipped through PR3's merge. Added the file to `apps/api/.rbac-migration-allowlist.json` (which Phase 3c had successfully emptied) to keep this PR scope-clean. Migrating to `getCapabilities()` / `@RequiresCapability` is Phase 3c follow-up.
+
 ## [0.2.47.51] - 2026-05-02
 
 ### Added
