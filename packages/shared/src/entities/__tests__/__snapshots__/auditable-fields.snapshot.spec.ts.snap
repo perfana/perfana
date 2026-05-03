@@ -37,7 +37,11 @@ exports[`auditableFields snapshot — every OwnedResource entity has a stable de
   "GraphPreset": null,
   "MetricsSource": null,
   "NotificationChannel": null,
-  "OrganizationMember": null,
+  "OrganizationMember": [
+    "user_id",
+    "roles",
+    "organization_id",
+  ],
   "OwnedEntity": null,
   "Profile": null,
   "ProfileBenchmark": null,

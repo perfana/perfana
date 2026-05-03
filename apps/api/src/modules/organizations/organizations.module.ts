@@ -1,4 +1,4 @@
-import { Module } from '@nestjs/common';
+import { Module, OnModuleInit } from '@nestjs/common';
 import { TypeOrmModule } from '@nestjs/typeorm';
 import { OrganizationsController } from './organizations.controller';
 import { OrganizationMembersController } from './organization-members.controller';
@@ -7,15 +7,25 @@ import { OrganizationMembersService } from './organization-members.service';
 import { Organization, OrganizationMember } from '../../entities';
 import { CommonModule } from '../../common/common.module';
 import { AuthModule } from '../auth/auth.module';
+import { AuditModule } from '../audit/audit.module';
+import { AuditResourceRegistry } from '../audit/audit-resource-registry';
 
 @Module({
   imports: [
     TypeOrmModule.forFeature([Organization, OrganizationMember]),
     CommonModule, // Provides AuthorizationService for org-level access controls
     AuthModule, // Provides KeycloakAdminService for user search
+    AuditModule, // Phase 5a: provides AuditService + AuditResourceRegistry
   ],
   controllers: [OrganizationsController, OrganizationMembersController],
   providers: [OrganizationsService, OrganizationMembersService],
   exports: [OrganizationsService, OrganizationMembersService],
 })
-export class OrganizationsModule {}
+export class OrganizationsModule implements OnModuleInit {
+  constructor(private readonly auditRegistry: AuditResourceRegistry) {}
+
+  onModuleInit(): void {
+    this.auditRegistry.register('organizations', Organization);
+    this.auditRegistry.register('organization-members', OrganizationMember);
+  }
+}

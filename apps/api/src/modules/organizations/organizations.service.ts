@@ -1,8 +1,9 @@
 import { Injectable, Logger, NotFoundException, ForbiddenException, forwardRef, Inject } from '@nestjs/common';
 import { InjectRepository, InjectDataSource } from '@nestjs/typeorm';
 import { Repository, In, DataSource } from 'typeorm';
-import { Organization } from '../../entities';
+import { Organization, OwnedResource } from '../../entities';
 import { AuthorizationService } from '../../common/services/authorization.service';
+import { AuditService } from '../audit/audit.service';
 import { OrganizationMembersService } from './organization-members.service';
 import { CreateOrganizationDto, UpdateOrganizationDto } from './dto/organization.dto';
 
@@ -33,6 +34,7 @@ export class OrganizationsService {
     private readonly membersService: OrganizationMembersService,
     @InjectDataSource()
     private readonly dataSource: DataSource,
+    private readonly auditService: AuditService,
   ) {}
 
   /**
@@ -183,6 +185,10 @@ export class OrganizationsService {
       const organization = this.organizationRepository.create(createDto);
       const savedOrg = await this.organizationRepository.save(organization);
 
+      this.auditService.logCreate(savedOrg as unknown as OwnedResource, {
+        organizationIdOverride: savedOrg.id,
+      });
+
       this.logger.log(`Created organization: ${savedOrg.name} (${savedOrg.id}) by user ${userId}`);
 
       // Automatically add the creator as org-admin
@@ -240,8 +246,16 @@ export class OrganizationsService {
         }
       }
 
+      // Snapshot the before-state for the audit diff (clone before Object.assign).
+      const before = { ...organization } as Organization;
       Object.assign(organization, updateDto);
-      await this.organizationRepository.save(organization);
+      const after = await this.organizationRepository.save(organization);
+
+      this.auditService.logUpdate(
+        before as unknown as OwnedResource,
+        after as unknown as OwnedResource,
+        { organizationIdOverride: id },
+      );
 
       this.logger.log(`Updated organization: ${organization.name} (${id}) by user ${userId}`);
 
@@ -293,6 +307,15 @@ export class OrganizationsService {
 
       // Delete all associated data in a transaction (prevents partial deletes on failure)
       this.logger.warn(`Cascading delete for organization ${id} - this will delete ALL associated data including test runs!`);
+
+      // Audit the org-level DELETE before tearing down the row + cascades.
+      // The cascaded team / member / SUT / test-run deletions are intentionally
+      // not individually audited — they are implied by the org delete and the
+      // raw `manager.query` calls below would not surface to the audit lint
+      // rule anyway.
+      this.auditService.logDelete(organization as unknown as OwnedResource, {
+        organizationIdOverride: id,
+      });
 
       await this.dataSource.transaction(async (manager) => {
         // For each team, delete all dependent data
