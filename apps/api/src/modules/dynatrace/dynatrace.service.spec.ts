@@ -11,6 +11,7 @@ import axios from 'axios';
 import { createAuthorizationServiceMock } from '../../../test/mocks/authorization-service.mock';
 import { AuthorizationService } from '../../common/services/authorization.service';
 import { Capability } from '../../constants/capabilities.constants';
+import { AuditService } from '../audit/audit.service';
 
 jest.mock('axios');
 const mockedAxios = axios as jest.Mocked<typeof axios>;
@@ -18,6 +19,7 @@ const mockedAxios = axios as jest.Mocked<typeof axios>;
 describe('DynatraceService', () => {
   let service: DynatraceService;
   let repository: jest.Mocked<DynatraceRepository>;
+  let auditService: jest.Mocked<AuditService>;
 
   const mockUserId = 'test-user-id';
   const mockRoles = ['user'];
@@ -101,11 +103,20 @@ describe('DynatraceService', () => {
           provide: AuthorizationService,
           useValue: createAuthorizationServiceMock(),
         },
+        {
+          provide: AuditService,
+          useValue: {
+            logCreate: jest.fn(),
+            logUpdate: jest.fn(),
+            logDelete: jest.fn(),
+          },
+        },
       ],
     }).compile();
 
     service = module.get<DynatraceService>(DynatraceService);
     repository = module.get(DynatraceRepository);
+    auditService = module.get(AuditService);
   });
 
   afterEach(() => {
@@ -1094,6 +1105,14 @@ describe('DynatraceService', () => {
             provide: AuthorizationService,
             useValue: createAuthorizationServiceMock(),
           },
+          {
+            provide: AuditService,
+            useValue: {
+              logCreate: jest.fn(),
+              logUpdate: jest.fn(),
+              logDelete: jest.fn(),
+            },
+          },
         ],
       }).compile();
 
@@ -1159,6 +1178,248 @@ describe('DynatraceService', () => {
         expect(result._permissions).toEqual({ update: true, delete: true });
       });
 
+    });
+  });
+
+  // ---------------------------------------------------------------------------
+  // Audit-logging assertions (Phase 5a, PR9). Every Dynatrace audit call must
+  // pass `organizationIdOverride: <row>.organizationId` because all three
+  // entities (DynatraceConfig / DynatraceQuery / DynatraceEntityMapping) map
+  // their `organization_id` column to the camelCase property `organizationId`,
+  // which AuditService.dispatch does not pick up off `ref.organization_id`.
+  describe('audit logging (Phase 5a, PR9)', () => {
+    describe('DynatraceConfig', () => {
+      const createDto: CreateDynatraceConfigDto = {
+        host: 'https://example.live.dynatrace.com',
+        apiToken: 'dt0c01.test.token',
+        dynatraceType: 'saas',
+        label: 'Test',
+      };
+
+      it('logs CREATE with organizationIdOverride from the persisted config', async () => {
+        repository.findByHost.mockResolvedValue(null);
+        repository.create.mockResolvedValue(mockDynatraceConfig);
+        mockedAxios.get.mockResolvedValue({ data: { totalCount: 1 } });
+
+        await service.create(createDto, mockUserId, mockRoles);
+
+        expect(auditService.logCreate).toHaveBeenCalledTimes(1);
+        expect(auditService.logCreate).toHaveBeenCalledWith(
+          mockDynatraceConfig,
+          { organizationIdOverride: mockDynatraceConfig.organizationId },
+        );
+      });
+
+      it('logs UPDATE with before/after snapshots and organizationIdOverride', async () => {
+        const updateDto: UpdateDynatraceConfigDto = { label: 'Renamed' };
+        const before = { ...mockDynatraceConfig };
+        const after = { ...mockDynatraceConfig, label: 'Renamed' };
+        repository.findById.mockResolvedValue(before);
+        repository.update.mockResolvedValue(after);
+
+        await service.update('config-123', updateDto, mockUserId, mockRoles);
+
+        expect(auditService.logUpdate).toHaveBeenCalledTimes(1);
+        expect(auditService.logUpdate).toHaveBeenCalledWith(
+          before,
+          after,
+          { organizationIdOverride: before.organizationId },
+        );
+      });
+
+      it('logs DELETE before repository.delete and uses organizationIdOverride', async () => {
+        repository.findById.mockResolvedValue(mockDynatraceConfig);
+        repository.delete.mockResolvedValue(undefined);
+
+        await service.delete('config-123', mockUserId, mockRoles);
+
+        expect(auditService.logDelete).toHaveBeenCalledTimes(1);
+        expect(auditService.logDelete).toHaveBeenCalledWith(
+          mockDynatraceConfig,
+          { organizationIdOverride: mockDynatraceConfig.organizationId },
+        );
+        // logDelete must run before repository.delete — invocation-order check.
+        expect(
+          (auditService.logDelete as jest.Mock).mock.invocationCallOrder[0],
+        ).toBeLessThan(
+          (repository.delete as jest.Mock).mock.invocationCallOrder[0],
+        );
+      });
+    });
+
+    describe('DynatraceQuery', () => {
+      const createQueryDto: CreateDynatraceQueryDto = {
+        dynatraceConfigId: 'config-123',
+        systemUnderTestId: 'sys-123',
+        testEnvironment: 'production',
+        workload: 'load-test',
+        dashboardLabel: 'Performance Dashboard',
+        panelId: 1,
+        panelTitle: 'Response Time',
+        metricUnit: 'ms',
+        query: 'timeseries avg(dt.service.response_time)',
+        applicationDashboardId: 'dash-123',
+      };
+
+      it('createQuery logs CREATE with organizationIdOverride from the persisted query', async () => {
+        repository.findById.mockResolvedValue(mockDynatraceConfig);
+        repository.createQuery.mockResolvedValue(mockDynatraceQuery);
+
+        await service.createQuery(createQueryDto, mockUserId, mockRoles);
+
+        expect(auditService.logCreate).toHaveBeenCalledTimes(1);
+        const [ref, opts] = (auditService.logCreate as jest.Mock).mock.calls[0];
+        // Wrapper preserves the persisted shape so the diff helper can read fields.
+        expect(ref).toEqual(expect.objectContaining({ id: mockDynatraceQuery.id }));
+        expect(opts).toEqual({ organizationIdOverride: mockDynatraceQuery.organizationId });
+      });
+
+      it('createQuerySmart logs CREATE with organizationIdOverride from the persisted query', async () => {
+        repository.findById.mockResolvedValue(mockDynatraceConfig);
+        repository.findDashboardByLabel.mockResolvedValue(null);
+        repository.createQueryWithSharedUuid.mockResolvedValue(mockDynatraceQuery);
+
+        await service.createQuerySmart(createQueryDto, mockUserId, mockRoles);
+
+        expect(auditService.logCreate).toHaveBeenCalledTimes(1);
+        const [ref, opts] = (auditService.logCreate as jest.Mock).mock.calls[0];
+        expect(ref).toEqual(expect.objectContaining({ id: mockDynatraceQuery.id }));
+        expect(opts).toEqual({ organizationIdOverride: mockDynatraceQuery.organizationId });
+      });
+
+      it('bulkImportQuery logs one CREATE per persisted row in shared-UUID mode', async () => {
+        const second = { ...mockDynatraceQuery, id: 'query-456' };
+        repository.findById.mockResolvedValue(mockDynatraceConfig);
+        repository.bulkCreateQueryWithSharedUuid.mockResolvedValue([
+          mockDynatraceQuery,
+          second,
+        ]);
+
+        await service.bulkImportQuery(
+          [createQueryDto, { ...createQueryDto, panelTitle: 'Throughput' }],
+          mockUserId,
+          mockRoles,
+          true,
+        );
+
+        expect(auditService.logCreate).toHaveBeenCalledTimes(2);
+        const ids = (auditService.logCreate as jest.Mock).mock.calls.map(
+          (c) => (c[0] as { id: string }).id,
+        );
+        expect(ids).toEqual([mockDynatraceQuery.id, second.id]);
+      });
+
+      it('bulkImportQuery non-shared-UUID mode delegates to createQuerySmart per row', async () => {
+        // Per-row audit happens inside createQuerySmart; this asserts the loop
+        // path doesn't double-log or skip rows.
+        repository.findById.mockResolvedValue(mockDynatraceConfig);
+        repository.findDashboardByLabel.mockResolvedValue(null);
+        repository.createQueryWithSharedUuid.mockResolvedValue(mockDynatraceQuery);
+
+        await service.bulkImportQuery([createQueryDto], mockUserId, mockRoles, false);
+
+        expect(auditService.logCreate).toHaveBeenCalledTimes(1);
+      });
+
+      it('updateQuery logs UPDATE with before/after snapshots and organizationIdOverride', async () => {
+        const updateDto: UpdateDynatraceQueryDto = { metricUnit: 'seconds' };
+        const after = { ...mockDynatraceQuery, metricUnit: 'seconds' };
+        repository.findQueryById.mockResolvedValue(mockDynatraceQuery);
+        repository.updateQuery.mockResolvedValue(after);
+
+        await service.updateQuery('query-123', updateDto, mockUserId, mockRoles);
+
+        expect(auditService.logUpdate).toHaveBeenCalledTimes(1);
+        const [before, afterArg, opts] = (auditService.logUpdate as jest.Mock).mock.calls[0];
+        expect(before).toEqual(expect.objectContaining({ id: mockDynatraceQuery.id, metricUnit: 'ms' }));
+        expect(afterArg).toEqual(expect.objectContaining({ id: mockDynatraceQuery.id, metricUnit: 'seconds' }));
+        expect(opts).toEqual({ organizationIdOverride: mockDynatraceQuery.organizationId });
+      });
+
+      it('deleteQuery logs DELETE before repository.deleteQuery', async () => {
+        repository.findQueryById.mockResolvedValue(mockDynatraceQuery);
+        repository.deleteQuery.mockResolvedValue(undefined);
+
+        await service.deleteQuery('query-123', mockUserId, mockRoles);
+
+        expect(auditService.logDelete).toHaveBeenCalledTimes(1);
+        const [ref, opts] = (auditService.logDelete as jest.Mock).mock.calls[0];
+        expect(ref).toEqual(expect.objectContaining({ id: mockDynatraceQuery.id }));
+        expect(opts).toEqual({ organizationIdOverride: mockDynatraceQuery.organizationId });
+        expect(
+          (auditService.logDelete as jest.Mock).mock.invocationCallOrder[0],
+        ).toBeLessThan(
+          (repository.deleteQuery as jest.Mock).mock.invocationCallOrder[0],
+        );
+      });
+    });
+
+    describe('DynatraceEntityMapping', () => {
+      const createMappingDto: CreateEntityMappingDto = {
+        dynatraceConfigId: 'config-123',
+        systemUnderTestId: 'sys-123',
+        testEnvironment: 'production',
+        workload: 'load-test',
+        entityId: 'entity-123',
+        entityDisplayName: 'Service 1',
+        entityType: 'SERVICE',
+        level: 'sut_testenv_workload' as const,
+      };
+
+      it('createEntityMapping logs CREATE with organizationIdOverride from the parent config', async () => {
+        const mockMapping = {
+          id: 'mapping-1',
+          ...createMappingDto,
+          dynatraceLabel: null,
+          createdAt: new Date(),
+          updatedAt: new Date(),
+        };
+        repository.findById.mockResolvedValue(mockDynatraceConfig);
+        repository.createEntityMapping.mockResolvedValue(mockMapping as any);
+
+        await service.createEntityMapping(createMappingDto, mockUserId, mockRoles);
+
+        expect(auditService.logCreate).toHaveBeenCalledTimes(1);
+        const [ref, opts] = (auditService.logCreate as jest.Mock).mock.calls[0];
+        // The DTO returned by the repo doesn't carry organizationId on the
+        // shape, but the service threaded the parent config's org id through
+        // for both ownership and audit scope.
+        expect(ref).toEqual(expect.objectContaining({ id: mockMapping.id }));
+        expect(opts).toEqual({
+          organizationIdOverride: mockDynatraceConfig.organizationId,
+        });
+      });
+
+      it('deleteEntityMapping logs DELETE before repository.deleteEntityMapping', async () => {
+        const mockMapping = {
+          id: 'mapping-1',
+          dynatraceConfigId: 'config-123',
+          systemUnderTestId: 'sys-123',
+          testEnvironment: 'production',
+          workload: 'load-test',
+          entityId: 'entity-123',
+          entityDisplayName: 'Service 1',
+          entityType: 'SERVICE',
+          level: 'sut' as const,
+          organizationId: 'org-123',
+          createdAt: new Date(),
+          updatedAt: new Date(),
+        };
+        repository.getEntityMappingById.mockResolvedValue(mockMapping as any);
+        repository.deleteEntityMapping.mockResolvedValue(undefined);
+
+        await service.deleteEntityMapping('mapping-1', mockUserId, mockRoles);
+
+        expect(auditService.logDelete).toHaveBeenCalledTimes(1);
+        const [ref, opts] = (auditService.logDelete as jest.Mock).mock.calls[0];
+        expect(ref).toEqual(expect.objectContaining({ id: mockMapping.id }));
+        expect(opts).toEqual({ organizationIdOverride: mockMapping.organizationId });
+        expect(
+          (auditService.logDelete as jest.Mock).mock.invocationCallOrder[0],
+        ).toBeLessThan(
+          (repository.deleteEntityMapping as jest.Mock).mock.invocationCallOrder[0],
+        );
+      });
     });
   });
 });
