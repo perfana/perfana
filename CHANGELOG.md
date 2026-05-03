@@ -4,6 +4,15 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
+## [0.2.47.54] - 2026-05-03
+
+### Added
+- **Local pre-flight lint gate** (`npm run preflight` = `turbo run lint type-check`) wired to `git push` via `.githooks/pre-push`. The `prepare` script auto-installs the hook on `npm install` (`git config core.hooksPath .githooks`). Mirrors gstack `/ship`'s pre-flight pattern so PR-time regressions get caught locally — turbo cache typically resolves in under a second on warm trees, far faster than waiting on CI. Bypass: `git push --no-verify`.
+
+### Fixed
+- **Worker lint regression** — `apps/worker/src/schedulers/AuditPartitionManager.ts:69` had a single-line `if (!m) continue;` that violated the worker's `curly` ESLint rule. Introduced by PR2 (#230); slipped past because the dormant CI workflow didn't run. Wrapped the body in braces.
+- **Web lint regression** — `app/integrations/components/IntegrationCard.test.tsx` (and other test files) were causing `@typescript-eslint/parser` to fail with a `parserOptions.project` error because the web `tsconfig.json` excludes `**/*.test.tsx`. Long-standing — undetected since PR #183. Added the standard test-file `ignorePatterns` block to `apps/web/.eslintrc.json`.
+
 ## [0.2.47.53] - 2026-05-03
 
 ### Changed

@@ -1,5 +1,18 @@
 {
   "extends": "next/core-web-vitals",
+  "ignorePatterns": [
+    "**/*.test.ts",
+    "**/*.test.tsx",
+    "**/*.spec.ts",
+    "**/*.spec.tsx",
+    "**/__tests__/**",
+    "**/__mocks__/**",
+    "jest.config.js",
+    "jest.setup.ts",
+    "next.config.js",
+    "tailwind.config.js",
+    "postcss.config.js"
+  ],
   "rules": {
     "@typescript-eslint/no-unused-vars": [
       "warn",
