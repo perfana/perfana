@@ -40,6 +40,7 @@ describe('AuditQueryController', () => {
       getCapabilities: jest.fn().mockResolvedValue([]),
       getAccessibleOrganizations: jest.fn().mockResolvedValue([]),
       canAccessResource: jest.fn().mockResolvedValue({ allowed: true, reason: 'ok' }),
+      isOrgAdminInAnyOrganization: jest.fn().mockResolvedValue(false),
     } as unknown as jest.Mocked<AuthorizationService>;
 
     const dataSource = {
@@ -159,6 +160,52 @@ describe('AuditQueryController', () => {
       const out = await ctl.findByResource('api-keys', 'r-1', mockUserCtx());
       expect(out).toEqual([{ id: 'a-1' }]);
       expect(svc.findByResource).toHaveBeenCalledWith('api-keys', 'r-1', expect.any(Object));
+    });
+  });
+
+  describe('GET /api/audit-logs/capabilities', () => {
+    it('returns cross-org scope for SystemAuditRead callers', async () => {
+      authz.getCapabilities.mockResolvedValue([Capability.SystemAuditRead]);
+      reg.knownTypes.mockReturnValue(['api-keys', 'benchmarks']);
+
+      const out = await ctl.getCapabilities(mockUserCtx({ roles: ['super-admin'] }));
+
+      expect(out).toEqual({
+        canView: true,
+        scope: 'cross-org',
+        accessibleOrganizationIds: [],
+        knownResourceTypes: ['api-keys', 'benchmarks'],
+      });
+    });
+
+    it('returns org-scoped + accessible org ids for org-admins', async () => {
+      authz.getCapabilities.mockResolvedValue([]);
+      authz.isOrgAdminInAnyOrganization.mockResolvedValue(true);
+      authz.getAccessibleOrganizations.mockResolvedValue(['o1', 'o2']);
+      reg.knownTypes.mockReturnValue(['api-keys']);
+
+      const out = await ctl.getCapabilities(mockUserCtx({ roles: ['org-admin'] }));
+
+      expect(out).toEqual({
+        canView: true,
+        scope: 'org-scoped',
+        accessibleOrganizationIds: ['o1', 'o2'],
+        knownResourceTypes: ['api-keys'],
+      });
+    });
+
+    it('returns canView=false for users without audit access', async () => {
+      authz.getCapabilities.mockResolvedValue([]);
+      authz.isOrgAdminInAnyOrganization.mockResolvedValue(false);
+
+      const out = await ctl.getCapabilities(mockUserCtx({ roles: ['user'] }));
+
+      expect(out).toEqual({
+        canView: false,
+        scope: 'none',
+        accessibleOrganizationIds: [],
+        knownResourceTypes: [],
+      });
     });
   });
 });

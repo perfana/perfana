@@ -82,6 +82,58 @@ export class AuditQueryController {
   }
 
   /**
+   * Probe whether the caller can view audit logs and at what scope.
+   * Used by the frontend sidebar to decide whether to render the
+   * "Audit Logs" item, and by the page itself to decide whether to expose
+   * the cross-org filter or pre-scope to the user's accessible orgs.
+   *
+   * - `cross-org`: SystemAuditRead capability (super-admin / system-admin / support).
+   * - `org-scoped`: org-admin in at least one org. `accessibleOrganizationIds` is populated.
+   * - `none`: no access. Frontend should hide the sidebar item.
+   *
+   * Authenticated users only (KeycloakEnhancedAuthGuard); never returns 403 —
+   * an unauthorized caller gets `{ canView: false, scope: 'none' }`.
+   */
+  @Get('capabilities')
+  @ApiOperation({ summary: 'Probe audit-log access for the current user' })
+  async getCapabilities(
+    @UserCtx() ctx: UserContext,
+  ): Promise<{
+    canView: boolean;
+    scope: 'cross-org' | 'org-scoped' | 'none';
+    accessibleOrganizationIds: string[];
+    knownResourceTypes: string[];
+  }> {
+    const caps = await this.authz.getCapabilities(ctx.userId, ctx.roles, null);
+    if (caps.includes(Capability.SystemAuditRead)) {
+      return {
+        canView: true,
+        scope: 'cross-org',
+        accessibleOrganizationIds: [],
+        knownResourceTypes: this.registry.knownTypes(),
+      };
+    }
+
+    const isOrgAdmin = await this.authz.isOrgAdminInAnyOrganization(ctx.userId);
+    if (isOrgAdmin) {
+      const accessible = await this.authz.getAccessibleOrganizations(ctx.userId);
+      return {
+        canView: true,
+        scope: 'org-scoped',
+        accessibleOrganizationIds: accessible,
+        knownResourceTypes: this.registry.knownTypes(),
+      };
+    }
+
+    return {
+      canView: false,
+      scope: 'none',
+      accessibleOrganizationIds: [],
+      knownResourceTypes: [],
+    };
+  }
+
+  /**
    * Per-resource history.
    * RBAC: caller must have read access to the resource via
    * AuthorizationService.canAccessResource(userId, roles, resource).

@@ -1,6 +1,6 @@
 'use client'
 
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import Link from 'next/link'
 import { usePathname } from 'next/navigation'
 import { useSidebar } from '@/contexts/sidebar-context'
@@ -41,10 +41,12 @@ import {
   DarkMode,
   LightMode,
   Schedule,
+  History,
 } from '@mui/icons-material'
 import { ThemePreference } from '@/contexts/theme-context'
 import { GLOBAL_ADMIN_ROLES } from '@/lib/constants/roles'
 import { OrganizationSelector } from './OrganizationSelector'
+import { fetchAuditCapabilities } from '@/lib/audit-api'
 
 interface NavigationItem {
   href: string
@@ -59,7 +61,11 @@ interface NavigationGroup {
   items: NavigationItem[]
 }
 
-const getNavigationItems = (hasRole: (role: string) => boolean, hasAnyRole: (roles: string[]) => boolean): NavigationGroup[] => {
+const getNavigationItems = (
+  hasRole: (role: string) => boolean,
+  hasAnyRole: (roles: string[]) => boolean,
+  canViewAuditLogs: boolean,
+): NavigationGroup[] => {
   const isGlobalAdmin = hasAnyRole(Array.from(GLOBAL_ADMIN_ROLES))
 
   return [
@@ -89,6 +95,13 @@ const getNavigationItems = (hasRole: (role: string) => boolean, hasAnyRole: (rol
         },
         { href: '/settings', label: 'Settings', icon: <Settings /> },
         { href: '/settings/profiles', label: 'Profiles', icon: <Tune /> },
+        // Audit Logs — visible only to callers with cross-org or org-scoped
+        // audit access (probed via /audit-logs/capabilities at mount time).
+        ...(canViewAuditLogs ? [{
+          href: '/audit-logs',
+          label: 'Audit Logs',
+          icon: <History />,
+        }] : []),
       ].filter(Boolean) as NavigationItem[]
     }
   ]
@@ -104,9 +117,29 @@ export function Sidebar() {
   const { isDark, preference, setPreference } = useThemeMode()
   const theme = useTheme()
   const [anchorEl, setAnchorEl] = useState<null | HTMLElement>(null)
+  const [canViewAuditLogs, setCanViewAuditLogs] = useState(false)
+
+  // Probe whether the current user can view audit logs. Hidden by default;
+  // only revealed once the backend confirms cross-org or org-scoped access.
+  // We re-probe whenever the authenticated user changes (login / logout).
+  useEffect(() => {
+    if (!user) {
+      setCanViewAuditLogs(false)
+      return
+    }
+    let cancelled = false
+    fetchAuditCapabilities()
+      .then(caps => {
+        if (!cancelled) setCanViewAuditLogs(caps.canView)
+      })
+      .catch(() => {
+        if (!cancelled) setCanViewAuditLogs(false)
+      })
+    return () => { cancelled = true }
+  }, [user])
 
   // Get navigation items based on user roles
-  const navigationItems = getNavigationItems(hasRole, hasAnyRole)
+  const navigationItems = getNavigationItems(hasRole, hasAnyRole, canViewAuditLogs)
 
   const handleLinkClick = () => {
     if (isMobile) {
