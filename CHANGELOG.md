@@ -4,6 +4,11 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
+## [0.2.47.66] - 2026-05-03
+
+### Fixed
+- **`grafana-sync` no longer fails to create benchmarks with `null value in column "organization_id" violates not-null constraint`.** `AutoConfigUpdatesService.insertBenchmarkBasedOnProfileBenchmark` was passing `organization_id` (snake_case) into `benchmarkRepo.create()`, but the `Benchmark` entity maps the property `organizationId` (camelCase) → DB column `organization_id` via TypeORM's `name:` option. TypeORM silently dropped the unknown `organization_id` property, so every INSERT went out without an org id and slammed into the NOT NULL constraint added by Phase 4 (commit c7d94ee, 2026-05-02). Fix: pass `organizationId: testRun.organizationId` (camelCase) and drop the now-impossible `|| null` fallback. Adds a regression test that asserts `benchmarkRepo.create` is called with the camelCase `organizationId` AND that `organization_id` is not present on the create args, so the silent-drop pattern can't reappear.
+
 ## [0.2.47.65] - 2026-05-03
 
 ### Fixed
