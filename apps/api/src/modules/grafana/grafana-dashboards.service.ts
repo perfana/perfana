@@ -12,6 +12,7 @@ import { GrafanaDashboard as GrafanaDashboardEntity } from '../../entities';
 import { AuthorizationService } from '../../common/services/authorization.service';
 import { withOrgFilter } from '../../common/utils/with-org-filter';
 import { OwnedResource } from '@perfana/shared';
+import { AuditService } from '../audit/audit.service';
 
 export interface GrafanaDashboard {
   id: string;
@@ -49,6 +50,7 @@ export class GrafanaDashboardsService {
     private grafanaDashboardRepo: Repository<GrafanaDashboardEntity>,
     private readonly grafanaClientService: GrafanaClientService,
     private readonly authzService: AuthorizationService,
+    private readonly auditService: AuditService,
   ) {}
 
   /**
@@ -275,6 +277,13 @@ export class GrafanaDashboardsService {
 
       const result = await this.grafanaDashboardRepo.save(dashboard);
 
+      // Phase 5a: GrafanaDashboard.organization_id maps to camelCase property
+      // organizationId, so AuditService.dispatch cannot read it directly —
+      // pass organizationIdOverride for the org-scope tag.
+      this.auditService.logCreate(result as unknown as OwnedResource, {
+        organizationIdOverride: result.organizationId,
+      });
+
       this.logger.log(`Created Grafana dashboard: ${result.name} (${result.id}) by user: ${userId}`);
 
       return {
@@ -309,8 +318,15 @@ export class GrafanaDashboardsService {
     this.logger.debug(`update: id=${id}, userId=${userId}`);
 
     try {
-      // Verify exists and user has access (org check in findOne)
-      await this.findOne(id, userId, roles);
+      // Load the entity directly so we have both the prototype (for the audit
+      // diff) and the pre-update snapshot. Replaces the previous
+      // `findOne(id, userId, roles)` call — same DB round-trip, but the
+      // service-layer findOne mapped to a DTO and lost the prototype.
+      const before = await this.grafanaDashboardRepo.findOne({ where: { id } });
+      if (!before) {
+        throw new NotFoundException(`Grafana dashboard with ID ${id} not found`);
+      }
+      await this.verifyOrgAccess(before, userId, roles);
 
       const updateData: Partial<GrafanaDashboardEntity> = {
         updated: new Date()
@@ -339,6 +355,12 @@ export class GrafanaDashboardsService {
       if (!result) {
         throw new Error('Failed to fetch updated Grafana dashboard');
       }
+
+      this.auditService.logUpdate(
+        before as unknown as OwnedResource,
+        result as unknown as OwnedResource,
+        { organizationIdOverride: before.organizationId ?? result.organizationId },
+      );
 
       this.logger.log(`Updated Grafana dashboard: ${result.name} (${result.id}) by user: ${userId}`);
 
@@ -374,8 +396,20 @@ export class GrafanaDashboardsService {
     this.logger.debug(`remove: id=${id}, userId=${userId}`);
 
     try {
-      // Verify exists and user has access (org check in findOne)
-      await this.findOne(id, userId, roles);
+      // Load the entity directly so we have the prototype (for auditableFields
+      // resolution). Replaces `findOne(id, userId, roles)` — same DB round-trip
+      // but keeps the entity instance instead of the mapped DTO.
+      const entity = await this.grafanaDashboardRepo.findOne({ where: { id } });
+      if (!entity) {
+        throw new NotFoundException(`Grafana dashboard with ID ${id} not found`);
+      }
+      await this.verifyOrgAccess(entity, userId, roles);
+
+      // logDelete fires BEFORE the row is removed so the diff captures the
+      // pre-delete state.
+      this.auditService.logDelete(entity as unknown as OwnedResource, {
+        organizationIdOverride: entity.organizationId,
+      });
 
       await this.grafanaDashboardRepo.delete(id);
 

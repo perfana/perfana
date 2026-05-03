@@ -6,6 +6,7 @@ import { CreateGrafanaInstanceDto, UpdateGrafanaInstanceDto } from './dto/grafan
 import { AuthorizationService } from '../../common/services/authorization.service';
 import { withOrgFilter } from '../../common/utils/with-org-filter';
 import { OwnedResource } from '@perfana/shared';
+import { AuditService } from '../audit/audit.service';
 
 export interface GrafanaInstance {
   id: string;
@@ -38,6 +39,7 @@ export class GrafanaInstancesService {
     @InjectRepository(GrafanaInstanceEntity)
     private grafanaInstanceRepo: Repository<GrafanaInstanceEntity>,
     private readonly authzService: AuthorizationService,
+    private readonly auditService: AuditService,
   ) {}
 
   /**
@@ -203,6 +205,13 @@ export class GrafanaInstancesService {
 
       const savedEntity = await this.grafanaInstanceRepo.save(entity);
 
+      // Phase 5a: GrafanaInstance.organization_id maps to camelCase property
+      // organizationId, so AuditService.dispatch cannot read it off ref directly —
+      // pass organizationIdOverride so the audit row is org-scoped.
+      this.auditService.logCreate(savedEntity as unknown as OwnedResource, {
+        organizationIdOverride: savedEntity.organizationId,
+      });
+
       this.logger.log(`Grafana instance created: ${createDto.label} by user ${userId}`);
       return this.mapEntityToDto(savedEntity);
     } catch (error) {
@@ -245,6 +254,12 @@ export class GrafanaInstancesService {
         throw new ForbiddenException('You do not have permission to modify this Grafana instance');
       }
 
+      // Capture pre-update snapshot for the audit diff. The mutation that
+      // follows mutates `entity` in place, so we clone via Object.assign onto
+      // a fresh prototype to keep `before.constructor.auditableFields`
+      // resolvable.
+      const before = Object.assign(new GrafanaInstanceEntity(), entity);
+
       // Update only provided fields
       if (updateDto.label !== undefined) entity.label = updateDto.label;
       if (updateDto.clientUrl !== undefined) entity.client_url = updateDto.clientUrl;
@@ -259,6 +274,12 @@ export class GrafanaInstancesService {
       entity.updatedBy = userId;
 
       const updatedEntity = await this.grafanaInstanceRepo.save(entity);
+
+      this.auditService.logUpdate(
+        before as unknown as OwnedResource,
+        updatedEntity as unknown as OwnedResource,
+        { organizationIdOverride: before.organizationId ?? updatedEntity.organizationId },
+      );
 
       this.logger.log(`Grafana instance updated: ${id} by user ${userId}`);
       return this.mapEntityToDto(updatedEntity);
@@ -301,6 +322,13 @@ export class GrafanaInstancesService {
       if (!modifyResult.allowed) {
         throw new ForbiddenException('You do not have permission to delete this Grafana instance');
       }
+
+      // Phase 5a: log DELETE before the row is removed so the diff captures the
+      // pre-delete state. organizationIdOverride bridges the camelCase property /
+      // snake_case column mismatch.
+      this.auditService.logDelete(entity as unknown as OwnedResource, {
+        organizationIdOverride: entity.organizationId,
+      });
 
       await this.grafanaInstanceRepo.remove(entity);
 

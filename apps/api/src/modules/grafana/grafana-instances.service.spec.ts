@@ -20,10 +20,12 @@ import { GrafanaInstancesService } from './grafana-instances.service';
 import { GrafanaInstance as GrafanaInstanceEntity } from '../../entities';
 import { createAuthorizationServiceMock } from '../../../test/mocks/authorization-service.mock';
 import { AuthorizationService } from '../../common/services/authorization.service';
+import { AuditService } from '../audit/audit.service';
 
 describe('GrafanaInstancesService', () => {
   let service: GrafanaInstancesService;
   let repository: jest.Mocked<Repository<GrafanaInstanceEntity>>;
+  let auditService: jest.Mocked<AuditService>;
 
   // Mock data factory
   const createMockEntity = (overrides?: Partial<GrafanaInstanceEntity>): GrafanaInstanceEntity => ({
@@ -73,11 +75,20 @@ describe('GrafanaInstancesService', () => {
           provide: AuthorizationService,
           useValue: createAuthorizationServiceMock(),
         },
+        {
+          provide: AuditService,
+          useValue: {
+            logCreate: jest.fn(),
+            logUpdate: jest.fn(),
+            logDelete: jest.fn(),
+          },
+        },
       ],
     }).compile();
 
     service = module.get<GrafanaInstancesService>(GrafanaInstancesService);
     repository = module.get(getRepositoryToken(GrafanaInstanceEntity));
+    auditService = module.get(AuditService);
 
     // Suppress logger output in tests
     jest.spyOn(Logger.prototype, 'log').mockImplementation();
@@ -1241,6 +1252,72 @@ describe('GrafanaInstancesService', () => {
       // Assert - Connection test
       expect(connectionResult.success).toBe(true);
       expect(connectionResult.message).toContain('Snapshot for Testing');
+    });
+  });
+
+  describe('audit logging (Phase 5a, PR10)', () => {
+    const mockOrgId = 'org-grafana-1';
+
+    it('logs CREATE with organizationIdOverride from the persisted instance', async () => {
+      const created = createMockEntity({ id: 'gi-1', label: 'New', organizationId: mockOrgId } as never);
+      repository.create.mockReturnValue(created);
+      repository.save.mockResolvedValue(created);
+
+      await service.create(
+        {
+          label: 'New',
+          clientUrl: 'https://grafana.example.com',
+          orgId: 'org-1',
+          apiKey: 'secret',
+        } as never,
+        mockUserId,
+        mockRoles,
+      );
+
+      expect(auditService.logCreate).toHaveBeenCalledTimes(1);
+      expect(auditService.logCreate).toHaveBeenCalledWith(
+        created,
+        { organizationIdOverride: mockOrgId },
+      );
+    });
+
+    it('logs UPDATE with cloned before-snapshot and organizationIdOverride', async () => {
+      const before = createMockEntity({
+        id: 'gi-2',
+        label: 'Original',
+        organizationId: mockOrgId,
+      } as never);
+      repository.findOne.mockResolvedValue(before);
+      // save() mutates entity in place; capture the value at call time so the
+      // assertion sees the post-mutation snapshot.
+      repository.save.mockImplementation(async (e) => e as GrafanaInstanceEntity);
+
+      await service.update('gi-2', { label: 'Renamed' } as never, mockUserId, mockRoles);
+
+      expect(auditService.logUpdate).toHaveBeenCalledTimes(1);
+      const [beforeArg, afterArg, opts] = (auditService.logUpdate as jest.Mock).mock.calls[0];
+      expect(beforeArg).toEqual(expect.objectContaining({ id: 'gi-2', label: 'Original' }));
+      expect(afterArg).toEqual(expect.objectContaining({ id: 'gi-2', label: 'Renamed' }));
+      expect(opts).toEqual({ organizationIdOverride: mockOrgId });
+    });
+
+    it('logs DELETE before repository.remove', async () => {
+      const entity = createMockEntity({ id: 'gi-3', organizationId: mockOrgId } as never);
+      repository.findOne.mockResolvedValue(entity);
+      repository.remove.mockResolvedValue(entity);
+
+      await service.remove('gi-3', mockUserId, mockRoles);
+
+      expect(auditService.logDelete).toHaveBeenCalledTimes(1);
+      expect(auditService.logDelete).toHaveBeenCalledWith(
+        entity,
+        { organizationIdOverride: mockOrgId },
+      );
+      expect(
+        (auditService.logDelete as jest.Mock).mock.invocationCallOrder[0],
+      ).toBeLessThan(
+        (repository.remove as jest.Mock).mock.invocationCallOrder[0],
+      );
     });
   });
 });
