@@ -24,6 +24,7 @@ import {
   TestRun,
   ReportStatus,
   ReportSectionConfig,
+  SystemUnderTest,
 } from '../../../entities';
 import {
   ResourceNotFoundException,
@@ -142,6 +143,16 @@ describe('ReportGenerationService', () => {
               where: jest.fn().mockReturnThis(),
               andWhere: jest.fn().mockReturnThis(),
               getOne: jest.fn().mockResolvedValue(null),
+            }),
+          },
+        },
+        {
+          provide: getRepositoryToken(SystemUnderTest),
+          useValue: {
+            findOne: jest.fn().mockResolvedValue({
+              id: 'system-mock',
+              organization_id: 'org-mock',
+              team_id: undefined,
             }),
           },
         },

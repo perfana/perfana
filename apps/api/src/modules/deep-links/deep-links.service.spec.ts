@@ -20,7 +20,7 @@ import { DeepLink } from './entities/deep-link.entity';
 import { CreateDeepLinkDto } from './dto/create-deep-link.dto';
 import { UpdateDeepLinkDto } from './dto/update-deep-link.dto';
 import { CopyDeepLinksDto } from './dto/copy-deep-links.dto';
-import { TestRunConfiguration, TestRun as TestRunEntity, SystemUnderTest } from '../../entities';
+import { TestRunConfiguration, TestRun as TestRunEntity, SystemUnderTest, Profile } from '../../entities';
 import { ResourceNotFoundException } from '../../common/exceptions/business.exception';
 import { AuthorizationService } from '../../common/services/authorization.service';
 import { createAuthorizationServiceMock } from '../../../test/mocks/authorization-service.mock';
@@ -117,6 +117,17 @@ describe('DeepLinksService', () => {
         {
           provide: getRepositoryToken(SystemUnderTest),
           useValue: mockSystemUnderTestRepository,
+        },
+        {
+          provide: getRepositoryToken(Profile),
+          useValue: {
+            findOne: jest.fn().mockResolvedValue({
+              id: 'profile-uuid',
+              name: 'profile-mock',
+              organizationId: 'org-uuid',
+              teamId: undefined,
+            }),
+          },
         },
         {
           provide: AuthorizationService,
@@ -228,7 +239,10 @@ describe('DeepLinksService', () => {
 
         // Assert
         expect(result).toEqual(mockDeepLink);
-        expect(repository.create).toHaveBeenCalledWith(createDto);
+        expect(repository.create).toHaveBeenCalledWith(createDto, {
+          organizationId: 'org-uuid',
+          teamId: undefined,
+        });
       });
 
       it('should create deep link with optional templateDeepLinkId', async () => {
@@ -250,7 +264,10 @@ describe('DeepLinksService', () => {
         // Assert
         expect(result).toEqual(deepLinkWithTemplate);
         expect(result.templateDeepLinkId).toBe('template-uuid');
-        expect(repository.create).toHaveBeenCalledWith(createDto);
+        expect(repository.create).toHaveBeenCalledWith(createDto, {
+          organizationId: 'org-uuid',
+          teamId: undefined,
+        });
       });
     });
 
@@ -1215,7 +1232,10 @@ describe('DeepLinksService', () => {
 
         // Assert
         expect(result).toEqual(genericDeepLink);
-        expect(repository.createGeneric).toHaveBeenCalledWith(createDto);
+        expect(repository.createGeneric).toHaveBeenCalledWith(createDto, {
+          organizationId: 'org-uuid',
+          teamId: undefined,
+        });
       });
     });
   });
@@ -1419,14 +1439,17 @@ describe('DeepLinksService', () => {
 
       // Assert
       expect(result).toEqual({ copied: 1, skipped: 0, total: 1 });
-      expect(repository.create).toHaveBeenCalledWith({
-        systemUnderTestId: 'target-system-uuid',
-        testEnvironment: 'production',
-        workload: 'load',
-        name: 'Grafana Dashboard',
-        url: sourceLink.url,
-        tags: ['grafana', 'monitoring'],
-      });
+      expect(repository.create).toHaveBeenCalledWith(
+        {
+          systemUnderTestId: 'target-system-uuid',
+          testEnvironment: 'production',
+          workload: 'load',
+          name: 'Grafana Dashboard',
+          url: sourceLink.url,
+          tags: ['grafana', 'monitoring'],
+        },
+        { organizationId: 'org-uuid', teamId: undefined },
+      );
     });
 
     it('should skip conflicting deep links when conflictStrategy is skip', async () => {
@@ -1491,6 +1514,7 @@ describe('DeepLinksService', () => {
       expect(repository.create).toHaveBeenCalledTimes(1);
       expect(repository.create).toHaveBeenCalledWith(
         expect.objectContaining({ name: 'Grafana Dashboard' }),
+        expect.objectContaining({ organizationId: 'org-uuid' }),
       );
     });
 
@@ -1570,6 +1594,7 @@ describe('DeepLinksService', () => {
       // Tags should default to empty array when missing from source
       expect(repository.create).toHaveBeenCalledWith(
         expect.objectContaining({ tags: [] }),
+        expect.objectContaining({ organizationId: 'org-uuid' }),
       );
     });
 

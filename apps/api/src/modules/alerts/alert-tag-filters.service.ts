@@ -1,4 +1,4 @@
-import { Injectable, NotFoundException } from '@nestjs/common';
+import { Injectable, NotFoundException, ForbiddenException } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { AlertTagFilter } from '../../entities';
@@ -53,6 +53,18 @@ export class AlertTagFiltersService {
   }
 
   async create(dto: CreateAlertTagFilterDto, userId: string): Promise<AlertTagFilter> {
+    // AlertTagFilter.organization_id is NOT NULL. Use the DTO value if supplied,
+    // otherwise default to the caller's first accessible org.
+    let organizationId = dto.organizationId;
+    if (!organizationId) {
+      const orgs = await this.authzService.getAccessibleOrganizations(userId);
+      const first = orgs?.[0];
+      if (!first) {
+        throw new ForbiddenException('No accessible organization found for user');
+      }
+      organizationId = first;
+    }
+
     const filter = this.filterRepo.create({
       filterType: dto.filterType,
       alertSource: dto.alertSource,
@@ -61,7 +73,7 @@ export class AlertTagFiltersService {
       systemUnderTestId: dto.systemUnderTestId,
       testEnvironment: dto.testEnvironment,
       workload: dto.workload,
-      organizationId: dto.organizationId,
+      organizationId,
       createdBy: userId,
       updatedBy: userId,
     });

@@ -9,7 +9,7 @@ import { CreateDeepLinkDto } from './dto/create-deep-link.dto';
 import { UpdateDeepLinkDto } from './dto/update-deep-link.dto';
 import { CreateGenericDeepLinkDto } from './dto/create-generic-deep-link.dto';
 import { CopyDeepLinksDto } from './dto/copy-deep-links.dto';
-import { TestRunConfiguration, TestRun as TestRunEntity, SystemUnderTest } from '../../entities';
+import { TestRunConfiguration, TestRun as TestRunEntity, SystemUnderTest, Profile } from '../../entities';
 import { ResourceNotFoundException } from '../../common/exceptions/business.exception';
 import { AuthorizationService } from '../../common/services/authorization.service';
 import type { OwnedResource } from '@perfana/shared';
@@ -45,6 +45,8 @@ export class DeepLinksService {
     private readonly testRunRepo: Repository<TestRunEntity>,
     @InjectRepository(SystemUnderTest)
     private readonly systemRepo: Repository<SystemUnderTest>,
+    @InjectRepository(Profile)
+    private readonly profileRepo: Repository<Profile>,
     private readonly authzService: AuthorizationService,
   ) {}
 
@@ -143,16 +145,27 @@ export class DeepLinksService {
     userId: string = '',
     roles: string[] = [],
   ): Promise<DeepLink> {
+    const system = await this.systemRepo.findOne({ where: { id: dto.systemUnderTestId } });
+    if (!system) {
+      throw new ResourceNotFoundException('System', dto.systemUnderTestId);
+    }
+
     // Validate access if authorization context provided
     if (userId !== '' || roles.length > 0) {
-      const hasAccess = await this.validateSystemAccess(dto.systemUnderTestId, userId, roles);
-      if (!hasAccess) {
+      const result = await this.authzService.canAccessResource(userId, roles, {
+        organization_id: system.organization_id,
+        created_by: system.created_by ?? '',
+      } as OwnedResource);
+      if (!result.allowed) {
         this.logger.warn(`User denied access to create deep link for system ${dto.systemUnderTestId}`);
         throw new ResourceNotFoundException('System', dto.systemUnderTestId);
       }
     }
 
-    return this.repository.create(dto);
+    return this.repository.create(dto, {
+      organizationId: system.organization_id,
+      teamId: system.team_id,
+    });
   }
 
   /**
@@ -207,9 +220,13 @@ export class DeepLinksService {
       throw new ResourceNotFoundException('System', dto.sourceSystemUnderTestId);
     }
 
-    // Validate access to target system
+    // Validate access to target system and capture it for ownership inheritance
     const hasTargetAccess = await this.validateSystemAccess(dto.targetSystemUnderTestId, userId, roles);
     if (!hasTargetAccess) {
+      throw new ResourceNotFoundException('System', dto.targetSystemUnderTestId);
+    }
+    const targetSystem = await this.systemRepo.findOne({ where: { id: dto.targetSystemUnderTestId } });
+    if (!targetSystem) {
       throw new ResourceNotFoundException('System', dto.targetSystemUnderTestId);
     }
 
@@ -263,14 +280,17 @@ export class DeepLinksService {
       }
 
       // Create new
-      await this.repository.create({
-        systemUnderTestId: dto.targetSystemUnderTestId,
-        testEnvironment: dto.targetTestEnvironment,
-        workload: dto.targetWorkload,
-        name: link.name,
-        url: link.url,
-        tags: linkTags,
-      });
+      await this.repository.create(
+        {
+          systemUnderTestId: dto.targetSystemUnderTestId,
+          testEnvironment: dto.targetTestEnvironment,
+          workload: dto.targetWorkload,
+          name: link.name,
+          url: link.url,
+          tags: linkTags,
+        },
+        { organizationId: targetSystem.organization_id, teamId: targetSystem.team_id },
+      );
       copied++;
     }
 
@@ -435,6 +455,15 @@ export class DeepLinksService {
   }
 
   async createGeneric(dto: CreateGenericDeepLinkDto): Promise<GenericDeepLink> {
-    return this.repository.createGeneric(dto);
+    // Inherit org/team from the parent Profile (matched by name) — GenericDeepLink.
+    // organization_id is NOT NULL.
+    const profile = await this.profileRepo.findOne({ where: { name: dto.profile } });
+    if (!profile) {
+      throw new ResourceNotFoundException('Profile', dto.profile);
+    }
+    return this.repository.createGeneric(dto, {
+      organizationId: profile.organizationId,
+      teamId: profile.teamId,
+    });
   }
 }

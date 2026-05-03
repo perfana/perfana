@@ -207,4 +207,45 @@ describe('BenchmarkMutationService', () => {
       expect(opts).toEqual({ organizationIdOverride: orgId });
     });
   });
+
+  // Regression: NOT NULL violation on benchmarks.organization_id when creating
+  // SLOs via the UI. Root cause: snake_case `organization_id` keys were silently
+  // dropped by TypeORM (the entity property is camelCase `organizationId`).
+  // Mirrors the grafana-sync fix in commit 57b40fd.
+  describe('benchmark create payload uses camelCase organizationId (regression)', () => {
+    it('create() sets organizationId from the parent system, not snake_case', async () => {
+      const created = buildEntity({ id: 'bm-create-org' });
+      benchmarkRepo.create.mockReturnValue(created);
+      benchmarkRepo.save.mockResolvedValue(created);
+
+      await service.create(userId, roles, {
+        systemUnderTestId: 'sut-1',
+        testEnvironment: 'production',
+        workload: 'loadTest',
+      } as never);
+
+      expect(benchmarkRepo.create).toHaveBeenCalledTimes(1);
+      const payload = (benchmarkRepo.create as jest.Mock).mock.calls[0][0];
+      expect(payload.organizationId).toBe(orgId);
+      expect(payload).not.toHaveProperty('organization_id');
+    });
+
+    it('createApdexSlo() sets organizationId from the parent system, not snake_case', async () => {
+      const created = buildEntity({ id: 'bm-apdex-org', benchmark_type: 'apdex', min_apdex_score: 0.9 });
+      benchmarkRepo.create.mockReturnValue(created);
+      benchmarkRepo.save.mockResolvedValue(created);
+
+      await service.createApdexSlo(userId, roles, {
+        systemUnderTestId: 'sut-1',
+        testEnvironment: 'production',
+        workload: 'loadTest',
+        minApdexScore: 0.9,
+      } as never);
+
+      expect(benchmarkRepo.create).toHaveBeenCalledTimes(1);
+      const payload = (benchmarkRepo.create as jest.Mock).mock.calls[0][0];
+      expect(payload.organizationId).toBe(orgId);
+      expect(payload).not.toHaveProperty('organization_id');
+    });
+  });
 });

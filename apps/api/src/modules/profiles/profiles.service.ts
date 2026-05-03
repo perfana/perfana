@@ -393,7 +393,8 @@ export class ProfilesService {
         );
       }
 
-      // Create the new dashboard association
+      // Create the new dashboard association — inherit org/team from parent profile
+      // (ProfileGrafanaDashboard.organization_id is NOT NULL).
       const dashboard = this.profileDashboardRepo.create({
         profile: profile.name,
         dashboardName: grafanaDashboard.name,
@@ -403,6 +404,8 @@ export class ProfilesService {
         setHardcodedValueForVariables: createDto.setHardcodedValueForVariables,
         matchRegexForVariables: createDto.matchRegexForVariables,
         readOnly: createDto.readOnly || false,
+        organizationId: profile.organizationId,
+        teamId: profile.teamId,
       });
 
       const savedDashboard = await this.profileDashboardRepo.save(dashboard);
@@ -790,7 +793,8 @@ export class ProfilesService {
         );
       }
 
-      // Create the new benchmark
+      // Create the new benchmark — inherit org/team from parent profile
+      // (ProfileBenchmark.organization_id is NOT NULL).
       const benchmark = this.profileBenchmarkRepo.create({
         profile_id: profileId,
         profile_dashboard_id: createDto.profileDashboardId,
@@ -814,6 +818,8 @@ export class ProfilesService {
         tags: createDto.tags || [],
         metadata: createDto.metadata || {},
         read_only: createDto.readOnly || false,
+        organizationId: profile.organizationId,
+        teamId: profile.teamId,
       });
 
       const savedBenchmark = await this.profileBenchmarkRepo.save(benchmark);
@@ -1087,6 +1093,14 @@ export class ProfilesService {
       throw new BadRequestException(`Profile with name '${dto.name}' already exists`);
     }
 
+    // Profile.organization_id is NOT NULL — default to the caller's first
+    // accessible org (UI does not currently expose org selection).
+    const orgs = await this.authzService.getAccessibleOrganizations(userId);
+    const organizationId = orgs?.[0];
+    if (!organizationId) {
+      throw new ForbiddenException('No accessible organization found for user');
+    }
+
     const profile = this.profileRepo.create({
       name: dto.name,
       description: dto.description,
@@ -1094,6 +1108,7 @@ export class ProfilesService {
       readOnly: dto.readOnly ?? false,
       createdBy: userId,
       updatedBy: userId,
+      organizationId,
     });
 
     const saved = await this.profileRepo.save(profile);

@@ -11,6 +11,7 @@ import { CopyApplicationDashboardsDto } from './dto/copy-application-dashboards.
 import {
   ApplicationDashboard as ApplicationDashboardEntity,
   GrafanaDashboard as GrafanaDashboardEntity,
+  SystemUnderTest,
 } from '../../entities';
 import { OwnedResource } from '@perfana/shared';
 import { GrafanaClientService } from './grafana-client.service';
@@ -96,6 +97,8 @@ export class ApplicationDashboardsService {
   constructor(
     @InjectRepository(ApplicationDashboardEntity)
     private appDashboardRepo: Repository<ApplicationDashboardEntity>,
+    @InjectRepository(SystemUnderTest)
+    private systemRepo: Repository<SystemUnderTest>,
     private dataSource: DataSource,
     private grafanaClientService: GrafanaClientService,
     private readonly authzService: AuthorizationService,
@@ -333,9 +336,16 @@ export class ApplicationDashboardsService {
   async create(createDto: CreateApplicationDashboardDto, userId: string, _roles: string[]): Promise<ApplicationDashboard> {
     this.logger.debug(`create: userId=${userId}`);
 
-    // NOTE: Ownership fields (created_by, organization_id) will be set here when Phase 4 adds them
-
     try {
+      // Inherit org/team from the parent SUT — ApplicationDashboard.organization_id
+      // is NOT NULL and the camelCase property key is required.
+      const system = await this.systemRepo.findOne({
+        where: { id: createDto.systemUnderTestId },
+      });
+      if (!system) {
+        throw new NotFoundException(`System under test not found: ${createDto.systemUnderTestId}`);
+      }
+
       const applicationDashboard = this.appDashboardRepo.create({
         systemUnderTestId: createDto.systemUnderTestId,
         testEnvironment: createDto.testEnvironment,
@@ -349,7 +359,9 @@ export class ApplicationDashboardsService {
         templateDashboardUid: createDto.templateDashboardUid,
         variables: (createDto.variables || []).filter(v => v && !Array.isArray(v) && typeof v.name === 'string'),
         replacedTemplatingVariables: createDto.replacedTemplatingVariables || [],
-        snapshotTimeout: createDto.snapshotTimeout || 4
+        snapshotTimeout: createDto.snapshotTimeout || 4,
+        organizationId: system.organization_id,
+        teamId: system.team_id,
       } as any);
 
       const result = await this.appDashboardRepo.save(applicationDashboard);

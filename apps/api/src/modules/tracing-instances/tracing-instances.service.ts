@@ -46,6 +46,16 @@ export class TracingInstancesService {
     }
   }
 
+  private async resolveOrganizationId(dtoOrgId: string | undefined, userId: string): Promise<string> {
+    if (dtoOrgId) return dtoOrgId;
+    const orgs = await this.authzService.getAccessibleOrganizations(userId);
+    const first = orgs?.[0];
+    if (!first) {
+      throw new ForbiddenException('No accessible organization found for user');
+    }
+    return first;
+  }
+
   private mapEntityToDto(entity: TracingInstanceEntity): TracingInstanceResponseDto {
     return {
       id: entity.id,
@@ -175,6 +185,9 @@ export class TracingInstancesService {
       // Check if user is org-admin in any organization
       await this.requireOrgAdmin(userId, roles);
 
+      // TracingInstance.organization_id is NOT NULL.
+      const organizationId = await this.resolveOrganizationId(createDto.organizationId, userId);
+
       const entity = this.tracingInstanceRepo.create({
         label: createDto.label,
         tracingUrl: createDto.tracingUrl,
@@ -183,7 +196,7 @@ export class TracingInstancesService {
         tracingIframeAllowed: createDto.tracingIframeAllowed || false,
         createdBy: userId,
         updatedBy: userId,
-        organizationId: createDto.organizationId || undefined,
+        organizationId,
       });
 
       const savedEntity = await this.tracingInstanceRepo.save(entity);

@@ -70,6 +70,7 @@ class AdaptPipeline extends BasePipeline<AdaptInput, AdaptOutput> {
 - **CRUD operations**: TypeORM Repository or QueryBuilder
 - **Complex analytics**: Named query files (`.query.ts`) with typed inputs/outputs
 - **Never**: Inline raw SQL strings. Never `as any` for query results.
+- **Use the camelCase entity property in `repo.create({...})`, not the snake_case column name.** Most entities declare `@Column({ name: 'organization_id' }) organizationId!: string`. Passing `organization_id: ...` to `repo.create()` silently drops the value (TypeORM ignores unknown properties), the INSERT goes out without an org id, and the Phase 4 NOT NULL constraint blows up at runtime. Always pass `organizationId: parent.organizationId` (and `teamId: parent.teamId`) when creating a child resource. Inherit from the parent (SUT / Profile / GrafanaInstance / TestRun) when one exists; otherwise default to `AuthorizationService.getAccessibleOrganizations(userId)[0]`.
 
 ```typescript
 // Good: QueryBuilder for CRUD
