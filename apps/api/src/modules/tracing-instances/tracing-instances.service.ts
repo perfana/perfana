@@ -3,6 +3,7 @@ import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { TracingInstance as TracingInstanceEntity, OwnedResource } from '@perfana/shared';
 import { AuthorizationService } from '../../common/services/authorization.service';
+import { AuditService } from '../audit/audit.service';
 import { withOrgFilter } from '../../common/utils/with-org-filter';
 import {
   CreateTracingInstanceDto,
@@ -30,6 +31,7 @@ export class TracingInstancesService {
     @InjectRepository(TracingInstanceEntity)
     private tracingInstanceRepo: Repository<TracingInstanceEntity>,
     private readonly authzService: AuthorizationService,
+    private readonly auditService: AuditService,
   ) {}
 
   /**
@@ -186,6 +188,13 @@ export class TracingInstancesService {
 
       const savedEntity = await this.tracingInstanceRepo.save(entity);
 
+      // Phase 5a: TracingInstance.organization_id maps to camelCase property
+      // organizationId, so AuditService.dispatch cannot read it off ref directly —
+      // pass organizationIdOverride so the audit row is org-scoped.
+      this.auditService.logCreate(savedEntity as unknown as OwnedResource, {
+        organizationIdOverride: savedEntity.organizationId,
+      });
+
       this.logger.log(`Tracing instance created: ${createDto.label}`);
       return this.mapEntityToDto(savedEntity);
     } catch (error) {
@@ -229,6 +238,12 @@ export class TracingInstancesService {
         throw new NotFoundException(`Tracing instance with id ${id} not found`);
       }
 
+      // Capture pre-update snapshot for the audit diff. The mutation that
+      // follows mutates `entity` in place, so we clone via Object.assign onto
+      // a fresh prototype to keep `before.constructor.auditableFields`
+      // resolvable.
+      const before = Object.assign(new TracingInstanceEntity(), entity);
+
       // Update only provided fields
       if (updateDto.label !== undefined) entity.label = updateDto.label;
       if (updateDto.tracingUrl !== undefined) entity.tracingUrl = updateDto.tracingUrl;
@@ -240,6 +255,12 @@ export class TracingInstancesService {
       entity.updatedBy = userId;
 
       const updatedEntity = await this.tracingInstanceRepo.save(entity);
+
+      this.auditService.logUpdate(
+        before as unknown as OwnedResource,
+        updatedEntity as unknown as OwnedResource,
+        { organizationIdOverride: before.organizationId ?? updatedEntity.organizationId },
+      );
 
       this.logger.log(`Tracing instance updated: ${id}`);
       return this.mapEntityToDto(updatedEntity);
@@ -282,6 +303,13 @@ export class TracingInstancesService {
       if (!accessResult.allowed) {
         throw new NotFoundException(`Tracing instance with id ${id} not found`);
       }
+
+      // Phase 5a: log DELETE before the row is removed so the diff captures the
+      // pre-delete state. organizationIdOverride bridges the camelCase property /
+      // snake_case column mismatch.
+      this.auditService.logDelete(entity as unknown as OwnedResource, {
+        organizationIdOverride: entity.organizationId,
+      });
 
       await this.tracingInstanceRepo.remove(entity);
 

@@ -5,6 +5,7 @@ import { PyroscopeInstance as PyroscopeInstanceEntity } from '../../entities';
 import { AuthorizationService } from '../../common/services/authorization.service';
 import { withOrgFilter } from '../../common/utils/with-org-filter';
 import { OwnedResource } from '@perfana/shared';
+import { AuditService } from '../audit/audit.service';
 import { CreatePyroscopeInstanceDto, UpdatePyroscopeInstanceDto } from './dto/pyroscope-instance.dto';
 
 export interface PyroscopeInstance {
@@ -40,6 +41,7 @@ export class PyroscopeInstancesService {
     @InjectRepository(PyroscopeInstanceEntity)
     private pyroscopeInstanceRepo: Repository<PyroscopeInstanceEntity>,
     private readonly authzService: AuthorizationService,
+    private readonly auditService: AuditService,
   ) {}
 
   /**
@@ -194,6 +196,13 @@ export class PyroscopeInstancesService {
 
       const savedEntity = await this.pyroscopeInstanceRepo.save(entity);
 
+      // Phase 5a: PyroscopeInstance.organization_id maps to camelCase property
+      // organizationId, so AuditService.dispatch cannot read it off ref directly —
+      // pass organizationIdOverride so the audit row is org-scoped.
+      this.auditService.logCreate(savedEntity as unknown as OwnedResource, {
+        organizationIdOverride: savedEntity.organizationId,
+      });
+
       this.logger.log(`Pyroscope instance created: ${createDto.label}`);
       return this.mapEntityToDto(savedEntity);
     } catch (error) {
@@ -237,6 +246,12 @@ export class PyroscopeInstancesService {
         throw new NotFoundException(`Pyroscope instance with id ${id} not found`);
       }
 
+      // Capture pre-update snapshot for the audit diff. The mutation that
+      // follows mutates `entity` in place, so we clone via Object.assign onto
+      // a fresh prototype to keep `before.constructor.auditableFields`
+      // resolvable.
+      const before = Object.assign(new PyroscopeInstanceEntity(), entity);
+
       // Update only provided fields
       if (updateDto.label !== undefined) entity.label = updateDto.label;
       if (updateDto.pyroscopeUrl !== undefined) entity.pyroscopeUrl = updateDto.pyroscopeUrl;
@@ -247,6 +262,12 @@ export class PyroscopeInstancesService {
       entity.updatedBy = userId;
 
       const updatedEntity = await this.pyroscopeInstanceRepo.save(entity);
+
+      this.auditService.logUpdate(
+        before as unknown as OwnedResource,
+        updatedEntity as unknown as OwnedResource,
+        { organizationIdOverride: before.organizationId ?? updatedEntity.organizationId },
+      );
 
       this.logger.log(`Pyroscope instance updated: ${id}`);
       return this.mapEntityToDto(updatedEntity);
@@ -289,6 +310,13 @@ export class PyroscopeInstancesService {
       if (!accessResult.allowed) {
         throw new NotFoundException(`Pyroscope instance with id ${id} not found`);
       }
+
+      // Phase 5a: log DELETE before the row is removed so the diff captures the
+      // pre-delete state. organizationIdOverride bridges the camelCase property /
+      // snake_case column mismatch.
+      this.auditService.logDelete(entity as unknown as OwnedResource, {
+        organizationIdOverride: entity.organizationId,
+      });
 
       await this.pyroscopeInstanceRepo.remove(entity);
 

@@ -4,6 +4,16 @@ import { stripTrailingSlashTransformer } from '../utils/url-column.transformer';
 
 @Entity('tracing_instances')
 export class TracingInstance {
+  // Phase 5a audit: identity + connection config. Excludes ownership/timestamps
+  // and the `id` PK. No credential columns on this entity.
+  static auditableFields = [
+    'label',
+    'tracingUrl',
+    'tracingApiUrl',
+    'tracingUi',
+    'tracingIframeAllowed',
+  ] as const;
+
   @PrimaryGeneratedColumn('uuid')
   id!: string;
 

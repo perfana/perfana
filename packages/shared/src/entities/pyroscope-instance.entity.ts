@@ -3,6 +3,15 @@ import { stripTrailingSlashTransformer } from '../utils/url-column.transformer';
 
 @Entity('pyroscope_instances')
 export class PyroscopeInstance {
+  // Phase 5a audit: identity + connection config. Excludes ownership/timestamps
+  // and the `id` PK. No credential columns on this entity.
+  static auditableFields = [
+    'label',
+    'pyroscopeUrl',
+    'backendUrl',
+    'pyroscopeStandAlone',
+  ] as const;
+
   @PrimaryGeneratedColumn('uuid')
   id!: string;
 
