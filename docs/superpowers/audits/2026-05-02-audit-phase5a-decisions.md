@@ -42,6 +42,7 @@ Unit: files in `apps/api/.audit-migration-allowlist.json`.
 | Date | Total at start | Migrated this round | Remaining | Notes |
 |---|---|---|---|---|
 | 2026-05-02 | 56 | 0 | 56 | Initial. PR4 lands rule + allowlist + drift + snapshot. |
+| 2026-05-03 | 56 | 1 | 55 | PR5: `api-keys.service.ts`. `ApiKey.auditableFields = ['description', 'roles', 'validUntil', 'organization_id']` (excludes the bcrypt `apiKey` hash and the per-auth `lastUsed` touch). `logCreate` after persist + cache; `logDelete` before cache invalidation and `repo.delete`. `ApiKey` doesn't formally `implements OwnedResource` because `created_by?` is nullable on legacy keys — call sites cast `as unknown as OwnedResource`; `AuditService.dispatch` only reads `id` and `organization_id` so the cast is sound. Repository file (`apps/api/src/repositories/api-key.repository.ts`) stays on the allowlist — repository-layer audit migration is a separate workstream. |
 
 ## Migration order
 

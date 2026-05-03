@@ -2,7 +2,6 @@
   "apps/api/src/modules/adapt/adapt.service.ts",
   "apps/api/src/modules/alerts/alert-tag-filters.service.ts",
   "apps/api/src/modules/alerts/alerts.service.ts",
-  "apps/api/src/modules/api-keys/api-keys.service.ts",
   "apps/api/src/modules/awr/controllers/awr-reports.controller.ts",
   "apps/api/src/modules/awr/services/awr-analysis.service.ts",
   "apps/api/src/modules/awr/services/awr-parser.service.ts",

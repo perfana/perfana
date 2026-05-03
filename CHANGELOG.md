@@ -4,6 +4,11 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
+## [0.2.47.55] - 2026-05-03
+
+### Added
+- **RBAC Phase 5a — audit logging in `api-keys` (PR5).** First service migration off the audit-migration allowlist. `ApiKey` now declares `static auditableFields = ['description', 'roles', 'validUntil', 'organization_id'] as const` — the bcrypt `apiKey` hash and the per-auth `lastUsed` timestamp are deliberately excluded (credential material + write-amplification noise). `ApiKeysService` injects `AuditService` and emits `logCreate(apiKey)` after persist + cache and `logDelete(apiKey)` before cache invalidation and `repo.delete`. `ApiKeysModule` imports `AuditModule` and registers `'api-keys' → ApiKey` with `AuditResourceRegistry` in `onModuleInit`, wiring the per-resource audit-history endpoint (`GET /api/audit-logs/resource/api-keys/:id`). Allowlist is now 55 entries (down from 56). Snapshot test re-recorded; 4 new spec assertions cover the create/delete log invariants (including the "log fires before mutation" ordering for delete and "no log on validation failures" for both paths). `ApiKey` does not formally `implements OwnedResource` because `created_by?` remains nullable on legacy keys — call sites cast `as unknown as OwnedResource`; `AuditService.dispatch` only reads `id` and `organization_id` so the cast is sound. The `api-key.repository.ts` data-access layer stays on the allowlist — repository-level audit migration is a separate workstream from the service-layer one. Burndown updated.
+
 ## [0.2.47.54] - 2026-05-03
 
 ### Added

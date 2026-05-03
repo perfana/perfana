@@ -24,6 +24,7 @@ import { ConflictException } from '@nestjs/common';
 import * as bcrypt from 'bcryptjs';
 import { createAuthorizationServiceMock } from '../../../test/mocks/authorization-service.mock';
 import { AuthorizationService } from '../../common/services/authorization.service';
+import { AuditService } from '../audit/audit.service';
 
 jest.mock('bcryptjs');
 
@@ -31,6 +32,7 @@ describe('ApiKeysService', () => {
   let service: ApiKeysService;
   let repository: jest.Mocked<ApiKeyRepository>;
   let cacheService: jest.Mocked<ApiKeyCacheService>;
+  let auditService: jest.Mocked<AuditService>;
 
   // Mock data factory
   const createMockApiKey = (overrides?: Partial<ApiKey>): ApiKey => ({
@@ -81,6 +83,14 @@ describe('ApiKeysService', () => {
           useValue: createAuthorizationServiceMock(),
         },
         {
+          provide: AuditService,
+          useValue: {
+            logCreate: jest.fn(),
+            logUpdate: jest.fn(),
+            logDelete: jest.fn(),
+          },
+        },
+        {
           provide: DataSource,
           useValue: {
             createQueryRunner: jest.fn(),
@@ -93,6 +103,7 @@ describe('ApiKeysService', () => {
     service = module.get<ApiKeysService>(ApiKeysService);
     repository = module.get(ApiKeyRepository);
     cacheService = module.get(ApiKeyCacheService);
+    auditService = module.get(AuditService);
 
     // Default mock behaviors
     (bcrypt.hash as jest.Mock).mockResolvedValue('hashed-token');
@@ -1220,6 +1231,77 @@ describe('ApiKeysService', () => {
 
       // Assert
       expect(result.apiKey.roles).toEqual([]);
+    });
+  });
+
+  describe('audit logging (Phase 5a)', () => {
+    it('logs CREATE after a successful createApiKey', async () => {
+      // Arrange
+      const createDto = { description: 'Audit Test Key', ttl: '30d', roles: ['ci-cd'] };
+      const mockCreatedKey = createMockApiKey({
+        description: createDto.description,
+        roles: createDto.roles,
+      });
+      repository.create.mockResolvedValue(mockCreatedKey);
+      cacheService.cacheKey.mockResolvedValue(undefined);
+
+      // Act
+      await service.createApiKey(createDto);
+
+      // Assert — log fires with the persisted entity (post-save shape)
+      expect(auditService.logCreate).toHaveBeenCalledTimes(1);
+      expect(auditService.logCreate).toHaveBeenCalledWith(mockCreatedKey);
+      expect(auditService.logDelete).not.toHaveBeenCalled();
+    });
+
+    it('does NOT log CREATE if the create path throws before persisting', async () => {
+      // Arrange — duplicate-description pre-check trips a ConflictException
+      // before repo.create is called, so no audit row should be emitted.
+      const createDto = { description: 'CI', ttl: '30d' };
+      repository.findByOrganizationAndDescription.mockResolvedValue(
+        createMockApiKey({ description: 'CI' }),
+      );
+
+      // Act
+      await expect(service.createApiKey(createDto)).rejects.toThrow(ConflictException);
+
+      // Assert
+      expect(auditService.logCreate).not.toHaveBeenCalled();
+    });
+
+    it('logs DELETE before the row is removed', async () => {
+      // Arrange
+      const mockApiKey = createMockApiKey();
+      repository.findById.mockResolvedValue(mockApiKey);
+      repository.delete.mockResolvedValue(undefined);
+      cacheService.invalidateKey.mockResolvedValue(undefined);
+      cacheService.invalidateAllValidationResults.mockResolvedValue(undefined);
+
+      // Act
+      await service.deleteApiKey(mockApiKey.id);
+
+      // Assert — logDelete must run BEFORE repo.delete so the entity is still
+      // available for the audit envelope.
+      expect(auditService.logDelete).toHaveBeenCalledTimes(1);
+      expect(auditService.logDelete).toHaveBeenCalledWith(mockApiKey);
+
+      const logDeleteOrder = (auditService.logDelete as jest.Mock).mock.invocationCallOrder[0];
+      const repoDeleteOrder = (repository.delete as jest.Mock).mock.invocationCallOrder[0];
+      expect(logDeleteOrder).toBeLessThan(repoDeleteOrder);
+      expect(auditService.logCreate).not.toHaveBeenCalled();
+    });
+
+    it('does NOT log DELETE when the key is not found', async () => {
+      // Arrange
+      repository.findById.mockResolvedValue(null as any);
+
+      // Act
+      await expect(service.deleteApiKey('missing-id')).rejects.toThrow(
+        ResourceNotFoundException,
+      );
+
+      // Assert
+      expect(auditService.logDelete).not.toHaveBeenCalled();
     });
   });
 

@@ -5,9 +5,10 @@ import * as bcrypt from 'bcryptjs';
 import { v4 as uuidv4 } from 'uuid';
 import { CreateApiKeyDto } from './dto/create-api-key.dto';
 import { ApiKeyRepository } from '../../repositories/api-key.repository';
-import { ApiKey } from '../../entities';
+import { ApiKey, OwnedResource } from '../../entities';
 import { ApiKeyCacheService } from './api-key-cache.service';
 import { AuthorizationService } from '../../common/services/authorization.service';
+import { AuditService } from '../audit/audit.service';
 import { Capability } from '../../constants/capabilities.constants';
 
 /**
@@ -32,6 +33,7 @@ export class ApiKeysService {
     private readonly apiKeyRepository: ApiKeyRepository,
     private readonly apiKeyCacheService: ApiKeyCacheService,
     private readonly authzService: AuthorizationService,
+    private readonly auditService: AuditService,
   ) {}
 
   /**
@@ -213,6 +215,8 @@ export class ApiKeysService {
       // Cache the newly created API key for immediate use
       await this.apiKeyCacheService.cacheKey(apiKey);
 
+      this.auditService.logCreate(apiKey as unknown as OwnedResource);
+
       this.logger.log(`API key created for description: ${createDto.description} with roles: ${apiKeyRoles.join(', ') || 'none'} by user: ${userId}`);
 
       return { apiKey, token };
@@ -281,6 +285,7 @@ export class ApiKeysService {
       await this.apiKeyCacheService.invalidateKey(apiKey.description);
       await this.apiKeyCacheService.invalidateAllValidationResults();
 
+      this.auditService.logDelete(apiKey as unknown as OwnedResource);
       await this.apiKeyRepository.delete(id);
       this.logger.log(`[deleteApiKey] API key ${id} deleted by user: ${userId}`);
     } catch (error) {
