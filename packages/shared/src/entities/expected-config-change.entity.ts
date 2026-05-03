@@ -4,6 +4,19 @@ import { SystemUnderTest } from './system-under-test.entity';
 @Entity('expected_config_changes')
 @Unique(['system_under_test_id', 'test_environment', 'workload', 'config_key'])
 export class ExpectedConfigChange {
+  // Phase 5a — fields surfaced in audit-log diffs. ExpectedConfigChange is a
+  // user-defined waiver suppressing config-diff alerts for a specific key on
+  // a (SUT, env, workload). Ownership / org / team and timestamps excluded
+  // (emitted via audit-row columns).
+  static auditableFields = [
+    'system_under_test_id',
+    'test_environment',
+    'workload',
+    'config_key',
+    'expected_value',
+    'description',
+  ] as const;
+
   @PrimaryGeneratedColumn('uuid')
   id!: string;
 

@@ -8,12 +8,14 @@ import {
   TestRunConfiguration as TestRunConfigEntity,
   SparseMetricExclusion,
 } from '../../../entities';
+import { OwnedResource } from '@perfana/shared';
 import { AddTestRunConfigDto, AddTestRunConfigsDto, AddTestRunConfigJsonDto } from '../dto/test-run-config.dto';
 import { CreateExpectedConfigChangeDto, ExpectedConfigChangeDto } from '../dto/expected-config-change.dto';
 import { CreateSparseMetricExclusionDto, SparseMetricExclusionDto } from '../dto/sparse-metric-exclusion.dto';
 import { ResourceNotFoundException, ValidationException } from '../../../common/exceptions/business.exception';
 import { AuthorizationService } from '../../../common/services/authorization.service';
 import { withOrgFilter } from '../../../common/utils/with-org-filter';
+import { AuditService } from '../../audit/audit.service';
 import safeRegex from 'safe-regex';
 
 export interface TestRun {
@@ -67,6 +69,7 @@ export class TestRunsConfigService {
     private sparseMetricExclusionRepo: Repository<SparseMetricExclusion>,
     private dataSource: DataSource,
     private authzService: AuthorizationService,
+    private readonly auditService: AuditService,
   ) {}
 
 
@@ -708,9 +711,18 @@ export class TestRunsConfigService {
       });
 
       if (expectedChange) {
-        // Update existing
+        // Update existing — clone before-snapshot so the diff captures the
+        // pre-update value (the in-place mutation below would otherwise alias
+        // the post-update field).
+        const before = Object.assign(new ExpectedConfigChange(), expectedChange);
         expectedChange.description = createDto.reason || undefined;
-        await this.expectedConfigChangeRepo.save(expectedChange);
+        const saved = await this.expectedConfigChangeRepo.save(expectedChange);
+        this.auditService.logUpdate(
+          before as unknown as OwnedResource,
+          saved as unknown as OwnedResource,
+          { organizationIdOverride: before.organizationId ?? saved.organizationId },
+        );
+        expectedChange = saved;
       } else {
         // Create new
         expectedChange = this.expectedConfigChangeRepo.create({
@@ -720,7 +732,11 @@ export class TestRunsConfigService {
           config_key: createDto.configKey,
           description: createDto.reason || undefined
         });
-        await this.expectedConfigChangeRepo.save(expectedChange);
+        const saved = await this.expectedConfigChangeRepo.save(expectedChange);
+        this.auditService.logCreate(saved as unknown as OwnedResource, {
+          organizationIdOverride: saved.organizationId,
+        });
+        expectedChange = saved;
       }
 
       this.logger.log(`Created expected config change: ${createDto.configKey} for ${createDto.system}-${createDto.environment}-${createDto.workload}`);
@@ -751,6 +767,24 @@ export class TestRunsConfigService {
 
       if (!systemUnderTest) {
         throw new ResourceNotFoundException('System under test', system);
+      }
+
+      // Phase 5a: load the existing row first so the audit row captures the
+      // pre-delete state. The unique constraint on
+      // (sut, env, workload, config_key) makes this at-most-one row.
+      const existing = await this.expectedConfigChangeRepo.findOne({
+        where: {
+          system_under_test_id: systemUnderTest.id,
+          test_environment: environment,
+          workload,
+          config_key: configKey,
+        },
+      });
+
+      if (existing) {
+        this.auditService.logDelete(existing as unknown as OwnedResource, {
+          organizationIdOverride: existing.organizationId,
+        });
       }
 
       await this.expectedConfigChangeRepo.delete({
@@ -838,8 +872,16 @@ export class TestRunsConfigService {
       });
 
       if (exclusion) {
+        // Update branch — clone before-snapshot for an accurate diff.
+        const before = Object.assign(new SparseMetricExclusion(), exclusion);
         exclusion.reason = createDto.reason || undefined;
-        await this.sparseMetricExclusionRepo.save(exclusion);
+        const saved = await this.sparseMetricExclusionRepo.save(exclusion);
+        this.auditService.logUpdate(
+          before as unknown as OwnedResource,
+          saved as unknown as OwnedResource,
+          { organizationIdOverride: before.organizationId ?? saved.organizationId },
+        );
+        exclusion = saved;
       } else {
         exclusion = this.sparseMetricExclusionRepo.create({
           system_under_test_id: sutId,
@@ -849,7 +891,11 @@ export class TestRunsConfigService {
           metric_name: createDto.metricName,
           reason: createDto.reason || undefined,
         });
-        await this.sparseMetricExclusionRepo.save(exclusion);
+        const saved = await this.sparseMetricExclusionRepo.save(exclusion);
+        this.auditService.logCreate(saved as unknown as OwnedResource, {
+          organizationIdOverride: saved.organizationId,
+        });
+        exclusion = saved;
       }
 
       this.logger.log(
@@ -888,6 +934,25 @@ export class TestRunsConfigService {
 
       if (!systemUnderTest) {
         throw new ResourceNotFoundException('System under test', system);
+      }
+
+      // Phase 5a: load the existing row first so the audit row captures the
+      // pre-delete state. Unique constraint on
+      // (sut, env, workload, dashboard_label, metric_name) ⇒ at-most-one row.
+      const existing = await this.sparseMetricExclusionRepo.findOne({
+        where: {
+          system_under_test_id: systemUnderTest.id,
+          test_environment: environment,
+          workload,
+          dashboard_label: dashboardLabel,
+          metric_name: metricName,
+        },
+      });
+
+      if (existing) {
+        this.auditService.logDelete(existing as unknown as OwnedResource, {
+          organizationIdOverride: existing.organizationId,
+        });
       }
 
       await this.sparseMetricExclusionRepo.delete({

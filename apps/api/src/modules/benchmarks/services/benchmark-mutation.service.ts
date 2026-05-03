@@ -8,6 +8,7 @@ import { BenchmarkMapper } from './benchmark.mapper';
 import { AuthorizationService } from '../../../common/services/authorization.service';
 import type { OwnedResource } from '@perfana/shared';
 import type { Benchmark } from './benchmark-query.types';
+import { AuditService } from '../../audit/audit.service';
 import type {
   CreateBenchmarkDto,
   UpdateBenchmarkDto,
@@ -46,6 +47,7 @@ export class BenchmarkMutationService {
     private readonly queryService: BenchmarkQueryService,
     private readonly tagHelper: BenchmarkTagHelper,
     private readonly authzService: AuthorizationService,
+    private readonly auditService: AuditService,
   ) {}
 
   /**
@@ -127,6 +129,14 @@ export class BenchmarkMutationService {
       });
 
       const result = await this.benchmarkRepo.save(benchmark);
+
+      // Phase 5a: Benchmark.organization_id maps to camelCase property
+      // organizationId, so AuditService.dispatch cannot read it off ref
+      // directly — pass organizationIdOverride so the audit row is org-scoped.
+      this.auditService.logCreate(result as unknown as OwnedResource, {
+        organizationIdOverride: result.organizationId,
+      });
+
       this.logger.log(`Created new benchmark: ${result.config_title}`);
 
       return BenchmarkMapper.mapEntityToBenchmark(result);
@@ -155,6 +165,13 @@ export class BenchmarkMutationService {
       // NOTE: Permission check will be added here when Benchmark entity has organization_id
       // For now, all benchmarks are modifiable (treated as legacy data)
 
+      // Phase 5a: rehydrate the entity prototype from the queryService DTO for
+      // the audit before-snapshot. BenchmarkMapper preserves snake_case field
+      // names (system_under_test_id, evaluate_type, configuration, etc.), so
+      // Object.assign onto a fresh BenchmarkEntity gives a faithful before-row
+      // for AuditService.dispatch to resolve auditableFields against.
+      const beforeEntity = Object.assign(new BenchmarkEntity(), existing);
+
       const tags = await this.tagHelper.getInheritedTagsForUpdate(
         dto.dashboardUid,
         dto.systemUnderTestId,
@@ -175,6 +192,16 @@ export class BenchmarkMutationService {
       });
 
       if (!result) throw new Error(`Failed to fetch updated benchmark ${id}`);
+
+      // Phase 5a: emit UPDATE audit row with the diff. organizationIdOverride
+      // bridges the camelCase property / snake_case column mismatch.
+      if (beforeEntity) {
+        this.auditService.logUpdate(
+          beforeEntity as unknown as OwnedResource,
+          result as unknown as OwnedResource,
+          { organizationIdOverride: beforeEntity.organizationId ?? result.organizationId },
+        );
+      }
 
       this.logger.log(`Updated benchmark: ${result.config_title || id}`);
       return BenchmarkMapper.mapEntityToBenchmark(result);
@@ -201,6 +228,16 @@ export class BenchmarkMutationService {
         this.logger.warn(`[delete] Benchmark not found or access denied: ${id}`);
         return false;
       }
+
+      // Phase 5a: rehydrate the entity prototype from the queryService DTO
+      // (BenchmarkMapper preserves snake_case field names, so Object.assign
+      // gives a faithful pre-delete row for AuditService.dispatch to resolve
+      // auditableFields against). Log DELETE before the FK null-out and the
+      // actual remove so the audit row captures the pre-delete state.
+      const entity = Object.assign(new BenchmarkEntity(), existing);
+      this.auditService.logDelete(entity as unknown as OwnedResource, {
+        organizationIdOverride: entity.organizationId,
+      });
 
       // Clear references in tables that have FK to benchmarks (prevents FK violation)
       await this.benchmarkRepo.manager.query(
@@ -284,6 +321,12 @@ export class BenchmarkMutationService {
       }
 
       if (existing && dto.conflictStrategy === 'overwrite') {
+        // Phase 5a: clone `existing` for the before-snapshot so the diff
+        // captures pre-overwrite values; the overwrite below is a SQL UPDATE
+        // (not in-place mutation), but we re-fetch after to keep the audit
+        // payload symmetric with the rest of the service.
+        const beforeOverwrite = Object.assign(new BenchmarkEntity(), existing);
+
         await this.benchmarkRepo.update(existing.id, {
           source: benchmark.source,
           grafana_instance: benchmark.grafana_instance,
@@ -309,6 +352,17 @@ export class BenchmarkMutationService {
           valid: benchmark.valid,
           updated_by: userId,
         } as any);
+
+        // Re-fetch the persisted row so the audit diff sees the actual
+        // post-update values (including any DB-side defaults / triggers).
+        const afterOverwrite = await this.benchmarkRepo.findOne({ where: { id: existing.id } });
+        if (afterOverwrite) {
+          this.auditService.logUpdate(
+            beforeOverwrite as unknown as OwnedResource,
+            afterOverwrite as unknown as OwnedResource,
+            { organizationIdOverride: beforeOverwrite.organizationId ?? afterOverwrite.organizationId },
+          );
+        }
         copied++;
         continue;
       }
@@ -350,7 +404,14 @@ export class BenchmarkMutationService {
         updated_by: userId,
       });
 
-      await this.benchmarkRepo.save(newBenchmark);
+      const savedNew = await this.benchmarkRepo.save(newBenchmark);
+
+      // Phase 5a: per-row CREATE audit (one row per persisted benchmark, per
+      // the audit architecture's "one row per entity" rule).
+      this.auditService.logCreate(savedNew as unknown as OwnedResource, {
+        organizationIdOverride: savedNew.organizationId,
+      });
+
       copied++;
     }
 
@@ -405,6 +466,12 @@ export class BenchmarkMutationService {
       });
 
       const result = await this.benchmarkRepo.save(benchmark);
+
+      // Phase 5a: CREATE audit on the Apdex path (same shape as `create`).
+      this.auditService.logCreate(result as unknown as OwnedResource, {
+        organizationIdOverride: result.organizationId,
+      });
+
       this.logger.log(
         `Created Apdex SLO: ${dto.transactionName || 'Workload'} (min score: ${dto.minApdexScore})`,
       );
@@ -447,6 +514,12 @@ export class BenchmarkMutationService {
         throw new Error('minApdexScore must be between 0 and 1');
       }
 
+      // Phase 5a: clone before-snapshot so the SQL-update-then-refetch flow
+      // produces a faithful audit diff (the underlying `update` is a SQL
+      // UPDATE, but `existingEntity` may share JSON references with the
+      // refetched `result`).
+      const beforeApdex = Object.assign(new BenchmarkEntity(), existingEntity);
+
       const updateData = this.buildApdexUpdateData(dto, existingEntity);
       // Track who updated the resource
       updateData.updated_by = userId;
@@ -459,6 +532,12 @@ export class BenchmarkMutationService {
       });
 
       if (!result) throw new Error(`Failed to fetch updated Apdex SLO ${id}`);
+
+      this.auditService.logUpdate(
+        beforeApdex as unknown as OwnedResource,
+        result as unknown as OwnedResource,
+        { organizationIdOverride: beforeApdex.organizationId ?? result.organizationId },
+      );
 
       this.logger.log(`Updated Apdex SLO: ${id}`);
       return BenchmarkMapper.mapEntityToBenchmark(result);
