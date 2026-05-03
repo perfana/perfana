@@ -5,6 +5,7 @@ import { AuditQueryController } from './audit-query.controller';
 import { AuditService } from './audit.service';
 import { AuditResourceRegistry } from './audit-resource-registry';
 import { AuthorizationService } from '../../common/services/authorization.service';
+import { Capability } from '../../constants/capabilities.constants';
 
 describe('AuditQueryController', () => {
   let ctl: AuditQueryController;
@@ -33,7 +34,10 @@ describe('AuditQueryController', () => {
     } as unknown as jest.Mocked<AuditResourceRegistry>;
 
     authz = {
-      isGlobalAdmin: jest.fn().mockReturnValue(false),
+      // Default: caller does not hold SystemAuditRead (i.e. is not a global
+      // admin). Tests that exercise the cross-org branch override this to
+      // include Capability.SystemAuditRead.
+      getCapabilities: jest.fn().mockResolvedValue([]),
       getAccessibleOrganizations: jest.fn().mockResolvedValue([]),
       canAccessResource: jest.fn().mockResolvedValue({ allowed: true, reason: 'ok' }),
     } as unknown as jest.Mocked<AuthorizationService>;
@@ -59,7 +63,7 @@ describe('AuditQueryController', () => {
 
   describe('GET /api/audit-logs (admin filter)', () => {
     it('super-admin sees cross-org rows (no organizationIds filter)', async () => {
-      authz.isGlobalAdmin.mockReturnValue(true);
+      authz.getCapabilities.mockResolvedValue([Capability.SystemAuditRead]);
       await ctl.findByFilter({}, mockUserCtx({ roles: ['super-admin'] }));
       expect(svc.findByFilter).toHaveBeenCalledWith(
         expect.objectContaining({ organizationIds: undefined }),
@@ -93,7 +97,7 @@ describe('AuditQueryController', () => {
     });
 
     it('passes through pagination and date filters', async () => {
-      authz.isGlobalAdmin.mockReturnValue(true);
+      authz.getCapabilities.mockResolvedValue([Capability.SystemAuditRead]);
       await ctl.findByFilter(
         { limit: 50, offset: 100, startDate: '2026-01-01T00:00:00Z', endDate: '2026-02-01T00:00:00Z' },
         mockUserCtx({ roles: ['super-admin'] }),
