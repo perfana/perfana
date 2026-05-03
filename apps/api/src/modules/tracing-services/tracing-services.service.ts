@@ -4,7 +4,8 @@ import {
   DatabaseException,
 } from '../../common/exceptions/business.exception';
 import { TracingServiceRepository } from '../../repositories/tracing-service.repository';
-import { TracingService } from '@perfana/shared/entities';
+import { TracingService, OwnedResource } from '@perfana/shared';
+import { AuditService } from '../audit/audit.service';
 import {
   CreateTracingServiceDto,
   UpdateTracingServiceDto,
@@ -26,6 +27,7 @@ export class TracingServicesService {
 
   constructor(
     private readonly tracingServiceRepository: TracingServiceRepository,
+    private readonly auditService: AuditService,
   ) {}
 
   /**
@@ -169,6 +171,19 @@ export class TracingServicesService {
 
       // NOTE: created_by, updated_by, organization_id will be set when Phase 4 adds those columns
 
+      // Phase 5a: split the upsert into CREATE vs UPDATE for accurate audit
+      // semantics. The repository performs the same findByExactMatch internally,
+      // so this adds one extra SELECT on this rarely-called write path — an
+      // acceptable trade-off for "one row per logical user action" auditing.
+      const existing = await this.tracingServiceRepository.findByExactMatch(
+        createDto.systemUnderTestId,
+        createDto.testEnvironment ?? null,
+        createDto.workload ?? null,
+      );
+      const before = existing
+        ? Object.assign(new TracingService(), existing)
+        : null;
+
       const tracingService =
         await this.tracingServiceRepository.createOrUpdate({
           systemUnderTestId: createDto.systemUnderTestId,
@@ -177,6 +192,20 @@ export class TracingServicesService {
           tracingInstanceId: createDto.tracingInstanceId,
           serviceNames: createDto.serviceNames,
         });
+
+      // TracingService has the same camelCase / snake_case mismatch as the
+      // other Phase 5a integrations — pass organizationIdOverride explicitly.
+      if (before) {
+        this.auditService.logUpdate(
+          before as unknown as OwnedResource,
+          tracingService as unknown as OwnedResource,
+          { organizationIdOverride: before.organizationId ?? tracingService.organizationId },
+        );
+      } else {
+        this.auditService.logCreate(tracingService as unknown as OwnedResource, {
+          organizationIdOverride: tracingService.organizationId,
+        });
+      }
 
       this.logger.log(`Tracing service saved with ID: ${tracingService.id}`);
       return tracingService;
@@ -233,6 +262,10 @@ export class TracingServicesService {
 
       // NOTE: updated_by will be set when Phase 4 adds that column
 
+      // Capture pre-update snapshot for the audit diff before the in-place
+      // repository.update mutates the row.
+      const before = Object.assign(new TracingService(), existing);
+
       // Update the tracing service
       await this.tracingServiceRepository.update(id, {
         ...(updateDto.testEnvironment !== undefined && {
@@ -249,8 +282,16 @@ export class TracingServicesService {
         }),
       } as Partial<TracingService>);
 
+      const after = await this.tracingServiceRepository.findById(id);
+
+      this.auditService.logUpdate(
+        before as unknown as OwnedResource,
+        after as unknown as OwnedResource,
+        { organizationIdOverride: before.organizationId ?? after.organizationId },
+      );
+
       this.logger.log(`Tracing service ${id} updated successfully`);
-      return await this.tracingServiceRepository.findById(id);
+      return after;
     } catch (error) {
       if (error instanceof ResourceNotFoundException) {
         throw error;
@@ -295,6 +336,13 @@ export class TracingServicesService {
 
       // NOTE: Delete permission check will be added here when TracingService entity has organization_id
       // For now, all tracing services are deletable (treated as legacy data)
+
+      // Phase 5a: log DELETE before the row is removed so the diff captures the
+      // pre-delete state. organizationIdOverride bridges the camelCase property /
+      // snake_case column mismatch.
+      this.auditService.logDelete(tracingService as unknown as OwnedResource, {
+        organizationIdOverride: tracingService.organizationId,
+      });
 
       await this.tracingServiceRepository.delete(id);
       this.logger.log(`Tracing service ${id} deleted successfully`);

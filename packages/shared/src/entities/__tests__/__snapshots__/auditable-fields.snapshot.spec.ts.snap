@@ -112,7 +112,12 @@ exports[`auditableFields snapshot — every OwnedResource entity has a stable de
   "ProfileBenchmark": null,
   "ProfileGrafanaDashboard": null,
   "ProvisionedTemplateDsCompareConfig": null,
-  "PyroscopeInstance": null,
+  "PyroscopeInstance": [
+    "label",
+    "pyroscopeUrl",
+    "backendUrl",
+    "pyroscopeStandAlone",
+  ],
   "ReportTemplate": null,
   "SparseMetricExclusion": null,
   "SystemUnderTest": null,
@@ -139,8 +144,20 @@ exports[`auditableFields snapshot — every OwnedResource entity has a stable de
     "expires",
     "expired",
   ],
-  "TracingInstance": null,
-  "TracingService": null,
+  "TracingInstance": [
+    "label",
+    "tracingUrl",
+    "tracingApiUrl",
+    "tracingUi",
+    "tracingIframeAllowed",
+  ],
+  "TracingService": [
+    "systemUnderTestId",
+    "testEnvironment",
+    "workload",
+    "tracingInstanceId",
+    "serviceNames",
+  ],
   "TrendsFilterPreset": null,
 }
 `;

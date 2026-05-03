@@ -17,6 +17,16 @@ export { TracingUI };
 @Entity('tracing_services')
 @Index(['systemUnderTestId', 'testEnvironment', 'workload', 'tracingInstanceId'], { unique: true })
 export class TracingService {
+  // Phase 5a audit: scoping keys + linkage + service list. Excludes ownership/
+  // timestamps, the `id` PK, and ManyToOne relations (the FK columns are kept).
+  static auditableFields = [
+    'systemUnderTestId',
+    'testEnvironment',
+    'workload',
+    'tracingInstanceId',
+    'serviceNames',
+  ] as const;
+
   @PrimaryGeneratedColumn('uuid')
   id!: string;
 
