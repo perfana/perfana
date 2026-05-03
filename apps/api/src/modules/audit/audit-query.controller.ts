@@ -15,6 +15,7 @@ import { AuditService, AuditFilter } from './audit.service';
 import { AuditResourceRegistry, EntityClass } from './audit-resource-registry';
 import { AuditFilterDto } from './dto/audit-filter.dto';
 import { AuthorizationService } from '../../common/services/authorization.service';
+import { Capability } from '../../constants/capabilities.constants';
 import { UserCtx, UserContext } from '../../common/decorators/user-context.decorator';
 
 @ApiTags('audit-logs')
@@ -30,9 +31,13 @@ export class AuditQueryController {
 
   /**
    * Admin filterable search across audit logs.
-   * - super-admin / system-admin / support → cross-org
+   * - super-admin / system-admin / support → cross-org (granted SystemAuditRead)
    * - org-admin → scoped to accessible organizations
    * - Anyone else → 403 (RolesGuard)
+   *
+   * Cross-org vs scoped is decided by `Capability.SystemAuditRead` rather than
+   * `isGlobalAdmin(roles)` directly: the capability is the contract, the
+   * roles → capability mapping is owned by `capabilities.constants.ts`.
    */
   @Get()
   @Roles({
@@ -44,7 +49,8 @@ export class AuditQueryController {
     @Query() dto: AuditFilterDto,
     @UserCtx() ctx: UserContext,
   ): Promise<{ rows: unknown[]; total: number }> {
-    const isAdmin = this.authz.isGlobalAdmin(ctx.roles);
+    const caps = await this.authz.getCapabilities(ctx.userId, ctx.roles, null);
+    const isAdmin = caps.includes(Capability.SystemAuditRead);
 
     const filter: AuditFilter = {
       resourceType: dto.resourceType,

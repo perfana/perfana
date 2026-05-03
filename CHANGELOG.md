@@ -4,6 +4,11 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
+## [0.2.47.53] - 2026-05-03
+
+### Changed
+- **`AuditQueryController` migrated off `authzService.isGlobalAdmin()`** to capability-based reasoning (`Capability.SystemAuditRead`). The cross-org-vs-scoped branch in `findByFilter` now reads the user's capabilities via `authz.getCapabilities(userId, roles, null)` and checks for `SystemAuditRead` (granted only to global admins via `GLOBAL_ADMIN_CAPABILITIES`). Behavior unchanged: super-admin / system-admin / support still see cross-org rows; org-admin still scoped to accessible organizations. Restores `apps/api/.rbac-migration-allowlist.json` to empty — Phase 3c stays closed.
+
 ## [0.2.47.52] - 2026-05-03
 
 ### Added
