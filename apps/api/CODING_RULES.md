@@ -103,9 +103,18 @@ Guards live at `src/guards/`, not `src/common/guards/`:
 
 ### Ownership Columns
 
-All resource entities include nullable ownership columns for RBAC:
+All owned-resource entities include four ownership columns for RBAC:
 - `created_by`, `updated_by` — user ID who created/modified
-- `organization_id`, `team_id` — org/team scope (nullable for backward compat)
+- `organization_id` — **NOT NULL** on all 26 owned-resource entities (Phase 4, 2026-05-02). Exceptions: `audit_logs` and `test_runs` (the latter checked via joined SUT).
+- `team_id` — nullable; teams are optional even on owned resources.
+
+### Setting `organization_id` on resource creation
+
+**Use the camelCase entity property in `repo.create({...})`, never the snake_case column name.** Most entities declare `@Column({ name: 'organization_id' }) organizationId!: string`. TypeORM silently drops unknown properties — passing `organization_id: ...` compiles, runs, and INSERTs without an org id, then crashes on the NOT NULL constraint.
+
+Two correct patterns (see `apps/api/src/modules/benchmarks/services/benchmark-mutation.service.ts` and `apps/api/src/modules/grafana/grafana-instances.service.ts` for examples):
+- **Inherit from parent** (child resource): load parent SUT / Profile / GrafanaInstance / TestRun, copy `organizationId` + `teamId` onto the child entity.
+- **Default to user's first accessible org** (top-level resource): `dto.organizationId ?? (await authzService.getAccessibleOrganizations(userId))[0]`; throw `ForbiddenException` if zero accessible orgs.
 
 ## Testing
 

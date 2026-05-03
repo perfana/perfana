@@ -114,9 +114,9 @@ Perfana implements a multi-tenant RBAC system for fine-grained access control ac
 |-------|-------------|--------|
 | Phase 1 | Role definitions & constants | Completed |
 | Phase 2 | Membership & ownership infrastructure | Completed |
-| Phase 3 | Service-layer authorization enforcement | TODO |
-| Phase 4 | Data migration for existing resources | TODO |
-| Phase 5 | Row-level security & audit logging | TODO |
+| Phase 3 | Service-layer authorization enforcement | Lint-enforced (allowlist empty) |
+| Phase 4 | Data migration — `organization_id` NOT NULL on owned resources | Completed (2026-05-02) |
+| Phase 5 | Row-level security & audit logging | In progress (5a audit logging shipping per-service) |
 
 ### Role Hierarchy
 
@@ -141,7 +141,7 @@ Perfana implements a multi-tenant RBAC system for fine-grained access control ac
 All resource entities implement the `OwnedResource` interface with four ownership columns:
 - `created_by` - User ID (Keycloak sub or api-key:{id}) who created the resource
 - `updated_by` - User ID who last modified the resource
-- `organization_id` - Organization the resource belongs to (nullable for backward compatibility)
+- `organization_id` - Organization the resource belongs to (NOT NULL on all 26 owned-resource entities as of Phase 4; nullable only on `audit_logs` and `test_runs` for documented reasons)
 - `team_id` - Team the resource belongs to (nullable)
 
 **Entities with Ownership Tracking** (~25 entities):
@@ -197,11 +197,22 @@ async findAll(userId: string, roles: string[]) {
 
 This is how `test-runs` and all working services implement it.
 
-### Backward Compatibility
+### Ownership column nullability
 
-- All ownership columns are **nullable** to support existing data
-- Resources with `null` `organization_id` are accessible to all authenticated users
-- Authorization enforcement is opt-in (Phase 3) and won't break existing functionality
+- `organization_id` is **NOT NULL** on all 26 owned-resource entities (Phase 4, 2026-05-02). The "null org = visible to all authenticated users" backward-compat rule is gone.
+- Exceptions intentionally kept nullable: `audit_logs.organization_id` (system-level events with no org context) and `test_runs.organization_id` (vestigial — TestRun access is checked via the joined SystemUnderTest's `organization_id`).
+- `team_id` remains nullable on all entities — teams are optional even on owned resources.
+- Authorization enforcement (Phase 3) is now lint-enforced and the data layer (Phase 4) prevents the escape hatch.
+
+### Resource creation pattern (avoid the camelCase / snake_case TypeORM gotcha)
+
+When creating a child resource via `repo.create({...})`, you MUST use the **camelCase entity property name** (e.g. `organizationId`), not the **snake_case DB column name** (e.g. `organization_id`). TypeORM silently drops unknown properties when an entity declares `@Column({ name: 'organization_id' }) organizationId!: string`. A snake_case key compiles, runs, and INSERTs without an org id — which slams into the Phase 4 NOT NULL constraint at runtime, not compile time.
+
+Two correct patterns:
+- **Inherit from parent**: load the parent (SUT, Profile, GrafanaInstance, TestRun) and copy `organizationId` + `teamId` onto the child entity in `repo.create({...})`.
+- **Default to user's first accessible org**: when a top-level resource accepts an optional `organizationId?` from the DTO, fall through to `AuthorizationService.getAccessibleOrganizations(userId)[0]` and throw `ForbiddenException` if the user has zero accessible orgs.
+
+v0.2.47.66 + v0.2.47.67 fixed 18 sites with this pattern. New services should follow it from day one.
 
 ## Environment Configuration
 

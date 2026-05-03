@@ -257,11 +257,36 @@ if (result.conflict) {
 
 Example: `POST /api/systems-under-test` — creates the SUT (with optional environments and workloads) or returns the existing one with 409.
 
+### Resource creation: use camelCase entity properties (avoid the silent-drop)
+
+When creating a child resource via `repo.create({...})`, pass the **camelCase entity property name** (e.g. `organizationId`), NOT the snake_case DB column name (e.g. `organization_id`). Most owned-resource entities declare `@Column({ name: 'organization_id' }) organizationId!: string`. TypeORM silently drops unknown properties, so a snake_case key compiles, runs, and INSERTs without an org id — which slams into the Phase 4 NOT NULL constraint at runtime, not compile time.
+
+Two correct patterns:
+
+```typescript
+// Pattern A — Inherit from parent (child resources):
+const sut = await this.sutRepo.findOne({ where: { id: parentSystemId } });
+const child = this.repo.create({
+  ...rest,
+  organizationId: sut.organizationId,  // camelCase, not organization_id
+  teamId: sut.teamId,
+});
+
+// Pattern B — Default to user's first accessible org (top-level resources):
+const orgId = dto.organizationId
+  ?? (await this.authzService.getAccessibleOrganizations(userId))[0];
+if (!orgId) throw new ForbiddenException('User has no accessible organization');
+const entity = this.repo.create({ ...dto, organizationId: orgId });
+```
+
+v0.2.47.66 + v0.2.47.67 fixed 18 sites that hit this gotcha across `grafana-sync` and 17 API services. New services must follow these patterns from day one.
+
 ### Common Issues
 
 1. **"Failed to fetch"** → Missing `...getAuthHeaders()` in fetch calls
 2. **401 Unauthorized** → Expired token, Keycloak handles refresh
 3. **403 Forbidden** → Wrong auth type for admin endpoints
+4. **`null value in column "organization_id" violates not-null constraint`** → You passed `organization_id` (snake_case) to `repo.create()`. Use `organizationId` (camelCase). See "Resource creation" pattern above.
 
 ## How-To Tutorials
 
