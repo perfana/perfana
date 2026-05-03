@@ -2,6 +2,7 @@ import { Injectable, NotFoundException, ForbiddenException, Logger } from '@nest
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository, Brackets } from 'typeorm';
 import { CompareFilterPreset, ApplicationDashboard, TestRun as TestRunEntity } from '../../entities';
+import { OwnedResource } from '@perfana/shared';
 import { CreateComparePresetDto } from './dto/create-compare-preset.dto';
 import { UpdateComparePresetDto } from './dto/update-compare-preset.dto';
 import { ComparePresetResponseDto } from './dto/compare-preset-response.dto';
@@ -9,6 +10,7 @@ import { PresetType, CompareSeriesConfig } from './dto/create-compare-preset.dto
 import { ResourceNotFoundException } from '../../common/exceptions/business.exception';
 import { AuthorizationService } from '../../common/services/authorization.service';
 import { withOrgFilter } from '../../common/utils/with-org-filter';
+import { AuditService } from '../audit/audit.service';
 
 @Injectable()
 export class ComparePresetsService {
@@ -20,6 +22,7 @@ export class ComparePresetsService {
     @InjectRepository(TestRunEntity)
     private testRunRepo: Repository<TestRunEntity>,
     private readonly authzService: AuthorizationService,
+    private readonly auditService: AuditService,
   ) {}
 
   /**
@@ -107,6 +110,14 @@ export class ComparePresetsService {
       } as any);
 
       const savedPreset = await this.comparePresetRepo.save(preset);
+
+      // Phase 5a: CompareFilterPreset.organization_id maps to camelCase
+      // property organizationId, so AuditService.dispatch cannot read it off
+      // ref directly — pass organizationIdOverride so the audit row is org-scoped.
+      this.auditService.logCreate(savedPreset as unknown as OwnedResource, {
+        organizationIdOverride: (savedPreset as unknown as CompareFilterPreset).organizationId,
+      });
+
       return this.mapToDto((savedPreset as unknown) as CompareFilterPreset, null, null);
     } catch (error) {
       if (error instanceof NotFoundException || error instanceof ForbiddenException || error instanceof ResourceNotFoundException) throw error;
@@ -322,6 +333,12 @@ export class ComparePresetsService {
         throw new ForbiddenException('You can only update your own presets');
       }
 
+      // Phase 5a: capture pre-update entity snapshot for the audit diff. The
+      // service-layer `findOne` returns a DTO (which loses the constructor
+      // prototype that `AuditService.dispatch` consults to resolve
+      // auditableFields); fetch the raw entity directly for the diff input.
+      const before = await this.comparePresetRepo.findOne({ where: { id } });
+
       // Validate access to new test run references for non-admin users
       if (orgIds !== null) {
         if (updateComparePresetDto.baseline_test_run_id !== undefined && updateComparePresetDto.baseline_test_run_id) {
@@ -367,6 +384,17 @@ export class ComparePresetsService {
         throw new Error('Failed to fetch updated preset');
       }
 
+      // Phase 5a: emit UPDATE audit row with the diff. `before` is loaded
+      // above; `updated` is the persisted entity. organizationIdOverride
+      // bridges the camelCase property / snake_case column mismatch.
+      if (before) {
+        this.auditService.logUpdate(
+          before as unknown as OwnedResource,
+          updated as unknown as OwnedResource,
+          { organizationIdOverride: before.organizationId ?? updated.organizationId },
+        );
+      }
+
       // Fetch test run data if needed
       let testRunData = null;
       if (updated.baselineTestRunId) {
@@ -402,6 +430,16 @@ export class ComparePresetsService {
       const existing = await this.findOne(id, userId, roles);
       if (existing.created_by !== userId) {
         throw new ForbiddenException('You can only delete your own presets');
+      }
+
+      // Phase 5a: load the raw entity for the audit diff (`existing` is a DTO
+      // and would lose the constructor prototype). Log DELETE before the
+      // remove so the diff captures the pre-delete state.
+      const entity = await this.comparePresetRepo.findOne({ where: { id } });
+      if (entity) {
+        this.auditService.logDelete(entity as unknown as OwnedResource, {
+          organizationIdOverride: entity.organizationId,
+        });
       }
 
       await this.comparePresetRepo.delete({

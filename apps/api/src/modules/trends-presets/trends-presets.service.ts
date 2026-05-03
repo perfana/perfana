@@ -2,8 +2,10 @@ import { Injectable, NotFoundException, ForbiddenException, Logger } from '@nest
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository, Brackets } from 'typeorm';
 import { TrendsFilterPreset, ApplicationDashboard, TestRun as TestRunEntity } from '../../entities';
+import { OwnedResource } from '@perfana/shared';
 import { CreateTrendsPresetDto } from './dto/create-trends-preset.dto';
 import { TrendsPresetResponseDto } from './dto/trends-preset-response.dto';
+import { AuditService } from '../audit/audit.service';
 
 /**
  * Service responsible for managing trends filter presets.
@@ -24,6 +26,7 @@ export class TrendsPresetsService {
     private trendsPresetRepo: Repository<TrendsFilterPreset>,
     @InjectRepository(TestRunEntity)
     private testRunRepo: Repository<TestRunEntity>,
+    private readonly auditService: AuditService,
   ) {}
 
   /**
@@ -55,6 +58,14 @@ export class TrendsPresetsService {
       });
 
       const savedPreset = await this.trendsPresetRepo.save(preset);
+
+      // Phase 5a: TrendsFilterPreset.organization_id maps to camelCase property
+      // organizationId, so AuditService.dispatch cannot read it off ref directly —
+      // pass organizationIdOverride so the audit row is org-scoped.
+      this.auditService.logCreate(savedPreset as unknown as OwnedResource, {
+        organizationIdOverride: savedPreset.organizationId,
+      });
+
       this.logger.debug(`Created trends preset ${savedPreset.id} for user ${userId}`);
       return this.mapToDto(savedPreset, null);
     } catch (error) {
@@ -224,6 +235,13 @@ export class TrendsPresetsService {
           throw new ForbiddenException('You can only delete your own presets');
         }
       }
+
+      // Phase 5a: log DELETE before the row is removed so the diff captures
+      // the pre-delete state. organizationIdOverride bridges the camelCase
+      // property / snake_case column mismatch.
+      this.auditService.logDelete(preset as unknown as OwnedResource, {
+        organizationIdOverride: preset.organizationId,
+      });
 
       await this.trendsPresetRepo.delete({ id });
 

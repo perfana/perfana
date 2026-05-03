@@ -22,6 +22,19 @@ export interface ChartOptions {
 @Index(['testRunId'], { where: 'test_run_id IS NOT NULL' })
 @Index(['userId', 'testRunId'])
 export class GraphPreset {
+  // Phase 5a — fields surfaced in audit-log diffs. Ownership / org / team
+  // columns and timestamps are intentionally excluded; they are emitted via
+  // dedicated columns on the audit row.
+  static auditableFields = [
+    'name',
+    'description',
+    'testRunId',
+    'userId',
+    'seriesConfig',
+    'chartOptions',
+    'isGlobal',
+  ] as const;
+
   @PrimaryGeneratedColumn('uuid')
   id!: string;
 
