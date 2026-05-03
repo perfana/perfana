@@ -4,6 +4,11 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
+## [0.2.47.65] - 2026-05-03
+
+### Fixed
+- **Audit log viewer — `perfana-admin` users no longer get 403.** `GET /api/audit-logs` was gated by `@Roles({ roles: ['super-admin', 'system-admin', 'support', 'org-admin'] })`, but in this codebase `perfana-admin` is the global-admin role (per `SystemRole.GLOBAL_ADMIN` in `apps/api/src/constants/roles.constants.ts`). The `RolesGuard` does strict string matching, so any token holding `perfana-admin` was rejected with 403 before the controller body's capability check could run — even though the body already authorizes via `Capability.SystemAuditRead`, which `GLOBAL_ADMIN_CAPABILITIES` grants to global admins. Fix: spread `GLOBAL_ADMIN_ROLES` (the canonical `['perfana-admin', 'admin']` constant) into the `@Roles` allowed-list. Adds a regression test that asserts the metadata via `Reflector` so the gate can't silently regress in the future. Also unblocks 42 pre-existing failing tests in `test-runs-config.service.spec.ts` by adding the missing `AuditService` mock provider that PR #244 (Phase 5a PR13) forgot to wire into the spec's test module.
+
 ## [0.2.47.64] - 2026-05-03
 
 ### Added
