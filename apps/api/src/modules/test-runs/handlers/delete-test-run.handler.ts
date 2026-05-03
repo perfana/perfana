@@ -8,12 +8,13 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository, DataSource, EntityManager } from 'typeorm';
-import { TestRun as TestRunEntity } from '../../../entities';
+import { TestRun as TestRunEntity, OwnedResource } from '../../../entities';
 import { DeleteTestRunCommand } from '../commands/delete-test-run.command';
 import { ICommandHandler, CommandContext, CommandResult } from '../commands/types';
 import { TestRunsGateway } from '../gateways/test-runs.gateway';
 import { TestRunEventType, TestRunDeletedEvent } from '../types/realtime-events.types';
 import { ResourceNotFoundException, DatabaseException } from '../../../common/exceptions/business.exception';
+import { AuditService } from '../../audit/audit.service';
 
 /**
  * Result type for delete operations
@@ -34,6 +35,7 @@ export class DeleteTestRunHandler implements ICommandHandler<DeleteTestRunComman
     private readonly testRunRepo: Repository<TestRunEntity>,
     private readonly dataSource: DataSource,
     private readonly testRunsGateway: TestRunsGateway,
+    private readonly auditService: AuditService,
   ) {}
 
   /**
@@ -47,10 +49,11 @@ export class DeleteTestRunHandler implements ICommandHandler<DeleteTestRunComman
     const { id } = data;
 
     try {
-      // First verify the test run exists and get its test_run_id
+      // First verify the test run exists. Load all columns (instead of a
+      // narrow select) so the audit envelope captures the full pre-delete
+      // snapshot of `auditableFields` and the camelCase `organizationId`.
       const testRun = await this.testRunRepo.findOne({
         where: { id },
-        select: ['id', 'testRunId', 'startTime', 'systemUnderTestId', 'testEnvironment', 'workload'],
         relations: ['systemUnderTest'],
       });
 
@@ -61,6 +64,16 @@ export class DeleteTestRunHandler implements ICommandHandler<DeleteTestRunComman
       const testRunId = testRun.testRunId;
       const teamId = testRun.systemUnderTest?.team_id;
       this.logger.log(`Starting cascade deletion for test run ${id} (test_run_id: ${testRunId})`);
+
+      // Audit DELETE before tearing down the row + cascades. Cascaded child
+      // table deletions (ds_change_points, check_results, ds_*, transactions,
+      // etc.) are intentionally not individually audited — they are implied
+      // by the test_run delete and the raw `manager.query('DELETE …')` calls
+      // would not surface to the audit lint rule's matcher anyway. The same
+      // pattern is used for organization delete (PR6).
+      this.auditService.logDelete(testRun as unknown as OwnedResource, {
+        organizationIdOverride: testRun.organizationId,
+      });
 
       // Perform cascade deletion with deadlock retry logic.
       // TimescaleDB compressed chunk decompression requires exclusive locks;
