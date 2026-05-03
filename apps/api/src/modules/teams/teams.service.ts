@@ -1,8 +1,9 @@
 import { Injectable, Logger, NotFoundException, ForbiddenException, forwardRef, Inject } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository, In } from 'typeorm';
-import { Team } from '../../entities';
+import { Team, OwnedResource } from '../../entities';
 import { AuthorizationService } from '../../common/services/authorization.service';
+import { AuditService } from '../audit/audit.service';
 import { TeamMembersService } from './team-members.service';
 import { CreateTeamDto, UpdateTeamDto } from './dto/team.dto';
 
@@ -33,6 +34,7 @@ export class TeamsService {
     private readonly authzService: AuthorizationService,
     @Inject(forwardRef(() => TeamMembersService))
     private readonly membersService: TeamMembersService,
+    private readonly auditService: AuditService,
   ) {}
 
   /**
@@ -194,6 +196,8 @@ export class TeamsService {
       const team = this.teamRepository.create(createDto);
       const savedTeam = await this.teamRepository.save(team);
 
+      this.auditService.logCreate(savedTeam as unknown as OwnedResource);
+
       this.logger.log(`Created team: ${savedTeam.name} (${savedTeam.id}) in org ${createDto.organization_id} by user ${userId}`);
 
       // Automatically add the creator as team-admin
@@ -268,8 +272,15 @@ export class TeamsService {
         }
       }
 
+      // Snapshot the before-state for the audit diff (clone before Object.assign).
+      const before = { ...team } as Team;
       Object.assign(team, updateDto);
-      await this.teamRepository.save(team);
+      const after = await this.teamRepository.save(team);
+
+      this.auditService.logUpdate(
+        before as unknown as OwnedResource,
+        after as unknown as OwnedResource,
+      );
 
       this.logger.log(`Updated team: ${team.name} (${id}) by user ${userId}`);
 
@@ -321,6 +332,9 @@ export class TeamsService {
         }
       }
 
+      // Audit DELETE before the row is removed so the entity is still
+      // available for the audit envelope.
+      this.auditService.logDelete(team as unknown as OwnedResource);
       await this.teamRepository.remove(team);
 
       this.logger.log(`Deleted team: ${team.name} (${id}) by user ${userId}`);

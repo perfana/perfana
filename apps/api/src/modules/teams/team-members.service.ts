@@ -6,10 +6,11 @@ import {
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
-import { Team, TeamMember } from '../../entities';
+import { Team, TeamMember, OwnedResource } from '../../entities';
 import { TeamRole } from '../../constants/roles.constants';
 import { KeycloakAdminService } from '../auth/keycloak-admin.service';
 import { AuthorizationService } from '../../common/services/authorization.service';
+import { AuditService } from '../audit/audit.service';
 import { fetchUserInfoMap, UserInfo } from '../../common/utils/user-enrichment';
 
 export interface AddTeamMemberDto {
@@ -37,6 +38,7 @@ export class TeamMembersService {
     private readonly teamRepository: Repository<Team>,
     private readonly keycloakAdminService: KeycloakAdminService,
     private readonly authorizationService: AuthorizationService,
+    private readonly auditService: AuditService,
   ) {}
 
   /**
@@ -200,6 +202,12 @@ export class TeamMembersService {
 
       const savedMember = await this.memberRepository.save(member);
 
+      // TeamMember has no `organization_id` column itself — pin the audit row
+      // to the parent team's org so org-admin scoped queries see this event.
+      this.auditService.logCreate(savedMember as unknown as OwnedResource, {
+        organizationIdOverride: team.organization_id,
+      });
+
       this.logger.log(
         `Added user ${dto.userId} to team ${team.name} (${dto.teamId}) with roles: ${dto.roles.join(', ')}`,
       );
@@ -227,8 +235,17 @@ export class TeamMembersService {
     try {
       const member = await this.findOne(id);
 
+      // Snapshot pre-mutation roles for the audit diff (clone the array so the
+      // post-mutation `member.roles = dto.roles` doesn't alias `before.roles`).
+      const before = { ...member, roles: [...member.roles] } as TeamMember;
       member.roles = dto.roles;
-      await this.memberRepository.save(member);
+      const after = await this.memberRepository.save(member);
+
+      this.auditService.logUpdate(
+        before as unknown as OwnedResource,
+        after as unknown as OwnedResource,
+        { organizationIdOverride: member.team?.organization_id },
+      );
 
       // Invalidate authorization cache for the affected user and team
       await this.authorizationService.invalidateUserCache(member.user_id);
@@ -257,6 +274,10 @@ export class TeamMembersService {
   async removeMember(id: string): Promise<void> {
     try {
       const member = await this.findOne(id);
+
+      this.auditService.logDelete(member as unknown as OwnedResource, {
+        organizationIdOverride: member.team?.organization_id,
+      });
       await this.memberRepository.remove(member);
 
       // Invalidate authorization cache for the removed user and team
@@ -294,6 +315,9 @@ export class TeamMembersService {
         );
       }
 
+      this.auditService.logDelete(member as unknown as OwnedResource, {
+        organizationIdOverride: member.team?.organization_id,
+      });
       await this.memberRepository.remove(member);
 
       // Invalidate authorization cache for the removed user and team
