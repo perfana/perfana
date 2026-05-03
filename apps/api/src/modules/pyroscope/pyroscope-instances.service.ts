@@ -49,6 +49,16 @@ export class PyroscopeInstancesService {
    * Delegates the global-admin / any-org-admin policy to AuthorizationService.canAdministerAnyOrganization.
    * @throws ForbiddenException if user is not authorized
    */
+  private async resolveOrganizationId(dtoOrgId: string | undefined, userId: string): Promise<string> {
+    if (dtoOrgId) return dtoOrgId;
+    const orgs = await this.authzService.getAccessibleOrganizations(userId);
+    const first = orgs?.[0];
+    if (!first) {
+      throw new ForbiddenException('No accessible organization found for user');
+    }
+    return first;
+  }
+
   private async requireOrgAdmin(userId: string, roles: string[]): Promise<void> {
     const result = await this.authzService.canAdministerAnyOrganization(userId, roles);
     if (!result.allowed) {
@@ -184,6 +194,9 @@ export class PyroscopeInstancesService {
       // Check if user is org-admin in any organization
       await this.requireOrgAdmin(userId, roles);
 
+      // PyroscopeInstance.organization_id is NOT NULL.
+      const organizationId = await this.resolveOrganizationId(createDto.organizationId, userId);
+
       const entity = this.pyroscopeInstanceRepo.create({
         label: createDto.label,
         pyroscopeUrl: createDto.pyroscopeUrl,
@@ -191,7 +204,7 @@ export class PyroscopeInstancesService {
         pyroscopeStandAlone: createDto.pyroscopeStandAlone || false,
         createdBy: userId,
         updatedBy: userId,
-        organizationId: createDto.organizationId || undefined,
+        organizationId,
       });
 
       const savedEntity = await this.pyroscopeInstanceRepo.save(entity);

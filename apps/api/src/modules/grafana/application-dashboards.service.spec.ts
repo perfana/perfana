@@ -3,7 +3,7 @@ import { getRepositoryToken } from '@nestjs/typeorm';
 import { Repository, DataSource } from 'typeorm';
 import { Logger } from '@nestjs/common';
 import { ApplicationDashboardsService } from './application-dashboards.service';
-import { ApplicationDashboard as ApplicationDashboardEntity } from '../../entities';
+import { ApplicationDashboard as ApplicationDashboardEntity, SystemUnderTest } from '../../entities';
 import { CreateApplicationDashboardDto, UpdateApplicationDashboardDto } from './dto/application-dashboard.dto';
 import { GrafanaClientService } from './grafana-client.service';
 import { createAuthorizationServiceMock } from '../../../test/mocks/authorization-service.mock';
@@ -153,6 +153,16 @@ describe('ApplicationDashboardsService', () => {
         {
           provide: getRepositoryToken(ApplicationDashboardEntity),
           useValue: mockAppDashboardRepo,
+        },
+        {
+          provide: getRepositoryToken(SystemUnderTest),
+          useValue: {
+            findOne: jest.fn().mockResolvedValue({
+              id: 'system-uuid',
+              organization_id: 'org-mock',
+              team_id: undefined,
+            }),
+          },
         },
         {
           provide: DataSource,
@@ -632,6 +642,8 @@ describe('ApplicationDashboardsService', () => {
         variables: [{ name: 'system_under_test', values: ['test-app'] }],
         replacedTemplatingVariables: [{ name: 'datasource', value: ['Prometheus'] }],
         snapshotTimeout: 10,
+        organizationId: 'org-mock',
+        teamId: undefined,
       });
       expect(result.id).toBe('app-dashboard-uuid');
     });

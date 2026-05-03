@@ -1,4 +1,4 @@
-import { Injectable, NotFoundException, ForbiddenException, Logger } from '@nestjs/common';
+import { Injectable, NotFoundException, ForbiddenException, BadRequestException, Logger } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository, Brackets } from 'typeorm';
 import { TrendsFilterPreset, ApplicationDashboard, TestRun as TestRunEntity } from '../../entities';
@@ -40,6 +40,16 @@ export class TrendsPresetsService {
     userId: string,
   ): Promise<TrendsPresetResponseDto> {
     try {
+      // Inherit org/team from the parent test run's SUT — TrendsFilterPreset.
+      // organization_id is NOT NULL and the camelCase property key is required.
+      const testRun = await this.testRunRepo.findOne({
+        where: { testRunId: createTrendsPresetDto.created_for_test_run_id },
+        relations: ['systemUnderTest'],
+      });
+      if (!testRun?.systemUnderTest) {
+        throw new BadRequestException(`Test run not found: ${createTrendsPresetDto.created_for_test_run_id}`);
+      }
+
       const preset = this.trendsPresetRepo.create({
         name: createTrendsPresetDto.name,
         description: createTrendsPresetDto.description,
@@ -54,7 +64,9 @@ export class TrendsPresetsService {
         seriesConfig: createTrendsPresetDto.series_config,
         createdForTestRunId: createTrendsPresetDto.created_for_test_run_id,
         isGlobal: createTrendsPresetDto.is_global || false,
-        createdBy: userId
+        createdBy: userId,
+        organizationId: testRun.systemUnderTest.organization_id,
+        teamId: testRun.systemUnderTest.team_id,
       });
 
       const savedPreset = await this.trendsPresetRepo.save(preset);

@@ -73,7 +73,10 @@ describe('GrafanaInstancesService', () => {
         },
         {
           provide: AuthorizationService,
-          useValue: createAuthorizationServiceMock(),
+          useValue: {
+            ...createAuthorizationServiceMock(),
+            getAccessibleOrganizations: jest.fn().mockResolvedValue(['test-org-123']),
+          },
         },
         {
           provide: AuditService,
@@ -417,7 +420,7 @@ describe('GrafanaInstancesService', () => {
         snapshotInstance: false,
         createdBy: mockUserId,
         updatedBy: mockUserId,
-        organizationId: undefined,
+        organizationId: 'test-org-123',
       });
       expect(repository.save).toHaveBeenCalledWith(mockEntity);
       expect(result.id).toBe('new-id-789');
@@ -453,7 +456,7 @@ describe('GrafanaInstancesService', () => {
         snapshotInstance: false,
         createdBy: mockUserId,
         updatedBy: mockUserId,
-        organizationId: undefined,
+        organizationId: 'test-org-123',
       });
     });
 
@@ -487,7 +490,7 @@ describe('GrafanaInstancesService', () => {
         snapshotInstance: false,
         createdBy: mockUserId,
         updatedBy: mockUserId,
-        organizationId: undefined,
+        organizationId: 'test-org-123',
       });
     });
 

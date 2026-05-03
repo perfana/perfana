@@ -40,7 +40,10 @@ export class DeepLinksRepository {
     return result ? this.mapToDeepLink(result) : null;
   }
 
-  async create(dto: CreateDeepLinkDto): Promise<DeepLink> {
+  async create(
+    dto: CreateDeepLinkDto,
+    ownership: { organizationId: string; teamId?: string },
+  ): Promise<DeepLink> {
     const deepLink = this.deepLinkRepo.create({
       systemUnderTestId: dto.systemUnderTestId,
       testEnvironment: dto.testEnvironment,
@@ -48,7 +51,9 @@ export class DeepLinksRepository {
       name: dto.name,
       url: dto.url,
       tags: dto.tags ?? [],
-      templateDeepLinkId: dto.templateDeepLinkId
+      templateDeepLinkId: dto.templateDeepLinkId,
+      organizationId: ownership.organizationId,
+      teamId: ownership.teamId,
     });
 
     const result = await this.deepLinkRepo.save(deepLink);
@@ -90,11 +95,16 @@ export class DeepLinksRepository {
     return results.map(this.mapToGenericDeepLink);
   }
 
-  async createGeneric(dto: CreateGenericDeepLinkDto): Promise<GenericDeepLink> {
+  async createGeneric(
+    dto: CreateGenericDeepLinkDto,
+    ownership: { organizationId: string; teamId?: string },
+  ): Promise<GenericDeepLink> {
     const genericDeepLink = this.genericDeepLinkRepo.create({
       profile: dto.profile,
       name: dto.name,
-      url: dto.url
+      url: dto.url,
+      organizationId: ownership.organizationId,
+      teamId: ownership.teamId,
     });
 
     const result = await this.genericDeepLinkRepo.save(genericDeepLink);

@@ -56,7 +56,10 @@ describe('GraphPresetsService', () => {
         {
           provide: getRepositoryToken(TestRunEntity),
           useValue: {
-            findOne: jest.fn(),
+            findOne: jest.fn().mockResolvedValue({
+              testRunId: 'tr-mock',
+              systemUnderTest: { organization_id: mockOrgId, team_id: undefined },
+            }),
           },
         },
         {

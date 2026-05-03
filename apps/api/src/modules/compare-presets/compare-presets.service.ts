@@ -90,6 +90,33 @@ export class ComparePresetsService {
         }
       }
 
+      // CompareFilterPreset.organization_id is NOT NULL. Inherit org/team from
+      // the parent test run's SUT when one is referenced; otherwise default to
+      // the caller's first accessible org (legacy presets without test-run scope).
+      const parentTestRunId =
+        createComparePresetDto.created_for_test_run_id ||
+        createComparePresetDto.baseline_test_run_id;
+      let organizationId: string;
+      let teamId: string | undefined;
+      if (parentTestRunId) {
+        const parentTestRun = await this.testRunRepo.findOne({
+          where: { testRunId: parentTestRunId },
+          relations: ['systemUnderTest'],
+        });
+        if (!parentTestRun?.systemUnderTest) {
+          throw new ResourceNotFoundException('TestRun', parentTestRunId);
+        }
+        organizationId = parentTestRun.systemUnderTest.organization_id;
+        teamId = parentTestRun.systemUnderTest.team_id;
+      } else {
+        const orgs = await this.authzService.getAccessibleOrganizations(userId);
+        const first = orgs?.[0];
+        if (!first) {
+          throw new ForbiddenException('No accessible organization found for user');
+        }
+        organizationId = first;
+      }
+
       const preset = this.comparePresetRepo.create({
         name: createComparePresetDto.name,
         description: createComparePresetDto.description,
@@ -106,7 +133,9 @@ export class ComparePresetsService {
         seriesConfig: createComparePresetDto.series_config as any,
         createdForTestRunId: createComparePresetDto.created_for_test_run_id,
         isGlobal: createComparePresetDto.is_global || false,
-        createdBy: userId
+        createdBy: userId,
+        organizationId,
+        teamId,
       } as any);
 
       const savedPreset = await this.comparePresetRepo.save(preset);

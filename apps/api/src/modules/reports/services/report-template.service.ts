@@ -5,6 +5,7 @@ import {
   ReportTemplate,
   ReportSectionConfig,
   ReportStyling,
+  SystemUnderTest,
 } from '@perfana/shared';
 import {
   ResourceNotFoundException,
@@ -101,6 +102,8 @@ export class ReportTemplateService {
   constructor(
     @InjectRepository(ReportTemplate)
     private readonly templateRepo: Repository<ReportTemplate>,
+    @InjectRepository(SystemUnderTest)
+    private readonly systemRepo: Repository<SystemUnderTest>,
   ) {}
 
   // ==================== Create Operations ====================
@@ -143,6 +146,13 @@ export class ReportTemplateService {
         );
       }
 
+      // Inherit org/team from the parent SUT — ReportTemplate.organization_id
+      // is NOT NULL and the camelCase property key is required.
+      const system = await this.systemRepo.findOne({ where: { id: options.systemId } });
+      if (!system) {
+        throw new ResourceNotFoundException('SystemUnderTest', options.systemId);
+      }
+
       // Create the template entity
       const template = this.templateRepo.create({
         name: options.name,
@@ -154,6 +164,8 @@ export class ReportTemplateService {
         sections: options.sections,
         styling: options.styling,
         is_default: options.isDefault || false,
+        organizationId: system.organization_id,
+        teamId: system.team_id,
       });
 
       const savedTemplate = await this.templateRepo.save(template);

@@ -21,6 +21,7 @@ import {
   ReportTemplate,
   ReportSectionConfig,
   ReportStyling,
+  SystemUnderTest,
 } from '../../../entities';
 import {
   ResourceNotFoundException,
@@ -78,6 +79,16 @@ describe('ReportTemplateService', () => {
         {
           provide: getRepositoryToken(ReportTemplate),
           useValue: templateRepo,
+        },
+        {
+          provide: getRepositoryToken(SystemUnderTest),
+          useValue: {
+            findOne: jest.fn().mockResolvedValue({
+              id: 'system-mock',
+              organization_id: 'org-mock',
+              team_id: undefined,
+            }),
+          },
         },
       ],
     }).compile();

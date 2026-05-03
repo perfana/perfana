@@ -31,8 +31,6 @@ export type {
  *
  * Authorization:
  * - All mutation methods accept userId and roles parameters for authorization
- * - Currently Benchmark entity does not have organization_id, so all data is treated as legacy
- * - When organization_id is added to Benchmark (Phase 4), authorization checks will be enabled
  * - Global admins bypass all authorization checks
  */
 @Injectable()
@@ -51,10 +49,17 @@ export class BenchmarkMutationService {
   ) {}
 
   /**
-   * Validate user has access to a system under test
+   * Validate user has access to a system under test and return the loaded entity.
+   * Callers use the returned system to inherit organizationId/teamId onto the
+   * benchmark — Benchmark.organization_id is NOT NULL (Phase 4) and the benchmark
+   * lives under the same org/team as its parent SUT.
    * @throws ForbiddenException if user doesn't have access
    */
-  private async validateSystemAccess(systemId: string, userId: string, roles: string[]): Promise<void> {
+  private async validateSystemAccess(
+    systemId: string,
+    userId: string,
+    roles: string[],
+  ): Promise<SystemUnderTest> {
     const system = await this.systemRepo.findOne({ where: { id: systemId } });
     if (!system) {
       throw new ForbiddenException(`System under test ${systemId} not found`);
@@ -68,6 +73,8 @@ export class BenchmarkMutationService {
     if (!result.allowed) {
       throw new ForbiddenException('You do not have access to this system');
     }
+
+    return system;
   }
 
   /**
@@ -81,8 +88,8 @@ export class BenchmarkMutationService {
    */
   async create(userId: string, roles: string[], dto: CreateBenchmarkDto): Promise<Benchmark> {
     try {
-      // Validate user has access to the system
-      await this.validateSystemAccess(dto.systemUnderTestId, userId, roles);
+      // Validate user has access to the system and capture it to inherit org/team
+      const system = await this.validateSystemAccess(dto.systemUnderTestId, userId, roles);
 
       const tags = await this.tagHelper.inheritTagsFromDashboard(
         dto.applicationDashboardId,
@@ -122,10 +129,13 @@ export class BenchmarkMutationService {
         average_all: false,
         validate_with_default_if_no_data: false,
         metadata: {},
-        // Set ownership tracking (created_by/updated_by exist on Benchmark entity)
+        // Inherit ownership from the parent system_under_test. organizationId is
+        // NOT NULL on Benchmark (Phase 4); TypeORM maps the camelCase property
+        // organizationId → DB column organization_id, so the key MUST be camelCase.
+        organizationId: system.organization_id,
+        teamId: system.team_id,
         created_by: userId,
         updated_by: userId,
-        // NOTE: organization_id and team_id will be set when Phase 4 adds those columns
       });
 
       const result = await this.benchmarkRepo.save(benchmark);
@@ -275,7 +285,7 @@ export class BenchmarkMutationService {
     dto: CopyBenchmarksDto,
   ): Promise<{ copied: number; skipped: number; total: number }> {
     await this.validateSystemAccess(dto.sourceSystemUnderTestId, userId, roles);
-    await this.validateSystemAccess(dto.targetSystemUnderTestId, userId, roles);
+    const targetSystem = await this.validateSystemAccess(dto.targetSystemUnderTestId, userId, roles);
 
     // Fetch source benchmarks
     let sourceBenchmarks = await this.benchmarkRepo.find({
@@ -400,6 +410,10 @@ export class BenchmarkMutationService {
         metadata: benchmark.metadata ?? {},
         enabled: benchmark.enabled,
         valid: benchmark.valid,
+        // Inherit ownership from the target SUT — copies live under the target's
+        // org, not the source's. organizationId is NOT NULL on Benchmark.
+        organizationId: targetSystem.organization_id,
+        teamId: targetSystem.team_id,
         created_by: userId,
         updated_by: userId,
       });
@@ -434,8 +448,8 @@ export class BenchmarkMutationService {
         throw new Error('minApdexScore must be between 0 and 1');
       }
 
-      // Validate user has access to the system
-      await this.validateSystemAccess(dto.systemUnderTestId, userId, roles);
+      // Validate user has access to the system and capture it to inherit org/team
+      const system = await this.validateSystemAccess(dto.systemUnderTestId, userId, roles);
 
       const benchmark = this.benchmarkRepo.create({
         system_under_test_id: dto.systemUnderTestId,
@@ -459,10 +473,13 @@ export class BenchmarkMutationService {
             : 'Workload Apdex SLO',
         },
         metadata: {},
-        // Set ownership tracking (created_by/updated_by exist on Benchmark entity)
+        // Inherit ownership from the parent system_under_test. organizationId is
+        // NOT NULL on Benchmark (Phase 4); the camelCase key matters because
+        // TypeORM silently drops snake_case organization_id on entity create.
+        organizationId: system.organization_id,
+        teamId: system.team_id,
         created_by: userId,
         updated_by: userId,
-        // NOTE: organization_id and team_id will be set when Phase 4 adds those columns
       });
 
       const result = await this.benchmarkRepo.save(benchmark);

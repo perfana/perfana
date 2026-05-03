@@ -8,7 +8,7 @@ import {
   GrafanaDashboardQuery,
   TemplatingVariableDto
 } from './dto/grafana-dashboard.dto';
-import { GrafanaDashboard as GrafanaDashboardEntity } from '../../entities';
+import { GrafanaDashboard as GrafanaDashboardEntity, GrafanaInstance as GrafanaInstanceEntity } from '../../entities';
 import { AuthorizationService } from '../../common/services/authorization.service';
 import { withOrgFilter } from '../../common/utils/with-org-filter';
 import { OwnedResource } from '@perfana/shared';
@@ -48,6 +48,8 @@ export class GrafanaDashboardsService {
   constructor(
     @InjectRepository(GrafanaDashboardEntity)
     private grafanaDashboardRepo: Repository<GrafanaDashboardEntity>,
+    @InjectRepository(GrafanaInstanceEntity)
+    private grafanaInstanceRepo: Repository<GrafanaInstanceEntity>,
     private readonly grafanaClientService: GrafanaClientService,
     private readonly authzService: AuthorizationService,
     private readonly auditService: AuditService,
@@ -258,7 +260,15 @@ export class GrafanaDashboardsService {
     this.logger.debug(`create: userId=${userId}`);
 
     try {
-      // NOTE: Ownership fields (created_by, organization_id) will be set here when Phase 4 adds them
+      // Inherit org/team from the parent GrafanaInstance — GrafanaDashboard.
+      // organization_id is NOT NULL and the camelCase property key is required.
+      const grafanaInstance = await this.grafanaInstanceRepo.findOne({
+        where: { id: createDto.grafanaInstanceId },
+      });
+      if (!grafanaInstance) {
+        throw new NotFoundException(`Grafana instance not found: ${createDto.grafanaInstanceId}`);
+      }
+
       const dashboard = this.grafanaDashboardRepo.create({
         grafanaInstanceId: createDto.grafanaInstanceId,
         grafanaId: createDto.grafanaId,
@@ -272,7 +282,9 @@ export class GrafanaDashboardsService {
         variables: createDto.variables || [],
         tags: createDto.tags || [],
         usedBySut: createDto.usedBySut || [],
-        updated: new Date()
+        updated: new Date(),
+        organizationId: grafanaInstance.organizationId,
+        teamId: grafanaInstance.teamId,
       });
 
       const result = await this.grafanaDashboardRepo.save(dashboard);

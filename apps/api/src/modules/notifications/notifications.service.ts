@@ -146,6 +146,15 @@ export class NotificationsService {
         throw new BadRequestException(`Invalid webhook URL: ${urlValidation.error}`);
       }
 
+      // Inherit org/team from the parent SUT — NotificationChannel.organization_id
+      // is NOT NULL and the camelCase property key is required.
+      const system = await this.systemUnderTestRepository.findOne({
+        where: { id: dto.systemUnderTestId },
+      });
+      if (!system) {
+        throw new BadRequestException(`System under test not found: ${dto.systemUnderTestId}`);
+      }
+
       const channel = this.notificationChannelRepository.create({
         systemUnderTestId: dto.systemUnderTestId,
         type: dto.type,
@@ -156,6 +165,8 @@ export class NotificationsService {
         enabled: dto.enabled ?? true,
         createdBy: userId,
         updatedBy: userId,
+        organizationId: system.organization_id,
+        teamId: system.team_id,
       });
 
       return await this.notificationChannelRepository.save(channel);

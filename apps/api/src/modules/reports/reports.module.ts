@@ -1,6 +1,6 @@
 import { Module } from '@nestjs/common';
 import { TypeOrmModule } from '@nestjs/typeorm';
-import { GeneratedReport, ReportTemplate, TestRun } from '@perfana/shared';
+import { GeneratedReport, ReportTemplate, TestRun, SystemUnderTest } from '@perfana/shared';
 import { ReportGenerationController } from './controllers/report-generation.controller';
 import { ReportTemplateController } from './controllers/report-template.controller';
 import { ReportShareController } from './controllers/report-share.controller';
@@ -32,7 +32,7 @@ import { PlaceholderRenderer } from './renderers/placeholder-renderer';
 
 @Module({
   imports: [
-    TypeOrmModule.forFeature([GeneratedReport, ReportTemplate, TestRun]),
+    TypeOrmModule.forFeature([GeneratedReport, ReportTemplate, TestRun, SystemUnderTest]),
     CommonModule, // Provides AuthorizationService
   ],
   controllers: [ReportGenerationController, ReportTemplateController, ReportShareController],

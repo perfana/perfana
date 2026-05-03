@@ -3,7 +3,7 @@ import { getRepositoryToken } from '@nestjs/typeorm';
 import { ForbiddenException, NotFoundException } from '@nestjs/common';
 import { GrafanaDashboardsService } from './grafana-dashboards.service';
 import { GrafanaClientService } from './grafana-client.service';
-import { GrafanaDashboard as GrafanaDashboardEntity } from '../../entities';
+import { GrafanaDashboard as GrafanaDashboardEntity, GrafanaInstance as GrafanaInstanceEntity } from '../../entities';
 import {
   CreateGrafanaDashboardDto,
   UpdateGrafanaDashboardDto,
@@ -99,6 +99,16 @@ describe('GrafanaDashboardsService', () => {
         {
           provide: getRepositoryToken(GrafanaDashboardEntity),
           useValue: mockRepository
+        },
+        {
+          provide: getRepositoryToken(GrafanaInstanceEntity),
+          useValue: {
+            findOne: jest.fn().mockResolvedValue({
+              id: 'gi-mock',
+              organizationId: 'org-mock',
+              teamId: undefined,
+            }),
+          },
         },
         {
           provide: GrafanaClientService,
@@ -430,7 +440,9 @@ describe('GrafanaDashboardsService', () => {
           variables: createDto.variables || [],
           tags: createDto.tags || [],
           usedBySut: createDto.usedBySut || [],
-          updated: expect.any(Date)
+          updated: expect.any(Date),
+          organizationId: 'org-mock',
+          teamId: undefined,
         });
         expect(repository.save).toHaveBeenCalledWith(mockDashboardEntity);
         expect(result.id).toBe(mockDashboardEntity.id);
@@ -1649,6 +1661,16 @@ describe('GrafanaDashboardsService', () => {
           {
             provide: getRepositoryToken(GrafanaDashboardEntity),
             useValue: mockRepository
+          },
+          {
+            provide: getRepositoryToken(GrafanaInstanceEntity),
+            useValue: {
+              findOne: jest.fn().mockResolvedValue({
+                id: 'gi-mock',
+                organizationId: 'org-mock',
+                teamId: undefined,
+              }),
+            },
           },
           {
             provide: GrafanaClientService,

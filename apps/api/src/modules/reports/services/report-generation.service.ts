@@ -9,6 +9,7 @@ import {
   ReportSectionConfig,
   ReportStyling,
   OwnedResource,
+  SystemUnderTest,
 } from '@perfana/shared';
 import {
   ResourceNotFoundException,
@@ -121,6 +122,8 @@ export class ReportGenerationService {
     private readonly templateRepo: Repository<ReportTemplate>,
     @InjectRepository(TestRun)
     private readonly testRunRepo: Repository<TestRun>,
+    @InjectRepository(SystemUnderTest)
+    private readonly systemRepo: Repository<SystemUnderTest>,
     private readonly authzService: AuthorizationService,
     private readonly validator: ReportGenerationValidatorService,
     private readonly utils: ReportUtilsService,
@@ -337,6 +340,15 @@ export class ReportGenerationService {
             ? 'Ephemeral template for ad-hoc report'
             : 'User-saved template from ad-hoc report';
 
+        // Inherit org/team from the parent SUT — ReportTemplate.organization_id
+        // is NOT NULL and the camelCase property key is required.
+        const system = await this.systemRepo.findOne({
+          where: { id: testRun.systemUnderTestId },
+        });
+        if (!system) {
+          throw new ResourceNotFoundException('SystemUnderTest', testRun.systemUnderTestId);
+        }
+
         const template = this.templateRepo.create({
           name: templateName,
           description: templateDescription,
@@ -347,6 +359,8 @@ export class ReportGenerationService {
           sections: options.sections,
           styling: options.styling || this.utils.getDefaultStyling(),
           is_adhoc: isAdhoc,
+          organizationId: system.organization_id,
+          teamId: system.team_id,
         });
 
         const savedTemplate = await this.templateRepo.save(template);

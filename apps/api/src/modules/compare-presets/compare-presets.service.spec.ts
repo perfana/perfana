@@ -49,6 +49,7 @@ describe('ComparePresetsService', () => {
     testRunId: 'test-123',
     applicationRelease: 'v1.0.0',
     annotations: ['Test annotation'],
+    systemUnderTest: { organization_id: 'org-1', team_id: undefined } as never,
   };
 
   beforeEach(async () => {
@@ -91,6 +92,9 @@ describe('ComparePresetsService', () => {
     comparePresetRepo = module.get(getRepositoryToken(CompareFilterPreset));
     testRunRepo = module.get(getRepositoryToken(TestRunEntity));
     auditService = module.get(AuditService);
+    // Default: testRun lookup for org/team inheritance returns a SUT-joined mock.
+    // Tests that need the lookup to fail can override per-call.
+    testRunRepo.findOne.mockResolvedValue(mockTestRun as TestRunEntity);
   });
 
   afterEach(() => {
@@ -137,6 +141,8 @@ describe('ComparePresetsService', () => {
         createdForTestRunId: createDto.created_for_test_run_id,
         isGlobal: createDto.is_global,
         createdBy: userId,
+        organizationId: 'org-1',
+        teamId: undefined,
       });
       expect(comparePresetRepo.save).toHaveBeenCalledWith(mockPreset);
       expect(result.id).toBe('preset-uuid');
@@ -219,6 +225,7 @@ describe('ComparePresetsService', () => {
       // Arrange
       const mockQueryBuilder = {
         leftJoinAndSelect: jest.fn().mockReturnThis(),
+        leftJoin: jest.fn().mockReturnThis(),
         where: jest.fn().mockReturnThis(),
         orderBy: jest.fn().mockReturnThis(),
         getMany: jest.fn().mockResolvedValue([mockPreset]),
@@ -249,7 +256,9 @@ describe('ComparePresetsService', () => {
 
       const mockQueryBuilder = {
         leftJoinAndSelect: jest.fn().mockReturnThis(),
+        leftJoin: jest.fn().mockReturnThis(),
         where: jest.fn().mockReturnThis(),
+        andWhere: jest.fn().mockReturnThis(),
         orderBy: jest.fn().mockReturnThis(),
         getMany: jest.fn().mockResolvedValue([genericPreset, specificPreset, otherSpecificPreset]),
       };
@@ -273,6 +282,7 @@ describe('ComparePresetsService', () => {
 
       const mockQueryBuilder = {
         leftJoinAndSelect: jest.fn().mockReturnThis(),
+        leftJoin: jest.fn().mockReturnThis(),
         where: jest.fn().mockReturnThis(),
         orderBy: jest.fn().mockReturnThis(),
         getMany: jest.fn().mockResolvedValue([genericPreset, specificPreset]),
@@ -292,6 +302,7 @@ describe('ComparePresetsService', () => {
       // Arrange
       const mockQueryBuilder = {
         leftJoinAndSelect: jest.fn().mockReturnThis(),
+        leftJoin: jest.fn().mockReturnThis(),
         where: jest.fn().mockReturnThis(),
         orderBy: jest.fn().mockReturnThis(),
         getMany: jest.fn().mockResolvedValue([mockPreset]),
@@ -316,6 +327,7 @@ describe('ComparePresetsService', () => {
       // Arrange
       const mockQueryBuilder = {
         leftJoinAndSelect: jest.fn().mockReturnThis(),
+        leftJoin: jest.fn().mockReturnThis(),
         where: jest.fn().mockReturnThis(),
         orderBy: jest.fn().mockReturnThis(),
         getMany: jest.fn().mockResolvedValue([mockPreset]),
@@ -336,6 +348,7 @@ describe('ComparePresetsService', () => {
       // Arrange
       const mockQueryBuilder = {
         leftJoinAndSelect: jest.fn().mockReturnThis(),
+        leftJoin: jest.fn().mockReturnThis(),
         where: jest.fn().mockReturnThis(),
         orderBy: jest.fn().mockReturnThis(),
         getMany: jest.fn().mockRejectedValue(new Error('Query error')),
@@ -353,6 +366,7 @@ describe('ComparePresetsService', () => {
       // Arrange
       const mockQueryBuilder = {
         leftJoinAndSelect: jest.fn().mockReturnThis(),
+        leftJoin: jest.fn().mockReturnThis(),
         where: jest.fn().mockReturnThis(),
         andWhere: jest.fn().mockReturnThis(),
         getOne: jest.fn().mockResolvedValue(mockPreset),
@@ -381,6 +395,7 @@ describe('ComparePresetsService', () => {
 
       const mockQueryBuilder = {
         leftJoinAndSelect: jest.fn().mockReturnThis(),
+        leftJoin: jest.fn().mockReturnThis(),
         where: jest.fn().mockReturnThis(),
         andWhere: jest.fn().mockReturnThis(),
         getOne: jest.fn().mockResolvedValue(globalPreset),
@@ -399,6 +414,7 @@ describe('ComparePresetsService', () => {
       // Arrange
       const mockQueryBuilder = {
         leftJoinAndSelect: jest.fn().mockReturnThis(),
+        leftJoin: jest.fn().mockReturnThis(),
         where: jest.fn().mockReturnThis(),
         andWhere: jest.fn().mockReturnThis(),
         getOne: jest.fn().mockResolvedValue(null),
@@ -416,6 +432,7 @@ describe('ComparePresetsService', () => {
       // Arrange
       const mockQueryBuilder = {
         leftJoinAndSelect: jest.fn().mockReturnThis(),
+        leftJoin: jest.fn().mockReturnThis(),
         where: jest.fn().mockReturnThis(),
         andWhere: jest.fn().mockReturnThis(),
         getOne: jest.fn().mockResolvedValue(mockPreset),
@@ -444,6 +461,7 @@ describe('ComparePresetsService', () => {
 
       const mockQueryBuilder = {
         leftJoinAndSelect: jest.fn().mockReturnThis(),
+        leftJoin: jest.fn().mockReturnThis(),
         where: jest.fn().mockReturnThis(),
         andWhere: jest.fn().mockReturnThis(),
         getOne: jest.fn().mockResolvedValue(mockPreset),
@@ -484,6 +502,7 @@ describe('ComparePresetsService', () => {
 
       const mockQueryBuilder = {
         leftJoinAndSelect: jest.fn().mockReturnThis(),
+        leftJoin: jest.fn().mockReturnThis(),
         where: jest.fn().mockReturnThis(),
         andWhere: jest.fn().mockReturnThis(),
         getOne: jest.fn().mockResolvedValue(mockPreset),
@@ -521,6 +540,7 @@ describe('ComparePresetsService', () => {
 
       const mockQueryBuilder = {
         leftJoinAndSelect: jest.fn().mockReturnThis(),
+        leftJoin: jest.fn().mockReturnThis(),
         where: jest.fn().mockReturnThis(),
         andWhere: jest.fn().mockReturnThis(),
         getOne: jest.fn().mockResolvedValue(otherUserPreset),
@@ -542,6 +562,7 @@ describe('ComparePresetsService', () => {
 
       const mockQueryBuilder = {
         leftJoinAndSelect: jest.fn().mockReturnThis(),
+        leftJoin: jest.fn().mockReturnThis(),
         where: jest.fn().mockReturnThis(),
         andWhere: jest.fn().mockReturnThis(),
         getOne: jest.fn().mockResolvedValue(null),
@@ -561,6 +582,7 @@ describe('ComparePresetsService', () => {
 
       const mockQueryBuilder = {
         leftJoinAndSelect: jest.fn().mockReturnThis(),
+        leftJoin: jest.fn().mockReturnThis(),
         where: jest.fn().mockReturnThis(),
         andWhere: jest.fn().mockReturnThis(),
         getOne: jest.fn().mockResolvedValue(mockPreset),
@@ -580,6 +602,7 @@ describe('ComparePresetsService', () => {
       // Arrange
       const mockQueryBuilder = {
         leftJoinAndSelect: jest.fn().mockReturnThis(),
+        leftJoin: jest.fn().mockReturnThis(),
         where: jest.fn().mockReturnThis(),
         andWhere: jest.fn().mockReturnThis(),
         getOne: jest.fn().mockResolvedValue(mockPreset),
@@ -604,6 +627,7 @@ describe('ComparePresetsService', () => {
 
       const mockQueryBuilder = {
         leftJoinAndSelect: jest.fn().mockReturnThis(),
+        leftJoin: jest.fn().mockReturnThis(),
         where: jest.fn().mockReturnThis(),
         andWhere: jest.fn().mockReturnThis(),
         getOne: jest.fn().mockResolvedValue(otherUserPreset),
@@ -621,6 +645,7 @@ describe('ComparePresetsService', () => {
       // Arrange
       const mockQueryBuilder = {
         leftJoinAndSelect: jest.fn().mockReturnThis(),
+        leftJoin: jest.fn().mockReturnThis(),
         where: jest.fn().mockReturnThis(),
         andWhere: jest.fn().mockReturnThis(),
         getOne: jest.fn().mockResolvedValue(null),
@@ -638,6 +663,7 @@ describe('ComparePresetsService', () => {
       // Arrange
       const mockQueryBuilder = {
         leftJoinAndSelect: jest.fn().mockReturnThis(),
+        leftJoin: jest.fn().mockReturnThis(),
         where: jest.fn().mockReturnThis(),
         andWhere: jest.fn().mockReturnThis(),
         getOne: jest.fn().mockResolvedValue({ ...mockPreset, dashboardLabel: 'Preset Label' }),
@@ -659,6 +685,7 @@ describe('ComparePresetsService', () => {
 
       const mockQueryBuilder = {
         leftJoinAndSelect: jest.fn().mockReturnThis(),
+        leftJoin: jest.fn().mockReturnThis(),
         where: jest.fn().mockReturnThis(),
         andWhere: jest.fn().mockReturnThis(),
         getOne: jest.fn().mockResolvedValue(presetWithoutLabel),
@@ -677,6 +704,7 @@ describe('ComparePresetsService', () => {
       // Arrange
       const mockQueryBuilder = {
         leftJoinAndSelect: jest.fn().mockReturnThis(),
+        leftJoin: jest.fn().mockReturnThis(),
         where: jest.fn().mockReturnThis(),
         andWhere: jest.fn().mockReturnThis(),
         getOne: jest.fn().mockResolvedValue(mockPreset),
@@ -928,6 +956,7 @@ describe('ComparePresetsService', () => {
         // Arrange
         const mockQueryBuilder = {
           leftJoinAndSelect: jest.fn().mockReturnThis(),
+        leftJoin: jest.fn().mockReturnThis(),
           where: jest.fn().mockReturnThis(),
           orderBy: jest.fn().mockReturnThis(),
           getMany: jest.fn().mockResolvedValue([]),
@@ -951,6 +980,7 @@ describe('ComparePresetsService', () => {
 
         const mockQueryBuilder = {
           leftJoinAndSelect: jest.fn().mockReturnThis(),
+        leftJoin: jest.fn().mockReturnThis(),
           where: jest.fn().mockReturnThis(),
           orderBy: jest.fn().mockReturnThis(),
           getMany: jest.fn().mockResolvedValue([presetWithoutDashboard]),
@@ -973,6 +1003,7 @@ describe('ComparePresetsService', () => {
 
         const mockQueryBuilder = {
           leftJoinAndSelect: jest.fn().mockReturnThis(),
+        leftJoin: jest.fn().mockReturnThis(),
           where: jest.fn().mockReturnThis(),
           orderBy: jest.fn().mockReturnThis(),
           getMany: jest.fn().mockResolvedValue([specific1, specific2]),
@@ -994,6 +1025,7 @@ describe('ComparePresetsService', () => {
 
         const mockQueryBuilder = {
           leftJoinAndSelect: jest.fn().mockReturnThis(),
+        leftJoin: jest.fn().mockReturnThis(),
           where: jest.fn().mockReturnThis(),
           orderBy: jest.fn().mockReturnThis(),
           getMany: jest.fn().mockResolvedValue([userPreset, globalPreset]),
@@ -1014,6 +1046,7 @@ describe('ComparePresetsService', () => {
         // Arrange
         const mockQueryBuilder = {
           leftJoinAndSelect: jest.fn().mockReturnThis(),
+        leftJoin: jest.fn().mockReturnThis(),
           where: jest.fn().mockReturnThis(),
           orderBy: jest.fn().mockReturnThis(),
           getMany: jest.fn().mockResolvedValue([mockPreset]),
@@ -1044,6 +1077,7 @@ describe('ComparePresetsService', () => {
 
         const mockQueryBuilder = {
           leftJoinAndSelect: jest.fn().mockReturnThis(),
+        leftJoin: jest.fn().mockReturnThis(),
           where: jest.fn().mockReturnThis(),
           orderBy: jest.fn().mockReturnThis(),
           getMany: jest.fn().mockResolvedValue([presetWithoutBaseline]),
@@ -1063,6 +1097,7 @@ describe('ComparePresetsService', () => {
         // Arrange
         const mockQueryBuilder = {
           leftJoinAndSelect: jest.fn().mockReturnThis(),
+        leftJoin: jest.fn().mockReturnThis(),
           where: jest.fn().mockReturnThis(),
           orderBy: jest.fn().mockReturnThis(),
           getMany: jest.fn().mockRejectedValue(null),
@@ -1088,6 +1123,7 @@ describe('ComparePresetsService', () => {
 
         const mockQueryBuilder = {
           leftJoinAndSelect: jest.fn().mockReturnThis(),
+        leftJoin: jest.fn().mockReturnThis(),
           where: jest.fn().mockReturnThis(),
           andWhere: jest.fn().mockReturnThis(),
           getOne: jest.fn().mockResolvedValue(globalPreset),
@@ -1107,6 +1143,7 @@ describe('ComparePresetsService', () => {
         // Arrange
         const mockQueryBuilder = {
           leftJoinAndSelect: jest.fn().mockReturnThis(),
+        leftJoin: jest.fn().mockReturnThis(),
           where: jest.fn().mockReturnThis(),
           andWhere: jest.fn().mockReturnThis(),
           getOne: jest.fn().mockResolvedValue(null),
@@ -1124,6 +1161,7 @@ describe('ComparePresetsService', () => {
         // Arrange
         const mockQueryBuilder = {
           leftJoinAndSelect: jest.fn().mockReturnThis(),
+        leftJoin: jest.fn().mockReturnThis(),
           where: jest.fn().mockReturnThis(),
           andWhere: jest.fn().mockReturnThis(),
           getOne: jest.fn().mockRejectedValue(new Error('Connection timeout')),
@@ -1141,6 +1179,7 @@ describe('ComparePresetsService', () => {
         // Arrange
         const mockQueryBuilder = {
           leftJoinAndSelect: jest.fn().mockReturnThis(),
+        leftJoin: jest.fn().mockReturnThis(),
           where: jest.fn().mockReturnThis(),
           andWhere: jest.fn().mockReturnThis(),
           getOne: jest.fn().mockResolvedValue(mockPreset),
@@ -1161,6 +1200,7 @@ describe('ComparePresetsService', () => {
         // Arrange
         const mockQueryBuilder = {
           leftJoinAndSelect: jest.fn().mockReturnThis(),
+        leftJoin: jest.fn().mockReturnThis(),
           where: jest.fn().mockReturnThis(),
           andWhere: jest.fn().mockReturnThis(),
           getOne: jest.fn().mockResolvedValue(mockPreset),
@@ -1201,6 +1241,7 @@ describe('ComparePresetsService', () => {
 
         const mockQueryBuilder = {
           leftJoinAndSelect: jest.fn().mockReturnThis(),
+        leftJoin: jest.fn().mockReturnThis(),
           where: jest.fn().mockReturnThis(),
           andWhere: jest.fn().mockReturnThis(),
           getOne: jest.fn().mockResolvedValue(mockPreset),
@@ -1241,6 +1282,7 @@ describe('ComparePresetsService', () => {
 
         const mockQueryBuilder = {
           leftJoinAndSelect: jest.fn().mockReturnThis(),
+        leftJoin: jest.fn().mockReturnThis(),
           where: jest.fn().mockReturnThis(),
           andWhere: jest.fn().mockReturnThis(),
           getOne: jest.fn().mockResolvedValue(mockPreset),
@@ -1271,6 +1313,7 @@ describe('ComparePresetsService', () => {
 
         const mockQueryBuilder = {
           leftJoinAndSelect: jest.fn().mockReturnThis(),
+        leftJoin: jest.fn().mockReturnThis(),
           where: jest.fn().mockReturnThis(),
           andWhere: jest.fn().mockReturnThis(),
           getOne: jest.fn().mockResolvedValue(globalPresetOwnedByOther),
@@ -1290,6 +1333,7 @@ describe('ComparePresetsService', () => {
 
         const mockQueryBuilder = {
           leftJoinAndSelect: jest.fn().mockReturnThis(),
+        leftJoin: jest.fn().mockReturnThis(),
           where: jest.fn().mockReturnThis(),
           andWhere: jest.fn().mockReturnThis(),
           getOne: jest.fn().mockResolvedValue(mockPreset),
@@ -1314,6 +1358,7 @@ describe('ComparePresetsService', () => {
 
         const mockQueryBuilder = {
           leftJoinAndSelect: jest.fn().mockReturnThis(),
+        leftJoin: jest.fn().mockReturnThis(),
           where: jest.fn().mockReturnThis(),
           andWhere: jest.fn().mockReturnThis(),
           getOne: jest.fn().mockResolvedValue(mockPreset),
@@ -1348,6 +1393,7 @@ describe('ComparePresetsService', () => {
 
         const mockQueryBuilder = {
           leftJoinAndSelect: jest.fn().mockReturnThis(),
+        leftJoin: jest.fn().mockReturnThis(),
           where: jest.fn().mockReturnThis(),
           andWhere: jest.fn().mockReturnThis(),
           getOne: jest.fn().mockResolvedValue(mockPreset),
@@ -1388,6 +1434,7 @@ describe('ComparePresetsService', () => {
 
         const mockQueryBuilder = {
           leftJoinAndSelect: jest.fn().mockReturnThis(),
+        leftJoin: jest.fn().mockReturnThis(),
           where: jest.fn().mockReturnThis(),
           andWhere: jest.fn().mockReturnThis(),
           getOne: jest.fn().mockResolvedValue(globalPresetOwnedByOther),
@@ -1406,6 +1453,7 @@ describe('ComparePresetsService', () => {
         // Arrange
         const mockQueryBuilder = {
           leftJoinAndSelect: jest.fn().mockReturnThis(),
+        leftJoin: jest.fn().mockReturnThis(),
           where: jest.fn().mockReturnThis(),
           andWhere: jest.fn().mockReturnThis(),
           getOne: jest.fn().mockResolvedValue(mockPreset),
@@ -1424,6 +1472,7 @@ describe('ComparePresetsService', () => {
         // Arrange
         const mockQueryBuilder = {
           leftJoinAndSelect: jest.fn().mockReturnThis(),
+        leftJoin: jest.fn().mockReturnThis(),
           where: jest.fn().mockReturnThis(),
           andWhere: jest.fn().mockReturnThis(),
           getOne: jest.fn().mockResolvedValue(mockPreset),
@@ -1485,6 +1534,7 @@ describe('ComparePresetsService', () => {
 
         const mockQueryBuilder = {
           leftJoinAndSelect: jest.fn().mockReturnThis(),
+        leftJoin: jest.fn().mockReturnThis(),
           where: jest.fn().mockReturnThis(),
           andWhere: jest.fn().mockReturnThis(),
           getOne: jest.fn().mockResolvedValue(mockPreset),
@@ -1515,6 +1565,7 @@ describe('ComparePresetsService', () => {
 
         const mockQueryBuilder = {
           leftJoinAndSelect: jest.fn().mockReturnThis(),
+        leftJoin: jest.fn().mockReturnThis(),
           where: jest.fn().mockReturnThis(),
           andWhere: jest.fn().mockReturnThis(),
           getOne: jest.fn().mockResolvedValue(presetWithNullCreatedBy),
@@ -1544,6 +1595,7 @@ describe('ComparePresetsService', () => {
 
         const mockQueryBuilder = {
           leftJoinAndSelect: jest.fn().mockReturnThis(),
+        leftJoin: jest.fn().mockReturnThis(),
           where: jest.fn().mockReturnThis(),
           andWhere: jest.fn().mockReturnThis(),
           getOne: jest.fn().mockResolvedValue(minimalPreset),
@@ -1568,6 +1620,7 @@ describe('ComparePresetsService', () => {
     // Helper: build the mock query builder used by findOne / update / remove
     const makeQueryBuilder = (preset: CompareFilterPreset | null) => ({
       leftJoinAndSelect: jest.fn().mockReturnThis(),
+        leftJoin: jest.fn().mockReturnThis(),
       where: jest.fn().mockReturnThis(),
       andWhere: jest.fn().mockReturnThis(),
       getOne: jest.fn().mockResolvedValue(preset),
@@ -1576,6 +1629,7 @@ describe('ComparePresetsService', () => {
     // Helper: build the mock query builder used by findAll
     const makeFindAllQueryBuilder = (presets: CompareFilterPreset[]) => ({
       leftJoinAndSelect: jest.fn().mockReturnThis(),
+        leftJoin: jest.fn().mockReturnThis(),
       leftJoin: jest.fn().mockReturnThis(),
       where: jest.fn().mockReturnThis(),
       andWhere: jest.fn().mockReturnThis(),
@@ -2126,6 +2180,7 @@ describe('ComparePresetsService', () => {
       // Default findOne for the access-check uses createQueryBuilder.
       const qb = {
         leftJoinAndSelect: jest.fn().mockReturnThis(),
+        leftJoin: jest.fn().mockReturnThis(),
         where: jest.fn().mockReturnThis(),
         andWhere: jest.fn().mockReturnThis(),
         orderBy: jest.fn().mockReturnThis(),

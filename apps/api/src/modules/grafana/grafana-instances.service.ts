@@ -55,6 +55,20 @@ export class GrafanaInstancesService {
   }
 
   /**
+   * Resolve organization_id for a new instance: prefer the DTO value, otherwise
+   * fall back to the caller's first accessible org. Throws if the user has none.
+   */
+  private async resolveOrganizationId(dtoOrgId: string | undefined, userId: string): Promise<string> {
+    if (dtoOrgId) return dtoOrgId;
+    const orgs = await this.authzService.getAccessibleOrganizations(userId);
+    const first = orgs?.[0];
+    if (!first) {
+      throw new ForbiddenException('No accessible organization found for user');
+    }
+    return first;
+  }
+
+  /**
    * Mask a credential value for safe API responses
    * Returns '[MASKED]' if value exists, undefined otherwise
    */
@@ -189,6 +203,10 @@ export class GrafanaInstancesService {
       // Check if user is org-admin in any organization
       await this.requireOrgAdmin(userId, roles);
 
+      // GrafanaInstance.organization_id is NOT NULL. Take the DTO value if
+      // provided; otherwise default to the caller's first accessible org.
+      const organizationId = await this.resolveOrganizationId(createDto.organizationId, userId);
+
       const entity = this.grafanaInstanceRepo.create({
         label: createDto.label,
         client_url: createDto.clientUrl,
@@ -200,7 +218,7 @@ export class GrafanaInstancesService {
         snapshotInstance: createDto.snapshotInstance || false,
         createdBy: userId,
         updatedBy: userId,
-        organizationId: createDto.organizationId || undefined,
+        organizationId,
       });
 
       const savedEntity = await this.grafanaInstanceRepo.save(entity);

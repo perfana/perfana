@@ -56,7 +56,10 @@ describe('TracingInstancesService', () => {
         },
         {
           provide: AuthorizationService,
-          useValue: createAuthorizationServiceMock(),
+          useValue: {
+            ...createAuthorizationServiceMock(),
+            getAccessibleOrganizations: jest.fn().mockResolvedValue([mockOrgId]),
+          },
         },
         {
           provide: AuditService,

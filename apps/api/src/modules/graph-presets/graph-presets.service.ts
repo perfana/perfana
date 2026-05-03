@@ -45,6 +45,17 @@ export class GraphPresetsService {
         throw new BadRequestException('Series configuration cannot be empty');
       }
 
+      // Inherit org/team from the parent test run's SUT — GraphPreset.organization_id
+      // is NOT NULL, and the camelCase property key is mandatory (TypeORM drops
+      // snake_case keys silently for camelCase-mapped columns).
+      const testRun = await this.testRunRepo.findOne({
+        where: { testRunId: createGraphPresetDto.testRunId },
+        relations: ['systemUnderTest'],
+      });
+      if (!testRun?.systemUnderTest) {
+        throw new BadRequestException(`Test run not found: ${createGraphPresetDto.testRunId}`);
+      }
+
       const preset = this.graphPresetRepo.create({
         name: createGraphPresetDto.name,
         description: createGraphPresetDto.description,
@@ -53,7 +64,9 @@ export class GraphPresetsService {
         createdBy: userId,
         seriesConfig: createGraphPresetDto.seriesConfig as unknown as SeriesConfig[],
         chartOptions: createGraphPresetDto.chartOptions,
-        isGlobal: createGraphPresetDto.isGlobal || false
+        isGlobal: createGraphPresetDto.isGlobal || false,
+        organizationId: testRun.systemUnderTest.organization_id,
+        teamId: testRun.systemUnderTest.team_id,
       });
 
       const savedPreset = await this.graphPresetRepo.save(preset);
