@@ -3,6 +3,12 @@ import { Organization } from './organization.entity';
 
 @Entity('teams')
 export class Team {
+  // Phase 5a audit logging — `organization_id` is included so a stripped diff
+  // pins the parent org. `restrict_to_team_members` is intentionally excluded:
+  // it's a team-level visibility flag with no diff value once the team is
+  // already scoped by `organization_id`.
+  static auditableFields = ['name', 'description', 'organization_id'] as const;
+
   @PrimaryGeneratedColumn('uuid')
   id!: string;
 

@@ -21,11 +21,13 @@ import { Team, TeamMember } from '@perfana/shared';
 import { TeamRole } from '../../../constants/roles.constants';
 import { KeycloakAdminService } from '../../auth/keycloak-admin.service';
 import { AuthorizationService } from '../../../common/services/authorization.service';
+import { AuditService } from '../../audit/audit.service';
 
 describe('TeamMembersService', () => {
   let service: TeamMembersService;
   let memberRepository: jest.Mocked<Repository<TeamMember>>;
   let teamRepository: jest.Mocked<Repository<Team>>;
+  let auditService: jest.Mocked<AuditService>;
 
   // Mock data factory for Team
   const createMockTeam = (overrides?: Partial<Team>): Team =>
@@ -87,12 +89,21 @@ describe('TeamMembersService', () => {
             invalidateTeamCache: jest.fn().mockResolvedValue(undefined),
           },
         },
+        {
+          provide: AuditService,
+          useValue: {
+            logCreate: jest.fn(),
+            logUpdate: jest.fn(),
+            logDelete: jest.fn(),
+          },
+        },
       ],
     }).compile();
 
     service = module.get<TeamMembersService>(TeamMembersService);
     memberRepository = module.get(getRepositoryToken(TeamMember));
     teamRepository = module.get(getRepositoryToken(Team));
+    auditService = module.get(AuditService);
   });
 
   afterEach(() => {
@@ -1027,6 +1038,167 @@ describe('TeamMembersService', () => {
 
       // Act & Assert
       await expect(service.countMembers('team-id')).rejects.toThrow(error);
+    });
+  });
+
+  describe('audit logging (Phase 5a)', () => {
+    it('logs CREATE after addMember persists, with the team org as override', async () => {
+      const teamId = '123e4567-e89b-12d3-a456-426614174000';
+      const orgId = 'parent-org-id';
+      const dto: AddTeamMemberDto = {
+        teamId,
+        userId: 'audit-user',
+        roles: [TeamRole.MEMBER],
+      };
+      const team = createMockTeam({ id: teamId, organization_id: orgId });
+      const savedMember = createMockMember({
+        team_id: teamId,
+        user_id: dto.userId,
+        roles: dto.roles,
+        team,
+      });
+
+      teamRepository.findOne.mockResolvedValue(team);
+      memberRepository.findOne.mockResolvedValueOnce(null);
+      memberRepository.create.mockReturnValue(savedMember);
+      memberRepository.save.mockResolvedValue(savedMember);
+      memberRepository.findOne.mockResolvedValueOnce(savedMember);
+
+      await service.addMember(dto);
+
+      expect(auditService.logCreate).toHaveBeenCalledTimes(1);
+      expect(auditService.logCreate).toHaveBeenCalledWith(savedMember, {
+        organizationIdOverride: orgId,
+      });
+      expect(auditService.logUpdate).not.toHaveBeenCalled();
+      expect(auditService.logDelete).not.toHaveBeenCalled();
+    });
+
+    it('does NOT log CREATE if addMember conflicts on existing membership', async () => {
+      const dto: AddTeamMemberDto = {
+        teamId: '123e4567-e89b-12d3-a456-426614174000',
+        userId: 'existing-user',
+        roles: [TeamRole.MEMBER],
+      };
+      teamRepository.findOne.mockResolvedValue(createMockTeam({ id: dto.teamId }));
+      memberRepository.findOne.mockResolvedValue(
+        createMockMember({ team_id: dto.teamId, user_id: dto.userId }),
+      );
+
+      await expect(service.addMember(dto)).rejects.toThrow(ConflictException);
+
+      expect(auditService.logCreate).not.toHaveBeenCalled();
+    });
+
+    it('does NOT log CREATE when team is not found', async () => {
+      teamRepository.findOne.mockResolvedValue(null);
+
+      await expect(
+        service.addMember({
+          teamId: 'missing',
+          userId: 'u',
+          roles: [TeamRole.MEMBER],
+        }),
+      ).rejects.toThrow(NotFoundException);
+
+      expect(auditService.logCreate).not.toHaveBeenCalled();
+    });
+
+    it('logs UPDATE on updateMemberRoles with before/after snapshots and org override from team', async () => {
+      const memberId = 'member-audit';
+      const orgId = 'parent-org-id';
+      const dto: UpdateTeamMemberRolesDto = { roles: [TeamRole.ADMIN] };
+      const team = createMockTeam({ organization_id: orgId });
+      const existing = createMockMember({
+        id: memberId,
+        roles: [TeamRole.MEMBER],
+        team,
+      });
+      const updated = createMockMember({
+        id: memberId,
+        roles: dto.roles,
+        team,
+      });
+
+      memberRepository.findOne.mockResolvedValueOnce(existing);
+      memberRepository.save.mockResolvedValue(updated);
+      memberRepository.findOne.mockResolvedValueOnce(updated);
+
+      await service.updateMemberRoles(memberId, dto);
+
+      expect(auditService.logUpdate).toHaveBeenCalledTimes(1);
+      const [beforeArg, afterArg, opts] = (auditService.logUpdate as jest.Mock).mock.calls[0];
+      // `before` must capture the pre-mutation roles, not alias the mutated `after.roles`.
+      expect(beforeArg.roles).toEqual([TeamRole.MEMBER]);
+      expect(afterArg.roles).toEqual([TeamRole.ADMIN]);
+      expect(opts).toEqual({ organizationIdOverride: orgId });
+    });
+
+    it('does NOT log UPDATE when member is not found', async () => {
+      memberRepository.findOne.mockResolvedValue(null);
+
+      await expect(
+        service.updateMemberRoles('missing', { roles: [TeamRole.ADMIN] }),
+      ).rejects.toThrow(NotFoundException);
+
+      expect(auditService.logUpdate).not.toHaveBeenCalled();
+    });
+
+    it('logs DELETE before removeMember removes the row, with org override from team', async () => {
+      const memberId = 'member-delete';
+      const orgId = 'parent-org-id';
+      const team = createMockTeam({ organization_id: orgId });
+      const member = createMockMember({ id: memberId, team });
+      memberRepository.findOne.mockResolvedValue(member);
+      memberRepository.remove.mockResolvedValue(member);
+
+      await service.removeMember(memberId);
+
+      expect(auditService.logDelete).toHaveBeenCalledTimes(1);
+      expect(auditService.logDelete).toHaveBeenCalledWith(member, {
+        organizationIdOverride: orgId,
+      });
+
+      const logDeleteOrder = (auditService.logDelete as jest.Mock).mock.invocationCallOrder[0];
+      const repoRemoveOrder = (memberRepository.remove as jest.Mock).mock.invocationCallOrder[0];
+      expect(logDeleteOrder).toBeLessThan(repoRemoveOrder);
+    });
+
+    it('does NOT log DELETE when removeMember does not find the row', async () => {
+      memberRepository.findOne.mockResolvedValue(null);
+
+      await expect(service.removeMember('missing')).rejects.toThrow(NotFoundException);
+      expect(auditService.logDelete).not.toHaveBeenCalled();
+    });
+
+    it('logs DELETE on removeMemberByTeamAndUser before remove, with org override from team', async () => {
+      const teamId = 'team-del';
+      const userId = 'user-del';
+      const orgId = 'parent-org-id';
+      const team = createMockTeam({ id: teamId, organization_id: orgId });
+      const member = createMockMember({ team_id: teamId, user_id: userId, team });
+      memberRepository.findOne.mockResolvedValue(member);
+      memberRepository.remove.mockResolvedValue(member);
+
+      await service.removeMemberByTeamAndUser(teamId, userId);
+
+      expect(auditService.logDelete).toHaveBeenCalledTimes(1);
+      expect(auditService.logDelete).toHaveBeenCalledWith(member, {
+        organizationIdOverride: orgId,
+      });
+      const logDeleteOrder = (auditService.logDelete as jest.Mock).mock.invocationCallOrder[0];
+      const repoRemoveOrder = (memberRepository.remove as jest.Mock).mock.invocationCallOrder[0];
+      expect(logDeleteOrder).toBeLessThan(repoRemoveOrder);
+    });
+
+    it('does NOT log DELETE on removeMemberByTeamAndUser when not found', async () => {
+      memberRepository.findOne.mockResolvedValue(null);
+
+      await expect(
+        service.removeMemberByTeamAndUser('team-x', 'user-x'),
+      ).rejects.toThrow(NotFoundException);
+
+      expect(auditService.logDelete).not.toHaveBeenCalled();
     });
   });
 });

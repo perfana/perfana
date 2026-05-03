@@ -51,7 +51,11 @@ exports[`auditableFields snapshot — every OwnedResource entity has a stable de
   "ReportTemplate": null,
   "SparseMetricExclusion": null,
   "SystemUnderTest": null,
-  "Team": null,
+  "Team": [
+    "name",
+    "description",
+    "organization_id",
+  ],
   "TestRun": null,
   "TracingInstance": null,
   "TracingService": null,

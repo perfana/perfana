@@ -16,6 +16,13 @@ import { Team } from './team.entity';
 @Index(['user_id'])
 @Index(['team_id', 'user_id'])
 export class TeamMember {
+  // Phase 5a audit logging — membership rows record who was added/removed
+  // (`user_id`), which roles they hold (`roles`), and the parent team
+  // (`team_id`). TeamMember has no `organization_id` column itself; the
+  // audit envelope is set via `organizationIdOverride: team.organization_id`
+  // at the call site so org-admin scoped queries see these rows.
+  static auditableFields = ['user_id', 'roles', 'team_id'] as const;
+
   @PrimaryGeneratedColumn('uuid')
   id!: string;
 
