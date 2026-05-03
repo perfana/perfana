@@ -1,4 +1,4 @@
-import { Module } from '@nestjs/common';
+import { Module, OnModuleInit } from '@nestjs/common';
 import { TypeOrmModule } from '@nestjs/typeorm';
 import { BenchmarksController } from './benchmarks.controller';
 import { BenchmarksService } from './benchmarks.service';
@@ -10,11 +10,14 @@ import {
 } from './services';
 import { CommonModule } from '../../common/common.module';
 import { Benchmark, SystemUnderTest, ApplicationDashboard } from '../../entities';
+import { AuditModule } from '../audit/audit.module';
+import { AuditResourceRegistry } from '../audit/audit-resource-registry';
 
 @Module({
   imports: [
     TypeOrmModule.forFeature([Benchmark, SystemUnderTest, ApplicationDashboard]),
     CommonModule,
+    AuditModule, // Phase 5a: provides AuditService + AuditResourceRegistry
   ],
   controllers: [BenchmarksController],
   providers: [
@@ -36,4 +39,10 @@ import { Benchmark, SystemUnderTest, ApplicationDashboard } from '../../entities
     BenchmarkMutationService,
   ],
 })
-export class BenchmarksModule {}
+export class BenchmarksModule implements OnModuleInit {
+  constructor(private readonly auditRegistry: AuditResourceRegistry) {}
+
+  onModuleInit(): void {
+    this.auditRegistry.register('benchmarks', Benchmark);
+  }
+}

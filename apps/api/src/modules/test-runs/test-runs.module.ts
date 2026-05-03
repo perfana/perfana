@@ -200,5 +200,11 @@ export class TestRunsModule implements OnModuleInit {
 
   onModuleInit(): void {
     this.auditRegistry.register('test-runs', TestRun);
+    // Phase 5a (PR13) — results-impacting config: SLO definitions and the
+    // per-test-run / golden-path knobs that drive ADAPT and anomaly detection.
+    this.auditRegistry.register('expected-config-changes', ExpectedConfigChange);
+    this.auditRegistry.register('sparse-metric-exclusions', SparseMetricExclusion);
+    this.auditRegistry.register('ds-compare-configs', DsCompareConfig);
+    this.auditRegistry.register('provisioned-template-ds-compare-configs', ProvisionedTemplateDsCompareConfig);
   }
 }

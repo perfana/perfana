@@ -5,6 +5,28 @@ import { MetricsSource } from './metrics-source.entity';
 
 @Entity('provisioned_template_ds_compare_configs')
 export class ProvisionedTemplateDsCompareConfig {
+  // Phase 5a — fields surfaced in audit-log diffs. Templates are golden-path
+  // metric classifications applied on test-run completion to seed
+  // DsCompareConfig rows; template edits propagate to future ADAPT runs.
+  // Ownership / org / team and timestamps excluded (emitted via audit-row
+  // columns).
+  static auditableFields = [
+    'system_under_test_id',
+    'test_environment',
+    'workload',
+    'dashboard_uid',
+    'dashboard_label',
+    'application_dashboard_id',
+    'metrics_source_id',
+    'panel_id',
+    'panel_title',
+    'metric_name',
+    'regex',
+    'higher_is_better',
+    'metric_classification',
+    'config_overrides',
+  ] as const;
+
   @PrimaryGeneratedColumn('uuid')
   id!: string;
 

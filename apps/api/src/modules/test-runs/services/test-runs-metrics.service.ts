@@ -8,10 +8,12 @@ import {
   ProvisionedTemplateDsCompareConfig,
   ApplicationDashboard,
 } from '../../../entities';
+import { OwnedResource } from '@perfana/shared';
 import { CreateMetricClassificationDto, MetricClassificationDto } from '../dto/metric-classification.dto';
 import { CreateDsCompareConfigDto, UpdateDsCompareConfigDto, DsCompareConfigDto } from '../dto/ds-compare-config.dto';
 import { ResourceNotFoundException, DatabaseException } from '../../../common/exceptions/business.exception';
 import { AuthorizationService } from '../../../common/services/authorization.service';
+import { AuditService } from '../../audit/audit.service';
 
 @Injectable()
 export class TestRunsMetricsService {
@@ -43,6 +45,7 @@ export class TestRunsMetricsService {
     @InjectRepository(ApplicationDashboard)
     private applicationDashboardRepo: Repository<ApplicationDashboard>,
     private authorizationService: AuthorizationService,
+    private readonly auditService: AuditService,
   ) {}
 
   async classifyMetric(
@@ -155,6 +158,9 @@ export class TestRunsMetricsService {
 
       let result: ProvisionedTemplateDsCompareConfig;
       if (existingClassification) {
+        // Phase 5a: clone the pre-update entity for the audit before-snapshot.
+        const before = Object.assign(new ProvisionedTemplateDsCompareConfig(), existingClassification);
+
         // Update existing classification
         await this.templateRepo.update(
           { id: existingClassification.id },
@@ -170,11 +176,20 @@ export class TestRunsMetricsService {
         }
 
         result = updated;
+
+        this.auditService.logUpdate(
+          before as unknown as OwnedResource,
+          updated as unknown as OwnedResource,
+        );
+
         this.logger.log(`Updated existing metric classification for: ${sanitizeString(createDto.dashboardLabel) || 'no-dashboard'}/${sanitizeString(createDto.panelTitle) || 'no-panel'}/${sanitizeString(createDto.metricName) || 'panel-wide'}`);
       } else {
         // Create new classification
         const newClassification = this.templateRepo.create(classificationData);
         result = await this.templateRepo.save(newClassification);
+
+        this.auditService.logCreate(result as unknown as OwnedResource);
+
         this.logger.log(`Created new metric classification for: ${sanitizeString(createDto.dashboardLabel) || 'no-dashboard'}/${sanitizeString(createDto.panelTitle) || 'no-panel'}/${sanitizeString(createDto.metricName) || 'panel-wide'}`);
       }
 
@@ -260,6 +275,10 @@ export class TestRunsMetricsService {
       });
 
       const result = await this.dsCompareConfigRepo.save(newConfig);
+
+      // Phase 5a: DsCompareConfig uses snake_case `organization_id` directly,
+      // so no override needed — AuditService.dispatch reads it off the ref.
+      this.auditService.logCreate(result as unknown as OwnedResource);
 
       this.logger.log(`Created ds-compare config for ${createDto.systemUnderTestId}/${createDto.testEnvironment}/${createDto.workload}${isAdmin ? ' (admin)' : ` (orgs: ${organizationIds.length})`}`);
 
@@ -418,6 +437,9 @@ export class TestRunsMetricsService {
         throw new ResourceNotFoundException('DS compare configuration', id);
       }
 
+      // Phase 5a: clone the pre-update entity for the audit before-snapshot.
+      const beforeUpdate = Object.assign(new DsCompareConfig(), existingConfig);
+
       await this.dsCompareConfigRepo.update(
         { id },
         // Entity config_data is Record<string, any> from shared package
@@ -431,6 +453,11 @@ export class TestRunsMetricsService {
       if (!result) {
         throw new ResourceNotFoundException('DS compare configuration', id);
       }
+
+      this.auditService.logUpdate(
+        beforeUpdate as unknown as OwnedResource,
+        result as unknown as OwnedResource,
+      );
 
       this.logger.log(`Updated ds-compare config ${id}${isAdmin ? ' (admin)' : ` (orgs: ${organizationIds.length})`}`);
 
@@ -564,6 +591,13 @@ export class TestRunsMetricsService {
             created_by: 'system:golden-path',
             updated_by: 'system:golden-path',
           });
+          // Phase 5a (PR13): NOT audited. applyGoldenPathClassifications is a
+          // worker-driven system action triggered on test-run completion (the
+          // hard-coded `created_by: 'system:golden-path'` flags it). Auditing
+          // it would generate a per-metric audit row on every test-run
+          // ingestion at zero compliance value — bucket-2 pattern from the
+          // PR8 deferral notes.
+          // eslint-disable-next-line audit-mutation-must-log
           await this.dsCompareConfigRepo.save(newConfig);
           compareConfigsCreated++;
         }
@@ -616,6 +650,10 @@ export class TestRunsMetricsService {
       if (!systemUnderTest) {
         throw new ResourceNotFoundException('DS compare configuration', id);
       }
+
+      // Phase 5a: log DELETE before the row is removed so the diff captures
+      // the pre-delete state.
+      this.auditService.logDelete(existingConfig as unknown as OwnedResource);
 
       const result = await this.dsCompareConfigRepo.delete({ id });
 

@@ -4,6 +4,19 @@ import { SystemUnderTest } from './system-under-test.entity';
 @Entity('sparse_metric_exclusions')
 @Unique(['system_under_test_id', 'test_environment', 'workload', 'dashboard_label', 'metric_name'])
 export class SparseMetricExclusion {
+  // Phase 5a — fields surfaced in audit-log diffs. SparseMetricExclusion
+  // suppresses anomaly detection on a specific metric within a (SUT, env,
+  // workload, dashboard) — directly impacts ADAPT verdicts. Ownership / org /
+  // team and timestamps excluded (emitted via audit-row columns).
+  static auditableFields = [
+    'system_under_test_id',
+    'test_environment',
+    'workload',
+    'dashboard_label',
+    'metric_name',
+    'reason',
+  ] as const;
+
   @PrimaryGeneratedColumn('uuid')
   id!: string;
 

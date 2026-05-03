@@ -18,6 +18,7 @@ import {
 } from '../../../test/helpers/mock-repository.factory';
 import { createAuthorizationServiceMock } from '../../../test/mocks/authorization-service.mock';
 import { AuthorizationService } from '../../common/services/authorization.service';
+import { AuditService } from '../audit/audit.service';
 
 // Mock the tag-filter utils
 jest.mock('../../common/tag-filter.utils', () => ({
@@ -137,6 +138,14 @@ describe('BenchmarksService', () => {
         {
           provide: AuthorizationService,
           useValue: createAuthorizationServiceMock(),
+        },
+        {
+          provide: AuditService,
+          useValue: {
+            logCreate: jest.fn(),
+            logUpdate: jest.fn(),
+            logDelete: jest.fn(),
+          },
         },
       ],
     }).compile();

@@ -5,6 +5,22 @@ import { SystemUnderTest } from './system-under-test.entity';
 
 @Entity('ds_compare_config')
 export class DsCompareConfig {
+  // Phase 5a — fields surfaced in audit-log diffs. DsCompareConfig drives
+  // ADAPT regression detection per (SUT, env, workload, dashboard, panel,
+  // metric); changes here retroactively change anomaly verdicts. Ownership /
+  // org / team and timestamps excluded (emitted via audit-row columns), and
+  // `config_hash` / `last_modified_at` are derived caches.
+  static auditableFields = [
+    'system_under_test_id',
+    'test_environment',
+    'workload',
+    'application_dashboard_id',
+    'panel_id',
+    'metric_name',
+    'metrics_source_id',
+    'config_data',
+  ] as const;
+
   @PrimaryGeneratedColumn('uuid')
   id!: string;
 

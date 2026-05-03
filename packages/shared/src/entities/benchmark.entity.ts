@@ -21,6 +21,56 @@ export type BenchmarkType = 'metric' | 'apdex';
   'generic_check_id'
 ])
 export class Benchmark {
+  // Phase 5a — fields surfaced in audit-log diffs. Benchmarks define what
+  // "passing" means for a test run, so every SLO knob is audited (including
+  // the embedded `configuration` jsonb that carries the threshold spec).
+  // Ownership / org / team columns and timestamps are excluded; they're
+  // emitted via dedicated columns on the audit row.
+  static auditableFields = [
+    // Scope
+    'system_under_test_id',
+    'test_environment',
+    'workload',
+    // Source / dashboard linkage
+    'source',
+    'grafana_instance',
+    'dashboard_label',
+    'dashboard_id',
+    'dashboard_uid',
+    'application_dashboard_id',
+    'metrics_source_id',
+    'generic_check_id',
+    // Panel identity
+    'panel_title',
+    'config_title',
+    'metric_unit',
+    // Metric SLO
+    'evaluate_type',
+    'requirement_operator',
+    'requirement_value',
+    // Apdex SLO
+    'benchmark_type',
+    'transaction_name',
+    'apdex_threshold_ms',
+    'min_apdex_score',
+    'include_failed_requests',
+    // Behavior knobs
+    'exclude_ramp_up_time',
+    'average_all',
+    'match_pattern',
+    'validate_with_default_if_no_data',
+    'validate_with_default_if_no_data_value',
+    'configuration',
+    'description',
+    'tags',
+    // Lifecycle / alerting
+    'enabled',
+    'valid',
+    'alert_on_breach',
+    'alert_channels',
+    'baseline_test_run_id',
+  ] as const;
+
   @PrimaryGeneratedColumn('uuid')
   id!: string;
 
