@@ -1,4 +1,4 @@
-import { Module } from '@nestjs/common';
+import { Module, OnModuleInit } from '@nestjs/common';
 import { TypeOrmModule } from '@nestjs/typeorm';
 import {
   TestRunsController,
@@ -52,6 +52,8 @@ import { WebSocketAuthGuard } from './guards/websocket-auth.guard';
 import { ApiKeysModule } from '../api-keys/api-keys.module';
 import { TempoModule } from '../tempo/tempo.module';
 import { CommonModule } from '../../common/common.module';
+import { AuditModule } from '../audit/audit.module';
+import { AuditResourceRegistry } from '../audit/audit-resource-registry';
 import {
   TestRun,
   TestRunConfiguration,
@@ -124,6 +126,7 @@ import {
     ApiKeysModule, // Required for WebSocket authentication
     CommonModule, // Provides AuthorizationService for RBAC
     TempoModule, // Provides TempoService for trace detail fetching
+    AuditModule, // Phase 5a: provides AuditService + AuditResourceRegistry
   ],
   controllers: [
     // Specific routes MUST come before parameterized routes
@@ -192,4 +195,10 @@ import {
     TestRunDeletionProcessor, // Export for controllers in this module
   ],
 })
-export class TestRunsModule {}
+export class TestRunsModule implements OnModuleInit {
+  constructor(private readonly auditRegistry: AuditResourceRegistry) {}
+
+  onModuleInit(): void {
+    this.auditRegistry.register('test-runs', TestRun);
+  }
+}

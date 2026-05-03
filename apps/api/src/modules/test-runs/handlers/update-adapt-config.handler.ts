@@ -8,13 +8,14 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
-import { TestRun as TestRunEntity } from '../../../entities';
+import { TestRun as TestRunEntity, OwnedResource } from '../../../entities';
 import { ResourceNotFoundException } from '../../../common/exceptions/business.exception';
 import { TestRun } from '../types/test-run.types';
 import { AdaptConfig } from '../../../types';
 import { TestRunsGateway } from '../gateways/test-runs.gateway';
 import { TestRunEventType } from '../types/realtime-events.types';
 import { mapEntityToTestRun } from './entity-mapper';
+import { AuditService } from '../../audit/audit.service';
 
 export interface UpdateAdaptConfigData {
   testRunId: string;
@@ -33,6 +34,7 @@ export class UpdateAdaptConfigHandler {
     @InjectRepository(TestRunEntity)
     private readonly testRunRepo: Repository<TestRunEntity>,
     private readonly testRunsGateway: TestRunsGateway,
+    private readonly auditService: AuditService,
   ) {}
 
   async execute(data: UpdateAdaptConfigData): Promise<TestRun> {
@@ -84,6 +86,12 @@ export class UpdateAdaptConfigHandler {
         };
       }
 
+      // Capture the pre-mutation snapshot for the audit diff. Cloning
+      // `adaptConfig` and `consolidatedResult` is not strictly needed
+      // because `updateData` builds new object literals, but kept explicit
+      // for symmetry with the orgs / teams update flow.
+      const before = { ...testRun } as TestRunEntity;
+
       await this.testRunRepo.update({ id: testRun.id }, updateData);
 
       const updatedEntity = await this.testRunRepo.findOne({
@@ -94,6 +102,12 @@ export class UpdateAdaptConfigHandler {
       if (!updatedEntity) {
         throw new ResourceNotFoundException('TestRun', testRunId);
       }
+
+      this.auditService.logUpdate(
+        before as unknown as OwnedResource,
+        updatedEntity as unknown as OwnedResource,
+        { organizationIdOverride: updatedEntity.organizationId },
+      );
 
       this.logger.log(
         `Updated adapt config for test run ${testRunId}: ${differencesAccepted}` +

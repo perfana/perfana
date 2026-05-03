@@ -8,13 +8,14 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
-import { TestRun as TestRunEntity } from '../../../entities';
+import { TestRun as TestRunEntity, OwnedResource } from '../../../entities';
 import { UpdateTestRunCommand, UpdateTestRunData } from '../commands/update-test-run.command';
 import { ICommandHandler, CommandContext, TestRunMutationResult } from '../commands/types';
 import { TestRunsGateway } from '../gateways/test-runs.gateway';
 import { TestRunEventType, TestRunUpdatedEvent } from '../types/realtime-events.types';
 import { DatabaseException } from '../../../common/exceptions/business.exception';
 import { TestRun } from '../types/test-run.types';
+import { AuditService } from '../../audit/audit.service';
 
 @Injectable()
 export class UpdateTestRunHandler implements ICommandHandler<UpdateTestRunCommand, TestRunMutationResult> {
@@ -24,6 +25,7 @@ export class UpdateTestRunHandler implements ICommandHandler<UpdateTestRunComman
     @InjectRepository(TestRunEntity)
     private readonly testRunRepo: Repository<TestRunEntity>,
     private readonly testRunsGateway: TestRunsGateway,
+    private readonly auditService: AuditService,
   ) {}
 
   /**
@@ -38,11 +40,58 @@ export class UpdateTestRunHandler implements ICommandHandler<UpdateTestRunComman
     try {
       this.logger.log(`Updating test run: ${data.testRunId}`);
 
-      // Update the test run entity
-      await this.updateTestRunEntity(data);
+      // Snapshot the pre-mutation row for the audit diff. `update()` does
+      // not return the prior state, so fetch it first. Skip the audit log
+      // entirely if the row is missing (the update itself will be a no-op
+      // and downstream fetchWithRelations will throw).
+      const before = await this.testRunRepo.findOne({
+        where: {
+          testRunId: data.testRunId,
+          systemUnderTestId: data.systemUnderTestId,
+          testEnvironment: data.testEnvironment,
+          workload: data.workload,
+        },
+      });
+
+      // Update the test run entity. Inlined (rather than delegated to a
+      // private helper) so the audit lint rule sees the mutation and the
+      // `auditService.logUpdate` call in the same method body.
+      const updatePayload: Partial<TestRunEntity> = {
+        applicationRelease: data.applicationRelease,
+        duration: data.duration,
+        plannedDuration: data.plannedDuration,
+        analysisStartOffset: data.analysisStartOffset,
+        completed: data.completed,
+        ciBuildResultsUrl: data.ciBuildResultsUrl || '',
+        annotations: data.annotations || [],
+        tags: data.tags || [],
+        abort: data.abort || false,
+        variables: data.variables,
+        endTime: data.endTime || new Date(),
+        updatedBy: data.updatedBy,
+      };
+      await this.testRunRepo.update(
+        {
+          testRunId: data.testRunId,
+          systemUnderTestId: data.systemUnderTestId,
+          testEnvironment: data.testEnvironment,
+          workload: data.workload,
+        },
+        updatePayload,
+      );
 
       // Fetch with relations for complete response
       const testRunWithRelations = await this.fetchWithRelations(data);
+
+      if (before) {
+        // TestRun.organization_id column maps to camelCase property —
+        // override since AuditService.dispatch reads `ref.organization_id`.
+        this.auditService.logUpdate(
+          before as unknown as OwnedResource,
+          testRunWithRelations as unknown as OwnedResource,
+          { organizationIdOverride: testRunWithRelations.organizationId },
+        );
+      }
 
       // Map to API response format
       const testRun = this.mapEntityToTestRun(testRunWithRelations);
@@ -64,37 +113,6 @@ export class UpdateTestRunHandler implements ICommandHandler<UpdateTestRunComman
       this.logger.error(`Failed to update test run ${data.testRunId}:`, error);
       throw error;
     }
-  }
-
-  /**
-   * Update the test run entity
-   */
-  private async updateTestRunEntity(data: UpdateTestRunData): Promise<void> {
-    const testRunData: Partial<TestRunEntity> = {
-      applicationRelease: data.applicationRelease,
-      duration: data.duration,
-      plannedDuration: data.plannedDuration,
-      analysisStartOffset: data.analysisStartOffset,
-      completed: data.completed,
-      ciBuildResultsUrl: data.ciBuildResultsUrl || '',
-      annotations: data.annotations || [],
-      tags: data.tags || [],
-      abort: data.abort || false,
-      variables: data.variables,
-      endTime: data.endTime || new Date(),
-      // Ownership tracking - update the updatedBy field
-      updatedBy: data.updatedBy,
-    };
-
-    await this.testRunRepo.update(
-      {
-        testRunId: data.testRunId,
-        systemUnderTestId: data.systemUnderTestId,
-        testEnvironment: data.testEnvironment,
-        workload: data.workload,
-      },
-      testRunData,
-    );
   }
 
   /**

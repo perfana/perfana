@@ -11,6 +11,7 @@ import { Repository } from 'typeorm';
 import {
   TestRun as TestRunEntity,
   DsChangePoints,
+  OwnedResource,
 } from '../../../entities';
 import { CreateTestRunCommand, CreateTestRunData } from '../commands/create-test-run.command';
 import { ICommandHandler, CommandContext, TestRunMutationResult } from '../commands/types';
@@ -19,6 +20,7 @@ import { TestRunEventType, TestRunCreatedEvent } from '../types/realtime-events.
 import { DatabaseException } from '../../../common/exceptions/business.exception';
 import { TestRun } from '../types/test-run.types';
 import { AdaptConfig } from '../../../types';
+import { AuditService } from '../../audit/audit.service';
 
 @Injectable()
 export class CreateTestRunHandler implements ICommandHandler<CreateTestRunCommand, TestRunMutationResult> {
@@ -30,6 +32,7 @@ export class CreateTestRunHandler implements ICommandHandler<CreateTestRunComman
     @InjectRepository(DsChangePoints)
     private readonly changePointsRepo: Repository<DsChangePoints>,
     private readonly testRunsGateway: TestRunsGateway,
+    private readonly auditService: AuditService,
   ) {}
 
   /**
@@ -44,8 +47,44 @@ export class CreateTestRunHandler implements ICommandHandler<CreateTestRunComman
     try {
       this.logger.log(`Creating new test run: ${data.testRunId}`);
 
-      // Create and save the test run entity
-      const testRunEntity = await this.createTestRunEntity(data);
+      // Create and save the test run entity. Inlined (rather than delegated
+      // to a private helper) so the audit lint rule sees the mutation and
+      // the `auditService.logCreate` call in the same method body.
+      const testRunData: Partial<TestRunEntity> = {
+        testRunId: data.testRunId,
+        systemUnderTestId: data.systemUnderTestId,
+        testEnvironment: data.testEnvironment,
+        workload: data.workload,
+        applicationRelease: data.applicationRelease,
+        duration: data.duration,
+        plannedDuration: data.plannedDuration,
+        analysisStartOffset: data.analysisStartOffset,
+        completed: data.completed,
+        ciBuildResultsUrl: data.ciBuildResultsUrl || '',
+        annotations: data.annotations || [],
+        tags: data.tags || [],
+        abort: data.abort || false,
+        variables: data.variables || [],
+        adaptConfig: {
+          mode: data.adaptMode || 'DEFAULT',
+          differencesAccepted: data.adaptMode === 'BASELINE' ? 'ACCEPTED' : 'TBD',
+        } as AdaptConfig,
+        startTime: data.startTime || new Date(),
+        endTime: data.endTime || new Date(),
+        organizationId: data.organizationId,
+        teamId: data.teamId,
+        createdBy: data.createdBy,
+        updatedBy: data.updatedBy,
+      };
+      const newTestRun = this.testRunRepo.create(testRunData);
+      const testRunEntity = await this.testRunRepo.save(newTestRun);
+
+      // TestRun's column `organization_id` maps to property `organizationId`,
+      // so AuditService.dispatch cannot read it from the entity directly —
+      // every TestRun audit call site sets organizationIdOverride explicitly.
+      this.auditService.logCreate(testRunEntity as unknown as OwnedResource, {
+        organizationIdOverride: testRunEntity.organizationId,
+      });
 
       // Fetch with relations for complete response
       const testRunWithRelations = await this.fetchWithRelations(testRunEntity.id);
@@ -73,42 +112,6 @@ export class CreateTestRunHandler implements ICommandHandler<CreateTestRunComman
       this.logger.error(`Failed to create test run ${data.testRunId}:`, error);
       throw error;
     }
-  }
-
-  /**
-   * Create and save the test run entity
-   */
-  private async createTestRunEntity(data: CreateTestRunData): Promise<TestRunEntity> {
-    const testRunData: Partial<TestRunEntity> = {
-      testRunId: data.testRunId,
-      systemUnderTestId: data.systemUnderTestId,
-      testEnvironment: data.testEnvironment,
-      workload: data.workload,
-      applicationRelease: data.applicationRelease,
-      duration: data.duration,
-      plannedDuration: data.plannedDuration,
-      analysisStartOffset: data.analysisStartOffset,
-      completed: data.completed,
-      ciBuildResultsUrl: data.ciBuildResultsUrl || '',
-      annotations: data.annotations || [],
-      tags: data.tags || [],
-      abort: data.abort || false,
-      variables: data.variables || [],
-      adaptConfig: {
-        mode: data.adaptMode || 'DEFAULT',
-        differencesAccepted: data.adaptMode === 'BASELINE' ? 'ACCEPTED' : 'TBD',
-      } as AdaptConfig,
-      startTime: data.startTime || new Date(),
-      endTime: data.endTime || new Date(),
-      // Ownership tracking (from API key or user context)
-      organizationId: data.organizationId,
-      teamId: data.teamId,
-      createdBy: data.createdBy,
-      updatedBy: data.updatedBy,
-    };
-
-    const newTestRun = this.testRunRepo.create(testRunData);
-    return this.testRunRepo.save(newTestRun);
   }
 
   /**
@@ -246,6 +249,10 @@ export class CreateTestRunHandler implements ICommandHandler<CreateTestRunComman
             test_run_id: data.testRunId,
           });
 
+          // System-derived bootstrap (bucket 2 in the audit decisions doc):
+          // first-test-run-of-a-combination automatically seeds a baseline
+          // changepoint. Not user-actionable, so no audit row.
+          // eslint-disable-next-line audit-mutation-must-log
           await this.changePointsRepo.save(changepoint);
           this.logger.log(
             `Created initial changepoint for first test run: ${data.testRunId} ` +

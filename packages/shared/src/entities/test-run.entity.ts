@@ -21,6 +21,37 @@ import {
 @Index('idx_test_runs_system_env_workload', ['systemUnderTestId', 'testEnvironment', 'workload'])
 @Index('idx_test_runs_system_env_workload_created', ['systemUnderTestId', 'testEnvironment', 'workload', 'createdAt'])
 export class TestRun {
+  // Phase 5a audit logging — user-mutable fields across the 8 mutation
+  // handlers. Skips: identity / immutable axes (id, systemUnderTestId,
+  // testEnvironment, workload), timestamps (startTime / endTime / createdAt
+  // / updatedAt — bumped on every save, write-amplification noise),
+  // ownership tracking (organizationId / teamId / createdBy / updatedBy —
+  // implicit context, not user-meaningful diffs), and system-derived
+  // fields (status, isStale / staleDetectedAt, valid / reasonsNotValid,
+  // dataWarnings, deepLinks, deletionStatus). The TestRun entity's
+  // `organization_id` column is mapped to property `organizationId` (camel
+  // case), so `AuditService.dispatch` cannot read `ref.organization_id`
+  // directly — every call site passes `organizationIdOverride:
+  // testRun.organizationId`.
+  static auditableFields = [
+    'testRunId',
+    'applicationRelease',
+    'annotations',
+    'tags',
+    'abort',
+    'abortMessage',
+    'completed',
+    'ciBuildResultsUrl',
+    'adaptConfig',
+    'consolidatedResult',
+    'analysisStartOffset',
+    'duration',
+    'plannedDuration',
+    'variables',
+    'expires',
+    'expired',
+  ] as const;
+
   @PrimaryGeneratedColumn('uuid')
   id!: string;
 

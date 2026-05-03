@@ -8,12 +8,13 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository, DataSource } from 'typeorm';
-import { TestRun as TestRunEntity } from '../../../entities';
+import { TestRun as TestRunEntity, OwnedResource } from '../../../entities';
 import { ResourceNotFoundException } from '../../../common/exceptions/business.exception';
 import { TestRun } from '../types/test-run.types';
 import { TestRunsGateway } from '../gateways/test-runs.gateway';
 import { TestRunEventType } from '../types/realtime-events.types';
 import { mapEntityToTestRun } from './entity-mapper';
+import { AuditService } from '../../audit/audit.service';
 
 export interface UpdateTagsData {
   id: string;
@@ -29,15 +30,18 @@ export class UpdateTagsHandler {
     private readonly testRunRepo: Repository<TestRunEntity>,
     private readonly dataSource: DataSource,
     private readonly testRunsGateway: TestRunsGateway,
+    private readonly auditService: AuditService,
   ) {}
 
   async execute(data: UpdateTagsData): Promise<TestRun> {
     const { id, tags } = data;
 
     try {
+      // Fetch the pre-mutation row in full for the audit diff (raw SQL
+      // update doesn't return prior state). The existence check below also
+      // relies on this load.
       const testRunEntity = await this.testRunRepo.findOne({
         where: { id },
-        select: ['id'],
       });
 
       if (!testRunEntity) {
@@ -59,6 +63,12 @@ export class UpdateTagsHandler {
       if (!updatedEntity) {
         throw new ResourceNotFoundException('TestRun', id);
       }
+
+      this.auditService.logUpdate(
+        testRunEntity as unknown as OwnedResource,
+        updatedEntity as unknown as OwnedResource,
+        { organizationIdOverride: updatedEntity.organizationId },
+      );
 
       this.logger.log(`Updated tags for test run ${id}`);
       const testRun = mapEntityToTestRun(updatedEntity);
