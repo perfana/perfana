@@ -1,11 +1,13 @@
 import { Test } from '@nestjs/testing';
 import { ForbiddenException, NotFoundException } from '@nestjs/common';
+import { Reflector } from '@nestjs/core';
 import { getDataSourceToken } from '@nestjs/typeorm';
 import { AuditQueryController } from './audit-query.controller';
 import { AuditService } from './audit.service';
 import { AuditResourceRegistry } from './audit-resource-registry';
 import { AuthorizationService } from '../../common/services/authorization.service';
 import { Capability } from '../../constants/capabilities.constants';
+import { ROLES_KEY, RoleOptions } from '../../decorators/roles.decorator';
 
 describe('AuditQueryController', () => {
   let ctl: AuditQueryController;
@@ -60,6 +62,22 @@ describe('AuditQueryController', () => {
     }).compile();
 
     ctl = m.get(AuditQueryController);
+  });
+
+  describe('@Roles metadata on findByFilter', () => {
+    // Regression: the controller body authorizes via Capability.SystemAuditRead,
+    // which `perfana-admin` (the global-admin role in this codebase) holds via
+    // GLOBAL_ADMIN_CAPABILITIES. The @Roles guard runs first and must let
+    // global-admin tokens through, otherwise the body's capability check is
+    // unreachable (403 before the controller runs).
+    it('includes perfana-admin and admin in the allowed-roles list', () => {
+      const reflector = new Reflector();
+      const meta = reflector.get<RoleOptions>(
+        ROLES_KEY,
+        AuditQueryController.prototype.findByFilter,
+      );
+      expect(meta?.roles).toEqual(expect.arrayContaining(['perfana-admin', 'admin', 'org-admin']));
+    });
   });
 
   describe('GET /api/audit-logs (admin filter)', () => {

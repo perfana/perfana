@@ -16,6 +16,7 @@ import { AuditResourceRegistry, EntityClass } from './audit-resource-registry';
 import { AuditFilterDto } from './dto/audit-filter.dto';
 import { AuthorizationService } from '../../common/services/authorization.service';
 import { Capability } from '../../constants/capabilities.constants';
+import { GLOBAL_ADMIN_ROLES } from '../../constants/roles.constants';
 import { UserCtx, UserContext } from '../../common/decorators/user-context.decorator';
 
 @ApiTags('audit-logs')
@@ -41,7 +42,7 @@ export class AuditQueryController {
    */
   @Get()
   @Roles({
-    roles: ['super-admin', 'system-admin', 'support', 'org-admin'],
+    roles: [...GLOBAL_ADMIN_ROLES, 'super-admin', 'system-admin', 'support', 'org-admin'],
     mode: RoleMatchingMode.ANY,
   })
   @ApiOperation({ summary: 'Filterable search of audit log rows (admin only)' })

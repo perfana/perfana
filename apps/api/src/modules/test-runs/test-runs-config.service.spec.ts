@@ -35,6 +35,7 @@ import {
 import { ResourceNotFoundException, ValidationException } from '../../common/exceptions/business.exception';
 import { AuthorizationService } from '../../common/services/authorization.service';
 import { createAuthorizationServiceMock } from '../../../test/mocks/authorization-service.mock';
+import { AuditService } from '../audit/audit.service';
 
 describe('TestRunsConfigService', () => {
   let service: TestRunsConfigService;
@@ -118,6 +119,14 @@ describe('TestRunsConfigService', () => {
           useFactory: () => {
             authzServiceMock = createAuthorizationServiceMock();
             return authzServiceMock;
+          },
+        },
+        {
+          provide: AuditService,
+          useValue: {
+            logCreate: jest.fn(),
+            logUpdate: jest.fn(),
+            logDelete: jest.fn(),
           },
         },
       ],
