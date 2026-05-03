@@ -603,6 +603,60 @@ describe('AutoConfigUpdatesService', () => {
         );
       });
 
+      it('should propagate organizationId from testRun (regression: snake_case key was silently dropped by TypeORM, causing NOT NULL violation)', async () => {
+        const mockSut = { id: 'sut-1', name: 'my-app' };
+        const mockSavedBenchmark = { id: 'benchmark-1' };
+
+        const profileBenchmark: any = {
+          id: 'pb-1',
+          source: 'grafana',
+          panel_id: 1,
+          panel_title: 'Heap',
+          panel_type: 'graph',
+          tags: [],
+          metadata: {},
+          read_only: false,
+        };
+
+        const testRun: any = {
+          testRunId: 'test-1',
+          systemUnderTest: { name: 'my-app' },
+          systemUnderTestId: 'sut-id',
+          testEnvironment: 'acc',
+          workload: 'loadTest',
+          organizationId: 'eb9b3953-1593-405d-9135-9806570d2aec',
+          endTime: new Date(),
+          tags: [],
+          variables: [],
+        };
+
+        const applicationDashboard = {
+          id: 'app-dash-1',
+          grafanaInstance: 'grafana-prod',
+          dashboardLabel: 'JVM',
+          dashboardId: 1,
+          dashboardUid: 'jvm-uid',
+        } as any;
+
+        systemUnderTestRepo.findOne.mockResolvedValue(mockSut);
+        benchmarkRepo.create.mockReturnValue({});
+        benchmarkRepo.save.mockResolvedValue(mockSavedBenchmark);
+
+        await service.insertBenchmarkBasedOnProfileBenchmark(
+          profileBenchmark,
+          testRun,
+          applicationDashboard,
+        );
+
+        expect(benchmarkRepo.create).toHaveBeenCalledWith(
+          expect.objectContaining({
+            organizationId: 'eb9b3953-1593-405d-9135-9806570d2aec',
+          }),
+        );
+        const createArg = benchmarkRepo.create.mock.calls[0][0];
+        expect(createArg).not.toHaveProperty('organization_id');
+      });
+
       it('should handle grafana instance from applicationDashboard object', async () => {
         // Arrange
         const mockSut = { id: 'sut-1' };

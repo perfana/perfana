@@ -430,7 +430,7 @@ export class AutoConfigUpdatesService {
         tags: profileBenchmark.tags || [],
         enabled: true,
         valid: true,
-        organization_id: testRun.organizationId || null, // RBAC: inherit from test run
+        organizationId: testRun.organizationId,
       };
 
       let savedBenchmark: Benchmark;
