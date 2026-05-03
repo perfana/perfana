@@ -507,6 +507,7 @@ Key routing rules:
 - lint: turbo run lint
 - test: turbo run test
 - deadcode: npx knip
+- **preflight (pre-push gate): npm run preflight** — runs lint + type-check across the monorepo. Wired to `git push` via `.githooks/pre-push` (auto-installed by `npm install` via the `prepare` script). Local-only by design — turbo's cache makes warm runs sub-second, far faster than waiting on CI. Bypass: `git push --no-verify` (use sparingly).
 
 <!-- gitnexus:start -->
 # GitNexus — Code Intelligence

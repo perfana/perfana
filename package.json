@@ -16,6 +16,8 @@
     "dev:grafana-sync": "turbo run dev --filter=@perfana/grafana-sync",
     "dev:perfana-report": "turbo run dev --filter=@perfana/perfana-report",
     "lint": "turbo run lint",
+    "preflight": "turbo run lint type-check",
+    "prepare": "git config core.hooksPath .githooks 2>/dev/null || true",
     "test": "turbo run test",
     "test:coverage": "cd apps/api && npm test -- --coverage && cd ../.. && cd apps/web && npm test -- --coverage && cd ../.. && cd apps/grafana-sync && npm test -- --coverage && cd ../.. && cd apps/worker && npm test -- --coverage && cd ../..",
     "fix-coverage-paths": "./fix-coverage-paths.sh",

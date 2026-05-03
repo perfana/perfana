@@ -66,7 +66,9 @@ export class AuditPartitionManager {
     );
     for (const { tablename } of rows) {
       const m = tablename.match(/^audit_logs_(\d{4})_(\d{2})$/);
-      if (!m) continue;
+      if (!m) {
+        continue;
+      }
       const partStart = new Date(Date.UTC(Number(m[1]), Number(m[2]) - 1, 1));
       if (partStart < cutoff) {
         await ds.query(`DROP TABLE IF EXISTS ${tablename}`);

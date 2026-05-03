@@ -1,0 +1,36 @@
+#!/usr/bin/env bash
+# Pre-push gate: run lint + type-check before allowing the push.
+# Mirrors gstack /ship's pre-flight pattern so PR-time regressions
+# (lint errors, broken type contracts) get caught locally instead of
+# slipping into CI/main.
+#
+# Bypass: git push --no-verify   (use sparingly — defeats the gate).
+# Skip preflight only: PRE_PUSH_SKIP_PREFLIGHT=1 git push
+#                      (e.g. when pushing a doc-only branch and the
+#                      preflight cache is cold; CI still re-runs it).
+set -e
+
+if [ "${PRE_PUSH_SKIP_PREFLIGHT:-}" = "1" ]; then
+  echo "→ pre-push: PRE_PUSH_SKIP_PREFLIGHT=1, skipping preflight"
+  exit 0
+fi
+
+# Resolve repo root (this script lives at <repo>/.githooks/pre-push).
+repo_root="$(git rev-parse --show-toplevel)"
+cd "$repo_root"
+
+if ! [ -f package.json ] || ! grep -q '"preflight"' package.json; then
+  echo "→ pre-push: no 'preflight' script found in package.json, skipping"
+  exit 0
+fi
+
+echo "→ pre-push: running 'npm run preflight' (lint + type-check)…"
+if ! npm run -s preflight; then
+  cat >&2 <<'EOF'
+
+✗ Pre-push gate failed.
+  Fix the lint / type-check errors above, then re-push.
+  To bypass intentionally: git push --no-verify
+EOF
+  exit 1
+fi
