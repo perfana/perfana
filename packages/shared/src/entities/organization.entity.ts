@@ -3,6 +3,11 @@ import { Team } from './team.entity';
 
 @Entity('organizations')
 export class Organization {
+  // Phase 5a audit logging — Organization itself has no `organization_id`
+  // column (it IS the organization), so the audit row's organization scope
+  // is set via `organizationIdOverride` at the call site.
+  static auditableFields = ['name', 'description'] as const;
+
   @PrimaryGeneratedColumn('uuid')
   id!: string;
 

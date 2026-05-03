@@ -16,6 +16,11 @@ import { Organization } from './organization.entity';
 @Index(['user_id'])
 @Index(['organization_id', 'user_id'])
 export class OrganizationMember {
+  // Phase 5a audit logging — membership rows record who was added/removed
+  // (`user_id`) and which roles they hold (`roles`). `organization_id` is
+  // intentionally included so a stripped diff still pins the org for joins.
+  static auditableFields = ['user_id', 'roles', 'organization_id'] as const;
+
   @PrimaryGeneratedColumn('uuid')
   id!: string;
 

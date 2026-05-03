@@ -21,11 +21,13 @@ import { Organization, OrganizationMember } from '@perfana/shared';
 import { OrganizationRole } from '../../../constants/roles.constants';
 import { KeycloakAdminService } from '../../auth/keycloak-admin.service';
 import { AuthorizationService } from '../../../common/services/authorization.service';
+import { AuditService } from '../../audit/audit.service';
 
 describe('OrganizationMembersService', () => {
   let service: OrganizationMembersService;
   let memberRepository: jest.Mocked<Repository<OrganizationMember>>;
   let organizationRepository: jest.Mocked<Repository<Organization>>;
+  let auditService: jest.Mocked<AuditService>;
 
   // Mock data factory for OrganizationMember
   const createMockMember = (
@@ -95,6 +97,14 @@ describe('OrganizationMembersService', () => {
             invalidateOrganizationCache: jest.fn().mockResolvedValue(undefined),
           },
         },
+        {
+          provide: AuditService,
+          useValue: {
+            logCreate: jest.fn(),
+            logUpdate: jest.fn(),
+            logDelete: jest.fn(),
+          },
+        },
       ],
     }).compile();
 
@@ -103,6 +113,7 @@ describe('OrganizationMembersService', () => {
     );
     memberRepository = module.get(getRepositoryToken(OrganizationMember));
     organizationRepository = module.get(getRepositoryToken(Organization));
+    auditService = module.get(AuditService);
   });
 
   afterEach(() => {
@@ -1061,6 +1072,151 @@ describe('OrganizationMembersService', () => {
 
       // Act & Assert
       await expect(service.countMembers('org-id')).rejects.toThrow(error);
+    });
+  });
+
+  describe('audit logging (Phase 5a)', () => {
+    it('logs CREATE after addMember persists', async () => {
+      // Arrange
+      const dto: AddOrganizationMemberDto = {
+        organizationId: '123e4567-e89b-12d3-a456-426614174000',
+        userId: 'audit-user',
+        roles: [OrganizationRole.MEMBER],
+      };
+      const mockOrganization = createMockOrganization({ id: dto.organizationId });
+      const savedMember = createMockMember({
+        organization_id: dto.organizationId,
+        user_id: dto.userId,
+        roles: dto.roles,
+      });
+
+      organizationRepository.findOne.mockResolvedValue(mockOrganization);
+      memberRepository.findOne.mockResolvedValueOnce(null);
+      memberRepository.create.mockReturnValue(savedMember);
+      memberRepository.save.mockResolvedValue(savedMember);
+      memberRepository.findOne.mockResolvedValueOnce(savedMember);
+
+      // Act
+      await service.addMember(dto);
+
+      // Assert — log fires with the persisted membership row.
+      expect(auditService.logCreate).toHaveBeenCalledTimes(1);
+      expect(auditService.logCreate).toHaveBeenCalledWith(savedMember);
+      expect(auditService.logUpdate).not.toHaveBeenCalled();
+      expect(auditService.logDelete).not.toHaveBeenCalled();
+    });
+
+    it('does NOT log CREATE if addMember conflicts on existing membership', async () => {
+      // Arrange — duplicate membership trips ConflictException before persist.
+      const dto: AddOrganizationMemberDto = {
+        organizationId: '123e4567-e89b-12d3-a456-426614174000',
+        userId: 'existing-user',
+        roles: [OrganizationRole.MEMBER],
+      };
+      const mockOrganization = createMockOrganization({ id: dto.organizationId });
+      organizationRepository.findOne.mockResolvedValue(mockOrganization);
+      memberRepository.findOne.mockResolvedValue(
+        createMockMember({ organization_id: dto.organizationId, user_id: dto.userId }),
+      );
+
+      // Act
+      await expect(service.addMember(dto)).rejects.toThrow(ConflictException);
+
+      // Assert
+      expect(auditService.logCreate).not.toHaveBeenCalled();
+    });
+
+    it('logs UPDATE on updateMemberRoles with before/after snapshots', async () => {
+      // Arrange
+      const memberId = 'member-audit';
+      const dto: UpdateOrganizationMemberRolesDto = {
+        roles: [OrganizationRole.ADMIN],
+      };
+      const existingMember = createMockMember({
+        id: memberId,
+        roles: [OrganizationRole.MEMBER],
+      });
+      const updatedMember = createMockMember({
+        id: memberId,
+        roles: dto.roles,
+      });
+
+      memberRepository.findOne.mockResolvedValueOnce(existingMember);
+      memberRepository.save.mockResolvedValue(updatedMember);
+      memberRepository.findOne.mockResolvedValueOnce(updatedMember);
+
+      // Act
+      await service.updateMemberRoles(memberId, dto);
+
+      // Assert — `before` must capture the pre-mutation roles, not alias the
+      // mutated `after.roles` array.
+      expect(auditService.logUpdate).toHaveBeenCalledTimes(1);
+      const [beforeArg, afterArg] = (auditService.logUpdate as jest.Mock).mock.calls[0];
+      expect(beforeArg.roles).toEqual([OrganizationRole.MEMBER]);
+      expect(afterArg.roles).toEqual([OrganizationRole.ADMIN]);
+    });
+
+    it('logs DELETE before removeMember removes the row', async () => {
+      // Arrange
+      const memberId = 'member-delete';
+      const mockMember = createMockMember({ id: memberId });
+      memberRepository.findOne.mockResolvedValue(mockMember);
+      memberRepository.remove.mockResolvedValue(mockMember);
+
+      // Act
+      await service.removeMember(memberId);
+
+      // Assert — logDelete must run BEFORE repo.remove so the entity is still
+      // available for the audit envelope.
+      expect(auditService.logDelete).toHaveBeenCalledTimes(1);
+      expect(auditService.logDelete).toHaveBeenCalledWith(mockMember);
+
+      const logDeleteOrder = (auditService.logDelete as jest.Mock).mock.invocationCallOrder[0];
+      const repoRemoveOrder = (memberRepository.remove as jest.Mock).mock.invocationCallOrder[0];
+      expect(logDeleteOrder).toBeLessThan(repoRemoveOrder);
+    });
+
+    it('does NOT log DELETE when removeMember does not find the row', async () => {
+      // Arrange
+      memberRepository.findOne.mockResolvedValue(null);
+
+      // Act
+      await expect(service.removeMember('missing')).rejects.toThrow(NotFoundException);
+
+      // Assert
+      expect(auditService.logDelete).not.toHaveBeenCalled();
+    });
+
+    it('logs DELETE on removeMemberByOrganizationAndUser before remove', async () => {
+      // Arrange
+      const orgId = 'org-delete';
+      const userId = 'user-delete';
+      const mockMember = createMockMember({ organization_id: orgId, user_id: userId });
+      memberRepository.findOne.mockResolvedValue(mockMember);
+      memberRepository.remove.mockResolvedValue(mockMember);
+
+      // Act
+      await service.removeMemberByOrganizationAndUser(orgId, userId);
+
+      // Assert
+      expect(auditService.logDelete).toHaveBeenCalledTimes(1);
+      expect(auditService.logDelete).toHaveBeenCalledWith(mockMember);
+      const logDeleteOrder = (auditService.logDelete as jest.Mock).mock.invocationCallOrder[0];
+      const repoRemoveOrder = (memberRepository.remove as jest.Mock).mock.invocationCallOrder[0];
+      expect(logDeleteOrder).toBeLessThan(repoRemoveOrder);
+    });
+
+    it('does NOT log DELETE on removeMemberByOrganizationAndUser when not found', async () => {
+      // Arrange
+      memberRepository.findOne.mockResolvedValue(null);
+
+      // Act
+      await expect(
+        service.removeMemberByOrganizationAndUser('org-x', 'user-x'),
+      ).rejects.toThrow(NotFoundException);
+
+      // Assert
+      expect(auditService.logDelete).not.toHaveBeenCalled();
     });
   });
 });

@@ -6,10 +6,11 @@ import {
 } from '@nestjs/common';
 import { InjectRepository, InjectDataSource } from '@nestjs/typeorm';
 import { Repository, DataSource } from 'typeorm';
-import { Organization, OrganizationMember } from '../../entities';
+import { Organization, OrganizationMember, OwnedResource } from '../../entities';
 import { OrganizationRole } from '../../constants/roles.constants';
 import { KeycloakAdminService } from '../auth/keycloak-admin.service';
 import { AuthorizationService } from '../../common/services/authorization.service';
+import { AuditService } from '../audit/audit.service';
 import { fetchUserInfoMap, UserInfo } from '../../common/utils/user-enrichment';
 
 export interface AddOrganizationMemberDto {
@@ -38,6 +39,7 @@ export class OrganizationMembersService {
     private readonly keycloakAdminService: KeycloakAdminService,
     @InjectDataSource() private readonly dataSource: DataSource,
     private readonly authorizationService: AuthorizationService,
+    private readonly auditService: AuditService,
   ) {}
 
   /**
@@ -225,6 +227,8 @@ export class OrganizationMembersService {
 
       const savedMember = await this.memberRepository.save(member);
 
+      this.auditService.logCreate(savedMember as unknown as OwnedResource);
+
       this.logger.log(
         `Added user ${dto.userId} to organization ${organization.name} (${dto.organizationId}) with roles: ${dto.roles.join(', ')}`,
       );
@@ -252,8 +256,16 @@ export class OrganizationMembersService {
     try {
       const member = await this.findOne(id);
 
+      // Snapshot pre-mutation roles for the audit diff (clone the array so the
+      // post-mutation `member.roles = dto.roles` doesn't alias `before.roles`).
+      const before = { ...member, roles: [...member.roles] } as OrganizationMember;
       member.roles = dto.roles;
-      await this.memberRepository.save(member);
+      const after = await this.memberRepository.save(member);
+
+      this.auditService.logUpdate(
+        before as unknown as OwnedResource,
+        after as unknown as OwnedResource,
+      );
 
       // Invalidate authorization cache for the affected user and organization
       await this.authorizationService.invalidateUserCache(member.user_id);
@@ -282,6 +294,8 @@ export class OrganizationMembersService {
   async removeMember(id: string): Promise<void> {
     try {
       const member = await this.findOne(id);
+
+      this.auditService.logDelete(member as unknown as OwnedResource);
       await this.memberRepository.remove(member);
 
       // Revoke API keys created by this user for this organization
@@ -322,6 +336,7 @@ export class OrganizationMembersService {
         );
       }
 
+      this.auditService.logDelete(member as unknown as OwnedResource);
       await this.memberRepository.remove(member);
 
       // Revoke API keys created by this user for this organization
