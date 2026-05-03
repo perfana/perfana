@@ -7,6 +7,11 @@ import { Entity, PrimaryGeneratedColumn, Column, CreateDateColumn, UpdateDateCol
 @Index('idx_api_keys_organization_id', ['organization_id'])
 @Index('idx_api_keys_created_by', ['created_by'])
 export class ApiKey {
+  // Phase 5a audit logging — fields safe to record on CREATE/UPDATE/DELETE rows.
+  // `apiKey` (bcrypt hash) and `lastUsed` (auto-touched on every authentication)
+  // are deliberately excluded.
+  static auditableFields = ['description', 'roles', 'validUntil', 'organization_id'] as const;
+
   @PrimaryGeneratedColumn('uuid')
   id!: string;
 

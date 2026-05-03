@@ -3,7 +3,12 @@
 exports[`auditableFields snapshot — every OwnedResource entity has a stable declaration 1`] = `
 {
   "AlertTagFilter": null,
-  "ApiKey": null,
+  "ApiKey": [
+    "description",
+    "roles",
+    "validUntil",
+    "organization_id",
+  ],
   "ApplicationDashboard": null,
   "AuditLog": null,
   "Benchmark": null,
