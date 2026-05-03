@@ -1,1 +1,3 @@
-[]
+[
+  "apps/api/src/modules/audit/audit-query.controller.ts"
+]
