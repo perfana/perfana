@@ -6,6 +6,28 @@ import { GrafanaInstance } from './grafana-instance.entity';
 @Index(['uid'])
 @Index(['name'])
 export class GrafanaDashboard {
+  // Phase 5a audit logging — dashboard identity + lightweight metadata only.
+  // `panels`, `variables`, `grafanaJson`, `applicationDashboardVariables`,
+  // `templateTestRunVariables`, `templateCreateDate` are bulk Grafana-derived
+  // JSON re-synced by the grafana-sync service and excluded as system-derived
+  // (would generate large, noisy diffs on every sync). The `updated` column
+  // is a Grafana-side timestamp also bumped on sync. Ownership tracking and
+  // timestamps are excluded; the audit envelope records actor + org scope.
+  static auditableFields = [
+    'grafanaInstanceId',
+    'grafanaId',
+    'datasourceType',
+    'uid',
+    'slug',
+    'name',
+    'uri',
+    'templatingVariables',
+    'tags',
+    'usedBySut',
+    'templateDashboardUid',
+    'templateProfile',
+  ] as const;
+
   @PrimaryGeneratedColumn('uuid')
   id!: string;
 

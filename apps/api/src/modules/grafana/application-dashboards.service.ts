@@ -12,9 +12,11 @@ import {
   ApplicationDashboard as ApplicationDashboardEntity,
   GrafanaDashboard as GrafanaDashboardEntity,
 } from '../../entities';
+import { OwnedResource } from '@perfana/shared';
 import { GrafanaClientService } from './grafana-client.service';
 import { AuthorizationService } from '../../common/services/authorization.service';
 import { withOrgFilter } from '../../common/utils/with-org-filter';
+import { AuditService } from '../audit/audit.service';
 
 export interface DeleteInfo {
   canDeleteFromGrafana: boolean;
@@ -97,6 +99,7 @@ export class ApplicationDashboardsService {
     private dataSource: DataSource,
     private grafanaClientService: GrafanaClientService,
     private readonly authzService: AuthorizationService,
+    private readonly auditService: AuditService,
   ) {}
 
   /**
@@ -361,6 +364,13 @@ export class ApplicationDashboardsService {
         throw new Error('Failed to fetch created application dashboard');
       }
 
+      // Phase 5a: ApplicationDashboard.organization_id maps to camelCase
+      // organizationId, so AuditService.dispatch cannot read it directly —
+      // pass organizationIdOverride for the org-scope tag.
+      this.auditService.logCreate(resultWithRelations as unknown as OwnedResource, {
+        organizationIdOverride: resultWithRelations.organizationId,
+      });
+
       this.logger.log(`Created application dashboard: ${resultWithRelations.dashboardLabel} (${resultWithRelations.id}) by user: ${userId}`);
 
       return {
@@ -440,6 +450,18 @@ export class ApplicationDashboardsService {
 
       // Update with TypeORM
       await this.appDashboardRepo.update(id, updateData as any);
+
+      // Reload the post-update entity (with prototype intact) for the audit
+      // diff. `existing` already holds the pre-update snapshot — no extra
+      // clone needed because update() doesn't mutate it in place.
+      const afterEntity = await this.appDashboardRepo.findOne({ where: { id } });
+      if (afterEntity) {
+        this.auditService.logUpdate(
+          existing as unknown as OwnedResource,
+          afterEntity as unknown as OwnedResource,
+          { organizationIdOverride: existing.organizationId ?? afterEntity.organizationId },
+        );
+      }
 
       // Fetch the updated record with relations
       const result = await this.findOne(id, userId, roles);
@@ -695,6 +717,22 @@ export class ApplicationDashboardsService {
         const usedBySut = grafanaDashboard.usedBySut || [];
         const otherSuts = usedBySut.filter(sut => sut !== currentSutName);
         shouldDeleteFromGrafana = otherSuts.length === 0;
+      }
+
+      // Phase 5a: log DELETE rows before the cascade transaction so the
+      // pre-delete state is captured. Mirrors the test-run handler precedent
+      // (PR8) — accepts the small false-positive risk if the txn rolls back.
+      // Audited rows: the ApplicationDashboard itself, and (if the user opted
+      // to also remove it from Grafana and the linked GrafanaDashboard is
+      // unused by any other SUT) the sibling GrafanaDashboard. Cascaded
+      // benchmark deletions are not individually audited (bucket-2 pattern).
+      this.auditService.logDelete(existing as unknown as OwnedResource, {
+        organizationIdOverride: existing.organizationId,
+      });
+      if (shouldDeleteFromGrafana && grafanaDashboard) {
+        this.auditService.logDelete(grafanaDashboard as unknown as OwnedResource, {
+          organizationIdOverride: grafanaDashboard.organizationId,
+        });
       }
 
       // Use transaction to ensure atomicity

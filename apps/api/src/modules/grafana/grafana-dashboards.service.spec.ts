@@ -17,12 +17,14 @@ import {
 } from '../../../test/helpers/mock-repository.factory';
 import { createAuthorizationServiceMock } from '../../../test/mocks/authorization-service.mock';
 import { AuthorizationService } from '../../common/services/authorization.service';
+import { AuditService } from '../audit/audit.service';
 
 describe('GrafanaDashboardsService', () => {
   let service: GrafanaDashboardsService;
   let repository: MockRepository<GrafanaDashboardEntity>;
   let grafanaClientService: jest.Mocked<GrafanaClientService>;
   let queryBuilder: MockSelectQueryBuilder<GrafanaDashboardEntity>;
+  let auditService: jest.Mocked<AuditService>;
 
   const mockUserId = 'test-user-id';
   const mockRoles = ['user'];
@@ -105,6 +107,14 @@ describe('GrafanaDashboardsService', () => {
         {
           provide: AuthorizationService,
           useValue: createAuthorizationServiceMock(),
+        },
+        {
+          provide: AuditService,
+          useValue: {
+            logCreate: jest.fn(),
+            logUpdate: jest.fn(),
+            logDelete: jest.fn(),
+          },
         }
       ]
     }).compile();
@@ -112,6 +122,7 @@ describe('GrafanaDashboardsService', () => {
     service = module.get<GrafanaDashboardsService>(GrafanaDashboardsService);
     repository = module.get(getRepositoryToken(GrafanaDashboardEntity));
     grafanaClientService = module.get(GrafanaClientService);
+    auditService = module.get(AuditService);
   });
 
   afterEach(() => {
@@ -1646,6 +1657,14 @@ describe('GrafanaDashboardsService', () => {
           {
             provide: AuthorizationService,
             useValue: authzService,
+          },
+          {
+            provide: AuditService,
+            useValue: {
+              logCreate: jest.fn(),
+              logUpdate: jest.fn(),
+              logDelete: jest.fn(),
+            },
           }
         ]
       }).compile();
@@ -2019,6 +2038,69 @@ describe('GrafanaDashboardsService', () => {
 
       // Assert
       expect(result.panels).toEqual([fullPanel]);
+    });
+  });
+
+  describe('audit logging (Phase 5a, PR10)', () => {
+    const mockOrgId = 'org-grafana-1';
+
+    it('create logs CREATE with organizationIdOverride from the persisted dashboard', async () => {
+      const created = { ...mockDashboardEntity, organizationId: mockOrgId } as never as GrafanaDashboardEntity;
+      repository.create.mockReturnValue(created);
+      repository.save.mockResolvedValue(created);
+
+      await service.create(
+        {
+          grafanaInstanceId: created.grafanaInstanceId,
+          grafanaId: created.grafanaId,
+          uid: created.uid,
+          name: created.name,
+        } as never,
+        mockUserId,
+        mockRoles,
+      );
+
+      expect(auditService.logCreate).toHaveBeenCalledTimes(1);
+      expect(auditService.logCreate).toHaveBeenCalledWith(
+        created,
+        { organizationIdOverride: mockOrgId },
+      );
+    });
+
+    it('update logs UPDATE with before/after snapshots and organizationIdOverride', async () => {
+      const before = { ...mockDashboardEntity, organizationId: mockOrgId } as never as GrafanaDashboardEntity;
+      const after = { ...mockDashboardEntity, organizationId: mockOrgId, name: 'Renamed' } as never as GrafanaDashboardEntity;
+      repository.findOne
+        .mockResolvedValueOnce(before)  // pre-update snapshot
+        .mockResolvedValueOnce(after);  // post-update result
+      repository.update.mockResolvedValue({ affected: 1 } as never);
+
+      await service.update(mockDashboardEntity.id, { name: 'Renamed' } as never, mockUserId, mockRoles);
+
+      expect(auditService.logUpdate).toHaveBeenCalledTimes(1);
+      const [beforeArg, afterArg, opts] = (auditService.logUpdate as jest.Mock).mock.calls[0];
+      expect(beforeArg).toEqual(expect.objectContaining({ id: mockDashboardEntity.id, name: mockDashboardEntity.name }));
+      expect(afterArg).toEqual(expect.objectContaining({ id: mockDashboardEntity.id, name: 'Renamed' }));
+      expect(opts).toEqual({ organizationIdOverride: mockOrgId });
+    });
+
+    it('remove logs DELETE before repository.delete', async () => {
+      const entity = { ...mockDashboardEntity, organizationId: mockOrgId } as never as GrafanaDashboardEntity;
+      repository.findOne.mockResolvedValue(entity);
+      repository.delete.mockResolvedValue({ affected: 1 } as never);
+
+      await service.remove(mockDashboardEntity.id, mockUserId, mockRoles);
+
+      expect(auditService.logDelete).toHaveBeenCalledTimes(1);
+      expect(auditService.logDelete).toHaveBeenCalledWith(
+        entity,
+        { organizationIdOverride: mockOrgId },
+      );
+      expect(
+        (auditService.logDelete as jest.Mock).mock.invocationCallOrder[0],
+      ).toBeLessThan(
+        (repository.delete as jest.Mock).mock.invocationCallOrder[0],
+      );
     });
   });
 });

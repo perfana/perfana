@@ -1,4 +1,4 @@
-import { Module } from '@nestjs/common';
+import { Module, OnModuleInit } from '@nestjs/common';
 import { TypeOrmModule } from '@nestjs/typeorm';
 import { GrafanaInstancesController } from './grafana-instances.controller';
 import { GrafanaInstancesService } from './grafana-instances.service';
@@ -9,11 +9,14 @@ import { ApplicationDashboardsController } from './application-dashboards.contro
 import { ApplicationDashboardsService } from './application-dashboards.service';
 import { ApplicationDashboard, GrafanaInstance, GrafanaDashboard, SystemUnderTest } from '../../entities';
 import { CommonModule } from '../../common/common.module';
+import { AuditModule } from '../audit/audit.module';
+import { AuditResourceRegistry } from '../audit/audit-resource-registry';
 
 @Module({
   imports: [
     TypeOrmModule.forFeature([ApplicationDashboard, GrafanaInstance, GrafanaDashboard, SystemUnderTest]),
     CommonModule, // Import for AuthorizationService
+    AuditModule, // Phase 5a: provides AuditService + AuditResourceRegistry
   ],
   controllers: [
     GrafanaInstancesController,
@@ -33,4 +36,12 @@ import { CommonModule } from '../../common/common.module';
     ApplicationDashboardsService
   ],
 })
-export class GrafanaModule {}
+export class GrafanaModule implements OnModuleInit {
+  constructor(private readonly auditRegistry: AuditResourceRegistry) {}
+
+  onModuleInit(): void {
+    this.auditRegistry.register('grafana-instances', GrafanaInstance);
+    this.auditRegistry.register('grafana-dashboards', GrafanaDashboard);
+    this.auditRegistry.register('application-dashboards', ApplicationDashboard);
+  }
+}

@@ -5,6 +5,19 @@ import { stripTrailingSlashTransformer } from '../utils/url-column.transformer';
 
 @Entity('grafana_instances')
 export class GrafanaInstance {
+  // Phase 5a audit logging — connection metadata only.
+  // `apiKey` and `password` are encrypted credentials and NEVER auditable.
+  // Ownership tracking and timestamps are excluded; the audit envelope already
+  // records actor + org scope.
+  static auditableFields = [
+    'label',
+    'client_url',
+    'server_url',
+    'orgId',
+    'username',
+    'snapshotInstance',
+  ] as const;
+
   @PrimaryGeneratedColumn('uuid')
   id!: string;
 

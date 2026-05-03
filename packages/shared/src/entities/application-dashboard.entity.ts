@@ -19,6 +19,30 @@ import { GrafanaDashboard } from './grafana-dashboard.entity';
 @Index(['dashboardUid'])
 @Index(['dashboardLabel'])
 export class ApplicationDashboard {
+  // Phase 5a audit logging — user-mutable linkage + dashboard scope fields.
+  // Identity ids (system_under_test_id, grafana_*) and the dashboard handle
+  // (dashboardUid/Label/Name) are auditable so renames or rebindings produce
+  // a clear diff. `variables` and `replacedTemplatingVariables` are JSONB
+  // payloads but are user-edited (per-SUT/per-environment overrides), not
+  // Grafana-derived bulk JSON, so they're auditable. Ownership tracking and
+  // timestamps are excluded; the audit envelope records actor + org scope.
+  static auditableFields = [
+    'systemUnderTestId',
+    'testEnvironment',
+    'grafanaInstanceId',
+    'grafanaDashboardId',
+    'dashboardName',
+    'dashboardId',
+    'dashboardUid',
+    'dashboardLabel',
+    'tags',
+    'templateDashboardUid',
+    'variables',
+    'replacedTemplatingVariables',
+    'snapshotTimeout',
+    'metricsSourceId',
+  ] as const;
+
   @PrimaryGeneratedColumn('uuid')
   id!: string;
 

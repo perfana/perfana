@@ -8,10 +8,12 @@ import { CreateApplicationDashboardDto, UpdateApplicationDashboardDto } from './
 import { GrafanaClientService } from './grafana-client.service';
 import { createAuthorizationServiceMock } from '../../../test/mocks/authorization-service.mock';
 import { AuthorizationService } from '../../common/services/authorization.service';
+import { AuditService } from '../audit/audit.service';
 
 describe('ApplicationDashboardsService', () => {
   let service: ApplicationDashboardsService;
   let appDashboardRepo: jest.Mocked<Repository<ApplicationDashboardEntity>>;
+  let auditService: jest.Mocked<AuditService>;
 
   const mockUserId = 'test-user-id';
   const mockRoles = ['user'];
@@ -164,11 +166,20 @@ describe('ApplicationDashboardsService', () => {
           provide: AuthorizationService,
           useValue: createAuthorizationServiceMock(),
         },
+        {
+          provide: AuditService,
+          useValue: {
+            logCreate: jest.fn(),
+            logUpdate: jest.fn(),
+            logDelete: jest.fn(),
+          },
+        },
       ],
     }).compile();
 
     service = module.get<ApplicationDashboardsService>(ApplicationDashboardsService);
     appDashboardRepo = module.get(getRepositoryToken(ApplicationDashboardEntity));
+    auditService = module.get(AuditService);
 
     // Suppress logger output in tests
     jest.spyOn(Logger.prototype, 'log').mockImplementation();
@@ -1066,7 +1077,9 @@ describe('ApplicationDashboardsService', () => {
 
     it('should call findOne after update to return updated entity', async () => {
       // Arrange
-      appDashboardRepo.findOne.mockResolvedValueOnce(mockApplicationDashboardEntity); // Existence check
+      appDashboardRepo.findOne
+        .mockResolvedValueOnce(mockApplicationDashboardEntity) // Existence check
+        .mockResolvedValueOnce(mockApplicationDashboardEntity); // Phase 5a: post-update reload for the audit diff
       appDashboardRepo.createQueryBuilder.mockReturnValue(
         createMockFindOneQueryBuilder(mockApplicationDashboardEntity) as any
       ); // Internal this.findOne() call
@@ -1077,7 +1090,7 @@ describe('ApplicationDashboardsService', () => {
       await service.update('app-dashboard-uuid', updateDto, mockUserId, mockRoles);
 
       // Assert
-      expect(appDashboardRepo.findOne).toHaveBeenCalledTimes(1); // Once for existence check
+      expect(appDashboardRepo.findOne).toHaveBeenCalledTimes(2); // Existence check + Phase 5a audit reload
       expect(appDashboardRepo.createQueryBuilder).toHaveBeenCalledWith('ad'); // findOne uses query builder
     });
   });
@@ -2383,6 +2396,133 @@ describe('ApplicationDashboardsService', () => {
           variables: [{ name: 'valid_var', values: ['val1'] }],
         })
       );
+    });
+  });
+
+  describe('audit logging (Phase 5a, PR10)', () => {
+    const mockOrgId = 'org-app-dashboard-1';
+
+    it('create logs CREATE with organizationIdOverride from the persisted dashboard', async () => {
+      const created = { ...mockApplicationDashboardEntity, organizationId: mockOrgId } as never as ApplicationDashboardEntity;
+      appDashboardRepo.create.mockReturnValue(created);
+      appDashboardRepo.save.mockResolvedValue(created);
+      appDashboardRepo.findOne.mockResolvedValue(created);
+
+      await service.create(
+        {
+          systemUnderTestId: created.systemUnderTestId,
+          testEnvironment: created.testEnvironment,
+          grafanaInstanceId: created.grafanaInstanceId,
+          grafanaDashboardId: created.grafanaDashboardId,
+          dashboardName: created.dashboardName,
+          dashboardUid: created.dashboardUid,
+          dashboardLabel: created.dashboardLabel,
+          tags: created.tags,
+        } as never,
+        mockUserId,
+        mockRoles,
+      );
+
+      expect(auditService.logCreate).toHaveBeenCalledTimes(1);
+      const [ref, opts] = (auditService.logCreate as jest.Mock).mock.calls[0];
+      expect(ref).toEqual(expect.objectContaining({ id: created.id }));
+      expect(opts).toEqual({ organizationIdOverride: mockOrgId });
+    });
+
+    it('update logs UPDATE with before/after snapshots and organizationIdOverride', async () => {
+      const before = { ...mockApplicationDashboardEntity, organizationId: mockOrgId } as never as ApplicationDashboardEntity;
+      const after = { ...mockApplicationDashboardEntity, organizationId: mockOrgId, dashboardLabel: 'Renamed' } as never as ApplicationDashboardEntity;
+      appDashboardRepo.findOne
+        .mockResolvedValueOnce(before)  // initial existence check
+        .mockResolvedValueOnce(after);  // post-update for audit
+      appDashboardRepo.update.mockResolvedValue({} as never);
+      // service.findOne (called at the end for the response) uses
+      // createQueryBuilder, not findOne — so wire it up to return `after`.
+      appDashboardRepo.createQueryBuilder.mockReturnValue(
+        createMockFindOneQueryBuilder(after) as any,
+      );
+
+      await service.update(
+        'app-dashboard-uuid',
+        { dashboardLabel: 'Renamed' } as never,
+        mockUserId,
+        mockRoles,
+      );
+
+      expect(auditService.logUpdate).toHaveBeenCalledTimes(1);
+      const [beforeArg, afterArg, opts] = (auditService.logUpdate as jest.Mock).mock.calls[0];
+      expect(beforeArg).toEqual(expect.objectContaining({ id: before.id, dashboardLabel: before.dashboardLabel }));
+      expect(afterArg).toEqual(expect.objectContaining({ id: after.id, dashboardLabel: 'Renamed' }));
+      expect(opts).toEqual({ organizationIdOverride: mockOrgId });
+    });
+
+    it('delete logs DELETE before the cascade transaction', async () => {
+      const existing = { ...mockApplicationDashboardEntity, organizationId: mockOrgId } as never as ApplicationDashboardEntity;
+      appDashboardRepo.findOne.mockResolvedValue(existing);
+
+      // Track the order of operations: logDelete must run before transaction.
+      let txnCalled = false;
+      const dataSource = (service as unknown as { dataSource: { transaction: jest.Mock } }).dataSource;
+      dataSource.transaction.mockImplementation(async (cb: (em: unknown) => Promise<unknown>) => {
+        txnCalled = true;
+        const mockEntityManager = {
+          createQueryBuilder: jest.fn().mockReturnValue({
+            delete: jest.fn().mockReturnThis(),
+            from: jest.fn().mockReturnThis(),
+            where: jest.fn().mockReturnThis(),
+            execute: jest.fn().mockResolvedValue({ affected: 0 }),
+          }),
+          delete: jest.fn().mockResolvedValue({ affected: 1 }),
+          update: jest.fn().mockResolvedValue({ affected: 1 }),
+        };
+        return cb(mockEntityManager);
+      });
+      // Capture the moment logDelete fired relative to the txn callback.
+      let txnAtLogDelete = false;
+      (auditService.logDelete as jest.Mock).mockImplementation(() => {
+        txnAtLogDelete = txnCalled;
+      });
+
+      await service.delete('app-dashboard-uuid', false, mockUserId, mockRoles);
+
+      expect(auditService.logDelete).toHaveBeenCalledTimes(1);
+      const [ref, opts] = (auditService.logDelete as jest.Mock).mock.calls[0];
+      expect(ref).toEqual(expect.objectContaining({ id: existing.id }));
+      expect(opts).toEqual({ organizationIdOverride: mockOrgId });
+      expect(txnAtLogDelete).toBe(false);  // txn had not started when logDelete fired
+    });
+
+    it('delete with deleteFromGrafana=true logs DELETE for both ApplicationDashboard and GrafanaDashboard when sibling dashboard is orphaned', async () => {
+      const grafanaDashboard = {
+        id: 'grafana-dashboard-uuid',
+        uid: 'jvm-memory-uid',
+        organizationId: mockOrgId,
+        usedBySut: ['Test System'],  // only this SUT — orphaned after delete
+      };
+      const existing = {
+        ...mockApplicationDashboardEntity,
+        organizationId: mockOrgId,
+        grafanaDashboard: grafanaDashboard as never,
+        grafanaInstance: { id: 'grafana-instance-uuid' } as never,
+        systemUnderTest: { id: 'system-uuid', name: 'Test System' } as never,
+      } as never as ApplicationDashboardEntity;
+      appDashboardRepo.findOne.mockResolvedValue(existing);
+
+      const grafanaClient = (service as unknown as {
+        grafanaClientService: { getGrafanaInstance: jest.Mock; deleteDashboard: jest.Mock };
+      }).grafanaClientService;
+      grafanaClient.getGrafanaInstance = jest.fn().mockResolvedValue({ id: 'grafana-instance-uuid' });
+      grafanaClient.deleteDashboard = jest.fn().mockResolvedValue(undefined);
+
+      await service.delete('app-dashboard-uuid', true, mockUserId, mockRoles);
+
+      // Two logDelete calls: one for the ApplicationDashboard, one for the
+      // GrafanaDashboard sibling row.
+      expect(auditService.logDelete).toHaveBeenCalledTimes(2);
+      const ids = (auditService.logDelete as jest.Mock).mock.calls.map(
+        (c) => (c[0] as { id: string }).id,
+      );
+      expect(ids).toEqual([existing.id, grafanaDashboard.id]);
     });
   });
 });
