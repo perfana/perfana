@@ -4,6 +4,23 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
+## [0.2.47.51] - 2026-05-02
+
+### Added
+- **RBAC Phase 5a — audit-log read endpoints (PR3).** Two HTTP surfaces against the partitioned `audit_logs` table from PR2:
+  - `GET /api/audit-logs?resourceType=&resourceId=&userId=&action=&organizationId=&startDate=&endDate=&limit=&offset=` — admin filterable search. Gated by `@Roles({ roles: ['super-admin', 'system-admin', 'support', 'org-admin'], mode: ANY })`. Super-admins see cross-org rows; org-admins are scoped to their accessible organizations via `getAccessibleOrganizations`. If a non-admin requests a specific `organizationId` they don't have access to, the endpoint returns an empty result (no information leak about whether that org exists). Pagination capped at limit ≤ 500.
+  - `GET /api/audit-logs/resource/:resourceType/:resourceId` — per-resource history. RBAC follows the resource's own access semantics: controller resolves `resourceType` to its entity class via `AuditResourceRegistry`, loads the entity by `id`, then calls `authzService.canAccessResource(userId, roles, resource)`. 404 if the resource type is unregistered or the resource doesn't exist; 403 if `canAccessResource` denies. "If you can see the resource, you can see who edited it."
+- **`AuditResourceRegistry` (`@Injectable()`).** Maps `resource_type` strings to entity classes for the per-resource endpoint's entity lookup. Domain modules will register their owned-resource entities in their `onModuleInit` hooks during PR5+ migration tasks. Last-write-wins for duplicate keys; `knownTypes()` returns sorted.
+- **`AuditFilterDto`.** Class-validator-decorated query DTO for the admin endpoint. Uses `@Type(() => Number)` for query-string number coercion (matches existing pagination pattern in the codebase), `@IsUUID` for `organizationId`, `@IsDateString` for date bounds, `@IsIn(['CREATE','UPDATE','DELETE'])` for action (sidesteps class-transformer enum-coercion fussiness).
+
+### Changed
+- **`AuditModule` now imports `CommonModule`** (for `AuthorizationService` injection into the controller) and registers `AuditQueryController` + `AuditResourceRegistry`. Module exports `AuditService` + `AuditResourceRegistry` so domain modules can register entities in PR5+.
+
+### Coverage
+- 9 controller spec tests covering admin/non-admin scoping, org-mismatch empty-result behavior, pagination passthrough, 404 for unknown resource types, 404 for missing resources, 403 for denied access, and the happy path.
+- 4 registry spec tests (register/resolve, unknown resolves to null, sorted listing, last-write-wins).
+- Total audit-module test count: 30 tests across 4 suites, all passing.
+
 ## [0.2.47.50] - 2026-05-02
 
 ### Added
