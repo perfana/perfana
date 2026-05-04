@@ -12,6 +12,9 @@ jest.mock('@perfana/shared/entities', () => ({
   GrafanaDashboard: class GrafanaDashboard {},
   GrafanaInstance: class GrafanaInstance {},
   SystemUnderTest: class SystemUnderTest {},
+  AuditLog: class AuditLog {},
+  AuditAction: { CREATE: 'CREATE', UPDATE: 'UPDATE', DELETE: 'DELETE' },
+  getAuditableFields: () => null,
 }));
 
 import { Test, TestingModule } from '@nestjs/testing';
@@ -26,6 +29,7 @@ describe('AutoConfigUpdatesService', () => {
   let grafanaDashboardRepo: any;
   let grafanaInstanceRepo: any;
   let systemUnderTestRepo: any;
+  let auditService: any;
 
   beforeEach(async () => {
     // Create mock repositories
@@ -34,6 +38,10 @@ describe('AutoConfigUpdatesService', () => {
     grafanaDashboardRepo = createMockRepository();
     grafanaInstanceRepo = createMockRepository();
     systemUnderTestRepo = createMockRepository();
+    auditService = {
+      logCreate: jest.fn(),
+      logUpdate: jest.fn(),
+    };
 
     const module: TestingModule = await Test.createTestingModule({
       providers: [
@@ -50,6 +58,7 @@ describe('AutoConfigUpdatesService', () => {
               grafanaInstanceRepo,
               systemUnderTestRepo,
               mockDataSource as any,
+              auditService,
             );
           },
         },
@@ -737,6 +746,95 @@ describe('AutoConfigUpdatesService', () => {
             applicationDashboard,
           ),
         ).rejects.toThrow("System under test 'nonexistent' not found");
+      });
+    });
+
+    describe('Audit logging', () => {
+      const baseProfileBenchmark: any = {
+        id: 'pb-1',
+        source: 'grafana',
+        panel_id: 1,
+        panel_title: 'Heap',
+        panel_type: 'graph',
+        tags: [],
+        metadata: {},
+        read_only: false,
+      };
+      const baseTestRun: any = {
+        testRunId: 'test-1',
+        systemUnderTest: { name: 'my-app' },
+        systemUnderTestId: 'sut-id',
+        testEnvironment: 'acc',
+        workload: 'loadTest',
+        organizationId: 'eb9b3953-1593-405d-9135-9806570d2aec',
+        endTime: new Date(),
+        tags: [],
+        variables: [],
+      };
+      const baseDashboard = {
+        id: 'app-dash-1',
+        grafanaInstance: 'grafana-prod',
+        dashboardLabel: 'JVM',
+        dashboardId: 1,
+        dashboardUid: 'jvm-uid',
+      } as any;
+
+      it('emits a CREATE audit row when a new benchmark is inserted', async () => {
+        const mockSut = { id: 'sut-1', name: 'my-app' };
+        const savedBenchmark = { id: 'benchmark-new', organizationId: baseTestRun.organizationId };
+
+        systemUnderTestRepo.findOne.mockResolvedValue(mockSut);
+        benchmarkRepo.findOne.mockResolvedValue(null); // no existing
+        benchmarkRepo.create.mockReturnValue({});
+        benchmarkRepo.save.mockResolvedValue(savedBenchmark);
+
+        await service.insertBenchmarkBasedOnProfileBenchmark(
+          baseProfileBenchmark,
+          baseTestRun,
+          baseDashboard,
+        );
+
+        expect(auditService.logCreate).toHaveBeenCalledTimes(1);
+        expect(auditService.logUpdate).not.toHaveBeenCalled();
+        expect(auditService.logCreate).toHaveBeenCalledWith(
+          savedBenchmark,
+          expect.objectContaining({
+            organizationIdOverride: baseTestRun.organizationId,
+          }),
+        );
+      });
+
+      it('emits an UPDATE audit row with a before snapshot when an existing benchmark is updated', async () => {
+        const mockSut = { id: 'sut-1', name: 'my-app' };
+        const existingBenchmark = {
+          id: 'benchmark-existing',
+          requirement_value: 1024,
+          organizationId: baseTestRun.organizationId,
+        };
+        const savedBenchmark = {
+          id: 'benchmark-existing',
+          requirement_value: 2048,
+          organizationId: baseTestRun.organizationId,
+        };
+
+        systemUnderTestRepo.findOne.mockResolvedValue(mockSut);
+        benchmarkRepo.findOne.mockResolvedValue(existingBenchmark);
+        benchmarkRepo.save.mockResolvedValue(savedBenchmark);
+
+        await service.insertBenchmarkBasedOnProfileBenchmark(
+          baseProfileBenchmark,
+          baseTestRun,
+          baseDashboard,
+        );
+
+        expect(auditService.logUpdate).toHaveBeenCalledTimes(1);
+        expect(auditService.logCreate).not.toHaveBeenCalled();
+        const [beforeArg, afterArg, opts] = auditService.logUpdate.mock.calls[0];
+        expect(beforeArg).toMatchObject({ id: 'benchmark-existing', requirement_value: 1024 });
+        expect(afterArg).toBe(savedBenchmark);
+        expect(opts).toEqual(
+          expect.objectContaining({ organizationIdOverride: baseTestRun.organizationId }),
+        );
       });
     });
   });

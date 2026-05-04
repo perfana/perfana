@@ -1,4 +1,4 @@
-import { pickAuditable, diff, truncateOversizedFields, AUDIT_MAX_FIELD_BYTES } from './audit-diff';
+import { pickAuditable, diff, truncateOversizedFields, AUDIT_MAX_FIELD_BYTES } from '../audit-diff';
 
 describe('pickAuditable', () => {
   it('returns only allowlisted fields', () => {
@@ -10,8 +10,9 @@ describe('pickAuditable', () => {
       .toEqual({ name: 'x' });
   });
   it('returns {} for null/undefined entity', () => {
-    expect(pickAuditable(null as unknown as object, ['x'])).toEqual({});
-    expect(pickAuditable(undefined as unknown as object, ['x'])).toEqual({});
+    type Shape = { x: string };
+    expect(pickAuditable<Shape>(null, ['x'])).toEqual({});
+    expect(pickAuditable<Shape>(undefined, ['x'])).toEqual({});
   });
 });
 

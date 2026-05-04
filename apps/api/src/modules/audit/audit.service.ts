@@ -5,7 +5,7 @@ import { ClsService } from 'nestjs-cls';
 import { AuditLog, AuditAction, AuditLogChanges, AuditLogMetadata } from '@perfana/shared/entities';
 import { OwnedResource, getAuditableFields } from '@perfana/shared/entities';
 import { REQ_CTX, RequestContextStore } from '../../common/context/request-context';
-import { diff, truncateOversizedFields } from './audit-diff';
+import { diff, truncateOversizedFields } from '@perfana/shared/utils';
 
 export type AuditOptions = {
   resourceName?: string;

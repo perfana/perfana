@@ -10,6 +10,7 @@ import { VariableDiscoveryService } from './variable-discovery.service';
 import { VariableDetectorService } from './variable-detector.service';
 import { VariableMatcherService } from './variable-matcher.service';
 import { GrafanaApiModule } from '../grafana-api/grafana-api.module';
+import { AuditModule } from '../audit/audit.module';
 import { DashboardProcessorService } from './services';
 import {
   TestRun,
@@ -42,6 +43,7 @@ import {
       SystemUnderTest,
     ]),
     GrafanaApiModule,
+    AuditModule,
   ],
   providers: [
     AutoConfigService,

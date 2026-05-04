@@ -26,6 +26,7 @@ import {
   ProfileBenchmark,
   PyroscopeInstance,
   MetricsSource,
+  AuditLog,
 } from '@perfana/shared/entities';
 
 @Module({
@@ -70,6 +71,8 @@ import {
           Profile,
           ProfileGrafanaDashboard,
           ProfileBenchmark,
+          // Audit logging
+          AuditLog,
         ],
         synchronize: false, // Never auto-sync schema - use migrations instead
         logging: configService.get('DB_LOGGING') === 'true',
