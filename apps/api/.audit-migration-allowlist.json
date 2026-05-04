@@ -8,7 +8,6 @@
   "apps/api/src/modules/awr/services/awr-reports.service.ts",
   "apps/api/src/modules/awr/services/comparison/comparison-result-persister.service.ts",
   "apps/api/src/modules/deep-links/deep-links.repository.ts",
-  "apps/api/src/modules/deep-links/deep-links.service.ts",
   "apps/api/src/modules/dynatrace/dynatrace.repository.ts",
   "apps/api/src/modules/events/events.service.ts",
   "apps/api/src/modules/metrics-sources/metrics-sources.service.ts",

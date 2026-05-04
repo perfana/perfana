@@ -12,6 +12,7 @@ import { CopyDeepLinksDto } from './dto/copy-deep-links.dto';
 import { TestRunConfiguration, TestRun as TestRunEntity, SystemUnderTest, Profile } from '../../entities';
 import { ResourceNotFoundException } from '../../common/exceptions/business.exception';
 import { AuthorizationService } from '../../common/services/authorization.service';
+import { AuditService } from '../audit/audit.service';
 import type { OwnedResource } from '@perfana/shared';
 
 /**
@@ -48,6 +49,7 @@ export class DeepLinksService {
     @InjectRepository(Profile)
     private readonly profileRepo: Repository<Profile>,
     private readonly authzService: AuthorizationService,
+    private readonly auditService: AuditService,
   ) {}
 
   /**
@@ -176,6 +178,7 @@ export class DeepLinksService {
    * @param userId - User ID for authorization checks
    * @param roles - User roles for authorization checks
    */
+  // audit-skip: per-test-run DeepLink — high-churn ingestion artefact, not user-curated config (Phase 5a PR16)
   async update(
     id: string,
     dto: UpdateDeepLinkDto,
@@ -193,6 +196,7 @@ export class DeepLinksService {
    * @param userId - User ID for authorization checks
    * @param roles - User roles for authorization checks
    */
+  // audit-skip: per-test-run DeepLink — high-churn ingestion artefact, not user-curated config (Phase 5a PR16)
   async delete(
     id: string,
     userId: string = '',
@@ -209,6 +213,7 @@ export class DeepLinksService {
    * @param roles - User roles from JWT token (for admin bypass)
    * @param organizationIds - User's accessible organization IDs
    */
+  // audit-skip: per-test-run DeepLink batch copy — same high-churn rationale as update/delete (Phase 5a PR16)
   async copyToScope(
     dto: CopyDeepLinksDto,
     userId: string,
@@ -461,9 +466,11 @@ export class DeepLinksService {
     if (!profile) {
       throw new ResourceNotFoundException('Profile', dto.profile);
     }
-    return this.repository.createGeneric(dto, {
+    const saved = await this.repository.createGeneric(dto, {
       organizationId: profile.organizationId,
       teamId: profile.teamId,
     });
+    this.auditService.logCreate(saved as unknown as OwnedResource);
+    return saved;
   }
 }

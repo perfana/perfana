@@ -144,7 +144,11 @@ exports[`auditableFields snapshot — every OwnedResource entity has a stable de
     "expected_value",
     "description",
   ],
-  "GenericDeepLink": null,
+  "GenericDeepLink": [
+    "profile",
+    "name",
+    "url",
+  ],
   "GrafanaDashboard": [
     "grafanaInstanceId",
     "grafanaId",
