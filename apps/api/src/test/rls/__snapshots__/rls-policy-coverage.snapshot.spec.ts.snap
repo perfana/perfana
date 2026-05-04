@@ -1,0 +1,406 @@
+// Jest Snapshot v1, https://goo.gl/fbAQLP
+
+exports[`RLS policy coverage snapshot every owned-resource table has FORCE RLS + 4 policies 1`] = `
+{
+  "alert_tag_filters": {
+    "force": false,
+    "policies": [],
+    "rls": false,
+  },
+  "api_keys": {
+    "force": true,
+    "policies": [
+      "DELETE:rls_api_keys_delete",
+      "INSERT:rls_api_keys_insert",
+      "SELECT:rls_api_keys_select",
+      "UPDATE:rls_api_keys_update",
+    ],
+    "rls": true,
+  },
+  "application_dashboards": {
+    "force": true,
+    "policies": [
+      "DELETE:rls_application_dashboards_delete",
+      "INSERT:rls_application_dashboards_insert",
+      "SELECT:rls_application_dashboards_select",
+      "UPDATE:rls_application_dashboards_update",
+    ],
+    "rls": true,
+  },
+  "audit_logs": {
+    "force": false,
+    "policies": [
+      "DELETE:rls_audit_logs_delete",
+      "INSERT:rls_audit_logs_insert",
+      "SELECT:rls_audit_logs_select",
+      "UPDATE:rls_audit_logs_update",
+    ],
+    "rls": false,
+  },
+  "awr_analysis": {
+    "force": false,
+    "policies": [],
+    "rls": false,
+  },
+  "awr_reports": {
+    "force": false,
+    "policies": [],
+    "rls": false,
+  },
+  "benchmarks": {
+    "force": true,
+    "policies": [
+      "DELETE:rls_benchmarks_delete",
+      "INSERT:rls_benchmarks_insert",
+      "SELECT:rls_benchmarks_select",
+      "UPDATE:rls_benchmarks_update",
+    ],
+    "rls": true,
+  },
+  "check_results": {
+    "force": false,
+    "policies": [],
+    "rls": true,
+  },
+  "compare_filter_presets": {
+    "force": true,
+    "policies": [
+      "DELETE:rls_compare_filter_presets_delete",
+      "INSERT:rls_compare_filter_presets_insert",
+      "SELECT:rls_compare_filter_presets_select",
+      "UPDATE:rls_compare_filter_presets_update",
+    ],
+    "rls": true,
+  },
+  "data_sources": {
+    "force": false,
+    "policies": [],
+    "rls": false,
+  },
+  "deep_links": {
+    "force": true,
+    "policies": [
+      "DELETE:rls_deep_links_delete",
+      "INSERT:rls_deep_links_insert",
+      "SELECT:rls_deep_links_select",
+      "UPDATE:rls_deep_links_update",
+    ],
+    "rls": true,
+  },
+  "ds_adapt_conclusion": {
+    "force": false,
+    "policies": [],
+    "rls": false,
+  },
+  "ds_adapt_results": {
+    "force": false,
+    "policies": [],
+    "rls": false,
+  },
+  "ds_adapt_tracked_results": {
+    "force": false,
+    "policies": [],
+    "rls": false,
+  },
+  "ds_change_points": {
+    "force": false,
+    "policies": [],
+    "rls": false,
+  },
+  "ds_compare_config": {
+    "force": false,
+    "policies": [],
+    "rls": false,
+  },
+  "ds_control_group_statistics": {
+    "force": false,
+    "policies": [],
+    "rls": false,
+  },
+  "ds_control_groups": {
+    "force": false,
+    "policies": [],
+    "rls": false,
+  },
+  "ds_metric_collection_status": {
+    "force": false,
+    "policies": [],
+    "rls": false,
+  },
+  "ds_metric_statistics": {
+    "force": false,
+    "policies": [],
+    "rls": false,
+  },
+  "ds_metrics": {
+    "force": false,
+    "policies": [],
+    "rls": false,
+  },
+  "ds_panels": {
+    "force": false,
+    "policies": [],
+    "rls": false,
+  },
+  "ds_queries": {
+    "force": false,
+    "policies": [],
+    "rls": false,
+  },
+  "ds_query_executions": {
+    "force": false,
+    "policies": [],
+    "rls": false,
+  },
+  "ds_tracked_differences": {
+    "force": false,
+    "policies": [],
+    "rls": false,
+  },
+  "dynatrace_configs": {
+    "force": true,
+    "policies": [
+      "DELETE:rls_dynatrace_configs_delete",
+      "INSERT:rls_dynatrace_configs_insert",
+      "SELECT:rls_dynatrace_configs_select",
+      "UPDATE:rls_dynatrace_configs_update",
+    ],
+    "rls": true,
+  },
+  "dynatrace_entity_mappings": {
+    "force": true,
+    "policies": [
+      "DELETE:rls_dynatrace_entity_mappings_delete",
+      "INSERT:rls_dynatrace_entity_mappings_insert",
+      "SELECT:rls_dynatrace_entity_mappings_select",
+      "UPDATE:rls_dynatrace_entity_mappings_update",
+    ],
+    "rls": true,
+  },
+  "dynatrace_queries": {
+    "force": true,
+    "policies": [
+      "DELETE:rls_dynatrace_queries_delete",
+      "INSERT:rls_dynatrace_queries_insert",
+      "SELECT:rls_dynatrace_queries_select",
+      "UPDATE:rls_dynatrace_queries_update",
+    ],
+    "rls": true,
+  },
+  "events": {
+    "force": true,
+    "policies": [
+      "DELETE:rls_events_delete",
+      "INSERT:rls_events_insert",
+      "SELECT:rls_events_select",
+      "UPDATE:rls_events_update",
+    ],
+    "rls": true,
+  },
+  "expected_config_changes": {
+    "force": true,
+    "policies": [
+      "DELETE:rls_expected_config_changes_delete",
+      "INSERT:rls_expected_config_changes_insert",
+      "SELECT:rls_expected_config_changes_select",
+      "UPDATE:rls_expected_config_changes_update",
+    ],
+    "rls": true,
+  },
+  "generic_deep_links": {
+    "force": true,
+    "policies": [
+      "DELETE:rls_generic_deep_links_delete",
+      "INSERT:rls_generic_deep_links_insert",
+      "SELECT:rls_generic_deep_links_select",
+      "UPDATE:rls_generic_deep_links_update",
+    ],
+    "rls": true,
+  },
+  "grafana_dashboards": {
+    "force": true,
+    "policies": [
+      "DELETE:rls_grafana_dashboards_delete",
+      "INSERT:rls_grafana_dashboards_insert",
+      "SELECT:rls_grafana_dashboards_select",
+      "UPDATE:rls_grafana_dashboards_update",
+    ],
+    "rls": true,
+  },
+  "grafana_instances": {
+    "force": true,
+    "policies": [
+      "DELETE:rls_grafana_instances_delete",
+      "INSERT:rls_grafana_instances_insert",
+      "SELECT:rls_grafana_instances_select",
+      "UPDATE:rls_grafana_instances_update",
+    ],
+    "rls": true,
+  },
+  "graph_presets": {
+    "force": true,
+    "policies": [
+      "DELETE:rls_graph_presets_delete",
+      "INSERT:rls_graph_presets_insert",
+      "SELECT:rls_graph_presets_select",
+      "UPDATE:rls_graph_presets_update",
+    ],
+    "rls": true,
+  },
+  "metrics_sources": {
+    "force": false,
+    "policies": [],
+    "rls": false,
+  },
+  "notification_channels": {
+    "force": true,
+    "policies": [
+      "DELETE:rls_notification_channels_delete",
+      "INSERT:rls_notification_channels_insert",
+      "SELECT:rls_notification_channels_select",
+      "UPDATE:rls_notification_channels_update",
+    ],
+    "rls": true,
+  },
+  "organization_members": {
+    "force": false,
+    "policies": [],
+    "rls": false,
+  },
+  "pending_ds_compare_config_changes": {
+    "force": false,
+    "policies": [],
+    "rls": false,
+  },
+  "profile_benchmarks": {
+    "force": false,
+    "policies": [],
+    "rls": true,
+  },
+  "profile_grafana_dashboards": {
+    "force": false,
+    "policies": [],
+    "rls": true,
+  },
+  "profiles": {
+    "force": true,
+    "policies": [
+      "DELETE:rls_profiles_delete",
+      "INSERT:rls_profiles_insert",
+      "SELECT:rls_profiles_select",
+      "UPDATE:rls_profiles_update",
+    ],
+    "rls": true,
+  },
+  "provisioned_template_ds_compare_configs": {
+    "force": false,
+    "policies": [],
+    "rls": false,
+  },
+  "pyroscope_instances": {
+    "force": true,
+    "policies": [
+      "DELETE:rls_pyroscope_instances_delete",
+      "INSERT:rls_pyroscope_instances_insert",
+      "SELECT:rls_pyroscope_instances_select",
+      "UPDATE:rls_pyroscope_instances_update",
+    ],
+    "rls": true,
+  },
+  "report_templates": {
+    "force": true,
+    "policies": [
+      "DELETE:rls_report_templates_delete",
+      "INSERT:rls_report_templates_insert",
+      "SELECT:rls_report_templates_select",
+      "UPDATE:rls_report_templates_update",
+    ],
+    "rls": true,
+  },
+  "scaling_sessions": {
+    "force": false,
+    "policies": [],
+    "rls": false,
+  },
+  "sparse_metric_exclusions": {
+    "force": false,
+    "policies": [],
+    "rls": false,
+  },
+  "systems_under_test": {
+    "force": true,
+    "policies": [
+      "DELETE:rls_systems_under_test_delete",
+      "INSERT:rls_systems_under_test_insert",
+      "SELECT:rls_systems_under_test_select",
+      "UPDATE:rls_systems_under_test_update",
+    ],
+    "rls": true,
+  },
+  "teams": {
+    "force": false,
+    "policies": [],
+    "rls": false,
+  },
+  "test_run_alerts": {
+    "force": false,
+    "policies": [],
+    "rls": false,
+  },
+  "test_run_events": {
+    "force": false,
+    "policies": [],
+    "rls": false,
+  },
+  "test_runs": {
+    "force": true,
+    "policies": [
+      "DELETE:rls_test_runs_delete",
+      "INSERT:rls_test_runs_insert",
+      "SELECT:rls_test_runs_select",
+      "UPDATE:rls_test_runs_update",
+    ],
+    "rls": true,
+  },
+  "tracing_instances": {
+    "force": true,
+    "policies": [
+      "DELETE:rls_tracing_instances_delete",
+      "INSERT:rls_tracing_instances_insert",
+      "SELECT:rls_tracing_instances_select",
+      "UPDATE:rls_tracing_instances_update",
+    ],
+    "rls": true,
+  },
+  "tracing_services": {
+    "force": true,
+    "policies": [
+      "DELETE:rls_tracing_services_delete",
+      "INSERT:rls_tracing_services_insert",
+      "SELECT:rls_tracing_services_select",
+      "UPDATE:rls_tracing_services_update",
+    ],
+    "rls": true,
+  },
+  "trends_filter_presets": {
+    "force": true,
+    "policies": [
+      "DELETE:rls_trends_filter_presets_delete",
+      "INSERT:rls_trends_filter_presets_insert",
+      "SELECT:rls_trends_filter_presets_select",
+      "UPDATE:rls_trends_filter_presets_update",
+    ],
+    "rls": true,
+  },
+  "workload_apdex_thresholds": {
+    "force": false,
+    "policies": [],
+    "rls": false,
+  },
+  "workload_transaction_apdex_thresholds": {
+    "force": false,
+    "policies": [],
+    "rls": false,
+  },
+}
+`;
