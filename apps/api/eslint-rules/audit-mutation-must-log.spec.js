@@ -1,3 +1,6 @@
+const assert = require('assert');
+const fs = require('fs');
+const path = require('path');
 const { RuleTester } = require('eslint');
 const rule = require('./audit-mutation-must-log');
 
@@ -86,6 +89,26 @@ ruleTester.run('audit-mutation-must-log', rule, {
         async wipe() { await this.repo.delete({}); }
       }`,
     },
+    // PR20 — POLICY_EXEMPT bucket-2 system-derived writes (one representative).
+    // ADAPT is worker-driven on test-run completion; auditing would generate
+    // ingestion-rate noise without compliance value.
+    {
+      filename: 'apps/api/src/modules/adapt/adapt.service.ts',
+      code: `class A { async persist() { await this.repo.save(e); } }`,
+    },
+    // PR20 — POLICY_EXEMPT NO-decision admin config (one representative).
+    // Notification channel CRUD is admin-config with low compliance demand.
+    {
+      filename: 'apps/api/src/modules/notifications/notifications.service.ts',
+      code: `class N { async update() { await this.repo.update({}, e); } }`,
+    },
+    // PR20 — POLICY_EXEMPT repository-layer audit deferred (one representative).
+    // The parallel service-layer path (api-keys.service.ts) is audited in PR5;
+    // repository-layer audit migration is its own workstream.
+    {
+      filename: 'apps/api/src/repositories/api-key.repository.ts',
+      code: `class R { async upsert(e) { await this.repository.save(e); } }`,
+    },
   ],
   invalid: [
     // Bare repo.save in a non-allowlisted file.
@@ -145,5 +168,66 @@ ruleTester.run('audit-mutation-must-log', rule, {
       }`,
       errors: [{ messageId: 'missing' }],
     },
+    // PR20 — a non-listed file outside the POLICY_EXEMPT set still trips,
+    // even when its path looks similar to an exempt entry.
+    {
+      filename: 'apps/api/src/modules/notifications/notifications-aux.service.ts',
+      code: `class N { async update() { await this.repo.save(e); } }`,
+      errors: [{ messageId: 'missing' }],
+    },
   ],
 });
+
+// PR20 — Structural assertions on the POLICY_EXEMPT set.
+// Promoted from .audit-migration-allowlist.json with per-file rationale; closes
+// the Phase 5a audit migration burndown. These checks lock the set against
+// accidental drift (e.g. a future refactor that drops rationale strings or
+// duplicates an entry across both sets).
+{
+  const { POLICY_EXEMPT_FILES, INFRASTRUCTURE_FILES } = rule;
+
+  assert.ok(
+    POLICY_EXEMPT_FILES instanceof Map,
+    'POLICY_EXEMPT_FILES must be exported as a Map (path → rationale)',
+  );
+  assert.ok(
+    POLICY_EXEMPT_FILES.size >= 27,
+    `POLICY_EXEMPT_FILES must contain the 27 entries promoted by PR20 (got ${POLICY_EXEMPT_FILES.size})`,
+  );
+  for (const [filePath, rationale] of POLICY_EXEMPT_FILES) {
+    assert.ok(
+      typeof filePath === 'string' && filePath.startsWith('apps/api/src/'),
+      `POLICY_EXEMPT key must be an apps/api/src/ relative path: ${filePath}`,
+    );
+    assert.ok(
+      typeof rationale === 'string' && rationale.length >= 20,
+      `POLICY_EXEMPT rationale must be a non-trivial string: ${filePath} → ${rationale}`,
+    );
+    assert.ok(
+      !INFRASTRUCTURE_FILES.has(filePath),
+      `POLICY_EXEMPT entry must not also be in INFRASTRUCTURE_FILES: ${filePath}`,
+    );
+  }
+
+  // Every POLICY_EXEMPT entry must resolve to an existing file on disk —
+  // mirrors the smoke test the spec doc requires for .rbac-migration-allowlist.json.
+  // findRepoRoot equivalent: walk up from this file until we find apps/api/.
+  const repoRoot = (() => {
+    let dir = __dirname;
+    for (let i = 0; i < 6; i++) {
+      if (fs.existsSync(path.join(dir, 'apps/api/.audit-migration-allowlist.json'))) return dir;
+      const parent = path.dirname(dir);
+      if (parent === dir) break;
+      dir = parent;
+    }
+    return null;
+  })();
+  if (repoRoot) {
+    for (const filePath of POLICY_EXEMPT_FILES.keys()) {
+      assert.ok(
+        fs.existsSync(path.join(repoRoot, filePath)),
+        `POLICY_EXEMPT entry references missing file: ${filePath}`,
+      );
+    }
+  }
+}
