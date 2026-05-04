@@ -271,5 +271,18 @@ exports[`auditableFields snapshot — every OwnedResource entity has a stable de
     "createdForTestRunId",
     "isGlobal",
   ],
+  "WorkloadApdexThreshold": [
+    "system_under_test_id",
+    "test_environment",
+    "workload",
+    "apdex_threshold",
+  ],
+  "WorkloadTransactionApdexThreshold": [
+    "system_under_test_id",
+    "test_environment",
+    "workload",
+    "transaction_name",
+    "apdex_threshold",
+  ],
 }
 `;

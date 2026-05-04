@@ -62,3 +62,5 @@ export * from './url-pattern.entity';
 export * from './notification-channel.entity';
 export * from './report-template.entity';
 export * from './generated-report.entity';
+export * from './workload-apdex-threshold.entity';
+export * from './workload-transaction-apdex-threshold.entity';
