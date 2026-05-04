@@ -13,7 +13,6 @@
   "apps/api/src/modules/events/events.service.ts",
   "apps/api/src/modules/metrics-sources/metrics-sources.service.ts",
   "apps/api/src/modules/notifications/notifications.service.ts",
-  "apps/api/src/modules/profiles/profiles.service.ts",
   "apps/api/src/modules/provisioning/provisioning.service.ts",
   "apps/api/src/modules/reports/controllers/report-generation.controller.ts",
   "apps/api/src/modules/reports/controllers/report-template.controller.ts",

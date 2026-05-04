@@ -15,6 +15,35 @@ import { Profile } from './profile.entity';
 @Index('idx_profile_benchmarks_dashboard_id', ['profile_dashboard_id'])
 @Index('idx_profile_benchmarks_workload_pattern', ['workload_pattern'])
 export class ProfileBenchmark {
+  // Phase 5a — fields surfaced in audit-log diffs. Field names use snake_case to
+  // match this entity's property naming. `metadata` is excluded (free-form bag,
+  // matches the Benchmark precedent in PR13). Ownership / org / team columns
+  // and timestamps are intentionally excluded; they are emitted via dedicated
+  // columns on the audit row.
+  static auditableFields = [
+    'profile_id',
+    'profile_dashboard_id',
+    'workload_pattern',
+    'source',
+    'grafana_instance',
+    'dashboard_uid',
+    'panel_id',
+    'panel_title',
+    'panel_type',
+    'panel_description',
+    'evaluate_type',
+    'metric_unit',
+    'requirement_operator',
+    'requirement_value',
+    'exclude_ramp_up_time',
+    'average_all',
+    'match_pattern',
+    'validate_with_default_if_no_data',
+    'validate_with_default_if_no_data_value',
+    'tags',
+    'read_only',
+  ] as const;
+
   @PrimaryGeneratedColumn('uuid')
   id!: string;
 

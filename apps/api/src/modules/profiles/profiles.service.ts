@@ -2,10 +2,12 @@ import { Injectable, Logger, NotFoundException, BadRequestException, ForbiddenEx
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { Profile, ProfileGrafanaDashboard, ProfileBenchmark, GrafanaInstance, GrafanaDashboard, GenericDeepLink } from '../../entities';
+import { OwnedResource } from '@perfana/shared/entities';
 import { CreateProfileDto, UpdateProfileDto } from './dto/profile.dto';
 import { CreateProfileDashboardDto, UpdateProfileDashboardDto } from './dto/profile-dashboard.dto';
 import { CreateProfileBenchmarkDto, UpdateProfileBenchmarkDto, ProfileBenchmarkResponse } from './dto/profile-benchmark.dto';
 import { AuthorizationService } from '../../common/services/authorization.service';
+import { AuditService } from '../audit/audit.service';
 
 export interface ProfileResponse {
   id: string;
@@ -69,6 +71,7 @@ export class ProfilesService {
     @InjectRepository(GenericDeepLink)
     private genericDeepLinkRepo: Repository<GenericDeepLink>,
     private readonly authzService: AuthorizationService,
+    private readonly auditService: AuditService,
   ) {}
 
   /**
@@ -410,6 +413,13 @@ export class ProfilesService {
 
       const savedDashboard = await this.profileDashboardRepo.save(dashboard);
 
+      // Phase 5a — ProfileGrafanaDashboard.organization_id is mapped via
+      // camelCase property `organizationId`, so AuditService.dispatch cannot
+      // read it off ref directly — pass organizationIdOverride.
+      this.auditService.logCreate(savedDashboard as unknown as OwnedResource, {
+        organizationIdOverride: savedDashboard.organizationId,
+      });
+
       this.logger.debug(`Created dashboard association ${savedDashboard.id} for profile ${profile.name}`);
 
       return {
@@ -479,6 +489,10 @@ export class ProfilesService {
           `Dashboard ${dashboardId} not found for profile ${profile.name}`
         );
       }
+
+      // Phase 5a — clone the pre-mutation state for the audit diff. Reuses the
+      // entity prototype so AuditService.dispatch resolves auditableFields.
+      const dashboardBefore = Object.assign(new ProfileGrafanaDashboard(), dashboard);
 
       // Validate dashboard UID and Grafana instance if they're being updated
       if (updateDto.dashboardUid || updateDto.grafanaLabel) {
@@ -577,6 +591,12 @@ export class ProfilesService {
         throw new NotFoundException(`Dashboard ${dashboardId} not found after update`);
       }
 
+      this.auditService.logUpdate(
+        dashboardBefore as unknown as OwnedResource,
+        savedDashboard as unknown as OwnedResource,
+        { organizationIdOverride: savedDashboard.organizationId },
+      );
+
       this.logger.debug(`[Service] Updated dashboard association ${savedDashboard.id} for profile ${profile.name}`);
       this.logger.debug(`[Service] Dashboard after update - matchRegexForVariables: ${JSON.stringify(savedDashboard.matchRegexForVariables)}`);
       this.logger.debug(`[Service] Dashboard after update - setHardcodedValueForVariables: ${JSON.stringify(savedDashboard.setHardcodedValueForVariables)}`);
@@ -655,6 +675,13 @@ export class ProfilesService {
           `Dashboard ${dashboardId} not found for profile ${profile.name}`
         );
       }
+
+      // Phase 5a — log DELETE before mutation so the audit row captures the
+      // pre-delete state. organizationIdOverride bridges the camelCase property
+      // / snake_case column gap.
+      this.auditService.logDelete(dashboard as unknown as OwnedResource, {
+        organizationIdOverride: dashboard.organizationId,
+      });
 
       // Delete the dashboard association
       await this.profileDashboardRepo.remove(dashboard);
@@ -824,6 +851,14 @@ export class ProfilesService {
 
       const savedBenchmark = await this.profileBenchmarkRepo.save(benchmark);
 
+      // Phase 5a — ProfileBenchmark.organization_id is mapped via camelCase
+      // property `organizationId` (the snake_case columns above are the entity's
+      // own property naming, not TypeORM's `name:` mapping), so dispatch
+      // cannot read it off ref directly — pass organizationIdOverride.
+      this.auditService.logCreate(savedBenchmark as unknown as OwnedResource, {
+        organizationIdOverride: savedBenchmark.organizationId,
+      });
+
       this.logger.debug(`Created benchmark ${savedBenchmark.id} for profile ${profile.name}`);
 
       return {
@@ -906,6 +941,9 @@ export class ProfilesService {
           `Benchmark ${benchmarkId} not found for profile ${profile.name}`
         );
       }
+
+      // Phase 5a — clone the pre-mutation state for the audit diff.
+      const benchmarkBefore = Object.assign(new ProfileBenchmark(), benchmark);
 
       // Validate profile dashboard if it's being updated
       if (updateDto.profileDashboardId) {
@@ -996,6 +1034,12 @@ export class ProfilesService {
 
       const savedBenchmark = await this.profileBenchmarkRepo.save(benchmark);
 
+      this.auditService.logUpdate(
+        benchmarkBefore as unknown as OwnedResource,
+        savedBenchmark as unknown as OwnedResource,
+        { organizationIdOverride: savedBenchmark.organizationId },
+      );
+
       this.logger.debug(`Updated benchmark ${savedBenchmark.id} for profile ${profile.name}`);
 
       return {
@@ -1072,6 +1116,12 @@ export class ProfilesService {
         );
       }
 
+      // Phase 5a — log DELETE before mutation so the audit row captures the
+      // pre-delete state.
+      this.auditService.logDelete(benchmark as unknown as OwnedResource, {
+        organizationIdOverride: benchmark.organizationId,
+      });
+
       // Delete the benchmark
       await this.profileBenchmarkRepo.remove(benchmark);
 
@@ -1112,6 +1162,13 @@ export class ProfilesService {
     });
 
     const saved = await this.profileRepo.save(profile);
+
+    // Phase 5a — Profile.organization_id is mapped via camelCase property
+    // `organizationId`, so dispatch needs the override to org-scope the row.
+    this.auditService.logCreate(saved as unknown as OwnedResource, {
+      organizationIdOverride: saved.organizationId,
+    });
+
     this.logger.log(`Profile '${saved.name}' created by ${userId}`);
 
     return {
@@ -1148,6 +1205,9 @@ export class ProfilesService {
       }
     }
 
+    // Phase 5a — clone the pre-mutation state for the audit diff.
+    const profileBefore = Object.assign(new Profile(), profile);
+
     if (dto.name !== undefined) profile.name = dto.name;
     if (dto.description !== undefined) profile.description = dto.description;
     if (dto.tags !== undefined) profile.tags = dto.tags;
@@ -1155,6 +1215,13 @@ export class ProfilesService {
     profile.updatedBy = userId;
 
     const saved = await this.profileRepo.save(profile);
+
+    this.auditService.logUpdate(
+      profileBefore as unknown as OwnedResource,
+      saved as unknown as OwnedResource,
+      { organizationIdOverride: saved.organizationId },
+    );
+
     this.logger.log(`Profile '${saved.name}' updated by ${userId}`);
 
     // Re-fetch counts
@@ -1173,6 +1240,14 @@ export class ProfilesService {
     if (profile.readOnly) {
       throw new BadRequestException('Cannot delete a read-only profile');
     }
+
+    // Phase 5a — log DELETE before mutation so the audit row captures the
+    // pre-delete state. Cascaded child rows (ProfileGrafanaDashboard,
+    // ProfileBenchmark) are intentionally not individually audited — they
+    // are implied by the Profile-DELETE row.
+    this.auditService.logDelete(profile as unknown as OwnedResource, {
+      organizationIdOverride: profile.organizationId,
+    });
 
     await this.profileRepo.remove(profile);
     this.logger.log(`Profile '${profile.name}' deleted by ${userId}`);

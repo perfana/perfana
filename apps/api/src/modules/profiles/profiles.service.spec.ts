@@ -15,6 +15,7 @@ import { CreateProfileDashboardDto, UpdateProfileDashboardDto } from './dto/prof
 import { CreateProfileBenchmarkDto, UpdateProfileBenchmarkDto } from './dto/profile-benchmark.dto';
 import { createAuthorizationServiceMock } from '../../../test/mocks/authorization-service.mock';
 import { AuthorizationService } from '../../common/services/authorization.service';
+import { AuditService } from '../audit/audit.service';
 
 describe('ProfilesService', () => {
   let service: ProfilesService;
@@ -23,6 +24,8 @@ describe('ProfilesService', () => {
   let profileBenchmarkRepo: jest.Mocked<Repository<ProfileBenchmark>>;
   let grafanaInstanceRepo: jest.Mocked<Repository<GrafanaInstance>>;
   let grafanaDashboardRepo: jest.Mocked<Repository<GrafanaDashboard>>;
+  let authzService: ReturnType<typeof createAuthorizationServiceMock>;
+  let auditService: jest.Mocked<AuditService>;
 
   const mockDate = new Date('2024-01-15T10:00:00.000Z');
 
@@ -224,6 +227,14 @@ describe('ProfilesService', () => {
           provide: AuthorizationService,
           useValue: createAuthorizationServiceMock(),
         },
+        {
+          provide: AuditService,
+          useValue: {
+            logCreate: jest.fn(),
+            logUpdate: jest.fn(),
+            logDelete: jest.fn(),
+          },
+        },
       ],
     }).compile();
 
@@ -233,6 +244,8 @@ describe('ProfilesService', () => {
     profileBenchmarkRepo = module.get(getRepositoryToken(ProfileBenchmark));
     grafanaInstanceRepo = module.get(getRepositoryToken(GrafanaInstance));
     grafanaDashboardRepo = module.get(getRepositoryToken(GrafanaDashboard));
+    authzService = module.get(AuthorizationService);
+    auditService = module.get(AuditService);
   });
 
   afterEach(() => {
@@ -1322,6 +1335,231 @@ describe('ProfilesService', () => {
       // Assert
       expect(result[0]!.requirementValue).toBe(0);
       expect(result[0]!.validateWithDefaultIfNoDataValue).toBe(0);
+    });
+  });
+
+  // Phase 5a — audit logging assertions across the 9 mutation methods.
+  describe('audit logging', () => {
+    const ownedProfile = {
+      ...mockProfile,
+      organizationId: 'org-1',
+    } as unknown as Profile;
+    const ownedDashboard = {
+      ...mockProfileDashboard,
+      organizationId: 'org-1',
+    } as unknown as ProfileGrafanaDashboard;
+    const ownedBenchmark = {
+      ...mockProfileBenchmark,
+      organizationId: 'org-1',
+    } as unknown as ProfileBenchmark;
+
+    describe('Profile', () => {
+      it('logs CREATE on createProfile()', async () => {
+        profileRepo.findOne.mockResolvedValue(null); // uniqueness check
+        authzService.getAccessibleOrganizations.mockResolvedValue(['org-1']);
+        profileRepo.create.mockReturnValue(ownedProfile);
+        profileRepo.save.mockResolvedValue(ownedProfile);
+
+        await service.createProfile(
+          { name: 'New Profile', description: 'desc' },
+          mockUserId,
+          mockIsAdmin,
+        );
+
+        expect(auditService.logCreate).toHaveBeenCalledTimes(1);
+        expect(auditService.logCreate).toHaveBeenCalledWith(
+          expect.objectContaining({ id: ownedProfile.id }),
+          expect.objectContaining({ organizationIdOverride: 'org-1' }),
+        );
+      });
+
+      it('logs UPDATE on updateProfile() with cloned before-snapshot', async () => {
+        profileRepo.findOne
+          .mockResolvedValueOnce(ownedProfile) // load + lock
+          .mockResolvedValueOnce(ownedProfile); // findOne re-fetch via this.findOne
+        profileDashboardRepo.count.mockResolvedValue(0);
+        profileBenchmarkRepo.count.mockResolvedValue(0);
+        profileRepo.save.mockImplementation(async (entity) => entity as Profile);
+
+        await service.updateProfile(
+          'profile-uuid-1',
+          { description: 'updated' },
+          mockUserId,
+          mockIsAdmin,
+        );
+
+        expect(auditService.logUpdate).toHaveBeenCalledTimes(1);
+        const [before, after, opts] = (auditService.logUpdate as jest.Mock).mock.calls[0];
+        expect(before).toEqual(expect.objectContaining({ id: ownedProfile.id, description: 'Test profile description' }));
+        expect(after).toEqual(expect.objectContaining({ id: ownedProfile.id, description: 'updated' }));
+        expect(opts).toEqual({ organizationIdOverride: 'org-1' });
+      });
+
+      it('logs DELETE before remove on deleteProfile()', async () => {
+        profileRepo.findOne.mockResolvedValue(ownedProfile);
+        profileRepo.remove.mockResolvedValue(ownedProfile);
+
+        await service.deleteProfile('profile-uuid-1', mockUserId, mockIsAdmin);
+
+        expect(auditService.logDelete).toHaveBeenCalledTimes(1);
+        expect(auditService.logDelete).toHaveBeenCalledWith(
+          expect.objectContaining({ id: ownedProfile.id }),
+          { organizationIdOverride: 'org-1' },
+        );
+        expect(
+          (auditService.logDelete as jest.Mock).mock.invocationCallOrder[0],
+        ).toBeLessThan(profileRepo.remove.mock.invocationCallOrder[0]);
+      });
+    });
+
+    describe('ProfileGrafanaDashboard', () => {
+      it('logs CREATE on createDashboard()', async () => {
+        profileRepo.findOne.mockResolvedValue(ownedProfile);
+        grafanaInstanceRepo.findOne.mockResolvedValue(mockGrafanaInstance);
+        grafanaDashboardRepo.findOne.mockResolvedValue(mockGrafanaDashboard);
+        profileDashboardRepo.create.mockReturnValue(ownedDashboard);
+        profileDashboardRepo.save.mockResolvedValue(ownedDashboard);
+
+        const dto: CreateProfileDashboardDto = {
+          dashboardUid: 'dashboard-uid-123',
+          grafanaLabel: 'Default',
+        };
+        await service.createDashboard('profile-uuid-1', dto, mockUserId, mockIsAdmin);
+
+        expect(auditService.logCreate).toHaveBeenCalledTimes(1);
+        expect(auditService.logCreate).toHaveBeenCalledWith(
+          expect.objectContaining({ id: ownedDashboard.id }),
+          { organizationIdOverride: 'org-1' },
+        );
+      });
+
+      it('logs UPDATE on updateDashboard() with cloned before-snapshot', async () => {
+        profileRepo.findOne.mockResolvedValue(ownedProfile);
+        profileDashboardRepo.findOne
+          .mockResolvedValueOnce(ownedDashboard) // initial load
+          .mockResolvedValueOnce({
+            ...ownedDashboard,
+            createSeparateDashboardForVariable: 'env',
+          } as ProfileGrafanaDashboard); // re-fetch after update()
+        grafanaInstanceRepo.findOne.mockResolvedValue(mockGrafanaInstance);
+        grafanaDashboardRepo.findOne.mockResolvedValue(mockGrafanaDashboard);
+
+        const dto: UpdateProfileDashboardDto = {
+          createSeparateDashboardForVariable: 'env',
+        };
+        await service.updateDashboard(
+          'profile-uuid-1',
+          'profile-dashboard-uuid-1',
+          dto,
+          mockUserId,
+          mockIsAdmin,
+        );
+
+        expect(auditService.logUpdate).toHaveBeenCalledTimes(1);
+        const [before, after, opts] = (auditService.logUpdate as jest.Mock).mock.calls[0];
+        expect(before).toEqual(expect.objectContaining({
+          id: ownedDashboard.id,
+          createSeparateDashboardForVariable: 'application',
+        }));
+        expect(after).toEqual(expect.objectContaining({
+          id: ownedDashboard.id,
+          createSeparateDashboardForVariable: 'env',
+        }));
+        expect(opts).toEqual({ organizationIdOverride: 'org-1' });
+      });
+
+      it('logs DELETE before remove on deleteDashboard()', async () => {
+        profileRepo.findOne.mockResolvedValue(ownedProfile);
+        profileDashboardRepo.findOne.mockResolvedValue(ownedDashboard);
+        profileDashboardRepo.remove.mockResolvedValue(ownedDashboard);
+
+        await service.deleteDashboard(
+          'profile-uuid-1',
+          'profile-dashboard-uuid-1',
+          mockUserId,
+          mockIsAdmin,
+        );
+
+        expect(auditService.logDelete).toHaveBeenCalledTimes(1);
+        expect(auditService.logDelete).toHaveBeenCalledWith(
+          expect.objectContaining({ id: ownedDashboard.id }),
+          { organizationIdOverride: 'org-1' },
+        );
+        expect(
+          (auditService.logDelete as jest.Mock).mock.invocationCallOrder[0],
+        ).toBeLessThan(profileDashboardRepo.remove.mock.invocationCallOrder[0]);
+      });
+    });
+
+    describe('ProfileBenchmark', () => {
+      it('logs CREATE on createBenchmark()', async () => {
+        profileRepo.findOne.mockResolvedValue(ownedProfile);
+        profileDashboardRepo.findOne.mockResolvedValue(ownedDashboard);
+        profileBenchmarkRepo.create.mockReturnValue(ownedBenchmark);
+        profileBenchmarkRepo.save.mockResolvedValue(ownedBenchmark);
+
+        const dto: CreateProfileBenchmarkDto = {
+          profileDashboardId: 'profile-dashboard-uuid-1',
+        };
+        await service.createBenchmark('profile-uuid-1', dto, mockUserId, mockIsAdmin);
+
+        expect(auditService.logCreate).toHaveBeenCalledTimes(1);
+        expect(auditService.logCreate).toHaveBeenCalledWith(
+          expect.objectContaining({ id: ownedBenchmark.id }),
+          { organizationIdOverride: 'org-1' },
+        );
+      });
+
+      it('logs UPDATE on updateBenchmark() with cloned before-snapshot', async () => {
+        profileRepo.findOne.mockResolvedValue(ownedProfile);
+        profileBenchmarkRepo.findOne.mockResolvedValue(ownedBenchmark);
+        profileBenchmarkRepo.save.mockImplementation(async (entity) => entity as ProfileBenchmark);
+
+        const dto: UpdateProfileBenchmarkDto = {
+          requirementValue: 2048,
+        };
+        await service.updateBenchmark(
+          'profile-uuid-1',
+          'benchmark-uuid-1',
+          dto,
+          mockUserId,
+          mockIsAdmin,
+        );
+
+        expect(auditService.logUpdate).toHaveBeenCalledTimes(1);
+        const [before, after, opts] = (auditService.logUpdate as jest.Mock).mock.calls[0];
+        expect(before).toEqual(expect.objectContaining({
+          id: ownedBenchmark.id,
+          requirement_value: 1024,
+        }));
+        expect(after).toEqual(expect.objectContaining({
+          id: ownedBenchmark.id,
+          requirement_value: 2048,
+        }));
+        expect(opts).toEqual({ organizationIdOverride: 'org-1' });
+      });
+
+      it('logs DELETE before remove on deleteBenchmark()', async () => {
+        profileRepo.findOne.mockResolvedValue(ownedProfile);
+        profileBenchmarkRepo.findOne.mockResolvedValue(ownedBenchmark);
+        profileBenchmarkRepo.remove.mockResolvedValue(ownedBenchmark);
+
+        await service.deleteBenchmark(
+          'profile-uuid-1',
+          'benchmark-uuid-1',
+          mockUserId,
+          mockIsAdmin,
+        );
+
+        expect(auditService.logDelete).toHaveBeenCalledTimes(1);
+        expect(auditService.logDelete).toHaveBeenCalledWith(
+          expect.objectContaining({ id: ownedBenchmark.id }),
+          { organizationIdOverride: 'org-1' },
+        );
+        expect(
+          (auditService.logDelete as jest.Mock).mock.invocationCallOrder[0],
+        ).toBeLessThan(profileBenchmarkRepo.remove.mock.invocationCallOrder[0]);
+      });
     });
   });
 });

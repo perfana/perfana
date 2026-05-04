@@ -2647,11 +2647,9 @@ Each migration PR follows the **same shape** for one service group:
 
 ### Migration order (priority)
 
-1. **api-keys** (sensitive — Phase 5a's marquee use case for `auditableFields`-as-redaction)
-2. **organizations + teams + members** (membership changes drive most compliance questions)
-3. **test-runs** (high-volume mutation, demonstrates batched patterns + soft-delete)
-4. **dynatrace, grafana-dashboards, integrations** (sensitive credentials)
-5. Remaining: profiles, presets, notification channels, etc.
+PRs 5–13 (shipped): api-keys → organizations + members → teams + members → test-runs handlers (bucket 1) → dynatrace → grafana (instances + dashboards + app-dashboards) → pyroscope + tracing → graph/trends/compare presets → results-impacting config (`benchmark-mutation` + `test-runs-config` + `test-runs-metrics`).
+
+Remaining work was scoped on 2026-05-04 via per-resource brainstorm — full per-resource decisions in the burndown doc's § "2026-05-04 per-resource brainstorm". The resulting PR breakdown lives in § "Remaining migration PRs (PR 14 through Final)" below.
 
 Each PR: ~200–400 lines + 1–2 entity declarations + 3–8 `auditService.log*` calls.
 
@@ -2820,18 +2818,22 @@ git commit -m "feat(api): wire audit logging in api-keys (Phase 5a, PR5)"
 
 - [ ] Push, ship via `/ship`. Title: `v0.2.X.Y feat(api): Phase 5a PR5 — audit logging in api-keys`. Wait for green + merge.
 
-### Remaining migration PRs (PR 6 through PR ~12)
+### Remaining migration PRs (PR 14 through Final)
 
-Repeat the **exact same shape** as PR 5 above, one PR per service group, in priority order. Each PR delivers:
+Each PR follows the **exact same shape** as PR 5 above (entity `auditableFields`, paired `auditService.log*` calls, module wiring, spec assertions, allowlist entry removed, burndown row appended). The table below pins the per-PR scope decided on 2026-05-04. PR 20 closes the "policy-skip" gap so the allowlist can finally reach `[]`.
 
-- One or more `auditableFields` declarations on entities
-- All `auditService.log*` calls in the service's mutation methods
-- Module wiring (`AuditModule` import + `AuditResourceRegistry` registration)
-- Spec assertions
-- Allowlist entry removed
-- Burndown updated
+| PR | Service group | Audit scope | Allowlist files closed |
+|---|---|---|---|
+| 14 | `profiles` | Full CRUD on `Profile` + the join entities `ProfileGrafanaDashboard` + `ProfileBenchmark` | `profiles.service.ts` |
+| 15 | `systems-under-test` | Destructive only — `logDelete` on SUT / Environment / Workload, plus `logUpdate` only when `name` changes (rename detection). Routine description / metadata edits skipped | `systems-under-test.service.ts` |
+| 16 | `deep-links` (org-scoped only) | Full CRUD on `URLPattern` and `GenericDeepLink`; **skip** per-test-run `DeepLink` writes (high churn / per-ingestion noise). Service-level entity-class branch decides whether to call `auditService.log*` | `deep-links.service.ts` (the per-test-run `DeepLink` write paths inside the same service file are tagged with an inline `// audit-skip: per-test-run deep-link` rationale rather than being lifted out) |
+| 17 | `reports` | Full CRUD on `ReportTemplate`; DELETE-only on `GeneratedReport` (creates are background-job output, intentionally unaudited per the bucket-2 pattern) | `report-template.service.ts`, `report-template.controller.ts`, `report-generation.service.ts`, `report-generation.controller.ts`, `report-share.service.ts` |
+| 18 | `benchmarks` user-facing CRUD (no-op verification) | `benchmarks.service.ts` is a thin facade — every controller CRUD path (`create`, `update`, `delete`, `copyToScope`, `createApdexSlo`, `updateApdexSlo`) already delegates to `BenchmarkMutationService`, which PR13 fully audited. Add an integration spec asserting the audit row materializes when the controller-level method is called, then close. No new `auditService.log*` calls | none — `benchmarks.service.ts` is not on the allowlist; closing is documentation-only |
+| 19 | `expected-config-change` repository-layer | Full CRUD audit on `ExpectedConfigChange` direct repo mutations — PR13 covered the service layer (`test-runs-config.service.ts`); this PR covers the parallel repo path | `expected-config-change.repository.ts` |
+| 20 | Policy exemptions (closes the allowlist) | Promote the policy-NO decisions + bucket-2 system-derived writes + remaining repository-layer files into the lint rule's exemption list with per-file rationale, then remove from the migration allowlist. Splits the lint rule's hardcoded list into `INFRASTRUCTURE_EXEMPT` (existing) and `POLICY_EXEMPT` (new). Updates the §"Done criteria" definition to "migration allowlist empty AND policy-exempt list documented" | `adapt.service.ts`, `alerts.service.ts`, `alert-tag-filters.service.ts`, all 4 `awr/**` files, `events.service.ts`, `metrics-sources.service.ts`, `notifications.service.ts`, `provisioning.service.ts`, the 5 system-derived `test-runs/services/*` (anomaly, changepoint, dashboard-query, stale-detection, test-run-lookup), and the 7 remaining `apps/api/src/repositories/*` files |
+| Final | Cleanup | Per existing § "PR Final — Cleanup" below | n/a |
 
-When the allowlist reaches `[]`: proceed to the cleanup PR.
+When the migration allowlist reaches `[]` AND `POLICY_EXEMPT` is documented in the lint rule + burndown: proceed to PR Final.
 
 ---
 
