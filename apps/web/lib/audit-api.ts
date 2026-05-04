@@ -18,6 +18,13 @@ export type AuditScope = 'cross-org' | 'org-scoped' | 'none';
 export interface AuditCapabilities {
   canView: boolean;
   scope: AuditScope;
+  /**
+   * True iff the caller has perfana-admin / admin / super-admin. Drives
+   * "true admin only" affordances (e.g. the cross-org filter dropdown), which
+   * we keep tighter than `scope === 'cross-org'` (system-admin / support also
+   * see cross-org rows but should not switch organizations).
+   */
+  isSuperAdmin: boolean;
   accessibleOrganizationIds: string[];
   knownResourceTypes: string[];
 }
@@ -45,6 +52,12 @@ export interface AuditLogRow {
   userId: string;
   userEmail?: string;
   organizationId?: string;
+  /**
+   * Denormalized SUT id populated by the audit dispatcher: the entity's own
+   * id when the resource is a SystemUnderTest, the carried `system_under_test_id`
+   * for child entities, or null for global / pre-migration rows.
+   */
+  systemUnderTestId?: string;
   action: AuditAction;
   resourceType: string;
   resourceId?: string;
@@ -63,6 +76,7 @@ export interface AuditFilter {
   userId?: string;
   action?: AuditAction;
   organizationId?: string;
+  systemUnderTestId?: string;
   startDate?: string;
   endDate?: string;
   limit?: number;
@@ -93,6 +107,7 @@ export async function fetchAuditCapabilities(): Promise<AuditCapabilities> {
     return {
       canView: false,
       scope: 'none',
+      isSuperAdmin: false,
       accessibleOrganizationIds: [],
       knownResourceTypes: [],
     };

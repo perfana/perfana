@@ -27,6 +27,7 @@ describe('AuditQueryController', () => {
     svc = {
       findByFilter: jest.fn().mockResolvedValue({ rows: [], total: 0 }),
       findByResource: jest.fn().mockResolvedValue([]),
+      getDistinctResourceTypes: jest.fn().mockResolvedValue([]),
     } as unknown as jest.Mocked<AuditService>;
 
     reg = {
@@ -64,19 +65,20 @@ describe('AuditQueryController', () => {
     ctl = m.get(AuditQueryController);
   });
 
-  describe('@Roles metadata on findByFilter', () => {
-    // Regression: the controller body authorizes via Capability.SystemAuditRead,
-    // which `perfana-admin` (the global-admin role in this codebase) holds via
-    // GLOBAL_ADMIN_CAPABILITIES. The @Roles guard runs first and must let
-    // global-admin tokens through, otherwise the body's capability check is
-    // unreachable (403 before the controller runs).
-    it('includes perfana-admin and admin in the allowed-roles list', () => {
+  describe('No @Roles guard on findByFilter (regression)', () => {
+    // `org-admin` is a DB-only role (organization_members.roles); it never
+    // reaches the JWT, so a `@Roles({ roles: [..., 'org-admin'] })` guard
+    // would 403 every legitimate org-admin before the body's
+    // isOrgAdminInAnyOrganization check could run. Authorization for this
+    // endpoint MUST live in the controller body so the DB membership check
+    // is reachable.
+    it('does not declare any @Roles metadata on findByFilter', () => {
       const reflector = new Reflector();
       const meta = reflector.get<RoleOptions>(
         ROLES_KEY,
         AuditQueryController.prototype.findByFilter,
       );
-      expect(meta?.roles).toEqual(expect.arrayContaining(['perfana-admin', 'admin', 'org-admin']));
+      expect(meta).toBeUndefined();
     });
   });
 
@@ -89,27 +91,42 @@ describe('AuditQueryController', () => {
       );
     });
 
-    it('non-admin (org-admin) is filtered to accessible orgs', async () => {
+    it('org-admin (DB membership) is filtered to accessible orgs', async () => {
+      authz.isOrgAdminInAnyOrganization.mockResolvedValue(true);
       authz.getAccessibleOrganizations.mockResolvedValue(['o1', 'o2']);
-      await ctl.findByFilter({}, mockUserCtx({ roles: ['org-admin'] }));
+      await ctl.findByFilter({}, mockUserCtx({ roles: ['perfana-user'] }));
       expect(svc.findByFilter).toHaveBeenCalledWith(
         expect.objectContaining({ organizationIds: ['o1', 'o2'] }),
       );
     });
 
-    it('non-admin requesting an org they cannot see → empty result', async () => {
+    it('regular user (no DB org-admin membership) → 403', async () => {
+      authz.getCapabilities.mockResolvedValue([]);
+      authz.isOrgAdminInAnyOrganization.mockResolvedValue(false);
+      await expect(
+        ctl.findByFilter({}, mockUserCtx({ roles: ['perfana-user'] })),
+      ).rejects.toBeInstanceOf(ForbiddenException);
+      expect(svc.findByFilter).not.toHaveBeenCalled();
+    });
+
+    it('org-admin requesting an org they cannot see → empty result', async () => {
+      authz.isOrgAdminInAnyOrganization.mockResolvedValue(true);
       authz.getAccessibleOrganizations.mockResolvedValue(['o1']);
       const out = await ctl.findByFilter(
         { organizationId: 'o2' },
-        mockUserCtx({ roles: ['org-admin'] }),
+        mockUserCtx({ roles: ['perfana-user'] }),
       );
       expect(out).toEqual({ rows: [], total: 0 });
       expect(svc.findByFilter).not.toHaveBeenCalled();
     });
 
-    it('non-admin requesting an accessible org → narrow to that one', async () => {
+    it('org-admin requesting an accessible org → narrow to that one', async () => {
+      authz.isOrgAdminInAnyOrganization.mockResolvedValue(true);
       authz.getAccessibleOrganizations.mockResolvedValue(['o1', 'o2']);
-      await ctl.findByFilter({ organizationId: 'o2' }, mockUserCtx({ roles: ['org-admin'] }));
+      await ctl.findByFilter(
+        { organizationId: 'o2' },
+        mockUserCtx({ roles: ['perfana-user'] }),
+      );
       expect(svc.findByFilter).toHaveBeenCalledWith(
         expect.objectContaining({ organizationIds: ['o2'] }),
       );
@@ -184,32 +201,55 @@ describe('AuditQueryController', () => {
   describe('GET /api/audit-logs/capabilities', () => {
     it('returns cross-org scope for SystemAuditRead callers', async () => {
       authz.getCapabilities.mockResolvedValue([Capability.SystemAuditRead]);
-      reg.knownTypes.mockReturnValue(['api-keys', 'benchmarks']);
+      (svc.getDistinctResourceTypes as jest.Mock).mockResolvedValue(['api-keys', 'benchmarks']);
 
       const out = await ctl.getCapabilities(mockUserCtx({ roles: ['super-admin'] }));
 
       expect(out).toEqual({
         canView: true,
         scope: 'cross-org',
+        isSuperAdmin: true,
         accessibleOrganizationIds: [],
         knownResourceTypes: ['api-keys', 'benchmarks'],
       });
+      expect(svc.getDistinctResourceTypes).toHaveBeenCalledWith();
+    });
+
+    it('flags isSuperAdmin=false for system-admin/support cross-org callers', async () => {
+      authz.getCapabilities.mockResolvedValue([Capability.SystemAuditRead]);
+      (svc.getDistinctResourceTypes as jest.Mock).mockResolvedValue(['api-keys']);
+
+      const out = await ctl.getCapabilities(mockUserCtx({ roles: ['system-admin'] }));
+
+      expect(out.scope).toBe('cross-org');
+      expect(out.isSuperAdmin).toBe(false);
+    });
+
+    it('flags isSuperAdmin=true for perfana-admin (global admin)', async () => {
+      authz.getCapabilities.mockResolvedValue([Capability.SystemAuditRead]);
+      (svc.getDistinctResourceTypes as jest.Mock).mockResolvedValue([]);
+
+      const out = await ctl.getCapabilities(mockUserCtx({ roles: ['perfana-admin'] }));
+
+      expect(out.isSuperAdmin).toBe(true);
     });
 
     it('returns org-scoped + accessible org ids for org-admins', async () => {
       authz.getCapabilities.mockResolvedValue([]);
       authz.isOrgAdminInAnyOrganization.mockResolvedValue(true);
       authz.getAccessibleOrganizations.mockResolvedValue(['o1', 'o2']);
-      reg.knownTypes.mockReturnValue(['api-keys']);
+      (svc.getDistinctResourceTypes as jest.Mock).mockResolvedValue(['api-keys']);
 
       const out = await ctl.getCapabilities(mockUserCtx({ roles: ['org-admin'] }));
 
       expect(out).toEqual({
         canView: true,
         scope: 'org-scoped',
+        isSuperAdmin: false,
         accessibleOrganizationIds: ['o1', 'o2'],
         knownResourceTypes: ['api-keys'],
       });
+      expect(svc.getDistinctResourceTypes).toHaveBeenCalledWith(['o1', 'o2']);
     });
 
     it('returns canView=false for users without audit access', async () => {
@@ -221,9 +261,23 @@ describe('AuditQueryController', () => {
       expect(out).toEqual({
         canView: false,
         scope: 'none',
+        isSuperAdmin: false,
         accessibleOrganizationIds: [],
         knownResourceTypes: [],
       });
+    });
+  });
+
+  describe('SUT filter pass-through', () => {
+    it('forwards systemUnderTestId from DTO to AuditService', async () => {
+      authz.getCapabilities.mockResolvedValue([Capability.SystemAuditRead]);
+      await ctl.findByFilter(
+        { systemUnderTestId: '11111111-1111-1111-1111-111111111111' },
+        mockUserCtx({ roles: ['super-admin'] }),
+      );
+      expect(svc.findByFilter).toHaveBeenCalledWith(
+        expect.objectContaining({ systemUnderTestId: '11111111-1111-1111-1111-111111111111' }),
+      );
     });
   });
 });

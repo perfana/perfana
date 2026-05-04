@@ -33,6 +33,16 @@ export class AuditFilterDto {
   @IsUUID()
   organizationId?: string;
 
+  @ApiPropertyOptional({
+    description:
+      'Filter to audit rows for a single SystemUnderTest and its descendants ' +
+      '(workloads, benchmarks, dashboards, expected-config-changes, etc.). ' +
+      'Backed by the denormalized `system_under_test_id` column populated at write time.',
+  })
+  @IsOptional()
+  @IsUUID()
+  systemUnderTestId?: string;
+
   @ApiPropertyOptional()
   @IsOptional()
   @IsDateString()

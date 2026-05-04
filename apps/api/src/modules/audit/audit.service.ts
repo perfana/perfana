@@ -27,6 +27,7 @@ export type AuditFilter = {
   action?: AuditAction;
   organizationId?: string;
   organizationIds?: string[]; // applied via withOrgFilter for org-admin scoping
+  systemUnderTestId?: string;
   startDate?: Date;
   endDate?: Date;
   limit?: number;
@@ -66,6 +67,27 @@ export class AuditService {
       skip: filter.offset ?? 0,
     });
     return { rows, total };
+  }
+
+  /**
+   * Distinct resource_type values present in audit_logs. Drives the
+   * "Resource Type" filter dropdown so it only lists types that actually
+   * have rows. Org-scoped admins get the set restricted to their accessible
+   * organizations; cross-org admins get every distinct type in the table.
+   */
+  async getDistinctResourceTypes(organizationIds?: string[]): Promise<string[]> {
+    const qb = this.repo
+      .createQueryBuilder('a')
+      .select('DISTINCT a.resource_type', 'resourceType');
+    if (organizationIds) {
+      if (organizationIds.length === 0) return [];
+      qb.where('a.organization_id IN (:...orgIds)', { orgIds: organizationIds });
+    }
+    const rows: Array<{ resourceType: string | null }> = await qb.getRawMany();
+    return rows
+      .map((r) => r.resourceType)
+      .filter((t): t is string => !!t)
+      .sort();
   }
 
   async findByResource(
@@ -136,13 +158,29 @@ export class AuditService {
     };
 
     const orgId =
-      options.organizationIdOverride ?? (ref as { organization_id?: string }).organization_id ?? null;
+      options.organizationIdOverride ??
+      (ref as { organizationId?: string; organization_id?: string }).organizationId ??
+      (ref as { organization_id?: string }).organization_id ??
+      null;
+
+    // Denormalize SUT id so the audit viewer can scope to a single SUT (and
+    // its descendants) without joining every owned table at query time.
+    // - SystemUnderTest itself: use its own id
+    // - Children: read whichever FK shape the entity exposes
+    const sutId =
+      klass.name === 'SystemUnderTest'
+        ? ((ref as { id?: string }).id ?? null)
+        : ((ref as { systemUnderTestId?: string; system_under_test_id?: string })
+            .systemUnderTestId ??
+          (ref as { system_under_test_id?: string }).system_under_test_id ??
+          null);
 
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const row: any = {
       userId: actor.userId,
       userEmail: actor.userEmail ?? undefined,
       organizationId: orgId ?? undefined,
+      systemUnderTestId: sutId ?? undefined,
       action,
       resourceType: options.resourceTypeOverride ?? defaultResourceType(klass.name ?? 'unknown'),
       resourceId: (ref as { id?: string }).id ?? undefined,
@@ -179,6 +217,7 @@ export class AuditService {
     if (f.userId) base.userId = f.userId;
     if (f.action) base.action = f.action;
     if (f.organizationId) base.organizationId = f.organizationId;
+    if (f.systemUnderTestId) base.systemUnderTestId = f.systemUnderTestId;
     if (f.startDate && f.endDate) base.timestamp = Between(f.startDate, f.endDate);
     else if (f.startDate) base.timestamp = MoreThanOrEqual(f.startDate);
     else if (f.endDate) base.timestamp = LessThanOrEqual(f.endDate);

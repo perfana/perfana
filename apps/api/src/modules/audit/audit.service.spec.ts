@@ -180,4 +180,153 @@ describe('AuditService (Phase 5a)', () => {
       });
     });
   });
+
+  describe('systemUnderTestId denormalization', () => {
+    class SutChild implements OwnedResource {
+      static auditableFields = ['name'] as const;
+      id!: string;
+      name!: string;
+      organization_id!: string;
+      created_by!: string;
+      systemUnderTestId!: string; // camelCase shape (e.g. TestRun)
+    }
+
+    class SutChildSnake implements OwnedResource {
+      static auditableFields = ['name'] as const;
+      id!: string;
+      name!: string;
+      organization_id!: string;
+      created_by!: string;
+      system_under_test_id!: string; // snake_case shape (e.g. Benchmark)
+    }
+
+    // Stand-in for the SystemUnderTest entity — name matches the runtime
+    // class name the dispatcher checks against.
+    class SystemUnderTest implements OwnedResource {
+      static auditableFields = ['name'] as const;
+      id!: string;
+      name!: string;
+      organization_id!: string;
+      created_by!: string;
+    }
+
+    it('reads camelCase systemUnderTestId off children', (done) => {
+      const e = Object.assign(new SutChild(), {
+        id: 'tr-1',
+        name: 'run',
+        organization_id: 'o-1',
+        created_by: 'kc-1',
+        systemUnderTestId: 'sut-1',
+      });
+      cls.run(() => {
+        cls.set(REQ_CTX, ctxStore);
+        service.logCreate(e);
+        setImmediate(() => {
+          const row = repo.insert.mock.calls[0][0] as Partial<AuditLog>;
+          expect(row.systemUnderTestId).toBe('sut-1');
+          done();
+        });
+      });
+    });
+
+    it('reads snake_case system_under_test_id off children', (done) => {
+      const e = Object.assign(new SutChildSnake(), {
+        id: 'b-1',
+        name: 'bench',
+        organization_id: 'o-1',
+        created_by: 'kc-1',
+        system_under_test_id: 'sut-2',
+      });
+      cls.run(() => {
+        cls.set(REQ_CTX, ctxStore);
+        service.logCreate(e);
+        setImmediate(() => {
+          const row = repo.insert.mock.calls[0][0] as Partial<AuditLog>;
+          expect(row.systemUnderTestId).toBe('sut-2');
+          done();
+        });
+      });
+    });
+
+    it('uses the entity id when the entity is the SystemUnderTest itself', (done) => {
+      const e = Object.assign(new SystemUnderTest(), {
+        id: 'sut-self',
+        name: 'env-a',
+        organization_id: 'o-1',
+        created_by: 'kc-1',
+      });
+      cls.run(() => {
+        cls.set(REQ_CTX, ctxStore);
+        service.logCreate(e);
+        setImmediate(() => {
+          const row = repo.insert.mock.calls[0][0] as Partial<AuditLog>;
+          expect(row.systemUnderTestId).toBe('sut-self');
+          done();
+        });
+      });
+    });
+
+    it('omits systemUnderTestId for entities without a SUT FK', (done) => {
+      const e = Object.assign(new FakeEntity(), {
+        id: 'r-1', name: 'x', organization_id: 'o-1', created_by: 'kc-1',
+      });
+      cls.run(() => {
+        cls.set(REQ_CTX, ctxStore);
+        service.logCreate(e);
+        setImmediate(() => {
+          const row = repo.insert.mock.calls[0][0] as Partial<AuditLog>;
+          expect(row.systemUnderTestId).toBeUndefined();
+          done();
+        });
+      });
+    });
+  });
+
+  describe('getDistinctResourceTypes', () => {
+    it('returns sorted distinct types when unscoped', async () => {
+      const getRawMany = jest.fn().mockResolvedValue([
+        { resourceType: 'benchmarks' },
+        { resourceType: 'api-keys' },
+      ]);
+      const where = jest.fn().mockReturnThis();
+      const select = jest.fn().mockReturnThis();
+      (repo.createQueryBuilder as unknown as jest.Mock) = jest.fn().mockReturnValue({
+        select,
+        where,
+        getRawMany,
+      });
+
+      const out = await service.getDistinctResourceTypes();
+      expect(out).toEqual(['api-keys', 'benchmarks']);
+      expect(where).not.toHaveBeenCalled();
+    });
+
+    it('returns [] for org-scoped admin with no accessible orgs (no DB hit)', async () => {
+      const getRawMany = jest.fn();
+      (repo.createQueryBuilder as unknown as jest.Mock) = jest.fn().mockReturnValue({
+        select: jest.fn().mockReturnThis(),
+        where: jest.fn().mockReturnThis(),
+        getRawMany,
+      });
+
+      const out = await service.getDistinctResourceTypes([]);
+      expect(out).toEqual([]);
+      expect(getRawMany).not.toHaveBeenCalled();
+    });
+
+    it('applies org filter when accessible orgs are provided', async () => {
+      const getRawMany = jest.fn().mockResolvedValue([{ resourceType: 'api-keys' }]);
+      const where = jest.fn().mockReturnThis();
+      (repo.createQueryBuilder as unknown as jest.Mock) = jest.fn().mockReturnValue({
+        select: jest.fn().mockReturnThis(),
+        where,
+        getRawMany,
+      });
+
+      await service.getDistinctResourceTypes(['o1', 'o2']);
+      expect(where).toHaveBeenCalledWith('a.organization_id IN (:...orgIds)', {
+        orgIds: ['o1', 'o2'],
+      });
+    });
+  });
 });

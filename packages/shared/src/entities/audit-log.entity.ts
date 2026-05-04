@@ -60,6 +60,7 @@ export interface AuditLogMetadata {
 @Index('idx_audit_logs_organization_id', ['organizationId'])
 @Index('idx_audit_logs_resource', ['resourceType', 'resourceId'])
 @Index('idx_audit_logs_action', ['action'])
+@Index('idx_audit_logs_system_under_test_id', ['systemUnderTestId'])
 export class AuditLog {
   @PrimaryGeneratedColumn('uuid')
   id!: string;
@@ -75,6 +76,15 @@ export class AuditLog {
 
   @Column({ name: 'organization_id', type: 'uuid', nullable: true })
   organizationId?: string;
+
+  /**
+   * Denormalized SUT id so audit-log queries can scope to a single
+   * system-under-test in O(index) time. Populated by the audit dispatcher when
+   * the entity is a SystemUnderTest (self) or carries a `systemUnderTestId` /
+   * `system_under_test_id` foreign key.
+   */
+  @Column({ name: 'system_under_test_id', type: 'uuid', nullable: true })
+  systemUnderTestId?: string;
 
   @Column({ type: 'varchar', length: 50 })
   action!: AuditAction;
