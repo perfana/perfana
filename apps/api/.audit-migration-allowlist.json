@@ -19,7 +19,6 @@
   "apps/api/src/modules/reports/services/report-generation.service.ts",
   "apps/api/src/modules/reports/services/report-share.service.ts",
   "apps/api/src/modules/reports/services/report-template.service.ts",
-  "apps/api/src/modules/systems-under-test/systems-under-test.service.ts",
   "apps/api/src/modules/test-runs/services/test-run-lookup.service.ts",
   "apps/api/src/modules/test-runs/services/test-runs-anomaly.service.ts",
   "apps/api/src/modules/test-runs/services/test-runs-changepoint.service.ts",

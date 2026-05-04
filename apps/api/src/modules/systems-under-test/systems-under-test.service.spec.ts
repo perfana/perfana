@@ -6,11 +6,13 @@ import { SystemUnderTest as SystemUnderTestEntity, PyroscopeInstance } from '../
 import { NotFoundException } from '@nestjs/common';
 import { AuthorizationService } from '../../common/services/authorization.service';
 import { createAuthorizationServiceMock } from '../../../test/mocks/authorization-service.mock';
+import { AuditService } from '../audit/audit.service';
 
 describe('SystemsUnderTestService', () => {
   let service: SystemsUnderTestService;
   let repository: jest.Mocked<Repository<SystemUnderTestEntity>>;
   let mockAuthzService: jest.Mocked<AuthorizationService>;
+  let auditService: jest.Mocked<AuditService>;
 
   // Test user context
   const testUserId = 'test-user-id';
@@ -74,11 +76,20 @@ describe('SystemsUnderTestService', () => {
           provide: AuthorizationService,
           useValue: mockAuthzService,
         },
+        {
+          provide: AuditService,
+          useValue: {
+            logCreate: jest.fn(),
+            logUpdate: jest.fn(),
+            logDelete: jest.fn(),
+          },
+        },
       ],
     }).compile();
 
     service = module.get<SystemsUnderTestService>(SystemsUnderTestService);
     repository = module.get(getRepositoryToken(SystemUnderTestEntity));
+    auditService = module.get(AuditService);
   });
 
   afterEach(() => {
@@ -688,6 +699,108 @@ describe('SystemsUnderTestService', () => {
 
       expect(mockAuthzService.isOrganizationMember).not.toHaveBeenCalled();
       expect(result.name).toBe('new-service');
+    });
+  });
+
+  describe('audit logging', () => {
+    // PR15 — destructive-only scope: SUT CREATE on the live createSut path
+    // and the legacy create path; UPDATE driven through dispatch's empty-diff
+    // gate (auditableFields = ['name']); DELETE on the vestigial service
+    // path. The live cascade-delete path goes through
+    // DeleteSystemUnderTestHandler — exercised in its own spec.
+
+    it('logs CREATE on createSut after the transaction commits', async () => {
+      const createDto = {
+        name: 'new-sut',
+        description: 'A new SUT',
+        organizationId: 'org-123',
+      };
+      const createdSut = { ...mockSystemUnderTest, name: 'new-sut', id: 'new-id', organization_id: 'org-123' } as SystemUnderTestEntity;
+
+      (repository as any).manager = {
+        transaction: jest.fn().mockImplementation(async (fn: any) => {
+          const mockManager = {
+            create: jest.fn().mockImplementation((_Entity: any, data: any) => ({ ...data, id: 'new-id' })),
+            save: jest.fn().mockImplementation(async (entity: any) => ({ ...entity, id: entity.id ?? 'new-id' })),
+          };
+          await fn(mockManager);
+        }),
+      };
+      repository.findOne.mockResolvedValueOnce(null);
+      repository.findOne.mockResolvedValueOnce(createdSut);
+      mockAuthzService.isOrganizationMember.mockResolvedValue(true);
+
+      await service.createSut(createDto, testUserId, adminIsAdmin);
+
+      expect(auditService.logCreate).toHaveBeenCalledTimes(1);
+      const [ref] = (auditService.logCreate as jest.Mock).mock.calls[0];
+      expect(ref).toMatchObject({ id: 'new-id', name: 'new-sut' });
+    });
+
+    it('logs CREATE on the legacy create path', async () => {
+      const createDto = { name: 'legacy-sut' };
+      const createdSut = { ...mockSystemUnderTest, name: 'legacy-sut' };
+
+      repository.create.mockReturnValue(createdSut);
+      repository.save.mockResolvedValue(createdSut);
+      repository.findOne.mockResolvedValue(createdSut);
+
+      await service.create(createDto, testUserId, testIsAdmin, 'org-123');
+
+      expect(auditService.logCreate).toHaveBeenCalledTimes(1);
+      const [ref] = (auditService.logCreate as jest.Mock).mock.calls[0];
+      expect(ref).toMatchObject({ name: 'legacy-sut' });
+    });
+
+    it('calls logUpdate on update with before/after — name change drives the rename row', async () => {
+      const renamedSut = { ...mockSystemUnderTest, name: 'renamed-sut' };
+      repository.findOne
+        .mockResolvedValueOnce(mockSystemUnderTest)
+        .mockResolvedValueOnce(renamedSut);
+      repository.update.mockResolvedValue({ affected: 1, raw: [], generatedMaps: [] });
+
+      await service.update('sys-123', { name: 'renamed-sut' }, testUserId, testIsAdmin);
+
+      expect(auditService.logUpdate).toHaveBeenCalledTimes(1);
+      const [before, after] = (auditService.logUpdate as jest.Mock).mock.calls[0];
+      expect(before.name).toBe(mockSystemUnderTest.name);
+      expect(after.name).toBe('renamed-sut');
+    });
+
+    it('still calls logUpdate on description-only update — dispatch silently drops it via auditableFields gate', async () => {
+      // The service unconditionally calls logUpdate; AuditService.dispatch
+      // returns without writing a row when the diff over auditableFields
+      // (= ['name']) is empty. We assert the contract end (the call) is
+      // present; dispatch's gate is exercised in audit.service.spec.ts.
+      const updatedSut = { ...mockSystemUnderTest, description: 'New description' };
+      repository.findOne
+        .mockResolvedValueOnce(mockSystemUnderTest)
+        .mockResolvedValueOnce(updatedSut);
+      repository.update.mockResolvedValue({ affected: 1, raw: [], generatedMaps: [] });
+
+      await service.update(
+        'sys-123',
+        { description: 'New description' },
+        testUserId,
+        testIsAdmin,
+      );
+
+      expect(auditService.logUpdate).toHaveBeenCalledTimes(1);
+    });
+
+    it('logs DELETE on the vestigial remove path before repo.remove', async () => {
+      repository.findOne.mockResolvedValue(mockSystemUnderTest);
+      repository.remove.mockResolvedValue(mockSystemUnderTest);
+
+      await service.remove('sys-123', testUserId, testIsAdmin);
+
+      expect(auditService.logDelete).toHaveBeenCalledTimes(1);
+      const [ref] = (auditService.logDelete as jest.Mock).mock.calls[0];
+      expect(ref.id).toBe('sys-123');
+      // log-before-mutation ordering: audit dispatched before the repo call
+      expect(
+        (auditService.logDelete as jest.Mock).mock.invocationCallOrder[0],
+      ).toBeLessThan((repository.remove as jest.Mock).mock.invocationCallOrder[0]);
     });
   });
 });

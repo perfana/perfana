@@ -4,6 +4,12 @@ import { SystemUnderTestWorkload } from './system-under-test-workload.entity';
 
 @Entity('system_under_test_test_environments')
 export class SystemUnderTestTestEnvironment {
+  // Phase 5a — declared so future env-rename / env-delete paths are pre-wired,
+  // but no service path currently calls auditService for environments.
+  // Cascade deletes from SUT-DELETE are bucket-2 (implied by the SUT row).
+  // Snapshot does NOT include this entity (no organization_id column).
+  static auditableFields = ['name'] as const;
+
   @PrimaryGeneratedColumn('uuid')
   id!: string;
 

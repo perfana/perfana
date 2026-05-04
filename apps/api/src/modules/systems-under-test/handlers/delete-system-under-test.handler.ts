@@ -1,6 +1,8 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { DataSource, EntityManager } from 'typeorm';
+import { SystemUnderTest, OwnedResource } from '@perfana/shared/entities';
 import { ResourceNotFoundException, DatabaseException } from '../../../common/exceptions/business.exception';
+import { AuditService } from '../../audit/audit.service';
 
 export interface DeletePreviewResult {
   systemName: string;
@@ -31,7 +33,10 @@ export interface DeletePreviewResult {
 export class DeleteSystemUnderTestHandler {
   private readonly logger = new Logger(DeleteSystemUnderTestHandler.name);
 
-  constructor(private readonly dataSource: DataSource) {}
+  constructor(
+    private readonly dataSource: DataSource,
+    private readonly auditService: AuditService,
+  ) {}
 
   /**
    * Returns counts of all related resources that will be deleted.
@@ -148,18 +153,33 @@ export class DeleteSystemUnderTestHandler {
    * Execute cascading delete of a system under test and ALL related data.
    */
   async execute(sutId: string): Promise<{ success: boolean; systemName: string }> {
-    // Verify the SUT exists
-    const sut = await this.dataSource.query(
-      `SELECT id, name FROM systems_under_test WHERE id = $1`,
+    // Verify the SUT exists — load the full row so the audit diff captures
+    // the pre-delete name + organization_id (auditableFields = ['name']).
+    const sutRows = await this.dataSource.query(
+      `SELECT id, name, organization_id, team_id FROM systems_under_test WHERE id = $1`,
       [sutId],
     );
 
-    if (!sut || sut.length === 0) {
+    if (!sutRows || sutRows.length === 0) {
       throw new ResourceNotFoundException('SystemUnderTest', sutId);
     }
 
-    const systemName = sut[0].name;
+    const systemName = sutRows[0].name as string;
     this.logger.log(`Starting cascade deletion for system under test "${systemName}" (${sutId})`);
+
+    // Phase 5a — log DELETE before the cascade transaction so the audit row
+    // captures the pre-delete state (mirrors PR8 / PR10 / PR14 ordering).
+    // Cascaded child rows (test_runs, application_dashboards, environments,
+    // workloads, …) are intentionally not individually audited — they are
+    // implied by the SUT-DELETE row, and the raw `manager.query('DELETE …')`
+    // calls below would not surface to the audit lint rule's matcher anyway.
+    const sutRef = Object.assign(new SystemUnderTest(), {
+      id: sutId,
+      name: systemName,
+      organization_id: sutRows[0].organization_id as string | undefined,
+      team_id: sutRows[0].team_id as string | undefined,
+    });
+    this.auditService.logDelete(sutRef as unknown as OwnedResource);
 
     try {
       await this.dataSource.transaction(async (manager) => {

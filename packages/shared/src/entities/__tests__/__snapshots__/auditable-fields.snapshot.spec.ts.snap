@@ -254,7 +254,9 @@ exports[`auditableFields snapshot — every OwnedResource entity has a stable de
     "metric_name",
     "reason",
   ],
-  "SystemUnderTest": null,
+  "SystemUnderTest": [
+    "name",
+  ],
   "Team": [
     "name",
     "description",
