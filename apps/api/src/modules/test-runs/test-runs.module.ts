@@ -82,6 +82,8 @@ import {
   MetricsSource,
   DynatraceConfig,
   GrafanaInstance,
+  WorkloadApdexThreshold,
+  WorkloadTransactionApdexThreshold,
 } from '../../entities';
 import {
   TestRunRepository,
@@ -119,6 +121,8 @@ import {
       MetricsSource,
       DynatraceConfig,
       GrafanaInstance,
+      WorkloadApdexThreshold,
+      WorkloadTransactionApdexThreshold,
     ]),
     SystemsUnderTestModule,
     DataScienceModule,
@@ -206,5 +210,7 @@ export class TestRunsModule implements OnModuleInit {
     this.auditRegistry.register('sparse-metric-exclusions', SparseMetricExclusion);
     this.auditRegistry.register('ds-compare-configs', DsCompareConfig);
     this.auditRegistry.register('provisioned-template-ds-compare-configs', ProvisionedTemplateDsCompareConfig);
+    this.auditRegistry.register('workload-apdex-thresholds', WorkloadApdexThreshold);
+    this.auditRegistry.register('workload-transaction-apdex-thresholds', WorkloadTransactionApdexThreshold);
   }
 }

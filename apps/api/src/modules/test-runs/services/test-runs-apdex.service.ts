@@ -1,10 +1,15 @@
 import { Injectable, Logger, NotFoundException } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
-import { TestRun, SystemUnderTest as SystemEntity } from '@perfana/shared';
+import {
+  SystemUnderTest as SystemEntity,
+  WorkloadApdexThreshold,
+  WorkloadTransactionApdexThreshold,
+} from '@perfana/shared';
 import { SetApdexThresholdDto, WorkloadApdexThresholdDto, WorkloadTransactionApdexThresholdDto } from '../dto/apdex-threshold.dto';
 import { ResourceNotFoundException } from '../../../common/exceptions/business.exception';
 import { AuthorizationService } from '../../../common/services/authorization.service';
+import { AuditService } from '../../audit/audit.service';
 import type { OwnedResource } from '@perfana/shared';
 
 /**
@@ -17,11 +22,14 @@ export class TestRunsApdexService {
   private readonly logger = new Logger(TestRunsApdexService.name);
 
   constructor(
-    @InjectRepository(TestRun)
-    private testRunRepo: Repository<TestRun>,
     @InjectRepository(SystemEntity)
     private systemRepo: Repository<SystemEntity>,
+    @InjectRepository(WorkloadApdexThreshold)
+    private workloadApdexRepo: Repository<WorkloadApdexThreshold>,
+    @InjectRepository(WorkloadTransactionApdexThreshold)
+    private transactionApdexRepo: Repository<WorkloadTransactionApdexThreshold>,
     private readonly authzService: AuthorizationService,
+    private readonly auditService: AuditService,
   ) {}
 
   /**
@@ -32,7 +40,7 @@ export class TestRunsApdexService {
     systemId: string,
     userId: string,
     roles: string[],
-  ): Promise<void> {
+  ): Promise<SystemEntity> {
     const system = await this.systemRepo.findOne({ where: { id: systemId } });
     if (!system) {
       throw new ResourceNotFoundException('System', systemId);
@@ -46,6 +54,8 @@ export class TestRunsApdexService {
     if (!result.allowed) {
       throw new ResourceNotFoundException('System', systemId);
     }
+
+    return system;
   }
 
   /**
@@ -64,33 +74,28 @@ export class TestRunsApdexService {
       // Validate user has access to the system (systemUnderTestId is a UUID)
       await this.validateSystemAccess(systemUnderTestId, userId, roles);
 
-      const query = `
-        SELECT system_under_test_id, test_environment, workload, apdex_threshold, created_at, updated_at
-        FROM workload_apdex_thresholds
-        WHERE system_under_test_id = $1
-          AND test_environment = $2
-          AND workload = $3
-      `;
+      const existing = await this.workloadApdexRepo.findOne({
+        where: { system_under_test_id: systemUnderTestId, test_environment: testEnvironment, workload },
+      });
 
-      const result = await this.testRunRepo.query(query, [systemUnderTestId, testEnvironment, workload]);
-
-      if (!result || result.length === 0) {
+      if (!existing) {
         // Return default if no threshold configured
         return {
           system_under_test_id: systemUnderTestId,
           test_environment: testEnvironment,
-          workload: workload,
+          workload,
           apdex_threshold: 500, // Default
         };
       }
 
       return {
-        system_under_test_id: result[0].system_under_test_id,
-        test_environment: result[0].test_environment,
-        workload: result[0].workload,
-        apdex_threshold: parseInt(result[0].apdex_threshold, 10),
-        created_at: result[0].created_at,
-        updated_at: result[0].updated_at,
+        id: existing.id,
+        system_under_test_id: existing.system_under_test_id,
+        test_environment: existing.test_environment,
+        workload: existing.workload,
+        apdex_threshold: existing.apdex_threshold,
+        created_at: existing.created_at?.toISOString(),
+        updated_at: existing.updated_at?.toISOString(),
       };
     } catch (error) {
       this.logger.error(`Failed to get workload Apdex threshold:`, error);
@@ -112,35 +117,48 @@ export class TestRunsApdexService {
     try {
       this.logger.log(`Setting workload Apdex threshold for ${systemUnderTestId}/${testEnvironment}/${workload} to ${dto.apdex_threshold}ms`);
 
-      // Validate user has access to the system
-      await this.validateSystemAccess(systemUnderTestId, userId, roles);
+      const system = await this.validateSystemAccess(systemUnderTestId, userId, roles);
 
-      // Upsert the workload threshold
-      const upsertQuery = `
-        INSERT INTO workload_apdex_thresholds (system_under_test_id, test_environment, workload, apdex_threshold)
-        VALUES ($1, $2, $3, $4)
-        ON CONFLICT (system_under_test_id, test_environment, workload)
-        DO UPDATE SET
-          apdex_threshold = EXCLUDED.apdex_threshold,
-          updated_at = CURRENT_TIMESTAMP
-        RETURNING id, system_under_test_id, test_environment, workload, apdex_threshold, created_at, updated_at
-      `;
+      const existing = await this.workloadApdexRepo.findOne({
+        where: { system_under_test_id: systemUnderTestId, test_environment: testEnvironment, workload },
+      });
 
-      const result = await this.testRunRepo.query(upsertQuery, [
-        systemUnderTestId,
-        testEnvironment,
-        workload,
-        dto.apdex_threshold,
-      ]);
+      let saved: WorkloadApdexThreshold;
+      if (!existing) {
+        const entity = this.workloadApdexRepo.create({
+          system_under_test_id: systemUnderTestId,
+          test_environment: testEnvironment,
+          workload,
+          apdex_threshold: dto.apdex_threshold,
+          organization_id: system.organization_id,
+          team_id: system.team_id,
+          created_by: userId,
+          updated_by: userId,
+        });
+        saved = await this.workloadApdexRepo.save(entity);
+        this.auditService.logCreate(saved, { organizationIdOverride: saved.organization_id });
+      } else {
+        const before = Object.assign(new WorkloadApdexThreshold(), existing);
+        existing.apdex_threshold = dto.apdex_threshold;
+        existing.updated_by = userId;
+        // Backfill ownership if missing (legacy rows pre-audit fix)
+        if (!existing.organization_id) existing.organization_id = system.organization_id;
+        if (!existing.team_id && system.team_id) existing.team_id = system.team_id;
+        if (!existing.created_by) existing.created_by = userId;
+        saved = await this.workloadApdexRepo.save(existing);
+        this.auditService.logUpdate(before, saved, {
+          organizationIdOverride: saved.organization_id ?? before.organization_id,
+        });
+      }
 
       return {
-        id: result[0].id,
-        system_under_test_id: result[0].system_under_test_id,
-        test_environment: result[0].test_environment,
-        workload: result[0].workload,
-        apdex_threshold: parseInt(result[0].apdex_threshold, 10),
-        created_at: result[0].created_at,
-        updated_at: result[0].updated_at,
+        id: saved.id,
+        system_under_test_id: saved.system_under_test_id,
+        test_environment: saved.test_environment,
+        workload: saved.workload,
+        apdex_threshold: saved.apdex_threshold,
+        created_at: saved.created_at?.toISOString(),
+        updated_at: saved.updated_at?.toISOString(),
       };
     } catch (error) {
       this.logger.error(`Failed to set workload Apdex threshold:`, error);
@@ -161,30 +179,22 @@ export class TestRunsApdexService {
     try {
       this.logger.log(`Getting transaction Apdex thresholds for ${systemUnderTestId}/${testEnvironment}/${workload}`);
 
-      // Validate user has access to the system
       await this.validateSystemAccess(systemUnderTestId, userId, roles);
 
-      const query = `
-        SELECT id, system_under_test_id, test_environment, workload, transaction_name, apdex_threshold, created_at, updated_at
-        FROM workload_transaction_apdex_thresholds
-        WHERE system_under_test_id = $1
-          AND test_environment = $2
-          AND workload = $3
-        ORDER BY transaction_name ASC
-      `;
+      const rows = await this.transactionApdexRepo.find({
+        where: { system_under_test_id: systemUnderTestId, test_environment: testEnvironment, workload },
+        order: { transaction_name: 'ASC' },
+      });
 
-      const result = await this.testRunRepo.query(query, [systemUnderTestId, testEnvironment, workload]);
-
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      return result.map((row: any) => ({
+      return rows.map((row) => ({
         id: row.id,
         system_under_test_id: row.system_under_test_id,
         test_environment: row.test_environment,
         workload: row.workload,
         transaction_name: row.transaction_name,
-        apdex_threshold: parseInt(row.apdex_threshold, 10),
-        created_at: row.created_at,
-        updated_at: row.updated_at,
+        apdex_threshold: row.apdex_threshold,
+        created_at: row.created_at?.toISOString(),
+        updated_at: row.updated_at?.toISOString(),
       }));
     } catch (error) {
       this.logger.error(`Failed to get transaction Apdex thresholds:`, error);
@@ -207,38 +217,54 @@ export class TestRunsApdexService {
     try {
       this.logger.log(`Setting transaction Apdex threshold for ${transactionName} in ${systemUnderTestId}/${testEnvironment}/${workload} to ${dto.apdex_threshold}ms`);
 
-      // Validate user has access to the system
-      await this.validateSystemAccess(systemUnderTestId, userId, roles);
+      const system = await this.validateSystemAccess(systemUnderTestId, userId, roles);
 
-      // Upsert the transaction threshold
-      const upsertQuery = `
-        INSERT INTO workload_transaction_apdex_thresholds
-          (system_under_test_id, test_environment, workload, transaction_name, apdex_threshold)
-        VALUES ($1, $2, $3, $4, $5)
-        ON CONFLICT (system_under_test_id, test_environment, workload, transaction_name)
-        DO UPDATE SET
-          apdex_threshold = EXCLUDED.apdex_threshold,
-          updated_at = CURRENT_TIMESTAMP
-        RETURNING id, system_under_test_id, test_environment, workload, transaction_name, apdex_threshold, created_at, updated_at
-      `;
+      const existing = await this.transactionApdexRepo.findOne({
+        where: {
+          system_under_test_id: systemUnderTestId,
+          test_environment: testEnvironment,
+          workload,
+          transaction_name: transactionName,
+        },
+      });
 
-      const result = await this.testRunRepo.query(upsertQuery, [
-        systemUnderTestId,
-        testEnvironment,
-        workload,
-        transactionName,
-        dto.apdex_threshold,
-      ]);
+      let saved: WorkloadTransactionApdexThreshold;
+      if (!existing) {
+        const entity = this.transactionApdexRepo.create({
+          system_under_test_id: systemUnderTestId,
+          test_environment: testEnvironment,
+          workload,
+          transaction_name: transactionName,
+          apdex_threshold: dto.apdex_threshold,
+          organization_id: system.organization_id,
+          team_id: system.team_id,
+          created_by: userId,
+          updated_by: userId,
+        });
+        saved = await this.transactionApdexRepo.save(entity);
+        this.auditService.logCreate(saved, { organizationIdOverride: saved.organization_id });
+      } else {
+        const before = Object.assign(new WorkloadTransactionApdexThreshold(), existing);
+        existing.apdex_threshold = dto.apdex_threshold;
+        existing.updated_by = userId;
+        if (!existing.organization_id) existing.organization_id = system.organization_id;
+        if (!existing.team_id && system.team_id) existing.team_id = system.team_id;
+        if (!existing.created_by) existing.created_by = userId;
+        saved = await this.transactionApdexRepo.save(existing);
+        this.auditService.logUpdate(before, saved, {
+          organizationIdOverride: saved.organization_id ?? before.organization_id,
+        });
+      }
 
       return {
-        id: result[0].id,
-        system_under_test_id: result[0].system_under_test_id,
-        test_environment: result[0].test_environment,
-        workload: result[0].workload,
-        transaction_name: result[0].transaction_name,
-        apdex_threshold: parseInt(result[0].apdex_threshold, 10),
-        created_at: result[0].created_at,
-        updated_at: result[0].updated_at,
+        id: saved.id,
+        system_under_test_id: saved.system_under_test_id,
+        test_environment: saved.test_environment,
+        workload: saved.workload,
+        transaction_name: saved.transaction_name,
+        apdex_threshold: saved.apdex_threshold,
+        created_at: saved.created_at?.toISOString(),
+        updated_at: saved.updated_at?.toISOString(),
       };
     } catch (error) {
       this.logger.error(`Failed to set transaction Apdex threshold:`, error);
@@ -260,30 +286,26 @@ export class TestRunsApdexService {
     try {
       this.logger.log(`Deleting transaction Apdex threshold for ${transactionName} in ${systemUnderTestId}/${testEnvironment}/${workload}`);
 
-      // Validate user has access to the system
       await this.validateSystemAccess(systemUnderTestId, userId, roles);
 
-      const deleteQuery = `
-        DELETE FROM workload_transaction_apdex_thresholds
-        WHERE system_under_test_id = $1
-          AND test_environment = $2
-          AND workload = $3
-          AND transaction_name = $4
-        RETURNING id
-      `;
+      const existing = await this.transactionApdexRepo.findOne({
+        where: {
+          system_under_test_id: systemUnderTestId,
+          test_environment: testEnvironment,
+          workload,
+          transaction_name: transactionName,
+        },
+      });
 
-      const result = await this.testRunRepo.query(deleteQuery, [
-        systemUnderTestId,
-        testEnvironment,
-        workload,
-        transactionName,
-      ]);
-
-      if (!result || result.length === 0) {
+      if (!existing) {
         throw new NotFoundException(
           `Transaction threshold for ${transactionName} in ${systemUnderTestId}/${testEnvironment}/${workload} not found`,
         );
       }
+
+      const snapshot = Object.assign(new WorkloadTransactionApdexThreshold(), existing);
+      await this.transactionApdexRepo.remove(existing);
+      this.auditService.logDelete(snapshot, { organizationIdOverride: snapshot.organization_id });
 
       return {
         message: `Threshold for transaction ${transactionName} reset to workload default`,
