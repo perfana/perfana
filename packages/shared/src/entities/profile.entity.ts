@@ -12,6 +12,16 @@ import {
 @Index('idx_profiles_read_only', ['readOnly'])
 @Index('idx_profiles_created_at', ['createdAt'])
 export class Profile {
+  // Phase 5a — fields surfaced in audit-log diffs. Ownership / org / team
+  // columns and timestamps are intentionally excluded; they are emitted via
+  // dedicated columns on the audit row.
+  static auditableFields = [
+    'name',
+    'description',
+    'tags',
+    'readOnly',
+  ] as const;
+
   @PrimaryGeneratedColumn('uuid')
   id!: string;
 

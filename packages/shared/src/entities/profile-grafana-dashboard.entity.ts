@@ -16,6 +16,20 @@ export interface DashboardVariable {
 @Entity('profile_grafana_dashboards')
 @Unique('unique_profile_dashboard_grafana', ['profile', 'dashboardUid', 'grafanaLabel'])
 export class ProfileGrafanaDashboard {
+  // Phase 5a — fields surfaced in audit-log diffs. Ownership / org / team
+  // columns and timestamps are intentionally excluded; they are emitted via
+  // dedicated columns on the audit row.
+  static auditableFields = [
+    'profile',
+    'dashboardName',
+    'dashboardUid',
+    'grafanaLabel',
+    'createSeparateDashboardForVariable',
+    'setHardcodedValueForVariables',
+    'matchRegexForVariables',
+    'readOnly',
+  ] as const;
+
   @PrimaryGeneratedColumn('uuid')
   id!: string;
 
