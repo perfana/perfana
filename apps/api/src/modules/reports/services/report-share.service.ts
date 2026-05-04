@@ -107,6 +107,9 @@ export class ReportShareService {
    * @param baseUrl - Base URL for generating share links
    * @returns Updated share settings
    */
+  // audit-skip: GeneratedReport share metadata — DELETE-only policy per Phase
+  // 5a brainstorm. Share toggles + expiry are usage/visibility flags on a
+  // bucket-2 entity; the DELETE row is the user-facing audit anchor.
   async updateShareSettings(
     reportId: string,
     options: UpdateShareSettingsOptions,
@@ -205,6 +208,8 @@ export class ReportShareService {
    * @param baseUrl - Base URL for generating share links
    * @returns Updated share settings with new share ID
    */
+  // audit-skip: GeneratedReport share metadata rotate — DELETE-only policy per
+  // Phase 5a brainstorm. Generates a new share UUID + resets view count.
   async regenerateShareId(reportId: string, baseUrl: string = ''): Promise<ShareSettingsResponse> {
     try {
       const report = await this.reportRepo.findOne({
@@ -409,6 +414,8 @@ export class ReportShareService {
    * Increment the view count for a report
    * @param reportId - Report UUID
    */
+  // audit-skip: GeneratedReport view counter — bucket-2 usage telemetry,
+  // fired on every public share fetch.
   async incrementViewCount(reportId: string): Promise<void> {
     try {
       await this.reportRepo

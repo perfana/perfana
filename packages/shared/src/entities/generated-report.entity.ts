@@ -56,6 +56,20 @@ export interface ReportFileMetadata {
 @Index('idx_generated_reports_status', ['status'])
 @Index('idx_generated_reports_created_at', ['created_at'])
 export class GeneratedReport {
+  // Phase 5a — DELETE-only audit policy: report rows are background-job output
+  // (status flow, file storage, retry counters, share telemetry are all
+  // bucket-2). Only deletes are user-driven and worth recording. The DELETE
+  // diff captures the identifying scope so the audit row stays meaningful even
+  // though the entity itself has no organization_id column (org is denormalized
+  // via organizationIdOverride from the parent test_run/template at log time).
+  // share_id, html_content, pdf_data are deliberately excluded.
+  static auditableFields = [
+    'name',
+    'test_run_id',
+    'template_id',
+    'status',
+  ] as const;
+
   @PrimaryGeneratedColumn('uuid')
   id!: string;
 

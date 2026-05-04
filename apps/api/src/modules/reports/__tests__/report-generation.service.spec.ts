@@ -37,12 +37,14 @@ import { ReportDataFetcherService } from '../services/report-data-fetcher.servic
 import { ReportUtilsService } from '../services/report-utils.service';
 import { ReportHtmlCompilerService } from '../services/report-html-compiler.service';
 import { AuthorizationService } from '../../../common/services/authorization.service';
+import { AuditService } from '../../audit/audit.service';
 
 describe('ReportGenerationService', () => {
   let service: ReportGenerationService;
   let reportRepo: jest.Mocked<Repository<GeneratedReport>>;
   let templateRepo: jest.Mocked<Repository<ReportTemplate>>;
   let testRunRepo: jest.Mocked<Repository<TestRun>>;
+  let auditService: jest.Mocked<AuditService>;
 
   // ==================== Mock Factories ====================
 
@@ -165,6 +167,14 @@ describe('ReportGenerationService', () => {
           },
         },
         {
+          provide: AuditService,
+          useValue: {
+            logCreate: jest.fn(),
+            logUpdate: jest.fn(),
+            logDelete: jest.fn(),
+          },
+        },
+        {
           provide: ReportGenerationValidatorService,
           useValue: {
             validateStatusTransition: jest.fn(),
@@ -206,6 +216,7 @@ describe('ReportGenerationService', () => {
     reportRepo = module.get(getRepositoryToken(GeneratedReport));
     templateRepo = module.get(getRepositoryToken(ReportTemplate));
     testRunRepo = module.get(getRepositoryToken(TestRun));
+    auditService = module.get(AuditService);
   });
 
   afterEach(() => {
@@ -817,6 +828,62 @@ describe('ReportGenerationService', () => {
         ResourceNotFoundException,
       );
     });
+
+    // Phase 5a PR17 — GeneratedReport is DELETE-only. The audit row must
+    // resolve organization_id via the parent test_run (or template) since
+    // the entity itself has no organization_id column.
+    it('logs DELETE with organizationIdOverride from the parent test_run', async () => {
+      const mockTestRun = createMockTestRun({ organizationId: 'org-from-tr' } as Partial<TestRun>);
+      const mockReport = createMockReport({
+        template: undefined,
+        test_run: mockTestRun,
+      });
+      reportRepo.findOne.mockResolvedValue(mockReport);
+      reportRepo.remove.mockResolvedValue(mockReport);
+
+      await service.delete(mockReport.id, 'test-user', ['admin']);
+
+      expect(auditService.logDelete).toHaveBeenCalledTimes(1);
+      const [ref, options] = (auditService.logDelete as jest.Mock).mock.calls[0];
+      expect(ref).toBe(mockReport);
+      expect(options).toEqual({ organizationIdOverride: 'org-from-tr' });
+    });
+
+    it('prefers the parent template organizationId when both relations are loaded', async () => {
+      const mockTemplate = createMockTemplate({ organizationId: 'org-from-tpl' } as Partial<ReportTemplate>);
+      const mockTestRun = createMockTestRun({ organizationId: 'org-from-tr' } as Partial<TestRun>);
+      const mockReport = createMockReport({
+        template: mockTemplate,
+        test_run: mockTestRun,
+      });
+      reportRepo.findOne.mockResolvedValue(mockReport);
+      reportRepo.remove.mockResolvedValue(mockReport);
+
+      await service.delete(mockReport.id, 'test-user', ['admin']);
+
+      expect(auditService.logDelete).toHaveBeenCalledTimes(1);
+      const [, options] = (auditService.logDelete as jest.Mock).mock.calls[0];
+      expect(options).toEqual({ organizationIdOverride: 'org-from-tpl' });
+    });
+
+    it('audits DELETE before remove (so a remove failure still leaves a row)', async () => {
+      const mockReport = createMockReport({
+        test_run: createMockTestRun({ organizationId: 'org-1' } as Partial<TestRun>),
+      });
+      reportRepo.findOne.mockResolvedValue(mockReport);
+      const callOrder: string[] = [];
+      (auditService.logDelete as jest.Mock).mockImplementation(() => {
+        callOrder.push('logDelete');
+      });
+      reportRepo.remove.mockImplementation(async () => {
+        callOrder.push('remove');
+        return mockReport;
+      });
+
+      await service.delete(mockReport.id, 'test-user', ['admin']);
+
+      expect(callOrder).toEqual(['logDelete', 'remove']);
+    });
   });
 
   // ==================== generateHtml ====================
@@ -886,6 +953,102 @@ describe('ReportGenerationService', () => {
 
       // Act & Assert
       await expect(service.generateHtml(mockReport.id)).rejects.toThrow(ResourceNotFoundException);
+    });
+  });
+
+  // ==================== Audit logging — Phase 5a PR17 ====================
+
+  // GeneratedReport is DELETE-only per the brainstorm: report row creates,
+  // status transitions, file storage, retry/job/download bookkeeping, and HTML
+  // content stores are all bucket-2 background-pipeline output. Only delete()
+  // emits a row, exercised in the `delete` describe above. The internally
+  // created ReportTemplate inside createAdHocReport IS audited (full CRUD on
+  // templates per the burndown).
+  describe('Audit logging — Phase 5a PR17', () => {
+    it('does not call auditService on createFromTemplate (DELETE-only)', async () => {
+      const options: CreateReportFromTemplateOptions = {
+        testRunId: '123e4567-e89b-12d3-a456-426614174001',
+        templateId: '123e4567-e89b-12d3-a456-426614174002',
+        generatedBy: 'test-user',
+        roles: ['admin'],
+      };
+      testRunRepo.findOne.mockResolvedValue(createMockTestRun());
+      templateRepo.findOne.mockResolvedValue(createMockTemplate());
+      reportRepo.create.mockReturnValue(createMockReport());
+      reportRepo.save.mockResolvedValue(createMockReport());
+
+      await service.createFromTemplate(options);
+
+      expect(auditService.logCreate).not.toHaveBeenCalled();
+      expect(auditService.logUpdate).not.toHaveBeenCalled();
+      expect(auditService.logDelete).not.toHaveBeenCalled();
+    });
+
+    it('logs CREATE on the inline-created ReportTemplate inside createAdHocReport', async () => {
+      const sections: ReportSectionConfig[] = [{ type: 'header', order: 0 }];
+      const options: CreateAdHocReportOptions = {
+        testRunId: '123e4567-e89b-12d3-a456-426614174001',
+        name: 'Ad-hoc Report',
+        sections,
+        generatedBy: 'test-user',
+        saveAsTemplate: true,
+        templateName: 'Saved Template',
+      };
+      const mockTemplate = createMockTemplate({ name: 'Saved Template', is_adhoc: false });
+
+      testRunRepo.findOne.mockResolvedValue(createMockTestRun());
+      templateRepo.create.mockReturnValue(mockTemplate);
+      templateRepo.save.mockResolvedValue(mockTemplate);
+      reportRepo.create.mockReturnValue(createMockReport());
+      reportRepo.save.mockResolvedValue(createMockReport());
+
+      await service.createAdHocReport(options);
+
+      expect(auditService.logCreate).toHaveBeenCalledTimes(1);
+      const [ref] = (auditService.logCreate as jest.Mock).mock.calls[0];
+      expect(ref).toBe(mockTemplate);
+      // GeneratedReport itself is intentionally not audited (DELETE-only).
+      expect(auditService.logCreate).not.toHaveBeenCalledWith(
+        expect.objectContaining({ test_run_id: expect.anything() }),
+      );
+    });
+
+    it('does not call auditService when createAdHocReport reuses an existing templateId', async () => {
+      const options: CreateAdHocReportOptions = {
+        testRunId: '123e4567-e89b-12d3-a456-426614174001',
+        name: 'Report with Template',
+        sections: [{ type: 'header', order: 0 }],
+        generatedBy: 'test-user',
+        templateId: 'existing-template-id',
+      };
+      testRunRepo.findOne.mockResolvedValue(createMockTestRun());
+      reportRepo.create.mockReturnValue(createMockReport());
+      reportRepo.save.mockResolvedValue(createMockReport());
+
+      await service.createAdHocReport(options);
+
+      // No new template created → no audit row. Report itself is DELETE-only.
+      expect(auditService.logCreate).not.toHaveBeenCalled();
+    });
+
+    it('does not call auditService on updateStatus (bucket-2 status flow)', async () => {
+      const mockReport = createMockReport({ status: 'pending' });
+      reportRepo.findOne.mockResolvedValue(mockReport);
+      reportRepo.save.mockResolvedValue({ ...mockReport, status: 'processing' });
+
+      await service.updateStatus(mockReport.id, 'processing', undefined, undefined, 'test-user', ['admin']);
+
+      expect(auditService.logUpdate).not.toHaveBeenCalled();
+    });
+
+    it('does not call auditService on incrementRetryCount (bucket-2 queue bookkeeping)', async () => {
+      const mockReport = createMockReport({ retry_count: 1 });
+      reportRepo.findOne.mockResolvedValue(mockReport);
+      reportRepo.save.mockResolvedValue({ ...mockReport, retry_count: 2 });
+
+      await service.incrementRetryCount(mockReport.id, 'test-user', ['admin']);
+
+      expect(auditService.logUpdate).not.toHaveBeenCalled();
     });
   });
 

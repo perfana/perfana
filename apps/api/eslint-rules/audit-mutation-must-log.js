@@ -99,7 +99,19 @@ module.exports = {
             ) {
               const propName = callee.property.name;
               const objText = context.getSourceCode().getText(callee.object);
-              if (MUTATION_METHODS.has(propName) && /repo|Repository|manager/i.test(objText)) {
+              // Match `repo`, `repository`, or `manager` as a complete token —
+              // either word-boundary-delimited (`this.repo`, `this.entityManager`)
+              // or as a camelCase suffix (`templateRepo`, `userRepository`).
+              // The trailing `[A-Z]|\W|$` lookahead prevents false positives like
+              // `Report*Service` where "Repo" is just a substring of a longer
+              // lowercase identifier. The /i flag is deliberately NOT used —
+              // it would make `[A-Z]` match lowercase letters too, defeating the
+              // boundary check (PR17 bugfix — was: /repo|Repository|manager/i
+              // which flagged controllers that delegate to *Report*Service).
+              if (
+                MUTATION_METHODS.has(propName) &&
+                /(?:\b|[a-z])(?:[Rr]epository|[Rr]epo|[Mm]anager)(?=$|\W|[A-Z])/.test(objText)
+              ) {
                 mutationCalls.push({ node: n, call: `${objText}.${propName}` });
               }
               if (AUDIT_LOG_METHODS.has(propName) && /audit/i.test(objText)) {

@@ -35,11 +35,13 @@ import {
   MockRepository,
   MockSelectQueryBuilder,
 } from '../../../../test/helpers/mock-repository.factory';
+import { AuditService } from '../../audit/audit.service';
 
 describe('ReportTemplateService', () => {
   let service: ReportTemplateService;
   let templateRepo: MockRepository<ReportTemplate>;
   let mockQueryBuilder: MockSelectQueryBuilder<ReportTemplate>;
+  let auditService: jest.Mocked<AuditService>;
 
   // ==================== Mock Factories ====================
 
@@ -90,11 +92,20 @@ describe('ReportTemplateService', () => {
             }),
           },
         },
+        {
+          provide: AuditService,
+          useValue: {
+            logCreate: jest.fn(),
+            logUpdate: jest.fn(),
+            logDelete: jest.fn(),
+          },
+        },
       ],
     }).compile();
 
     service = module.get<ReportTemplateService>(ReportTemplateService);
     templateRepo = module.get(getRepositoryToken(ReportTemplate));
+    auditService = module.get(AuditService);
   });
 
   afterEach(() => {
@@ -695,18 +706,20 @@ describe('ReportTemplateService', () => {
   describe('delete', () => {
     it('should delete template by ID', async () => {
       // Arrange
-      templateRepo.delete.mockResolvedValue({ affected: 1 } as any);
+      const mockTemplate = createMockTemplate({ id: 'template-id' });
+      templateRepo.findOne.mockResolvedValue(mockTemplate);
+      templateRepo.remove.mockResolvedValue(mockTemplate);
 
       // Act
       await service.delete('template-id');
 
       // Assert
-      expect(templateRepo.delete).toHaveBeenCalledWith('template-id');
+      expect(templateRepo.remove).toHaveBeenCalledWith(mockTemplate);
     });
 
     it('should throw ResourceNotFoundException when not found', async () => {
       // Arrange
-      templateRepo.delete.mockResolvedValue({ affected: 0 } as any);
+      templateRepo.findOne.mockResolvedValue(null);
 
       // Act & Assert
       await expect(service.delete('non-existent')).rejects.toThrow(
@@ -927,6 +940,72 @@ describe('ReportTemplateService', () => {
 
       // Assert
       expect(result.sections).toEqual([]);
+    });
+  });
+
+  // ==================== Audit logging — Phase 5a PR17 ====================
+
+  // ReportTemplate is full-CRUD per the brainstorm. Each user-facing mutation
+  // (create / update / delete) emits exactly one audit row; the bulk
+  // is_default clear in clearDefaultInScope() is intentionally not audited
+  // (covered by `audit-skip:` on that helper).
+  describe('Audit logging — Phase 5a PR17', () => {
+    it('logs CREATE on create()', async () => {
+      const options: CreateTemplateOptions = {
+        name: 'Audited Template',
+        createdBy: 'test-user',
+        systemId: 'system-001',
+        testEnvironment: 'staging',
+        workload: 'load-test',
+        sections: createValidSections(),
+      };
+      const mockTemplate = createMockTemplate({ name: 'Audited Template' });
+      templateRepo.findOne.mockResolvedValue(null);
+      templateRepo.create.mockReturnValue(mockTemplate);
+      templateRepo.save.mockResolvedValue(mockTemplate);
+
+      await service.create(options);
+
+      expect(auditService.logCreate).toHaveBeenCalledTimes(1);
+      const [ref] = (auditService.logCreate as jest.Mock).mock.calls[0];
+      expect(ref).toBe(mockTemplate);
+    });
+
+    it('logs UPDATE on update() with the pre-mutation snapshot as `before`', async () => {
+      const before = createMockTemplate({ name: 'Old Name', description: 'Old desc' });
+      const after = createMockTemplate({ name: 'Old Name', description: 'New desc' });
+      templateRepo.findOne
+        .mockResolvedValueOnce(before) // findById in update
+        .mockResolvedValueOnce(after); // findById after templateRepo.update
+      templateRepo.update.mockResolvedValue({ affected: 1 } as any);
+
+      await service.update(before.id, { description: 'New desc' });
+
+      expect(auditService.logUpdate).toHaveBeenCalledTimes(1);
+      const [b, a] = (auditService.logUpdate as jest.Mock).mock.calls[0];
+      // The cloned `before` preserves the description and prototype.
+      expect(b).toMatchObject({ id: before.id, description: 'Old desc' });
+      expect(a).toBe(after);
+    });
+
+    it('logs DELETE before remove() so a remove failure still leaves a row', async () => {
+      const mockTemplate = createMockTemplate({ id: 'tpl-1' });
+      templateRepo.findOne.mockResolvedValue(mockTemplate);
+      const callOrder: string[] = [];
+      (auditService.logDelete as jest.Mock).mockImplementation(() => {
+        callOrder.push('logDelete');
+      });
+      templateRepo.remove.mockImplementation(async () => {
+        callOrder.push('remove');
+        return mockTemplate;
+      });
+
+      await service.delete('tpl-1');
+
+      expect(auditService.logDelete).toHaveBeenCalledTimes(1);
+      const [ref] = (auditService.logDelete as jest.Mock).mock.calls[0];
+      expect(ref).toBe(mockTemplate);
+      expect(callOrder).toEqual(['logDelete', 'remove']);
     });
   });
 });

@@ -71,6 +71,23 @@ export interface ReportStyling {
   'workload',
 ])
 export class ReportTemplate {
+  // Phase 5a — full-CRUD audit on user-curated template config. `is_adhoc`
+  // flips to true for ephemeral one-shot adhoc reports; the diff makes those
+  // rows filterable. organizationId/teamId are emitted via dedicated
+  // audit_logs columns; created_by/updated_by are the actor (also redundant).
+  static auditableFields = [
+    'name',
+    'description',
+    'system_id',
+    'test_environment',
+    'workload',
+    'sections',
+    'styling',
+    'is_default',
+    'is_adhoc',
+    'teamId',
+  ] as const;
+
   @PrimaryGeneratedColumn('uuid')
   id!: string;
 
