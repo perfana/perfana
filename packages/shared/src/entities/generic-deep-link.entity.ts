@@ -2,6 +2,12 @@ import { Entity, PrimaryGeneratedColumn, Column, CreateDateColumn, UpdateDateCol
 
 @Entity('generic_deep_links')
 export class GenericDeepLink {
+  // Phase 5a — generic deep links are profile-scoped templates rendered into
+  // every test run; user-curated config that's worth a row when changed.
+  // Per-test-run `DeepLink` writes are intentionally NOT audited (high churn,
+  // bucket-2 ingestion noise) — see PR16 burndown.
+  static auditableFields = ['profile', 'name', 'url'] as const;
+
   @PrimaryGeneratedColumn('uuid')
   id!: string;
 

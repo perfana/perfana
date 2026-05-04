@@ -107,8 +107,11 @@ export class DeepLinksRepository {
       teamId: ownership.teamId,
     });
 
-    const result = await this.genericDeepLinkRepo.save(genericDeepLink);
-    return this.mapToGenericDeepLink(result);
+    // Return the saved TypeORM entity instance (not a mapped plain object) so
+    // the caller can pass it to AuditService — dispatch reads `.constructor`
+    // to resolve `auditableFields`. Read paths keep the mapping to preserve
+    // their narrower API shape.
+    return this.genericDeepLinkRepo.save(genericDeepLink);
   }
 
   private mapToDeepLink(entity: DeepLinkEntity): DeepLink {

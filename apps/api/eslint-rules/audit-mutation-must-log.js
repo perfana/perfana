@@ -49,7 +49,7 @@ module.exports = {
     type: 'problem',
     docs: {
       description:
-        'Service mutations on OwnedResource entities must call auditService.log{Create,Update,Delete} in the same method body. Grandfathered files (from the Phase 5a seed) are allowed via apps/api/.audit-migration-allowlist.json. Audit infrastructure (AuditService, AuditModule, AuthorizedBaseService, TypeOrmBaseRepository) is permanently exempt.',
+        "Service mutations on OwnedResource entities must call auditService.log{Create,Update,Delete} in the same method body. Grandfathered files (from the Phase 5a seed) are allowed via apps/api/.audit-migration-allowlist.json. Audit infrastructure (AuditService, AuditModule, AuthorizedBaseService, TypeOrmBaseRepository) is permanently exempt. A method may opt out of the check with a leading `// audit-skip: <rationale>` comment — the rationale is mandatory and surfaces the deliberate non-audit decision in PR review.",
     },
     schema: [],
     messages: {
@@ -75,10 +75,16 @@ module.exports = {
     if (allowlist.has(relPath)) return {};
     if (relPath.endsWith('.spec.ts') || relPath.endsWith('.test.ts')) return {};
 
+    const sourceCode = context.getSourceCode();
     return {
       MethodDefinition(node) {
         const body = node.value && node.value.body;
         if (!body) return;
+        // Per-method opt-out: a leading `// audit-skip: <rationale>` comment
+        // documents a deliberate non-audit decision (e.g. high-churn ingestion
+        // writes). Reviewer enforces that the rationale is meaningful.
+        const leading = sourceCode.getCommentsBefore(node);
+        if (leading.some((c) => /audit-skip:\s*\S/.test(c.value))) return;
         const mutationCalls = [];
         let sawAuditCall = false;
         const visit = (n) => {

@@ -20,9 +20,10 @@ import { DeepLink } from './entities/deep-link.entity';
 import { CreateDeepLinkDto } from './dto/create-deep-link.dto';
 import { UpdateDeepLinkDto } from './dto/update-deep-link.dto';
 import { CopyDeepLinksDto } from './dto/copy-deep-links.dto';
-import { TestRunConfiguration, TestRun as TestRunEntity, SystemUnderTest, Profile } from '../../entities';
+import { TestRunConfiguration, TestRun as TestRunEntity, SystemUnderTest, Profile, GenericDeepLink as GenericDeepLinkEntity } from '../../entities';
 import { ResourceNotFoundException } from '../../common/exceptions/business.exception';
 import { AuthorizationService } from '../../common/services/authorization.service';
+import { AuditService } from '../audit/audit.service';
 import { createAuthorizationServiceMock } from '../../../test/mocks/authorization-service.mock';
 import {
   createMockRepository,
@@ -54,6 +55,7 @@ describe('DeepLinksService', () => {
   let testRunRepo: MockRepository<TestRunEntity>;
   let systemRepo: MockRepository<SystemUnderTest>;
   let authzService: ReturnType<typeof createAuthorizationServiceMock>;
+  let auditService: jest.Mocked<AuditService>;
 
   // Mock data factory for deep links
   const createMockDeepLink = (overrides?: Partial<DeepLink>): DeepLink => ({
@@ -133,6 +135,14 @@ describe('DeepLinksService', () => {
           provide: AuthorizationService,
           useValue: mockAuthzService,
         },
+        {
+          provide: AuditService,
+          useValue: {
+            logCreate: jest.fn(),
+            logUpdate: jest.fn(),
+            logDelete: jest.fn(),
+          },
+        },
       ],
     }).compile();
 
@@ -142,6 +152,7 @@ describe('DeepLinksService', () => {
     testRunRepo = module.get(getRepositoryToken(TestRunEntity));
     systemRepo = module.get(getRepositoryToken(SystemUnderTest));
     authzService = mockAuthzService;
+    auditService = module.get(AuditService);
     // Default: validateSystemAccess loads a system. canAccessResource allows by default.
     systemRepo.findOne.mockResolvedValue({
       id: 'system-uuid',
@@ -1224,7 +1235,14 @@ describe('DeepLinksService', () => {
           name: 'Generic Link',
           url: 'https://example.com/{perfana-test-run-id}',
         };
-        const genericDeepLink = { id: 'generic-uuid', ...createDto };
+        // Use a real GenericDeepLink instance so the audit dispatch can read
+        // `auditableFields` off the prototype (matches what the repository now
+        // returns from `genericDeepLinkRepo.save`).
+        const genericDeepLink = Object.assign(new GenericDeepLinkEntity(), {
+          id: 'generic-uuid',
+          ...createDto,
+          organizationId: 'org-uuid',
+        });
         repository.createGeneric.mockResolvedValue(genericDeepLink as any);
 
         // Act
@@ -1236,7 +1254,80 @@ describe('DeepLinksService', () => {
           organizationId: 'org-uuid',
           teamId: undefined,
         });
+        // Phase 5a — auditService.logCreate fires on createGeneric so the
+        // 'generic-deep-links' audit-history endpoint surfaces this row.
+        expect(auditService.logCreate).toHaveBeenCalledTimes(1);
+        const [ref] = (auditService.logCreate as jest.Mock).mock.calls[0];
+        expect(ref).toBe(genericDeepLink);
       });
+    });
+  });
+
+  describe('Audit logging — Phase 5a PR16', () => {
+    // Per-test-run DeepLink writes are intentionally NOT audited (high-churn
+    // ingestion artefact). The methods carry `// audit-skip:` markers; here
+    // we lock that decision in with negative assertions so future refactors
+    // can't silently add audit rows on every per-test-run mutation.
+
+    it('does not call auditService on per-test-run create()', async () => {
+      const dto: CreateDeepLinkDto = {
+        systemUnderTestId: 'system-uuid',
+        testEnvironment: 'test',
+        workload: 'load',
+        name: 'New Deep Link',
+        url: 'https://example.com/{perfana-test-run-id}',
+      };
+      repository.create.mockResolvedValue(mockDeepLink);
+
+      await service.create(dto);
+
+      expect(auditService.logCreate).not.toHaveBeenCalled();
+      expect(auditService.logUpdate).not.toHaveBeenCalled();
+      expect(auditService.logDelete).not.toHaveBeenCalled();
+    });
+
+    it('does not call auditService on per-test-run update()', async () => {
+      repository.findById.mockResolvedValue(mockDeepLink);
+      repository.update.mockResolvedValue(mockDeepLink);
+
+      await service.update('deep-link-uuid', { name: 'renamed' });
+
+      expect(auditService.logUpdate).not.toHaveBeenCalled();
+    });
+
+    it('does not call auditService on per-test-run delete()', async () => {
+      repository.findById.mockResolvedValue(mockDeepLink);
+      repository.delete.mockResolvedValue(undefined);
+
+      await service.delete('deep-link-uuid');
+
+      expect(auditService.logDelete).not.toHaveBeenCalled();
+    });
+
+    it('does not call auditService inside copyToScope()', async () => {
+      const dto: CopyDeepLinksDto = {
+        sourceSystemUnderTestId: 'src',
+        sourceTestEnvironment: 'test',
+        sourceWorkload: 'load',
+        targetSystemUnderTestId: 'tgt',
+        targetTestEnvironment: 'prod',
+        targetWorkload: 'load',
+        conflictStrategy: 'skip',
+      };
+      repository.findBySystemEnvWorkload
+        .mockResolvedValueOnce([{ ...mockDeepLink, tags: [] } as DeepLink])
+        .mockResolvedValueOnce([]);
+      repository.create.mockResolvedValue(mockDeepLink);
+      systemRepo.findOne.mockResolvedValue({
+        id: 'tgt',
+        organization_id: 'org-uuid',
+        created_by: 'creator',
+      } as SystemUnderTest);
+
+      await service.copyToScope(dto, 'admin', ['perfana-admin']);
+
+      expect(auditService.logCreate).not.toHaveBeenCalled();
+      expect(auditService.logUpdate).not.toHaveBeenCalled();
     });
   });
 

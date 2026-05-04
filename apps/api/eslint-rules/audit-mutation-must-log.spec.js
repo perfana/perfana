@@ -58,6 +58,22 @@ ruleTester.run('audit-mutation-must-log', rule, {
       filename: 'apps/api/src/modules/foo/foo.service.ts',
       code: `class S { async create() { await this.entityManager.insert(E, e); this.auditService.logCreate(e); } }`,
     },
+    // Method opted out via leading `// audit-skip:` comment with rationale.
+    {
+      filename: 'apps/api/src/modules/foo/foo.service.ts',
+      code: `class S {
+        // audit-skip: per-test-run write, high-churn ingestion path
+        async update() { await this.repo.save(e); }
+      }`,
+    },
+    // audit-skip in a block comment also accepted.
+    {
+      filename: 'apps/api/src/modules/foo/foo.service.ts',
+      code: `class S {
+        /* audit-skip: cascade delete from parent */
+        async wipe() { await this.repo.delete({}); }
+      }`,
+    },
   ],
   invalid: [
     // Bare repo.save in a non-allowlisted file.
@@ -99,6 +115,15 @@ ruleTester.run('audit-mutation-must-log', rule, {
     {
       filename: 'apps/api/src/modules/newfeature/newfeature.service.ts',
       code: `class S { async update() { await this.repo.save(e); this.auditService.logFoo(e); } }`,
+      errors: [{ messageId: 'missing' }],
+    },
+    // `audit-skip` without a rationale (just the bare token) is rejected.
+    {
+      filename: 'apps/api/src/modules/newfeature/newfeature.service.ts',
+      code: `class S {
+        // audit-skip:
+        async update() { await this.repo.save(e); }
+      }`,
       errors: [{ messageId: 'missing' }],
     },
   ],
