@@ -4,6 +4,11 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
+## [0.2.47.68] - 2026-05-04
+
+### Added
+- **Audit logging for workload-level Apdex thresholds.** `PUT /api/test-runs/:id/apdex-threshold`, `PUT /api/test-runs/:id/transactions/:txn/apdex-threshold`, and `DELETE /api/test-runs/:id/transactions/:txn/apdex-threshold` now emit CREATE / UPDATE / DELETE rows into `audit_logs` like every other Phase 5a resource. Previously these endpoints used raw `INSERT … ON CONFLICT DO UPDATE` SQL that bypassed `AuditService` entirely and never populated the `organization_id`, `team_id`, `created_by`, or `updated_by` ownership columns either, so user-driven Apdex SLO threshold changes vanished from the audit trail and the rows landed orphaned of any tenant. Two new TypeORM entities (`WorkloadApdexThreshold`, `WorkloadTransactionApdexThreshold`) map onto the existing `workload_apdex_thresholds` and `workload_transaction_apdex_thresholds` tables — no schema migration needed, both tables already had ownership columns waiting to be used. `TestRunsApdexService` swapped its raw SQL paths for repo-based `findOne → save` (or `remove`) so we get a real before/after snapshot, inherits `organizationId`/`teamId` from the parent `SystemUnderTest` (matches the v0.2.47.66/.67 inherit-from-parent pattern), sets `created_by`/`updated_by` from the request user, and calls `auditService.logCreate` / `logUpdate` / `logDelete` with `organizationIdOverride` so the audit-log viewer can scope by tenant. Legacy rows that landed pre-fix with NULL ownership get backfilled on their next update — no data migration required, just touch the threshold once. `TestRunsModule` registers both entities in `TypeOrmModule.forFeature` and in `AuditResourceRegistry` under `workload-apdex-thresholds` and `workload-transaction-apdex-thresholds` so the per-resource audit history endpoint resolves them. New spec `test-runs-apdex.service.spec.ts` covers all five mutation paths: CREATE on first set, UPDATE with before/after diff on second set, ownership backfill for legacy rows, CREATE/UPDATE for transaction-level thresholds, DELETE with snapshot, and NotFoundException-without-audit-call when deleting a missing transaction threshold.
+
 ## [0.2.47.67] - 2026-05-03
 
 ### Fixed
