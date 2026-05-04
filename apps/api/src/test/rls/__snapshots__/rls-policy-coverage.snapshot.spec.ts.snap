@@ -1,6 +1,6 @@
 // Jest Snapshot v1, https://goo.gl/fbAQLP
 
-exports[`RLS policy coverage snapshot every owned-resource table has FORCE RLS + 4 policies 1`] = `
+exports[`RLS policy coverage snapshot every owned-resource and policy-bearing table is RLS-snapshotted 1`] = `
 {
   "alert_tag_filters": {
     "force": false,
@@ -28,14 +28,14 @@ exports[`RLS policy coverage snapshot every owned-resource table has FORCE RLS +
     "rls": true,
   },
   "audit_logs": {
-    "force": false,
+    "force": true,
     "policies": [
       "DELETE:rls_audit_logs_delete",
       "INSERT:rls_audit_logs_insert",
       "SELECT:rls_audit_logs_select",
       "UPDATE:rls_audit_logs_update",
     ],
-    "rls": false,
+    "rls": true,
   },
   "awr_analysis": {
     "force": false,
@@ -204,6 +204,16 @@ exports[`RLS policy coverage snapshot every owned-resource table has FORCE RLS +
       "INSERT:rls_expected_config_changes_insert",
       "SELECT:rls_expected_config_changes_select",
       "UPDATE:rls_expected_config_changes_update",
+    ],
+    "rls": true,
+  },
+  "generated_reports": {
+    "force": true,
+    "policies": [
+      "DELETE:rls_generated_reports_delete",
+      "INSERT:rls_generated_reports_insert",
+      "SELECT:rls_generated_reports_select",
+      "UPDATE:rls_generated_reports_update",
     ],
     "rls": true,
   },
@@ -389,6 +399,16 @@ exports[`RLS policy coverage snapshot every owned-resource table has FORCE RLS +
       "INSERT:rls_trends_filter_presets_insert",
       "SELECT:rls_trends_filter_presets_select",
       "UPDATE:rls_trends_filter_presets_update",
+    ],
+    "rls": true,
+  },
+  "url_patterns": {
+    "force": true,
+    "policies": [
+      "DELETE:rls_url_patterns_delete",
+      "INSERT:rls_url_patterns_insert",
+      "SELECT:rls_url_patterns_select",
+      "UPDATE:rls_url_patterns_update",
     ],
     "rls": true,
   },
