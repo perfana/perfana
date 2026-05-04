@@ -7,9 +7,11 @@ import {
   SystemUnderTestWorkload,
   PyroscopeInstance,
 } from '../../entities';
+import { OwnedResource } from '@perfana/shared/entities';
 // SystemUnderTestTestEnvironment and SystemUnderTestWorkload are used in transaction manager.create()
 import { CreateSystemUnderTestDto, UpdatePyroscopeConfigDto } from './dto';
 import { AuthorizationService } from '../../common/services/authorization.service';
+import { AuditService } from '../audit/audit.service';
 
 export interface SystemSummary {
   id: string;
@@ -62,6 +64,7 @@ export class SystemsUnderTestService {
     @InjectRepository(PyroscopeInstance)
     private readonly pyroscopeInstanceRepo: Repository<PyroscopeInstance>,
     private readonly authzService: AuthorizationService,
+    private readonly auditService: AuditService,
   ) {}
 
   /**
@@ -97,7 +100,7 @@ export class SystemsUnderTestService {
       }
 
       // Create SUT + environments + workloads in a single transaction
-      let createdId: string;
+      let createdSystem: SystemUnderTestEntity | undefined;
       await this.systemRepo.manager.transaction(async (manager) => {
         const system = manager.create(SystemUnderTestEntity, {
           name: dto.name,
@@ -108,7 +111,7 @@ export class SystemsUnderTestService {
           updated_by: userId,
         });
         const savedSystem = await manager.save(system);
-        createdId = savedSystem.id;
+        createdSystem = savedSystem;
         this.logger.log(`createSut: Created SUT '${savedSystem.name}' (${savedSystem.id})`);
 
         if (dto.environments && dto.environments.length > 0) {
@@ -132,7 +135,13 @@ export class SystemsUnderTestService {
         }
       });
 
-      return await this.findOne(createdId!, userId, isAdmin);
+      // Phase 5a — log CREATE for the SUT after the transaction commits.
+      // Pre-seeded environments + workloads inside the same transaction are
+      // not individually audited (bucket-2: cascade noise, implied by the
+      // SUT-CREATE row).
+      this.auditService.logCreate(createdSystem! as unknown as OwnedResource);
+
+      return await this.findOne(createdSystem!.id, userId, isAdmin);
     } catch (error) {
       if (error instanceof NotFoundException) throw error;
       this.logger.error('Failed to create system under test', error instanceof Error ? error.stack : error);
@@ -416,6 +425,11 @@ export class SystemsUnderTestService {
 
       const savedSystem = await this.systemRepo.save(system);
 
+      // Phase 5a — log CREATE on the legacy `create` path. (No controller
+      // currently calls this method; createSut is the live endpoint. Kept
+      // wired so the lint rule passes and any future caller is audited.)
+      this.auditService.logCreate(savedSystem as unknown as OwnedResource);
+
       this.logger.log(
         `Created system under test: ${savedSystem.name} (${savedSystem.id}) in org ${organizationId}`,
       );
@@ -459,6 +473,11 @@ export class SystemsUnderTestService {
         }
       }
 
+      // Phase 5a — clone the pre-mutation entity for the audit diff. Reuses
+      // the entity prototype so AuditService.dispatch resolves
+      // SystemUnderTest.auditableFields = ['name'].
+      const systemBefore = Object.assign(new SystemUnderTestEntity(), system);
+
       // Build update object, handling null values explicitly for TypeORM
       const updateData: Record<string, string | null | undefined> = {};
       if (updateDto.name !== undefined) updateData.name = updateDto.name;
@@ -477,7 +496,19 @@ export class SystemsUnderTestService {
 
       this.logger.log(`Updated system under test: ${id} with data: ${JSON.stringify(updateData)}`);
 
-      return await this.findOne(id, userId, isAdmin);
+      const systemAfter = await this.findOne(id, userId, isAdmin);
+
+      // Phase 5a — destructive-only scope: rename detection only. Because
+      // SystemUnderTest.auditableFields = ['name'], dispatch produces no row
+      // when only description / team_id / tracing_service / updated_by
+      // change. Routine metadata edits are silently dropped per the PR15
+      // brainstorm.
+      this.auditService.logUpdate(
+        systemBefore as unknown as OwnedResource,
+        systemAfter as unknown as OwnedResource,
+      );
+
+      return systemAfter;
     } catch (error) {
       this.logger.error(`Failed to update system under test ${id}`, error instanceof Error ? error.stack : error);
       throw error;
@@ -512,6 +543,12 @@ export class SystemsUnderTestService {
           throw new NotFoundException(`System under test with ID ${id} not found`);
         }
       }
+
+      // Phase 5a — log DELETE before mutation so the audit row captures the
+      // pre-delete state. Note: this code path is currently vestigial — the
+      // live SUT delete endpoint is wired through DeleteSystemUnderTestHandler
+      // (raw-SQL cascade), which performs its own logDelete.
+      this.auditService.logDelete(system as unknown as OwnedResource);
 
       await this.systemRepo.remove(system);
 
@@ -572,6 +609,13 @@ export class SystemsUnderTestService {
         }
       }
 
+      // Phase 5a — clone the pre-mutation entity for the audit diff. Pyroscope
+      // edits don't touch `name`, so SystemUnderTest.auditableFields = ['name']
+      // produces an empty diff and AuditService.dispatch drops the row. The
+      // logUpdate call exists to satisfy the audit-mutation-must-log lint rule
+      // — it is not expected to materialize an audit row in normal flow.
+      const systemBefore = Object.assign(new SystemUnderTestEntity(), system);
+
       // 4. Update fields - handle explicit null to clear the instance
       if ('pyroscope_instance_id' in updateDto) {
         system.pyroscope_instance_id = updateDto.pyroscope_instance_id ?? undefined;
@@ -582,7 +626,12 @@ export class SystemsUnderTestService {
 
       // 5. Save and return with relations
       // NOTE: updated_by will be set when Phase 4 adds that column
-      await this.systemRepo.save(system);
+      const savedSystem = await this.systemRepo.save(system);
+
+      this.auditService.logUpdate(
+        systemBefore as unknown as OwnedResource,
+        savedSystem as unknown as OwnedResource,
+      );
 
       this.logger.log(`Updated Pyroscope config for system: ${system.name} (${id})`);
 

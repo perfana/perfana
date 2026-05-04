@@ -3,6 +3,13 @@ import { SystemUnderTestTestEnvironment } from './system-under-test-test-environ
 
 @Entity('system_under_test_workloads')
 export class SystemUnderTestWorkload {
+  // Phase 5a — declared for parity with SystemUnderTestTestEnvironment. No
+  // user-facing CUD service path currently exists; ingestion-side workload
+  // creates / updates live in test-run-lookup.service.ts (bucket-2,
+  // POLICY_EXEMPT in PR20). Snapshot does NOT include this entity (no
+  // organization_id column).
+  static auditableFields = ['name'] as const;
+
   @PrimaryGeneratedColumn('uuid')
   id!: string;
 
