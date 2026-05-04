@@ -27,3 +27,5 @@
 4. Report burndown: count remaining allowlist entries, compare to the previous run's count. If the prior 14 days show zero progress, raise it as a stalled-migration concern. Update the burndown table in `docs/superpowers/audits/2026-05-02-audit-phase5a-decisions.md`.
 
 **Stop condition:** `apps/api/.audit-migration-allowlist.json` is `[]` AND no new sites detected for two consecutive runs. Disable the schedule.
+
+**Closed:** 2026-05-04 — Phase 5a audit migration complete. Allowlist closed in PR20 (#258); the lint rule (`audit-mutation-must-log` + `POLICY_EXEMPT_FILES`) now provides continuous drift coverage on every preflight / CI run, replacing the bi-weekly drift sweep. No remote `/schedule` routine was active at closure (verified via `RemoteTrigger list` → empty).
