@@ -1,8 +1,9 @@
 'use client';
 
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import {
   Alert,
+  Autocomplete,
   Box,
   Button,
   Chip,
@@ -33,6 +34,11 @@ import {
 } from '@mui/icons-material';
 import { useAuditCapabilities, useAuditLogs } from '@/lib/hooks/use-audit-logs';
 import { useOrganizations } from '@/lib/hooks/use-organizations';
+import { useUserSearch } from '@/lib/hooks/use-user-search';
+import { useDebounce } from '@/lib/hooks/use-debounce';
+import { fetchAllSystemsUnderTest } from '@/lib/systems';
+import type { SystemUnderTest } from '@/types/test-runs';
+import type { UserInfo } from '@/lib/api/users';
 import { AuditAction, AuditFilter, AuditLogRow } from '@/lib/audit-api';
 
 const PAGE_SIZE = 50;
@@ -46,20 +52,20 @@ const ACTION_COLORS: Record<AuditAction, 'success' | 'info' | 'error'> = {
 
 interface FilterState {
   resourceType: string;
-  resourceId: string;
-  userId: string;
+  user: UserInfo | null;
   action: AuditAction | '';
   organizationId: string;
+  systemUnderTestId: string;
   startDate: string;
   endDate: string;
 }
 
 const EMPTY_FILTERS: FilterState = {
   resourceType: '',
-  resourceId: '',
-  userId: '',
+  user: null,
   action: '',
   organizationId: '',
+  systemUnderTestId: '',
   startDate: '',
   endDate: '',
 };
@@ -67,10 +73,10 @@ const EMPTY_FILTERS: FilterState = {
 function toAuditFilter(state: FilterState, page: number): AuditFilter {
   return {
     resourceType: state.resourceType || undefined,
-    resourceId: state.resourceId || undefined,
-    userId: state.userId || undefined,
+    userId: state.user?.id || undefined,
     action: (state.action || undefined) as AuditAction | undefined,
     organizationId: state.organizationId || undefined,
+    systemUnderTestId: state.systemUnderTestId || undefined,
     startDate: state.startDate ? new Date(state.startDate).toISOString() : undefined,
     endDate: state.endDate ? new Date(state.endDate).toISOString() : undefined,
     limit: PAGE_SIZE,
@@ -80,10 +86,50 @@ function toAuditFilter(state: FilterState, page: number): AuditFilter {
 
 export default function AuditLogsPage() {
   const { data: caps, isLoading: capsLoading } = useAuditCapabilities();
-  const { data: organizations = [] } = useOrganizations({ enabled: caps?.scope === 'cross-org' });
+  // Load orgs for every audit viewer so the table can resolve `organizationId`
+  // → name. The Organization filter dropdown is still gated on isSuperAdmin
+  // below; this hook just feeds the column renderer.
+  const { data: organizations = [] } = useOrganizations({ enabled: caps?.canView ?? false });
+  const orgById = useMemo(() => {
+    const m = new Map<string, string>();
+    for (const o of organizations) m.set(o.id, o.name);
+    return m;
+  }, [organizations]);
   const [filters, setFilters] = useState<FilterState>(EMPTY_FILTERS);
   const [appliedFilters, setAppliedFilters] = useState<FilterState>(EMPTY_FILTERS);
   const [page, setPage] = useState(1);
+
+  // User filter — type-ahead backed by the same Keycloak user search the
+  // org/team "Add Member" dialog uses, so the dropdown shows a real name +
+  // email instead of a Keycloak `sub` UUID.
+  const [userQuery, setUserQuery] = useState('');
+  const debouncedUserQuery = useDebounce(userQuery, 300);
+  const { data: userOptions = [], isFetching: userSearchLoading } = useUserSearch(
+    { q: debouncedUserQuery, limit: 20 },
+    { enabled: (caps?.canView ?? false) && debouncedUserQuery.length >= 2 },
+  );
+
+  // SUT filter — load once. The `/systems-under-test` endpoint is already
+  // RBAC-scoped to the caller's accessible orgs server-side.
+  const [systems, setSystems] = useState<SystemUnderTest[]>([]);
+  useEffect(() => {
+    if (!caps?.canView) return;
+    let cancelled = false;
+    fetchAllSystemsUnderTest()
+      .then((rows) => { if (!cancelled) setSystems(rows); })
+      .catch(() => { /* non-blocking — dropdown just stays empty */ });
+    return () => { cancelled = true; };
+  }, [caps?.canView]);
+  const sutById = useMemo(() => {
+    const m = new Map<string, SystemUnderTest>();
+    for (const s of systems) if (s.id) m.set(s.id, s);
+    return m;
+  }, [systems]);
+  const sutNameById = useMemo(() => {
+    const m = new Map<string, string>();
+    for (const [id, s] of sutById) m.set(id, s.name);
+    return m;
+  }, [sutById]);
 
   const queryFilter = useMemo(() => toAuditFilter(appliedFilters, page), [appliedFilters, page]);
   const { data, isLoading, isFetching, error, refetch } = useAuditLogs(queryFilter, {
@@ -118,6 +164,7 @@ export default function AuditLogsPage() {
   const reset = () => {
     setFilters(EMPTY_FILTERS);
     setAppliedFilters(EMPTY_FILTERS);
+    setUserQuery('');
     setPage(1);
   };
 
@@ -185,7 +232,7 @@ export default function AuditLogsPage() {
             </Select>
           </FormControl>
 
-          {caps.scope === 'cross-org' && (
+          {caps.isSuperAdmin && (
             <FormControl size="small" sx={{ minWidth: 220 }}>
               <InputLabel id="org-label">Organization</InputLabel>
               <Select
@@ -206,20 +253,45 @@ export default function AuditLogsPage() {
             </FormControl>
           )}
 
-          <TextField
+          <Autocomplete<UserInfo, false, false, false>
             size="small"
-            label="User ID"
-            value={filters.userId}
-            onChange={(e) => setFilters({ ...filters, userId: e.target.value })}
-            sx={{ minWidth: 220 }}
+            sx={{ minWidth: 240 }}
+            value={filters.user}
+            onChange={(_, value) => setFilters({ ...filters, user: value })}
+            inputValue={userQuery}
+            onInputChange={(_, value) => setUserQuery(value)}
+            options={userOptions}
+            getOptionLabel={(opt) => opt.displayName ?? opt.username ?? ''}
+            isOptionEqualToValue={(a, b) => a.id === b.id}
+            filterOptions={(opts) => opts}
+            loading={userSearchLoading}
+            noOptionsText={
+              debouncedUserQuery.length < 2 ? 'Type at least 2 characters' : 'No users found'
+            }
+            renderOption={(props, option) => (
+              <li {...props} key={option.id}>
+                <Box>
+                  <Typography variant="body2">{option.displayName}</Typography>
+                  <Typography variant="caption" color="text.secondary">
+                    {option.email ?? option.username}
+                  </Typography>
+                </Box>
+              </li>
+            )}
+            renderInput={(params) => <TextField {...params} label="User" />}
           />
 
-          <TextField
+          <Autocomplete<SystemUnderTest, false, false, false>
             size="small"
-            label="Resource ID"
-            value={filters.resourceId}
-            onChange={(e) => setFilters({ ...filters, resourceId: e.target.value })}
-            sx={{ minWidth: 220 }}
+            sx={{ minWidth: 240 }}
+            value={filters.systemUnderTestId ? (sutById.get(filters.systemUnderTestId) ?? null) : null}
+            onChange={(_, value) =>
+              setFilters({ ...filters, systemUnderTestId: value?.id ?? '' })
+            }
+            options={systems}
+            getOptionLabel={(opt) => opt.name ?? ''}
+            isOptionEqualToValue={(a, b) => a.id === b.id}
+            renderInput={(params) => <TextField {...params} label="System under test" />}
           />
 
           <TextField
@@ -267,7 +339,7 @@ export default function AuditLogsPage() {
                 <TableCell>Actor</TableCell>
                 <TableCell>Action</TableCell>
                 <TableCell>Resource</TableCell>
-                <TableCell>Resource ID</TableCell>
+                <TableCell>System under test</TableCell>
                 <TableCell>Org</TableCell>
               </TableRow>
             </TableHead>
@@ -285,7 +357,14 @@ export default function AuditLogsPage() {
                   </TableCell>
                 </TableRow>
               ) : (
-                data!.rows.map((row) => <AuditRow key={row.id} row={row} />)
+                data!.rows.map((row) => (
+                  <AuditRow
+                    key={row.id}
+                    row={row}
+                    sutNameById={sutNameById}
+                    orgNameById={orgById}
+                  />
+                ))
               )}
             </TableBody>
           </Table>
@@ -311,10 +390,20 @@ export default function AuditLogsPage() {
   );
 }
 
-function AuditRow({ row }: { row: AuditLogRow }) {
+function AuditRow({
+  row,
+  sutNameById,
+  orgNameById,
+}: {
+  row: AuditLogRow;
+  sutNameById: Map<string, string>;
+  orgNameById: Map<string, string>;
+}) {
   const [expanded, setExpanded] = useState(false);
   const hasDiff = !!row.changes && (row.changes.fields?.length ?? 0) > 0;
   const ts = new Date(row.timestamp);
+  const sutName = row.systemUnderTestId ? sutNameById.get(row.systemUnderTestId) : undefined;
+  const orgName = row.organizationId ? orgNameById.get(row.organizationId) : undefined;
 
   return (
     <>
@@ -354,8 +443,20 @@ function AuditRow({ row }: { row: AuditLogRow }) {
             </Typography>
           ) : null}
         </TableCell>
-        <TableCell sx={{ fontFamily: 'monospace' }}>{row.resourceId ?? '—'}</TableCell>
-        <TableCell sx={{ fontFamily: 'monospace' }}>{row.organizationId ?? '—'}</TableCell>
+        <TableCell>
+          {row.systemUnderTestId ? (
+            <Typography variant="body2">{sutName ?? row.systemUnderTestId}</Typography>
+          ) : (
+            '—'
+          )}
+        </TableCell>
+        <TableCell>
+          {row.organizationId ? (
+            <Typography variant="body2">{orgName ?? row.organizationId}</Typography>
+          ) : (
+            '—'
+          )}
+        </TableCell>
       </TableRow>
       {hasDiff && (
         <TableRow>

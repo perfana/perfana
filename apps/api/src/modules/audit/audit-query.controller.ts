@@ -7,7 +7,6 @@ import {
   NotFoundException,
 } from '@nestjs/common';
 import { ApiTags, ApiOperation, ApiBearerAuth } from '@nestjs/swagger';
-import { Roles, RoleMatchingMode } from '../../decorators/roles.decorator';
 import { InjectDataSource } from '@nestjs/typeorm';
 import { DataSource, FindOptionsWhere } from 'typeorm';
 import { OwnedResource } from '@perfana/shared/entities';
@@ -16,7 +15,7 @@ import { AuditResourceRegistry, EntityClass } from './audit-resource-registry';
 import { AuditFilterDto } from './dto/audit-filter.dto';
 import { AuthorizationService } from '../../common/services/authorization.service';
 import { Capability } from '../../constants/capabilities.constants';
-import { GLOBAL_ADMIN_ROLES } from '../../constants/roles.constants';
+import { hasGlobalAdminRole } from '../../constants/roles.constants';
 import { UserCtx, UserContext } from '../../common/decorators/user-context.decorator';
 
 @ApiTags('audit-logs')
@@ -32,19 +31,19 @@ export class AuditQueryController {
 
   /**
    * Admin filterable search across audit logs.
-   * - super-admin / system-admin / support → cross-org (granted SystemAuditRead)
-   * - org-admin → scoped to accessible organizations
-   * - Anyone else → 403 (RolesGuard)
    *
-   * Cross-org vs scoped is decided by `Capability.SystemAuditRead` rather than
-   * `isGlobalAdmin(roles)` directly: the capability is the contract, the
-   * roles → capability mapping is owned by `capabilities.constants.ts`.
+   * - SystemAuditRead capability (super-admin / system-admin / support) → cross-org
+   * - org-admin in at least one org → scoped to accessible orgs
+   * - Anyone else → 403 ForbiddenException
+   *
+   * NOTE: We deliberately do NOT use `@Roles` here. `org-admin` is a DB-only
+   * role stored in `organization_members.roles`; it never reaches the JWT, so
+   * the role guard cannot match it. Authorization happens in the body using
+   * `Capability.SystemAuditRead` (capability ←→ Keycloak role mapping owned by
+   * `capabilities.constants.ts`) and `AuthorizationService.isOrgAdminInAnyOrganization`
+   * (which reads `organization_members`). Mirrors `getCapabilities` below.
    */
   @Get()
-  @Roles({
-    roles: [...GLOBAL_ADMIN_ROLES, 'super-admin', 'system-admin', 'support', 'org-admin'],
-    mode: RoleMatchingMode.ANY,
-  })
   @ApiOperation({ summary: 'Filterable search of audit log rows (admin only)' })
   async findByFilter(
     @Query() dto: AuditFilterDto,
@@ -53,12 +52,22 @@ export class AuditQueryController {
     const caps = await this.authz.getCapabilities(ctx.userId, ctx.roles, null);
     const isAdmin = caps.includes(Capability.SystemAuditRead);
 
+    if (!isAdmin) {
+      const isOrgAdmin = await this.authz.isOrgAdminInAnyOrganization(ctx.userId);
+      if (!isOrgAdmin) {
+        throw new ForbiddenException(
+          'Audit log access requires global-admin, system-admin, support, or org-admin in at least one organization.',
+        );
+      }
+    }
+
     const filter: AuditFilter = {
       resourceType: dto.resourceType,
       resourceId: dto.resourceId,
       userId: dto.userId,
       action: dto.action,
       organizationId: dto.organizationId,
+      systemUnderTestId: dto.systemUnderTestId,
       startDate: dto.startDate ? new Date(dto.startDate) : undefined,
       endDate: dto.endDate ? new Date(dto.endDate) : undefined,
       limit: dto.limit ?? 100,
@@ -102,16 +111,21 @@ export class AuditQueryController {
   ): Promise<{
     canView: boolean;
     scope: 'cross-org' | 'org-scoped' | 'none';
+    isSuperAdmin: boolean;
     accessibleOrganizationIds: string[];
     knownResourceTypes: string[];
   }> {
     const caps = await this.authz.getCapabilities(ctx.userId, ctx.roles, null);
+    const isSuperAdmin =
+      hasGlobalAdminRole(ctx.roles) || (ctx.roles ?? []).includes('super-admin');
+
     if (caps.includes(Capability.SystemAuditRead)) {
       return {
         canView: true,
         scope: 'cross-org',
+        isSuperAdmin,
         accessibleOrganizationIds: [],
-        knownResourceTypes: this.registry.knownTypes(),
+        knownResourceTypes: await this.auditService.getDistinctResourceTypes(),
       };
     }
 
@@ -121,14 +135,16 @@ export class AuditQueryController {
       return {
         canView: true,
         scope: 'org-scoped',
+        isSuperAdmin,
         accessibleOrganizationIds: accessible,
-        knownResourceTypes: this.registry.knownTypes(),
+        knownResourceTypes: await this.auditService.getDistinctResourceTypes(accessible),
       };
     }
 
     return {
       canView: false,
       scope: 'none',
+      isSuperAdmin,
       accessibleOrganizationIds: [],
       knownResourceTypes: [],
     };
