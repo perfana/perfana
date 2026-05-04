@@ -19,6 +19,7 @@ import {
 } from '../../../common/exceptions/business.exception';
 import { AuthorizationService } from '../../../common/services/authorization.service';
 import { withOrgFilter } from '../../../common/utils/with-org-filter';
+import { AuditService } from '../../audit/audit.service';
 import { ReportGenerationValidatorService } from './report-generation-validator.service';
 import { ReportUtilsService } from './report-utils.service';
 import { ReportHtmlCompilerService } from './report-html-compiler.service';
@@ -125,6 +126,7 @@ export class ReportGenerationService {
     @InjectRepository(SystemUnderTest)
     private readonly systemRepo: Repository<SystemUnderTest>,
     private readonly authzService: AuthorizationService,
+    private readonly auditService: AuditService,
     private readonly validator: ReportGenerationValidatorService,
     private readonly utils: ReportUtilsService,
     private readonly htmlCompiler: ReportHtmlCompilerService,
@@ -240,6 +242,9 @@ export class ReportGenerationService {
    * @param options - Creation options including test run ID, template ID, roles and organizationIds for authorization
    * @returns Created report entity
    */
+  // audit-skip: GeneratedReport is DELETE-only (Phase 5a brainstorm) — the row
+  // create is the trigger for a background-job pipeline; status/file/share
+  // mutations are bucket-2. User-facing audit happens on delete.
   async createFromTemplate(options: CreateReportFromTemplateOptions): Promise<GeneratedReport> {
     try {
       const roles = options.roles || [];
@@ -364,6 +369,10 @@ export class ReportGenerationService {
         });
 
         const savedTemplate = await this.templateRepo.save(template);
+        // Phase 5a — full CRUD on ReportTemplate per the burndown. Adhoc
+        // templates are still recorded; their is_adhoc=true diff makes them
+        // filterable in the audit viewer.
+        this.auditService.logCreate(savedTemplate as unknown as OwnedResource);
         templateId = savedTemplate.id;
 
         this.logger.log(
@@ -382,6 +391,9 @@ export class ReportGenerationService {
         max_retries: 3,
       });
 
+      // GeneratedReport intentionally not audited on create per DELETE-only
+      // policy (Phase 5a brainstorm). The conditional template logCreate above
+      // is what satisfies the lint rule for this method.
       const savedReport = await this.reportRepo.save(report);
 
       this.logger.log(
@@ -686,6 +698,8 @@ export class ReportGenerationService {
    * @param organizationIds - User's accessible organization IDs from JWT token
    * @returns Updated report entity
    */
+  // audit-skip: GeneratedReport status flow — bucket-2 background-job state
+  // machine (pending → processing → html_complete → pdf_*). Not user-curated.
   async updateStatus(
     reportId: string,
     newStatus: ReportStatus,
@@ -733,6 +747,8 @@ export class ReportGenerationService {
    * @param reportId - Report UUID
    * @param fileSize - File size in bytes
    */
+  // audit-skip: GeneratedReport bookkeeping — file_size is bucket-2 output of
+  // the background pipeline; not user-curated config.
   async updateFileSize(reportId: string, fileSize: number): Promise<void> {
     try {
       await this.reportRepo.update(reportId, { file_size: fileSize });
@@ -750,6 +766,8 @@ export class ReportGenerationService {
    * @param roles - User roles from JWT token (for admin bypass)
    * @param organizationIds - User's accessible organization IDs from JWT token
    */
+  // audit-skip: GeneratedReport content storage — bucket-2 output of the HTML
+  // compiler pipeline; not user-curated.
   async storeHtmlContent(
     reportId: string,
     htmlContent: string,
@@ -778,6 +796,7 @@ export class ReportGenerationService {
    * @param reportId - Report UUID
    * @param jobId - Queue job ID
    */
+  // audit-skip: GeneratedReport job tracking — bucket-2 BullMQ-internal field.
   async updateJobId(reportId: string, jobId: string): Promise<void> {
     try {
       await this.reportRepo.update(reportId, { job_id: jobId });
@@ -795,6 +814,8 @@ export class ReportGenerationService {
    * @param organizationIds - User's accessible organization IDs from JWT token
    * @returns New retry count
    */
+  // audit-skip: GeneratedReport retry counter — bucket-2 queue retry
+  // bookkeeping, not user-driven mutation.
   async incrementRetryCount(
     reportId: string,
     userId: string = '',
@@ -832,6 +853,19 @@ export class ReportGenerationService {
   ): Promise<void> {
     try {
       const report = await this.findById(reportId, userId, roles);
+
+      // GeneratedReport has no organization_id column of its own — fall back
+      // to the parent template's org, or the test_run's org. findById loads
+      // both relations, so one of these is always populated.
+      const orgIdOverride =
+        report.template?.organizationId ??
+        report.test_run?.organizationId ??
+        undefined;
+
+      this.auditService.logDelete(report as unknown as OwnedResource, {
+        organizationIdOverride: orgIdOverride,
+      });
+
       await this.reportRepo.remove(report);
       this.logger.log(`Deleted report ${reportId}`);
     } catch (error) {

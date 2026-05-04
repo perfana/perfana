@@ -7,12 +7,14 @@ import {
   ReportStyling,
   SystemUnderTest,
 } from '@perfana/shared';
+import type { OwnedResource } from '@perfana/shared';
 import {
   ResourceNotFoundException,
   DatabaseException,
   ValidationException,
   ResourceExistsException,
 } from '../../../common/exceptions/business.exception';
+import { AuditService } from '../../audit/audit.service';
 import { CopyReportTemplatesDto } from '../dto/copy-report-templates.dto';
 
 // ==================== Interfaces ====================
@@ -104,6 +106,7 @@ export class ReportTemplateService {
     private readonly templateRepo: Repository<ReportTemplate>,
     @InjectRepository(SystemUnderTest)
     private readonly systemRepo: Repository<SystemUnderTest>,
+    private readonly auditService: AuditService,
   ) {}
 
   // ==================== Create Operations ====================
@@ -169,6 +172,8 @@ export class ReportTemplateService {
       });
 
       const savedTemplate = await this.templateRepo.save(template);
+
+      this.auditService.logCreate(savedTemplate as unknown as OwnedResource);
 
       this.logger.log(
         `Created report template '${savedTemplate.name}' (${savedTemplate.id}) for ${options.systemId}/${options.testEnvironment}/${options.workload}`,
@@ -453,9 +458,21 @@ export class ReportTemplateService {
         updateData.updatedBy = options.updatedBy;
       }
 
+      // Snapshot the pre-update entity for the audit diff. `templateRepo.update`
+      // issues a SQL UPDATE and does not mutate `template`, but cloning here
+      // preserves the prototype so AuditService.dispatch resolves
+      // `auditableFields` correctly even if the source were ever swapped to a
+      // mutating path.
+      const before = Object.assign(new ReportTemplate(), template);
+
       await this.templateRepo.update(templateId, updateData as Record<string, unknown>);
 
       const updatedTemplate = await this.findById(templateId);
+
+      this.auditService.logUpdate(
+        before as unknown as OwnedResource,
+        updatedTemplate as unknown as OwnedResource,
+      );
 
       this.logger.log(`Updated report template '${updatedTemplate.name}' (${templateId})`);
 
@@ -574,11 +591,13 @@ export class ReportTemplateService {
    */
   async delete(templateId: string): Promise<void> {
     try {
-      const result = await this.templateRepo.delete(templateId);
+      // Load before delete so the audit row captures the pre-delete snapshot
+      // (name + scope) — cheap because findById is a single-row lookup.
+      const template = await this.findById(templateId);
 
-      if (result.affected === 0) {
-        throw new ResourceNotFoundException('Report Template', templateId);
-      }
+      this.auditService.logDelete(template as unknown as OwnedResource);
+
+      await this.templateRepo.remove(template);
 
       this.logger.log(`Deleted report template ${templateId}`);
     } catch (error) {
@@ -770,6 +789,9 @@ export class ReportTemplateService {
    * Clear the default flag for all templates in a scope
    * @param excludeId - Optional template ID to exclude from clearing
    */
+  // audit-skip: bulk is_default flag clear — side-effect of assigning a new
+  // default template; the new default's UPDATE row already records the
+  // is_default flip, and the cleared rows are bucket-2 cascade noise.
   private async clearDefaultInScope(
     systemId: string,
     testEnvironment: string,

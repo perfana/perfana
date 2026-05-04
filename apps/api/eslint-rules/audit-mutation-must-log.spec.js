@@ -53,6 +53,18 @@ ruleTester.run('audit-mutation-must-log', rule, {
       filename: 'apps/api/src/modules/foo/foo.service.ts',
       code: `class S { async sync() { await this.queue.update(e); } }`,
     },
+    // PR17 — controllers that delegate to *Report*Service must NOT be flagged.
+    // The regex used to match "Repo" inside "Report" via the substring `repo`,
+    // which fired on `this.reportTemplateService.delete(id)`. Tightening the
+    // regex to require word/camelCase boundaries fixes the false positive.
+    {
+      filename: 'apps/api/src/modules/reports/controllers/report-template.controller.ts',
+      code: `class C { async delete(id) { return this.reportTemplateService.delete(id); } }`,
+    },
+    {
+      filename: 'apps/api/src/modules/reports/controllers/report-generation.controller.ts',
+      code: `class C { async delete(id) { return this.reportGenerationService.delete(id); } }`,
+    },
     // EntityManager-style call counts as audit-needed but the body has the audit call.
     {
       filename: 'apps/api/src/modules/foo/foo.service.ts',
@@ -109,6 +121,13 @@ ruleTester.run('audit-mutation-must-log', rule, {
     {
       filename: 'apps/api/src/modules/newfeature/newfeature.service.ts',
       code: `class S { async update() { await this.userRepository.update({}, e); } }`,
+      errors: [{ messageId: 'missing' }],
+    },
+    // PR17 — camelCase Repo suffix on a repo property still gets flagged
+    // (the tightened regex must keep `templateRepo`-style names matching).
+    {
+      filename: 'apps/api/src/modules/newfeature/newfeature.service.ts',
+      code: `class S { async update() { await this.templateRepo.save(e); } }`,
       errors: [{ messageId: 'missing' }],
     },
     // Audit call on the wrong method (logFoo, not logCreate/Update/Delete) → still flagged.

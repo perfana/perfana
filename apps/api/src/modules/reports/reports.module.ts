@@ -1,4 +1,4 @@
-import { Module } from '@nestjs/common';
+import { Module, OnModuleInit } from '@nestjs/common';
 import { TypeOrmModule } from '@nestjs/typeorm';
 import { GeneratedReport, ReportTemplate, TestRun, SystemUnderTest } from '@perfana/shared';
 import { ReportGenerationController } from './controllers/report-generation.controller';
@@ -10,6 +10,8 @@ import { ReportShareService } from './services/report-share.service';
 import { HtmlGenerationProcessor } from './processors/html-generation.processor';
 import { PdfGenerationProcessor } from './processors/pdf-generation.processor';
 import { CommonModule } from '../../common/common.module';
+import { AuditModule } from '../audit/audit.module';
+import { AuditResourceRegistry } from '../audit/audit-resource-registry';
 
 // Report Generation Services (Orchestrator Pattern)
 import { ReportGenerationValidatorService } from './services/report-generation-validator.service';
@@ -34,6 +36,7 @@ import { PlaceholderRenderer } from './renderers/placeholder-renderer';
   imports: [
     TypeOrmModule.forFeature([GeneratedReport, ReportTemplate, TestRun, SystemUnderTest]),
     CommonModule, // Provides AuthorizationService
+    AuditModule, // Phase 5a — provides AuditService + AuditResourceRegistry
   ],
   controllers: [ReportGenerationController, ReportTemplateController, ReportShareController],
   providers: [
@@ -73,4 +76,14 @@ import { PlaceholderRenderer } from './renderers/placeholder-renderer';
     PdfGenerationProcessor,
   ],
 })
-export class ReportsModule {}
+export class ReportsModule implements OnModuleInit {
+  constructor(private readonly auditRegistry: AuditResourceRegistry) {}
+
+  onModuleInit(): void {
+    // Phase 5a — both entities are registered so the per-resource audit
+    // history endpoint can resolve their types. ReportTemplate gets full CRUD
+    // rows; GeneratedReport gets DELETE-only rows (per the brainstorm).
+    this.auditRegistry.register('report-templates', ReportTemplate);
+    this.auditRegistry.register('generated-reports', GeneratedReport);
+  }
+}
