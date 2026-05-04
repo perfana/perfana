@@ -12,6 +12,9 @@ export * from './url-column.transformer';
 // Export safe regex utilities (ReDoS prevention)
 export * from './safe-regex';
 
+// Export audit-log diff helpers (used by API + grafana-sync audit dispatchers)
+export * from './audit-diff';
+
 /**
  * Formats a date to ISO string
  */

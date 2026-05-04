@@ -19,6 +19,8 @@ import {
   upsertMetricsSource,
   inferSourceTypeFromDashboardUid,
 } from '@perfana/shared/services/metrics-source-upsert';
+import type { OwnedResource } from '@perfana/shared/entities';
+import { GrafanaSyncAuditService } from '../audit/grafana-sync-audit.service';
 import { DashboardVariable } from './types';
 
 /**
@@ -68,6 +70,7 @@ export class AutoConfigUpdatesService {
     @InjectRepository(SystemUnderTest)
     private systemUnderTestRepo: Repository<SystemUnderTest>,
     private dataSource: DataSource,
+    private auditService: GrafanaSyncAuditService,
   ) {}
 
   private get metricsSourceRepo(): Repository<MetricsSource> {
@@ -439,12 +442,20 @@ export class AutoConfigUpdatesService {
       if (existingBenchmark) {
         // UPDATE existing benchmark
         this.logger.log(`Updating existing benchmark with ID: ${existingBenchmark.id}`);
+        // Snapshot the pre-save state so the audit diff sees a faithful before
+        // row resolved against Benchmark.auditableFields.
+        const beforeSnapshot = Object.assign(new Benchmark(), existingBenchmark);
         savedBenchmark = await this.benchmarkRepo.save({
           ...benchmarkData,
           id: existingBenchmark.id,
         });
         wasCreated = false;
         this.logger.log(`Successfully updated benchmark with ID: ${savedBenchmark.id}`);
+        this.auditService.logUpdate(
+          beforeSnapshot as unknown as OwnedResource,
+          savedBenchmark as unknown as OwnedResource,
+          { organizationIdOverride: testRun.organizationId },
+        );
       } else {
         // INSERT new benchmark
         this.logger.log('Creating new benchmark');
@@ -452,6 +463,9 @@ export class AutoConfigUpdatesService {
         savedBenchmark = await this.benchmarkRepo.save(benchmark);
         wasCreated = true;
         this.logger.log(`Successfully inserted new benchmark with ID: ${savedBenchmark.id}`);
+        this.auditService.logCreate(savedBenchmark as unknown as OwnedResource, {
+          organizationIdOverride: testRun.organizationId,
+        });
       }
 
       return { insertedId: savedBenchmark.id, wasCreated };

@@ -1,10 +1,19 @@
-/** Default 4 KB per field. Override via env in AuditService (not here). */
+/**
+ * Pure helpers for computing field-level diffs between entity snapshots and
+ * trimming oversized values before they hit the audit_logs jsonb column.
+ *
+ * Lives in @perfana/shared so both the API (request-scoped audit) and
+ * grafana-sync (background-scheduler audit with synthetic actor) consume the
+ * same diff semantics.
+ */
+
+/** Default 4 KB per field. Override via env in callers (not here). */
 export const AUDIT_MAX_FIELD_BYTES = 4096;
 
 /** Pick only allowlisted, defined keys from an entity. */
 export function pickAuditable<T extends object>(
   entity: T | null | undefined,
-  allow: readonly (keyof T & string)[]
+  allow: readonly (keyof T & string)[],
 ): Partial<T> {
   if (!entity) return {};
   const out: Partial<T> = {};
@@ -19,7 +28,7 @@ export function pickAuditable<T extends object>(
 export function diff<T extends object>(
   before: T | null,
   after: T | null,
-  allow: readonly (keyof T & string)[]
+  allow: readonly (keyof T & string)[],
 ): { before: Partial<T>; after: Partial<T>; fields: (keyof T & string)[] } {
   const fields: (keyof T & string)[] = [];
   const beforeOut: Partial<T> = {};
