@@ -116,7 +116,8 @@ Perfana implements a multi-tenant RBAC system for fine-grained access control ac
 | Phase 2 | Membership & ownership infrastructure | Completed |
 | Phase 3 | Service-layer authorization enforcement | Lint-enforced (allowlist empty) |
 | Phase 4 | Data migration — `organization_id` NOT NULL on owned resources | Completed (2026-05-02) |
-| Phase 5 | Row-level security & audit logging | In progress (5a audit logging shipping per-service) |
+| Phase 5a | Audit logging | Completed (2026-05-04 — allowlist empty; 29 services migrated, 27 closed via `POLICY_EXEMPT`) |
+| Phase 5b | Row-Level Security | Pending — separate spec to be drafted (Postgres RLS + GUC plumbing) |
 
 ### Role Hierarchy
 
