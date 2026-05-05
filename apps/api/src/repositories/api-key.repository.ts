@@ -3,6 +3,7 @@ import { InjectRepository } from '@nestjs/typeorm';
 import { Repository, LessThan, MoreThan, IsNull, FindOptionsWhere } from 'typeorm';
 import type { QueryDeepPartialEntity } from 'typeorm/query-builder/QueryPartialEntity';
 import { TypeOrmBaseRepository } from '../common/repositories/typeorm-base.repository';
+import { withRequestEm } from '../common/db/request-em';
 import { ApiKey } from '@perfana/shared/entities';
 import { DatabaseException } from '../common/exceptions/business.exception';
 
@@ -30,7 +31,7 @@ export class ApiKeyRepository extends TypeOrmBaseRepository<ApiKey> {
   async findValidKey(key: string): Promise<ApiKey | null> {
     try {
       const now = new Date();
-      return await this.repository.findOne({
+      return await withRequestEm(this.repository).findOne({
         where: [
           {
             apiKey: key,
@@ -53,7 +54,7 @@ export class ApiKeyRepository extends TypeOrmBaseRepository<ApiKey> {
    */
   async findExpired(): Promise<ApiKey[]> {
     const now = new Date();
-    return await this.repository.find({
+    return await withRequestEm(this.repository).find({
       where: {
         validUntil: LessThan(now)
       },
@@ -65,7 +66,7 @@ export class ApiKeyRepository extends TypeOrmBaseRepository<ApiKey> {
    * Find API keys that never expire
    */
   async findNeverExpiring(): Promise<ApiKey[]> {
-    return await this.repository.find({
+    return await withRequestEm(this.repository).find({
       where: {
         validUntil: IsNull()
       },
@@ -78,7 +79,7 @@ export class ApiKeyRepository extends TypeOrmBaseRepository<ApiKey> {
    */
   async updateLastUsed(id: string): Promise<void> {
     try {
-      await this.repository.update(id, {
+      await withRequestEm(this.repository).update(id, {
         lastUsed: new Date()
       });
       this.logger.debug(`Updated last used timestamp for API key: ${id}`);
@@ -134,7 +135,7 @@ export class ApiKeyRepository extends TypeOrmBaseRepository<ApiKey> {
       const futureDate = new Date();
       futureDate.setDate(futureDate.getDate() + days);
 
-      return await this.repository.createQueryBuilder('ak')
+      return await withRequestEm(this.repository).createQueryBuilder('ak')
         .where('ak.validUntil IS NOT NULL')
         .andWhere('ak.validUntil > :now', { now })
         .andWhere('ak.validUntil <= :futureDate', { futureDate })
@@ -155,7 +156,7 @@ export class ApiKeyRepository extends TypeOrmBaseRepository<ApiKey> {
     organizationId: string,
     description: string,
   ): Promise<ApiKey | null> {
-    return await this.repository.findOne({
+    return await withRequestEm(this.repository).findOne({
       where: { organization_id: organizationId, description },
     });
   }
@@ -165,7 +166,7 @@ export class ApiKeyRepository extends TypeOrmBaseRepository<ApiKey> {
    */
   async searchByDescription(searchTerm: string): Promise<ApiKey[]> {
     try {
-      return await this.repository.createQueryBuilder('ak')
+      return await withRequestEm(this.repository).createQueryBuilder('ak')
         .where('ak.description ILIKE :search', { search: `%${searchTerm}%` })
         .orderBy('ak.createdAt', 'DESC')
         .getMany();
@@ -208,7 +209,7 @@ export class ApiKeyRepository extends TypeOrmBaseRepository<ApiKey> {
   async deleteExpired(): Promise<number> {
     try {
       const now = new Date();
-      const result = await this.repository.createQueryBuilder()
+      const result = await withRequestEm(this.repository).createQueryBuilder()
         .delete()
         .where('validUntil < :now', { now })
         .execute();
@@ -229,7 +230,7 @@ export class ApiKeyRepository extends TypeOrmBaseRepository<ApiKey> {
       const cutoffDate = new Date();
       cutoffDate.setDate(cutoffDate.getDate() - days);
 
-      return await this.repository.find({
+      return await withRequestEm(this.repository).find({
         where: {
           createdAt: MoreThan(cutoffDate)
         },
@@ -245,7 +246,7 @@ export class ApiKeyRepository extends TypeOrmBaseRepository<ApiKey> {
    * Find unused API keys (never used)
    */
   async findUnused(): Promise<ApiKey[]> {
-    return await this.repository.find({
+    return await withRequestEm(this.repository).find({
       where: {
         lastUsed: IsNull()
       },
@@ -261,7 +262,7 @@ export class ApiKeyRepository extends TypeOrmBaseRepository<ApiKey> {
       const cutoffDate = new Date();
       cutoffDate.setDate(cutoffDate.getDate() - days);
 
-      return await this.repository.createQueryBuilder('ak')
+      return await withRequestEm(this.repository).createQueryBuilder('ak')
         .where('ak.lastUsed < :cutoffDate', { cutoffDate })
         .orWhere('ak.lastUsed IS NULL')
         .orderBy('ak.lastUsed', 'ASC', 'NULLS FIRST')
