@@ -2,6 +2,7 @@ import { Injectable } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { TypeOrmBaseRepository } from '../common/repositories/typeorm-base.repository';
+import { withRequestEm } from '../common/db/request-em';
 import { TestRunConfiguration } from '@perfana/shared/entities';
 import { DatabaseException } from '../common/exceptions/business.exception';
 
@@ -19,7 +20,7 @@ export class TestRunConfigurationRepository extends TypeOrmBaseRepository<TestRu
    */
   async findByTestRunId(testRunId: string): Promise<TestRunConfiguration[]> {
     try {
-      return await this.repository.find({
+      return await withRequestEm(this.repository).find({
         where: { testRunId },
         order: { key: 'ASC' }
       });
@@ -34,7 +35,7 @@ export class TestRunConfigurationRepository extends TypeOrmBaseRepository<TestRu
    */
   async findByTestRunIdString(testRunIdString: string): Promise<TestRunConfiguration[]> {
     try {
-      return await this.repository.find({
+      return await withRequestEm(this.repository).find({
         where: { testRunIdString },
         order: { key: 'ASC' }
       });
@@ -58,7 +59,7 @@ export class TestRunConfigurationRepository extends TypeOrmBaseRepository<TestRu
    */
   async findByTags(tags: string[]): Promise<TestRunConfiguration[]> {
     try {
-      return await this.repository.createQueryBuilder('config')
+      return await withRequestEm(this.repository).createQueryBuilder('config')
         .where('config.tags && ARRAY[:...tags]::varchar[]', { tags })
         .orderBy('config.createdAt', 'DESC')
         .getMany();
@@ -73,8 +74,8 @@ export class TestRunConfigurationRepository extends TypeOrmBaseRepository<TestRu
    */
   async createMany(configs: Partial<TestRunConfiguration>[]): Promise<TestRunConfiguration[]> {
     try {
-      const entities = this.repository.create(configs);
-      return await this.repository.save(entities);
+      const entities = withRequestEm(this.repository).create(configs);
+      return await withRequestEm(this.repository).save(entities);
     } catch (error) {
       this.logger.error('Failed to bulk create configurations:', error);
       throw new DatabaseException('Failed to create test run configurations', error);
@@ -86,7 +87,7 @@ export class TestRunConfigurationRepository extends TypeOrmBaseRepository<TestRu
    */
   async deleteByTestRunId(testRunId: string): Promise<number> {
     try {
-      const result = await this.repository.createQueryBuilder()
+      const result = await withRequestEm(this.repository).createQueryBuilder()
         .delete()
         .where('testRunId = :testRunId', { testRunId })
         .execute();
@@ -104,7 +105,7 @@ export class TestRunConfigurationRepository extends TypeOrmBaseRepository<TestRu
    */
   async searchByKeyPattern(pattern: string, limit = 50): Promise<TestRunConfiguration[]> {
     try {
-      return await this.repository.createQueryBuilder('config')
+      return await withRequestEm(this.repository).createQueryBuilder('config')
         .where('config.key ILIKE :pattern', { pattern: `%${pattern}%` })
         .orderBy('config.createdAt', 'DESC')
         .limit(limit)
@@ -120,7 +121,7 @@ export class TestRunConfigurationRepository extends TypeOrmBaseRepository<TestRu
    */
   async getUniqueKeys(): Promise<string[]> {
     try {
-      const results = await this.repository.createQueryBuilder('config')
+      const results = await withRequestEm(this.repository).createQueryBuilder('config')
         .select('DISTINCT config.key', 'key')
         .orderBy('config.key', 'ASC')
         .getRawMany();

@@ -2,6 +2,7 @@ import { Injectable } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { TypeOrmBaseRepository } from '../common/repositories/typeorm-base.repository';
+import { withRequestEm } from '../common/db/request-em';
 import { ExpectedConfigChange } from '@perfana/shared/entities';
 import { DatabaseException } from '../common/exceptions/business.exception';
 
@@ -23,7 +24,7 @@ export class ExpectedConfigChangeRepository extends TypeOrmBaseRepository<Expect
     workload: string
   ): Promise<ExpectedConfigChange[]> {
     try {
-      return await this.repository.find({
+      return await withRequestEm(this.repository).find({
         where: {
           system_under_test_id: systemId,
           test_environment: environment,
@@ -61,7 +62,7 @@ export class ExpectedConfigChangeRepository extends TypeOrmBaseRepository<Expect
    */
   async findBySystemId(systemId: string): Promise<ExpectedConfigChange[]> {
     try {
-      return await this.repository.find({
+      return await withRequestEm(this.repository).find({
         where: { system_under_test_id: systemId },
         relations: ['system_under_test'],
         order: { test_environment: 'ASC', workload: 'ASC', config_key: 'ASC' }
@@ -77,7 +78,7 @@ export class ExpectedConfigChangeRepository extends TypeOrmBaseRepository<Expect
    */
   async findByEnvironment(environment: string): Promise<ExpectedConfigChange[]> {
     try {
-      return await this.repository.find({
+      return await withRequestEm(this.repository).find({
         where: { test_environment: environment },
         relations: ['system_under_test'],
         order: { system_under_test_id: 'ASC', workload: 'ASC', config_key: 'ASC' }
@@ -93,8 +94,8 @@ export class ExpectedConfigChangeRepository extends TypeOrmBaseRepository<Expect
    */
   async createMany(changes: Partial<ExpectedConfigChange>[]): Promise<ExpectedConfigChange[]> {
     try {
-      const entities = this.repository.create(changes);
-      return await this.repository.save(entities);
+      const entities = withRequestEm(this.repository).create(changes);
+      return await withRequestEm(this.repository).save(entities);
     } catch (error) {
       this.logger.error('Failed to bulk create expected config changes:', error);
       throw new DatabaseException('Failed to create expected config changes', error);
@@ -106,7 +107,7 @@ export class ExpectedConfigChangeRepository extends TypeOrmBaseRepository<Expect
    */
   async deleteBySystemId(systemId: string): Promise<number> {
     try {
-      const result = await this.repository.createQueryBuilder()
+      const result = await withRequestEm(this.repository).createQueryBuilder()
         .delete()
         .where('system_under_test_id = :systemId', { systemId })
         .execute();
@@ -128,7 +129,7 @@ export class ExpectedConfigChangeRepository extends TypeOrmBaseRepository<Expect
     workload: string
   ): Promise<number> {
     try {
-      const result = await this.repository.createQueryBuilder()
+      const result = await withRequestEm(this.repository).createQueryBuilder()
         .delete()
         .where('system_under_test_id = :systemId', { systemId })
         .andWhere('test_environment = :environment', { environment })
@@ -148,7 +149,7 @@ export class ExpectedConfigChangeRepository extends TypeOrmBaseRepository<Expect
    */
   async getUniqueEnvironments(): Promise<string[]> {
     try {
-      const results = await this.repository.createQueryBuilder('ecc')
+      const results = await withRequestEm(this.repository).createQueryBuilder('ecc')
         .select('DISTINCT ecc.test_environment', 'environment')
         .orderBy('ecc.test_environment', 'ASC')
         .getRawMany();
@@ -165,7 +166,7 @@ export class ExpectedConfigChangeRepository extends TypeOrmBaseRepository<Expect
    */
   async getUniqueWorkloads(systemId: string, environment: string): Promise<string[]> {
     try {
-      const results = await this.repository.createQueryBuilder('ecc')
+      const results = await withRequestEm(this.repository).createQueryBuilder('ecc')
         .select('DISTINCT ecc.workload', 'workload')
         .where('ecc.system_under_test_id = :systemId', { systemId })
         .andWhere('ecc.test_environment = :environment', { environment })

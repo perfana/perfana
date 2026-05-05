@@ -2,6 +2,7 @@ import { Injectable } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository, Between, IsNull, Not } from 'typeorm';
 import { TypeOrmBaseRepository } from '../common/repositories/typeorm-base.repository';
+import { withRequestEm } from '../common/db/request-em';
 import { TestRun } from '@perfana/shared/entities';
 import { DatabaseException, ValidationException } from '../common/exceptions/business.exception';
 import { TestRunStatus } from '@perfana/shared/types';
@@ -47,7 +48,7 @@ export class TestRunRepository extends TypeOrmBaseRepository<TestRun> {
    */
   async findAllWithSystem(filters?: TestRunFilters): Promise<TestRun[]> {
     try {
-      const queryBuilder = this.repository.createQueryBuilder('tr')
+      const queryBuilder = withRequestEm(this.repository).createQueryBuilder('tr')
         .leftJoinAndSelect('tr.systemUnderTest', 'system')
         .orderBy('tr.createdAt', 'DESC');
 
@@ -143,7 +144,7 @@ export class TestRunRepository extends TypeOrmBaseRepository<TestRun> {
    * Find running (not completed) test runs
    */
   async findRunning(): Promise<TestRun[]> {
-    return await this.repository.find({
+    return await withRequestEm(this.repository).find({
       where: { completed: false },
       relations: ['systemUnderTest'],
       order: { createdAt: 'DESC' }
@@ -154,7 +155,7 @@ export class TestRunRepository extends TypeOrmBaseRepository<TestRun> {
    * Find test runs by date range
    */
   async findByDateRange(startDate: Date, endDate: Date): Promise<TestRun[]> {
-    return await this.repository.find({
+    return await withRequestEm(this.repository).find({
       where: {
         startTime: Between(startDate, endDate)
       },
@@ -173,7 +174,7 @@ export class TestRunRepository extends TypeOrmBaseRepository<TestRun> {
         return [];
       }
 
-      return await this.repository.createQueryBuilder('tr')
+      return await withRequestEm(this.repository).createQueryBuilder('tr')
         .where('tr.tags IS NOT NULL AND tr.tags && ARRAY[:...tags]::varchar[]', { tags })
         .leftJoinAndSelect('tr.systemUnderTest', 'system')
         .orderBy('tr.createdAt', 'DESC')
@@ -188,7 +189,7 @@ export class TestRunRepository extends TypeOrmBaseRepository<TestRun> {
    * Find expired test runs
    */
   async findExpired(): Promise<TestRun[]> {
-    return await this.repository.find({
+    return await withRequestEm(this.repository).find({
       where: {
         expires: Not(IsNull()),
         expired: true
@@ -202,7 +203,7 @@ export class TestRunRepository extends TypeOrmBaseRepository<TestRun> {
    */
   async getStatsBySystem(systemIds?: string[]): Promise<TestRunStats[]> {
     try {
-      const queryBuilder = this.repository.createQueryBuilder('tr')
+      const queryBuilder = withRequestEm(this.repository).createQueryBuilder('tr')
         .select('tr.systemUnderTestId', 'systemId')
         .addSelect('COUNT(tr.id)::int', 'totalRuns')
         .addSelect('COUNT(CASE WHEN tr.completed = true THEN 1 END)::int', 'completedRuns')
@@ -227,7 +228,7 @@ export class TestRunRepository extends TypeOrmBaseRepository<TestRun> {
    */
   async getLatestPerSystem(systemIds?: string[]): Promise<TestRun[]> {
     try {
-      const queryBuilder = this.repository.createQueryBuilder('tr')
+      const queryBuilder = withRequestEm(this.repository).createQueryBuilder('tr')
         .distinctOn(['tr.systemUnderTestId'])
         .leftJoinAndSelect('tr.systemUnderTest', 'system')
         .orderBy('tr.systemUnderTestId', 'ASC')
@@ -249,7 +250,7 @@ export class TestRunRepository extends TypeOrmBaseRepository<TestRun> {
    */
   async search(searchTerm: string, limit = 50): Promise<TestRun[]> {
     try {
-      return await this.repository.createQueryBuilder('tr')
+      return await withRequestEm(this.repository).createQueryBuilder('tr')
         .leftJoinAndSelect('tr.systemUnderTest', 'system')
         .where(
           '(tr.testRunId ILIKE :search OR system.name ILIKE :search OR tr.testEnvironment ILIKE :search OR tr.workload ILIKE :search)',
@@ -301,7 +302,7 @@ export class TestRunRepository extends TypeOrmBaseRepository<TestRun> {
    */
   async groupByEnvironment(systemId?: string): Promise<TestRunEnvironmentGroup[]> {
     try {
-      const queryBuilder = this.repository.createQueryBuilder('tr')
+      const queryBuilder = withRequestEm(this.repository).createQueryBuilder('tr')
         .select('tr.testEnvironment', 'environment')
         .addSelect('COUNT(tr.id)::int', 'count')
         .addSelect('AVG(tr.duration)::float', 'avgDuration')
@@ -324,7 +325,7 @@ export class TestRunRepository extends TypeOrmBaseRepository<TestRun> {
    */
   async deleteOlderThan(date: Date): Promise<number> {
     try {
-      const result = await this.repository.createQueryBuilder()
+      const result = await withRequestEm(this.repository).createQueryBuilder()
         .delete()
         .where('createdAt < :date', { date })
         .execute();
@@ -359,7 +360,7 @@ export class TestRunRepository extends TypeOrmBaseRepository<TestRun> {
     }
 
     try {
-      return await this.repository.createQueryBuilder('tr')
+      return await withRequestEm(this.repository).createQueryBuilder('tr')
         .where(`tr.status->>'${fieldName}' = :value`, { value: String(fieldValue) })
         .leftJoinAndSelect('tr.systemUnderTest', 'system')
         .getMany();
@@ -374,7 +375,7 @@ export class TestRunRepository extends TypeOrmBaseRepository<TestRun> {
    */
   async countByWorkload(systemId: string, environment: string): Promise<Map<string, number>> {
     try {
-      const results = await this.repository.createQueryBuilder('tr')
+      const results = await withRequestEm(this.repository).createQueryBuilder('tr')
         .select('tr.workload', 'workload')
         .addSelect('COUNT(tr.id)::int', 'count')
         .where('tr.systemUnderTestId = :systemId', { systemId })

@@ -2,6 +2,7 @@ import { Injectable } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { TypeOrmBaseRepository } from '../common/repositories/typeorm-base.repository';
+import { withRequestEm } from '../common/db/request-em';
 import { TrendsFilterPreset } from '@perfana/shared/entities';
 import { DatabaseException } from '../common/exceptions/business.exception';
 
@@ -19,7 +20,7 @@ export class TrendsFilterPresetRepository extends TypeOrmBaseRepository<TrendsFi
    */
   async findGlobal(): Promise<TrendsFilterPreset[]> {
     try {
-      return await this.repository.find({
+      return await withRequestEm(this.repository).find({
         where: { isGlobal: true },
         order: { name: 'ASC' }
       });
@@ -34,7 +35,7 @@ export class TrendsFilterPresetRepository extends TypeOrmBaseRepository<TrendsFi
    */
   async findByUser(userId: string): Promise<TrendsFilterPreset[]> {
     try {
-      return await this.repository.find({
+      return await withRequestEm(this.repository).find({
         where: { createdBy: userId },
         order: { createdAt: 'DESC' }
       });
@@ -49,7 +50,7 @@ export class TrendsFilterPresetRepository extends TypeOrmBaseRepository<TrendsFi
    */
   async findByApplicationDashboard(dashboardId: string): Promise<TrendsFilterPreset[]> {
     try {
-      return await this.repository.find({
+      return await withRequestEm(this.repository).find({
         where: { applicationDashboardId: dashboardId },
         relations: ['applicationDashboard'],
         order: { name: 'ASC' }
@@ -65,7 +66,7 @@ export class TrendsFilterPresetRepository extends TypeOrmBaseRepository<TrendsFi
    */
   async findByTestRun(testRunId: string): Promise<TrendsFilterPreset[]> {
     try {
-      return await this.repository.find({
+      return await withRequestEm(this.repository).find({
         where: { createdForTestRunId: testRunId },
         order: { createdAt: 'DESC' }
       });
@@ -80,7 +81,7 @@ export class TrendsFilterPresetRepository extends TypeOrmBaseRepository<TrendsFi
    */
   async findByType(presetType: string): Promise<TrendsFilterPreset[]> {
     try {
-      return await this.repository.find({
+      return await withRequestEm(this.repository).find({
         where: { presetType },
         order: { name: 'ASC' }
       });
@@ -100,7 +101,7 @@ export class TrendsFilterPresetRepository extends TypeOrmBaseRepository<TrendsFi
         where.panelTitle = panelTitle;
       }
 
-      return await this.repository.find({
+      return await withRequestEm(this.repository).find({
         where,
         order: { name: 'ASC' }
       });
@@ -115,7 +116,7 @@ export class TrendsFilterPresetRepository extends TypeOrmBaseRepository<TrendsFi
    */
   async findAccessibleByUser(userId: string): Promise<TrendsFilterPreset[]> {
     try {
-      return await this.repository.createQueryBuilder('preset')
+      return await withRequestEm(this.repository).createQueryBuilder('preset')
         .where('preset.isGlobal = :isGlobal', { isGlobal: true })
         .orWhere('preset.createdBy = :userId', { userId })
         .orderBy('preset.name', 'ASC')
@@ -131,7 +132,7 @@ export class TrendsFilterPresetRepository extends TypeOrmBaseRepository<TrendsFi
    */
   async searchByName(searchTerm: string, limit = 50): Promise<TrendsFilterPreset[]> {
     try {
-      return await this.repository.createQueryBuilder('preset')
+      return await withRequestEm(this.repository).createQueryBuilder('preset')
         .where('preset.name ILIKE :search', { search: `%${searchTerm}%` })
         .orderBy('preset.name', 'ASC')
         .limit(limit)
@@ -147,7 +148,7 @@ export class TrendsFilterPresetRepository extends TypeOrmBaseRepository<TrendsFi
    */
   async deleteByUser(userId: string): Promise<number> {
     try {
-      const result = await this.repository.createQueryBuilder()
+      const result = await withRequestEm(this.repository).createQueryBuilder()
         .delete()
         .where('createdBy = :userId', { userId })
         .execute();

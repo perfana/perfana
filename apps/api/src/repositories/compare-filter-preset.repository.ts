@@ -2,6 +2,7 @@ import { Injectable } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { TypeOrmBaseRepository } from '../common/repositories/typeorm-base.repository';
+import { withRequestEm } from '../common/db/request-em';
 import { CompareFilterPreset } from '@perfana/shared/entities';
 import { DatabaseException } from '../common/exceptions/business.exception';
 
@@ -19,7 +20,7 @@ export class CompareFilterPresetRepository extends TypeOrmBaseRepository<Compare
    */
   async findGlobal(): Promise<CompareFilterPreset[]> {
     try {
-      return await this.repository.find({
+      return await withRequestEm(this.repository).find({
         where: { isGlobal: true },
         order: { name: 'ASC' }
       });
@@ -34,7 +35,7 @@ export class CompareFilterPresetRepository extends TypeOrmBaseRepository<Compare
    */
   async findByUser(userId: string): Promise<CompareFilterPreset[]> {
     try {
-      return await this.repository.find({
+      return await withRequestEm(this.repository).find({
         where: { createdBy: userId },
         order: { createdAt: 'DESC' }
       });
@@ -49,7 +50,7 @@ export class CompareFilterPresetRepository extends TypeOrmBaseRepository<Compare
    */
   async findByApplicationDashboard(dashboardId: string): Promise<CompareFilterPreset[]> {
     try {
-      return await this.repository.find({
+      return await withRequestEm(this.repository).find({
         where: { applicationDashboardId: dashboardId },
         relations: ['applicationDashboard'],
         order: { name: 'ASC' }
@@ -65,7 +66,7 @@ export class CompareFilterPresetRepository extends TypeOrmBaseRepository<Compare
    */
   async findByTestRun(testRunId: string): Promise<CompareFilterPreset[]> {
     try {
-      return await this.repository.find({
+      return await withRequestEm(this.repository).find({
         where: { createdForTestRunId: testRunId },
         order: { createdAt: 'DESC' }
       });
@@ -80,7 +81,7 @@ export class CompareFilterPresetRepository extends TypeOrmBaseRepository<Compare
    */
   async findByType(presetType: string): Promise<CompareFilterPreset[]> {
     try {
-      return await this.repository.find({
+      return await withRequestEm(this.repository).find({
         where: { presetType },
         order: { name: 'ASC' }
       });
@@ -100,7 +101,7 @@ export class CompareFilterPresetRepository extends TypeOrmBaseRepository<Compare
         where.panelTitle = panelTitle;
       }
 
-      return await this.repository.find({
+      return await withRequestEm(this.repository).find({
         where,
         order: { name: 'ASC' }
       });
@@ -115,7 +116,7 @@ export class CompareFilterPresetRepository extends TypeOrmBaseRepository<Compare
    */
   async findByBaselineTestRun(testRunId: string): Promise<CompareFilterPreset[]> {
     try {
-      return await this.repository.find({
+      return await withRequestEm(this.repository).find({
         where: { baselineTestRunId: testRunId },
         order: { createdAt: 'DESC' }
       });
@@ -130,7 +131,7 @@ export class CompareFilterPresetRepository extends TypeOrmBaseRepository<Compare
    */
   async findAccessibleByUser(userId: string): Promise<CompareFilterPreset[]> {
     try {
-      return await this.repository.createQueryBuilder('preset')
+      return await withRequestEm(this.repository).createQueryBuilder('preset')
         .where('preset.isGlobal = :isGlobal', { isGlobal: true })
         .orWhere('preset.createdBy = :userId', { userId })
         .orderBy('preset.name', 'ASC')
@@ -146,7 +147,7 @@ export class CompareFilterPresetRepository extends TypeOrmBaseRepository<Compare
    */
   async search(searchTerm: string, limit = 50): Promise<CompareFilterPreset[]> {
     try {
-      return await this.repository.createQueryBuilder('preset')
+      return await withRequestEm(this.repository).createQueryBuilder('preset')
         .where('preset.name ILIKE :search', { search: `%${searchTerm}%` })
         .orWhere('preset.seriesSearchText ILIKE :search', { search: `%${searchTerm}%` })
         .orderBy('preset.name', 'ASC')
@@ -163,7 +164,7 @@ export class CompareFilterPresetRepository extends TypeOrmBaseRepository<Compare
    */
   async findWithPercentiles(): Promise<CompareFilterPreset[]> {
     try {
-      return await this.repository.find({
+      return await withRequestEm(this.repository).find({
         where: { showPercentiles: true },
         order: { name: 'ASC' }
       });
@@ -178,7 +179,7 @@ export class CompareFilterPresetRepository extends TypeOrmBaseRepository<Compare
    */
   async deleteByUser(userId: string): Promise<number> {
     try {
-      const result = await this.repository.createQueryBuilder()
+      const result = await withRequestEm(this.repository).createQueryBuilder()
         .delete()
         .where('createdBy = :userId', { userId })
         .execute();

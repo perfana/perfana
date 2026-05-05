@@ -2,6 +2,7 @@ import { Injectable } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository, IsNull } from 'typeorm';
 import { TypeOrmBaseRepository } from '../common/repositories/typeorm-base.repository';
+import { withRequestEm } from '../common/db/request-em';
 import { TracingService } from '@perfana/shared/entities';
 import { DatabaseException } from '../common/exceptions/business.exception';
 
@@ -32,7 +33,7 @@ export class TracingServiceRepository extends TypeOrmBaseRepository<TracingServi
     try {
       // Try most specific first: system + environment + workload
       if (environment && workload) {
-        const specificMatch = await this.repository.createQueryBuilder('ts')
+        const specificMatch = await withRequestEm(this.repository).createQueryBuilder('ts')
           .leftJoinAndSelect('ts.tracingInstance', 'ti')
           .where('ts.system_under_test_id = :systemId', { systemId })
           .andWhere('ts.test_environment = :environment', { environment })
@@ -46,7 +47,7 @@ export class TracingServiceRepository extends TypeOrmBaseRepository<TracingServi
 
       // Try environment level: system + environment (workload IS NULL)
       if (environment) {
-        const envMatch = await this.repository.createQueryBuilder('ts')
+        const envMatch = await withRequestEm(this.repository).createQueryBuilder('ts')
           .leftJoinAndSelect('ts.tracingInstance', 'ti')
           .where('ts.system_under_test_id = :systemId', { systemId })
           .andWhere('ts.test_environment = :environment', { environment })
@@ -59,7 +60,7 @@ export class TracingServiceRepository extends TypeOrmBaseRepository<TracingServi
       }
 
       // Fallback to system level: system only (environment IS NULL, workload IS NULL)
-      const systemMatch = await this.repository.createQueryBuilder('ts')
+      const systemMatch = await withRequestEm(this.repository).createQueryBuilder('ts')
         .leftJoinAndSelect('ts.tracingInstance', 'ti')
         .where('ts.system_under_test_id = :systemId', { systemId })
         .andWhere('ts.test_environment IS NULL')
@@ -78,7 +79,7 @@ export class TracingServiceRepository extends TypeOrmBaseRepository<TracingServi
    */
   async findBySystemId(systemId: string): Promise<TracingService[]> {
     try {
-      return await this.repository.find({
+      return await withRequestEm(this.repository).find({
         where: { systemUnderTestId: systemId },
         relations: ['tracingInstance'],
         order: {
@@ -117,7 +118,7 @@ export class TracingServiceRepository extends TypeOrmBaseRepository<TracingServi
         where.workload = workload;
       }
 
-      return await this.repository.findOne({ where });
+      return await withRequestEm(this.repository).findOne({ where });
     } catch (error) {
       this.logger.error('Failed to find tracing service by exact match:', error);
       throw new DatabaseException('Failed to retrieve tracing service', error);
@@ -139,13 +140,13 @@ export class TracingServiceRepository extends TypeOrmBaseRepository<TracingServi
 
       if (existing) {
         // Update existing
-        await this.repository.update(existing.id, data);
+        await withRequestEm(this.repository).update(existing.id, data);
         return await this.findById(existing.id);
       }
 
       // Create new
-      const created = this.repository.create(data);
-      return await this.repository.save(created);
+      const created = withRequestEm(this.repository).create(data);
+      return await withRequestEm(this.repository).save(created);
     } catch (error) {
       this.logger.error('Failed to create or update tracing service:', error);
       throw new DatabaseException('Failed to save tracing service', error);
