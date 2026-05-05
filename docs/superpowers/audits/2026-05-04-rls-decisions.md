@@ -50,7 +50,7 @@ False-positive pruning: `apps/api/src/common/services/authorized-base.service.ts
 |----|---------------|----------------|----------------------|
 | PR3 | (initial allowlist) | 0 | 58 |
 | PR4 | TypeOrmBaseRepository (standard CRUD across 8 Pattern A repos) | 1 file (base class) | 58 (Pattern A files stay until PR5 covers bespoke methods) |
-| PR5 | Pattern A bespoke methods (8 custom repos) | 8 files | TBD |
+| PR5 | Pattern A bespoke methods (8 custom repos) | 8 files | 51 (7 came off the allowlist; test-run-configuration was never on it because TestRunConfiguration is not an owned-resource entity, but the plan still required wrapping for RLS-readiness consistency) |
 | PR6 | Pattern B services (initial batch) | TBD | TBD |
 | PR7 | dynatrace + grafana batch | TBD | TBD |
 | PR8 | tracing + pyroscope | TBD | TBD |
