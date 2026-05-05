@@ -6,6 +6,7 @@ import { OwnedResource } from '@perfana/shared';
 import { CreateGraphPresetDto, SeriesConfigDto } from './dto/create-graph-preset.dto';
 import { GraphPresetResponseDto } from './dto/graph-preset-response.dto';
 import { TestRun as TestRunEntity } from '../../entities';
+import { withRequestEm } from '../../common/db/request-em';
 import { AuditService } from '../audit/audit.service';
 
 /**
@@ -48,7 +49,7 @@ export class GraphPresetsService {
       // Inherit org/team from the parent test run's SUT — GraphPreset.organization_id
       // is NOT NULL, and the camelCase property key is mandatory (TypeORM drops
       // snake_case keys silently for camelCase-mapped columns).
-      const testRun = await this.testRunRepo.findOne({
+      const testRun = await withRequestEm(this.testRunRepo).findOne({
         where: { testRunId: createGraphPresetDto.testRunId },
         relations: ['systemUnderTest'],
       });
@@ -69,7 +70,7 @@ export class GraphPresetsService {
         teamId: testRun.systemUnderTest.team_id,
       });
 
-      const savedPreset = await this.graphPresetRepo.save(preset);
+      const savedPreset = await withRequestEm(this.graphPresetRepo).save(preset);
 
       // Phase 5a: GraphPreset.organization_id maps to camelCase property
       // organizationId, so AuditService.dispatch cannot read it off ref directly —
@@ -105,7 +106,7 @@ export class GraphPresetsService {
       // Resolve SUT context from the provided testRunId
       let sutContext: { systemUnderTestId: string; testEnvironment: string; workload: string } | null = null;
       if (testRunId) {
-        const testRun = await this.testRunRepo.findOne({
+        const testRun = await withRequestEm(this.testRunRepo).findOne({
           where: { testRunId },
           select: ['systemUnderTestId', 'testEnvironment', 'workload'],
         });
@@ -118,7 +119,7 @@ export class GraphPresetsService {
         }
       }
 
-      const queryBuilder = this.graphPresetRepo
+      const queryBuilder = withRequestEm(this.graphPresetRepo)
         .createQueryBuilder('preset');
 
       // Global admins see all presets, regular users see only their own + global
@@ -173,7 +174,7 @@ export class GraphPresetsService {
   async findOne(id: string, userId: string, isAdmin: boolean): Promise<GraphPresetResponseDto> {
     try {
       // First fetch the preset without filtering to properly handle 404 vs 403
-      const preset = await this.graphPresetRepo.findOne({
+      const preset = await withRequestEm(this.graphPresetRepo).findOne({
         where: { id }
       });
 
@@ -216,7 +217,7 @@ export class GraphPresetsService {
   async remove(id: string, userId: string, isAdmin: boolean): Promise<void> {
     try {
       // First check if preset exists
-      const preset = await this.graphPresetRepo.findOne({
+      const preset = await withRequestEm(this.graphPresetRepo).findOne({
         where: { id }
       });
 
@@ -240,7 +241,7 @@ export class GraphPresetsService {
         organizationIdOverride: preset.organizationId,
       });
 
-      await this.graphPresetRepo.delete({ id });
+      await withRequestEm(this.graphPresetRepo).delete({ id });
 
       this.logger.log(`Deleted graph preset: ${id} (by user: ${userId}, isAdmin: ${isAdmin})`);
     } catch (error) {
