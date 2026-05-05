@@ -1,6 +1,7 @@
 import { Module } from '@nestjs/common';
 import { ConfigModule, ConfigService } from '@nestjs/config';
 import { TypeOrmModule } from '@nestjs/typeorm';
+import { createSystemDataSource } from '@perfana/shared/database';
 import { ScheduleModule } from '@nestjs/schedule';
 import grafanaSyncConfig from './config/grafana-sync.config';
 import { validationSchema } from './config/validation.schema';
@@ -77,6 +78,10 @@ import {
         synchronize: false, // Never auto-sync schema - use migrations instead
         logging: configService.get('DB_LOGGING') === 'true',
       }),
+      dataSourceFactory: async (opts) => {
+        if (!opts) throw new Error('grafana-sync: typeorm options missing');
+        return createSystemDataSource('grafana-sync', opts);
+      },
     }),
 
     // Feature modules

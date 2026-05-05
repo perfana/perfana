@@ -5,6 +5,7 @@ import { CommonModule } from './common/common.module.js';
 import { RealtimeModule } from './modules/realtime/realtime.module.js';
 import { SchedulersModule } from './schedulers/schedulers.module.js';
 import { createTypeOrmConfig, createWriteTypeOrmConfig } from './config/typeorm.config.js';
+import { createSystemDataSource } from '@perfana/shared/database';
 
 /**
  * Root Application Module for Worker
@@ -30,11 +31,27 @@ import { createTypeOrmConfig, createWriteTypeOrmConfig } from './config/typeorm.
     }),
 
     // TypeORM database connection (analytics/read — main pool)
-    TypeOrmModule.forRoot(createTypeOrmConfig()),
+    TypeOrmModule.forRootAsync({
+      useFactory: () => createTypeOrmConfig(),
+      dataSourceFactory: async (opts) => {
+        if (!opts) {
+          throw new Error('worker: typeorm options missing');
+        }
+        return createSystemDataSource('worker', opts);
+      },
+    }),
 
     // Dedicated write connection pool — small, never starved by analytical queries
     // See: 2026-03-26 write starvation post-mortem
-    TypeOrmModule.forRoot(createWriteTypeOrmConfig()),
+    TypeOrmModule.forRootAsync({
+      useFactory: () => createWriteTypeOrmConfig(),
+      dataSourceFactory: async (opts) => {
+        if (!opts) {
+          throw new Error('worker: typeorm write options missing');
+        }
+        return createSystemDataSource('worker', opts);
+      },
+    }),
 
     // Common module with database services and repositories
     CommonModule,

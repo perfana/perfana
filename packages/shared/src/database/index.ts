@@ -1,4 +1,7 @@
 // Database exports
+export { createSystemDataSource } from './data-source-system';
+export type { SystemActor } from './system-connection';
+
 // Export all migrations for TypeORM
 export { ConsolidatedSchema1700000000000 } from './migrations/1700000000000-ConsolidatedSchema';
 export { CleanupLegacyMigrationRecords1700000000001 } from './migrations/1700000000001-CleanupLegacyMigrationRecords';
