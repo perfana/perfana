@@ -3,6 +3,7 @@ import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { DeepLink as DeepLinkEntity } from '../../entities';
 import { GenericDeepLink as GenericDeepLinkEntity } from '../../entities';
+import { withRequestEm } from '../../common/db/request-em';
 import { DeepLink } from '@perfana/shared/entities';
 import { GenericDeepLink } from '@perfana/shared/entities';
 import { CreateDeepLinkDto } from './dto/create-deep-link.dto';
@@ -23,7 +24,7 @@ export class DeepLinksRepository {
     testEnvironment: string,
     workload: string,
   ): Promise<DeepLink[]> {
-    const results = await this.deepLinkRepo.find({
+    const results = await withRequestEm(this.deepLinkRepo).find({
       where: {
         systemUnderTestId,
         testEnvironment,
@@ -36,7 +37,7 @@ export class DeepLinksRepository {
   }
 
   async findById(id: string): Promise<DeepLink | null> {
-    const result = await this.deepLinkRepo.findOne({ where: { id } });
+    const result = await withRequestEm(this.deepLinkRepo).findOne({ where: { id } });
     return result ? this.mapToDeepLink(result) : null;
   }
 
@@ -56,7 +57,7 @@ export class DeepLinksRepository {
       teamId: ownership.teamId,
     });
 
-    const result = await this.deepLinkRepo.save(deepLink);
+    const result = await withRequestEm(this.deepLinkRepo).save(deepLink);
     return this.mapToDeepLink(result);
   }
 
@@ -71,9 +72,9 @@ export class DeepLinksRepository {
     if (dto.templateDeepLinkId !== undefined) updateData.templateDeepLinkId = dto.templateDeepLinkId;
     if (dto.tags !== undefined) updateData.tags = dto.tags;
 
-    await this.deepLinkRepo.update(id, updateData);
+    await withRequestEm(this.deepLinkRepo).update(id, updateData);
 
-    const result = await this.deepLinkRepo.findOne({ where: { id } });
+    const result = await withRequestEm(this.deepLinkRepo).findOne({ where: { id } });
     if (!result) {
       throw new NotFoundException(`DeepLink with id ${id} not found after update`);
     }
@@ -82,12 +83,12 @@ export class DeepLinksRepository {
   }
 
   async delete(id: string): Promise<void> {
-    await this.deepLinkRepo.delete(id);
+    await withRequestEm(this.deepLinkRepo).delete(id);
   }
 
   // Generic Deep Links methods
   async findGenericByProfile(profile: string): Promise<GenericDeepLink[]> {
-    const results = await this.genericDeepLinkRepo.find({
+    const results = await withRequestEm(this.genericDeepLinkRepo).find({
       where: { profile },
       order: { name: 'ASC' }
     });
@@ -111,7 +112,7 @@ export class DeepLinksRepository {
     // the caller can pass it to AuditService — dispatch reads `.constructor`
     // to resolve `auditableFields`. Read paths keep the mapping to preserve
     // their narrower API shape.
-    return this.genericDeepLinkRepo.save(genericDeepLink);
+    return withRequestEm(this.genericDeepLinkRepo).save(genericDeepLink);
   }
 
   private mapToDeepLink(entity: DeepLinkEntity): DeepLink {
