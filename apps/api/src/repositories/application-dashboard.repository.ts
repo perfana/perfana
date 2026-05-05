@@ -2,6 +2,7 @@ import { Injectable } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { TypeOrmBaseRepository } from '../common/repositories/typeorm-base.repository';
+import { withRequestEm } from '../common/db/request-em';
 import { ApplicationDashboard } from '@perfana/shared/entities';
 import { DatabaseException } from '../common/exceptions/business.exception';
 
@@ -22,7 +23,7 @@ export class ApplicationDashboardRepository extends TypeOrmBaseRepository<Applic
     environment: string
   ): Promise<ApplicationDashboard[]> {
     try {
-      return await this.repository.find({
+      return await withRequestEm(this.repository).find({
         where: {
           systemUnderTestId: systemId,
           testEnvironment: environment
@@ -40,7 +41,7 @@ export class ApplicationDashboardRepository extends TypeOrmBaseRepository<Applic
    */
   async findBySystem(systemId: string): Promise<ApplicationDashboard[]> {
     try {
-      return await this.repository.find({
+      return await withRequestEm(this.repository).find({
         where: { systemUnderTestId: systemId },
         order: { testEnvironment: 'ASC', dashboardLabel: 'ASC' }
       });
@@ -55,7 +56,7 @@ export class ApplicationDashboardRepository extends TypeOrmBaseRepository<Applic
    */
   async findByEnvironment(environment: string): Promise<ApplicationDashboard[]> {
     try {
-      return await this.repository.find({
+      return await withRequestEm(this.repository).find({
         where: { testEnvironment: environment },
         order: { systemUnderTestId: 'ASC', dashboardLabel: 'ASC' }
       });
@@ -70,7 +71,7 @@ export class ApplicationDashboardRepository extends TypeOrmBaseRepository<Applic
    */
   async findByGrafanaInstance(instanceId: string): Promise<ApplicationDashboard[]> {
     try {
-      return await this.repository.find({
+      return await withRequestEm(this.repository).find({
         where: { grafanaInstanceId: instanceId },
         order: { dashboardLabel: 'ASC' }
       });
@@ -103,7 +104,7 @@ export class ApplicationDashboardRepository extends TypeOrmBaseRepository<Applic
    */
   async findByTags(tags: string[]): Promise<ApplicationDashboard[]> {
     try {
-      return await this.repository.createQueryBuilder('ad')
+      return await withRequestEm(this.repository).createQueryBuilder('ad')
         .where('ad.tags && ARRAY[:...tags]::text[]', { tags })
         .orderBy('ad.dashboardLabel', 'ASC')
         .getMany();
@@ -118,7 +119,7 @@ export class ApplicationDashboardRepository extends TypeOrmBaseRepository<Applic
    */
   async search(searchTerm: string, limit = 50): Promise<ApplicationDashboard[]> {
     try {
-      return await this.repository.createQueryBuilder('ad')
+      return await withRequestEm(this.repository).createQueryBuilder('ad')
         .where('ad.dashboardName ILIKE :search', { search: `%${searchTerm}%` })
         .orWhere('ad.dashboardLabel ILIKE :search', { search: `%${searchTerm}%` })
         .orderBy('ad.dashboardLabel', 'ASC')
@@ -135,7 +136,7 @@ export class ApplicationDashboardRepository extends TypeOrmBaseRepository<Applic
    */
   async getUniqueEnvironments(): Promise<string[]> {
     try {
-      const results = await this.repository.createQueryBuilder('ad')
+      const results = await withRequestEm(this.repository).createQueryBuilder('ad')
         .select('DISTINCT ad.testEnvironment', 'environment')
         .orderBy('ad.testEnvironment', 'ASC')
         .getRawMany();
@@ -152,7 +153,7 @@ export class ApplicationDashboardRepository extends TypeOrmBaseRepository<Applic
    */
   async groupBySystem(): Promise<Map<string, ApplicationDashboard[]>> {
     try {
-      const dashboards = await this.repository.find({
+      const dashboards = await withRequestEm(this.repository).find({
         order: { systemUnderTestId: 'ASC', dashboardLabel: 'ASC' }
       });
 
@@ -177,7 +178,7 @@ export class ApplicationDashboardRepository extends TypeOrmBaseRepository<Applic
    */
   async deleteByGrafanaInstance(instanceId: string): Promise<number> {
     try {
-      const result = await this.repository.createQueryBuilder()
+      const result = await withRequestEm(this.repository).createQueryBuilder()
         .delete()
         .where('grafanaInstanceId = :instanceId', { instanceId })
         .execute();
@@ -195,7 +196,7 @@ export class ApplicationDashboardRepository extends TypeOrmBaseRepository<Applic
    */
   async deleteBySystem(systemId: string): Promise<number> {
     try {
-      const result = await this.repository.createQueryBuilder()
+      const result = await withRequestEm(this.repository).createQueryBuilder()
         .delete()
         .where('systemUnderTestId = :systemId', { systemId })
         .execute();
