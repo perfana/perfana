@@ -47,9 +47,23 @@ export async function createSystemDataSource(
     }
   });
 
-  // Sanity check: assert the role switched on the first checkout.
-  const result = await ds.query(`SELECT current_user`) as Array<{ current_user: string }>;
-  const currentUser = result[0]?.current_user;
+  // Sanity check: assert the role switch works on a single connection.
+  // pool.on('connect') only fires for *new* connections, but ds.initialize()
+  // pre-warms `min` connections before the hook is registered. Pre-warmed
+  // connections bypass the hook, so we use a QueryRunner to pin the preamble
+  // and check to the same connection.
+  const qr = ds.createQueryRunner();
+  await qr.connect();
+  let currentUser: string;
+  try {
+    for (const stmt of preamble) {
+      await qr.query(stmt);
+    }
+    const result = await qr.query(`SELECT current_user`) as Array<{ current_user: string }>;
+    currentUser = result[0]?.current_user;
+  } finally {
+    await qr.release();
+  }
   if (currentUser !== 'perfana_system') {
     await ds.destroy();
     throw new Error(

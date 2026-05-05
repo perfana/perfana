@@ -1,6 +1,7 @@
 import { Module } from '@nestjs/common';
 import { ConfigModule, ConfigService } from '@nestjs/config';
 import { TypeOrmModule } from '@nestjs/typeorm';
+import { createSystemDataSource } from '@perfana/shared/database';
 
 // Import all entities from shared package to ensure complete entity graph
 import * as sharedEntities from '@perfana/shared/entities';
@@ -41,6 +42,10 @@ import { HealthModule } from './modules/health/health.module';
           synchronize: false, // Never auto-sync schema - use migrations instead
           logging: configService.get<string>('DB_LOGGING') === 'true',
         };
+      },
+      dataSourceFactory: async (opts) => {
+        if (!opts) throw new Error('perfana-report: typeorm options missing');
+        return createSystemDataSource('perfana-report', opts);
       },
     }),
 
