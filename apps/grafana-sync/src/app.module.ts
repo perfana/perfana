@@ -1,7 +1,7 @@
 import { Module } from '@nestjs/common';
 import { ConfigModule, ConfigService } from '@nestjs/config';
 import { TypeOrmModule } from '@nestjs/typeorm';
-import { createSystemDataSource } from '@perfana/shared/database';
+import { createSystemDataSource } from '@perfana/shared/database/data-source-system';
 import { ScheduleModule } from '@nestjs/schedule';
 import grafanaSyncConfig from './config/grafana-sync.config';
 import { validationSchema } from './config/validation.schema';

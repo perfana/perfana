@@ -5,7 +5,7 @@ import { CommonModule } from './common/common.module.js';
 import { RealtimeModule } from './modules/realtime/realtime.module.js';
 import { SchedulersModule } from './schedulers/schedulers.module.js';
 import { createTypeOrmConfig, createWriteTypeOrmConfig } from './config/typeorm.config.js';
-import { createSystemDataSource } from '@perfana/shared/database';
+import { createSystemDataSource } from '@perfana/shared/database/data-source-system';
 
 /**
  * Root Application Module for Worker

@@ -1,7 +1,7 @@
 import { Module } from '@nestjs/common';
 import { ConfigModule, ConfigService } from '@nestjs/config';
 import { TypeOrmModule } from '@nestjs/typeorm';
-import { createSystemDataSource } from '@perfana/shared/database';
+import { createSystemDataSource } from '@perfana/shared/database/data-source-system';
 
 // Import all entities from shared package to ensure complete entity graph
 import * as sharedEntities from '@perfana/shared/entities';
