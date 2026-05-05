@@ -70,6 +70,7 @@ const OWNED_RESOURCE_ENTITIES = new Set([
   'PyroscopeInstanceEntity',
   'ReportTemplate',
   'SparseMetricExclusion',
+  'SystemEntity',
   'SystemUnderTest',
   'SystemUnderTestEntity',
   'TestRun',

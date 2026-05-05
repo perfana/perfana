@@ -8,6 +8,7 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
+import { withRequestEm } from '../../../common/db/request-em';
 import { TestRun as TestRunEntity, OwnedResource } from '../../../entities';
 import { UpdateTestRunCommand, UpdateTestRunData } from '../commands/update-test-run.command';
 import { ICommandHandler, CommandContext, TestRunMutationResult } from '../commands/types';
@@ -44,7 +45,7 @@ export class UpdateTestRunHandler implements ICommandHandler<UpdateTestRunComman
       // not return the prior state, so fetch it first. Skip the audit log
       // entirely if the row is missing (the update itself will be a no-op
       // and downstream fetchWithRelations will throw).
-      const before = await this.testRunRepo.findOne({
+      const before = await withRequestEm(this.testRunRepo).findOne({
         where: {
           testRunId: data.testRunId,
           systemUnderTestId: data.systemUnderTestId,
@@ -70,7 +71,7 @@ export class UpdateTestRunHandler implements ICommandHandler<UpdateTestRunComman
         endTime: data.endTime || new Date(),
         updatedBy: data.updatedBy,
       };
-      await this.testRunRepo.update(
+      await withRequestEm(this.testRunRepo).update(
         {
           testRunId: data.testRunId,
           systemUnderTestId: data.systemUnderTestId,
@@ -119,7 +120,7 @@ export class UpdateTestRunHandler implements ICommandHandler<UpdateTestRunComman
    * Fetch test run with all necessary relations
    */
   private async fetchWithRelations(data: UpdateTestRunData): Promise<TestRunEntity> {
-    const testRunWithRelations = await this.testRunRepo.findOne({
+    const testRunWithRelations = await withRequestEm(this.testRunRepo).findOne({
       where: {
         testRunId: data.testRunId,
         systemUnderTestId: data.systemUnderTestId,

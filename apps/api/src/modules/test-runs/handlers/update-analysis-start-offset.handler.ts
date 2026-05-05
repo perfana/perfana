@@ -10,6 +10,7 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository, DataSource } from 'typeorm';
+import { withRequestEm } from '../../../common/db/request-em';
 import { TestRun as TestRunEntity, OwnedResource } from '../../../entities';
 import { ResourceNotFoundException } from '../../../common/exceptions/business.exception';
 import { TestRun } from '../types/test-run.types';
@@ -40,7 +41,7 @@ export class UpdateAnalysisStartOffsetHandler {
 
     try {
       // Fetch the pre-mutation row in full for the audit diff.
-      const testRunEntity = await this.testRunRepo.findOne({
+      const testRunEntity = await withRequestEm(this.testRunRepo).findOne({
         where: { id },
       });
 
@@ -55,7 +56,7 @@ export class UpdateAnalysisStartOffsetHandler {
         [analysisStartOffset, id],
       );
 
-      const updatedEntity = await this.testRunRepo.findOne({
+      const updatedEntity = await withRequestEm(this.testRunRepo).findOne({
         where: { id },
         relations: ['systemUnderTest'],
       });

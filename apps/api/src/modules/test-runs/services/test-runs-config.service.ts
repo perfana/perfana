@@ -1,6 +1,7 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository, DataSource } from 'typeorm';
+import { withRequestEm } from '../../../common/db/request-em';
 import {
   TestRun as TestRunEntity,
   SystemUnderTest as SystemEntity,
@@ -93,7 +94,7 @@ export class TestRunsConfigService {
 
       if (system && environment && workload) {
         // Find system first with team relation for organization filtering
-        const systemQuery = this.systemRepo.createQueryBuilder('sut')
+        const systemQuery = withRequestEm(this.systemRepo).createQueryBuilder('sut')
           .leftJoin('sut.team', 'team')
           .where('sut.name = :name', { name: system })
           .select(['sut.id']);
@@ -109,7 +110,7 @@ export class TestRunsConfigService {
         }
 
         // Find test run with params
-        testRun = await this.testRunRepo.findOne({
+        testRun = await withRequestEm(this.testRunRepo).findOne({
           where: {
             testRunId,
             systemUnderTestId: systemUnderTest.id,
@@ -120,7 +121,7 @@ export class TestRunsConfigService {
         });
       } else {
         // Find by test_run_id only, with organization filtering
-        const testRunQuery = this.testRunRepo.createQueryBuilder('tr')
+        const testRunQuery = withRequestEm(this.testRunRepo).createQueryBuilder('tr')
           .leftJoin('tr.systemUnderTest', 'sut')
           .leftJoin('sut.team', 'team')
           .where('tr.testRunId = :testRunId', { testRunId })
@@ -161,7 +162,7 @@ export class TestRunsConfigService {
       this.logger.log(`Looking up test run with test_run_id: ${configDto.testRunId}`);
 
       // Validate system under test exists
-      const systemUnderTest = await this.systemRepo.findOne({
+      const systemUnderTest = await withRequestEm(this.systemRepo).findOne({
         where: { name: configDto.systemUnderTest },
         select: ['id']
       });
@@ -171,7 +172,7 @@ export class TestRunsConfigService {
       }
 
       // Try to find test run by test_run_id
-      const testRun = await this.testRunRepo.findOne({
+      const testRun = await withRequestEm(this.testRunRepo).findOne({
         where: { testRunId: configDto.testRunId },
         select: ['id', 'systemUnderTestId']
       });
@@ -214,7 +215,7 @@ export class TestRunsConfigService {
   async addTestRunConfigs(configsDto: AddTestRunConfigsDto): Promise<void> {
     try {
       // Validate system under test exists
-      const systemUnderTest = await this.systemRepo.findOne({
+      const systemUnderTest = await withRequestEm(this.systemRepo).findOne({
         where: { name: configsDto.systemUnderTest },
         select: ['id']
       });
@@ -224,7 +225,7 @@ export class TestRunsConfigService {
       }
 
       // Try to find test run
-      const testRun = await this.testRunRepo.findOne({
+      const testRun = await withRequestEm(this.testRunRepo).findOne({
         where: { testRunId: configsDto.testRunId },
         select: ['id', 'systemUnderTestId']
       });
@@ -336,7 +337,7 @@ export class TestRunsConfigService {
   ): Promise<void> {
     try {
       // Find test run by UUID
-      const testRun = await this.testRunRepo.findOne({
+      const testRun = await withRequestEm(this.testRunRepo).findOne({
         where: { id: testRunUuid },
         select: ['id']
       });
@@ -435,7 +436,7 @@ export class TestRunsConfigService {
       });
 
       // Find system under test
-      const systemUnderTest = await this.systemRepo.findOne({
+      const systemUnderTest = await withRequestEm(this.systemRepo).findOne({
         where: { name: configJsonDto.systemUnderTest },
         select: ['id']
       });
@@ -445,7 +446,7 @@ export class TestRunsConfigService {
       }
 
       // Find test run
-      const testRun = await this.testRunRepo.findOne({
+      const testRun = await withRequestEm(this.testRunRepo).findOne({
         where: { testRunId: configJsonDto.testRunId },
         select: ['id']
       });
@@ -576,7 +577,7 @@ export class TestRunsConfigService {
       }
 
       // Find system under test with organization filtering
-      const systemQuery = this.systemRepo.createQueryBuilder('sut')
+      const systemQuery = withRequestEm(this.systemRepo).createQueryBuilder('sut')
         .leftJoin('sut.team', 'team')
         .where('sut.name = :name', { name: system })
         .select(['sut.id']);
@@ -593,7 +594,7 @@ export class TestRunsConfigService {
       }
 
       // Find latest test run
-      const latestTestRun = await this.testRunRepo.findOne({
+      const latestTestRun = await withRequestEm(this.testRunRepo).findOne({
         where: {
           systemUnderTestId: systemUnderTest.id,
           testEnvironment: environment,
@@ -642,7 +643,7 @@ export class TestRunsConfigService {
       }
 
       // Find system under test with organization filtering
-      const systemQuery = this.systemRepo.createQueryBuilder('sut')
+      const systemQuery = withRequestEm(this.systemRepo).createQueryBuilder('sut')
         .leftJoin('sut.team', 'team')
         .where('sut.name = :name', { name: system })
         .select(['sut.id']);
@@ -658,7 +659,7 @@ export class TestRunsConfigService {
         return [];
       }
 
-      const expectedChanges = await this.expectedConfigChangeRepo.find({
+      const expectedChanges = await withRequestEm(this.expectedConfigChangeRepo).find({
         where: {
           system_under_test_id: systemUnderTest.id,
           test_environment: environment,
@@ -691,7 +692,7 @@ export class TestRunsConfigService {
   async createExpectedConfigChange(createDto: CreateExpectedConfigChangeDto): Promise<ExpectedConfigChangeDto> {
     try {
       // Find system under test
-      const systemUnderTest = await this.systemRepo.findOne({
+      const systemUnderTest = await withRequestEm(this.systemRepo).findOne({
         where: { name: createDto.system },
         select: ['id']
       });
@@ -701,7 +702,7 @@ export class TestRunsConfigService {
       }
 
       // Check if already exists
-      let expectedChange = await this.expectedConfigChangeRepo.findOne({
+      let expectedChange = await withRequestEm(this.expectedConfigChangeRepo).findOne({
         where: {
           system_under_test_id: systemUnderTest.id,
           test_environment: createDto.environment,
@@ -716,7 +717,7 @@ export class TestRunsConfigService {
         // the post-update field).
         const before = Object.assign(new ExpectedConfigChange(), expectedChange);
         expectedChange.description = createDto.reason || undefined;
-        const saved = await this.expectedConfigChangeRepo.save(expectedChange);
+        const saved = await withRequestEm(this.expectedConfigChangeRepo).save(expectedChange);
         this.auditService.logUpdate(
           before as unknown as OwnedResource,
           saved as unknown as OwnedResource,
@@ -732,7 +733,7 @@ export class TestRunsConfigService {
           config_key: createDto.configKey,
           description: createDto.reason || undefined
         });
-        const saved = await this.expectedConfigChangeRepo.save(expectedChange);
+        const saved = await withRequestEm(this.expectedConfigChangeRepo).save(expectedChange);
         this.auditService.logCreate(saved as unknown as OwnedResource, {
           organizationIdOverride: saved.organizationId,
         });
@@ -760,7 +761,7 @@ export class TestRunsConfigService {
   async deleteExpectedConfigChange(system: string, environment: string, workload: string, configKey: string): Promise<void> {
     try {
       // Find system under test
-      const systemUnderTest = await this.systemRepo.findOne({
+      const systemUnderTest = await withRequestEm(this.systemRepo).findOne({
         where: { name: system },
         select: ['id']
       });
@@ -772,7 +773,7 @@ export class TestRunsConfigService {
       // Phase 5a: load the existing row first so the audit row captures the
       // pre-delete state. The unique constraint on
       // (sut, env, workload, config_key) makes this at-most-one row.
-      const existing = await this.expectedConfigChangeRepo.findOne({
+      const existing = await withRequestEm(this.expectedConfigChangeRepo).findOne({
         where: {
           system_under_test_id: systemUnderTest.id,
           test_environment: environment,
@@ -787,7 +788,7 @@ export class TestRunsConfigService {
         });
       }
 
-      await this.expectedConfigChangeRepo.delete({
+      await withRequestEm(this.expectedConfigChangeRepo).delete({
         system_under_test_id: systemUnderTest.id,
         test_environment: environment,
         workload,
@@ -809,7 +810,7 @@ export class TestRunsConfigService {
     workload: string,
   ): Promise<SparseMetricExclusionDto[]> {
     try {
-      const systemUnderTest = await this.systemRepo.findOne({
+      const systemUnderTest = await withRequestEm(this.systemRepo).findOne({
         where: { name: system },
         select: ['id'],
       });
@@ -819,7 +820,7 @@ export class TestRunsConfigService {
         return [];
       }
 
-      const exclusions = await this.sparseMetricExclusionRepo.find({
+      const exclusions = await withRequestEm(this.sparseMetricExclusionRepo).find({
         where: {
           system_under_test_id: systemUnderTest.id,
           test_environment: environment,
@@ -850,7 +851,7 @@ export class TestRunsConfigService {
       // Use provided UUID directly, fall back to name lookup
       let sutId = createDto.systemUnderTestId;
       if (!sutId) {
-        const systemUnderTest = await this.systemRepo.findOne({
+        const systemUnderTest = await withRequestEm(this.systemRepo).findOne({
           where: { name: createDto.system },
           select: ['id'],
         });
@@ -861,7 +862,7 @@ export class TestRunsConfigService {
       }
 
       // Upsert: update reason if already exists
-      let exclusion = await this.sparseMetricExclusionRepo.findOne({
+      let exclusion = await withRequestEm(this.sparseMetricExclusionRepo).findOne({
         where: {
           system_under_test_id: sutId,
           test_environment: createDto.environment,
@@ -875,7 +876,7 @@ export class TestRunsConfigService {
         // Update branch — clone before-snapshot for an accurate diff.
         const before = Object.assign(new SparseMetricExclusion(), exclusion);
         exclusion.reason = createDto.reason || undefined;
-        const saved = await this.sparseMetricExclusionRepo.save(exclusion);
+        const saved = await withRequestEm(this.sparseMetricExclusionRepo).save(exclusion);
         this.auditService.logUpdate(
           before as unknown as OwnedResource,
           saved as unknown as OwnedResource,
@@ -891,7 +892,7 @@ export class TestRunsConfigService {
           metric_name: createDto.metricName,
           reason: createDto.reason || undefined,
         });
-        const saved = await this.sparseMetricExclusionRepo.save(exclusion);
+        const saved = await withRequestEm(this.sparseMetricExclusionRepo).save(exclusion);
         this.auditService.logCreate(saved as unknown as OwnedResource, {
           organizationIdOverride: saved.organizationId,
         });
@@ -927,7 +928,7 @@ export class TestRunsConfigService {
     metricName: string,
   ): Promise<void> {
     try {
-      const systemUnderTest = await this.systemRepo.findOne({
+      const systemUnderTest = await withRequestEm(this.systemRepo).findOne({
         where: { name: system },
         select: ['id'],
       });
@@ -939,7 +940,7 @@ export class TestRunsConfigService {
       // Phase 5a: load the existing row first so the audit row captures the
       // pre-delete state. Unique constraint on
       // (sut, env, workload, dashboard_label, metric_name) ⇒ at-most-one row.
-      const existing = await this.sparseMetricExclusionRepo.findOne({
+      const existing = await withRequestEm(this.sparseMetricExclusionRepo).findOne({
         where: {
           system_under_test_id: systemUnderTest.id,
           test_environment: environment,
@@ -955,7 +956,7 @@ export class TestRunsConfigService {
         });
       }
 
-      await this.sparseMetricExclusionRepo.delete({
+      await withRequestEm(this.sparseMetricExclusionRepo).delete({
         system_under_test_id: systemUnderTest.id,
         test_environment: environment,
         workload,

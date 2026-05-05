@@ -1,6 +1,7 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository, DataSource } from 'typeorm';
+import { withRequestEm } from '../../../common/db/request-em';
 import {
   TestRun as TestRunEntity,
   DsChangePoints,
@@ -33,7 +34,7 @@ export class TestRunsChangepointService {
   ): Promise<string[]> {
     try {
       // Get the changepoint test run to get its creation date
-      const changepointTestRun = await this.testRunRepo.findOne({
+      const changepointTestRun = await withRequestEm(this.testRunRepo).findOne({
         where: {
           systemUnderTestId,
           testEnvironment,
@@ -49,7 +50,7 @@ export class TestRunsChangepointService {
       }
 
       // Get all test runs created after the changepoint
-      const laterTestRuns = await this.testRunRepo.find({
+      const laterTestRuns = await withRequestEm(this.testRunRepo).find({
         where: {
           systemUnderTestId,
           testEnvironment,
@@ -107,7 +108,7 @@ export class TestRunsChangepointService {
   ): Promise<{ testRunIds: string[] }> {
     try {
       // Get the base test run to get its creation date
-      const baseTestRun = await this.testRunRepo.findOne({
+      const baseTestRun = await withRequestEm(this.testRunRepo).findOne({
         where: {
           systemUnderTestId,
           testEnvironment,
@@ -123,7 +124,7 @@ export class TestRunsChangepointService {
       }
 
       // Get all test runs created after the base test run
-      const laterTestRuns = await this.testRunRepo.find({
+      const laterTestRuns = await withRequestEm(this.testRunRepo).find({
         where: {
           systemUnderTestId,
           testEnvironment,
@@ -341,7 +342,7 @@ export class TestRunsChangepointService {
           testRunsToReevaluate = [previousChangepoint.test_run_id, ...testRunsToReevaluate];
         } else {
           // No previous changepoint, get all test runs
-          const allTestRuns = await this.testRunRepo.find({
+          const allTestRuns = await withRequestEm(this.testRunRepo).find({
             where: {
               systemUnderTestId,
               testEnvironment,
@@ -410,7 +411,7 @@ export class TestRunsChangepointService {
         this.logger.log(`No changepoint found for ${systemUnderTestId}/${testEnvironment}/${workload}, returning all test runs`);
 
         // Return all test runs for this system/environment/workload when no changepoint exists
-        const allTestRuns = await this.testRunRepo.find({
+        const allTestRuns = await withRequestEm(this.testRunRepo).find({
           where: {
             systemUnderTestId,
             testEnvironment,

@@ -8,6 +8,7 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
+import { withRequestEm } from '../../../common/db/request-em';
 import { TestRun as TestRunEntity, OwnedResource } from '../../../entities';
 import { ResourceNotFoundException } from '../../../common/exceptions/business.exception';
 import { TestRun } from '../types/test-run.types';
@@ -44,7 +45,7 @@ export class UpdateAdaptConfigHandler {
       let testRun: TestRunEntity | null = null;
 
       if (systemUnderTestId && environment && workload) {
-        testRun = await this.testRunRepo.findOne({
+        testRun = await withRequestEm(this.testRunRepo).findOne({
           where: {
             testRunId,
             systemUnderTestId,
@@ -54,7 +55,7 @@ export class UpdateAdaptConfigHandler {
           relations: ['systemUnderTest'],
         });
       } else {
-        testRun = await this.testRunRepo.findOne({
+        testRun = await withRequestEm(this.testRunRepo).findOne({
           where: { testRunId },
           relations: ['systemUnderTest'],
         });
@@ -92,9 +93,9 @@ export class UpdateAdaptConfigHandler {
       // for symmetry with the orgs / teams update flow.
       const before = { ...testRun } as TestRunEntity;
 
-      await this.testRunRepo.update({ id: testRun.id }, updateData);
+      await withRequestEm(this.testRunRepo).update({ id: testRun.id }, updateData);
 
-      const updatedEntity = await this.testRunRepo.findOne({
+      const updatedEntity = await withRequestEm(this.testRunRepo).findOne({
         where: { id: testRun.id },
         relations: ['systemUnderTest'],
       });

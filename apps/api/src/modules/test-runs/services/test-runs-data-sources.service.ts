@@ -1,6 +1,7 @@
 import { Injectable, Logger, NotFoundException, BadRequestException, BadGatewayException } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { In, Repository } from 'typeorm';
+import { withRequestEm } from '../../../common/db/request-em';
 import axios from 'axios';
 import { TempoService } from '../../tempo/tempo.service';
 import { validateExternalUrl } from '../../../common/security/url-validator';
@@ -151,7 +152,7 @@ export class TestRunsDataSourcesService {
     let testRun: TestRun | null = null;
 
     if (isUuid) {
-      testRun = await this.testRunRepo.findOne({
+      testRun = await withRequestEm(this.testRunRepo).findOne({
         where: { id: testRunId },
         relations: ['systemUnderTest'],
       });
@@ -159,7 +160,7 @@ export class TestRunsDataSourcesService {
 
     // If not found by UUID (or value is not a UUID), try testRunId string
     if (!testRun) {
-      testRun = await this.testRunRepo.findOne({
+      testRun = await withRequestEm(this.testRunRepo).findOne({
         where: { testRunId },
         relations: ['systemUnderTest'],
       });
@@ -182,7 +183,7 @@ export class TestRunsDataSourcesService {
   ): Promise<TracingService[]> {
     // Find all tracing services for this SUT, then filter.
     // Entries with empty/null test_environment apply to ALL environments.
-    const all = await this.tracingServiceRepo.find({
+    const all = await withRequestEm(this.tracingServiceRepo).find({
       where: { systemUnderTestId: sutId },
     });
 
@@ -392,7 +393,7 @@ export class TestRunsDataSourcesService {
     }
 
     // ── Grafana (ApplicationDashboard) ─────────────────────────────────────
-    const appDashboards = await this.appDashboardRepo.find({
+    const appDashboards = await withRequestEm(this.appDashboardRepo).find({
       where: {
         systemUnderTestId: sut.id,
         testEnvironment: testRun.testEnvironment,
@@ -423,7 +424,7 @@ export class TestRunsDataSourcesService {
     };
 
     if (sut.pyroscope_instance_id) {
-      const pyroInstance = await this.pyroscopeInstanceRepo.findOne({
+      const pyroInstance = await withRequestEm(this.pyroscopeInstanceRepo).findOne({
         where: { id: sut.pyroscope_instance_id },
       });
 
@@ -443,7 +444,7 @@ export class TestRunsDataSourcesService {
     // ── Dynatrace (metrics_sources → dynatrace_configs) ───────────────────
     // MetricsSource rows with source_type='dynatrace' are created automatically
     // when DynatraceQuery rows are saved, keyed by (sut, env, workload, configId).
-    const dynatraceSources = await this.metricsSourceRepo.find({
+    const dynatraceSources = await withRequestEm(this.metricsSourceRepo).find({
       where: {
         systemUnderTestId: sut.id,
         testEnvironment: testRun.testEnvironment,
@@ -456,7 +457,7 @@ export class TestRunsDataSourcesService {
     const dynatraceConfigs: Array<{ id: string; label: string; host: string }> = [];
 
     if (uniqueConfigIds.length > 0) {
-      const configs = await this.dynatraceConfigRepo.findBy({ id: In(uniqueConfigIds) });
+      const configs = await withRequestEm(this.dynatraceConfigRepo).findBy({ id: In(uniqueConfigIds) });
       for (const config of configs) {
         dynatraceConfigs.push({ id: config.id, label: config.label, host: config.host });
       }
@@ -724,7 +725,7 @@ export class TestRunsDataSourcesService {
       throw new NotFoundException(`No Pyroscope instance configured for system under test "${sut.name}"`);
     }
 
-    const pyroInstance = await this.pyroscopeInstanceRepo.findOne({
+    const pyroInstance = await withRequestEm(this.pyroscopeInstanceRepo).findOne({
       where: { id: sut.pyroscope_instance_id },
     });
 
@@ -778,7 +779,7 @@ export class TestRunsDataSourcesService {
       throw new NotFoundException(`No Pyroscope instance configured for system under test "${sut.name}"`);
     }
 
-    const pyroInstance = await this.pyroscopeInstanceRepo.findOne({
+    const pyroInstance = await withRequestEm(this.pyroscopeInstanceRepo).findOne({
       where: { id: sut.pyroscope_instance_id },
     });
 
@@ -833,7 +834,7 @@ export class TestRunsDataSourcesService {
     const sut = testRun.systemUnderTest;
 
     // Find the ApplicationDashboard matching by label or name
-    const appDashboards = await this.appDashboardRepo.find({
+    const appDashboards = await withRequestEm(this.appDashboardRepo).find({
       where: {
         systemUnderTestId: sut.id,
         testEnvironment: testRun.testEnvironment,
@@ -908,7 +909,7 @@ export class TestRunsDataSourcesService {
     const testRun = await this.loadTestRunWithSut(testRunId);
     const sut = testRun.systemUnderTest;
 
-    const dynatraceSources = await this.metricsSourceRepo.find({
+    const dynatraceSources = await withRequestEm(this.metricsSourceRepo).find({
       where: {
         systemUnderTestId: sut.id,
         sourceType: 'dynatrace',
@@ -929,7 +930,7 @@ export class TestRunsDataSourcesService {
     for (const source of dynatraceSources) {
       if (!source.sourceConfigId) continue;
 
-      const config = await this.dynatraceConfigRepo.findOne({
+      const config = await withRequestEm(this.dynatraceConfigRepo).findOne({
         where: { id: source.sourceConfigId },
       });
 

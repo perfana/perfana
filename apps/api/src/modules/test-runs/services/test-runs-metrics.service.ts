@@ -1,6 +1,7 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository, IsNull } from 'typeorm';
+import { withRequestEm } from '../../../common/db/request-em';
 import {
   TestRun as TestRunEntity,
   SystemUnderTest as SystemEntity,
@@ -73,7 +74,7 @@ export class TestRunsMetricsService {
 
       if (system && environment && workload) {
         // Use provided query parameters with organization filtering
-        const systemQuery = this.systemRepo.createQueryBuilder('sut')
+        const systemQuery = withRequestEm(this.systemRepo).createQueryBuilder('sut')
           .leftJoin('sut.team', 'team')
           .where('sut.name = :name', { name: system })
           .select(['sut.id']);
@@ -94,7 +95,7 @@ export class TestRunsMetricsService {
         testWorkload = workload;
       } else {
         // Get from test run with organization filtering
-        const testRunQuery = this.testRunRepo.createQueryBuilder('tr')
+        const testRunQuery = withRequestEm(this.testRunRepo).createQueryBuilder('tr')
           .leftJoin('tr.systemUnderTest', 'sut')
           .leftJoin('sut.team', 'team')
           .where('tr.testRunId = :testRunId', { testRunId })
@@ -217,7 +218,7 @@ export class TestRunsMetricsService {
       }
 
       // Validate that the system under test exists and user has access
-      const systemQuery = this.systemRepo.createQueryBuilder('sut')
+      const systemQuery = withRequestEm(this.systemRepo).createQueryBuilder('sut')
         .leftJoin('sut.team', 'team')
         .where('sut.id = :id', { id: createDto.systemUnderTestId })
         .select(['sut.id']);
@@ -234,7 +235,7 @@ export class TestRunsMetricsService {
       }
 
       // Validate that the application dashboard exists
-      const dashboardExists = await this.applicationDashboardRepo.findOne({
+      const dashboardExists = await withRequestEm(this.applicationDashboardRepo).findOne({
         where: { id: createDto.applicationDashboardId },
         select: ['id']
       });
@@ -323,7 +324,7 @@ export class TestRunsMetricsService {
       }
 
       // First validate that the system exists and user has access
-      const systemQuery = this.systemRepo.createQueryBuilder('sut')
+      const systemQuery = withRequestEm(this.systemRepo).createQueryBuilder('sut')
         .leftJoin('sut.team', 'team')
         .where('sut.id = :id', { id: systemUnderTestId })
         .select(['sut.id']);
@@ -421,7 +422,7 @@ export class TestRunsMetricsService {
       }
 
       // Validate that the user has access to the system
-      const systemQuery = this.systemRepo.createQueryBuilder('sut')
+      const systemQuery = withRequestEm(this.systemRepo).createQueryBuilder('sut')
         .leftJoin('sut.team', 'team')
         .where('sut.id = :id', { id: existingConfig.system_under_test_id })
         .select(['sut.id']);
@@ -504,7 +505,7 @@ export class TestRunsMetricsService {
     let compareConfigsCreated = 0;
 
     // 1. Load application dashboards for this SUT + environment
-    const dashboards = await this.applicationDashboardRepo.find({
+    const dashboards = await withRequestEm(this.applicationDashboardRepo).find({
       where: { systemUnderTestId, testEnvironment },
     });
 
@@ -635,7 +636,7 @@ export class TestRunsMetricsService {
       }
 
       // Validate that the user has access to the system
-      const systemQuery = this.systemRepo.createQueryBuilder('sut')
+      const systemQuery = withRequestEm(this.systemRepo).createQueryBuilder('sut')
         .leftJoin('sut.team', 'team')
         .where('sut.id = :id', { id: existingConfig.system_under_test_id })
         .select(['sut.id']);

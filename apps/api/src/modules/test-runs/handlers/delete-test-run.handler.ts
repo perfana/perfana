@@ -8,6 +8,7 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository, DataSource, EntityManager } from 'typeorm';
+import { withRequestEm } from '../../../common/db/request-em';
 import { TestRun as TestRunEntity, OwnedResource } from '../../../entities';
 import { DeleteTestRunCommand } from '../commands/delete-test-run.command';
 import { ICommandHandler, CommandContext, CommandResult } from '../commands/types';
@@ -52,7 +53,7 @@ export class DeleteTestRunHandler implements ICommandHandler<DeleteTestRunComman
       // First verify the test run exists. Load all columns (instead of a
       // narrow select) so the audit envelope captures the full pre-delete
       // snapshot of `auditableFields` and the camelCase `organizationId`.
-      const testRun = await this.testRunRepo.findOne({
+      const testRun = await withRequestEm(this.testRunRepo).findOne({
         where: { id },
         relations: ['systemUnderTest'],
       });

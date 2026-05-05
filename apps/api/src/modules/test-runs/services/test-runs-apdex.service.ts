@@ -1,6 +1,7 @@
 import { Injectable, Logger, NotFoundException } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
+import { withRequestEm } from '../../../common/db/request-em';
 import {
   SystemUnderTest as SystemEntity,
   WorkloadApdexThreshold,
@@ -41,7 +42,7 @@ export class TestRunsApdexService {
     userId: string,
     roles: string[],
   ): Promise<SystemEntity> {
-    const system = await this.systemRepo.findOne({ where: { id: systemId } });
+    const system = await withRequestEm(this.systemRepo).findOne({ where: { id: systemId } });
     if (!system) {
       throw new ResourceNotFoundException('System', systemId);
     }

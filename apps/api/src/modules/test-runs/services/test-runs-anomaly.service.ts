@@ -1,6 +1,7 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository, DataSource } from 'typeorm';
+import { withRequestEm } from '../../../common/db/request-em';
 import {
   TestRun as TestRunEntity,
   DsAdaptResults,
@@ -102,7 +103,7 @@ export class TestRunsAnomalyService {
       this.logger.log(`Getting anomaly detection results for test run: ${testRunId}`);
 
       // Get test run details
-      const testRun = await this.testRunRepo.findOne({
+      const testRun = await withRequestEm(this.testRunRepo).findOne({
         where: { testRunId },
         select: ['systemUnderTestId', 'testEnvironment', 'workload']
       });
@@ -309,7 +310,7 @@ export class TestRunsAnomalyService {
         deletedCount = await this.cascadeDeleteAnomalyData([testRunId], deleteDto);
       } else {
         // Delete for all test runs with same system/environment/workload
-        const testRun = await this.testRunRepo.findOne({
+        const testRun = await withRequestEm(this.testRunRepo).findOne({
           where: { testRunId },
           select: ['systemUnderTestId', 'testEnvironment', 'workload']
         });
@@ -319,7 +320,7 @@ export class TestRunsAnomalyService {
         }
 
         // Get all test run IDs for this combination
-        const testRuns = await this.testRunRepo.find({
+        const testRuns = await withRequestEm(this.testRunRepo).find({
           where: {
             systemUnderTestId: testRun.systemUnderTestId,
             testEnvironment: testRun.testEnvironment,

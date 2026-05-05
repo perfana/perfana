@@ -1,6 +1,7 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
+import { withRequestEm } from '../../../common/db/request-em';
 import { TestRun as TestRunEntity } from '../../../entities';
 import { DatabaseException, ResourceNotFoundException } from '../../../common/exceptions/business.exception';
 import { TestRunsMapperService } from './test-runs-mapper.service';
@@ -32,7 +33,7 @@ export class TestRunsTimeSeriesQueryService {
     userId: string,
     roles: string[],
   ): Promise<void> {
-    const result = await this.testRunRepo.query(
+    const result = await withRequestEm(this.testRunRepo).query(
       `SELECT sut.organization_id, sut.created_by
        FROM test_runs tr
        INNER JOIN systems_under_test sut ON sut.id = tr.system_under_test_id
@@ -64,7 +65,7 @@ export class TestRunsTimeSeriesQueryService {
       FROM test_runs
       WHERE test_run_id = $1
     `;
-    const result = await this.testRunRepo.query(query, [testRunId]);
+    const result = await withRequestEm(this.testRunRepo).query(query, [testRunId]);
 
     if (result[0]?.start_time && result[0]?.ramp_up) {
       const startTime = new Date(result[0].start_time);
@@ -180,7 +181,7 @@ export class TestRunsTimeSeriesQueryService {
       const queryParams = cutoffTime
         ? [testRunId, transactionName, excludeRampUp, cutoffTime]
         : [testRunId, transactionName, excludeRampUp, null];
-      const transactionResult = await this.testRunRepo.query(transactionQuery, queryParams);
+      const transactionResult = await withRequestEm(this.testRunRepo).query(transactionQuery, queryParams);
 
       // Query for sampler-level aggregated data with complete time series
       const samplerQuery = `
@@ -250,7 +251,7 @@ export class TestRunsTimeSeriesQueryService {
         ORDER BY ts.sampler_name, ts.time_bucket ASC
       `;
 
-      const samplerResult = await this.testRunRepo.query(samplerQuery, queryParams);
+      const samplerResult = await withRequestEm(this.testRunRepo).query(samplerQuery, queryParams);
 
       // Group sampler data by sampler_name
       const samplerData: Record<string, TimeSeriesDataPoint[]> = {};
@@ -363,7 +364,7 @@ export class TestRunsTimeSeriesQueryService {
       const queryParams = cutoffTime
         ? [testRunId, transactionName, samplerName, excludeRampUp, cutoffTime]
         : [testRunId, transactionName, samplerName, excludeRampUp, null];
-      const samplerResult = await this.testRunRepo.query(samplerQuery, queryParams);
+      const samplerResult = await withRequestEm(this.testRunRepo).query(samplerQuery, queryParams);
 
       this.logger.log(`Retrieved ${samplerResult.length} data points for sampler ${samplerName}`);
 
