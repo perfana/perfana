@@ -93,3 +93,14 @@ Notable mechanical decisions:
 - **Raw SQL via `repo.query(...)`** is wrapped the same way as ORM calls: the perl-driven mechanical pass extends the lint rule's standard `REPO_METHODS` set with `query` (the perl pattern only — the lint rule itself is unchanged) so the test-runs services' many raw-SQL aggregation paths route through the request EM.
 - **Non-owned repos remain unwrapped intentionally**: `OrganizationMember`, `TeamMember`, `Team` (auth metadata, not subject to RLS), `DsMetrics`/`DsMetricStatistics`/`DsControlGroups`/`DsChangePoints`/`DsAdaptResults`/`DsAdaptTrackedResults`/`DsAdaptConclusion` (datastore-internal aggregation tables), `Organization`, `TestRunConfigEntity` (config diffs, not owned per the lint set), `TestRunView` (read-only DB view), `WorkloadApdexThreshold`/`WorkloadTransactionApdexThreshold` (threshold reference tables), `ProvisionedTemplateDsCompareConfig` (provisioning template), `Event` (special-cased per the Phase 5b spec — events never have RLS).
 - **`AuthorizationService.apiKeyRepository` is now wrapped** despite the chicken-and-egg concern flagged in the PR3 doc. `withRequestEm()` is identity-transparent when no request EM is in CLS (returns the bare repo), so the bootstrap call from `RlsTransactionInterceptor` still works pre-transaction. For in-request callers (post-interceptor), the wrap correctly routes through the request EM. The `OrganizationMember`/`TeamMember`/`Team` calls are left unwrapped because none of those entities are owned-resource per the lint set.
+
+### PR8.1 (2026-05-05 → 2026-05-05) — local RLS preflight gate
+
+Plan Task 60 was framed as a CI gate (`DB_ENABLE_RLS_ROLE=true` on every PR). Reality: this repo's gate is local pre-push (`npm run preflight`) per the team's local-gates-over-CI preference; `pr-quality-gate.yml` is `workflow_dispatch`-only. PR8.1 ships the equivalent locally:
+
+- New script `apps/api/test:rls` runs `jest src/test/rls/ --runInBand` with `USE_TESTCONTAINERS=false`, `DB_ENABLE_RLS_ROLE=true`, and `DB_NAME=${DB_NAME:-perfana}` (defaults to dev DB; overridable).
+- Root `preflight` chains `turbo run lint type-check && npm run test:rls --workspace=@perfana/api`. The `.githooks/pre-push` hook is unchanged — it already invokes `npm run preflight`.
+- Targets the dev `perfana` DB rather than the synchronize-only `perfana_test` DB because the RLS suite needs migration-applied state (per-DB policies + helper functions, cluster-wide `perfana_app`/`perfana_system` roles). The harness seeds two fixed-UUID test orgs `…0a01`/`…0a02` idempotently (`ON CONFLICT DO NOTHING`); per-test mutations are wrapped in `withRollback`. Verified: 132/132 pass against dev DB in ~3s.
+- CLAUDE.md "Health Stack" updated to document the new step + DB requirement.
+
+Operational tasks 61 (staging flip) + 62 (production flip) remain — they require deployment infra changes outside this repo and a ≥1-week staging soak before prod.
