@@ -2,6 +2,7 @@ import { Logger } from '@nestjs/common';
 import { Repository, FindOptionsWhere, FindManyOptions, FindOneOptions, DeepPartial } from 'typeorm';
 import { QueryDeepPartialEntity } from 'typeorm/query-builder/QueryPartialEntity';
 import { ResourceNotFoundException, DatabaseException } from '../exceptions/business.exception';
+import { withRequestEm } from '../db/request-em';
 
 /**
  * Base TypeORM repository providing common database operations
@@ -22,7 +23,7 @@ export abstract class TypeOrmBaseRepository<T extends { id: string }> {
    */
   async findAll(options?: FindManyOptions<T>): Promise<T[]> {
     try {
-      return await this.repository.find(options);
+      return await withRequestEm(this.repository).find(options);
     } catch (error) {
       this.logger.error(`Failed to find all ${this.entityName}s:`, error);
       throw new DatabaseException(`Failed to retrieve ${this.entityName}s`, error);
@@ -42,7 +43,7 @@ export abstract class TypeOrmBaseRepository<T extends { id: string }> {
       const page = options?.skip ? Math.floor(options.skip / (options.take || 20)) + 1 : 1;
       const pageSize = options?.take || 20;
 
-      const [data, total] = await this.repository.findAndCount(options);
+      const [data, total] = await withRequestEm(this.repository).findAndCount(options);
 
       return { data, total, page, pageSize };
     } catch (error) {
@@ -56,7 +57,7 @@ export abstract class TypeOrmBaseRepository<T extends { id: string }> {
    */
   async findById(id: string, options?: FindOneOptions<T>): Promise<T> {
     try {
-      const entity = await this.repository.findOne({
+      const entity = await withRequestEm(this.repository).findOne({
         ...options,
         where: { ...options?.where, id } as FindOptionsWhere<T>,
       });
@@ -80,7 +81,7 @@ export abstract class TypeOrmBaseRepository<T extends { id: string }> {
    */
   async findOne(options: FindOneOptions<T>): Promise<T | null> {
     try {
-      return await this.repository.findOne(options);
+      return await withRequestEm(this.repository).findOne(options);
     } catch (error) {
       this.logger.error(`Failed to find ${this.entityName}:`, error);
       throw new DatabaseException(`Failed to retrieve ${this.entityName}`, error);
@@ -92,7 +93,7 @@ export abstract class TypeOrmBaseRepository<T extends { id: string }> {
    */
   async findBy(where: FindOptionsWhere<T> | FindOptionsWhere<T>[]): Promise<T[]> {
     try {
-      return await this.repository.findBy(where);
+      return await withRequestEm(this.repository).findBy(where);
     } catch (error) {
       this.logger.error(`Failed to find ${this.entityName}s:`, error);
       throw new DatabaseException(`Failed to retrieve ${this.entityName}s`, error);
@@ -104,8 +105,9 @@ export abstract class TypeOrmBaseRepository<T extends { id: string }> {
    */
   async create(data: DeepPartial<T>): Promise<T> {
     try {
-      const entity = this.repository.create(data);
-      const saved = await this.repository.save(entity);
+      const repo = withRequestEm(this.repository);
+      const entity = repo.create(data);
+      const saved = await repo.save(entity);
       this.logger.log(`Created new ${this.entityName} with id: ${saved.id}`);
       return saved;
     } catch (error) {
@@ -119,8 +121,9 @@ export abstract class TypeOrmBaseRepository<T extends { id: string }> {
    */
   async createMany(data: DeepPartial<T>[], chunkSize = 100): Promise<T[]> {
     try {
-      const entities = this.repository.create(data);
-      const saved = await this.repository.save(entities, { chunk: chunkSize });
+      const repo = withRequestEm(this.repository);
+      const entities = repo.create(data);
+      const saved = await repo.save(entities, { chunk: chunkSize });
       this.logger.log(`Created ${saved.length} new ${this.entityName}s`);
       return saved;
     } catch (error) {
@@ -134,7 +137,7 @@ export abstract class TypeOrmBaseRepository<T extends { id: string }> {
    */
   async update(id: string, data: QueryDeepPartialEntity<T>): Promise<T> {
     try {
-      await this.repository.update(id, data);
+      await withRequestEm(this.repository).update(id, data);
 
       const updated = await this.findById(id);
       this.logger.log(`Updated ${this.entityName} with id: ${id}`);
@@ -153,7 +156,7 @@ export abstract class TypeOrmBaseRepository<T extends { id: string }> {
    */
   async updateMany(ids: string[], data: QueryDeepPartialEntity<T>): Promise<void> {
     try {
-      await this.repository.createQueryBuilder()
+      await withRequestEm(this.repository).createQueryBuilder()
         .update()
         .set(data)
         .whereInIds(ids)
@@ -171,7 +174,7 @@ export abstract class TypeOrmBaseRepository<T extends { id: string }> {
    */
   async delete(id: string): Promise<void> {
     try {
-      const result = await this.repository.delete(id);
+      const result = await withRequestEm(this.repository).delete(id);
 
       if (result.affected === 0) {
         throw new ResourceNotFoundException(this.entityName, id);
@@ -192,7 +195,7 @@ export abstract class TypeOrmBaseRepository<T extends { id: string }> {
    */
   async deleteMany(ids: string[]): Promise<void> {
     try {
-      await this.repository.delete(ids);
+      await withRequestEm(this.repository).delete(ids);
       this.logger.log(`Deleted ${ids.length} ${this.entityName}s`);
     } catch (error) {
       this.logger.error(`Failed to delete multiple ${this.entityName}s:`, error);
@@ -205,7 +208,7 @@ export abstract class TypeOrmBaseRepository<T extends { id: string }> {
    */
   async softDelete(id: string): Promise<void> {
     try {
-      const result = await this.repository.softDelete(id);
+      const result = await withRequestEm(this.repository).softDelete(id);
 
       if (result.affected === 0) {
         throw new ResourceNotFoundException(this.entityName, id);
@@ -226,7 +229,7 @@ export abstract class TypeOrmBaseRepository<T extends { id: string }> {
    */
   async restore(id: string): Promise<void> {
     try {
-      await this.repository.restore(id);
+      await withRequestEm(this.repository).restore(id);
       this.logger.log(`Restored ${this.entityName} with id: ${id}`);
     } catch (error) {
       this.logger.error(`Failed to restore ${this.entityName}:`, error);
@@ -239,7 +242,7 @@ export abstract class TypeOrmBaseRepository<T extends { id: string }> {
    */
   async exists(id: string): Promise<boolean> {
     try {
-      const count = await this.repository.countBy({ id } as FindOptionsWhere<T>);
+      const count = await withRequestEm(this.repository).countBy({ id } as FindOptionsWhere<T>);
       return count > 0;
     } catch (error) {
       return false;
@@ -251,7 +254,7 @@ export abstract class TypeOrmBaseRepository<T extends { id: string }> {
    */
   async count(where?: FindOptionsWhere<T> | FindOptionsWhere<T>[]): Promise<number> {
     try {
-      return await this.repository.countBy(where || {});
+      return await withRequestEm(this.repository).countBy(where || {});
     } catch (error) {
       this.logger.error(`Failed to count ${this.entityName}s:`, error);
       throw new DatabaseException(`Failed to count ${this.entityName}s`, error);
