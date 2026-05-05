@@ -2,6 +2,7 @@ import { Injectable, Logger, ForbiddenException } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { Benchmark as BenchmarkEntity, SystemUnderTest } from '../../../entities';
+import { withRequestEm } from '../../../common/db/request-em';
 import { BenchmarkQueryService } from './benchmark-query.service';
 import { BenchmarkTagHelper } from './benchmark-tag.helper';
 import { BenchmarkMapper } from './benchmark.mapper';
@@ -138,7 +139,7 @@ export class BenchmarkMutationService {
         updated_by: userId,
       });
 
-      const result = await this.benchmarkRepo.save(benchmark);
+      const result = await withRequestEm(this.benchmarkRepo).save(benchmark);
 
       // Phase 5a: Benchmark.organization_id maps to camelCase property
       // organizationId, so AuditService.dispatch cannot read it off ref
@@ -194,9 +195,9 @@ export class BenchmarkMutationService {
       // Track who updated the resource
       updateData.updated_by = userId;
 
-      await this.benchmarkRepo.update(id, updateData as any);
+      await withRequestEm(this.benchmarkRepo).update(id, updateData as any);
 
-      const result = await this.benchmarkRepo.findOne({
+      const result = await withRequestEm(this.benchmarkRepo).findOne({
         where: { id },
         relations: ['system_under_test'],
       });
@@ -249,17 +250,19 @@ export class BenchmarkMutationService {
         organizationIdOverride: entity.organizationId,
       });
 
-      // Clear references in tables that have FK to benchmarks (prevents FK violation)
-      await this.benchmarkRepo.manager.query(
+      // Clear references in tables that have FK to benchmarks (prevents FK violation).
+      // Use the request-scoped EM via withRequestEm() so these raw queries inherit the
+      // RLS interceptor's transaction-scoped GUCs.
+      await withRequestEm(this.benchmarkRepo).manager.query(
         `UPDATE ds_metric_statistics SET benchmark_id = NULL WHERE benchmark_id = $1`,
         [id],
       );
-      await this.benchmarkRepo.manager.query(
+      await withRequestEm(this.benchmarkRepo).manager.query(
         `UPDATE ds_tracked_differences SET benchmark_id = NULL WHERE benchmark_id = $1`,
         [id],
       );
 
-      const result = await this.benchmarkRepo.delete(id);
+      const result = await withRequestEm(this.benchmarkRepo).delete(id);
       if (result.affected === 0) {
         this.logger.warn(`No benchmark found with id ${id} to delete`);
         return false;
@@ -288,7 +291,7 @@ export class BenchmarkMutationService {
     const targetSystem = await this.validateSystemAccess(dto.targetSystemUnderTestId, userId, roles);
 
     // Fetch source benchmarks
-    let sourceBenchmarks = await this.benchmarkRepo.find({
+    let sourceBenchmarks = await withRequestEm(this.benchmarkRepo).find({
       where: {
         system_under_test_id: dto.sourceSystemUnderTestId,
         test_environment: dto.sourceTestEnvironment,
@@ -308,7 +311,7 @@ export class BenchmarkMutationService {
 
     for (const benchmark of sourceBenchmarks) {
       // Check for existing benchmark in target scope using the same unique constraint fields
-      const existing = await this.benchmarkRepo.findOne({
+      const existing = await withRequestEm(this.benchmarkRepo).findOne({
         where: {
           system_under_test_id: dto.targetSystemUnderTestId,
           test_environment: dto.targetTestEnvironment,
@@ -337,7 +340,7 @@ export class BenchmarkMutationService {
         // payload symmetric with the rest of the service.
         const beforeOverwrite = Object.assign(new BenchmarkEntity(), existing);
 
-        await this.benchmarkRepo.update(existing.id, {
+        await withRequestEm(this.benchmarkRepo).update(existing.id, {
           source: benchmark.source,
           grafana_instance: benchmark.grafana_instance,
           dashboard_label: benchmark.dashboard_label,
@@ -365,7 +368,7 @@ export class BenchmarkMutationService {
 
         // Re-fetch the persisted row so the audit diff sees the actual
         // post-update values (including any DB-side defaults / triggers).
-        const afterOverwrite = await this.benchmarkRepo.findOne({ where: { id: existing.id } });
+        const afterOverwrite = await withRequestEm(this.benchmarkRepo).findOne({ where: { id: existing.id } });
         if (afterOverwrite) {
           this.auditService.logUpdate(
             beforeOverwrite as unknown as OwnedResource,
@@ -418,7 +421,7 @@ export class BenchmarkMutationService {
         updated_by: userId,
       });
 
-      const savedNew = await this.benchmarkRepo.save(newBenchmark);
+      const savedNew = await withRequestEm(this.benchmarkRepo).save(newBenchmark);
 
       // Phase 5a: per-row CREATE audit (one row per persisted benchmark, per
       // the audit architecture's "one row per entity" rule).
@@ -482,7 +485,7 @@ export class BenchmarkMutationService {
         updated_by: userId,
       });
 
-      const result = await this.benchmarkRepo.save(benchmark);
+      const result = await withRequestEm(this.benchmarkRepo).save(benchmark);
 
       // Phase 5a: CREATE audit on the Apdex path (same shape as `create`).
       this.auditService.logCreate(result as unknown as OwnedResource, {
@@ -524,7 +527,7 @@ export class BenchmarkMutationService {
       }
 
       // Get the entity for update (we know it exists and user has access)
-      const existingEntity = await this.benchmarkRepo.findOne({ where: { id } });
+      const existingEntity = await withRequestEm(this.benchmarkRepo).findOne({ where: { id } });
       if (!existingEntity) return null;
 
       if (dto.minApdexScore !== undefined && (dto.minApdexScore < 0 || dto.minApdexScore > 1)) {
@@ -541,9 +544,9 @@ export class BenchmarkMutationService {
       // Track who updated the resource
       updateData.updated_by = userId;
 
-      await this.benchmarkRepo.update(id, updateData as any);
+      await withRequestEm(this.benchmarkRepo).update(id, updateData as any);
 
-      const result = await this.benchmarkRepo.findOne({
+      const result = await withRequestEm(this.benchmarkRepo).findOne({
         where: { id },
         relations: ['system_under_test'],
       });
