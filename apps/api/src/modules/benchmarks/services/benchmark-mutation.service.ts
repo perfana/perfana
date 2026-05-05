@@ -61,7 +61,7 @@ export class BenchmarkMutationService {
     userId: string,
     roles: string[],
   ): Promise<SystemUnderTest> {
-    const system = await this.systemRepo.findOne({ where: { id: systemId } });
+    const system = await withRequestEm(this.systemRepo).findOne({ where: { id: systemId } });
     if (!system) {
       throw new ForbiddenException(`System under test ${systemId} not found`);
     }

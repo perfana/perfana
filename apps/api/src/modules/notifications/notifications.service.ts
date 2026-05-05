@@ -149,7 +149,7 @@ export class NotificationsService {
 
       // Inherit org/team from the parent SUT — NotificationChannel.organization_id
       // is NOT NULL and the camelCase property key is required.
-      const system = await this.systemUnderTestRepository.findOne({
+      const system = await withRequestEm(this.systemUnderTestRepository).findOne({
         where: { id: dto.systemUnderTestId },
       });
       if (!system) {
@@ -286,7 +286,7 @@ export class NotificationsService {
     const channel = await this.findOne(id, userId, roles);
 
     // Get system name for the message
-    const system = await this.systemUnderTestRepository.findOne({
+    const system = await withRequestEm(this.systemUnderTestRepository).findOne({
       where: { id: channel.systemUnderTestId },
     });
     const systemName = system?.name || 'Unknown System';
@@ -341,7 +341,7 @@ export class NotificationsService {
       }
 
       // Get system name for the message
-      const system = await this.systemUnderTestRepository.findOne({
+      const system = await withRequestEm(this.systemUnderTestRepository).findOne({
         where: { id: testRun.systemUnderTestId },
       });
       const systemName = system?.name || 'Unknown System';

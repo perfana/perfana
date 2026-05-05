@@ -152,7 +152,7 @@ export class ReportTemplateService {
 
       // Inherit org/team from the parent SUT — ReportTemplate.organization_id
       // is NOT NULL and the camelCase property key is required.
-      const system = await this.systemRepo.findOne({ where: { id: options.systemId } });
+      const system = await withRequestEm(this.systemRepo).findOne({ where: { id: options.systemId } });
       if (!system) {
         throw new ResourceNotFoundException('SystemUnderTest', options.systemId);
       }

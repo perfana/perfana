@@ -6,7 +6,6 @@
   "apps/api/src/modules/metrics/metrics.controller.ts",
   "apps/api/src/modules/metrics/metrics.service.ts",
   "apps/api/src/modules/provisioning/provisioning.service.ts",
-  "apps/api/src/modules/systems-under-test/systems-under-test.service.ts",
   "apps/api/src/modules/tempo/tempo.service.ts",
   "apps/api/src/modules/test-runs/handlers/create-test-run.handler.ts",
   "apps/api/src/modules/test-runs/handlers/delete-test-run.handler.ts",

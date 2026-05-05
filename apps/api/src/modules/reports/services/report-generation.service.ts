@@ -348,7 +348,7 @@ export class ReportGenerationService {
 
         // Inherit org/team from the parent SUT — ReportTemplate.organization_id
         // is NOT NULL and the camelCase property key is required.
-        const system = await this.systemRepo.findOne({
+        const system = await withRequestEm(this.systemRepo).findOne({
           where: { id: testRun.systemUnderTestId },
         });
         if (!system) {

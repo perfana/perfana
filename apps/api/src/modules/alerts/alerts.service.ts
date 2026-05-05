@@ -125,7 +125,7 @@ export class AlertsService {
    */
   private async processAlert(parsed: ParsedAlert, source: string): Promise<number> {
     // 1. Resolve system under test
-    const sut = await this.sutRepo.findOne({ where: { name: parsed.systemUnderTest } });
+    const sut = await withRequestEm(this.sutRepo).findOne({ where: { name: parsed.systemUnderTest } });
     if (!sut) {
       this.logger.warn(`No system under test found for name "${parsed.systemUnderTest}"`);
       return 0;

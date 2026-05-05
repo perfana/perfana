@@ -62,7 +62,7 @@ export class DeepLinksService {
     userId: string,
     roles: string[],
   ): Promise<boolean> {
-    const system = await this.systemRepo.findOne({ where: { id: systemUnderTestId } });
+    const system = await withRequestEm(this.systemRepo).findOne({ where: { id: systemUnderTestId } });
     if (!system) {
       return false;
     }
@@ -148,7 +148,7 @@ export class DeepLinksService {
     userId: string = '',
     roles: string[] = [],
   ): Promise<DeepLink> {
-    const system = await this.systemRepo.findOne({ where: { id: dto.systemUnderTestId } });
+    const system = await withRequestEm(this.systemRepo).findOne({ where: { id: dto.systemUnderTestId } });
     if (!system) {
       throw new ResourceNotFoundException('System', dto.systemUnderTestId);
     }
@@ -231,7 +231,7 @@ export class DeepLinksService {
     if (!hasTargetAccess) {
       throw new ResourceNotFoundException('System', dto.targetSystemUnderTestId);
     }
-    const targetSystem = await this.systemRepo.findOne({ where: { id: dto.targetSystemUnderTestId } });
+    const targetSystem = await withRequestEm(this.systemRepo).findOne({ where: { id: dto.targetSystemUnderTestId } });
     if (!targetSystem) {
       throw new ResourceNotFoundException('System', dto.targetSystemUnderTestId);
     }

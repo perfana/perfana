@@ -8,6 +8,7 @@ import {
   PyroscopeInstance,
 } from '../../entities';
 import { OwnedResource } from '@perfana/shared/entities';
+import { withRequestEm } from '../../common/db/request-em';
 // SystemUnderTestTestEnvironment and SystemUnderTestWorkload are used in transaction manager.create()
 import { CreateSystemUnderTestDto, UpdatePyroscopeConfigDto } from './dto';
 import { AuthorizationService } from '../../common/services/authorization.service';
@@ -88,7 +89,7 @@ export class SystemsUnderTestService {
       }
 
       // Idempotency check
-      const existing = await this.systemRepo.findOne({
+      const existing = await withRequestEm(this.systemRepo).findOne({
         where: { name: dto.name, organization_id: dto.organizationId },
         relations: ['team'],
       });
@@ -99,9 +100,11 @@ export class SystemsUnderTestService {
         return Object.assign(verified, { conflict: true });
       }
 
-      // Create SUT + environments + workloads in a single transaction
+      // Create SUT + environments + workloads in a single transaction.
+      // Use the request-scoped EM so this nested transaction (savepoint when
+      // RLS is on) inherits the interceptor's GUCs.
       let createdSystem: SystemUnderTestEntity | undefined;
-      await this.systemRepo.manager.transaction(async (manager) => {
+      await withRequestEm(this.systemRepo).manager.transaction(async (manager) => {
         const system = manager.create(SystemUnderTestEntity, {
           name: dto.name,
           description: dto.description ?? '',
@@ -176,7 +179,7 @@ export class SystemsUnderTestService {
 
       if (orgIds === null) {
         // No filtering - admin without explicit org
-        const systems = await this.systemRepo.find({
+        const systems = await withRequestEm(this.systemRepo).find({
           relations: ['team'],
           order: { created_at: 'DESC' },
         });
@@ -188,7 +191,7 @@ export class SystemsUnderTestService {
       const userTeamIds = await this.authzService.getAccessibleTeams(userId);
 
       // Build query with organization filter + team restriction
-      const queryBuilder = this.systemRepo
+      const queryBuilder = withRequestEm(this.systemRepo)
         .createQueryBuilder('system')
         .leftJoinAndSelect('system.team', 'team')
         .where(
@@ -233,7 +236,7 @@ export class SystemsUnderTestService {
     try {
       this.logger.debug(`findOne: id=${id}, userId=${userId}, isGlobalAdmin=${isAdmin}`);
 
-      const system = await this.systemRepo.findOne({
+      const system = await withRequestEm(this.systemRepo).findOne({
         where: { id },
         relations: ['team'],
       });
@@ -287,7 +290,7 @@ export class SystemsUnderTestService {
       this.logger.debug(`findSystemSummary: id=${id}, userId=${userId}, isGlobalAdmin=${isAdmin}`);
 
       // Use TypeORM to get system with its test runs and team
-      const system = await this.systemRepo.findOne({
+      const system = await withRequestEm(this.systemRepo).findOne({
         where: { id },
         relations: ['testRuns', 'team'],
       });
@@ -361,7 +364,7 @@ export class SystemsUnderTestService {
     try {
       this.logger.debug(`findByName: name=${name}, userId=${userId}, isGlobalAdmin=${isAdmin}`);
 
-      const system = await this.systemRepo.findOne({
+      const system = await withRequestEm(this.systemRepo).findOne({
         where: { name },
         relations: ['team'],
       });
@@ -423,7 +426,7 @@ export class SystemsUnderTestService {
         organization_id: organizationId,
       });
 
-      const savedSystem = await this.systemRepo.save(system);
+      const savedSystem = await withRequestEm(this.systemRepo).save(system);
 
       // Phase 5a — log CREATE on the legacy `create` path. (No controller
       // currently calls this method; createSut is the live endpoint. Kept
@@ -492,7 +495,7 @@ export class SystemsUnderTestService {
       updateData.updated_by = userId;
 
       // Use TypeORM's update method for direct column updates
-      await this.systemRepo.update(id, updateData);
+      await withRequestEm(this.systemRepo).update(id, updateData);
 
       this.logger.log(`Updated system under test: ${id} with data: ${JSON.stringify(updateData)}`);
 
@@ -550,7 +553,7 @@ export class SystemsUnderTestService {
       // (raw-SQL cascade), which performs its own logDelete.
       this.auditService.logDelete(system as unknown as OwnedResource);
 
-      await this.systemRepo.remove(system);
+      await withRequestEm(this.systemRepo).remove(system);
 
       this.logger.log(`Deleted system under test: ${system.name} (${id})`);
     } catch (error) {
@@ -587,7 +590,7 @@ export class SystemsUnderTestService {
 
       // 2. Validate pyroscope_instance_id exists if provided
       if (updateDto.pyroscope_instance_id) {
-        const instance = await this.pyroscopeInstanceRepo.findOne({
+        const instance = await withRequestEm(this.pyroscopeInstanceRepo).findOne({
           where: { id: updateDto.pyroscope_instance_id },
         });
 
@@ -626,7 +629,7 @@ export class SystemsUnderTestService {
 
       // 5. Save and return with relations
       // NOTE: updated_by will be set when Phase 4 adds that column
-      const savedSystem = await this.systemRepo.save(system);
+      const savedSystem = await withRequestEm(this.systemRepo).save(system);
 
       this.auditService.logUpdate(
         systemBefore as unknown as OwnedResource,

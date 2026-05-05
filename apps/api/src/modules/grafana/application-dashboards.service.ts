@@ -340,7 +340,7 @@ export class ApplicationDashboardsService {
     try {
       // Inherit org/team from the parent SUT — ApplicationDashboard.organization_id
       // is NOT NULL and the camelCase property key is required.
-      const system = await this.systemRepo.findOne({
+      const system = await withRequestEm(this.systemRepo).findOne({
         where: { id: createDto.systemUnderTestId },
       });
       if (!system) {
