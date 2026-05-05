@@ -21,7 +21,13 @@ export async function createSystemDataSource(
 
   // node-postgres pool exposed via the driver. Property name is `master` for
   // the main pool (replicas live under `slaves`).
-  const driver = ds.driver as unknown as { master?: { on: (e: string, cb: (c: unknown) => void) => void } };
+  const driver = ds.driver as unknown as {
+    master?: {
+      on: (e: string, cb: (c: unknown) => void) => void;
+      idleCount?: number;
+      end?: () => Promise<void>;
+    };
+  };
   const pool = driver.master;
   if (!pool || typeof pool.on !== 'function') {
     throw new Error(
@@ -30,6 +36,8 @@ export async function createSystemDataSource(
     );
   }
   const preamble = buildSystemConnectionPreamble(actor);
+
+  // Hook for future connections — fires when the pool creates a new client.
   pool.on('connect', async (client: unknown) => {
     const c = client as { query: (sql: string) => Promise<unknown>; release: (force?: boolean) => void };
     try {
@@ -47,30 +55,39 @@ export async function createSystemDataSource(
     }
   });
 
-  // Sanity check: assert the role switch works on a single connection.
-  // pool.on('connect') only fires for *new* connections, but ds.initialize()
-  // pre-warms `min` connections before the hook is registered. Pre-warmed
-  // connections bypass the hook, so we use a QueryRunner to pin the preamble
-  // and check to the same connection.
-  const qr = ds.createQueryRunner();
-  await qr.connect();
-  let currentUser: string;
-  try {
-    for (const stmt of preamble) {
-      await qr.query(stmt);
+  // Drain any pre-warmed connections — `ds.initialize()` creates `min` pool
+  // clients BEFORE the `on('connect')` hook is registered, so those bypass
+  // the preamble. We pull each one through a QueryRunner, apply the preamble
+  // manually, release. The first checkout also doubles as the role-switch
+  // sanity check.
+  const preWarmed = pool.idleCount ?? 0;
+  const drainCount = Math.max(preWarmed, 1); // always do at least one for the sanity check
+  let firstCurrentUser: string | undefined;
+  for (let i = 0; i < drainCount; i++) {
+    const qr = ds.createQueryRunner();
+    await qr.connect();
+    try {
+      for (const stmt of preamble) {
+        await qr.query(stmt);
+      }
+      if (i === 0) {
+        const result = await qr.query(`SELECT current_user`) as Array<{ current_user: string }>;
+        firstCurrentUser = result[0]?.current_user;
+      }
+    } finally {
+      await qr.release();
     }
-    const result = await qr.query(`SELECT current_user`) as Array<{ current_user: string }>;
-    currentUser = result[0]?.current_user;
-  } finally {
-    await qr.release();
   }
-  if (currentUser !== 'perfana_system') {
+  if (firstCurrentUser !== 'perfana_system') {
     await ds.destroy();
     throw new Error(
-      `createSystemDataSource: expected role 'perfana_system' after preamble, got '${currentUser}'. ` +
+      `createSystemDataSource: expected role 'perfana_system' after preamble, got '${firstCurrentUser}'. ` +
       `Did the perfana_system role migration run? See packages/shared/src/database/migrations/1778000000000-CreatePerfanaSystemRole.ts.`,
     );
   }
-  logger.log(`system data source initialized as perfana_system for actor=${actor}`);
+  logger.log(
+    `system data source initialized as perfana_system for actor=${actor} ` +
+    `(drained ${drainCount} pre-warmed connection${drainCount === 1 ? '' : 's'})`,
+  );
   return ds;
 }
