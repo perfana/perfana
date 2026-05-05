@@ -148,6 +148,19 @@ When you modify any file listed in `apps/api/.rbac-migration-allowlist.json`, mi
 
 After migrating a site, remove its file from `apps/api/.rbac-migration-allowlist.json` (when the LAST site in that file is migrated) and update the burndown table in the audit log.
 
+## Phase 5b RLS migration (in progress)
+
+When you modify any file listed in `apps/api/.rls-em-migration-allowlist.json`, migrate its owned-resource repository calls to `withRequestEm()` as part of the same PR. The lint rule (`owned-resource-must-use-request-em`) blocks new un-wrapped sites in non-allowlisted files; the allowlist tolerates existing un-migrated files until they're touched.
+
+The transformation is mechanical: `this.<ownedRepo>.<method>(...)` → `withRequestEm(this.<ownedRepo>).<method>(...)`. The wrapper participates in the per-request transaction opened by `RlsTransactionInterceptor`, which sets the GUCs that RLS policies read.
+
+Migration references:
+- [Phase 5b spec](docs/superpowers/specs/2026-05-04-rbac-phase5b-rls-design.md) §4.2
+- [Phase 5b plan](docs/superpowers/plans/2026-05-04-rbac-phase5b-rls.md) — "Standard transformation pattern"
+- [Phase 5b decisions](docs/superpowers/audits/2026-05-04-rls-decisions.md)
+
+After migrating, remove the file from `apps/api/.rls-em-migration-allowlist.json` in the same PR and update the burndown table in the decisions doc.
+
 ## License
 
 By contributing, you agree that your contributions will be licensed under the Apache License 2.0.

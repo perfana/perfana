@@ -20,15 +20,23 @@ module.exports = {
     // grandfathered until migrated.
     // See: docs/superpowers/audits/2026-05-02-audit-phase5a-decisions.md
     'audit-mutation-must-log': 'error',
+    // Phase 5b RLS migration guard: every owned-resource repo call must go
+    // through withRequestEm() so it picks up the RlsTransactionInterceptor's
+    // transaction-scoped GUCs. Files listed in .rls-em-migration-allowlist.json
+    // are grandfathered until migrated.
+    // See: docs/superpowers/audits/2026-05-04-rls-decisions.md
+    'owned-resource-must-use-request-em': 'error',
   },
   overrides: [
     {
-      // Test files may call isGlobalAdmin / mutate without audit to test the
-      // infrastructure services themselves — exempt from both migration guards.
+      // Test files may call isGlobalAdmin / mutate without audit / use raw repos
+      // to test the infrastructure services themselves — exempt from all three
+      // migration guards.
       files: ['**/*.spec.ts', '**/*.test.ts', '**/__tests__/**/*.ts'],
       rules: {
         'no-direct-is-global-admin': 'off',
         'audit-mutation-must-log': 'off',
+        'owned-resource-must-use-request-em': 'off',
       },
     },
   ],
