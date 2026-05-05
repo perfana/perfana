@@ -36,6 +36,16 @@
       "development": "./src/database/index.ts",
       "default": "./dist/database/index.js"
     },
+    "./database/data-source-system": {
+      "types": "./dist/database/data-source-system.d.ts",
+      "development": "./src/database/data-source-system.ts",
+      "default": "./dist/database/data-source-system.js"
+    },
+    "./database/system-connection": {
+      "types": "./dist/database/system-connection.d.ts",
+      "development": "./src/database/system-connection.ts",
+      "default": "./dist/database/system-connection.js"
+    },
     "./realtime": {
       "types": "./dist/realtime/index.d.ts",
       "development": "./src/realtime/index.ts",
