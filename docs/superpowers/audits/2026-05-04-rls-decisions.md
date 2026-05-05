@@ -82,6 +82,10 @@ Tightened RLS helpers and policy expressions to match the post-Phase-4 NOT-NULL 
 - Connection draining at boot for the system data source.
 - `/api/users/me/db-context` health endpoint.
 
-### PR3 (2026-05-04 → ?) — lint rule + allowlist + drift agent
+### PR3 (2026-05-04 → 2026-05-05, merged in #262) — lint rule + allowlist + drift agent
 
 This file. Adds the migration scaffolding so PR4–PR18 can land service-by-service with lint enforcement of the wrapping pattern. No runtime behavior change.
+
+### PR4 (2026-05-05 → ?) — `TypeOrmBaseRepository` to `withRequestEm`
+
+Wraps every `this.repository.X(...)` call in the base class with `withRequestEm(...)`. Single base-class change covers standard CRUD across the 8 custom repositories that extend it. Pattern A files (api-key, application-dashboard, compare-filter-preset, expected-config-change, test-run-configuration, test-run, tracing-service, trends-filter-preset) remain on the allowlist until PR5 migrates their bespoke methods. `getRepository()` accessor is intentionally left unwrapped — it returns the bare repo for subclasses to use directly, and those direct uses are caught by the lint rule on a per-file basis.
