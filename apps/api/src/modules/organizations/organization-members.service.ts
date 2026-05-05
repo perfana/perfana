@@ -229,6 +229,10 @@ export class OrganizationMembersService {
 
       this.auditService.logCreate(savedMember as unknown as OwnedResource);
 
+      // Invalidate authorization cache for the added user and organization
+      await this.authorizationService.invalidateUserCache(dto.userId);
+      await this.authorizationService.invalidateOrganizationCache(dto.organizationId);
+
       this.logger.log(
         `Added user ${dto.userId} to organization ${organization.name} (${dto.organizationId}) with roles: ${dto.roles.join(', ')}`,
       );
