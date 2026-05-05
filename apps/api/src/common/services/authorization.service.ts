@@ -11,6 +11,7 @@ import {
   OwnedResource,
   createdByUser,
 } from '@perfana/shared/entities';
+import { withRequestEm } from '../db/request-em';
 import {
   hasGlobalAdminRole,
   OrganizationRole,
@@ -278,7 +279,7 @@ export class AuthorizationService {
       // For API key users, also check if the API key belongs to this organization
       if (!isMember && userId.startsWith('api-key:')) {
         const apiKeyId = userId.replace('api-key:', '');
-        const apiKeyCount = await this.apiKeyRepository.count({
+        const apiKeyCount = await withRequestEm(this.apiKeyRepository).count({
           where: { id: apiKeyId, organization_id: organizationId },
         });
         isMember = apiKeyCount > 0;
@@ -460,7 +461,7 @@ export class AuthorizationService {
       // For API key users, also include the API key's own organization_id
       if (userId.startsWith('api-key:')) {
         const apiKeyId = userId.replace('api-key:', '');
-        const apiKey = await this.apiKeyRepository.findOne({
+        const apiKey = await withRequestEm(this.apiKeyRepository).findOne({
           where: { id: apiKeyId },
           select: ['organization_id'],
         });

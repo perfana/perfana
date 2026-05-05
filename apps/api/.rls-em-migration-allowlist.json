@@ -1,10 +1,1 @@
-[
-  "apps/api/src/common/services/authorization.service.ts",
-  "apps/api/src/modules/adapt/adapt.service.ts",
-  "apps/api/src/modules/awr/controllers/awr-reports.controller.ts",
-  "apps/api/src/modules/events/events.service.ts",
-  "apps/api/src/modules/metrics/metrics.controller.ts",
-  "apps/api/src/modules/metrics/metrics.service.ts",
-  "apps/api/src/modules/provisioning/provisioning.service.ts",
-  "apps/api/src/modules/tempo/tempo.service.ts",
-]
+[]
