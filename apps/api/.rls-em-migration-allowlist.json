@@ -2,7 +2,6 @@
   "apps/api/src/common/services/authorization.service.ts",
   "apps/api/src/modules/adapt/adapt.service.ts",
   "apps/api/src/modules/awr/controllers/awr-reports.controller.ts",
-  "apps/api/src/modules/compare-presets/compare-presets.service.ts",
   "apps/api/src/modules/deep-links/deep-links.repository.ts",
   "apps/api/src/modules/deep-links/deep-links.service.ts",
   "apps/api/src/modules/dynatrace/dynatrace.repository.ts",
