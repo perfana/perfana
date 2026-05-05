@@ -17,6 +17,7 @@
     "test:cov": "jest --coverage",
     "test:debug": "node --inspect-brk -r tsconfig-paths/register -r ts-node/register node_modules/.bin/jest --runInBand",
     "test:e2e": "jest --config ./test/jest-e2e.json",
+    "test:rls": "USE_TESTCONTAINERS=false DB_ENABLE_RLS_ROLE=true DB_NAME=${DB_NAME:-perfana} jest src/test/rls/ --runInBand",
     "type-check": "tsc --noEmit",
     "clean": "rimraf dist",
     "migration:run": "npx ts-node -r tsconfig-paths/register ../../node_modules/typeorm/cli.js migration:run -d src/data-source.ts",

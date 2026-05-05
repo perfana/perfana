@@ -533,7 +533,7 @@ Key routing rules:
 - lint: turbo run lint
 - test: turbo run test
 - deadcode: npx knip
-- **preflight (pre-push gate): npm run preflight** — runs lint + type-check across the monorepo. Wired to `git push` via `.githooks/pre-push` (auto-installed by `npm install` via the `prepare` script). Local-only by design — turbo's cache makes warm runs sub-second, far faster than waiting on CI. Bypass: `git push --no-verify` (use sparingly).
+- **preflight (pre-push gate): npm run preflight** — runs lint + type-check across the monorepo, then the API RLS test suite (`apps/api/src/test/rls/` with `DB_ENABLE_RLS_ROLE=true`). Wired to `git push` via `.githooks/pre-push` (auto-installed by `npm install` via the `prepare` script). Local-only by design — turbo's cache makes warm runs sub-second, and the RLS suite is ~3s. The RLS step targets the local dev DB (`perfana` on `localhost:5432` by default; override with `DB_NAME`); it requires Phase 5b migrations to be applied (cluster roles `perfana_app`/`perfana_system` + per-DB RLS policies and helper functions). Bypass: `git push --no-verify` (use sparingly).
 
 <!-- gitnexus:start -->
 # GitNexus — Code Intelligence
