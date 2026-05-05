@@ -45,6 +45,7 @@ import { RolesGuard } from './guards/roles.guard';
 import { EnhancedThrottlerGuard } from './guards/enhanced-throttler.guard';
 import { ThrottlerStorageRedisService } from './guards/throttler-storage-redis.service';
 import { AuditContextInterceptor } from './common/interceptors/audit-context.interceptor';
+import { RlsTransactionInterceptor } from './common/interceptors/rls-transaction.interceptor';
 import { RequestContextModule } from './common/context/request-context.module';
 import { CommonModule } from './common/common.module';
 import IORedis from 'ioredis';
@@ -142,6 +143,12 @@ import IORedis from 'ioredis';
     {
       provide: APP_INTERCEPTOR,
       useClass: AuditContextInterceptor,
+    },
+    // Phase 5b: per-request RLS transaction wrapper. Runs after AuditContext
+    // so REQ_CTX is populated; gated on DB_ENABLE_RLS_ROLE=true.
+    {
+      provide: APP_INTERCEPTOR,
+      useClass: RlsTransactionInterceptor,
     },
   ],
 })
