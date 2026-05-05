@@ -2,6 +2,7 @@ import { Injectable, Logger, NotFoundException, ForbiddenException } from '@nest
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { MetricsSource as MetricsSourceEntity } from '../../entities';
+import { withRequestEm } from '../../common/db/request-em';
 import { AuthorizationService } from '../../common/services/authorization.service';
 import { withOrgFilter } from '../../common/utils/with-org-filter';
 import { OwnedResource } from '@perfana/shared';
@@ -56,7 +57,7 @@ export class MetricsSourcesService {
     this.logger.debug(`findAll: userId=${userId}, isGlobalAdmin=${orgIds === null}`);
 
     try {
-      const qb = this.metricsSourceRepo
+      const qb = withRequestEm(this.metricsSourceRepo)
         .createQueryBuilder('ms')
         .leftJoinAndSelect('ms.systemUnderTest', 'sut');
 
@@ -114,7 +115,7 @@ export class MetricsSourcesService {
     this.logger.debug(`findOne: id=${id}, userId=${userId}, isGlobalAdmin=${orgIds === null}`);
 
     try {
-      const qb = this.metricsSourceRepo
+      const qb = withRequestEm(this.metricsSourceRepo)
         .createQueryBuilder('ms')
         .leftJoinAndSelect('ms.systemUnderTest', 'sut')
         .where('ms.id = :id', { id });
@@ -152,7 +153,7 @@ export class MetricsSourcesService {
     this.logger.debug(`findByApplicationDashboardId: adId=${applicationDashboardId}, userId=${userId}`);
 
     try {
-      const qb = this.metricsSourceRepo
+      const qb = withRequestEm(this.metricsSourceRepo)
         .createQueryBuilder('ms')
         .leftJoinAndSelect('ms.systemUnderTest', 'sut')
         .where('ms.externalRef = (SELECT dashboard_uid FROM application_dashboards WHERE id = :adId)', {
@@ -200,9 +201,9 @@ export class MetricsSourcesService {
         createdBy: userId,
       });
 
-      const saved = await this.metricsSourceRepo.save(entity);
+      const saved = await withRequestEm(this.metricsSourceRepo).save(entity);
 
-      const result = await this.metricsSourceRepo.findOne({
+      const result = await withRequestEm(this.metricsSourceRepo).findOne({
         where: { id: saved.id },
         relations: ['systemUnderTest'],
       });
@@ -223,7 +224,7 @@ export class MetricsSourcesService {
     this.logger.debug(`update: id=${id}, userId=${userId}`);
 
     try {
-      const existing = await this.metricsSourceRepo.findOne({ where: { id } });
+      const existing = await withRequestEm(this.metricsSourceRepo).findOne({ where: { id } });
       if (!existing) {
         throw new NotFoundException(`MetricsSource with id ${id} not found`);
       }
@@ -255,7 +256,7 @@ export class MetricsSourcesService {
       if (dto.organizationId !== undefined) updateData.organizationId = dto.organizationId;
       if (dto.teamId !== undefined) updateData.teamId = dto.teamId;
 
-      await this.metricsSourceRepo.update(id, updateData as any);
+      await withRequestEm(this.metricsSourceRepo).update(id, updateData as any);
 
       const result = await this.findOne(id, userId, roles);
       this.logger.log(`Updated metrics source: ${result.display_name} (${result.id}) by user: ${userId}`);
@@ -271,7 +272,7 @@ export class MetricsSourcesService {
     this.logger.debug(`delete: id=${id}, userId=${userId}`);
 
     try {
-      const existing = await this.metricsSourceRepo.findOne({ where: { id } });
+      const existing = await withRequestEm(this.metricsSourceRepo).findOne({ where: { id } });
       if (!existing) {
         throw new NotFoundException(`MetricsSource with id ${id} not found`);
       }
@@ -285,7 +286,7 @@ export class MetricsSourcesService {
         throw new ForbiddenException('You do not have permission to delete this metrics source');
       }
 
-      await this.metricsSourceRepo.delete(id);
+      await withRequestEm(this.metricsSourceRepo).delete(id);
       this.logger.log(`Deleted metrics source: ${existing.displayName} (${id}) by user: ${userId}`);
     } catch (error) {
       if (error instanceof NotFoundException) throw error;

@@ -3,7 +3,6 @@
   "apps/api/src/modules/adapt/adapt.service.ts",
   "apps/api/src/modules/awr/controllers/awr-reports.controller.ts",
   "apps/api/src/modules/events/events.service.ts",
-  "apps/api/src/modules/metrics-sources/metrics-sources.service.ts",
   "apps/api/src/modules/metrics/metrics.controller.ts",
   "apps/api/src/modules/metrics/metrics.service.ts",
   "apps/api/src/modules/notifications/notifications.service.ts",
