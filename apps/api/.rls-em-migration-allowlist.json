@@ -26,6 +26,5 @@
   "apps/api/src/modules/test-runs/services/test-runs-performance-query.service.ts",
   "apps/api/src/modules/test-runs/services/test-runs-stale-detection.service.ts",
   "apps/api/src/modules/test-runs/services/test-runs-timeseries-query.service.ts",
-  "apps/api/src/modules/tracing-instances/tracing-instances.service.ts",
   "apps/api/src/modules/trends-presets/trends-presets.service.ts"
 ]
