@@ -11,6 +11,7 @@ import {
   ProfileBenchmark,
   ProvisionedTemplateDsCompareConfig,
 } from '../../entities';
+import { withRequestEm } from '../../common/db/request-em';
 
 const SYSTEM_ACTOR = 'system:provisioning';
 
@@ -233,12 +234,12 @@ export class ProvisioningService implements OnApplicationBootstrap {
 
     for (const item of items) {
       try {
-        const existing = await this.profileRepo.findOne({
+        const existing = await withRequestEm(this.profileRepo).findOne({
           where: { name: item.name },
         });
 
         if (existing) {
-          await this.profileRepo.update(existing.id, {
+          await withRequestEm(this.profileRepo).update(existing.id, {
             description: item.description,
             tags: item.tags,
             readOnly: true,
@@ -247,7 +248,7 @@ export class ProvisioningService implements OnApplicationBootstrap {
           });
           result.updated++;
         } else {
-          await this.profileRepo.insert({
+          await withRequestEm(this.profileRepo).insert({
             name: item.name,
             description: item.description,
             tags: item.tags,
@@ -283,7 +284,7 @@ export class ProvisioningService implements OnApplicationBootstrap {
       try {
         const grafanaLabel = item.grafana ?? 'Default';
 
-        const existing = await this.dashboardRepo.findOne({
+        const existing = await withRequestEm(this.dashboardRepo).findOne({
           where: {
             profile: item.profile,
             dashboardUid: item.dashboardUid,
@@ -313,13 +314,13 @@ export class ProvisioningService implements OnApplicationBootstrap {
         };
 
         if (existing) {
-          await this.dashboardRepo.update(existing.id, {
+          await withRequestEm(this.dashboardRepo).update(existing.id, {
             ...values,
             updatedBy: SYSTEM_ACTOR,
           });
           result.updated++;
         } else {
-          await this.dashboardRepo.insert({
+          await withRequestEm(this.dashboardRepo).insert({
             ...values,
             createdBy: SYSTEM_ACTOR,
             updatedBy: SYSTEM_ACTOR,
@@ -352,7 +353,7 @@ export class ProvisioningService implements OnApplicationBootstrap {
         const grafanaLabel = item.grafana ?? 'Default';
 
         // Resolve profile name → profile_id
-        const profile = await this.profileRepo.findOne({
+        const profile = await withRequestEm(this.profileRepo).findOne({
           where: { name: item.profile },
         });
         if (!profile) {
@@ -364,7 +365,7 @@ export class ProvisioningService implements OnApplicationBootstrap {
         }
 
         // Resolve profile + dashboardUid + grafana → profile_dashboard_id
-        const dashboard = await this.dashboardRepo.findOne({
+        const dashboard = await withRequestEm(this.dashboardRepo).findOne({
           where: {
             profile: item.profile,
             dashboardUid: item.dashboardUid,
@@ -382,7 +383,7 @@ export class ProvisioningService implements OnApplicationBootstrap {
         const workloadPattern = item.addForWorkloadsMatchingRegex ?? '.*';
 
         // Find existing by composite key
-        const existing = await this.benchmarkRepo.findOne({
+        const existing = await withRequestEm(this.benchmarkRepo).findOne({
           where: {
             profile_id: profile.id,
             profile_dashboard_id: dashboard.id,
@@ -416,13 +417,13 @@ export class ProvisioningService implements OnApplicationBootstrap {
         };
 
         if (existing) {
-          await this.benchmarkRepo.update(existing.id, {
+          await withRequestEm(this.benchmarkRepo).update(existing.id, {
             ...values,
             updatedBy: SYSTEM_ACTOR,
           });
           result.updated++;
         } else {
-          await this.benchmarkRepo.insert({
+          await withRequestEm(this.benchmarkRepo).insert({
             ...values,
             createdBy: SYSTEM_ACTOR,
             updatedBy: SYSTEM_ACTOR,

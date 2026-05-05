@@ -2,6 +2,7 @@ import { Injectable, NotFoundException, ForbiddenException } from '@nestjs/commo
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { AlertTagFilter } from '../../entities';
+import { withRequestEm } from '../../common/db/request-em';
 import { AuthorizationService } from '../../common/services/authorization.service';
 import { withOrgFilter } from '../../common/utils/with-org-filter';
 import { OwnedResource } from '@perfana/shared';
@@ -18,7 +19,7 @@ export class AlertTagFiltersService {
   async findAll(userId: string, roles: string[]): Promise<AlertTagFilter[]> {
     const orgIds = await withOrgFilter(userId, roles, this.authzService);
 
-    const qb = this.filterRepo
+    const qb = withRequestEm(this.filterRepo)
       .createQueryBuilder('f')
       .orderBy('f.created_at', 'DESC');
 
@@ -33,7 +34,7 @@ export class AlertTagFiltersService {
   }
 
   async findOne(id: string, userId: string, roles: string[]): Promise<AlertTagFilter> {
-    const filter = await this.filterRepo.findOne({ where: { id } });
+    const filter = await withRequestEm(this.filterRepo).findOne({ where: { id } });
     if (!filter) {
       throw new NotFoundException(`Alert tag filter ${id} not found`);
     }
@@ -78,7 +79,7 @@ export class AlertTagFiltersService {
       updatedBy: userId,
     });
 
-    return this.filterRepo.save(filter);
+    return withRequestEm(this.filterRepo).save(filter);
   }
 
   async update(id: string, dto: UpdateAlertTagFilterDto, userId: string, roles: string[]): Promise<AlertTagFilter> {
@@ -93,11 +94,11 @@ export class AlertTagFiltersService {
     if (dto.workload !== undefined) filter.workload = dto.workload;
     filter.updatedBy = userId;
 
-    return this.filterRepo.save(filter);
+    return withRequestEm(this.filterRepo).save(filter);
   }
 
   async remove(id: string, userId: string, roles: string[]): Promise<void> {
     await this.findOne(id, userId, roles);
-    await this.filterRepo.delete(id);
+    await withRequestEm(this.filterRepo).delete(id);
   }
 }

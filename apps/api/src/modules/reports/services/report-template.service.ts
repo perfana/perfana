@@ -8,6 +8,7 @@ import {
   SystemUnderTest,
 } from '@perfana/shared';
 import type { OwnedResource } from '@perfana/shared';
+import { withRequestEm } from '../../../common/db/request-em';
 import {
   ResourceNotFoundException,
   DatabaseException,
@@ -124,7 +125,7 @@ export class ReportTemplateService {
       this.validateSections(options.sections);
 
       // Check for existing template with same name in scope
-      const existing = await this.templateRepo.findOne({
+      const existing = await withRequestEm(this.templateRepo).findOne({
         where: {
           name: options.name,
           system_id: options.systemId,
@@ -151,7 +152,7 @@ export class ReportTemplateService {
 
       // Inherit org/team from the parent SUT — ReportTemplate.organization_id
       // is NOT NULL and the camelCase property key is required.
-      const system = await this.systemRepo.findOne({ where: { id: options.systemId } });
+      const system = await withRequestEm(this.systemRepo).findOne({ where: { id: options.systemId } });
       if (!system) {
         throw new ResourceNotFoundException('SystemUnderTest', options.systemId);
       }
@@ -171,7 +172,7 @@ export class ReportTemplateService {
         teamId: system.team_id,
       });
 
-      const savedTemplate = await this.templateRepo.save(template);
+      const savedTemplate = await withRequestEm(this.templateRepo).save(template);
 
       this.auditService.logCreate(savedTemplate as unknown as OwnedResource);
 
@@ -202,7 +203,7 @@ export class ReportTemplateService {
    */
   async findById(templateId: string): Promise<ReportTemplate> {
     try {
-      const template = await this.templateRepo.findOne({
+      const template = await withRequestEm(this.templateRepo).findOne({
         where: { id: templateId },
       });
 
@@ -258,7 +259,7 @@ export class ReportTemplateService {
       where.is_adhoc = false;
 
       // Handle search across name and description
-      let queryBuilder = this.templateRepo.createQueryBuilder('template');
+      let queryBuilder = withRequestEm(this.templateRepo).createQueryBuilder('template');
 
       if (Object.keys(where).length > 0) {
         queryBuilder = queryBuilder.where(where);
@@ -313,7 +314,7 @@ export class ReportTemplateService {
     workload: string,
   ): Promise<ReportTemplate[]> {
     try {
-      return await this.templateRepo.find({
+      return await withRequestEm(this.templateRepo).find({
         where: {
           system_id: systemId,
           test_environment: testEnvironment,
@@ -341,7 +342,7 @@ export class ReportTemplateService {
     workload: string,
   ): Promise<ReportTemplate | null> {
     try {
-      return await this.templateRepo.findOne({
+      return await withRequestEm(this.templateRepo).findOne({
         where: {
           system_id: systemId,
           test_environment: testEnvironment,
@@ -409,7 +410,7 @@ export class ReportTemplateService {
 
       // Check for name conflict if name is being updated
       if (options.name && options.name !== template.name) {
-        const existing = await this.templateRepo.findOne({
+        const existing = await withRequestEm(this.templateRepo).findOne({
           where: {
             name: options.name,
             system_id: template.system_id,
@@ -465,7 +466,7 @@ export class ReportTemplateService {
       // mutating path.
       const before = Object.assign(new ReportTemplate(), template);
 
-      await this.templateRepo.update(templateId, updateData as Record<string, unknown>);
+      await withRequestEm(this.templateRepo).update(templateId, updateData as Record<string, unknown>);
 
       const updatedTemplate = await this.findById(templateId);
 
@@ -597,7 +598,7 @@ export class ReportTemplateService {
 
       this.auditService.logDelete(template as unknown as OwnedResource);
 
-      await this.templateRepo.remove(template);
+      await withRequestEm(this.templateRepo).remove(template);
 
       this.logger.log(`Deleted report template ${templateId}`);
     } catch (error) {
@@ -799,7 +800,7 @@ export class ReportTemplateService {
     excludeId?: string,
   ): Promise<void> {
     try {
-      let queryBuilder = this.templateRepo
+      let queryBuilder = withRequestEm(this.templateRepo)
         .createQueryBuilder()
         .update(ReportTemplate)
         .set({ is_default: false })

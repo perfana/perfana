@@ -2,6 +2,7 @@ import { Injectable, NotFoundException, ForbiddenException, Logger } from '@nest
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository, Brackets } from 'typeorm';
 import { CompareFilterPreset, ApplicationDashboard, TestRun as TestRunEntity } from '../../entities';
+import { withRequestEm } from '../../common/db/request-em';
 import { OwnedResource } from '@perfana/shared';
 import { CreateComparePresetDto } from './dto/create-compare-preset.dto';
 import { UpdateComparePresetDto } from './dto/update-compare-preset.dto';
@@ -52,7 +53,7 @@ export class ComparePresetsService {
       LIMIT 1
     `;
 
-    const result = await this.testRunRepo.query(query, [testRunId, orgIds]);
+    const result = await withRequestEm(this.testRunRepo).query(query, [testRunId, orgIds]);
     return result && result.length > 0;
   }
 
@@ -99,7 +100,7 @@ export class ComparePresetsService {
       let organizationId: string;
       let teamId: string | undefined;
       if (parentTestRunId) {
-        const parentTestRun = await this.testRunRepo.findOne({
+        const parentTestRun = await withRequestEm(this.testRunRepo).findOne({
           where: { testRunId: parentTestRunId },
           relations: ['systemUnderTest'],
         });
@@ -138,7 +139,7 @@ export class ComparePresetsService {
         teamId,
       } as any);
 
-      const savedPreset = await this.comparePresetRepo.save(preset);
+      const savedPreset = await withRequestEm(this.comparePresetRepo).save(preset);
 
       // Phase 5a: CompareFilterPreset.organization_id maps to camelCase
       // property organizationId, so AuditService.dispatch cannot read it off
@@ -168,7 +169,7 @@ export class ComparePresetsService {
       // Resolve SUT context from the provided testRunId
       let sutContext: { systemUnderTestId: string; testEnvironment: string; workload: string } | null = null;
       if (currentTestRunId) {
-        const testRun = await this.testRunRepo.findOne({
+        const testRun = await withRequestEm(this.testRunRepo).findOne({
           where: { testRunId: currentTestRunId },
           select: ['systemUnderTestId', 'testEnvironment', 'workload'],
         });
@@ -182,7 +183,7 @@ export class ComparePresetsService {
       }
 
       // Get presets — admins see all, others see own + global
-      const queryBuilder = this.comparePresetRepo
+      const queryBuilder = withRequestEm(this.comparePresetRepo)
         .createQueryBuilder('preset')
         .leftJoinAndSelect('preset.applicationDashboard', 'dashboard');
 
@@ -263,7 +264,7 @@ export class ComparePresetsService {
           // Fetch test run data if baseline_test_run_id exists
           if (preset.baselineTestRunId) {
             try {
-              testRunData = await this.testRunRepo.findOne({
+              testRunData = await withRequestEm(this.testRunRepo).findOne({
                 where: { testRunId: preset.baselineTestRunId },
                 select: ['applicationRelease', 'annotations']
               });
@@ -292,7 +293,7 @@ export class ComparePresetsService {
     this.logger.log(`Fetching compare preset: ${id}${orgIds === null ? ' (admin)' : ''}`);
 
     try {
-      const preset = await this.comparePresetRepo
+      const preset = await withRequestEm(this.comparePresetRepo)
         .createQueryBuilder('preset')
         .leftJoinAndSelect('preset.applicationDashboard', 'dashboard')
         .where('preset.id = :id', { id })
@@ -327,7 +328,7 @@ export class ComparePresetsService {
       let testRunData = null;
       if (preset.baselineTestRunId) {
         try {
-          testRunData = await this.testRunRepo.findOne({
+          testRunData = await withRequestEm(this.testRunRepo).findOne({
             where: { testRunId: preset.baselineTestRunId },
             select: ['applicationRelease', 'annotations']
           });
@@ -366,7 +367,7 @@ export class ComparePresetsService {
       // service-layer `findOne` returns a DTO (which loses the constructor
       // prototype that `AuditService.dispatch` consults to resolve
       // auditableFields); fetch the raw entity directly for the diff input.
-      const before = await this.comparePresetRepo.findOne({ where: { id } });
+      const before = await withRequestEm(this.comparePresetRepo).findOne({ where: { id } });
 
       // Validate access to new test run references for non-admin users
       if (orgIds !== null) {
@@ -398,13 +399,13 @@ export class ComparePresetsService {
       if (updateComparePresetDto.series_config !== undefined) updateData.seriesConfig = updateComparePresetDto.series_config as any;
       if (updateComparePresetDto.is_global !== undefined) updateData.isGlobal = updateComparePresetDto.is_global;
 
-      await this.comparePresetRepo.update(
+      await withRequestEm(this.comparePresetRepo).update(
         { id, createdBy: userId },
         updateData as any
       );
 
       // Fetch updated preset
-      const updated = await this.comparePresetRepo.findOne({
+      const updated = await withRequestEm(this.comparePresetRepo).findOne({
         where: { id },
         relations: ['applicationDashboard']
       });
@@ -428,7 +429,7 @@ export class ComparePresetsService {
       let testRunData = null;
       if (updated.baselineTestRunId) {
         try {
-          testRunData = await this.testRunRepo.findOne({
+          testRunData = await withRequestEm(this.testRunRepo).findOne({
             where: { testRunId: updated.baselineTestRunId },
             select: ['applicationRelease', 'annotations']
           });
@@ -464,14 +465,14 @@ export class ComparePresetsService {
       // Phase 5a: load the raw entity for the audit diff (`existing` is a DTO
       // and would lose the constructor prototype). Log DELETE before the
       // remove so the diff captures the pre-delete state.
-      const entity = await this.comparePresetRepo.findOne({ where: { id } });
+      const entity = await withRequestEm(this.comparePresetRepo).findOne({ where: { id } });
       if (entity) {
         this.auditService.logDelete(entity as unknown as OwnedResource, {
           organizationIdOverride: entity.organizationId,
         });
       }
 
-      await this.comparePresetRepo.delete({
+      await withRequestEm(this.comparePresetRepo).delete({
         id,
         createdBy: userId
       });

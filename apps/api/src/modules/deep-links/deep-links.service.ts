@@ -10,6 +10,7 @@ import { UpdateDeepLinkDto } from './dto/update-deep-link.dto';
 import { CreateGenericDeepLinkDto } from './dto/create-generic-deep-link.dto';
 import { CopyDeepLinksDto } from './dto/copy-deep-links.dto';
 import { TestRunConfiguration, TestRun as TestRunEntity, SystemUnderTest, Profile } from '../../entities';
+import { withRequestEm } from '../../common/db/request-em';
 import { ResourceNotFoundException } from '../../common/exceptions/business.exception';
 import { AuthorizationService } from '../../common/services/authorization.service';
 import { AuditService } from '../audit/audit.service';
@@ -61,7 +62,7 @@ export class DeepLinksService {
     userId: string,
     roles: string[],
   ): Promise<boolean> {
-    const system = await this.systemRepo.findOne({ where: { id: systemUnderTestId } });
+    const system = await withRequestEm(this.systemRepo).findOne({ where: { id: systemUnderTestId } });
     if (!system) {
       return false;
     }
@@ -147,7 +148,7 @@ export class DeepLinksService {
     userId: string = '',
     roles: string[] = [],
   ): Promise<DeepLink> {
-    const system = await this.systemRepo.findOne({ where: { id: dto.systemUnderTestId } });
+    const system = await withRequestEm(this.systemRepo).findOne({ where: { id: dto.systemUnderTestId } });
     if (!system) {
       throw new ResourceNotFoundException('System', dto.systemUnderTestId);
     }
@@ -230,7 +231,7 @@ export class DeepLinksService {
     if (!hasTargetAccess) {
       throw new ResourceNotFoundException('System', dto.targetSystemUnderTestId);
     }
-    const targetSystem = await this.systemRepo.findOne({ where: { id: dto.targetSystemUnderTestId } });
+    const targetSystem = await withRequestEm(this.systemRepo).findOne({ where: { id: dto.targetSystemUnderTestId } });
     if (!targetSystem) {
       throw new ResourceNotFoundException('System', dto.targetSystemUnderTestId);
     }
@@ -431,7 +432,7 @@ export class DeepLinksService {
     try {
       // Get previous test run
       if (url.includes('{perfana-previous-test-run-id}')) {
-        const previousTestRun = await this.testRunRepo.findOne({
+        const previousTestRun = await withRequestEm(this.testRunRepo).findOne({
           where: {
             systemUnderTestId: testRun.system_under_test_id,
             testEnvironment: testRun.test_environment,
@@ -462,7 +463,7 @@ export class DeepLinksService {
   async createGeneric(dto: CreateGenericDeepLinkDto): Promise<GenericDeepLink> {
     // Inherit org/team from the parent Profile (matched by name) — GenericDeepLink.
     // organization_id is NOT NULL.
-    const profile = await this.profileRepo.findOne({ where: { name: dto.profile } });
+    const profile = await withRequestEm(this.profileRepo).findOne({ where: { name: dto.profile } });
     if (!profile) {
       throw new ResourceNotFoundException('Profile', dto.profile);
     }

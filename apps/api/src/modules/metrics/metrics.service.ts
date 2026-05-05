@@ -10,6 +10,7 @@ import {
   TestRun as TestRunEntity,
   ApplicationDashboard,
 } from '../../entities';
+import { withRequestEm } from '../../common/db/request-em';
 import { AuthorizationService } from '../../common/services/authorization.service';
 import { withOrgFilter } from '../../common/utils/with-org-filter';
 import type { OwnedResource } from '@perfana/shared';
@@ -81,7 +82,7 @@ export class MetricsService {
    * application_dashboards table.  Returns undefined when no match is found.
    */
   private async resolveApplicationDashboardId(metricsSourceId: string): Promise<string | undefined> {
-    const row = await this.applicationDashboardRepo.findOne({
+    const row = await withRequestEm(this.applicationDashboardRepo).findOne({
       where: { metricsSourceId },
       select: ['id'],
     });
@@ -93,7 +94,7 @@ export class MetricsService {
     userId: string,
     roles: string[],
   ): Promise<boolean> {
-    const result = await this.testRunRepo.query(
+    const result = await withRequestEm(this.testRunRepo).query(
       `SELECT sut.organization_id, sut.created_by
        FROM test_runs tr
        INNER JOIN systems_under_test sut ON sut.id = tr.system_under_test_id
@@ -342,7 +343,7 @@ export class MetricsService {
       const orgIds = await withOrgFilter(userId, roles, this.authzService);
 
       // First, get test_run_ids that match the criteria from test_runs table
-      const queryBuilder = this.testRunRepo
+      const queryBuilder = withRequestEm(this.testRunRepo)
         .createQueryBuilder('testRun')
         .leftJoinAndSelect('testRun.systemUnderTest', 'sut')
         .select([
@@ -527,7 +528,7 @@ export class MetricsService {
       const orgIds = await withOrgFilter(userId, roles, this.authzService);
 
       // First, get test_run_ids that match the criteria from test_runs table
-      const queryBuilder = this.testRunRepo
+      const queryBuilder = withRequestEm(this.testRunRepo)
         .createQueryBuilder('testRun')
         .leftJoinAndSelect('testRun.systemUnderTest', 'sut')
         .select([
@@ -713,7 +714,7 @@ export class MetricsService {
 
       // Step 2: Get test run details for version and annotations enrichment (control group + current test run)
       const allTestRunIds = [...controlGroupTestRuns, testRunId];
-      const testRuns = await this.testRunRepo.find({
+      const testRuns = await withRequestEm(this.testRunRepo).find({
         where: {
           testRunId: In(allTestRunIds)
         },

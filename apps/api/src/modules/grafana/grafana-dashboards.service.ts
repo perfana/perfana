@@ -9,6 +9,7 @@ import {
   TemplatingVariableDto
 } from './dto/grafana-dashboard.dto';
 import { GrafanaDashboard as GrafanaDashboardEntity, GrafanaInstance as GrafanaInstanceEntity } from '../../entities';
+import { withRequestEm } from '../../common/db/request-em';
 import { AuthorizationService } from '../../common/services/authorization.service';
 import { withOrgFilter } from '../../common/utils/with-org-filter';
 import { OwnedResource } from '@perfana/shared';
@@ -84,7 +85,7 @@ export class GrafanaDashboardsService {
     this.logger.debug(`findAll: userId=${userId}, isGlobalAdmin=${orgIds === null}`);
 
     try {
-      const queryBuilder = this.grafanaDashboardRepo.createQueryBuilder('gd');
+      const queryBuilder = withRequestEm(this.grafanaDashboardRepo).createQueryBuilder('gd');
 
       // Organization filtering: non-admin users only see dashboards belonging to
       // their organizations OR dashboards with no organization (legacy/shared data).
@@ -205,7 +206,7 @@ export class GrafanaDashboardsService {
     this.logger.debug(`findOne: id=${id}, userId=${userId}`);
 
     try {
-      const result = await this.grafanaDashboardRepo.findOne({ where: { id } });
+      const result = await withRequestEm(this.grafanaDashboardRepo).findOne({ where: { id } });
 
       if (!result) {
         throw new NotFoundException(`Grafana dashboard with ID ${id} not found`);
@@ -262,7 +263,7 @@ export class GrafanaDashboardsService {
     try {
       // Inherit org/team from the parent GrafanaInstance — GrafanaDashboard.
       // organization_id is NOT NULL and the camelCase property key is required.
-      const grafanaInstance = await this.grafanaInstanceRepo.findOne({
+      const grafanaInstance = await withRequestEm(this.grafanaInstanceRepo).findOne({
         where: { id: createDto.grafanaInstanceId },
       });
       if (!grafanaInstance) {
@@ -287,7 +288,7 @@ export class GrafanaDashboardsService {
         teamId: grafanaInstance.teamId,
       });
 
-      const result = await this.grafanaDashboardRepo.save(dashboard);
+      const result = await withRequestEm(this.grafanaDashboardRepo).save(dashboard);
 
       // Phase 5a: GrafanaDashboard.organization_id maps to camelCase property
       // organizationId, so AuditService.dispatch cannot read it directly —
@@ -334,7 +335,7 @@ export class GrafanaDashboardsService {
       // diff) and the pre-update snapshot. Replaces the previous
       // `findOne(id, userId, roles)` call — same DB round-trip, but the
       // service-layer findOne mapped to a DTO and lost the prototype.
-      const before = await this.grafanaDashboardRepo.findOne({ where: { id } });
+      const before = await withRequestEm(this.grafanaDashboardRepo).findOne({ where: { id } });
       if (!before) {
         throw new NotFoundException(`Grafana dashboard with ID ${id} not found`);
       }
@@ -359,10 +360,10 @@ export class GrafanaDashboardsService {
       if (updateDto.usedBySut !== undefined) updateData.usedBySut = updateDto.usedBySut;
 
       // Update with TypeORM
-      await this.grafanaDashboardRepo.update(id, updateData as any);
+      await withRequestEm(this.grafanaDashboardRepo).update(id, updateData as any);
 
       // Fetch the updated record
-      const result = await this.grafanaDashboardRepo.findOne({ where: { id } });
+      const result = await withRequestEm(this.grafanaDashboardRepo).findOne({ where: { id } });
 
       if (!result) {
         throw new Error('Failed to fetch updated Grafana dashboard');
@@ -411,7 +412,7 @@ export class GrafanaDashboardsService {
       // Load the entity directly so we have the prototype (for auditableFields
       // resolution). Replaces `findOne(id, userId, roles)` — same DB round-trip
       // but keeps the entity instance instead of the mapped DTO.
-      const entity = await this.grafanaDashboardRepo.findOne({ where: { id } });
+      const entity = await withRequestEm(this.grafanaDashboardRepo).findOne({ where: { id } });
       if (!entity) {
         throw new NotFoundException(`Grafana dashboard with ID ${id} not found`);
       }
@@ -423,7 +424,7 @@ export class GrafanaDashboardsService {
         organizationIdOverride: entity.organizationId,
       });
 
-      await this.grafanaDashboardRepo.delete(id);
+      await withRequestEm(this.grafanaDashboardRepo).delete(id);
 
       this.logger.log(`Deleted Grafana dashboard: ${id} by user: ${userId}`);
     } catch (error) {

@@ -1,6 +1,7 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository, LessThan } from 'typeorm';
+import { withRequestEm } from '../../../common/db/request-em';
 import { ConfigService } from '@nestjs/config';
 import { TestRun as TestRunEntity } from '../../../entities';
 import { QueueService } from '../../queue/queue.service';
@@ -37,7 +38,7 @@ export class TestRunsStaleDetectionService {
       const staleThresholdDate = new Date(Date.now() - this.staleTimeoutMinutes * 60 * 1000);
 
       // Find incomplete test runs that haven't been updated in a while and aren't already marked as stale
-      const staleTestRuns = await this.testRunRepo.find({
+      const staleTestRuns = await withRequestEm(this.testRunRepo).find({
         where: {
           completed: false,
           isStale: false,
@@ -87,7 +88,7 @@ export class TestRunsStaleDetectionService {
   private async markTestRunAsStale(testRun: TestRunEntity): Promise<void> {
     const now = new Date();
 
-    await this.testRunRepo.update(testRun.id, {
+    await withRequestEm(this.testRunRepo).update(testRun.id, {
       isStale: true,
       staleDetectedAt: now,
       completed: true,
@@ -100,7 +101,7 @@ export class TestRunsStaleDetectionService {
 
     // Emit real-time event so the frontend moves the test run from "Running" to "Completed"
     try {
-      const updatedEntity = await this.testRunRepo.findOne({
+      const updatedEntity = await withRequestEm(this.testRunRepo).findOne({
         where: { id: testRun.id },
         relations: ['systemUnderTest'],
       });
@@ -183,7 +184,7 @@ export class TestRunsStaleDetectionService {
     const oneDayAgo = new Date(Date.now() - 24 * 60 * 60 * 1000);
 
     // Build query for total stale count with organization filtering
-    const totalStaleQuery = this.testRunRepo
+    const totalStaleQuery = withRequestEm(this.testRunRepo)
       .createQueryBuilder('tr')
       .where('tr.isStale = :isStale', { isStale: true });
 
@@ -197,7 +198,7 @@ export class TestRunsStaleDetectionService {
     const totalStale = await totalStaleQuery.getCount();
 
     // Build query for stale in last 24 hours with organization filtering
-    const staleInLast24HoursQuery = this.testRunRepo
+    const staleInLast24HoursQuery = withRequestEm(this.testRunRepo)
       .createQueryBuilder('tr')
       .where('tr.isStale = :isStale', { isStale: true })
       .andWhere('tr.staleDetectedAt >= :oneDayAgo', { oneDayAgo });

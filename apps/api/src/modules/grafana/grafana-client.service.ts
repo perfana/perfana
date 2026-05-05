@@ -2,6 +2,7 @@ import { Injectable, Logger, BadRequestException } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { GrafanaInstance as GrafanaInstanceEntity } from '../../entities';
+import { withRequestEm } from '../../common/db/request-em';
 import { validateGrafanaUrl } from '../../common/security';
 
 interface GrafanaInstance {
@@ -34,7 +35,7 @@ export class GrafanaClientService {
   ) {}
 
   async getGrafanaInstance(grafanaInstanceId: string): Promise<GrafanaInstance> {
-    const result = await this.grafanaInstanceRepo.findOne({ where: { id: grafanaInstanceId } });
+    const result = await withRequestEm(this.grafanaInstanceRepo).findOne({ where: { id: grafanaInstanceId } });
 
     if (!result) {
       throw new Error(`Grafana instance with ID ${grafanaInstanceId} not found`);

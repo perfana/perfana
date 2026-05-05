@@ -7,6 +7,7 @@ import {
   DsAdaptResults,
   TestRun as TestRunEntity
 } from '../../entities';
+import { withRequestEm } from '../../common/db/request-em';
 import {
   TrackedRegressionDto,
   TrackedRegressionsResponseDto,
@@ -127,7 +128,7 @@ export class AdaptService {
       LIMIT 1
     `;
 
-    const result = await this.testRunRepo.query(query, [testRunId, orgIds]);
+    const result = await withRequestEm(this.testRunRepo).query(query, [testRunId, orgIds]);
     return result && result.length > 0;
   }
 
@@ -312,7 +313,7 @@ export class AdaptService {
 
         // Try to fetch test run metadata
         try {
-          const testRunData = await this.testRunRepo.findOne({
+          const testRunData = await withRequestEm(this.testRunRepo).findOne({
             where: { testRunId: dbResult.tracked_test_run_id }
           });
 

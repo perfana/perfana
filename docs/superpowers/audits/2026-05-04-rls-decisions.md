@@ -51,19 +51,7 @@ False-positive pruning: `apps/api/src/common/services/authorized-base.service.ts
 | PR3 | (initial allowlist) | 0 | 58 |
 | PR4 | TypeOrmBaseRepository (standard CRUD across 8 Pattern A repos) | 1 file (base class) | 58 (Pattern A files stay until PR5 covers bespoke methods) |
 | PR5 | Pattern A bespoke methods (8 custom repos) | 8 files | 51 (7 came off the allowlist; test-run-configuration was never on it because TestRunConfiguration is not an owned-resource entity, but the plan still required wrapping for RLS-readiness consistency) |
-| PR6 | Pattern B services (initial batch) | TBD | TBD |
-| PR7 | dynatrace + grafana batch | TBD | TBD |
-| PR8 | tracing + pyroscope | TBD | TBD |
-| PR9 | presets (graph, compare, trends) | TBD | TBD |
-| PR10 | deep-links + generic-deep-links | TBD | TBD |
-| PR11 | notifications + alerts | TBD | TBD |
-| PR12 | profiles + profile-children | TBD | TBD |
-| PR13 | systems-under-test | TBD | TBD |
-| PR14 | test-runs handlers + services (largest) | TBD | TBD |
-| PR15 | benchmarks + expected-config-change | TBD | TBD |
-| PR16 | reports | TBD | TBD |
-| PR17 | metrics-sources + sparse-metric-exclusion + alert-tag-filters | TBD | TBD |
-| PR18 | provisioning + cleanup | TBD | TBD |
+| PR6 | Pattern B services — all remaining files (alerts, benchmarks, compare-presets, deep-links, dynatrace, grafana, graph-presets, metrics-sources, notifications, profiles, pyroscope, reports, systems-under-test, test-runs, tracing-instances, trends-presets, plus extras: adapt, awr, events, metrics, tempo, provisioning, authorization) | 51 files (17 commits PR6.1–PR6.17) | 0 — Phase 5b PR6 complete; allowlist drained pending tests + activation |
 
 ## PR notes
 
@@ -89,3 +77,19 @@ This file. Adds the migration scaffolding so PR4–PR18 can land service-by-serv
 ### PR4 (2026-05-05 → ?) — `TypeOrmBaseRepository` to `withRequestEm`
 
 Wraps every `this.repository.X(...)` call in the base class with `withRequestEm(...)`. Single base-class change covers standard CRUD across the 8 custom repositories that extend it. Pattern A files (api-key, application-dashboard, compare-filter-preset, expected-config-change, test-run-configuration, test-run, tracing-service, trends-filter-preset) remain on the allowlist until PR5 migrates their bespoke methods. `getRepository()` accessor is intentionally left unwrapped — it returns the bare repo for subclasses to use directly, and those direct uses are caught by the lint rule on a per-file basis.
+
+### PR5 (2026-05-05 → 2026-05-05, merged in #264) — Pattern A bespoke methods
+
+Eight `*.repository.ts` subclasses of `TypeOrmBaseRepository` had bespoke methods using `this.repository.X(...)` directly. Each subclass migrated in its own commit (PR5.1–PR5.8). Allowlist trimmed from 58 → 51.
+
+### PR6 (2026-05-05 → 2026-05-05) — Pattern B services (final allowlist drain)
+
+Bundles every remaining Pattern B service migration into a single PR with one commit per module (PR6.1–PR6.17). Allowlist trimmed from 51 → 0.
+
+Notable mechanical decisions:
+
+- **`SystemUnderTest`/`SystemUnderTestEntity`/`SystemEntity` added to `OWNED_RESOURCE_ENTITIES`** (in PR6.13). The entity has `organization_id NOT NULL` since Phase 4 and the standard SELECT/INSERT/UPDATE/DELETE RLS policies plus `ENABLE ROW LEVEL SECURITY` already exist on `systems_under_test` (verified in `schema-sql.ts`). Adding it to the rule set caught seven previously-migrated modules where SUT calls were intentionally left unwrapped (alerts, benchmarks, deep-links, grafana, notifications, reports). PR6.13 back-fills those SUT call sites in the same commit.
+- **Nested `manager.transaction(...)` blocks rewired to use the request EM** in `benchmarks` (FK clears for `ds_metric_statistics` / `ds_tracked_differences`), `systems-under-test` (SUT + envs + workloads create), and `test-runs-performance-query` (the two `SET LOCAL work_mem` blocks for heavy percentile aggregations). All now route through `withRequestEm(this.<repo>).manager.transaction(...)` so the inner savepoint inherits the outer request transaction's GUCs (per Q2=A).
+- **Raw SQL via `repo.query(...)`** is wrapped the same way as ORM calls: the perl-driven mechanical pass extends the lint rule's standard `REPO_METHODS` set with `query` (the perl pattern only — the lint rule itself is unchanged) so the test-runs services' many raw-SQL aggregation paths route through the request EM.
+- **Non-owned repos remain unwrapped intentionally**: `OrganizationMember`, `TeamMember`, `Team` (auth metadata, not subject to RLS), `DsMetrics`/`DsMetricStatistics`/`DsControlGroups`/`DsChangePoints`/`DsAdaptResults`/`DsAdaptTrackedResults`/`DsAdaptConclusion` (datastore-internal aggregation tables), `Organization`, `TestRunConfigEntity` (config diffs, not owned per the lint set), `TestRunView` (read-only DB view), `WorkloadApdexThreshold`/`WorkloadTransactionApdexThreshold` (threshold reference tables), `ProvisionedTemplateDsCompareConfig` (provisioning template), `Event` (special-cased per the Phase 5b spec — events never have RLS).
+- **`AuthorizationService.apiKeyRepository` is now wrapped** despite the chicken-and-egg concern flagged in the PR3 doc. `withRequestEm()` is identity-transparent when no request EM is in CLS (returns the bare repo), so the bootstrap call from `RlsTransactionInterceptor` still works pre-transaction. For in-request callers (post-interceptor), the wrap correctly routes through the request EM. The `OrganizationMember`/`TeamMember`/`Team` calls are left unwrapped because none of those entities are owned-resource per the lint set.

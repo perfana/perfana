@@ -1,6 +1,7 @@
 import { Injectable, Logger, NotFoundException, BadRequestException } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
+import { withRequestEm } from '../../../common/db/request-em';
 import { TestRun, SystemUnderTest as SystemEntity } from '@perfana/shared';
 import {
   BaselineApdexPreviewDto,
@@ -79,7 +80,7 @@ export class TestRunsBaselineApdexService {
     userId: string,
     roles: string[],
   ): Promise<void> {
-    const system = await this.systemRepo.findOne({ where: { id: systemUnderTestId } });
+    const system = await withRequestEm(this.systemRepo).findOne({ where: { id: systemUnderTestId } });
     if (!system) {
       throw new ResourceNotFoundException('System', systemUnderTestId);
     }
@@ -424,7 +425,7 @@ export class TestRunsBaselineApdexService {
       LIMIT 1
     `;
 
-    const result = await this.testRunRepo.query(query, [testRunId]);
+    const result = await withRequestEm(this.testRunRepo).query(query, [testRunId]);
 
     if (!result || result.length === 0) {
       throw new NotFoundException(`Test run not found: ${testRunId}`);
@@ -465,7 +466,7 @@ export class TestRunsBaselineApdexService {
       ORDER BY t.scenario_name, t.transaction_name
     `;
 
-    const result = await this.testRunRepo.query(query, [
+    const result = await withRequestEm(this.testRunRepo).query(query, [
       testRun.system_under_test_id,
       testRun.test_environment,
       testRun.workload,
@@ -526,7 +527,7 @@ export class TestRunsBaselineApdexService {
       GROUP BY t.transaction_name
     `;
 
-    const result = await this.testRunRepo.query(query, [testRun.test_run_id, transactionName]);
+    const result = await withRequestEm(this.testRunRepo).query(query, [testRun.test_run_id, transactionName]);
 
     if (!result || result.length === 0) {
       throw new NotFoundException(`Transaction ${transactionName} not found in test run ${testRunId}`);

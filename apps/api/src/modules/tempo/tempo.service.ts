@@ -2,6 +2,7 @@ import { Injectable, Logger, BadRequestException } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { validateExternalUrl } from '../../common/security/url-validator';
+import { withRequestEm } from '../../common/db/request-em';
 import { TracingInstance } from '@perfana/shared';
 import {
   SearchTracesDto,
@@ -411,7 +412,7 @@ export class TempoService {
    * Get tracing instance by ID
    */
   private async getTracingInstance(id: string): Promise<TracingInstance> {
-    const instance = await this.tracingInstanceRepo.findOne({
+    const instance = await withRequestEm(this.tracingInstanceRepo).findOne({
       where: { id },
     });
 

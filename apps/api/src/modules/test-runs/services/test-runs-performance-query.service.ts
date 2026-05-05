@@ -1,6 +1,7 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
+import { withRequestEm } from '../../../common/db/request-em';
 import { TestRun as TestRunEntity } from '../../../entities';
 import { DatabaseException } from '../../../common/exceptions/business.exception';
 import { TestRunsMapperService } from './test-runs-mapper.service';
@@ -38,7 +39,7 @@ export class TestRunsPerformanceQueryService {
     if (isUuid) {
       // Look up test_run_id by UUID
       const query = `SELECT test_run_id FROM test_runs WHERE id = $1`;
-      const result = await this.testRunRepo.query(query, [testRunIdOrUuid]);
+      const result = await withRequestEm(this.testRunRepo).query(query, [testRunIdOrUuid]);
       if (!result || result.length === 0) {
         throw new DatabaseException(`Test run not found with UUID: ${testRunIdOrUuid}`);
       }
@@ -60,7 +61,7 @@ export class TestRunsPerformanceQueryService {
       FROM test_runs
       WHERE test_run_id = $1
     `;
-    const result = await this.testRunRepo.query(query, [testRunId]);
+    const result = await withRequestEm(this.testRunRepo).query(query, [testRunId]);
 
     if (result[0]?.start_time && result[0]?.ramp_up) {
       const startTime = new Date(result[0].start_time);
@@ -77,7 +78,7 @@ export class TestRunsPerformanceQueryService {
    * at finalization). When false, the live-aggregation path runs instead.
    */
   private async hasTransactionRollup(testRunId: string): Promise<boolean> {
-    const result = await this.testRunRepo.query(
+    const result = await withRequestEm(this.testRunRepo).query(
       `SELECT 1 FROM test_run_transaction_stats WHERE test_run_id = $1 LIMIT 1`,
       [testRunId],
     );
@@ -89,7 +90,7 @@ export class TestRunsPerformanceQueryService {
    * pair. When false, the live-aggregation path over requests_raw runs instead.
    */
   private async hasSamplerRollup(testRunId: string, transactionName: string): Promise<boolean> {
-    const result = await this.testRunRepo.query(
+    const result = await withRequestEm(this.testRunRepo).query(
       `SELECT 1 FROM test_run_sampler_stats
        WHERE test_run_id = $1 AND transaction_name = $2 LIMIT 1`,
       [testRunId, transactionName],
@@ -199,7 +200,7 @@ export class TestRunsPerformanceQueryService {
       ? [resolvedTestRunId, excludeRampUp, organizationIds]
       : [resolvedTestRunId, excludeRampUp];
 
-    const result = await this.testRunRepo.query(query, params);
+    const result = await withRequestEm(this.testRunRepo).query(query, params);
 
     this.logger.log(
       `Retrieved ${result.length} transaction stats (rollup) for test run: ${resolvedTestRunId} (excludeRampUp: ${excludeRampUp})`,
@@ -319,7 +320,7 @@ export class TestRunsPerformanceQueryService {
       ? [resolvedTestRunId, transactionName, excludeRampUp, organizationIds]
       : [resolvedTestRunId, transactionName, excludeRampUp];
 
-    const result = await this.testRunRepo.query(query, params);
+    const result = await withRequestEm(this.testRunRepo).query(query, params);
 
     this.logger.log(
       `Retrieved ${result.length} aggregated samplers (rollup) for transaction: ${transactionName} (excludeRampUp: ${excludeRampUp})`,
@@ -516,8 +517,10 @@ export class TestRunsPerformanceQueryService {
           : [resolvedTestRunId, excludeRampUp, cutoffTime];
       }
       // Wrap in a transaction so SET LOCAL work_mem applies only to this query
-      // (reverts at COMMIT — global default unaffected).
-      const result = await this.testRunRepo.manager.transaction(async (em) => {
+      // (reverts at COMMIT — global default unaffected). Manager comes from
+      // the request-scoped EM via withRequestEm so this nested transaction
+      // (savepoint when RLS is on) inherits the outer request transaction's GUCs.
+      const result = await withRequestEm(this.testRunRepo).manager.transaction(async (em) => {
         await em.query(`SET LOCAL work_mem = '512MB'`);
         return em.query(query, queryParams);
       });
@@ -699,7 +702,10 @@ export class TestRunsPerformanceQueryService {
           : [resolvedTestRunId, transactionName, excludeRampUp, cutoffTime];
       }
       // Wrap in a transaction so SET LOCAL work_mem applies only to this query.
-      const result = await this.testRunRepo.manager.transaction(async (em) => {
+      // Manager comes from the request-scoped EM via withRequestEm so this nested
+      // transaction (savepoint when RLS is on) inherits the outer request
+      // transaction's GUCs.
+      const result = await withRequestEm(this.testRunRepo).manager.transaction(async (em) => {
         await em.query(`SET LOCAL work_mem = '512MB'`);
         return em.query(query, queryParams);
       });
@@ -895,7 +901,7 @@ export class TestRunsPerformanceQueryService {
         LIMIT 100
       `;
 
-      const result = await this.testRunRepo.query(query, params);
+      const result = await withRequestEm(this.testRunRepo).query(query, params);
 
       this.logger.log(`Retrieved ${result.length} error groups for test run: ${resolvedTestRunId}`);
 
@@ -1009,8 +1015,8 @@ export class TestRunsPerformanceQueryService {
         : [resolvedTestRunId, excludeRampUp, cutoffTime];
 
       const [overallResult, scenarioResult] = await Promise.all([
-        this.testRunRepo.query(overallQuery, queryParams),
-        this.testRunRepo.query(scenarioQuery, queryParams),
+        withRequestEm(this.testRunRepo).query(overallQuery, queryParams),
+        withRequestEm(this.testRunRepo).query(scenarioQuery, queryParams),
       ]);
 
       this.logger.log(`Retrieved virtual user stats: overall + ${scenarioResult.length} scenarios for test run: ${resolvedTestRunId}`);
@@ -1178,9 +1184,9 @@ export class TestRunsPerformanceQueryService {
         : [resolvedTestRunId, excludeRampUp, cutoffTime];
 
       const [transactionsResult, requestsResult, scenarioResult] = await Promise.all([
-        this.testRunRepo.query(transactionsQuery, queryParams),
-        this.testRunRepo.query(requestsQuery, queryParams),
-        this.testRunRepo.query(scenarioQuery, queryParams),
+        withRequestEm(this.testRunRepo).query(transactionsQuery, queryParams),
+        withRequestEm(this.testRunRepo).query(requestsQuery, queryParams),
+        withRequestEm(this.testRunRepo).query(scenarioQuery, queryParams),
       ]);
 
       const transactions = transactionsResult[0] || { peak_transactions_per_second: 0 };

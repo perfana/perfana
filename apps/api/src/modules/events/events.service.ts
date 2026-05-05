@@ -2,6 +2,7 @@ import { Injectable, Logger, NotFoundException } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { Event, SystemUnderTest, ApplicationDashboard, GrafanaInstance, TestRun } from '../../entities';
+import { withRequestEm } from '../../common/db/request-em';
 import { AuthorizationService } from '../../common/services/authorization.service';
 import { withOrgFilter } from '../../common/utils/with-org-filter';
 import { OwnedResource } from '@perfana/shared';
@@ -130,9 +131,9 @@ export class EventsService {
     const isUuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(dto.systemUnderTest);
 
     if (isUuid) {
-      sut = await this.sutRepo.findOne({ where: { id: dto.systemUnderTest } });
+      sut = await withRequestEm(this.sutRepo).findOne({ where: { id: dto.systemUnderTest } });
     } else {
-      sut = await this.sutRepo.findOne({ where: { name: dto.systemUnderTest } });
+      sut = await withRequestEm(this.sutRepo).findOne({ where: { name: dto.systemUnderTest } });
     }
 
     if (!sut) {
@@ -199,7 +200,7 @@ export class EventsService {
    */
   private async syncGrafanaAnnotations(event: Event): Promise<void> {
     try {
-      const appDashboards = await this.appDashboardRepo.find({
+      const appDashboards = await withRequestEm(this.appDashboardRepo).find({
         where: {
           systemUnderTestId: event.systemUnderTestId,
           testEnvironment: event.testEnvironment,
@@ -267,7 +268,7 @@ export class EventsService {
     for (const [key, annotationId] of Object.entries(event.grafanaAnnotationIds)) {
       const [instanceId] = key.split(':');
       try {
-        const instance = await this.grafanaInstanceRepo.findOne({ where: { id: instanceId } });
+        const instance = await withRequestEm(this.grafanaInstanceRepo).findOne({ where: { id: instanceId } });
         if (!instance) continue;
 
         const grafanaInst = {

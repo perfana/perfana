@@ -1,6 +1,7 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
+import { withRequestEm } from '../../../common/db/request-em';
 import { mergeAndFilterTags } from '../../../common/tag-filter.utils';
 import { ApplicationDashboard as ApplicationDashboardEntity } from '../../../entities';
 
@@ -27,7 +28,7 @@ export class BenchmarkTagHelper {
 
     if (applicationDashboardId) {
       try {
-        const dashboard = await this.appDashboardRepo.findOne({
+        const dashboard = await withRequestEm(this.appDashboardRepo).findOne({
           where: { id: applicationDashboardId },
           select: ['id', 'tags'],
         });
@@ -63,7 +64,7 @@ export class BenchmarkTagHelper {
 
     if (dashboardUid && systemUnderTestId && testEnvironment) {
       try {
-        const dashboard = await this.appDashboardRepo.findOne({
+        const dashboard = await withRequestEm(this.appDashboardRepo).findOne({
           where: {
             systemUnderTestId,
             testEnvironment,

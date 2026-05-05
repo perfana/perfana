@@ -8,6 +8,7 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
+import { withRequestEm } from '../../../common/db/request-em';
 import {
   TestRun as TestRunEntity,
   DsChangePoints,
@@ -77,7 +78,7 @@ export class CreateTestRunHandler implements ICommandHandler<CreateTestRunComman
         updatedBy: data.updatedBy,
       };
       const newTestRun = this.testRunRepo.create(testRunData);
-      const testRunEntity = await this.testRunRepo.save(newTestRun);
+      const testRunEntity = await withRequestEm(this.testRunRepo).save(newTestRun);
 
       // TestRun's column `organization_id` maps to property `organizationId`,
       // so AuditService.dispatch cannot read it from the entity directly —
@@ -118,7 +119,7 @@ export class CreateTestRunHandler implements ICommandHandler<CreateTestRunComman
    * Fetch test run with all necessary relations
    */
   private async fetchWithRelations(id: string): Promise<TestRunEntity> {
-    const testRunWithRelations = await this.testRunRepo.findOne({
+    const testRunWithRelations = await withRequestEm(this.testRunRepo).findOne({
       where: { id },
       relations: ['systemUnderTest'],
     });
@@ -222,7 +223,7 @@ export class CreateTestRunHandler implements ICommandHandler<CreateTestRunComman
   private async createChangepointIfFirstTestRun(data: CreateTestRunData): Promise<void> {
     try {
       // Count existing test runs for this combination
-      const testRunCount = await this.testRunRepo.count({
+      const testRunCount = await withRequestEm(this.testRunRepo).count({
         where: {
           systemUnderTestId: data.systemUnderTestId,
           testEnvironment: data.testEnvironment,

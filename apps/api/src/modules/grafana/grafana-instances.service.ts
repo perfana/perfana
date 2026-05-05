@@ -2,6 +2,7 @@ import { Injectable, Logger, NotFoundException, ForbiddenException } from '@nest
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { GrafanaInstance as GrafanaInstanceEntity } from '../../entities';
+import { withRequestEm } from '../../common/db/request-em';
 import { CreateGrafanaInstanceDto, UpdateGrafanaInstanceDto } from './dto/grafana-instance.dto';
 import { AuthorizationService } from '../../common/services/authorization.service';
 import { withOrgFilter } from '../../common/utils/with-org-filter';
@@ -108,7 +109,7 @@ export class GrafanaInstancesService {
       const orgIds = await withOrgFilter(userId, roles, this.authzService);
       this.logger.debug(`findAll: userId=${userId}, isGlobalAdmin=${orgIds === null}, organizationId=${organizationId}`);
 
-      const queryBuilder = this.grafanaInstanceRepo
+      const queryBuilder = withRequestEm(this.grafanaInstanceRepo)
         .createQueryBuilder('gi')
         .orderBy('gi.created_at', 'DESC');
 
@@ -157,7 +158,7 @@ export class GrafanaInstancesService {
     try {
       this.logger.debug(`findOne: id=${id}, userId=${userId}`);
 
-      const entity = await this.grafanaInstanceRepo.findOne({
+      const entity = await withRequestEm(this.grafanaInstanceRepo).findOne({
         where: { id }
       });
 
@@ -221,7 +222,7 @@ export class GrafanaInstancesService {
         organizationId,
       });
 
-      const savedEntity = await this.grafanaInstanceRepo.save(entity);
+      const savedEntity = await withRequestEm(this.grafanaInstanceRepo).save(entity);
 
       // Phase 5a: GrafanaInstance.organization_id maps to camelCase property
       // organizationId, so AuditService.dispatch cannot read it off ref directly —
@@ -255,7 +256,7 @@ export class GrafanaInstancesService {
       // Check if user is org-admin in any organization
       await this.requireOrgAdmin(userId, roles);
 
-      const entity = await this.grafanaInstanceRepo.findOne({ where: { id } });
+      const entity = await withRequestEm(this.grafanaInstanceRepo).findOne({ where: { id } });
 
       if (!entity) {
         throw new NotFoundException(`Grafana instance with id ${id} not found`);
@@ -291,7 +292,7 @@ export class GrafanaInstancesService {
       // Update ownership tracking
       entity.updatedBy = userId;
 
-      const updatedEntity = await this.grafanaInstanceRepo.save(entity);
+      const updatedEntity = await withRequestEm(this.grafanaInstanceRepo).save(entity);
 
       this.auditService.logUpdate(
         before as unknown as OwnedResource,
@@ -326,7 +327,7 @@ export class GrafanaInstancesService {
       // Check if user is org-admin in any organization
       await this.requireOrgAdmin(userId, roles);
 
-      const entity = await this.grafanaInstanceRepo.findOne({ where: { id } });
+      const entity = await withRequestEm(this.grafanaInstanceRepo).findOne({ where: { id } });
 
       if (!entity) {
         throw new NotFoundException(`Grafana instance with id ${id} not found`);
@@ -348,7 +349,7 @@ export class GrafanaInstancesService {
         organizationIdOverride: entity.organizationId,
       });
 
-      await this.grafanaInstanceRepo.remove(entity);
+      await withRequestEm(this.grafanaInstanceRepo).remove(entity);
 
       this.logger.log(`Grafana instance ${id} deleted successfully by user ${userId}`);
     } catch (error) {

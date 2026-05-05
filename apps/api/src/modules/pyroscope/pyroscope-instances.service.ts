@@ -2,6 +2,7 @@ import { Injectable, Logger, NotFoundException, ForbiddenException } from '@nest
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { PyroscopeInstance as PyroscopeInstanceEntity } from '../../entities';
+import { withRequestEm } from '../../common/db/request-em';
 import { AuthorizationService } from '../../common/services/authorization.service';
 import { withOrgFilter } from '../../common/utils/with-org-filter';
 import { OwnedResource } from '@perfana/shared';
@@ -94,7 +95,7 @@ export class PyroscopeInstancesService {
       const orgIds = await withOrgFilter(userId, roles, this.authzService);
       this.logger.debug(`findAll: userId=${userId}, isGlobalAdmin=${orgIds === null}, organizationId=${organizationId}`);
 
-      const queryBuilder = this.pyroscopeInstanceRepo
+      const queryBuilder = withRequestEm(this.pyroscopeInstanceRepo)
         .createQueryBuilder('pi')
         .orderBy('pi.created_at', 'DESC');
 
@@ -148,7 +149,7 @@ export class PyroscopeInstancesService {
     try {
       this.logger.debug(`findOne: id=${id}, userId=${userId}`);
 
-      const entity = await this.pyroscopeInstanceRepo.findOne({
+      const entity = await withRequestEm(this.pyroscopeInstanceRepo).findOne({
         where: { id }
       });
 
@@ -207,7 +208,7 @@ export class PyroscopeInstancesService {
         organizationId,
       });
 
-      const savedEntity = await this.pyroscopeInstanceRepo.save(entity);
+      const savedEntity = await withRequestEm(this.pyroscopeInstanceRepo).save(entity);
 
       // Phase 5a: PyroscopeInstance.organization_id maps to camelCase property
       // organizationId, so AuditService.dispatch cannot read it off ref directly —
@@ -242,7 +243,7 @@ export class PyroscopeInstancesService {
       // Check if user is org-admin in any organization
       await this.requireOrgAdmin(userId, roles);
 
-      const entity = await this.pyroscopeInstanceRepo.findOne({ where: { id } });
+      const entity = await withRequestEm(this.pyroscopeInstanceRepo).findOne({ where: { id } });
 
       if (!entity) {
         throw new NotFoundException(`Pyroscope instance with id ${id} not found`);
@@ -274,7 +275,7 @@ export class PyroscopeInstancesService {
       // Track who updated the instance
       entity.updatedBy = userId;
 
-      const updatedEntity = await this.pyroscopeInstanceRepo.save(entity);
+      const updatedEntity = await withRequestEm(this.pyroscopeInstanceRepo).save(entity);
 
       this.auditService.logUpdate(
         before as unknown as OwnedResource,
@@ -309,7 +310,7 @@ export class PyroscopeInstancesService {
       // Check if user is org-admin in any organization
       await this.requireOrgAdmin(userId, roles);
 
-      const entity = await this.pyroscopeInstanceRepo.findOne({ where: { id } });
+      const entity = await withRequestEm(this.pyroscopeInstanceRepo).findOne({ where: { id } });
 
       if (!entity) {
         throw new NotFoundException(`Pyroscope instance with id ${id} not found`);
@@ -331,7 +332,7 @@ export class PyroscopeInstancesService {
         organizationIdOverride: entity.organizationId,
       });
 
-      await this.pyroscopeInstanceRepo.remove(entity);
+      await withRequestEm(this.pyroscopeInstanceRepo).remove(entity);
 
       this.logger.log(`Pyroscope instance ${id} deleted successfully`);
     } catch (error) {

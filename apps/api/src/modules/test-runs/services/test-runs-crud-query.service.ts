@@ -1,6 +1,7 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository, SelectQueryBuilder, ObjectLiteral } from 'typeorm';
+import { withRequestEm } from '../../../common/db/request-em';
 import {
   TestRun as TestRunEntity,
   SystemUnderTest,
@@ -119,7 +120,7 @@ export class TestRunsCrudQueryService {
         return false;
       }
 
-      const mostRecentTestRun = await this.testRunRepo.findOne({
+      const mostRecentTestRun = await withRequestEm(this.testRunRepo).findOne({
         where: {
           systemUnderTestId,
           testEnvironment,
@@ -176,7 +177,7 @@ export class TestRunsCrudQueryService {
       const allowedSortFields = ['createdAt', 'testRunId', 'workload', 'testEnvironment', 'startTime', 'endTime'];
       const safeSortBy = allowedSortFields.includes(sortBy) ? sortBy : 'createdAt';
 
-      const queryBuilder = this.testRunRepo
+      const queryBuilder = withRequestEm(this.testRunRepo)
         .createQueryBuilder('tr')
         .leftJoinAndSelect('tr.systemUnderTest', 'sut')
         .where("(tr.deletionStatus IS NULL OR tr.deletionStatus = 'failed')")
@@ -335,7 +336,7 @@ export class TestRunsCrudQueryService {
       }
 
       const buildBaseQuery = () => {
-        const qb = this.testRunRepo
+        const qb = withRequestEm(this.testRunRepo)
           .createQueryBuilder('tr')
           .leftJoin('tr.systemUnderTest', 'sut')
           .where("(tr.deletionStatus IS NULL OR tr.deletionStatus = 'failed')");
@@ -412,7 +413,7 @@ export class TestRunsCrudQueryService {
     try {
       this.logger.debug(`findAll: isAdmin=${isAdmin}`);
 
-      const queryBuilder = this.testRunRepo
+      const queryBuilder = withRequestEm(this.testRunRepo)
         .createQueryBuilder('tr')
         .leftJoinAndSelect('tr.systemUnderTest', 'sut')
         .where("(tr.deletionStatus IS NULL OR tr.deletionStatus = 'failed')")
@@ -489,7 +490,7 @@ export class TestRunsCrudQueryService {
     try {
       this.logger.debug(`findByTestRunId: testRunId=${testRunId}, userId=${userId}, isAdmin=${isAdmin}`);
 
-      const testRunEntity = await this.testRunRepo.findOne({
+      const testRunEntity = await withRequestEm(this.testRunRepo).findOne({
         where: { testRunId },
         relations: ['systemUnderTest', 'systemUnderTest.pyroscopeInstance']
       });
@@ -555,7 +556,7 @@ export class TestRunsCrudQueryService {
     try {
       this.logger.debug(`findOne: id=${id}, userId=${userId}, isAdmin=${isAdmin}`);
 
-      const testRunEntity = await this.testRunRepo.findOne({
+      const testRunEntity = await withRequestEm(this.testRunRepo).findOne({
         where: { id },
         relations: ['systemUnderTest', 'systemUnderTest.pyroscopeInstance']
       });
@@ -621,7 +622,7 @@ export class TestRunsCrudQueryService {
     try {
       this.logger.debug(`getTestRunByTestRunId: testRunId=${testRunId}, userId=${userId}, isAdmin=${isAdmin}`);
 
-      const testRunEntity = await this.testRunRepo.findOne({
+      const testRunEntity = await withRequestEm(this.testRunRepo).findOne({
         where: { testRunId },
         relations: ['systemUnderTest', 'systemUnderTest.pyroscopeInstance']
       });
@@ -702,7 +703,7 @@ export class TestRunsCrudQueryService {
       this.logger.debug(`findByTestRunIdAndParams: testRunId=${testRunId}, isAdmin=${isAdmin}, organizationId=${organizationId}`);
 
       // Single query: join test_run with system_under_test by name
-      const queryBuilder = this.testRunRepo
+      const queryBuilder = withRequestEm(this.testRunRepo)
         .createQueryBuilder('tr')
         .leftJoinAndSelect('tr.systemUnderTest', 'sut')
         .leftJoinAndSelect('sut.pyroscopeInstance', 'pyro')
@@ -792,7 +793,7 @@ export class TestRunsCrudQueryService {
           userTeamIds,
         );
       } else {
-        const testRunEntity = await this.testRunRepo.findOne({
+        const testRunEntity = await withRequestEm(this.testRunRepo).findOne({
           where: { testRunId },
           relations: ['systemUnderTest', 'systemUnderTest.pyroscopeInstance']
         });
@@ -808,7 +809,7 @@ export class TestRunsCrudQueryService {
 
       // NOTE: Organization filtering will be added here when TestRun entity has organization_id
 
-      const relatedTestRunEntities = await this.testRunRepo
+      const relatedTestRunEntities = await withRequestEm(this.testRunRepo)
         .createQueryBuilder('tr')
         .select([
           'tr.testRunId',
@@ -866,7 +867,7 @@ export class TestRunsCrudQueryService {
       let systems: SystemUnderTest[];
       if (organizationId) {
         // Explicit org selected — scope to that org
-        const qb = this.systemRepo
+        const qb = withRequestEm(this.systemRepo)
           .createQueryBuilder('system')
           .where('system.organization_id = :organizationId', { organizationId })
           .orderBy('system.name', 'ASC');
@@ -878,7 +879,7 @@ export class TestRunsCrudQueryService {
         this.logger.log(`[getSystemsSummary] ORG-SCOPED PATH - Returning ${systems.length} systems for org ${organizationId}`);
       } else if (isAdmin) {
         // Global admins see all systems
-        systems = await this.systemRepo.find({
+        systems = await withRequestEm(this.systemRepo).find({
           order: { name: 'ASC' }
         });
         this.logger.log(`[getSystemsSummary] ADMIN PATH - Returning ${systems.length} systems (all systems)`);
@@ -892,7 +893,7 @@ export class TestRunsCrudQueryService {
         }
 
         // Filter systems by organization + team restriction
-        const qb = this.systemRepo
+        const qb = withRequestEm(this.systemRepo)
           .createQueryBuilder('system')
           .leftJoin('teams', 'team', 'team.id = system.team_id')
           .where(
@@ -922,7 +923,7 @@ export class TestRunsCrudQueryService {
       if (systemIds.length === 0) {
         envWorkloadData = [];
       } else {
-        envWorkloadData = await this.testRunRepo
+        envWorkloadData = await withRequestEm(this.testRunRepo)
           .createQueryBuilder('tr')
           .select([
             'tr.systemUnderTestId',
@@ -982,7 +983,7 @@ export class TestRunsCrudQueryService {
     try {
       this.logger.log(`[getAllTags] START - isAdmin=${isAdmin}`);
 
-      const queryBuilder = this.testRunRepo
+      const queryBuilder = withRequestEm(this.testRunRepo)
         .createQueryBuilder('tr')
         .select('DISTINCT unnest(tr.tags)', 'tag')
         .where('tr.tags IS NOT NULL')
@@ -1024,7 +1025,7 @@ export class TestRunsCrudQueryService {
     try {
       this.logger.log(`[getAllAnnotations] START - isAdmin=${isAdmin}`);
 
-      const queryBuilder = this.testRunRepo
+      const queryBuilder = withRequestEm(this.testRunRepo)
         .createQueryBuilder('tr')
         .select('DISTINCT unnest(tr.annotations)', 'annotation')
         .where('tr.annotations IS NOT NULL')
@@ -1077,7 +1078,7 @@ export class TestRunsCrudQueryService {
 
       // NOTE: Organization filtering will be added here when TestRun entity has organization_id
 
-      const queryBuilder = this.testRunRepo
+      const queryBuilder = withRequestEm(this.testRunRepo)
         .createQueryBuilder('tr')
         .leftJoinAndSelect('tr.systemUnderTest', 'sut')
         .where('tr.systemUnderTestId = :systemUnderTestId', { systemUnderTestId })
@@ -1125,7 +1126,7 @@ export class TestRunsCrudQueryService {
           ORDER BY metric_name
         `;
 
-        const result = await this.testRunRepo.query(query, [
+        const result = await withRequestEm(this.testRunRepo).query(query, [
           testRun.id,
           `%${panelDescription}%`,
         ]);
@@ -1140,7 +1141,7 @@ export class TestRunsCrudQueryService {
           ORDER BY request_name
         `;
 
-        const result = await this.testRunRepo.query(query, [testRun.test_run_id]);
+        const result = await withRequestEm(this.testRunRepo).query(query, [testRun.test_run_id]);
 
         return result.map((row: { request_name: string }) => row.request_name);
       }

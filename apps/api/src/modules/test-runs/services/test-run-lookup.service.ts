@@ -13,6 +13,7 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository, DataSource } from 'typeorm';
+import { withRequestEm } from '../../../common/db/request-em';
 import {
   SystemUnderTest as SystemEntity,
   Organization,
@@ -61,7 +62,7 @@ export class TestRunLookupService {
       );
 
       // Now read the guaranteed-existing row
-      const systemUnderTest = await this.systemRepo.findOne({
+      const systemUnderTest = await withRequestEm(this.systemRepo).findOne({
         where: { name, organization_id: organizationId },
         select: ['id', 'name', 'description', 'team_id', 'organization_id', 'created_at', 'updated_at'],
       });

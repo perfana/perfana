@@ -45,6 +45,7 @@ import { UserCtx, UserContext } from '../../../common/decorators/user-context.de
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { TestRun } from '../../../entities';
+import { withRequestEm } from '../../../common/db/request-em';
 import { OwnedResource } from '@perfana/shared';
 import { AuthorizationService } from '../../../common/services/authorization.service';
 import { AwrReportsService, CreateAwrReportOptions } from '../services/awr-reports.service';
@@ -101,7 +102,7 @@ export class AwrReportsController {
     ctx: UserContext,
   ): Promise<boolean> {
     // Look up the test run's organization via its system under test
-    const testRun = await this.testRunRepo.findOne({
+    const testRun = await withRequestEm(this.testRunRepo).findOne({
       where: { id: testRunId },
       relations: ['systemUnderTest'],
     });
@@ -131,7 +132,7 @@ export class AwrReportsController {
       WHERE ar.id = $1
       LIMIT 1
     `;
-    const rows = await this.testRunRepo.query(query, [reportId]);
+    const rows = await withRequestEm(this.testRunRepo).query(query, [reportId]);
     if (!rows || rows.length === 0) return false;
 
     const result = await this.authzService.canAccessResource(ctx.userId, ctx.roles, {

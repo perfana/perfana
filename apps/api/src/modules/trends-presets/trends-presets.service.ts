@@ -2,6 +2,7 @@ import { Injectable, NotFoundException, ForbiddenException, BadRequestException,
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository, Brackets } from 'typeorm';
 import { TrendsFilterPreset, ApplicationDashboard, TestRun as TestRunEntity } from '../../entities';
+import { withRequestEm } from '../../common/db/request-em';
 import { OwnedResource } from '@perfana/shared';
 import { CreateTrendsPresetDto } from './dto/create-trends-preset.dto';
 import { TrendsPresetResponseDto } from './dto/trends-preset-response.dto';
@@ -42,7 +43,7 @@ export class TrendsPresetsService {
     try {
       // Inherit org/team from the parent test run's SUT — TrendsFilterPreset.
       // organization_id is NOT NULL and the camelCase property key is required.
-      const testRun = await this.testRunRepo.findOne({
+      const testRun = await withRequestEm(this.testRunRepo).findOne({
         where: { testRunId: createTrendsPresetDto.created_for_test_run_id },
         relations: ['systemUnderTest'],
       });
@@ -69,7 +70,7 @@ export class TrendsPresetsService {
         teamId: testRun.systemUnderTest.team_id,
       });
 
-      const savedPreset = await this.trendsPresetRepo.save(preset);
+      const savedPreset = await withRequestEm(this.trendsPresetRepo).save(preset);
 
       // Phase 5a: TrendsFilterPreset.organization_id maps to camelCase property
       // organizationId, so AuditService.dispatch cannot read it off ref directly —
@@ -102,7 +103,7 @@ export class TrendsPresetsService {
       // Resolve SUT context from the provided testRunId
       let sutContext: { systemUnderTestId: string; testEnvironment: string; workload: string } | null = null;
       if (currentTestRunId) {
-        const testRun = await this.testRunRepo.findOne({
+        const testRun = await withRequestEm(this.testRunRepo).findOne({
           where: { testRunId: currentTestRunId },
           select: ['systemUnderTestId', 'testEnvironment', 'workload'],
         });
@@ -115,7 +116,7 @@ export class TrendsPresetsService {
         }
       }
 
-      const queryBuilder = this.trendsPresetRepo
+      const queryBuilder = withRequestEm(this.trendsPresetRepo)
         .createQueryBuilder('preset')
         .leftJoinAndSelect('preset.applicationDashboard', 'dashboard');
 
@@ -186,7 +187,7 @@ export class TrendsPresetsService {
   async findOne(id: string, userId: string, isAdmin: boolean): Promise<TrendsPresetResponseDto> {
     try {
       // First fetch the preset without filtering to properly handle 404 vs 403
-      const preset = await this.trendsPresetRepo
+      const preset = await withRequestEm(this.trendsPresetRepo)
         .createQueryBuilder('preset')
         .leftJoinAndSelect('preset.applicationDashboard', 'dashboard')
         .where('preset.id = :id', { id })
@@ -231,7 +232,7 @@ export class TrendsPresetsService {
   async remove(id: string, userId: string, isAdmin: boolean): Promise<void> {
     try {
       // First check if preset exists
-      const preset = await this.trendsPresetRepo.findOne({
+      const preset = await withRequestEm(this.trendsPresetRepo).findOne({
         where: { id }
       });
 
@@ -255,7 +256,7 @@ export class TrendsPresetsService {
         organizationIdOverride: preset.organizationId,
       });
 
-      await this.trendsPresetRepo.delete({ id });
+      await withRequestEm(this.trendsPresetRepo).delete({ id });
 
       this.logger.log(`Deleted trends preset: ${id} (by user: ${userId}, isAdmin: ${isAdmin})`);
     } catch (error) {

@@ -2,6 +2,7 @@ import { Injectable, Logger } from '@nestjs/common';
 import { InjectRepository, InjectDataSource } from '@nestjs/typeorm';
 import { Repository, DataSource } from 'typeorm';
 import { Benchmark as BenchmarkEntity } from '../../../entities';
+import { withRequestEm } from '../../../common/db/request-em';
 import {
   Benchmark,
   BenchmarkQuery,
@@ -50,7 +51,7 @@ export class BenchmarkQueryService {
       const orgIds = await withOrgFilter(userId, roles, this.authzService);
       this.logger.log(`[findAll] START - userId=${userId}, isGlobalAdmin=${orgIds === null}`);
 
-      const queryBuilder = this.benchmarkRepo
+      const queryBuilder = withRequestEm(this.benchmarkRepo)
         .createQueryBuilder('b')
         .leftJoinAndSelect('b.system_under_test', 'sut');
 
@@ -137,7 +138,7 @@ export class BenchmarkQueryService {
     try {
       this.logger.log(`[findOne] START - id=${id}, userId=${userId}`);
 
-      const result = await this.benchmarkRepo.findOne({
+      const result = await withRequestEm(this.benchmarkRepo).findOne({
         where: { id },
         relations: ['system_under_test']
       });
@@ -189,7 +190,7 @@ export class BenchmarkQueryService {
       const orgIds = await withOrgFilter(userId, roles, this.authzService);
       this.logger.log(`[getSystemEnvironmentsAndWorkloads] START - systemId=${systemUnderTestId}, userId=${userId}, isGlobalAdmin=${orgIds === null}`);
 
-      const queryBuilder = this.benchmarkRepo
+      const queryBuilder = withRequestEm(this.benchmarkRepo)
         .createQueryBuilder('b')
         .leftJoin('b.system_under_test', 'sut')
         .select(['b.test_environment', 'b.workload'])

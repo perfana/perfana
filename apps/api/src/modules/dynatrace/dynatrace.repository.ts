@@ -7,6 +7,7 @@ import { DynatraceEntityMapping } from '../../entities';
 import { DsPanels } from '../../entities';
 import { DsMetrics } from '../../entities';
 import { MetricsSource } from '../../entities';
+import { withRequestEm } from '../../common/db/request-em';
 import { CreateDynatraceQueryDto } from './dto/create-dynatrace-query.dto';
 import { UpdateDynatraceQueryDto } from './dto/update-dynatrace-query.dto';
 import { CreateEntityMappingDto } from './dto/create-entity-mapping.dto';
@@ -61,7 +62,7 @@ export class DynatraceRepository {
     dynatraceConfigId: string,
     configLabel: string,
   ): Promise<string> {
-    await this.metricsSourceRepo.upsert(
+    await withRequestEm(this.metricsSourceRepo).upsert(
       {
         systemUnderTestId,
         testEnvironment,
@@ -78,7 +79,7 @@ export class DynatraceRepository {
       },
     );
 
-    const row = await this.metricsSourceRepo.findOneOrFail({
+    const row = await withRequestEm(this.metricsSourceRepo).findOneOrFail({
       where: {
         systemUnderTestId,
         testEnvironment,
@@ -104,17 +105,17 @@ export class DynatraceRepository {
 
   // Config Methods
   async findAll() {
-    return this.configRepo.find({
+    return withRequestEm(this.configRepo).find({
       order: { host: 'ASC' }
     });
   }
 
   async findByHost(host: string) {
-    return this.configRepo.findOne({ where: { host } });
+    return withRequestEm(this.configRepo).findOne({ where: { host } });
   }
 
   async findById(id: string) {
-    return this.configRepo.findOne({ where: { id } });
+    return withRequestEm(this.configRepo).findOne({ where: { id } });
   }
 
   async create(dto: {
@@ -141,7 +142,7 @@ export class DynatraceRepository {
       updatedBy: dto.updated_by,
       organizationId: dto.organization_id,
     });
-    return this.configRepo.save(config);
+    return withRequestEm(this.configRepo).save(config);
   }
 
   async update(
@@ -172,9 +173,9 @@ export class DynatraceRepository {
       updateData.updatedBy = dto.updated_by;
     }
 
-    await this.configRepo.update(id, updateData);
+    await withRequestEm(this.configRepo).update(id, updateData);
 
-    const result = await this.configRepo.findOne({ where: { id } });
+    const result = await withRequestEm(this.configRepo).findOne({ where: { id } });
     if (!result) {
       throw new NotFoundException(`Config with id ${id} not found after update`);
     }
@@ -182,12 +183,12 @@ export class DynatraceRepository {
   }
 
   async delete(id: string) {
-    await this.configRepo.delete(id);
+    await withRequestEm(this.configRepo).delete(id);
   }
 
   // DQL Methods
   async findAllQuery() {
-    const results = await this.queryRepo
+    const results = await withRequestEm(this.queryRepo)
       .createQueryBuilder('query')
       .leftJoinAndSelect('query.dynatraceConfig', 'config')
       .orderBy('query.createdAt', 'DESC')
@@ -196,7 +197,7 @@ export class DynatraceRepository {
   }
 
   async findQueryBySystemAndEnvironment(systemId: string, environment: string, workload: string) {
-    const results = await this.queryRepo
+    const results = await withRequestEm(this.queryRepo)
       .createQueryBuilder('query')
       .leftJoinAndSelect('query.dynatraceConfig', 'config')
       .where('query.systemUnderTestId = :systemId', { systemId })
@@ -239,7 +240,7 @@ export class DynatraceRepository {
   }
 
   async findQueryById(id: string) {
-    const result = await this.queryRepo
+    const result = await withRequestEm(this.queryRepo)
       .createQueryBuilder('query')
       .leftJoinAndSelect('query.dynatraceConfig', 'config')
       .where('query.id = :id', { id })
@@ -250,7 +251,7 @@ export class DynatraceRepository {
   async createQuery(dto: CreateDynatraceQueryDto, ownership?: QueryOwnership) {
     const panelId = dto.panelId || this.generatePanelId(dto.dashboardLabel, dto.panelTitle);
 
-    const config = await this.configRepo.findOne({ where: { id: dto.dynatraceConfigId } });
+    const config = await withRequestEm(this.configRepo).findOne({ where: { id: dto.dynatraceConfigId } });
     const metricsSourceId = config
       ? await this.ensureMetricsSourceExists(
           dto.systemUnderTestId,
@@ -282,7 +283,7 @@ export class DynatraceRepository {
       updatedBy: ownership?.updatedBy ?? ownership?.createdBy,
     });
 
-    const result = await this.queryRepo.save(query);
+    const result = await withRequestEm(this.queryRepo).save(query);
     return this.mapEntityToDtoFields(result);
   }
 
@@ -317,9 +318,9 @@ export class DynatraceRepository {
       }
     }
 
-    await this.queryRepo.update(id, updateData as any);
+    await withRequestEm(this.queryRepo).update(id, updateData as any);
 
-    const result = await this.queryRepo.findOne({ where: { id } });
+    const result = await withRequestEm(this.queryRepo).findOne({ where: { id } });
     if (!result) {
       throw new NotFoundException(`Query with id ${id} not found after update`);
     }
@@ -327,11 +328,11 @@ export class DynatraceRepository {
   }
 
   async deleteQuery(id: string) {
-    await this.queryRepo.delete(id);
+    await withRequestEm(this.queryRepo).delete(id);
   }
 
   async findDashboardByLabel(dashboardLabel: string) {
-    const result = await this.queryRepo.findOne({
+    const result = await withRequestEm(this.queryRepo).findOne({
       where: { dashboardLabel },
       select: ['applicationDashboardId']
     });
@@ -345,7 +346,7 @@ export class DynatraceRepository {
   ) {
     const panelId = dto.panelId || this.generatePanelId(dto.dashboardLabel, dto.panelTitle);
 
-    const config = await this.configRepo.findOne({ where: { id: dto.dynatraceConfigId } });
+    const config = await withRequestEm(this.configRepo).findOne({ where: { id: dto.dynatraceConfigId } });
     const metricsSourceId = config
       ? await this.ensureMetricsSourceExists(
           dto.systemUnderTestId,
@@ -377,7 +378,7 @@ export class DynatraceRepository {
       updatedBy: ownership?.updatedBy ?? ownership?.createdBy,
     });
 
-    const result = await this.queryRepo.save(query);
+    const result = await withRequestEm(this.queryRepo).save(query);
     return this.mapEntityToDtoFields(result);
   }
 
@@ -408,7 +409,7 @@ export class DynatraceRepository {
     }
 
     if (firstDto) {
-      const config = await this.configRepo.findOne({ where: { id: firstDto.dynatraceConfigId } });
+      const config = await withRequestEm(this.configRepo).findOne({ where: { id: firstDto.dynatraceConfigId } });
       if (config) {
         metricsSourceId = await this.ensureMetricsSourceExists(
           firstDto.systemUnderTestId,
@@ -442,13 +443,13 @@ export class DynatraceRepository {
       updatedBy: ownership?.updatedBy ?? ownership?.createdBy,
     }));
 
-    const results = await this.queryRepo.save(querys);
+    const results = await withRequestEm(this.queryRepo).save(querys);
     return results.map(this.mapEntityToDtoFields);
   }
 
   // SLO Support Methods
   async getDistinctDashboardLabels(systemId: string, environment: string, workload: string) {
-    const results = await this.queryRepo
+    const results = await withRequestEm(this.queryRepo)
       .createQueryBuilder('query')
       .select('DISTINCT query.dashboardLabel', 'dashboardLabel')
       .where('query.systemUnderTestId = :systemId', { systemId })
@@ -461,7 +462,7 @@ export class DynatraceRepository {
   }
 
   async getPanelTitlesForDashboard(systemId: string, environment: string, workload: string, dashboardLabel: string) {
-    const results = await this.queryRepo
+    const results = await withRequestEm(this.queryRepo)
       .createQueryBuilder('query')
       .select(['query.panelTitle', 'query.panelId', 'query.applicationDashboardId', 'query.metricsSourceId', 'query.metricUnit'])
       .where('query.systemUnderTestId = :systemId', { systemId })
@@ -487,7 +488,7 @@ export class DynatraceRepository {
 
   // Entity Mapping Methods
   async getEntityMappings(systemId?: string, environment?: string, workload?: string) {
-    const queryBuilder = this.entityMappingRepo
+    const queryBuilder = withRequestEm(this.entityMappingRepo)
       .createQueryBuilder('mapping')
       .leftJoinAndSelect('mapping.dynatraceConfig', 'config')
       .orderBy('mapping.createdAt', 'DESC');
@@ -526,14 +527,14 @@ export class DynatraceRepository {
   }
 
   async getEntityMappingById(id: string) {
-    const result = await this.entityMappingRepo.findOne({ where: { id } });
+    const result = await withRequestEm(this.entityMappingRepo).findOne({ where: { id } });
     return result ? this.mapEntityMappingToDtoFields(result) : null;
   }
 
   async createEntityMapping(dto: CreateEntityMappingDto, ownership?: QueryOwnership) {
     let parentOrgId: string | undefined;
     if (!ownership?.organizationId) {
-      const parentConfig = await this.configRepo.findOne({
+      const parentConfig = await withRequestEm(this.configRepo).findOne({
         where: { id: dto.dynatraceConfigId },
         select: ['organizationId'],
       });
@@ -555,10 +556,10 @@ export class DynatraceRepository {
     });
 
     try {
-      const result = await this.entityMappingRepo.save(mapping);
+      const result = await withRequestEm(this.entityMappingRepo).save(mapping);
 
       // Fetch with joined config to get the label
-      const entityWithConfig = await this.entityMappingRepo
+      const entityWithConfig = await withRequestEm(this.entityMappingRepo)
         .createQueryBuilder('mapping')
         .leftJoinAndSelect('mapping.dynatraceConfig', 'config')
         .where('mapping.id = :id', { id: result.id })
@@ -577,7 +578,7 @@ export class DynatraceRepository {
   }
 
   async deleteEntityMapping(id: string) {
-    await this.entityMappingRepo.delete(id);
+    await withRequestEm(this.entityMappingRepo).delete(id);
   }
 
   private mapEntityMappingToDtoFields(entity: DynatraceEntityMapping) {

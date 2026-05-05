@@ -13,6 +13,7 @@ import {
   GrafanaDashboard as GrafanaDashboardEntity,
   SystemUnderTest,
 } from '../../entities';
+import { withRequestEm } from '../../common/db/request-em';
 import { OwnedResource } from '@perfana/shared';
 import { GrafanaClientService } from './grafana-client.service';
 import { AuthorizationService } from '../../common/services/authorization.service';
@@ -122,7 +123,7 @@ export class ApplicationDashboardsService {
 
     try {
       // Build TypeORM query with relations
-      const queryBuilder = this.appDashboardRepo
+      const queryBuilder = withRequestEm(this.appDashboardRepo)
         .createQueryBuilder('ad')
         .leftJoinAndSelect('ad.grafanaInstance', 'gi')
         .leftJoinAndSelect('ad.systemUnderTest', 'sut')
@@ -252,7 +253,7 @@ export class ApplicationDashboardsService {
 
     try {
       // Build query with organization filtering
-      const queryBuilder = this.appDashboardRepo
+      const queryBuilder = withRequestEm(this.appDashboardRepo)
         .createQueryBuilder('ad')
         .leftJoinAndSelect('ad.grafanaInstance', 'gi')
         .leftJoinAndSelect('ad.systemUnderTest', 'sut')
@@ -339,7 +340,7 @@ export class ApplicationDashboardsService {
     try {
       // Inherit org/team from the parent SUT — ApplicationDashboard.organization_id
       // is NOT NULL and the camelCase property key is required.
-      const system = await this.systemRepo.findOne({
+      const system = await withRequestEm(this.systemRepo).findOne({
         where: { id: createDto.systemUnderTestId },
       });
       if (!system) {
@@ -364,10 +365,10 @@ export class ApplicationDashboardsService {
         teamId: system.team_id,
       } as any);
 
-      const result = await this.appDashboardRepo.save(applicationDashboard);
+      const result = await withRequestEm(this.appDashboardRepo).save(applicationDashboard);
 
       // Fetch with relations
-      const resultWithRelations = await this.appDashboardRepo.findOne({
+      const resultWithRelations = await withRequestEm(this.appDashboardRepo).findOne({
         where: { id: (result as any).id },
         relations: ['grafanaInstance', 'systemUnderTest']
       });
@@ -435,7 +436,7 @@ export class ApplicationDashboardsService {
 
     try {
       // First check if the dashboard exists
-      const existing = await this.appDashboardRepo.findOne({ where: { id } });
+      const existing = await withRequestEm(this.appDashboardRepo).findOne({ where: { id } });
       if (!existing) {
         throw new NotFoundException(`Application dashboard with id ${id} not found`);
       }
@@ -461,12 +462,12 @@ export class ApplicationDashboardsService {
       if (updateDto.snapshotTimeout !== undefined) updateData.snapshotTimeout = updateDto.snapshotTimeout;
 
       // Update with TypeORM
-      await this.appDashboardRepo.update(id, updateData as any);
+      await withRequestEm(this.appDashboardRepo).update(id, updateData as any);
 
       // Reload the post-update entity (with prototype intact) for the audit
       // diff. `existing` already holds the pre-update snapshot — no extra
       // clone needed because update() doesn't mutate it in place.
-      const afterEntity = await this.appDashboardRepo.findOne({ where: { id } });
+      const afterEntity = await withRequestEm(this.appDashboardRepo).findOne({ where: { id } });
       if (afterEntity) {
         this.auditService.logUpdate(
           existing as unknown as OwnedResource,
@@ -606,7 +607,7 @@ export class ApplicationDashboardsService {
 
     try {
       // Load the application dashboard with its grafana dashboard and SUT
-      const appDashboard = await this.appDashboardRepo.findOne({
+      const appDashboard = await withRequestEm(this.appDashboardRepo).findOne({
         where: { id },
         relations: ['grafanaDashboard', 'systemUnderTest'],
       });
@@ -707,7 +708,7 @@ export class ApplicationDashboardsService {
 
     try {
       // First check if the dashboard exists and load related data
-      const existing = await this.appDashboardRepo.findOne({
+      const existing = await withRequestEm(this.appDashboardRepo).findOne({
         where: { id },
         relations: ['grafanaDashboard', 'grafanaInstance', 'systemUnderTest'],
       });

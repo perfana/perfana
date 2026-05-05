@@ -4,6 +4,7 @@ import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { MetricsService } from './metrics.service';
 import { Benchmark } from '../../entities';
+import { withRequestEm } from '../../common/db/request-em';
 import { UserCtx, UserContext } from '../../common/decorators/user-context.decorator';
 
 @ApiTags('metrics')
@@ -74,7 +75,7 @@ export class MetricsController {
     if (!finalApplicationDashboardId && benchmarkId) {
       try {
         // Query benchmarks table using id (UUID)
-        const benchmark = await this.benchmarkRepo.findOne({
+        const benchmark = await withRequestEm(this.benchmarkRepo).findOne({
           where: { id: benchmarkId },
           select: ['application_dashboard_id']
         });

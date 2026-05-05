@@ -16,6 +16,7 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
+import { withRequestEm } from '../../../common/db/request-em';
 import { TestRun as TestRunEntity } from '../../../entities';
 import { UpdateRunningTestDto } from '../dto/update-running-test.dto';
 import { InitTestDto, InitTestResponse } from '../dto/init-test.dto';
@@ -135,7 +136,7 @@ export class TestRunsMutationService {
   }
 
   async findTestRun(testRunId: string, systemUnderTestId: string, testEnvironment: string, workload: string): Promise<TestRun | null> {
-    const entity = await this.testRunRepo.findOne({ where: { testRunId, systemUnderTestId, testEnvironment, workload } });
+    const entity = await withRequestEm(this.testRunRepo).findOne({ where: { testRunId, systemUnderTestId, testEnvironment, workload } });
     return entity ? mapEntityToTestRun(entity) : null;
   }
 

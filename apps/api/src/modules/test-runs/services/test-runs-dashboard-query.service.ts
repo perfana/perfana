@@ -1,6 +1,7 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository, SelectQueryBuilder, ObjectLiteral } from 'typeorm';
+import { withRequestEm } from '../../../common/db/request-em';
 import {
   TestRun as TestRunEntity,
   SystemUnderTest,
@@ -122,35 +123,35 @@ export class TestRunsDashboardQueryService {
       };
 
       // Get total count
-      const baseQuery = this.testRunRepo.createQueryBuilder('tr');
+      const baseQuery = withRequestEm(this.testRunRepo).createQueryBuilder('tr');
       applyAccessFilters(baseQuery);
       this.mapper.applyDateFilters(baseQuery, dateThreshold, dateUpperBound);
 
       const totalTests = await baseQuery.getCount();
 
       // Get passed tests (where consolidated_result.overall === true)
-      const passedQuery = this.testRunRepo.createQueryBuilder('tr');
+      const passedQuery = withRequestEm(this.testRunRepo).createQueryBuilder('tr');
       applyAccessFilters(passedQuery);
       this.mapper.applyDateFilters(passedQuery, dateThreshold, dateUpperBound);
       passedQuery.andWhere("tr.consolidated_result->>'overall' = 'true'");
       const passedTests = await passedQuery.getCount();
 
       // Get failed tests (where consolidated_result.overall === false)
-      const failedQuery = this.testRunRepo.createQueryBuilder('tr');
+      const failedQuery = withRequestEm(this.testRunRepo).createQueryBuilder('tr');
       applyAccessFilters(failedQuery);
       this.mapper.applyDateFilters(failedQuery, dateThreshold, dateUpperBound);
       failedQuery.andWhere("tr.consolidated_result->>'overall' = 'false'");
       const failedTests = await failedQuery.getCount();
 
       // Get active tests (where completed === false)
-      const activeQuery = this.testRunRepo.createQueryBuilder('tr');
+      const activeQuery = withRequestEm(this.testRunRepo).createQueryBuilder('tr');
       applyAccessFilters(activeQuery);
       this.mapper.applyDateFilters(activeQuery, dateThreshold, dateUpperBound);
       activeQuery.andWhere('tr.completed = false');
       const activeTests = await activeQuery.getCount();
 
       // Get SLO compliance rate
-      const sloQuery = this.testRunRepo.createQueryBuilder('tr');
+      const sloQuery = withRequestEm(this.testRunRepo).createQueryBuilder('tr');
       applyAccessFilters(sloQuery);
       this.mapper.applyDateFilters(sloQuery, dateThreshold, dateUpperBound);
       sloQuery.andWhere("tr.consolidated_result->>'meetsRequirement' = 'true'");
@@ -158,7 +159,7 @@ export class TestRunsDashboardQueryService {
       const sloComplianceRate = totalTests > 0 ? Math.round((sloCompliantTests / totalTests) * 100) : 0;
 
       // Get most tested system
-      const systemCountQuery = this.testRunRepo
+      const systemCountQuery = withRequestEm(this.testRunRepo)
         .createQueryBuilder('tr')
         .leftJoin('tr.systemUnderTest', 'sut')
         .select('sut.name', 'system_name')
@@ -204,7 +205,7 @@ export class TestRunsDashboardQueryService {
    */
   async recordView(userId: string, testRunId: string): Promise<void> {
     try {
-      await this.testRunViewRepo
+      await withRequestEm(this.testRunViewRepo)
         .createQueryBuilder()
         .insert()
         .into(TestRunView)
@@ -251,7 +252,7 @@ export class TestRunsDashboardQueryService {
 
       const { dateThreshold, dateUpperBound } = this.mapper.calculateDateBounds(timePeriod, from, to);
 
-      const query = this.testRunRepo
+      const query = withRequestEm(this.testRunRepo)
         .createQueryBuilder('tr')
         .leftJoinAndSelect('tr.systemUnderTest', 'sut')
         .where("tr.consolidated_result->>'overall' = 'false'")
@@ -327,7 +328,7 @@ export class TestRunsDashboardQueryService {
       }
 
       // Query systems with organization + team filtering
-      const systemsQuery = this.systemRepo
+      const systemsQuery = withRequestEm(this.systemRepo)
         .createQueryBuilder('sut')
         .orderBy('sut.name', 'ASC');
 
@@ -341,7 +342,7 @@ export class TestRunsDashboardQueryService {
       const systems = await systemsQuery.getMany();
 
       // Query test run stats with organization + team filtering
-      const statsQuery = this.testRunRepo
+      const statsQuery = withRequestEm(this.testRunRepo)
         .createQueryBuilder('tr')
         .leftJoin('tr.systemUnderTest', 'sut')
         .select('tr.system_under_test_id', 'system_id')

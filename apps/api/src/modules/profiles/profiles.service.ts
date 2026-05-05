@@ -2,6 +2,7 @@ import { Injectable, Logger, NotFoundException, BadRequestException, ForbiddenEx
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { Profile, ProfileGrafanaDashboard, ProfileBenchmark, GrafanaInstance, GrafanaDashboard, GenericDeepLink } from '../../entities';
+import { withRequestEm } from '../../common/db/request-em';
 import { OwnedResource } from '@perfana/shared/entities';
 import { CreateProfileDto, UpdateProfileDto } from './dto/profile.dto';
 import { CreateProfileDashboardDto, UpdateProfileDashboardDto } from './dto/profile-dashboard.dto';
@@ -108,7 +109,7 @@ export class ProfilesService {
         return [];
       }
 
-      const queryBuilder = this.profileRepo
+      const queryBuilder = withRequestEm(this.profileRepo)
         .createQueryBuilder('profile')
         .orderBy('profile.name', 'ASC');
 
@@ -124,7 +125,7 @@ export class ProfilesService {
       this.logger.debug(`Found ${profiles.length} profiles`);
 
       // Get dashboard counts for all profiles
-      const dashboardCounts = await this.profileDashboardRepo
+      const dashboardCounts = await withRequestEm(this.profileDashboardRepo)
         .createQueryBuilder('dashboard')
         .select('dashboard.profile', 'profile')
         .addSelect('COUNT(*)', 'count')
@@ -132,7 +133,7 @@ export class ProfilesService {
         .getRawMany();
 
       // Get benchmark (SLO) counts for all profiles
-      const benchmarkCounts = await this.profileBenchmarkRepo
+      const benchmarkCounts = await withRequestEm(this.profileBenchmarkRepo)
         .createQueryBuilder('benchmark')
         .select('benchmark.profile_id', 'profile_id')
         .addSelect('COUNT(*)', 'count')
@@ -140,7 +141,7 @@ export class ProfilesService {
         .getRawMany();
 
       // Get deep link counts for all profiles
-      const deepLinkCounts = await this.genericDeepLinkRepo
+      const deepLinkCounts = await withRequestEm(this.genericDeepLinkRepo)
         .createQueryBuilder('deepLink')
         .select('deepLink.profile', 'profile')
         .addSelect('COUNT(*)', 'count')
@@ -195,7 +196,7 @@ export class ProfilesService {
     try {
       this.logger.debug(`findOne: id=${id}, userId=${userId}, isGlobalAdmin=${isAdmin}`);
 
-      const profile = await this.profileRepo.findOne({
+      const profile = await withRequestEm(this.profileRepo).findOne({
         where: { id },
       });
 
@@ -207,17 +208,17 @@ export class ProfilesService {
       // For now, all profiles are accessible (treated as legacy data)
 
       // Get dashboard count for this profile
-      const dashboardCount = await this.profileDashboardRepo.count({
+      const dashboardCount = await withRequestEm(this.profileDashboardRepo).count({
         where: { profile: profile.name },
       });
 
       // Get benchmark (SLO) count for this profile
-      const sloCount = await this.profileBenchmarkRepo.count({
+      const sloCount = await withRequestEm(this.profileBenchmarkRepo).count({
         where: { profile_id: profile.id },
       });
 
       // Get deep link count for this profile
-      const deepLinksCount = await this.genericDeepLinkRepo.count({
+      const deepLinksCount = await withRequestEm(this.genericDeepLinkRepo).count({
         where: { profile: profile.name },
       });
 
@@ -254,7 +255,7 @@ export class ProfilesService {
       this.logger.debug(`findDashboardsByProfileId: id=${id}, userId=${userId}, isGlobalAdmin=${isAdmin}`);
 
       // First, get the profile to get its name
-      const profile = await this.profileRepo.findOne({
+      const profile = await withRequestEm(this.profileRepo).findOne({
         where: { id },
       });
 
@@ -269,7 +270,7 @@ export class ProfilesService {
       this.logger.debug(`Fetching dashboards for profile: ${profile.name}`);
 
       // Get all dashboards for this profile
-      const dashboards = await this.profileDashboardRepo.find({
+      const dashboards = await withRequestEm(this.profileDashboardRepo).find({
         where: { profile: profile.name },
         order: {
           dashboardName: 'ASC',
@@ -283,7 +284,7 @@ export class ProfilesService {
       const dashboardUids = [...new Set(dashboards.map(d => d.dashboardUid))];
 
       // Fetch Grafana instances for these labels
-      const grafanaInstances = await this.grafanaInstanceRepo.find({
+      const grafanaInstances = await withRequestEm(this.grafanaInstanceRepo).find({
         where: grafanaLabels.map(label => ({ label })),
       });
 
@@ -298,7 +299,7 @@ export class ProfilesService {
       // Skip query if there are no dashboard UIDs (empty IN clause causes SQL error)
       let grafanaDashboards: GrafanaDashboard[] = [];
       if (dashboardUids.length > 0) {
-        grafanaDashboards = await this.grafanaDashboardRepo
+        grafanaDashboards = await withRequestEm(this.grafanaDashboardRepo)
           .createQueryBuilder('dashboard')
           .where('dashboard.uid IN (:...uids)', { uids: dashboardUids })
           .getMany();
@@ -363,7 +364,7 @@ export class ProfilesService {
       await this.requireOrgAdmin(userId, isAdmin);
 
       // Get the profile to retrieve its name
-      const profile = await this.profileRepo.findOne({
+      const profile = await withRequestEm(this.profileRepo).findOne({
         where: { id: profileId },
       });
 
@@ -375,7 +376,7 @@ export class ProfilesService {
       // For now, all profiles are modifiable (treated as legacy data)
 
       // Validate that the Grafana dashboard exists
-      const grafanaInstance = await this.grafanaInstanceRepo.findOne({
+      const grafanaInstance = await withRequestEm(this.grafanaInstanceRepo).findOne({
         where: { label: createDto.grafanaLabel },
       });
 
@@ -383,7 +384,7 @@ export class ProfilesService {
         throw new BadRequestException(`Grafana instance with label '${createDto.grafanaLabel}' not found`);
       }
 
-      const grafanaDashboard = await this.grafanaDashboardRepo.findOne({
+      const grafanaDashboard = await withRequestEm(this.grafanaDashboardRepo).findOne({
         where: {
           uid: createDto.dashboardUid,
           grafanaInstanceId: grafanaInstance.id,
@@ -411,7 +412,7 @@ export class ProfilesService {
         teamId: profile.teamId,
       });
 
-      const savedDashboard = await this.profileDashboardRepo.save(dashboard);
+      const savedDashboard = await withRequestEm(this.profileDashboardRepo).save(dashboard);
 
       // Phase 5a — ProfileGrafanaDashboard.organization_id is mapped via
       // camelCase property `organizationId`, so AuditService.dispatch cannot
@@ -468,7 +469,7 @@ export class ProfilesService {
       await this.requireOrgAdmin(userId, isAdmin);
 
       // Get the profile to retrieve its name
-      const profile = await this.profileRepo.findOne({
+      const profile = await withRequestEm(this.profileRepo).findOne({
         where: { id: profileId },
       });
 
@@ -480,7 +481,7 @@ export class ProfilesService {
       // For now, all profiles are modifiable (treated as legacy data)
 
       // Get the existing dashboard association
-      const dashboard = await this.profileDashboardRepo.findOne({
+      const dashboard = await withRequestEm(this.profileDashboardRepo).findOne({
         where: { id: dashboardId, profile: profile.name },
       });
 
@@ -499,7 +500,7 @@ export class ProfilesService {
         const grafanaLabel = updateDto.grafanaLabel || dashboard.grafanaLabel;
         const dashboardUid = updateDto.dashboardUid || dashboard.dashboardUid;
 
-        const grafanaInstance = await this.grafanaInstanceRepo.findOne({
+        const grafanaInstance = await withRequestEm(this.grafanaInstanceRepo).findOne({
           where: { label: grafanaLabel },
         });
 
@@ -507,7 +508,7 @@ export class ProfilesService {
           throw new BadRequestException(`Grafana instance with label '${grafanaLabel}' not found`);
         }
 
-        const grafanaDashboard = await this.grafanaDashboardRepo.findOne({
+        const grafanaDashboard = await withRequestEm(this.grafanaDashboardRepo).findOne({
           where: {
             uid: dashboardUid,
             grafanaInstanceId: grafanaInstance.id,
@@ -580,10 +581,10 @@ export class ProfilesService {
 
       this.logger.debug(`[Service] About to update dashboard ${dashboard.id} with data: ${JSON.stringify(updateData, null, 2)}`);
 
-      await this.profileDashboardRepo.update(dashboard.id, updateData);
+      await withRequestEm(this.profileDashboardRepo).update(dashboard.id, updateData);
 
       // Fetch the saved dashboard to return
-      const savedDashboard = await this.profileDashboardRepo.findOne({
+      const savedDashboard = await withRequestEm(this.profileDashboardRepo).findOne({
         where: { id: dashboard.id },
       });
 
@@ -602,12 +603,12 @@ export class ProfilesService {
       this.logger.debug(`[Service] Dashboard after update - setHardcodedValueForVariables: ${JSON.stringify(savedDashboard.setHardcodedValueForVariables)}`);
 
       // Fetch the Grafana dashboard for tags
-      const grafanaInstance = await this.grafanaInstanceRepo.findOne({
+      const grafanaInstance = await withRequestEm(this.grafanaInstanceRepo).findOne({
         where: { label: savedDashboard.grafanaLabel },
       });
 
       const grafanaDashboard = grafanaInstance
-        ? await this.grafanaDashboardRepo.findOne({
+        ? await withRequestEm(this.grafanaDashboardRepo).findOne({
             where: {
               uid: savedDashboard.dashboardUid,
               grafanaInstanceId: grafanaInstance.id,
@@ -654,7 +655,7 @@ export class ProfilesService {
       await this.requireOrgAdmin(userId, isAdmin);
 
       // Get the profile to retrieve its name
-      const profile = await this.profileRepo.findOne({
+      const profile = await withRequestEm(this.profileRepo).findOne({
         where: { id: profileId },
       });
 
@@ -666,7 +667,7 @@ export class ProfilesService {
       // For now, all profiles are deletable (treated as legacy data)
 
       // Get the dashboard association
-      const dashboard = await this.profileDashboardRepo.findOne({
+      const dashboard = await withRequestEm(this.profileDashboardRepo).findOne({
         where: { id: dashboardId, profile: profile.name },
       });
 
@@ -684,7 +685,7 @@ export class ProfilesService {
       });
 
       // Delete the dashboard association
-      await this.profileDashboardRepo.remove(dashboard);
+      await withRequestEm(this.profileDashboardRepo).remove(dashboard);
 
       this.logger.debug(`Deleted dashboard association ${dashboardId} from profile ${profile.name}`);
     } catch (error) {
@@ -708,7 +709,7 @@ export class ProfilesService {
       this.logger.debug(`findBenchmarksByProfileId: profileId=${profileId}, userId=${userId}, isGlobalAdmin=${isAdmin}`);
 
       // Get the profile to validate it exists
-      const profile = await this.profileRepo.findOne({
+      const profile = await withRequestEm(this.profileRepo).findOne({
         where: { id: profileId },
       });
 
@@ -723,7 +724,7 @@ export class ProfilesService {
       this.logger.debug(`Fetching benchmarks for profile: ${profile.name}`);
 
       // Get all benchmarks for this profile
-      const benchmarks = await this.profileBenchmarkRepo.find({
+      const benchmarks = await withRequestEm(this.profileBenchmarkRepo).find({
         where: { profile_id: profileId },
         order: {
           createdAt: 'DESC',
@@ -791,7 +792,7 @@ export class ProfilesService {
       await this.requireOrgAdmin(userId, isAdmin);
 
       // Get the profile to validate it exists
-      const profile = await this.profileRepo.findOne({
+      const profile = await withRequestEm(this.profileRepo).findOne({
         where: { id: profileId },
       });
 
@@ -803,7 +804,7 @@ export class ProfilesService {
       // For now, all profiles are modifiable (treated as legacy data)
 
       // Validate that the profile dashboard exists
-      const profileDashboard = await this.profileDashboardRepo.findOne({
+      const profileDashboard = await withRequestEm(this.profileDashboardRepo).findOne({
         where: { id: createDto.profileDashboardId },
       });
 
@@ -849,7 +850,7 @@ export class ProfilesService {
         teamId: profile.teamId,
       });
 
-      const savedBenchmark = await this.profileBenchmarkRepo.save(benchmark);
+      const savedBenchmark = await withRequestEm(this.profileBenchmarkRepo).save(benchmark);
 
       // Phase 5a — ProfileBenchmark.organization_id is mapped via camelCase
       // property `organizationId` (the snake_case columns above are the entity's
@@ -920,7 +921,7 @@ export class ProfilesService {
       await this.requireOrgAdmin(userId, isAdmin);
 
       // Get the profile to validate it exists
-      const profile = await this.profileRepo.findOne({
+      const profile = await withRequestEm(this.profileRepo).findOne({
         where: { id: profileId },
       });
 
@@ -932,7 +933,7 @@ export class ProfilesService {
       // For now, all profiles are modifiable (treated as legacy data)
 
       // Get the existing benchmark
-      const benchmark = await this.profileBenchmarkRepo.findOne({
+      const benchmark = await withRequestEm(this.profileBenchmarkRepo).findOne({
         where: { id: benchmarkId, profile_id: profileId },
       });
 
@@ -947,7 +948,7 @@ export class ProfilesService {
 
       // Validate profile dashboard if it's being updated
       if (updateDto.profileDashboardId) {
-        const profileDashboard = await this.profileDashboardRepo.findOne({
+        const profileDashboard = await withRequestEm(this.profileDashboardRepo).findOne({
           where: { id: updateDto.profileDashboardId },
         });
 
@@ -1032,7 +1033,7 @@ export class ProfilesService {
 
       this.logger.debug(`Updating benchmark ${benchmark.id} for profile ${profile.name}`);
 
-      const savedBenchmark = await this.profileBenchmarkRepo.save(benchmark);
+      const savedBenchmark = await withRequestEm(this.profileBenchmarkRepo).save(benchmark);
 
       this.auditService.logUpdate(
         benchmarkBefore as unknown as OwnedResource,
@@ -1094,7 +1095,7 @@ export class ProfilesService {
       await this.requireOrgAdmin(userId, isAdmin);
 
       // Get the profile to validate it exists
-      const profile = await this.profileRepo.findOne({
+      const profile = await withRequestEm(this.profileRepo).findOne({
         where: { id: profileId },
       });
 
@@ -1106,7 +1107,7 @@ export class ProfilesService {
       // For now, all profiles are deletable (treated as legacy data)
 
       // Get the benchmark
-      const benchmark = await this.profileBenchmarkRepo.findOne({
+      const benchmark = await withRequestEm(this.profileBenchmarkRepo).findOne({
         where: { id: benchmarkId, profile_id: profileId },
       });
 
@@ -1123,7 +1124,7 @@ export class ProfilesService {
       });
 
       // Delete the benchmark
-      await this.profileBenchmarkRepo.remove(benchmark);
+      await withRequestEm(this.profileBenchmarkRepo).remove(benchmark);
 
       this.logger.debug(`Deleted benchmark ${benchmarkId} from profile ${profile.name}`);
     } catch (error) {
@@ -1138,7 +1139,7 @@ export class ProfilesService {
     await this.requireOrgAdmin(userId, isAdmin);
 
     // Check uniqueness
-    const existing = await this.profileRepo.findOne({ where: { name: dto.name } });
+    const existing = await withRequestEm(this.profileRepo).findOne({ where: { name: dto.name } });
     if (existing) {
       throw new BadRequestException(`Profile with name '${dto.name}' already exists`);
     }
@@ -1161,7 +1162,7 @@ export class ProfilesService {
       organizationId,
     });
 
-    const saved = await this.profileRepo.save(profile);
+    const saved = await withRequestEm(this.profileRepo).save(profile);
 
     // Phase 5a — Profile.organization_id is mapped via camelCase property
     // `organizationId`, so dispatch needs the override to org-scope the row.
@@ -1188,7 +1189,7 @@ export class ProfilesService {
   async updateProfile(id: string, dto: UpdateProfileDto, userId: string, isAdmin: boolean): Promise<ProfileResponse> {
     await this.requireOrgAdmin(userId, isAdmin);
 
-    const profile = await this.profileRepo.findOne({ where: { id } });
+    const profile = await withRequestEm(this.profileRepo).findOne({ where: { id } });
     if (!profile) {
       throw new NotFoundException(`Profile not found: ${id}`);
     }
@@ -1199,7 +1200,7 @@ export class ProfilesService {
 
     // If renaming, check uniqueness
     if (dto.name && dto.name !== profile.name) {
-      const existing = await this.profileRepo.findOne({ where: { name: dto.name } });
+      const existing = await withRequestEm(this.profileRepo).findOne({ where: { name: dto.name } });
       if (existing) {
         throw new BadRequestException(`Profile with name '${dto.name}' already exists`);
       }
@@ -1214,7 +1215,7 @@ export class ProfilesService {
     if (dto.readOnly !== undefined) profile.readOnly = dto.readOnly;
     profile.updatedBy = userId;
 
-    const saved = await this.profileRepo.save(profile);
+    const saved = await withRequestEm(this.profileRepo).save(profile);
 
     this.auditService.logUpdate(
       profileBefore as unknown as OwnedResource,
@@ -1232,7 +1233,7 @@ export class ProfilesService {
   async deleteProfile(id: string, userId: string, isAdmin: boolean): Promise<void> {
     await this.requireOrgAdmin(userId, isAdmin);
 
-    const profile = await this.profileRepo.findOne({ where: { id } });
+    const profile = await withRequestEm(this.profileRepo).findOne({ where: { id } });
     if (!profile) {
       throw new NotFoundException(`Profile not found: ${id}`);
     }
@@ -1249,7 +1250,7 @@ export class ProfilesService {
       organizationIdOverride: profile.organizationId,
     });
 
-    await this.profileRepo.remove(profile);
+    await withRequestEm(this.profileRepo).remove(profile);
     this.logger.log(`Profile '${profile.name}' deleted by ${userId}`);
   }
 }

@@ -2,6 +2,7 @@ import { Injectable, Logger, NotFoundException, ForbiddenException } from '@nest
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { TracingInstance as TracingInstanceEntity, OwnedResource } from '@perfana/shared';
+import { withRequestEm } from '../../common/db/request-em';
 import { AuthorizationService } from '../../common/services/authorization.service';
 import { AuditService } from '../audit/audit.service';
 import { withOrgFilter } from '../../common/utils/with-org-filter';
@@ -85,7 +86,7 @@ export class TracingInstancesService {
       const orgIds = await withOrgFilter(userId, roles, this.authzService);
       this.logger.debug(`findAll: userId=${userId}, isGlobalAdmin=${orgIds === null}, organizationId=${organizationId}`);
 
-      const queryBuilder = this.tracingInstanceRepo
+      const queryBuilder = withRequestEm(this.tracingInstanceRepo)
         .createQueryBuilder('ti')
         .orderBy('ti.created_at', 'DESC');
 
@@ -139,7 +140,7 @@ export class TracingInstancesService {
     try {
       this.logger.debug(`findOne: id=${id}, userId=${userId}`);
 
-      const entity = await this.tracingInstanceRepo.findOne({
+      const entity = await withRequestEm(this.tracingInstanceRepo).findOne({
         where: { id }
       });
 
@@ -199,7 +200,7 @@ export class TracingInstancesService {
         organizationId,
       });
 
-      const savedEntity = await this.tracingInstanceRepo.save(entity);
+      const savedEntity = await withRequestEm(this.tracingInstanceRepo).save(entity);
 
       // Phase 5a: TracingInstance.organization_id maps to camelCase property
       // organizationId, so AuditService.dispatch cannot read it off ref directly —
@@ -234,7 +235,7 @@ export class TracingInstancesService {
       // Check if user is org-admin in any organization
       await this.requireOrgAdmin(userId, roles);
 
-      const entity = await this.tracingInstanceRepo.findOne({ where: { id } });
+      const entity = await withRequestEm(this.tracingInstanceRepo).findOne({ where: { id } });
 
       if (!entity) {
         throw new NotFoundException(`Tracing instance with id ${id} not found`);
@@ -267,7 +268,7 @@ export class TracingInstancesService {
       // Track who updated the instance
       entity.updatedBy = userId;
 
-      const updatedEntity = await this.tracingInstanceRepo.save(entity);
+      const updatedEntity = await withRequestEm(this.tracingInstanceRepo).save(entity);
 
       this.auditService.logUpdate(
         before as unknown as OwnedResource,
@@ -302,7 +303,7 @@ export class TracingInstancesService {
       // Check if user is org-admin in any organization
       await this.requireOrgAdmin(userId, roles);
 
-      const entity = await this.tracingInstanceRepo.findOne({ where: { id } });
+      const entity = await withRequestEm(this.tracingInstanceRepo).findOne({ where: { id } });
 
       if (!entity) {
         throw new NotFoundException(`Tracing instance with id ${id} not found`);
@@ -324,7 +325,7 @@ export class TracingInstancesService {
         organizationIdOverride: entity.organizationId,
       });
 
-      await this.tracingInstanceRepo.remove(entity);
+      await withRequestEm(this.tracingInstanceRepo).remove(entity);
 
       this.logger.log(`Tracing instance ${id} deleted successfully`);
     } catch (error) {

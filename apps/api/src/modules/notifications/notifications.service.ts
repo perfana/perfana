@@ -3,6 +3,7 @@ import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { ConfigService } from '@nestjs/config';
 import { NotificationChannel, TestRun, SystemUnderTest } from '@perfana/shared';
+import { withRequestEm } from '../../common/db/request-em';
 import {
   ResourceNotFoundException,
   DatabaseException,
@@ -65,7 +66,7 @@ export class NotificationsService {
       // NOTE: Org filtering will be added here when NotificationChannel entity has organization_id
       // For now, all notification channels for the system are returned (treated as legacy data)
 
-      return await this.notificationChannelRepository.find({
+      return await withRequestEm(this.notificationChannelRepository).find({
         where: { systemUnderTestId: systemId },
         order: { createdAt: 'DESC' },
       });
@@ -93,7 +94,7 @@ export class NotificationsService {
     try {
       this.logger.debug(`findOne: id=${id}, userId=${userId}`);
 
-      const channel = await this.notificationChannelRepository.findOne({
+      const channel = await withRequestEm(this.notificationChannelRepository).findOne({
         where: { id },
       });
 
@@ -148,7 +149,7 @@ export class NotificationsService {
 
       // Inherit org/team from the parent SUT — NotificationChannel.organization_id
       // is NOT NULL and the camelCase property key is required.
-      const system = await this.systemUnderTestRepository.findOne({
+      const system = await withRequestEm(this.systemUnderTestRepository).findOne({
         where: { id: dto.systemUnderTestId },
       });
       if (!system) {
@@ -169,7 +170,7 @@ export class NotificationsService {
         teamId: system.team_id,
       });
 
-      return await this.notificationChannelRepository.save(channel);
+      return await withRequestEm(this.notificationChannelRepository).save(channel);
     } catch (error) {
       if (error instanceof BadRequestException) {
         throw error;
@@ -223,7 +224,7 @@ export class NotificationsService {
 
       this.logger.log(`Updating notification channel ${id} by user ${userId}`);
 
-      return await this.notificationChannelRepository.save(channel);
+      return await withRequestEm(this.notificationChannelRepository).save(channel);
     } catch (error) {
       if (error instanceof ResourceNotFoundException || error instanceof BadRequestException) {
         throw error;
@@ -258,7 +259,7 @@ export class NotificationsService {
 
       this.logger.log(`Deleting notification channel ${id} by user ${userId}`);
 
-      await this.notificationChannelRepository.remove(channel);
+      await withRequestEm(this.notificationChannelRepository).remove(channel);
     } catch (error) {
       if (error instanceof ResourceNotFoundException) {
         throw error;
@@ -285,7 +286,7 @@ export class NotificationsService {
     const channel = await this.findOne(id, userId, roles);
 
     // Get system name for the message
-    const system = await this.systemUnderTestRepository.findOne({
+    const system = await withRequestEm(this.systemUnderTestRepository).findOne({
       where: { id: channel.systemUnderTestId },
     });
     const systemName = system?.name || 'Unknown System';
@@ -326,7 +327,7 @@ export class NotificationsService {
   async sendTestRunNotification(testRun: TestRun): Promise<void> {
     try {
       // Find all enabled channels for this system that want test run notifications
-      const channels = await this.notificationChannelRepository.find({
+      const channels = await withRequestEm(this.notificationChannelRepository).find({
         where: {
           systemUnderTestId: testRun.systemUnderTestId,
           enabled: true,
@@ -340,7 +341,7 @@ export class NotificationsService {
       }
 
       // Get system name for the message
-      const system = await this.systemUnderTestRepository.findOne({
+      const system = await withRequestEm(this.systemUnderTestRepository).findOne({
         where: { id: testRun.systemUnderTestId },
       });
       const systemName = system?.name || 'Unknown System';

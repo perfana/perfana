@@ -2,6 +2,7 @@ import { Injectable, Logger } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { TestRun, SystemUnderTest, AlertTagFilter } from '../../entities';
+import { withRequestEm } from '../../common/db/request-em';
 import { EventsService } from '../events/events.service';
 import { GrafanaAlertDto, AlertmanagerPayloadDto, AlertmanagerAlert } from './dto/alert-webhook.dto';
 
@@ -124,7 +125,7 @@ export class AlertsService {
    */
   private async processAlert(parsed: ParsedAlert, source: string): Promise<number> {
     // 1. Resolve system under test
-    const sut = await this.sutRepo.findOne({ where: { name: parsed.systemUnderTest } });
+    const sut = await withRequestEm(this.sutRepo).findOne({ where: { name: parsed.systemUnderTest } });
     if (!sut) {
       this.logger.warn(`No system under test found for name "${parsed.systemUnderTest}"`);
       return 0;
@@ -134,7 +135,7 @@ export class AlertsService {
     const now = new Date();
     const graceWindow = new Date(now.getTime() - 30_000);
 
-    const testRuns = await this.testRunRepo
+    const testRuns = await withRequestEm(this.testRunRepo)
       .createQueryBuilder('tr')
       .where('tr.system_under_test_id = :sutId', { sutId: sut.id })
       .andWhere('tr.test_environment = :env', { env: parsed.testEnvironment })
@@ -148,7 +149,7 @@ export class AlertsService {
     }
 
     // 3. Load omit filters scoped to this SUT/env and strip matching tags
-    const omitFilters = await this.filterRepo.find({
+    const omitFilters = await withRequestEm(this.filterRepo).find({
       where: { filterType: 'omit', alertSource: source },
     });
 
@@ -226,7 +227,7 @@ export class AlertsService {
     sut: SystemUnderTest,
     testRuns: TestRun[],
   ): Promise<void> {
-    const abortFilters = await this.filterRepo.find({
+    const abortFilters = await withRequestEm(this.filterRepo).find({
       where: { filterType: 'abort', alertSource: source },
     });
 
@@ -249,7 +250,7 @@ export class AlertsService {
         if (filter.workload && testRun.workload !== filter.workload) continue;
 
         try {
-          await this.testRunRepo.update(testRun.id, {
+          await withRequestEm(this.testRunRepo).update(testRun.id, {
             abort: true,
             abortMessage,
           });
