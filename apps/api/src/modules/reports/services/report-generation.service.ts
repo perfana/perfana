@@ -11,6 +11,7 @@ import {
   OwnedResource,
   SystemUnderTest,
 } from '@perfana/shared';
+import { withRequestEm } from '../../../common/db/request-em';
 import {
   ResourceNotFoundException,
   DatabaseException,
@@ -160,7 +161,7 @@ export class ReportGenerationService {
     userId: string,
     roles: string[],
   ): Promise<{ accessible: boolean; testRun: TestRun | null }> {
-    const testRun = await this.testRunRepo.findOne({
+    const testRun = await withRequestEm(this.testRunRepo).findOne({
       where: { id: testRunId },
       relations: ['systemUnderTest', 'systemUnderTest.team'],
     });
@@ -261,7 +262,7 @@ export class ReportGenerationService {
         throw new ResourceNotFoundException('Test Run', options.testRunId);
       }
 
-      const template = await this.templateRepo.findOne({
+      const template = await withRequestEm(this.templateRepo).findOne({
         where: { id: options.templateId },
       });
 
@@ -368,7 +369,7 @@ export class ReportGenerationService {
           teamId: system.team_id,
         });
 
-        const savedTemplate = await this.templateRepo.save(template);
+        const savedTemplate = await withRequestEm(this.templateRepo).save(template);
         // Phase 5a — full CRUD on ReportTemplate per the burndown. Adhoc
         // templates are still recorded; their is_adhoc=true diff makes them
         // filterable in the audit viewer.
@@ -581,7 +582,7 @@ export class ReportGenerationService {
 
       // First, try to find the test run to get its UUID
       // This handles both UUID and string test_run_id inputs
-      const testRunQuery = this.testRunRepo
+      const testRunQuery = withRequestEm(this.testRunRepo)
         .createQueryBuilder('tr')
         .leftJoin('tr.systemUnderTest', 'sut')
         .leftJoin('sut.team', 'team')
@@ -925,7 +926,7 @@ export class ReportGenerationService {
 
       await this.updateStatus(reportId, 'processing', undefined, undefined, userId, roles);
 
-      const testRun = report.test_run || await this.testRunRepo.findOne({
+      const testRun = report.test_run || await withRequestEm(this.testRunRepo).findOne({
         where: { id: report.test_run_id },
         relations: ['systemUnderTest'],
       });

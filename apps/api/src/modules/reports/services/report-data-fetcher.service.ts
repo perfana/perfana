@@ -2,6 +2,7 @@ import { Injectable, Logger } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository, DataSource } from 'typeorm';
 import { TestRun } from '@perfana/shared';
+import { withRequestEm } from '../../../common/db/request-em';
 import { AuthorizationService } from '../../../common/services/authorization.service';
 import { withOrgFilter } from '../../../common/utils/with-org-filter';
 
@@ -406,7 +407,7 @@ export class ReportDataFetcherService {
       WHERE tr.test_run_id = $1
       ${orgFilter.clause}
     `;
-    const result = await this.testRunRepo.query(query, [testRunId, ...orgFilter.params]);
+    const result = await withRequestEm(this.testRunRepo).query(query, [testRunId, ...orgFilter.params]);
 
     if (result[0]?.start_time && result[0]?.ramp_up) {
       const startTime = new Date(result[0].start_time);
@@ -454,7 +455,7 @@ export class ReportDataFetcherService {
         ORDER BY txn.transaction_name
       `;
 
-      const transactions = await this.testRunRepo.query(query, [testRun.testRunId, scenarioName, ...orgFilter.params]);
+      const transactions = await withRequestEm(this.testRunRepo).query(query, [testRun.testRunId, scenarioName, ...orgFilter.params]);
 
       if (!transactions || transactions.length === 0) {
         return null;
@@ -475,7 +476,7 @@ export class ReportDataFetcherService {
         ORDER BY txn.transaction_name, time_bucket
       `;
 
-      const timeSeriesData = await this.testRunRepo.query(timeSeriesQuery, [testRun.testRunId, scenarioName, ...orgFilter.params]);
+      const timeSeriesData = await withRequestEm(this.testRunRepo).query(timeSeriesQuery, [testRun.testRunId, scenarioName, ...orgFilter.params]);
 
       // Format data for chart rendering
       return {
@@ -576,7 +577,7 @@ export class ReportDataFetcherService {
         ORDER BY t.scenario_name, t.transaction_name
       `;
 
-      const allTransactions: ApdexTransactionRow[] = await this.testRunRepo.query(allTransactionsQuery, queryParams);
+      const allTransactions: ApdexTransactionRow[] = await withRequestEm(this.testRunRepo).query(allTransactionsQuery, queryParams);
 
       if (!allTransactions || allTransactions.length === 0) {
         return null;
@@ -853,9 +854,9 @@ export class ReportDataFetcherService {
         : [testRunId, excludeRampUp, null, ...orgFilter.params];
 
       const [transactionsResult, requestsResult, scenarioResult] = await Promise.all([
-        this.testRunRepo.query(transactionsQuery, queryParams),
-        this.testRunRepo.query(requestsQuery, queryParams),
-        this.testRunRepo.query(scenarioQuery, queryParams),
+        withRequestEm(this.testRunRepo).query(transactionsQuery, queryParams),
+        withRequestEm(this.testRunRepo).query(requestsQuery, queryParams),
+        withRequestEm(this.testRunRepo).query(scenarioQuery, queryParams),
       ]);
 
       const transactions = transactionsResult[0] || { peak_transactions_per_second: 0 };
@@ -952,8 +953,8 @@ export class ReportDataFetcherService {
         : [testRunId, excludeRampUp, null, ...orgFilter.params];
 
       const [overallResult, scenarioResult] = await Promise.all([
-        this.testRunRepo.query(overallQuery, queryParams),
-        this.testRunRepo.query(scenarioQuery, queryParams),
+        withRequestEm(this.testRunRepo).query(overallQuery, queryParams),
+        withRequestEm(this.testRunRepo).query(scenarioQuery, queryParams),
       ]);
 
       const overall = overallResult[0] || {};
@@ -1579,7 +1580,7 @@ export class ReportDataFetcherService {
         LIMIT ${safeMaxRuns + 1}
       `;
 
-      const rows = await this.testRunRepo.query(query, [
+      const rows = await withRequestEm(this.testRunRepo).query(query, [
         testRun.systemUnderTestId,
         testRun.testEnvironment,
         testRun.workload,
@@ -1681,7 +1682,7 @@ export class ReportDataFetcherService {
           ORDER BY dm.time ASC
         `;
 
-        const rows: MetricsTimeSeriesRow[] = await this.testRunRepo.query(query, params);
+        const rows: MetricsTimeSeriesRow[] = await withRequestEm(this.testRunRepo).query(query, params);
 
         if (rows.length > 0) {
           const firstRow = rows[0]!;
@@ -1746,7 +1747,7 @@ export class ReportDataFetcherService {
       `;
 
       const rows: Array<{ dashboard_label: string; panel_title: string; metric_name: string }> =
-        await this.testRunRepo.query(query, params);
+        await withRequestEm(this.testRunRepo).query(query, params);
 
       return rows.map((row) => ({
         dashboardLabel: row.dashboard_label || '',
