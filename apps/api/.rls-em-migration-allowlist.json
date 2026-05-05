@@ -5,7 +5,6 @@
   "apps/api/src/modules/events/events.service.ts",
   "apps/api/src/modules/metrics/metrics.controller.ts",
   "apps/api/src/modules/metrics/metrics.service.ts",
-  "apps/api/src/modules/profiles/profiles.service.ts",
   "apps/api/src/modules/provisioning/provisioning.service.ts",
   "apps/api/src/modules/pyroscope/pyroscope-instances.service.ts",
   "apps/api/src/modules/reports/services/report-data-fetcher.service.ts",
