@@ -34,7 +34,9 @@ import { createSystemDataSource } from '@perfana/shared/database';
     TypeOrmModule.forRootAsync({
       useFactory: () => createTypeOrmConfig(),
       dataSourceFactory: async (opts) => {
-        if (!opts) throw new Error('worker: typeorm options missing');
+        if (!opts) {
+          throw new Error('worker: typeorm options missing');
+        }
         return createSystemDataSource('worker', opts);
       },
     }),
@@ -44,7 +46,9 @@ import { createSystemDataSource } from '@perfana/shared/database';
     TypeOrmModule.forRootAsync({
       useFactory: () => createWriteTypeOrmConfig(),
       dataSourceFactory: async (opts) => {
-        if (!opts) throw new Error('worker: typeorm write options missing');
+        if (!opts) {
+          throw new Error('worker: typeorm write options missing');
+        }
         return createSystemDataSource('worker', opts);
       },
     }),
