@@ -3,6 +3,7 @@ import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { ConfigService } from '@nestjs/config';
 import { NotificationChannel, TestRun, SystemUnderTest } from '@perfana/shared';
+import { withRequestEm } from '../../common/db/request-em';
 import {
   ResourceNotFoundException,
   DatabaseException,
@@ -65,7 +66,7 @@ export class NotificationsService {
       // NOTE: Org filtering will be added here when NotificationChannel entity has organization_id
       // For now, all notification channels for the system are returned (treated as legacy data)
 
-      return await this.notificationChannelRepository.find({
+      return await withRequestEm(this.notificationChannelRepository).find({
         where: { systemUnderTestId: systemId },
         order: { createdAt: 'DESC' },
       });
@@ -93,7 +94,7 @@ export class NotificationsService {
     try {
       this.logger.debug(`findOne: id=${id}, userId=${userId}`);
 
-      const channel = await this.notificationChannelRepository.findOne({
+      const channel = await withRequestEm(this.notificationChannelRepository).findOne({
         where: { id },
       });
 
@@ -169,7 +170,7 @@ export class NotificationsService {
         teamId: system.team_id,
       });
 
-      return await this.notificationChannelRepository.save(channel);
+      return await withRequestEm(this.notificationChannelRepository).save(channel);
     } catch (error) {
       if (error instanceof BadRequestException) {
         throw error;
@@ -223,7 +224,7 @@ export class NotificationsService {
 
       this.logger.log(`Updating notification channel ${id} by user ${userId}`);
 
-      return await this.notificationChannelRepository.save(channel);
+      return await withRequestEm(this.notificationChannelRepository).save(channel);
     } catch (error) {
       if (error instanceof ResourceNotFoundException || error instanceof BadRequestException) {
         throw error;
@@ -258,7 +259,7 @@ export class NotificationsService {
 
       this.logger.log(`Deleting notification channel ${id} by user ${userId}`);
 
-      await this.notificationChannelRepository.remove(channel);
+      await withRequestEm(this.notificationChannelRepository).remove(channel);
     } catch (error) {
       if (error instanceof ResourceNotFoundException) {
         throw error;
@@ -326,7 +327,7 @@ export class NotificationsService {
   async sendTestRunNotification(testRun: TestRun): Promise<void> {
     try {
       // Find all enabled channels for this system that want test run notifications
-      const channels = await this.notificationChannelRepository.find({
+      const channels = await withRequestEm(this.notificationChannelRepository).find({
         where: {
           systemUnderTestId: testRun.systemUnderTestId,
           enabled: true,
