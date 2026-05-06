@@ -136,6 +136,7 @@ describe('ApplicationDashboardsService', () => {
           }),
           delete: jest.fn().mockResolvedValue({ affected: 1 }),
           update: jest.fn().mockResolvedValue({ affected: 1 }),
+          query: jest.fn().mockResolvedValue([]),
         };
         return callback(mockEntityManager);
       }),
@@ -1138,6 +1139,55 @@ describe('ApplicationDashboardsService', () => {
       );
     });
 
+    // Regression: ds_metric_statistics (and 8 sibling ds_* tables) reference
+    // application_dashboards with NO ACTION FKs. Without an explicit cascade
+    // the DELETE failed with a 23503 violation and bubbled as a 500.
+    it('should cascade-delete dependent ds_* rows before the dashboard row', async () => {
+      // Arrange
+      appDashboardRepo.findOne.mockResolvedValue(mockApplicationDashboardEntity);
+      const queryMock = jest.fn().mockResolvedValue([]);
+      const mockDataSource = service['dataSource'] as any;
+      mockDataSource.transaction.mockImplementationOnce(async (callback: any) => {
+        const mockEntityManager = {
+          createQueryBuilder: jest.fn().mockReturnValue({
+            delete: jest.fn().mockReturnThis(),
+            from: jest.fn().mockReturnThis(),
+            where: jest.fn().mockReturnThis(),
+            execute: jest.fn().mockResolvedValue({ affected: 0 }),
+          }),
+          delete: jest.fn().mockResolvedValue({ affected: 1 }),
+          update: jest.fn().mockResolvedValue({ affected: 1 }),
+          query: queryMock,
+        };
+        return callback(mockEntityManager);
+      });
+
+      // Act
+      await service.delete('app-dashboard-uuid', false, mockUserId, mockRoles);
+
+      // Assert — every ds_* table with a NO ACTION FK gets a DELETE keyed
+      // on application_dashboard_id, in a stable order, before the parent
+      // delete runs.
+      const expectedTables = [
+        'ds_change_points',
+        'ds_adapt_results',
+        'ds_adapt_tracked_results',
+        'ds_tracked_differences',
+        'ds_metric_classification',
+        'ds_control_group_statistics',
+        'ds_metric_statistics',
+        'ds_panels',
+        'ds_metrics',
+      ];
+      expect(queryMock).toHaveBeenCalledTimes(expectedTables.length);
+      expectedTables.forEach((table, index) => {
+        expect(queryMock.mock.calls[index][0]).toBe(
+          `DELETE FROM ${table} WHERE application_dashboard_id = $1`
+        );
+        expect(queryMock.mock.calls[index][1]).toEqual(['app-dashboard-uuid']);
+      });
+    });
+
     it('should handle case when no benchmarks are deleted', async () => {
       // Arrange
       appDashboardRepo.findOne.mockResolvedValue(mockApplicationDashboardEntity);
@@ -1191,6 +1241,7 @@ describe('ApplicationDashboardsService', () => {
             execute: jest.fn().mockResolvedValue({ affected: 0 }),
           }),
           delete: jest.fn().mockRejectedValue(new Error('Database delete error')),
+          query: jest.fn().mockResolvedValue([]),
         };
         return callback(mockEntityManager);
       });
@@ -1229,6 +1280,7 @@ describe('ApplicationDashboardsService', () => {
           }),
           delete: jest.fn().mockResolvedValue({ affected: 1 }),
           update: jest.fn().mockResolvedValue({ affected: 1 }),
+          query: jest.fn().mockResolvedValue([]),
         };
         return callback(mockEntityManager);
       });
@@ -1886,6 +1938,7 @@ describe('ApplicationDashboardsService', () => {
           }),
           delete: jest.fn().mockResolvedValue({ affected: 1 }),
           update: jest.fn().mockResolvedValue({ affected: 1 }),
+          query: jest.fn().mockResolvedValue([]),
         };
         return callback(mockEntityManager);
       });
@@ -2030,6 +2083,7 @@ describe('ApplicationDashboardsService', () => {
           }),
           delete: jest.fn().mockResolvedValue({ affected: 1 }),
           update: jest.fn().mockResolvedValue({ affected: 1 }),
+          query: jest.fn().mockResolvedValue([]),
         };
         return callback(mockEntityManager);
       });
@@ -2486,6 +2540,7 @@ describe('ApplicationDashboardsService', () => {
           }),
           delete: jest.fn().mockResolvedValue({ affected: 1 }),
           update: jest.fn().mockResolvedValue({ affected: 1 }),
+          query: jest.fn().mockResolvedValue([]),
         };
         return cb(mockEntityManager);
       });

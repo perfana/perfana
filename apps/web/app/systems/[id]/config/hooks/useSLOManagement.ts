@@ -22,6 +22,7 @@ interface UseSLOManagementReturn {
 
   // Loading states
   deleteSloLoading: boolean;
+  deleteSloError: string | null;
 
   // Actions
   fetchBenchmarks: (systemId: string, environment: string, workload: string) => Promise<void>;
@@ -64,6 +65,7 @@ export function useSLOManagement(): UseSLOManagementReturn {
 
   // Loading states
   const [deleteSloLoading, setDeleteSloLoading] = useState(false);
+  const [deleteSloError, setDeleteSloError] = useState<string | null>(null);
 
   // Fetch benchmarks
   const fetchBenchmarks = useCallback(async (systemId: string, environment: string, workload: string) => {
@@ -136,6 +138,7 @@ export function useSLOManagement(): UseSLOManagementReturn {
   // Handle delete SLO
   const handleDeleteSLO = useCallback((benchmark: Benchmark) => {
     setDeletingSlo(benchmark);
+    setDeleteSloError(null);
     setDeleteSloOpen(true);
   }, []);
 
@@ -149,6 +152,7 @@ export function useSLOManagement(): UseSLOManagementReturn {
 
     try {
       setDeleteSloLoading(true);
+      setDeleteSloError(null);
       const response = await authenticatedFetch(
         `/benchmarks/${deletingSlo.id}`,
         {
@@ -158,8 +162,12 @@ export function useSLOManagement(): UseSLOManagementReturn {
       );
 
       if (!response.ok) {
-        const errorText = await response.text();
-        return { error: `Failed to delete SLO: ${response.status} - ${errorText}` };
+        const body = await response.json().catch(() => null);
+        const message = body?.message
+          ?? body?.error
+          ?? `Failed to delete SLO (${response.status} ${response.statusText})`;
+        setDeleteSloError(message);
+        return { error: message };
       }
 
       // Refresh benchmarks list
@@ -171,7 +179,11 @@ export function useSLOManagement(): UseSLOManagementReturn {
       setDeletingSlo(null);
       return {};
     } catch (err) {
-      return { error: err && typeof err === 'object' && 'message' in err ? (err as Error).message : 'Failed to delete SLO' };
+      const message = err && typeof err === 'object' && 'message' in err
+        ? (err as Error).message
+        : 'Failed to delete SLO';
+      setDeleteSloError(message);
+      return { error: message };
     } finally {
       setDeleteSloLoading(false);
     }
@@ -247,6 +259,7 @@ export function useSLOManagement(): UseSLOManagementReturn {
 
     // Loading states
     deleteSloLoading,
+    deleteSloError,
 
     // Actions
     fetchBenchmarks,

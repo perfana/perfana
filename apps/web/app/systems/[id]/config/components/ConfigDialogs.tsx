@@ -27,6 +27,7 @@ interface DashboardDialogState {
   formLoading: boolean;
   editFormLoading: boolean;
   deleteLoading: boolean;
+  deleteError: string | null;
 }
 
 interface SLODialogState {
@@ -36,6 +37,7 @@ interface SLODialogState {
   editingSlo: Benchmark | null;
   deletingSlo: Benchmark | null;
   deleteSloLoading: boolean;
+  deleteSloError: string | null;
 }
 
 interface ConfigDialogsProps {
@@ -121,6 +123,7 @@ export default function ConfigDialogs({
         message="Are you sure you want to delete this dashboard configuration? This action cannot be undone."
         itemName={dashboard.deletingDashboard?.dashboard_label}
         loading={dashboard.deleteLoading}
+        error={dashboard.deleteError}
         grafanaOption={
           dashboard.deleteInfo
             ? {
@@ -143,6 +146,7 @@ export default function ConfigDialogs({
         message="Are you sure you want to delete this service level objective? This action cannot be undone."
         itemName={slo.deletingSlo?.config_title || slo.deletingSlo?.metric_name}
         loading={slo.deleteSloLoading}
+        error={slo.deleteSloError}
       />
 
       <AddSLODialog

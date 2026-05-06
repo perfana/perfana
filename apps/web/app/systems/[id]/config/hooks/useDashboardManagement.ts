@@ -35,6 +35,7 @@ interface UseDashboardManagementReturn {
   formLoading: boolean;
   editFormLoading: boolean;
   deleteLoading: boolean;
+  deleteError: string | null;
 
   // Actions
   fetchApplicationDashboards: (systemId: string, environment: string) => Promise<void>;
@@ -100,6 +101,7 @@ export function useDashboardManagement(): UseDashboardManagementReturn {
   const [formLoading, setFormLoading] = useState(false);
   const [editFormLoading, setEditFormLoading] = useState(false);
   const [deleteLoading, setDeleteLoading] = useState(false);
+  const [deleteError, setDeleteError] = useState<string | null>(null);
 
   // Fetch application dashboards
   const fetchApplicationDashboards = useCallback(async (systemId: string, environment: string) => {
@@ -295,6 +297,7 @@ export function useDashboardManagement(): UseDashboardManagementReturn {
     }
 
     setDeleteFromGrafana(false);
+    setDeleteError(null);
     setDeletingDashboard(dashboard);
     setDeleteConfirmOpen(true);
   }, []);
@@ -305,6 +308,7 @@ export function useDashboardManagement(): UseDashboardManagementReturn {
 
     try {
       setDeleteLoading(true);
+      setDeleteError(null);
 
       const deleteUrl = deleteFromGrafana && deleteInfo?.canDeleteFromGrafana
         ? `/grafana/application-dashboards/${deletingDashboard.id}?deleteFromGrafana=true`
@@ -316,8 +320,11 @@ export function useDashboardManagement(): UseDashboardManagementReturn {
       });
 
       if (!response.ok) {
-        const errorText = await response.text();
-        throw new Error(`Failed to delete dashboard configuration: ${response.status} - ${errorText}`);
+        const body = await response.json().catch(() => null);
+        const message = body?.message
+          ?? body?.error
+          ?? `Failed to delete dashboard configuration (${response.status} ${response.statusText})`;
+        throw new Error(message);
       }
 
       await fetchApplicationDashboards(systemName, environment);
@@ -325,6 +332,12 @@ export function useDashboardManagement(): UseDashboardManagementReturn {
       setDeletingDashboard(null);
       setDeleteInfo(null);
       setDeleteFromGrafana(false);
+    } catch (err) {
+      setDeleteError(
+        err && typeof err === 'object' && 'message' in err
+          ? (err as Error).message
+          : 'Failed to delete dashboard configuration'
+      );
     } finally {
       setDeleteLoading(false);
     }
@@ -371,6 +384,7 @@ export function useDashboardManagement(): UseDashboardManagementReturn {
     setDeleteConfirmOpen(false);
     setDeleteInfo(null);
     setDeleteFromGrafana(false);
+    setDeleteError(null);
   }, []);
 
   // Clear dashboards (when environment changes)
@@ -401,6 +415,7 @@ export function useDashboardManagement(): UseDashboardManagementReturn {
     formLoading,
     editFormLoading,
     deleteLoading,
+    deleteError,
 
     // Actions
     fetchApplicationDashboards,
