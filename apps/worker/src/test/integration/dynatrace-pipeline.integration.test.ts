@@ -476,6 +476,10 @@ describe('DynatracePipeline Integration Tests', () => {
         'dashboard_name VARCHAR(255)',
         'dashboard_uid VARCHAR(255)',
         'dashboard_label VARCHAR(255)',
+        'organization_id UUID',
+        'team_id UUID',
+        'created_by VARCHAR(255)',
+        'updated_by VARCHAR(255)',
       ];
       for (const col of appDashCols) {
         await testDb.query(
@@ -499,6 +503,24 @@ describe('DynatracePipeline Integration Tests', () => {
           `ALTER TABLE grafana_dashboards ADD COLUMN IF NOT EXISTS ${col};`
         ).catch(() => {});
       }
+
+      // systems_under_test stub: DynatraceDashboardManager now resolves the
+      // owning organization (NOT NULL on application_dashboards) by SELECTing
+      // from systems_under_test. The shared test schema uses VARCHAR ids, so
+      // this stub matches that style; production uses UUID.
+      await testDb.query(`
+        CREATE TABLE IF NOT EXISTS systems_under_test (
+          id VARCHAR(255) PRIMARY KEY,
+          organization_id UUID NOT NULL,
+          team_id UUID
+        );
+      `);
+      await testDb.query(
+        `INSERT INTO systems_under_test (id, organization_id, team_id)
+         VALUES ($1, $2, $3)
+         ON CONFLICT (id) DO NOTHING`,
+        ['test-app', '00000000-0000-0000-0000-000000000001', null]
+      );
 
       const mockDataSource = {
         query: async (sql: string, params?: any[]) => {

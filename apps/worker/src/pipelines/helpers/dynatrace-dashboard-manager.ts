@@ -59,16 +59,72 @@ export interface DashboardMetadata {
 }
 
 /**
+ * Owner identity used for system-driven writes from the worker.
+ * Mirrors `created_by = 'worker-pipeline'` used by the surrounding pipeline writes
+ * (ds_metrics, ds_panels, …).
+ */
+const WORKER_PIPELINE_ACTOR = 'worker-pipeline';
+
+/**
+ * SUT ownership snapshot loaded once per (systemUnderTestId) and cached on the
+ * manager. `organizationId` is required for `INSERT INTO application_dashboards`
+ * since migration `1777700000000-OrganizationIdNotNull` made the column NOT NULL.
+ */
+interface SutOwnership {
+  organizationId: string;
+  teamId: string | null;
+}
+
+/**
  * Dynatrace Dashboard Manager Class
  * Handles creation and tracking of Dynatrace-based dashboards
  */
 export class DynatraceDashboardManager {
   private dashboardCache: Map<string, DashboardMetadata> = new Map();
+  private sutOwnershipCache: Map<string, SutOwnership> = new Map();
 
   constructor(
     private dataSource: DataSource,
     private logger: Logger
   ) {}
+
+  /**
+   * Resolve the owning organization (and optional team) for a SUT. The result
+   * is cached per `systemUnderTestId` for the lifetime of the manager — one SELECT
+   * per SUT per pipeline run.
+   *
+   * Throws if the SUT row is missing or has no organization_id, since callers
+   * cannot satisfy the `application_dashboards.organization_id` NOT NULL
+   * constraint without it.
+   */
+  private async getSutOwnership(systemUnderTestId: string): Promise<SutOwnership> {
+    const cached = this.sutOwnershipCache.get(systemUnderTestId);
+    if (cached) {
+      return cached;
+    }
+
+    const rows = await this.dataSource.query<Array<{ organization_id: string | null; team_id: string | null }>>(
+      `SELECT organization_id, team_id FROM systems_under_test WHERE id = $1`,
+      [systemUnderTestId]
+    );
+
+    const row = rows?.[0];
+    if (!row) {
+      throw new Error(`SUT not found for systemUnderTestId=${systemUnderTestId}`);
+    }
+    if (!row.organization_id) {
+      throw new Error(
+        `SUT ${systemUnderTestId} has no organization_id; cannot create Dynatrace dashboard`
+      );
+    }
+
+    const ownership: SutOwnership = {
+      organizationId: row.organization_id,
+      teamId: row.team_id ?? null,
+    };
+    this.sutOwnershipCache.set(systemUnderTestId, ownership);
+    return ownership;
+  }
 
   /**
    * Get or create a dashboard for a specific Dynatrace metric set
@@ -101,6 +157,11 @@ export class DynatraceDashboardManager {
     );
     const dashboardUid = this.generateDynatraceDashboardUid(dashboardLabel);
 
+    // Resolve owning org/team from the parent SUT — required for both INSERTs
+    // below since `application_dashboards.organization_id` is NOT NULL and
+    // `metrics_sources.organization_id` is part of the RBAC sweep.
+    const ownership = await this.getSutOwnership(systemUnderTestId);
+
     // Check if dashboard already exists
     const existing = await this.dataSource.query(
       `SELECT id FROM application_dashboards WHERE id = $1`,
@@ -114,7 +175,8 @@ export class DynatraceDashboardManager {
         dashboardUid,
         dashboardLabel,
         systemUnderTestId,
-        testEnvironment
+        testEnvironment,
+        ownership
       );
     }
 
@@ -126,6 +188,7 @@ export class DynatraceDashboardManager {
         testEnvironment,
         dashboardUid,
         dashboardLabel,
+        ownership,
       );
     } catch (err) {
       this.logger.error({ err }, `MetricsSource dual-write failed for Dynatrace dashboard ${dashboardId} (non-blocking)`);
@@ -197,18 +260,22 @@ export class DynatraceDashboardManager {
     dashboardUid: string,
     dashboardLabel: string,
     systemUnderTestId: string,
-    testEnvironment: string
+    testEnvironment: string,
+    ownership: SutOwnership
   ): Promise<void> {
     this.logger.info(
       `🔧 Creating Dynatrace dashboard: ${dashboardLabel} (${dashboardUid})`
     );
 
-    // Create application_dashboard without Grafana references (nullable columns)
+    // Create application_dashboard without Grafana references (nullable columns).
+    // organization_id is required (NOT NULL since 1777700000000-OrganizationIdNotNull)
+    // and is sourced from the parent SUT.
     await this.dataSource.query(
       `INSERT INTO application_dashboards (
         id, system_under_test_id, test_environment,
-        dashboard_name, dashboard_uid, dashboard_label
-      ) VALUES ($1, $2, $3, $4, $5, $6)
+        dashboard_name, dashboard_uid, dashboard_label,
+        organization_id, team_id, created_by, updated_by
+      ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $9)
       ON CONFLICT DO NOTHING`,
       [
         dashboardId,
@@ -217,6 +284,9 @@ export class DynatraceDashboardManager {
         dashboardLabel,
         dashboardUid,
         dashboardLabel,
+        ownership.organizationId,
+        ownership.teamId,
+        WORKER_PIPELINE_ACTOR,
       ]
     );
 
@@ -232,16 +302,31 @@ export class DynatraceDashboardManager {
     testEnvironment: string,
     dashboardUid: string,
     dashboardLabel: string,
+    ownership: SutOwnership,
   ): Promise<string | undefined> {
     const result = await this.dataSource.query<Array<{ id: string }>>(
       `INSERT INTO metrics_sources (
         system_under_test_id, test_environment, source_type,
-        external_ref, display_name, display_label
-      ) VALUES ($1, $2, 'dynatrace', $3, $4, $5)
+        external_ref, display_name, display_label,
+        organization_id, team_id, created_by
+      ) VALUES ($1, $2, 'dynatrace', $3, $4, $5, $6, $7, $8)
       ON CONFLICT ON CONSTRAINT uq_metrics_sources_unique
-      DO UPDATE SET display_label = EXCLUDED.display_label, updated_at = NOW()
+      DO UPDATE SET
+        display_label = EXCLUDED.display_label,
+        organization_id = EXCLUDED.organization_id,
+        team_id = EXCLUDED.team_id,
+        updated_at = NOW()
       RETURNING id`,
-      [systemUnderTestId, testEnvironment, dashboardUid, dashboardLabel, dashboardLabel]
+      [
+        systemUnderTestId,
+        testEnvironment,
+        dashboardUid,
+        dashboardLabel,
+        dashboardLabel,
+        ownership.organizationId,
+        ownership.teamId,
+        WORKER_PIPELINE_ACTOR,
+      ]
     );
     return result?.[0]?.id;
   }
@@ -251,5 +336,6 @@ export class DynatraceDashboardManager {
    */
   clearCache(): void {
     this.dashboardCache.clear();
+    this.sutOwnershipCache.clear();
   }
 }
