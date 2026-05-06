@@ -43,7 +43,17 @@ import { createSystemDataSource } from '@perfana/shared/database/data-source-sys
 
     // Dedicated write connection pool — small, never starved by analytical queries
     // See: 2026-03-26 write starvation post-mortem
+    //
+    // `name: 'write'` MUST be at the OUTER forRootAsync level — that is what
+    // @nestjs/typeorm reads to register the named provider token that
+    // `@InjectDataSource('write')` in WorkerDatabaseService resolves against.
+    // The `name: 'write'` returned by `createWriteTypeOrmConfig()` is read by
+    // typeorm's DataSource constructor, but does NOT bubble up to NestJS's
+    // provider registry. PR #261 migrated this from `forRoot()` (which read
+    // the inner name) to `forRootAsync()` (which doesn't), silently breaking
+    // worker DI until the next rebuild.
     TypeOrmModule.forRootAsync({
+      name: 'write',
       useFactory: () => createWriteTypeOrmConfig(),
       dataSourceFactory: async (opts) => {
         if (!opts) {
