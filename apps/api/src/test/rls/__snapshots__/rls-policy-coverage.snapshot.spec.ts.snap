@@ -284,12 +284,22 @@ exports[`RLS policy coverage snapshot every owned-resource and policy-bearing ta
   },
   "profile_benchmarks": {
     "force": false,
-    "policies": [],
+    "policies": [
+      "DELETE:rls_profile_benchmarks_delete",
+      "INSERT:rls_profile_benchmarks_insert",
+      "SELECT:rls_profile_benchmarks_select",
+      "UPDATE:rls_profile_benchmarks_update",
+    ],
     "rls": true,
   },
   "profile_grafana_dashboards": {
     "force": false,
-    "policies": [],
+    "policies": [
+      "DELETE:rls_profile_grafana_dashboards_delete",
+      "INSERT:rls_profile_grafana_dashboards_insert",
+      "SELECT:rls_profile_grafana_dashboards_select",
+      "UPDATE:rls_profile_grafana_dashboards_update",
+    ],
     "rls": true,
   },
   "profiles": {
