@@ -4,6 +4,11 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
+## [0.2.47.75] - 2026-05-06
+
+### Fixed
+- **Performance test ingest unblocked: scenario dashboards now write `organization_id` and `ds_metrics` populates again for `source_type='performance_test'` (#275).** Migration `1777700000000-OrganizationIdNotNull` made `application_dashboards.organization_id` NOT NULL, but the worker's `DashboardManager.createScenarioDashboard` enumerated columns explicitly and never threaded the org through, so every JMeter / perf-test ingest blew up on the first INSERT with `null value in column "organization_id" of relation "application_dashboards" violates not-null constraint`. The retry path (`IncrementalCollectionScheduler`, once a minute) made no progress — in perfana-demo on `0.2.47.73` it had been retrying for ~40 minutes when found, with 7,335 `requests_raw` rows + 1,696 `transactions` rows on disk producing 0 derived `ds_metrics`. The grafana-backed metrics path was independent and kept working, which is why `ds_metrics` was non-empty but contained only `source_type='grafana'` rows. Fix resolves the owning org/team from the parent SUT (single SELECT against `systems_under_test`, cached per `systemUnderTestId` on the manager instance), threads them through the `application_dashboards` INSERT, and passes them into the `metrics_sources` upsert that follows. `created_by`/`updated_by` are stamped `'worker-pipeline'` to mirror the surrounding ds_* writes (ds_metrics, ds_panels, ds_metric_statistics, …). `metrics_sources` DO UPDATE refreshes `organization_id`/`team_id` (so re-parenting a dashboard to a different org propagates) but leaves `created_by` alone (preserves original creator across overlapping ticks — covered by an inverse-contract test). Audit per the issue's "while in dashboard-manager.ts" note: `DynatraceDashboardManager` had the identical bug and got the same fix. New `dashboard-manager.test.ts` (6 cases: org threading, ownership cache, scenario cache, missing-SUT error, missing-org error, DO-UPDATE invariant); `DynatracePipeline.test.ts` mocks updated for the new SUT lookup; integration test schema gets a `systems_under_test` stub so the dynatrace dashboard tests can satisfy the SELECT.
+
 ## [0.2.47.74] - 2026-05-06
 
 ### Fixed

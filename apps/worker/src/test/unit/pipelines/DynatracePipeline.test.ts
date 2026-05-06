@@ -1297,13 +1297,25 @@ describe('DynatraceDashboardManager - MetricsSource', () => {
     manager = new DynatraceDashboardManager(mockDataSource, mockLogger);
   });
 
+  // SUT ownership row returned by the new SELECT against systems_under_test.
+  const sutOwnershipRow = [
+    {
+      organization_id: '00000000-0000-0000-0000-000000000001',
+      team_id: null,
+    },
+  ];
+
   it('should return metricsSourceId in DashboardMetadata from getOrCreateDynatraceDashboard', async () => {
-    // Arrange
-    // 1st query: check if application_dashboard exists -> not found
+    // Arrange — query call order:
+    //   1. SELECT organization_id, team_id FROM systems_under_test
+    //   2. SELECT id FROM application_dashboards
+    //   3. INSERT INTO application_dashboards
+    //   4. INSERT INTO metrics_sources RETURNING id
     mockDataSource.query
-      .mockResolvedValueOnce([]) // SELECT id FROM application_dashboards
-      .mockResolvedValueOnce([]) // INSERT INTO application_dashboards (no grafana refs)
-      .mockResolvedValueOnce([{ id: 'metrics-source-uuid-1' }]); // INSERT INTO metrics_sources RETURNING id
+      .mockResolvedValueOnce(sutOwnershipRow)
+      .mockResolvedValueOnce([])
+      .mockResolvedValueOnce([])
+      .mockResolvedValueOnce([{ id: 'metrics-source-uuid-1' }]);
 
     // Act
     const metadata = await manager.getOrCreateDynatraceDashboard(
@@ -1318,13 +1330,20 @@ describe('DynatraceDashboardManager - MetricsSource', () => {
     expect(metadata.dashboardLabel).toBe('Response Time');
     expect(metadata.dashboardId).toBeDefined();
     expect(metadata.dashboardUid).toBeDefined();
+
+    // Application dashboard INSERT must thread organization_id from the SUT.
+    const appDashCall = mockDataSource.query.mock.calls[2];
+    expect(appDashCall[0]).toMatch(/INSERT INTO application_dashboards/);
+    expect(appDashCall[0]).toMatch(/organization_id/);
+    expect(appDashCall[1]).toContain('00000000-0000-0000-0000-000000000001');
   });
 
   it('should continue without metricsSourceId when upsertMetricsSource fails (non-blocking)', async () => {
     // Arrange
     mockDataSource.query
+      .mockResolvedValueOnce(sutOwnershipRow) // SELECT systems_under_test
       .mockResolvedValueOnce([]) // SELECT id FROM application_dashboards
-      .mockResolvedValueOnce([]) // INSERT INTO application_dashboards (no grafana refs)
+      .mockResolvedValueOnce([]) // INSERT INTO application_dashboards
       .mockRejectedValueOnce(new Error('metrics_sources table does not exist')); // INSERT INTO metrics_sources FAILS
 
     // Act
@@ -1349,8 +1368,9 @@ describe('DynatraceDashboardManager - MetricsSource', () => {
   it('should return cached metricsSourceId on subsequent calls', async () => {
     // Arrange - first call creates the dashboard
     mockDataSource.query
+      .mockResolvedValueOnce(sutOwnershipRow) // SELECT systems_under_test (cached after this)
       .mockResolvedValueOnce([]) // SELECT id FROM application_dashboards
-      .mockResolvedValueOnce([]) // INSERT INTO application_dashboards (no grafana refs)
+      .mockResolvedValueOnce([]) // INSERT INTO application_dashboards
       .mockResolvedValueOnce([{ id: 'metrics-source-uuid-cached' }]); // INSERT INTO metrics_sources RETURNING id
 
     // Act - first call populates cache
@@ -1372,7 +1392,8 @@ describe('DynatraceDashboardManager - MetricsSource', () => {
     // Assert
     expect(metadata1.metricsSourceId).toBe('metrics-source-uuid-cached');
     expect(metadata2.metricsSourceId).toBe('metrics-source-uuid-cached');
-    // The dataSource.query should only be called for the first invocation (3 calls), not again
-    expect(mockDataSource.query).toHaveBeenCalledTimes(3);
+    // First invocation: 4 queries (SUT + dashboard SELECT + dashboard INSERT + metrics_sources INSERT).
+    // Second invocation: cache hit, no additional queries.
+    expect(mockDataSource.query).toHaveBeenCalledTimes(4);
   });
 });
