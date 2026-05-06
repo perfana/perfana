@@ -59,7 +59,12 @@ exports[`RLS policy coverage snapshot every owned-resource and policy-bearing ta
   },
   "check_results": {
     "force": false,
-    "policies": [],
+    "policies": [
+      "DELETE:rls_check_results_delete",
+      "INSERT:rls_check_results_insert",
+      "SELECT:rls_check_results_select",
+      "UPDATE:rls_check_results_update",
+    ],
     "rls": true,
   },
   "compare_filter_presets": {

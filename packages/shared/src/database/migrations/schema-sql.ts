@@ -7943,6 +7943,34 @@ CREATE POLICY rls_benchmarks_update ON public.benchmarks FOR UPDATE USING (publi
 
 
 --
+-- Name: check_results rls_check_results_delete; Type: POLICY; Schema: public; Owner: -
+--
+
+CREATE POLICY rls_check_results_delete ON public.check_results FOR DELETE USING (public.can_modify_resource(organization_id, team_id, (created_by)::text));
+
+
+--
+-- Name: check_results rls_check_results_insert; Type: POLICY; Schema: public; Owner: -
+--
+
+CREATE POLICY rls_check_results_insert ON public.check_results FOR INSERT WITH CHECK ((public.is_global_admin() OR public.can_access_resource(organization_id, team_id, (created_by)::text)));
+
+
+--
+-- Name: check_results rls_check_results_select; Type: POLICY; Schema: public; Owner: -
+--
+
+CREATE POLICY rls_check_results_select ON public.check_results FOR SELECT USING (public.can_access_resource(organization_id, team_id, (created_by)::text));
+
+
+--
+-- Name: check_results rls_check_results_update; Type: POLICY; Schema: public; Owner: -
+--
+
+CREATE POLICY rls_check_results_update ON public.check_results FOR UPDATE USING (public.can_modify_resource(organization_id, team_id, (created_by)::text));
+
+
+--
 -- Name: compare_filter_presets rls_compare_filter_presets_delete; Type: POLICY; Schema: public; Owner: -
 --
 
