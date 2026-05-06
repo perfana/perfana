@@ -31,6 +31,7 @@ export function useDeepLinksSection({
   // Loading states
   const [submitting, setSubmitting] = useState(false);
   const [deleteLoading, setDeleteLoading] = useState(false);
+  const [deleteError, setDeleteError] = useState<string | null>(null);
 
   // Selection state
   const [selectedDeepLinkIds, setSelectedDeepLinkIds] = useState<Set<string>>(new Set());
@@ -153,6 +154,7 @@ export function useDeepLinksSection({
   // Delete deep link handler (open dialog)
   const handleDeleteDeepLink = useCallback((deepLink: DeepLink) => {
     setDeletingDeepLink(deepLink);
+    setDeleteError(null);
     setDeleteDialogOpen(true);
   }, []);
 
@@ -162,7 +164,7 @@ export function useDeepLinksSection({
 
     try {
       setDeleteLoading(true);
-      setError(null);
+      setDeleteError(null);
 
       const response = await authenticatedFetch(`/deep-links/${deletingDeepLink.id}`, {
         method: 'DELETE',
@@ -172,7 +174,11 @@ export function useDeepLinksSection({
       });
 
       if (!response.ok) {
-        throw new Error('Failed to delete deep link');
+        const body = await response.json().catch(() => null);
+        const message = body?.message
+          ?? body?.error
+          ?? `Failed to delete deep link (${response.status} ${response.statusText})`;
+        throw new Error(message);
       }
 
       await fetchDeepLinks();
@@ -183,7 +189,7 @@ export function useDeepLinksSection({
         err && typeof err === 'object' && 'message' in err
           ? (err as Error).message
           : 'Failed to delete deep link';
-      setError(errorMessage);
+      setDeleteError(errorMessage);
     } finally {
       setDeleteLoading(false);
     }
@@ -272,6 +278,7 @@ export function useDeepLinksSection({
     // Loading states
     submitting,
     deleteLoading,
+    deleteError,
 
     // Selection state
     selectedDeepLinkIds,

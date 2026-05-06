@@ -46,6 +46,7 @@ export default function DeepLinksSection({
     // Loading states
     submitting,
     deleteLoading,
+    deleteError,
 
     // Selection state
     selectedDeepLinkIds,
@@ -265,6 +266,7 @@ export default function DeepLinksSection({
         message="Are you sure you want to delete this deep link? This action cannot be undone."
         itemName={deletingDeepLink?.name}
         loading={deleteLoading}
+        error={deleteError}
       />
     </Paper>
   );

@@ -48,6 +48,7 @@ export interface UseDeepLinksSectionReturn {
   // Loading states
   submitting: boolean;
   deleteLoading: boolean;
+  deleteError: string | null;
 
   // Selection state
   selectedDeepLinkIds: Set<string>;

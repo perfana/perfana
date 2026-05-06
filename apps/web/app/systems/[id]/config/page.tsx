@@ -282,6 +282,7 @@ export default function SystemConfigurationPage() {
           formLoading: dashboard.formLoading,
           editFormLoading: dashboard.editFormLoading,
           deleteLoading: dashboard.deleteLoading,
+          deleteError: dashboard.deleteError,
         }}
         slo={{
           addSloOpen: slo.addSloOpen,
@@ -290,6 +291,7 @@ export default function SystemConfigurationPage() {
           editingSlo: slo.editingSlo,
           deletingSlo: slo.deletingSlo,
           deleteSloLoading: slo.deleteSloLoading,
+          deleteSloError: slo.deleteSloError,
         }}
         onAddDashboardClose={() => dashboard.setAddDashboardOpen(false)}
         onAddDashboardSubmit={(id, label, vars) =>

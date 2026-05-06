@@ -762,6 +762,29 @@ export class ApplicationDashboardsService {
           this.logger.log(`Cascade deleted ${benchmarkResult.affected} benchmark(s) for application dashboard ${id}`);
         }
 
+        // Cascade-delete dependent ds_* rows that have NO ACTION FKs to
+        // application_dashboards. Mirrors the test-run delete handler — these
+        // are time-series stats keyed on the dashboard and are meaningless
+        // once the dashboard is gone. Without this the parent DELETE fails
+        // with a 23503 FK violation (e.g. ds_metric_statistics).
+        const dsTables = [
+          'ds_change_points',
+          'ds_adapt_results',
+          'ds_adapt_tracked_results',
+          'ds_tracked_differences',
+          'ds_metric_classification',
+          'ds_control_group_statistics',
+          'ds_metric_statistics',
+          'ds_panels',
+          'ds_metrics',
+        ];
+        for (const table of dsTables) {
+          await transactionalEntityManager.query(
+            `DELETE FROM ${table} WHERE application_dashboard_id = $1`,
+            [id],
+          );
+        }
+
         // Delete the application dashboard
         await transactionalEntityManager.delete(ApplicationDashboardEntity, id);
         this.logger.log(`Deleted application dashboard: ${existing.dashboardLabel} (${existing.id}) by user: ${userId}`);
