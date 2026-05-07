@@ -4,6 +4,11 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
+## [0.2.47.76] - 2026-05-07
+
+### Fixed
+- **Transaction stats rollup no longer aborts with `function tdigest(double precision) does not exist`, restoring the fast path on the Performance Analysis card (#278).** PR #275 (v0.2.47.75) corrected the sketch family from `percentile_agg`/`uddsketch` to `tdigest` to match the rollup table column type, but used the single-arg form `tdigest(t.response_time::double precision)`. TimescaleDB Toolkit `1.22.0` (running on TimescaleDB `2.26.4`) only ships the two-arg aggregate `tdigest(size integer, value double precision)` — there is no single-argument signature. The planner returned `function tdigest(double precision) does not exist` on the rollup INSERT, the whole transaction aborted, and `test_run_transaction_stats` / `test_run_sampler_stats` stayed empty the same way they did under the original `uddsketch` mismatch. Surfaced via `QueryFailedError: function tdigest(double precision) does not exist at TransactionStatsRollupPipeline.execute` in worker logs on every retry; reproduced on lab branch `lab/db-stress-18k-rps` against ~64M `requests_raw` rows across 4 SUTs × 2 runs. All four call sites in `TransactionStatsRollupPipeline.ts` (transaction full + excl, sampler full + excl) now pass `tdigest(100, t.response_time::double precision)` — 100 buckets matches the toolkit's documented default for response-time distributions and is sufficient for the p95/p99 the Performance Analysis card reads. Bucket count is hard-coded with a doc comment pointing readers at the right knob to bump if p999 estimates ever drift on high-cardinality runs (~10M+ unique samples) — there's no caller that needs to round-trip the exact value, so a config knob is YAGNI for now. The existing #278 regression test was tightened to assert the size argument explicitly (`tdigest\s*\(\s*\d+\s*,\s*[^)]*response_time`) so a future drift back to either single-arg `tdigest` or `percentile_agg` fails the test instead of slipping through.
+
 ## [0.2.47.75] - 2026-05-06
 
 ### Fixed
