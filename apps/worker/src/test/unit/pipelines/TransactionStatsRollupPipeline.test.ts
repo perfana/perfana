@@ -224,6 +224,29 @@ describe('TransactionStatsRollupPipeline', () => {
       expect((result.data as any).samplerRows).toBe(73);
     });
 
+    it('uses tdigest() for the pct_agg sketch in both rollup INSERTs (issue #278)', async () => {
+      // Regression test for #278: the schema columns
+      // `test_run_transaction_stats.pct_agg` and `test_run_sampler_stats.pct_agg`
+      // are declared `tdigest`, but on the toolkit version we ship,
+      // `percentile_agg(...)` returns `uddsketch`. If the SQL ever drifts back
+      // to `percentile_agg`, every rollup transaction will abort with
+      // `column "pct_agg" is of type tdigest but expression is of type uddsketch`
+      // and the rollup tables will silently stay empty.
+      mockDb.getTestRunByTestRunId.mockResolvedValue(makeTestRun());
+      wireTransaction({ tx: 1, sampler: 1 });
+
+      await pipeline.execute({ testRunId: 'run-001' });
+
+      const inserts = mockManagerQuery.mock.calls
+        .map(([sql]) => sql as string)
+        .filter(s => /INSERT INTO test_run_(transaction|sampler)_stats/i.test(s));
+      expect(inserts.length).toBe(2);
+      for (const sql of inserts) {
+        expect(sql).toMatch(/tdigest\s*\(\s*[^)]*response_time/i);
+        expect(sql).not.toMatch(/percentile_agg\s*\(\s*[^)]*response_time/i);
+      }
+    });
+
     it('returns an error result when the database transaction throws', async () => {
       mockDb.getTestRunByTestRunId.mockResolvedValue(makeTestRun());
       mockDb.transaction.mockRejectedValue(new Error('db unavailable'));

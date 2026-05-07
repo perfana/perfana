@@ -35,6 +35,21 @@ interface RollupRowCount {
  * computed at read time via `approx_percentile` / `approx_percentile_rank`
  * against the *current* threshold, so threshold edits take effect immediately
  * without any recompute.
+ *
+ * Sketch type — DO NOT change to `percentile_agg()`:
+ *   The schema columns (`test_run_transaction_stats.pct_agg`,
+ *   `test_run_sampler_stats.pct_agg`) are declared `tdigest NOT NULL` in
+ *   migration `1776800000000-CreateTestRunStatsRollup.ts`. On the toolkit
+ *   versions we ship, `percentile_agg(...)` returns `uddsketch`, and Postgres
+ *   refuses the implicit cast → the whole rollup transaction aborts and the
+ *   tables stay empty (issue #278). Use `tdigest(...)` here.
+ *
+ *   Note that the continuous aggregates in `1777500000000-AddContinuousAggregates.ts`
+ *   intentionally still use `percentile_agg`/`uddsketch` (for `rollup()` chaining
+ *   on the CAGG side). The two sketch families are never merged — Grafana panel
+ *   queries read the CAGGs (uddsketch); the Performance Analysis card reads
+ *   these rollup tables (tdigest) — so the split is safe. Don't naively
+ *   re-unify them without a schema migration.
  */
 export class TransactionStatsRollupPipeline extends BasePipelineTypeORM {
 
@@ -215,7 +230,8 @@ const TRANSACTION_ROLLUP_SQL = `
       COUNT(*) FILTER (WHERE NOT t.success)                                AS failed_full,
       ROUND(AVG(t.response_time)::numeric, 2)                              AS avg_full,
       ROUND((AVG(t.response_time) * COUNT(*))::numeric, 2)                 AS impact_full,
-      percentile_agg(t.response_time::double precision)                    AS pct_full,
+      -- tdigest() (NOT percentile_agg) -- target column is tdigest; see #278.
+      tdigest(t.response_time::double precision)                           AS pct_full,
       COUNT(*) FILTER (WHERE t.time >= $2)                                 AS total_excl,
       COUNT(*) FILTER (WHERE t.success     AND t.time >= $2)               AS passed_excl,
       COUNT(*) FILTER (WHERE NOT t.success AND t.time >= $2)               AS failed_excl,
@@ -224,7 +240,7 @@ const TRANSACTION_ROLLUP_SQL = `
         AVG(t.response_time) FILTER (WHERE t.time >= $2) *
         COUNT(*)             FILTER (WHERE t.time >= $2)
       )::numeric, 2)                                                       AS impact_excl,
-      percentile_agg(t.response_time::double precision) FILTER (WHERE t.time >= $2) AS pct_excl
+      tdigest(t.response_time::double precision) FILTER (WHERE t.time >= $2) AS pct_excl
     FROM transactions t
     JOIN test_runs tr ON tr.test_run_id = t.test_run_id
     WHERE t.test_run_id = $1
@@ -294,7 +310,8 @@ const SAMPLER_ROLLUP_SQL = `
       ROUND(AVG(r.response_connect_time)::numeric, 2)                           AS conn_full,
       SUM(r.request_size)                                                       AS req_size_full,
       SUM(r.response_size)                                                      AS resp_size_full,
-      percentile_agg(r.response_time::double precision)                         AS pct_full,
+      -- tdigest() (NOT percentile_agg) -- target column is tdigest; see #278.
+      tdigest(r.response_time::double precision)                                AS pct_full,
       COUNT(*) FILTER (WHERE r.time >= $2)                                      AS total_excl,
       SUM(CASE WHEN r.success THEN 1 ELSE 0 END)
         FILTER (WHERE r.time >= $2)                                             AS passed_excl,
@@ -307,7 +324,7 @@ const SAMPLER_ROLLUP_SQL = `
       ROUND((AVG(r.response_connect_time) FILTER (WHERE r.time >= $2))::numeric, 2) AS conn_excl,
       SUM(r.request_size)  FILTER (WHERE r.time >= $2)                          AS req_size_excl,
       SUM(r.response_size) FILTER (WHERE r.time >= $2)                          AS resp_size_excl,
-      percentile_agg(r.response_time::double precision) FILTER (WHERE r.time >= $2) AS pct_excl
+      tdigest(r.response_time::double precision) FILTER (WHERE r.time >= $2) AS pct_excl
     FROM requests_raw r
     WHERE r.test_run_id = $1
       AND r.transaction_name IS NOT NULL
