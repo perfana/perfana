@@ -104,6 +104,13 @@ describe('MetricsPipeline', () => {
       apiKey: 'test-api-key',
       orgId: '1'
     });
+    // Default: Grafana is configured. The soft-skip test (issue #282) overrides
+    // this to null per-test.
+    vi.mocked(grafanaConfigCache.tryGetGrafanaConfig).mockResolvedValue({
+      url: 'http://grafana.test',
+      apiKey: 'test-api-key',
+      orgId: '1'
+    });
 
     // Setup mock Grafana client
     mockGrafanaClient = {
@@ -227,6 +234,35 @@ describe('MetricsPipeline', () => {
       });
 
       expect(mockDb.getDsPanelsByTestRun).toHaveBeenCalled();
+    });
+  });
+
+  describe('Soft-skip when no Grafana configured (issue #282)', () => {
+    test('returns success with skipped marker and does not query Grafana or DB', async () => {
+      vi.mocked(grafanaConfigCache.tryGetGrafanaConfig).mockResolvedValueOnce(null);
+
+      const result = await pipeline.execute({ testRunId: 'test-run-no-grafana' });
+
+      expect(result.success).toBe(true);
+      expect((result.data as any)?.skipped).toBe('no-grafana-configured');
+
+      // Must short-circuit before client init, panel load, and Grafana queries
+      // — otherwise downstream stages get aborted on stacks with no Grafana.
+      expect(grafanaConfigCache.getGrafanaConfig).not.toHaveBeenCalled();
+      expect(mockDb.getTestRunByTestRunId).not.toHaveBeenCalled();
+      expect(mockDb.getDsPanelsByTestRun).not.toHaveBeenCalled();
+      expect(mockGrafanaClient.queryPanelData).not.toHaveBeenCalled();
+    });
+
+    test('still fails (returns error result) when Grafana row is invalid', async () => {
+      vi.mocked(grafanaConfigCache.tryGetGrafanaConfig).mockRejectedValueOnce(
+        new Error('Grafana config not available. A grafana_instances row exists but is invalid')
+      );
+
+      const result = await pipeline.execute({ testRunId: 'test-run-invalid-grafana' });
+
+      expect(result.success).toBe(false);
+      expect(result.error?.message).toMatch(/invalid/i);
     });
   });
 

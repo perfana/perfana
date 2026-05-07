@@ -2,7 +2,7 @@ import { EntityManager } from 'typeorm';
 import { BasePipelineTypeORM } from './BasePipelineTypeORM.js';
 import { PipelineResult, PanelDocument, PanelMetricsDocument } from '../types/pipeline.js';
 import { GrafanaClient } from '@perfana/shared/services/grafana';
-import { getGrafanaConfig, getGrafanaInstanceId } from '../config/grafana-config-cache.js';
+import { getGrafanaConfig, getGrafanaInstanceId, tryGetGrafanaConfig } from '../config/grafana-config-cache.js';
 
 /**
  * Number of records per INSERT batch.
@@ -56,6 +56,18 @@ export class MetricsPipeline extends BasePipelineTypeORM {
       const { testRunId, benchmarksOnly = false, panelDocuments } = validatedInput;
 
       this.logger.info(`🔷 Starting metrics collection for test run: ${testRunId}`);
+
+      // Soft-skip when no Grafana instance is configured. Grafana is documented
+      // as an optional metric source — without one there is nothing to collect,
+      // but downstream stages must still run. See issue #282.
+      const grafanaConfig = await tryGetGrafanaConfig();
+      if (!grafanaConfig) {
+        this.logger.info('No Grafana instance configured — skipping metrics-collection');
+        return this.createSuccessResult({
+          testRunId,
+          skipped: 'no-grafana-configured',
+        }, Date.now() - startTime);
+      }
 
       // Cleanup stale data before processing
       await this.cleanupStaleApplicationDashboards(['ds_metrics']);

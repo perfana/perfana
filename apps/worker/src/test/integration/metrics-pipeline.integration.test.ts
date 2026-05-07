@@ -26,7 +26,15 @@ vi.mock('../../config/grafana-config-cache.js', () => ({
     url: 'http://localhost:3000',
     token: 'test-token',
     timeout: 30000
-  }))
+  })),
+  tryGetGrafanaConfig: vi.fn(async () => ({
+    url: 'http://localhost:3000',
+    token: 'test-token',
+    timeout: 30000
+  })),
+  getGrafanaInstanceId: vi.fn(() => 'instance-1'),
+  initializeGrafanaConfig: vi.fn(),
+  clearGrafanaConfigCache: vi.fn()
 }));
 
 // Mock database accessor to provide test database
