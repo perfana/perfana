@@ -1,4 +1,4 @@
-import { Injectable, Logger } from '@nestjs/common';
+import { BadRequestException, Injectable, Logger } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { withRequestEm } from '../../../common/db/request-em';
@@ -74,6 +74,23 @@ export class TestRunsTimeSeriesQueryService {
     }
 
     return null;
+  }
+
+  /**
+   * Aggregation seconds must be >= 5 and a multiple of 5 — the CAGG floor is
+   * the 5 s `bucket` column on `requests_raw_5s` / `transactions_5s`.
+   */
+  private validateAggregationSeconds(aggregationSeconds: number): void {
+    if (
+      !Number.isFinite(aggregationSeconds) ||
+      !Number.isInteger(aggregationSeconds) ||
+      aggregationSeconds < 5 ||
+      aggregationSeconds % 5 !== 0
+    ) {
+      throw new BadRequestException(
+        `aggregationSeconds must be an integer >= 5 and a multiple of 5 (got ${aggregationSeconds})`,
+      );
+    }
   }
 
   /**
