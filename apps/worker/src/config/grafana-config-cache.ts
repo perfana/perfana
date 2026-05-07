@@ -13,13 +13,22 @@ const logger = getLogger('grafana-config-cache');
  */
 let cachedConfig: GrafanaConfig | null = null;
 let cachedInstanceId: string | null = null;
-let loadPromise: Promise<boolean> | null = null;
+let loadPromise: Promise<LoadResult> | null = null;
+
+type LoadResult = 'loaded' | 'not-configured' | 'invalid';
 
 /**
  * Load Grafana config from database.
- * Returns true if config was loaded, false if no valid instance exists.
+ *
+ * - 'loaded': a valid instance row was found and cached
+ * - 'not-configured': zero rows in `grafana_instances` (Grafana is documented as
+ *   optional — callers that can survive without Grafana should treat this as a
+ *   soft skip rather than a failure)
+ * - 'invalid': a row exists but is missing required fields, OR the DB query
+ *   failed. Callers should treat this as a real error since the operator
+ *   clearly intended Grafana to be wired up.
  */
-async function loadFromDatabase(): Promise<boolean> {
+async function loadFromDatabase(): Promise<LoadResult> {
   try {
     const db = getDatabaseService();
 
@@ -31,12 +40,12 @@ async function loadFromDatabase(): Promise<boolean> {
     const grafanaInstance = grafanaInstances[0];
 
     if (!grafanaInstance) {
-      return false;
+      return 'not-configured';
     }
 
     if (!grafanaInstance.server_url || !grafanaInstance.apiKey) {
-      logger.warn('Grafana instance missing server_url or apiKey — Grafana-dependent jobs will fail');
-      return false;
+      logger.warn('Grafana instance row found but missing server_url or apiKey — Grafana-dependent jobs will fail');
+      return 'invalid';
     }
 
     cachedConfig = {
@@ -47,11 +56,21 @@ async function loadFromDatabase(): Promise<boolean> {
     cachedInstanceId = grafanaInstance.id;
 
     logger.info(`Grafana config cached: ${cachedConfig.url} (instance: ${cachedInstanceId})`);
-    return true;
+    return 'loaded';
   } catch (error) {
     logger.warn('Failed to load Grafana config:', error);
-    return false;
+    return 'invalid';
   }
+}
+
+async function ensureLoaded(): Promise<LoadResult> {
+  if (cachedConfig) {
+    return 'loaded';
+  }
+  if (!loadPromise) {
+    loadPromise = loadFromDatabase().finally(() => { loadPromise = null; });
+  }
+  return loadPromise;
 }
 
 /**
@@ -64,27 +83,48 @@ export async function initializeGrafanaConfig(): Promise<void> {
     return;
   }
 
-  const loaded = await loadFromDatabase();
-  if (!loaded) {
-    logger.warn('No Grafana instance configured — Grafana-dependent jobs will fail until one is added');
+  const result = await loadFromDatabase();
+  if (result === 'not-configured') {
+    logger.info('No Grafana instance configured — Grafana-dependent stages will be skipped');
+  } else if (result === 'invalid') {
+    logger.warn('Grafana instance is misconfigured — Grafana-dependent jobs will fail until fixed');
   }
 }
 
 /**
- * Get Grafana config, retrying from database if not yet cached.
- * This ensures instances added after worker startup are picked up.
+ * Get Grafana config, throwing if no valid instance is available.
+ *
+ * Use this when the caller cannot proceed without Grafana (e.g. on-demand
+ * incremental refresh that is only triggered for Grafana-backed sources).
+ * For analyze pipeline stages where Grafana is optional, use
+ * {@link tryGetGrafanaConfig} instead.
  */
 export async function getGrafanaConfig(): Promise<GrafanaConfig> {
-  if (!cachedConfig) {
-    if (!loadPromise) {
-      loadPromise = loadFromDatabase().finally(() => { loadPromise = null; });
-    }
-    await loadPromise;
+  const result = await ensureLoaded();
+  if (result === 'loaded' && cachedConfig) {
+    return cachedConfig;
   }
-  if (!cachedConfig) {
-    throw new Error('Grafana config not available. No valid Grafana instance found in database.');
+  throw new Error('Grafana config not available. No valid Grafana instance found in database.');
+}
+
+/**
+ * Get Grafana config if a valid instance is configured, or `null` if no
+ * instance row exists at all. Throws if a row exists but is invalid (missing
+ * required fields or DB error) — that's a real misconfiguration that should
+ * fail loudly, not a documented "Grafana is optional" scenario.
+ *
+ * Used by analyze pipeline stages (panels-processing, metrics-collection)
+ * that can soft-skip when Grafana is not wired up — see issue #282.
+ */
+export async function tryGetGrafanaConfig(): Promise<GrafanaConfig | null> {
+  const result = await ensureLoaded();
+  if (result === 'loaded' && cachedConfig) {
+    return cachedConfig;
   }
-  return cachedConfig;
+  if (result === 'not-configured') {
+    return null;
+  }
+  throw new Error('Grafana config not available. A grafana_instances row exists but is invalid (check server_url and apiKey).');
 }
 
 /**
