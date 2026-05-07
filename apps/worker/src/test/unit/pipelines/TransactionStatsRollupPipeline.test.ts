@@ -224,14 +224,17 @@ describe('TransactionStatsRollupPipeline', () => {
       expect((result.data as any).samplerRows).toBe(73);
     });
 
-    it('uses tdigest() for the pct_agg sketch in both rollup INSERTs (issue #278)', async () => {
-      // Regression test for #278: the schema columns
+    it('uses tdigest(size, value) for the pct_agg sketch in both rollup INSERTs (issue #278)', async () => {
+      // Regression test for #278 + follow-up: the schema columns
       // `test_run_transaction_stats.pct_agg` and `test_run_sampler_stats.pct_agg`
-      // are declared `tdigest`, but on the toolkit version we ship,
-      // `percentile_agg(...)` returns `uddsketch`. If the SQL ever drifts back
-      // to `percentile_agg`, every rollup transaction will abort with
-      // `column "pct_agg" is of type tdigest but expression is of type uddsketch`
-      // and the rollup tables will silently stay empty.
+      // are declared `tdigest`. Two ways this has gone wrong before:
+      //   1. `percentile_agg(...)` returns `uddsketch` on the toolkit version
+      //      we ship, so the INSERT aborts with a type mismatch.
+      //   2. Single-arg `tdigest(value)` doesn't exist in toolkit ≥1.22 — the
+      //      planner errors with `function tdigest(double precision) does not
+      //      exist`. The aggregate signature is `tdigest(size integer, value
+      //      double precision)`, so the bucket count is required.
+      // Both forms abort the transaction silently → rollup tables stay empty.
       mockDb.getTestRunByTestRunId.mockResolvedValue(makeTestRun());
       wireTransaction({ tx: 1, sampler: 1 });
 
@@ -242,7 +245,8 @@ describe('TransactionStatsRollupPipeline', () => {
         .filter(s => /INSERT INTO test_run_(transaction|sampler)_stats/i.test(s));
       expect(inserts.length).toBe(2);
       for (const sql of inserts) {
-        expect(sql).toMatch(/tdigest\s*\(\s*[^)]*response_time/i);
+        // Must be tdigest(size, value) — bucket count then column.
+        expect(sql).toMatch(/tdigest\s*\(\s*\d+\s*,\s*[^)]*response_time/i);
         expect(sql).not.toMatch(/percentile_agg\s*\(\s*[^)]*response_time/i);
       }
     });

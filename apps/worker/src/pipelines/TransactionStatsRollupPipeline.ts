@@ -42,7 +42,7 @@ interface RollupRowCount {
  *   migration `1776800000000-CreateTestRunStatsRollup.ts`. On the toolkit
  *   versions we ship, `percentile_agg(...)` returns `uddsketch`, and Postgres
  *   refuses the implicit cast → the whole rollup transaction aborts and the
- *   tables stay empty (issue #278). Use `tdigest(...)` here.
+ *   tables stay empty (issue #278). Use `tdigest(size, value)` here.
  *
  *   Note that the continuous aggregates in `1777500000000-AddContinuousAggregates.ts`
  *   intentionally still use `percentile_agg`/`uddsketch` (for `rollup()` chaining
@@ -50,6 +50,14 @@ interface RollupRowCount {
  *   queries read the CAGGs (uddsketch); the Performance Analysis card reads
  *   these rollup tables (tdigest) — so the split is safe. Don't naively
  *   re-unify them without a schema migration.
+ *
+ *   Toolkit `tdigest` aggregate signature — first arg is the centroid bucket
+ *   count, NOT a single-arg `tdigest(double precision)` (toolkit ≥1.22 dropped
+ *   that form). 100 buckets matches the toolkit's documented default and is
+ *   sufficient for the p95/p99 the Performance Analysis card reads. If p999
+ *   estimates ever drift on high-cardinality test runs (~10M+ unique
+ *   response-time samples), bump this here — there's no caller that needs to
+ *   round-trip the exact bucket count.
  */
 export class TransactionStatsRollupPipeline extends BasePipelineTypeORM {
 
@@ -230,8 +238,9 @@ const TRANSACTION_ROLLUP_SQL = `
       COUNT(*) FILTER (WHERE NOT t.success)                                AS failed_full,
       ROUND(AVG(t.response_time)::numeric, 2)                              AS avg_full,
       ROUND((AVG(t.response_time) * COUNT(*))::numeric, 2)                 AS impact_full,
-      -- tdigest() (NOT percentile_agg) -- target column is tdigest; see #278.
-      tdigest(t.response_time::double precision)                           AS pct_full,
+      -- tdigest(size, value) (NOT percentile_agg, NOT single-arg tdigest) --
+      -- target column is tdigest; see #278.
+      tdigest(100, t.response_time::double precision)                      AS pct_full,
       COUNT(*) FILTER (WHERE t.time >= $2)                                 AS total_excl,
       COUNT(*) FILTER (WHERE t.success     AND t.time >= $2)               AS passed_excl,
       COUNT(*) FILTER (WHERE NOT t.success AND t.time >= $2)               AS failed_excl,
@@ -240,7 +249,7 @@ const TRANSACTION_ROLLUP_SQL = `
         AVG(t.response_time) FILTER (WHERE t.time >= $2) *
         COUNT(*)             FILTER (WHERE t.time >= $2)
       )::numeric, 2)                                                       AS impact_excl,
-      tdigest(t.response_time::double precision) FILTER (WHERE t.time >= $2) AS pct_excl
+      tdigest(100, t.response_time::double precision) FILTER (WHERE t.time >= $2) AS pct_excl
     FROM transactions t
     JOIN test_runs tr ON tr.test_run_id = t.test_run_id
     WHERE t.test_run_id = $1
@@ -310,8 +319,9 @@ const SAMPLER_ROLLUP_SQL = `
       ROUND(AVG(r.response_connect_time)::numeric, 2)                           AS conn_full,
       SUM(r.request_size)                                                       AS req_size_full,
       SUM(r.response_size)                                                      AS resp_size_full,
-      -- tdigest() (NOT percentile_agg) -- target column is tdigest; see #278.
-      tdigest(r.response_time::double precision)                                AS pct_full,
+      -- tdigest(size, value) (NOT percentile_agg, NOT single-arg tdigest) --
+      -- target column is tdigest; see #278.
+      tdigest(100, r.response_time::double precision)                           AS pct_full,
       COUNT(*) FILTER (WHERE r.time >= $2)                                      AS total_excl,
       SUM(CASE WHEN r.success THEN 1 ELSE 0 END)
         FILTER (WHERE r.time >= $2)                                             AS passed_excl,
@@ -324,7 +334,7 @@ const SAMPLER_ROLLUP_SQL = `
       ROUND((AVG(r.response_connect_time) FILTER (WHERE r.time >= $2))::numeric, 2) AS conn_excl,
       SUM(r.request_size)  FILTER (WHERE r.time >= $2)                          AS req_size_excl,
       SUM(r.response_size) FILTER (WHERE r.time >= $2)                          AS resp_size_excl,
-      tdigest(r.response_time::double precision) FILTER (WHERE r.time >= $2) AS pct_excl
+      tdigest(100, r.response_time::double precision) FILTER (WHERE r.time >= $2) AS pct_excl
     FROM requests_raw r
     WHERE r.test_run_id = $1
       AND r.transaction_name IS NOT NULL
