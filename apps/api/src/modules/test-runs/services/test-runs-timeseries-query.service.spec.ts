@@ -261,4 +261,67 @@ describe('TestRunsTimeSeriesQueryService', () => {
       ).rejects.toThrow(ResourceNotFoundException);
     });
   });
+
+  describe('getSamplerTimeSeries', () => {
+    const TEST_RUN_ID = 'tr-1';
+    const TX_NAME = 'checkout';
+    const SAMPLER = 'GET /api/foo';
+    const USER = 'user-1';
+    const ROLES = ['perfana-admin'];
+
+    it('rejects aggregationSeconds=4 with BadRequestException', async () => {
+      repo.query.mockResolvedValueOnce([{ organization_id: 'org-1', created_by: USER }]);
+      await expect(
+        service.getSamplerTimeSeries(TEST_RUN_ID, TX_NAME, SAMPLER, USER, ROLES, 4, false),
+      ).rejects.toThrow(BadRequestException);
+    });
+
+    it('runs the sampler-single CAGG query with sampler_name as $3', async () => {
+      // org access
+      repo.query.mockResolvedValueOnce([{ organization_id: 'org-1', created_by: USER }]);
+      // sampler-single CAGG query
+      repo.query.mockResolvedValueOnce([
+        {
+          time_bucket: '2026-05-07T00:00:00Z',
+          avg_response_time: '110.00',
+          median_response_time: '100.00',
+          min_response_time: '40',
+          max_response_time: '480',
+          p90_response_time: '190.00',
+          p95_response_time: '290.00',
+          p99_response_time: '440.00',
+          total_count: '300',
+          passed_count: '295',
+          failed_count: '5',
+        },
+      ]);
+
+      const result = await service.getSamplerTimeSeries(
+        TEST_RUN_ID,
+        TX_NAME,
+        SAMPLER,
+        USER,
+        ROLES,
+        10,
+        false,
+      );
+
+      expect(repo.query).toHaveBeenCalledTimes(2);
+      const callArgs = repo.query.mock.calls[1]!;
+      expect(callArgs[0]).toContain('FROM requests_raw_5s c');
+      expect(callArgs[0]).toContain('AND c.sampler_name = $3');
+      expect(callArgs[1]).toEqual([TEST_RUN_ID, TX_NAME, SAMPLER, false, null]);
+      expect(result).toHaveLength(1);
+    });
+
+    it('propagates ResourceNotFoundException (404) from validateOrganizationAccess without wrapping it in DatabaseException', async () => {
+      // Return a row so the org-access query succeeds, but deny access via canAccessResource.
+      repo.query.mockResolvedValueOnce([{ organization_id: 'org-1', created_by: 'other-user' }]);
+      (authzService.canAccessResource as jest.Mock).mockResolvedValueOnce({ allowed: false });
+
+      await expect(
+        service.getSamplerTimeSeries(TEST_RUN_ID, TX_NAME, SAMPLER, USER, ROLES, 10, false),
+      ).rejects.toThrow(ResourceNotFoundException);
+    });
+  });
 });
