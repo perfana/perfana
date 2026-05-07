@@ -1,4 +1,4 @@
-import { BadRequestException, Injectable, Logger } from '@nestjs/common';
+import { BadRequestException, HttpException, Injectable, Logger } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { withRequestEm } from '../../../common/db/request-em';
@@ -303,7 +303,7 @@ export class TestRunsTimeSeriesQueryService {
         sampler_data: samplerData,
       };
     } catch (error) {
-      if (error instanceof BadRequestException) throw error;
+      if (error instanceof HttpException) throw error;
       this.logger.error(
         `Failed to get time-series data for transaction ${transactionName}:`,
         error,

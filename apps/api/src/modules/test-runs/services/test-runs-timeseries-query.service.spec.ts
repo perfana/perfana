@@ -6,6 +6,7 @@ import { TestRunsTimeSeriesQueryService } from './test-runs-timeseries-query.ser
 import { TestRunsMapperService } from './test-runs-mapper.service';
 import { AuthorizationService } from '../../../common/services/authorization.service';
 import { TestRun as TestRunEntity } from '../../../entities';
+import { ResourceNotFoundException } from '../../../common/exceptions/business.exception';
 
 type MockRepo = jest.Mocked<Pick<Repository<TestRunEntity>, 'query'>> & {
   manager: { transaction: jest.Mock };
@@ -22,6 +23,7 @@ function createMockRepo(): MockRepo {
 describe('TestRunsTimeSeriesQueryService', () => {
   let service: TestRunsTimeSeriesQueryService;
   let repo: MockRepo;
+  let authzService: jest.Mocked<AuthorizationService>;
 
   beforeEach(async () => {
     repo = createMockRepo();
@@ -47,6 +49,7 @@ describe('TestRunsTimeSeriesQueryService', () => {
       ],
     }).compile();
     service = module.get(TestRunsTimeSeriesQueryService);
+    authzService = module.get(AuthorizationService) as jest.Mocked<AuthorizationService>;
   });
 
   describe('validateAggregationSeconds', () => {
@@ -205,8 +208,7 @@ describe('TestRunsTimeSeriesQueryService', () => {
         false,
       );
 
-      // 4 calls: org-access + 2 timeseries queries (no ramp-up lookup since excludeRampUp=false).
-      // Wait — getRampUpCutoffTime always runs when excludeRampUp=true; here it's false, so it returns null without a query. Total = 3.
+      // 3 calls: org-access query, transaction CAGG query, sampler CAGG query (no ramp-up DB lookup when excludeRampUp=false).
       expect(repo.query).toHaveBeenCalledTimes(3);
 
       const txCallArgs = repo.query.mock.calls[1]!;
@@ -247,6 +249,16 @@ describe('TestRunsTimeSeriesQueryService', () => {
       expect(params[2]).toBe(true);
       expect(params[3]).toBeInstanceOf(Date);
       expect((params[3] as Date).toISOString()).toBe('2026-05-07T00:01:00.000Z');
+    });
+
+    it('propagates ResourceNotFoundException (404) from validateOrganizationAccess without wrapping it in DatabaseException', async () => {
+      // Return a row so the org-access query succeeds, but deny access via canAccessResource.
+      repo.query.mockResolvedValueOnce([{ organization_id: 'org-1', created_by: 'other-user' }]);
+      (authzService.canAccessResource as jest.Mock).mockResolvedValueOnce({ allowed: false });
+
+      await expect(
+        service.getTransactionTimeSeries(TEST_RUN_ID, TX_NAME, USER, ROLES, 10, false),
+      ).rejects.toThrow(ResourceNotFoundException);
     });
   });
 });

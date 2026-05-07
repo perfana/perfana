@@ -1,4 +1,4 @@
-import { Controller, Get, Post, Put, Delete, Param, Query, Body, DefaultValuePipe, ParseBoolPipe, BadRequestException, Logger } from '@nestjs/common';
+import { Controller, Get, Post, Put, Delete, Param, Query, Body, DefaultValuePipe, ParseBoolPipe, ParseIntPipe, BadRequestException, Logger } from '@nestjs/common';
 import { UserCtx, UserContext } from '../../common/decorators/user-context.decorator';
 import { ApiTags, ApiOperation, ApiResponse, ApiQuery, ApiParam } from '@nestjs/swagger';
 import { TestRunsService } from './test-runs.service';
@@ -121,9 +121,9 @@ export class TestRunsMetricsController {
   @ApiQuery({
     name: 'aggregationSeconds',
     required: false,
-    description: 'Time bucket aggregation in seconds (1, 3, 5, 10, or 30)',
+    description: 'Time bucket aggregation in seconds — must be an integer >= 5 and a multiple of 5 (e.g. 5, 10, 15, 30, 60).',
     type: Number,
-    example: 1
+    example: 5
   })
   @ApiQuery({
     name: 'excludeRampUp',
@@ -182,7 +182,7 @@ export class TestRunsMetricsController {
   async getTransactionTimeSeries(
     @Param('testRunId') testRunId: string,
     @Param('transactionName') transactionName: string,
-    @Query('aggregationSeconds') aggregationSeconds: number = 1,
+    @Query('aggregationSeconds', new DefaultValuePipe(5), ParseIntPipe) aggregationSeconds: number,
     @Query('excludeRampUp', new DefaultValuePipe(false), ParseBoolPipe) excludeRampUp: boolean,
     @UserCtx() ctx: UserContext
   ) {
@@ -198,7 +198,7 @@ export class TestRunsMetricsController {
   @ApiQuery({
     name: 'aggregationSeconds',
     required: false,
-    description: 'Time bucket aggregation in seconds (1, 3, 5, 10, or 30)',
+    description: 'Time bucket aggregation in seconds — must be an integer >= 5 and a multiple of 5 (e.g. 5, 10, 15, 30, 60).',
     type: Number,
     example: 5
   })
@@ -237,7 +237,7 @@ export class TestRunsMetricsController {
     @Param('testRunId') testRunId: string,
     @Param('transactionName') transactionName: string,
     @Param('samplerName') samplerName: string,
-    @Query('aggregationSeconds') aggregationSeconds: number = 5,
+    @Query('aggregationSeconds', new DefaultValuePipe(5), ParseIntPipe) aggregationSeconds: number,
     @Query('excludeRampUp', new DefaultValuePipe(false), ParseBoolPipe) excludeRampUp: boolean,
     @UserCtx() ctx: UserContext
   ) {
