@@ -128,6 +128,15 @@ describe('TestRunsTimeSeriesQueryService', () => {
         expect(q).toMatch(/GROUP BY[\s\S]*sampler_name/);
         expect(q).toContain('c.sampler_name AS sampler_name');
       });
+
+      it('groups by the time_bucket expression and sampler_name (not by positional ordinal)', () => {
+        // Regression: a `GROUP BY 1, c.sampler_name` here resolves position 1
+        // to sampler_name (the first SELECT column), leaving the time_bucket
+        // ungrouped → Postgres "must appear in the GROUP BY clause" error.
+        expect(sql()).toContain(
+          "GROUP BY time_bucket('10 seconds'::interval, c.bucket), c.sampler_name",
+        );
+      });
     });
 
     describe('sampler-single kind', () => {

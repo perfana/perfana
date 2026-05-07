@@ -54,8 +54,6 @@ interface RequestTimeSeriesModalProps {
 }
 
 const AGGREGATION_OPTIONS = [
-  { value: 1, label: '1 second' },
-  { value: 3, label: '3 seconds' },
   { value: 5, label: '5 seconds' },
   { value: 10, label: '10 seconds' },
   { value: 30, label: '30 seconds' },

@@ -200,7 +200,7 @@ export class TestRunsTimeSeriesQueryService {
           AND c.bucket <  (SELECT end_time   FROM bounds) + interval '5 seconds'
           AND (${excludeRampParam}::boolean = false OR ${cutoffParam}::timestamptz IS NULL
                OR c.bucket >= time_bucket('5 seconds', ${cutoffParam}::timestamptz))
-        GROUP BY 1${samplerGroupKey}
+        GROUP BY time_bucket('${aggSec} seconds'::interval, c.bucket)${samplerGroupKey}
       )
       SELECT ${isSamplerGroup ? 'ts.sampler_name,' : ''}
              ts.time_bucket,
