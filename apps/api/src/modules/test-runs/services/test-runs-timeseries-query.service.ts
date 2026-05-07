@@ -251,150 +251,38 @@ export class TestRunsTimeSeriesQueryService {
     transactionName: string,
     userId: string,
     roles: string[],
-    aggregationSeconds: number = 1,
+    aggregationSeconds: number = 5,
     excludeRampUp: boolean = false,
   ): Promise<TransactionTimeSeriesData> {
     try {
-      // Validate organization access before processing
+      this.validateAggregationSeconds(aggregationSeconds);
       await this.validateOrganizationAccess(testRunId, userId, roles);
 
-      this.logger.log(`Getting time-series data for transaction: ${transactionName} with ${aggregationSeconds}s aggregation (excludeRampUp: ${excludeRampUp})`);
+      this.logger.log(
+        `Getting time-series data for transaction: ${transactionName} with ${aggregationSeconds}s aggregation (excludeRampUp: ${excludeRampUp})`,
+      );
 
       const cutoffTime = await this.getRampUpCutoffTime(testRunId, excludeRampUp);
+      const queryParams = [testRunId, transactionName, excludeRampUp, cutoffTime ?? null];
 
-      // Query for transaction-level aggregated data with complete time series (zero-filled gaps)
-      const transactionQuery = `
-        WITH test_run_bounds AS (
-          SELECT
-            CASE
-              WHEN $3::boolean = true THEN GREATEST(MIN(time), $4::timestamptz)
-              ELSE MIN(time)
-            END as start_time,
-            MAX(time) as end_time
-          FROM transactions
-          WHERE test_run_id = $1
-            AND transaction_name = $2
-        ),
-        time_series AS (
-          SELECT generate_series(
-            time_bucket('${aggregationSeconds} seconds', start_time),
-            time_bucket('${aggregationSeconds} seconds', end_time),
-            interval '${aggregationSeconds} seconds'
-          ) as time_bucket
-          FROM test_run_bounds
-        ),
-        aggregated_data AS (
-          SELECT
-            time_bucket('${aggregationSeconds} seconds', time) as time_bucket,
-            AVG(response_time)::numeric(10,2) as avg_response_time,
-            PERCENTILE_CONT(0.50) WITHIN GROUP (ORDER BY response_time)::numeric(10,2) as median_response_time,
-            MIN(response_time) as min_response_time,
-            MAX(response_time) as max_response_time,
-            PERCENTILE_CONT(0.90) WITHIN GROUP (ORDER BY response_time)::numeric(10,2) as p90_response_time,
-            PERCENTILE_CONT(0.95) WITHIN GROUP (ORDER BY response_time)::numeric(10,2) as p95_response_time,
-            PERCENTILE_CONT(0.99) WITHIN GROUP (ORDER BY response_time)::numeric(10,2) as p99_response_time,
-            COUNT(*) as total_count,
-            COUNT(*) FILTER (WHERE success = true) as passed_count,
-            COUNT(*) FILTER (WHERE success = false) as failed_count
-          FROM transactions
-          WHERE test_run_id = $1
-            AND transaction_name = $2
-            AND ($3::boolean = false OR $4::timestamptz IS NULL OR time >= $4::timestamptz)
-          GROUP BY time_bucket
-        )
-        SELECT
-          ts.time_bucket,
-          ad.avg_response_time,
-          ad.median_response_time,
-          ad.min_response_time,
-          ad.max_response_time,
-          ad.p90_response_time,
-          ad.p95_response_time,
-          ad.p99_response_time,
-          COALESCE(ad.total_count, 0) as total_count,
-          COALESCE(ad.passed_count, 0) as passed_count,
-          COALESCE(ad.failed_count, 0) as failed_count
-        FROM time_series ts
-        LEFT JOIN aggregated_data ad ON ts.time_bucket = ad.time_bucket
-        ORDER BY ts.time_bucket ASC
-      `;
+      const transactionQuery = this.buildTimeSeriesQuery({
+        kind: 'transaction',
+        aggSec: aggregationSeconds,
+      });
+      const transactionResult = await withRequestEm(this.testRunRepo).query(
+        transactionQuery,
+        queryParams,
+      );
 
-      const queryParams = cutoffTime
-        ? [testRunId, transactionName, excludeRampUp, cutoffTime]
-        : [testRunId, transactionName, excludeRampUp, null];
-      const transactionResult = await withRequestEm(this.testRunRepo).query(transactionQuery, queryParams);
+      const samplerQuery = this.buildTimeSeriesQuery({
+        kind: 'sampler',
+        aggSec: aggregationSeconds,
+      });
+      const samplerResult = await withRequestEm(this.testRunRepo).query(
+        samplerQuery,
+        queryParams,
+      );
 
-      // Query for sampler-level aggregated data with complete time series
-      const samplerQuery = `
-        WITH test_run_bounds AS (
-          SELECT
-            CASE
-              WHEN $3::boolean = true THEN GREATEST(MIN(time), $4::timestamptz)
-              ELSE MIN(time)
-            END as start_time,
-            MAX(time) as end_time
-          FROM requests_raw
-          WHERE test_run_id = $1
-            AND transaction_name = $2
-        ),
-        sampler_list AS (
-          SELECT DISTINCT sampler_name
-          FROM requests_raw
-          WHERE test_run_id = $1
-            AND transaction_name = $2
-        ),
-        time_series AS (
-          SELECT
-            sl.sampler_name,
-            generate_series(
-              time_bucket('${aggregationSeconds} seconds', trb.start_time),
-              time_bucket('${aggregationSeconds} seconds', trb.end_time),
-              interval '${aggregationSeconds} seconds'
-            ) as time_bucket
-          FROM sampler_list sl
-          CROSS JOIN test_run_bounds trb
-        ),
-        aggregated_data AS (
-          SELECT
-            sampler_name,
-            time_bucket('${aggregationSeconds} seconds', time) as time_bucket,
-            AVG(response_time)::numeric(10,2) as avg_response_time,
-            PERCENTILE_CONT(0.50) WITHIN GROUP (ORDER BY response_time)::numeric(10,2) as median_response_time,
-            MIN(response_time) as min_response_time,
-            MAX(response_time) as max_response_time,
-            PERCENTILE_CONT(0.90) WITHIN GROUP (ORDER BY response_time)::numeric(10,2) as p90_response_time,
-            PERCENTILE_CONT(0.95) WITHIN GROUP (ORDER BY response_time)::numeric(10,2) as p95_response_time,
-            PERCENTILE_CONT(0.99) WITHIN GROUP (ORDER BY response_time)::numeric(10,2) as p99_response_time,
-            COUNT(*) as total_count,
-            COUNT(*) FILTER (WHERE success = true) as passed_count,
-            COUNT(*) FILTER (WHERE success = false) as failed_count
-          FROM requests_raw
-          WHERE test_run_id = $1
-            AND transaction_name = $2
-            AND ($3::boolean = false OR $4::timestamptz IS NULL OR time >= $4::timestamptz)
-          GROUP BY sampler_name, time_bucket
-        )
-        SELECT
-          ts.sampler_name,
-          ts.time_bucket,
-          ad.avg_response_time,
-          ad.median_response_time,
-          ad.min_response_time,
-          ad.max_response_time,
-          ad.p90_response_time,
-          ad.p95_response_time,
-          ad.p99_response_time,
-          COALESCE(ad.total_count, 0) as total_count,
-          COALESCE(ad.passed_count, 0) as passed_count,
-          COALESCE(ad.failed_count, 0) as failed_count
-        FROM time_series ts
-        LEFT JOIN aggregated_data ad ON ts.sampler_name = ad.sampler_name AND ts.time_bucket = ad.time_bucket
-        ORDER BY ts.sampler_name, ts.time_bucket ASC
-      `;
-
-      const samplerResult = await withRequestEm(this.testRunRepo).query(samplerQuery, queryParams);
-
-      // Group sampler data by sampler_name
       const samplerData: Record<string, TimeSeriesDataPoint[]> = {};
       for (const row of samplerResult as Record<string, unknown>[]) {
         const samplerName = row.sampler_name as string;
@@ -404,15 +292,26 @@ export class TestRunsTimeSeriesQueryService {
         samplerData[samplerName]!.push(this.parseTimeSeriesRow(row));
       }
 
-      this.logger.log(`Retrieved ${transactionResult.length} transaction data points and ${Object.keys(samplerData).length} samplers`);
+      this.logger.log(
+        `Retrieved ${transactionResult.length} transaction data points and ${Object.keys(samplerData).length} samplers`,
+      );
 
       return {
-        transaction_data: transactionResult.map((row: Record<string, unknown>) => this.parseTimeSeriesRow(row)),
+        transaction_data: transactionResult.map((row: Record<string, unknown>) =>
+          this.parseTimeSeriesRow(row),
+        ),
         sampler_data: samplerData,
       };
     } catch (error) {
-      this.logger.error(`Failed to get time-series data for transaction ${transactionName}:`, error);
-      throw new DatabaseException('Failed to retrieve transaction time-series data', error);
+      if (error instanceof BadRequestException) throw error;
+      this.logger.error(
+        `Failed to get time-series data for transaction ${transactionName}:`,
+        error,
+      );
+      throw new DatabaseException(
+        'Failed to retrieve transaction time-series data',
+        error,
+      );
     }
   }
 

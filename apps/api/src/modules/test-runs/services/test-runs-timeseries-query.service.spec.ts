@@ -139,4 +139,114 @@ describe('TestRunsTimeSeriesQueryService', () => {
       });
     });
   });
+
+  describe('getTransactionTimeSeries', () => {
+    const TEST_RUN_ID = 'tr-1';
+    const TX_NAME = 'checkout';
+    const USER = 'user-1';
+    const ROLES = ['perfana-admin'];
+
+    function primeOrgAccessAndRamp(mockRepo: MockRepo) {
+      // 1. validateOrganizationAccess: SELECT sut.organization_id, sut.created_by ...
+      mockRepo.query.mockResolvedValueOnce([{ organization_id: 'org-1', created_by: USER }]);
+      // 2. getRampUpCutoffTime (only when excludeRampUp=true): SELECT start_time, ramp_up
+      // (skipped when excludeRampUp=false)
+    }
+
+    it('rejects aggregationSeconds=1 with BadRequestException', async () => {
+      primeOrgAccessAndRamp(repo);
+      await expect(
+        service.getTransactionTimeSeries(TEST_RUN_ID, TX_NAME, USER, ROLES, 1, false),
+      ).rejects.toThrow(BadRequestException);
+    });
+
+    it('runs the transaction CAGG query and the sampler CAGG query', async () => {
+      primeOrgAccessAndRamp(repo);
+      // 3. transaction CAGG query
+      repo.query.mockResolvedValueOnce([
+        {
+          time_bucket: '2026-05-07T00:00:00Z',
+          avg_response_time: '120.50',
+          median_response_time: '110.00',
+          min_response_time: '50',
+          max_response_time: '500',
+          p90_response_time: '200.00',
+          p95_response_time: '300.00',
+          p99_response_time: '450.00',
+          total_count: '600',
+          passed_count: '590',
+          failed_count: '10',
+        },
+      ]);
+      // 4. sampler CAGG query
+      repo.query.mockResolvedValueOnce([
+        {
+          sampler_name: 'GET /api/foo',
+          time_bucket: '2026-05-07T00:00:00Z',
+          avg_response_time: '110.00',
+          median_response_time: '100.00',
+          min_response_time: '40',
+          max_response_time: '480',
+          p90_response_time: '190.00',
+          p95_response_time: '290.00',
+          p99_response_time: '440.00',
+          total_count: '300',
+          passed_count: '295',
+          failed_count: '5',
+        },
+      ]);
+
+      const result = await service.getTransactionTimeSeries(
+        TEST_RUN_ID,
+        TX_NAME,
+        USER,
+        ROLES,
+        10,
+        false,
+      );
+
+      // 4 calls: org-access + 2 timeseries queries (no ramp-up lookup since excludeRampUp=false).
+      // Wait — getRampUpCutoffTime always runs when excludeRampUp=true; here it's false, so it returns null without a query. Total = 3.
+      expect(repo.query).toHaveBeenCalledTimes(3);
+
+      const txCallArgs = repo.query.mock.calls[1]!;
+      expect(txCallArgs[0]).toContain('FROM transactions_5s c');
+      expect(txCallArgs[1]).toEqual([TEST_RUN_ID, TX_NAME, false, null]);
+
+      const samplerCallArgs = repo.query.mock.calls[2]!;
+      expect(samplerCallArgs[0]).toContain('FROM requests_raw_5s c');
+      expect(samplerCallArgs[1]).toEqual([TEST_RUN_ID, TX_NAME, false, null]);
+
+      expect(result.transaction_data).toHaveLength(1);
+      expect(result.sampler_data['GET /api/foo']).toHaveLength(1);
+    });
+
+    it('passes the ramp-up cutoff timestamp when excludeRampUp=true', async () => {
+      // org access
+      repo.query.mockResolvedValueOnce([{ organization_id: 'org-1', created_by: USER }]);
+      // ramp-up lookup
+      repo.query.mockResolvedValueOnce([
+        { start_time: '2026-05-07T00:00:00Z', ramp_up: 60 },
+      ]);
+      // transaction CAGG query
+      repo.query.mockResolvedValueOnce([]);
+      // sampler CAGG query
+      repo.query.mockResolvedValueOnce([]);
+
+      await service.getTransactionTimeSeries(
+        TEST_RUN_ID,
+        TX_NAME,
+        USER,
+        ROLES,
+        10,
+        true,
+      );
+
+      const txCallArgs = repo.query.mock.calls[2]!;
+      const params = txCallArgs[1] as unknown[];
+      expect(params[2]).toBe(true);
+      expect(params[3]).toBeInstanceOf(Date);
+      expect((params[3] as Date).toISOString()).toBe('2026-05-07T00:01:00.000Z');
+    });
+  });
 });
