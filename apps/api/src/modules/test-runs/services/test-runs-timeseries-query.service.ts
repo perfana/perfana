@@ -94,6 +94,130 @@ export class TestRunsTimeSeriesQueryService {
   }
 
   /**
+   * Build the parameterized SQL for a time-series query against the 5 s CAGG.
+   * One source of truth for the three call shapes used by this service.
+   *
+   * Kinds:
+   *   - 'transaction'      → group by 5 s bucket, read from transactions_5s
+   *   - 'sampler'          → group by 5 s bucket + sampler_name, read from requests_raw_5s
+   *   - 'sampler-single'   → group by 5 s bucket only, filter sampler_name = $3,
+   *                          read from requests_raw_5s
+   *
+   * Parameters expected by the returned SQL:
+   *   $1 = test_run_id
+   *   $2 = transaction_name
+   *   for transaction & sampler kinds:
+   *     $3 = excludeRampUp (boolean)
+   *     $4 = ramp-up cutoff (timestamptz | null)
+   *   for sampler-single kind:
+   *     $3 = sampler_name
+   *     $4 = excludeRampUp (boolean)
+   *     $5 = ramp-up cutoff (timestamptz | null)
+   */
+  private buildTimeSeriesQuery(opts: {
+    kind: 'transaction' | 'sampler' | 'sampler-single';
+    aggSec: number;
+  }): string {
+    const { kind, aggSec } = opts;
+    const sourceView = kind === 'transaction' ? 'transactions_5s' : 'requests_raw_5s';
+    const isSamplerSingle = kind === 'sampler-single';
+    const isSamplerGroup = kind === 'sampler';
+
+    const excludeRampParam = isSamplerSingle ? '$4' : '$3';
+    const cutoffParam = isSamplerSingle ? '$5' : '$4';
+    const samplerSinglePredicate = isSamplerSingle ? 'AND c.sampler_name = $3' : '';
+    const samplerGroupSelect = isSamplerGroup ? 'c.sampler_name AS sampler_name,' : '';
+    const samplerGroupKey = isSamplerGroup ? ', c.sampler_name' : '';
+
+    return `
+      WITH run AS (
+        SELECT sut.name AS sut,
+               tr.test_environment AS env,
+               tr.start_time,
+               tr.end_time
+        FROM test_runs tr
+        JOIN systems_under_test sut ON sut.id = tr.system_under_test_id
+        WHERE tr.test_run_id = $1
+      ),
+      scenarios AS (
+        SELECT DISTINCT scenario_name
+        FROM transactions
+        WHERE test_run_id = $1 AND transaction_name = $2
+      ),
+      bounds AS (
+        SELECT CASE WHEN ${excludeRampParam}::boolean
+                    THEN GREATEST(start_time, ${cutoffParam}::timestamptz)
+                    ELSE start_time END AS start_time,
+               end_time
+        FROM run
+      ),
+      time_series AS (
+        SELECT ${isSamplerGroup ? 'sl.sampler_name,' : ''}
+               generate_series(
+                 time_bucket('${aggSec} seconds'::interval, b.start_time),
+                 time_bucket('${aggSec} seconds'::interval, b.end_time),
+                 interval '${aggSec} seconds'
+               ) AS time_bucket
+        FROM bounds b
+        ${
+          isSamplerGroup
+            ? `CROSS JOIN (
+                 SELECT DISTINCT sampler_name
+                 FROM requests_raw_5s c
+                 JOIN run r
+                   ON c.system_under_test = r.sut
+                  AND c.test_environment  = r.env
+                 WHERE c.transaction_name = $2
+                   AND c.scenario_name IN (SELECT scenario_name FROM scenarios)
+                   AND c.bucket >= (SELECT start_time FROM bounds)
+                   AND c.bucket <  (SELECT end_time   FROM bounds) + interval '5 seconds'
+               ) sl`
+            : ''
+        }
+      ),
+      agg AS (
+        SELECT
+          ${samplerGroupSelect}
+          time_bucket('${aggSec} seconds'::interval, c.bucket) AS time_bucket,
+          (sum(c.avg_rt * c.n) / NULLIF(sum(c.n), 0))::numeric(10,2) AS avg_response_time,
+          approx_percentile(0.50, rollup(c.pct_agg))::numeric(10,2) AS median_response_time,
+          min(c.min_rt) AS min_response_time,
+          max(c.max_rt) AS max_response_time,
+          approx_percentile(0.90, rollup(c.pct_agg))::numeric(10,2) AS p90_response_time,
+          approx_percentile(0.95, rollup(c.pct_agg))::numeric(10,2) AS p95_response_time,
+          approx_percentile(0.99, rollup(c.pct_agg))::numeric(10,2) AS p99_response_time,
+          sum(c.n)::bigint    AS total_count,
+          sum(c.n_ok)::bigint AS passed_count,
+          sum(c.n_err)::bigint AS failed_count
+        FROM ${sourceView} c
+        JOIN run r
+          ON c.system_under_test = r.sut
+         AND c.test_environment  = r.env
+        WHERE c.transaction_name = $2
+          ${samplerSinglePredicate}
+          AND c.scenario_name IN (SELECT scenario_name FROM scenarios)
+          AND c.bucket >= (SELECT start_time FROM bounds)
+          AND c.bucket <  (SELECT end_time   FROM bounds) + interval '5 seconds'
+          AND (${excludeRampParam}::boolean = false OR ${cutoffParam}::timestamptz IS NULL
+               OR c.bucket >= time_bucket('5 seconds', ${cutoffParam}::timestamptz))
+        GROUP BY 1${samplerGroupKey}
+      )
+      SELECT ${isSamplerGroup ? 'ts.sampler_name,' : ''}
+             ts.time_bucket,
+             a.avg_response_time, a.median_response_time,
+             a.min_response_time, a.max_response_time,
+             a.p90_response_time, a.p95_response_time, a.p99_response_time,
+             COALESCE(a.total_count, 0)  AS total_count,
+             COALESCE(a.passed_count, 0) AS passed_count,
+             COALESCE(a.failed_count, 0) AS failed_count
+      FROM time_series ts
+      LEFT JOIN agg a ON a.time_bucket = ts.time_bucket
+        ${isSamplerGroup ? 'AND a.sampler_name = ts.sampler_name' : ''}
+      ORDER BY ${isSamplerGroup ? 'ts.sampler_name, ' : ''}ts.time_bucket ASC
+    `;
+  }
+
+  /**
    * Parse time series row to data point
    */
   private parseTimeSeriesRow(row: Record<string, unknown>): TimeSeriesDataPoint {
