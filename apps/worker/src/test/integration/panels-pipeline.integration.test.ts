@@ -9,6 +9,25 @@ import { PanelsPipeline } from '../../pipelines/PanelsPipeline.js';
 import { Pool } from 'pg';
 import { createTestScenario, clearTestData } from '../helpers/database.js';
 
+// Mock Grafana configuration cache so PanelsPipeline doesn't try to load a
+// grafana_instances row from the test DB. Returning a non-null config keeps
+// the existing happy-path tests on their original code path.
+vi.mock('../../config/grafana-config-cache.js', () => ({
+  tryGetGrafanaConfig: vi.fn(async () => ({
+    url: 'http://localhost:3000',
+    apiKey: 'test-api-key',
+    orgId: '1'
+  })),
+  getGrafanaConfig: vi.fn(async () => ({
+    url: 'http://localhost:3000',
+    apiKey: 'test-api-key',
+    orgId: '1'
+  })),
+  getGrafanaInstanceId: vi.fn(() => 'instance-1'),
+  initializeGrafanaConfig: vi.fn(),
+  clearGrafanaConfigCache: vi.fn()
+}));
+
 // Mock panel helpers
 vi.mock('../../pipelines/panels/helpers.js', () => ({
   getApplicationDashboardsForTestRun: vi.fn().mockResolvedValue([

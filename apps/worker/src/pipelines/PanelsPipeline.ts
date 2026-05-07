@@ -1,6 +1,7 @@
 import { BasePipelineTypeORM } from './BasePipelineTypeORM.js';
 import { PipelineResult } from '../types/pipeline.js';
 import { EntityManager } from 'typeorm';
+import { tryGetGrafanaConfig } from '../config/grafana-config-cache.js';
 import {
   getApplicationDashboardsForTestRun,
   getGrafanaDashboardsForApplicationDashboards,
@@ -17,6 +18,20 @@ export class PanelsPipeline extends BasePipelineTypeORM {
     const overallStartTime = Date.now();
 
     try {
+      // Soft-skip when no Grafana instance is configured. Grafana is documented
+      // as an optional metric source; without one, there are no panels to build,
+      // but downstream stages (rollup, statistics, checks) still need to run on
+      // the load-test data already in TimescaleDB. See issue #282.
+      const grafanaConfig = await tryGetGrafanaConfig();
+      if (!grafanaConfig) {
+        this.logger.info('No Grafana instance configured — skipping panels-processing');
+        return {
+          success: true,
+          duration: Date.now() - overallStartTime,
+          data: { skipped: 'no-grafana-configured' },
+        };
+      }
+
       // Cleanup stale data before processing
       await this.cleanupStaleApplicationDashboards(['ds_panels']);
 

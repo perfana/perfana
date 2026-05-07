@@ -32,12 +32,23 @@ vi.mock('../../../pipelines/panels/helpers.js', () => ({
   createPanelDocuments: vi.fn()
 }));
 
+// Mock the Grafana config cache. Default to "configured" so existing happy-path
+// tests pass; the soft-skip test overrides this to null per-test.
+vi.mock('../../../config/grafana-config-cache.js', () => ({
+  tryGetGrafanaConfig: vi.fn(),
+  getGrafanaConfig: vi.fn(),
+  getGrafanaInstanceId: vi.fn(() => 'instance-1'),
+  initializeGrafanaConfig: vi.fn(),
+  clearGrafanaConfigCache: vi.fn(),
+}));
+
 import {
   getApplicationDashboardsForTestRun,
   getGrafanaDashboardsForApplicationDashboards,
   getBenchmarksForTestRun,
   createPanelDocuments
 } from '../../../pipelines/panels/helpers.js';
+import { tryGetGrafanaConfig } from '../../../config/grafana-config-cache.js';
 
 // Create mock database service
 const mockDatabaseService = {
@@ -78,6 +89,13 @@ describe('PanelsPipeline', () => {
     // Setup transaction to call the callback with mock entity manager
     mockDatabaseService.transaction.mockImplementation(async (callback: any) => {
       return await callback(mockEntityManager);
+    });
+
+    // Default: Grafana is configured. Soft-skip tests override to null.
+    (tryGetGrafanaConfig as any).mockResolvedValue({
+      url: 'http://grafana.test',
+      apiKey: 'test-api-key',
+      orgId: '1',
     });
 
     // Create pipeline instance
@@ -130,6 +148,37 @@ describe('PanelsPipeline', () => {
       expect(pipeline.validateInput({ testRunId: 123 })).toBe(false);
       expect(pipeline.validateInput({ testRunId: '' })).toBe(false);
       expect(pipeline.validateInput({ testRunId: {} })).toBe(false);
+    });
+  });
+
+  describe('Soft-skip when no Grafana configured (issue #282)', () => {
+    test('returns success with skipped marker and does not touch DB or helpers', async () => {
+      (tryGetGrafanaConfig as any).mockResolvedValueOnce(null);
+
+      const result = await pipeline.execute({ testRunId: 'test-run-no-grafana' });
+
+      expect(result.success).toBe(true);
+      expect(result.data).toEqual({ skipped: 'no-grafana-configured' });
+
+      // The pipeline must short-circuit before any helper or DB call so a
+      // Grafana-less stack still flows through to downstream stages cleanly.
+      expect(getApplicationDashboardsForTestRun).not.toHaveBeenCalled();
+      expect(getGrafanaDashboardsForApplicationDashboards).not.toHaveBeenCalled();
+      expect(getBenchmarksForTestRun).not.toHaveBeenCalled();
+      expect(createPanelDocuments).not.toHaveBeenCalled();
+      expect(mockDatabaseService.getTestRunByTestRunId).not.toHaveBeenCalled();
+      expect(mockDatabaseService.transaction).not.toHaveBeenCalled();
+    });
+
+    test('still fails (returns success: false) when Grafana row is invalid', async () => {
+      (tryGetGrafanaConfig as any).mockRejectedValueOnce(
+        new Error('Grafana config not available. A grafana_instances row exists but is invalid')
+      );
+
+      const result = await pipeline.execute({ testRunId: 'test-run-invalid-grafana' });
+
+      expect(result.success).toBe(false);
+      expect(result.error?.message).toContain('invalid');
     });
   });
 
