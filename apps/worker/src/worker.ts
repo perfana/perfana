@@ -149,8 +149,15 @@ export class PerfanaWorkerApp {
 
     // Handle unhandled promise rejections
     process.on('unhandledRejection', (reason, promise) => {
+      // Serialize Error objects explicitly — pino strips name/message/stack from
+      // raw Error instances logged under arbitrary keys, leaving the log useless
+      // for debugging. See issue #294 (the original symptom that exposed this).
+      const reasonPayload =
+        reason instanceof Error
+          ? { name: reason.name, message: reason.message, stack: reason.stack }
+          : { value: reason };
       this.logger.error('❌ Unhandled promise rejection:', {
-        reason,
+        reason: reasonPayload,
         promise: promise.toString(),
       });
       this.shutdown('unhandledRejection').finally(() => {

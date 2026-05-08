@@ -543,9 +543,17 @@ export class PipelineOrchestrator {
 
       this.logger.info(`✅ Sequential pipeline completed for ${testRunId} in ${totalDuration}ms`);
 
-      // Report pipeline completion to progress tracker
+      // Report pipeline completion to progress tracker. Best-effort — a failure to
+      // finalize progress reporting must not escape the orchestrator (issue #294).
       if (progressReporter) {
-        await progressReporter.complete();
+        try {
+          await progressReporter.complete();
+        } catch (reporterError) {
+          this.logger.warn('progressReporter.complete() failed; pipeline result is unaffected', {
+            testRunId,
+            error: reporterError instanceof Error ? reporterError.message : String(reporterError)
+          });
+        }
       }
 
       return {
@@ -571,9 +579,18 @@ export class PipelineOrchestrator {
         duration: totalDuration
       });
 
-      // Report pipeline failure to progress tracker
+      // Report pipeline failure to progress tracker. Best-effort — a failure here
+      // would otherwise become a second throw escaping the catch block, surface as
+      // an unhandled rejection, and shut the worker down (issue #294).
       if (progressReporter) {
-        await progressReporter.fail(errorMessage);
+        try {
+          await progressReporter.fail(errorMessage);
+        } catch (reporterError) {
+          this.logger.warn('progressReporter.fail() failed; pipeline error is still reported via return value', {
+            testRunId,
+            error: reporterError instanceof Error ? reporterError.message : String(reporterError)
+          });
+        }
       }
 
       return {
