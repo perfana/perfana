@@ -684,18 +684,104 @@ describe('ReportDataFetcherService', () => {
   // ═══════════════════════════════════════════════════════════════════════════
 
   describe('getThroughputStatsForReport', () => {
-    describe('happy path', () => {
+    /**
+     * The CAGG-vs-fallback decision is made by `loadThroughputRunInfoForReport`,
+     * which runs ahead of the three parallel data queries. The lookup SQL is
+     * recognized by the SUT/env projection + `has_cagg` column. See issue #288.
+     */
+    const isReportRunInfoLookup = (sql: unknown): boolean =>
+      typeof sql === 'string' && /sut\.name\s+AS\s+sut[\s\S]*has_cagg/i.test(sql);
+
+    /** Run-info row that flips the service into the CAGG-backed query path. */
+    const REPORT_RUN_INFO_CAGG = {
+      sut: 'webshop',
+      env: 'acc',
+      start_time: '2025-01-01T10:00:00Z',
+      end_time: '2025-01-01T11:00:00Z',
+      has_cagg: true,
+    };
+    /** Run-info row that flips the service into the legacy raw-scan fallback. */
+    const REPORT_RUN_INFO_NO_CAGG = { ...REPORT_RUN_INFO_CAGG, has_cagg: false };
+
+    /**
+     * Mock the throughput query sequence:
+     *   1) run-info lookup (returns the row above; null = inaccessible run)
+     *   2..4) three parallel data queries (transactions, requests, scenarios)
+     *
+     * The mock dispatches by matching `isReportRunInfoLookup(sql)` so existing
+     * call-order assertions in non-throughput tests are unaffected.
+     */
+    function mockThroughputCalls(
+      runInfoRow: unknown | null,
+      ...dataResults: unknown[][]
+    ) {
+      let dataIdx = 0;
+      testRunRepo.query.mockImplementation(async (sql: unknown) => {
+        if (isReportRunInfoLookup(sql)) {
+          return runInfoRow === null ? [] : [runInfoRow];
+        }
+        const r = dataResults[dataIdx] ?? [];
+        dataIdx++;
+        return r;
+      });
+    }
+
+    /** Returns only the post-run-info data calls (filters out the lookup). */
+    const dataCalls = (): jest.Mock['mock']['calls'] =>
+      testRunRepo.query.mock.calls.filter((c) => !isReportRunInfoLookup(c[0]));
+
+    describe('CAGG fast path (issue #288)', () => {
+      it('reads from transactions_5s / requests_raw_5s when has_cagg is true', async () => {
+        authzService.isGlobalAdmin.mockReturnValue(true);
+        mockThroughputCalls(
+          REPORT_RUN_INFO_CAGG,
+          [{ peak_transactions_per_second: '42' }],
+          [{ peak_requests_per_second: '55' }],
+          [],
+        );
+
+        await service.getThroughputStatsForReport('run-001', false, null, 'admin', ['perfana-admin']);
+
+        const sqls = dataCalls().map((c) => c[0] as string).join('\n');
+        expect(sqls).toContain('FROM transactions_5s c');
+        expect(sqls).toContain('FROM requests_raw_5s c');
+        expect(sqls).not.toMatch(/FROM\s+transactions\b(?!_5s)/);
+        expect(sqls).not.toMatch(/FROM\s+requests_raw\b(?!_5s)/);
+      });
+
+      it('passes (sut, env, start, end, excludeRampUp, cutoff) to the CAGG queries', async () => {
+        authzService.isGlobalAdmin.mockReturnValue(true);
+        mockThroughputCalls(REPORT_RUN_INFO_CAGG, [], [], []);
+
+        const cutoff = new Date('2025-01-01T10:02:00Z');
+        await service.getThroughputStatsForReport('run-001', true, cutoff, 'admin', ['perfana-admin']);
+
+        const dc = dataCalls();
+        expect(dc).toHaveLength(3);
+        for (const call of dc) {
+          const params = call[1] as unknown[];
+          expect(params[0]).toBe('webshop');
+          expect(params[1]).toBe('acc');
+          expect(params[2]).toEqual(new Date(REPORT_RUN_INFO_CAGG.start_time));
+          expect(params[3]).toEqual(new Date(REPORT_RUN_INFO_CAGG.end_time));
+          expect(params[4]).toBe(true);
+          expect(params[5]).toBe(cutoff);
+        }
+      });
+    });
+
+    describe('happy path (raw-scan fallback)', () => {
       it('should return overall and per-scenario throughput from database results', async () => {
         authzService.isGlobalAdmin.mockReturnValue(true);
-
-        // Promise.all fires three queries: transactions, requests, scenarios
-        testRunRepo.query
-          .mockResolvedValueOnce([{ peak_transactions_per_second: '42' }])
-          .mockResolvedValueOnce([{ peak_requests_per_second: '55' }])
-          .mockResolvedValueOnce([
+        mockThroughputCalls(
+          REPORT_RUN_INFO_NO_CAGG,
+          [{ peak_transactions_per_second: '42' }],
+          [{ peak_requests_per_second: '55' }],
+          [
             { scenario_name: 'BrowseAndSearch', peak_transactions_per_second: '20', peak_requests_per_second: '25' },
             { scenario_name: 'Checkout', peak_transactions_per_second: '22', peak_requests_per_second: '30' },
-          ]);
+          ],
+        );
 
         const result = await service.getThroughputStatsForReport('run-001', false, null, 'admin', ['perfana-admin']);
 
@@ -711,10 +797,7 @@ describe('ReportDataFetcherService', () => {
 
       it('should default to 0 when database returns no rows for overall', async () => {
         authzService.isGlobalAdmin.mockReturnValue(true);
-        testRunRepo.query
-          .mockResolvedValueOnce([])
-          .mockResolvedValueOnce([])
-          .mockResolvedValueOnce([]);
+        mockThroughputCalls(REPORT_RUN_INFO_NO_CAGG, [], [], []);
 
         const result = await service.getThroughputStatsForReport('run-001', false, null, 'admin', ['perfana-admin']);
 
@@ -725,10 +808,12 @@ describe('ReportDataFetcherService', () => {
 
       it('should default to 0 when overall row fields are null/non-numeric', async () => {
         authzService.isGlobalAdmin.mockReturnValue(true);
-        testRunRepo.query
-          .mockResolvedValueOnce([{ peak_transactions_per_second: null }])
-          .mockResolvedValueOnce([{ peak_requests_per_second: undefined }])
-          .mockResolvedValueOnce([]);
+        mockThroughputCalls(
+          REPORT_RUN_INFO_NO_CAGG,
+          [{ peak_transactions_per_second: null }],
+          [{ peak_requests_per_second: undefined }],
+          [],
+        );
 
         const result = await service.getThroughputStatsForReport('run-001', false, null, 'admin', ['perfana-admin']);
 
@@ -738,13 +823,13 @@ describe('ReportDataFetcherService', () => {
 
       it('should pass cutoffTime in query params when provided', async () => {
         authzService.isGlobalAdmin.mockReturnValue(true);
-        testRunRepo.query.mockResolvedValue([]);
+        mockThroughputCalls(REPORT_RUN_INFO_NO_CAGG, [], [], []);
 
         const cutoff = new Date('2025-01-01T10:02:00Z');
         await service.getThroughputStatsForReport('run-001', true, cutoff, 'admin', ['perfana-admin']);
 
-        // All three queries should have cutoff as third param
-        for (const call of testRunRepo.query.mock.calls) {
+        // The fallback path's three data queries each carry the cutoff at $3.
+        for (const call of dataCalls()) {
           const params = call[1] as unknown[];
           expect(params[2]).toBe(cutoff);
         }
@@ -752,49 +837,61 @@ describe('ReportDataFetcherService', () => {
 
       it('should pass null cutoffTime when not provided', async () => {
         authzService.isGlobalAdmin.mockReturnValue(true);
-        testRunRepo.query.mockResolvedValue([]);
+        mockThroughputCalls(REPORT_RUN_INFO_NO_CAGG, [], [], []);
 
         await service.getThroughputStatsForReport('run-001', false, null, 'admin', ['perfana-admin']);
 
-        for (const call of testRunRepo.query.mock.calls) {
+        for (const call of dataCalls()) {
           const params = call[1] as unknown[];
           expect(params[2]).toBeNull();
         }
       });
     });
 
-    describe('org filtering', () => {
+    describe('org filtering (raw-scan fallback)', () => {
       it('should use CTE-based org filter in SQL when user has org memberships', async () => {
         authzService.isGlobalAdmin.mockReturnValue(false);
         authzService.getAccessibleOrganizations.mockResolvedValueOnce(['org-1']);
-        testRunRepo.query.mockResolvedValue([]);
+        mockThroughputCalls(REPORT_RUN_INFO_NO_CAGG, [], [], []);
 
         await service.getThroughputStatsForReport('run-001', false, null, 'user-1', []);
 
-        // At least one of the three queries should include the org_filter CTE
-        const sqls = testRunRepo.query.mock.calls.map((c) => c[0] as string);
+        const sqls = dataCalls().map((c) => c[0] as string);
         expect(sqls.some((sql) => sql.includes('org_filter'))).toBe(true);
       });
 
       it('should use IS NULL variant CTE when user has no org memberships', async () => {
         authzService.isGlobalAdmin.mockReturnValue(false);
         authzService.getAccessibleOrganizations.mockResolvedValueOnce([]);
-        testRunRepo.query.mockResolvedValue([]);
+        mockThroughputCalls(REPORT_RUN_INFO_NO_CAGG, [], [], []);
 
         await service.getThroughputStatsForReport('run-001', false, null, 'user-1', []);
 
-        const sqls = testRunRepo.query.mock.calls.map((c) => c[0] as string);
+        const sqls = dataCalls().map((c) => c[0] as string);
         expect(sqls.some((sql) => sql.includes('organization_id IS NULL'))).toBe(true);
       });
 
       it('should not include org_filter CTE for admin users', async () => {
         authzService.isGlobalAdmin.mockReturnValue(true);
-        testRunRepo.query.mockResolvedValue([]);
+        mockThroughputCalls(REPORT_RUN_INFO_NO_CAGG, [], [], []);
 
         await service.getThroughputStatsForReport('run-001', false, null, 'admin', ['perfana-admin']);
 
-        const sqls = testRunRepo.query.mock.calls.map((c) => c[0] as string);
+        const sqls = dataCalls().map((c) => c[0] as string);
         expect(sqls.every((sql) => !sql.includes('org_filter'))).toBe(true);
+      });
+
+      it('threads orgIds into the run-info lookup for non-admin users', async () => {
+        authzService.isGlobalAdmin.mockReturnValue(false);
+        authzService.getAccessibleOrganizations.mockResolvedValueOnce(['org-1', 'org-2']);
+        mockThroughputCalls(REPORT_RUN_INFO_NO_CAGG, [], [], []);
+
+        await service.getThroughputStatsForReport('run-001', false, null, 'user-1', []);
+
+        const lookup = testRunRepo.query.mock.calls.find((c) => isReportRunInfoLookup(c[0]));
+        expect(lookup).toBeDefined();
+        expect(lookup![0]).toContain('tr.organization_id IN');
+        expect(lookup![1]).toEqual(['run-001', 'org-1', 'org-2']);
       });
     });
 

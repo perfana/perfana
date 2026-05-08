@@ -1468,36 +1468,50 @@ describe('TestRunsPerformanceQueryService', () => {
 
   describe('getThroughputStats', () => {
     /**
-     * getThroughputStats issues 3 parallel queries (transactions, requests, scenarios).
-     * Call order in Promise.all: transactions → requests → scenarios.
+     * Sample run-info rows used by the new single-round-trip lookup
+     * (`loadThroughputRunInfo`). The lookup returns the SUT name + test
+     * environment (the CAGG keying), the run window, and a `has_cagg` flag
+     * derived from EXISTS probes against `transactions_5s` / `requests_raw_5s`.
+     * See issue #288.
      */
-    function mockThroughputQueries(
-      transactionRows: unknown[],
-      requestRows: unknown[],
-      scenarioRows: unknown[]
-    ) {
-      let callCount = 0;
-      (testRunRepo.query as jest.Mock).mockImplementation(async () => {
-        if (callCount === 0) { callCount++; return transactionRows; }
-        if (callCount === 1) { callCount++; return requestRows; }
-        callCount++;
-        return scenarioRows;
-      });
-    }
+    const RUN_INFO_CAGG = {
+      sut: 'webshop',
+      env: 'acc',
+      start_time: '2024-01-01T10:00:00Z',
+      end_time: '2024-01-01T10:30:00Z',
+      ramp_up: null,
+      has_cagg: true,
+    };
+    const RUN_INFO_NO_CAGG = { ...RUN_INFO_CAGG, has_cagg: false };
 
-    function mockThroughputWithRampUp(
-      rampUpRow: unknown,
+    /** SQL fragment that identifies the run-info / CAGG-existence lookup. */
+    const isRunInfoLookup = (sql: unknown): boolean =>
+      typeof sql === 'string' && /sut\.name\s+AS\s+sut[\s\S]*has_cagg/i.test(sql);
+
+    /**
+     * Mock the throughput call sequence. The service issues:
+     *   1) run-info lookup (returns sut/env/start/end/ramp_up + has_cagg)
+     *   2..4) three parallel queries (transactions, requests, scenarios) — same
+     *         shape regardless of CAGG-vs-raw path, the mock doesn't care which
+     *         SQL was issued, only their result rows.
+     *
+     * Pass `runInfoRow = null` to simulate a missing/inaccessible run.
+     */
+    function mockThroughputCalls(
+      runInfoRow: unknown | null,
       transactionRows: unknown[],
       requestRows: unknown[],
-      scenarioRows: unknown[]
+      scenarioRows: unknown[],
     ) {
-      let callCount = 0;
-      (testRunRepo.query as jest.Mock).mockImplementation(async () => {
-        if (callCount === 0) { callCount++; return [rampUpRow]; }
-        if (callCount === 1) { callCount++; return transactionRows; }
-        if (callCount === 2) { callCount++; return requestRows; }
-        callCount++;
-        return scenarioRows;
+      let parallelIdx = 0;
+      const parallel = [transactionRows, requestRows, scenarioRows];
+      (testRunRepo.query as jest.Mock).mockImplementation(async (sql: unknown) => {
+        if (isRunInfoLookup(sql)) {
+          return runInfoRow === null ? [] : [runInfoRow];
+        }
+        const r = parallel[parallelIdx] ?? [];
+        parallelIdx++;
+        return r;
       });
     }
 
@@ -1516,7 +1530,8 @@ describe('TestRunsPerformanceQueryService', () => {
       });
 
       it('queries database for admin with empty org list', async () => {
-        mockThroughputQueries(
+        mockThroughputCalls(
+          RUN_INFO_CAGG,
           [RAW_TRANSACTIONS_TPS],
           [RAW_REQUESTS_RPS],
           [RAW_SCENARIO_THROUGHPUT],
@@ -1530,22 +1545,49 @@ describe('TestRunsPerformanceQueryService', () => {
       });
 
       it('queries database for non-admin with org memberships', async () => {
-        mockThroughputQueries([RAW_TRANSACTIONS_TPS], [RAW_REQUESTS_RPS], []);
+        mockThroughputCalls(RUN_INFO_CAGG, [RAW_TRANSACTIONS_TPS], [RAW_REQUESTS_RPS], []);
 
         const result = await service.getThroughputStats(TEST_RUN_ID, false, NOT_ADMIN, ORG_IDS);
 
         expect(result.overall.peak_transactions_per_second).toBe(120);
+      });
+
+      it('threads organizationIds into the run-info lookup for non-admins', async () => {
+        mockThroughputCalls(RUN_INFO_CAGG, [], [], []);
+
+        await service.getThroughputStats(TEST_RUN_ID, false, NOT_ADMIN, ORG_IDS);
+
+        const lookupCall = (testRunRepo.query as jest.Mock).mock.calls.find(
+          (c: unknown[]) => isRunInfoLookup(c[0]),
+        );
+        expect(lookupCall).toBeDefined();
+        expect(lookupCall![0]).toContain('AND sut.organization_id = ANY($2::uuid[])');
+        expect(lookupCall![1]).toEqual([TEST_RUN_ID, ORG_IDS]);
+      });
+
+      it('returns empty struct when run is inaccessible (org filter excludes it)', async () => {
+        mockThroughputCalls(null, [], [], []);
+
+        const result = await service.getThroughputStats(TEST_RUN_ID, false, NOT_ADMIN, ORG_IDS);
+
+        expect(result).toEqual({
+          overall: { peak_transactions_per_second: 0, peak_requests_per_second: 0 },
+          by_scenario: [],
+        });
+        // Only the run-info lookup ran; the parallel queries were skipped.
+        expect(testRunRepo.query).toHaveBeenCalledTimes(1);
       });
     });
 
     describe('UUID resolution', () => {
       it('resolves UUID before querying', async () => {
         let callCount = 0;
-        (testRunRepo.query as jest.Mock).mockImplementation(async () => {
+        (testRunRepo.query as jest.Mock).mockImplementation(async (sql: unknown) => {
           callCount++;
           if (callCount === 1) return [{ test_run_id: TEST_RUN_ID }]; // UUID lookup
-          if (callCount === 2) return [RAW_TRANSACTIONS_TPS];
-          if (callCount === 3) return [RAW_REQUESTS_RPS];
+          if (isRunInfoLookup(sql)) return [RUN_INFO_CAGG];
+          if (callCount === 3) return [RAW_TRANSACTIONS_TPS];
+          if (callCount === 4) return [RAW_REQUESTS_RPS];
           return [RAW_SCENARIO_THROUGHPUT];
         });
 
@@ -1556,26 +1598,90 @@ describe('TestRunsPerformanceQueryService', () => {
       });
     });
 
-    describe('ramp-up exclusion', () => {
-      it('fetches cutoff time when excludeRampUp is true', async () => {
-        const startTime = new Date('2024-01-01T10:00:00Z');
-        mockThroughputWithRampUp(
-          { start_time: startTime.toISOString(), ramp_up: '600' },
+    describe('CAGG fast path (issue #288)', () => {
+      it('reads from transactions_5s / requests_raw_5s when has_cagg is true', async () => {
+        mockThroughputCalls(
+          RUN_INFO_CAGG,
+          [RAW_TRANSACTIONS_TPS],
+          [RAW_REQUESTS_RPS],
+          [RAW_SCENARIO_THROUGHPUT],
+        );
+
+        await service.getThroughputStats(TEST_RUN_ID, false, IS_ADMIN, []);
+
+        const calls = (testRunRepo.query as jest.Mock).mock.calls;
+        const dataCalls = calls.filter((c: unknown[]) => !isRunInfoLookup(c[0]));
+        const allSql = dataCalls.map((c: unknown[]) => c[0] as string).join('\n');
+        expect(allSql).toContain('FROM transactions_5s c');
+        expect(allSql).toContain('FROM requests_raw_5s c');
+        // The legacy raw-scan path must not run alongside the CAGG path.
+        expect(allSql).not.toMatch(/FROM\s+transactions\s+t\b/);
+        expect(allSql).not.toMatch(/FROM\s+requests_raw\s+rr\b/);
+      });
+
+      it('passes (sut, env, start, end, excludeRampUp, cutoff) to the CAGG queries', async () => {
+        mockThroughputCalls(RUN_INFO_CAGG, [], [], []);
+
+        await service.getThroughputStats(TEST_RUN_ID, false, IS_ADMIN, []);
+
+        const calls = (testRunRepo.query as jest.Mock).mock.calls;
+        const dataCalls = calls.filter((c: unknown[]) => !isRunInfoLookup(c[0]));
+        // 3 parallel queries, all share the same param tuple.
+        expect(dataCalls).toHaveLength(3);
+        for (const c of dataCalls) {
+          const params = c[1] as unknown[];
+          expect(params[0]).toBe('webshop');                 // sut
+          expect(params[1]).toBe('acc');                     // env
+          expect(params[2]).toEqual(new Date(RUN_INFO_CAGG.start_time));
+          expect(params[3]).toEqual(new Date(RUN_INFO_CAGG.end_time));
+          expect(params[4]).toBe(false);                     // excludeRampUp
+          expect(params[5]).toBeNull();                      // cutoffTime
+        }
+      });
+
+      it('threads ramp-up cutoff into the CAGG queries when excludeRampUp is true', async () => {
+        const runInfo = {
+          ...RUN_INFO_CAGG,
+          start_time: '2024-01-01T10:00:00Z',
+          ramp_up: '600',
+        };
+        mockThroughputCalls(runInfo, [], [], []);
+
+        await service.getThroughputStats(TEST_RUN_ID, true, IS_ADMIN, []);
+
+        const dataCall = (testRunRepo.query as jest.Mock).mock.calls
+          .find((c: unknown[]) => !isRunInfoLookup(c[0]));
+        const params = dataCall![1] as unknown[];
+        expect(params[4]).toBe(true);                                          // excludeRampUp
+        expect(params[5]).toEqual(new Date('2024-01-01T10:10:00Z'));           // start + 600s
+      });
+    });
+
+    describe('raw-scan fallback (CAGG empty / in-flight runs)', () => {
+      it('reads from raw transactions / requests_raw when has_cagg is false', async () => {
+        mockThroughputCalls(
+          RUN_INFO_NO_CAGG,
           [RAW_TRANSACTIONS_TPS],
           [RAW_REQUESTS_RPS],
           [],
         );
 
-        await service.getThroughputStats(TEST_RUN_ID, true, IS_ADMIN, []);
+        await service.getThroughputStats(TEST_RUN_ID, false, IS_ADMIN, []);
 
-        // 4 calls: ramp-up + 3 parallel throughput queries
-        expect(testRunRepo.query).toHaveBeenCalledTimes(4);
+        const calls = (testRunRepo.query as jest.Mock).mock.calls;
+        const dataCalls = calls.filter((c: unknown[]) => !isRunInfoLookup(c[0]));
+        const allSql = dataCalls.map((c: unknown[]) => c[0] as string).join('\n');
+        expect(allSql).toMatch(/FROM\s+transactions\s+t\b/);
+        expect(allSql).toMatch(/FROM\s+requests_raw\s+rr\b/);
+        // CAGGs must NOT be queried when the existence check came back false.
+        expect(allSql).not.toContain('FROM transactions_5s c');
+        expect(allSql).not.toContain('FROM requests_raw_5s c');
       });
     });
 
     describe('data mapping', () => {
       it('maps overall throughput correctly', async () => {
-        mockThroughputQueries([RAW_TRANSACTIONS_TPS], [RAW_REQUESTS_RPS], []);
+        mockThroughputCalls(RUN_INFO_CAGG, [RAW_TRANSACTIONS_TPS], [RAW_REQUESTS_RPS], []);
 
         const result = await service.getThroughputStats(TEST_RUN_ID, false, IS_ADMIN, []);
 
@@ -1584,7 +1690,8 @@ describe('TestRunsPerformanceQueryService', () => {
       });
 
       it('maps by_scenario throughput correctly', async () => {
-        mockThroughputQueries(
+        mockThroughputCalls(
+          RUN_INFO_CAGG,
           [RAW_TRANSACTIONS_TPS],
           [RAW_REQUESTS_RPS],
           [RAW_SCENARIO_THROUGHPUT],
@@ -1600,7 +1707,7 @@ describe('TestRunsPerformanceQueryService', () => {
       });
 
       it('returns zero overall when DB returns empty result', async () => {
-        mockThroughputQueries([], [], []);
+        mockThroughputCalls(RUN_INFO_CAGG, [], [], []);
 
         const result = await service.getThroughputStats(TEST_RUN_ID, false, IS_ADMIN, []);
 
@@ -1609,7 +1716,7 @@ describe('TestRunsPerformanceQueryService', () => {
       });
 
       it('returns empty by_scenario array when no scenarios', async () => {
-        mockThroughputQueries([RAW_TRANSACTIONS_TPS], [RAW_REQUESTS_RPS], []);
+        mockThroughputCalls(RUN_INFO_CAGG, [RAW_TRANSACTIONS_TPS], [RAW_REQUESTS_RPS], []);
 
         const result = await service.getThroughputStats(TEST_RUN_ID, false, IS_ADMIN, []);
 
@@ -1617,7 +1724,8 @@ describe('TestRunsPerformanceQueryService', () => {
       });
 
       it('defaults null peak_transactions_per_second to 0', async () => {
-        mockThroughputQueries(
+        mockThroughputCalls(
+          RUN_INFO_CAGG,
           [{ peak_transactions_per_second: null }],
           [{ peak_requests_per_second: null }],
           [],

@@ -727,6 +727,201 @@ export class ReportDataFetcherService {
   }
 
   /**
+   * Single round-trip lookup that fetches the (sut, env, start_time, end_time)
+   * needed to read the 5 s CAGGs and probes whether either CAGG already covers
+   * this run's window. Org-filtered when `orgIds` is non-null.
+   *
+   * Returns null when the run doesn't exist or the user lacks access — callers
+   * fall back to the raw-scan path (which itself returns zeros under those
+   * conditions, matching pre-#288 behavior).
+   */
+  private async loadThroughputRunInfoForReport(
+    testRunId: string,
+    orgIds: string[] | null,
+  ): Promise<{
+    sut: string;
+    env: string;
+    startTime: Date;
+    endTime: Date;
+    hasCagg: boolean;
+  } | null> {
+    // Org filter: empty list (= no accessible orgs) maps to "null orgs only"
+    // to match the existing buildOrganizationFilterClause + null-org compatibility.
+    const orgClause =
+      orgIds === null
+        ? ''
+        : orgIds.length > 0
+          ? `AND (tr.organization_id IN (${orgIds.map((_, i) => `$${2 + i}`).join(', ')}) OR tr.organization_id IS NULL)`
+          : 'AND tr.organization_id IS NULL';
+
+    const query = `
+      SELECT
+        sut.name           AS sut,
+        tr.test_environment AS env,
+        tr.start_time      AS start_time,
+        tr.end_time        AS end_time,
+        (
+          EXISTS (
+            SELECT 1 FROM transactions_5s c
+            WHERE c.system_under_test = sut.name
+              AND c.test_environment  = tr.test_environment
+              AND c.bucket >= tr.start_time
+              AND c.bucket <  COALESCE(tr.end_time, NOW()) + interval '5 seconds'
+          )
+          OR EXISTS (
+            SELECT 1 FROM requests_raw_5s c
+            WHERE c.system_under_test = sut.name
+              AND c.test_environment  = tr.test_environment
+              AND c.bucket >= tr.start_time
+              AND c.bucket <  COALESCE(tr.end_time, NOW()) + interval '5 seconds'
+          )
+        ) AS has_cagg
+      FROM test_runs tr
+      JOIN systems_under_test sut ON sut.id = tr.system_under_test_id
+      WHERE tr.test_run_id = $1
+        ${orgClause}
+      LIMIT 1
+    `;
+
+    const params: unknown[] = orgIds === null ? [testRunId] : [testRunId, ...orgIds];
+
+    const rows = await withRequestEm(this.testRunRepo).query(query, params);
+    if (!rows || rows.length === 0) return null;
+    const row = rows[0] as {
+      sut: string;
+      env: string;
+      start_time: string | Date | null;
+      end_time: string | Date | null;
+      has_cagg: boolean;
+    };
+    if (!row.start_time || !row.end_time) return null;
+    return {
+      sut: row.sut,
+      env: row.env,
+      startTime: new Date(row.start_time),
+      endTime: new Date(row.end_time),
+      hasCagg: row.has_cagg === true,
+    };
+  }
+
+  /**
+   * CAGG-backed throughput for report generation. Reads from the 5 s continuous
+   * aggregates (`transactions_5s`, `requests_raw_5s`) keyed by (sut, env,
+   * bucket). Same `CEIL(MAX(SUM(n))/5)` semantics the report has been emitting.
+   *
+   * Issue #288.
+   */
+  private async getThroughputStatsFromCaggForReport(
+    runInfo: { sut: string; env: string; startTime: Date; endTime: Date },
+    excludeRampUp: boolean,
+    cutoffTime: Date | null,
+  ): Promise<ThroughputStats> {
+    const params: unknown[] = [
+      runInfo.sut,
+      runInfo.env,
+      runInfo.startTime,
+      runInfo.endTime,
+      excludeRampUp,
+      cutoffTime,
+    ];
+
+    const transactionsQuery = `
+      WITH per_bucket AS (
+        SELECT c.bucket, SUM(c.n)::bigint AS total
+        FROM transactions_5s c
+        WHERE c.system_under_test = $1
+          AND c.test_environment  = $2
+          AND c.bucket >= $3::timestamptz
+          AND c.bucket <  $4::timestamptz + interval '5 seconds'
+          AND ($5::boolean = false OR $6::timestamptz IS NULL
+               OR c.bucket >= time_bucket('5 seconds'::interval, $6::timestamptz))
+        GROUP BY c.bucket
+      )
+      SELECT CEIL(COALESCE(MAX(total), 0)::numeric / 5) AS peak_transactions_per_second
+      FROM per_bucket
+    `;
+
+    const requestsQuery = `
+      WITH per_bucket AS (
+        SELECT c.bucket, SUM(c.n)::bigint AS total
+        FROM requests_raw_5s c
+        WHERE c.system_under_test = $1
+          AND c.test_environment  = $2
+          AND c.bucket >= $3::timestamptz
+          AND c.bucket <  $4::timestamptz + interval '5 seconds'
+          AND ($5::boolean = false OR $6::timestamptz IS NULL
+               OR c.bucket >= time_bucket('5 seconds'::interval, $6::timestamptz))
+        GROUP BY c.bucket
+      )
+      SELECT CEIL(COALESCE(MAX(total), 0)::numeric / 5) AS peak_requests_per_second
+      FROM per_bucket
+    `;
+
+    const scenarioQuery = `
+      WITH tx_per AS (
+        SELECT c.scenario_name, c.bucket, SUM(c.n)::bigint AS total
+        FROM transactions_5s c
+        WHERE c.system_under_test = $1
+          AND c.test_environment  = $2
+          AND c.bucket >= $3::timestamptz
+          AND c.bucket <  $4::timestamptz + interval '5 seconds'
+          AND ($5::boolean = false OR $6::timestamptz IS NULL
+               OR c.bucket >= time_bucket('5 seconds'::interval, $6::timestamptz))
+          AND c.scenario_name IS NOT NULL
+        GROUP BY c.scenario_name, c.bucket
+      ),
+      req_per AS (
+        SELECT c.scenario_name, c.bucket, SUM(c.n)::bigint AS total
+        FROM requests_raw_5s c
+        WHERE c.system_under_test = $1
+          AND c.test_environment  = $2
+          AND c.bucket >= $3::timestamptz
+          AND c.bucket <  $4::timestamptz + interval '5 seconds'
+          AND ($5::boolean = false OR $6::timestamptz IS NULL
+               OR c.bucket >= time_bucket('5 seconds'::interval, $6::timestamptz))
+          AND c.scenario_name IS NOT NULL
+        GROUP BY c.scenario_name, c.bucket
+      ),
+      tx_peaks AS (
+        SELECT scenario_name, CEIL(MAX(total)::numeric / 5) AS peak_transactions_per_second
+        FROM tx_per GROUP BY scenario_name
+      ),
+      req_peaks AS (
+        SELECT scenario_name, CEIL(MAX(total)::numeric / 5) AS peak_requests_per_second
+        FROM req_per GROUP BY scenario_name
+      )
+      SELECT
+        COALESCE(t.scenario_name, r.scenario_name) AS scenario_name,
+        COALESCE(t.peak_transactions_per_second, 0) AS peak_transactions_per_second,
+        COALESCE(r.peak_requests_per_second, 0)     AS peak_requests_per_second
+      FROM tx_peaks t
+      FULL OUTER JOIN req_peaks r ON t.scenario_name = r.scenario_name
+      ORDER BY scenario_name ASC
+    `;
+
+    const [transactionsResult, requestsResult, scenarioResult] = await Promise.all([
+      withRequestEm(this.testRunRepo).query(transactionsQuery, params),
+      withRequestEm(this.testRunRepo).query(requestsQuery, params),
+      withRequestEm(this.testRunRepo).query(scenarioQuery, params),
+    ]);
+
+    const transactions = transactionsResult[0] || { peak_transactions_per_second: 0 };
+    const requests = requestsResult[0] || { peak_requests_per_second: 0 };
+
+    return {
+      overall: {
+        peak_transactions_per_second: parseInt(transactions.peak_transactions_per_second) || 0,
+        peak_requests_per_second: parseInt(requests.peak_requests_per_second) || 0,
+      },
+      by_scenario: (scenarioResult as ThroughputScenarioRow[]).map((row) => ({
+        scenario_name: row.scenario_name,
+        peak_transactions_per_second: parseInt(row.peak_transactions_per_second) || 0,
+        peak_requests_per_second: parseInt(row.peak_requests_per_second) || 0,
+      })),
+    };
+  }
+
+  /**
    * Get throughput stats for report generation
    * Calculates peak transactions/sec and peak requests/sec
    * @param testRunId - Test run ID
@@ -746,6 +941,19 @@ export class ReportDataFetcherService {
     try {
       // Internal/system calls (no userId) or admin users bypass org filtering
       const orgIds = userId ? await withOrgFilter(userId, roles, this.authzService) : null;
+
+      // Single round-trip: SUT/env (the CAGG keying), test-run window, and a probe
+      // for whether the 5 s CAGGs already cover this run. When they do, the dashboard
+      // queries collapse from ~30-40 s of raw-hypertable scans to a few hundred
+      // pre-aggregated rows. See issue #288.
+      const runInfo = await this.loadThroughputRunInfoForReport(testRunId, orgIds);
+      if (runInfo && runInfo.hasCagg) {
+        return await this.getThroughputStatsFromCaggForReport(runInfo, excludeRampUp, cutoffTime);
+      }
+
+      // Fallback: in-flight run that pre-dates the next CAGG refresh (≤30 s lag),
+      // run not yet started, or a stack where the CAGG policy never ran. Reverts
+      // to the legacy raw-scan path.
 
       // Build organization filter for test_run validation
       // Base params are: [testRunId, excludeRampUp, cutoffTime] = indices 1, 2, 3
