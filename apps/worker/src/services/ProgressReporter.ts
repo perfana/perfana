@@ -131,9 +131,15 @@ export class ProgressReporter {
     // Publish completion event
     await this.publishCompletionEvent();
 
-    // Clean up progress key (will be deleted by TTL anyway, but good practice)
-    const progressKey = `${JOB_REDIS_KEYS.PROGRESS_PREFIX}${this.job.id}`;
-    await this.redis.expire(progressKey, 3600); // 1 hour TTL for completed jobs
+    // Clean up progress key (will be deleted by TTL anyway, but good practice).
+    // Best-effort: a Redis hiccup here must not throw out of the worker callback —
+    // unhandled rejection would shut the process down (issue #294).
+    try {
+      const progressKey = `${JOB_REDIS_KEYS.PROGRESS_PREFIX}${this.job.id}`;
+      await this.redis.expire(progressKey, 3600); // 1 hour TTL for completed jobs
+    } catch (error) {
+      logger.error(`Failed to set TTL on progress key for job ${this.job.id}:`, error);
+    }
   }
 
   /**
@@ -159,9 +165,13 @@ export class ProgressReporter {
     // Publish failure event
     await this.publishFailureEvent(error);
 
-    // Clean up progress key
-    const progressKey = `${JOB_REDIS_KEYS.PROGRESS_PREFIX}${this.job.id}`;
-    await this.redis.expire(progressKey, 7200); // 2 hour TTL for failed jobs (keep longer for debugging)
+    // Clean up progress key. Best-effort — see complete() above.
+    try {
+      const progressKey = `${JOB_REDIS_KEYS.PROGRESS_PREFIX}${this.job.id}`;
+      await this.redis.expire(progressKey, 7200); // 2 hour TTL for failed jobs (keep longer for debugging)
+    } catch (err) {
+      logger.error(`Failed to set TTL on progress key for failed job ${this.job.id}:`, err);
+    }
   }
 
   /**

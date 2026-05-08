@@ -110,9 +110,14 @@ export class RedisConnectionPool {
    */
   private async createConnection(): Promise<Redis> {
     try {
-      // CRITICAL: Use minimal BullMQ-compatible configuration
-      // DO NOT include extra options like commandTimeout, connectTimeout, keepAlive, family, etc.
-      // These interfere with BullMQ's blocking mode (BRPOPLPUSH)
+      // These are general-purpose pool connections — NOT the BullMQ blocking-worker
+      // connection (created separately in createSimpleWorker). The "no keepAlive /
+      // commandTimeout / connectTimeout" rule applies only to the blocking connection
+      // because those options interfere with BRPOPLPUSH. Pool connections are held
+      // for the full duration of long-running jobs (analyze pipelines run 3–6 min on
+      // populated DBs), so they MUST have TCP keepalive — without it, OS / Docker /
+      // load-balancer idle timeouts silently drop the socket during long INSERTs and
+      // the next Redis command fails with `Connection is closed.` (see issue #294).
       const connection = new Redis({
         host: this.config.host,
         port: this.config.port,
@@ -120,7 +125,8 @@ export class RedisConnectionPool {
         db: this.config.db,
         maxRetriesPerRequest: null,   // Required for BullMQ
         enableReadyCheck: false,      // Recommended for BullMQ
-        lazyConnect: false            // Connect immediately for pool
+        lazyConnect: false,           // Connect immediately for pool
+        keepAlive: 30000              // 30s TCP keepalive — detect dropped sockets
       });
 
       // Set up connection event handlers
