@@ -98,7 +98,22 @@ export class ApdexCalculator extends BaseCheckService {
   }
 
   /**
-   * Calculate Apdex score for a specific transaction or entire workload
+   * Calculate Apdex score for a specific transaction or entire workload.
+   *
+   * Fast path: when `transactionName` is set and `test_run_transaction_stats` has
+   * eligible rows for this `(test_run_id, transaction_name, ramp_up_excluded)`
+   * triple, the score is computed from the rolled-up tdigest sketch via
+   * `approx_percentile_rank`. Drops a ~260 K-row hypertable scan to a few rollup
+   * rows. See issue #296.
+   *
+   * Eligibility: the rollup's `pct_agg` is built over every row (no `success`
+   * filter), so we only fast-path when the success filter would be a no-op —
+   * either `includeFailedRequests=true` or the rollup has zero failures across
+   * the matching rows. Otherwise fall back to the raw `transactions` scan.
+   *
+   * Workload-level callers (`transactionName === null`, e.g. `previewApdex`)
+   * keep the raw-scan path. The hot path in checks-evaluation always passes a
+   * transactionName because `evaluateWorkloadLevelApdex` iterates per-transaction.
    */
   async calculateApdex(params: {
     testRun: TestRun;
@@ -108,6 +123,19 @@ export class ApdexCalculator extends BaseCheckService {
     excludeRampUp: boolean;
   }): Promise<ApdexResult> {
     const { testRun, transactionName, thresholdMs, includeFailedRequests, excludeRampUp } = params;
+
+    if (transactionName !== null) {
+      const fastPath = await this.calculateApdexFromRollup({
+        testRunId: testRun.test_run_id,
+        transactionName,
+        thresholdMs,
+        includeFailedRequests,
+        excludeRampUp,
+      });
+      if (fastPath) {
+        return fastPath;
+      }
+    }
 
     const toleratingThreshold = thresholdMs * 4;
 
@@ -175,6 +203,116 @@ export class ApdexCalculator extends BaseCheckService {
     this.logger.info(
       `Apdex for ${transactionName || 'workload'}: ${apdexScore?.toFixed(3) || 'N/A'} ` +
       `(S:${satisfied} T:${tolerating} F:${frustrated} Total:${total} Avg:${avgResponseTime?.toFixed(0) || 'N/A'}ms)`
+    );
+
+    return {
+      transaction_name: transactionName,
+      satisfied_count: satisfied,
+      tolerating_count: tolerating,
+      frustrated_count: frustrated,
+      total_count: total,
+      apdex_score: apdexScore,
+      threshold_ms: thresholdMs,
+      avg_response_time_ms: avgResponseTime,
+    };
+  }
+
+  /**
+   * Rollup-based Apdex fast path. Returns null when the rollup either has no
+   * matching rows or carries failed transactions that the caller wants
+   * filtered out (the sketch is built without a `success` filter, so we can't
+   * subtract failed response_times from it). The caller falls back to the raw
+   * `transactions` scan in that case.
+   *
+   * Eligibility filter `($4::boolean OR failed = 0)` keeps the SQL a single
+   * round-trip: rows that fail eligibility produce zero result rows, signalling
+   * "miss" to the caller. See issue #296.
+   *
+   * Output column names mirror the raw query so the caller's parsing works
+   * identically; the JS-side Apdex score formula is the same as the raw path.
+   */
+  private async calculateApdexFromRollup(params: {
+    testRunId: string;
+    transactionName: string;
+    thresholdMs: number;
+    includeFailedRequests: boolean;
+    excludeRampUp: boolean;
+  }): Promise<ApdexResult | null> {
+    const { testRunId, transactionName, thresholdMs, includeFailedRequests, excludeRampUp } = params;
+
+    const query = `
+      WITH agg AS (
+        SELECT
+          COUNT(*)                                                AS row_count,
+          COALESCE(SUM(total_count), 0)::bigint                   AS total,
+          COALESCE(SUM(passed_count), 0)::bigint                  AS passed,
+          COALESCE(SUM(failed_count), 0)::bigint                  AS failed,
+          SUM(avg_response_time * total_count)::numeric           AS sum_avg_x_total,
+          rollup(pct_agg)                                         AS pct_agg
+        FROM test_run_transaction_stats
+        WHERE test_run_id = $1
+          AND ramp_up_excluded = $2
+          AND transaction_name = $3
+      )
+      SELECT
+        total                                                                                  AS total_count,
+        GREATEST(
+          ROUND(approx_percentile_rank($5::double precision, pct_agg) * total)::bigint,
+          0::bigint
+        )                                                                                      AS satisfied_count,
+        GREATEST(
+          (ROUND(approx_percentile_rank(($5 * 4)::double precision, pct_agg) * total)::bigint
+           - ROUND(approx_percentile_rank($5::double precision, pct_agg) * total)::bigint),
+          0::bigint
+        )                                                                                      AS tolerating_count,
+        GREATEST(
+          (total
+           - ROUND(approx_percentile_rank(($5 * 4)::double precision, pct_agg) * total)::bigint),
+          0::bigint
+        )                                                                                      AS frustrated_count,
+        ROUND((sum_avg_x_total / NULLIF(total, 0))::numeric, 2)                                AS avg_response_time_ms
+      FROM agg
+      WHERE row_count > 0
+        AND total > 0
+        AND ($4::boolean OR failed = 0)
+    `;
+
+    const queryParams: unknown[] = [
+      testRunId,
+      excludeRampUp,
+      transactionName,
+      includeFailedRequests,
+      thresholdMs,
+    ];
+
+    this.logger.debug(
+      `Trying rollup Apdex fast path for test run ${testRunId}, transaction: ${transactionName}, threshold: ${thresholdMs}ms`,
+    );
+
+    const result = await this.manager.query(query, queryParams);
+    if (result.length === 0) {
+      this.logger.debug(
+        `Rollup Apdex fast path miss for ${testRunId}/${transactionName} (no rollup rows or includeFailedRequests=false with failures)`,
+      );
+      return null;
+    }
+
+    const row = result[0];
+    const satisfied = parseInt(row.satisfied_count) || 0;
+    const tolerating = parseInt(row.tolerating_count) || 0;
+    const frustrated = parseInt(row.frustrated_count) || 0;
+    const total = parseInt(row.total_count) || 0;
+    const avgResponseTime = row.avg_response_time_ms !== null && row.avg_response_time_ms !== undefined
+      ? Math.round(parseFloat(row.avg_response_time_ms) * 100) / 100
+      : null;
+
+    const apdexScore = total > 0
+      ? Math.round(((satisfied + tolerating * 0.5) / total) * 1000) / 1000
+      : null;
+
+    this.logger.info(
+      `Apdex (rollup) for ${transactionName}: ${apdexScore?.toFixed(3) || 'N/A'} ` +
+      `(S:${satisfied} T:${tolerating} F:${frustrated} Total:${total} Avg:${avgResponseTime?.toFixed(0) || 'N/A'}ms)`,
     );
 
     return {
