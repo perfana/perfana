@@ -727,8 +727,8 @@ describe('ApdexCalculator', () => {
       const testRun = createTestRun();
       const benchmark = createBenchmark({ transaction_name: null });
 
-      // getTransactionsWithScenarios returns empty
-      mockManager.query.mockResolvedValueOnce([]);
+      // getTransactionsWithScenarios: rollup empty → falls back to legacy → also empty
+      mockManager.query.mockResolvedValueOnce([]).mockResolvedValueOnce([]);
 
       // Act
       const result = await calculator.evaluateApdexBenchmark(testRun, benchmark);
@@ -912,7 +912,8 @@ describe('ApdexCalculator', () => {
       const testRun = createTestRun();
       const benchmark = createBenchmark({ transaction_name: null, apdex_threshold_ms: null });
 
-      mockManager.query.mockResolvedValueOnce([]); // no transactions
+      // rollup empty → falls back to legacy → also empty
+      mockManager.query.mockResolvedValueOnce([]).mockResolvedValueOnce([]);
 
       // Act
       const result = await calculator.evaluateApdexBenchmark(testRun, benchmark);
@@ -928,9 +929,9 @@ describe('ApdexCalculator', () => {
   // ══════════════════════════════════════════════════════════════════════════
 
   describe('getAvailableTransactions', () => {
-    it('should return distinct transaction names for a test run', async () => {
-      // Arrange
-      mockManager.query.mockResolvedValue([
+    it('should read from the test_run_transaction_stats rollup first', async () => {
+      // Arrange — rollup has rows, legacy must not be queried
+      mockManager.query.mockResolvedValueOnce([
         { transaction_name: 'checkout' },
         { transaction_name: 'login' },
         { transaction_name: 'search' },
@@ -941,20 +942,43 @@ describe('ApdexCalculator', () => {
 
       // Assert
       expect(result).toEqual(['checkout', 'login', 'search']);
+      expect(mockManager.query).toHaveBeenCalledTimes(1);
       const [query, params] = mockManager.query.mock.calls[0];
+      expect(query).toContain('FROM test_run_transaction_stats');
+      expect(query).toContain('ramp_up_excluded = false');
       expect(query).toContain('DISTINCT transaction_name');
       expect(params).toEqual(['run-001']);
     });
 
-    it('should return empty array when test run has no transactions', async () => {
+    it('should fall back to the transactions hypertable when rollup is empty', async () => {
+      // Arrange — rollup miss, legacy has rows
+      mockManager.query
+        .mockResolvedValueOnce([])
+        .mockResolvedValueOnce([
+          { transaction_name: 'legacy-tx' },
+        ]);
+
+      // Act
+      const result = await calculator.getAvailableTransactions('run-pre-rollup');
+
+      // Assert
+      expect(result).toEqual(['legacy-tx']);
+      expect(mockManager.query).toHaveBeenCalledTimes(2);
+      const [legacyQuery] = mockManager.query.mock.calls[1];
+      expect(legacyQuery).toContain('FROM transactions');
+      expect(legacyQuery).not.toContain('test_run_transaction_stats');
+    });
+
+    it('should return empty array when both rollup and legacy are empty', async () => {
       // Arrange
-      mockManager.query.mockResolvedValue([]);
+      mockManager.query.mockResolvedValueOnce([]).mockResolvedValueOnce([]);
 
       // Act
       const result = await calculator.getAvailableTransactions('run-empty');
 
       // Assert
       expect(result).toEqual([]);
+      expect(mockManager.query).toHaveBeenCalledTimes(2);
     });
   });
 
@@ -963,9 +987,9 @@ describe('ApdexCalculator', () => {
   // ══════════════════════════════════════════════════════════════════════════
 
   describe('getTransactionsWithScenarios', () => {
-    it('should return transaction names with scenario names', async () => {
-      // Arrange
-      mockManager.query.mockResolvedValue([
+    it('should read from the test_run_transaction_stats rollup first', async () => {
+      // Arrange — rollup has rows; legacy must not be queried
+      mockManager.query.mockResolvedValueOnce([
         { transaction_name: 'login', scenario_name: 'default' },
         { transaction_name: 'checkout', scenario_name: 'scenario-a' },
       ]);
@@ -977,11 +1001,52 @@ describe('ApdexCalculator', () => {
       expect(result).toHaveLength(2);
       expect(result[0]).toEqual({ transaction_name: 'login', scenario_name: 'default' });
       expect(result[1]).toEqual({ transaction_name: 'checkout', scenario_name: 'scenario-a' });
+      expect(mockManager.query).toHaveBeenCalledTimes(1);
+      const [query, params] = mockManager.query.mock.calls[0];
+      expect(query).toContain('FROM test_run_transaction_stats');
+      expect(query).toContain('ramp_up_excluded = false');
+      // The rollup stores scenario_name as '' for NULL; NULLIF maps that back to 'default'.
+      expect(query).toContain("NULLIF(scenario_name, '')");
+      expect(params).toEqual(['run-001']);
     });
 
-    it('should pass test_run_id as the sole query parameter', async () => {
+    it('should fall back to the transactions hypertable when rollup is empty', async () => {
+      // Arrange — rollup miss, legacy returns the transactions
+      mockManager.query
+        .mockResolvedValueOnce([])
+        .mockResolvedValueOnce([
+          { transaction_name: 'legacy-login', scenario_name: 'default' },
+        ]);
+
+      // Act
+      const result = await calculator.getTransactionsWithScenarios('run-pre-rollup');
+
+      // Assert
+      expect(result).toEqual([{ transaction_name: 'legacy-login', scenario_name: 'default' }]);
+      expect(mockManager.query).toHaveBeenCalledTimes(2);
+      const [legacyQuery, legacyParams] = mockManager.query.mock.calls[1];
+      expect(legacyQuery).toContain('FROM transactions');
+      expect(legacyQuery).not.toContain('test_run_transaction_stats');
+      expect(legacyParams).toEqual(['run-pre-rollup']);
+    });
+
+    it('should return empty array when both rollup and legacy are empty', async () => {
       // Arrange
-      mockManager.query.mockResolvedValue([]);
+      mockManager.query.mockResolvedValueOnce([]).mockResolvedValueOnce([]);
+
+      // Act
+      const result = await calculator.getTransactionsWithScenarios('run-empty');
+
+      // Assert
+      expect(result).toEqual([]);
+      expect(mockManager.query).toHaveBeenCalledTimes(2);
+    });
+
+    it('should pass test_run_id as the sole query parameter on the rollup query', async () => {
+      // Arrange — rollup returns one row so legacy is not invoked
+      mockManager.query.mockResolvedValueOnce([
+        { transaction_name: 'tx-1', scenario_name: 'default' },
+      ]);
 
       // Act
       await calculator.getTransactionsWithScenarios('run-42');
@@ -991,9 +1056,9 @@ describe('ApdexCalculator', () => {
       expect(params).toEqual(['run-42']);
     });
 
-    it('should use COALESCE default scenario name from query', async () => {
-      // Arrange — the raw row already has 'default' applied by COALESCE in SQL
-      mockManager.query.mockResolvedValue([
+    it('should pass through the scenario name as returned by SQL (default applied via NULLIF/COALESCE)', async () => {
+      // Arrange — SQL has already mapped '' → 'default' via NULLIF/COALESCE
+      mockManager.query.mockResolvedValueOnce([
         { transaction_name: 'tx-a', scenario_name: 'default' },
       ]);
 

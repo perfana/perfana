@@ -706,11 +706,36 @@ export class ApdexCalculator extends BaseCheckService {
   }
 
   /**
-   * Get all available transactions for a test run with their scenario names
-   * Useful for UI to show available transactions for Apdex SLO configuration
+   * Get all available transactions for a test run.
+   *
+   * Reads `test_run_transaction_stats` (one row per `(test_run × transaction ×
+   * scenario × ramp_up_excluded)` triple) instead of scanning the
+   * `transactions` hypertable. The rollup is keyed by the same triple so a
+   * `SELECT DISTINCT transaction_name … WHERE test_run_id = $1 AND
+   * ramp_up_excluded = false` is an index-only scan on the existing PK
+   * (`O(distinct transactions)` vs the legacy `O(hypertable chunk)` cost).
+   * Filtering on `ramp_up_excluded = false` picks one of the two variants the
+   * rollup pipeline always emits — the unconditional full-window row.
+   *
+   * Falls back to the raw `transactions` scan when the rollup is empty for
+   * this `test_run_id` (rollup pipeline has not run yet, or the run predates
+   * the rollup tables). Same shape #296 / #298 use for the Apdex fast path.
    */
   async getAvailableTransactions(testRunId: string): Promise<string[]> {
-    const result = await this.manager.query(`
+    const rollupResult = await this.manager.query(`
+      SELECT DISTINCT transaction_name
+      FROM test_run_transaction_stats
+      WHERE test_run_id = $1
+        AND ramp_up_excluded = false
+        AND transaction_name IS NOT NULL
+      ORDER BY transaction_name
+    `, [testRunId]) as any;
+
+    if (rollupResult.length > 0) {
+      return rollupResult.map((row: any) => row.transaction_name);
+    }
+
+    const legacyResult = await this.manager.query(`
       SELECT DISTINCT transaction_name
       FROM transactions
       WHERE test_run_id = $1
@@ -718,14 +743,40 @@ export class ApdexCalculator extends BaseCheckService {
       ORDER BY transaction_name
     `, [testRunId]) as any;
 
-    return result.map((row: any) => row.transaction_name);
+    return legacyResult.map((row: any) => row.transaction_name);
   }
 
   /**
-   * Get all available transactions with their scenario names for a test run
+   * Get all available transactions with their scenario names for a test run.
+   *
+   * Same rollup-first / raw-scan fallback as `getAvailableTransactions`. This
+   * is the hot path inside `evaluateWorkloadLevelApdex`, fired once per
+   * workload-level Apdex SLO per test_run.
+   *
+   * The rollup stores `scenario_name` as `''` (empty string) when the source
+   * was NULL — `COALESCE(NULLIF(scenario_name, ''), 'default')` preserves the
+   * legacy caller contract (return `'default'` for the no-scenario case).
    */
   async getTransactionsWithScenarios(testRunId: string): Promise<Array<{ transaction_name: string; scenario_name: string }>> {
-    const result = await this.manager.query(`
+    const rollupResult = await this.manager.query(`
+      SELECT DISTINCT
+        transaction_name,
+        COALESCE(NULLIF(scenario_name, ''), 'default') AS scenario_name
+      FROM test_run_transaction_stats
+      WHERE test_run_id = $1
+        AND ramp_up_excluded = false
+        AND transaction_name IS NOT NULL
+      ORDER BY scenario_name, transaction_name
+    `, [testRunId]) as any;
+
+    if (rollupResult.length > 0) {
+      return rollupResult.map((row: any) => ({
+        transaction_name: row.transaction_name,
+        scenario_name: row.scenario_name,
+      }));
+    }
+
+    const legacyResult = await this.manager.query(`
       SELECT DISTINCT transaction_name, COALESCE(scenario_name, 'default') as scenario_name
       FROM transactions
       WHERE test_run_id = $1
@@ -733,7 +784,7 @@ export class ApdexCalculator extends BaseCheckService {
       ORDER BY scenario_name, transaction_name
     `, [testRunId]) as any;
 
-    return result.map((row: any) => ({
+    return legacyResult.map((row: any) => ({
       transaction_name: row.transaction_name,
       scenario_name: row.scenario_name,
     }));
