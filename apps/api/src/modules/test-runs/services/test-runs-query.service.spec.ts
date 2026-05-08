@@ -598,7 +598,7 @@ describe('TestRunsQueryService', () => {
 
         const result = await service.getTransactionErrors('test-run-001', mockUserId, mockRoles, 'checkout');
 
-        expect(performanceService.getTransactionErrors).toHaveBeenCalledWith('test-run-001', 'checkout', undefined, true, []);
+        expect(performanceService.getTransactionErrors).toHaveBeenCalledWith('test-run-001', 'checkout', undefined, true, [], undefined);
         expect(result).toHaveLength(1);
       });
     });

@@ -352,10 +352,11 @@ export class TestRunsQueryService {
     userId: string,
     roles: string[],
     transactionName?: string,
-    samplerName?: string
+    samplerName?: string,
+    excludeRampUp?: boolean,
   ): Promise<ErrorStats[]> {
     const { orgIds, isAdmin } = await this.resolveOrganizationIds(userId, roles);
-    return this.performanceService.getTransactionErrors(testRunId, transactionName, samplerName, isAdmin, orgIds);
+    return this.performanceService.getTransactionErrors(testRunId, transactionName, samplerName, isAdmin, orgIds, excludeRampUp);
   }
 
   async getVirtualUserStats(

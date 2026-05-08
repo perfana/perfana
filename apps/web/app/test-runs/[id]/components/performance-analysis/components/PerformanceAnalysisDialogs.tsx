@@ -46,6 +46,7 @@ interface PerformanceAnalysisDialogsProps {
   errorsModalOpen: boolean;
   onErrorsModalClose: () => void;
   errorModalConfig: ErrorModalConfig;
+  excludeRampUp: boolean;
 
   // Graph modal
   graphModalOpen: boolean;
@@ -91,6 +92,7 @@ export function PerformanceAnalysisDialogs({
   errorsModalOpen,
   onErrorsModalClose,
   errorModalConfig,
+  excludeRampUp,
   graphModalOpen,
   onGraphModalClose,
   graphModalTransactionName,
@@ -166,6 +168,7 @@ export function PerformanceAnalysisDialogs({
         transactionName={errorModalConfig.transactionName}
         samplerName={errorModalConfig.samplerName}
         title={errorModalConfig.title}
+        excludeRampUp={excludeRampUp}
       />
 
       {/* Graph Modal */}

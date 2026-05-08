@@ -100,6 +100,7 @@ interface ErrorsModalProps {
   transactionName?: string;
   samplerName?: string;
   title?: string;
+  excludeRampUp?: boolean;
 }
 
 export default function ErrorsModal({
@@ -109,6 +110,7 @@ export default function ErrorsModal({
   transactionName,
   samplerName,
   title,
+  excludeRampUp = true,
 }: ErrorsModalProps) {
   const [loading, setLoading] = useState(false);
   const [errors, setErrors] = useState<ErrorGroup[]>([]);
@@ -118,7 +120,7 @@ export default function ErrorsModal({
     if (open && testRunId) {
       fetchErrors();
     }
-  }, [open, testRunId, transactionName, samplerName]);
+  }, [open, testRunId, transactionName, samplerName, excludeRampUp]);
 
   const fetchErrors = async () => {
     setLoading(true);
@@ -128,6 +130,7 @@ export default function ErrorsModal({
       const params = new URLSearchParams();
       if (transactionName) params.append('transactionName', transactionName);
       if (samplerName) params.append('samplerName', samplerName);
+      params.append('excludeRampUp', String(excludeRampUp));
 
       const queryString = params.toString();
       const url = `/test-runs/${testRunId}/errors${queryString ? `?${queryString}` : ''}`;
