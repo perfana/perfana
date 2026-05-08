@@ -251,6 +251,59 @@ describe('TransactionStatsRollupPipeline', () => {
       }
     });
 
+    it('writes a success-filtered pct_agg_passed sketch alongside pct_agg (issue #298)', async () => {
+      // Regression test for #298: each rollup INSERT must populate the
+      // pct_agg_passed column with a tdigest built only over `success = true`
+      // rows, so the Apdex fast path can serve includeFailedRequests=false
+      // benchmarks without bailing back to the legacy scan when the rollup
+      // row carries failures.
+      mockDb.getTestRunByTestRunId.mockResolvedValue(makeTestRun());
+      wireTransaction({ tx: 1, sampler: 1 });
+
+      await pipeline.execute({ testRunId: 'run-001' });
+
+      const inserts = mockManagerQuery.mock.calls
+        .map(([sql]) => sql as string)
+        .filter(s => /INSERT INTO test_run_(transaction|sampler)_stats/i.test(s));
+      expect(inserts.length).toBe(2);
+      for (const sql of inserts) {
+        // The pct_agg_passed column must appear in the INSERT column list and
+        // in the ON CONFLICT DO UPDATE branch.
+        expect(sql).toMatch(/pct_agg_passed/);
+        expect(sql).toMatch(/pct_agg_passed\s*=\s*EXCLUDED\.pct_agg_passed/);
+        // And there must be at least one tdigest(...) FILTER (WHERE ... success)
+        // in the CTE feeding the INSERT.
+        expect(sql).toMatch(/tdigest\s*\([^)]*response_time[^)]*\)\s*FILTER\s*\(\s*WHERE[^)]*success/i);
+      }
+    });
+
+    it('writes a ramp-up-excluded passed sketch in the second UNION row (issue #298)', async () => {
+      // The full-window and ramp-up-excluded variants are emitted in the same
+      // UNION ALL — both must carry their own pct_agg_passed. Otherwise the
+      // Overview-tab fast path (excludeRampUp=true) would always miss when
+      // include_failed_requests=false on a workload with failures.
+      mockDb.getTestRunByTestRunId.mockResolvedValue(makeTestRun());
+      wireTransaction({ tx: 1, sampler: 1 });
+
+      await pipeline.execute({ testRunId: 'run-001' });
+
+      const txInsert = mockManagerQuery.mock.calls
+        .map(([sql]) => sql as string)
+        .find(s => /INSERT INTO test_run_transaction_stats/i.test(s))!;
+      // Two distinct success-filtered tdigest expressions — one bare, one
+      // also gated on `time >= $2` for the ramp-up-excluded variant.
+      const passedFullPattern = /tdigest\s*\([^)]*response_time[^)]*\)\s*FILTER\s*\(\s*WHERE\s+t\.success\s*\)/i;
+      const passedExclPattern = /tdigest\s*\([^)]*response_time[^)]*\)\s*FILTER\s*\(\s*WHERE\s+t\.success\s+AND\s+t\.time\s*>=\s*\$2/i;
+      expect(txInsert).toMatch(passedFullPattern);
+      expect(txInsert).toMatch(passedExclPattern);
+
+      const samplerInsert = mockManagerQuery.mock.calls
+        .map(([sql]) => sql as string)
+        .find(s => /INSERT INTO test_run_sampler_stats/i.test(s))!;
+      expect(samplerInsert).toMatch(/FILTER\s*\(\s*WHERE\s+r\.success\s*\)/i);
+      expect(samplerInsert).toMatch(/FILTER\s*\(\s*WHERE\s+r\.success\s+AND\s+r\.time\s*>=\s*\$2/i);
+    });
+
     it('returns an error result when the database transaction throws', async () => {
       mockDb.getTestRunByTestRunId.mockResolvedValue(makeTestRun());
       mockDb.transaction.mockRejectedValue(new Error('db unavailable'));

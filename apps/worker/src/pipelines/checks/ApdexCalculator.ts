@@ -101,15 +101,19 @@ export class ApdexCalculator extends BaseCheckService {
    * Calculate Apdex score for a specific transaction or entire workload.
    *
    * Fast path: when `transactionName` is set and `test_run_transaction_stats` has
-   * eligible rows for this `(test_run_id, transaction_name, ramp_up_excluded)`
+   * matching rows for this `(test_run_id, transaction_name, ramp_up_excluded)`
    * triple, the score is computed from the rolled-up tdigest sketch via
    * `approx_percentile_rank`. Drops a ~260 K-row hypertable scan to a few rollup
-   * rows. See issue #296.
+   * rows. See issues #296 and #298.
    *
-   * Eligibility: the rollup's `pct_agg` is built over every row (no `success`
-   * filter), so we only fast-path when the success filter would be a no-op —
-   * either `includeFailedRequests=true` or the rollup has zero failures across
-   * the matching rows. Otherwise fall back to the raw `transactions` scan.
+   * Sketch selection (#298): the rollup tables store two sketches per row —
+   * `pct_agg` over every transaction and `pct_agg_passed` over only `success =
+   * true` rows. The fast path picks `pct_agg` when `includeFailedRequests=true`
+   * and `pct_agg_passed` otherwise, so the fast path fires regardless of how
+   * many failures the run produced. Pre-#298 rollups don't have
+   * `pct_agg_passed` populated; in that case the fast path returns a miss and
+   * the caller falls back to the raw `transactions` scan, the same shape #296
+   * used for the original rollout.
    *
    * Workload-level callers (`transactionName === null`, e.g. `previewApdex`)
    * keep the raw-scan path. The hot path in checks-evaluation always passes a
@@ -218,15 +222,26 @@ export class ApdexCalculator extends BaseCheckService {
   }
 
   /**
-   * Rollup-based Apdex fast path. Returns null when the rollup either has no
-   * matching rows or carries failed transactions that the caller wants
-   * filtered out (the sketch is built without a `success` filter, so we can't
-   * subtract failed response_times from it). The caller falls back to the raw
-   * `transactions` scan in that case.
+   * Rollup-based Apdex fast path. Returns null when the rollup has no matching
+   * rows OR (when `includeFailedRequests=false`) any matching row's
+   * `pct_agg_passed` is NULL — i.e. the row predates #298 and has not been
+   * re-rolled-up yet. The caller falls back to the raw `transactions` scan in
+   * either case.
    *
-   * Eligibility filter `($4::boolean OR failed = 0)` keeps the SQL a single
-   * round-trip: rows that fail eligibility produce zero result rows, signalling
-   * "miss" to the caller. See issue #296.
+   * Sketch selection (#298): `rollup(CASE WHEN $4::boolean THEN pct_agg ELSE
+   * pct_agg_passed END)` picks the all-rows sketch when
+   * `includeFailedRequests=true`, the success-only sketch otherwise. This lets
+   * the fast path fire regardless of how many failed rows the run produced —
+   * pre-#298 the eligibility filter `($4::boolean OR failed = 0)` forced a
+   * fall-back to the legacy scan on every soak run with non-trivial failure
+   * rate.
+   *
+   * Score denominator (#298): `total_count` reported from this query is the
+   * effective total for the chosen sketch — `SUM(total_count)` when
+   * including failures (matches the all-rows pct_agg) or `SUM(passed_count)`
+   * when excluding (matches the success-only pct_agg_passed). That mirrors
+   * what the raw query produces with vs without `success = true` and keeps
+   * the JS-side score formula identical to the raw path.
    *
    * Output column names mirror the raw query so the caller's parsing works
    * identically; the JS-side Apdex score formula is the same as the raw path.
@@ -244,37 +259,41 @@ export class ApdexCalculator extends BaseCheckService {
       WITH agg AS (
         SELECT
           COUNT(*)                                                AS row_count,
-          COALESCE(SUM(total_count), 0)::bigint                   AS total,
-          COALESCE(SUM(passed_count), 0)::bigint                  AS passed,
-          COALESCE(SUM(failed_count), 0)::bigint                  AS failed,
+          COALESCE(
+            SUM(CASE WHEN $4::boolean THEN total_count ELSE passed_count END),
+            0
+          )::bigint                                               AS effective_total,
+          COALESCE(SUM(total_count), 0)::bigint                   AS sum_total_count,
+          BOOL_AND(pct_agg_passed IS NOT NULL)                    AS has_passed_sketch,
           SUM(avg_response_time * total_count)::numeric           AS sum_avg_x_total,
-          rollup(pct_agg)                                         AS pct_agg
+          rollup(CASE WHEN $4::boolean THEN pct_agg ELSE pct_agg_passed END)
+                                                                  AS pct_eff
         FROM test_run_transaction_stats
         WHERE test_run_id = $1
           AND ramp_up_excluded = $2
           AND transaction_name = $3
       )
       SELECT
-        total                                                                                  AS total_count,
+        effective_total                                                                        AS total_count,
         GREATEST(
-          ROUND(approx_percentile_rank($5::double precision, pct_agg) * total)::bigint,
+          ROUND(approx_percentile_rank($5::double precision, pct_eff) * effective_total)::bigint,
           0::bigint
         )                                                                                      AS satisfied_count,
         GREATEST(
-          (ROUND(approx_percentile_rank(($5 * 4)::double precision, pct_agg) * total)::bigint
-           - ROUND(approx_percentile_rank($5::double precision, pct_agg) * total)::bigint),
+          (ROUND(approx_percentile_rank(($5 * 4)::double precision, pct_eff) * effective_total)::bigint
+           - ROUND(approx_percentile_rank($5::double precision, pct_eff) * effective_total)::bigint),
           0::bigint
         )                                                                                      AS tolerating_count,
         GREATEST(
-          (total
-           - ROUND(approx_percentile_rank(($5 * 4)::double precision, pct_agg) * total)::bigint),
+          (effective_total
+           - ROUND(approx_percentile_rank(($5 * 4)::double precision, pct_eff) * effective_total)::bigint),
           0::bigint
         )                                                                                      AS frustrated_count,
-        ROUND((sum_avg_x_total / NULLIF(total, 0))::numeric, 2)                                AS avg_response_time_ms
+        ROUND((sum_avg_x_total / NULLIF(sum_total_count, 0))::numeric, 2)                      AS avg_response_time_ms
       FROM agg
       WHERE row_count > 0
-        AND total > 0
-        AND ($4::boolean OR failed = 0)
+        AND effective_total > 0
+        AND ($4::boolean OR has_passed_sketch)
     `;
 
     const queryParams: unknown[] = [
@@ -292,7 +311,7 @@ export class ApdexCalculator extends BaseCheckService {
     const result = await this.manager.query(query, queryParams);
     if (result.length === 0) {
       this.logger.debug(
-        `Rollup Apdex fast path miss for ${testRunId}/${transactionName} (no rollup rows or includeFailedRequests=false with failures)`,
+        `Rollup Apdex fast path miss for ${testRunId}/${transactionName} (no rollup rows, zero matching count, or pct_agg_passed not yet populated)`,
       );
       return null;
     }
