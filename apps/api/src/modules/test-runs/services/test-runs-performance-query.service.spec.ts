@@ -1178,6 +1178,11 @@ describe('TestRunsPerformanceQueryService', () => {
         // ramp_up_excluded must be threaded through so Apdex matches the
         // parent Performance Analysis card.
         expect(call[1]).toContain(true);
+        // tc.active_threshold is referenced outside aggregates inside the
+        // rollup CTE (as the percentile_rank target), so it must appear in
+        // the GROUP BY alongside trss.sampler_name. Without it Postgres
+        // raises 42803 ("must appear in the GROUP BY clause").
+        expect(call[0]).toMatch(/GROUP BY\s+trss\.sampler_name,\s*tc\.active_threshold/);
       });
 
       it('falls back to the requests_raw scan when no sampler rollup exists', async () => {

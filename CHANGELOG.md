@@ -4,6 +4,11 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
+## [0.2.47.82] - 2026-05-08
+
+### Fixed
+- **Errors Overview no longer 500s with `column "tc.active_threshold" must appear in the GROUP BY clause` after the rollup-fast-path landed (#287 follow-up).** PR #287 routed `getTransactionErrors()` through `test_run_sampler_stats` and added a `sampler_stats` CTE that joins `threshold_config` (a one-row CTE holding the per-transaction Apdex threshold) and references `tc.active_threshold` as the first argument to `approx_percentile_rank(...)`. `approx_percentile_rank` is a regular function, not an aggregate — only its second arg, `rollup(trss.pct_agg)`, is the aggregate — so Postgres treats `tc.active_threshold` as an ordinary column reference. Combined with `GROUP BY trss.sampler_name`, that violates the SQL-standard GROUP BY rule and Postgres rejects the query with `42803` (`parse_agg.c:1489`), surfacing as `GET /api/test-runs/:id/errors?transactionName=...&excludeRampUp=true` returning HTTP 500 (`DATABASE_ERROR` via `GlobalExceptionFilter`) on every Errors Overview open against any test run that has a populated `test_run_sampler_stats` rollup. Reproduces on `lab-sut-d-lab-lab-soak-00005` (and any other run that exercised the rollup fast path). The legacy raw-scan branch wraps `tc.active_threshold` inside `SUM(CASE WHEN rr.response_time <= tc.active_threshold ...)`, so it sits inside the aggregate and never tripped the rule — only the new rollup branch was affected. Fixed `apps/api/src/modules/test-runs/services/test-runs-performance-query.service.ts:880` by adding `tc.active_threshold` to the GROUP BY (`GROUP BY trss.sampler_name, tc.active_threshold`). Safe because `threshold_config` is `LIMIT 1` — exactly one row, so the CROSS JOIN doesn't multiply rows and the extra GROUP BY column does not change result cardinality. Added a regression assertion in `test-runs-performance-query.service.spec.ts` (the rollup-CTE shape test now asserts `/GROUP BY\s+trss\.sampler_name,\s*tc\.active_threshold/`) so future drift back to grouping by `sampler_name` alone fails the test before reaching production. Spec suite: 105/105 passing; API typecheck clean.
+
 ## [0.2.47.81] - 2026-05-08
 
 ### Fixed

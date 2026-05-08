@@ -877,7 +877,7 @@ export class TestRunsPerformanceQueryService {
               AND trss.ramp_up_excluded = $${rampUpParamIndex}
               ${transactionFilterRollup}
               ${samplerFilterRollup}
-            GROUP BY trss.sampler_name
+            GROUP BY trss.sampler_name, tc.active_threshold
           )
         `;
       } else {
