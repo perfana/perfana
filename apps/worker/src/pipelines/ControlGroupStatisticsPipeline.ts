@@ -26,7 +26,7 @@ export interface ControlGroupStatisticsInput {
  * Aggregation Methodology
  * ──────────────────────────────────────────────────────────────────────────────
  * Unlike StatisticsPipeline (which computes stats per individual test run), this
- * pipeline pools ALL raw data points from ALL control runs into a single
+ * pipeline pools ALL data points from ALL control runs into a single
  * distribution per metric. This means:
  *
  *   - mean, std_dev, percentiles are computed over the union of all data points
@@ -39,27 +39,53 @@ export interface ControlGroupStatisticsInput {
  * per-run statistics since they describe per-run characteristics.
  *
  * ──────────────────────────────────────────────────────────────────────────────
- * SQL CTE Chain Overview
+ * Fast path vs. legacy raw-scan path (issue #289)
+ * ──────────────────────────────────────────────────────────────────────────────
+ * Until #289, this pipeline pooled `percentile_agg(value)` directly from
+ * `ds_metrics` raw across every control run. On a populated lab DB that's
+ * 100+ s of cold reads per re-evaluate, contending with autovacuum on the
+ * same hypertable chunk.
+ *
+ * `StatisticsPipeline` (Step 6, runs before this Step 9) already builds a
+ * per-run `percentile_agg(value)` sketch for every (test_run, dashboard,
+ * panel, metric) tuple to derive the scalar quantiles in `ds_metric_statistics`.
+ * Since #289 we persist that sketch in the new `pct_agg` column alongside
+ * `sum_value` and `sum_sq_value`, which means the pooled distribution can be
+ * reconstructed via `rollup(pct_agg)` over ~N pre-aggregated rows instead of
+ * ~N × ~70K raw `ds_metrics` rows.
+ *
+ * The fast path is taken whenever every control run already has the sketch
+ * persisted. If any control run was statisticed before #289, `pct_agg` will
+ * be NULL on its rows and we fall back to the legacy raw-scan query.
+ * Re-running `StatisticsPipeline` on those runs backfills the sketch and
+ * graduates them onto the fast path.
+ *
+ * ──────────────────────────────────────────────────────────────────────────────
+ * SQL CTE Chain Overview (fast path)
  * ──────────────────────────────────────────────────────────────────────────────
  *
- *   raw_metrics_aggregated     Pool raw ds_metrics data points from all control
- *        │                     runs → GROUP BY (dashboard, panel, metric).
- *        │                     Compute mean, std_dev, percentile_agg (t-digest).
- *        │                     Done FIRST (before any joins) to avoid a
- *        │                     cartesian explosion between metadata and raw data.
+ *   per_run_pooled             SUM(sum_value), SUM(sum_sq_value), SUM(count),
+ *        │                     MIN(min_value), MAX(max_value),
+ *        │                     rollup(pct_agg) over the per-run rows.
+ *        │                     One row per (dashboard, panel, metric).
+ *        │
+ *   raw_metrics_aggregated     Derive the pooled mean / std_dev exactly from
+ *        │                     the recombined moments (sketches don't preserve
+ *        │                     enough info for STDDEV_POP) and expose the
+ *        │                     pooled sketch as pct_agg. Naming preserved so
+ *        │                     the downstream final_stats CTE is unchanged.
  *        │
  *   control_metrics_metadata   DISTINCT ON per-metric metadata (dashboard_uid,
  *        │                     panel_title, unit, benchmark_id, etc.) from
- *        │                     ds_metric_statistics. Uses the most recent
- *        │                     non-null values via ORDER BY ... NULLS LAST.
+ *        │                     ds_metric_statistics.
  *        │
  *   metadata_aggregated        AVG of per-run counters (last_value, count,
  *        │                     n_missing, n_non_zero, pct_missing) across the
  *        │                     control runs. Collects distinct benchmark_ids.
  *        │
  *   final_stats                JOIN the three CTEs (small: ~N metrics each),
- *        │                     extract approximate percentiles from t-digest,
- *        │                     compute IQR and IDR.
+ *        │                     extract approximate percentiles from the pooled
+ *        │                     sketch, compute IQR and IDR.
  *        ▼
  *   INSERT INTO ds_control_group_statistics  (UPSERT on conflict)
  *
@@ -217,9 +243,93 @@ export class ControlGroupStatisticsPipeline extends BasePipelineTypeORM {
     }
 
 
-    // Calculate statistics using TimescaleDB aggregations on raw metrics data
-    // OPTIMIZED: Aggregate raw metrics FIRST, then join metadata to avoid cartesian explosion
-    const statisticsQuery = `
+    // Decide which path to use: the fast `rollup(pct_agg)` path requires every
+    // control run's `ds_metric_statistics` rows to carry the sketch persisted
+    // by migration 1778900000000. Any NULL `pct_agg` means the row was written
+    // before #289 — fall back to the legacy raw-scan query so we still produce
+    // correct baseline stats. Re-running StatisticsPipeline on those runs
+    // backfills the sketch and graduates them onto the fast path.
+    const sketchAvailabilityQuery = `
+      SELECT COUNT(*) FILTER (WHERE pct_agg IS NULL)::int AS missing_sketches
+      FROM ds_metric_statistics
+      WHERE test_run_id = ANY($1::varchar[])
+    `;
+    const sketchAvailability = await manager.query(sketchAvailabilityQuery, [controlGroup.test_runs]);
+    const missingSketches = parseInt(sketchAvailability[0]?.missing_sketches ?? '0', 10);
+    const useFastPath = missingSketches === 0;
+
+    if (useFastPath) {
+      this.logger.info(`⚡ Fast path: pooling ${totalMetricStats} per-run sketches via rollup(pct_agg)`);
+    } else {
+      this.logger.warn(`🐢 Legacy path: ${missingSketches} ds_metric_statistics rows missing pct_agg — re-run StatisticsPipeline on the control runs to enable the fast path (#289)`);
+    }
+
+    // Fast path — pool persisted per-run sketches with `rollup(pct_agg)` and
+    // recombine population mean / std_dev exactly from sum / sum_sq / count.
+    // ~10 control runs × ~795 metric rows ≈ 8 K rows scanned, vs. ~10 × ~70 K
+    // raw `ds_metrics` rows × ~50 metrics on the legacy path.
+    const fastPathLeadingCtes = `
+      WITH per_run_pooled AS (
+        SELECT
+          ms.application_dashboard_id,
+          ms.panel_id,
+          ms.metric_name,
+          SUM(ms.sum_value)                        AS pooled_sum,
+          SUM(ms.sum_sq_value)                     AS pooled_sum_sq,
+          SUM(ms.count)                            AS pooled_count,
+          MIN(ms.min_value)                        AS pooled_min,
+          MAX(ms.max_value)                        AS pooled_max,
+          rollup(ms.pct_agg)                       AS pct_agg
+        FROM ds_metric_statistics ms
+        INNER JOIN test_runs tr ON ms.test_run_id = tr.test_run_id
+        WHERE ms.test_run_id = ANY($2::varchar[])
+          AND ms.pct_agg IS NOT NULL
+          AND (
+            ms.application_dashboard_id IN (
+              SELECT id FROM application_dashboards ad
+              WHERE ad.organization_id = tr.organization_id OR ad.organization_id IS NULL
+            )
+            OR ms.application_dashboard_id IN (
+              SELECT DISTINCT application_dashboard_id FROM dynatrace_queries dq
+              WHERE dq.organization_id = tr.organization_id OR dq.organization_id IS NULL
+            )
+          )
+        GROUP BY ms.application_dashboard_id, ms.panel_id, ms.metric_name
+      ),
+
+      raw_metrics_aggregated AS (
+        SELECT
+          application_dashboard_id,
+          panel_id,
+          metric_name,
+          CASE WHEN pooled_count > 0
+               THEN pooled_sum / pooled_count
+          END AS mean,
+          pooled_min AS min_value,
+          pooled_max AS max_value,
+          CASE WHEN pooled_count > 0
+               THEN sqrt(GREATEST(
+                 pooled_sum_sq / pooled_count - power(pooled_sum / pooled_count, 2),
+                 0
+               ))
+               ELSE 0
+          END AS std_dev,
+          pct_agg,
+          (
+            pooled_count > 0
+            AND sqrt(GREATEST(
+              pooled_sum_sq / pooled_count - power(pooled_sum / pooled_count, 2),
+              0
+            )) < 0.0001
+          ) AS is_constant,
+          (pooled_count = 0) AS all_missing
+        FROM per_run_pooled
+      )
+    `;
+
+    // Legacy path — kept verbatim for backfill correctness when any control
+    // run is missing the persisted per-run sketch.
+    const legacyLeadingCtes = `
       WITH raw_metrics_aggregated AS (
         -- Pool ALL raw data points from ALL control runs into a single
         -- distribution per metric. This is fundamentally different from
@@ -233,7 +343,7 @@ export class ControlGroupStatisticsPipeline extends BasePipelineTypeORM {
           MIN(m.value) as min_value,
           MAX(m.value) as max_value,
           STDDEV_POP(m.value) as std_dev,         -- Population std dev (not sample)
-          percentile_agg(m.value) as pct_agg,     -- t-digest sketch for percentile extraction
+          percentile_agg(m.value) as pct_agg,     -- uddsketch for percentile extraction
           (STDDEV_POP(m.value) < 0.0001) as is_constant,  -- Near-zero variance → constant metric
           (COUNT(m.value) = 0) as all_missing
         FROM ds_metrics m
@@ -251,9 +361,11 @@ export class ControlGroupStatisticsPipeline extends BasePipelineTypeORM {
             )
           )
         GROUP BY m.application_dashboard_id, m.panel_id, m.metric_name
-      ),
+      )
+    `;
 
-      control_metrics_metadata AS (
+    const sharedTailCtes = `
+      , control_metrics_metadata AS (
         -- Pick ONE metadata row per metric across all control runs.
         -- DISTINCT ON with ORDER BY ... NULLS LAST ensures we prefer the row
         -- with the most complete metadata (non-null dashboard_uid, metrics_source_id).
@@ -471,6 +583,8 @@ export class ControlGroupStatisticsPipeline extends BasePipelineTypeORM {
         team_id = EXCLUDED.team_id,
         updated_by = EXCLUDED.updated_by
     `;
+
+    const statisticsQuery = (useFastPath ? fastPathLeadingCtes : legacyLeadingCtes) + sharedTailCtes;
 
     this.logger.info(`🚀 Executing control group statistics aggregation INSERT...`);
 
