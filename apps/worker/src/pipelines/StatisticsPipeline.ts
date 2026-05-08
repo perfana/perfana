@@ -235,8 +235,18 @@ export class StatisticsPipeline extends BasePipelineTypeORM {
               MAX(value) as max_value,
               STDDEV_POP(value) as std_dev,
 
-              -- TimescaleDB percentile_agg builds a t-digest sketch in O(n).
-              -- All percentile extractions in final_statistics share this single sketch.
+              -- Persisted alongside pct_agg so ControlGroupStatisticsPipeline can
+              -- recombine pooled population mean and std_dev exactly across
+              -- per-run rows without rescanning ds_metrics (issue #289).
+              -- Sketches don't preserve enough info to recover STDDEV_POP across
+              -- the pooled distribution, so we keep the two raw moments.
+              SUM(value::double precision) as sum_value,
+              SUM((value::double precision) * (value::double precision)) as sum_sq_value,
+
+              -- TimescaleDB percentile_agg builds a uddsketch sketch in O(n).
+              -- Stored on ds_metric_statistics so ControlGroupStatisticsPipeline
+              -- can pool across control runs via rollup(pct_agg) (issue #289)
+              -- instead of re-scanning ds_metrics for every re-evaluate.
               percentile_agg(value) as pct_agg,
 
               -- Track max timestamp so the LATERAL join in final_statistics can
@@ -289,6 +299,9 @@ export class StatisticsPipeline extends BasePipelineTypeORM {
 
               sa.count,
               sa.mean,
+              sa.sum_value,
+              sa.sum_sq_value,
+              sa.pct_agg,
               -- Extract percentiles from single-pass aggregation
               approx_percentile(0.50, sa.pct_agg) as median,
               sa.min_value,
@@ -402,7 +415,10 @@ export class StatisticsPipeline extends BasePipelineTypeORM {
           team_id,
           created_by,
           updated_by,
-          metrics_source_id
+          metrics_source_id,
+          pct_agg,
+          sum_value,
+          sum_sq_value
       )
       SELECT
           test_run_id,
@@ -443,7 +459,10 @@ export class StatisticsPipeline extends BasePipelineTypeORM {
           team_id,
           created_by,
           updated_by,
-          metrics_source_id
+          metrics_source_id,
+          pct_agg,
+          sum_value,
+          sum_sq_value
       FROM final_statistics
     `;
 
