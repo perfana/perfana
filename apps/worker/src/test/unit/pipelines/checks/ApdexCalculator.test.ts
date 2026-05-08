@@ -1156,4 +1156,221 @@ describe('ApdexCalculator', () => {
       expect(params).toContain(1000);
     });
   });
+
+  // ══════════════════════════════════════════════════════════════════════════
+  // calculateApdex — rollup fast path (test_run_transaction_stats)
+  // See issue #296.
+  // ══════════════════════════════════════════════════════════════════════════
+
+  describe('calculateApdex — rollup fast path', () => {
+    /**
+     * Build a row as returned by the rollup fast-path query. Same column names
+     * as the raw query so the calculator parses them identically — that's
+     * intentional, see calculateApdexFromRollup() in ApdexCalculator.ts.
+     */
+    const makeRollupRow = (satisfied: number, tolerating: number, frustrated: number, avg: number | null = null) => ({
+      satisfied_count: String(satisfied),
+      tolerating_count: String(tolerating),
+      frustrated_count: String(frustrated),
+      total_count: String(satisfied + tolerating + frustrated),
+      avg_response_time_ms: avg !== null ? String(avg) : null,
+    });
+
+    it('should hit fast path when transactionName is set and rollup returns a row', async () => {
+      // Arrange
+      const testRun = createTestRun();
+      mockManager.query.mockResolvedValueOnce([makeRollupRow(900, 50, 50, 200)]);
+
+      // Act
+      const result = await calculator.calculateApdex({
+        testRun,
+        transactionName: 'checkout',
+        thresholdMs: 500,
+        includeFailedRequests: false,
+        excludeRampUp: true,
+      });
+
+      // Assert — single DB call (no fall-back), values flow through unchanged
+      expect(mockManager.query).toHaveBeenCalledTimes(1);
+      const [sql, params] = mockManager.query.mock.calls[0];
+      expect(sql).toContain('test_run_transaction_stats');
+      expect(sql).toContain('rollup(pct_agg)');
+      expect(sql).toContain('approx_percentile_rank');
+      // Param layout: [testRunId, excludeRampUp, transactionName, includeFailedRequests, thresholdMs]
+      expect(params).toEqual(['run-001', true, 'checkout', false, 500]);
+      // Score: (900 + 25) / 1000 = 0.925
+      expect(result.apdex_score).toBe(0.925);
+      expect(result.satisfied_count).toBe(900);
+      expect(result.tolerating_count).toBe(50);
+      expect(result.frustrated_count).toBe(50);
+      expect(result.total_count).toBe(1000);
+      expect(result.transaction_name).toBe('checkout');
+      expect(result.threshold_ms).toBe(500);
+      expect(result.avg_response_time_ms).toBe(200);
+    });
+
+    it('should fall back to raw scan when fast path returns no rows (rollup empty)', async () => {
+      // Arrange
+      const testRun = createTestRun();
+      mockManager.query
+        .mockResolvedValueOnce([])                                   // fast-path miss
+        .mockResolvedValueOnce([makeApdexRow(80, 10, 10, 300)]);     // raw fallback
+
+      // Act
+      const result = await calculator.calculateApdex({
+        testRun,
+        transactionName: 'checkout',
+        thresholdMs: 500,
+        includeFailedRequests: false,
+        excludeRampUp: false,
+      });
+
+      // Assert — two DB calls: rollup miss, then raw scan
+      expect(mockManager.query).toHaveBeenCalledTimes(2);
+      const [rollupSql] = mockManager.query.mock.calls[0];
+      const [rawSql] = mockManager.query.mock.calls[1];
+      expect(rollupSql).toContain('test_run_transaction_stats');
+      expect(rawSql).toContain('FROM transactions');
+      expect(result.satisfied_count).toBe(80);
+      expect(result.total_count).toBe(100);
+    });
+
+    it('should skip fast path entirely when transactionName is null (workload-level)', async () => {
+      // Arrange — only the raw-scan path should be invoked
+      const testRun = createTestRun();
+      mockManager.query.mockResolvedValueOnce([makeApdexRow(50, 30, 20, 400)]);
+
+      // Act
+      await calculator.calculateApdex({
+        testRun,
+        transactionName: null,
+        thresholdMs: 500,
+        includeFailedRequests: false,
+        excludeRampUp: false,
+      });
+
+      // Assert — single DB call straight to raw scan, no rollup probe
+      expect(mockManager.query).toHaveBeenCalledTimes(1);
+      const [sql] = mockManager.query.mock.calls[0];
+      expect(sql).toContain('FROM transactions');
+      expect(sql).not.toContain('test_run_transaction_stats');
+    });
+
+    it('should pass excludeRampUp through as the ramp_up_excluded filter', async () => {
+      // Arrange
+      const testRun = createTestRun();
+      mockManager.query.mockResolvedValueOnce([makeRollupRow(95, 5, 0, 250)]);
+
+      // Act
+      await calculator.calculateApdex({
+        testRun,
+        transactionName: 'login',
+        thresholdMs: 500,
+        includeFailedRequests: false,
+        excludeRampUp: true,
+      });
+
+      // Assert
+      const [sql, params] = mockManager.query.mock.calls[0];
+      expect(sql).toContain('ramp_up_excluded = $2');
+      expect(params[1]).toBe(true);
+    });
+
+    it('should propagate includeFailedRequests as the eligibility flag', async () => {
+      // Arrange — when includeFailedRequests=true, the SQL gates with $4::boolean,
+      // letting rows with failed > 0 pass through the rollup
+      const testRun = createTestRun();
+      mockManager.query.mockResolvedValueOnce([makeRollupRow(100, 0, 0, 200)]);
+
+      // Act
+      await calculator.calculateApdex({
+        testRun,
+        transactionName: 'tx',
+        thresholdMs: 500,
+        includeFailedRequests: true,
+        excludeRampUp: false,
+      });
+
+      // Assert
+      const [sql, params] = mockManager.query.mock.calls[0];
+      expect(sql).toContain('$4::boolean');
+      expect(params[3]).toBe(true);
+    });
+
+    it('should pass thresholdMs as the rank parameter (no separate 4x param)', async () => {
+      // Arrange — rollup SQL computes 4 * threshold inline, so only one threshold param
+      const testRun = createTestRun();
+      mockManager.query.mockResolvedValueOnce([makeRollupRow(80, 10, 10, 250)]);
+
+      // Act
+      await calculator.calculateApdex({
+        testRun,
+        transactionName: 'tx',
+        thresholdMs: 750,
+        includeFailedRequests: false,
+        excludeRampUp: false,
+      });
+
+      // Assert
+      const [sql, params] = mockManager.query.mock.calls[0];
+      expect(sql).toContain('approx_percentile_rank($5');
+      expect(sql).toContain('($5 * 4)');
+      expect(params[4]).toBe(750);
+    });
+
+    it('should round avg_response_time_ms to 2 decimal places', async () => {
+      // Arrange — rollup SQL rounds at SQL level; JS does another round to 2dp on output
+      const testRun = createTestRun();
+      mockManager.query.mockResolvedValueOnce([makeRollupRow(50, 30, 20, 123.456789)]);
+
+      // Act
+      const result = await calculator.calculateApdex({
+        testRun,
+        transactionName: 'tx',
+        thresholdMs: 500,
+        includeFailedRequests: false,
+        excludeRampUp: false,
+      });
+
+      // Assert
+      expect(result.avg_response_time_ms).toBe(123.46);
+    });
+
+    it('should return null avg when rollup returns null avg_response_time_ms', async () => {
+      // Arrange
+      const testRun = createTestRun();
+      mockManager.query.mockResolvedValueOnce([makeRollupRow(80, 10, 10, null)]);
+
+      // Act
+      const result = await calculator.calculateApdex({
+        testRun,
+        transactionName: 'tx',
+        thresholdMs: 500,
+        includeFailedRequests: false,
+        excludeRampUp: false,
+      });
+
+      // Assert
+      expect(result.avg_response_time_ms).toBeNull();
+    });
+
+    it('should produce score equivalent to raw query for the same distribution', async () => {
+      // Arrange — rollup row matches what the raw query would produce on the same fixture
+      const testRun = createTestRun();
+      mockManager.query.mockResolvedValueOnce([makeRollupRow(60, 30, 10, 800)]);
+
+      // Act
+      const result = await calculator.calculateApdex({
+        testRun,
+        transactionName: 'tx',
+        thresholdMs: 500,
+        includeFailedRequests: false,
+        excludeRampUp: false,
+      });
+
+      // Assert — (60 + 15) / 100 = 0.75, same formula as the raw path
+      expect(result.apdex_score).toBe(0.75);
+      expect(result.total_count).toBe(100);
+    });
+  });
 });
