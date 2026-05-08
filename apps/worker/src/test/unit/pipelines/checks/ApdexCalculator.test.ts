@@ -1194,7 +1194,9 @@ describe('ApdexCalculator', () => {
       expect(mockManager.query).toHaveBeenCalledTimes(1);
       const [sql, params] = mockManager.query.mock.calls[0];
       expect(sql).toContain('test_run_transaction_stats');
-      expect(sql).toContain('rollup(pct_agg)');
+      // After #298 the sketch is selected per-call from pct_agg vs pct_agg_passed
+      // — `rollup(CASE WHEN $4::boolean THEN pct_agg ELSE pct_agg_passed END)`.
+      expect(sql).toMatch(/rollup\s*\(\s*CASE\s+WHEN\s+\$4::boolean\s+THEN\s+pct_agg\s+ELSE\s+pct_agg_passed\s+END\s*\)/i);
       expect(sql).toContain('approx_percentile_rank');
       // Param layout: [testRunId, excludeRampUp, transactionName, includeFailedRequests, thresholdMs]
       expect(params).toEqual(['run-001', true, 'checkout', false, 500]);
@@ -1276,9 +1278,10 @@ describe('ApdexCalculator', () => {
       expect(params[1]).toBe(true);
     });
 
-    it('should propagate includeFailedRequests as the eligibility flag', async () => {
-      // Arrange — when includeFailedRequests=true, the SQL gates with $4::boolean,
-      // letting rows with failed > 0 pass through the rollup
+    it('should propagate includeFailedRequests as the sketch-selection flag', async () => {
+      // Arrange — after #298 the SQL uses $4::boolean to switch between
+      // pct_agg (all rows) and pct_agg_passed (success-only) instead of
+      // gating eligibility on failed_count.
       const testRun = createTestRun();
       mockManager.query.mockResolvedValueOnce([makeRollupRow(100, 0, 0, 200)]);
 
@@ -1294,7 +1297,85 @@ describe('ApdexCalculator', () => {
       // Assert
       const [sql, params] = mockManager.query.mock.calls[0];
       expect(sql).toContain('$4::boolean');
+      // The eligibility filter `($4::boolean OR failed = 0)` from #296 is gone.
+      expect(sql).not.toMatch(/failed\s*=\s*0/i);
       expect(params[3]).toBe(true);
+    });
+
+    it('still fires fast path when rollup row has failed_count > 0 and includeFailedRequests=false (issue #298)', async () => {
+      // Arrange — the canonical #298 regression. Before the fix, the SQL
+      // bailed out when any matching row had failed_count > 0 with
+      // includeFailedRequests=false, falling back to the legacy
+      // `FROM transactions` scan. After #298 the success-only sketch
+      // (pct_agg_passed) makes the fast path serve this case directly.
+      const testRun = createTestRun();
+      // Single rollup row returned — fast path served, no fall-back.
+      mockManager.query.mockResolvedValueOnce([makeRollupRow(700, 100, 200, 350)]);
+
+      // Act
+      const result = await calculator.calculateApdex({
+        testRun,
+        transactionName: 'soak-tx',
+        thresholdMs: 500,
+        includeFailedRequests: false,
+        excludeRampUp: true,
+      });
+
+      // Assert — exactly one DB round-trip, score returned from rollup
+      expect(mockManager.query).toHaveBeenCalledTimes(1);
+      // (700 + 50) / 1000 = 0.75
+      expect(result.apdex_score).toBe(0.75);
+      expect(result.total_count).toBe(1000);
+    });
+
+    it('falls back to raw scan when pct_agg_passed is missing (legacy rollup) and includeFailedRequests=false', async () => {
+      // Arrange — pre-#298 rollup rows have NULL pct_agg_passed; the SQL
+      // gates `($4::boolean OR has_passed_sketch)`, so the fast path returns
+      // zero rows for the success-only branch and the caller falls back.
+      const testRun = createTestRun();
+      mockManager.query
+        .mockResolvedValueOnce([])                                 // fast-path miss (NULL pct_agg_passed)
+        .mockResolvedValueOnce([makeApdexRow(80, 10, 10, 300)]);   // raw fallback
+
+      // Act
+      const result = await calculator.calculateApdex({
+        testRun,
+        transactionName: 'tx',
+        thresholdMs: 500,
+        includeFailedRequests: false,
+        excludeRampUp: false,
+      });
+
+      // Assert — two DB calls: rollup miss, then raw scan
+      expect(mockManager.query).toHaveBeenCalledTimes(2);
+      const [rollupSql] = mockManager.query.mock.calls[0];
+      const [rawSql] = mockManager.query.mock.calls[1];
+      expect(rollupSql).toContain('test_run_transaction_stats');
+      expect(rollupSql).toMatch(/has_passed_sketch|pct_agg_passed/i);
+      expect(rawSql).toContain('FROM transactions');
+      expect(result.satisfied_count).toBe(80);
+    });
+
+    it('uses BOOL_AND(pct_agg_passed IS NOT NULL) as the legacy-rollup gate (issue #298)', async () => {
+      // The fast path can only serve includeFailedRequests=false when *every*
+      // matching rollup row has pct_agg_passed populated. A partially
+      // backfilled set (some rows pre-#298) must miss and fall back, so
+      // partial sketches don't produce a score over an inconsistent universe.
+      const testRun = createTestRun();
+      mockManager.query.mockResolvedValueOnce([makeRollupRow(100, 0, 0, 200)]);
+
+      // Act
+      await calculator.calculateApdex({
+        testRun,
+        transactionName: 'tx',
+        thresholdMs: 500,
+        includeFailedRequests: false,
+        excludeRampUp: false,
+      });
+
+      // Assert
+      const [sql] = mockManager.query.mock.calls[0];
+      expect(sql).toMatch(/BOOL_AND\s*\(\s*pct_agg_passed\s+IS\s+NOT\s+NULL\s*\)/i);
     });
 
     it('should pass thresholdMs as the rank parameter (no separate 4x param)', async () => {

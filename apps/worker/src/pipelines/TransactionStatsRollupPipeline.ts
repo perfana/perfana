@@ -241,6 +241,12 @@ const TRANSACTION_ROLLUP_SQL = `
       -- tdigest(size, value) (NOT percentile_agg, NOT single-arg tdigest) --
       -- target column is tdigest; see #278.
       tdigest(100, t.response_time::double precision)                      AS pct_full,
+      -- Success-only sketch (#298) -- built in the same single pass via
+      -- FILTER. Lets the Apdex fast path serve include_failed_requests=false
+      -- benchmarks even when the rollup row has failures, instead of bailing
+      -- out to the legacy raw transactions scan.
+      tdigest(100, t.response_time::double precision)
+        FILTER (WHERE t.success)                                           AS pct_passed_full,
       COUNT(*) FILTER (WHERE t.time >= $2)                                 AS total_excl,
       COUNT(*) FILTER (WHERE t.success     AND t.time >= $2)               AS passed_excl,
       COUNT(*) FILTER (WHERE NOT t.success AND t.time >= $2)               AS failed_excl,
@@ -249,7 +255,9 @@ const TRANSACTION_ROLLUP_SQL = `
         AVG(t.response_time) FILTER (WHERE t.time >= $2) *
         COUNT(*)             FILTER (WHERE t.time >= $2)
       )::numeric, 2)                                                       AS impact_excl,
-      tdigest(100, t.response_time::double precision) FILTER (WHERE t.time >= $2) AS pct_excl
+      tdigest(100, t.response_time::double precision) FILTER (WHERE t.time >= $2) AS pct_excl,
+      tdigest(100, t.response_time::double precision)
+        FILTER (WHERE t.success AND t.time >= $2)                          AS pct_passed_excl
     FROM transactions t
     JOIN test_runs tr ON tr.test_run_id = t.test_run_id
     WHERE t.test_run_id = $1
@@ -261,18 +269,18 @@ const TRANSACTION_ROLLUP_SQL = `
     test_run_id, transaction_name, scenario_name, ramp_up_excluded,
     system_under_test_id, test_environment, workload,
     total_count, passed_count, failed_count,
-    avg_response_time, impact_score, pct_agg
+    avg_response_time, impact_score, pct_agg, pct_agg_passed
   )
   SELECT
     test_run_id, transaction_name, scenario_name, false,
     system_under_test_id, test_environment, workload,
-    total_full, passed_full, failed_full, avg_full, impact_full, pct_full
+    total_full, passed_full, failed_full, avg_full, impact_full, pct_full, pct_passed_full
   FROM base
   UNION ALL
   SELECT
     test_run_id, transaction_name, scenario_name, true,
     system_under_test_id, test_environment, workload,
-    total_excl, passed_excl, failed_excl, avg_excl, impact_excl, pct_excl
+    total_excl, passed_excl, failed_excl, avg_excl, impact_excl, pct_excl, pct_passed_excl
   FROM base
   WHERE total_excl > 0
   ON CONFLICT (test_run_id, transaction_name, scenario_name, ramp_up_excluded)
@@ -286,6 +294,7 @@ const TRANSACTION_ROLLUP_SQL = `
     avg_response_time    = EXCLUDED.avg_response_time,
     impact_score         = EXCLUDED.impact_score,
     pct_agg              = EXCLUDED.pct_agg,
+    pct_agg_passed       = EXCLUDED.pct_agg_passed,
     computed_at          = now()
 `;
 
@@ -322,6 +331,12 @@ const SAMPLER_ROLLUP_SQL = `
       -- tdigest(size, value) (NOT percentile_agg, NOT single-arg tdigest) --
       -- target column is tdigest; see #278.
       tdigest(100, r.response_time::double precision)                           AS pct_full,
+      -- Success-only sketch (#298) -- same single-pass FILTER pattern as the
+      -- transaction rollup above. The Errors Overview consumer (issue #287's
+      -- getTransactionSamplesFromRollup) computes per-sampler Apdex via
+      -- approx_percentile_rank; storing the success-only sketch lets that
+      -- consumer ignore failed-row response_times when SLO config requires.
+      tdigest(100, r.response_time::double precision) FILTER (WHERE r.success)  AS pct_passed_full,
       COUNT(*) FILTER (WHERE r.time >= $2)                                      AS total_excl,
       SUM(CASE WHEN r.success THEN 1 ELSE 0 END)
         FILTER (WHERE r.time >= $2)                                             AS passed_excl,
@@ -334,7 +349,9 @@ const SAMPLER_ROLLUP_SQL = `
       ROUND((AVG(r.response_connect_time) FILTER (WHERE r.time >= $2))::numeric, 2) AS conn_excl,
       SUM(r.request_size)  FILTER (WHERE r.time >= $2)                          AS req_size_excl,
       SUM(r.response_size) FILTER (WHERE r.time >= $2)                          AS resp_size_excl,
-      tdigest(100, r.response_time::double precision) FILTER (WHERE r.time >= $2) AS pct_excl
+      tdigest(100, r.response_time::double precision) FILTER (WHERE r.time >= $2) AS pct_excl,
+      tdigest(100, r.response_time::double precision)
+        FILTER (WHERE r.success AND r.time >= $2)                               AS pct_passed_excl
     FROM requests_raw r
     WHERE r.test_run_id = $1
       AND r.transaction_name IS NOT NULL
@@ -348,7 +365,7 @@ const SAMPLER_ROLLUP_SQL = `
     total_count, passed_count, failed_count,
     avg_response_time, min_response_time, max_response_time,
     avg_latency, avg_connect_time,
-    total_request_size, total_response_size, pct_agg
+    total_request_size, total_response_size, pct_agg, pct_agg_passed
   )
   SELECT
     test_run_id, transaction_name, sampler_name, scenario_name, false,
@@ -356,7 +373,7 @@ const SAMPLER_ROLLUP_SQL = `
     total_full, passed_full, failed_full,
     avg_full, min_full, max_full,
     lat_full, conn_full,
-    req_size_full, resp_size_full, pct_full
+    req_size_full, resp_size_full, pct_full, pct_passed_full
   FROM base
   UNION ALL
   SELECT
@@ -365,7 +382,7 @@ const SAMPLER_ROLLUP_SQL = `
     total_excl, passed_excl, failed_excl,
     avg_excl, min_excl, max_excl,
     lat_excl, conn_excl,
-    req_size_excl, resp_size_excl, pct_excl
+    req_size_excl, resp_size_excl, pct_excl, pct_passed_excl
   FROM base
   WHERE total_excl > 0
   ON CONFLICT (test_run_id, transaction_name, sampler_name, scenario_name, ramp_up_excluded)
@@ -384,5 +401,6 @@ const SAMPLER_ROLLUP_SQL = `
     total_request_size   = EXCLUDED.total_request_size,
     total_response_size  = EXCLUDED.total_response_size,
     pct_agg              = EXCLUDED.pct_agg,
+    pct_agg_passed       = EXCLUDED.pct_agg_passed,
     computed_at          = now()
 `;
