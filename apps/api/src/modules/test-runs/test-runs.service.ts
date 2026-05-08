@@ -207,7 +207,7 @@ export class TestRunsService {
     return this.queryService.getTransactionSamples(testRunId, transactionName, userId, roles, excludeRampUp, sinceMinutes);
   }
 
-  async getTransactionErrors(testRunId: string, userId: string, roles: string[], transactionName?: string, samplerName?: string): Promise<Array<{
+  async getTransactionErrors(testRunId: string, userId: string, roles: string[], transactionName?: string, samplerName?: string, excludeRampUp?: boolean): Promise<Array<{
     error_type: string;
     response_code: string;
     response_message: string;
@@ -218,7 +218,7 @@ export class TestRunsService {
     last_occurrence: string;
     sample_response_data: string;
   }>> {
-    return this.queryService.getTransactionErrors(testRunId, userId, roles, transactionName, samplerName);
+    return this.queryService.getTransactionErrors(testRunId, userId, roles, transactionName, samplerName, excludeRampUp);
   }
 
   async getTransactionTimeSeries(testRunId: string, transactionName: string, userId: string, roles: string[], aggregationSeconds: number = 5, excludeRampUp: boolean = false) {

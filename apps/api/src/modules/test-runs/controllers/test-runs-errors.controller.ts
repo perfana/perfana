@@ -24,6 +24,7 @@ export class TestRunsErrorsController {
   @ApiParam({ name: 'testRunId', description: 'Test run ID', type: String })
   @ApiQuery({ name: 'transactionName', required: false, description: 'Filter errors by transaction name', type: String })
   @ApiQuery({ name: 'samplerName', required: false, description: 'Filter errors by sampler name', type: String })
+  @ApiQuery({ name: 'excludeRampUp', required: false, description: 'Exclude ramp-up period when computing per-sampler Apdex (defaults to true to match the parent Performance Analysis card)', type: Boolean })
   @ApiResponse({
     status: 200,
     description: 'Grouped error statistics retrieved successfully',
@@ -55,8 +56,12 @@ export class TestRunsErrorsController {
     @UserCtx() ctx: UserContext,
     @Query('transactionName') transactionName?: string,
     @Query('samplerName') samplerName?: string,
+    @Query('excludeRampUp') excludeRampUp?: string,
   ) {
-    return this.testRunsService.getTransactionErrors(testRunId, ctx.userId, ctx.roles, transactionName, samplerName);
+    // Default to true to match the parent Performance Analysis card. Only an
+    // explicit "false" disables ramp-up exclusion in the per-sampler Apdex.
+    const excludeRampUpFlag = excludeRampUp === 'false' ? false : true;
+    return this.testRunsService.getTransactionErrors(testRunId, ctx.userId, ctx.roles, transactionName, samplerName, excludeRampUpFlag);
   }
 
   // Error Analysis Endpoints

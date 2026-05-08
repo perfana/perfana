@@ -1065,13 +1065,29 @@ describe('TestRunsPerformanceQueryService', () => {
       });
     });
 
+    /**
+     * #287 routes the errors query through `hasAnySamplerRollup()` first, which
+     * runs a `SELECT 1 FROM test_run_sampler_stats … LIMIT 1` existence check.
+     * Tests that inspect the *main* query need to skip the existence-check call.
+     */
+    function getMainErrorsCall() {
+      const calls = (testRunRepo.query as jest.Mock).mock.calls;
+      const main = calls.find(
+        (c) => typeof c[0] === 'string' && /WITH threshold_config AS/i.test(c[0]),
+      );
+      if (!main) {
+        throw new Error('Main errors query was not issued');
+      }
+      return main;
+    }
+
     describe('optional filters', () => {
       it('builds query without transaction or sampler filter', async () => {
         mockQuerySequence([RAW_ERROR_ROW]);
 
         await service.getTransactionErrors(TEST_RUN_ID, undefined, undefined, IS_ADMIN, []);
 
-        const call = (testRunRepo.query as jest.Mock).mock.calls[0];
+        const call = getMainErrorsCall();
         // Params should only contain testRunId (no extra filters)
         expect(call[1]).toEqual([TEST_RUN_ID]);
       });
@@ -1081,7 +1097,7 @@ describe('TestRunsPerformanceQueryService', () => {
 
         await service.getTransactionErrors(TEST_RUN_ID, 'checkout', undefined, IS_ADMIN, []);
 
-        const call = (testRunRepo.query as jest.Mock).mock.calls[0];
+        const call = getMainErrorsCall();
         expect(call[1]).toContain('checkout');
         expect(call[1]).toHaveLength(2);
       });
@@ -1091,7 +1107,7 @@ describe('TestRunsPerformanceQueryService', () => {
 
         await service.getTransactionErrors(TEST_RUN_ID, undefined, 'POST /checkout', IS_ADMIN, []);
 
-        const call = (testRunRepo.query as jest.Mock).mock.calls[0];
+        const call = getMainErrorsCall();
         expect(call[1]).toContain('POST /checkout');
         expect(call[1]).toHaveLength(2);
       });
@@ -1101,7 +1117,7 @@ describe('TestRunsPerformanceQueryService', () => {
 
         await service.getTransactionErrors(TEST_RUN_ID, 'checkout', 'POST /checkout', IS_ADMIN, []);
 
-        const call = (testRunRepo.query as jest.Mock).mock.calls[0];
+        const call = getMainErrorsCall();
         expect(call[1]).toContain('checkout');
         expect(call[1]).toContain('POST /checkout');
         expect(call[1]).toHaveLength(3);
@@ -1112,7 +1128,7 @@ describe('TestRunsPerformanceQueryService', () => {
 
         await service.getTransactionErrors(TEST_RUN_ID, 'checkout', undefined, NOT_ADMIN, ORG_IDS);
 
-        const call = (testRunRepo.query as jest.Mock).mock.calls[0];
+        const call = getMainErrorsCall();
         expect(call[1][call[1].length - 1]).toEqual(ORG_IDS);
       });
     });
@@ -1123,7 +1139,7 @@ describe('TestRunsPerformanceQueryService', () => {
 
         await service.getTransactionErrors(TEST_RUN_ID, undefined, undefined, IS_ADMIN, []);
 
-        const call = (testRunRepo.query as jest.Mock).mock.calls[0];
+        const call = getMainErrorsCall();
         expect(call[0]).toContain('wat.system_under_test_id = sut.id');
         expect(call[0]).not.toContain('sut.name OR');
         expect(call[0]).not.toContain('sut.id::text');
@@ -1134,11 +1150,46 @@ describe('TestRunsPerformanceQueryService', () => {
 
         await service.getTransactionErrors(TEST_RUN_ID, 'checkout', undefined, IS_ADMIN, []);
 
-        const call = (testRunRepo.query as jest.Mock).mock.calls[0];
+        const call = getMainErrorsCall();
         expect(call[0]).toContain('wat.system_under_test_id = sut.id');
         expect(call[0]).toContain('wtat.system_under_test_id = sut.id');
         expect(call[0]).not.toContain('sut.name OR');
         expect(call[0]).not.toContain('sut.id::text');
+      });
+
+      it('uses test_run_sampler_stats rollup CTE when sampler stats are present (#287)', async () => {
+        // Mock the rollup existence check to return a hit; then the main query
+        // returns an empty result (we only care about the SQL shape here).
+        (testRunRepo.query as jest.Mock).mockImplementation(async (sql: unknown) => {
+          if (typeof sql === 'string' && /SELECT 1 FROM test_run_sampler_stats/i.test(sql)) {
+            return [{ '?column?': 1 }];
+          }
+          return [];
+        });
+
+        await service.getTransactionErrors(TEST_RUN_ID, 'checkout', undefined, IS_ADMIN, [], true);
+
+        const call = getMainErrorsCall();
+        expect(call[0]).toContain('FROM test_run_sampler_stats trss');
+        expect(call[0]).toContain('rollup(trss.pct_agg)');
+        expect(call[0]).toContain('approx_percentile_rank');
+        // Legacy raw-scan path is gone when rollup is present.
+        expect(call[0]).not.toContain('FROM requests_raw rr');
+        // ramp_up_excluded must be threaded through so Apdex matches the
+        // parent Performance Analysis card.
+        expect(call[1]).toContain(true);
+      });
+
+      it('falls back to the requests_raw scan when no sampler rollup exists', async () => {
+        // Default mockQuerySequence makes the existence check return [] →
+        // the legacy CTE wins.
+        mockQuerySequence([RAW_ERROR_ROW]);
+
+        await service.getTransactionErrors(TEST_RUN_ID, 'checkout', undefined, IS_ADMIN, []);
+
+        const call = getMainErrorsCall();
+        expect(call[0]).toContain('FROM requests_raw rr');
+        expect(call[0]).not.toContain('rollup(trss.pct_agg)');
       });
     });
 

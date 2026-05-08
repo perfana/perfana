@@ -66,9 +66,19 @@ describe('TestRunsErrorAnalysisService', () => {
   // =========================================================================
 
   describe('getErrorSummary', () => {
+    /**
+     * #287: total-requests now comes from test_run_transaction_stats when the
+     * rollup is populated, with a fallback to COUNT(*) FROM requests_raw for
+     * in-progress runs. Tests that exercise the legacy fallback need the
+     * existence check to return an empty result.
+     */
+    const ROLLUP_MISSING = [];
+    const ROLLUP_PRESENT = [{ '?column?': 1 }];
+
     describe('Happy path', () => {
       it('should return aggregated counts parsed as integers', async () => {
-        // Arrange — first call: summary, second call: total requests
+        // Arrange — call 1: summary, call 2: rollup existence (missing → fallback),
+        // call 3: COUNT(*) FROM requests_raw.
         mockQuery
           .mockResolvedValueOnce([
             {
@@ -78,6 +88,7 @@ describe('TestRunsErrorAnalysisService', () => {
               uniqueErrorUrls: '5',
             },
           ])
+          .mockResolvedValueOnce(ROLLUP_MISSING)
           .mockResolvedValueOnce([{ total: '500' }]);
 
         // Act
@@ -91,11 +102,12 @@ describe('TestRunsErrorAnalysisService', () => {
       });
 
       it('should calculate error rate correctly when raw requests data is available', async () => {
-        // Arrange
+        // Arrange — fallback path: no rollup, raw COUNT(*) returns 1000.
         mockQuery
           .mockResolvedValueOnce([
             { totalErrors: '50', uniqueResponseCodes: '2', transactionsWithErrors: '4', uniqueErrorUrls: '3' },
           ])
+          .mockResolvedValueOnce(ROLLUP_MISSING)
           .mockResolvedValueOnce([{ total: '1000' }]);
 
         // Act
@@ -107,11 +119,12 @@ describe('TestRunsErrorAnalysisService', () => {
       });
 
       it('should set errorRate to 0 when totalRequests is 0', async () => {
-        // Arrange
+        // Arrange — fallback path with zero raw requests.
         mockQuery
           .mockResolvedValueOnce([
             { totalErrors: '10', uniqueResponseCodes: '1', transactionsWithErrors: '1', uniqueErrorUrls: '1' },
           ])
+          .mockResolvedValueOnce(ROLLUP_MISSING)
           .mockResolvedValueOnce([{ total: '0' }]);
 
         // Act
@@ -123,19 +136,44 @@ describe('TestRunsErrorAnalysisService', () => {
       });
 
       it('should pass testRunId as query parameter', async () => {
-        // Arrange
+        // Arrange — fallback path.
         mockQuery
           .mockResolvedValueOnce([
             { totalErrors: '1', uniqueResponseCodes: '1', transactionsWithErrors: '1', uniqueErrorUrls: '1' },
           ])
+          .mockResolvedValueOnce(ROLLUP_MISSING)
           .mockResolvedValueOnce([{ total: '10' }]);
 
         // Act
         await service.getErrorSummary(TEST_RUN_ID);
 
-        // Assert — both queries receive the testRunId
+        // Assert — every query receives the testRunId.
         expect(mockQuery.mock.calls[0][1]).toEqual([TEST_RUN_ID]);
         expect(mockQuery.mock.calls[1][1]).toEqual([TEST_RUN_ID]);
+        expect(mockQuery.mock.calls[2][1]).toEqual([TEST_RUN_ID]);
+      });
+
+      it('should read total requests from test_run_transaction_stats when the rollup is populated (#287)', async () => {
+        // Arrange — rollup hit: SUM(total_count) returns 5000.
+        mockQuery
+          .mockResolvedValueOnce([
+            { totalErrors: '100', uniqueResponseCodes: '2', transactionsWithErrors: '5', uniqueErrorUrls: '3' },
+          ])
+          .mockResolvedValueOnce(ROLLUP_PRESENT)
+          .mockResolvedValueOnce([{ total: '5000' }]);
+
+        // Act
+        const result = await service.getErrorSummary(TEST_RUN_ID);
+
+        // Assert — 100/5000 * 100 = 2% from the rollup.
+        expect(result.totalRequests).toBe(5000);
+        expect(result.errorRate).toBe(2);
+        // The third call must hit test_run_transaction_stats, not requests_raw.
+        const totalRequestsSql = mockQuery.mock.calls[2][0] as string;
+        expect(totalRequestsSql).toContain('FROM test_run_transaction_stats');
+        expect(totalRequestsSql).toContain('SUM(total_count)');
+        expect(totalRequestsSql).toContain('ramp_up_excluded = false');
+        expect(totalRequestsSql).not.toContain('FROM requests_raw');
       });
     });
 
@@ -171,11 +209,12 @@ describe('TestRunsErrorAnalysisService', () => {
       });
 
       it('should omit errorRate fields when requests_raw query returns empty array', async () => {
-        // Arrange
+        // Arrange — fallback path with empty raw count result.
         mockQuery
           .mockResolvedValueOnce([
             { totalErrors: '5', uniqueResponseCodes: '1', transactionsWithErrors: '1', uniqueErrorUrls: '1' },
           ])
+          .mockResolvedValueOnce(ROLLUP_MISSING)
           .mockResolvedValueOnce([]);
 
         // Act
@@ -188,11 +227,12 @@ describe('TestRunsErrorAnalysisService', () => {
       });
 
       it('should return summary without errorRate when requests_raw query throws', async () => {
-        // Arrange
+        // Arrange — fallback path: existence check empty, raw COUNT(*) throws.
         mockQuery
           .mockResolvedValueOnce([
             { totalErrors: '8', uniqueResponseCodes: '2', transactionsWithErrors: '3', uniqueErrorUrls: '2' },
           ])
+          .mockResolvedValueOnce(ROLLUP_MISSING)
           .mockRejectedValueOnce(new Error('relation "requests_raw" does not exist'));
 
         // Act — must not throw; the catch block swallows the error
@@ -210,6 +250,7 @@ describe('TestRunsErrorAnalysisService', () => {
           .mockResolvedValueOnce([
             { totalErrors: '3', uniqueResponseCodes: '1', transactionsWithErrors: '1', uniqueErrorUrls: '1' },
           ])
+          .mockResolvedValueOnce(ROLLUP_MISSING)
           .mockRejectedValueOnce('unexpected string rejection');
 
         // Act

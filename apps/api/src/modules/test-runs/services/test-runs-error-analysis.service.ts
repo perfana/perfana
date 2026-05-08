@@ -38,6 +38,38 @@ function buildScenarioFilter(
   return { clause: ` AND (${conditions.join(' OR ')})`, params };
 }
 
+/**
+ * Variant of buildScenarioFilter for the test_run_transaction_stats rollup,
+ * where scenario_name is `text NOT NULL DEFAULT ''` (the empty string represents
+ * "no scenario", not NULL).
+ */
+function buildScenarioFilterForRollup(
+  scenarios: string[] | undefined,
+  startIndex: number,
+): { clause: string; params: unknown[] } {
+  if (!scenarios || scenarios.length === 0) {
+    return { clause: '', params: [] };
+  }
+
+  const includeNull = scenarios.includes(NO_SCENARIO_SENTINEL);
+  const namedScenarios = scenarios.filter((s) => s !== NO_SCENARIO_SENTINEL);
+
+  const conditions: string[] = [];
+  const params: unknown[] = [];
+
+  if (namedScenarios.length > 0) {
+    conditions.push(`scenario_name = ANY($${startIndex})`);
+    params.push(namedScenarios);
+  }
+  if (includeNull) {
+    conditions.push(`scenario_name = ''`);
+  }
+
+  if (conditions.length === 0) return { clause: '', params: [] };
+
+  return { clause: ` AND (${conditions.join(' OR ')})`, params };
+}
+
 export interface ErrorSummary {
   totalErrors: number;
   uniqueResponseCodes: number;
@@ -131,21 +163,13 @@ export class TestRunsErrorAnalysisService {
       uniqueErrorUrls: parseInt(result[0].uniqueErrorUrls, 10),
     };
 
-    // Optionally calculate error rate if we have requests_raw data
+    // Calculate total request count for error rate. Prefer the per-test-run
+    // rollup table (test_run_transaction_stats) — a tens-of-rows scan — over
+    // COUNT(*) FROM requests_raw, which scans the active hypertable chunk and
+    // can take seconds on populated TimescaleDB. #287
     try {
-      const rawFilter = buildScenarioFilter(scenarios, 2);
-      const totalRequestsQuery = `
-        SELECT COUNT(*) as total
-        FROM requests_raw
-        WHERE test_run_id = $1${rawFilter.clause}
-      `;
-      const totalRequestsResult = await this.dataSource.query(
-        totalRequestsQuery,
-        [testRunId, ...rawFilter.params],
-      );
-
-      if (totalRequestsResult && totalRequestsResult.length > 0) {
-        const totalRequests = parseInt(totalRequestsResult[0].total, 10);
+      const totalRequests = await this.getTotalRequestCount(testRunId, scenarios);
+      if (totalRequests !== null) {
         summary.totalRequests = totalRequests;
         summary.errorRate = totalRequests > 0 ? (summary.totalErrors / totalRequests) * 100 : 0;
       }
@@ -154,6 +178,61 @@ export class TestRunsErrorAnalysisService {
     }
 
     return summary;
+  }
+
+  /**
+   * Read total request count for a test run. Reads from
+   * test_run_transaction_stats (rollup) when populated; falls back to
+   * COUNT(*) FROM requests_raw when the rollup hasn't been computed yet.
+   *
+   * Returns null when neither path produces a value (e.g., test run still
+   * ingesting and rollup not yet built — caller skips the errorRate field).
+   */
+  private async getTotalRequestCount(
+    testRunId: string,
+    scenarios?: string[],
+  ): Promise<number | null> {
+    // Rollup path: SUM(total_count) WHERE ramp_up_excluded = false matches the
+    // pre-rollup behavior of COUNT(*) FROM requests_raw (no ramp-up filter).
+    const rollupExists = await this.dataSource.query(
+      `SELECT 1 FROM test_run_transaction_stats WHERE test_run_id = $1 LIMIT 1`,
+      [testRunId],
+    );
+
+    if (rollupExists.length > 0) {
+      const rollupFilter = buildScenarioFilterForRollup(scenarios, 2);
+      const rollupQuery = `
+        SELECT COALESCE(SUM(total_count), 0)::bigint AS total
+        FROM test_run_transaction_stats
+        WHERE test_run_id = $1
+          AND ramp_up_excluded = false
+          ${rollupFilter.clause}
+      `;
+      const result = await this.dataSource.query(rollupQuery, [testRunId, ...rollupFilter.params]);
+      if (result && result.length > 0) {
+        return parseInt(String(result[0].total), 10);
+      }
+      return null;
+    }
+
+    // Fallback: rollup not yet computed (ingestion in progress, or finalization
+    // failed). Scan requests_raw directly — slow on big runs, but keeps the
+    // error-rate readout populated for in-progress runs.
+    const rawFilter = buildScenarioFilter(scenarios, 2);
+    const totalRequestsQuery = `
+      SELECT COUNT(*) as total
+      FROM requests_raw
+      WHERE test_run_id = $1${rawFilter.clause}
+    `;
+    const totalRequestsResult = await this.dataSource.query(
+      totalRequestsQuery,
+      [testRunId, ...rawFilter.params],
+    );
+
+    if (totalRequestsResult && totalRequestsResult.length > 0) {
+      return parseInt(String(totalRequestsResult[0].total), 10);
+    }
+    return null;
   }
 
   /**

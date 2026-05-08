@@ -640,6 +640,7 @@ export default function PerformanceAnalysisCard({
         errorsModalOpen={errorsModalOpen}
         onErrorsModalClose={() => setErrorsModalOpen(false)}
         errorModalConfig={errorModalConfig}
+        excludeRampUp={excludeRampUp}
         graphModalOpen={graphModalOpen}
         onGraphModalClose={() => setGraphModalOpen(false)}
         graphModalTransactionName={graphModalTransactionName}
