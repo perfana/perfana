@@ -1084,10 +1084,10 @@ describe('TestRunsPerformanceQueryService', () => {
         const result = await service.getTransactionSamples(TEST_RUN_ID, TRANSACTION, true, IS_ADMIN, []);
 
         expect(result).toHaveLength(1);
-        // 6 calls: rollup existence check + scope lookup (rollup-pending gate)
-        // + ramp-up lookup + SET LOCAL statement_timeout + SET LOCAL work_mem
-        // + samples query
-        expect(testRunRepo.query).toHaveBeenCalledTimes(6);
+        // 7 calls: rollup existence check + scope lookup (rollup-pending gate)
+        // + CAGG scope lookup (live-Apdex CAGG plan) + ramp-up lookup
+        // + SET LOCAL statement_timeout + SET LOCAL work_mem + samples query
+        expect(testRunRepo.query).toHaveBeenCalledTimes(7);
       });
 
       it('does not fetch cutoff when excludeRampUp is false', async () => {
@@ -1095,10 +1095,10 @@ describe('TestRunsPerformanceQueryService', () => {
 
         await service.getTransactionSamples(TEST_RUN_ID, TRANSACTION, false, IS_ADMIN, []);
 
-        // 5 calls — rollup existence check + scope lookup (rollup-pending gate)
-        // + SET LOCAL statement_timeout + SET LOCAL work_mem + samples query
-        // (no ramp-up lookup)
-        expect(testRunRepo.query).toHaveBeenCalledTimes(5);
+        // 6 calls — rollup existence check + scope lookup (rollup-pending gate)
+        // + CAGG scope lookup (live-Apdex CAGG plan) + SET LOCAL statement_timeout
+        // + SET LOCAL work_mem + samples query (no ramp-up lookup)
+        expect(testRunRepo.query).toHaveBeenCalledTimes(6);
       });
     });
 
@@ -1390,6 +1390,12 @@ describe('TestRunsPerformanceQueryService', () => {
           status: 'rollup-pending',
           stage: 'transaction-stats-rollup',
         } as never);
+        // Stub the CAGG scope explicitly: with the live-Apdex CAGG plan
+        // wire-up, a CAGG hit would shadow the pending result. Force the
+        // CAGG-empty branch so this test still asserts the pending payload.
+        jest
+          .spyOn(service as never, 'loadCaggApdexScope')
+          .mockResolvedValue(null as never);
 
         const result = await service.getTransactionSamples(TEST_RUN_ID, TRANSACTION, false, IS_ADMIN, []);
 
@@ -1420,9 +1426,13 @@ describe('TestRunsPerformanceQueryService', () => {
 
         await service.getTransactionSamples(TEST_RUN_ID, TRANSACTION, false, IS_ADMIN, [], 9999);
 
+        // Tighten the regex to specifically match the raw-scan SQL (`FROM
+        // requests_raw r`) rather than `FROM requests_raw` which would also
+        // match the `requests_raw_passed_5s` EXISTS subquery in the CAGG
+        // scope-lookup added by the live-Apdex CAGG plan.
         const liveCall = (testRunRepo.query as jest.Mock).mock.calls.find(
           (call: [unknown]) =>
-            typeof call[0] === 'string' && (call[0] as string).includes('FROM requests_raw'),
+            typeof call[0] === 'string' && /FROM\s+requests_raw\s+r\b/.test(call[0] as string),
         );
         expect(liveCall).toBeDefined();
         expect(liveCall![1]).toEqual(expect.arrayContaining([60]));
@@ -1442,6 +1452,252 @@ describe('TestRunsPerformanceQueryService', () => {
         expect(
           calls.some((sql) => typeof sql === 'string' && (sql as string).includes('statement_timeout')),
         ).toBe(true);
+      });
+    });
+
+    // ---------------------------------------------------------------------
+    // CAGG fast path (live-Apdex CAGG plan, Task 5)
+    // ---------------------------------------------------------------------
+
+    describe('CAGG fast path', () => {
+      const baseScope = {
+        sut: 'demo-sut',
+        systemUnderTestId: 'sut-uuid-1',
+        env: 'prod',
+        workload: 'wl-1',
+        startTime: new Date('2026-05-09T10:00:00Z'),
+        endTime: new Date('2026-05-09T10:30:00Z'),
+        cutoffTime: null,
+        hasTransactionsCagg: true,
+        hasRequestsRawCagg: true,
+      };
+
+      const RAW_SAMPLER_CAGG_ROW = {
+        sampler_name: 's1',
+        scenario_name: 'sc',
+        url_hash: null,
+        url_pattern: null,
+        avg_response_time: '420.50',
+        min_response_time: '10',
+        max_response_time: '5000',
+        p95_response_time: '900.00',
+        p99_response_time: '1200.00',
+        passed_count: '95',
+        failed_count: '5',
+        total_count: '100',
+        avg_latency: '50.00',
+        avg_connect_time: '20.00',
+        total_request_size: '10240',
+        total_response_size: '102400',
+        active_threshold: '500',
+        apdex_score: '0.875',
+      };
+
+      it('runs the requests_raw_5s + requests_raw_passed_5s JOIN', async () => {
+        jest
+          .spyOn(service as never, 'getRollupStatus')
+          .mockResolvedValue({ status: 'unavailable' } as never);
+        jest
+          .spyOn(service as never, 'loadCaggApdexScope')
+          .mockResolvedValue(baseScope as never);
+
+        const sqlSeen: string[] = [];
+        (testRunRepo.query as jest.Mock).mockImplementation(async (sql: unknown) => {
+          if (typeof sql === 'string') sqlSeen.push(sql);
+          if (isSetLocalWorkMem(sql)) return [];
+          return [];
+        });
+
+        await service.getTransactionSamples(TEST_RUN_ID, TRANSACTION, false, IS_ADMIN, []);
+
+        const sql = sqlSeen.find((s) => /requests_raw_5s/.test(s) && /JOIN/.test(s));
+        expect(sql).toBeDefined();
+        expect(sql!).toMatch(/FROM\s+requests_raw_5s/);
+        expect(sql!).toMatch(/JOIN\s+requests_raw_passed_5s/);
+        // p95/p99 from all-rows sketch; Apdex from success-filtered sketch.
+        expect(sql!).toMatch(/rollup\(c\.pct_agg\)/);
+        expect(sql!).toMatch(/rollup\(p\.pct_agg_passed\)/);
+        // Transaction filter param ($8).
+        expect(sql!).toMatch(/c\.transaction_name\s*=\s*\$8/);
+        // 7-key JOIN: bucket + sut + env + scenario(IS NOT DISTINCT FROM) +
+        // sampler + transaction + location(IS NOT DISTINCT FROM).
+        expect(sql!).toMatch(/c\.bucket\s*=\s*p\.bucket/);
+        expect(sql!).toMatch(/c\.system_under_test\s*=\s*p\.system_under_test/);
+        expect(sql!).toMatch(/c\.test_environment\s*=\s*p\.test_environment/);
+        expect(sql!).toMatch(/c\.scenario_name\s+IS\s+NOT\s+DISTINCT\s+FROM\s+p\.scenario_name/);
+        expect(sql!).toMatch(/c\.sampler_name\s*=\s*p\.sampler_name/);
+        expect(sql!).toMatch(/c\.transaction_name\s*=\s*p\.transaction_name/);
+        expect(sql!).toMatch(/c\.location\s+IS\s+NOT\s+DISTINCT\s+FROM\s+p\.location/);
+        // Threshold join uses the SUT UUID ($9), not name (cross-org safe).
+        expect(sql!).toMatch(/wat\.system_under_test_id\s*=\s*ids\.sut_id/);
+        expect(sql!).toMatch(/wtat\.system_under_test_id\s*=\s*ids\.sut_id/);
+      });
+
+      it('returns mapped rows with url_hash=null and url_pattern=null (CAGG limitation)', async () => {
+        jest
+          .spyOn(service as never, 'getRollupStatus')
+          .mockResolvedValue({ status: 'unavailable' } as never);
+        jest
+          .spyOn(service as never, 'loadCaggApdexScope')
+          .mockResolvedValue(baseScope as never);
+        (testRunRepo.query as jest.Mock).mockImplementation(async (sql: unknown) => {
+          if (isSetLocalWorkMem(sql)) return [];
+          if (typeof sql === 'string' && /requests_raw_passed_5s/.test(sql)) {
+            return [RAW_SAMPLER_CAGG_ROW];
+          }
+          return [];
+        });
+
+        const result = await service.getTransactionSamples(TEST_RUN_ID, TRANSACTION, false, IS_ADMIN, []);
+
+        expect(Array.isArray(result)).toBe(true);
+        const rows = result as Array<Record<string, unknown>>;
+        expect(rows[0]).toMatchObject({
+          sampler_name: 's1',
+          total_count: 100,
+          passed_count: 95,
+          failed_count: 5,
+          apdex_score: 0.875,
+          active_threshold: 500,
+          url_hash: null,
+          url_pattern: null,
+        });
+      });
+
+      it('falls through to raw scan when requests_raw_passed CAGG is empty for the window', async () => {
+        jest
+          .spyOn(service as never, 'getRollupStatus')
+          .mockResolvedValue({ status: 'unavailable' } as never);
+        jest
+          .spyOn(service as never, 'loadCaggApdexScope')
+          .mockResolvedValue({ ...baseScope, hasRequestsRawCagg: false } as never);
+        // Live-agg path: rollup existence check + CAGG scope skip + samples query
+        mockQuerySequence([RAW_SAMPLER_ROW]);
+
+        const result = await service.getTransactionSamples(TEST_RUN_ID, TRANSACTION, false, IS_ADMIN, []);
+
+        expect(Array.isArray(result)).toBe(true);
+        const calls = (testRunRepo.query as jest.Mock).mock.calls;
+        // Confirm we did NOT issue the CAGG-specific JOIN query.
+        const ranCagg = calls.some(([sql]: [unknown]) =>
+          typeof sql === 'string' && /JOIN\s+requests_raw_passed_5s/.test(sql as string),
+        );
+        expect(ranCagg).toBe(false);
+        // Confirm the raw-scan path ran (FROM requests_raw r).
+        const ranRaw = calls.some(([sql]: [unknown]) =>
+          typeof sql === 'string' && /FROM\s+requests_raw\s+r\b/.test(sql as string),
+        );
+        expect(ranRaw).toBe(true);
+      });
+
+      it('uses the CAGG path even when sinceMinutes is set (live window) and bypasses getRollupStatus', async () => {
+        const getRollupStatusSpy = jest.spyOn(service as never, 'getRollupStatus');
+        const loadCaggApdexScopeSpy = jest
+          .spyOn(service as never, 'loadCaggApdexScope')
+          .mockResolvedValue(baseScope as never);
+        const getTransactionSamplesFromCaggSpy = jest
+          .spyOn(service as never, 'getTransactionSamplesFromCagg')
+          .mockResolvedValue([] as never);
+
+        const sinceMinutes = 5;
+        const before = Date.now();
+        await service.getTransactionSamples(TEST_RUN_ID, TRANSACTION, false, IS_ADMIN, [], sinceMinutes);
+        const after = Date.now();
+
+        // getRollupStatus must NOT be called when sinceMinutes is set.
+        expect(getRollupStatusSpy).not.toHaveBeenCalled();
+        expect(loadCaggApdexScopeSpy).toHaveBeenCalled();
+        // Adjusted scope: startTime = max(scope.startTime, NOW() - sinceMinutes*60_000).
+        // baseScope.startTime is in 2026 (well in the past), so the live cutoff wins.
+        expect(getTransactionSamplesFromCaggSpy).toHaveBeenCalledTimes(1);
+        const passedScope = (getTransactionSamplesFromCaggSpy.mock.calls[0] as unknown[])[0] as {
+          startTime: Date;
+        };
+        const liveCutoffMs = passedScope.startTime.getTime();
+        expect(liveCutoffMs).toBeGreaterThanOrEqual(before - sinceMinutes * 60_000);
+        expect(liveCutoffMs).toBeLessThanOrEqual(after - sinceMinutes * 60_000);
+        // Transaction name is forwarded as the second argument.
+        expect((getTransactionSamplesFromCaggSpy.mock.calls[0] as unknown[])[1]).toBe(TRANSACTION);
+      });
+
+      it("returns RollupPendingResult when rollup is 'rollup-pending' AND CAGG is empty", async () => {
+        jest.spyOn(service as never, 'getRollupStatus').mockResolvedValue({
+          status: 'rollup-pending',
+          stage: 'transaction-stats-rollup',
+          progress: { stageName: 'transaction-stats-rollup', stageIndex: 4, totalStages: 11 },
+        } as never);
+        jest
+          .spyOn(service as never, 'loadCaggApdexScope')
+          .mockResolvedValue({ ...baseScope, hasRequestsRawCagg: false } as never);
+
+        const result = await service.getTransactionSamples(TEST_RUN_ID, TRANSACTION, false, IS_ADMIN, []);
+
+        expect(isRollupPending(result)).toBe(true);
+        expect(result).toMatchObject({
+          stage: 'transaction-stats-rollup',
+          progress: { stageIndex: 4, totalStages: 11 },
+        });
+      });
+
+      it("prefers CAGG over RollupPendingResult when rollup is 'rollup-pending' AND CAGG has data", async () => {
+        jest.spyOn(service as never, 'getRollupStatus').mockResolvedValue({
+          status: 'rollup-pending',
+          stage: 'transaction-stats-rollup',
+          progress: { stageName: 'transaction-stats-rollup', stageIndex: 4, totalStages: 11 },
+        } as never);
+        jest
+          .spyOn(service as never, 'loadCaggApdexScope')
+          .mockResolvedValue(baseScope as never);
+        (testRunRepo.query as jest.Mock).mockImplementation(async (sql: unknown) => {
+          if (isSetLocalWorkMem(sql)) return [];
+          if (typeof sql === 'string' && /requests_raw_passed_5s/.test(sql)) {
+            return [RAW_SAMPLER_CAGG_ROW];
+          }
+          return [];
+        });
+
+        const result = await service.getTransactionSamples(TEST_RUN_ID, TRANSACTION, false, IS_ADMIN, []);
+
+        expect(isRollupPending(result)).toBe(false);
+        expect(Array.isArray(result)).toBe(true);
+        const rows = result as Array<Record<string, unknown>>;
+        expect(rows.length).toBeGreaterThan(0);
+        expect(rows[0].sampler_name).toBe('s1');
+      });
+
+      it("uses CAGG when status='ready' AND hasSamplerRollup=false AND CAGG has data", async () => {
+        // Existing fall-through: 'ready' rollup but no per-transaction sampler
+        // row (e.g. unsampled high-cardinality sampler) used to skip straight
+        // to live aggregation. Now it routes through CAGG when present.
+        jest
+          .spyOn(service as never, 'getRollupStatus')
+          .mockResolvedValue({ status: 'ready' } as never);
+        jest
+          .spyOn(service as never, 'hasSamplerRollup')
+          .mockResolvedValue(false as never);
+        jest
+          .spyOn(service as never, 'loadCaggApdexScope')
+          .mockResolvedValue(baseScope as never);
+        (testRunRepo.query as jest.Mock).mockImplementation(async (sql: unknown) => {
+          if (isSetLocalWorkMem(sql)) return [];
+          if (typeof sql === 'string' && /requests_raw_passed_5s/.test(sql)) {
+            return [RAW_SAMPLER_CAGG_ROW];
+          }
+          return [];
+        });
+
+        const result = await service.getTransactionSamples(TEST_RUN_ID, TRANSACTION, false, IS_ADMIN, []);
+
+        expect(Array.isArray(result)).toBe(true);
+        const rows = result as Array<Record<string, unknown>>;
+        expect(rows.length).toBeGreaterThan(0);
+        expect(rows[0]).toMatchObject({
+          sampler_name: 's1',
+          total_count: 100,
+          apdex_score: 0.875,
+          url_hash: null,
+          url_pattern: null,
+        });
       });
     });
   });
