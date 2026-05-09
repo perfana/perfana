@@ -1874,6 +1874,142 @@ describe('TestRunsPerformanceQueryService', () => {
         const call = getMainErrorsCall();
         expect(call[0]).toContain('FROM requests_raw rr');
         expect(call[0]).not.toContain('rollup(trss.pct_agg)');
+        // The CAGG JOIN must NOT be present when the scope lookup returns no
+        // CAGG data (default mock behaviour).
+        expect(call[0]).not.toMatch(/JOIN\s+requests_raw_passed_5s/);
+      });
+
+      // ---------------------------------------------------------------------
+      // CAGG fast path (#304)
+      // ---------------------------------------------------------------------
+
+      describe('CAGG arm (#304)', () => {
+        const baseScope = {
+          sut: 'demo-sut',
+          systemUnderTestId: 'sut-uuid-1',
+          env: 'prod',
+          workload: 'wl-1',
+          startTime: new Date('2026-05-09T10:00:00Z'),
+          endTime: new Date('2026-05-09T10:30:00Z'),
+          cutoffTime: null,
+          hasTransactionsCagg: true,
+          hasRequestsRawCagg: true,
+        };
+
+        /**
+         * The errors query goes through `loadCaggApdexScope` only when the
+         * sampler rollup is empty. Stub the scope helper directly and route
+         * the existence check through the same `query` mock as everything
+         * else — that keeps the mock setup small and avoids depending on
+         * the internal probe SQL.
+         */
+        function stubScope(scope: typeof baseScope | null) {
+          jest.spyOn(service as never, 'loadCaggApdexScope').mockResolvedValue(scope as never);
+        }
+
+        it('uses requests_raw_5s + requests_raw_passed_5s CTE when CAGG scope is present', async () => {
+          stubScope(baseScope);
+          mockQuerySequence([RAW_ERROR_ROW]);
+
+          await service.getTransactionErrors(
+            TEST_RUN_ID, 'checkout', undefined, IS_ADMIN, [], true,
+          );
+
+          const call = getMainErrorsCall();
+          expect(call[0]).toMatch(/FROM\s+requests_raw_5s\s+c/);
+          expect(call[0]).toMatch(/JOIN\s+requests_raw_passed_5s\s+p/);
+          // Apdex from the success-filtered sketch (post-#298).
+          expect(call[0]).toMatch(/rollup\(p\.pct_agg_passed\)/);
+          // 7-key JOIN matches the samples-from-CAGG path so duplicate rows
+          // can't slip through.
+          expect(call[0]).toMatch(/c\.bucket\s*=\s*p\.bucket/);
+          expect(call[0]).toMatch(/c\.system_under_test\s*=\s*p\.system_under_test/);
+          expect(call[0]).toMatch(/c\.test_environment\s*=\s*p\.test_environment/);
+          expect(call[0]).toMatch(/c\.scenario_name\s+IS\s+NOT\s+DISTINCT\s+FROM\s+p\.scenario_name/);
+          expect(call[0]).toMatch(/c\.sampler_name\s*=\s*p\.sampler_name/);
+          expect(call[0]).toMatch(/c\.transaction_name\s*=\s*p\.transaction_name/);
+          expect(call[0]).toMatch(/c\.location\s+IS\s+NOT\s+DISTINCT\s+FROM\s+p\.location/);
+          // The legacy raw scan must be gone.
+          expect(call[0]).not.toContain('FROM requests_raw rr');
+          // tc.active_threshold is referenced outside aggregates — must appear
+          // in GROUP BY or Postgres raises 42803.
+          expect(call[0]).toMatch(/GROUP BY\s+c\.sampler_name,\s*tc\.active_threshold/);
+          // Threshold join still uses sut.id in threshold_config (cross-org safe).
+          expect(call[0]).toContain('wat.system_under_test_id = sut.id');
+          // sut/env/start/end/excludeRampUp/cutoff params bound after the
+          // optional transaction filter ($2).
+          expect(call[1]).toContain('demo-sut');
+          expect(call[1]).toContain('prod');
+          expect(call[1]).toContain(true); // excludeRampUp
+        });
+
+        it('binds transaction filter against c.transaction_name in the CAGG arm', async () => {
+          stubScope(baseScope);
+          mockQuerySequence([RAW_ERROR_ROW]);
+
+          await service.getTransactionErrors(TEST_RUN_ID, 'checkout', undefined, IS_ADMIN, []);
+
+          const call = getMainErrorsCall();
+          expect(call[0]).toMatch(/AND\s+c\.transaction_name\s*=\s*\$2/);
+        });
+
+        it('binds sampler filter against c.sampler_name in the CAGG arm', async () => {
+          stubScope(baseScope);
+          mockQuerySequence([RAW_ERROR_ROW]);
+
+          await service.getTransactionErrors(
+            TEST_RUN_ID, 'checkout', 'POST /checkout', IS_ADMIN, [],
+          );
+
+          const call = getMainErrorsCall();
+          expect(call[0]).toMatch(/AND\s+c\.sampler_name\s*=\s*\$3/);
+        });
+
+        it('keeps the orgIds tail param at the end for non-admin callers', async () => {
+          stubScope(baseScope);
+          mockQuerySequence([RAW_ERROR_ROW]);
+
+          await service.getTransactionErrors(
+            TEST_RUN_ID, 'checkout', undefined, NOT_ADMIN, ORG_IDS,
+          );
+
+          const call = getMainErrorsCall();
+          // orgIds remains the last param even though six CAGG params were
+          // inserted before it.
+          expect(call[1][call[1].length - 1]).toEqual(ORG_IDS);
+          // Org filter clause references the correct ($N::uuid[]) slot.
+          const orgIndex = call[1].length;
+          expect(call[0]).toContain(`sut.organization_id = ANY($${orgIndex}::uuid[])`);
+        });
+
+        it('still wins over CAGG when a sampler rollup exists', async () => {
+          // Rollup hit short-circuits before loadCaggApdexScope is even called.
+          const scopeSpy = jest.spyOn(service as never, 'loadCaggApdexScope');
+          (testRunRepo.query as jest.Mock).mockImplementation(async (sql: unknown) => {
+            if (typeof sql === 'string' && /SELECT 1 FROM test_run_sampler_stats/i.test(sql)) {
+              return [{ '?column?': 1 }];
+            }
+            return [];
+          });
+
+          await service.getTransactionErrors(TEST_RUN_ID, 'checkout', undefined, IS_ADMIN, []);
+
+          const call = getMainErrorsCall();
+          expect(call[0]).toContain('FROM test_run_sampler_stats trss');
+          expect(call[0]).not.toMatch(/JOIN\s+requests_raw_passed_5s/);
+          expect(scopeSpy).not.toHaveBeenCalled();
+        });
+
+        it('falls through to legacy raw scan when CAGG scope reports no data', async () => {
+          stubScope({ ...baseScope, hasRequestsRawCagg: false });
+          mockQuerySequence([RAW_ERROR_ROW]);
+
+          await service.getTransactionErrors(TEST_RUN_ID, 'checkout', undefined, IS_ADMIN, []);
+
+          const call = getMainErrorsCall();
+          expect(call[0]).toContain('FROM requests_raw rr');
+          expect(call[0]).not.toMatch(/JOIN\s+requests_raw_passed_5s/);
+        });
       });
     });
 
