@@ -75,3 +75,13 @@ export interface DrillDownFilters {
   transaction?: string;
   sampler?: string;
 }
+
+export interface RollupPendingState {
+  status: 'rollup-pending';
+  stage: 'transaction-stats-rollup';
+  progress?: {
+    stageName: string;
+    stageIndex: number;
+    totalStages: number;
+  };
+}

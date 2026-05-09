@@ -10,6 +10,7 @@ import {
   ThroughputStats,
   SortField,
   SortOrder,
+  RollupPendingState,
 } from '../types/performance-analysis.types';
 
 export interface UsePerformanceAnalysisDataProps {
@@ -25,6 +26,7 @@ export interface UsePerformanceAnalysisDataReturn {
   transactions: TransactionStat[];
   loading: boolean;
   error: string | null;
+  rollupPending: RollupPendingState | null;
 
   // Additional stats
   testLevelThreshold: number;
@@ -82,6 +84,7 @@ export function usePerformanceAnalysisData({
   const [loading, setLoading] = useState(false);
   const [transactions, setTransactions] = useState<TransactionStat[]>([]);
   const [error, setError] = useState<string | null>(null);
+  const [rollupPending, setRollupPending] = useState<RollupPendingState | null>(null);
 
   // Additional stats
   const [testLevelThreshold, setTestLevelThreshold] = useState<number>(500);
@@ -122,6 +125,7 @@ export function usePerformanceAnalysisData({
     try {
       setLoading(true);
       setError(null);
+      setRollupPending(null);
 
       const params = new URLSearchParams({ excludeRampUp: String(excludeRampUp) });
       if (sinceMinutes != null) params.set('sinceMinutes', String(sinceMinutes));
@@ -135,6 +139,17 @@ export function usePerformanceAnalysisData({
           },
         }
       );
+
+      if (response.status === 202) {
+        const body = await response.json().catch(() => null);
+        setRollupPending({
+          status: 'rollup-pending',
+          stage: 'transaction-stats-rollup',
+          progress: body?.progress,
+        });
+        setTransactions([]);
+        return;
+      }
 
       if (!response.ok) {
         throw new Error('Failed to fetch transaction data');
@@ -388,6 +403,7 @@ export function usePerformanceAnalysisData({
     transactions,
     loading,
     error,
+    rollupPending,
 
     // Additional stats
     testLevelThreshold,
