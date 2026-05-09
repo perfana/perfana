@@ -233,7 +233,7 @@ describe('TestRunsPerformanceQueryService', () => {
    */
   const isRollupScopeLookup = (sql: unknown): boolean =>
     typeof sql === 'string' &&
-    /SELECT\s+system_under_test_id,\s*test_environment,\s*workload\s+FROM\s+test_runs/i.test(
+    /SELECT\s+tr\.system_under_test_id,\s*tr\.test_environment,\s*tr\.workload\s+FROM\s+test_runs\s+tr/i.test(
       sql,
     );
 
@@ -2001,8 +2001,8 @@ describe('TestRunsPerformanceQueryService', () => {
       });
 
       const result = await (service as unknown as {
-        getRollupStatus: (id: string) => Promise<{ status: string }>;
-      }).getRollupStatus('test-run-1');
+        getRollupStatus: (id: string, isAdmin: boolean, orgs: string[]) => Promise<{ status: string }>;
+      }).getRollupStatus('test-run-1', true, []);
       expect(result.status).toBe('ready');
     });
 
@@ -2026,12 +2026,12 @@ describe('TestRunsPerformanceQueryService', () => {
       });
 
       const result = await (service as unknown as {
-        getRollupStatus: (id: string) => Promise<{
+        getRollupStatus: (id: string, isAdmin: boolean, orgs: string[]) => Promise<{
           status: string;
           stage?: string;
           progress?: { stageName: string; stageIndex: number; totalStages: number };
         }>;
-      }).getRollupStatus('test-run-1');
+      }).getRollupStatus('test-run-1', true, []);
       expect(result.status).toBe('rollup-pending');
       expect(result.progress).toEqual({
         stageName: 'transaction-stats-rollup',
@@ -2051,8 +2051,8 @@ describe('TestRunsPerformanceQueryService', () => {
       mockJobProgressService.getActiveJobForScope.mockResolvedValue(null);
 
       const result = await (service as unknown as {
-        getRollupStatus: (id: string) => Promise<{ status: string }>;
-      }).getRollupStatus('test-run-1');
+        getRollupStatus: (id: string, isAdmin: boolean, orgs: string[]) => Promise<{ status: string }>;
+      }).getRollupStatus('test-run-1', true, []);
       expect(result.status).toBe('unavailable');
     });
 
@@ -2064,9 +2064,31 @@ describe('TestRunsPerformanceQueryService', () => {
       });
 
       const result = await (service as unknown as {
-        getRollupStatus: (id: string) => Promise<{ status: string }>;
-      }).getRollupStatus('test-run-1');
+        getRollupStatus: (id: string, isAdmin: boolean, orgs: string[]) => Promise<{ status: string }>;
+      }).getRollupStatus('test-run-1', true, []);
       expect(result.status).toBe('unavailable');
+      expect(mockJobProgressService.getActiveJobForScope).not.toHaveBeenCalled();
+    });
+
+    it('returns "unavailable" when run exists but caller has no org membership (cross-tenant guard)', async () => {
+      (testRunRepo.query as jest.Mock).mockImplementation(async (sql: string, params: unknown[]) => {
+        if (sql.includes('FROM test_run_transaction_stats')) return [];
+        if (sql.includes('FROM test_runs tr') && sql.includes('JOIN systems_under_test sut')) {
+          // Filter by org should produce 0 rows for a non-admin without membership
+          const orgs = params[1] as string[];
+          if (Array.isArray(orgs) && orgs.length === 0) return [];
+          // (Other cases — admin or matching org — would return scope; not exercised in this test.)
+          return [];
+        }
+        throw new Error(`unexpected sql: ${sql}`);
+      });
+
+      const result = await (service as unknown as {
+        getRollupStatus: (id: string, isAdmin: boolean, orgs: string[]) => Promise<{ status: string }>;
+      }).getRollupStatus('test-run-1', false, []);
+      expect(result.status).toBe('unavailable');
+      // Critically: the active-job lookup should NOT have been called, because
+      // we never resolved a scope to look up by.
       expect(mockJobProgressService.getActiveJobForScope).not.toHaveBeenCalled();
     });
   });

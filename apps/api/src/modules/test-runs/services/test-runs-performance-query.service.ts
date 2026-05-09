@@ -111,10 +111,18 @@ export class TestRunsPerformanceQueryService {
    * rollup pipeline could complete, returning 'rollup-pending' for a run that
    * is now 'ready'. Benign — the next client poll resolves it.
    *
+   * Org-scope guarantee: the scope lookup joins `systems_under_test` and (for
+   * non-admins) filters on `sut.organization_id`, so a caller without
+   * membership in the run's org collapses to `'unavailable'` (live-agg
+   * fallback also org-filters → `[]`) rather than leaking that the run exists
+   * or what analyze-stage it is in via the `rollup-pending` payload.
+   *
    * @internal
    */
   private async getRollupStatus(
     testRunId: string,
+    isAdmin: boolean,
+    organizationIds: string[],
   ): Promise<{ status: 'ready' } | RollupPendingResult | { status: 'unavailable' }> {
     const rollupRows = await withRequestEm(this.testRunRepo).query(
       `SELECT 1 FROM test_run_transaction_stats WHERE test_run_id = $1 LIMIT 1`,
@@ -122,14 +130,27 @@ export class TestRunsPerformanceQueryService {
     );
     if (rollupRows.length > 0) return { status: 'ready' };
 
+    // Scope lookup with org-scoping. Non-admin callers without membership in
+    // the run's org receive zero rows → 'unavailable' → live-agg fallback
+    // (which also org-filters) → []. This prevents the 'rollup-pending'
+    // response from leaking analyze-stage progress for runs the caller can't
+    // see.
+    const orgFilterClause = !isAdmin
+      ? 'AND sut.organization_id = ANY($2::uuid[])'
+      : '';
+    const scopeParams: unknown[] = !isAdmin ? [testRunId, organizationIds] : [testRunId];
     const scopeRows: Array<{
       system_under_test_id: string;
       test_environment: string;
       workload: string;
     }> = await withRequestEm(this.testRunRepo).query(
-      `SELECT system_under_test_id, test_environment, workload
-         FROM test_runs WHERE test_run_id = $1 LIMIT 1`,
-      [testRunId],
+      `SELECT tr.system_under_test_id, tr.test_environment, tr.workload
+         FROM test_runs tr
+         JOIN systems_under_test sut ON sut.id = tr.system_under_test_id
+        WHERE tr.test_run_id = $1
+          ${orgFilterClause}
+        LIMIT 1`,
+      scopeParams,
     );
     const scope = scopeRows[0];
     if (!scope) return { status: 'unavailable' };
@@ -508,7 +529,7 @@ export class TestRunsPerformanceQueryService {
       //                     stalling on the live-aggregation fallback
       //   unavailable     → soft-failed rollup; fall through to live aggregation
       if (clampedSinceMinutes == null) {
-        const rollupStatus = await this.getRollupStatus(resolvedTestRunId);
+        const rollupStatus = await this.getRollupStatus(resolvedTestRunId, isAdmin, organizationIds);
         if (rollupStatus.status === 'ready') {
           return await this.getTransactionStatsFromRollup(
             resolvedTestRunId,
@@ -724,7 +745,7 @@ export class TestRunsPerformanceQueryService {
       // so getRollupStatus's check against test_run_transaction_stats is
       // the correct upstream gate here too.
       if (clampedSinceMinutes == null) {
-        const rollupStatus = await this.getRollupStatus(resolvedTestRunId);
+        const rollupStatus = await this.getRollupStatus(resolvedTestRunId, isAdmin, organizationIds);
         // Note: the 'ready' arm may fall through to live aggregation when the
         // per-transaction sampler-rollup row is absent (e.g. unsampled
         // high-cardinality sampler), so the 'rollup-pending' arm is gated with
