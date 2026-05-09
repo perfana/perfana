@@ -89,7 +89,7 @@ export default function TestRunDetailsPage() {
     [loadRelatedTestRuns, checkConfigurationStatus]
   );
 
-  const { testRun, loading, error, setTestRun, refreshTestRun, editingState, setEditingState, realtimeTrigger } =
+  const { testRun, loading, error, setTestRun, refreshTestRun, editingState, setEditingState } =
     useTestRunData({ testRunId, onLoadComplete: handleTestRunLoaded });
 
   const { events } = useEventsData(testRunId);
@@ -332,7 +332,7 @@ export default function TestRunDetailsPage() {
                 <DeepLinksCard testRun={testRun} expanded={expansionState.deepLinksExpanded} onExpand={() => { const wasCollapsed = !expansionState.deepLinksExpanded; toggleExpansion('deepLinksExpanded'); if (wasCollapsed) scrollToCard('deep-links-card-expanded'); }} />
               </Box>
               <Box sx={cardBoxStyle(expansionState.performanceExpanded)}>
-                <PerformanceAnalysisCard testRunId={testRunId} testRun={testRun} realtimeTrigger={realtimeTrigger} expanded={expansionState.performanceExpanded} onExpand={() => { const wasCollapsed = !expansionState.performanceExpanded; toggleExpansion('performanceExpanded'); if (wasCollapsed) scrollToCard('performance-analysis-card-expanded'); }} showToast={showToast} hasDistributedTracing={configurationStatus.hasDistributedTracing} hasDynatrace={configurationStatus.hasDynatrace} onDrillDownToDistributedTracing={onDrillDownToDistributedTracing} onDrillDownToDynatrace={onDrillDownToDynatrace} />
+                <PerformanceAnalysisCard testRunId={testRunId} testRun={testRun} expanded={expansionState.performanceExpanded} onExpand={() => { const wasCollapsed = !expansionState.performanceExpanded; toggleExpansion('performanceExpanded'); if (wasCollapsed) scrollToCard('performance-analysis-card-expanded'); }} showToast={showToast} hasDistributedTracing={configurationStatus.hasDistributedTracing} hasDynatrace={configurationStatus.hasDynatrace} onDrillDownToDistributedTracing={onDrillDownToDistributedTracing} onDrillDownToDynatrace={onDrillDownToDynatrace} />
               </Box>
               <Box sx={cardBoxStyle(expansionState.sloExpanded)}>
                 <ServiceLevelObjectivesSection testRun={testRun} testRunId={testRunId} sloExpanded={expansionState.sloExpanded} setSloExpanded={(val) => { const wasCollapsed = !expansionState.sloExpanded; setExpansion('sloExpanded', val); if (wasCollapsed && val) scrollToCard('slo-section-expanded'); }} hasDistributedTracing={configurationStatus.hasDistributedTracing} hasDynatrace={configurationStatus.hasDynatrace} onDrillDownToDistributedTracing={onDrillDownToDistributedTracing} onDrillDownToDynatrace={onDrillDownToDynatrace} />

@@ -21,6 +21,7 @@ import {
   ExpandMore,
   ExpandLess,
   MoreVert as MoreVertIcon,
+  Refresh as RefreshIcon,
 } from '@mui/icons-material';
 import { DrillDownFilters } from './types/performance-analysis.types';
 import { getApdexColor } from './utils/performance-formatters';
@@ -51,7 +52,6 @@ import { TestRun } from '@/types/test-runs';
 interface PerformanceAnalysisCardProps {
   testRunId: string;
   testRun?: TestRun | null;
-  realtimeTrigger?: number;
   expanded: boolean;
   onExpand: () => void;
   showToast: (message: string) => void;
@@ -64,7 +64,6 @@ interface PerformanceAnalysisCardProps {
 export default function PerformanceAnalysisCard({
   testRunId,
   testRun,
-  realtimeTrigger = 0,
   expanded,
   onExpand,
   showToast,
@@ -115,7 +114,7 @@ export default function PerformanceAnalysisCard({
     elapsedMinutes,
     sinceMinutes,
     setSinceMinutes,
-  } = usePerformanceAnalysisData({ testRunId, testRun, realtimeTrigger });
+  } = usePerformanceAnalysisData({ testRunId, testRun });
 
   const availableScenarios = useMemo(
     () => deriveAvailableScenarios(transactions),
@@ -349,9 +348,28 @@ export default function PerformanceAnalysisCard({
                 />
               </Tooltip>
             )}
-            {/* Live time-window selector — only shown when test is running */}
+            {/* Live-test controls: manual refresh + time-window selector. Anchored at
+                right:96 to clear the Apdex-options menu (right:48, ~36px wide). The
+                refresh button replaces the prior auto-refetch on every realtime entity
+                update, which was causing visible re-renders of the whole table during
+                live tests. */}
             {expanded && isRunning && (
-              <Box sx={{ position: 'absolute', right: 48 }} onClick={(e) => e.stopPropagation()}>
+              <Box
+                sx={{ position: 'absolute', right: 96, display: 'flex', gap: 0.5, alignItems: 'center' }}
+                onClick={(e) => e.stopPropagation()}
+              >
+                <Tooltip title="Refresh metrics" arrow>
+                  <span>
+                    <IconButton
+                      onClick={refreshAll}
+                      size="small"
+                      disabled={loading}
+                      sx={{ color: 'text.secondary', '&:hover': { color: 'primary.main' } }}
+                    >
+                      {loading ? <CircularProgress size={18} /> : <RefreshIcon fontSize="small" />}
+                    </IconButton>
+                  </span>
+                </Tooltip>
                 <LiveWindowSelector
                   elapsedMinutes={elapsedMinutes}
                   sinceMinutes={sinceMinutes}
@@ -495,8 +513,10 @@ export default function PerformanceAnalysisCard({
             {/* Tab Panel 0: Transactions */}
             {activeTab === 0 && (
               <>
-                {/* Aggregated Test Metrics */}
-                {!loading && !error && !rollupPending && filteredTransactions.length > 0 && (
+                {/* Aggregated Test Metrics — kept mounted across refreshes so the live
+                    numbers update in place. The `!loading` gate from the previous
+                    realtime-auto-refetch era would unmount this on every refresh. */}
+                {!error && !rollupPending && filteredTransactions.length > 0 && (
                   <OverallTestMetrics
                     transactions={filteredTransactions}
                     throughputStats={filteredThroughputStats}
@@ -514,7 +534,11 @@ export default function PerformanceAnalysisCard({
                       : ''}.
                     The page will refresh automatically.
                   </Alert>
-                ) : loading ? (
+                ) : loading && transactions.length === 0 ? (
+                  // Page-level spinner only on the first fetch (no data yet). Subsequent
+                  // refreshes flip `loading` true→false but keep the table mounted so the
+                  // numbers update in place; the spinner inside the Refresh button
+                  // signals the in-flight fetch.
                   <Box textAlign="center" py={4}>
                     <CircularProgress size={32} />
                     <Typography variant="body2" color="text.secondary" sx={{ mt: 1 }}>
