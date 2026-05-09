@@ -1,5 +1,6 @@
 import { Injectable } from '@nestjs/common';
 import { TestRunsQueryService } from './services/test-runs-query.service';
+import { RollupPendingResult } from './services/test-runs-performance-query.types';
 import { TestRunsMutationService } from './services/test-runs-mutation.service';
 import { TestRunsConfigService } from './services/test-runs-config.service';
 import { TestRunsAnomalyService } from './services/test-runs-anomaly.service';
@@ -182,7 +183,7 @@ export class TestRunsService {
     ranking: number;
     apdex_score: number;
     active_threshold: number;
-  }>> {
+  }> | RollupPendingResult> {
     return this.queryService.getTransactionStats(testRunId, userId, roles, excludeRampUp, sinceMinutes);
   }
 
@@ -203,7 +204,7 @@ export class TestRunsService {
     total_response_size: number;
     apdex_score: number;
     active_threshold: number;
-  }>> {
+  }> | RollupPendingResult> {
     return this.queryService.getTransactionSamples(testRunId, transactionName, userId, roles, excludeRampUp, sinceMinutes);
   }
 

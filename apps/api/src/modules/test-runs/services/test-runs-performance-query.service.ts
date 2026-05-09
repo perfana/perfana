@@ -76,19 +76,6 @@ export class TestRunsPerformanceQueryService {
   }
 
   /**
-   * Check whether pre-computed transaction stats exist for a test run
-   * (test_run_transaction_stats is populated by TransactionStatsRollupPipeline
-   * at finalization). When false, the live-aggregation path runs instead.
-   */
-  private async hasTransactionRollup(testRunId: string): Promise<boolean> {
-    const result = await withRequestEm(this.testRunRepo).query(
-      `SELECT 1 FROM test_run_transaction_stats WHERE test_run_id = $1 LIMIT 1`,
-      [testRunId],
-    );
-    return result.length > 0;
-  }
-
-  /**
    * Determine whether the rollup-backed Apdex fast path can be served, or
    * whether the post-test analyze-test job is still running, or whether
    * we're in the soft-failure case (no rollup, no active job).
@@ -448,7 +435,7 @@ export class TestRunsPerformanceQueryService {
     isAdmin: boolean = false,
     organizationIds: string[] = [],
     sinceMinutes?: number,
-  ): Promise<TransactionStats[]> {
+  ): Promise<TransactionStats[] | RollupPendingResult> {
     try {
       // Non-admin users with no organization memberships see empty results
       if (!isAdmin && organizationIds.length === 0) {
@@ -467,9 +454,16 @@ export class TestRunsPerformanceQueryService {
       // whole-test-run only), read from the rollup table. Dashboard latency
       // drops from seconds-to-minutes to <100ms.
       // See: issues #150, #151.
+      //
+      // Three-arm gate (rollup-pending plan):
+      //   ready           → fast-path read from rollup
+      //   rollup-pending  → analyze-test still running; bubble RollupPendingResult
+      //                     so the controller maps to HTTP 202 instead of
+      //                     stalling on the live-aggregation fallback
+      //   unavailable     → soft-failed rollup; fall through to live aggregation
       if (sinceMinutes == null) {
-        const hasRollup = await this.hasTransactionRollup(resolvedTestRunId);
-        if (hasRollup) {
+        const rollupStatus = await this.getRollupStatus(resolvedTestRunId);
+        if (rollupStatus.status === 'ready') {
           return await this.getTransactionStatsFromRollup(
             resolvedTestRunId,
             excludeRampUp,
@@ -477,6 +471,13 @@ export class TestRunsPerformanceQueryService {
             organizationIds,
           );
         }
+        if (rollupStatus.status === 'rollup-pending') {
+          this.logger.debug(
+            `Rollup pending for ${resolvedTestRunId}; returning rollup-pending result`,
+          );
+          return rollupStatus;
+        }
+        // status === 'unavailable' → fall through to live aggregation
       }
 
       const cutoffTime = await this.getRampUpCutoffTime(resolvedTestRunId, excludeRampUp);
