@@ -26,6 +26,8 @@ import { TestRunsPerformanceQueryService } from './test-runs-performance-query.s
 import { TestRunsMapperService } from './test-runs-mapper.service';
 import { TestRun as TestRunEntity } from '../../../entities';
 import { DatabaseException } from '../../../common/exceptions/business.exception';
+import { JobProgressService } from '../../data-science/services/job-progress.service';
+import { isRollupPending } from './test-runs-performance-query.types';
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -163,9 +165,13 @@ describe('TestRunsPerformanceQueryService', () => {
   let service: TestRunsPerformanceQueryService;
   let testRunRepo: MockRepo;
   let mapper: TestRunsMapperService;
+  let mockJobProgressService: { getActiveJobForScope: jest.Mock };
 
   beforeEach(async () => {
     testRunRepo = createMockRepo();
+    mockJobProgressService = {
+      getActiveJobForScope: jest.fn(),
+    };
 
     const module: TestingModule = await Test.createTestingModule({
       providers: [
@@ -174,6 +180,10 @@ describe('TestRunsPerformanceQueryService', () => {
         {
           provide: getRepositoryToken(TestRunEntity),
           useValue: testRunRepo,
+        },
+        {
+          provide: JobProgressService,
+          useValue: mockJobProgressService,
         },
       ],
     }).compile();
@@ -192,12 +202,13 @@ describe('TestRunsPerformanceQueryService', () => {
 
   /**
    * The rewritten Apdex queries run inside a transaction and issue
-   * `SET LOCAL work_mem = '512MB'` as the first statement. That call goes
-   * through the same mocked `query` fn — so the mock implementations below
-   * need to skip it when stepping through the configured result sequence.
+   * `SET LOCAL` preludes (work_mem and statement_timeout) before the data
+   * query. Those calls go through the same mocked `query` fn — so the mock
+   * implementations below need to skip them when stepping through the
+   * configured result sequence.
    */
   const isSetLocalWorkMem = (sql: unknown): boolean =>
-    typeof sql === 'string' && /SET\s+LOCAL\s+work_mem/i.test(sql);
+    typeof sql === 'string' && /SET\s+LOCAL\s+(work_mem|statement_timeout)/i.test(sql);
 
   /**
    * The rollup fast-path (#150, #151) issues a `SELECT 1 FROM
@@ -213,6 +224,20 @@ describe('TestRunsPerformanceQueryService', () => {
     /SELECT\s+1\s+FROM\s+test_run_(transaction|sampler)_stats/i.test(sql);
 
   /**
+   * The Apdex rollup-pending gate's `getRollupStatus()` helper issues a scope
+   * lookup against `test_runs` (sut/env/workload) when the rollup existence
+   * check returns empty. Live-aggregation fallback tests need this lookup to
+   * appear as a no-op so it doesn't consume a configured result-sequence entry.
+   * Returning `[]` makes `getRollupStatus()` resolve as `'unavailable'`, which
+   * is exactly the soft-failure branch existing live-agg tests assume.
+   */
+  const isRollupScopeLookup = (sql: unknown): boolean =>
+    typeof sql === 'string' &&
+    /SELECT\s+tr\.system_under_test_id,\s*tr\.test_environment,\s*tr\.workload\s+FROM\s+test_runs\s+tr/i.test(
+      sql,
+    );
+
+  /**
    * Configures testRunRepo.query so that the first call (UUID lookup) returns
    * the given test_run_id, and all subsequent calls return the provided rows.
    * `SET LOCAL work_mem` preludes are treated as no-op steps.
@@ -226,6 +251,7 @@ describe('TestRunsPerformanceQueryService', () => {
     (testRunRepo.query as jest.Mock).mockImplementation(async (sql: unknown) => {
       if (isSetLocalWorkMem(sql)) return [];
       if (isRollupExistenceCheck(sql)) return [];
+      if (isRollupScopeLookup(sql)) return [];
       if (!uuidServed) {
         uuidServed = true;
         return [{ test_run_id: resolvedTestRunId }];
@@ -246,6 +272,7 @@ describe('TestRunsPerformanceQueryService', () => {
     (testRunRepo.query as jest.Mock).mockImplementation(async (sql: unknown) => {
       if (isSetLocalWorkMem(sql)) return [];
       if (isRollupExistenceCheck(sql)) return [];
+      if (isRollupScopeLookup(sql)) return [];
       const r = results[idx] ?? [];
       idx++;
       return r;
@@ -264,6 +291,7 @@ describe('TestRunsPerformanceQueryService', () => {
     (testRunRepo.query as jest.Mock).mockImplementation(async (sql: unknown) => {
       if (isSetLocalWorkMem(sql)) return [];
       if (isRollupExistenceCheck(sql)) return [{ '?column?': 1 }];
+      if (isRollupScopeLookup(sql)) return [];
       // Everything else: the rollup read (no UUID lookup for plain test_run_id).
       return rollupRows;
     });
@@ -367,8 +395,10 @@ describe('TestRunsPerformanceQueryService', () => {
 
         // Assert
         expect(result).toHaveLength(1);
-        // 4 calls: rollup existence check + ramp-up lookup + SET LOCAL work_mem + stats query
-        expect(testRunRepo.query).toHaveBeenCalledTimes(4);
+        // 6 calls: rollup existence check + scope lookup (rollup-pending gate)
+        // + ramp-up lookup + SET LOCAL statement_timeout + SET LOCAL work_mem
+        // + stats query
+        expect(testRunRepo.query).toHaveBeenCalledTimes(6);
         const calls = (testRunRepo.query as jest.Mock).mock.calls;
         expect(calls.some(([sql]) => (sql as string).includes('SELECT start_time, ramp_up'))).toBe(true);
       });
@@ -685,6 +715,108 @@ describe('TestRunsPerformanceQueryService', () => {
         expect(params[2]).toEqual(ORG_IDS);
       });
     });
+
+    // ---------------------------------------------------------------------
+    // Rollup-pending gate
+    // ---------------------------------------------------------------------
+
+    describe('rollup-pending gate', () => {
+      it('returns RollupPendingResult when status is rollup-pending and sinceMinutes is null', async () => {
+        jest.spyOn(service as never, 'getRollupStatus').mockResolvedValue({
+          status: 'rollup-pending',
+          stage: 'transaction-stats-rollup',
+          progress: { stageName: 'transaction-stats-rollup', stageIndex: 4, totalStages: 11 },
+        } as never);
+
+        const result = await service.getTransactionStats(TEST_RUN_ID, false, IS_ADMIN, []);
+
+        expect(isRollupPending(result)).toBe(true);
+        expect(result).toMatchObject({
+          stage: 'transaction-stats-rollup',
+          progress: { stageIndex: 4, totalStages: 11 },
+        });
+      });
+
+      it('falls through to live aggregation when status is unavailable (soft-failed rollup)', async () => {
+        jest.spyOn(service as never, 'getRollupStatus').mockResolvedValue({
+          status: 'unavailable',
+        } as never);
+        // Configure remaining query mocks for the live-agg path.
+        mockQuerySequence([RAW_TRANSACTION_ROW]);
+
+        const result = await service.getTransactionStats(TEST_RUN_ID, false, IS_ADMIN, []);
+
+        expect(isRollupPending(result)).toBe(false);
+        expect(Array.isArray(result)).toBe(true);
+      });
+
+      it('does NOT gate when sinceMinutes is set, even if rollup would be pending', async () => {
+        const getRollupStatusSpy = jest.spyOn(service as never, 'getRollupStatus');
+        mockQuerySequence([RAW_TRANSACTION_ROW]);
+
+        await service.getTransactionStats(TEST_RUN_ID, false, IS_ADMIN, [], 5);
+
+        expect(getRollupStatusSpy).not.toHaveBeenCalled();
+      });
+    });
+
+    // ---------------------------------------------------------------------
+    // Safety net (clamp + statement_timeout)
+    // ---------------------------------------------------------------------
+
+    describe('safety net (clamp + statement_timeout)', () => {
+      const LIVE_WINDOW_MAX_MINUTES = 60;
+
+      it('clamps sinceMinutes to LIVE_WINDOW_MAX_MINUTES on the live path', async () => {
+        jest
+          .spyOn(service as never, 'getRollupStatus')
+          .mockResolvedValue({ status: 'unavailable' } as never);
+        mockQuerySequence([RAW_TRANSACTION_ROW]);
+
+        await service.getTransactionStats(TEST_RUN_ID, false, IS_ADMIN, [], 9999);
+
+        // Find the call that ran the live-agg SQL (contains "FROM transactions t")
+        const liveCall = (testRunRepo.query as jest.Mock).mock.calls.find(
+          (call: [unknown]) =>
+            typeof call[0] === 'string' && (call[0] as string).includes('FROM transactions t'),
+        );
+        expect(liveCall).toBeDefined();
+        // sinceMinutes appears in the params array, clamped
+        expect(liveCall![1]).toEqual(expect.arrayContaining([LIVE_WINDOW_MAX_MINUTES]));
+      });
+
+      it('passes sinceMinutes through unchanged when below the cap', async () => {
+        jest
+          .spyOn(service as never, 'getRollupStatus')
+          .mockResolvedValue({ status: 'unavailable' } as never);
+        mockQuerySequence([RAW_TRANSACTION_ROW]);
+
+        await service.getTransactionStats(TEST_RUN_ID, false, IS_ADMIN, [], 5);
+
+        const liveCall = (testRunRepo.query as jest.Mock).mock.calls.find(
+          (call: [unknown]) =>
+            typeof call[0] === 'string' && (call[0] as string).includes('FROM transactions t'),
+        );
+        expect(liveCall).toBeDefined();
+        expect(liveCall![1]).toEqual(expect.arrayContaining([5]));
+      });
+
+      it('wraps live aggregation in a transaction that sets statement_timeout', async () => {
+        jest
+          .spyOn(service as never, 'getRollupStatus')
+          .mockResolvedValue({ status: 'unavailable' } as never);
+        mockQuerySequence([RAW_TRANSACTION_ROW]);
+
+        await service.getTransactionStats(TEST_RUN_ID, false, IS_ADMIN, [], 5);
+
+        const calls = (testRunRepo.query as jest.Mock).mock.calls.map(
+          (c: [unknown]) => c[0],
+        );
+        expect(
+          calls.some((sql) => typeof sql === 'string' && (sql as string).includes('statement_timeout')),
+        ).toBe(true);
+      });
+    });
   });
 
   // =========================================================================
@@ -730,8 +862,10 @@ describe('TestRunsPerformanceQueryService', () => {
         const result = await service.getTransactionSamples(TEST_RUN_ID, TRANSACTION, true, IS_ADMIN, []);
 
         expect(result).toHaveLength(1);
-        // 4 calls: rollup existence check + ramp-up lookup + SET LOCAL work_mem + samples query
-        expect(testRunRepo.query).toHaveBeenCalledTimes(4);
+        // 6 calls: rollup existence check + scope lookup (rollup-pending gate)
+        // + ramp-up lookup + SET LOCAL statement_timeout + SET LOCAL work_mem
+        // + samples query
+        expect(testRunRepo.query).toHaveBeenCalledTimes(6);
       });
 
       it('does not fetch cutoff when excludeRampUp is false', async () => {
@@ -739,8 +873,10 @@ describe('TestRunsPerformanceQueryService', () => {
 
         await service.getTransactionSamples(TEST_RUN_ID, TRANSACTION, false, IS_ADMIN, []);
 
-        // 3 calls — rollup existence check + SET LOCAL work_mem + samples query (no ramp-up lookup)
-        expect(testRunRepo.query).toHaveBeenCalledTimes(3);
+        // 5 calls — rollup existence check + scope lookup (rollup-pending gate)
+        // + SET LOCAL statement_timeout + SET LOCAL work_mem + samples query
+        // (no ramp-up lookup)
+        expect(testRunRepo.query).toHaveBeenCalledTimes(5);
       });
     });
 
@@ -1019,6 +1155,71 @@ describe('TestRunsPerformanceQueryService', () => {
         expect(params[1]).toBe(TRANSACTION);
         expect(params[2]).toBe(true);
         expect(params[3]).toEqual(ORG_IDS);
+      });
+    });
+
+    // ---------------------------------------------------------------------
+    // Rollup-pending gate
+    // ---------------------------------------------------------------------
+
+    describe('rollup-pending gate', () => {
+      it('returns RollupPendingResult when rollup is pending', async () => {
+        jest.spyOn(service as never, 'getRollupStatus').mockResolvedValue({
+          status: 'rollup-pending',
+          stage: 'transaction-stats-rollup',
+        } as never);
+
+        const result = await service.getTransactionSamples(TEST_RUN_ID, TRANSACTION, false, IS_ADMIN, []);
+
+        expect(isRollupPending(result)).toBe(true);
+        expect(result).toMatchObject({ stage: 'transaction-stats-rollup' });
+      });
+
+      it('does NOT gate samples when sinceMinutes is set', async () => {
+        const getRollupStatusSpy = jest.spyOn(service as never, 'getRollupStatus');
+        mockQuerySequence([RAW_SAMPLER_ROW]);
+
+        await service.getTransactionSamples(TEST_RUN_ID, TRANSACTION, false, IS_ADMIN, [], 5);
+
+        expect(getRollupStatusSpy).not.toHaveBeenCalled();
+      });
+    });
+
+    // ---------------------------------------------------------------------
+    // Safety net (clamp + statement_timeout) — samples
+    // ---------------------------------------------------------------------
+
+    describe('safety net (clamp + statement_timeout) — samples', () => {
+      it('clamps sinceMinutes to LIVE_WINDOW_MAX_MINUTES on the samples live path', async () => {
+        jest
+          .spyOn(service as never, 'getRollupStatus')
+          .mockResolvedValue({ status: 'unavailable' } as never);
+        mockQuerySequence([RAW_SAMPLER_ROW]);
+
+        await service.getTransactionSamples(TEST_RUN_ID, TRANSACTION, false, IS_ADMIN, [], 9999);
+
+        const liveCall = (testRunRepo.query as jest.Mock).mock.calls.find(
+          (call: [unknown]) =>
+            typeof call[0] === 'string' && (call[0] as string).includes('FROM requests_raw'),
+        );
+        expect(liveCall).toBeDefined();
+        expect(liveCall![1]).toEqual(expect.arrayContaining([60]));
+      });
+
+      it('wraps samples live aggregation in a transaction that sets statement_timeout', async () => {
+        jest
+          .spyOn(service as never, 'getRollupStatus')
+          .mockResolvedValue({ status: 'unavailable' } as never);
+        mockQuerySequence([RAW_SAMPLER_ROW]);
+
+        await service.getTransactionSamples(TEST_RUN_ID, TRANSACTION, false, IS_ADMIN, [], 5);
+
+        const calls = (testRunRepo.query as jest.Mock).mock.calls.map(
+          (c: [unknown]) => c[0],
+        );
+        expect(
+          calls.some((sql) => typeof sql === 'string' && (sql as string).includes('statement_timeout')),
+        ).toBe(true);
       });
     });
   });
@@ -1785,6 +1986,110 @@ describe('TestRunsPerformanceQueryService', () => {
 
       // parseInt called for total_count, passed_count, failed_count, active_threshold
       expect(parseIntSpy).toHaveBeenCalledTimes(4);
+    });
+  });
+
+  // =========================================================================
+  // getRollupStatus (private helper used by the Apdex rollup-pending gate)
+  // =========================================================================
+
+  describe('getRollupStatus', () => {
+    it('returns "ready" when test_run_transaction_stats has rows for the run', async () => {
+      (testRunRepo.query as jest.Mock).mockImplementation(async (sql: string) => {
+        if (sql.includes('FROM test_run_transaction_stats')) return [{ '?column?': 1 }];
+        throw new Error(`unexpected sql: ${sql}`);
+      });
+
+      const result = await (service as unknown as {
+        getRollupStatus: (id: string, isAdmin: boolean, orgs: string[]) => Promise<{ status: string }>;
+      }).getRollupStatus('test-run-1', true, []);
+      expect(result.status).toBe('ready');
+    });
+
+    it('returns "rollup-pending" when rollup empty AND an active job exists for the scope', async () => {
+      (testRunRepo.query as jest.Mock).mockImplementation(async (sql: string) => {
+        if (sql.includes('FROM test_run_transaction_stats')) return [];
+        if (sql.includes('FROM test_runs')) {
+          return [{
+            system_under_test_id: 'sut-1',
+            test_environment: 'prod',
+            workload: 'wl-1',
+          }];
+        }
+        throw new Error(`unexpected sql: ${sql}`);
+      });
+      mockJobProgressService.getActiveJobForScope.mockResolvedValue({
+        jobId: 'job-1',
+        stageName: 'transaction-stats-rollup',
+        stageIndex: 4,
+        totalStages: 11,
+      });
+
+      const result = await (service as unknown as {
+        getRollupStatus: (id: string, isAdmin: boolean, orgs: string[]) => Promise<{
+          status: string;
+          stage?: string;
+          progress?: { stageName: string; stageIndex: number; totalStages: number };
+        }>;
+      }).getRollupStatus('test-run-1', true, []);
+      expect(result.status).toBe('rollup-pending');
+      expect(result.progress).toEqual({
+        stageName: 'transaction-stats-rollup',
+        stageIndex: 4,
+        totalStages: 11,
+      });
+    });
+
+    it('returns "unavailable" when rollup empty AND no active job (soft-failure)', async () => {
+      (testRunRepo.query as jest.Mock).mockImplementation(async (sql: string) => {
+        if (sql.includes('FROM test_run_transaction_stats')) return [];
+        if (sql.includes('FROM test_runs')) {
+          return [{ system_under_test_id: 'sut-1', test_environment: 'prod', workload: 'wl-1' }];
+        }
+        throw new Error(`unexpected sql: ${sql}`);
+      });
+      mockJobProgressService.getActiveJobForScope.mockResolvedValue(null);
+
+      const result = await (service as unknown as {
+        getRollupStatus: (id: string, isAdmin: boolean, orgs: string[]) => Promise<{ status: string }>;
+      }).getRollupStatus('test-run-1', true, []);
+      expect(result.status).toBe('unavailable');
+    });
+
+    it('returns "unavailable" when scope lookup fails (defensive)', async () => {
+      (testRunRepo.query as jest.Mock).mockImplementation(async (sql: string) => {
+        if (sql.includes('FROM test_run_transaction_stats')) return [];
+        if (sql.includes('FROM test_runs')) return [];
+        throw new Error(`unexpected sql: ${sql}`);
+      });
+
+      const result = await (service as unknown as {
+        getRollupStatus: (id: string, isAdmin: boolean, orgs: string[]) => Promise<{ status: string }>;
+      }).getRollupStatus('test-run-1', true, []);
+      expect(result.status).toBe('unavailable');
+      expect(mockJobProgressService.getActiveJobForScope).not.toHaveBeenCalled();
+    });
+
+    it('returns "unavailable" when run exists but caller has no org membership (cross-tenant guard)', async () => {
+      (testRunRepo.query as jest.Mock).mockImplementation(async (sql: string, params: unknown[]) => {
+        if (sql.includes('FROM test_run_transaction_stats')) return [];
+        if (sql.includes('FROM test_runs tr') && sql.includes('JOIN systems_under_test sut')) {
+          // Filter by org should produce 0 rows for a non-admin without membership
+          const orgs = params[1] as string[];
+          if (Array.isArray(orgs) && orgs.length === 0) return [];
+          // (Other cases — admin or matching org — would return scope; not exercised in this test.)
+          return [];
+        }
+        throw new Error(`unexpected sql: ${sql}`);
+      });
+
+      const result = await (service as unknown as {
+        getRollupStatus: (id: string, isAdmin: boolean, orgs: string[]) => Promise<{ status: string }>;
+      }).getRollupStatus('test-run-1', false, []);
+      expect(result.status).toBe('unavailable');
+      // Critically: the active-job lookup should NOT have been called, because
+      // we never resolved a scope to look up by.
+      expect(mockJobProgressService.getActiveJobForScope).not.toHaveBeenCalled();
     });
   });
 });

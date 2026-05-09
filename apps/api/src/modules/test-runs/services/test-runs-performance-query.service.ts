@@ -5,6 +5,8 @@ import { withRequestEm } from '../../../common/db/request-em';
 import { TestRun as TestRunEntity } from '../../../entities';
 import { DatabaseException } from '../../../common/exceptions/business.exception';
 import { TestRunsMapperService } from './test-runs-mapper.service';
+import { JobProgressService } from '../../data-science/services/job-progress.service';
+import { RollupPendingResult } from './test-runs-performance-query.types';
 import {
   TransactionStats,
   SamplerStats,
@@ -21,10 +23,28 @@ import {
 export class TestRunsPerformanceQueryService {
   private readonly logger = new Logger(TestRunsPerformanceQueryService.name);
 
+  /**
+   * Maximum sinceMinutes accepted on the live-aggregation paths (over raw
+   * `transactions` / `requests_raw`). On 10M-row tests, an unbounded window
+   * scans the whole hypertable and pins a connection — clamping caps the
+   * worst case. The rollup-pending gate covers the `null` case for completed
+   * runs; live-path null pass-through is handled separately (see callers).
+   */
+  private static readonly LIVE_WINDOW_MAX_MINUTES = 60;
+
+  /**
+   * Per-statement timeout applied to the live-aggregation paths via
+   * `SET LOCAL statement_timeout`. Postgres aborts the query if it exceeds
+   * the budget — the connection is released cleanly rather than held
+   * indefinitely.
+   */
+  private static readonly LIVE_QUERY_STATEMENT_TIMEOUT_MS = 10_000;
+
   constructor(
     @InjectRepository(TestRunEntity)
     private readonly testRunRepo: Repository<TestRunEntity>,
     private readonly mapper: TestRunsMapperService,
+    private readonly jobProgressService: JobProgressService,
   ) {}
 
   /**
@@ -73,16 +93,111 @@ export class TestRunsPerformanceQueryService {
   }
 
   /**
-   * Check whether pre-computed transaction stats exist for a test run
-   * (test_run_transaction_stats is populated by TransactionStatsRollupPipeline
-   * at finalization). When false, the live-aggregation path runs instead.
+   * Determine whether the rollup-backed Apdex fast path can be served, or
+   * whether the post-test analyze-test job is still running, or whether
+   * we're in the soft-failure case (no rollup, no active job).
+   *
+   * - 'ready'           → rollup rows exist; callers should use the fast path.
+   * - 'rollup-pending'  → rollup empty AND an active analyze-test job is
+   *                       running for the run's scope (sut/env/workload).
+   *                       Controllers map this to HTTP 202 so the UI can
+   *                       render an informative pending state instead of
+   *                       stalling the DB on the live-aggregation fallback.
+   * - 'unavailable'     → rollup empty AND no active job (soft-failure).
+   *                       Callers should preserve the existing
+   *                       live-aggregation fallback.
+   *
+   * Note: between the rollup-existence check and the active-job lookup the
+   * rollup pipeline could complete, returning 'rollup-pending' for a run that
+   * is now 'ready'. Benign — the next client poll resolves it.
+   *
+   * Org-scope guarantee: the scope lookup joins `systems_under_test` and (for
+   * non-admins) filters on `sut.organization_id`, so a caller without
+   * membership in the run's org collapses to `'unavailable'` (live-agg
+   * fallback also org-filters → `[]`) rather than leaking that the run exists
+   * or what analyze-stage it is in via the `rollup-pending` payload.
+   *
+   * @internal
    */
-  private async hasTransactionRollup(testRunId: string): Promise<boolean> {
-    const result = await withRequestEm(this.testRunRepo).query(
+  private async getRollupStatus(
+    testRunId: string,
+    isAdmin: boolean,
+    organizationIds: string[],
+  ): Promise<{ status: 'ready' } | RollupPendingResult | { status: 'unavailable' }> {
+    const rollupRows = await withRequestEm(this.testRunRepo).query(
       `SELECT 1 FROM test_run_transaction_stats WHERE test_run_id = $1 LIMIT 1`,
       [testRunId],
     );
-    return result.length > 0;
+    if (rollupRows.length > 0) return { status: 'ready' };
+
+    // Scope lookup with org-scoping. Non-admin callers without membership in
+    // the run's org receive zero rows → 'unavailable' → live-agg fallback
+    // (which also org-filters) → []. This prevents the 'rollup-pending'
+    // response from leaking analyze-stage progress for runs the caller can't
+    // see.
+    const orgFilterClause = !isAdmin
+      ? 'AND sut.organization_id = ANY($2::uuid[])'
+      : '';
+    const scopeParams: unknown[] = !isAdmin ? [testRunId, organizationIds] : [testRunId];
+    const scopeRows: Array<{
+      system_under_test_id: string;
+      test_environment: string;
+      workload: string;
+    }> = await withRequestEm(this.testRunRepo).query(
+      `SELECT tr.system_under_test_id, tr.test_environment, tr.workload
+         FROM test_runs tr
+         JOIN systems_under_test sut ON sut.id = tr.system_under_test_id
+        WHERE tr.test_run_id = $1
+          ${orgFilterClause}
+        LIMIT 1`,
+      scopeParams,
+    );
+    const scope = scopeRows[0];
+    if (!scope) return { status: 'unavailable' };
+
+    const activeJob = await this.jobProgressService.getActiveJobForScope(
+      scope.system_under_test_id,
+      scope.test_environment,
+      scope.workload,
+    );
+    if (!activeJob) return { status: 'unavailable' };
+
+    return {
+      status: 'rollup-pending',
+      stage: 'transaction-stats-rollup',
+      progress: {
+        stageName: activeJob.stageName,
+        stageIndex: activeJob.stageIndex,
+        totalStages: activeJob.totalStages,
+      },
+    };
+  }
+
+  /**
+   * Clamp sinceMinutes to a server-side maximum. Prevents accidentally huge
+   * windows from triggering unbounded raw-data scans during a running test
+   * (the live path can't be served from the rollup until analyze-test runs
+   * post-completion). Pass-through for null/undefined.
+   */
+  private clampSinceMinutes(sinceMinutes: number | undefined): number | undefined {
+    if (sinceMinutes == null) return sinceMinutes;
+    return Math.min(sinceMinutes, TestRunsPerformanceQueryService.LIVE_WINDOW_MAX_MINUTES);
+  }
+
+  /**
+   * Run a query with a per-statement timeout. Postgres aborts the query if it
+   * exceeds the budget (the connection is released, not held). Used for the
+   * live-aggregation paths over raw transactions / requests_raw.
+   */
+  private async withStatementTimeout<T>(
+    fn: (em: import('typeorm').EntityManager) => Promise<T>,
+  ): Promise<T> {
+    return withRequestEm(this.testRunRepo).manager.transaction(async (txEm) => {
+      await txEm.query(
+        `SET LOCAL statement_timeout = '${TestRunsPerformanceQueryService.LIVE_QUERY_STATEMENT_TIMEOUT_MS}ms'`,
+      );
+      return fn(txEm);
+    });
   }
 
   /**
@@ -382,7 +497,7 @@ export class TestRunsPerformanceQueryService {
     isAdmin: boolean = false,
     organizationIds: string[] = [],
     sinceMinutes?: number,
-  ): Promise<TransactionStats[]> {
+  ): Promise<TransactionStats[] | RollupPendingResult> {
     try {
       // Non-admin users with no organization memberships see empty results
       if (!isAdmin && organizationIds.length === 0) {
@@ -396,14 +511,26 @@ export class TestRunsPerformanceQueryService {
       const resolvedTestRunId = await this.resolveTestRunId(testRunId);
       this.logger.debug(`Resolved test run ID: ${testRunId} -> ${resolvedTestRunId}`);
 
+      // Server-side safety net: clamp the live-window so a huge `sinceMinutes`
+      // can't accidentally scan the whole hypertable. Null passes through
+      // (the rollup-pending gate covers that case for completed runs).
+      const clampedSinceMinutes = this.clampSinceMinutes(sinceMinutes);
+
       // Fast path: if the rollup stage has written rows for this test run
       // (completed runs only) AND sinceMinutes is not set (the rollup is
       // whole-test-run only), read from the rollup table. Dashboard latency
       // drops from seconds-to-minutes to <100ms.
       // See: issues #150, #151.
-      if (sinceMinutes == null) {
-        const hasRollup = await this.hasTransactionRollup(resolvedTestRunId);
-        if (hasRollup) {
+      //
+      // Three-arm gate (rollup-pending plan):
+      //   ready           → fast-path read from rollup
+      //   rollup-pending  → analyze-test still running; bubble RollupPendingResult
+      //                     so the controller maps to HTTP 202 instead of
+      //                     stalling on the live-aggregation fallback
+      //   unavailable     → soft-failed rollup; fall through to live aggregation
+      if (clampedSinceMinutes == null) {
+        const rollupStatus = await this.getRollupStatus(resolvedTestRunId, isAdmin, organizationIds);
+        if (rollupStatus.status === 'ready') {
           return await this.getTransactionStatsFromRollup(
             resolvedTestRunId,
             excludeRampUp,
@@ -411,6 +538,13 @@ export class TestRunsPerformanceQueryService {
             organizationIds,
           );
         }
+        if (rollupStatus.status === 'rollup-pending') {
+          this.logger.debug(
+            `Rollup pending for ${resolvedTestRunId}; returning rollup-pending result`,
+          );
+          return rollupStatus;
+        }
+        // status === 'unavailable' → fall through to live aggregation
       }
 
       const cutoffTime = await this.getRampUpCutoffTime(resolvedTestRunId, excludeRampUp);
@@ -422,9 +556,9 @@ export class TestRunsPerformanceQueryService {
       //   $4 = sinceMinutes  (only when provided)
       //   $4 or $5 = organizationIds (non-admin only; index shifts when sinceMinutes present)
       const windowParamIndex = 4;
-      const orgParamIndex = sinceMinutes != null ? 5 : 4;
+      const orgParamIndex = clampedSinceMinutes != null ? 5 : 4;
 
-      const windowFilter = sinceMinutes != null
+      const windowFilter = clampedSinceMinutes != null
         ? `AND t.time >= NOW() - ($${windowParamIndex}::numeric * interval '1 minute')`
         : '';
 
@@ -521,20 +655,22 @@ export class TestRunsPerformanceQueryService {
       //   $4=sinceMinutes (when provided), $5=orgIds (non-admin)
       //   OR $4=orgIds (non-admin, no window)
       let queryParams: unknown[];
-      if (sinceMinutes != null) {
+      if (clampedSinceMinutes != null) {
         queryParams = !isAdmin
-          ? [resolvedTestRunId, excludeRampUp, cutoffTime, sinceMinutes, organizationIds]
-          : [resolvedTestRunId, excludeRampUp, cutoffTime, sinceMinutes];
+          ? [resolvedTestRunId, excludeRampUp, cutoffTime, clampedSinceMinutes, organizationIds]
+          : [resolvedTestRunId, excludeRampUp, cutoffTime, clampedSinceMinutes];
       } else {
         queryParams = !isAdmin
           ? [resolvedTestRunId, excludeRampUp, cutoffTime, organizationIds]
           : [resolvedTestRunId, excludeRampUp, cutoffTime];
       }
-      // Wrap in a transaction so SET LOCAL work_mem applies only to this query
+      // Wrap in a transaction so SET LOCAL applies only to this query
       // (reverts at COMMIT — global default unaffected). Manager comes from
       // the request-scoped EM via withRequestEm so this nested transaction
       // (savepoint when RLS is on) inherits the outer request transaction's GUCs.
-      const result = await withRequestEm(this.testRunRepo).manager.transaction(async (em) => {
+      // statement_timeout caps a runaway query so the connection is released
+      // cleanly rather than pinned indefinitely.
+      const result = await this.withStatementTimeout(async (em) => {
         await em.query(`SET LOCAL work_mem = '512MB'`);
         return em.query(query, queryParams);
       });
@@ -579,7 +715,7 @@ export class TestRunsPerformanceQueryService {
     isAdmin: boolean = false,
     organizationIds: string[] = [],
     sinceMinutes?: number,
-  ): Promise<SamplerStats[]> {
+  ): Promise<SamplerStats[] | RollupPendingResult> {
     try {
       // Non-admin users with no organization memberships see empty results
       if (!isAdmin && organizationIds.length === 0) {
@@ -591,20 +727,52 @@ export class TestRunsPerformanceQueryService {
 
       const resolvedTestRunId = await this.resolveTestRunId(testRunId);
 
+      // Server-side safety net: clamp the live-window so a huge `sinceMinutes`
+      // can't accidentally scan the whole hypertable. Null passes through
+      // (the rollup-pending gate covers that case for completed runs).
+      const clampedSinceMinutes = this.clampSinceMinutes(sinceMinutes);
+
       // Fast path: rollup (#150, #151). Covers the common case hit by the
       // Overview-tab row expand and the Top 10 Requests tab — exactly the
       // 140s query case captured in #151 for `stream_download_segment`.
-      if (sinceMinutes == null) {
-        const hasRollup = await this.hasSamplerRollup(resolvedTestRunId, transactionName);
-        if (hasRollup) {
-          return await this.getTransactionSamplesFromRollup(
-            resolvedTestRunId,
-            transactionName,
-            excludeRampUp,
-            isAdmin,
-            organizationIds,
+      //
+      // Gate by upstream `transaction-stats-rollup` job (same as
+      // getTransactionStats): a pending job means we should bubble a
+      // RollupPendingResult so the controller can map to HTTP 202 instead
+      // of stalling on the live-aggregation fallback. The sampler rollup
+      // table (test_run_sampler_stats) is populated by the same upstream
+      // analyze-test pipeline that backfills test_run_transaction_stats —
+      // so getRollupStatus's check against test_run_transaction_stats is
+      // the correct upstream gate here too.
+      if (clampedSinceMinutes == null) {
+        const rollupStatus = await this.getRollupStatus(resolvedTestRunId, isAdmin, organizationIds);
+        // Note: the 'ready' arm may fall through to live aggregation when the
+        // per-transaction sampler-rollup row is absent (e.g. unsampled
+        // high-cardinality sampler), so the 'rollup-pending' arm is gated with
+        // `else if` to preserve the bypass — only ever return the pending
+        // result when getRollupStatus actually returns 'rollup-pending'.
+        if (rollupStatus.status === 'ready') {
+          // Sampler rollup may still not have a row for this exact transaction
+          // (e.g. an unsampled high-cardinality sampler). Fall back to live
+          // aggregation in that case rather than serving an empty rollup read.
+          const hasSamplerRow = await this.hasSamplerRollup(resolvedTestRunId, transactionName);
+          if (hasSamplerRow) {
+            return await this.getTransactionSamplesFromRollup(
+              resolvedTestRunId,
+              transactionName,
+              excludeRampUp,
+              isAdmin,
+              organizationIds,
+            );
+          }
+          // status===ready but no per-transaction sampler row → fall through
+        } else if (rollupStatus.status === 'rollup-pending') {
+          this.logger.debug(
+            `Rollup pending for ${resolvedTestRunId}; returning rollup-pending result for samples`,
           );
+          return rollupStatus;
         }
+        // status === 'unavailable' → fall through to live aggregation
       }
 
       const cutoffTime = await this.getRampUpCutoffTime(resolvedTestRunId, excludeRampUp);
@@ -612,9 +780,9 @@ export class TestRunsPerformanceQueryService {
       // Param layout: $1=testRunId, $2=transactionName, $3=excludeRampUp, $4=cutoffTime,
       //   $5=sinceMinutes (when provided), $5 or $6=orgIds (non-admin)
       const windowParamIndexSamples = 5;
-      const orgParamIndexSamples = sinceMinutes != null ? 6 : 5;
+      const orgParamIndexSamples = clampedSinceMinutes != null ? 6 : 5;
 
-      const windowFilterSamples = sinceMinutes != null
+      const windowFilterSamples = clampedSinceMinutes != null
         ? `AND r.time >= NOW() - ($${windowParamIndexSamples}::numeric * interval '1 minute')`
         : '';
 
@@ -706,20 +874,21 @@ export class TestRunsPerformanceQueryService {
       `;
 
       let queryParams: unknown[];
-      if (sinceMinutes != null) {
+      if (clampedSinceMinutes != null) {
         queryParams = !isAdmin
-          ? [resolvedTestRunId, transactionName, excludeRampUp, cutoffTime, sinceMinutes, organizationIds]
-          : [resolvedTestRunId, transactionName, excludeRampUp, cutoffTime, sinceMinutes];
+          ? [resolvedTestRunId, transactionName, excludeRampUp, cutoffTime, clampedSinceMinutes, organizationIds]
+          : [resolvedTestRunId, transactionName, excludeRampUp, cutoffTime, clampedSinceMinutes];
       } else {
         queryParams = !isAdmin
           ? [resolvedTestRunId, transactionName, excludeRampUp, cutoffTime, organizationIds]
           : [resolvedTestRunId, transactionName, excludeRampUp, cutoffTime];
       }
-      // Wrap in a transaction so SET LOCAL work_mem applies only to this query.
+      // Wrap in a transaction so SET LOCAL applies only to this query.
       // Manager comes from the request-scoped EM via withRequestEm so this nested
       // transaction (savepoint when RLS is on) inherits the outer request
-      // transaction's GUCs.
-      const result = await withRequestEm(this.testRunRepo).manager.transaction(async (em) => {
+      // transaction's GUCs. statement_timeout caps a runaway query so the
+      // connection is released cleanly rather than pinned indefinitely.
+      const result = await this.withStatementTimeout(async (em) => {
         await em.query(`SET LOCAL work_mem = '512MB'`);
         return em.query(query, queryParams);
       });

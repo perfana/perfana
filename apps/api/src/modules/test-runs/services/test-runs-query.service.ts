@@ -11,6 +11,7 @@ import { withTeamFilter } from '../../../common/utils/with-team-filter';
 import { TestRunsCrudQueryService } from './test-runs-crud-query.service';
 import { TestRunsDashboardQueryService } from './test-runs-dashboard-query.service';
 import { TestRunsPerformanceQueryService } from './test-runs-performance-query.service';
+import { RollupPendingResult } from './test-runs-performance-query.types';
 import { TestRunsTimeSeriesQueryService } from './test-runs-timeseries-query.service';
 
 // Re-export types for backwards compatibility
@@ -330,7 +331,7 @@ export class TestRunsQueryService {
     roles: string[],
     excludeRampUp?: boolean,
     sinceMinutes?: number,
-  ): Promise<TransactionStats[]> {
+  ): Promise<TransactionStats[] | RollupPendingResult> {
     const { orgIds, isAdmin } = await this.resolveOrganizationIds(userId, roles);
     return this.performanceService.getTransactionStats(testRunId, excludeRampUp, isAdmin, orgIds, sinceMinutes);
   }
@@ -342,7 +343,7 @@ export class TestRunsQueryService {
     roles: string[],
     excludeRampUp?: boolean,
     sinceMinutes?: number,
-  ): Promise<SamplerStats[]> {
+  ): Promise<SamplerStats[] | RollupPendingResult> {
     const { orgIds, isAdmin } = await this.resolveOrganizationIds(userId, roles);
     return this.performanceService.getTransactionSamples(testRunId, transactionName, excludeRampUp, isAdmin, orgIds, sinceMinutes);
   }

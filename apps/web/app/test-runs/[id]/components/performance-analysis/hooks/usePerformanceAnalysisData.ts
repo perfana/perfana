@@ -10,7 +10,23 @@ import {
   ThroughputStats,
   SortField,
   SortOrder,
+  RollupPendingState,
 } from '../types/performance-analysis.types';
+
+/**
+ * Type guard for the `progress` field on the API's 202 rollup-pending response body.
+ * Guards against backend schema drift (e.g. `progress: "string"` or
+ * `progress: { stageIndex: "1" }`) which would render "stage 1 of undefined: undefined".
+ */
+const isValidRollupProgress = (p: unknown): p is RollupPendingState['progress'] => {
+  if (!p || typeof p !== 'object') return false;
+  const o = p as Record<string, unknown>;
+  return (
+    typeof o.stageName === 'string' &&
+    typeof o.stageIndex === 'number' &&
+    typeof o.totalStages === 'number'
+  );
+};
 
 export interface UsePerformanceAnalysisDataProps {
   testRunId: string;
@@ -25,6 +41,7 @@ export interface UsePerformanceAnalysisDataReturn {
   transactions: TransactionStat[];
   loading: boolean;
   error: string | null;
+  rollupPending: RollupPendingState | null;
 
   // Additional stats
   testLevelThreshold: number;
@@ -82,6 +99,7 @@ export function usePerformanceAnalysisData({
   const [loading, setLoading] = useState(false);
   const [transactions, setTransactions] = useState<TransactionStat[]>([]);
   const [error, setError] = useState<string | null>(null);
+  const [rollupPending, setRollupPending] = useState<RollupPendingState | null>(null);
 
   // Additional stats
   const [testLevelThreshold, setTestLevelThreshold] = useState<number>(500);
@@ -122,6 +140,10 @@ export function usePerformanceAnalysisData({
     try {
       setLoading(true);
       setError(null);
+      // Note: do NOT optimistically clear rollupPending here. Clearing it before
+      // the response arrives causes a flash-of-empty-state on every realtime
+      // refetch (pending Alert -> spinner -> pending Alert). We clear it on the
+      // 200 success path below and in the catch block instead.
 
       const params = new URLSearchParams({ excludeRampUp: String(excludeRampUp) });
       if (sinceMinutes != null) params.set('sinceMinutes', String(sinceMinutes));
@@ -136,14 +158,30 @@ export function usePerformanceAnalysisData({
         }
       );
 
+      if (response.status === 202) {
+        const body = await response.json().catch(() => null) as { progress?: unknown } | null;
+        setRollupPending({
+          status: 'rollup-pending',
+          stage: 'transaction-stats-rollup',
+          progress: isValidRollupProgress(body?.progress) ? body!.progress : undefined,
+        });
+        setTransactions([]);
+        return;
+      }
+
       if (!response.ok) {
         throw new Error('Failed to fetch transaction data');
       }
 
+      // 200: clear any prior pending state and store the data.
+      setRollupPending(null);
       const data = await response.json();
       setTransactions(data || []);
     } catch (err) {
       console.error('Error fetching transactions:', err);
+      // Clear pending state on error so a transient failure doesn't keep the
+      // pending UI on screen indefinitely; the user sees the error instead.
+      setRollupPending(null);
       setError(err && typeof err === 'object' && 'message' in err ? (err as Error).message : 'Failed to fetch transaction data');
       setTransactions([]);
     } finally {
@@ -242,6 +280,19 @@ export function usePerformanceAnalysisData({
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [realtimeTrigger]);
+
+  // While the rollup-pending gate is active, poll every 5s so the card transitions
+  // out of the pending state once the post-test rollup completes — even on completed
+  // runs where the realtime entity-update trigger is no longer firing.
+  // The interval is cleared on unmount AND when rollupPending flips to null
+  // (effect re-runs, cleanup tears down the old interval, the new run early-returns).
+  useEffect(() => {
+    if (!rollupPending) return;
+    const interval = setInterval(() => {
+      fetchTransactions();
+    }, 5000);
+    return () => clearInterval(interval);
+  }, [rollupPending, fetchTransactions]);
 
   // When the test stops running, reset sinceMinutes back to null (complete test)
   // so the card shows full data once the run finishes.
@@ -388,6 +439,7 @@ export function usePerformanceAnalysisData({
     transactions,
     loading,
     error,
+    rollupPending,
 
     // Additional stats
     testLevelThreshold,
