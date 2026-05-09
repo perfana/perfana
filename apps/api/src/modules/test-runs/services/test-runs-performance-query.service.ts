@@ -1375,11 +1375,21 @@ export class TestRunsPerformanceQueryService {
       // Resolve UUID to test_run_id if necessary
       const resolvedTestRunId = await this.resolveTestRunId(testRunId);
 
-      // Fast path: when test_run_sampler_stats has rows for this run, compute the
-      // sampler_stats CTE from the rollup (tdigest sketch + total_count) instead
-      // of scanning requests_raw. Drops Errors Overview wall time from ~38s to
-      // microseconds on populated TimescaleDB. #287
+      // Three-arm fast-path gate for the `sampler_stats` CTE:
+      //   1. Rollup arm (#287): when test_run_sampler_stats has rows for this run,
+      //      compute Apdex from rollup(pct_agg) on the pre-aggregated tdigest. ~µs.
+      //      Wins for completed runs that have already been backfilled.
+      //   2. CAGG arm (#304): for in-flight runs (no rollup yet) — read from
+      //      requests_raw_5s + requests_raw_passed_5s and compute Apdex via
+      //      rollup(pct_agg_passed). O(buckets) instead of O(rows). Drops Errors
+      //      Overview wall time from ~38s to <1s on populated TimescaleDB.
+      //   3. Raw arm: legacy scan over requests_raw, kept as a last-resort
+      //      fallback when neither the rollup nor the CAGG covers the run.
       const useSamplerRollup = await this.hasAnySamplerRollup(resolvedTestRunId);
+      const caggScope = !useSamplerRollup
+        ? await this.loadCaggApdexScope(resolvedTestRunId, excludeRampUp, isAdmin, organizationIds)
+        : null;
+      const useCagg = !useSamplerRollup && caggScope?.hasRequestsRawCagg === true;
 
       const params: unknown[] = [resolvedTestRunId];
       let paramIndex = 2;
@@ -1389,6 +1399,7 @@ export class TestRunsPerformanceQueryService {
       if (transactionName) orgParamIndex++;
       if (samplerName) orgParamIndex++;
       if (useSamplerRollup) orgParamIndex++; // ramp_up_excluded param
+      if (useCagg) orgParamIndex += 6; // sut, env, startTime, endTime, excludeRampUp, cutoffTime
 
       const orgFilterClause = !isAdmin
         ? `AND sut.organization_id = ANY($${orgParamIndex}::uuid[])`
@@ -1417,6 +1428,24 @@ export class TestRunsPerformanceQueryService {
         paramIndex++;
       }
 
+      // CAGG arm params: sut name, env, start/end window, ramp-up flag, cutoff.
+      // Slot in between optional filters and the orgIds tail so $orgParamIndex
+      // computed above stays correct.
+      let caggSutParamIdx = -1;
+      let caggEnvParamIdx = -1;
+      let caggStartParamIdx = -1;
+      let caggEndParamIdx = -1;
+      let caggRampUpParamIdx = -1;
+      let caggCutoffParamIdx = -1;
+      if (useCagg && caggScope) {
+        caggSutParamIdx = paramIndex; params.push(caggScope.sut); paramIndex++;
+        caggEnvParamIdx = paramIndex; params.push(caggScope.env); paramIndex++;
+        caggStartParamIdx = paramIndex; params.push(caggScope.startTime); paramIndex++;
+        caggEndParamIdx = paramIndex; params.push(caggScope.endTime); paramIndex++;
+        caggRampUpParamIdx = paramIndex; params.push(excludeRampUp); paramIndex++;
+        caggCutoffParamIdx = paramIndex; params.push(caggScope.cutoffTime); paramIndex++;
+      }
+
       // Add organization IDs as the last parameter for non-admin users
       if (!isAdmin) {
         params.push(organizationIds);
@@ -1436,12 +1465,15 @@ export class TestRunsPerformanceQueryService {
         ? 'COALESCE(wtat.apdex_threshold, wat.apdex_threshold, 500)'
         : 'COALESCE(wat.apdex_threshold, 500)';
 
-      // sampler_stats CTE — two shapes:
+      // sampler_stats CTE — three shapes:
       //   - Rollup path (#287): read pre-aggregated tdigests from
       //     test_run_sampler_stats, grouping by sampler_name with rollup(pct_agg)
       //     to merge sketches across transactions/scenarios. ~µs.
+      //   - CAGG path (#304): read requests_raw_5s + requests_raw_passed_5s for
+      //     in-flight tests, computing Apdex via rollup(pct_agg_passed). O(buckets).
       //   - Legacy path: scan requests_raw and compute Apdex from raw response_time.
-      //     Slow on populated DBs (~38s); kept as fallback when rollup is empty.
+      //     Slow on populated DBs (~38s); kept as a last-resort fallback when
+      //     neither rollup nor CAGG covers the run.
       let samplerStatsCte: string;
       if (useSamplerRollup) {
         const transactionFilterRollup = transactionName
@@ -1472,6 +1504,49 @@ export class TestRunsPerformanceQueryService {
               ${transactionFilterRollup}
               ${samplerFilterRollup}
             GROUP BY trss.sampler_name, tc.active_threshold
+          )
+        `;
+      } else if (useCagg) {
+        const transactionFilterCagg = transactionName
+          ? ` AND c.transaction_name = $2`
+          : '';
+        const samplerParamIdx = transactionName ? 3 : 2;
+        const samplerFilterCagg = samplerName
+          ? ` AND c.sampler_name = $${samplerParamIdx}`
+          : '';
+        samplerStatsCte = `
+          sampler_stats AS (
+            SELECT
+              c.sampler_name,
+              SUM(c.n)::bigint AS total_count,
+              ROUND(
+                (
+                  approx_percentile_rank(tc.active_threshold::double precision, rollup(p.pct_agg_passed))
+                  + (approx_percentile_rank((tc.active_threshold * 4)::double precision, rollup(p.pct_agg_passed))
+                     - approx_percentile_rank(tc.active_threshold::double precision, rollup(p.pct_agg_passed))) / 2
+                )::numeric,
+                3
+              ) AS apdex_score
+            FROM requests_raw_5s c
+            JOIN requests_raw_passed_5s p
+              ON  c.bucket            = p.bucket
+              AND c.system_under_test = p.system_under_test
+              AND c.test_environment  = p.test_environment
+              AND c.scenario_name IS NOT DISTINCT FROM p.scenario_name
+              AND c.sampler_name      = p.sampler_name
+              AND c.transaction_name  = p.transaction_name
+              AND c.location IS NOT DISTINCT FROM p.location
+            CROSS JOIN threshold_config tc
+            WHERE c.system_under_test = $${caggSutParamIdx}
+              AND c.test_environment  = $${caggEnvParamIdx}
+              AND c.bucket >= $${caggStartParamIdx}::timestamptz
+              AND c.bucket <  $${caggEndParamIdx}::timestamptz + interval '5 seconds'
+              AND ($${caggRampUpParamIdx}::boolean = false
+                   OR $${caggCutoffParamIdx}::timestamptz IS NULL
+                   OR c.bucket >= time_bucket('5 seconds'::interval, $${caggCutoffParamIdx}::timestamptz))
+              ${transactionFilterCagg}
+              ${samplerFilterCagg}
+            GROUP BY c.sampler_name, tc.active_threshold
           )
         `;
       } else {
