@@ -90,6 +90,7 @@ export default function PerformanceAnalysisCard({
     transactions,
     loading,
     error,
+    rollupPending,
     testLevelThreshold,
     virtualUserStats,
     throughputStats,
@@ -449,6 +450,7 @@ export default function PerformanceAnalysisCard({
               testRun={testRun}
               excludeRampUp={excludeRampUp}
               onExcludeRampUpChange={setExcludeRampUp}
+              rollupPending={rollupPending}
             />
           )}
 
@@ -494,7 +496,7 @@ export default function PerformanceAnalysisCard({
             {activeTab === 0 && (
               <>
                 {/* Aggregated Test Metrics */}
-                {!loading && !error && filteredTransactions.length > 0 && (
+                {!loading && !error && !rollupPending && filteredTransactions.length > 0 && (
                   <OverallTestMetrics
                     transactions={filteredTransactions}
                     throughputStats={filteredThroughputStats}
@@ -503,7 +505,16 @@ export default function PerformanceAnalysisCard({
                   />
                 )}
 
-                {loading ? (
+                {rollupPending ? (
+                  <Alert severity="info" sx={{ mb: 2 }}>
+                    Performance analysis becomes available once the post-test rollup
+                    completes
+                    {rollupPending.progress
+                      ? ` — stage ${rollupPending.progress.stageIndex} of ${rollupPending.progress.totalStages}: ${rollupPending.progress.stageName}`
+                      : ''}.
+                    The page will refresh automatically.
+                  </Alert>
+                ) : loading ? (
                   <Box textAlign="center" py={4}>
                     <CircularProgress size={32} />
                     <Typography variant="body2" color="text.secondary" sx={{ mt: 1 }}>

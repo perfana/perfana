@@ -1,9 +1,9 @@
 'use client';
 
-import { Box, Divider, Typography, Tooltip, Switch, FormControlLabel } from '@mui/material';
+import { Alert, Box, Divider, Typography, Tooltip, Switch, FormControlLabel } from '@mui/material';
 import KPIDisplay from '../../shared/KPIDisplay';
 import SoftBadge from '../../shared/SoftBadge';
-import { TransactionStat, ThroughputStats } from '../types/performance-analysis.types';
+import { TransactionStat, ThroughputStats, RollupPendingState } from '../types/performance-analysis.types';
 import { formatNumber, getApdexLabel } from '../utils/performance-formatters';
 import { TestRun } from '@/types/test-runs';
 
@@ -17,6 +17,7 @@ interface PerformanceAnalysisCollapsedViewProps {
   testRun?: TestRun | null;
   excludeRampUp: boolean;
   onExcludeRampUpChange: (value: boolean) => void;
+  rollupPending: RollupPendingState | null;
 }
 
 export function PerformanceAnalysisCollapsedView({
@@ -29,6 +30,7 @@ export function PerformanceAnalysisCollapsedView({
   testRun,
   excludeRampUp,
   onExcludeRampUpChange,
+  rollupPending,
 }: PerformanceAnalysisCollapsedViewProps) {
   const hasPoorApdexTransactions = poorApdexTransactions.length > 0;
 
@@ -43,6 +45,24 @@ export function PerformanceAnalysisCollapsedView({
   const isRampUpState = !loading && !error && transactions.length === 0 && (
     testRun?.reasons_not_valid?.some(r => r.includes('ramp-up') || r.includes('steady-state')) || isInRampUpPhase
   );
+
+  if (rollupPending) {
+    return (
+      <Box sx={{ flexGrow: 1, display: 'flex', flexDirection: 'column', gap: 2.5 }}>
+        <Alert severity="info" sx={{ mt: 1 }}>
+          <Typography variant="body2" sx={{ fontWeight: 600 }}>
+            Performance analysis pending
+          </Typography>
+          <Typography variant="caption" color="text.secondary">
+            Available once the post-test rollup completes
+            {rollupPending.progress
+              ? ` (stage ${rollupPending.progress.stageIndex} of ${rollupPending.progress.totalStages}: ${rollupPending.progress.stageName})`
+              : ''}
+          </Typography>
+        </Alert>
+      </Box>
+    );
+  }
 
   return (
     <Box sx={{ flexGrow: 1, display: 'flex', flexDirection: 'column', gap: 2.5 }}>
