@@ -1,7 +1,8 @@
-import { Controller, Get, Param, Query, DefaultValuePipe, ParseBoolPipe, ParseIntPipe, Logger } from '@nestjs/common';
+import { Controller, Get, Param, Query, DefaultValuePipe, ParseBoolPipe, ParseIntPipe, Logger, HttpException, HttpStatus } from '@nestjs/common';
 import { ApiTags, ApiOperation, ApiResponse, ApiQuery, ApiParam, ApiBearerAuth } from '@nestjs/swagger';
 import { UserCtx, UserContext } from '../../../common/decorators/user-context.decorator';
 import { TestRunsService } from '../test-runs.service';
+import { isRollupPending } from '../services/test-runs-performance-query.types';
 
 /**
  * Transaction-level metrics and statistics endpoints.
@@ -63,7 +64,13 @@ export class TestRunsMetricsTransactionController {
   ) {
     const sinceMinutes = sinceMinutesRaw != null ? parseInt(sinceMinutesRaw, 10) : undefined;
     this.logger.debug('Getting transaction stats', { testRunId, excludeRampUp, sinceMinutes });
-    return this.testRunsService.getTransactionStats(testRunId, ctx.userId, ctx.roles, excludeRampUp, sinceMinutes);
+    const result = await this.testRunsService.getTransactionStats(
+      testRunId, ctx.userId, ctx.roles, excludeRampUp, sinceMinutes,
+    );
+    if (isRollupPending(result)) {
+      throw new HttpException(result, HttpStatus.ACCEPTED);
+    }
+    return result;
   }
 
   @Get(':testRunId/transactions/:transactionName/samples')
@@ -116,7 +123,13 @@ export class TestRunsMetricsTransactionController {
   ) {
     const sinceMinutes = sinceMinutesRaw != null ? parseInt(sinceMinutesRaw, 10) : undefined;
     this.logger.debug('Getting transaction samples', { testRunId, transactionName, excludeRampUp, sinceMinutes });
-    return this.testRunsService.getTransactionSamples(testRunId, transactionName, ctx.userId, ctx.roles, excludeRampUp, sinceMinutes);
+    const result = await this.testRunsService.getTransactionSamples(
+      testRunId, transactionName, ctx.userId, ctx.roles, excludeRampUp, sinceMinutes,
+    );
+    if (isRollupPending(result)) {
+      throw new HttpException(result, HttpStatus.ACCEPTED);
+    }
+    return result;
   }
 
   @Get(':testRunId/transactions/:transactionName/timeseries')
