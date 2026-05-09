@@ -100,12 +100,21 @@ export class TestRunsPerformanceQueryService {
    * - 'ready'           → rollup rows exist; callers should use the fast path.
    * - 'rollup-pending'  → rollup empty AND an active analyze-test job is
    *                       running for the run's scope (sut/env/workload).
-   *                       Controllers map this to HTTP 202 so the UI can
-   *                       render an informative pending state instead of
-   *                       stalling the DB on the live-aggregation fallback.
    * - 'unavailable'     → rollup empty AND no active job (soft-failure).
-   *                       Callers should preserve the existing
-   *                       live-aggregation fallback.
+   *
+   * **Status alone does NOT determine the HTTP outcome.** Callers also probe
+   * the live-Apdex CAGGs via `loadCaggApdexScope` before deciding whether to
+   * return 202 vs. 200. The decision tree at the call site is:
+   *
+   *   ready                       → return rollup-table result (200)
+   *   rollup-pending + CAGG ready → return CAGG result (200, live numbers)
+   *   rollup-pending + CAGG empty → return rollup-pending (controller maps to 202)
+   *   unavailable    + CAGG ready → return CAGG result (200)
+   *   unavailable    + CAGG empty → fall through to raw-scan with safety net
+   *
+   * The CAGG arms were added by migration `1779100000000` and the live-Apdex
+   * fast path in `getTransactionStatsFromCagg` / `getTransactionSamplesFromCagg`.
+   * Before that change, `'rollup-pending'` always resolved to 202 (PR #302).
    *
    * Note: between the rollup-existence check and the active-job lookup the
    * rollup pipeline could complete, returning 'rollup-pending' for a run that
