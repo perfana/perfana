@@ -32,8 +32,6 @@ export interface UsePerformanceAnalysisDataProps {
   testRunId: string;
   /** Full test run object — used to determine running state and elapsed duration */
   testRun?: TestRun | null;
-  /** Increments each time the test run entity receives a realtime update (triggers refresh) */
-  realtimeTrigger?: number;
 }
 
 export interface UsePerformanceAnalysisDataReturn {
@@ -93,7 +91,6 @@ export interface UsePerformanceAnalysisDataReturn {
 export function usePerformanceAnalysisData({
   testRunId,
   testRun,
-  realtimeTrigger = 0,
 }: UsePerformanceAnalysisDataProps): UsePerformanceAnalysisDataReturn {
   // Core state
   const [loading, setLoading] = useState(false);
@@ -268,18 +265,6 @@ export function usePerformanceAnalysisData({
       fetchThroughputStats();
     }
   }, [testRunId, excludeRampUp, fetchTransactions, fetchTestLevelThreshold, fetchVirtualUserStats, fetchThroughputStats]);
-
-  // Realtime refresh: whenever the test run entity is updated (realtimeTrigger increments)
-  // and the test is still running, refresh transaction stats to show live Apdex scores.
-  // Skip the first render (trigger=0) to avoid a double-fetch on mount.
-  useEffect(() => {
-    if (realtimeTrigger > 0 && isRunning && testRunId) {
-      fetchTransactions();
-      fetchVirtualUserStats();
-      fetchThroughputStats();
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [realtimeTrigger]);
 
   // While the rollup-pending gate is active, poll every 5s so the card transitions
   // out of the pending state once the post-test rollup completes — even on completed

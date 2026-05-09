@@ -99,8 +99,6 @@ interface UseTestRunDataReturn {
   refreshTestRun: () => Promise<void>;
   editingState: EditingState;
   setEditingState: React.Dispatch<React.SetStateAction<EditingState>>;
-  /** Increments each time a realtime update is received for this test run. Use as a refresh trigger in child components. */
-  realtimeTrigger: number;
 }
 
 /**
@@ -123,10 +121,6 @@ export function useTestRunData({ testRunId, onLoadComplete }: UseTestRunDataOpti
     annotationsSaving: false,
   });
 
-  // Counter that increments on every realtime update — used by child components to trigger
-  // data refreshes in sync with the test run entity update cadence.
-  const [realtimeTrigger, setRealtimeTrigger] = useState(0);
-
   // Real-time updates subscription
   useTestRunRealtime({
     enabled: true,
@@ -143,9 +137,6 @@ export function useTestRunData({ testRunId, onLoadComplete }: UseTestRunDataOpti
         if (!areTestRunsEqual(testRun, normalizedTestRun)) {
           setTestRun(normalizedTestRun);
         }
-
-        // Always increment the trigger so downstream consumers know an update arrived
-        setRealtimeTrigger((n) => n + 1);
       }
     },
   });
@@ -217,6 +208,5 @@ export function useTestRunData({ testRunId, onLoadComplete }: UseTestRunDataOpti
     refreshTestRun,
     editingState,
     setEditingState,
-    realtimeTrigger,
   };
 }
