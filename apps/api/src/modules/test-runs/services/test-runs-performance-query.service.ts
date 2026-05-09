@@ -1397,6 +1397,123 @@ export class TestRunsPerformanceQueryService {
   }
 
   /**
+   * Single round-trip scope lookup for the live-Apdex CAGG fast path.
+   *
+   * Mirrors `loadThroughputRunInfo`, but:
+   *   - returns the `workload` string (workload is NOT a CAGG dimension, but
+   *     the live Apdex query joins workload-level thresholds against the
+   *     post-aggregation result later — and a single test_run has a single
+   *     workload, so we resolve it here in the same round-trip)
+   *   - probes the new success-filtered CAGGs (`transactions_passed_5s` and
+   *     `requests_raw_passed_5s`, added in migration `1779100000000`) rather
+   *     than the existing all-rows `_5s` CAGGs. The `_passed_5s` CAGGs are the
+   *     authoritative signal for "is the live Apdex CAGG path viable?" — a
+   *     non-empty `_5s` CAGG without a matching `_passed_5s` row would yield a
+   *     wrong Apdex (we'd treat all hits as passing).
+   *   - reports the two probe results separately so the caller can pick the
+   *     right CAGG family per request type (transaction vs sampler/request)
+   *
+   * Returns null when the run doesn't exist or the org filter excludes the
+   * caller — matches the empty-result semantics of `loadThroughputRunInfo`.
+   *
+   * For in-flight runs (`tr.end_time IS NULL`), the upper bucket bound is
+   * clamped to `NOW() + 5 seconds` so the EXISTS probes still see freshly
+   * refreshed CAGG buckets during a running test.
+   */
+  // @ts-expect-error TS6133 — wired into getTransactionStats / getTransactionSamples in Task 4/5 of the live-Apdex CAGG plan; tested in isolation here.
+  private async loadCaggApdexScope(
+    resolvedTestRunId: string,
+    excludeRampUp: boolean,
+    isAdmin: boolean,
+    organizationIds: string[],
+  ): Promise<{
+    sut: string;
+    env: string;
+    workload: string | null;
+    startTime: Date;
+    endTime: Date;
+    cutoffTime: Date | null;
+    hasTransactionsCagg: boolean;
+    hasRequestsRawCagg: boolean;
+  } | null> {
+    const orgFilterClause = !isAdmin ? 'AND sut.organization_id = ANY($2::uuid[])' : '';
+
+    const query = `
+      SELECT
+        sut.name             AS sut,
+        tr.test_environment  AS env,
+        tr.workload          AS workload,
+        tr.start_time        AS start_time,
+        tr.end_time          AS end_time,
+        tr.ramp_up           AS ramp_up,
+        EXISTS (
+          SELECT 1 FROM transactions_passed_5s c
+          WHERE c.system_under_test = sut.name
+            AND c.test_environment  = tr.test_environment
+            AND c.bucket >= tr.start_time
+            AND c.bucket <  COALESCE(tr.end_time, NOW()) + interval '5 seconds'
+        ) AS has_transactions_cagg,
+        EXISTS (
+          SELECT 1 FROM requests_raw_passed_5s c
+          WHERE c.system_under_test = sut.name
+            AND c.test_environment  = tr.test_environment
+            AND c.bucket >= tr.start_time
+            AND c.bucket <  COALESCE(tr.end_time, NOW()) + interval '5 seconds'
+        ) AS has_requests_raw_cagg
+      FROM test_runs tr
+      JOIN systems_under_test sut ON sut.id = tr.system_under_test_id
+      WHERE tr.test_run_id = $1
+        ${orgFilterClause}
+      LIMIT 1
+    `;
+
+    const params: unknown[] = !isAdmin
+      ? [resolvedTestRunId, organizationIds]
+      : [resolvedTestRunId];
+
+    const rows = await withRequestEm(this.testRunRepo).query(query, params);
+    if (!rows || rows.length === 0) return null;
+
+    const row = rows[0] as {
+      sut: string;
+      env: string;
+      workload: string | null;
+      start_time: string | Date | null;
+      end_time: string | Date | null;
+      ramp_up: string | number | null;
+      has_transactions_cagg: boolean;
+      has_requests_raw_cagg: boolean;
+    };
+
+    if (!row.start_time) return null;
+
+    const startTime = new Date(row.start_time);
+    // For an in-flight run, end_time is null; clamp to NOW() so the
+    // bucket-window query above works and live windows during a running
+    // test go through the same path.
+    const endTime = row.end_time ? new Date(row.end_time) : new Date();
+
+    let cutoffTime: Date | null = null;
+    if (excludeRampUp && row.ramp_up != null) {
+      const rampUpSeconds = this.mapper.parseInt(row.ramp_up);
+      if (rampUpSeconds > 0) {
+        cutoffTime = new Date(startTime.getTime() + rampUpSeconds * 1000);
+      }
+    }
+
+    return {
+      sut: row.sut,
+      env: row.env,
+      workload: row.workload,
+      startTime,
+      endTime,
+      cutoffTime,
+      hasTransactionsCagg: row.has_transactions_cagg === true,
+      hasRequestsRawCagg: row.has_requests_raw_cagg === true,
+    };
+  }
+
+  /**
    * CAGG-backed throughput. Reads from the 5 s continuous aggregates
    * (`transactions_5s`, `requests_raw_5s`) instead of scanning the raw
    * hypertables. The CAGG already carries `n` (count per 5 s bucket per

@@ -2092,4 +2092,108 @@ describe('TestRunsPerformanceQueryService', () => {
       expect(mockJobProgressService.getActiveJobForScope).not.toHaveBeenCalled();
     });
   });
+
+  // =========================================================================
+  // loadCaggApdexScope (private helper for the live-Apdex CAGG fast path)
+  // =========================================================================
+
+  describe('loadCaggApdexScope', () => {
+    type LoadCaggApdexScopeFn = (
+      testRunId: string,
+      excludeRampUp: boolean,
+      isAdmin: boolean,
+      orgs: string[],
+    ) => Promise<{
+      sut: string;
+      env: string;
+      workload: string | null;
+      startTime: Date;
+      endTime: Date;
+      cutoffTime: Date | null;
+      hasTransactionsCagg: boolean;
+      hasRequestsRawCagg: boolean;
+    } | null>;
+
+    const callHelper = (
+      testRunId: string,
+      excludeRampUp: boolean,
+      isAdmin: boolean,
+      orgs: string[],
+    ) =>
+      (service as unknown as { loadCaggApdexScope: LoadCaggApdexScopeFn }).loadCaggApdexScope(
+        testRunId,
+        excludeRampUp,
+        isAdmin,
+        orgs,
+      );
+
+    it('returns scope + workload + has-cagg flags when the run exists and CAGGs are populated', async () => {
+      (testRunRepo.query as jest.Mock).mockResolvedValueOnce([
+        {
+          sut: 'webshop',
+          env: 'acc',
+          workload: 'loadTest',
+          start_time: '2024-01-01T10:00:00Z',
+          end_time: '2024-01-01T10:30:00Z',
+          ramp_up: '60',
+          has_transactions_cagg: true,
+          has_requests_raw_cagg: true,
+        },
+      ]);
+
+      const scope = await callHelper(TEST_RUN_ID, true, IS_ADMIN, []);
+
+      expect(scope).not.toBeNull();
+      expect(scope!.sut).toBe('webshop');
+      expect(scope!.env).toBe('acc');
+      expect(scope!.workload).toBe('loadTest');
+      expect(scope!.startTime).toEqual(new Date('2024-01-01T10:00:00Z'));
+      expect(scope!.endTime).toEqual(new Date('2024-01-01T10:30:00Z'));
+      // ramp_up = 60s + excludeRampUp=true → cutoffTime = startTime + 60_000ms
+      expect(scope!.cutoffTime).toEqual(new Date('2024-01-01T10:01:00Z'));
+      expect(scope!.hasTransactionsCagg).toBe(true);
+      expect(scope!.hasRequestsRawCagg).toBe(true);
+    });
+
+    it('returns null when the run does not exist or the org filter excludes the user', async () => {
+      (testRunRepo.query as jest.Mock).mockResolvedValueOnce([]);
+
+      const scope = await callHelper(TEST_RUN_ID, false, NOT_ADMIN, ['org-1']);
+
+      expect(scope).toBeNull();
+    });
+
+    it('reports has-cagg flags as false when the CAGG has no rows', async () => {
+      (testRunRepo.query as jest.Mock).mockResolvedValueOnce([
+        {
+          sut: 'webshop',
+          env: 'acc',
+          workload: null,
+          start_time: '2024-01-01T10:00:00Z',
+          end_time: '2024-01-01T10:30:00Z',
+          ramp_up: null,
+          has_transactions_cagg: false,
+          has_requests_raw_cagg: false,
+        },
+      ]);
+
+      const scope = await callHelper(TEST_RUN_ID, true, IS_ADMIN, []);
+
+      expect(scope).not.toBeNull();
+      expect(scope!.hasTransactionsCagg).toBe(false);
+      expect(scope!.hasRequestsRawCagg).toBe(false);
+      expect(scope!.cutoffTime).toBeNull();
+      expect(scope!.workload).toBeNull();
+    });
+
+    it('passes organizationIds for non-admin and applies the org filter clause', async () => {
+      (testRunRepo.query as jest.Mock).mockResolvedValueOnce([]);
+
+      await callHelper(TEST_RUN_ID, false, NOT_ADMIN, ['org-1']);
+
+      const call = (testRunRepo.query as jest.Mock).mock.calls[0];
+      expect(call[0]).toMatch(/sut\.organization_id\s*=\s*ANY\(\$2::uuid\[\]\)/);
+      expect(call[1]).toEqual([TEST_RUN_ID, ['org-1']]);
+    });
+  });
 });
