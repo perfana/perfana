@@ -351,6 +351,157 @@ export class TestRunsPerformanceQueryService {
   }
 
   /**
+   * CAGG-backed live aggregation for transaction stats. Reads from
+   * `transactions_5s` (counts + all-rows percentile sketch) joined with
+   * `transactions_passed_5s` (success-filtered percentile sketch added in
+   * migration 1779100000000) instead of scanning raw `transactions`.
+   *
+   * Apdex correctness: uses `rollup(pct_agg_passed)` for the
+   * `approx_percentile_rank` inputs — same shape as the rollup-table fast
+   * path post-#298. p95/p99 still come from `rollup(pct_agg)` (all rows),
+   * matching the rollup behaviour: percentile reporting includes failures
+   * because slow failures are still slow.
+   *
+   * Threshold lookup: workload is read once from `test_runs` in the
+   * scope-loader (`loadCaggApdexScope`) and passed through here as
+   * `scope.workload`. CAGGs are not workload-keyed (one row in scope =
+   * one workload per test_run), so the workload-level / per-transaction
+   * threshold tables are joined post-aggregation against the small
+   * per-transaction result. The threshold tables are keyed by
+   * `system_under_test_id` (UUID), which we read once from `test_runs`
+   * in the scope-loader and pass through as `scope.systemUnderTestId`
+   * — a UUID match (cross-org safe) rather than a name match (which is
+   * not unique across orgs).
+   *
+   * Precision tradeoff vs. the rollup table: the rollup table sketches
+   * are over the exact ramp-up cutoff (per-row `t.time >= cutoff`); the
+   * CAGG path filters on 5 s bucket boundaries
+   * (`c.bucket >= time_bucket('5s', cutoff)`), so up to one 5 s bucket of
+   * ramp-up data may be included or excluded. Negligible for full-test
+   * Apdex; documented for transparency.
+   *
+   * Wrapped in `withStatementTimeout` for consistency with the raw-scan
+   * fallback. CAGG reads are typically <500 ms even for 10M-row runs, but
+   * the wrap is cheap insurance and matches the project pattern.
+   */
+  private async getTransactionStatsFromCagg(
+    scope: {
+      sut: string;
+      systemUnderTestId: string;
+      env: string;
+      workload: string | null;
+      startTime: Date;
+      endTime: Date;
+      cutoffTime: Date | null;
+    },
+    excludeRampUp: boolean,
+  ): Promise<TransactionStats[]> {
+    const params: unknown[] = [
+      scope.sut, scope.env,                                          // $1, $2
+      scope.startTime, scope.endTime,                                // $3, $4
+      excludeRampUp, scope.cutoffTime,                               // $5, $6
+      scope.workload,                                                // $7 (for threshold join)
+      scope.systemUnderTestId,                                       // $8 (FK for threshold join — cross-org safe)
+    ];
+
+    const query = `
+      WITH agg AS (
+        SELECT
+          c.transaction_name,
+          c.scenario_name,
+          SUM(c.n)::bigint                                          AS total_count,
+          SUM(c.n_ok)::bigint                                       AS passed_count,
+          SUM(c.n_err)::bigint                                      AS failed_count,
+          ROUND((SUM(c.avg_rt * c.n) / NULLIF(SUM(c.n),0))::numeric, 2)  AS avg_response_time,
+          rollup(c.pct_agg)                                         AS pct_agg_all,
+          rollup(p.pct_agg_passed)                                  AS pct_agg_passed,
+          ROUND((SUM(c.avg_rt * c.n))::numeric, 2)                  AS impact_score
+        FROM transactions_5s c
+        JOIN transactions_passed_5s p
+          ON  c.bucket            = p.bucket
+          AND c.system_under_test = p.system_under_test
+          AND c.test_environment  = p.test_environment
+          AND c.scenario_name IS NOT DISTINCT FROM p.scenario_name
+          AND c.transaction_name  = p.transaction_name
+        WHERE c.system_under_test = $1
+          AND c.test_environment  = $2
+          AND c.bucket >= $3::timestamptz
+          AND c.bucket <  $4::timestamptz + interval '5 seconds'
+          AND ($5::boolean = false OR $6::timestamptz IS NULL
+               OR c.bucket >= time_bucket('5 seconds'::interval, $6::timestamptz))
+        GROUP BY c.transaction_name, c.scenario_name
+      ),
+      threshold_per_tx AS (
+        SELECT
+          a.transaction_name,
+          a.scenario_name,
+          COALESCE(wtat.apdex_threshold, wat.apdex_threshold, 500) AS active_threshold
+        FROM agg a
+        LEFT JOIN workload_apdex_thresholds wat
+          ON  wat.system_under_test_id = $8::uuid
+          AND wat.test_environment     = $2
+          AND wat.workload             = $7
+        LEFT JOIN workload_transaction_apdex_thresholds wtat
+          ON  wtat.system_under_test_id = $8::uuid
+          AND wtat.test_environment     = $2
+          AND wtat.workload             = $7
+          AND wtat.transaction_name     = a.transaction_name
+      ),
+      scored AS (
+        SELECT
+          a.transaction_name, a.scenario_name,
+          a.total_count, a.passed_count, a.failed_count,
+          a.avg_response_time,
+          ROUND(approx_percentile(0.95, a.pct_agg_all)::numeric, 2) AS p95_response_time,
+          ROUND(approx_percentile(0.99, a.pct_agg_all)::numeric, 2) AS p99_response_time,
+          a.impact_score, t.active_threshold,
+          ROUND(
+            (
+              approx_percentile_rank(t.active_threshold::double precision, a.pct_agg_passed)
+              + (approx_percentile_rank((t.active_threshold * 4)::double precision, a.pct_agg_passed)
+                 - approx_percentile_rank(t.active_threshold::double precision, a.pct_agg_passed)) / 2
+            )::numeric, 3
+          ) AS apdex_score
+        FROM agg a
+        JOIN threshold_per_tx t
+          ON  t.transaction_name = a.transaction_name
+          AND t.scenario_name IS NOT DISTINCT FROM a.scenario_name
+      )
+      SELECT
+        transaction_name, scenario_name,
+        total_count, passed_count, failed_count,
+        avg_response_time, p95_response_time, p99_response_time,
+        impact_score, active_threshold, apdex_score,
+        RANK() OVER (ORDER BY impact_score DESC) AS ranking
+      FROM scored
+      ORDER BY transaction_name ASC
+    `;
+
+    const result = await this.withStatementTimeout(async (em) => {
+      await em.query(`SET LOCAL work_mem = '256MB'`);
+      return em.query(query, params);
+    });
+
+    this.logger.log(
+      `Retrieved ${result.length} transaction stats (CAGG) for sut=${scope.sut} env=${scope.env}`,
+    );
+
+    return result.map((row: Record<string, unknown>) => ({
+      transaction_name: row.transaction_name as string,
+      scenario_name: (row.scenario_name as string) || undefined,
+      avg_response_time: this.mapper.parseFloat(row.avg_response_time),
+      p95_response_time: this.mapper.parseFloat(row.p95_response_time),
+      p99_response_time: this.mapper.parseFloat(row.p99_response_time),
+      passed_count: this.mapper.parseInt(row.passed_count),
+      failed_count: this.mapper.parseInt(row.failed_count),
+      total_count: this.mapper.parseInt(row.total_count),
+      ranking: this.mapper.parseFloat(row.ranking),
+      apdex_score: this.mapper.parseFloat(row.apdex_score),
+      active_threshold: this.mapper.parseInt(row.active_threshold, 500),
+    }));
+  }
+
+  /**
    * Fast-path sampler stats read: pulls pre-computed tdigest + counts from
    * test_run_sampler_stats filtered by `ramp_up_excluded`, joins current
    * threshold + url_patterns, and computes Apdex / p95 / p99 at read time.
@@ -522,12 +673,12 @@ export class TestRunsPerformanceQueryService {
       // drops from seconds-to-minutes to <100ms.
       // See: issues #150, #151.
       //
-      // Three-arm gate (rollup-pending plan):
+      // Three-arm gate (rollup-pending plan), with CAGG fast path inserted:
       //   ready           → fast-path read from rollup
-      //   rollup-pending  → analyze-test still running; bubble RollupPendingResult
-      //                     so the controller maps to HTTP 202 instead of
-      //                     stalling on the live-aggregation fallback
-      //   unavailable     → soft-failed rollup; fall through to live aggregation
+      //   rollup-pending  → defer 202 until we've also probed the CAGG; if
+      //                     CAGG has data we serve a live 200 instead.
+      //   unavailable     → try CAGG; else fall through to live aggregation
+      let pendingRollup: RollupPendingResult | null = null;
       if (clampedSinceMinutes == null) {
         const rollupStatus = await this.getRollupStatus(resolvedTestRunId, isAdmin, organizationIds);
         if (rollupStatus.status === 'ready') {
@@ -539,12 +690,59 @@ export class TestRunsPerformanceQueryService {
           );
         }
         if (rollupStatus.status === 'rollup-pending') {
-          this.logger.debug(
-            `Rollup pending for ${resolvedTestRunId}; returning rollup-pending result`,
-          );
-          return rollupStatus;
+          // Hold the pending result; CAGG may serve a live 200 below. If the
+          // CAGG is empty too we'll return this and the controller maps it
+          // to HTTP 202 (preserves the pending-gate plan's cold-start
+          // behaviour).
+          pendingRollup = rollupStatus;
         }
-        // status === 'unavailable' → fall through to live aggregation
+        // status === 'unavailable' → try CAGG below, else fall through to
+        // live aggregation
+      }
+
+      // CAGG fast path: live-Apdex path that avoids the raw transactions
+      // hypertable scan by reading from transactions_5s + transactions_passed_5s.
+      // Used when:
+      //   (a) clampedSinceMinutes == null AND rollup is 'rollup-pending' or
+      //       'unavailable' AND the CAGG has data for this run's window —
+      //       preferred over both 202 (better UX: live numbers) and raw scan
+      //       (faster + more correct Apdex since pct_agg_passed is
+      //       success-filtered post-#298 / migration 1779100000000)
+      //   (b) clampedSinceMinutes != null — live windows during a running
+      //       test (the pre-CAGG raw scan was clamped to 60 min +
+      //       statement_timeout 10s; CAGG reads typically <500 ms even for
+      //       10M-row runs)
+      //
+      // Note (rollup-pending plan interaction): when the rollup status was
+      // 'rollup-pending' and we now serve from CAGG, we override the 202.
+      const caggScope = await this.loadCaggApdexScope(
+        resolvedTestRunId,
+        excludeRampUp,
+        isAdmin,
+        organizationIds,
+      );
+      if (caggScope?.hasTransactionsCagg) {
+        // For live windows, narrow the scope's startTime to NOW() - sinceMinutes
+        // (or keep scope.startTime if it's later than the live cutoff).
+        const adjustedScope = clampedSinceMinutes != null
+          ? {
+              ...caggScope,
+              startTime: new Date(Math.max(
+                caggScope.startTime.getTime(),
+                Date.now() - clampedSinceMinutes * 60_000,
+              )),
+            }
+          : caggScope;
+        return await this.getTransactionStatsFromCagg(adjustedScope, excludeRampUp);
+      }
+      // No CAGG: if rollup was 'rollup-pending', return that pending result
+      // (controller maps it to 202). Otherwise fall through to the raw-scan
+      // safety net below.
+      if (pendingRollup) {
+        this.logger.debug(
+          `Rollup pending for ${resolvedTestRunId} and CAGG empty; returning rollup-pending result`,
+        );
+        return pendingRollup;
       }
 
       const cutoffTime = await this.getRampUpCutoffTime(resolvedTestRunId, excludeRampUp);
@@ -1420,7 +1618,6 @@ export class TestRunsPerformanceQueryService {
    * clamped to `NOW() + 5 seconds` so the EXISTS probes still see freshly
    * refreshed CAGG buckets during a running test.
    */
-  // @ts-expect-error TS6133 — wired into getTransactionStats / getTransactionSamples in Task 4/5 of the live-Apdex CAGG plan; tested in isolation here.
   private async loadCaggApdexScope(
     resolvedTestRunId: string,
     excludeRampUp: boolean,
@@ -1428,6 +1625,7 @@ export class TestRunsPerformanceQueryService {
     organizationIds: string[],
   ): Promise<{
     sut: string;
+    systemUnderTestId: string;
     env: string;
     workload: string | null;
     startTime: Date;
@@ -1440,12 +1638,13 @@ export class TestRunsPerformanceQueryService {
 
     const query = `
       SELECT
-        sut.name             AS sut,
-        tr.test_environment  AS env,
-        tr.workload          AS workload,
-        tr.start_time        AS start_time,
-        tr.end_time          AS end_time,
-        tr.ramp_up           AS ramp_up,
+        sut.name                AS sut,
+        tr.system_under_test_id AS system_under_test_id,
+        tr.test_environment     AS env,
+        tr.workload             AS workload,
+        tr.start_time           AS start_time,
+        tr.end_time             AS end_time,
+        tr.ramp_up              AS ramp_up,
         EXISTS (
           SELECT 1 FROM transactions_passed_5s c
           WHERE c.system_under_test = sut.name
@@ -1476,6 +1675,7 @@ export class TestRunsPerformanceQueryService {
 
     const row = rows[0] as {
       sut: string;
+      system_under_test_id: string;
       env: string;
       workload: string | null;
       start_time: string | Date | null;
@@ -1503,6 +1703,7 @@ export class TestRunsPerformanceQueryService {
 
     return {
       sut: row.sut,
+      systemUnderTestId: row.system_under_test_id,
       env: row.env,
       workload: row.workload,
       startTime,

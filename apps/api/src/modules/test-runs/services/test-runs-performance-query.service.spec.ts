@@ -238,6 +238,20 @@ describe('TestRunsPerformanceQueryService', () => {
     );
 
   /**
+   * The CAGG fast path (live-Apdex CAGG plan, Task 4/5) issues a scope-loader
+   * query against `test_runs` joined with `systems_under_test` that probes
+   * `transactions_passed_5s` / `requests_raw_passed_5s` via EXISTS. Live-agg
+   * fallback tests want this lookup to appear as "no CAGG data" so it doesn't
+   * consume a configured result-sequence entry. Returning `[]` makes
+   * `loadCaggApdexScope()` resolve to `null`, which preserves the
+   * raw-scan behaviour the existing tests assert.
+   */
+  const isCaggScopeLookup = (sql: unknown): boolean =>
+    typeof sql === 'string' &&
+    /has_transactions_cagg/i.test(sql) &&
+    /has_requests_raw_cagg/i.test(sql);
+
+  /**
    * Configures testRunRepo.query so that the first call (UUID lookup) returns
    * the given test_run_id, and all subsequent calls return the provided rows.
    * `SET LOCAL work_mem` preludes are treated as no-op steps.
@@ -252,6 +266,7 @@ describe('TestRunsPerformanceQueryService', () => {
       if (isSetLocalWorkMem(sql)) return [];
       if (isRollupExistenceCheck(sql)) return [];
       if (isRollupScopeLookup(sql)) return [];
+      if (isCaggScopeLookup(sql)) return [];
       if (!uuidServed) {
         uuidServed = true;
         return [{ test_run_id: resolvedTestRunId }];
@@ -273,6 +288,7 @@ describe('TestRunsPerformanceQueryService', () => {
       if (isSetLocalWorkMem(sql)) return [];
       if (isRollupExistenceCheck(sql)) return [];
       if (isRollupScopeLookup(sql)) return [];
+      if (isCaggScopeLookup(sql)) return [];
       const r = results[idx] ?? [];
       idx++;
       return r;
@@ -292,6 +308,7 @@ describe('TestRunsPerformanceQueryService', () => {
       if (isSetLocalWorkMem(sql)) return [];
       if (isRollupExistenceCheck(sql)) return [{ '?column?': 1 }];
       if (isRollupScopeLookup(sql)) return [];
+      if (isCaggScopeLookup(sql)) return [];
       // Everything else: the rollup read (no UUID lookup for plain test_run_id).
       return rollupRows;
     });
@@ -395,10 +412,10 @@ describe('TestRunsPerformanceQueryService', () => {
 
         // Assert
         expect(result).toHaveLength(1);
-        // 6 calls: rollup existence check + scope lookup (rollup-pending gate)
-        // + ramp-up lookup + SET LOCAL statement_timeout + SET LOCAL work_mem
-        // + stats query
-        expect(testRunRepo.query).toHaveBeenCalledTimes(6);
+        // 7 calls: rollup existence check + scope lookup (rollup-pending gate)
+        // + CAGG scope lookup (live-Apdex CAGG plan) + ramp-up lookup
+        // + SET LOCAL statement_timeout + SET LOCAL work_mem + stats query
+        expect(testRunRepo.query).toHaveBeenCalledTimes(7);
         const calls = (testRunRepo.query as jest.Mock).mock.calls;
         expect(calls.some(([sql]) => (sql as string).includes('SELECT start_time, ramp_up'))).toBe(true);
       });
@@ -727,6 +744,9 @@ describe('TestRunsPerformanceQueryService', () => {
           stage: 'transaction-stats-rollup',
           progress: { stageName: 'transaction-stats-rollup', stageIndex: 4, totalStages: 11 },
         } as never);
+        // CAGG fast path probes scope after getRollupStatus; null = no CAGG
+        // data → fall through to the pending result (controller maps to 202).
+        jest.spyOn(service as never, 'loadCaggApdexScope').mockResolvedValue(null as never);
 
         const result = await service.getTransactionStats(TEST_RUN_ID, false, IS_ADMIN, []);
 
@@ -815,6 +835,208 @@ describe('TestRunsPerformanceQueryService', () => {
         expect(
           calls.some((sql) => typeof sql === 'string' && (sql as string).includes('statement_timeout')),
         ).toBe(true);
+      });
+    });
+
+    // ---------------------------------------------------------------------
+    // CAGG fast path (live-Apdex CAGG plan, Task 4)
+    // ---------------------------------------------------------------------
+
+    describe('CAGG fast path', () => {
+      const baseScope = {
+        sut: 'demo-sut',
+        systemUnderTestId: 'sut-uuid-1',
+        env: 'prod',
+        workload: 'wl-1',
+        startTime: new Date('2026-05-09T10:00:00Z'),
+        endTime: new Date('2026-05-09T10:30:00Z'),
+        cutoffTime: null,
+        hasTransactionsCagg: true,
+        hasRequestsRawCagg: true,
+      };
+
+      const RAW_CAGG_ROW = {
+        transaction_name: 'tx',
+        scenario_name: 'sc',
+        total_count: '100',
+        passed_count: '95',
+        failed_count: '5',
+        avg_response_time: '420.50',
+        p95_response_time: '900.00',
+        p99_response_time: '1200.00',
+        impact_score: '42050.00',
+        active_threshold: '500',
+        apdex_score: '0.875',
+        ranking: '1',
+      };
+
+      it('runs the CAGG query and returns mapped stats', async () => {
+        jest
+          .spyOn(service as never, 'getRollupStatus')
+          .mockResolvedValue({ status: 'unavailable' } as never);
+        jest
+          .spyOn(service as never, 'loadCaggApdexScope')
+          .mockResolvedValue(baseScope as never);
+        // CAGG query routes through manager.transaction → mapped query mock.
+        (testRunRepo.query as jest.Mock).mockImplementation(async (sql: unknown) => {
+          if (isSetLocalWorkMem(sql)) return [];
+          if (typeof sql === 'string' && /transactions_passed_5s/.test(sql)) {
+            return [RAW_CAGG_ROW];
+          }
+          return [];
+        });
+
+        const result = await service.getTransactionStats(TEST_RUN_ID, false, IS_ADMIN, []);
+
+        expect(Array.isArray(result)).toBe(true);
+        expect((result as Array<Record<string, unknown> & { transaction_name?: string }>)[0]).toMatchObject({
+          transaction_name: 'tx',
+          total_count: 100,
+          passed_count: 95,
+          failed_count: 5,
+          apdex_score: 0.875,
+          active_threshold: 500,
+        });
+      });
+
+      it('JOINs transactions_5s and transactions_passed_5s on (bucket, sut, env, scenario, transaction)', async () => {
+        jest
+          .spyOn(service as never, 'getRollupStatus')
+          .mockResolvedValue({ status: 'unavailable' } as never);
+        jest
+          .spyOn(service as never, 'loadCaggApdexScope')
+          .mockResolvedValue(baseScope as never);
+
+        const sqlSeen: string[] = [];
+        (testRunRepo.query as jest.Mock).mockImplementation(async (sql: unknown) => {
+          if (typeof sql === 'string') sqlSeen.push(sql);
+          if (isSetLocalWorkMem(sql)) return [];
+          return [];
+        });
+
+        await service.getTransactionStats(TEST_RUN_ID, false, IS_ADMIN, []);
+
+        const sql = sqlSeen.find((s) => /transactions_5s/.test(s));
+        expect(sql).toBeDefined();
+        expect(sql!).toMatch(/FROM\s+transactions_5s/);
+        expect(sql!).toMatch(/JOIN\s+transactions_passed_5s/);
+        // JOIN keys
+        expect(sql!).toMatch(/c\.bucket\s*=\s*p\.bucket/);
+        expect(sql!).toMatch(/c\.system_under_test\s*=\s*p\.system_under_test/);
+        expect(sql!).toMatch(/c\.transaction_name\s*=\s*p\.transaction_name/);
+        // Aggregation: rollup(c.pct_agg) (all rows for percentiles) and
+        // rollup(p.pct_agg_passed) (success-filtered for Apdex).
+        expect(sql!).toMatch(/rollup\(c\.pct_agg\)/);
+        expect(sql!).toMatch(/rollup\(p\.pct_agg_passed\)/);
+        // Apdex uses pct_agg_passed (success-filtered) — the post-#298 fix.
+        expect(sql!).toMatch(
+          /approx_percentile_rank\([\s\S]*?active_threshold[\s\S]*?pct_agg_passed[\s\S]*?\)/,
+        );
+        // Threshold join uses the SUT UUID (FK from test_runs) rather than
+        // matching `systems_under_test.name`, which is not unique across orgs.
+        expect(sql!).toMatch(/wat\.system_under_test_id\s*=\s*\$8::uuid/);
+        expect(sql!).toMatch(/wtat\.system_under_test_id\s*=\s*\$8::uuid/);
+        expect(sql!).not.toMatch(/JOIN\s+systems_under_test\s+sut\s+ON\s+sut\.name\s*=\s*\$1/);
+      });
+
+      it('falls through to raw scan when transactions_passed CAGG is empty for the window', async () => {
+        jest
+          .spyOn(service as never, 'getRollupStatus')
+          .mockResolvedValue({ status: 'unavailable' } as never);
+        jest
+          .spyOn(service as never, 'loadCaggApdexScope')
+          .mockResolvedValue({ ...baseScope, hasTransactionsCagg: false } as never);
+        // Live-agg path: rollup existence check + CAGG scope skip + stats query
+        mockQuerySequence([RAW_TRANSACTION_ROW]);
+
+        const result = await service.getTransactionStats(TEST_RUN_ID, false, IS_ADMIN, []);
+
+        expect(Array.isArray(result)).toBe(true);
+        const calls = (testRunRepo.query as jest.Mock).mock.calls;
+        // Confirm we did NOT issue the CAGG-specific query (no transactions_passed_5s).
+        const ranCagg = calls.some(([sql]: [unknown]) =>
+          typeof sql === 'string' && /transactions_passed_5s/.test(sql as string),
+        );
+        expect(ranCagg).toBe(false);
+        // Confirm the raw-scan path ran (FROM transactions t).
+        const ranRaw = calls.some(([sql]: [unknown]) =>
+          typeof sql === 'string' && /FROM\s+transactions\s+t\b/.test(sql as string),
+        );
+        expect(ranRaw).toBe(true);
+      });
+
+      it('uses the CAGG path even when sinceMinutes is set (live window)', async () => {
+        const getRollupStatusSpy = jest.spyOn(service as never, 'getRollupStatus');
+        const loadCaggApdexScopeSpy = jest
+          .spyOn(service as never, 'loadCaggApdexScope')
+          .mockResolvedValue(baseScope as never);
+        const getTransactionStatsFromCaggSpy = jest
+          .spyOn(service as never, 'getTransactionStatsFromCagg')
+          .mockResolvedValue([] as never);
+
+        const sinceMinutes = 5;
+        const before = Date.now();
+        await service.getTransactionStats(TEST_RUN_ID, false, IS_ADMIN, [], sinceMinutes);
+        const after = Date.now();
+
+        // getRollupStatus must NOT be called when sinceMinutes is set.
+        expect(getRollupStatusSpy).not.toHaveBeenCalled();
+        expect(loadCaggApdexScopeSpy).toHaveBeenCalled();
+        // getTransactionStatsFromCagg called with adjusted scope; startTime
+        // is max(scope.startTime, NOW() - sinceMinutes*60_000). The stub
+        // baseScope.startTime is from 2026 (well in the past), so the
+        // live cutoff wins.
+        expect(getTransactionStatsFromCaggSpy).toHaveBeenCalledTimes(1);
+        const passedScope = (getTransactionStatsFromCaggSpy.mock.calls[0] as unknown[])[0] as {
+          startTime: Date;
+        };
+        const liveCutoffMs = passedScope.startTime.getTime();
+        expect(liveCutoffMs).toBeGreaterThanOrEqual(before - sinceMinutes * 60_000);
+        expect(liveCutoffMs).toBeLessThanOrEqual(after - sinceMinutes * 60_000);
+      });
+
+      it("returns RollupPendingResult when rollup is 'rollup-pending' AND CAGG is empty", async () => {
+        jest.spyOn(service as never, 'getRollupStatus').mockResolvedValue({
+          status: 'rollup-pending',
+          stage: 'transaction-stats-rollup',
+          progress: { stageName: 'transaction-stats-rollup', stageIndex: 4, totalStages: 11 },
+        } as never);
+        jest
+          .spyOn(service as never, 'loadCaggApdexScope')
+          .mockResolvedValue({ ...baseScope, hasTransactionsCagg: false } as never);
+
+        const result = await service.getTransactionStats(TEST_RUN_ID, false, IS_ADMIN, []);
+
+        expect(isRollupPending(result)).toBe(true);
+        expect(result).toMatchObject({
+          stage: 'transaction-stats-rollup',
+          progress: { stageIndex: 4, totalStages: 11 },
+        });
+      });
+
+      it("prefers CAGG over RollupPendingResult when rollup is 'rollup-pending' AND CAGG has data", async () => {
+        jest.spyOn(service as never, 'getRollupStatus').mockResolvedValue({
+          status: 'rollup-pending',
+          stage: 'transaction-stats-rollup',
+          progress: { stageName: 'transaction-stats-rollup', stageIndex: 4, totalStages: 11 },
+        } as never);
+        jest
+          .spyOn(service as never, 'loadCaggApdexScope')
+          .mockResolvedValue(baseScope as never);
+        (testRunRepo.query as jest.Mock).mockImplementation(async (sql: unknown) => {
+          if (isSetLocalWorkMem(sql)) return [];
+          if (typeof sql === 'string' && /transactions_passed_5s/.test(sql)) {
+            return [RAW_CAGG_ROW];
+          }
+          return [];
+        });
+
+        const result = await service.getTransactionStats(TEST_RUN_ID, false, IS_ADMIN, []);
+
+        expect(isRollupPending(result)).toBe(false);
+        expect(Array.isArray(result)).toBe(true);
+        expect((result as Array<Record<string, unknown> & { transaction_name?: string }>).length).toBeGreaterThan(0);
+        expect((result as Array<Record<string, unknown> & { transaction_name?: string }>)[0].transaction_name).toBe('tx');
       });
     });
   });
@@ -2105,6 +2327,7 @@ describe('TestRunsPerformanceQueryService', () => {
       orgs: string[],
     ) => Promise<{
       sut: string;
+      systemUnderTestId: string;
       env: string;
       workload: string | null;
       startTime: Date;
@@ -2131,6 +2354,7 @@ describe('TestRunsPerformanceQueryService', () => {
       (testRunRepo.query as jest.Mock).mockResolvedValueOnce([
         {
           sut: 'webshop',
+          system_under_test_id: 'sut-uuid-1',
           env: 'acc',
           workload: 'loadTest',
           start_time: '2024-01-01T10:00:00Z',
@@ -2145,6 +2369,7 @@ describe('TestRunsPerformanceQueryService', () => {
 
       expect(scope).not.toBeNull();
       expect(scope!.sut).toBe('webshop');
+      expect(scope!.systemUnderTestId).toBe('sut-uuid-1');
       expect(scope!.env).toBe('acc');
       expect(scope!.workload).toBe('loadTest');
       expect(scope!.startTime).toEqual(new Date('2024-01-01T10:00:00Z'));
@@ -2167,6 +2392,7 @@ describe('TestRunsPerformanceQueryService', () => {
       (testRunRepo.query as jest.Mock).mockResolvedValueOnce([
         {
           sut: 'webshop',
+          system_under_test_id: 'sut-uuid-1',
           env: 'acc',
           workload: null,
           start_time: '2024-01-01T10:00:00Z',
