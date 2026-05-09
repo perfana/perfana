@@ -4,6 +4,11 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
+## [0.2.47.91] - 2026-05-09
+
+### Security
+- **axios bumped from 1.15.0 → 1.16.0 to clear 13 advisories.** /cso security audit (2026-05-09) flagged axios as the highest-priority finding: 13 active advisories on the installed range, including GHSA-pmwg-cvhr-8vh7 (NO_PROXY bypass via 127.0.0.0/8 loopback subnet, CVSS 7.2 — SSRF), GHSA-w9j2-pvgh-6h63 (auth bypass via prototype-pollution `validateStatus` merge gadget), GHSA-3w6x-2g7m-8v23 (invisible JSON response tampering via `parseReviver` prototype pollution gadget), GHSA-q8qp-cvcw-x6jj (prototype-pollution credential injection, CVSS 7.4), GHSA-62hf-57xw-28j9 (toFormData unbounded recursion DoS, CVSS 7.5), plus 8 more. Vulnerable range was `>=1.0.0 <1.15.1` for several of these — the patched ceiling is 1.15.1+ but per-advisory varies, so bumped to the current latest 1.16.0 to clear the entire set in one shot. axios is used server-side in the API for upstream Grafana, Dynatrace, and Prometheus calls (`apps/api/src/modules/dynatrace/dynatrace.service.ts`, `apps/api/src/modules/test-runs/services/test-runs-data-sources.service.ts`, `apps/api/src/modules/auth/auth.controller.ts`); SSRF and credential-leak gadgets in this role are directly reachable from any authenticated user who can configure a metrics source URL. **Files:** `package.json` (root `dependencies.axios` and `overrides.axios` both bumped — the override is what forces the hoisted resolution; without it, the workspace bump alone left `node_modules/axios` on 1.15.0 while only `apps/api/node_modules/axios` got 1.16.0); `apps/api/package.json` (`dependencies.axios` bumped); `package-lock.json` (regenerated). **Tests:** 4414/4434 passing on `apps/api` (20 skipped, 0 failed) — full suite excluding RLS + phase5-migration-validation (both blocked by no local postgres on :5432). Lint + type-check clean across all 8 packages. **Audit:** `npm audit --json | jq '.vulnerabilities.axios'` → no advisories on axios after the bump (was 13 before). **No code change required:** the three call sites use standard `axios.get/post/request` patterns + the `AxiosResponse` typedef — covered by 1.x semver guarantees, no migration shim needed.
+
 ## [0.2.47.90] - 2026-05-09
 
 ### Fixed
