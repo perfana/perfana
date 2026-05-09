@@ -664,7 +664,7 @@ export class TestRunsPerformanceQueryService {
    * The CAGGs don't carry per-row `url_hash` (would either inflate
    * cardinality unacceptably — sampler_name × transaction_name × url_hash
    * — or require a side lookup). The UI already handles missing url_hash
-   * gracefully. Real fix is a separate enhancement.
+   * gracefully. Tracked as #303.
    *
    * Wrapped in `withStatementTimeout` for consistency with the raw-scan
    * fallback. CAGG reads are typically <500ms even for 10M-row runs, but
