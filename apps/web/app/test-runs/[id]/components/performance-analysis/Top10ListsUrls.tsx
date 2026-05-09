@@ -271,6 +271,7 @@ export default function Top10ListsUrls({ testRunId, selectedScenarios = [] }: To
   };
 
   const top10Data = prepareTop10Data();
+  const hasMissingUrlPatterns = samplers.some((s) => s.url_pattern == null);
 
   const dimensions = [
     {
@@ -327,6 +328,11 @@ export default function Top10ListsUrls({ testRunId, selectedScenarios = [] }: To
 
   return (
     <Box sx={{ p: 3 }}>
+      {hasMissingUrlPatterns && (
+        <Alert severity="info" sx={{ mb: 2 }} data-testid="top10-urls-pending-hint">
+          Some entries show the sampler name in place of the URL pattern. URL patterns populate once the test completes and the post-test rollup runs.
+        </Alert>
+      )}
       {/* Dimensions */}
       <Box sx={{ display: 'flex', flexDirection: 'column', gap: 3 }}>
         {dimensions.map((dimension, index) => (
