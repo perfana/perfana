@@ -90,6 +90,10 @@ export class TestRunsPerformanceQueryService {
    *                       Callers should preserve the existing
    *                       live-aggregation fallback.
    *
+   * Note: between the rollup-existence check and the active-job lookup the
+   * rollup pipeline could complete, returning 'rollup-pending' for a run that
+   * is now 'ready'. Benign — the next client poll resolves it.
+   *
    * @internal
    */
   private async getRollupStatus(
@@ -665,6 +669,11 @@ export class TestRunsPerformanceQueryService {
       // the correct upstream gate here too.
       if (sinceMinutes == null) {
         const rollupStatus = await this.getRollupStatus(resolvedTestRunId);
+        // Note: the 'ready' arm may fall through to live aggregation when the
+        // per-transaction sampler-rollup row is absent (e.g. unsampled
+        // high-cardinality sampler), so the 'rollup-pending' arm is gated with
+        // `else if` to preserve the bypass — only ever return the pending
+        // result when getRollupStatus actually returns 'rollup-pending'.
         if (rollupStatus.status === 'ready') {
           // Sampler rollup may still not have a row for this exact transaction
           // (e.g. an unsampled high-cardinality sampler). Fall back to live

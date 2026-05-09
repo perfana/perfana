@@ -729,6 +729,10 @@ describe('TestRunsPerformanceQueryService', () => {
         const result = await service.getTransactionStats(TEST_RUN_ID, false, IS_ADMIN, []);
 
         expect(isRollupPending(result)).toBe(true);
+        expect(result).toMatchObject({
+          stage: 'transaction-stats-rollup',
+          progress: { stageIndex: 4, totalStages: 11 },
+        });
       });
 
       it('falls through to live aggregation when status is unavailable (soft-failed rollup)', async () => {
@@ -1106,6 +1110,7 @@ describe('TestRunsPerformanceQueryService', () => {
         const result = await service.getTransactionSamples(TEST_RUN_ID, TRANSACTION, false, IS_ADMIN, []);
 
         expect(isRollupPending(result)).toBe(true);
+        expect(result).toMatchObject({ stage: 'transaction-stats-rollup' });
       });
 
       it('does NOT gate samples when sinceMinutes is set', async () => {
