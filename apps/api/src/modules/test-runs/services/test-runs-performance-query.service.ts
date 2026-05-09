@@ -90,16 +90,9 @@ export class TestRunsPerformanceQueryService {
    *                       Callers should preserve the existing
    *                       live-aggregation fallback.
    *
-   * NOTE: This helper is plumbed but not yet wired into
-   * getTransactionStats / getTransactionSamples — that wiring is a separate
-   * task. See the Apdex rollup-pending gate plan. Visibility is intentionally
-   * left as default (no `private`) so tsc's `noUnusedLocals` rule passes
-   * during the foundational Task 2 commit; the upcoming wiring tasks will
-   * call it from within the class.
-   *
    * @internal
    */
-  async getRollupStatus(
+  private async getRollupStatus(
     testRunId: string,
   ): Promise<{ status: 'ready' } | RollupPendingResult | { status: 'unavailable' }> {
     const rollupRows = await withRequestEm(this.testRunRepo).query(
