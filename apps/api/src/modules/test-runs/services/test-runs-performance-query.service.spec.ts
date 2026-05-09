@@ -202,12 +202,13 @@ describe('TestRunsPerformanceQueryService', () => {
 
   /**
    * The rewritten Apdex queries run inside a transaction and issue
-   * `SET LOCAL work_mem = '512MB'` as the first statement. That call goes
-   * through the same mocked `query` fn — so the mock implementations below
-   * need to skip it when stepping through the configured result sequence.
+   * `SET LOCAL` preludes (work_mem and statement_timeout) before the data
+   * query. Those calls go through the same mocked `query` fn — so the mock
+   * implementations below need to skip them when stepping through the
+   * configured result sequence.
    */
   const isSetLocalWorkMem = (sql: unknown): boolean =>
-    typeof sql === 'string' && /SET\s+LOCAL\s+work_mem/i.test(sql);
+    typeof sql === 'string' && /SET\s+LOCAL\s+(work_mem|statement_timeout)/i.test(sql);
 
   /**
    * The rollup fast-path (#150, #151) issues a `SELECT 1 FROM
@@ -394,9 +395,10 @@ describe('TestRunsPerformanceQueryService', () => {
 
         // Assert
         expect(result).toHaveLength(1);
-        // 5 calls: rollup existence check + scope lookup (rollup-pending gate)
-        // + ramp-up lookup + SET LOCAL work_mem + stats query
-        expect(testRunRepo.query).toHaveBeenCalledTimes(5);
+        // 6 calls: rollup existence check + scope lookup (rollup-pending gate)
+        // + ramp-up lookup + SET LOCAL statement_timeout + SET LOCAL work_mem
+        // + stats query
+        expect(testRunRepo.query).toHaveBeenCalledTimes(6);
         const calls = (testRunRepo.query as jest.Mock).mock.calls;
         expect(calls.some(([sql]) => (sql as string).includes('SELECT start_time, ramp_up'))).toBe(true);
       });
@@ -757,6 +759,64 @@ describe('TestRunsPerformanceQueryService', () => {
         expect(getRollupStatusSpy).not.toHaveBeenCalled();
       });
     });
+
+    // ---------------------------------------------------------------------
+    // Safety net (clamp + statement_timeout)
+    // ---------------------------------------------------------------------
+
+    describe('safety net (clamp + statement_timeout)', () => {
+      const LIVE_WINDOW_MAX_MINUTES = 60;
+
+      it('clamps sinceMinutes to LIVE_WINDOW_MAX_MINUTES on the live path', async () => {
+        jest
+          .spyOn(service as never, 'getRollupStatus')
+          .mockResolvedValue({ status: 'unavailable' } as never);
+        mockQuerySequence([RAW_TRANSACTION_ROW]);
+
+        await service.getTransactionStats(TEST_RUN_ID, false, IS_ADMIN, [], 9999);
+
+        // Find the call that ran the live-agg SQL (contains "FROM transactions t")
+        const liveCall = (testRunRepo.query as jest.Mock).mock.calls.find(
+          (call: [unknown]) =>
+            typeof call[0] === 'string' && (call[0] as string).includes('FROM transactions t'),
+        );
+        expect(liveCall).toBeDefined();
+        // sinceMinutes appears in the params array, clamped
+        expect(liveCall![1]).toEqual(expect.arrayContaining([LIVE_WINDOW_MAX_MINUTES]));
+      });
+
+      it('passes sinceMinutes through unchanged when below the cap', async () => {
+        jest
+          .spyOn(service as never, 'getRollupStatus')
+          .mockResolvedValue({ status: 'unavailable' } as never);
+        mockQuerySequence([RAW_TRANSACTION_ROW]);
+
+        await service.getTransactionStats(TEST_RUN_ID, false, IS_ADMIN, [], 5);
+
+        const liveCall = (testRunRepo.query as jest.Mock).mock.calls.find(
+          (call: [unknown]) =>
+            typeof call[0] === 'string' && (call[0] as string).includes('FROM transactions t'),
+        );
+        expect(liveCall).toBeDefined();
+        expect(liveCall![1]).toEqual(expect.arrayContaining([5]));
+      });
+
+      it('wraps live aggregation in a transaction that sets statement_timeout', async () => {
+        jest
+          .spyOn(service as never, 'getRollupStatus')
+          .mockResolvedValue({ status: 'unavailable' } as never);
+        mockQuerySequence([RAW_TRANSACTION_ROW]);
+
+        await service.getTransactionStats(TEST_RUN_ID, false, IS_ADMIN, [], 5);
+
+        const calls = (testRunRepo.query as jest.Mock).mock.calls.map(
+          (c: [unknown]) => c[0],
+        );
+        expect(
+          calls.some((sql) => typeof sql === 'string' && (sql as string).includes('statement_timeout')),
+        ).toBe(true);
+      });
+    });
   });
 
   // =========================================================================
@@ -802,9 +862,10 @@ describe('TestRunsPerformanceQueryService', () => {
         const result = await service.getTransactionSamples(TEST_RUN_ID, TRANSACTION, true, IS_ADMIN, []);
 
         expect(result).toHaveLength(1);
-        // 5 calls: rollup existence check + scope lookup (rollup-pending gate)
-        // + ramp-up lookup + SET LOCAL work_mem + samples query
-        expect(testRunRepo.query).toHaveBeenCalledTimes(5);
+        // 6 calls: rollup existence check + scope lookup (rollup-pending gate)
+        // + ramp-up lookup + SET LOCAL statement_timeout + SET LOCAL work_mem
+        // + samples query
+        expect(testRunRepo.query).toHaveBeenCalledTimes(6);
       });
 
       it('does not fetch cutoff when excludeRampUp is false', async () => {
@@ -812,9 +873,10 @@ describe('TestRunsPerformanceQueryService', () => {
 
         await service.getTransactionSamples(TEST_RUN_ID, TRANSACTION, false, IS_ADMIN, []);
 
-        // 4 calls — rollup existence check + scope lookup (rollup-pending gate)
-        // + SET LOCAL work_mem + samples query (no ramp-up lookup)
-        expect(testRunRepo.query).toHaveBeenCalledTimes(4);
+        // 5 calls — rollup existence check + scope lookup (rollup-pending gate)
+        // + SET LOCAL statement_timeout + SET LOCAL work_mem + samples query
+        // (no ramp-up lookup)
+        expect(testRunRepo.query).toHaveBeenCalledTimes(5);
       });
     });
 
@@ -1120,6 +1182,44 @@ describe('TestRunsPerformanceQueryService', () => {
         await service.getTransactionSamples(TEST_RUN_ID, TRANSACTION, false, IS_ADMIN, [], 5);
 
         expect(getRollupStatusSpy).not.toHaveBeenCalled();
+      });
+    });
+
+    // ---------------------------------------------------------------------
+    // Safety net (clamp + statement_timeout) — samples
+    // ---------------------------------------------------------------------
+
+    describe('safety net (clamp + statement_timeout) — samples', () => {
+      it('clamps sinceMinutes to LIVE_WINDOW_MAX_MINUTES on the samples live path', async () => {
+        jest
+          .spyOn(service as never, 'getRollupStatus')
+          .mockResolvedValue({ status: 'unavailable' } as never);
+        mockQuerySequence([RAW_SAMPLER_ROW]);
+
+        await service.getTransactionSamples(TEST_RUN_ID, TRANSACTION, false, IS_ADMIN, [], 9999);
+
+        const liveCall = (testRunRepo.query as jest.Mock).mock.calls.find(
+          (call: [unknown]) =>
+            typeof call[0] === 'string' && (call[0] as string).includes('FROM requests_raw'),
+        );
+        expect(liveCall).toBeDefined();
+        expect(liveCall![1]).toEqual(expect.arrayContaining([60]));
+      });
+
+      it('wraps samples live aggregation in a transaction that sets statement_timeout', async () => {
+        jest
+          .spyOn(service as never, 'getRollupStatus')
+          .mockResolvedValue({ status: 'unavailable' } as never);
+        mockQuerySequence([RAW_SAMPLER_ROW]);
+
+        await service.getTransactionSamples(TEST_RUN_ID, TRANSACTION, false, IS_ADMIN, [], 5);
+
+        const calls = (testRunRepo.query as jest.Mock).mock.calls.map(
+          (c: [unknown]) => c[0],
+        );
+        expect(
+          calls.some((sql) => typeof sql === 'string' && (sql as string).includes('statement_timeout')),
+        ).toBe(true);
       });
     });
   });

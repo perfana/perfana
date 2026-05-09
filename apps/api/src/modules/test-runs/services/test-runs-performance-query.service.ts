@@ -23,6 +23,23 @@ import {
 export class TestRunsPerformanceQueryService {
   private readonly logger = new Logger(TestRunsPerformanceQueryService.name);
 
+  /**
+   * Maximum sinceMinutes accepted on the live-aggregation paths (over raw
+   * `transactions` / `requests_raw`). On 10M-row tests, an unbounded window
+   * scans the whole hypertable and pins a connection — clamping caps the
+   * worst case. The rollup-pending gate covers the `null` case for completed
+   * runs; live-path null pass-through is handled separately (see callers).
+   */
+  private static readonly LIVE_WINDOW_MAX_MINUTES = 60;
+
+  /**
+   * Per-statement timeout applied to the live-aggregation paths via
+   * `SET LOCAL statement_timeout`. Postgres aborts the query if it exceeds
+   * the budget — the connection is released cleanly rather than held
+   * indefinitely.
+   */
+  private static readonly LIVE_QUERY_STATEMENT_TIMEOUT_MS = 10_000;
+
   constructor(
     @InjectRepository(TestRunEntity)
     private readonly testRunRepo: Repository<TestRunEntity>,
@@ -133,6 +150,33 @@ export class TestRunsPerformanceQueryService {
         totalStages: activeJob.totalStages,
       },
     };
+  }
+
+  /**
+   * Clamp sinceMinutes to a server-side maximum. Prevents accidentally huge
+   * windows from triggering unbounded raw-data scans during a running test
+   * (the live path can't be served from the rollup until analyze-test runs
+   * post-completion). Pass-through for null/undefined.
+   */
+  private clampSinceMinutes(sinceMinutes: number | undefined): number | undefined {
+    if (sinceMinutes == null) return sinceMinutes;
+    return Math.min(sinceMinutes, TestRunsPerformanceQueryService.LIVE_WINDOW_MAX_MINUTES);
+  }
+
+  /**
+   * Run a query with a per-statement timeout. Postgres aborts the query if it
+   * exceeds the budget (the connection is released, not held). Used for the
+   * live-aggregation paths over raw transactions / requests_raw.
+   */
+  private async withStatementTimeout<T>(
+    fn: (em: import('typeorm').EntityManager) => Promise<T>,
+  ): Promise<T> {
+    return withRequestEm(this.testRunRepo).manager.transaction(async (txEm) => {
+      await txEm.query(
+        `SET LOCAL statement_timeout = '${TestRunsPerformanceQueryService.LIVE_QUERY_STATEMENT_TIMEOUT_MS}ms'`,
+      );
+      return fn(txEm);
+    });
   }
 
   /**
@@ -446,6 +490,11 @@ export class TestRunsPerformanceQueryService {
       const resolvedTestRunId = await this.resolveTestRunId(testRunId);
       this.logger.debug(`Resolved test run ID: ${testRunId} -> ${resolvedTestRunId}`);
 
+      // Server-side safety net: clamp the live-window so a huge `sinceMinutes`
+      // can't accidentally scan the whole hypertable. Null passes through
+      // (the rollup-pending gate covers that case for completed runs).
+      const clampedSinceMinutes = this.clampSinceMinutes(sinceMinutes);
+
       // Fast path: if the rollup stage has written rows for this test run
       // (completed runs only) AND sinceMinutes is not set (the rollup is
       // whole-test-run only), read from the rollup table. Dashboard latency
@@ -458,7 +507,7 @@ export class TestRunsPerformanceQueryService {
       //                     so the controller maps to HTTP 202 instead of
       //                     stalling on the live-aggregation fallback
       //   unavailable     → soft-failed rollup; fall through to live aggregation
-      if (sinceMinutes == null) {
+      if (clampedSinceMinutes == null) {
         const rollupStatus = await this.getRollupStatus(resolvedTestRunId);
         if (rollupStatus.status === 'ready') {
           return await this.getTransactionStatsFromRollup(
@@ -486,9 +535,9 @@ export class TestRunsPerformanceQueryService {
       //   $4 = sinceMinutes  (only when provided)
       //   $4 or $5 = organizationIds (non-admin only; index shifts when sinceMinutes present)
       const windowParamIndex = 4;
-      const orgParamIndex = sinceMinutes != null ? 5 : 4;
+      const orgParamIndex = clampedSinceMinutes != null ? 5 : 4;
 
-      const windowFilter = sinceMinutes != null
+      const windowFilter = clampedSinceMinutes != null
         ? `AND t.time >= NOW() - ($${windowParamIndex}::numeric * interval '1 minute')`
         : '';
 
@@ -585,20 +634,22 @@ export class TestRunsPerformanceQueryService {
       //   $4=sinceMinutes (when provided), $5=orgIds (non-admin)
       //   OR $4=orgIds (non-admin, no window)
       let queryParams: unknown[];
-      if (sinceMinutes != null) {
+      if (clampedSinceMinutes != null) {
         queryParams = !isAdmin
-          ? [resolvedTestRunId, excludeRampUp, cutoffTime, sinceMinutes, organizationIds]
-          : [resolvedTestRunId, excludeRampUp, cutoffTime, sinceMinutes];
+          ? [resolvedTestRunId, excludeRampUp, cutoffTime, clampedSinceMinutes, organizationIds]
+          : [resolvedTestRunId, excludeRampUp, cutoffTime, clampedSinceMinutes];
       } else {
         queryParams = !isAdmin
           ? [resolvedTestRunId, excludeRampUp, cutoffTime, organizationIds]
           : [resolvedTestRunId, excludeRampUp, cutoffTime];
       }
-      // Wrap in a transaction so SET LOCAL work_mem applies only to this query
+      // Wrap in a transaction so SET LOCAL applies only to this query
       // (reverts at COMMIT — global default unaffected). Manager comes from
       // the request-scoped EM via withRequestEm so this nested transaction
       // (savepoint when RLS is on) inherits the outer request transaction's GUCs.
-      const result = await withRequestEm(this.testRunRepo).manager.transaction(async (em) => {
+      // statement_timeout caps a runaway query so the connection is released
+      // cleanly rather than pinned indefinitely.
+      const result = await this.withStatementTimeout(async (em) => {
         await em.query(`SET LOCAL work_mem = '512MB'`);
         return em.query(query, queryParams);
       });
@@ -655,6 +706,11 @@ export class TestRunsPerformanceQueryService {
 
       const resolvedTestRunId = await this.resolveTestRunId(testRunId);
 
+      // Server-side safety net: clamp the live-window so a huge `sinceMinutes`
+      // can't accidentally scan the whole hypertable. Null passes through
+      // (the rollup-pending gate covers that case for completed runs).
+      const clampedSinceMinutes = this.clampSinceMinutes(sinceMinutes);
+
       // Fast path: rollup (#150, #151). Covers the common case hit by the
       // Overview-tab row expand and the Top 10 Requests tab — exactly the
       // 140s query case captured in #151 for `stream_download_segment`.
@@ -667,7 +723,7 @@ export class TestRunsPerformanceQueryService {
       // analyze-test pipeline that backfills test_run_transaction_stats —
       // so getRollupStatus's check against test_run_transaction_stats is
       // the correct upstream gate here too.
-      if (sinceMinutes == null) {
+      if (clampedSinceMinutes == null) {
         const rollupStatus = await this.getRollupStatus(resolvedTestRunId);
         // Note: the 'ready' arm may fall through to live aggregation when the
         // per-transaction sampler-rollup row is absent (e.g. unsampled
@@ -703,9 +759,9 @@ export class TestRunsPerformanceQueryService {
       // Param layout: $1=testRunId, $2=transactionName, $3=excludeRampUp, $4=cutoffTime,
       //   $5=sinceMinutes (when provided), $5 or $6=orgIds (non-admin)
       const windowParamIndexSamples = 5;
-      const orgParamIndexSamples = sinceMinutes != null ? 6 : 5;
+      const orgParamIndexSamples = clampedSinceMinutes != null ? 6 : 5;
 
-      const windowFilterSamples = sinceMinutes != null
+      const windowFilterSamples = clampedSinceMinutes != null
         ? `AND r.time >= NOW() - ($${windowParamIndexSamples}::numeric * interval '1 minute')`
         : '';
 
@@ -797,20 +853,21 @@ export class TestRunsPerformanceQueryService {
       `;
 
       let queryParams: unknown[];
-      if (sinceMinutes != null) {
+      if (clampedSinceMinutes != null) {
         queryParams = !isAdmin
-          ? [resolvedTestRunId, transactionName, excludeRampUp, cutoffTime, sinceMinutes, organizationIds]
-          : [resolvedTestRunId, transactionName, excludeRampUp, cutoffTime, sinceMinutes];
+          ? [resolvedTestRunId, transactionName, excludeRampUp, cutoffTime, clampedSinceMinutes, organizationIds]
+          : [resolvedTestRunId, transactionName, excludeRampUp, cutoffTime, clampedSinceMinutes];
       } else {
         queryParams = !isAdmin
           ? [resolvedTestRunId, transactionName, excludeRampUp, cutoffTime, organizationIds]
           : [resolvedTestRunId, transactionName, excludeRampUp, cutoffTime];
       }
-      // Wrap in a transaction so SET LOCAL work_mem applies only to this query.
+      // Wrap in a transaction so SET LOCAL applies only to this query.
       // Manager comes from the request-scoped EM via withRequestEm so this nested
       // transaction (savepoint when RLS is on) inherits the outer request
-      // transaction's GUCs.
-      const result = await withRequestEm(this.testRunRepo).manager.transaction(async (em) => {
+      // transaction's GUCs. statement_timeout caps a runaway query so the
+      // connection is released cleanly rather than pinned indefinitely.
+      const result = await this.withStatementTimeout(async (em) => {
         await em.query(`SET LOCAL work_mem = '512MB'`);
         return em.query(query, queryParams);
       });
