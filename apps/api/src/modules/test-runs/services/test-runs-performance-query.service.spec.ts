@@ -26,6 +26,7 @@ import { TestRunsPerformanceQueryService } from './test-runs-performance-query.s
 import { TestRunsMapperService } from './test-runs-mapper.service';
 import { TestRun as TestRunEntity } from '../../../entities';
 import { DatabaseException } from '../../../common/exceptions/business.exception';
+import { JobProgressService } from '../../data-science/services/job-progress.service';
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -163,9 +164,13 @@ describe('TestRunsPerformanceQueryService', () => {
   let service: TestRunsPerformanceQueryService;
   let testRunRepo: MockRepo;
   let mapper: TestRunsMapperService;
+  let mockJobProgressService: { getActiveJobForScope: jest.Mock };
 
   beforeEach(async () => {
     testRunRepo = createMockRepo();
+    mockJobProgressService = {
+      getActiveJobForScope: jest.fn(),
+    };
 
     const module: TestingModule = await Test.createTestingModule({
       providers: [
@@ -174,6 +179,10 @@ describe('TestRunsPerformanceQueryService', () => {
         {
           provide: getRepositoryToken(TestRunEntity),
           useValue: testRunRepo,
+        },
+        {
+          provide: JobProgressService,
+          useValue: mockJobProgressService,
         },
       ],
     }).compile();
@@ -1785,6 +1794,88 @@ describe('TestRunsPerformanceQueryService', () => {
 
       // parseInt called for total_count, passed_count, failed_count, active_threshold
       expect(parseIntSpy).toHaveBeenCalledTimes(4);
+    });
+  });
+
+  // =========================================================================
+  // getRollupStatus (private helper used by the Apdex rollup-pending gate)
+  // =========================================================================
+
+  describe('getRollupStatus', () => {
+    it('returns "ready" when test_run_transaction_stats has rows for the run', async () => {
+      (testRunRepo.query as jest.Mock).mockImplementation(async (sql: string) => {
+        if (sql.includes('FROM test_run_transaction_stats')) return [{ '?column?': 1 }];
+        throw new Error(`unexpected sql: ${sql}`);
+      });
+
+      const result = await (service as unknown as {
+        getRollupStatus: (id: string) => Promise<{ status: string }>;
+      }).getRollupStatus('test-run-1');
+      expect(result.status).toBe('ready');
+    });
+
+    it('returns "rollup-pending" when rollup empty AND an active job exists for the scope', async () => {
+      (testRunRepo.query as jest.Mock).mockImplementation(async (sql: string) => {
+        if (sql.includes('FROM test_run_transaction_stats')) return [];
+        if (sql.includes('FROM test_runs')) {
+          return [{
+            system_under_test_id: 'sut-1',
+            test_environment: 'prod',
+            workload: 'wl-1',
+          }];
+        }
+        throw new Error(`unexpected sql: ${sql}`);
+      });
+      mockJobProgressService.getActiveJobForScope.mockResolvedValue({
+        jobId: 'job-1',
+        stageName: 'transaction-stats-rollup',
+        stageIndex: 4,
+        totalStages: 11,
+      });
+
+      const result = await (service as unknown as {
+        getRollupStatus: (id: string) => Promise<{
+          status: string;
+          stage?: string;
+          progress?: { stageName: string; stageIndex: number; totalStages: number };
+        }>;
+      }).getRollupStatus('test-run-1');
+      expect(result.status).toBe('rollup-pending');
+      expect(result.progress).toEqual({
+        stageName: 'transaction-stats-rollup',
+        stageIndex: 4,
+        totalStages: 11,
+      });
+    });
+
+    it('returns "unavailable" when rollup empty AND no active job (soft-failure)', async () => {
+      (testRunRepo.query as jest.Mock).mockImplementation(async (sql: string) => {
+        if (sql.includes('FROM test_run_transaction_stats')) return [];
+        if (sql.includes('FROM test_runs')) {
+          return [{ system_under_test_id: 'sut-1', test_environment: 'prod', workload: 'wl-1' }];
+        }
+        throw new Error(`unexpected sql: ${sql}`);
+      });
+      mockJobProgressService.getActiveJobForScope.mockResolvedValue(null);
+
+      const result = await (service as unknown as {
+        getRollupStatus: (id: string) => Promise<{ status: string }>;
+      }).getRollupStatus('test-run-1');
+      expect(result.status).toBe('unavailable');
+    });
+
+    it('returns "unavailable" when scope lookup fails (defensive)', async () => {
+      (testRunRepo.query as jest.Mock).mockImplementation(async (sql: string) => {
+        if (sql.includes('FROM test_run_transaction_stats')) return [];
+        if (sql.includes('FROM test_runs')) return [];
+        throw new Error(`unexpected sql: ${sql}`);
+      });
+
+      const result = await (service as unknown as {
+        getRollupStatus: (id: string) => Promise<{ status: string }>;
+      }).getRollupStatus('test-run-1');
+      expect(result.status).toBe('unavailable');
+      expect(mockJobProgressService.getActiveJobForScope).not.toHaveBeenCalled();
     });
   });
 });

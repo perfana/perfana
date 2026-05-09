@@ -5,6 +5,8 @@ import { withRequestEm } from '../../../common/db/request-em';
 import { TestRun as TestRunEntity } from '../../../entities';
 import { DatabaseException } from '../../../common/exceptions/business.exception';
 import { TestRunsMapperService } from './test-runs-mapper.service';
+import { JobProgressService } from '../../data-science/services/job-progress.service';
+import { RollupPendingResult } from './test-runs-performance-query.types';
 import {
   TransactionStats,
   SamplerStats,
@@ -25,6 +27,7 @@ export class TestRunsPerformanceQueryService {
     @InjectRepository(TestRunEntity)
     private readonly testRunRepo: Repository<TestRunEntity>,
     private readonly mapper: TestRunsMapperService,
+    private readonly jobProgressService: JobProgressService,
   ) {}
 
   /**
@@ -83,6 +86,69 @@ export class TestRunsPerformanceQueryService {
       [testRunId],
     );
     return result.length > 0;
+  }
+
+  /**
+   * Determine whether the rollup-backed Apdex fast path can be served, or
+   * whether the post-test analyze-test job is still running, or whether
+   * we're in the soft-failure case (no rollup, no active job).
+   *
+   * - 'ready'           → rollup rows exist; callers should use the fast path.
+   * - 'rollup-pending'  → rollup empty AND an active analyze-test job is
+   *                       running for the run's scope (sut/env/workload).
+   *                       Controllers map this to HTTP 202 so the UI can
+   *                       render an informative pending state instead of
+   *                       stalling the DB on the live-aggregation fallback.
+   * - 'unavailable'     → rollup empty AND no active job (soft-failure).
+   *                       Callers should preserve the existing
+   *                       live-aggregation fallback.
+   *
+   * NOTE: This helper is plumbed but not yet wired into
+   * getTransactionStats / getTransactionSamples — that wiring is a separate
+   * task. See the Apdex rollup-pending gate plan. Visibility is intentionally
+   * left as default (no `private`) so tsc's `noUnusedLocals` rule passes
+   * during the foundational Task 2 commit; the upcoming wiring tasks will
+   * call it from within the class.
+   *
+   * @internal
+   */
+  async getRollupStatus(
+    testRunId: string,
+  ): Promise<{ status: 'ready' } | RollupPendingResult | { status: 'unavailable' }> {
+    const rollupRows = await withRequestEm(this.testRunRepo).query(
+      `SELECT 1 FROM test_run_transaction_stats WHERE test_run_id = $1 LIMIT 1`,
+      [testRunId],
+    );
+    if (rollupRows.length > 0) return { status: 'ready' };
+
+    const scopeRows: Array<{
+      system_under_test_id: string;
+      test_environment: string;
+      workload: string;
+    }> = await withRequestEm(this.testRunRepo).query(
+      `SELECT system_under_test_id, test_environment, workload
+         FROM test_runs WHERE test_run_id = $1 LIMIT 1`,
+      [testRunId],
+    );
+    const scope = scopeRows[0];
+    if (!scope) return { status: 'unavailable' };
+
+    const activeJob = await this.jobProgressService.getActiveJobForScope(
+      scope.system_under_test_id,
+      scope.test_environment,
+      scope.workload,
+    );
+    if (!activeJob) return { status: 'unavailable' };
+
+    return {
+      status: 'rollup-pending',
+      stage: 'transaction-stats-rollup',
+      progress: {
+        stageName: activeJob.stageName,
+        stageIndex: activeJob.stageIndex,
+        totalStages: activeJob.totalStages,
+      },
+    };
   }
 
   /**
