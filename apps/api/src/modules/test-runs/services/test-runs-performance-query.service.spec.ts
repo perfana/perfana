@@ -798,8 +798,9 @@ describe('TestRunsPerformanceQueryService', () => {
         const result = await service.getTransactionSamples(TEST_RUN_ID, TRANSACTION, true, IS_ADMIN, []);
 
         expect(result).toHaveLength(1);
-        // 4 calls: rollup existence check + ramp-up lookup + SET LOCAL work_mem + samples query
-        expect(testRunRepo.query).toHaveBeenCalledTimes(4);
+        // 5 calls: rollup existence check + scope lookup (rollup-pending gate)
+        // + ramp-up lookup + SET LOCAL work_mem + samples query
+        expect(testRunRepo.query).toHaveBeenCalledTimes(5);
       });
 
       it('does not fetch cutoff when excludeRampUp is false', async () => {
@@ -807,8 +808,9 @@ describe('TestRunsPerformanceQueryService', () => {
 
         await service.getTransactionSamples(TEST_RUN_ID, TRANSACTION, false, IS_ADMIN, []);
 
-        // 3 calls — rollup existence check + SET LOCAL work_mem + samples query (no ramp-up lookup)
-        expect(testRunRepo.query).toHaveBeenCalledTimes(3);
+        // 4 calls — rollup existence check + scope lookup (rollup-pending gate)
+        // + SET LOCAL work_mem + samples query (no ramp-up lookup)
+        expect(testRunRepo.query).toHaveBeenCalledTimes(4);
       });
     });
 
@@ -1087,6 +1089,32 @@ describe('TestRunsPerformanceQueryService', () => {
         expect(params[1]).toBe(TRANSACTION);
         expect(params[2]).toBe(true);
         expect(params[3]).toEqual(ORG_IDS);
+      });
+    });
+
+    // ---------------------------------------------------------------------
+    // Rollup-pending gate
+    // ---------------------------------------------------------------------
+
+    describe('rollup-pending gate', () => {
+      it('returns RollupPendingResult when rollup is pending', async () => {
+        jest.spyOn(service as never, 'getRollupStatus').mockResolvedValue({
+          status: 'rollup-pending',
+          stage: 'transaction-stats-rollup',
+        } as never);
+
+        const result = await service.getTransactionSamples(TEST_RUN_ID, TRANSACTION, false, IS_ADMIN, []);
+
+        expect(isRollupPending(result)).toBe(true);
+      });
+
+      it('does NOT gate samples when sinceMinutes is set', async () => {
+        const getRollupStatusSpy = jest.spyOn(service as never, 'getRollupStatus');
+        mockQuerySequence([RAW_SAMPLER_ROW]);
+
+        await service.getTransactionSamples(TEST_RUN_ID, TRANSACTION, false, IS_ADMIN, [], 5);
+
+        expect(getRollupStatusSpy).not.toHaveBeenCalled();
       });
     });
   });

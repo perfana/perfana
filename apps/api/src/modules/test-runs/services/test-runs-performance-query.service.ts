@@ -646,7 +646,7 @@ export class TestRunsPerformanceQueryService {
     isAdmin: boolean = false,
     organizationIds: string[] = [],
     sinceMinutes?: number,
-  ): Promise<SamplerStats[]> {
+  ): Promise<SamplerStats[] | RollupPendingResult> {
     try {
       // Non-admin users with no organization memberships see empty results
       if (!isAdmin && organizationIds.length === 0) {
@@ -661,17 +661,39 @@ export class TestRunsPerformanceQueryService {
       // Fast path: rollup (#150, #151). Covers the common case hit by the
       // Overview-tab row expand and the Top 10 Requests tab — exactly the
       // 140s query case captured in #151 for `stream_download_segment`.
+      //
+      // Gate by upstream `transaction-stats-rollup` job (same as
+      // getTransactionStats): a pending job means we should bubble a
+      // RollupPendingResult so the controller can map to HTTP 202 instead
+      // of stalling on the live-aggregation fallback. The sampler rollup
+      // table (test_run_sampler_stats) is populated by the same upstream
+      // analyze-test pipeline that backfills test_run_transaction_stats —
+      // so getRollupStatus's check against test_run_transaction_stats is
+      // the correct upstream gate here too.
       if (sinceMinutes == null) {
-        const hasRollup = await this.hasSamplerRollup(resolvedTestRunId, transactionName);
-        if (hasRollup) {
-          return await this.getTransactionSamplesFromRollup(
-            resolvedTestRunId,
-            transactionName,
-            excludeRampUp,
-            isAdmin,
-            organizationIds,
+        const rollupStatus = await this.getRollupStatus(resolvedTestRunId);
+        if (rollupStatus.status === 'ready') {
+          // Sampler rollup may still not have a row for this exact transaction
+          // (e.g. an unsampled high-cardinality sampler). Fall back to live
+          // aggregation in that case rather than serving an empty rollup read.
+          const hasSamplerRow = await this.hasSamplerRollup(resolvedTestRunId, transactionName);
+          if (hasSamplerRow) {
+            return await this.getTransactionSamplesFromRollup(
+              resolvedTestRunId,
+              transactionName,
+              excludeRampUp,
+              isAdmin,
+              organizationIds,
+            );
+          }
+          // status===ready but no per-transaction sampler row → fall through
+        } else if (rollupStatus.status === 'rollup-pending') {
+          this.logger.debug(
+            `Rollup pending for ${resolvedTestRunId}; returning rollup-pending result for samples`,
           );
+          return rollupStatus;
         }
+        // status === 'unavailable' → fall through to live aggregation
       }
 
       const cutoffTime = await this.getRampUpCutoffTime(resolvedTestRunId, excludeRampUp);
