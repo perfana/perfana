@@ -67,6 +67,9 @@ Stage 4: Transaction Stats Rollup
   └── Pre-computes per-run transaction + sampler aggregates (count, tdigest, impact score)
   └── Stores in test_run_transaction_stats / test_run_sampler_stats
   └── Backs /test-runs/:id/transactions — p95/p99/Apdex computed at read time via approx_percentile on the stored tdigest
+  └── While a run is still in flight (rollup table empty), live Apdex queries are served from the
+      transactions_passed_* / requests_raw_passed_* continuous aggregates so the page stays fast on
+      10M-row in-flight runs. See Database/Continuous Aggregates.md for the CAGG family.
 
 Stage 5: Metrics Collection
   └── Pulls time-series data from Grafana/Prometheus/InfluxDB

@@ -23,16 +23,19 @@ Introduce three TimescaleDB continuous aggregates (CAGGs) per hypertable, at 5 s
 
 ### CAGG shapes
 
-| CAGG                             | Source          | Group-by (besides `bucket`)                                                                                            |
-| -------------------------------- | --------------- | ----------------------------------------------------------------------------------------------------------------------- |
-| `requests_raw_{5s,1m,5m}`        | `requests_raw`  | `system_under_test, test_environment, scenario_name, sampler_name, transaction_name, location`                          |
-| `transactions_{5s,1m,5m}`        | `transactions`  | `system_under_test, test_environment, scenario_name, transaction_name`                                                  |
-| `requests_error_{5s,1m,5m}`      | `requests_error`| `system_under_test, test_environment, scenario_name, sampler_name, transaction_name, node_name, response_code`          |
+| CAGG                                    | Source          | Group-by (besides `bucket`)                                                                                            |
+| --------------------------------------- | --------------- | ----------------------------------------------------------------------------------------------------------------------- |
+| `requests_raw_{5s,1m,5m}`               | `requests_raw`  | `system_under_test, test_environment, scenario_name, sampler_name, transaction_name, location`                          |
+| `transactions_{5s,1m,5m}`               | `transactions`  | `system_under_test, test_environment, scenario_name, transaction_name`                                                  |
+| `requests_error_{5s,1m,5m}`             | `requests_error`| `system_under_test, test_environment, scenario_name, sampler_name, transaction_name, node_name, response_code`          |
+| `transactions_passed_{5s,1m,5m}`        | `transactions`  | `system_under_test, test_environment, scenario_name, transaction_name` (success-filtered sketch — see below)            |
+| `requests_raw_passed_{5s,1m,5m}`        | `requests_raw`  | `system_under_test, test_environment, scenario_name, sampler_name, transaction_name, location` (success-filtered sketch)|
 
 ### Aggregate columns
 
 - **`requests_raw_*` / `transactions_*`:** `n` (count::bigint), `n_ok` / `n_err` (counts filtered by `success`), `avg_rt`, `min_rt`, `max_rt`, and `pct_agg` — a `timescaledb_toolkit` `percentile_agg` (tdigest) for approximate percentiles. `requests_raw` additionally carries `avg_connect`, `avg_latency`, `bytes_in` (from `response_size`), `bytes_out` (from `request_size`), and `avg_response_size`.
 - **`requests_error_*`:** just `n`. Error counts roll up by bucket × (sampler, transaction, node, response_code). Individual error rows (used by the detail panels on `template-timescaledb-errors`) stay on the raw `requests_error` hypertable — CAGGs don't materialize row-level data.
+- **`transactions_passed_*` / `requests_raw_passed_*`:** carry a single sketch column `pct_agg_passed` built as `percentile_agg(response_time::double precision) FILTER (WHERE success)` (uddsketch family — same as the existing CAGGs). Backs the live-Apdex fast path on `GET /test-runs/:id/transactions` and `/transactions/:name/samples` while a run is still in flight. `approx_percentile_rank(threshold, rollup(pct_agg_passed))` reproduces the success-filtered Apdex score that the post-test rollup table emits, so failed-but-fast rows are correctly counted as frustrated rather than satisfied. Side-by-side with the unfiltered family rather than DROP+CREATE, so existing throughput/latency panels are unaffected. Refresh + retention policies match the unfiltered family (5s every 30s, 1m every 1min, 5m every 5min; 90-day retention). Migration: `1779100000000-AddPctAggPassedCaggs`.
 
 ### Hierarchical rollup
 
@@ -109,3 +112,4 @@ No per-tenant feature flag. CAGGs are additive DDL: creating them does not chang
 - [#137](https://github.com/perfana/perfana/issues/137): composite `(sut, env, scenario, time DESC)` indexes. Still required — raw tables still serve live "now" queries, individual-row drill-downs, and the success-filtered stat panels listed above.
 - [#139](https://github.com/perfana/perfana/issues/139): `approx_percentile` rewrite of the Apdex query. CAGGs reuse the same tdigest pattern.
 - [#150](https://github.com/perfana/perfana/issues/150) / [#151](https://github.com/perfana/perfana/issues/151): `test_run_{transaction,sampler}_stats` rollup. Solves a different hot path (API-side `getTransactionStats` / `getAggregatedSamplerStats` over immutable completed runs). Complementary, not overlapping.
+- **Live Apdex CAGG fast path** (v0.2.47.88, migration `1779100000000`): the `*_passed` family above serves the live (in-flight) Apdex query for `GET /test-runs/:id/transactions` and `/transactions/:name/samples`. Wired into `getTransactionStats` / `getTransactionSamples` between the existing rollup-table fast path and the raw-scan fallback. The HTTP 202 rollup-pending response (introduced alongside the gate in #302) only fires when *both* the rollup table and the CAGG are empty for the run window. Sampler-level CAGG path returns `url_hash` / `url_pattern` as null — tracked as #303.
