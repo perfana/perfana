@@ -660,11 +660,19 @@ export class TestRunsPerformanceQueryService {
    * (which is not unique across orgs). The UUID is loaded once by
    * `loadCaggApdexScope` and passed through here as `scope.systemUnderTestId`.
    *
-   * Documented limitation: `url_hash` and `url_pattern` come back as `null`.
-   * The CAGGs don't carry per-row `url_hash` (would either inflate
-   * cardinality unacceptably — sampler_name × transaction_name × url_hash
-   * — or require a side lookup). The UI already handles missing url_hash
-   * gracefully. Tracked as #303.
+   * Documented limitation (resolved as accept + document, #303): `url_hash`
+   * and `url_pattern` come back as `null`. The CAGGs don't carry per-row
+   * `url_hash` — adding it as a GROUP BY column would either inflate
+   * cardinality (sampler × transaction × url_hash) or require a per-request
+   * side-lookup against `requests_raw`, which would defeat the CAGG fast
+   * path's <500ms target. The rollup pipeline itself uses the same shape
+   * (no url_hash in GROUP BY; it materializes "last-seen url_hash per
+   * sampler" via `(ARRAY_AGG ORDER BY time DESC)[1]` post-test). The UI
+   * falls back to `sampler_name` (`Top10ListsUrls`) and conditionally
+   * renders the URL chip in detail / errors views, so the live-window
+   * regression is bounded: the URL pattern reappears once the test ends
+   * and the rollup runs. `Top10ListsUrls` shows an info hint when any
+   * sampler in the response has a null `url_pattern`.
    *
    * Wrapped in `withStatementTimeout` for consistency with the raw-scan
    * fallback. CAGG reads are typically <500ms even for 10M-row runs, but
