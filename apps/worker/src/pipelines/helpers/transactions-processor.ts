@@ -18,7 +18,6 @@ import {
   createDsCompareConfigRecordPanelLevel,
   createDsCompareConfigRecordPanelLevelNoClassification,
 } from './metrics-builder.js';
-import { calculateApdexScore } from '../../utils/performance-aggregations.js';
 import {
   METRIC_TYPE_PANEL_IDS,
   METRIC_TYPE_PANEL_UNITS,
@@ -89,6 +88,7 @@ export class TransactionsProcessor {
     const aggregatedData = await this.aggregateTransactionsInDatabase(
       testRunId,
       testRun,
+      apdexThresholds,
       bucketSizeSeconds
     );
 
@@ -121,17 +121,12 @@ export class TransactionsProcessor {
       // Build the new metric name: just the transaction name
       const metricName = buildNewTransactionMetricName(row.transaction_name);
 
-      // Get Apdex threshold for this transaction
-      const apdexThreshold = this.getApdexThreshold(row.transaction_name, apdexThresholds);
-      const apdexToleratingThreshold = apdexThreshold * 4;
-
-      // Calculate Apdex score from response times array
-      if (row.response_times_array && row.response_times_array.length > 0) {
-        row.apdex_score = calculateApdexScore(
-          row.response_times_array,
-          apdexThreshold,
-          apdexToleratingThreshold
-        );
+      // Compute Apdex score from SQL-aggregated bracket counts (no array materialisation)
+      const apdexTotal = parseInt(row.apdex_total, 10) || 0;
+      if (apdexTotal > 0) {
+        const apdexSatisfied = parseInt(row.apdex_satisfied, 10) || 0;
+        const apdexTolerating = parseInt(row.apdex_tolerating, 10) || 0;
+        row.apdex_score = (apdexSatisfied + apdexTolerating * 0.5) / apdexTotal;
       }
 
       // Emit one metric record per metric type, each to its own panel
@@ -268,8 +263,12 @@ export class TransactionsProcessor {
   }
 
   /**
-   * Aggregate transactions data at database level for much better performance
-   * Uses TimescaleDB's time_bucket() and PostgreSQL's PERCENTILE_CONT
+   * Aggregate transactions data at database level for much better performance.
+   * Uses TimescaleDB's time_bucket() and PostgreSQL's PERCENTILE_CONT.
+   *
+   * Apdex bracket counts are computed in SQL using a LEFT JOIN to
+   * workload_transaction_apdex_thresholds, so no response-time arrays are
+   * materialised in JS heap. Memory cost is O(rows) not O(rows × bucket_size).
    *
    * For incremental collection:
    * - Bucket alignment uses original start_time for consistency across increments
@@ -278,25 +277,47 @@ export class TransactionsProcessor {
   private async aggregateTransactionsInDatabase(
     testRunId: string,
     testRun: TestRunMetadata,
+    apdexThresholds: ApdexThresholdLookup,
     bucketSizeSeconds: number
   ): Promise<any[]> {
-    // Determine effective filter times (use filter times if set, otherwise use start/end)
     const filterFromTime = testRun.filter_from_time ?? testRun.start_time;
     const filterToTime = testRun.filter_to_time ?? testRun.end_time;
     const hasFilterEndTime = filterToTime !== null;
+    const hasOrgFilter = !!testRun.organization_id;
 
-    // Parameters - reordered to put time filter at $2/$3 (fixes parameter binding issue)
+    // Fallback threshold used when no per-transaction override exists.
+    const fallbackThreshold =
+      apdexThresholds.workloadThreshold ??
+      apdexThresholds.benchmarkThreshold ??
+      DEFAULT_APDEX_THRESHOLD_MS;
+
     // $1 = testRunId
-    // $2 = filterFromTime (for WHERE clause)
-    // $3 = filterToTime (optional, for WHERE clause)
+    // $2 = filterFromTime
+    // $3 = filterToTime (null when no upper bound)
     // $4 = bucketSizeSeconds
-    // $5 = start_time (original, for bucket alignment)
+    // $5 = start_time (bucket origin)
+    // $6 = system_under_test_id (for per-transaction threshold JOIN)
+    // $7 = test_environment
+    // $8 = workload
+    // $9 = fallbackThreshold (ms)
+    // $10 = organization_id (optional, only when hasOrgFilter)
+    const orgFilterClause = hasOrgFilter
+      ? 'AND (organization_id = $10 OR organization_id IS NULL)'
+      : '';
+
     const query = `
-      WITH bucketed_data AS (
+      WITH per_txn_thresholds AS (
+        SELECT transaction_name, apdex_threshold
+        FROM workload_transaction_apdex_thresholds
+        WHERE system_under_test_id = $6::uuid
+          AND test_environment = $7
+          AND workload = $8
+          ${orgFilterClause}
+      ),
+      bucketed_data AS (
         SELECT
           COALESCE(scenario_name, 'default') as scenario_name,
           transaction_name,
-          -- Use TimescaleDB's time_bucket for optimal performance
           -- Bucket alignment uses ORIGINAL start_time ($5) for consistency
           CASE
             WHEN EXISTS (SELECT 1 FROM pg_extension WHERE extname = 'timescaledb')
@@ -314,61 +335,58 @@ export class TransactionsProcessor {
       ),
       aggregated AS (
         SELECT
-          scenario_name,
-          transaction_name,
-          bucket_time,
+          bd.scenario_name,
+          bd.transaction_name,
+          bd.bucket_time,
+          -- Apdex threshold resolved per transaction; fallback to $9 when no override
+          COALESCE(pt.apdex_threshold, $9) as apdex_threshold_ms,
           COUNT(*) as transaction_count,
-          SUM(is_error) as error_count,
+          SUM(bd.is_error) as error_count,
 
-          -- Response time aggregations
-          AVG(response_time) FILTER (WHERE response_time IS NOT NULL) as avg_response_time,
-          PERCENTILE_CONT(0.90) WITHIN GROUP (ORDER BY response_time)
-            FILTER (WHERE response_time IS NOT NULL) as p90_response_time,
-          PERCENTILE_CONT(0.95) WITHIN GROUP (ORDER BY response_time)
-            FILTER (WHERE response_time IS NOT NULL) as p95_response_time,
-          PERCENTILE_CONT(0.99) WITHIN GROUP (ORDER BY response_time)
-            FILTER (WHERE response_time IS NOT NULL) as p99_response_time,
+          AVG(bd.response_time) FILTER (WHERE bd.response_time IS NOT NULL) as avg_response_time,
+          PERCENTILE_CONT(0.90) WITHIN GROUP (ORDER BY bd.response_time)
+            FILTER (WHERE bd.response_time IS NOT NULL) as p90_response_time,
+          PERCENTILE_CONT(0.95) WITHIN GROUP (ORDER BY bd.response_time)
+            FILTER (WHERE bd.response_time IS NOT NULL) as p95_response_time,
+          PERCENTILE_CONT(0.99) WITHIN GROUP (ORDER BY bd.response_time)
+            FILTER (WHERE bd.response_time IS NOT NULL) as p99_response_time,
 
-          -- Apdex calculation components
-          ARRAY_AGG(response_time ORDER BY response_time)
-            FILTER (WHERE response_time IS NOT NULL) as response_times_array
-        FROM bucketed_data
-        GROUP BY scenario_name, transaction_name, bucket_time
+          -- Apdex bracket counts — replaces ARRAY_AGG to avoid heap allocation
+          COUNT(*) FILTER (WHERE bd.response_time IS NOT NULL
+                             AND bd.response_time <= COALESCE(pt.apdex_threshold, $9)) as apdex_satisfied,
+          COUNT(*) FILTER (WHERE bd.response_time IS NOT NULL
+                             AND bd.response_time > COALESCE(pt.apdex_threshold, $9)
+                             AND bd.response_time <= COALESCE(pt.apdex_threshold, $9) * 4) as apdex_tolerating,
+          COUNT(*) FILTER (WHERE bd.response_time IS NOT NULL) as apdex_total
+        FROM bucketed_data bd
+        LEFT JOIN per_txn_thresholds pt ON pt.transaction_name = bd.transaction_name
+        GROUP BY bd.scenario_name, bd.transaction_name, bd.bucket_time, COALESCE(pt.apdex_threshold, $9)
       )
       SELECT
         *,
         ROUND((error_count::numeric / NULLIF(transaction_count, 0) * 100)::numeric, 2) as error_rate,
         ROUND((transaction_count::numeric / $4)::numeric, 2) as throughput,
-        -- Calculate absolute timestep from test start (not relative to query result)
-        -- This ensures consistent timestep values across incremental pipeline runs
+        -- Absolute timestep from test start for consistent values across incremental runs
         FLOOR(EXTRACT(EPOCH FROM (bucket_time - $5::timestamp)) / $4)::integer as timestep
       FROM aggregated
       ORDER BY scenario_name, transaction_name, bucket_time
     `;
 
-    // Params reordered: time filter at $2/$3, bucket params at $4/$5
-    const params = hasFilterEndTime
-      ? [testRunId, filterFromTime, filterToTime, bucketSizeSeconds, testRun.start_time]
-      : [testRunId, filterFromTime, null, bucketSizeSeconds, testRun.start_time];
+    const baseParams: unknown[] = [
+      testRunId,                         // $1
+      filterFromTime,                    // $2
+      hasFilterEndTime ? filterToTime : null, // $3
+      bucketSizeSeconds,                 // $4
+      testRun.start_time,               // $5
+      testRun.system_under_test_id,     // $6
+      testRun.test_environment,          // $7
+      testRun.workload,                  // $8
+      fallbackThreshold,                 // $9
+    ];
+    const params = hasOrgFilter
+      ? [...baseParams, testRun.organization_id]  // $10
+      : baseParams;
 
-    const result = await this.dataSource.query(query, params);
-
-    // Apdex score will be calculated in main loop with proper thresholds
-    for (const row of result) {
-      row.apdex_score = null; // Placeholder
-    }
-
-    return result;
-  }
-
-  private getApdexThreshold(
-    transactionName: string,
-    apdexThresholds: ApdexThresholdLookup
-  ): number {
-    // Priority: transaction-specific > workload > benchmark > default
-    if (apdexThresholds.transactionThresholds.has(transactionName)) {
-      return apdexThresholds.transactionThresholds.get(transactionName)!;
-    }
-    return apdexThresholds.workloadThreshold || apdexThresholds.benchmarkThreshold || DEFAULT_APDEX_THRESHOLD_MS;
+    return this.dataSource.query(query, params);
   }
 }
