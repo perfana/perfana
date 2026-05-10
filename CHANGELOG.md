@@ -4,6 +4,11 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
+## [0.2.47.95] - 2026-05-10
+
+### Documentation
+- **Rewrote `docs-site/content/Features/RBAC.md` as the canonical RBAC reference.** The previous file was a phase-1 stub from before capabilities, owned-resources, and `restrict_to_team_members` shipped — the role table listed `org_admin` / `team_admin` (underscore form, never used in code) and made no mention of capabilities, the resource model, or team visibility rules. New doc derives every fact from source: `apps/api/src/constants/roles.constants.ts` (system / org / team role enums), `apps/api/src/constants/capabilities.constants.ts` (full capability catalog + role→capability map), `apps/api/src/common/services/authorization.service.ts` (the 7-step decision flow, `canAccessResource` / `canModifyResource` / `canViewTeamResources` / `canAdministerAnyOrganization` entrypoints, Redis cache + invalidation), `packages/shared/src/entities/owned-resource.interface.ts` (the four ownership columns), `packages/shared/src/entities/team.entity.ts` (the `restrict_to_team_members` flag), and the actual SQL filter clauses in `apps/api/src/modules/test-runs/services/test-runs-crud-query.service.ts` + `apps/api/src/modules/systems-under-test/systems-under-test.service.ts`. Sections: identity (JWT vs api-key principals), role hierarchy (3 scopes), authorization model (the global-admin → owner → org-admin → org-member → team-admin → team-member → deny order), `OwnedResource` columns + the camelCase pitfall, capability catalog with all 33 strings, role→capability matrix across all 7 roles, resource→action matrix for ~25 user-facing resources with required role per List/Read/Create/Update/Delete, team `restrict_to_team_members` rules with a worked Acme example showing what 5 different principals can see/do across restricted "Payments" + open "Catalog" teams, caching behavior, and phase status synced with `CLAUDE.md`. **Files:** `docs-site/content/Features/RBAC.md` (354 lines changed, 271 insertions / 83 deletions). No code change.
+
 ## [0.2.47.94] - 2026-05-09
 
 ### Changed
