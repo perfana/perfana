@@ -10,16 +10,29 @@ interface ResultStatusIconProps {
 export function ResultStatusIcon({ testRun }: ResultStatusIconProps): JSX.Element {
   // Check if any pipeline stage is IN_PROGRESS
   const status = testRun.status as unknown;
+  const statusObj = status as {
+    activeJob?: { stageName?: string } | null;
+    evaluatingChecks?: string;
+    evaluatingComparisons?: string;
+    evaluatingAdapt?: string;
+  } | undefined;
+
+  const activeJob = statusObj?.activeJob;
   const isInProgress =
-    status?.evaluatingChecks === 'IN_PROGRESS' ||
-    status?.evaluatingComparisons === 'IN_PROGRESS' ||
-    status?.evaluatingAdapt === 'IN_PROGRESS';
+    !!activeJob ||
+    statusObj?.evaluatingChecks === 'IN_PROGRESS' ||
+    statusObj?.evaluatingComparisons === 'IN_PROGRESS' ||
+    statusObj?.evaluatingAdapt === 'IN_PROGRESS';
+
+  const spinnerTooltip = activeJob?.stageName
+    ? `${activeJob.stageName} in progress`
+    : 'Test run evaluation in progress';
 
   // Show progress indicator if any pipeline is in progress
   if (isInProgress) {
     return (
       <Tooltip
-        title="Test run evaluation in progress"
+        title={spinnerTooltip}
         arrow
         placement="top"
       >

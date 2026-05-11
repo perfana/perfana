@@ -271,12 +271,14 @@ export const PIPELINE_STAGES = [
   { id: 'dynatrace-collection', name: 'Dynatrace collection' },
   { id: 'panels-processing', name: 'Panels processing' },
   { id: 'performance-test-metrics', name: 'Performance test metrics' },
+  { id: 'transaction-stats-rollup', name: 'Transaction stats rollup' },
   { id: 'metrics-collection', name: 'Metrics collection' },
   { id: 'statistics-calculation', name: 'Statistics calculation' },
   { id: 'checks-evaluation', name: 'Checks evaluation' },
   { id: 'control-groups-creation', name: 'Control groups creation' },
   { id: 'control-group-statistics', name: 'Control group statistics' },
   { id: 'adapt-analysis', name: 'ADAPT analysis' },
+  { id: 'data-sanity-check', name: 'Data sanity check' },
 ] as const;
 
 /**
