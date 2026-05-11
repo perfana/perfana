@@ -3,6 +3,7 @@ import { TypeOrmModule } from '@nestjs/typeorm';
 import { ApiKeysController } from './api-keys.controller';
 import { ApiKeysService } from './api-keys.service';
 import { ApiKeyCacheService } from './api-key-cache.service';
+import { ApiKeyLastUsedFlusherService } from './api-key-last-used-flusher.service';
 import { ApiKeyRepository } from '../../repositories/api-key.repository';
 import { ApiKey } from '../../entities';
 import { QueueModule } from '../queue/queue.module';
@@ -18,7 +19,7 @@ import { AuditResourceRegistry } from '../audit/audit-resource-registry';
     AuditModule, // Phase 5a: provides AuditService + AuditResourceRegistry
   ],
   controllers: [ApiKeysController],
-  providers: [ApiKeysService, ApiKeyCacheService, ApiKeyRepository],
+  providers: [ApiKeysService, ApiKeyCacheService, ApiKeyLastUsedFlusherService, ApiKeyRepository],
   exports: [ApiKeysService, ApiKeyRepository],
 })
 export class ApiKeysModule implements OnModuleInit {

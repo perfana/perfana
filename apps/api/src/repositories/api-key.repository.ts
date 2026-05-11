@@ -1,6 +1,6 @@
 import { Injectable } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Repository, LessThan, MoreThan, IsNull, FindOptionsWhere } from 'typeorm';
+import { Repository, LessThan, MoreThan, IsNull, In, FindOptionsWhere } from 'typeorm';
 import type { QueryDeepPartialEntity } from 'typeorm/query-builder/QueryPartialEntity';
 import { TypeOrmBaseRepository } from '../common/repositories/typeorm-base.repository';
 import { withRequestEm } from '../common/db/request-em';
@@ -86,6 +86,21 @@ export class ApiKeyRepository extends TypeOrmBaseRepository<ApiKey> {
     } catch (error) {
       this.logger.error('Failed to update API key last used:', error);
       throw new DatabaseException('Failed to update API key', error);
+    }
+  }
+
+  /**
+   * Batch update last_used for multiple API keys in a single statement.
+   * Runs outside the HTTP request context (no CLS/RLS) — uses the base repo directly.
+   */
+  async updateLastUsedBatch(ids: string[]): Promise<void> {
+    if (ids.length === 0) return;
+    try {
+      await this.repository.update({ id: In(ids) }, { lastUsed: new Date() });
+      this.logger.debug(`Batch updated last_used for ${ids.length} API key(s)`);
+    } catch (error) {
+      this.logger.error('Failed to batch update API key last used:', error);
+      throw new DatabaseException('Failed to batch update API key', error);
     }
   }
 
