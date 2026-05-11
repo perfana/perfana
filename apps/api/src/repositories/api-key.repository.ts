@@ -96,7 +96,7 @@ export class ApiKeyRepository extends TypeOrmBaseRepository<ApiKey> {
   async updateLastUsedBatch(ids: string[]): Promise<void> {
     if (ids.length === 0) return;
     try {
-      await this.repository.update({ id: In(ids) }, { lastUsed: new Date() });
+      await withRequestEm(this.repository).update({ id: In(ids) }, { lastUsed: new Date() });
       this.logger.debug(`Batch updated last_used for ${ids.length} API key(s)`);
     } catch (error) {
       this.logger.error('Failed to batch update API key last used:', error);
