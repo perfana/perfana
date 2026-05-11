@@ -242,9 +242,12 @@ export default function AnomalyDetectionCollapsedCard({
                 sx={{
                   fontSize: '0.875rem',
                   color: 'text.secondary',
+                  maxWidth: 280,
+                  mx: 'auto',
+                  lineHeight: 1.5,
                 }}
               >
-                No previous results to compare with
+                {(dsAdaptConclusion as any)?.details?.message ?? 'No previous results to compare with'}
               </Typography>
             </Box>
           ) : (

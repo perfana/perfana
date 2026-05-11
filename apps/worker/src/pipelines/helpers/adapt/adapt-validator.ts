@@ -283,6 +283,91 @@ export class AdaptValidator {
   }
 
   /**
+   * Write ds_adapt_conclusion rows for test runs excluded during pre-processing.
+   *
+   * When all test runs are filtered out (changepoints or empty control groups) the
+   * pipeline exits early without generating conclusions. This method fills that gap
+   * with an INSUFFICIENT_DATA conclusion so the UI can surface a clear explanation
+   * instead of an empty card.
+   */
+  async writeExclusionConclusions(
+    manager: EntityManager,
+    changepoints: string[],
+    emptyControlGroups: string[],
+  ): Promise<void> {
+    const allExcluded = [...changepoints, ...emptyControlGroups];
+    if (allExcluded.length === 0) { return; }
+
+    // Fetch org/team for ownership columns
+    const idPlaceholders = allExcluded.map((_: string, i: number) => `$${i + 1}`).join(', ');
+    const testRunRows = await manager.query(
+      `SELECT test_run_id, organization_id, team_id FROM test_runs WHERE test_run_id IN (${idPlaceholders})`,
+      allExcluded
+    );
+    const infoMap = new Map<string, { organization_id: string | null; team_id: string | null }>(
+      testRunRows.map((r: { test_run_id: string; organization_id: string | null; team_id: string | null }) => [
+        r.test_run_id,
+        { organization_id: r.organization_id, team_id: r.team_id },
+      ])
+    );
+
+    // Fetch control run lists for empty-control-group cases
+    const controlRunMap = new Map<string, string[]>();
+    if (emptyControlGroups.length > 0) {
+      const cgPlaceholders = emptyControlGroups.map((_: string, i: number) => `$${i + 1}`).join(', ');
+      const cgRows = await manager.query(
+        `SELECT control_group_id, test_runs FROM ds_control_groups WHERE control_group_id IN (${cgPlaceholders})`,
+        emptyControlGroups
+      );
+      for (const row of cgRows) {
+        controlRunMap.set(row.control_group_id, row.test_runs ?? []);
+      }
+    }
+
+    for (const testRunId of allExcluded) {
+      const info = infoMap.get(testRunId);
+      const isChangepoint = changepoints.includes(testRunId);
+
+      let message: string;
+      if (isChangepoint) {
+        message =
+          'This test run is a changepoint — a new baseline was established. ' +
+          'ADAPT comparison starts fresh from this run.';
+      } else {
+        const controlRuns = controlRunMap.get(testRunId) ?? [];
+        if (controlRuns.length > 0) {
+          const shown = controlRuns.slice(0, 3).join(', ');
+          const extra = controlRuns.length > 3 ? ` and ${controlRuns.length - 3} more` : '';
+          message =
+            `ADAPT requires valid baseline data. The ${controlRuns.length} control run${controlRuns.length === 1 ? '' : 's'} ` +
+            `(${shown}${extra}) contained insufficient metrics — they may have been too short or aborted. ` +
+            'Run at least one full-duration test to establish a baseline.';
+        } else {
+          message =
+            'ADAPT requires valid baseline data. The control runs contained insufficient metrics — ' +
+            'they may have been too short or aborted. Run at least one full-duration test to establish a baseline.';
+        }
+      }
+
+      await manager.query(
+        `INSERT INTO ds_adapt_conclusion (
+          test_run_id, control_group_id, regressions, improvements, differences, tracked_regressions,
+          conclusion, details, updated_at, organization_id, team_id, created_by, updated_by
+        )
+        VALUES ($1, $1, '{}', '{}', '{}', '{}', 'INSUFFICIENT_DATA', $2::jsonb, NOW(), $3, $4, 'worker-pipeline', 'worker-pipeline')
+        ON CONFLICT (test_run_id) DO UPDATE SET
+          conclusion = EXCLUDED.conclusion,
+          details    = EXCLUDED.details,
+          updated_at = EXCLUDED.updated_at,
+          updated_by = EXCLUDED.updated_by`,
+        [testRunId, JSON.stringify({ message }), info?.organization_id ?? null, info?.team_id ?? null]
+      );
+    }
+
+    this.logger.info(`Wrote INSUFFICIENT_DATA conclusions for ${allExcluded.length} excluded test run(s)`);
+  }
+
+  /**
    * Update status to failed when ADAPT processing fails
    *
    * Sets evaluatingAdapt to FAILED and adaptTestRunOK to false.

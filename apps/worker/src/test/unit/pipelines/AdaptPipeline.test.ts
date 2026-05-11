@@ -348,6 +348,8 @@ describe('AdaptPipeline', () => {
           processableTestRuns: [],
         });
       const processSpy = vi.spyOn((adaptPipeline as any).resultsProcessor, 'processAdaptResults');
+      const exclusionSpy = vi.spyOn((adaptPipeline as any).validator, 'writeExclusionConclusions')
+        .mockResolvedValue(undefined);
 
       // Act
       const result = await adaptPipeline.execute(input);
@@ -359,6 +361,58 @@ describe('AdaptPipeline', () => {
       expect(mockLogger.warn).toHaveBeenCalledWith(
         expect.stringContaining('No test runs available')
       );
+      expect(exclusionSpy).toHaveBeenCalledWith(
+        expect.anything(),
+        [],
+        ['no-baseline-1', 'no-baseline-2'],
+      );
+    });
+
+    it('should write exclusion conclusions for changepoints when all runs are excluded', async () => {
+      // Arrange
+      const input = { testRunIds: ['changepoint-run'] };
+
+      vi.spyOn((adaptPipeline as any).validator, 'runPreProcessingValidation')
+        .mockResolvedValue({
+          changepoints: ['changepoint-run'],
+          emptyControlGroups: [],
+          processableTestRuns: [],
+        });
+      vi.spyOn((adaptPipeline as any).resultsProcessor, 'processAdaptResults');
+      const exclusionSpy = vi.spyOn((adaptPipeline as any).validator, 'writeExclusionConclusions')
+        .mockResolvedValue(undefined);
+
+      // Act
+      const result = await adaptPipeline.execute(input);
+
+      // Assert
+      expect(result.success).toBe(true);
+      expect(result.data.processedRows).toBe(0);
+      expect(exclusionSpy).toHaveBeenCalledWith(
+        expect.anything(),
+        ['changepoint-run'],
+        [],
+      );
+    });
+
+    it('should not write exclusion conclusions when updateConclusion is false', async () => {
+      // Arrange
+      const input = { testRunIds: ['no-baseline-1'], updateConclusion: false };
+
+      vi.spyOn((adaptPipeline as any).validator, 'runPreProcessingValidation')
+        .mockResolvedValue({
+          changepoints: [],
+          emptyControlGroups: ['no-baseline-1'],
+          processableTestRuns: [],
+        });
+      const exclusionSpy = vi.spyOn((adaptPipeline as any).validator, 'writeExclusionConclusions')
+        .mockResolvedValue(undefined);
+
+      // Act
+      await adaptPipeline.execute(input);
+
+      // Assert
+      expect(exclusionSpy).not.toHaveBeenCalled();
     });
   });
 

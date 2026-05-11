@@ -102,6 +102,15 @@ export class AdaptPipeline extends BasePipelineTypeORM {
 
         if (preValidation.processableTestRuns.length === 0) {
           this.logger.warn('No test runs available for ADAPT processing after filtering');
+          if (updateConclusion) {
+            const conclusionStart = Date.now();
+            await this.validator.writeExclusionConclusions(
+              manager,
+              preValidation.changepoints,
+              preValidation.emptyControlGroups,
+            );
+            subStages.push({ stage: 'write-exclusion-conclusions', duration: Date.now() - conclusionStart });
+          }
           return { processedRows: 0, subStages };
         }
 
