@@ -7,6 +7,7 @@ import { CreateApiKeyDto } from './dto/create-api-key.dto';
 import { ApiKeyRepository } from '../../repositories/api-key.repository';
 import { ApiKey, OwnedResource } from '../../entities';
 import { ApiKeyCacheService } from './api-key-cache.service';
+import { ApiKeyLastUsedFlusherService } from './api-key-last-used-flusher.service';
 import { AuthorizationService } from '../../common/services/authorization.service';
 import { AuditService } from '../audit/audit.service';
 import { Capability } from '../../constants/capabilities.constants';
@@ -34,6 +35,7 @@ export class ApiKeysService {
     private readonly apiKeyCacheService: ApiKeyCacheService,
     private readonly authzService: AuthorizationService,
     private readonly auditService: AuditService,
+    private readonly lastUsedFlusher: ApiKeyLastUsedFlusherService,
   ) {}
 
   /**
@@ -393,11 +395,10 @@ export class ApiKeysService {
       }
 
       // bcrypt already passed in either the cache or DB-scan branch above.
-      // Cache the positive result and fire-and-forget the last-used update.
+      // Cache the positive result and buffer the last_used update — the flusher
+      // writes it in a single batch every 30 s, keeping the hot row lock-free.
       await this.apiKeyCacheService.cacheValidationResult(token, true);
-      this.updateLastUsed(apiKeyDoc.id).catch(err => {
-        this.logger.warn(`Failed to update last_used: ${err && typeof err === 'object' && 'message' in err ? (err as Error).message : 'Unknown error'}`);
-      });
+      this.lastUsedFlusher.record(apiKeyDoc.id);
       return apiKeyDoc;
     } catch (error) {
       this.logger.error('Error validating API key:', error);
@@ -435,15 +436,6 @@ export class ApiKeysService {
       }
     } catch (error) {
       this.logger.error(`Failed to warm caches: ${error && typeof error === 'object' && 'message' in error ? (error as Error).message : 'Unknown error'}`);
-    }
-  }
-
-  private async updateLastUsed(id: string): Promise<void> {
-    try {
-      await this.apiKeyRepository.updateLastUsed(id);
-    } catch (error) {
-      this.logger.warn('Failed to update last_used timestamp:', error);
-      // Don't throw error as this is not critical
     }
   }
 

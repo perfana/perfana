@@ -14,6 +14,7 @@ import { DataSource } from 'typeorm';
 import { ApiKeysService } from './api-keys.service';
 import { ApiKeyRepository } from '../../repositories/api-key.repository';
 import { ApiKeyCacheService } from './api-key-cache.service';
+import { ApiKeyLastUsedFlusherService } from './api-key-last-used-flusher.service';
 import { ApiKey } from '../../entities';
 import {
   ResourceNotFoundException,
@@ -33,6 +34,7 @@ describe('ApiKeysService', () => {
   let repository: jest.Mocked<ApiKeyRepository>;
   let cacheService: jest.Mocked<ApiKeyCacheService>;
   let auditService: jest.Mocked<AuditService>;
+  let lastUsedFlusher: jest.Mocked<ApiKeyLastUsedFlusherService>;
 
   // Mock data factory
   const createMockApiKey = (overrides?: Partial<ApiKey>): ApiKey => ({
@@ -91,6 +93,10 @@ describe('ApiKeysService', () => {
           },
         },
         {
+          provide: ApiKeyLastUsedFlusherService,
+          useValue: { record: jest.fn() },
+        },
+        {
           provide: DataSource,
           useValue: {
             createQueryRunner: jest.fn(),
@@ -104,6 +110,7 @@ describe('ApiKeysService', () => {
     repository = module.get(ApiKeyRepository);
     cacheService = module.get(ApiKeyCacheService);
     auditService = module.get(AuditService);
+    lastUsedFlusher = module.get(ApiKeyLastUsedFlusherService);
 
     // Default mock behaviors
     (bcrypt.hash as jest.Mock).mockResolvedValue('hashed-token');
@@ -505,7 +512,6 @@ describe('ApiKeysService', () => {
       cacheService.getCachedKey.mockResolvedValue(null);
       repository.searchByDescription.mockResolvedValue([mockApiKey]);
       (bcrypt.compare as jest.Mock).mockResolvedValue(true);
-      repository.updateLastUsed.mockResolvedValue(undefined);
       cacheService.cacheKey.mockResolvedValue(undefined);
       cacheService.cacheValidationResult.mockResolvedValue(undefined);
 
@@ -516,7 +522,7 @@ describe('ApiKeysService', () => {
       expect(result).toBe(mockApiKey);
       expect(cacheService.cacheKey).toHaveBeenCalledWith(mockApiKey);
       expect(cacheService.cacheValidationResult).toHaveBeenCalledWith(token, true);
-      expect(repository.updateLastUsed).toHaveBeenCalledWith(mockApiKey.id);
+      expect(lastUsedFlusher.record).toHaveBeenCalledWith(mockApiKey.id);
     });
 
     it('should validate API key using cache hit', async () => {
@@ -673,7 +679,7 @@ describe('ApiKeysService', () => {
       expect(result).toBe(null);
     });
 
-    it('should update lastUsed timestamp asynchronously on successful validation', async () => {
+    it('should record lastUsed via flusher on successful validation', async () => {
       // Arrange
       const token = Buffer.from('Test Key#uuid').toString('base64');
       const mockApiKey = createMockApiKey({ description: 'Test Key' });
@@ -681,15 +687,13 @@ describe('ApiKeysService', () => {
       cacheService.getCachedValidationResult.mockResolvedValue(null);
       cacheService.getCachedKey.mockResolvedValue(mockApiKey);
       (bcrypt.compare as jest.Mock).mockResolvedValue(true);
-      repository.updateLastUsed.mockResolvedValue(undefined);
       cacheService.cacheValidationResult.mockResolvedValue(undefined);
 
       // Act
       await service.validateApiKey(token);
 
-      // Assert - updateLastUsed is called but not awaited
-      await new Promise((resolve) => setTimeout(resolve, 10)); // Allow async to complete
-      expect(repository.updateLastUsed).toHaveBeenCalledWith(mockApiKey.id);
+      // Assert - flusher.record is synchronous, no async gap needed
+      expect(lastUsedFlusher.record).toHaveBeenCalledWith(mockApiKey.id);
     });
   });
 
