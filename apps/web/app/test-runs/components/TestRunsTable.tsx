@@ -174,12 +174,12 @@ export function TestRunsTable({
         },
       },
       {
-        field: 'created_at',
+        field: 'start_time',
         headerName: 'Start',
         minWidth: 140,
         flex: 1.5,
         maxWidth: 180,
-        valueGetter: (_value, row) => row?.created_at ? new Date(row.created_at).toLocaleString() : 'N/A',
+        valueGetter: (_value, row) => row?.start_time ? new Date(row.start_time).toLocaleString() : 'N/A',
       },
       {
         field: 'elapsed',
@@ -260,12 +260,12 @@ export function TestRunsTable({
         },
       },
       {
-        field: 'created_at',
+        field: 'start_time',
         headerName: 'Start',
         minWidth: 140,
         flex: 1.5,
         maxWidth: 180,
-        valueGetter: (_value, row) => row?.created_at ? new Date(row.created_at).toLocaleString() : 'N/A',
+        valueGetter: (_value, row) => row?.start_time ? new Date(row.start_time).toLocaleString() : 'N/A',
       },
       {
         field: 'duration',
