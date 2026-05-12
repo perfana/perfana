@@ -4,6 +4,11 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
+## [0.2.47.101] - 2026-05-12
+
+### Fixed
+- **Test run list now shows the actual test start time instead of the import timestamp.** The "Start" column in the test runs table was reading `created_at` (the database row creation time) instead of `start_time` (the actual test start from the load tool). For JTL imports this caused the list to show the time of upload while the test run detail page correctly showed the real start time from the JTL data.
+
 ## [0.2.47.100] - 2026-05-12
 
 ### Fixed
