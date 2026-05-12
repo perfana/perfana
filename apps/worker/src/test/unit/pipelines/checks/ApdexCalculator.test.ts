@@ -18,6 +18,40 @@ vi.mock('../../../../lib/utils/logger.js', () => ({
 
 // ─── Helpers ────────────────────────────────────────────────────────────────
 
+/**
+ * Build a mock EntityManager whose `query` method ignores SAVEPOINT management
+ * queries (SAVEPOINT, RELEASE SAVEPOINT, ROLLBACK TO SAVEPOINT) and returns
+ * pre-queued values for all other queries. This mirrors the SAVEPOINT isolation
+ * added to evaluateWorkloadLevelApdex (Fix 2, issue #326) without requiring
+ * every test to enumerate the savepoint calls explicitly.
+ *
+ * Usage: call `queueQueryResult(...rows)` before each expected non-savepoint
+ * query in invocation order. The queue is drained in FIFO order; unqueued
+ * non-savepoint calls return [].
+ */
+function createSavepointAwareMockManager() {
+  const queue: Array<any[] | Error> = [];
+  const query = vi.fn().mockImplementation((sql: string) => {
+    if (/^\s*(SAVEPOINT|RELEASE\s+SAVEPOINT|ROLLBACK\s+TO\s+SAVEPOINT)\b/i.test(sql)) {
+      return Promise.resolve([]);
+    }
+    if (queue.length > 0) {
+      const next = queue.shift()!;
+      return next instanceof Error ? Promise.reject(next) : Promise.resolve(next);
+    }
+    return Promise.resolve([]);
+  });
+  return {
+    manager: { query },
+    /** Queue a return value for the next non-savepoint query call. */
+    enqueue(...values: Array<any[] | Error>) {
+      queue.push(...values);
+    },
+    /** Direct access to the spy for assertions. */
+    querySpy: query,
+  };
+}
+
 const createTestRun = (overrides?: Partial<TestRun>): TestRun => ({
   test_run_id: 'run-001',
   system_under_test_id: 'sut-1',
@@ -61,9 +95,14 @@ describe('ApdexCalculator', () => {
   let calculator: ApdexCalculator;
   let mockManager: { query: ReturnType<typeof vi.fn> };
 
+  // Savepoint-aware mock used by workload-level tests (evaluateWorkloadLevelApdex
+  // emits SAVEPOINT / RELEASE SAVEPOINT per transaction since issue #326 Fix 2).
+  let spMock: ReturnType<typeof createSavepointAwareMockManager>;
+
   beforeEach(() => {
     vi.clearAllMocks();
     mockManager = { query: vi.fn() };
+    spMock = createSavepointAwareMockManager();
     calculator = new ApdexCalculator(mockLogger as any, mockManager as unknown as EntityManager);
   });
 
@@ -719,19 +758,31 @@ describe('ApdexCalculator', () => {
 
   // ══════════════════════════════════════════════════════════════════════════
   // evaluateApdexBenchmark — workload-level (null transaction_name)
+  //
+  // These tests use `spMock` (createSavepointAwareMockManager) rather than the
+  // plain `mockManager` because evaluateWorkloadLevelApdex emits SAVEPOINT /
+  // RELEASE SAVEPOINT queries around each per-named-transaction iteration
+  // (issue #326 Fix 2). The savepoint-aware mock silently absorbs those calls
+  // so each test only needs to queue the data-bearing query results.
   // ══════════════════════════════════════════════════════════════════════════
 
   describe('evaluateApdexBenchmark — workload-level (null transaction_name)', () => {
+    // Helper: create a calculator backed by the savepoint-aware mock.
+    function makeSPCalculator() {
+      return new ApdexCalculator(mockLogger as any, spMock.manager as unknown as EntityManager);
+    }
+
     it('should return NO_DATA with meets_requirement=false when no transactions exist for the test run', async () => {
       // Arrange
       const testRun = createTestRun();
       const benchmark = createBenchmark({ transaction_name: null });
+      const calc = makeSPCalculator();
 
       // getTransactionsWithScenarios: rollup empty → falls back to legacy → also empty
-      mockManager.query.mockResolvedValueOnce([]).mockResolvedValueOnce([]);
+      spMock.enqueue([], []);
 
       // Act
-      const result = await calculator.evaluateApdexBenchmark(testRun, benchmark);
+      const result = await calc.evaluateApdexBenchmark(testRun, benchmark);
 
       // Assert — NO_DATA with no fallback default must fail, not silently pass the consolidated rollup
       expect(result.status).toBe('NO_DATA');
@@ -744,24 +795,23 @@ describe('ApdexCalculator', () => {
       // Arrange
       const testRun = createTestRun();
       const benchmark = createBenchmark({ transaction_name: null, min_apdex_score: 0.75 });
+      const calc = makeSPCalculator();
 
-      mockManager.query
-        // getTransactionsWithScenarios
-        .mockResolvedValueOnce([
-          { transaction_name: 'login', scenario_name: 'default' },
-          { transaction_name: 'checkout', scenario_name: 'default' },
-        ])
-        // resolveThreshold for 'login' → TX-specific empty, no workload call (benchmarkThreshold provided)
-        .mockResolvedValueOnce([])   // TX-specific threshold for login
-        // calculateApdex for 'login' → score = 1.0
-        .mockResolvedValueOnce([makeApdexRow(100, 0, 0, 200)])
+      spMock.enqueue(
+        // getTransactionsWithScenarios (rollup hit)
+        [{ transaction_name: 'login', scenario_name: 'default' }, { transaction_name: 'checkout', scenario_name: 'default' }],
+        // resolveThreshold for 'login' → TX-specific empty (benchmark threshold used)
+        [],
+        // calculateApdex for 'login' via raw scan → score = 1.0
+        [makeApdexRow(100, 0, 0, 200)],
         // resolveThreshold for 'checkout'
-        .mockResolvedValueOnce([])   // TX-specific threshold for checkout
-        // calculateApdex for 'checkout' → score = 0.85
-        .mockResolvedValueOnce([makeApdexRow(85, 15, 0, 350)]);
+        [],
+        // calculateApdex for 'checkout' via raw scan → score = (85+7.5)/100 = 0.925
+        [makeApdexRow(85, 15, 0, 350)],
+      );
 
       // Act
-      const result = await calculator.evaluateApdexBenchmark(testRun, benchmark);
+      const result = await calc.evaluateApdexBenchmark(testRun, benchmark);
 
       // Assert
       expect(result.status).toBe('COMPLETE');
@@ -774,19 +824,18 @@ describe('ApdexCalculator', () => {
       // Arrange
       const testRun = createTestRun();
       const benchmark = createBenchmark({ transaction_name: null, min_apdex_score: 0.80 });
+      const calc = makeSPCalculator();
 
-      mockManager.query
-        .mockResolvedValueOnce([
-          { transaction_name: 'login', scenario_name: 'default' },
-          { transaction_name: 'slow-search', scenario_name: 'default' },
-        ])
-        .mockResolvedValueOnce([])                           // TX threshold for login
-        .mockResolvedValueOnce([makeApdexRow(90, 5, 5, 200)]) // login → 0.925
-        .mockResolvedValueOnce([])                           // TX threshold for slow-search
-        .mockResolvedValueOnce([makeApdexRow(40, 30, 30, 900)]); // slow-search → (40+15)/100 = 0.55
+      spMock.enqueue(
+        [{ transaction_name: 'login', scenario_name: 'default' }, { transaction_name: 'slow-search', scenario_name: 'default' }],
+        [],                                       // TX threshold for login
+        [makeApdexRow(90, 5, 5, 200)],            // login → 0.925
+        [],                                       // TX threshold for slow-search
+        [makeApdexRow(40, 30, 30, 900)],          // slow-search → (40+15)/100 = 0.55
+      );
 
       // Act
-      const result = await calculator.evaluateApdexBenchmark(testRun, benchmark);
+      const result = await calc.evaluateApdexBenchmark(testRun, benchmark);
 
       // Assert
       expect(result.status).toBe('COMPLETE');
@@ -798,19 +847,18 @@ describe('ApdexCalculator', () => {
       // Arrange
       const testRun = createTestRun();
       const benchmark = createBenchmark({ transaction_name: null, min_apdex_score: 0.5 });
+      const calc = makeSPCalculator();
 
-      mockManager.query
-        .mockResolvedValueOnce([
-          { transaction_name: 'tx-a', scenario_name: 'default' },
-          { transaction_name: 'tx-b', scenario_name: 'default' },
-        ])
-        .mockResolvedValueOnce([])                        // TX threshold for tx-a
-        .mockResolvedValueOnce([makeApdexRow(60, 20, 20)]) // tx-a
-        .mockResolvedValueOnce([])                        // TX threshold for tx-b
-        .mockResolvedValueOnce([makeApdexRow(40, 10, 50)]); // tx-b
+      spMock.enqueue(
+        [{ transaction_name: 'tx-a', scenario_name: 'default' }, { transaction_name: 'tx-b', scenario_name: 'default' }],
+        [],                          // TX threshold for tx-a
+        [makeApdexRow(60, 20, 20)],  // tx-a
+        [],                          // TX threshold for tx-b
+        [makeApdexRow(40, 10, 50)],  // tx-b
+      );
 
       // Act
-      const result = await calculator.evaluateApdexBenchmark(testRun, benchmark);
+      const result = await calc.evaluateApdexBenchmark(testRun, benchmark);
 
       // Assert — aggregate: 100 sat, 30 tol, 70 frus, total = 200
       expect(result.apdex_result.satisfied_count).toBe(100);
@@ -825,19 +873,18 @@ describe('ApdexCalculator', () => {
       // Arrange
       const testRun = createTestRun();
       const benchmark = createBenchmark({ transaction_name: null, min_apdex_score: 0.75 });
+      const calc = makeSPCalculator();
 
-      mockManager.query
-        .mockResolvedValueOnce([
-          { transaction_name: 'login', scenario_name: 'default' },
-          { transaction_name: 'checkout', scenario_name: 'default' },
-        ])
-        .mockResolvedValueOnce([])                          // TX threshold for login
-        .mockRejectedValueOnce(new Error('DB error'))       // calculateApdex for login throws
-        .mockResolvedValueOnce([])                          // TX threshold for checkout
-        .mockResolvedValueOnce([makeApdexRow(90, 5, 5, 200)]); // checkout succeeds
+      spMock.enqueue(
+        [{ transaction_name: 'login', scenario_name: 'default' }, { transaction_name: 'checkout', scenario_name: 'default' }],
+        [],                                   // TX threshold for login
+        new Error('DB error'),                // calculateApdex for login throws
+        [],                                   // TX threshold for checkout
+        [makeApdexRow(90, 5, 5, 200)],        // checkout succeeds
+      );
 
       // Act
-      const result = await calculator.evaluateApdexBenchmark(testRun, benchmark);
+      const result = await calc.evaluateApdexBenchmark(testRun, benchmark);
 
       // Assert
       expect(result.status).toBe('ERROR');
@@ -848,14 +895,16 @@ describe('ApdexCalculator', () => {
       // Arrange
       const testRun = createTestRun();
       const benchmark = createBenchmark({ transaction_name: null });
+      const calc = makeSPCalculator();
 
-      mockManager.query
-        .mockResolvedValueOnce([{ transaction_name: 'login', scenario_name: 'default' }])
-        .mockResolvedValueOnce([])
-        .mockResolvedValueOnce([makeApdexRow(80, 10, 10, 300)]);
+      spMock.enqueue(
+        [{ transaction_name: 'login', scenario_name: 'default' }],
+        [],
+        [makeApdexRow(80, 10, 10, 300)],
+      );
 
       // Act
-      const result = await calculator.evaluateApdexBenchmark(testRun, benchmark);
+      const result = await calc.evaluateApdexBenchmark(testRun, benchmark);
 
       // Assert
       expect(result.apdex_result.transaction_name).toBeNull();
@@ -865,14 +914,16 @@ describe('ApdexCalculator', () => {
       // Arrange — a transaction exists but has no data; validate_with_default_if_no_data is always false for Apdex
       const testRun = createTestRun();
       const benchmark = createBenchmark({ transaction_name: null, min_apdex_score: 0.75 });
+      const calc = makeSPCalculator();
 
-      mockManager.query
-        .mockResolvedValueOnce([{ transaction_name: 'ghost', scenario_name: 'default' }])
-        .mockResolvedValueOnce([])                        // TX threshold
-        .mockResolvedValueOnce([makeApdexRow(0, 0, 0)]); // zero counts
+      spMock.enqueue(
+        [{ transaction_name: 'ghost', scenario_name: 'default' }],
+        [],                       // TX threshold
+        [makeApdexRow(0, 0, 0)],  // zero counts
+      );
 
       // Act
-      const result = await calculator.evaluateApdexBenchmark(testRun, benchmark);
+      const result = await calc.evaluateApdexBenchmark(testRun, benchmark);
 
       // Assert — NO_DATA with no fallback default must fail the gate, not silently pass
       expect(result.status).toBe('NO_DATA');
@@ -883,22 +934,23 @@ describe('ApdexCalculator', () => {
       // Arrange — 4 failing transactions
       const testRun = createTestRun();
       const benchmark = createBenchmark({ transaction_name: null, min_apdex_score: 0.95 });
+      const calc = makeSPCalculator();
 
       const transactions = ['tx-1', 'tx-2', 'tx-3', 'tx-4'].map(name => ({
         transaction_name: name,
         scenario_name: 'default',
       }));
 
-      // Build query mock chain: for each TX → threshold (empty) + apdex row (all failing, score = 0)
-      let queryMock = mockManager.query.mockResolvedValueOnce(transactions); // getTransactionsWithScenarios
+      spMock.enqueue(transactions); // getTransactionsWithScenarios
       for (let i = 0; i < 4; i++) {
-        queryMock = queryMock
-          .mockResolvedValueOnce([])                      // TX threshold
-          .mockResolvedValueOnce([makeApdexRow(0, 0, 100)]); // frustrated → score = 0
+        spMock.enqueue(
+          [],                          // TX threshold
+          [makeApdexRow(0, 0, 100)],   // frustrated → score = 0
+        );
       }
 
       // Act
-      const result = await calculator.evaluateApdexBenchmark(testRun, benchmark);
+      const result = await calc.evaluateApdexBenchmark(testRun, benchmark);
 
       // Assert
       expect(result.message).toContain('...');
@@ -911,16 +963,71 @@ describe('ApdexCalculator', () => {
       // Arrange — benchmark has null threshold
       const testRun = createTestRun();
       const benchmark = createBenchmark({ transaction_name: null, apdex_threshold_ms: null });
+      const calc = makeSPCalculator();
 
       // rollup empty → falls back to legacy → also empty
-      mockManager.query.mockResolvedValueOnce([]).mockResolvedValueOnce([]);
+      spMock.enqueue([], []);
 
       // Act
-      const result = await calculator.evaluateApdexBenchmark(testRun, benchmark);
+      const result = await calc.evaluateApdexBenchmark(testRun, benchmark);
 
       // Assert
       expect(result.apdex_result.threshold_ms).toBe(500);
       expect(result.requirement.threshold_ms).toBe(500);
+    });
+
+    // ── Fix 2: SAVEPOINT isolation (issue #326) ───────────────────────────
+
+    it('should continue evaluating remaining transactions when one fails with a fatal DB error (SAVEPOINT isolation)', async () => {
+      // Regression: before Fix 2, a fatal Postgres error on one iteration (e.g.
+      // bigint overflow) would abort the PG transaction and cause every subsequent
+      // query to fail with "current transaction is aborted". The SAVEPOINT wrapper
+      // rolls the transaction back to a healthy state so the loop continues.
+      const testRun = createTestRun();
+      const benchmark = createBenchmark({ transaction_name: null, min_apdex_score: 0.75 });
+      const calc = makeSPCalculator();
+
+      spMock.enqueue(
+        [
+          { transaction_name: 'tx-bad', scenario_name: 'default' },
+          { transaction_name: 'tx-good', scenario_name: 'default' },
+        ],
+        [],                                             // TX threshold for tx-bad
+        new Error('bigint out of range'),               // tx-bad fails
+        [],                                             // TX threshold for tx-good (runs because SAVEPOINT was rolled back)
+        [makeApdexRow(80, 10, 10, 200)],               // tx-good succeeds
+      );
+
+      // Act
+      const result = await calc.evaluateApdexBenchmark(testRun, benchmark);
+
+      // Assert — overall ERROR because tx-bad failed, but tx-good was still evaluated
+      expect(result.status).toBe('ERROR');
+      expect(result.transaction_results).toHaveLength(2);
+      expect(result.transaction_results[0].transaction_name).toBe('tx-bad');
+      expect(result.transaction_results[0].meets_requirement).toBeNull();
+      expect(result.transaction_results[1].transaction_name).toBe('tx-good');
+      expect(result.transaction_results[1].apdex_score).toBe(0.85); // (80+5)/100
+    });
+
+    it('should emit SAVEPOINT and RELEASE SAVEPOINT around each transaction iteration', async () => {
+      // Verifies that the SAVEPOINT calls are actually emitted, so the isolation
+      // mechanism is present and can be observed in the call log.
+      const testRun = createTestRun();
+      const benchmark = createBenchmark({ transaction_name: null, min_apdex_score: 0.75 });
+      const calc = makeSPCalculator();
+
+      spMock.enqueue(
+        [{ transaction_name: 'login', scenario_name: 'default' }],
+        [],
+        [makeApdexRow(90, 5, 5, 200)],
+      );
+
+      await calc.evaluateApdexBenchmark(testRun, benchmark);
+
+      const allCalls: string[] = spMock.querySpy.mock.calls.map((c: any[]) => c[0] as string);
+      expect(allCalls.some(s => /^\s*SAVEPOINT\b/i.test(s))).toBe(true);
+      expect(allCalls.some(s => /^\s*RELEASE\s+SAVEPOINT\b/i.test(s))).toBe(true);
     });
   });
 
@@ -1517,6 +1624,73 @@ describe('ApdexCalculator', () => {
       // Assert — (60 + 15) / 100 = 0.75, same formula as the raw path
       expect(result.apdex_score).toBe(0.75);
       expect(result.total_count).toBe(100);
+    });
+
+    // ── Fix 1: NaN-safe approx_percentile_rank (issue #326) ──────────────
+
+    it('rollup SQL wraps approx_percentile_rank in COALESCE(NULLIF(..., NaN), 1.0) (issue #326)', async () => {
+      // Regression: approx_percentile_rank returns NaN when the threshold equals
+      // exactly the tdigest maximum. Without the NaN guard the subsequent
+      // ROUND(NaN * count)::bigint throws "bigint out of range", aborting the
+      // entire Postgres transaction. Verify the SQL contains the guard so that
+      // the database-level fix is present.
+      const testRun = createTestRun();
+      mockManager.query.mockResolvedValueOnce([makeRollupRow(100, 0, 0, 326)]);
+
+      await calculator.calculateApdex({
+        testRun,
+        transactionName: 'Zoek_BSN_10_Uitloggen',
+        thresholdMs: 326,
+        includeFailedRequests: false,
+        excludeRampUp: true,
+      });
+
+      const [sql] = mockManager.query.mock.calls[0];
+      // Both rank computations must be guarded
+      expect(sql).toMatch(/COALESCE\s*\(\s*NULLIF\s*\(\s*approx_percentile_rank\s*\(\s*\$5::double precision/i);
+      expect(sql).toMatch(/COALESCE\s*\(\s*NULLIF\s*\(\s*approx_percentile_rank\s*\(\s*\(\$5\s*\*\s*4\)/i);
+      expect(sql).toMatch(/'NaN'::double precision/i);
+    });
+
+    it('rollup path returns score 1.0 when DB emits all-satisfied row (threshold = tdigest max, issue #326)', async () => {
+      // Simulates the post-fix outcome: approx_percentile_rank returns 1.0
+      // (via the COALESCE guard) when threshold = max, so every request counts
+      // as satisfied and the Apdex score is 1.000.
+      const testRun = createTestRun();
+      // The DB guard coerces NaN → 1.0, so all 100 requests end up in satisfied.
+      mockManager.query.mockResolvedValueOnce([makeRollupRow(100, 0, 0, 326)]);
+
+      const result = await calculator.calculateApdex({
+        testRun,
+        transactionName: 'Zoek_BSN_10_Uitloggen',
+        thresholdMs: 326,
+        includeFailedRequests: false,
+        excludeRampUp: true,
+      });
+
+      expect(result.apdex_score).toBe(1.0);
+      expect(result.satisfied_count).toBe(100);
+      expect(result.total_count).toBe(100);
+    });
+
+    it('rollup SQL uses a ranks CTE so approx_percentile_rank is not repeated inline', async () => {
+      // The ranks CTE computes rank_t and rank_4t once and reuses them, preventing
+      // four separate approx_percentile_rank calls on the same sketch.
+      const testRun = createTestRun();
+      mockManager.query.mockResolvedValueOnce([makeRollupRow(80, 10, 10)]);
+
+      await calculator.calculateApdex({
+        testRun,
+        transactionName: 'tx',
+        thresholdMs: 500,
+        includeFailedRequests: false,
+        excludeRampUp: false,
+      });
+
+      const [sql] = mockManager.query.mock.calls[0];
+      expect(sql).toMatch(/\branks\s+AS\s*\(/i);
+      expect(sql).toMatch(/\brank_t\b/);
+      expect(sql).toMatch(/\brank_4t\b/);
     });
   });
 });

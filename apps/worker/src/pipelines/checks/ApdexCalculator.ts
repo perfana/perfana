@@ -255,6 +255,10 @@ export class ApdexCalculator extends BaseCheckService {
   }): Promise<ApdexResult | null> {
     const { testRunId, transactionName, thresholdMs, includeFailedRequests, excludeRampUp } = params;
 
+    // TimescaleDB toolkit edge case: approx_percentile_rank(x, sketch) returns NaN
+    // when x equals exactly the maximum value stored in the sketch (issue #326).
+    // NULLIF(NaN, 'NaN') returns NULL in PG (NaN = NaN is true), and COALESCE gives
+    // the semantically correct 1.0 (threshold >= max means 100% satisfied).
     const query = `
       WITH agg AS (
         SELECT
@@ -272,25 +276,36 @@ export class ApdexCalculator extends BaseCheckService {
         WHERE test_run_id = $1
           AND ramp_up_excluded = $2
           AND transaction_name = $3
+      ),
+      ranks AS (
+        SELECT
+          effective_total,
+          sum_total_count,
+          sum_avg_x_total,
+          row_count,
+          has_passed_sketch,
+          COALESCE(NULLIF(approx_percentile_rank($5::double precision,         pct_eff), 'NaN'::double precision), 1.0) AS rank_t,
+          COALESCE(NULLIF(approx_percentile_rank(($5 * 4)::double precision,   pct_eff), 'NaN'::double precision), 1.0) AS rank_4t
+        FROM agg
       )
       SELECT
         effective_total                                                                        AS total_count,
         GREATEST(
-          ROUND(approx_percentile_rank($5::double precision, pct_eff) * effective_total)::bigint,
+          ROUND(rank_t * effective_total)::bigint,
           0::bigint
         )                                                                                      AS satisfied_count,
         GREATEST(
-          (ROUND(approx_percentile_rank(($5 * 4)::double precision, pct_eff) * effective_total)::bigint
-           - ROUND(approx_percentile_rank($5::double precision, pct_eff) * effective_total)::bigint),
+          (ROUND(rank_4t * effective_total)::bigint
+           - ROUND(rank_t * effective_total)::bigint),
           0::bigint
         )                                                                                      AS tolerating_count,
         GREATEST(
           (effective_total
-           - ROUND(approx_percentile_rank(($5 * 4)::double precision, pct_eff) * effective_total)::bigint),
+           - ROUND(rank_4t * effective_total)::bigint),
           0::bigint
         )                                                                                      AS frustrated_count,
         ROUND((sum_avg_x_total / NULLIF(sum_total_count, 0))::numeric, 2)                      AS avg_response_time_ms
-      FROM agg
+      FROM ranks
       WHERE row_count > 0
         AND effective_total > 0
         AND ($4::boolean OR has_passed_sketch)
@@ -501,8 +516,21 @@ export class ApdexCalculator extends BaseCheckService {
     let totalCount = 0;
     const failedTransactions: string[] = [];
 
+    // SAVEPOINT isolation: if one transaction's query causes a fatal Postgres error
+    // (e.g. bigint overflow from a NaN propagation bug), it aborts the current
+    // transaction block and makes every subsequent query fail with "current
+    // transaction is aborted". By wrapping each iteration in a SAVEPOINT we can
+    // roll back to a clean state and continue evaluating the remaining transactions.
+    // SAVEPOINT is a no-op if we are not inside an explicit transaction (the query
+    // throws, which we catch and ignore so the loop continues without isolation).
+    let savepointIdx = 0;
     for (const { transaction_name: transactionName, scenario_name: scenarioName } of transactionsWithScenarios) {
+      const sp = `sp_apdex_${savepointIdx++}`;
+      let savepointActive = false;
       try {
+        await this.manager.query(`SAVEPOINT ${sp}`);
+        savepointActive = true;
+
         // Resolve threshold for this specific transaction (allows per-transaction overrides)
         const resolvedThreshold = await this.resolveThreshold({
           benchmarkThreshold: apdex_threshold_ms,
@@ -521,6 +549,9 @@ export class ApdexCalculator extends BaseCheckService {
           includeFailedRequests: include_failed_requests,
           excludeRampUp: exclude_ramp_up_time,
         });
+
+        await this.manager.query(`RELEASE SAVEPOINT ${sp}`);
+        savepointActive = false;
 
         const meetsReq = apdexResult.apdex_score !== null && apdexResult.apdex_score >= min_apdex_score;
 
@@ -549,6 +580,9 @@ export class ApdexCalculator extends BaseCheckService {
         });
 
       } catch (error) {
+        if (savepointActive) {
+          try { await this.manager.query(`ROLLBACK TO SAVEPOINT ${sp}`); } catch (_) {}
+        }
         this.logger.error(`Error calculating Apdex for transaction ${transactionName}: ${error}`);
         anyError = true;
         transactionResults.push({
