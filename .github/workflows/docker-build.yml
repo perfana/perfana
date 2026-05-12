@@ -82,7 +82,7 @@ jobs:
           context: .
           file: ./Dockerfile
           target: web
-          platforms: linux/amd64
+          platforms: linux/amd64,linux/arm64
           push: ${{ github.event_name == 'push' || github.event.inputs.push_images == 'true' }}
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
@@ -146,7 +146,7 @@ jobs:
           context: .
           file: ./Dockerfile
           target: api
-          platforms: linux/amd64
+          platforms: linux/amd64,linux/arm64
           push: ${{ github.event_name == 'push' || github.event.inputs.push_images == 'true' }}
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
@@ -203,7 +203,7 @@ jobs:
           context: .
           file: ./Dockerfile
           target: worker
-          platforms: linux/amd64
+          platforms: linux/amd64,linux/arm64
           push: ${{ github.event_name == 'push' || github.event.inputs.push_images == 'true' }}
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
@@ -265,7 +265,7 @@ jobs:
           context: .
           file: ./Dockerfile
           target: grafana-sync
-          platforms: linux/amd64
+          platforms: linux/amd64,linux/arm64
           push: ${{ github.event_name == 'push' || github.event.inputs.push_images == 'true' }}
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
@@ -327,7 +327,7 @@ jobs:
           context: .
           file: ./Dockerfile
           target: perfana-report
-          platforms: linux/amd64
+          platforms: linux/amd64,linux/arm64
           push: ${{ github.event_name == 'push' || github.event.inputs.push_images == 'true' }}
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
@@ -384,7 +384,7 @@ jobs:
           context: .
           file: ./Dockerfile.migrations
           target: migrations
-          platforms: linux/amd64
+          platforms: linux/amd64,linux/arm64
           push: ${{ github.event_name == 'push' || github.event.inputs.push_images == 'true' }}
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
@@ -410,7 +410,7 @@ jobs:
           echo "| Perfana Report | ${{ needs.build-perfana-report.result }} |" >> $GITHUB_STEP_SUMMARY
           echo "| Migration | ${{ needs.build-migration.result }} |" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
-          echo "**Platforms**: linux/amd64" >> $GITHUB_STEP_SUMMARY
+          echo "**Platforms**: linux/amd64, linux/arm64" >> $GITHUB_STEP_SUMMARY
           echo "**Registry**: Docker Hub (perfana)" >> $GITHUB_STEP_SUMMARY
 
           if [[ "${{ needs.build-web.result }}" == "failure" ]] || \
