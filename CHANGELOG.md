@@ -4,6 +4,11 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
+## [0.2.47.100] - 2026-05-12
+
+### Fixed
+- **Expanded test run info card now shows the ADAPT conclusion message instead of the generic fallback when no baselines exist.** When `evaluatingAdapt === 'NO_BASELINES_FOUND'`, the Anomaly Detection subsection in the expanded info card (`EvaluationResultsSection`) was always displaying the hardcoded string "No previous results to compare with" — even when the `/adapt/conclusion/{testRunId}` endpoint returned a `details.message` (e.g. "Insufficient data to run ADAPT analysis"). The collapsed card (`AnomalyDetectionCollapsedCard`) had already been fixed in [#319](https://github.com/perfana/perfana/issues/319) to read `dsAdaptConclusion?.details?.message`, but the fix was not applied to the expanded path. The `AnomalyDetectionSubsection` component in `EvaluationResultsSection` now fetches the ADAPT conclusion on mount (guarded by the `NO_BASELINES_FOUND` condition) and surfaces `details.message` with the same fallback string as the collapsed card. Fixes [#324](https://github.com/perfana/perfana/issues/324). **Files:** `apps/web/app/test-runs/[id]/components/test-run-details/components/EvaluationResultsSection.tsx` (29 lines), `apps/web/__tests__/app/test-runs/test-run-details/TestRunDetailsCard.test.tsx` (4 lines, 2 new tests).
+
 ## [0.2.47.99] - 2026-05-12
 
 ### Fixed
