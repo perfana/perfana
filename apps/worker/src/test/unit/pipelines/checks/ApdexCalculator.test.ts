@@ -647,8 +647,8 @@ describe('ApdexCalculator', () => {
       expect(result.message).toContain('below minimum');
     });
 
-    it('should return NO_DATA when no transactions found', async () => {
-      // Arrange — DB returns zero-count row
+    it('should return NO_DATA with meets_requirement=false when no transactions found (validate_with_default_if_no_data=false)', async () => {
+      // Arrange — DB returns zero-count row; validate_with_default_if_no_data is always false for Apdex
       const testRun = createTestRun();
       const benchmark = createBenchmark({ transaction_name: 'ghost-tx', apdex_threshold_ms: 500 });
 
@@ -659,9 +659,9 @@ describe('ApdexCalculator', () => {
       // Act
       const result = await calculator.evaluateApdexBenchmark(testRun, benchmark);
 
-      // Assert
+      // Assert — NO_DATA with no fallback default must fail, not silently pass the consolidated rollup
       expect(result.status).toBe('NO_DATA');
-      expect(result.meets_requirement).toBeNull();
+      expect(result.meets_requirement).toBe(false);
       expect(result.message).toContain('No request data found for transaction: ghost-tx');
     });
 
@@ -722,7 +722,7 @@ describe('ApdexCalculator', () => {
   // ══════════════════════════════════════════════════════════════════════════
 
   describe('evaluateApdexBenchmark — workload-level (null transaction_name)', () => {
-    it('should return NO_DATA when no transactions exist for the test run', async () => {
+    it('should return NO_DATA with meets_requirement=false when no transactions exist for the test run', async () => {
       // Arrange
       const testRun = createTestRun();
       const benchmark = createBenchmark({ transaction_name: null });
@@ -733,9 +733,9 @@ describe('ApdexCalculator', () => {
       // Act
       const result = await calculator.evaluateApdexBenchmark(testRun, benchmark);
 
-      // Assert
+      // Assert — NO_DATA with no fallback default must fail, not silently pass the consolidated rollup
       expect(result.status).toBe('NO_DATA');
-      expect(result.meets_requirement).toBeNull();
+      expect(result.meets_requirement).toBe(false);
       expect(result.message).toContain('No transactions found');
       expect(result.transaction_results).toEqual([]);
     });
@@ -861,8 +861,8 @@ describe('ApdexCalculator', () => {
       expect(result.apdex_result.transaction_name).toBeNull();
     });
 
-    it('should set meets_requirement to null when total count is zero for all transactions', async () => {
-      // Arrange — a transaction exists but has no data
+    it('should set meets_requirement to false when total count is zero for all transactions (issue #320)', async () => {
+      // Arrange — a transaction exists but has no data; validate_with_default_if_no_data is always false for Apdex
       const testRun = createTestRun();
       const benchmark = createBenchmark({ transaction_name: null, min_apdex_score: 0.75 });
 
@@ -874,9 +874,9 @@ describe('ApdexCalculator', () => {
       // Act
       const result = await calculator.evaluateApdexBenchmark(testRun, benchmark);
 
-      // Assert
+      // Assert — NO_DATA with no fallback default must fail the gate, not silently pass
       expect(result.status).toBe('NO_DATA');
-      expect(result.meets_requirement).toBeNull();
+      expect(result.meets_requirement).toBe(false);
     });
 
     it('should truncate failed transaction list in message at 3 names with ellipsis', async () => {

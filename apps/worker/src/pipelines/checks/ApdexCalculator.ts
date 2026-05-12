@@ -470,7 +470,7 @@ export class ApdexCalculator extends BaseCheckService {
       return {
         benchmark_id: benchmarkId,
         test_run_id: testRun.test_run_id,
-        meets_requirement: null,
+        meets_requirement: false,
         apdex_result: {
           transaction_name: null,
           satisfied_count: 0,
@@ -595,7 +595,7 @@ export class ApdexCalculator extends BaseCheckService {
     return {
       benchmark_id: benchmarkId,
       test_run_id: testRun.test_run_id,
-      meets_requirement: totalCount > 0 ? allPass : null,
+      meets_requirement: totalCount > 0 ? allPass : false,
       apdex_result: {
         transaction_name: null, // Workload-level
         satisfied_count: totalSatisfied,
@@ -658,7 +658,7 @@ export class ApdexCalculator extends BaseCheckService {
         return {
           benchmark_id: benchmarkId,
           test_run_id: testRun.test_run_id,
-          meets_requirement: null,
+          meets_requirement: false,
           apdex_result: apdexResult,
           requirement: { min_score: min_apdex_score, threshold_ms: resolvedThreshold },
           status: 'NO_DATA',
