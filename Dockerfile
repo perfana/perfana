@@ -39,7 +39,7 @@ ARG CSP_UPGRADE_INSECURE=true
 # ================================================================================================
 # STAGE 1: Security Scanner Base
 # ================================================================================================
-FROM node:${NODE_VERSION}-alpine${ALPINE_VERSION} AS security-base
+FROM --platform=$BUILDPLATFORM node:${NODE_VERSION}-alpine${ALPINE_VERSION} AS security-base
 
 # Install security scanning tools
 RUN apk upgrade --no-cache \
@@ -55,7 +55,7 @@ RUN addgroup -g 10001 -S perfana \
 # ================================================================================================
 # STAGE 2: Dependencies Installation
 # ================================================================================================
-FROM security-base AS deps
+FROM --platform=$BUILDPLATFORM security-base AS deps
 
 # Set working directory
 WORKDIR /app
@@ -80,7 +80,7 @@ RUN npm ci --only=production --ignore-scripts \
 # ================================================================================================
 # STAGE 3: Build Dependencies (includes dev deps)
 # ================================================================================================
-FROM security-base AS build-deps
+FROM --platform=$BUILDPLATFORM security-base AS build-deps
 
 WORKDIR /app
 
@@ -102,7 +102,7 @@ RUN npm ci --ignore-scripts \
 # ================================================================================================
 # STAGE 4: Source Code Preparation
 # ================================================================================================
-FROM build-deps AS source
+FROM --platform=$BUILDPLATFORM build-deps AS source
 
 # Copy source code with proper ownership
 COPY --chown=perfana:perfana . .
@@ -125,7 +125,7 @@ RUN rm -rf \
 # ================================================================================================
 # STAGE 5: Build Stage
 # ================================================================================================
-FROM source AS builder
+FROM --platform=$BUILDPLATFORM source AS builder
 
 # Re-declare build args for this stage
 ARG NEXT_PUBLIC_API_URL
