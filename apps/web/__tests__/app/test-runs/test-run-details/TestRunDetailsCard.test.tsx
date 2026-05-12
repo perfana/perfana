@@ -638,13 +638,31 @@ describe('TestRunDetailsCard', () => {
       expect(screen.getByText('Not Configured')).toBeInTheDocument();
     });
 
-    it('should handle NO_BASELINES_FOUND status for anomaly detection', () => {
+    it('should handle NO_BASELINES_FOUND status for anomaly detection with generic fallback', async () => {
+      (authenticatedFetch as jest.Mock).mockResolvedValue({ ok: true, text: async () => '' });
       const noBaselinesTestRun = {
         ...mockTestRun,
         status: { ...mockTestRun.status!, evaluatingAdapt: 'NO_BASELINES_FOUND' },
       };
       render(<TestRunDetailsCard {...defaultProps} testRun={noBaselinesTestRun} expanded={true} />);
-      expect(screen.getByText('No previous results to compare with')).toBeInTheDocument();
+      await waitFor(() => {
+        expect(screen.getByText('No previous results to compare with')).toBeInTheDocument();
+      });
+    });
+
+    it('should show dsAdaptConclusion details.message for NO_BASELINES_FOUND when conclusion exists', async () => {
+      (authenticatedFetch as jest.Mock).mockResolvedValue({
+        ok: true,
+        text: async () => JSON.stringify({ conclusion: 'INSUFFICIENT_DATA', details: { message: 'Insufficient data to run ADAPT analysis' } }),
+      });
+      const noBaselinesTestRun = {
+        ...mockTestRun,
+        status: { ...mockTestRun.status!, evaluatingAdapt: 'NO_BASELINES_FOUND' },
+      };
+      render(<TestRunDetailsCard {...defaultProps} testRun={noBaselinesTestRun} expanded={true} />);
+      await waitFor(() => {
+        expect(screen.getByText('Insufficient data to run ADAPT analysis')).toBeInTheDocument();
+      });
     });
   });
 

@@ -1,6 +1,6 @@
 'use client';
 
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { Box, Typography, Chip, Button, IconButton, Tooltip, useTheme } from '@mui/material';
 import WarningAmberRoundedIcon from '@mui/icons-material/WarningAmberRounded';
 import InfoOutlinedIcon from '@mui/icons-material/InfoOutlined';
@@ -285,6 +285,17 @@ function AnomalyDetectionSubsection({ testRun }: { testRun: TestRun }) {
   const isDark = theme.palette.mode === 'dark';
   const isError = testRun.status?.evaluatingAdapt === 'ERROR' || testRun.status?.evaluatingAdapt === 'FAILED';
   const sectionColor = isDark ? '#ffcc80' : '#ff9800';
+  const [dsAdaptConclusion, setDsAdaptConclusion] = useState<any>(null);
+
+  useEffect(() => {
+    if (testRun.status?.evaluatingAdapt !== 'NO_BASELINES_FOUND') return;
+    authenticatedFetch(`/adapt/conclusion/${testRun.test_run_id}`)
+      .then(res => res.ok ? res.text() : null)
+      .then(text => {
+        if (text?.trim()) setDsAdaptConclusion(JSON.parse(text));
+      })
+      .catch(() => {});
+  }, [testRun.test_run_id, testRun.status?.evaluatingAdapt]);
 
   if (testRun.status?.evaluatingAdapt === 'NO_BASELINES_FOUND') {
     return (
@@ -309,7 +320,7 @@ function AnomalyDetectionSubsection({ testRun }: { testRun: TestRun }) {
           Anomaly Detection
         </Typography>
         <Typography variant="caption" sx={{ color: 'text.secondary' }}>
-          No previous results to compare with
+          {dsAdaptConclusion?.details?.message ?? 'No previous results to compare with'}
         </Typography>
       </Box>
     );
