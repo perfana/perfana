@@ -4,6 +4,11 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
+## [0.2.47.98] - 2026-05-12
+
+### Changed
+- **Docker builds now target `linux/amd64,linux/arm64` (multi-arch).** All six build jobs in the GitHub Actions workflow (`web`, `api`, `worker`, `grafana-sync`, `perfana-report`, `migration`) now produce multi-platform images via QEMU emulation on `ubuntu-latest` runners. The build summary step reflects both platforms. **Files:** `.github/workflows/docker-build.yml` (7 lines changed).
+
 ## [0.2.47.97] - 2026-05-12
 
 ### Fixed
