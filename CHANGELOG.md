@@ -4,6 +4,11 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
+## [0.2.47.97] - 2026-05-12
+
+### Fixed
+- **`check_results.meets_requirement` now correctly writes `false` (not `NULL`) when an Apdex benchmark returns `NO_DATA` with `validate_with_default_if_no_data = false`.** The three NO_DATA return paths in `ApdexCalculator` — (1) no transactions found for a named transaction, (2) no transactions at all for workload-level, (3) all transactions have zero count for workload-level — previously returned `meets_requirement: null`. `updateConsolidatedResult` uses `COALESCE(meets_requirement, true)`, so NULL was silently treated as passing, causing short runs with no transaction data to pollute ADAPT control groups as if they had passed all checks. The fix is three one-line changes (`null → false`) in `ApdexCalculator.ts`. Note: `validate_with_default_if_no_data` is hardcoded to `false` for all Apdex results in `ChecksPipeline.saveApdexCheckResult`, so the default-value fallback path is never reached for Apdex — the `false` return is always the correct outcome. Three existing unit tests updated to assert `false` instead of `null`; 1350 worker tests pass. Fixes [#320](https://github.com/perfana/perfana/issues/320). **Files:** `apps/worker/src/pipelines/checks/ApdexCalculator.ts` (3 lines), `apps/worker/src/test/unit/pipelines/checks/ApdexCalculator.test.ts` (6 lines).
+
 ## [0.2.47.95] - 2026-05-10
 
 ### Documentation
