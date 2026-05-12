@@ -4,6 +4,11 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
+## [0.2.47.99] - 2026-05-12
+
+### Fixed
+- **Docker arm64 builds: use `--platform=$BUILDPLATFORM` on build stages to prevent QEMU SIGILL crash.** `npm ci` running under QEMU arm64 emulation crashes with `Illegal instruction` (SIGILL, exit 132) because Node.js 20's V8 engine uses CPU instructions that QEMU cannot emulate. Build stages (`security-base`, `deps`, `build-deps`, `source`, `builder` in `Dockerfile`; `builder` in `Dockerfile.migrations`) now pin to `$BUILDPLATFORM` so npm and tsc run natively on the amd64 CI runner. Final runtime stages (distroless, Alpine) remain unplatformed and are assembled for the target architecture by buildx. The compiled TypeScript output is pure JS with no native addons, so building on amd64 and running on arm64 is correct. **Files:** `Dockerfile` (5 lines), `Dockerfile.migrations` (1 line).
+
 ## [0.2.47.98] - 2026-05-12
 
 ### Changed
