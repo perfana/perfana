@@ -4,6 +4,11 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
+## [0.2.47.101] - 2026-05-12
+
+### Fixed
+- **Apdex rollup: guard `approx_percentile_rank` against NaN when threshold equals tdigest maximum.** When an Apdex threshold was set to exactly the highest observed response time, TimescaleDB's `approx_percentile_rank` returned `NaN` instead of `1.0`. The subsequent `ROUND(NaN × count)::bigint` threw `"bigint out of range"`, aborting the Postgres transaction and wiping every check result for the test run — the UI showed "Not Configured" and the run was incorrectly excluded from ADAPT control groups. The fix introduces a `ranks` CTE that wraps both `approx_percentile_rank` calls in `COALESCE(NULLIF(…, 'NaN'::double precision), 1.0)` (threshold ≥ max means 100 % satisfied → 1.0 is semantically correct). A second defensive fix wraps each per-named-transaction iteration in `evaluateWorkloadLevelApdex` with `SAVEPOINT` / `RELEASE SAVEPOINT` / `ROLLBACK TO SAVEPOINT` so that any future fatal Postgres error on one transaction does not abort the pipeline for the remaining transactions. Fixes [#326](https://github.com/perfana/perfana/issues/326). **Files:** `apps/worker/src/pipelines/checks/ApdexCalculator.ts`.
+
 ## [0.2.47.100] - 2026-05-12
 
 ### Fixed

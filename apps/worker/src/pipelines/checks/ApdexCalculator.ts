@@ -581,7 +581,8 @@ export class ApdexCalculator extends BaseCheckService {
 
       } catch (error) {
         if (savepointActive) {
-          try { await this.manager.query(`ROLLBACK TO SAVEPOINT ${sp}`); } catch (_) {}
+          // eslint-disable-next-line no-empty
+          try { await this.manager.query(`ROLLBACK TO SAVEPOINT ${sp}`); } catch { /* intentionally swallowed — restoring savepoint is best-effort */ }
         }
         this.logger.error(`Error calculating Apdex for transaction ${transactionName}: ${error}`);
         anyError = true;
