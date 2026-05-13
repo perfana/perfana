@@ -4,6 +4,11 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
+## [0.2.47.102] - 2026-05-13
+
+### Fixed
+- **`POST /api/tracing-services` no longer fails with a 500 RLS violation.** The endpoint was always returning HTTP 500 (`new row violates row-level security policy for table "tracing_services"`, PG error 42501) because `organization_id` was never set before the INSERT — the database received `DEFAULT` which resolves to `NULL`, and the RLS policy fails closed on `NULL`. The fix looks up the System Under Test by `systemUnderTestId` and derives `organization_id` from the SUT record; callers do not need to supply it. Fixes [#329](https://github.com/perfana/perfana/issues/329). **Files:** `apps/api/src/modules/tracing-services/tracing-services.service.ts`, `apps/api/src/modules/tracing-services/tracing-services.module.ts`.
+
 ## [0.2.47.101] - 2026-05-12
 
 ### Fixed
