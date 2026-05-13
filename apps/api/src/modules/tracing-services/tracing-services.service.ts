@@ -1,26 +1,19 @@
 import { Injectable, Logger, ConflictException } from '@nestjs/common';
+import { InjectRepository } from '@nestjs/typeorm';
+import { Repository } from 'typeorm';
 import {
   ResourceNotFoundException,
   DatabaseException,
 } from '../../common/exceptions/business.exception';
 import { TracingServiceRepository } from '../../repositories/tracing-service.repository';
-import { TracingService, OwnedResource } from '@perfana/shared';
+import { TracingService, OwnedResource, SystemUnderTest } from '@perfana/shared';
 import { AuditService } from '../audit/audit.service';
+import { withRequestEm } from '../../common/db/request-em';
 import {
   CreateTracingServiceDto,
   UpdateTracingServiceDto,
 } from './dto/create-tracing-service.dto';
-// NOTE: AuthorizationService will be re-added when Phase 4 adds organization_id to TracingService
 
-/**
- * Service responsible for managing tracing service configurations.
- *
- * Authorization:
- * - All methods accept userId and roles parameters for future authorization
- * - Currently TracingService entity does not have organization_id, so all data is treated as legacy
- * - When organization_id is added to TracingService (Phase 4), authorization checks will be enabled
- * - Global admins bypass all authorization checks
- */
 @Injectable()
 export class TracingServicesService {
   private readonly logger = new Logger(TracingServicesService.name);
@@ -28,6 +21,8 @@ export class TracingServicesService {
   constructor(
     private readonly tracingServiceRepository: TracingServiceRepository,
     private readonly auditService: AuditService,
+    @InjectRepository(SystemUnderTest)
+    private readonly sutRepository: Repository<SystemUnderTest>,
   ) {}
 
   /**
@@ -39,15 +34,6 @@ export class TracingServicesService {
    * 3. System level: system only (environment IS NULL, workload IS NULL)
    *
    * Returns the first match found
-   *
-   * @param systemId - The system under test ID
-   * @param userId - The user ID for authorization
-   * @param roles - The user's roles for authorization checks
-   * @param environment - Optional environment filter
-   * @param workload - Optional workload filter
-   *
-   * Note: TracingService entity does not have organization_id yet, so access checks are not applied.
-   * Full access permission checks will be enabled when Phase 4 adds organization_id column.
    */
   async findTracingService(
     systemId: string,
@@ -58,9 +44,6 @@ export class TracingServicesService {
   ): Promise<TracingService | null> {
     try {
       this.logger.debug(`findTracingService: systemId=${systemId}, userId=${userId}`);
-
-      // NOTE: Access permission check will be added here when TracingService entity has organization_id
-      // For now, all tracing services are accessible (treated as legacy data)
 
       return await this.tracingServiceRepository.findWithHierarchy(
         systemId,
@@ -75,13 +58,6 @@ export class TracingServicesService {
 
   /**
    * Get all tracing services for a system (for configuration UI)
-   *
-   * @param systemId - The system under test ID
-   * @param userId - The user ID for authorization
-   * @param roles - The user's roles for authorization checks
-   *
-   * Note: TracingService entity does not have organization_id yet, so org filtering is not applied.
-   * Full org filtering will be enabled when Phase 4 adds organization_id column.
    */
   async findAllBySystem(
     systemId: string,
@@ -90,9 +66,6 @@ export class TracingServicesService {
   ): Promise<TracingService[]> {
     try {
       this.logger.debug(`findAllBySystem: systemId=${systemId}, userId=${userId}`);
-
-      // NOTE: Org filtering will be added here when TracingService entity has organization_id
-      // For now, all tracing services are returned (treated as legacy data)
 
       return await this.tracingServiceRepository.findBySystemId(systemId);
     } catch (error) {
@@ -106,13 +79,6 @@ export class TracingServicesService {
 
   /**
    * Get a single tracing service by ID
-   *
-   * @param id - The tracing service ID
-   * @param userId - The user ID for authorization
-   * @param roles - The user's roles for authorization checks
-   *
-   * Note: TracingService entity does not have organization_id yet, so access checks are not applied.
-   * Full access permission checks will be enabled when Phase 4 adds organization_id column.
    */
   async findOne(
     id: string,
@@ -128,9 +94,6 @@ export class TracingServicesService {
         throw new ResourceNotFoundException('Tracing service', id);
       }
 
-      // NOTE: Access permission check will be added here when TracingService entity has organization_id
-      // For now, all tracing services are accessible (treated as legacy data)
-
       return tracingService;
     } catch (error) {
       if (error instanceof ResourceNotFoundException) {
@@ -141,18 +104,6 @@ export class TracingServicesService {
     }
   }
 
-  /**
-   * Create or update a tracing service
-   * Uses createOrUpdate to handle conflicts automatically
-   *
-   * @param createDto - The create/update DTO
-   * @param userId - The user ID for authorization and ownership tracking
-   * @param roles - The user's roles for authorization checks
-   *
-   * Note: TracingService entity does not have organization_id or created_by/updated_by yet,
-   * so ownership tracking is not applied. Full ownership assignment will be enabled when
-   * Phase 4 adds the ownership columns.
-   */
   async createOrUpdate(
     createDto: CreateTracingServiceDto,
     userId: string,
@@ -169,7 +120,12 @@ export class TracingServicesService {
           `services: ${createDto.serviceNames.join(', ')}`,
       );
 
-      // NOTE: created_by, updated_by, organization_id will be set when Phase 4 adds those columns
+      const sut = await withRequestEm(this.sutRepository).findOne({
+        where: { id: createDto.systemUnderTestId },
+      });
+      if (!sut) {
+        throw new ResourceNotFoundException('System under test', createDto.systemUnderTestId);
+      }
 
       // Phase 5a: split the upsert into CREATE vs UPDATE for accurate audit
       // semantics. The repository performs the same findByExactMatch internally,
@@ -191,6 +147,7 @@ export class TracingServicesService {
           workload: createDto.workload ?? null,
           tracingInstanceId: createDto.tracingInstanceId,
           serviceNames: createDto.serviceNames,
+          organizationId: sut.organization_id,
         });
 
       // TracingService has the same camelCase / snake_case mismatch as the
@@ -233,14 +190,6 @@ export class TracingServicesService {
 
   /**
    * Update an existing tracing service by ID
-   *
-   * @param id - The tracing service ID
-   * @param updateDto - The update DTO
-   * @param userId - The user ID for authorization and ownership tracking
-   * @param roles - The user's roles for authorization checks
-   *
-   * Note: TracingService entity does not have organization_id yet, so permission checks are not applied.
-   * Full permission checks will be enabled when Phase 4 adds organization_id column.
    */
   async update(
     id: string,
@@ -256,11 +205,6 @@ export class TracingServicesService {
       if (!existing) {
         throw new ResourceNotFoundException('Tracing service', id);
       }
-
-      // NOTE: Permission check will be added here when TracingService entity has organization_id
-      // For now, all tracing services are modifiable (treated as legacy data)
-
-      // NOTE: updated_by will be set when Phase 4 adds that column
 
       // Capture pre-update snapshot for the audit diff before the in-place
       // repository.update mutates the row.
@@ -316,13 +260,6 @@ export class TracingServicesService {
 
   /**
    * Delete a tracing service by ID
-   *
-   * @param id - The tracing service ID
-   * @param userId - The user ID for authorization
-   * @param roles - The user's roles for authorization checks
-   *
-   * Note: TracingService entity does not have organization_id yet, so permission checks are not applied.
-   * Full permission checks will be enabled when Phase 4 adds organization_id column.
    */
   async delete(id: string, userId: string, _roles: string[]): Promise<void> {
     try {
@@ -333,9 +270,6 @@ export class TracingServicesService {
       if (!tracingService) {
         throw new ResourceNotFoundException('Tracing service', id);
       }
-
-      // NOTE: Delete permission check will be added here when TracingService entity has organization_id
-      // For now, all tracing services are deletable (treated as legacy data)
 
       // Phase 5a: log DELETE before the row is removed so the diff captures the
       // pre-delete state. organizationIdOverride bridges the camelCase property /
