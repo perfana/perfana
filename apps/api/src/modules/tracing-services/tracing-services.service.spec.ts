@@ -179,4 +179,49 @@ describe('TracingServicesService', () => {
       );
     });
   });
+
+  describe('SUT lookup in createOrUpdate', () => {
+    it('throws ResourceNotFoundException when SUT does not exist', async () => {
+      sutRepository.findOne.mockResolvedValue(null);
+
+      await expect(
+        service.createOrUpdate(
+          {
+            systemUnderTestId: 'sut-missing',
+            testEnvironment: 'prod',
+            workload: 'load',
+            tracingInstanceId: 'ti-1',
+            serviceNames: ['svc-a'],
+          } as never,
+          mockUserId,
+          mockRoles,
+        ),
+      ).rejects.toThrow('System under test');
+
+      expect(repository.createOrUpdate).not.toHaveBeenCalled();
+    });
+
+    it('passes organization_id from SUT to the repository', async () => {
+      const created = createMockEntity({ id: 'ts-new' });
+      repository.findByExactMatch.mockResolvedValue(null);
+      repository.createOrUpdate.mockResolvedValue(created);
+
+      await service.createOrUpdate(
+        {
+          systemUnderTestId: 'sut-1',
+          testEnvironment: 'prod',
+          workload: 'load',
+          tracingInstanceId: 'ti-1',
+          serviceNames: ['svc-a'],
+        } as never,
+        mockUserId,
+        mockRoles,
+      );
+
+      expect(sutRepository.findOne).toHaveBeenCalledWith({ where: { id: 'sut-1' } });
+      expect(repository.createOrUpdate).toHaveBeenCalledWith(
+        expect.objectContaining({ organizationId: mockOrgId }),
+      );
+    });
+  });
 });

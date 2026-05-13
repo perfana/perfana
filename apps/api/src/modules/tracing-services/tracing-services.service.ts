@@ -167,6 +167,9 @@ export class TracingServicesService {
       this.logger.log(`Tracing service saved with ID: ${tracingService.id}`);
       return tracingService;
     } catch (error) {
+      if (error instanceof ResourceNotFoundException) {
+        throw error;
+      }
       this.logger.error('Failed to create or update tracing service:', error);
 
       // Check for unique constraint violation
