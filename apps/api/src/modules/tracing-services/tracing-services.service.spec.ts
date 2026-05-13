@@ -7,9 +7,10 @@
  */
 
 import { Test, TestingModule } from '@nestjs/testing';
+import { getRepositoryToken } from '@nestjs/typeorm';
 import { TracingServicesService } from './tracing-services.service';
 import { TracingServiceRepository } from '../../repositories/tracing-service.repository';
-import { TracingService } from '@perfana/shared';
+import { TracingService, SystemUnderTest } from '@perfana/shared';
 import { AuditService } from '../audit/audit.service';
 
 type MockRepo = {
@@ -24,6 +25,7 @@ describe('TracingServicesService', () => {
   let service: TracingServicesService;
   let repository: MockRepo;
   let auditService: jest.Mocked<AuditService>;
+  let sutRepository: { findOne: jest.Mock };
 
   const mockUserId = 'test-user-id';
   const mockRoles = ['user'];
@@ -45,6 +47,8 @@ describe('TracingServicesService', () => {
     ...overrides,
   } as unknown as TracingService);
 
+  const mockSut = { id: 'sut-1', organization_id: mockOrgId } as unknown as SystemUnderTest;
+
   beforeEach(async () => {
     const repoMock: MockRepo = {
       findByExactMatch: jest.fn(),
@@ -54,10 +58,13 @@ describe('TracingServicesService', () => {
       delete: jest.fn(),
     };
 
+    const sutRepoMock = { findOne: jest.fn().mockResolvedValue(mockSut) };
+
     const module: TestingModule = await Test.createTestingModule({
       providers: [
         TracingServicesService,
         { provide: TracingServiceRepository, useValue: repoMock },
+        { provide: getRepositoryToken(SystemUnderTest), useValue: sutRepoMock },
         {
           provide: AuditService,
           useValue: {
@@ -71,6 +78,7 @@ describe('TracingServicesService', () => {
 
     service = module.get<TracingServicesService>(TracingServicesService);
     repository = module.get(TracingServiceRepository) as unknown as MockRepo;
+    sutRepository = module.get(getRepositoryToken(SystemUnderTest)) as unknown as { findOne: jest.Mock };
     auditService = module.get(AuditService);
   });
 
@@ -168,6 +176,51 @@ describe('TracingServicesService', () => {
         (auditService.logDelete as jest.Mock).mock.invocationCallOrder[0],
       ).toBeLessThan(
         (repository.delete as jest.Mock).mock.invocationCallOrder[0],
+      );
+    });
+  });
+
+  describe('SUT lookup in createOrUpdate', () => {
+    it('throws ResourceNotFoundException when SUT does not exist', async () => {
+      sutRepository.findOne.mockResolvedValue(null);
+
+      await expect(
+        service.createOrUpdate(
+          {
+            systemUnderTestId: 'sut-missing',
+            testEnvironment: 'prod',
+            workload: 'load',
+            tracingInstanceId: 'ti-1',
+            serviceNames: ['svc-a'],
+          } as never,
+          mockUserId,
+          mockRoles,
+        ),
+      ).rejects.toThrow('System under test');
+
+      expect(repository.createOrUpdate).not.toHaveBeenCalled();
+    });
+
+    it('passes organization_id from SUT to the repository', async () => {
+      const created = createMockEntity({ id: 'ts-new' });
+      repository.findByExactMatch.mockResolvedValue(null);
+      repository.createOrUpdate.mockResolvedValue(created);
+
+      await service.createOrUpdate(
+        {
+          systemUnderTestId: 'sut-1',
+          testEnvironment: 'prod',
+          workload: 'load',
+          tracingInstanceId: 'ti-1',
+          serviceNames: ['svc-a'],
+        } as never,
+        mockUserId,
+        mockRoles,
+      );
+
+      expect(sutRepository.findOne).toHaveBeenCalledWith({ where: { id: 'sut-1' } });
+      expect(repository.createOrUpdate).toHaveBeenCalledWith(
+        expect.objectContaining({ organizationId: mockOrgId }),
       );
     });
   });

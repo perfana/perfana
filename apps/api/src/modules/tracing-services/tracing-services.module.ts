@@ -1,6 +1,6 @@
 import { Module, OnModuleInit } from '@nestjs/common';
 import { TypeOrmModule } from '@nestjs/typeorm';
-import { TracingService } from '@perfana/shared/entities';
+import { TracingService, SystemUnderTest } from '@perfana/shared/entities';
 import { TracingServicesController } from './tracing-services.controller';
 import { TracingServicesService } from './tracing-services.service';
 import { TracingServiceRepository } from '../../repositories/tracing-service.repository';
@@ -10,9 +10,9 @@ import { AuditResourceRegistry } from '../audit/audit-resource-registry';
 
 @Module({
   imports: [
-    TypeOrmModule.forFeature([TracingService]),
-    CommonModule, // Import for AuthorizationService
-    AuditModule, // Phase 5a: provides AuditService + AuditResourceRegistry
+    TypeOrmModule.forFeature([TracingService, SystemUnderTest]),
+    CommonModule,
+    AuditModule,
   ],
   controllers: [TracingServicesController],
   providers: [TracingServicesService, TracingServiceRepository],
