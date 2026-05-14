@@ -18,16 +18,24 @@ import { SCHEMA_SQL } from './schema-sql';
  *   - Foreign key constraints
  *   - Row-level security (ENABLE + FORCE + policies)
  *
- * Phase 2: Restricted App Role
+ * Phase 2: Restricted App Roles
  *   - Creates perfana_app role (NOSUPERUSER, NOBYPASSRLS, NOLOGIN)
- *   - Grants DML on all tables, sequences, and functions
- *   - Used via SET LOCAL ROLE in API middleware for RLS enforcement
+ *     Used via SET LOCAL ROLE in API middleware for RLS enforcement
+ *   - Creates perfana_system role (NOSUPERUSER, NOBYPASSRLS, NOLOGIN)
+ *     Used by worker/grafana-sync/perfana-report; sets super-admin GUC to bypass RLS
+ *   - Grants DML on all tables, sequences, and functions to both roles
  *
  * Phase 3: Seed Data
  *   - Default organization (00000000-0000-0000-0000-000000000001)
  *
  * Phase 4: TimescaleDB Hypertables
  *   - Converts time-series tables to hypertables
+ *
+ * Phase 5: Continuous Aggregates
+ *   - requests_raw family: 5s / 1m / 5m + passed variants
+ *   - transactions family: 5s / 1m / 5m + passed variants
+ *   - requests_error family: 5s / 1m / 5m
+ *   - Refresh and retention policies for all 15 CAGGs
  */
 export class ConsolidatedSchema1700000000000 implements MigrationInterface {
   name = 'ConsolidatedSchema1700000000000';
@@ -50,7 +58,16 @@ export class ConsolidatedSchema1700000000000 implements MigrationInterface {
     // 3. psql meta-commands (backslash commands)
     const filteredStatements = statements.filter(
       (stmt) =>
+        // TimescaleDB auto-created triggers
         !stmt.includes('_timescaledb_functions.insert_blocker') &&
+        // TimescaleDB CAGG backing views (reference _timescaledb_internal.* hypertables
+        // that only exist after CREATE MATERIALIZED VIEW is called in Phase 5).
+        !stmt.includes('_timescaledb_internal') &&
+        // Per-object GRANT statements for perfana_app/perfana_system roles.
+        // Roles don't exist during Phase 1 (created in Phase 2).
+        // Phase 2 covers all grants in bulk via GRANT ON ALL TABLES + ALTER DEFAULT PRIVILEGES.
+        !stmt.match(/^GRANT .* TO (perfana_app|perfana_system)\s*;?\s*$/ms) &&
+        // TypeORM migrations table (created by TypeORM automatically)
         !stmt.includes('migrations_id_seq') &&
         !stmt.match(/CREATE TABLE.*migrations/i) &&
         !stmt.match(/ALTER TABLE.*migrations/i) &&
@@ -104,10 +121,27 @@ export class ConsolidatedSchema1700000000000 implements MigrationInterface {
     console.log('Phase 4: Creating TimescaleDB hypertables...');
     await this.createHypertables(queryRunner);
 
+    // ─── Phase 5: Create continuous aggregates ───
+    console.log('Phase 5: Creating continuous aggregates...');
+    await this.createContinuousAggregates(queryRunner);
+
     console.log('Consolidated schema migration complete.');
   }
 
   public async down(queryRunner: QueryRunner): Promise<void> {
+    // ─── Drop continuous aggregates first (depend on hypertables) ───
+    console.log('Dropping continuous aggregates...');
+    const caggViews = [
+      'transactions_passed_5m', 'transactions_passed_1m', 'transactions_passed_5s',
+      'requests_raw_passed_5m', 'requests_raw_passed_1m', 'requests_raw_passed_5s',
+      'requests_error_5m',  'requests_error_1m',  'requests_error_5s',
+      'transactions_5m',    'transactions_1m',    'transactions_5s',
+      'requests_raw_5m',    'requests_raw_1m',    'requests_raw_5s',
+    ];
+    for (const view of caggViews) {
+      await queryRunner.query(`DROP MATERIALIZED VIEW IF EXISTS ${view} CASCADE`);
+    }
+
     // ─── Drop RLS policies first ───
     console.log('Dropping RLS policies...');
     const policies = await queryRunner.query(`
@@ -270,126 +304,98 @@ export class ConsolidatedSchema1700000000000 implements MigrationInterface {
   private async createRestrictedAppRole(
     queryRunner: QueryRunner,
   ): Promise<void> {
-    const roleExists = await queryRunner.query(
-      `SELECT 1 FROM pg_roles WHERE rolname = 'perfana_app'`,
-    );
-
-    if (roleExists.length === 0) {
-      await queryRunner.query(`
-        CREATE ROLE perfana_app
-          NOLOGIN NOINHERIT NOSUPERUSER NOCREATEDB NOCREATEROLE NOREPLICATION NOBYPASSRLS
-      `);
-      console.log('  Created role: perfana_app');
-    } else {
-      await queryRunner.query(`
-        ALTER ROLE perfana_app
-          NOLOGIN NOINHERIT NOSUPERUSER NOCREATEDB NOCREATEROLE NOREPLICATION NOBYPASSRLS
-      `);
-      console.log('  Role perfana_app already exists, ensured correct attributes');
-    }
-
-    // Grant the role to perfana so SET ROLE works
-    try {
-      await queryRunner.query(`GRANT perfana_app TO perfana`);
-    } catch {
-      // May already be granted
-    }
-
-    // Schema usage
-    await queryRunner.query(
-      `GRANT USAGE ON SCHEMA public TO perfana_app`,
-    );
-
-    // Table permissions (current + future)
-    await queryRunner.query(`
-      GRANT SELECT, INSERT, UPDATE, DELETE
-      ON ALL TABLES IN SCHEMA public TO perfana_app
-    `);
-    await queryRunner.query(`
-      ALTER DEFAULT PRIVILEGES IN SCHEMA public
-      GRANT SELECT, INSERT, UPDATE, DELETE ON TABLES TO perfana_app
-    `);
-
-    // Sequence permissions (current + future)
-    await queryRunner.query(`
-      GRANT USAGE, SELECT ON ALL SEQUENCES IN SCHEMA public TO perfana_app
-    `);
-    await queryRunner.query(`
-      ALTER DEFAULT PRIVILEGES IN SCHEMA public
-      GRANT USAGE, SELECT ON SEQUENCES TO perfana_app
-    `);
-
-    // Function permissions (current + future)
-    const rlsFunctions = [
-      'current_user_id()',
-      'current_user_organizations()',
-      'current_user_teams()',
-      'is_global_admin()',
-      'can_access_resource(UUID, UUID, TEXT)',
-      'can_modify_resource(UUID, UUID, TEXT)',
-      'generate_uuidv7()',
-      'validate_benchmark_configuration()',
-    ];
-
-    for (const func of rlsFunctions) {
-      try {
-        await queryRunner.query(
-          `GRANT EXECUTE ON FUNCTION ${func} TO perfana_app`,
-        );
-      } catch {
-        // Function may not exist yet
+    for (const role of ['perfana_app', 'perfana_system']) {
+      const exists = await queryRunner.query(
+        `SELECT 1 FROM pg_roles WHERE rolname = $1`,
+        [role],
+      );
+      if (exists.length === 0) {
+        await queryRunner.query(`
+          CREATE ROLE ${role}
+            NOLOGIN NOINHERIT NOSUPERUSER NOCREATEDB NOCREATEROLE NOREPLICATION NOBYPASSRLS
+        `);
+        console.log(`  Created role: ${role}`);
+      } else {
+        await queryRunner.query(`
+          ALTER ROLE ${role}
+            NOLOGIN NOINHERIT NOSUPERUSER NOCREATEDB NOCREATEROLE NOREPLICATION NOBYPASSRLS
+        `);
+        console.log(`  Role ${role} already exists, ensured correct attributes`);
       }
+
+      try {
+        await queryRunner.query(`GRANT ${role} TO perfana`);
+      } catch {
+        // May already be granted
+      }
+
+      await queryRunner.query(`GRANT USAGE ON SCHEMA public TO ${role}`);
+      await queryRunner.query(`
+        GRANT SELECT, INSERT, UPDATE, DELETE ON ALL TABLES IN SCHEMA public TO ${role}
+      `);
+      await queryRunner.query(`
+        ALTER DEFAULT PRIVILEGES IN SCHEMA public
+        GRANT SELECT, INSERT, UPDATE, DELETE ON TABLES TO ${role}
+      `);
+      await queryRunner.query(`
+        GRANT USAGE, SELECT ON ALL SEQUENCES IN SCHEMA public TO ${role}
+      `);
+      await queryRunner.query(`
+        ALTER DEFAULT PRIVILEGES IN SCHEMA public
+        GRANT USAGE, SELECT ON SEQUENCES TO ${role}
+      `);
+      await queryRunner.query(`
+        GRANT EXECUTE ON ALL FUNCTIONS IN SCHEMA public TO ${role}
+      `);
+      await queryRunner.query(`
+        ALTER DEFAULT PRIVILEGES IN SCHEMA public
+        GRANT EXECUTE ON FUNCTIONS TO ${role}
+      `);
     }
 
-    await queryRunner.query(`
-      ALTER DEFAULT PRIVILEGES IN SCHEMA public
-      GRANT EXECUTE ON FUNCTIONS TO perfana_app
-    `);
-
-    console.log('  Restricted app role setup complete');
+    console.log('  Restricted app roles setup complete (perfana_app, perfana_system)');
   }
 
   private async dropRestrictedAppRole(
     queryRunner: QueryRunner,
   ): Promise<void> {
-    try {
-      await queryRunner.query(`
-        ALTER DEFAULT PRIVILEGES IN SCHEMA public
-        REVOKE SELECT, INSERT, UPDATE, DELETE ON TABLES FROM perfana_app
-      `);
-      await queryRunner.query(`
-        ALTER DEFAULT PRIVILEGES IN SCHEMA public
-        REVOKE USAGE, SELECT ON SEQUENCES FROM perfana_app
-      `);
-      await queryRunner.query(`
-        ALTER DEFAULT PRIVILEGES IN SCHEMA public
-        REVOKE EXECUTE ON FUNCTIONS FROM perfana_app
-      `);
-      await queryRunner.query(`
-        REVOKE ALL PRIVILEGES ON ALL TABLES IN SCHEMA public FROM perfana_app
-      `);
-      await queryRunner.query(`
-        REVOKE ALL PRIVILEGES ON ALL SEQUENCES IN SCHEMA public FROM perfana_app
-      `);
-      await queryRunner.query(
-        `REVOKE USAGE ON SCHEMA public FROM perfana_app`,
+    for (const role of ['perfana_app', 'perfana_system']) {
+      try {
+        await queryRunner.query(`
+          ALTER DEFAULT PRIVILEGES IN SCHEMA public
+          REVOKE SELECT, INSERT, UPDATE, DELETE ON TABLES FROM ${role}
+        `);
+        await queryRunner.query(`
+          ALTER DEFAULT PRIVILEGES IN SCHEMA public
+          REVOKE USAGE, SELECT ON SEQUENCES FROM ${role}
+        `);
+        await queryRunner.query(`
+          ALTER DEFAULT PRIVILEGES IN SCHEMA public
+          REVOKE EXECUTE ON FUNCTIONS FROM ${role}
+        `);
+        await queryRunner.query(
+          `REVOKE ALL PRIVILEGES ON ALL TABLES IN SCHEMA public FROM ${role}`,
+        );
+        await queryRunner.query(
+          `REVOKE ALL PRIVILEGES ON ALL SEQUENCES IN SCHEMA public FROM ${role}`,
+        );
+        await queryRunner.query(`REVOKE USAGE ON SCHEMA public FROM ${role}`);
+      } catch {
+        // Ignore revoke errors
+      }
+      try {
+        await queryRunner.query(`REVOKE ${role} FROM perfana`);
+      } catch {
+        // Ignore
+      }
+      const exists = await queryRunner.query(
+        `SELECT 1 FROM pg_roles WHERE rolname = $1`,
+        [role],
       );
-    } catch {
-      // Ignore revoke errors
-    }
-
-    try {
-      await queryRunner.query(`REVOKE perfana_app FROM perfana`);
-    } catch {
-      // Ignore
-    }
-
-    const roleExists = await queryRunner.query(
-      `SELECT 1 FROM pg_roles WHERE rolname = 'perfana_app'`,
-    );
-    if (roleExists.length > 0) {
-      await queryRunner.query(`DROP ROLE perfana_app`);
-      console.log('  Dropped role: perfana_app');
+      if (exists.length > 0) {
+        await queryRunner.query(`DROP ROLE ${role}`);
+        console.log(`  Dropped role: ${role}`);
+      }
     }
   }
 
@@ -497,6 +503,294 @@ export class ConsolidatedSchema1700000000000 implements MigrationInterface {
         );
       }
     }
+  }
+
+  // ═══════════════════════════════════════════════════════════
+  // Continuous Aggregates
+  // ═══════════════════════════════════════════════════════════
+
+  private async createContinuousAggregates(
+    queryRunner: QueryRunner,
+  ): Promise<void> {
+    const tsCheck = await queryRunner.query(`
+      SELECT EXISTS (SELECT 1 FROM pg_extension WHERE extname = 'timescaledb') as has_ts
+    `);
+    if (!tsCheck[0]?.has_ts) {
+      console.log('  TimescaleDB not available, skipping continuous aggregates');
+      return;
+    }
+
+    // Creation order matters: each higher granularity rolls up from the one below
+    const caggs: Array<{ view: string; sql: string }> = [
+      // ── requests_raw family ──────────────────────────────────
+      {
+        view: 'requests_raw_5s',
+        sql: `CREATE MATERIALIZED VIEW IF NOT EXISTS requests_raw_5s
+      WITH (timescaledb.continuous) AS
+      SELECT
+        time_bucket('5 seconds'::interval, time)          AS bucket,
+        system_under_test, test_environment, scenario_name, sampler_name,
+        transaction_name, location,
+        count(*)                                           AS n,
+        count(*) FILTER (WHERE success)                    AS n_ok,
+        count(*) FILTER (WHERE NOT success)                AS n_err,
+        avg(response_time)                                 AS avg_rt,
+        min(response_time)                                 AS min_rt,
+        max(response_time)                                 AS max_rt,
+        avg(response_connect_time)                         AS avg_connect,
+        avg(response_latency)                              AS avg_latency,
+        sum(response_size)::bigint                         AS bytes_in,
+        sum(request_size)::bigint                          AS bytes_out,
+        avg(response_size)                                 AS avg_response_size,
+        percentile_agg(response_time::double precision)    AS pct_agg
+      FROM requests_raw GROUP BY 1,2,3,4,5,6,7 WITH NO DATA`,
+      },
+      {
+        view: 'requests_raw_1m',
+        sql: `CREATE MATERIALIZED VIEW IF NOT EXISTS requests_raw_1m
+      WITH (timescaledb.continuous) AS
+      SELECT
+        time_bucket('1 minute'::interval, bucket)          AS bucket,
+        system_under_test, test_environment, scenario_name, sampler_name,
+        transaction_name, location,
+        sum(n)::bigint AS n, sum(n_ok)::bigint AS n_ok, sum(n_err)::bigint AS n_err,
+        sum(avg_rt * n) / NULLIF(sum(n), 0)                AS avg_rt,
+        min(min_rt) AS min_rt, max(max_rt) AS max_rt,
+        sum(avg_connect * n) / NULLIF(sum(n), 0)           AS avg_connect,
+        sum(avg_latency * n) / NULLIF(sum(n), 0)           AS avg_latency,
+        sum(bytes_in)::bigint AS bytes_in, sum(bytes_out)::bigint AS bytes_out,
+        sum(avg_response_size * n) / NULLIF(sum(n), 0)     AS avg_response_size,
+        rollup(pct_agg)                                    AS pct_agg
+      FROM requests_raw_5s GROUP BY 1,2,3,4,5,6,7 WITH NO DATA`,
+      },
+      {
+        view: 'requests_raw_5m',
+        sql: `CREATE MATERIALIZED VIEW IF NOT EXISTS requests_raw_5m
+      WITH (timescaledb.continuous) AS
+      SELECT
+        time_bucket('5 minutes'::interval, bucket)         AS bucket,
+        system_under_test, test_environment, scenario_name, sampler_name,
+        transaction_name, location,
+        sum(n)::bigint AS n, sum(n_ok)::bigint AS n_ok, sum(n_err)::bigint AS n_err,
+        sum(avg_rt * n) / NULLIF(sum(n), 0)                AS avg_rt,
+        min(min_rt) AS min_rt, max(max_rt) AS max_rt,
+        sum(avg_connect * n) / NULLIF(sum(n), 0)           AS avg_connect,
+        sum(avg_latency * n) / NULLIF(sum(n), 0)           AS avg_latency,
+        sum(bytes_in)::bigint AS bytes_in, sum(bytes_out)::bigint AS bytes_out,
+        sum(avg_response_size * n) / NULLIF(sum(n), 0)     AS avg_response_size,
+        rollup(pct_agg)                                    AS pct_agg
+      FROM requests_raw_1m GROUP BY 1,2,3,4,5,6,7 WITH NO DATA`,
+      },
+      // ── transactions family ──────────────────────────────────
+      {
+        view: 'transactions_5s',
+        sql: `CREATE MATERIALIZED VIEW IF NOT EXISTS transactions_5s
+      WITH (timescaledb.continuous) AS
+      SELECT
+        time_bucket('5 seconds'::interval, time)          AS bucket,
+        system_under_test, test_environment, scenario_name, transaction_name,
+        count(*)                                           AS n,
+        count(*) FILTER (WHERE success)                    AS n_ok,
+        count(*) FILTER (WHERE NOT success)                AS n_err,
+        avg(response_time)                                 AS avg_rt,
+        min(response_time)                                 AS min_rt,
+        max(response_time)                                 AS max_rt,
+        percentile_agg(response_time::double precision)    AS pct_agg
+      FROM transactions GROUP BY 1,2,3,4,5 WITH NO DATA`,
+      },
+      {
+        view: 'transactions_1m',
+        sql: `CREATE MATERIALIZED VIEW IF NOT EXISTS transactions_1m
+      WITH (timescaledb.continuous) AS
+      SELECT
+        time_bucket('1 minute'::interval, bucket)          AS bucket,
+        system_under_test, test_environment, scenario_name, transaction_name,
+        sum(n)::bigint AS n, sum(n_ok)::bigint AS n_ok, sum(n_err)::bigint AS n_err,
+        sum(avg_rt * n) / NULLIF(sum(n), 0)                AS avg_rt,
+        min(min_rt) AS min_rt, max(max_rt) AS max_rt,
+        rollup(pct_agg)                                    AS pct_agg
+      FROM transactions_5s GROUP BY 1,2,3,4,5 WITH NO DATA`,
+      },
+      {
+        view: 'transactions_5m',
+        sql: `CREATE MATERIALIZED VIEW IF NOT EXISTS transactions_5m
+      WITH (timescaledb.continuous) AS
+      SELECT
+        time_bucket('5 minutes'::interval, bucket)         AS bucket,
+        system_under_test, test_environment, scenario_name, transaction_name,
+        sum(n)::bigint AS n, sum(n_ok)::bigint AS n_ok, sum(n_err)::bigint AS n_err,
+        sum(avg_rt * n) / NULLIF(sum(n), 0)                AS avg_rt,
+        min(min_rt) AS min_rt, max(max_rt) AS max_rt,
+        rollup(pct_agg)                                    AS pct_agg
+      FROM transactions_1m GROUP BY 1,2,3,4,5 WITH NO DATA`,
+      },
+      // ── requests_error family ────────────────────────────────
+      {
+        view: 'requests_error_5s',
+        sql: `CREATE MATERIALIZED VIEW IF NOT EXISTS requests_error_5s
+      WITH (timescaledb.continuous) AS
+      SELECT
+        time_bucket('5 seconds'::interval, time)          AS bucket,
+        system_under_test, test_environment, scenario_name,
+        sampler_name, transaction_name, node_name, response_code,
+        count(*)                                           AS n
+      FROM requests_error GROUP BY 1,2,3,4,5,6,7,8 WITH NO DATA`,
+      },
+      {
+        view: 'requests_error_1m',
+        sql: `CREATE MATERIALIZED VIEW IF NOT EXISTS requests_error_1m
+      WITH (timescaledb.continuous) AS
+      SELECT
+        time_bucket('1 minute'::interval, bucket)          AS bucket,
+        system_under_test, test_environment, scenario_name,
+        sampler_name, transaction_name, node_name, response_code,
+        sum(n)::bigint                                     AS n
+      FROM requests_error_5s GROUP BY 1,2,3,4,5,6,7,8 WITH NO DATA`,
+      },
+      {
+        view: 'requests_error_5m',
+        sql: `CREATE MATERIALIZED VIEW IF NOT EXISTS requests_error_5m
+      WITH (timescaledb.continuous) AS
+      SELECT
+        time_bucket('5 minutes'::interval, bucket)         AS bucket,
+        system_under_test, test_environment, scenario_name,
+        sampler_name, transaction_name, node_name, response_code,
+        sum(n)::bigint                                     AS n
+      FROM requests_error_1m GROUP BY 1,2,3,4,5,6,7,8 WITH NO DATA`,
+      },
+      // ── requests_raw_passed family ───────────────────────────
+      {
+        view: 'requests_raw_passed_5s',
+        sql: `CREATE MATERIALIZED VIEW IF NOT EXISTS requests_raw_passed_5s
+      WITH (timescaledb.continuous) AS
+      SELECT
+        time_bucket('5 seconds'::interval, time)           AS bucket,
+        system_under_test, test_environment, scenario_name,
+        sampler_name, transaction_name, location,
+        percentile_agg(response_time::double precision)
+          FILTER (WHERE success)                            AS pct_agg_passed
+      FROM requests_raw GROUP BY 1,2,3,4,5,6,7 WITH NO DATA`,
+      },
+      {
+        view: 'requests_raw_passed_1m',
+        sql: `CREATE MATERIALIZED VIEW IF NOT EXISTS requests_raw_passed_1m
+      WITH (timescaledb.continuous) AS
+      SELECT
+        time_bucket('1 minute'::interval, bucket)          AS bucket,
+        system_under_test, test_environment, scenario_name,
+        sampler_name, transaction_name, location,
+        rollup(pct_agg_passed)                             AS pct_agg_passed
+      FROM requests_raw_passed_5s GROUP BY 1,2,3,4,5,6,7 WITH NO DATA`,
+      },
+      {
+        view: 'requests_raw_passed_5m',
+        sql: `CREATE MATERIALIZED VIEW IF NOT EXISTS requests_raw_passed_5m
+      WITH (timescaledb.continuous) AS
+      SELECT
+        time_bucket('5 minutes'::interval, bucket)         AS bucket,
+        system_under_test, test_environment, scenario_name,
+        sampler_name, transaction_name, location,
+        rollup(pct_agg_passed)                             AS pct_agg_passed
+      FROM requests_raw_passed_1m GROUP BY 1,2,3,4,5,6,7 WITH NO DATA`,
+      },
+      // ── transactions_passed family ───────────────────────────
+      {
+        view: 'transactions_passed_5s',
+        sql: `CREATE MATERIALIZED VIEW IF NOT EXISTS transactions_passed_5s
+      WITH (timescaledb.continuous) AS
+      SELECT
+        time_bucket('5 seconds'::interval, time)           AS bucket,
+        system_under_test, test_environment, scenario_name, transaction_name,
+        percentile_agg(response_time::double precision)
+          FILTER (WHERE success)                            AS pct_agg_passed
+      FROM transactions GROUP BY 1,2,3,4,5 WITH NO DATA`,
+      },
+      {
+        view: 'transactions_passed_1m',
+        sql: `CREATE MATERIALIZED VIEW IF NOT EXISTS transactions_passed_1m
+      WITH (timescaledb.continuous) AS
+      SELECT
+        time_bucket('1 minute'::interval, bucket)          AS bucket,
+        system_under_test, test_environment, scenario_name, transaction_name,
+        rollup(pct_agg_passed)                             AS pct_agg_passed
+      FROM transactions_passed_5s GROUP BY 1,2,3,4,5 WITH NO DATA`,
+      },
+      {
+        view: 'transactions_passed_5m',
+        sql: `CREATE MATERIALIZED VIEW IF NOT EXISTS transactions_passed_5m
+      WITH (timescaledb.continuous) AS
+      SELECT
+        time_bucket('5 minutes'::interval, bucket)         AS bucket,
+        system_under_test, test_environment, scenario_name, transaction_name,
+        rollup(pct_agg_passed)                             AS pct_agg_passed
+      FROM transactions_passed_1m GROUP BY 1,2,3,4,5 WITH NO DATA`,
+      },
+    ];
+
+    for (const { view, sql } of caggs) {
+      try {
+        await queryRunner.query(sql);
+        console.log(`  Created CAGG: ${view}`);
+      } catch (error: unknown) {
+        // 42P07 = relation already exists — safe to skip on re-run
+        if ((error as { code?: string })?.code === '42P07') {
+          console.log(`  CAGG already exists: ${view}`);
+        } else {
+          console.warn(`  Warning: Could not create CAGG ${view}:`, (error as Error).message);
+        }
+      }
+    }
+
+    // Refresh policies: each CAGG refreshes on a schedule, offset by granularity
+    const refreshPolicies = [
+      { view: 'requests_raw_5s',      start: '1 hour',  end: '1 minute',  schedule: '30 seconds' },
+      { view: 'requests_raw_1m',      start: '2 hours', end: '2 minutes', schedule: '1 minute'   },
+      { view: 'requests_raw_5m',      start: '1 day',   end: '5 minutes', schedule: '5 minutes'  },
+      { view: 'transactions_5s',      start: '1 hour',  end: '1 minute',  schedule: '30 seconds' },
+      { view: 'transactions_1m',      start: '2 hours', end: '2 minutes', schedule: '1 minute'   },
+      { view: 'transactions_5m',      start: '1 day',   end: '5 minutes', schedule: '5 minutes'  },
+      { view: 'requests_error_5s',    start: '1 hour',  end: '1 minute',  schedule: '30 seconds' },
+      { view: 'requests_error_1m',    start: '2 hours', end: '2 minutes', schedule: '1 minute'   },
+      { view: 'requests_error_5m',    start: '1 day',   end: '5 minutes', schedule: '5 minutes'  },
+      { view: 'requests_raw_passed_5s',  start: '1 hour',  end: '1 minute',  schedule: '30 seconds' },
+      { view: 'requests_raw_passed_1m',  start: '2 hours', end: '2 minutes', schedule: '1 minute'   },
+      { view: 'requests_raw_passed_5m',  start: '1 day',   end: '5 minutes', schedule: '5 minutes'  },
+      { view: 'transactions_passed_5s',  start: '1 hour',  end: '1 minute',  schedule: '30 seconds' },
+      { view: 'transactions_passed_1m',  start: '2 hours', end: '2 minutes', schedule: '1 minute'   },
+      { view: 'transactions_passed_5m',  start: '1 day',   end: '5 minutes', schedule: '5 minutes'  },
+    ];
+
+    for (const p of refreshPolicies) {
+      try {
+        await queryRunner.query(`
+          SELECT add_continuous_aggregate_policy('${p.view}',
+            start_offset      => INTERVAL '${p.start}',
+            end_offset        => INTERVAL '${p.end}',
+            schedule_interval => INTERVAL '${p.schedule}',
+            if_not_exists     => TRUE
+          )
+        `);
+      } catch (error: unknown) {
+        console.warn(`  Warning: Could not add refresh policy for ${p.view}:`, (error as Error).message);
+      }
+    }
+
+    // Retention policies: 90 days on all CAGGs
+    const allCaggViews = caggs.map((c) => c.view);
+    for (const view of allCaggViews) {
+      try {
+        await queryRunner.query(`
+          SELECT add_retention_policy('${view}',
+            drop_after    => INTERVAL '90 days',
+            if_not_exists => TRUE
+          )
+        `);
+      } catch (error: unknown) {
+        console.warn(`  Warning: Could not add retention policy for ${view}:`, (error as Error).message);
+      }
+    }
+
+    console.log(`  Created ${caggs.length} CAGGs with refresh and retention policies`);
   }
 
   // ═══════════════════════════════════════════════════════════
