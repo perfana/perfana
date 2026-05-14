@@ -1,0 +1,1 @@
+/Users/daniel/workspace/perfana/.claude/skills/gstack/plan-devex-review/SKILL.md

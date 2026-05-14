@@ -58,6 +58,7 @@ describe('fetchAuditCapabilities', () => {
     await expect(fetchAuditCapabilities()).resolves.toEqual({
       canView: false,
       scope: 'none',
+      isSuperAdmin: false,
       accessibleOrganizationIds: [],
       knownResourceTypes: [],
     });

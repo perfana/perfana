@@ -2,14 +2,11 @@ import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import { IsString, IsNumber, IsBoolean, IsOptional, IsEnum, IsUrl } from 'class-validator';
 
 export enum PyroscopeViewMode {
-  SINGLE = 'single',
   COMPARISON = 'comparison',
-  DIFF = 'diff'
 }
 
 export enum PyroscopeTheme {
-  LIGHT = 'light',
-  DARK = 'dark'
+  DARK = 'dark',
 }
 
 export class ProfilerTypeDto {
