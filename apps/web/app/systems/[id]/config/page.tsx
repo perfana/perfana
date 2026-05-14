@@ -55,6 +55,7 @@ export default function SystemConfigurationPage() {
     if (systemData.activeTab === 'templates' && systemData.systemId && systemData.selectedEnvironment && systemData.selectedWorkload) {
       template.fetchTemplates(systemData.systemId, systemData.selectedEnvironment, systemData.selectedWorkload);
     }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [systemData.activeTab, systemData.systemId, systemData.selectedEnvironment, systemData.selectedWorkload]);
 
   // Reset state when environment changes
@@ -62,6 +63,7 @@ export default function SystemConfigurationPage() {
     dashboard.clearDashboards();
     slo.clearBenchmarks();
     template.clearTemplates();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [systemData.selectedEnvironment]);
 
   const handleBack = () => router.push('/systems');
@@ -350,7 +352,7 @@ export default function SystemConfigurationPage() {
         <DialogTitle>Delete Template</DialogTitle>
         <DialogContent>
           <DialogContentText>
-            Are you sure you want to delete the template "{template.deletingTemplate?.name}"?
+            {`Are you sure you want to delete the template "${template.deletingTemplate?.name}"?`}
             This action cannot be undone.
           </DialogContentText>
         </DialogContent>

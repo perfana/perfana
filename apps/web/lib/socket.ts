@@ -369,7 +369,7 @@ class SocketManager {
   on<T = unknown>(event: string, listener: (data: T) => void): () => void {
     if (!this.socket) {
       // console.warn(`[Socket] Cannot subscribe to ${event}: not connected`);
-      return () => {};
+      return () => { /* noop */ };
     }
 
     // console.log(`[Socket] Subscribing to event: ${event}`);

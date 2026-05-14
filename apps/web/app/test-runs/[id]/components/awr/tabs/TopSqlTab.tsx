@@ -29,9 +29,7 @@ import {
   Skeleton,
   useTheme,
   alpha,
-  Tooltip,
   IconButton,
-  Badge,
   Dialog,
   DialogTitle,
   DialogContent,
@@ -41,7 +39,6 @@ import {
 import {
   Search as SearchIcon,
   Info as InfoIcon,
-  FilterList as FilterListIcon,
   Close as CloseIcon,
 } from '@mui/icons-material';
 import { useQuery } from '@tanstack/react-query';
@@ -51,7 +48,6 @@ import type {
   SqlStatementDisplay,
   SqlSortField,
   SortDirection,
-  SnackbarSeverity,
 } from '../types';
 import { SqlMetricsTable, SqlTextViewer } from '../sql';
 import { formatSqlId } from '../utils';
@@ -348,10 +344,10 @@ function EmptyState() {
  */
 export function TopSqlTab({
   reportId,
-  testRunId,
+  testRunId: _testRunId,
   maxStatements = DEFAULT_MAX_STATEMENTS,
   defaultSortBy = DEFAULT_SORT_FIELD,
-  expandableSqlText = true,
+  expandableSqlText: _expandableSqlText = true,
   onSnackbar,
 }: TopSqlTabProps) {
   const theme = useTheme();

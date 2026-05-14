@@ -17,8 +17,8 @@ export function isArtificialDashboard(dashboard: { dashboard_uid?: string }): bo
 export function createDashboardSlug(dashboardName: string): string {
   return dashboardName.toLowerCase()
     .replace(/\s+/g, '-')
-    .replace(/[^\w\-]+/g, '')
-    .replace(/\-\-+/g, '-')
+    .replace(/[^\w-]+/g, '')
+    .replace(/--+/g, '-')
     .replace(/^-+/, '')
     .replace(/-+$/, '');
 }

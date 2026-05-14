@@ -141,6 +141,7 @@ export function useConfigComparison({
       setRelatedTestRuns([]);
       relatedTestRunsAttempted.current = true;
     }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [buildUrlWithParams, testRun, selectedRelatedTestRun]);
 
   // Load selected test run configurations

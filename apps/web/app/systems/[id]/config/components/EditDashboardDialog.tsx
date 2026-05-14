@@ -119,6 +119,7 @@ export default function EditDashboardDialog({
         });
       }
     }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open, dashboard, systemName, selectedEnvironment]);
 
   const handleVariableChange = (variableName: string, values: string[]) => {

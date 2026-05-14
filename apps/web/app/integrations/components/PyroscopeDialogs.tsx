@@ -140,7 +140,7 @@ export function PyroscopeDeleteDialog({
       <DialogTitle>Delete Pyroscope Instance</DialogTitle>
       <DialogContent>
         <Typography>
-          Are you sure you want to delete the Pyroscope instance "{instance?.label}"? This action cannot be undone.
+          {`Are you sure you want to delete the Pyroscope instance "${instance?.label}"? This action cannot be undone.`}
         </Typography>
       </DialogContent>
       <DialogActions>

@@ -164,7 +164,7 @@ class KeycloakAuthService {
   }
 
   // Method to handle token for API calls
-  getAuthHeader(): { Authorization: string } | {} {
+  getAuthHeader(): { Authorization: string } | Record<string, unknown> {
     const token = this.getToken();
     return token ? { Authorization: `Bearer ${token}` } : {};
   }

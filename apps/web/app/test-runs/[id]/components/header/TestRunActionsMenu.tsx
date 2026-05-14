@@ -421,7 +421,7 @@ export default function TestRunActionsMenu({
         <DialogTitle>Delete Test Run</DialogTitle>
         <DialogContent>
           <DialogContentText>
-            Are you sure you want to delete test run "<strong>{testRun.test_run_id}</strong>"?
+            Are you sure you want to delete test run &quot;<strong>{testRun.test_run_id}</strong>&quot;?
             This action cannot be undone and will remove all associated data.
           </DialogContentText>
         </DialogContent>

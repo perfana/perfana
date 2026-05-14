@@ -377,7 +377,7 @@ export default function TestRunDetailsPage() {
                     if (wasCollapsed) scrollToCard('report-card-expanded');
                   }}
                   onGenerateReport={() => setGenerateReportDialogOpen(true)}
-                  onSnackbar={(message, severity) => showToast(message)}
+                  onSnackbar={(message, _severity) => showToast(message)}
                   refreshTrigger={reportRefreshTrigger}
                 />
               </Box>
@@ -409,7 +409,7 @@ export default function TestRunDetailsPage() {
             testEnvironment: testRun.test_environment || '',
             workload: testRun.workload || '',
           }}
-          onSuccess={(reportId, jobId) => {
+          onSuccess={(reportId, _jobId) => {
             setGenerateReportDialogOpen(false);
             showToast('Generating report...');
             // Start polling for report completion

@@ -294,7 +294,7 @@ function AnomalyDetectionSubsection({ testRun }: { testRun: TestRun }) {
       .then(text => {
         if (text?.trim()) setDsAdaptConclusion(JSON.parse(text));
       })
-      .catch(() => {});
+      .catch(() => { /* noop */ });
   }, [testRun.test_run_id, testRun.status?.evaluatingAdapt]);
 
   if (testRun.status?.evaluatingAdapt === 'NO_BASELINES_FOUND') {

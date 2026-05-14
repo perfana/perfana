@@ -2,12 +2,11 @@
 
 import { useState, useEffect, useCallback } from 'react';
 import { useParams, useSearchParams } from 'next/navigation';
-import { SystemUnderTest, ApplicationDashboard } from '@/lib/types';
+import { SystemUnderTest } from '@/lib/types';
 import { authenticatedFetch } from '@/lib/api';
 import { fetchDynatraceConfigs } from '@/lib/dynatrace';
 import { fetchTracingInstances } from '@/lib/distributed-tracing';
 import { fetchPyroscopeInstances } from '@/lib/pyroscope';
-import { Benchmark } from '../components/types';
 
 export type TabId = 'grafana' | 'slo' | 'deep-links' | 'dynatrace' | 'tracing' | 'pyroscope' | 'notifications' | 'templates' | 'adapt-settings';
 
@@ -177,6 +176,7 @@ export function useSystemData({
       fetchSystem();
       fetchIntegrations();
     }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [systemId]);
 
   // Handle URL parameters for initial state

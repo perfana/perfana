@@ -251,7 +251,7 @@ export function AnomalyExpandedContent({
               panelId={row.panel_id}
               metricName={row.metric_name}
               testRun={(() => {
-                const effectiveTestRunId = selectedTestRunIdForRow || testRunId;
+                const _effectiveTestRunId = selectedTestRunIdForRow || testRunId;
                 if (selectedTestRunIdForRow && trendsData) {
                   const selectedTrendData = trendsData.find(t => t.test_run_id === selectedTestRunIdForRow);
                   if (selectedTrendData) {

@@ -109,6 +109,7 @@ export default function AddDynatraceQueryDialog({
       setDetectedVariables([]);
       setVariableValues({});
     }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [formData.query]);
 
   // Fetch Dynatrace configs when dialog opens

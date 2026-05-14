@@ -13,7 +13,7 @@ import {
   getOrganization,
   createOrganization,
   updateOrganization,
-  deleteOrganization, Organization,
+  deleteOrganization,
   CreateOrganizationDto,
   UpdateOrganizationDto,
 } from '../api/organizations';

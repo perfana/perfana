@@ -14,7 +14,6 @@ import {
   Button,
   Alert,
   CircularProgress,
-  Divider,
   Paper,
   Grid
 } from '@mui/material';
@@ -172,6 +171,7 @@ export default function MetricConfigForm({
         setScope(configData?.metricName && configData.metricName !== null ? 'metric' : 'panel');
       }
     }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [configData?.rowKey]);
 
   const handleSave = async () => {

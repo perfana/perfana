@@ -250,7 +250,7 @@ export default function PyroscopeSection({
 
               {configurations.length === 0 && (
                 <Alert severity="info" sx={{ mb: 2 }}>
-                  No combinations configured. Click "Add Combination" to add your first application+profiler pair.
+                  No combinations configured. Click &quot;Add Combination&quot; to add your first application+profiler pair.
                 </Alert>
               )}
 

@@ -54,6 +54,7 @@ export function useBaselineApdex({
       setTestRunDetails(null);
       fetchTestRunDetails();
     }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open, testRunId]);
 
   const fetchTestRunDetails = useCallback(async () => {

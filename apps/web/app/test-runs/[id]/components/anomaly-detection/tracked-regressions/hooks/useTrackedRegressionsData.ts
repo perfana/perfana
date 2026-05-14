@@ -22,8 +22,8 @@ export function useTrackedRegressionsData({
   system,
   environment,
   workload,
-  onNotification = () => {},
-  showToast = () => {},
+  onNotification = () => { /* noop */ },
+  showToast = () => { /* noop */ },
 }: UseTrackedRegressionsDataOptions) {
   const theme = useTheme();
   const isDarkMode = theme.palette.mode === 'dark';
@@ -125,6 +125,7 @@ export function useTrackedRegressionsData({
     if (!wasExpanded && !correlatedRegressions[id]) {
       await fetchCorrelatedRegressions(id);
     }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [expandedCards, correlatedRegressions]);
 
   // Fetch correlated regressions for a specific regression

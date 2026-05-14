@@ -32,23 +32,26 @@ export function sortMetricTargets(
     let comparison = 0;
 
     switch (field) {
-      case 'series':
+      case 'series': {
         const aName = a.target || '';
         const bName = b.target || '';
         comparison = aName.localeCompare(bName);
         break;
+      }
 
-      case 'value':
+      case 'value': {
         const aValue = Number(a.value) || 0;
         const bValue = Number(b.value) || 0;
         comparison = aValue - bValue;
         break;
+      }
 
-      case 'result':
+      case 'result': {
         const aStatus = getStatusPriority(a.meets_requirement);
         const bStatus = getStatusPriority(b.meets_requirement);
         comparison = aStatus - bStatus;
         break;
+      }
     }
 
     return direction === 'desc' ? -comparison : comparison;

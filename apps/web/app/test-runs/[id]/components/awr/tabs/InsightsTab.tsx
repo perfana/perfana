@@ -53,7 +53,6 @@ import type {
   InsightFilters,
   InsightSeverity,
   InsightCategory,
-  AwrInsight,
 } from '../types';
 import { InsightsList} from '../insights';
 import { SqlTextViewer } from '../sql';

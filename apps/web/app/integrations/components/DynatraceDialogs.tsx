@@ -238,7 +238,7 @@ export function DynatraceDeleteDialog({
       <DialogTitle>Delete Dynatrace Configuration</DialogTitle>
       <DialogContent>
         <Typography>
-          Are you sure you want to delete the Dynatrace configuration for "{hostname}"? This action cannot be undone.
+          {`Are you sure you want to delete the Dynatrace configuration for "${hostname}"? This action cannot be undone.`}
         </Typography>
       </DialogContent>
       <DialogActions>

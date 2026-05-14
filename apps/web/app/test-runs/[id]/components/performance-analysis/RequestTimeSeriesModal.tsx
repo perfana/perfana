@@ -101,6 +101,7 @@ export default function RequestTimeSeriesModal({
     if (open && testRunId && transactionName && samplerName) {
       fetchTimeSeriesData();
     }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open, testRunId, transactionName, samplerName, aggregationSeconds]);
 
   const fetchTimeSeriesData = async () => {

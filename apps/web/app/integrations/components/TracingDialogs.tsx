@@ -158,7 +158,7 @@ export function TracingDeleteDialog({
       <DialogTitle>Delete Tracing Instance</DialogTitle>
       <DialogContent>
         <Typography>
-          Are you sure you want to delete the tracing instance "{instance?.label}"? This action cannot be undone.
+          {`Are you sure you want to delete the tracing instance "${instance?.label}"? This action cannot be undone.`}
         </Typography>
       </DialogContent>
       <DialogActions>

@@ -1,5 +1,5 @@
 import { formatValueWithUnit } from '@/lib/units';
-import { MetricTrendData, ConfigSourceInfo, ThresholdData } from './types';
+import { MetricTrendData, ConfigSourceInfo } from './types';
 
 // Data formatting functions
 export const formatNumber = (value: unknown): string => {
@@ -154,7 +154,7 @@ export const createTrendsPlot = (
   });
 
   let conversionFactor = 1;
-  let adjustedYAxesFormat = unit || '';
+  let _adjustedYAxesFormat = unit || '';
   let yAxisLabel = 'Value';
   let unitSuffix = '';
 
@@ -164,12 +164,12 @@ export const createTrendsPlot = (
     unitSuffix = '%';
   } else if (unit === 's' && globalMaxDataPoint && globalMaxDataPoint < 1) {
     conversionFactor = 1000;
-    adjustedYAxesFormat = 'ms';
+    _adjustedYAxesFormat = 'ms';
     yAxisLabel = 'Time (ms)';
     unitSuffix = ' ms';
   } else if (unit === 'ms' && globalMinDataPoint && globalMinDataPoint > 1000) {
     conversionFactor = 1/1000;
-    adjustedYAxesFormat = 's';
+    _adjustedYAxesFormat = 's';
     yAxisLabel = 'Time (s)';
     unitSuffix = ' s';
   } else if (unit === 's') {
@@ -549,8 +549,8 @@ export const generateThresholdData = (drawerData: Record<string, unknown>, unit?
   if (drawerData.checks && drawerData.statistic && drawerData.compare_config) {
     const statistic = drawerData.statistic as DrawerStatistic;
     const testValue = statistic?.test || 0;
-    const controlValue = statistic?.control || 0;
-    const observedDiff = statistic?.diff || 0;
+    const _controlValue = statistic?.control || 0;
+    const _observedDiff = statistic?.diff || 0;
 
     const config = drawerData.compare_config as DrawerConfig;
     const checks = (drawerData.checks || {}) as DrawerChecks;
@@ -638,9 +638,9 @@ export const generateThresholdData = (drawerData: Record<string, unknown>, unit?
     const statistic2 = drawerData.statistic as DrawerStatistic;
     const testValue = statistic2?.test || 0;
     const controlValue = statistic2?.control || 0;
-    const observedDiff = statistic2?.diff || 0;
+    const _observedDiff = statistic2?.diff || 0;
 
-    const percentageDiff = controlValue !== 0
+    const _percentageDiff = controlValue !== 0
       ? ((testValue - controlValue) / Math.abs(controlValue)) * 100
       : 0;
 

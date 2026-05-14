@@ -51,6 +51,7 @@ export function DeepLinkDialog({ link, onClose }: DeepLinkDialogProps) {
   const iframeRef = useRef<HTMLIFrameElement>(null);
   const timeoutRef = useRef<ReturnType<typeof setTimeout>>();
 
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   const canEmbed = useMemo(() => (link ? isEmbeddable(link.url) : false), [link?.url]);
 
   // Reset iframe status when the link changes
@@ -61,6 +62,7 @@ export function DeepLinkDialog({ link, onClose }: DeepLinkDialogProps) {
     return () => {
       if (timeoutRef.current) clearTimeout(timeoutRef.current);
     };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [link?.url, canEmbed]);
 
   // After iframe mounts, start a timeout to detect if it's blocked

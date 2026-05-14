@@ -48,16 +48,19 @@ export function usePyroscopeData({ testRun, expanded }: UsePyroscopeDataProps) {
   // Extract Pyroscope configuration from test run
   // Handle both possible field names (systems_under_test and system_under_test)
   const pyroscopeConfig = testRun.systems_under_test || testRun.system_under_test;
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   const configurations: PyroscopeConfiguration[] = pyroscopeConfig?.pyroscope_configurations || [];
   const pyroscopeInstance = pyroscopeConfig?.pyroscopeInstance;
 
   // Derive unique applications and profilers for collapsed state display
   const applications = useMemo(
     () => [...new Set(configurations.map((c) => c.application))].sort(),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
     [configurations]
   );
   const profilers = useMemo(
     () => [...new Set(configurations.map((c) => c.profiler))].sort(),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
     [configurations]
   );
 

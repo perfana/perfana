@@ -191,6 +191,7 @@ export function useApdexConfigDialog({
     } finally {
       setLoading(false);
     }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [threshold, enableSlo, minApdexScore, includeFailedRequests, excludeRampUpTime, existingSlo, isTransactionLevel, sloCheckFailed, testRunId, transactionName, testRunDetails, onSuccess, onClose]);
 
   const handleSloUpdate = async (thresholdValue: number) => {

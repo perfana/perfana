@@ -49,7 +49,7 @@ export default function TrackedRegressionsView({
   onResolve,
   onMarkChangepoint,
   trendsData: _externalTrendsData,
-  showToast = () => {},
+  showToast = () => { /* noop */ },
 }: TrackedRegressionsViewProps) {
   const theme = useTheme();
   const [groupedRegressions, setGroupedRegressions] = useState<GroupedTrackedRegressions[]>([]);
@@ -314,6 +314,7 @@ export default function TrackedRegressionsView({
     if (testRunId) {
       fetchTrackedRegressions();
     }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [testRunId]);
 
   if (loading) {

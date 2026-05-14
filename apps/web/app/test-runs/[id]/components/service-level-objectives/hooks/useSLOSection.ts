@@ -572,6 +572,7 @@ export function useSLOSection({
         loadBenchmarks();
       }
     }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [testRun]);
 
   // Status change effect

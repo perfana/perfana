@@ -15,7 +15,7 @@ import {
   updateTeamMemberRoles,
   removeTeamMember,
   removeTeamMemberByUser,
-  getMyTeamMemberships, TeamMember,
+  getMyTeamMemberships,
   AddTeamMemberDto,
   UpdateTeamMemberRolesDto,
 } from '../api/team-members';
@@ -139,7 +139,7 @@ export function useRemoveTeamMember() {
   return useMutation({
     mutationFn: ({
       id,
-      teamId,
+      teamId: _teamId,
     }: {
       id: string;
       teamId: string;
