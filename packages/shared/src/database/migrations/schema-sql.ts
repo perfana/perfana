@@ -1,45 +1,46 @@
 /**
- * Embedded schema SQL - generated from database/schema_dump.sql
+ * Embedded schema SQL - generated from pg_dump on 2026-05-14 (v0.2.48.x baseline)
  *
  * This module embeds the complete database schema as a string constant so that
- * the ConsolidatedSchema and SyncSchemaState migrations are self-contained and
- * do not depend on an external .sql file at runtime.
+ * the ConsolidatedSchema migration is self-contained and does not depend on an
+ * external .sql file at runtime.
  *
- * To regenerate: run pg_dump --schema-only against a fully migrated database,
- * then run: node scripts/embed-schema-dump.js
+ * To regenerate:
+ *   docker exec perfana-postgres pg_dump -U perfana --schema-only --no-owner --schema=public perfana > /tmp/dump.sql
+ *   Then strip lines before first SET statement, strip psql metacommands (\\...), prepend extensions,
+ *   and swap can_access_resource/can_modify_resource so 3-arg versions precede the 2-arg wrappers.
  */
 export const SCHEMA_SQL = `--
 -- Perfana Consolidated Database Schema
--- Generated from production pg_dump with extensions prepended
+-- Generated from pg_dump on 2026-05-14 (v0.2.48.x baseline)
 --
--- This file is loaded by the ConsolidatedSchema migration.
--- It contains the complete database schema including:
+-- Regenerate: docker exec perfana-postgres pg_dump -U perfana --schema-only --no-owner --schema=public perfana
+-- Then strip lines before first SET statement, strip psql metacommands (\\...), prepend extensions.
+--
+-- Contents:
 --   - Extensions (uuid-ossp, timescaledb, timescaledb_toolkit)
 --   - Custom types and enums
 --   - Functions (utility, trigger, RLS helper)
 --   - Tables with all columns, defaults, and constraints
 --   - Views
---   - Indexes
---   - Triggers
+--   - Indexes (213 total)
+--   - Triggers (31 total)
 --   - Foreign key constraints
---   - Row-level security policies
+--   - Row-level security (ENABLE + FORCE + 116 policies)
+--
+-- NOT included (handled by ConsolidatedSchema migration phases):
+--   - perfana_app / perfana_system roles (cluster-level, Phase 2)
+--   - Default organization seed data (Phase 3)
+--   - TimescaleDB hypertable conversion (Phase 4)
+--   - Continuous aggregates and policies (Phase 5)
 --
 
 --
--- Extensions
+-- Extensions (must precede all other objects)
 --
-
 CREATE EXTENSION IF NOT EXISTS "uuid-ossp" WITH SCHEMA public;
 CREATE EXTENSION IF NOT EXISTS timescaledb WITH SCHEMA public;
 CREATE EXTENSION IF NOT EXISTS timescaledb_toolkit WITH SCHEMA public;
-
---
--- PostgreSQL database dump
---
-
-
--- Dumped from database version 15.15 (Ubuntu 15.15-1.pgdg22.04+1)
--- Dumped by pg_dump version 15.14 (Homebrew)
 
 SET statement_timeout = 0;
 SET lock_timeout = 0;
@@ -56,7 +57,14 @@ SET row_security = off;
 -- Name: public; Type: SCHEMA; Schema: -; Owner: -
 --
 
--- Schema public already exists
+CREATE SCHEMA IF NOT EXISTS public;
+
+
+--
+-- Name: SCHEMA public; Type: COMMENT; Schema: -; Owner: -
+--
+
+COMMENT ON SCHEMA public IS 'standard public schema';
 
 
 --
@@ -71,44 +79,44 @@ CREATE TYPE public.tracing_instances_tracing_ui_enum AS ENUM (
 
 
 --
--- Name: tags_hash(text[]); Type: FUNCTION; Schema: public; Owner: -
---
-
-CREATE FUNCTION public.tags_hash(tags text[]) RETURNS text
-    LANGUAGE sql IMMUTABLE
-    AS $$
-      SELECT md5(COALESCE(array_to_string(tags, ','), ''))
-    $$;
-
---
 -- Name: can_access_resource(uuid, uuid, text); Type: FUNCTION; Schema: public; Owner: -
 --
 
 CREATE FUNCTION public.can_access_resource(resource_org_id uuid, resource_team_id uuid, resource_created_by text) RETURNS boolean
     LANGUAGE plpgsql STABLE SECURITY DEFINER
     AS $$
-    BEGIN
-      IF is_global_admin() THEN
-        RETURN TRUE;
-      END IF;
-      IF resource_org_id IS NULL AND resource_team_id IS NULL AND resource_created_by IS NULL THEN
-        RETURN TRUE;
-      END IF;
-      IF resource_org_id IS NULL THEN
-        RETURN TRUE;
-      END IF;
-      IF resource_org_id = ANY(current_user_organizations()) THEN
-        RETURN TRUE;
-      END IF;
-      IF resource_team_id IS NOT NULL AND resource_team_id = ANY(current_user_teams()) THEN
-        RETURN TRUE;
-      END IF;
-      IF resource_created_by IS NOT NULL AND resource_created_by = current_user_id() THEN
-        RETURN TRUE;
-      END IF;
-      RETURN FALSE;
-    END;
-    $$;
+        BEGIN
+          IF is_global_admin() THEN
+            RETURN TRUE;
+          END IF;
+          -- Phase 4: organization_id is NOT NULL on every owned resource.
+          -- A NULL here indicates a bug or misconfigured caller — fail closed.
+          IF resource_org_id IS NULL THEN
+            RETURN FALSE;
+          END IF;
+          IF resource_org_id = ANY(current_user_organizations()) THEN
+            RETURN TRUE;
+          END IF;
+          IF resource_team_id IS NOT NULL AND resource_team_id = ANY(current_user_teams()) THEN
+            RETURN TRUE;
+          END IF;
+          IF resource_created_by IS NOT NULL AND resource_created_by = current_user_id() THEN
+            RETURN TRUE;
+          END IF;
+          RETURN FALSE;
+        END;
+        $$;
+
+
+--
+-- Name: can_access_resource(uuid, text); Type: FUNCTION; Schema: public; Owner: -
+--
+
+CREATE FUNCTION public.can_access_resource(resource_org_id uuid, resource_created_by text) RETURNS boolean
+    LANGUAGE sql STABLE SECURITY DEFINER
+    AS $$
+          SELECT public.can_access_resource(resource_org_id, NULL::uuid, resource_created_by);
+        $$;
 
 
 --
@@ -118,74 +126,68 @@ CREATE FUNCTION public.can_access_resource(resource_org_id uuid, resource_team_i
 CREATE FUNCTION public.can_modify_resource(resource_org_id uuid, resource_team_id uuid DEFAULT NULL::uuid, resource_created_by text DEFAULT NULL::text) RETURNS boolean
     LANGUAGE plpgsql STABLE SECURITY DEFINER
     AS $$
-      DECLARE
-        user_id TEXT;
-        user_orgs UUID[];
-        user_teams UUID[];
-        user_roles TEXT;
-      BEGIN
-        -- Global admins can modify everything
-        IF is_global_admin() THEN
-          RETURN TRUE;
-        END IF;
+          DECLARE
+            user_id TEXT;
+            user_orgs UUID[];
+            user_teams UUID[];
+            user_roles TEXT;
+          BEGIN
+            IF is_global_admin() THEN
+              RETURN TRUE;
+            END IF;
+            user_id := current_user_id();
+            user_orgs := current_user_organizations();
+            user_teams := current_user_teams();
+            user_roles := current_setting('app.current_user_roles', true);
 
-        -- Get current user context
-        user_id := current_user_id();
-        user_orgs := current_user_organizations();
-        user_teams := current_user_teams();
-        user_roles := current_setting('app.current_user_roles', true);
+            IF user_id IS NULL THEN
+              RETURN FALSE;
+            END IF;
 
-        -- If no user context, deny access (fail-safe)
-        IF user_id IS NULL THEN
-          RETURN FALSE;
-        END IF;
+            -- Phase 4: NOT NULL on owned resources. Fail closed on unexpected NULL.
+            IF resource_org_id IS NULL THEN
+              RETURN FALSE;
+            END IF;
 
-        -- Check if user is the resource owner/creator
-        IF resource_created_by IS NOT NULL AND resource_created_by = user_id THEN
-          RETURN TRUE;
-        END IF;
+            -- Creator path
+            IF resource_created_by IS NOT NULL AND resource_created_by = user_id THEN
+              RETURN TRUE;
+            END IF;
 
-        -- Resources without organization_id - check if user has org-admin role
-        -- (stricter than read access for legacy data)
-        IF resource_org_id IS NULL THEN
-          -- For legacy resources, require org-admin to modify
-          IF user_roles LIKE '%"org-admin"%' THEN
-            RETURN TRUE;
-          END IF;
-          -- Regular users can only modify their own resources
-          RETURN FALSE;
-        END IF;
+            -- Org-admin in the resource's organization
+            IF resource_org_id = ANY(user_orgs) AND user_roles LIKE '%"org-admin"%' THEN
+              RETURN TRUE;
+            END IF;
 
-        -- Check if user is an org-admin in the resource's organization
-        IF resource_org_id = ANY(user_orgs) THEN
-          -- Check for org-level admin role
-          IF user_roles LIKE '%"org-admin"%' THEN
-            RETURN TRUE;
-          END IF;
-        END IF;
+            -- Team-admin in the resource's team
+            IF resource_team_id IS NOT NULL AND resource_team_id = ANY(user_teams)
+               AND user_roles LIKE '%"team-admin"%' THEN
+              RETURN TRUE;
+            END IF;
 
-        -- Check team-level permissions
-        IF resource_team_id IS NOT NULL AND resource_team_id = ANY(user_teams) THEN
-          -- Check for team-level admin role
-          IF user_roles LIKE '%"team-admin"%' THEN
-            RETURN TRUE;
-          END IF;
-        END IF;
+            -- Coarse backstop: org/team membership allows modify.
+            -- Loose vs service layer; precise gates live there.
+            IF resource_org_id = ANY(user_orgs) THEN
+              RETURN TRUE;
+            END IF;
+            IF resource_team_id IS NOT NULL AND resource_team_id = ANY(user_teams) THEN
+              RETURN TRUE;
+            END IF;
 
-        -- Members can modify resources in their org/team
-        -- This allows org-member and team-member to modify resources
-        IF resource_org_id = ANY(user_orgs) THEN
-          RETURN TRUE;
-        END IF;
+            RETURN FALSE;
+          END;
+          $$;
 
-        IF resource_team_id IS NOT NULL AND resource_team_id = ANY(user_teams) THEN
-          RETURN TRUE;
-        END IF;
 
-        -- Deny modification if no conditions match
-        RETURN FALSE;
-      END;
-      $$;
+--
+-- Name: can_modify_resource(uuid, text); Type: FUNCTION; Schema: public; Owner: -
+--
+
+CREATE FUNCTION public.can_modify_resource(resource_org_id uuid, resource_created_by text) RETURNS boolean
+    LANGUAGE sql STABLE SECURITY DEFINER
+    AS $$
+          SELECT public.can_modify_resource(resource_org_id, NULL::uuid, resource_created_by);
+        $$;
 
 
 --
@@ -434,6 +436,17 @@ $$;
 
 
 --
+-- Name: tags_hash(text[]); Type: FUNCTION; Schema: public; Owner: -
+--
+
+CREATE FUNCTION public.tags_hash(tags text[]) RETURNS text
+    LANGUAGE sql IMMUTABLE
+    AS $$
+        SELECT md5(COALESCE(array_to_string(tags, ','), ''))
+      $$;
+
+
+--
 -- Name: update_deep_links_updated_at(); Type: FUNCTION; Schema: public; Owner: -
 --
 
@@ -615,6 +628,336 @@ SET default_tablespace = '';
 SET default_table_access_method = heap;
 
 --
+-- Name: requests_raw; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public.requests_raw (
+    "time" timestamp with time zone NOT NULL,
+    test_run_id text NOT NULL,
+    system_under_test text,
+    test_environment text,
+    location text,
+    transaction_name text,
+    sampler_name text NOT NULL,
+    success boolean NOT NULL,
+    request_size integer,
+    response_size integer,
+    response_code text,
+    response_connect_time integer,
+    response_latency integer,
+    response_time integer,
+    scenario_name text,
+    url_hash text
+);
+
+
+--
+-- Name: requests_raw_5s; Type: VIEW; Schema: public; Owner: -
+--
+
+CREATE VIEW public.requests_raw_5s AS
+ SELECT _materialized_hypertable_12.bucket,
+    _materialized_hypertable_12.system_under_test,
+    _materialized_hypertable_12.test_environment,
+    _materialized_hypertable_12.scenario_name,
+    _materialized_hypertable_12.sampler_name,
+    _materialized_hypertable_12.transaction_name,
+    _materialized_hypertable_12.location,
+    _materialized_hypertable_12.n,
+    _materialized_hypertable_12.n_ok,
+    _materialized_hypertable_12.n_err,
+    _materialized_hypertable_12.avg_rt,
+    _materialized_hypertable_12.min_rt,
+    _materialized_hypertable_12.max_rt,
+    _materialized_hypertable_12.avg_connect,
+    _materialized_hypertable_12.avg_latency,
+    _materialized_hypertable_12.bytes_in,
+    _materialized_hypertable_12.bytes_out,
+    _materialized_hypertable_12.avg_response_size,
+    _materialized_hypertable_12.pct_agg
+   FROM _timescaledb_internal._materialized_hypertable_12;
+
+
+--
+-- Name: requests_raw_1m; Type: VIEW; Schema: public; Owner: -
+--
+
+CREATE VIEW public.requests_raw_1m AS
+ SELECT _materialized_hypertable_13.bucket,
+    _materialized_hypertable_13.system_under_test,
+    _materialized_hypertable_13.test_environment,
+    _materialized_hypertable_13.scenario_name,
+    _materialized_hypertable_13.sampler_name,
+    _materialized_hypertable_13.transaction_name,
+    _materialized_hypertable_13.location,
+    _materialized_hypertable_13.n,
+    _materialized_hypertable_13.n_ok,
+    _materialized_hypertable_13.n_err,
+    _materialized_hypertable_13.avg_rt,
+    _materialized_hypertable_13.min_rt,
+    _materialized_hypertable_13.max_rt,
+    _materialized_hypertable_13.avg_connect,
+    _materialized_hypertable_13.avg_latency,
+    _materialized_hypertable_13.bytes_in,
+    _materialized_hypertable_13.bytes_out,
+    _materialized_hypertable_13.avg_response_size,
+    _materialized_hypertable_13.pct_agg
+   FROM _timescaledb_internal._materialized_hypertable_13;
+
+
+--
+-- Name: transactions; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public.transactions (
+    "time" timestamp with time zone NOT NULL,
+    test_run_id text NOT NULL,
+    system_under_test text,
+    test_environment text,
+    location text,
+    transaction_name text NOT NULL,
+    success boolean NOT NULL,
+    request_size integer,
+    response_size integer,
+    response_time integer,
+    scenario_name text
+)
+WITH (autovacuum_vacuum_cost_delay='2', autovacuum_vacuum_scale_factor='0.02', autovacuum_analyze_scale_factor='0.02');
+
+
+--
+-- Name: transactions_5s; Type: VIEW; Schema: public; Owner: -
+--
+
+CREATE VIEW public.transactions_5s AS
+ SELECT _materialized_hypertable_15.bucket,
+    _materialized_hypertable_15.system_under_test,
+    _materialized_hypertable_15.test_environment,
+    _materialized_hypertable_15.scenario_name,
+    _materialized_hypertable_15.transaction_name,
+    _materialized_hypertable_15.n,
+    _materialized_hypertable_15.n_ok,
+    _materialized_hypertable_15.n_err,
+    _materialized_hypertable_15.avg_rt,
+    _materialized_hypertable_15.min_rt,
+    _materialized_hypertable_15.max_rt,
+    _materialized_hypertable_15.pct_agg
+   FROM _timescaledb_internal._materialized_hypertable_15;
+
+
+--
+-- Name: transactions_1m; Type: VIEW; Schema: public; Owner: -
+--
+
+CREATE VIEW public.transactions_1m AS
+ SELECT _materialized_hypertable_16.bucket,
+    _materialized_hypertable_16.system_under_test,
+    _materialized_hypertable_16.test_environment,
+    _materialized_hypertable_16.scenario_name,
+    _materialized_hypertable_16.transaction_name,
+    _materialized_hypertable_16.n,
+    _materialized_hypertable_16.n_ok,
+    _materialized_hypertable_16.n_err,
+    _materialized_hypertable_16.avg_rt,
+    _materialized_hypertable_16.min_rt,
+    _materialized_hypertable_16.max_rt,
+    _materialized_hypertable_16.pct_agg
+   FROM _timescaledb_internal._materialized_hypertable_16;
+
+
+--
+-- Name: requests_error; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public.requests_error (
+    "time" timestamp with time zone NOT NULL,
+    test_run_id text NOT NULL,
+    system_under_test text,
+    test_environment text,
+    location text,
+    node_name text NOT NULL,
+    transaction_name text NOT NULL,
+    sampler_name text NOT NULL,
+    response_code text,
+    response_time integer,
+    connection_time integer,
+    url text,
+    assertions text,
+    response_message text,
+    request_headers text,
+    response_headers text,
+    response_data text,
+    random_id integer,
+    scenario_name text,
+    url_hash text
+);
+
+
+--
+-- Name: requests_error_5s; Type: VIEW; Schema: public; Owner: -
+--
+
+CREATE VIEW public.requests_error_5s AS
+ SELECT _materialized_hypertable_18.bucket,
+    _materialized_hypertable_18.system_under_test,
+    _materialized_hypertable_18.test_environment,
+    _materialized_hypertable_18.scenario_name,
+    _materialized_hypertable_18.sampler_name,
+    _materialized_hypertable_18.transaction_name,
+    _materialized_hypertable_18.node_name,
+    _materialized_hypertable_18.response_code,
+    _materialized_hypertable_18.n
+   FROM _timescaledb_internal._materialized_hypertable_18;
+
+
+--
+-- Name: requests_error_1m; Type: VIEW; Schema: public; Owner: -
+--
+
+CREATE VIEW public.requests_error_1m AS
+ SELECT _materialized_hypertable_19.bucket,
+    _materialized_hypertable_19.system_under_test,
+    _materialized_hypertable_19.test_environment,
+    _materialized_hypertable_19.scenario_name,
+    _materialized_hypertable_19.sampler_name,
+    _materialized_hypertable_19.transaction_name,
+    _materialized_hypertable_19.node_name,
+    _materialized_hypertable_19.response_code,
+    _materialized_hypertable_19.n
+   FROM _timescaledb_internal._materialized_hypertable_19;
+
+
+--
+-- Name: transactions_passed_5s; Type: VIEW; Schema: public; Owner: -
+--
+
+CREATE VIEW public.transactions_passed_5s AS
+ SELECT _materialized_hypertable_21.bucket,
+    _materialized_hypertable_21.system_under_test,
+    _materialized_hypertable_21.test_environment,
+    _materialized_hypertable_21.scenario_name,
+    _materialized_hypertable_21.transaction_name,
+    _materialized_hypertable_21.pct_agg_passed
+   FROM _timescaledb_internal._materialized_hypertable_21;
+
+
+--
+-- Name: transactions_passed_1m; Type: VIEW; Schema: public; Owner: -
+--
+
+CREATE VIEW public.transactions_passed_1m AS
+ SELECT _materialized_hypertable_22.bucket,
+    _materialized_hypertable_22.system_under_test,
+    _materialized_hypertable_22.test_environment,
+    _materialized_hypertable_22.scenario_name,
+    _materialized_hypertable_22.transaction_name,
+    _materialized_hypertable_22.pct_agg_passed
+   FROM _timescaledb_internal._materialized_hypertable_22;
+
+
+--
+-- Name: requests_raw_passed_5s; Type: VIEW; Schema: public; Owner: -
+--
+
+CREATE VIEW public.requests_raw_passed_5s AS
+ SELECT _materialized_hypertable_24.bucket,
+    _materialized_hypertable_24.system_under_test,
+    _materialized_hypertable_24.test_environment,
+    _materialized_hypertable_24.scenario_name,
+    _materialized_hypertable_24.sampler_name,
+    _materialized_hypertable_24.transaction_name,
+    _materialized_hypertable_24.location,
+    _materialized_hypertable_24.pct_agg_passed
+   FROM _timescaledb_internal._materialized_hypertable_24;
+
+
+--
+-- Name: requests_raw_passed_1m; Type: VIEW; Schema: public; Owner: -
+--
+
+CREATE VIEW public.requests_raw_passed_1m AS
+ SELECT _materialized_hypertable_25.bucket,
+    _materialized_hypertable_25.system_under_test,
+    _materialized_hypertable_25.test_environment,
+    _materialized_hypertable_25.scenario_name,
+    _materialized_hypertable_25.sampler_name,
+    _materialized_hypertable_25.transaction_name,
+    _materialized_hypertable_25.location,
+    _materialized_hypertable_25.pct_agg_passed
+   FROM _timescaledb_internal._materialized_hypertable_25;
+
+
+--
+-- Name: ds_metrics; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public.ds_metrics (
+    test_run_id character varying(255) NOT NULL,
+    application_dashboard_id uuid NOT NULL,
+    dashboard_uid character varying(255) NOT NULL,
+    panel_id integer NOT NULL,
+    "time" timestamp with time zone NOT NULL,
+    metric_name character varying(255) NOT NULL,
+    panel_title character varying(500),
+    dashboard_label character varying(255),
+    benchmark_ids text[],
+    errors jsonb,
+    timestep double precision,
+    ramp_up boolean,
+    value double precision,
+    unit character varying(50),
+    created_at timestamp without time zone DEFAULT now() NOT NULL,
+    updated_at timestamp without time zone DEFAULT now() NOT NULL,
+    organization_id uuid,
+    team_id uuid,
+    created_by character varying(255),
+    updated_by character varying(255),
+    metrics_source_id uuid
+)
+WITH (autovacuum_vacuum_cost_delay='2', autovacuum_vacuum_scale_factor='0.02', autovacuum_analyze_scale_factor='0.02');
+
+
+--
+-- Name: virtual_users; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public.virtual_users (
+    "time" timestamp with time zone NOT NULL,
+    test_run_id text NOT NULL,
+    system_under_test text,
+    test_environment text,
+    location text,
+    node_name text NOT NULL,
+    active_threads integer,
+    started_threads integer,
+    finished_threads integer,
+    scenario_name text
+);
+
+
+--
+-- Name: alert_tag_filters; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public.alert_tag_filters (
+    id uuid DEFAULT gen_random_uuid() NOT NULL,
+    filter_type character varying(20) NOT NULL,
+    alert_source character varying(50) NOT NULL,
+    tag_key character varying(255) NOT NULL,
+    tag_value character varying(255),
+    system_under_test_id uuid,
+    test_environment character varying(255),
+    test_type character varying(255),
+    organization_id uuid NOT NULL,
+    team_id uuid,
+    created_by character varying(255),
+    updated_by character varying(255),
+    created_at timestamp without time zone DEFAULT now() NOT NULL,
+    updated_at timestamp without time zone DEFAULT now() NOT NULL
+);
+
+
+--
 -- Name: api_keys; Type: TABLE; Schema: public; Owner: -
 --
 
@@ -627,34 +970,12 @@ CREATE TABLE public.api_keys (
     created_at timestamp with time zone DEFAULT now() NOT NULL,
     updated_at timestamp with time zone DEFAULT now() NOT NULL,
     last_used timestamp with time zone,
-    organization_id uuid,
+    organization_id uuid NOT NULL,
     created_by character varying(255),
-    updated_by character varying(255),
-    team_id uuid
+    updated_by character varying(255)
 );
 
 ALTER TABLE ONLY public.api_keys FORCE ROW LEVEL SECURITY;
-
-
---
--- Name: COLUMN api_keys.organization_id; Type: COMMENT; Schema: public; Owner: -
---
-
-COMMENT ON COLUMN public.api_keys.organization_id IS 'Organization this API key belongs to. NULL only allowed for legacy keys (global admin only).';
-
-
---
--- Name: COLUMN api_keys.created_by; Type: COMMENT; Schema: public; Owner: -
---
-
-COMMENT ON COLUMN public.api_keys.created_by IS 'User ID (Keycloak sub) who created this API key';
-
-
---
--- Name: COLUMN api_keys.updated_by; Type: COMMENT; Schema: public; Owner: -
---
-
-COMMENT ON COLUMN public.api_keys.updated_by IS 'User ID (Keycloak sub) who last modified this API key';
 
 
 --
@@ -665,8 +986,8 @@ CREATE TABLE public.application_dashboards (
     id uuid DEFAULT public.uuid_generate_v4() NOT NULL,
     system_under_test_id uuid NOT NULL,
     test_environment character varying(255) NOT NULL,
-    grafana_instance_id uuid NOT NULL,
-    grafana_dashboard_id uuid NOT NULL,
+    grafana_instance_id uuid,
+    grafana_dashboard_id uuid,
     dashboard_name character varying(255) NOT NULL,
     dashboard_id integer,
     dashboard_uid character varying(100),
@@ -678,10 +999,11 @@ CREATE TABLE public.application_dashboards (
     snapshot_timeout integer DEFAULT 4 NOT NULL,
     created_at timestamp without time zone DEFAULT now() NOT NULL,
     updated_at timestamp without time zone DEFAULT now() NOT NULL,
-    organization_id uuid,
+    organization_id uuid NOT NULL,
     team_id uuid,
     created_by character varying(255),
-    updated_by character varying(255)
+    updated_by character varying(255),
+    metrics_source_id uuid
 );
 
 ALTER TABLE ONLY public.application_dashboards FORCE ROW LEVEL SECURITY;
@@ -692,21 +1014,97 @@ ALTER TABLE ONLY public.application_dashboards FORCE ROW LEVEL SECURITY;
 --
 
 CREATE TABLE public.audit_logs (
-    id uuid DEFAULT public.uuid_generate_v4() NOT NULL,
+    id uuid DEFAULT gen_random_uuid() NOT NULL,
     "timestamp" timestamp with time zone DEFAULT now() NOT NULL,
-    user_id text NOT NULL,
-    user_email text,
-    action text NOT NULL,
-    resource_type text NOT NULL,
-    resource_id text,
+    user_id character varying(255) NOT NULL,
+    user_email character varying(255),
     organization_id uuid,
-    ip_address text,
-    user_agent text,
+    action character varying(20) NOT NULL,
+    resource_type character varying(100) NOT NULL,
+    resource_id character varying(255),
+    resource_name character varying(255),
     changes jsonb,
     metadata jsonb,
+    success boolean DEFAULT true NOT NULL,
     error_message text,
+    ip_address character varying(45),
+    user_agent text,
+    system_under_test_id uuid
+)
+PARTITION BY RANGE ("timestamp");
+
+ALTER TABLE ONLY public.audit_logs FORCE ROW LEVEL SECURITY;
+
+
+--
+-- Name: audit_logs_2026_05; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public.audit_logs_2026_05 (
+    id uuid DEFAULT gen_random_uuid() NOT NULL,
+    "timestamp" timestamp with time zone DEFAULT now() NOT NULL,
+    user_id character varying(255) NOT NULL,
+    user_email character varying(255),
+    organization_id uuid,
+    action character varying(20) NOT NULL,
+    resource_type character varying(100) NOT NULL,
+    resource_id character varying(255),
     resource_name character varying(255),
-    success boolean DEFAULT true
+    changes jsonb,
+    metadata jsonb,
+    success boolean DEFAULT true NOT NULL,
+    error_message text,
+    ip_address character varying(45),
+    user_agent text,
+    system_under_test_id uuid
+);
+
+
+--
+-- Name: audit_logs_2026_06; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public.audit_logs_2026_06 (
+    id uuid DEFAULT gen_random_uuid() NOT NULL,
+    "timestamp" timestamp with time zone DEFAULT now() NOT NULL,
+    user_id character varying(255) NOT NULL,
+    user_email character varying(255),
+    organization_id uuid,
+    action character varying(20) NOT NULL,
+    resource_type character varying(100) NOT NULL,
+    resource_id character varying(255),
+    resource_name character varying(255),
+    changes jsonb,
+    metadata jsonb,
+    success boolean DEFAULT true NOT NULL,
+    error_message text,
+    ip_address character varying(45),
+    user_agent text,
+    system_under_test_id uuid
+);
+
+
+--
+-- Name: audit_logs_2026_07; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public.audit_logs_2026_07 (
+    id uuid DEFAULT gen_random_uuid() NOT NULL,
+    "timestamp" timestamp with time zone DEFAULT now() NOT NULL,
+    user_id character varying(255) NOT NULL,
+    user_email character varying(255),
+    organization_id uuid,
+    action character varying(20) NOT NULL,
+    resource_type character varying(100) NOT NULL,
+    resource_id character varying(255),
+    resource_name character varying(255),
+    changes jsonb,
+    metadata jsonb,
+    success boolean DEFAULT true NOT NULL,
+    error_message text,
+    ip_address character varying(45),
+    user_agent text,
+    system_under_test_id uuid
 );
 
 
@@ -823,46 +1221,12 @@ CREATE TABLE public.benchmarks (
     updated_by character varying(255),
     created_at timestamp without time zone DEFAULT now() NOT NULL,
     updated_at timestamp without time zone DEFAULT now() NOT NULL,
-    organization_id uuid,
-    team_id uuid
+    organization_id uuid NOT NULL,
+    team_id uuid,
+    metrics_source_id uuid
 );
 
 ALTER TABLE ONLY public.benchmarks FORCE ROW LEVEL SECURITY;
-
-
---
--- Name: COLUMN benchmarks.benchmark_type; Type: COMMENT; Schema: public; Owner: -
---
-
-COMMENT ON COLUMN public.benchmarks.benchmark_type IS 'Type of benchmark: metric (Grafana-based) or apdex (transaction response time based)';
-
-
---
--- Name: COLUMN benchmarks.transaction_name; Type: COMMENT; Schema: public; Owner: -
---
-
-COMMENT ON COLUMN public.benchmarks.transaction_name IS 'Transaction name for Apdex SLOs. NULL means workload-level aggregate.';
-
-
---
--- Name: COLUMN benchmarks.apdex_threshold_ms; Type: COMMENT; Schema: public; Owner: -
---
-
-COMMENT ON COLUMN public.benchmarks.apdex_threshold_ms IS 'Apdex T threshold in milliseconds. Satisfied: <=T, Tolerating: T<x<=4T, Frustrated: >4T';
-
-
---
--- Name: COLUMN benchmarks.min_apdex_score; Type: COMMENT; Schema: public; Owner: -
---
-
-COMMENT ON COLUMN public.benchmarks.min_apdex_score IS 'Minimum required Apdex score (0.0-1.0). Benchmark passes if calculated >= this value.';
-
-
---
--- Name: COLUMN benchmarks.include_failed_requests; Type: COMMENT; Schema: public; Owner: -
---
-
-COMMENT ON COLUMN public.benchmarks.include_failed_requests IS 'Whether to include failed requests in Apdex calculation (default: false)';
 
 
 --
@@ -872,7 +1236,7 @@ COMMENT ON COLUMN public.benchmarks.include_failed_requests IS 'Whether to inclu
 CREATE TABLE public.grafana_dashboards (
     id uuid DEFAULT public.uuid_generate_v4() NOT NULL,
     grafana_instance_id uuid NOT NULL,
-    grafana_id integer NOT NULL,
+    grafana_id bigint NOT NULL,
     datasource_type character varying,
     uid character varying(255) NOT NULL,
     slug character varying(255),
@@ -891,7 +1255,7 @@ CREATE TABLE public.grafana_dashboards (
     grafana_json jsonb,
     updated timestamp with time zone,
     created_at timestamp without time zone DEFAULT now() NOT NULL,
-    organization_id uuid,
+    organization_id uuid NOT NULL,
     team_id uuid,
     created_by character varying(255),
     updated_by character varying(255)
@@ -916,7 +1280,7 @@ CREATE TABLE public.grafana_instances (
     snapshot_instance boolean,
     created_at timestamp without time zone DEFAULT now() NOT NULL,
     updated_at timestamp without time zone DEFAULT now() NOT NULL,
-    organization_id uuid,
+    organization_id uuid NOT NULL,
     team_id uuid,
     created_by character varying(255),
     updated_by character varying(255)
@@ -941,31 +1305,10 @@ CREATE TABLE public.systems_under_test (
     updated_at timestamp without time zone DEFAULT now() NOT NULL,
     created_by character varying(255),
     updated_by character varying(255),
-    organization_id uuid
+    organization_id uuid NOT NULL
 );
 
 ALTER TABLE ONLY public.systems_under_test FORCE ROW LEVEL SECURITY;
-
-
---
--- Name: COLUMN systems_under_test.created_by; Type: COMMENT; Schema: public; Owner: -
---
-
-COMMENT ON COLUMN public.systems_under_test.created_by IS 'User ID (Keycloak sub) or API key identifier (api-key:{id}) who created this system';
-
-
---
--- Name: COLUMN systems_under_test.updated_by; Type: COMMENT; Schema: public; Owner: -
---
-
-COMMENT ON COLUMN public.systems_under_test.updated_by IS 'User ID (Keycloak sub) or API key identifier (api-key:{id}) who last modified this system';
-
-
---
--- Name: COLUMN systems_under_test.organization_id; Type: COMMENT; Schema: public; Owner: -
---
-
-COMMENT ON COLUMN public.systems_under_test.organization_id IS 'Organization this system belongs to. Nullable for backward compatibility. Will be required after data migration.';
 
 
 --
@@ -1081,7 +1424,7 @@ CREATE TABLE public.check_results (
     application_dashboard_id uuid,
     organization_id uuid,
     team_id uuid,
-    CONSTRAINT check_results_source_check CHECK (((source)::text = ANY ((ARRAY['grafana'::character varying, 'dynatrace'::character varying, 'timescaledb'::character varying, 'influxdb'::character varying, 'prometheus'::character varying, 'custom'::character varying])::text[])))
+    CONSTRAINT check_results_source_check CHECK (((source)::text = ANY (ARRAY[('grafana'::character varying)::text, ('dynatrace'::character varying)::text, ('timescaledb'::character varying)::text, ('influxdb'::character varying)::text, ('prometheus'::character varying)::text, ('custom'::character varying)::text])))
 );
 
 
@@ -1115,9 +1458,10 @@ CREATE TABLE public.compare_filter_presets (
     created_by character varying(255),
     created_at timestamp without time zone DEFAULT now() NOT NULL,
     updated_at timestamp without time zone DEFAULT now() NOT NULL,
-    organization_id uuid,
+    organization_id uuid NOT NULL,
     team_id uuid,
-    updated_by character varying(255)
+    updated_by character varying(255),
+    metrics_source_id uuid
 );
 
 ALTER TABLE ONLY public.compare_filter_presets FORCE ROW LEVEL SECURITY;
@@ -1172,10 +1516,11 @@ CREATE TABLE public.deep_links (
     template_deep_link_id uuid,
     created_at timestamp without time zone DEFAULT now() NOT NULL,
     updated_at timestamp without time zone DEFAULT now() NOT NULL,
-    organization_id uuid,
+    organization_id uuid NOT NULL,
     team_id uuid,
     created_by character varying(255),
-    updated_by character varying(255)
+    updated_by character varying(255),
+    tags text[] DEFAULT '{}'::text[] NOT NULL
 );
 
 ALTER TABLE ONLY public.deep_links FORCE ROW LEVEL SECURITY;
@@ -1258,7 +1603,8 @@ CREATE TABLE public.ds_adapt_results (
     organization_id uuid,
     team_id uuid,
     created_by character varying(255),
-    updated_by character varying(255)
+    updated_by character varying(255),
+    metrics_source_id uuid
 );
 
 
@@ -1316,7 +1662,8 @@ CREATE TABLE public.ds_adapt_tracked_results (
     organization_id uuid,
     team_id uuid,
     created_by character varying(255),
-    updated_by character varying(255)
+    updated_by character varying(255),
+    metrics_source_id uuid
 );
 
 
@@ -1341,7 +1688,8 @@ CREATE TABLE public.ds_change_points (
     organization_id uuid,
     team_id uuid,
     created_by character varying(255),
-    updated_by character varying(255)
+    updated_by character varying(255),
+    metrics_source_id uuid
 );
 
 
@@ -1385,7 +1733,8 @@ CREATE TABLE public.ds_compare_config (
     organization_id uuid,
     team_id uuid,
     created_by character varying(255),
-    updated_by character varying(255)
+    updated_by character varying(255),
+    metrics_source_id uuid
 );
 
 
@@ -1431,7 +1780,8 @@ CREATE TABLE public.ds_control_group_statistics (
     organization_id uuid,
     team_id uuid,
     created_by character varying(255),
-    updated_by character varying(255)
+    updated_by character varying(255),
+    metrics_source_id uuid
 );
 
 
@@ -1501,33 +1851,6 @@ ALTER SEQUENCE public.ds_control_groups_id_seq OWNED BY public.ds_control_groups
 
 
 --
--- Name: ds_metric_classification; Type: TABLE; Schema: public; Owner: -
---
-
-CREATE TABLE public.ds_metric_classification (
-    id uuid DEFAULT public.uuid_generate_v4() NOT NULL,
-    system_under_test_id uuid,
-    test_environment character varying(255),
-    workload character varying(255),
-    dashboard_uid character varying(255),
-    dashboard_label character varying(255),
-    application_dashboard_id uuid,
-    panel_id integer,
-    panel_title character varying(500),
-    metric_name character varying(255),
-    regex boolean DEFAULT false NOT NULL,
-    higher_is_better boolean,
-    metric_classification character varying(255),
-    created_at timestamp without time zone DEFAULT now() NOT NULL,
-    updated_at timestamp without time zone DEFAULT now() NOT NULL,
-    organization_id uuid,
-    team_id uuid,
-    created_by character varying(255),
-    updated_by character varying(255)
-);
-
-
---
 -- Name: ds_metric_collection_status; Type: TABLE; Schema: public; Owner: -
 --
 
@@ -1535,7 +1858,7 @@ CREATE TABLE public.ds_metric_collection_status (
     id uuid DEFAULT public.uuid_generate_v4() NOT NULL,
     test_run_id character varying(255) NOT NULL,
     source_type character varying(50) NOT NULL,
-    source_id character varying(255),
+    source_id character varying(255) DEFAULT ''::character varying NOT NULL,
     collected_ranges jsonb DEFAULT '[]'::jsonb NOT NULL,
     failed_ranges jsonb DEFAULT '[]'::jsonb NOT NULL,
     last_collected_at timestamp with time zone,
@@ -1548,69 +1871,6 @@ CREATE TABLE public.ds_metric_collection_status (
     created_by character varying(255),
     updated_by character varying(255)
 );
-
-
---
--- Name: TABLE ds_metric_collection_status; Type: COMMENT; Schema: public; Owner: -
---
-
-COMMENT ON TABLE public.ds_metric_collection_status IS 'Tracks metric collection progress from various sources (Grafana, Dynatrace, performance tests) for data science analysis';
-
-
---
--- Name: COLUMN ds_metric_collection_status.test_run_id; Type: COMMENT; Schema: public; Owner: -
---
-
-COMMENT ON COLUMN public.ds_metric_collection_status.test_run_id IS 'Test run identifier (supports both UUID and custom test_run_id)';
-
-
---
--- Name: COLUMN ds_metric_collection_status.source_type; Type: COMMENT; Schema: public; Owner: -
---
-
-COMMENT ON COLUMN public.ds_metric_collection_status.source_type IS 'Source type: grafana, dynatrace, or performance_test';
-
-
---
--- Name: COLUMN ds_metric_collection_status.source_id; Type: COMMENT; Schema: public; Owner: -
---
-
-COMMENT ON COLUMN public.ds_metric_collection_status.source_id IS 'Optional source identifier (e.g., Grafana/Dynatrace instance ID)';
-
-
---
--- Name: COLUMN ds_metric_collection_status.collected_ranges; Type: COMMENT; Schema: public; Owner: -
---
-
-COMMENT ON COLUMN public.ds_metric_collection_status.collected_ranges IS 'Array of successfully collected time ranges as JSON objects with start/end timestamps';
-
-
---
--- Name: COLUMN ds_metric_collection_status.failed_ranges; Type: COMMENT; Schema: public; Owner: -
---
-
-COMMENT ON COLUMN public.ds_metric_collection_status.failed_ranges IS 'Array of failed time ranges as JSON objects with start/end timestamps and error details';
-
-
---
--- Name: COLUMN ds_metric_collection_status.last_collected_at; Type: COMMENT; Schema: public; Owner: -
---
-
-COMMENT ON COLUMN public.ds_metric_collection_status.last_collected_at IS 'Timestamp of last successful collection attempt';
-
-
---
--- Name: COLUMN ds_metric_collection_status.is_complete; Type: COMMENT; Schema: public; Owner: -
---
-
-COMMENT ON COLUMN public.ds_metric_collection_status.is_complete IS 'Indicates if all metrics have been collected for this source';
-
-
---
--- Name: COLUMN ds_metric_collection_status.total_data_points; Type: COMMENT; Schema: public; Owner: -
---
-
-COMMENT ON COLUMN public.ds_metric_collection_status.total_data_points IS 'Total number of data points collected from this source';
 
 
 --
@@ -1656,35 +1916,11 @@ CREATE TABLE public.ds_metric_statistics (
     organization_id uuid,
     team_id uuid,
     created_by character varying(255),
-    updated_by character varying(255)
-);
-
-
---
--- Name: ds_metrics; Type: TABLE; Schema: public; Owner: -
---
-
-CREATE TABLE public.ds_metrics (
-    test_run_id character varying(255) NOT NULL,
-    application_dashboard_id uuid NOT NULL,
-    dashboard_uid character varying(255) NOT NULL,
-    panel_id integer NOT NULL,
-    "time" timestamp with time zone NOT NULL,
-    metric_name character varying(255) NOT NULL,
-    panel_title character varying(500),
-    dashboard_label character varying(255),
-    benchmark_ids text[],
-    errors jsonb,
-    timestep double precision,
-    ramp_up boolean,
-    value double precision,
-    unit character varying(50),
-    created_at timestamp without time zone DEFAULT now() NOT NULL,
-    updated_at timestamp without time zone DEFAULT now() NOT NULL,
-    organization_id uuid,
-    team_id uuid,
-    created_by character varying(255),
-    updated_by character varying(255)
+    updated_by character varying(255),
+    metrics_source_id uuid,
+    pct_agg public.uddsketch,
+    sum_value double precision,
+    sum_sq_value double precision
 );
 
 
@@ -1712,7 +1948,8 @@ CREATE TABLE public.ds_panels (
     organization_id uuid,
     team_id uuid,
     created_by character varying(255),
-    updated_by character varying(255)
+    updated_by character varying(255),
+    metrics_source_id uuid
 );
 
 
@@ -1806,7 +2043,8 @@ CREATE TABLE public.ds_tracked_differences (
     organization_id uuid,
     team_id uuid,
     created_by character varying(255),
-    updated_by character varying(255)
+    updated_by character varying(255),
+    metrics_source_id uuid
 );
 
 
@@ -1825,7 +2063,7 @@ CREATE TABLE public.dynatrace_configs (
     perfana_request_name_attribute character varying(255),
     created_at timestamp without time zone DEFAULT now() NOT NULL,
     updated_at timestamp without time zone DEFAULT now() NOT NULL,
-    organization_id uuid,
+    organization_id uuid NOT NULL,
     team_id uuid,
     created_by character varying(255),
     updated_by character varying(255)
@@ -1850,7 +2088,7 @@ CREATE TABLE public.dynatrace_entity_mappings (
     level character varying(50) NOT NULL,
     created_at timestamp without time zone DEFAULT now() NOT NULL,
     updated_at timestamp without time zone DEFAULT now() NOT NULL,
-    organization_id uuid,
+    organization_id uuid NOT NULL,
     team_id uuid,
     created_by character varying(255),
     updated_by character varying(255)
@@ -1881,20 +2119,14 @@ CREATE TABLE public.dynatrace_queries (
     metric_name character varying(255),
     created_at timestamp without time zone DEFAULT now() NOT NULL,
     updated_at timestamp without time zone DEFAULT now() NOT NULL,
-    organization_id uuid,
+    organization_id uuid NOT NULL,
     team_id uuid,
     created_by character varying(255),
-    updated_by character varying(255)
+    updated_by character varying(255),
+    metrics_source_id uuid
 );
 
 ALTER TABLE ONLY public.dynatrace_queries FORCE ROW LEVEL SECURITY;
-
-
---
--- Name: COLUMN dynatrace_queries.metric_name; Type: COMMENT; Schema: public; Owner: -
---
-
-COMMENT ON COLUMN public.dynatrace_queries.metric_name IS 'Explicit metric name for storage (e.g., "CPU Usage", "Memory Usage"). Used instead of deriving from DQL field names.';
 
 
 --
@@ -1910,12 +2142,15 @@ CREATE TABLE public.events (
     "timestamp" timestamp with time zone NOT NULL,
     tags text[],
     grafana_annotation_ids jsonb DEFAULT '{}'::jsonb,
-    organization_id uuid,
+    organization_id uuid NOT NULL,
     team_id uuid,
     created_by character varying(255),
     updated_by character varying(255),
     created_at timestamp without time zone DEFAULT now() NOT NULL,
-    updated_at timestamp without time zone DEFAULT now() NOT NULL
+    updated_at timestamp without time zone DEFAULT now() NOT NULL,
+    source character varying(50) DEFAULT 'manual'::character varying NOT NULL,
+    alert_metadata jsonb,
+    workload character varying(255)
 );
 
 ALTER TABLE ONLY public.events FORCE ROW LEVEL SECURITY;
@@ -1935,7 +2170,7 @@ CREATE TABLE public.expected_config_changes (
     description text,
     created_at timestamp without time zone DEFAULT now() NOT NULL,
     updated_at timestamp without time zone DEFAULT now() NOT NULL,
-    organization_id uuid,
+    organization_id uuid NOT NULL,
     team_id uuid,
     created_by character varying(255),
     updated_by character varying(255)
@@ -1977,11 +2212,7 @@ CREATE TABLE public.generated_reports (
     created_at timestamp with time zone DEFAULT now() NOT NULL,
     updated_at timestamp with time zone DEFAULT now() NOT NULL,
     started_at timestamp with time zone,
-    completed_at timestamp with time zone,
-    organization_id uuid,
-    team_id uuid,
-    created_by character varying(255),
-    updated_by character varying(255)
+    completed_at timestamp with time zone
 );
 
 ALTER TABLE ONLY public.generated_reports FORCE ROW LEVEL SECURITY;
@@ -1998,7 +2229,7 @@ CREATE TABLE public.generic_deep_links (
     url text NOT NULL,
     created_at timestamp without time zone DEFAULT now() NOT NULL,
     updated_at timestamp without time zone DEFAULT now() NOT NULL,
-    organization_id uuid,
+    organization_id uuid NOT NULL,
     team_id uuid,
     created_by character varying(255),
     updated_by character varying(255)
@@ -2022,7 +2253,7 @@ CREATE TABLE public.graph_presets (
     is_global boolean DEFAULT false NOT NULL,
     created_at timestamp with time zone DEFAULT now() NOT NULL,
     updated_at timestamp with time zone DEFAULT now() NOT NULL,
-    organization_id uuid,
+    organization_id uuid NOT NULL,
     team_id uuid,
     created_by character varying(255),
     updated_by character varying(255)
@@ -2049,34 +2280,27 @@ CREATE TABLE public.licenses (
 
 
 --
--- Name: migrations; Type: TABLE; Schema: public; Owner: -
+-- Name: metrics_sources; Type: TABLE; Schema: public; Owner: -
 --
 
-CREATE TABLE public.migrations (
-    id integer NOT NULL,
-    "timestamp" bigint NOT NULL,
-    name character varying NOT NULL
+CREATE TABLE public.metrics_sources (
+    id uuid DEFAULT gen_random_uuid() NOT NULL,
+    system_under_test_id uuid NOT NULL,
+    test_environment character varying(255) NOT NULL,
+    workload character varying(255),
+    source_type character varying(50) NOT NULL,
+    source_config_id uuid,
+    external_ref character varying(255),
+    display_name character varying(255) NOT NULL,
+    display_label character varying(255),
+    tags text[],
+    metadata jsonb,
+    organization_id uuid NOT NULL,
+    team_id uuid,
+    created_by character varying(255),
+    created_at timestamp without time zone DEFAULT now() NOT NULL,
+    updated_at timestamp without time zone DEFAULT now() NOT NULL
 );
-
-
---
--- Name: migrations_id_seq; Type: SEQUENCE; Schema: public; Owner: -
---
-
-CREATE SEQUENCE public.migrations_id_seq
-    AS integer
-    START WITH 1
-    INCREMENT BY 1
-    NO MINVALUE
-    NO MAXVALUE
-    CACHE 1;
-
-
---
--- Name: migrations_id_seq; Type: SEQUENCE OWNED BY; Schema: public; Owner: -
---
-
-ALTER SEQUENCE public.migrations_id_seq OWNED BY public.migrations.id;
 
 
 --
@@ -2094,7 +2318,7 @@ CREATE TABLE public.notification_channels (
     enabled boolean DEFAULT true NOT NULL,
     created_at timestamp without time zone DEFAULT now() NOT NULL,
     updated_at timestamp without time zone DEFAULT now() NOT NULL,
-    organization_id uuid,
+    organization_id uuid NOT NULL,
     team_id uuid,
     created_by character varying(255),
     updated_by character varying(255)
@@ -2115,6 +2339,20 @@ CREATE TABLE public.organization_members (
     created_at timestamp with time zone DEFAULT now() NOT NULL,
     updated_at timestamp with time zone DEFAULT now() NOT NULL
 );
+
+
+--
+-- Name: COLUMN organization_members.user_id; Type: COMMENT; Schema: public; Owner: -
+--
+
+COMMENT ON COLUMN public.organization_members.user_id IS 'Keycloak user sub or api-key:{id}';
+
+
+--
+-- Name: COLUMN organization_members.roles; Type: COMMENT; Schema: public; Owner: -
+--
+
+COMMENT ON COLUMN public.organization_members.roles IS 'Organization-level roles: org-admin, org-member, org-viewer';
 
 
 --
@@ -2176,7 +2414,7 @@ CREATE TABLE public.profile_benchmarks (
     read_only boolean DEFAULT false NOT NULL,
     created_at timestamp with time zone DEFAULT now() NOT NULL,
     updated_at timestamp with time zone DEFAULT now() NOT NULL,
-    organization_id uuid,
+    organization_id uuid NOT NULL,
     team_id uuid,
     created_by character varying(255),
     updated_by character varying(255)
@@ -2199,7 +2437,7 @@ CREATE TABLE public.profile_grafana_dashboards (
     read_only boolean DEFAULT false,
     created_at timestamp with time zone DEFAULT now() NOT NULL,
     updated_at timestamp with time zone DEFAULT now() NOT NULL,
-    organization_id uuid,
+    organization_id uuid NOT NULL,
     team_id uuid,
     created_by character varying(255),
     updated_by character varying(255)
@@ -2218,13 +2456,42 @@ CREATE TABLE public.profiles (
     read_only boolean DEFAULT false,
     created_at timestamp with time zone DEFAULT now() NOT NULL,
     updated_at timestamp with time zone DEFAULT now() NOT NULL,
-    organization_id uuid,
+    organization_id uuid NOT NULL,
     team_id uuid,
     created_by character varying(255),
     updated_by character varying(255)
 );
 
 ALTER TABLE ONLY public.profiles FORCE ROW LEVEL SECURITY;
+
+
+--
+-- Name: provisioned_template_ds_compare_configs; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public.provisioned_template_ds_compare_configs (
+    id uuid DEFAULT public.uuid_generate_v4() NOT NULL,
+    system_under_test_id uuid,
+    test_environment character varying(255),
+    workload character varying(255),
+    dashboard_uid character varying(255),
+    dashboard_label character varying(255),
+    application_dashboard_id uuid,
+    panel_id integer,
+    panel_title character varying(500),
+    metric_name character varying(255),
+    regex boolean DEFAULT false NOT NULL,
+    higher_is_better boolean,
+    metric_classification character varying(255),
+    created_at timestamp without time zone DEFAULT now() NOT NULL,
+    updated_at timestamp without time zone DEFAULT now() NOT NULL,
+    organization_id uuid,
+    team_id uuid,
+    created_by character varying(255),
+    updated_by character varying(255),
+    config_overrides jsonb,
+    metrics_source_id uuid
+);
 
 
 --
@@ -2239,7 +2506,7 @@ CREATE TABLE public.pyroscope_instances (
     pyroscope_stand_alone boolean DEFAULT false NOT NULL,
     created_at timestamp without time zone DEFAULT now() NOT NULL,
     updated_at timestamp without time zone DEFAULT now() NOT NULL,
-    organization_id uuid,
+    organization_id uuid NOT NULL,
     team_id uuid,
     created_by character varying(255),
     updated_by character varying(255)
@@ -2266,7 +2533,7 @@ CREATE TABLE public.report_templates (
     is_adhoc boolean DEFAULT false NOT NULL,
     created_at timestamp without time zone DEFAULT now() NOT NULL,
     updated_at timestamp without time zone DEFAULT now() NOT NULL,
-    organization_id uuid,
+    organization_id uuid NOT NULL,
     team_id uuid,
     updated_by character varying(255)
 );
@@ -2275,54 +2542,108 @@ ALTER TABLE ONLY public.report_templates FORCE ROW LEVEL SECURITY;
 
 
 --
--- Name: requests_error; Type: TABLE; Schema: public; Owner: -
+-- Name: requests_error_5m; Type: VIEW; Schema: public; Owner: -
 --
 
-CREATE TABLE public.requests_error (
-    "time" timestamp with time zone NOT NULL,
-    test_run_id text NOT NULL,
-    system_under_test text,
-    test_environment text,
-    location text,
-    node_name text NOT NULL,
-    transaction_name text NOT NULL,
-    sampler_name text NOT NULL,
-    response_code text,
-    response_time integer,
-    connection_time integer,
-    url text,
-    assertions text,
-    response_message text,
-    request_headers text,
-    response_headers text,
-    response_data text,
-    random_id integer,
-    scenario_name text,
-    url_hash text
+CREATE VIEW public.requests_error_5m AS
+ SELECT _materialized_hypertable_20.bucket,
+    _materialized_hypertable_20.system_under_test,
+    _materialized_hypertable_20.test_environment,
+    _materialized_hypertable_20.scenario_name,
+    _materialized_hypertable_20.sampler_name,
+    _materialized_hypertable_20.transaction_name,
+    _materialized_hypertable_20.node_name,
+    _materialized_hypertable_20.response_code,
+    _materialized_hypertable_20.n
+   FROM _timescaledb_internal._materialized_hypertable_20;
+
+
+--
+-- Name: requests_raw_5m; Type: VIEW; Schema: public; Owner: -
+--
+
+CREATE VIEW public.requests_raw_5m AS
+ SELECT _materialized_hypertable_14.bucket,
+    _materialized_hypertable_14.system_under_test,
+    _materialized_hypertable_14.test_environment,
+    _materialized_hypertable_14.scenario_name,
+    _materialized_hypertable_14.sampler_name,
+    _materialized_hypertable_14.transaction_name,
+    _materialized_hypertable_14.location,
+    _materialized_hypertable_14.n,
+    _materialized_hypertable_14.n_ok,
+    _materialized_hypertable_14.n_err,
+    _materialized_hypertable_14.avg_rt,
+    _materialized_hypertable_14.min_rt,
+    _materialized_hypertable_14.max_rt,
+    _materialized_hypertable_14.avg_connect,
+    _materialized_hypertable_14.avg_latency,
+    _materialized_hypertable_14.bytes_in,
+    _materialized_hypertable_14.bytes_out,
+    _materialized_hypertable_14.avg_response_size,
+    _materialized_hypertable_14.pct_agg
+   FROM _timescaledb_internal._materialized_hypertable_14;
+
+
+--
+-- Name: requests_raw_passed_5m; Type: VIEW; Schema: public; Owner: -
+--
+
+CREATE VIEW public.requests_raw_passed_5m AS
+ SELECT _materialized_hypertable_26.bucket,
+    _materialized_hypertable_26.system_under_test,
+    _materialized_hypertable_26.test_environment,
+    _materialized_hypertable_26.scenario_name,
+    _materialized_hypertable_26.sampler_name,
+    _materialized_hypertable_26.transaction_name,
+    _materialized_hypertable_26.location,
+    _materialized_hypertable_26.pct_agg_passed
+   FROM _timescaledb_internal._materialized_hypertable_26;
+
+
+--
+-- Name: scaling_sessions; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public.scaling_sessions (
+    id uuid DEFAULT gen_random_uuid() NOT NULL,
+    name character varying(255) NOT NULL,
+    description text,
+    system_under_test_id uuid NOT NULL,
+    test_environment character varying(255) NOT NULL,
+    workload character varying(255) NOT NULL,
+    baseline_test_run_id character varying(255),
+    target_load character varying(255),
+    status character varying(50) DEFAULT 'active'::character varying NOT NULL,
+    organization_id uuid,
+    team_id uuid,
+    created_by character varying(255),
+    updated_by character varying(255),
+    created_at timestamp with time zone DEFAULT now() NOT NULL,
+    updated_at timestamp with time zone DEFAULT now() NOT NULL,
+    linked_benchmark_ids uuid[] DEFAULT '{}'::uuid[] NOT NULL,
+    run_comments jsonb DEFAULT '{}'::jsonb NOT NULL
 );
 
 
 --
--- Name: requests_raw; Type: TABLE; Schema: public; Owner: -
+-- Name: sparse_metric_exclusions; Type: TABLE; Schema: public; Owner: -
 --
 
-CREATE TABLE public.requests_raw (
-    "time" timestamp with time zone NOT NULL,
-    test_run_id text NOT NULL,
-    system_under_test text,
-    test_environment text,
-    location text,
-    transaction_name text,
-    sampler_name text NOT NULL,
-    success boolean NOT NULL,
-    request_size integer,
-    response_size integer,
-    response_code text,
-    response_connect_time integer,
-    response_latency integer,
-    response_time integer,
-    scenario_name text,
-    url_hash text
+CREATE TABLE public.sparse_metric_exclusions (
+    id uuid DEFAULT gen_random_uuid() NOT NULL,
+    system_under_test_id uuid NOT NULL,
+    test_environment character varying(255) NOT NULL,
+    workload character varying(255) NOT NULL,
+    dashboard_label character varying(255) NOT NULL,
+    metric_name character varying(255) NOT NULL,
+    reason text,
+    organization_id uuid NOT NULL,
+    team_id uuid,
+    created_by character varying(255),
+    updated_by character varying(255),
+    created_at timestamp without time zone DEFAULT now() NOT NULL,
+    updated_at timestamp without time zone DEFAULT now() NOT NULL
 );
 
 
@@ -2336,15 +2657,8 @@ CREATE TABLE public.system_under_test_test_environments (
     name character varying(255) NOT NULL,
     tracing_service character varying(255),
     pyroscope_application character varying(255),
-    created_at timestamp with time zone DEFAULT now()
+    created_at timestamp without time zone DEFAULT now() NOT NULL
 );
-
-
---
--- Name: TABLE system_under_test_test_environments; Type: COMMENT; Schema: public; Owner: -
---
-
-COMMENT ON TABLE public.system_under_test_test_environments IS 'Test environments for each system under test (e.g., dev, acc, prod)';
 
 
 --
@@ -2356,15 +2670,8 @@ CREATE TABLE public.system_under_test_workloads (
     system_under_test_test_environment_id uuid NOT NULL,
     name character varying(255) NOT NULL,
     config jsonb,
-    created_at timestamp with time zone DEFAULT now()
+    created_at timestamp without time zone DEFAULT now() NOT NULL
 );
-
-
---
--- Name: TABLE system_under_test_workloads; Type: COMMENT; Schema: public; Owner: -
---
-
-COMMENT ON TABLE public.system_under_test_workloads IS 'Workloads/test types for each environment (e.g., load, stress, endurance)';
 
 
 --
@@ -2379,6 +2686,20 @@ CREATE TABLE public.team_members (
     created_at timestamp with time zone DEFAULT now() NOT NULL,
     updated_at timestamp with time zone DEFAULT now() NOT NULL
 );
+
+
+--
+-- Name: COLUMN team_members.user_id; Type: COMMENT; Schema: public; Owner: -
+--
+
+COMMENT ON COLUMN public.team_members.user_id IS 'Keycloak user sub or api-key:{id}';
+
+
+--
+-- Name: COLUMN team_members.roles; Type: COMMENT; Schema: public; Owner: -
+--
+
+COMMENT ON COLUMN public.team_members.roles IS 'Team-level roles: team-admin, team-member, team-viewer';
 
 
 --
@@ -2425,11 +2746,7 @@ CREATE TABLE public.test_run_configs (
     value text,
     tags text[],
     created_at timestamp without time zone DEFAULT now() NOT NULL,
-    test_run_id_string character varying,
-    organization_id uuid,
-    team_id uuid,
-    created_by character varying(255),
-    updated_by character varying(255)
+    test_run_id_string character varying
 );
 
 
@@ -2447,6 +2764,69 @@ CREATE TABLE public.test_run_events (
     team_id uuid,
     created_by character varying(255),
     updated_by character varying(255)
+);
+
+
+--
+-- Name: test_run_sampler_stats; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public.test_run_sampler_stats (
+    test_run_id text NOT NULL,
+    transaction_name text NOT NULL,
+    sampler_name text NOT NULL,
+    scenario_name text DEFAULT ''::text NOT NULL,
+    ramp_up_excluded boolean NOT NULL,
+    url_hash text,
+    system_under_test text NOT NULL,
+    test_environment text NOT NULL,
+    total_count bigint NOT NULL,
+    passed_count bigint NOT NULL,
+    failed_count bigint NOT NULL,
+    avg_response_time numeric,
+    min_response_time integer,
+    max_response_time integer,
+    avg_latency numeric,
+    avg_connect_time numeric,
+    total_request_size bigint,
+    total_response_size bigint,
+    pct_agg public.tdigest NOT NULL,
+    computed_at timestamp with time zone DEFAULT now() NOT NULL,
+    pct_agg_passed public.tdigest
+);
+
+
+--
+-- Name: test_run_transaction_stats; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public.test_run_transaction_stats (
+    test_run_id text NOT NULL,
+    transaction_name text NOT NULL,
+    scenario_name text DEFAULT ''::text NOT NULL,
+    ramp_up_excluded boolean NOT NULL,
+    system_under_test_id uuid NOT NULL,
+    test_environment text NOT NULL,
+    workload text,
+    total_count bigint NOT NULL,
+    passed_count bigint NOT NULL,
+    failed_count bigint NOT NULL,
+    avg_response_time numeric,
+    impact_score numeric,
+    pct_agg public.tdigest NOT NULL,
+    computed_at timestamp with time zone DEFAULT now() NOT NULL,
+    pct_agg_passed public.tdigest
+);
+
+
+--
+-- Name: test_run_views; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public.test_run_views (
+    user_id character varying(255) NOT NULL,
+    test_run_id uuid NOT NULL,
+    viewed_at timestamp with time zone DEFAULT now() NOT NULL
 );
 
 
@@ -2484,10 +2864,13 @@ CREATE TABLE public.test_runs (
     deep_links jsonb,
     created_at timestamp with time zone DEFAULT now() NOT NULL,
     updated_at timestamp with time zone DEFAULT now() NOT NULL,
-    organization_id uuid,
+    organization_id uuid NOT NULL,
     team_id uuid,
     created_by character varying(255),
-    updated_by character varying(255)
+    updated_by character varying(255),
+    abort_message text,
+    data_warnings text[],
+    deletion_status character varying(20)
 );
 
 ALTER TABLE ONLY public.test_runs FORCE ROW LEVEL SECURITY;
@@ -2506,7 +2889,7 @@ CREATE TABLE public.tracing_instances (
     tracing_iframe_allowed boolean DEFAULT false NOT NULL,
     created_at timestamp without time zone DEFAULT now() NOT NULL,
     updated_at timestamp without time zone DEFAULT now() NOT NULL,
-    organization_id uuid,
+    organization_id uuid NOT NULL,
     team_id uuid,
     created_by character varying(255),
     updated_by character varying(255)
@@ -2528,7 +2911,7 @@ CREATE TABLE public.tracing_services (
     service_names text[] DEFAULT '{}'::text[] NOT NULL,
     created_at timestamp without time zone DEFAULT now() NOT NULL,
     updated_at timestamp without time zone DEFAULT now() NOT NULL,
-    organization_id uuid,
+    organization_id uuid NOT NULL,
     team_id uuid,
     created_by character varying(255),
     updated_by character varying(255)
@@ -2538,22 +2921,37 @@ ALTER TABLE ONLY public.tracing_services FORCE ROW LEVEL SECURITY;
 
 
 --
--- Name: transactions; Type: TABLE; Schema: public; Owner: -
+-- Name: transactions_5m; Type: VIEW; Schema: public; Owner: -
 --
 
-CREATE TABLE public.transactions (
-    "time" timestamp with time zone NOT NULL,
-    test_run_id text NOT NULL,
-    system_under_test text,
-    test_environment text,
-    location text,
-    transaction_name text NOT NULL,
-    success boolean NOT NULL,
-    request_size integer,
-    response_size integer,
-    response_time integer,
-    scenario_name text
-);
+CREATE VIEW public.transactions_5m AS
+ SELECT _materialized_hypertable_17.bucket,
+    _materialized_hypertable_17.system_under_test,
+    _materialized_hypertable_17.test_environment,
+    _materialized_hypertable_17.scenario_name,
+    _materialized_hypertable_17.transaction_name,
+    _materialized_hypertable_17.n,
+    _materialized_hypertable_17.n_ok,
+    _materialized_hypertable_17.n_err,
+    _materialized_hypertable_17.avg_rt,
+    _materialized_hypertable_17.min_rt,
+    _materialized_hypertable_17.max_rt,
+    _materialized_hypertable_17.pct_agg
+   FROM _timescaledb_internal._materialized_hypertable_17;
+
+
+--
+-- Name: transactions_passed_5m; Type: VIEW; Schema: public; Owner: -
+--
+
+CREATE VIEW public.transactions_passed_5m AS
+ SELECT _materialized_hypertable_23.bucket,
+    _materialized_hypertable_23.system_under_test,
+    _materialized_hypertable_23.test_environment,
+    _materialized_hypertable_23.scenario_name,
+    _materialized_hypertable_23.transaction_name,
+    _materialized_hypertable_23.pct_agg_passed
+   FROM _timescaledb_internal._materialized_hypertable_23;
 
 
 --
@@ -2577,12 +2975,44 @@ CREATE TABLE public.trends_filter_presets (
     created_by character varying(255),
     created_at timestamp without time zone DEFAULT now() NOT NULL,
     updated_at timestamp without time zone DEFAULT now() NOT NULL,
-    organization_id uuid,
+    organization_id uuid NOT NULL,
     team_id uuid,
-    updated_by character varying(255)
+    updated_by character varying(255),
+    metrics_source_id uuid
 );
 
 ALTER TABLE ONLY public.trends_filter_presets FORCE ROW LEVEL SECURITY;
+
+
+--
+-- Name: typeorm_migrations; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public.typeorm_migrations (
+    id integer NOT NULL,
+    "timestamp" bigint NOT NULL,
+    name character varying NOT NULL
+);
+
+
+--
+-- Name: typeorm_migrations_id_seq; Type: SEQUENCE; Schema: public; Owner: -
+--
+
+CREATE SEQUENCE public.typeorm_migrations_id_seq
+    AS integer
+    START WITH 1
+    INCREMENT BY 1
+    NO MINVALUE
+    NO MAXVALUE
+    CACHE 1;
+
+
+--
+-- Name: typeorm_migrations_id_seq; Type: SEQUENCE OWNED BY; Schema: public; Owner: -
+--
+
+ALTER SEQUENCE public.typeorm_migrations_id_seq OWNED BY public.typeorm_migrations.id;
 
 
 --
@@ -2595,12 +3025,9 @@ CREATE TABLE public.url_patterns (
     test_environment text NOT NULL,
     normalized_url text NOT NULL,
     original_example text,
-    first_seen timestamp with time zone NOT NULL,
-    organization_id uuid,
-    team_id uuid,
-    created_by character varying(255),
-    updated_by character varying(255)
-);
+    first_seen timestamp with time zone NOT NULL
+)
+WITH (autovacuum_vacuum_scale_factor='0.05', autovacuum_analyze_scale_factor='0.05', autovacuum_vacuum_cost_limit='1000');
 
 ALTER TABLE ONLY public.url_patterns FORCE ROW LEVEL SECURITY;
 
@@ -2614,24 +3041,6 @@ CREATE TABLE public.versions (
     component character varying(255) NOT NULL,
     version character varying(255) NOT NULL,
     created_at timestamp with time zone DEFAULT now()
-);
-
-
---
--- Name: virtual_users; Type: TABLE; Schema: public; Owner: -
---
-
-CREATE TABLE public.virtual_users (
-    "time" timestamp with time zone NOT NULL,
-    test_run_id text NOT NULL,
-    system_under_test text,
-    test_environment text,
-    location text,
-    node_name text NOT NULL,
-    active_threads integer,
-    started_threads integer,
-    finished_threads integer,
-    scenario_name text
 );
 
 
@@ -2677,6 +3086,27 @@ CREATE TABLE public.workload_transaction_apdex_thresholds (
 
 
 --
+-- Name: audit_logs_2026_05; Type: TABLE ATTACH; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.audit_logs ATTACH PARTITION public.audit_logs_2026_05 FOR VALUES FROM ('2026-05-01 00:00:00+00') TO ('2026-06-01 00:00:00+00');
+
+
+--
+-- Name: audit_logs_2026_06; Type: TABLE ATTACH; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.audit_logs ATTACH PARTITION public.audit_logs_2026_06 FOR VALUES FROM ('2026-06-01 00:00:00+00') TO ('2026-07-01 00:00:00+00');
+
+
+--
+-- Name: audit_logs_2026_07; Type: TABLE ATTACH; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.audit_logs ATTACH PARTITION public.audit_logs_2026_07 FOR VALUES FROM ('2026-07-01 00:00:00+00') TO ('2026-08-01 00:00:00+00');
+
+
+--
 -- Name: ds_change_points id; Type: DEFAULT; Schema: public; Owner: -
 --
 
@@ -2705,10 +3135,10 @@ ALTER TABLE ONLY public.ds_panels ALTER COLUMN id SET DEFAULT nextval('public.ds
 
 
 --
--- Name: migrations id; Type: DEFAULT; Schema: public; Owner: -
+-- Name: typeorm_migrations id; Type: DEFAULT; Schema: public; Owner: -
 --
 
-ALTER TABLE ONLY public.migrations ALTER COLUMN id SET DEFAULT nextval('public.migrations_id_seq'::regclass);
+ALTER TABLE ONLY public.typeorm_migrations ALTER COLUMN id SET DEFAULT nextval('public.typeorm_migrations_id_seq'::regclass);
 
 
 --
@@ -2736,10 +3166,10 @@ ALTER TABLE ONLY public.expected_config_changes
 
 
 --
--- Name: ds_metric_classification PK_12f5a3e063fa546e13463efb6c4; Type: CONSTRAINT; Schema: public; Owner: -
+-- Name: provisioned_template_ds_compare_configs PK_12f5a3e063fa546e13463efb6c4; Type: CONSTRAINT; Schema: public; Owner: -
 --
 
-ALTER TABLE ONLY public.ds_metric_classification
+ALTER TABLE ONLY public.provisioned_template_ds_compare_configs
     ADD CONSTRAINT "PK_12f5a3e063fa546e13463efb6c4" PRIMARY KEY (id);
 
 
@@ -2928,14 +3358,6 @@ ALTER TABLE ONLY public.url_patterns
 
 
 --
--- Name: migrations PK_8c82d7f526340ab734260ea46be; Type: CONSTRAINT; Schema: public; Owner: -
---
-
-ALTER TABLE ONLY public.migrations
-    ADD CONSTRAINT "PK_8c82d7f526340ab734260ea46be" PRIMARY KEY (id);
-
-
---
 -- Name: ds_adapt_results PK_8d857bb499c732c569a9642ca98; Type: CONSTRAINT; Schema: public; Owner: -
 --
 
@@ -3096,6 +3518,22 @@ ALTER TABLE ONLY public.expected_config_changes
 
 
 --
+-- Name: team_members UQ_1d3c06a8217a8785e2af0ec4ab8; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.team_members
+    ADD CONSTRAINT "UQ_1d3c06a8217a8785e2af0ec4ab8" UNIQUE (team_id, user_id);
+
+
+--
+-- Name: sparse_metric_exclusions UQ_2a4f0dec5e9b05689c7478552ba; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.sparse_metric_exclusions
+    ADD CONSTRAINT "UQ_2a4f0dec5e9b05689c7478552ba" UNIQUE (system_under_test_id, test_environment, workload, dashboard_label, metric_name);
+
+
+--
 -- Name: profiles UQ_4e9da7cade0e9edd393329bb326; Type: CONSTRAINT; Schema: public; Owner: -
 --
 
@@ -3128,19 +3566,27 @@ ALTER TABLE ONLY public.api_keys
 
 
 --
+-- Name: organization_members UQ_f4812f00736e35131a65d6032da; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.organization_members
+    ADD CONSTRAINT "UQ_f4812f00736e35131a65d6032da" UNIQUE (organization_id, user_id);
+
+
+--
+-- Name: alert_tag_filters alert_tag_filters_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.alert_tag_filters
+    ADD CONSTRAINT alert_tag_filters_pkey PRIMARY KEY (id);
+
+
+--
 -- Name: api_keys api_keys_api_key_key; Type: CONSTRAINT; Schema: public; Owner: -
 --
 
 ALTER TABLE ONLY public.api_keys
     ADD CONSTRAINT api_keys_api_key_key UNIQUE (api_key);
-
-
---
--- Name: api_keys api_keys_description_key; Type: CONSTRAINT; Schema: public; Owner: -
---
-
-ALTER TABLE ONLY public.api_keys
-    ADD CONSTRAINT api_keys_description_key UNIQUE (description);
 
 
 --
@@ -3172,7 +3618,31 @@ ALTER TABLE ONLY public.system_under_test_workloads
 --
 
 ALTER TABLE ONLY public.audit_logs
-    ADD CONSTRAINT audit_logs_pkey PRIMARY KEY (id);
+    ADD CONSTRAINT audit_logs_pkey PRIMARY KEY (id, "timestamp");
+
+
+--
+-- Name: audit_logs_2026_05 audit_logs_2026_05_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.audit_logs_2026_05
+    ADD CONSTRAINT audit_logs_2026_05_pkey PRIMARY KEY (id, "timestamp");
+
+
+--
+-- Name: audit_logs_2026_06 audit_logs_2026_06_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.audit_logs_2026_06
+    ADD CONSTRAINT audit_logs_2026_06_pkey PRIMARY KEY (id, "timestamp");
+
+
+--
+-- Name: audit_logs_2026_07 audit_logs_2026_07_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.audit_logs_2026_07
+    ADD CONSTRAINT audit_logs_2026_07_pkey PRIMARY KEY (id, "timestamp");
 
 
 --
@@ -3216,38 +3686,6 @@ ALTER TABLE ONLY public.data_sources
 
 
 --
--- Name: ds_adapt_conclusion ds_adapt_conclusion_test_run_id_key; Type: CONSTRAINT; Schema: public; Owner: -
---
-
-ALTER TABLE ONLY public.ds_adapt_conclusion
-    ADD CONSTRAINT ds_adapt_conclusion_test_run_id_key UNIQUE (test_run_id);
-
-
---
--- Name: ds_adapt_tracked_results ds_adapt_tracked_results_unique; Type: CONSTRAINT; Schema: public; Owner: -
---
-
-ALTER TABLE ONLY public.ds_adapt_tracked_results
-    ADD CONSTRAINT ds_adapt_tracked_results_unique UNIQUE (test_run_id, application_dashboard_id, panel_id, metric_name, tracked_test_run_id);
-
-
---
--- Name: ds_control_groups ds_control_groups_control_group_id_key; Type: CONSTRAINT; Schema: public; Owner: -
---
-
-ALTER TABLE ONLY public.ds_control_groups
-    ADD CONSTRAINT ds_control_groups_control_group_id_key UNIQUE (control_group_id);
-
-
---
--- Name: ds_metric_statistics ds_metric_statistics_unique_metric; Type: CONSTRAINT; Schema: public; Owner: -
---
-
-ALTER TABLE ONLY public.ds_metric_statistics
-    ADD CONSTRAINT ds_metric_statistics_unique_metric UNIQUE (test_run_id, application_dashboard_id, panel_id, metric_name);
-
-
---
 -- Name: ds_queries ds_queries_pkey; Type: CONSTRAINT; Schema: public; Owner: -
 --
 
@@ -3269,30 +3707,6 @@ ALTER TABLE ONLY public.ds_queries
 
 ALTER TABLE ONLY public.ds_query_executions
     ADD CONSTRAINT ds_query_executions_pkey PRIMARY KEY (id);
-
-
---
--- Name: dynatrace_configs dynatrace_configs_host_key; Type: CONSTRAINT; Schema: public; Owner: -
---
-
-ALTER TABLE ONLY public.dynatrace_configs
-    ADD CONSTRAINT dynatrace_configs_host_key UNIQUE (host);
-
-
---
--- Name: expected_config_changes expected_config_changes_system_under_test_id_test_environme_key; Type: CONSTRAINT; Schema: public; Owner: -
---
-
-ALTER TABLE ONLY public.expected_config_changes
-    ADD CONSTRAINT expected_config_changes_system_under_test_id_test_environme_key UNIQUE (system_under_test_id, test_environment, workload, config_key);
-
-
---
--- Name: grafana_instances grafana_instances_label_key; Type: CONSTRAINT; Schema: public; Owner: -
---
-
-ALTER TABLE ONLY public.grafana_instances
-    ADD CONSTRAINT grafana_instances_label_key UNIQUE (label);
 
 
 --
@@ -3336,11 +3750,43 @@ ALTER TABLE ONLY public.pending_ds_compare_config_changes
 
 
 --
+-- Name: metrics_sources pk_metrics_sources; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.metrics_sources
+    ADD CONSTRAINT pk_metrics_sources PRIMARY KEY (id);
+
+
+--
+-- Name: scaling_sessions pk_scaling_sessions; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.scaling_sessions
+    ADD CONSTRAINT pk_scaling_sessions PRIMARY KEY (id);
+
+
+--
+-- Name: test_run_views pk_test_run_views; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.test_run_views
+    ADD CONSTRAINT pk_test_run_views PRIMARY KEY (user_id, test_run_id);
+
+
+--
 -- Name: profiles profiles_name_key; Type: CONSTRAINT; Schema: public; Owner: -
 --
 
 ALTER TABLE ONLY public.profiles
     ADD CONSTRAINT profiles_name_key UNIQUE (name);
+
+
+--
+-- Name: sparse_metric_exclusions sparse_metric_exclusions_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.sparse_metric_exclusions
+    ADD CONSTRAINT sparse_metric_exclusions_pkey PRIMARY KEY (id);
 
 
 --
@@ -3368,14 +3814,6 @@ ALTER TABLE ONLY public.test_run_alerts
 
 
 --
--- Name: test_run_configs_test_run_id_key_tags_key; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE UNIQUE INDEX test_run_configs_test_run_id_key_tags_key
-    ON public.test_run_configs USING btree (test_run_id, key, public.tags_hash(tags));
-
-
---
 -- Name: test_run_events test_run_events_pkey; Type: CONSTRAINT; Schema: public; Owner: -
 --
 
@@ -3384,11 +3822,19 @@ ALTER TABLE ONLY public.test_run_events
 
 
 --
--- Name: test_runs test_runs_application_id_test_environment_test_type_test_ru_key; Type: CONSTRAINT; Schema: public; Owner: -
+-- Name: test_run_sampler_stats test_run_sampler_stats_pkey; Type: CONSTRAINT; Schema: public; Owner: -
 --
 
-ALTER TABLE ONLY public.test_runs
-    ADD CONSTRAINT test_runs_application_id_test_environment_test_type_test_ru_key UNIQUE (system_under_test_id, test_environment, workload, test_run_id);
+ALTER TABLE ONLY public.test_run_sampler_stats
+    ADD CONSTRAINT test_run_sampler_stats_pkey PRIMARY KEY (test_run_id, transaction_name, sampler_name, scenario_name, ramp_up_excluded);
+
+
+--
+-- Name: test_run_transaction_stats test_run_transaction_stats_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.test_run_transaction_stats
+    ADD CONSTRAINT test_run_transaction_stats_pkey PRIMARY KEY (test_run_id, transaction_name, scenario_name, ramp_up_excluded);
 
 
 --
@@ -3400,11 +3846,11 @@ ALTER TABLE ONLY public.tracing_instances
 
 
 --
--- Name: ds_adapt_results uk_ds_adapt_results_business_key; Type: CONSTRAINT; Schema: public; Owner: -
+-- Name: typeorm_migrations typeorm_migrations_pkey; Type: CONSTRAINT; Schema: public; Owner: -
 --
 
-ALTER TABLE ONLY public.ds_adapt_results
-    ADD CONSTRAINT uk_ds_adapt_results_business_key UNIQUE (test_run_id, control_group_id, application_dashboard_id, panel_id, metric_name);
+ALTER TABLE ONLY public.typeorm_migrations
+    ADD CONSTRAINT typeorm_migrations_pkey PRIMARY KEY (id);
 
 
 --
@@ -3448,6 +3894,14 @@ ALTER TABLE ONLY public.benchmarks
 
 
 --
+-- Name: metrics_sources uq_metrics_sources_unique; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.metrics_sources
+    ADD CONSTRAINT uq_metrics_sources_unique UNIQUE (system_under_test_id, test_environment, source_type, external_ref, display_name, display_label);
+
+
+--
 -- Name: notification_channels uq_notification_channels_system_name; Type: CONSTRAINT; Schema: public; Owner: -
 --
 
@@ -3456,35 +3910,11 @@ ALTER TABLE ONLY public.notification_channels
 
 
 --
--- Name: organization_members uq_organization_members_user_org; Type: CONSTRAINT; Schema: public; Owner: -
---
-
-ALTER TABLE ONLY public.organization_members
-    ADD CONSTRAINT uq_organization_members_user_org UNIQUE (organization_id, user_id);
-
-
---
 -- Name: report_templates uq_report_templates_name_scope; Type: CONSTRAINT; Schema: public; Owner: -
 --
 
 ALTER TABLE ONLY public.report_templates
     ADD CONSTRAINT uq_report_templates_name_scope UNIQUE (name, system_id, test_environment, workload);
-
-
---
--- Name: team_members uq_team_members_user_team; Type: CONSTRAINT; Schema: public; Owner: -
---
-
-ALTER TABLE ONLY public.team_members
-    ADD CONSTRAINT uq_team_members_user_team UNIQUE (team_id, user_id);
-
-
---
--- Name: tracing_services uq_tracing_services_config; Type: CONSTRAINT; Schema: public; Owner: -
---
-
-ALTER TABLE ONLY public.tracing_services
-    ADD CONSTRAINT uq_tracing_services_config UNIQUE (system_under_test_id, test_environment, workload, tracing_instance_id);
 
 
 --
@@ -3527,6 +3957,20 @@ CREATE INDEX "IDX_008825f84d7351df73c0546d6d" ON public.compare_filter_presets U
 
 
 --
+-- Name: IDX_1835049d53ec3b6c60988b7419; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX "IDX_1835049d53ec3b6c60988b7419" ON public.metrics_sources USING btree (source_config_id);
+
+
+--
+-- Name: IDX_1d3c06a8217a8785e2af0ec4ab; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX "IDX_1d3c06a8217a8785e2af0ec4ab" ON public.team_members USING btree (team_id, user_id);
+
+
+--
 -- Name: IDX_261d1c1d7d43b94a9f0a8601db; Type: INDEX; Schema: public; Owner: -
 --
 
@@ -3538,6 +3982,13 @@ CREATE INDEX "IDX_261d1c1d7d43b94a9f0a8601db" ON public.graph_presets USING btre
 --
 
 CREATE INDEX "IDX_32d4b19a96d6ff07e7e7102040" ON public.application_dashboards USING btree (dashboard_uid);
+
+
+--
+-- Name: IDX_41fde009f014dff1c3f4f5396d; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX "IDX_41fde009f014dff1c3f4f5396d" ON public.metrics_sources USING btree (system_under_test_id);
 
 
 --
@@ -3569,6 +4020,13 @@ CREATE INDEX "IDX_60be5a799bbd19f5c046aaaecf" ON public.grafana_dashboards USING
 
 
 --
+-- Name: IDX_660b279a4e95a274e7f3ef1a12; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX "IDX_660b279a4e95a274e7f3ef1a12" ON public.metrics_sources USING btree (system_under_test_id, test_environment);
+
+
+--
 -- Name: IDX_6d4d25020a25d7ef8db9e8040b; Type: INDEX; Schema: public; Owner: -
 --
 
@@ -3580,6 +4038,13 @@ CREATE INDEX "IDX_6d4d25020a25d7ef8db9e8040b" ON public.graph_presets USING btre
 --
 
 CREATE INDEX "IDX_7b8c895fd44f497e8608b8c5cb" ON public.trends_filter_presets USING btree (name);
+
+
+--
+-- Name: IDX_89bde91f78d36ca41e9515d91c; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX "IDX_89bde91f78d36ca41e9515d91c" ON public.organization_members USING btree (user_id);
 
 
 --
@@ -3625,6 +4090,13 @@ CREATE INDEX "IDX_9900d24670c8b447abc3b88a06" ON public.graph_presets USING btre
 
 
 --
+-- Name: IDX_9ba37d16f89ed1fbb14d6c2749; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX "IDX_9ba37d16f89ed1fbb14d6c2749" ON public.metrics_sources USING btree (source_type);
+
+
+--
 -- Name: IDX_a7b2d4a5425c8e087ab8014e3f; Type: INDEX; Schema: public; Owner: -
 --
 
@@ -3667,10 +4139,10 @@ CREATE INDEX "IDX_c0143e62b384490aeb5e1e0a86" ON public.trends_filter_presets US
 
 
 --
--- Name: IDX_c51ab2014ab264427902fcefec; Type: INDEX; Schema: public; Owner: -
+-- Name: IDX_c2bf4967c8c2a6b845dadfbf3d; Type: INDEX; Schema: public; Owner: -
 --
 
-CREATE UNIQUE INDEX "IDX_c51ab2014ab264427902fcefec" ON public.ds_metric_collection_status USING btree (test_run_id, source_type, source_id);
+CREATE INDEX "IDX_c2bf4967c8c2a6b845dadfbf3d" ON public.team_members USING btree (user_id);
 
 
 --
@@ -3716,6 +4188,13 @@ CREATE INDEX "IDX_e7b0832c5e9bb206704c511f29" ON public.application_dashboards U
 
 
 --
+-- Name: IDX_f4812f00736e35131a65d6032d; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX "IDX_f4812f00736e35131a65d6032d" ON public.organization_members USING btree (organization_id, user_id);
+
+
+--
 -- Name: IDX_f705ea42d61dd455d5a9cc8f1a; Type: INDEX; Schema: public; Owner: -
 --
 
@@ -3737,10 +4216,192 @@ CREATE INDEX "IDX_fbae9e222dde1d3850c895dc5a" ON public.application_dashboards U
 
 
 --
--- Name: ds_metrics_time_idx; Type: INDEX; Schema: public; Owner: -
+-- Name: api_keys_organization_id_description_key; Type: INDEX; Schema: public; Owner: -
 --
 
-CREATE INDEX ds_metrics_time_idx ON public.ds_metrics USING btree ("time" DESC);
+CREATE UNIQUE INDEX api_keys_organization_id_description_key ON public.api_keys USING btree (organization_id, description);
+
+
+--
+-- Name: idx_audit_logs_action; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX idx_audit_logs_action ON ONLY public.audit_logs USING btree (action, "timestamp" DESC);
+
+
+--
+-- Name: audit_logs_2026_05_action_timestamp_idx; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX audit_logs_2026_05_action_timestamp_idx ON public.audit_logs_2026_05 USING btree (action, "timestamp" DESC);
+
+
+--
+-- Name: idx_audit_logs_organization_id; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX idx_audit_logs_organization_id ON ONLY public.audit_logs USING btree (organization_id, "timestamp" DESC) WHERE (organization_id IS NOT NULL);
+
+
+--
+-- Name: audit_logs_2026_05_organization_id_timestamp_idx; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX audit_logs_2026_05_organization_id_timestamp_idx ON public.audit_logs_2026_05 USING btree (organization_id, "timestamp" DESC) WHERE (organization_id IS NOT NULL);
+
+
+--
+-- Name: idx_audit_logs_resource; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX idx_audit_logs_resource ON ONLY public.audit_logs USING btree (resource_type, resource_id, "timestamp" DESC) WHERE (resource_id IS NOT NULL);
+
+
+--
+-- Name: audit_logs_2026_05_resource_type_resource_id_timestamp_idx; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX audit_logs_2026_05_resource_type_resource_id_timestamp_idx ON public.audit_logs_2026_05 USING btree (resource_type, resource_id, "timestamp" DESC) WHERE (resource_id IS NOT NULL);
+
+
+--
+-- Name: idx_audit_logs_system_under_test_id; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX idx_audit_logs_system_under_test_id ON ONLY public.audit_logs USING btree (system_under_test_id, "timestamp" DESC) WHERE (system_under_test_id IS NOT NULL);
+
+
+--
+-- Name: audit_logs_2026_05_system_under_test_id_timestamp_idx; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX audit_logs_2026_05_system_under_test_id_timestamp_idx ON public.audit_logs_2026_05 USING btree (system_under_test_id, "timestamp" DESC) WHERE (system_under_test_id IS NOT NULL);
+
+
+--
+-- Name: idx_audit_logs_timestamp; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX idx_audit_logs_timestamp ON ONLY public.audit_logs USING btree ("timestamp" DESC);
+
+
+--
+-- Name: audit_logs_2026_05_timestamp_idx; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX audit_logs_2026_05_timestamp_idx ON public.audit_logs_2026_05 USING btree ("timestamp" DESC);
+
+
+--
+-- Name: idx_audit_logs_user_id; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX idx_audit_logs_user_id ON ONLY public.audit_logs USING btree (user_id, "timestamp" DESC);
+
+
+--
+-- Name: audit_logs_2026_05_user_id_timestamp_idx; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX audit_logs_2026_05_user_id_timestamp_idx ON public.audit_logs_2026_05 USING btree (user_id, "timestamp" DESC);
+
+
+--
+-- Name: audit_logs_2026_06_action_timestamp_idx; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX audit_logs_2026_06_action_timestamp_idx ON public.audit_logs_2026_06 USING btree (action, "timestamp" DESC);
+
+
+--
+-- Name: audit_logs_2026_06_organization_id_timestamp_idx; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX audit_logs_2026_06_organization_id_timestamp_idx ON public.audit_logs_2026_06 USING btree (organization_id, "timestamp" DESC) WHERE (organization_id IS NOT NULL);
+
+
+--
+-- Name: audit_logs_2026_06_resource_type_resource_id_timestamp_idx; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX audit_logs_2026_06_resource_type_resource_id_timestamp_idx ON public.audit_logs_2026_06 USING btree (resource_type, resource_id, "timestamp" DESC) WHERE (resource_id IS NOT NULL);
+
+
+--
+-- Name: audit_logs_2026_06_system_under_test_id_timestamp_idx; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX audit_logs_2026_06_system_under_test_id_timestamp_idx ON public.audit_logs_2026_06 USING btree (system_under_test_id, "timestamp" DESC) WHERE (system_under_test_id IS NOT NULL);
+
+
+--
+-- Name: audit_logs_2026_06_timestamp_idx; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX audit_logs_2026_06_timestamp_idx ON public.audit_logs_2026_06 USING btree ("timestamp" DESC);
+
+
+--
+-- Name: audit_logs_2026_06_user_id_timestamp_idx; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX audit_logs_2026_06_user_id_timestamp_idx ON public.audit_logs_2026_06 USING btree (user_id, "timestamp" DESC);
+
+
+--
+-- Name: audit_logs_2026_07_action_timestamp_idx; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX audit_logs_2026_07_action_timestamp_idx ON public.audit_logs_2026_07 USING btree (action, "timestamp" DESC);
+
+
+--
+-- Name: audit_logs_2026_07_organization_id_timestamp_idx; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX audit_logs_2026_07_organization_id_timestamp_idx ON public.audit_logs_2026_07 USING btree (organization_id, "timestamp" DESC) WHERE (organization_id IS NOT NULL);
+
+
+--
+-- Name: audit_logs_2026_07_resource_type_resource_id_timestamp_idx; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX audit_logs_2026_07_resource_type_resource_id_timestamp_idx ON public.audit_logs_2026_07 USING btree (resource_type, resource_id, "timestamp" DESC) WHERE (resource_id IS NOT NULL);
+
+
+--
+-- Name: audit_logs_2026_07_system_under_test_id_timestamp_idx; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX audit_logs_2026_07_system_under_test_id_timestamp_idx ON public.audit_logs_2026_07 USING btree (system_under_test_id, "timestamp" DESC) WHERE (system_under_test_id IS NOT NULL);
+
+
+--
+-- Name: audit_logs_2026_07_timestamp_idx; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX audit_logs_2026_07_timestamp_idx ON public.audit_logs_2026_07 USING btree ("timestamp" DESC);
+
+
+--
+-- Name: audit_logs_2026_07_user_id_timestamp_idx; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX audit_logs_2026_07_user_id_timestamp_idx ON public.audit_logs_2026_07 USING btree (user_id, "timestamp" DESC);
+
+
+--
+-- Name: idx_alert_tag_filters_organization_id; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX idx_alert_tag_filters_organization_id ON public.alert_tag_filters USING btree (organization_id);
+
+
+--
+-- Name: idx_alert_tag_filters_source_type; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX idx_alert_tag_filters_source_type ON public.alert_tag_filters USING btree (alert_source, filter_type);
 
 
 --
@@ -3772,157 +4433,10 @@ CREATE INDEX idx_api_keys_roles ON public.api_keys USING btree (roles);
 
 
 --
--- Name: idx_api_keys_team_id; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX idx_api_keys_team_id ON public.api_keys USING btree (team_id);
-
-
---
 -- Name: idx_api_keys_valid_until; Type: INDEX; Schema: public; Owner: -
 --
 
 CREATE INDEX idx_api_keys_valid_until ON public.api_keys USING btree (valid_until);
-
-
---
--- Name: idx_application_dashboards_dashboard_id; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX idx_application_dashboards_dashboard_id ON public.application_dashboards USING btree (grafana_dashboard_id);
-
-
---
--- Name: idx_application_dashboards_environment; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX idx_application_dashboards_environment ON public.application_dashboards USING btree (test_environment);
-
-
---
--- Name: idx_application_dashboards_grafana_id; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX idx_application_dashboards_grafana_id ON public.application_dashboards USING btree (grafana_instance_id);
-
-
---
--- Name: idx_application_dashboards_label; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX idx_application_dashboards_label ON public.application_dashboards USING btree (dashboard_label);
-
-
---
--- Name: idx_application_dashboards_organization_id; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX idx_application_dashboards_organization_id ON public.application_dashboards USING btree (organization_id);
-
-
---
--- Name: idx_application_dashboards_system_env; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX idx_application_dashboards_system_env ON public.application_dashboards USING btree (system_under_test_id, test_environment);
-
-
---
--- Name: idx_application_dashboards_system_id; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX idx_application_dashboards_system_id ON public.application_dashboards USING btree (system_under_test_id);
-
-
---
--- Name: idx_application_dashboards_team_id; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX idx_application_dashboards_team_id ON public.application_dashboards USING btree (team_id);
-
-
---
--- Name: idx_application_dashboards_uid; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX idx_application_dashboards_uid ON public.application_dashboards USING btree (dashboard_uid);
-
-
---
--- Name: idx_application_dashboards_unique; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE UNIQUE INDEX idx_application_dashboards_unique ON public.application_dashboards USING btree (system_under_test_id, test_environment, grafana_instance_id, dashboard_uid, dashboard_label);
-
-
---
--- Name: idx_applications_name; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX idx_applications_name ON public.systems_under_test USING btree (name);
-
-
---
--- Name: idx_applications_team_id; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX idx_applications_team_id ON public.systems_under_test USING btree (team_id);
-
-
---
--- Name: idx_audit_logs_action; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX idx_audit_logs_action ON public.audit_logs USING btree (action);
-
-
---
--- Name: idx_audit_logs_org_timestamp; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX idx_audit_logs_org_timestamp ON public.audit_logs USING btree (organization_id, "timestamp" DESC);
-
-
---
--- Name: idx_audit_logs_organization_id; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX idx_audit_logs_organization_id ON public.audit_logs USING btree (organization_id);
-
-
---
--- Name: idx_audit_logs_resource_id; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX idx_audit_logs_resource_id ON public.audit_logs USING btree (resource_id);
-
-
---
--- Name: idx_audit_logs_resource_type; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX idx_audit_logs_resource_type ON public.audit_logs USING btree (resource_type);
-
-
---
--- Name: idx_audit_logs_timestamp; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX idx_audit_logs_timestamp ON public.audit_logs USING btree ("timestamp" DESC);
-
-
---
--- Name: idx_audit_logs_user_action; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX idx_audit_logs_user_action ON public.audit_logs USING btree (user_id, action);
-
-
---
--- Name: idx_audit_logs_user_id; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX idx_audit_logs_user_id ON public.audit_logs USING btree (user_id);
 
 
 --
@@ -4021,146 +4535,6 @@ CREATE INDEX idx_awr_reports_test_run_id ON public.awr_reports USING btree (test
 --
 
 CREATE INDEX idx_awr_reports_uploaded_at ON public.awr_reports USING btree (uploaded_at);
-
-
---
--- Name: idx_benchmarks_apdex_transaction; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX idx_benchmarks_apdex_transaction ON public.benchmarks USING btree (system_under_test_id, test_environment, workload, transaction_name) WHERE ((benchmark_type)::text = 'apdex'::text);
-
-
---
--- Name: idx_benchmarks_config_title; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX idx_benchmarks_config_title ON public.benchmarks USING btree (config_title);
-
-
---
--- Name: idx_benchmarks_configuration_gin; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX idx_benchmarks_configuration_gin ON public.benchmarks USING gin (configuration);
-
-
---
--- Name: idx_benchmarks_created_by; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX idx_benchmarks_created_by ON public.benchmarks USING btree (created_by);
-
-
---
--- Name: idx_benchmarks_dashboard_uid; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX idx_benchmarks_dashboard_uid ON public.benchmarks USING btree (dashboard_uid) WHERE ((source)::text = 'grafana'::text);
-
-
---
--- Name: idx_benchmarks_enabled; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX idx_benchmarks_enabled ON public.benchmarks USING btree (enabled) WHERE (enabled = true);
-
-
---
--- Name: idx_benchmarks_evaluate_type; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX idx_benchmarks_evaluate_type ON public.benchmarks USING btree (evaluate_type);
-
-
---
--- Name: idx_benchmarks_generic_check_id; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX idx_benchmarks_generic_check_id ON public.benchmarks USING btree (generic_check_id) WHERE (generic_check_id IS NOT NULL);
-
-
---
--- Name: idx_benchmarks_organization_id; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX idx_benchmarks_organization_id ON public.benchmarks USING btree (organization_id);
-
-
---
--- Name: idx_benchmarks_source; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX idx_benchmarks_source ON public.benchmarks USING btree (source);
-
-
---
--- Name: idx_benchmarks_sut_source_env_workload; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX idx_benchmarks_sut_source_env_workload ON public.benchmarks USING btree (system_under_test_id, source, test_environment, workload);
-
-
---
--- Name: idx_benchmarks_system_under_test_id; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX idx_benchmarks_system_under_test_id ON public.benchmarks USING btree (system_under_test_id);
-
-
---
--- Name: idx_benchmarks_tags_gin; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX idx_benchmarks_tags_gin ON public.benchmarks USING gin (tags);
-
-
---
--- Name: idx_benchmarks_team_id; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX idx_benchmarks_team_id ON public.benchmarks USING btree (team_id);
-
-
---
--- Name: idx_benchmarks_test_env; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX idx_benchmarks_test_env ON public.benchmarks USING btree (test_environment);
-
-
---
--- Name: idx_benchmarks_type; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX idx_benchmarks_type ON public.benchmarks USING btree (benchmark_type);
-
-
---
--- Name: idx_benchmarks_unique_grafana; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE UNIQUE INDEX idx_benchmarks_unique_grafana ON public.benchmarks USING btree (system_under_test_id, source, test_environment, workload, dashboard_uid, config_id, dashboard_label) WHERE ((enabled = true) AND ((source)::text = 'grafana'::text));
-
-
---
--- Name: idx_benchmarks_unique_non_grafana; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE UNIQUE INDEX idx_benchmarks_unique_non_grafana ON public.benchmarks USING btree (system_under_test_id, source, test_environment, workload, config_title) WHERE ((enabled = true) AND ((source)::text <> 'grafana'::text));
-
-
---
--- Name: idx_benchmarks_valid; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX idx_benchmarks_valid ON public.benchmarks USING btree (valid) WHERE (valid = true);
-
-
---
--- Name: idx_benchmarks_workload; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX idx_benchmarks_workload ON public.benchmarks USING btree (workload);
 
 
 --
@@ -4311,220 +4685,10 @@ CREATE INDEX idx_check_results_workload ON public.check_results USING btree (wor
 
 
 --
--- Name: idx_collection_status_incomplete; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX idx_collection_status_incomplete ON public.ds_metric_collection_status USING btree (test_run_id) WHERE (is_complete = false);
-
-
---
--- Name: idx_collection_status_test_run; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX idx_collection_status_test_run ON public.ds_metric_collection_status USING btree (test_run_id);
-
-
---
--- Name: idx_compare_config_lookup; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX idx_compare_config_lookup ON public.ds_compare_config USING btree (system_under_test_id, test_environment, workload, application_dashboard_id, panel_id, metric_name);
-
-
---
--- Name: idx_compare_filter_presets_app_dashboard; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX idx_compare_filter_presets_app_dashboard ON public.compare_filter_presets USING btree (application_dashboard_id) WHERE (application_dashboard_id IS NOT NULL);
-
-
---
--- Name: idx_compare_filter_presets_created_by; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX idx_compare_filter_presets_created_by ON public.compare_filter_presets USING btree (created_by);
-
-
---
--- Name: idx_compare_filter_presets_created_for_test_run; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX idx_compare_filter_presets_created_for_test_run ON public.compare_filter_presets USING btree (created_for_test_run_id) WHERE (created_for_test_run_id IS NOT NULL);
-
-
---
--- Name: idx_compare_filter_presets_global; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX idx_compare_filter_presets_global ON public.compare_filter_presets USING btree (is_global);
-
-
---
--- Name: idx_compare_filter_presets_name; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX idx_compare_filter_presets_name ON public.compare_filter_presets USING btree (name);
-
-
---
--- Name: idx_compare_filter_presets_organization_id; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX idx_compare_filter_presets_organization_id ON public.compare_filter_presets USING btree (organization_id);
-
-
---
--- Name: idx_compare_filter_presets_team_id; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX idx_compare_filter_presets_team_id ON public.compare_filter_presets USING btree (team_id);
-
-
---
--- Name: idx_compare_filter_presets_type; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX idx_compare_filter_presets_type ON public.compare_filter_presets USING btree (preset_type);
-
-
---
--- Name: idx_deep_links_created_by; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX idx_deep_links_created_by ON public.deep_links USING btree (created_by);
-
-
---
--- Name: idx_deep_links_lookup; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX idx_deep_links_lookup ON public.deep_links USING btree (system_under_test_id, test_environment, workload);
-
-
---
--- Name: idx_deep_links_organization_id; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX idx_deep_links_organization_id ON public.deep_links USING btree (organization_id);
-
-
---
--- Name: idx_deep_links_team_id; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX idx_deep_links_team_id ON public.deep_links USING btree (team_id);
-
-
---
--- Name: idx_deep_links_template; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX idx_deep_links_template ON public.deep_links USING btree (template_deep_link_id) WHERE (template_deep_link_id IS NOT NULL);
-
-
---
--- Name: idx_ds_adapt_conclusion_conclusion; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX idx_ds_adapt_conclusion_conclusion ON public.ds_adapt_conclusion USING btree (conclusion);
-
-
---
--- Name: idx_ds_adapt_conclusion_control_group_id; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX idx_ds_adapt_conclusion_control_group_id ON public.ds_adapt_conclusion USING btree (control_group_id) WHERE (control_group_id IS NOT NULL);
-
-
---
--- Name: idx_ds_adapt_conclusion_created_by; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX idx_ds_adapt_conclusion_created_by ON public.ds_adapt_conclusion USING btree (created_by);
-
-
---
--- Name: idx_ds_adapt_conclusion_details_gin; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX idx_ds_adapt_conclusion_details_gin ON public.ds_adapt_conclusion USING gin (details);
-
-
---
 -- Name: idx_ds_adapt_conclusion_details_message; Type: INDEX; Schema: public; Owner: -
 --
 
 CREATE INDEX idx_ds_adapt_conclusion_details_message ON public.ds_adapt_conclusion USING btree (((details ->> 'message'::text)));
-
-
---
--- Name: idx_ds_adapt_conclusion_differences_gin; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX idx_ds_adapt_conclusion_differences_gin ON public.ds_adapt_conclusion USING gin (differences);
-
-
---
--- Name: idx_ds_adapt_conclusion_improvements_gin; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX idx_ds_adapt_conclusion_improvements_gin ON public.ds_adapt_conclusion USING gin (improvements);
-
-
---
--- Name: idx_ds_adapt_conclusion_organization_id; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX idx_ds_adapt_conclusion_organization_id ON public.ds_adapt_conclusion USING btree (organization_id);
-
-
---
--- Name: idx_ds_adapt_conclusion_regressions_gin; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX idx_ds_adapt_conclusion_regressions_gin ON public.ds_adapt_conclusion USING gin (regressions);
-
-
---
--- Name: idx_ds_adapt_conclusion_team_id; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX idx_ds_adapt_conclusion_team_id ON public.ds_adapt_conclusion USING btree (team_id);
-
-
---
--- Name: idx_ds_adapt_conclusion_test_run_id; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX idx_ds_adapt_conclusion_test_run_id ON public.ds_adapt_conclusion USING btree (test_run_id);
-
-
---
--- Name: idx_ds_adapt_conclusion_tracked_regressions_gin; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX idx_ds_adapt_conclusion_tracked_regressions_gin ON public.ds_adapt_conclusion USING gin (tracked_regressions);
-
-
---
--- Name: idx_ds_adapt_conclusion_updated_at; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX idx_ds_adapt_conclusion_updated_at ON public.ds_adapt_conclusion USING btree (updated_at DESC);
-
-
---
--- Name: idx_ds_adapt_results_compare_config_gin; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX idx_ds_adapt_results_compare_config_gin ON public.ds_adapt_results USING gin (compare_config);
-
-
---
--- Name: idx_ds_adapt_results_conclusion_gin; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX idx_ds_adapt_results_conclusion_gin ON public.ds_adapt_results USING gin (conclusion);
 
 
 --
@@ -4535,83 +4699,6 @@ CREATE INDEX idx_ds_adapt_results_conclusion_label ON public.ds_adapt_results US
 
 
 --
--- Name: idx_ds_adapt_results_control_group_id; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX idx_ds_adapt_results_control_group_id ON public.ds_adapt_results USING btree (control_group_id);
-
-
---
--- Name: idx_ds_adapt_results_created_by; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX idx_ds_adapt_results_created_by ON public.ds_adapt_results USING btree (created_by);
-
-
---
--- Name: idx_ds_adapt_results_dashboard; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX idx_ds_adapt_results_dashboard ON public.ds_adapt_results USING btree (application_dashboard_id, panel_id);
-
-
---
--- Name: idx_ds_adapt_results_metric; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX idx_ds_adapt_results_metric ON public.ds_adapt_results USING btree (metric_name);
-
-
---
--- Name: idx_ds_adapt_results_organization_id; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX idx_ds_adapt_results_organization_id ON public.ds_adapt_results USING btree (organization_id);
-
-
---
--- Name: idx_ds_adapt_results_stale; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX idx_ds_adapt_results_stale ON public.ds_adapt_results USING btree (test_run_id, is_stale) WHERE (is_stale = true);
-
-
---
--- Name: idx_ds_adapt_results_team_id; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX idx_ds_adapt_results_team_id ON public.ds_adapt_results USING btree (team_id);
-
-
---
--- Name: idx_ds_adapt_results_test_run_id; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX idx_ds_adapt_results_test_run_id ON public.ds_adapt_results USING btree (test_run_id);
-
-
---
--- Name: idx_ds_adapt_results_test_run_start; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX idx_ds_adapt_results_test_run_start ON public.ds_adapt_results USING btree (test_run_start);
-
-
---
--- Name: idx_ds_adapt_results_updated_at; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX idx_ds_adapt_results_updated_at ON public.ds_adapt_results USING btree (updated_at);
-
-
---
--- Name: idx_ds_adapt_tracked_results_checks_gin; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX idx_ds_adapt_tracked_results_checks_gin ON public.ds_adapt_tracked_results USING gin (checks);
-
-
---
 -- Name: idx_ds_adapt_tracked_results_conclusion_analysis; Type: INDEX; Schema: public; Owner: -
 --
 
@@ -4619,717 +4706,10 @@ CREATE INDEX idx_ds_adapt_tracked_results_conclusion_analysis ON public.ds_adapt
 
 
 --
--- Name: idx_ds_adapt_tracked_results_control_group; Type: INDEX; Schema: public; Owner: -
+-- Name: idx_ds_metrics_panel_lookup; Type: INDEX; Schema: public; Owner: -
 --
 
-CREATE INDEX idx_ds_adapt_tracked_results_control_group ON public.ds_adapt_tracked_results USING btree (control_group_id, test_run_start DESC);
-
-
---
--- Name: idx_ds_adapt_tracked_results_created_by; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX idx_ds_adapt_tracked_results_created_by ON public.ds_adapt_tracked_results USING btree (created_by);
-
-
---
--- Name: idx_ds_adapt_tracked_results_dashboard; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX idx_ds_adapt_tracked_results_dashboard ON public.ds_adapt_tracked_results USING btree (application_dashboard_id, test_run_start DESC);
-
-
---
--- Name: idx_ds_adapt_tracked_results_mean_gin; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX idx_ds_adapt_tracked_results_mean_gin ON public.ds_adapt_tracked_results USING gin (mean);
-
-
---
--- Name: idx_ds_adapt_tracked_results_median_gin; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX idx_ds_adapt_tracked_results_median_gin ON public.ds_adapt_tracked_results USING gin (median);
-
-
---
--- Name: idx_ds_adapt_tracked_results_metric_tracking; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX idx_ds_adapt_tracked_results_metric_tracking ON public.ds_adapt_tracked_results USING btree (application_dashboard_id, panel_id, metric_name, control_group_id, test_run_start DESC);
-
-
---
--- Name: idx_ds_adapt_tracked_results_organization_id; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX idx_ds_adapt_tracked_results_organization_id ON public.ds_adapt_tracked_results USING btree (organization_id);
-
-
---
--- Name: idx_ds_adapt_tracked_results_panel; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX idx_ds_adapt_tracked_results_panel ON public.ds_adapt_tracked_results USING btree (application_dashboard_id, panel_id, test_run_start DESC);
-
-
---
--- Name: idx_ds_adapt_tracked_results_team_id; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX idx_ds_adapt_tracked_results_team_id ON public.ds_adapt_tracked_results USING btree (team_id);
-
-
---
--- Name: idx_ds_adapt_tracked_results_test_run_id; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX idx_ds_adapt_tracked_results_test_run_id ON public.ds_adapt_tracked_results USING btree (test_run_id);
-
-
---
--- Name: idx_ds_adapt_tracked_results_time_series; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX idx_ds_adapt_tracked_results_time_series ON public.ds_adapt_tracked_results USING btree (application_dashboard_id, panel_id, metric_name, test_run_start DESC);
-
-
---
--- Name: idx_ds_adapt_tracked_results_tracked_test_run_id; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX idx_ds_adapt_tracked_results_tracked_test_run_id ON public.ds_adapt_tracked_results USING btree (tracked_test_run_id);
-
-
---
--- Name: idx_ds_change_points_application_dashboard_id; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX idx_ds_change_points_application_dashboard_id ON public.ds_change_points USING btree (application_dashboard_id);
-
-
---
--- Name: idx_ds_change_points_composite; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX idx_ds_change_points_composite ON public.ds_change_points USING btree (system_under_test_id, workload, test_environment);
-
-
---
--- Name: idx_ds_change_points_created_by; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX idx_ds_change_points_created_by ON public.ds_change_points USING btree (created_by);
-
-
---
--- Name: idx_ds_change_points_metric_name; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX idx_ds_change_points_metric_name ON public.ds_change_points USING btree (metric_name);
-
-
---
--- Name: idx_ds_change_points_organization_id; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX idx_ds_change_points_organization_id ON public.ds_change_points USING btree (organization_id);
-
-
---
--- Name: idx_ds_change_points_panel_composite; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX idx_ds_change_points_panel_composite ON public.ds_change_points USING btree (application_dashboard_id, panel_id, metric_name);
-
-
---
--- Name: idx_ds_change_points_panel_id; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX idx_ds_change_points_panel_id ON public.ds_change_points USING btree (panel_id);
-
-
---
--- Name: idx_ds_change_points_system_under_test_id; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX idx_ds_change_points_system_under_test_id ON public.ds_change_points USING btree (system_under_test_id);
-
-
---
--- Name: idx_ds_change_points_team_id; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX idx_ds_change_points_team_id ON public.ds_change_points USING btree (team_id);
-
-
---
--- Name: idx_ds_change_points_test_environment; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX idx_ds_change_points_test_environment ON public.ds_change_points USING btree (test_environment);
-
-
---
--- Name: idx_ds_change_points_test_run_id; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX idx_ds_change_points_test_run_id ON public.ds_change_points USING btree (test_run_id);
-
-
---
--- Name: idx_ds_change_points_workload; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX idx_ds_change_points_workload ON public.ds_change_points USING btree (workload);
-
-
---
--- Name: idx_ds_compare_config_created_by; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX idx_ds_compare_config_created_by ON public.ds_compare_config USING btree (created_by);
-
-
---
--- Name: idx_ds_compare_config_dashboard_fallback; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX idx_ds_compare_config_dashboard_fallback ON public.ds_compare_config USING btree (system_under_test_id, test_environment, workload, application_dashboard_id) WHERE ((metric_name IS NULL) AND (panel_id IS NULL));
-
-
---
--- Name: idx_ds_compare_config_environment_fallback; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX idx_ds_compare_config_environment_fallback ON public.ds_compare_config USING btree (system_under_test_id, test_environment, workload) WHERE ((metric_name IS NULL) AND (panel_id IS NULL) AND (application_dashboard_id IS NULL));
-
-
---
--- Name: idx_ds_compare_config_global_fallback; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX idx_ds_compare_config_global_fallback ON public.ds_compare_config USING btree (system_under_test_id, workload) WHERE ((metric_name IS NULL) AND (panel_id IS NULL) AND (application_dashboard_id IS NULL) AND (test_environment IS NULL));
-
-
---
--- Name: idx_ds_compare_config_hash; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX idx_ds_compare_config_hash ON public.ds_compare_config USING btree (system_under_test_id, test_environment, workload, config_hash);
-
-
---
--- Name: idx_ds_compare_config_metric_specific; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX idx_ds_compare_config_metric_specific ON public.ds_compare_config USING btree (system_under_test_id, test_environment, workload, application_dashboard_id, panel_id, metric_name) WHERE (metric_name IS NOT NULL);
-
-
---
--- Name: idx_ds_compare_config_organization_id; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX idx_ds_compare_config_organization_id ON public.ds_compare_config USING btree (organization_id);
-
-
---
--- Name: idx_ds_compare_config_panel_specific; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX idx_ds_compare_config_panel_specific ON public.ds_compare_config USING btree (system_under_test_id, test_environment, workload, application_dashboard_id, panel_id) WHERE (metric_name IS NULL);
-
-
---
--- Name: idx_ds_compare_config_team_id; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX idx_ds_compare_config_team_id ON public.ds_compare_config USING btree (team_id);
-
-
---
--- Name: idx_ds_control_group_statistics_application_dashboard_id; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX idx_ds_control_group_statistics_application_dashboard_id ON public.ds_control_group_statistics USING btree (application_dashboard_id);
-
-
---
--- Name: idx_ds_control_group_statistics_composite; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX idx_ds_control_group_statistics_composite ON public.ds_control_group_statistics USING btree (control_group_id, application_dashboard_id, panel_id);
-
-
---
--- Name: idx_ds_control_group_statistics_control_group_id; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX idx_ds_control_group_statistics_control_group_id ON public.ds_control_group_statistics USING btree (control_group_id);
-
-
---
--- Name: idx_ds_control_group_statistics_created_by; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX idx_ds_control_group_statistics_created_by ON public.ds_control_group_statistics USING btree (created_by);
-
-
---
--- Name: idx_ds_control_group_statistics_metric_name; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX idx_ds_control_group_statistics_metric_name ON public.ds_control_group_statistics USING btree (metric_name);
-
-
---
--- Name: idx_ds_control_group_statistics_organization_id; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX idx_ds_control_group_statistics_organization_id ON public.ds_control_group_statistics USING btree (organization_id);
-
-
---
--- Name: idx_ds_control_group_statistics_panel_id; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX idx_ds_control_group_statistics_panel_id ON public.ds_control_group_statistics USING btree (panel_id);
-
-
---
--- Name: idx_ds_control_group_statistics_team_id; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX idx_ds_control_group_statistics_team_id ON public.ds_control_group_statistics USING btree (team_id);
-
-
---
--- Name: idx_ds_control_group_stats_unique; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE UNIQUE INDEX idx_ds_control_group_stats_unique ON public.ds_control_group_statistics USING btree (control_group_id, application_dashboard_id, panel_id, metric_name);
-
-
---
--- Name: idx_ds_control_groups_composite; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX idx_ds_control_groups_composite ON public.ds_control_groups USING btree (system_under_test_id, workload, test_environment);
-
-
---
--- Name: idx_ds_control_groups_control_group_id; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX idx_ds_control_groups_control_group_id ON public.ds_control_groups USING btree (control_group_id);
-
-
---
--- Name: idx_ds_control_groups_created_by; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX idx_ds_control_groups_created_by ON public.ds_control_groups USING btree (created_by);
-
-
---
--- Name: idx_ds_control_groups_organization_id; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX idx_ds_control_groups_organization_id ON public.ds_control_groups USING btree (organization_id);
-
-
---
--- Name: idx_ds_control_groups_system_under_test_id; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX idx_ds_control_groups_system_under_test_id ON public.ds_control_groups USING btree (system_under_test_id);
-
-
---
--- Name: idx_ds_control_groups_team_id; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX idx_ds_control_groups_team_id ON public.ds_control_groups USING btree (team_id);
-
-
---
--- Name: idx_ds_control_groups_test_environment; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX idx_ds_control_groups_test_environment ON public.ds_control_groups USING btree (test_environment);
-
-
---
--- Name: idx_ds_control_groups_updated_at; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX idx_ds_control_groups_updated_at ON public.ds_control_groups USING btree (updated_at);
-
-
---
--- Name: idx_ds_control_groups_workload; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX idx_ds_control_groups_workload ON public.ds_control_groups USING btree (workload);
-
-
---
--- Name: idx_ds_metric_classification_created_by; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX idx_ds_metric_classification_created_by ON public.ds_metric_classification USING btree (created_by);
-
-
---
--- Name: idx_ds_metric_classification_lookup; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX idx_ds_metric_classification_lookup ON public.ds_metric_classification USING btree (system_under_test_id, test_environment, workload, application_dashboard_id, panel_id, metric_name);
-
-
---
--- Name: idx_ds_metric_classification_metric; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX idx_ds_metric_classification_metric ON public.ds_metric_classification USING btree (metric_name) WHERE (metric_name IS NOT NULL);
-
-
---
--- Name: idx_ds_metric_classification_organization_id; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX idx_ds_metric_classification_organization_id ON public.ds_metric_classification USING btree (organization_id);
-
-
---
--- Name: idx_ds_metric_classification_panel; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX idx_ds_metric_classification_panel ON public.ds_metric_classification USING btree (application_dashboard_id, panel_id);
-
-
---
--- Name: idx_ds_metric_classification_team_id; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX idx_ds_metric_classification_team_id ON public.ds_metric_classification USING btree (team_id);
-
-
---
--- Name: idx_ds_metric_collection_status_created_by; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX idx_ds_metric_collection_status_created_by ON public.ds_metric_collection_status USING btree (created_by);
-
-
---
--- Name: idx_ds_metric_collection_status_organization_id; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX idx_ds_metric_collection_status_organization_id ON public.ds_metric_collection_status USING btree (organization_id);
-
-
---
--- Name: idx_ds_metric_collection_status_team_id; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX idx_ds_metric_collection_status_team_id ON public.ds_metric_collection_status USING btree (team_id);
-
-
---
--- Name: idx_ds_metric_statistics_application_dashboard_id; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX idx_ds_metric_statistics_application_dashboard_id ON public.ds_metric_statistics USING btree (application_dashboard_id);
-
-
---
--- Name: idx_ds_metric_statistics_composite; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX idx_ds_metric_statistics_composite ON public.ds_metric_statistics USING btree (test_run_id, application_dashboard_id, panel_id);
-
-
---
--- Name: idx_ds_metric_statistics_created_by; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX idx_ds_metric_statistics_created_by ON public.ds_metric_statistics USING btree (created_by);
-
-
---
--- Name: idx_ds_metric_statistics_dashboard; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX idx_ds_metric_statistics_dashboard ON public.ds_metric_statistics USING btree (dashboard_uid, dashboard_label, panel_id);
-
-
---
--- Name: idx_ds_metric_statistics_dashboard_label; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX idx_ds_metric_statistics_dashboard_label ON public.ds_metric_statistics USING btree (dashboard_label);
-
-
---
--- Name: idx_ds_metric_statistics_dashboard_uid; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX idx_ds_metric_statistics_dashboard_uid ON public.ds_metric_statistics USING btree (dashboard_uid);
-
-
---
--- Name: idx_ds_metric_statistics_metric_name; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX idx_ds_metric_statistics_metric_name ON public.ds_metric_statistics USING btree (metric_name);
-
-
---
--- Name: idx_ds_metric_statistics_organization_id; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX idx_ds_metric_statistics_organization_id ON public.ds_metric_statistics USING btree (organization_id);
-
-
---
--- Name: idx_ds_metric_statistics_panel_id; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX idx_ds_metric_statistics_panel_id ON public.ds_metric_statistics USING btree (panel_id);
-
-
---
--- Name: idx_ds_metric_statistics_team_id; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX idx_ds_metric_statistics_team_id ON public.ds_metric_statistics USING btree (team_id);
-
-
---
--- Name: idx_ds_metric_statistics_test_run_id; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX idx_ds_metric_statistics_test_run_id ON public.ds_metric_statistics USING btree (test_run_id);
-
-
---
--- Name: idx_ds_metric_statistics_test_run_start; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX idx_ds_metric_statistics_test_run_start ON public.ds_metric_statistics USING btree (test_run_start);
-
-
---
--- Name: idx_ds_metric_statistics_unit; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX idx_ds_metric_statistics_unit ON public.ds_metric_statistics USING btree (unit);
-
-
---
--- Name: idx_ds_metric_stats_composite; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX idx_ds_metric_stats_composite ON public.ds_metric_statistics USING btree (application_dashboard_id, panel_id);
-
-
---
--- Name: idx_ds_metric_stats_percentiles; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX idx_ds_metric_stats_percentiles ON public.ds_metric_statistics USING gin (percentiles);
-
-
---
--- Name: idx_ds_metric_stats_test_run; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX idx_ds_metric_stats_test_run ON public.ds_metric_statistics USING btree (test_run_id);
-
-
---
--- Name: idx_ds_metrics_application_dashboard_id; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX idx_ds_metrics_application_dashboard_id ON public.ds_metrics USING btree (application_dashboard_id);
-
-
---
--- Name: idx_ds_metrics_composite; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX idx_ds_metrics_composite ON public.ds_metrics USING btree (test_run_id, application_dashboard_id, panel_id);
-
-
---
--- Name: idx_ds_metrics_created_by; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX idx_ds_metrics_created_by ON public.ds_metrics USING btree (created_by);
-
-
---
--- Name: idx_ds_metrics_dashboard_panel_metric_time; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX idx_ds_metrics_dashboard_panel_metric_time ON public.ds_metrics USING btree (application_dashboard_id, panel_id, metric_name, "time" DESC);
-
-
---
--- Name: idx_ds_metrics_metric_name; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX idx_ds_metrics_metric_name ON public.ds_metrics USING btree (metric_name);
-
-
---
--- Name: idx_ds_metrics_metric_name_time; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX idx_ds_metrics_metric_name_time ON public.ds_metrics USING btree (metric_name, "time" DESC);
-
-
---
--- Name: idx_ds_metrics_organization_id; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX idx_ds_metrics_organization_id ON public.ds_metrics USING btree (organization_id);
-
-
---
--- Name: idx_ds_metrics_panel_id; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX idx_ds_metrics_panel_id ON public.ds_metrics USING btree (panel_id);
-
-
---
--- Name: idx_ds_metrics_panel_time; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX idx_ds_metrics_panel_time ON public.ds_metrics USING btree (panel_id, "time" DESC);
-
-
---
--- Name: idx_ds_metrics_team_id; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX idx_ds_metrics_team_id ON public.ds_metrics USING btree (team_id);
-
-
---
--- Name: idx_ds_metrics_test_run_id; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX idx_ds_metrics_test_run_id ON public.ds_metrics USING btree (test_run_id);
-
-
---
--- Name: idx_ds_metrics_test_run_time; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX idx_ds_metrics_test_run_time ON public.ds_metrics USING btree (test_run_id, "time" DESC);
-
-
---
--- Name: idx_ds_metrics_time; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX idx_ds_metrics_time ON public.ds_metrics USING btree ("time");
-
-
---
--- Name: idx_ds_metrics_upsert_key; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE UNIQUE INDEX idx_ds_metrics_upsert_key ON public.ds_metrics USING btree (test_run_id, application_dashboard_id, panel_id, metric_name, "time");
-
-
---
--- Name: idx_ds_metrics_value; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX idx_ds_metrics_value ON public.ds_metrics USING btree (value);
-
-
---
--- Name: idx_ds_panels_application_dashboard_id; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX idx_ds_panels_application_dashboard_id ON public.ds_panels USING btree (application_dashboard_id);
-
-
---
--- Name: idx_ds_panels_benchmark_ids; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX idx_ds_panels_benchmark_ids ON public.ds_panels USING gin (benchmark_ids);
-
-
---
--- Name: idx_ds_panels_composite; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX idx_ds_panels_composite ON public.ds_panels USING btree (test_run_id, application_dashboard_id, panel_id);
-
-
---
--- Name: idx_ds_panels_created_by; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX idx_ds_panels_created_by ON public.ds_panels USING btree (created_by);
-
-
---
--- Name: idx_ds_panels_dashboard_uid; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX idx_ds_panels_dashboard_uid ON public.ds_panels USING btree (dashboard_uid);
-
-
---
--- Name: idx_ds_panels_datasource_type; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX idx_ds_panels_datasource_type ON public.ds_panels USING btree (datasource_type);
-
-
---
--- Name: idx_ds_panels_organization_id; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX idx_ds_panels_organization_id ON public.ds_panels USING btree (organization_id);
-
-
---
--- Name: idx_ds_panels_panel_id; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX idx_ds_panels_panel_id ON public.ds_panels USING btree (panel_id);
-
-
---
--- Name: idx_ds_panels_team_id; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX idx_ds_panels_team_id ON public.ds_panels USING btree (team_id);
-
-
---
--- Name: idx_ds_panels_test_run_id; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX idx_ds_panels_test_run_id ON public.ds_panels USING btree (test_run_id);
-
-
---
--- Name: idx_ds_panels_updated_at; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX idx_ds_panels_updated_at ON public.ds_panels USING btree (updated_at);
+CREATE INDEX idx_ds_metrics_panel_lookup ON public.ds_metrics USING btree (test_run_id, dashboard_label, panel_title, panel_id, unit, metric_name);
 
 
 --
@@ -5403,97 +4783,6 @@ CREATE INDEX idx_ds_query_executions_test_run_id ON public.ds_query_executions U
 
 
 --
--- Name: idx_ds_tracked_differences_created_by; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX idx_ds_tracked_differences_created_by ON public.ds_tracked_differences USING btree (created_by);
-
-
---
--- Name: idx_ds_tracked_differences_organization_id; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX idx_ds_tracked_differences_organization_id ON public.ds_tracked_differences USING btree (organization_id);
-
-
---
--- Name: idx_ds_tracked_differences_team_id; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX idx_ds_tracked_differences_team_id ON public.ds_tracked_differences USING btree (team_id);
-
-
---
--- Name: idx_dynatrace_configs_created_by; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX idx_dynatrace_configs_created_by ON public.dynatrace_configs USING btree (created_by);
-
-
---
--- Name: idx_dynatrace_configs_host; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE UNIQUE INDEX idx_dynatrace_configs_host ON public.dynatrace_configs USING btree (host);
-
-
---
--- Name: idx_dynatrace_configs_label; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX idx_dynatrace_configs_label ON public.dynatrace_configs USING btree (label);
-
-
---
--- Name: idx_dynatrace_configs_organization_id; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX idx_dynatrace_configs_organization_id ON public.dynatrace_configs USING btree (organization_id);
-
-
---
--- Name: idx_dynatrace_configs_team_id; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX idx_dynatrace_configs_team_id ON public.dynatrace_configs USING btree (team_id);
-
-
---
--- Name: idx_dynatrace_entity_mappings_config_id; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX idx_dynatrace_entity_mappings_config_id ON public.dynatrace_entity_mappings USING btree (dynatrace_config_id);
-
-
---
--- Name: idx_dynatrace_entity_mappings_created_by; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX idx_dynatrace_entity_mappings_created_by ON public.dynatrace_entity_mappings USING btree (created_by);
-
-
---
--- Name: idx_dynatrace_entity_mappings_organization_id; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX idx_dynatrace_entity_mappings_organization_id ON public.dynatrace_entity_mappings USING btree (organization_id);
-
-
---
--- Name: idx_dynatrace_entity_mappings_system_level; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX idx_dynatrace_entity_mappings_system_level ON public.dynatrace_entity_mappings USING btree (system_under_test_id, level);
-
-
---
--- Name: idx_dynatrace_entity_mappings_team_id; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX idx_dynatrace_entity_mappings_team_id ON public.dynatrace_entity_mappings USING btree (team_id);
-
-
---
 -- Name: idx_dynatrace_entity_mappings_unique; Type: INDEX; Schema: public; Owner: -
 --
 
@@ -5501,73 +4790,17 @@ CREATE UNIQUE INDEX idx_dynatrace_entity_mappings_unique ON public.dynatrace_ent
 
 
 --
--- Name: idx_dynatrace_queries_application_dashboard; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX idx_dynatrace_queries_application_dashboard ON public.dynatrace_queries USING btree (application_dashboard_id, dashboard_label);
-
-
---
--- Name: idx_dynatrace_queries_config_id; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX idx_dynatrace_queries_config_id ON public.dynatrace_queries USING btree (dynatrace_config_id);
-
-
---
--- Name: idx_dynatrace_queries_created_at; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX idx_dynatrace_queries_created_at ON public.dynatrace_queries USING btree (created_at DESC);
-
-
---
--- Name: idx_dynatrace_queries_created_by; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX idx_dynatrace_queries_created_by ON public.dynatrace_queries USING btree (created_by);
-
-
---
--- Name: idx_dynatrace_queries_dashboard_panel; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX idx_dynatrace_queries_dashboard_panel ON public.dynatrace_queries USING btree (dashboard_label, panel_title);
-
-
---
--- Name: idx_dynatrace_queries_organization_id; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX idx_dynatrace_queries_organization_id ON public.dynatrace_queries USING btree (organization_id);
-
-
---
--- Name: idx_dynatrace_queries_panel_id; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX idx_dynatrace_queries_panel_id ON public.dynatrace_queries USING btree (panel_id);
-
-
---
--- Name: idx_dynatrace_queries_system_env_workload; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX idx_dynatrace_queries_system_env_workload ON public.dynatrace_queries USING btree (system_under_test_id, test_environment, workload);
-
-
---
--- Name: idx_dynatrace_queries_team_id; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX idx_dynatrace_queries_team_id ON public.dynatrace_queries USING btree (team_id);
-
-
---
 -- Name: idx_events_organization_id; Type: INDEX; Schema: public; Owner: -
 --
 
 CREATE INDEX idx_events_organization_id ON public.events USING btree (organization_id);
+
+
+--
+-- Name: idx_events_source; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX idx_events_source ON public.events USING btree (source);
 
 
 --
@@ -5585,59 +4818,10 @@ CREATE INDEX idx_events_timestamp ON public.events USING btree ("timestamp");
 
 
 --
--- Name: idx_expected_config_changes_composite; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX idx_expected_config_changes_composite ON public.expected_config_changes USING btree (system_under_test_id, test_environment, workload);
-
-
---
--- Name: idx_expected_config_changes_config_key; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX idx_expected_config_changes_config_key ON public.expected_config_changes USING btree (config_key);
-
-
---
--- Name: idx_expected_config_changes_created_by; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX idx_expected_config_changes_created_by ON public.expected_config_changes USING btree (created_by);
-
-
---
--- Name: idx_expected_config_changes_organization_id; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX idx_expected_config_changes_organization_id ON public.expected_config_changes USING btree (organization_id);
-
-
---
--- Name: idx_expected_config_changes_team_id; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX idx_expected_config_changes_team_id ON public.expected_config_changes USING btree (team_id);
-
-
---
 -- Name: idx_generated_reports_created_at; Type: INDEX; Schema: public; Owner: -
 --
 
 CREATE INDEX idx_generated_reports_created_at ON public.generated_reports USING btree (created_at);
-
-
---
--- Name: idx_generated_reports_created_by; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX idx_generated_reports_created_by ON public.generated_reports USING btree (created_by);
-
-
---
--- Name: idx_generated_reports_organization_id; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX idx_generated_reports_organization_id ON public.generated_reports USING btree (organization_id);
 
 
 --
@@ -5669,244 +4853,6 @@ CREATE INDEX idx_generated_reports_test_run_id ON public.generated_reports USING
 
 
 --
--- Name: idx_generic_deep_links_created_by; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX idx_generic_deep_links_created_by ON public.generic_deep_links USING btree (created_by);
-
-
---
--- Name: idx_generic_deep_links_organization_id; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX idx_generic_deep_links_organization_id ON public.generic_deep_links USING btree (organization_id);
-
-
---
--- Name: idx_generic_deep_links_profile; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX idx_generic_deep_links_profile ON public.generic_deep_links USING btree (profile);
-
-
---
--- Name: idx_generic_deep_links_team_id; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX idx_generic_deep_links_team_id ON public.generic_deep_links USING btree (team_id);
-
-
---
--- Name: idx_grafana_dashboards_grafana_id; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX idx_grafana_dashboards_grafana_id ON public.grafana_dashboards USING btree (grafana_instance_id);
-
-
---
--- Name: idx_grafana_dashboards_name; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX idx_grafana_dashboards_name ON public.grafana_dashboards USING btree (name);
-
-
---
--- Name: idx_grafana_dashboards_organization_id; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX idx_grafana_dashboards_organization_id ON public.grafana_dashboards USING btree (organization_id);
-
-
---
--- Name: idx_grafana_dashboards_tags; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX idx_grafana_dashboards_tags ON public.grafana_dashboards USING gin (tags);
-
-
---
--- Name: idx_grafana_dashboards_team_id; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX idx_grafana_dashboards_team_id ON public.grafana_dashboards USING btree (team_id);
-
-
---
--- Name: idx_grafana_dashboards_template_profile; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX idx_grafana_dashboards_template_profile ON public.grafana_dashboards USING btree (template_profile) WHERE (template_profile IS NOT NULL);
-
-
---
--- Name: idx_grafana_dashboards_template_uid; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX idx_grafana_dashboards_template_uid ON public.grafana_dashboards USING btree (template_dashboard_uid) WHERE (template_dashboard_uid IS NOT NULL);
-
-
---
--- Name: idx_grafana_dashboards_uid; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX idx_grafana_dashboards_uid ON public.grafana_dashboards USING btree (uid);
-
-
---
--- Name: idx_grafana_dashboards_used_by_sut; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX idx_grafana_dashboards_used_by_sut ON public.grafana_dashboards USING gin (used_by_sut);
-
-
---
--- Name: idx_grafana_instances_label; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX idx_grafana_instances_label ON public.grafana_instances USING btree (label);
-
-
---
--- Name: idx_grafana_instances_organization_id; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX idx_grafana_instances_organization_id ON public.grafana_instances USING btree (organization_id);
-
-
---
--- Name: idx_grafana_instances_snapshot; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX idx_grafana_instances_snapshot ON public.grafana_instances USING btree (snapshot_instance) WHERE (snapshot_instance = true);
-
-
---
--- Name: idx_grafana_instances_team_id; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX idx_grafana_instances_team_id ON public.grafana_instances USING btree (team_id);
-
-
---
--- Name: idx_graph_presets_created_by; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX idx_graph_presets_created_by ON public.graph_presets USING btree (created_by);
-
-
---
--- Name: idx_graph_presets_is_global; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX idx_graph_presets_is_global ON public.graph_presets USING btree (is_global);
-
-
---
--- Name: idx_graph_presets_name; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX idx_graph_presets_name ON public.graph_presets USING btree (name);
-
-
---
--- Name: idx_graph_presets_organization_id; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX idx_graph_presets_organization_id ON public.graph_presets USING btree (organization_id);
-
-
---
--- Name: idx_graph_presets_team_id; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX idx_graph_presets_team_id ON public.graph_presets USING btree (team_id);
-
-
---
--- Name: idx_graph_presets_test_run_id; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX idx_graph_presets_test_run_id ON public.graph_presets USING btree (test_run_id);
-
-
---
--- Name: idx_graph_presets_user_id; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX idx_graph_presets_user_id ON public.graph_presets USING btree (user_id);
-
-
---
--- Name: idx_graph_presets_user_test_run; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX idx_graph_presets_user_test_run ON public.graph_presets USING btree (user_id, test_run_id);
-
-
---
--- Name: idx_notification_channels_created_by; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX idx_notification_channels_created_by ON public.notification_channels USING btree (created_by);
-
-
---
--- Name: idx_notification_channels_enabled; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX idx_notification_channels_enabled ON public.notification_channels USING btree (enabled);
-
-
---
--- Name: idx_notification_channels_organization_id; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX idx_notification_channels_organization_id ON public.notification_channels USING btree (organization_id);
-
-
---
--- Name: idx_notification_channels_system_id; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX idx_notification_channels_system_id ON public.notification_channels USING btree (system_under_test_id);
-
-
---
--- Name: idx_notification_channels_team_id; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX idx_notification_channels_team_id ON public.notification_channels USING btree (team_id);
-
-
---
--- Name: idx_organization_members_org_id; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX idx_organization_members_org_id ON public.organization_members USING btree (organization_id);
-
-
---
--- Name: idx_organization_members_org_user; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX idx_organization_members_org_user ON public.organization_members USING btree (organization_id, user_id);
-
-
---
--- Name: idx_organization_members_user_id; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX idx_organization_members_user_id ON public.organization_members USING btree (user_id);
-
-
---
--- Name: idx_organizations_name; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX idx_organizations_name ON public.organizations USING btree (name);
-
-
---
 -- Name: idx_pending_ds_compare_config_changes_created_by; Type: INDEX; Schema: public; Owner: -
 --
 
@@ -5928,38 +4874,10 @@ CREATE INDEX idx_pending_ds_compare_config_changes_team_id ON public.pending_ds_
 
 
 --
--- Name: idx_profile_benchmarks_created_by; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX idx_profile_benchmarks_created_by ON public.profile_benchmarks USING btree (created_by);
-
-
---
 -- Name: idx_profile_benchmarks_dashboard_id; Type: INDEX; Schema: public; Owner: -
 --
 
 CREATE INDEX idx_profile_benchmarks_dashboard_id ON public.profile_benchmarks USING btree (profile_dashboard_id);
-
-
---
--- Name: idx_profile_benchmarks_dashboard_uid; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX idx_profile_benchmarks_dashboard_uid ON public.profile_benchmarks USING btree (dashboard_uid);
-
-
---
--- Name: idx_profile_benchmarks_org_profile; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX idx_profile_benchmarks_org_profile ON public.profile_benchmarks USING btree (organization_id, profile_id);
-
-
---
--- Name: idx_profile_benchmarks_organization_id; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX idx_profile_benchmarks_organization_id ON public.profile_benchmarks USING btree (organization_id);
 
 
 --
@@ -5974,27 +4892,6 @@ CREATE INDEX idx_profile_benchmarks_profile_id ON public.profile_benchmarks USIN
 --
 
 CREATE INDEX idx_profile_benchmarks_workload_pattern ON public.profile_benchmarks USING btree (workload_pattern);
-
-
---
--- Name: idx_profile_dashboards_created_by; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX idx_profile_dashboards_created_by ON public.profile_grafana_dashboards USING btree (created_by);
-
-
---
--- Name: idx_profile_dashboards_org_profile; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX idx_profile_dashboards_org_profile ON public.profile_grafana_dashboards USING btree (organization_id, profile);
-
-
---
--- Name: idx_profile_dashboards_organization_id; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX idx_profile_dashboards_organization_id ON public.profile_grafana_dashboards USING btree (organization_id);
 
 
 --
@@ -6026,31 +4923,10 @@ CREATE INDEX idx_profiles_created_at ON public.profiles USING btree (created_at)
 
 
 --
--- Name: idx_profiles_created_by; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX idx_profiles_created_by ON public.profiles USING btree (created_by);
-
-
---
 -- Name: idx_profiles_name; Type: INDEX; Schema: public; Owner: -
 --
 
 CREATE INDEX idx_profiles_name ON public.profiles USING btree (name);
-
-
---
--- Name: idx_profiles_org_created; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX idx_profiles_org_created ON public.profiles USING btree (organization_id, created_at DESC);
-
-
---
--- Name: idx_profiles_organization_id; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX idx_profiles_organization_id ON public.profiles USING btree (organization_id);
 
 
 --
@@ -6061,59 +4937,10 @@ CREATE INDEX idx_profiles_read_only ON public.profiles USING btree (read_only);
 
 
 --
--- Name: idx_pyroscope_instances_created_by; Type: INDEX; Schema: public; Owner: -
+-- Name: idx_requests_error_sut_env_scen_time; Type: INDEX; Schema: public; Owner: -
 --
 
-CREATE INDEX idx_pyroscope_instances_created_by ON public.pyroscope_instances USING btree (created_by);
-
-
---
--- Name: idx_pyroscope_instances_label; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX idx_pyroscope_instances_label ON public.pyroscope_instances USING btree (label);
-
-
---
--- Name: idx_pyroscope_instances_organization_id; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX idx_pyroscope_instances_organization_id ON public.pyroscope_instances USING btree (organization_id);
-
-
---
--- Name: idx_pyroscope_instances_stand_alone; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX idx_pyroscope_instances_stand_alone ON public.pyroscope_instances USING btree (pyroscope_stand_alone);
-
-
---
--- Name: idx_pyroscope_instances_team_id; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX idx_pyroscope_instances_team_id ON public.pyroscope_instances USING btree (team_id);
-
-
---
--- Name: idx_report_templates_created_by; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX idx_report_templates_created_by ON public.report_templates USING btree (created_by);
-
-
---
--- Name: idx_report_templates_organization_id; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX idx_report_templates_organization_id ON public.report_templates USING btree (organization_id);
-
-
---
--- Name: idx_report_templates_team_id; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX idx_report_templates_team_id ON public.report_templates USING btree (team_id);
+CREATE INDEX idx_requests_error_sut_env_scen_time ON public.requests_error USING btree (system_under_test, test_environment, scenario_name, "time" DESC);
 
 
 --
@@ -6152,6 +4979,13 @@ CREATE INDEX idx_requests_raw_scenario_name ON public.requests_raw USING btree (
 
 
 --
+-- Name: idx_requests_raw_sut_env_scen_time; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX idx_requests_raw_sut_env_scen_time ON public.requests_raw USING btree (system_under_test, test_environment, scenario_name, "time" DESC);
+
+
+--
 -- Name: idx_requests_raw_test_run_id_time; Type: INDEX; Schema: public; Owner: -
 --
 
@@ -6180,6 +5014,27 @@ CREATE INDEX idx_requests_raw_url_hash ON public.requests_raw USING btree (url_h
 
 
 --
+-- Name: idx_scaling_sessions_organization_id; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX idx_scaling_sessions_organization_id ON public.scaling_sessions USING btree (organization_id);
+
+
+--
+-- Name: idx_scaling_sessions_status; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX idx_scaling_sessions_status ON public.scaling_sessions USING btree (status);
+
+
+--
+-- Name: idx_scaling_sessions_system_env_workload; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX idx_scaling_sessions_system_env_workload ON public.scaling_sessions USING btree (system_under_test_id, test_environment, workload);
+
+
+--
 -- Name: idx_systems_under_test_created_by; Type: INDEX; Schema: public; Owner: -
 --
 
@@ -6194,13 +5049,6 @@ CREATE INDEX idx_systems_under_test_name ON public.systems_under_test USING btre
 
 
 --
--- Name: idx_systems_under_test_org_created; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX idx_systems_under_test_org_created ON public.systems_under_test USING btree (organization_id, created_at DESC);
-
-
---
 -- Name: idx_systems_under_test_organization_id; Type: INDEX; Schema: public; Owner: -
 --
 
@@ -6208,66 +5056,10 @@ CREATE INDEX idx_systems_under_test_organization_id ON public.systems_under_test
 
 
 --
--- Name: idx_systems_under_test_pyroscope_configurations; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX idx_systems_under_test_pyroscope_configurations ON public.systems_under_test USING gin (pyroscope_configurations);
-
-
---
--- Name: idx_systems_under_test_pyroscope_instance; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX idx_systems_under_test_pyroscope_instance ON public.systems_under_test USING btree (pyroscope_instance_id);
-
-
---
 -- Name: idx_systems_under_test_team_id; Type: INDEX; Schema: public; Owner: -
 --
 
 CREATE INDEX idx_systems_under_test_team_id ON public.systems_under_test USING btree (team_id);
-
-
---
--- Name: idx_team_members_team_id; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX idx_team_members_team_id ON public.team_members USING btree (team_id);
-
-
---
--- Name: idx_team_members_team_user; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX idx_team_members_team_user ON public.team_members USING btree (team_id, user_id);
-
-
---
--- Name: idx_team_members_user_id; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX idx_team_members_user_id ON public.team_members USING btree (user_id);
-
-
---
--- Name: idx_teams_name; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX idx_teams_name ON public.teams USING btree (organization_id, name);
-
-
---
--- Name: idx_teams_organization_id; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX idx_teams_organization_id ON public.teams USING btree (organization_id);
-
-
---
--- Name: idx_test_environments_system_id; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX idx_test_environments_system_id ON public.system_under_test_test_environments USING btree (system_under_test_id);
 
 
 --
@@ -6285,27 +5077,6 @@ CREATE INDEX idx_test_run_alerts_test_run_id ON public.test_run_alerts USING btr
 
 
 --
--- Name: idx_test_run_configs_organization_id; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX idx_test_run_configs_organization_id ON public.test_run_configs USING btree (organization_id);
-
-
---
--- Name: idx_test_run_configs_test_run_id; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX idx_test_run_configs_test_run_id ON public.test_run_configs USING btree (test_run_id);
-
-
---
--- Name: idx_test_run_configs_test_run_id_string; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX idx_test_run_configs_test_run_id_string ON public.test_run_configs USING btree (test_run_id_string);
-
-
---
 -- Name: idx_test_run_events_organization_id; Type: INDEX; Schema: public; Owner: -
 --
 
@@ -6320,10 +5091,17 @@ CREATE INDEX idx_test_run_events_test_run_id ON public.test_run_events USING btr
 
 
 --
--- Name: idx_test_runs_application_id; Type: INDEX; Schema: public; Owner: -
+-- Name: idx_test_run_views_test_run_id; Type: INDEX; Schema: public; Owner: -
 --
 
-CREATE INDEX idx_test_runs_application_id ON public.test_runs USING btree (system_under_test_id);
+CREATE INDEX idx_test_run_views_test_run_id ON public.test_run_views USING btree (test_run_id);
+
+
+--
+-- Name: idx_test_run_views_user_id; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX idx_test_run_views_user_id ON public.test_run_views USING btree (user_id);
 
 
 --
@@ -6341,13 +5119,6 @@ CREATE INDEX idx_test_runs_completed_updated ON public.test_runs USING btree (co
 
 
 --
--- Name: idx_test_runs_composite; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX idx_test_runs_composite ON public.test_runs USING btree (system_under_test_id, test_environment, workload);
-
-
---
 -- Name: idx_test_runs_created_at; Type: INDEX; Schema: public; Owner: -
 --
 
@@ -6355,38 +5126,10 @@ CREATE INDEX idx_test_runs_created_at ON public.test_runs USING btree (created_a
 
 
 --
--- Name: idx_test_runs_created_by; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX idx_test_runs_created_by ON public.test_runs USING btree (created_by);
-
-
---
 -- Name: idx_test_runs_is_stale; Type: INDEX; Schema: public; Owner: -
 --
 
 CREATE INDEX idx_test_runs_is_stale ON public.test_runs USING btree (is_stale);
-
-
---
--- Name: idx_test_runs_org_created; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX idx_test_runs_org_created ON public.test_runs USING btree (organization_id, created_at DESC);
-
-
---
--- Name: idx_test_runs_org_system_env; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX idx_test_runs_org_system_env ON public.test_runs USING btree (organization_id, system_under_test_id, test_environment);
-
-
---
--- Name: idx_test_runs_organization_id; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX idx_test_runs_organization_id ON public.test_runs USING btree (organization_id);
 
 
 --
@@ -6432,83 +5175,6 @@ CREATE INDEX idx_test_runs_workload ON public.test_runs USING btree (workload);
 
 
 --
--- Name: idx_tracing_instances_created_by; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX idx_tracing_instances_created_by ON public.tracing_instances USING btree (created_by);
-
-
---
--- Name: idx_tracing_instances_organization_id; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX idx_tracing_instances_organization_id ON public.tracing_instances USING btree (organization_id);
-
-
---
--- Name: idx_tracing_instances_team_id; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX idx_tracing_instances_team_id ON public.tracing_instances USING btree (team_id);
-
-
---
--- Name: idx_tracing_instances_url; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX idx_tracing_instances_url ON public.tracing_instances USING btree (tracing_url);
-
-
---
--- Name: idx_tracing_services_created_by; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX idx_tracing_services_created_by ON public.tracing_services USING btree (created_by);
-
-
---
--- Name: idx_tracing_services_instance_id; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX idx_tracing_services_instance_id ON public.tracing_services USING btree (tracing_instance_id);
-
-
---
--- Name: idx_tracing_services_organization_id; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX idx_tracing_services_organization_id ON public.tracing_services USING btree (organization_id);
-
-
---
--- Name: idx_tracing_services_system_env; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX idx_tracing_services_system_env ON public.tracing_services USING btree (system_under_test_id, test_environment);
-
-
---
--- Name: idx_tracing_services_system_env_workload; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX idx_tracing_services_system_env_workload ON public.tracing_services USING btree (system_under_test_id, test_environment, workload);
-
-
---
--- Name: idx_tracing_services_system_id; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX idx_tracing_services_system_id ON public.tracing_services USING btree (system_under_test_id);
-
-
---
--- Name: idx_tracing_services_team_id; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX idx_tracing_services_team_id ON public.tracing_services USING btree (team_id);
-
-
---
 -- Name: idx_transactions_grouping; Type: INDEX; Schema: public; Owner: -
 --
 
@@ -6520,6 +5186,13 @@ CREATE INDEX idx_transactions_grouping ON public.transactions USING btree (test_
 --
 
 CREATE INDEX idx_transactions_scenario_name ON public.transactions USING btree (scenario_name) WHERE (scenario_name IS NOT NULL);
+
+
+--
+-- Name: idx_transactions_sut_env_scen_time; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX idx_transactions_sut_env_scen_time ON public.transactions USING btree (system_under_test, test_environment, scenario_name, "time" DESC);
 
 
 --
@@ -6544,87 +5217,17 @@ CREATE INDEX idx_transactions_transaction_name ON public.transactions USING btre
 
 
 --
--- Name: idx_trends_filter_presets_app_dashboard; Type: INDEX; Schema: public; Owner: -
+-- Name: idx_trs_sampler_stats_lookup; Type: INDEX; Schema: public; Owner: -
 --
 
-CREATE INDEX idx_trends_filter_presets_app_dashboard ON public.trends_filter_presets USING btree (application_dashboard_id) WHERE (application_dashboard_id IS NOT NULL);
-
-
---
--- Name: idx_trends_filter_presets_created_by; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX idx_trends_filter_presets_created_by ON public.trends_filter_presets USING btree (created_by);
+CREATE INDEX idx_trs_sampler_stats_lookup ON public.test_run_sampler_stats USING btree (test_run_id, transaction_name, ramp_up_excluded);
 
 
 --
--- Name: idx_trends_filter_presets_created_for_test_run; Type: INDEX; Schema: public; Owner: -
+-- Name: idx_trs_tx_stats_sut_env_wl; Type: INDEX; Schema: public; Owner: -
 --
 
-CREATE INDEX idx_trends_filter_presets_created_for_test_run ON public.trends_filter_presets USING btree (created_for_test_run_id) WHERE (created_for_test_run_id IS NOT NULL);
-
-
---
--- Name: idx_trends_filter_presets_global; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX idx_trends_filter_presets_global ON public.trends_filter_presets USING btree (is_global);
-
-
---
--- Name: idx_trends_filter_presets_name; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX idx_trends_filter_presets_name ON public.trends_filter_presets USING btree (name);
-
-
---
--- Name: idx_trends_filter_presets_organization_id; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX idx_trends_filter_presets_organization_id ON public.trends_filter_presets USING btree (organization_id);
-
-
---
--- Name: idx_trends_filter_presets_team_id; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX idx_trends_filter_presets_team_id ON public.trends_filter_presets USING btree (team_id);
-
-
---
--- Name: idx_trends_filter_presets_type; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX idx_trends_filter_presets_type ON public.trends_filter_presets USING btree (preset_type);
-
-
---
--- Name: idx_url_patterns_created_by; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX idx_url_patterns_created_by ON public.url_patterns USING btree (created_by);
-
-
---
--- Name: idx_url_patterns_normalized_url; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX idx_url_patterns_normalized_url ON public.url_patterns USING btree (normalized_url);
-
-
---
--- Name: idx_url_patterns_organization_id; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX idx_url_patterns_organization_id ON public.url_patterns USING btree (organization_id);
-
-
---
--- Name: idx_url_patterns_team_id; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX idx_url_patterns_team_id ON public.url_patterns USING btree (team_id);
+CREATE INDEX idx_trs_tx_stats_sut_env_wl ON public.test_run_transaction_stats USING btree (system_under_test_id, test_environment, workload);
 
 
 --
@@ -6726,13 +5329,6 @@ CREATE INDEX idx_workload_transaction_apdex_thresholds_team_id ON public.workloa
 
 
 --
--- Name: idx_workloads_environment_id; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX idx_workloads_environment_id ON public.system_under_test_workloads USING btree (system_under_test_test_environment_id);
-
-
---
 -- Name: requests_error_time_idx; Type: INDEX; Schema: public; Owner: -
 --
 
@@ -6747,10 +5343,38 @@ CREATE INDEX requests_raw_time_idx ON public.requests_raw USING btree ("time" DE
 
 
 --
+-- Name: test_run_configs_test_run_id_key_tags_key; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE UNIQUE INDEX test_run_configs_test_run_id_key_tags_key ON public.test_run_configs USING btree (test_run_id, key, public.tags_hash(tags));
+
+
+--
 -- Name: transactions_time_idx; Type: INDEX; Schema: public; Owner: -
 --
 
 CREATE INDEX transactions_time_idx ON public.transactions USING btree ("time" DESC);
+
+
+--
+-- Name: uniq_ds_adapt_conclusion; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE UNIQUE INDEX uniq_ds_adapt_conclusion ON public.ds_adapt_conclusion USING btree (test_run_id);
+
+
+--
+-- Name: uniq_ds_adapt_results; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE UNIQUE INDEX uniq_ds_adapt_results ON public.ds_adapt_results USING btree (test_run_id, control_group_id, application_dashboard_id, panel_id, metric_name);
+
+
+--
+-- Name: uniq_ds_adapt_tracked_results; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE UNIQUE INDEX uniq_ds_adapt_tracked_results ON public.ds_adapt_tracked_results USING btree (test_run_id, application_dashboard_id, panel_id, metric_name, tracked_test_run_id);
 
 
 --
@@ -6768,10 +5392,45 @@ CREATE UNIQUE INDEX uniq_ds_compare_config_panel ON public.ds_compare_config USI
 
 
 --
--- Name: uq_collection_status; Type: INDEX; Schema: public; Owner: -
+-- Name: uniq_ds_control_group_statistics; Type: INDEX; Schema: public; Owner: -
 --
 
-CREATE UNIQUE INDEX uq_collection_status ON public.ds_metric_collection_status USING btree (test_run_id, source_type, source_id);
+CREATE UNIQUE INDEX uniq_ds_control_group_statistics ON public.ds_control_group_statistics USING btree (control_group_id, application_dashboard_id, panel_id, metric_name);
+
+
+--
+-- Name: uniq_ds_control_groups_cgid; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE UNIQUE INDEX uniq_ds_control_groups_cgid ON public.ds_control_groups USING btree (control_group_id);
+
+
+--
+-- Name: uniq_ds_metric_statistics; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE UNIQUE INDEX uniq_ds_metric_statistics ON public.ds_metric_statistics USING btree (test_run_id, application_dashboard_id, panel_id, metric_name);
+
+
+--
+-- Name: uniq_ds_metrics_upsert; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE UNIQUE INDEX uniq_ds_metrics_upsert ON public.ds_metrics USING btree (test_run_id, application_dashboard_id, panel_id, metric_name, "time");
+
+
+--
+-- Name: uq_ds_metric_collection_status_source; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE UNIQUE INDEX uq_ds_metric_collection_status_source ON public.ds_metric_collection_status USING btree (test_run_id, source_type, source_id);
+
+
+--
+-- Name: uq_system_under_test_name_org; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE UNIQUE INDEX uq_system_under_test_name_org ON public.systems_under_test USING btree (name, organization_id);
 
 
 --
@@ -6779,6 +5438,153 @@ CREATE UNIQUE INDEX uq_collection_status ON public.ds_metric_collection_status U
 --
 
 CREATE INDEX virtual_users_time_idx ON public.virtual_users USING btree ("time" DESC);
+
+
+--
+-- Name: audit_logs_2026_05_action_timestamp_idx; Type: INDEX ATTACH; Schema: public; Owner: -
+--
+
+ALTER INDEX public.idx_audit_logs_action ATTACH PARTITION public.audit_logs_2026_05_action_timestamp_idx;
+
+
+--
+-- Name: audit_logs_2026_05_organization_id_timestamp_idx; Type: INDEX ATTACH; Schema: public; Owner: -
+--
+
+ALTER INDEX public.idx_audit_logs_organization_id ATTACH PARTITION public.audit_logs_2026_05_organization_id_timestamp_idx;
+
+
+--
+-- Name: audit_logs_2026_05_pkey; Type: INDEX ATTACH; Schema: public; Owner: -
+--
+
+ALTER INDEX public.audit_logs_pkey ATTACH PARTITION public.audit_logs_2026_05_pkey;
+
+
+--
+-- Name: audit_logs_2026_05_resource_type_resource_id_timestamp_idx; Type: INDEX ATTACH; Schema: public; Owner: -
+--
+
+ALTER INDEX public.idx_audit_logs_resource ATTACH PARTITION public.audit_logs_2026_05_resource_type_resource_id_timestamp_idx;
+
+
+--
+-- Name: audit_logs_2026_05_system_under_test_id_timestamp_idx; Type: INDEX ATTACH; Schema: public; Owner: -
+--
+
+ALTER INDEX public.idx_audit_logs_system_under_test_id ATTACH PARTITION public.audit_logs_2026_05_system_under_test_id_timestamp_idx;
+
+
+--
+-- Name: audit_logs_2026_05_timestamp_idx; Type: INDEX ATTACH; Schema: public; Owner: -
+--
+
+ALTER INDEX public.idx_audit_logs_timestamp ATTACH PARTITION public.audit_logs_2026_05_timestamp_idx;
+
+
+--
+-- Name: audit_logs_2026_05_user_id_timestamp_idx; Type: INDEX ATTACH; Schema: public; Owner: -
+--
+
+ALTER INDEX public.idx_audit_logs_user_id ATTACH PARTITION public.audit_logs_2026_05_user_id_timestamp_idx;
+
+
+--
+-- Name: audit_logs_2026_06_action_timestamp_idx; Type: INDEX ATTACH; Schema: public; Owner: -
+--
+
+ALTER INDEX public.idx_audit_logs_action ATTACH PARTITION public.audit_logs_2026_06_action_timestamp_idx;
+
+
+--
+-- Name: audit_logs_2026_06_organization_id_timestamp_idx; Type: INDEX ATTACH; Schema: public; Owner: -
+--
+
+ALTER INDEX public.idx_audit_logs_organization_id ATTACH PARTITION public.audit_logs_2026_06_organization_id_timestamp_idx;
+
+
+--
+-- Name: audit_logs_2026_06_pkey; Type: INDEX ATTACH; Schema: public; Owner: -
+--
+
+ALTER INDEX public.audit_logs_pkey ATTACH PARTITION public.audit_logs_2026_06_pkey;
+
+
+--
+-- Name: audit_logs_2026_06_resource_type_resource_id_timestamp_idx; Type: INDEX ATTACH; Schema: public; Owner: -
+--
+
+ALTER INDEX public.idx_audit_logs_resource ATTACH PARTITION public.audit_logs_2026_06_resource_type_resource_id_timestamp_idx;
+
+
+--
+-- Name: audit_logs_2026_06_system_under_test_id_timestamp_idx; Type: INDEX ATTACH; Schema: public; Owner: -
+--
+
+ALTER INDEX public.idx_audit_logs_system_under_test_id ATTACH PARTITION public.audit_logs_2026_06_system_under_test_id_timestamp_idx;
+
+
+--
+-- Name: audit_logs_2026_06_timestamp_idx; Type: INDEX ATTACH; Schema: public; Owner: -
+--
+
+ALTER INDEX public.idx_audit_logs_timestamp ATTACH PARTITION public.audit_logs_2026_06_timestamp_idx;
+
+
+--
+-- Name: audit_logs_2026_06_user_id_timestamp_idx; Type: INDEX ATTACH; Schema: public; Owner: -
+--
+
+ALTER INDEX public.idx_audit_logs_user_id ATTACH PARTITION public.audit_logs_2026_06_user_id_timestamp_idx;
+
+
+--
+-- Name: audit_logs_2026_07_action_timestamp_idx; Type: INDEX ATTACH; Schema: public; Owner: -
+--
+
+ALTER INDEX public.idx_audit_logs_action ATTACH PARTITION public.audit_logs_2026_07_action_timestamp_idx;
+
+
+--
+-- Name: audit_logs_2026_07_organization_id_timestamp_idx; Type: INDEX ATTACH; Schema: public; Owner: -
+--
+
+ALTER INDEX public.idx_audit_logs_organization_id ATTACH PARTITION public.audit_logs_2026_07_organization_id_timestamp_idx;
+
+
+--
+-- Name: audit_logs_2026_07_pkey; Type: INDEX ATTACH; Schema: public; Owner: -
+--
+
+ALTER INDEX public.audit_logs_pkey ATTACH PARTITION public.audit_logs_2026_07_pkey;
+
+
+--
+-- Name: audit_logs_2026_07_resource_type_resource_id_timestamp_idx; Type: INDEX ATTACH; Schema: public; Owner: -
+--
+
+ALTER INDEX public.idx_audit_logs_resource ATTACH PARTITION public.audit_logs_2026_07_resource_type_resource_id_timestamp_idx;
+
+
+--
+-- Name: audit_logs_2026_07_system_under_test_id_timestamp_idx; Type: INDEX ATTACH; Schema: public; Owner: -
+--
+
+ALTER INDEX public.idx_audit_logs_system_under_test_id ATTACH PARTITION public.audit_logs_2026_07_system_under_test_id_timestamp_idx;
+
+
+--
+-- Name: audit_logs_2026_07_timestamp_idx; Type: INDEX ATTACH; Schema: public; Owner: -
+--
+
+ALTER INDEX public.idx_audit_logs_timestamp ATTACH PARTITION public.audit_logs_2026_07_timestamp_idx;
+
+
+--
+-- Name: audit_logs_2026_07_user_id_timestamp_idx; Type: INDEX ATTACH; Schema: public; Owner: -
+--
+
+ALTER INDEX public.idx_audit_logs_user_id ATTACH PARTITION public.audit_logs_2026_07_user_id_timestamp_idx;
 
 
 --
@@ -7007,11 +5813,35 @@ ALTER TABLE ONLY public.awr_analysis
 
 
 --
+-- Name: events FK_07e6ccadf8f88e91de6d7b4d492; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.events
+    ADD CONSTRAINT "FK_07e6ccadf8f88e91de6d7b4d492" FOREIGN KEY (system_under_test_id) REFERENCES public.systems_under_test(id) ON DELETE CASCADE;
+
+
+--
+-- Name: ds_change_points FK_0ddc98fc89d6503f950aa738295; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.ds_change_points
+    ADD CONSTRAINT "FK_0ddc98fc89d6503f950aa738295" FOREIGN KEY (metrics_source_id) REFERENCES public.metrics_sources(id);
+
+
+--
 -- Name: test_run_configs FK_0f51a7f49362c67adfaaca3973c; Type: FK CONSTRAINT; Schema: public; Owner: -
 --
 
 ALTER TABLE ONLY public.test_run_configs
     ADD CONSTRAINT "FK_0f51a7f49362c67adfaaca3973c" FOREIGN KEY (test_run_id) REFERENCES public.test_runs(id);
+
+
+--
+-- Name: system_under_test_test_environments FK_12059dd841b1a09e27f5b97ef8b; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.system_under_test_test_environments
+    ADD CONSTRAINT "FK_12059dd841b1a09e27f5b97ef8b" FOREIGN KEY (system_under_test_id) REFERENCES public.systems_under_test(id) ON DELETE CASCADE;
 
 
 --
@@ -7023,11 +5853,27 @@ ALTER TABLE ONLY public.awr_analysis
 
 
 --
+-- Name: benchmarks FK_15f55fcc664f13c42c0383eaf01; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.benchmarks
+    ADD CONSTRAINT "FK_15f55fcc664f13c42c0383eaf01" FOREIGN KEY (metrics_source_id) REFERENCES public.metrics_sources(id);
+
+
+--
 -- Name: ds_compare_config FK_169495604b63cc277a90ada81f8; Type: FK CONSTRAINT; Schema: public; Owner: -
 --
 
 ALTER TABLE ONLY public.ds_compare_config
     ADD CONSTRAINT "FK_169495604b63cc277a90ada81f8" FOREIGN KEY (application_dashboard_id) REFERENCES public.application_dashboards(id) ON DELETE CASCADE;
+
+
+--
+-- Name: trends_filter_presets FK_290de7d72c27f468f642473a896; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.trends_filter_presets
+    ADD CONSTRAINT "FK_290de7d72c27f468f642473a896" FOREIGN KEY (metrics_source_id) REFERENCES public.metrics_sources(id);
 
 
 --
@@ -7055,11 +5901,27 @@ ALTER TABLE ONLY public.ds_metric_statistics
 
 
 --
+-- Name: ds_compare_config FK_3951a3d0dce6c3b80b7ef7487ff; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.ds_compare_config
+    ADD CONSTRAINT "FK_3951a3d0dce6c3b80b7ef7487ff" FOREIGN KEY (metrics_source_id) REFERENCES public.metrics_sources(id);
+
+
+--
 -- Name: trends_filter_presets FK_40f749c7a9543b7321b4e7bd66a; Type: FK CONSTRAINT; Schema: public; Owner: -
 --
 
 ALTER TABLE ONLY public.trends_filter_presets
     ADD CONSTRAINT "FK_40f749c7a9543b7321b4e7bd66a" FOREIGN KEY (application_dashboard_id) REFERENCES public.application_dashboards(id) ON DELETE SET NULL;
+
+
+--
+-- Name: metrics_sources FK_41fde009f014dff1c3f4f5396da; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.metrics_sources
+    ADD CONSTRAINT "FK_41fde009f014dff1c3f4f5396da" FOREIGN KEY (system_under_test_id) REFERENCES public.systems_under_test(id);
 
 
 --
@@ -7095,11 +5957,19 @@ ALTER TABLE ONLY public.notification_channels
 
 
 --
--- Name: ds_metric_classification FK_5b8c0dc266cea368bc3667ff44d; Type: FK CONSTRAINT; Schema: public; Owner: -
+-- Name: test_run_views FK_63d2b9e6328a2bfe4a87550a218; Type: FK CONSTRAINT; Schema: public; Owner: -
 --
 
-ALTER TABLE ONLY public.ds_metric_classification
-    ADD CONSTRAINT "FK_5b8c0dc266cea368bc3667ff44d" FOREIGN KEY (system_under_test_id) REFERENCES public.systems_under_test(id);
+ALTER TABLE ONLY public.test_run_views
+    ADD CONSTRAINT "FK_63d2b9e6328a2bfe4a87550a218" FOREIGN KEY (test_run_id) REFERENCES public.test_runs(id) ON DELETE CASCADE;
+
+
+--
+-- Name: ds_metrics FK_64b571cec128bcfa57a7aafd9d0; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.ds_metrics
+    ADD CONSTRAINT "FK_64b571cec128bcfa57a7aafd9d0" FOREIGN KEY (metrics_source_id) REFERENCES public.metrics_sources(id);
 
 
 --
@@ -7135,11 +6005,59 @@ ALTER TABLE ONLY public.ds_metrics
 
 
 --
+-- Name: organization_members FK_7062a4fbd9bab22ffd918e5d3d9; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.organization_members
+    ADD CONSTRAINT "FK_7062a4fbd9bab22ffd918e5d3d9" FOREIGN KEY (organization_id) REFERENCES public.organizations(id) ON DELETE CASCADE;
+
+
+--
+-- Name: ds_tracked_differences FK_756090a826300d317f0d1c20db2; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.ds_tracked_differences
+    ADD CONSTRAINT "FK_756090a826300d317f0d1c20db2" FOREIGN KEY (metrics_source_id) REFERENCES public.metrics_sources(id);
+
+
+--
+-- Name: provisioned_template_ds_compare_configs FK_7870a740c1c5dc55851b51d98d2; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.provisioned_template_ds_compare_configs
+    ADD CONSTRAINT "FK_7870a740c1c5dc55851b51d98d2" FOREIGN KEY (application_dashboard_id) REFERENCES public.application_dashboards(id);
+
+
+--
+-- Name: application_dashboards FK_7a5452cca93bb802c6a63c05227; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.application_dashboards
+    ADD CONSTRAINT "FK_7a5452cca93bb802c6a63c05227" FOREIGN KEY (metrics_source_id) REFERENCES public.metrics_sources(id);
+
+
+--
 -- Name: ds_tracked_differences FK_851c0133b601de9f6da6929412e; Type: FK CONSTRAINT; Schema: public; Owner: -
 --
 
 ALTER TABLE ONLY public.ds_tracked_differences
     ADD CONSTRAINT "FK_851c0133b601de9f6da6929412e" FOREIGN KEY (application_dashboard_id) REFERENCES public.application_dashboards(id);
+
+
+--
+-- Name: ds_control_group_statistics FK_87646daed8babdf7579f5ef4fda; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.ds_control_group_statistics
+    ADD CONSTRAINT "FK_87646daed8babdf7579f5ef4fda" FOREIGN KEY (metrics_source_id) REFERENCES public.metrics_sources(id);
+
+
+--
+-- Name: compare_filter_presets FK_889845191bd344571f4fbad48ea; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.compare_filter_presets
+    ADD CONSTRAINT "FK_889845191bd344571f4fbad48ea" FOREIGN KEY (metrics_source_id) REFERENCES public.metrics_sources(id);
 
 
 --
@@ -7151,11 +6069,27 @@ ALTER TABLE ONLY public.ds_metric_collection_status
 
 
 --
+-- Name: sparse_metric_exclusions FK_93e60e7e7b85bc2efbc2ba41c58; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.sparse_metric_exclusions
+    ADD CONSTRAINT "FK_93e60e7e7b85bc2efbc2ba41c58" FOREIGN KEY (system_under_test_id) REFERENCES public.systems_under_test(id) ON DELETE CASCADE;
+
+
+--
 -- Name: benchmarks FK_9864637f3b46c65b330edc79cd0; Type: FK CONSTRAINT; Schema: public; Owner: -
 --
 
 ALTER TABLE ONLY public.benchmarks
     ADD CONSTRAINT "FK_9864637f3b46c65b330edc79cd0" FOREIGN KEY (application_dashboard_id) REFERENCES public.application_dashboards(id) ON DELETE CASCADE;
+
+
+--
+-- Name: ds_adapt_tracked_results FK_99502c9ad78012d701393338ff4; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.ds_adapt_tracked_results
+    ADD CONSTRAINT "FK_99502c9ad78012d701393338ff4" FOREIGN KEY (metrics_source_id) REFERENCES public.metrics_sources(id);
 
 
 --
@@ -7191,11 +6125,43 @@ ALTER TABLE ONLY public.dynatrace_queries
 
 
 --
+-- Name: dynatrace_queries FK_aec39dbc4110d86d4fb581851c2; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.dynatrace_queries
+    ADD CONSTRAINT "FK_aec39dbc4110d86d4fb581851c2" FOREIGN KEY (metrics_source_id) REFERENCES public.metrics_sources(id);
+
+
+--
 -- Name: compare_filter_presets FK_b1aef8d4becaadc9900652373ed; Type: FK CONSTRAINT; Schema: public; Owner: -
 --
 
 ALTER TABLE ONLY public.compare_filter_presets
     ADD CONSTRAINT "FK_b1aef8d4becaadc9900652373ed" FOREIGN KEY (application_dashboard_id) REFERENCES public.application_dashboards(id) ON DELETE SET NULL;
+
+
+--
+-- Name: ds_panels FK_b28e9f50acce1728e58b9ca5f27; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.ds_panels
+    ADD CONSTRAINT "FK_b28e9f50acce1728e58b9ca5f27" FOREIGN KEY (metrics_source_id) REFERENCES public.metrics_sources(id);
+
+
+--
+-- Name: provisioned_template_ds_compare_configs FK_b45c39b31193d846fbcd8963a48; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.provisioned_template_ds_compare_configs
+    ADD CONSTRAINT "FK_b45c39b31193d846fbcd8963a48" FOREIGN KEY (metrics_source_id) REFERENCES public.metrics_sources(id);
+
+
+--
+-- Name: provisioned_template_ds_compare_configs FK_bc762dd43f2adeeda94cb422cb9; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.provisioned_template_ds_compare_configs
+    ADD CONSTRAINT "FK_bc762dd43f2adeeda94cb422cb9" FOREIGN KEY (system_under_test_id) REFERENCES public.systems_under_test(id);
 
 
 --
@@ -7231,11 +6197,11 @@ ALTER TABLE ONLY public.tracing_services
 
 
 --
--- Name: ds_metric_classification FK_d49cd20cc90d3ae50c9e158dd8a; Type: FK CONSTRAINT; Schema: public; Owner: -
+-- Name: ds_metric_statistics FK_d493a008fb813ab53456c228509; Type: FK CONSTRAINT; Schema: public; Owner: -
 --
 
-ALTER TABLE ONLY public.ds_metric_classification
-    ADD CONSTRAINT "FK_d49cd20cc90d3ae50c9e158dd8a" FOREIGN KEY (application_dashboard_id) REFERENCES public.application_dashboards(id);
+ALTER TABLE ONLY public.ds_metric_statistics
+    ADD CONSTRAINT "FK_d493a008fb813ab53456c228509" FOREIGN KEY (metrics_source_id) REFERENCES public.metrics_sources(id);
 
 
 --
@@ -7252,6 +6218,14 @@ ALTER TABLE ONLY public.grafana_dashboards
 
 ALTER TABLE ONLY public.tracing_services
     ADD CONSTRAINT "FK_dc58a9f80e04fa36ab4748679cc" FOREIGN KEY (system_under_test_id) REFERENCES public.systems_under_test(id) ON DELETE CASCADE;
+
+
+--
+-- Name: ds_adapt_results FK_e47e2ef0c139c6b0d1c3a8fb709; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.ds_adapt_results
+    ADD CONSTRAINT "FK_e47e2ef0c139c6b0d1c3a8fb709" FOREIGN KEY (metrics_source_id) REFERENCES public.metrics_sources(id);
 
 
 --
@@ -7279,6 +6253,14 @@ ALTER TABLE ONLY public.ds_control_group_statistics
 
 
 --
+-- Name: scaling_sessions FK_e687f4ee2b7710a067a0510cf39; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.scaling_sessions
+    ADD CONSTRAINT "FK_e687f4ee2b7710a067a0510cf39" FOREIGN KEY (system_under_test_id) REFERENCES public.systems_under_test(id);
+
+
+--
 -- Name: application_dashboards FK_e7b0832c5e9bb206704c511f29c; Type: FK CONSTRAINT; Schema: public; Owner: -
 --
 
@@ -7295,11 +6277,11 @@ ALTER TABLE ONLY public.ds_panels
 
 
 --
--- Name: events FK_events_system_under_test; Type: FK CONSTRAINT; Schema: public; Owner: -
+-- Name: system_under_test_workloads FK_ee6788c3f8a05594142091b7c30; Type: FK CONSTRAINT; Schema: public; Owner: -
 --
 
-ALTER TABLE ONLY public.events
-    ADD CONSTRAINT "FK_events_system_under_test" FOREIGN KEY (system_under_test_id) REFERENCES public.systems_under_test(id) ON DELETE CASCADE;
+ALTER TABLE ONLY public.system_under_test_workloads
+    ADD CONSTRAINT "FK_ee6788c3f8a05594142091b7c30" FOREIGN KEY (system_under_test_test_environment_id) REFERENCES public.system_under_test_test_environments(id) ON DELETE CASCADE;
 
 
 --
@@ -7319,51 +6301,19 @@ ALTER TABLE ONLY public.application_dashboards
 
 
 --
+-- Name: team_members FK_fdad7d5768277e60c40e01cdcea; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.team_members
+    ADD CONSTRAINT "FK_fdad7d5768277e60c40e01cdcea" FOREIGN KEY (team_id) REFERENCES public.teams(id) ON DELETE CASCADE;
+
+
+--
 -- Name: teams FK_fdc736f761896ccc179c823a785; Type: FK CONSTRAINT; Schema: public; Owner: -
 --
 
 ALTER TABLE ONLY public.teams
     ADD CONSTRAINT "FK_fdc736f761896ccc179c823a785" FOREIGN KEY (organization_id) REFERENCES public.organizations(id);
-
-
---
--- Name: application_dashboards application_dashboards_grafana_dashboard_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
---
-
-ALTER TABLE ONLY public.application_dashboards
-    ADD CONSTRAINT application_dashboards_grafana_dashboard_id_fkey FOREIGN KEY (grafana_dashboard_id) REFERENCES public.grafana_dashboards(id) ON DELETE CASCADE;
-
-
---
--- Name: application_dashboards application_dashboards_grafana_instance_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
---
-
-ALTER TABLE ONLY public.application_dashboards
-    ADD CONSTRAINT application_dashboards_grafana_instance_id_fkey FOREIGN KEY (grafana_instance_id) REFERENCES public.grafana_instances(id) ON DELETE CASCADE;
-
-
---
--- Name: application_dashboards application_dashboards_system_under_test_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
---
-
-ALTER TABLE ONLY public.application_dashboards
-    ADD CONSTRAINT application_dashboards_system_under_test_id_fkey FOREIGN KEY (system_under_test_id) REFERENCES public.systems_under_test(id) ON DELETE CASCADE;
-
-
---
--- Name: systems_under_test applications_team_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
---
-
-ALTER TABLE ONLY public.systems_under_test
-    ADD CONSTRAINT applications_team_id_fkey FOREIGN KEY (team_id) REFERENCES public.teams(id);
-
-
---
--- Name: benchmarks benchmarks_system_under_test_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
---
-
-ALTER TABLE ONLY public.benchmarks
-    ADD CONSTRAINT benchmarks_system_under_test_id_fkey FOREIGN KEY (system_under_test_id) REFERENCES public.systems_under_test(id) ON DELETE CASCADE;
 
 
 --
@@ -7375,35 +6325,11 @@ ALTER TABLE ONLY public.check_results
 
 
 --
--- Name: compare_filter_presets compare_filter_presets_application_dashboard_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
---
-
-ALTER TABLE ONLY public.compare_filter_presets
-    ADD CONSTRAINT compare_filter_presets_application_dashboard_id_fkey FOREIGN KEY (application_dashboard_id) REFERENCES public.application_dashboards(id) ON DELETE SET NULL;
-
-
---
 -- Name: data_sources data_sources_organization_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
 --
 
 ALTER TABLE ONLY public.data_sources
     ADD CONSTRAINT data_sources_organization_id_fkey FOREIGN KEY (organization_id) REFERENCES public.organizations(id);
-
-
---
--- Name: deep_links deep_links_system_under_test_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
---
-
-ALTER TABLE ONLY public.deep_links
-    ADD CONSTRAINT deep_links_system_under_test_id_fkey FOREIGN KEY (system_under_test_id) REFERENCES public.systems_under_test(id) ON DELETE CASCADE;
-
-
---
--- Name: deep_links deep_links_template_deep_link_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
---
-
-ALTER TABLE ONLY public.deep_links
-    ADD CONSTRAINT deep_links_template_deep_link_id_fkey FOREIGN KEY (template_deep_link_id) REFERENCES public.generic_deep_links(id);
 
 
 --
@@ -7420,46 +6346,6 @@ ALTER TABLE ONLY public.ds_query_executions
 
 ALTER TABLE ONLY public.ds_query_executions
     ADD CONSTRAINT ds_query_executions_test_run_id_fkey FOREIGN KEY (test_run_id) REFERENCES public.test_runs(id);
-
-
---
--- Name: ds_tracked_differences ds_tracked_differences_test_run_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
---
-
-ALTER TABLE ONLY public.ds_tracked_differences
-    ADD CONSTRAINT ds_tracked_differences_test_run_id_fkey FOREIGN KEY (test_run_id) REFERENCES public.test_runs(id);
-
-
---
--- Name: expected_config_changes expected_config_changes_system_under_test_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
---
-
-ALTER TABLE ONLY public.expected_config_changes
-    ADD CONSTRAINT expected_config_changes_system_under_test_id_fkey FOREIGN KEY (system_under_test_id) REFERENCES public.systems_under_test(id) ON DELETE CASCADE;
-
-
---
--- Name: api_keys fk_api_keys_organization; Type: FK CONSTRAINT; Schema: public; Owner: -
---
-
-ALTER TABLE ONLY public.api_keys
-    ADD CONSTRAINT fk_api_keys_organization FOREIGN KEY (organization_id) REFERENCES public.organizations(id) ON DELETE CASCADE;
-
-
---
--- Name: application_dashboards fk_application_dashboards_organization; Type: FK CONSTRAINT; Schema: public; Owner: -
---
-
-ALTER TABLE ONLY public.application_dashboards
-    ADD CONSTRAINT fk_application_dashboards_organization FOREIGN KEY (organization_id) REFERENCES public.organizations(id) ON DELETE SET NULL;
-
-
---
--- Name: application_dashboards fk_application_dashboards_team; Type: FK CONSTRAINT; Schema: public; Owner: -
---
-
-ALTER TABLE ONLY public.application_dashboards
-    ADD CONSTRAINT fk_application_dashboards_team FOREIGN KEY (team_id) REFERENCES public.teams(id) ON DELETE SET NULL;
 
 
 --
@@ -7487,230 +6373,6 @@ ALTER TABLE ONLY public.awr_reports
 
 
 --
--- Name: ds_compare_config fk_ds_compare_config_application_dashboard; Type: FK CONSTRAINT; Schema: public; Owner: -
---
-
-ALTER TABLE ONLY public.ds_compare_config
-    ADD CONSTRAINT fk_ds_compare_config_application_dashboard FOREIGN KEY (application_dashboard_id) REFERENCES public.application_dashboards(id) ON DELETE CASCADE;
-
-
---
--- Name: ds_compare_config fk_ds_compare_config_system_under_test; Type: FK CONSTRAINT; Schema: public; Owner: -
---
-
-ALTER TABLE ONLY public.ds_compare_config
-    ADD CONSTRAINT fk_ds_compare_config_system_under_test FOREIGN KEY (system_under_test_id) REFERENCES public.systems_under_test(id);
-
-
---
--- Name: dynatrace_entity_mappings fk_dynatrace_entity_mappings_config; Type: FK CONSTRAINT; Schema: public; Owner: -
---
-
-ALTER TABLE ONLY public.dynatrace_entity_mappings
-    ADD CONSTRAINT fk_dynatrace_entity_mappings_config FOREIGN KEY (dynatrace_config_id) REFERENCES public.dynatrace_configs(id) ON DELETE CASCADE;
-
-
---
--- Name: dynatrace_entity_mappings fk_dynatrace_entity_mappings_system; Type: FK CONSTRAINT; Schema: public; Owner: -
---
-
-ALTER TABLE ONLY public.dynatrace_entity_mappings
-    ADD CONSTRAINT fk_dynatrace_entity_mappings_system FOREIGN KEY (system_under_test_id) REFERENCES public.systems_under_test(id) ON DELETE CASCADE;
-
-
---
--- Name: dynatrace_queries fk_dynatrace_queries_config; Type: FK CONSTRAINT; Schema: public; Owner: -
---
-
-ALTER TABLE ONLY public.dynatrace_queries
-    ADD CONSTRAINT fk_dynatrace_queries_config FOREIGN KEY (dynatrace_config_id) REFERENCES public.dynatrace_configs(id) ON DELETE CASCADE;
-
-
---
--- Name: generated_reports fk_generated_reports_template; Type: FK CONSTRAINT; Schema: public; Owner: -
---
-
-ALTER TABLE ONLY public.generated_reports
-    ADD CONSTRAINT fk_generated_reports_template FOREIGN KEY (template_id) REFERENCES public.report_templates(id) ON DELETE SET NULL;
-
-
---
--- Name: generated_reports fk_generated_reports_test_run; Type: FK CONSTRAINT; Schema: public; Owner: -
---
-
-ALTER TABLE ONLY public.generated_reports
-    ADD CONSTRAINT fk_generated_reports_test_run FOREIGN KEY (test_run_id) REFERENCES public.test_runs(id) ON DELETE CASCADE;
-
-
---
--- Name: grafana_dashboards fk_grafana_dashboards_organization; Type: FK CONSTRAINT; Schema: public; Owner: -
---
-
-ALTER TABLE ONLY public.grafana_dashboards
-    ADD CONSTRAINT fk_grafana_dashboards_organization FOREIGN KEY (organization_id) REFERENCES public.organizations(id) ON DELETE SET NULL;
-
-
---
--- Name: grafana_dashboards fk_grafana_dashboards_team; Type: FK CONSTRAINT; Schema: public; Owner: -
---
-
-ALTER TABLE ONLY public.grafana_dashboards
-    ADD CONSTRAINT fk_grafana_dashboards_team FOREIGN KEY (team_id) REFERENCES public.teams(id) ON DELETE SET NULL;
-
-
---
--- Name: grafana_instances fk_grafana_instances_organization; Type: FK CONSTRAINT; Schema: public; Owner: -
---
-
-ALTER TABLE ONLY public.grafana_instances
-    ADD CONSTRAINT fk_grafana_instances_organization FOREIGN KEY (organization_id) REFERENCES public.organizations(id) ON DELETE SET NULL;
-
-
---
--- Name: grafana_instances fk_grafana_instances_team; Type: FK CONSTRAINT; Schema: public; Owner: -
---
-
-ALTER TABLE ONLY public.grafana_instances
-    ADD CONSTRAINT fk_grafana_instances_team FOREIGN KEY (team_id) REFERENCES public.teams(id) ON DELETE SET NULL;
-
-
---
--- Name: notification_channels fk_notification_channels_system_under_test; Type: FK CONSTRAINT; Schema: public; Owner: -
---
-
-ALTER TABLE ONLY public.notification_channels
-    ADD CONSTRAINT fk_notification_channels_system_under_test FOREIGN KEY (system_under_test_id) REFERENCES public.systems_under_test(id) ON DELETE CASCADE;
-
-
---
--- Name: organization_members fk_organization_members_organization; Type: FK CONSTRAINT; Schema: public; Owner: -
---
-
-ALTER TABLE ONLY public.organization_members
-    ADD CONSTRAINT fk_organization_members_organization FOREIGN KEY (organization_id) REFERENCES public.organizations(id) ON DELETE CASCADE;
-
-
---
--- Name: profile_benchmarks fk_profile_benchmarks_profile; Type: FK CONSTRAINT; Schema: public; Owner: -
---
-
-ALTER TABLE ONLY public.profile_benchmarks
-    ADD CONSTRAINT fk_profile_benchmarks_profile FOREIGN KEY (profile_id) REFERENCES public.profiles(id) ON DELETE CASCADE;
-
-
---
--- Name: systems_under_test fk_systems_under_test_pyroscope_instance; Type: FK CONSTRAINT; Schema: public; Owner: -
---
-
-ALTER TABLE ONLY public.systems_under_test
-    ADD CONSTRAINT fk_systems_under_test_pyroscope_instance FOREIGN KEY (pyroscope_instance_id) REFERENCES public.pyroscope_instances(id) ON DELETE SET NULL;
-
-
---
--- Name: team_members fk_team_members_team; Type: FK CONSTRAINT; Schema: public; Owner: -
---
-
-ALTER TABLE ONLY public.team_members
-    ADD CONSTRAINT fk_team_members_team FOREIGN KEY (team_id) REFERENCES public.teams(id) ON DELETE CASCADE;
-
-
---
--- Name: tracing_services fk_tracing_services_instance; Type: FK CONSTRAINT; Schema: public; Owner: -
---
-
-ALTER TABLE ONLY public.tracing_services
-    ADD CONSTRAINT fk_tracing_services_instance FOREIGN KEY (tracing_instance_id) REFERENCES public.tracing_instances(id) ON DELETE CASCADE;
-
-
---
--- Name: tracing_services fk_tracing_services_system_under_test; Type: FK CONSTRAINT; Schema: public; Owner: -
---
-
-ALTER TABLE ONLY public.tracing_services
-    ADD CONSTRAINT fk_tracing_services_system_under_test FOREIGN KEY (system_under_test_id) REFERENCES public.systems_under_test(id) ON DELETE CASCADE;
-
-
---
--- Name: grafana_dashboards grafana_dashboards_grafana_instance_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
---
-
-ALTER TABLE ONLY public.grafana_dashboards
-    ADD CONSTRAINT grafana_dashboards_grafana_instance_id_fkey FOREIGN KEY (grafana_instance_id) REFERENCES public.grafana_instances(id) ON DELETE CASCADE;
-
-
---
--- Name: pending_ds_compare_config_changes pending_ds_compare_config_changes_ds_compare_config_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
---
-
-ALTER TABLE ONLY public.pending_ds_compare_config_changes
-    ADD CONSTRAINT pending_ds_compare_config_changes_ds_compare_config_id_fkey FOREIGN KEY (ds_compare_config_id) REFERENCES public.ds_compare_config(id) ON DELETE CASCADE;
-
-
---
--- Name: system_under_test_test_environments system_under_test_test_environments_system_under_test_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
---
-
-ALTER TABLE ONLY public.system_under_test_test_environments
-    ADD CONSTRAINT system_under_test_test_environments_system_under_test_id_fkey FOREIGN KEY (system_under_test_id) REFERENCES public.systems_under_test(id) ON DELETE CASCADE;
-
-
---
--- Name: system_under_test_workloads system_under_test_test_types_system_under_test_test_environment; Type: FK CONSTRAINT; Schema: public; Owner: -
---
-
-ALTER TABLE ONLY public.system_under_test_workloads
-    ADD CONSTRAINT system_under_test_test_types_system_under_test_test_environment FOREIGN KEY (system_under_test_test_environment_id) REFERENCES public.system_under_test_test_environments(id) ON DELETE CASCADE;
-
-
---
--- Name: teams teams_organization_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
---
-
-ALTER TABLE ONLY public.teams
-    ADD CONSTRAINT teams_organization_id_fkey FOREIGN KEY (organization_id) REFERENCES public.organizations(id) ON DELETE CASCADE;
-
-
---
--- Name: test_run_alerts test_run_alerts_test_run_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
---
-
-ALTER TABLE ONLY public.test_run_alerts
-    ADD CONSTRAINT test_run_alerts_test_run_id_fkey FOREIGN KEY (test_run_id) REFERENCES public.test_runs(id) ON DELETE CASCADE;
-
-
---
--- Name: test_run_configs test_run_configs_test_run_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
---
-
-ALTER TABLE ONLY public.test_run_configs
-    ADD CONSTRAINT test_run_configs_test_run_id_fkey FOREIGN KEY (test_run_id) REFERENCES public.test_runs(id) ON DELETE CASCADE;
-
-
---
--- Name: test_run_events test_run_events_test_run_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
---
-
-ALTER TABLE ONLY public.test_run_events
-    ADD CONSTRAINT test_run_events_test_run_id_fkey FOREIGN KEY (test_run_id) REFERENCES public.test_runs(id) ON DELETE CASCADE;
-
-
---
--- Name: test_runs test_runs_system_under_test_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
---
-
-ALTER TABLE ONLY public.test_runs
-    ADD CONSTRAINT test_runs_system_under_test_id_fkey FOREIGN KEY (system_under_test_id) REFERENCES public.systems_under_test(id);
-
-
---
--- Name: trends_filter_presets trends_filter_presets_application_dashboard_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
---
-
-ALTER TABLE ONLY public.trends_filter_presets
-    ADD CONSTRAINT trends_filter_presets_application_dashboard_id_fkey FOREIGN KEY (application_dashboard_id) REFERENCES public.application_dashboards(id) ON DELETE SET NULL;
-
-
---
 -- Name: workload_apdex_thresholds fk_workload_apdex_thresholds_system_under_test; Type: FK CONSTRAINT; Schema: public; Owner: -
 --
 
@@ -7727,6 +6389,30 @@ ALTER TABLE ONLY public.workload_transaction_apdex_thresholds
 
 
 --
+-- Name: pending_ds_compare_config_changes pending_ds_compare_config_changes_ds_compare_config_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.pending_ds_compare_config_changes
+    ADD CONSTRAINT pending_ds_compare_config_changes_ds_compare_config_id_fkey FOREIGN KEY (ds_compare_config_id) REFERENCES public.ds_compare_config(id) ON DELETE CASCADE;
+
+
+--
+-- Name: test_run_alerts test_run_alerts_test_run_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.test_run_alerts
+    ADD CONSTRAINT test_run_alerts_test_run_id_fkey FOREIGN KEY (test_run_id) REFERENCES public.test_runs(id) ON DELETE CASCADE;
+
+
+--
+-- Name: test_run_events test_run_events_test_run_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.test_run_events
+    ADD CONSTRAINT test_run_events_test_run_id_fkey FOREIGN KEY (test_run_id) REFERENCES public.test_runs(id) ON DELETE CASCADE;
+
+
+--
 -- Name: api_keys; Type: ROW SECURITY; Schema: public; Owner: -
 --
 
@@ -7737,6 +6423,12 @@ ALTER TABLE public.api_keys ENABLE ROW LEVEL SECURITY;
 --
 
 ALTER TABLE public.application_dashboards ENABLE ROW LEVEL SECURITY;
+
+--
+-- Name: audit_logs; Type: ROW SECURITY; Schema: public; Owner: -
+--
+
+ALTER TABLE public.audit_logs ENABLE ROW LEVEL SECURITY;
 
 --
 -- Name: benchmarks; Type: ROW SECURITY; Schema: public; Owner: -
@@ -7862,7 +6554,7 @@ ALTER TABLE public.report_templates ENABLE ROW LEVEL SECURITY;
 -- Name: api_keys rls_api_keys_delete; Type: POLICY; Schema: public; Owner: -
 --
 
-CREATE POLICY rls_api_keys_delete ON public.api_keys FOR DELETE USING (public.can_modify_resource(organization_id, team_id, (created_by)::text));
+CREATE POLICY rls_api_keys_delete ON public.api_keys FOR DELETE USING (public.can_modify_resource(organization_id, (created_by)::text));
 
 
 --
@@ -7876,14 +6568,14 @@ CREATE POLICY rls_api_keys_insert ON public.api_keys FOR INSERT WITH CHECK (true
 -- Name: api_keys rls_api_keys_select; Type: POLICY; Schema: public; Owner: -
 --
 
-CREATE POLICY rls_api_keys_select ON public.api_keys FOR SELECT USING (public.can_access_resource(organization_id, team_id, (created_by)::text));
+CREATE POLICY rls_api_keys_select ON public.api_keys FOR SELECT USING (public.can_access_resource(organization_id, (created_by)::text));
 
 
 --
 -- Name: api_keys rls_api_keys_update; Type: POLICY; Schema: public; Owner: -
 --
 
-CREATE POLICY rls_api_keys_update ON public.api_keys FOR UPDATE USING (public.can_modify_resource(organization_id, team_id, (created_by)::text));
+CREATE POLICY rls_api_keys_update ON public.api_keys FOR UPDATE USING (public.can_modify_resource(organization_id, (created_by)::text));
 
 
 --
@@ -7912,6 +6604,34 @@ CREATE POLICY rls_application_dashboards_select ON public.application_dashboards
 --
 
 CREATE POLICY rls_application_dashboards_update ON public.application_dashboards FOR UPDATE USING (public.can_modify_resource(organization_id, team_id, (created_by)::text));
+
+
+--
+-- Name: audit_logs rls_audit_logs_delete; Type: POLICY; Schema: public; Owner: -
+--
+
+CREATE POLICY rls_audit_logs_delete ON public.audit_logs FOR DELETE USING (public.is_global_admin());
+
+
+--
+-- Name: audit_logs rls_audit_logs_insert; Type: POLICY; Schema: public; Owner: -
+--
+
+CREATE POLICY rls_audit_logs_insert ON public.audit_logs FOR INSERT WITH CHECK (true);
+
+
+--
+-- Name: audit_logs rls_audit_logs_select; Type: POLICY; Schema: public; Owner: -
+--
+
+CREATE POLICY rls_audit_logs_select ON public.audit_logs FOR SELECT USING ((public.is_global_admin() OR ((organization_id IS NOT NULL) AND public.can_access_resource(organization_id, NULL::uuid, NULL::text))));
+
+
+--
+-- Name: audit_logs rls_audit_logs_update; Type: POLICY; Schema: public; Owner: -
+--
+
+CREATE POLICY rls_audit_logs_update ON public.audit_logs FOR UPDATE USING (public.is_global_admin());
 
 
 --
@@ -8170,28 +6890,36 @@ CREATE POLICY rls_expected_config_changes_update ON public.expected_config_chang
 -- Name: generated_reports rls_generated_reports_delete; Type: POLICY; Schema: public; Owner: -
 --
 
-CREATE POLICY rls_generated_reports_delete ON public.generated_reports FOR DELETE USING (public.can_modify_resource(organization_id, team_id, (created_by)::text));
+CREATE POLICY rls_generated_reports_delete ON public.generated_reports FOR DELETE USING ((public.is_global_admin() OR (EXISTS ( SELECT 1
+   FROM public.test_runs tr
+  WHERE ((tr.id = generated_reports.test_run_id) AND public.can_modify_resource(tr.organization_id, NULL::uuid, NULL::text))))));
 
 
 --
 -- Name: generated_reports rls_generated_reports_insert; Type: POLICY; Schema: public; Owner: -
 --
 
-CREATE POLICY rls_generated_reports_insert ON public.generated_reports FOR INSERT WITH CHECK (true);
+CREATE POLICY rls_generated_reports_insert ON public.generated_reports FOR INSERT WITH CHECK ((public.is_global_admin() OR (EXISTS ( SELECT 1
+   FROM public.test_runs tr
+  WHERE ((tr.id = generated_reports.test_run_id) AND public.can_access_resource(tr.organization_id, NULL::uuid, NULL::text))))));
 
 
 --
 -- Name: generated_reports rls_generated_reports_select; Type: POLICY; Schema: public; Owner: -
 --
 
-CREATE POLICY rls_generated_reports_select ON public.generated_reports FOR SELECT USING (public.can_access_resource(organization_id, team_id, (created_by)::text));
+CREATE POLICY rls_generated_reports_select ON public.generated_reports FOR SELECT USING ((public.is_global_admin() OR (EXISTS ( SELECT 1
+   FROM public.test_runs tr
+  WHERE ((tr.id = generated_reports.test_run_id) AND public.can_access_resource(tr.organization_id, NULL::uuid, NULL::text))))));
 
 
 --
 -- Name: generated_reports rls_generated_reports_update; Type: POLICY; Schema: public; Owner: -
 --
 
-CREATE POLICY rls_generated_reports_update ON public.generated_reports FOR UPDATE USING (public.can_modify_resource(organization_id, team_id, (created_by)::text));
+CREATE POLICY rls_generated_reports_update ON public.generated_reports FOR UPDATE USING ((public.is_global_admin() OR (EXISTS ( SELECT 1
+   FROM public.test_runs tr
+  WHERE ((tr.id = generated_reports.test_run_id) AND public.can_modify_resource(tr.organization_id, NULL::uuid, NULL::text))))));
 
 
 --
@@ -8332,6 +7060,62 @@ CREATE POLICY rls_notification_channels_select ON public.notification_channels F
 --
 
 CREATE POLICY rls_notification_channels_update ON public.notification_channels FOR UPDATE USING (public.can_modify_resource(organization_id, team_id, (created_by)::text));
+
+
+--
+-- Name: profile_benchmarks rls_profile_benchmarks_delete; Type: POLICY; Schema: public; Owner: -
+--
+
+CREATE POLICY rls_profile_benchmarks_delete ON public.profile_benchmarks FOR DELETE USING (public.can_modify_resource(organization_id, team_id, (created_by)::text));
+
+
+--
+-- Name: profile_benchmarks rls_profile_benchmarks_insert; Type: POLICY; Schema: public; Owner: -
+--
+
+CREATE POLICY rls_profile_benchmarks_insert ON public.profile_benchmarks FOR INSERT WITH CHECK (true);
+
+
+--
+-- Name: profile_benchmarks rls_profile_benchmarks_select; Type: POLICY; Schema: public; Owner: -
+--
+
+CREATE POLICY rls_profile_benchmarks_select ON public.profile_benchmarks FOR SELECT USING (public.can_access_resource(organization_id, team_id, (created_by)::text));
+
+
+--
+-- Name: profile_benchmarks rls_profile_benchmarks_update; Type: POLICY; Schema: public; Owner: -
+--
+
+CREATE POLICY rls_profile_benchmarks_update ON public.profile_benchmarks FOR UPDATE USING (public.can_modify_resource(organization_id, team_id, (created_by)::text));
+
+
+--
+-- Name: profile_grafana_dashboards rls_profile_grafana_dashboards_delete; Type: POLICY; Schema: public; Owner: -
+--
+
+CREATE POLICY rls_profile_grafana_dashboards_delete ON public.profile_grafana_dashboards FOR DELETE USING (public.can_modify_resource(organization_id, team_id, (created_by)::text));
+
+
+--
+-- Name: profile_grafana_dashboards rls_profile_grafana_dashboards_insert; Type: POLICY; Schema: public; Owner: -
+--
+
+CREATE POLICY rls_profile_grafana_dashboards_insert ON public.profile_grafana_dashboards FOR INSERT WITH CHECK (true);
+
+
+--
+-- Name: profile_grafana_dashboards rls_profile_grafana_dashboards_select; Type: POLICY; Schema: public; Owner: -
+--
+
+CREATE POLICY rls_profile_grafana_dashboards_select ON public.profile_grafana_dashboards FOR SELECT USING (public.can_access_resource(organization_id, team_id, (created_by)::text));
+
+
+--
+-- Name: profile_grafana_dashboards rls_profile_grafana_dashboards_update; Type: POLICY; Schema: public; Owner: -
+--
+
+CREATE POLICY rls_profile_grafana_dashboards_update ON public.profile_grafana_dashboards FOR UPDATE USING (public.can_modify_resource(organization_id, team_id, (created_by)::text));
 
 
 --
@@ -8562,28 +7346,28 @@ CREATE POLICY rls_trends_filter_presets_update ON public.trends_filter_presets F
 -- Name: url_patterns rls_url_patterns_delete; Type: POLICY; Schema: public; Owner: -
 --
 
-CREATE POLICY rls_url_patterns_delete ON public.url_patterns FOR DELETE USING (public.can_modify_resource(organization_id, team_id, (created_by)::text));
+CREATE POLICY rls_url_patterns_delete ON public.url_patterns FOR DELETE USING (public.is_global_admin());
 
 
 --
 -- Name: url_patterns rls_url_patterns_insert; Type: POLICY; Schema: public; Owner: -
 --
 
-CREATE POLICY rls_url_patterns_insert ON public.url_patterns FOR INSERT WITH CHECK ((public.is_global_admin() OR public.can_access_resource(organization_id, team_id, (created_by)::text)));
+CREATE POLICY rls_url_patterns_insert ON public.url_patterns FOR INSERT WITH CHECK (true);
 
 
 --
 -- Name: url_patterns rls_url_patterns_select; Type: POLICY; Schema: public; Owner: -
 --
 
-CREATE POLICY rls_url_patterns_select ON public.url_patterns FOR SELECT USING (public.can_access_resource(organization_id, team_id, (created_by)::text));
+CREATE POLICY rls_url_patterns_select ON public.url_patterns FOR SELECT USING (true);
 
 
 --
 -- Name: url_patterns rls_url_patterns_update; Type: POLICY; Schema: public; Owner: -
 --
 
-CREATE POLICY rls_url_patterns_update ON public.url_patterns FOR UPDATE USING (public.can_modify_resource(organization_id, team_id, (created_by)::text));
+CREATE POLICY rls_url_patterns_update ON public.url_patterns FOR UPDATE USING (public.is_global_admin());
 
 
 --
@@ -8621,6 +7405,999 @@ ALTER TABLE public.trends_filter_presets ENABLE ROW LEVEL SECURITY;
 --
 
 ALTER TABLE public.url_patterns ENABLE ROW LEVEL SECURITY;
+
+--
+-- Name: SCHEMA public; Type: ACL; Schema: -; Owner: -
+--
+
+GRANT USAGE ON SCHEMA public TO perfana_app;
+GRANT USAGE ON SCHEMA public TO perfana_system;
+
+
+--
+-- Name: FUNCTION can_access_resource(resource_org_id uuid, resource_created_by text); Type: ACL; Schema: public; Owner: -
+--
+
+GRANT ALL ON FUNCTION public.can_access_resource(resource_org_id uuid, resource_created_by text) TO perfana_app;
+GRANT ALL ON FUNCTION public.can_access_resource(resource_org_id uuid, resource_created_by text) TO perfana_system;
+
+
+--
+-- Name: FUNCTION can_access_resource(resource_org_id uuid, resource_team_id uuid, resource_created_by text); Type: ACL; Schema: public; Owner: -
+--
+
+GRANT ALL ON FUNCTION public.can_access_resource(resource_org_id uuid, resource_team_id uuid, resource_created_by text) TO perfana_app;
+GRANT ALL ON FUNCTION public.can_access_resource(resource_org_id uuid, resource_team_id uuid, resource_created_by text) TO perfana_system;
+
+
+--
+-- Name: FUNCTION can_modify_resource(resource_org_id uuid, resource_created_by text); Type: ACL; Schema: public; Owner: -
+--
+
+GRANT ALL ON FUNCTION public.can_modify_resource(resource_org_id uuid, resource_created_by text) TO perfana_app;
+GRANT ALL ON FUNCTION public.can_modify_resource(resource_org_id uuid, resource_created_by text) TO perfana_system;
+
+
+--
+-- Name: FUNCTION can_modify_resource(resource_org_id uuid, resource_team_id uuid, resource_created_by text); Type: ACL; Schema: public; Owner: -
+--
+
+GRANT ALL ON FUNCTION public.can_modify_resource(resource_org_id uuid, resource_team_id uuid, resource_created_by text) TO perfana_app;
+GRANT ALL ON FUNCTION public.can_modify_resource(resource_org_id uuid, resource_team_id uuid, resource_created_by text) TO perfana_system;
+
+
+--
+-- Name: FUNCTION current_user_id(); Type: ACL; Schema: public; Owner: -
+--
+
+GRANT ALL ON FUNCTION public.current_user_id() TO perfana_app;
+GRANT ALL ON FUNCTION public.current_user_id() TO perfana_system;
+
+
+--
+-- Name: FUNCTION current_user_organizations(); Type: ACL; Schema: public; Owner: -
+--
+
+GRANT ALL ON FUNCTION public.current_user_organizations() TO perfana_app;
+GRANT ALL ON FUNCTION public.current_user_organizations() TO perfana_system;
+
+
+--
+-- Name: FUNCTION current_user_teams(); Type: ACL; Schema: public; Owner: -
+--
+
+GRANT ALL ON FUNCTION public.current_user_teams() TO perfana_app;
+GRANT ALL ON FUNCTION public.current_user_teams() TO perfana_system;
+
+
+--
+-- Name: FUNCTION is_global_admin(); Type: ACL; Schema: public; Owner: -
+--
+
+GRANT ALL ON FUNCTION public.is_global_admin() TO perfana_app;
+GRANT ALL ON FUNCTION public.is_global_admin() TO perfana_system;
+
+
+--
+-- Name: FUNCTION mark_results_fresh_on_analysis(); Type: ACL; Schema: public; Owner: -
+--
+
+GRANT ALL ON FUNCTION public.mark_results_fresh_on_analysis() TO perfana_system;
+
+
+--
+-- Name: FUNCTION mark_results_stale_on_config_change(); Type: ACL; Schema: public; Owner: -
+--
+
+GRANT ALL ON FUNCTION public.mark_results_stale_on_config_change() TO perfana_system;
+
+
+--
+-- Name: FUNCTION migrate_benchmark_from_mongodb(p_application character varying, p_test_environment character varying, p_test_type character varying, p_grafana character varying, p_dashboard_label character varying, p_dashboard_id integer, p_dashboard_uid character varying, p_panel jsonb, p_generic_check_id character varying, p_application_dashboard_id character varying, p_valid boolean); Type: ACL; Schema: public; Owner: -
+--
+
+GRANT ALL ON FUNCTION public.migrate_benchmark_from_mongodb(p_application character varying, p_test_environment character varying, p_test_type character varying, p_grafana character varying, p_dashboard_label character varying, p_dashboard_id integer, p_dashboard_uid character varying, p_panel jsonb, p_generic_check_id character varying, p_application_dashboard_id character varying, p_valid boolean) TO perfana_system;
+
+
+--
+-- Name: FUNCTION percentile_agg_finalfunc(vals double precision[]); Type: ACL; Schema: public; Owner: -
+--
+
+GRANT ALL ON FUNCTION public.percentile_agg_finalfunc(vals double precision[]) TO perfana_system;
+
+
+--
+-- Name: FUNCTION tags_hash(tags text[]); Type: ACL; Schema: public; Owner: -
+--
+
+GRANT ALL ON FUNCTION public.tags_hash(tags text[]) TO perfana_system;
+
+
+--
+-- Name: FUNCTION update_deep_links_updated_at(); Type: ACL; Schema: public; Owner: -
+--
+
+GRANT ALL ON FUNCTION public.update_deep_links_updated_at() TO perfana_system;
+
+
+--
+-- Name: FUNCTION update_generic_deep_links_updated_at(); Type: ACL; Schema: public; Owner: -
+--
+
+GRANT ALL ON FUNCTION public.update_generic_deep_links_updated_at() TO perfana_system;
+
+
+--
+-- Name: FUNCTION update_graph_preset_timestamp(); Type: ACL; Schema: public; Owner: -
+--
+
+GRANT ALL ON FUNCTION public.update_graph_preset_timestamp() TO perfana_system;
+
+
+--
+-- Name: FUNCTION update_graph_presets_updated_at(); Type: ACL; Schema: public; Owner: -
+--
+
+GRANT ALL ON FUNCTION public.update_graph_presets_updated_at() TO perfana_system;
+
+
+--
+-- Name: FUNCTION update_tracing_instance_timestamp(); Type: ACL; Schema: public; Owner: -
+--
+
+GRANT ALL ON FUNCTION public.update_tracing_instance_timestamp() TO perfana_system;
+
+
+--
+-- Name: FUNCTION update_tracing_service_timestamp(); Type: ACL; Schema: public; Owner: -
+--
+
+GRANT ALL ON FUNCTION public.update_tracing_service_timestamp() TO perfana_system;
+
+
+--
+-- Name: FUNCTION update_transaction_apdex_threshold_timestamp(); Type: ACL; Schema: public; Owner: -
+--
+
+GRANT ALL ON FUNCTION public.update_transaction_apdex_threshold_timestamp() TO perfana_system;
+
+
+--
+-- Name: FUNCTION update_updated_at_column(); Type: ACL; Schema: public; Owner: -
+--
+
+GRANT ALL ON FUNCTION public.update_updated_at_column() TO perfana_system;
+
+
+--
+-- Name: FUNCTION update_workload_apdex_threshold_timestamp(); Type: ACL; Schema: public; Owner: -
+--
+
+GRANT ALL ON FUNCTION public.update_workload_apdex_threshold_timestamp() TO perfana_system;
+
+
+--
+-- Name: FUNCTION update_workload_transaction_apdex_threshold_timestamp(); Type: ACL; Schema: public; Owner: -
+--
+
+GRANT ALL ON FUNCTION public.update_workload_transaction_apdex_threshold_timestamp() TO perfana_system;
+
+
+--
+-- Name: FUNCTION validate_benchmark_configuration(); Type: ACL; Schema: public; Owner: -
+--
+
+GRANT ALL ON FUNCTION public.validate_benchmark_configuration() TO perfana_app;
+GRANT ALL ON FUNCTION public.validate_benchmark_configuration() TO perfana_system;
+
+
+--
+-- Name: TABLE requests_raw; Type: ACL; Schema: public; Owner: -
+--
+
+GRANT SELECT,INSERT,DELETE,UPDATE ON TABLE public.requests_raw TO perfana_app;
+GRANT SELECT,INSERT,DELETE,UPDATE ON TABLE public.requests_raw TO perfana_system;
+
+
+--
+-- Name: TABLE requests_raw_5s; Type: ACL; Schema: public; Owner: -
+--
+
+GRANT SELECT,INSERT,DELETE,UPDATE ON TABLE public.requests_raw_5s TO perfana_app;
+GRANT SELECT,INSERT,DELETE,UPDATE ON TABLE public.requests_raw_5s TO perfana_system;
+
+
+--
+-- Name: TABLE requests_raw_1m; Type: ACL; Schema: public; Owner: -
+--
+
+GRANT SELECT,INSERT,DELETE,UPDATE ON TABLE public.requests_raw_1m TO perfana_app;
+GRANT SELECT,INSERT,DELETE,UPDATE ON TABLE public.requests_raw_1m TO perfana_system;
+
+
+--
+-- Name: TABLE transactions; Type: ACL; Schema: public; Owner: -
+--
+
+GRANT SELECT,INSERT,DELETE,UPDATE ON TABLE public.transactions TO perfana_app;
+GRANT SELECT,INSERT,DELETE,UPDATE ON TABLE public.transactions TO perfana_system;
+
+
+--
+-- Name: TABLE transactions_5s; Type: ACL; Schema: public; Owner: -
+--
+
+GRANT SELECT,INSERT,DELETE,UPDATE ON TABLE public.transactions_5s TO perfana_app;
+GRANT SELECT,INSERT,DELETE,UPDATE ON TABLE public.transactions_5s TO perfana_system;
+
+
+--
+-- Name: TABLE transactions_1m; Type: ACL; Schema: public; Owner: -
+--
+
+GRANT SELECT,INSERT,DELETE,UPDATE ON TABLE public.transactions_1m TO perfana_app;
+GRANT SELECT,INSERT,DELETE,UPDATE ON TABLE public.transactions_1m TO perfana_system;
+
+
+--
+-- Name: TABLE requests_error; Type: ACL; Schema: public; Owner: -
+--
+
+GRANT SELECT,INSERT,DELETE,UPDATE ON TABLE public.requests_error TO perfana_app;
+GRANT SELECT,INSERT,DELETE,UPDATE ON TABLE public.requests_error TO perfana_system;
+
+
+--
+-- Name: TABLE requests_error_5s; Type: ACL; Schema: public; Owner: -
+--
+
+GRANT SELECT,INSERT,DELETE,UPDATE ON TABLE public.requests_error_5s TO perfana_app;
+GRANT SELECT,INSERT,DELETE,UPDATE ON TABLE public.requests_error_5s TO perfana_system;
+
+
+--
+-- Name: TABLE requests_error_1m; Type: ACL; Schema: public; Owner: -
+--
+
+GRANT SELECT,INSERT,DELETE,UPDATE ON TABLE public.requests_error_1m TO perfana_app;
+GRANT SELECT,INSERT,DELETE,UPDATE ON TABLE public.requests_error_1m TO perfana_system;
+
+
+--
+-- Name: TABLE transactions_passed_5s; Type: ACL; Schema: public; Owner: -
+--
+
+GRANT SELECT,INSERT,DELETE,UPDATE ON TABLE public.transactions_passed_5s TO perfana_app;
+GRANT SELECT,INSERT,DELETE,UPDATE ON TABLE public.transactions_passed_5s TO perfana_system;
+
+
+--
+-- Name: TABLE transactions_passed_1m; Type: ACL; Schema: public; Owner: -
+--
+
+GRANT SELECT,INSERT,DELETE,UPDATE ON TABLE public.transactions_passed_1m TO perfana_app;
+GRANT SELECT,INSERT,DELETE,UPDATE ON TABLE public.transactions_passed_1m TO perfana_system;
+
+
+--
+-- Name: TABLE requests_raw_passed_5s; Type: ACL; Schema: public; Owner: -
+--
+
+GRANT SELECT,INSERT,DELETE,UPDATE ON TABLE public.requests_raw_passed_5s TO perfana_app;
+GRANT SELECT,INSERT,DELETE,UPDATE ON TABLE public.requests_raw_passed_5s TO perfana_system;
+
+
+--
+-- Name: TABLE requests_raw_passed_1m; Type: ACL; Schema: public; Owner: -
+--
+
+GRANT SELECT,INSERT,DELETE,UPDATE ON TABLE public.requests_raw_passed_1m TO perfana_app;
+GRANT SELECT,INSERT,DELETE,UPDATE ON TABLE public.requests_raw_passed_1m TO perfana_system;
+
+
+--
+-- Name: TABLE ds_metrics; Type: ACL; Schema: public; Owner: -
+--
+
+GRANT SELECT,INSERT,DELETE,UPDATE ON TABLE public.ds_metrics TO perfana_app;
+GRANT SELECT,INSERT,DELETE,UPDATE ON TABLE public.ds_metrics TO perfana_system;
+
+
+--
+-- Name: TABLE virtual_users; Type: ACL; Schema: public; Owner: -
+--
+
+GRANT SELECT,INSERT,DELETE,UPDATE ON TABLE public.virtual_users TO perfana_app;
+GRANT SELECT,INSERT,DELETE,UPDATE ON TABLE public.virtual_users TO perfana_system;
+
+
+--
+-- Name: TABLE alert_tag_filters; Type: ACL; Schema: public; Owner: -
+--
+
+GRANT SELECT,INSERT,DELETE,UPDATE ON TABLE public.alert_tag_filters TO perfana_app;
+GRANT SELECT,INSERT,DELETE,UPDATE ON TABLE public.alert_tag_filters TO perfana_system;
+
+
+--
+-- Name: TABLE api_keys; Type: ACL; Schema: public; Owner: -
+--
+
+GRANT SELECT,INSERT,DELETE,UPDATE ON TABLE public.api_keys TO perfana_app;
+GRANT SELECT,INSERT,DELETE,UPDATE ON TABLE public.api_keys TO perfana_system;
+
+
+--
+-- Name: TABLE application_dashboards; Type: ACL; Schema: public; Owner: -
+--
+
+GRANT SELECT,INSERT,DELETE,UPDATE ON TABLE public.application_dashboards TO perfana_app;
+GRANT SELECT,INSERT,DELETE,UPDATE ON TABLE public.application_dashboards TO perfana_system;
+
+
+--
+-- Name: TABLE audit_logs; Type: ACL; Schema: public; Owner: -
+--
+
+GRANT SELECT,INSERT,DELETE,UPDATE ON TABLE public.audit_logs TO perfana_app;
+GRANT SELECT,INSERT,DELETE,UPDATE ON TABLE public.audit_logs TO perfana_system;
+
+
+--
+-- Name: TABLE audit_logs_2026_05; Type: ACL; Schema: public; Owner: -
+--
+
+GRANT SELECT,INSERT,DELETE,UPDATE ON TABLE public.audit_logs_2026_05 TO perfana_app;
+GRANT SELECT,INSERT,DELETE,UPDATE ON TABLE public.audit_logs_2026_05 TO perfana_system;
+
+
+--
+-- Name: TABLE audit_logs_2026_06; Type: ACL; Schema: public; Owner: -
+--
+
+GRANT SELECT,INSERT,DELETE,UPDATE ON TABLE public.audit_logs_2026_06 TO perfana_app;
+GRANT SELECT,INSERT,DELETE,UPDATE ON TABLE public.audit_logs_2026_06 TO perfana_system;
+
+
+--
+-- Name: TABLE audit_logs_2026_07; Type: ACL; Schema: public; Owner: -
+--
+
+GRANT SELECT,INSERT,DELETE,UPDATE ON TABLE public.audit_logs_2026_07 TO perfana_app;
+GRANT SELECT,INSERT,DELETE,UPDATE ON TABLE public.audit_logs_2026_07 TO perfana_system;
+
+
+--
+-- Name: TABLE awr_analysis; Type: ACL; Schema: public; Owner: -
+--
+
+GRANT SELECT,INSERT,DELETE,UPDATE ON TABLE public.awr_analysis TO perfana_app;
+GRANT SELECT,INSERT,DELETE,UPDATE ON TABLE public.awr_analysis TO perfana_system;
+
+
+--
+-- Name: TABLE awr_reports; Type: ACL; Schema: public; Owner: -
+--
+
+GRANT SELECT,INSERT,DELETE,UPDATE ON TABLE public.awr_reports TO perfana_app;
+GRANT SELECT,INSERT,DELETE,UPDATE ON TABLE public.awr_reports TO perfana_system;
+
+
+--
+-- Name: TABLE benchmarks; Type: ACL; Schema: public; Owner: -
+--
+
+GRANT SELECT,INSERT,DELETE,UPDATE ON TABLE public.benchmarks TO perfana_app;
+GRANT SELECT,INSERT,DELETE,UPDATE ON TABLE public.benchmarks TO perfana_system;
+
+
+--
+-- Name: TABLE grafana_dashboards; Type: ACL; Schema: public; Owner: -
+--
+
+GRANT SELECT,INSERT,DELETE,UPDATE ON TABLE public.grafana_dashboards TO perfana_app;
+GRANT SELECT,INSERT,DELETE,UPDATE ON TABLE public.grafana_dashboards TO perfana_system;
+
+
+--
+-- Name: TABLE grafana_instances; Type: ACL; Schema: public; Owner: -
+--
+
+GRANT SELECT,INSERT,DELETE,UPDATE ON TABLE public.grafana_instances TO perfana_app;
+GRANT SELECT,INSERT,DELETE,UPDATE ON TABLE public.grafana_instances TO perfana_system;
+
+
+--
+-- Name: TABLE systems_under_test; Type: ACL; Schema: public; Owner: -
+--
+
+GRANT SELECT,INSERT,DELETE,UPDATE ON TABLE public.systems_under_test TO perfana_app;
+GRANT SELECT,INSERT,DELETE,UPDATE ON TABLE public.systems_under_test TO perfana_system;
+
+
+--
+-- Name: TABLE benchmarks_view; Type: ACL; Schema: public; Owner: -
+--
+
+GRANT SELECT,INSERT,DELETE,UPDATE ON TABLE public.benchmarks_view TO perfana_app;
+GRANT SELECT,INSERT,DELETE,UPDATE ON TABLE public.benchmarks_view TO perfana_system;
+
+
+--
+-- Name: TABLE check_results; Type: ACL; Schema: public; Owner: -
+--
+
+GRANT SELECT,INSERT,DELETE,UPDATE ON TABLE public.check_results TO perfana_app;
+GRANT SELECT,INSERT,DELETE,UPDATE ON TABLE public.check_results TO perfana_system;
+
+
+--
+-- Name: TABLE compare_filter_presets; Type: ACL; Schema: public; Owner: -
+--
+
+GRANT SELECT,INSERT,DELETE,UPDATE ON TABLE public.compare_filter_presets TO perfana_app;
+GRANT SELECT,INSERT,DELETE,UPDATE ON TABLE public.compare_filter_presets TO perfana_system;
+
+
+--
+-- Name: TABLE configuration; Type: ACL; Schema: public; Owner: -
+--
+
+GRANT SELECT,INSERT,DELETE,UPDATE ON TABLE public.configuration TO perfana_app;
+GRANT SELECT,INSERT,DELETE,UPDATE ON TABLE public.configuration TO perfana_system;
+
+
+--
+-- Name: TABLE data_sources; Type: ACL; Schema: public; Owner: -
+--
+
+GRANT SELECT,INSERT,DELETE,UPDATE ON TABLE public.data_sources TO perfana_app;
+GRANT SELECT,INSERT,DELETE,UPDATE ON TABLE public.data_sources TO perfana_system;
+
+
+--
+-- Name: TABLE deep_links; Type: ACL; Schema: public; Owner: -
+--
+
+GRANT SELECT,INSERT,DELETE,UPDATE ON TABLE public.deep_links TO perfana_app;
+GRANT SELECT,INSERT,DELETE,UPDATE ON TABLE public.deep_links TO perfana_system;
+
+
+--
+-- Name: TABLE ds_adapt_conclusion; Type: ACL; Schema: public; Owner: -
+--
+
+GRANT SELECT,INSERT,DELETE,UPDATE ON TABLE public.ds_adapt_conclusion TO perfana_app;
+GRANT SELECT,INSERT,DELETE,UPDATE ON TABLE public.ds_adapt_conclusion TO perfana_system;
+
+
+--
+-- Name: TABLE ds_adapt_results; Type: ACL; Schema: public; Owner: -
+--
+
+GRANT SELECT,INSERT,DELETE,UPDATE ON TABLE public.ds_adapt_results TO perfana_app;
+GRANT SELECT,INSERT,DELETE,UPDATE ON TABLE public.ds_adapt_results TO perfana_system;
+
+
+--
+-- Name: TABLE ds_adapt_tracked_results; Type: ACL; Schema: public; Owner: -
+--
+
+GRANT SELECT,INSERT,DELETE,UPDATE ON TABLE public.ds_adapt_tracked_results TO perfana_app;
+GRANT SELECT,INSERT,DELETE,UPDATE ON TABLE public.ds_adapt_tracked_results TO perfana_system;
+
+
+--
+-- Name: TABLE ds_change_points; Type: ACL; Schema: public; Owner: -
+--
+
+GRANT SELECT,INSERT,DELETE,UPDATE ON TABLE public.ds_change_points TO perfana_app;
+GRANT SELECT,INSERT,DELETE,UPDATE ON TABLE public.ds_change_points TO perfana_system;
+
+
+--
+-- Name: SEQUENCE ds_change_points_id_seq; Type: ACL; Schema: public; Owner: -
+--
+
+GRANT SELECT,USAGE ON SEQUENCE public.ds_change_points_id_seq TO perfana_app;
+GRANT SELECT,USAGE ON SEQUENCE public.ds_change_points_id_seq TO perfana_system;
+
+
+--
+-- Name: TABLE ds_compare_config; Type: ACL; Schema: public; Owner: -
+--
+
+GRANT SELECT,INSERT,DELETE,UPDATE ON TABLE public.ds_compare_config TO perfana_app;
+GRANT SELECT,INSERT,DELETE,UPDATE ON TABLE public.ds_compare_config TO perfana_system;
+
+
+--
+-- Name: TABLE ds_control_group_statistics; Type: ACL; Schema: public; Owner: -
+--
+
+GRANT SELECT,INSERT,DELETE,UPDATE ON TABLE public.ds_control_group_statistics TO perfana_app;
+GRANT SELECT,INSERT,DELETE,UPDATE ON TABLE public.ds_control_group_statistics TO perfana_system;
+
+
+--
+-- Name: SEQUENCE ds_control_group_statistics_id_seq; Type: ACL; Schema: public; Owner: -
+--
+
+GRANT SELECT,USAGE ON SEQUENCE public.ds_control_group_statistics_id_seq TO perfana_app;
+GRANT SELECT,USAGE ON SEQUENCE public.ds_control_group_statistics_id_seq TO perfana_system;
+
+
+--
+-- Name: TABLE ds_control_groups; Type: ACL; Schema: public; Owner: -
+--
+
+GRANT SELECT,INSERT,DELETE,UPDATE ON TABLE public.ds_control_groups TO perfana_app;
+GRANT SELECT,INSERT,DELETE,UPDATE ON TABLE public.ds_control_groups TO perfana_system;
+
+
+--
+-- Name: SEQUENCE ds_control_groups_id_seq; Type: ACL; Schema: public; Owner: -
+--
+
+GRANT SELECT,USAGE ON SEQUENCE public.ds_control_groups_id_seq TO perfana_app;
+GRANT SELECT,USAGE ON SEQUENCE public.ds_control_groups_id_seq TO perfana_system;
+
+
+--
+-- Name: TABLE ds_metric_collection_status; Type: ACL; Schema: public; Owner: -
+--
+
+GRANT SELECT,INSERT,DELETE,UPDATE ON TABLE public.ds_metric_collection_status TO perfana_app;
+GRANT SELECT,INSERT,DELETE,UPDATE ON TABLE public.ds_metric_collection_status TO perfana_system;
+
+
+--
+-- Name: TABLE ds_metric_statistics; Type: ACL; Schema: public; Owner: -
+--
+
+GRANT SELECT,INSERT,DELETE,UPDATE ON TABLE public.ds_metric_statistics TO perfana_app;
+GRANT SELECT,INSERT,DELETE,UPDATE ON TABLE public.ds_metric_statistics TO perfana_system;
+
+
+--
+-- Name: TABLE ds_panels; Type: ACL; Schema: public; Owner: -
+--
+
+GRANT SELECT,INSERT,DELETE,UPDATE ON TABLE public.ds_panels TO perfana_app;
+GRANT SELECT,INSERT,DELETE,UPDATE ON TABLE public.ds_panels TO perfana_system;
+
+
+--
+-- Name: SEQUENCE ds_panels_id_seq; Type: ACL; Schema: public; Owner: -
+--
+
+GRANT SELECT,USAGE ON SEQUENCE public.ds_panels_id_seq TO perfana_app;
+GRANT SELECT,USAGE ON SEQUENCE public.ds_panels_id_seq TO perfana_system;
+
+
+--
+-- Name: TABLE ds_queries; Type: ACL; Schema: public; Owner: -
+--
+
+GRANT SELECT,INSERT,DELETE,UPDATE ON TABLE public.ds_queries TO perfana_app;
+GRANT SELECT,INSERT,DELETE,UPDATE ON TABLE public.ds_queries TO perfana_system;
+
+
+--
+-- Name: TABLE ds_query_executions; Type: ACL; Schema: public; Owner: -
+--
+
+GRANT SELECT,INSERT,DELETE,UPDATE ON TABLE public.ds_query_executions TO perfana_app;
+GRANT SELECT,INSERT,DELETE,UPDATE ON TABLE public.ds_query_executions TO perfana_system;
+
+
+--
+-- Name: TABLE ds_tracked_differences; Type: ACL; Schema: public; Owner: -
+--
+
+GRANT SELECT,INSERT,DELETE,UPDATE ON TABLE public.ds_tracked_differences TO perfana_app;
+GRANT SELECT,INSERT,DELETE,UPDATE ON TABLE public.ds_tracked_differences TO perfana_system;
+
+
+--
+-- Name: TABLE dynatrace_configs; Type: ACL; Schema: public; Owner: -
+--
+
+GRANT SELECT,INSERT,DELETE,UPDATE ON TABLE public.dynatrace_configs TO perfana_app;
+GRANT SELECT,INSERT,DELETE,UPDATE ON TABLE public.dynatrace_configs TO perfana_system;
+
+
+--
+-- Name: TABLE dynatrace_entity_mappings; Type: ACL; Schema: public; Owner: -
+--
+
+GRANT SELECT,INSERT,DELETE,UPDATE ON TABLE public.dynatrace_entity_mappings TO perfana_app;
+GRANT SELECT,INSERT,DELETE,UPDATE ON TABLE public.dynatrace_entity_mappings TO perfana_system;
+
+
+--
+-- Name: TABLE dynatrace_queries; Type: ACL; Schema: public; Owner: -
+--
+
+GRANT SELECT,INSERT,DELETE,UPDATE ON TABLE public.dynatrace_queries TO perfana_app;
+GRANT SELECT,INSERT,DELETE,UPDATE ON TABLE public.dynatrace_queries TO perfana_system;
+
+
+--
+-- Name: TABLE events; Type: ACL; Schema: public; Owner: -
+--
+
+GRANT SELECT,INSERT,DELETE,UPDATE ON TABLE public.events TO perfana_app;
+GRANT SELECT,INSERT,DELETE,UPDATE ON TABLE public.events TO perfana_system;
+
+
+--
+-- Name: TABLE expected_config_changes; Type: ACL; Schema: public; Owner: -
+--
+
+GRANT SELECT,INSERT,DELETE,UPDATE ON TABLE public.expected_config_changes TO perfana_app;
+GRANT SELECT,INSERT,DELETE,UPDATE ON TABLE public.expected_config_changes TO perfana_system;
+
+
+--
+-- Name: TABLE generated_reports; Type: ACL; Schema: public; Owner: -
+--
+
+GRANT SELECT,INSERT,DELETE,UPDATE ON TABLE public.generated_reports TO perfana_app;
+GRANT SELECT,INSERT,DELETE,UPDATE ON TABLE public.generated_reports TO perfana_system;
+
+
+--
+-- Name: TABLE generic_deep_links; Type: ACL; Schema: public; Owner: -
+--
+
+GRANT SELECT,INSERT,DELETE,UPDATE ON TABLE public.generic_deep_links TO perfana_app;
+GRANT SELECT,INSERT,DELETE,UPDATE ON TABLE public.generic_deep_links TO perfana_system;
+
+
+--
+-- Name: TABLE graph_presets; Type: ACL; Schema: public; Owner: -
+--
+
+GRANT SELECT,INSERT,DELETE,UPDATE ON TABLE public.graph_presets TO perfana_app;
+GRANT SELECT,INSERT,DELETE,UPDATE ON TABLE public.graph_presets TO perfana_system;
+
+
+--
+-- Name: TABLE licenses; Type: ACL; Schema: public; Owner: -
+--
+
+GRANT SELECT,INSERT,DELETE,UPDATE ON TABLE public.licenses TO perfana_app;
+GRANT SELECT,INSERT,DELETE,UPDATE ON TABLE public.licenses TO perfana_system;
+
+
+--
+-- Name: TABLE metrics_sources; Type: ACL; Schema: public; Owner: -
+--
+
+GRANT SELECT,INSERT,DELETE,UPDATE ON TABLE public.metrics_sources TO perfana_app;
+GRANT SELECT,INSERT,DELETE,UPDATE ON TABLE public.metrics_sources TO perfana_system;
+
+
+--
+-- Name: TABLE notification_channels; Type: ACL; Schema: public; Owner: -
+--
+
+GRANT SELECT,INSERT,DELETE,UPDATE ON TABLE public.notification_channels TO perfana_app;
+GRANT SELECT,INSERT,DELETE,UPDATE ON TABLE public.notification_channels TO perfana_system;
+
+
+--
+-- Name: TABLE organization_members; Type: ACL; Schema: public; Owner: -
+--
+
+GRANT SELECT,INSERT,DELETE,UPDATE ON TABLE public.organization_members TO perfana_app;
+GRANT SELECT,INSERT,DELETE,UPDATE ON TABLE public.organization_members TO perfana_system;
+
+
+--
+-- Name: TABLE organizations; Type: ACL; Schema: public; Owner: -
+--
+
+GRANT SELECT,INSERT,DELETE,UPDATE ON TABLE public.organizations TO perfana_app;
+GRANT SELECT,INSERT,DELETE,UPDATE ON TABLE public.organizations TO perfana_system;
+
+
+--
+-- Name: TABLE pending_ds_compare_config_changes; Type: ACL; Schema: public; Owner: -
+--
+
+GRANT SELECT,INSERT,DELETE,UPDATE ON TABLE public.pending_ds_compare_config_changes TO perfana_app;
+GRANT SELECT,INSERT,DELETE,UPDATE ON TABLE public.pending_ds_compare_config_changes TO perfana_system;
+
+
+--
+-- Name: TABLE profile_benchmarks; Type: ACL; Schema: public; Owner: -
+--
+
+GRANT SELECT,INSERT,DELETE,UPDATE ON TABLE public.profile_benchmarks TO perfana_app;
+GRANT SELECT,INSERT,DELETE,UPDATE ON TABLE public.profile_benchmarks TO perfana_system;
+
+
+--
+-- Name: TABLE profile_grafana_dashboards; Type: ACL; Schema: public; Owner: -
+--
+
+GRANT SELECT,INSERT,DELETE,UPDATE ON TABLE public.profile_grafana_dashboards TO perfana_app;
+GRANT SELECT,INSERT,DELETE,UPDATE ON TABLE public.profile_grafana_dashboards TO perfana_system;
+
+
+--
+-- Name: TABLE profiles; Type: ACL; Schema: public; Owner: -
+--
+
+GRANT SELECT,INSERT,DELETE,UPDATE ON TABLE public.profiles TO perfana_app;
+GRANT SELECT,INSERT,DELETE,UPDATE ON TABLE public.profiles TO perfana_system;
+
+
+--
+-- Name: TABLE provisioned_template_ds_compare_configs; Type: ACL; Schema: public; Owner: -
+--
+
+GRANT SELECT,INSERT,DELETE,UPDATE ON TABLE public.provisioned_template_ds_compare_configs TO perfana_app;
+GRANT SELECT,INSERT,DELETE,UPDATE ON TABLE public.provisioned_template_ds_compare_configs TO perfana_system;
+
+
+--
+-- Name: TABLE pyroscope_instances; Type: ACL; Schema: public; Owner: -
+--
+
+GRANT SELECT,INSERT,DELETE,UPDATE ON TABLE public.pyroscope_instances TO perfana_app;
+GRANT SELECT,INSERT,DELETE,UPDATE ON TABLE public.pyroscope_instances TO perfana_system;
+
+
+--
+-- Name: TABLE report_templates; Type: ACL; Schema: public; Owner: -
+--
+
+GRANT SELECT,INSERT,DELETE,UPDATE ON TABLE public.report_templates TO perfana_app;
+GRANT SELECT,INSERT,DELETE,UPDATE ON TABLE public.report_templates TO perfana_system;
+
+
+--
+-- Name: TABLE requests_error_5m; Type: ACL; Schema: public; Owner: -
+--
+
+GRANT SELECT,INSERT,DELETE,UPDATE ON TABLE public.requests_error_5m TO perfana_app;
+GRANT SELECT,INSERT,DELETE,UPDATE ON TABLE public.requests_error_5m TO perfana_system;
+
+
+--
+-- Name: TABLE requests_raw_5m; Type: ACL; Schema: public; Owner: -
+--
+
+GRANT SELECT,INSERT,DELETE,UPDATE ON TABLE public.requests_raw_5m TO perfana_app;
+GRANT SELECT,INSERT,DELETE,UPDATE ON TABLE public.requests_raw_5m TO perfana_system;
+
+
+--
+-- Name: TABLE requests_raw_passed_5m; Type: ACL; Schema: public; Owner: -
+--
+
+GRANT SELECT,INSERT,DELETE,UPDATE ON TABLE public.requests_raw_passed_5m TO perfana_app;
+GRANT SELECT,INSERT,DELETE,UPDATE ON TABLE public.requests_raw_passed_5m TO perfana_system;
+
+
+--
+-- Name: TABLE scaling_sessions; Type: ACL; Schema: public; Owner: -
+--
+
+GRANT SELECT,INSERT,DELETE,UPDATE ON TABLE public.scaling_sessions TO perfana_app;
+GRANT SELECT,INSERT,DELETE,UPDATE ON TABLE public.scaling_sessions TO perfana_system;
+
+
+--
+-- Name: TABLE sparse_metric_exclusions; Type: ACL; Schema: public; Owner: -
+--
+
+GRANT SELECT,INSERT,DELETE,UPDATE ON TABLE public.sparse_metric_exclusions TO perfana_app;
+GRANT SELECT,INSERT,DELETE,UPDATE ON TABLE public.sparse_metric_exclusions TO perfana_system;
+
+
+--
+-- Name: TABLE system_under_test_test_environments; Type: ACL; Schema: public; Owner: -
+--
+
+GRANT SELECT,INSERT,DELETE,UPDATE ON TABLE public.system_under_test_test_environments TO perfana_app;
+GRANT SELECT,INSERT,DELETE,UPDATE ON TABLE public.system_under_test_test_environments TO perfana_system;
+
+
+--
+-- Name: TABLE system_under_test_workloads; Type: ACL; Schema: public; Owner: -
+--
+
+GRANT SELECT,INSERT,DELETE,UPDATE ON TABLE public.system_under_test_workloads TO perfana_app;
+GRANT SELECT,INSERT,DELETE,UPDATE ON TABLE public.system_under_test_workloads TO perfana_system;
+
+
+--
+-- Name: TABLE team_members; Type: ACL; Schema: public; Owner: -
+--
+
+GRANT SELECT,INSERT,DELETE,UPDATE ON TABLE public.team_members TO perfana_app;
+GRANT SELECT,INSERT,DELETE,UPDATE ON TABLE public.team_members TO perfana_system;
+
+
+--
+-- Name: TABLE teams; Type: ACL; Schema: public; Owner: -
+--
+
+GRANT SELECT,INSERT,DELETE,UPDATE ON TABLE public.teams TO perfana_app;
+GRANT SELECT,INSERT,DELETE,UPDATE ON TABLE public.teams TO perfana_system;
+
+
+--
+-- Name: TABLE test_run_alerts; Type: ACL; Schema: public; Owner: -
+--
+
+GRANT SELECT,INSERT,DELETE,UPDATE ON TABLE public.test_run_alerts TO perfana_app;
+GRANT SELECT,INSERT,DELETE,UPDATE ON TABLE public.test_run_alerts TO perfana_system;
+
+
+--
+-- Name: TABLE test_run_configs; Type: ACL; Schema: public; Owner: -
+--
+
+GRANT SELECT,INSERT,DELETE,UPDATE ON TABLE public.test_run_configs TO perfana_app;
+GRANT SELECT,INSERT,DELETE,UPDATE ON TABLE public.test_run_configs TO perfana_system;
+
+
+--
+-- Name: TABLE test_run_events; Type: ACL; Schema: public; Owner: -
+--
+
+GRANT SELECT,INSERT,DELETE,UPDATE ON TABLE public.test_run_events TO perfana_app;
+GRANT SELECT,INSERT,DELETE,UPDATE ON TABLE public.test_run_events TO perfana_system;
+
+
+--
+-- Name: TABLE test_run_sampler_stats; Type: ACL; Schema: public; Owner: -
+--
+
+GRANT SELECT,INSERT,DELETE,UPDATE ON TABLE public.test_run_sampler_stats TO perfana_app;
+GRANT SELECT,INSERT,DELETE,UPDATE ON TABLE public.test_run_sampler_stats TO perfana_system;
+
+
+--
+-- Name: TABLE test_run_transaction_stats; Type: ACL; Schema: public; Owner: -
+--
+
+GRANT SELECT,INSERT,DELETE,UPDATE ON TABLE public.test_run_transaction_stats TO perfana_app;
+GRANT SELECT,INSERT,DELETE,UPDATE ON TABLE public.test_run_transaction_stats TO perfana_system;
+
+
+--
+-- Name: TABLE test_run_views; Type: ACL; Schema: public; Owner: -
+--
+
+GRANT SELECT,INSERT,DELETE,UPDATE ON TABLE public.test_run_views TO perfana_app;
+GRANT SELECT,INSERT,DELETE,UPDATE ON TABLE public.test_run_views TO perfana_system;
+
+
+--
+-- Name: TABLE test_runs; Type: ACL; Schema: public; Owner: -
+--
+
+GRANT SELECT,INSERT,DELETE,UPDATE ON TABLE public.test_runs TO perfana_app;
+GRANT SELECT,INSERT,DELETE,UPDATE ON TABLE public.test_runs TO perfana_system;
+
+
+--
+-- Name: TABLE tracing_instances; Type: ACL; Schema: public; Owner: -
+--
+
+GRANT SELECT,INSERT,DELETE,UPDATE ON TABLE public.tracing_instances TO perfana_app;
+GRANT SELECT,INSERT,DELETE,UPDATE ON TABLE public.tracing_instances TO perfana_system;
+
+
+--
+-- Name: TABLE tracing_services; Type: ACL; Schema: public; Owner: -
+--
+
+GRANT SELECT,INSERT,DELETE,UPDATE ON TABLE public.tracing_services TO perfana_app;
+GRANT SELECT,INSERT,DELETE,UPDATE ON TABLE public.tracing_services TO perfana_system;
+
+
+--
+-- Name: TABLE transactions_5m; Type: ACL; Schema: public; Owner: -
+--
+
+GRANT SELECT,INSERT,DELETE,UPDATE ON TABLE public.transactions_5m TO perfana_app;
+GRANT SELECT,INSERT,DELETE,UPDATE ON TABLE public.transactions_5m TO perfana_system;
+
+
+--
+-- Name: TABLE transactions_passed_5m; Type: ACL; Schema: public; Owner: -
+--
+
+GRANT SELECT,INSERT,DELETE,UPDATE ON TABLE public.transactions_passed_5m TO perfana_app;
+GRANT SELECT,INSERT,DELETE,UPDATE ON TABLE public.transactions_passed_5m TO perfana_system;
+
+
+--
+-- Name: TABLE trends_filter_presets; Type: ACL; Schema: public; Owner: -
+--
+
+GRANT SELECT,INSERT,DELETE,UPDATE ON TABLE public.trends_filter_presets TO perfana_app;
+GRANT SELECT,INSERT,DELETE,UPDATE ON TABLE public.trends_filter_presets TO perfana_system;
+
+
+--
+-- Name: TABLE typeorm_migrations; Type: ACL; Schema: public; Owner: -
+--
+
+GRANT SELECT,INSERT,DELETE,UPDATE ON TABLE public.typeorm_migrations TO perfana_app;
+GRANT SELECT,INSERT,DELETE,UPDATE ON TABLE public.typeorm_migrations TO perfana_system;
+
+
+--
+-- Name: SEQUENCE typeorm_migrations_id_seq; Type: ACL; Schema: public; Owner: -
+--
+
+GRANT SELECT,USAGE ON SEQUENCE public.typeorm_migrations_id_seq TO perfana_app;
+GRANT SELECT,USAGE ON SEQUENCE public.typeorm_migrations_id_seq TO perfana_system;
+
+
+--
+-- Name: TABLE url_patterns; Type: ACL; Schema: public; Owner: -
+--
+
+GRANT SELECT,INSERT,DELETE,UPDATE ON TABLE public.url_patterns TO perfana_app;
+GRANT SELECT,INSERT,DELETE,UPDATE ON TABLE public.url_patterns TO perfana_system;
+
+
+--
+-- Name: TABLE versions; Type: ACL; Schema: public; Owner: -
+--
+
+GRANT SELECT,INSERT,DELETE,UPDATE ON TABLE public.versions TO perfana_app;
+GRANT SELECT,INSERT,DELETE,UPDATE ON TABLE public.versions TO perfana_system;
+
+
+--
+-- Name: TABLE workload_apdex_thresholds; Type: ACL; Schema: public; Owner: -
+--
+
+GRANT SELECT,INSERT,DELETE,UPDATE ON TABLE public.workload_apdex_thresholds TO perfana_app;
+GRANT SELECT,INSERT,DELETE,UPDATE ON TABLE public.workload_apdex_thresholds TO perfana_system;
+
+
+--
+-- Name: TABLE workload_transaction_apdex_thresholds; Type: ACL; Schema: public; Owner: -
+--
+
+GRANT SELECT,INSERT,DELETE,UPDATE ON TABLE public.workload_transaction_apdex_thresholds TO perfana_app;
+GRANT SELECT,INSERT,DELETE,UPDATE ON TABLE public.workload_transaction_apdex_thresholds TO perfana_system;
+
+
+--
+-- Name: DEFAULT PRIVILEGES FOR SEQUENCES; Type: DEFAULT ACL; Schema: public; Owner: -
+--
+
+ALTER DEFAULT PRIVILEGES FOR ROLE perfana IN SCHEMA public GRANT SELECT,USAGE ON SEQUENCES  TO perfana_app;
+ALTER DEFAULT PRIVILEGES FOR ROLE perfana IN SCHEMA public GRANT SELECT,USAGE ON SEQUENCES  TO perfana_system;
+
+
+--
+-- Name: DEFAULT PRIVILEGES FOR FUNCTIONS; Type: DEFAULT ACL; Schema: public; Owner: -
+--
+
+ALTER DEFAULT PRIVILEGES FOR ROLE perfana IN SCHEMA public GRANT ALL ON FUNCTIONS  TO perfana_app;
+ALTER DEFAULT PRIVILEGES FOR ROLE perfana IN SCHEMA public GRANT ALL ON FUNCTIONS  TO perfana_system;
+
+
+--
+-- Name: DEFAULT PRIVILEGES FOR TABLES; Type: DEFAULT ACL; Schema: public; Owner: -
+--
+
+ALTER DEFAULT PRIVILEGES FOR ROLE perfana IN SCHEMA public GRANT SELECT,INSERT,DELETE,UPDATE ON TABLES  TO perfana_app;
+ALTER DEFAULT PRIVILEGES FOR ROLE perfana IN SCHEMA public GRANT SELECT,INSERT,DELETE,UPDATE ON TABLES  TO perfana_system;
+
 
 --
 -- PostgreSQL database dump complete

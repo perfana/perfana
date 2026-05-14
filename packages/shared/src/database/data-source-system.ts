@@ -11,8 +11,7 @@ import { SystemActor } from './system-connection';
  * connection sees the correct session state.
  *
  * Asserts post-init that the role switch succeeded — fails loud if the
- * `perfana_system` role doesn't exist (e.g., migration 1778000000000
- * hasn't been run).
+ * `perfana_system` role doesn't exist (created by ConsolidatedSchema Phase 2).
  *
  * History: this used to install a `pool.on('connect', cb)` listener that
  * issued the same statements via `client.query()`. pg-pool emits 'connect'
@@ -54,7 +53,7 @@ export async function createSystemDataSource(
     await ds.destroy();
     throw new Error(
       `createSystemDataSource: expected role 'perfana_system' at session start, got '${currentUser}'. ` +
-      `Did the perfana_system role migration run? See packages/shared/src/database/migrations/1778000000000-CreatePerfanaSystemRole.ts.`,
+      `Is the ConsolidatedSchema migration applied? It creates the perfana_system role in Phase 2.`,
     );
   }
   logger.log(`system data source initialized as perfana_system for actor=${actor}`);
