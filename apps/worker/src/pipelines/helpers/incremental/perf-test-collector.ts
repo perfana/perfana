@@ -64,8 +64,8 @@ export class PerformanceTestCollector {
       }
 
       // Extract metrics count from pipeline result
-      const pipelineData = result.data as any;
-      const metricsCreated = pipelineData?.metricsCreated ?? 0;
+      const pipelineData = result.data as Record<string, unknown> | undefined;
+      const metricsCreated = (pipelineData?.metricsCreated as number) ?? 0;
 
       this.logger.info(
         `Performance test metrics collection completed: ${metricsCreated} metrics stored in ds_metrics`

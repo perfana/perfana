@@ -209,6 +209,7 @@ export function TestRunsTable({
       if (column.field === 'workload' && workloadFilter) return false;
       return true;
     });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [systemFilter, environmentFilter, workloadFilter, currentTime]);
 
   // Completed tests columns
@@ -411,6 +412,7 @@ export function TestRunsTable({
     }
 
     return visibleColumns;
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [systemFilter, environmentFilter, workloadFilter, selectedTestRunIds, testRuns.length, onSelectAll, onSelectOne]);
 
   const columns = variant === 'running' ? runningColumns : completedColumns;

@@ -1,4 +1,5 @@
 import React, { useRef } from 'react';
+import { TestRun } from '@/types/test-runs';
 import {
   Card,
   CardContent,
@@ -6,14 +7,11 @@ import {
   Typography,
   IconButton,
   Tooltip,
-  _CircularProgress,
 } from '@mui/material';
 import { alpha, useTheme } from '@mui/material/styles';
 import {
   ExpandMore,
-  _WarningAmber,
   Delete,
-  _CheckCircle,
   Error as _ErrorIcon,
 } from '@mui/icons-material';
 import { AnomalyData } from '../types';
@@ -23,18 +21,18 @@ import SoftBadge from '../../shared/SoftBadge';
 interface AnomalyDetectionCollapsedCardProps {
   data: AnomalyData[];
   loading: boolean;
-  _conclusionFilter: string;
+  conclusionFilter: string;
   setConclusionFilter: (value: string) => void;
   onExpand: (tabIndex?: number) => void;
   onDelete?: () => void;
-  testRun: any | null;
+  testRun: TestRun | null;
   dsAdaptConclusion?: unknown;
 }
 
 export default function AnomalyDetectionCollapsedCard({
   data: anomalyData,
   loading,
-  _conclusionFilter,
+  conclusionFilter: _conclusionFilter,
   setConclusionFilter,
   onExpand,
   onDelete,
@@ -247,7 +245,7 @@ export default function AnomalyDetectionCollapsedCard({
                   lineHeight: 1.5,
                 }}
               >
-                {(dsAdaptConclusion as any)?.details?.message ?? 'No previous results to compare with'}
+                {(dsAdaptConclusion as { details?: { message?: string } } | null)?.details?.message ?? 'No previous results to compare with'}
               </Typography>
             </Box>
           ) : (

@@ -96,7 +96,7 @@ export default function DeleteAnomalyDialog({
                     Delete this metric only
                   </Typography>
                   <Typography variant="caption" color="text.secondary">
-                    Remove only "{anomalyData.metric_name}" from this panel
+                    {`Remove only "${anomalyData.metric_name}" from this panel`}
                   </Typography>
                 </Box>
               }
@@ -110,7 +110,7 @@ export default function DeleteAnomalyDialog({
                     Delete all metrics in this panel
                   </Typography>
                   <Typography variant="caption" color="text.secondary">
-                    Remove all metrics from "{anomalyData.panel_title}"
+                    {`Remove all metrics from "${anomalyData.panel_title}"`}
                   </Typography>
                 </Box>
               }

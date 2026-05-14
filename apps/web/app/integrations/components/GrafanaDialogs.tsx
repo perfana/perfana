@@ -232,7 +232,7 @@ export function GrafanaDeleteDialog({
       <DialogTitle>Delete Grafana Instance</DialogTitle>
       <DialogContent>
         <Typography>
-          Are you sure you want to delete the Grafana instance "{instance?.label}"? This action cannot be undone.
+          {`Are you sure you want to delete the Grafana instance "${instance?.label}"? This action cannot be undone.`}
         </Typography>
       </DialogContent>
       <DialogActions>

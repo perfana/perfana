@@ -33,7 +33,7 @@ export class IncrementalValidator {
    * @param input - Unknown input to validate
    * @returns Validation result with parsed input if valid
    */
-  validateInput(input: any): InputValidationResult {
+  validateInput(input: unknown): InputValidationResult {
     if (!input || typeof input !== 'object') {
       return {
         valid: false,

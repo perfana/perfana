@@ -65,7 +65,7 @@ export class DynatraceRepository {
 
     logger.info(`Found ${result.length} Dynatrace queries for ${systemUnderTestId}.${testEnvironment}.${workload}`);
 
-    return result.map((row: any) => ({
+    return result.map((row: DynatraceQueryConfigFromDb) => ({
       ...row,
       omitGroupByVariableFromMetricName: row.omitGroupByVariableFromMetricName || []
     }));

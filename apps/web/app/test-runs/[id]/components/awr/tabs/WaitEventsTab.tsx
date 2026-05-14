@@ -22,7 +22,6 @@ import {
   Box,
   Typography,
   Paper,
-  _Grid,
   Table,
   TableBody,
   TableCell,

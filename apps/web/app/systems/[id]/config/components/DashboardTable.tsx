@@ -221,7 +221,7 @@ export default function DashboardTable({
                         .filter(variable => variable && !Array.isArray(variable) && typeof variable.name === 'string' && !['system_under_test', 'test_environment'].includes(variable.name))
                         .map((variable, index) => {
                           // Display variable values
-                          let displayValue = Array.isArray(variable.values) ? variable.values.join(', ') : variable.values;
+                          const displayValue = Array.isArray(variable.values) ? variable.values.join(', ') : variable.values;
                           return (
                             <Typography key={index} variant="caption">
                               <strong>{variable.name}:</strong> {displayValue || '(empty)'}

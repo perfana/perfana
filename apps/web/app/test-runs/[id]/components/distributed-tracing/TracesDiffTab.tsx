@@ -82,11 +82,13 @@ export default function TracesDiffTab({
       // Trigger comparison with the new sampler
       triggerCompare(pendingDrillDown);
     }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [sampler, pendingDrillDown, selectedBaseline]);
 
   // Load related test runs on mount
   useEffect(() => {
     loadRelatedTestRuns();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   const loadRelatedTestRuns = async (): Promise<void> => {
@@ -392,7 +394,7 @@ export default function TracesDiffTab({
         >
           <CompareArrows sx={{ fontSize: 48, mb: 1, opacity: 0.5 }} />
           <Typography variant="body1" sx={{ mb: 0.5 }}>
-            Select a baseline test run and click "Compare Traces"
+            Select a baseline test run and click &quot;Compare Traces&quot;
           </Typography>
           <Typography variant="body2">
             The analysis will compare traces for{' '}

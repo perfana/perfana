@@ -279,7 +279,7 @@ export class TransactionsProcessor {
     testRun: TestRunMetadata,
     apdexThresholds: ApdexThresholdLookup,
     bucketSizeSeconds: number
-  ): Promise<any[]> {
+  ) {
     const filterFromTime = testRun.filter_from_time ?? testRun.start_time;
     const filterToTime = testRun.filter_to_time ?? testRun.end_time;
     const hasFilterEndTime = filterToTime !== null;

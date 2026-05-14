@@ -210,6 +210,7 @@ export default function SavePresetModal({
         created_for_test_run_id: currentTestRunId
       }));
     }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open, currentFilters, currentTestRunId]);
 
   const [errors, setErrors] = useState<{[key: string]: string}>({});

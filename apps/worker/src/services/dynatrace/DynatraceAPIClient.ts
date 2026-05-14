@@ -293,7 +293,7 @@ export class DynatraceAPIClient {
       // Use Metrics API v2 for metric selector queries
       const metricsResult = await this.executeMetricsAPIQuery(query, startTime, endTime);
       // Transform to DQL-like format for consistent processing
-      return this.transformMetricsAPIResultToDQL(metricsResult);
+      return this.transformMetricsAPIResultToDQL(metricsResult as Record<string, unknown>);
     } else {
       logger.info(`📊 Routing to DQL API (query format: DQL)`);
       // Use DQL platform endpoint for DQL queries
@@ -325,17 +325,19 @@ export class DynatraceAPIClient {
    *   ]
    * }
    */
-  private transformMetricsAPIResultToDQL(metricsResult: any): any {
+  private transformMetricsAPIResultToDQL(metricsResult: Record<string, unknown>): { records: Record<string, unknown>[] } {
     logger.info(`🔄 Transforming Metrics API v2 response to DQL-like format...`);
 
-    const records: unknown[] = [];
+    const records: Record<string, unknown>[] = [];
 
-    if (!metricsResult.result || metricsResult.result.length === 0) {
+    const resultArray = metricsResult.result as Array<{ metricId?: string; data?: Array<{ dimensionMap?: Record<string, unknown>; timestamps?: number[]; values?: (number | null)[] }> }> | undefined;
+
+    if (!resultArray || resultArray.length === 0) {
       logger.warn('Empty Metrics API v2 result');
       return { records: [] };
     }
 
-    for (const metric of metricsResult.result) {
+    for (const metric of resultArray) {
       if (!metric.data || metric.data.length === 0) {
         logger.debug(`Skipping metric ${metric.metricId || 'unknown'} - no data`);
         continue;
@@ -350,7 +352,7 @@ export class DynatraceAPIClient {
 
         // Create a record for each timestamp/value pair
         for (let i = 0; i < timestamps.length; i++) {
-          const record: any = {
+          const record: Record<string, unknown> = {
             timestamp: new Date(timestamps[i]).toISOString(),
             value: values[i]
           };
@@ -416,7 +418,7 @@ export class DynatraceAPIClient {
     query: string,
     startTime?: Date,
     endTime?: Date
-  ): Promise<{ immediate: true; result: any } | { immediate: false; requestToken: string }> {
+  ): Promise<{ immediate: true; result: unknown } | { immediate: false; requestToken: string }> {
     const maxRetries = this.config.maxRetries!;
     let lastError: Error | null = null;
 
@@ -604,7 +606,7 @@ export class DynatraceAPIClient {
     queries: DynatraceQueryConfig[],
     startTime?: Date,
     endTime?: Date
-  ): Promise<any[]> {
+  ): Promise<Array<{ tileId: string; tileTitle: string; result: unknown; error: string | null }>> {
     const apiType = this.config.dynatraceType === 'saas' ? 'DQL' : 'Metrics API v2';
     logger.info(`Executing ${queries.length} ${apiType} queries with max concurrency ${this.config.maxConcurrent}`);
 
@@ -682,7 +684,7 @@ export class DynatraceAPIClient {
         }
       );
 
-      const data = await response.body.json() as any;
+      const data = await response.body.json() as Record<string, unknown>;
 
       if (response.statusCode === 200) {
         logger.info(`✓ Metrics API v2 query completed successfully`);
@@ -692,8 +694,8 @@ export class DynatraceAPIClient {
         if (data.result && Array.isArray(data.result)) {
           logger.info(`📈 Response contains ${data.result.length} metric(s)`);
           data.result.forEach((metric: unknown, idx: number) => {
-            const m = metric as any;
-            const dataPointCount = m.data?.reduce((sum: number, d: any) => sum + (d.values?.length || 0), 0) || 0;
+            const m = metric as { metricId?: string; data?: Array<{ values?: unknown[] }> };
+            const dataPointCount = m.data?.reduce((sum: number, d) => sum + (d.values?.length || 0), 0) || 0;
             logger.info(`  Metric ${idx + 1}: ${m.metricId || 'unknown'} - ${dataPointCount} data points`);
           });
         }

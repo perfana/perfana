@@ -159,7 +159,7 @@ export function createPlotLayout(
   selectedMetric: Panel | null,
   evaluateType: string,
   addedSeries: TrendsSeries[]
-): any {
+): Record<string, unknown> {
   const firstSeries = Object.values(seriesData)[0] || [];
   const xAxisLabels = createXAxisLabels(seriesData);
   const changepointPositions = getChangepointPositions(seriesData);
@@ -299,7 +299,7 @@ export function createPlotConfig(
   selectedMetric: Panel | null,
   evaluateType: string,
   showToast: (message: string) => void
-): any {
+): Record<string, unknown> {
   return {
     responsive: true,
     displayModeBar: true,
@@ -322,10 +322,12 @@ export function createPlotConfig(
           transform: 'scale(0.8)'
         },
         click: function(gd: unknown) {
-          (window as unknown).Plotly.toImage(gd, {
+          type PlotlyGd = { _fullLayout?: { width?: number; height?: number } };
+          const plotlyWindow = window as { Plotly?: { toImage: (gd: unknown, opts: Record<string, unknown>) => Promise<string> } };
+          plotlyWindow.Plotly!.toImage(gd, {
             format: 'png',
-            width: gd._fullLayout.width || 800,
-            height: gd._fullLayout.height || 400,
+            width: (gd as PlotlyGd)._fullLayout?.width || 800,
+            height: (gd as PlotlyGd)._fullLayout?.height || 400,
             scale: 2
           }).then((dataUrl: string) => {
             fetch(dataUrl)

@@ -2,6 +2,26 @@ import { BasePipelineTypeORM } from './BasePipelineTypeORM.js';
 import { PipelineResult } from '../types/pipeline.js';
 import { EntityManager } from 'typeorm';
 
+interface TestRunStatusRow {
+  test_run_id: string;
+  checks_status: string;
+  comparisons_status: string;
+  adapt_status: string;
+  last_update: string | null;
+}
+
+interface TestRunQueryRow {
+  test_run_id: string;
+  system_under_test_id: string;
+  workload: string;
+  test_environment: string;
+  start_time: Date;
+  adapt_config: unknown;
+  consolidated_result: unknown;
+  organization_id: string | null;
+  team_id: string | null;
+}
+
 export interface ControlGroupsInput {
   testRunIds: string[];
 }
@@ -28,15 +48,15 @@ export interface ControlGroup {
 }
 
 export class ControlGroupsPipeline extends BasePipelineTypeORM {
-  validateInput(input: any): boolean {
+  validateInput(input: unknown): boolean {
     if (!input || typeof input !== 'object') {return false;}
-    const typedInput = input as any;
+    const typedInput = input as { testRunIds?: unknown[] };
     return Array.isArray(typedInput.testRunIds) &&
            typedInput.testRunIds.length > 0 &&
-           typedInput.testRunIds.every((id: any) => typeof id === 'string');
+           typedInput.testRunIds.every((id: unknown) => typeof id === 'string');
   }
 
-  async execute(input: any): Promise<PipelineResult> {
+  async execute(input: unknown): Promise<PipelineResult> {
     const startTime = Date.now();
 
     if (!this.validateInput(input)) {
@@ -121,10 +141,10 @@ export class ControlGroupsPipeline extends BasePipelineTypeORM {
         WHERE test_run_id = ANY($1::varchar[])
       `;
 
-      const result = await manager.query(checkQuery, [testRunIds]) as any;
+      const result = await manager.query<TestRunStatusRow[]>(checkQuery, [testRunIds]);
 
       // Check each test run's status
-      const notReadyRuns = result.filter((row: any) => {
+      const notReadyRuns = result.filter((row) => {
         const checksStatus = row.checks_status;
         const comparisonsStatus = row.comparisons_status;
         const adaptStatus = row.adapt_status;
@@ -231,21 +251,21 @@ export class ControlGroupsPipeline extends BasePipelineTypeORM {
       WHERE test_run_id = $1
     `;
 
-    const testRunResult = await manager.query(testRunQuery, [testRunId]) as any;
+    const testRunResult = await manager.query<TestRunQueryRow[]>(testRunQuery, [testRunId]);
     if (testRunResult.length === 0) {
       throw new Error(`Test run not found: ${testRunId}`);
     }
 
-    const testRun = testRunResult[0] as any;
+    const testRun = testRunResult[0];
 
     // Control group ID is the same as test run ID (following Python pattern)
     const controlGroupId = testRunId;
 
     // Check for changepoint first (matching Python changepoint detection)
-    const changePoint = await this.detectChangePoint(manager, testRun as any);
+    const changePoint = await this.detectChangePoint(manager, testRun);
 
     // Find control test runs (shared across ALL metrics for this test run)
-    const controlTestRuns = await this.findControlTestRuns(manager, testRun as any, changePoint as any);
+    const controlTestRuns = await this.findControlTestRuns(manager, testRun, changePoint);
 
     // Calculate first and last datetime from control runs
     let firstDatetime: Date | null = null;
@@ -259,7 +279,7 @@ export class ControlGroupsPipeline extends BasePipelineTypeORM {
         FROM test_runs
         WHERE test_run_id = ANY($1::varchar[])
       `;
-      const dateResult = await manager.query(dateQuery, [controlTestRuns]) as any;
+      const dateResult = await manager.query<{ first_datetime: Date | null; last_datetime: Date | null }[]>(dateQuery, [controlTestRuns]);
       if (dateResult.length > 0) {
         firstDatetime = dateResult[0].first_datetime;
         lastDatetime = dateResult[0].last_datetime;
@@ -329,7 +349,7 @@ export class ControlGroupsPipeline extends BasePipelineTypeORM {
     manager: EntityManager,
     testRun: unknown
   ): Promise<{ test_run_id: string; start_time: Date } | null> {
-    const tr = testRun as any;
+    const tr = testRun as TestRunQueryRow;
 
     let changePointQuery = `
       SELECT
@@ -343,7 +363,7 @@ export class ControlGroupsPipeline extends BasePipelineTypeORM {
         AND tr.start_time <= $4
     `;
 
-    const changePointParams: any[] = [
+    const changePointParams: unknown[] = [
       tr.system_under_test_id,
       tr.workload,
       tr.test_environment,
@@ -360,7 +380,7 @@ export class ControlGroupsPipeline extends BasePipelineTypeORM {
       LIMIT 1
     `;
 
-    const result = await manager.query(changePointQuery, changePointParams) as any;
+    const result = await manager.query<{ test_run_id: string; start_time: Date }[]>(changePointQuery, changePointParams);
 
     if (result.length > 0) {
       this.logger.info(`Found changepoint for test run ${tr.test_run_id}: ${result[0].test_run_id}`);
@@ -394,7 +414,7 @@ export class ControlGroupsPipeline extends BasePipelineTypeORM {
     testRun: unknown,
     changePoint: { test_run_id: string; start_time: Date } | null
   ): Promise<string[]> {
-    const tr = testRun as any;
+    const tr = testRun as TestRunQueryRow;
 
     let controlRunQuery = `
       SELECT DISTINCT
@@ -409,7 +429,7 @@ export class ControlGroupsPipeline extends BasePipelineTypeORM {
         AND end_time IS NOT NULL
     `;
 
-    const queryParams: any[] = [
+    const queryParams: unknown[] = [
       tr.system_under_test_id,
       tr.workload,
       tr.test_environment,
@@ -452,9 +472,9 @@ export class ControlGroupsPipeline extends BasePipelineTypeORM {
       LIMIT 10
     `;
 
-    const result = await manager.query(controlRunQuery, queryParams) as any;
+    const result = await manager.query<{ test_run_id: string }[]>(controlRunQuery, queryParams);
 
-    const controlTestRunIds = result.map((row: any) => row.test_run_id);
+    const controlTestRunIds = result.map((row) => row.test_run_id);
 
     this.logger.info(`Found ${controlTestRunIds.length} control test runs for test run ${tr.test_run_id}`);
 

@@ -1,4 +1,5 @@
 import type { Job } from 'bullmq';
+import type Redis from 'ioredis';
 import { getLogger, logPipelineStart, logPipelineSuccess as _logPipelineSuccess, logPipelineError } from '../lib/utils/logger.js';
 import { AnalyzeTestJobSchema, type AnalyzeTestJob, type JobResult } from '../types/jobs.js';
 import { PipelineOrchestrator } from '../services/PipelineOrchestrator.js';
@@ -30,7 +31,7 @@ export function analyzeTestWorker() {
   return async (job: Job): Promise<JobResult> => {
     const startTime = Date.now();
     let validatedData: AnalyzeTestJob | undefined;
-    let redis: any = null;
+    let redis: Redis | null = null;
     let lockService: JobLockService | null = null;
     let progressReporter: ProgressReporter | null = null;
     let lockAcquired = false;

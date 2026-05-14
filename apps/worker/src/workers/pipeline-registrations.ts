@@ -101,7 +101,7 @@ registerPipeline({
 registerPipeline({
   jobName: JOB_NAMES.DYNATRACE_COLLECTION,
   createPipeline: (logger) => new DynatracePipeline(logger),
-  transformInput: (data: any) => ({ testRunIds: [data.testRunId] }),
+  transformInput: (data: unknown) => ({ testRunIds: [(data as { testRunId: string }).testRunId] }),
   successMessage: 'Dynatrace collection',
 });
 
@@ -126,12 +126,13 @@ registerPipeline({
   jobName: JOB_NAMES.REEVALUATE_CHECKS,
   schema: ReevaluateJobSchema,
   createPipeline: (logger) => ({
-    execute: async (data: any) => {
-      logger.warn({ testRunId: data.testRunId }, 'REEVALUATE_CHECKS pipeline not yet implemented — job skipped');
+    execute: async (data: unknown) => {
+      const d = data as { testRunId: string };
+      logger.warn({ testRunId: d.testRunId }, 'REEVALUATE_CHECKS pipeline not yet implemented — job skipped');
       return {
         success: false,
         error: 'REEVALUATE_CHECKS pipeline not yet implemented',
-        data: { testRunId: data.testRunId },
+        data: { testRunId: d.testRunId },
       };
     },
   }),

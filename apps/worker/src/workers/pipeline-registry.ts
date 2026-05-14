@@ -14,10 +14,12 @@
 import { getLogger } from '../lib/utils/logger.js';
 import { type JobResult } from '../types/jobs.js';
 import { type ZodSchema } from 'zod';
+import type pino from 'pino';
+import { type PipelineResult } from '../types/pipeline.js';
 
 interface PipelineInstance {
-  execute: (input: any) => Promise<unknown>;
-  validateInput?: (data: any) => boolean;
+  execute(input: unknown): Promise<unknown>;
+  validateInput?(data: unknown): boolean;
 }
 
 export interface PipelineRegistration {
@@ -25,9 +27,9 @@ export interface PipelineRegistration {
   /** Zod validation schema. When omitted, job.data is passed through as-is. */
   schema?: ZodSchema;
   /** Factory to create the pipeline with a logger. */
-  createPipeline: (logger: any) => PipelineInstance;
+  createPipeline: (logger: pino.Logger) => PipelineInstance;
   /** Optional transform applied to job.data (after schema validation) before pipeline.execute(). */
-  transformInput?: (data: any) => any;
+  transformInput?: (data: unknown) => unknown;
   /** Human-readable pipeline name for log/error messages. */
   successMessage: string;
   /**
@@ -47,7 +49,7 @@ export function registerPipeline(reg: PipelineRegistration): void {
  * Safely convert an error value to a readable string.
  * Fixes the [object Object] bug in error messages.
  */
-function formatError(error: any): string {
+function formatError(error: unknown): string {
   if (!error) { return 'Unknown error'; }
   if (typeof error === 'string') { return error; }
   if (error instanceof Error) { return error.message; }
@@ -90,8 +92,7 @@ export function createProcessorFromRegistry(): Record<string, (job: { data: unkn
         }
 
         // Step 4: Execute
-        const result = await pipeline.execute(pipelineInput);
-        const r = result as any;
+        const r = await pipeline.execute(pipelineInput) as PipelineResult;
 
         // Step 5: Handle result
         if (!r.success) {

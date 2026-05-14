@@ -272,7 +272,7 @@ export class DataProcessor {
       return { timestep: 0.0, rampUp: false };
     }
 
-    const tr = testRun as any;
+    const tr = testRun as { startTime?: Date | string; start_time?: Date | string; analysisStartOffset?: number; ramp_up?: number };
     // Check for startTime in both camelCase (TypeORM entity) and snake_case (raw query)
     const startTimeValue = tr.startTime || tr.start_time;
 
@@ -321,7 +321,7 @@ export class DataProcessor {
 
     // Check if timeframe object exists
     if ('timeframe' in record && typeof record.timeframe === 'object') {
-      const timeframe = record.timeframe as any;
+      const timeframe = record.timeframe as Record<string, unknown>;
       if (timeframe?.start) {
         return {
           timestamp: this.parseTimestampValue(timeframe.start),
@@ -347,7 +347,7 @@ export class DataProcessor {
   /**
    * Parse timestamp value from various formats
    */
-  private parseTimestampValue(value: any): Date {
+  private parseTimestampValue(value: unknown): Date {
     if (typeof value === 'string') {
       return new Date(value);
     } else if (typeof value === 'number') {
@@ -355,11 +355,12 @@ export class DataProcessor {
       return new Date(value);
     } else if (typeof value === 'object' && value !== null) {
       // Handle timeframe objects
-      if ('start' in value) {
-        return new Date(value.start);
+      const obj = value as Record<string, unknown>;
+      if ('start' in obj) {
+        return new Date(obj.start as string | number);
       }
-      if ('end' in value) {
-        return new Date(value.end);
+      if ('end' in obj) {
+        return new Date(obj.end as string | number);
       }
     }
 
@@ -509,16 +510,16 @@ export class DataProcessor {
 
       // Debug: Log the entire DQL result structure
       logger.info(`📊 Processing DQL/Metrics result for tile ${tileId} (${tileTitle})`);
-      const dr = dqlResult as any;
+      const dr = dqlResult as Record<string, unknown> | undefined;
       logger.debug(`DQL result structure for tile ${tileId}:`, {
         hasResult: !!dr,
         resultKeys: dr ? Object.keys(dr) : [],
         recordsType: dr?.records ? typeof dr.records : 'undefined',
-        recordsLength: dr?.records?.length || 0
+        recordsLength: Array.isArray(dr?.records) ? dr.records.length : 0
       });
 
       // Extract records from DQL result
-      const records = dr?.records || [];
+      const records = (Array.isArray(dr?.records) ? dr!.records : []) as Record<string, unknown>[];
       if (records.length === 0) {
         logger.warn(`No records found in DQL result for tile ${tileId}. Full result:`, JSON.stringify(dr, null, 2));
         return null;
@@ -586,7 +587,7 @@ export class DataProcessor {
         }
 
         // Get metricName value if present (from fieldsAdd metricName = "value")
-        const metricNameFromFieldsAdd = record.metricName;
+        const metricNameFromFieldsAdd = record.metricName as string | undefined;
 
         // Extract metric values from the record
         for (const [fieldName, fieldValue] of Object.entries(record)) {
@@ -633,8 +634,11 @@ export class DataProcessor {
 
               // Get start time from timeframe
               let startTime = timestamp;
-              if (record.timeframe && typeof record.timeframe === 'object' && record.timeframe.start) {
-                startTime = this.parseTimestampValue(record.timeframe.start);
+              if (record.timeframe && typeof record.timeframe === 'object') {
+                const tf = record.timeframe as Record<string, unknown>;
+                if (tf.start) {
+                  startTime = this.parseTimestampValue(tf.start);
+                }
               }
 
               for (let idx = 0; idx < fieldValue.length; idx++) {

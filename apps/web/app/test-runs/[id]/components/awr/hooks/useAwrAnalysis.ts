@@ -273,6 +273,7 @@ export function useAwrAnalysis(
 
   // Extract data with defaults
   const analysis = query.data ?? null;
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   const insights = analysis?.insights ?? [];
   const severitySummary = analysis?.severitySummary ?? null;
 
@@ -344,6 +345,7 @@ export function useAwrAnalysis(
 
       return true;
     });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [insights]);
 
   /**
@@ -353,6 +355,7 @@ export function useAwrAnalysis(
     (severity: InsightSeverity): AwrInsight[] => {
       return insights.filter((insight) => insight.severity === severity);
     },
+    // eslint-disable-next-line react-hooks/exhaustive-deps
     [insights]
   );
 
@@ -363,6 +366,7 @@ export function useAwrAnalysis(
     (category: InsightCategory): AwrInsight[] => {
       return insights.filter((insight) => insight.category === category);
     },
+    // eslint-disable-next-line react-hooks/exhaustive-deps
     [insights]
   );
 

@@ -53,24 +53,23 @@ export function createRedisConnection(): Redis {
     logger.info('✅ Redis ready');
   });
 
-  redis.on('error', (error: any) => {
-    const err = error as any;
+  redis.on('error', (error: Error & { code?: string; errno?: number; syscall?: string; address?: string; port?: number }) => {
     // Filter out command timeout errors from BullMQ polling - these are normal behavior
-    if (err.message?.includes('Command timed out')) {
+    if (error.message?.includes('Command timed out')) {
       logger.debug('Redis command timeout during BullMQ polling (normal behavior)', {
-        message: err.message
+        message: error.message
       });
       return;
     }
 
     // Log other Redis errors normally
     logger.error('❌ Redis error:', {
-      message: err.message,
-      code: err.code,
-      errno: err.errno,
-      syscall: err.syscall,
-      address: err.address,
-      port: err.port
+      message: error.message,
+      code: error.code,
+      errno: error.errno,
+      syscall: error.syscall,
+      address: error.address,
+      port: error.port
     });
   });
 

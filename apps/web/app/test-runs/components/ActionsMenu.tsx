@@ -312,7 +312,7 @@ export function ActionsMenu({ testRun, onDelete, showToast, onRefresh }: Actions
         <DialogTitle>Delete Test Run</DialogTitle>
         <DialogContent>
           <DialogContentText>
-            Are you sure you want to delete test run "{testRun.test_run_id}"? This action cannot be undone.
+            {`Are you sure you want to delete test run "${testRun.test_run_id}"? This action cannot be undone.`}
           </DialogContentText>
         </DialogContent>
         <DialogActions>

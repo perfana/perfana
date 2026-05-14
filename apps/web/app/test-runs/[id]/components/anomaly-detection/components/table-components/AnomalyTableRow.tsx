@@ -24,7 +24,7 @@ import StaleTooltipContent from '../StaleTooltipContent';
 
 interface AnomalyTableRowProps {
   row: AnomalyData;
-  _rowKey: string;
+  rowKey: string;
   index: number;
   isExpanded: boolean;
   isLast: boolean;
@@ -38,7 +38,7 @@ interface AnomalyTableRowProps {
 
 export function AnomalyTableRow({
   row,
-  _rowKey,
+  rowKey: _rowKey,
   index,
   isExpanded,
   isLast,

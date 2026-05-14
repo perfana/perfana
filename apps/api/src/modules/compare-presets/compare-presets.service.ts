@@ -1,6 +1,6 @@
 import { Injectable, NotFoundException, ForbiddenException, Logger } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Repository, Brackets } from 'typeorm';
+import { Repository, Brackets, DeepPartial } from 'typeorm';
 import { CompareFilterPreset, ApplicationDashboard, TestRun as TestRunEntity } from '../../entities';
 import { withRequestEm } from '../../common/db/request-em';
 import { OwnedResource } from '@perfana/shared';
@@ -131,13 +131,13 @@ export class ComparePresetsService {
         panelId: createComparePresetDto.panel_id,
         panelTitle: createComparePresetDto.panel_title,
         baselineTestRunId: createComparePresetDto.baseline_test_run_id,
-        seriesConfig: createComparePresetDto.series_config as any,
+        seriesConfig: createComparePresetDto.series_config as unknown as Record<string, unknown>[],
         createdForTestRunId: createComparePresetDto.created_for_test_run_id,
         isGlobal: createComparePresetDto.is_global || false,
         createdBy: userId,
         organizationId,
         teamId,
-      } as any);
+      } as unknown as DeepPartial<CompareFilterPreset>);
 
       const savedPreset = await withRequestEm(this.comparePresetRepo).save(preset);
 
@@ -396,12 +396,12 @@ export class ComparePresetsService {
       if (updateComparePresetDto.panel_id !== undefined) updateData.panelId = updateComparePresetDto.panel_id;
       if (updateComparePresetDto.panel_title !== undefined) updateData.panelTitle = updateComparePresetDto.panel_title;
       if (updateComparePresetDto.baseline_test_run_id !== undefined) updateData.baselineTestRunId = updateComparePresetDto.baseline_test_run_id;
-      if (updateComparePresetDto.series_config !== undefined) updateData.seriesConfig = updateComparePresetDto.series_config as any;
+      if (updateComparePresetDto.series_config !== undefined) updateData.seriesConfig = updateComparePresetDto.series_config as unknown as Record<string, unknown>[];
       if (updateComparePresetDto.is_global !== undefined) updateData.isGlobal = updateComparePresetDto.is_global;
 
       await withRequestEm(this.comparePresetRepo).update(
         { id, createdBy: userId },
-        updateData as any
+        updateData as unknown as Parameters<typeof this.comparePresetRepo.update>[1]
       );
 
       // Fetch updated preset

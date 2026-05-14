@@ -1,8 +1,8 @@
 import { formatValueWithUnit } from '@/lib/units';
-import { MetricTrendData, ConfigSourceInfo, ThresholdData } from './types';
+import { MetricTrendData, ConfigSourceInfo } from './types';
 
 // Data formatting functions
-export const formatNumber = (value: any): string => {
+export const formatNumber = (value: unknown): string => {
   if (value === null || value === undefined || value === '' || isNaN(Number(value))) {
     return '-';
   }
@@ -120,7 +120,7 @@ export const createTrendsPlot = (
   rowKey: string,
   metricName: string,
   unit?: string,
-  theme?: any,
+  theme?: import('@mui/material').Theme,
   regressionDetectionTestRunId?: string
 ) => {
   // console.log(`createTrendsPlot called for metric: ${metricName}`, {
@@ -154,7 +154,7 @@ export const createTrendsPlot = (
   });
 
   let conversionFactor = 1;
-  let adjustedYAxesFormat = unit || '';
+  let _adjustedYAxesFormat = unit || '';
   let yAxisLabel = 'Value';
   let unitSuffix = '';
 
@@ -164,12 +164,12 @@ export const createTrendsPlot = (
     unitSuffix = '%';
   } else if (unit === 's' && globalMaxDataPoint && globalMaxDataPoint < 1) {
     conversionFactor = 1000;
-    adjustedYAxesFormat = 'ms';
+    _adjustedYAxesFormat = 'ms';
     yAxisLabel = 'Time (ms)';
     unitSuffix = ' ms';
   } else if (unit === 'ms' && globalMinDataPoint && globalMinDataPoint > 1000) {
     conversionFactor = 1/1000;
-    adjustedYAxesFormat = 's';
+    _adjustedYAxesFormat = 's';
     yAxisLabel = 'Time (s)';
     unitSuffix = ' s';
   } else if (unit === 's') {
@@ -526,7 +526,7 @@ export const createTrendsPlot = (
   }
 
   if (regressionAnnotation) {
-    const layoutAny = layout as any;
+    const layoutAny = layout as unknown as { annotations?: unknown[] };
     if (!layoutAny.annotations) {
       layoutAny.annotations = [];
     }
@@ -537,17 +537,24 @@ export const createTrendsPlot = (
 };
 
 // Threshold generation functions
-export const generateThresholdData = (drawerData: any, unit?: string) => {
+type DrawerStatistic = { test?: number; control?: number; diff?: number };
+type DrawerThresholdRange = { pct?: number; iqr?: number; overall?: number };
+type DrawerThresholds = { lower?: DrawerThresholdRange; upper?: DrawerThresholdRange };
+type DrawerCheck = { isDifference?: boolean };
+type DrawerChecks = { pct?: DrawerCheck; iqr?: DrawerCheck; abs?: DrawerCheck };
+type DrawerConfig = { source?: string; thresholds?: { percentageThreshold?: number; iqrThreshold?: number; absoluteThreshold?: number } };
+export const generateThresholdData = (drawerData: Record<string, unknown>, unit?: string) => {
   const thresholds = [];
 
   if (drawerData.checks && drawerData.statistic && drawerData.compare_config) {
-    const testValue = drawerData.statistic?.test || 0;
-    const controlValue = drawerData.statistic?.control || 0;
-    const observedDiff = drawerData.statistic?.diff || 0;
+    const statistic = drawerData.statistic as DrawerStatistic;
+    const testValue = statistic?.test || 0;
+    const _controlValue = statistic?.control || 0;
+    const _observedDiff = statistic?.diff || 0;
 
-    const config = drawerData.compare_config;
-    const checks = drawerData.checks || {};
-    const thresholdRanges = drawerData.thresholds || {};
+    const config = drawerData.compare_config as DrawerConfig;
+    const checks = (drawerData.checks || {}) as DrawerChecks;
+    const thresholdRanges = (drawerData.thresholds || {}) as DrawerThresholds;
     const lowerThresholds = thresholdRanges.lower || {};
     const upperThresholds = thresholdRanges.upper || {};
 
@@ -628,17 +635,19 @@ export const generateThresholdData = (drawerData: any, unit?: string) => {
   }
 
   if (thresholds.length === 0 && drawerData.thresholds && drawerData.statistic) {
-    const testValue = drawerData.statistic?.test || 0;
-    const controlValue = drawerData.statistic?.control || 0;
-    const observedDiff = drawerData.statistic?.diff || 0;
+    const statistic2 = drawerData.statistic as DrawerStatistic;
+    const testValue = statistic2?.test || 0;
+    const controlValue = statistic2?.control || 0;
+    const _observedDiff = statistic2?.diff || 0;
 
-    const percentageDiff = controlValue !== 0
+    const _percentageDiff = controlValue !== 0
       ? ((testValue - controlValue) / Math.abs(controlValue)) * 100
       : 0;
 
-    if (drawerData.thresholds.lower?.overall !== undefined || drawerData.thresholds.upper?.overall !== undefined) {
-      const lowerOverall = drawerData.thresholds.lower?.overall;
-      const upperOverall = drawerData.thresholds.upper?.overall;
+    const thresholdsTyped = drawerData.thresholds as DrawerThresholds;
+    if (thresholdsTyped.lower?.overall !== undefined || thresholdsTyped.upper?.overall !== undefined) {
+      const lowerOverall = thresholdsTyped.lower?.overall;
+      const upperOverall = thresholdsTyped.upper?.overall;
       const thresholdValue = lowerOverall !== undefined && upperOverall !== undefined
         ? `${formatNumber(lowerOverall)} - ${formatNumber(upperOverall)}`
         : lowerOverall !== undefined ? `> ${formatNumber(lowerOverall)}`

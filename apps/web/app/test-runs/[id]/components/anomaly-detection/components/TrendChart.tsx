@@ -30,9 +30,9 @@ export default function TrendChart({
   regressionDetectionTestRunId
 }: TrendChartProps) {
   const theme = useTheme();
-  const [plotData, setPlotData] = useState<any[]>([]);
-  const [plotLayout, setPlotLayout] = useState<any>({});
-  const [plotConfig, setPlotConfig] = useState<any>({});
+  const [plotData, setPlotData] = useState<unknown[]>([]);
+  const [plotLayout, setPlotLayout] = useState<unknown>({});
+  const [plotConfig, setPlotConfig] = useState<unknown>({});
 
   useEffect(() => {
     if (data && data.length > 0) {

@@ -1,6 +1,7 @@
 import { Injectable, Logger, NotFoundException, ConflictException } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository, DataSource } from 'typeorm';
+import type { QueryDeepPartialEntity } from 'typeorm/query-builder/QueryPartialEntity';
 import { DynatraceConfig } from '../../entities';
 import { DynatraceQuery } from '../../entities';
 import { DynatraceEntityMapping } from '../../entities';
@@ -318,7 +319,7 @@ export class DynatraceRepository {
       }
     }
 
-    await withRequestEm(this.queryRepo).update(id, updateData as any);
+    await withRequestEm(this.queryRepo).update(id, updateData as unknown as QueryDeepPartialEntity<DynatraceQuery>);
 
     const result = await withRequestEm(this.queryRepo).findOne({ where: { id } });
     if (!result) {

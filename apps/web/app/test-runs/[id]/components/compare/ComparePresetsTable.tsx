@@ -4,7 +4,6 @@ import React, { useState } from 'react';
 import {
   Box,
   Typography,
-  _Chip,
   IconButton,
   Tooltip,
   alpha,
@@ -145,7 +144,7 @@ export default function ComparePresetsTable({
           maxWidth: 400,
           mx: 'auto'
         }}>
-          Create your first preset by configuring filters and clicking "Save Preset" to quickly reuse your comparison settings.
+          Create your first preset by configuring filters and clicking &quot;Save Preset&quot; to quickly reuse your comparison settings.
         </Typography>
       </Box>
     );
@@ -295,8 +294,7 @@ export default function ComparePresetsTable({
         <DialogTitle>Delete Preset</DialogTitle>
         <DialogContent>
           <Typography>
-            Are you sure you want to delete the preset "{presetToDelete?.name}"? 
-            This action cannot be undone.
+            {`Are you sure you want to delete the preset "${presetToDelete?.name}"? This action cannot be undone.`}
           </Typography>
         </DialogContent>
         <DialogActions>

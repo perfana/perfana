@@ -45,7 +45,7 @@ interface UseGraphsPresetsProps {
 }
 
 export function useGraphsPresets({
-  testRun,
+  testRun: _testRun,
   testRunId,
   showToast,
   addedSeries,

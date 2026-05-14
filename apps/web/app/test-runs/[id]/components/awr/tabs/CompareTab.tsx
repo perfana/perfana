@@ -23,7 +23,6 @@ import {
   Paper,
   Grid,
   FormControl,
-  InputLabel,
   Select,
   MenuItem,
   Button,
@@ -32,11 +31,8 @@ import {
   Skeleton,
   Alert,
   AlertTitle,
-  Chip,
-  Divider,
   useTheme,
   alpha,
-  Tooltip,
   Dialog,
   DialogTitle,
   DialogContent,
@@ -48,17 +44,14 @@ import {
   TrendingUp as TrendingUpIcon,
   TrendingDown as TrendingDownIcon,
   TrendingFlat as TrendingFlatIcon,
-  Refresh as RefreshIcon,
   Info as InfoIcon,
   Warning as WarningIcon,
-  Error as ErrorIcon,
   CheckCircle as CheckCircleIcon,
   Close as CloseIcon,
 } from '@mui/icons-material';
 import { useAwrComparison, useComparisonStats } from '../hooks';
 import type {
   CompareTabProps,
-  ComparisonResponse,
   SqlComparisonItem,
   WaitEventComparisonItem,
   LoadProfileComparisonItem,
@@ -69,11 +62,9 @@ import { SqlTextViewer } from '../sql';
 import { InsightsList } from '../insights';
 import {
   formatNumber,
-  formatPercentage,
   formatDuration,
   formatDate,
   formatChangePercentage,
-  getChangeDirectionColor,
   getChangeDirectionLabel,
 } from '../utils';
 import { CHANGE_DIRECTION_COLORS } from '../types';
@@ -357,10 +348,10 @@ function SqlChangesView({
   improvements,
   newStatements,
   onSqlClick,
-  onSnackbar,
+  onSnackbar: _onSnackbar,
 }: SqlChangesViewProps) {
   const theme = useTheme();
-  const [expanded, setExpanded] = useState<string | null>(null);
+  const [_expanded, _setExpanded] = useState<string | null>(null);
 
   if (regressions.length === 0 && improvements.length === 0 && newStatements.length === 0) {
     return (
@@ -702,7 +693,7 @@ export function CompareTab({
   reportId,
   testRunId,
   baselineReportId: initialBaselineId,
-  baselineTestRunId,
+  baselineTestRunId: _baselineTestRunId,
   onComparisonComplete,
   onSnackbar,
 }: CompareTabProps) {
@@ -732,8 +723,8 @@ export function CompareTab({
     loadProfileComparisons,
     overallStatus,
     hasComparison,
-    regressionCount,
-    improvementCount,
+    regressionCount: _regressionCount,
+    improvementCount: _improvementCount,
   } = useAwrComparison(reportId, testRunId, {
     initialBaselineId,
     onCompareSuccess: (response) => {

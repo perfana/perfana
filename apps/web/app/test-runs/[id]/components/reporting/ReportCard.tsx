@@ -67,7 +67,6 @@ import {
   getReportStatusLabel,
   getReportStatusColor,
   isCompletedStatus,
-  _isFailedStatus,
   buildShareUrl,
   type ReportSummary,
   type ReportListItem,
@@ -204,6 +203,7 @@ export function ReportCard({
     };
 
     fetchReports();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [expanded, testRun.id]);
 
   // Refresh reports when refreshTrigger changes
@@ -230,6 +230,7 @@ export function ReportCard({
     };
 
     refresh();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [refreshTrigger, testRun.id, expanded, handleSnackbar]);
 
   // Handle expand with auto-focus

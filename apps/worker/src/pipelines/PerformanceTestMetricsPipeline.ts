@@ -41,26 +41,20 @@ import { ErrorsProcessor, VirtualUsersProcessor } from './helpers/scenario-proce
  * Performance Test Metrics Pipeline
  */
 export class PerformanceTestMetricsPipeline extends BasePipelineTypeORM {
-  private dashboardManager: DashboardManager;
-  private requestsProcessor: RequestsProcessor;
-  private transactionsProcessor: TransactionsProcessor;
-  private errorsProcessor: ErrorsProcessor;
-  private virtualUsersProcessor: VirtualUsersProcessor;
+  private dashboardManager!: DashboardManager;
+  private requestsProcessor!: RequestsProcessor;
+  private transactionsProcessor!: TransactionsProcessor;
+  private errorsProcessor!: ErrorsProcessor;
+  private virtualUsersProcessor!: VirtualUsersProcessor;
 
   constructor(logger: Logger) {
     super(logger);
-    // Initialize processors (will be instantiated with dataSource in execute)
-    this.dashboardManager = null as any;
-    this.requestsProcessor = null as any;
-    this.transactionsProcessor = null as any;
-    this.errorsProcessor = null as any;
-    this.virtualUsersProcessor = null as any;
   }
 
   /**
    * Execute the performance test metrics pipeline
    */
-  async execute(input: any): Promise<PipelineResult> {
+  async execute(input: unknown): Promise<PipelineResult> {
     const startTime = Date.now();
 
     try {
@@ -330,12 +324,12 @@ export class PerformanceTestMetricsPipeline extends BasePipelineTypeORM {
   /**
    * Validate and parse input
    */
-  private validateAndParseInput(input: any): PerformanceTestMetricsInput {
+  private validateAndParseInput(input: unknown): PerformanceTestMetricsInput {
     if (!input || typeof input !== 'object') {
       throw new Error('Invalid input: expected object');
     }
 
-    const { testRunId, fromTime, toTime } = input as any;
+    const { testRunId, fromTime, toTime } = input as Record<string, unknown>;
 
     if (!testRunId || typeof testRunId !== 'string') {
       throw new Error('Invalid input: testRunId is required and must be a string');
@@ -345,14 +339,14 @@ export class PerformanceTestMetricsPipeline extends BasePipelineTypeORM {
     const result: PerformanceTestMetricsInput = { testRunId };
 
     if (fromTime !== undefined) {
-      result.fromTime = fromTime instanceof Date ? fromTime : new Date(fromTime);
+      result.fromTime = fromTime instanceof Date ? fromTime : new Date(fromTime as string | number);
       if (isNaN(result.fromTime.getTime())) {
         throw new Error('Invalid input: fromTime is not a valid date');
       }
     }
 
     if (toTime !== undefined) {
-      result.toTime = toTime instanceof Date ? toTime : new Date(toTime);
+      result.toTime = toTime instanceof Date ? toTime : new Date(toTime as string | number);
       if (isNaN(result.toTime.getTime())) {
         throw new Error('Invalid input: toTime is not a valid date');
       }

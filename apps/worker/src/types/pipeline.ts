@@ -26,8 +26,8 @@ export interface PipelineResult {
 
 // Base interface for all pipeline services
 export interface Pipeline {
-  execute(input: any): Promise<PipelineResult>;
-  validateInput?(input: any): boolean;
+  execute(input: unknown): Promise<PipelineResult>;
+  validateInput?(input: unknown): boolean;
   cleanup?(): Promise<void>;
 }
 

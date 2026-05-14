@@ -85,6 +85,7 @@ export default function ApdexSloDialog({
       // Fetch test run details for SLO creation
       fetchTestRunDetails();
     }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open, testRunId]);
 
   // When we have test run details, check for existing SLO
@@ -92,6 +93,7 @@ export default function ApdexSloDialog({
     if (testRunDetails && open) {
       checkExistingSlo();
     }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [testRunDetails, open]);
 
   const fetchTestRunDetails = async () => {

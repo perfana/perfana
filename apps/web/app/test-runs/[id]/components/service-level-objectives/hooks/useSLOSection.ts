@@ -122,9 +122,9 @@ export function useSLOSection({
   const cardRef = useRef<HTMLDivElement>(null);
 
   // Core data state
-  const [checkResults, setCheckResults] = useState<any[]>([]);
+  const [checkResults, setCheckResults] = useState<unknown[]>([]);
   const [checkResultsLoading, setCheckResultsLoading] = useState(false);
-  const [benchmarks, setBenchmarks] = useState<any[]>([]);
+  const [benchmarks, setBenchmarks] = useState<unknown[]>([]);
   const [benchmarksLoading, setBenchmarksLoading] = useState(false);
 
   // UI state
@@ -151,7 +151,7 @@ export function useSLOSection({
 
   // Edit SLO dialog state
   const [editSloDialogOpen, setEditSloDialogOpen] = useState(false);
-  const [selectedSloForEdit, setSelectedSloForEdit] = useState<any>(null);
+  const [selectedSloForEdit, setSelectedSloForEdit] = useState<unknown>(null);
 
   // Apdex transaction threshold config dialog state
   const [apdexConfigDialogOpen, setApdexConfigDialogOpen] = useState(false);
@@ -159,7 +159,7 @@ export function useSLOSection({
 
   // Apdex thresholds management dialog state
   const [apdexThresholdsDialogOpen, setApdexThresholdsDialogOpen] = useState(false);
-  const [selectedApdexResultForThresholds, setSelectedApdexResultForThresholds] = useState<any>(null);
+  const [selectedApdexResultForThresholds, setSelectedApdexResultForThresholds] = useState<unknown>(null);
 
   // Ref for status change tracking
   const prevStatusRef = useRef<TestRunStatus | null>(null);
@@ -572,6 +572,7 @@ export function useSLOSection({
         loadBenchmarks();
       }
     }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [testRun]);
 
   // Status change effect

@@ -88,6 +88,7 @@ export default function Top10ListsUrls({ testRunId, selectedScenarios = [] }: To
 
   useEffect(() => {
     fetchData();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [testRunId]);
 
   const fetchData = async () => {

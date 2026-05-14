@@ -35,7 +35,28 @@ async function fetchTestRun(id: string, searchParams: URLSearchParams): Promise<
  * Normalize field names from camelCase to snake_case for compatibility
  */
 function normalizeTestRun(updatedTestRun: TestRun): TestRun {
-  const rawTestRun = updatedTestRun as any;
+  // The API may return camelCase field names; cast to access them safely
+  const rawTestRun = updatedTestRun as unknown as Partial<{
+    testRunId: string;
+    testEnvironment: string;
+    systemUnderTestId: string;
+    startTime: string;
+    endTime: string;
+    plannedDuration: number;
+    analysisStartOffset: number;
+    consolidatedResult: TestRun['consolidated_result'];
+    applicationRelease: string;
+    ciBuildResultsUrl: string;
+    deepLinks: TestRun['deep_links'];
+    createdAt: string;
+    updatedAt: string;
+    reasonsNotValid: string[];
+    dataWarnings: string[];
+    adaptConfig: TestRun['adapt_config'];
+    isChangepoint: boolean;
+    isControlGroup: boolean;
+    systemUnderTest: TestRun['systems_under_test'];
+  }>;
   return {
     ...updatedTestRun,
     test_run_id: rawTestRun.testRunId || updatedTestRun.test_run_id,
@@ -127,7 +148,7 @@ export function useTestRunData({ testRunId, onLoadComplete }: UseTestRunDataOpti
     onTestRunUpdated: (updatedTestRun: TestRun) => {
       const matchesCurrentRun =
         updatedTestRun.id === testRun?.id ||
-        (updatedTestRun as any).testRunId === testRunId ||
+        (updatedTestRun as unknown as Record<string, unknown>).testRunId === testRunId ||
         updatedTestRun.test_run_id === testRunId;
 
       if (matchesCurrentRun) {

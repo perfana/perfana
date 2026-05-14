@@ -47,7 +47,7 @@ export class MetricsPipeline extends BasePipelineTypeORM {
     this.logger.info(`🔗 Initialized Grafana client with URL: ${grafanaConfig.url}`);
   }
 
-  async execute(input: any): Promise<PipelineResult> {
+  async execute(input: unknown): Promise<PipelineResult> {
     const startTime = Date.now();
 
     try {
@@ -98,7 +98,7 @@ export class MetricsPipeline extends BasePipelineTypeORM {
           dashboard_label: panel.dashboard_label || '', // Provide default empty string
           benchmark_ids: panel.benchmark_ids || null,
           panel: panel.panel,
-          errors: panel.errors as any || null, // Type assertion needed for compatibility
+          errors: panel.errors as unknown as PanelDocument['errors'],
           requests: typeof panel.requests === 'string' ? JSON.parse(panel.requests || '[]') : (panel.requests || []),
           updated_at: panel.updated_at
         }));
@@ -193,8 +193,12 @@ export class MetricsPipeline extends BasePipelineTypeORM {
     } catch (error) {
       const duration = Date.now() - startTime;
 
+      const testRunId = (input && typeof input === 'object' && 'testRunId' in input)
+        ? (input as { testRunId?: unknown }).testRunId
+        : undefined;
+
       this.logError(error as Error, {
-        testRunId: (input as any)?.testRunId,
+        testRunId,
         duration
       });
 
@@ -203,7 +207,7 @@ export class MetricsPipeline extends BasePipelineTypeORM {
       return this.createErrorResult(
         error as Error,
         'METRICS_COLLECTION_ERROR',
-        { testRunId: (input as any)?.testRunId },
+        { testRunId },
         duration
       );
     }
@@ -212,21 +216,21 @@ export class MetricsPipeline extends BasePipelineTypeORM {
   /**
    * Validate and parse input parameters
    */
-  private validateAndParseInput(input: any): MetricsInput {
+  private validateAndParseInput(input: unknown): MetricsInput {
     if (!input || typeof input !== 'object') {
       throw new Error('Invalid input: must be an object');
     }
 
-    const { testRunId, benchmarksOnly, panelDocuments } = input as any;
+    const { testRunId, benchmarksOnly, panelDocuments } = input as Record<string, unknown>;
 
     if (!testRunId || typeof testRunId !== 'string') {
       throw new Error('Invalid input: testRunId is required and must be a string');
     }
 
     return {
-      testRunId,
+      testRunId: testRunId as string,
       benchmarksOnly: Boolean(benchmarksOnly),
-      panelDocuments
+      panelDocuments: panelDocuments as PanelDocument[] | undefined
     };
   }
 
@@ -235,7 +239,7 @@ export class MetricsPipeline extends BasePipelineTypeORM {
    * Get panel metrics as flattened records directly
    * Simplified version that bypasses intermediate PanelMetricsDocument step
    */
-  private async getPanelMetricsAsRecords(testRun: unknown, panels: PanelDocument[]): Promise<any[]> {
+  private async getPanelMetricsAsRecords(testRun: { start_time?: Date; ramp_up?: number; organization_id?: string | null; team_id?: string | null }, panels: PanelDocument[]): Promise<unknown[]> {
     // Separate panels with/without errors for different processing (Python pattern)
     const panelsWithoutErrors = panels.filter(panel =>
       panel.errors === null || panel.errors === undefined
@@ -307,7 +311,7 @@ export class MetricsPipeline extends BasePipelineTypeORM {
    * Helper method for the new direct flattening approach
    * @param testRun - Test run information including start_time and ramp_up duration
    */
-  private flattenSingleDocument(document: PanelMetricsDocument, testRun: any): unknown[] {
+  private flattenSingleDocument(document: PanelMetricsDocument, testRun: { start_time?: Date; ramp_up?: number; organization_id?: string | null; team_id?: string | null }): unknown[] {
     const baseData = {
       test_run_id: document.test_run_id,
       application_dashboard_id: document.application_dashboard_id,
@@ -463,7 +467,7 @@ export class MetricsPipeline extends BasePipelineTypeORM {
 
     // Flatten parameters for prepared statement, truncating strings to column limits
     const params = batch.flatMap(record => {
-      const r = record as any;
+      const r = record as Record<string, unknown>;
       return columns.map(col => {
         const val = r[col];
         const limit = varcharLimits[col];

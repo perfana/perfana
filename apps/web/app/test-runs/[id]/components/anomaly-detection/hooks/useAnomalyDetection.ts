@@ -135,10 +135,10 @@ interface UseAnomalyDetectionReturn {
   fetchAnomalyData: () => Promise<void>;
   handleConclusionFilterChange: (newFilter: string) => void;
   handleSearchChange: (e: React.ChangeEvent<HTMLInputElement>) => void;
-  handleConclusionFilterForForm: (e: unknown) => void;
-  handleClassificationFilterChange: (e: unknown) => void;
-  handleDashboardFilterChange: (e: unknown) => void;
-  handlePanelFilterChange: (e: unknown) => void;
+  handleConclusionFilterForForm: (e: { target: { value: string } }) => void;
+  handleClassificationFilterChange: (e: { target: { value: string } }) => void;
+  handleDashboardFilterChange: (e: { target: { value: string } }) => void;
+  handlePanelFilterChange: (e: { target: { value: string } }) => void;
 }
 
 export function useAnomalyDetection({
@@ -168,7 +168,7 @@ export function useAnomalyDetection({
   const [anomalyData, setAnomalyData] = useState<AnomalyData[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string>();
-  const [dsAdaptConclusion, setDsAdaptConclusion] = useState<any>(null);
+  const [dsAdaptConclusion, setDsAdaptConclusion] = useState<unknown>(null);
 
   // Tab and tracking state
   const [localActiveTab, setLocalActiveTab] = useState<number>(0);
@@ -658,23 +658,23 @@ export function useAnomalyDetection({
     setPage(0);
   }, []);
 
-  const handleConclusionFilterForForm = useCallback((e: unknown) => {
+  const handleConclusionFilterForForm = useCallback((e: { target: { value: string } }) => {
     setConclusionFilter(e.target.value);
     setPage(0);
   }, [setConclusionFilter]);
 
-  const handleClassificationFilterChange = useCallback((e: unknown) => {
+  const handleClassificationFilterChange = useCallback((e: { target: { value: string } }) => {
     setClassificationFilter(e.target.value);
     setPage(0);
   }, []);
 
-  const handleDashboardFilterChange = useCallback((e: unknown) => {
+  const handleDashboardFilterChange = useCallback((e: { target: { value: string } }) => {
     setDashboardFilter(e.target.value);
     setPanelFilter('all'); // Reset panel when dashboard changes
     setPage(0);
   }, []);
 
-  const handlePanelFilterChange = useCallback((e: unknown) => {
+  const handlePanelFilterChange = useCallback((e: { target: { value: string } }) => {
     setPanelFilter(e.target.value);
     setPage(0);
   }, []);

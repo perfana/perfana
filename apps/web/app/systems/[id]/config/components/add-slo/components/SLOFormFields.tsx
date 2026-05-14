@@ -69,7 +69,7 @@ export function SLOFormFields({
   };
 
   // Merge all dashboards into a single grouped list
-  type UnifiedDashboard = { id: string; label: string; sourceType: string; groupLabel: string; color: string; original: any };
+  type UnifiedDashboard = { id: string; label: string; sourceType: string; groupLabel: string; color: string; original: unknown };
   const allDashboardsMerged = useMemo((): UnifiedDashboard[] => {
     const result: UnifiedDashboard[] = [];
 

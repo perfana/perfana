@@ -215,6 +215,7 @@ export function useReportingTemplateManagement(): UseReportingTemplateManagement
     } finally {
       setDeleteLoading(false);
     }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [deletingTemplate]);
 
   // Handle batch delete

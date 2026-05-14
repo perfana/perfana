@@ -17,7 +17,7 @@ export interface DataSanityCheckInput {
  */
 export class DataSanityCheckPipeline extends BasePipelineTypeORM {
 
-  async execute(input: any): Promise<PipelineResult> {
+  async execute(input: unknown): Promise<PipelineResult> {
     const startTime = Date.now();
     const { testRunId } = input as DataSanityCheckInput;
 
@@ -257,8 +257,8 @@ export class DataSanityCheckPipeline extends BasePipelineTypeORM {
       const valid = reasons.length === 0;
       await this.db.updateTestRunByTestRunId(testRunId, {
         valid,
-        reasonsNotValid: (valid ? null : reasons) as any,
-        dataWarnings: (warnings.length > 0 ? warnings : null) as any,
+        reasonsNotValid: valid ? null : reasons,
+        dataWarnings: warnings.length > 0 ? warnings : null,
       });
 
       const duration = Date.now() - startTime;

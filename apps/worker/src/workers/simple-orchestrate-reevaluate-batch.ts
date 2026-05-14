@@ -6,7 +6,9 @@
  */
 
 import { Queue, QueueEvents } from 'bullmq';
+import type { Job as BullJob } from 'bullmq';
 import IORedis from 'ioredis';
+import type Redis from 'ioredis';
 import { getLogger } from '../lib/utils/logger.js';
 import { OrchestrateReevaluateBatchJobSchema, type JobResult, type GapFillAction, type TestRunGapAnalysis, JOB_NAMES } from '../types/jobs.js';
 import { SIMPLE_QUEUES, getJobOptions } from '../config/simple-queues.js';
@@ -175,7 +177,7 @@ export function simpleOrchestrateReevaluateBatchWorker() {
 
   return async (job: { data: unknown; id?: string }): Promise<JobResult> => {
     const startTime = Date.now();
-    let redis: any = null;
+    let redis: Redis | null = null;
     let lockService: JobLockService | null = null;
     let progressReporter: ProgressReporter | null = null;
     let lockAcquired = false;
@@ -279,13 +281,13 @@ export function simpleOrchestrateReevaluateBatchWorker() {
       // Initialize progress reporter
       progressReporter = new ProgressReporter(
         redis,
-        job as any,
+        job as unknown as BullJob,
         testRunInfo,
         'reevaluate' as JobType,
         stages
       );
 
-      const results: { [key: string]: any } = {};
+      const results: Record<string, unknown> = {};
       const stageTiming: Array<{ stage: string; duration: number }> = [];
 
       // Create queues (all jobs go to perfana-analyze queue)
@@ -333,7 +335,7 @@ export function simpleOrchestrateReevaluateBatchWorker() {
             const statuses = await db.getAllCollectionStatuses(testRunId);
 
             // Filter to selected source types
-            let sourcesToRefetch = statuses.filter(s => enabledSourceTypes.has(s.source_type));
+            let sourcesToRefetch: Array<{ source_type: string; source_id?: string }> = statuses.filter(s => enabledSourceTypes.has(s.source_type));
 
             // Force mode: discover sources that have no collection status yet
             // This handles cases where Dynatrace/Grafana configs were added after initial collection
@@ -378,7 +380,7 @@ export function simpleOrchestrateReevaluateBatchWorker() {
 
                 if (discoveredSources.length > 0) {
                   logger.info(`  ${testRunId}: discovered ${discoveredSources.length} new sources: ${discoveredSources.map(s => `${s.source_type}/${s.source_id ?? 'null'}`).join(', ')}`);
-                  sourcesToRefetch = [...sourcesToRefetch, ...discoveredSources] as any;
+                  sourcesToRefetch = [...sourcesToRefetch, ...discoveredSources];
                 }
               }
             }
@@ -426,7 +428,8 @@ export function simpleOrchestrateReevaluateBatchWorker() {
                   // Use the full DynatracePipeline — same as the analyze worker's dynatrace-collection stage
                   const dynatracePipeline = new DynatracePipeline(logger);
                   const result = await dynatracePipeline.execute({ testRunIds: [testRunId] });
-                  dataPoints = (result.data as any)?.totalMetrics ?? (result.data as any)?.totalDataPoints ?? (result.data as any)?.metricsCollected ?? 0;
+                  const dtData = result.data as Record<string, unknown>;
+                  dataPoints = (dtData?.totalMetrics ?? dtData?.totalDataPoints ?? dtData?.metricsCollected ?? 0) as number;
                 } else {
                   // Grafana and performance_test use incremental pipeline with full time range
                   const result = await incrementalPipeline.execute({
@@ -438,7 +441,7 @@ export function simpleOrchestrateReevaluateBatchWorker() {
                     collectPerformanceTestMetrics: status.source_type === 'performance_test',
                     ...(status.source_type === 'grafana' && status.source_id ? { grafanaInstanceId: status.source_id } : {}),
                   });
-                  dataPoints = (result.data as any)?.totalDataPoints as number || 0;
+                  dataPoints = ((result.data as Record<string, unknown>)?.totalDataPoints as number) || 0;
                 }
 
                 logger.info(`    ${status.source_type}/${status.source_id ?? 'null'}: ${dataPoints} data points collected`);
@@ -549,7 +552,7 @@ export function simpleOrchestrateReevaluateBatchWorker() {
           let filteredCount = 0;
           for (const [_trId, gapInfo] of testRunGaps) {
             const before = gapInfo.gaps.length;
-            gapInfo.gaps = gapInfo.gaps.filter((g: any) => enabledSourceTypes.has(g.sourceType));
+            gapInfo.gaps = gapInfo.gaps.filter((g: unknown) => enabledSourceTypes.has((g as { sourceType: string }).sourceType));
             filteredCount += before - gapInfo.gaps.length;
           }
 
@@ -576,10 +579,10 @@ export function simpleOrchestrateReevaluateBatchWorker() {
             let testRunReceivedData = false;
 
             for (const gap of gapInfo.gaps) {
-              const g = gap as any;
+              const g = gap as { sourceType: string; sourceId?: string; missingRanges: Array<{ from: Date | string; to: Date | string }>; failedRanges: Array<{ from: Date | string; to: Date | string }> };
               const allRanges = [
-                ...g.missingRanges.map((r: any) => ({ from: r.from, to: r.to, type: 'missing' as const })),
-                ...g.failedRanges.map((r: any) => ({ from: r.from, to: r.to, type: 'retry' as const })),
+                ...g.missingRanges.map((r) => ({ from: r.from, to: r.to, type: 'missing' as const })),
+                ...g.failedRanges.map((r) => ({ from: r.from, to: r.to, type: 'retry' as const })),
               ];
 
               for (const range of allRanges) {
@@ -598,12 +601,12 @@ export function simpleOrchestrateReevaluateBatchWorker() {
                     ...(g.sourceType === 'dynatrace' && g.sourceId ? { dynatraceConfigId: g.sourceId } : {}),
                   });
 
-                  const dataPoints = (result.data as any)?.totalDataPoints as number || 0;
+                  const dataPoints = ((result.data as Record<string, unknown>)?.totalDataPoints as number) || 0;
                   if (dataPoints > 0) { testRunReceivedData = true; }
 
                   actions.push({
                     sourceType: g.sourceType,
-                    sourceId: g.sourceId,
+                    sourceId: g.sourceId ?? null,
                     rangeFrom: fromDate.toISOString(),
                     rangeTo: toDate.toISOString(),
                     status: dataPoints > 0 ? 'collected' : 'no-data',
@@ -614,7 +617,7 @@ export function simpleOrchestrateReevaluateBatchWorker() {
                   logger.error(`  ❌ Gap fill failed for ${g.sourceType}/${g.sourceId ?? 'null'}: ${errorMsg}`);
                   actions.push({
                     sourceType: g.sourceType,
-                    sourceId: g.sourceId,
+                    sourceId: g.sourceId ?? null,
                     rangeFrom: fromDate.toISOString(),
                     rangeTo: toDate.toISOString(),
                     status: 'failed',
@@ -629,7 +632,7 @@ export function simpleOrchestrateReevaluateBatchWorker() {
               const allSucceeded = sourceActions.every(a => a.status !== 'failed');
               if (allSucceeded) {
                 try {
-                  await gapService.markSourceComplete(testRunId, g.sourceType, g.sourceId);
+                  await gapService.markSourceComplete(testRunId, g.sourceType, g.sourceId ?? null);
                 } catch (markErr) {
                   logger.warn(`Non-fatal: failed to mark source complete for ${testRunId} ${g.sourceType}/${g.sourceId ?? 'null'}: ${markErr}`);
                 }
@@ -648,7 +651,10 @@ export function simpleOrchestrateReevaluateBatchWorker() {
             gapAnalysisDetails.push({
               testRunId,
               sourcesAnalyzed: gapInfo.gaps.length,
-              gapsFound: gapInfo.gaps.reduce((sum: number, gi: any) => sum + gi.missingRanges.length + gi.failedRanges.length, 0),
+              gapsFound: gapInfo.gaps.reduce((sum: number, gi: unknown) => {
+                const g = gi as { missingRanges: unknown[]; failedRanges: unknown[] };
+                return sum + g.missingRanges.length + g.failedRanges.length;
+              }, 0),
               coverageBefore: gapInfo.coverageBefore,
               coverageAfter,
               actions,

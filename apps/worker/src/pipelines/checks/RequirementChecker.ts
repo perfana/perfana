@@ -70,7 +70,7 @@ export class RequirementChecker extends BaseCheckService {
       // Check if requirement config exists
       // Based on requirement_checker.py:88-124
       const hasRequirement = this.hasValidRequirement(benchmark);
-      const config = benchmark.configuration as any;
+      const config = benchmark.configuration as Record<string, unknown> | null | undefined;
 
       if (!hasRequirement) {
         const panelId = config?.panelId;
@@ -86,7 +86,7 @@ export class RequirementChecker extends BaseCheckService {
       // Based on requirement_checker.py:134-141
       // Using safe-regex validation to prevent ReDoS attacks
       let regex: RegExp | null = null;
-      const matchPattern = config?.matchPattern;
+      const matchPattern = config?.matchPattern as string | null | undefined;
       if (matchPattern) {
         const result = validateRegexPattern(matchPattern);
         if (result.safe && result.regex) {
@@ -151,10 +151,10 @@ export class RequirementChecker extends BaseCheckService {
       );
 
       // Extract panel configuration
-      const panelId = config?.id || null;
-      const panelType = config?.type || 'graph';
+      const panelId = (config?.id as number | null | undefined) ?? null;
+      const panelType = (config?.type as string | undefined) || 'graph';
       const panelTitle = this.stripPanelTitlePrefix(benchmark.panel_title || '');
-      const panelYAxesFormat = config?.yAxesFormat || null;
+      const panelYAxesFormat = (config?.yAxesFormat as string | null | undefined) ?? null;
 
       // Create CheckResult document
       // Based on requirement_checker.py:187-231
@@ -324,7 +324,7 @@ export class RequirementChecker extends BaseCheckService {
    * Convert benchmark requirement config to requirement object
    * Based on requirement_checker.py:308-338
    */
-  private convertRequirement(benchmark: Benchmark): any {
+  private convertRequirement(benchmark: Benchmark): { operator: string; value: number } | null {
     if (!this.hasValidRequirement(benchmark)) {
       return null;
     }

@@ -1,0 +1,1 @@
+/Users/daniel/workspace/perfana/.claude/skills/gstack/autoplan/SKILL.md

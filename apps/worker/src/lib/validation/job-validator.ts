@@ -44,7 +44,7 @@ const JOB_SCHEMAS = {
   [JOB_NAMES.REEVALUATION_BATCH]: ReevaluationBatchJobSchema
 } as const;
 
-export interface ValidationResult<T = any> {
+export interface ValidationResult<T = unknown> {
   success: boolean;
   data?: T;
   errors?: string[];

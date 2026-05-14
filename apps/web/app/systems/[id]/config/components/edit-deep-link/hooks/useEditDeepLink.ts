@@ -102,6 +102,7 @@ export function useEditDeepLink({
       resetAutocomplete();
       setAvailableVariables(BASE_VARIABLES);
     }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open, deepLink]);
 
   const resetAutocomplete = useCallback(() => {

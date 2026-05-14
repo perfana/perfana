@@ -6,7 +6,8 @@ function getAuthHeaders(): Record<string, string> {
   // Try to get Keycloak token first if enabled
   if (env.USE_KEYCLOAK_AUTH) {
     try {
-      // Dynamically import keycloak auth to avoid SSR issues
+      // Lazy import to avoid SSR issues with keycloak-js browser globals
+      // eslint-disable-next-line @typescript-eslint/no-var-requires
       const keycloakAuth = require('./keycloak-auth').default;
       const keycloakToken = keycloakAuth.getToken();
       if (keycloakToken) {
@@ -28,7 +29,7 @@ async function handleAuthError(response: Response): Promise<boolean> {
     // Handle Keycloak token refresh first if enabled
     if (env.USE_KEYCLOAK_AUTH && typeof window !== 'undefined') {
       try {
-        const keycloakAuth = require('./keycloak-auth').default;
+        const { default: keycloakAuth } = await import('./keycloak-auth');
         if (keycloakAuth.isAuthenticated()) {
           const refreshed = await keycloakAuth.updateToken(0); // Force refresh
           if (refreshed) {
@@ -136,7 +137,7 @@ export interface RecentFailure {
   workload: string;
   start_time: string | null;
   end_time: string | null;
-  consolidated_result: any;
+  consolidated_result: { meetsRequirement?: boolean | null; adaptTestRunOK?: boolean | null } | null;
   created_at: string;
 }
 

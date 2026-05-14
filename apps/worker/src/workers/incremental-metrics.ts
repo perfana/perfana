@@ -296,7 +296,7 @@ async function collectGrafanaMetrics(
     }
 
     // Extract data points from pipeline result
-    const data = result.data as any;
+    const data = result.data as { grafana?: { dataPoints?: number }; totalDataPoints?: number } | undefined;
     const dataPoints = data?.grafana?.dataPoints ?? data?.totalDataPoints ?? 0;
 
     return {
@@ -367,7 +367,7 @@ async function collectDynatraceMetrics(
     }
 
     // Extract data points and max timestamp from pipeline result
-    const data = result.data as any;
+    const data = result.data as { dynatrace?: { dataPoints?: number; maxDataTimestamp?: string }; totalDataPoints?: number } | undefined;
     const dataPoints = data?.dynatrace?.dataPoints ?? data?.totalDataPoints ?? 0;
     const maxDataTimestamp = data?.dynatrace?.maxDataTimestamp
       ? new Date(data.dynatrace.maxDataTimestamp)
@@ -475,7 +475,7 @@ async function collectPerformanceTestMetrics(
     }
 
     // Extract data points from pipeline result
-    const data = result.data as any;
+    const data = result.data as { performanceTest?: { dataPoints?: number }; totalDataPoints?: number } | undefined;
     const dataPoints = data?.performanceTest?.dataPoints ?? data?.totalDataPoints ?? 0;
 
     return {

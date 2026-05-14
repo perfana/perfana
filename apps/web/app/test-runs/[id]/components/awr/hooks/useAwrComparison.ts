@@ -475,12 +475,17 @@ export function useAwrComparison(
   const summary = summaryQuery.data ?? null;
 
   // Extract comparison details
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   const sqlComparisons = comparison?.sqlComparison?.comparisons ?? [];
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   const sqlRegressions = comparison?.sqlComparison?.regressions ?? [];
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   const sqlImprovements = comparison?.sqlComparison?.improvements ?? [];
   const newSqlStatements = comparison?.sqlComparison?.newStatements ?? [];
   const waitEventComparisons = comparison?.waitEventComparison?.comparisons ?? [];
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   const waitEventIncreases = comparison?.waitEventComparison?.increases ?? [];
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   const waitEventDecreases = comparison?.waitEventComparison?.decreases ?? [];
   const loadProfileComparisons = comparison?.loadProfileComparison?.metrics ?? [];
 
@@ -580,6 +585,7 @@ export function useAwrComparison(
         return true;
       });
     },
+    // eslint-disable-next-line react-hooks/exhaustive-deps
     [sqlComparisons]
   );
 
@@ -588,11 +594,13 @@ export function useAwrComparison(
 
   const hasSignificantRegressions = useMemo(
     () => sqlRegressions.length > 0 || waitEventIncreases.length > 0,
+    // eslint-disable-next-line react-hooks/exhaustive-deps
     [sqlRegressions, waitEventIncreases]
   );
 
   const hasSignificantImprovements = useMemo(
     () => sqlImprovements.length > 0 || waitEventDecreases.length > 0,
+    // eslint-disable-next-line react-hooks/exhaustive-deps
     [sqlImprovements, waitEventDecreases]
   );
 

@@ -57,8 +57,8 @@ export class DataAggregator extends BaseCheckService {
   ): Promise<AggregationResult> {
     try {
       // Extract panel_id from configuration.id (matches Python benchmark.panel.id)
-      const config = benchmark.configuration as any;
-      const panelId = config?.id;
+      const config = benchmark.configuration as Record<string, unknown> | null | undefined;
+      const panelId = config?.id as number | undefined;
       if (!panelId) {
         throw new DataAggregationError(`No panel ID found in benchmark ${benchmark.id} configuration`);
       }
@@ -121,26 +121,26 @@ export class DataAggregator extends BaseCheckService {
           )
       `;
 
-      const result = await this.manager.query(metricStatisticsSql, queryParams) as any;
+      const result = await this.manager.query(metricStatisticsSql, queryParams) as Record<string, unknown>[];
 
-      const metricStatistics: MetricStatistic[] = result.map((row: any) => ({
-        metric_name: row.metric_name,
-        mean: row.mean,
-        median: row.median,
-        min_value: row.min_value,
-        max_value: row.max_value,
-        std_dev: row.std_dev,
-        q10: row.q10,
-        q25: row.q25,
-        q75: row.q75,
-        q90: row.q90,
-        q95: row.q95,
-        q99: row.q99,
-        last_value: row.last_value,
-        count: row.count,
-        is_constant: row.is_constant,
-        all_missing: row.all_missing,
-        pct_missing: row.pct_missing
+      const metricStatistics: MetricStatistic[] = result.map((row) => ({
+        metric_name: row.metric_name as string,
+        mean: row.mean as number,
+        median: row.median as number,
+        min_value: row.min_value as number,
+        max_value: row.max_value as number,
+        std_dev: row.std_dev as number,
+        q10: row.q10 as number,
+        q25: row.q25 as number,
+        q75: row.q75 as number,
+        q90: row.q90 as number,
+        q95: row.q95 as number,
+        q99: row.q99 as number,
+        last_value: row.last_value as number,
+        count: row.count as number,
+        is_constant: row.is_constant as boolean,
+        all_missing: row.all_missing as boolean,
+        pct_missing: row.pct_missing as number
       }));
 
       // Based on data_aggregator.py:59-131

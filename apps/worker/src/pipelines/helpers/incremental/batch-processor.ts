@@ -145,7 +145,7 @@ export class BatchProcessor {
     documents: unknown[],
     testRun: TestRunContext,
     source: MetricSource,
-    flattenFn: (doc: any) => FlattenedMetricRecord[]
+    flattenFn: (doc: unknown) => FlattenedMetricRecord[]
   ): Promise<BatchProcessResult> {
     const result: BatchProcessResult = {
       totalRecords: 0,
@@ -208,7 +208,7 @@ export class BatchProcessor {
     batch: unknown[],
     testRun: TestRunContext,
     source: MetricSource,
-    flattenFn: (doc: any) => FlattenedMetricRecord[]
+    flattenFn: (doc: unknown) => FlattenedMetricRecord[]
   ): Promise<BatchProcessResult> {
     const result: BatchProcessResult = {
       totalRecords: 0,
@@ -280,8 +280,8 @@ export class BatchProcessor {
    * @param doc - Document to identify
    * @returns String identifier for the document
    */
-  private getDocumentIdentifier(doc: any): string {
-    const d = doc as any;
+  private getDocumentIdentifier(doc: unknown): string {
+    const d = doc as Record<string, unknown>;
     // Try various common ID fields
     const panelId = d.panel_id || d.panelId;
     const panelTitle = d.panel_title || d.panelTitle;
@@ -294,7 +294,7 @@ export class BatchProcessor {
       return String(panelId);
     }
     if (dashboardLabel) {
-      return dashboardLabel;
+      return String(dashboardLabel);
     }
     return 'unknown';
   }

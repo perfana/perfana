@@ -4,6 +4,30 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
+## [0.2.48.2] - 2026-05-14
+
+### Fixed
+- **Removed unused `PyroscopeViewMode` enum members** (`SINGLE`, `DIFF`) and `PyroscopeTheme.LIGHT` — only `COMPARISON` and `DARK` are actually referenced. Eliminates dead enum branches that lint would eventually flag.
+- **Audit capabilities test aligned to current `AuditCapabilities` type** — added `isSuperAdmin: false` to the expected shape so the test reflects the actual interface rather than an outdated subset.
+- **gstack tooling upgraded from v1.34.1.0 → v1.34.2.0** — fixes `/codex review` breakage on Codex CLI 0.130+, silent `/investigate` learning drops, and `/sync-gbrain` engine detection for Supabase backends.
+
+## [0.2.48.1] - 2026-05-14
+
+### Changed
+- **Frontend & API type safety: eliminated all `no-explicit-any` ESLint warnings across web and API apps.** Replaced 116 web and additional API `any` usages with precise types: Plotly callbacks use `unknown` + inline casts instead of `any`-typed parameters; MUI Select handlers use structural event types to avoid generic inference conflicts; `setDynatraceMetrics` now typed as `React.Dispatch<React.SetStateAction<DynatraceMetric[]>>`; `RecentFailure.consolidated_result` typed with its actual shape; dynamic `next/dynamic` component casts use `as unknown as` to bypass `Parameters<T>` constraint; `window` Plotly extension uses double-cast to avoid non-overlapping type error. API service files (adapt, benchmarks, compare-presets, dynatrace, grafana, metrics, provisioning, test-runs) similarly converted from `any` to `unknown` + targeted casts. Zero `eslint-disable` comments added.
+- **`TestRun` entity: `reasonsNotValid` and `dataWarnings` now typed `string[] | null`** to match the nullable DB columns. `DataSanityCheckPipeline` assigns `null` (not `undefined`) when clearing these fields so TypeORM issues a SQL `NULL` rather than silently skipping the column. API mappers coerce `null → undefined` at the DTO boundary with `?? undefined`.
+
+## [0.2.48.0] - 2026-05-14
+
+### Changed
+- **Worker type safety: replaced `any` with `unknown` across all pipeline code.** The `Pipeline` interface, `BasePipelineTypeORM`, and all 25+ pipeline implementations now use `unknown` instead of `any` for `execute()` and `validateInput()` inputs. SQL query result row fields are explicitly cast at the point of use rather than silently typed as `any`. This eliminates 200+ lint warnings and makes type violations visible at compile time rather than at runtime.
+- **BullMQ Worker options aligned to current API.** `blockingConnection` (which changed from a Redis instance to `boolean` in newer BullMQ) and `drainDelay` (which moved from `settings` to a top-level option) are now correctly typed.
+
+### Fixed
+- **Grafana-sync circular dependency in `auto-config.service.spec.ts` eliminated.** The `@InjectRepository(AuditLog)` decorator in `grafana-sync-audit.service.ts` was executing at import time and triggering a circular import chain. The spec now mocks the audit service before any import resolves, making all 18 tests pass.
+- **Unused `MutationCommandType` enum members removed** from `apps/api` (`ABORT_TEST_RUN`, `INIT_TEST_RUN`, `UPDATE_RUNNING_TEST`, `UPDATE_TEST_STATUS`). Only the three members actually referenced in command files are kept.
+- **`markCollectionComplete` test corrected** to match the actual `TimeRange` type (`from/to` are `Date` objects, not ISO strings).
+
 ## [0.2.47.102] - 2026-05-13
 
 ### Fixed

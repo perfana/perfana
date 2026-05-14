@@ -6,7 +6,6 @@ import {
   Card,
   CardContent,
   Typography,
-  _Chip,
   Divider,
   Alert,
   Button,
@@ -67,7 +66,7 @@ interface TrackedRegressionSectionProps {
   group: GroupedTrackedRegressions;
   onResolve: (trackedTestRunId: string, resolution: string) => void;
   onMarkChangepoint: (trackedTestRunId: string) => void;
-  trendsData?: Record<string, any[]>;
+  trendsData?: Record<string, unknown[]>;
 }
 
 export default function TrackedRegressionSection({

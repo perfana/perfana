@@ -1,6 +1,45 @@
-import { PoolClient as _PoolClient } from 'pg';
 import { TestRun } from '../../types/pipeline.js';
 import { getLogger } from '../../lib/utils/logger.js';
+
+interface PoolLike {
+  query(sql: string, params?: unknown[]): Promise<{ rows: unknown[] }>;
+}
+
+interface GrafanaTargetJson {
+  datasource?: { uid?: string; type?: string } | string;
+  refId?: string;
+  query?: string;
+  datasourceId?: number | string;
+  [key: string]: unknown;
+}
+
+interface GrafanaPanelJson {
+  id?: number;
+  title?: string;
+  type?: string;
+  description?: string;
+  datasource?: { uid?: string; type?: string } | string;
+  targets?: GrafanaTargetJson[];
+  fieldConfig?: { defaults?: { unit?: string } };
+  options?: { reduceOptions?: { calcs?: string[] } };
+  transformations?: unknown[];
+}
+
+interface GrafanaDashboardContent {
+  panels?: GrafanaPanelJson[];
+  templating?: { list?: unknown[] };
+}
+
+interface GrafanaDashboardJson {
+  dashboard?: GrafanaDashboardContent;
+}
+
+interface TemplateVariable {
+  name?: string;
+  includeAll?: boolean;
+  allValue?: string;
+  current?: { value?: string };
+}
 
 const logger = getLogger('panels-helpers');
 
@@ -24,20 +63,20 @@ const NO_ANOMALY_DETECTION_MARKER = 'no-anomaly-detection';
  * 2. Panels with unsupported types
  */
 function shouldStorePanel(panel: unknown, datasourceType: string | null): boolean {
-  const p = panel as any;
+  const p = panel as GrafanaPanelJson;
   // Filter 1: Skip panels with "grafana" datasource
   if (datasourceType === 'grafana') {
     logger.debug(`Skipping panel ${p.id} (${p.title}): grafana datasource`);
     return false;
   }
 
-  if (p.datasource === 'grafana' || p.datasource?.uid === 'grafana') {
+  if (p.datasource === 'grafana' || (typeof p.datasource === 'object' && p.datasource?.uid === 'grafana')) {
     logger.debug(`Skipping panel ${p.id} (${p.title}): grafana datasource`);
     return false;
   }
 
   // Filter 2: Skip panels with unsupported types
-  if (!SUPPORTED_PANEL_TYPES.includes(p.type)) {
+  if (!p.type || !SUPPORTED_PANEL_TYPES.includes(p.type)) {
     logger.debug(`Skipping panel ${p.id} (${p.title}): unsupported type '${p.type}'`);
     return false;
   }
@@ -87,7 +126,7 @@ export interface PerfanaData {
 }
 
 export async function getApplicationDashboardsForTestRun(
-  pool: import('pg').Pool,
+  pool: PoolLike,
   testRun: TestRun
 ): Promise<ApplicationDashboard[]> {
   const _logger = getLogger('panels-helpers');
@@ -115,11 +154,11 @@ export async function getApplicationDashboardsForTestRun(
 
   const result = await pool.query(query, params);
 
-  return result.rows;
+  return result.rows as ApplicationDashboard[];
 }
 
 export async function getGrafanaDashboardsForApplicationDashboards(
-  pool: import('pg').Pool,
+  pool: PoolLike,
   applicationDashboards: ApplicationDashboard[]
 ): Promise<GrafanaDashboard[]> {
   const logger = getLogger('panels-helpers');
@@ -129,7 +168,7 @@ export async function getGrafanaDashboardsForApplicationDashboards(
   }
 
   // Extract dashboard UIDs from application dashboards and deduplicate
-  const dashboardUids = [...new Set(applicationDashboards.map(ad => ad.dashboard_uid).filter(uid => uid))];
+  const dashboardUids = [...new Set(applicationDashboards.map(ad => ad.dashboard_uid).filter((uid): uid is string => !!uid))];
 
   if (dashboardUids.length === 0) {
     logger.warn('No dashboard UIDs found in application dashboards');
@@ -147,7 +186,8 @@ export async function getGrafanaDashboardsForApplicationDashboards(
   const result = await pool.query(query, dashboardUids);
 
   // Parse the dashboard JSON for each result
-  const dashboards = result.rows.map(row => {
+  const dashboards = result.rows.map(rawRow => {
+    const row = rawRow as { id: string; uid: string; title: string; dashboard: unknown; tags?: string[] };
     let parsedDashboard = null;
     try {
       parsedDashboard = typeof row.dashboard === 'string' ? JSON.parse(row.dashboard) : row.dashboard;
@@ -170,7 +210,7 @@ export async function getGrafanaDashboardsForApplicationDashboards(
 }
 
 export async function getBenchmarksForTestRun(
-  pool: import('pg').Pool,
+  pool: PoolLike,
   testRun: TestRun
 ): Promise<Benchmark[]> {
   const _logger = getLogger('panels-helpers');
@@ -199,7 +239,7 @@ export async function getBenchmarksForTestRun(
 
   const result = await pool.query(query, params);
 
-  return result.rows;
+  return result.rows as Benchmark[];
 }
 
 export async function createPanelDocuments(
@@ -211,15 +251,15 @@ export async function createPanelDocuments(
   // Step 1: Collect all unique datasource UIDs from panels
   const datasourceUids = new Set<string>();
   for (const dashboard of perfanaData.dashboards) {
-    const db = dashboard as any;
-    if (!db.dashboard || !db.dashboard.dashboard || !db.dashboard.dashboard.panels) {
+    const dashboardJson = dashboard.dashboard as GrafanaDashboardJson | undefined;
+    if (!dashboardJson?.dashboard?.panels) {
       continue;
     }
-    for (const panel of (db.dashboard.dashboard.panels as any[])) {
-      const p = panel as any;
+    for (const panel of dashboardJson.dashboard.panels) {
+      const p = panel as GrafanaPanelJson;
       if (p.targets) {
-        for (const target of (p.targets as any[])) {
-          const t = target as any;
+        for (const target of p.targets) {
+          const t = target as GrafanaTargetJson;
           if (t.datasource) {
             let uid: string | undefined;
             if (typeof t.datasource === 'object' && t.datasource.uid) {
@@ -267,22 +307,22 @@ export async function createPanelDocuments(
 
   // Process all dashboards and create panel documents
   for (const dashboard of perfanaData.dashboards) {
-    const d = dashboard as any;
+    const dashboardJson = dashboard.dashboard as GrafanaDashboardJson | undefined;
 
-    if (!d.dashboard || !d.dashboard.dashboard || !d.dashboard.dashboard.panels) {
+    if (!dashboardJson?.dashboard?.panels) {
       continue;
     }
 
     // Filter 1: Skip dashboards with "no-anomaly-detection" tag
-    if (d.tags && d.tags.includes(NO_ANOMALY_DETECTION_MARKER)) {
-      logger.info(`⏭️ Skipping dashboard ${d.uid} (${d.title}): has "${NO_ANOMALY_DETECTION_MARKER}" tag`);
+    if (dashboard.tags && dashboard.tags.includes(NO_ANOMALY_DETECTION_MARKER)) {
+      logger.info(`⏭️ Skipping dashboard ${dashboard.uid} (${dashboard.title}): has "${NO_ANOMALY_DETECTION_MARKER}" tag`);
       continue;
     }
 
 
     // Find ALL corresponding application dashboards (multiple can have same dashboard_uid)
     const matchingAppDashboards = perfanaData.application_dashboards.filter(
-      ad => ad.dashboard_uid === d.uid
+      ad => ad.dashboard_uid === dashboard.uid
     );
 
 
@@ -292,8 +332,8 @@ export async function createPanelDocuments(
 
     // Create panels for each matching application dashboard
     for (const appDashboard of matchingAppDashboards) {
-      for (const panel of d.dashboard.dashboard.panels) {
-        const p = panel as any;
+      for (const panel of dashboardJson.dashboard.panels) {
+        const p = panel as GrafanaPanelJson;
       if (!p.id || !p.title) {
         continue;
       }
@@ -318,7 +358,7 @@ export async function createPanelDocuments(
         perfanaData.test_run,
         systemUnderTestName,
         appDashboard,
-        d.dashboard.dashboard.templating?.list || []
+        dashboardJson.dashboard.templating?.list || []
       );
 
       // Create Grafana API request with variable substitution
@@ -338,9 +378,10 @@ export async function createPanelDocuments(
 
       // Check for datasource in targets as fallback
       if (!datasourceType && p.targets && p.targets.length > 0) {
-        const firstTarget = p.targets[0] as any;
-        if (firstTarget.datasource?.type) {
-          datasourceType = firstTarget.datasource.type;
+        const firstTarget = p.targets[0];
+        const fds = firstTarget.datasource;
+        if (fds && typeof fds === 'object' && fds.type) {
+          datasourceType = fds.type;
         }
       }
 
@@ -353,7 +394,7 @@ export async function createPanelDocuments(
         test_run_id: perfanaData.test_run_id,
         application_dashboard_id: appDashboard.id,
         metrics_source_id: appDashboard.metrics_source_id || null,
-        dashboard_uid: d.uid,
+        dashboard_uid: dashboard.uid,
         panel_id: p.id,
         panel_title: p.title,
         dashboard_label: appDashboard.dashboard_label,
@@ -396,10 +437,10 @@ function generateTemplateVariablesFromAppDashboard(
   };
 
   // Build a map of template variables for quick lookup
-  const templateVarMap = new Map<string, any>();
+  const templateVarMap = new Map<string, TemplateVariable>();
   if (templateVariables && Array.isArray(templateVariables)) {
     for (const templateVar of templateVariables) {
-      const tv = templateVar as any;
+      const tv = templateVar as TemplateVariable;
       if (tv.name) {
         templateVarMap.set(tv.name, tv);
       }
@@ -494,7 +535,7 @@ function _generateTemplateVariables(
   // Process actual template variables from dashboard definition
   if (templateVariables && Array.isArray(templateVariables)) {
     for (const templateVar of templateVariables) {
-      const tv = templateVar as any;
+      const tv = templateVar as TemplateVariable;
       if (tv.name && tv.current?.value) {
         queryVariables[tv.name] = tv.current.value;
       }
@@ -513,8 +554,8 @@ async function createPanelRequests(
   queryVariables: Record<string, string>,
   testRun: TestRun,
   datasourceMap: Map<string, { id: number; uid: string; name: string; type: string }>
-): Promise<any[]> {
-  const p = panel as any;
+): Promise<Record<string, unknown>[]> {
+  const p = panel as GrafanaPanelJson;
   if (!p.targets || p.targets.length === 0) {
     return [];
   }
@@ -532,18 +573,19 @@ async function createPanelRequests(
     // The datasource info is in the target.datasource object but Grafana needs numeric datasourceId at root
     if (substitutedTarget.datasource && !substitutedTarget.datasourceId) {
       let uid: string | undefined;
-      if (typeof substitutedTarget.datasource === 'object' && substitutedTarget.datasource.uid) {
-        uid = substitutedTarget.datasource.uid;
-      } else if (typeof substitutedTarget.datasource === 'string') {
-        uid = substitutedTarget.datasource;
+      const ds = substitutedTarget.datasource as Record<string, unknown> | string;
+      if (typeof ds === 'object' && ds.uid) {
+        uid = ds.uid as string;
+      } else if (typeof ds === 'string') {
+        uid = ds;
       }
 
       // Fall back to panel-level datasource when target datasource is corrupted
       // (e.g. a string like "Mimir" spread into {"0":"M","1":"i",...} by a buggy dashboard import)
-      if (!uid && typeof substitutedTarget.datasource === 'object' && !substitutedTarget.datasource.uid) {
-        const panelDs = p.datasource;
+      if (!uid && typeof ds === 'object' && !ds.uid) {
+        const panelDs = p.datasource as Record<string, unknown> | undefined;
         if (panelDs && typeof panelDs === 'object' && panelDs.uid) {
-          uid = panelDs.uid;
+          uid = panelDs.uid as string;
           // Fix the target datasource so the query uses the correct datasource
           substitutedTarget.datasource = { uid: panelDs.uid, type: panelDs.type || 'prometheus' };
           logger.warn(`⚠️ Panel ${p.id} target[${targetIndex}] has corrupted datasource, falling back to panel datasource: ${uid}`);
@@ -594,8 +636,8 @@ async function createPanelRequests(
 /**
  * Substitute template variables in a Grafana target query
  */
-function substituteVariablesInTarget(target: unknown, queryVariables: Record<string, string>, _panel?: unknown): any {
-  const substitutedTarget = JSON.parse(JSON.stringify(target)); // Deep clone
+function substituteVariablesInTarget(target: unknown, queryVariables: Record<string, string>, _panel?: unknown): Record<string, unknown> {
+  const substitutedTarget = JSON.parse(JSON.stringify(target)) as Record<string, unknown>; // Deep clone
 
   // For Prometheus queries, ensure proper interval/step settings
   // Remove the huge default step that causes no data to be returned
@@ -621,7 +663,7 @@ function substituteVariablesInTarget(target: unknown, queryVariables: Record<str
   delete substitutedTarget.maxDataPoints;
 
   // Substitute variables in all string fields recursively
-  function substituteInObject(obj: unknown): any {
+  function substituteInObject(obj: unknown): unknown {
     if (typeof obj === 'string') {
       let result = obj;
       for (const [key, value] of Object.entries(queryVariables)) {
@@ -639,7 +681,7 @@ function substituteVariablesInTarget(target: unknown, queryVariables: Record<str
     } else if (Array.isArray(obj)) {
       return obj.map(item => substituteInObject(item));
     } else if (obj && typeof obj === 'object') {
-      const substituted: any = {};
+      const substituted: Record<string, unknown> = {};
       for (const [k, v] of Object.entries(obj)) {
         substituted[k] = substituteInObject(v);
       }
@@ -648,7 +690,7 @@ function substituteVariablesInTarget(target: unknown, queryVariables: Record<str
     return obj;
   }
 
-  const result = substituteInObject(substitutedTarget);
+  const result = substituteInObject(substitutedTarget) as Record<string, unknown>;
 
   // Debug logging for final step values (can be removed after debugging)
   // if (_panel) {
@@ -660,8 +702,9 @@ function substituteVariablesInTarget(target: unknown, queryVariables: Record<str
 
   // After substitution, ensure interval is reasonable for Prometheus queries
   // This ensures we don't use huge step values that result in no data
-  if (result.interval && result.interval.includes('h')) {
-    const hours = parseInt(result.interval);
+  const interval = result.interval as string | undefined;
+  if (interval && interval.includes('h')) {
+    const hours = parseInt(interval);
     // If interval is more than 1 hour, cap it at 1 minute for test data
     if (hours > 1) {
       result.interval = "1m";

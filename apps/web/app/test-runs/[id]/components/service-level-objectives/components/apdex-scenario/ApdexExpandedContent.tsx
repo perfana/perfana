@@ -35,7 +35,7 @@ function StatCard({ count, label, description, color, bgColor, borderColor }: St
   );
 }
 
-function ThemeAwareStatCards({ target }: { target: any }) {
+function ThemeAwareStatCards({ target }: { target: { satisfied_count?: number; tolerating_count?: number; frustrated_count?: number; total_count?: number } }) {
   const theme = useTheme();
   return (
     <Box sx={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 2 }}>

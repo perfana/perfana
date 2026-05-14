@@ -626,11 +626,11 @@ export class MetricsService {
         // Extract the value based on the evaluate type
         let value: number | null = null;
         if (evaluateType === 'q90' && record.percentiles) {
-          value = (record.percentiles as any).p90 ?? null;
+          value = (record.percentiles['p90'] as number | null) ?? null;
         } else if (evaluateType === 'q95' && record.percentiles) {
-          value = (record.percentiles as any).p95 ?? null;
+          value = (record.percentiles['p95'] as number | null) ?? null;
         } else if (evaluateType === 'q99' && record.percentiles) {
-          value = (record.percentiles as any).p99 ?? null;
+          value = (record.percentiles['p99'] as number | null) ?? null;
         } else {
           // For non-percentile columns, use the direct column value
           const recordData = record as unknown as Record<string, number | undefined | null>;
@@ -901,8 +901,8 @@ export class MetricsService {
             annotations: Array.isArray(testRun?.annotations)
               ? testRun.annotations.join(', ')
               : testRun?.annotations || null
-          } as any;
-        }) as any;
+          } as unknown as ControlGroupTrendResult;
+        });
 
     } catch (error) {
       this.logger.error('Error in findControlGroupTrends:', error);

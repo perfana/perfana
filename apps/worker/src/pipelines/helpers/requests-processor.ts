@@ -273,7 +273,7 @@ export class RequestsProcessor {
     testRunId: string,
     testRun: TestRunMetadata,
     bucketSizeSeconds: number
-  ): Promise<any[]> {
+  ) {
     // Determine effective filter times (use filter times if set, otherwise use start/end)
     const filterFromTime = testRun.filter_from_time ?? testRun.start_time;
     const filterToTime = testRun.filter_to_time ?? testRun.end_time;

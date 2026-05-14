@@ -38,9 +38,9 @@ export function useTrendsPlot({
   showToast,
 }: UseTrendsPlotProps) {
   const theme = useTheme();
-  const [plotData, setPlotData] = useState<any[]>([]);
-  const [plotLayout, setPlotLayout] = useState<any>({});
-  const [plotConfig, setPlotConfig] = useState<any>({});
+  const [plotData, setPlotData] = useState<unknown[]>([]);
+  const [plotLayout, setPlotLayout] = useState<unknown>({});
+  const [plotConfig, setPlotConfig] = useState<unknown>({});
 
   // Build Plotly chart data and layout
   useEffect(() => {
@@ -306,10 +306,12 @@ export function useTrendsPlot({
             transform: 'scale(0.8)'
           },
           click: function(gd: unknown) {
-            (window as unknown).Plotly.toImage(gd, {
+            const Plotly = (window as { Plotly?: { toImage: (gd: unknown, opts: Record<string, unknown>) => Promise<string> } }).Plotly;
+            if (!Plotly) return;
+            Plotly.toImage(gd, {
               format: 'png',
-              width: gd._fullLayout.width || 800,
-              height: gd._fullLayout.height || 400,
+              width: (gd as { _fullLayout?: { width?: number } })._fullLayout?.width || 800,
+              height: (gd as { _fullLayout?: { height?: number } })._fullLayout?.height || 400,
               scale: 2
             }).then((dataUrl: string) => {
               fetch(dataUrl)
@@ -353,7 +355,7 @@ export function useTrendsPlot({
         },
         showlegend: true,
         hoverinfo: 'skip' as const
-      } as unknown);
+      });
     }
 
     setPlotData(traces);

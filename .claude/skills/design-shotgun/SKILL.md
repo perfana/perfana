@@ -1,0 +1,1 @@
+/Users/daniel/workspace/perfana/.claude/skills/gstack/design-shotgun/SKILL.md

@@ -16,8 +16,8 @@ export const TrackedRegressionsTab: React.FC<TrackedRegressionsTabProps> = ({
   system,
   environment,
   workload,
-  onNotification = () => {},
-  showToast = () => {},
+  onNotification = () => { /* noop */ },
+  showToast = () => { /* noop */ },
 }) => {
   // Use the data hook for state management and API calls
   const {

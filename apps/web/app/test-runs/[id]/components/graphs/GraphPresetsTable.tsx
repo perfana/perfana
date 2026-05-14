@@ -153,7 +153,7 @@ export default function GraphPresetsTable({
           maxWidth: 400,
           mx: 'auto'
         }}>
-          Create your first graph preset by adding metrics to your custom graph and clicking "Save Preset" to quickly reuse your graph configuration.
+          Create your first graph preset by adding metrics to your custom graph and clicking &quot;Save Preset&quot; to quickly reuse your graph configuration.
         </Typography>
       </Box>
     );
@@ -318,8 +318,7 @@ export default function GraphPresetsTable({
         <DialogTitle>Delete Graph Preset</DialogTitle>
         <DialogContent>
           <Typography>
-            Are you sure you want to delete the preset "{presetToDelete?.name}"?
-            This action cannot be undone.
+            {`Are you sure you want to delete the preset "${presetToDelete?.name}"? This action cannot be undone.`}
           </Typography>
         </DialogContent>
         <DialogActions>

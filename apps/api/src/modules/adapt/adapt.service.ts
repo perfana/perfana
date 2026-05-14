@@ -447,9 +447,9 @@ export class AdaptService {
         await this.trackedResultsRepo.update(
           { id: regression.id },
           {
-            tracked_conclusion: updatedTrackedConclusion as any,
+            tracked_conclusion: updatedTrackedConclusion,
             updated_at: new Date()
-          } as any
+          } as unknown as Parameters<typeof this.trackedResultsRepo.update>[1]
         );
 
         resolvedCount++;
@@ -522,9 +522,9 @@ export class AdaptService {
       await this.trackedResultsRepo.update(
         { id: regressionId },
         {
-          tracked_conclusion: updatedTrackedConclusion as any,
+          tracked_conclusion: updatedTrackedConclusion,
           updated_at: new Date()
-        } as any
+        } as unknown as Parameters<typeof this.trackedResultsRepo.update>[1]
       );
 
       return {

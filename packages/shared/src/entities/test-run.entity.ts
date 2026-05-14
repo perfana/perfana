@@ -125,10 +125,10 @@ export class TestRun {
   valid?: boolean;
 
   @Column('text', { array: true, name: 'reasons_not_valid', nullable: true })
-  reasonsNotValid?: string[];
+  reasonsNotValid?: string[] | null;
 
   @Column('text', { array: true, name: 'data_warnings', nullable: true })
-  dataWarnings?: string[];
+  dataWarnings?: string[] | null;
 
   @Column('jsonb', { name: 'adapt_config', nullable: true })
   adaptConfig?: AdaptConfig;

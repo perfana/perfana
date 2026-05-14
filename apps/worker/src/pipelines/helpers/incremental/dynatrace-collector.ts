@@ -145,7 +145,7 @@ export class DynatraceCollector {
     dynatraceConfigId: string | undefined,
     applicationDashboardIds: string[] | undefined,
     metricsSourceIds: string[] | undefined
-  ): Promise<any[]> {
+  ): Promise<Record<string, unknown>[]> {
     let query = `
       SELECT
         dq.id,
@@ -187,43 +187,43 @@ export class DynatraceCollector {
       params.push(applicationDashboardIds);
     }
 
-    return this.db.query<any>(query, params);
+    return this.db.query<Record<string, unknown>>(query, params);
   }
 
   /**
    * Group queries by Dynatrace config ID
    */
-  private groupQueriesByConfig(queryConfigs: unknown[]): Map<string, DynatraceQueryConfig[]> {
+  private groupQueriesByConfig(queryConfigs: Record<string, unknown>[]): Map<string, DynatraceQueryConfig[]> {
     const queriesByConfig = new Map<string, DynatraceQueryConfig[]>();
 
     for (const config of queryConfigs) {
-      const c = config as any;
-      const configId = c.dynatrace_config_id;
+      const c = config;
+      const configId = c.dynatrace_config_id as string;
       if (!queriesByConfig.has(configId)) {
         queriesByConfig.set(configId, []);
       }
 
       // Process query: replace template variables and clean time range
-      let processedQuery = c.query;
-      if (c.template_variables && Object.keys(c.template_variables).length > 0) {
-        processedQuery = this.metricProcessor.replaceTemplateVariables(processedQuery, c.template_variables);
+      let processedQuery = c.query as string;
+      if (c.template_variables && Object.keys(c.template_variables as Record<string, unknown>).length > 0) {
+        processedQuery = this.metricProcessor.replaceTemplateVariables(processedQuery, c.template_variables as Record<string, unknown>);
       }
       processedQuery = this.metricProcessor.cleanTimeRangeFromQuery(processedQuery);
 
       // Convert database row to DynatraceQueryConfig
       const queryConfig: DynatraceQueryConfig = {
-        tileId: c.id,
-        tileTitle: c.panel_title,
+        tileId: c.id as string,
+        tileTitle: c.panel_title as string,
         query: processedQuery,
         visualization: 'timeseries',
-        dashboardLabel: c.dashboard_label,
-        applicationDashboardId: c.application_dashboard_id,
+        dashboardLabel: c.dashboard_label as string,
+        applicationDashboardId: c.application_dashboard_id as string,
         querySettings: {},
-        matchMetricPattern: c.match_metric_pattern,
-        omitGroupByVariableFromMetricName: c.omit_group_by_variable_from_metric_name || [],
-        panelId: c.panel_id,
-        metricName: c.metric_name,
-        dynatraceConfigId: c.dynatrace_config_id,
+        matchMetricPattern: c.match_metric_pattern as string | undefined,
+        omitGroupByVariableFromMetricName: (c.omit_group_by_variable_from_metric_name as string[] | undefined) || [],
+        panelId: c.panel_id as number | null | undefined,
+        metricName: c.metric_name as string | undefined,
+        dynatraceConfigId: c.dynatrace_config_id as string,
       };
 
       queriesByConfig.get(configId)!.push(queryConfig);

@@ -83,8 +83,7 @@ export function VisualiseTab({
         ) : null
       ) : (
         <Alert severity="info" sx={{ mt: 2 }}>
-          Iframe embedding is disabled for this tracing service. Click "Open in{' '}
-          {tracingUiLabel}" to view traces in a new tab.
+          {`Iframe embedding is disabled for this tracing service. Click "Open in ${tracingUiLabel}" to view traces in a new tab.`}
         </Alert>
       )}
     </>

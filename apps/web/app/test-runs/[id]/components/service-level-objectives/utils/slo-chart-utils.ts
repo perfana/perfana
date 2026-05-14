@@ -182,7 +182,7 @@ export function buildBarTrace(
   color: string,
   adjustedFormat: string,
   textColor: string
-): any {
+): Record<string, unknown> {
   const formatSuffix =
     adjustedFormat === 'percentunit' ? '%' : adjustedFormat ? ` ${adjustedFormat}` : '';
 
@@ -219,7 +219,7 @@ export function buildLineTrace(
   color: string,
   bgColor: string,
   adjustedFormat: string
-): any {
+): Record<string, unknown> {
   const formatSuffix =
     adjustedFormat === 'percentunit' ? '%' : adjustedFormat ? ` ${adjustedFormat}` : '';
 
@@ -257,7 +257,7 @@ export function buildRequirementTrace(
   adjustedRequirement: number,
   sloColor: string,
   adjustedFormat: string
-): any {
+): Record<string, unknown> {
   const formatSuffix =
     adjustedFormat === 'percentunit' ? '%' : adjustedFormat ? ` ${adjustedFormat}` : '';
 
@@ -287,7 +287,7 @@ export function buildChartLayout(
   yAxisLabel: string,
   colors: ChartThemeColors,
   fontFamily: string
-): any {
+): Record<string, unknown> {
   return {
     plot_bgcolor: colors.plotBgColor,
     paper_bgcolor: colors.bgColor,
@@ -381,7 +381,7 @@ export function buildChartLayout(
 /**
  * Build chart configuration with copy-to-clipboard button
  */
-export function buildChartConfig(metricName: string): any {
+export function buildChartConfig(metricName: string): Record<string, unknown> {
   return {
     responsive: true,
     displayModeBar: true,

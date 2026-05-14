@@ -28,12 +28,12 @@ export function useAddSLOForm({
   const [panelsLoading, setPanelsLoading] = useState(false);
 
   // Available options
-  const [availableDashboards, setAvailableDashboards] = useState<any[]>([]);
-  const [availablePanels, setAvailablePanels] = useState<any[]>([]);
-  const [availableDynatraceDashboards, setAvailableDynatraceDashboards] = useState<any[]>([]);
-  const [availableDynatraceMetrics, setAvailableDynatraceMetrics] = useState<any[]>([]);
-  const [availablePerfMetricsDashboards, setAvailablePerfMetricsDashboards] = useState<any[]>([]);
-  const [availablePerfMetricsPanels, setAvailablePerfMetricsPanels] = useState<any[]>([]);
+  const [availableDashboards, setAvailableDashboards] = useState<unknown[]>([]);
+  const [availablePanels, setAvailablePanels] = useState<unknown[]>([]);
+  const [availableDynatraceDashboards, setAvailableDynatraceDashboards] = useState<unknown[]>([]);
+  const [availableDynatraceMetrics, setAvailableDynatraceMetrics] = useState<unknown[]>([]);
+  const [availablePerfMetricsDashboards, setAvailablePerfMetricsDashboards] = useState<unknown[]>([]);
+  const [availablePerfMetricsPanels, setAvailablePerfMetricsPanels] = useState<unknown[]>([]);
   const [validationErrors, setValidationErrors] = useState<ValidationErrors>({});
 
   // Data source availability
@@ -176,7 +176,7 @@ export function useAddSLOForm({
         const dashboardData = await response.json();
         const dashboard = Array.isArray(dashboardData) ? dashboardData[0] : dashboardData;
         const filteredPanels =
-          dashboard?.panels?.filter((panel: unknown) => SUPPORTED_PANEL_TYPES.includes(panel.type)) || [];
+          dashboard?.panels?.filter((panel: { type: string }) => SUPPORTED_PANEL_TYPES.includes(panel.type)) || [];
         setAvailablePanels(filteredPanels);
       } else {
         console.warn('Failed to fetch dashboard panels:', response.statusText);

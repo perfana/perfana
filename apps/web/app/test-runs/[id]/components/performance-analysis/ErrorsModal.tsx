@@ -120,6 +120,7 @@ export default function ErrorsModal({
     if (open && testRunId) {
       fetchErrors();
     }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open, testRunId, transactionName, samplerName, excludeRampUp]);
 
   const fetchErrors = async () => {

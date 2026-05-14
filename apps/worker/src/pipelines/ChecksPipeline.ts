@@ -1,6 +1,7 @@
 import { BasePipelineTypeORM } from './BasePipelineTypeORM.js';
 import { PipelineResult } from '../types/pipeline.js';
 import { EntityManager } from 'typeorm';
+import type { PoolClient } from 'pg';
 import { BenchmarkMatcher, TestRun as TestRunInterface, Benchmark } from './checks/BenchmarkMatcher.js';
 import { DataAggregator } from './checks/DataAggregator.js';
 import { RequirementChecker, CheckResult as _CheckResult } from './checks/RequirementChecker.js';
@@ -35,15 +36,15 @@ export interface ChecksPipelineResult {
  */
 export class ChecksPipeline extends BasePipelineTypeORM {
 
-  validateInput(input: any): boolean {
+  validateInput(input: unknown): boolean {
     if (!input || typeof input !== 'object') {return false;}
-    const typedInput = input as any;
+    const typedInput = input as { testRunIds?: unknown[] };
     return Array.isArray(typedInput.testRunIds) &&
            typedInput.testRunIds.length > 0 &&
-           typedInput.testRunIds.every((id: any) => typeof id === 'string');
+           typedInput.testRunIds.every((id: unknown) => typeof id === 'string');
   }
 
-  async execute(input: any): Promise<PipelineResult> {
+  async execute(input: unknown): Promise<PipelineResult> {
     const startTime = Date.now();
 
     try {
@@ -141,10 +142,10 @@ export class ChecksPipeline extends BasePipelineTypeORM {
           await this.withTransaction(async (manager: EntityManager) => {
             // Initialize services with this transaction's manager
             // Note: These services still use PoolClient internally, but EntityManager is compatible for query operations
-            const benchmarkMatcher = new BenchmarkMatcher(this.logger, manager as any);
-            const dataAggregator = new DataAggregator(this.logger, manager as any);
-            const requirementChecker = new RequirementChecker(this.logger, manager as any);
-            const apdexCalculator = new ApdexCalculator(this.logger, manager as any);
+            const benchmarkMatcher = new BenchmarkMatcher(this.logger, manager);
+            const dataAggregator = new DataAggregator(this.logger, manager);
+            const requirementChecker = new RequirementChecker(this.logger, manager as unknown as PoolClient);
+            const apdexCalculator = new ApdexCalculator(this.logger, manager);
 
             // Load test run
             const testRunData = await this.loadTestRunForChecks(manager, testRunId);
@@ -253,7 +254,7 @@ export class ChecksPipeline extends BasePipelineTypeORM {
         return results;
       }
 
-      const checkResults = [];
+      const checkResults: Array<{ status: string; meets_requirement: boolean | null }> = [];
 
       // Process each benchmark inside a savepoint so a single DB-level failure
       // (e.g. FK violation, constraint error) doesn't abort the entire transaction
@@ -289,7 +290,7 @@ export class ChecksPipeline extends BasePipelineTypeORM {
             checkResults.push({
               status: apdexResult.status,
               meets_requirement: apdexResult.meets_requirement,
-            } as any);
+            });
             results.created_check_results += 1;
 
             this.logger.info(

@@ -101,6 +101,7 @@ export default function RequestTimeSeriesModal({
     if (open && testRunId && transactionName && samplerName) {
       fetchTimeSeriesData();
     }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open, testRunId, transactionName, samplerName, aggregationSeconds]);
 
   const fetchTimeSeriesData = async () => {
@@ -139,7 +140,7 @@ export default function RequestTimeSeriesModal({
   const generatePlotlyData = () => {
     if (!data || data.length === 0) return [];
 
-    const traces: any[] = [];
+    const traces: Record<string, unknown>[] = [];
 
     // Response time trace
     traces.push({
@@ -311,12 +312,14 @@ export default function RequestTimeSeriesModal({
             path: 'M768 1664h896v-640h-416q-40 0-68-28t-28-68v-416h-384v1152zm256-1440v-64q0-13-9.5-22.5t-22.5-9.5h-704q-13 0-22.5 9.5t-9.5 22.5v64q0 13 9.5 22.5t22.5 9.5h704q13 0 22.5-9.5t9.5-22.5zm256 672h299l-299-299v299zm512 128v672q0 40-28 68t-68 28h-960q-40 0-68-28t-28-68v-160h-544q-40 0-68-28t-28-68v-1344q0-40 28-68t68-28h1088q40 0 68 28t28 68v328q21 13 36 28l408 408q28 28 48 76t20 88z',
             transform: 'scale(0.8)'
           },
-          click: function(gd: any) {
+          click: function(gd: unknown) {
             // Convert plot to PNG blob and copy to clipboard
-            (window as any).Plotly.toImage(gd, {
+            const Plotly = (window as unknown as { Plotly?: { toImage: (gd: unknown, opts: Record<string, unknown>) => Promise<string> } }).Plotly;
+            if (!Plotly) return;
+            Plotly.toImage(gd, {
               format: 'png',
-              width: gd._fullLayout.width || 800,
-              height: gd._fullLayout.height || 400,
+              width: (gd as { _fullLayout?: { width?: number } })._fullLayout?.width || 800,
+              height: (gd as { _fullLayout?: { height?: number } })._fullLayout?.height || 400,
               scale: 2
             }).then((dataUrl: string) => {
               // Convert data URL to blob
@@ -345,7 +348,7 @@ export default function RequestTimeSeriesModal({
           }
         }
       ]
-    ] as any,
+    ],
   };
 
   return (
@@ -477,8 +480,8 @@ export default function RequestTimeSeriesModal({
         ) : (
           <Box sx={{ width: '100%', height: '550px' }}>
             <Plot
-              data={generatePlotlyData()}
-              layout={plotLayout as any}
+              data={generatePlotlyData() as unknown as import('plotly.js').Data[]}
+              layout={plotLayout as unknown as import('plotly.js').Layout}
               config={plotConfig as Partial<Config>}
               style={{ width: '100%', height: '100%' }}
               useResizeHandler

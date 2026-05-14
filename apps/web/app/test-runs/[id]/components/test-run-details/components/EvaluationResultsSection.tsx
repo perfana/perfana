@@ -285,7 +285,7 @@ function AnomalyDetectionSubsection({ testRun }: { testRun: TestRun }) {
   const isDark = theme.palette.mode === 'dark';
   const isError = testRun.status?.evaluatingAdapt === 'ERROR' || testRun.status?.evaluatingAdapt === 'FAILED';
   const sectionColor = isDark ? '#ffcc80' : '#ff9800';
-  const [dsAdaptConclusion, setDsAdaptConclusion] = useState<any>(null);
+  const [dsAdaptConclusion, setDsAdaptConclusion] = useState<{ details?: { message?: string } } | null>(null);
 
   useEffect(() => {
     if (testRun.status?.evaluatingAdapt !== 'NO_BASELINES_FOUND') return;
@@ -294,7 +294,7 @@ function AnomalyDetectionSubsection({ testRun }: { testRun: TestRun }) {
       .then(text => {
         if (text?.trim()) setDsAdaptConclusion(JSON.parse(text));
       })
-      .catch(() => {});
+      .catch(() => { /* noop */ });
   }, [testRun.test_run_id, testRun.status?.evaluatingAdapt]);
 
   if (testRun.status?.evaluatingAdapt === 'NO_BASELINES_FOUND') {

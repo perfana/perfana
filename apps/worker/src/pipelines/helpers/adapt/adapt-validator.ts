@@ -46,7 +46,7 @@ export class AdaptValidator {
    * @param input - Unknown input to validate
    * @returns Validation result with parsed input if valid
    */
-  validateInput(input: any): InputValidationResult {
+  validateInput(input: unknown): InputValidationResult {
     if (!input || typeof input !== 'object') {
       return {
         valid: false,
@@ -71,7 +71,7 @@ export class AdaptValidator {
       };
     }
 
-    if (!typedInput.testRunIds.every((id: any) => typeof id === 'string')) {
+    if (!typedInput.testRunIds.every((id: unknown) => typeof id === 'string')) {
       return {
         valid: false,
         error: 'Invalid input: all testRunIds must be strings',

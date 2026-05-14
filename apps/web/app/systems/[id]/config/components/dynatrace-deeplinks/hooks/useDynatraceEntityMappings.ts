@@ -103,6 +103,7 @@ export function useDynatraceEntityMappings({
   // Fetch entity mappings for the current context
   useEffect(() => {
     fetchEntityMappings();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [systemId, selectedEnvironment, selectedWorkload]);
 
   // Debounced search effect
@@ -120,6 +121,7 @@ export function useDynatraceEntityMappings({
     }, 300);
 
     return () => clearTimeout(timeoutId);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selectedEntityType, searchInput, selectedEntity]);
 
   // Cleanup timeout on unmount

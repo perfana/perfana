@@ -42,7 +42,7 @@ export function useTestRunsData({ onSnackbar, organizationId, serverFilters }: U
 
   // Real-time connection — with server-side pagination, we only update in-place
   // for test runs already on the current page. New/deleted runs trigger a re-fetch.
-  const loadTestRunsRef = useRef<() => void>(() => {});
+  const loadTestRunsRef = useRef<() => void>(() => { /* noop */ });
 
   const { connectionStatus: _connectionStatus, isLive: _isLive } = useTestRunRealtime({
     enabled: true,

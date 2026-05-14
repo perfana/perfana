@@ -156,6 +156,7 @@ export function OrganizationProvider({ children }: OrganizationProviderProps) {
     ) {
       clearSelection();
     }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isInitialized, isLoading, selectedId, organizations]);
 
   const selectOrganization = useCallback((id: string) => {

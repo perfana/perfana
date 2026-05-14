@@ -363,13 +363,13 @@ export class ApplicationDashboardsService {
         snapshotTimeout: createDto.snapshotTimeout || 4,
         organizationId: system.organization_id,
         teamId: system.team_id,
-      } as any);
+      } as unknown as Parameters<typeof this.appDashboardRepo.create>[0]);
 
       const result = await withRequestEm(this.appDashboardRepo).save(applicationDashboard);
 
       // Fetch with relations
       const resultWithRelations = await withRequestEm(this.appDashboardRepo).findOne({
-        where: { id: (result as any).id },
+        where: { id: result.id },
         relations: ['grafanaInstance', 'systemUnderTest']
       });
 
@@ -457,12 +457,12 @@ export class ApplicationDashboardsService {
       if (updateDto.dashboardLabel !== undefined) updateData.dashboardLabel = updateDto.dashboardLabel;
       if (updateDto.tags !== undefined) updateData.tags = updateDto.tags;
       if (updateDto.templateDashboardUid !== undefined) updateData.templateDashboardUid = updateDto.templateDashboardUid;
-      if (updateDto.variables !== undefined) updateData.variables = updateDto.variables.filter(v => v && !Array.isArray(v) && typeof v.name === 'string') as any;
-      if (updateDto.replacedTemplatingVariables !== undefined) updateData.replacedTemplatingVariables = updateDto.replacedTemplatingVariables as any;
+      if (updateDto.variables !== undefined) updateData.variables = updateDto.variables.filter(v => v && !Array.isArray(v) && typeof v.name === 'string') as unknown as Record<string, unknown>;
+      if (updateDto.replacedTemplatingVariables !== undefined) updateData.replacedTemplatingVariables = updateDto.replacedTemplatingVariables as unknown as Record<string, unknown>;
       if (updateDto.snapshotTimeout !== undefined) updateData.snapshotTimeout = updateDto.snapshotTimeout;
 
       // Update with TypeORM
-      await withRequestEm(this.appDashboardRepo).update(id, updateData as any);
+      await withRequestEm(this.appDashboardRepo).update(id, updateData as unknown as Parameters<typeof this.appDashboardRepo.update>[1]);
 
       // Reload the post-update entity (with prototype intact) for the audit
       // diff. `existing` already holds the pre-update snapshot — no extra

@@ -1,0 +1,1 @@
+/Users/daniel/workspace/perfana/.claude/skills/gstack/plan-ceo-review/SKILL.md

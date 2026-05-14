@@ -52,7 +52,6 @@ import {
   formatDuration,
   formatPercentage,
   formatDbTime,
-  _formatNumber,
 } from '../utils/formatters';
 
 // ==================== Constants ====================

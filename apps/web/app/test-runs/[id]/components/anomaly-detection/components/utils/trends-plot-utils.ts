@@ -361,7 +361,7 @@ export function createTrendsPlot(
     }
   };
 
-  const config: any = {
+  const config: Record<string, unknown> = {
     responsive: true,
     displayModeBar: true,
     modeBarButtonsToRemove: ['pan2d', 'lasso2d', 'select2d', 'autoScale2d', 'zoom2d', 'zoomIn2d', 'zoomOut2d', 'resetScale2d'],
@@ -401,10 +401,12 @@ function createCopyToClipboardButton(showToast: (message: string) => void) {
       console.log('ClipboardItem support:', typeof ClipboardItem !== 'undefined');
 
       // Convert plot to PNG and copy to clipboard
-      (window as unknown).Plotly.toImage(gd, {
+      type PlotlyGd = { _fullLayout?: { width?: number; height?: number } };
+      const plotlyWindow = window as { Plotly?: { toImage: (gd: unknown, opts: Record<string, unknown>) => Promise<string> } };
+      plotlyWindow.Plotly!.toImage(gd, {
         format: 'png',
-        width: gd._fullLayout.width || 800,
-        height: gd._fullLayout.height || 400,
+        width: (gd as PlotlyGd)._fullLayout?.width || 800,
+        height: (gd as PlotlyGd)._fullLayout?.height || 400,
         scale: 2
       }).then((dataUrl: string) => {
         console.log('Successfully generated image data URL, length:', dataUrl.length);

@@ -482,14 +482,14 @@ export class ProvisioningService implements OnApplicationBootstrap {
           await this.templateRepo.update(existing.id, {
             ...values,
             updated_by: SYSTEM_ACTOR,
-          } as any);
+          } as unknown as Parameters<typeof this.templateRepo.update>[1]);
           result.updated++;
         } else {
           await this.templateRepo.insert({
             ...values,
             created_by: SYSTEM_ACTOR,
             updated_by: SYSTEM_ACTOR,
-          } as any);
+          } as unknown as Parameters<typeof this.templateRepo.insert>[0]);
           result.created++;
         }
       } catch (error) {

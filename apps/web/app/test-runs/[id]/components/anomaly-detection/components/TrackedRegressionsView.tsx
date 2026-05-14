@@ -39,7 +39,7 @@ interface TrackedRegressionsViewProps {
   testRun?: TestRun | null;
   onResolve?: (trackedTestRunId: string, resolution: string) => void;
   onMarkChangepoint?: (trackedTestRunId: string) => void;
-  trendsData?: Record<string, any[]>;
+  trendsData?: Record<string, unknown[]>;
   showToast?: (message: string) => void;
 }
 
@@ -49,13 +49,13 @@ export default function TrackedRegressionsView({
   onResolve,
   onMarkChangepoint,
   trendsData: _externalTrendsData,
-  showToast = () => {},
+  showToast = () => { /* noop */ },
 }: TrackedRegressionsViewProps) {
   const theme = useTheme();
   const [groupedRegressions, setGroupedRegressions] = useState<GroupedTrackedRegressions[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const [localTrendsData, setLocalTrendsData] = useState<Record<string, any[]>>({});
+  const [localTrendsData, setLocalTrendsData] = useState<Record<string, unknown[]>>({});
 
   const { triggerBatchReevaluation } = useBatchReevaluation({
     testRun,
@@ -208,7 +208,7 @@ export default function TrackedRegressionsView({
           const response = await authenticatedFetch(url);
 
           if (response.ok) {
-            const trendsData: unknown[] = await response.json();
+            const trendsData: Array<{ test_run_start: string }> = await response.json();
             trendsData.sort((a, b) => new Date(a.test_run_start).getTime() - new Date(b.test_run_start).getTime());
             return { metricName, data: trendsData };
           } else {
@@ -224,7 +224,7 @@ export default function TrackedRegressionsView({
       const results = await Promise.all(trendsPromises);
 
       // Build the trends data object keyed by metric name
-      const newTrendsData: Record<string, any[]> = {};
+      const newTrendsData: Record<string, unknown[]> = {};
       results.forEach(({ metricName, data }) => {
         newTrendsData[metricName] = data;
       });
@@ -314,6 +314,7 @@ export default function TrackedRegressionsView({
     if (testRunId) {
       fetchTrackedRegressions();
     }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [testRunId]);
 
   if (loading) {

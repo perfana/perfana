@@ -9,6 +9,8 @@ export class BenchmarkMapper {
    * Map a BenchmarkEntity to the Benchmark DTO
    */
   static mapEntityToBenchmark(entity: BenchmarkEntity): Benchmark {
+    const conf = entity.configuration as Record<string, unknown> | undefined;
+    const confReq = conf?.['requirement'] as Record<string, unknown> | undefined;
     return {
       id: entity.id,
       system_under_test_id: entity.system_under_test_id,
@@ -23,13 +25,13 @@ export class BenchmarkMapper {
       metrics_source_id: entity.metrics_source_id,
       generic_check_id: entity.generic_check_id,
       configuration: entity.configuration,
-      config_title: entity.config_title || (entity.configuration as any)?.title,
+      config_title: entity.config_title || (conf?.['title'] as string | undefined),
       config_id: entity.config_id,
       panel_title: entity.panel_title,
       metric_unit: entity.metric_unit,
-      evaluate_type: entity.evaluate_type || (entity.configuration as any)?.evaluateType,
-      requirement_operator: entity.requirement_operator || (entity.configuration as any)?.requirement?.operator,
-      requirement_value: entity.requirement_value ?? ((entity.configuration as any)?.requirement?.value != null ? Number((entity.configuration as any).requirement.value) : undefined),
+      evaluate_type: entity.evaluate_type || (conf?.['evaluateType'] as string | undefined),
+      requirement_operator: entity.requirement_operator || (confReq?.['operator'] as string | undefined),
+      requirement_value: entity.requirement_value ?? (confReq?.['value'] != null ? Number(confReq['value']) : undefined),
       enabled: entity.enabled,
       valid: entity.valid,
       tags: entity.tags,

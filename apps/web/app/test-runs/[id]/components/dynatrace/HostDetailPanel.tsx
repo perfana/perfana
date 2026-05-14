@@ -50,6 +50,7 @@ export default function HostDetailPanel({
 
   useEffect(() => {
     fetchHostData();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [host.entityId, testRun.id]);
 
   const fetchHostData = async () => {

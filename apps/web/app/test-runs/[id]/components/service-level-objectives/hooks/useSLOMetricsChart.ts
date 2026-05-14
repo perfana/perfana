@@ -58,9 +58,9 @@ export function useSLOMetricsChart({
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [metricsData, setMetricsData] = useState<DSMetric | MetricDataPoint[] | null>(null);
-  const [plotData, setPlotData] = useState<any[]>([]);
-  const [plotLayout, setPlotLayout] = useState<any>({});
-  const [plotConfig, setPlotConfig] = useState<any>({});
+  const [plotData, setPlotData] = useState<unknown[]>([]);
+  const [plotLayout, setPlotLayout] = useState<unknown>({});
+  const [plotConfig, setPlotConfig] = useState<unknown>({});
 
   const metricName = checkResult.metric_name || checkResult.panel_title || 'Unknown Metric';
 

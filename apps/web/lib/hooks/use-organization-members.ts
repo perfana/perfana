@@ -15,7 +15,7 @@ import {
   updateOrganizationMemberRoles,
   removeOrganizationMember,
   removeOrganizationMemberByUser,
-  getMyOrganizationMemberships, OrganizationMember,
+  getMyOrganizationMemberships,
   AddOrganizationMemberDto,
   UpdateOrganizationMemberRolesDto,
 } from '../api/organization-members';
@@ -139,7 +139,7 @@ export function useRemoveOrganizationMember() {
   return useMutation({
     mutationFn: ({
       id,
-      organizationId,
+      organizationId: _organizationId,
     }: {
       id: string;
       organizationId: string;

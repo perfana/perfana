@@ -9,8 +9,8 @@ export interface CompleteTestRunData {
   configs: unknown[];
   expectedConfigChanges: unknown[];
   applicationDashboards: unknown[];
-  anomalyDetection: any | null;
-  checkResults: any | null;
+  anomalyDetection: unknown | null;
+  checkResults: unknown | null;
 }
 
 interface TestRunDataContextType {

@@ -62,9 +62,9 @@ export function useCurrentTestRunChart({
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [metricsData, setMetricsData] = useState<MetricDataPoint[]>([]);
-  const [plotData, setPlotData] = useState<any[]>([]);
-  const [plotLayout, setPlotLayout] = useState<any>({});
-  const [plotConfig, setPlotConfig] = useState<any>({});
+  const [plotData, setPlotData] = useState<unknown[]>([]);
+  const [plotLayout, setPlotLayout] = useState<unknown>({});
+  const [plotConfig, setPlotConfig] = useState<unknown>({});
 
   const fetchMetricsData = useCallback(async () => {
     try {
