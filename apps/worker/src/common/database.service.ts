@@ -44,11 +44,11 @@ const TRANSIENT_ERRORS = [
   '08004', // sqlserver_rejected_establishment_of_sqlconnection
 ];
 
-function isTransientError(error: any): boolean {
+function isTransientError(error: unknown): boolean {
   if (!error || typeof error !== 'object') { return false; }
-  const err = error as any;
-  const msg = 'message' in error ? String(err.message) : '';
-  const code = 'code' in error ? String(err.code) : '';
+  const err = error as Record<string, unknown>;
+  const msg = 'message' in err ? String(err.message) : '';
+  const code = 'code' in err ? String(err.code) : '';
   return TRANSIENT_ERRORS.some(t => msg.includes(t) || code === t);
 }
 
@@ -131,6 +131,7 @@ export class WorkerDatabaseService implements OnModuleInit {
    * Execute raw SQL query with retry logic for transient connection errors.
    * Use sparingly - prefer TypeORM query builder when possible.
    */
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   async query<T = any>(sql: string, parameters?: unknown[]): Promise<T[]> {
     return this.withRetry('query', async () => {
       const result = await this.dataSource.query(sql, parameters);
@@ -163,7 +164,7 @@ export class WorkerDatabaseService implements OnModuleInit {
    *
    * See: 2026-03-26 write starvation post-mortem
    */
-  async writeQuery<T = any>(sql: string, parameters?: unknown[]): Promise<T[]> {
+  async writeQuery<T = Record<string, unknown>>(sql: string, parameters?: unknown[]): Promise<T[]> {
     return this.withRetry('writeQuery', async () => {
       const result = await this.writeDataSource.query(sql, parameters);
       return result;
@@ -425,7 +426,7 @@ export class WorkerDatabaseService implements OnModuleInit {
   ): Promise<void> {
     for (let i = 0; i < items.length; i += chunkSize) {
       const chunk = items.slice(i, i + chunkSize);
-      await repo.insert(chunk as any);
+      await repo.insert(chunk as Partial<T>[]);
     }
     this.logger.debug(`Inserted ${items.length} ${entityName} records`);
   }
@@ -503,7 +504,8 @@ export class WorkerDatabaseService implements OnModuleInit {
   }
 
   async insertDsAdaptConclusion(conclusion: Partial<DsAdaptConclusion>): Promise<void> {
-    await this.dsAdaptConclusionRepo.insert(conclusion as any);
+    // TypeORM's _QueryDeepPartialEntity is incompatible with Record<string,unknown> JSONB columns at the type level
+    await this.dsAdaptConclusionRepo.insert(conclusion as unknown as Parameters<typeof this.dsAdaptConclusionRepo.insert>[0]);
     this.logger.debug(`Inserted ds_adapt_conclusion for test run: ${conclusion.test_run_id}`);
   }
 
@@ -771,7 +773,7 @@ export class WorkerDatabaseService implements OnModuleInit {
       );
     }
 
-    const updateData: any = {
+    const updateData: Partial<DsMetricCollectionStatus> = {
       is_complete: true,
       failed_ranges: [],
       last_collected_at: new Date(),
@@ -783,7 +785,7 @@ export class WorkerDatabaseService implements OnModuleInit {
       const testRun = await this.getTestRunByTestRunId(testRunId);
       if (testRun?.startTime && testRun?.endTime) {
         updateData.collected_ranges = [
-          { from: testRun.startTime.toISOString(), to: testRun.endTime.toISOString() },
+          { from: testRun.startTime, to: testRun.endTime },
         ];
       }
     }

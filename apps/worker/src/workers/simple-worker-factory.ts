@@ -70,9 +70,7 @@ export function createSimpleWorker(
   // Get worker configuration
   const workerConfig = getWorkerConfig(queueName);
 
-  // Create TWO separate Redis connections
   const connection = createRedisConnection();
-  const blockingConnection = createRedisConnection();
 
   logger.info(`Creating simple worker for queue: ${queueName}`, {
     concurrency: workerConfig.concurrency,
@@ -117,18 +115,13 @@ export function createSimpleWorker(
     return processor(job);
   };
 
-  // Create worker with EXACT pattern from test-blocking.cjs
   const worker = new Worker(
     queueName,
     wrappedProcessor,
     {
-      connection: connection as any,              // Regular connection for commands
-      blockingConnection: blockingConnection as any,      // CRITICAL: Separate connection for BRPOPLPUSH
+      connection,
       concurrency: workerConfig.concurrency,
-      // NO limiter configuration!
-      settings: {
-        drainDelay: workerConfig.drainDelay, // MUST be > 50ms for blocking mode
-      } as any,
+      drainDelay: workerConfig.drainDelay,
     }
   );
 
@@ -145,15 +138,15 @@ export function createSimpleWorker(
     logger.error(`Job ${job?.id} failed in ${queueName}:`, err);
   });
 
-  worker.on('completed', (job: any) => {
+  worker.on('completed', (job: Job) => {
     logger.info(`Job ${job.id} completed in ${queueName}`);
   });
 
-  worker.on('stalled', (job: any) => {
-    logger.warn(`Job ${job.id} stalled in ${queueName}`);
+  worker.on('stalled', (jobId: string) => {
+    logger.warn(`Job ${jobId} stalled in ${queueName}`);
   });
 
-  logger.info(`Simple worker created for ${queueName} with blocking connection`);
+  logger.info(`Simple worker created for ${queueName}`);
 
   return worker;
 }

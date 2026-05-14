@@ -8,7 +8,7 @@
  * All workers use BRPOPLPUSH blocking mode for instant (<10ms) job pickup.
  */
 
-import { Worker } from 'bullmq';
+import { Worker, Job } from 'bullmq';
 import { getLogger } from '../lib/utils/logger.js';
 import { SIMPLE_QUEUES, SimpleQueueName as _SimpleQueueName } from '../config/simple-queues.js';
 import { JOB_NAMES } from '../types/jobs.js';
@@ -43,7 +43,7 @@ function createAnalyzeQueueProcessor() {
     [JOB_NAMES.INCREMENTAL_COLLECTION]: incrementalMetricsWorker(),
   };
 
-  return async (job: any) => {
+  return async (job: Job) => {
     const processor = processors[job.name as keyof typeof processors];
 
     if (!processor) {
@@ -69,7 +69,7 @@ function createBatchQueueProcessor() {
     [JOB_NAMES.ORCHESTRATE_REEVALUATE_BATCH]: simpleOrchestrateReevaluateBatchWorker(), // Simplified orchestrator
   };
 
-  return async (job: any) => {
+  return async (job: Job) => {
     const processor = processors[job.name as keyof typeof processors];
 
     if (!processor) {
