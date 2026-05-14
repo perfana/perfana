@@ -4,6 +4,13 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
+## [0.2.48.2] - 2026-05-14
+
+### Fixed
+- **Removed unused `PyroscopeViewMode` enum members** (`SINGLE`, `DIFF`) and `PyroscopeTheme.LIGHT` — only `COMPARISON` and `DARK` are actually referenced. Eliminates dead enum branches that lint would eventually flag.
+- **Audit capabilities test aligned to current `AuditCapabilities` type** — added `isSuperAdmin: false` to the expected shape so the test reflects the actual interface rather than an outdated subset.
+- **gstack tooling upgraded from v1.34.1.0 → v1.34.2.0** — fixes `/codex review` breakage on Codex CLI 0.130+, silent `/investigate` learning drops, and `/sync-gbrain` engine detection for Supabase backends.
+
 ## [0.2.48.1] - 2026-05-14
 
 ### Changed
