@@ -31,12 +31,12 @@ export abstract class BasePipelineTypeORM implements Pipeline {
   /**
    * Abstract method that must be implemented by each pipeline
    */
-  abstract execute(input: any): Promise<PipelineResult>;
+  abstract execute(input: unknown): Promise<PipelineResult>;
 
   /**
    * Optional input validation - override in specific pipelines
    */
-  validateInput?(input: any): boolean;
+  validateInput?(input: unknown): boolean;
 
   /**
    * Optional cleanup method - override if pipeline needs cleanup
@@ -81,7 +81,7 @@ export abstract class BasePipelineTypeORM implements Pipeline {
   /**
    * Execute raw SQL query (use sparingly - prefer repository methods)
    */
-  protected async query<T = any>(sql: string, parameters?: unknown[]): Promise<T[]> {
+  protected async query<T = unknown>(sql: string, parameters?: unknown[]): Promise<T[]> {
     return await this.db.query<T>(sql, parameters);
   }
 
@@ -89,7 +89,7 @@ export abstract class BasePipelineTypeORM implements Pipeline {
    * Execute a write operation using the dedicated write connection pool.
    * Use this for INSERT/UPDATE operations that must not be starved by analytics.
    */
-  protected async writeQuery<T = any>(sql: string, parameters?: unknown[]): Promise<T[]> {
+  protected async writeQuery<T = unknown>(sql: string, parameters?: unknown[]): Promise<T[]> {
     return await this.db.writeQuery<T>(sql, parameters);
   }
 
