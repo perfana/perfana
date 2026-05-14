@@ -513,7 +513,7 @@ describe('GrafanaClientService', () => {
       await service.getInfluxVariableValues(VALID_GRAFANA_INSTANCE, INFLUX_DATASOURCE, query);
 
       const [calledUrl] = fetchMock.mock.calls[0];
-      expect(calledUrl).toContain(`/api/datasources/proxy/${INFLUX_DATASOURCE.id}/query`);
+      expect(calledUrl).toContain(`/api/datasources/proxy/uid/${INFLUX_DATASOURCE.uid}/query`);
       expect(calledUrl).toContain(`db=${INFLUX_DATASOURCE.database}`);
       expect(calledUrl).toContain(encodeURIComponent(query));
     });
@@ -696,7 +696,7 @@ describe('GrafanaClientService', () => {
         );
 
         const [calledUrl] = fetchMock.mock.calls[0];
-        expect(calledUrl).toContain(`/api/datasources/proxy/${PROM_DATASOURCE.id}/api/v1/series`);
+        expect(calledUrl).toContain(`/api/datasources/proxy/uid/${PROM_DATASOURCE.uid}/api/v1/series`);
         expect(calledUrl).toContain('match[]=');
         expect(result).toEqual(['api-server', 'web-server']);
       });
@@ -767,7 +767,7 @@ describe('GrafanaClientService', () => {
 
         const [calledUrl] = fetchMock.mock.calls[0];
         expect(calledUrl).toContain(
-          `/api/datasources/proxy/${PROM_DATASOURCE.id}/api/v1/label/${encodeURIComponent('instance')}/values`,
+          `/api/datasources/proxy/uid/${PROM_DATASOURCE.uid}/api/v1/label/${encodeURIComponent('instance')}/values`,
         );
         expect(result).toEqual(['node1', 'node2', 'node3']);
       });

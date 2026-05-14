@@ -247,7 +247,7 @@ export class GrafanaApiService {
   /**
    * Create or find folder in Grafana
    */
-  async createOrFindFolder(instanceId: string, folderTitle: string): Promise<number> {
+  async createOrFindFolder(instanceId: string, folderTitle: string): Promise<{ id: number; uid: string }> {
     const instance = await this.getInstance(instanceId);
     const folderUid = folderTitle.toLowerCase().replace(/ /g, '-');
 
@@ -259,8 +259,8 @@ export class GrafanaApiService {
       );
 
       if (searchResults.length > 0) {
-        this.logger.debug(`Found existing folder: ${folderTitle} (ID: ${searchResults[0].id})`);
-        return searchResults[0].id;
+        this.logger.debug(`Found existing folder: ${folderTitle} (ID: ${searchResults[0].id}, UID: ${searchResults[0].uid})`);
+        return { id: searchResults[0].id, uid: searchResults[0].uid };
       }
 
       // Create new folder
@@ -269,15 +269,15 @@ export class GrafanaApiService {
         uid: folderUid,
       });
 
-      this.logger.log(`Created new folder: ${folderTitle} (ID: ${createResponse.id})`);
-      return createResponse.id;
+      this.logger.log(`Created new folder: ${folderTitle} (ID: ${createResponse.id}, UID: ${createResponse.uid})`);
+      return { id: createResponse.id, uid: createResponse.uid };
     } catch (error) {
       const errorMessage = error instanceof Error ? error.stack : String(error);
       this.logger.error(
         `Failed to create/find folder ${folderTitle}, using General folder (0)`,
         errorMessage,
       );
-      return 0; // Fallback to General folder
+      return { id: 0, uid: '' }; // Fallback to General folder
     }
   }
 

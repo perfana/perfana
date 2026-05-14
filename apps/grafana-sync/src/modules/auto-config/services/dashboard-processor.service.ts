@@ -288,7 +288,7 @@ export class DashboardProcessorService {
 
     // Create or find folder for system under test
     const sutName = testRun.systemUnderTest?.name || testRun.systemUnderTestId;
-    const folderId = await this.grafanaApiService.createOrFindFolder(
+    const folder = await this.grafanaApiService.createOrFindFolder(
       grafanaInstanceEntity.id,
       sutName,
     );
@@ -301,6 +301,7 @@ export class DashboardProcessorService {
     );
 
     // Prepare new dashboard JSON
+    // Send both folderId (Grafana ≤12) and folderUid (Grafana 13+) for compatibility.
     const newDashboardJson = {
       dashboard: {
         ...templateDashboardResponse.dashboard,
@@ -311,7 +312,8 @@ export class DashboardProcessorService {
           (tag: string) => tag.toLowerCase() !== PERFANA_TEMPLATE_TAG,
         ),
       },
-      folderId: folderId,
+      folderId: folder.id,
+      folderUid: folder.uid,
       overwrite: false,
     };
 
