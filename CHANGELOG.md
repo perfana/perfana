@@ -4,6 +4,14 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
+## [0.2.48.3] - 2026-05-14
+
+### Changed
+- **Migration consolidation: 59 TypeORM migrations → 1 `ConsolidatedSchema`.** All migrations from `1700000000000` to `1779100000000` are replaced by a single `ConsolidatedSchema1700000000000` migration. The migration is structured in five phases: (1) execute the full pg_dump schema SQL, (2) create the `perfana_app`/`perfana_system` cluster roles, (3) seed the default organization, (4) create TimescaleDB hypertables, (5) create continuous aggregates with refresh policies. Idempotent via `IF NOT EXISTS` / `IF EXISTS` guards and ALREADY_EXISTS_CODES error suppression throughout. Fresh-DB smoke test validated: 93 tables, clean diff.
+- **`scripts/dump-schema.sh` added** for regenerating `schema-sql.ts` from a running Postgres container. Uses Python internally to avoid shell heredoc expansion of PostgreSQL `$1`/`$2` parameter refs and `$$` function body delimiters that would corrupt the TypeScript template literal.
+- **`ALREADY_EXISTS_CODES` extracted as a static class constant** in `ConsolidatedSchema1700000000000` — eliminates duplication between the Phase 1 schema loop and the Phase 5 CAGG creation loop.
+- **`down()` table list completed** — added 7 tables present in the live schema that were missing (`alert_tag_filters`, `metrics_sources`, `scaling_sessions`, `sparse_metric_exclusions`, `test_run_sampler_stats`, `test_run_transaction_stats`, `test_run_views`); removed stale `compare_results` entry.
+
 ## [0.2.48.2] - 2026-05-14
 
 ### Fixed
