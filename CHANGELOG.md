@@ -4,6 +4,11 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
+## [0.2.48.4] - 2026-05-14
+
+### Fixed
+- **`application_dashboards.dashboard_id` and `benchmarks.dashboard_id` widened to `bigint`** — Grafana 12 returns dashboard IDs above the PostgreSQL `integer` max (2,147,483,647). The `ChangeGrafanaIdToBigint` migration that fixed `grafana_dashboards.grafana_id` missed these two columns. `benchmarks_view` (which selects `dashboard_id`) was dropped and recreated around the `ALTER TABLE`. The `migrate_benchmark_from_mongodb` function signature updated to `bigint` for consistency. ConsolidatedSchema `schema-sql.ts` updated so fresh-DB installs are correct from day one.
+
 ## [0.2.48.3] - 2026-05-14
 
 ### Changed

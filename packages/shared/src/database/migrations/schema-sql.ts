@@ -350,10 +350,10 @@ $$;
 
 
 --
--- Name: migrate_benchmark_from_mongodb(character varying, character varying, character varying, character varying, character varying, integer, character varying, jsonb, character varying, character varying, boolean); Type: FUNCTION; Schema: public; Owner: -
+-- Name: migrate_benchmark_from_mongodb(character varying, character varying, character varying, character varying, character varying, bigint, character varying, jsonb, character varying, character varying, boolean); Type: FUNCTION; Schema: public; Owner: -
 --
 
-CREATE FUNCTION public.migrate_benchmark_from_mongodb(p_application character varying, p_test_environment character varying, p_test_type character varying, p_grafana character varying, p_dashboard_label character varying, p_dashboard_id integer, p_dashboard_uid character varying, p_panel jsonb, p_generic_check_id character varying DEFAULT NULL::character varying, p_application_dashboard_id character varying DEFAULT NULL::character varying, p_valid boolean DEFAULT true) RETURNS uuid
+CREATE FUNCTION public.migrate_benchmark_from_mongodb(p_application character varying, p_test_environment character varying, p_test_type character varying, p_grafana character varying, p_dashboard_label character varying, p_dashboard_id bigint, p_dashboard_uid character varying, p_panel jsonb, p_generic_check_id character varying DEFAULT NULL::character varying, p_application_dashboard_id character varying DEFAULT NULL::character varying, p_valid boolean DEFAULT true) RETURNS uuid
     LANGUAGE plpgsql
     AS $$
 DECLARE
@@ -989,7 +989,7 @@ CREATE TABLE public.application_dashboards (
     grafana_instance_id uuid,
     grafana_dashboard_id uuid,
     dashboard_name character varying(255) NOT NULL,
-    dashboard_id integer,
+    dashboard_id bigint,
     dashboard_uid character varying(100),
     dashboard_label character varying(255) NOT NULL,
     tags text[],
@@ -1186,7 +1186,7 @@ CREATE TABLE public.benchmarks (
     source character varying(50) DEFAULT 'grafana'::character varying NOT NULL,
     grafana_instance character varying(255),
     dashboard_label character varying(500),
-    dashboard_id integer,
+    dashboard_id bigint,
     dashboard_uid character varying(255),
     application_dashboard_id uuid,
     generic_check_id character varying(500),
