@@ -72,6 +72,9 @@ export class ConsolidatedSchema1700000000000 implements MigrationInterface {
         // Roles don't exist during Phase 1 (created in Phase 2).
         // Phase 2 covers all grants in bulk via GRANT ON ALL TABLES + ALTER DEFAULT PRIVILEGES.
         !stmt.match(/^GRANT .* TO (perfana_app|perfana_system)\s*;?\s*$/ms) &&
+        // ALTER DEFAULT PRIVILEGES statements captured from a live DB that already had the
+        // roles. Phase 2 re-applies these after role creation, so skip them here.
+        !stmt.match(/ALTER DEFAULT PRIVILEGES .* TO (perfana_app|perfana_system)/ms) &&
         // TypeORM migrations table (created by TypeORM automatically)
         !stmt.includes('migrations_id_seq') &&
         !stmt.match(/CREATE TABLE.*migrations/i) &&

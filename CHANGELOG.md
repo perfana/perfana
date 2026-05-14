@@ -9,6 +9,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
 ### Fixed
 - **Grafana 13 compatibility: datasource proxy URLs migrated from numeric ID to UID** — `GrafanaClientService` was calling `/api/datasources/proxy/{numericId}/` for InfluxDB and Prometheus variable resolution. Grafana 13 disables numeric-ID datasource APIs by default (`datasourceLegacyIdApi` feature flag off). All three call sites switched to `/api/datasources/proxy/uid/{uid}/`, which works in Grafana 8+ including Grafana 12 and 13.
 - **Grafana 13 compatibility: `folderId` → `folderUid` in dashboard create/restore payloads** — `POST /api/dashboards/db` dropped support for the numeric `folderId` field in Grafana 13. `GrafanaApiService.createOrFindFolder()` now returns `{ id, uid }` instead of a bare number; auto-config dashboard creation (`dashboard-processor.service.ts`) and dashboard restore (`restore-dashboard.service.ts`) send both `folderId` and `folderUid` for full Grafana 12/13 compatibility.
+- **`ConsolidatedSchema` migration now succeeds on fresh databases** — the schema dump captured `ALTER DEFAULT PRIVILEGES … TO perfana_app/perfana_system` statements from a live DB that already had those roles. These slipped past the existing `GRANT … TO perfana_app` filter (which only matched statements starting with `GRANT`) and failed during Phase 1 before Phase 2 created the roles. A second filter clause now strips `ALTER DEFAULT PRIVILEGES … TO perfana_app/perfana_system` from Phase 1; Phase 2 re-applies the same grants after role creation.
 
 ## [0.2.48.4] - 2026-05-14
 
