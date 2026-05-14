@@ -61,7 +61,7 @@ export class ApplicationDashboard {
   @Column({ name: 'dashboard_name', type: 'varchar', length: 255 })
   dashboardName!: string;
 
-  @Column({ name: 'dashboard_id', type: 'integer', nullable: true })
+  @Column({ name: 'dashboard_id', type: 'bigint', nullable: true })
   dashboardId?: number;
 
   @Column({ name: 'dashboard_uid', type: 'varchar', length: 100, nullable: true })
