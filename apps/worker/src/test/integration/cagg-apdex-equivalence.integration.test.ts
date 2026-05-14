@@ -8,8 +8,7 @@
  * Catches:
  *  - sketch-family bugs (uddsketch drift across rollup boundaries),
  *  - bucket-boundary off-by-ones in the CAGG join,
- *  - any future drift in the CAGG schema added by migration
- *    1779100000000-AddPctAggPassedCaggs.
+ *  - any future drift in the CAGG schema (defined in ConsolidatedSchema Phase 5).
  *
  * Setup: 10k synthetic transactions (95% success / 5% failure) inside a
  * unique test_run, with a roughly gamma-shaped response_time distribution.
@@ -17,7 +16,7 @@
  *
  * Skip conditions:
  *  - SKIP_CAGG_EQUIVALENCE_TEST=true (explicit opt-out)
- *  - migration 1779100000000 not applied (no transactions_passed_5s view)
+ *  - ConsolidatedSchema Phase 5 not applied (no transactions_passed_5s view)
  *
  * Note on DB access pattern:
  * Uses a `pg.Pool` directly with the standard DB_* env-var configuration —
@@ -75,13 +74,13 @@ describe('CAGG Apdex equivalence (raw vs transactions_passed_5s)', () => {
       return;
     }
 
-    // Verify migration 1779100000000 is applied
+    // Verify ConsolidatedSchema Phase 5 has run (CAGG views exist)
     const exists = await pool.query(`
       SELECT 1 FROM timescaledb_information.continuous_aggregates
       WHERE view_name = 'transactions_passed_5s' LIMIT 1
     `);
     if (exists.rows.length === 0) {
-      skipReason = 'transactions_passed_5s CAGG not present (migration 1779100000000 not applied?)';
+      skipReason = 'transactions_passed_5s CAGG not present (ConsolidatedSchema Phase 5 not applied?)';
       console.log(`[cagg-apdex-equivalence] Skipping: ${skipReason}`);
       return;
     }

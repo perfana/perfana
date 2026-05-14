@@ -46,6 +46,11 @@ export class ConsolidatedSchema1700000000000 implements MigrationInterface {
     'Default organization for legacy data. ' +
     'Resources in this organization were created before multi-tenancy enforcement.';
 
+  // 42P07 = relation/index already exists
+  // 42710 = object already exists (constraints, triggers)
+  // 42723 = function already exists with same argument types
+  static readonly ALREADY_EXISTS_CODES = ['42P07', '42710', '42723'];
+
   public async up(queryRunner: QueryRunner): Promise<void> {
     // ─── Phase 1: Execute schema dump ───
     console.log('Phase 1: Executing schema dump...');
@@ -88,13 +93,9 @@ export class ConsolidatedSchema1700000000000 implements MigrationInterface {
             );
           }
         } catch (error: unknown) {
-          // Skip "already exists" errors to make migration idempotent:
-          // 42P07 = relation/index already exists
-          // 42710 = object already exists (constraints, triggers)
-          // 42723 = function already exists with same argument types
-          const alreadyExistsCodes = ['42P07', '42710', '42723'];
+          // Skip "already exists" errors to make migration idempotent
           // eslint-disable-next-line @typescript-eslint/no-explicit-any
-          if (alreadyExistsCodes.includes((error as any)?.code)) {
+          if (ConsolidatedSchema1700000000000.ALREADY_EXISTS_CODES.includes((error as any)?.code)) {
             executed++;
             continue;
           }
@@ -110,7 +111,7 @@ export class ConsolidatedSchema1700000000000 implements MigrationInterface {
     console.log(`Successfully executed ${executed} statements.`);
 
     // ─── Phase 2: Create restricted app role ───
-    console.log('Phase 2: Creating restricted app role...');
+    console.log('Phase 2: Creating restricted app roles...');
     await this.createRestrictedAppRole(queryRunner);
 
     // ─── Phase 3: Seed default organization ───
@@ -190,6 +191,11 @@ export class ConsolidatedSchema1700000000000 implements MigrationInterface {
       'test_run_alerts',
       'test_run_configs',
       'expected_config_changes',
+      'test_run_sampler_stats',
+      'test_run_transaction_stats',
+      'test_run_views',
+      'scaling_sessions',
+      'alert_tag_filters',
       'test_runs',
       'ds_tracked_differences',
       'ds_adapt_tracked_results',
@@ -210,7 +216,6 @@ export class ConsolidatedSchema1700000000000 implements MigrationInterface {
       'dynatrace_queries',
       'dynatrace_configs',
       'check_results',
-      'compare_results',
       'benchmarks',
       'profile_benchmarks',
       'profile_grafana_dashboards',
@@ -218,6 +223,8 @@ export class ConsolidatedSchema1700000000000 implements MigrationInterface {
       'grafana_dashboards',
       'grafana_instances',
       'data_sources',
+      'metrics_sources',
+      'sparse_metric_exclusions',
       'generic_deep_links',
       'deep_links',
       'compare_filter_presets',
@@ -732,8 +739,7 @@ export class ConsolidatedSchema1700000000000 implements MigrationInterface {
         await queryRunner.query(sql);
         console.log(`  Created CAGG: ${view}`);
       } catch (error: unknown) {
-        // 42P07 = relation already exists — safe to skip on re-run
-        if ((error as { code?: string })?.code === '42P07') {
+        if (ConsolidatedSchema1700000000000.ALREADY_EXISTS_CODES.includes((error as { code?: string })?.code ?? '')) {
           console.log(`  CAGG already exists: ${view}`);
         } else {
           console.warn(`  Warning: Could not create CAGG ${view}:`, (error as Error).message);
