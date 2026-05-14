@@ -1568,8 +1568,8 @@ describe('WorkerDatabaseService', () => {
       // Assert
       expect(dsMetricCollectionStatusRepo.update).toHaveBeenCalledWith('cs-1', expect.objectContaining({
         collected_ranges: [{
-          from: testRun.startTime.toISOString(),
-          to: testRun.endTime.toISOString(),
+          from: testRun.startTime,
+          to: testRun.endTime,
         }],
       }));
     });

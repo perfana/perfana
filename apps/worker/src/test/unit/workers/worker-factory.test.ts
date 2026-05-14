@@ -166,23 +166,19 @@ describe('Worker Factory', () => {
         expect.any(Function),
         expect.objectContaining({
           connection: mockRedisInstance,
-          blockingConnection: mockRedisInstance,
           concurrency: 5,
-          settings: expect.objectContaining({
-            drainDelay: 100,
-          }),
+          drainDelay: 100,
         })
       );
       expect(worker).toBe(mockWorkerInstance);
     });
 
-    it('should create separate blocking connection', () => {
+    it('should create one Redis connection for the worker', () => {
       // Act
       createSimpleWorker('analyze-test', mockProcessor);
 
       // Assert
-      // IORedis should be called twice: once for regular connection, once for blocking
-      expect(IORedis).toHaveBeenCalledTimes(2);
+      expect(IORedis).toHaveBeenCalledTimes(1);
     });
 
     it('should setup all event listeners', () => {
@@ -215,9 +211,7 @@ describe('Worker Factory', () => {
         expect.any(Function),
         expect.objectContaining({
           concurrency: 10,
-          settings: expect.objectContaining({
-            drainDelay: 200,
-          }),
+          drainDelay: 200,
         })
       );
     });
@@ -431,7 +425,7 @@ describe('Worker Factory', () => {
   });
 
   describe('Worker Blocking Connection Pattern', () => {
-    it('should create separate connections for blocking and regular operations', () => {
+    it('should create a connection and pass it to the worker', () => {
       // Arrange
       const mockProcessor = vi.fn();
 
@@ -439,11 +433,10 @@ describe('Worker Factory', () => {
       createSimpleWorker('analyze-test', mockProcessor);
 
       // Assert
-      expect(IORedis).toHaveBeenCalledTimes(2); // Two separate connections
+      expect(IORedis).toHaveBeenCalledTimes(1);
       const workerCall = vi.mocked(Worker).mock.calls[0];
       const workerOptions = workerCall[2];
       expect(workerOptions.connection).toBeDefined();
-      expect(workerOptions.blockingConnection).toBeDefined();
     });
 
     it('should configure drainDelay greater than 50ms', () => {
@@ -456,7 +449,7 @@ describe('Worker Factory', () => {
       // Assert
       const workerCall = vi.mocked(Worker).mock.calls[0];
       const workerOptions = workerCall[2];
-      expect(workerOptions.settings.drainDelay).toBeGreaterThanOrEqual(50);
+      expect(workerOptions.drainDelay).toBeGreaterThanOrEqual(50);
     });
   });
 
