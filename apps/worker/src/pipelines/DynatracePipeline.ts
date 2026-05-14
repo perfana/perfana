@@ -39,23 +39,23 @@ export class DynatracePipeline extends BasePipelineTypeORM {
   private dataProcessor: DataProcessor;
   private config = getConfig();
 
-  constructor(logger: any) {
-    super(logger as any);
+  constructor(logger: import('pino').Logger) {
+    super(logger);
     // DynatraceRepository migrated to use TypeORM WorkerDatabaseService
     this.repository = new DynatraceRepository(this.db);
     this.queryConstructor = new QueryConstructor(this.repository);
     this.dataProcessor = new DataProcessor();
   }
 
-  validateInput(input: any): boolean {
+  validateInput(input: unknown): boolean {
     if (!input || typeof input !== 'object') {return false;}
-    const typedInput = input as any;
+    const typedInput = input as { testRunIds?: unknown[] };
     return Array.isArray(typedInput.testRunIds) &&
            typedInput.testRunIds.length > 0 &&
-           typedInput.testRunIds.every((id: any) => typeof id === 'string');
+           typedInput.testRunIds.every((id: unknown) => typeof id === 'string');
   }
 
-  async execute(input: any): Promise<PipelineResult> {
+  async execute(input: unknown): Promise<PipelineResult> {
     const startTime = Date.now();
 
     if (!this.validateInput(input)) {
@@ -288,7 +288,7 @@ export class DynatracePipeline extends BasePipelineTypeORM {
   private async storePanelDocuments(
     panelDocuments: PanelDocument[],
     _testRunId: string,
-    testRun?: any
+    testRun?: { organizationId?: string | null; teamId?: string | null }
   ): Promise<void> {
     if (panelDocuments.length === 0) {
       this.logger.info('No panel documents to store');

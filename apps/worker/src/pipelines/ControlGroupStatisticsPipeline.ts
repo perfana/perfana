@@ -98,9 +98,9 @@ export interface ControlGroupStatisticsInput {
  * information (non-null dashboard_uid and metrics_source_id preferred).
  */
 export class ControlGroupStatisticsPipeline extends BasePipelineTypeORM {
-  validateInput(input: any): boolean {
+  validateInput(input: unknown): boolean {
     if (!input || typeof input !== 'object') {return false;}
-    const typedInput = input as any;
+    const typedInput = input as { controlGroupIds?: unknown[]; testRunIds?: unknown[] };
 
     // Must have either controlGroupIds or testRunIds
     const hasControlGroupIds = Array.isArray(typedInput.controlGroupIds) &&
@@ -111,7 +111,7 @@ export class ControlGroupStatisticsPipeline extends BasePipelineTypeORM {
     return hasControlGroupIds || hasTestRunIds;
   }
 
-  async execute(input: any): Promise<PipelineResult> {
+  async execute(input: unknown): Promise<PipelineResult> {
     const startTime = Date.now();
 
     if (!this.validateInput(input)) {

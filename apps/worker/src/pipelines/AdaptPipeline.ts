@@ -44,11 +44,11 @@ export class AdaptPipeline extends BasePipelineTypeORM {
     this.resultsProcessor = new ResultsProcessor(logger);
   }
 
-  validateInput(input: any): boolean {
+  validateInput(input: unknown): boolean {
     return this.validator.validateInput(input).valid;
   }
 
-  async execute(input: any): Promise<PipelineResult> {
+  async execute(input: unknown): Promise<PipelineResult> {
     const startTime = Date.now();
 
     const validationResult = this.validator.validateInput(input);

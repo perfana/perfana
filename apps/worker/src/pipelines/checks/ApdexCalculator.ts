@@ -764,10 +764,10 @@ export class ApdexCalculator extends BaseCheckService {
         AND ramp_up_excluded = false
         AND transaction_name IS NOT NULL
       ORDER BY transaction_name
-    `, [testRunId]) as any;
+    `, [testRunId]) as Array<{ transaction_name: string }>;
 
     if (rollupResult.length > 0) {
-      return rollupResult.map((row: any) => row.transaction_name);
+      return rollupResult.map((row) => row.transaction_name);
     }
 
     const legacyResult = await this.manager.query(`
@@ -776,9 +776,9 @@ export class ApdexCalculator extends BaseCheckService {
       WHERE test_run_id = $1
         AND transaction_name IS NOT NULL
       ORDER BY transaction_name
-    `, [testRunId]) as any;
+    `, [testRunId]) as Array<{ transaction_name: string }>;
 
-    return legacyResult.map((row: any) => row.transaction_name);
+    return legacyResult.map((row) => row.transaction_name);
   }
 
   /**
@@ -802,10 +802,10 @@ export class ApdexCalculator extends BaseCheckService {
         AND ramp_up_excluded = false
         AND transaction_name IS NOT NULL
       ORDER BY scenario_name, transaction_name
-    `, [testRunId]) as any;
+    `, [testRunId]) as Array<{ transaction_name: string; scenario_name: string }>;
 
     if (rollupResult.length > 0) {
-      return rollupResult.map((row: any) => ({
+      return rollupResult.map((row) => ({
         transaction_name: row.transaction_name,
         scenario_name: row.scenario_name,
       }));
@@ -817,9 +817,9 @@ export class ApdexCalculator extends BaseCheckService {
       WHERE test_run_id = $1
         AND transaction_name IS NOT NULL
       ORDER BY scenario_name, transaction_name
-    `, [testRunId]) as any;
+    `, [testRunId]) as Array<{ transaction_name: string; scenario_name: string }>;
 
-    return legacyResult.map((row: any) => ({
+    return legacyResult.map((row) => ({
       transaction_name: row.transaction_name,
       scenario_name: row.scenario_name,
     }));

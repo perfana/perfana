@@ -151,7 +151,7 @@ export class BenchmarkMatcher extends BaseCheckService {
       WHERE ${whereClauses.join('\n        AND ')}
     `;
 
-    const result = await this.manager.query(benchmarksSql, queryParams) as any;
+    const result = await this.manager.query(benchmarksSql, queryParams) as Record<string, unknown>[];
 
     if (result.length === 0) {
       throw new BenchmarkNotFoundError(
@@ -162,32 +162,32 @@ export class BenchmarkMatcher extends BaseCheckService {
 
     // Convert rows to Benchmark objects and validate
     // Based on benchmark_matcher.py:66-88
-    const benchmarks: Benchmark[] = result.map((row: any) => ({
-      id: row.id,
-      system_under_test_id: row.system_under_test_id,
-      test_environment: row.test_environment,
-      workload: row.workload,
-      dashboard_uid: row.dashboard_uid,
-      dashboard_label: row.dashboard_label,
-      application_dashboard_id: row.application_dashboard_id,
+    const benchmarks: Benchmark[] = result.map((row) => ({
+      id: row.id as string,
+      system_under_test_id: row.system_under_test_id as string,
+      test_environment: row.test_environment as string,
+      workload: row.workload as string,
+      dashboard_uid: row.dashboard_uid as string,
+      dashboard_label: row.dashboard_label as string,
+      application_dashboard_id: row.application_dashboard_id as string,
       configuration: row.configuration,
-      requirement_operator: row.requirement_operator,
-      requirement_value: row.requirement_value,
-      validate_with_default_if_no_data: row.validate_with_default_if_no_data || false,
-      validate_with_default_if_no_data_value: row.validate_with_default_if_no_data_value,
-      average_all: row.average_all || false,
+      requirement_operator: row.requirement_operator as string | undefined,
+      requirement_value: row.requirement_value as number | undefined,
+      validate_with_default_if_no_data: (row.validate_with_default_if_no_data as boolean) || false,
+      validate_with_default_if_no_data_value: row.validate_with_default_if_no_data_value as number | undefined,
+      average_all: (row.average_all as boolean) || false,
       exclude_ramp_up_time: row.exclude_ramp_up_time !== false, // Default true
-      panel_title: row.panel_title,
-      evaluate_type: row.evaluate_type,
-      metric_unit: row.metric_unit,
+      panel_title: row.panel_title as string | undefined,
+      evaluate_type: row.evaluate_type as string | undefined,
+      metric_unit: row.metric_unit as string | undefined,
       valid: row.valid !== false, // Default true
       enabled: row.enabled !== false, // Default true
       // Apdex SLO fields
-      benchmark_type: row.benchmark_type || 'metric',
-      transaction_name: row.transaction_name,
-      apdex_threshold_ms: row.apdex_threshold_ms,
+      benchmark_type: ((row.benchmark_type as string) || 'metric') as BenchmarkType,
+      transaction_name: row.transaction_name as string | undefined,
+      apdex_threshold_ms: row.apdex_threshold_ms as number | undefined,
       min_apdex_score: row.min_apdex_score ? parseFloat(String(row.min_apdex_score)) : undefined,
-      include_failed_requests: row.include_failed_requests || false,
+      include_failed_requests: (row.include_failed_requests as boolean) || false,
     }));
 
     // Filter out invalid benchmarks

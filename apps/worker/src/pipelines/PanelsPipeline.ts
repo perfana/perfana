@@ -177,7 +177,7 @@ export class PanelsPipeline extends BasePipelineTypeORM {
     }
   }
 
-  private async insertPanelDocuments(manager: EntityManager, panelDocuments: unknown[], testRun: any): Promise<void> {
+  private async insertPanelDocuments(manager: EntityManager, panelDocuments: unknown[], testRun: { organizationId?: string | null; teamId?: string | null }): Promise<void> {
     if (panelDocuments.length === 0) {return;}
 
     const columns = [
@@ -199,7 +199,7 @@ export class PanelsPipeline extends BasePipelineTypeORM {
 
     // Flatten all parameters into a single array
     const params = panelDocuments.flatMap(doc => {
-      const d = doc as any;
+      const d = doc as Record<string, unknown>;
       return [
         d.test_run_id,
         d.application_dashboard_id,
@@ -226,12 +226,12 @@ export class PanelsPipeline extends BasePipelineTypeORM {
     await manager.query(insertQuery, params);
   }
 
-  validateInput(input: any): boolean {
+  validateInput(input: unknown): boolean {
     if (!input || typeof input !== 'object') {
       return false;
     }
 
-    const inputObj = input as any;
+    const inputObj = input as { testRunId?: unknown };
     return typeof inputObj.testRunId === 'string' && inputObj.testRunId.length > 0;
   }
 }

@@ -28,15 +28,15 @@ export interface ControlGroup {
 }
 
 export class ControlGroupsPipeline extends BasePipelineTypeORM {
-  validateInput(input: any): boolean {
+  validateInput(input: unknown): boolean {
     if (!input || typeof input !== 'object') {return false;}
-    const typedInput = input as any;
+    const typedInput = input as { testRunIds?: unknown[] };
     return Array.isArray(typedInput.testRunIds) &&
            typedInput.testRunIds.length > 0 &&
-           typedInput.testRunIds.every((id: any) => typeof id === 'string');
+           typedInput.testRunIds.every((id: unknown) => typeof id === 'string');
   }
 
-  async execute(input: any): Promise<PipelineResult> {
+  async execute(input: unknown): Promise<PipelineResult> {
     const startTime = Date.now();
 
     if (!this.validateInput(input)) {
@@ -343,7 +343,7 @@ export class ControlGroupsPipeline extends BasePipelineTypeORM {
         AND tr.start_time <= $4
     `;
 
-    const changePointParams: any[] = [
+    const changePointParams: unknown[] = [
       tr.system_under_test_id,
       tr.workload,
       tr.test_environment,
@@ -409,7 +409,7 @@ export class ControlGroupsPipeline extends BasePipelineTypeORM {
         AND end_time IS NOT NULL
     `;
 
-    const queryParams: any[] = [
+    const queryParams: unknown[] = [
       tr.system_under_test_id,
       tr.workload,
       tr.test_environment,

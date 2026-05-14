@@ -360,10 +360,10 @@ export class MetricProcessor {
     source: string,
     errors: string[]
   ): boolean {
-    const doc = document as any;
+    const doc = document as Record<string, unknown> & { errors?: Array<{ message?: string }> };
     if (doc.errors && doc.errors.length > 0) {
       const errorMessages = doc.errors
-        .map((e: any) => e.message || JSON.stringify(e))
+        .map((e) => e.message || JSON.stringify(e))
         .join('; ');
       const panelId = doc.panel_id || doc.panelId;
       const panelTitle = doc.panel_title || doc.panelTitle;
@@ -384,7 +384,7 @@ export class MetricProcessor {
    * @returns True if the document has no data and should be skipped
    */
   isEmptyDocument(document: unknown, source: string): boolean {
-    const doc = document as any;
+    const doc = document as Record<string, unknown> & { data?: unknown[] };
     if (!doc.data || doc.data.length === 0) {
       const panelId = doc.panel_id || doc.panelId;
       const panelTitle = doc.panel_title || doc.panelTitle;

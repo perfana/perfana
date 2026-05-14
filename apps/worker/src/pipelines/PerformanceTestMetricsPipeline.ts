@@ -60,7 +60,7 @@ export class PerformanceTestMetricsPipeline extends BasePipelineTypeORM {
   /**
    * Execute the performance test metrics pipeline
    */
-  async execute(input: any): Promise<PipelineResult> {
+  async execute(input: unknown): Promise<PipelineResult> {
     const startTime = Date.now();
 
     try {
@@ -330,12 +330,12 @@ export class PerformanceTestMetricsPipeline extends BasePipelineTypeORM {
   /**
    * Validate and parse input
    */
-  private validateAndParseInput(input: any): PerformanceTestMetricsInput {
+  private validateAndParseInput(input: unknown): PerformanceTestMetricsInput {
     if (!input || typeof input !== 'object') {
       throw new Error('Invalid input: expected object');
     }
 
-    const { testRunId, fromTime, toTime } = input as any;
+    const { testRunId, fromTime, toTime } = input as Record<string, unknown>;
 
     if (!testRunId || typeof testRunId !== 'string') {
       throw new Error('Invalid input: testRunId is required and must be a string');
@@ -345,14 +345,14 @@ export class PerformanceTestMetricsPipeline extends BasePipelineTypeORM {
     const result: PerformanceTestMetricsInput = { testRunId };
 
     if (fromTime !== undefined) {
-      result.fromTime = fromTime instanceof Date ? fromTime : new Date(fromTime);
+      result.fromTime = fromTime instanceof Date ? fromTime : new Date(fromTime as string | number);
       if (isNaN(result.fromTime.getTime())) {
         throw new Error('Invalid input: fromTime is not a valid date');
       }
     }
 
     if (toTime !== undefined) {
-      result.toTime = toTime instanceof Date ? toTime : new Date(toTime);
+      result.toTime = toTime instanceof Date ? toTime : new Date(toTime as string | number);
       if (isNaN(result.toTime.getTime())) {
         throw new Error('Invalid input: toTime is not a valid date');
       }

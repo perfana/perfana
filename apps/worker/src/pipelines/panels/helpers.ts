@@ -532,18 +532,19 @@ async function createPanelRequests(
     // The datasource info is in the target.datasource object but Grafana needs numeric datasourceId at root
     if (substitutedTarget.datasource && !substitutedTarget.datasourceId) {
       let uid: string | undefined;
-      if (typeof substitutedTarget.datasource === 'object' && substitutedTarget.datasource.uid) {
-        uid = substitutedTarget.datasource.uid;
-      } else if (typeof substitutedTarget.datasource === 'string') {
-        uid = substitutedTarget.datasource;
+      const ds = substitutedTarget.datasource as Record<string, unknown> | string;
+      if (typeof ds === 'object' && ds.uid) {
+        uid = ds.uid as string;
+      } else if (typeof ds === 'string') {
+        uid = ds;
       }
 
       // Fall back to panel-level datasource when target datasource is corrupted
       // (e.g. a string like "Mimir" spread into {"0":"M","1":"i",...} by a buggy dashboard import)
-      if (!uid && typeof substitutedTarget.datasource === 'object' && !substitutedTarget.datasource.uid) {
-        const panelDs = p.datasource;
+      if (!uid && typeof ds === 'object' && !ds.uid) {
+        const panelDs = p.datasource as Record<string, unknown> | undefined;
         if (panelDs && typeof panelDs === 'object' && panelDs.uid) {
-          uid = panelDs.uid;
+          uid = panelDs.uid as string;
           // Fix the target datasource so the query uses the correct datasource
           substitutedTarget.datasource = { uid: panelDs.uid, type: panelDs.type || 'prometheus' };
           logger.warn(`⚠️ Panel ${p.id} target[${targetIndex}] has corrupted datasource, falling back to panel datasource: ${uid}`);
@@ -594,8 +595,8 @@ async function createPanelRequests(
 /**
  * Substitute template variables in a Grafana target query
  */
-function substituteVariablesInTarget(target: unknown, queryVariables: Record<string, string>, _panel?: unknown): any {
-  const substitutedTarget = JSON.parse(JSON.stringify(target)); // Deep clone
+function substituteVariablesInTarget(target: unknown, queryVariables: Record<string, string>, _panel?: unknown): Record<string, unknown> {
+  const substitutedTarget = JSON.parse(JSON.stringify(target)) as Record<string, unknown>; // Deep clone
 
   // For Prometheus queries, ensure proper interval/step settings
   // Remove the huge default step that causes no data to be returned
@@ -621,7 +622,7 @@ function substituteVariablesInTarget(target: unknown, queryVariables: Record<str
   delete substitutedTarget.maxDataPoints;
 
   // Substitute variables in all string fields recursively
-  function substituteInObject(obj: unknown): any {
+  function substituteInObject(obj: unknown): unknown {
     if (typeof obj === 'string') {
       let result = obj;
       for (const [key, value] of Object.entries(queryVariables)) {
@@ -639,7 +640,7 @@ function substituteVariablesInTarget(target: unknown, queryVariables: Record<str
     } else if (Array.isArray(obj)) {
       return obj.map(item => substituteInObject(item));
     } else if (obj && typeof obj === 'object') {
-      const substituted: any = {};
+      const substituted: Record<string, unknown> = {};
       for (const [k, v] of Object.entries(obj)) {
         substituted[k] = substituteInObject(v);
       }
@@ -648,7 +649,7 @@ function substituteVariablesInTarget(target: unknown, queryVariables: Record<str
     return obj;
   }
 
-  const result = substituteInObject(substitutedTarget);
+  const result = substituteInObject(substitutedTarget) as Record<string, unknown>;
 
   // Debug logging for final step values (can be removed after debugging)
   // if (_panel) {
@@ -660,8 +661,9 @@ function substituteVariablesInTarget(target: unknown, queryVariables: Record<str
 
   // After substitution, ensure interval is reasonable for Prometheus queries
   // This ensures we don't use huge step values that result in no data
-  if (result.interval && result.interval.includes('h')) {
-    const hours = parseInt(result.interval);
+  const interval = result.interval as string | undefined;
+  if (interval && interval.includes('h')) {
+    const hours = parseInt(interval);
     // If interval is more than 1 hour, cap it at 1 minute for test data
     if (hours > 1) {
       result.interval = "1m";
