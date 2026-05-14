@@ -244,7 +244,7 @@ export class GrafanaClientService {
   ): Promise<string[]> {
     try {
       const encodedQuery = encodeURIComponent(query);
-      const queryUrl = `/api/datasources/proxy/${datasource.id}/query?db=${datasource.database}&q=${encodedQuery}`;
+      const queryUrl = `/api/datasources/proxy/uid/${datasource.uid}/query?db=${datasource.database}&q=${encodedQuery}`;
       
       const response = await this.grafanaCall(grafanaInstance, queryUrl) as Record<string, unknown>;
       const variableValues: string[] = [];
@@ -313,7 +313,7 @@ export class GrafanaClientService {
           const startTime = Math.round(new Date(Date.now() - 24 * 60 * 60 * 1000).getTime() / 1000);
           const endTime = Math.round(new Date().getTime() / 1000);
           
-          queryUrl = `/api/datasources/proxy/${datasource.id}/api/v1/series?match[]=${encodeURIComponent(metric)}&start=${startTime}&end=${endTime}`;
+          queryUrl = `/api/datasources/proxy/uid/${datasource.uid}/api/v1/series?match[]=${encodeURIComponent(metric)}&start=${startTime}&end=${endTime}`;
           
           const response = await this.grafanaCall(grafanaInstance, queryUrl) as Record<string, unknown>;
 
@@ -327,7 +327,7 @@ export class GrafanaClientService {
         }
       } else {
         // Simple label values query
-        queryUrl = `/api/datasources/proxy/${datasource.id}/api/v1/label/${encodeURIComponent(query)}/values`;
+        queryUrl = `/api/datasources/proxy/uid/${datasource.uid}/api/v1/label/${encodeURIComponent(query)}/values`;
         const response = await this.grafanaCall(grafanaInstance, queryUrl) as Record<string, unknown>;
 
         if (response && response.data) {

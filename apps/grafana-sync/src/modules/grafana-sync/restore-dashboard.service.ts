@@ -145,13 +145,15 @@ export class RestoreDashboardService {
         return;
       }
 
-      // Prepare dashboard for restoration
+      // Prepare dashboard for restoration.
+      // Send both folderId (Grafana ≤12) and folderUid (Grafana 13+) for compatibility.
       const restorePayload = {
         dashboard: {
           ...grafanaJson.dashboard,
           id: null, // Let Grafana assign new ID
         },
-        folderId: grafanaJson.meta?.folderId || 0, // Use stored folder or General
+        folderId: grafanaJson.meta?.folderId || 0,
+        folderUid: grafanaJson.meta?.folderUid || '',
         overwrite: false,
       };
 

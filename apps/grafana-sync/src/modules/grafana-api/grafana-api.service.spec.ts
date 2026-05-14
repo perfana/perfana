@@ -263,7 +263,7 @@ describe('GrafanaApiService', () => {
   });
 
   describe('createOrFindFolder', () => {
-    it('should return existing folder ID if found', async () => {
+    it('should return existing folder { id, uid } if found', async () => {
       const searchResults = [{ id: 5, uid: 'my-app', title: 'My App' }];
 
       jest.spyOn(grafanaInstanceRepo, 'findOne').mockResolvedValue(mockInstance as any);
@@ -273,16 +273,16 @@ describe('GrafanaApiService', () => {
         json: async () => searchResults,
       });
 
-      const folderId = await service.createOrFindFolder('test-id', 'My App');
+      const folder = await service.createOrFindFolder('test-id', 'My App');
 
-      expect(folderId).toBe(5);
+      expect(folder).toEqual({ id: 5, uid: 'my-app' });
       expect(global.fetch).toHaveBeenCalledWith(
         expect.stringContaining('/api/search?type=dash-folder&query=my-app'),
         expect.any(Object),
       );
     });
 
-    it('should create new folder if not found', async () => {
+    it('should create new folder and return { id, uid } if not found', async () => {
       const createResponse = { id: 10, uid: 'new-app', title: 'New App' };
 
       jest.spyOn(grafanaInstanceRepo, 'findOne').mockResolvedValue(mockInstance as any);
@@ -297,9 +297,9 @@ describe('GrafanaApiService', () => {
           json: async () => createResponse, // Create succeeds
         });
 
-      const folderId = await service.createOrFindFolder('test-id', 'New App');
+      const folder = await service.createOrFindFolder('test-id', 'New App');
 
-      expect(folderId).toBe(10);
+      expect(folder).toEqual({ id: 10, uid: 'new-app' });
       expect(global.fetch).toHaveBeenNthCalledWith(
         2,
         'http://grafana.test/api/folders',
@@ -313,14 +313,14 @@ describe('GrafanaApiService', () => {
       );
     });
 
-    it('should return 0 (General folder) on error', async () => {
+    it('should return General folder fallback { id: 0, uid: "" } on error', async () => {
       jest.spyOn(grafanaInstanceRepo, 'findOne').mockResolvedValue(mockInstance as any);
 
       (global.fetch as jest.Mock).mockRejectedValue(new Error('Network error'));
 
-      const folderId = await service.createOrFindFolder('test-id', 'My App');
+      const folder = await service.createOrFindFolder('test-id', 'My App');
 
-      expect(folderId).toBe(0);
+      expect(folder).toEqual({ id: 0, uid: '' });
     });
   });
 });
