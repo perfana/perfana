@@ -1,10 +1,10 @@
 'use client';
 
-import { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import { useAuth } from '@/contexts/auth-context';
 import { authenticatedFetch } from '@/lib/api';
 import { TrendsPresetsAPI, PresetType } from '@/lib/trends-presets';
-import { fetchDynatraceDashboards} from '@/lib/dynatrace';
+import { fetchDynatraceDashboards, DynatraceMetric } from '@/lib/dynatrace';
 import { TrendsPreset } from '../TrendsPresetsTable';
 import { PresetFormData } from '../SaveTrendsPresetModal';
 import {
@@ -32,7 +32,7 @@ interface UseTrendsPresetsProps {
   setSelectedMetric: (metric: Panel | null) => void;
   setEvaluateType: (type: string) => void;
   setAddedSeries: (series: TrendsSeries[] | ((prev: TrendsSeries[]) => TrendsSeries[])) => void;
-  setDynatraceMetrics: (fn: (prev: unknown[]) => any[]) => void;
+  setDynatraceMetrics: React.Dispatch<React.SetStateAction<DynatraceMetric[]>>;
 }
 
 export function useTrendsPresets({

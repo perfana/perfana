@@ -120,7 +120,7 @@ export class DynatracePipeline extends BasePipelineTypeORM {
     this.logger.info(`Processing Dynatrace DQL queries for test run ${testRunId}`);
 
     // Step 1: Load test run details
-    const testRun = await this.loadTestRun(testRunId) as any;
+    const testRun = await this.loadTestRun(testRunId);
 
     // Step 2: Construct queries from database configurations
     const queries = await this.queryConstructor.constructQueriesFromDatabase({
@@ -355,7 +355,7 @@ export class DynatracePipeline extends BasePipelineTypeORM {
   private async storeMetricsDocuments(
     metricsDocuments: PanelMetricsDocument[],
     _testRunId: string,
-    testRun?: unknown
+    testRun?: { organizationId?: string; teamId?: string }
   ): Promise<void> {
     if (metricsDocuments.length === 0) {
       this.logger.info('No metrics documents to store');
@@ -422,8 +422,8 @@ export class DynatracePipeline extends BasePipelineTypeORM {
               metric.rampUp,
               metric.value,
               metric.unit || null,
-              (testRun as any)?.organizationId || null,
-              (testRun as any)?.teamId || null,
+              testRun?.organizationId ?? null,
+              testRun?.teamId ?? null,
               'worker-pipeline',
               'worker-pipeline'
             ]

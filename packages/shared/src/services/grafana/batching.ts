@@ -233,8 +233,8 @@ export function processBatchedResponses(
         // 2. Process individual query results within the batch
         // CRITICAL: Even HTTP 400 responses can contain valid individual query results
         const responseResults = jsonResponse.results || {};
-        const panelData: any = { results: {} };
-        const panelErrors: Array<any> = [];
+        const panelData: { results: Record<string, unknown> } = { results: {} };
+        const panelErrors: Array<{ target_index: number; message: string; status_code?: number; type: string; detail?: string }> = [];
 
 
 

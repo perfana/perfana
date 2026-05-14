@@ -14,7 +14,7 @@ import {
   Button,
   Alert,
   CircularProgress,
-  _Divider,
+  Divider,
   Paper,
   Grid
 } from '@mui/material';

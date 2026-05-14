@@ -238,7 +238,7 @@ export class GrafanaClient {
    * Execute single request with retry logic
    * Implements the retry pattern from Python (3 attempts with exponential backoff)
    */
-  private async executeRequestWithRetry(requestBatch: RequestBatch, batchIndex: number): Promise<any> {
+  private async executeRequestWithRetry(requestBatch: RequestBatch, batchIndex: number): Promise<{ batch: RequestBatch; response?: unknown; error?: Error | null; status: number }> {
     const maxRetries = 3;
     let lastError: Error | null = null;
 

@@ -15,7 +15,7 @@ describe('RequiresCapability decorator', () => {
     ...args: Parameters<typeof RequiresCapability>
   ): RequiresCapabilityMeta | undefined {
     class Target {
-      testMethod() {}
+      testMethod() { /* intentionally empty — decorator target only */ }
     }
 
     const propertyKey = 'testMethod';

@@ -56,7 +56,7 @@ import {
 } from '@mui/icons-material';
 import {
   type ReportListItem,
-  type _ReportStatus,
+  type ReportStatus,
   getReportStatusLabel,
   getReportStatusColor,
   isCompletedStatus,

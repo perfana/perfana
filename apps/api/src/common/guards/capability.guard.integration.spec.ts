@@ -107,7 +107,7 @@ describe('CapabilityGuard (e2e / integration)', () => {
     await app.init();
 
     // Spy AFTER app.init() so the guard's own logger instance already exists
-    warnSpy = jest.spyOn(Logger.prototype, 'warn').mockImplementation(() => {});
+    warnSpy = jest.spyOn(Logger.prototype, 'warn').mockImplementation(() => { /* suppress warn output in tests */ });
   });
 
   afterAll(async () => {

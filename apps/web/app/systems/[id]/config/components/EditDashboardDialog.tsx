@@ -36,7 +36,7 @@ export default function EditDashboardDialog({
 }: EditDashboardDialogProps) {
   const [dashboardLabel, setDashboardLabel] = useState('');
   const [variableValues, setVariableValues] = useState<Record<string, string[]>>({});
-  const [variableOptions, setVariableOptions] = useState<Record<string, any[]>>({});
+  const [variableOptions, setVariableOptions] = useState<Record<string, unknown[]>>({});
   const [loadingVariables, setLoadingVariables] = useState<Record<string, boolean>>({});
 
   // Helper function for auth headers

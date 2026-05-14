@@ -37,14 +37,14 @@ interface AnomalyExpandedContentProps {
   trendsLoading: boolean;
   chartKey: number;
   drawerOpen: boolean;
-  drawerData: any;
+  drawerData: unknown;
   drawerLoading: boolean;
   showConfigForm: boolean;
   showToast?: (message: string) => void;
   selectedTestRunIdForRow?: string;
   onDrawerToggle: () => void;
   onConfigFormToggle: () => void;
-  onConfigSave: (rowKey: string, data: any, scope: 'metric' | 'panel') => Promise<void>;
+  onConfigSave: (rowKey: string, data: unknown, scope: 'metric' | 'panel') => Promise<void>;
   onSelectTestRun: (testRunId: string) => void;
   onResetSelectedTestRun: () => void;
 }
@@ -160,8 +160,9 @@ export function AnomalyExpandedContent({
                     config={plotConfig}
                     style={{ width: '100%', height: '100%' }}
                     useResizeHandler={true}
-                    onInitialized={(figure: any, graphDiv: any) => {
-                      graphDiv.on('plotly_click', (data: any) => {
+                    onInitialized={(_figure: unknown, rawGraphDiv: unknown) => {
+                      const graphDiv = rawGraphDiv as { on: (event: string, handler: (data: { points?: Array<{ customdata?: { testRunId?: string } }> }) => void) => void; style?: CSSStyleDeclaration; querySelector: (sel: string) => { style?: CSSStyleDeclaration } | null };
+                      graphDiv.on('plotly_click', (data: { points?: Array<{ customdata?: { testRunId?: string } }> }) => {
                         if (data.points && data.points.length > 0) {
                           const clickedPoint = data.points[0];
                           const clickedTestRunId = clickedPoint.customdata?.testRunId;
@@ -174,7 +175,7 @@ export function AnomalyExpandedContent({
                         }
                       });
 
-                      graphDiv.on('plotly_hover', (data: any) => {
+                      graphDiv.on('plotly_hover', (data: { points?: Array<{ customdata?: { testRunId?: string } }> }) => {
                         if (data.points && data.points.length > 0) {
                           if (graphDiv.style) {
                             graphDiv.style.cursor = 'pointer';
@@ -343,26 +344,28 @@ export function AnomalyExpandedContent({
                     metricName: row.metric_name,
                     dashboardLabel: row.dashboard_label || 'Unknown Dashboard',
                     currentConfig: (() => {
-                      const existingConfig = drawerData?.compare_config || {};
+                      const drawerRecord = drawerData as Record<string, unknown> | undefined;
+                      type NestedConfig = Record<string, unknown>;
+                      const existingConfig = (drawerRecord?.compare_config as NestedConfig) || {} as NestedConfig;
+                      const mc = existingConfig.metricClassification as NestedConfig | undefined;
+                      const th = existingConfig.thresholds as NestedConfig | undefined;
+                      const pctThreshold = th?.percentageThreshold ?? existingConfig.percentageThreshold ?? existingConfig.percentage_threshold ?? existingConfig.threshold_percentage;
                       return {
                         ignore: existingConfig.ignore || false,
                         metricClassification: {
-                          classification: existingConfig.metricClassification?.classification || existingConfig.classification || row.classification || 'unclassified',
-                          higherIsBetter: existingConfig.metricClassification?.higherIsBetter || existingConfig.higherIsBetter || existingConfig.higher_is_better || false
+                          classification: mc?.classification ?? existingConfig.classification ?? row.classification ?? 'unclassified',
+                          higherIsBetter: mc?.higherIsBetter ?? existingConfig.higherIsBetter ?? existingConfig.higher_is_better ?? false
                         },
                         thresholds: {
-                          aggregation: existingConfig.thresholds?.aggregation || existingConfig.aggregation || existingConfig.statistic || 'mean',
-                          percentageThreshold: (() => {
-                            const pctThreshold = existingConfig.thresholds?.percentageThreshold || existingConfig.percentageThreshold || existingConfig.percentage_threshold || existingConfig.threshold_percentage;
-                            return pctThreshold !== undefined && pctThreshold !== null ?
-                              (pctThreshold < 1 ? pctThreshold * 100 : pctThreshold) : 15;
-                          })(),
-                          iqrThreshold: existingConfig.thresholds?.iqrThreshold || existingConfig.iqrThreshold || existingConfig.iqr_threshold || existingConfig.threshold_iqr || 2,
-                          absoluteThreshold: existingConfig.thresholds?.absoluteThreshold || existingConfig.absoluteThreshold || existingConfig.absolute_threshold || existingConfig.threshold_absolute || null
+                          aggregation: th?.aggregation ?? existingConfig.aggregation ?? existingConfig.statistic ?? 'mean',
+                          percentageThreshold: pctThreshold !== undefined && pctThreshold !== null ?
+                            ((pctThreshold as number) < 1 ? (pctThreshold as number) * 100 : pctThreshold as number) : 15,
+                          iqrThreshold: th?.iqrThreshold ?? existingConfig.iqrThreshold ?? existingConfig.iqr_threshold ?? existingConfig.threshold_iqr ?? 2,
+                          absoluteThreshold: th?.absoluteThreshold ?? existingConfig.absoluteThreshold ?? existingConfig.absolute_threshold ?? existingConfig.threshold_absolute ?? null
                         },
-                        defaultValueIfControlGroupMissing: existingConfig.defaultValueIfControlGroupMissing || existingConfig.default_value_if_control_group_missing || null,
-                        configSource: existingConfig.source || 'global'
-                      };
+                        defaultValueIfControlGroupMissing: existingConfig.defaultValueIfControlGroupMissing ?? existingConfig.default_value_if_control_group_missing ?? null,
+                        configSource: existingConfig.source ?? 'global'
+                      } as { ignore?: boolean; metricClassification?: { classification: string; higherIsBetter: boolean }; thresholds?: { aggregation: string; percentageThreshold: number; iqrThreshold: number; absoluteThreshold: number }; configSource?: string };
                     })()
                   }}
                   onSave={onConfigSave}

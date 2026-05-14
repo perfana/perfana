@@ -47,7 +47,7 @@ interface MetricsComparisonTableProps {
   testRun: TestRun | null;
   relatedTestRuns: RelatedTestRun[];
   showToast: (message: string) => void;
-  _addedSeries: CompareSeries[];
+  addedSeries: CompareSeries[];
 }
 
 export default function MetricsComparisonTable({
@@ -67,7 +67,7 @@ export default function MetricsComparisonTable({
   testRun,
   relatedTestRuns,
   showToast,
-  _addedSeries
+  addedSeries: _addedSeries
 }: MetricsComparisonTableProps) {
   const visibleColumns = getVisibleColumns(showPercentiles);
   const gridTemplateColumns = getGridTemplateColumns(showPercentiles);

@@ -149,7 +149,7 @@ export class MetricsSourceOneToOneAndNullableGrafana1700000000017 implements Mig
         WHERE t.application_dashboard_id = ad.id
           AND ad.metrics_source_id IS NOT NULL
           AND (t.metrics_source_id IS NULL OR t.metrics_source_id != ad.metrics_source_id)
-      `).catch(() => {});
+      `).catch(() => undefined);
     }
 
     // ── Part 2: Nullable Grafana columns ──

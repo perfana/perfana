@@ -4,7 +4,7 @@ import React, { useState } from 'react';
 import {
   Box,
   Typography,
-  _Chip,
+  Chip,
   IconButton,
   Tooltip,
   alpha,

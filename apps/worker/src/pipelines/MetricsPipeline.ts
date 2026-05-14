@@ -98,7 +98,7 @@ export class MetricsPipeline extends BasePipelineTypeORM {
           dashboard_label: panel.dashboard_label || '', // Provide default empty string
           benchmark_ids: panel.benchmark_ids || null,
           panel: panel.panel,
-          errors: panel.errors as any || null, // Type assertion needed for compatibility
+          errors: panel.errors as unknown as PanelDocument['errors'],
           requests: typeof panel.requests === 'string' ? JSON.parse(panel.requests || '[]') : (panel.requests || []),
           updated_at: panel.updated_at
         }));

@@ -199,7 +199,7 @@ export class BackfillMetricsSources1700000000015 implements MigrationInterface {
     if (!chunks || chunks.length === 0) {
       await queryRunner.query(`
         UPDATE ds_metrics SET metrics_source_id = NULL WHERE metrics_source_id IS NOT NULL
-      `).catch(() => {});
+      `).catch(() => undefined);
       return;
     }
 

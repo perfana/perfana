@@ -41,20 +41,14 @@ import { ErrorsProcessor, VirtualUsersProcessor } from './helpers/scenario-proce
  * Performance Test Metrics Pipeline
  */
 export class PerformanceTestMetricsPipeline extends BasePipelineTypeORM {
-  private dashboardManager: DashboardManager;
-  private requestsProcessor: RequestsProcessor;
-  private transactionsProcessor: TransactionsProcessor;
-  private errorsProcessor: ErrorsProcessor;
-  private virtualUsersProcessor: VirtualUsersProcessor;
+  private dashboardManager!: DashboardManager;
+  private requestsProcessor!: RequestsProcessor;
+  private transactionsProcessor!: TransactionsProcessor;
+  private errorsProcessor!: ErrorsProcessor;
+  private virtualUsersProcessor!: VirtualUsersProcessor;
 
   constructor(logger: Logger) {
     super(logger);
-    // Initialize processors (will be instantiated with dataSource in execute)
-    this.dashboardManager = null as any;
-    this.requestsProcessor = null as any;
-    this.transactionsProcessor = null as any;
-    this.errorsProcessor = null as any;
-    this.virtualUsersProcessor = null as any;
   }
 
   /**

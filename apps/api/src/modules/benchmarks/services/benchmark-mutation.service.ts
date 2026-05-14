@@ -195,7 +195,7 @@ export class BenchmarkMutationService {
       // Track who updated the resource
       updateData.updated_by = userId;
 
-      await withRequestEm(this.benchmarkRepo).update(id, updateData as any);
+      await withRequestEm(this.benchmarkRepo).update(id, updateData as unknown as Parameters<typeof this.benchmarkRepo.update>[1]);
 
       const result = await withRequestEm(this.benchmarkRepo).findOne({
         where: { id },
@@ -364,7 +364,7 @@ export class BenchmarkMutationService {
           enabled: benchmark.enabled,
           valid: benchmark.valid,
           updated_by: userId,
-        } as any);
+        } as unknown as Parameters<typeof this.benchmarkRepo.update>[1]);
 
         // Re-fetch the persisted row so the audit diff sees the actual
         // post-update values (including any DB-side defaults / triggers).
@@ -544,7 +544,7 @@ export class BenchmarkMutationService {
       // Track who updated the resource
       updateData.updated_by = userId;
 
-      await withRequestEm(this.benchmarkRepo).update(id, updateData as any);
+      await withRequestEm(this.benchmarkRepo).update(id, updateData as unknown as Parameters<typeof this.benchmarkRepo.update>[1]);
 
       const result = await withRequestEm(this.benchmarkRepo).findOne({
         where: { id },

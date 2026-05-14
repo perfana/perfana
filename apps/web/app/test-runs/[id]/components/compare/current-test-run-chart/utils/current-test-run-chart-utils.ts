@@ -130,7 +130,7 @@ export function buildMetricTrace(
   y: number[],
   unit: string,
   primaryColor: string
-): any {
+): Record<string, unknown> {
   const formatSuffix = unit === 'percentunit' ? '%' : unit ? ` ${unit}` : '';
 
   return {
@@ -223,7 +223,7 @@ export function buildChartLayout(
   colors: ChartThemeColors,
   fontFamily: string,
   hasData: boolean
-): any {
+): Record<string, unknown> {
   const { start, end } = timeRange;
 
   return {
@@ -328,7 +328,7 @@ export function buildChartLayout(
 export function buildChartConfig(
   metricName: string,
   showToast?: (message: string) => void
-): any {
+): Record<string, unknown> {
   const modeBarButtonsToAdd = showToast
     ? [
         {

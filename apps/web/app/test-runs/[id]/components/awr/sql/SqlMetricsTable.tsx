@@ -50,7 +50,7 @@ import {
 import type {
   SqlMetricsTableProps,
   SqlSortField,
-  _SortDirection,
+  SortDirection,
   SqlStatementDisplay,
 } from '../types';
 import {

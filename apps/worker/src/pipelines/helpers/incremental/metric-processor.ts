@@ -16,6 +16,48 @@ import type { Logger } from 'pino';
 import type { EntityManager } from 'typeorm';
 import { WorkerDatabaseService } from '../../../common/database.service.js';
 
+interface GrafanaMetricRecord {
+  metric_name: string;
+  time: Date | string;
+  timestep: number | null;
+  value: number;
+  unit?: string | null;
+}
+
+interface GrafanaMetricsDoc {
+  test_run_id: string;
+  application_dashboard_id: string;
+  metrics_source_id?: string | null;
+  dashboard_uid: string;
+  panel_id: number | string;
+  panel_title: string;
+  dashboard_label: string;
+  benchmark_ids?: string[] | null;
+  errors?: unknown;
+  data?: GrafanaMetricRecord[];
+}
+
+interface DynatraceMetricRecord {
+  metricName: string;
+  time: Date | string;
+  timestep: number | null;
+  value: number;
+  unit?: string | null;
+}
+
+interface DynatraceMetricsDoc {
+  testRunId: string;
+  applicationDashboardId: string;
+  metricsSourceId?: string | null;
+  dashboardUid: string;
+  panelId: number | string;
+  panelTitle: string;
+  dashboardLabel: string;
+  benchmarkIds?: string[] | null;
+  errors?: unknown;
+  data?: DynatraceMetricRecord[];
+}
+
 /**
  * Flattened metric record ready for database insertion
  */
@@ -74,7 +116,7 @@ export class MetricProcessor {
    * @returns Array of flattened metric records
    */
   flattenGrafanaMetricsDocument(document: unknown, testRun: TestRunContext): FlattenedMetricRecord[] {
-    const doc = document as any;
+    const doc = document as GrafanaMetricsDoc;
     const baseData = {
       test_run_id: doc.test_run_id,
       application_dashboard_id: doc.application_dashboard_id,
@@ -83,7 +125,7 @@ export class MetricProcessor {
       panel_id: doc.panel_id,
       panel_title: doc.panel_title,
       dashboard_label: doc.dashboard_label,
-      benchmark_ids: doc.benchmark_ids,
+      benchmark_ids: doc.benchmark_ids ?? null,
       errors: doc.errors ? JSON.stringify(doc.errors) : null,
       organization_id: testRun.organizationId || null,
       team_id: testRun.teamId || null,
@@ -95,12 +137,11 @@ export class MetricProcessor {
     const dataRecords = doc.data || [];
 
     for (const record of dataRecords) {
-      const r = record as any;
-      const recordTime = new Date(r.time);
+      const recordTime = new Date(record.time);
 
       // Recalculate timestep based on ORIGINAL test run start time
       // This ensures consistent timesteps across all incremental collections
-      let timestep: number | null = r.timestep;
+      let timestep: number | null = record.timestep;
       let isRampUp = false;
 
       if (testRun.startTime) {
@@ -114,12 +155,12 @@ export class MetricProcessor {
 
       flattened.push({
         ...baseData,
-        metric_name: r.metric_name,
-        time: r.time,
+        metric_name: record.metric_name,
+        time: record.time,
         timestep: timestep,
         ramp_up: isRampUp,
-        value: r.value,
-        unit: r.unit || null,
+        value: record.value,
+        unit: record.unit || null,
       });
     }
 
@@ -137,7 +178,7 @@ export class MetricProcessor {
    * @returns Array of flattened metric records
    */
   flattenDynatraceMetricsDocument(document: unknown, testRun: TestRunContext): FlattenedMetricRecord[] {
-    const doc = document as any;
+    const doc = document as DynatraceMetricsDoc;
     const baseData = {
       test_run_id: doc.testRunId,
       application_dashboard_id: doc.applicationDashboardId,
@@ -158,12 +199,11 @@ export class MetricProcessor {
     const dataRecords = doc.data || [];
 
     for (const record of dataRecords) {
-      const record_any = record as any;
-      const recordTime = new Date(record_any.time);
+      const recordTime = new Date(record.time);
 
       // Recalculate timestep based on ORIGINAL test run start time
       // This ensures consistent timesteps across all incremental collections
-      let timestep: number | null = record_any.timestep;
+      let timestep: number | null = record.timestep;
       let isRampUp = false;
 
       if (testRun.startTime) {
@@ -177,12 +217,12 @@ export class MetricProcessor {
 
       flattened.push({
         ...baseData,
-        metric_name: record_any.metricName,
-        time: record_any.time,
+        metric_name: record.metricName,
+        time: record.time,
         timestep: timestep,
         ramp_up: isRampUp,
-        value: record_any.value,
-        unit: record_any.unit || null,
+        value: record.value,
+        unit: record.unit || null,
       });
     }
 

@@ -34,10 +34,10 @@ export function useEditSLOForm({
   const [saveDialogOption, setSaveDialogOption] = useState<SaveDialogOption>('none');
 
   // Available options
-  const [availableDashboards, setAvailableDashboards] = useState<any[]>([]);
-  const [availablePanels, setAvailablePanels] = useState<any[]>([]);
-  const [availableDynatraceDashboards, setAvailableDynatraceDashboards] = useState<any[]>([]);
-  const [availableDynatraceMetrics, setAvailableDynatraceMetrics] = useState<any[]>([]);
+  const [availableDashboards, setAvailableDashboards] = useState<unknown[]>([]);
+  const [availablePanels, setAvailablePanels] = useState<unknown[]>([]);
+  const [availableDynatraceDashboards, setAvailableDynatraceDashboards] = useState<unknown[]>([]);
+  const [availableDynatraceMetrics, setAvailableDynatraceMetrics] = useState<unknown[]>([]);
   const [validationErrors, setValidationErrors] = useState<ValidationErrors>({});
 
   // Fetch Grafana application dashboards
@@ -257,38 +257,41 @@ export function useEditSLOForm({
       // Find the dashboard that matches the benchmark - prioritize metrics_source_id, then application_dashboard_id
       let matchingDashboard = null;
 
+      type DashboardEntry = { id?: unknown; dashboard_uid?: unknown; metrics_source_id?: unknown };
+      const benchmarkAny = benchmark as { metrics_source_id?: unknown };
       // First try to match by metrics_source_id (most reliable when available)
-      if ((benchmark as unknown).metrics_source_id) {
+      if (benchmarkAny.metrics_source_id) {
         matchingDashboard = availableDashboards.find(
-          (dashboard: unknown) => dashboard.metrics_source_id === (benchmark as unknown).metrics_source_id
+          (dashboard) => (dashboard as DashboardEntry).metrics_source_id === benchmarkAny.metrics_source_id
         );
       }
 
       // Then try to match by application_dashboard_id
       if (!matchingDashboard && benchmark.application_dashboard_id) {
         matchingDashboard = availableDashboards.find(
-          (dashboard) => dashboard.id === benchmark.application_dashboard_id
+          (dashboard) => (dashboard as DashboardEntry).id === benchmark.application_dashboard_id
         );
       }
 
       // Fallback to dashboard_uid match if no application_dashboard_id match
       if (!matchingDashboard && benchmark.dashboard_uid) {
         matchingDashboard = availableDashboards.find(
-          (dashboard) => dashboard.dashboard_uid === benchmark.dashboard_uid
+          (dashboard) => (dashboard as DashboardEntry).dashboard_uid === benchmark.dashboard_uid
         );
       }
 
       if (matchingDashboard) {
+        const typedDashboard = matchingDashboard as DashboardEntry & { dashboard_uid?: string; id?: string };
         setSloFormData((prev) => ({
           ...prev,
-          selectedDashboard: matchingDashboard,
+          selectedDashboard: typedDashboard,
         }));
 
         // Fetch panels for this dashboard to upgrade the synthetic panel too
-        if (isPerformanceTest(matchingDashboard)) {
-          fetchPerfMetricsPanels(matchingDashboard.id);
+        if (isPerformanceTest(typedDashboard)) {
+          fetchPerfMetricsPanels(typedDashboard.id as string);
         } else {
-          fetchDashboardPanels(matchingDashboard.dashboard_uid);
+          fetchDashboardPanels(typedDashboard.dashboard_uid as string);
         }
       }
     }
@@ -301,10 +304,11 @@ export function useEditSLOForm({
       benchmark &&
       benchmark.source === 'dynatrace'
     ) {
+      type DynatraceDashboard = { dashboardLabel?: string };
       // For Dynatrace, try to match by dashboardLabel
       const matchingDashboard = availableDynatraceDashboards.find(
-        (dashboard) => dashboard.dashboardLabel === benchmark.config_title?.split(' - ')[0]
-      );
+        (dashboard) => (dashboard as DynatraceDashboard).dashboardLabel === benchmark.config_title?.split(' - ')[0]
+      ) as DynatraceDashboard | undefined;
 
       if (matchingDashboard) {
         setSloFormData((prev) => ({
@@ -313,7 +317,7 @@ export function useEditSLOForm({
         }));
 
         // Fetch metrics for this dashboard to upgrade the synthetic panel
-        fetchDynatraceMetricsForSlo(matchingDashboard.dashboardLabel);
+        fetchDynatraceMetricsForSlo(matchingDashboard.dashboardLabel ?? '');
       }
     }
   }, [availableDynatraceDashboards, benchmark, fetchDynatraceMetricsForSlo]);
@@ -332,13 +336,13 @@ export function useEditSLOForm({
         const parts = benchmark.config_title.split(' - ');
         if (parts.length > 1) {
           const extractedTitle = parts.slice(1).join(' - ');
-          matchingMetric = availableDynatraceMetrics.find((metric) => metric.panelTitle === extractedTitle);
+          matchingMetric = availableDynatraceMetrics.find((metric) => (metric as { panelTitle?: string }).panelTitle === extractedTitle);
         }
       }
 
       // Fallback to metric_name match
       if (!matchingMetric && benchmark.metric_name) {
-        matchingMetric = availableDynatraceMetrics.find((metric) => metric.panelTitle === benchmark.metric_name);
+        matchingMetric = availableDynatraceMetrics.find((metric) => (metric as { panelTitle?: string }).panelTitle === benchmark.metric_name);
       }
 
       if (matchingMetric) {
@@ -353,21 +357,23 @@ export function useEditSLOForm({
   // Upgrade synthetic panel to real one when Grafana panels are loaded
   useEffect(() => {
     if (availablePanels.length > 0 && benchmark) {
+      type GrafanaPanel = { id?: unknown; title?: string };
       // Try multiple ways to find the matching panel
-      let matchingPanel = null;
+      let matchingPanel: unknown = null;
 
       // 1. Try to match by panel ID from configuration (most reliable)
       if (benchmark.configuration?.panelId) {
         const panelId = benchmark.configuration.panelId;
         matchingPanel = availablePanels.find((panel) => {
+          const p = panel as GrafanaPanel;
           // Handle both string and number panel IDs
-          return panel.id === panelId || panel.id === String(panelId) || String(panel.id) === String(panelId);
+          return p.id === panelId || p.id === String(panelId) || String(p.id) === String(panelId);
         });
       }
 
       // 2. Try to match by panel title exactly matching metric_name
       if (!matchingPanel && benchmark.metric_name) {
-        matchingPanel = availablePanels.find((panel) => panel.title === benchmark.metric_name);
+        matchingPanel = availablePanels.find((panel) => (panel as GrafanaPanel).title === benchmark.metric_name);
       }
 
       // 3. Try to match by extracting panel title from config_title
@@ -376,13 +382,13 @@ export function useEditSLOForm({
         const parts = benchmark.config_title.split(' - ');
         if (parts.length > 1) {
           const extractedTitle = parts.slice(1).join(' - ');
-          matchingPanel = availablePanels.find((panel) => panel.title === extractedTitle);
+          matchingPanel = availablePanels.find((panel) => (panel as GrafanaPanel).title === extractedTitle);
         }
 
         // Also try last part only
         if (!matchingPanel && parts.length > 0) {
           const lastPart = parts[parts.length - 1];
-          matchingPanel = availablePanels.find((panel) => panel.title === lastPart);
+          matchingPanel = availablePanels.find((panel) => (panel as GrafanaPanel).title === lastPart);
         }
       }
 
@@ -390,7 +396,7 @@ export function useEditSLOForm({
       if (!matchingPanel && benchmark.metric_name) {
         const metricLower = benchmark.metric_name.toLowerCase();
         matchingPanel = availablePanels.find((panel) => {
-          const titleLower = panel.title.toLowerCase();
+          const titleLower = ((panel as GrafanaPanel).title ?? '').toLowerCase();
           return titleLower.includes(metricLower) || metricLower.includes(titleLower);
         });
       }

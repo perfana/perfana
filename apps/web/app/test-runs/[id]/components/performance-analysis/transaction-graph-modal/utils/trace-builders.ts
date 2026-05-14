@@ -9,7 +9,7 @@ export function buildTransactionTrace(
   data: TimeSeriesResponse,
   transactionName: string,
   selectedMetric: MetricType
-): any {
+): Record<string, unknown> {
   return {
     x: data.transaction_data.map(d => new Date(d.time_bucket)),
     y: data.transaction_data.map(d => d[selectedMetric]),
@@ -37,7 +37,7 @@ export function buildTransactionTrace(
 export function buildPassedTrace(
   data: TimeSeriesResponse,
   aggregationSeconds: number
-): any {
+): Record<string, unknown> {
   return {
     x: data.transaction_data.map(d => new Date(d.time_bucket)),
     y: data.transaction_data.map(d => d.passed_count / aggregationSeconds),
@@ -59,7 +59,7 @@ export function buildPassedTrace(
 export function buildFailedTrace(
   data: TimeSeriesResponse,
   aggregationSeconds: number
-): any {
+): Record<string, unknown> {
   return {
     x: data.transaction_data.map(d => new Date(d.time_bucket)),
     y: data.transaction_data.map(d => d.failed_count / aggregationSeconds),

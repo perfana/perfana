@@ -53,7 +53,7 @@ import type { InsightCardProps, InsightCategory } from '../types';
 import {
   getSeverityColors,
   getCategoryLabel,
-  _getCategoryIcon,
+  getCategoryIcon,
   getCategoryColor,
   getImpactScoreColor,
   getImpactScoreLabel,

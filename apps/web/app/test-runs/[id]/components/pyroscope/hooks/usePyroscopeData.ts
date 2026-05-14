@@ -144,8 +144,8 @@ export function usePyroscopeData({ testRun, expanded }: UsePyroscopeDataProps) {
       setError(null);
       setIframeLoading(true);
 
-      const pyroscopeUrl = (pyroscopeInstance as any).pyroscope_url || pyroscopeInstance.pyroscopeUrl;
-      const isStandalone = (pyroscopeInstance as any).pyroscope_stand_alone ?? pyroscopeInstance.pyroscopeStandAlone;
+      const pyroscopeUrl = pyroscopeInstance.pyroscope_url || pyroscopeInstance.pyroscopeUrl;
+      const isStandalone = pyroscopeInstance.pyroscope_stand_alone ?? pyroscopeInstance.pyroscopeStandAlone;
       const startTimeMs = dateToMs(testRun.start_time);
       const endTimeMs = dateToMs(testRun.end_time);
 
@@ -213,8 +213,8 @@ export function usePyroscopeData({ testRun, expanded }: UsePyroscopeDataProps) {
         return;
       }
 
-      const pyroscopeUrl = (pyroscopeInstance as any).pyroscope_url || pyroscopeInstance.pyroscopeUrl;
-      const isStandalone = (pyroscopeInstance as any).pyroscope_stand_alone ?? pyroscopeInstance.pyroscopeStandAlone;
+      const pyroscopeUrl = pyroscopeInstance.pyroscope_url || pyroscopeInstance.pyroscopeUrl;
+      const isStandalone = pyroscopeInstance.pyroscope_stand_alone ?? pyroscopeInstance.pyroscopeStandAlone;
 
       // Convert ISO date strings to millisecond timestamps
       const currentStartTimeMs = dateToMs(testRun.start_time);
@@ -306,7 +306,7 @@ export function usePyroscopeData({ testRun, expanded }: UsePyroscopeDataProps) {
       const profilerLabel = extractProfilerLabel(selectedProfiler);
 
       // Build request body with backend URL for API access
-      const backendUrl = (pyroscopeInstance as any).backend_url || (pyroscopeInstance as any).pyroscope_url || pyroscopeInstance.pyroscopeUrl;
+      const backendUrl = pyroscopeInstance.backend_url || pyroscopeInstance.pyroscope_url || pyroscopeInstance.pyroscopeUrl;
       const requestBody = {
         backendUrl: backendUrl?.trim() || pyroscopeInstance.pyroscopeUrl,
         application: selectedApplication,

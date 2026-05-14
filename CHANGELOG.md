@@ -4,6 +4,12 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
+## [0.2.48.1] - 2026-05-14
+
+### Changed
+- **Frontend & API type safety: eliminated all `no-explicit-any` ESLint warnings across web and API apps.** Replaced 116 web and additional API `any` usages with precise types: Plotly callbacks use `unknown` + inline casts instead of `any`-typed parameters; MUI Select handlers use structural event types to avoid generic inference conflicts; `setDynatraceMetrics` now typed as `React.Dispatch<React.SetStateAction<DynatraceMetric[]>>`; `RecentFailure.consolidated_result` typed with its actual shape; dynamic `next/dynamic` component casts use `as unknown as` to bypass `Parameters<T>` constraint; `window` Plotly extension uses double-cast to avoid non-overlapping type error. API service files (adapt, benchmarks, compare-presets, dynatrace, grafana, metrics, provisioning, test-runs) similarly converted from `any` to `unknown` + targeted casts. Zero `eslint-disable` comments added.
+- **`TestRun` entity: `reasonsNotValid` and `dataWarnings` now typed `string[] | null`** to match the nullable DB columns. `DataSanityCheckPipeline` assigns `null` (not `undefined`) when clearing these fields so TypeORM issues a SQL `NULL` rather than silently skipping the column. API mappers coerce `null → undefined` at the DTO boundary with `?? undefined`.
+
 ## [0.2.48.0] - 2026-05-14
 
 ### Changed

@@ -63,8 +63,8 @@ export class PanelsPipeline extends BasePipelineTypeORM {
         test_environment: testRun.testEnvironment,
         workload: testRun.workload,
         test_run_id: testRun.testRunId,
-        start_time: testRun.startTime,
-        end_time: testRun.endTime,
+        start_time: testRun.startTime!,
+        end_time: testRun.endTime!,
         organization_id: testRun.organizationId || null,
       };
 
@@ -80,14 +80,14 @@ export class PanelsPipeline extends BasePipelineTypeORM {
 
       // Find application dashboards using helper (helpers use pool.query() for raw SQL)
       stepStart = Date.now();
-      const applicationDashboards = await getApplicationDashboardsForTestRun(poolAdapter as any, testRunAdapter as any);
+      const applicationDashboards = await getApplicationDashboardsForTestRun(poolAdapter, testRunAdapter);
       const appDashTime = Date.now() - stepStart;
       this.logger.info(`🎯 Found ${applicationDashboards.length} application dashboards: ${appDashTime}ms`);
 
       // Find grafana dashboards
       stepStart = Date.now();
       const grafanaDashboards = await getGrafanaDashboardsForApplicationDashboards(
-        poolAdapter as any,
+        poolAdapter,
         applicationDashboards
       );
       const grafanaDashTime = Date.now() - stepStart;
@@ -95,7 +95,7 @@ export class PanelsPipeline extends BasePipelineTypeORM {
 
       // Find benchmarks
       stepStart = Date.now();
-      const benchmarks = await getBenchmarksForTestRun(poolAdapter as any, testRunAdapter as any);
+      const benchmarks = await getBenchmarksForTestRun(poolAdapter, testRunAdapter);
       const benchmarksTime = Date.now() - stepStart;
       this.logger.info(`🎯 Found ${benchmarks.length} benchmarks: ${benchmarksTime}ms`);
 
@@ -103,7 +103,7 @@ export class PanelsPipeline extends BasePipelineTypeORM {
       stepStart = Date.now();
       const perfanaData: PerfanaData = {
         test_run_id: testRunId,
-        test_run: testRunAdapter as any,
+        test_run: testRunAdapter as unknown as PerfanaData['test_run'],
         application_dashboards: applicationDashboards,
         benchmarks: benchmarks,
         dashboards: grafanaDashboards

@@ -136,7 +136,7 @@ export interface RecentFailure {
   workload: string;
   start_time: string | null;
   end_time: string | null;
-  consolidated_result: any;
+  consolidated_result: { meetsRequirement?: boolean | null; adaptTestRunOK?: boolean | null } | null;
   created_at: string;
 }
 

@@ -32,7 +32,7 @@ import {
   IconButton,
   Tooltip,
   Button,
-  _Collapse,
+  Collapse,
   alpha,
 } from '@mui/material';
 import {

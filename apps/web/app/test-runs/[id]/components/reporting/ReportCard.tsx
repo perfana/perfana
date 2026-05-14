@@ -67,7 +67,7 @@ import {
   getReportStatusLabel,
   getReportStatusColor,
   isCompletedStatus,
-  _isFailedStatus,
+  isFailedStatus,
   buildShareUrl,
   type ReportSummary,
   type ReportListItem,
