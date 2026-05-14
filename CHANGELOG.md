@@ -4,6 +4,17 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
+## [0.2.48.0] - 2026-05-14
+
+### Changed
+- **Worker type safety: replaced `any` with `unknown` across all pipeline code.** The `Pipeline` interface, `BasePipelineTypeORM`, and all 25+ pipeline implementations now use `unknown` instead of `any` for `execute()` and `validateInput()` inputs. SQL query result row fields are explicitly cast at the point of use rather than silently typed as `any`. This eliminates 200+ lint warnings and makes type violations visible at compile time rather than at runtime.
+- **BullMQ Worker options aligned to current API.** `blockingConnection` (which changed from a Redis instance to `boolean` in newer BullMQ) and `drainDelay` (which moved from `settings` to a top-level option) are now correctly typed.
+
+### Fixed
+- **Grafana-sync circular dependency in `auto-config.service.spec.ts` eliminated.** The `@InjectRepository(AuditLog)` decorator in `grafana-sync-audit.service.ts` was executing at import time and triggering a circular import chain. The spec now mocks the audit service before any import resolves, making all 18 tests pass.
+- **Unused `MutationCommandType` enum members removed** from `apps/api` (`ABORT_TEST_RUN`, `INIT_TEST_RUN`, `UPDATE_RUNNING_TEST`, `UPDATE_TEST_STATUS`). Only the three members actually referenced in command files are kept.
+- **`markCollectionComplete` test corrected** to match the actual `TimeRange` type (`from/to` are `Date` objects, not ISO strings).
+
 ## [0.2.47.102] - 2026-05-13
 
 ### Fixed
