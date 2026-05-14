@@ -3,7 +3,7 @@ import { TestRun, ProfileGrafanaDashboard } from '@perfana/shared/entities';
 import { DashboardFinderService } from './dashboard-finder.service';
 import { VariableDiscoveryService } from './variable-discovery.service';
 import { DashboardVariable } from './types';
-import { DashboardProcessorService } from './services';
+import { DashboardProcessorService } from './services/dashboard-processor.service';
 import { PERFANA_TEMPLATE_TAG } from '../../config/constants';
 
 @Injectable()

@@ -16,7 +16,11 @@ jest.mock('@perfana/shared/entities', () => ({
   GrafanaInstance: class GrafanaInstance {},
   ApplicationDashboard: class ApplicationDashboard {},
   SystemUnderTest: class SystemUnderTest {},
+  AuditLog: class AuditLog {},
 }));
+
+// Break the @InjectRepository(AuditLog) circular dep in grafana-sync-audit.service.ts
+jest.mock('../audit/grafana-sync-audit.service');
 
 import { Test, TestingModule } from '@nestjs/testing';
 import { ConfigService } from '@nestjs/config';
