@@ -4,6 +4,12 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
+## [0.2.49.1] - 2026-05-15
+
+### Changed
+- **ESLint rules promoted from warnings to errors** — all 11 existing rules now exit non-zero on violation, creating a hard lint gate on push. Added `react-hooks/exhaustive-deps` as an error rule to enforce correct hook dependency arrays.
+- **27 existing lint warnings resolved** — removed unused imports across 13 files, replaced `any` types with precise inline types, wrapped `loadDashboards` (GrafanaDashboardsTable) and `fetchTeamSystems` (TeamSystemsTab) in `useCallback` for hook dependency correctness, and escaped unescaped JSX quotes.
+
 ## [0.2.49.0] - 2026-05-15
 
 ### Changed
