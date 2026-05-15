@@ -62,6 +62,7 @@ export class DynatraceRepository {
     workload: string,
     dynatraceConfigId: string,
     configLabel: string,
+    organizationId: string,
   ): Promise<string> {
     await withRequestEm(this.metricsSourceRepo).upsert(
       {
@@ -73,6 +74,7 @@ export class DynatraceRepository {
         externalRef: dynatraceConfigId,
         displayName: configLabel,
         displayLabel: workload,
+        organizationId,
       },
       {
         conflictPaths: ['systemUnderTestId', 'testEnvironment', 'sourceType', 'externalRef', 'displayName', 'displayLabel'],
@@ -253,13 +255,15 @@ export class DynatraceRepository {
     const panelId = dto.panelId || this.generatePanelId(dto.dashboardLabel, dto.panelTitle);
 
     const config = await withRequestEm(this.configRepo).findOne({ where: { id: dto.dynatraceConfigId } });
-    const metricsSourceId = config
+    const resolvedOrgId = ownership?.organizationId ?? config?.organizationId;
+    const metricsSourceId = config && resolvedOrgId
       ? await this.ensureMetricsSourceExists(
           dto.systemUnderTestId,
           dto.testEnvironment,
           dto.workload || '',
           dto.dynatraceConfigId,
           config.label,
+          resolvedOrgId,
         )
       : undefined;
 
@@ -279,7 +283,7 @@ export class DynatraceRepository {
       templateVariables: dto.templateVariables,
       metricUnit: dto.metricUnit,
       metricName: dto.metricName,
-      organizationId: ownership?.organizationId ?? config?.organizationId,
+      organizationId: resolvedOrgId,
       createdBy: ownership?.createdBy,
       updatedBy: ownership?.updatedBy ?? ownership?.createdBy,
     });
@@ -348,13 +352,15 @@ export class DynatraceRepository {
     const panelId = dto.panelId || this.generatePanelId(dto.dashboardLabel, dto.panelTitle);
 
     const config = await withRequestEm(this.configRepo).findOne({ where: { id: dto.dynatraceConfigId } });
-    const metricsSourceId = config
+    const resolvedOrgId = ownership?.organizationId ?? config?.organizationId;
+    const metricsSourceId = config && resolvedOrgId
       ? await this.ensureMetricsSourceExists(
           dto.systemUnderTestId,
           dto.testEnvironment,
           dto.workload || '',
           dto.dynatraceConfigId,
           config.label,
+          resolvedOrgId,
         )
       : undefined;
 
@@ -374,7 +380,7 @@ export class DynatraceRepository {
       templateVariables: dto.templateVariables,
       metricUnit: dto.metricUnit,
       metricName: dto.metricName,
-      organizationId: ownership?.organizationId ?? config?.organizationId,
+      organizationId: resolvedOrgId,
       createdBy: ownership?.createdBy,
       updatedBy: ownership?.updatedBy ?? ownership?.createdBy,
     });
@@ -412,14 +418,15 @@ export class DynatraceRepository {
     if (firstDto) {
       const config = await withRequestEm(this.configRepo).findOne({ where: { id: firstDto.dynatraceConfigId } });
       if (config) {
+        parentOrgId = ownership?.organizationId ?? config.organizationId;
         metricsSourceId = await this.ensureMetricsSourceExists(
           firstDto.systemUnderTestId,
           firstDto.testEnvironment,
           firstDto.workload || '',
           firstDto.dynatraceConfigId,
           config.label,
+          parentOrgId,
         );
-        parentOrgId = config.organizationId;
       }
     }
 
