@@ -130,6 +130,8 @@ describe('AnomalyDetectionExpandedCard', () => {
     paginatedData: mockAnomalyData,
     toggleRowExpanded: jest.fn(),
     onDeleteAnomaly: jest.fn(),
+    hasActiveFilters: false,
+    onClearAllFilters: jest.fn(),
   };
 
   beforeEach(() => {

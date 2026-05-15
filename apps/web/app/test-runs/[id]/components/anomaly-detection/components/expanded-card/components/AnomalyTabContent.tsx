@@ -29,6 +29,8 @@ export function AnomalyTabContent({
   dashboardsForDropdown,
   panelsForDropdown,
   filteredData,
+  hasActiveFilters,
+  onClearAllFilters,
   feedbackState,
   onMarkAsRegression,
   onMarkAsVariability,
@@ -102,6 +104,8 @@ export function AnomalyTabContent({
         panelsForDropdown={panelsForDropdown}
         filteredData={filteredData}
         anomalyData={anomalyData}
+        hasActiveFilters={hasActiveFilters}
+        onClearAllFilters={onClearAllFilters}
       />
 
       <FeedbackBanner

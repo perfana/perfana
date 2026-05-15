@@ -1,6 +1,7 @@
 import React from 'react';
 import {
   Box,
+  Button,
   TextField,
   InputAdornment,
   FormControl,
@@ -10,7 +11,8 @@ import {
   Typography
 } from '@mui/material';
 import {
-  Search as SearchIcon
+  Search as SearchIcon,
+  FilterListOff,
 } from '@mui/icons-material';
 import { getClassificationDisplayInfo } from '../helpers';
 
@@ -31,6 +33,8 @@ interface FilterControlsProps {
   panelsForDropdown: string[];
   filteredData: unknown[];
   anomalyData: unknown[];
+  hasActiveFilters: boolean;
+  onClearAllFilters: () => void;
 }
 
 export default function FilterControls({
@@ -49,7 +53,9 @@ export default function FilterControls({
   dashboardsForDropdown,
   panelsForDropdown,
   filteredData,
-  anomalyData
+  anomalyData,
+  hasActiveFilters,
+  onClearAllFilters,
 }: FilterControlsProps) {
   return (
     <Box sx={{
@@ -156,20 +162,34 @@ export default function FilterControls({
         </Select>
       </FormControl>
 
-      {/* Count - spans remaining columns (TestValue, ControlGroup, Difference, Actions) */}
-      <Typography
-        variant="body2"
-        color="text.secondary"
+      {/* Clear All + count - spans remaining columns (TestValue, ControlGroup, Difference, Actions) */}
+      <Box
         sx={{
           gridColumn: 'span 4',
-          fontSize: '0.75rem',
-          whiteSpace: 'nowrap',
-          textAlign: 'right',
+          display: 'flex',
+          justifyContent: 'flex-end',
+          alignItems: 'center',
+          gap: 1,
           pr: 1,
         }}
       >
-        {filteredData.length}/{anomalyData.length}
-      </Typography>
+        <Button
+          variant="outlined"
+          size="small"
+          startIcon={<FilterListOff />}
+          onClick={onClearAllFilters}
+          disabled={!hasActiveFilters}
+        >
+          Clear All
+        </Button>
+        <Typography
+          variant="body2"
+          color="text.secondary"
+          sx={{ fontSize: '0.75rem', whiteSpace: 'nowrap' }}
+        >
+          {filteredData.length}/{anomalyData.length}
+        </Typography>
+      </Box>
     </Box>
   );
 }

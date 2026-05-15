@@ -30,6 +30,8 @@ export default function AnomalyDetectionExpandedCard(props: AnomalyDetectionExpa
     dashboardFilter,
     panelFilter,
     filteredData,
+    hasActiveFilters,
+    onClearAllFilters,
     handleSearchChange,
     handleConclusionFilterChange,
     handleClassificationFilterChange,
@@ -149,6 +151,8 @@ export default function AnomalyDetectionExpandedCard(props: AnomalyDetectionExpa
             dashboardsForDropdown={dashboardsForDropdown}
             panelsForDropdown={panelsForDropdown}
             filteredData={filteredData}
+            hasActiveFilters={hasActiveFilters}
+            onClearAllFilters={onClearAllFilters}
             feedbackState={feedbackState}
             onMarkAsRegression={handleMarkAsRegression}
             onMarkAsVariability={handleMarkAsVariability}
