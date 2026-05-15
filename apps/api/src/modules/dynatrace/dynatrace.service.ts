@@ -729,13 +729,14 @@ export class DynatraceService {
       'create',
     );
 
-    if (dto.systemUnderTestId && dto.testEnvironment && dto.dashboardLabel && dto.applicationDashboardId) {
+    if (dto.systemUnderTestId && dto.testEnvironment && dto.dashboardLabel && dto.applicationDashboardId && parentOrgId) {
       await this.repository.ensureArtificialDashboardExists(
         dto.systemUnderTestId,
         dto.testEnvironment,
         dto.workload || '',
         dto.dashboardLabel,
-        dto.applicationDashboardId
+        dto.applicationDashboardId,
+        parentOrgId
       );
     }
 
@@ -780,13 +781,14 @@ export class DynatraceService {
       applicationDashboardId = randomUUID();
     }
 
-    if (dto.systemUnderTestId && dto.testEnvironment && dto.dashboardLabel) {
+    if (dto.systemUnderTestId && dto.testEnvironment && dto.dashboardLabel && parentOrgId) {
       await this.repository.ensureArtificialDashboardExists(
         dto.systemUnderTestId,
         dto.testEnvironment,
         dto.workload || '',
         dto.dashboardLabel,
-        applicationDashboardId
+        applicationDashboardId,
+        parentOrgId
       );
     }
 
@@ -839,13 +841,14 @@ export class DynatraceService {
     if (generateSharedUuid) {
       const sharedUuid = randomUUID();
 
-      if (firstDto.systemUnderTestId && firstDto.testEnvironment && firstDto.dashboardLabel) {
+      if (firstDto.systemUnderTestId && firstDto.testEnvironment && firstDto.dashboardLabel && parentOrgId) {
         await this.repository.ensureArtificialDashboardExists(
           firstDto.systemUnderTestId,
           firstDto.testEnvironment,
           firstDto.workload || '',
           firstDto.dashboardLabel,
-          sharedUuid
+          sharedUuid,
+          parentOrgId
         );
       }
 
@@ -1498,8 +1501,15 @@ export class DynatraceService {
     userId: string,
     roles: string[]
   ): Promise<void> {
-    // Log authorization context for debugging
     this.logger.debug(`createHostMetricQueries: dynatraceConfigId=${dynatraceConfigId}, hostId=${hostId}, userId=${userId}`);
+
+    const parentOrgId = await this.requireDynatraceMutationCapability(
+      dynatraceConfigId,
+      userId,
+      roles,
+      'create',
+    );
+
     // Each host gets its own dashboard label (Dashboard: Dynatrace host metrics {hostName})
     const dashboardLabel = `Dynatrace host metrics ${hostDisplayName}`;
 
@@ -1536,7 +1546,8 @@ export class DynatraceService {
         testEnvironment,
         workload,
         dashboardLabel,
-        applicationDashboardId
+        applicationDashboardId,
+        parentOrgId!
       );
       this.logger.log(`Ensured artificial dashboard exists for ${dashboardLabel}`);
     } catch (error) {

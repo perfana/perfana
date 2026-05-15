@@ -4,6 +4,13 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
+## [0.2.50.0] - 2026-05-15
+
+### Fixed
+
+- Dynatrace HOST entity metric queries now create successfully — `ensureArtificialDashboardExists` was inserting rows into `grafana_dashboards` and `application_dashboards` without `organization_id`, violating the NOT NULL constraint (Phase 4 RBAC). The function now accepts `organizationId` as a required parameter and propagates it through all four call sites.
+- `createHostMetricQueries` now enforces authorization via `requireDynatraceMutationCapability` before creating resources; the call was previously missing, leaving that code path without an auth check.
+
 ## [0.2.49.1] - 2026-05-15
 
 ### Changed

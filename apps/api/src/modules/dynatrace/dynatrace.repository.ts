@@ -663,7 +663,8 @@ export class DynatraceRepository {
     testEnvironment: string,
     workload: string,
     dashboardLabel: string,
-    applicationDashboardId: string
+    applicationDashboardId: string,
+    organizationId: string
   ): Promise<void> {
     const dashboardUid = this.generateDynatraceDashboardUid(dashboardLabel);
 
@@ -701,8 +702,8 @@ export class DynatraceRepository {
 
         const result = await manager.query<Array<{ id: string }>>(
           `INSERT INTO grafana_dashboards (
-            grafana_instance_id, grafana_id, uid, name, panels
-          ) VALUES ($1, $2, $3, $4, $5)
+            grafana_instance_id, grafana_id, uid, name, panels, organization_id
+          ) VALUES ($1, $2, $3, $4, $5, $6)
           RETURNING id`,
           [
             grafanaInstanceId,
@@ -710,6 +711,7 @@ export class DynatraceRepository {
             dashboardUid,
             dashboardLabel,
             JSON.stringify([]), // Empty panels array
+            organizationId,
           ]
         );
         grafanaDashboardId = result[0]!.id;
@@ -732,8 +734,8 @@ export class DynatraceRepository {
           `INSERT INTO application_dashboards (
             id, system_under_test_id, test_environment,
             grafana_instance_id, grafana_dashboard_id,
-            dashboard_name, dashboard_uid, dashboard_label
-          ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+            dashboard_name, dashboard_uid, dashboard_label, organization_id
+          ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
           ON CONFLICT (system_under_test_id, test_environment, grafana_instance_id, dashboard_uid, dashboard_label)
           DO NOTHING`,
           [
@@ -745,6 +747,7 @@ export class DynatraceRepository {
             dashboardLabel,
             dashboardUid,
             dashboardLabel,
+            organizationId,
           ]
         );
 
