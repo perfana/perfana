@@ -4,6 +4,12 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
+## [0.2.50.1] - 2026-05-15
+
+### Fixed
+
+- Dynatrace metric query creation no longer violates the `organization_id NOT NULL` constraint on `metrics_sources` — `ensureMetricsSourceExists` was upserting without `organizationId`, causing the entire `createEntityMapping` transaction to roll back. The method now accepts `organizationId` as a required parameter and all three call sites (`createQuery`, `createQueryWithSharedUuid`, `bulkCreateQueryWithSharedUuid`) resolve and pass it through.
+
 ## [0.2.50.0] - 2026-05-15
 
 ### Fixed
