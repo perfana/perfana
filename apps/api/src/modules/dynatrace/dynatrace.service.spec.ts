@@ -89,6 +89,8 @@ describe('DynatraceService', () => {
     deleteEntityMapping: jest.fn(),
     getMetricNames: jest.fn(),
     ensureArtificialDashboardExists: jest.fn(),
+    generateDynatraceDashboardUuid: jest.fn().mockReturnValue('generated-uuid-123'),
+    createDsCompareConfigForMetric: jest.fn().mockResolvedValue(undefined),
   });
 
   beforeEach(async () => {
@@ -676,6 +678,32 @@ describe('DynatraceService', () => {
           }),
         );
       });
+
+      it('should pass organizationId to ensureArtificialDashboardExists', async () => {
+        repository.findById.mockResolvedValue(mockDynatraceConfig);
+        repository.createQuery.mockResolvedValue(mockDynatraceQuery);
+
+        await service.createQuery(createQueryDto, mockUserId, mockRoles);
+
+        expect(repository.ensureArtificialDashboardExists).toHaveBeenCalledWith(
+          createQueryDto.systemUnderTestId,
+          createQueryDto.testEnvironment,
+          createQueryDto.workload,
+          createQueryDto.dashboardLabel,
+          createQueryDto.applicationDashboardId,
+          mockDynatraceConfig.organizationId,
+        );
+      });
+
+      it('should skip ensureArtificialDashboardExists when applicationDashboardId is absent', async () => {
+        const dtoWithoutId = { ...createQueryDto, applicationDashboardId: undefined };
+        repository.findById.mockResolvedValue(mockDynatraceConfig);
+        repository.createQuery.mockResolvedValue(mockDynatraceQuery);
+
+        await service.createQuery(dtoWithoutId as any, mockUserId, mockRoles);
+
+        expect(repository.ensureArtificialDashboardExists).not.toHaveBeenCalled();
+      });
     });
 
     describe('createQuerySmart', () => {
@@ -731,6 +759,23 @@ describe('DynatraceService', () => {
           }),
         );
       });
+
+      it('should pass organizationId to ensureArtificialDashboardExists', async () => {
+        repository.findById.mockResolvedValue(mockDynatraceConfig);
+        repository.findDashboardByLabel.mockResolvedValue(null);
+        repository.createQueryWithSharedUuid.mockResolvedValue(mockDynatraceQuery);
+
+        await service.createQuerySmart(createQueryDto, mockUserId, mockRoles);
+
+        expect(repository.ensureArtificialDashboardExists).toHaveBeenCalledWith(
+          createQueryDto.systemUnderTestId,
+          createQueryDto.testEnvironment,
+          createQueryDto.workload,
+          createQueryDto.dashboardLabel,
+          expect.any(String),
+          mockDynatraceConfig.organizationId,
+        );
+      });
     });
 
     describe('bulkImportQuery', () => {
@@ -782,6 +827,67 @@ describe('DynatraceService', () => {
 
         expect(result).toEqual([mockDynatraceQuery]);
         expect(repository.findDashboardByLabel).toHaveBeenCalled();
+      });
+
+      it('should pass organizationId to ensureArtificialDashboardExists in shared-UUID mode', async () => {
+        repository.findById.mockResolvedValue(mockDynatraceConfig);
+        repository.bulkCreateQueryWithSharedUuid.mockResolvedValue([mockDynatraceQuery]);
+
+        await service.bulkImportQuery(dtoList, mockUserId, mockRoles, true);
+
+        expect(repository.ensureArtificialDashboardExists).toHaveBeenCalledWith(
+          dtoList[0].systemUnderTestId,
+          dtoList[0].testEnvironment,
+          dtoList[0].workload,
+          dtoList[0].dashboardLabel,
+          expect.any(String),
+          mockDynatraceConfig.organizationId,
+        );
+      });
+    });
+
+    describe('createHostMetricQueries', () => {
+      beforeEach(() => {
+        repository.findById.mockResolvedValue(mockDynatraceConfig);
+        repository.ensureArtificialDashboardExists.mockResolvedValue(undefined);
+        repository.createQuery.mockResolvedValue(mockDynatraceQuery);
+      });
+
+      it('should call requireDynatraceMutationCapability to enforce authorization', async () => {
+        await service.createHostMetricQueries(
+          'config-123', 'sys-123', 'production', 'load-test',
+          'HOST-abc123', 'web-server-01', mockUserId, mockRoles,
+        );
+
+        expect(repository.findById).toHaveBeenCalledWith('config-123');
+      });
+
+      it('should pass parentOrgId to ensureArtificialDashboardExists', async () => {
+        await service.createHostMetricQueries(
+          'config-123', 'sys-123', 'production', 'load-test',
+          'HOST-abc123', 'web-server-01', mockUserId, mockRoles,
+        );
+
+        expect(repository.ensureArtificialDashboardExists).toHaveBeenCalledWith(
+          'sys-123',
+          'production',
+          'load-test',
+          'Dynatrace host metrics web-server-01',
+          expect.any(String),
+          mockDynatraceConfig.organizationId,
+        );
+      });
+
+      it('should rethrow when ensureArtificialDashboardExists fails', async () => {
+        const dbError = new Error('null value in column "organization_id" violates not-null constraint');
+        repository.ensureArtificialDashboardExists.mockRejectedValue(dbError);
+
+        await expect(
+          service.createHostMetricQueries(
+            'config-123', 'sys-123', 'production', 'load-test',
+            'HOST-abc123', 'web-server-01', mockUserId, mockRoles,
+          ),
+        ).rejects.toThrow('null value in column "organization_id"');
       });
     });
 
