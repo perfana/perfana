@@ -52,7 +52,7 @@ export default function SectionPreviewModal({
   children,
   initialComment = '',
   onSaveComment,
-  testRunId,
+  testRunId: _testRunId,
 }: SectionPreviewModalProps) {
   const [comment, setComment] = useState(initialComment);
   const [hasChanges, setHasChanges] = useState(false);

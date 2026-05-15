@@ -31,7 +31,6 @@ import {
 import { OrganizationMember } from '@/lib/api/organization-members';
 import {
   getOrganizationRoleLabel,
-  ORGANIZATION_ROLE_LABELS,
 } from '@/lib/constants/roles';
 import { AddMemberDialog } from './AddMemberDialog';
 import { EditMemberRolesDialog } from './EditMemberRolesDialog';

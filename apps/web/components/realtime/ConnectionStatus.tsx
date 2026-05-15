@@ -127,13 +127,13 @@ export function ConnectionStatus({
     }
 
     // Listen for connection info
-    const unsubscribeInfo = socketManager.on('connection_info', (info: any) => {
+    const unsubscribeInfo = socketManager.on('connection_info', (info: { socketId: string; authenticated: boolean }) => {
       setSocketId(info.socketId);
       setAuthenticated(info.authenticated);
     });
 
     // Listen for connection established
-    const unsubscribeEstablished = socketManager.on('connection_established', (payload: any) => {
+    const unsubscribeEstablished = socketManager.on('connection_established', (payload: { socketId: string; authenticated: boolean }) => {
       setSocketId(payload.socketId);
       setAuthenticated(payload.authenticated);
     });

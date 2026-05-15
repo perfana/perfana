@@ -26,7 +26,7 @@
  * ```
  */
 
-import { useState, useCallback, useMemo } from 'react';
+import { useState, useCallback } from 'react';
 import {
   Box,
   Typography,
@@ -52,7 +52,6 @@ import {
   ArrowUpward as ArrowUpIcon,
   ArrowDownward as ArrowDownIcon,
   Delete as DeleteIcon,
-  ExpandMore as ExpandMoreIcon,
   ExpandLess as ExpandLessIcon,
   Edit as EditIcon,
   Title as TitleIcon,

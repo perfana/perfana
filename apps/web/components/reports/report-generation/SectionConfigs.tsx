@@ -7,7 +7,7 @@
  */
 
 import { useState, useEffect } from 'react';
-import { Box, TextField, Select, MenuItem, FormControlLabel, Switch, Slider, Typography, Button, Tooltip } from '@mui/material';
+import { Box, TextField, Select, MenuItem, FormControlLabel, Switch, Typography, Button, Tooltip } from '@mui/material';
 import VisibilityIcon from '@mui/icons-material/Visibility';
 import SectionPreviewModal from './SectionPreviewModal';
 import dynamic from 'next/dynamic';
@@ -354,7 +354,7 @@ export function TransactionResponseTimesConfigForm({ config, onChange, testRunId
         }
 
         // Extract unique scenario names (not transaction names)
-        const uniqueScenarios = Array.from(new Set(transactions.map((t: any) => t.scenario_name).filter(Boolean)));
+        const uniqueScenarios = Array.from(new Set(transactions.map((t: { scenario_name?: string }) => t.scenario_name).filter(Boolean)));
         setScenarios(uniqueScenarios as string[]);
       } catch (err) {
         console.error('Failed to fetch scenarios:', err);
