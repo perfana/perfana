@@ -16,7 +16,7 @@ import {
   InputAdornment,
   Chip,
 } from '@mui/material';
-import { Search as SearchIcon, Person as PersonIcon, Email as EmailIcon, CheckCircle as CheckCircleIcon } from '@mui/icons-material';
+import { Search as SearchIcon, Email as EmailIcon, CheckCircle as CheckCircleIcon } from '@mui/icons-material';
 import { useUserSearch } from '@/lib/hooks/use-user-search';
 import { UserInfo } from '@/lib/api/users';
 import { useDebounce } from '@/lib/hooks/use-debounce';

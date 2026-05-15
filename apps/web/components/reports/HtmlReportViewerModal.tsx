@@ -53,7 +53,7 @@ import {
   Share as ShareIcon,
 } from '@mui/icons-material';
 import { forwardRef, type ReactElement, type Ref } from 'react';
-import { getReport, getReportHtml, getPublicReport, buildShareUrl, generatePdf, downloadPdf } from '@/lib/api/reports';
+import { getReport, getPublicReport, buildShareUrl, generatePdf, downloadPdf } from '@/lib/api/reports';
 
 // ==================== Types ====================
 

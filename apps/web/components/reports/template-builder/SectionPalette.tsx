@@ -56,7 +56,6 @@ import {
 import {
   type ReportSectionType,
   REPORT_SECTION_TYPES,
-  getSectionTypeLabel,
   isCommentableSection,
 } from '@/lib/api/reports';
 

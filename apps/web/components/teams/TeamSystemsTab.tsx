@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import {
   Box,
   Typography,
@@ -61,7 +61,7 @@ export function TeamSystemsTab({ teamId }: TeamSystemsTabProps) {
   const { currentOrganizationId } = useOrganizationContext();
 
   // Fetch systems for this team
-  const fetchTeamSystems = async () => {
+  const fetchTeamSystems = useCallback(async () => {
     try {
       setLoading(true);
       setError(null);
@@ -93,13 +93,13 @@ export function TeamSystemsTab({ teamId }: TeamSystemsTabProps) {
     } finally {
       setLoading(false);
     }
-  };
+  }, [teamId, currentOrganizationId]);
 
   useEffect(() => {
     if (teamId) {
       fetchTeamSystems();
     }
-  }, [teamId, currentOrganizationId]);
+  }, [teamId, fetchTeamSystems]);
 
   const handleAddSystem = async () => {
     if (!selectedSystemId) return;
@@ -109,7 +109,7 @@ export function TeamSystemsTab({ teamId }: TeamSystemsTabProps) {
       setError(null);
 
       const updatePayload = { team_id: teamId };
-      const result = await updateSystemUnderTest(selectedSystemId, updatePayload);
+      await updateSystemUnderTest(selectedSystemId, updatePayload);
 
       // Refresh the list
       await fetchTeamSystems();

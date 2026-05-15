@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useEffect, useMemo } from 'react'
+import { useState, useEffect, useMemo, useCallback } from 'react'
 import {
   Box,
   Typography,
@@ -81,7 +81,7 @@ export default function GrafanaDashboardsTable({
   const [deleting, setDeleting] = useState(false)
   const [selectedSutFilter, setSelectedSutFilter] = useState<string>('')
 
-  const loadDashboards = async () => {
+  const loadDashboards = useCallback(async () => {
     try {
       setLoading(true)
       setError(null)
@@ -96,11 +96,11 @@ export default function GrafanaDashboardsTable({
     } finally {
       setLoading(false)
     }
-  }
+  }, [grafanaInstance.id, onError])
 
   useEffect(() => {
     loadDashboards()
-  }, [grafanaInstance.id])
+  }, [loadDashboards])
 
   // Get all unique SUTs from dashboards for the filter dropdown
   const allSuts = useMemo(() => {
@@ -535,7 +535,7 @@ export default function GrafanaDashboardsTable({
         <DialogTitle>Delete Dashboard</DialogTitle>
         <DialogContent>
           <Typography>
-            Are you sure you want to delete the dashboard "{dashboardToDelete?.name}"?
+            Are you sure you want to delete the dashboard &quot;{dashboardToDelete?.name}&quot;?
             This action cannot be undone.
           </Typography>
         </DialogContent>

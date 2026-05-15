@@ -6,7 +6,7 @@
  * Modern UI for building custom reports with template support
  */
 
-import { useState, useCallback, useEffect } from 'react';
+import { useState, useEffect } from 'react';
 import {
   Dialog,
   DialogTitle,
@@ -50,7 +50,6 @@ import {
   Assignment as AssignmentIcon,
   Speed as SpeedIcon,
   TrendingUp as TrendingIcon,
-  BarChart as BarChartIcon,
   CompareArrows as CompareIcon,
   ShowChart as GraphIcon,
   Warning as WarningIcon,
@@ -60,7 +59,6 @@ import {
   Star as StarIcon,
 } from '@mui/icons-material';
 import {
-  generateReportFromTemplate,
   generateAdHocReport,
   getTemplateSummaries,
   getTemplate,
@@ -427,7 +425,7 @@ export function GenerateReportDialog({
               }
             >
               <Typography variant="body2" fontWeight={600}>
-                Based on Template: "{selectedTemplate.name}"
+                Based on Template: &quot;{selectedTemplate.name}&quot;
               </Typography>
               <Typography variant="caption" color="text.secondary">
                 Modifying a copy of the selected template. Changes will not affect the original template.
@@ -808,7 +806,7 @@ interface LayoutSectionCardProps {
   testRunId?: string;
 }
 
-function LayoutSectionCard({ id, section, index, onDelete, onConfigChange, onMoveUp, onMoveDown, testRunId }: LayoutSectionCardProps) {
+function LayoutSectionCard({ id, section, index, onDelete, onConfigChange, onMoveUp: _onMoveUp, onMoveDown: _onMoveDown, testRunId }: LayoutSectionCardProps) {
   const config = SECTION_CONFIG[section.type];
   const [expanded, setExpanded] = useState(false);
 
@@ -834,7 +832,7 @@ function LayoutSectionCard({ id, section, index, onDelete, onConfigChange, onMov
     const sectionConfig = {
       ...(section.config || {}),
       ...(section.comment !== undefined && { comment: section.comment }),
-    } as any;
+    } as Record<string, unknown>;
 
     switch (section.type) {
       case 'header':
