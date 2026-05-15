@@ -53,7 +53,9 @@ describe('FilterControls', () => {
     dashboardsForDropdown: ['Performance Dashboard', 'Load Test Dashboard'],
     panelsForDropdown: ['Response Time', 'Throughput'],
     filteredData: mockAnomalyData,
-    anomalyData: mockAnomalyData
+    anomalyData: mockAnomalyData,
+    hasActiveFilters: false,
+    onClearAllFilters: jest.fn(),
   };
 
   beforeEach(() => {
@@ -513,6 +515,30 @@ describe('FilterControls', () => {
       fireEvent.change(searchInput, { target: { value: 'abc' } });
 
       expect(handleSearchChange).toHaveBeenCalledTimes(3);
+    });
+  });
+
+  describe('Clear All Button', () => {
+    it('should render the Clear All button', () => {
+      render(<FilterControls {...defaultProps} />);
+      expect(screen.getByRole('button', { name: /clear all/i })).toBeInTheDocument();
+    });
+
+    it('should be disabled when no filters are active', () => {
+      render(<FilterControls {...defaultProps} hasActiveFilters={false} />);
+      expect(screen.getByRole('button', { name: /clear all/i })).toBeDisabled();
+    });
+
+    it('should be enabled when filters are active', () => {
+      render(<FilterControls {...defaultProps} hasActiveFilters={true} />);
+      expect(screen.getByRole('button', { name: /clear all/i })).not.toBeDisabled();
+    });
+
+    it('should call onClearAllFilters when clicked', () => {
+      const onClearAllFilters = jest.fn();
+      render(<FilterControls {...defaultProps} hasActiveFilters={true} onClearAllFilters={onClearAllFilters} />);
+      fireEvent.click(screen.getByRole('button', { name: /clear all/i }));
+      expect(onClearAllFilters).toHaveBeenCalledTimes(1);
     });
   });
 

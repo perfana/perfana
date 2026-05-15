@@ -109,12 +109,14 @@ export default function AnomalyDetectionSection({
     updateAdaptConfig,
     disableBaselineMode,
     fetchAnomalyData,
+    hasActiveFilters,
     handleConclusionFilterChange,
     handleSearchChange,
     handleConclusionFilterForForm,
     handleClassificationFilterChange,
     handleDashboardFilterChange,
     handlePanelFilterChange,
+    handleClearAllFilters,
   } = useAnomalyDetection({
     testRun,
     testRunId,
@@ -198,6 +200,8 @@ export default function AnomalyDetectionSection({
       handlePanelFilterChange={handlePanelFilterChange}
       dashboardsForDropdown={dashboardsForDropdown}
       panelsForDropdown={panelsForDropdown}
+      hasActiveFilters={hasActiveFilters}
+      onClearAllFilters={handleClearAllFilters}
       paginatedData={paginatedData}
       toggleRowExpanded={handleRowToggle}
       sortBy={sortBy}

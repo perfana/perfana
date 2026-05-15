@@ -4,6 +4,12 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
+## [0.2.49.0] - 2026-05-15
+
+### Changed
+- **Anomaly detection filter dropdowns now use faceted filtering** — each dropdown only shows values present in items that match all currently active filters. Selecting a dashboard no longer shows panels from unrelated dashboards; selecting a conclusion no longer shows classifications that have no results for that conclusion. This eliminates "ghost" filter options that would produce empty result sets.
+- **"Clear All Filters" button added to anomaly detection** — a single button resets the search query, conclusion, classification, dashboard, and panel filters simultaneously. The button is disabled when no filters are active, giving users a clear visual signal of filter state.
+
 ## [0.2.48.5] - 2026-05-14
 
 ### Fixed

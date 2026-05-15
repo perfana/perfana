@@ -16,6 +16,38 @@ const KNOWN_CLASSIFICATIONS = new Set([
   'business_metric', 'infrastructure_metric', 'application_metric'
 ]);
 
+function matchesSearchPredicate(item: AnomalyData, searchQuery: string): boolean {
+  if (!searchQuery?.trim()) return true;
+  const searchWords = searchQuery.toLowerCase().split(/\s+/).filter(w => w.length > 0);
+  const searchableText = [item.metric_name, item.dashboard_label, item.panel_title, item.conclusion_label, item.classification]
+    .filter(Boolean).join(' ').toLowerCase();
+  return searchWords.every(w => searchableText.includes(w));
+}
+
+function matchesConclusionPredicate(item: AnomalyData, filter: string): boolean {
+  return filter === 'all' || (!!item.conclusion_label && item.conclusion_label.toLowerCase() === filter.toLowerCase());
+}
+
+function matchesClassificationPredicate(item: AnomalyData, filter: string): boolean {
+  if (filter === 'all' || filter === 'higher-is-better' || filter === 'lower-is-better') return true;
+  const itemClass = item.classification?.toLowerCase();
+  const normalized = itemClass && KNOWN_CLASSIFICATIONS.has(itemClass) ? itemClass : 'unclassified';
+  return normalized === filter.toLowerCase();
+}
+
+function matchesDashboardPredicate(item: AnomalyData, filter: string): boolean {
+  return filter === 'all' || item.dashboard_label === filter;
+}
+
+function matchesPanelPredicate(item: AnomalyData, filter: string): boolean {
+  return filter === 'all' || item.panel_title === filter;
+}
+
+function normalizeItemClassification(item: AnomalyData): string {
+  const classification = item.classification?.toLowerCase();
+  return classification && KNOWN_CLASSIFICATIONS.has(classification) ? classification : 'unclassified';
+}
+
 export type AnomalySortKey =
   | 'dashboard_label'
   | 'panel_title'
@@ -120,6 +152,8 @@ interface UseAnomalyDetectionReturn {
   // Ref for pending conclusion
   pendingConclusionRef: MutableRefObject<string | null>;
 
+  hasActiveFilters: boolean;
+
   // Handlers
   handleExpand: (tabIndex?: number) => void;
   handleCollapse: () => void;
@@ -139,6 +173,7 @@ interface UseAnomalyDetectionReturn {
   handleClassificationFilterChange: (e: { target: { value: string } }) => void;
   handleDashboardFilterChange: (e: { target: { value: string } }) => void;
   handlePanelFilterChange: (e: { target: { value: string } }) => void;
+  handleClearAllFilters: () => void;
 }
 
 export function useAnomalyDetection({
@@ -325,44 +360,13 @@ export function useAnomalyDetection({
 
   // Data filtering
   const getFilteredData = useCallback(() => {
-    return anomalyData.filter(item => {
-      // Enhanced fuzzy search
-      let matchesSearch = true;
-      if (searchQuery && searchQuery.trim()) {
-        const searchWords = searchQuery.toLowerCase().split(/\s+/).filter(word => word.length > 0);
-        const searchableText = [
-          item.metric_name,
-          item.dashboard_label,
-          item.panel_title,
-          item.conclusion_label,
-          item.classification,
-        ].filter(field => field !== null && field !== undefined)
-         .join(' ')
-         .toLowerCase();
-        matchesSearch = searchWords.every(word => searchableText.includes(word));
-      }
-
-      const matchesConclusion = conclusionFilter === 'all' ||
-        (item.conclusion_label && conclusionFilter && item.conclusion_label.toLowerCase() === conclusionFilter.toLowerCase());
-
-      const itemClassification = item.classification?.toLowerCase();
-      const normalizedItemClassification = itemClassification && KNOWN_CLASSIFICATIONS.has(itemClassification)
-        ? itemClassification
-        : 'unclassified';
-
-      const matchesClassification = classificationFilter === 'all' ||
-        classificationFilter === 'higher-is-better' ||
-        classificationFilter === 'lower-is-better' ||
-        normalizedItemClassification === classificationFilter.toLowerCase();
-
-      const matchesDashboard = dashboardFilter === 'all' ||
-        item.dashboard_label === dashboardFilter;
-
-      const matchesPanel = panelFilter === 'all' ||
-        item.panel_title === panelFilter;
-
-      return matchesSearch && matchesConclusion && matchesClassification && matchesDashboard && matchesPanel;
-    });
+    return anomalyData.filter(item =>
+      matchesSearchPredicate(item, searchQuery) &&
+      matchesConclusionPredicate(item, conclusionFilter) &&
+      matchesClassificationPredicate(item, classificationFilter) &&
+      matchesDashboardPredicate(item, dashboardFilter) &&
+      matchesPanelPredicate(item, panelFilter)
+    );
   }, [anomalyData, searchQuery, conclusionFilter, classificationFilter, dashboardFilter, panelFilter]);
 
   const filteredData = useMemo(() => getFilteredData(), [getFilteredData]);
@@ -424,25 +428,45 @@ export function useAnomalyDetection({
     }
   }, [sortBy]);
 
-  // Dropdown options
-  const conclusionsForDropdown = useMemo(() => [...new Set(anomalyData.map(item => item.conclusion_label))], [anomalyData]);
-  const classificationsForDropdown = useMemo(() => [...new Set(
-    anomalyData.map(item => {
-      const classification = item.classification?.toLowerCase();
-      return classification && KNOWN_CLASSIFICATIONS.has(classification)
-        ? classification
-        : 'unclassified';
-    })
-  )], [anomalyData]);
-  const dashboardsForDropdown = useMemo(() => [...new Set(
-    anomalyData.map(item => item.dashboard_label).filter(Boolean)
-  )].sort(), [anomalyData]);
-  const panelsForDropdown = useMemo(() => [...new Set(
-    anomalyData
-      .filter(item => dashboardFilter === 'all' || item.dashboard_label === dashboardFilter)
-      .map(item => item.panel_title)
-      .filter(Boolean)
-  )].sort(), [anomalyData, dashboardFilter]);
+  // Dropdown options — faceted: each dropdown shows values available given all OTHER active filters
+  const dashboardsForDropdown = useMemo(() => {
+    const filtered = anomalyData.filter(item =>
+      matchesSearchPredicate(item, searchQuery) &&
+      matchesConclusionPredicate(item, conclusionFilter) &&
+      matchesClassificationPredicate(item, classificationFilter)
+    );
+    return [...new Set(filtered.map(item => item.dashboard_label).filter((v): v is string => !!v))].sort();
+  }, [anomalyData, searchQuery, conclusionFilter, classificationFilter]);
+
+  const panelsForDropdown = useMemo(() => {
+    const filtered = anomalyData.filter(item =>
+      matchesSearchPredicate(item, searchQuery) &&
+      matchesConclusionPredicate(item, conclusionFilter) &&
+      matchesClassificationPredicate(item, classificationFilter) &&
+      matchesDashboardPredicate(item, dashboardFilter)
+    );
+    return [...new Set(filtered.map(item => item.panel_title).filter((v): v is string => !!v))].sort();
+  }, [anomalyData, searchQuery, conclusionFilter, classificationFilter, dashboardFilter]);
+
+  const conclusionsForDropdown = useMemo(() => {
+    const filtered = anomalyData.filter(item =>
+      matchesSearchPredicate(item, searchQuery) &&
+      matchesClassificationPredicate(item, classificationFilter) &&
+      matchesDashboardPredicate(item, dashboardFilter) &&
+      matchesPanelPredicate(item, panelFilter)
+    );
+    return [...new Set(filtered.map(item => item.conclusion_label).filter((v): v is string => !!v))];
+  }, [anomalyData, searchQuery, classificationFilter, dashboardFilter, panelFilter]);
+
+  const classificationsForDropdown = useMemo(() => {
+    const filtered = anomalyData.filter(item =>
+      matchesSearchPredicate(item, searchQuery) &&
+      matchesConclusionPredicate(item, conclusionFilter) &&
+      matchesDashboardPredicate(item, dashboardFilter) &&
+      matchesPanelPredicate(item, panelFilter)
+    );
+    return [...new Set(filtered.map(item => normalizeItemClassification(item)))];
+  }, [anomalyData, searchQuery, conclusionFilter, dashboardFilter, panelFilter]);
 
   // Wrapper function for adapt config
   const updateAdaptConfig = useCallback(async (differencesAccepted: 'ACCEPTED' | 'DENIED' | 'TBD') => {
@@ -643,6 +667,21 @@ export function useAnomalyDetection({
   const handleAcceptResults = useCallback(() => updateAdaptConfig('ACCEPTED'), [updateAdaptConfig]);
   const handleDenyResults = useCallback(() => updateAdaptConfig('DENIED'), [updateAdaptConfig]);
 
+  const hasActiveFilters = useMemo(() =>
+    searchQuery !== '' || conclusionFilter !== 'all' || classificationFilter !== 'all' ||
+    dashboardFilter !== 'all' || panelFilter !== 'all',
+    [searchQuery, conclusionFilter, classificationFilter, dashboardFilter, panelFilter]
+  );
+
+  const handleClearAllFilters = useCallback(() => {
+    setSearchQuery('');
+    setConclusionFilter('all');
+    setClassificationFilter('all');
+    setDashboardFilter('all');
+    setPanelFilter('all');
+    setPage(0);
+  }, [setConclusionFilter]);
+
   const handleConclusionFilterChange = useCallback((newFilter: string) => {
     if (!anomalyExpanded) {
       pendingConclusionRef.current = newFilter;
@@ -766,11 +805,13 @@ export function useAnomalyDetection({
     updateAdaptConfig,
     disableBaselineMode,
     fetchAnomalyData,
+    hasActiveFilters,
     handleConclusionFilterChange,
     handleSearchChange,
     handleConclusionFilterForForm,
     handleClassificationFilterChange,
     handleDashboardFilterChange,
     handlePanelFilterChange,
+    handleClearAllFilters,
   };
 }

@@ -57,6 +57,8 @@ export interface AnomalyTabContentProps {
   dashboardsForDropdown: string[];
   panelsForDropdown: string[];
   filteredData: AnomalyData[];
+  hasActiveFilters: boolean;
+  onClearAllFilters: () => void;
   feedbackState: FeedbackState;
   onMarkAsRegression: () => Promise<void>;
   onMarkAsVariability: () => Promise<void>;
@@ -178,6 +180,8 @@ export interface AnomalyDetectionExpandedCardProps {
   dashboardsForDropdown: string[];
   panelsForDropdown: string[];
   filteredData: AnomalyData[];
+  hasActiveFilters: boolean;
+  onClearAllFilters: () => void;
   handleSearchChange: (e: React.ChangeEvent<HTMLInputElement>) => void;
   handleConclusionFilterChange: (e: React.ChangeEvent<HTMLInputElement> | { target: { value: string } }) => void;
   handleClassificationFilterChange: (e: React.ChangeEvent<HTMLInputElement> | { target: { value: string } }) => void;
