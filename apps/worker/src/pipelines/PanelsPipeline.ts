@@ -136,9 +136,10 @@ export class PanelsPipeline extends BasePipelineTypeORM {
         }
       });
 
-      // TODO: Process Dynatrace dashboards if enabled
       if (includeDynatrace) {
-        this.logger.info('⚠️  Dynatrace processing not yet implemented');
+        stepStart = Date.now();
+        await this.processDynatracePanels(testRunId, testRun);
+        this.logger.info(`  🔷 Dynatrace panels: ${Date.now() - stepStart}ms`);
       }
 
       const totalTime = Date.now() - overallStartTime;
@@ -224,6 +225,76 @@ export class PanelsPipeline extends BasePipelineTypeORM {
     });
 
     await manager.query(insertQuery, params);
+  }
+
+  private async processDynatracePanels(
+    testRunId: string,
+    testRun: { systemUnderTestId: string; testEnvironment: string; workload: string; organizationId?: string | null; teamId?: string | null }
+  ): Promise<void> {
+    const rows = await this.db.query<{
+      application_dashboard_id: string;
+      metrics_source_id: string | null;
+      dashboard_label: string;
+      panel_id: number;
+      panel_title: string;
+      template_variables: Record<string, unknown>;
+    }>(
+      `SELECT application_dashboard_id, metrics_source_id, dashboard_label,
+              panel_id, panel_title, template_variables
+       FROM dynatrace_queries
+       WHERE system_under_test_id = $1
+         AND test_environment = $2
+         AND workload = $3
+         AND application_dashboard_id IS NOT NULL`,
+      [testRun.systemUnderTestId, testRun.testEnvironment, testRun.workload]
+    );
+
+    if (rows.length === 0) {
+      this.logger.debug('No Dynatrace queries configured for this test run');
+      return;
+    }
+
+    this.logger.info(`📊 Storing ${rows.length} Dynatrace tile(s) in ds_panels`);
+
+    const columns = [
+      'test_run_id', 'application_dashboard_id', 'metrics_source_id', 'dashboard_uid', 'panel_id',
+      'panel_title', 'dashboard_label', 'benchmark_ids', 'panel',
+      'query_variables', 'datasource_type', 'requests', 'errors', 'warnings', 'updated_at',
+      'organization_id', 'team_id', 'created_by', 'updated_by',
+    ];
+
+    const placeholders = rows
+      .map((_, i) => `(${columns.map((_, c) => `$${i * columns.length + c + 1}`).join(', ')})`)
+      .join(', ');
+
+    const params = rows.flatMap(dq => [
+      testRunId,
+      dq.application_dashboard_id,
+      dq.metrics_source_id || null,
+      dq.dashboard_label,
+      dq.panel_id,
+      dq.panel_title,
+      dq.dashboard_label,
+      null,
+      JSON.stringify({ type: 'timeseries', title: dq.panel_title, id: dq.panel_id, dynatrace: true }),
+      JSON.stringify(dq.template_variables || {}),
+      'dynatrace',
+      JSON.stringify([]),
+      null,
+      null,
+      new Date(),
+      testRun.organizationId || null,
+      testRun.teamId || null,
+      'worker-pipeline',
+      'worker-pipeline',
+    ]);
+
+    await this.db.query(
+      `INSERT INTO ds_panels (${columns.join(', ')}) VALUES ${placeholders} ON CONFLICT DO NOTHING`,
+      params
+    );
+
+    this.logger.info(`✅ Stored ${rows.length} Dynatrace panel record(s) in ds_panels`);
   }
 
   validateInput(input: unknown): boolean {

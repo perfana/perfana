@@ -611,10 +611,10 @@ export class IncrementalCollectionScheduler {
         // Grafana source
         sourceKey = `grafana:${dashboard.grafanaInstanceId}`;
       } else {
-        // TODO: Add Dynatrace support when DynatraceConfig relation is added to ApplicationDashboard
-        // For now, skip non-Grafana dashboards
-        this.logger.warn(
-          `Dashboard ${dashboard.id} has no grafanaInstanceId - skipping for now (Dynatrace not yet supported)`
+        // Dashboards without a grafanaInstanceId are not Grafana sources.
+        // Dynatrace sources are enqueued separately via dynatrace_queries — skip here.
+        this.logger.debug(
+          `Dashboard ${dashboard.id} has no grafanaInstanceId — skipping (handled via dynatrace_queries path)`
         );
         continue;
       }
