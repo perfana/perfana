@@ -783,6 +783,9 @@ describe('PanelsPipeline', () => {
       // Mock delete query
       (mockEntityManager.query as any).mockResolvedValueOnce([[], 0]);
 
+      // Mock dynatrace_queries SELECT (includeDynatrace defaults to true)
+      mockDatabaseService.query.mockResolvedValueOnce([]);
+
       const result = await pipeline.execute({
         testRunId
       });
@@ -852,6 +855,9 @@ describe('PanelsPipeline', () => {
       // Mock delete and insert queries
       (mockEntityManager.query as any).mockResolvedValueOnce([[], 0]);
       (mockEntityManager.query as any).mockResolvedValueOnce([]);
+
+      // Mock dynatrace_queries SELECT (includeDynatrace defaults to true)
+      mockDatabaseService.query.mockResolvedValueOnce([]);
 
       await pipeline.execute({
         testRunId
@@ -929,7 +935,7 @@ describe('PanelsPipeline', () => {
   });
 
   describe('Dynatrace Integration', () => {
-    test('should log warning when Dynatrace is enabled', async () => {
+    test('should store Dynatrace panel records when queries exist', async () => {
       const testRunId = 'test-run-001';
 
       // Mock cleanup query
@@ -943,7 +949,9 @@ describe('PanelsPipeline', () => {
         testEnvironment: 'production',
         workload: 'load-test',
         startTime: new Date('2024-01-01T00:00:00Z'),
-        endTime: new Date('2024-01-01T01:00:00Z')
+        endTime: new Date('2024-01-01T01:00:00Z'),
+        organizationId: 'org-1',
+        teamId: null,
       });
 
       // Mock system name
@@ -958,14 +966,85 @@ describe('PanelsPipeline', () => {
       // Mock delete query
       (mockEntityManager.query as any).mockResolvedValueOnce([[], 0]);
 
+      // Mock dynatrace_queries result (2 tiles) then the INSERT result
+      mockDatabaseService.query
+        .mockResolvedValueOnce([
+          {
+            application_dashboard_id: 'app-dash-1',
+            metrics_source_id: null,
+            dashboard_label: 'DT Dashboard',
+            panel_id: 10,
+            panel_title: 'CPU Usage',
+            template_variables: {},
+          },
+          {
+            application_dashboard_id: 'app-dash-1',
+            metrics_source_id: null,
+            dashboard_label: 'DT Dashboard',
+            panel_id: 11,
+            panel_title: 'Memory Usage',
+            template_variables: {},
+          },
+        ])
+        .mockResolvedValueOnce([]); // INSERT result
+
       await pipeline.execute({
         testRunId,
-        includeDynatrace: true
+        includeDynatrace: true,
       });
 
-      // Verify Dynatrace warning
+      // Verify Dynatrace panels were stored
       expect(mockLogger.info).toHaveBeenCalledWith(
-        expect.stringContaining('Dynatrace processing not yet implemented')
+        expect.stringContaining('Storing 2 Dynatrace tile(s) in ds_panels')
+      );
+      expect(mockLogger.info).toHaveBeenCalledWith(
+        expect.stringContaining('Stored 2 Dynatrace panel record(s) in ds_panels')
+      );
+      expect(mockLogger.info).not.toHaveBeenCalledWith(
+        expect.stringContaining('not yet implemented')
+      );
+    });
+
+    test('should skip Dynatrace panel storage when no queries configured', async () => {
+      const testRunId = 'test-run-001';
+
+      // Mock cleanup query
+      mockDatabaseService.query.mockResolvedValueOnce([[], 0]);
+
+      // Mock test run
+      mockDatabaseService.getTestRunByTestRunId.mockResolvedValueOnce({
+        id: '123e4567-e89b-12d3-a456-426614174000',
+        testRunId: testRunId,
+        systemUnderTestId: 'system-1',
+        testEnvironment: 'production',
+        workload: 'load-test',
+        startTime: new Date('2024-01-01T00:00:00Z'),
+        endTime: new Date('2024-01-01T01:00:00Z'),
+      });
+
+      // Mock system name
+      mockDatabaseService.getSystemUnderTestName.mockResolvedValueOnce('MyApp');
+
+      // Mock application dashboards
+      (getApplicationDashboardsForTestRun as any).mockResolvedValueOnce([]);
+      (getGrafanaDashboardsForApplicationDashboards as any).mockResolvedValueOnce([]);
+      (getBenchmarksForTestRun as any).mockResolvedValueOnce([]);
+      (createPanelDocuments as any).mockResolvedValueOnce([]);
+
+      // Mock delete query
+      (mockEntityManager.query as any).mockResolvedValueOnce([[], 0]);
+
+      // Mock dynatrace_queries — no results
+      mockDatabaseService.query.mockResolvedValueOnce([]);
+
+      await pipeline.execute({
+        testRunId,
+        includeDynatrace: true,
+      });
+
+      // No "Storing" message and no insert called for Dynatrace
+      expect(mockLogger.info).not.toHaveBeenCalledWith(
+        expect.stringContaining('Storing')
       );
     });
 
