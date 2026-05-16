@@ -4,6 +4,12 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
+## [0.2.51.3] - 2026-05-16
+
+### Fixed
+
+- **ADAPT regression confirmation now correctly sets test run to FAILED** — when a user confirmed a regression by setting `differencesAccepted = 'DENIED'`, the worker's status-updater SQL preserved the previous `overall` value for both `ACCEPTED` and `DENIED` states. This meant that denying a regression left `overall = true` even though `adaptTestRunOK` was correctly set to `false`. Fix: the SQL now only locks `overall` when the user explicitly accepted differences (`ACCEPTED`); for `DENIED` and `TBD` (pending) states it always recalculates from the current ADAPT findings so `adaptTestRunOK = false` propagates to `overall`. The API handler for updating adapt config also now explicitly sets `adaptTestRunOK = false` and `overall = false` for the `DENIED` case, ensuring the immediate API response is consistent.
+
 ## [0.2.51.2] - 2026-05-16
 
 ### Fixed
