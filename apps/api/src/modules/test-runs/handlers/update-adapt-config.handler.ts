@@ -77,13 +77,17 @@ export class UpdateAdaptConfigHandler {
 
       if (differencesAccepted === 'ACCEPTED') {
         const meetsRequirement = testRun.consolidatedResult?.meetsRequirement ?? true;
-        const adaptTestRunOK = true;
-        const overall = meetsRequirement && adaptTestRunOK;
-
         updateData.consolidatedResult = {
           ...(testRun.consolidatedResult || {}),
           adaptTestRunOK: true,
-          overall: overall,
+          overall: meetsRequirement,
+        };
+      } else if (differencesAccepted === 'DENIED') {
+        // adaptTestRunOK=false makes overall false regardless of meetsRequirement
+        updateData.consolidatedResult = {
+          ...(testRun.consolidatedResult || {}),
+          adaptTestRunOK: false,
+          overall: false,
         };
       }
 
@@ -112,7 +116,8 @@ export class UpdateAdaptConfigHandler {
 
       this.logger.log(
         `Updated adapt config for test run ${testRunId}: ${differencesAccepted}` +
-          `${differencesAccepted === 'ACCEPTED' ? ' (consolidated result set to OK)' : ''}`,
+          (differencesAccepted === 'ACCEPTED' ? ' (consolidated result set to OK)' :
+           differencesAccepted === 'DENIED' ? ' (consolidated result set to FAILED)' : ''),
       );
 
       const testRunResult = mapEntityToTestRun(updatedEntity);

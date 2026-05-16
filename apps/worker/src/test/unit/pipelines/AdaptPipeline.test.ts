@@ -988,48 +988,49 @@ describe('AdaptPipeline', () => {
       expect(overallOK2).toBe(false);
     });
 
-    it('should only update overall when differencesAccepted is TBD', () => {
-      // When differencesAccepted is 'TBD' (or not set), overall should be recalculated
-      // When differencesAccepted is 'ACCEPTED' or 'DENIED', overall should be preserved
+    it('should recalculate overall when differencesAccepted is TBD or DENIED', () => {
+      // TBD (pending) and DENIED (confirmed regression) both recalculate overall
+      // so that adaptTestRunOK=false is reflected in the consolidated result.
+      // Only ACCEPTED locks overall at its current value.
 
       // Arrange - differencesAccepted is TBD (should recalculate)
       const testRunTBD = {
         adaptConfig: { differencesAccepted: 'TBD' },
         meetsRequirement: true,
-        adaptTestRunOK: false, // This would make overall false
-        existingOverall: true, // But this was the previous value
+        adaptTestRunOK: false, // regression detected
+        existingOverall: true,
       };
 
-      // Act - Simulate the SQL logic for TBD case
-      const shouldRecalculate = (testRunTBD.adaptConfig.differencesAccepted ?? 'TBD') === 'TBD';
-      const newOverallTBD = shouldRecalculate
-        ? (testRunTBD.meetsRequirement && testRunTBD.adaptTestRunOK)
-        : testRunTBD.existingOverall;
+      // Act - Simulate the SQL logic (ACCEPTED preserves; everything else recalculates)
+      const shouldPreserveTBD = (testRunTBD.adaptConfig.differencesAccepted ?? 'TBD') === 'ACCEPTED';
+      const newOverallTBD = shouldPreserveTBD
+        ? testRunTBD.existingOverall
+        : (testRunTBD.meetsRequirement && testRunTBD.adaptTestRunOK);
 
-      // Assert - Should recalculate and be false
+      // Assert - Should recalculate to false because adaptTestRunOK=false
       expect(newOverallTBD).toBe(false);
 
       // Arrange - differencesAccepted is not set (defaults to TBD, should recalculate)
       const testRunNotSet = {
-        adaptConfig: {}, // differencesAccepted not set
+        adaptConfig: {} as { differencesAccepted?: string },
         meetsRequirement: true,
         adaptTestRunOK: false,
         existingOverall: true,
       };
 
       // Act
-      const shouldRecalculateNotSet = (testRunNotSet.adaptConfig.differencesAccepted ?? 'TBD') === 'TBD';
-      const newOverallNotSet = shouldRecalculateNotSet
-        ? (testRunNotSet.meetsRequirement && testRunNotSet.adaptTestRunOK)
-        : testRunNotSet.existingOverall;
+      const shouldPreserveNotSet = (testRunNotSet.adaptConfig.differencesAccepted ?? 'TBD') === 'ACCEPTED';
+      const newOverallNotSet = shouldPreserveNotSet
+        ? testRunNotSet.existingOverall
+        : (testRunNotSet.meetsRequirement && testRunNotSet.adaptTestRunOK);
 
-      // Assert - Should recalculate and be false
+      // Assert - Should recalculate to false
       expect(newOverallNotSet).toBe(false);
     });
 
     it('should preserve overall when differencesAccepted is ACCEPTED', () => {
       // When differencesAccepted is 'ACCEPTED', the overall result should be preserved
-      // This prevents re-evaluation from changing a user-accepted result
+      // so that a user-accepted result is not overridden by subsequent re-evaluation.
 
       // Arrange
       const testRun = {
@@ -1039,35 +1040,35 @@ describe('AdaptPipeline', () => {
         existingOverall: true, // But user accepted, so this should be preserved
       };
 
-      // Act - Simulate the SQL logic
-      const shouldRecalculate = (testRun.adaptConfig.differencesAccepted ?? 'TBD') === 'TBD';
-      const newOverall = shouldRecalculate
-        ? (testRun.meetsRequirement && testRun.adaptTestRunOK)
-        : testRun.existingOverall;
+      // Act - Simulate the SQL logic (only ACCEPTED preserves)
+      const shouldPreserve = (testRun.adaptConfig.differencesAccepted ?? 'TBD') === 'ACCEPTED';
+      const newOverall = shouldPreserve
+        ? testRun.existingOverall
+        : (testRun.meetsRequirement && testRun.adaptTestRunOK);
 
       // Assert - Should preserve existing value (true) instead of recalculating (false)
       expect(newOverall).toBe(true);
     });
 
-    it('should preserve overall when differencesAccepted is DENIED', () => {
-      // When differencesAccepted is 'DENIED', the overall result should be preserved
-      // This prevents re-evaluation from changing a user-denied result
+    it('should recalculate overall when differencesAccepted is DENIED (confirmed regression)', () => {
+      // DENIED means the user confirmed the differences are real regressions.
+      // overall must reflect adaptTestRunOK=false, not be locked at the previous value.
 
-      // Arrange
+      // Arrange - test was previously passing but now has a regression conclusion
       const testRun = {
         adaptConfig: { differencesAccepted: 'DENIED' },
         meetsRequirement: true,
-        adaptTestRunOK: true, // This would normally make overall true
-        existingOverall: false, // But user denied, so this should be preserved
+        adaptTestRunOK: false, // ADAPT found regression
+        existingOverall: true, // Stale — was true before the regression was detected
       };
 
-      // Act - Simulate the SQL logic
-      const shouldRecalculate = (testRun.adaptConfig.differencesAccepted ?? 'TBD') === 'TBD';
-      const newOverall = shouldRecalculate
-        ? (testRun.meetsRequirement && testRun.adaptTestRunOK)
-        : testRun.existingOverall;
+      // Act - Simulate the SQL logic (DENIED recalculates like TBD)
+      const shouldPreserve = (testRun.adaptConfig.differencesAccepted ?? 'TBD') === 'ACCEPTED';
+      const newOverall = shouldPreserve
+        ? testRun.existingOverall
+        : (testRun.meetsRequirement && testRun.adaptTestRunOK);
 
-      // Assert - Should preserve existing value (false) instead of recalculating (true)
+      // Assert - Should recalculate to false, not preserve the stale true
       expect(newOverall).toBe(false);
     });
   });
