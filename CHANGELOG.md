@@ -4,6 +4,12 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
+## [0.2.51.2] - 2026-05-16
+
+### Fixed
+
+- **Re-evaluation jobs no longer hang when a test is actively running** — resolving a tracked regression or marking/removing a changepoint could trigger a BullMQ re-evaluation batch that included currently-running tests. The Checks and ADAPT pipeline stages cannot handle in-progress tests (no completion state), causing the orchestration worker to block until the 10-minute timeout. The four query sites in `TestRunsChangepointService` now filter for finished tests only: `completed = true` (normal end) OR `abort = true` (aborted end). Actively-running tests (`completed = false, abort = false`) are excluded from all re-evaluation batches.
+
 ## [0.2.51.1] - 2026-05-16
 
 ### Fixed
