@@ -4,6 +4,13 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
+## [0.2.51.1] - 2026-05-16
+
+### Fixed
+
+- **Dynatrace metric series now populate after incremental storage** — selecting a Dynatrace dashboard panel in the Graphs card showed an empty metric series dropdown unless a full force re-fetch had previously run. Root cause: the incremental collector omitted `metrics_source_id` from its SQL query, query config, and result mapping, so `ds_metrics` rows were written with `metrics_source_id = NULL`. The `/metrics/ds-metrics/distinct-names` endpoint queries by `metrics_source_id`, returning zero rows until a force re-fetch filled in the value.
+- **Dynatrace verbose log noise reduced** — raw Metrics API v2 response body and per-metric data point counts now log at `debug` instead of `info`, keeping worker logs clean during normal operation.
+
 ## [0.2.51.0] - 2026-05-16
 
 ### Added
