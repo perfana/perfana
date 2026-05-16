@@ -688,15 +688,14 @@ export class DynatraceAPIClient {
 
       if (response.statusCode === 200) {
         logger.info(`✓ Metrics API v2 query completed successfully`);
-        logger.info(`📊 Raw Metrics API v2 response: ${JSON.stringify(data, null, 2)}`);
+        logger.debug(`📊 Raw Metrics API v2 response: ${JSON.stringify(data, null, 2)}`);
 
-        // Log summary of response structure
         if (data.result && Array.isArray(data.result)) {
-          logger.info(`📈 Response contains ${data.result.length} metric(s)`);
+          logger.debug(`📈 Response contains ${data.result.length} metric(s)`);
           data.result.forEach((metric: unknown, idx: number) => {
             const m = metric as { metricId?: string; data?: Array<{ values?: unknown[] }> };
             const dataPointCount = m.data?.reduce((sum: number, d) => sum + (d.values?.length || 0), 0) || 0;
-            logger.info(`  Metric ${idx + 1}: ${m.metricId || 'unknown'} - ${dataPointCount} data points`);
+            logger.debug(`  Metric ${idx + 1}: ${m.metricId || 'unknown'} - ${dataPointCount} data points`);
           });
         }
 
