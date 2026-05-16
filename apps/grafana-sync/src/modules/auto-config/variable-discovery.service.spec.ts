@@ -1783,6 +1783,119 @@ describe('VariableDiscoveryService', () => {
       });
     });
 
+    it('should substitute multi-value variable in SQL IN clause as quoted CSV', async () => {
+      const mockGrafanaDashboard = createMockDashboard([
+        {
+          name: 'scenarioName',
+          type: 'custom',
+          query: 'BrowseAndSearch,Checkout',
+        },
+        {
+          name: 'transaction',
+          type: 'query',
+          query: `SELECT DISTINCT transaction_name FROM requests_raw
+WHERE system_under_test = '$system_under_test'
+  AND test_environment = '$test_environment'
+  AND scenario_name IN ($scenarioName)
+ORDER BY 1`,
+          datasource: { uid: 'postgres-uid' },
+        },
+      ]);
+
+      const mockAutoConfigDashboard = {
+        dashboardUid: 'test-uid',
+        dashboardName: 'Test Dashboard',
+      };
+
+      variableDetectorService.getValuesFromDatasourceQuery.mockResolvedValue([
+        'add-to-cart',
+        'checkout',
+      ]);
+
+      await service.getApplicationDashboardVariables(
+        mockTestRun,
+        mockGrafanaDashboard,
+        mockAutoConfigDashboard,
+        mockGrafanaInstance,
+      );
+
+      // The query sent to the detector should have IN ('BrowseAndSearch','Checkout')
+      const callArgs = variableDetectorService.getValuesFromDatasourceQuery.mock.calls[0];
+      const queryPassedToDetector = callArgs[3] as string;
+      expect(queryPassedToDetector).toContain("IN ('BrowseAndSearch','Checkout')");
+      expect(queryPassedToDetector).not.toContain('IN (BrowseAndSearch|Checkout)');
+    });
+
+    it('should keep pipe-separated substitution for non-IN-clause variable usage', async () => {
+      const mockGrafanaDashboard = createMockDashboard([
+        {
+          name: 'region',
+          type: 'custom',
+          query: 'us-east-1,us-west-2',
+        },
+        {
+          name: 'instance',
+          type: 'query',
+          query: 'SHOW TAG VALUES WHERE region =~ /^$region$/',
+          datasource: { uid: 'influxdb-uid' },
+        },
+      ]);
+
+      const mockAutoConfigDashboard = {
+        dashboardUid: 'test-uid',
+        dashboardName: 'Test Dashboard',
+      };
+
+      variableDetectorService.getValuesFromDatasourceQuery.mockResolvedValue(['server1']);
+
+      await service.getApplicationDashboardVariables(
+        mockTestRun,
+        mockGrafanaDashboard,
+        mockAutoConfigDashboard,
+        mockGrafanaInstance,
+      );
+
+      const callArgs = variableDetectorService.getValuesFromDatasourceQuery.mock.calls[0];
+      const queryPassedToDetector = callArgs[3] as string;
+      // Non-IN clause context should still use pipe-separated format
+      expect(queryPassedToDetector).toContain('us-east-1|us-west-2');
+    });
+
+    it('should properly escape single quotes in values substituted into SQL IN clause', async () => {
+      const mockGrafanaDashboard = createMockDashboard([
+        {
+          name: 'scenarioName',
+          type: 'custom',
+          query: "Browse's,Checkout",
+        },
+        {
+          name: 'transaction',
+          type: 'query',
+          query: "SELECT name FROM t WHERE scenario_name IN ($scenarioName)",
+          datasource: { uid: 'postgres-uid' },
+        },
+      ]);
+
+      const mockAutoConfigDashboard = {
+        dashboardUid: 'test-uid',
+        dashboardName: 'Test Dashboard',
+      };
+
+      variableDetectorService.getValuesFromDatasourceQuery.mockResolvedValue(['tx1']);
+
+      await service.getApplicationDashboardVariables(
+        mockTestRun,
+        mockGrafanaDashboard,
+        mockAutoConfigDashboard,
+        mockGrafanaInstance,
+      );
+
+      const callArgs = variableDetectorService.getValuesFromDatasourceQuery.mock.calls[0];
+      const queryPassedToDetector = callArgs[3] as string;
+      // Single quote in value should be escaped as '' (SQL standard escaping)
+      expect(queryPassedToDetector).toContain("IN ('Browse''s','Checkout')");
+    });
+
     it('should escape special regex characters in variable names', async () => {
       const mockGrafanaDashboard = createMockDashboard([
         {

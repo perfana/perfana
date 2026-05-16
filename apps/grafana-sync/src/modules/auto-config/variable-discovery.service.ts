@@ -115,32 +115,43 @@ export class VariableDiscoveryService {
 
     // Replace other templating variables in query
     applicationDashboardVariables.forEach((applicationDashboardVariable) => {
-      const placeholder = new RegExp(
-        '\\$' + this.variableMatcherService.escapeRegExp(applicationDashboardVariable.name),
-        'g',
+      const varNameEscaped = this.variableMatcherService.escapeRegExp(
+        applicationDashboardVariable.name,
       );
+      const placeholder = new RegExp('\\$' + varNameEscaped, 'g');
 
       if (
         placeholder.test(templatingVariableQuery) &&
         applicationDashboardVariable.name !== 'system_under_test' &&
         applicationDashboardVariable.name !== 'test_environment'
       ) {
+        // Detect SQL IN ($var) context — needs quoted CSV, not pipe-separated regex
+        const inClausePattern = new RegExp(`\\bIN\\s*\\(\\s*\\$${varNameEscaped}\\s*\\)`, 'i');
+        const isInSqlContext = inClausePattern.test(systemUnderTestQuery);
+
         let replaceValue = '';
 
-        applicationDashboardVariable.values.forEach(
-          (applicationDashboardVariableValue, valueIndex) => {
-            const value =
-              applicationDashboardVariableValue === 'All'
-                ? '.*'
-                : applicationDashboardVariableValue;
+        if (isInSqlContext) {
+          // Produce 'val1','val2' so IN ('val1','val2') is valid SQL
+          replaceValue = applicationDashboardVariable.values
+            .map((v) => `'${v.replace(/'/g, "''")}'`)
+            .join(',');
+        } else {
+          applicationDashboardVariable.values.forEach(
+            (applicationDashboardVariableValue, valueIndex) => {
+              const value =
+                applicationDashboardVariableValue === 'All'
+                  ? '.*'
+                  : applicationDashboardVariableValue;
 
-            if (valueIndex === 0) {
-              replaceValue += value;
-            } else {
-              replaceValue += `|${value}`;
-            }
-          },
-        );
+              if (valueIndex === 0) {
+                replaceValue += value;
+              } else {
+                replaceValue += `|${value}`;
+              }
+            },
+          );
+        }
 
         systemUnderTestQuery = systemUnderTestQuery.replace(placeholder, replaceValue);
       }
