@@ -49,13 +49,14 @@ export class TestRunsChangepointService {
         return [];
       }
 
-      // Get all test runs created after the changepoint
+      // Get all finished test runs created after the changepoint.
+      // "Finished" means completed=true (normal end) OR abort=true (aborted end).
+      // Actively running tests (completed=false, abort=false) are excluded.
       const laterTestRuns = await withRequestEm(this.testRunRepo).find({
-        where: {
-          systemUnderTestId,
-          testEnvironment,
-          workload
-        },
+        where: [
+          { systemUnderTestId, testEnvironment, workload, completed: true },
+          { systemUnderTestId, testEnvironment, workload, abort: true },
+        ],
         select: ['testRunId', 'createdAt'],
         order: { createdAt: 'ASC' }
       });
@@ -123,13 +124,14 @@ export class TestRunsChangepointService {
         return { testRunIds: [] };
       }
 
-      // Get all test runs created after the base test run
+      // Get all finished test runs created after the base test run.
+      // "Finished" means completed=true (normal end) OR abort=true (aborted end).
+      // Actively running tests (completed=false, abort=false) are excluded.
       const laterTestRuns = await withRequestEm(this.testRunRepo).find({
-        where: {
-          systemUnderTestId,
-          testEnvironment,
-          workload
-        },
+        where: [
+          { systemUnderTestId, testEnvironment, workload, completed: true },
+          { systemUnderTestId, testEnvironment, workload, abort: true },
+        ],
         select: ['testRunId', 'createdAt'],
         order: { createdAt: 'ASC' }
       });
@@ -341,13 +343,14 @@ export class TestRunsChangepointService {
           // Include the previous changepoint itself
           testRunsToReevaluate = [previousChangepoint.test_run_id, ...testRunsToReevaluate];
         } else {
-          // No previous changepoint, get all test runs
+          // No previous changepoint, get all finished test runs.
+          // "Finished" means completed=true (normal end) OR abort=true (aborted end).
+          // Actively running tests (completed=false, abort=false) are excluded.
           const allTestRuns = await withRequestEm(this.testRunRepo).find({
-            where: {
-              systemUnderTestId,
-              testEnvironment,
-              workload
-            },
+            where: [
+              { systemUnderTestId, testEnvironment, workload, completed: true },
+              { systemUnderTestId, testEnvironment, workload, abort: true },
+            ],
             select: ['testRunId'],
             order: { startTime: 'ASC' }
           });
@@ -408,15 +411,15 @@ export class TestRunsChangepointService {
       });
 
       if (!mostRecentChangepoint) {
-        this.logger.log(`No changepoint found for ${systemUnderTestId}/${testEnvironment}/${workload}, returning all test runs`);
+        this.logger.log(`No changepoint found for ${systemUnderTestId}/${testEnvironment}/${workload}, returning all finished test runs (excluding running)`);
 
-        // Return all test runs for this system/environment/workload when no changepoint exists
+        // "Finished" means completed=true (normal end) OR abort=true (aborted end).
+        // Actively running tests (completed=false, abort=false) are excluded.
         const allTestRuns = await withRequestEm(this.testRunRepo).find({
-          where: {
-            systemUnderTestId,
-            testEnvironment,
-            workload
-          },
+          where: [
+            { systemUnderTestId, testEnvironment, workload, completed: true },
+            { systemUnderTestId, testEnvironment, workload, abort: true },
+          ],
           select: ['testRunId'],
           order: { createdAt: 'ASC' }
         });

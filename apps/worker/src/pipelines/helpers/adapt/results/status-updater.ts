@@ -60,9 +60,15 @@ export class AdaptStatusUpdater {
                   END
               ),
               '{overall}',
-              -- Only set overall when differencesAccepted is 'TBD', otherwise preserve existing value
+              -- Only preserve overall when user explicitly accepted (ACCEPTED).
+              -- For TBD (pending) and DENIED (confirmed regression), always recalculate
+              -- so that adaptTestRunOK=false is reflected in overall.
               CASE
-                  WHEN COALESCE((adapt_config->>'differencesAccepted'), 'TBD') = 'TBD' THEN
+                  WHEN COALESCE((adapt_config->>'differencesAccepted'), 'TBD') = 'ACCEPTED' THEN
+                      -- User explicitly accepted differences: lock overall as-is
+                      COALESCE(consolidated_result->'overall', 'null'::jsonb)
+                  ELSE
+                      -- TBD or DENIED: recalculate overall from current ADAPT findings
                       -- overall requires BOTH meetsRequirement AND adaptTestRunOK
                       CASE WHEN
                           COALESCE((COALESCE(consolidated_result, '{}'::jsonb)->>'meetsRequirement')::boolean, true) AND
@@ -78,9 +84,6 @@ export class AdaptStatusUpdater {
                               )
                           END
                       THEN 'true'::jsonb ELSE 'false'::jsonb END
-                  ELSE
-                      -- Preserve existing overall value when differencesAccepted is not 'TBD'
-                      COALESCE(consolidated_result->'overall', 'null'::jsonb)
               END
           ),
           updated_at = NOW()
