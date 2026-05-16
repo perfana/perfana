@@ -4,6 +4,13 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
+## [0.2.51.0] - 2026-05-16
+
+### Added
+
+- **Dynatrace panels now stored in `ds_panels` during `PanelsPipeline`** — the pipeline previously wrote only Grafana panel records to `ds_panels`; Dynatrace tiles were silently skipped. The pipeline now reads `dynatrace_queries` for the test run's SUT/environment/workload and inserts a panel record per tile (with `datasource_type = 'dynatrace'`), making Dynatrace panels visible in the UI and available to ADAPT checks.
+- **Scheduler log noise reduced** — non-Grafana dashboards that route through the separate `dynatrace_queries` path now log at `debug` instead of `warn`, removing misleading "not yet supported" warnings from normal operation.
+
 ## [0.2.50.1] - 2026-05-15
 
 ### Fixed

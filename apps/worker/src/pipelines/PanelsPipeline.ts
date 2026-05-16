@@ -271,7 +271,7 @@ export class PanelsPipeline extends BasePipelineTypeORM {
       testRunId,
       dq.application_dashboard_id,
       dq.metrics_source_id || null,
-      dq.dashboard_label,
+      null,                          // dashboard_uid — Dynatrace tiles have no Grafana UID
       dq.panel_id,
       dq.panel_title,
       dq.dashboard_label,
@@ -290,7 +290,7 @@ export class PanelsPipeline extends BasePipelineTypeORM {
     ]);
 
     await this.db.query(
-      `INSERT INTO ds_panels (${columns.join(', ')}) VALUES ${placeholders} ON CONFLICT DO NOTHING`,
+      `INSERT INTO ds_panels (${columns.join(', ')}) VALUES ${placeholders}`,
       params
     );
 
