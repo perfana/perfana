@@ -272,7 +272,7 @@ export class TestRunsMutationService {
 
     // Trigger ADAPT analysis
     try {
-      this.logger.log(`Test run ${testRun.test_run_id} completed - triggering ADAPT analysis`);
+      this.logger.log(`Triggering ADAPT analysis for test run ${testRun.test_run_id}`);
       const result = await this.bullmqClientService.analyzeTest(testRun.test_run_id, { adapt: true, benchmarksOnly: false });
       this.logger.log(`ADAPT analysis initiated for test run ${testRun.test_run_id}, job ID: ${result.jobId}`);
     } catch (error) {
