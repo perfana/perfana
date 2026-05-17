@@ -21,6 +21,7 @@ import {
   TestRunStatusChip,
   ProgressBar,
   ResultStatusIcon,
+  AbortTestRunButton,
 } from './index';
 import {
   formatDuration,
@@ -43,6 +44,8 @@ interface TestRunsTableProps {
   onPageChange?: (page: number) => void;
   onPageSizeChange?: (pageSize: number) => void;
   pageLoading?: boolean;
+  showToast?: (message: string) => void;
+  onRefresh?: () => void;
 }
 
 export function TestRunsTable({
@@ -59,6 +62,8 @@ export function TestRunsTable({
   onPageChange,
   onPageSizeChange,
   pageLoading,
+  showToast,
+  onRefresh,
 }: TestRunsTableProps) {
   const router = useRouter();
   const { currentOrganizationId } = useOrganizationContext();
@@ -201,6 +206,21 @@ export function TestRunsTable({
         renderCell: (params) => <ProgressBar testRun={params.row} currentTime={currentTime} />,
         sortable: false,
       },
+      {
+        field: 'actions',
+        headerName: '',
+        width: 60,
+        sortable: false,
+        disableColumnMenu: true,
+        renderCell: (params) => (
+          <AbortTestRunButton
+            testRun={params.row}
+            onAborted={onRefresh ?? (() => {})}
+            showToast={showToast ?? (() => {})}
+            variant="icon"
+          />
+        ),
+      },
     ];
 
     return allColumns.filter(column => {
@@ -210,7 +230,7 @@ export function TestRunsTable({
       return true;
     });
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [systemFilter, environmentFilter, workloadFilter, currentTime]);
+  }, [systemFilter, environmentFilter, workloadFilter, currentTime, showToast, onRefresh]);
 
   // Completed tests columns
   const completedColumns: GridColDef[] = useMemo(() => {
