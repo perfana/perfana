@@ -259,7 +259,15 @@ export class PerfanaClient {
       throw new Error(`Perfana API error ${res.status} for ${path}: ${body}`);
     }
 
-    return res.json() as Promise<T>;
+    const text = await res.text();
+    if (!text.trim()) {
+      throw new Error(`Perfana API returned empty body for ${path} (status: ${res.status})`);
+    }
+    try {
+      return JSON.parse(text) as T;
+    } catch {
+      throw new Error(`Perfana API returned invalid JSON for ${path}: ${text.slice(0, 200)}`);
+    }
   }
 }
 

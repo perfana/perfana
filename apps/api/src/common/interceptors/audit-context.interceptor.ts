@@ -21,21 +21,32 @@ export class AuditContextInterceptor implements NestInterceptor {
   intercept(context: ExecutionContext, next: CallHandler): Observable<unknown> {
     const req = context.switchToHttp().getRequest<{
       user?: { sub?: string; email?: string };
-      authType?: 'keycloak' | 'api-key';
+      authType?: 'keycloak' | 'keycloak-jwt' | 'api-key';
+      apiKey?: { id: string };
       headers?: Record<string, string | string[] | undefined>;
       ip?: string;
       connection?: { remoteAddress?: string };
     }>();
 
-    const userId = req.user?.sub;
+    // JWT auth sets req.user.sub; API key auth sets req.apiKey.id.
+    const userId = req.user?.sub
+      ?? (req.authType === 'api-key' && req.apiKey ? `api-key:${req.apiKey.id}` : undefined);
+
     if (userId) {
+      // Normalize 'keycloak-jwt' (set by KeycloakEnhancedAuthGuard) to 'keycloak'
+      // so RequestContextStore.authType matches its declared union type.
+      const authType: 'keycloak' | 'api-key' | null =
+        req.authType === 'api-key' ? 'api-key'
+        : req.authType != null ? 'keycloak'
+        : null;
+
       const store: RequestContextStore = {
         userId,
         userEmail: req.user?.email ?? null,
         ipAddress: this.extractIp(req),
         userAgent: this.extractUserAgent(req),
         requestId: randomUUID(),
-        authType: req.authType ?? null,
+        authType,
       };
       this.cls.set(REQ_CTX, store);
     }

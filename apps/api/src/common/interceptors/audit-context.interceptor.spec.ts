@@ -82,4 +82,32 @@ describe('AuditContextInterceptor', () => {
       });
     });
   });
+
+  it('populates CLS store from API key request', (done) => {
+    const req = {
+      authType: 'api-key',
+      apiKey: { id: 'key-abc-123' },
+      headers: { 'user-agent': 'perfana-ci/1.0', 'x-forwarded-for': '10.0.0.5' },
+    };
+    cls.run(() => {
+      interceptor.intercept(makeCtx(req), { handle: () => of('r') }).subscribe(() => {
+        const stored = cls.get<RequestContextStore>(REQ_CTX);
+        expect(stored?.userId).toBe('api-key:key-abc-123');
+        expect(stored?.authType).toBe('api-key');
+        expect(stored?.userEmail).toBeNull();
+        expect(stored?.ipAddress).toBe('10.0.0.5');
+        done();
+      });
+    });
+  });
+
+  it('normalizes keycloak-jwt authType to keycloak in the stored context', (done) => {
+    const req = { user: { sub: 'kc-2' }, authType: 'keycloak-jwt', headers: {}, ip: '1.1.1.1' };
+    cls.run(() => {
+      interceptor.intercept(makeCtx(req), { handle: () => of('r') }).subscribe(() => {
+        expect(cls.get<RequestContextStore>(REQ_CTX)?.authType).toBe('keycloak');
+        done();
+      });
+    });
+  });
 });
