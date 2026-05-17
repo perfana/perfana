@@ -231,7 +231,8 @@ export class AdaptValidator {
             COALESCE(status, '{}'),
             '{evaluatingAdapt}',
             '"NO_BASELINES_FOUND"'
-        )
+        ),
+        updated_at = NOW()
         WHERE test_run_id IN (${tooShortPlaceholders})
       `,
         tooShort
@@ -400,12 +401,16 @@ export class AdaptValidator {
           'This test run is a changepoint — a new baseline was established. ' +
           'ADAPT comparison starts fresh from this run.';
       } else if (isTooShort) {
-        const rampUp = info?.ramp_up ?? 0;
-        const duration = info?.duration ?? 0;
-        message =
-          `This test run is too short to analyze — the analysis start offset (${rampUp}s ramp-up) ` +
-          `exceeds the test duration (${duration}s). No steady-state data was available for comparison. ` +
-          'Run a full-duration test to generate ADAPT results.';
+        if (info?.ramp_up != null && info?.duration != null) {
+          message =
+            `This test run is too short to analyze — the analysis start offset (${info.ramp_up}s ramp-up) ` +
+            `exceeds the test duration (${info.duration}s). No steady-state data was available for comparison. ` +
+            'Run a full-duration test to generate ADAPT results.';
+        } else {
+          message =
+            'This test run is too short to analyze — the analysis start offset exceeds the test duration. ' +
+            'No steady-state data was available for comparison. Run a full-duration test to generate ADAPT results.';
+        }
       } else {
         const controlRuns = controlRunMap.get(testRunId) ?? [];
         if (controlRuns.length > 0) {

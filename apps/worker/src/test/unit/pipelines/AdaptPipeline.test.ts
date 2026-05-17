@@ -403,6 +403,35 @@ describe('AdaptPipeline', () => {
       );
     });
 
+    it('should write exclusion conclusions for too-short test runs when all runs are excluded', async () => {
+      // Arrange
+      const input = { testRunIds: ['too-short-run'] };
+
+      vi.spyOn((adaptPipeline as any).validator, 'runPreProcessingValidation')
+        .mockResolvedValue({
+          changepoints: [],
+          tooShortTestRuns: ['too-short-run'],
+          emptyControlGroups: [],
+          processableTestRuns: [],
+        });
+      vi.spyOn((adaptPipeline as any).resultsProcessor, 'processAdaptResults');
+      const exclusionSpy = vi.spyOn((adaptPipeline as any).validator, 'writeExclusionConclusions')
+        .mockResolvedValue(undefined);
+
+      // Act
+      const result = await adaptPipeline.execute(input);
+
+      // Assert
+      expect(result.success).toBe(true);
+      expect(result.data.processedRows).toBe(0);
+      expect(exclusionSpy).toHaveBeenCalledWith(
+        expect.anything(),
+        [],
+        ['too-short-run'],
+        [],
+      );
+    });
+
     it('should not write exclusion conclusions when updateConclusion is false', async () => {
       // Arrange
       const input = { testRunIds: ['no-baseline-1'], updateConclusion: false };
