@@ -15,6 +15,7 @@ import { AuthorizationService } from '../services/authorization.service';
 import { REQ_CTX, RequestContextStore } from '../context/request-context';
 import { REQ_EM } from '../db/request-em';
 import { SKIP_RLS_KEY } from '../db/skip-rls.decorator';
+import { AuthenticatedRequest } from '../../guards/keycloak-enhanced-auth.guard';
 
 /**
  * Phase 5b: Wraps each authenticated request handler in a TypeORM transaction
@@ -66,8 +67,11 @@ export class RlsTransactionInterceptor implements NestInterceptor {
     const reqCtx = this.cls.get<RequestContextStore>(REQ_CTX);
     if (!reqCtx?.userId) return next.handle();
 
-    const req = context.switchToHttp().getRequest<{ user?: { roles?: string[] } }>();
-    const roles = req.user?.roles ?? [];
+    const req = context.switchToHttp().getRequest<AuthenticatedRequest>();
+    // API key auth populates req.apiKey.roles; JWT auth populates req.user.roles.
+    const roles = req.authType === 'api-key'
+      ? (req.apiKey?.roles ?? [])
+      : (req.user?.roles ?? []);
 
     const [orgs, teams] = await Promise.all([
       this.authz.getAccessibleOrganizations(reqCtx.userId),
