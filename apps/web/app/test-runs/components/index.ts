@@ -7,3 +7,4 @@ export { TestRunsFilters } from './TestRunsFilters';
 export { TestRunsTable } from './TestRunsTable';
 export { TestRunsEmptyState } from './TestRunsEmptyState';
 export { BatchActionsToolbar } from './BatchActionsToolbar';
+export { AbortTestRunButton } from './AbortTestRunButton';
