@@ -31,6 +31,8 @@ export interface InputValidationResult {
 export interface PreProcessingValidationResult {
   /** Test runs that have changepoints and should be excluded */
   changepoints: string[];
+  /** Test runs where ramp-up exceeds duration — no steady-state data */
+  tooShortTestRuns: string[];
   /** Test runs with empty control groups that should be excluded */
   emptyControlGroups: string[];
   /** Test runs that can be processed (after filtering) */
@@ -188,6 +190,63 @@ export class AdaptValidator {
   }
 
   /**
+   * Check for test runs where ramp-up time exceeds actual duration.
+   *
+   * These runs have no steady-state window for analysis. They must be caught
+   * before `checkEmptyControlGroups` because the placeholder metric statistics
+   * written for them (mean=0, metric_name='default') would otherwise trigger
+   * the empty-control-group path and produce a misleading message blaming the
+   * baseline runs instead of the current run being too short.
+   */
+  async checkTooShortTestRuns(
+    manager: EntityManager,
+    testRunIds: string[]
+  ): Promise<string[]> {
+    if (testRunIds.length === 0) {
+      return [];
+    }
+
+    const placeholders = testRunIds.map((_: string, i: number) => `$${i + 1}`).join(', ');
+
+    const result = await manager.query(
+      `
+      SELECT test_run_id
+      FROM test_runs
+      WHERE test_run_id IN (${placeholders})
+        AND ramp_up IS NOT NULL
+        AND duration IS NOT NULL
+        AND ramp_up >= duration
+    `,
+      testRunIds
+    );
+
+    const tooShort = result.map((row: { test_run_id: string }) => row.test_run_id);
+
+    if (tooShort.length > 0) {
+      const tooShortPlaceholders = tooShort.map((_: string, i: number) => `$${i + 1}`).join(', ');
+      await manager.query(
+        `
+        UPDATE test_runs
+        SET status = jsonb_set(
+            COALESCE(status, '{}'),
+            '{evaluatingAdapt}',
+            '"NO_BASELINES_FOUND"'
+        ),
+        updated_at = NOW()
+        WHERE test_run_id IN (${tooShortPlaceholders})
+      `,
+        tooShort
+      );
+
+      this.logger.info(
+        `Found ${tooShort.length} test run(s) with ramp-up >= duration (set to NO_BASELINES_FOUND): ${tooShort.join(', ')}`
+      );
+    }
+
+    return tooShort;
+  }
+
+  /**
    * Check for test runs with empty control groups
    *
    * Test runs without control group statistics cannot be compared and are
@@ -271,12 +330,18 @@ export class AdaptValidator {
     const changepoints = await this.checkForChangepoints(manager, testRunIds);
     const nonChangepointTestRuns = testRunIds.filter((id) => !changepoints.includes(id));
 
+    // Detect test runs whose ramp-up exceeds their duration before the empty-control-group
+    // check, which would otherwise misattribute the failure to the baseline runs.
+    const tooShortTestRuns = await this.checkTooShortTestRuns(manager, nonChangepointTestRuns);
+    const candidateTestRuns = nonChangepointTestRuns.filter((id) => !tooShortTestRuns.includes(id));
+
     // Check for empty control groups
-    const emptyControlGroups = await this.checkEmptyControlGroups(manager, nonChangepointTestRuns);
-    const processableTestRuns = nonChangepointTestRuns.filter((id) => !emptyControlGroups.includes(id));
+    const emptyControlGroups = await this.checkEmptyControlGroups(manager, candidateTestRuns);
+    const processableTestRuns = candidateTestRuns.filter((id) => !emptyControlGroups.includes(id));
 
     return {
       changepoints,
+      tooShortTestRuns,
       emptyControlGroups,
       processableTestRuns,
     };
@@ -293,21 +358,22 @@ export class AdaptValidator {
   async writeExclusionConclusions(
     manager: EntityManager,
     changepoints: string[],
+    tooShortTestRuns: string[],
     emptyControlGroups: string[],
   ): Promise<void> {
-    const allExcluded = [...changepoints, ...emptyControlGroups];
+    const allExcluded = [...changepoints, ...tooShortTestRuns, ...emptyControlGroups];
     if (allExcluded.length === 0) { return; }
 
-    // Fetch org/team for ownership columns
+    // Fetch org/team and timing info for all excluded runs
     const idPlaceholders = allExcluded.map((_: string, i: number) => `$${i + 1}`).join(', ');
     const testRunRows = await manager.query(
-      `SELECT test_run_id, organization_id, team_id FROM test_runs WHERE test_run_id IN (${idPlaceholders})`,
+      `SELECT test_run_id, organization_id, team_id, ramp_up, duration FROM test_runs WHERE test_run_id IN (${idPlaceholders})`,
       allExcluded
     );
-    const infoMap = new Map<string, { organization_id: string | null; team_id: string | null }>(
-      testRunRows.map((r: { test_run_id: string; organization_id: string | null; team_id: string | null }) => [
+    const infoMap = new Map<string, { organization_id: string | null; team_id: string | null; ramp_up: number | null; duration: number | null }>(
+      testRunRows.map((r: { test_run_id: string; organization_id: string | null; team_id: string | null; ramp_up: number | null; duration: number | null }) => [
         r.test_run_id,
-        { organization_id: r.organization_id, team_id: r.team_id },
+        { organization_id: r.organization_id, team_id: r.team_id, ramp_up: r.ramp_up, duration: r.duration },
       ])
     );
 
@@ -327,12 +393,24 @@ export class AdaptValidator {
     for (const testRunId of allExcluded) {
       const info = infoMap.get(testRunId);
       const isChangepoint = changepoints.includes(testRunId);
+      const isTooShort = tooShortTestRuns.includes(testRunId);
 
       let message: string;
       if (isChangepoint) {
         message =
           'This test run is a changepoint — a new baseline was established. ' +
           'ADAPT comparison starts fresh from this run.';
+      } else if (isTooShort) {
+        if (info?.ramp_up != null && info?.duration != null) {
+          message =
+            `This test run is too short to analyze — the analysis start offset (${info.ramp_up}s ramp-up) ` +
+            `exceeds the test duration (${info.duration}s). No steady-state data was available for comparison. ` +
+            'Run a full-duration test to generate ADAPT results.';
+        } else {
+          message =
+            'This test run is too short to analyze — the analysis start offset exceeds the test duration. ' +
+            'No steady-state data was available for comparison. Run a full-duration test to generate ADAPT results.';
+        }
       } else {
         const controlRuns = controlRunMap.get(testRunId) ?? [];
         if (controlRuns.length > 0) {

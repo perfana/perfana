@@ -107,6 +107,7 @@ export class AdaptPipeline extends BasePipelineTypeORM {
             await this.validator.writeExclusionConclusions(
               manager,
               preValidation.changepoints,
+              preValidation.tooShortTestRuns,
               preValidation.emptyControlGroups,
             );
             subStages.push({ stage: 'write-exclusion-conclusions', duration: Date.now() - conclusionStart });

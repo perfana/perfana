@@ -4,6 +4,12 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
+## [0.2.54.0] - 2026-05-17
+
+### Fixed
+
+- **ADAPT shows accurate message for test runs with no steady-state data**: when the analysis start offset (ramp-up) equals or exceeds the test duration, ADAPT now reports that the *current* run is too short to analyze — including the exact ramp-up and duration in seconds — instead of incorrectly blaming the baseline/control runs. Previously, placeholder metric rows written for these runs caused a false "empty control group" classification, producing a misleading message that the baseline runs contained insufficient metrics.
+
 ## [0.2.53.1] - 2026-05-17
 
 ### Fixed
