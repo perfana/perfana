@@ -1,4 +1,4 @@
-import { Controller, Get, Delete, Post, Put, Param, Query, Body, ParseUUIDPipe, HttpCode, HttpStatus, Logger } from '@nestjs/common';
+import { Controller, Get, Delete, Post, Put, Patch, Param, Query, Body, ParseUUIDPipe, HttpCode, HttpStatus, Logger } from '@nestjs/common';
 import { ApiTags, ApiOperation, ApiResponse, ApiQuery, ApiParam, ApiBearerAuth, ApiBody } from '@nestjs/swagger';
 import { TestRunsService } from '../test-runs.service';
 import { PaginationQueryDto, TestRunQueryDto } from '../../../common/dto';
@@ -240,6 +240,21 @@ export class TestRunsController {
     }
 
     return this.testRunsService.updateAnalysisStartOffset(id, body.analysisStartOffset, ctx.userId, ctx.roles);
+  }
+
+  @Patch(':id/abort')
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({ summary: 'Abort a running test run', description: 'Sets abort=true and records who triggered it. Rejected if already completed or aborted.' })
+  @ApiParam({ name: 'id', description: 'Test run UUID', example: '550e8400-e29b-41d4-a716-446655440000' })
+  @ApiResponse({ status: 200, description: 'Test run aborted successfully' })
+  @ApiResponse({ status: 400, description: 'Test run already completed or already aborted' })
+  @ApiResponse({ status: 404, description: 'Test run not found' })
+  async abortTestRun(
+    @Param('id', ParseUUIDPipe) id: string,
+    @UserCtx() ctx: UserContext,
+  ) {
+    const userIdentifier = ctx.email ?? ctx.userId;
+    return this.testRunsService.abortTestRun(id, ctx.userId, ctx.roles, userIdentifier);
   }
 
   @Delete(':id')
