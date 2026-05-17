@@ -295,6 +295,10 @@ export class TestRunsService {
     return this.mutationService.deleteTestRun(id, userId, roles);
   }
 
+  async abortTestRun(id: string, userId: string, roles: string[], userIdentifier: string): Promise<TestRun> {
+    return this.mutationService.abortTestRun(id, userId, roles, userIdentifier);
+  }
+
   async updateTags(id: string, tags: string[], userId: string, roles: string[]): Promise<TestRun> {
     return this.mutationService.updateTags(id, tags, userId, roles);
   }

@@ -21,6 +21,8 @@ import { TestRunsMetricsService } from './test-runs-metrics.service';
 import { createMockRepository, MockRepository } from '../../../../test/helpers/mock-repository.factory';
 import { createAuthorizationServiceMock } from '../../../../test/mocks/authorization-service.mock';
 import { AuthorizationService } from '../../../common/services/authorization.service';
+import { AuditService } from '../../audit/audit.service';
+import { NotFoundException, BadRequestException } from '@nestjs/common';
 
 describe('TestRunsMutationService', () => {
   let service: TestRunsMutationService;
@@ -34,6 +36,7 @@ describe('TestRunsMutationService', () => {
   let updateAdaptConfigHandler: jest.Mocked<UpdateAdaptConfigHandler>;
   let initTestHandler: jest.Mocked<InitTestHandler>;
   let lookupService: jest.Mocked<TestRunLookupService>;
+  let auditService: jest.Mocked<AuditService>;
 
   const createMockTestRunEntity = (overrides?: Partial<TestRunEntity>): TestRunEntity => {
     const now = new Date();
@@ -145,10 +148,15 @@ describe('TestRunsMutationService', () => {
           provide: AuthorizationService,
           useValue: createAuthorizationServiceMock(),
         },
+        {
+          provide: AuditService,
+          useValue: { logUpdate: jest.fn(), logCreate: jest.fn(), logDelete: jest.fn() },
+        },
       ],
     }).compile();
 
     service = module.get<TestRunsMutationService>(TestRunsMutationService);
+    auditService = module.get(AuditService);
     testRunRepo = module.get(getRepositoryToken(TestRunEntity));
     bullmqClientService = module.get(BullMQClientService);
     createTestRunHandler = module.get(CreateTestRunHandler);
@@ -502,6 +510,48 @@ describe('TestRunsMutationService', () => {
       const result = await service.findTestRun('test-001', 'sys-123', 'production', 'loadTest');
 
       expect(result).toBeNull();
+    });
+  });
+
+  describe('abortTestRun', () => {
+    const userId = 'user-uuid-123';
+    const userIdentifier = 'test@example.com';
+
+    it('should abort a running test run', async () => {
+      const entity = createMockTestRunEntity({ completed: false, abort: false });
+      testRunRepo.findOne.mockResolvedValue(entity);
+      testRunRepo.save.mockResolvedValue({ ...entity, abort: true, abortMessage: `Aborted manually by ${userIdentifier}` });
+
+      const result = await service.abortTestRun(entity.id, userId, [], userIdentifier);
+
+      expect(testRunRepo.save).toHaveBeenCalledWith(
+        expect.objectContaining({ abort: true, abortMessage: `Aborted manually by ${userIdentifier}`, updatedBy: userId }),
+      );
+      expect(auditService.logUpdate).toHaveBeenCalledTimes(1);
+      expect(result.abort).toBe(true);
+    });
+
+    it('should throw NotFoundException when test run does not exist', async () => {
+      testRunRepo.findOne.mockResolvedValue(null);
+
+      await expect(service.abortTestRun('no-such-id', userId, [], userIdentifier))
+        .rejects.toThrow(NotFoundException);
+    });
+
+    it('should throw BadRequestException when test run is already completed', async () => {
+      const entity = createMockTestRunEntity({ completed: true, abort: false });
+      testRunRepo.findOne.mockResolvedValue(entity);
+
+      await expect(service.abortTestRun(entity.id, userId, [], userIdentifier))
+        .rejects.toThrow(BadRequestException);
+    });
+
+    it('should throw BadRequestException when test run is already aborted', async () => {
+      const entity = createMockTestRunEntity({ completed: false, abort: true });
+      testRunRepo.findOne.mockResolvedValue(entity);
+
+      await expect(service.abortTestRun(entity.id, userId, [], userIdentifier))
+        .rejects.toThrow(BadRequestException);
     });
   });
 });
