@@ -4,7 +4,7 @@ import { ArrowBack, NavigateBefore, NavigateNext } from '@mui/icons-material';
 import { useRouter } from 'next/navigation';
 import { TestRun } from '@/types/test-runs';
 import TestRunActionsMenu from './TestRunActionsMenu';
-import { AbortTestRunButton } from '../../components/AbortTestRunButton';
+import { AbortTestRunButton } from '../../../components/AbortTestRunButton';
 
 interface RelatedTestRun {
   test_run_id: string;
