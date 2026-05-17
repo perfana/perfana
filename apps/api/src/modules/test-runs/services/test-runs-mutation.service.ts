@@ -152,7 +152,7 @@ export class TestRunsMutationService {
 
     await withRequestEm(this.testRunRepo).save(entity);
 
-    this.auditService.logUpdate(
+    await this.auditService.logUpdate(
       before as unknown as OwnedResource,
       entity as unknown as OwnedResource,
       { organizationIdOverride: entity.organizationId },

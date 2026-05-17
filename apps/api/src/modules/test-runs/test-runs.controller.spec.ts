@@ -342,6 +342,16 @@ describe('TestRunsController', () => {
 
         expect(service.abortTestRun).toHaveBeenCalledWith('uuid-123', mockUserContext.userId, mockUserContext.roles, mockUserContext.userId);
       });
+
+      it('should propagate ForbiddenException when verifyTestRunAccess rejects', async () => {
+        const { ForbiddenException } = await import('@nestjs/common');
+        jest.spyOn(service, 'verifyTestRunAccess').mockRejectedValue(new ForbiddenException());
+
+        await expect(
+          controller.abortTestRun('uuid-123', mockUserContext as any),
+        ).rejects.toThrow(ForbiddenException);
+        expect(service.abortTestRun).not.toHaveBeenCalled();
+      });
     });
   });
 

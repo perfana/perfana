@@ -248,11 +248,13 @@ export class TestRunsController {
   @ApiParam({ name: 'id', description: 'Test run UUID', example: '550e8400-e29b-41d4-a716-446655440000' })
   @ApiResponse({ status: 200, description: 'Test run aborted successfully' })
   @ApiResponse({ status: 400, description: 'Test run already completed or already aborted' })
+  @ApiResponse({ status: 403, description: 'Access denied to this test run' })
   @ApiResponse({ status: 404, description: 'Test run not found' })
   async abortTestRun(
     @Param('id', ParseUUIDPipe) id: string,
     @UserCtx() ctx: UserContext,
   ) {
+    await this.testRunsService.verifyTestRunAccess(id, ctx.userId, ctx.roles);
     const userIdentifier = ctx.email ?? ctx.userId;
     return this.testRunsService.abortTestRun(id, ctx.userId, ctx.roles, userIdentifier);
   }
