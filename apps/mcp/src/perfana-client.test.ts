@@ -6,12 +6,13 @@ import { PerfanaClient } from './perfana-client.js';
 
 const originalFetch = globalThis.fetch;
 
-function mockFetch(status: number, body: unknown) {
+function mockFetch(status: number, body: unknown, rawText?: string) {
+  const text = rawText ?? JSON.stringify(body);
   const fn = mock.fn(async () => ({
     ok: status >= 200 && status < 300,
     status,
     json: async () => body,
-    text: async () => JSON.stringify(body),
+    text: async () => text,
   }));
   globalThis.fetch = fn as unknown as typeof fetch;
   return fn;
@@ -225,6 +226,53 @@ describe('PerfanaClient', () => {
 
       const url = (fetchMock.mock.calls[0] as { arguments: unknown[] }).arguments[0] as string;
       assert.equal(url, 'http://localhost:3001/api/adapt/conclusion/run-1/enriched');
+    });
+  });
+
+  // ─── Empty-body / invalid-JSON guard (PerfanaClient.get) ──────────────────
+
+  describe('empty-body and invalid-JSON guard', () => {
+    it('throws descriptive error when API returns empty body on 200', async () => {
+      mockFetch(200, null, '');
+      await assert.rejects(
+        () => client.getAdaptConclusion('run-3'),
+        (err: Error) => {
+          assert.ok(err.message.includes('empty body'), `unexpected: ${err.message}`);
+          assert.ok(err.message.includes('/adapt/conclusion/run-3/enriched'));
+          assert.ok(err.message.includes('status: 200'));
+          return true;
+        },
+      );
+    });
+
+    it('throws descriptive error when API returns whitespace-only body', async () => {
+      mockFetch(200, null, '   \n  ');
+      await assert.rejects(
+        () => client.getAdaptConclusion('run-4'),
+        (err: Error) => {
+          assert.ok(err.message.includes('empty body'), `unexpected: ${err.message}`);
+          return true;
+        },
+      );
+    });
+
+    it('throws descriptive error when API returns non-JSON body', async () => {
+      mockFetch(200, null, 'not valid json {{{');
+      await assert.rejects(
+        () => client.getAdaptConclusion('run-5'),
+        (err: Error) => {
+          assert.ok(err.message.includes('invalid JSON'), `unexpected: ${err.message}`);
+          assert.ok(err.message.includes('/adapt/conclusion/run-5/enriched'));
+          return true;
+        },
+      );
+    });
+
+    it('returns parsed data when body is valid JSON', async () => {
+      const payload = { conclusion: 'passed', regressions: [] };
+      mockFetch(200, payload);
+      const result = await client.getAdaptConclusion('run-6');
+      assert.deepEqual(result, payload);
     });
   });
 

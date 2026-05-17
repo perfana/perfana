@@ -1,4 +1,4 @@
-import { Controller, Get, Post, Param, Query, Body, BadRequestException } from '@nestjs/common';
+import { Controller, Get, Post, Param, Query, Body, BadRequestException, NotFoundException } from '@nestjs/common';
 import { ApiTags, ApiOperation, ApiResponse, ApiQuery } from '@nestjs/swagger';
 import { AdaptService } from './adapt.service';
 import {
@@ -88,7 +88,11 @@ export class AdaptController {
       throw new ValidationException('testRunId is required');
     }
 
-    return this.adaptService.getDsAdaptConclusion(testRunId, ctx.userId, ctx.roles);
+    const result = await this.adaptService.getDsAdaptConclusion(testRunId, ctx.userId, ctx.roles);
+    if (!result) {
+      throw new NotFoundException(`Adapt conclusion not found for test run ${testRunId}`);
+    }
+    return result;
   }
 
   @Get('conclusion/:testRunId/enriched')
@@ -100,7 +104,11 @@ export class AdaptController {
       throw new ValidationException('testRunId is required');
     }
 
-    return this.adaptService.getEnrichedConclusion(testRunId, ctx.userId, ctx.roles);
+    const result = await this.adaptService.getEnrichedConclusion(testRunId, ctx.userId, ctx.roles);
+    if (!result) {
+      throw new NotFoundException(`Adapt conclusion not found for test run ${testRunId}`);
+    }
+    return result;
   }
 
   @Post('tracked-regressions/resolve')
