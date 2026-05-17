@@ -4,6 +4,12 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
+## [0.2.53.1] - 2026-05-17
+
+### Fixed
+
+- **Abort triggers ADAPT analysis**: aborting a test run from the UI now enqueues an ADAPT analysis job for the data collected up to the abort point, matching the behaviour of a normal test completion. Previously the abort endpoint set `abort=true` and saved but never triggered analysis, leaving aborted runs without check results.
+
 ## [0.2.53.0] - 2026-05-17
 
 ### Added
