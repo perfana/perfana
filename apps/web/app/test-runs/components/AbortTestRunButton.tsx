@@ -17,8 +17,8 @@ import { authenticatedFetch } from '@/lib/api';
 
 interface AbortTestRunButtonProps {
   testRun: TestRun;
-  onAborted: () => void;
-  showToast: (message: string) => void;
+  onAborted?: () => void;
+  showToast?: (message: string) => void;
   variant?: 'icon' | 'button';
 }
 
@@ -36,13 +36,13 @@ export function AbortTestRunButton({ testRun, onAborted, showToast, variant = 'i
         const data = await response.json().catch(() => ({}));
         throw new Error((data as { message?: string }).message || 'Failed to abort test run');
       }
-      showToast('Test run aborted successfully');
-      onAborted();
+      showToast?.('Test run aborted successfully');
+      onAborted?.();
     } catch (err) {
       const msg = err && typeof err === 'object' && 'message' in err
         ? (err as Error).message
         : 'Failed to abort test run';
-      showToast(msg);
+      showToast?.(msg);
     } finally {
       setLoading(false);
       setConfirmOpen(false);

@@ -215,8 +215,8 @@ export function TestRunsTable({
         renderCell: (params) => (
           <AbortTestRunButton
             testRun={params.row}
-            onAborted={onRefresh ?? (() => {})}
-            showToast={showToast ?? (() => {})}
+            onAborted={onRefresh}
+            showToast={showToast}
             variant="icon"
           />
         ),

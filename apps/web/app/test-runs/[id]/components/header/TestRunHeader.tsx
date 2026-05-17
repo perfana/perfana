@@ -154,8 +154,8 @@ export default function TestRunHeader({
               <Divider orientation="vertical" flexItem sx={{ mx: 1 }} />
               <AbortTestRunButton
                 testRun={testRun}
-                onAborted={onRefresh ?? (() => {})}
-                showToast={onSuccess ?? (() => {})}
+                onAborted={onRefresh}
+                showToast={onSuccess}
                 variant="button"
               />
               <TestRunActionsMenu
