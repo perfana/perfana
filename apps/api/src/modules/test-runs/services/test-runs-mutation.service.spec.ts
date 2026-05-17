@@ -517,10 +517,11 @@ describe('TestRunsMutationService', () => {
     const userId = 'user-uuid-123';
     const userIdentifier = 'test@example.com';
 
-    it('should abort a running test run', async () => {
+    it('should abort a running test run and trigger analysis', async () => {
       const entity = createMockTestRunEntity({ completed: false, abort: false });
       testRunRepo.findOne.mockResolvedValue(entity);
       testRunRepo.save.mockResolvedValue({ ...entity, abort: true, abortMessage: `Aborted manually by ${userIdentifier}` });
+      bullmqClientService.analyzeTest.mockResolvedValue({ jobId: 'job-abort-123' });
 
       const result = await service.abortTestRun(entity.id, userId, [], userIdentifier);
 
@@ -529,6 +530,19 @@ describe('TestRunsMutationService', () => {
       );
       expect(auditService.logUpdate).toHaveBeenCalledTimes(1);
       expect(result.abort).toBe(true);
+      expect(bullmqClientService.analyzeTest).toHaveBeenCalledWith(entity.testRunId, { adapt: true, benchmarksOnly: false });
+    });
+
+    it('should still abort successfully if analysis job fails to enqueue', async () => {
+      const entity = createMockTestRunEntity({ completed: false, abort: false });
+      testRunRepo.findOne.mockResolvedValue(entity);
+      testRunRepo.save.mockResolvedValue({ ...entity, abort: true, abortMessage: `Aborted manually by ${userIdentifier}` });
+      bullmqClientService.analyzeTest.mockRejectedValue(new Error('Queue unavailable'));
+
+      const result = await service.abortTestRun(entity.id, userId, [], userIdentifier);
+
+      expect(result.abort).toBe(true);
+      expect(bullmqClientService.analyzeTest).toHaveBeenCalledTimes(1);
     });
 
     it('should throw NotFoundException when test run does not exist', async () => {

@@ -158,7 +158,13 @@ export class TestRunsMutationService {
       { organizationIdOverride: entity.organizationId },
     );
 
-    return mapEntityToTestRun(entity);
+    const testRun = mapEntityToTestRun(entity);
+
+    // Trigger analysis for aborted runs so results collected up to the abort
+    // point are evaluated by ADAPT (same path as a normal completion).
+    await this.handleCompletedTest(testRun);
+
+    return testRun;
   }
 
   async findOrCreateSystemUnderTest(
