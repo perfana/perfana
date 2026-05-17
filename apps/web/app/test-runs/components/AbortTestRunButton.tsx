@@ -86,7 +86,7 @@ export function AbortTestRunButton({ testRun, onAborted, showToast, variant = 'i
         </DialogContent>
         <DialogActions>
           <Button onClick={() => setConfirmOpen(false)} disabled={loading}>Cancel</Button>
-          <Button onClick={handleAbort} color="error" variant="contained" disabled={loading}>
+          <Button onClick={handleAbort} color="error" variant="contained" disabled={loading} data-testid="confirm-abort">
             Abort
           </Button>
         </DialogActions>

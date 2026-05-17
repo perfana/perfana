@@ -104,7 +104,7 @@ describe('AbortTestRunButton', () => {
     it('calls PATCH /test-runs/:id/abort on confirm', async () => {
       render(<AbortTestRunButton testRun={makeTestRun()} />);
       fireEvent.click(screen.getByRole('button', { name: 'abort test run' }));
-      fireEvent.click(screen.getAllByRole('button', { name: /abort/i }).find(b => b.closest('[role="dialog"]'))!);
+      fireEvent.click(screen.getByTestId('confirm-abort'));
       await waitFor(() => {
         expect(mockFetch).toHaveBeenCalledWith('/test-runs/tr-uuid-1/abort', { method: 'PATCH' });
       });
@@ -117,7 +117,7 @@ describe('AbortTestRunButton', () => {
         <AbortTestRunButton testRun={makeTestRun()} onAborted={onAborted} showToast={showToast} />
       );
       fireEvent.click(screen.getByRole('button', { name: 'abort test run' }));
-      fireEvent.click(screen.getAllByRole('button', { name: /abort/i }).find(b => b.closest('[role="dialog"]'))!);
+      fireEvent.click(screen.getByTestId('confirm-abort'));
       await waitFor(() => {
         expect(showToast).toHaveBeenCalledWith('Test run aborted successfully');
         expect(onAborted).toHaveBeenCalled();
@@ -135,7 +135,7 @@ describe('AbortTestRunButton', () => {
         <AbortTestRunButton testRun={makeTestRun()} onAborted={onAborted} showToast={showToast} />
       );
       fireEvent.click(screen.getByRole('button', { name: 'abort test run' }));
-      fireEvent.click(screen.getAllByRole('button', { name: /abort/i }).find(b => b.closest('[role="dialog"]'))!);
+      fireEvent.click(screen.getByTestId('confirm-abort'));
       await waitFor(() => {
         expect(showToast).toHaveBeenCalledWith('Test run is already completed');
         expect(onAborted).not.toHaveBeenCalled();
@@ -145,7 +145,7 @@ describe('AbortTestRunButton', () => {
     it('works without optional callbacks (no crash)', async () => {
       render(<AbortTestRunButton testRun={makeTestRun()} />);
       fireEvent.click(screen.getByRole('button', { name: 'abort test run' }));
-      fireEvent.click(screen.getAllByRole('button', { name: /abort/i }).find(b => b.closest('[role="dialog"]'))!);
+      fireEvent.click(screen.getByTestId('confirm-abort'));
       await waitFor(() => {
         expect(mockFetch).toHaveBeenCalled();
       });
