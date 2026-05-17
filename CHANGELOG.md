@@ -4,6 +4,15 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
+## [0.2.52.0] - 2026-05-17
+
+### Fixed
+
+- **MCP `get_adapt_results`**: tool no longer throws "Unexpected end of JSON input" when the Adapt conclusion endpoint returns an empty body; the HTTP client now reads the response as text first and emits a clear error describing the status code and path
+- **Adapt controller**: `GET /adapt/conclusion/:testRunId` and `GET /adapt/conclusion/:testRunId/enriched` now return HTTP 404 (with a descriptive message) instead of HTTP 200 with an empty body when no conclusion exists for the given test run
+- **RLS transaction interceptor**: API key requests now pass the correct role set into the Postgres GUC (`app.current_user_roles`); previously the interceptor always read from `req.user.roles` which is `undefined` for API key auth, silently setting an empty roles array
+- **Audit context interceptor**: API key requests now populate the per-request CLS store (`REQ_CTX`) using the API key's own user ID, making the RLS transaction interceptor reachable for API key auth; also normalises the `keycloak-jwt` auth type to `keycloak` so the stored value always matches the declared `RequestContextStore` union type
+
 ## [0.2.51.3] - 2026-05-16
 
 ### Fixed
