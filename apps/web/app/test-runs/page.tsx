@@ -237,6 +237,8 @@ export default function TestRunsPage() {
           variant="running"
           onSelectAll={() => handleSelectAll(testRuns)}
           onSelectOne={handleSelectOne}
+          showToast={(msg) => handleSnackbar({ open: true, message: msg })}
+          onRefresh={loadTestRuns}
         />
       )}
 

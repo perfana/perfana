@@ -78,6 +78,7 @@ const mockServiceFactory = () => ({
   getBaselineCandidates: jest.fn(),
   recordTestRunView: jest.fn().mockResolvedValue(undefined),
   verifyTestRunAccess: jest.fn().mockResolvedValue(undefined),
+  abortTestRun: jest.fn(),
 });
 
 // =============================================================================
@@ -317,6 +318,39 @@ describe('TestRunsController', () => {
           message: 'Test run deletion queued',
           status: 'queued',
         });
+      });
+    });
+
+    describe('PATCH /test-runs/:id/abort', () => {
+      it('should abort a running test run', async () => {
+        const mockResult = { id: 'uuid-123', test_run_id: 'run-001', abort: true, abort_message: 'Aborted manually by test@example.com', completed: false };
+        jest.spyOn(service, 'abortTestRun').mockResolvedValue(mockResult as any);
+
+        const ctx = { ...mockUserContext, email: 'test@example.com' };
+        const result = await controller.abortTestRun('uuid-123', ctx as any);
+
+        expect(service.abortTestRun).toHaveBeenCalledWith('uuid-123', mockUserContext.userId, mockUserContext.roles, 'test@example.com');
+        expect(result).toEqual(mockResult);
+      });
+
+      it('should fall back to userId when email is not present', async () => {
+        const mockResult = { id: 'uuid-123', abort: true, abort_message: 'Aborted manually by test-user-123', completed: false };
+        jest.spyOn(service, 'abortTestRun').mockResolvedValue(mockResult as any);
+
+        const ctx = { ...mockUserContext, email: undefined };
+        await controller.abortTestRun('uuid-123', ctx as any);
+
+        expect(service.abortTestRun).toHaveBeenCalledWith('uuid-123', mockUserContext.userId, mockUserContext.roles, mockUserContext.userId);
+      });
+
+      it('should propagate ForbiddenException when verifyTestRunAccess rejects', async () => {
+        const { ForbiddenException } = await import('@nestjs/common');
+        jest.spyOn(service, 'verifyTestRunAccess').mockRejectedValue(new ForbiddenException());
+
+        await expect(
+          controller.abortTestRun('uuid-123', mockUserContext as any),
+        ).rejects.toThrow(ForbiddenException);
+        expect(service.abortTestRun).not.toHaveBeenCalled();
       });
     });
   });

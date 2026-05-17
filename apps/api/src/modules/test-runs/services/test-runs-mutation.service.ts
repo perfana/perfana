@@ -13,11 +13,11 @@
  * @pattern Orchestrator Pattern + Command Pattern
  */
 
-import { Injectable, Logger } from '@nestjs/common';
+import { Injectable, Logger, NotFoundException, BadRequestException } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { withRequestEm } from '../../../common/db/request-em';
-import { TestRun as TestRunEntity } from '../../../entities';
+import { TestRun as TestRunEntity, OwnedResource } from '../../../entities';
 import { UpdateRunningTestDto } from '../dto/update-running-test.dto';
 import { InitTestDto, InitTestResponse } from '../dto/init-test.dto';
 import { ResourceExistsException, DatabaseException } from '../../../common/exceptions/business.exception';
@@ -37,6 +37,7 @@ import { TestRunLookupService } from './test-run-lookup.service';
 import { TestRunsMetricsService } from './test-runs-metrics.service';
 import { TestRun, SystemUnderTest, TestEnvironment, Workload } from '../types/test-run.types';
 import { mapEntityToTestRun } from '../handlers/entity-mapper';
+import { AuditService } from '../../audit/audit.service';
 
 // Re-export types for backward compatibility
 export { TestRun, SystemUnderTest, TestEnvironment, Workload };
@@ -59,6 +60,7 @@ export class TestRunsMutationService {
     private readonly initTestHandler: InitTestHandler,
     private readonly lookupService: TestRunLookupService,
     private readonly metricsService: TestRunsMetricsService,
+    private readonly auditService: AuditService,
   ) {}
 
   /**
@@ -117,6 +119,46 @@ export class TestRunsMutationService {
     }
 
     return testRun;
+  }
+
+  /**
+   * Abort a running test run.
+   *
+   * @param id - The test run UUID
+   * @param userId - The user ID for ownership tracking
+   * @param _roles - The user's roles (reserved for future authorization)
+   * @param userIdentifier - Human-readable identifier (email) for the abort message
+   */
+  async abortTestRun(id: string, userId: string, _roles: string[], userIdentifier: string): Promise<TestRun> {
+    const entity = await withRequestEm(this.testRunRepo).findOne({ where: { id } });
+
+    if (!entity) {
+      throw new NotFoundException(`Test run not found: ${id}`);
+    }
+
+    if (entity.completed) {
+      throw new BadRequestException('Test run is already completed');
+    }
+
+    if (entity.abort) {
+      throw new BadRequestException('Test run is already aborted');
+    }
+
+    const before = { ...entity };
+
+    entity.abort = true;
+    entity.abortMessage = `Aborted manually by ${userIdentifier}`;
+    entity.updatedBy = userId;
+
+    await withRequestEm(this.testRunRepo).save(entity);
+
+    await this.auditService.logUpdate(
+      before as unknown as OwnedResource,
+      entity as unknown as OwnedResource,
+      { organizationIdOverride: entity.organizationId },
+    );
+
+    return mapEntityToTestRun(entity);
   }
 
   async findOrCreateSystemUnderTest(

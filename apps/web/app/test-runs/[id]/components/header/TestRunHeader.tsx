@@ -4,6 +4,7 @@ import { ArrowBack, NavigateBefore, NavigateNext } from '@mui/icons-material';
 import { useRouter } from 'next/navigation';
 import { TestRun } from '@/types/test-runs';
 import TestRunActionsMenu from './TestRunActionsMenu';
+import { AbortTestRunButton } from '../../../components/AbortTestRunButton';
 
 interface RelatedTestRun {
   test_run_id: string;
@@ -151,6 +152,12 @@ export default function TestRunHeader({
           {testRun && (
             <>
               <Divider orientation="vertical" flexItem sx={{ mx: 1 }} />
+              <AbortTestRunButton
+                testRun={testRun}
+                onAborted={onRefresh}
+                showToast={onSuccess}
+                variant="button"
+              />
               <TestRunActionsMenu
                 testRun={testRun}
                 onSuccess={onSuccess}

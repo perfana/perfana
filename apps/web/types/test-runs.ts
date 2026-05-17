@@ -109,6 +109,7 @@ export interface TestRun {
   analysis_start_offset?: number;
   completed: boolean;
   abort?: boolean;
+  abort_message?: string;
   is_stale?: boolean;
   stale_detected_at?: string;
   completion_percentage?: number;

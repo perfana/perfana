@@ -66,7 +66,7 @@ export class UpdateTestRunHandler implements ICommandHandler<UpdateTestRunComman
         ciBuildResultsUrl: data.ciBuildResultsUrl || '',
         annotations: data.annotations || [],
         tags: data.tags || [],
-        abort: data.abort || false,
+        abort: data.abort === true ? true : (before?.abort ?? false),
         variables: data.variables,
         endTime: data.endTime || new Date(),
         updatedBy: data.updatedBy,

@@ -4,6 +4,16 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
+## [0.2.53.0] - 2026-05-17
+
+### Added
+
+- **Abort running test run**: operators can now abort an in-progress test run directly from the test run list (icon button) or the test run detail header (outlined button). Clicking either opens a confirmation dialog; on confirm, `PATCH /test-runs/:id/abort` sets `abort=true` and records `abortMessage` with the triggering user's identity. The endpoint enforces access control, rejects requests for already-completed or already-aborted runs with HTTP 400, and writes an audit event. A race-condition fix ensures that subsequent agent heartbeats (`PUT /test`) can never silently clear the abort flag once it has been set.
+
+### Fixed
+
+- **Abort flag preserved across agent heartbeats**: the test-run update handler previously used `data.abort || false`, which caused any agent heartbeat without an explicit `abort: true` payload to overwrite an operator-set abort flag back to `false`. The handler now uses `data.abort === true ? true : (before?.abort ?? false)`, preserving the existing DB value when the incoming payload does not explicitly request an abort.
+
 ## [0.2.52.0] - 2026-05-17
 
 ### Fixed
