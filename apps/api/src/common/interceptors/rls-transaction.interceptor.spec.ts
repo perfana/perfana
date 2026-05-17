@@ -15,6 +15,8 @@ function makeInterceptor(opts: {
   orgs: string[];
   teams: string[];
   skipRls?: boolean;
+  authType?: 'api-key' | 'keycloak-jwt';
+  apiKey?: { roles: string[] };
 }) {
   const queries: Array<{ q: string; params?: unknown[] }> = [];
   const txn = jest.fn(async (cb: (em: unknown) => Promise<unknown>) => {
@@ -50,7 +52,13 @@ function makeInterceptor(opts: {
   );
 
   const ctx = {
-    switchToHttp: () => ({ getRequest: () => ({ user: opts.user }) }),
+    switchToHttp: () => ({
+      getRequest: () => ({
+        user: opts.user,
+        authType: opts.authType,
+        apiKey: opts.apiKey,
+      }),
+    }),
     getHandler: () => () => undefined,
     getClass: () => class C {},
   } as unknown as Parameters<typeof interceptor.intercept>[0];
@@ -132,5 +140,39 @@ describe('RlsTransactionInterceptor', () => {
     const obs = await interceptor.intercept(ctx, next);
     await expect(lastValueFrom(obs)).rejects.toThrow('handler boom');
     expect(txn).toHaveBeenCalledTimes(1);
+  });
+
+  it('reads roles from req.apiKey.roles when authType is api-key', async () => {
+    const { interceptor, ctx, queries } = makeInterceptor({
+      flagEnabled: true,
+      reqCtx: { userId: 'api-key:k1' },
+      user: null,
+      orgs: ['org-X'],
+      teams: [],
+      authType: 'api-key',
+      apiKey: { roles: ['org-admin'] },
+    });
+    const next = { handle: () => of('ok') };
+    const obs = await interceptor.intercept(ctx, next);
+    await lastValueFrom(obs);
+    const rolesQuery = queries.find(q => q.q.includes('current_user_roles'));
+    expect(rolesQuery?.params).toEqual(['["org-admin"]']);
+  });
+
+  it('falls back to empty roles when authType is api-key but apiKey is absent', async () => {
+    const { interceptor, ctx, queries } = makeInterceptor({
+      flagEnabled: true,
+      reqCtx: { userId: 'api-key:k2' },
+      user: null,
+      orgs: [],
+      teams: [],
+      authType: 'api-key',
+      apiKey: undefined,
+    });
+    const next = { handle: () => of('ok') };
+    const obs = await interceptor.intercept(ctx, next);
+    await lastValueFrom(obs);
+    const rolesQuery = queries.find(q => q.q.includes('current_user_roles'));
+    expect(rolesQuery?.params).toEqual(['[]']);
   });
 });
