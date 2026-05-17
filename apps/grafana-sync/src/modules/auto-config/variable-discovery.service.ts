@@ -137,20 +137,9 @@ export class VariableDiscoveryService {
             .map((v) => `'${v.replace(/'/g, "''")}'`)
             .join(',');
         } else {
-          applicationDashboardVariable.values.forEach(
-            (applicationDashboardVariableValue, valueIndex) => {
-              const value =
-                applicationDashboardVariableValue === 'All'
-                  ? '.*'
-                  : applicationDashboardVariableValue;
-
-              if (valueIndex === 0) {
-                replaceValue += value;
-              } else {
-                replaceValue += `|${value}`;
-              }
-            },
-          );
+          replaceValue = applicationDashboardVariable.values
+            .map((v) => (v === 'All' ? '.*' : v))
+            .join('|');
         }
 
         systemUnderTestQuery = systemUnderTestQuery.replace(placeholder, replaceValue);

@@ -1871,7 +1871,7 @@ ORDER BY 1`,
         {
           name: 'transaction',
           type: 'query',
-          query: "SELECT name FROM t WHERE scenario_name IN ($scenarioName)",
+          query: 'SELECT name FROM t WHERE scenario_name IN ($scenarioName)',
           datasource: { uid: 'postgres-uid' },
         },
       ]);
@@ -1894,6 +1894,78 @@ ORDER BY 1`,
       const queryPassedToDetector = callArgs[3] as string;
       // Single quote in value should be escaped as '' (SQL standard escaping)
       expect(queryPassedToDetector).toContain("IN ('Browse''s','Checkout')");
+    });
+
+    it('should produce IN (\'only-value\') for single-value variable in SQL IN clause', async () => {
+      const mockGrafanaDashboard = createMockDashboard([
+        {
+          name: 'scenarioName',
+          type: 'custom',
+          query: 'SingleScenario',
+        },
+        {
+          name: 'transaction',
+          type: 'query',
+          query: 'SELECT name FROM t WHERE scenario_name IN ($scenarioName)',
+          datasource: { uid: 'postgres-uid' },
+        },
+      ]);
+
+      const mockAutoConfigDashboard = {
+        dashboardUid: 'test-uid',
+        dashboardName: 'Test Dashboard',
+      };
+
+      variableDetectorService.getValuesFromDatasourceQuery.mockResolvedValue(['tx1']);
+
+      await service.getApplicationDashboardVariables(
+        mockTestRun,
+        mockGrafanaDashboard,
+        mockAutoConfigDashboard,
+        mockGrafanaInstance,
+      );
+
+      const callArgs = variableDetectorService.getValuesFromDatasourceQuery.mock.calls[0];
+      const queryPassedToDetector = callArgs[3] as string;
+      expect(queryPassedToDetector).toContain("IN ('SingleScenario')");
+    });
+
+    it('should use literal "All" (not ".*") when substituting into SQL IN clause', async () => {
+      // The IN-clause path must not map 'All' → '.*' (that is only valid for regex contexts).
+      // SQL IN ('.*') would be a literal string match, so this documents the correct behavior.
+      const mockGrafanaDashboard = createMockDashboard([
+        {
+          name: 'scenarioName',
+          type: 'custom',
+          query: 'All,Checkout',
+        },
+        {
+          name: 'transaction',
+          type: 'query',
+          query: 'SELECT name FROM t WHERE scenario_name IN ($scenarioName)',
+          datasource: { uid: 'postgres-uid' },
+        },
+      ]);
+
+      const mockAutoConfigDashboard = {
+        dashboardUid: 'test-uid',
+        dashboardName: 'Test Dashboard',
+      };
+
+      variableDetectorService.getValuesFromDatasourceQuery.mockResolvedValue(['tx1']);
+
+      await service.getApplicationDashboardVariables(
+        mockTestRun,
+        mockGrafanaDashboard,
+        mockAutoConfigDashboard,
+        mockGrafanaInstance,
+      );
+
+      const callArgs = variableDetectorService.getValuesFromDatasourceQuery.mock.calls[0];
+      const queryPassedToDetector = callArgs[3] as string;
+      // In SQL IN context 'All' must stay as the literal string, not become '.*'
+      expect(queryPassedToDetector).toContain("IN ('All','Checkout')");
+      expect(queryPassedToDetector).not.toContain("IN ('.*','Checkout')");
     });
 
     it('should escape special regex characters in variable names', async () => {
