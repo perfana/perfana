@@ -25,6 +25,7 @@ export function mapEntityToTestRun(entity: TestRunEntity): TestRun {
     analysis_start_offset: entity.analysisStartOffset,
     completed: entity.completed || false,
     abort: entity.abort,
+    abort_message: entity.abortMessage,
     is_stale: entity.isStale,
     stale_detected_at: entity.staleDetectedAt?.toISOString(),
     status: entity.status,
