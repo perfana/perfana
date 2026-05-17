@@ -139,6 +139,7 @@ describe('AdaptPipeline', () => {
       vi.spyOn((adaptPipeline as any).validator, 'updateEvaluationStatus').mockResolvedValue(undefined);
       vi.spyOn((adaptPipeline as any).validator, 'runPreProcessingValidation').mockResolvedValue({
         changepoints: [],
+        tooShortTestRuns: [],
         emptyControlGroups: [],
         processableTestRuns: ['test-run-1'],
       });
@@ -263,6 +264,7 @@ describe('AdaptPipeline', () => {
       vi.spyOn((adaptPipeline as any).validator, 'runPreProcessingValidation')
         .mockResolvedValue({
           changepoints: ['changepoint-test'],
+          tooShortTestRuns: [],
           emptyControlGroups: [],
           processableTestRuns: ['normal-test'],
         });
@@ -285,6 +287,7 @@ describe('AdaptPipeline', () => {
       vi.spyOn((adaptPipeline as any).validator, 'runPreProcessingValidation')
         .mockResolvedValue({
           changepoints: ['changepoint-1', 'changepoint-2'],
+          tooShortTestRuns: [],
           emptyControlGroups: [],
           processableTestRuns: [],
         });
@@ -322,6 +325,7 @@ describe('AdaptPipeline', () => {
       vi.spyOn((adaptPipeline as any).validator, 'runPreProcessingValidation')
         .mockResolvedValue({
           changepoints: [],
+          tooShortTestRuns: [],
           emptyControlGroups: ['no-baseline-test'],
           processableTestRuns: ['with-baseline-test'],
         });
@@ -344,6 +348,7 @@ describe('AdaptPipeline', () => {
       vi.spyOn((adaptPipeline as any).validator, 'runPreProcessingValidation')
         .mockResolvedValue({
           changepoints: [],
+          tooShortTestRuns: [],
           emptyControlGroups: ['no-baseline-1', 'no-baseline-2'],
           processableTestRuns: [],
         });
@@ -364,6 +369,7 @@ describe('AdaptPipeline', () => {
       expect(exclusionSpy).toHaveBeenCalledWith(
         expect.anything(),
         [],
+        [],
         ['no-baseline-1', 'no-baseline-2'],
       );
     });
@@ -375,6 +381,7 @@ describe('AdaptPipeline', () => {
       vi.spyOn((adaptPipeline as any).validator, 'runPreProcessingValidation')
         .mockResolvedValue({
           changepoints: ['changepoint-run'],
+          tooShortTestRuns: [],
           emptyControlGroups: [],
           processableTestRuns: [],
         });
@@ -392,6 +399,7 @@ describe('AdaptPipeline', () => {
         expect.anything(),
         ['changepoint-run'],
         [],
+        [],
       );
     });
 
@@ -402,6 +410,7 @@ describe('AdaptPipeline', () => {
       vi.spyOn((adaptPipeline as any).validator, 'runPreProcessingValidation')
         .mockResolvedValue({
           changepoints: [],
+          tooShortTestRuns: [],
           emptyControlGroups: ['no-baseline-1'],
           processableTestRuns: [],
         });
@@ -424,6 +433,7 @@ describe('AdaptPipeline', () => {
       vi.spyOn((adaptPipeline as any).validator, 'updateEvaluationStatus').mockResolvedValue(undefined);
       vi.spyOn((adaptPipeline as any).validator, 'runPreProcessingValidation').mockResolvedValue({
         changepoints: [],
+        tooShortTestRuns: [],
         emptyControlGroups: [],
         processableTestRuns: ['test-run-1'],
       });
@@ -535,6 +545,7 @@ describe('AdaptPipeline', () => {
       vi.spyOn((adaptPipeline as any).validator, 'updateEvaluationStatus').mockResolvedValue(undefined);
       vi.spyOn((adaptPipeline as any).validator, 'runPreProcessingValidation').mockResolvedValue({
         changepoints: [],
+        tooShortTestRuns: [],
         emptyControlGroups: [],
         processableTestRuns: ['test-run-1'],
       });
@@ -1178,6 +1189,7 @@ describe('AdaptPipeline', () => {
       vi.spyOn((adaptPipeline as any).validator, 'updateEvaluationStatus').mockResolvedValue(undefined);
       vi.spyOn((adaptPipeline as any).validator, 'runPreProcessingValidation').mockResolvedValue({
         changepoints: [],
+        tooShortTestRuns: [],
         emptyControlGroups: [],
         processableTestRuns: ['test-run-1'],
       });
@@ -1235,6 +1247,7 @@ describe('AdaptPipeline', () => {
       vi.spyOn((adaptPipeline as any).validator, 'updateEvaluationStatus').mockResolvedValue(undefined);
       vi.spyOn((adaptPipeline as any).validator, 'runPreProcessingValidation').mockResolvedValue({
         changepoints: [],
+        tooShortTestRuns: [],
         emptyControlGroups: [],
         processableTestRuns: ['test-run-1'],
       });
