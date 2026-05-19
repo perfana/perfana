@@ -125,34 +125,50 @@ export function AnomalyTableRow({
       </Box>
 
       {/* Dashboard */}
-      <Typography variant="body2" sx={{
-        fontSize: '0.875rem',
-        lineHeight: 1.4,
-        color: 'text.primary'
-      }}>
-        {row.dashboard_label}
-      </Typography>
+      <Tooltip title={row.dashboard_label} placement="top" arrow>
+        <Typography variant="body2" sx={{
+          fontSize: '0.875rem',
+          lineHeight: 1.4,
+          color: 'text.primary',
+          overflow: 'hidden',
+          textOverflow: 'ellipsis',
+          whiteSpace: 'nowrap',
+          minWidth: 0,
+        }}>
+          {row.dashboard_label}
+        </Typography>
+      </Tooltip>
 
       {/* Panel */}
-      <Typography variant="body2" sx={{
-        fontSize: '0.875rem',
-        lineHeight: 1.4,
-        color: 'text.primary'
-      }}>
-        {row.panel_title}
-      </Typography>
+      <Tooltip title={row.panel_title} placement="top" arrow>
+        <Typography variant="body2" sx={{
+          fontSize: '0.875rem',
+          lineHeight: 1.4,
+          color: 'text.primary',
+          overflow: 'hidden',
+          textOverflow: 'ellipsis',
+          whiteSpace: 'nowrap',
+          minWidth: 0,
+        }}>
+          {row.panel_title}
+        </Typography>
+      </Tooltip>
 
       {/* Metric */}
-      <Typography variant="body2" sx={{
-        fontSize: '0.875rem',
-        lineHeight: 1.4,
-        color: 'text.primary',
-        fontFamily: 'monospace',
-        wordBreak: 'break-word',
-        overflowWrap: 'anywhere'
-      }}>
-        {row.metric_name || '-'}
-      </Typography>
+      <Tooltip title={row.metric_name || '-'} placement="top" arrow>
+        <Typography variant="body2" sx={{
+          fontSize: '0.875rem',
+          lineHeight: 1.4,
+          color: 'text.primary',
+          fontFamily: 'monospace',
+          overflow: 'hidden',
+          textOverflow: 'ellipsis',
+          whiteSpace: 'nowrap',
+          minWidth: 0,
+        }}>
+          {row.metric_name || '-'}
+        </Typography>
+      </Tooltip>
 
       {/* Classification */}
       <Chip
