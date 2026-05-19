@@ -4,6 +4,12 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
+## [0.2.55.1] - 2026-05-19
+
+### Fixed
+
+- Anomaly detection table: Dashboard, Panel, and Metric columns now wrap their full text rather than truncating to a single line. Values like long span metric names are fully readable without hovering.
+
 ## [0.2.55.0] - 2026-05-19
 
 ### Fixed
