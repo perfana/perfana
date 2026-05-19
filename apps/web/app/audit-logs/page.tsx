@@ -407,16 +407,14 @@ function AuditRow({
 
   return (
     <>
-      <TableRow hover>
-        <TableCell>
+      <TableRow
+        hover={hasDiff}
+        onClick={() => hasDiff && setExpanded((e) => !e)}
+        sx={{ cursor: hasDiff ? 'pointer' : 'default' }}
+      >
+        <TableCell sx={{ color: 'text.secondary' }}>
           {hasDiff ? (
-            <IconButton
-              size="small"
-              onClick={() => setExpanded((e) => !e)}
-              aria-label={expanded ? 'Collapse changes' : 'Expand changes'}
-            >
-              {expanded ? <KeyboardArrowDown /> : <KeyboardArrowRight />}
-            </IconButton>
+            expanded ? <KeyboardArrowDown fontSize="small" /> : <KeyboardArrowRight fontSize="small" />
           ) : null}
         </TableCell>
         <TableCell sx={{ whiteSpace: 'nowrap', fontFamily: 'monospace' }}>

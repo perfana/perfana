@@ -85,13 +85,17 @@ export class UpdateTestRunHandler implements ICommandHandler<UpdateTestRunComman
       const testRunWithRelations = await this.fetchWithRelations(data);
 
       if (before) {
-        // TestRun.organization_id column maps to camelCase property —
-        // override since AuditService.dispatch reads `ref.organization_id`.
-        this.auditService.logUpdate(
-          before as unknown as OwnedResource,
-          testRunWithRelations as unknown as OwnedResource,
-          { organizationIdOverride: testRunWithRelations.organizationId },
-        );
+        // Only log when completed transitions false→true or abort becomes true.
+        // Routine duration updates during running tests are suppressed to avoid noise.
+        const completedTransition = !before.completed && !!data.completed;
+        const abortTransition = !before.abort && data.abort === true;
+        if (completedTransition || abortTransition) {
+          this.auditService.logUpdate(
+            before as unknown as OwnedResource,
+            testRunWithRelations as unknown as OwnedResource,
+            { organizationIdOverride: testRunWithRelations.organizationId },
+          );
+        }
       }
 
       // Map to API response format
