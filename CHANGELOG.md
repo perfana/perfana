@@ -4,6 +4,12 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
+## [0.2.55.0] - 2026-05-19
+
+### Fixed
+
+- Anomaly detection table: Dashboard, Panel, and Metric column text no longer overflows into adjacent columns. Long values are now truncated with an ellipsis and revealed in full on hover via a tooltip.
+
 ## [0.2.54.0] - 2026-05-17
 
 ### Fixed

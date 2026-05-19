@@ -19,8 +19,28 @@ import {
 import { AnomalyData } from '../../types';
 import { formatValueWithUnit } from '@/lib/units';
 import { getConclusionColor, getClassificationDisplayInfo } from '../../helpers';
-import { formatDifference} from '../utils';
+import { formatDifference } from '../utils';
 import StaleTooltipContent from '../StaleTooltipContent';
+
+function TruncatedCell({ value, mono = false }: { value: string | null | undefined; mono?: boolean }) {
+  const display = value || '-';
+  return (
+    <Tooltip title={display} placement="top" arrow componentsProps={{ tooltip: { sx: { maxWidth: 450, fontSize: '0.75rem' } } }}>
+      <Typography variant="body2" sx={{
+        fontSize: '0.875rem',
+        lineHeight: 1.4,
+        color: 'text.primary',
+        ...(mono && { fontFamily: 'monospace' }),
+        overflow: 'hidden',
+        textOverflow: 'ellipsis',
+        whiteSpace: 'nowrap',
+        minWidth: 0,
+      }}>
+        {display}
+      </Typography>
+    </Tooltip>
+  );
+}
 
 interface AnomalyTableRowProps {
   row: AnomalyData;
@@ -125,34 +145,13 @@ export function AnomalyTableRow({
       </Box>
 
       {/* Dashboard */}
-      <Typography variant="body2" sx={{
-        fontSize: '0.875rem',
-        lineHeight: 1.4,
-        color: 'text.primary'
-      }}>
-        {row.dashboard_label}
-      </Typography>
+      <TruncatedCell value={row.dashboard_label} />
 
       {/* Panel */}
-      <Typography variant="body2" sx={{
-        fontSize: '0.875rem',
-        lineHeight: 1.4,
-        color: 'text.primary'
-      }}>
-        {row.panel_title}
-      </Typography>
+      <TruncatedCell value={row.panel_title} />
 
       {/* Metric */}
-      <Typography variant="body2" sx={{
-        fontSize: '0.875rem',
-        lineHeight: 1.4,
-        color: 'text.primary',
-        fontFamily: 'monospace',
-        wordBreak: 'break-word',
-        overflowWrap: 'anywhere'
-      }}>
-        {row.metric_name || '-'}
-      </Typography>
+      <TruncatedCell value={row.metric_name} mono />
 
       {/* Classification */}
       <Chip
