@@ -207,9 +207,9 @@ describe('UpdateTestRunHandler — audit (Phase 5a, PR8)', () => {
 
   afterEach(() => jest.clearAllMocks());
 
-  it('logs UPDATE with before/after snapshots and organizationIdOverride', async () => {
-    const before = mockTestRun({ tags: ['old'], applicationRelease: '1.0.0' });
-    const after = mockTestRun({ tags: ['new'], applicationRelease: '1.1.0' });
+  it('logs UPDATE when completed transitions false → true', async () => {
+    const before = mockTestRun({ tags: ['old'], applicationRelease: '1.0.0', completed: false });
+    const after = mockTestRun({ tags: ['old'], applicationRelease: '1.0.0', completed: true });
     testRunRepo.findOne
       .mockResolvedValueOnce(before) // initial snapshot
       .mockResolvedValueOnce(after); // post-update fetchWithRelations
@@ -223,9 +223,9 @@ describe('UpdateTestRunHandler — audit (Phase 5a, PR8)', () => {
         workload: before.workload,
         duration: 60,
         plannedDuration: 60,
-        completed: false,
-        applicationRelease: '1.1.0',
-        tags: ['new'],
+        completed: true,
+        applicationRelease: '1.0.0',
+        tags: ['old'],
       },
     } as never);
 
@@ -233,11 +233,56 @@ describe('UpdateTestRunHandler — audit (Phase 5a, PR8)', () => {
     const [beforeArg, afterArg, opts] = (
       auditService.logUpdate as jest.Mock
     ).mock.calls[0];
-    expect(beforeArg.tags).toEqual(['old']);
-    expect(beforeArg.applicationRelease).toBe('1.0.0');
-    expect(afterArg.tags).toEqual(['new']);
-    expect(afterArg.applicationRelease).toBe('1.1.0');
+    expect(beforeArg.completed).toBe(false);
+    expect(afterArg.completed).toBe(true);
     expect(opts).toEqual({ organizationIdOverride: ORG_ID });
+  });
+
+  it('logs UPDATE when abort transitions false → true', async () => {
+    const before = mockTestRun({ abort: false });
+    const after = mockTestRun({ abort: true });
+    testRunRepo.findOne
+      .mockResolvedValueOnce(before)
+      .mockResolvedValueOnce(after);
+    testRunRepo.update.mockResolvedValue({} as never);
+
+    await handler.execute({
+      data: {
+        testRunId: before.testRunId,
+        systemUnderTestId: before.systemUnderTestId,
+        testEnvironment: before.testEnvironment,
+        workload: before.workload,
+        duration: 60,
+        plannedDuration: 60,
+        completed: false,
+        abort: true,
+      },
+    } as never);
+
+    expect(auditService.logUpdate).toHaveBeenCalledTimes(1);
+  });
+
+  it('does NOT log UPDATE for routine duration-tick updates on running tests', async () => {
+    const before = mockTestRun({ completed: false, abort: false });
+    const after = mockTestRun({ completed: false, abort: false, duration: 120 });
+    testRunRepo.findOne
+      .mockResolvedValueOnce(before)
+      .mockResolvedValueOnce(after);
+    testRunRepo.update.mockResolvedValue({} as never);
+
+    await handler.execute({
+      data: {
+        testRunId: before.testRunId,
+        systemUnderTestId: before.systemUnderTestId,
+        testEnvironment: before.testEnvironment,
+        workload: before.workload,
+        duration: 120,
+        plannedDuration: 60,
+        completed: false,
+      },
+    } as never);
+
+    expect(auditService.logUpdate).not.toHaveBeenCalled();
   });
 
   it('does NOT log UPDATE when before-snapshot fetch returns null', async () => {
