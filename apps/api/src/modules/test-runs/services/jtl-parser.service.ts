@@ -85,6 +85,81 @@ export class JtlParserService {
     return scenarios;
   }
 
+  /**
+   * Drop lines whose quote characters are unbalanced (odd count).
+   * JMeter writes JTL files from multiple threads without file-level locking;
+   * two threads can interleave their output onto one physical line.  Every
+   * such corrupted line contains exactly one stray `"` — either an unclosed
+   * opening quote from a transaction-message field, or a closing quote from
+   * an interleaved transaction message appended to an unrelated field value.
+   * Either way the line is unusable and safe to discard.
+   * The header line (which never contains quotes) is always kept.
+   */
+  /**
+   * Count commas that are outside of quoted fields.
+   * A valid CSV row always has exactly (headerColumnCount - 1) such commas,
+   * regardless of how many commas appear inside quoted field values.
+   */
+  private countUnquotedCommas(line: string): number {
+    let count = 0;
+    let inQuote = false;
+    for (const ch of line) {
+      if (ch === '"') inQuote = !inQuote;
+      else if (ch === ',' && !inQuote) count++;
+    }
+    return count;
+  }
+
+  /**
+   * Drop lines whose structure is broken by JMeter concurrent-write interleaving.
+   * Three patterns detected:
+   *
+   * A — odd `"` count: one `"` without a matching pair.
+   *
+   * B — even `"` count but a closing `"` is followed by something other than
+   *     `,`, `\r`, `\n`, or `"`.  E.g. `"…samples : 0"0,…` where `0` lands
+   *     immediately after the closing quote.
+   *
+   * C — wrong number of unquoted commas.  A valid row always has exactly
+   *     (headerColumns - 1) unquoted commas.  Column-shifted rows (an extra
+   *     comma from an un-quoted transaction message) or merged rows (two rows
+   *     concatenated) have the wrong count and slip past patterns A and B.
+   *     This is the main cause of fake thread-groups and NaN start/end times.
+   */
+  private removeCorruptedLines(content: string, scenarioName: string): string {
+    const BAD_CLOSING = /[^,\r\n]"[^,\r\n"]/;
+    const lines = content.split(/\r?\n/);
+    if (lines.length === 0) return content;
+
+    const expectedCommas = this.countUnquotedCommas(lines[0]!);
+
+    const cleaned: string[] = [lines[0]!];
+    let dropped = 0;
+    for (let i = 1; i < lines.length; i++) {
+      const line = lines[i]!;
+      if (!line.trim()) {
+        cleaned.push(line); // skip_empty_lines handles blanks; keep them
+        continue;
+      }
+      const quoteCount = (line.match(/"/g) ?? []).length;
+      if (
+        quoteCount % 2 !== 0 ||
+        BAD_CLOSING.test(line) ||
+        this.countUnquotedCommas(line) !== expectedCommas
+      ) {
+        dropped++;
+      } else {
+        cleaned.push(line);
+      }
+    }
+    if (dropped > 0) {
+      this.logger.warn(
+        `Dropped ${dropped} corrupted line(s) from "${scenarioName}" (concurrent JMeter thread-write interleaving)`,
+      );
+    }
+    return cleaned.join('\n');
+  }
+
   private extractScenarioName(entryName: string): string {
     // entryName e.g. "scenarioFolder/results_001.jtl" or "results.jtl"
     const parts = entryName.replace(/\\/g, '/').split('/');
@@ -106,7 +181,8 @@ export class JtlParserService {
     csvContent: string,
     scenarioName: string,
   ): ParsedScenario[] {
-    const records = parse(csvContent, {
+    const cleanedContent = this.removeCorruptedLines(csvContent, scenarioName);
+    const records = parse(cleanedContent, {
       columns: true,
       skip_empty_lines: true,
       trim: true,
@@ -179,7 +255,10 @@ export class JtlParserService {
 
     let minTime = Infinity;
     let maxTimeWithElapsed = -Infinity;
-    let currentTransactionLabel = '';
+    // Per-thread transaction label: JMeter writes rows from concurrent VU threads
+    // interleaved by timestamp, so a single shared label would assign requests from
+    // one thread to the last transaction seen on a different thread.
+    const transactionLabelByThread = new Map<string, string>();
 
     // Track VU samples per second to avoid duplicates
     const vuPerSecond = new Map<number, VirtualUserSample>();
@@ -199,6 +278,7 @@ export class JtlParserService {
       const url = row['URL'] || '';
       const latency = parseInt(row['Latency'] || '0', 10);
       const connectTime = parseInt(row['Connect'] || '0', 10);
+      const threadName = row['threadName'] || '';
 
       const time = new Date(timeStamp);
 
@@ -213,7 +293,7 @@ export class JtlParserService {
       );
 
       if (isTransaction) {
-        currentTransactionLabel = label;
+        transactionLabelByThread.set(threadName, label);
         transactions.push({
           time,
           transactionName: label,
@@ -225,7 +305,7 @@ export class JtlParserService {
       } else {
         requests.push({
           time,
-          transactionName: currentTransactionLabel || label,
+          transactionName: transactionLabelByThread.get(threadName) || label,
           samplerName: label,
           responseCode,
           responseMessage,
