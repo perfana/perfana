@@ -43,6 +43,8 @@ export class BenchmarkMapper {
       min_apdex_score: entity.min_apdex_score ? parseFloat(String(entity.min_apdex_score)) : undefined,
       include_failed_requests: entity.include_failed_requests ?? false,
       exclude_ramp_up_time: entity.exclude_ramp_up_time ?? true,
+      aggregate_metric: entity.aggregate_metric,
+      aggregate_stat: entity.aggregate_stat,
       systems_under_test: entity.system_under_test ? {
         id: entity.system_under_test.id,
         name: entity.system_under_test.name,
