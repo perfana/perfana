@@ -48,6 +48,8 @@ exports[`auditableFields snapshot — every OwnedResource entity has a stable de
     "transaction_name",
     "apdex_threshold_ms",
     "min_apdex_score",
+    "aggregate_metric",
+    "aggregate_stat",
     "include_failed_requests",
     "exclude_ramp_up_time",
     "average_all",
