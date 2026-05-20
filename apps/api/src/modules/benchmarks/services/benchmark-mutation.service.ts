@@ -583,9 +583,12 @@ export class BenchmarkMutationService {
   async createAggregatedSlo(userId: string, roles: string[], dto: CreateAggregatedSloDto): Promise<Benchmark> {
     const system = await this.validateSystemAccess(dto.systemUnderTestId, userId, roles);
 
+    const statLabel = dto.aggregateStat
+      ? dto.aggregateStat.charAt(0).toUpperCase() + dto.aggregateStat.slice(1)
+      : '';
     const label = dto.aggregateMetric === 'error_percentage'
-      ? 'Aggregated Error Percentage'
-      : `Aggregated ${dto.aggregateMetric === 'transaction_response_time' ? 'Transaction' : 'Request'} Response Times (${dto.aggregateStat})`;
+      ? 'Error Percentage'
+      : `${statLabel ? statLabel + ' ' : ''}${dto.aggregateMetric === 'transaction_response_time' ? 'Transaction' : 'Request'} Response Times`;
 
     const benchmark = this.benchmarkRepo.create({
       system_under_test_id: dto.systemUnderTestId,

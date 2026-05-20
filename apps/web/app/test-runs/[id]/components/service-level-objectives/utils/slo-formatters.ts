@@ -60,13 +60,46 @@ export function isCheckResultStale(checkResult: unknown, benchmark: unknown): bo
   return benchmarkUpdatedDate > checkResultDate;
 }
 
+// Helper function to format aggregated SLO metric label from requirement JSON
+export function formatAggregatedMetricLabel(requirement: unknown): string {
+  if (!requirement || typeof requirement !== 'object') return 'Aggregated Metric';
+  const req = requirement as { aggregate_metric?: string; aggregate_stat?: string };
+
+  if (req.aggregate_metric === 'error_percentage') return 'Error Percentage';
+
+  const statLabel = req.aggregate_stat
+    ? req.aggregate_stat.charAt(0).toUpperCase() + req.aggregate_stat.slice(1)
+    : '';
+  const metricLabel = req.aggregate_metric === 'transaction_response_time'
+    ? 'Transaction Response Times'
+    : 'Request Response Times';
+
+  return statLabel ? `${statLabel} ${metricLabel}` : metricLabel;
+}
+
 // Helper function to format requirement as human readable text
 export function formatRequirement(requirement: unknown, evaluateType?: string, metricUnit?: string): string {
   if (!requirement || typeof requirement !== 'object') {
     return 'No requirement specified';
   }
 
-  const { operator, value } = requirement;
+  // Aggregated SLO: return just the operator+value expression (e.g. "<= 2000 ms")
+  if ((requirement as { type?: string }).type === 'aggregated') {
+    const req = requirement as { operator?: string; value?: number };
+    const op = req.operator ?? '<=';
+    let val = String(req.value ?? 0);
+    let unitSuffix = '';
+    if (metricUnit) {
+      const unit = getUnit(metricUnit);
+      if (unit.format) unitSuffix = ` ${unit.format}`;
+      if (metricUnit === 'percentunit') {
+        val = String(Math.round(Number(req.value) * 10000) / 100);
+      }
+    }
+    return `${op} ${val}${unitSuffix}`;
+  }
+
+  const { operator, value } = requirement as { operator?: string; value?: unknown };
   const operatorMap: Record<string, string> = {
     'lt': 'should be less than',
     'le': 'should be less than or equal to',
