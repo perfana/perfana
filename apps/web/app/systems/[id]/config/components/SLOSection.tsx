@@ -6,6 +6,9 @@ import {
   CircularProgress,
   Typography,
   Button,
+  ButtonGroup,
+  Menu,
+  MenuItem,
   Toolbar,
   IconButton,
   Tooltip,
@@ -20,6 +23,7 @@ import {
   Delete as DeleteIcon,
   Close as CloseIcon,
   ContentCopy as CopyIcon,
+  ArrowDropDown as ArrowDropDownIcon,
 } from '@mui/icons-material';
 import { Benchmark } from './types';
 import FilterBar from './FilterBar';
@@ -40,6 +44,7 @@ interface SLOSectionProps {
   onTagToggle: (tag: string) => void;
   onClearTags: () => void;
   onAddSLO: () => void;
+  onAddAggregatedSLO: () => void;
   onEditSLO: (benchmark: Benchmark) => void;
   onDeleteSLO: (benchmark: Benchmark) => void;
   onViewSLO: (benchmark: Benchmark) => void;
@@ -59,11 +64,15 @@ export default function SLOSection({
   onTagToggle,
   onClearTags,
   onAddSLO,
+  onAddAggregatedSLO,
   onEditSLO,
   onDeleteSLO,
   onViewSLO,
   onBatchDelete
 }: SLOSectionProps) {
+  // Split button menu state
+  const [splitMenuAnchor, setSplitMenuAnchor] = useState<HTMLElement | null>(null);
+
   // Multi-select state
   const [selectedSloIds, setSelectedSloIds] = useState<Set<string>>(new Set());
   const [batchDeleteDialogOpen, setBatchDeleteDialogOpen] = useState(false);
@@ -213,18 +222,44 @@ export default function SLOSection({
           </Alert>
         )}
 
-        <FilterBar
-          searchText={searchText}
-          onSearchChange={onSearchChange}
-          selectedTags={selectedTags}
-          availableTags={getAllSloTags()}
-          onTagToggle={onTagToggle}
-          onClearTags={onClearTags}
-          showAddButton={true}
-          onAddClick={onAddSLO}
-          addButtonText="Add SLO"
-          placeholder="Search SLOs by metric, description, or dashboard..."
-        />
+        <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, mb: 1 }}>
+          <Box sx={{ flex: 1 }}>
+            <FilterBar
+              searchText={searchText}
+              onSearchChange={onSearchChange}
+              selectedTags={selectedTags}
+              availableTags={getAllSloTags()}
+              onTagToggle={onTagToggle}
+              onClearTags={onClearTags}
+              showAddButton={false}
+              placeholder="Search SLOs by metric, description, or dashboard..."
+            />
+          </Box>
+          <ButtonGroup variant="contained" size="small">
+            <Button startIcon={<AddIcon />} onClick={onAddSLO}>
+              Add Metric SLO
+            </Button>
+            <Button
+              size="small"
+              onClick={(e) => setSplitMenuAnchor(e.currentTarget)}
+              sx={{ px: 0.5 }}
+            >
+              <ArrowDropDownIcon />
+            </Button>
+          </ButtonGroup>
+          <Menu
+            anchorEl={splitMenuAnchor}
+            open={Boolean(splitMenuAnchor)}
+            onClose={() => setSplitMenuAnchor(null)}
+          >
+            <MenuItem onClick={() => { onAddSLO(); setSplitMenuAnchor(null); }}>
+              Add Metric SLO
+            </MenuItem>
+            <MenuItem onClick={() => { onAddAggregatedSLO(); setSplitMenuAnchor(null); }}>
+              Add Aggregated SLO
+            </MenuItem>
+          </Menu>
+        </Box>
 
         {/* Batch Actions Toolbar */}
         {selectedSloIds.size > 0 && (

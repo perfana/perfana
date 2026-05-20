@@ -36,12 +36,15 @@ import NotificationsSection from './components/NotificationsSection';
 import ReportingTemplatesSection from './components/ReportingTemplatesSection';
 import AdaptSettingsSection from './components/AdaptSettingsSection';
 import ConfigDialogs from './components/ConfigDialogs';
+import AggregatedSloDialog, { ExistingAggregatedBenchmark } from '@/app/test-runs/[id]/components/performance-analysis/AggregatedSloDialog';
 import TemplateManagementDialog from './components/TemplateManagementDialog';
 import DeleteSystemDialog from './components/DeleteSystemDialog';
 
 export default function SystemConfigurationPage() {
   const router = useRouter();
   const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
+  const [aggregatedSloDialogOpen, setAggregatedSloDialogOpen] = useState(false);
+  const [selectedAggregatedBenchmark, setSelectedAggregatedBenchmark] = useState<ExistingAggregatedBenchmark | null>(null);
   const dashboard = useDashboardManagement();
   const slo = useSLOManagement();
   const template = useReportingTemplateManagement();
@@ -190,7 +193,26 @@ export default function SystemConfigurationPage() {
               onTagToggle={slo.handleSloTagToggle}
               onClearTags={slo.clearSloTags}
               onAddSLO={slo.handleAddSLO}
-              onEditSLO={slo.handleEditSLO}
+              onAddAggregatedSLO={() => {
+                setSelectedAggregatedBenchmark(null);
+                setAggregatedSloDialogOpen(true);
+              }}
+              onEditSLO={(benchmark) => {
+                if (benchmark.benchmark_type === 'aggregated') {
+                  setSelectedAggregatedBenchmark({
+                    id: benchmark.id,
+                    aggregate_metric: benchmark.aggregate_metric as ExistingAggregatedBenchmark['aggregate_metric'],
+                    aggregate_stat: benchmark.aggregate_stat as ExistingAggregatedBenchmark['aggregate_stat'],
+                    requirement_operator: benchmark.requirement_operator ?? '<=',
+                    requirement_value: benchmark.requirement_value ?? 0,
+                    exclude_ramp_up_time: benchmark.exclude_ramp_up_time,
+                    enabled: benchmark.enabled,
+                  });
+                  setAggregatedSloDialogOpen(true);
+                  return;
+                }
+                slo.handleEditSLO(benchmark);
+              }}
               onDeleteSLO={slo.handleDeleteSLO}
               onViewSLO={slo.handleViewSLO}
               onBatchDelete={(ids) =>
@@ -372,6 +394,24 @@ export default function SystemConfigurationPage() {
           </Button>
         </DialogActions>
       </Dialog>
+
+      <AggregatedSloDialog
+        open={aggregatedSloDialogOpen}
+        onClose={() => {
+          setAggregatedSloDialogOpen(false);
+          setSelectedAggregatedBenchmark(null);
+        }}
+        onSuccess={() => {
+          setAggregatedSloDialogOpen(false);
+          setSelectedAggregatedBenchmark(null);
+          slo.fetchBenchmarks(systemId, selectedEnvironment, selectedWorkload);
+        }}
+        systemUnderTestId={systemId}
+        systemName={system.name}
+        testEnvironment={selectedEnvironment}
+        workload={selectedWorkload}
+        existingBenchmark={selectedAggregatedBenchmark ?? undefined}
+      />
 
       <DeleteSystemDialog
         open={deleteDialogOpen}

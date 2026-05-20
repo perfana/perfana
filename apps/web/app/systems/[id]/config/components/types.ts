@@ -29,8 +29,10 @@ export interface Benchmark {
   metric_name?: string;
   created_at: string;
   updated_at: string;
-  // Apdex SLO fields
-  benchmark_type?: 'metric' | 'apdex';
+  // Apdex / Aggregated SLO fields
+  benchmark_type?: 'metric' | 'apdex' | 'aggregated';
+  aggregate_metric?: string;
+  aggregate_stat?: string;
   transaction_name?: string;
   apdex_threshold_ms?: number;
   min_apdex_score?: number;
