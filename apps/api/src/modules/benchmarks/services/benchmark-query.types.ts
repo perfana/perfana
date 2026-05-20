@@ -39,7 +39,7 @@ export interface BenchmarkTagSyncStatus {
 /**
  * Benchmark type discriminator
  */
-export type BenchmarkType = 'metric' | 'apdex';
+export type BenchmarkType = 'metric' | 'apdex' | 'aggregated';
 
 /**
  * Benchmark DTO representing the response format
@@ -70,13 +70,17 @@ export interface Benchmark {
   tags?: string[];
   created_at: string;
   updated_at: string;
-  // Apdex SLO fields
+  // SLO type fields
   benchmark_type: BenchmarkType;
+  // Apdex SLO fields
   transaction_name?: string;
   apdex_threshold_ms?: number;
   min_apdex_score?: number;
   include_failed_requests: boolean;
   exclude_ramp_up_time: boolean;
+  // Aggregated SLO fields
+  aggregate_metric?: string;
+  aggregate_stat?: string;
   // Joined data
   systems_under_test?: {
     id: string;
