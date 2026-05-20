@@ -75,6 +75,7 @@ export default function PerformanceAnalysisCard({
   const cardRef = useRef<HTMLDivElement>(null);
 
   const [selectedScenarios, setSelectedScenarios] = useState<string[]>([]);
+  const [aggregatedSloDialogOpen, setAggregatedSloDialogOpen] = useState(false);
   const toggleScenarioFilter = useCallback((scenario: string) => {
     setSelectedScenarios((prev) =>
       prev.includes(scenario) ? prev.filter((s) => s !== scenario) : [...prev, scenario],
@@ -639,6 +640,7 @@ export default function PerformanceAnalysisCard({
         onOpenSloDialog={handleOpenSloDialog}
         onOpenBaselineDialog={handleOpenBaselineDialog}
         onOpenThresholdsManagementDialog={handleOpenThresholdsManagementDialog}
+        onOpenAggregatedSloDialog={() => setAggregatedSloDialogOpen(true)}
         actionMenuAnchor={actionMenuAnchor}
         actionMenuTransaction={actionMenuTransaction}
         onCloseActionMenu={handleCloseActionMenu}
@@ -668,6 +670,8 @@ export default function PerformanceAnalysisCard({
         onThresholdDialogClose={() => setThresholdDialogOpen(false)}
         sloDialogOpen={sloDialogOpen}
         onSloDialogClose={() => setSloDialogOpen(false)}
+        aggregatedSloDialogOpen={aggregatedSloDialogOpen}
+        onAggregatedSloDialogClose={() => setAggregatedSloDialogOpen(false)}
         baselineDialogOpen={baselineDialogOpen}
         onBaselineDialogClose={() => setBaselineDialogOpen(false)}
         thresholdsManagementDialogOpen={thresholdsManagementDialogOpen}

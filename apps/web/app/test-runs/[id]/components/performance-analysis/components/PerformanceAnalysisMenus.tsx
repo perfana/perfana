@@ -34,6 +34,7 @@ interface PerformanceAnalysisMenusProps {
   onOpenSloDialog: () => void;
   onOpenBaselineDialog: () => void;
   onOpenThresholdsManagementDialog: () => void;
+  onOpenAggregatedSloDialog: () => void;
 
   // Transaction action menu
   actionMenuAnchor: HTMLElement | null;
@@ -66,6 +67,7 @@ export function PerformanceAnalysisMenus({
   onOpenSloDialog,
   onOpenBaselineDialog,
   onOpenThresholdsManagementDialog,
+  onOpenAggregatedSloDialog,
   actionMenuAnchor,
   actionMenuTransaction,
   onCloseActionMenu,
@@ -107,6 +109,15 @@ export function PerformanceAnalysisMenus({
             <AssessmentIcon fontSize="small" />
           </ListItemIcon>
           <ListItemText>Set Apdex SLO</ListItemText>
+        </MenuItem>
+        <MenuItem onClick={() => {
+          onOpenAggregatedSloDialog();
+          onCloseApdexMenu();
+        }}>
+          <ListItemIcon>
+            <AssessmentIcon fontSize="small" />
+          </ListItemIcon>
+          <ListItemText>Set SLO</ListItemText>
         </MenuItem>
         <MenuItem onClick={hasExplicitThreshold ? onOpenThresholdsManagementDialog : onOpenBaselineDialog}>
           <ListItemIcon>
