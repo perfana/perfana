@@ -13,7 +13,7 @@ export interface TestRun {
   ramp_up?: number;
 }
 
-export type BenchmarkType = 'metric' | 'apdex';
+export type BenchmarkType = 'metric' | 'apdex' | 'aggregated';
 
 export interface Benchmark {
   id: string;
@@ -41,6 +41,9 @@ export interface Benchmark {
   apdex_threshold_ms?: number;
   min_apdex_score?: number;
   include_failed_requests: boolean;
+  // Aggregated SLO fields
+  aggregate_metric?: string;
+  aggregate_stat?: string;
 }
 
 /**
@@ -94,6 +97,8 @@ export class BenchmarkMatcher extends BaseCheckService {
         (COALESCE(benchmark_type, 'metric') = 'metric' AND (requirement_operator IS NOT NULL OR requirement_value IS NOT NULL))
         OR
         (benchmark_type = 'apdex' AND min_apdex_score IS NOT NULL)
+        OR
+        (benchmark_type = 'aggregated' AND aggregate_metric IS NOT NULL AND requirement_value IS NOT NULL)
       )`
     ];
 
@@ -146,7 +151,9 @@ export class BenchmarkMatcher extends BaseCheckService {
         transaction_name,
         apdex_threshold_ms,
         min_apdex_score,
-        COALESCE(include_failed_requests, false) as include_failed_requests
+        COALESCE(include_failed_requests, false) as include_failed_requests,
+        aggregate_metric,
+        aggregate_stat
       FROM benchmarks
       WHERE ${whereClauses.join('\n        AND ')}
     `;
@@ -188,6 +195,9 @@ export class BenchmarkMatcher extends BaseCheckService {
       apdex_threshold_ms: row.apdex_threshold_ms as number | undefined,
       min_apdex_score: row.min_apdex_score ? parseFloat(String(row.min_apdex_score)) : undefined,
       include_failed_requests: (row.include_failed_requests as boolean) || false,
+      // Aggregated SLO fields
+      aggregate_metric: row.aggregate_metric as string | undefined,
+      aggregate_stat: row.aggregate_stat as string | undefined,
     }));
 
     // Filter out invalid benchmarks
@@ -231,7 +241,9 @@ export class BenchmarkMatcher extends BaseCheckService {
         transaction_name,
         apdex_threshold_ms,
         min_apdex_score,
-        COALESCE(include_failed_requests, false) as include_failed_requests
+        COALESCE(include_failed_requests, false) as include_failed_requests,
+        aggregate_metric,
+        aggregate_stat
       FROM benchmarks
       WHERE id = $1
     `;
@@ -269,6 +281,9 @@ export class BenchmarkMatcher extends BaseCheckService {
       apdex_threshold_ms: row.apdex_threshold_ms,
       min_apdex_score: row.min_apdex_score ? parseFloat(String(row.min_apdex_score)) : undefined,
       include_failed_requests: row.include_failed_requests || false,
+      // Aggregated SLO fields
+      aggregate_metric: row.aggregate_metric,
+      aggregate_stat: row.aggregate_stat,
     };
   }
 
@@ -292,6 +307,14 @@ export class BenchmarkMatcher extends BaseCheckService {
       if (benchmark.min_apdex_score === null || benchmark.min_apdex_score === undefined) {
         this.logger.debug(
           `Apdex benchmark ${benchmark.id} missing min_apdex_score`
+        );
+        return false;
+      }
+    } else if (benchmark.benchmark_type === 'aggregated') {
+      // Aggregated benchmarks need aggregate_metric and requirement_value
+      if (!benchmark.aggregate_metric || benchmark.requirement_value === undefined) {
+        this.logger.debug(
+          `Aggregated benchmark ${benchmark.id} missing aggregate_metric or requirement_value`
         );
         return false;
       }

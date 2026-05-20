@@ -8,7 +8,14 @@ import { MetricsSource } from './metrics-source.entity';
  * - 'metric': Traditional Grafana-based SLO with panel queries
  * - 'apdex': Transaction-level Apdex score based on response times from requests_raw
  */
-export type BenchmarkType = 'metric' | 'apdex';
+export type BenchmarkType = 'metric' | 'apdex' | 'aggregated';
+
+export type AggregateMetric =
+  | 'transaction_response_time'
+  | 'request_response_time'
+  | 'error_percentage';
+
+export type AggregateStat = 'avg' | 'p50' | 'p90' | 'p95' | 'p99' | 'max';
 
 @Entity('benchmarks')
 // Note: The actual unique constraint uses COALESCE for nullable fields (see migration)
@@ -53,6 +60,8 @@ export class Benchmark {
     'transaction_name',
     'apdex_threshold_ms',
     'min_apdex_score',
+    'aggregate_metric',
+    'aggregate_stat',
     'include_failed_requests',
     // Behavior knobs
     'exclude_ramp_up_time',
@@ -220,6 +229,12 @@ export class Benchmark {
    */
   @Column({ type: 'boolean', default: false })
   include_failed_requests!: boolean;
+
+  @Column({ type: 'varchar', length: 50, nullable: true })
+  aggregate_metric?: AggregateMetric;
+
+  @Column({ type: 'varchar', length: 20, nullable: true })
+  aggregate_stat?: AggregateStat;
 
   @Column({ type: 'jsonb', default: '{}' })
   metadata!: Record<string, unknown>;

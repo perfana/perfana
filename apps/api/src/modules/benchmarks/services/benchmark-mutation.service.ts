@@ -15,6 +15,8 @@ import type {
   UpdateBenchmarkDto,
   CreateApdexSloDto,
   UpdateApdexSloDto,
+  CreateAggregatedSloDto,
+  UpdateAggregatedSloDto,
 } from './benchmark-mutation.types';
 import type { CopyBenchmarksDto } from '../dto/copy-benchmarks.dto';
 
@@ -24,6 +26,8 @@ export type {
   UpdateBenchmarkDto,
   CreateApdexSloDto,
   UpdateApdexSloDto,
+  CreateAggregatedSloDto,
+  UpdateAggregatedSloDto,
 } from './benchmark-mutation.types';
 
 /**
@@ -565,6 +569,114 @@ export class BenchmarkMutationService {
       this.logger.error(`Failed to update Apdex SLO ${id}:`, error);
       throw error;
     }
+  }
+
+  /**
+   * Create an Aggregated SLO benchmark
+   *
+   * @param userId - The user ID for authorization and ownership tracking
+   * @param roles - The user's roles for authorization checks
+   * @param dto - The create Aggregated SLO DTO
+   *
+   * Validates user has access to the system_under_test before creating.
+   */
+  async createAggregatedSlo(userId: string, roles: string[], dto: CreateAggregatedSloDto): Promise<Benchmark> {
+    const system = await this.validateSystemAccess(dto.systemUnderTestId, userId, roles);
+
+    const label = dto.aggregateMetric === 'error_percentage'
+      ? 'Aggregated Error Percentage'
+      : `Aggregated ${dto.aggregateMetric === 'transaction_response_time' ? 'Transaction' : 'Request'} Response Times (${dto.aggregateStat})`;
+
+    const benchmark = this.benchmarkRepo.create({
+      system_under_test_id: dto.systemUnderTestId,
+      test_environment: dto.testEnvironment,
+      workload: dto.workload,
+      source: 'custom',
+      benchmark_type: 'aggregated',
+      aggregate_metric: dto.aggregateMetric,
+      aggregate_stat: dto.aggregateStat,
+      requirement_operator: dto.requirementOperator,
+      requirement_value: dto.requirementValue,
+      exclude_ramp_up_time: dto.excludeRampUpTime ?? true,
+      description: dto.description || '',
+      tags: dto.tags || [],
+      enabled: true,
+      valid: true,
+      panel_title: label,
+      config_title: label,
+      configuration: { type: 'aggregated', title: label },
+      metadata: {},
+      // Inherit ownership from the parent system_under_test. organizationId is
+      // NOT NULL on Benchmark (Phase 4); the camelCase key matters because
+      // TypeORM silently drops snake_case organization_id on entity create.
+      organizationId: system.organization_id,
+      teamId: system.team_id,
+      created_by: userId,
+      updated_by: userId,
+    });
+
+    const result = await withRequestEm(this.benchmarkRepo).save(benchmark);
+
+    this.auditService.logCreate(result as unknown as OwnedResource, {
+      organizationIdOverride: result.organizationId,
+    });
+
+    this.logger.log(`Created Aggregated SLO: ${label}`);
+    return BenchmarkMapper.mapEntityToBenchmark(result);
+  }
+
+  /**
+   * Update an Aggregated SLO benchmark
+   *
+   * @param id - The benchmark ID to update
+   * @param userId - The user ID for authorization and ownership tracking
+   * @param roles - The user's roles for authorization checks
+   * @param dto - The update Aggregated SLO DTO
+   *
+   * Checks organization access before updating.
+   */
+  async updateAggregatedSlo(id: string, userId: string, roles: string[], dto: UpdateAggregatedSloDto): Promise<Benchmark | null> {
+    const existing = await this.queryService.findOne(id, userId, roles);
+    if (!existing) {
+      this.logger.warn(`[updateAggregatedSlo] Benchmark not found or access denied: ${id}`);
+      return null;
+    }
+
+    if (existing.benchmark_type !== 'aggregated') {
+      throw new Error('Benchmark is not an aggregated SLO');
+    }
+
+    const existingEntity = await withRequestEm(this.benchmarkRepo).findOne({ where: { id } });
+    if (!existingEntity) return null;
+
+    const beforeEntity = Object.assign(new BenchmarkEntity(), existingEntity);
+
+    const updates: Partial<BenchmarkEntity> = { updated_by: userId };
+    if (dto.aggregateStat !== undefined) updates.aggregate_stat = dto.aggregateStat;
+    if (dto.requirementOperator !== undefined) updates.requirement_operator = dto.requirementOperator;
+    if (dto.requirementValue !== undefined) updates.requirement_value = dto.requirementValue;
+    if (dto.excludeRampUpTime !== undefined) updates.exclude_ramp_up_time = dto.excludeRampUpTime;
+    if (dto.enabled !== undefined) updates.enabled = dto.enabled;
+    if (dto.description !== undefined) updates.description = dto.description;
+    if (dto.tags !== undefined) updates.tags = dto.tags;
+
+    await withRequestEm(this.benchmarkRepo).update(id, updates as unknown as Parameters<typeof this.benchmarkRepo.update>[1]);
+
+    const updated = await withRequestEm(this.benchmarkRepo).findOne({
+      where: { id },
+      relations: ['system_under_test'],
+    });
+
+    if (!updated) throw new Error(`Failed to fetch updated Aggregated SLO ${id}`);
+
+    this.auditService.logUpdate(
+      beforeEntity as unknown as OwnedResource,
+      updated as unknown as OwnedResource,
+      { organizationIdOverride: beforeEntity.organizationId ?? updated.organizationId },
+    );
+
+    this.logger.log(`Updated Aggregated SLO ${id}`);
+    return BenchmarkMapper.mapEntityToBenchmark(updated);
   }
 
   // ============================================================================

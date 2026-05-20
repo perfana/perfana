@@ -138,6 +138,7 @@ export default function SLOTable({
                 inputProps={{ 'aria-label': 'Select all SLOs' }}
               />
             </TableCell>
+            <TableCell sx={{ backgroundColor: 'background.paper' }}><strong>Type</strong></TableCell>
             <TableCell sx={{ backgroundColor: 'background.paper' }}><strong>Metric</strong></TableCell>
             <TableCell sx={{ backgroundColor: 'background.paper' }}><strong>Source</strong></TableCell>
             <TableCell sx={{ backgroundColor: 'background.paper' }}><strong>Evaluation</strong></TableCell>
@@ -149,7 +150,7 @@ export default function SLOTable({
         <TableBody>
           {filteredBenchmarks.length === 0 ? (
             <TableRow>
-              <TableCell colSpan={7} sx={{ textAlign: 'center', py: 4 }}>
+              <TableCell colSpan={8} sx={{ textAlign: 'center', py: 4 }}>
                 <Typography variant="body2" color="text.secondary">
                   {searchText || selectedTags.length > 0
                     ? 'No SLOs match the current filters'
@@ -190,6 +191,18 @@ export default function SLOTable({
                   checked={selectedSloIds.has(benchmark.id)}
                   onChange={() => onSelectOne(benchmark.id)}
                   inputProps={{ 'aria-label': `Select SLO ${benchmark.config_title || benchmark.panel_title}` }}
+                />
+              </TableCell>
+              <TableCell>
+                <Chip
+                  label={benchmark.benchmark_type ?? 'metric'}
+                  size="small"
+                  variant="outlined"
+                  color={
+                    benchmark.benchmark_type === 'aggregated' ? 'success' :
+                    benchmark.benchmark_type === 'apdex' ? 'info' : 'default'
+                  }
+                  sx={{ fontSize: 11 }}
                 />
               </TableCell>
               <TableCell>

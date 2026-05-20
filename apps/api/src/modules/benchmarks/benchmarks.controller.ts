@@ -4,6 +4,7 @@ import { BenchmarksService } from './benchmarks.service';
 import { CopyBenchmarksDto } from './dto/copy-benchmarks.dto';
 import { BenchmarkQuery } from './services/benchmark-query.types';
 import { UserCtx, UserContext } from '../../common/decorators/user-context.decorator';
+import type { CreateAggregatedSloDto, UpdateAggregatedSloDto } from './services';
 
 @ApiTags('benchmarks')
 @ApiBearerAuth()
@@ -20,7 +21,7 @@ export class BenchmarksController {
   @ApiQuery({ name: 'workload', required: false, description: 'Filter by workload' })
   @ApiQuery({ name: 'enabled', required: false, description: 'Filter by enabled status' })
   @ApiQuery({ name: 'valid', required: false, description: 'Filter by valid status' })
-  @ApiQuery({ name: 'benchmarkType', required: false, enum: ['metric', 'apdex'], description: 'Filter by benchmark type' })
+  @ApiQuery({ name: 'benchmarkType', required: false, enum: ['metric', 'apdex', 'aggregated'], description: 'Filter by benchmark type' })
   @ApiQuery({ name: 'metricsSourceId', required: false, description: 'Filter by metrics source ID' })
   @ApiResponse({ status: 200, description: 'Return all benchmarks' })
   async findAll(@UserCtx() ctx: UserContext, @Query() query: BenchmarkQuery) {
@@ -422,6 +423,45 @@ export class BenchmarksController {
         'Failed to get Apdex threshold',
         HttpStatus.INTERNAL_SERVER_ERROR,
       );
+    }
+  }
+
+  // ==================== Aggregated SLO Endpoints ====================
+
+  @Post('aggregated')
+  @ApiOperation({ summary: 'Create a new Aggregated Test SLO' })
+  @ApiResponse({ status: 201, description: 'Aggregated SLO created successfully' })
+  @ApiResponse({ status: 400, description: 'Invalid input data' })
+  async createAggregatedSlo(
+    @UserCtx() ctx: UserContext,
+    @Body() dto: CreateAggregatedSloDto,
+  ) {
+    try {
+      return await this.benchmarksService.createAggregatedSlo(ctx.userId, ctx.roles, dto);
+    } catch (error) {
+      this.logger.error('Failed to create Aggregated SLO:', error);
+      if (error instanceof HttpException) throw error;
+      throw new HttpException('Failed to create Aggregated SLO', HttpStatus.INTERNAL_SERVER_ERROR);
+    }
+  }
+
+  @Put('aggregated/:id')
+  @ApiOperation({ summary: 'Update an existing Aggregated Test SLO' })
+  @ApiResponse({ status: 200, description: 'Aggregated SLO updated successfully' })
+  @ApiResponse({ status: 404, description: 'SLO not found' })
+  async updateAggregatedSlo(
+    @Param('id') id: string,
+    @UserCtx() ctx: UserContext,
+    @Body() dto: UpdateAggregatedSloDto,
+  ) {
+    try {
+      const result = await this.benchmarksService.updateAggregatedSlo(id, ctx.userId, ctx.roles, dto);
+      if (!result) throw new HttpException('SLO not found', HttpStatus.NOT_FOUND);
+      return result;
+    } catch (error) {
+      this.logger.error('Failed to update Aggregated SLO:', error);
+      if (error instanceof HttpException) throw error;
+      throw new HttpException('Failed to update Aggregated SLO', HttpStatus.INTERNAL_SERVER_ERROR);
     }
   }
 }

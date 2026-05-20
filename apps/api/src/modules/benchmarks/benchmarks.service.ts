@@ -10,6 +10,7 @@ import {
   CreateApdexSloDto,
   UpdateApdexSloDto,
 } from './services';
+import type { CreateAggregatedSloDto, UpdateAggregatedSloDto } from './services';
 import { CopyBenchmarksDto } from './dto/copy-benchmarks.dto';
 
 // Re-export types from sub-services for backwards compatibility
@@ -28,6 +29,8 @@ export type {
   UpdateBenchmarkDto,
   CreateApdexSloDto,
   UpdateApdexSloDto,
+  CreateAggregatedSloDto,
+  UpdateAggregatedSloDto,
 } from './services';
 
 // Import types for internal use
@@ -130,6 +133,19 @@ export class BenchmarksService {
     updateDto: UpdateApdexSloDto,
   ): Promise<Benchmark | null> {
     return this.mutationService.updateApdexSlo(id, userId, roles, updateDto);
+  }
+
+  async createAggregatedSlo(userId: string, roles: string[], dto: CreateAggregatedSloDto): Promise<Benchmark> {
+    return this.mutationService.createAggregatedSlo(userId, roles, dto);
+  }
+
+  async updateAggregatedSlo(
+    id: string,
+    userId: string,
+    roles: string[],
+    dto: UpdateAggregatedSloDto,
+  ): Promise<Benchmark | null> {
+    return this.mutationService.updateAggregatedSlo(id, userId, roles, dto);
   }
 
   // ============================================================================

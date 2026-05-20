@@ -6,6 +6,7 @@ import { BenchmarkMatcher, TestRun as TestRunInterface, Benchmark } from './chec
 import { DataAggregator } from './checks/DataAggregator.js';
 import { RequirementChecker, CheckResult as _CheckResult } from './checks/RequirementChecker.js';
 import { ApdexCalculator, ApdexCheckResult } from './checks/ApdexCalculator.js';
+import { AggregatedBenchmarkEvaluator, AggregatedCheckResult } from './checks/AggregatedBenchmarkEvaluator.js';
 import { CheckPipelineError, BenchmarkNotFoundError } from './checks/BaseCheckService.js';
 import { getRealtimePublisher } from '../common/realtime-accessor.js';
 import { TestRun } from '@perfana/shared';
@@ -146,6 +147,7 @@ export class ChecksPipeline extends BasePipelineTypeORM {
             const dataAggregator = new DataAggregator(this.logger, manager);
             const requirementChecker = new RequirementChecker(this.logger, manager as unknown as PoolClient);
             const apdexCalculator = new ApdexCalculator(this.logger, manager);
+            const aggregatedEvaluator = new AggregatedBenchmarkEvaluator(this.logger, manager);
 
             // Load test run
             const testRunData = await this.loadTestRunForChecks(manager, testRunId);
@@ -170,6 +172,7 @@ export class ChecksPipeline extends BasePipelineTypeORM {
               dataAggregator,
               requirementChecker,
               apdexCalculator,
+              aggregatedEvaluator,
               manager,
               snapshotId,
               grafanaInfo,
@@ -216,6 +219,7 @@ export class ChecksPipeline extends BasePipelineTypeORM {
     dataAggregator: DataAggregator,
     requirementChecker: RequirementChecker,
     apdexCalculator: ApdexCalculator,
+    aggregatedEvaluator: AggregatedBenchmarkEvaluator,
     manager: EntityManager,
     snapshotId?: string,
     grafanaInfo?: string,
@@ -298,6 +302,31 @@ export class ChecksPipeline extends BasePipelineTypeORM {
               `score=${apdexResult.apdex_result.apdex_score?.toFixed(3) || 'N/A'}, ` +
               `meets_requirement=${apdexResult.meets_requirement}` +
               (apdexResult.transaction_results ? ` (${apdexResult.transaction_results.length} transactions)` : '')
+            );
+          } else if (benchmark.benchmark_type === 'aggregated') {
+            this.logger.info(`Processing Aggregated benchmark ${benchmark.id}: ${benchmark.aggregate_metric} (${benchmark.aggregate_stat ?? 'n/a'})`);
+
+            const aggResult = await aggregatedEvaluator.evaluate(testRun, {
+              id: benchmark.id,
+              aggregate_metric: benchmark.aggregate_metric as 'transaction_response_time' | 'request_response_time' | 'error_percentage',
+              aggregate_stat: benchmark.aggregate_stat,
+              requirement_operator: benchmark.requirement_operator ?? '<=',
+              requirement_value: benchmark.requirement_value ?? 0,
+              exclude_ramp_up_time: benchmark.exclude_ramp_up_time,
+            });
+
+            results.processed_benchmarks += 1;
+            await this.saveAggregatedCheckResult(manager, testRun, benchmark, aggResult);
+            checkResults.push({
+              status: aggResult.status,
+              meets_requirement: aggResult.meets_requirement,
+            });
+            results.created_check_results += 1;
+
+            this.logger.info(
+              `Created Aggregated check result for benchmark ${benchmark.id}: ` +
+              `value=${aggResult.actual_value?.toFixed(2) ?? 'N/A'}, ` +
+              `meets_requirement=${aggResult.meets_requirement}`
             );
           } else {
             // Handle metric benchmarks (existing logic)
@@ -703,6 +732,85 @@ export class ChecksPipeline extends BasePipelineTypeORM {
       `Saved Apdex check result for benchmark ${benchmark.id}: ` +
       `score=${apdexResult.apdex_result.apdex_score?.toFixed(3) || 'N/A'}, ` +
       `meets_requirement=${apdexResult.meets_requirement}`
+    );
+  }
+
+  /**
+   * Save an Aggregated SLO check result to the database
+   * Adapts AggregatedCheckResult to fit the check_results table schema
+   */
+  private async saveAggregatedCheckResult(
+    manager: EntityManager,
+    testRun: TestRunInterface,
+    benchmark: Benchmark,
+    aggResult: AggregatedCheckResult,
+  ): Promise<void> {
+    const label = benchmark.panel_title ?? benchmark.aggregate_metric ?? 'Aggregated SLO';
+    const metricUnit = benchmark.aggregate_metric === 'error_percentage' ? '%' : 'ms';
+
+    const targets = [{
+      target: label,
+      value: aggResult.actual_value,
+      meets_requirement: aggResult.meets_requirement,
+    }];
+
+    const insertSql = `
+      INSERT INTO check_results (
+        system_under_test_id, test_environment, workload, test_run_id,
+        dashboard_label, dashboard_uid, application_dashboard_id, panel_title, panel_id, panel_type,
+        panel_y_axes_format, metric_name, metric_unit, benchmark_id, status, message,
+        average_all, evaluate_type, exclude_ramp_up_time, ramp_up,
+        match_pattern, requirement, panel_average, meets_requirement,
+        targets, validate_with_default_if_no_data, validate_with_default_if_no_data_value,
+        tags, created_at, updated_at
+      ) VALUES (
+        $1, $2, $3, $4, $5, $6, $7, $8, $9, $10,
+        $11, $12, $13, $14, $15, $16, $17, $18, $19, $20,
+        $21, $22, $23, $24, $25, $26, $27, $28, NOW(), NOW()
+      )
+    `;
+
+    await manager.query(insertSql, [
+      testRun.system_under_test_id,
+      testRun.test_environment,
+      testRun.workload,
+      testRun.test_run_id,
+      'Aggregated SLO',                            // dashboard_label
+      null,                                        // dashboard_uid - not applicable
+      null,                                        // application_dashboard_id - not applicable
+      label,                                       // panel_title
+      null,                                        // panel_id - not applicable
+      'aggregated',                                // panel_type
+      null,                                        // panel_y_axes_format
+      benchmark.aggregate_metric ?? null,          // metric_name
+      metricUnit,                                  // metric_unit
+      benchmark.id,                                // benchmark_id
+      aggResult.status,                            // status (COMPLETE, ERROR, NO_DATA)
+      aggResult.message,                           // message
+      false,                                       // average_all - not applicable
+      'aggregated',                                // evaluate_type
+      benchmark.exclude_ramp_up_time,              // exclude_ramp_up_time
+      testRun.ramp_up || 0,                        // ramp_up
+      null,                                        // match_pattern
+      JSON.stringify({
+        type: 'aggregated',
+        aggregate_metric: benchmark.aggregate_metric,
+        aggregate_stat: benchmark.aggregate_stat,
+        operator: benchmark.requirement_operator ?? '<=',
+        threshold: benchmark.requirement_value ?? 0,
+      }),                                          // requirement (JSONB)
+      aggResult.actual_value,                      // panel_average - stores the computed value
+      aggResult.meets_requirement,                 // meets_requirement
+      JSON.stringify(targets),                     // targets (JSONB)
+      false,                                       // validate_with_default_if_no_data
+      0,                                           // validate_with_default_if_no_data_value
+      [],                                          // tags
+    ]);
+
+    this.logger.debug(
+      `Saved Aggregated check result for benchmark ${benchmark.id}: ` +
+      `value=${aggResult.actual_value?.toFixed(2) ?? 'N/A'}, ` +
+      `meets_requirement=${aggResult.meets_requirement}`
     );
   }
 

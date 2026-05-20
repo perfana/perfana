@@ -1034,6 +1034,31 @@ describe('BenchmarksService', () => {
     });
   });
 
+  describe('createAggregatedSlo', () => {
+    it('delegates to mutationService.createAggregatedSlo', async () => {
+      const createSpy = jest.spyOn((service as any).mutationService, 'createAggregatedSlo')
+        .mockResolvedValue({ id: 'bench-1', benchmark_type: 'aggregated' });
+
+      const result = await service.createAggregatedSlo('user-1', ['user'], {
+        systemUnderTestId: 'sut-1',
+        testEnvironment: 'staging',
+        workload: 'baseline',
+        aggregateMetric: 'transaction_response_time',
+        aggregateStat: 'p95',
+        requirementOperator: '<=',
+        requirementValue: 2000,
+        excludeRampUpTime: true,
+      });
+
+      expect(createSpy).toHaveBeenCalledWith('user-1', ['user'], expect.objectContaining({
+        aggregateMetric: 'transaction_response_time',
+        aggregateStat: 'p95',
+        requirementValue: 2000,
+      }));
+      expect(result).toMatchObject({ benchmark_type: 'aggregated' });
+    });
+  });
+
   describe('syncTagsWithApplicationDashboards', () => {
     it('should call stored procedure to sync tags', async () => {
       // Arrange

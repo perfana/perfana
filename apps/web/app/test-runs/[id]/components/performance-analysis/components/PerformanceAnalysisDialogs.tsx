@@ -3,6 +3,7 @@
 import ApdexConfigDialog from '../ApdexConfigDialog';
 import ApdexThresholdDialog from '../ApdexThresholdDialog';
 import ApdexSloDialog from '../ApdexSloDialog';
+import AggregatedSloDialog from '../AggregatedSloDialog';
 import BaselineApdexDialog from '../BaselineApdexDialog';
 import ApdexThresholdsManagementDialog from '../../service-level-objectives/ApdexThresholdsManagementDialog';
 import ErrorsModal from '../ErrorsModal';
@@ -33,6 +34,10 @@ interface PerformanceAnalysisDialogsProps {
   // Apdex SLO dialog
   sloDialogOpen: boolean;
   onSloDialogClose: () => void;
+
+  // Aggregated SLO dialog
+  aggregatedSloDialogOpen: boolean;
+  onAggregatedSloDialogClose: () => void;
 
   // Baseline dialog
   baselineDialogOpen: boolean;
@@ -85,6 +90,8 @@ export function PerformanceAnalysisDialogs({
   onThresholdDialogClose,
   sloDialogOpen,
   onSloDialogClose,
+  aggregatedSloDialogOpen,
+  onAggregatedSloDialogClose,
   baselineDialogOpen,
   onBaselineDialogClose,
   thresholdsManagementDialogOpen,
@@ -140,6 +147,14 @@ export function PerformanceAnalysisDialogs({
         onClose={onSloDialogClose}
         testRunId={testRunId}
         currentThreshold={testLevelThreshold}
+        onSuccess={onConfigSuccess}
+      />
+
+      {/* Aggregated SLO Dialog */}
+      <AggregatedSloDialog
+        open={aggregatedSloDialogOpen}
+        onClose={onAggregatedSloDialogClose}
+        testRunId={testRunId}
         onSuccess={onConfigSuccess}
       />
 

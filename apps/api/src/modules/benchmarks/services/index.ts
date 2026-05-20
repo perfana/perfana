@@ -29,6 +29,8 @@ export type {
   UpdateBenchmarkDto,
   CreateApdexSloDto,
   UpdateApdexSloDto,
+  CreateAggregatedSloDto,
+  UpdateAggregatedSloDto,
 } from './benchmark-mutation.service';
 
 export { BenchmarkTagHelper } from './benchmark-tag.helper';

@@ -77,3 +77,32 @@ export interface UpdateApdexSloDto {
   description?: string;
   tags?: string[];
 }
+
+/**
+ * DTO for creating an aggregated SLO benchmark
+ */
+export interface CreateAggregatedSloDto {
+  systemUnderTestId: string;
+  testEnvironment: string;
+  workload: string;
+  aggregateMetric: 'transaction_response_time' | 'request_response_time' | 'error_percentage';
+  aggregateStat?: 'avg' | 'p50' | 'p90' | 'p95' | 'p99' | 'max';
+  requirementOperator: string;
+  requirementValue: number;
+  excludeRampUpTime?: boolean;
+  description?: string;
+  tags?: string[];
+}
+
+/**
+ * DTO for updating an aggregated SLO benchmark
+ */
+export interface UpdateAggregatedSloDto {
+  aggregateStat?: 'avg' | 'p50' | 'p90' | 'p95' | 'p99' | 'max';
+  requirementOperator?: string;
+  requirementValue?: number;
+  excludeRampUpTime?: boolean;
+  enabled?: boolean;
+  description?: string;
+  tags?: string[];
+}
