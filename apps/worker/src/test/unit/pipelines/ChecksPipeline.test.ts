@@ -333,6 +333,7 @@ describe('ChecksPipeline', () => {
     let mockDataAggregator: any;
     let mockRequirementChecker: any;
     let mockApdexCalculator: any;
+    let mockAggregatedEvaluator: any;
 
     beforeEach(() => {
       mockBenchmarkMatcher = {
@@ -351,6 +352,10 @@ describe('ChecksPipeline', () => {
       mockApdexCalculator = {
         calculateApdexScores: vi.fn(),
         saveApdexResults: vi.fn(),
+      };
+
+      mockAggregatedEvaluator = {
+        evaluate: vi.fn(),
       };
 
       // Mock update methods
@@ -394,6 +399,7 @@ describe('ChecksPipeline', () => {
         mockDataAggregator,
         mockRequirementChecker,
         mockApdexCalculator,
+        mockAggregatedEvaluator,
         mockManager
       );
 
@@ -438,6 +444,7 @@ describe('ChecksPipeline', () => {
         mockDataAggregator,
         mockRequirementChecker,
         mockApdexCalculator,
+        mockAggregatedEvaluator,
         mockManager
       );
 
@@ -489,6 +496,7 @@ describe('ChecksPipeline', () => {
         mockDataAggregator,
         mockRequirementChecker,
         mockApdexCalculator,
+        mockAggregatedEvaluator,
         mockManager
       );
 
@@ -543,6 +551,7 @@ describe('ChecksPipeline', () => {
         mockDataAggregator,
         mockRequirementChecker,
         mockApdexCalculator,
+        mockAggregatedEvaluator,
         mockManager
       );
 
@@ -589,6 +598,7 @@ describe('ChecksPipeline', () => {
         mockDataAggregator,
         mockRequirementChecker,
         mockApdexCalculator,
+        mockAggregatedEvaluator,
         mockManager
       );
 
@@ -636,6 +646,7 @@ describe('ChecksPipeline', () => {
         mockDataAggregator,
         mockRequirementChecker,
         mockApdexCalculator,
+        mockAggregatedEvaluator,
         mockManager
       );
 
@@ -655,6 +666,7 @@ describe('ChecksPipeline', () => {
     let mockDataAggregator: any;
     let mockRequirementChecker: any;
     let mockApdexCalculator: any;
+    let mockAggregatedEvaluator: any;
 
     beforeEach(() => {
       mockBenchmarkMatcher = {
@@ -673,6 +685,10 @@ describe('ChecksPipeline', () => {
       mockApdexCalculator = {
         calculateApdexScores: vi.fn(),
         saveApdexResults: vi.fn(),
+      };
+
+      mockAggregatedEvaluator = {
+        evaluate: vi.fn(),
       };
 
       vi.spyOn(pipeline as any, 'updateTestRunStatus').mockResolvedValue(undefined);
@@ -699,6 +715,7 @@ describe('ChecksPipeline', () => {
         mockDataAggregator,
         mockRequirementChecker,
         mockApdexCalculator,
+        mockAggregatedEvaluator,
         mockManager
       );
 
@@ -739,6 +756,7 @@ describe('ChecksPipeline', () => {
         mockDataAggregator,
         mockRequirementChecker,
         mockApdexCalculator,
+        mockAggregatedEvaluator,
         mockManager
       );
 
@@ -784,6 +802,7 @@ describe('ChecksPipeline', () => {
         mockDataAggregator,
         mockRequirementChecker,
         mockApdexCalculator,
+        mockAggregatedEvaluator,
         mockManager
       );
 
@@ -830,6 +849,7 @@ describe('ChecksPipeline', () => {
         mockDataAggregator,
         mockRequirementChecker,
         mockApdexCalculator,
+        mockAggregatedEvaluator,
         mockManager
       );
 
@@ -881,6 +901,7 @@ describe('ChecksPipeline', () => {
         mockDataAggregator,
         mockRequirementChecker,
         mockApdexCalculator,
+        mockAggregatedEvaluator,
         mockManager,
         undefined,
         undefined,
@@ -905,6 +926,7 @@ describe('ChecksPipeline', () => {
     let mockDataAggregator: any;
     let mockRequirementChecker: any;
     let mockApdexCalculator: any;
+    let mockAggregatedEvaluator: any;
 
     beforeEach(() => {
       mockBenchmarkMatcher = {
@@ -923,6 +945,10 @@ describe('ChecksPipeline', () => {
       mockApdexCalculator = {
         calculateApdexScores: vi.fn(),
         saveApdexResults: vi.fn(),
+      };
+
+      mockAggregatedEvaluator = {
+        evaluate: vi.fn(),
       };
 
       vi.spyOn(pipeline as any, 'updateTestRunStatus').mockResolvedValue(undefined);
@@ -952,6 +978,7 @@ describe('ChecksPipeline', () => {
         mockDataAggregator,
         mockRequirementChecker,
         mockApdexCalculator,
+        mockAggregatedEvaluator,
         mockManager
         )
       ).rejects.toThrow('Failed to process test run test-run-1');
