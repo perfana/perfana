@@ -4,6 +4,17 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
+## [0.2.56.0] - 2026-05-20
+
+### Added
+
+- **Aggregated Test SLOs**: a new `benchmark_type = 'aggregated'` lets teams define a single pass/fail gate on a metric aggregated across all requests in a test run. Three metrics are supported: `transaction_response_time` (avg/p50/p90/p95/p99/max across all transactions), `request_response_time` (same stat options for HTTP requests), and `error_percentage`. Results appear in `check_results` alongside existing metric and Apdex SLOs and feed into the test run's overall validity.
+  - **API**: new `POST /benchmarks/aggregated` and `PUT /benchmarks/aggregated/:id` endpoints accept `aggregate_metric`, `aggregate_stat`, `requirement_operator` (`<=`, `>=`, `<`, `>`), and `requirement_value`.
+  - **Worker**: `AggregatedBenchmarkEvaluator` runs a direct SQL aggregation query; `ChecksPipeline` dispatches to it when `benchmark_type = 'aggregated'`.
+  - **UI (Performance Analysis menu)**: "Set Aggregated SLO" item opens `AggregatedSloDialog` — a form for choosing metric, stat, operator, and threshold. Pre-populates for editing when an existing aggregated SLO is detected for the test run's workload.
+  - **UI (SUT config / SLO tab)**: the "Add SLO" button is now a split dropdown; the second option opens the same aggregated SLO dialog. The SLO table gains a **Type** column with colour-coded chips (`metric` / `apdex` / `aggregated`).
+  - **Database**: two nullable columns (`aggregate_metric varchar(50)`, `aggregate_stat varchar(10)`) added to the `benchmarks` table via a new migration.
+
 ## [0.2.55.1] - 2026-05-19
 
 ### Fixed
