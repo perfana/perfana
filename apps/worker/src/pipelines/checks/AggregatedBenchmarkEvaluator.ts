@@ -22,12 +22,12 @@ export interface AggregatedCheckResult {
 }
 
 const STAT_SQL: Record<string, string> = {
-  avg: 'AVG(elapsed)',
-  p50: 'PERCENTILE_CONT(0.50) WITHIN GROUP (ORDER BY elapsed)',
-  p90: 'PERCENTILE_CONT(0.90) WITHIN GROUP (ORDER BY elapsed)',
-  p95: 'PERCENTILE_CONT(0.95) WITHIN GROUP (ORDER BY elapsed)',
-  p99: 'PERCENTILE_CONT(0.99) WITHIN GROUP (ORDER BY elapsed)',
-  max: 'MAX(elapsed)',
+  avg: 'AVG(response_time)',
+  p50: 'PERCENTILE_CONT(0.50) WITHIN GROUP (ORDER BY response_time)',
+  p90: 'PERCENTILE_CONT(0.90) WITHIN GROUP (ORDER BY response_time)',
+  p95: 'PERCENTILE_CONT(0.95) WITHIN GROUP (ORDER BY response_time)',
+  p99: 'PERCENTILE_CONT(0.99) WITHIN GROUP (ORDER BY response_time)',
+  max: 'MAX(response_time)',
 };
 
 /**
@@ -89,27 +89,35 @@ export class AggregatedBenchmarkEvaluator extends BaseCheckService {
 
   private async computeMetric(testRun: TestRun, benchmark: AggregatedBenchmark): Promise<number | null> {
     const params: unknown[] = [testRun.test_run_id];
+    let paramIndex = 2;
+
+    const rampUpClause = (): string => {
+      if (benchmark.exclude_ramp_up_time && testRun.ramp_up && testRun.start_time) {
+        const rampUpEnd = new Date(testRun.start_time.getTime() + testRun.ramp_up * 1000);
+        params.push(rampUpEnd);
+        return ` AND time >= $${paramIndex++}`;
+      }
+      return '';
+    };
 
     if (benchmark.aggregate_metric === 'error_percentage') {
       const sql = `
         SELECT (COUNT(*) FILTER (WHERE success = false))::float / NULLIF(COUNT(*), 0) * 100 AS result
         FROM requests_raw
-        WHERE test_run_id = $1
+        WHERE test_run_id = $1${rampUpClause()}
       `;
       const rows = await this.manager.query(sql, params) as { result: string | null }[];
       const val = rows[0]?.result;
       return val !== null && val !== undefined ? parseFloat(String(val)) : null;
     }
 
-    const statSql = STAT_SQL[benchmark.aggregate_stat ?? 'avg'] ?? 'AVG(elapsed)';
-    const transactionFilter = benchmark.aggregate_metric === 'transaction_response_time'
-      ? 'AND is_transaction = true'
-      : 'AND is_transaction = false';
+    const statSql = STAT_SQL[benchmark.aggregate_stat ?? 'avg'] ?? 'AVG(response_time)';
+    const table = benchmark.aggregate_metric === 'transaction_response_time' ? 'transactions' : 'requests_raw';
 
     const sql = `
       SELECT ${statSql} AS result
-      FROM requests_raw
-      WHERE test_run_id = $1 ${transactionFilter}
+      FROM ${table}
+      WHERE test_run_id = $1${rampUpClause()}
     `;
     const rows = await this.manager.query(sql, params) as { result: string | null }[];
     const val = rows[0]?.result;

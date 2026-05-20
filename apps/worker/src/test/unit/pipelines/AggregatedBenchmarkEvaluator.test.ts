@@ -98,7 +98,7 @@ describe('AggregatedBenchmarkEvaluator', () => {
     expect(result.meets_requirement).toBe(true);  // 1000 <= 2000 via default
   });
 
-  it('evaluates request_response_time metric (is_transaction = false)', async () => {
+  it('evaluates request_response_time metric from requests_raw table', async () => {
     const manager = makeManager([{ result: '300' }]);
     const evaluator = new AggregatedBenchmarkEvaluator(logger, manager);
     const result = await evaluator.evaluate(testRun, {
@@ -110,7 +110,17 @@ describe('AggregatedBenchmarkEvaluator', () => {
     expect(result.meets_requirement).toBe(true);
     expect(result.actual_value).toBe(300);
     const call = (manager.query as ReturnType<typeof vi.fn>).mock.calls[0];
-    expect(call[0]).toContain('is_transaction = false');
+    expect(call[0]).toContain('FROM requests_raw');
+    expect(call[0]).not.toContain('is_transaction');
+  });
+
+  it('evaluates transaction_response_time metric from transactions table', async () => {
+    const manager = makeManager([{ result: '800' }]);
+    const evaluator = new AggregatedBenchmarkEvaluator(logger, manager);
+    await evaluator.evaluate(testRun, { ...baseBenchmark, aggregate_metric: 'transaction_response_time' });
+    const sql: string = (manager.query as ReturnType<typeof vi.fn>).mock.calls[0][0];
+    expect(sql).toContain('FROM transactions');
+    expect(sql).not.toContain('is_transaction');
   });
 
   it('returns ERROR status when query throws', async () => {
@@ -134,6 +144,39 @@ describe('AggregatedBenchmarkEvaluator', () => {
     const evaluator = new AggregatedBenchmarkEvaluator(logger, manager);
     await evaluator.evaluate(testRun, { ...baseBenchmark, aggregate_stat: 'unknown_stat' });
     const sql: string = (manager.query as ReturnType<typeof vi.fn>).mock.calls[0][0];
-    expect(sql).toContain('AVG(elapsed)');
+    expect(sql).toContain('AVG(response_time)');
+  });
+
+  it('uses response_time column not elapsed', async () => {
+    const manager = makeManager([{ result: '1200' }]);
+    const evaluator = new AggregatedBenchmarkEvaluator(logger, manager);
+    await evaluator.evaluate(testRun, baseBenchmark);
+    const sql: string = (manager.query as ReturnType<typeof vi.fn>).mock.calls[0][0];
+    expect(sql).toContain('response_time');
+    expect(sql).not.toContain('elapsed');
+  });
+
+  it('applies ramp-up exclusion when exclude_ramp_up_time is true and testRun has start_time', async () => {
+    const manager = makeManager([{ result: '1000' }]);
+    const evaluator = new AggregatedBenchmarkEvaluator(logger, manager);
+    const testRunWithStartTime: TestRun = {
+      ...testRun,
+      start_time: new Date('2026-01-01T10:00:00Z'),
+      ramp_up: 60,
+    };
+    await evaluator.evaluate(testRunWithStartTime, { ...baseBenchmark, exclude_ramp_up_time: true });
+    const call = (manager.query as ReturnType<typeof vi.fn>).mock.calls[0];
+    expect(call[0]).toContain('time >=');
+    expect(call[1]).toHaveLength(2);
+    expect(call[1][1]).toEqual(new Date('2026-01-01T10:01:00Z'));
+  });
+
+  it('skips ramp-up exclusion when exclude_ramp_up_time is false', async () => {
+    const manager = makeManager([{ result: '1000' }]);
+    const evaluator = new AggregatedBenchmarkEvaluator(logger, manager);
+    await evaluator.evaluate(testRun, { ...baseBenchmark, exclude_ramp_up_time: false });
+    const call = (manager.query as ReturnType<typeof vi.fn>).mock.calls[0];
+    expect(call[0]).not.toContain('time >=');
+    expect(call[1]).toHaveLength(1);
   });
 });

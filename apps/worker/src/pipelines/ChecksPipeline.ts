@@ -797,7 +797,7 @@ export class ChecksPipeline extends BasePipelineTypeORM {
         aggregate_metric: benchmark.aggregate_metric,
         aggregate_stat: benchmark.aggregate_stat,
         operator: benchmark.requirement_operator ?? '<=',
-        threshold: benchmark.requirement_value ?? 0,
+        value: benchmark.requirement_value ?? 0,
       }),                                          // requirement (JSONB)
       aggResult.actual_value,                      // panel_average - stores the computed value
       aggResult.meets_requirement,                 // meets_requirement
