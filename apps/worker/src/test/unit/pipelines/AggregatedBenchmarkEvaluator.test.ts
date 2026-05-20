@@ -76,4 +76,64 @@ describe('AggregatedBenchmarkEvaluator', () => {
     });
     expect(result.meets_requirement).toBe(false);  // 1800 is not >= 2000
   });
+
+  it('applies < operator correctly', async () => {
+    const manager = makeManager([{ result: '1999' }]);
+    const evaluator = new AggregatedBenchmarkEvaluator(logger, manager);
+    const result = await evaluator.evaluate(testRun, { ...baseBenchmark, requirement_operator: '<', requirement_value: 2000 });
+    expect(result.meets_requirement).toBe(true);  // 1999 < 2000
+  });
+
+  it('applies > operator correctly', async () => {
+    const manager = makeManager([{ result: '2001' }]);
+    const evaluator = new AggregatedBenchmarkEvaluator(logger, manager);
+    const result = await evaluator.evaluate(testRun, { ...baseBenchmark, requirement_operator: '>', requirement_value: 2000 });
+    expect(result.meets_requirement).toBe(true);  // 2001 > 2000
+  });
+
+  it('falls back to <= for unknown operator', async () => {
+    const manager = makeManager([{ result: '1000' }]);
+    const evaluator = new AggregatedBenchmarkEvaluator(logger, manager);
+    const result = await evaluator.evaluate(testRun, { ...baseBenchmark, requirement_operator: 'invalid', requirement_value: 2000 });
+    expect(result.meets_requirement).toBe(true);  // 1000 <= 2000 via default
+  });
+
+  it('evaluates request_response_time metric (is_transaction = false)', async () => {
+    const manager = makeManager([{ result: '300' }]);
+    const evaluator = new AggregatedBenchmarkEvaluator(logger, manager);
+    const result = await evaluator.evaluate(testRun, {
+      ...baseBenchmark,
+      aggregate_metric: 'request_response_time',
+      aggregate_stat: 'avg',
+      requirement_value: 500,
+    });
+    expect(result.meets_requirement).toBe(true);
+    expect(result.actual_value).toBe(300);
+    const call = (manager.query as ReturnType<typeof vi.fn>).mock.calls[0];
+    expect(call[0]).toContain('is_transaction = false');
+  });
+
+  it('returns ERROR status when query throws', async () => {
+    const manager = { query: vi.fn().mockRejectedValue(new Error('DB down')) } as unknown as EntityManager;
+    const evaluator = new AggregatedBenchmarkEvaluator(logger, manager);
+    const result = await evaluator.evaluate(testRun, baseBenchmark);
+    expect(result.status).toBe('ERROR');
+    expect(result.meets_requirement).toBeNull();
+    expect(result.message).toContain('Evaluation failed');
+  });
+
+  it('returns NO_DATA when query returns empty array', async () => {
+    const manager = makeManager([]);
+    const evaluator = new AggregatedBenchmarkEvaluator(logger, manager);
+    const result = await evaluator.evaluate(testRun, baseBenchmark);
+    expect(result.status).toBe('NO_DATA');
+  });
+
+  it('uses AVG fallback for unrecognised aggregate_stat', async () => {
+    const manager = makeManager([{ result: '800' }]);
+    const evaluator = new AggregatedBenchmarkEvaluator(logger, manager);
+    await evaluator.evaluate(testRun, { ...baseBenchmark, aggregate_stat: 'unknown_stat' });
+    const sql: string = (manager.query as ReturnType<typeof vi.fn>).mock.calls[0][0];
+    expect(sql).toContain('AVG(elapsed)');
+  });
 });

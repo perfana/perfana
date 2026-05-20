@@ -681,6 +681,42 @@ describe('BenchmarkMatcher', () => {
       // Assert
       expect(result).toBe(true);
     });
+
+    it('should validate aggregated benchmark with aggregate_metric and requirement_value', () => {
+      const benchmark = {
+        id: 'agg-1',
+        benchmark_type: 'aggregated',
+        aggregate_metric: 'transaction_response_time',
+        aggregate_stat: 'p95',
+        requirement_operator: '<=',
+        requirement_value: 2000,
+        exclude_ramp_up_time: true,
+      };
+      const result = (matcher as any).isBenchmarkValid(benchmark);
+      expect(result).toBe(true);
+    });
+
+    it('should reject aggregated benchmark missing aggregate_metric', () => {
+      const benchmark = {
+        id: 'agg-2',
+        benchmark_type: 'aggregated',
+        aggregate_metric: undefined,
+        requirement_value: 2000,
+      };
+      const result = (matcher as any).isBenchmarkValid(benchmark);
+      expect(result).toBe(false);
+    });
+
+    it('should reject aggregated benchmark missing requirement_value', () => {
+      const benchmark = {
+        id: 'agg-3',
+        benchmark_type: 'aggregated',
+        aggregate_metric: 'transaction_response_time',
+        requirement_value: undefined,
+      };
+      const result = (matcher as any).isBenchmarkValid(benchmark);
+      expect(result).toBe(false);
+    });
   });
 
   describe('Edge Cases', () => {

@@ -659,6 +659,86 @@ describe('ChecksPipeline', () => {
         'test-run-1'
       );
     });
+
+    it('should route aggregated benchmark to aggregatedEvaluator and count result', async () => {
+      const testRun = {
+        test_run_id: 'test-run-1',
+        system_under_test_id: 'sut-1',
+        test_environment: 'production',
+        workload: 'load-test',
+      };
+
+      const aggregatedBenchmark = {
+        id: 'agg-benchmark-1',
+        benchmark_type: 'aggregated',
+        aggregate_metric: 'transaction_response_time',
+        aggregate_stat: 'p95',
+        requirement_operator: '<=',
+        requirement_value: 2000,
+        exclude_ramp_up_time: true,
+      };
+
+      mockBenchmarkMatcher.findMatchingBenchmarks.mockResolvedValue([aggregatedBenchmark]);
+      mockAggregatedEvaluator.evaluate.mockResolvedValue({
+        benchmark_id: 'agg-benchmark-1',
+        test_run_id: 'test-run-1',
+        actual_value: 1500,
+        meets_requirement: true,
+        status: 'COMPLETE',
+        message: 'P95 1500.00ms <= 2000ms: PASS',
+      });
+
+      const saveAggSpy = vi.spyOn(pipeline as any, 'saveAggregatedCheckResult').mockResolvedValue(undefined);
+
+      const result = await (pipeline as any).processSingleTestRun(
+        testRun,
+        mockBenchmarkMatcher,
+        mockDataAggregator,
+        mockRequirementChecker,
+        mockApdexCalculator,
+        mockAggregatedEvaluator,
+        mockManager
+      );
+
+      expect(result.processed_benchmarks).toBe(1);
+      expect(result.created_check_results).toBe(1);
+      expect(mockAggregatedEvaluator.evaluate).toHaveBeenCalledWith(
+        testRun,
+        expect.objectContaining({
+          id: 'agg-benchmark-1',
+          aggregate_metric: 'transaction_response_time',
+          aggregate_stat: 'p95',
+          requirement_operator: '<=',
+          requirement_value: 2000,
+        })
+      );
+      expect(saveAggSpy).toHaveBeenCalledWith(
+        mockManager, testRun, aggregatedBenchmark,
+        expect.objectContaining({ meets_requirement: true, status: 'COMPLETE' })
+      );
+      expect(mockRequirementChecker.saveCheckResult).not.toHaveBeenCalled();
+    });
+
+    it('should include aggregated ERROR result in check results and mark run invalid', async () => {
+      const testRun = { test_run_id: 'test-run-1', system_under_test_id: 'sut-1', test_environment: 'production', workload: 'load-test' };
+
+      mockBenchmarkMatcher.findMatchingBenchmarks.mockResolvedValue([
+        { id: 'agg-1', benchmark_type: 'aggregated', aggregate_metric: 'error_percentage', requirement_operator: '<=', requirement_value: 1, exclude_ramp_up_time: false },
+      ]);
+      mockAggregatedEvaluator.evaluate.mockResolvedValue({
+        benchmark_id: 'agg-1', test_run_id: 'test-run-1',
+        actual_value: null, meets_requirement: null, status: 'ERROR', message: 'DB error',
+      });
+      vi.spyOn(pipeline as any, 'saveAggregatedCheckResult').mockResolvedValue(undefined);
+      const markInvalidSpy = vi.spyOn(pipeline as any, 'markTestRunInvalid').mockResolvedValue(undefined);
+
+      await (pipeline as any).processSingleTestRun(
+        testRun, mockBenchmarkMatcher, mockDataAggregator, mockRequirementChecker,
+        mockApdexCalculator, mockAggregatedEvaluator, mockManager
+      );
+
+      expect(markInvalidSpy).toHaveBeenCalledWith(mockManager, 'test-run-1', expect.any(String));
+    });
   });
 
   describe('processSingleTestRun - Edge Cases', () => {
