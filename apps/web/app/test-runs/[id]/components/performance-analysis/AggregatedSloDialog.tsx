@@ -297,7 +297,7 @@ export default function AggregatedSloDialog({
           </Box>
 
           {ctx && (
-            <Box sx={{ bgcolor: 'grey.50', borderRadius: 1, p: 1.5, fontSize: 12, color: 'text.secondary' }}>
+            <Box sx={{ border: 1, borderColor: 'divider', borderRadius: 1, p: 1.5, fontSize: 12, color: 'text.secondary' }}>
               Applies to all future test runs matching:<br />
               • System: <strong>{ctx.systemName}</strong> · Environment: <strong>{ctx.testEnvironment}</strong> · Workload: <strong>{ctx.workload}</strong>
             </Box>

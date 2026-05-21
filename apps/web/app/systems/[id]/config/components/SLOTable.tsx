@@ -208,7 +208,14 @@ export default function SLOTable({
               <TableCell>
                 <Box>
                   <Typography variant="body2" fontWeight="medium">
-                    {benchmark.config_title || benchmark.panel_title || 'Unnamed Metric'}
+                    {(() => {
+                      const name = benchmark.config_title || benchmark.panel_title || 'Unnamed Metric';
+                      // Strip trailing " (stat)" suffix for aggregated benchmarks — stat shown in Evaluation column
+                      if (benchmark.benchmark_type === 'aggregated') {
+                        return name.replace(/ \([^)]+\)$/, '');
+                      }
+                      return name;
+                    })()}
                   </Typography>
                   <Typography variant="caption" color="text.secondary">
                     {benchmark.description}
@@ -227,7 +234,11 @@ export default function SLOTable({
               </TableCell>
               <TableCell>
                 <Chip
-                  label={benchmark.source}
+                  label={
+                    benchmark.benchmark_type === 'aggregated' || benchmark.benchmark_type === 'apdex'
+                      ? 'performance-metrics'
+                      : benchmark.source
+                  }
                   sx={{
                     height: '32px',
                     fontWeight: 600,
@@ -288,6 +299,9 @@ export default function SLOTable({
                       'q95': '95th Percentile',
                       'q99': '99th Percentile'
                     };
+                    if (benchmark.benchmark_type === 'aggregated') {
+                      return benchmark.aggregate_stat || 'N/A';
+                    }
                     return evaluateTypeLabels[benchmark.evaluate_type || ''] || benchmark.evaluate_type || 'N/A';
                   })()}
                 </Typography>

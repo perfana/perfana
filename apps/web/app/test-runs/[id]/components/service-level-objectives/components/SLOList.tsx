@@ -30,6 +30,7 @@ import {
   isApdexResult,
   formatApdexRequirement,
   formatRequirement,
+  formatAggregatedMetricLabel,
 } from '../utils/slo-formatters';
 
 interface SLOListProps {
@@ -424,6 +425,10 @@ export function SLOList({
                   <Typography variant="body2" color="text.secondary">
                     Apdex Score
                   </Typography>
+                ) : result.evaluate_type === 'aggregated' ? (
+                  <Typography variant="body2" color="text.secondary">
+                    {formatAggregatedMetricLabel(result.requirement)}
+                  </Typography>
                 ) : (
                   <>
                     <Typography variant="body2" color="text.secondary">
@@ -518,7 +523,7 @@ export function SLOList({
                     hasDistributedTracing={hasDistributedTracing}
                     hasDynatrace={hasDynatrace}
                   />
-                ) : (
+                ) : result.evaluate_type !== 'aggregated' ? (
                   /* Metrics Chart - Full width container */
                   <Box sx={{ width: 'calc(100% + 48px)', mx: -3 }}>
                     <SLOMetricsChart
@@ -529,7 +534,7 @@ export function SLOList({
                       isVisible={expandedSloRows.has(resultKey)}
                     />
                   </Box>
-                )}
+                ) : null}
 
                 {/* Target Values Table (only for non-Apdex results) */}
                 {!isApdexResult(result) && (

@@ -4,6 +4,18 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
+## [0.2.57.0] - 2026-05-20
+
+### Fixed
+
+- **Aggregated SLO display**: The SLO list in test run analysis now shows a human-readable metric label ("P95 Transaction Response Times") instead of the raw panel title for aggregated SLOs. The requirement column shows a concise expression ("<= 2000 ms") instead of the verbose "Value should <= 2000 ms" form.
+- **SUT config SLO table**: The Evaluation column now shows the stat (e.g. `p95`) for aggregated SLOs instead of "N/A". The Source column shows "performance-metrics" for aggregated and Apdex SLOs. The Metric column strips the redundant "(p95)" suffix from aggregated benchmark names since the stat is already visible in Evaluation.
+- **Aggregated SLO evaluator**: Switched SQL aggregation queries to use the `response_time` column (was `elapsed`, which does not exist in `requests_raw`/`transactions`). Transaction response time queries now read from the `transactions` table instead of filtering `requests_raw` by `is_transaction`, matching the actual schema. Ramp-up exclusion is applied per query.
+- **Aggregated SLO requirement JSON**: The stored requirement object now uses the `value` key (was `threshold`) so the frontend formatter reads it correctly.
+- **JTL parser — concurrent thread interleaving**: Corrupted lines produced when multiple JMeter VU threads write to the same JTL file simultaneously are now detected and dropped before CSV parsing. Three patterns caught: odd quote count, a closing quote followed by a non-delimiter character, and wrong number of unquoted commas for the header column count.
+- **JTL parser — per-thread transaction labels**: Requests are now assigned to the transaction label seen on the same thread, not the last transaction label seen on any thread. This prevents cross-thread label bleed when VU threads are interleaved by timestamp.
+- **Benchmark API response**: The `aggregate_metric` and `aggregate_stat` fields are now included in the benchmark DTO returned by the API, allowing the frontend to render the correct evaluation stat without re-deriving it from the configuration JSON.
+
 ## [0.2.56.0] - 2026-05-20
 
 ### Added

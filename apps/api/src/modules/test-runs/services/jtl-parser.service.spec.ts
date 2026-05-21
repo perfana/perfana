@@ -737,6 +737,50 @@ describe('JtlParserService', () => {
   });
 
   // -------------------------------------------------------------------------
+  // Corrupted / malformed CSV rows (JMeter concurrent-write interleaving)
+  // -------------------------------------------------------------------------
+
+  describe('malformed CSV (JMeter concurrent-write corruption)', () => {
+    // Pattern A: unclosed opening quote (one " at start of responseMessage field).
+    // Would previously cause "Invalid Closing Quote: got N".
+    const corruptedOpeningQuote =
+      '1776095051068,3,CORRUPTED_TX,200,"Number of samples in t343,39,OTHER_TX,302,,Grp 1-1,,true,,0,0,1,1,null,0,0,0';
+
+    // Pattern B: stray closing quote mid-field (one " embedded in URL column).
+    // Would previously cause "Invalid Opening Quote: a quote is found on field Latency".
+    const corruptedClosingQuote =
+      '1776095076805,5,PWS_28_07_Uitloggen_05,200,,jp@gc 1-2,,true,,785,947,2,2,https://example.com/lev/Vransaction : 1, number of failing samples : 0",jp@gc 1-2,,true,,1401,1017,2,2,null,0,1661,0';
+
+    it('should not throw when a line has an unclosed opening quote (pattern A)', () => {
+      const csv = [JTL_HEADER, corruptedOpeningQuote, buildJtlRow({ label: 'GET /ok' })].join('\n');
+      expect(() => service.parseZip(createZipWithJtl('c/run.jtl', csv))).not.toThrow();
+    });
+
+    it('should not throw when a line has a stray closing quote mid-field (pattern B)', () => {
+      const csv = [JTL_HEADER, corruptedClosingQuote, buildJtlRow({ label: 'GET /ok' })].join('\n');
+      expect(() => service.parseZip(createZipWithJtl('c/run.jtl', csv))).not.toThrow();
+    });
+
+    it('should not throw when a corrupted line appears at end of file with no subsequent quoted field', () => {
+      const csv = [JTL_HEADER, corruptedOpeningQuote].join('\n');
+      expect(() => service.parseZip(createZipWithJtl('c/run.jtl', csv))).not.toThrow();
+    });
+
+    it('should drop corrupted lines and still parse all healthy rows', () => {
+      const goodBefore = buildJtlRow({ label: 'GET /before', timeStamp: 1_700_000_000_000 });
+      const goodAfter  = buildJtlRow({ label: 'GET /after',  timeStamp: 1_700_000_002_000 });
+      const csv = [JTL_HEADER, goodBefore, corruptedOpeningQuote, corruptedClosingQuote, goodAfter].join('\n');
+
+      const scenarios = service.parseZip(createZipWithJtl('c/run.jtl', csv));
+      const labels = scenarios.flatMap((s) => s.requests.map((r) => r.samplerName));
+
+      expect(labels).toContain('GET /before');
+      expect(labels).toContain('GET /after');
+      expect(labels).not.toContain('CORRUPTED_TX');
+    });
+  });
+
+  // -------------------------------------------------------------------------
   // Empty / degenerate records
   // -------------------------------------------------------------------------
 
