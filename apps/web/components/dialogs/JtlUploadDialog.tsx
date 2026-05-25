@@ -15,6 +15,8 @@ import {
   CircularProgress,
   IconButton,
   Chip,
+  Checkbox,
+  FormControlLabel,
 } from '@mui/material';
 import { CloudUpload, Close, Add, Delete } from '@mui/icons-material';
 import { authenticatedFetch } from '@/lib/api';
@@ -44,6 +46,7 @@ export function JtlUploadDialog({
   const [workload, setWorkload] = useState<string>('');
   const [analysisStartOffset, setAnalysisStartOffset] = useState<string>('');
   const [configs, setConfigs] = useState<ConfigPair[]>([]);
+  const [includeSubTransactions, setIncludeSubTransactions] = useState(false);
   const [uploading, setUploading] = useState(false);
   const [result, setResult] = useState<{ success: boolean; message: string; testRunId?: string } | null>(null);
 
@@ -54,6 +57,7 @@ export function JtlUploadDialog({
     setWorkload('');
     setAnalysisStartOffset('');
     setConfigs([]);
+    setIncludeSubTransactions(false);
     setResult(null);
   }, []);
 
@@ -113,6 +117,10 @@ export function JtlUploadDialog({
       const validConfigs = configs.filter((c) => c.key.trim() && c.value.trim());
       if (validConfigs.length > 0) {
         formData.append('configs', JSON.stringify(validConfigs));
+      }
+
+      if (includeSubTransactions) {
+        formData.append('includeSubTransactions', 'true');
       }
 
       const response = await authenticatedFetch('test-runs/jtl-upload', {
@@ -227,6 +235,26 @@ export function JtlUploadDialog({
             disabled={uploading}
             helperText="Excluded from performance analysis"
             slotProps={{ htmlInput: { min: 0 } }}
+          />
+
+          {/* Sub-transaction rows */}
+          <FormControlLabel
+            control={
+              <Checkbox
+                checked={includeSubTransactions}
+                onChange={(e) => setIncludeSubTransactions(e.target.checked)}
+                disabled={uploading}
+                size="small"
+              />
+            }
+            label={
+              <Box>
+                <Typography variant="body2">Include sub-transaction rows</Typography>
+                <Typography variant="caption" color="text.secondary">
+                  By default, Parallel Controller sub-requests are excluded. Enable only if your test plan uses Parallel Controllers and you need the sub-sampler data.
+                </Typography>
+              </Box>
+            }
           />
 
           {/* Config Key-Value Pairs */}

@@ -1010,7 +1010,7 @@ describe('JtlImportService', () => {
 
       await service.importJtl(buffer, DEFAULT_OPTIONS);
 
-      expect(jtlParserService.parseZip).toHaveBeenCalledWith(buffer);
+      expect(jtlParserService.parseZip).toHaveBeenCalledWith(buffer, { includeSubTransactions: false });
     });
 
     it('should not insert url_patterns when url field is absent (empty string)', async () => {

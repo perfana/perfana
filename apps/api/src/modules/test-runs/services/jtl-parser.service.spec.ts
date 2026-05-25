@@ -7,7 +7,7 @@ import { JtlParserService, ParsedScenario } from './jtl-parser.service';
 
 /** Standard JTL CSV header used across all test fixtures */
 const JTL_HEADER =
-  'timeStamp,elapsed,label,responseCode,responseMessage,threadName,success,bytes,sentBytes,grpThreads,allThreads,URL,Latency,Connect,failureMessage';
+  'timeStamp,elapsed,label,responseCode,responseMessage,threadName,success,bytes,sentBytes,grpThreads,allThreads,URL,Latency,Connect,failureMessage,dataType';
 
 interface JtlRowOptions {
   timeStamp?: number;
@@ -25,6 +25,7 @@ interface JtlRowOptions {
   latency?: number;
   connect?: number;
   failureMessage?: string;
+  dataType?: string;
 }
 
 /**
@@ -59,6 +60,7 @@ function buildJtlRow(opts: JtlRowOptions = {}): string {
     opts.latency ?? 80,
     opts.connect ?? 5,
     opts.failureMessage ?? '',
+    opts.dataType ?? 'text',
   ];
   return fields.map(csvField).join(',');
 }
@@ -960,6 +962,97 @@ describe('JtlParserService', () => {
       expect(scenario.endTime.getTime()).toBeGreaterThanOrEqual(
         scenario.startTime.getTime(),
       );
+    });
+  });
+
+  // -------------------------------------------------------------------------
+  // Sub-transaction filtering (Parallel Controller rows)
+  // -------------------------------------------------------------------------
+
+  describe('sub-transaction filtering', () => {
+    /**
+     * Build a CSV that contains:
+     *  - one real TC row (responseMessage starts with 'Number of samples…')
+     *  - one normal request row (threadName='MainGroup 1-1', dataType='text')
+     *  - one PC sub-request row (threadName='', dataType='text')
+     *  - one PC container row (threadName='MainGroup 1-1', dataType='')
+     */
+    function buildMixedCsv(): string {
+      const BASE = 1_700_000_000_000;
+      const rows = [
+        buildJtlRow({ timeStamp: BASE,       label: 'GET /api',    threadName: 'MainGroup 1-1', dataType: 'text' }),
+        buildJtlRow({ timeStamp: BASE + 10,  label: 'PC_sub',      threadName: '',              dataType: 'text' }),
+        buildJtlRow({ timeStamp: BASE + 20,  label: 'PC_container',threadName: 'MainGroup 1-1', dataType: '' }),
+        // TC row last (as JMeter emits it after samplers)
+        buildJtlRow({
+          timeStamp: BASE + 100,
+          label: 'MyTransaction',
+          threadName: 'MainGroup 1-1',
+          responseMessage: 'Number of samples in transaction : 1, number of failing samples : 0',
+          dataType: '',
+        }),
+      ];
+      return [JTL_HEADER, ...rows].join('\n');
+    }
+
+    it('should exclude PC sub-request rows (threadName="") by default', () => {
+      const zipBuffer = createZipWithJtl('s/run.jtl', buildMixedCsv());
+      const scenarios = service.parseZip(zipBuffer);
+
+      // No spurious "" scenario
+      const names = scenarios.map((s) => s.scenarioName);
+      expect(names).not.toContain('');
+      // All rows belong to 'MainGroup'
+      expect(scenarios.length).toBe(1);
+      expect(scenarios[0]!.requests.every((r) => r.samplerName !== 'PC_sub')).toBe(true);
+    });
+
+    it('should exclude PC container rows (dataType="") by default', () => {
+      const zipBuffer = createZipWithJtl('s/run.jtl', buildMixedCsv());
+      const scenario = service.parseZip(zipBuffer)[0]!;
+
+      expect(scenario.requests.every((r) => r.samplerName !== 'PC_container')).toBe(true);
+    });
+
+    it('should always include TC rows regardless of dataType', () => {
+      const zipBuffer = createZipWithJtl('s/run.jtl', buildMixedCsv());
+      const scenario = service.parseZip(zipBuffer)[0]!;
+
+      // TC row (dataType='') must appear in transactions
+      expect(scenario.transactions.some((t) => t.transactionName === 'MyTransaction')).toBe(true);
+    });
+
+    it('should include PC sub-request rows when includeSubTransactions=true', () => {
+      const zipBuffer = createZipWithJtl('s/run.jtl', buildMixedCsv());
+      const scenarios = service.parseZip(zipBuffer, { includeSubTransactions: true });
+
+      // With opt-in, the "" thread group becomes its own scenario
+      const names = scenarios.map((s) => s.scenarioName);
+      expect(names.some((n) => n === '')).toBe(true);
+    });
+
+    it('should include PC container rows when includeSubTransactions=true', () => {
+      const zipBuffer = createZipWithJtl('s/run.jtl', buildMixedCsv());
+      // opt-in: all thread groups included; find the MainGroup scenario
+      const scenarios = service.parseZip(zipBuffer, { includeSubTransactions: true });
+      const main = scenarios.find((s) => s.scenarioName === 'MainGroup')!;
+
+      expect(main.requests.some((r) => r.samplerName === 'PC_container')).toBe(true);
+    });
+
+    it('should filter PC sub-requests in single-group files (no thread split)', () => {
+      // Single-thread-group CSV — no split, exercises the activeRecords path
+      const BASE = 1_700_000_000_000;
+      const csv = [
+        JTL_HEADER,
+        buildJtlRow({ timeStamp: BASE,      label: 'GET /real', threadName: 'T 1-1', dataType: 'text' }),
+        buildJtlRow({ timeStamp: BASE + 10, label: 'PC_sub',    threadName: '',      dataType: 'text' }),
+      ].join('\n');
+      const zipBuffer = createZipWithJtl('single/run.jtl', csv);
+
+      const scenario = service.parseZip(zipBuffer)[0]!;
+      expect(scenario.requests.every((r) => r.samplerName !== 'PC_sub')).toBe(true);
+      expect(scenario.requests.some((r) => r.samplerName === 'GET /real')).toBe(true);
     });
   });
 });

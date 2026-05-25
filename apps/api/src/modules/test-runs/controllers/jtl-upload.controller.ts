@@ -53,6 +53,7 @@ export class JtlUploadController {
         workload: { type: 'string', description: 'Workload name' },
         analysisStartOffset: { type: 'string', description: 'Analysis start offset in seconds' },
         configs: { type: 'string', description: 'Optional JSON: [{key, value}]' },
+        includeSubTransactions: { type: 'string', description: 'Include Parallel Controller sub-transaction rows (default: false)' },
       },
       required: ['file', 'systemUnderTest', 'testEnvironment', 'workload'],
     },
@@ -109,6 +110,7 @@ export class JtlUploadController {
     );
 
     const analysisStartOffset = dto.analysisStartOffset ? parseInt(dto.analysisStartOffset, 10) : 0;
+    const includeSubTransactions = dto.includeSubTransactions === 'true';
 
     const result = await this.jtlImportService.importJtl(file.buffer, {
       systemUnderTest: dto.systemUnderTest,
@@ -116,6 +118,7 @@ export class JtlUploadController {
       workload: dto.workload,
       analysisStartOffset: isNaN(analysisStartOffset) ? 0 : analysisStartOffset,
       configs,
+      includeSubTransactions,
       userId: ctx.userId,
       roles: ctx.roles,
       organizationId,
