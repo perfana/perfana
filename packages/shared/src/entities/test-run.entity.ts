@@ -83,7 +83,7 @@ export class TestRun {
   @Column({ name: 'ramp_up', type: 'integer', nullable: true })
   analysisStartOffset?: number;
 
-  @Column({ name: 'ramp_down', type: 'integer', nullable: true, default: 0 })
+  @Column({ name: 'ramp_down', type: 'integer', nullable: true })
   analysisEndOffset?: number;
 
   @Column({ type: 'boolean', nullable: true, default: false })
