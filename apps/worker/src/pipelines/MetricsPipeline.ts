@@ -107,14 +107,20 @@ export class MetricsPipeline extends BasePipelineTypeORM {
       }
 
       // Create adapter for testRun (convert camelCase to snake_case for compatibility)
+      const rampDownSeconds = testRun.analysisEndOffset ?? 0;
+      const effectiveEndTime = testRun.endTime && rampDownSeconds > 0
+        ? new Date(testRun.endTime.getTime() - rampDownSeconds * 1000)
+        : testRun.endTime;
+
       const testRunAdapter = {
         test_run_id: testRun.testRunId,
         system_under_test_id: testRun.systemUnderTestId,
         workload: testRun.workload,
         test_environment: testRun.testEnvironment,
         start_time: testRun.startTime,
-        end_time: testRun.endTime,
+        end_time: effectiveEndTime,
         ramp_up: testRun.analysisStartOffset || 0,
+        ramp_down: rampDownSeconds,
         created_at: testRun.createdAt,
         updated_at: testRun.updatedAt,
         organization_id: testRun.organizationId || null,
@@ -239,7 +245,7 @@ export class MetricsPipeline extends BasePipelineTypeORM {
    * Get panel metrics as flattened records directly
    * Simplified version that bypasses intermediate PanelMetricsDocument step
    */
-  private async getPanelMetricsAsRecords(testRun: { start_time?: Date; ramp_up?: number; organization_id?: string | null; team_id?: string | null }, panels: PanelDocument[]): Promise<unknown[]> {
+  private async getPanelMetricsAsRecords(testRun: { start_time?: Date; end_time?: Date; ramp_up?: number; ramp_down?: number; organization_id?: string | null; team_id?: string | null }, panels: PanelDocument[]): Promise<unknown[]> {
     // Separate panels with/without errors for different processing (Python pattern)
     const panelsWithoutErrors = panels.filter(panel =>
       panel.errors === null || panel.errors === undefined
@@ -311,7 +317,7 @@ export class MetricsPipeline extends BasePipelineTypeORM {
    * Helper method for the new direct flattening approach
    * @param testRun - Test run information including start_time and ramp_up duration
    */
-  private flattenSingleDocument(document: PanelMetricsDocument, testRun: { start_time?: Date; ramp_up?: number; organization_id?: string | null; team_id?: string | null }): unknown[] {
+  private flattenSingleDocument(document: PanelMetricsDocument, testRun: { start_time?: Date; end_time?: Date; ramp_up?: number; ramp_down?: number; organization_id?: string | null; team_id?: string | null }): unknown[] {
     const baseData = {
       test_run_id: document.test_run_id,
       application_dashboard_id: document.application_dashboard_id,
@@ -337,10 +343,16 @@ export class MetricsPipeline extends BasePipelineTypeORM {
       for (const record of dataRecords) {
         // Calculate ramp_up flag based on test run timing
         let isRampUp = false;
-        if (testRun.start_time && testRun.ramp_up !== undefined) {
+        if (testRun.start_time) {
           const recordTime = new Date(record.time);
           const elapsedSeconds = (recordTime.getTime() - testRun.start_time.getTime()) / 1000;
-          isRampUp = elapsedSeconds < testRun.ramp_up;
+          const startOffset = testRun.ramp_up ?? 0;
+          const endOffset   = testRun.ramp_down ?? 0;
+          const durationSeconds = testRun.end_time
+            ? (testRun.end_time.getTime() - testRun.start_time.getTime()) / 1000
+            : Infinity;
+          isRampUp = elapsedSeconds < startOffset
+            || (endOffset > 0 && elapsedSeconds > durationSeconds - endOffset);
         }
 
         flattened.push({

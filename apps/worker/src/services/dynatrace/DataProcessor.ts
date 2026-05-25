@@ -272,7 +272,12 @@ export class DataProcessor {
       return { timestep: 0.0, rampUp: false };
     }
 
-    const tr = testRun as { startTime?: Date | string; start_time?: Date | string; analysisStartOffset?: number; ramp_up?: number };
+    const tr = testRun as {
+      startTime?: Date | string; start_time?: Date | string;
+      endTime?: Date | string; end_time?: Date | string;
+      analysisStartOffset?: number; ramp_up?: number;
+      analysisEndOffset?: number; ramp_down?: number;
+    };
     // Check for startTime in both camelCase (TypeORM entity) and snake_case (raw query)
     const startTimeValue = tr.startTime || tr.start_time;
 
@@ -287,8 +292,15 @@ export class DataProcessor {
     // Round to integer for cleaner display
     const roundedTimestep = Math.round(timestep);
 
-    const analysisStartOffsetSeconds = tr.analysisStartOffset || tr.ramp_up || 0;
-    const rampUp = roundedTimestep < analysisStartOffsetSeconds;
+    const startOffsetSeconds = tr.analysisStartOffset || tr.ramp_up || 0;
+    const endOffsetSeconds   = tr.analysisEndOffset   || tr.ramp_down || 0;
+    const rawEndTime = tr.endTime || tr.end_time;
+    const rawStartTime = tr.startTime || tr.start_time;
+    const durationSeconds = rawEndTime && rawStartTime
+      ? (new Date(rawEndTime).getTime() - new Date(rawStartTime).getTime()) / 1000
+      : Infinity;
+    const rampUp = roundedTimestep < startOffsetSeconds
+      || (endOffsetSeconds > 0 && roundedTimestep > durationSeconds - endOffsetSeconds);
 
     return { timestep: roundedTimestep, rampUp };
   }

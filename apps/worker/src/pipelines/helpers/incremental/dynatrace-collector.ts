@@ -27,7 +27,9 @@ interface TestRunData {
   workload: string;
   testEnvironment: string;
   startTime?: Date;
+  endTime?: Date;
   analysisStartOffset?: number;
+  analysisEndOffset?: number;
   organizationId?: string | null;
   teamId?: string | null;
 }
@@ -250,7 +252,9 @@ export class DynatraceCollector {
 
     const testRunContext: TestRunContext = {
       startTime: testRun.startTime,
+      endTime: testRun.endTime,
       analysisStartOffset: testRun.analysisStartOffset,
+      analysisEndOffset: testRun.analysisEndOffset,
       organizationId: testRun.organizationId || null,
       teamId: testRun.teamId || null,
     };
