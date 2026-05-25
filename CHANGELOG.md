@@ -4,6 +4,24 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
+## [0.2.58.0] - 2026-05-25
+
+### Added
+
+- **Analysis end offset**: A symmetric counterpart to `analysisStartOffset` that excludes a tail period at the end of a test run from all statistical analysis (ADAPT, rollups, Grafana queries). The effective analysis window becomes `[startTime + analysisStartOffset, endTime − analysisEndOffset]`. A value of `0` means no end exclusion (default, backward-compatible).
+  - **Database**: new `ramp_down` integer column on `test_runs` (mirrors `ramp_up`); migration backfills existing rows to `0`.
+  - **API**: `PUT /test-runs/:id/analysis-time-range` atomically updates both start and end offsets and re-triggers the stats rollup. `GET /test-runs/:id/summary-timeseries` returns time-bucketed throughput, avg response time, and errors/s across the full run for the dialog chart; returns 404 for non-JTL/non-performance-test runs.
+  - **Worker**: `TransactionStatsRollupPipeline` applies `endCutoff = endTime − analysisEndOffset` to the `ramp_up_excluded=true` variant. `MetricProcessor`, Grafana collector, and Dynatrace collector mark tail data points as `ramp_up = true`. `MetricsPipeline` ends Grafana API queries at `effectiveEndTime`. `DataSanityCheckPipeline` warns when the combined offsets eliminate the entire analysis window.
+  - **UI**: "Analysis Window" row in the test-run timing section replaces the old inline `analysisStartOffset` edit field. A "Change analysis time range" button (hidden for Grafana-only runs) opens a dialog with a Recharts ComposedChart (throughput, avg RT, errors/s) and a MUI dual-handle slider. Moving the handles updates amber reference lines and shaded exclusion zones on the chart in real time.
+- **JTL Parallel Controller sub-transaction filtering**: The JTL parser now excludes two categories of Parallel Controller noise by default — sub-requests from PC virtual threads (`threadName == ''`) and PC aggregation container rows (`dataType == ''`). Pass `includeSubTransactions=true` in the multipart upload (or check the new checkbox in the upload dialog) to retain them.
+
+### Fixed
+
+- **Stats rollup**: Pipeline now skips with a warning instead of using wall-clock time when `endTime` is null, preventing silent data corruption for incomplete test runs.
+- **Analysis time range dialog chart**: `getSummaryTimeseries` no longer filters `ramp_up = false`, so the chart shows the full test run (including currently-excluded zones) rather than only the current analysis window.
+- **DataProcessor (Dynatrace)**: `||` replaced with `??` for `startOffsetSeconds`/`endOffsetSeconds` reads so a zero `analysisEndOffset` is not silently bypassed by the fallback chain.
+- **Analysis time range dialog**: `ReferenceArea` excluded zones now snap to the nearest bucket boundary so shaded regions always render at all slider positions, not only at exact bucket edges.
+
 ## [0.2.57.0] - 2026-05-20
 
 ### Fixed
