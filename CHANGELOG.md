@@ -4,6 +4,11 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
+## [0.2.59.1] - 2026-05-25
+
+### Fixed
+- Analysis time range dialog now shows the correct saved offsets on page reload — `analysis_end_offset` was missing from `TestRunsMapperService`, so every GET response omitted it and the dialog always initialized with zero for the end offset
+
 ## [0.2.59.0] - 2026-05-25
 
 ### Fixed
