@@ -10,7 +10,7 @@ import { withTeamFilter } from '../../../common/utils/with-team-filter';
 // Import sub-services
 import { TestRunsCrudQueryService } from './test-runs-crud-query.service';
 import { TestRunsDashboardQueryService } from './test-runs-dashboard-query.service';
-import { TestRunsPerformanceQueryService } from './test-runs-performance-query.service';
+import { TestRunsPerformanceQueryService, SummaryTimeseriesResponse } from './test-runs-performance-query.service';
 import { RollupPendingResult } from './test-runs-performance-query.types';
 import { TestRunsTimeSeriesQueryService } from './test-runs-timeseries-query.service';
 
@@ -378,6 +378,10 @@ export class TestRunsQueryService {
   ): Promise<ThroughputStats> {
     const { orgIds, isAdmin } = await this.resolveOrganizationIds(userId, roles);
     return this.performanceService.getThroughputStats(testRunId, excludeRampUp, isAdmin, orgIds);
+  }
+
+  async getSummaryTimeseries(testRunId: string): Promise<SummaryTimeseriesResponse | null> {
+    return this.performanceService.getSummaryTimeseries(testRunId);
   }
 
   // ============================================================================

@@ -14,6 +14,7 @@ export interface JtlImportOptions {
   workload: string;
   analysisStartOffset?: number;
   configs?: Array<{ key: string; value: string }>;
+  includeSubTransactions?: boolean;
   userId: string;
   roles: string[];
   organizationId: string;
@@ -40,7 +41,9 @@ export class JtlImportService {
     zipBuffer: Buffer,
     options: JtlImportOptions,
   ): Promise<JtlImportResult> {
-    const scenarios = this.jtlParserService.parseZip(zipBuffer);
+    const scenarios = this.jtlParserService.parseZip(zipBuffer, {
+      includeSubTransactions: options.includeSubTransactions ?? false,
+    });
 
     this.logger.log(
       `Importing ${scenarios.length} scenario(s) for ${options.systemUnderTest}/${options.testEnvironment}/${options.workload}`,

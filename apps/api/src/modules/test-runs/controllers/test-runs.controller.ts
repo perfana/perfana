@@ -1,6 +1,7 @@
-import { Controller, Get, Delete, Post, Put, Patch, Param, Query, Body, ParseUUIDPipe, HttpCode, HttpStatus, Logger } from '@nestjs/common';
+import { Controller, Get, Delete, Post, Put, Patch, Param, Query, Body, ParseUUIDPipe, HttpCode, HttpStatus, Logger, NotFoundException } from '@nestjs/common';
 import { ApiTags, ApiOperation, ApiResponse, ApiQuery, ApiParam, ApiBearerAuth, ApiBody } from '@nestjs/swagger';
 import { TestRunsService } from '../test-runs.service';
+import { SummaryTimeseriesResponse } from '../services/test-runs-performance-query.service';
 import { PaginationQueryDto, TestRunQueryDto } from '../../../common/dto';
 import { ValidationException } from '../../../common/exceptions/business.exception';
 import { UuidValidationPipe } from '../../../common/pipes';
@@ -242,6 +243,33 @@ export class TestRunsController {
     return this.testRunsService.updateAnalysisStartOffset(id, body.analysisStartOffset, ctx.userId, ctx.roles);
   }
 
+  @Put(':id/analysis-time-range')
+  @ApiOperation({ summary: 'Update analysis time range (start and end offsets) for a test run' })
+  @ApiResponse({ status: 200, description: 'Analysis time range updated successfully' })
+  @ApiResponse({ status: 404, description: 'Test run not found' })
+  @ApiResponse({ status: 400, description: 'Invalid request data' })
+  async updateAnalysisTimeRange(
+    @Param('id', UuidValidationPipe) id: string,
+    @Body() body: { analysisStartOffset: number; analysisEndOffset: number },
+    @UserCtx() ctx: UserContext,
+  ) {
+    if (
+      typeof body.analysisStartOffset !== 'number' || body.analysisStartOffset < 0 ||
+      typeof body.analysisEndOffset !== 'number' || body.analysisEndOffset < 0
+    ) {
+      throw new ValidationException(
+        'analysisStartOffset and analysisEndOffset must be non-negative numbers (seconds)',
+      );
+    }
+    return this.testRunsService.updateAnalysisTimeRange(
+      id,
+      body.analysisStartOffset,
+      body.analysisEndOffset,
+      ctx.userId,
+      ctx.roles,
+    );
+  }
+
   @Patch(':id/abort')
   @HttpCode(HttpStatus.OK)
   @ApiOperation({ summary: 'Abort a running test run', description: 'Sets abort=true and records who triggered it. Rejected if already completed or aborted.' })
@@ -311,5 +339,18 @@ export class TestRunsController {
     return {
       message: 'Test run deleted successfully',
     };
+  }
+
+  @Get(':id/summary-timeseries')
+  @ApiOperation({ summary: 'Get time-bucketed performance summary for the analysis time range dialog' })
+  @ApiParam({ name: 'id', description: 'Test run UUID or test_run_id string', example: 'PerfanaWebshop-acc-loadTest-00012' })
+  @ApiResponse({ status: 200, description: 'Time-bucketed performance data returned successfully' })
+  @ApiResponse({ status: 404, description: 'No performance timeseries data found for the test run' })
+  async getSummaryTimeseries(@Param('id', UuidValidationPipe) id: string): Promise<SummaryTimeseriesResponse> {
+    const result = await this.testRunsService.getSummaryTimeseries(id);
+    if (!result) {
+      throw new NotFoundException(`No performance timeseries data found for test run ${id}`);
+    }
+    return result;
   }
 }

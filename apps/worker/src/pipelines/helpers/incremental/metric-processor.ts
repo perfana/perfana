@@ -88,7 +88,9 @@ export interface FlattenedMetricRecord {
  */
 export interface TestRunContext {
   startTime?: Date;
+  endTime?: Date;              // used for end-exclusion cutoff
   analysisStartOffset?: number;
+  analysisEndOffset?: number;  // seconds from end to exclude (ramp-down)
   organizationId?: string | null;
   teamId?: string | null;
 }
@@ -148,9 +150,14 @@ export class MetricProcessor {
         const elapsedSeconds = (recordTime.getTime() - testRun.startTime.getTime()) / 1000;
         timestep = elapsedSeconds;
 
-        if (testRun.analysisStartOffset !== undefined) {
-          isRampUp = elapsedSeconds < testRun.analysisStartOffset;
-        }
+        const startOffset = testRun.analysisStartOffset ?? 0;
+        const endOffset = testRun.analysisEndOffset ?? 0;
+        const durationSeconds = testRun.endTime
+          ? (testRun.endTime.getTime() - testRun.startTime.getTime()) / 1000
+          : Infinity;
+        isRampUp =
+          elapsedSeconds < startOffset ||
+          (endOffset > 0 && elapsedSeconds > durationSeconds - endOffset);
       }
 
       flattened.push({
@@ -210,9 +217,14 @@ export class MetricProcessor {
         const elapsedSeconds = (recordTime.getTime() - testRun.startTime.getTime()) / 1000;
         timestep = elapsedSeconds;
 
-        if (testRun.analysisStartOffset !== undefined) {
-          isRampUp = elapsedSeconds < testRun.analysisStartOffset;
-        }
+        const startOffset = testRun.analysisStartOffset ?? 0;
+        const endOffset = testRun.analysisEndOffset ?? 0;
+        const durationSeconds = testRun.endTime
+          ? (testRun.endTime.getTime() - testRun.startTime.getTime()) / 1000
+          : Infinity;
+        isRampUp =
+          elapsedSeconds < startOffset ||
+          (endOffset > 0 && elapsedSeconds > durationSeconds - endOffset);
       }
 
       flattened.push({

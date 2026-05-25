@@ -50,6 +50,16 @@ export class JtlUploadDto {
   @IsOptional()
   @IsString()
   configs?: string;
+
+  @ApiPropertyOptional({
+    description:
+      'Include Parallel Controller sub-transaction rows (default: false). ' +
+      'When omitted, rows with an empty threadName or empty dataType are excluded.',
+    example: 'true',
+  })
+  @IsOptional()
+  @IsString()
+  includeSubTransactions?: string;
 }
 
 export interface JtlUploadResult {

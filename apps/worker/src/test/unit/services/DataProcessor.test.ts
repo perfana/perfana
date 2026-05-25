@@ -319,6 +319,63 @@ describe('DataProcessor', () => {
       expect(result.timestep).toBe(0);
       expect(result.rampUp).toBe(false);
     });
+
+    it('should mark data point as ramp_up when elapsed > duration - endOffsetSeconds', () => {
+      // Arrange — 10 minute test run, 60s end offset, data point 9m30s in (570s)
+      // durationSeconds = 600, durationSeconds - endOffset = 540, 570 > 540 → ramp_up
+      const testRun = {
+        start_time: new Date('2024-01-01T12:00:00Z'),
+        end_time:   new Date('2024-01-01T12:10:00Z'),
+        ramp_up:    0,
+        ramp_down:  60,
+      };
+      const timestamp = new Date('2024-01-01T12:09:30Z'); // 570s elapsed
+
+      // Act
+      const result = (processor as any).calculateTimestepAndRampUp(timestamp, testRun);
+
+      // Assert
+      expect(result.timestep).toBe(570);
+      expect(result.rampUp).toBe(true);
+    });
+
+    it('should NOT mark data point as ramp_up when elapsed is within the analysis window with endOffset > 0', () => {
+      // Arrange — 10 minute test run, 60s end offset, data point at 5 minutes (300s)
+      // durationSeconds = 600, durationSeconds - endOffset = 540, 300 < 540 → not ramp_up
+      const testRun = {
+        start_time: new Date('2024-01-01T12:00:00Z'),
+        end_time:   new Date('2024-01-01T12:10:00Z'),
+        ramp_up:    0,
+        ramp_down:  60,
+      };
+      const timestamp = new Date('2024-01-01T12:05:00Z'); // 300s elapsed
+
+      // Act
+      const result = (processor as any).calculateTimestepAndRampUp(timestamp, testRun);
+
+      // Assert
+      expect(result.timestep).toBe(300);
+      expect(result.rampUp).toBe(false);
+    });
+
+    it('should NOT exclude tail when endOffset is 0', () => {
+      // Arrange — 10 minute test run, 0s end offset, data point at 9m59s (599s)
+      // endOffset = 0, tail exclusion branch is skipped → not ramp_up
+      const testRun = {
+        start_time: new Date('2024-01-01T12:00:00Z'),
+        end_time:   new Date('2024-01-01T12:10:00Z'),
+        ramp_up:    0,
+        ramp_down:  0,
+      };
+      const timestamp = new Date('2024-01-01T12:09:59Z'); // 599s elapsed
+
+      // Act
+      const result = (processor as any).calculateTimestepAndRampUp(timestamp, testRun);
+
+      // Assert
+      expect(result.timestep).toBe(599);
+      expect(result.rampUp).toBe(false);
+    });
   });
 
   describe('Numeric String Parsing', () => {

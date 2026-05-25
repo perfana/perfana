@@ -151,6 +151,20 @@ export class DataSanityCheckPipeline extends BasePipelineTypeORM {
         }
       }
 
+      // 3c. Zero/negative analysis window warning
+      if (testRun.startTime && testRun.endTime) {
+        const durationSeconds =
+          (new Date(testRun.endTime).getTime() - new Date(testRun.startTime).getTime()) / 1000;
+        const startOffset = testRun.analysisStartOffset ?? 0;
+        const endOffset   = testRun.analysisEndOffset ?? 0;
+        if (startOffset + endOffset >= durationSeconds) {
+          warnings.push(
+            `Analysis window is zero or negative: start offset (${startOffset}s) + end offset (${endOffset}s) ` +
+            `>= total duration (${Math.round(durationSeconds)}s). No data will be included in analysis.`
+          );
+        }
+      }
+
       // 4. Statistics completeness (only if metrics exist)
       if (metricsCount > 0) {
         const statsResult = await this.query<{ total: string; all_missing: string }>(

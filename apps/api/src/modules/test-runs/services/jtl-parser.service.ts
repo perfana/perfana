@@ -52,8 +52,14 @@ export class JtlParserService {
    * When a JTL file contains multiple JMeter thread groups (identified
    * by the threadName column), each thread group becomes a separate scenario.
    * Otherwise the parent folder name is used as the scenario name.
+   *
+   * By default, two types of Parallel Controller rows are excluded:
+   *   - Sub-requests: rows emitted by PC virtual threads (threadName === '').
+   *   - Container rows: PC aggregation rows with no HTTP data (dataType === '').
+   * Set includeSubTransactions: true to retain them.
    */
-  parseZip(zipBuffer: Buffer): ParsedScenario[] {
+  parseZip(zipBuffer: Buffer, options?: { includeSubTransactions?: boolean }): ParsedScenario[] {
+    const includeSubTransactions = options?.includeSubTransactions ?? false;
     const zip = new AdmZip(zipBuffer);
     const entries = zip.getEntries();
 
@@ -78,7 +84,7 @@ export class JtlParserService {
         `Parsing JTL file: ${entry.entryName} (scenario: ${scenarioName}, size: ${csvContent.length} bytes)`,
       );
 
-      const parsed = this.parseCsv(csvContent, scenarioName);
+      const parsed = this.parseCsv(csvContent, scenarioName, includeSubTransactions);
       scenarios.push(...parsed);
     }
 
@@ -180,6 +186,7 @@ export class JtlParserService {
   private parseCsv(
     csvContent: string,
     scenarioName: string,
+    includeSubTransactions = false,
   ): ParsedScenario[] {
     const cleanedContent = this.removeCorruptedLines(csvContent, scenarioName);
     const records = parse(cleanedContent, {
@@ -211,6 +218,10 @@ export class JtlParserService {
         group.push(row);
       }
 
+      // Drop the empty-thread-name group: these are Parallel Controller
+      // sub-requests that run in virtual threads with no thread name.
+      if (!includeSubTransactions) groupedRecords.delete('');
+
       if (groupedRecords.size > 1) {
         this.logger.log(
           `Detected ${groupedRecords.size} thread groups in "${scenarioName}": ` +
@@ -220,15 +231,21 @@ export class JtlParserService {
         const scenarios: ParsedScenario[] = [];
         for (const [groupName, groupRecords] of groupedRecords) {
           scenarios.push(
-            this.buildScenarioFromRecords(groupRecords, groupName, true),
+            this.buildScenarioFromRecords(groupRecords, groupName, true, includeSubTransactions),
           );
         }
         return scenarios;
       }
     }
 
-    // Single thread group or no threadName column — use folder-based name
-    return [this.buildScenarioFromRecords(records, scenarioName, false)];
+    // Single thread group or no threadName column — use folder-based name.
+    // Still filter out empty-threadName rows (PC sub-requests) for the
+    // single-group path, since they never belong in the main scenario.
+    const activeRecords =
+      includeSubTransactions
+        ? records
+        : records.filter((r) => (r['threadName'] ?? '') !== '');
+    return [this.buildScenarioFromRecords(activeRecords, scenarioName, false, includeSubTransactions)];
   }
 
   /**
@@ -244,11 +261,14 @@ export class JtlParserService {
    *
    * @param isThreadGroupSplit - When true, uses grpThreads for VU tracking
    *   (per-thread-group count) instead of allThreads (global total).
+   * @param includeSubTransactions - When false (default), rows with an empty
+   *   dataType (Parallel Controller container rows) are excluded from requests.
    */
   private buildScenarioFromRecords(
     records: Record<string, string>[],
     scenarioName: string,
     isThreadGroupSplit: boolean,
+    includeSubTransactions = false,
   ): ParsedScenario {
     const requests: JtlRequestRow[] = [];
     const transactions: JtlTransactionRow[] = [];
@@ -302,7 +322,9 @@ export class JtlParserService {
           responseSize: bytes,
           responseTime: elapsed,
         });
-      } else {
+      } else if (includeSubTransactions || (row['dataType'] ?? 'text') !== '') {
+        // Exclude Parallel Controller container rows: they have dataType='' and
+        // carry no real HTTP data. TC rows are always kept (handled above).
         requests.push({
           time,
           transactionName: transactionLabelByThread.get(threadName) || label,

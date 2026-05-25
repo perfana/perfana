@@ -40,7 +40,9 @@ function makeTestRun(overrides: Record<string, unknown> = {}) {
     testEnvironment: 'production',
     workload: 'default',
     startTime: new Date('2026-04-10T10:00:00Z'),
+    endTime: new Date('2026-04-10T10:10:00Z'),  // 600s duration
     analysisStartOffset: 60,
+    analysisEndOffset: 0,  // default: no end exclusion
     completed: true,
     ...overrides,
   };
@@ -302,6 +304,53 @@ describe('TransactionStatsRollupPipeline', () => {
         .find(s => /INSERT INTO test_run_sampler_stats/i.test(s))!;
       expect(samplerInsert).toMatch(/FILTER\s*\(\s*WHERE\s+r\.success\s*\)/i);
       expect(samplerInsert).toMatch(/FILTER\s*\(\s*WHERE\s+r\.success\s+AND\s+r\.time\s*>=\s*\$2/i);
+    });
+
+    it('computes endCutoff = end_time - analysisEndOffset seconds and passes it as $3', async () => {
+      mockDb.getTestRunByTestRunId.mockResolvedValue(
+        makeTestRun({
+          startTime: new Date('2026-04-10T10:00:00Z'),
+          endTime: new Date('2026-04-10T10:10:00Z'),
+          analysisStartOffset: 60,
+          analysisEndOffset: 60,
+        }),
+      );
+      wireTransaction({ tx: 1, sampler: 1 });
+
+      await pipeline.execute({ testRunId: 'run-001' });
+
+      const insertCall = mockManagerQuery.mock.calls.find(([sql]) =>
+        /INSERT INTO test_run_transaction_stats/i.test(sql as string),
+      );
+      expect(insertCall).toBeDefined();
+      const params = insertCall![1] as unknown[];
+      expect(params[0]).toBe('run-001');
+      // 10:00:00Z + 60s = 10:01:00Z
+      expect((params[1] as Date).toISOString()).toBe('2026-04-10T10:01:00.000Z');
+      // 10:10:00Z - 60s = 10:09:00Z
+      expect((params[2] as Date).toISOString()).toBe('2026-04-10T10:09:00.000Z');
+    });
+
+    it('uses endTime as endCutoff when analysisEndOffset is 0', async () => {
+      mockDb.getTestRunByTestRunId.mockResolvedValue(
+        makeTestRun({
+          startTime: new Date('2026-04-10T10:00:00Z'),
+          endTime: new Date('2026-04-10T10:10:00Z'),
+          analysisStartOffset: 60,
+          analysisEndOffset: 0,
+        }),
+      );
+      wireTransaction({ tx: 1, sampler: 1 });
+
+      await pipeline.execute({ testRunId: 'run-001' });
+
+      const insertCall = mockManagerQuery.mock.calls.find(([sql]) =>
+        /INSERT INTO test_run_transaction_stats/i.test(sql as string),
+      );
+      expect(insertCall).toBeDefined();
+      const params = insertCall![1] as unknown[];
+      // endCutoff = endTime - 0s = 10:10:00Z
+      expect((params[2] as Date).toISOString()).toBe('2026-04-10T10:10:00.000Z');
     });
 
     it('returns an error result when the database transaction throws', async () => {

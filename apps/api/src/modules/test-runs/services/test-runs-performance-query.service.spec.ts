@@ -2814,4 +2814,85 @@ describe('TestRunsPerformanceQueryService', () => {
       expect(call[1]).toEqual([TEST_RUN_ID, ['org-1']]);
     });
   });
+
+  // =========================================================================
+  // getSummaryTimeseries
+  // =========================================================================
+
+  describe('getSummaryTimeseries', () => {
+    it('returns null when no transactions exist', async () => {
+      // Arrange: first call resolves test run (start_time + duration), second returns empty bucket data
+      (testRunRepo.query as jest.Mock)
+        .mockResolvedValueOnce([{ start_time: '2024-01-01T10:00:00Z', duration: 1800 }])
+        .mockResolvedValueOnce([]);
+
+      // Act
+      const result = await service.getSummaryTimeseries(TEST_RUN_ID);
+
+      // Assert
+      expect(result).toBeNull();
+    });
+
+    it('returns null when test run not found', async () => {
+      // Arrange: first call returns empty (no test run)
+      (testRunRepo.query as jest.Mock).mockResolvedValueOnce([]);
+
+      // Act
+      const result = await service.getSummaryTimeseries(TEST_RUN_ID);
+
+      // Assert
+      expect(result).toBeNull();
+    });
+
+    it('returns buckets with throughput, avgResponseTime, errorsPerSecond when data exists', async () => {
+      // Arrange
+      const duration = 600; // 10 minutes
+      const bucketSize = Math.max(5, Math.min(60, Math.round(duration / 100))); // = 6
+
+      (testRunRepo.query as jest.Mock)
+        .mockResolvedValueOnce([{ start_time: '2024-01-01T10:00:00Z', duration }])
+        .mockResolvedValueOnce([
+          { time_seconds: '0', throughput: '25.5', avg_response_time: '120.3', errors_per_second: '0.5' },
+          { time_seconds: '6', throughput: '30.2', avg_response_time: '110.0', errors_per_second: '0' },
+        ]);
+
+      // Act
+      const result = await service.getSummaryTimeseries(TEST_RUN_ID);
+
+      // Assert
+      expect(result).not.toBeNull();
+      expect(result!.duration).toBe(duration);
+      expect(result!.bucketSizeSeconds).toBe(bucketSize);
+      expect(result!.buckets).toHaveLength(2);
+      expect(result!.buckets[0]).toMatchObject({
+        timeSeconds: 0,
+        throughput: 25.5,
+        avgResponseTime: 120.3,
+        errorsPerSecond: 0.5,
+      });
+      expect(result!.buckets[1]).toMatchObject({
+        timeSeconds: 6,
+        throughput: 30.2,
+        avgResponseTime: 110.0,
+        errorsPerSecond: 0,
+      });
+    });
+
+    it('resolves UUID to test_run_id before querying', async () => {
+      // Arrange: UUID → test_run_id lookup, then test run meta, then empty buckets
+      (testRunRepo.query as jest.Mock)
+        .mockResolvedValueOnce([{ test_run_id: TEST_RUN_ID }])
+        .mockResolvedValueOnce([{ start_time: '2024-01-01T10:00:00Z', duration: 300 }])
+        .mockResolvedValueOnce([]);
+
+      // Act
+      const result = await service.getSummaryTimeseries(UUID);
+
+      // Assert: UUID lookup was first call
+      const firstCall = (testRunRepo.query as jest.Mock).mock.calls[0];
+      expect(firstCall[0]).toContain('SELECT test_run_id FROM test_runs WHERE id');
+      expect(firstCall[1]).toEqual([UUID]);
+      expect(result).toBeNull(); // no buckets → null
+    });
+  });
 });

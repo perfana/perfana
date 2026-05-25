@@ -285,4 +285,72 @@ describe('DataSanityCheckPipeline', () => {
       });
     });
   });
+
+  describe('zero/negative analysis window warning (step 3c)', () => {
+    it('should add zero-window warning when start + end offset >= duration', async () => {
+      // testRun: 6 min (360s) duration, 60s analysisStartOffset + 300s analysisEndOffset = 360s >= 360s
+      const testRun = createMockTestRun({
+        analysisStartOffset: 60,
+        analysisEndOffset: 300,
+      });
+      mockDb.getTestRunByTestRunId.mockResolvedValue(testRun);
+      setupQueryMock({ adaptConfig: null });
+
+      const result = await pipeline.execute({ testRunId: 'test-run-001' });
+
+      expect(result.success).toBe(true);
+      expect(result.data.warnings).toEqual(
+        expect.arrayContaining([
+          expect.stringMatching(/Analysis window is zero or negative/),
+        ]),
+      );
+    });
+
+    it('should add zero-window warning when offsets exceed duration', async () => {
+      // testRun: 6 min (360s) duration, 200s + 200s = 400s > 360s
+      const testRun = createMockTestRun({
+        analysisStartOffset: 200,
+        analysisEndOffset: 200,
+      });
+      mockDb.getTestRunByTestRunId.mockResolvedValue(testRun);
+      setupQueryMock({});
+
+      const result = await pipeline.execute({ testRunId: 'test-run-001' });
+
+      expect(result.success).toBe(true);
+      const warnings: string[] = result.data.warnings ?? [];
+      expect(warnings.some((w: string) => w.includes('Analysis window is zero or negative'))).toBe(true);
+    });
+
+    it('should NOT add zero-window warning when both offsets are 0', async () => {
+      const testRun = createMockTestRun({
+        analysisStartOffset: 0,
+        analysisEndOffset: 0,
+      });
+      mockDb.getTestRunByTestRunId.mockResolvedValue(testRun);
+      setupQueryMock({ adaptConfig: null });
+
+      const result = await pipeline.execute({ testRunId: 'test-run-001' });
+
+      expect(result.success).toBe(true);
+      const warnings: string[] = result.data.warnings ?? [];
+      expect(warnings.some((w: string) => w.includes('Analysis window is zero or negative'))).toBe(false);
+    });
+
+    it('should NOT add zero-window warning when offsets leave a positive window', async () => {
+      // testRun: 6 min (360s) duration, 60s + 60s = 120s < 360s
+      const testRun = createMockTestRun({
+        analysisStartOffset: 60,
+        analysisEndOffset: 60,
+      });
+      mockDb.getTestRunByTestRunId.mockResolvedValue(testRun);
+      setupQueryMock({});
+
+      const result = await pipeline.execute({ testRunId: 'test-run-001' });
+
+      expect(result.success).toBe(true);
+      const warnings: string[] = result.data.warnings ?? [];
+      expect(warnings.some((w: string) => w.includes('Analysis window is zero or negative'))).toBe(false);
+    });
+  });
 });

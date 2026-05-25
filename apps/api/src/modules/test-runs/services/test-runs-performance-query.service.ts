@@ -15,6 +15,19 @@ import {
   ThroughputStats,
 } from '../types/test-run.types';
 
+export interface SummaryTimeseriesBucket {
+  timeSeconds: number;
+  throughput: number;
+  avgResponseTime: number;
+  errorsPerSecond: number;
+}
+
+export interface SummaryTimeseriesResponse {
+  duration: number;
+  bucketSizeSeconds: number;
+  buckets: SummaryTimeseriesBucket[];
+}
+
 /**
  * Service responsible for performance analysis queries
  * Handles: transaction stats, sampler stats, error analysis, virtual users, throughput
@@ -2318,6 +2331,73 @@ export class TestRunsPerformanceQueryService {
     } catch (error) {
       this.logger.error(`Failed to get throughput stats for test run ${testRunId}:`, error);
       throw new DatabaseException('Failed to retrieve throughput statistics', error);
+    }
+  }
+
+  /**
+   * Return time-bucketed performance data for the analysis time range dialog chart.
+   * Buckets span the full test duration (ramp_up excluded via the transactions.ramp_up column).
+   * Returns null when the test run cannot be found or has no JTL/transactions data.
+   */
+  async getSummaryTimeseries(testRunIdOrUuid: string): Promise<SummaryTimeseriesResponse | null> {
+    try {
+      const resolvedTestRunId = await this.resolveTestRunId(testRunIdOrUuid).catch(() => null);
+      if (!resolvedTestRunId) return null;
+
+      // Fetch test run metadata: start_time and duration
+      const metaRows: Array<{ start_time: string; duration: number }> = await withRequestEm(
+        this.testRunRepo,
+      ).query(`SELECT start_time, duration FROM test_runs WHERE test_run_id = $1 LIMIT 1`, [
+        resolvedTestRunId,
+      ]);
+
+      const meta = metaRows[0];
+      if (!meta || meta.duration == null) return null;
+
+      const { start_time, duration } = meta;
+      const durationNum = Number(duration);
+      const BUCKET_TARGET_COUNT = 100;
+      const MIN_BUCKET_SECONDS = 5;
+      const MAX_BUCKET_SECONDS = 60;
+      const bucketSizeSeconds = Math.max(MIN_BUCKET_SECONDS, Math.min(MAX_BUCKET_SECONDS, Math.round(durationNum / BUCKET_TARGET_COUNT)));
+
+      // Query bucketed stats across the FULL test run (no ramp_up filter) so the
+      // analysis time range dialog can show the user data outside the current
+      // analysis window and let them choose new boundaries.
+      const bucketRows: Array<{
+        time_seconds: string;
+        throughput: string;
+        avg_response_time: string;
+        errors_per_second: string;
+      }> = await withRequestEm(this.testRunRepo).query(
+        `SELECT
+           FLOOR(EXTRACT(EPOCH FROM (t.time - $2::timestamptz)) / $3) * $3 AS time_seconds,
+           COUNT(*)::float / $3 AS throughput,
+           AVG(t.mean) AS avg_response_time,
+           0 AS errors_per_second /* TODO: wire real error rate from transactions/requests_error */
+         FROM transactions t
+         WHERE t.test_run_id = $1
+         GROUP BY 1
+         ORDER BY 1`,
+        [resolvedTestRunId, start_time, bucketSizeSeconds],
+      );
+
+      if (bucketRows.length === 0) return null;
+
+      const buckets: SummaryTimeseriesBucket[] = bucketRows.map((row) => ({
+        timeSeconds: Number(row.time_seconds),
+        throughput: Number(row.throughput),
+        avgResponseTime: Number(row.avg_response_time),
+        errorsPerSecond: Number(row.errors_per_second),
+      }));
+
+      return { duration: durationNum, bucketSizeSeconds, buckets };
+    } catch (error) {
+      this.logger.error(
+        `Failed to get summary timeseries for test run ${testRunIdOrUuid}:`,
+        error,
+      );
+      throw new DatabaseException('Failed to retrieve summary timeseries', error);
     }
   }
 }

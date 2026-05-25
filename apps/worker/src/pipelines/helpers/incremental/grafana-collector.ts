@@ -30,6 +30,7 @@ interface TestRunData {
   startTime?: Date;
   endTime?: Date;
   analysisStartOffset?: number;
+  analysisEndOffset?: number;
   createdAt?: Date;
   updatedAt?: Date;
   organizationId?: string | null;
@@ -133,7 +134,9 @@ export class GrafanaCollector {
       // Process metrics documents using batch processor
       const testRunContext: TestRunContext = {
         startTime: testRun.startTime,
+        endTime: testRun.endTime,
         analysisStartOffset: testRun.analysisStartOffset,
+        analysisEndOffset: testRun.analysisEndOffset,
         organizationId: testRun.organizationId || null,
         teamId: testRun.teamId || null,
       };

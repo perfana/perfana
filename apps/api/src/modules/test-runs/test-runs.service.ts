@@ -1,6 +1,7 @@
 import { Injectable } from '@nestjs/common';
 import { TestRunsQueryService } from './services/test-runs-query.service';
 import { RollupPendingResult } from './services/test-runs-performance-query.types';
+import { SummaryTimeseriesResponse } from './services/test-runs-performance-query.service';
 import { TestRunsMutationService } from './services/test-runs-mutation.service';
 import { TestRunsConfigService } from './services/test-runs-config.service';
 import { TestRunsAnomalyService } from './services/test-runs-anomaly.service';
@@ -38,6 +39,7 @@ export interface TestRun {
   duration?: number;
   planned_duration?: number;
   analysis_start_offset?: number;
+  analysis_end_offset?: number;
   completed: boolean;
   abort?: boolean;
   is_stale?: boolean;
@@ -238,6 +240,10 @@ export class TestRunsService {
     return this.queryService.getThroughputStats(testRunId, userId, roles, excludeRampUp);
   }
 
+  async getSummaryTimeseries(testRunId: string): Promise<SummaryTimeseriesResponse | null> {
+    return this.queryService.getSummaryTimeseries(testRunId);
+  }
+
   // ========== Dashboard Methods (delegated to QueryService) ==========
 
   async getDashboardStatistics(userId: string, roles: string[], timePeriod: '24h' | '7d' | '30d' | 'all' | 'custom' = '7d', from?: string, to?: string, organizationId?: string) {
@@ -309,6 +315,10 @@ export class TestRunsService {
 
   async updateAnalysisStartOffset(id: string, analysisStartOffset: number, userId: string, roles: string[]): Promise<TestRun> {
     return this.mutationService.updateAnalysisStartOffset(id, analysisStartOffset, userId, roles);
+  }
+
+  async updateAnalysisTimeRange(id: string, analysisStartOffset: number, analysisEndOffset: number, userId: string, roles: string[]): Promise<TestRun> {
+    return this.mutationService.updateAnalysisTimeRange(id, analysisStartOffset, analysisEndOffset, userId, roles);
   }
 
   async updateAdaptConfig(testRunId: string, differencesAccepted: 'ACCEPTED' | 'DENIED' | 'TBD', userId: string, roles: string[], systemUnderTestId?: string, environment?: string, workload?: string, mode?: 'DEFAULT' | 'BASELINE'): Promise<TestRun> {

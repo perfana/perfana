@@ -79,6 +79,10 @@ const mockServiceFactory = () => ({
   recordTestRunView: jest.fn().mockResolvedValue(undefined),
   verifyTestRunAccess: jest.fn().mockResolvedValue(undefined),
   abortTestRun: jest.fn(),
+  updateAnalysisTimeRange: jest.fn(),
+  getSummaryTimeseries: jest.fn(),
+  getFilterOptions: jest.fn(),
+  updateAnalysisStartOffset: jest.fn(),
 });
 
 // =============================================================================
@@ -508,6 +512,101 @@ describe('TestRunsController', () => {
 
       expect(result).toHaveProperty('message');
       expect(result.message).toBe('Test run deletion queued');
+    });
+  });
+
+  // G4: PUT :id/analysis-time-range
+  describe('PUT :id/analysis-time-range', () => {
+    it('should update analysis time range and return the updated test run (happy path)', async () => {
+      const id = mockTestRun.id;
+      const updatedTestRun = { ...mockTestRun, analysisStartOffset: 60, analysisEndOffset: 120 };
+      service.updateAnalysisTimeRange.mockResolvedValue(updatedTestRun);
+
+      const result = await controller.updateAnalysisTimeRange(
+        id,
+        { analysisStartOffset: 60, analysisEndOffset: 120 },
+        mockUserContext,
+      );
+
+      expect(result).toEqual(updatedTestRun);
+      expect(service.updateAnalysisTimeRange).toHaveBeenCalledWith(
+        id,
+        60,
+        120,
+        mockUserContext.userId,
+        mockUserContext.roles,
+      );
+    });
+
+    it('should accept zero values for both offsets', async () => {
+      const id = mockTestRun.id;
+      service.updateAnalysisTimeRange.mockResolvedValue(mockTestRun);
+
+      const result = await controller.updateAnalysisTimeRange(
+        id,
+        { analysisStartOffset: 0, analysisEndOffset: 0 },
+        mockUserContext,
+      );
+
+      expect(result).toEqual(mockTestRun);
+      expect(service.updateAnalysisTimeRange).toHaveBeenCalledWith(id, 0, 0, mockUserContext.userId, mockUserContext.roles);
+    });
+
+    it('should throw ValidationException when analysisStartOffset is negative', async () => {
+      const id = mockTestRun.id;
+
+      await expect(
+        controller.updateAnalysisTimeRange(
+          id,
+          { analysisStartOffset: -1, analysisEndOffset: 0 },
+          mockUserContext,
+        ),
+      ).rejects.toThrow(ValidationException);
+
+      expect(service.updateAnalysisTimeRange).not.toHaveBeenCalled();
+    });
+
+    it('should throw ValidationException when analysisEndOffset is negative', async () => {
+      const id = mockTestRun.id;
+
+      await expect(
+        controller.updateAnalysisTimeRange(
+          id,
+          { analysisStartOffset: 0, analysisEndOffset: -5 },
+          mockUserContext,
+        ),
+      ).rejects.toThrow(ValidationException);
+
+      expect(service.updateAnalysisTimeRange).not.toHaveBeenCalled();
+    });
+  });
+
+  // G5: GET :id/summary-timeseries
+  describe('GET :id/summary-timeseries', () => {
+    it('should return summary timeseries data when service returns a result', async () => {
+      const id = mockTestRun.id;
+      const mockTimeseries = {
+        buckets: [
+          { time: '2024-01-15T10:00:00Z', p95: 250, throughput: 120 },
+          { time: '2024-01-15T10:01:00Z', p95: 260, throughput: 115 },
+        ],
+      };
+      service.getSummaryTimeseries.mockResolvedValue(mockTimeseries as any);
+
+      const result = await controller.getSummaryTimeseries(id);
+
+      expect(result).toEqual(mockTimeseries);
+      expect(service.getSummaryTimeseries).toHaveBeenCalledWith(id);
+    });
+
+    it('should throw NotFoundException when service returns null', async () => {
+      const id = mockTestRun.id;
+      service.getSummaryTimeseries.mockResolvedValue(null);
+
+      const { NotFoundException } = await import('@nestjs/common');
+
+      await expect(controller.getSummaryTimeseries(id)).rejects.toThrow(NotFoundException);
+      expect(service.getSummaryTimeseries).toHaveBeenCalledWith(id);
     });
   });
 
