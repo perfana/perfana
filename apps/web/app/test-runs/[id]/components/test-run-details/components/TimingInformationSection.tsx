@@ -47,6 +47,9 @@ export function TimingInformationSection({ testRun, onTestRunUpdate, showToast }
   const effectiveEnd = duration - endOffset;
   const effectiveDuration = effectiveEnd - startOffset;
 
+  // formatDuration(0) returns "N/A" which is wrong for a zero start offset
+  const formatOffset = (seconds: number) => seconds === 0 ? '0s' : formatDuration(seconds);
+
   const showButton = testRun.completed && !timeseriesLoading && timeseriesData !== null;
 
   return (
@@ -85,7 +88,7 @@ export function TimingInformationSection({ testRun, onTestRunUpdate, showToast }
           Analysis Window
         </Typography>
         <Typography variant="body2" sx={{ fontSize: '0.9375rem', fontWeight: 600, color: 'text.primary', lineHeight: 1.4 }}>
-          {formatDuration(startOffset)} → {formatDuration(effectiveEnd)}
+          {formatOffset(startOffset)} → {formatOffset(effectiveEnd)}
           <Typography component="span" variant="caption" sx={{ ml: 1, color: 'text.secondary', fontWeight: 400 }}>
             ({formatDuration(Math.max(0, effectiveDuration))} effective)
           </Typography>

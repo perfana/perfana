@@ -4,6 +4,13 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
+## [0.2.59.0] - 2026-05-25
+
+### Fixed
+- Analysis time range save now triggers ADAPT re-analysis automatically, so results update without needing a manual re-evaluation trigger
+- After saving a new time range, reopening the dialog reflects the actual saved offsets rather than stale pre-save values (fixed missing `analysisEndOffset` in WebSocket normalizer and object-equality bug in change detection)
+- Analysis window display no longer shows "N/A" when the start offset is zero; it now correctly shows "0s"
+
 ## [0.2.58.0] - 2026-05-25
 
 ### Added

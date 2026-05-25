@@ -404,6 +404,15 @@ export class TestRunsMutationService {
           err,
         );
       }
+      try {
+        await this.bullmqClientService.analyzeTest(result.test_run_id, { adapt: true, benchmarksOnly: false });
+        this.logger.log(`Re-analysis enqueued for test run ${result.test_run_id} after time range update`);
+      } catch (err) {
+        this.logger.error(
+          `Failed to enqueue re-analysis after time range edit for ${result.test_run_id}:`,
+          err,
+        );
+      }
     }
 
     return result;
