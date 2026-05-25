@@ -2364,6 +2364,8 @@ export class TestRunsPerformanceQueryService {
       // Query bucketed stats across the FULL test run (no ramp_up filter) so the
       // analysis time range dialog can show the user data outside the current
       // analysis window and let them choose new boundaries.
+      // UNION ALL covers both JMeter/Gatling runs (transactions table) and
+      // JTL-imported runs (requests_raw table) — only one will have rows.
       const bucketRows: Array<{
         time_seconds: string;
         throughput: string;
@@ -2373,10 +2375,13 @@ export class TestRunsPerformanceQueryService {
         `SELECT
            FLOOR(EXTRACT(EPOCH FROM (t.time - $2::timestamptz)) / $3) * $3 AS time_seconds,
            COUNT(*)::float / $3 AS throughput,
-           AVG(t.mean) AS avg_response_time,
-           0 AS errors_per_second /* TODO: wire real error rate from transactions/requests_error */
-         FROM transactions t
-         WHERE t.test_run_id = $1
+           AVG(t.response_time) AS avg_response_time,
+           0 AS errors_per_second
+         FROM (
+           SELECT time, response_time FROM transactions   WHERE test_run_id = $1
+           UNION ALL
+           SELECT time, response_time FROM requests_raw   WHERE test_run_id = $1
+         ) t
          GROUP BY 1
          ORDER BY 1`,
         [resolvedTestRunId, start_time, bucketSizeSeconds],

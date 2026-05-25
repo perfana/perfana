@@ -97,6 +97,10 @@ describe('TestRunDetailsCard', () => {
 
   beforeEach(() => {
     jest.clearAllMocks();
+    // TimingInformationSection fires authenticatedFetch on mount for the
+    // summary-timeseries endpoint. Default to a non-ok response so it
+    // silently sets timeseriesData=null without throwing.
+    (authenticatedFetch as jest.Mock).mockResolvedValue({ ok: false });
   });
 
   describe('Rendering - Collapsed State', () => {
@@ -314,7 +318,8 @@ describe('TestRunDetailsCard', () => {
 
     it('should format ramp up period correctly', () => {
       render(<TestRunDetailsCard {...defaultProps} expanded={true} />);
-      expect(screen.getByText('5m 0s')).toBeInTheDocument();
+      // analysis_start_offset=300 → "5m 0s" appears in the Analysis Window line
+      expect(screen.getAllByText(/5m 0s/).length).toBeGreaterThan(0);
     });
   });
 
