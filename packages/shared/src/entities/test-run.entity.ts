@@ -45,6 +45,7 @@ export class TestRun {
     'adaptConfig',
     'consolidatedResult',
     'analysisStartOffset',
+    'analysisEndOffset',
     'duration',
     'plannedDuration',
     'variables',
@@ -81,6 +82,9 @@ export class TestRun {
 
   @Column({ name: 'ramp_up', type: 'integer', nullable: true })
   analysisStartOffset?: number;
+
+  @Column({ name: 'ramp_down', type: 'integer', nullable: true, default: 0 })
+  analysisEndOffset?: number;
 
   @Column({ type: 'boolean', nullable: true, default: false })
   completed?: boolean;
