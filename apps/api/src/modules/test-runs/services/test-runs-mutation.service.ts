@@ -31,6 +31,7 @@ import { DeleteTestRunHandler } from '../handlers/delete-test-run.handler';
 import { UpdateTagsHandler } from '../handlers/update-tags.handler';
 import { UpdateAnnotationsHandler } from '../handlers/update-annotations.handler';
 import { UpdateAnalysisStartOffsetHandler } from '../handlers/update-analysis-start-offset.handler';
+import { UpdateAnalysisTimeRangeHandler } from '../handlers/update-analysis-time-range.handler';
 import { UpdateAdaptConfigHandler } from '../handlers/update-adapt-config.handler';
 import { InitTestHandler } from '../handlers/init-test.handler';
 import { TestRunLookupService } from './test-run-lookup.service';
@@ -56,6 +57,7 @@ export class TestRunsMutationService {
     private readonly updateTagsHandler: UpdateTagsHandler,
     private readonly updateAnnotationsHandler: UpdateAnnotationsHandler,
     private readonly updateAnalysisStartOffsetHandler: UpdateAnalysisStartOffsetHandler,
+    private readonly updateAnalysisTimeRangeHandler: UpdateAnalysisTimeRangeHandler,
     private readonly updateAdaptConfigHandler: UpdateAdaptConfigHandler,
     private readonly initTestHandler: InitTestHandler,
     private readonly lookupService: TestRunLookupService,
@@ -370,6 +372,37 @@ export class TestRunsMutationService {
         );
         // Intentionally swallowed — the mutation itself succeeded, and the
         // dashboard falls back to live aggregation if the rollup is stale.
+      }
+    }
+
+    return result;
+  }
+
+  async updateAnalysisTimeRange(
+    id: string,
+    analysisStartOffset: number,
+    analysisEndOffset: number,
+    userId: string,
+    _roles: string[],
+  ): Promise<TestRun> {
+    this.logger.debug(
+      `updateAnalysisTimeRange: id=${id}, startOffset=${analysisStartOffset}, endOffset=${analysisEndOffset}, userId=${userId}`,
+    );
+
+    const result = await this.updateAnalysisTimeRangeHandler.execute({
+      id,
+      analysisStartOffset,
+      analysisEndOffset,
+    });
+
+    if (result?.completed && result?.test_run_id) {
+      try {
+        await this.bullmqClientService.enqueueTransactionStatsRollup(result.test_run_id);
+      } catch (err) {
+        this.logger.error(
+          `Failed to re-enqueue stats rollup after time range edit for ${result.test_run_id}:`,
+          err,
+        );
       }
     }
 

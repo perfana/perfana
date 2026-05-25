@@ -14,6 +14,7 @@ import { DeleteTestRunHandler } from '../handlers/delete-test-run.handler';
 import { UpdateTagsHandler } from '../handlers/update-tags.handler';
 import { UpdateAnnotationsHandler } from '../handlers/update-annotations.handler';
 import { UpdateAnalysisStartOffsetHandler } from '../handlers/update-analysis-start-offset.handler';
+import { UpdateAnalysisTimeRangeHandler } from '../handlers/update-analysis-time-range.handler';
 import { UpdateAdaptConfigHandler } from '../handlers/update-adapt-config.handler';
 import { InitTestHandler } from '../handlers/init-test.handler';
 import { TestRunLookupService } from './test-run-lookup.service';
@@ -117,6 +118,7 @@ describe('TestRunsMutationService', () => {
     const mockUpdateTagsHandler = { execute: jest.fn() };
     const mockUpdateAnnotationsHandler = { execute: jest.fn() };
     const mockUpdateAnalysisStartOffsetHandler = { execute: jest.fn() };
+    const mockUpdateAnalysisTimeRangeHandler = { execute: jest.fn() };
     const mockUpdateAdaptConfigHandler = { execute: jest.fn() };
     const mockInitTestHandler = { execute: jest.fn() };
     const mockLookupService = {
@@ -140,6 +142,7 @@ describe('TestRunsMutationService', () => {
         { provide: UpdateTagsHandler, useValue: mockUpdateTagsHandler },
         { provide: UpdateAnnotationsHandler, useValue: mockUpdateAnnotationsHandler },
         { provide: UpdateAnalysisStartOffsetHandler, useValue: mockUpdateAnalysisStartOffsetHandler },
+        { provide: UpdateAnalysisTimeRangeHandler, useValue: mockUpdateAnalysisTimeRangeHandler },
         { provide: UpdateAdaptConfigHandler, useValue: mockUpdateAdaptConfigHandler },
         { provide: InitTestHandler, useValue: mockInitTestHandler },
         { provide: TestRunLookupService, useValue: mockLookupService },
@@ -432,6 +435,39 @@ describe('TestRunsMutationService', () => {
       expect(result).toBeDefined();
       expect(result.test_run_id).toBe('run-99');
       expect(bullmqClientService.enqueueTransactionStatsRollup).toHaveBeenCalledWith('run-99');
+    });
+  });
+
+  describe('updateAnalysisTimeRange', () => {
+    it('calls handler and enqueues rollup when test run is completed', async () => {
+      const mockResult = {
+        id: 'uuid-1',
+        test_run_id: 'run-001',
+        completed: true,
+        analysis_start_offset: 30,
+        analysis_end_offset: 60,
+      };
+      const mockHandler = { execute: jest.fn().mockResolvedValue(mockResult) };
+      (service as any).updateAnalysisTimeRangeHandler = mockHandler;
+      (service as any).bullmqClientService = { enqueueTransactionStatsRollup: jest.fn().mockResolvedValue(undefined) };
+
+      const result = await service.updateAnalysisTimeRange('uuid-1', 30, 60, 'user-1', []);
+
+      expect(mockHandler.execute).toHaveBeenCalledWith({ id: 'uuid-1', analysisStartOffset: 30, analysisEndOffset: 60 });
+      expect((service as any).bullmqClientService.enqueueTransactionStatsRollup).toHaveBeenCalledWith('run-001');
+      expect(result).toBe(mockResult);
+    });
+
+    it('does not enqueue rollup when test run is not completed', async () => {
+      const mockResult = { id: 'uuid-1', test_run_id: 'run-001', completed: false };
+      const mockHandler = { execute: jest.fn().mockResolvedValue(mockResult) };
+      const mockBullmq = { enqueueTransactionStatsRollup: jest.fn() };
+      (service as any).updateAnalysisTimeRangeHandler = mockHandler;
+      (service as any).bullmqClientService = mockBullmq;
+
+      await service.updateAnalysisTimeRange('uuid-1', 0, 0, 'user-1', []);
+
+      expect(mockBullmq.enqueueTransactionStatsRollup).not.toHaveBeenCalled();
     });
   });
 

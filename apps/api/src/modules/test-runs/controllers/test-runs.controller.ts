@@ -242,6 +242,33 @@ export class TestRunsController {
     return this.testRunsService.updateAnalysisStartOffset(id, body.analysisStartOffset, ctx.userId, ctx.roles);
   }
 
+  @Put(':id/analysis-time-range')
+  @ApiOperation({ summary: 'Update analysis time range (start and end offsets) for a test run' })
+  @ApiResponse({ status: 200, description: 'Analysis time range updated successfully' })
+  @ApiResponse({ status: 404, description: 'Test run not found' })
+  @ApiResponse({ status: 400, description: 'Invalid request data' })
+  async updateAnalysisTimeRange(
+    @Param('id') id: string,
+    @Body() body: { analysisStartOffset: number; analysisEndOffset: number },
+    @UserCtx() ctx: UserContext,
+  ) {
+    if (
+      typeof body.analysisStartOffset !== 'number' || body.analysisStartOffset < 0 ||
+      typeof body.analysisEndOffset !== 'number' || body.analysisEndOffset < 0
+    ) {
+      throw new ValidationException(
+        'analysisStartOffset and analysisEndOffset must be non-negative numbers (seconds)',
+      );
+    }
+    return this.testRunsService.updateAnalysisTimeRange(
+      id,
+      body.analysisStartOffset,
+      body.analysisEndOffset,
+      ctx.userId,
+      ctx.roles,
+    );
+  }
+
   @Patch(':id/abort')
   @HttpCode(HttpStatus.OK)
   @ApiOperation({ summary: 'Abort a running test run', description: 'Sets abort=true and records who triggered it. Rejected if already completed or aborted.' })

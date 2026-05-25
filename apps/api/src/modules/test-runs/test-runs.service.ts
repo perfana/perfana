@@ -312,6 +312,10 @@ export class TestRunsService {
     return this.mutationService.updateAnalysisStartOffset(id, analysisStartOffset, userId, roles);
   }
 
+  async updateAnalysisTimeRange(id: string, analysisStartOffset: number, analysisEndOffset: number, userId: string, roles: string[]): Promise<TestRun> {
+    return this.mutationService.updateAnalysisTimeRange(id, analysisStartOffset, analysisEndOffset, userId, roles);
+  }
+
   async updateAdaptConfig(testRunId: string, differencesAccepted: 'ACCEPTED' | 'DENIED' | 'TBD', userId: string, roles: string[], systemUnderTestId?: string, environment?: string, workload?: string, mode?: 'DEFAULT' | 'BASELINE'): Promise<TestRun> {
     return this.mutationService.updateAdaptConfig(testRunId, differencesAccepted, userId, roles, systemUnderTestId, environment, workload, mode);
   }
