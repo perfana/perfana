@@ -44,6 +44,7 @@ function normalizeTestRun(updatedTestRun: TestRun): TestRun {
     endTime: string;
     plannedDuration: number;
     analysisStartOffset: number;
+    analysisEndOffset: number;
     consolidatedResult: TestRun['consolidated_result'];
     applicationRelease: string;
     ciBuildResultsUrl: string;
@@ -59,25 +60,26 @@ function normalizeTestRun(updatedTestRun: TestRun): TestRun {
   }>;
   return {
     ...updatedTestRun,
-    test_run_id: rawTestRun.testRunId || updatedTestRun.test_run_id,
-    test_environment: rawTestRun.testEnvironment || updatedTestRun.test_environment,
-    system_under_test_id: rawTestRun.systemUnderTestId || updatedTestRun.system_under_test_id,
-    start_time: rawTestRun.startTime || updatedTestRun.start_time,
-    end_time: rawTestRun.endTime || updatedTestRun.end_time,
-    planned_duration: rawTestRun.plannedDuration || updatedTestRun.planned_duration,
-    analysis_start_offset: rawTestRun.analysisStartOffset || updatedTestRun.analysis_start_offset,
-    consolidated_result: rawTestRun.consolidatedResult || updatedTestRun.consolidated_result,
-    application_release: rawTestRun.applicationRelease || updatedTestRun.application_release,
-    ci_build_results_url: rawTestRun.ciBuildResultsUrl || updatedTestRun.ci_build_results_url,
-    deep_links: rawTestRun.deepLinks || updatedTestRun.deep_links,
-    created_at: rawTestRun.createdAt || updatedTestRun.created_at,
-    updated_at: rawTestRun.updatedAt || updatedTestRun.updated_at,
-    reasons_not_valid: rawTestRun.reasonsNotValid || updatedTestRun.reasons_not_valid,
-    data_warnings: rawTestRun.dataWarnings || updatedTestRun.data_warnings,
-    adapt_config: rawTestRun.adaptConfig || updatedTestRun.adapt_config,
-    is_changepoint: rawTestRun.isChangepoint || updatedTestRun.is_changepoint,
-    is_control_group: rawTestRun.isControlGroup || updatedTestRun.is_control_group,
-    systems_under_test: rawTestRun.systemUnderTest || updatedTestRun.systems_under_test,
+    test_run_id: rawTestRun.testRunId ?? updatedTestRun.test_run_id,
+    test_environment: rawTestRun.testEnvironment ?? updatedTestRun.test_environment,
+    system_under_test_id: rawTestRun.systemUnderTestId ?? updatedTestRun.system_under_test_id,
+    start_time: rawTestRun.startTime ?? updatedTestRun.start_time,
+    end_time: rawTestRun.endTime ?? updatedTestRun.end_time,
+    planned_duration: rawTestRun.plannedDuration ?? updatedTestRun.planned_duration,
+    analysis_start_offset: rawTestRun.analysisStartOffset ?? updatedTestRun.analysis_start_offset,
+    analysis_end_offset: rawTestRun.analysisEndOffset ?? updatedTestRun.analysis_end_offset,
+    consolidated_result: rawTestRun.consolidatedResult ?? updatedTestRun.consolidated_result,
+    application_release: rawTestRun.applicationRelease ?? updatedTestRun.application_release,
+    ci_build_results_url: rawTestRun.ciBuildResultsUrl ?? updatedTestRun.ci_build_results_url,
+    deep_links: rawTestRun.deepLinks ?? updatedTestRun.deep_links,
+    created_at: rawTestRun.createdAt ?? updatedTestRun.created_at,
+    updated_at: rawTestRun.updatedAt ?? updatedTestRun.updated_at,
+    reasons_not_valid: rawTestRun.reasonsNotValid ?? updatedTestRun.reasons_not_valid,
+    data_warnings: rawTestRun.dataWarnings ?? updatedTestRun.data_warnings,
+    adapt_config: rawTestRun.adaptConfig ?? updatedTestRun.adapt_config,
+    is_changepoint: rawTestRun.isChangepoint ?? updatedTestRun.is_changepoint,
+    is_control_group: rawTestRun.isControlGroup ?? updatedTestRun.is_control_group,
+    systems_under_test: rawTestRun.systemUnderTest ?? updatedTestRun.systems_under_test,
   };
 }
 
@@ -95,7 +97,9 @@ function areTestRunsEqual(a: TestRun | null, b: TestRun | null): boolean {
     a.test_run_id === b.test_run_id &&
     a.start_time === b.start_time &&
     a.end_time === b.end_time &&
-    a.consolidated_result === b.consolidated_result &&
+    a.analysis_start_offset === b.analysis_start_offset &&
+    a.analysis_end_offset === b.analysis_end_offset &&
+    JSON.stringify(a.consolidated_result) === JSON.stringify(b.consolidated_result) &&
     a.application_release === b.application_release &&
     a.is_changepoint === b.is_changepoint &&
     a.is_control_group === b.is_control_group &&
