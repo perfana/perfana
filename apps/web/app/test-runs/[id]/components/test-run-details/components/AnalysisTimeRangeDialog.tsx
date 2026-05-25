@@ -1,9 +1,9 @@
 'use client';
 
-import { useState, useCallback } from 'react';
+import { useState, useCallback, useMemo } from 'react';
 import {
   Dialog, DialogTitle, DialogContent, DialogActions,
-  Button, Slider, Typography, Box, CircularProgress, useTheme,
+  Button, Slider, Typography, Box, CircularProgress, Alert, useTheme,
 } from '@mui/material';
 import {
   ComposedChart, Area, Line, XAxis, YAxis, CartesianGrid, Tooltip,
@@ -47,6 +47,7 @@ export function AnalysisTimeRangeDialog({ open, testRun, timeseriesData, onClose
   const [localStart, setLocalStart] = useState(testRun.analysis_start_offset ?? 0);
   const [localEnd, setLocalEnd]     = useState(testRun.analysis_end_offset ?? 0);
   const [saving, setSaving]         = useState(false);
+  const [saveError, setSaveError]   = useState<string | null>(null);
 
   // Slider value: [startOffset, duration - endOffset]
   const sliderValue: [number, number] = [localStart, duration - localEnd];
@@ -61,26 +62,27 @@ export function AnalysisTimeRangeDialog({ open, testRun, timeseriesData, onClose
 
   const handleSave = async () => {
     setSaving(true);
+    setSaveError(null);
     try {
       const res = await authenticatedFetch(`/test-runs/${testRun.id}/analysis-time-range`, {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ analysisStartOffset: localStart, analysisEndOffset: localEnd }),
       });
-      if (!res.ok) throw new Error('Failed to save');
+      if (!res.ok) throw new Error(`Failed to save analysis time range (HTTP ${res.status})`);
       const updated: TestRun = await res.json();
       onSaved(updated);
-    } catch {
-      // error is surfaced via saving state
+    } catch (err) {
+      setSaveError(err instanceof Error ? err.message : 'Failed to save — please try again');
     } finally {
       setSaving(false);
     }
   };
 
-  const chartData = timeseriesData.buckets.map(b => ({
+  const chartData = useMemo(() => timeseriesData.buckets.map(b => ({
     ...b,
     name: formatSeconds(b.timeSeconds),
-  }));
+  })), [timeseriesData.buckets]);
 
   const startLine = localStart;
   const endLine   = duration - localEnd;
@@ -153,6 +155,12 @@ export function AnalysisTimeRangeDialog({ open, testRun, timeseriesData, onClose
           </Box>
         </Box>
       </DialogContent>
+
+      {saveError && (
+        <Box sx={{ px: 3, pb: 1 }}>
+          <Alert severity="error" onClose={() => setSaveError(null)}>{saveError}</Alert>
+        </Box>
+      )}
 
       <DialogActions sx={{ px: 3, pb: 2 }}>
         <Button onClick={onClose} disabled={saving}>Cancel</Button>

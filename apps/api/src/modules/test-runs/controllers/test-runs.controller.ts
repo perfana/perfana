@@ -249,7 +249,7 @@ export class TestRunsController {
   @ApiResponse({ status: 404, description: 'Test run not found' })
   @ApiResponse({ status: 400, description: 'Invalid request data' })
   async updateAnalysisTimeRange(
-    @Param('id') id: string,
+    @Param('id', UuidValidationPipe) id: string,
     @Body() body: { analysisStartOffset: number; analysisEndOffset: number },
     @UserCtx() ctx: UserContext,
   ) {
@@ -346,7 +346,7 @@ export class TestRunsController {
   @ApiParam({ name: 'id', description: 'Test run UUID or test_run_id string', example: 'PerfanaWebshop-acc-loadTest-00012' })
   @ApiResponse({ status: 200, description: 'Time-bucketed performance data returned successfully' })
   @ApiResponse({ status: 404, description: 'No performance timeseries data found for the test run' })
-  async getSummaryTimeseries(@Param('id') id: string): Promise<SummaryTimeseriesResponse> {
+  async getSummaryTimeseries(@Param('id', UuidValidationPipe) id: string): Promise<SummaryTimeseriesResponse> {
     const result = await this.testRunsService.getSummaryTimeseries(id);
     if (!result) {
       throw new NotFoundException(`No performance timeseries data found for test run ${id}`);

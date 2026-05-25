@@ -2356,7 +2356,10 @@ export class TestRunsPerformanceQueryService {
 
       const { start_time, duration } = meta;
       const durationNum = Number(duration);
-      const bucketSizeSeconds = Math.max(5, Math.min(60, Math.round(durationNum / 100)));
+      const BUCKET_TARGET_COUNT = 100;
+      const MIN_BUCKET_SECONDS = 5;
+      const MAX_BUCKET_SECONDS = 60;
+      const bucketSizeSeconds = Math.max(MIN_BUCKET_SECONDS, Math.min(MAX_BUCKET_SECONDS, Math.round(durationNum / BUCKET_TARGET_COUNT)));
 
       // Query bucketed stats from transactions table (ramp_up = false rows only)
       const bucketRows: Array<{
@@ -2369,7 +2372,7 @@ export class TestRunsPerformanceQueryService {
            FLOOR(EXTRACT(EPOCH FROM (t.time - $2::timestamptz)) / $3) * $3 AS time_seconds,
            COUNT(*)::float / $3 AS throughput,
            AVG(t.mean) AS avg_response_time,
-           0 AS errors_per_second
+           0 AS errors_per_second /* TODO: wire real error rate from transactions/requests_error */
          FROM transactions t
          WHERE t.test_run_id = $1
            AND t.ramp_up = false
