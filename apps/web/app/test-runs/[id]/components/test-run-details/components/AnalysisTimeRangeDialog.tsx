@@ -84,8 +84,17 @@ export function AnalysisTimeRangeDialog({ open, testRun, timeseriesData, onClose
     name: formatSeconds(b.timeSeconds),
   })), [timeseriesData.buckets]);
 
-  const startLine = localStart;
-  const endLine   = duration - localEnd;
+  // Snap to nearest bucket name for ReferenceArea/ReferenceLine —
+  // Recharts categorical x-axis requires exact data key matches.
+  const snapToNearest = useCallback((targetSeconds: number) => {
+    if (chartData.length === 0) return '';
+    return chartData.reduce((prev, curr) =>
+      Math.abs(curr.timeSeconds - targetSeconds) < Math.abs(prev.timeSeconds - targetSeconds) ? curr : prev
+    ).name;
+  }, [chartData]);
+
+  const startLine = snapToNearest(localStart);
+  const endLine   = snapToNearest(duration - localEnd);
 
   return (
     <Dialog open={open} onClose={onClose} maxWidth="md" fullWidth>
@@ -108,11 +117,11 @@ export function AnalysisTimeRangeDialog({ open, testRun, timeseriesData, onClose
 
               {/* Excluded start region */}
               {localStart > 0 && (
-                <ReferenceArea yAxisId="left" x1={chartData[0]?.name} x2={formatSeconds(startLine)} fill="rgba(0,0,0,0.35)" />
+                <ReferenceArea yAxisId="left" x1={chartData[0]?.name} x2={startLine} fill="rgba(0,0,0,0.35)" />
               )}
               {/* Excluded end region */}
               {localEnd > 0 && (
-                <ReferenceArea yAxisId="left" x1={formatSeconds(endLine)} x2={chartData[chartData.length - 1]?.name} fill="rgba(0,0,0,0.35)" />
+                <ReferenceArea yAxisId="left" x1={endLine} x2={chartData[chartData.length - 1]?.name} fill="rgba(0,0,0,0.35)" />
               )}
 
               <Area yAxisId="left" type="monotone" dataKey="throughput" name="Throughput (tx/s)" fill="rgba(16,185,129,0.15)" stroke="#10b981" strokeWidth={1.5} dot={false} />
@@ -120,8 +129,8 @@ export function AnalysisTimeRangeDialog({ open, testRun, timeseriesData, onClose
               <Area yAxisId="left" type="monotone" dataKey="errorsPerSecond" name="Errors/s" fill="rgba(239,68,68,0.15)" stroke="#ef4444" strokeWidth={1} dot={false} />
 
               {/* Boundary lines */}
-              <ReferenceLine yAxisId="left" x={formatSeconds(startLine)} stroke="#f59e0b" strokeWidth={2} strokeDasharray="4 3" />
-              <ReferenceLine yAxisId="left" x={formatSeconds(endLine)} stroke="#f59e0b" strokeWidth={2} strokeDasharray="4 3" />
+              <ReferenceLine yAxisId="left" x={startLine} stroke="#f59e0b" strokeWidth={2} strokeDasharray="4 3" />
+              <ReferenceLine yAxisId="left" x={endLine} stroke="#f59e0b" strokeWidth={2} strokeDasharray="4 3" />
             </ComposedChart>
           </ResponsiveContainer>
         </Box>

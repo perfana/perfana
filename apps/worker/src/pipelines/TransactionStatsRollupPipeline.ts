@@ -107,6 +107,16 @@ export class TransactionStatsRollupPipeline extends BasePipelineTypeORM {
         );
       }
 
+      if (!testRun.endTime) {
+        this.logger.warn(
+          `Skipping stats rollup for ${testRunId}: test run has no end_time`
+        );
+        return this.createSuccessResult(
+          { testRunId, skipped: 'no-end-time' },
+          Date.now() - startTime
+        );
+      }
+
       // Compute ramp-up / ramp-down cutoffs.
       // If analysisStartOffset is 0/null, startCutoff == start_time so the
       // FILTER clause matches every row and the ramp_up_excluded=true variant
@@ -119,9 +129,7 @@ export class TransactionStatsRollupPipeline extends BasePipelineTypeORM {
       const startCutoff = new Date(
         testRun.startTime.getTime() + rampUpSeconds * 1000
       );
-      const endCutoff = testRun.endTime
-        ? new Date(testRun.endTime.getTime() - rampDownSeconds * 1000)
-        : new Date();
+      const endCutoff = new Date(testRun.endTime.getTime() - rampDownSeconds * 1000);
 
       this.logger.info(
         `🎯 Rolling up transaction stats for ${testRunId} (ramp_up=${rampUpSeconds}s, ramp_down=${rampDownSeconds}s, startCutoff=${startCutoff.toISOString()}, endCutoff=${endCutoff.toISOString()})`

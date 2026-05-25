@@ -292,8 +292,8 @@ export class DataProcessor {
     // Round to integer for cleaner display
     const roundedTimestep = Math.round(timestep);
 
-    const startOffsetSeconds = tr.analysisStartOffset || tr.ramp_up || 0;
-    const endOffsetSeconds   = tr.analysisEndOffset   || tr.ramp_down || 0;
+    const startOffsetSeconds = tr.analysisStartOffset ?? tr.ramp_up ?? 0;
+    const endOffsetSeconds   = tr.analysisEndOffset   ?? tr.ramp_down ?? 0;
     const rawEndTime = tr.endTime || tr.end_time;
     const rawStartTime = tr.startTime || tr.start_time;
     const durationSeconds = rawEndTime && rawStartTime

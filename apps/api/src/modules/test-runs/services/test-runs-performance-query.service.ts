@@ -2361,7 +2361,9 @@ export class TestRunsPerformanceQueryService {
       const MAX_BUCKET_SECONDS = 60;
       const bucketSizeSeconds = Math.max(MIN_BUCKET_SECONDS, Math.min(MAX_BUCKET_SECONDS, Math.round(durationNum / BUCKET_TARGET_COUNT)));
 
-      // Query bucketed stats from transactions table (ramp_up = false rows only)
+      // Query bucketed stats across the FULL test run (no ramp_up filter) so the
+      // analysis time range dialog can show the user data outside the current
+      // analysis window and let them choose new boundaries.
       const bucketRows: Array<{
         time_seconds: string;
         throughput: string;
@@ -2375,7 +2377,6 @@ export class TestRunsPerformanceQueryService {
            0 AS errors_per_second /* TODO: wire real error rate from transactions/requests_error */
          FROM transactions t
          WHERE t.test_run_id = $1
-           AND t.ramp_up = false
          GROUP BY 1
          ORDER BY 1`,
         [resolvedTestRunId, start_time, bucketSizeSeconds],
