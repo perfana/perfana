@@ -1,6 +1,7 @@
-import { Controller, Get, Delete, Post, Put, Patch, Param, Query, Body, ParseUUIDPipe, HttpCode, HttpStatus, Logger } from '@nestjs/common';
+import { Controller, Get, Delete, Post, Put, Patch, Param, Query, Body, ParseUUIDPipe, HttpCode, HttpStatus, Logger, NotFoundException } from '@nestjs/common';
 import { ApiTags, ApiOperation, ApiResponse, ApiQuery, ApiParam, ApiBearerAuth, ApiBody } from '@nestjs/swagger';
 import { TestRunsService } from '../test-runs.service';
+import { SummaryTimeseriesResponse } from '../services/test-runs-performance-query.service';
 import { PaginationQueryDto, TestRunQueryDto } from '../../../common/dto';
 import { ValidationException } from '../../../common/exceptions/business.exception';
 import { UuidValidationPipe } from '../../../common/pipes';
@@ -338,5 +339,18 @@ export class TestRunsController {
     return {
       message: 'Test run deleted successfully',
     };
+  }
+
+  @Get(':id/summary-timeseries')
+  @ApiOperation({ summary: 'Get time-bucketed performance summary for the analysis time range dialog' })
+  @ApiParam({ name: 'id', description: 'Test run UUID or test_run_id string', example: 'PerfanaWebshop-acc-loadTest-00012' })
+  @ApiResponse({ status: 200, description: 'Time-bucketed performance data returned successfully' })
+  @ApiResponse({ status: 404, description: 'No performance timeseries data found for the test run' })
+  async getSummaryTimeseries(@Param('id') id: string): Promise<SummaryTimeseriesResponse> {
+    const result = await this.testRunsService.getSummaryTimeseries(id);
+    if (!result) {
+      throw new NotFoundException(`No performance timeseries data found for test run ${id}`);
+    }
+    return result;
   }
 }

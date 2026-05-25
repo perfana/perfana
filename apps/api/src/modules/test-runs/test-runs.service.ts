@@ -1,6 +1,7 @@
 import { Injectable } from '@nestjs/common';
 import { TestRunsQueryService } from './services/test-runs-query.service';
 import { RollupPendingResult } from './services/test-runs-performance-query.types';
+import { SummaryTimeseriesResponse } from './services/test-runs-performance-query.service';
 import { TestRunsMutationService } from './services/test-runs-mutation.service';
 import { TestRunsConfigService } from './services/test-runs-config.service';
 import { TestRunsAnomalyService } from './services/test-runs-anomaly.service';
@@ -237,6 +238,10 @@ export class TestRunsService {
 
   async getThroughputStats(testRunId: string, userId: string, roles: string[], excludeRampUp: boolean = false) {
     return this.queryService.getThroughputStats(testRunId, userId, roles, excludeRampUp);
+  }
+
+  async getSummaryTimeseries(testRunId: string): Promise<SummaryTimeseriesResponse | null> {
+    return this.queryService.getSummaryTimeseries(testRunId);
   }
 
   // ========== Dashboard Methods (delegated to QueryService) ==========
