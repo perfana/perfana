@@ -23,6 +23,7 @@ export function mapEntityToTestRun(entity: TestRunEntity): TestRun {
     duration: entity.duration,
     planned_duration: entity.plannedDuration,
     analysis_start_offset: entity.analysisStartOffset,
+    analysis_end_offset: entity.analysisEndOffset,
     completed: entity.completed || false,
     abort: entity.abort,
     abort_message: entity.abortMessage,

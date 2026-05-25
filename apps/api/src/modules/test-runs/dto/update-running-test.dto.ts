@@ -142,6 +142,23 @@ export class UpdateRunningTestDto {
   @Max(86400, { message: 'Analysis start offset must not exceed 1 day (86400 seconds)' })
   analysisStartOffset?: number;
 
+  @ApiPropertyOptional({
+    description: 'Analysis end offset in seconds (trailing ramp-down period excluded from analysis)',
+    example: '60'
+  })
+  @IsOptional()
+  @Transform(({ value }) => {
+    if (typeof value === 'string') {
+      const parsed = parseInt(value, 10);
+      return isNaN(parsed) ? undefined : parsed;
+    }
+    return value;
+  })
+  @IsInt({ message: 'Analysis end offset must be an integer' })
+  @Min(0, { message: 'Analysis end offset must be non-negative' })
+  @Max(86400, { message: 'Analysis end offset must not exceed 1 day (86400 seconds)' })
+  analysisEndOffset?: number;
+
   @ApiProperty({
     description: 'Unique test run identifier',
     example: 'PaymentService-production-loadTest-20240115-103000'

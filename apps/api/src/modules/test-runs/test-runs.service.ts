@@ -38,6 +38,7 @@ export interface TestRun {
   duration?: number;
   planned_duration?: number;
   analysis_start_offset?: number;
+  analysis_end_offset?: number;
   completed: boolean;
   abort?: boolean;
   is_stale?: boolean;
