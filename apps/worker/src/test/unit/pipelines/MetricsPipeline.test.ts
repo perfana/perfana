@@ -826,6 +826,126 @@ describe('MetricsPipeline', () => {
     });
   });
 
+  describe('effectiveEndTime / ramp_down end-exclusion (analysisEndOffset)', () => {
+    test('when ramp_down > 0, Grafana query end_time is clipped by rampDownSeconds', async () => {
+      // testRun: 60-minute window, 5-minute (300s) ramp_down
+      const mockTestRun = {
+        ...createMockTestRun(),
+        startTime: new Date('2024-01-01T00:00:00Z'),
+        endTime:   new Date('2024-01-01T01:00:00Z'),
+        analysisEndOffset: 300, // 5 minutes
+      };
+      const mockPanels = [createMockPanel()];
+
+      mockDb.getTestRunByTestRunId.mockResolvedValue(mockTestRun);
+      mockDb.getDsPanelsByTestRun.mockResolvedValue(mockPanels);
+      mockGrafanaClient.queryPanelData.mockResolvedValue([]);
+
+      await pipeline.execute({ testRunId: 'test-run-001' });
+
+      // The end_time passed to queryPanelData must be 5 minutes before the real endTime
+      const expectedClippedEnd = new Date('2024-01-01T00:55:00Z');
+      expect(mockGrafanaClient.queryPanelData).toHaveBeenCalledWith(
+        expect.any(Array),
+        expect.objectContaining({
+          end_time: expectedClippedEnd,
+          ramp_down: 300,
+        }),
+      );
+    });
+
+    test('when ramp_down = 0, end_time is unchanged', async () => {
+      const mockTestRun = {
+        ...createMockTestRun(),
+        startTime: new Date('2024-01-01T00:00:00Z'),
+        endTime:   new Date('2024-01-01T01:00:00Z'),
+        analysisEndOffset: 0,
+      };
+      const mockPanels = [createMockPanel()];
+
+      mockDb.getTestRunByTestRunId.mockResolvedValue(mockTestRun);
+      mockDb.getDsPanelsByTestRun.mockResolvedValue(mockPanels);
+      mockGrafanaClient.queryPanelData.mockResolvedValue([]);
+
+      await pipeline.execute({ testRunId: 'test-run-001' });
+
+      expect(mockGrafanaClient.queryPanelData).toHaveBeenCalledWith(
+        expect.any(Array),
+        expect.objectContaining({
+          end_time: new Date('2024-01-01T01:00:00Z'),
+          ramp_down: 0,
+        }),
+      );
+    });
+
+    test('data points in the tail (after effectiveEndTime) are marked ramp_up = true in flattened records', async () => {
+      // 60-minute test run, 5-minute ramp_down → effectiveEndTime = T+55min
+      // Data point at T+57min (3420s) is in the tail → ramp_up should be true
+      const startTime = new Date('2024-01-01T00:00:00Z');
+      const endTime   = new Date('2024-01-01T01:00:00Z');
+      const mockTestRun = {
+        ...createMockTestRun(),
+        startTime,
+        endTime,
+        analysisEndOffset: 300, // 5 minutes
+        analysisStartOffset: 0,
+      };
+      const mockPanels = [createMockPanel()];
+
+      // Data point at T+57min → inside the ramp_down tail
+      const tailTime = new Date(startTime.getTime() + 57 * 60 * 1000);
+      // Data point at T+30min → within analysis window
+      const midTime  = new Date(startTime.getTime() + 30 * 60 * 1000);
+
+      const mockMetricsDoc = createMockMetricsDocument({
+        data: [
+          { metric_name: 'tail_metric', time: tailTime, timestep: 3420, ramp_up: false, value: 99, unit: 'ms' },
+          { metric_name: 'mid_metric',  time: midTime,  timestep: 1800, ramp_up: false, value: 42, unit: 'ms' },
+        ],
+      });
+
+      mockDb.getTestRunByTestRunId.mockResolvedValue(mockTestRun);
+      mockDb.getDsPanelsByTestRun.mockResolvedValue(mockPanels);
+      mockGrafanaClient.queryPanelData.mockResolvedValue([mockMetricsDoc]);
+
+      await pipeline.execute({ testRunId: 'test-run-001' });
+
+      // The INSERT call should have the tail metric with ramp_up = true
+      // and the mid metric with ramp_up = false
+      const insertCalls = mockEntityManager.query.mock.calls as any[][];
+      expect(insertCalls.length).toBeGreaterThan(0);
+
+      // Flatten all params and look for our metric names + ramp_up values
+      const allParams = insertCalls.flatMap(call => call[1] as unknown[]);
+
+      // Find ramp_up flag for tail_metric:
+      // params are positional: [..., metric_name, time, timestep, ramp_up, value, unit, ...]
+      // Column order from insertBatch: test_run_id, application_dashboard_id, metrics_source_id,
+      //   dashboard_uid, panel_id, panel_title, dashboard_label, benchmark_ids, errors,
+      //   metric_name(9), time(10), timestep(11), ramp_up(12), value(13), unit(14), ...
+      // (0-indexed within one record block of 21 params)
+      const colCount = 21;
+      const metricNameIdx = 9;  // 0-indexed column position within one record
+      const rampUpIdx     = 12;
+
+      const tailRecordStart = allParams.findIndex((p, i) =>
+        p === 'tail_metric' && i % colCount === metricNameIdx
+      );
+      const midRecordStart  = allParams.findIndex((p, i) =>
+        p === 'mid_metric' && i % colCount === metricNameIdx
+      );
+
+      expect(tailRecordStart).toBeGreaterThanOrEqual(0);
+      expect(midRecordStart).toBeGreaterThanOrEqual(0);
+
+      const tailBlock  = Math.floor(tailRecordStart / colCount) * colCount;
+      const midBlock   = Math.floor(midRecordStart  / colCount) * colCount;
+
+      expect(allParams[tailBlock + rampUpIdx]).toBe(true);  // tail is excluded
+      expect(allParams[midBlock  + rampUpIdx]).toBe(false); // mid is in analysis window
+    });
+  });
+
   describe('Data Transformation', () => {
     test('should flatten metrics document correctly', async () => {
       const mockTestRun = createMockTestRun();
