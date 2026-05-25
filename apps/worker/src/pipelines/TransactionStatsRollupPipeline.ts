@@ -107,17 +107,24 @@ export class TransactionStatsRollupPipeline extends BasePipelineTypeORM {
         );
       }
 
-      // Compute ramp-up cutoff. If analysisStartOffset is 0/null, cutoff ==
-      // start_time so the FILTER clause matches every row and the
-      // ramp_up_excluded=true variant becomes identical to the full-run
-      // variant — same semantics the live query has today.
-      const rampUpSeconds = testRun.analysisStartOffset ?? 0;
-      const cutoff = new Date(
+      // Compute ramp-up / ramp-down cutoffs.
+      // If analysisStartOffset is 0/null, startCutoff == start_time so the
+      // FILTER clause matches every row and the ramp_up_excluded=true variant
+      // becomes identical to the full-run variant — same semantics the live
+      // query has today.
+      // If analysisEndOffset is 0/null, endCutoff == end_time so no rows are
+      // excluded at the tail.
+      const rampUpSeconds   = testRun.analysisStartOffset ?? 0;
+      const rampDownSeconds = testRun.analysisEndOffset ?? 0;
+      const startCutoff = new Date(
         testRun.startTime.getTime() + rampUpSeconds * 1000
       );
+      const endCutoff = testRun.endTime
+        ? new Date(testRun.endTime.getTime() - rampDownSeconds * 1000)
+        : new Date();
 
       this.logger.info(
-        `🎯 Rolling up transaction stats for ${testRunId} (ramp_up=${rampUpSeconds}s, cutoff=${cutoff.toISOString()})`
+        `🎯 Rolling up transaction stats for ${testRunId} (ramp_up=${rampUpSeconds}s, ramp_down=${rampDownSeconds}s, startCutoff=${startCutoff.toISOString()}, endCutoff=${endCutoff.toISOString()})`
       );
 
       // Use `db.transaction` directly (NOT `withAnalyticsTransaction`): the
@@ -155,11 +162,11 @@ export class TransactionStatsRollupPipeline extends BasePipelineTypeORM {
 
         const txResult = await manager.query<RollupRowCount[]>(
           TRANSACTION_ROLLUP_SQL,
-          [testRunId, cutoff]
+          [testRunId, startCutoff, endCutoff]
         );
         const samplerResult = await manager.query<RollupRowCount[]>(
           SAMPLER_ROLLUP_SQL,
-          [testRunId, cutoff]
+          [testRunId, startCutoff, endCutoff]
         );
 
         // manager.query returns the INSERT's affected count via rowCount,
@@ -191,6 +198,7 @@ export class TransactionStatsRollupPipeline extends BasePipelineTypeORM {
       this.logPerformance('transaction-stats-rollup', startTime, {
         testRunId,
         rampUpSeconds,
+        rampDownSeconds,
         transactionRows: result.transactionRows,
         samplerRows: result.samplerRows,
       });
@@ -220,9 +228,12 @@ export class TransactionStatsRollupPipeline extends BasePipelineTypeORM {
 
 /**
  * Transaction-level rollup: one scan over `transactions` per test run.
- * `FILTER (WHERE t.time >= $2)` computes the ramp-up-excluded variant in the
- * same pass. `UNION ALL` emits two rows per group; the excluded row is
- * omitted when its group has zero rows in the measurement window.
+ * `FILTER (WHERE t.time >= $2 AND t.time < $3)` computes the ramp-up/ramp-down-
+ * excluded variant in the same pass. `UNION ALL` emits two rows per group;
+ * the excluded row is omitted when its group has zero rows in the measurement
+ * window.
+ *
+ * $1 = testRunId, $2 = startCutoff (start + ramp_up), $3 = endCutoff (end - ramp_down)
  */
 const TRANSACTION_ROLLUP_SQL = `
   WITH base AS (
@@ -247,17 +258,17 @@ const TRANSACTION_ROLLUP_SQL = `
       -- out to the legacy raw transactions scan.
       tdigest(100, t.response_time::double precision)
         FILTER (WHERE t.success)                                           AS pct_passed_full,
-      COUNT(*) FILTER (WHERE t.time >= $2)                                 AS total_excl,
-      COUNT(*) FILTER (WHERE t.success     AND t.time >= $2)               AS passed_excl,
-      COUNT(*) FILTER (WHERE NOT t.success AND t.time >= $2)               AS failed_excl,
-      ROUND(AVG(t.response_time) FILTER (WHERE t.time >= $2)::numeric, 2)  AS avg_excl,
+      COUNT(*) FILTER (WHERE t.time >= $2 AND t.time < $3)                                 AS total_excl,
+      COUNT(*) FILTER (WHERE t.success     AND t.time >= $2 AND t.time < $3)               AS passed_excl,
+      COUNT(*) FILTER (WHERE NOT t.success AND t.time >= $2 AND t.time < $3)               AS failed_excl,
+      ROUND(AVG(t.response_time) FILTER (WHERE t.time >= $2 AND t.time < $3)::numeric, 2)  AS avg_excl,
       ROUND((
-        AVG(t.response_time) FILTER (WHERE t.time >= $2) *
-        COUNT(*)             FILTER (WHERE t.time >= $2)
+        AVG(t.response_time) FILTER (WHERE t.time >= $2 AND t.time < $3) *
+        COUNT(*)             FILTER (WHERE t.time >= $2 AND t.time < $3)
       )::numeric, 2)                                                       AS impact_excl,
-      tdigest(100, t.response_time::double precision) FILTER (WHERE t.time >= $2) AS pct_excl,
+      tdigest(100, t.response_time::double precision) FILTER (WHERE t.time >= $2 AND t.time < $3) AS pct_excl,
       tdigest(100, t.response_time::double precision)
-        FILTER (WHERE t.success AND t.time >= $2)                          AS pct_passed_excl
+        FILTER (WHERE t.success AND t.time >= $2 AND t.time < $3)                          AS pct_passed_excl
     FROM transactions t
     JOIN test_runs tr ON tr.test_run_id = t.test_run_id
     WHERE t.test_run_id = $1
@@ -304,6 +315,8 @@ const TRANSACTION_ROLLUP_SQL = `
  * the full window and once for the excluded window — because the "latest"
  * url_hash for a sampler can differ when a test saw URL changes near the
  * ramp-up boundary.
+ *
+ * $1 = testRunId, $2 = startCutoff (start + ramp_up), $3 = endCutoff (end - ramp_down)
  */
 const SAMPLER_ROLLUP_SQL = `
   WITH base AS (
@@ -317,7 +330,7 @@ const SAMPLER_ROLLUP_SQL = `
       (ARRAY_AGG(r.url_hash ORDER BY r.time DESC)
         FILTER (WHERE r.url_hash IS NOT NULL))[1]                               AS url_hash_full,
       (ARRAY_AGG(r.url_hash ORDER BY r.time DESC)
-        FILTER (WHERE r.url_hash IS NOT NULL AND r.time >= $2))[1]              AS url_hash_excl,
+        FILTER (WHERE r.url_hash IS NOT NULL AND r.time >= $2 AND r.time < $3))[1]              AS url_hash_excl,
       COUNT(*)                                                                  AS total_full,
       SUM(CASE WHEN r.success THEN 1 ELSE 0 END)                                AS passed_full,
       SUM(CASE WHEN NOT r.success THEN 1 ELSE 0 END)                            AS failed_full,
@@ -337,21 +350,21 @@ const SAMPLER_ROLLUP_SQL = `
       -- approx_percentile_rank; storing the success-only sketch lets that
       -- consumer ignore failed-row response_times when SLO config requires.
       tdigest(100, r.response_time::double precision) FILTER (WHERE r.success)  AS pct_passed_full,
-      COUNT(*) FILTER (WHERE r.time >= $2)                                      AS total_excl,
+      COUNT(*) FILTER (WHERE r.time >= $2 AND r.time < $3)                                      AS total_excl,
       SUM(CASE WHEN r.success THEN 1 ELSE 0 END)
-        FILTER (WHERE r.time >= $2)                                             AS passed_excl,
+        FILTER (WHERE r.time >= $2 AND r.time < $3)                                             AS passed_excl,
       SUM(CASE WHEN NOT r.success THEN 1 ELSE 0 END)
-        FILTER (WHERE r.time >= $2)                                             AS failed_excl,
-      ROUND((AVG(r.response_time) FILTER (WHERE r.time >= $2))::numeric, 2)     AS avg_excl,
-      MIN(r.response_time) FILTER (WHERE r.time >= $2)                          AS min_excl,
-      MAX(r.response_time) FILTER (WHERE r.time >= $2)                          AS max_excl,
-      ROUND((AVG(r.response_latency) FILTER (WHERE r.time >= $2))::numeric, 2)  AS lat_excl,
-      ROUND((AVG(r.response_connect_time) FILTER (WHERE r.time >= $2))::numeric, 2) AS conn_excl,
-      SUM(r.request_size)  FILTER (WHERE r.time >= $2)                          AS req_size_excl,
-      SUM(r.response_size) FILTER (WHERE r.time >= $2)                          AS resp_size_excl,
-      tdigest(100, r.response_time::double precision) FILTER (WHERE r.time >= $2) AS pct_excl,
+        FILTER (WHERE r.time >= $2 AND r.time < $3)                                             AS failed_excl,
+      ROUND((AVG(r.response_time) FILTER (WHERE r.time >= $2 AND r.time < $3))::numeric, 2)     AS avg_excl,
+      MIN(r.response_time) FILTER (WHERE r.time >= $2 AND r.time < $3)                          AS min_excl,
+      MAX(r.response_time) FILTER (WHERE r.time >= $2 AND r.time < $3)                          AS max_excl,
+      ROUND((AVG(r.response_latency) FILTER (WHERE r.time >= $2 AND r.time < $3))::numeric, 2)  AS lat_excl,
+      ROUND((AVG(r.response_connect_time) FILTER (WHERE r.time >= $2 AND r.time < $3))::numeric, 2) AS conn_excl,
+      SUM(r.request_size)  FILTER (WHERE r.time >= $2 AND r.time < $3)                          AS req_size_excl,
+      SUM(r.response_size) FILTER (WHERE r.time >= $2 AND r.time < $3)                          AS resp_size_excl,
+      tdigest(100, r.response_time::double precision) FILTER (WHERE r.time >= $2 AND r.time < $3) AS pct_excl,
       tdigest(100, r.response_time::double precision)
-        FILTER (WHERE r.success AND r.time >= $2)                               AS pct_passed_excl
+        FILTER (WHERE r.success AND r.time >= $2 AND r.time < $3)                               AS pct_passed_excl
     FROM requests_raw r
     WHERE r.test_run_id = $1
       AND r.transaction_name IS NOT NULL
