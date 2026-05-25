@@ -21,6 +21,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
 - **Analysis time range dialog chart**: `getSummaryTimeseries` no longer filters `ramp_up = false`, so the chart shows the full test run (including currently-excluded zones) rather than only the current analysis window.
 - **DataProcessor (Dynatrace)**: `||` replaced with `??` for `startOffsetSeconds`/`endOffsetSeconds` reads so a zero `analysisEndOffset` is not silently bypassed by the fallback chain.
 - **Analysis time range dialog**: `ReferenceArea` excluded zones now snap to the nearest bucket boundary so shaded regions always render at all slider positions, not only at exact bucket edges.
+- **"Change analysis time range" button invisible**: `getSummaryTimeseries` queried `AVG(t.mean)` (column does not exist) and only read from `transactions`, so JTL-imported runs received a SQL error and the button never rendered. Fixed by using `AVG(t.response_time)` and adding a `UNION ALL` against `requests_raw`.
+- **ADAPT golden file**: Refreshed `adapt-real-golden.json` to match the current pipeline output (950 results, up from the stale 894 captured two months ago).
 
 ## [0.2.57.0] - 2026-05-20
 
