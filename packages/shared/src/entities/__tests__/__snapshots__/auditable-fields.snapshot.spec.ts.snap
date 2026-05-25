@@ -291,6 +291,7 @@ exports[`auditableFields snapshot — every OwnedResource entity has a stable de
     "adaptConfig",
     "consolidatedResult",
     "analysisStartOffset",
+    "analysisEndOffset",
     "duration",
     "plannedDuration",
     "variables",
