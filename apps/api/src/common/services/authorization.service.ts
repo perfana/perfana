@@ -437,11 +437,11 @@ export class AuthorizationService {
         if (cached) {
           this.cacheHits++;
           const orgIds = JSON.parse(cached) as string[];
-          this.logger.log(`[getAccessibleOrganizations] Cache HIT for user ${userId} - organizations: ${orgIds.join(', ')}`);
+          this.logger.debug(`[getAccessibleOrganizations] Cache HIT for user ${userId} - organizations: ${orgIds.join(', ')}`);
           return orgIds;
         }
         this.cacheMisses++;
-        this.logger.log(`[getAccessibleOrganizations] Cache MISS for user ${userId}`);
+        this.logger.debug(`[getAccessibleOrganizations] Cache MISS for user ${userId}`);
       } catch (error) {
         this.logger.error(
           `Failed to get cached accessible organizations: ${error && typeof error === 'object' && 'message' in error ? (error as Error).message : 'Unknown error'}`,
@@ -470,13 +470,13 @@ export class AuthorizationService {
         }
       }
 
-      this.logger.log(`[getAccessibleOrganizations] Database query for user ${userId} - found ${orgIds.length} organizations: ${orgIds.join(', ')}`);
+      this.logger.debug(`[getAccessibleOrganizations] Database query for user ${userId} - found ${orgIds.length} organizations: ${orgIds.join(', ')}`);
 
       // Cache the result
       if (this.enableCache) {
         try {
           await this.redis.setex(cacheKey, this.defaultTtl, JSON.stringify(orgIds));
-          this.logger.log(`[getAccessibleOrganizations] Cached ${orgIds.length} organizations for user ${userId}`);
+          this.logger.debug(`[getAccessibleOrganizations] Cached ${orgIds.length} organizations for user ${userId}`);
         } catch (error) {
           this.logger.error(
             `Failed to cache accessible organizations: ${error && typeof error === 'object' && 'message' in error ? (error as Error).message : 'Unknown error'}`,
