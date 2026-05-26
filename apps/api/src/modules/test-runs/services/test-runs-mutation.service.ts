@@ -221,6 +221,7 @@ export class TestRunsMutationService {
       duration,
       plannedDuration,
       analysisStartOffset: d.analysisStartOffset ? parseInt(String(d.analysisStartOffset)) : undefined,
+      analysisEndOffset: d.analysisEndOffset ? parseInt(String(d.analysisEndOffset)) : undefined,
       completed: d.completed,
       ciBuildResultsUrl: d.CIBuildResultsUrl || d.buildResultsUrl,
       annotations: d.annotations ? [d.annotations] : [],
