@@ -84,25 +84,36 @@ export class TestRunsPerformanceQueryService {
   }
 
   /**
-   * Get ramp-up cutoff time for a test run
+   * Get analysis bounds (start cutoff from ramp_up, end cutoff from ramp_down) for a test run.
+   * When excludeRampUp is false both values are null.
+   * For running tests (end_time IS NULL) the end cutoff is not applied — only completed tests
+   * have a tail to trim.
    */
-  private async getRampUpCutoffTime(testRunId: string, excludeRampUp: boolean): Promise<Date | null> {
-    if (!excludeRampUp) return null;
+  private async getAnalysisBounds(
+    testRunId: string,
+    excludeRampUp: boolean,
+  ): Promise<{ startCutoff: Date | null; endCutoff: Date | null }> {
+    if (!excludeRampUp) return { startCutoff: null, endCutoff: null };
 
-    const query = `
-      SELECT start_time, ramp_up
-      FROM test_runs
-      WHERE test_run_id = $1
-    `;
+    const query = `SELECT start_time, ramp_up, end_time, ramp_down FROM test_runs WHERE test_run_id = $1`;
     const result = await withRequestEm(this.testRunRepo).query(query, [testRunId]);
+
+    let startCutoff: Date | null = null;
+    let endCutoff: Date | null = null;
 
     if (result[0]?.start_time && result[0]?.ramp_up) {
       const startTime = new Date(result[0].start_time);
-      const analysisStartOffsetSeconds = this.mapper.parseInt(result[0].ramp_up);
-      return new Date(startTime.getTime() + analysisStartOffsetSeconds * 1000);
+      const rampUpSeconds = this.mapper.parseInt(result[0].ramp_up);
+      if (rampUpSeconds > 0) startCutoff = new Date(startTime.getTime() + rampUpSeconds * 1000);
     }
 
-    return null;
+    if (result[0]?.end_time && result[0]?.ramp_down) {
+      const endTime = new Date(result[0].end_time);
+      const rampDownSeconds = this.mapper.parseInt(result[0].ramp_down);
+      if (rampDownSeconds > 0) endCutoff = new Date(endTime.getTime() - rampDownSeconds * 1000);
+    }
+
+    return { startCutoff, endCutoff };
   }
 
   /**
@@ -910,15 +921,19 @@ export class TestRunsPerformanceQueryService {
       if (caggScope?.hasTransactionsCagg) {
         // For live windows, narrow the scope's startTime to NOW() - sinceMinutes
         // (or keep scope.startTime if it's later than the live cutoff).
+        // Apply endCutoffTime (ramp_down) as the upper bound for completed runs;
+        // for in-flight runs endCutoffTime is null so endTime (NOW()) is used as-is.
+        const effectiveEndTime = caggScope.endCutoffTime ?? caggScope.endTime;
         const adjustedScope = clampedSinceMinutes != null
           ? {
               ...caggScope,
+              endTime: effectiveEndTime,
               startTime: new Date(Math.max(
                 caggScope.startTime.getTime(),
                 Date.now() - clampedSinceMinutes * 60_000,
               )),
             }
-          : caggScope;
+          : { ...caggScope, endTime: effectiveEndTime };
         return await this.getTransactionStatsFromCagg(adjustedScope, excludeRampUp);
       }
       // No CAGG: if rollup was 'rollup-pending', return that pending result
@@ -931,16 +946,17 @@ export class TestRunsPerformanceQueryService {
         return pendingRollup;
       }
 
-      const cutoffTime = await this.getRampUpCutoffTime(resolvedTestRunId, excludeRampUp);
+      const { startCutoff: cutoffTime, endCutoff } = await this.getAnalysisBounds(resolvedTestRunId, excludeRampUp);
 
       // Param layout (1-indexed):
       //   $1 = resolvedTestRunId
       //   $2 = excludeRampUp
-      //   $3 = cutoffTime
-      //   $4 = sinceMinutes  (only when provided)
-      //   $4 or $5 = organizationIds (non-admin only; index shifts when sinceMinutes present)
-      const windowParamIndex = 4;
-      const orgParamIndex = clampedSinceMinutes != null ? 5 : 4;
+      //   $3 = cutoffTime (start cutoff)
+      //   $4 = endCutoff  (end cutoff)
+      //   $5 = sinceMinutes  (only when provided)
+      //   $5 or $6 = organizationIds (non-admin only; index shifts when sinceMinutes present)
+      const windowParamIndex = 5;
+      const orgParamIndex = clampedSinceMinutes != null ? 6 : 5;
 
       const windowFilter = clampedSinceMinutes != null
         ? `AND t.time >= NOW() - ($${windowParamIndex}::numeric * interval '1 minute')`
@@ -973,6 +989,7 @@ export class TestRunsPerformanceQueryService {
           JOIN systems_under_test sut ON sut.id = tr.system_under_test_id
           WHERE t.test_run_id = $1
             AND ($2::boolean = false OR $3::timestamptz IS NULL OR t.time >= $3::timestamptz)
+            AND ($2::boolean = false OR $4::timestamptz IS NULL OR t.time <= $4::timestamptz)
             ${windowFilter}
             ${orgFilterClause}
           GROUP BY t.transaction_name, t.scenario_name, tr.system_under_test_id, tr.test_environment, tr.workload
@@ -1035,18 +1052,18 @@ export class TestRunsPerformanceQueryService {
         ORDER BY transaction_name ASC
       `;
 
-      // Param layout: $1=testRunId, $2=excludeRampUp, $3=cutoffTime,
-      //   $4=sinceMinutes (when provided), $5=orgIds (non-admin)
-      //   OR $4=orgIds (non-admin, no window)
+      // Param layout: $1=testRunId, $2=excludeRampUp, $3=cutoffTime, $4=endCutoff,
+      //   $5=sinceMinutes (when provided), $6=orgIds (non-admin)
+      //   OR $5=orgIds (non-admin, no window)
       let queryParams: unknown[];
       if (clampedSinceMinutes != null) {
         queryParams = !isAdmin
-          ? [resolvedTestRunId, excludeRampUp, cutoffTime, clampedSinceMinutes, organizationIds]
-          : [resolvedTestRunId, excludeRampUp, cutoffTime, clampedSinceMinutes];
+          ? [resolvedTestRunId, excludeRampUp, cutoffTime, endCutoff, clampedSinceMinutes, organizationIds]
+          : [resolvedTestRunId, excludeRampUp, cutoffTime, endCutoff, clampedSinceMinutes];
       } else {
         queryParams = !isAdmin
-          ? [resolvedTestRunId, excludeRampUp, cutoffTime, organizationIds]
-          : [resolvedTestRunId, excludeRampUp, cutoffTime];
+          ? [resolvedTestRunId, excludeRampUp, cutoffTime, endCutoff, organizationIds]
+          : [resolvedTestRunId, excludeRampUp, cutoffTime, endCutoff];
       }
       // Wrap in a transaction so SET LOCAL applies only to this query
       // (reverts at COMMIT — global default unaffected). Manager comes from
@@ -1187,15 +1204,19 @@ export class TestRunsPerformanceQueryService {
           organizationIds,
         );
         if (caggScope?.hasRequestsRawCagg) {
+          // Apply endCutoffTime (ramp_down) as the upper bound for completed runs;
+          // for in-flight runs endCutoffTime is null so endTime (NOW()) is used as-is.
+          const effectiveEndTime = caggScope.endCutoffTime ?? caggScope.endTime;
           const adjustedScope = clampedSinceMinutes != null
             ? {
                 ...caggScope,
+                endTime: effectiveEndTime,
                 startTime: new Date(Math.max(
                   caggScope.startTime.getTime(),
                   Date.now() - clampedSinceMinutes * 60_000,
                 )),
               }
-            : caggScope;
+            : { ...caggScope, endTime: effectiveEndTime };
           return await this.getTransactionSamplesFromCagg(
             adjustedScope,
             transactionName,
@@ -1213,12 +1234,12 @@ export class TestRunsPerformanceQueryService {
         }
       }
 
-      const cutoffTime = await this.getRampUpCutoffTime(resolvedTestRunId, excludeRampUp);
+      const { startCutoff: cutoffTime, endCutoff } = await this.getAnalysisBounds(resolvedTestRunId, excludeRampUp);
 
-      // Param layout: $1=testRunId, $2=transactionName, $3=excludeRampUp, $4=cutoffTime,
-      //   $5=sinceMinutes (when provided), $5 or $6=orgIds (non-admin)
-      const windowParamIndexSamples = 5;
-      const orgParamIndexSamples = clampedSinceMinutes != null ? 6 : 5;
+      // Param layout: $1=testRunId, $2=transactionName, $3=excludeRampUp, $4=cutoffTime, $5=endCutoff,
+      //   $6=sinceMinutes (when provided), $6 or $7=orgIds (non-admin)
+      const windowParamIndexSamples = 6;
+      const orgParamIndexSamples = clampedSinceMinutes != null ? 7 : 6;
 
       const windowFilterSamples = clampedSinceMinutes != null
         ? `AND r.time >= NOW() - ($${windowParamIndexSamples}::numeric * interval '1 minute')`
@@ -1273,6 +1294,7 @@ export class TestRunsPerformanceQueryService {
           WHERE r.test_run_id = $1
             AND r.transaction_name = $2
             AND ($3::boolean = false OR $4::timestamptz IS NULL OR r.time >= $4::timestamptz)
+            AND ($3::boolean = false OR $5::timestamptz IS NULL OR r.time <= $5::timestamptz)
             ${windowFilterSamples}
           GROUP BY r.sampler_name, r.scenario_name, r.system_under_test, r.test_environment
         )
@@ -1314,12 +1336,12 @@ export class TestRunsPerformanceQueryService {
       let queryParams: unknown[];
       if (clampedSinceMinutes != null) {
         queryParams = !isAdmin
-          ? [resolvedTestRunId, transactionName, excludeRampUp, cutoffTime, clampedSinceMinutes, organizationIds]
-          : [resolvedTestRunId, transactionName, excludeRampUp, cutoffTime, clampedSinceMinutes];
+          ? [resolvedTestRunId, transactionName, excludeRampUp, cutoffTime, endCutoff, clampedSinceMinutes, organizationIds]
+          : [resolvedTestRunId, transactionName, excludeRampUp, cutoffTime, endCutoff, clampedSinceMinutes];
       } else {
         queryParams = !isAdmin
-          ? [resolvedTestRunId, transactionName, excludeRampUp, cutoffTime, organizationIds]
-          : [resolvedTestRunId, transactionName, excludeRampUp, cutoffTime];
+          ? [resolvedTestRunId, transactionName, excludeRampUp, cutoffTime, endCutoff, organizationIds]
+          : [resolvedTestRunId, transactionName, excludeRampUp, cutoffTime, endCutoff];
       }
       // Wrap in a transaction so SET LOCAL applies only to this query.
       // Manager comes from the request-scoped EM via withRequestEm so this nested
@@ -1454,7 +1476,9 @@ export class TestRunsPerformanceQueryService {
         caggSutParamIdx = paramIndex; params.push(caggScope.sut); paramIndex++;
         caggEnvParamIdx = paramIndex; params.push(caggScope.env); paramIndex++;
         caggStartParamIdx = paramIndex; params.push(caggScope.startTime); paramIndex++;
-        caggEndParamIdx = paramIndex; params.push(caggScope.endTime); paramIndex++;
+        // Use endCutoffTime (ramp_down trimmed) as the upper bound for completed runs;
+        // for in-flight runs endCutoffTime is null so endTime (NOW()) is used as-is.
+        caggEndParamIdx = paramIndex; params.push(caggScope.endCutoffTime ?? caggScope.endTime); paramIndex++;
         caggRampUpParamIdx = paramIndex; params.push(excludeRampUp); paramIndex++;
         caggCutoffParamIdx = paramIndex; params.push(caggScope.cutoffTime); paramIndex++;
       }
@@ -1720,11 +1744,12 @@ export class TestRunsPerformanceQueryService {
       // Resolve UUID to test_run_id if necessary
       const resolvedTestRunId = await this.resolveTestRunId(testRunId);
 
-      const cutoffTime = await this.getRampUpCutoffTime(resolvedTestRunId, excludeRampUp);
+      const { startCutoff: cutoffTime, endCutoff } = await this.getAnalysisBounds(resolvedTestRunId, excludeRampUp);
 
       // Build organization filter clause
+      // Param layout: $1=testRunId, $2=excludeRampUp, $3=cutoffTime, $4=endCutoff, $5=orgIds (non-admin)
       const orgFilterClause = !isAdmin
-        ? 'AND sut.organization_id = ANY($4::uuid[])'
+        ? 'AND sut.organization_id = ANY($5::uuid[])'
         : '';
 
       const overallQuery = `
@@ -1742,6 +1767,7 @@ export class TestRunsPerformanceQueryService {
         LEFT JOIN teams team ON team.id = sut.team_id
         WHERE vu.test_run_id = $1
           AND ($2::boolean = false OR $3::timestamptz IS NULL OR vu.time >= $3::timestamptz)
+          AND ($2::boolean = false OR $4::timestamptz IS NULL OR vu.time <= $4::timestamptz)
           ${orgFilterClause}
       `;
 
@@ -1762,14 +1788,15 @@ export class TestRunsPerformanceQueryService {
         WHERE vu.test_run_id = $1
           AND vu.scenario_name IS NOT NULL
           AND ($2::boolean = false OR $3::timestamptz IS NULL OR vu.time >= $3::timestamptz)
+          AND ($2::boolean = false OR $4::timestamptz IS NULL OR vu.time <= $4::timestamptz)
           ${orgFilterClause}
         GROUP BY vu.scenario_name
         ORDER BY vu.scenario_name ASC
       `;
 
       const queryParams = !isAdmin
-        ? [resolvedTestRunId, excludeRampUp, cutoffTime, organizationIds]
-        : [resolvedTestRunId, excludeRampUp, cutoffTime];
+        ? [resolvedTestRunId, excludeRampUp, cutoffTime, endCutoff, organizationIds]
+        : [resolvedTestRunId, excludeRampUp, cutoffTime, endCutoff];
 
       const [overallResult, scenarioResult] = await Promise.all([
         withRequestEm(this.testRunRepo).query(overallQuery, queryParams),
@@ -1834,6 +1861,7 @@ export class TestRunsPerformanceQueryService {
     startTime: Date;
     endTime: Date;
     cutoffTime: Date | null;
+    endCutoffTime: Date | null;
     hasCagg: boolean;
   } | null> {
     const orgFilterClause = !isAdmin ? 'AND sut.organization_id = ANY($2::uuid[])' : '';
@@ -1845,6 +1873,7 @@ export class TestRunsPerformanceQueryService {
         tr.start_time      AS start_time,
         tr.end_time        AS end_time,
         tr.ramp_up         AS ramp_up,
+        tr.ramp_down       AS ramp_down,
         (
           EXISTS (
             SELECT 1
@@ -1883,6 +1912,7 @@ export class TestRunsPerformanceQueryService {
       start_time: string | Date | null;
       end_time: string | Date | null;
       ramp_up: string | number | null;
+      ramp_down: string | number | null;
       has_cagg: boolean;
     };
 
@@ -1899,12 +1929,21 @@ export class TestRunsPerformanceQueryService {
       }
     }
 
+    let endCutoffTime: Date | null = null;
+    if (excludeRampUp && row.ramp_down != null) {
+      const rampDownSeconds = this.mapper.parseInt(row.ramp_down);
+      if (rampDownSeconds > 0) {
+        endCutoffTime = new Date(endTime.getTime() - rampDownSeconds * 1000);
+      }
+    }
+
     return {
       sut: row.sut,
       env: row.env,
       startTime,
       endTime,
       cutoffTime,
+      endCutoffTime,
       hasCagg: row.has_cagg === true,
     };
   }
@@ -1946,6 +1985,7 @@ export class TestRunsPerformanceQueryService {
     startTime: Date;
     endTime: Date;
     cutoffTime: Date | null;
+    endCutoffTime: Date | null;
     hasTransactionsCagg: boolean;
     hasRequestsRawCagg: boolean;
   } | null> {
@@ -1960,6 +2000,7 @@ export class TestRunsPerformanceQueryService {
         tr.start_time           AS start_time,
         tr.end_time             AS end_time,
         tr.ramp_up              AS ramp_up,
+        tr.ramp_down            AS ramp_down,
         EXISTS (
           SELECT 1 FROM transactions_passed_5s c
           WHERE c.system_under_test = sut.name
@@ -1996,6 +2037,7 @@ export class TestRunsPerformanceQueryService {
       start_time: string | Date | null;
       end_time: string | Date | null;
       ramp_up: string | number | null;
+      ramp_down: string | number | null;
       has_transactions_cagg: boolean;
       has_requests_raw_cagg: boolean;
     };
@@ -2016,6 +2058,17 @@ export class TestRunsPerformanceQueryService {
       }
     }
 
+    // ramp_down only applies to completed tests (end_time IS NOT NULL).
+    // For in-flight runs we clamp endTime to NOW() above but intentionally
+    // leave endCutoffTime null — there is no tail to trim on a running test.
+    let endCutoffTime: Date | null = null;
+    if (excludeRampUp && row.end_time && row.ramp_down != null) {
+      const rampDownSeconds = this.mapper.parseInt(row.ramp_down);
+      if (rampDownSeconds > 0) {
+        endCutoffTime = new Date(endTime.getTime() - rampDownSeconds * 1000);
+      }
+    }
+
     return {
       sut: row.sut,
       systemUnderTestId: row.system_under_test_id,
@@ -2024,6 +2077,7 @@ export class TestRunsPerformanceQueryService {
       startTime,
       endTime,
       cutoffTime,
+      endCutoffTime,
       hasTransactionsCagg: row.has_transactions_cagg === true,
       hasRequestsRawCagg: row.has_requests_raw_cagg === true,
     };
@@ -2040,14 +2094,17 @@ export class TestRunsPerformanceQueryService {
    * in #288 is not addressed here (would be a UI-facing change).
    */
   private async getThroughputStatsFromCagg(
-    runInfo: { sut: string; env: string; startTime: Date; endTime: Date; cutoffTime: Date | null },
+    runInfo: { sut: string; env: string; startTime: Date; endTime: Date; cutoffTime: Date | null; endCutoffTime?: Date | null },
     excludeRampUp: boolean,
   ): Promise<ThroughputStats> {
+    // Apply endCutoffTime (ramp_down) as the upper bound for completed runs;
+    // for in-flight runs endCutoffTime is null/undefined so endTime (NOW()) is used.
+    const effectiveEndTime = runInfo.endCutoffTime ?? runInfo.endTime;
     const params: unknown[] = [
       runInfo.sut,
       runInfo.env,
       runInfo.startTime,
-      runInfo.endTime,
+      effectiveEndTime,
       excludeRampUp,
       runInfo.cutoffTime,
     ];
@@ -2208,10 +2265,13 @@ export class TestRunsPerformanceQueryService {
       // or a stack where the CAGG policy hasn't run yet. Falls back to the legacy
       // raw-scan path so we don't return zeros for a populated test run.
       const cutoffTime = runInfo.cutoffTime;
+      const endCutoffTime = runInfo.endCutoffTime;
 
       // Build organization filter clause
+      // Param layout: $1=testRunId, $2=excludeRampUp, $3=cutoffTime, $4=endCutoffTime,
+      //   $5=orgIds (non-admin)
       const orgFilterClause = !isAdmin
-        ? 'AND sut.organization_id = ANY($4::uuid[])'
+        ? 'AND sut.organization_id = ANY($5::uuid[])'
         : '';
 
       const transactionsQuery = `
@@ -2225,6 +2285,7 @@ export class TestRunsPerformanceQueryService {
           LEFT JOIN teams team ON team.id = sut.team_id
           WHERE t.test_run_id = $1
             AND ($2::boolean = false OR $3::timestamptz IS NULL OR t.time >= $3::timestamptz)
+            AND ($2::boolean = false OR $4::timestamptz IS NULL OR t.time <= $4::timestamptz)
             ${orgFilterClause}
           GROUP BY floor(extract(epoch from t.time) / 5)
         )
@@ -2243,6 +2304,7 @@ export class TestRunsPerformanceQueryService {
           LEFT JOIN teams team ON team.id = sut.team_id
           WHERE rr.test_run_id = $1
             AND ($2::boolean = false OR $3::timestamptz IS NULL OR rr.time >= $3::timestamptz)
+            AND ($2::boolean = false OR $4::timestamptz IS NULL OR rr.time <= $4::timestamptz)
             ${orgFilterClause}
           GROUP BY floor(extract(epoch from rr.time) / 5)
         )
@@ -2263,6 +2325,7 @@ export class TestRunsPerformanceQueryService {
           WHERE t.test_run_id = $1
             AND t.scenario_name IS NOT NULL
             AND ($2::boolean = false OR $3::timestamptz IS NULL OR t.time >= $3::timestamptz)
+            AND ($2::boolean = false OR $4::timestamptz IS NULL OR t.time <= $4::timestamptz)
             ${orgFilterClause}
           GROUP BY t.scenario_name, floor(extract(epoch from t.time) / 5)
         ),
@@ -2278,6 +2341,7 @@ export class TestRunsPerformanceQueryService {
           WHERE rr.test_run_id = $1
             AND rr.scenario_name IS NOT NULL
             AND ($2::boolean = false OR $3::timestamptz IS NULL OR rr.time >= $3::timestamptz)
+            AND ($2::boolean = false OR $4::timestamptz IS NULL OR rr.time <= $4::timestamptz)
             ${orgFilterClause}
           GROUP BY rr.scenario_name, floor(extract(epoch from rr.time) / 5)
         ),
@@ -2305,8 +2369,8 @@ export class TestRunsPerformanceQueryService {
       `;
 
       const queryParams = !isAdmin
-        ? [resolvedTestRunId, excludeRampUp, cutoffTime, organizationIds]
-        : [resolvedTestRunId, excludeRampUp, cutoffTime];
+        ? [resolvedTestRunId, excludeRampUp, cutoffTime, endCutoffTime, organizationIds]
+        : [resolvedTestRunId, excludeRampUp, cutoffTime, endCutoffTime];
 
       const [transactionsResult, requestsResult, scenarioResult] = await Promise.all([
         withRequestEm(this.testRunRepo).query(transactionsQuery, queryParams),
