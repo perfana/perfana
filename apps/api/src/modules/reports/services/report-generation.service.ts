@@ -283,7 +283,7 @@ export class ReportGenerationService {
         max_retries: 3,
       });
 
-      const savedReport = await this.reportRepo.save(report);
+      const savedReport = await withRequestEm(this.reportRepo).save(report);
 
       this.logger.log(
         `Created report ${savedReport.id} from template ${options.templateId} for test run ${options.testRunId}`,
@@ -395,7 +395,7 @@ export class ReportGenerationService {
       // GeneratedReport intentionally not audited on create per DELETE-only
       // policy (Phase 5a brainstorm). The conditional template logCreate above
       // is what satisfies the lint rule for this method.
-      const savedReport = await this.reportRepo.save(report);
+      const savedReport = await withRequestEm(this.reportRepo).save(report);
 
       this.logger.log(
         `Created ad-hoc report ${savedReport.id} for test run ${options.testRunId}`,
@@ -729,7 +729,7 @@ export class ReportGenerationService {
         report.completed_at = new Date();
       }
 
-      const updated = await this.reportRepo.save(report);
+      const updated = await withRequestEm(this.reportRepo).save(report);
 
       this.logger.log(`Updated report ${reportId} status to ${newStatus}`);
 
@@ -779,7 +779,7 @@ export class ReportGenerationService {
       const report = await this.findById(reportId, userId, roles);
       report.html_content = htmlContent;
       report.file_size = Buffer.byteLength(htmlContent, 'utf8');
-      await this.reportRepo.save(report);
+      await withRequestEm(this.reportRepo).save(report);
       await this.updateStatus(reportId, 'html_complete', undefined, undefined, userId, roles);
 
       this.logger.log(`Stored HTML content for report ${reportId} (${report.file_size} bytes)`);
@@ -825,7 +825,7 @@ export class ReportGenerationService {
     try {
       const report = await this.findById(reportId, userId, roles);
       report.retry_count = (report.retry_count || 0) + 1;
-      await this.reportRepo.save(report);
+      await withRequestEm(this.reportRepo).save(report);
 
       this.logger.log(`Incremented retry count for report ${reportId} to ${report.retry_count}`);
 

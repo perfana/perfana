@@ -1,7 +1,7 @@
 'use client';
 
 import { useState } from 'react';
-import { Box, IconButton, Tooltip } from '@mui/material';
+import { Box, IconButton, LinearProgress, Tooltip } from '@mui/material';
 import { ContentCopy, Check } from '@mui/icons-material';
 import { TestRun } from '@/types/test-runs';
 import KPIDisplay from '../../shared/KPIDisplay';
@@ -123,6 +123,21 @@ export function TestRunDetailsCollapsedView({ testRun }: TestRunDetailsCollapsed
           />
         )}
       </Box>
+
+      {/* Running progress indicator — shown only while the test is in progress */}
+      {!testRun.completed && (
+        <LinearProgress
+          variant="indeterminate"
+          sx={{
+            mx: -3.5,
+            mb: -3.5,
+            mt: 'auto',
+            borderBottomLeftRadius: 12,
+            borderBottomRightRadius: 12,
+            height: 3,
+          }}
+        />
+      )}
     </Box>
   );
 }

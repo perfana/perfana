@@ -314,7 +314,7 @@ export default function PerformanceAnalysisCard({
             )}
             {/* Toggle to exclude ramp-up time */}
             {expanded && (
-              <Tooltip title="Exclude data during ramp-up time period from all statistics" arrow>
+              <Tooltip title="Show only the configured analysis timerange — excludes ramp-up and ramp-down periods from all statistics" arrow>
                 <FormControlLabel
                   control={
                     <Switch
@@ -334,7 +334,7 @@ export default function PerformanceAnalysisCard({
                       }}
                     />
                   }
-                  label="Exclude Ramp-up"
+                  label="Analysis timerange"
                   onClick={(e) => e.stopPropagation()}
                   sx={{
                     position: 'absolute',
@@ -554,7 +554,7 @@ export default function PerformanceAnalysisCard({
                   <Box textAlign="center" py={4}>
                     <Typography variant="body2" color="text.secondary">
                       {testRun?.reasons_not_valid?.some(r => r.includes('ramp-up') || r.includes('steady-state'))
-                        ? 'No data outside the configured ramp-up period. All data points fall within the ramp-up window and are excluded from analysis. Reduce the ramp-up value in the Test Run Info card to include data.'
+                        ? 'No data within the configured analysis timerange. All data points fall outside the analysis window. Adjust the ramp-up or ramp-down values in the Test Run Info card.'
                         : 'No transaction data available for this test run.'}
                     </Typography>
                   </Box>
