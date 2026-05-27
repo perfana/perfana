@@ -170,8 +170,8 @@ export function PerformanceAnalysisCollapsedView({
           isRampUpState
             ? (
               <Box sx={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 1 }}>
-                <SoftBadge label="Excluded by ramp-up" color="orange" />
-                <Tooltip title="Exclude data during ramp-up time period from all statistics" arrow>
+                <SoftBadge label="Outside analysis timerange" color="orange" />
+                <Tooltip title="Show only the configured analysis timerange — excludes ramp-up and ramp-down periods from all statistics" arrow>
                   <FormControlLabel
                     control={
                       <Switch
@@ -191,7 +191,7 @@ export function PerformanceAnalysisCollapsedView({
                         }}
                       />
                     }
-                    label="Exclude Ramp-up"
+                    label="Analysis timerange"
                     onClick={(e) => e.stopPropagation()}
                     sx={{
                       margin: 0,
