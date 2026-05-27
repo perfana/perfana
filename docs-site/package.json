@@ -97,6 +97,9 @@
     "ws": "^8.19.0",
     "yargs": "^18.0.0"
   },
+  "overrides": {
+    "brace-expansion": "^5.0.6"
+  },
   "devDependencies": {
     "@types/d3": "^7.4.3",
     "@types/hast": "^3.0.4",

@@ -4,6 +4,15 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
+## [0.2.59.3] - 2026-05-27
+
+### Changed
+- Bumped `bullmq` from 5.66.5 → 5.77.6 to resolve Snyk vulnerability
+- Bumped `uuid` from 11.1.0 → 11.1.1 to resolve Snyk vulnerability
+- Bumped `ws` from 8.18.3 → 8.21.0 (root) and 8.19.0 → 8.21.0 (docs-site) to resolve Snyk vulnerability
+- Added `ajv@^8.18.0` and `webpack@^5.104.1` npm overrides in root `package.json` to resolve Snyk transitive vulnerabilities
+- Added `brace-expansion@^5.0.6` npm override in `docs-site/package.json` to resolve Snyk transitive vulnerability
+
 ## [0.2.59.2] - 2026-05-27
 
 ### Fixed
