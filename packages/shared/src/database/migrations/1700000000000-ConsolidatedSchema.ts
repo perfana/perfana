@@ -799,7 +799,41 @@ export class ConsolidatedSchema1700000000000 implements MigrationInterface {
       }
     }
 
+    // Enable real-time aggregation so the CAGGs serve data immediately via the
+    // raw hypertable for the unrefreshed end_offset window. Without this the
+    // performance-analysis card shows the "rollup pending" banner for the first
+    // ~90 s of every test run (one refresh cycle + end_offset delay).
+    const realtimeCaggs = [
+      'transactions_5s',
+      'transactions_passed_5s',
+      'requests_raw_5s',
+      'requests_raw_passed_5s',
+    ];
+    for (const view of realtimeCaggs) {
+      try {
+        await queryRunner.query(
+          `ALTER MATERIALIZED VIEW ${view} SET (timescaledb.materialized_only = false)`,
+        );
+      } catch (error: unknown) {
+        console.warn(`  Warning: Could not enable real-time aggregation for ${view}:`, (error as Error).message);
+      }
+    }
+
     console.log(`  Created ${caggs.length} CAGGs with refresh and retention policies`);
+
+    // ─── Phase 6: Post-schema column additions ───
+    // Columns added after the initial schema dump. Safe to re-run via IF NOT EXISTS.
+    await queryRunner.query(
+      `ALTER TABLE "benchmarks" ADD COLUMN IF NOT EXISTS "aggregate_metric" character varying(50)`,
+    );
+    await queryRunner.query(
+      `ALTER TABLE "benchmarks" ADD COLUMN IF NOT EXISTS "aggregate_stat" character varying(20)`,
+    );
+    await queryRunner.query(
+      `ALTER TABLE test_runs ADD COLUMN IF NOT EXISTS ramp_down INTEGER DEFAULT 0`,
+    );
+
+    console.log('Phase 6: Post-schema column additions applied.');
   }
 
   // ═══════════════════════════════════════════════════════════
