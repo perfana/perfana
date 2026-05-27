@@ -4,6 +4,13 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
+## [0.2.59.2] - 2026-05-27
+
+### Fixed
+- `analysisEndOffset` is now correctly persisted when a test run is **created** via `POST /api/test` — it was included in the DTO but never written to the database because `CreateTestRunHandler` omitted the field from its `testRunData` object
+- `POST /api/test` and keepalive responses now include `analysis_end_offset` in the JSON — both handler-level `mapEntityToTestRun` methods were missing the field, so the create and update response bodies never returned it even when the value was stored
+- `analysisEndOffset: 0` is no longer silently dropped during test run create/update — the falsy guard `d.analysisEndOffset ?` now uses a null-check so zero is preserved
+
 ## [0.2.59.1] - 2026-05-25
 
 ### Fixed
