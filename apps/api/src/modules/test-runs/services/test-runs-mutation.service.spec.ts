@@ -321,6 +321,44 @@ describe('TestRunsMutationService', () => {
       const result = await service.updateRunningTest(updateDto, mockUserId, mockRoles, mockOrganizationId);
       expect(result.completed).toBe(true);
     });
+
+    it('should pass analysisEndOffset from DTO to CreateTestRunCommand', async () => {
+      const updateDto = { ...createMockUpdateDto(), analysisEndOffset: 120 };
+      const mockSystem = { id: 'sys-123', name: 'PaymentService', created_at: new Date().toISOString(), updated_at: new Date().toISOString() };
+      const mockEnv = { id: 'env-123', name: 'production', system_under_test_id: 'sys-123', created_at: new Date().toISOString() };
+      const mockWorkload = { id: 'work-123', name: 'loadTest', system_under_test_test_environment_id: 'env-123', created_at: new Date().toISOString() };
+      const mockNewTestRun = createMockTestRun(createMockTestRunEntity({ completed: false }));
+
+      lookupService.findOrCreateSystemUnderTest.mockResolvedValue(mockSystem);
+      lookupService.findOrCreateTestEnvironment.mockResolvedValue(mockEnv);
+      lookupService.findOrCreateWorkload.mockResolvedValue(mockWorkload);
+      testRunRepo.findOne.mockResolvedValue(null);
+      createTestRunHandler.execute.mockResolvedValue({ success: true, data: mockNewTestRun, testRunId: mockNewTestRun.test_run_id, isNew: true });
+
+      await service.updateRunningTest(updateDto, mockUserId, mockRoles, mockOrganizationId);
+
+      const [command] = createTestRunHandler.execute.mock.calls[0];
+      expect(command.data.analysisEndOffset).toBe(120);
+    });
+
+    it('should preserve analysisEndOffset of 0 (not coerce to undefined)', async () => {
+      const updateDto = { ...createMockUpdateDto(), analysisEndOffset: 0 };
+      const mockSystem = { id: 'sys-123', name: 'PaymentService', created_at: new Date().toISOString(), updated_at: new Date().toISOString() };
+      const mockEnv = { id: 'env-123', name: 'production', system_under_test_id: 'sys-123', created_at: new Date().toISOString() };
+      const mockWorkload = { id: 'work-123', name: 'loadTest', system_under_test_test_environment_id: 'env-123', created_at: new Date().toISOString() };
+      const mockNewTestRun = createMockTestRun(createMockTestRunEntity({ completed: false }));
+
+      lookupService.findOrCreateSystemUnderTest.mockResolvedValue(mockSystem);
+      lookupService.findOrCreateTestEnvironment.mockResolvedValue(mockEnv);
+      lookupService.findOrCreateWorkload.mockResolvedValue(mockWorkload);
+      testRunRepo.findOne.mockResolvedValue(null);
+      createTestRunHandler.execute.mockResolvedValue({ success: true, data: mockNewTestRun, testRunId: mockNewTestRun.test_run_id, isNew: true });
+
+      await service.updateRunningTest(updateDto, mockUserId, mockRoles, mockOrganizationId);
+
+      const [command] = createTestRunHandler.execute.mock.calls[0];
+      expect(command.data.analysisEndOffset).toBe(0);
+    });
   });
 
   describe('deleteTestRun', () => {
