@@ -1,6 +1,6 @@
 import { Injectable, Logger, OnModuleInit, OnModuleDestroy } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
-import { Worker, Job } from 'bullmq';
+import { Worker, Job, ConnectionOptions } from 'bullmq';
 import IORedis from 'ioredis';
 import { PdfService } from './pdf.service';
 
@@ -123,7 +123,7 @@ export class PdfQueueProcessor implements OnModuleInit, OnModuleDestroy {
         PDF_GENERATION_QUEUE_NAME,
         async (job) => this.processJob(job),
         {
-          connection: this.redis,
+          connection: this.redis as unknown as ConnectionOptions,
           concurrency, // Lower concurrency for resource-intensive PDF generation
           lockDuration: 120000, // 2 minutes lock duration for PDF generation
           limiter: {
