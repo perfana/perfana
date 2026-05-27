@@ -1,6 +1,6 @@
 import { Global, Module, Logger } from '@nestjs/common';
 import { ConfigModule, ConfigService } from '@nestjs/config';
-import { Queue } from 'bullmq';
+import { Queue, ConnectionOptions } from 'bullmq';
 import IORedis from 'ioredis';
 import { QueueService } from './queue.service';
 
@@ -42,7 +42,7 @@ import { QueueService } from './queue.service';
         logger.log('Initializing BullMQ queue...');
 
         const queue = new Queue('perfana-jobs', {
-          connection: redis,
+          connection: redis as unknown as ConnectionOptions,
           defaultJobOptions: {
             removeOnComplete: 100,
             removeOnFail: 50,

@@ -401,7 +401,7 @@ export class AdaptValidator {
           'This test run is a changepoint — a new baseline was established. ' +
           'ADAPT comparison starts fresh from this run.';
       } else if (isTooShort) {
-        if (info?.ramp_up != null && info?.duration != null) {
+        if (info?.ramp_up !== null && info?.ramp_up !== undefined && info?.duration !== null && info?.duration !== undefined) {
           message =
             `This test run is too short to analyze — the analysis start offset (${info.ramp_up}s ramp-up) ` +
             `exceeds the test duration (${info.duration}s). No steady-state data was available for comparison. ` +
