@@ -12,7 +12,7 @@
  * - perfana-batch: Batch reevaluation pipeline
  */
 
-import { JobsOptions } from 'bullmq';
+import { JobsOptions, KeepJobs } from 'bullmq';
 import { getConfig } from './environment.js';
 
 // ── Retry & backoff constants ──────────────────────────────────────────
@@ -135,8 +135,8 @@ export interface SimpleJobOptions extends JobsOptions {
     type: 'exponential' | 'fixed';
     delay: number;
   };
-  removeOnComplete?: number | boolean | { age?: number; count?: number };
-  removeOnFail?: number | boolean | { age?: number; count?: number };
+  removeOnComplete?: number | boolean | KeepJobs;
+  removeOnFail?: number | boolean | KeepJobs;
 }
 
 /**

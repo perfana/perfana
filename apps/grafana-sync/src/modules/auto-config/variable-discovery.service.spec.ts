@@ -1896,7 +1896,7 @@ ORDER BY 1`,
       expect(queryPassedToDetector).toContain("IN ('Browse''s','Checkout')");
     });
 
-    it('should produce IN (\'only-value\') for single-value variable in SQL IN clause', async () => {
+    it("should produce IN ('only-value') for single-value variable in SQL IN clause", async () => {
       const mockGrafanaDashboard = createMockDashboard([
         {
           name: 'scenarioName',

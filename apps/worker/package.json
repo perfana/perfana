@@ -44,7 +44,7 @@
     "@nestjs/schedule": "^6.1.0",
     "@nestjs/typeorm": "^11.0.0",
     "@perfana/shared": "file:../../packages/shared",
-    "bullmq": "^5.5.0",
+    "bullmq": "^5.77.6",
     "class-transformer": "^0.5.1",
     "class-validator": "^0.14.0",
     "dotenv": "^17.2.2",

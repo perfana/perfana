@@ -1,6 +1,6 @@
 import { Injectable, Logger, OnModuleDestroy } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
-import { Queue, FlowProducer, Job } from 'bullmq';
+import { Queue, FlowProducer, Job, ConnectionOptions } from 'bullmq';
 import IORedis from 'ioredis';
 import { InjectDataSource } from '@nestjs/typeorm';
 import { DataSource } from 'typeorm';
@@ -148,7 +148,7 @@ export class BullMQClientService implements OnModuleDestroy {
     try {
       // Initialize queues
       this.analysisQueue = new Queue('perfana-analyze', {
-        connection: this.redis,
+        connection: this.redis as unknown as ConnectionOptions,
         defaultJobOptions: {
           removeOnComplete: 50,
           removeOnFail: 10,
@@ -158,7 +158,7 @@ export class BullMQClientService implements OnModuleDestroy {
       });
 
       this.batchQueue = new Queue('perfana-batch', {
-        connection: this.redis,
+        connection: this.redis as unknown as ConnectionOptions,
         defaultJobOptions: {
           removeOnComplete: 25,
           removeOnFail: 10,
@@ -171,7 +171,7 @@ export class BullMQClientService implements OnModuleDestroy {
       this.reevalQueue = this.batchQueue;
 
       this.flowProducer = new FlowProducer({
-        connection: this.redis
+        connection: this.redis as unknown as ConnectionOptions
       });
 
       this.logger.log('BullMQ queues initialized successfully');
