@@ -1,4 +1,9 @@
-import { Injectable, Logger, OnModuleInit, OnModuleDestroy } from '@nestjs/common';
+import {
+  Injectable,
+  Logger,
+  OnModuleInit,
+  OnModuleDestroy,
+} from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import * as puppeteer from 'puppeteer';
 
@@ -23,11 +28,16 @@ export class BrowserPoolService implements OnModuleInit, OnModuleDestroy {
   private isInitialized = false;
 
   constructor(private readonly configService: ConfigService) {
-    this.poolSize = parseInt(this.configService.get('BROWSER_POOL_SIZE', '3'), 10);
+    this.poolSize = parseInt(
+      this.configService.get('BROWSER_POOL_SIZE', '3'),
+      10
+    );
   }
 
   async onModuleInit() {
-    this.logger.log(`Initializing browser pool with ${this.poolSize} browsers...`);
+    this.logger.log(
+      `Initializing browser pool with ${this.poolSize} browsers...`
+    );
     await this.initializePool();
   }
 
@@ -45,7 +55,9 @@ export class BrowserPoolService implements OnModuleInit, OnModuleDestroy {
       this.browsers = await Promise.all(launchPromises);
       this.isInitialized = true;
 
-      this.logger.log(`Browser pool initialized successfully with ${this.browsers.length} browsers`);
+      this.logger.log(
+        `Browser pool initialized successfully with ${this.browsers.length} browsers`
+      );
     } catch (error) {
       const errorMessage =
         error && typeof error === 'object' && 'message' in error
@@ -101,7 +113,9 @@ export class BrowserPoolService implements OnModuleInit, OnModuleDestroy {
         this.logger.log('Using Puppeteer bundled Chromium');
       }
 
-      this.logger.log(`Launching browser ${index + 1} with args: ${args.join(' ')}`);
+      this.logger.log(
+        `Launching browser ${index + 1} with args: ${args.join(' ')}`
+      );
       const browser = await puppeteer.launch(launchOptions);
 
       this.logger.debug(`Browser ${index + 1} launched successfully`);
@@ -112,7 +126,9 @@ export class BrowserPoolService implements OnModuleInit, OnModuleDestroy {
           ? (error as Error).message
           : 'Unknown error';
 
-      this.logger.error(`Failed to launch browser ${index + 1}: ${errorMessage}`);
+      this.logger.error(
+        `Failed to launch browser ${index + 1}: ${errorMessage}`
+      );
       throw error;
     }
   }
@@ -129,11 +145,14 @@ export class BrowserPoolService implements OnModuleInit, OnModuleDestroy {
     const browser = this.browsers[this.currentBrowserIndex];
 
     // Move to next browser for next request
-    this.currentBrowserIndex = (this.currentBrowserIndex + 1) % this.browsers.length;
+    this.currentBrowserIndex =
+      (this.currentBrowserIndex + 1) % this.browsers.length;
 
     // Check if browser is still connected, if not, relaunch it
     if (!browser.connected) {
-      this.logger.warn(`Browser ${this.currentBrowserIndex} disconnected, relaunching...`);
+      this.logger.warn(
+        `Browser ${this.currentBrowserIndex} disconnected, relaunching...`
+      );
       const newBrowser = await this.launchBrowser(this.currentBrowserIndex);
       this.browsers[this.currentBrowserIndex] = newBrowser;
       return newBrowser;
@@ -150,8 +169,8 @@ export class BrowserPoolService implements OnModuleInit, OnModuleDestroy {
     connected: number;
     disconnected: number;
   } {
-    const connected = this.browsers.filter((b) => b.connected).length;
-    const disconnected = this.browsers.filter((b) => !b.connected).length;
+    const connected = this.browsers.filter(b => b.connected).length;
+    const disconnected = this.browsers.filter(b => !b.connected).length;
 
     return {
       poolSize: this.poolSize,
@@ -182,7 +201,9 @@ export class BrowserPoolService implements OnModuleInit, OnModuleDestroy {
             error && typeof error === 'object' && 'message' in error
               ? (error as Error).message
               : 'Unknown error';
-          this.logger.warn(`Error closing browser ${index + 1}: ${errorMessage}`);
+          this.logger.warn(
+            `Error closing browser ${index + 1}: ${errorMessage}`
+          );
         }
       });
 

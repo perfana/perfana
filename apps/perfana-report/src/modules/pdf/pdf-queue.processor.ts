@@ -1,4 +1,9 @@
-import { Injectable, Logger, OnModuleInit, OnModuleDestroy } from '@nestjs/common';
+import {
+  Injectable,
+  Logger,
+  OnModuleInit,
+  OnModuleDestroy,
+} from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { Worker, Job, ConnectionOptions } from 'bullmq';
 import IORedis from 'ioredis';
@@ -52,7 +57,7 @@ export class PdfQueueProcessor implements OnModuleInit, OnModuleDestroy {
 
   constructor(
     private readonly configService: ConfigService,
-    private readonly pdfService: PdfService,
+    private readonly pdfService: PdfService
   ) {}
 
   async onModuleInit() {
@@ -65,10 +70,15 @@ export class PdfQueueProcessor implements OnModuleInit, OnModuleDestroy {
   private async initializeConnections(): Promise<void> {
     try {
       const redisHost = this.configService.get('REDIS_HOST', 'localhost');
-      const redisPort = parseInt(this.configService.get('REDIS_PORT', '6379'), 10);
+      const redisPort = parseInt(
+        this.configService.get('REDIS_PORT', '6379'),
+        10
+      );
       const redisUrl = `redis://${redisHost}:${redisPort}`;
 
-      this.logger.log(`Connecting to Redis at: ${redisUrl} for PDF queue processor`);
+      this.logger.log(
+        `Connecting to Redis at: ${redisUrl} for PDF queue processor`
+      );
 
       this.redis = new IORedis(redisUrl, {
         maxRetriesPerRequest: null, // Critical for BullMQ
@@ -83,7 +93,7 @@ export class PdfQueueProcessor implements OnModuleInit, OnModuleDestroy {
         this.initializeWorker();
       });
 
-      this.redis.on('error', (error) => {
+      this.redis.on('error', error => {
         this.logger.error(`Redis connection error: ${error.message}`);
         this.isRedisAvailable = false;
         throw error;
@@ -102,7 +112,9 @@ export class PdfQueueProcessor implements OnModuleInit, OnModuleDestroy {
           ? (error as Error).message
           : 'Unknown error';
 
-      this.logger.error(`Failed to initialize Redis connection: ${errorMessage}`);
+      this.logger.error(
+        `Failed to initialize Redis connection: ${errorMessage}`
+      );
       throw error;
     }
   }
@@ -116,12 +128,15 @@ export class PdfQueueProcessor implements OnModuleInit, OnModuleDestroy {
     }
 
     try {
-      const concurrency = parseInt(this.configService.get('QUEUE_CONCURRENCY', '2'), 10);
+      const concurrency = parseInt(
+        this.configService.get('QUEUE_CONCURRENCY', '2'),
+        10
+      );
 
       // Initialize worker for processing jobs
       this.worker = new Worker<PdfGenerationJobData, PdfGenerationJobResult>(
         PDF_GENERATION_QUEUE_NAME,
-        async (job) => this.processJob(job),
+        async job => this.processJob(job),
         {
           connection: this.redis as unknown as ConnectionOptions,
           concurrency, // Lower concurrency for resource-intensive PDF generation
@@ -130,26 +145,30 @@ export class PdfQueueProcessor implements OnModuleInit, OnModuleDestroy {
             max: 5,
             duration: 60000, // Max 5 PDF jobs per minute
           },
-        },
+        }
       );
 
       // Handle worker events
       this.worker.on('ready', () => {
-        this.logger.log(`PDF generation worker ready (concurrency: ${concurrency})`);
+        this.logger.log(
+          `PDF generation worker ready (concurrency: ${concurrency})`
+        );
       });
 
-      this.worker.on('active', (job) => {
-        this.logger.debug(`Processing PDF generation job ${job.id} for report ${job.data.reportId}`);
+      this.worker.on('active', job => {
+        this.logger.debug(
+          `Processing PDF generation job ${job.id} for report ${job.data.reportId}`
+        );
       });
 
       this.worker.on('completed', (job, result) => {
         if (result.success) {
           this.logger.log(
-            `PDF generation completed for report ${job.data.reportId} in ${result.generationTimeMs}ms (${this.formatFileSize(result.fileSizeBytes || 0)})`,
+            `PDF generation completed for report ${job.data.reportId} in ${result.generationTimeMs}ms (${this.formatFileSize(result.fileSizeBytes || 0)})`
           );
         } else {
           this.logger.warn(
-            `PDF generation failed for report ${job.data.reportId}: ${result.errorMessage}`,
+            `PDF generation failed for report ${job.data.reportId}: ${result.errorMessage}`
           );
         }
       });
@@ -157,11 +176,11 @@ export class PdfQueueProcessor implements OnModuleInit, OnModuleDestroy {
       this.worker.on('failed', (job, error) => {
         this.logger.error(
           `PDF generation job ${job?.id} failed: ${error.message}`,
-          error.stack,
+          error.stack
         );
       });
 
-      this.worker.on('error', (error) => {
+      this.worker.on('error', error => {
         this.logger.error(`PDF generation worker error: ${error.message}`);
       });
 
@@ -180,7 +199,7 @@ export class PdfQueueProcessor implements OnModuleInit, OnModuleDestroy {
    * Process a single PDF generation job
    */
   private async processJob(
-    job: Job<PdfGenerationJobData, PdfGenerationJobResult>,
+    job: Job<PdfGenerationJobData, PdfGenerationJobResult>
   ): Promise<PdfGenerationJobResult> {
     const { reportId } = job.data;
     const startTime = Date.now();
@@ -224,11 +243,16 @@ export class PdfQueueProcessor implements OnModuleInit, OnModuleDestroy {
           : 'Unknown error';
 
       this.logger.error(
-        `PDF generation failed for report ${reportId}: ${errorMessage}`,
+        `PDF generation failed for report ${reportId}: ${errorMessage}`
       );
 
       // Update report status to failed
-      await this.pdfService.updateReportStatus(reportId, 'failed', errorMessage, 'PDF_GENERATION_ERROR');
+      await this.pdfService.updateReportStatus(
+        reportId,
+        'failed',
+        errorMessage,
+        'PDF_GENERATION_ERROR'
+      );
 
       return {
         success: false,
@@ -269,7 +293,9 @@ export class PdfQueueProcessor implements OnModuleInit, OnModuleDestroy {
         error && typeof error === 'object' && 'message' in error
           ? (error as Error).message
           : 'Unknown error';
-      this.logger.warn(`Error during PDF queue processor cleanup: ${errorMessage}`);
+      this.logger.warn(
+        `Error during PDF queue processor cleanup: ${errorMessage}`
+      );
     }
   }
 }

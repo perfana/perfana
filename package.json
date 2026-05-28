@@ -32,6 +32,7 @@
     "migration:show": "cd packages/shared && typeorm migration:show -d ormconfig.js"
   },
   "devDependencies": {
+    "brace-expansion": "^1.1.11",
     "@faker-js/faker": "^10.0.0",
     "@playwright/test": "^1.55.0",
     "@types/multer": "^2.0.0",
@@ -57,9 +58,7 @@
     "basic-ftp": "^5.2.0",
     "axios": "^1.16.1",
     "ws": "^8.21.0",
-    "ajv": "^8.18.0",
-    "webpack": "^5.104.1",
-    "brace-expansion": "^5.0.6"
+    "webpack": "^5.104.1"
   },
   "dependencies": {
     "axios": "^1.16.1",

@@ -24,10 +24,11 @@ import { HealthModule } from './modules/health/health.module';
         // Get all shared entity classes to ensure complete entity graph for TypeORM
         // Filter out enums (like TracingUI) and keep only entity classes
         const sharedEntityClasses = Object.entries(sharedEntities)
-          .filter(([key, value]) =>
-            typeof value === 'function' &&
-            value.prototype &&
-            key !== 'TracingUI' // Exclude the TracingUI enum
+          .filter(
+            ([key, value]) =>
+              typeof value === 'function' &&
+              value.prototype &&
+              key !== 'TracingUI' // Exclude the TracingUI enum
           )
           .map(([, value]) => value) as Array<new (...args: any[]) => any>;
 
@@ -43,7 +44,7 @@ import { HealthModule } from './modules/health/health.module';
           logging: configService.get<string>('DB_LOGGING') === 'true',
         };
       },
-      dataSourceFactory: async (opts) => {
+      dataSourceFactory: async opts => {
         if (!opts) throw new Error('perfana-report: typeorm options missing');
         return createSystemDataSource('perfana-report', opts);
       },

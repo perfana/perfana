@@ -37,7 +37,7 @@ export class PdfService {
     private readonly configService: ConfigService,
     private readonly browserPoolService: BrowserPoolService,
     @InjectRepository(GeneratedReport)
-    private readonly reportRepo: Repository<GeneratedReport>,
+    private readonly reportRepo: Repository<GeneratedReport>
   ) {
     this.pdfTimeout = this.configService.get<number>('PDF_TIMEOUT_MS', 90000);
   }
@@ -61,25 +61,35 @@ export class PdfService {
     }
 
     if (!report.html_content) {
-      throw new Error(`Report ${reportId} does not have HTML content. Generate HTML first.`);
+      throw new Error(
+        `Report ${reportId} does not have HTML content. Generate HTML first.`
+      );
     }
 
     // Generate PDF from HTML
-    const result = await this.generatePdfFromHtml(report.html_content, report.name);
+    const result = await this.generatePdfFromHtml(
+      report.html_content,
+      report.name
+    );
 
     // Populate file_metadata with page count and Puppeteer version
     const fileMetadata: Record<string, unknown> = {};
     if (result.pageCount != null) fileMetadata.pageCount = result.pageCount;
-    if (result.puppeteerVersion != null) fileMetadata.puppeteerVersion = result.puppeteerVersion;
+    if (result.puppeteerVersion != null)
+      fileMetadata.puppeteerVersion = result.puppeteerVersion;
 
     if (Object.keys(fileMetadata).length > 0) {
       await this.reportRepo.update(reportId, {
         file_metadata: fileMetadata as any,
       });
-      this.logger.log(`Updated file_metadata for report ${reportId}: ${JSON.stringify(fileMetadata)}`);
+      this.logger.log(
+        `Updated file_metadata for report ${reportId}: ${JSON.stringify(fileMetadata)}`
+      );
     }
 
-    this.logger.log(`PDF generated successfully for report ${reportId}, size: ${this.formatFileSize(result.buffer.length)}`);
+    this.logger.log(
+      `PDF generated successfully for report ${reportId}, size: ${this.formatFileSize(result.buffer.length)}`
+    );
 
     return result.buffer;
   }
@@ -87,7 +97,14 @@ export class PdfService {
   /**
    * Generate PDF from HTML content using Puppeteer
    */
-  private async generatePdfFromHtml(htmlContent: string, reportName: string): Promise<{ buffer: Buffer; pageCount: number | null; puppeteerVersion: string | null }> {
+  private async generatePdfFromHtml(
+    htmlContent: string,
+    reportName: string
+  ): Promise<{
+    buffer: Buffer;
+    pageCount: number | null;
+    puppeteerVersion: string | null;
+  }> {
     let page = null;
 
     try {
@@ -136,28 +153,42 @@ export class PdfService {
       const pdfBuffer = await Promise.race([
         page.pdf(pdfOptions),
         new Promise<never>((_, reject) =>
-          setTimeout(() => reject(new Error('PDF generation timeout')), this.pdfTimeout)
+          setTimeout(
+            () => reject(new Error('PDF generation timeout')),
+            this.pdfTimeout
+          )
         ),
       ]);
 
       // Get page count from Puppeteer metrics
-      const pageCount = await page.evaluate(() => {
-        // CSS page-break elements define page boundaries; approximate via content height / A4 height
-        const body = document.body;
-        const totalHeight = Math.max(body.scrollHeight, body.offsetHeight);
-        const a4HeightPx = 1123; // A4 at 96 DPI minus margins (~297mm - 40mm margins)
-        return Math.max(1, Math.ceil(totalHeight / a4HeightPx));
-      }).catch(() => null);
+      const pageCount = await page
+        .evaluate(() => {
+          // CSS page-break elements define page boundaries; approximate via content height / A4 height
+          const body = document.body;
+          const totalHeight = Math.max(body.scrollHeight, body.offsetHeight);
+          const a4HeightPx = 1123; // A4 at 96 DPI minus margins (~297mm - 40mm margins)
+          return Math.max(1, Math.ceil(totalHeight / a4HeightPx));
+        })
+        .catch(() => null);
 
-      const browserVersion = await page.browser().version().catch(() => null);
+      const browserVersion = await page
+        .browser()
+        .version()
+        .catch(() => null);
 
-      this.logger.debug(`PDF generated successfully, size: ${pdfBuffer.length} bytes, ~${pageCount} pages`);
+      this.logger.debug(
+        `PDF generated successfully, size: ${pdfBuffer.length} bytes, ~${pageCount} pages`
+      );
 
-      return { buffer: Buffer.from(pdfBuffer), pageCount, puppeteerVersion: browserVersion };
+      return {
+        buffer: Buffer.from(pdfBuffer),
+        pageCount,
+        puppeteerVersion: browserVersion,
+      };
     } finally {
       // Clean up page (but keep browser in pool)
       if (page) {
-        await page.close().catch((error) => {
+        await page.close().catch(error => {
           const errorMessage =
             error && typeof error === 'object' && 'message' in error
               ? (error as Error).message
@@ -175,7 +206,7 @@ export class PdfService {
     reportId: string,
     status: ReportStatus,
     errorMessage?: string,
-    errorCode?: string,
+    errorCode?: string
   ): Promise<void> {
     const updateData: Partial<GeneratedReport> = { status };
 
@@ -210,7 +241,9 @@ export class PdfService {
         completed_at: new Date(),
       });
 
-      this.logger.log(`Stored PDF data in database for report ${reportId} (${this.formatFileSize(pdfBuffer.length)})`);
+      this.logger.log(
+        `Stored PDF data in database for report ${reportId} (${this.formatFileSize(pdfBuffer.length)})`
+      );
     } catch (error) {
       const errorMessage =
         error && typeof error === 'object' && 'message' in error
@@ -242,6 +275,6 @@ export class PdfService {
       '"': '&quot;',
       "'": '&#039;',
     };
-    return text.replace(/[&<>"']/g, (char) => map[char] || char);
+    return text.replace(/[&<>"']/g, char => map[char] || char);
   }
 }

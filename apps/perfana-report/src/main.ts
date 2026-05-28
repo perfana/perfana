@@ -25,7 +25,7 @@ async function bootstrap() {
 
   // Handle termination signals for graceful shutdown
   const signals = ['SIGTERM', 'SIGINT'];
-  signals.forEach((signal) => {
+  signals.forEach(signal => {
     process.on(signal, async () => {
       logger.log(`Received ${signal}, closing application gracefully...`);
       try {

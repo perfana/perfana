@@ -1,5 +1,9 @@
 import { Injectable } from '@nestjs/common';
-import { HealthIndicator, HealthIndicatorResult, HealthCheckError } from '@nestjs/terminus';
+import {
+  HealthIndicator,
+  HealthIndicatorResult,
+  HealthCheckError,
+} from '@nestjs/terminus';
 import { BrowserPoolService } from '../pdf/browser-pool.service';
 
 @Injectable()
@@ -32,7 +36,7 @@ export class BrowserPoolHealthIndicator extends HealthIndicator {
 
       throw new HealthCheckError(
         'Browser pool health check failed',
-        this.getStatus(key, false, { message: errorMessage }),
+        this.getStatus(key, false, { message: errorMessage })
       );
     }
   }
