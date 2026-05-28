@@ -4,6 +4,11 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
+## [0.2.59.10] - 2026-05-28
+
+### Fixed
+- Fixed broken `perfana-api` Docker image where `@nestjs/swagger`, `rxjs`, `@nestjs/websockets`, `@nestjs/platform-socket.io`, and 4 other production packages were missing at runtime. Root cause: NestJS v10→v11 upgrade changed npm hoisting so these packages now land in `apps/api/node_modules` instead of root, but the `COPY` for `apps/api/node_modules` had been removed in PR #119. Re-added `COPY --from=builder /app/apps/api/node_modules ./apps/api/node_modules` to the `runtime-prep` stage.
+
 ## [0.2.59.9] - 2026-05-28
 
 ### Fixed
