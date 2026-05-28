@@ -13,6 +13,7 @@ import {
 } from '@mui/material';
 import { HourglassEmpty, Launch, ContentCopy, Check } from '@mui/icons-material';
 import { TestRun } from '@/types/test-runs';
+import { calculateProgress } from '@/app/test-runs/utils/test-run-utils';
 
 interface TestRunIdentitySectionProps {
   testRun: TestRun;
@@ -206,7 +207,7 @@ export function TestRunIdentitySection({ testRun }: TestRunIdentitySectionProps)
           </Box>
 
           {/* Completion Percentage Progress Bar */}
-          {(!testRun.completed || testRun.is_stale) && testRun.completion_percentage !== undefined && (
+          {(!testRun.completed || testRun.is_stale) && testRun.start_time && testRun.planned_duration && (
             <Box sx={{ width: '100%' }}>
               <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', mb: 0.5 }}>
                 <Typography
@@ -229,12 +230,12 @@ export function TestRunIdentitySection({ testRun }: TestRunIdentitySectionProps)
                     color: testRun.is_stale ? '#ff9800' : 'primary.main',
                   }}
                 >
-                  {testRun.completion_percentage}%
+                  {Math.round(calculateProgress(testRun))}%
                 </Typography>
               </Box>
               <LinearProgress
                 variant="determinate"
-                value={testRun.completion_percentage}
+                value={calculateProgress(testRun)}
                 sx={{
                   height: 8,
                   borderRadius: 4,
