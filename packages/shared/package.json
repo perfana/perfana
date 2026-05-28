@@ -91,7 +91,7 @@
     "clean": "rimraf dist"
   },
   "dependencies": {
-    "@nestjs/common": "^10.2.0",
+    "@nestjs/common": "^11.1.24",
     "@nestjs/typeorm": "^11.0.0",
     "ioredis": "^5.8.0",
     "pg": "^8.11.3",
