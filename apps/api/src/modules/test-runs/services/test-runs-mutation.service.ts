@@ -151,6 +151,7 @@ export class TestRunsMutationService {
     entity.abort = true;
     entity.abortMessage = `Aborted manually by ${userIdentifier}`;
     entity.updatedBy = userId;
+    entity.endTime = new Date();
 
     await withRequestEm(this.testRunRepo).save(entity);
 

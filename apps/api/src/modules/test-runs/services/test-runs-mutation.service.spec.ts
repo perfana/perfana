@@ -600,7 +600,7 @@ describe('TestRunsMutationService', () => {
       const result = await service.abortTestRun(entity.id, userId, [], userIdentifier);
 
       expect(testRunRepo.save).toHaveBeenCalledWith(
-        expect.objectContaining({ abort: true, abortMessage: `Aborted manually by ${userIdentifier}`, updatedBy: userId }),
+        expect.objectContaining({ abort: true, abortMessage: `Aborted manually by ${userIdentifier}`, updatedBy: userId, endTime: expect.any(Date) }),
       );
       expect(auditService.logUpdate).toHaveBeenCalledTimes(1);
       expect(result.abort).toBe(true);

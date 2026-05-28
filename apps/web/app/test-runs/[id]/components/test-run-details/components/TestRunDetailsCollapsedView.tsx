@@ -100,7 +100,7 @@ export function TestRunDetailsCollapsedView({ testRun }: TestRunDetailsCollapsed
         )}
 
         {/* Status Badge */}
-        {!testRun.completed && (
+        {!testRun.completed && !testRun.abort && (
           <SoftBadge
             label="Running"
             color="blue"
@@ -125,7 +125,7 @@ export function TestRunDetailsCollapsedView({ testRun }: TestRunDetailsCollapsed
       </Box>
 
       {/* Running progress indicator — shown only while the test is in progress */}
-      {!testRun.completed && (
+      {!testRun.completed && !testRun.abort && (
         <LinearProgress
           variant="indeterminate"
           sx={{
