@@ -173,7 +173,8 @@ RUN rm -rf node_modules \
     && npm cache clean --force \
     && rm -rf /tmp/* /var/tmp/* /root/.npm \
     && rm -rf apps/web/.next/cache \
-    && rm -rf apps/web/.next/trace
+    && rm -rf apps/web/.next/trace \
+    && mkdir -p apps/web/node_modules apps/grafana-sync/node_modules apps/worker/node_modules apps/perfana-report/node_modules
 
 # ================================================================================================
 # STAGE 6: Runtime Preparation

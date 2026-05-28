@@ -4,6 +4,11 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
+## [0.2.59.9] - 2026-05-28
+
+### Fixed
+- Fixed Docker CI build failure caused by NestJS v10→v11 upgrade changing npm workspace hoisting: `apps/web/node_modules`, `apps/grafana-sync/node_modules`, `apps/worker/node_modules`, and `apps/perfana-report/node_modules` were no longer created after production reinstall because all deps are now hoisted to root. Added `mkdir -p` in the builder stage to guarantee these directories exist before the `runtime-prep` COPY stage reads them.
+
 ## [0.2.59.6] - 2026-05-28
 
 ### Fixed
