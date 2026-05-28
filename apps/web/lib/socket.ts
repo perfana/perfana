@@ -51,6 +51,8 @@ class SocketManager {
   private reconnectDelay = 1000; // Start with 1 second
   private maxReconnectDelay = 30000; // Max 30 seconds
   private reconnectTimer: NodeJS.Timeout | null = null;
+  // Persisted event listeners — re-applied to every new socket after reconnect
+  private persistedListeners: Map<string, Set<(...args: unknown[]) => void>> = new Map();
 
   /**
    * Get the WebSocket URL from API URL
@@ -112,6 +114,8 @@ class SocketManager {
         timeout: 10000,
       });
 
+      // Re-attach any listeners registered before this socket was created
+      this.reapplyPersistedListeners();
       this.setupSocketListeners();
 
       // Wait for connection
@@ -364,31 +368,43 @@ class SocketManager {
   }
 
   /**
-   * Subscribe to a specific event
+   * Subscribe to a specific event.
+   * The listener is persisted in an internal registry so it is automatically
+   * re-attached to every new socket instance created after a reconnect.
    */
   on<T = unknown>(event: string, listener: (data: T) => void): () => void {
-    if (!this.socket) {
-      // console.warn(`[Socket] Cannot subscribe to ${event}: not connected`);
-      return () => { /* noop */ };
+    const typedListener = listener as (...args: unknown[]) => void;
+
+    // Persist so reconnects re-apply it
+    if (!this.persistedListeners.has(event)) {
+      this.persistedListeners.set(event, new Set());
+    }
+    this.persistedListeners.get(event)!.add(typedListener);
+
+    // Attach to current socket immediately if available
+    if (this.socket) {
+      this.socket.on(event, typedListener);
     }
 
-    // console.log(`[Socket] Subscribing to event: ${event}`);
-
-    // Wrap listener to add logging
-    const wrappedListener = (data: T) => {
-      // console.log(`[Socket] Received event: ${event}`, data);
-      listener(data);
-    };
-
-    this.socket.on(event, wrappedListener);
-
-    // Return unsubscribe function
     return () => {
+      this.persistedListeners.get(event)?.delete(typedListener);
       if (this.socket) {
-        // console.log(`[Socket] Unsubscribing from event: ${event}`);
-        this.socket.off(event, wrappedListener);
+        this.socket.off(event, typedListener);
       }
     };
+  }
+
+  /**
+   * Re-attach all persisted listeners to the current socket.
+   * Called whenever a new socket instance is created.
+   */
+  private reapplyPersistedListeners(): void {
+    if (!this.socket) return;
+    for (const [event, listeners] of this.persistedListeners) {
+      for (const listener of listeners) {
+        this.socket.on(event, listener);
+      }
+    }
   }
 
   /**
