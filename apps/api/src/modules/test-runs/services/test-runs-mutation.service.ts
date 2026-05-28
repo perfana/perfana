@@ -39,6 +39,8 @@ import { TestRunsMetricsService } from './test-runs-metrics.service';
 import { TestRun, SystemUnderTest, TestEnvironment, Workload } from '../types/test-run.types';
 import { mapEntityToTestRun } from '../handlers/entity-mapper';
 import { AuditService } from '../../audit/audit.service';
+import { TestRunsGateway } from '../gateways/test-runs.gateway';
+import { TestRunEventType } from '../types/realtime-events.types';
 
 // Re-export types for backward compatibility
 export { TestRun, SystemUnderTest, TestEnvironment, Workload };
@@ -63,6 +65,7 @@ export class TestRunsMutationService {
     private readonly lookupService: TestRunLookupService,
     private readonly metricsService: TestRunsMetricsService,
     private readonly auditService: AuditService,
+    private readonly testRunsGateway: TestRunsGateway,
   ) {}
 
   /**
@@ -152,6 +155,7 @@ export class TestRunsMutationService {
     entity.abortMessage = `Aborted manually by ${userIdentifier}`;
     entity.updatedBy = userId;
     entity.endTime = new Date();
+    entity.completed = true;
 
     await withRequestEm(this.testRunRepo).save(entity);
 
@@ -163,8 +167,26 @@ export class TestRunsMutationService {
 
     const testRun = mapEntityToTestRun(entity);
 
-    // Trigger analysis for aborted runs so results collected up to the abort
-    // point are evaluated by ADAPT (same path as a normal completion).
+    try {
+      this.testRunsGateway.emitTestRunUpdated(
+        {
+          eventType: TestRunEventType.UPDATED,
+          timestamp: new Date().toISOString(),
+          testRun,
+          userId,
+          organizationId: entity.organizationId,
+          teamId: entity.teamId ?? undefined,
+        },
+        userId,
+        entity.organizationId,
+        entity.teamId ?? undefined,
+      );
+    } catch (err) {
+      this.logger.warn(`Failed to emit UPDATED event after abort for ${entity.testRunId}: ${
+        err && typeof err === 'object' && 'message' in err ? (err as Error).message : 'Unknown error'
+      }`);
+    }
+
     await this.handleCompletedTest(testRun);
 
     return testRun;

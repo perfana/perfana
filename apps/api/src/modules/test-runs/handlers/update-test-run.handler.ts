@@ -174,6 +174,11 @@ export class UpdateTestRunHandler implements ICommandHandler<UpdateTestRunComman
       adapt_config: entity.adaptConfig,
       variables: entity.variables,
       deep_links: entity.deepLinks,
+      completion_percentage: (() => {
+        if (!entity.startTime || !entity.plannedDuration || entity.completed) return undefined;
+        const elapsed = (Date.now() - entity.startTime.getTime()) / 1000;
+        return Math.min(Math.round((elapsed / entity.plannedDuration) * 100), 100);
+      })(),
       created_at: entity.createdAt.toISOString(),
       updated_at: entity.updatedAt.toISOString(),
       systems_under_test: entity.systemUnderTest ? {

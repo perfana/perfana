@@ -19,6 +19,7 @@ import { UpdateAdaptConfigHandler } from '../handlers/update-adapt-config.handle
 import { InitTestHandler } from '../handlers/init-test.handler';
 import { TestRunLookupService } from './test-run-lookup.service';
 import { TestRunsMetricsService } from './test-runs-metrics.service';
+import { TestRunsGateway } from '../gateways/test-runs.gateway';
 import { createMockRepository, MockRepository } from '../../../../test/helpers/mock-repository.factory';
 import { createAuthorizationServiceMock } from '../../../../test/mocks/authorization-service.mock';
 import { AuthorizationService } from '../../../common/services/authorization.service';
@@ -38,6 +39,7 @@ describe('TestRunsMutationService', () => {
   let initTestHandler: jest.Mocked<InitTestHandler>;
   let lookupService: jest.Mocked<TestRunLookupService>;
   let auditService: jest.Mocked<AuditService>;
+  let testRunsGateway: jest.Mocked<TestRunsGateway>;
 
   const createMockTestRunEntity = (overrides?: Partial<TestRunEntity>): TestRunEntity => {
     const now = new Date();
@@ -155,6 +157,10 @@ describe('TestRunsMutationService', () => {
           provide: AuditService,
           useValue: { logUpdate: jest.fn(), logCreate: jest.fn(), logDelete: jest.fn() },
         },
+        {
+          provide: TestRunsGateway,
+          useValue: { emitTestRunUpdated: jest.fn() },
+        },
       ],
     }).compile();
 
@@ -162,6 +168,7 @@ describe('TestRunsMutationService', () => {
     auditService = module.get(AuditService);
     testRunRepo = module.get(getRepositoryToken(TestRunEntity));
     bullmqClientService = module.get(BullMQClientService);
+    testRunsGateway = module.get(TestRunsGateway);
     createTestRunHandler = module.get(CreateTestRunHandler);
     updateTestRunHandler = module.get(UpdateTestRunHandler);
     deleteTestRunHandler = module.get(DeleteTestRunHandler);
@@ -594,15 +601,16 @@ describe('TestRunsMutationService', () => {
     it('should abort a running test run and trigger analysis', async () => {
       const entity = createMockTestRunEntity({ completed: false, abort: false });
       testRunRepo.findOne.mockResolvedValue(entity);
-      testRunRepo.save.mockResolvedValue({ ...entity, abort: true, abortMessage: `Aborted manually by ${userIdentifier}` });
+      testRunRepo.save.mockResolvedValue({ ...entity, abort: true, completed: true, abortMessage: `Aborted manually by ${userIdentifier}` });
       bullmqClientService.analyzeTest.mockResolvedValue({ jobId: 'job-abort-123' });
 
       const result = await service.abortTestRun(entity.id, userId, [], userIdentifier);
 
       expect(testRunRepo.save).toHaveBeenCalledWith(
-        expect.objectContaining({ abort: true, abortMessage: `Aborted manually by ${userIdentifier}`, updatedBy: userId, endTime: expect.any(Date) }),
+        expect.objectContaining({ abort: true, completed: true, abortMessage: `Aborted manually by ${userIdentifier}`, updatedBy: userId, endTime: expect.any(Date) }),
       );
       expect(auditService.logUpdate).toHaveBeenCalledTimes(1);
+      expect(testRunsGateway.emitTestRunUpdated).toHaveBeenCalledTimes(1);
       expect(result.abort).toBe(true);
       expect(bullmqClientService.analyzeTest).toHaveBeenCalledWith(entity.testRunId, { adapt: true, benchmarksOnly: false });
     });
@@ -610,7 +618,7 @@ describe('TestRunsMutationService', () => {
     it('should still abort successfully if analysis job fails to enqueue', async () => {
       const entity = createMockTestRunEntity({ completed: false, abort: false });
       testRunRepo.findOne.mockResolvedValue(entity);
-      testRunRepo.save.mockResolvedValue({ ...entity, abort: true, abortMessage: `Aborted manually by ${userIdentifier}` });
+      testRunRepo.save.mockResolvedValue({ ...entity, abort: true, completed: true, abortMessage: `Aborted manually by ${userIdentifier}` });
       bullmqClientService.analyzeTest.mockRejectedValue(new Error('Queue unavailable'));
 
       const result = await service.abortTestRun(entity.id, userId, [], userIdentifier);
