@@ -13,6 +13,7 @@ import {
 } from '@mui/material';
 import { HourglassEmpty, Launch, ContentCopy, Check } from '@mui/icons-material';
 import { TestRun } from '@/types/test-runs';
+import { calculateProgress } from '@/app/test-runs/utils/test-run-utils';
 
 interface TestRunIdentitySectionProps {
   testRun: TestRun;
@@ -152,25 +153,43 @@ export function TestRunIdentitySection({ testRun }: TestRunIdentitySectionProps)
         </Typography>
         <Box sx={{ display: 'flex', flexDirection: 'column', gap: 1.5 }}>
           <Box sx={{ display: 'flex', gap: 1, flexWrap: 'wrap', alignItems: 'center' }}>
-            <Chip
-              label={testRun.completed ? 'Completed' : 'Running'}
-              size="medium"
-              icon={testRun.completed ? undefined : <CircularProgress size={14} sx={{ ml: 1 }} />}
-              sx={{
-                height: '32px',
-                backgroundColor: testRun.completed ? 'rgba(76, 175, 80, 0.08)' : 'rgba(25, 118, 210, 0.08)',
-                border: testRun.completed ? '1px solid rgba(76, 175, 80, 0.3)' : '1px solid rgba(25, 118, 210, 0.3)',
-                color: testRun.completed ? '#4caf50' : 'primary.main',
-                fontWeight: 600,
-                fontSize: '0.875rem',
-                '& .MuiChip-label': {
-                  px: 1.5,
-                },
-                '& .MuiChip-icon': {
-                  ml: 1,
-                }
-              }}
-            />
+            {testRun.abort ? (
+              <Chip
+                label="Aborted"
+                size="medium"
+                sx={{
+                  height: '32px',
+                  backgroundColor: 'rgba(244, 67, 54, 0.08)',
+                  border: '1px solid rgba(244, 67, 54, 0.3)',
+                  color: '#f44336',
+                  fontWeight: 600,
+                  fontSize: '0.875rem',
+                  '& .MuiChip-label': {
+                    px: 1.5,
+                  },
+                }}
+              />
+            ) : (
+              <Chip
+                label={testRun.completed ? 'Completed' : 'Running'}
+                size="medium"
+                icon={testRun.completed ? undefined : <CircularProgress size={14} sx={{ ml: 1 }} />}
+                sx={{
+                  height: '32px',
+                  backgroundColor: testRun.completed ? 'rgba(76, 175, 80, 0.08)' : 'rgba(25, 118, 210, 0.08)',
+                  border: testRun.completed ? '1px solid rgba(76, 175, 80, 0.3)' : '1px solid rgba(25, 118, 210, 0.3)',
+                  color: testRun.completed ? '#4caf50' : 'primary.main',
+                  fontWeight: 600,
+                  fontSize: '0.875rem',
+                  '& .MuiChip-label': {
+                    px: 1.5,
+                  },
+                  '& .MuiChip-icon': {
+                    ml: 1,
+                  }
+                }}
+              />
+            )}
 
             {/* Stale Indicator */}
             {testRun.is_stale && (
@@ -206,7 +225,7 @@ export function TestRunIdentitySection({ testRun }: TestRunIdentitySectionProps)
           </Box>
 
           {/* Completion Percentage Progress Bar */}
-          {(!testRun.completed || testRun.is_stale) && testRun.completion_percentage !== undefined && (
+          {!testRun.abort && (!testRun.completed || testRun.is_stale) && testRun.start_time && testRun.planned_duration && (
             <Box sx={{ width: '100%' }}>
               <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', mb: 0.5 }}>
                 <Typography
@@ -229,12 +248,12 @@ export function TestRunIdentitySection({ testRun }: TestRunIdentitySectionProps)
                     color: testRun.is_stale ? '#ff9800' : 'primary.main',
                   }}
                 >
-                  {testRun.completion_percentage}%
+                  {Math.round(calculateProgress(testRun))}%
                 </Typography>
               </Box>
               <LinearProgress
                 variant="determinate"
-                value={testRun.completion_percentage}
+                value={calculateProgress(testRun)}
                 sx={{
                   height: 8,
                   borderRadius: 4,

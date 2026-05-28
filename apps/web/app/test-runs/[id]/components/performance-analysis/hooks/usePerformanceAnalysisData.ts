@@ -312,21 +312,21 @@ export function usePerformanceAnalysisData({
     fetchThroughputStats();
   }, [fetchTransactions, fetchTestLevelThreshold, fetchVirtualUserStats, fetchThroughputStats]);
 
-  // Auto-refresh: re-fetch whenever a WS update changes completion_percentage,
-  // unless the last fetch was slow (≥5 s). The initial load is handled by the
-  // mount effect above; this effect skips the first render via prevRef.
-  const prevCompletionRef = useRef<number | undefined>(undefined);
+  // Auto-refresh: re-fetch whenever a WS update arrives (signalled by updated_at
+  // changing), unless the last fetch was slow (≥5 s). The initial load is handled
+  // by the mount effect above; this effect skips the first render via prevRef.
+  const prevUpdatedAtRef = useRef<string | undefined>(undefined);
   useEffect(() => {
     if (!isRunning || autoRefreshDisabled) return;
-    const current = testRun?.completion_percentage;
-    const prev = prevCompletionRef.current;
-    prevCompletionRef.current = current;
+    const current = testRun?.updated_at;
+    const prev = prevUpdatedAtRef.current;
+    prevUpdatedAtRef.current = current;
     // Skip on first run (prev is still the initial sentinel value)
     if (prev === undefined) return;
     // Skip when the value hasn't actually changed
     if (current === prev) return;
     refreshAll();
-  }, [testRun?.completion_percentage, isRunning, autoRefreshDisabled, refreshAll]);
+  }, [testRun?.updated_at, isRunning, autoRefreshDisabled, refreshAll]);
 
   // Sorting handler
   const handleSort = useCallback((field: SortField) => {

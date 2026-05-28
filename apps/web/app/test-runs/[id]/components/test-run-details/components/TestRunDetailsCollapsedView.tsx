@@ -7,6 +7,7 @@ import { TestRun } from '@/types/test-runs';
 import KPIDisplay from '../../shared/KPIDisplay';
 import SoftBadge from '../../shared/SoftBadge';
 import { hasEvaluationError } from '../utils/test-run-formatters';
+import { calculateProgress } from '@/app/test-runs/utils/test-run-utils';
 
 interface TestRunDetailsCollapsedViewProps {
   testRun: TestRun;
@@ -103,6 +104,12 @@ export function TestRunDetailsCollapsedView({ testRun }: TestRunDetailsCollapsed
         )}
 
         {/* Status Badge */}
+        {testRun.abort && (
+          <SoftBadge
+            label="Aborted"
+            color="red"
+          />
+        )}
         {isRunning && (
           <SoftBadge
             label="Running"
@@ -128,19 +135,19 @@ export function TestRunDetailsCollapsedView({ testRun }: TestRunDetailsCollapsed
       </Box>
 
       {/* Completion progress — shown while test is running */}
-      {isRunning && testRun.completion_percentage !== undefined && (
+      {isRunning && testRun.start_time && testRun.planned_duration && (
         <Box sx={{ mt: 'auto', px: 0.5 }}>
           <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', mb: 0.5 }}>
             <Typography variant="caption" sx={{ fontSize: '0.7rem', fontWeight: 500, color: 'text.secondary', textTransform: 'uppercase', letterSpacing: '0.5px' }}>
               Completion
             </Typography>
             <Typography variant="caption" sx={{ fontSize: '0.75rem', fontWeight: 600, color: testRun.is_stale ? '#ff9800' : 'primary.main' }}>
-              {testRun.completion_percentage}%
+              {Math.round(calculateProgress(testRun))}%
             </Typography>
           </Box>
           <LinearProgress
             variant="determinate"
-            value={testRun.completion_percentage}
+            value={calculateProgress(testRun)}
             sx={{
               height: 6,
               borderRadius: 3,
