@@ -43,6 +43,11 @@ export function mapEntityToTestRun(entity: TestRunEntity): TestRun {
     adapt_config: entity.adaptConfig,
     variables: entity.variables,
     deep_links: entity.deepLinks,
+    completion_percentage: (() => {
+      if (!entity.startTime || !entity.plannedDuration || entity.completed) return undefined;
+      const elapsed = (Date.now() - entity.startTime.getTime()) / 1000;
+      return Math.min(Math.round((elapsed / entity.plannedDuration) * 100), 100);
+    })(),
     // Ownership tracking (multi-tenant RBAC)
     organization_id: entity.organizationId,
     team_id: entity.teamId,

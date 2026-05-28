@@ -179,18 +179,32 @@ export class TestRunsGateway
     await client.join(userRoom);
     this.logger.log(`Client ${client.id} joined room: ${userRoom}`);
 
-    // Join organization room if available
-    if (client.organizationId) {
-      const orgRoom = TestRunRooms.organization(client.organizationId);
+    // Join organization rooms — look up DB memberships because Keycloak JWTs
+    // don't carry Perfana organization_id/team_id claims.
+    const orgRows = await this.dataSource.query<{ organization_id: string }[]>(
+      `SELECT organization_id FROM organization_members WHERE user_id = $1`,
+      [client.userId],
+    ).catch(() => [] as { organization_id: string }[]);
+
+    for (const row of orgRows) {
+      const orgRoom = TestRunRooms.organization(row.organization_id);
       await client.join(orgRoom);
-      this.logger.log(`Client ${client.id} joined room: ${orgRoom}`);
+      this.logger.debug(`Client ${client.id} joined room: ${orgRoom}`);
     }
 
-    // Join team room if available
+    // Also honour JWT claim if present (e.g. API-key auth paths that do carry it)
+    if (client.organizationId && !orgRows.find(r => r.organization_id === client.organizationId)) {
+      const orgRoom = TestRunRooms.organization(client.organizationId);
+      await client.join(orgRoom);
+      this.logger.debug(`Client ${client.id} joined room (from JWT): ${orgRoom}`);
+    }
+
+    // Join team room if available (JWT claim — team memberships are less critical
+    // since org room already covers test run updates)
     if (client.teamId) {
       const teamRoom = TestRunRooms.team(client.teamId);
       await client.join(teamRoom);
-      this.logger.log(`Client ${client.id} joined room: ${teamRoom}`);
+      this.logger.debug(`Client ${client.id} joined room: ${teamRoom}`);
     }
 
     // Join global room if user has admin role

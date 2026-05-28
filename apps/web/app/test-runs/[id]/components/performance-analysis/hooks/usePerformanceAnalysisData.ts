@@ -57,6 +57,9 @@ export interface UsePerformanceAnalysisDataReturn {
   sinceMinutes: number | null;
   setSinceMinutes: (value: number | null) => void;
 
+  // Auto-refresh state — true when the last fetch took ≥5 s (user must refresh manually)
+  autoRefreshDisabled: boolean;
+
   // Sorting
   sortField: SortField;
   sortOrder: SortOrder;
@@ -110,6 +113,9 @@ export function usePerformanceAnalysisData({
   // Live window state — null means "complete test", a number means "last N minutes"
   const [sinceMinutes, setSinceMinutes] = useState<number | null>(null);
 
+  // Auto-refresh: disabled when the last fetchTransactions call took ≥5 s
+  const [autoRefreshDisabled, setAutoRefreshDisabled] = useState(false);
+
   // Derive running state and elapsed duration from the testRun prop
   const isRunning = !!testRun && !testRun.completed;
   const elapsedMinutes = (() => {
@@ -134,6 +140,7 @@ export function usePerformanceAnalysisData({
 
   // Fetch transactions
   const fetchTransactions = useCallback(async () => {
+    const fetchStartMs = Date.now();
     try {
       setLoading(true);
       setError(null);
@@ -183,6 +190,7 @@ export function usePerformanceAnalysisData({
       setTransactions([]);
     } finally {
       setLoading(false);
+      setAutoRefreshDisabled(Date.now() - fetchStartMs >= 5000);
     }
   }, [testRunId, excludeRampUp, sinceMinutes]);
 
@@ -303,6 +311,22 @@ export function usePerformanceAnalysisData({
     fetchVirtualUserStats();
     fetchThroughputStats();
   }, [fetchTransactions, fetchTestLevelThreshold, fetchVirtualUserStats, fetchThroughputStats]);
+
+  // Auto-refresh: re-fetch whenever a WS update changes completion_percentage,
+  // unless the last fetch was slow (≥5 s). The initial load is handled by the
+  // mount effect above; this effect skips the first render via prevRef.
+  const prevCompletionRef = useRef<number | undefined>(undefined);
+  useEffect(() => {
+    if (!isRunning || autoRefreshDisabled) return;
+    const current = testRun?.completion_percentage;
+    const prev = prevCompletionRef.current;
+    prevCompletionRef.current = current;
+    // Skip on first run (prev is still the initial sentinel value)
+    if (prev === undefined) return;
+    // Skip when the value hasn't actually changed
+    if (current === prev) return;
+    refreshAll();
+  }, [testRun?.completion_percentage, isRunning, autoRefreshDisabled, refreshAll]);
 
   // Sorting handler
   const handleSort = useCallback((field: SortField) => {
@@ -441,6 +465,9 @@ export function usePerformanceAnalysisData({
     elapsedMinutes,
     sinceMinutes,
     setSinceMinutes,
+
+    // Auto-refresh
+    autoRefreshDisabled,
 
     // Sorting
     sortField,

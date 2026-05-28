@@ -95,10 +95,16 @@ function areTestRunsEqual(a: TestRun | null, b: TestRun | null): boolean {
   return (
     a.id === b.id &&
     a.test_run_id === b.test_run_id &&
+    a.completed === b.completed &&
+    a.abort === b.abort &&
+    a.is_stale === b.is_stale &&
     a.start_time === b.start_time &&
     a.end_time === b.end_time &&
+    a.duration === b.duration &&
+    a.completion_percentage === b.completion_percentage &&
     a.analysis_start_offset === b.analysis_start_offset &&
     a.analysis_end_offset === b.analysis_end_offset &&
+    JSON.stringify(a.status) === JSON.stringify(b.status) &&
     JSON.stringify(a.consolidated_result) === JSON.stringify(b.consolidated_result) &&
     a.application_release === b.application_release &&
     a.is_changepoint === b.is_changepoint &&

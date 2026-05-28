@@ -42,6 +42,7 @@ export class TestRunsStaleDetectionService {
         where: {
           completed: false,
           isStale: false,
+          abort: false,
           updatedAt: LessThan(staleThresholdDate),
         },
         select: ['id', 'testRunId', 'systemUnderTestId', 'testEnvironment', 'workload', 'startTime', 'endTime', 'updatedAt'],

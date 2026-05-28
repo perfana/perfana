@@ -115,6 +115,7 @@ export default function PerformanceAnalysisCard({
     elapsedMinutes,
     sinceMinutes,
     setSinceMinutes,
+    autoRefreshDisabled,
   } = usePerformanceAnalysisData({ testRunId, testRun });
 
   const availableScenarios = useMemo(
@@ -349,28 +350,29 @@ export default function PerformanceAnalysisCard({
                 />
               </Tooltip>
             )}
-            {/* Live-test controls: manual refresh + time-window selector. Anchored at
-                right:96 to clear the Apdex-options menu (right:48, ~36px wide). The
-                refresh button replaces the prior auto-refetch on every realtime entity
-                update, which was causing visible re-renders of the whole table during
-                live tests. */}
+            {/* Live-test controls: time-window selector (always shown when running) +
+                manual refresh button (shown only when auto-refresh is disabled because
+                the last fetch took ≥5 s). When auto-refresh is enabled the card
+                refreshes automatically on every WS update. */}
             {expanded && isRunning && (
               <Box
                 sx={{ position: 'absolute', right: 96, display: 'flex', gap: 0.5, alignItems: 'center' }}
                 onClick={(e) => e.stopPropagation()}
               >
-                <Tooltip title="Refresh metrics" arrow>
-                  <span>
-                    <IconButton
-                      onClick={refreshAll}
-                      size="small"
-                      disabled={loading}
-                      sx={{ color: 'text.secondary', '&:hover': { color: 'primary.main' } }}
-                    >
-                      {loading ? <CircularProgress size={18} /> : <RefreshIcon fontSize="small" />}
-                    </IconButton>
-                  </span>
-                </Tooltip>
+                {autoRefreshDisabled && (
+                  <Tooltip title="Refresh metrics (auto-refresh paused — last fetch took >5s)" arrow>
+                    <span>
+                      <IconButton
+                        onClick={refreshAll}
+                        size="small"
+                        disabled={loading}
+                        sx={{ color: 'text.secondary', '&:hover': { color: 'primary.main' } }}
+                      >
+                        {loading ? <CircularProgress size={18} /> : <RefreshIcon fontSize="small" />}
+                      </IconButton>
+                    </span>
+                  </Tooltip>
+                )}
                 <LiveWindowSelector
                   elapsedMinutes={elapsedMinutes}
                   sinceMinutes={sinceMinutes}
