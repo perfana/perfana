@@ -30,7 +30,9 @@
     "esModuleInterop": true,
     "paths": {
       "@perfana/shared": ["../../packages/shared/src"],
-      "@perfana/shared/*": ["../../packages/shared/src/*"]
+      "@perfana/shared/*": ["../../packages/shared/src/*"],
+      "rxjs": ["./node_modules/rxjs"],
+      "rxjs/*": ["./node_modules/rxjs/*"]
     }
   },
   "include": ["src/**/*"],

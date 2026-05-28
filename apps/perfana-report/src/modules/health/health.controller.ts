@@ -13,7 +13,7 @@ export class HealthController {
     private health: HealthCheckService,
     private db: TypeOrmHealthIndicator,
     private redis: RedisHealthIndicator,
-    private browserPool: BrowserPoolHealthIndicator,
+    private browserPool: BrowserPoolHealthIndicator
   ) {}
 
   /**

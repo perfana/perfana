@@ -1,6 +1,10 @@
 import { Injectable } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
-import { HealthIndicator, HealthIndicatorResult, HealthCheckError } from '@nestjs/terminus';
+import {
+  HealthIndicator,
+  HealthIndicatorResult,
+  HealthCheckError,
+} from '@nestjs/terminus';
 import IORedis from 'ioredis';
 
 @Injectable()
@@ -51,7 +55,7 @@ export class RedisHealthIndicator extends HealthIndicator {
 
       throw new HealthCheckError(
         'Redis health check failed',
-        this.getStatus(key, false, { message: errorMessage }),
+        this.getStatus(key, false, { message: errorMessage })
       );
     }
   }
