@@ -1,7 +1,7 @@
 'use client';
 
 import { useState } from 'react';
-import { Box, IconButton, LinearProgress, Tooltip } from '@mui/material';
+import { Box, IconButton, LinearProgress, Tooltip, Typography, useTheme } from '@mui/material';
 import { ContentCopy, Check } from '@mui/icons-material';
 import { TestRun } from '@/types/test-runs';
 import KPIDisplay from '../../shared/KPIDisplay';
@@ -14,6 +14,9 @@ interface TestRunDetailsCollapsedViewProps {
 
 export function TestRunDetailsCollapsedView({ testRun }: TestRunDetailsCollapsedViewProps) {
   const [copied, setCopied] = useState(false);
+  const theme = useTheme();
+  const isDark = theme.palette.mode === 'dark';
+  const isRunning = !testRun.completed && !testRun.abort;
 
   const handleCopy = (e: React.MouseEvent) => {
     e.stopPropagation();
@@ -100,7 +103,7 @@ export function TestRunDetailsCollapsedView({ testRun }: TestRunDetailsCollapsed
         )}
 
         {/* Status Badge */}
-        {!testRun.completed && !testRun.abort && (
+        {isRunning && (
           <SoftBadge
             label="Running"
             color="blue"
@@ -124,19 +127,33 @@ export function TestRunDetailsCollapsedView({ testRun }: TestRunDetailsCollapsed
         )}
       </Box>
 
-      {/* Running progress indicator — shown only while the test is in progress */}
-      {!testRun.completed && !testRun.abort && (
-        <LinearProgress
-          variant="indeterminate"
-          sx={{
-            mx: -3.5,
-            mb: -3.5,
-            mt: 'auto',
-            borderBottomLeftRadius: 12,
-            borderBottomRightRadius: 12,
-            height: 3,
-          }}
-        />
+      {/* Completion progress — shown while test is running */}
+      {isRunning && testRun.completion_percentage !== undefined && (
+        <Box sx={{ mt: 'auto', px: 0.5 }}>
+          <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', mb: 0.5 }}>
+            <Typography variant="caption" sx={{ fontSize: '0.7rem', fontWeight: 500, color: 'text.secondary', textTransform: 'uppercase', letterSpacing: '0.5px' }}>
+              Completion
+            </Typography>
+            <Typography variant="caption" sx={{ fontSize: '0.75rem', fontWeight: 600, color: testRun.is_stale ? '#ff9800' : 'primary.main' }}>
+              {testRun.completion_percentage}%
+            </Typography>
+          </Box>
+          <LinearProgress
+            variant="determinate"
+            value={testRun.completion_percentage}
+            sx={{
+              height: 6,
+              borderRadius: 3,
+              backgroundColor: isDark ? 'rgba(255,255,255,0.08)' : 'rgba(0,0,0,0.06)',
+              '& .MuiLinearProgress-bar': {
+                borderRadius: 3,
+                background: testRun.is_stale
+                  ? 'linear-gradient(90deg, #ff9800 0%, #ffb74d 100%)'
+                  : 'linear-gradient(90deg, #1976d2 0%, #42a5f5 100%)',
+              },
+            }}
+          />
+        </Box>
       )}
     </Box>
   );
