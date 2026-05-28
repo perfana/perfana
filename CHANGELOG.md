@@ -4,6 +4,13 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
+## [0.2.59.12] - 2026-05-28
+
+### Fixed
+- **Abort analysis not triggered**: `abortTestRun` now sets `completed = true` on the entity before saving, allowing `TransactionStatsRollupPipeline` to proceed past its `!testRun.completed` guard and run ADAPT analysis on data collected up to the abort point.
+- **Performance analysis card not auto-refreshing**: `UpdateTestRunHandler.mapEntityToTestRun` was missing `completion_percentage` in the WS event payload. The `usePerformanceAnalysisData` auto-refresh effect watches this field; without it, running-test WS updates never triggered a data fetch.
+- **WS updates not re-rendering detail view after abort**: `abortTestRun` called `repo.save()` directly without emitting a WebSocket event. Injected `TestRunsGateway` into `TestRunsMutationService` and emit `TEST_RUN_UPDATED` after each abort so the detail view updates in real time.
+
 ## [0.2.59.10] - 2026-05-28
 
 ### Fixed
