@@ -109,7 +109,7 @@ export function TestConfigurationSection({ testRun }: TestConfigurationSectionPr
       </Box>
 
       {/* Workload */}
-      <Box sx={{ mb: testRun.abort ? 2.5 : 0 }}>
+      <Box sx={{ mb: 0 }}>
         <Typography
           variant="caption"
           sx={{
@@ -141,42 +141,6 @@ export function TestConfigurationSection({ testRun }: TestConfigurationSectionPr
           }}
         />
       </Box>
-
-      {/* Abort Status (conditional) */}
-      {testRun.abort && (
-        <Box>
-          <Typography
-            variant="caption"
-            sx={{
-              display: 'block',
-              fontSize: '0.75rem',
-              fontWeight: 500,
-              letterSpacing: '0.5px',
-              textTransform: 'uppercase',
-              color: 'text.secondary',
-              mb: 0.75,
-              opacity: 0.8,
-            }}
-          >
-            Test Aborted
-          </Typography>
-          <Chip
-            label="Yes - Test was aborted"
-            size="medium"
-            sx={{
-              height: '32px',
-              backgroundColor: 'rgba(244, 67, 54, 0.08)',
-              border: '1px solid rgba(244, 67, 54, 0.3)',
-              color: '#f44336',
-              fontWeight: 600,
-              fontSize: '0.875rem',
-              '& .MuiChip-label': {
-                px: 1.5,
-              }
-            }}
-          />
-        </Box>
-      )}
     </Box>
   );
 }

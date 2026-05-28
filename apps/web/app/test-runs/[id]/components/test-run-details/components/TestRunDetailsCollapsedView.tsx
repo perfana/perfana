@@ -104,6 +104,12 @@ export function TestRunDetailsCollapsedView({ testRun }: TestRunDetailsCollapsed
         )}
 
         {/* Status Badge */}
+        {testRun.abort && (
+          <SoftBadge
+            label="Aborted"
+            color="red"
+          />
+        )}
         {isRunning && (
           <SoftBadge
             label="Running"
