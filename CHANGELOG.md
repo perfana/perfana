@@ -4,6 +4,13 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
+## [0.2.59.6] - 2026-05-28
+
+### Fixed
+- Bumped `axios` from 1.16.0 → 1.16.1 to fix 3 critical CVEs (prototype pollution, HTTP response splitting) and 10 medium/high CVEs in `apps/api` and root workspace
+- Fixed stale `package-lock.json` that was resolving `next` to 15.5.14 despite `^15.5.18` declared in `apps/web/package.json` — now correctly installs 15.5.18, patching 9 high-severity CVEs (auth bypass, SSRF, incorrect authorization, DoS)
+- Fixed 6 pre-existing test failures in `test-runs-performance-query.service.spec.ts` where sinceMinutes/orgIds param index assertions were not updated when `endCutoff` was added as a second cutoff parameter
+
 ## [0.2.59.3] - 2026-05-27
 
 ### Changed
