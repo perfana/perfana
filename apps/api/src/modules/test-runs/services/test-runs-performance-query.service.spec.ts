@@ -458,9 +458,9 @@ describe('TestRunsPerformanceQueryService', () => {
           sql.includes('approx_percentile')
         )!;
         expect(statsCall[0]).toContain("interval '1 minute'");
-        // Admin params: [testRunId, excludeRampUp, cutoffTime, sinceMinutes]
-        expect(statsCall[1]).toHaveLength(4);
-        expect(statsCall[1][3]).toBe(60);
+        // Admin params: [testRunId, excludeRampUp, cutoffTime, endCutoff, sinceMinutes]
+        expect(statsCall[1]).toHaveLength(5);
+        expect(statsCall[1][4]).toBe(60);
       });
 
       it('includes window filter and org filter for non-admin with sinceMinutes', async () => {
@@ -471,10 +471,10 @@ describe('TestRunsPerformanceQueryService', () => {
         const statsCall = (testRunRepo.query as jest.Mock).mock.calls.find(([sql]: [string]) =>
           sql.includes('approx_percentile')
         )!;
-        // Non-admin params: [testRunId, excludeRampUp, cutoffTime, sinceMinutes, orgIds]
-        expect(statsCall[1]).toHaveLength(5);
-        expect(statsCall[1][3]).toBe(30);
-        expect(statsCall[1][4]).toEqual(ORG_IDS);
+        // Non-admin params: [testRunId, excludeRampUp, cutoffTime, endCutoff, sinceMinutes, orgIds]
+        expect(statsCall[1]).toHaveLength(6);
+        expect(statsCall[1][4]).toBe(30);
+        expect(statsCall[1][5]).toEqual(ORG_IDS);
       });
 
       it('omits window filter when sinceMinutes is undefined (admin)', async () => {
@@ -485,8 +485,8 @@ describe('TestRunsPerformanceQueryService', () => {
         const statsCall = (testRunRepo.query as jest.Mock).mock.calls.find(([sql]: [string]) =>
           sql.includes('approx_percentile')
         )!;
-        // Admin params without sinceMinutes: [testRunId, excludeRampUp, cutoffTime]
-        expect(statsCall[1]).toHaveLength(3);
+        // Admin params without sinceMinutes: [testRunId, excludeRampUp, cutoffTime, endCutoff]
+        expect(statsCall[1]).toHaveLength(4);
       });
     });
 
@@ -1113,9 +1113,9 @@ describe('TestRunsPerformanceQueryService', () => {
           sql.includes('approx_percentile')
         )!;
         expect(samplerCall[0]).toContain("interval '1 minute'");
-        // Params: [testRunId, transactionName, excludeRampUp, cutoffTime, sinceMinutes]
-        expect(samplerCall[1]).toHaveLength(5);
-        expect(samplerCall[1][4]).toBe(45);
+        // Params: [testRunId, transactionName, excludeRampUp, cutoffTime, endCutoff, sinceMinutes]
+        expect(samplerCall[1]).toHaveLength(6);
+        expect(samplerCall[1][5]).toBe(45);
       });
 
       it('appends orgIds after sinceMinutes for non-admin', async () => {
@@ -1126,10 +1126,10 @@ describe('TestRunsPerformanceQueryService', () => {
         const samplerCall = (testRunRepo.query as jest.Mock).mock.calls.find(([sql]: [string]) =>
           sql.includes('approx_percentile')
         )!;
-        // Params: [testRunId, transactionName, excludeRampUp, cutoffTime, sinceMinutes, orgIds]
-        expect(samplerCall[1]).toHaveLength(6);
-        expect(samplerCall[1][4]).toBe(15);
-        expect(samplerCall[1][5]).toEqual(ORG_IDS);
+        // Params: [testRunId, transactionName, excludeRampUp, cutoffTime, endCutoff, sinceMinutes, orgIds]
+        expect(samplerCall[1]).toHaveLength(7);
+        expect(samplerCall[1][5]).toBe(15);
+        expect(samplerCall[1][6]).toEqual(ORG_IDS);
       });
 
       it('places orgIds at position 5 when sinceMinutes absent (non-admin)', async () => {
@@ -1140,9 +1140,9 @@ describe('TestRunsPerformanceQueryService', () => {
         const samplerCall = (testRunRepo.query as jest.Mock).mock.calls.find(([sql]: [string]) =>
           sql.includes('approx_percentile')
         )!;
-        // Params: [testRunId, transactionName, excludeRampUp, cutoffTime, orgIds]
-        expect(samplerCall[1]).toHaveLength(5);
-        expect(samplerCall[1][4]).toEqual(ORG_IDS);
+        // Params: [testRunId, transactionName, excludeRampUp, cutoffTime, endCutoff, orgIds]
+        expect(samplerCall[1]).toHaveLength(6);
+        expect(samplerCall[1][5]).toEqual(ORG_IDS);
       });
     });
 
