@@ -1,6 +1,6 @@
 {
   "name": "@perfana/web",
-  "version": "0.1.0",
+  "version": "0.2.59.13",
   "private": true,
   "description": "Perfana Next.js frontend application",
   "scripts": {

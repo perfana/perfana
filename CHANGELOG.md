@@ -4,6 +4,12 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
+## [0.2.59.13] - 2026-05-28
+
+### Fixed
+- **Completion progress bar disappears on WebSocket updates**: The detail view's progress bars now use client-side `calculateProgress()` (based on `start_time` + `planned_duration`) instead of the server-computed `completion_percentage` field, which is `undefined` in WebSocket payloads and was causing the bar to vanish after the first real-time update.
+- **Performance analysis auto-refresh never firing during running tests**: The auto-refresh trigger in the performance analysis card switched from `completion_percentage` (always `undefined` from WebSocket events) to `updated_at`, which is always present and changes on every database update, so the card now reliably re-fetches data as a test progresses.
+
 ## [0.2.59.12] - 2026-05-28
 
 ### Fixed
