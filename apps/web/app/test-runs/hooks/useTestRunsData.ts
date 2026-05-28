@@ -4,6 +4,7 @@ import { useState, useEffect, useCallback, useRef } from 'react';
 import { authenticatedFetch } from '@/lib/api';
 import { TestRun } from '@/types/test-runs';
 import { useTestRunRealtime } from '@/hooks/useTestRunRealtime';
+import { ConnectionState } from '@/types/realtime';
 import { normalizeTestRun } from '../utils/test-runs-filters';
 import { SnackbarState } from '../types';
 
@@ -44,6 +45,9 @@ export function useTestRunsData({ onSnackbar, organizationId, serverFilters }: U
   // for test runs already on the current page. New/deleted runs trigger a re-fetch.
   const loadTestRunsRef = useRef<() => void>(() => { /* noop */ });
 
+  // Track previous connection state to detect reconnections
+  const prevConnectionStateRef = useRef<ConnectionState | null>(null);
+
   const { connectionStatus: _connectionStatus, isLive: _isLive } = useTestRunRealtime({
     enabled: true,
     onTestRunCreated: useCallback((_testRun: TestRun) => {
@@ -73,6 +77,17 @@ export function useTestRunsData({ onSnackbar, organizationId, serverFilters }: U
     }, []),
     onTestRunsInitial: useCallback((_testRuns: TestRun[]) => {
       // Ignore socket initial snapshot — we load via HTTP with pagination
+    }, []),
+    onConnectionStateChange: useCallback((state: ConnectionState) => {
+      // Re-fetch on WS reconnect to recover any events missed during disconnection.
+      // Without this, a disconnect during post-abort analysis leaves the result
+      // column spinner stuck indefinitely (analysis-complete event is never received).
+      const wasDisconnected = prevConnectionStateRef.current !== null &&
+        prevConnectionStateRef.current !== 'connected';
+      if (state === 'connected' && wasDisconnected) {
+        loadTestRunsRef.current();
+      }
+      prevConnectionStateRef.current = state;
     }, []),
   });
 
