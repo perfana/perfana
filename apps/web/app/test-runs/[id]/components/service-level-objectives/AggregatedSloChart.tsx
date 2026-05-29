@@ -55,7 +55,7 @@ export default function AggregatedSloChart({
   const stat = checkResult.requirement?.aggregate_stat;
 
   const buildChart = useCallback((buckets: TimeseriesBucket[]) => {
-    const requirementValue = checkResult.requirement?.value ?? 0;
+    const requirementValue = Number(checkResult.requirement?.value ?? 0);
     const metricUnit = checkResult.metric_unit || '';
 
     const { factor, adjustedRequirement, adjustedFormat, yAxisLabel } =
