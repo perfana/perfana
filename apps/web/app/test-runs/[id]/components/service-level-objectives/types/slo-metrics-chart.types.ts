@@ -21,6 +21,9 @@ export interface DSMetric {
 export interface CheckResultRequirement {
   operator: string;
   value: number;
+  type?: string;
+  aggregate_metric?: string;
+  aggregate_stat?: string;
 }
 
 export interface CheckResultTarget {
@@ -45,7 +48,10 @@ export interface CheckResult {
 export interface TestRunInfo {
   start_time: string;
   end_time?: string;
+  /** @deprecated Use analysis_start_offset instead. Kept for API compatibility. */
   ramp_up_seconds?: number;
+  analysis_start_offset?: number;
+  analysis_end_offset?: number;
 }
 
 export interface SLOMetricsChartProps {
@@ -65,7 +71,7 @@ export interface UnitConversion {
 
 export interface ChartThemeColors {
   sloColor: string;
-  rampUpColor: string;
+  excludedRegionColor: string;
   textColor: string;
   textSecondary: string;
   bgColor: string;

@@ -3,7 +3,6 @@
  */
 
 import type { Theme } from '@mui/material';
-import { alpha } from '@mui/material';
 import type {
   MetricDataPoint,
   UnitConversion,
@@ -12,6 +11,8 @@ import type {
 
 // Default chart height
 export const DEFAULT_CHART_HEIGHT = 320;
+
+const ANALYSIS_BOUNDARY_COLOR = '#f59e0b';
 
 // Color palette for different metrics
 export const METRIC_COLOR_PALETTE = [
@@ -122,7 +123,7 @@ export function getChartThemeColors(theme: Theme): ChartThemeColors {
   const isDark = theme.palette.mode === 'dark';
   return {
     sloColor: theme.palette.error.main,
-    rampUpColor: alpha(theme.palette.info.main, 0.08),
+    excludedRegionColor: isDark ? 'rgba(0,0,0,0.35)' : 'rgba(0,0,0,0.12)',
     textColor: theme.palette.text.primary,
     textSecondary: theme.palette.text.secondary,
     bgColor: isDark ? '#121212' : theme.palette.background.paper,
@@ -283,11 +284,86 @@ export function buildChartLayout(
   hasTimeSeriesData: boolean,
   testRunStart: Date,
   testRunEnd: Date,
-  lastRampUpTimestamp: Date,
+  analysisStartOffset: number | undefined,
+  analysisEndOffset: number | undefined,
   yAxisLabel: string,
   colors: ChartThemeColors,
   fontFamily: string
 ): Record<string, unknown> {
+  const shapes: unknown[] = [];
+
+  if (hasTimeSeriesData) {
+    const startBoundary = new Date(
+      testRunStart.getTime() + ((analysisStartOffset ?? 0) * 1000)
+    );
+    const endBoundary = new Date(
+      testRunEnd.getTime() - ((analysisEndOffset ?? 0) * 1000)
+    );
+    const safeEndBoundary = endBoundary.getTime() > startBoundary.getTime()
+      ? endBoundary
+      : startBoundary;
+
+    if (analysisStartOffset !== undefined && analysisStartOffset > 0) {
+      shapes.push({
+        type: 'rect' as const,
+        x0: testRunStart,
+        y0: 0,
+        x1: startBoundary,
+        y1: 1,
+        xref: 'x' as const,
+        yref: 'paper' as const,
+        line: { width: 0 },
+        fillcolor: colors.excludedRegionColor,
+        layer: 'above' as const,
+        opacity: 1,
+      });
+    }
+
+    if (analysisStartOffset !== undefined) {
+      shapes.push({
+        type: 'line' as const,
+        x0: startBoundary,
+        y0: 0,
+        x1: startBoundary,
+        y1: 1,
+        xref: 'x' as const,
+        yref: 'paper' as const,
+        line: { color: ANALYSIS_BOUNDARY_COLOR, width: 1.5, dash: 'dash' as const },
+        layer: 'above' as const,
+      });
+    }
+
+    if (analysisEndOffset !== undefined && analysisEndOffset > 0) {
+      shapes.push({
+        type: 'rect' as const,
+        x0: safeEndBoundary,
+        y0: 0,
+        x1: testRunEnd,
+        y1: 1,
+        xref: 'x' as const,
+        yref: 'paper' as const,
+        line: { width: 0 },
+        fillcolor: colors.excludedRegionColor,
+        layer: 'above' as const,
+        opacity: 1,
+      });
+    }
+
+    if (analysisEndOffset !== undefined) {
+      shapes.push({
+        type: 'line' as const,
+        x0: safeEndBoundary,
+        y0: 0,
+        x1: safeEndBoundary,
+        y1: 1,
+        xref: 'x' as const,
+        yref: 'paper' as const,
+        line: { color: ANALYSIS_BOUNDARY_COLOR, width: 1.5, dash: 'dash' as const },
+        layer: 'above' as const,
+      });
+    }
+  }
+
   return {
     plot_bgcolor: colors.plotBgColor,
     paper_bgcolor: colors.bgColor,
@@ -356,22 +432,7 @@ export function buildChartLayout(
       align: 'left' as const,
     },
     margin: { t: 20, b: 50, l: 60, r: 20 },
-    shapes: hasTimeSeriesData
-      ? [
-          {
-            type: 'rect' as const,
-            x0: testRunStart,
-            y0: 0,
-            x1: lastRampUpTimestamp,
-            y1: 1,
-            yref: 'paper' as const,
-            line: { width: 0 },
-            fillcolor: colors.rampUpColor,
-            layer: 'below' as const,
-            opacity: 1,
-          },
-        ]
-      : [],
+    shapes,
     width: undefined,
     height: DEFAULT_CHART_HEIGHT,
     autosize: true,

@@ -14,7 +14,6 @@ import type {
   TestRunInfo,
 } from '../types';
 import {
-  _DEFAULT_CHART_HEIGHT,
   METRIC_COLOR_PALETTE,
   groupDataByMetricName,
   findGlobalDataRange,
@@ -157,9 +156,6 @@ export function useSLOMetricsChart({
       metricGroups
     );
 
-    const rampUpSeconds = testRun?.ramp_up_seconds || 60;
-    const lastRampUpTimestamp = new Date(testRunStart.getTime() + rampUpSeconds * 1000);
-
     // Create traces for each metric
     const metricTraces: unknown[] = [];
     let colorIndex = 0;
@@ -218,7 +214,8 @@ export function useSLOMetricsChart({
       hasTimeSeriesData,
       testRunStart,
       testRunEnd,
-      lastRampUpTimestamp,
+      testRun?.analysis_start_offset,
+      testRun?.analysis_end_offset,
       yAxisLabel,
       colors,
       theme.typography.fontFamily as string
