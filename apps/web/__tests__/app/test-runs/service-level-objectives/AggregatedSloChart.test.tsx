@@ -183,9 +183,9 @@ describe('AggregatedSloChart', () => {
       />,
     );
 
-    // Give the component a moment to run effects
+    // Flush microtasks/effects — no real timer needed
     await act(async () => {
-      await new Promise(r => setTimeout(r, 50));
+      await Promise.resolve();
     });
 
     expect(mockAuthenticatedFetch).not.toHaveBeenCalled();
@@ -201,9 +201,9 @@ describe('AggregatedSloChart', () => {
       />,
     );
 
-    // Give effects time to fire (they should NOT call fetch)
+    // Flush microtasks/effects — no real timer needed
     await act(async () => {
-      await new Promise(r => setTimeout(r, 50));
+      await Promise.resolve();
     });
 
     expect(mockAuthenticatedFetch).not.toHaveBeenCalled();

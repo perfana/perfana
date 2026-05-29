@@ -2895,4 +2895,392 @@ describe('TestRunsPerformanceQueryService', () => {
       expect(result).toBeNull(); // no buckets → null
     });
   });
+
+  // =========================================================================
+  // getAggregatedMetricTimeseries
+  // =========================================================================
+
+  describe('getAggregatedMetricTimeseries', () => {
+    /**
+     * Helper: configure the mock for getAggregatedMetricTimeseries calls.
+     *
+     * Call sequence (non-UUID path):
+     *   1. resolveTestRunId → plain test_run_id string, so NO UUID lookup issued
+     *   2. getAnalysisBounds → query for start_time, ramp_up, end_time, ramp_down
+     *      (only when applyAnalysisWindow=true; returns early with nulls otherwise)
+     *   3. Bucket data query  → the actual metric query (uses date_trunc, not time_bucket)
+     */
+    function mockAggTimeseries(
+      opts: {
+        applyAnalysisWindow?: boolean;
+        bucketRows?: Array<{ time: string; value: string | null }>;
+      } = {},
+    ) {
+      const { applyAnalysisWindow = false, bucketRows = [] } = opts;
+      let callIdx = 0;
+      (testRunRepo.query as jest.Mock).mockImplementation(async (sql: unknown) => {
+        // Skip SET LOCAL preludes (shouldn't appear here, but guard defensively)
+        if (isSetLocalWorkMem(sql)) return [];
+
+        // resolveTestRunId: plain test_run_id → skipped (no UUID lookup)
+        // getAnalysisBounds query — only issued when applyAnalysisWindow=true
+        if (
+          applyAnalysisWindow &&
+          callIdx === 0 &&
+          typeof sql === 'string' &&
+          /ramp_up.*ramp_down|ramp_down.*ramp_up/i.test(sql)
+        ) {
+          callIdx++;
+          return [{ start_time: '2024-01-01T10:00:00Z', ramp_up: 60, end_time: '2024-01-01T10:10:00Z', ramp_down: 0 }];
+        }
+
+        // Bucket data query (everything else)
+        return bucketRows;
+      });
+    }
+
+    describe('authorization', () => {
+      it('returns empty buckets when non-admin with empty orgIds (no DB hit)', async () => {
+        // Arrange — no mock needed; method should return early
+        // Act
+        const result = await service.getAggregatedMetricTimeseries(
+          TEST_RUN_ID,
+          'transaction_response_time',
+          'p95',
+          false,
+          NOT_ADMIN,
+          [],
+        );
+
+        // Assert
+        expect(result.buckets).toHaveLength(0);
+        expect(testRunRepo.query).not.toHaveBeenCalled();
+      });
+
+      it('queries DB for admin even with empty orgIds', async () => {
+        // Arrange
+        mockAggTimeseries({ bucketRows: [{ time: '2024-01-01T10:01:00Z', value: '120' }] });
+
+        // Act
+        const result = await service.getAggregatedMetricTimeseries(
+          TEST_RUN_ID,
+          'transaction_response_time',
+          'avg',
+          false,
+          IS_ADMIN,
+          [],
+        );
+
+        // Assert
+        expect(testRunRepo.query).toHaveBeenCalled();
+        expect(result.buckets).toHaveLength(1);
+      });
+
+      it('includes org filter clause in SQL for non-admin with org memberships', async () => {
+        // Arrange
+        mockAggTimeseries({ bucketRows: [{ time: '2024-01-01T10:01:00Z', value: '150' }] });
+
+        // Act
+        await service.getAggregatedMetricTimeseries(
+          TEST_RUN_ID,
+          'transaction_response_time',
+          'avg',
+          false,
+          NOT_ADMIN,
+          ORG_IDS,
+        );
+
+        // Assert: the bucket query contains an org filter
+        const calls = (testRunRepo.query as jest.Mock).mock.calls;
+        const bucketCall = calls.find(([sql]: [unknown]) =>
+          typeof sql === 'string' && /date_trunc/i.test(sql),
+        );
+        expect(bucketCall).toBeDefined();
+        expect(bucketCall[0]).toMatch(/organization_id\s*=\s*ANY\(/i);
+      });
+
+      it('omits org filter clause from SQL for admin', async () => {
+        // Arrange
+        mockAggTimeseries({ bucketRows: [{ time: '2024-01-01T10:01:00Z', value: '150' }] });
+
+        // Act
+        await service.getAggregatedMetricTimeseries(
+          TEST_RUN_ID,
+          'transaction_response_time',
+          'avg',
+          false,
+          IS_ADMIN,
+          [],
+        );
+
+        // Assert: the bucket query does NOT contain an org filter
+        const calls = (testRunRepo.query as jest.Mock).mock.calls;
+        const bucketCall = calls.find(([sql]: [unknown]) =>
+          typeof sql === 'string' && /date_trunc/i.test(sql),
+        );
+        expect(bucketCall).toBeDefined();
+        expect(bucketCall[0]).not.toMatch(/organization_id\s*=\s*ANY\(/i);
+      });
+    });
+
+    describe('metric variants', () => {
+      it('queries transactions table for transaction_response_time', async () => {
+        // Arrange
+        mockAggTimeseries({ bucketRows: [] });
+
+        // Act
+        await service.getAggregatedMetricTimeseries(
+          TEST_RUN_ID,
+          'transaction_response_time',
+          'p95',
+          false,
+          IS_ADMIN,
+          [],
+        );
+
+        // Assert: query targets transactions table
+        const calls = (testRunRepo.query as jest.Mock).mock.calls;
+        const bucketCall = calls.find(([sql]: [unknown]) =>
+          typeof sql === 'string' && /date_trunc/i.test(sql),
+        );
+        expect(bucketCall[0]).toMatch(/FROM\s+transactions/i);
+      });
+
+      it('queries requests_raw table for request_response_time', async () => {
+        // Arrange
+        mockAggTimeseries({ bucketRows: [] });
+
+        // Act
+        await service.getAggregatedMetricTimeseries(
+          TEST_RUN_ID,
+          'request_response_time',
+          'avg',
+          false,
+          IS_ADMIN,
+          [],
+        );
+
+        // Assert: query targets requests_raw table
+        const calls = (testRunRepo.query as jest.Mock).mock.calls;
+        const bucketCall = calls.find(([sql]: [unknown]) =>
+          typeof sql === 'string' && /date_trunc/i.test(sql),
+        );
+        expect(bucketCall[0]).toMatch(/FROM\s+requests_raw/i);
+      });
+
+      it('queries requests_raw table and computes error ratio for error_percentage', async () => {
+        // Arrange
+        mockAggTimeseries({
+          bucketRows: [{ time: '2024-01-01T10:01:00Z', value: '5.5' }],
+        });
+
+        // Act
+        const result = await service.getAggregatedMetricTimeseries(
+          TEST_RUN_ID,
+          'error_percentage',
+          'avg', // stat is irrelevant for error_percentage
+          false,
+          IS_ADMIN,
+          [],
+        );
+
+        // Assert: query targets requests_raw and computes error ratio
+        const calls = (testRunRepo.query as jest.Mock).mock.calls;
+        const bucketCall = calls.find(([sql]: [unknown]) =>
+          typeof sql === 'string' && /date_trunc/i.test(sql),
+        );
+        expect(bucketCall[0]).toMatch(/FROM\s+requests_raw/i);
+        expect(bucketCall[0]).toMatch(/success/i);
+        expect(result.buckets[0].value).toBe(5.5);
+      });
+    });
+
+    describe('stat variants', () => {
+      it('uses approx_percentile(0.95) for p95 stat on transaction_response_time', async () => {
+        // Arrange
+        mockAggTimeseries({ bucketRows: [] });
+
+        // Act
+        await service.getAggregatedMetricTimeseries(
+          TEST_RUN_ID,
+          'transaction_response_time',
+          'p95',
+          false,
+          IS_ADMIN,
+          [],
+        );
+
+        // Assert
+        const calls = (testRunRepo.query as jest.Mock).mock.calls;
+        const bucketCall = calls.find(([sql]: [unknown]) =>
+          typeof sql === 'string' && /date_trunc/i.test(sql),
+        );
+        expect(bucketCall[0]).toContain('approx_percentile(0.95,');
+      });
+
+      it('uses AVG() for avg stat on request_response_time', async () => {
+        // Arrange
+        mockAggTimeseries({ bucketRows: [] });
+
+        // Act
+        await service.getAggregatedMetricTimeseries(
+          TEST_RUN_ID,
+          'request_response_time',
+          'avg',
+          false,
+          IS_ADMIN,
+          [],
+        );
+
+        // Assert
+        const calls = (testRunRepo.query as jest.Mock).mock.calls;
+        const bucketCall = calls.find(([sql]: [unknown]) =>
+          typeof sql === 'string' && /date_trunc/i.test(sql),
+        );
+        expect(bucketCall[0]).toMatch(/AVG\(t\.response_time\)/i);
+      });
+    });
+
+    describe('bucket mapping', () => {
+      it('maps raw DB rows to { time, value } buckets', async () => {
+        // Arrange
+        mockAggTimeseries({
+          bucketRows: [
+            { time: '2024-01-01T10:00:00Z', value: '100.5' },
+            { time: '2024-01-01T10:01:00Z', value: '200.0' },
+          ],
+        });
+
+        // Act
+        const result = await service.getAggregatedMetricTimeseries(
+          TEST_RUN_ID,
+          'transaction_response_time',
+          'avg',
+          false,
+          IS_ADMIN,
+          [],
+        );
+
+        // Assert
+        expect(result.buckets).toHaveLength(2);
+        expect(result.buckets[0]).toEqual({ time: '2024-01-01T10:00:00.000Z', value: 100.5 });
+        expect(result.buckets[1]).toEqual({ time: '2024-01-01T10:01:00.000Z', value: 200.0 });
+      });
+
+      it('maps null DB value to 0', async () => {
+        // Arrange
+        mockAggTimeseries({
+          bucketRows: [{ time: '2024-01-01T10:00:00Z', value: null }],
+        });
+
+        // Act
+        const result = await service.getAggregatedMetricTimeseries(
+          TEST_RUN_ID,
+          'transaction_response_time',
+          'avg',
+          false,
+          IS_ADMIN,
+          [],
+        );
+
+        // Assert
+        expect(result.buckets[0].value).toBe(0);
+      });
+
+      it('always returns bucketSizeSeconds of 60', async () => {
+        // Arrange
+        mockAggTimeseries({ bucketRows: [] });
+
+        // Act
+        const result = await service.getAggregatedMetricTimeseries(
+          TEST_RUN_ID,
+          'transaction_response_time',
+          'avg',
+          false,
+          IS_ADMIN,
+          [],
+        );
+
+        // Assert
+        expect(result.bucketSizeSeconds).toBe(60);
+      });
+    });
+
+    describe('analysis window', () => {
+      it('issues getAnalysisBounds query when applyAnalysisWindow is true', async () => {
+        // Arrange
+        mockAggTimeseries({ applyAnalysisWindow: true, bucketRows: [] });
+
+        // Act
+        await service.getAggregatedMetricTimeseries(
+          TEST_RUN_ID,
+          'transaction_response_time',
+          'avg',
+          true, // applyAnalysisWindow
+          IS_ADMIN,
+          [],
+        );
+
+        // Assert: a query touching ramp_up appeared
+        const calls = (testRunRepo.query as jest.Mock).mock.calls;
+        const boundsCall = calls.find(([sql]: [unknown]) =>
+          typeof sql === 'string' && /ramp_up/i.test(sql),
+        );
+        expect(boundsCall).toBeDefined();
+      });
+
+      it('does NOT issue getAnalysisBounds query when applyAnalysisWindow is false', async () => {
+        // Arrange
+        mockAggTimeseries({ applyAnalysisWindow: false, bucketRows: [] });
+
+        // Act
+        await service.getAggregatedMetricTimeseries(
+          TEST_RUN_ID,
+          'transaction_response_time',
+          'avg',
+          false, // applyAnalysisWindow
+          IS_ADMIN,
+          [],
+        );
+
+        // Assert: no query touching ramp_up
+        const calls = (testRunRepo.query as jest.Mock).mock.calls;
+        const boundsCall = calls.find(([sql]: [unknown]) =>
+          typeof sql === 'string' && /ramp_up/i.test(sql),
+        );
+        expect(boundsCall).toBeUndefined();
+      });
+    });
+
+    describe('error handling', () => {
+      it('wraps DB errors in DatabaseException', async () => {
+        // Arrange: plain test_run_id → no UUID lookup; applyAnalysisWindow=false → no
+        // getAnalysisBounds query. The first (and only) DB call is the bucket query, which throws.
+        (testRunRepo.query as jest.Mock)
+          .mockRejectedValueOnce(new Error('connection timeout'));
+        let caughtError: unknown;
+        try {
+          await service.getAggregatedMetricTimeseries(
+            TEST_RUN_ID,
+            'transaction_response_time',
+            'avg',
+            false,
+            IS_ADMIN,
+            [],
+          );
+        } catch (e) {
+          caughtError = e;
+        }
+
+        expect(caughtError).toBeInstanceOf(DatabaseException);
+        const msg =
+          caughtError &&
+          typeof caughtError === 'object' &&
+          'message' in caughtError
+            ? (caughtError as DatabaseException).message
+            : '';
+        expect(msg).toMatch(/aggregated metric timeseries/i);
+      });
+    });
+  });
 });

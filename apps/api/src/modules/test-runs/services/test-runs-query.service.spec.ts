@@ -58,6 +58,7 @@ type MockPerformanceQueryService = jest.Mocked<Pick<
   | 'getTransactionErrors'
   | 'getVirtualUserStats'
   | 'getThroughputStats'
+  | 'getAggregatedMetricTimeseries'
 >>;
 
 type MockTimeSeriesQueryService = jest.Mocked<Pick<
@@ -151,6 +152,7 @@ describe('TestRunsQueryService', () => {
       getTransactionErrors: jest.fn(),
       getVirtualUserStats: jest.fn(),
       getThroughputStats: jest.fn(),
+      getAggregatedMetricTimeseries: jest.fn(),
     };
 
     const mockTimeSeriesService: MockTimeSeriesQueryService = {
@@ -641,6 +643,63 @@ describe('TestRunsQueryService', () => {
 
         expect(performanceService.getThroughputStats).toHaveBeenCalledWith('test-run-001', undefined, true, []);
         expect(result.overall.peak_transactions_per_second).toBe(100);
+      });
+    });
+
+    describe('getAggregatedMetricTimeseries', () => {
+      it('resolves org IDs and delegates to performanceService', async () => {
+        // Arrange
+        // Default authz mock returns isGlobalAdmin=true → isAdmin=true, orgIds=[]
+        const mockResult = {
+          bucketSizeSeconds: 10,
+          buckets: [
+            { time: '2024-01-01T10:00:00Z', value: 120 },
+            { time: '2024-01-01T10:00:10Z', value: 135 },
+          ],
+        };
+        performanceService.getAggregatedMetricTimeseries.mockResolvedValue(mockResult);
+
+        // Act
+        const result = await service.getAggregatedMetricTimeseries(
+          'test-run-001',
+          'transaction_response_time',
+          'p95',
+          false,
+          mockUserId,
+          mockRoles,
+        );
+
+        // Assert: delegation call includes resolved isAdmin=true and empty orgIds
+        expect(performanceService.getAggregatedMetricTimeseries).toHaveBeenCalledWith(
+          'test-run-001',
+          'transaction_response_time',
+          'p95',
+          false,
+          true,  // isAdmin resolved from global-admin mock
+          [],    // orgIds empty for admin
+        );
+        expect(result.buckets).toHaveLength(2);
+        expect(result.bucketSizeSeconds).toBe(10);
+      });
+
+      it('passes isAdmin=true when resolveOrganizationIds returns admin=true', async () => {
+        // Arrange
+        const mockResult = { bucketSizeSeconds: 60, buckets: [] };
+        performanceService.getAggregatedMetricTimeseries.mockResolvedValue(mockResult);
+
+        // Act
+        await service.getAggregatedMetricTimeseries(
+          'test-run-001',
+          'error_percentage',
+          'avg',
+          true,
+          mockUserId,
+          mockRoles,
+        );
+
+        // Assert: isAdmin=true forwarded correctly
+        const callArgs = performanceService.getAggregatedMetricTimeseries.mock.calls[0];
+        expect(callArgs[4]).toBe(true); // isAdmin is the 5th argument
       });
     });
   });
