@@ -662,11 +662,11 @@ describe('TestRunsQueryService', () => {
         // Act
         const result = await service.getAggregatedMetricTimeseries(
           'test-run-001',
+          mockUserId,
+          mockRoles,
           'transaction_response_time',
           'p95',
           false,
-          mockUserId,
-          mockRoles,
         );
 
         // Assert: delegation call includes resolved isAdmin=true and empty orgIds
@@ -690,11 +690,11 @@ describe('TestRunsQueryService', () => {
         // Act
         await service.getAggregatedMetricTimeseries(
           'test-run-001',
+          mockUserId,
+          mockRoles,
           'error_percentage',
           'avg',
           true,
-          mockUserId,
-          mockRoles,
         );
 
         // Assert: isAdmin=true forwarded correctly
