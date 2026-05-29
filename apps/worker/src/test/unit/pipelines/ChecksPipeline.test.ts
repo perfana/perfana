@@ -613,7 +613,7 @@ describe('ChecksPipeline', () => {
       );
     });
 
-    it('should publish realtime updates during processing', async () => {
+    it('should NOT call publishRealtimeUpdate (publish is done by runCheckPipeline after commit)', async () => {
       // Arrange
       const testRun = {
         test_run_id: 'test-run-1',
@@ -650,14 +650,8 @@ describe('ChecksPipeline', () => {
         mockManager
       );
 
-      // Assert
-      expect(publishSpy).toHaveBeenCalledWith(
-        expect.objectContaining({
-          query: expect.any(Function),
-          findOne: expect.any(Function),
-        }),
-        'test-run-1'
-      );
+      // Assert: publish is now the caller's responsibility (after withTransaction commits)
+      expect(publishSpy).not.toHaveBeenCalled();
     });
 
     it('should route aggregated benchmark to aggregatedEvaluator and count result', async () => {
@@ -1302,10 +1296,10 @@ describe('ChecksPipeline', () => {
         status: { evaluatingChecks: 'COMPLETED' },
       };
 
-      mockManager.findOne.mockResolvedValue(mockTestRun);
+      mockDb.getTestRunByTestRunId.mockResolvedValue(mockTestRun);
 
       // Act
-      await (pipeline as any).publishRealtimeUpdate(mockManager, 'test-run-1');
+      await (pipeline as any).publishRealtimeUpdate('test-run-1');
 
       // Assert
       expect(mockRealtimePublisher.triggerTestRunUpdated).toHaveBeenCalledWith(mockTestRun);
@@ -1316,10 +1310,10 @@ describe('ChecksPipeline', () => {
 
     it('should handle missing test run gracefully', async () => {
       // Arrange
-      mockManager.findOne.mockResolvedValue(null);
+      mockDb.getTestRunByTestRunId.mockResolvedValue(null);
 
       // Act
-      await (pipeline as any).publishRealtimeUpdate(mockManager, 'non-existent');
+      await (pipeline as any).publishRealtimeUpdate('non-existent');
 
       // Assert
       expect(mockRealtimePublisher.triggerTestRunUpdated).not.toHaveBeenCalled();
@@ -1335,14 +1329,14 @@ describe('ChecksPipeline', () => {
         status: { evaluatingChecks: 'COMPLETED' },
       };
 
-      mockManager.findOne.mockResolvedValue(mockTestRun);
+      mockDb.getTestRunByTestRunId.mockResolvedValue(mockTestRun);
       mockRealtimePublisher.triggerTestRunUpdated.mockRejectedValue(
         new Error('Connection failed')
       );
 
       // Act (should not throw)
       await expect(
-        (pipeline as any).publishRealtimeUpdate(mockManager, 'test-run-1')
+        (pipeline as any).publishRealtimeUpdate('test-run-1')
       ).resolves.not.toThrow();
 
       // Assert
