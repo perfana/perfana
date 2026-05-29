@@ -4,6 +4,14 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
+## [0.2.60.1] - 2026-05-29
+
+### Fixed
+- **Socket.IO gateway not initializing in Docker**: In monorepo Docker builds, `npm ci --omit=dev` hoists packages differently than a local install, leaving `@nestjs/websockets` and `@nestjs/platform-socket.io` in `apps/api/node_modules` rather than the root. The `IoAdapter` parent class's `instanceof NestApplication` check silently failed against the duplicate `@nestjs/core` copy, causing Socket.IO to attach to the wrong object and return 404 on WebSocket upgrade. Fixed by hoisting `@nestjs/websockets` to the root `package.json` so it is always resolved from the root even in production Docker images.
+
+### Changed
+- **SocketIOAdapter extracted to its own module**: Moved the `SocketIOAdapter` class from `main.ts` to `apps/api/src/socket-io.adapter.ts` to make it independently testable. Added 8 unit tests covering the `port === 0` Docker shared-server path, the `port !== 0` fallback path, CORS origin configuration from env vars (`CORS_ALLOWED_ORIGINS`, `FRONTEND_URL`), and option merging.
+
 ## [0.2.60.0] - 2026-05-29
 
 ### Added

@@ -78,6 +78,29 @@ and any DQL query / entity-mapping editor pages.
 
 ---
 
+## Tests
+
+### Fix pre-existing web test failures (socket + TestRunDetailsCard)
+
+**Priority:** P0
+**Origin:** Noticed during /ship on `fix/websocket-hoist-nestjs-websockets` (2026-05-29). Pre-existing failures, unrelated to this branch.
+**What:**
+1. `__tests__/lib/socket.test.ts` — `SocketManager.connect()` test expects `mockIo` called with `ws://localhost:3001/test-runs` and specific params; expectation no longer matches the implementation.
+2. `__tests__/app/test-runs/test-run-details/TestRunDetailsCard.test.tsx` — expects text `'Yes - Test was aborted'` but the component renders it differently now.
+**How:** Read the current `lib/socket.ts` and `TestRunDetailsCard` implementations and update the test expectations to match.
+
+---
+
+### Regenerate ADAPT golden-file snapshot
+
+**Priority:** P0
+**Origin:** Noticed during /ship on `fix/websocket-hoist-nestjs-websockets` (2026-05-29). Pre-existing failure, unrelated to this branch.
+**What:** `apps/worker/src/test/golden-files/adapt-real-golden.test.ts` compares ADAPT output against a stored snapshot. The local DB now has 1,041 results vs the golden file's expected 950 (diff: +91 rows, different conclusion distribution). Golden file needs to be regenerated to match current DB state.
+**How:** With the dev DB running, run `cd apps/worker && npx vitest run src/test/golden-files/adapt-real-golden.test.ts -- --update` or update the golden JSON files in `apps/worker/src/test/golden-files/` manually against current output.
+**Note:** Only do this against a stable/representative DB, not a transient dev snapshot — the golden file is the regression baseline.
+
+---
+
 ## Completed
 
 (none yet)
