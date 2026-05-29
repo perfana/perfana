@@ -9,7 +9,6 @@ import { ApdexCalculator, ApdexCheckResult } from './checks/ApdexCalculator.js';
 import { AggregatedBenchmarkEvaluator, AggregatedCheckResult } from './checks/AggregatedBenchmarkEvaluator.js';
 import { CheckPipelineError, BenchmarkNotFoundError } from './checks/BaseCheckService.js';
 import { getRealtimePublisher } from '../common/realtime-accessor.js';
-import { TestRun } from '@perfana/shared';
 
 export interface ChecksInput {
   testRunIds: string[];
@@ -130,14 +129,13 @@ export class ChecksPipeline extends BasePipelineTypeORM {
                 lastUpdate: now.toISOString()
               });
               this.logger.info(`Successfully updated test run status to IN_PROGRESS for ${testRunId}`);
-
-              // Publish realtime update
-              await this.publishRealtimeUpdate(manager, testRunId);
             } catch (error) {
               this.logger.error(`Failed to update test run status to IN_PROGRESS for ${testRunId}: ${error}`);
               throw error;
             }
           });
+          // Publish after commit so the API reads the committed IN_PROGRESS state
+          await this.publishRealtimeUpdate(testRunId);
 
           // Main transaction for processing the work
           await this.withTransaction(async (manager: EntityManager) => {
@@ -184,6 +182,8 @@ export class ChecksPipeline extends BasePipelineTypeORM {
             results.processed_benchmarks += testRunResults.processed_benchmarks;
             results.created_check_results += testRunResults.created_check_results;
           });
+          // Publish after commit — evaluatingChecks, consolidated_result, and valid are all written
+          await this.publishRealtimeUpdate(testRunId);
 
         } catch (error) {
           this.logger.error(`Failed to process test run ${testRunId}: ${error}`);
@@ -251,9 +251,6 @@ export class ChecksPipeline extends BasePipelineTypeORM {
           evaluatingChecks: 'NOT_CONFIGURED',
           lastUpdate: new Date().toISOString()
         });
-
-        // Publish realtime update
-        await this.publishRealtimeUpdate(manager, testRun.test_run_id);
 
         return results;
       }
@@ -392,9 +389,6 @@ export class ChecksPipeline extends BasePipelineTypeORM {
         lastUpdate: new Date().toISOString()
       });
 
-      // Publish realtime update
-      await this.publishRealtimeUpdate(manager, testRun.test_run_id);
-
       // --- SET VALID=FALSE IF ANY STATUS IS ERROR, OTHERWISE SET VALID=TRUE ---
       if (hasError) {
         const reason = hasBenchmarkFailure
@@ -426,9 +420,6 @@ export class ChecksPipeline extends BasePipelineTypeORM {
           lastUpdate: new Date().toISOString()
         });
 
-        // Publish realtime update
-        await this.publishRealtimeUpdate(manager, testRun.test_run_id);
-
         return results;
       }
 
@@ -436,9 +427,6 @@ export class ChecksPipeline extends BasePipelineTypeORM {
         evaluatingChecks: 'ERROR',
         lastUpdate: new Date().toISOString()
       });
-
-      // Publish realtime update
-      await this.publishRealtimeUpdate(manager, testRun.test_run_id);
 
       throw new CheckPipelineError(`Failed to process test run ${testRun.test_run_id}: ${error}`);
     }
@@ -815,18 +803,14 @@ export class ChecksPipeline extends BasePipelineTypeORM {
   }
 
   /**
-   * Publish realtime update for a single test run after status change
-   * This is called after each status update to provide real-time feedback
+   * Publish realtime update for a single test run after its transaction has committed.
+   * Reads from the live DB (outside any transaction) so the API receives the fully
+   * committed state — including consolidated_result and valid — when it re-fetches.
    */
-  private async publishRealtimeUpdate(manager: EntityManager, testRunId: string): Promise<void> {
+  private async publishRealtimeUpdate(testRunId: string): Promise<void> {
     try {
       const realtime = getRealtimePublisher();
-
-      // IMPORTANT: Query within the transaction to get the FRESH data, not cached!
-      // Note: We don't need to load relations for real-time updates, just the core fields
-      const testRun = await manager.findOne(TestRun, {
-        where: { testRunId: testRunId }
-      });
+      const testRun = await this.db.getTestRunByTestRunId(testRunId);
 
       if (testRun) {
         this.logger.debug(`Publishing realtime update for ${testRunId} with status: ${JSON.stringify(testRun.status)}`);

@@ -4,6 +4,11 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
+## [0.2.59.15] - 2026-05-29
+
+### Fixed
+- **Result column spinner stuck after abort analysis**: `ChecksPipeline.publishRealtimeUpdate` was called inside `withTransaction` callbacks, so the API re-fetched the test run before the transaction committed and saw stale `evaluatingChecks=IN_PROGRESS` state — leaving the spinner permanently stuck. Both publish calls are now placed after their respective `withTransaction` blocks so the API always reads committed state (`consolidatedResult`, `valid`, final `evaluatingChecks`) when it re-fetches on the WebSocket event.
+
 ## [0.2.59.13] - 2026-05-28
 
 ### Fixed
