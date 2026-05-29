@@ -75,11 +75,19 @@ export class TestRunsAnomalyService {
       );
 
       // Parse JSONB fields if they were returned as strings
-      const parsedResults: ParsedCheckResult[] = checkResults.map((result) => ({
-        ...result,
-        targets: typeof result.targets === 'string' ? JSON.parse(result.targets) : result.targets,
-        requirement: typeof result.requirement === 'string' ? JSON.parse(result.requirement) : result.requirement,
-      }));
+      const parsedResults: ParsedCheckResult[] = checkResults.map((result) => {
+        const requirement = typeof result.requirement === 'string' ? JSON.parse(result.requirement) : result.requirement;
+        // Normalize requirement.value to number — PostgreSQL NUMERIC columns are returned as
+        // strings by node-postgres, so requirement_value may have been serialized as "2000".
+        if (requirement && requirement.value !== undefined && requirement.value !== null) {
+          requirement.value = Number(requirement.value);
+        }
+        return {
+          ...result,
+          targets: typeof result.targets === 'string' ? JSON.parse(result.targets) : result.targets,
+          requirement,
+        };
+      });
 
       this.logger.log(`Retrieved ${parsedResults.length} check results for test run: ${testRunId}`);
       return parsedResults;
