@@ -109,7 +109,7 @@ class SocketManager {
         auth: {
           token,
         },
-        transports: ['websocket', 'polling'], // Try websocket first, fallback to polling
+        transports: ['polling', 'websocket'], // Polling first for proxy compatibility, upgrades to websocket
         reconnection: false, // Handle reconnection manually
         timeout: 10000,
       });
