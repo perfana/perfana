@@ -22,10 +22,10 @@ import { Server, ServerOptions } from 'socket.io';
  */
 class SocketIOAdapter extends IoAdapter {
   constructor(
-    app: INestApplication,
+    private readonly nestApp: INestApplication,
     private configService: ConfigService,
   ) {
-    super(app);
+    super(nestApp);
   }
 
   createIOServer(port: number, options?: ServerOptions): Server {
@@ -47,6 +47,15 @@ class SocketIOAdapter extends IoAdapter {
       transports: ['websocket', 'polling'],
     };
 
+    // When port === 0, Socket.IO should share the existing HTTP server.
+    // We call app.getHttpServer() directly rather than relying on this.httpServer
+    // from the parent class, because the parent sets it via an `instanceof NestApplication`
+    // check — which silently fails in Docker builds where monorepo npm hoisting produces
+    // a duplicate @nestjs/core copy, leaving this.httpServer pointing at the app object
+    // instead of the real http.Server and breaking Socket.IO attachment.
+    if (port === 0) {
+      return new Server(this.nestApp.getHttpServer(), serverOptions);
+    }
     return super.createIOServer(port, serverOptions);
   }
 }
