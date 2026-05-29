@@ -61,6 +61,7 @@
     "webpack": "^5.104.1"
   },
   "dependencies": {
+    "@nestjs/websockets": "^11.1.24",
     "axios": "^1.16.1",
     "bullmq": "^5.77.6",
     "uuid": "^11.1.1"
