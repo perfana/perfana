@@ -4,6 +4,11 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
+## [0.2.60.2] - 2026-05-29
+
+### Fixed
+- **Aggregated SLO chart crashes the page on expand**: PostgreSQL `NUMERIC` columns are returned as strings by the node-postgres driver at runtime. `benchmark.requirement_value` was being serialized as `"2000"` (string) into the `requirement` JSONB column, causing `"2000".toFixed(2)` → `TypeError: r.toFixed is not a function` when the aggregated SLO chart tried to render the threshold line — crashing the entire page. Fixed at three layers: (1) `ChecksPipeline.saveAggregatedCheckResult` now coerces `requirement_value` with `Number()` before JSON serialization, preventing future bad writes; (2) `TestRunsAnomalyService.getTestRunCheckResults` normalizes `requirement.value` to a number on read, fixing existing stored data without a migration; (3) `AggregatedSloChart` defensively coerces the value with `Number()` as a final guard.
+
 ## [0.2.60.1] - 2026-05-29
 
 ### Fixed
