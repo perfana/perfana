@@ -189,6 +189,19 @@ export class TestRunsService {
     return this.queryService.getTransactionStats(testRunId, userId, roles, excludeRampUp, sinceMinutes);
   }
 
+  async getAggregatedMetricTimeseries(
+    testRunId: string,
+    userId: string,
+    roles: string[],
+    metric: 'transaction_response_time' | 'request_response_time' | 'error_percentage',
+    stat: 'avg' | 'p50' | 'p90' | 'p95' | 'p99' | 'max',
+    applyAnalysisWindow: boolean,
+  ): Promise<{ bucketSizeSeconds: number; buckets: Array<{ time: string; value: number }> }> {
+    return this.queryService.getAggregatedMetricTimeseries(
+      testRunId, userId, roles, metric, stat, applyAnalysisWindow,
+    );
+  }
+
   async getTransactionSamples(testRunId: string, transactionName: string, userId: string, roles: string[], excludeRampUp: boolean = false, sinceMinutes?: number): Promise<Array<{
     sampler_name: string;
     scenario_name?: string;
