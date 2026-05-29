@@ -9,6 +9,7 @@
  * - TestRunsComparisonController: Config comparison, expected changes, check results
  * - TestRunsDashboardController: Dashboard statistics and summaries
  * - TestRunsErrorsController: Error analysis and grouped error statistics
+ * - TestRunsAggregatedTimeseriesController: 60-second bucketed timeseries for aggregated SLO charts
  * - TestRunsDataSourcesController: Connected data sources, traces, flamegraph, hotspots, dashboard snapshot, Dynatrace problems
  * - TestController: Test run creation via /test endpoint
  * - ConfigController: Test configuration management
@@ -23,6 +24,7 @@ export { TestRunsMetricsApdexController } from './test-runs-metrics-apdex.contro
 export { TestRunsComparisonController } from './test-runs-comparison.controller';
 export { TestRunsDashboardController } from './test-runs-dashboard.controller';
 export { TestRunsErrorsController } from './test-runs-errors.controller';
+export { TestRunsAggregatedTimeseriesController } from './test-runs-aggregated-timeseries.controller';
 export { TestController } from './test.controller';
 export { ConfigController } from './config.controller';
 export { InitController } from './init.controller';

@@ -336,6 +336,20 @@ export class TestRunsQueryService {
     return this.performanceService.getTransactionStats(testRunId, excludeRampUp, isAdmin, orgIds, sinceMinutes);
   }
 
+  async getAggregatedMetricTimeseries(
+    testRunId: string,
+    userId: string,
+    roles: string[],
+    metric: 'transaction_response_time' | 'request_response_time' | 'error_percentage',
+    stat: 'avg' | 'p50' | 'p90' | 'p95' | 'p99' | 'max',
+    applyAnalysisWindow: boolean,
+  ): Promise<{ bucketSizeSeconds: number; buckets: Array<{ time: string; value: number }> }> {
+    const { orgIds, isAdmin } = await this.resolveOrganizationIds(userId, roles);
+    return this.performanceService.getAggregatedMetricTimeseries(
+      testRunId, metric, stat, applyAnalysisWindow, isAdmin, orgIds,
+    );
+  }
+
   async getTransactionSamples(
     testRunId: string,
     transactionName: string,

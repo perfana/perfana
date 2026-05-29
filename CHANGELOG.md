@@ -4,6 +4,14 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
+## [0.2.60.0] - 2026-05-29
+
+### Added
+- **Aggregated SLO timeseries chart**: Expanding an aggregated SLO row now shows a timeseries graph for the underlying metric. New `GET /test-runs/:id/aggregated-metric-timeseries` endpoint returns 1-minute bucketed values (using `date_trunc` + `approx_percentile`/AVG/error-rate depending on the stat). New `AggregatedSloChart.tsx` component fetches and renders the chart with visibility-gated loading, loading/empty/error states, and a threshold reference line.
+
+### Changed
+- **SLO chart analysis-window visualization**: Replaced the single grey ramp-up rectangle with dark semi-transparent excluded-region overlays and amber dashed boundary lines for both the analysis-start and analysis-end offsets in `buildChartLayout`, giving a clearer visual indication of which time ranges are outside the analysis window.
+
 ## [0.2.59.15] - 2026-05-29
 
 ### Fixed

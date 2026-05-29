@@ -21,6 +21,7 @@ import {
   Clear,
 } from '@mui/icons-material';
 import SLOMetricsChart from '../SLOMetricsChart';
+import AggregatedSloChart from '../AggregatedSloChart';
 import SLOStatusChip from './SLOStatusChip';
 import ApdexScenarioTable from './ApdexScenarioTable';
 import MetricSeriesTable from './MetricSeriesTable';
@@ -534,7 +535,17 @@ export function SLOList({
                       isVisible={expandedSloRows.has(resultKey)}
                     />
                   </Box>
-                ) : null}
+                ) : (
+                  /* Aggregated SLO Chart */
+                  <Box sx={{ width: 'calc(100% + 48px)', mx: -3 }}>
+                    <AggregatedSloChart
+                      testRunId={testRunId}
+                      checkResult={result}
+                      testRun={testRun}
+                      isVisible={expandedSloRows.has(resultKey)}
+                    />
+                  </Box>
+                )}
 
                 {/* Target Values Table (only for non-Apdex results) */}
                 {!isApdexResult(result) && (
