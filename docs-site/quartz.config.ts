@@ -9,7 +9,7 @@ const config: QuartzConfig = {
     enablePopovers: true,
     analytics: null,
     locale: "en-US",
-    baseUrl: "localhost:8888",
+    baseUrl: "perfana.github.io/perfana",
     ignorePatterns: ["private", "templates", ".obsidian", "Bases"],
     defaultDateType: "modified",
     theme: {

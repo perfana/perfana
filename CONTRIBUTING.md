@@ -161,6 +161,47 @@ Migration references:
 
 After migrating, remove the file from `apps/api/.rls-em-migration-allowlist.json` in the same PR and update the burndown table in the decisions doc.
 
+## Before you push
+
+Run the local pre-push gate before pushing:
+
+```bash
+npm run preflight
+```
+
+`npm run preflight` runs lint + type-check across the monorepo plus the API
+RLS test suite. It is wired to `git push` via `.githooks/pre-push`, which is
+installed automatically when you run `npm install` (via the `prepare` script).
+
+If you must bypass the gate, use `git push --no-verify` — but do so sparingly,
+and only when you understand why it would otherwise fail.
+
+## Architecture onboarding
+
+New here? Read these in order to get oriented:
+
+1. [README.md](README.md) — what Perfana is and how to run it
+2. [ARCHITECTURE.md](ARCHITECTURE.md) — system diagrams and how the apps fit together
+3. [AGENTS.md](AGENTS.md) — conventions and guidance for humans and AI agents
+4. The documentation site under [`docs-site/`](docs-site/) — deep reference for
+   ADAPT, RBAC, schemas, and features
+
+## Developer Certificate of Origin (DCO)
+
+By contributing to Perfana, you certify that you wrote the contribution or
+otherwise have the right to submit it under the project's license. We use the
+[Developer Certificate of Origin](https://developercertificate.org/) to record
+this.
+
+Sign off your commits with the `-s` flag:
+
+```bash
+git commit -s -m "your message"
+```
+
+This appends a `Signed-off-by: Your Name <your@email>` trailer to the commit
+message. All commits in a pull request must be signed off.
+
 ## License
 
 By contributing, you agree that your contributions will be licensed under the Apache License 2.0.

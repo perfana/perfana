@@ -1,0 +1,632 @@
+
+    ○
+    │╲
+    │ ○
+    ○ ░
+    ░    gitleaks
+
+Finding:     ENCRYPTION_KEY=[1;3;mREDACTED[0m
+Secret:      [1;3;mREDACTED[0m
+RuleID:      generic-api-key
+Entropy:     3.723334
+File:        docs/superpowers/plans/2026-05-06-db-stress-18k-rps-lab-implementation.md
+Line:        288
+Commit:      4f9c897afa29978090dc73769f103d7e428ccac5
+Author:      Daniel Moll
+Email:       dmoll1974@gmail.com
+Date:        2026-05-06T18:07:31Z
+Fingerprint: 4f9c897afa29978090dc73769f103d7e428ccac5:docs/superpowers/plans/2026-05-06-db-stress-18k-rps-lab-implementation.md:generic-api-key:288
+Link:        https://github.com/perfana/perfana/blob/4f9c897afa29978090dc73769f103d7e428ccac5/docs/superpowers/plans/2026-05-06-db-stress-18k-rps-lab-implementation.md?plain=1#L288
+
+Finding:     const API_KEY = "[1;3;mREDACTED[0m"
+Secret:      [1;3;mREDACTED[0m
+RuleID:      generic-api-key
+Entropy:     4.214997
+File:        .claude/skills/gstack/test/skill-e2e-cso.test.ts
+Line:        45
+Commit:      ea656e88c9b7c0f9038fa4ecd97db446fa6a87bb
+Author:      DanielPerfana
+Email:       64680964+DanielPerfana@users.noreply.github.com
+Date:        2026-03-23T17:31:46Z
+Fingerprint: ea656e88c9b7c0f9038fa4ecd97db446fa6a87bb:.claude/skills/gstack/test/skill-e2e-cso.test.ts:generic-api-key:45
+Link:        https://github.com/perfana/perfana/blob/ea656e88c9b7c0f9038fa4ecd97db446fa6a87bb/.claude/skills/gstack/test/skill-e2e-cso.test.ts#L45
+
+Finding:     ...'storage', ['set', 'repoAccess', '[1;3;mREDACTED[0m'], bm);
+Secret:      [1;3;mREDACTED[0m
+RuleID:      generic-api-key
+Entropy:     4.000000
+File:        .claude/skills/gstack/browse/test/commands.test.ts
+Line:        412
+Commit:      1cc66e98f45839e1970d1aafc2a56d1ca3a41d17
+Author:      Daniel Moll
+Email:       dmoll1974@gmail.com
+Date:        2026-03-22T21:25:59Z
+Fingerprint: 1cc66e98f45839e1970d1aafc2a56d1ca3a41d17:.claude/skills/gstack/browse/test/commands.test.ts:generic-api-key:412
+Link:        https://github.com/perfana/perfana/blob/1cc66e98f45839e1970d1aafc2a56d1ca3a41d17/.claude/skills/gstack/browse/test/commands.test.ts#L412
+
+Finding:     GSTACK_SUPABASE_ANON_KEY="[1;3;mREDACTED[0m"
+Secret:      [1;3;mREDACTED[0m
+RuleID:      generic-api-key
+Entropy:     4.762268
+File:        .claude/skills/gstack/supabase/config.sh
+Line:        7
+Commit:      5e00a1deccf6e66109f0152b160459aa39becd31
+Author:      Daniel Moll
+Email:       dmoll1974@gmail.com
+Date:        2026-03-21T22:13:19Z
+Fingerprint: 5e00a1deccf6e66109f0152b160459aa39becd31:.claude/skills/gstack/supabase/config.sh:generic-api-key:7
+Link:        https://github.com/perfana/perfana/blob/5e00a1deccf6e66109f0152b160459aa39becd31/.claude/skills/gstack/supabase/config.sh#L7
+
+Finding:     ...: jdbc:postgresql://postgres-keycloak:[1;3;mREDACTED[0m
+Secret:      [1;3;mREDACTED[0m
+RuleID:      generic-api-key
+Entropy:     3.546594
+File:        KEYCLOAK_MIGRATION_PLAN.md
+Line:        198
+Commit:      cb6c7630de89ef22dcbcaf66f01f0fcc458a0aca
+Author:      Daniel Moll
+Email:       dmoll1974@gmail.com
+Date:        2026-03-21T22:01:18Z
+Fingerprint: cb6c7630de89ef22dcbcaf66f01f0fcc458a0aca:KEYCLOAK_MIGRATION_PLAN.md:generic-api-key:198
+Link:        https://github.com/perfana/perfana/blob/cb6c7630de89ef22dcbcaf66f01f0fcc458a0aca/KEYCLOAK_MIGRATION_PLAN.md?plain=1#L198
+
+Finding:     ...: jdbc:postgresql://keycloak-postgres:[1;3;mREDACTED[0m
+Secret:      [1;3;mREDACTED[0m
+RuleID:      generic-api-key
+Entropy:     3.546594
+File:        PHASE6_KEYCLOAK_AUTH_MIGRATION.md
+Line:        97
+Commit:      cb6c7630de89ef22dcbcaf66f01f0fcc458a0aca
+Author:      Daniel Moll
+Email:       dmoll1974@gmail.com
+Date:        2026-03-21T22:01:18Z
+Fingerprint: cb6c7630de89ef22dcbcaf66f01f0fcc458a0aca:PHASE6_KEYCLOAK_AUTH_MIGRATION.md:generic-api-key:97
+Link:        https://github.com/perfana/perfana/blob/cb6c7630de89ef22dcbcaf66f01f0fcc458a0aca/PHASE6_KEYCLOAK_AUTH_MIGRATION.md?plain=1#L97
+
+Finding:     curl -X POST http://localhost:3001/api/test \
+  -H "Content-Type: application/json" \      
+  -H "Authorization: Bearer                  [1;3;mREDACTED[0m" \
+Secret:      [1;3;mREDACTED[0m
+RuleID:      curl-auth-header
+Entropy:     3.121928
+File:        REALTIME_QUICKSTART.md
+Line:        100
+Commit:      cb6c7630de89ef22dcbcaf66f01f0fcc458a0aca
+Author:      Daniel Moll
+Email:       dmoll1974@gmail.com
+Date:        2026-03-21T22:01:18Z
+Fingerprint: cb6c7630de89ef22dcbcaf66f01f0fcc458a0aca:REALTIME_QUICKSTART.md:curl-auth-header:100
+Link:        https://github.com/perfana/perfana/blob/cb6c7630de89ef22dcbcaf66f01f0fcc458a0aca/REALTIME_QUICKSTART.md?plain=1#L100-L102
+
+Finding:     curl -X POST http://localhost:3001/api/test \
+  -H "Content-Type: application/json" \      
+  -H "Authorization: Bearer                  [1;3;mREDACTED[0m" \
+Secret:      [1;3;mREDACTED[0m
+RuleID:      curl-auth-header
+Entropy:     3.121928
+File:        REALTIME_QUICKSTART.md
+Line:        122
+Commit:      cb6c7630de89ef22dcbcaf66f01f0fcc458a0aca
+Author:      Daniel Moll
+Email:       dmoll1974@gmail.com
+Date:        2026-03-21T22:01:18Z
+Fingerprint: cb6c7630de89ef22dcbcaf66f01f0fcc458a0aca:REALTIME_QUICKSTART.md:curl-auth-header:122
+Link:        https://github.com/perfana/perfana/blob/cb6c7630de89ef22dcbcaf66f01f0fcc458a0aca/REALTIME_QUICKSTART.md?plain=1#L122-L124
+
+Finding:     userId: 'api-key:[1;3;mREDACTED[0m'
+Secret:      [1;3;mREDACTED[0m
+RuleID:      generic-api-key
+Entropy:     3.631478
+File:        TEST_RUN_CREATION_FLOW_WITH_API_KEY.md
+Line:        48
+Commit:      cb6c7630de89ef22dcbcaf66f01f0fcc458a0aca
+Author:      Daniel Moll
+Email:       dmoll1974@gmail.com
+Date:        2026-03-21T22:01:18Z
+Fingerprint: cb6c7630de89ef22dcbcaf66f01f0fcc458a0aca:TEST_RUN_CREATION_FLOW_WITH_API_KEY.md:generic-api-key:48
+Link:        https://github.com/perfana/perfana/blob/cb6c7630de89ef22dcbcaf66f01f0fcc458a0aca/TEST_RUN_CREATION_FLOW_WITH_API_KEY.md?plain=1#L48
+
+Finding:     createdBy: 'api-key:[1;3;mREDACTED[0m'
+Secret:      [1;3;mREDACTED[0m
+RuleID:      generic-api-key
+Entropy:     3.631478
+File:        TEST_RUN_CREATION_FLOW_WITH_API_KEY.md
+Line:        144
+Commit:      cb6c7630de89ef22dcbcaf66f01f0fcc458a0aca
+Author:      Daniel Moll
+Email:       dmoll1974@gmail.com
+Date:        2026-03-21T22:01:18Z
+Fingerprint: cb6c7630de89ef22dcbcaf66f01f0fcc458a0aca:TEST_RUN_CREATION_FLOW_WITH_API_KEY.md:generic-api-key:144
+Link:        https://github.com/perfana/perfana/blob/cb6c7630de89ef22dcbcaf66f01f0fcc458a0aca/TEST_RUN_CREATION_FLOW_WITH_API_KEY.md?plain=1#L144
+
+Finding:     updatedBy: 'api-key:[1;3;mREDACTED[0m'
+Secret:      [1;3;mREDACTED[0m
+RuleID:      generic-api-key
+Entropy:     3.631478
+File:        TEST_RUN_CREATION_FLOW_WITH_API_KEY.md
+Line:        145
+Commit:      cb6c7630de89ef22dcbcaf66f01f0fcc458a0aca
+Author:      Daniel Moll
+Email:       dmoll1974@gmail.com
+Date:        2026-03-21T22:01:18Z
+Fingerprint: cb6c7630de89ef22dcbcaf66f01f0fcc458a0aca:TEST_RUN_CREATION_FLOW_WITH_API_KEY.md:generic-api-key:145
+Link:        https://github.com/perfana/perfana/blob/cb6c7630de89ef22dcbcaf66f01f0fcc458a0aca/TEST_RUN_CREATION_FLOW_WITH_API_KEY.md?plain=1#L145
+
+Finding:     created_by: api-key:[1;3;mREDACTED[0m ✅
+Secret:      [1;3;mREDACTED[0m
+RuleID:      generic-api-key
+Entropy:     3.631478
+File:        TEST_RUN_CREATION_FLOW_WITH_API_KEY.md
+Line:        184
+Commit:      cb6c7630de89ef22dcbcaf66f01f0fcc458a0aca
+Author:      Daniel Moll
+Email:       dmoll1974@gmail.com
+Date:        2026-03-21T22:01:18Z
+Fingerprint: cb6c7630de89ef22dcbcaf66f01f0fcc458a0aca:TEST_RUN_CREATION_FLOW_WITH_API_KEY.md:generic-api-key:184
+Link:        https://github.com/perfana/perfana/blob/cb6c7630de89ef22dcbcaf66f01f0fcc458a0aca/TEST_RUN_CREATION_FLOW_WITH_API_KEY.md?plain=1#L184
+
+Finding:     created_by: api-key:[1;3;mREDACTED[0m ✅
+Secret:      [1;3;mREDACTED[0m
+RuleID:      generic-api-key
+Entropy:     3.631478
+File:        TEST_RUN_CREATION_FLOW_WITH_API_KEY.md
+Line:        193
+Commit:      cb6c7630de89ef22dcbcaf66f01f0fcc458a0aca
+Author:      Daniel Moll
+Email:       dmoll1974@gmail.com
+Date:        2026-03-21T22:01:18Z
+Fingerprint: cb6c7630de89ef22dcbcaf66f01f0fcc458a0aca:TEST_RUN_CREATION_FLOW_WITH_API_KEY.md:generic-api-key:193
+Link:        https://github.com/perfana/perfana/blob/cb6c7630de89ef22dcbcaf66f01f0fcc458a0aca/TEST_RUN_CREATION_FLOW_WITH_API_KEY.md?plain=1#L193
+
+Finding:     updated_by: api-key:[1;3;mREDACTED[0m ✅
+Secret:      [1;3;mREDACTED[0m
+RuleID:      generic-api-key
+Entropy:     3.631478
+File:        TEST_RUN_CREATION_FLOW_WITH_API_KEY.md
+Line:        194
+Commit:      cb6c7630de89ef22dcbcaf66f01f0fcc458a0aca
+Author:      Daniel Moll
+Email:       dmoll1974@gmail.com
+Date:        2026-03-21T22:01:18Z
+Fingerprint: cb6c7630de89ef22dcbcaf66f01f0fcc458a0aca:TEST_RUN_CREATION_FLOW_WITH_API_KEY.md:generic-api-key:194
+Link:        https://github.com/perfana/perfana/blob/cb6c7630de89ef22dcbcaf66f01f0fcc458a0aca/TEST_RUN_CREATION_FLOW_WITH_API_KEY.md?plain=1#L194
+
+Finding:     ...st specialUserId = 'api-key:[1;3;mREDACTED[0m'
+Secret:      [1;3;mREDACTED[0m
+RuleID:      generic-api-key
+Entropy:     3.694386
+File:        apps/api/src/common/decorators/__tests__/user-context.decorator.spec.ts
+Line:        596
+Commit:      cb6c7630de89ef22dcbcaf66f01f0fcc458a0aca
+Author:      Daniel Moll
+Email:       dmoll1974@gmail.com
+Date:        2026-03-21T22:01:18Z
+Fingerprint: cb6c7630de89ef22dcbcaf66f01f0fcc458a0aca:apps/api/src/common/decorators/__tests__/user-context.decorator.spec.ts:generic-api-key:596
+Link:        https://github.com/perfana/perfana/blob/cb6c7630de89ef22dcbcaf66f01f0fcc458a0aca/apps/api/src/common/decorators/__tests__/user-context.decorator.spec.ts#L596
+
+Finding:     SUPABASE_ANON_KEY=[1;3;mREDACTED[0m (LEGACY - SHOULD BE...
+Secret:      [1;3;mREDACTED[0m
+RuleID:      generic-api-key
+Entropy:     4.419391
+File:        apps/api/CODE_AUDIT_REPORT.md
+Line:        44
+Commit:      cb6c7630de89ef22dcbcaf66f01f0fcc458a0aca
+Author:      Daniel Moll
+Email:       dmoll1974@gmail.com
+Date:        2026-03-21T22:01:18Z
+Fingerprint: cb6c7630de89ef22dcbcaf66f01f0fcc458a0aca:apps/api/CODE_AUDIT_REPORT.md:generic-api-key:44
+Link:        https://github.com/perfana/perfana/blob/cb6c7630de89ef22dcbcaf66f01f0fcc458a0aca/apps/api/CODE_AUDIT_REPORT.md?plain=1#L44
+
+Finding:     SUPABASE_SERVICE_ROLE_KEY=[1;3;mREDACTED[0m (LEGACY - SHOULD BE...
+Secret:      [1;3;mREDACTED[0m
+RuleID:      generic-api-key
+Entropy:     4.419391
+File:        apps/api/CODE_AUDIT_REPORT.md
+Line:        45
+Commit:      cb6c7630de89ef22dcbcaf66f01f0fcc458a0aca
+Author:      Daniel Moll
+Email:       dmoll1974@gmail.com
+Date:        2026-03-21T22:01:18Z
+Fingerprint: cb6c7630de89ef22dcbcaf66f01f0fcc458a0aca:apps/api/CODE_AUDIT_REPORT.md:generic-api-key:45
+Link:        https://github.com/perfana/perfana/blob/cb6c7630de89ef22dcbcaf66f01f0fcc458a0aca/apps/api/CODE_AUDIT_REPORT.md?plain=1#L45
+
+Finding:     DYNATRACE_API_TOKEN=[1;3;mREDACTED[0m (EXPOSED API KEY)
+Secret:      [1;3;mREDACTED[0m
+RuleID:      generic-api-key
+Entropy:     4.205110
+File:        apps/api/CODE_AUDIT_REPORT.md
+Line:        51
+Commit:      cb6c7630de89ef22dcbcaf66f01f0fcc458a0aca
+Author:      Daniel Moll
+Email:       dmoll1974@gmail.com
+Date:        2026-03-21T22:01:18Z
+Fingerprint: cb6c7630de89ef22dcbcaf66f01f0fcc458a0aca:apps/api/CODE_AUDIT_REPORT.md:generic-api-key:51
+Link:        https://github.com/perfana/perfana/blob/cb6c7630de89ef22dcbcaf66f01f0fcc458a0aca/apps/api/CODE_AUDIT_REPORT.md?plain=1#L51
+
+Finding:     SUPABASE_ANON_KEY=[1;3;mREDACTED[0m (LEGACY - SHOULD BE...
+Secret:      [1;3;mREDACTED[0m
+RuleID:      generic-api-key
+Entropy:     4.419391
+File:        apps/api/CODE_AUDIT_REPORT.md
+Line:        52
+Commit:      cb6c7630de89ef22dcbcaf66f01f0fcc458a0aca
+Author:      Daniel Moll
+Email:       dmoll1974@gmail.com
+Date:        2026-03-21T22:01:18Z
+Fingerprint: cb6c7630de89ef22dcbcaf66f01f0fcc458a0aca:apps/api/CODE_AUDIT_REPORT.md:generic-api-key:52
+Link:        https://github.com/perfana/perfana/blob/cb6c7630de89ef22dcbcaf66f01f0fcc458a0aca/apps/api/CODE_AUDIT_REPORT.md?plain=1#L52
+
+Finding:     SUPABASE_SERVICE_ROLE_KEY=[1;3;mREDACTED[0m (LEGACY - SHOULD BE...
+Secret:      [1;3;mREDACTED[0m
+RuleID:      generic-api-key
+Entropy:     4.419391
+File:        apps/api/CODE_AUDIT_REPORT.md
+Line:        53
+Commit:      cb6c7630de89ef22dcbcaf66f01f0fcc458a0aca
+Author:      Daniel Moll
+Email:       dmoll1974@gmail.com
+Date:        2026-03-21T22:01:18Z
+Fingerprint: cb6c7630de89ef22dcbcaf66f01f0fcc458a0aca:apps/api/CODE_AUDIT_REPORT.md:generic-api-key:53
+Link:        https://github.com/perfana/perfana/blob/cb6c7630de89ef22dcbcaf66f01f0fcc458a0aca/apps/api/CODE_AUDIT_REPORT.md?plain=1#L53
+
+Finding:     'Invalid token: [1;3;mREDACTED[0m'
+Secret:      [1;3;mREDACTED[0m
+RuleID:      jwt
+Entropy:     5.444070
+File:        apps/api/src/common/filters/global-exception.filter.spec.ts
+Line:        124
+Commit:      cb6c7630de89ef22dcbcaf66f01f0fcc458a0aca
+Author:      Daniel Moll
+Email:       dmoll1974@gmail.com
+Date:        2026-03-21T22:01:18Z
+Fingerprint: cb6c7630de89ef22dcbcaf66f01f0fcc458a0aca:apps/api/src/common/filters/global-exception.filter.spec.ts:jwt:124
+Link:        https://github.com/perfana/perfana/blob/cb6c7630de89ef22dcbcaf66f01f0fcc458a0aca/apps/api/src/common/filters/global-exception.filter.spec.ts#L124
+
+Finding:     ...nst apiKeyUserId = 'api-key:[1;3;mREDACTED[0m'
+Secret:      [1;3;mREDACTED[0m
+RuleID:      generic-api-key
+Entropy:     3.694386
+File:        apps/api/src/common/services/__tests__/authorized-base.service.spec.ts
+Line:        854
+Commit:      cb6c7630de89ef22dcbcaf66f01f0fcc458a0aca
+Author:      Daniel Moll
+Email:       dmoll1974@gmail.com
+Date:        2026-03-21T22:01:18Z
+Fingerprint: cb6c7630de89ef22dcbcaf66f01f0fcc458a0aca:apps/api/src/common/services/__tests__/authorized-base.service.spec.ts:generic-api-key:854
+Link:        https://github.com/perfana/perfana/blob/cb6c7630de89ef22dcbcaf66f01f0fcc458a0aca/apps/api/src/common/services/__tests__/authorized-base.service.spec.ts#L854
+
+Finding:     ...st specialUserId = 'api-key:[1;3;mREDACTED[0m'
+Secret:      [1;3;mREDACTED[0m
+RuleID:      generic-api-key
+Entropy:     3.694386
+File:        apps/api/src/common/services/__tests__/authorization.service.spec.ts
+Line:        1245
+Commit:      cb6c7630de89ef22dcbcaf66f01f0fcc458a0aca
+Author:      Daniel Moll
+Email:       dmoll1974@gmail.com
+Date:        2026-03-21T22:01:18Z
+Fingerprint: cb6c7630de89ef22dcbcaf66f01f0fcc458a0aca:apps/api/src/common/services/__tests__/authorization.service.spec.ts:generic-api-key:1245
+Link:        https://github.com/perfana/perfana/blob/cb6c7630de89ef22dcbcaf66f01f0fcc458a0aca/apps/api/src/common/services/__tests__/authorization.service.spec.ts#L1245
+
+Finding:     const mockToken = '[1;3;mREDACTED[0m'
+Secret:      [1;3;mREDACTED[0m
+RuleID:      generic-api-key
+Entropy:     5.020844
+File:        apps/api/src/modules/api-keys/api-keys.controller.spec.ts
+Line:        34
+Commit:      cb6c7630de89ef22dcbcaf66f01f0fcc458a0aca
+Author:      Daniel Moll
+Email:       dmoll1974@gmail.com
+Date:        2026-03-21T22:01:18Z
+Fingerprint: cb6c7630de89ef22dcbcaf66f01f0fcc458a0aca:apps/api/src/modules/api-keys/api-keys.controller.spec.ts:generic-api-key:34
+Link:        https://github.com/perfana/perfana/blob/cb6c7630de89ef22dcbcaf66f01f0fcc458a0aca/apps/api/src/modules/api-keys/api-keys.controller.spec.ts#L34
+
+Finding:     const jwtToken = '[1;3;mREDACTED[0m'
+Secret:      [1;3;mREDACTED[0m
+RuleID:      jwt
+Entropy:     5.331768
+File:        apps/api/src/modules/api-keys/api-keys.controller.spec.ts
+Line:        743
+Commit:      cb6c7630de89ef22dcbcaf66f01f0fcc458a0aca
+Author:      Daniel Moll
+Email:       dmoll1974@gmail.com
+Date:        2026-03-21T22:01:18Z
+Fingerprint: cb6c7630de89ef22dcbcaf66f01f0fcc458a0aca:apps/api/src/modules/api-keys/api-keys.controller.spec.ts:jwt:743
+Link:        https://github.com/perfana/perfana/blob/cb6c7630de89ef22dcbcaf66f01f0fcc458a0aca/apps/api/src/modules/api-keys/api-keys.controller.spec.ts#L743
+
+Finding:     '[1;3;mREDACTED[0m'
+Secret:      [1;3;mREDACTED[0m
+RuleID:      jwt
+Entropy:     5.331768
+File:        apps/api/src/modules/api-keys/api-keys.service.spec.ts
+Line:        413
+Commit:      cb6c7630de89ef22dcbcaf66f01f0fcc458a0aca
+Author:      Daniel Moll
+Email:       dmoll1974@gmail.com
+Date:        2026-03-21T22:01:18Z
+Fingerprint: cb6c7630de89ef22dcbcaf66f01f0fcc458a0aca:apps/api/src/modules/api-keys/api-keys.service.spec.ts:jwt:413
+Link:        https://github.com/perfana/perfana/blob/cb6c7630de89ef22dcbcaf66f01f0fcc458a0aca/apps/api/src/modules/api-keys/api-keys.service.spec.ts#L413
+
+Finding:     const jwtToken = '[1;3;mREDACTED[0m'
+Secret:      [1;3;mREDACTED[0m
+RuleID:      generic-api-key
+Entropy:     4.668880
+File:        apps/api/src/guards/keycloak-enhanced-auth.guard.spec.ts
+Line:        593
+Commit:      cb6c7630de89ef22dcbcaf66f01f0fcc458a0aca
+Author:      Daniel Moll
+Email:       dmoll1974@gmail.com
+Date:        2026-03-21T22:01:18Z
+Fingerprint: cb6c7630de89ef22dcbcaf66f01f0fcc458a0aca:apps/api/src/guards/keycloak-enhanced-auth.guard.spec.ts:generic-api-key:593
+Link:        https://github.com/perfana/perfana/blob/cb6c7630de89ef22dcbcaf66f01f0fcc458a0aca/apps/api/src/guards/keycloak-enhanced-auth.guard.spec.ts#L593
+
+Finding:     const sensitiveToken = '[1;3;mREDACTED[0m'
+Secret:      [1;3;mREDACTED[0m
+RuleID:      generic-api-key
+Entropy:     3.907268
+File:        apps/api/src/guards/keycloak-enhanced-auth.guard.spec.ts
+Line:        1435
+Commit:      cb6c7630de89ef22dcbcaf66f01f0fcc458a0aca
+Author:      Daniel Moll
+Email:       dmoll1974@gmail.com
+Date:        2026-03-21T22:01:18Z
+Fingerprint: cb6c7630de89ef22dcbcaf66f01f0fcc458a0aca:apps/api/src/guards/keycloak-enhanced-auth.guard.spec.ts:generic-api-key:1435
+Link:        https://github.com/perfana/perfana/blob/cb6c7630de89ef22dcbcaf66f01f0fcc458a0aca/apps/api/src/guards/keycloak-enhanced-auth.guard.spec.ts#L1435
+
+Finding:     example: '[1;3;mREDACTED[0m',
+Secret:      [1;3;mREDACTED[0m
+RuleID:      dynatrace-api-token
+Entropy:     4.938991
+File:        apps/api/src/modules/dynatrace/dto/test-connection.dto.ts
+Line:        16
+Commit:      cb6c7630de89ef22dcbcaf66f01f0fcc458a0aca
+Author:      Daniel Moll
+Email:       dmoll1974@gmail.com
+Date:        2026-03-21T22:01:18Z
+Fingerprint: cb6c7630de89ef22dcbcaf66f01f0fcc458a0aca:apps/api/src/modules/dynatrace/dto/test-connection.dto.ts:dynatrace-api-token:16
+Link:        https://github.com/perfana/perfana/blob/cb6c7630de89ef22dcbcaf66f01f0fcc458a0aca/apps/api/src/modules/dynatrace/dto/test-connection.dto.ts#L16
+
+Finding:     apiKey: '[1;3;mREDACTED[0m'
+Secret:      [1;3;mREDACTED[0m
+RuleID:      generic-api-key
+Entropy:     3.855389
+File:        apps/api/src/modules/grafana/grafana-instances.service.spec.ts
+Line:        35
+Commit:      cb6c7630de89ef22dcbcaf66f01f0fcc458a0aca
+Author:      Daniel Moll
+Email:       dmoll1974@gmail.com
+Date:        2026-03-21T22:01:18Z
+Fingerprint: cb6c7630de89ef22dcbcaf66f01f0fcc458a0aca:apps/api/src/modules/grafana/grafana-instances.service.spec.ts:generic-api-key:35
+Link:        https://github.com/perfana/perfana/blob/cb6c7630de89ef22dcbcaf66f01f0fcc458a0aca/apps/api/src/modules/grafana/grafana-instances.service.spec.ts#L35
+
+Finding:     key: '[1;3;mREDACTED[0m', // base64 encoded ...
+Secret:      [1;3;mREDACTED[0m
+RuleID:      generic-api-key
+Entropy:     3.684561
+File:        apps/api/src/test/migration-validation.test.ts.disabled
+Line:        197
+Commit:      cb6c7630de89ef22dcbcaf66f01f0fcc458a0aca
+Author:      Daniel Moll
+Email:       dmoll1974@gmail.com
+Date:        2026-03-21T22:01:18Z
+Fingerprint: cb6c7630de89ef22dcbcaf66f01f0fcc458a0aca:apps/api/src/test/migration-validation.test.ts.disabled:generic-api-key:197
+Link:        https://github.com/perfana/perfana/blob/cb6c7630de89ef22dcbcaf66f01f0fcc458a0aca/apps/api/src/test/migration-validation.test.ts.disabled#L197
+
+Finding:     const expiredToken = '[1;3;mREDACTED[0m'
+Secret:      [1;3;mREDACTED[0m
+RuleID:      generic-api-key
+Entropy:     5.312478
+File:        apps/api/test/security/auth-bypass.spec.ts
+Line:        144
+Commit:      cb6c7630de89ef22dcbcaf66f01f0fcc458a0aca
+Author:      Daniel Moll
+Email:       dmoll1974@gmail.com
+Date:        2026-03-21T22:01:18Z
+Fingerprint: cb6c7630de89ef22dcbcaf66f01f0fcc458a0aca:apps/api/test/security/auth-bypass.spec.ts:generic-api-key:144
+Link:        https://github.com/perfana/perfana/blob/cb6c7630de89ef22dcbcaf66f01f0fcc458a0aca/apps/api/test/security/auth-bypass.spec.ts#L144
+
+Finding:     const invalidJwt = '[1;3;mREDACTED[0m'
+Secret:      [1;3;mREDACTED[0m
+RuleID:      jwt
+Entropy:     5.427458
+File:        apps/api/test/security/auth-bypass.spec.ts
+Line:        168
+Commit:      cb6c7630de89ef22dcbcaf66f01f0fcc458a0aca
+Author:      Daniel Moll
+Email:       dmoll1974@gmail.com
+Date:        2026-03-21T22:01:18Z
+Fingerprint: cb6c7630de89ef22dcbcaf66f01f0fcc458a0aca:apps/api/test/security/auth-bypass.spec.ts:jwt:168
+Link:        https://github.com/perfana/perfana/blob/cb6c7630de89ef22dcbcaf66f01f0fcc458a0aca/apps/api/test/security/auth-bypass.spec.ts#L168
+
+Finding:     curl -H "Authorization: Bearer [1;3;mREDACTED[0m" \
+Secret:      [1;3;mREDACTED[0m
+RuleID:      curl-auth-header
+Entropy:     4.519394
+File:        apps/perfana-report/PDF_DOWNLOAD_FLOW.md
+Line:        268
+Commit:      cb6c7630de89ef22dcbcaf66f01f0fcc458a0aca
+Author:      Daniel Moll
+Email:       dmoll1974@gmail.com
+Date:        2026-03-21T22:01:18Z
+Fingerprint: cb6c7630de89ef22dcbcaf66f01f0fcc458a0aca:apps/perfana-report/PDF_DOWNLOAD_FLOW.md:curl-auth-header:268
+Link:        https://github.com/perfana/perfana/blob/cb6c7630de89ef22dcbcaf66f01f0fcc458a0aca/apps/perfana-report/PDF_DOWNLOAD_FLOW.md?plain=1#L268
+
+Finding:     curl -H "Authorization: Bearer [1;3;mREDACTED[0m" \
+Secret:      [1;3;mREDACTED[0m
+RuleID:      curl-auth-header
+Entropy:     5.044653
+File:        apps/perfana-report/PDF_DOWNLOAD_FLOW.md
+Line:        276
+Commit:      cb6c7630de89ef22dcbcaf66f01f0fcc458a0aca
+Author:      Daniel Moll
+Email:       dmoll1974@gmail.com
+Date:        2026-03-21T22:01:18Z
+Fingerprint: cb6c7630de89ef22dcbcaf66f01f0fcc458a0aca:apps/perfana-report/PDF_DOWNLOAD_FLOW.md:curl-auth-header:276
+Link:        https://github.com/perfana/perfana/blob/cb6c7630de89ef22dcbcaf66f01f0fcc458a0aca/apps/perfana-report/PDF_DOWNLOAD_FLOW.md?plain=1#L276
+
+Finding:     apiKey: '[1;3;mREDACTED[0m'
+Secret:      [1;3;mREDACTED[0m
+RuleID:      generic-api-key
+Entropy:     3.640224
+File:        apps/web/__tests__/lib/validations.test.ts
+Line:        301
+Commit:      cb6c7630de89ef22dcbcaf66f01f0fcc458a0aca
+Author:      Daniel Moll
+Email:       dmoll1974@gmail.com
+Date:        2026-03-21T22:01:18Z
+Fingerprint: cb6c7630de89ef22dcbcaf66f01f0fcc458a0aca:apps/web/__tests__/lib/validations.test.ts:generic-api-key:301
+Link:        https://github.com/perfana/perfana/blob/cb6c7630de89ef22dcbcaf66f01f0fcc458a0aca/apps/web/__tests__/lib/validations.test.ts#L301
+
+Finding:     const apiKey = '[1;3;mREDACTED[0m'
+Secret:      [1;3;mREDACTED[0m
+RuleID:      generic-api-key
+Entropy:     3.733661
+File:        apps/web/__tests__/security/auth-security.test.tsx
+Line:        127
+Commit:      cb6c7630de89ef22dcbcaf66f01f0fcc458a0aca
+Author:      Daniel Moll
+Email:       dmoll1974@gmail.com
+Date:        2026-03-21T22:01:18Z
+Fingerprint: cb6c7630de89ef22dcbcaf66f01f0fcc458a0aca:apps/web/__tests__/security/auth-security.test.tsx:generic-api-key:127
+Link:        https://github.com/perfana/perfana/blob/cb6c7630de89ef22dcbcaf66f01f0fcc458a0aca/apps/web/__tests__/security/auth-security.test.tsx#L127
+
+Finding:     const apiKey = '[1;3;mREDACTED[0m'
+Secret:      [1;3;mREDACTED[0m
+RuleID:      generic-api-key
+Entropy:     3.733661
+File:        apps/web/__tests__/security/auth-security.test.tsx
+Line:        140
+Commit:      cb6c7630de89ef22dcbcaf66f01f0fcc458a0aca
+Author:      Daniel Moll
+Email:       dmoll1974@gmail.com
+Date:        2026-03-21T22:01:18Z
+Fingerprint: cb6c7630de89ef22dcbcaf66f01f0fcc458a0aca:apps/web/__tests__/security/auth-security.test.tsx:generic-api-key:140
+Link:        https://github.com/perfana/perfana/blob/cb6c7630de89ef22dcbcaf66f01f0fcc458a0aca/apps/web/__tests__/security/auth-security.test.tsx#L140
+
+Finding:     const expiredToken = '[1;3;mREDACTED[0m'
+Secret:      [1;3;mREDACTED[0m
+RuleID:      generic-api-key
+Entropy:     5.379865
+File:        apps/web/__tests__/security/auth-security.test.tsx
+Line:        175
+Commit:      cb6c7630de89ef22dcbcaf66f01f0fcc458a0aca
+Author:      Daniel Moll
+Email:       dmoll1974@gmail.com
+Date:        2026-03-21T22:01:18Z
+Fingerprint: cb6c7630de89ef22dcbcaf66f01f0fcc458a0aca:apps/web/__tests__/security/auth-security.test.tsx:generic-api-key:175
+Link:        https://github.com/perfana/perfana/blob/cb6c7630de89ef22dcbcaf66f01f0fcc458a0aca/apps/web/__tests__/security/auth-security.test.tsx#L175
+
+Finding:     apiToken: '[1;3;mREDACTED[0m'
+Secret:      [1;3;mREDACTED[0m
+RuleID:      generic-api-key
+Entropy:     3.546594
+File:        apps/web/__tests__/lib/dynatrace.test.ts
+Line:        89
+Commit:      cb6c7630de89ef22dcbcaf66f01f0fcc458a0aca
+Author:      Daniel Moll
+Email:       dmoll1974@gmail.com
+Date:        2026-03-21T22:01:18Z
+Fingerprint: cb6c7630de89ef22dcbcaf66f01f0fcc458a0aca:apps/web/__tests__/lib/dynatrace.test.ts:generic-api-key:89
+Link:        https://github.com/perfana/perfana/blob/cb6c7630de89ef22dcbcaf66f01f0fcc458a0aca/apps/web/__tests__/lib/dynatrace.test.ts#L89
+
+Finding:     platformApiToken: '[1;3;mREDACTED[0m'
+Secret:      [1;3;mREDACTED[0m
+RuleID:      generic-api-key
+Entropy:     3.546594
+File:        apps/worker/src/test/unit/pipelines/DynatracePipeline.test.ts
+Line:        79
+Commit:      cb6c7630de89ef22dcbcaf66f01f0fcc458a0aca
+Author:      Daniel Moll
+Email:       dmoll1974@gmail.com
+Date:        2026-03-21T22:01:18Z
+Fingerprint: cb6c7630de89ef22dcbcaf66f01f0fcc458a0aca:apps/worker/src/test/unit/pipelines/DynatracePipeline.test.ts:generic-api-key:79
+Link:        https://github.com/perfana/perfana/blob/cb6c7630de89ef22dcbcaf66f01f0fcc458a0aca/apps/worker/src/test/unit/pipelines/DynatracePipeline.test.ts#L79
+
+Finding:     curl http://localhost:3001/api/health     
+                                          
+# Test authentication                     
+curl http://localhost:3001/api/auth/health
+                                          
+# Test test-runs endpoint                 
+curl -H "Authorization: Bearer            [1;3;mREDACTED[0m" http://localhost:30...
+Secret:      [1;3;mREDACTED[0m
+RuleID:      curl-auth-header
+Entropy:     3.121928
+File:        database/DEPLOYMENT_CHECKLIST.md
+Line:        181
+Commit:      cb6c7630de89ef22dcbcaf66f01f0fcc458a0aca
+Author:      Daniel Moll
+Email:       dmoll1974@gmail.com
+Date:        2026-03-21T22:01:18Z
+Fingerprint: cb6c7630de89ef22dcbcaf66f01f0fcc458a0aca:database/DEPLOYMENT_CHECKLIST.md:curl-auth-header:181
+Link:        https://github.com/perfana/perfana/blob/cb6c7630de89ef22dcbcaf66f01f0fcc458a0aca/database/DEPLOYMENT_CHECKLIST.md?plain=1#L181-L187
+
+Finding:     curl -X GET "https://YOUR_ENV.live.dynatrace.com/api/v2/apiTokens/lookup" \
+  -H "Authorization: Api-Token                                             [1;3;mREDACTED[0m" \
+Secret:      [1;3;mREDACTED[0m
+RuleID:      curl-auth-header
+Entropy:     3.121928
+File:        docs/DYNATRACE_INTEGRATION.md
+Line:        107
+Commit:      cb6c7630de89ef22dcbcaf66f01f0fcc458a0aca
+Author:      Daniel Moll
+Email:       dmoll1974@gmail.com
+Date:        2026-03-21T22:01:18Z
+Fingerprint: cb6c7630de89ef22dcbcaf66f01f0fcc458a0aca:docs/DYNATRACE_INTEGRATION.md:curl-auth-header:107
+Link:        https://github.com/perfana/perfana/blob/cb6c7630de89ef22dcbcaf66f01f0fcc458a0aca/docs/DYNATRACE_INTEGRATION.md?plain=1#L107-L108
+
+Finding:     process.env.ENCRYPTION_KEY = '[1;3;mREDACTED[0m'.repeat(4);
+Secret:      [1;3;mREDACTED[0m
+RuleID:      generic-api-key
+Entropy:     4.000000
+File:        packages/shared/src/utils/__tests__/encryption.spec.ts
+Line:        70
+Commit:      cb6c7630de89ef22dcbcaf66f01f0fcc458a0aca
+Author:      Daniel Moll
+Email:       dmoll1974@gmail.com
+Date:        2026-03-21T22:01:18Z
+Fingerprint: cb6c7630de89ef22dcbcaf66f01f0fcc458a0aca:packages/shared/src/utils/__tests__/encryption.spec.ts:generic-api-key:70
+Link:        https://github.com/perfana/perfana/blob/cb6c7630de89ef22dcbcaf66f01f0fcc458a0aca/packages/shared/src/utils/__tests__/encryption.spec.ts#L70
+
+Finding:     process.env.ENCRYPTION_KEY = '[1;3;mREDACTED[0m'.repeat(4);
+Secret:      [1;3;mREDACTED[0m
+RuleID:      generic-api-key
+Entropy:     4.000000
+File:        packages/shared/src/utils/__tests__/encryption.spec.ts
+Line:        75
+Commit:      cb6c7630de89ef22dcbcaf66f01f0fcc458a0aca
+Author:      Daniel Moll
+Email:       dmoll1974@gmail.com
+Date:        2026-03-21T22:01:18Z
+Fingerprint: cb6c7630de89ef22dcbcaf66f01f0fcc458a0aca:packages/shared/src/utils/__tests__/encryption.spec.ts:generic-api-key:75
+Link:        https://github.com/perfana/perfana/blob/cb6c7630de89ef22dcbcaf66f01f0fcc458a0aca/packages/shared/src/utils/__tests__/encryption.spec.ts#L75
+
+Finding:     process.env.ENCRYPTION_KEY = '[1;3;mREDACTED[0m'.repeat(4);
+Secret:      [1;3;mREDACTED[0m
+RuleID:      generic-api-key
+Entropy:     4.000000
+File:        packages/shared/src/utils/__tests__/encryption.spec.ts
+Line:        80
+Commit:      cb6c7630de89ef22dcbcaf66f01f0fcc458a0aca
+Author:      Daniel Moll
+Email:       dmoll1974@gmail.com
+Date:        2026-03-21T22:01:18Z
+Fingerprint: cb6c7630de89ef22dcbcaf66f01f0fcc458a0aca:packages/shared/src/utils/__tests__/encryption.spec.ts:generic-api-key:80
+Link:        https://github.com/perfana/perfana/blob/cb6c7630de89ef22dcbcaf66f01f0fcc458a0aca/packages/shared/src/utils/__tests__/encryption.spec.ts#L80
+
+Finding:     const apiKey = '[1;3;mREDACTED[0m'
+Secret:      [1;3;mREDACTED[0m
+RuleID:      generic-api-key
+Entropy:     3.969816
+File:        packages/shared/src/utils/__tests__/encrypted-column.transformer.spec.ts
+Line:        322
+Commit:      cb6c7630de89ef22dcbcaf66f01f0fcc458a0aca
+Author:      Daniel Moll
+Email:       dmoll1974@gmail.com
+Date:        2026-03-21T22:01:18Z
+Fingerprint: cb6c7630de89ef22dcbcaf66f01f0fcc458a0aca:packages/shared/src/utils/__tests__/encrypted-column.transformer.spec.ts:generic-api-key:322
+Link:        https://github.com/perfana/perfana/blob/cb6c7630de89ef22dcbcaf66f01f0fcc458a0aca/packages/shared/src/utils/__tests__/encrypted-column.transformer.spec.ts#L322
+
+[90m8:41PM[0m [32mINF[0m [1m1092 commits scanned.[0m
+[90m8:41PM[0m [32mINF[0m [1mscanned ~63012274 bytes (63.01 MB) in 1m54s[0m
+[90m8:41PM[0m [33mWRN[0m [1mleaks found: 47[0m

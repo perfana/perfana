@@ -1,6 +1,6 @@
 {
   "name": "perfana",
-  "version": "0.2.61.2",
+  "version": "0.2.61.3",
   "private": true,
   "description": "Open-source performance analysis platform",
   "workspaces": [
@@ -16,6 +16,7 @@
     "dev:grafana-sync": "turbo run dev --filter=@perfana/grafana-sync",
     "dev:perfana-report": "turbo run dev --filter=@perfana/perfana-report",
     "lint": "turbo run lint",
+    "seed": "tsx scripts/seed.ts",
     "preflight": "turbo run lint type-check && npm run test:rls --workspace=@perfana/api",
     "prepare": "git config core.hooksPath .githooks 2>/dev/null || true",
     "test": "turbo run test",

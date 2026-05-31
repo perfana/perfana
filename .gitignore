@@ -207,7 +207,9 @@ infra/test_db
 infra/loadtest
 infra/jmeter
 # infra/dynatrace-mock  # Now tracked — WireMock mappings for Dynatrace mock containers
-.claude/skills/gstack/
-.claude/skills/gitnexus/
+.claude/skills/
 .claude/worktrees/
 .gitnexus
+
+# Internal docs (kept local, not open-sourced)
+docs/superpowers/
