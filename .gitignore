@@ -210,3 +210,6 @@ infra/jmeter
 .claude/skills/
 .claude/worktrees/
 .gitnexus
+
+# Internal docs (kept local, not open-sourced)
+docs/superpowers/
