@@ -111,19 +111,19 @@ writing from scratch.
   ones or fix the links.
 - `docs/readmes/` (api/web/worker/db + per-module readmes) — keep; verify current.
 
-**`docs-site/` (Astro Starlight — the public documentation site):**
-- 30+ content categories already present (getting-started, ai-development,
-  contributing, development, architecture, repository-structure, integrations,
-  deployment, troubleshooting, api, …). Verify the key contributor/agent onramps
-  are **complete, not stubs**: `getting-started`, `ai-development`,
-  `contributing`, `development`, `repository-structure`.
-- **Clean up `docs-site/package.json`** — it currently contains junk keys
-  (`dwwwww`, `wwwww`, `wwwww2`, `node_modules: "@a"`, `scripts_comment`) that must
-  be removed before publishing.
+**`docs-site/` (Quartz 4 — the public documentation site, deploys to GitHub Pages):**
+- Content lives under `docs-site/content/` (Obsidian-flavored vault: Apps,
+  Packages, Architecture, Features, Database, Operations, …). Verify the key
+  contributor/agent onramps are **complete, not stubs**.
 - Audit `docs-site/content/` for customer/internal references (same scrub bar as
-  `CHANGELOG.md` in Phase 1).
-- Verify the `docs.yml` ("Docs Site CI/CD") deploy target works on the **public**
-  repo and needs no private secrets; confirm the published docs URL is correct.
+  `CHANGELOG.md` in Phase 1); strip the `content/.obsidian/` editor config.
+- `docs-site/package.json` is the upstream Quartz manifest (`@jackyzha0/quartz`,
+  MIT) — leave as-is; just confirm `LICENSE.txt` attribution is preserved.
+- Verify the `docs.yml` ("Deploy Documentation") workflow works on the **public**
+  repo: it uses only the built-in `GITHUB_TOKEN` + Pages permissions (no private
+  secrets), triggers on `docs-site/**` pushes to `main`. Confirm GitHub Pages is
+  enabled for the repo and `quartz.config.ts baseUrl` is set to the real
+  published URL (currently `localhost:8888`).
 
 **Cross-cutting:**
 - **Broken-link / dead-reference sweep:** every doc link in
