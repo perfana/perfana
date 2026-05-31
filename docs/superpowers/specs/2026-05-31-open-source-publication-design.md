@@ -94,7 +94,47 @@ Use `git rm --cached -r <path>` (keeps files on disk) + add to `.gitignore`:
 - **`CHANGELOG.md`:** scrub customer/internal references.
 - Review `TODOS.md` for internal/sensitive content; strip or sanitize.
 
-### Phase 3 — Agent-friendliness for coding contributors (the core goal)
+### Phase 3 — Documentation (completeness, accuracy, publishability)
+
+The docs are already extensive — this phase is about **accuracy post-strip,
+removing internal cruft, and verifying nothing is broken or leaking** rather than
+writing from scratch.
+
+**Root & per-app docs:**
+- `README.md`, `ARCHITECTURE.md`, `CONVENTIONS.md`, `CONTRIBUTING.md` — verify
+  accurate after the Phase 2 strip (no references to removed skills, GitNexus,
+  gstack, or `docs/superpowers/`).
+- Per-app docs exist: `apps/{api,web,grafana-sync}/CODING_RULES.md`,
+  `packages/shared/README.md`. `CLAUDE.md`/`AGENTS.md` reference READMEs for
+  `apps/worker`, `apps/mcp`, `apps/perfana-report`, `packages/config` — **audit
+  every referenced doc actually exists** (broken-link sweep); create the missing
+  ones or fix the links.
+- `docs/readmes/` (api/web/worker/db + per-module readmes) — keep; verify current.
+
+**`docs-site/` (Astro Starlight — the public documentation site):**
+- 30+ content categories already present (getting-started, ai-development,
+  contributing, development, architecture, repository-structure, integrations,
+  deployment, troubleshooting, api, …). Verify the key contributor/agent onramps
+  are **complete, not stubs**: `getting-started`, `ai-development`,
+  `contributing`, `development`, `repository-structure`.
+- **Clean up `docs-site/package.json`** — it currently contains junk keys
+  (`dwwwww`, `wwwww`, `wwwww2`, `node_modules: "@a"`, `scripts_comment`) that must
+  be removed before publishing.
+- Audit `docs-site/content/` for customer/internal references (same scrub bar as
+  `CHANGELOG.md` in Phase 1).
+- Verify the `docs.yml` ("Docs Site CI/CD") deploy target works on the **public**
+  repo and needs no private secrets; confirm the published docs URL is correct.
+
+**Cross-cutting:**
+- **Broken-link / dead-reference sweep:** every doc link in
+  `README`/`AGENTS`/`CLAUDE`/`CONTRIBUTING` resolves to a file that still exists
+  after the strip (don't link to removed `docs/superpowers/` specs).
+- **"Docs match reality":** documented commands (`npm run dev`, `setup.sh`, ports,
+  service URLs) actually work — validated end-to-end in Phase 6 clean-clone check.
+- Decide and document the canonical entry path: `README` → `docs-site` (deep
+  reference), `AGENTS.md` (agent entry point).
+
+### Phase 4 — Agent-friendliness for coding contributors (the core goal)
 
 - **Validate the documented quickstart from a clean clone** — the #1
   agent-friendliness signal. `./scripts/setup.sh` + `npm run dev` must come up
@@ -103,29 +143,35 @@ Use `git rm --cached -r <path>` (keeps files on disk) + add to `.gitignore`:
   loops, where things live, per-app `CODING_RULES.md` links, and the
   health/preflight gates — all working from a fresh clone.
 - Provide **seed/demo data** so an agent sees the app actually working (a test
-  run with metrics), not an empty shell.
+  run with metrics), not an empty shell. Lean on/extend the existing
+  `scripts/seed.ts`.
 - `CONTRIBUTING.md`: confirm it covers run/test/lint, PR conventions, and the
   local pre-push gate.
 - Add an architecture onboarding path + a few `good first issue`s.
 
-### Phase 4 — Open-source governance polish
+### Phase 5 — Open-source governance polish
 
 - `NOTICE` file + optional copyright-header policy (Apache 2.0 already present).
 - Verify `SECURITY.md` points to a **real, monitored** reporting address.
 - Add `.github/ISSUE_TEMPLATE/` + `PULL_REQUEST_TEMPLATE.md` if missing.
 - Decide contribution sign-off: **DCO** (`Signed-off-by`) recommended over CLA.
-- Audit `.github/workflows/` (`pr-quality-gate`): must run on public PRs
-  **without** privileged secrets, or gate secret-requiring jobs behind GitHub
-  environment protection / fork-PR restrictions.
+- Audit `.github/workflows/` (`pr-quality-gate`, `claude-review`, `docker-build`,
+  `docs`): must run on public PRs **without** privileged secrets, or gate
+  secret-requiring jobs behind GitHub environment protection / fork-PR restrictions.
+- Existing `.github/` is already well-stocked — issue templates (incl.
+  `ai-ready-issue.md`), `dependabot.yml`, `CODEOWNERS` — so this is mostly
+  audit-and-verify, not create-from-scratch.
 
-### Phase 5 — Clean-clone validation (dogfood the claim)
+### Phase 6 — Clean-clone validation (dogfood the claim)
 
 - Fresh clone into a temp dir; follow the README verbatim; confirm dev env +
   tests + lint pass with zero local-only assumptions.
+- Build the docs-site from the clean clone (`docs-site && npm run build`) to
+  confirm published docs are reproducible.
 - Bonus: have an AI agent do a cold onboarding pass to prove the
   "agent-friendly" claim end-to-end.
 
-### Phase 6 — Publication & launch
+### Phase 7 — Publication & launch
 
 - Final credential-rotation confirmation.
 - Flip `package.json` `"private"` intent as appropriate.
@@ -147,5 +193,7 @@ Use `git rm --cached -r <path>` (keeps files on disk) + add to `.gitignore`:
 | A missed historical secret persists after publish | Mandatory credential rotation (Phase 1) makes any leaked secret useless. |
 | Force-push rewrites SHAs, breaks local clones/forks | Only if scrub is needed; communicate before flipping public (no external forks exist yet — repo is private). |
 | Stripping skills breaks local workflow | `git rm --cached` + gitignore keeps all files on disk; plugin cache provides vendor skills independently. |
-| Public CI exposes secrets via fork PRs | Phase 4 gates secret-requiring jobs behind environment protection. |
-| `auth-audit` recon leaks if accidentally kept | Explicitly stripped in Phase 2; verify absence in Phase 5 clean-clone check. |
+| Public CI exposes secrets via fork PRs | Phase 5 gates secret-requiring jobs behind environment protection. |
+| `auth-audit` recon leaks if accidentally kept | Explicitly stripped in Phase 2; verify absence in Phase 6 clean-clone check. |
+| Customer/internal refs hidden in `docs-site/` content | Phase 3 audits all docs-site content with the same scrub bar as CHANGELOG. |
+| Broken doc links after stripping `docs/superpowers/` | Phase 3 broken-link sweep; Phase 6 clean-clone validation catches the rest. |
