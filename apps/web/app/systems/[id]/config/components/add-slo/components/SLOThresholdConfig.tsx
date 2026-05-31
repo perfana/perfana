@@ -196,7 +196,7 @@ export function SLOThresholdConfig({
       </Grid>
 
       {/* Advanced Options */}
-      {/* Exclude Ramp-up Time */}
+      {/* Apply to analysis timerange only */}
       <Grid size={{ xs: 12, md: 6 }}>
         <FormControlLabel
           control={
@@ -206,7 +206,7 @@ export function SLOThresholdConfig({
               color="primary"
             />
           }
-          label="Exclude Ramp-up Time"
+          label="Apply to analysis timerange only"
         />
         <FormHelperText sx={{ ml: 0, mt: 0.5 }}>
           Exclude measurements taken during the ramp-up period from SLO evaluation

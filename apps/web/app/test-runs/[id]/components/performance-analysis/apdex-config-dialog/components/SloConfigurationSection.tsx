@@ -147,7 +147,7 @@ export function SloConfigurationSection({
               />
             }
             label={
-              <Typography variant="body2">Exclude ramp-up period from calculation</Typography>
+              <Typography variant="body2">Apply to analysis timerange only</Typography>
             }
             sx={{ mt: 2 }}
           />

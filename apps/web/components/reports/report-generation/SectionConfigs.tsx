@@ -207,8 +207,8 @@ export function ApdexConfigForm({ config, onChange, testRunId }: ApdexConfigForm
   return (
     <>
       <Box sx={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
-        {/* Exclude Ramp-up Toggle */}
-        <Tooltip title="Exclude data during ramp-up time period from all statistics" arrow>
+        {/* Apply to analysis timerange only Toggle */}
+        <Tooltip title="Apply statistics to the configured analysis timerange only" arrow>
           <FormControlLabel
             control={
               <Switch
@@ -225,7 +225,7 @@ export function ApdexConfigForm({ config, onChange, testRunId }: ApdexConfigForm
                 }}
               />
             }
-            label="Exclude Ramp-up"
+            label="Apply to analysis timerange only"
             sx={{
               '& .MuiFormControlLabel-label': {
                 fontSize: '0.875rem',

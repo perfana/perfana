@@ -313,7 +313,7 @@ export default function PerformanceAnalysisCard({
                 Performance Analysis
               </Typography>
             )}
-            {/* Toggle to exclude ramp-up time */}
+            {/* Apply to analysis timerange only toggle */}
             {expanded && (
               <Tooltip title="Show only the configured analysis timerange — excludes ramp-up and ramp-down periods from all statistics" arrow>
                 <FormControlLabel

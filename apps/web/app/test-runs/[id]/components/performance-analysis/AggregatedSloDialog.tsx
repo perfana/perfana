@@ -289,7 +289,7 @@ export default function AggregatedSloDialog({
               }
               label={
                 <Box>
-                  <Typography variant="body2" fontWeight={500}>Exclude ramp-up period</Typography>
+                  <Typography variant="body2" fontWeight={500}>Apply to analysis timerange only</Typography>
                   <Typography variant="caption" color="text.secondary">Requests during ramp-up phase are excluded</Typography>
                 </Box>
               }

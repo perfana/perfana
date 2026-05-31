@@ -793,7 +793,7 @@ describe('BenchmarkFormDialog', () => {
   });
 
   describe('Advanced Options', () => {
-    it('should render exclude ramp-up time checkbox', async () => {
+    it('should render apply to analysis timerange only checkbox', async () => {
       render(
         <BenchmarkFormDialog
           open={true}
@@ -807,7 +807,7 @@ describe('BenchmarkFormDialog', () => {
       );
 
       await waitFor(() => {
-        expect(screen.getByLabelText(/exclude ramp-up time/i)).toBeInTheDocument();
+        expect(screen.getByLabelText(/apply to analysis timerange only/i)).toBeInTheDocument();
       });
     });
 
