@@ -53,7 +53,7 @@ async function enableSlo(user: ReturnType<typeof userEvent.setup>) {
   await user.click(switches[0]);
   // Wait for the SLO config panel to expand (its toggles render conditionally)
   await waitFor(() => {
-    expect(screen.getByText(/Exclude ramp-up period from calculation/i)).toBeInTheDocument();
+    expect(screen.getByText(/Apply to analysis timerange only/i)).toBeInTheDocument();
   });
 }
 
@@ -65,7 +65,7 @@ describe('ApdexSloDialog - excludeRampUpTime toggle', () => {
     jest.clearAllMocks();
   });
 
-  it('renders the exclude ramp-up toggle, defaulted on, once SLO is enabled', async () => {
+  it('renders the apply to analysis timerange only toggle, defaulted on, once SLO is enabled', async () => {
     routeFetch({
       '/test-runs/': testRun,
       '/benchmarks?': [],
@@ -87,7 +87,7 @@ describe('ApdexSloDialog - excludeRampUpTime toggle', () => {
 
     await enableSlo(user);
 
-    const excludeLabel = screen.getByText(/Exclude ramp-up period from calculation/i);
+    const excludeLabel = screen.getByText(/Apply to analysis timerange only/i);
     const row = excludeLabel.closest('label');
     expect(row).not.toBeNull();
     const toggle = within(row as HTMLElement).getByRole('switch');
@@ -122,10 +122,10 @@ describe('ApdexSloDialog - excludeRampUpTime toggle', () => {
     // When an SLO exists, the dialog enables the SLO automatically, so the
     // config panel is visible without toggling.
     await waitFor(() => {
-      expect(screen.getByText(/Exclude ramp-up period from calculation/i)).toBeInTheDocument();
+      expect(screen.getByText(/Apply to analysis timerange only/i)).toBeInTheDocument();
     });
 
-    const excludeLabel = screen.getByText(/Exclude ramp-up period from calculation/i);
+    const excludeLabel = screen.getByText(/Apply to analysis timerange only/i);
     const row = excludeLabel.closest('label');
     const toggle = within(row as HTMLElement).getByRole('switch');
     expect(toggle).not.toBeChecked();
@@ -152,7 +152,7 @@ describe('ApdexSloDialog - excludeRampUpTime toggle', () => {
     await enableSlo(user);
 
     // Flip the ramp-up toggle off
-    const excludeLabel = screen.getByText(/Exclude ramp-up period from calculation/i);
+    const excludeLabel = screen.getByText(/Apply to analysis timerange only/i);
     const row = excludeLabel.closest('label') as HTMLElement;
     const toggle = within(row).getByRole('switch');
     await user.click(toggle);
@@ -233,11 +233,11 @@ describe('ApdexSloDialog - excludeRampUpTime toggle', () => {
     );
 
     await waitFor(() => {
-      expect(screen.getByText(/Exclude ramp-up period from calculation/i)).toBeInTheDocument();
+      expect(screen.getByText(/Apply to analysis timerange only/i)).toBeInTheDocument();
     });
 
     // Toggle off ramp-up exclusion
-    const excludeLabel = screen.getByText(/Exclude ramp-up period from calculation/i);
+    const excludeLabel = screen.getByText(/Apply to analysis timerange only/i);
     const row = excludeLabel.closest('label') as HTMLElement;
     const toggle = within(row).getByRole('switch');
     expect(toggle).toBeChecked();

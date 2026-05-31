@@ -406,7 +406,7 @@ export default function ApdexSloDialog({
                 When disabled, only successful requests count toward the Apdex score
               </Typography>
 
-              {/* Exclude Ramp-Up Time */}
+              {/* Apply to analysis timerange only */}
               <FormControlLabel
                 control={
                   <Switch
@@ -418,7 +418,7 @@ export default function ApdexSloDialog({
                 }
                 label={
                   <Typography variant="body2">
-                    Exclude ramp-up period from calculation
+                    Apply to analysis timerange only
                   </Typography>
                 }
                 sx={{ mb: 1 }}

@@ -127,6 +127,7 @@ export class TestRunsAnomalyService {
         where: { test_run_id: testRunId },
         select: [
           'dashboard_label',
+          'dashboard_uid',
           'panel_title',
           'metric_name',
           'unit',
@@ -140,6 +141,7 @@ export class TestRunsAnomalyService {
           'stale_at',
           'config_hash_used'
         ],
+        relations: ['metrics_source'],
         order: {
           dashboard_label: 'ASC',
           panel_title: 'ASC',
@@ -267,6 +269,8 @@ export class TestRunsAnomalyService {
         const statistic = row.statistic as Record<string, unknown> | null;
         return {
           dashboard_label: row.dashboard_label,
+          dashboard_uid: row.dashboard_uid || null,
+          source_type: row.metrics_source?.sourceType || null,
           panel_title: row.panel_title,
           metric_name: row.metric_name,
           unit: row.unit || null,

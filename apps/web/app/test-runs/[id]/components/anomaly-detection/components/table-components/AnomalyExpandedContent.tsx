@@ -1,6 +1,6 @@
 'use client';
 
-import React from 'react';
+import React, { useMemo } from 'react';
 import {
   Box,
   Typography,
@@ -20,9 +20,33 @@ import dynamic from 'next/dynamic';
 import { AnomalyData, MetricTrendData } from '../../types';
 import { TestRun } from '@/types/test-runs';
 import CurrentTestRunChart from '../../../compare/CurrentTestRunChart';
+import type { AggregatedMetricSource } from '../../../compare/current-test-run-chart/types';
 import MetricConfigForm from '../../../configuration-comparison/MetricConfigForm';
 import { createTrendsPlot } from '../utils/trends-plot-utils';
 import { StatisticalDrawerContent } from './StatisticalDrawerContent';
+
+const VALID_STATS = new Set(['avg', 'p50', 'p90', 'p95', 'p99', 'max']);
+
+function parseAggregatedMetricSource(metricName: string, sourceType?: string | null): AggregatedMetricSource | undefined {
+  if (sourceType !== 'performance_test') return undefined;
+
+  const parts = metricName.split('.');
+  if (parts.length < 3) return undefined;
+
+  const type = parts[0];
+  const lastPart = parts[parts.length - 1];
+  const hasAggregation = parts.length >= 4 && VALID_STATS.has(lastPart);
+  const baseName = hasAggregation ? parts[parts.length - 2] : lastPart;
+  const stat = hasAggregation ? lastPart : 'avg';
+
+  if (baseName === 'error_rate') {
+    return { metric: 'error_percentage', stat: 'avg' };
+  }
+  if (baseName !== 'response_time') return undefined;
+  if (type === 'transactions') return { metric: 'transaction_response_time', stat };
+  if (type === 'requests') return { metric: 'request_response_time', stat };
+  return undefined;
+}
 
 const Plot = dynamic(() => import('react-plotly.js'), { ssr: false });
 
@@ -72,6 +96,11 @@ export function AnomalyExpandedContent({
   onResetSelectedTestRun,
 }: AnomalyExpandedContentProps) {
   const theme = useTheme();
+
+  const aggregatedMetricSource = useMemo(
+    () => parseAggregatedMetricSource(row.metric_name, row.source_type),
+    [row.metric_name, row.source_type]
+  );
 
   // Generate trends plot data
   const getTrendsPlotData = (trendData: MetricTrendData[], unit?: string) => {
@@ -245,32 +274,39 @@ export function AnomalyExpandedContent({
                 </Button>
               )}
             </Box>
-            <CurrentTestRunChart
-              testRunId={selectedTestRunIdForRow || testRunId}
-              applicationDashboardId={row.application_dashboard_id}
-              panelId={row.panel_id}
-              metricName={row.metric_name}
-              testRun={(() => {
-                const _effectiveTestRunId = selectedTestRunIdForRow || testRunId;
-                if (selectedTestRunIdForRow && trendsData) {
-                  const selectedTrendData = trendsData.find(t => t.test_run_id === selectedTestRunIdForRow);
-                  if (selectedTrendData) {
-                    return {
-                      start_time: selectedTrendData.test_run_start,
-                      end_time: undefined
-                    };
+            {(row.source_type !== 'performance_test' || aggregatedMetricSource) ? (
+              <CurrentTestRunChart
+                testRunId={selectedTestRunIdForRow || testRunId}
+                applicationDashboardId={row.application_dashboard_id}
+                panelId={row.panel_id}
+                metricName={row.metric_name}
+                testRun={(() => {
+                  const _effectiveTestRunId = selectedTestRunIdForRow || testRunId;
+                  if (selectedTestRunIdForRow && trendsData) {
+                    const selectedTrendData = trendsData.find(t => t.test_run_id === selectedTestRunIdForRow);
+                    if (selectedTrendData) {
+                      return {
+                        start_time: selectedTrendData.test_run_start,
+                        end_time: undefined
+                      };
+                    }
                   }
-                }
-                return testRun ? {
-                  start_time: testRun.start_time,
-                  end_time: testRun.end_time || undefined
-                } : undefined;
-              })()}
-              thresholds={trendsData && trendsData.length > 0 ? trendsData.find(t => t.test_run_id === (selectedTestRunIdForRow || testRunId))?.thresholds : undefined}
-              unit={row.unit}
-              isDrawerOpen={drawerOpen}
-              showToast={showToast}
-            />
+                  return testRun ? {
+                    start_time: testRun.start_time,
+                    end_time: testRun.end_time || undefined
+                  } : undefined;
+                })()}
+                thresholds={trendsData && trendsData.length > 0 ? trendsData.find(t => t.test_run_id === (selectedTestRunIdForRow || testRunId))?.thresholds : undefined}
+                unit={row.unit}
+                isDrawerOpen={drawerOpen}
+                showToast={showToast}
+                aggregatedMetricSource={aggregatedMetricSource}
+              />
+            ) : (
+              <Typography variant="body2" color="text.secondary" sx={{ py: 2, textAlign: 'center' }}>
+                Chart not available for this metric type
+              </Typography>
+            )}
           </Box>
         </Box>
 

@@ -4,6 +4,18 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
+## [0.2.61.0] - 2026-05-31
+
+### Changed
+- **"Exclude Ramp-up Time" renamed to "Apply to analysis timerange only"**: All UI labels, form checkboxes, and tooltips across benchmark forms, SLO threshold config, the aggregated SLO dialog, Apdex SLO dialogs, and the report generation section now use the new label. Helper text updated to match throughout.
+- **Aggregated SLO source tag shows "performance-metrics" instead of "custom"**: The service-level objectives results list now displays the tag as "performance-metrics" for aggregated/custom-source SLOs. The stored data value is unchanged.
+- **Anomaly detection test run details chart uses aggregated timeseries for performance-metrics rows**: When expanding an ADAPT row whose `source_type` is `performance_test`, the "Current Test Run Details" chart now fetches from the `/aggregated-metric-timeseries` endpoint (60-second bucketed data direct from performance tables) instead of the Grafana panel metrics endpoint. The metric and stat are derived from the row's metric name (e.g. `transactions.login.response_time.p95` → `transaction_response_time` / `p95`). Grafana-backed rows are unaffected. Metric types that cannot be mapped to a known aggregated source now show a "Chart not available" message instead of silently rendering an empty chart.
+- **Current test run detail chart shows data points as lines with markers**: The chart mode changed from `lines` to `lines+markers` for clearer data point visibility.
+
+### Fixed
+- **Anomaly detection sort column only worked once**: Clicking the same column header a second time had no effect. The root cause was `setSortDirection` being called inside a `setSortBy` functional updater — React can bail out of re-rendering when state doesn't change, making the nested call unreliable. Fixed by reading `sortBy` directly and calling each setter independently.
+- **Anomaly detection API includes `dashboard_uid`**: The `/test-runs/:id/anomaly-detection` endpoint now returns `dashboard_uid` in each result, enabling the frontend to identify performance-metrics rows.
+
 ## [0.2.60.3] - 2026-05-31
 
 ### Fixed
