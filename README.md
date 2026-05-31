@@ -43,6 +43,7 @@ Login: `perfana@example.com` / `perfana`
 npm install
 docker compose -f docker-compose.infra.yml up -d
 # Wait for Postgres + Keycloak to be healthy, then:
+npm run seed   # load demo test run + metrics (setup.sh runs this automatically)
 npm run dev
 ```
 
