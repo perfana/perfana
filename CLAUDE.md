@@ -35,7 +35,6 @@ npm run dev
 
 → System diagrams: [ARCHITECTURE.md](ARCHITECTURE.md)
 → Code patterns: [CONVENTIONS.md](CONVENTIONS.md)
-→ Improvement plan: [PLAN.md](PLAN.md) (archived — active work tracked in GitHub Issues)
 
 ---
 
