@@ -12,9 +12,10 @@ import { validate as uuidValidate } from 'uuid';
  * This constant UUID is used as a placeholder since performance test data
  * doesn't originate from actual Grafana dashboards.
  */
-export const PERF_TEST_APP_DASHBOARD_ID = '00000000-0000-0000-0000-000000000001';
+const PERF_TEST_APP_DASHBOARD_ID = '00000000-0000-0000-0000-000000000001';
 
 @ValidatorConstraint({ async: false })
+/** @public */
 export class IsUuidOrSyntheticConstraint implements ValidatorConstraintInterface {
   validate(value: unknown, _args: ValidationArguments) {
     if (typeof value !== 'string') {

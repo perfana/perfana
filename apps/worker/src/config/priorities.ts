@@ -21,7 +21,7 @@ export type PriorityLevel = typeof PRIORITY_LEVELS[keyof typeof PRIORITY_LEVELS]
  * Priority mapping for job types
  * Replaces string-based priorities in ENHANCED_JOB_CONFIGS
  */
-export const JOB_PRIORITIES: Record<string, PriorityLevel> = {
+const JOB_PRIORITIES: Record<string, PriorityLevel> = {
   // Critical pipeline jobs
   'analyze-test': PRIORITY_LEVELS.CRITICAL,
 
@@ -55,7 +55,7 @@ export const JOB_PRIORITIES: Record<string, PriorityLevel> = {
  * Queue priority mapping
  * Aligns queue priorities with job priorities
  */
-export const QUEUE_PRIORITIES: Record<string, PriorityLevel> = {
+const QUEUE_PRIORITIES: Record<string, PriorityLevel> = {
   'perfana-critical': PRIORITY_LEVELS.CRITICAL,
   'perfana-processing': PRIORITY_LEVELS.HIGH,
   'perfana-background': PRIORITY_LEVELS.LOW,
@@ -101,62 +101,3 @@ export function validateJobQueuePriority(jobName: string, queueName: string): {
       : undefined
   };
 }
-
-/**
- * Priority-based configuration helpers
- */
-export const PRIORITY_CONFIG = {
-  /**
-   * Get recommended concurrency based on priority level
-   */
-  getRecommendedConcurrency(priority: PriorityLevel): number {
-    switch (priority) {
-      case PRIORITY_LEVELS.CRITICAL: return 8;  // Increased from 3
-      case PRIORITY_LEVELS.HIGH: return 5;
-      case PRIORITY_LEVELS.MEDIUM: return 3;
-      case PRIORITY_LEVELS.LOW: return 2;
-      case PRIORITY_LEVELS.DELAYED: return 1;
-      default: return 3;
-    }
-  },
-
-  /**
-   * Get recommended rate limit based on priority level
-   */
-  getRecommendedRateLimit(priority: PriorityLevel): { max: number; duration: number } {
-    switch (priority) {
-      case PRIORITY_LEVELS.CRITICAL:
-        return { max: 100, duration: 60000 }; // 100 jobs/minute
-      case PRIORITY_LEVELS.HIGH:
-        return { max: 200, duration: 60000 }; // Increased from 50
-      case PRIORITY_LEVELS.MEDIUM:
-        return { max: 150, duration: 60000 };
-      case PRIORITY_LEVELS.LOW:
-        return { max: 50, duration: 60000 };
-      case PRIORITY_LEVELS.DELAYED:
-        return { max: 100, duration: 60000 };
-      default:
-        return { max: 100, duration: 60000 };
-    }
-  },
-
-  /**
-   * Get cleanup policy based on priority level
-   */
-  getCleanupPolicy(priority: PriorityLevel): { removeOnComplete: number; removeOnFail: number } {
-    switch (priority) {
-      case PRIORITY_LEVELS.CRITICAL:
-        return { removeOnComplete: 50, removeOnFail: 20 };
-      case PRIORITY_LEVELS.HIGH:
-        return { removeOnComplete: 30, removeOnFail: 15 };
-      case PRIORITY_LEVELS.MEDIUM:
-        return { removeOnComplete: 25, removeOnFail: 10 };
-      case PRIORITY_LEVELS.LOW:
-        return { removeOnComplete: 15, removeOnFail: 5 };
-      case PRIORITY_LEVELS.DELAYED:
-        return { removeOnComplete: 10, removeOnFail: 5 };
-      default:
-        return { removeOnComplete: 25, removeOnFail: 10 };
-    }
-  }
-} as const;

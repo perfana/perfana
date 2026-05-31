@@ -97,18 +97,3 @@ export interface PanelMetricsDocument {
   benchmarkIds: string[];
 }
 
-// Job data
-export interface DynatraceCollectJobData {
-  testRunId: string;
-  requestId?: string;
-  batchSize?: number;
-  maxConcurrent?: number;
-}
-
-// Processing result
-export interface DynatraceProcessingResult {
-  panelDocuments: PanelDocument[];
-  metricsDocuments: PanelMetricsDocument[];
-  executionTime: number;
-  processedQueries: number;
-}

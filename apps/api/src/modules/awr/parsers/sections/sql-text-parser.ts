@@ -18,6 +18,7 @@ import { findTableByIdentifier, findSectionHeading, parseTableToArray } from '..
 /**
  * Map of SQL ID to full SQL text
  */
+/** @public */
 export interface SqlTextMap {
   [sqlId: string]: string;
 }

@@ -1,6 +1,7 @@
 import { cn } from '@/lib/utils';
 import React from 'react';
 
+/** @public */
 export interface CardProps extends React.HTMLAttributes<HTMLDivElement> {
   variant?: 'default' | 'bordered' | 'elevated' | 'flush'
 }

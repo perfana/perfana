@@ -12,8 +12,6 @@ export interface OrgIdSource {
   orgIdFromQuery?: string;
 }
 
-export interface RequiresCapabilityOptions extends OrgIdSource {}
-
 export interface RequiresCapabilityMeta {
   capability: CapabilityValue;
   source: OrgIdSource;

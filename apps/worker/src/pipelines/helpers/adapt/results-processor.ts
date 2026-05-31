@@ -26,33 +26,9 @@ import {
 } from './results/index.js';
 
 /**
- * Result of processing ADAPT results
- */
-export interface ProcessAdaptResultsOutput {
-  /** Number of rows inserted/updated */
-  rowCount: number;
-}
-
-/**
- * Result of generating conclusions
- */
-export interface GenerateConclusionsOutput {
-  /** Number of conclusions generated */
-  rowCount: number;
-}
-
-/**
- * Result of storing tracked results
- */
-export interface StoreTrackedResultsOutput {
-  /** Number of tracked results stored */
-  rowCount: number;
-}
-
-/**
  * Optional metric filter for ADAPT processing
  */
-export interface MetricFilter {
+interface MetricFilter {
   /** Filter to specific application dashboard */
   applicationDashboardId?: string;
   /** Filter to specific panel */

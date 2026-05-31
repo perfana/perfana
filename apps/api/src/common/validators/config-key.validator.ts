@@ -44,6 +44,7 @@ export class IsValidConfigKeyConstraint implements ValidatorConstraintInterface 
   }
 }
 
+/** @public */
 export function IsValidConfigKey(validationOptions?: ValidationOptions) {
   return function (object: object, propertyName: string) {
     registerDecorator({

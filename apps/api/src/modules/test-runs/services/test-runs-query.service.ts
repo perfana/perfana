@@ -18,7 +18,6 @@ import { TestRunsTimeSeriesQueryService } from './test-runs-timeseries-query.ser
 export {
   TestRun,
   TimePeriod,
-  DateBounds,
   DashboardStatistics,
   RecentFailure,
   SystemSummary,

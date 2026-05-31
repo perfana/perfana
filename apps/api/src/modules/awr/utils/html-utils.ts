@@ -14,13 +14,6 @@ import type { Element, AnyNode } from 'domhandler';
 // ==================== Types ====================
 
 /**
- * Represents a single table row as key-value pairs
- */
-export interface TableRow {
-  [key: string]: string;
-}
-
-/**
  * Options for table parsing
  */
 export interface TableParseOptions {
@@ -151,28 +144,6 @@ export function findSectionHeading(
 // ==================== Table Parsing ====================
 
 /**
- * Extract headers from a table row
- *
- * @param $ - CheerioAPI instance
- * @param row - Table row element
- * @returns Array of header strings
- */
-export function extractTableHeaders(
-  $: CheerioAPI,
-  row: Cheerio<Element>,
-): string[] {
-  const headers: string[] = [];
-  const cells = row.find('th, td');
-
-  cells.each((_index: number, cell: Element) => {
-    const text = extractText($(cell));
-    headers.push(text);
-  });
-
-  return headers;
-}
-
-/**
  * Parse a table row into an array of cell values
  *
  * @param $ - CheerioAPI instance
@@ -180,7 +151,7 @@ export function extractTableHeaders(
  * @param trim - Whether to trim whitespace (default: true)
  * @returns Array of cell values
  */
-export function parseTableRowToArray(
+function parseTableRowToArray(
   $: CheerioAPI,
   row: Cheerio<Element>,
   trim: boolean = true,
@@ -197,74 +168,6 @@ export function parseTableRowToArray(
   });
 
   return values;
-}
-
-/**
- * Parse an HTML table into an array of row objects
- *
- * @param $ - CheerioAPI instance
- * @param table - Table element to parse
- * @param options - Parsing options
- * @returns Array of row objects with header keys
- */
-export function parseTableToObjects(
-  $: CheerioAPI,
-  table: Cheerio<Element>,
-  options: TableParseOptions = {},
-): TableRow[] {
-  const {
-    hasHeaders = true,
-    trimCells = true,
-    skipEmptyRows = true,
-    maxRows,
-  } = options;
-
-  const rows = table.find('tr');
-  const result: TableRow[] = [];
-
-  if (rows.length === 0) {
-    return result;
-  }
-
-  // Extract headers from first row if applicable
-  let headers: string[] = [];
-  let startIndex = 0;
-
-  if (hasHeaders) {
-    headers = extractTableHeaders($, $(rows[0]));
-    startIndex = 1;
-  }
-
-  // Parse data rows
-  for (let i = startIndex; i < rows.length; i++) {
-    if (maxRows !== undefined && result.length >= maxRows) {
-      break;
-    }
-
-    const row = $(rows[i]);
-    const values = parseTableRowToArray($, row, trimCells);
-
-    // Skip empty rows
-    if (skipEmptyRows && values.every((v) => v === '')) {
-      continue;
-    }
-
-    // Create row object
-    const rowObj: TableRow = {};
-    if (hasHeaders) {
-      headers.forEach((header, index) => {
-        rowObj[header] = values[index] || '';
-      });
-    } else {
-      values.forEach((value, index) => {
-        rowObj[`col${index}`] = value;
-      });
-    }
-
-    result.push(rowObj);
-  }
-
-  return result;
 }
 
 /**
@@ -306,31 +209,6 @@ export function parseTableToArray(
 // ==================== AWR-Specific Helpers ====================
 
 /**
- * Find the content section following a heading until the next heading
- *
- * @param $ - CheerioAPI instance
- * @param heading - Heading element
- * @returns HTML content of the section
- */
-export function getSectionContent(
-  $: CheerioAPI,
-  heading: Cheerio<Element>,
-): string {
-  const content: string[] = [];
-  let current = heading.next();
-
-  while (
-    current.length > 0 &&
-    !current.is('h1, h2, h3, h4, h5, h6, hr')
-  ) {
-    content.push($.html(current));
-    current = current.next();
-  }
-
-  return content.join('');
-}
-
-/**
  * Extract a value from a labeled cell in AWR format
  * AWR often uses "Label: Value" or adjacent cells
  *
@@ -362,28 +240,6 @@ export function extractLabeledValue(
   }
 
   return null;
-}
-
-/**
- * Check if HTML contains AWR report markers
- *
- * @param html - HTML content to check
- * @returns True if content appears to be an AWR report
- */
-export function isAwrReport(html: string): boolean {
-  const markers = [
-    'WORKLOAD REPOSITORY',
-    'AWR Report',
-    'Automatic Workload Repository',
-    'snapshot.dbid',
-    'Begin Snap:',
-    'End Snap:',
-  ];
-
-  const lowerHtml = html.toLowerCase();
-  return markers.some((marker) =>
-    lowerHtml.includes(marker.toLowerCase()),
-  );
 }
 
 /**

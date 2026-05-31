@@ -18,12 +18,11 @@ import type { EntityManager } from 'typeorm';
 import type { CompareConfig } from './types.js';
 import {
   CompareConfigCache,
-  DEFAULT_COMPARE_CONFIG as _DEFAULT_COMPARE_CONFIG,
   type TempConfigCacheResult,
 } from './compare-config-cache.js';
 
 // Re-export for backward compatibility
-export { DEFAULT_COMPARE_CONFIG, type TempConfigCacheResult } from './compare-config-cache.js';
+export { type TempConfigCacheResult } from './compare-config-cache.js';
 
 /**
  * Control Group Processor

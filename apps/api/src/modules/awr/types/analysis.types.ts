@@ -13,6 +13,7 @@ import type { AwrInsight, InsightSeverity } from './insights.types';
 /**
  * Analysis type for distinguishing single vs comparison analysis
  */
+/** @public */
 export type AnalysisType = 'single' | 'comparison';
 
 /**
@@ -32,6 +33,7 @@ export interface SeveritySummary {
 /**
  * Single report analysis result
  */
+/** @public */
 export interface SingleAnalysisResult {
   /** Analysis type identifier */
   type: 'single';
@@ -52,6 +54,7 @@ export interface SingleAnalysisResult {
 /**
  * Comparison analysis result between two AWR reports
  */
+/** @public */
 export interface ComparisonAnalysisResult {
   /** Analysis type identifier */
   type: 'comparison';
@@ -80,6 +83,7 @@ export interface ComparisonAnalysisResult {
 /**
  * Union type for all analysis results
  */
+/** @public */
 export type AnalysisResult = SingleAnalysisResult | ComparisonAnalysisResult;
 
 // ==================== SQL Comparison Types ====================
@@ -313,6 +317,7 @@ export interface LoadProfileComparisonResult {
 /**
  * Input for single report analysis
  */
+/** @public */
 export interface SingleAnalysisInput {
   /** Report ID */
   reportId: string;
@@ -337,6 +342,7 @@ export interface ComparisonAnalysisInput {
 /**
  * Configuration options for analysis
  */
+/** @public */
 export interface AnalysisConfig {
   /** Minimum percentage change to consider significant regression */
   regressionThresholdPercent?: number;
@@ -359,6 +365,7 @@ export interface AnalysisConfig {
 /**
  * Summary data for collapsed card view
  */
+/** @public */
 export interface AwrReportSummary {
   /** Report ID */
   id: string;

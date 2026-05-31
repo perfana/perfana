@@ -18,6 +18,7 @@ const ApdexSectionPreview = dynamic(() => import('./preview/ApdexSectionPreview'
 
 // ==================== Header Section Config ====================
 
+/** @public */
 export interface HeaderConfig {
   text?: string;
   level?: number;
@@ -62,6 +63,7 @@ export function HeaderConfigForm({ config, onChange }: HeaderConfigFormProps) {
 
 // ==================== Text Block Section Config ====================
 
+/** @public */
 export interface TextBlockConfig {
   content?: string;
   fontSize?: number;
@@ -124,6 +126,7 @@ export function TextBlockConfigForm({ config, onChange }: TextBlockConfigFormPro
 
 // ==================== SLO Section Config ====================
 
+/** @public */
 export interface SloConfig {
   maxItems?: number;
   showDetails?: boolean;
@@ -298,6 +301,7 @@ export function ApdexConfigForm({ config, onChange, testRunId }: ApdexConfigForm
 
 // ==================== Transaction Response Times Config ====================
 
+/** @public */
 export interface TransactionResponseTimesConfig {
   scenario?: string;
   comment?: string;
@@ -492,6 +496,7 @@ export function TransactionResponseTimesConfigForm({ config, onChange, testRunId
 
 // ==================== Regressions Config ====================
 
+/** @public */
 export interface RegressionsConfig {
   sortBy?: 'severity' | 'change' | 'name';
   maxItems?: number;
@@ -568,6 +573,7 @@ export function RegressionsConfigForm({ config, onChange }: RegressionsConfigFor
 
 // ==================== Graphs Config ====================
 
+/** @public */
 export interface GraphsConfig {
   panels?: string[];
   quality?: 'low' | 'standard' | 'high';
@@ -635,6 +641,7 @@ export function GraphsConfigForm({ config, onChange }: GraphsConfigFormProps) {
 
 // ==================== AWR Config ====================
 
+/** @public */
 export interface AwrConfig {
   topSqlCount?: number;
   showSqlStats?: boolean;
@@ -701,6 +708,7 @@ export function AwrConfigForm({ config, onChange }: AwrConfigFormProps) {
 
 // ==================== Trends Config ====================
 
+/** @public */
 export interface TrendsConfig {
   metrics?: string[];
   presetId?: string;
@@ -772,6 +780,7 @@ export function TrendsConfigForm({ config, onChange }: TrendsConfigFormProps) {
 
 // ==================== Comparisons Config ====================
 
+/** @public */
 export interface ComparisonsConfig {
   showSideBySide?: boolean;
   metricsToCompare?: string[];

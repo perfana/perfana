@@ -71,30 +71,6 @@ export const SIMPLE_QUEUES = {
 export type SimpleQueueName = typeof SIMPLE_QUEUES[keyof typeof SIMPLE_QUEUES];
 
 /**
- * Job type to queue mapping
- */
-export const JOB_TO_QUEUE_MAP: Record<string, SimpleQueueName> = {
-  // Single test run pipeline → perfana-analyze
-  'analyze-test': SIMPLE_QUEUES.ANALYZE,
-  'metrics-collection': SIMPLE_QUEUES.ANALYZE,
-  'statistics-calculation': SIMPLE_QUEUES.ANALYZE,
-  'control-groups-pipeline': SIMPLE_QUEUES.ANALYZE,
-  'adapt-analysis': SIMPLE_QUEUES.ANALYZE,
-  'checks-evaluation': SIMPLE_QUEUES.ANALYZE,
-  'panels-processing': SIMPLE_QUEUES.ANALYZE,
-  'performance-test-metrics': SIMPLE_QUEUES.ANALYZE,
-  'dynatrace-collection': SIMPLE_QUEUES.ANALYZE,
-  'reevaluate-checks': SIMPLE_QUEUES.ANALYZE,
-  'transaction-stats-rollup': SIMPLE_QUEUES.ANALYZE,
-
-  // Batch processing → perfana-batch
-  'batch-analysis': SIMPLE_QUEUES.BATCH,
-  'batch-flow': SIMPLE_QUEUES.BATCH,
-  'reevaluation-batch': SIMPLE_QUEUES.BATCH,
-  'orchestrate-reevaluate-batch': SIMPLE_QUEUES.BATCH,
-};
-
-/**
  * Simple worker configuration - based on test-blocking.cjs that achieved 8ms pickup
  */
 export interface SimpleWorkerConfig {
@@ -105,7 +81,7 @@ export interface SimpleWorkerConfig {
 // Worker configs are now dynamic - loaded from environment variables
 let workerConfigsCache: Record<SimpleQueueName, SimpleWorkerConfig> | null = null;
 
-export function getSimpleWorkerConfigs(): Record<SimpleQueueName, SimpleWorkerConfig> {
+function getSimpleWorkerConfigs(): Record<SimpleQueueName, SimpleWorkerConfig> {
   if (workerConfigsCache) {
     return workerConfigsCache;
   }
@@ -142,7 +118,7 @@ export interface SimpleJobOptions extends JobsOptions {
 /**
  * Default job options per job type - NO priority anywhere
  */
-export const SIMPLE_JOB_OPTIONS: Record<string, SimpleJobOptions> = {
+const SIMPLE_JOB_OPTIONS: Record<string, SimpleJobOptions> = {
   'analyze-test': {
     attempts: ATTEMPTS_STANDARD,
     backoff: { type: 'exponential', delay: BACKOFF_STANDARD_MS },
@@ -228,13 +204,6 @@ export const SIMPLE_JOB_OPTIONS: Record<string, SimpleJobOptions> = {
     removeOnFail: 5,
   },
 };
-
-/**
- * Get queue name for a job type
- */
-export function getQueueForJobType(jobType: string): SimpleQueueName {
-  return JOB_TO_QUEUE_MAP[jobType] || SIMPLE_QUEUES.ANALYZE;
-}
 
 /**
  * Get worker config for a queue

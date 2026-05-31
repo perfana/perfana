@@ -1,11 +1,5 @@
 import { HttpException, HttpStatus } from '@nestjs/common';
 
-export interface BusinessExceptionDetails {
-  code: string;
-  details?: unknown;
-  field?: string;
-}
-
 /**
  * Base business exception for domain-specific errors
  */
@@ -68,24 +62,6 @@ export class ResourceExistsException extends BusinessException {
 }
 
 /**
- * Exception for unauthorized access
- */
-export class UnauthorizedException extends BusinessException {
-  constructor(message: string = 'Unauthorized access') {
-    super(message, 'UNAUTHORIZED', HttpStatus.UNAUTHORIZED);
-  }
-}
-
-/**
- * Exception for forbidden access (insufficient permissions)
- */
-export class ForbiddenException extends BusinessException {
-  constructor(message: string = 'Insufficient permissions') {
-    super(message, 'FORBIDDEN', HttpStatus.FORBIDDEN);
-  }
-}
-
-/**
  * Exception for database operation failures
  */
 export class DatabaseException extends BusinessException {
@@ -94,20 +70,6 @@ export class DatabaseException extends BusinessException {
       message,
       'DATABASE_ERROR',
       HttpStatus.INTERNAL_SERVER_ERROR,
-      originalError,
-    );
-  }
-}
-
-/**
- * Exception for external service failures
- */
-export class ExternalServiceException extends BusinessException {
-  constructor(service: string, message: string, originalError?: unknown) {
-    super(
-      `External service '${service}' error: ${message}`,
-      'EXTERNAL_SERVICE_ERROR',
-      HttpStatus.SERVICE_UNAVAILABLE,
       originalError,
     );
   }
@@ -127,14 +89,5 @@ export class InvalidStateException extends BusinessException {
       HttpStatus.UNPROCESSABLE_ENTITY,
       details,
     );
-  }
-}
-
-/**
- * Exception for rate limiting
- */
-export class RateLimitException extends BusinessException {
-  constructor(message: string = 'Rate limit exceeded') {
-    super(message, 'RATE_LIMIT_EXCEEDED', HttpStatus.TOO_MANY_REQUESTS);
   }
 }

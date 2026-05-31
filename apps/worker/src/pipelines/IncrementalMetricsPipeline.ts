@@ -2,8 +2,6 @@ import { BasePipelineTypeORM } from './BasePipelineTypeORM.js';
 import { PipelineResult } from '../types/pipeline.js';
 import type { Logger } from 'pino';
 import type {
-  IncrementalMetricsInput,
-  CollectionResult,
   IncrementalMetricsOutput,
 } from './helpers/incremental/index.js';
 import {
@@ -14,9 +12,6 @@ import {
   DynatraceCollector,
   PerformanceTestCollector,
 } from './helpers/incremental/index.js';
-
-// Re-export types for external consumers
-export type { IncrementalMetricsInput, CollectionResult, IncrementalMetricsOutput };
 
 /**
  * Incremental Metrics Pipeline - Orchestrator

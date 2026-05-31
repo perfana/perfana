@@ -117,6 +117,7 @@ export interface ComparisonThresholds {
 /**
  * Severity Determination Thresholds
  */
+/** @public */
 export interface SeverityThresholds {
   /** DB time percentage for critical severity (default: 20%) */
   criticalDbTimePercent: number;
@@ -131,6 +132,7 @@ export interface SeverityThresholds {
 /**
  * General Analysis Settings
  */
+/** @public */
 export interface GeneralSettings {
   /** Maximum total insights to return (default: 100) */
   maxTotalInsights: number;
@@ -165,6 +167,7 @@ export interface AwrAnalysisConfig {
 /**
  * Default SQL performance thresholds
  */
+/** @public */
 export const DEFAULT_SQL_THRESHOLDS: SqlThresholds = {
   minDbTimePercent: 5,
   criticalDbTimePercent: 20,
@@ -182,6 +185,7 @@ export const DEFAULT_SQL_THRESHOLDS: SqlThresholds = {
 /**
  * Default wait event thresholds
  */
+/** @public */
 export const DEFAULT_WAIT_EVENT_THRESHOLDS: WaitEventThresholds = {
   minDbTimePercent: 5,
   criticalDbTimePercent: 15,
@@ -196,6 +200,7 @@ export const DEFAULT_WAIT_EVENT_THRESHOLDS: WaitEventThresholds = {
 /**
  * Default resource utilization thresholds
  */
+/** @public */
 export const DEFAULT_RESOURCE_THRESHOLDS: ResourceThresholds = {
   cpuWarningPercent: 70,
   cpuCriticalPercent: 90,
@@ -213,6 +218,7 @@ export const DEFAULT_RESOURCE_THRESHOLDS: ResourceThresholds = {
 /**
  * Default comparison thresholds
  */
+/** @public */
 export const DEFAULT_COMPARISON_THRESHOLDS: ComparisonThresholds = {
   significantRegressionPercent: 20,
   criticalRegressionPercent: 50,
@@ -227,6 +233,7 @@ export const DEFAULT_COMPARISON_THRESHOLDS: ComparisonThresholds = {
 /**
  * Default severity thresholds
  */
+/** @public */
 export const DEFAULT_SEVERITY_THRESHOLDS: SeverityThresholds = {
   criticalDbTimePercent: 20,
   warningDbTimePercent: 5,
@@ -237,6 +244,7 @@ export const DEFAULT_SEVERITY_THRESHOLDS: SeverityThresholds = {
 /**
  * Default general settings
  */
+/** @public */
 export const DEFAULT_GENERAL_SETTINGS: GeneralSettings = {
   maxTotalInsights: 100,
   includeInfoInsights: true,
@@ -321,6 +329,7 @@ export function createAwrAnalysisConfig(
  *
  * @returns Strict analysis configuration
  */
+/** @public */
 export function createStrictConfig(): AwrAnalysisConfig {
   return createAwrAnalysisConfig({
     thresholds: {
@@ -352,6 +361,7 @@ export function createStrictConfig(): AwrAnalysisConfig {
  *
  * @returns Relaxed analysis configuration
  */
+/** @public */
 export function createRelaxedConfig(): AwrAnalysisConfig {
   return createAwrAnalysisConfig({
     thresholds: {
@@ -383,6 +393,7 @@ export function createRelaxedConfig(): AwrAnalysisConfig {
 /**
  * Wait class categories for grouping wait events
  */
+/** @public */
 export const WAIT_CLASS_CATEGORIES = {
   IO: ['User I/O', 'System I/O'],
   LOCK: ['Concurrency', 'Application', 'Cluster'],

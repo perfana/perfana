@@ -152,19 +152,7 @@ export const TransactionStatsRollupJobSchema = z.object({
 
 // Inferred types from schemas
 export type AnalyzeTestJob = z.infer<typeof AnalyzeTestJobSchema>;
-export type BatchProcessingJob = z.infer<typeof BatchProcessingJobSchema>;
-export type ReevaluateJob = z.infer<typeof ReevaluateJobSchema>;
-export type MetricsCollectionJob = z.infer<typeof MetricsCollectionJobSchema>;
-export type StatisticsJob = z.infer<typeof StatisticsJobSchema>;
-export type ControlGroupsJob = z.infer<typeof ControlGroupsJobSchema>;
-export type AdaptJob = z.infer<typeof AdaptJobSchema>;
-export type ChecksJob = z.infer<typeof ChecksJobSchema>;
-export type BatchAnalysisJob = z.infer<typeof BatchAnalysisJobSchema>;
-export type BatchFlowJob = z.infer<typeof BatchFlowJobSchema>;
-export type ReevaluationBatchJob = z.infer<typeof ReevaluationBatchJobSchema>;
-export type OrchestrateReevaluateBatchJob = z.infer<typeof OrchestrateReevaluateBatchJobSchema>;
 export type IncrementalCollectionJob = z.infer<typeof IncrementalCollectionJobSchema>;
-export type TransactionStatsRollupJob = z.infer<typeof TransactionStatsRollupJobSchema>;
 
 // Job names as constants
 export const JOB_NAMES = {
@@ -216,104 +204,6 @@ export interface EnhancedJobOptions extends JobsOptions {
   batchId?: string;
   parentJobId?: string;
 }
-
-// Queue configuration per job type
-export interface JobQueueConfig {
-  teamSize: number;
-  teamConcurrency: number;
-  batchSize: number;
-}
-
-// FIXED: Resource-aligned job queue configurations
-export const JOB_QUEUE_CONFIGS: Record<JobName, JobQueueConfig> = {
-  [JOB_NAMES.ANALYZE_TEST]: {
-    teamSize: 6, // Reduced from 10 - memory intensive
-    teamConcurrency: 1,
-    batchSize: 1,
-  },
-  [JOB_NAMES.METRICS_COLLECTION]: {
-    teamSize: 8, // FIXED: Reduced from 15 to align with Grafana capacity (8×2×3=48 < 75% of 30)
-    teamConcurrency: 2,
-    batchSize: 1,
-  },
-  [JOB_NAMES.STATISTICS_PIPELINE]: {
-    teamSize: 4, // Reduced from 5 - CPU intensive
-    teamConcurrency: 1,
-    batchSize: 1,
-  },
-  [JOB_NAMES.CONTROL_GROUPS_PIPELINE]: {
-    teamSize: 4, // Reduced from 5
-    teamConcurrency: 1,
-    batchSize: 1,
-  },
-  [JOB_NAMES.CONTROL_GROUP_STATISTICS]: {
-    teamSize: 3,
-    teamConcurrency: 1,
-    batchSize: 1,
-  },
-  [JOB_NAMES.ADAPT_PIPELINE]: {
-    teamSize: 2, // Reduced from 3 - very resource-intensive (768MB each)
-    teamConcurrency: 1,
-    batchSize: 1,
-  },
-  [JOB_NAMES.CHECKS_EVALUATION]: {
-    teamSize: 6, // Reduced from 8
-    teamConcurrency: 2,
-    batchSize: 1,
-  },
-  [JOB_NAMES.PANELS_PROCESSING]: {
-    teamSize: 6, // Reduced from 10
-    teamConcurrency: 2,
-    batchSize: 1,
-  },
-  [JOB_NAMES.PERFORMANCE_TEST_METRICS]: {
-    teamSize: 6, // Similar to metrics collection
-    teamConcurrency: 2,
-    batchSize: 1,
-  },
-  [JOB_NAMES.DYNATRACE_COLLECTION]: {
-    teamSize: 5, // Reduced from 8
-    teamConcurrency: 2,
-    batchSize: 1,
-  },
-  [JOB_NAMES.REEVALUATE_CHECKS]: {
-    teamSize: 6, // Reduced from 8
-    teamConcurrency: 2,
-    batchSize: 1,
-  },
-
-  // Enhanced job types - conservative settings
-  [JOB_NAMES.BATCH_ANALYSIS]: {
-    teamSize: 2,
-    teamConcurrency: 1,
-    batchSize: 1,
-  },
-  [JOB_NAMES.BATCH_FLOW]: {
-    teamSize: 2,
-    teamConcurrency: 1,
-    batchSize: 1,
-  },
-  [JOB_NAMES.REEVALUATION_BATCH]: {
-    teamSize: 3,
-    teamConcurrency: 1,
-    batchSize: 1,
-  },
-  [JOB_NAMES.ORCHESTRATE_REEVALUATE_BATCH]: {
-    teamSize: 2,
-    teamConcurrency: 1,
-    batchSize: 1,
-  },
-  [JOB_NAMES.INCREMENTAL_COLLECTION]: {
-    teamSize: 4,
-    teamConcurrency: 2,
-    batchSize: 1,
-  },
-  [JOB_NAMES.TRANSACTION_STATS_ROLLUP]: {
-    teamSize: 3, // CPU + IO heavy (tdigest aggregation over millions of rows)
-    teamConcurrency: 1,
-    batchSize: 1,
-  },
-};
 
 /**
  * Enhanced job configurations with detailed resource requirements and timeouts

@@ -2,7 +2,7 @@ import { Injectable, Logger } from '@nestjs/common';
 import { InjectDataSource } from '@nestjs/typeorm';
 import { DataSource } from 'typeorm';
 
-export const NO_SCENARIO_SENTINEL = '__NO_SCENARIO__';
+const NO_SCENARIO_SENTINEL = '__NO_SCENARIO__';
 
 /**
  * Builds a SQL fragment + params for filtering by scenario_name.

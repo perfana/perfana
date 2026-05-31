@@ -6,41 +6,6 @@ export interface StatisticsInput {
   testRunIds: string[];
 }
 
-export interface MetricStatisticsResult {
-  test_run_id: string;
-  application_dashboard_id: string;
-  panel_id: number;
-  metric_name: string;
-  count: number;
-  mean: number;
-  median: number;
-  min_value: number;
-  max_value: number;
-  std_dev: number;
-  last_value: number;
-  n_missing: number;
-  n_non_zero: number;
-  q10: number;
-  q25: number;
-  q75: number;
-  q90: number;
-  q95: number;
-  q99: number;
-  percentiles: Record<string, number>;
-  iqr: number;
-  idr: number;
-  is_constant: boolean;
-  all_missing: boolean;
-  pct_missing: number;
-  dashboard_uid: string;
-  dashboard_label: string;
-  panel_title: string;
-  unit?: string;
-  benchmark_ids?: string[];
-  updated_at: Date;
-  test_run_start?: Date;
-}
-
 /**
  * StatisticsPipeline — Per-Test-Run Descriptive Statistics
  *

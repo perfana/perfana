@@ -14,28 +14,6 @@
  */
 
 /**
- * @deprecated Legacy constant - replaced by scenario-specific dashboard UUIDs
- *
- * Use generateScenarioDashboardUuid() from utils/uuid-generator.ts instead.
- * New structure creates one dashboard per scenario with deterministic UUIDs.
- *
- * Synthetic Application Dashboard ID for all performance test metrics
- * This constant UUID is used as a placeholder since performance test data
- * doesn't originate from actual Grafana dashboards.
- */
-export const PERF_TEST_APP_DASHBOARD_ID = '00000000-0000-0000-0000-000000000001';
-
-/**
- * @deprecated Legacy constant - replaced by scenario-specific dashboard UIDs
- *
- * Use generateScenarioDashboardUid() from utils/uuid-generator.ts instead.
- * New structure creates dashboard UIDs like: "performance-test-metrics-loadtest"
- *
- * Synthetic Dashboard UID for performance test metrics
- */
-export const PERF_TEST_DASHBOARD_UID = 'performance-test-metrics';
-
-/**
  * @deprecated Legacy panel ID mapping - replaced by hash-based panel generation
  *
  * Use generateTransactionPanelId() from utils/panel-id-generator.ts instead.
@@ -48,7 +26,7 @@ export const PERF_TEST_DASHBOARD_UID = 'performance-test-metrics';
  * not specific aggregations. Aggregation type is encoded in metric_name suffix.
  * Example: panel_id=1 covers all response_time metrics (avg, p90, p95, p99)
  */
-export const PERFORMANCE_METRIC_PANEL_IDS = {
+const PERFORMANCE_METRIC_PANEL_IDS = {
   // Response Time Metrics (Panel ID 1) - Consolidated from 6 panels to 1
   // Stores time-series data with multiple aggregations: avg, p90, p95, p99
   RESPONSE_TIME: 1,
@@ -102,8 +80,6 @@ export const AGGREGATION_TYPES = {
   P99: 'p99',
   APDEX: 'apdex',
 } as const;
-
-export type AggregationType = typeof AGGREGATION_TYPES[keyof typeof AGGREGATION_TYPES];
 
 /**
  * Metric classification configuration
@@ -303,154 +279,9 @@ export const APDEX_CONSTANTS = {
 } as const;
 
 /**
- * Helper Functions
- */
-
-/**
- * Build a complete metric name with prefix and aggregation suffix
- *
- * @param prefix - Metric prefix (e.g., "requests.checkout", "transactions.login")
- * @param baseMetricName - Base metric name from METRIC_NAME_TEMPLATES
- * @param aggregationType - Aggregation type from AGGREGATION_TYPES (optional for some metrics)
- * @returns Complete metric name
- *
- * @example
- * buildMetricName("requests.checkout", "response_time", "avg")
- * // Returns: "requests.checkout.response_time.avg"
- *
- * buildMetricName("requests.checkout", "throughput")
- * // Returns: "requests.checkout.throughput"
- */
-export function buildMetricName(
-  prefix: string,
-  baseMetricName: string,
-  aggregationType?: AggregationType
-): string {
-  const base = `${prefix}.${baseMetricName}`;
-  return aggregationType ? `${base}.${aggregationType}` : base;
-}
-
-/**
- * Parse a metric name into its components
- *
- * @param metricName - Full metric name to parse
- * @returns Parsed components or null if invalid format
- *
- * @example
- * parseMetricName("requests.checkout.response_time.avg")
- * // Returns: { prefix: "requests.checkout", baseName: "response_time", aggregation: "avg" }
- */
-export function parseMetricName(metricName: string): {
-  prefix: string;
-  baseName: string;
-  aggregation: string | null;
-} | null {
-  const parts = metricName.split('.');
-  if (parts.length < 3) {
-    return null;
-  }
-
-  // Check if last part is an aggregation type
-  const lastPart = parts[parts.length - 1];
-  const aggregationValues = Object.values(AGGREGATION_TYPES);
-  const isAggregation = aggregationValues.includes(lastPart as AggregationType);
-
-  if (isAggregation) {
-    // Has aggregation suffix
-    const baseName = parts[parts.length - 2];
-    const prefix = parts.slice(0, -2).join('.');
-    return { prefix, baseName, aggregation: lastPart };
-  } else {
-    // No aggregation suffix
-    const baseName = parts[parts.length - 1];
-    const prefix = parts.slice(0, -1).join('.');
-    return { prefix, baseName, aggregation: null };
-  }
-}
-
-/**
- * Get all aggregation types that should be generated for a given base metric
- *
- * @param baseMetricName - Base metric name from METRIC_NAME_TEMPLATES
- * @returns Array of aggregation types to generate
- *
- * @example
- * getAggregationsForMetric("response_time")
- * // Returns: ["avg", "p90", "p95", "p99"]
- *
- * getAggregationsForMetric("throughput")
- * // Returns: [] (no aggregations, raw values)
- */
-export function getAggregationsForMetric(baseMetricName: string): AggregationType[] {
-  switch (baseMetricName) {
-    case METRIC_NAME_TEMPLATES.RESPONSE_TIME:
-      return [
-        AGGREGATION_TYPES.AVG,
-        AGGREGATION_TYPES.P90,
-        AGGREGATION_TYPES.P95,
-        AGGREGATION_TYPES.P99,
-      ];
-    case METRIC_NAME_TEMPLATES.APDEX_SCORE:
-      return [AGGREGATION_TYPES.APDEX];
-    default:
-      // Metrics like throughput, error_rate, etc. don't use aggregation suffixes
-      return [];
-  }
-}
-
-/**
- * Map AGGREGATION_TYPES to ADAPT pipeline aggregation values
- *
- * The ADAPT pipeline expects specific aggregation method names when combining
- * multiple time-series data points. This function maps our internal aggregation
- * type constants to the values expected by ADAPT.
- *
- * @param aggregationType - Aggregation type from AGGREGATION_TYPES or null
- * @returns Aggregation method name for ADAPT pipeline ('mean', 'p50', 'p90', 'p95', 'p99')
- *
- * @example
- * mapAggregationTypeToAdaptAggregation('avg') // Returns: 'mean'
- * mapAggregationTypeToAdaptAggregation('p95') // Returns: 'p95'
- * mapAggregationTypeToAdaptAggregation('apdex') // Returns: 'mean'
- * mapAggregationTypeToAdaptAggregation(null) // Returns: 'mean'
- */
-export function mapAggregationTypeToAdaptAggregation(
-  aggregationType: AggregationType | null | undefined
-): string {
-  if (!aggregationType) {
-    return 'mean';
-  }
-
-  switch (aggregationType) {
-    case AGGREGATION_TYPES.AVG:
-      return 'mean'; // avg is equivalent to mean
-    case AGGREGATION_TYPES.P50:
-      return 'p50';
-    case AGGREGATION_TYPES.P90:
-      return 'p90';
-    case AGGREGATION_TYPES.P95:
-      return 'p95';
-    case AGGREGATION_TYPES.P99:
-      return 'p99';
-    case AGGREGATION_TYPES.APDEX:
-      return 'mean'; // Apdex scores are averaged
-    default:
-      return 'mean';
-  }
-}
-
-/**
  * NEW ARCHITECTURE CONSTANTS
  * These constants support the new scenario/transaction-based dashboard structure
  */
-
-/**
- * Special panel name for scenario-level metrics (virtual users, etc.)
- * This panel contains metrics that apply to the entire scenario, not specific transactions.
- *
- * Imported from utils/panel-id-generator.ts for consistency
- */
-export { SCENARIO_LEVEL_PANEL_NAME, SCENARIO_LEVEL_PANEL_ID } from '../utils/panel-id-generator.js';
 
 // ---------------------------------------------------------------------------
 // Panel-Per-Metric-Type Architecture (v2)
@@ -491,8 +322,6 @@ export const METRIC_TYPE_PANEL_IDS = {
   SCENARIO_AVG_THREADS: 302,
   SCENARIO_MAX_THREADS: 303,
 } as const;
-
-export type MetricTypePanelId = typeof METRIC_TYPE_PANEL_IDS[keyof typeof METRIC_TYPE_PANEL_IDS];
 
 /**
  * Human-readable panel names keyed by panel ID.

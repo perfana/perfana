@@ -10,9 +10,6 @@ export {
   UploadAwrReportDto,
   UploadAwrReportByUrlDto,
   ListAwrReportsQueryDto,
-  AwrReportParamsDto,
-  TestRunAwrReportParamsDto,
-  type AwrFileType,
 } from './upload-awr-report.dto';
 
 // Response DTOs
@@ -32,9 +29,6 @@ export {
 export {
   CompareReportsDto,
   CompareTestRunAwrReportsDto,
-  SqlComparisonItemDto,
-  WaitEventComparisonItemDto,
-  LoadProfileComparisonItemDto,
   ComparisonResponseDto,
   ComparisonSummaryDto,
   AvailableBaselineDto,

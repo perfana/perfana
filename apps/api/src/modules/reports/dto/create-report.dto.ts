@@ -416,30 +416,6 @@ export class ListReportsQueryDto {
 }
 
 /**
- * Path parameters for report endpoints
- */
-export class ReportParamsDto {
-  @ApiProperty({
-    description: 'Report UUID',
-    example: '123e4567-e89b-12d3-a456-426614174000',
-  })
-  @IsUUID('4', { message: 'Report ID must be a valid UUID' })
-  reportId!: string;
-}
-
-/**
- * Path parameters for test run report endpoints
- */
-export class TestRunReportParamsDto {
-  @ApiProperty({
-    description: 'Test run UUID',
-    example: '123e4567-e89b-12d3-a456-426614174000',
-  })
-  @IsUUID('4', { message: 'Test run ID must be a valid UUID' })
-  testRunId!: string;
-}
-
-/**
  * Path parameters for share endpoints
  */
 export class ShareParamsDto {

@@ -15,6 +15,7 @@
 /**
  * Result of parsing a number, includes metadata about the parse
  */
+/** @public */
 export interface ParsedNumber {
   /** The parsed numeric value */
   value: number;

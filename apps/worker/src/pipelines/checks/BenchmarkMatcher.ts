@@ -13,7 +13,7 @@ export interface TestRun {
   ramp_up?: number;
 }
 
-export type BenchmarkType = 'metric' | 'apdex' | 'aggregated';
+type BenchmarkType = 'metric' | 'apdex' | 'aggregated';
 
 export interface Benchmark {
   id: string;

@@ -32,7 +32,7 @@ export interface HtmlGenerationJobResult {
 /**
  * Queue name constant for HTML generation
  */
-export const HTML_GENERATION_QUEUE_NAME = 'perfana-report-html-generation';
+const HTML_GENERATION_QUEUE_NAME = 'perfana-report-html-generation';
 
 /**
  * BullMQ HTML Generation Processor

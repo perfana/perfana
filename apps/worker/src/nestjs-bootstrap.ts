@@ -56,14 +56,6 @@ export async function bootstrapNestJS(): Promise<INestApplicationContext> {
 }
 
 /**
- * Get the NestJS application context
- * Returns null if not initialized
- */
-export function getNestJSContext(): INestApplicationContext | null {
-  return appContext;
-}
-
-/**
  * Get a service from the NestJS application context
  * Throws error if context not initialized
  */

@@ -17,9 +17,6 @@ import { CopyBenchmarksDto } from './dto/copy-benchmarks.dto';
 export {
   Benchmark,
   BenchmarkQuery,
-  BenchmarkType,
-  BenchmarkRequirement,
-  BenchmarkConfiguration,
   BenchmarkTagSyncStatus,
 } from './services';
 

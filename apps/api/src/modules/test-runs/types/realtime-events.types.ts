@@ -14,7 +14,7 @@ export enum TestRunEventType {
 /**
  * Base event payload structure
  */
-export interface TestRunEventPayload {
+interface TestRunEventPayload {
   eventType: TestRunEventType;
   timestamp: string;
   testRun: TestRun;
@@ -58,7 +58,7 @@ export interface TestRunDeletedEvent {
 /**
  * Status changed event payload
  */
-export interface TestRunStatusChangedEvent extends TestRunEventPayload {
+interface TestRunStatusChangedEvent extends TestRunEventPayload {
   eventType: TestRunEventType.STATUS_CHANGED;
   oldStatus?: string;
   newStatus: string;

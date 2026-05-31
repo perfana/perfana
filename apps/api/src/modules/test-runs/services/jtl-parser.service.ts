@@ -2,7 +2,7 @@ import { Injectable, Logger } from '@nestjs/common';
 import AdmZip = require('adm-zip');
 import { parse } from 'csv-parse/sync';
 
-export interface JtlRequestRow {
+interface JtlRequestRow {
   time: Date;
   transactionName: string;
   samplerName: string;
@@ -18,7 +18,7 @@ export interface JtlRequestRow {
   url: string;
 }
 
-export interface JtlTransactionRow {
+interface JtlTransactionRow {
   time: Date;
   transactionName: string;
   success: boolean;
@@ -27,7 +27,7 @@ export interface JtlTransactionRow {
   responseTime: number;
 }
 
-export interface VirtualUserSample {
+interface VirtualUserSample {
   time: Date;
   grpThreads: number;
   allThreads: number;

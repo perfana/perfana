@@ -4,13 +4,19 @@
     "apps/api": {
       "entry": ["src/main.ts", "src/data-source.ts"],
       "project": ["src/**/*.ts"],
-      "ignore": ["src/test/**", "src/**/*.spec.ts", "src/**/*.e2e-spec.ts"],
-      "ignoreDependencies": ["@nestjs/platform-express"]
+      "ignore": [
+        "src/test/**",
+        "src/**/*.spec.ts",
+        "src/**/*.e2e-spec.ts",
+        "src/repositories/application-dashboard.repository.ts",
+        "src/repositories/compare-filter-preset.repository.ts",
+        "src/repositories/trends-filter-preset.repository.ts"
+      ]
     },
     "apps/web": {
       "entry": ["app/**/*.{ts,tsx}", "lib/**/*.{ts,tsx}"],
-      "project": ["app/**/*.{ts,tsx}", "lib/**/*.{ts,tsx}"],
-      "ignore": ["__tests__/**"],
+      "project": ["app/**/*.{ts,tsx}", "lib/**/*.{ts,tsx}", "hooks/**/*.{ts,tsx}", "components/**/*.{ts,tsx}"],
+      "ignore": ["public/**", "scripts/**"],
       "jest": false
     },
     "apps/worker": {
@@ -20,24 +26,45 @@
     },
     "apps/grafana-sync": {
       "entry": ["src/main.ts"],
-      "project": ["src/**/*.ts"],
-      "ignore": ["src/**/*.spec.ts", "test/**"]
+      "project": ["src/**/*.ts"]
     },
     "apps/perfana-report": {
       "entry": ["src/main.ts"],
-      "project": ["src/**/*.ts"],
-      "ignore": ["src/**/*.spec.ts"]
+      "project": ["src/**/*.ts"]
     },
     "packages/shared": {
-      "entry": ["src/index.ts", "src/entities/index.ts", "src/types/index.ts"],
-      "project": ["src/**/*.ts"],
-      "ignore": ["src/**/*.spec.ts"]
+      "entry": ["src/index.ts"],
+      "project": ["src/**/*.ts"]
     },
     "packages/config": {
       "entry": ["src/index.ts"],
       "project": ["src/**/*.ts"]
     }
   },
-  "ignore": [".claude/**", "docs-site/**", ".eslintrc.js"],
+  "ignore": ["docs-site/**", ".eslintrc.js", "scripts/**"],
+  "exclude": ["duplicates"],
+  "ignoreBinaries": ["typeorm", "quartz", "tsconfig-paths"],
+  "ignoreDependencies": [
+    "tsconfig-paths",
+    "@types/.+",
+    "@typescript-eslint/.+",
+    "@testcontainers/.+",
+    "eslint-config-prettier",
+    "eslint-plugin-prettier",
+    "supertest",
+    "@nestjs/testing",
+    "@nestjs/cli",
+    "@nestjs/schematics",
+    "@faker-js/faker",
+    "@playwright/test",
+    "jest-environment-jsdom",
+    "ts-loader",
+    "source-map-support",
+    "husky",
+    "lint-staged",
+    "prettier",
+    "postcss",
+    "brace-expansion"
+  ],
   "ignoreWorkspaces": ["apps/mcp"]
 }

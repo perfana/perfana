@@ -11,16 +11,12 @@
 // Base analyzer interface and abstract class
 export {
   AwrAnalyzer,
-  BaseAwrAnalyzer,
   AnalyzerResult,
   AnalyzerOptions,
-  AnalyzerConstructor,
-  AnalyzerRegistryEntry,
 } from './base-analyzer';
 
 // Concrete analyzer implementations
 export { SqlPerformanceAnalyzer } from './sql-analyzer';
 export { WaitEventsAnalyzer } from './wait-events-analyzer';
 export { ResourceUtilizationAnalyzer } from './resource-analyzer';
-export { ComparisonAnalyzer } from './comparison-analyzer';
 export { RowSourceAnalyzer } from './row-source-analyzer';

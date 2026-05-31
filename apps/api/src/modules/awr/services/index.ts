@@ -4,22 +4,6 @@
  */
 
 export { AwrReportsService } from './awr-reports.service';
-export type {
-  CreateAwrReportOptions,
-  UpdateAwrReportMetadataOptions,
-} from './awr-reports.service';
-
 export { AwrParserService } from './awr-parser.service';
-export type {
-  ParseAwrReportOptions,
-  ParseReportResult,
-  ExtractedMetadata,
-} from './awr-parser.service';
-
 export { AwrAnalysisService } from './awr-analysis.service';
-export type {
-  AnalysisOptions,
-  AnalysisOrchestrationResult,
-} from './awr-analysis.service';
-
 export { AwrComparisonService } from './awr-comparison.service';

@@ -1,7 +1,6 @@
 import {
   IsString,
   IsOptional,
-  IsUUID,
   Length,
   IsEnum,
   Matches,
@@ -145,28 +144,4 @@ export class ListAwrReportsQueryDto {
   @IsString()
   @IsEnum(['asc', 'desc'], { message: 'Sort order must be asc or desc' })
   sortOrder?: 'asc' | 'desc';
-}
-
-/**
- * Path parameters for AWR report endpoints
- */
-export class AwrReportParamsDto {
-  @ApiProperty({
-    description: 'AWR report UUID',
-    example: '123e4567-e89b-12d3-a456-426614174000',
-  })
-  @IsUUID('4', { message: 'Report ID must be a valid UUID' })
-  reportId!: string;
-}
-
-/**
- * Path parameters for test run AWR report endpoints
- */
-export class TestRunAwrReportParamsDto {
-  @ApiProperty({
-    description: 'Test run UUID',
-    example: '123e4567-e89b-12d3-a456-426614174000',
-  })
-  @IsUUID('4', { message: 'Test run ID must be a valid UUID' })
-  testRunId!: string;
 }
