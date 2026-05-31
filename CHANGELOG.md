@@ -4,6 +4,17 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
+## [0.2.61.3] - 2026-05-31
+
+### Changed
+- **Open-source publication preparation** (no application code changes). Prepared the repository for going public:
+  - **Secret audit**: full-history scan with gitleaks (47 findings, all triaged benign — test mocks + doc examples) and trufflehog (0 verified secrets). Decision recorded to keep git history as-is. Reports under `docs/audit/`.
+  - **Repo curation**: untracked maintainer-local tooling from git while keeping it on disk — all of `.claude/skills/` (kept only the generic `.claude/agents/` helpers) and the internal `docs/superpowers/` specs/plans/audits. Stripped gstack/GitNexus/skill-routing sections from `CLAUDE.md` and `AGENTS.md` (kept the project-relevant Health Stack section). Untracked the `docs-site/content/.obsidian/` editor config.
+  - **Docs**: fixed a dead `PLAN.md` link; verified the Quartz docs-site builds; set `quartz.config.ts` `baseUrl` to `perfana.github.io/perfana` for GitHub Pages.
+  - **Onboarding**: wired `npm run seed` and documented it in the Quick Start; added pre-push-gate and architecture-onboarding sections to `CONTRIBUTING.md`.
+  - **Governance**: added `NOTICE` (Apache-2.0 + bundled Quartz/MIT attribution), a PR template, and a DCO sign-off policy; confirmed the security reporting contact. Audited CI workflows — none expose secrets to fork PRs.
+  - A pre-publication credential-rotation checklist (`docs/audit/2026-05-31-rotation-checklist.md`) and clean-clone validation remain as operator follow-ups before visibility is flipped to public.
+
 ## [0.2.61.2] - 2026-05-31
 
 ### Fixed
