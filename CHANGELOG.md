@@ -4,6 +4,16 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
+## [0.2.61.0] - 2026-05-31
+
+### Changed
+- **"Exclude Ramp-up Time" renamed to "Apply to analysis timerange only"**: All UI labels, form checkboxes, and tooltips across benchmark forms, SLO threshold config, the aggregated SLO dialog, Apdex SLO dialogs, and the report generation section now use the new label. Test assertions updated to match.
+- **Aggregated SLO source tag shows "performance-metrics" instead of "custom"**: The service-level objectives results list now displays the tag as "performance-metrics" for aggregated/custom-source SLOs. The stored data value is unchanged.
+- **Anomaly detection test run details chart uses aggregated timeseries for performance-metrics rows**: When expanding an ADAPT row whose `dashboard_uid` starts with `performance-test-metrics`, the "Current Test Run Details" chart now fetches from the `/aggregated-metric-timeseries` endpoint (60-second bucketed data direct from performance tables) instead of the Grafana panel metrics endpoint. The metric and stat are derived from the row's metric name (e.g. `transactions.login.response_time.p95` → `transaction_response_time` / `p95`). Grafana-backed rows are unaffected.
+
+### Fixed
+- **Anomaly detection API includes `dashboard_uid`**: The `/test-runs/:id/anomaly-detection` endpoint now returns `dashboard_uid` in each result, enabling the frontend to identify performance-metrics rows.
+
 ## [0.2.60.3] - 2026-05-31
 
 ### Fixed
