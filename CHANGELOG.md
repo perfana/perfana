@@ -4,6 +4,11 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
+## [0.2.61.2] - 2026-05-31
+
+### Fixed
+- **Repaired 3 stale `@perfana/web` tests** (no production code change — the tests had drifted behind intentional source changes). (1) `socket.test.ts` asserted the old `['websocket','polling']` transport order; the source intentionally switched to polling-first in #377 for proxy compatibility, so the assertion now matches. (2) The `on()` "wrap listener with logging" test leaked state across the full suite — the `socketManager` singleton re-attaches persisted listeners on every `connect()`, so `.find()` grabbed a stale handler; it now takes the last `test_event` registration (its own listener) and is renamed to reflect current behavior. (3) `TestRunDetailsCard.test.tsx` expected the removed text "Yes - Test was aborted"; abort is now rendered as a `<Chip label="Aborted">`, so it asserts on "Aborted". Full web suite back to 3963/3963 passing.
+
 ## [0.2.61.1] - 2026-05-31
 
 ### Changed

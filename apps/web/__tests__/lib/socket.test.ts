@@ -227,7 +227,7 @@ describe('SocketManager', () => {
         auth: {
           token: 'valid-token-abc',
         },
-        transports: ['websocket', 'polling'],
+        transports: ['polling', 'websocket'],
         reconnection: false,
         timeout: 10000,
       });
@@ -1143,19 +1143,22 @@ describe('SocketManager', () => {
       expect(unsubscribe).toBeInstanceOf(Function);
     });
 
-    it('should wrap listener with logging', () => {
+    it('should register listener that receives event data', () => {
       // Arrange
       const listener = jest.fn();
 
       // Act
       socketManager.on('test_event', listener);
 
-      // Trigger the event
-      const wrappedListener = mockSocketOn.mock.calls.find(
+      // Trigger the event. The singleton persists listeners across the suite and
+      // re-attaches them on each connect(), so multiple 'test_event' handlers may
+      // be registered. Grab the last registration — that is this test's listener.
+      const testEventCalls = mockSocketOn.mock.calls.filter(
         (call) => call[0] === 'test_event'
-      )?.[1];
-      if (wrappedListener) {
-        wrappedListener({ data: 'test' });
+      );
+      const registeredListener = testEventCalls[testEventCalls.length - 1]?.[1];
+      if (registeredListener) {
+        registeredListener({ data: 'test' });
       }
 
       // Assert

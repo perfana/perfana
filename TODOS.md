@@ -80,14 +80,13 @@ and any DQL query / entity-mapping editor pages.
 
 ## Tests
 
-### Fix pre-existing web test failures (socket + TestRunDetailsCard)
+### Consider clearing `persistedListeners` on manual `disconnect()`
 
-**Priority:** P0
-**Origin:** Noticed during /ship on `fix/websocket-hoist-nestjs-websockets` (2026-05-29). Pre-existing failures, unrelated to this branch.
-**What:**
-1. `__tests__/lib/socket.test.ts` — `SocketManager.connect()` test expects `mockIo` called with `ws://localhost:3001/test-runs` and specific params; expectation no longer matches the implementation.
-2. `__tests__/app/test-runs/test-run-details/TestRunDetailsCard.test.tsx` — expects text `'Yes - Test was aborted'` but the component renders it differently now.
-**How:** Read the current `lib/socket.ts` and `TestRunDetailsCard` implementations and update the test expectations to match.
+**Priority:** P3
+**Origin:** Noticed during /investigate of failing web tests on `fix/web-stale-failing-tests` (2026-05-31).
+**Why:** `socketManager.disconnect()` tears down the socket but intentionally preserves `persistedListeners` so they survive transient reconnects. A *manual* disconnect is a full teardown though — a later `connect()` re-attaches listeners the caller may have meant to drop. This same leak caused the socket `on()` test to grab a stale handler across the suite (worked around in the test, not the source).
+**What:** Decide whether a manual `disconnect()` should clear `persistedListeners` while reconnect-triggered teardown keeps them. If yes, distinguish manual teardown from reconnect teardown.
+**Where:** `apps/web/lib/socket.ts` — `disconnect()` (~line 281) and `persistedListeners` (~line 55).
 
 ---
 
@@ -103,4 +102,7 @@ and any DQL query / entity-mapping editor pages.
 
 ## Completed
 
-(none yet)
+### Fix pre-existing web test failures (socket + TestRunDetailsCard)
+
+Updated stale test assertions to match intentional source changes: socket transport order (polling-first, #377), socket `on()` listener registration (state-leak workaround + rename), and abort UI (`<Chip label="Aborted">` instead of removed text). Full web suite back to 3963/3963.
+**Completed:** v0.2.61.2 (2026-05-31)
