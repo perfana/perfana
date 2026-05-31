@@ -111,7 +111,7 @@ export default function AggregatedSloChart({
       setLoading(true);
       setError(null);
 
-      const params = new URLSearchParams({ metric, applyAnalysisWindow: 'true' });
+      const params = new URLSearchParams({ metric, applyAnalysisWindow: 'false' });
       if (stat) params.set('stat', stat);
 
       const response = await authenticatedFetch(

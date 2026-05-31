@@ -4,6 +4,11 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
+## [0.2.60.3] - 2026-05-31
+
+### Fixed
+- **Aggregated SLO chart shows only analysis window data**: The timeseries fetch was using `applyAnalysisWindow=true`, clipping the chart data to the ramp-up/ramp-down window and leaving the chart empty outside the orange dashed boundary lines. Changed to `applyAnalysisWindow=false` so the full test run timeseries is shown; the analysis window boundaries remain visible as orange dashed vertical lines.
+
 ## [0.2.60.2] - 2026-05-29
 
 ### Fixed
