@@ -358,9 +358,10 @@ export function SLOList({
                       const source = benchmark?.source || result.source;
                       if (!source) return null;
                       const isGrafana = source === 'grafana';
+                      const sourceLabel = source === 'custom' ? 'performance-metrics' : source;
                       return (
                         <Chip
-                          label={source}
+                          label={sourceLabel}
                           sx={(thm) => ({
                             height: '20px',
                             fontWeight: 600,
