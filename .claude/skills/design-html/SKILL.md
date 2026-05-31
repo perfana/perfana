@@ -1,1 +1,0 @@
-/Users/daniel/workspace/perfana/.claude/skills/gstack/design-html/SKILL.md

@@ -1,1 +1,0 @@
-/Users/daniel/workspace/perfana/.claude/skills/gstack/connect-chrome/SKILL.md
