@@ -40,54 +40,6 @@ export function createRedisConfig(): RedisConfiguration {
   };
 }
 
-export function createRedisConnection(): Redis {
-  const config = createRedisConfig();
-  const redis = new Redis(config);
-
-  // Handle Redis events
-  redis.on('connect', () => {
-    logger.info('🔗 Redis connected');
-  });
-
-  redis.on('ready', () => {
-    logger.info('✅ Redis ready');
-  });
-
-  redis.on('error', (error: Error & { code?: string; errno?: number; syscall?: string; address?: string; port?: number }) => {
-    // Filter out command timeout errors from BullMQ polling - these are normal behavior
-    if (error.message?.includes('Command timed out')) {
-      logger.debug('Redis command timeout during BullMQ polling (normal behavior)', {
-        message: error.message
-      });
-      return;
-    }
-
-    // Log other Redis errors normally
-    logger.error('❌ Redis error:', {
-      message: error.message,
-      code: error.code,
-      errno: error.errno,
-      syscall: error.syscall,
-      address: error.address,
-      port: error.port
-    });
-  });
-
-  redis.on('close', () => {
-    logger.warn('🔌 Redis connection closed');
-  });
-
-  redis.on('reconnecting', (time: number) => {
-    logger.info(`🔄 Redis reconnecting in ${time}ms`);
-  });
-
-  redis.on('end', () => {
-    logger.info('🛑 Redis connection ended');
-  });
-
-  return redis;
-}
-
 export async function testRedisConnection(redis: Redis): Promise<boolean> {
   try {
     // For lazy connections, ensure we're connected first
@@ -121,16 +73,4 @@ export async function testRedisConnection(redis: Redis): Promise<boolean> {
     logger.error('❌ Redis connection test failed:', error);
     return false;
   }
-}
-
-export function getRedisConnectionString(): string {
-  const config = getConfig();
-
-  // Use REDIS_URL if provided, otherwise construct from individual parts
-  if (config.REDIS_URL && config.REDIS_URL !== 'redis://localhost:6379') {
-    return config.REDIS_URL;
-  }
-
-  const auth = config.REDIS_PASSWORD ? `:${config.REDIS_PASSWORD}@` : '';
-  return `redis://${auth}${config.REDIS_HOST}:${config.REDIS_PORT}/${config.REDIS_DB}`;
 }

@@ -62,7 +62,7 @@ export interface AdaptInput {
 /**
  * Threshold configuration for ADAPT comparison
  */
-export interface ThresholdConfig {
+interface ThresholdConfig {
   /**
    * Percentage threshold for determining difference
    */
@@ -87,7 +87,7 @@ export interface ThresholdConfig {
 /**
  * Metric classification for determining comparison direction
  */
-export interface MetricClassification {
+interface MetricClassification {
   /**
    * Classification type (e.g., 'RED_duration', 'RED_errors', 'RED_rate', 'load', 'none')
    */
@@ -132,113 +132,3 @@ export interface CompareConfig {
   source: string;
 }
 
-/**
- * Statistical result for a single metric comparison
- */
-export interface StatisticResult {
-  /**
-   * Test value (current test run)
-   */
-  test: number | null;
-
-  /**
-   * Control value (baseline from control group)
-   */
-  control: number | null;
-
-  /**
-   * Raw difference (test - control)
-   */
-  diff: number | null;
-
-  /**
-   * Percentage difference ((test - control) / control * 100)
-   */
-  pctDiff: number | null;
-
-  /**
-   * Absolute difference (|test - control|)
-   */
-  absDiff: number | null;
-
-  /**
-   * IQR-based difference for robust comparison
-   */
-  iqrDiff: number | null;
-}
-
-/**
- * Individual threshold check result
- */
-export interface ThresholdCheckResult {
-  /**
-   * Whether the threshold is valid/applicable
-   */
-  valid: boolean;
-
-  /**
-   * Whether a significant difference was detected
-   */
-  isDifference: boolean;
-}
-
-/**
- * Combined threshold checks for all threshold types
- */
-export interface ThresholdChecks {
-  /**
-   * Percentage threshold check result
-   */
-  pct: ThresholdCheckResult;
-
-  /**
-   * IQR threshold check result
-   */
-  iqr: ThresholdCheckResult;
-
-  /**
-   * Absolute threshold check result
-   */
-  abs: ThresholdCheckResult;
-}
-
-/**
- * Final ADAPT conclusion for a metric comparison
- */
-export interface AdaptConclusion {
-  /**
-   * Whether the comparison is valid
-   */
-  valid: boolean;
-
-  /**
-   * Whether the metric increased (degraded for lower-is-better metrics)
-   */
-  increase: boolean;
-
-  /**
-   * Whether the metric decreased (improved for lower-is-better metrics)
-   */
-  decrease: boolean;
-
-  /**
-   * Whether only some threshold checks showed a difference
-   */
-  partialDifference: boolean;
-
-  /**
-   * Whether all threshold checks showed a difference
-   */
-  allDifference: boolean;
-
-  /**
-   * Whether this metric was ignored in the comparison
-   */
-  ignore: boolean;
-
-  /**
-   * Human-readable label for the conclusion
-   * (e.g., 'REGRESSION', 'IMPROVEMENT', 'STABLE', 'IGNORED')
-   */
-  label: string;
-}

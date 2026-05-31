@@ -44,7 +44,7 @@ export interface ApdexBenchmark {
 /**
  * Per-transaction Apdex result for workload-level SLOs
  */
-export interface TransactionApdexResult {
+interface TransactionApdexResult {
   transaction_name: string;
   scenario_name: string;
   apdex_score: number | null;

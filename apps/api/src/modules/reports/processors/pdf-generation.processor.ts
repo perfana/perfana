@@ -9,7 +9,7 @@ import { GeneratedReport } from '@perfana/shared';
 /**
  * Job data for PDF generation
  */
-export interface PdfGenerationJobData {
+interface PdfGenerationJobData {
   reportId: string;
   priority?: number;
   initiatedBy?: string;
@@ -31,7 +31,7 @@ export interface PdfGenerationJobResult {
 /**
  * Queue name constant for PDF generation
  */
-export const PDF_GENERATION_QUEUE_NAME = 'perfana-report-pdf-generation';
+const PDF_GENERATION_QUEUE_NAME = 'perfana-report-pdf-generation';
 
 /**
  * BullMQ PDF Generation Processor

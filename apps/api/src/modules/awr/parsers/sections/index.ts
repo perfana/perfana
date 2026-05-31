@@ -17,8 +17,6 @@ export { SegmentStatisticsParser } from './segment-statistics-parser';
 
 // ASH SQL parsers
 export { parseAshSql } from './ash-sql-parser';
-export type { TopSqlWithEvent, TopSqlWithRowSource, ParsedAshSqlData } from './ash-sql-parser';
 
 // SQL Text parser
 export { parseSqlText } from './sql-text-parser';
-export type { SqlTextMap, ParsedSqlTextData } from './sql-text-parser';

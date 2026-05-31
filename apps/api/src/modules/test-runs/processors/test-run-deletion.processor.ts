@@ -30,7 +30,7 @@ export interface TestRunDeletionJobResult {
   errorMessage?: string;
 }
 
-export const TEST_RUN_DELETION_QUEUE_NAME = 'perfana-test-run-deletion';
+const TEST_RUN_DELETION_QUEUE_NAME = 'perfana-test-run-deletion';
 
 /**
  * BullMQ Test Run Deletion Processor

@@ -275,7 +275,7 @@ export interface MetricsPanelSelector {
 }
 
 /** A single data point in a metrics time series */
-export interface MetricsDataPoint {
+interface MetricsDataPoint {
   time: Date;
   value: number | null;
 }

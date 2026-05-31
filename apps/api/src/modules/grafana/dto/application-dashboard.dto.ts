@@ -180,36 +180,4 @@ export class UpdateApplicationDashboardDto {
   snapshotTimeout?: number;
 }
 
-export class ApplicationDashboardQuery {
-  @ApiPropertyOptional({ description: 'Filter by system under test ID' })
-  @IsOptional()
-  @IsUUID()
-  systemUnderTestId?: string;
-
-  @ApiPropertyOptional({ description: 'Filter by test environment' })
-  @IsOptional()
-  @IsString()
-  testEnvironment?: string;
-
-  @ApiPropertyOptional({ description: 'Filter by Grafana instance ID' })
-  @IsOptional()
-  @IsUUID()
-  grafanaInstanceId?: string;
-
-  @ApiPropertyOptional({ description: 'Filter by dashboard label' })
-  @IsOptional()
-  @IsString()
-  dashboardLabel?: string;
-
-  @ApiPropertyOptional({ description: 'Filter by dashboard UID' })
-  @IsOptional()
-  @IsString()
-  dashboardUid?: string;
-
-  @ApiPropertyOptional({ description: 'Filter by tags', type: [String] })
-  @IsOptional()
-  @IsArray()
-  @IsString({ each: true })
-  tags?: string[];
-}
 

@@ -147,6 +147,3 @@ export const darkTheme = createTheme({
 export function getTheme(mode: ThemeMode) {
   return mode === 'dark' ? darkTheme : lightTheme;
 }
-
-// Backward compatibility
-export const theme = lightTheme;

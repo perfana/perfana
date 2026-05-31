@@ -34,6 +34,7 @@ export interface PdfGenerationJobResult {
 /**
  * Queue name constant for PDF generation
  */
+/** @public */
 export const PDF_GENERATION_QUEUE_NAME = 'perfana-report-pdf-generation';
 
 /**

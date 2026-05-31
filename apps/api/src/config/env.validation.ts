@@ -4,7 +4,7 @@ import * as Joi from 'joi';
  * Environment variable validation schema using Joi
  * This ensures all required configuration is present and valid before app startup
  */
-export const envValidationSchema = Joi.object({
+const envValidationSchema = Joi.object({
   // Application Configuration
   NODE_ENV: Joi.string()
     .valid('development', 'production', 'test')

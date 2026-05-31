@@ -7,6 +7,7 @@ import { PipeTransform, Injectable } from '@nestjs/common';
  * - Removes dangerous characters
  */
 @Injectable()
+/** @public */
 export class StringSanitizationPipe implements PipeTransform<string, string> {
   constructor(
     private readonly options?: {

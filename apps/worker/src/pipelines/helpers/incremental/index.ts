@@ -7,31 +7,19 @@
 
 // Types and interfaces
 export type {
-  IncrementalMetricsInput,
-  CollectionResult,
   IncrementalMetricsOutput,
 } from './types.js';
 
 // Validator
 export {
   IncrementalValidator,
-  type InputValidationResult,
 } from './incremental-validator.js';
 
 // Processors
 export { MetricProcessor } from './metric-processor.js';
-export type {
-  FlattenedMetricRecord,
-  TestRunContext,
-} from './metric-processor.js';
 
 // Batch processing
 export { BatchProcessor } from './batch-processor.js';
-export type {
-  MetricSource,
-  BatchProcessorConfig,
-  BatchProcessResult,
-} from './batch-processor.js';
 
 // Collectors
 export { GrafanaCollector } from './grafana-collector.js';

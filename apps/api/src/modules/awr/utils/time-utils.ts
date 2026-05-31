@@ -30,6 +30,7 @@ export type TimeUnit =
 /**
  * Parsed time value with metadata
  */
+/** @public */
 export interface ParsedTime {
   /** Time value in seconds (canonical unit) */
   seconds: number;

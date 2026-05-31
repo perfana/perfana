@@ -1,7 +1,7 @@
 import { BasePipelineTypeORM } from './BasePipelineTypeORM.js';
 import { PipelineResult } from '../types/pipeline.js';
 
-export interface TransactionStatsRollupInput {
+interface TransactionStatsRollupInput {
   testRunId: string;
 }
 

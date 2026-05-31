@@ -4,6 +4,12 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
+## [0.2.61.1] - 2026-05-31
+
+### Changed
+- **Dead-code cleanup (knip backlog cleared)**: Removed ~205 knip findings across the monorepo so `npx knip` exits clean. Deleted 43 dead files — the unwired `tracked-regressions/` anomaly-detection feature, the superseded `apdex-config-dialog` implementation, orphaned components (`ReportList`, `CollapsedCard`, `SLOContext`, `ConnectionStatus`, `useRealtime`, template-builder pieces), the worker `statistics-processor`, and unused barrel `index.ts` files. Removed ~180 unused exports/re-exports from `apps/api` and `apps/worker` (barrel re-exports, dead DTOs, helper functions, type aliases). Tagged framework-DI symbols (guards/pipes/validators/decorators) and live-feature type vocabularies (AWR, report-generation) with `/** @public */` where knip cannot trace runtime usage.
+- **Dependency hygiene**: Declared previously-undeclared phantom deps in `apps/api` (`express`, `dotenv`, `domhandler`, `js-yaml`); removed `puppeteer` from `apps/api` (used only in `perfana-report`/`shared`); removed the redundant root `dependencies` block (each entry is declared in the workspace that uses it). Configured `knip.json` to ignore CLI binaries used in scripts (`typeorm`, `quartz`, `tsconfig-paths`) and tooling knip cannot trace (test runners, git hooks, eslint plugins).
+
 ## [0.2.61.0] - 2026-05-31
 
 ### Changed

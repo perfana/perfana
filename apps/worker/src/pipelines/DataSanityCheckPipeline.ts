@@ -2,7 +2,7 @@ import { BasePipelineTypeORM } from './BasePipelineTypeORM.js';
 import { PipelineResult } from '../types/pipeline.js';
 import { MetricCollectionGapService } from '../services/MetricCollectionGapService.js';
 
-export interface DataSanityCheckInput {
+interface DataSanityCheckInput {
   testRunId: string;
 }
 

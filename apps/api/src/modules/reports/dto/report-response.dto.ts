@@ -4,6 +4,7 @@ import { REPORT_SECTION_TYPES, ReportSectionType, ReportSectionConfigDto, Report
 /**
  * Report status values
  */
+/** @public */
 export const REPORT_STATUS_VALUES = [
   'pending',
   'processing',
@@ -667,42 +668,4 @@ export class TemplateSummaryDto {
     example: 5,
   })
   section_count!: number;
-}
-
-/**
- * Response DTO for job progress
- */
-export class JobProgressDto {
-  @ApiProperty({
-    description: 'BullMQ job ID',
-    example: 'html-generation-123',
-  })
-  job_id!: string;
-
-  @ApiProperty({
-    description: 'Report UUID',
-    example: '123e4567-e89b-12d3-a456-426614174000',
-  })
-  report_id!: string;
-
-  @ApiProperty({
-    description: 'Current generation stage',
-    example: 'rendering_html',
-    enum: ['initializing', 'fetching_data', 'rendering_html', 'saving', 'complete'],
-  })
-  stage!: 'initializing' | 'fetching_data' | 'rendering_html' | 'saving' | 'complete';
-
-  @ApiProperty({
-    description: 'Progress percentage (0-100)',
-    example: 75,
-    minimum: 0,
-    maximum: 100,
-  })
-  progress!: number;
-
-  @ApiProperty({
-    description: 'Human-readable status message',
-    example: 'Rendering HTML content...',
-  })
-  message!: string;
 }

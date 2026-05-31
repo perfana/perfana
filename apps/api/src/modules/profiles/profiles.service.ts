@@ -23,7 +23,7 @@ export interface ProfileResponse {
   updatedAt: string;
 }
 
-export interface DashboardVariable {
+interface DashboardVariable {
   name: string;
   values: string[];
 }

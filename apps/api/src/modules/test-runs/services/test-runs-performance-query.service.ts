@@ -15,7 +15,7 @@ import {
   ThroughputStats,
 } from '../types/test-run.types';
 
-export interface SummaryTimeseriesBucket {
+interface SummaryTimeseriesBucket {
   timeSeconds: number;
   throughput: number;
   avgResponseTime: number;

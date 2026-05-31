@@ -619,4 +619,3 @@ export function HtmlReportViewerModal({
   );
 }
 
-export default HtmlReportViewerModal;

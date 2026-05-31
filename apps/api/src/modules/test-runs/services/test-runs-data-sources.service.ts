@@ -20,24 +20,24 @@ import {
 
 // ─── Response shape interfaces ────────────────────────────────────────────────
 
-export interface GrafanaSourceInfo {
+interface GrafanaSourceInfo {
   available: boolean;
   instances: Array<{ id: string; label: string; url: string }>;
   dashboardCount: number;
 }
 
-export interface TempoSourceInfo {
+interface TempoSourceInfo {
   available: boolean;
   instances: Array<{ id: string; label: string; apiUrl: string }>;
 }
 
-export interface PyroscopeSourceInfo {
+interface PyroscopeSourceInfo {
   available: boolean;
   instance: { id: string; label: string; backendUrl: string } | null;
   configurations: Array<{ application: string; profiler: string }>;
 }
 
-export interface DynatraceSourceInfo {
+interface DynatraceSourceInfo {
   available: boolean;
   configs: Array<{ id: string; label: string; host: string }>;
 }
@@ -71,7 +71,7 @@ export interface HotspotEntry {
   percentage: number;
 }
 
-export interface PanelSummary {
+interface PanelSummary {
   panelId: number;
   title: string;
   metrics: Array<{

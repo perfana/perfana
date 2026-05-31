@@ -83,7 +83,7 @@ export interface GrafanaRequest {
   };
 }
 
-export interface GrafanaQuery {
+interface GrafanaQuery {
   refId: string;
   expr?: string;
   datasource?: {
@@ -121,24 +121,4 @@ export interface PanelMetricsDocument {
   }> | null;
   data: MetricsRecord[];
   updated_at: Date;
-}
-
-// Database row structure (flattened for PostgreSQL)
-export interface MetricsRowData {
-  test_run_id: string;
-  application_dashboard_id: string;
-  dashboard_uid: string;
-  panel_id: number;
-  panel_title: string;
-  dashboard_label: string;
-  benchmark_ids?: string[] | null;
-  errors?: unknown | null;
-  metric_name: string;
-  time: Date;
-  timestep?: number | null;
-  ramp_up?: boolean;
-  value: number;
-  unit?: string | null;
-  updated_at: Date;
-  created_at?: Date;
 }

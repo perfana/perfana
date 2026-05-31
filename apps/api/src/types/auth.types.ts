@@ -4,12 +4,12 @@ import { Request } from 'express';
 /**
  * Authentication types supported by the API
  */
-export type AuthType = 'api-key' | 'keycloak-jwt';
+type AuthType = 'api-key' | 'keycloak-jwt';
 
 /**
  * API key information extracted during authentication
  */
-export interface ApiKeyInfo {
+interface ApiKeyInfo {
   id: string;
   description: string;
   roles: string[];

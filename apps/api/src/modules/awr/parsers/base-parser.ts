@@ -253,22 +253,3 @@ export abstract class BaseSectionParser<T> {
     return 'An unexpected error occurred';
   }
 }
-
-// ==================== Utility Types for Parsers ====================
-
-/**
- * Type representing a parser class constructor
- */
-export type ParserConstructor<T> = new (options?: ParserOptions) => BaseSectionParser<T>;
-
-/**
- * Registry entry for a section parser
- */
-export interface ParserRegistryEntry<T> {
-  /** Parser class constructor */
-  parser: ParserConstructor<T>;
-  /** Whether this section is required for a valid AWR report */
-  required: boolean;
-  /** Processing priority (lower = earlier) */
-  priority: number;
-}

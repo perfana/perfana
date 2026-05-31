@@ -71,7 +71,7 @@ export interface AdaptConfig {
  * Test run variable
  * Individual variable with placeholder and value
  */
-export interface TestRunVariable {
+interface TestRunVariable {
   /**
    * Variable placeholder/key
    */
@@ -94,7 +94,7 @@ export type TestRunVariables = TestRunVariable[];
  * Provides quick access links to related resources (Grafana, CI/CD, etc.)
  * Note: This is different from the DeepLink entity (database representation)
  */
-export interface TestRunDeepLink {
+interface TestRunDeepLink {
   /**
    * Display name for the link
    */

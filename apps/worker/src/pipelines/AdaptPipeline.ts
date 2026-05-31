@@ -2,30 +2,12 @@ import { BasePipelineTypeORM } from './BasePipelineTypeORM.js';
 import { PipelineResult } from '../types/pipeline.js';
 import { EntityManager } from 'typeorm';
 import type {
-  AdaptInput as _AdaptInput,
-  ThresholdConfig as _ThresholdConfig,
-  MetricClassification as _MetricClassification,
-  CompareConfig as _CompareConfig,
-  StatisticResult as _StatisticResult,
-  ThresholdChecks as _ThresholdChecks,
-  AdaptConclusion as _AdaptConclusion,
   SubstageEntry,
 } from './helpers/adapt/index.js';
 import {
   AdaptValidator,
   ResultsProcessor,
   formatSubstageBreakdown,
-} from './helpers/adapt/index.js';
-
-// Re-export types for backwards compatibility
-export type {
-  AdaptInput,
-  ThresholdConfig,
-  MetricClassification,
-  CompareConfig,
-  StatisticResult,
-  ThresholdChecks,
-  AdaptConclusion,
 } from './helpers/adapt/index.js';
 
 /**

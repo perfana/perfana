@@ -1,7 +1,2 @@
-export { TraceAnalyzerService, SpanAggregation, HierarchyInfo } from './trace-analyzer.service';
-export {
-  TraceQueryService,
-  TraceSearchQuery,
-  TraceSearchResult,
-  ComparisonTraceSearchResult,
-} from './trace-query.service';
+export { TraceAnalyzerService } from './trace-analyzer.service';
+export { TraceQueryService } from './trace-query.service';

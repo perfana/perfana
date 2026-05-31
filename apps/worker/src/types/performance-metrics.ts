@@ -54,21 +54,6 @@ export interface PerformanceTestMetricsOutput {
 }
 
 /**
- * Apdex threshold configuration for a transaction or workload
- */
-export interface ApdexThresholdConfig {
-  /**
-   * Transaction name (null for workload-level threshold)
-   */
-  transactionName: string | null;
-
-  /**
-   * Apdex threshold in milliseconds
-   */
-  thresholdMs: number;
-}
-
-/**
  * Apdex threshold lookup result
  */
 export interface ApdexThresholdLookup {
@@ -88,75 +73,6 @@ export interface ApdexThresholdLookup {
    * Map of transaction_name -> threshold_ms
    */
   transactionThresholds: Map<string, number>;
-}
-
-/**
- * Aggregated metrics for a specific transaction or overall
- */
-export interface AggregatedMetrics {
-  /**
-   * Transaction or sampler name (null for overall metrics)
-   */
-  name: string | null;
-
-  /**
-   * Response time statistics (in milliseconds)
-   */
-  responseTime?: {
-    avg: number | null;
-    p50: number | null;
-    p95: number | null;
-    p99: number | null;
-    min: number | null;
-    max: number | null;
-  };
-
-  /**
-   * Response latency average (in milliseconds)
-   */
-  responseLatency?: {
-    avg: number | null;
-  };
-
-  /**
-   * Response connect time average (in milliseconds)
-   */
-  responseConnectTime?: {
-    avg: number | null;
-  };
-
-  /**
-   * Success rate (0-100%)
-   */
-  successRate?: number | null;
-
-  /**
-   * Throughput (requests per second)
-   */
-  throughput?: number | null;
-
-  /**
-   * Error count
-   */
-  errorCount?: number | null;
-
-  /**
-   * Error rate (errors per second)
-   */
-  errorRate?: number | null;
-
-  /**
-   * Virtual user statistics
-   */
-  virtualUsers?: {
-    avg: number | null;
-    max: number | null;
-  };
-
-  /**
-   * Apdex score (0.0-1.0)
-   */
-  apdexScore?: number | null;
 }
 
 /**
@@ -203,87 +119,6 @@ export interface DsCompareConfigRecord {
     };
     defaultValueIfControlGroupMissing: number;
   };
-}
-
-/**
- * Request raw data row (from requests_raw table)
- */
-export interface RequestsRawRow {
-  time: Date;
-  test_run_id: string;
-  system_under_test: string | null;
-  test_environment: string | null;
-  location: string | null;
-  scenario_name: string | null;
-  transaction_name: string | null;
-  sampler_name: string;
-  success: boolean;
-  request_size: number | null;
-  response_size: number | null;
-  response_code: string | null;
-  response_connect_time: number | null;
-  response_latency: number | null;
-  response_time: number | null;
-  url_hash: string | null;
-}
-
-/**
- * Transaction data row (from transactions table)
- */
-export interface TransactionRow {
-  time: Date;
-  test_run_id: string;
-  system_under_test: string | null;
-  test_environment: string | null;
-  location: string | null;
-  scenario_name: string | null;
-  transaction_name: string;
-  success: boolean;
-  request_size: number | null;
-  response_size: number | null;
-  response_time: number | null;
-}
-
-/**
- * Requests error data row (from requests_error table)
- */
-export interface RequestsErrorRow {
-  time: Date;
-  test_run_id: string;
-  system_under_test: string | null;
-  test_environment: string | null;
-  location: string | null;
-  node_name: string;
-  scenario_name?: string | null;
-  transaction_name: string;
-  sampler_name: string;
-  response_code: string | null;
-  response_time: number | null;
-  connection_time: number | null;
-  url: string | null;
-  assertions: string | null;
-  response_message: string | null;
-  request_headers: string | null;
-  response_headers: string | null;
-  response_data: string | null;
-  random_id: number | null;
-  url_hash: string | null;
-}
-
-/**
- * Virtual users data row (from virtual_users table)
- */
-export interface VirtualUsersRow {
-  time: Date;
-  test_run_id: string;
-  system_under_test: string | null;
-  test_environment: string | null;
-  location: string | null;
-  node_name: string;
-  scenario_name?: string | null;
-  active_threads: number | null;
-  started_threads: number | null;
-  finished_threads: number | null;
 }
 
 /**

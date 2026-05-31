@@ -18,4 +18,5 @@ import { SetMetadata } from '@nestjs/common';
  *   }
  */
 export const SKIP_RLS_KEY = 'skip-rls';
+/** @public */
 export const SkipRls = (): MethodDecorator => SetMetadata(SKIP_RLS_KEY, true);

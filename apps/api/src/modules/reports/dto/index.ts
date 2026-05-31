@@ -10,11 +10,7 @@
 // Report Generation DTOs
 export {
   // Types and constants
-  REPORT_SECTION_TYPES,
   type ReportSectionType,
-  // Section configuration
-  ReportSectionConfigDto,
-  ReportStylingDto,
   // Report generation requests
   GenerateReportFromTemplateDto,
   GenerateAdHocReportDto,
@@ -26,8 +22,6 @@ export {
   // Query parameters
   ListReportsQueryDto,
   // Path parameters
-  ReportParamsDto,
-  TestRunReportParamsDto,
   ShareParamsDto,
 } from './create-report.dto';
 
@@ -43,15 +37,11 @@ export {
   DuplicateTemplateDto,
   // Query parameters
   ListTemplatesQueryDto,
-  // Path parameters
-  TemplateParamsDto,
-  SectionParamsDto,
 } from './create-template.dto';
 
 // Response DTOs
 export {
   // Types and constants
-  REPORT_STATUS_VALUES,
   type ReportStatus,
   // Generation responses
   GenerateReportResponseDto,
@@ -60,15 +50,11 @@ export {
   ShareSettingsResponseDto,
   PublicShareResponseDto,
   // Report list/detail responses
-  ReportListItemDto,
   ReportListResponseDto,
   ReportSummaryDto,
   ReportDetailDto,
   // Template responses
-  TemplateListItemDto,
   TemplateListResponseDto,
   TemplateDetailDto,
   TemplateSummaryDto,
-  // Job progress
-  JobProgressDto,
 } from './report-response.dto';

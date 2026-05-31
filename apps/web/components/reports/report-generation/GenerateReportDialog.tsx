@@ -84,12 +84,14 @@ import {
 
 // ==================== Types ====================
 
+/** @public */
 export interface ReportScope {
   systemId: string;
   testEnvironment: string;
   workload: string;
 }
 
+/** @public */
 export interface GenerateReportDialogProps {
   open: boolean;
   onClose: () => void;

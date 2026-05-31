@@ -5,6 +5,7 @@
 /**
  * Benchmark requirement configuration
  */
+/** @public */
 export interface BenchmarkRequirement {
   operator: string;
   value: number;
@@ -39,6 +40,7 @@ export interface BenchmarkTagSyncStatus {
 /**
  * Benchmark type discriminator
  */
+/** @public */
 export type BenchmarkType = 'metric' | 'apdex' | 'aggregated';
 
 /**

@@ -141,11 +141,6 @@ export function isTeamAdmin(roles: string[] | null | undefined): boolean {
   return roles.includes(TeamRole.ADMIN);
 }
 
-/**
- * Aliases for iteration arrays (used by member dialogs).
- */
-export const ALL_ORGANIZATION_ROLES = ORGANIZATION_ROLES;
-export const ALL_TEAM_ROLES = TEAM_ROLES;
 
 /**
  * Get the display label for an organization role.

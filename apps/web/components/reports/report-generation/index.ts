@@ -4,8 +4,4 @@
  * Components for generating reports with template and ad-hoc modes.
  */
 
-export {
-  GenerateReportDialog,
-  type GenerateReportDialogProps,
-  type ReportScope,
-} from './GenerateReportDialog';
+export { GenerateReportDialog } from './GenerateReportDialog';

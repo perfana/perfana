@@ -7,21 +7,14 @@ export { BenchmarkCalculatorService } from './benchmark-calculator.service';
 export type {
   ApdexPreviewResult,
   ApdexThresholdResult,
-  ApdexPreviewParams,
-  ApdexThresholdParams,
 } from './benchmark-calculator.service';
 
 export { BenchmarkQueryService } from './benchmark-query.service';
 export type {
   Benchmark,
   BenchmarkQuery,
-  BenchmarkType,
-  BenchmarkRequirement,
-  BenchmarkConfiguration,
   BenchmarkTagSyncStatus,
 } from './benchmark-query.types';
-
-export { BenchmarkMapper } from './benchmark.mapper';
 
 export { BenchmarkMutationService } from './benchmark-mutation.service';
 export type {

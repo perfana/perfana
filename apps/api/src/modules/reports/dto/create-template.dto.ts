@@ -1,7 +1,6 @@
 import {
   IsString,
   IsOptional,
-  IsUUID,
   Length,
   IsEnum,
   IsArray,
@@ -361,40 +360,4 @@ export class ListTemplatesQueryDto {
   @IsString()
   @IsEnum(['asc', 'desc'], { message: 'Sort order must be asc or desc' })
   sortOrder?: 'asc' | 'desc';
-}
-
-/**
- * Path parameters for template endpoints
- */
-export class TemplateParamsDto {
-  @ApiProperty({
-    description: 'Template UUID',
-    example: '123e4567-e89b-12d3-a456-426614174000',
-  })
-  @IsUUID('4', { message: 'Template ID must be a valid UUID' })
-  templateId!: string;
-}
-
-/**
- * Path parameters for section-specific endpoints
- */
-export class SectionParamsDto {
-  @ApiProperty({
-    description: 'Template UUID',
-    example: '123e4567-e89b-12d3-a456-426614174000',
-  })
-  @IsUUID('4', { message: 'Template ID must be a valid UUID' })
-  templateId!: string;
-
-  @ApiProperty({
-    description: 'Section order index (0-based)',
-    example: 0,
-    minimum: 0,
-    maximum: 49,
-  })
-  @IsNumber()
-  @Min(0, { message: 'Section index must be at least 0' })
-  @Max(49, { message: 'Section index must not exceed 49' })
-  @Type(() => Number)
-  sectionIndex!: number;
 }

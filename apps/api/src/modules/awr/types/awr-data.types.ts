@@ -150,6 +150,7 @@ export interface LoadProfile {
 /**
  * Single time model statistic
  */
+/** @public */
 export interface TimeModelStat {
   /** Statistic name */
   name: string;
@@ -164,6 +165,7 @@ export interface TimeModelStat {
 /**
  * Time model breakdown from AWR report
  */
+/** @public */
 export interface TimeModel {
   /** Total DB time in seconds */
   dbTime: number;
@@ -362,6 +364,7 @@ export interface OsStatistics {
 /**
  * I/O statistics for a single tablespace or file
  */
+/** @public */
 export interface IoStatistic {
   /** Tablespace or file name */
   name: string;
@@ -410,6 +413,7 @@ export interface IoStatistics {
 /**
  * SGA memory component
  */
+/** @public */
 export interface SgaComponent {
   /** Component name */
   name: string;
@@ -424,6 +428,7 @@ export interface SgaComponent {
 /**
  * PGA statistics
  */
+/** @public */
 export interface PgaStatistics {
   /** Aggregate PGA target in MB */
   aggregatePgaTargetMb?: number;
@@ -517,6 +522,7 @@ export interface SegmentStatistics {
 /**
  * Database instance configuration parameter
  */
+/** @public */
 export interface ConfigParameter {
   /** Parameter name */
   name: string;
@@ -533,6 +539,7 @@ export interface ConfigParameter {
 /**
  * Instance configuration section
  */
+/** @public */
 export interface InstanceConfig {
   /** Configuration parameters */
   parameters?: ConfigParameter[];

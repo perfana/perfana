@@ -14,7 +14,7 @@ export interface UserInfo {
 /**
  * Get a human-readable display name for a user.
  */
-export function getDisplayName(user: {
+function getDisplayName(user: {
   firstName?: string;
   lastName?: string;
   email?: string;

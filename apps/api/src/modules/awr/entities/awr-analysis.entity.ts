@@ -24,6 +24,7 @@ export type InsightSeverity = 'critical' | 'warning' | 'info';
 /**
  * Insight category types for grouping insights
  */
+/** @public */
 export type InsightCategory =
   | 'sql_performance'
   | 'wait_events'

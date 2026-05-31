@@ -10,7 +10,7 @@ export const SCENARIO_LEVEL_PANEL_NAME = 'scenario-level';
  * Fixed panel ID for scenario-level metrics.
  * Using a high number to avoid collisions with transaction-based panel IDs.
  */
-export const SCENARIO_LEVEL_PANEL_ID = 999999;
+const SCENARIO_LEVEL_PANEL_ID = 999999;
 
 /**
  * Generates a deterministic panel ID from a panel name using hash-based generation.
@@ -26,7 +26,7 @@ export const SCENARIO_LEVEL_PANEL_ID = 999999;
  * const scenarioPanelId = generatePanelId(SCENARIO_LEVEL_PANEL_NAME);
  * // Returns: 999999 (fixed ID for scenario-level metrics)
  */
-export function generatePanelId(panelName: string): number {
+function generatePanelId(panelName: string): number {
   // Special case: scenario-level panel always uses fixed ID
   if (panelName === SCENARIO_LEVEL_PANEL_NAME) {
     return SCENARIO_LEVEL_PANEL_ID;

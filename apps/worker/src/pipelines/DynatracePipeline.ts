@@ -29,7 +29,7 @@ import {
  * 5. Store documents in ds_panels, panel_metrics, and metrics tables
  */
 
-export interface DynatraceInput {
+interface DynatraceInput {
   testRunIds: string[];
 }
 

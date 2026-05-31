@@ -19,40 +19,6 @@ import { withOrgFilter } from '../../../common/utils/with-org-filter';
 import { AuditService } from '../../audit/audit.service';
 import safeRegex from 'safe-regex';
 
-export interface TestRun {
-  id: string;
-  test_run_id: string;
-  system_under_test_id: string;
-  test_environment: string;
-  workload: string;
-  systems_under_test?: {
-    name: string;
-    pyroscope_instance_id?: string;
-    pyroscope_configurations?: Array<{ application: string; profiler: string }>;
-    pyroscopeInstance?: {
-      id: string;
-      label: string;
-      pyroscope_url: string;
-      pyroscope_stand_alone: boolean;
-    };
-  };
-}
-
-export interface SystemUnderTest {
-  id: string;
-  name: string;
-}
-
-export interface TestRunConfig {
-  id: string;
-  test_run_id: string;
-  key: string;
-  value: string;
-  tags?: string[];
-  created_at: string;
-  updated_at: string;
-}
-
 @Injectable()
 export class TestRunsConfigService {
   private readonly logger = new Logger(TestRunsConfigService.name);

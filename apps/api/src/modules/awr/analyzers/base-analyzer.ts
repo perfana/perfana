@@ -440,27 +440,3 @@ export abstract class BaseAwrAnalyzer implements AwrAnalyzer {
     return 'An unexpected error occurred during analysis';
   }
 }
-
-// ==================== Utility Types ====================
-
-/**
- * Type representing an analyzer class constructor
- */
-export type AnalyzerConstructor = new (
-  config: AwrAnalysisConfig,
-  options?: AnalyzerOptions
-) => AwrAnalyzer;
-
-/**
- * Registry entry for an analyzer
- */
-export interface AnalyzerRegistryEntry {
-  /** Analyzer class constructor */
-  analyzer: AnalyzerConstructor;
-  /** Whether this analyzer is required */
-  required: boolean;
-  /** Processing priority (lower = earlier) */
-  priority: number;
-  /** Whether this analyzer is for comparison analysis only */
-  comparisonOnly?: boolean;
-}

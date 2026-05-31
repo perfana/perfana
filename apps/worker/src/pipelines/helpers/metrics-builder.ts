@@ -25,40 +25,6 @@ import type {
 } from '../../types/performance-metrics.js';
 
 /**
- * Build a cleaned metric name for request-level metrics
- * Removes scenario and transaction names, keeps sampler name
- *
- * @param samplerName - The sampler/request name (e.g., "homepage", "api_call")
- * @param metricType - The metric type from METRIC_NAME_TEMPLATES
- * @param aggregationType - Optional aggregation type from AGGREGATION_TYPES
- * @returns Cleaned metric name (e.g., "homepage.response_time.avg")
- */
-export function buildRequestMetricName(
-  samplerName: string,
-  metricType: string,
-  aggregationType?: string
-): string {
-  return aggregationType
-    ? `${samplerName}.${metricType}.${aggregationType}`
-    : `${samplerName}.${metricType}`;
-}
-
-/**
- * Build a cleaned metric name for transaction-level metrics
- * Removes scenario and transaction names completely
- *
- * @param metricType - The metric type from METRIC_NAME_TEMPLATES
- * @param aggregationType - Optional aggregation type from AGGREGATION_TYPES
- * @returns Cleaned metric name (e.g., "response_time.avg")
- */
-export function buildTransactionMetricName(
-  metricType: string,
-  aggregationType?: string
-): string {
-  return aggregationType ? `${metricType}.${aggregationType}` : metricType;
-}
-
-/**
  * Build a cleaned metric name for scenario-level metrics
  * Just the metric type itself
  *
@@ -156,39 +122,6 @@ export function createDsMetricsRecord(
  *   parsing the metric name (required for panel-per-metric-type panels where
  *   metric names no longer contain the metric type).
  */
-export function createDsCompareConfigRecord(
-  testRun: TestRunMetadata,
-  dashboard: DashboardMetadata,
-  panel: PanelMetadata,
-  metricName: string,
-  aggregation: string = 'mean',
-  classificationOverride?: MetricClassification
-): DsCompareConfigRecord {
-  const classification = classificationOverride ?? getClassificationForMetric(metricName);
-
-  return {
-    system_under_test_id: testRun.system_under_test_id,
-    test_environment: testRun.test_environment,
-    workload: testRun.workload,
-    application_dashboard_id: dashboard.dashboardId,
-    panel_id: panel.panelId,
-    metric_name: metricName,
-    config_data: {
-      metricClassification: {
-        classification: classification.classification,
-        higherIsBetter: classification.higherIsBetter,
-      },
-      thresholds: {
-        aggregation,
-        percentageThreshold: DEFAULT_PERFORMANCE_THRESHOLDS.percentageThreshold,
-        iqrThreshold: DEFAULT_PERFORMANCE_THRESHOLDS.iqrThreshold,
-        absoluteThreshold: DEFAULT_PERFORMANCE_THRESHOLDS.absoluteThreshold,
-      },
-      defaultValueIfControlGroupMissing: DEFAULT_VALUE_IF_CONTROL_GROUP_MISSING,
-    },
-  };
-}
-
 /**
  * Create a panel-level ds_compare_config record (metric_name = null).
  *
@@ -249,91 +182,3 @@ export function createDsCompareConfigRecordPanelLevelNoClassification(
   });
 }
 
-/**
- * Create a ds_compare_config record without classification
- * Used for non-baseline aggregations (p90, p95, p99) that are stored but not compared
- */
-export function createDsCompareConfigRecordNoClassification(
-  testRun: TestRunMetadata,
-  dashboard: DashboardMetadata,
-  panel: PanelMetadata,
-  metricName: string,
-  aggregation: string = 'mean'
-): DsCompareConfigRecord {
-  return {
-    system_under_test_id: testRun.system_under_test_id,
-    test_environment: testRun.test_environment,
-    workload: testRun.workload,
-    application_dashboard_id: dashboard.dashboardId,
-    panel_id: panel.panelId,
-    metric_name: metricName,
-    config_data: {
-      metricClassification: {
-        classification: 'none',
-        higherIsBetter: null,
-      },
-      thresholds: {
-        aggregation,
-        percentageThreshold: DEFAULT_PERFORMANCE_THRESHOLDS.percentageThreshold,
-        iqrThreshold: DEFAULT_PERFORMANCE_THRESHOLDS.iqrThreshold,
-        absoluteThreshold: DEFAULT_PERFORMANCE_THRESHOLDS.absoluteThreshold,
-      },
-      defaultValueIfControlGroupMissing: DEFAULT_VALUE_IF_CONTROL_GROUP_MISSING,
-    },
-  };
-}
-
-/**
- * Determine classification for a metric based on its name
- * Helper function since we no longer use fixed panel IDs for classification
- */
-function getClassificationForMetric(metricName: string): {
-  classification: string;
-  higherIsBetter: boolean | null;
-} {
-  // Check metric name patterns to determine classification
-  if (
-    metricName.includes('response_time') ||
-    metricName.includes('latency') ||
-    metricName.includes('connect_time')
-  ) {
-    return {
-      classification: 'RED_duration',
-      higherIsBetter: false,
-    };
-  }
-
-  if (metricName.includes('error_rate') || metricName.includes('error_count')) {
-    return {
-      classification: 'RED_errors',
-      higherIsBetter: false,
-    };
-  }
-
-  if (metricName.includes('throughput')) {
-    return {
-      classification: 'RED_rate',
-      higherIsBetter: true,
-    };
-  }
-
-  if (metricName.includes('apdex_score')) {
-    return {
-      classification: 'RED_duration',
-      higherIsBetter: true, // Apdex is 0-1, higher is better
-    };
-  }
-
-  if (metricName.includes('active_threads')) {
-    return {
-      classification: 'load',
-      higherIsBetter: null,
-    };
-  }
-
-  // Default classification
-  return {
-    classification: 'none',
-    higherIsBetter: null,
-  };
-}

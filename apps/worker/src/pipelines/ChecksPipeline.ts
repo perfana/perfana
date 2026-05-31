@@ -10,7 +10,7 @@ import { AggregatedBenchmarkEvaluator, AggregatedCheckResult } from './checks/Ag
 import { CheckPipelineError, BenchmarkNotFoundError } from './checks/BaseCheckService.js';
 import { getRealtimePublisher } from '../common/realtime-accessor.js';
 
-export interface ChecksInput {
+interface ChecksInput {
   testRunIds: string[];
   forceReprocess?: boolean;
   snapshotId?: string;

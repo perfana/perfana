@@ -22,7 +22,7 @@ interface TestRunQueryRow {
   team_id: string | null;
 }
 
-export interface ControlGroupsInput {
+interface ControlGroupsInput {
   testRunIds: string[];
 }
 

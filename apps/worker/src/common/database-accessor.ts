@@ -28,11 +28,3 @@ export function getDatabaseService(): WorkerDatabaseService {
   }
   return cachedService;
 }
-
-/**
- * Clear the cached service instance
- * Useful for testing or when reinitializing the application
- */
-export function clearCachedDatabaseService(): void {
-  cachedService = null;
-}

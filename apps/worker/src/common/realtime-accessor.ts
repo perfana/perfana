@@ -28,11 +28,3 @@ export function getRealtimePublisher(): RealtimePublisherService {
   }
   return cachedService;
 }
-
-/**
- * Clear the cached service instance
- * Useful for testing or when reinitializing the application
- */
-export function clearCachedRealtimePublisher(): void {
-  cachedService = null;
-}

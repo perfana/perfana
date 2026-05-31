@@ -112,6 +112,7 @@ export interface InsightMetadata {
 /**
  * Action type for recommendations
  */
+/** @public */
 export type RecommendationAction =
   | 'investigate'
   | 'tune_sql'
@@ -127,11 +128,13 @@ export type RecommendationAction =
 /**
  * Priority level for recommendations
  */
+/** @public */
 export type RecommendationPriority = 'high' | 'medium' | 'low';
 
 /**
  * Detailed recommendation for addressing an insight
  */
+/** @public */
 export interface Recommendation {
   /** Recommended action type */
   action: RecommendationAction;
@@ -156,6 +159,7 @@ export interface Recommendation {
 /**
  * Insights grouped by category
  */
+/** @public */
 export interface InsightsByCategory {
   /** Category name */
   category: InsightCategory;
@@ -176,6 +180,7 @@ export interface InsightsByCategory {
 /**
  * Insights grouped by severity
  */
+/** @public */
 export interface InsightsBySeverity {
   /** Severity level */
   severity: InsightSeverity;
@@ -190,6 +195,7 @@ export interface InsightsBySeverity {
 /**
  * SQL performance insight with detailed metrics
  */
+/** @public */
 export interface SqlPerformanceInsight extends AwrInsight {
   category: 'sql_performance';
   /** SQL ID */
@@ -212,6 +218,7 @@ export interface SqlPerformanceInsight extends AwrInsight {
 /**
  * Specific SQL performance issue
  */
+/** @public */
 export interface SqlPerformanceIssue {
   /** Issue type */
   type:
@@ -238,6 +245,7 @@ export interface SqlPerformanceIssue {
 /**
  * Wait event insight with detailed metrics
  */
+/** @public */
 export interface WaitEventInsight extends AwrInsight {
   category: 'wait_events';
   /** Wait event name */
@@ -260,6 +268,7 @@ export interface WaitEventInsight extends AwrInsight {
 /**
  * Regression insight from comparison analysis
  */
+/** @public */
 export interface RegressionInsight extends AwrInsight {
   category: 'regression';
   isComparison: true;
@@ -278,6 +287,7 @@ export interface RegressionInsight extends AwrInsight {
 /**
  * Improvement insight from comparison analysis
  */
+/** @public */
 export interface ImprovementInsight extends AwrInsight {
   category: 'improvement';
   isComparison: true;
@@ -298,6 +308,7 @@ export interface ImprovementInsight extends AwrInsight {
 /**
  * Input for creating an insight
  */
+/** @public */
 export interface InsightBuilderInput {
   /** Severity level */
   severity: InsightSeverity;
@@ -326,6 +337,7 @@ export interface InsightBuilderInput {
 /**
  * Display labels for insight categories
  */
+/** @public */
 export const INSIGHT_CATEGORY_LABELS: Record<InsightCategory, string> = {
   sql_performance: 'SQL Performance',
   wait_events: 'Wait Events',
@@ -344,6 +356,7 @@ export const INSIGHT_CATEGORY_LABELS: Record<InsightCategory, string> = {
 /**
  * Display labels for severity levels
  */
+/** @public */
 export const INSIGHT_SEVERITY_LABELS: Record<InsightSeverity, string> = {
   critical: 'Critical',
   warning: 'Warning',
@@ -353,6 +366,7 @@ export const INSIGHT_SEVERITY_LABELS: Record<InsightSeverity, string> = {
 /**
  * Colors for severity levels (for UI reference)
  */
+/** @public */
 export const INSIGHT_SEVERITY_COLORS: Record<InsightSeverity, string> = {
   critical: '#d32f2f', // red
   warning: '#ed6c02', // orange
