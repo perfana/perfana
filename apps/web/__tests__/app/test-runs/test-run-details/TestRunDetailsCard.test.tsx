@@ -718,12 +718,12 @@ describe('TestRunDetailsCard', () => {
     it('should show abort status when test was aborted', () => {
       const abortedTestRun = { ...mockTestRun, abort: true };
       render(<TestRunDetailsCard {...defaultProps} testRun={abortedTestRun} expanded={true} />);
-      expect(screen.getByText('Yes - Test was aborted')).toBeInTheDocument();
+      expect(screen.getByText('Aborted')).toBeInTheDocument();
     });
 
     it('should not show abort status when test was not aborted', () => {
       render(<TestRunDetailsCard {...defaultProps} expanded={true} />);
-      expect(screen.queryByText('Yes - Test was aborted')).not.toBeInTheDocument();
+      expect(screen.queryByText('Aborted')).not.toBeInTheDocument();
     });
   });
 
