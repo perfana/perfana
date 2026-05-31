@@ -11,6 +11,7 @@ import type {
   MetricDataPoint,
   TestRunInfo,
   Thresholds,
+  AggregatedMetricSource,
 } from '../types';
 import {
   DEFAULT_CHART_HEIGHT,
@@ -34,6 +35,7 @@ interface UseCurrentTestRunChartProps {
   unit?: string | null;
   isDrawerOpen?: boolean;
   showToast?: (message: string) => void;
+  aggregatedMetricSource?: AggregatedMetricSource;
 }
 
 interface UseCurrentTestRunChartReturn {
@@ -57,6 +59,7 @@ export function useCurrentTestRunChart({
   unit,
   isDrawerOpen = false,
   showToast,
+  aggregatedMetricSource,
 }: UseCurrentTestRunChartProps): UseCurrentTestRunChartReturn {
   const theme = useTheme();
   const [loading, setLoading] = useState(true);
@@ -71,46 +74,63 @@ export function useCurrentTestRunChart({
       setLoading(true);
       setError(null);
 
-      // Build URL with query params
-      let url = `/metrics/ds-metrics/${testRunId}/${panelId}`;
-      const queryParams = new URLSearchParams();
-
-      if (applicationDashboardId) {
-        queryParams.append('applicationDashboardId', applicationDashboardId);
-      }
-
-      if (queryParams.toString()) {
-        url += `?${queryParams.toString()}`;
-      }
-
-      const response = await authenticatedFetch(url, {
-        method: 'GET',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-      });
-
-      if (!response.ok) {
-        if (response.status === 404) {
-          setMetricsData([]);
-          return;
+      if (aggregatedMetricSource) {
+        // Use the aggregated timeseries endpoint for performance-metrics source
+        const queryParams = new URLSearchParams({ metric: aggregatedMetricSource.metric });
+        if (aggregatedMetricSource.stat) {
+          queryParams.append('stat', aggregatedMetricSource.stat);
         }
-        throw new Error(`Failed to fetch metrics data: ${response.status} ${response.statusText}`);
-      }
 
-      const data = await response.json();
-
-      // Handle both old format (object with data property) and new format (direct array)
-      const dataPoints = Array.isArray(data) ? data : data.data;
-
-      if (dataPoints && Array.isArray(dataPoints)) {
-        // Filter for the specific metric name
-        const filteredData = dataPoints.filter(
-          (point: MetricDataPoint) => point.metric_name === metricName
+        const response = await authenticatedFetch(
+          `/test-runs/${testRunId}/aggregated-metric-timeseries?${queryParams.toString()}`,
+          { method: 'GET', headers: { 'Content-Type': 'application/json' } },
         );
-        setMetricsData(filteredData);
+
+        if (!response.ok) {
+          if (response.status === 404) { setMetricsData([]); return; }
+          throw new Error(`Failed to fetch aggregated metric data: ${response.status} ${response.statusText}`);
+        }
+
+        const data = await response.json();
+        const buckets: Array<{ time: string; value: number }> = data.buckets ?? [];
+        const bucketSize: number = data.bucketSizeSeconds ?? 60;
+
+        setMetricsData(buckets.map(b => ({
+          metric_name: metricName,
+          time: b.time,
+          timestep: bucketSize,
+          ramp_up: false,
+          value: b.value,
+        })));
       } else {
-        setMetricsData([]);
+        // Use the Grafana panel metrics endpoint
+        let url = `/metrics/ds-metrics/${testRunId}/${panelId}`;
+        const queryParams = new URLSearchParams();
+        if (applicationDashboardId) {
+          queryParams.append('applicationDashboardId', applicationDashboardId);
+        }
+        if (queryParams.toString()) url += `?${queryParams.toString()}`;
+
+        const response = await authenticatedFetch(url, {
+          method: 'GET',
+          headers: { 'Content-Type': 'application/json' },
+        });
+
+        if (!response.ok) {
+          if (response.status === 404) { setMetricsData([]); return; }
+          throw new Error(`Failed to fetch metrics data: ${response.status} ${response.statusText}`);
+        }
+
+        const data = await response.json();
+        const dataPoints = Array.isArray(data) ? data : data.data;
+
+        if (dataPoints && Array.isArray(dataPoints)) {
+          setMetricsData(dataPoints.filter(
+            (point: MetricDataPoint) => point.metric_name === metricName,
+          ));
+        } else {
+          setMetricsData([]);
+        }
       }
     } catch (err) {
       setError(
@@ -121,7 +141,7 @@ export function useCurrentTestRunChart({
     } finally {
       setLoading(false);
     }
-  }, [testRunId, panelId, applicationDashboardId, metricName]);
+  }, [testRunId, panelId, applicationDashboardId, metricName, aggregatedMetricSource]);
 
   const createPlotlyGraph = useCallback(() => {
     if (!metricsData || metricsData.length === 0) return;

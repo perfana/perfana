@@ -20,6 +20,7 @@ export default function CurrentTestRunChart({
   unit,
   isDrawerOpen = false,
   showToast,
+  aggregatedMetricSource,
 }: CurrentTestRunChartProps) {
   const theme = useTheme();
 
@@ -41,6 +42,7 @@ export default function CurrentTestRunChart({
     unit,
     isDrawerOpen,
     showToast,
+    aggregatedMetricSource,
   });
 
   if (loading) {

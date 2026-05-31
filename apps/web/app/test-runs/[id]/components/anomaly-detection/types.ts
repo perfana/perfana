@@ -2,6 +2,7 @@ import { TestRun } from '@/types/test-runs';
 
 export interface AnomalyData {
   dashboard_label: string;
+  dashboard_uid?: string | null;
   panel_title: string;
   metric_name: string;
   unit: string | null;

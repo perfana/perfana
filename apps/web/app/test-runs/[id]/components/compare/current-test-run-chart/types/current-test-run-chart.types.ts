@@ -25,6 +25,11 @@ export interface Thresholds {
   upper?: ThresholdBound;
 }
 
+export interface AggregatedMetricSource {
+  metric: 'transaction_response_time' | 'request_response_time' | 'error_percentage';
+  stat?: string;
+}
+
 export interface CurrentTestRunChartProps {
   testRunId: string;
   applicationDashboardId: string;
@@ -35,6 +40,7 @@ export interface CurrentTestRunChartProps {
   unit?: string | null;
   isDrawerOpen?: boolean;
   showToast?: (message: string) => void;
+  aggregatedMetricSource?: AggregatedMetricSource;
 }
 
 export interface UnitConversion {

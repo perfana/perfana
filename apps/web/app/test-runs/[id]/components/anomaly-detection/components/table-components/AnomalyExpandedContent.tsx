@@ -20,9 +20,33 @@ import dynamic from 'next/dynamic';
 import { AnomalyData, MetricTrendData } from '../../types';
 import { TestRun } from '@/types/test-runs';
 import CurrentTestRunChart from '../../../compare/CurrentTestRunChart';
+import type { AggregatedMetricSource } from '../../../compare/current-test-run-chart/types';
 import MetricConfigForm from '../../../configuration-comparison/MetricConfigForm';
 import { createTrendsPlot } from '../utils/trends-plot-utils';
 import { StatisticalDrawerContent } from './StatisticalDrawerContent';
+
+const VALID_STATS = new Set(['avg', 'p50', 'p90', 'p95', 'p99', 'max']);
+
+function parseAggregatedMetricSource(metricName: string, dashboardUid?: string | null): AggregatedMetricSource | undefined {
+  if (!dashboardUid?.startsWith('performance-test-metrics')) return undefined;
+
+  const parts = metricName.split('.');
+  if (parts.length < 3) return undefined;
+
+  const type = parts[0];
+  const lastPart = parts[parts.length - 1];
+  const hasAggregation = parts.length >= 4 && VALID_STATS.has(lastPart);
+  const baseName = hasAggregation ? parts[parts.length - 2] : lastPart;
+  const stat = hasAggregation ? lastPart : 'avg';
+
+  if (baseName === 'error_rate') {
+    return { metric: 'error_percentage', stat: 'avg' };
+  }
+  if (baseName !== 'response_time') return undefined;
+  if (type === 'transactions') return { metric: 'transaction_response_time', stat };
+  if (type === 'requests') return { metric: 'request_response_time', stat };
+  return undefined;
+}
 
 const Plot = dynamic(() => import('react-plotly.js'), { ssr: false });
 
@@ -270,6 +294,7 @@ export function AnomalyExpandedContent({
               unit={row.unit}
               isDrawerOpen={drawerOpen}
               showToast={showToast}
+              aggregatedMetricSource={parseAggregatedMetricSource(row.metric_name, row.dashboard_uid)}
             />
           </Box>
         </Box>
