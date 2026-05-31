@@ -27,8 +27,8 @@ import { StatisticalDrawerContent } from './StatisticalDrawerContent';
 
 const VALID_STATS = new Set(['avg', 'p50', 'p90', 'p95', 'p99', 'max']);
 
-function parseAggregatedMetricSource(metricName: string, dashboardUid?: string | null): AggregatedMetricSource | undefined {
-  if (!dashboardUid?.startsWith('performance-test-metrics-')) return undefined;
+function parseAggregatedMetricSource(metricName: string, sourceType?: string | null): AggregatedMetricSource | undefined {
+  if (sourceType !== 'performance_test') return undefined;
 
   const parts = metricName.split('.');
   if (parts.length < 3) return undefined;
@@ -98,8 +98,8 @@ export function AnomalyExpandedContent({
   const theme = useTheme();
 
   const aggregatedMetricSource = useMemo(
-    () => parseAggregatedMetricSource(row.metric_name, row.dashboard_uid),
-    [row.metric_name, row.dashboard_uid]
+    () => parseAggregatedMetricSource(row.metric_name, row.source_type),
+    [row.metric_name, row.source_type]
   );
 
   // Generate trends plot data
@@ -274,7 +274,7 @@ export function AnomalyExpandedContent({
                 </Button>
               )}
             </Box>
-            {(!row.dashboard_uid?.startsWith('performance-test-metrics-') || aggregatedMetricSource) ? (
+            {(row.source_type !== 'performance_test' || aggregatedMetricSource) ? (
               <CurrentTestRunChart
                 testRunId={selectedTestRunIdForRow || testRunId}
                 applicationDashboardId={row.application_dashboard_id}
