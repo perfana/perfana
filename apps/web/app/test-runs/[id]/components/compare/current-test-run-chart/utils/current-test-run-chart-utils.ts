@@ -138,7 +138,7 @@ export function buildMetricTrace(
     y: y,
     name: metricName,
     type: 'scatter' as const,
-    mode: 'lines' as const,
+    mode: 'lines+markers' as const,
     showlegend: false,
     hovertemplate: `<b>${metricName}</b><br>%{x|%H:%M:%S}<br>%{y:.2f}${formatSuffix}<extra></extra>`,
     connectgaps: true,
@@ -146,6 +146,10 @@ export function buildMetricTrace(
       color: primaryColor,
       width: 2.5,
       shape: 'linear' as const,
+    },
+    marker: {
+      color: primaryColor,
+      size: 4,
     },
   };
 }

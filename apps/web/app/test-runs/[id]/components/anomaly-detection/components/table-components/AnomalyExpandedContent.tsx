@@ -1,6 +1,6 @@
 'use client';
 
-import React from 'react';
+import React, { useMemo } from 'react';
 import {
   Box,
   Typography,
@@ -28,7 +28,7 @@ import { StatisticalDrawerContent } from './StatisticalDrawerContent';
 const VALID_STATS = new Set(['avg', 'p50', 'p90', 'p95', 'p99', 'max']);
 
 function parseAggregatedMetricSource(metricName: string, dashboardUid?: string | null): AggregatedMetricSource | undefined {
-  if (!dashboardUid?.startsWith('performance-test-metrics')) return undefined;
+  if (!dashboardUid?.startsWith('performance-test-metrics-')) return undefined;
 
   const parts = metricName.split('.');
   if (parts.length < 3) return undefined;
@@ -96,6 +96,11 @@ export function AnomalyExpandedContent({
   onResetSelectedTestRun,
 }: AnomalyExpandedContentProps) {
   const theme = useTheme();
+
+  const aggregatedMetricSource = useMemo(
+    () => parseAggregatedMetricSource(row.metric_name, row.dashboard_uid),
+    [row.metric_name, row.dashboard_uid]
+  );
 
   // Generate trends plot data
   const getTrendsPlotData = (trendData: MetricTrendData[], unit?: string) => {
@@ -269,33 +274,39 @@ export function AnomalyExpandedContent({
                 </Button>
               )}
             </Box>
-            <CurrentTestRunChart
-              testRunId={selectedTestRunIdForRow || testRunId}
-              applicationDashboardId={row.application_dashboard_id}
-              panelId={row.panel_id}
-              metricName={row.metric_name}
-              testRun={(() => {
-                const _effectiveTestRunId = selectedTestRunIdForRow || testRunId;
-                if (selectedTestRunIdForRow && trendsData) {
-                  const selectedTrendData = trendsData.find(t => t.test_run_id === selectedTestRunIdForRow);
-                  if (selectedTrendData) {
-                    return {
-                      start_time: selectedTrendData.test_run_start,
-                      end_time: undefined
-                    };
+            {(!row.dashboard_uid?.startsWith('performance-test-metrics-') || aggregatedMetricSource) ? (
+              <CurrentTestRunChart
+                testRunId={selectedTestRunIdForRow || testRunId}
+                applicationDashboardId={row.application_dashboard_id}
+                panelId={row.panel_id}
+                metricName={row.metric_name}
+                testRun={(() => {
+                  const _effectiveTestRunId = selectedTestRunIdForRow || testRunId;
+                  if (selectedTestRunIdForRow && trendsData) {
+                    const selectedTrendData = trendsData.find(t => t.test_run_id === selectedTestRunIdForRow);
+                    if (selectedTrendData) {
+                      return {
+                        start_time: selectedTrendData.test_run_start,
+                        end_time: undefined
+                      };
+                    }
                   }
-                }
-                return testRun ? {
-                  start_time: testRun.start_time,
-                  end_time: testRun.end_time || undefined
-                } : undefined;
-              })()}
-              thresholds={trendsData && trendsData.length > 0 ? trendsData.find(t => t.test_run_id === (selectedTestRunIdForRow || testRunId))?.thresholds : undefined}
-              unit={row.unit}
-              isDrawerOpen={drawerOpen}
-              showToast={showToast}
-              aggregatedMetricSource={parseAggregatedMetricSource(row.metric_name, row.dashboard_uid)}
-            />
+                  return testRun ? {
+                    start_time: testRun.start_time,
+                    end_time: testRun.end_time || undefined
+                  } : undefined;
+                })()}
+                thresholds={trendsData && trendsData.length > 0 ? trendsData.find(t => t.test_run_id === (selectedTestRunIdForRow || testRunId))?.thresholds : undefined}
+                unit={row.unit}
+                isDrawerOpen={drawerOpen}
+                showToast={showToast}
+                aggregatedMetricSource={aggregatedMetricSource}
+              />
+            ) : (
+              <Typography variant="body2" color="text.secondary" sx={{ py: 2, textAlign: 'center' }}>
+                Chart not available for this metric type
+              </Typography>
+            )}
           </Box>
         </Box>
 

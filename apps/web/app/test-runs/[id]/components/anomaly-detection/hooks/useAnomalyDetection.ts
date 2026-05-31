@@ -410,16 +410,14 @@ export function useAnomalyDetection({
   const paginatedData = useMemo(() => sortedData.slice(page * rowsPerPage, page * rowsPerPage + rowsPerPage), [sortedData, page, rowsPerPage]);
 
   const handleSortChange = useCallback((key: AnomalySortKey) => {
-    setSortBy(prev => {
-      if (prev === key) {
-        setSortDirection(d => (d === 'asc' ? 'desc' : 'asc'));
-        return prev;
-      }
+    if (sortBy === key) {
+      setSortDirection(d => (d === 'asc' ? 'desc' : 'asc'));
+    } else {
+      setSortBy(key);
       setSortDirection('asc');
-      return key;
-    });
+    }
     setPage(0);
-  }, []);
+  }, [sortBy]);
 
   const handleDiffSortModeChange = useCallback((mode: DiffSortMode) => {
     setDiffSortMode(mode);

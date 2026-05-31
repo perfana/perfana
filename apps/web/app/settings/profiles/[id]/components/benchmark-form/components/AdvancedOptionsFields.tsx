@@ -62,7 +62,7 @@ export function AdvancedOptionsFields({
           label="Apply to analysis timerange only"
         />
         <FormHelperText sx={{ ml: 0, mt: 0.5 }}>
-          Exclude measurements taken during the ramp-up period from SLO evaluation
+          Only data within the configured analysis timerange is used for SLO evaluation
         </FormHelperText>
       </Grid>
 
