@@ -832,6 +832,34 @@ export class ConsolidatedSchema1700000000000 implements MigrationInterface {
     await queryRunner.query(
       `ALTER TABLE test_runs ADD COLUMN IF NOT EXISTS ramp_down INTEGER DEFAULT 0`,
     );
+    // Nullable jsonb capturing a failed virtual user's session variables, written
+    // opt-in by the perfana-jmeter-timescaledb backend listener for failed samples.
+    // Continuous-aggregate views over requests_error are count rollups and do not
+    // select this column, so they are unaffected. See issue #389.
+    await queryRunner.query(
+      `ALTER TABLE public.requests_error ADD COLUMN IF NOT EXISTS session_variables jsonb`,
+    );
+
+    // tags_hash unique index, folded in from the former standalone
+    // 1700000000003-AddTagsHashUniqueIndex migration so the consolidated migration
+    // is the single source of truth for a greenfield install. All idempotent —
+    // no-ops when schema-sql.ts (Phase 1) already created the function and index.
+    await queryRunner.query(`
+      CREATE OR REPLACE FUNCTION tags_hash(tags text[])
+      RETURNS text
+      LANGUAGE SQL
+      IMMUTABLE
+      AS $$
+        SELECT md5(COALESCE(array_to_string(tags, ','), ''))
+      $$;
+    `);
+    await queryRunner.query(
+      `ALTER TABLE test_run_configs DROP CONSTRAINT IF EXISTS test_run_configs_test_run_id_key_key`,
+    );
+    await queryRunner.query(
+      `CREATE UNIQUE INDEX IF NOT EXISTS test_run_configs_test_run_id_key_tags_key
+        ON test_run_configs (test_run_id, key, tags_hash(tags))`,
+    );
 
     console.log('Phase 6: Post-schema column additions applied.');
   }

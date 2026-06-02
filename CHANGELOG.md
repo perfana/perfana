@@ -4,6 +4,14 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
+## [0.2.61.4] - 2026-06-02
+
+### Added
+- **Capture session variables on failed samples** — added a nullable `session_variables jsonb` column to `requests_error` so the `perfana-jmeter-timescaledb` backend listener can persist a failed virtual user's session variables (key/value pairs) alongside the existing error detail. Capture is opt-in on the listener side and writes only for failed samples; existing and success rows stay `NULL`. Stored as `jsonb` so individual keys are queryable later (e.g. `WHERE session_variables->>'cartId' = '...'`). The `requests_error_5s/1m/5m` continuous aggregates are count rollups and are unaffected. (#389)
+
+### Changed
+- **Consolidated schema migration is now the single source of truth for a greenfield install** — folded the former standalone `tags_hash` unique-index migration into the consolidated migration as idempotent statements, so a fresh database is fully provisioned by the one consolidated migration with no dependency on a separate timestamped migration.
+
 ## [0.2.61.3] - 2026-05-31
 
 ### Changed

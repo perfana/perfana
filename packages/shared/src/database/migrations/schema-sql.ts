@@ -789,7 +789,8 @@ CREATE TABLE public.requests_error (
     response_data text,
     random_id integer,
     scenario_name text,
-    url_hash text
+    url_hash text,
+    session_variables jsonb
 );
 
 
