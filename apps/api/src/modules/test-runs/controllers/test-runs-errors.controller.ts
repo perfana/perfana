@@ -252,7 +252,13 @@ export class TestRunsErrorsController {
           responseMessage: { type: 'string' },
           responseData: { type: 'string' },
           requestHeaders: { type: 'string' },
-          responseHeaders: { type: 'string' }
+          responseHeaders: { type: 'string' },
+          sessionVariables: {
+            type: 'object',
+            nullable: true,
+            additionalProperties: { type: 'string' },
+            description: "Failed virtual user's captured session variables (key/value pairs), or null when none were captured"
+          }
         }
       }
     }

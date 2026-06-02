@@ -233,7 +233,7 @@ server.tool(
 
 server.tool(
   'get_error_details',
-  'Get detailed error instances for a specific transaction/sampler/URL — includes request headers, response headers, response body, and status code. Use after get_error_analysis to drill into root cause.',
+  'Get detailed error instances for a specific transaction/sampler/URL — includes request headers, response headers, response body, status code, and any captured session variables (key/value pairs of the failed virtual user). Use after get_error_analysis to drill into root cause.',
   {
     testRunId: z.string().describe('The test run ID'),
     transactionName: z.string().describe('Transaction name from error analysis'),

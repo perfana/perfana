@@ -382,7 +382,60 @@ describe('TestRunsErrorAnalysisService', () => {
           responseCode: '500',
           errorCount: 15,
           avgResponseTime: 780.5,
+          hasSessionVariables: false,
         });
+      });
+
+      it('should map hasSessionVariables to a boolean from the bool_or aggregate', async () => {
+        // Arrange — DB returns truthy for one group, falsy for another
+        mockQuery.mockResolvedValueOnce([
+          {
+            transactionName: 'checkout',
+            samplerName: 'HTTP Request',
+            url: '/checkout',
+            responseCode: '500',
+            errorCount: '15',
+            avgResponseTime: '780.50',
+            hasSessionVariables: true,
+          },
+          {
+            transactionName: 'login',
+            samplerName: 'HTTP Request',
+            url: '/login',
+            responseCode: '401',
+            errorCount: '3',
+            avgResponseTime: '120.00',
+            hasSessionVariables: false,
+          },
+        ]);
+
+        // Act
+        const results = await service.getErrorsByTransaction(TEST_RUN_ID);
+
+        // Assert
+        expect(results[0].hasSessionVariables).toBe(true);
+        expect(results[1].hasSessionVariables).toBe(false);
+      });
+
+      it('should coerce a null hasSessionVariables aggregate to false', async () => {
+        // Arrange — bool_or over an empty group yields null
+        mockQuery.mockResolvedValueOnce([
+          {
+            transactionName: 'checkout',
+            samplerName: 'HTTP Request',
+            url: '/checkout',
+            responseCode: '500',
+            errorCount: '1',
+            avgResponseTime: '100.00',
+            hasSessionVariables: null,
+          },
+        ]);
+
+        // Act
+        const results = await service.getErrorsByTransaction(TEST_RUN_ID);
+
+        // Assert
+        expect(results[0].hasSessionVariables).toBe(false);
       });
 
       it('should include responseCode field', async () => {
@@ -670,7 +723,55 @@ describe('TestRunsErrorAnalysisService', () => {
           responseData: '<html>500</html>',
           requestHeaders: 'Authorization: Bearer token',
           responseHeaders: 'Content-Type: text/html',
+          sessionVariables: null,
         });
+      });
+
+      it('should map session variables (jsonb object) through unchanged', async () => {
+        // Arrange — node-postgres parses jsonb into a JS object
+        const vars = { userId: '48213', cartId: 'a1b2-c3d4', region: 'eu-west-1' };
+        mockQuery.mockResolvedValueOnce([
+          {
+            time: '2024-01-15T10:05:30.000Z',
+            transactionName: TRANSACTION,
+            samplerName: SAMPLER,
+            responseCode: '500',
+            responseTime: 1234,
+            url: URL,
+            responseMessage: 'Internal Server Error',
+            responseData: '',
+            requestHeaders: '',
+            responseHeaders: '',
+            sessionVariables: vars,
+          },
+        ]);
+
+        // Act
+        const results = await service.getErrorDetails(TEST_RUN_ID, TRANSACTION, SAMPLER, URL);
+
+        // Assert
+        expect(results[0].sessionVariables).toEqual(vars);
+      });
+
+      it('should default sessionVariables to null when absent', async () => {
+        // Arrange — column is null for this row
+        mockQuery.mockResolvedValueOnce([
+          {
+            time: '2024-01-15T10:00:00.000Z',
+            transactionName: TRANSACTION,
+            samplerName: SAMPLER,
+            responseCode: '502',
+            responseTime: 500,
+            url: URL,
+            sessionVariables: null,
+          },
+        ]);
+
+        // Act
+        const results = await service.getErrorDetails(TEST_RUN_ID, TRANSACTION, SAMPLER, URL);
+
+        // Assert
+        expect(results[0].sessionVariables).toBeNull();
       });
 
       it('should pass all four filter parameters to the query', async () => {

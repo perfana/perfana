@@ -94,6 +94,7 @@ export interface ErrorByTransaction {
   errorCount: number;
   avgResponseTime: number;
   responseCode?: string;
+  hasSessionVariables: boolean;
 }
 
 export interface ErrorOverTime {
@@ -117,6 +118,7 @@ export interface ErrorDetail {
   responseData: string;
   requestHeaders: string;
   responseHeaders: string;
+  sessionVariables: Record<string, string> | null;
 }
 
 @Injectable()
@@ -280,7 +282,8 @@ export class TestRunsErrorAnalysisService {
         url,
         response_code as "responseCode",
         COUNT(*) as "errorCount",
-        ROUND(AVG(response_time)) as "avgResponseTime"
+        ROUND(AVG(response_time)) as "avgResponseTime",
+        bool_or(session_variables IS NOT NULL AND session_variables <> '{}'::jsonb) as "hasSessionVariables"
       FROM requests_error
       WHERE test_run_id = $1${clause}
       GROUP BY transaction_name, sampler_name, url, response_code
@@ -297,6 +300,7 @@ export class TestRunsErrorAnalysisService {
       responseCode: row.responseCode as string,
       errorCount: parseInt(String(row.errorCount), 10),
       avgResponseTime: parseFloat(String(row.avgResponseTime)),
+      hasSessionVariables: Boolean(row.hasSessionVariables),
     }));
   }
 
@@ -391,7 +395,8 @@ export class TestRunsErrorAnalysisService {
         response_message as "responseMessage",
         response_data as "responseData",
         request_headers as "requestHeaders",
-        response_headers as "responseHeaders"
+        response_headers as "responseHeaders",
+        session_variables as "sessionVariables"
       FROM requests_error
       WHERE test_run_id = $1
         AND transaction_name = $2
@@ -419,6 +424,8 @@ export class TestRunsErrorAnalysisService {
       responseData: (row.responseData as string) || '',
       requestHeaders: (row.requestHeaders as string) || '',
       responseHeaders: (row.responseHeaders as string) || '',
+      sessionVariables:
+        (row.sessionVariables as Record<string, string> | null) ?? null,
     }));
   }
 }

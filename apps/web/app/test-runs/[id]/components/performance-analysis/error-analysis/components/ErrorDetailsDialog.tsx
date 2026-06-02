@@ -10,6 +10,10 @@ import {
   DialogActions,
   Button,
   IconButton,
+  Table,
+  TableBody,
+  TableCell,
+  TableRow,
   useTheme,
 } from '@mui/material';
 import {
@@ -92,6 +96,60 @@ function CodeBlock({
       ) : (
         <pre style={{ margin: 0 }}>{displayContent}</pre>
       )}
+    </Box>
+  );
+}
+
+function SessionVariablesTable({ variables }: { variables: Record<string, string> }) {
+  const theme = useTheme();
+  const isDark = theme.palette.mode === 'dark';
+
+  const resolvedBg = isDark ? 'rgba(255, 255, 255, 0.05)' : 'rgba(0, 0, 0, 0.03)';
+  const resolvedBorder = isDark ? 'rgba(255, 255, 255, 0.12)' : 'rgba(0, 0, 0, 0.12)';
+
+  return (
+    <Box
+      sx={{
+        mb: 2,
+        backgroundColor: resolvedBg,
+        border: `1px solid ${resolvedBorder}`,
+        borderRadius: 1,
+        maxHeight: '200px',
+        overflowY: 'auto',
+      }}
+    >
+      <Table size="small">
+        <TableBody>
+          {Object.entries(variables).map(([key, value]) => (
+            <TableRow key={key} sx={{ '&:last-child td': { borderBottom: 'none' } }}>
+              <TableCell
+                sx={{
+                  fontFamily: 'monospace',
+                  fontSize: '0.75rem',
+                  fontWeight: 600,
+                  color: 'text.secondary',
+                  verticalAlign: 'top',
+                  width: '35%',
+                  borderColor: resolvedBorder,
+                  wordBreak: 'break-all',
+                }}
+              >
+                {key}
+              </TableCell>
+              <TableCell
+                sx={{
+                  fontFamily: 'monospace',
+                  fontSize: '0.75rem',
+                  borderColor: resolvedBorder,
+                  wordBreak: 'break-all',
+                }}
+              >
+                {String(value)}
+              </TableCell>
+            </TableRow>
+          ))}
+        </TableBody>
+      </Table>
     </Box>
   );
 }
@@ -196,6 +254,13 @@ export function ErrorDetailsDialog({
                 {new Date(selectedError.time).toLocaleString()}
               </Typography>
             </Grid>
+            {selectedError.sessionVariables &&
+              Object.keys(selectedError.sessionVariables).length > 0 && (
+                <Grid size={{ xs: 12 }}>
+                  <DetailLabel label="Session Variables" />
+                  <SessionVariablesTable variables={selectedError.sessionVariables} />
+                </Grid>
+              )}
             <Grid size={{ xs: 12 }}>
               <DetailLabel label="URL" />
               <CodeBlock

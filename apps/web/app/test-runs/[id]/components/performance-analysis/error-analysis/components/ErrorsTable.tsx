@@ -21,6 +21,7 @@ import {
   InfoOutlined as InfoIcon,
   KeyboardArrowDown,
   KeyboardArrowUp,
+  VpnKeyOutlined as SessionVariablesIcon,
 } from '@mui/icons-material';
 import FancyChip from '../../../shared/FancyChip';
 import { ErrorByTransaction, ErrorByTransactionGroup } from '../types';
@@ -137,18 +138,28 @@ function GroupRow({
                         </Typography>
                       </TableCell>
                       <TableCell align="center">
-                        <Tooltip title="View Error Details" arrow>
-                          <IconButton
-                            size="small"
-                            onClick={() => onViewDetails(child)}
-                            sx={{
-                              color: 'primary.main',
-                              '&:hover': { backgroundColor: 'action.hover' },
-                            }}
-                          >
-                            <InfoIcon fontSize="small" />
-                          </IconButton>
-                        </Tooltip>
+                        <Box sx={{ display: 'inline-flex', alignItems: 'center', gap: 0.5 }}>
+                          {child.hasSessionVariables && (
+                            <Tooltip title="Session variables captured" arrow>
+                              <SessionVariablesIcon
+                                fontSize="small"
+                                sx={{ color: 'text.secondary' }}
+                              />
+                            </Tooltip>
+                          )}
+                          <Tooltip title="View Error Details" arrow>
+                            <IconButton
+                              size="small"
+                              onClick={() => onViewDetails(child)}
+                              sx={{
+                                color: 'primary.main',
+                                '&:hover': { backgroundColor: 'action.hover' },
+                              }}
+                            >
+                              <InfoIcon fontSize="small" />
+                            </IconButton>
+                          </Tooltip>
+                        </Box>
                       </TableCell>
                     </TableRow>
                   ))}
