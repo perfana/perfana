@@ -446,6 +446,7 @@ export interface ErrorDetail {
   responseData: string;
   requestHeaders: string;
   responseHeaders: string;
+  sessionVariables?: Record<string, string> | null;
 }
 
 // ─── Data sources & cross-source investigation types ─────────────────────

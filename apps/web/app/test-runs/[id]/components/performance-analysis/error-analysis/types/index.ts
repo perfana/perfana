@@ -22,6 +22,7 @@ export interface ErrorByTransaction {
   errorCount: number;
   avgResponseTime: number;
   responseCode?: string;
+  hasSessionVariables?: boolean;
 }
 
 export interface ErrorByTransactionGroup {
@@ -55,6 +56,7 @@ export interface ErrorDetail {
   responseData: string;
   requestHeaders: string;
   responseHeaders: string;
+  sessionVariables?: Record<string, string> | null;
 }
 
 export interface ErrorAnalysisCardProps {

@@ -4,6 +4,11 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
+## [0.2.61.5] - 2026-06-02
+
+### Added
+- **Surface failed-user session variables in the error UI** — the `session_variables` captured on `requests_error` (see 0.2.61.4) are now read by the API and shown wherever error details are presented. The Error Details dialog renders them as a key/value table (after Response Time, before URL), shown only when present. The errors table marks rows that have captured session data with a key icon ("Session variables captured") so users can spot them before drilling in. The MCP `get_error_details` tool now returns `sessionVariables` too, so AI agents receive them. Empty `{}` and `NULL` are treated identically (no section, no indicator). No DB migration — the column already exists. (#389)
+
 ## [0.2.61.4] - 2026-06-02
 
 ### Added
