@@ -4,6 +4,12 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
+## [0.2.61.6] - 2026-06-03
+
+### Fixed
+- **Long JMeter scenario names no longer abort the performance-test-metrics pipeline** (#388) — `generateScenarioDashboardUid()` now caps its output at the `application_dashboards.dashboard_uid` `varchar(100)` limit. Short names are unchanged (`performance-test-metrics-<sanitized>`, no churn for existing dashboards); names that would overflow are truncated and given a short deterministic SHA-256 suffix of the original name, so the UID stays stable across re-runs (idempotent) and two long names that share a truncated prefix still map to distinct UIDs. As defense-in-depth, `RequestsProcessor` and `TransactionsProcessor` now log-and-skip a scenario whose dashboard creation fails instead of aborting the whole run, so the remaining scenarios still produce `ds_metrics`.
+- **Phantom "job in progress" now self-heals** (#387) — `JobProgressService` reconciles each in-memory active-job entry against authoritative state on read, so a finished job whose terminal `completed`/`failed` event was dropped clears automatically (no `perfana-api` restart). Eviction triggers: `lastProgressAt` older than a configurable staleness threshold (`JOB_PROGRESS_STALE_THRESHOLD_MS`, default 5 min), the Redis `job:progress:{jobId}` key gone, a terminal status present in Redis, or the scope lock held by a different job. The Redis progress key (refreshed every progress event) is treated as authoritative rather than the scope lock, which is not auto-extended and so legitimately expires for long-running jobs. `getActiveJobForScope()` and `getAllActiveJobs()` now both reconcile before returning.
+
 ## [0.2.61.5] - 2026-06-02
 
 ### Added

@@ -109,14 +109,35 @@ export class TransactionsProcessor {
       timestep: number;
     }>();
 
+    // Scenarios whose dashboard could not be created — skipped without aborting
+    // the whole run, so remaining scenarios still yield ds_metrics (issue #388).
+    const failedScenarios = new Set<string>();
+
     // Process pre-aggregated data from database
     for (const row of aggregatedData) {
-      // Get/create dashboard for this scenario
-      const dashboard = await this.dashboardManager.getOrCreateScenarioDashboard(
-        row.scenario_name,
-        testRun.system_under_test_id,
-        testRun.test_environment
-      );
+      // Skip rows for a scenario we already failed to set up (logged once below).
+      if (failedScenarios.has(row.scenario_name)) {
+        continue;
+      }
+
+      // Get/create dashboard for this scenario. A single failing scenario must
+      // not abort the entire pipeline — log it, remember it, and move on.
+      let dashboard: DashboardMetadata;
+      try {
+        dashboard = await this.dashboardManager.getOrCreateScenarioDashboard(
+          row.scenario_name,
+          testRun.system_under_test_id,
+          testRun.test_environment
+        );
+      } catch (err) {
+        failedScenarios.add(row.scenario_name);
+        const msg = err && typeof err === 'object' && 'message' in err ? (err as Error).message : 'Unknown error';
+        this.logger.error(
+          { err },
+          `⚠️  Skipping scenario "${row.scenario_name}" — dashboard creation failed: ${msg}. Remaining scenarios will still be processed.`
+        );
+        continue;
+      }
 
       // Build the new metric name: just the transaction name
       const metricName = buildNewTransactionMetricName(row.transaction_name);

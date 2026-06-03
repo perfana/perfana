@@ -5,6 +5,7 @@ import {
   JobProgress,
   JobBlockedInfo,
   JobLockInfo,
+  JOB_DEFAULTS,
   JOB_REDIS_CHANNELS,
   JOB_REDIS_KEYS,
   generateLockKey,
@@ -44,13 +45,25 @@ export class JobProgressService implements OnModuleInit, OnModuleDestroy {
   // Key: scopeKey (systemUnderTestId:testEnvironment:workload) -> jobId
   private scopeToJobIndex = new Map<string, string>();
 
+  // An in-memory active entry whose `lastProgressAt` is older than this is
+  // treated as expired and evicted on read. Defaults to the worker's progress-key
+  // TTL (LOCK_TTL_SECONDS) — past that window the worker is no longer refreshing
+  // the key, so a still-"active" in-memory copy is a phantom (issue #387).
+  // Override with JOB_PROGRESS_STALE_THRESHOLD_MS.
+  private staleThresholdMs = JOB_DEFAULTS.LOCK_TTL_SECONDS * 1000;
+
   // Event handlers that can be registered by the gateway
   private progressHandlers: Array<(progress: JobProgress) => void> = [];
   private completedHandlers: Array<(event: JobCompletedEvent['payload']) => void> = [];
   private failedHandlers: Array<(event: JobFailedEvent['payload']) => void> = [];
   private stuckHandlers: Array<(event: JobStuckEvent['payload']) => void> = [];
 
-  constructor(private readonly configService: ConfigService) {}
+  constructor(private readonly configService: ConfigService) {
+    const configuredThreshold = this.configService.get<number>('JOB_PROGRESS_STALE_THRESHOLD_MS');
+    if (typeof configuredThreshold === 'number' && configuredThreshold > 0) {
+      this.staleThresholdMs = configuredThreshold;
+    }
+  }
 
   async onModuleInit() {
     this.logger.log('🚀 JobProgressService onModuleInit starting...');
@@ -359,8 +372,12 @@ export class JobProgressService implements OnModuleInit, OnModuleDestroy {
   }
 
   /**
-   * Get active job for a specific scope
-   * Checks in-memory cache first, then falls back to Redis lock
+   * Get active job for a specific scope.
+   *
+   * An in-memory `activeJobs` entry is never trusted blindly — it is reconciled
+   * against authoritative state (Redis progress key + staleness + lock owner) so
+   * a finished job whose terminal `completed`/`failed` event was dropped clears
+   * automatically instead of showing a phantom "in progress" forever (issue #387).
    */
   async getActiveJobForScope(
     systemUnderTestId: string,
@@ -368,46 +385,164 @@ export class JobProgressService implements OnModuleInit, OnModuleDestroy {
     workload: string
   ): Promise<JobProgress | null> {
     const scopeKey = this.getScopeKey(systemUnderTestId, testEnvironment, workload);
+    const lockKey = generateLockKey(systemUnderTestId, testEnvironment, workload);
 
-    // Check in-memory cache first
-    const jobId = this.scopeToJobIndex.get(scopeKey);
-    if (jobId) {
-      return this.getJobProgress(jobId);
+    // Candidate job from the in-memory index — reconcile before returning.
+    const indexedJobId = this.scopeToJobIndex.get(scopeKey);
+    if (indexedJobId) {
+      return this.reconcileScopeJob(scopeKey, lockKey, indexedJobId);
     }
 
-    // Fall back to checking Redis lock directly
+    // No in-memory entry — fall back to the Redis lock to discover a running job.
     if (!this.isRedisAvailable) {
       return null;
     }
 
     try {
-      const lockKey = generateLockKey(systemUnderTestId, testEnvironment, workload);
       const lockData = await this.queryRedis.get(lockKey);
-
       if (!lockData) {
         return null;
       }
 
       const lock: JobLockInfo = JSON.parse(lockData);
-
       if (!lock.locked || !lock.jobId) {
         return null;
       }
 
-      // Get progress from Redis
-      const progress = await this.getJobProgress(lock.jobId);
-
-      // If we found progress, update the cache
-      if (progress) {
-        this.activeJobs.set(progress.jobId, progress);
-        this.scopeToJobIndex.set(scopeKey, progress.jobId);
-      }
-
-      return progress;
+      // Reconcile the lock's job against the authoritative progress key too, so we
+      // never resurrect a finished job from a lock that outlived its terminal event.
+      return this.reconcileScopeJob(scopeKey, lockKey, lock.jobId);
     } catch (error) {
       const errorMessage = error && typeof error === 'object' && 'message' in error ? (error as Error).message : 'Unknown error';
       this.logger.error(`Error checking Redis lock for scope: ${errorMessage}`);
       return null;
+    }
+  }
+
+  /**
+   * Reconcile a candidate `jobId` for a scope against authoritative state and
+   * return live progress, or evict the in-memory entry and return `null`.
+   *
+   * The authoritative source is the Redis progress key (`job:progress:{jobId}`),
+   * which the worker refreshes on every progress event (`setex`, LOCK_TTL_SECONDS)
+   * and stamps with a terminal status on complete/fail. The scope lock is NOT
+   * auto-extended (worker `extendLock` is unused), so a *missing* lock is ambiguous
+   * for long-running jobs and is only used here to detect a *different* current
+   * owner — never as a standalone eviction signal.
+   *
+   * Eviction triggers (in order):
+   *  1. `lastProgressAt` older than the staleness threshold (works even if Redis is down).
+   *  2. Progress key gone from Redis (job finished/expired with no terminal event seen).
+   *  3. Progress key present but not `active`/`waiting` (terminal event was missed).
+   *  4. Scope lock held by a *different* job.
+   */
+  private async reconcileScopeJob(
+    scopeKey: string,
+    lockKey: string,
+    jobId: string
+  ): Promise<JobProgress | null> {
+    const cached = this.activeJobs.get(jobId);
+
+    // (1) Staleness guard — independent of Redis availability.
+    if (cached && this.isStale(cached)) {
+      this.logger.warn(
+        `Evicting stale active-job entry ${jobId} (lastProgressAt ${cached.lastProgressAt})`
+      );
+      this.evictJob(jobId, scopeKey);
+      return null;
+    }
+
+    if (!this.isRedisAvailable) {
+      // Cannot reconcile further — trust the (non-stale) cached entry if any.
+      return cached ?? null;
+    }
+
+    try {
+      // (2) Authoritative Redis progress key.
+      const progressKey = `${JOB_REDIS_KEYS.PROGRESS_PREFIX}${jobId}`;
+      const progressData = await this.queryRedis.get(progressKey);
+
+      if (!progressData) {
+        if (cached) {
+          this.logger.warn(`Evicting active-job entry ${jobId}: progress key gone from Redis`);
+        }
+        this.evictJob(jobId, scopeKey);
+        return null;
+      }
+
+      const progress: JobProgress = JSON.parse(progressData);
+
+      // (3) Terminal status present but the completed/failed event was missed.
+      if (progress.status !== 'active' && progress.status !== 'waiting') {
+        this.logger.warn(
+          `Evicting active-job entry ${jobId}: Redis progress status is '${progress.status}'`
+        );
+        this.evictJob(jobId, scopeKey);
+        return null;
+      }
+
+      // Re-check staleness against the freshest Redis copy.
+      if (this.isStale(progress)) {
+        this.logger.warn(
+          `Evicting active-job entry ${jobId}: Redis progress lastProgressAt is stale (${progress.lastProgressAt})`
+        );
+        this.evictJob(jobId, scopeKey);
+        return null;
+      }
+
+      // (4) Lock cross-check — only evict if the scope is owned by another job.
+      const lockData = await this.queryRedis.get(lockKey);
+      if (lockData) {
+        const lock: JobLockInfo = JSON.parse(lockData);
+        if (lock.locked && lock.jobId && lock.jobId !== jobId) {
+          this.logger.warn(
+            `Evicting active-job entry ${jobId}: scope lock now held by ${lock.jobId}`
+          );
+          this.evictJob(jobId, scopeKey);
+          return null;
+        }
+      }
+
+      // Confirmed running — refresh the in-memory copy from authoritative Redis state.
+      this.activeJobs.set(jobId, progress);
+      this.scopeToJobIndex.set(scopeKey, jobId);
+      return progress;
+    } catch (error) {
+      const errorMessage = error && typeof error === 'object' && 'message' in error ? (error as Error).message : 'Unknown error';
+      this.logger.error(`Error reconciling active job ${jobId}: ${errorMessage}`);
+      // On reconciliation error, fall back to the (already non-stale) cached entry.
+      return cached ?? null;
+    }
+  }
+
+  /**
+   * Whether a progress entry is older than the staleness threshold.
+   * A non-parseable timestamp is treated as not-stale (we can't judge it).
+   */
+  private isStale(progress: JobProgress): boolean {
+    const lastProgressMs = Date.parse(progress.lastProgressAt);
+    if (!Number.isFinite(lastProgressMs)) {
+      return false;
+    }
+    return Date.now() - lastProgressMs > this.staleThresholdMs;
+  }
+
+  /**
+   * Remove a job from the in-memory caches. When `scopeKey` is omitted, every
+   * scope-index entry pointing at the job is removed.
+   */
+  private evictJob(jobId: string, scopeKey?: string): void {
+    this.activeJobs.delete(jobId);
+    if (scopeKey) {
+      if (this.scopeToJobIndex.get(scopeKey) === jobId) {
+        this.scopeToJobIndex.delete(scopeKey);
+      }
+      return;
+    }
+    for (const [key, value] of this.scopeToJobIndex.entries()) {
+      if (value === jobId) {
+        this.scopeToJobIndex.delete(key);
+      }
     }
   }
 
@@ -449,10 +584,30 @@ export class JobProgressService implements OnModuleInit, OnModuleDestroy {
   }
 
   /**
-   * Get all active jobs
+   * Get all active jobs.
+   *
+   * Each entry is reconciled against authoritative state before being returned,
+   * so finished/stale jobs are evicted rather than reported as active (issue #387).
    */
-  getAllActiveJobs(): JobProgress[] {
-    return Array.from(this.activeJobs.values());
+  async getAllActiveJobs(): Promise<JobProgress[]> {
+    const result: JobProgress[] = [];
+
+    // Snapshot keys up front — reconciliation may evict entries mid-iteration.
+    const jobIds = Array.from(this.activeJobs.keys());
+    for (const jobId of jobIds) {
+      const entry = this.activeJobs.get(jobId);
+      if (!entry) {
+        continue;
+      }
+      const scopeKey = this.getScopeKey(entry.systemUnderTestId, entry.testEnvironment, entry.workload);
+      const lockKey = generateLockKey(entry.systemUnderTestId, entry.testEnvironment, entry.workload);
+      const live = await this.reconcileScopeJob(scopeKey, lockKey, jobId);
+      if (live) {
+        result.push(live);
+      }
+    }
+
+    return result;
   }
 
   /**
