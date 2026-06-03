@@ -52,11 +52,32 @@ export function generateScenarioDashboardUuid(
   return generateDeterministicUuid(input);
 }
 
+/** Fixed prefix for every performance-test scenario dashboard UID (25 chars). */
+const SCENARIO_DASHBOARD_UID_PREFIX = 'performance-test-metrics-';
+
+/**
+ * Maximum length of a scenario dashboard UID, bounded by the
+ * `application_dashboards.dashboard_uid` column (`varchar(100)`).
+ */
+const SCENARIO_DASHBOARD_UID_MAX_LENGTH = 100;
+
+/** Length of the deterministic hash suffix appended to truncated UIDs (8 hex chars). */
+const SCENARIO_DASHBOARD_UID_HASH_LENGTH = 8;
+
 /**
  * Generates a dashboard UID for Grafana integration.
  *
+ * The result is always `<= 100` characters so it fits the `varchar(100)`
+ * `application_dashboards.dashboard_uid` column. Short names are returned
+ * unchanged (`performance-test-metrics-<sanitized>`) so already-ingested runs
+ * keep stable UIDs. When the sanitized name would overflow the column, it is
+ * truncated and a short deterministic SHA-256 suffix of the *original* name is
+ * appended — this keeps the UID stable across re-runs (idempotent) while
+ * guaranteeing two long names that share a truncated prefix still map to
+ * distinct UIDs.
+ *
  * @param scenarioName - The scenario name (e.g., "loadtest", "smoketest")
- * @returns A dashboard UID string
+ * @returns A dashboard UID string, never longer than 100 characters
  *
  * @example
  * const uid = generateScenarioDashboardUid('loadtest');
@@ -65,7 +86,27 @@ export function generateScenarioDashboardUuid(
 export function generateScenarioDashboardUid(scenarioName: string): string {
   // Sanitize scenario name for use in UID (lowercase, replace spaces/special chars with hyphens)
   const sanitized = scenarioName.toLowerCase().replace(/[^a-z0-9-]/g, '-');
-  return `performance-test-metrics-${sanitized}`;
+  const full = `${SCENARIO_DASHBOARD_UID_PREFIX}${sanitized}`;
+
+  // Common case: the full UID already fits — return it unchanged so existing
+  // short-name dashboards see no churn.
+  if (full.length <= SCENARIO_DASHBOARD_UID_MAX_LENGTH) {
+    return full;
+  }
+
+  // Overflow: truncate the sanitized name and append a deterministic hash of the
+  // original scenario name to preserve uniqueness within the 100-char budget.
+  const hash = createHash('sha256')
+    .update(scenarioName)
+    .digest('hex')
+    .substring(0, SCENARIO_DASHBOARD_UID_HASH_LENGTH);
+  const suffix = `-${hash}`; // 9 chars (hyphen + 8 hex)
+  const available =
+    SCENARIO_DASHBOARD_UID_MAX_LENGTH - SCENARIO_DASHBOARD_UID_PREFIX.length - suffix.length;
+  // Trim trailing hyphens from the truncated name to avoid an ugly "--" join.
+  const truncated = sanitized.substring(0, available).replace(/-+$/, '');
+
+  return `${SCENARIO_DASHBOARD_UID_PREFIX}${truncated}${suffix}`;
 }
 
 /**

@@ -672,7 +672,7 @@ export class DataScienceController {
   })
   async getActiveJobs() {
     try {
-      const activeJobs = this.jobProgressService.getAllActiveJobs();
+      const activeJobs = await this.jobProgressService.getAllActiveJobs();
       return {
         totalActive: activeJobs.length,
         jobs: activeJobs

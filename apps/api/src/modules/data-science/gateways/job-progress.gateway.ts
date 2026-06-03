@@ -208,7 +208,7 @@ export class JobProgressGateway
     }
 
     // Send connection acknowledgment with current active jobs
-    const activeJobs = this.jobProgressService.getAllActiveJobs();
+    const activeJobs = await this.jobProgressService.getAllActiveJobs();
     client.emit('connected', {
       message: 'Successfully connected to job-progress updates',
       userId: client.userId,
