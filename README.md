@@ -1,18 +1,24 @@
 # Perfana
 
-[![License](https://img.shields.io/badge/license-Apache%202.0-blue.svg)](LICENSE) [![CI](https://github.com/perfana/perfana/actions/workflows/pr-quality-gate.yml/badge.svg)](https://github.com/perfana/perfana/actions/workflows/pr-quality-gate.yml) [![TypeScript](https://img.shields.io/badge/TypeScript-5.3-blue.svg)](https://www.typescriptlang.org/) [![Node](https://img.shields.io/badge/node-18%2B-green.svg)](https://nodejs.org/)
+[![License](https://img.shields.io/badge/license-Apache%202.0-blue.svg)](LICENSE) [![TypeScript](https://img.shields.io/badge/TypeScript-5.3-blue.svg)](https://www.typescriptlang.org/) [![Node](https://img.shields.io/badge/node-18%2B-green.svg)](https://nodejs.org/)
 
 Open-source performance analysis platform. Ingest load test results, collect metrics from Grafana/Dynatrace/Prometheus, detect regressions with the ADAPT algorithm, and track SLO compliance — all in one place.
 
 ## Features
 
-- **Automated regression detection** — ADAPT algorithm analyzes metrics across test runs
+- **Automated regression detection** — ADAPT algorithm detects anomalies in metrics across test runs from different sources
+- **Apdex scoring** — Application performance index for transaction-level performance scoring
+- **SLO compliance** — Define and track service level objectives with configurable thresholds
+- **Run comparison** — Time series comparison between test runs
 - **Multi-source metrics** — Grafana, Dynatrace, InfluxDB, Prometheus, and more
 - **Load test support** — Gatling, JMeter, k6, Neoload
-- **SLO compliance** — Define and track service level objectives
-- **Dashboard library** — 21 pre-built Grafana dashboards for common scenarios
 - **Distributed tracing** — Tempo and Jaeger integration
 - **Profiling** — Pyroscope integration for continuous profiling
+- **Automated report generation** — Generate performance reports automatically
+- **CI quality gate** — Integrate with CI pipelines to gate releases on performance
+- **Dashboard library** — 21 pre-built Grafana dashboards for common scenarios
+- **Automated dashboard configuration** — Configure Grafana dashboards from profiles and metric discovery
+- **MCP server** — Query test runs, metrics, and analysis results from AI agents
 - **Multi-tenant** — Organizations and teams with role-based access
 
 ## Quick Start
