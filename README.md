@@ -38,6 +38,8 @@ npm run dev
 
 Login: `perfana@example.com` / `perfana`
 
+> 💡 Want the full stack with a sample application under test? See the [**perfana-demo**](https://github.com/perfana/perfana-demo) repository.
+
 ### Prerequisites
 
 - Node.js 18+
