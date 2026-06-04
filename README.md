@@ -1,6 +1,6 @@
 # Perfana
 
-[![License](https://img.shields.io/badge/license-Apache%202.0-blue.svg)](LICENSE) [![CI](https://github.com/perfana/perfana/actions/workflows/pr-quality-gate.yml/badge.svg)](https://github.com/perfana/perfana/actions/workflows/pr-quality-gate.yml) [![TypeScript](https://img.shields.io/badge/TypeScript-5.3-blue.svg)](https://www.typescriptlang.org/) [![Node](https://img.shields.io/badge/node-18%2B-green.svg)](https://nodejs.org/)
+[![License](https://img.shields.io/badge/license-Apache%202.0-blue.svg)](LICENSE) [![TypeScript](https://img.shields.io/badge/TypeScript-5.3-blue.svg)](https://www.typescriptlang.org/) [![Node](https://img.shields.io/badge/node-18%2B-green.svg)](https://nodejs.org/)
 
 Open-source performance analysis platform. Ingest load test results, collect metrics from Grafana/Dynatrace/Prometheus, detect regressions with the ADAPT algorithm, and track SLO compliance — all in one place.
 
