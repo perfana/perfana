@@ -6,13 +6,19 @@ Open-source performance analysis platform. Ingest load test results, collect met
 
 ## Features
 
-- **Automated regression detection** — ADAPT algorithm analyzes metrics across test runs
+- **Automated regression detection** — ADAPT algorithm detects anomalies in metrics across test runs from different sources
+- **Apdex scoring** — Application performance index for transaction-level performance scoring
+- **SLO compliance** — Define and track service level objectives with configurable thresholds
+- **Run comparison** — Time series comparison between test runs
 - **Multi-source metrics** — Grafana, Dynatrace, InfluxDB, Prometheus, and more
 - **Load test support** — Gatling, JMeter, k6, Neoload
-- **SLO compliance** — Define and track service level objectives
-- **Dashboard library** — 21 pre-built Grafana dashboards for common scenarios
 - **Distributed tracing** — Tempo and Jaeger integration
 - **Profiling** — Pyroscope integration for continuous profiling
+- **Automated report generation** — Generate performance reports automatically
+- **CI quality gate** — Integrate with CI pipelines to gate releases on performance
+- **Dashboard library** — 21 pre-built Grafana dashboards for common scenarios
+- **Automated dashboard configuration** — Configure Grafana dashboards from profiles and metric discovery
+- **MCP server** — Query test runs, metrics, and analysis results from AI agents
 - **Multi-tenant** — Organizations and teams with role-based access
 
 ## Quick Start
