@@ -32,7 +32,7 @@ export class VariableDiscoveryService {
   ): Promise<DashboardVariable[]> {
     // Set base variables for system_under_test and test_environment
     const systemUnderTestName = testRun.systemUnderTest?.name || testRun.systemUnderTestId;
-    const applicationDashboardVariables: DashboardVariable[] = [
+    let applicationDashboardVariables: DashboardVariable[] = [
       {
         name: 'system_under_test',
         values: [systemUnderTestName],
@@ -64,6 +64,27 @@ export class VariableDiscoveryService {
             templatingVariable,
             applicationDashboardVariables,
           );
+
+          // Apply overrides + regex filtering immediately, BEFORE the next
+          // templating variable is resolved. Template variables can chain:
+          // a dependent variable's datasource query references an
+          // already-resolved variable (e.g. `... IN ($scenarioName)`). If
+          // filtering runs only once after the whole loop, the dependent
+          // query is built against the full, unfiltered upstream values, so a
+          // regex rule on the upstream variable never narrows the dependent
+          // results. Filtering per-variable here lets the narrowed values flow
+          // into the chained query (spanmetrics: requestName depends on
+          // scenarioName + transaction, so both regex rules must constrain it).
+          applicationDashboardVariables = this.variableMatcherService.overrideValues(
+            applicationDashboardVariables,
+            autoConfigGrafanaDashboard.setHardcodedValueForVariables,
+            testRun,
+          );
+          applicationDashboardVariables = this.variableMatcherService.filterValuesOnRegex(
+            applicationDashboardVariables,
+            autoConfigGrafanaDashboard,
+            testRun,
+          );
         } catch (err) {
           const errorMessage = err instanceof Error ? err.stack : String(err);
           this.logger.error(
@@ -75,14 +96,16 @@ export class VariableDiscoveryService {
       }
     }
 
-    // Apply overrides and regex filtering
-    const overriddenVariables = this.variableMatcherService.overrideValues(
+    // Final pass: guarantees overrides + regex are applied even when there are
+    // no templating variables (the loop never runs). Idempotent for variables
+    // already processed inside the loop.
+    applicationDashboardVariables = this.variableMatcherService.overrideValues(
       applicationDashboardVariables,
       autoConfigGrafanaDashboard.setHardcodedValueForVariables,
       testRun,
     );
     return this.variableMatcherService.filterValuesOnRegex(
-      overriddenVariables,
+      applicationDashboardVariables,
       autoConfigGrafanaDashboard,
       testRun,
     );

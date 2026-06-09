@@ -1968,6 +1968,60 @@ ORDER BY 1`,
       expect(queryPassedToDetector).not.toContain("IN ('.*','Checkout')");
     });
 
+    it('should filter an upstream variable BEFORE resolving a dependent variable that chains on it', async () => {
+      // Regression: a regex rule on an upstream variable must narrow a
+      // dependent variable whose query chains on it via `IN ($upstream)`.
+      // spanmetrics: requestName depends on scenarioName + transaction, so a
+      // regex on scenarioName must propagate into the dependent query. If
+      // filtering runs only AFTER all variable queries, the dependent query
+      // sees the full unfiltered upstream set and over-produces dashboards.
+      const mockGrafanaDashboard = createMockDashboard([
+        { name: 'scenarioName', type: 'custom', query: 'BrowseAndSearch,Checkout' },
+        {
+          name: 'transaction',
+          type: 'query',
+          query:
+            'SELECT DISTINCT transaction_name FROM requests_raw WHERE scenario_name IN ($scenarioName)',
+          datasource: { uid: 'postgres-uid' },
+        },
+      ]);
+
+      const mockAutoConfigDashboard = {
+        dashboardUid: 'test-uid',
+        dashboardName: 'Test Dashboard',
+        matchRegexForVariables: { scenarioName: 'Checkout' },
+      };
+
+      // Faithful reimplementation of filterValuesOnRegex (the default module
+      // mock is identity, which cannot exercise ordering).
+      variableMatcherService.filterValuesOnRegex.mockImplementation((vars: any[], cfg: any) => {
+        const rules = cfg?.matchRegexForVariables;
+        if (!rules) return vars;
+        return vars.map((v: any) => {
+          const pattern = rules[v.name];
+          if (!pattern) return v;
+          const re = new RegExp(pattern);
+          return { ...v, values: v.values.filter((val: string) => re.test(val)) };
+        });
+      });
+
+      variableDetectorService.getValuesFromDatasourceQuery.mockResolvedValue(['tx1']);
+
+      await service.getApplicationDashboardVariables(
+        mockTestRun,
+        mockGrafanaDashboard,
+        mockAutoConfigDashboard,
+        mockGrafanaInstance,
+      );
+
+      // scenarioName must have been narrowed to ['Checkout'] before the
+      // transaction query was built.
+      const callArgs = variableDetectorService.getValuesFromDatasourceQuery.mock.calls[0];
+      const queryPassedToDetector = callArgs[3] as string;
+      expect(queryPassedToDetector).toContain("IN ('Checkout')");
+      expect(queryPassedToDetector).not.toContain('BrowseAndSearch');
+    });
+
     it('should escape special regex characters in variable names', async () => {
       const mockGrafanaDashboard = createMockDashboard([
         {
