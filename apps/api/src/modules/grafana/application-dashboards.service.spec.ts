@@ -1173,7 +1173,6 @@ describe('ApplicationDashboardsService', () => {
         'ds_adapt_results',
         'ds_adapt_tracked_results',
         'ds_tracked_differences',
-        'ds_metric_classification',
         'ds_control_group_statistics',
         'ds_metric_statistics',
         'ds_panels',

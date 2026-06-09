@@ -4,6 +4,11 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
+## [0.2.61.7] - 2026-06-09
+
+### Fixed
+- **Deleting a Grafana dashboard from a system under test no longer fails with `relation "ds_metric_classification" does not exist`** — the cascade-delete list in `ApplicationDashboardsService.delete` (added in #274) referenced `ds_metric_classification`, a table that has never existed (`metric_classification` is only a *column* on some `ds_*` tables, not a table of its own). The bogus `DELETE FROM ds_metric_classification ...` threw a `42P01` and rolled back the whole delete transaction. Removed the entry; the remaining 8 `ds_*` tables in the list are exactly the ones with NO ACTION FKs on `application_dashboard_id` that actually block the parent delete.
+
 ## [0.2.61.6] - 2026-06-03
 
 ### Fixed
