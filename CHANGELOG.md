@@ -4,6 +4,12 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
+## [0.2.61.7] - 2026-06-09
+
+### Fixed
+- **Deleting a Grafana dashboard from a system under test no longer fails with `relation "ds_metric_classification" does not exist`** — the cascade-delete list in `ApplicationDashboardsService.delete` (added in #274) referenced `ds_metric_classification`, a table that has never existed (`metric_classification` is only a *column* on some `ds_*` tables, not a table of its own). The bogus `DELETE FROM ds_metric_classification ...` threw a `42P01` and rolled back the whole delete transaction. Removed the entry; the remaining 8 `ds_*` tables in the list are exactly the ones with NO ACTION FKs on `application_dashboard_id` that actually block the parent delete.
+- **Deleting a dashboard referenced by a provisioned template no longer fails with a `23503` FK violation** — `provisioned_template_ds_compare_configs` also has a NO ACTION FK on `application_dashboard_id` but was missing from the cascade-delete list, so deleting a dashboard that a provisioned template config pointed at would abort the transaction. Added it to the list (mirrors the SUT delete handler, which already deletes these before `application_dashboards`); a template config referencing a deleted dashboard is meaningless.
+
 ## [0.2.61.6] - 2026-06-03
 
 ### Fixed

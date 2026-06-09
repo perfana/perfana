@@ -1165,7 +1165,7 @@ describe('ApplicationDashboardsService', () => {
       // Act
       await service.delete('app-dashboard-uuid', false, mockUserId, mockRoles);
 
-      // Assert — every ds_* table with a NO ACTION FK gets a DELETE keyed
+      // Assert — every dependent table with a NO ACTION FK gets a DELETE keyed
       // on application_dashboard_id, in a stable order, before the parent
       // delete runs.
       const expectedTables = [
@@ -1173,11 +1173,11 @@ describe('ApplicationDashboardsService', () => {
         'ds_adapt_results',
         'ds_adapt_tracked_results',
         'ds_tracked_differences',
-        'ds_metric_classification',
         'ds_control_group_statistics',
         'ds_metric_statistics',
         'ds_panels',
         'ds_metrics',
+        'provisioned_template_ds_compare_configs',
       ];
       expect(queryMock).toHaveBeenCalledTimes(expectedTables.length);
       expectedTables.forEach((table, index) => {
