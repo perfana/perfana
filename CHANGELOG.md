@@ -4,6 +4,11 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
+## [0.2.61.8] - 2026-06-09
+
+### Fixed
+- **Regex rules on chained dashboard template variables now narrow dependent variables** — auto-config applied a profile's `matchRegexForVariables` filters only *after* every template variable had been resolved against its datasource. When variables chain (a dependent variable's query references an already-resolved one, e.g. `... WHERE scenario_name IN ($scenarioName) AND transaction_name IN ($transaction)`), the dependent query ran against the full, unfiltered upstream values, so an upstream regex rule never reduced the dependent results. `VariableDiscoveryService.getApplicationDashboardVariables` now applies overrides + regex filtering after each variable is resolved, inside the discovery loop, so narrowed upstream values flow into the chained `IN (...)` clauses. Concretely, the `spanmetrics` profile (where `requestName` depends on `scenarioName` + `transaction`) generated a separate dashboard for every `requestName` regardless of the `scenarioName`/`transaction` regex rules; with the fix both rules constrain `requestName` via the chained SQL, so only matching requests produce dashboards. Profiles with no chained variables or a single rule are unaffected (the per-variable filtering is idempotent).
+
 ## [0.2.61.7] - 2026-06-09
 
 ### Fixed
