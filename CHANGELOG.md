@@ -4,6 +4,11 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
+## [0.2.61.9] - 2026-06-10
+
+### Fixed
+- **Migration Runner Docker image now builds for `linux/arm64`** — the multi-arch CI build (`linux/amd64,linux/arm64`) failed on the migration image with `exit code: 132` (SIGILL). The final stage of `Dockerfile.migrations` ran `npm install` for `typeorm`/`pg`/`dotenv`/`reflect-metadata` without `--platform=$BUILDPLATFORM`, so for the non-native architecture the install ran under QEMU emulation, where npm/node crashes with an illegal-instruction fault. These four packages are pure-JS (no arch-specific binaries), so the install now happens once in the native builder stage and the resulting `node_modules` is `COPY`-ed into the final stage — eliminating the emulated `npm install` entirely. Verified by building both arches and loading all four deps at runtime under amd64 emulation.
+
 ## [0.2.61.8] - 2026-06-09
 
 ### Fixed
