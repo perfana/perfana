@@ -40,6 +40,14 @@ COPY packages/shared/ ./packages/shared/
 WORKDIR /app/packages/shared
 RUN npm run build
 
+# Install the production runtime deps natively (pure-JS packages, arch-independent).
+# Doing this in the builder stage avoids running `npm install` under QEMU emulation
+# in the final stage, which crashes with SIGILL (exit 132) on the non-native arch.
+WORKDIR /app/migration-deps
+RUN npm init -y && \
+    npm install --save typeorm@^0.3.27 pg@^8.11.3 dotenv@^16.0.0 reflect-metadata@^0.1.13 && \
+    npm cache clean --force
+
 # ================================================================================================
 # STAGE 2: Production Migration Runner
 # ================================================================================================
@@ -51,10 +59,11 @@ RUN addgroup -g 10001 -S perfana \
 
 WORKDIR /app
 
-# Install only production dependencies for pg and typeorm
-RUN npm init -y && \
-    npm install --save typeorm@^0.3.27 pg@^8.11.3 dotenv@^16.0.0 reflect-metadata@^0.1.13 && \
-    npm cache clean --force
+# Copy production dependencies installed natively in the builder stage.
+# These are pure-JS packages, so the node_modules tree is arch-independent and
+# can be reused across platforms without re-running npm under emulation.
+COPY --from=builder --chown=perfana:perfana /app/migration-deps/package.json ./package.json
+COPY --from=builder --chown=perfana:perfana /app/migration-deps/node_modules ./node_modules/
 
 # Copy compiled migrations, entities, and utils
 COPY --from=builder --chown=perfana:perfana /app/packages/shared/dist/database/migrations ./migrations/
