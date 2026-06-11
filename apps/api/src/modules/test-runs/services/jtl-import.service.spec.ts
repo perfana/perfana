@@ -98,7 +98,11 @@ describe('JtlImportService', () => {
     const mockMutationService = { updateRunningTest: jest.fn() };
     const mockConfigService = { addTestRunConfigsByUuid: jest.fn() };
     const mockInitTestHandler = { execute: jest.fn() };
-    const mockDataSource = { query: jest.fn() };
+    // Issue #398: metric inserts now route through `withRequestQuery(this.dataSource).query`,
+    // which resolves to `dataSource.manager.query` outside an HTTP request. Share one
+    // jest.fn across both so the existing `dataSource.query` assertions keep observing calls.
+    const mockQuery = jest.fn();
+    const mockDataSource = { query: mockQuery, manager: { query: mockQuery } };
 
     const module: TestingModule = await Test.createTestingModule({
       providers: [

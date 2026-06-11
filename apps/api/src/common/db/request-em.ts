@@ -1,5 +1,5 @@
 import { ClsServiceManager } from 'nestjs-cls';
-import { EntityManager, ObjectLiteral, Repository } from 'typeorm';
+import { DataSource, EntityManager, ObjectLiteral, Repository } from 'typeorm';
 
 /**
  * Phase 5b: CLS namespace key for the per-request, transaction-scoped
@@ -46,4 +46,28 @@ export function withRequestEm<T extends ObjectLiteral>(repo: Repository<T>): Rep
   const em = getRequestEm();
   if (!em) return repo;
   return em.getRepository(repo.target);
+}
+
+/**
+ * Returns a raw-query executor bound to the request-scoped EntityManager when
+ * available, falling back to the DataSource's default manager otherwise. Use
+ * for raw `.query(...)` writes that have no repository to hang off of (e.g.
+ * JTL import metric inserts) but MUST run on the same connection/transaction
+ * that created earlier rows in the request — otherwise the write lands on a
+ * separate pooled connection where those rows are still uncommitted (FK
+ * violations) and autocommits independently (orphaned rows that survive a
+ * request rollback).
+ *
+ *   // BEFORE
+ *   await this.dataSource.query(sql, params);
+ *
+ *   // AFTER
+ *   await withRequestQuery(this.dataSource).query(sql, params);
+ *
+ * Identity-transparent when DB_ENABLE_RLS_ROLE=false / outside an HTTP request:
+ * returns `dataSource.manager`, which queries on a pooled connection exactly
+ * like `dataSource.query` did.
+ */
+export function withRequestQuery(dataSource: DataSource): EntityManager {
+  return getRequestEm() ?? dataSource.manager;
 }

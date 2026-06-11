@@ -1,7 +1,7 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Repository, DataSource } from 'typeorm';
-import { withRequestEm } from '../../../common/db/request-em';
+import { Repository } from 'typeorm';
+import { getRequestEm, withRequestEm } from '../../../common/db/request-em';
 import {
   TestRun as TestRunEntity,
   SystemUnderTest as SystemEntity,
@@ -34,7 +34,6 @@ export class TestRunsConfigService {
     private testRunConfigRepo: Repository<TestRunConfigEntity>,
     @InjectRepository(SparseMetricExclusion)
     private sparseMetricExclusionRepo: Repository<SparseMetricExclusion>,
-    private dataSource: DataSource,
     private authzService: AuthorizationService,
     private readonly auditService: AuditService,
   ) {}
@@ -153,7 +152,7 @@ export class TestRunsConfigService {
         // Test run exists, use UUID foreign key with proper upsert
         // Use ON CONFLICT with tags_hash(tags) to allow same key with different tags
         const tagsLiteral = this.toPostgresArray(configDto.tags);
-        await this.dataSource.query(
+        await withRequestEm(this.testRunRepo).query(
           `INSERT INTO test_run_configs (test_run_id, key, value, tags)
            VALUES ($1, $2, $3, $4::text[])
            ON CONFLICT (test_run_id, key, tags_hash(tags))
@@ -165,7 +164,7 @@ export class TestRunsConfigService {
         // Test run doesn't exist yet, store with string ID
         // Convert tags array to PostgreSQL array literal format
         const tagsLiteral = this.toPostgresArray(configDto.tags);
-        await this.dataSource.query(
+        await withRequestEm(this.testRunRepo).query(
           `INSERT INTO test_run_configs (test_run_id_string, key, value, tags)
            VALUES ($1, $2, $3, $4::text[])`,
           [configDto.testRunId, configDto.key, configDto.value, tagsLiteral]
@@ -218,7 +217,7 @@ export class TestRunsConfigService {
           params.push(testRun.id, item.key, item.value, tagsLiteral);
         });
 
-        await this.dataSource.query(
+        await withRequestEm(this.testRunRepo).query(
           `INSERT INTO test_run_configs (test_run_id, key, value, tags)
            VALUES ${values}
            ON CONFLICT (test_run_id, key, tags_hash(tags))
@@ -238,7 +237,7 @@ export class TestRunsConfigService {
           params.push(configsDto.testRunId, item.key, item.value, tagsLiteral);
         });
 
-        await this.dataSource.query(
+        await withRequestEm(this.testRunRepo).query(
           `INSERT INTO test_run_configs (test_run_id_string, key, value, tags)
            VALUES ${values}`,
           params
@@ -252,10 +251,22 @@ export class TestRunsConfigService {
   }
 
   async associateStringBasedConfigs(testRunIdString: string, testRunUuid: string): Promise<void> {
+    // Runs inside the request's RLS transaction when present, so the UPDATE's FK to
+    // the just-created (still-uncommitted) run resolves on the same connection — this
+    // is the same #398 fix that makes JTL config writes work. But because this method
+    // intentionally swallows errors ("not critical"), a failed statement on the shared
+    // request connection would abort the whole transaction (Postgres 25P02) and silently
+    // roll back the updateRunningTest that called us. Guard the mutations with a SAVEPOINT
+    // so a failure rolls back only this sub-operation, keeping the swallow-and-continue
+    // contract intact. Outside a request (no request EM), withRequestEm falls back to a
+    // pooled autocommit connection where each statement is already isolated — no savepoint.
+    const em = getRequestEm();
+    const SAVEPOINT = 'associate_string_configs';
     try {
+      if (em) await em.query(`SAVEPOINT ${SAVEPOINT}`);
       // Find configs with string-based test_run_id, keeping only the most recent for each (key, tags) combination
       // Using tags_hash(tags) to match the unique constraint on test_run_configs
-      const stringConfigs = await this.dataSource.query(
+      const stringConfigs = await withRequestEm(this.testRunRepo).query(
         `SELECT DISTINCT ON (key, tags_hash(tags)) id, key, value, tags, created_at
          FROM test_run_configs
          WHERE test_run_id_string = $1 AND test_run_id IS NULL
@@ -268,7 +279,7 @@ export class TestRunsConfigService {
         const idsToKeep = stringConfigs.map((c: { id: string }) => c.id);
 
         // Delete duplicate configs (older ones with same key and tags)
-        await this.dataSource.query(
+        await withRequestEm(this.testRunRepo).query(
           `DELETE FROM test_run_configs
            WHERE test_run_id_string = $1
            AND test_run_id IS NULL
@@ -277,7 +288,7 @@ export class TestRunsConfigService {
         );
 
         // Update remaining configs to associate with test run UUID
-        await this.dataSource.query(
+        await withRequestEm(this.testRunRepo).query(
           `UPDATE test_run_configs
            SET test_run_id = $1, test_run_id_string = NULL
            WHERE test_run_id_string = $2 AND test_run_id IS NULL`,
@@ -286,7 +297,18 @@ export class TestRunsConfigService {
 
         this.logger.log(`Associated ${stringConfigs.length} string-based configs with test run ${testRunIdString}`);
       }
+      if (em) await em.query(`RELEASE SAVEPOINT ${SAVEPOINT}`);
     } catch (error) {
+      // Roll back to the savepoint so the swallowed failure doesn't poison the
+      // surrounding request transaction. Best-effort: if the connection is already
+      // gone the rollback itself may fail, which we also swallow.
+      if (em) {
+        try {
+          await em.query(`ROLLBACK TO SAVEPOINT ${SAVEPOINT}`);
+        } catch {
+          /* connection already torn down — nothing to preserve */
+        }
+      }
       this.logger.error(`Failed to associate string-based configs for ${testRunIdString}:`, error);
       // Don't throw - this is not critical
     }
@@ -318,7 +340,7 @@ export class TestRunsConfigService {
 
       // Insert all config items
       for (const item of configItems) {
-        await this.dataSource.query(
+        await withRequestEm(this.testRunRepo).query(
           `INSERT INTO test_run_configs (test_run_id, key, value, tags)
            VALUES ($1, $2, $3, $4::text[])
            ON CONFLICT (test_run_id, key, tags_hash(tags))
@@ -451,7 +473,7 @@ export class TestRunsConfigService {
             params.push(testRun.id, item.key, item.value, tagsLiteral);
           });
 
-          await this.dataSource.query(
+          await withRequestEm(this.testRunRepo).query(
             `INSERT INTO test_run_configs (test_run_id, key, value, tags)
              VALUES ${values}
              ON CONFLICT (test_run_id, key, tags_hash(tags))
@@ -471,7 +493,7 @@ export class TestRunsConfigService {
             params.push(configJsonDto.testRunId, item.key, item.value, tagsLiteral);
           });
 
-          await this.dataSource.query(
+          await withRequestEm(this.testRunRepo).query(
             `INSERT INTO test_run_configs (test_run_id_string, key, value, tags)
              VALUES ${values}`,
             params
