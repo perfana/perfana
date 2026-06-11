@@ -1,7 +1,7 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
-import { withRequestEm } from '../../../common/db/request-em';
+import { getRequestEm, withRequestEm } from '../../../common/db/request-em';
 import {
   TestRun as TestRunEntity,
   SystemUnderTest as SystemEntity,
@@ -251,7 +251,19 @@ export class TestRunsConfigService {
   }
 
   async associateStringBasedConfigs(testRunIdString: string, testRunUuid: string): Promise<void> {
+    // Runs inside the request's RLS transaction when present, so the UPDATE's FK to
+    // the just-created (still-uncommitted) run resolves on the same connection — this
+    // is the same #398 fix that makes JTL config writes work. But because this method
+    // intentionally swallows errors ("not critical"), a failed statement on the shared
+    // request connection would abort the whole transaction (Postgres 25P02) and silently
+    // roll back the updateRunningTest that called us. Guard the mutations with a SAVEPOINT
+    // so a failure rolls back only this sub-operation, keeping the swallow-and-continue
+    // contract intact. Outside a request (no request EM), withRequestEm falls back to a
+    // pooled autocommit connection where each statement is already isolated — no savepoint.
+    const em = getRequestEm();
+    const SAVEPOINT = 'associate_string_configs';
     try {
+      if (em) await em.query(`SAVEPOINT ${SAVEPOINT}`);
       // Find configs with string-based test_run_id, keeping only the most recent for each (key, tags) combination
       // Using tags_hash(tags) to match the unique constraint on test_run_configs
       const stringConfigs = await withRequestEm(this.testRunRepo).query(
@@ -285,7 +297,18 @@ export class TestRunsConfigService {
 
         this.logger.log(`Associated ${stringConfigs.length} string-based configs with test run ${testRunIdString}`);
       }
+      if (em) await em.query(`RELEASE SAVEPOINT ${SAVEPOINT}`);
     } catch (error) {
+      // Roll back to the savepoint so the swallowed failure doesn't poison the
+      // surrounding request transaction. Best-effort: if the connection is already
+      // gone the rollback itself may fail, which we also swallow.
+      if (em) {
+        try {
+          await em.query(`ROLLBACK TO SAVEPOINT ${SAVEPOINT}`);
+        } catch {
+          /* connection already torn down — nothing to preserve */
+        }
+      }
       this.logger.error(`Failed to associate string-based configs for ${testRunIdString}:`, error);
       // Don't throw - this is not critical
     }

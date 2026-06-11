@@ -183,4 +183,34 @@ describe('Issue #398 — JTL import writes through the request transaction', () 
     );
     expect(after[0].c).toBe(0);
   });
+
+  it('associateStringBasedConfigs swallows a failure without poisoning the request transaction', async () => {
+    // associateStringBasedConfigs runs on the request EM and intentionally swallows
+    // errors. Without the SAVEPOINT guard, a failed statement would abort the whole
+    // request transaction (Postgres 25P02), silently rolling back the updateRunningTest
+    // that called it. Force the UPDATE to fail (FK to a non-existent run) and assert the
+    // outer transaction survives — a subsequent statement on the same connection works.
+    const stringId = `${sutName}-${testEnvironment}-${workload}-assoc-${Date.now()}`;
+    const missingRunUuid = randomUUID(); // not in test_runs → UPDATE's FK violates
+
+    const txStillUsable = await inRequestTransaction(async (em) => {
+      // Seed a string-keyed config row so the SELECT finds work to do and the
+      // UPDATE (to the missing run UUID) actually runs and violates the FK.
+      await em.query(
+        `INSERT INTO test_run_configs (test_run_id_string, key, value, tags)
+         VALUES ($1, 'jvm.heap', '4G', '{}'::text[])`,
+        [stringId],
+      );
+
+      // Must NOT throw — the method swallows the FK error after rolling back to its savepoint.
+      await configService.associateStringBasedConfigs(stringId, missingRunUuid);
+
+      // If the savepoint guard works, the transaction is still alive and this succeeds.
+      // Without it, Postgres reports "current transaction is aborted" and this throws.
+      const ok = await em.query(`SELECT 1 AS ok`);
+      return ok[0].ok as number;
+    });
+
+    expect(txStillUsable).toBe(1);
+  });
 });

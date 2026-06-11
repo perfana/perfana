@@ -1,6 +1,6 @@
 import { ClsServiceManager } from 'nestjs-cls';
-import type { EntityManager, Repository } from 'typeorm';
-import { getRequestEm, REQ_EM, withRequestEm } from './request-em';
+import type { DataSource, EntityManager, Repository } from 'typeorm';
+import { getRequestEm, REQ_EM, withRequestEm, withRequestQuery } from './request-em';
 
 describe('withRequestEm', () => {
   beforeEach(() => {
@@ -55,6 +55,45 @@ describe('withRequestEm', () => {
       await ClsServiceManager.getClsService().run(async () => {
         // REQ_EM intentionally not set
         expect(withRequestEm(fakeRepo)).toBe(fakeRepo);
+      });
+    });
+  });
+});
+
+describe('withRequestQuery', () => {
+  beforeEach(() => {
+    try {
+      ClsServiceManager.getClsService().exit();
+    } catch {
+      /* not initialized — fine */
+    }
+  });
+
+  const fakeManager = { query: jest.fn() } as unknown as EntityManager;
+  const fakeDataSource = { manager: fakeManager } as unknown as DataSource;
+
+  describe('outside CLS (no request)', () => {
+    it("returns the DataSource's default manager", () => {
+      expect(withRequestQuery(fakeDataSource)).toBe(fakeManager);
+    });
+  });
+
+  describe('inside CLS with REQ_EM populated', () => {
+    it('returns the stored request EntityManager (not the pooled manager)', async () => {
+      const fakeEm = { query: jest.fn() } as unknown as EntityManager;
+      await ClsServiceManager.getClsService().run(async () => {
+        ClsServiceManager.getClsService().set(REQ_EM, fakeEm);
+        expect(withRequestQuery(fakeDataSource)).toBe(fakeEm);
+        expect(withRequestQuery(fakeDataSource)).not.toBe(fakeManager);
+      });
+    });
+  });
+
+  describe('inside CLS without REQ_EM (e.g., flag off)', () => {
+    it("falls back to the DataSource's default manager", async () => {
+      await ClsServiceManager.getClsService().run(async () => {
+        // REQ_EM intentionally not set
+        expect(withRequestQuery(fakeDataSource)).toBe(fakeManager);
       });
     });
   });
