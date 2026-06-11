@@ -87,6 +87,12 @@ describe('TestRunsConfigService', () => {
       query: jest.fn(),
     };
 
+    // Issue #398: config writes now route through `withRequestEm(this.testRunRepo).query`
+    // so they share the request's RLS transaction connection. Outside an HTTP request
+    // there's no CLS request-EM, so `withRequestEm` falls back to the injected repo —
+    // point its raw-query mock at the same jest.fn the assertions below use.
+    testRunRepo.query = mockDataSource.query as jest.Mock;
+
     const module: TestingModule = await Test.createTestingModule({
       providers: [
         TestRunsConfigService,

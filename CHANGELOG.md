@@ -4,6 +4,11 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
+## [0.2.61.10] - 2026-06-11
+
+### Fixed
+- **JTL file imports no longer fail with foreign-key violation `FK_0f51a7f49362c67adfaaca3973c`** — a JTL upload creates the test run and writes its configs + metric rows in a *single* request. The run was `save()`-ed through the request-scoped RLS transaction (`withRequestEm`), but `TestRunsConfigService.addTestRunConfigsByUuid` and `JtlImportService`'s metric inserts (`insertRequests`/`insertTransactions`/`insertErrors`/`insertVirtualUsers`/`insertUrlPatterns`) wrote through raw `this.dataSource.query` — a *separate* pooled connection where the just-created run was still uncommitted and invisible. The `test_run_configs` FK to `test_runs.id` couldn't resolve → violation → `RlsTransactionInterceptor` rolled the whole request back, so the run and its metrics vanished. The raw-connection metric inserts autocommitted independently and *survived* the rollback, leaking orphaned `requests_raw`/`transactions`/`virtual_users` rows on every failed import. Live perfana-cli runs were spared only because they create-run and write-configs in *separate* polled requests (the run is already committed by the time configs are written). All config and JTL-metric writes now route through the request EntityManager (`withRequestEm` / the new `withRequestQuery` helper), so they share the run's transaction connection — the FK resolves and a failed import rolls back atomically with no orphans. Regression covered by `apps/api/src/test/rls/jtl-import-request-em.spec.ts`.
+
 ## [0.2.61.9] - 2026-06-10
 
 ### Fixed

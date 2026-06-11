@@ -1,6 +1,7 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { createHash } from 'crypto';
 import { DataSource } from 'typeorm';
+import { withRequestQuery } from '../../../common/db/request-em';
 import { JtlParserService, ParsedScenario } from './jtl-parser.service';
 import { TestRunsMutationService } from './test-runs-mutation.service';
 import { TestRunsConfigService } from './test-runs-config.service';
@@ -247,7 +248,7 @@ export class JtlImportService {
         paramIdx += 16;
       }
 
-      await this.dataSource.query(
+      await withRequestQuery(this.dataSource).query(
         `INSERT INTO requests_raw (time, test_run_id, system_under_test, test_environment, location,
           transaction_name, sampler_name, success, request_size, response_size,
           response_code, response_connect_time, response_latency, response_time, scenario_name, url_hash)
@@ -296,7 +297,7 @@ export class JtlImportService {
         paramIdx += 11;
       }
 
-      await this.dataSource.query(
+      await withRequestQuery(this.dataSource).query(
         `INSERT INTO transactions (time, test_run_id, system_under_test, test_environment, location,
           transaction_name, success, request_size, response_size, response_time, scenario_name)
          VALUES ${values.join(', ')}`,
@@ -350,7 +351,7 @@ export class JtlImportService {
         paramIdx += 15;
       }
 
-      await this.dataSource.query(
+      await withRequestQuery(this.dataSource).query(
         `INSERT INTO requests_error (time, test_run_id, system_under_test, test_environment, location,
           node_name, transaction_name, sampler_name, response_code, response_time,
           connection_time, url, response_message, scenario_name, url_hash)
@@ -396,7 +397,7 @@ export class JtlImportService {
         paramIdx += 8;
       }
 
-      await this.dataSource.query(
+      await withRequestQuery(this.dataSource).query(
         `INSERT INTO virtual_users (time, test_run_id, system_under_test, test_environment, location,
           node_name, active_threads, scenario_name)
          VALUES ${values.join(', ')}`,
@@ -506,7 +507,7 @@ export class JtlImportService {
         paramIdx += 6;
       }
 
-      await this.dataSource.query(
+      await withRequestQuery(this.dataSource).query(
         `INSERT INTO url_patterns (url_hash, system_under_test, test_environment,
           normalized_url, original_example, first_seen)
          VALUES ${values.join(', ')}

@@ -1,6 +1,6 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Repository, DataSource } from 'typeorm';
+import { Repository } from 'typeorm';
 import { withRequestEm } from '../../../common/db/request-em';
 import {
   TestRun as TestRunEntity,
@@ -34,7 +34,6 @@ export class TestRunsConfigService {
     private testRunConfigRepo: Repository<TestRunConfigEntity>,
     @InjectRepository(SparseMetricExclusion)
     private sparseMetricExclusionRepo: Repository<SparseMetricExclusion>,
-    private dataSource: DataSource,
     private authzService: AuthorizationService,
     private readonly auditService: AuditService,
   ) {}
@@ -153,7 +152,7 @@ export class TestRunsConfigService {
         // Test run exists, use UUID foreign key with proper upsert
         // Use ON CONFLICT with tags_hash(tags) to allow same key with different tags
         const tagsLiteral = this.toPostgresArray(configDto.tags);
-        await this.dataSource.query(
+        await withRequestEm(this.testRunRepo).query(
           `INSERT INTO test_run_configs (test_run_id, key, value, tags)
            VALUES ($1, $2, $3, $4::text[])
            ON CONFLICT (test_run_id, key, tags_hash(tags))
@@ -165,7 +164,7 @@ export class TestRunsConfigService {
         // Test run doesn't exist yet, store with string ID
         // Convert tags array to PostgreSQL array literal format
         const tagsLiteral = this.toPostgresArray(configDto.tags);
-        await this.dataSource.query(
+        await withRequestEm(this.testRunRepo).query(
           `INSERT INTO test_run_configs (test_run_id_string, key, value, tags)
            VALUES ($1, $2, $3, $4::text[])`,
           [configDto.testRunId, configDto.key, configDto.value, tagsLiteral]
@@ -218,7 +217,7 @@ export class TestRunsConfigService {
           params.push(testRun.id, item.key, item.value, tagsLiteral);
         });
 
-        await this.dataSource.query(
+        await withRequestEm(this.testRunRepo).query(
           `INSERT INTO test_run_configs (test_run_id, key, value, tags)
            VALUES ${values}
            ON CONFLICT (test_run_id, key, tags_hash(tags))
@@ -238,7 +237,7 @@ export class TestRunsConfigService {
           params.push(configsDto.testRunId, item.key, item.value, tagsLiteral);
         });
 
-        await this.dataSource.query(
+        await withRequestEm(this.testRunRepo).query(
           `INSERT INTO test_run_configs (test_run_id_string, key, value, tags)
            VALUES ${values}`,
           params
@@ -255,7 +254,7 @@ export class TestRunsConfigService {
     try {
       // Find configs with string-based test_run_id, keeping only the most recent for each (key, tags) combination
       // Using tags_hash(tags) to match the unique constraint on test_run_configs
-      const stringConfigs = await this.dataSource.query(
+      const stringConfigs = await withRequestEm(this.testRunRepo).query(
         `SELECT DISTINCT ON (key, tags_hash(tags)) id, key, value, tags, created_at
          FROM test_run_configs
          WHERE test_run_id_string = $1 AND test_run_id IS NULL
@@ -268,7 +267,7 @@ export class TestRunsConfigService {
         const idsToKeep = stringConfigs.map((c: { id: string }) => c.id);
 
         // Delete duplicate configs (older ones with same key and tags)
-        await this.dataSource.query(
+        await withRequestEm(this.testRunRepo).query(
           `DELETE FROM test_run_configs
            WHERE test_run_id_string = $1
            AND test_run_id IS NULL
@@ -277,7 +276,7 @@ export class TestRunsConfigService {
         );
 
         // Update remaining configs to associate with test run UUID
-        await this.dataSource.query(
+        await withRequestEm(this.testRunRepo).query(
           `UPDATE test_run_configs
            SET test_run_id = $1, test_run_id_string = NULL
            WHERE test_run_id_string = $2 AND test_run_id IS NULL`,
@@ -318,7 +317,7 @@ export class TestRunsConfigService {
 
       // Insert all config items
       for (const item of configItems) {
-        await this.dataSource.query(
+        await withRequestEm(this.testRunRepo).query(
           `INSERT INTO test_run_configs (test_run_id, key, value, tags)
            VALUES ($1, $2, $3, $4::text[])
            ON CONFLICT (test_run_id, key, tags_hash(tags))
@@ -451,7 +450,7 @@ export class TestRunsConfigService {
             params.push(testRun.id, item.key, item.value, tagsLiteral);
           });
 
-          await this.dataSource.query(
+          await withRequestEm(this.testRunRepo).query(
             `INSERT INTO test_run_configs (test_run_id, key, value, tags)
              VALUES ${values}
              ON CONFLICT (test_run_id, key, tags_hash(tags))
@@ -471,7 +470,7 @@ export class TestRunsConfigService {
             params.push(configJsonDto.testRunId, item.key, item.value, tagsLiteral);
           });
 
-          await this.dataSource.query(
+          await withRequestEm(this.testRunRepo).query(
             `INSERT INTO test_run_configs (test_run_id_string, key, value, tags)
              VALUES ${values}`,
             params
