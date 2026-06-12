@@ -274,39 +274,43 @@ export function AnomalyExpandedContent({
                 </Button>
               )}
             </Box>
-            {(row.source_type !== 'performance_test' || aggregatedMetricSource) ? (
-              <CurrentTestRunChart
-                testRunId={selectedTestRunIdForRow || testRunId}
-                applicationDashboardId={row.application_dashboard_id}
-                panelId={row.panel_id}
-                metricName={row.metric_name}
-                testRun={(() => {
-                  const _effectiveTestRunId = selectedTestRunIdForRow || testRunId;
-                  if (selectedTestRunIdForRow && trendsData) {
-                    const selectedTrendData = trendsData.find(t => t.test_run_id === selectedTestRunIdForRow);
-                    if (selectedTrendData) {
-                      return {
-                        start_time: selectedTrendData.test_run_start,
-                        end_time: undefined
-                      };
-                    }
+            {/*
+              Render the Current Test Run chart for every row. Performance-test
+              rows that resolve an aggregatedMetricSource (the whole-test aggregate
+              SLO metrics, e.g. transactions.login.response_time.p95) use the
+              aggregated-metric-timeseries endpoint; per-transaction ADAPT rows —
+              whose metric_name is the plain transaction name and whose type/stat
+              live in panel_title — pass aggregatedMetricSource={undefined} and
+              fall back to the ds-metrics panel endpoint keyed by panel_id +
+              metric_name (restores pre-#383 behaviour).
+            */}
+            <CurrentTestRunChart
+              testRunId={selectedTestRunIdForRow || testRunId}
+              applicationDashboardId={row.application_dashboard_id}
+              panelId={row.panel_id}
+              metricName={row.metric_name}
+              testRun={(() => {
+                const _effectiveTestRunId = selectedTestRunIdForRow || testRunId;
+                if (selectedTestRunIdForRow && trendsData) {
+                  const selectedTrendData = trendsData.find(t => t.test_run_id === selectedTestRunIdForRow);
+                  if (selectedTrendData) {
+                    return {
+                      start_time: selectedTrendData.test_run_start,
+                      end_time: undefined
+                    };
                   }
-                  return testRun ? {
-                    start_time: testRun.start_time,
-                    end_time: testRun.end_time || undefined
-                  } : undefined;
-                })()}
-                thresholds={trendsData && trendsData.length > 0 ? trendsData.find(t => t.test_run_id === (selectedTestRunIdForRow || testRunId))?.thresholds : undefined}
-                unit={row.unit}
-                isDrawerOpen={drawerOpen}
-                showToast={showToast}
-                aggregatedMetricSource={aggregatedMetricSource}
-              />
-            ) : (
-              <Typography variant="body2" color="text.secondary" sx={{ py: 2, textAlign: 'center' }}>
-                Chart not available for this metric type
-              </Typography>
-            )}
+                }
+                return testRun ? {
+                  start_time: testRun.start_time,
+                  end_time: testRun.end_time || undefined
+                } : undefined;
+              })()}
+              thresholds={trendsData && trendsData.length > 0 ? trendsData.find(t => t.test_run_id === (selectedTestRunIdForRow || testRunId))?.thresholds : undefined}
+              unit={row.unit}
+              isDrawerOpen={drawerOpen}
+              showToast={showToast}
+              aggregatedMetricSource={aggregatedMetricSource}
+            />
           </Box>
         </Box>
 

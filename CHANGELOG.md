@@ -4,6 +4,11 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
+## [0.2.61.11] - 2026-06-12
+
+### Fixed
+- **Anomaly-detection rows for per-transaction performance metrics show their Current Test Run chart again** — a regression from #383 (v0.2.61.0). That change added the aggregated-metric-timeseries chart for whole-test aggregate SLO metrics and guarded `CurrentTestRunChart` with `row.source_type !== 'performance_test' || aggregatedMetricSource`, intending to block "falling back to the wrong Grafana endpoint" for unrecognised performance-test metrics. But `parseAggregatedMetricSource` only resolves the dotted aggregate format (`transactions.<name>.response_time.<stat>`), whereas per-transaction ADAPT rows store the plain transaction name in `metric_name` (e.g. `AV_BVAC_03_Vacatures`) with the type/stat in `panel_title` ("Transaction RT Avg"). So the parser returned `undefined` for every per-transaction row and the guard rendered "Chart not available for this metric type" instead — for *all* per-transaction performance rows (e.g. all 123k such ADAPT rows in a representative DB), even though `ds_metrics` holds their data keyed by `panel_id` + `metric_name` (the pre-#383 ds-metrics path drew them fine). The guard is removed: `CurrentTestRunChart` now renders for every row — aggregate-SLO rows still use the aggregated endpoint via `aggregatedMetricSource`, while per-transaction rows pass `aggregatedMetricSource={undefined}` and fall back to the ds-metrics panel endpoint as before #383. Regression covered by `apps/web/__tests__/app/test-runs/anomaly-detection/AnomalyExpandedContent.test.tsx`, plus a fixture-driven guardrail (`AnomalyExpandedContent.fixtures.test.tsx` + `fixtures/adapt-metric-names.ts`) that renders the component against real `ds_adapt_results` metric-name shapes (plain transaction names, `<txn>.<sub-request>`, global counters, Grafana series, and the dotted aggregate-SLO format) and asserts each renders a chart on the correct data path — encoding "what production metric names actually look like" once so the synthetic-input gap that hid this regression can't recur.
+
 ## [0.2.61.10] - 2026-06-11
 
 ### Fixed
