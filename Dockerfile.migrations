@@ -28,7 +28,6 @@ COPY apps/web/package*.json ./apps/web/
 COPY apps/grafana-sync/package*.json ./apps/grafana-sync/
 COPY apps/worker/package*.json ./apps/worker/
 COPY packages/shared/package*.json ./packages/shared/
-COPY packages/config/package*.json ./packages/config/
 
 # Install all dependencies (needed for TypeScript compilation)
 RUN npm ci --ignore-scripts && npm cache clean --force

@@ -69,7 +69,6 @@ COPY --chown=perfana:perfana apps/grafana-sync/package*.json ./apps/grafana-sync
 COPY --chown=perfana:perfana apps/worker/package*.json ./apps/worker/
 COPY --chown=perfana:perfana apps/perfana-report/package*.json ./apps/perfana-report/
 COPY --chown=perfana:perfana packages/shared/package*.json ./packages/shared/
-COPY --chown=perfana:perfana packages/config/package*.json ./packages/config/
 
 # Security: Verify package integrity and install dependencies
 RUN npm ci --only=production --ignore-scripts \
@@ -93,7 +92,6 @@ COPY --chown=perfana:perfana apps/grafana-sync/package*.json ./apps/grafana-sync
 COPY --chown=perfana:perfana apps/worker/package*.json ./apps/worker/
 COPY --chown=perfana:perfana apps/perfana-report/package*.json ./apps/perfana-report/
 COPY --chown=perfana:perfana packages/shared/package*.json ./packages/shared/
-COPY --chown=perfana:perfana packages/config/package*.json ./packages/config/
 
 # Install all dependencies including dev dependencies for build
 RUN npm ci --ignore-scripts \
@@ -162,9 +160,8 @@ RUN rm -rf apps/*/dist packages/*/dist *.tsbuildinfo apps/*/*.tsbuildinfo packag
 # Build shared packages first to ensure they're available for other packages
 # This is critical because @perfana/web imports from @perfana/shared/utils
 RUN cd packages/shared && npm run build
-RUN cd packages/config && npm run build
 
-# Build applications (shared and config are already built)
+# Build applications (shared is already built)
 RUN npm run build
 
 # Clean up build artifacts and dev dependencies
@@ -204,8 +201,6 @@ COPY --from=builder --chown=nonroot:nonroot /app/apps/perfana-report/node_module
 COPY --from=builder --chown=nonroot:nonroot /app/node_modules ./node_modules
 COPY --from=builder --chown=nonroot:nonroot /app/packages/shared/dist ./packages/shared/dist
 COPY --from=builder --chown=nonroot:nonroot /app/packages/shared/package.json ./packages/shared/package.json
-COPY --from=builder --chown=nonroot:nonroot /app/packages/config/dist ./packages/config/dist
-COPY --from=builder --chown=nonroot:nonroot /app/packages/config/package.json ./packages/config/package.json
 COPY --from=builder --chown=nonroot:nonroot /app/package.json ./package.json
 
 # ================================================================================================
@@ -458,7 +453,6 @@ COPY --chown=perfana:perfana turbo.json ./
 COPY --chown=perfana:perfana apps/web/package*.json ./apps/web/
 COPY --chown=perfana:perfana apps/api/package*.json ./apps/api/
 COPY --chown=perfana:perfana packages/shared/package*.json ./packages/shared/
-COPY --chown=perfana:perfana packages/config/package*.json ./packages/config/
 
 RUN npm ci \
     && npm cache clean --force
