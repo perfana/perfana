@@ -103,7 +103,6 @@ exports[`auditableFields snapshot — every OwnedResource entity has a stable de
   "DsMetricStatistics": null,
   "DsMetrics": null,
   "DsPanels": null,
-  "DsTrackedDifferences": null,
   "DynatraceConfig": [
     "host",
     "label",

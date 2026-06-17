@@ -4,6 +4,11 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
+## [0.2.61.13] - 2026-06-17
+
+### Fixed
+- **`auditableFields` entity snapshot updated after the `DsTrackedDifferences` removal in v0.2.61.12 (#401).** That PR deleted the dead `DsTrackedDifferences` entity but left it listed in `packages/shared/src/entities/__tests__/__snapshots__/auditable-fields.snapshot.spec.ts.snap`, so the snapshot test went red on `main`. Regenerated the snapshot (one line removed). The failure slipped through because the pre-push gate (`npm run preflight`) runs lint + type-check + the RLS suite, not the full Jest test suites.
+
 ## [0.2.61.12] - 2026-06-17
 
 ### Removed
