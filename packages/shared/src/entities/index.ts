@@ -34,7 +34,6 @@ export * from './ds-metric-statistics.entity';
 export * from './ds-metric-collection-status.entity';
 export * from './ds-metrics.entity';
 export * from './ds-panels.entity';
-export * from './ds-tracked-differences.entity';
 export * from './dynatrace-config.entity';
 export * from './dynatrace-entity-mapping.entity';
 export * from './dynatrace-query.entity';

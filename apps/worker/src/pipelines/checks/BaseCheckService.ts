@@ -1,4 +1,3 @@
-import { PoolClient as _PoolClient } from 'pg';
 import type { Logger } from 'pino';
 
 /**
