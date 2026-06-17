@@ -4,6 +4,17 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
+## [0.2.61.12] - 2026-06-17
+
+### Removed
+- **Dead code removal surfaced by an over-engineering audit (−5,547 lines, −1 dependency, no behavior change).** Every cut was verified against real callers/importers before deletion; the audit's larger claims were checked and most rejected because the code was in active use.
+  - `@perfana/config` package — zero importers; the live TypeORM config factory is `@perfana/shared/config`.
+  - `DsTrackedDifferences` entity class — the `ds_tracked_differences` table is accessed only via raw SQL, so the class was never imported, registered in a `TypeOrmModule.forFeature`, or injected. Table and migrations are untouched.
+  - 7 never-called `TypeOrmBaseRepository` methods (`findWithPagination`, `createMany`, `updateMany`, `deleteMany`, `softDelete`, `restore`, `exists`); the two repo-level `createMany` overrides are independent and unaffected.
+  - 3 unused `BasePipelineTypeORM` methods (`writeQuery`, `createTimer`, `logTimingSummary`), an unused `PoolClient` import in `BaseCheckService`, and commented-out panel-106 debug blocks. `JSON.parse(JSON.stringify())` deep clone replaced with `structuredClone()` in the panel-request builder.
+  - 7 unused shadcn `components/ui/` files (`alert`, `badge`, `data-table`, `metric-card`, `progress`, `select`, `spinner`) plus their tests — MUI is the real UI system. `data-table` was the only consumer of `@tanstack/react-table`, now dropped from `apps/web`. `button`/`card`/`input` stay (they back the live `/signin` Keycloak login and `/signup`).
+  - `AuthorizedBaseService` abstract class (434 lines) — zero production subclasses; only a JSDoc example and a throwaway test subclass referenced it.
+
 ## [0.2.61.11] - 2026-06-12
 
 ### Fixed
