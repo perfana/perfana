@@ -86,14 +86,6 @@ export abstract class BasePipelineTypeORM implements Pipeline {
   }
 
   /**
-   * Execute a write operation using the dedicated write connection pool.
-   * Use this for INSERT/UPDATE operations that must not be starved by analytics.
-   */
-  protected async writeQuery<T = unknown>(sql: string, parameters?: unknown[]): Promise<T[]> {
-    return await this.db.writeQuery<T>(sql, parameters);
-  }
-
-  /**
    * Execute write operations within a transaction using the dedicated write pool.
    */
   protected async writeTransaction<T>(operation: (manager: EntityManager) => Promise<T>): Promise<T> {
@@ -169,13 +161,6 @@ export abstract class BasePipelineTypeORM implements Pipeline {
   }
 
   /**
-   * Create a new performance timer for sub-operations
-   */
-  protected createTimer(context: string): PerformanceTimer {
-    return createPerformanceTimer(this.logger, `${this.constructor.name}:${context}`);
-  }
-
-  /**
    * Clean up stale data with invalid application_dashboard_id references
    * This should be called at the start of pipelines that write to data science tables
    *
@@ -225,12 +210,5 @@ export abstract class BasePipelineTypeORM implements Pipeline {
     }
 
     return { duration, totalDeleted, deletedByTable };
-  }
-
-  /**
-   * Log timing summary for this pipeline
-   */
-  protected logTimingSummary(additionalContext?: Record<string, unknown>): void {
-    this.timer.logSummary(additionalContext);
   }
 }

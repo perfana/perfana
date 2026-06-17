@@ -567,7 +567,7 @@ async function createPanelRequests(
 
 
     // Substitute variables in the target query
-    const substitutedTarget = substituteVariablesInTarget(target, queryVariables, panel);
+    const substitutedTarget = substituteVariablesInTarget(target, queryVariables);
 
     // CRITICAL: Add datasourceId to query root level for Grafana API
     // The datasource info is in the target.datasource object but Grafana needs numeric datasourceId at root
@@ -605,19 +605,6 @@ async function createPanelRequests(
       }
     }
 
-    // Debug logging for specific panels (can be removed after debugging)
-    // if (p.id === 106) {
-    //   logger.info(`📝 Panel ${p.id} substituted target[${targetIndex}]:`);
-    //   logger.info(`   expr: ${substitutedTarget.expr || 'undefined'}`);
-    //   logger.info(`   datasource: ${JSON.stringify(substitutedTarget.datasource) || 'undefined'}`);
-    //   logger.info(`   datasourceId: ${substitutedTarget.datasourceId || 'undefined'}`);
-    //   logger.info(`   refId: ${substitutedTarget.refId || 'undefined'}`);
-    //   logger.info(`   interval: ${substitutedTarget.interval || 'undefined'}`);
-    //   logger.info(`   intervalMs: ${substitutedTarget.intervalMs || 'undefined'}`);
-    //   logger.info(`   step: ${substitutedTarget.step || 'undefined'}`);
-    //   logger.info(`   All target properties: ${Object.keys(substitutedTarget).join(', ')}`);
-    // }
-
     const request = {
       request_body: {
         queries: [substitutedTarget],
@@ -636,8 +623,8 @@ async function createPanelRequests(
 /**
  * Substitute template variables in a Grafana target query
  */
-function substituteVariablesInTarget(target: unknown, queryVariables: Record<string, string>, _panel?: unknown): Record<string, unknown> {
-  const substitutedTarget = JSON.parse(JSON.stringify(target)) as Record<string, unknown>; // Deep clone
+function substituteVariablesInTarget(target: unknown, queryVariables: Record<string, string>): Record<string, unknown> {
+  const substitutedTarget = structuredClone(target) as Record<string, unknown>;
 
   // For Prometheus queries, ensure proper interval/step settings
   // Remove the huge default step that causes no data to be returned
@@ -691,14 +678,6 @@ function substituteVariablesInTarget(target: unknown, queryVariables: Record<str
   }
 
   const result = substituteInObject(substitutedTarget) as Record<string, unknown>;
-
-  // Debug logging for final step values (can be removed after debugging)
-  // if (_panel) {
-  //   const p = _panel as any;
-  //   if (p.id === 106) {
-  //     logger.info(`🏁 Panel ${p.id} final step: ${result.step}`);
-  //   }
-  // }
 
   // After substitution, ensure interval is reasonable for Prometheus queries
   // This ensures we don't use huge step values that result in no data

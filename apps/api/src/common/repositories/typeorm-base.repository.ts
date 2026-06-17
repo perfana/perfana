@@ -31,28 +31,6 @@ export abstract class TypeOrmBaseRepository<T extends { id: string }> {
   }
 
   /**
-   * Find entities with pagination
-   */
-  async findWithPagination(options?: FindManyOptions<T>): Promise<{
-    data: T[];
-    total: number;
-    page: number;
-    pageSize: number;
-  }> {
-    try {
-      const page = options?.skip ? Math.floor(options.skip / (options.take || 20)) + 1 : 1;
-      const pageSize = options?.take || 20;
-
-      const [data, total] = await withRequestEm(this.repository).findAndCount(options);
-
-      return { data, total, page, pageSize };
-    } catch (error) {
-      this.logger.error(`Failed to find paginated ${this.entityName}s:`, error);
-      throw new DatabaseException(`Failed to retrieve ${this.entityName}s`, error);
-    }
-  }
-
-  /**
    * Find a single entity by ID
    */
   async findById(id: string, options?: FindOneOptions<T>): Promise<T> {
@@ -117,22 +95,6 @@ export abstract class TypeOrmBaseRepository<T extends { id: string }> {
   }
 
   /**
-   * Create multiple entities
-   */
-  async createMany(data: DeepPartial<T>[], chunkSize = 100): Promise<T[]> {
-    try {
-      const repo = withRequestEm(this.repository);
-      const entities = repo.create(data);
-      const saved = await repo.save(entities, { chunk: chunkSize });
-      this.logger.log(`Created ${saved.length} new ${this.entityName}s`);
-      return saved;
-    } catch (error) {
-      this.logger.error(`Failed to create multiple ${this.entityName}s:`, error);
-      throw new DatabaseException(`Failed to create ${this.entityName}s`, error);
-    }
-  }
-
-  /**
    * Update an entity by ID
    */
   async update(id: string, data: QueryDeepPartialEntity<T>): Promise<T> {
@@ -148,24 +110,6 @@ export abstract class TypeOrmBaseRepository<T extends { id: string }> {
       }
       this.logger.error(`Failed to update ${this.entityName}:`, error);
       throw new DatabaseException(`Failed to update ${this.entityName}`, error);
-    }
-  }
-
-  /**
-   * Update multiple entities by IDs
-   */
-  async updateMany(ids: string[], data: QueryDeepPartialEntity<T>): Promise<void> {
-    try {
-      await withRequestEm(this.repository).createQueryBuilder()
-        .update()
-        .set(data)
-        .whereInIds(ids)
-        .execute();
-
-      this.logger.log(`Updated ${ids.length} ${this.entityName}s`);
-    } catch (error) {
-      this.logger.error(`Failed to update multiple ${this.entityName}s:`, error);
-      throw new DatabaseException(`Failed to update ${this.entityName}s`, error);
     }
   }
 
@@ -187,65 +131,6 @@ export abstract class TypeOrmBaseRepository<T extends { id: string }> {
       }
       this.logger.error(`Failed to delete ${this.entityName}:`, error);
       throw new DatabaseException(`Failed to delete ${this.entityName}`, error);
-    }
-  }
-
-  /**
-   * Delete multiple entities by IDs
-   */
-  async deleteMany(ids: string[]): Promise<void> {
-    try {
-      await withRequestEm(this.repository).delete(ids);
-      this.logger.log(`Deleted ${ids.length} ${this.entityName}s`);
-    } catch (error) {
-      this.logger.error(`Failed to delete multiple ${this.entityName}s:`, error);
-      throw new DatabaseException(`Failed to delete ${this.entityName}s`, error);
-    }
-  }
-
-  /**
-   * Soft delete an entity by ID (if entity supports soft delete)
-   */
-  async softDelete(id: string): Promise<void> {
-    try {
-      const result = await withRequestEm(this.repository).softDelete(id);
-
-      if (result.affected === 0) {
-        throw new ResourceNotFoundException(this.entityName, id);
-      }
-
-      this.logger.log(`Soft deleted ${this.entityName} with id: ${id}`);
-    } catch (error) {
-      if (error instanceof ResourceNotFoundException) {
-        throw error;
-      }
-      this.logger.error(`Failed to soft delete ${this.entityName}:`, error);
-      throw new DatabaseException(`Failed to soft delete ${this.entityName}`, error);
-    }
-  }
-
-  /**
-   * Restore a soft-deleted entity by ID
-   */
-  async restore(id: string): Promise<void> {
-    try {
-      await withRequestEm(this.repository).restore(id);
-      this.logger.log(`Restored ${this.entityName} with id: ${id}`);
-    } catch (error) {
-      this.logger.error(`Failed to restore ${this.entityName}:`, error);
-      throw new DatabaseException(`Failed to restore ${this.entityName}`, error);
-    }
-  }
-
-  /**
-   * Check if an entity exists by ID
-   */
-  async exists(id: string): Promise<boolean> {
-    try {
-      const count = await withRequestEm(this.repository).countBy({ id } as FindOptionsWhere<T>);
-      return count > 0;
-    } catch (error) {
-      return false;
     }
   }
 
