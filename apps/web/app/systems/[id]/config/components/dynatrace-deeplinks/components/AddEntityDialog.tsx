@@ -17,6 +17,12 @@ import {
   SelectChangeEvent,
   Autocomplete,
   CircularProgress,
+  Checkbox,
+  List,
+  ListItem,
+  ListItemButton,
+  ListItemIcon,
+  ListItemText,
 } from '@mui/material';
 import { Save as SaveIcon } from '@mui/icons-material';
 import {
@@ -52,7 +58,16 @@ interface AddEntityDialogProps {
   onEntityChange: (entity: DynatraceEntity | null) => void;
   searchInput: string;
   onInputChange: (event: unknown, newInputValue: string, reason?: string) => void;
+  onSearchInputChange: (value: string) => void;
   onFetchEntities: (entityType: string) => void;
+
+  // HOST multi-select via tag filter
+  selectedTagKey: string;
+  onTagKeyChange: (key: string) => void;
+  selectedTagValue: string;
+  onTagValueChange: (value: string) => void;
+  selectedHosts: DynatraceEntity[];
+  onSelectedHostsChange: (hosts: DynatraceEntity[]) => void;
 }
 
 export function AddEntityDialog({
@@ -73,8 +88,17 @@ export function AddEntityDialog({
   onEntityChange,
   searchInput,
   onInputChange,
+  onSearchInputChange,
   onFetchEntities,
+  selectedTagKey,
+  onTagKeyChange,
+  selectedTagValue,
+  onTagValueChange,
+  selectedHosts,
+  onSelectedHostsChange,
 }: AddEntityDialogProps) {
+  const isHost = selectedEntityType === 'HOST';
+
   const handleInstanceChange = (e: SelectChangeEvent) => {
     onInstanceChange(e.target.value);
     onEntityChange(null);
@@ -105,6 +129,65 @@ export function AddEntityDialog({
       onFetchEntities(selectedEntityType);
     }
   };
+
+  // Only HOST entities feed the multi-select list, even if `entities` still holds
+  // a stale mixed-type fetch from before the type was switched to HOST.
+  const hostEntities = entities.filter((e) => e.entityType === 'HOST');
+
+  // Tag options derived from the fetched hosts. ponytail: client-side over the
+  // fetched page (≤500 hosts); push tag("k:v") into the server entitySelector if
+  // a fleet ever exceeds one page.
+  const tagKeys = Array.from(
+    new Set(hostEntities.flatMap((e) => (e.tags || []).map((t) => t.key)))
+  ).sort();
+  const tagValues = Array.from(
+    new Set(
+      hostEntities
+        .flatMap((e) => e.tags || [])
+        .filter((t) => t.key === selectedTagKey && t.value)
+        .map((t) => t.value as string)
+    )
+  ).sort();
+
+  const nameQuery = searchInput.trim().toLowerCase();
+  const filteredHosts = hostEntities.filter((e) => {
+    if (nameQuery && !e.displayName.toLowerCase().includes(nameQuery)) return false;
+    if (!selectedTagKey) return true;
+    return (e.tags || []).some(
+      (t) => t.key === selectedTagKey && (!selectedTagValue || t.value === selectedTagValue)
+    );
+  });
+
+  const isSelected = (entityId: string) => selectedHosts.some((h) => h.entityId === entityId);
+
+  const toggleHost = (host: DynatraceEntity) => {
+    onSelectedHostsChange(
+      isSelected(host.entityId)
+        ? selectedHosts.filter((h) => h.entityId !== host.entityId)
+        : [...selectedHosts, host]
+    );
+  };
+
+  const selectedFilteredCount = filteredHosts.filter((h) => isSelected(h.entityId)).length;
+  const allFilteredSelected = filteredHosts.length > 0 && selectedFilteredCount === filteredHosts.length;
+
+  const toggleSelectAll = () => {
+    if (allFilteredSelected) {
+      const filteredIds = new Set(filteredHosts.map((h) => h.entityId));
+      onSelectedHostsChange(selectedHosts.filter((h) => !filteredIds.has(h.entityId)));
+    } else {
+      const selectedIds = new Set(selectedHosts.map((h) => h.entityId));
+      const additions = filteredHosts.filter((h) => !selectedIds.has(h.entityId));
+      onSelectedHostsChange([...selectedHosts, ...additions]);
+    }
+  };
+
+  const submitDisabled = loading || (isHost ? selectedHosts.length === 0 : !selectedEntity);
+  const submitLabel = loading
+    ? 'Adding...'
+    : isHost
+    ? `Add ${selectedHosts.length} ${selectedHosts.length === 1 ? 'Host' : 'Hosts'}`
+    : 'Add Entity';
 
   return (
     <Dialog open={open} onClose={onClose} maxWidth="sm" fullWidth>
@@ -172,59 +255,166 @@ export function AddEntityDialog({
             </FormHelperText>
           </FormControl>
 
-          <Autocomplete
-            options={entities}
-            getOptionLabel={(option) => option.displayName}
-            value={selectedEntity}
-            inputValue={searchInput}
-            open={entities.length > 0 && searchInput.length >= 2 && !selectedEntity}
-            onChange={handleEntityChange}
-            onInputChange={onInputChange}
-            disabled={!selectedEntityType || entitiesLoading}
-            loading={entitiesLoading}
-            filterOptions={(options) => options}
-            openOnFocus={false}
-            clearOnBlur={false}
-            selectOnFocus={true}
-            handleHomeEndKeys={true}
-            renderInput={(params) => (
+          {isHost ? (
+            <>
               <TextField
-                {...params}
-                label="Dynatrace Entity"
-                placeholder="Type to search..."
-                helperText={
-                  !selectedEntityType
-                    ? 'Please select an entity type first'
-                    : entitiesLoading
-                    ? 'Loading entities...'
-                    : 'Type at least 2 characters to search for specific entities'
-                }
+                label="Search hosts by name"
+                placeholder="Type to filter..."
+                value={searchInput}
+                onChange={(e) => onSearchInputChange(e.target.value)}
+                disabled={entitiesLoading && hostEntities.length === 0}
+                helperText="Optional — filters the host list below"
                 InputProps={{
-                  ...params.InputProps,
-                  endAdornment: (
-                    <>
-                      {entitiesLoading ? <CircularProgress color="inherit" size={20} /> : null}
-                      {params.InputProps.endAdornment}
-                    </>
-                  ),
+                  endAdornment: entitiesLoading ? (
+                    <CircularProgress color="inherit" size={20} />
+                  ) : null,
                 }}
+                fullWidth
               />
-            )}
-            renderOption={(props, option) => {
-              const { _key, ...otherProps } = props;
-              return (
-                <Box component="li" key={option.entityId} {...otherProps}>
-                  <Box>
-                    <Typography variant="body2">{option.displayName}</Typography>
-                    <Typography variant="caption" color="text.secondary">
-                      {option.entityType} - {option.entityId}
-                    </Typography>
+
+              <Box sx={{ display: 'flex', gap: 2 }}>
+                <FormControl fullWidth>
+                  <InputLabel>Tag</InputLabel>
+                  <Select
+                    value={tagKeys.includes(selectedTagKey) ? selectedTagKey : ''}
+                    onChange={(e: SelectChangeEvent) => onTagKeyChange(e.target.value)}
+                    label="Tag"
+                    disabled={tagKeys.length === 0}
+                  >
+                    <MenuItem value="">
+                      <em>Any tag</em>
+                    </MenuItem>
+                    {tagKeys.map((key) => (
+                      <MenuItem key={key} value={key}>
+                        {key}
+                      </MenuItem>
+                    ))}
+                  </Select>
+                </FormControl>
+
+                <FormControl fullWidth>
+                  <InputLabel>Value</InputLabel>
+                  <Select
+                    value={tagValues.includes(selectedTagValue) ? selectedTagValue : ''}
+                    onChange={(e: SelectChangeEvent) => onTagValueChange(e.target.value)}
+                    label="Value"
+                    disabled={!selectedTagKey || tagValues.length === 0}
+                  >
+                    <MenuItem value="">
+                      <em>Any value</em>
+                    </MenuItem>
+                    {tagValues.map((value) => (
+                      <MenuItem key={value} value={value}>
+                        {value}
+                      </MenuItem>
+                    ))}
+                  </Select>
+                </FormControl>
+              </Box>
+
+              <Box sx={{ border: 1, borderColor: 'divider', borderRadius: 1 }}>
+                <ListItemButton onClick={toggleSelectAll} disabled={filteredHosts.length === 0}>
+                  <ListItemIcon sx={{ minWidth: 'auto', mr: 1 }}>
+                    <Checkbox
+                      edge="start"
+                      checked={allFilteredSelected}
+                      indeterminate={!allFilteredSelected && selectedFilteredCount > 0}
+                      tabIndex={-1}
+                      disableRipple
+                    />
+                  </ListItemIcon>
+                  <ListItemText
+                    primary={
+                      filteredHosts.length === 0
+                        ? entitiesLoading
+                          ? 'Loading hosts...'
+                          : 'No matching hosts'
+                        : `Select all (${filteredHosts.length})`
+                    }
+                    secondary={
+                      selectedHosts.length > 0 ? `${selectedHosts.length} selected` : undefined
+                    }
+                  />
+                </ListItemButton>
+                <List dense sx={{ maxHeight: 240, overflow: 'auto', pt: 0 }}>
+                  {filteredHosts.map((host) => (
+                    <ListItem key={host.entityId} disablePadding>
+                      <ListItemButton onClick={() => toggleHost(host)}>
+                        <ListItemIcon sx={{ minWidth: 'auto', mr: 1 }}>
+                          <Checkbox
+                            edge="start"
+                            checked={isSelected(host.entityId)}
+                            tabIndex={-1}
+                            disableRipple
+                          />
+                        </ListItemIcon>
+                        <ListItemText
+                          primary={host.displayName}
+                          secondary={host.entityId}
+                          primaryTypographyProps={{ variant: 'body2' }}
+                          secondaryTypographyProps={{ variant: 'caption' }}
+                        />
+                      </ListItemButton>
+                    </ListItem>
+                  ))}
+                </List>
+              </Box>
+            </>
+          ) : (
+            <Autocomplete
+              options={entities}
+              getOptionLabel={(option) => option.displayName}
+              value={selectedEntity}
+              inputValue={searchInput}
+              open={entities.length > 0 && searchInput.length >= 2 && !selectedEntity}
+              onChange={handleEntityChange}
+              onInputChange={onInputChange}
+              disabled={!selectedEntityType || entitiesLoading}
+              loading={entitiesLoading}
+              filterOptions={(options) => options}
+              openOnFocus={false}
+              clearOnBlur={false}
+              selectOnFocus={true}
+              handleHomeEndKeys={true}
+              renderInput={(params) => (
+                <TextField
+                  {...params}
+                  label="Dynatrace Entity"
+                  placeholder="Type to search..."
+                  helperText={
+                    !selectedEntityType
+                      ? 'Please select an entity type first'
+                      : entitiesLoading
+                      ? 'Loading entities...'
+                      : 'Type at least 2 characters to search for specific entities'
+                  }
+                  InputProps={{
+                    ...params.InputProps,
+                    endAdornment: (
+                      <>
+                        {entitiesLoading ? <CircularProgress color="inherit" size={20} /> : null}
+                        {params.InputProps.endAdornment}
+                      </>
+                    ),
+                  }}
+                />
+              )}
+              renderOption={(props, option) => {
+                const { _key, ...otherProps } = props;
+                return (
+                  <Box component="li" key={option.entityId} {...otherProps}>
+                    <Box>
+                      <Typography variant="body2">{option.displayName}</Typography>
+                      <Typography variant="caption" color="text.secondary">
+                        {option.entityType} - {option.entityId}
+                      </Typography>
+                    </Box>
                   </Box>
-                </Box>
-              );
-            }}
-            fullWidth
-          />
+                );
+              }}
+              fullWidth
+            />
+          )}
         </Box>
       </DialogContent>
       <DialogActions>
@@ -234,10 +424,10 @@ export function AddEntityDialog({
         <Button
           onClick={onSubmit}
           variant="contained"
-          disabled={!selectedEntity || loading}
+          disabled={submitDisabled}
           startIcon={loading ? <CircularProgress size={16} /> : <SaveIcon />}
         >
-          {loading ? 'Adding...' : 'Add Entity'}
+          {submitLabel}
         </Button>
       </DialogActions>
     </Dialog>
