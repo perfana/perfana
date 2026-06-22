@@ -51,6 +51,15 @@ export default function DynatraceDeeplinkSection({
     selectedEntity,
     setSelectedEntity,
     searchInput,
+    setSearchInput,
+
+    // HOST multi-select via tag filter
+    selectedTagKey,
+    setSelectedTagKey,
+    selectedTagValue,
+    setSelectedTagValue,
+    selectedHosts,
+    setSelectedHosts,
 
     // Actions
     fetchDynatraceEntities,
@@ -65,14 +74,30 @@ export default function DynatraceDeeplinkSection({
     selectedWorkload,
   });
 
+  // Changing the data source invalidates any in-progress entity/host selection —
+  // clear it so a selection made against instance A can't be submitted to instance B.
+  const clearEntitySelection = () => {
+    setSelectedEntity(null);
+    setSelectedTagKey('');
+    setSelectedTagValue('');
+    setSelectedHosts([]);
+    setSearchInput('');
+  };
+
   const handleInstanceChange = (instanceId: string) => {
     setSelectedInstance(instanceId);
-    setSelectedEntity(null);
+    setSelectedEntityType('');
+    clearEntitySelection();
   };
 
   const handleEntityTypeChange = (type: string) => {
     setSelectedEntityType(type);
-    setSelectedEntity(null);
+    clearEntitySelection();
+  };
+
+  const handleTagKeyChange = (key: string) => {
+    setSelectedTagKey(key);
+    setSelectedTagValue('');
   };
 
   return (
@@ -146,7 +171,14 @@ export default function DynatraceDeeplinkSection({
         onEntityChange={setSelectedEntity}
         searchInput={searchInput}
         onInputChange={handleInputChange}
+        onSearchInputChange={setSearchInput}
         onFetchEntities={fetchDynatraceEntities}
+        selectedTagKey={selectedTagKey}
+        onTagKeyChange={handleTagKeyChange}
+        selectedTagValue={selectedTagValue}
+        onTagValueChange={setSelectedTagValue}
+        selectedHosts={selectedHosts}
+        onSelectedHostsChange={setSelectedHosts}
       />
     </Box>
   );

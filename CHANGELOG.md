@@ -4,6 +4,13 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
+## [0.2.61.14] - 2026-06-22
+
+### Added
+- **Tag-based multi-select for Dynatrace HOST entity mappings.** In the system config "Add Dynatrace Entity" dialog, picking entity type `HOST` now shows a tag key + value filter and a checkbox list of matching hosts, so you can map many hosts at once instead of one autocomplete pick at a time. A name search box filters the list client-side alongside the tag filter; "Select all" maps every host currently matching. Submit loops the existing `POST /dynatrace/entities/mappings` once per selected host (already-mapped hosts return 409 and are skipped, not failed). Other entity types keep the original single-select autocomplete. Frontend-only — no API, endpoint, or schema changes.
+  - Tag options are derived client-side from the fetched host page (≤500 hosts). If a fleet ever exceeds one page, push a `tag("k:v")` condition into the server-side `entitySelector` (marked with a `ponytail:` comment in `AddEntityDialog.tsx`).
+  - Selected hosts are stored as full entity objects, not ids, so changing the tag/name filter never silently drops a selection from the submit set. Changing the Dynatrace instance clears the in-progress selection so it can't be submitted against the wrong instance. The batch is resilient: a non-409 failure mid-loop doesn't abort — it keeps the dialog open with only the failed hosts still selected and reports an added/skipped/failed summary.
+
 ## [0.2.61.13] - 2026-06-17
 
 ### Fixed

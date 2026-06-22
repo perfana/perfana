@@ -10,6 +10,18 @@ import {
 } from '../types';
 import { filterMappingsByContext } from '../utils';
 
+// Prefer the API's JSON `message`, fall back to a status-based string for non-JSON bodies.
+async function messageFromResponse(response: Response, fallback: string): Promise<string> {
+  const text = await response.text();
+  try {
+    const json = JSON.parse(text);
+    if (json && json.message) return json.message as string;
+  } catch {
+    // Non-JSON body — use the fallback.
+  }
+  return fallback;
+}
+
 interface UseDynatraceEntityMappingsProps {
   systemId: string;
   selectedEnvironment: string;
@@ -47,6 +59,14 @@ interface UseDynatraceEntityMappingsReturn {
   setSelectedEntity: (entity: DynatraceEntity | null) => void;
   searchInput: string;
   setSearchInput: (input: string) => void;
+
+  // HOST multi-select via tag filter
+  selectedTagKey: string;
+  setSelectedTagKey: (key: string) => void;
+  selectedTagValue: string;
+  setSelectedTagValue: (value: string) => void;
+  selectedHosts: DynatraceEntity[];
+  setSelectedHosts: (hosts: DynatraceEntity[]) => void;
 
   // Refs for input handling
   userTypingRef: React.MutableRefObject<boolean>;
@@ -90,10 +110,19 @@ export function useDynatraceEntityMappings({
   const [selectedEntity, setSelectedEntity] = useState<DynatraceEntity | null>(null);
   const [searchInput, setSearchInput] = useState<string>('');
 
+  // HOST multi-select via tag filter. Selected hosts are stored as full entity
+  // objects (not ids) so the submit set never depends on the volatile `entities`
+  // array — searching/filtering can replace `entities` without dropping a selection.
+  const [selectedTagKey, setSelectedTagKey] = useState<string>('');
+  const [selectedTagValue, setSelectedTagValue] = useState<string>('');
+  const [selectedHosts, setSelectedHosts] = useState<DynatraceEntity[]>([]);
+
   // Refs for input handling
   const inputChangeTimeoutRef = useRef<NodeJS.Timeout | null>(null);
   const userTypingRef = useRef<boolean>(false);
   const lastValidInputRef = useRef<string>('');
+  // Synchronous guard against double-submit (setAddLoading is async).
+  const submittingRef = useRef<boolean>(false);
 
   // Fetch Dynatrace instances on mount
   useEffect(() => {
@@ -106,9 +135,11 @@ export function useDynatraceEntityMappings({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [systemId, selectedEnvironment, selectedWorkload]);
 
-  // Debounced search effect
+  // Debounced search effect.
+  // HOST mode loads the full host list once (on entity-type change) and filters
+  // client-side by tag + name in the dialog, so it does not refetch on keystrokes.
   useEffect(() => {
-    if (!selectedEntityType) {
+    if (!selectedEntityType || selectedEntityType === 'HOST') {
       return;
     }
 
@@ -259,6 +290,9 @@ export function useDynatraceEntityMappings({
     setSelectedEntityType('');
     setSelectedLevel('sut');
     setSearchInput('');
+    setSelectedTagKey('');
+    setSelectedTagValue('');
+    setSelectedHosts([]);
     userTypingRef.current = false;
     lastValidInputRef.current = '';
   }, []);
@@ -270,50 +304,111 @@ export function useDynatraceEntityMappings({
     setAddDialogOpen(true);
   };
 
-  const handleSubmitEntity = async () => {
-    if (!selectedEntity || !selectedInstance) return;
+  // Build the mapping payload for one entity using the current form context.
+  const buildMappingPayload = (entity: DynatraceEntity) => ({
+    dynatraceConfigId: selectedInstance,
+    systemUnderTestId: systemId,
+    testEnvironment: selectedLevel !== 'sut' ? selectedEnvironment : undefined,
+    workload: selectedLevel === 'sut_testenv_workload' ? selectedWorkload : undefined,
+    entityId: entity.entityId,
+    entityDisplayName: entity.displayName,
+    entityType: entity.entityType,
+    level: selectedLevel,
+  });
 
+  const handleSubmitEntity = async () => {
+    if (!selectedInstance) return;
+    if (submittingRef.current) return; // guard against a double-click before addLoading propagates
+
+    // HOST: add every checkbox-selected host. ponytail: loop the existing single
+    // POST per host (handful of hosts in practice); add a bulk endpoint if fleets get large.
+    if (selectedEntityType === 'HOST') {
+      // Submit the stored selection objects directly — never re-derive from `entities`,
+      // which the tag/name filter can have replaced.
+      const hosts = selectedHosts;
+      if (hosts.length === 0) return;
+
+      submittingRef.current = true;
+      try {
+        setAddLoading(true);
+        setError(null);
+
+        let added = 0;
+        let skipped = 0;
+        const failed: DynatraceEntity[] = [];
+        let firstError = '';
+        // Per-host POSTs are not transactional; keep going on failure and report
+        // a per-host summary rather than aborting mid-batch with a misleading message.
+        for (const host of hosts) {
+          const response = await authenticatedFetch('/dynatrace/entities/mappings', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(buildMappingPayload(host)),
+          });
+
+          if (response.ok) {
+            added++;
+          } else if (response.status === 409) {
+            skipped++; // already mapped — skip, don't abort the batch
+          } else {
+            failed.push(host);
+            if (!firstError) {
+              firstError = await messageFromResponse(response, `${response.status} ${response.statusText}`);
+            }
+          }
+        }
+
+        await fetchEntityMappings();
+
+        if (failed.length > 0) {
+          // Keep the dialog open with only the failures still selected so the user can retry.
+          const failedIds = new Set(failed.map((h) => h.entityId));
+          setSelectedHosts(hosts.filter((h) => failedIds.has(h.entityId)));
+          const summary = [`added ${added}`, skipped ? `${skipped} already mapped` : '', `${failed.length} failed`]
+            .filter(Boolean)
+            .join(', ');
+          setError(`${summary} (${failed.map((h) => h.displayName).join(', ')}): ${firstError}`);
+        } else {
+          resetDialogState();
+          if (added === 0 && skipped > 0) {
+            setError('All selected hosts were already added');
+          }
+        }
+      } catch (err) {
+        setError(err && typeof err === 'object' && 'message' in err ? (err as Error).message : 'Failed to add host mappings');
+      } finally {
+        setAddLoading(false);
+        submittingRef.current = false;
+      }
+      return;
+    }
+
+    if (!selectedEntity) return;
+
+    submittingRef.current = true;
     try {
       setAddLoading(true);
       setError(null);
 
-      const payload = {
-        dynatraceConfigId: selectedInstance,
-        systemUnderTestId: systemId,
-        testEnvironment: selectedLevel !== 'sut' ? selectedEnvironment : undefined,
-        workload: selectedLevel === 'sut_testenv_workload' ? selectedWorkload : undefined,
-        entityId: selectedEntity.entityId,
-        entityDisplayName: selectedEntity.displayName,
-        entityType: selectedEntity.entityType,
-        level: selectedLevel,
-      };
-
       const response = await authenticatedFetch('/dynatrace/entities/mappings', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(payload),
+        body: JSON.stringify(buildMappingPayload(selectedEntity)),
       });
 
       if (!response.ok) {
-        const errorText = await response.text();
-
         if (response.status === 409) {
           setError('Entity already added');
           resetDialogState();
           return;
         }
 
-        let errorMessage = `Failed to add entity mapping: ${response.status} ${response.statusText}`;
-        try {
-          const errorJson = JSON.parse(errorText);
-          if (errorJson.message) {
-            errorMessage = errorJson.message;
-          }
-        } catch {
-          // Use default error message
-        }
-
-        throw new Error(errorMessage);
+        throw new Error(
+          await messageFromResponse(
+            response,
+            `Failed to add entity mapping: ${response.status} ${response.statusText}`
+          )
+        );
       }
 
       await fetchEntityMappings();
@@ -322,6 +417,7 @@ export function useDynatraceEntityMappings({
       setError(err && typeof err === 'object' && 'message' in err ? (err as Error).message : 'Failed to add entity mapping');
     } finally {
       setAddLoading(false);
+      submittingRef.current = false;
     }
   };
 
@@ -381,6 +477,14 @@ export function useDynatraceEntityMappings({
     setSelectedEntity,
     searchInput,
     setSearchInput,
+
+    // HOST multi-select via tag filter
+    selectedTagKey,
+    setSelectedTagKey,
+    selectedTagValue,
+    setSelectedTagValue,
+    selectedHosts,
+    setSelectedHosts,
 
     // Refs
     userTypingRef,
