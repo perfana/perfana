@@ -6,6 +6,7 @@ import {
   DsAdaptConclusion,
   DsAdaptResults,
   TestRun as TestRunEntity,
+  DsMetrics,
 } from '../../entities';
 import { TrackedRegressionStatus } from './dto/tracked-regression.dto';
 import { createMockRepository, MockRepository } from '../../../test/helpers/mock-repository.factory';
@@ -98,6 +99,10 @@ describe('AdaptService', () => {
         {
           provide: getRepositoryToken(DsAdaptResults),
           useValue: createMockRepository<DsAdaptResults>(),
+        },
+        {
+          provide: getRepositoryToken(DsMetrics),
+          useValue: createMockRepository<DsMetrics>(),
         },
         {
           provide: AuthorizationService,
@@ -1852,6 +1857,79 @@ describe('AdaptService', () => {
         // Empty string '' || undefined becomes undefined
         expect(result.regressions[0]?.annotations).toBeUndefined();
       });
+    });
+  });
+});
+
+// ---------------------------------------------------------------------------
+// getCorrelationGroups — TDD tests (Task 3)
+// ---------------------------------------------------------------------------
+
+const correlationAdaptRows = [
+  { id: 'a', metric_name: 'cpu', dashboard_label: 'svc', dashboard_uid: 'u', panel_id: 1, application_dashboard_id: 'd', panel_title: 'p', conclusion: { label: 'regression' } },
+  { id: 'b', metric_name: 'latency', dashboard_label: 'svc', dashboard_uid: 'u', panel_id: 2, application_dashboard_id: 'd', panel_title: 'p', conclusion: { label: 'regression' } },
+  { id: 'c', metric_name: 'noise', dashboard_label: 'svc', dashboard_uid: 'u', panel_id: 3, application_dashboard_id: 'd', panel_title: 'p', conclusion: { label: 'regression' } },
+];
+
+const seriesByMetric: Record<string, number[]> = {
+  cpu: [1, 2, 3, 4, 5, 6],
+  latency: [2, 4, 6, 8, 10, 12], // r=1 with cpu
+  noise: [5, 1, 9, 2, 8, 3],     // uncorrelated
+};
+
+function buildCorrelationModule(conclusionReturn: unknown) {
+  const dsMetricsRepo = {
+    find: jest.fn(async (opts: { where: { metric_name: string } }) =>
+      seriesByMetric[opts.where.metric_name].map((value, i) => ({ time: new Date(i * 1000), value })),
+    ),
+  };
+  return Test.createTestingModule({
+    providers: [
+      AdaptService,
+      { provide: getRepositoryToken(DsAdaptTrackedResults), useValue: {} },
+      { provide: getRepositoryToken(DsAdaptConclusion), useValue: { findOne: jest.fn(async () => conclusionReturn) } },
+      { provide: getRepositoryToken(TestRunEntity), useValue: {} },
+      { provide: getRepositoryToken(DsAdaptResults), useValue: { find: jest.fn(async () => correlationAdaptRows) } },
+      { provide: getRepositoryToken(DsMetrics), useValue: dsMetricsRepo },
+      { provide: AuthorizationService, useValue: { isGlobalAdmin: () => true, getAccessibleOrganizations: jest.fn(async () => []) } },
+    ],
+  }).compile();
+}
+
+describe('AdaptService.getCorrelationGroups', () => {
+  describe('with three regressions (two correlated, one noise)', () => {
+    let service: AdaptService;
+
+    const conclusion = { test_run_id: 't1', regressions: ['a', 'b', 'c'] };
+
+    beforeEach(async () => {
+      const moduleRef = await buildCorrelationModule(conclusion);
+      service = moduleRef.get(AdaptService);
+    });
+
+    it('groups correlated regressions and leaves the independent one ungrouped', async () => {
+      const result = await service.getCorrelationGroups('t1', 'admin', ['super-admin']);
+      expect(result).not.toBeNull();
+      expect(result!.groups).toHaveLength(1);
+      expect(result!.groups[0].members.map((m) => m.resultId).sort()).toEqual(['a', 'b']);
+      expect(result!.ungrouped.map((u) => u.resultId)).toEqual(['c']);
+    });
+  });
+
+  describe('with fewer than two regressions', () => {
+    let service: AdaptService;
+
+    const conclusion = { test_run_id: 't1', regressions: ['a'] };
+
+    beforeEach(async () => {
+      const moduleRef = await buildCorrelationModule(conclusion);
+      service = moduleRef.get(AdaptService);
+    });
+
+    it('returns empty groups and empty ungrouped', async () => {
+      const single = await service.getCorrelationGroups('t1', 'admin', ['super-admin']);
+      expect(single!.groups).toHaveLength(0);
+      expect(single!.ungrouped).toHaveLength(0);
     });
   });
 });
