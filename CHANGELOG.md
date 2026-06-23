@@ -4,6 +4,16 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
+## [0.2.61.18] - 2026-06-23
+
+### Added
+- **Regression correlation groups — same-run clustering of ADAPT regressions by time-series correlation.** A new on-demand read path takes the regressions ADAPT already detected for a run and clusters the ones whose raw `ds_metrics` series moved together, so a long flat list collapses into a few themes, each with a human label (shared dashboard), a "driver" metric (most central), and per-member correlation. Pure function of existing data — no persistence, no new table.
+  - Algorithm (`apps/api/src/modules/adapt/correlation-groups.util.ts`): Pearson `|r|` over time-aligned series (inner-join on timestamp, ≥5 overlapping points), hybrid edge rule (`|r| ≥ 0.8`, or `|r| ≥ 0.6` when two metrics share a dashboard), connected-components grouping. Uses absolute `r` so a metric that regressed in the opposite direction still groups with its theme.
+  - API: `GET /adapt/correlation-groups/:testRunId` (optional `?threshold=`), org-access-guarded like the other adapt endpoints.
+  - MCP: new `get_regression_correlations` tool for agents to triage many regressions into root-cause themes.
+  - Web: a "Group by correlation" toggle in the Anomaly Detection expanded card renders the grouped view alongside the flat regressions table.
+  - Distinct from the existing `getCorrelatedRegressions` (which finds related regressions across runs in a ±7-day window seeded by one tracked regression); this is same-run, statistical, over the whole regressed set.
+
 ## [0.2.61.17] - 2026-06-23
 
 ### Changed
