@@ -747,7 +747,7 @@ export class AdaptService {
 
       const primary = primaryThreshold ?? this.CORRELATION_PRIMARY;
       const ids = conclusion.regressions ?? [];
-      if (ids.length < 2) {
+      if (ids.length === 0) {
         return { testRunId, threshold: primary, groups: [], ungrouped: [] };
       }
 

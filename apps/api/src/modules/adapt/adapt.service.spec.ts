@@ -1916,10 +1916,45 @@ describe('AdaptService.getCorrelationGroups', () => {
     });
   });
 
-  describe('with fewer than two regressions', () => {
+  describe('with exactly one regression', () => {
     let service: AdaptService;
 
     const conclusion = { test_run_id: 't1', regressions: ['a'] };
+    const rowA = correlationAdaptRows[0]!; // { id: 'a', metric_name: 'cpu', ... }
+
+    beforeEach(async () => {
+      const dsMetricsRepo = {
+        find: jest.fn(async () =>
+          seriesByMetric['cpu']!.map((value, i) => ({ time: new Date(i * 1000), value })),
+        ),
+      };
+      const moduleRef = await Test.createTestingModule({
+        providers: [
+          AdaptService,
+          { provide: getRepositoryToken(DsAdaptTrackedResults), useValue: {} },
+          { provide: getRepositoryToken(DsAdaptConclusion), useValue: { findOne: jest.fn(async () => conclusion) } },
+          { provide: getRepositoryToken(TestRunEntity), useValue: {} },
+          { provide: getRepositoryToken(DsAdaptResults), useValue: { find: jest.fn(async () => [rowA]) } },
+          { provide: getRepositoryToken(DsMetrics), useValue: dsMetricsRepo },
+          { provide: AuthorizationService, useValue: { isGlobalAdmin: () => true, getAccessibleOrganizations: jest.fn(async () => []) } },
+        ],
+      }).compile();
+      service = moduleRef.get(AdaptService);
+    });
+
+    it('returns empty groups and one ungrouped entry', async () => {
+      const result = await service.getCorrelationGroups('t1', 'admin', ['super-admin']);
+      expect(result).not.toBeNull();
+      expect(result!.groups).toHaveLength(0);
+      expect(result!.ungrouped).toHaveLength(1);
+      expect(result!.ungrouped[0]!.resultId).toBe('a');
+    });
+  });
+
+  describe('with zero regressions', () => {
+    let service: AdaptService;
+
+    const conclusion = { test_run_id: 't1', regressions: [] };
 
     beforeEach(async () => {
       const moduleRef = await buildCorrelationModule(conclusion);
@@ -1927,9 +1962,10 @@ describe('AdaptService.getCorrelationGroups', () => {
     });
 
     it('returns empty groups and empty ungrouped', async () => {
-      const single = await service.getCorrelationGroups('t1', 'admin', ['super-admin']);
-      expect(single!.groups).toHaveLength(0);
-      expect(single!.ungrouped).toHaveLength(0);
+      const result = await service.getCorrelationGroups('t1', 'admin', ['super-admin']);
+      expect(result).not.toBeNull();
+      expect(result!.groups).toHaveLength(0);
+      expect(result!.ungrouped).toHaveLength(0);
     });
   });
 });
