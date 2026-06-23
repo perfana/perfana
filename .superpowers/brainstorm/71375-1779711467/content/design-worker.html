@@ -1,0 +1,56 @@
+<h2>Design — Section 2: Worker Changes</h2>
+<p class="subtitle">Every place analysisStartOffset is applied, analysisEndOffset is applied symmetrically</p>
+
+<div class="section">
+  <h3>TransactionStatsRollupPipeline.ts</h3>
+  <div class="mockup">
+    <div class="mockup-header">Before</div>
+    <div class="mockup-body" style="font-family: monospace; font-size: 0.85rem; line-height: 1.8;">
+      const rampUpSeconds = testRun.analysisStartOffset ?? 0;<br>
+      const cutoff = new Date(startTime + rampUpSeconds * 1000);<br>
+      <br>
+      SQL: WHERE time &gt;= $cutoff (ramp_up_excluded=true rows)
+    </div>
+  </div>
+  <div class="mockup" style="margin-top: 0.75rem;">
+    <div class="mockup-header">After</div>
+    <div class="mockup-body" style="font-family: monospace; font-size: 0.85rem; line-height: 1.8;">
+      const rampUpSeconds = testRun.analysisStartOffset ?? 0;<br>
+      const rampDownSeconds = testRun.analysisEndOffset ?? 0;<br>
+      const startCutoff = new Date(startTime + rampUpSeconds * 1000);<br>
+      const endCutoff = new Date(endTime − rampDownSeconds * 1000);<br>
+      <br>
+      SQL: WHERE time &gt;= $startCutoff AND time &lt; $endCutoff (ramp_up_excluded=true rows)<br>
+      <span style="color: var(--color-text-secondary)">// Full-run rows (ramp_up_excluded=false) remain unchanged — no cutoffs</span>
+    </div>
+  </div>
+</div>
+
+<div class="section">
+  <h3>metric-processor.ts (incremental JTL ingestion)</h3>
+  <div class="mockup">
+    <div class="mockup-header">Change</div>
+    <div class="mockup-body" style="font-family: monospace; font-size: 0.85rem; line-height: 1.8;">
+      // Currently marks ramp_up=true when elapsedSeconds &lt; analysisStartOffset<br>
+      // Add: also mark ramp_up=true when elapsed &gt; (duration − analysisEndOffset)<br>
+      const isExcluded = elapsedSeconds &lt; startOffset<br>
+      &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp; || (endOffset &gt; 0 &amp;&amp; elapsedSeconds &gt; (duration − endOffset));
+    </div>
+  </div>
+  <p style="font-size: 0.875rem; color: var(--color-text-secondary); margin-top: 0.5rem;">Same pattern applied in grafana-collector.ts and dynatrace-collector.ts wherever ramp_up is set.</p>
+</div>
+
+<div class="section">
+  <h3>MetricsPipeline.ts (Grafana time-range queries)</h3>
+  <p style="font-size: 0.875rem;">The Grafana query time range currently starts at <code>startTime + analysisStartOffset</code>. It will also end at <code>endTime − analysisEndOffset</code> (instead of always <code>endTime</code>). This clips the Grafana fetch window symmetrically.</p>
+</div>
+
+<div class="section">
+  <h3>DataSanityCheckPipeline.ts</h3>
+  <p style="font-size: 0.875rem;">Add a check: if the effective analysis window is zero or negative (<code>analysisStartOffset + analysisEndOffset &gt;= duration</code>), add a <code>dataWarning</code> rather than marking the run invalid — the user deliberately set this, so it's a warning not an error.</p>
+</div>
+
+<div class="section">
+  <h3>Re-trigger on save</h3>
+  <p style="font-size: 0.875rem;">When <code>UpdateAnalysisTimeRangeHandler</code> saves both offsets, it enqueues a <code>TransactionStatsRollupPipeline</code> job — identical to what <code>UpdateAnalysisStartOffsetHandler</code> does today. One job, one rollup.</p>
+</div>

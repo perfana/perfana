@@ -1,0 +1,108 @@
+<h2>Set Aggregated Test SLO — Dialog Mockup</h2>
+<p class="subtitle">How the new dialog should look. Let me know if anything needs adjusting.</p>
+
+<div class="mockup" style="max-width:560px;margin:0 auto;">
+  <div class="mockup-header">Set Aggregated Test SLO</div>
+  <div class="mockup-body" style="padding:20px;display:flex;flex-direction:column;gap:16px;">
+
+    <!-- Info alert -->
+    <div style="background:#e3f2fd;border-left:4px solid #1976d2;padding:10px 14px;border-radius:4px;font-size:13px;">
+      <strong>Aggregated Test SLO</strong> creates a pass/fail check based on a single metric aggregated across all transactions or requests in the test run. Ramp-up filtering applies if enabled.
+    </div>
+
+    <!-- Enable toggle -->
+    <div style="display:flex;align-items:center;gap:12px;">
+      <div style="width:40px;height:22px;background:#1976d2;border-radius:11px;position:relative;cursor:pointer;">
+        <div style="width:18px;height:18px;background:white;border-radius:50%;position:absolute;right:2px;top:2px;"></div>
+      </div>
+      <div>
+        <div style="font-size:14px;font-weight:500;">Create Aggregated SLO</div>
+        <div style="font-size:12px;color:#666;">Toggle to enable or disable this SLO</div>
+      </div>
+    </div>
+
+    <!-- Metric dropdown -->
+    <div>
+      <div style="font-size:12px;color:#666;margin-bottom:4px;">Metric <span style="color:#d32f2f;">*</span></div>
+      <div class="mock-input" style="display:flex;align-items:center;justify-content:space-between;cursor:pointer;">
+        <span>Aggregated transaction response times</span>
+        <span style="color:#666;">▾</span>
+      </div>
+      <div style="font-size:11px;color:#888;margin-top:3px;">The metric to aggregate across all data in the test run</div>
+      <!-- Dropdown hint -->
+      <div style="background:#fff;border:1px solid #ddd;border-radius:4px;margin-top:2px;font-size:13px;padding:4px 0;box-shadow:0 2px 8px rgba(0,0,0,0.1);">
+        <div style="padding:8px 14px;background:#e3f2fd;">Aggregated transaction response times</div>
+        <div style="padding:8px 14px;color:#333;">Aggregated request response times</div>
+        <div style="padding:8px 14px;color:#333;">Aggregated error percentage</div>
+      </div>
+    </div>
+
+    <!-- Stat + Operator + Value row -->
+    <div style="display:grid;grid-template-columns:1fr 80px 1fr;gap:12px;align-items:end;">
+      <div>
+        <div style="font-size:12px;color:#666;margin-bottom:4px;">Statistic <span style="color:#d32f2f;">*</span></div>
+        <div class="mock-input" style="display:flex;align-items:center;justify-content:space-between;cursor:pointer;">
+          <span>p95</span>
+          <span style="color:#666;">▾</span>
+        </div>
+        <div style="font-size:11px;color:#888;margin-top:3px;">avg · p50 · p90 · p95 · p99 · max</div>
+      </div>
+      <div>
+        <div style="font-size:12px;color:#666;margin-bottom:4px;">Operator</div>
+        <div class="mock-input" style="display:flex;align-items:center;justify-content:space-between;cursor:pointer;">
+          <span>≤</span>
+          <span style="color:#666;">▾</span>
+        </div>
+      </div>
+      <div>
+        <div style="font-size:12px;color:#666;margin-bottom:4px;">Threshold (ms) <span style="color:#d32f2f;">*</span></div>
+        <div class="mock-input">2000</div>
+      </div>
+    </div>
+
+    <!-- Exclude ramp-up toggle -->
+    <div style="display:flex;align-items:center;gap:12px;padding:10px 14px;border:1px solid #e0e0e0;border-radius:6px;">
+      <div style="width:32px;height:18px;background:#1976d2;border-radius:9px;position:relative;cursor:pointer;flex-shrink:0;">
+        <div style="width:14px;height:14px;background:white;border-radius:50%;position:absolute;right:2px;top:2px;"></div>
+      </div>
+      <div>
+        <div style="font-size:13px;font-weight:500;">Exclude ramp-up period from calculation</div>
+        <div style="font-size:11px;color:#888;">When enabled, requests issued during the ramp-up phase are ignored</div>
+      </div>
+    </div>
+
+    <!-- Scope info -->
+    <div style="background:#f3f3f3;border-radius:6px;padding:10px 14px;font-size:12px;color:#555;">
+      This SLO will apply to all future test runs with matching:<br/>
+      • System: <strong>my-service</strong><br/>
+      • Environment: <strong>staging</strong><br/>
+      • Workload: <strong>baseline-load</strong>
+    </div>
+
+    <!-- Actions -->
+    <div style="display:flex;justify-content:flex-end;gap:10px;padding-top:4px;">
+      <button class="mock-button" style="background:transparent;border:1px solid #bbb;color:#333;">Cancel</button>
+      <button class="mock-button">Save</button>
+    </div>
+  </div>
+</div>
+
+<div style="margin-top:32px;max-width:560px;margin-left:auto;margin-right:auto;">
+  <h3>Menu placement</h3>
+  <p class="subtitle">New "Set SLO" item added to the Apdex actions menu</p>
+  <div style="background:#fff;border:1px solid #ddd;border-radius:6px;width:220px;box-shadow:0 2px 8px rgba(0,0,0,0.1);font-size:14px;overflow:hidden;">
+    <div style="padding:10px 16px;display:flex;align-items:center;gap:10px;border-bottom:1px solid #f0f0f0;">
+      <span style="font-size:16px;">⚙</span> Set Apdex Threshold
+    </div>
+    <div style="padding:10px 16px;display:flex;align-items:center;gap:10px;border-bottom:1px solid #f0f0f0;">
+      <span style="font-size:16px;">📊</span> Set Apdex SLO
+    </div>
+    <div style="padding:10px 16px;display:flex;align-items:center;gap:10px;border-bottom:1px solid #f0f0f0;background:#e8f5e9;">
+      <span style="font-size:16px;">🎯</span> <strong>Set SLO</strong> <span style="font-size:11px;color:#2e7d32;margin-left:4px;">new</span>
+    </div>
+    <div style="padding:10px 16px;display:flex;align-items:center;gap:10px;">
+      <span style="font-size:16px;">📈</span> Modify Thresholds
+    </div>
+  </div>
+  <p style="font-size:12px;color:#888;margin-top:8px;">Also appears in System Under Test config → SLO tab (as a new "Add Aggregated SLO" button alongside the existing "Add SLO" button)</p>
+</div>

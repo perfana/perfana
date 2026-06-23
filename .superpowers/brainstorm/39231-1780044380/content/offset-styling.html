@@ -1,0 +1,96 @@
+<h2>Analysis Offset — Current vs Proposed</h2>
+<p class="subtitle">How excluded regions are shown in SLO charts (and all metric graphs)</p>
+
+<div class="split">
+  <div class="mockup">
+    <div class="mockup-header">Current — start offset only (grey background)</div>
+    <div class="mockup-body">
+      <p style="font-size:12px;color:#94a3b8;margin-bottom:8px">Ramp-up is shaded grey. No end-offset shown. No boundary lines.</p>
+      <svg width="100%" height="140" viewBox="0 0 400 140" style="display:block;background:#1e1e1e;border-radius:6px">
+        <!-- grey ramp-up region (start offset only) -->
+        <rect x="0" y="0" width="60" height="140" fill="rgba(100,116,139,0.12)"/>
+
+        <!-- grid lines -->
+        <line x1="0" y1="30" x2="400" y2="30" stroke="#2a2a2a" stroke-width="1"/>
+        <line x1="0" y1="70" x2="400" y2="70" stroke="#2a2a2a" stroke-width="1"/>
+        <line x1="0" y1="110" x2="400" y2="110" stroke="#2a2a2a" stroke-width="1"/>
+
+        <!-- metric line -->
+        <path d="M0,100 C30,95 50,90 70,70 C100,50 130,55 170,48 C210,41 240,44 270,42 C300,40 330,38 360,36 L400,35" fill="none" stroke="#6366f1" stroke-width="2"/>
+
+        <!-- SLO threshold -->
+        <line x1="0" y1="55" x2="400" y2="55" stroke="#ef4444" stroke-width="1.5" stroke-dasharray="5,4"/>
+        <text x="340" y="50" fill="#ef4444" font-size="9" font-family="monospace">SLO threshold</text>
+
+        <!-- x-axis labels -->
+        <text x="4" y="135" fill="#64748b" font-size="9" font-family="monospace">0s</text>
+        <text x="170" y="135" fill="#64748b" font-size="9" font-family="monospace">5m</text>
+        <text x="355" y="135" fill="#64748b" font-size="9" font-family="monospace">10m</text>
+
+        <!-- ramp-up label -->
+        <text x="4" y="18" fill="#64748b" font-size="8" font-family="monospace">ramp-up</text>
+      </svg>
+      <p style="font-size:11px;color:#ef4444;margin-top:8px">⚠ End offset (ramp-down) not shown at all</p>
+    </div>
+  </div>
+
+  <div class="mockup">
+    <div class="mockup-header">Proposed — both offsets as dark overlays + boundary lines</div>
+    <div class="mockup-body">
+      <p style="font-size:12px;color:#94a3b8;margin-bottom:8px">Both excluded regions darkened. Amber dashed lines mark analysis window boundaries. Matches AnalysisTimeRangeDialog style.</p>
+      <svg width="100%" height="140" viewBox="0 0 400 140" style="display:block;background:#1e1e1e;border-radius:6px">
+        <!-- start offset dark overlay -->
+        <rect x="0" y="0" width="60" height="140" fill="rgba(0,0,0,0.35)"/>
+        <!-- end offset dark overlay -->
+        <rect x="340" y="0" width="60" height="140" fill="rgba(0,0,0,0.35)"/>
+
+        <!-- grid lines -->
+        <line x1="0" y1="30" x2="400" y2="30" stroke="#2a2a2a" stroke-width="1"/>
+        <line x1="0" y1="70" x2="400" y2="70" stroke="#2a2a2a" stroke-width="1"/>
+        <line x1="0" y1="110" x2="400" y2="110" stroke="#2a2a2a" stroke-width="1"/>
+
+        <!-- metric line -->
+        <path d="M0,100 C30,95 50,90 70,70 C100,50 130,55 170,48 C210,41 240,44 270,42 C300,40 330,38 360,36 L400,35" fill="none" stroke="#6366f1" stroke-width="2"/>
+
+        <!-- SLO threshold -->
+        <line x1="0" y1="55" x2="400" y2="55" stroke="#ef4444" stroke-width="1.5" stroke-dasharray="5,4"/>
+        <text x="300" y="50" fill="#ef4444" font-size="9" font-family="monospace">SLO threshold</text>
+
+        <!-- start boundary line (amber dashed) -->
+        <line x1="60" y1="0" x2="60" y2="140" stroke="#f59e0b" stroke-width="1.5" stroke-dasharray="4,3"/>
+        <!-- end boundary line (amber dashed) -->
+        <line x1="340" y1="0" x2="340" y2="140" stroke="#f59e0b" stroke-width="1.5" stroke-dasharray="4,3"/>
+
+        <!-- x-axis labels -->
+        <text x="4" y="135" fill="#64748b" font-size="9" font-family="monospace">0s</text>
+        <text x="170" y="135" fill="#64748b" font-size="9" font-family="monospace">5m</text>
+        <text x="355" y="135" fill="#64748b" font-size="9" font-family="monospace">10m</text>
+
+        <!-- region labels -->
+        <text x="4" y="18" fill="#94a3b8" font-size="8" font-family="monospace">excluded</text>
+        <text x="345" y="18" fill="#94a3b8" font-size="8" font-family="monospace">excl.</text>
+
+        <!-- analysis window label -->
+        <text x="150" y="18" fill="#10b981" font-size="8" font-family="monospace">← analysis window →</text>
+      </svg>
+      <p style="font-size:11px;color:#10b981;margin-top:8px">✓ Both excluded regions visible. Boundary lines mark the exact window used for SLO evaluation.</p>
+    </div>
+  </div>
+</div>
+
+<div style="margin-top:24px;padding:16px;background:rgba(99,102,241,0.08);border-radius:8px;border:1px solid rgba(99,102,241,0.2)">
+  <p style="margin:0;font-size:13px;color:#94a3b8"><strong style="color:#e2e8f0">Implementation note:</strong> This change applies to <em>all</em> SLO charts (non-aggregated and the new aggregated chart). The <code>buildChartLayout()</code> utility in <code>slo-chart-utils.ts</code> currently uses only <code>ramp_up_seconds</code>. It needs to accept <code>analysis_start_offset</code> + <code>analysis_end_offset</code> from the test run and render two dark rect shapes + two amber dashed vertical lines.</p>
+</div>
+
+<p style="margin-top:20px;font-size:13px;color:#94a3b8">Does the proposed style look right? (Click the right panel or confirm in terminal)</p>
+
+<div class="options" style="margin-top:12px">
+  <div class="option" data-choice="yes" onclick="toggleSelect(this)">
+    <div class="letter">✓</div>
+    <div class="content"><h3>Looks good — go with this</h3></div>
+  </div>
+  <div class="option" data-choice="tweak" onclick="toggleSelect(this)">
+    <div class="letter">~</div>
+    <div class="content"><h3>I'd like to tweak something</h3></div>
+  </div>
+</div>

@@ -1,0 +1,61 @@
+<h2>Design — Section 1: Data Model & API</h2>
+<p class="subtitle">Does this look right before we move on?</p>
+
+<div class="section">
+  <h3>New DB column</h3>
+  <div class="mockup">
+    <div class="mockup-header">test_runs table (new column)</div>
+    <div class="mockup-body" style="font-family: monospace; font-size: 0.85rem; line-height: 1.8;">
+      <span style="color: #6366f1">ramp_up</span> &nbsp;&nbsp;&nbsp;&nbsp;INTEGER NULLABLE &nbsp;← existing (<code>analysisStartOffset</code>)<br>
+      <span style="color: #10b981">ramp_down</span> &nbsp; INTEGER NULLABLE DEFAULT 0 &nbsp;← <strong>new</strong> (<code>analysisEndOffset</code>)
+    </div>
+  </div>
+  <p style="font-size: 0.875rem; color: var(--color-text-secondary); margin-top: 0.75rem;">
+    Semantics: <strong>0 = no exclusion</strong>. Effective analysis window = <code>[startTime + analysisStartOffset, endTime − analysisEndOffset]</code>. Stored as seconds.
+  </p>
+</div>
+
+<div class="section">
+  <h3>Shared schema / entity</h3>
+  <ul style="font-size: 0.875rem; line-height: 2;">
+    <li><code>packages/shared/src/entities/test-run.entity.ts</code> — add <code>@Column('ramp_down') analysisEndOffset?: number</code></li>
+    <li><code>packages/shared/src/schemas/index.ts</code> — add <code>analysisEndOffset: z.number().int().optional()</code> to both Zod schemas</li>
+    <li><code>apps/api/src/modules/test-runs/handlers/entity-mapper.ts</code> — map <code>ramp_down → analysisEndOffset</code></li>
+    <li><code>apps/api/src/modules/test-runs/commands/create-test-run.command.ts</code> — accept optional <code>analysisEndOffset</code></li>
+    <li><code>apps/api/src/modules/test-runs/dto/update-running-test.dto.ts</code> — add optional field</li>
+    <li><code>apps/api/src/modules/test-runs/services/test-runs-mapper.service.ts</code> — include in mapped output</li>
+  </ul>
+</div>
+
+<div class="section">
+  <h3>New API endpoints</h3>
+  <div class="mockup">
+    <div class="mockup-header">PUT /test-runs/:id/analysis-time-range</div>
+    <div class="mockup-body" style="font-family: monospace; font-size: 0.85rem; line-height: 1.8;">
+      Body: { analysisStartOffset: number, analysisEndOffset: number }<br>
+      Handler: <code>UpdateAnalysisTimeRangeHandler</code><br>
+      — writes both to DB atomically<br>
+      — triggers TransactionStatsRollupPipeline (one job)<br>
+      — emits WebSocket UPDATED event<br>
+      — audit logs both fields
+    </div>
+  </div>
+  <div class="mockup" style="margin-top: 1rem;">
+    <div class="mockup-header">GET /test-runs/:id/summary-timeseries</div>
+    <div class="mockup-body" style="font-family: monospace; font-size: 0.85rem; line-height: 1.8;">
+      Returns: [{ time, throughput, avgResponseTime, errorsPerSecond }]<br>
+      Source: <code>transactions</code> + <code>requests_error</code> tables<br>
+      Bucket size: auto-computed from duration (reuses <code>calculateBucketSize</code>)<br>
+      Only available when performance test data exists<br>
+      (404 if no data → frontend hides button)
+    </div>
+  </div>
+  <p style="font-size: 0.875rem; color: var(--color-text-secondary); margin-top: 0.75rem;">
+    The old <code>PUT .../analysis-start-offset</code> endpoint is kept but deprecated (for any CI scripts using it directly). The frontend will no longer call it.
+  </p>
+</div>
+
+<div class="section">
+  <h3>Database migration</h3>
+  <p style="font-size: 0.875rem;">New TypeORM migration: <code>AddAnalysisEndOffsetToTestRuns</code> — adds <code>ramp_down INTEGER DEFAULT 0</code> to <code>test_runs</code>. Backfills existing rows to 0 (no change in behavior).</p>
+</div>

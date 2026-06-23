@@ -1,0 +1,113 @@
+<h2>Analysis Offset — Dark &amp; Light Theme</h2>
+<p class="subtitle">Proposed styling for both themes — dark overlays + amber boundary lines</p>
+
+<div class="split">
+  <div class="mockup">
+    <div class="mockup-header">Dark theme</div>
+    <div class="mockup-body">
+      <svg width="100%" height="150" viewBox="0 0 400 150" style="display:block;background:#1e1e1e;border-radius:6px;border:1px solid #2a2a2a">
+        <!-- start offset dark overlay -->
+        <rect x="0" y="0" width="60" height="150" fill="rgba(0,0,0,0.35)"/>
+        <!-- end offset dark overlay -->
+        <rect x="340" y="0" width="60" height="150" fill="rgba(0,0,0,0.35)"/>
+
+        <!-- grid lines -->
+        <line x1="0" y1="35" x2="400" y2="35" stroke="#2a2a2a" stroke-width="1"/>
+        <line x1="0" y1="75" x2="400" y2="75" stroke="#2a2a2a" stroke-width="1"/>
+        <line x1="0" y1="115" x2="400" y2="115" stroke="#2a2a2a" stroke-width="1"/>
+
+        <!-- metric area fill -->
+        <defs>
+          <linearGradient id="gd-dark" x1="0" y1="0" x2="0" y2="1">
+            <stop offset="0%" stop-color="#6366f1" stop-opacity="0.25"/>
+            <stop offset="100%" stop-color="#6366f1" stop-opacity="0.0"/>
+          </linearGradient>
+        </defs>
+        <path d="M0,108 C30,100 55,92 70,78 C100,58 130,62 170,55 C210,48 240,50 270,48 C300,46 330,44 360,42 L400,40 L400,150 L0,150 Z" fill="url(#gd-dark)"/>
+        <!-- metric line -->
+        <path d="M0,108 C30,100 55,92 70,78 C100,58 130,62 170,55 C210,48 240,50 270,48 C300,46 330,44 360,42 L400,40" fill="none" stroke="#6366f1" stroke-width="2"/>
+
+        <!-- SLO threshold -->
+        <line x1="0" y1="62" x2="400" y2="62" stroke="#ef4444" stroke-width="1.5" stroke-dasharray="5,4"/>
+        <text x="290" y="57" fill="#ef4444" font-size="9" font-family="monospace">SLO: 2 000 ms</text>
+
+        <!-- boundary lines (amber) -->
+        <line x1="60" y1="0" x2="60" y2="150" stroke="#f59e0b" stroke-width="1.5" stroke-dasharray="4,3"/>
+        <line x1="340" y1="0" x2="340" y2="150" stroke="#f59e0b" stroke-width="1.5" stroke-dasharray="4,3"/>
+
+        <!-- axis labels -->
+        <text x="4" y="145" fill="#64748b" font-size="9" font-family="monospace">0s</text>
+        <text x="168" y="145" fill="#64748b" font-size="9" font-family="monospace">5m</text>
+        <text x="354" y="145" fill="#64748b" font-size="9" font-family="monospace">10m</text>
+
+        <!-- region labels -->
+        <text x="4" y="18" fill="#94a3b8" font-size="8" font-family="monospace">excluded</text>
+        <text x="344" y="18" fill="#94a3b8" font-size="8" font-family="monospace">excl.</text>
+        <text x="140" y="18" fill="#10b981" font-size="8" font-family="monospace">← analysis window →</text>
+      </svg>
+      <p style="margin-top:8px;font-size:11px;color:#94a3b8">Dark overlay: <code>rgba(0,0,0,0.35)</code></p>
+    </div>
+  </div>
+
+  <div class="mockup">
+    <div class="mockup-header">Light theme</div>
+    <div class="mockup-body">
+      <svg width="100%" height="150" viewBox="0 0 400 150" style="display:block;background:#f8fafc;border-radius:6px;border:1px solid #e2e8f0">
+        <!-- start offset overlay — semi-transparent dark on light bg -->
+        <rect x="0" y="0" width="60" height="150" fill="rgba(0,0,0,0.12)"/>
+        <!-- end offset overlay -->
+        <rect x="340" y="0" width="60" height="150" fill="rgba(0,0,0,0.12)"/>
+
+        <!-- grid lines -->
+        <line x1="0" y1="35" x2="400" y2="35" stroke="#e2e8f0" stroke-width="1"/>
+        <line x1="0" y1="75" x2="400" y2="75" stroke="#e2e8f0" stroke-width="1"/>
+        <line x1="0" y1="115" x2="400" y2="115" stroke="#e2e8f0" stroke-width="1"/>
+
+        <!-- metric area fill -->
+        <defs>
+          <linearGradient id="gd-light" x1="0" y1="0" x2="0" y2="1">
+            <stop offset="0%" stop-color="#6366f1" stop-opacity="0.15"/>
+            <stop offset="100%" stop-color="#6366f1" stop-opacity="0.0"/>
+          </linearGradient>
+        </defs>
+        <path d="M0,108 C30,100 55,92 70,78 C100,58 130,62 170,55 C210,48 240,50 270,48 C300,46 330,44 360,42 L400,40 L400,150 L0,150 Z" fill="url(#gd-light)"/>
+        <!-- metric line -->
+        <path d="M0,108 C30,100 55,92 70,78 C100,58 130,62 170,55 C210,48 240,50 270,48 C300,46 330,44 360,42 L400,40" fill="none" stroke="#6366f1" stroke-width="2"/>
+
+        <!-- SLO threshold -->
+        <line x1="0" y1="62" x2="400" y2="62" stroke="#ef4444" stroke-width="1.5" stroke-dasharray="5,4"/>
+        <text x="290" y="57" fill="#ef4444" font-size="9" font-family="monospace">SLO: 2 000 ms</text>
+
+        <!-- boundary lines (amber) -->
+        <line x1="60" y1="0" x2="60" y2="150" stroke="#f59e0b" stroke-width="1.5" stroke-dasharray="4,3"/>
+        <line x1="340" y1="0" x2="340" y2="150" stroke="#f59e0b" stroke-width="1.5" stroke-dasharray="4,3"/>
+
+        <!-- axis labels -->
+        <text x="4" y="145" fill="#94a3b8" font-size="9" font-family="monospace">0s</text>
+        <text x="168" y="145" fill="#94a3b8" font-size="9" font-family="monospace">5m</text>
+        <text x="354" y="145" fill="#94a3b8" font-size="9" font-family="monospace">10m</text>
+
+        <!-- region labels -->
+        <text x="4" y="18" fill="#64748b" font-size="8" font-family="monospace">excluded</text>
+        <text x="344" y="18" fill="#64748b" font-size="8" font-family="monospace">excl.</text>
+        <text x="140" y="18" fill="#059669" font-size="8" font-family="monospace">← analysis window →</text>
+      </svg>
+      <p style="margin-top:8px;font-size:11px;color:#64748b">Dark overlay on light: <code>rgba(0,0,0,0.12)</code></p>
+    </div>
+  </div>
+</div>
+
+<div style="margin-top:20px;padding:14px;background:rgba(245,158,11,0.08);border-radius:8px;border:1px solid rgba(245,158,11,0.2)">
+  <p style="margin:0;font-size:12px;color:#94a3b8">The overlay opacity differs by theme — <strong style="color:#e2e8f0">0.35</strong> on dark (strong contrast against dark plot bg) vs <strong style="color:#e2e8f0">0.12</strong> on light (subtle tint on white bg). The amber dashed lines and analysis window label are the same in both themes.</p>
+</div>
+
+<div class="options" style="margin-top:20px">
+  <div class="option" data-choice="looks-good" onclick="toggleSelect(this)">
+    <div class="letter">✓</div>
+    <div class="content"><h3>Looks good for both themes</h3></div>
+  </div>
+  <div class="option" data-choice="adjust-opacity" onclick="toggleSelect(this)">
+    <div class="letter">~</div>
+    <div class="content"><h3>Adjust the opacity / colour</h3></div>
+  </div>
+</div>

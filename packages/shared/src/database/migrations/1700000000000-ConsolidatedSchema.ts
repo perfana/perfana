@@ -552,6 +552,7 @@ export class ConsolidatedSchema1700000000000 implements MigrationInterface {
         sum(response_size)::bigint                         AS bytes_in,
         sum(request_size)::bigint                          AS bytes_out,
         avg(response_size)                                 AS avg_response_size,
+        sum(response_time) FILTER (WHERE success)          AS sum_rt_ok,
         percentile_agg(response_time::double precision)    AS pct_agg
       FROM requests_raw GROUP BY 1,2,3,4,5,6,7 WITH NO DATA`,
       },
@@ -570,6 +571,7 @@ export class ConsolidatedSchema1700000000000 implements MigrationInterface {
         sum(avg_latency * n) / NULLIF(sum(n), 0)           AS avg_latency,
         sum(bytes_in)::bigint AS bytes_in, sum(bytes_out)::bigint AS bytes_out,
         sum(avg_response_size * n) / NULLIF(sum(n), 0)     AS avg_response_size,
+        sum(sum_rt_ok)                                     AS sum_rt_ok,
         rollup(pct_agg)                                    AS pct_agg
       FROM requests_raw_5s GROUP BY 1,2,3,4,5,6,7 WITH NO DATA`,
       },
@@ -588,6 +590,7 @@ export class ConsolidatedSchema1700000000000 implements MigrationInterface {
         sum(avg_latency * n) / NULLIF(sum(n), 0)           AS avg_latency,
         sum(bytes_in)::bigint AS bytes_in, sum(bytes_out)::bigint AS bytes_out,
         sum(avg_response_size * n) / NULLIF(sum(n), 0)     AS avg_response_size,
+        sum(sum_rt_ok)                                     AS sum_rt_ok,
         rollup(pct_agg)                                    AS pct_agg
       FROM requests_raw_1m GROUP BY 1,2,3,4,5,6,7 WITH NO DATA`,
       },
@@ -605,6 +608,7 @@ export class ConsolidatedSchema1700000000000 implements MigrationInterface {
         avg(response_time)                                 AS avg_rt,
         min(response_time)                                 AS min_rt,
         max(response_time)                                 AS max_rt,
+        sum(response_time) FILTER (WHERE success)          AS sum_rt_ok,
         percentile_agg(response_time::double precision)    AS pct_agg
       FROM transactions GROUP BY 1,2,3,4,5 WITH NO DATA`,
       },
@@ -618,6 +622,7 @@ export class ConsolidatedSchema1700000000000 implements MigrationInterface {
         sum(n)::bigint AS n, sum(n_ok)::bigint AS n_ok, sum(n_err)::bigint AS n_err,
         sum(avg_rt * n) / NULLIF(sum(n), 0)                AS avg_rt,
         min(min_rt) AS min_rt, max(max_rt) AS max_rt,
+        sum(sum_rt_ok)                                     AS sum_rt_ok,
         rollup(pct_agg)                                    AS pct_agg
       FROM transactions_5s GROUP BY 1,2,3,4,5 WITH NO DATA`,
       },
@@ -631,6 +636,7 @@ export class ConsolidatedSchema1700000000000 implements MigrationInterface {
         sum(n)::bigint AS n, sum(n_ok)::bigint AS n_ok, sum(n_err)::bigint AS n_err,
         sum(avg_rt * n) / NULLIF(sum(n), 0)                AS avg_rt,
         min(min_rt) AS min_rt, max(max_rt) AS max_rt,
+        sum(sum_rt_ok)                                     AS sum_rt_ok,
         rollup(pct_agg)                                    AS pct_agg
       FROM transactions_1m GROUP BY 1,2,3,4,5 WITH NO DATA`,
       },
