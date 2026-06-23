@@ -87,11 +87,9 @@ export function buildCorrelationGroups(
   series: MetricSeries[],
   opts: GroupingOptions,
 ): CorrelationGroupsResult {
-  let n = series.length;
-
-  // ponytail: O(n^2) pairwise — cap at 100 regressed metrics, log and group only the
-  // first 100 if exceeded. Promote to a real clustering lib only if a run blows past that.
-  if (n > 100) series = series.slice(0, 100);
+  // ponytail: O(n^2) pairwise — cap at 100 regressed metrics, grouping only the first 100
+  // if exceeded. Promote to a real clustering lib only if a run blows past that.
+  if (series.length > 100) series = series.slice(0, 100);
 
   const toUngrouped = (s: MetricSeries): UngroupedRegression => ({
     resultId: s.resultId, metricName: s.metricName,
@@ -145,7 +143,10 @@ export function buildCorrelationGroups(
     if (idx.length < 2) { ungrouped.push(toUngrouped(series[idx[0]])); continue; }
 
     // Driver = member with the highest mean |r| to the rest of the group.
+    // Note: in transitively-connected groups (chains where some pairs lack a direct
+    // correlation) the hub may not win the driver election — that is acceptable.
     let driverIdx = idx[0], driverScore = -1;
+    const meanToGroup: Record<number, number> = {};
     for (const i of idx) {
       let sum = 0, cnt = 0;
       for (const j of idx) {
@@ -154,6 +155,7 @@ export function buildCorrelationGroups(
         if (!Number.isNaN(r)) { sum += r; cnt++; }
       }
       const score = cnt ? sum / cnt : 0;
+      meanToGroup[i] = score;
       if (score > driverScore) { driverScore = score; driverIdx = i; }
     }
 
@@ -165,7 +167,12 @@ export function buildCorrelationGroups(
         dashboardLabel: series[i].dashboardLabel,
         panelTitle: series[i].panelTitle,
         conclusionLabel: series[i].conclusionLabel,
-        correlationToDriver: i === driverIdx ? 1 : (Number.isNaN(r) ? 0 : Math.round(r * 1000) / 1000),
+        correlationToDriver: i === driverIdx
+          ? 1
+          : (!Number.isNaN(r)
+              ? Math.round(r * 1000) / 1000
+              // transitive member: no direct edge to driver; use mean |r| to the group as a proxy
+              : Math.round((meanToGroup[i] || 0) * 1000) / 1000),
       };
     });
 
@@ -188,8 +195,9 @@ export function buildCorrelationGroups(
     });
   }
 
-  // Largest, strongest groups first.
+  // Largest, strongest groups first; renumber ids to match output position.
   groups.sort((x, y) => y.size - x.size || y.avgCorrelation - x.avgCorrelation);
+  groups.forEach((g, i) => { g.id = `group-${i}`; });
   return { groups, ungrouped };
 }
 

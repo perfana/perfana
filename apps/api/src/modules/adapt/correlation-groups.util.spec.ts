@@ -37,6 +37,10 @@ describe('buildCorrelationGroups', () => {
     expect(result.groups[0].members.map((m) => m.resultId).sort()).toEqual(['a', 'b']);
     expect(result.groups[0].label).toBe('svc');
     expect(result.ungrouped.map((u) => u.resultId)).toEqual(['c']);
+    // driver must be one of the two grouped members
+    expect(['a', 'b']).toContain(result.groups[0].driver.resultId);
+    // avgCorrelation must reflect the near-perfect r=1 relationship
+    expect(result.groups[0].avgCorrelation).toBeGreaterThan(0.9);
   });
 
   it('uses the metadata threshold only when dashboardUid matches', () => {
@@ -50,6 +54,64 @@ describe('buildCorrelationGroups', () => {
     const split = buildCorrelationGroups(diffUid, { primary: 0.8, metaThreshold: 0.6 });
     expect(grouped.groups).toHaveLength(1);   // same uid + medium correlation => edge
     expect(split.groups).toHaveLength(0);     // different uid + medium correlation => no edge
+  });
+
+  it('places transitively-connected members in one group and uses proxy for correlationToDriver', () => {
+    // A and C share NO overlapping timestamps (disjoint time grids) so their inner-join
+    // has 0 shared points. B overlaps both A and C (≥5 each). Because A-B and B-C edges
+    // exist, BFS joins all three into one component. The driver is elected first (A wins
+    // on ties as idx[0]). C has no direct |r| to A, so its correlationToDriver must fall
+    // back to its mean |r| to the group — which is > 0, not the misleading 0.
+    //
+    // A times 0-9, values linear (perfectly correlated with B's 0-5 overlap window).
+    // B times 0-5 (overlap A) + 20-24 (overlap C).
+    // C times 20-28 (no overlap with A).
+    const tsAt = (times: number[], values: number[]) =>
+      times.map((t, i) => ({ time: t, value: values[i] }));
+
+    const seriesA: MetricSeries = {
+      ...base, resultId: 'a', metricName: 'cpu',
+      points: tsAt([0, 1, 2, 3, 4, 5, 6, 7, 8, 9], [1, 2, 3, 4, 5, 6, 7, 8, 9, 10]),
+    };
+    const seriesB: MetricSeries = {
+      ...base, resultId: 'b', metricName: 'memory',
+      // times 0-5 overlap A (values match A perfectly => r=1),
+      // times 20-24 overlap C (values match C on those points => r=1)
+      points: tsAt(
+        [0, 1, 2, 3, 4, 5, 20, 21, 22, 23, 24],
+        [1, 2, 3, 4, 5, 6, 10, 20, 30, 40, 50],
+      ),
+    };
+    const seriesC: MetricSeries = {
+      ...base, resultId: 'c', metricName: 'latency',
+      // times 20-28, no overlap with A at all
+      points: tsAt(
+        [20, 21, 22, 23, 24, 25, 26, 27, 28],
+        [10, 20, 30, 40, 50, 60, 70, 80, 90],
+      ),
+    };
+
+    const result = buildCorrelationGroups([seriesA, seriesB, seriesC], { primary: 0.8, metaThreshold: 0.6 });
+
+    // All three must be in one group (transitive: A-B edge + B-C edge => one component)
+    expect(result.groups).toHaveLength(1);
+    expect(result.ungrouped).toHaveLength(0);
+    const group = result.groups[0];
+    expect(group.members.map((m) => m.resultId).sort()).toEqual(['a', 'b', 'c']);
+
+    // The transitively-connected member's correlationToDriver must NOT be 0
+    // (it should reflect mean |r| to the group as a proxy — greater than 0)
+    const driverResultId = group.driver.resultId;
+    const transitiveMember = group.members.find(
+      (m) => m.resultId !== driverResultId && m.correlationToDriver > 0,
+    );
+    expect(transitiveMember).toBeDefined();
+    // Every non-driver member must have a positive correlationToDriver (no misleading zero)
+    for (const m of group.members) {
+      if (m.resultId !== driverResultId) {
+        expect(m.correlationToDriver).toBeGreaterThan(0);
+      }
+    }
   });
 
   it('returns nothing to group for fewer than two series', () => {
