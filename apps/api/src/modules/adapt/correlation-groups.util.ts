@@ -56,11 +56,11 @@ export function pearson(a: number[], b: number[]): number {
   const n = Math.min(a.length, b.length);
   if (n < 2) return NaN;
   let sa = 0, sb = 0;
-  for (let i = 0; i < n; i++) { sa += a[i]; sb += b[i]; }
+  for (let i = 0; i < n; i++) { sa += a[i]!; sb += b[i]!; }
   const ma = sa / n, mb = sb / n;
   let cov = 0, va = 0, vb = 0;
   for (let i = 0; i < n; i++) {
-    const da = a[i] - ma, db = b[i] - mb;
+    const da = a[i]! - ma, db = b[i]! - mb;
     cov += da * db; va += da * da; vb += db * db;
   }
   if (va === 0 || vb === 0) return NaN;
@@ -107,15 +107,15 @@ export function buildCorrelationGroups(
 
   for (let i = 0; i < m; i++) {
     for (let j = i + 1; j < m; j++) {
-      const [a, b] = alignSeries(series[i].points, series[j].points);
+      const [a, b] = alignSeries(series[i]!.points, series[j]!.points);
       if (a.length < MIN_OVERLAP) continue;
       const r = pearson(a, b);
       if (Number.isNaN(r)) continue;
       const absR = Math.abs(r);
-      corr[i][j] = absR; corr[j][i] = absR;
-      const sameUid = series[i].dashboardUid === series[j].dashboardUid;
+      corr[i]![j] = absR; corr[j]![i] = absR;
+      const sameUid = series[i]!.dashboardUid === series[j]!.dashboardUid;
       const edge = absR >= opts.primary || (sameUid && absR >= opts.metaThreshold);
-      adj[i][j] = edge; adj[j][i] = edge;
+      adj[i]![j] = edge; adj[j]![i] = edge;
     }
   }
 
@@ -129,7 +129,7 @@ export function buildCorrelationGroups(
     while (queue.length) {
       const u = queue.pop()!;
       for (let v = 0; v < m; v++) {
-        if (adj[u][v] && comp[v] === -1) { comp[v] = nComp; queue.push(v); }
+        if (adj[u]![v] && comp[v] === -1) { comp[v] = nComp; queue.push(v); }
       }
     }
     nComp++;
@@ -140,18 +140,18 @@ export function buildCorrelationGroups(
 
   for (let c = 0; c < nComp; c++) {
     const idx = series.map((_, i) => i).filter((i) => comp[i] === c);
-    if (idx.length < 2) { ungrouped.push(toUngrouped(series[idx[0]])); continue; }
+    if (idx.length < 2) { ungrouped.push(toUngrouped(series[idx[0]!]!)); continue; }
 
     // Driver = member with the highest mean |r| to the rest of the group.
     // Note: in transitively-connected groups (chains where some pairs lack a direct
     // correlation) the hub may not win the driver election — that is acceptable.
-    let driverIdx = idx[0], driverScore = -1;
+    let driverIdx = idx[0]!, driverScore = -1;
     const meanToGroup: Record<number, number> = {};
     for (const i of idx) {
       let sum = 0, cnt = 0;
       for (const j of idx) {
         if (i === j) continue;
-        const r = corr[i][j];
+        const r = corr[i]![j]!;
         if (!Number.isNaN(r)) { sum += r; cnt++; }
       }
       const score = cnt ? sum / cnt : 0;
@@ -160,13 +160,13 @@ export function buildCorrelationGroups(
     }
 
     const members: GroupMember[] = idx.map((i) => {
-      const r = corr[i][driverIdx];
+      const r = corr[i]![driverIdx]!;
       return {
-        resultId: series[i].resultId,
-        metricName: series[i].metricName,
-        dashboardLabel: series[i].dashboardLabel,
-        panelTitle: series[i].panelTitle,
-        conclusionLabel: series[i].conclusionLabel,
+        resultId: series[i]!.resultId,
+        metricName: series[i]!.metricName,
+        dashboardLabel: series[i]!.dashboardLabel,
+        panelTitle: series[i]!.panelTitle,
+        conclusionLabel: series[i]!.conclusionLabel,
         correlationToDriver: i === driverIdx
           ? 1
           : (!Number.isNaN(r)
@@ -180,17 +180,17 @@ export function buildCorrelationGroups(
     let sum = 0, cnt = 0;
     for (let a = 0; a < idx.length; a++) {
       for (let b = a + 1; b < idx.length; b++) {
-        const r = corr[idx[a]][idx[b]];
+        const r = corr[idx[a]!]![idx[b]!]!;
         if (!Number.isNaN(r)) { sum += r; cnt++; }
       }
     }
 
     groups.push({
       id: `group-${c}`,
-      label: mostCommonLabel(idx.map((i) => series[i].dashboardLabel)),
+      label: mostCommonLabel(idx.map((i) => series[i]!.dashboardLabel)),
       size: idx.length,
       avgCorrelation: cnt ? Math.round((sum / cnt) * 1000) / 1000 : 0,
-      driver: { resultId: series[driverIdx].resultId, metricName: series[driverIdx].metricName, panelTitle: series[driverIdx].panelTitle },
+      driver: { resultId: series[driverIdx]!.resultId, metricName: series[driverIdx]!.metricName, panelTitle: series[driverIdx]!.panelTitle },
       members,
     });
   }
