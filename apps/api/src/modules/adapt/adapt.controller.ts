@@ -9,6 +9,7 @@ import {
 } from './dto/tracked-regression.dto';
 import { ValidationException } from '../../common/exceptions/business.exception';
 import { UserCtx, UserContext } from '../../common/decorators/user-context.decorator';
+import { CorrelationGroupsResponseDto } from './dto/correlation-groups.dto';
 
 @ApiTags('adapt')
 @Controller('adapt')
@@ -261,6 +262,33 @@ export class AdaptController {
     );
 
     return { regressions };
+  }
+
+  @Get('correlation-groups/:testRunId')
+  @ApiOperation({ summary: 'Cluster a run\'s regressions by time-series correlation (same-run grouping)' })
+  @ApiResponse({ status: 200, description: 'Correlation groups retrieved successfully', type: CorrelationGroupsResponseDto })
+  @ApiResponse({ status: 404, description: 'Conclusion not found' })
+  @ApiQuery({ name: 'threshold', description: 'Primary |r| threshold (default 0.8)', required: false })
+  async getCorrelationGroups(
+    @Param('testRunId') testRunId: string,
+    @UserCtx() ctx: UserContext,
+    @Query('threshold') threshold?: string,
+  ): Promise<CorrelationGroupsResponseDto> {
+    if (!testRunId) {
+      throw new ValidationException('testRunId is required');
+    }
+    let primary: number | undefined;
+    if (threshold !== undefined) {
+      primary = parseFloat(threshold);
+      if (isNaN(primary) || primary <= 0 || primary > 1) {
+        throw new BadRequestException('threshold must be a number in (0, 1]');
+      }
+    }
+    const result = await this.adaptService.getCorrelationGroups(testRunId, ctx.userId, ctx.roles, primary);
+    if (!result) {
+      throw new NotFoundException(`Adapt conclusion not found for test run ${testRunId}`);
+    }
+    return result;
   }
 
 }
