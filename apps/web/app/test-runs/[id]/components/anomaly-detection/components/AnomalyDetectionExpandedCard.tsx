@@ -5,6 +5,7 @@ import {
   Card,
   CardContent,
   Box,
+  Button,
   Tabs,
   Tab
 } from '@mui/material';
@@ -13,6 +14,7 @@ import {
   AnomalyTabContent,
   TrackedRegressionsTabContent,
 } from './expanded-card/components';
+import CorrelationGroupsView from './CorrelationGroupsView';
 import { useExpandedCardActions } from './expanded-card/hooks';
 import { calculateFeedbackState } from './expanded-card/utils';
 import type { AnomalyDetectionExpandedCardProps } from './expanded-card/types';
@@ -94,6 +96,9 @@ export default function AnomalyDetectionExpandedCard(props: AnomalyDetectionExpa
   // Calculate feedback state
   const feedbackState = calculateFeedbackState(testRun, anomalyData, loading);
 
+  // Correlation groups toggle
+  const [showGroups, setShowGroups] = React.useState(false);
+
   // Handle tab change
   const handleTabChange = (_event: React.SyntheticEvent, newValue: number) => {
     onTabChange(newValue);
@@ -133,64 +138,83 @@ export default function AnomalyDetectionExpandedCard(props: AnomalyDetectionExpa
 
         {/* Tab Content */}
         {activeTab === 0 && (
-          <AnomalyTabContent
-            loading={loading}
-            anomalyData={anomalyData}
-            searchQuery={searchQuery}
-            handleSearchChange={handleSearchChange}
-            conclusionFilter={conclusionFilter}
-            handleConclusionFilterChange={handleConclusionFilterChange}
-            classificationFilter={classificationFilter}
-            handleClassificationFilterChange={handleClassificationFilterChange}
-            dashboardFilter={dashboardFilter}
-            handleDashboardFilterChange={handleDashboardFilterChange}
-            panelFilter={panelFilter}
-            handlePanelFilterChange={handlePanelFilterChange}
-            conclusionsForDropdown={conclusionsForDropdown}
-            classificationsForDropdown={classificationsForDropdown}
-            dashboardsForDropdown={dashboardsForDropdown}
-            panelsForDropdown={panelsForDropdown}
-            filteredData={filteredData}
-            hasActiveFilters={hasActiveFilters}
-            onClearAllFilters={onClearAllFilters}
-            feedbackState={feedbackState}
-            onMarkAsRegression={handleMarkAsRegression}
-            onMarkAsVariability={handleMarkAsVariability}
-            onMarkAsChangepoint={markAsChangepoint}
-            onDisableBaselineMode={props.disableBaselineMode}
-            paginatedData={paginatedData}
-            page={page}
-            rowsPerPage={rowsPerPage}
-            onPageChange={onPageChange}
-            onRowsPerPageChange={onRowsPerPageChange}
-            expandedRows={expandedRows}
-            toggleRowExpanded={toggleRowExpanded}
-            testRunId={testRunId}
-            testRun={testRun}
-            trendsData={trendsData}
-            trendsLoading={trendsLoading}
-            chartKey={chartKey}
-            drawerOpen={drawerOpen}
-            onDrawerToggle={onDrawerToggle}
-            drawerData={drawerData}
-            drawerLoading={drawerLoading}
-            showToast={showToast}
-            showConfigForm={showConfigForm}
-            configFormData={configFormData}
-            onConfigFormToggle={onConfigFormToggle}
-            onConfigSave={onConfigSave}
-            onRefreshAnomalyData={onRefreshAnomalyData}
-            onDeleteAnomaly={onDeleteAnomaly}
-            hasDistributedTracing={hasDistributedTracing}
-            hasDynatrace={hasDynatrace}
-            onDrillDownToDistributedTracing={onDrillDownToDistributedTracing}
-            onDrillDownToDynatrace={onDrillDownToDynatrace}
-            sortBy={sortBy}
-            sortDirection={sortDirection}
-            diffSortMode={diffSortMode}
-            onSortChange={onSortChange}
-            onDiffSortModeChange={onDiffSortModeChange}
-          />
+          <>
+            {/* Correlation groups toggle */}
+            <Box sx={{ px: 3, pb: 1 }}>
+              <Button
+                size="small"
+                variant="text"
+                onClick={() => setShowGroups((prev) => !prev)}
+              >
+                {showGroups ? 'Show flat list' : 'Group by correlation'}
+              </Button>
+            </Box>
+
+            {showGroups ? (
+              <Box sx={{ px: 3, pb: 3 }}>
+                <CorrelationGroupsView testRunId={testRunId} />
+              </Box>
+            ) : (
+              <AnomalyTabContent
+                loading={loading}
+                anomalyData={anomalyData}
+                searchQuery={searchQuery}
+                handleSearchChange={handleSearchChange}
+                conclusionFilter={conclusionFilter}
+                handleConclusionFilterChange={handleConclusionFilterChange}
+                classificationFilter={classificationFilter}
+                handleClassificationFilterChange={handleClassificationFilterChange}
+                dashboardFilter={dashboardFilter}
+                handleDashboardFilterChange={handleDashboardFilterChange}
+                panelFilter={panelFilter}
+                handlePanelFilterChange={handlePanelFilterChange}
+                conclusionsForDropdown={conclusionsForDropdown}
+                classificationsForDropdown={classificationsForDropdown}
+                dashboardsForDropdown={dashboardsForDropdown}
+                panelsForDropdown={panelsForDropdown}
+                filteredData={filteredData}
+                hasActiveFilters={hasActiveFilters}
+                onClearAllFilters={onClearAllFilters}
+                feedbackState={feedbackState}
+                onMarkAsRegression={handleMarkAsRegression}
+                onMarkAsVariability={handleMarkAsVariability}
+                onMarkAsChangepoint={markAsChangepoint}
+                onDisableBaselineMode={props.disableBaselineMode}
+                paginatedData={paginatedData}
+                page={page}
+                rowsPerPage={rowsPerPage}
+                onPageChange={onPageChange}
+                onRowsPerPageChange={onRowsPerPageChange}
+                expandedRows={expandedRows}
+                toggleRowExpanded={toggleRowExpanded}
+                testRunId={testRunId}
+                testRun={testRun}
+                trendsData={trendsData}
+                trendsLoading={trendsLoading}
+                chartKey={chartKey}
+                drawerOpen={drawerOpen}
+                onDrawerToggle={onDrawerToggle}
+                drawerData={drawerData}
+                drawerLoading={drawerLoading}
+                showToast={showToast}
+                showConfigForm={showConfigForm}
+                configFormData={configFormData}
+                onConfigFormToggle={onConfigFormToggle}
+                onConfigSave={onConfigSave}
+                onRefreshAnomalyData={onRefreshAnomalyData}
+                onDeleteAnomaly={onDeleteAnomaly}
+                hasDistributedTracing={hasDistributedTracing}
+                hasDynatrace={hasDynatrace}
+                onDrillDownToDistributedTracing={onDrillDownToDistributedTracing}
+                onDrillDownToDynatrace={onDrillDownToDynatrace}
+                sortBy={sortBy}
+                sortDirection={sortDirection}
+                diffSortMode={diffSortMode}
+                onSortChange={onSortChange}
+                onDiffSortModeChange={onDiffSortModeChange}
+              />
+            )}
+          </>
         )}
 
         {activeTab === 1 && (
