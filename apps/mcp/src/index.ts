@@ -173,6 +173,25 @@ server.tool(
   }),
 );
 
+// ─── Tool: get_regression_correlations ────────────────────────────────────────
+
+server.tool(
+  'get_regression_correlations',
+  'Group a test run\'s detected regressions by how strongly their raw time-series moved together. Returns themed clusters (each with a driver metric and member list) plus the regressions that did not correlate with anything. Use after get_adapt_results to triage many regressions down to a few root-cause themes.',
+  { testRunId: z.string().describe('The test run ID') },
+  safeTool(async ({ testRunId }) => {
+    const result = await client.getCorrelationGroups(testRunId);
+    return {
+      content: [
+        {
+          type: 'text',
+          text: JSON.stringify(result, null, 2),
+        },
+      ],
+    };
+  }),
+);
+
 // ─── Tool: get_deep_links ─────────────────────────────────────────────────────
 
 server.tool(

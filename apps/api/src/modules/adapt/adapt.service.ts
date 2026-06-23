@@ -5,8 +5,11 @@ import {
   DsAdaptTrackedResults,
   DsAdaptConclusion,
   DsAdaptResults,
-  TestRun as TestRunEntity
+  TestRun as TestRunEntity,
+  DsMetrics,
 } from '../../entities';
+import { buildCorrelationGroups, MetricSeries } from './correlation-groups.util';
+import { CorrelationGroupsResponseDto } from './dto/correlation-groups.dto';
 import { withRequestEm } from '../../common/db/request-em';
 import {
   TrackedRegressionDto,
@@ -87,6 +90,8 @@ interface DatabaseTrackedRegression {
 @Injectable()
 export class AdaptService {
   private readonly logger = new Logger(AdaptService.name);
+  private readonly CORRELATION_PRIMARY = 0.8;
+  private readonly CORRELATION_META = 0.6;
 
   constructor(
     @InjectRepository(DsAdaptTrackedResults)
@@ -97,6 +102,8 @@ export class AdaptService {
     private testRunRepo: Repository<TestRunEntity>,
     @InjectRepository(DsAdaptResults)
     private adaptResultsRepo: Repository<DsAdaptResults>,
+    @InjectRepository(DsMetrics)
+    private dsMetricsRepo: Repository<DsMetrics>,
     private readonly authzService: AuthorizationService,
   ) {}
 
@@ -715,6 +722,77 @@ export class AdaptService {
     } catch (error) {
       this.logger.error(`Error fetching ds_adapt_conclusion for ${testRunId}:`, error);
       // Return null if not found or error occurs
+      return null;
+    }
+  }
+
+  /**
+   * Cluster a run's regressions by how strongly their raw series moved together.
+   * On-demand, no persistence. Mirrors getEnrichedConclusion's access guarding.
+   */
+  async getCorrelationGroups(
+    testRunId: string,
+    userId = '',
+    roles: string[] = [],
+    primaryThreshold?: number,
+  ): Promise<CorrelationGroupsResponseDto | null> {
+    const orgIds = await withOrgFilter(userId, roles, this.authzService);
+    try {
+      if (orgIds !== null && orgIds.length === 0) return null;
+      const hasAccess = await this.validateTestRunAccess(testRunId, orgIds);
+      if (!hasAccess) return null;
+
+      const conclusion = await this.getDsAdaptConclusionInternal(testRunId);
+      if (!conclusion) return null;
+
+      const primary = primaryThreshold ?? this.CORRELATION_PRIMARY;
+      const ids = conclusion.regressions ?? [];
+      if (ids.length === 0) {
+        return { testRunId, threshold: primary, groups: [], ungrouped: [] };
+      }
+
+      const rows = await this.adaptResultsRepo.find({
+        where: { id: In(ids) },
+        select: [
+          'id', 'metric_name', 'dashboard_label', 'dashboard_uid',
+          'panel_id', 'application_dashboard_id', 'panel_title', 'conclusion',
+        ],
+      });
+
+      const series: MetricSeries[] = await Promise.all(
+        rows.map(async (r) => {
+          const points = await this.dsMetricsRepo.find({
+            where: {
+              test_run_id: testRunId,
+              application_dashboard_id: r.application_dashboard_id,
+              dashboard_uid: r.dashboard_uid,
+              panel_id: r.panel_id,
+              metric_name: r.metric_name,
+            },
+            select: ['time', 'value'],
+            order: { time: 'ASC' },
+          });
+          return {
+            resultId: r.id,
+            metricName: r.metric_name,
+            dashboardLabel: r.dashboard_label,
+            dashboardUid: r.dashboard_uid,
+            panelTitle: r.panel_title,
+            conclusionLabel: (r.conclusion?.label as string | undefined) ?? null,
+            points: points
+              .filter((p) => p.value != null)
+              .map((p) => ({ time: new Date(p.time).getTime(), value: p.value as number })),
+          };
+        }),
+      );
+
+      const { groups, ungrouped } = buildCorrelationGroups(series, {
+        primary,
+        metaThreshold: this.CORRELATION_META,
+      });
+      return { testRunId, threshold: primary, groups, ungrouped };
+    } catch (error) {
+      this.logger.error(`Error building correlation groups for ${testRunId}:`, error);
       return null;
     }
   }
