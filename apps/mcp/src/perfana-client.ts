@@ -97,6 +97,10 @@ export class PerfanaClient {
     return this.get<TrackedRegressionsResponse>(`/adapt/tracked-regressions?${params}`);
   }
 
+  async getCorrelationGroups(testRunId: string): Promise<unknown> {
+    return this.get<unknown>(`/adapt/correlation-groups/${encodeURIComponent(testRunId)}`);
+  }
+
   // ─── Error analysis ──────────────────────────────────────────────────────
 
   async getErrorSummary(testRunId: string): Promise<ErrorSummary> {
