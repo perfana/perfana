@@ -4,6 +4,11 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
+## [0.2.61.17] - 2026-06-23
+
+### Changed
+- **First test run of a sut/test-environment/workload combination now seeds the baseline automatically.** `CreateTestRunHandler` detects when no prior run exists for the combination and forces `adaptConfig.mode = BASELINE` (differences auto-`ACCEPTED`), overriding any requested mode — there is nothing to compare a first run against. Subsequent runs keep their requested mode (`DEFAULT` by default). Mirrors the existing first-run changepoint seeding.
+
 ## [0.2.61.16] - 2026-06-23
 
 ### Added
