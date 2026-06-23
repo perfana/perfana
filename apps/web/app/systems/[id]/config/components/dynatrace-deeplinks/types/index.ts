@@ -43,6 +43,9 @@ export interface DynatraceDeeplinkSectionProps {
   systemName: string;
   selectedEnvironment: string;
   selectedWorkload: string;
+  // Called after host mappings are added — adding a HOST auto-creates metric
+  // queries server-side, so the Queries tab needs to refetch to show them.
+  onHostQueriesCreated?: () => void;
 }
 
 export interface EntityTypeOption {

@@ -6,8 +6,21 @@ import {
   Button,
   Alert,
   CircularProgress,
+  Paper,
+  Toolbar,
+  IconButton,
+  Tooltip,
+  Dialog,
+  DialogTitle,
+  DialogContent,
+  DialogContentText,
+  DialogActions,
 } from '@mui/material';
-import { Add as AddIcon } from '@mui/icons-material';
+import {
+  Add as AddIcon,
+  Delete as DeleteIcon,
+  Close as CloseIcon,
+} from '@mui/icons-material';
 
 // Types
 import { DynatraceDeeplinkSectionProps } from './dynatrace-deeplinks/types';
@@ -17,12 +30,14 @@ import { useDynatraceEntityMappings } from './dynatrace-deeplinks/hooks';
 
 // Components
 import { EntityMappingsTable, AddEntityDialog } from './dynatrace-deeplinks/components';
+import DeleteConfirmationDialog from './DeleteConfirmationDialog';
 
 export default function DynatraceDeeplinkSection({
   systemId,
-  _systemName,
+  systemName: _systemName,
   selectedEnvironment,
   selectedWorkload,
+  onHostQueriesCreated,
 }: DynatraceDeeplinkSectionProps) {
   const {
     // Dynatrace instances
@@ -42,6 +57,21 @@ export default function DynatraceDeeplinkSection({
     // Dialog state
     addDialogOpen,
     addLoading,
+
+    // Multi-select + delete confirmation
+    selectedMappingIds,
+    handleSelectAll,
+    handleSelectOne,
+    handleClearSelection,
+    deleteDialogOpen,
+    deletingMapping,
+    deleteLoading,
+    closeDeleteDialog,
+    handleConfirmDelete,
+    batchDeleteDialogOpen,
+    handleBatchDeleteClick,
+    handleBatchDeleteConfirm,
+    handleBatchDeleteCancel,
 
     // Form state
     selectedLevel,
@@ -72,6 +102,7 @@ export default function DynatraceDeeplinkSection({
     systemId,
     selectedEnvironment,
     selectedWorkload,
+    onHostQueriesCreated,
   });
 
   // Changing the data source invalidates any in-progress entity/host selection —
@@ -139,11 +170,77 @@ export default function DynatraceDeeplinkSection({
           No Dynatrace entities configured for the current context.
         </Alert>
       ) : (
-        <EntityMappingsTable
-          mappings={filteredMappings}
-          onDelete={handleDeleteEntity}
-        />
+        <>
+          {selectedMappingIds.size > 0 && (
+            <Paper sx={{ mb: 2 }}>
+              <Toolbar
+                sx={{
+                  pl: { sm: 2 },
+                  pr: { xs: 1, sm: 1 },
+                  bgcolor: (theme) =>
+                    theme.palette.mode === 'dark' ? 'rgba(56, 142, 232, 0.15)' : 'rgba(25, 118, 210, 0.08)',
+                }}
+              >
+                <Typography sx={{ flex: '1 1 100%' }} color="primary" variant="subtitle1" component="div">
+                  {selectedMappingIds.size} entit{selectedMappingIds.size > 1 ? 'ies' : 'y'} selected
+                </Typography>
+                <Tooltip title="Delete selected">
+                  <IconButton onClick={handleBatchDeleteClick} color="error">
+                    <DeleteIcon />
+                  </IconButton>
+                </Tooltip>
+                <Tooltip title="Clear selection">
+                  <IconButton onClick={handleClearSelection}>
+                    <CloseIcon />
+                  </IconButton>
+                </Tooltip>
+              </Toolbar>
+            </Paper>
+          )}
+
+          <EntityMappingsTable
+            mappings={filteredMappings}
+            selectedMappingIds={selectedMappingIds}
+            onSelectAll={handleSelectAll}
+            onSelectOne={handleSelectOne}
+            onDelete={handleDeleteEntity}
+          />
+        </>
       )}
+
+      {/* Batch Delete Confirmation Dialog */}
+      <Dialog open={batchDeleteDialogOpen} onClose={handleBatchDeleteCancel}>
+        <DialogTitle>Delete Multiple Dynatrace Entities</DialogTitle>
+        <DialogContent>
+          {error && (
+            <Alert severity="error" sx={{ mb: 2 }}>
+              {error}
+            </Alert>
+          )}
+          <DialogContentText>
+            Are you sure you want to delete {selectedMappingIds.size} entit
+            {selectedMappingIds.size > 1 ? 'ies' : 'y'}? This action cannot be undone.
+          </DialogContentText>
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={handleBatchDeleteCancel}>Cancel</Button>
+          <Button onClick={handleBatchDeleteConfirm} color="error" variant="contained" disabled={deleteLoading}>
+            Delete {selectedMappingIds.size} Entit{selectedMappingIds.size > 1 ? 'ies' : 'y'}
+          </Button>
+        </DialogActions>
+      </Dialog>
+
+      {/* Single Delete Confirmation Dialog */}
+      <DeleteConfirmationDialog
+        open={deleteDialogOpen}
+        onClose={closeDeleteDialog}
+        onConfirm={handleConfirmDelete}
+        title="Delete Dynatrace Entity"
+        message="Are you sure you want to delete this Dynatrace entity? This action cannot be undone."
+        itemName={deletingMapping?.entityDisplayName}
+        loading={deleteLoading}
+        error={error}
+      />
 
       {/* Footer Help Text */}
       <Box sx={{ mt: 2 }}>
