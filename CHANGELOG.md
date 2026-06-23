@@ -4,6 +4,14 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
+## [0.2.61.15] - 2026-06-23
+
+### Added
+- **Multi-select + delete confirmation on the Dynatrace "Entities" tab (system config), matching the "Queries" tab.** The entity mappings table now has a select-all header checkbox and per-row checkboxes; selecting one or more rows shows a toolbar ("N entities selected") with bulk-delete and clear-selection actions. Single-row deletes now open a confirmation dialog (`DeleteConfirmationDialog`) instead of deleting immediately, and bulk deletes prompt with a count before running. Bulk delete fires one `DELETE /dynatrace/entities/mappings/:id` per selected row; if any fails it keeps the dialog open and surfaces an error rather than silently dropping some. Frontend-only — no API, endpoint, or schema changes. Covered by a new Jest hook test (`useDynatraceEntityMappings.test.ts`).
+
+### Fixed
+- **Adding Dynatrace HOST entities now refreshes the Queries tab immediately.** Mapping a HOST auto-creates four metric queries server-side (CPU, memory, disk, network via `createHostMetricQueries`), but the Queries tab only fetched on mount, so the new queries didn't appear until a manual reload. The Entities tab now calls back into the parent (`onHostQueriesCreated` → `fetchQueries`) after a successful host add, so the Queries tab reflects them right away.
+
 ## [0.2.61.14] - 2026-06-22
 
 ### Added
