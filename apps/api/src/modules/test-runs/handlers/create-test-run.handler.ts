@@ -48,6 +48,18 @@ export class CreateTestRunHandler implements ICommandHandler<CreateTestRunComman
     try {
       this.logger.log(`Creating new test run: ${data.testRunId}`);
 
+      // First test run of a sut/testenv/workload combination has nothing to
+      // compare against, so it seeds the baseline regardless of requested mode.
+      const isFirstTestRun =
+        (await withRequestEm(this.testRunRepo).count({
+          where: {
+            systemUnderTestId: data.systemUnderTestId,
+            testEnvironment: data.testEnvironment,
+            workload: data.workload,
+          },
+        })) === 0;
+      const adaptMode = isFirstTestRun ? 'BASELINE' : data.adaptMode || 'DEFAULT';
+
       // Create and save the test run entity. Inlined (rather than delegated
       // to a private helper) so the audit lint rule sees the mutation and
       // the `auditService.logCreate` call in the same method body.
@@ -68,8 +80,8 @@ export class CreateTestRunHandler implements ICommandHandler<CreateTestRunComman
         abort: data.abort || false,
         variables: data.variables || [],
         adaptConfig: {
-          mode: data.adaptMode || 'DEFAULT',
-          differencesAccepted: data.adaptMode === 'BASELINE' ? 'ACCEPTED' : 'TBD',
+          mode: adaptMode,
+          differencesAccepted: adaptMode === 'BASELINE' ? 'ACCEPTED' : 'TBD',
         } as AdaptConfig,
         startTime: data.startTime || new Date(),
         endTime: data.endTime || new Date(),
