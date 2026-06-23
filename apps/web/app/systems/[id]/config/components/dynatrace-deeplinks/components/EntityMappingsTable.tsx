@@ -12,6 +12,7 @@ import {
   IconButton,
   Chip,
   Tooltip,
+  Checkbox,
 } from '@mui/material';
 import {
   Delete as DeleteIcon,
@@ -22,15 +23,32 @@ import { getLevelDisplayName, getLevelColor } from '../utils';
 
 interface EntityMappingsTableProps {
   mappings: DynatraceEntityMapping[];
+  selectedMappingIds: Set<string>;
+  onSelectAll: () => void;
+  onSelectOne: (id: string) => void;
   onDelete: (mapping: DynatraceEntityMapping) => void;
 }
 
-export function EntityMappingsTable({ mappings, onDelete }: EntityMappingsTableProps) {
+export function EntityMappingsTable({
+  mappings,
+  selectedMappingIds,
+  onSelectAll,
+  onSelectOne,
+  onDelete,
+}: EntityMappingsTableProps) {
   return (
     <TableContainer>
       <Table>
         <TableHead>
           <TableRow>
+            <TableCell padding="checkbox">
+              <Checkbox
+                checked={selectedMappingIds.size > 0 && selectedMappingIds.size === mappings.length}
+                indeterminate={selectedMappingIds.size > 0 && selectedMappingIds.size < mappings.length}
+                onChange={onSelectAll}
+                inputProps={{ 'aria-label': 'Select all entities' }}
+              />
+            </TableCell>
             <TableCell>Entity Name</TableCell>
             <TableCell>Entity Type</TableCell>
             <TableCell>Dynatrace Instance</TableCell>
@@ -40,7 +58,14 @@ export function EntityMappingsTable({ mappings, onDelete }: EntityMappingsTableP
         </TableHead>
         <TableBody>
           {mappings.map((mapping) => (
-            <TableRow key={mapping.id}>
+            <TableRow key={mapping.id} hover selected={selectedMappingIds.has(mapping.id)}>
+              <TableCell padding="checkbox">
+                <Checkbox
+                  checked={selectedMappingIds.has(mapping.id)}
+                  onChange={() => onSelectOne(mapping.id)}
+                  inputProps={{ 'aria-label': `Select entity ${mapping.entityDisplayName}` }}
+                />
+              </TableCell>
               <TableCell>
                 <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
                   <LinkIcon color="primary" fontSize="small" />

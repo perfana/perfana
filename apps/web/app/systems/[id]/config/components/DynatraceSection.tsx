@@ -217,6 +217,7 @@ export default function DynatraceSection({
           systemName={systemName}
           selectedEnvironment={selectedEnvironment}
           selectedWorkload={selectedWorkload}
+          onHostQueriesCreated={dynatraceQueries.fetchQueries}
         />
       )}
 

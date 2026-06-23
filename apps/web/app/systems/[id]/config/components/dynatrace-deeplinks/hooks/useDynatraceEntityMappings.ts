@@ -26,6 +26,9 @@ interface UseDynatraceEntityMappingsProps {
   systemId: string;
   selectedEnvironment: string;
   selectedWorkload: string;
+  // Adding a HOST mapping auto-creates metric queries server-side; the parent
+  // uses this to refetch the Queries tab so they appear without a reload.
+  onHostQueriesCreated?: () => void;
 }
 
 interface UseDynatraceEntityMappingsReturn {
@@ -49,6 +52,21 @@ interface UseDynatraceEntityMappingsReturn {
   addDialogOpen: boolean;
   setAddDialogOpen: (open: boolean) => void;
   addLoading: boolean;
+
+  // Multi-select + delete confirmation
+  selectedMappingIds: Set<string>;
+  handleSelectAll: () => void;
+  handleSelectOne: (id: string) => void;
+  handleClearSelection: () => void;
+  deleteDialogOpen: boolean;
+  deletingMapping: DynatraceEntityMapping | null;
+  deleteLoading: boolean;
+  closeDeleteDialog: () => void;
+  handleConfirmDelete: () => Promise<void>;
+  batchDeleteDialogOpen: boolean;
+  handleBatchDeleteClick: () => void;
+  handleBatchDeleteConfirm: () => Promise<void>;
+  handleBatchDeleteCancel: () => void;
 
   // Form state
   selectedLevel: EntityMappingLevel;
@@ -77,7 +95,7 @@ interface UseDynatraceEntityMappingsReturn {
   fetchDynatraceEntities: (entityType?: string, entityName?: string) => Promise<void>;
   handleAddEntity: () => Promise<void>;
   handleSubmitEntity: () => Promise<void>;
-  handleDeleteEntity: (mapping: DynatraceEntityMapping) => Promise<void>;
+  handleDeleteEntity: (mapping: DynatraceEntityMapping) => void;
   handleInputChange: (event: unknown, newInputValue: string, reason?: string) => void;
   resetDialogState: () => void;
 }
@@ -86,6 +104,7 @@ export function useDynatraceEntityMappings({
   systemId,
   selectedEnvironment,
   selectedWorkload,
+  onHostQueriesCreated,
 }: UseDynatraceEntityMappingsProps): UseDynatraceEntityMappingsReturn {
   // Dynatrace instances state
   const [dynatraceInstances, setDynatraceInstances] = useState<DynatraceConfig[]>([]);
@@ -103,6 +122,13 @@ export function useDynatraceEntityMappings({
   // Dialog state
   const [addDialogOpen, setAddDialogOpen] = useState(false);
   const [addLoading, setAddLoading] = useState(false);
+
+  // Multi-select + delete confirmation state
+  const [selectedMappingIds, setSelectedMappingIds] = useState<Set<string>>(new Set());
+  const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
+  const [deletingMapping, setDeletingMapping] = useState<DynatraceEntityMapping | null>(null);
+  const [deleteLoading, setDeleteLoading] = useState(false);
+  const [batchDeleteDialogOpen, setBatchDeleteDialogOpen] = useState(false);
 
   // Form state
   const [selectedLevel, setSelectedLevel] = useState<EntityMappingLevel>('sut');
@@ -360,6 +386,12 @@ export function useDynatraceEntityMappings({
 
         await fetchEntityMappings();
 
+        // Each successful HOST add creates metric queries server-side — tell the
+        // parent so the Queries tab refetches without a manual reload.
+        if (added > 0) {
+          onHostQueriesCreated?.();
+        }
+
         if (failed.length > 0) {
           // Keep the dialog open with only the failures still selected so the user can retry.
           const failedIds = new Set(failed.map((h) => h.entityId));
@@ -421,11 +453,32 @@ export function useDynatraceEntityMappings({
     }
   };
 
-  const handleDeleteEntity = async (mapping: DynatraceEntityMapping) => {
+  const filteredMappings = filterMappingsByContext(
+    entityMappings,
+    selectedEnvironment,
+    selectedWorkload
+  ) as DynatraceEntityMapping[];
+
+  // Single delete — open a confirmation dialog instead of deleting immediately.
+  const handleDeleteEntity = (mapping: DynatraceEntityMapping) => {
+    setError(null);
+    setDeletingMapping(mapping);
+    setDeleteDialogOpen(true);
+  };
+
+  const closeDeleteDialog = useCallback(() => {
+    setError(null);
+    setDeleteDialogOpen(false);
+    setDeletingMapping(null);
+  }, []);
+
+  const handleConfirmDelete = async () => {
+    if (!deletingMapping) return;
     try {
+      setDeleteLoading(true);
       setError(null);
 
-      const response = await authenticatedFetch(`/dynatrace/entities/mappings/${mapping.id}`, {
+      const response = await authenticatedFetch(`/dynatrace/entities/mappings/${deletingMapping.id}`, {
         method: 'DELETE',
         headers: { 'Content-Type': 'application/json' },
       });
@@ -435,16 +488,78 @@ export function useDynatraceEntityMappings({
       }
 
       await fetchEntityMappings();
+      setDeleteDialogOpen(false);
+      setDeletingMapping(null);
     } catch (err) {
       setError(err && typeof err === 'object' && 'message' in err ? (err as Error).message : 'Failed to delete entity mapping');
+    } finally {
+      setDeleteLoading(false);
     }
   };
 
-  const filteredMappings = filterMappingsByContext(
-    entityMappings,
-    selectedEnvironment,
-    selectedWorkload
-  ) as DynatraceEntityMapping[];
+  // Multi-select handlers (operate over the currently visible/filtered mappings)
+  const handleSelectAll = () => {
+    setSelectedMappingIds((prev) =>
+      prev.size === filteredMappings.length
+        ? new Set()
+        : new Set(filteredMappings.map((m) => m.id))
+    );
+  };
+
+  const handleSelectOne = useCallback((id: string) => {
+    setSelectedMappingIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) {
+        next.delete(id);
+      } else {
+        next.add(id);
+      }
+      return next;
+    });
+  }, []);
+
+  const handleClearSelection = useCallback(() => {
+    setSelectedMappingIds(new Set());
+  }, []);
+
+  // Batch delete
+  const handleBatchDeleteClick = useCallback(() => {
+    setError(null);
+    setBatchDeleteDialogOpen(true);
+  }, []);
+
+  const handleBatchDeleteConfirm = async () => {
+    const ids = Array.from(selectedMappingIds);
+    try {
+      setDeleteLoading(true);
+      setError(null);
+
+      const responses = await Promise.all(
+        ids.map((id) =>
+          authenticatedFetch(`/dynatrace/entities/mappings/${id}`, {
+            method: 'DELETE',
+            headers: { 'Content-Type': 'application/json' },
+          })
+        )
+      );
+      if (responses.some((r) => !r.ok)) {
+        throw new Error('Failed to delete some entity mappings');
+      }
+
+      await fetchEntityMappings();
+      setBatchDeleteDialogOpen(false);
+      setSelectedMappingIds(new Set());
+    } catch (err) {
+      setError(err && typeof err === 'object' && 'message' in err ? (err as Error).message : 'Failed to delete some entity mappings');
+    } finally {
+      setDeleteLoading(false);
+    }
+  };
+
+  const handleBatchDeleteCancel = useCallback(() => {
+    setError(null);
+    setBatchDeleteDialogOpen(false);
+  }, []);
 
   return {
     // Dynatrace instances
@@ -467,6 +582,21 @@ export function useDynatraceEntityMappings({
     addDialogOpen,
     setAddDialogOpen,
     addLoading,
+
+    // Multi-select + delete confirmation
+    selectedMappingIds,
+    handleSelectAll,
+    handleSelectOne,
+    handleClearSelection,
+    deleteDialogOpen,
+    deletingMapping,
+    deleteLoading,
+    closeDeleteDialog,
+    handleConfirmDelete,
+    batchDeleteDialogOpen,
+    handleBatchDeleteClick,
+    handleBatchDeleteConfirm,
+    handleBatchDeleteCancel,
 
     // Form state
     selectedLevel,
