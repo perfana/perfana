@@ -1,0 +1,134 @@
+<h2>Design — Section 3: Frontend</h2>
+<p class="subtitle">TimingInformationSection changes + new AnalysisTimeRangeDialog</p>
+
+<div class="section">
+  <h3>TimingInformationSection.tsx — updated</h3>
+  <div class="mockup">
+    <div class="mockup-header">Timing Information card (replaces inline edit)</div>
+    <div class="mockup-body" style="font-size: 0.875rem; line-height: 2;">
+      <div style="display:flex; flex-direction:column; gap: 1rem;">
+
+        <div>
+          <div style="font-size:0.7rem; text-transform:uppercase; color:#888; letter-spacing:1px;">Total Duration</div>
+          <div style="font-size:1.4rem; font-weight:700; font-family:monospace;">10m 30s</div>
+        </div>
+
+        <div style="border-top:1px solid rgba(128,128,128,0.2); padding-top:1rem;">
+          <div style="font-size:0.7rem; text-transform:uppercase; color:#888; letter-spacing:1px;">Analysis Window</div>
+          <div style="font-size:0.9rem; font-weight:600; margin-top:0.25rem;">60s → 9m 30s &nbsp;<span style="color:#888; font-weight:400; font-size:0.8rem;">(8m 30s effective)</span></div>
+          <div style="margin-top:0.5rem;">
+            <button style="font-size:0.75rem; padding:4px 10px; border-radius:6px; border:1px solid rgba(99,102,241,0.4); background:rgba(99,102,241,0.08); color:#6366f1; cursor:pointer;">
+              ✏ Change analysis time range
+            </button>
+          </div>
+          <div style="font-size:0.7rem; color:#888; margin-top:0.25rem; font-style:italic;">Only shown when JTL performance data is available</div>
+        </div>
+
+        <div style="border-top:1px solid rgba(128,128,128,0.2); padding-top:1rem;">
+          <div style="font-size:0.7rem; text-transform:uppercase; color:#888; letter-spacing:1px;">Start Time</div>
+          <div style="font-size:0.9rem; font-weight:600;">May 25, 2026, 10:00:00 AM</div>
+        </div>
+
+        <div>
+          <div style="font-size:0.7rem; text-transform:uppercase; color:#888; letter-spacing:1px;">End Time</div>
+          <div style="font-size:0.9rem; font-weight:600;">May 25, 2026, 10:10:30 AM</div>
+        </div>
+
+      </div>
+    </div>
+  </div>
+  <p style="font-size:0.8rem; color:var(--color-text-secondary); margin-top:0.5rem;">
+    "Analysis Window" row replaces the old "Analysis Start Offset" row. Shows <code>startOffset → duration−endOffset</code> plus the effective duration. The button opens the dialog. Button visibility is gated on <code>GET .../summary-timeseries</code> returning data.
+  </p>
+</div>
+
+<div class="section">
+  <h3>AnalysisTimeRangeDialog.tsx — new component</h3>
+  <div class="mockup">
+    <div class="mockup-header">Dialog: Change Analysis Time Range</div>
+    <div class="mockup-body" style="padding: 0; overflow: hidden;">
+
+      <!-- Chart area -->
+      <div style="background:#0f172a; padding:1rem 1rem 0.5rem; border-radius:6px 6px 0 0;">
+        <div style="font-size:0.7rem; color:#64748b; margin-bottom:0.5rem; text-transform:uppercase; letter-spacing:1px;">Throughput / Response Time / Errors</div>
+
+        <!-- Fake chart with SVG -->
+        <svg viewBox="0 0 600 140" style="width:100%; height:120px; display:block;">
+          <!-- Background grid -->
+          <line x1="0" y1="35" x2="600" y2="35" stroke="#1e293b" stroke-width="1"/>
+          <line x1="0" y1="70" x2="600" y2="70" stroke="#1e293b" stroke-width="1"/>
+          <line x1="0" y1="105" x2="600" y2="105" stroke="#1e293b" stroke-width="1"/>
+
+          <!-- Throughput series (green area) -->
+          <path d="M0,80 C30,75 60,40 90,35 C120,30 150,28 180,30 C210,32 240,30 270,28 C300,26 330,29 360,30 C390,31 420,28 450,30 C480,32 510,35 540,33 C570,31 600,32 600,32 L600,140 L0,140Z"
+                fill="rgba(16,185,129,0.2)" stroke="#10b981" stroke-width="1.5"/>
+
+          <!-- Response time series (blue line) -->
+          <path d="M0,90 C30,85 60,60 90,55 C120,50 150,52 180,50 C210,48 240,50 270,48 C300,46 330,50 360,52 C390,54 420,50 450,52 C480,54 510,58 540,55 C570,52 600,53 600,53"
+                fill="none" stroke="#6366f1" stroke-width="1.5"/>
+
+          <!-- Errors series (red area) -->
+          <path d="M0,130 C30,130 60,128 90,125 C120,122 150,125 180,128 C210,130 240,130 270,128 C300,126 330,124 360,120 C390,116 420,118 450,122 C480,126 510,128 540,126 C570,124 600,125 600,125 L600,140 L0,140Z"
+                fill="rgba(239,68,68,0.2)" stroke="#ef4444" stroke-width="1"/>
+
+          <!-- Left analysis boundary (start offset) -->
+          <line x1="80" y1="0" x2="80" y2="140" stroke="#f59e0b" stroke-width="2" stroke-dasharray="4,3"/>
+          <rect x="68" y="2" width="24" height="14" fill="#f59e0b" rx="2"/>
+          <text x="80" y="13" text-anchor="middle" fill="white" font-size="8" font-family="monospace">60s</text>
+
+          <!-- Right analysis boundary (end offset) -->
+          <line x1="520" y1="0" x2="520" y2="140" stroke="#f59e0b" stroke-width="2" stroke-dasharray="4,3"/>
+          <rect x="502" y="2" width="36" height="14" fill="#f59e0b" rx="2"/>
+          <text x="520" y="13" text-anchor="middle" fill="white" font-size="8" font-family="monospace">9m30s</text>
+
+          <!-- Shaded excluded regions -->
+          <rect x="0" y="0" width="80" height="140" fill="rgba(0,0,0,0.35)"/>
+          <rect x="520" y="0" width="80" height="140" fill="rgba(0,0,0,0.35)"/>
+
+          <!-- Legend -->
+          <rect x="10" y="118" width="8" height="3" fill="#10b981" rx="1"/>
+          <text x="22" y="122" fill="#94a3b8" font-size="7">Throughput</text>
+          <rect x="80" y="118" width="8" height="3" fill="#6366f1" rx="1"/>
+          <text x="92" y="122" fill="#94a3b8" font-size="7">Avg RT</text>
+          <rect x="140" y="118" width="8" height="3" fill="#ef4444" rx="1"/>
+          <text x="152" y="122" fill="#94a3b8" font-size="7">Errors/s</text>
+        </svg>
+      </div>
+
+      <!-- Slider area -->
+      <div style="background:#1e293b; padding:1rem 1.25rem;">
+        <div style="display:flex; justify-content:space-between; font-size:0.7rem; color:#64748b; margin-bottom:0.25rem;">
+          <span>0s (start)</span>
+          <span>10m 30s (end)</span>
+        </div>
+        <!-- Fake dual-handle slider -->
+        <div style="position:relative; height:6px; background:#334155; border-radius:3px; margin:0 0 1rem;">
+          <div style="position:absolute; left:13%; right:13%; height:100%; background:#6366f1; border-radius:3px;"></div>
+          <div style="position:absolute; left:13%; top:50%; transform:translate(-50%,-50%); width:16px; height:16px; background:#f59e0b; border-radius:50%; border:2px solid white; cursor:ew-resize;"></div>
+          <div style="position:absolute; right:13%; top:50%; transform:translate(50%,-50%); width:16px; height:16px; background:#f59e0b; border-radius:50%; border:2px solid white; cursor:ew-resize;"></div>
+        </div>
+        <div style="display:flex; justify-content:space-between; font-size:0.8rem; color:#e2e8f0;">
+          <div><span style="color:#94a3b8;">Start offset:</span> <strong>60s</strong></div>
+          <div style="font-size:0.75rem; color:#94a3b8;">Effective: <strong style="color:#10b981;">8m 30s</strong></div>
+          <div><span style="color:#94a3b8;">End offset:</span> <strong>60s</strong></div>
+        </div>
+      </div>
+
+      <!-- Actions -->
+      <div style="background:#1e293b; padding:0.75rem 1.25rem; display:flex; justify-content:flex-end; gap:0.75rem; border-top:1px solid #334155;">
+        <button style="padding:6px 16px; border-radius:6px; border:1px solid #475569; background:transparent; color:#94a3b8; cursor:pointer; font-size:0.85rem;">Cancel</button>
+        <button style="padding:6px 16px; border-radius:6px; border:none; background:#6366f1; color:white; cursor:pointer; font-size:0.85rem; font-weight:600;">Save &amp; Re-analyse</button>
+      </div>
+
+    </div>
+  </div>
+
+  <ul style="font-size:0.875rem; line-height:2; margin-top:1rem;">
+    <li>MUI <code>Slider</code> in range mode (<code>value={[startOffset, duration−endOffset]}</code>) — two amber handles</li>
+    <li>Handles move → vertical dashed lines in chart update live (React state, no API call)</li>
+    <li>Shaded regions show excluded time at start and end</li>
+    <li>Chart: Recharts (already used in the app) with three series — throughput (area), avg response time (line), errors/s (area)</li>
+    <li>"Save &amp; Re-analyse" → <code>PUT .../analysis-time-range</code> → closes dialog, shows toast, updates Analysis Window row</li>
+    <li>Dialog fetches chart data on open from <code>GET .../summary-timeseries</code></li>
+  </ul>
+</div>

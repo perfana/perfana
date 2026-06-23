@@ -4,6 +4,12 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
+## [0.2.61.16] - 2026-06-23
+
+### Added
+- **Ok-only average is now derivable from the transaction & request continuous aggregates (#405).** Added a `sum_rt_ok` column (`sum(response_time) FILTER (WHERE success)`, rolled up as `sum(sum_rt_ok)` at the 1m/5m granularities) to the six main caggs — `transactions_5s/1m/5m` and `requests_raw_5s/1m/5m`. Since `n_ok` already lives in these views, dashboards can now compute the average of *successful* responses as `sum_rt_ok / n_ok` straight from the rollup, no raw-table scan. Purely additive to the cagg SELECT lists; existing columns (`avg_rt/min_rt/max_rt/n/n_ok/n_err/pct_agg`) are untouched.
+  - Percentiles (p90/p95/p99) were already covered: the caggs store a `percentile_agg` sketch (`pct_agg`, plus ok-only `pct_agg_passed` in the `*_passed` sibling caggs) and queries use `approx_percentile(...)` over `rollup(pct_agg)`, which aggregates correctly across buckets. The PerformanceAnalysisCard's p95/p99 columns come from this path via `GET /test-runs/:id/transactions` → `test-runs-performance-query.service.ts`.
+
 ## [0.2.61.15] - 2026-06-23
 
 ### Added

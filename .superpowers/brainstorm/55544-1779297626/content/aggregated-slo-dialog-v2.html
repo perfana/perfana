@@ -1,0 +1,135 @@
+<h2>Set Aggregated Test SLO — Updated Mockup</h2>
+<p class="subtitle">No toggle — create vs edit determined by whether an SLO exists</p>
+
+<div class="split" style="gap:32px;align-items:flex-start;flex-wrap:wrap;">
+
+  <!-- Create mode -->
+  <div class="mockup" style="flex:1;min-width:280px;max-width:520px;">
+    <div class="mockup-header">Set Aggregated Test SLO <span style="font-size:11px;font-weight:400;opacity:0.7;">(no existing SLO)</span></div>
+    <div class="mockup-body" style="padding:20px;display:flex;flex-direction:column;gap:14px;">
+
+      <div style="background:#e3f2fd;border-left:4px solid #1976d2;padding:10px 14px;border-radius:4px;font-size:13px;">
+        <strong>Aggregated Test SLO</strong> creates a pass/fail check based on a single metric aggregated across all transactions or requests in the test run.
+      </div>
+
+      <!-- Metric dropdown -->
+      <div>
+        <div style="font-size:12px;color:#666;margin-bottom:4px;">Metric <span style="color:#d32f2f;">*</span></div>
+        <div class="mock-input" style="display:flex;align-items:center;justify-content:space-between;">
+          <span>Aggregated transaction response times</span>
+          <span style="color:#666;">▾</span>
+        </div>
+      </div>
+
+      <!-- Stat + Operator + Value -->
+      <div style="display:grid;grid-template-columns:1fr 80px 1fr;gap:10px;align-items:end;">
+        <div>
+          <div style="font-size:12px;color:#666;margin-bottom:4px;">Statistic <span style="color:#d32f2f;">*</span></div>
+          <div class="mock-input" style="display:flex;align-items:center;justify-content:space-between;">
+            <span>p95</span><span style="color:#666;">▾</span>
+          </div>
+        </div>
+        <div>
+          <div style="font-size:12px;color:#666;margin-bottom:4px;">Operator</div>
+          <div class="mock-input" style="display:flex;align-items:center;justify-content:space-between;">
+            <span>≤</span><span style="color:#666;">▾</span>
+          </div>
+        </div>
+        <div>
+          <div style="font-size:12px;color:#666;margin-bottom:4px;">Threshold (ms) <span style="color:#d32f2f;">*</span></div>
+          <div class="mock-input">2000</div>
+        </div>
+      </div>
+
+      <!-- Exclude ramp-up -->
+      <div style="display:flex;align-items:center;gap:10px;padding:10px 12px;border:1px solid #e0e0e0;border-radius:6px;">
+        <div style="width:32px;height:18px;background:#1976d2;border-radius:9px;position:relative;flex-shrink:0;">
+          <div style="width:14px;height:14px;background:white;border-radius:50%;position:absolute;right:2px;top:2px;"></div>
+        </div>
+        <div>
+          <div style="font-size:13px;font-weight:500;">Exclude ramp-up period</div>
+          <div style="font-size:11px;color:#888;">Requests during ramp-up phase are excluded</div>
+        </div>
+      </div>
+
+      <!-- Scope -->
+      <div style="background:#f5f5f5;border-radius:6px;padding:10px 12px;font-size:12px;color:#555;">
+        Applies to all future test runs matching:<br/>
+        • System: <strong>my-service</strong> · Environment: <strong>staging</strong> · Workload: <strong>baseline</strong>
+      </div>
+
+      <!-- Actions: create mode -->
+      <div style="display:flex;justify-content:flex-end;gap:10px;padding-top:4px;">
+        <button class="mock-button" style="background:transparent;border:1px solid #bbb;color:#333;">Cancel</button>
+        <button class="mock-button">Create SLO</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Edit mode -->
+  <div class="mockup" style="flex:1;min-width:280px;max-width:520px;">
+    <div class="mockup-header">Set Aggregated Test SLO <span style="font-size:11px;font-weight:400;opacity:0.7;">(existing SLO — pre-filled)</span></div>
+    <div class="mockup-body" style="padding:20px;display:flex;flex-direction:column;gap:14px;">
+
+      <div style="background:#e8f5e9;border-left:4px solid #388e3c;padding:10px 14px;border-radius:4px;font-size:13px;">
+        An SLO already exists for this workload. Update the values below or disable it.
+      </div>
+
+      <!-- Metric (read-only in edit) -->
+      <div>
+        <div style="font-size:12px;color:#666;margin-bottom:4px;">Metric</div>
+        <div class="mock-input" style="background:#f5f5f5;color:#888;display:flex;align-items:center;justify-content:space-between;">
+          <span>Aggregated transaction response times</span>
+        </div>
+        <div style="font-size:11px;color:#888;margin-top:3px;">Metric cannot be changed when editing</div>
+      </div>
+
+      <!-- Stat + Operator + Value -->
+      <div style="display:grid;grid-template-columns:1fr 80px 1fr;gap:10px;align-items:end;">
+        <div>
+          <div style="font-size:12px;color:#666;margin-bottom:4px;">Statistic</div>
+          <div class="mock-input" style="display:flex;align-items:center;justify-content:space-between;">
+            <span>p95</span><span style="color:#666;">▾</span>
+          </div>
+        </div>
+        <div>
+          <div style="font-size:12px;color:#666;margin-bottom:4px;">Operator</div>
+          <div class="mock-input" style="display:flex;align-items:center;justify-content:space-between;">
+            <span>≤</span><span style="color:#666;">▾</span>
+          </div>
+        </div>
+        <div>
+          <div style="font-size:12px;color:#666;margin-bottom:4px;">Threshold (ms)</div>
+          <div class="mock-input">2000</div>
+        </div>
+      </div>
+
+      <!-- Exclude ramp-up -->
+      <div style="display:flex;align-items:center;gap:10px;padding:10px 12px;border:1px solid #e0e0e0;border-radius:6px;">
+        <div style="width:32px;height:18px;background:#1976d2;border-radius:9px;position:relative;flex-shrink:0;">
+          <div style="width:14px;height:14px;background:white;border-radius:50%;position:absolute;right:2px;top:2px;"></div>
+        </div>
+        <div>
+          <div style="font-size:13px;font-weight:500;">Exclude ramp-up period</div>
+          <div style="font-size:11px;color:#888;">Requests during ramp-up phase are excluded</div>
+        </div>
+      </div>
+
+      <!-- Scope -->
+      <div style="background:#f5f5f5;border-radius:6px;padding:10px 12px;font-size:12px;color:#555;">
+        Applies to all future test runs matching:<br/>
+        • System: <strong>my-service</strong> · Environment: <strong>staging</strong> · Workload: <strong>baseline</strong>
+      </div>
+
+      <!-- Actions: edit mode — Disable is secondary/destructive -->
+      <div style="display:flex;justify-content:space-between;gap:10px;padding-top:4px;">
+        <button class="mock-button" style="background:transparent;border:1px solid #d32f2f;color:#d32f2f;">Disable SLO</button>
+        <div style="display:flex;gap:10px;">
+          <button class="mock-button" style="background:transparent;border:1px solid #bbb;color:#333;">Cancel</button>
+          <button class="mock-button">Update SLO</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+</div>

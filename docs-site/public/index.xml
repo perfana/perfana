@@ -1,0 +1,70 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<rss version="2.0">
+    <channel>
+      <title>Perfana Docs</title>
+      <link>https://perfana.github.io/perfana</link>
+      <description>Last 10 notes on Perfana Docs</description>
+      <generator>Quartz -- quartz.jzhao.xyz</generator>
+      <item>
+    <title>RBAC</title>
+    <link>https://perfana.github.io/perfana/Features/RBAC</link>
+    <guid>https://perfana.github.io/perfana/Features/RBAC</guid>
+    <description><![CDATA[ RBAC Perfana enforces multi-tenant Role-Based Access Control across system, organization, and team scopes. ]]></description>
+    <pubDate>Sun, 10 May 2026 08:39:28 GMT</pubDate>
+  </item><item>
+    <title>Data Flow</title>
+    <link>https://perfana.github.io/perfana/Architecture/Data-Flow</link>
+    <guid>https://perfana.github.io/perfana/Architecture/Data-Flow</guid>
+    <description><![CDATA[ Data Flow Test Run Lifecycle A test run goes through several phases from creation to final analysis. 1. ]]></description>
+    <pubDate>Sat, 09 May 2026 17:43:55 GMT</pubDate>
+  </item><item>
+    <title>Continuous Aggregates</title>
+    <link>https://perfana.github.io/perfana/Database/Continuous-Aggregates</link>
+    <guid>https://perfana.github.io/perfana/Database/Continuous-Aggregates</guid>
+    <description><![CDATA[ Continuous Aggregates (CAGGs) Perfana materializes bucketed rollups over the three high-volume request hypertables so Grafana panels read pre-aggregated rows instead of re-scanning millions of raw rows on every refresh. ]]></description>
+    <pubDate>Sat, 09 May 2026 17:43:55 GMT</pubDate>
+  </item><item>
+    <title>Capabilities and RBAC</title>
+    <link>https://perfana.github.io/perfana/Architecture/Capabilities-and-RBAC</link>
+    <guid>https://perfana.github.io/perfana/Architecture/Capabilities-and-RBAC</guid>
+    <description><![CDATA[ Capabilities and RBAC Perfana’s authorization model is capabilities-based, not role-based at the call site. ]]></description>
+    <pubDate>Tue, 28 Apr 2026 10:08:42 GMT</pubDate>
+  </item><item>
+    <title>Environment Variables</title>
+    <link>https://perfana.github.io/perfana/Operations/Environment-Variables</link>
+    <guid>https://perfana.github.io/perfana/Operations/Environment-Variables</guid>
+    <description><![CDATA[ Environment Variables All configuration is managed through environment variables, loaded from .env.local or .env. ]]></description>
+    <pubDate>Fri, 24 Apr 2026 09:37:12 GMT</pubDate>
+  </item><item>
+    <title>Hypertable Space Rebuild</title>
+    <link>https://perfana.github.io/perfana/Operations/Hypertable-Space-Rebuild</link>
+    <guid>https://perfana.github.io/perfana/Operations/Hypertable-Space-Rebuild</guid>
+    <description><![CDATA[ Hypertable Space Rebuild Procedure for retroactively applying the by_hash(&#039;system_under_test&#039;, N) space dimension to the request hypertables (requests_raw, requests_error, transactions) on an existing deployment. ]]></description>
+    <pubDate>Fri, 24 Apr 2026 09:37:12 GMT</pubDate>
+  </item><item>
+    <title>Worker Overview</title>
+    <link>https://perfana.github.io/perfana/Apps/Worker/Worker-Overview</link>
+    <guid>https://perfana.github.io/perfana/Apps/Worker/Worker-Overview</guid>
+    <description><![CDATA[ Worker Overview The Worker service is the core processing engine for performance analysis. ]]></description>
+    <pubDate>Mon, 20 Apr 2026 12:13:55 GMT</pubDate>
+  </item><item>
+    <title>ADAPT Algorithm</title>
+    <link>https://perfana.github.io/perfana/Features/ADAPT-Algorithm</link>
+    <guid>https://perfana.github.io/perfana/Features/ADAPT-Algorithm</guid>
+    <description><![CDATA[ ADAPT Algorithm ADAPT (Automated Detection And Performance Testing) is Perfana’s core regression detection algorithm. ]]></description>
+    <pubDate>Mon, 20 Apr 2026 12:13:55 GMT</pubDate>
+  </item><item>
+    <title>API Authentication</title>
+    <link>https://perfana.github.io/perfana/Apps/API/API-Authentication</link>
+    <guid>https://perfana.github.io/perfana/Apps/API/API-Authentication</guid>
+    <description><![CDATA[ API Authentication Perfana uses a dual authentication system: Keycloak JWT for users and API keys for programmatic access. Authentication Types 1. ]]></description>
+    <pubDate>Sat, 21 Mar 2026 22:01:18 GMT</pubDate>
+  </item><item>
+    <title>API Endpoints</title>
+    <link>https://perfana.github.io/perfana/Apps/API/API-Endpoints</link>
+    <guid>https://perfana.github.io/perfana/Apps/API/API-Endpoints</guid>
+    <description><![CDATA[ API Endpoints Swagger Interactive API docs available at http://localhost:3001/api/docs (non-production or with SWAGGER_ENABLED=true). ]]></description>
+    <pubDate>Sat, 21 Mar 2026 22:01:18 GMT</pubDate>
+  </item>
+    </channel>
+  </rss>

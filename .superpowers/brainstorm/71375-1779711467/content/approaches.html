@@ -1,0 +1,63 @@
+<h2>Analysis Time Range — 3 Approaches</h2>
+<p class="subtitle">All share the same frontend dialog; differences are in API mutation strategy</p>
+
+<div class="options">
+  <div class="option" data-choice="a" onclick="toggleSelect(this)">
+    <div class="letter">A</div>
+    <div class="content">
+      <h3>Unified endpoint — recommended</h3>
+      <p>New <code>PUT /test-runs/:id/analysis-time-range</code> accepts both offsets atomically. New column <code>analysis_end_offset</code> (stored as <code>ramp_down</code> DB column). <code>UpdateAnalysisTimeRangeHandler</code> writes both, triggers one stats-rollup job. The old <code>/analysis-start-offset</code> endpoint stays for backward-compat but is no longer wired to the UI.</p>
+      <div class="pros-cons">
+        <div class="pros"><h4>Pros</h4><ul>
+          <li>Single atomic write — no partial state where start is saved but end isn't</li>
+          <li>One rollup re-trigger instead of two</li>
+          <li>Clean, discoverable contract</li>
+        </ul></div>
+        <div class="cons"><h4>Cons</h4><ul>
+          <li>New endpoint to add (small lift)</li>
+        </ul></div>
+      </div>
+    </div>
+  </div>
+
+  <div class="option" data-choice="b" onclick="toggleSelect(this)">
+    <div class="letter">B</div>
+    <div class="content">
+      <h3>Extend existing endpoint</h3>
+      <p>Extend <code>PUT /test-runs/:id/analysis-start-offset</code> to also accept optional <code>analysisEndOffset</code>. Rename endpoint to <code>/analysis-time-range</code> (with a redirect from the old path). Single handler update.</p>
+      <div class="pros-cons">
+        <div class="pros"><h4>Pros</h4><ul>
+          <li>Minimal new surface area</li>
+          <li>Fewer files to create</li>
+        </ul></div>
+        <div class="cons"><h4>Cons</h4><ul>
+          <li>Muddies the existing handler's single-responsibility</li>
+          <li>Breaking change risk on old callers unless redirect added</li>
+        </ul></div>
+      </div>
+    </div>
+  </div>
+
+  <div class="option" data-choice="c" onclick="toggleSelect(this)">
+    <div class="letter">C</div>
+    <div class="content">
+      <h3>Two separate endpoints</h3>
+      <p>Keep existing <code>PUT .../analysis-start-offset</code>; add new <code>PUT .../analysis-end-offset</code>. Dialog saves both on confirm (two sequential requests).</p>
+      <div class="pros-cons">
+        <div class="pros"><h4>Pros</h4><ul>
+          <li>Most surgical — each offset independently updatable</li>
+        </ul></div>
+        <div class="cons"><h4>Cons</h4><ul>
+          <li>Non-atomic: if second request fails, state is inconsistent</li>
+          <li>Triggers rollup twice (double compute cost)</li>
+          <li>More API surface for same user action</li>
+        </ul></div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div class="section" style="margin-top: 2rem; padding: 1rem; background: rgba(99,102,241,0.08); border-radius: 8px; border-left: 3px solid #6366f1;">
+  <p class="label">Implementation note (shared across all approaches)</p>
+  <p style="margin: 0.5rem 0 0;">New property: <code>analysisEndOffset</code> = seconds from the <em>end</em> of the test to exclude (0 = no exclusion, same semantics as <code>analysisStartOffset</code> from the start). Stored in a new <code>ramp_down</code> DB column. Slider right handle position = <code>duration − analysisEndOffset</code>. Graph data served from a new lightweight <code>GET /test-runs/:id/summary-timeseries</code> endpoint querying the <code>transactions</code> + <code>requests_error</code> tables.</p>
+</div>
