@@ -4,6 +4,12 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
+## [0.2.61.18] - 2026-06-25
+
+### Security
+- **`npm audit`: cleared every prod-runtime advisory (56 → 36 vulnerabilities, all remaining are dev-tooling).** Bumped the prod-facing packages via `npm update` (incremental, no lockfile regen): `undici` → 7.28.0 (request smuggling, header injection, TLS bypass), `form-data` → 4.0.6 (CRLF injection), `hono` → 4.12.27 (path traversal, CORS wildcard), `protobufjs` → 7.6.4, `ajv`. Added two `overrides` in `package.json`: `multer` → ^2.2.0 (high DoS, pulled in via `@nestjs/platform-express`) and a scoped `@typescript-eslint/typescript-estree` → `minimatch` ^9.0.9 (high ReDoS, dev-only eslint tooling — scoped to avoid disturbing the 3.x/10.x minimatch consumers). The 36 remaining advisories all require breaking major bumps of dev toolchains (vitest/vite/esbuild/turbo/next-dev/testcontainers) and are deferred.
+  - **Note for future lockfile work:** npm 10.9.2 drops 6–7 of `@nestjs/cli`'s transitive deps (e.g. `node-emoji`, `@inquirer/prompts`) when the lockfile is regenerated from scratch (`rm package-lock.json && npm install`) — it emits the dependency edge but never the package node, which breaks `nest build`. Apply override changes with `npm update <pkg>` (incremental, seeded from the committed lockfile) rather than a full regen.
+
 ## [0.2.61.17] - 2026-06-23
 
 ### Changed

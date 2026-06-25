@@ -59,6 +59,10 @@
     "basic-ftp": "^5.2.0",
     "axios": "^1.16.1",
     "ws": "^8.21.0",
-    "webpack": "^5.104.1"
+    "webpack": "^5.104.1",
+    "multer": "^2.2.0",
+    "@typescript-eslint/typescript-estree": {
+      "minimatch": "^9.0.9"
+    }
   }
 }
