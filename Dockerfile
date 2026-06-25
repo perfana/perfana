@@ -18,7 +18,8 @@
 # ARGS AND METADATA
 # ================================================================================================
 ARG NODE_VERSION=20
-ARG ALPINE_VERSION=3.20
+# alpine 3.22 ships Node 20.20.x (CVE-2025-55131 fix); 3.20/3.21 are stuck on <20.20.0
+ARG ALPINE_VERSION=3.22
 ARG APP_VERSION=0.1.0
 ARG BUILD_DATE
 ARG VCS_REF
