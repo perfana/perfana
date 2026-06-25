@@ -4,6 +4,11 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
+## [0.2.61.19] - 2026-06-25
+
+### Security
+- **Bumped the Alpine build base from `alpine3.20` to `alpine3.22` to clear CVE-2025-55131 (Node.js `vm` timeout race condition, CVSS 9.2 critical).** The fix landed in Node 20.20.0, but `node:20-alpine3.20` is frozen at 20.19.2 and `node:20-alpine3.21` at 20.19.6 — only `alpine3.22` ships a fixed runtime (20.20.2). This affected the build stages and, importantly, the `perfana-report` production image (the only prod image not on distroless, since Puppeteer needs system libs). The distroless runtime images (web/api/grafana-sync/worker) already shipped Node 20.20.0 and were never vulnerable. Single-line `ALPINE_VERSION` ARG change in `Dockerfile`.
+
 ## [0.2.61.18] - 2026-06-25
 
 ### Security
