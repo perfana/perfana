@@ -7,7 +7,8 @@
 # ================================================================================================
 
 ARG NODE_VERSION=20
-ARG ALPINE_VERSION=3.20
+# Builder is alpine (needs apk for node-gyp toolchain); the final stage is distroless.
+ARG ALPINE_VERSION=3.22
 
 # ================================================================================================
 # STAGE 1: Build Stage
@@ -50,27 +51,25 @@ RUN npm init -y && \
 # ================================================================================================
 # STAGE 2: Production Migration Runner
 # ================================================================================================
-FROM node:${NODE_VERSION}-alpine${ALPINE_VERSION} AS migrations
-
-# Security: Create non-root user
-RUN addgroup -g 10001 -S perfana \
-    && adduser -u 10001 -D -S -G perfana perfana
+# Distroless: no shell, no package manager, no alpine openssl to patch. Pure-JS
+# TypeORM runner only needs node. distroless ships the `nonroot` user (uid 65532).
+FROM gcr.io/distroless/nodejs20-debian12:nonroot AS migrations
 
 WORKDIR /app
 
 # Copy production dependencies installed natively in the builder stage.
 # These are pure-JS packages, so the node_modules tree is arch-independent and
 # can be reused across platforms without re-running npm under emulation.
-COPY --from=builder --chown=perfana:perfana /app/migration-deps/package.json ./package.json
-COPY --from=builder --chown=perfana:perfana /app/migration-deps/node_modules ./node_modules/
+COPY --from=builder --chown=nonroot:nonroot /app/migration-deps/package.json ./package.json
+COPY --from=builder --chown=nonroot:nonroot /app/migration-deps/node_modules ./node_modules/
 
 # Copy compiled migrations, entities, and utils
-COPY --from=builder --chown=perfana:perfana /app/packages/shared/dist/database/migrations ./migrations/
-COPY --from=builder --chown=perfana:perfana /app/packages/shared/dist/entities ./entities/
-COPY --from=builder --chown=perfana:perfana /app/packages/shared/dist/utils ./utils/
+COPY --from=builder --chown=nonroot:nonroot /app/packages/shared/dist/database/migrations ./migrations/
+COPY --from=builder --chown=nonroot:nonroot /app/packages/shared/dist/entities ./entities/
+COPY --from=builder --chown=nonroot:nonroot /app/packages/shared/dist/utils ./utils/
 
 # Create a standalone ormconfig for the container
-COPY --chown=perfana:perfana <<'EOF' ormconfig.js
+COPY --chown=nonroot:nonroot <<'EOF' ormconfig.js
 const { DataSource } = require('typeorm');
 require('reflect-metadata');
 
@@ -95,7 +94,7 @@ module.exports = { AppDataSource };
 EOF
 
 # Create migration runner script
-COPY --chown=perfana:perfana <<'EOF' run-migrations.js
+COPY --chown=nonroot:nonroot <<'EOF' run-migrations.js
 const { AppDataSource } = require('./ormconfig');
 
 async function runMigrations() {
@@ -133,7 +132,7 @@ runMigrations();
 EOF
 
 # Create migration show script
-COPY --chown=perfana:perfana <<'EOF' show-migrations.js
+COPY --chown=nonroot:nonroot <<'EOF' show-migrations.js
 const { AppDataSource } = require('./ormconfig');
 
 async function showMigrations() {
@@ -155,7 +154,7 @@ showMigrations();
 EOF
 
 # Create revert script
-COPY --chown=perfana:perfana <<'EOF' revert-migration.js
+COPY --chown=nonroot:nonroot <<'EOF' revert-migration.js
 const { AppDataSource } = require('./ormconfig');
 
 async function revertMigration() {
@@ -179,16 +178,14 @@ async function revertMigration() {
 revertMigration();
 EOF
 
-# Set ownership
-RUN chown -R perfana:perfana /app
-
-# Switch to non-root user
-USER perfana:perfana
+# Switch to non-root user (distroless ships uid 65532)
+USER nonroot:nonroot
 
 # Labels
 LABEL org.opencontainers.image.title="Perfana Database Migrations" \
       org.opencontainers.image.description="TypeORM migration runner for Perfana" \
       org.opencontainers.image.vendor="Perfana"
 
-# Default command: run migrations
-CMD ["node", "run-migrations.js"]
+# Default command: run migrations (ENTRYPOINT is /nodejs/bin/node from distroless).
+# To show/revert instead, override: docker run ... <image> show-migrations.js
+CMD ["run-migrations.js"]
