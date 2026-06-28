@@ -175,9 +175,34 @@ RUN rm -rf node_modules \
     && mkdir -p apps/web/node_modules apps/grafana-sync/node_modules apps/worker/node_modules apps/perfana-report/node_modules
 
 # ================================================================================================
+# STAGE 5b: OpenSSL patch overlay for distroless
+# ================================================================================================
+# Google's distroless base lags Debian's openssl security releases — as of this
+# writing the base ships libssl3 3.0.18-1~deb12u2 while debian-security has
+# 3.0.20-1~deb12u2 (CVE-2026-31789). Node bundles its own openssl so it doesn't
+# link this lib, but image scanners still flag the stale package. We pull the
+# patched libssl3 from debian:12-slim and overlay both the shared libs and the
+# dpkg metadata (distroless tracks packages in /var/lib/dpkg/status.d/<pkg>) so
+# scanners see the fixed version. Unpinned install = always the latest security
+# build; the per-arch buildx stage resolves the correct /usr/lib/<arch> path.
+FROM debian:12-slim AS openssl-patch
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends libssl3 \
+    && rm -rf /var/lib/apt/lists/* \
+    && mkdir -p /patch/var/lib/dpkg/status.d \
+    && dpkg-query -s libssl3 > /patch/var/lib/dpkg/status.d/libssl3 \
+    && cp -a --parents /usr/lib/*-linux-gnu/libssl.so.3 /patch/ \
+    && cp -a --parents /usr/lib/*-linux-gnu/libcrypto.so.3 /patch/
+
+# Patched distroless base — all runtime images derive from this instead of the
+# raw :nonroot tag so they inherit the overlaid libssl3.
+FROM gcr.io/distroless/nodejs20-debian12:nonroot AS distroless-patched
+COPY --from=openssl-patch /patch/ /
+
+# ================================================================================================
 # STAGE 6: Runtime Preparation
 # ================================================================================================
-FROM gcr.io/distroless/nodejs20-debian12:nonroot AS runtime-prep
+FROM distroless-patched AS runtime-prep
 
 WORKDIR /app
 
@@ -207,7 +232,7 @@ COPY --from=builder --chown=nonroot:nonroot /app/package.json ./package.json
 # ================================================================================================
 # STAGE 7: Web Application (Next.js)
 # ================================================================================================
-FROM gcr.io/distroless/nodejs20-debian12:nonroot AS web
+FROM distroless-patched AS web
 
 # Security labels and metadata
 LABEL \
@@ -254,7 +279,7 @@ CMD ["scripts/start-server.js"]
 # ================================================================================================
 # STAGE 8: API Application (NestJS)
 # ================================================================================================
-FROM gcr.io/distroless/nodejs20-debian12:nonroot AS api
+FROM distroless-patched AS api
 
 # Security labels and metadata
 LABEL \
@@ -295,7 +320,7 @@ CMD ["apps/api/dist/main.js"]
 # ================================================================================================
 # STAGE 9: Grafana Sync Service (NestJS)
 # ================================================================================================
-FROM gcr.io/distroless/nodejs20-debian12:nonroot AS grafana-sync
+FROM distroless-patched AS grafana-sync
 
 # Security labels and metadata
 LABEL \
@@ -336,7 +361,7 @@ CMD ["apps/grafana-sync/dist/src/main.js"]
 # ================================================================================================
 # STAGE 10: Worker Service (BullMQ)
 # ================================================================================================
-FROM gcr.io/distroless/nodejs20-debian12:nonroot AS worker
+FROM distroless-patched AS worker
 
 # Security labels and metadata
 LABEL \

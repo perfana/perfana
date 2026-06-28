@@ -4,6 +4,11 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
+## [0.2.61.21] - 2026-06-28
+
+### Security
+- **Actually cleared OpenSSL CVE-2026-31789 (`libssl3`) across every distroless image by overlaying the patched Debian package.** v0.2.61.20 assumed distroless inherits a patched openssl from the debian12 base via the floating `:nonroot` tag — that's **wrong**: Google's distroless lags Debian's openssl security releases, shipping `libssl3 3.0.18-1~deb12u2` while debian-security has `3.0.20-1~deb12u2`. So a rebuild does **not** clear the finding. (Node bundles its own OpenSSL — `process.versions.openssl` is 3.0.17 — and never links this lib, but scanners still flag the stale package.) Fix: a `debian:12-slim` `openssl-patch` stage `apt-get install`s the current `libssl3` and we overlay both the shared libs (`libssl.so.3`, `libcrypto.so.3`) and the dpkg metadata (`/var/lib/dpkg/status.d/libssl3`) onto the distroless final stages, so scanners read `3.0.20-1~deb12u2`. Install is unpinned (always the latest security build); the per-arch buildx stage resolves the correct `/usr/lib/<arch>` path. In `Dockerfile` this is a single shared `distroless-patched` base that web/api/grafana-sync/worker/runtime-prep all derive from; `Dockerfile.migrations` carries the same stage. Verified: built `api` and `migration` images both report `libssl3 3.0.20-1~deb12u2` and node still runs. (This is the overlay work that was dropped from PR #411's squash merge.)
+
 ## [0.2.61.20] - 2026-06-28
 
 ### Security

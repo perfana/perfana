@@ -49,11 +49,31 @@ RUN npm init -y && \
     npm cache clean --force
 
 # ================================================================================================
+# STAGE 1b: OpenSSL patch overlay for distroless
+# ================================================================================================
+# Google's distroless base lags Debian's openssl security releases (ships
+# libssl3 3.0.18 vs debian-security's 3.0.20-1~deb12u2, CVE-2026-31789). Node
+# bundles its own openssl so it doesn't link this lib, but image scanners flag
+# the stale package. Overlay the patched libssl3 + dpkg metadata from
+# debian:12-slim so scanners see the fixed version. (Same pattern as Dockerfile.)
+FROM debian:12-slim AS openssl-patch
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends libssl3 \
+    && rm -rf /var/lib/apt/lists/* \
+    && mkdir -p /patch/var/lib/dpkg/status.d \
+    && dpkg-query -s libssl3 > /patch/var/lib/dpkg/status.d/libssl3 \
+    && cp -a --parents /usr/lib/*-linux-gnu/libssl.so.3 /patch/ \
+    && cp -a --parents /usr/lib/*-linux-gnu/libcrypto.so.3 /patch/
+
+# ================================================================================================
 # STAGE 2: Production Migration Runner
 # ================================================================================================
-# Distroless: no shell, no package manager, no alpine openssl to patch. Pure-JS
-# TypeORM runner only needs node. distroless ships the `nonroot` user (uid 65532).
+# Distroless: no shell, no package manager. Pure-JS TypeORM runner only needs
+# node. distroless ships the `nonroot` user (uid 65532).
 FROM gcr.io/distroless/nodejs20-debian12:nonroot AS migrations
+
+# Overlay patched libssl3 (see openssl-patch stage above)
+COPY --from=openssl-patch /patch/ /
 
 WORKDIR /app
 
