@@ -4,6 +4,11 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
+## [0.2.61.20] - 2026-06-28
+
+### Security
+- **Moved the `perfana-migration` image off Alpine onto distroless (`gcr.io/distroless/nodejs20-debian12:nonroot`), the same base as the api/web/worker/grafana-sync runtimes.** The migration runner is pure-JS TypeORM with no native runtime deps, so it never needed Alpine's shell or package manager — the Alpine base only carried an OpenSSL that needed patching for CVE-2026-31789. Distroless inherits OpenSSL from the debian12 base (floating `:nonroot` tag → a rebuild pulls the patched library), removing this image from the Alpine-openssl patch treadmill entirely. The builder stage stays `node:20-alpine3.22` (needs `apk` for the node-gyp toolchain); only the final stage changed. Dropped the now-impossible `apk upgrade`, `addgroup`/`adduser`, and `RUN chown` lines (no shell in distroless); COPYs use `--chown=nonroot:nonroot`, and `CMD` is `["run-migrations.js"]` since distroless sets ENTRYPOINT to `/nodejs/bin/node`. `perfana-report` stays on Alpine — Puppeteer/Chromium needs the system libs only `apk` can install.
+
 ## [0.2.61.19] - 2026-06-25
 
 ### Security
