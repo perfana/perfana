@@ -8,15 +8,17 @@ Alert filters control which incoming alerts Perfana ignores and which can abort 
 
 **Steps**
 1. Open the **Settings** hub (`/settings`), then go to **Alert Filters** (`/settings/alert-filters`).
-   You see a table of existing filters, subtitled "Configure which alerts to omit or use to abort test runs". Columns are Alert Source, System, Environment, Test Type, Tag Key, and Tag Value.
-   [[SCREENSHOT: /settings/alert-filters — the Alert Filters table and the Create control]]
+   You see a table of existing filters, subtitled "Configure how alerts from Grafana and Alertmanager are processed". Columns are Alert Source, System, Environment, Test Type, Tag Key, and Tag Value.
+   ![The Alert Filters page with the Add Filter button](../assets/alert-filters.png)
+   *Figure: the Alert Filters page.*
 
-2. Click **Create** and choose the **alert source** the filter applies to.
-   The scope fields become available.
+2. Click **Add Filter** and choose the **Alert Source** the filter applies to.
+   The **Create Omit Tag Filter** dialog opens and the scope fields become available.
 
 3. Set the scope: choose the **system**, **environment**, and **workload** the filter should match. Narrow it further with a **tag key** and **tag value** if you only want to match alerts carrying a specific tag.
    The filter targets only alerts matching every field you set.
-   [[SCREENSHOT: /settings/alert-filters — the create form with source, scope, and tag fields]]
+   ![The Create Omit Tag Filter dialog with alert source, system, environment, workload, and tag fields](../assets/alert-filter-dialog.png)
+   *Figure: the alert filter form.*
 
 4. Save the filter.
    It appears in the table and applies to matching alerts on future runs.

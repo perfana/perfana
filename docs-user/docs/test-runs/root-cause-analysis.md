@@ -10,7 +10,8 @@ This lets you go from "a run regressed" to "here is where it went wrong" by digg
 
 1. Open the run and select the **Root Cause Analysis** tab.
    You see the analysis cards available for this run.
-   [[SCREENSHOT: /test-runs/[id] — Root Cause Analysis tab, highlight the available cards]]
+   ![The Root Cause Analysis tab with Distributed Tracing, Pyroscope Profiling, and AWR Reports cards](../assets/run-rca.png)
+   *Figure: the Root Cause Analysis tab. A card appears for each connected integration.*
 
 2. Use the **Dynatrace** card to inspect application and infrastructure metrics. Apply its filters to narrow to the service, host, or timeframe you care about.
    You can correlate the regression with CPU, memory, or response-time data from Dynatrace. Appears only when Dynatrace is connected — see [Connect Dynatrace](../integrations/connect-dynatrace.md).

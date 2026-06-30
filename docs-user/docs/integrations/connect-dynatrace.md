@@ -15,7 +15,8 @@ Connect Dynatrace so Perfana can pull problems and service metrics into a test r
 3. Select your deployment type, **Managed** or **SaaS**.
    The form adjusts to the deployment you chose.
 4. Enter the **environment URL** and your **API token**.
-   [[SCREENSHOT: /integrations — the Dynatrace connection dialog with deployment type, URL, and token fields]]
+   ![The Add Integration dialog with Grafana, Dynatrace, Pyroscope, and Distributed Tracing options](../assets/integration-picker.png)
+   *Figure: choose Dynatrace in the Add Integration dialog.*
 5. Set the **request-attribute mapping** so Perfana can match Dynatrace requests to your test runs: map the attribute that carries the **test-run id** and the attribute that carries the **request name**.
    These mappings let Perfana correlate Dynatrace data with the correct run and transactions.
 6. Click **Test Connection**.

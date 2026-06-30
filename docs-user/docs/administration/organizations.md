@@ -8,12 +8,14 @@ Create and manage organizations, their members, and their teams. An organization
 **Steps**
 1. In the sidebar, open **Organizations** (under Settings).
    The Organizations page opens with "Manage your organizations and their members".
-   [[SCREENSHOT: /settings/organizations — the organizations list with the Create Organization button]]
+   ![The Organizations page with the Create Organization button](../assets/organizations.png)
+   *Figure: the Organizations page.*
 2. Click **Create Organization** and enter its details.
    The new organization appears in the list.
 3. Open an organization to manage it.
    The organization detail page opens with **Settings**, **Members**, and **Teams** tabs.
-   [[SCREENSHOT: /settings/organizations/[id] — the Settings, Members, and Teams tabs]]
+   ![An organization's detail page with Settings, Members, and Teams tabs](../assets/org-detail.png)
+   *Figure: an organization's Settings, Members, and Teams tabs.*
 4. On the **Settings** tab, edit the organization's details.
    Your changes are saved to the organization.
 5. On the **Members** tab, add or remove members and set each member's role.

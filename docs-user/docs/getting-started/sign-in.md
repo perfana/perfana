@@ -8,19 +8,19 @@ Sign in to reach your dashboards, test runs, and analysis. Do this every time yo
 
 **Steps**
 1. Open Perfana in your browser. You land on the **Sign in to Perfana** screen.
-   You see a **Sign In with Keycloak** button and, below it, a fallback email and password form.
-   [[SCREENSHOT: /signin — the Sign In with Keycloak button and the email/password fallback]]
+   You see a **Sign In with Keycloak** button under the heading "Sign in with your enterprise credentials".
+   ![The Perfana sign-in screen with the Sign In with Keycloak button](../assets/sign-in.png)
+   *Figure: the Perfana sign-in screen.*
 2. Click **Sign In with Keycloak**.
    You are taken to your organization's login page, where you enter your work credentials.
 3. Enter your username and password on the Keycloak page, then confirm.
    You return to Perfana and land on the **Home** page.
-   [[SCREENSHOT: / — the Home page after a successful sign-in]]
+   ![The Perfana Home page shown after signing in](../assets/home.png)
+   *Figure: the Home page after sign-in.*
 
-**If you don't use SSO**
+**If your install doesn't use Keycloak**
 
-Use the email and password form on the sign-in screen instead of the Keycloak button. Enter your email and password, then click the sign-in button. For the demo environment, use `perfana@example.com` / `perfana`.
-
-If you forgot your password, click **Forgot your password?** and follow the reset instructions.
+Some installs are configured without Keycloak. On those, the sign-in screen shows an email and password form instead of the **Sign In with Keycloak** button. Enter your email and password, then click the sign-in button. For the demo environment, use `perfana@example.com` / `perfana`.
 
 **Result**
 You are signed in and viewing the **Home** page, with the sidebar visible on the left.

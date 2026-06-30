@@ -17,11 +17,13 @@ This lets you bring a JMeter `.jtl` result file into Perfana by hand, without wi
 
 2. Click **Upload JTL**.
    The upload dialog opens.
-   [[SCREENSHOT: /test-runs — highlight the Upload JTL button]]
+   ![The Test Runs list with the Upload JTL button](../assets/test-runs-list.png)
+   *Figure: the Upload JTL button on the Test Runs list.*
 
 3. **Choose your `.jtl` file** and fill in the run details (system, environment, workload) the dialog asks for.
    The file is staged and the run details are set.
-   [[SCREENSHOT: /test-runs — the Upload JTL dialog, highlight the file picker and run-detail fields]]
+   ![The Upload JTL dialog with a file picker and run-detail fields](../assets/upload-jtl-dialog.png)
+   *Figure: the Upload JTL dialog.*
 
 4. **Confirm the upload.**
    Perfana ingests the file and creates a run. A new row appears on the Test Runs list.

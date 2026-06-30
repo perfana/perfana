@@ -7,16 +7,16 @@ A reporting template defines what a generated report contains and how it is laid
 - The Reporting integration is connected (the **Reporting Templates** tab appears only when it is).
 
 **Steps**
-1. Open the system from **Systems Under Test** (`/systems`) using its **Actions** button.
+1. Open the system from **Systems Under Test** (`/systems`) using its **Edit Config** button.
    You see the system's configuration page.
 
 2. Open the **Reporting Templates** tab.
    You see the templates already defined for this system.
-   [[SCREENSHOT: /systems/[id]/config — the Reporting Templates tab]]
+   ![The Reporting Templates tab in system configuration](../assets/sut-reporting-templates.png)
+   *Figure: the Reporting Templates tab.*
 
 3. Create a template and configure how it shapes the report.
    The template appears in the list and can be used when generating reports.
-   [[SCREENSHOT: /systems/[id]/config — creating a reporting template]]
 
 4. To remove a template, delete it and confirm in the dialog.
    The template is removed from the list once you confirm.

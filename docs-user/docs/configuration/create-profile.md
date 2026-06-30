@@ -9,14 +9,16 @@ A profile is a reusable bundle of dashboards and SLOs. Create one so new test ru
 **Steps**
 1. Go to **Profiles** (`/settings/profiles`).
    You see a table of existing profiles.
-   [[SCREENSHOT: /settings/profiles — the Profiles table and the Add Profile control]]
+   ![The Profiles list with the Add Profile button](../assets/profiles.png)
+   *Figure: the Profiles list.*
 
 2. Click **Add Profile**, then enter a **name** and **description**.
    The profile appears in the table.
 
 3. Open the new profile to see its detail page (`/settings/profiles/[id]`).
    You see the profile's tabs: **Dashboards**, **Service Level Objectives**, and **Deep Links** (coming soon).
-   [[SCREENSHOT: /settings/profiles/[id] — the profile detail tabs]]
+   ![A profile's detail page with Dashboards, Service Level Objectives, and Deep Links tabs](../assets/profile-detail.png)
+   *Figure: a profile's detail tabs.*
 
 4. On the **Dashboards** tab, click **Add Dashboard** and add each dashboard you want runs to inherit.
    The dashboards appear in the list.

@@ -10,11 +10,11 @@ This lets you see how one run stacks up against another, and how a metric moves 
 
 1. On the **Reporting** tab, find the **Compare** card.
    The card shows the comparison entry point for the current run.
-   [[SCREENSHOT: /test-runs/[id] — Reporting tab, highlight the Compare card]]
+   ![The Reporting tab with the Reports, Trends, and Compare cards](../assets/run-reporting.png)
+   *Figure: the Reporting tab - use the Compare card for two runs, Trends across many.*
 
 2. **Pick the run to compare against.**
    Perfana lines up the two runs side by side, showing the metric differences between them.
-   [[SCREENSHOT: /test-runs/[id] — the Compare result, highlight the side-by-side metric differences]]
 
 3. Read the differences to see what changed between the two runs.
    You can tell whether response times, throughput, or errors moved, and in which direction.
@@ -23,7 +23,6 @@ This lets you see how one run stacks up against another, and how a metric moves 
 
 1. On the **Reporting** tab, find the **Trends** card.
    The card shows how a metric has changed across a series of runs.
-   [[SCREENSHOT: /test-runs/[id] — Reporting tab, highlight the Trends card]]
 
 2. **Choose the metric** you want to follow.
    The trend line plots that metric run over run, so a gradual climb or drop stands out.

@@ -7,16 +7,16 @@ Service Level Objectives (SLOs) are the checks Perfana evaluates against each te
 - You know the metric and threshold you want to enforce (for example, p95 response time under 500 ms).
 
 **Steps**
-1. Open the system from **Systems Under Test** (`/systems`) using its **Actions** button.
+1. Open the system from **Systems Under Test** (`/systems`) using its **Edit Config** button.
    You see the system's configuration page.
 
 2. Open the **Service Level Objectives** tab.
    You see the SLOs already defined for this system.
-   [[SCREENSHOT: /systems/[id]/config — the Service Level Objectives tab]]
+   ![The Service Level Objectives tab in system configuration](../assets/sut-slo-config.png)
+   *Figure: the Service Level Objectives tab for a system.*
 
 3. Add a Service Level Objective and set the metric, the comparison, and the threshold (for example, **p95 < 500 ms**).
    The check appears in the list and applies to future runs.
-   [[SCREENSHOT: /systems/[id]/config — adding a check with metric and threshold]]
 
 4. Save the check.
    New runs of this system are now evaluated against it.

@@ -9,15 +9,14 @@ This lets you turn a test run into a shareable HTML report and send it to people
 
 1. On the **Reporting** tab, find the **Report** card and click **Generate Report**.
    The generate-report dialog opens.
-   [[SCREENSHOT: /test-runs/[id] — Reporting tab, highlight the Generate Report button on the Report card]]
+   ![The Reporting tab with the Reports card and a Generate Report action](../assets/run-reporting.png)
+   *Figure: the Reporting tab - generate a report from the Reports card.*
 
 2. **Confirm the report options** in the dialog and generate it.
    Perfana builds the report and opens it as an HTML report in a modal.
-   [[SCREENSHOT: /test-runs/[id] — the generated HTML report modal]]
 
 3. **Share the report** using its share link. The link points to `/reports/share/[shareId]`.
    Anyone with the link can open the report without signing in to Perfana.
-   [[SCREENSHOT: /reports/share/[shareId] — the shared report view, highlight the Refresh and Print actions]]
 
 **Result**
 You have an HTML report for the run and a link you can send to others.

@@ -15,7 +15,8 @@ Connect Pyroscope so Perfana can surface continuous-profiling (flame graph) data
    - **Standalone** — enter the Pyroscope server URL and credentials.
    - **Grafana app** — point at your Grafana instance that hosts the Pyroscope app.
    The form adjusts to the mode you chose.
-   [[SCREENSHOT: /integrations — the Pyroscope connection dialog with standalone vs Grafana-app choice]]
+   ![The Add Integration dialog with Grafana, Dynatrace, Pyroscope, and Distributed Tracing options](../assets/integration-picker.png)
+   *Figure: choose Pyroscope in the Add Integration dialog.*
 4. Click **Test Connection**.
    Perfana confirms it can reach Pyroscope.
 5. Save the integration.

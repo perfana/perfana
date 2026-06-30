@@ -8,12 +8,12 @@ Review who changed what and when across Perfana. Use audit logs to investigate a
 **Steps**
 1. In the sidebar, open **Audit Logs**.
    The audit table opens with columns for Timestamp, Actor, Action, Resource, System under test, and Org.
-   [[SCREENSHOT: /audit-logs — the audit table with its column headers]]
+   ![The Audit Logs page with the filter bar and the audit table](../assets/audit-logs.png)
+   *Figure: the Audit Logs page - filter bar above the audit table.*
 2. Set any filters you need: **Resource Type**, **Action**, **Organization**, **User**, **System under test**, and a **From**/**To** date range.
    The filters define which events you want to see.
 3. Click **Apply**.
    The table refreshes to show only matching events.
-   [[SCREENSHOT: /audit-logs — the filter bar with Apply and Reset]]
 4. Page through the results using the pagination controls.
    Older or newer matching events load as you page.
 5. To clear all filters, click **Reset**.

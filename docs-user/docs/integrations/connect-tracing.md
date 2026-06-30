@@ -14,7 +14,8 @@ Connect a distributed-tracing backend so Perfana can link traces into a test run
 3. Select your backend: **Tempo**, **Jaeger**, or **Elastic APM**.
    The form adjusts to the backend you chose.
 4. Enter the backend URL and any required credentials.
-   [[SCREENSHOT: /integrations — the Distributed Tracing dialog with backend choice and URL fields]]
+   ![The Add Integration dialog with Grafana, Dynatrace, Pyroscope, and Distributed Tracing options](../assets/integration-picker.png)
+   *Figure: choose Distributed Tracing in the Add Integration dialog.*
 5. Choose how Perfana shows traces: **embed (iframe)** to display the tracing UI inside Perfana, or **external link** to open it in a new tab.
    This controls how the Distributed Tracing card behaves on a test run.
 6. Click **Test Connection**.

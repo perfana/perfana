@@ -11,12 +11,12 @@ Create an API key so your CI pipeline or load-test tool can authenticate to Perf
    The Settings hub opens with the subtitle "Manage your API keys and notification settings".
 2. On the **API Keys** card, click **Create API Key**.
    A dialog opens for the new key.
-   [[SCREENSHOT: /settings — the API Keys card with the Create API Key button]]
+   ![The Settings page with the API Keys card and the Create API Key button](../assets/settings.png)
+   *Figure: the Settings page - the API Keys card.*
 3. Give the key a description and **scope it to an organization**.
    The key will only authenticate for resources in that organization.
 4. Create the key, then **copy the token**.
    The full token is shown only once — copy and store it securely now.
-   [[SCREENSHOT: /settings — the dialog showing the generated token with a copy action]]
 5. Use the token as a Bearer token in your CI/load-test tool when sending runs.
    Requests authenticated with the key can ingest test runs into the scoped organization.
 

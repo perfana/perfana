@@ -9,14 +9,16 @@ Connect a Grafana instance so Perfana can pull dashboards, panels, and metrics f
 **Steps**
 1. In the sidebar, open **Integrations**.
    The Integrations page lists your connected tools under "Connect your performance testing tools and observability platforms".
-   [[SCREENSHOT: /integrations — the Integrations page with the Add Integration button]]
+   ![The Integrations page with connected instances and the Add Integration button](../assets/integrations.png)
+   *Figure: the Integrations page.*
 2. Click **Add Integration**.
    A picker dialog opens listing the available integration types.
 3. Choose **Grafana**, then click **Connect**.
    The Grafana connection dialog opens.
 4. Enter the Grafana **base URL** (for example `https://grafana.example.com`) and your **API token/key**.
    If your Grafana uses organizations, set the **org id**. Enable snapshot support here if you use snapshot instances.
-   [[SCREENSHOT: /integrations — the Grafana connection dialog with URL and token fields]]
+   ![The Add Integration dialog with Grafana, Dynatrace, Pyroscope, and Distributed Tracing options](../assets/integration-picker.png)
+   *Figure: choose Grafana in the Add Integration dialog.*
 5. Click **Test Connection**.
    Perfana confirms it can reach Grafana with the supplied credentials.
 6. Save the integration.

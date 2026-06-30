@@ -9,14 +9,14 @@ Create teams, manage their members, and assign systems to them. Teams group peop
 **Steps**
 1. In the sidebar, open **Teams** (under Settings).
    The Teams page opens with "Manage your teams and their members".
-   [[SCREENSHOT: /settings/teams — the teams list with Filter by Organization and Create Team]]
+   ![The Teams page with the Create Team button](../assets/teams.png)
+   *Figure: the Teams page.*
 2. Use **Filter by Organization** to narrow the list to one organization.
    The list shows only that organization's teams.
 3. Click **Create Team** and enter its details.
    The new team appears in the list.
 4. Open a team to manage it.
    The team detail page opens with **Settings**, **Members**, and **Systems** tabs.
-   [[SCREENSHOT: /settings/teams/[id] — the Settings, Members, and Systems tabs]]
 5. On the **Members** tab, add or remove members and set each member's role.
    Members gain access at the role you assign (team-admin, team-member, or team-viewer).
 6. On the **Systems** tab, assign systems to the team.

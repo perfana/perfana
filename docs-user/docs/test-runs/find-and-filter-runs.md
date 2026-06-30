@@ -8,7 +8,8 @@ Browse all your test runs, narrow the list to the ones you care about, share tha
 **Steps**
 1. In the sidebar, open **Test Runs**.
    You see a paginated table of runs, with running and completed runs listed.
-   [[SCREENSHOT: /test-runs — the test runs table with filters and toolbar]]
+   ![The Test Runs list with the filter bar and the runs table](../assets/test-runs-list.png)
+   *Figure: the Test Runs list - filter by System, Environment, and Workload.*
 2. Narrow the list with the **System**, **Environment**, and **Workload** filters at the top.
    The table updates to show only matching runs.
 3. To clear all filters, click **Reset filters**.
@@ -17,7 +18,6 @@ Browse all your test runs, narrow the list to the ones you care about, share tha
    A link to the current filtered view is copied to your clipboard, ready to paste to a teammate.
 5. To act on several runs at once, select the checkboxes on the rows you want.
    A batch toolbar appears with actions for the selected runs.
-   [[SCREENSHOT: /test-runs — the batch toolbar shown after selecting multiple rows]]
 
 **Batch actions**
 

@@ -8,7 +8,8 @@ Read Perfana's automated regression detection (ADAPT) to see whether a run got b
 **Steps**
 1. On the test run, open the **Results** tab and go to **Anomaly Detection**.
    You see the overall verdict for the run and a per-metric list of conclusions.
-   [[SCREENSHOT: /test-runs/[id] — the Anomaly Detection section with overall verdict and per-metric labels]]
+   ![The Anomaly Detection results table with per-metric classifications and Mark as Regression, Variability, and Changepoint buttons](../assets/run-adapt.png)
+   *Figure: Anomaly Detection - per-metric classifications and the review actions.*
 2. Read each metric's label. ADAPT classifies every metric against the baseline as one of:
    - **No change** — the metric is in line with the baseline.
    - **Improvement** — the metric got better.
@@ -18,7 +19,6 @@ Read Perfana's automated regression detection (ADAPT) to see whether a run got b
    The list shows only metrics with the conclusion you chose, so you can go straight to regressions.
 4. Review an anomaly and, when you've judged it, accept it.
    The anomaly is marked as reviewed so your team knows it's been looked at.
-   [[SCREENSHOT: /test-runs/[id] — reviewing and accepting an anomaly]]
 
 **Baselines and change points**
 

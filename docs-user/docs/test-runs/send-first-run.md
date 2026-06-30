@@ -14,7 +14,6 @@ This lets your load-test tool (Gatling, JMeter, k6, NeoLoad) push results into P
 
 2. **Find your systemUnderTestId**. Open the system in Perfana, or list your systems through the API at `http://localhost:3001/api/docs`.
    You have the identifier that ties this run to the right system.
-   [[SCREENSHOT: /api/docs — the GET /systems-under-test endpoint, highlight the id field in the response]]
 
 3. **Have your load-test tool call `POST /api/test-runs/init`** at the start of the test, with the API key as a Bearer token and the three coordinates in the JSON body. A minimal example:
 
@@ -34,7 +33,8 @@ This lets your load-test tool (Gatling, JMeter, k6, NeoLoad) push results into P
 
 4. **Watch the run appear** on the Test Runs list at `/test-runs`.
    A new row shows up for your run, with its system, environment, and workload.
-   [[SCREENSHOT: /test-runs — the new run row, highlight status and the SUT/environment/workload columns]]
+   ![The Test Runs list showing runs with System, Environment, and Workload columns](../assets/test-runs-list.png)
+   *Figure: your run appears in the Test Runs list.*
 
 5. **Let the test finish.** When your tool signals completion (or the test window ends), Perfana runs analysis automatically, including ADAPT regression detection.
    The run moves out of INITIALIZING and its checks and analysis become available on the run detail page.
