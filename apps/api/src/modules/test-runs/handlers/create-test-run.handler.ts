@@ -22,6 +22,7 @@ import { DatabaseException } from '../../../common/exceptions/business.exception
 import { TestRun } from '../types/test-run.types';
 import { AdaptConfig } from '../../../types';
 import { AuditService } from '../../audit/audit.service';
+import { TestRunLookupService } from '../services/test-run-lookup.service';
 
 @Injectable()
 export class CreateTestRunHandler implements ICommandHandler<CreateTestRunCommand, TestRunMutationResult> {
@@ -34,6 +35,7 @@ export class CreateTestRunHandler implements ICommandHandler<CreateTestRunComman
     private readonly changePointsRepo: Repository<DsChangePoints>,
     private readonly testRunsGateway: TestRunsGateway,
     private readonly auditService: AuditService,
+    private readonly lookupService: TestRunLookupService,
   ) {}
 
   /**
@@ -113,6 +115,14 @@ export class CreateTestRunHandler implements ICommandHandler<CreateTestRunComman
 
       // Create changepoint if this is the first test run for this combination
       await this.createChangepointIfFirstTestRun(data);
+
+      // Persist BASELINE as the combination's default adapt mode so every
+      // subsequent run inherits it (storeTestRun reads workloadConfig.adaptMode)
+      // until the user changes it. Without this, only this first run is BASELINE
+      // and run #2 falls back to DEFAULT.
+      if (isFirstTestRun) {
+        await this.seedBaselineWorkloadConfig(data);
+      }
 
       this.logger.log(`Successfully created test run: ${data.testRunId}`);
 
@@ -226,6 +236,29 @@ export class CreateTestRunHandler implements ICommandHandler<CreateTestRunComman
             ? (error as Error).message
             : 'Unknown error'
         }`
+      );
+    }
+  }
+
+  /**
+   * Seeds adaptMode=BASELINE onto the workload config for the first run of a
+   * combination. Best-effort: a failure here must not break test run creation.
+   */
+  private async seedBaselineWorkloadConfig(data: CreateTestRunData): Promise<void> {
+    try {
+      await this.lookupService.updateWorkloadConfig(
+        data.systemUnderTestId,
+        data.testEnvironment,
+        data.workload,
+        { adaptMode: 'BASELINE' },
+      );
+      this.logger.log(
+        `Seeded BASELINE adapt mode for combination ` +
+        `${data.systemUnderTestId}/${data.testEnvironment}/${data.workload}`,
+      );
+    } catch (error) {
+      this.logger.error(
+        `Failed to seed BASELINE workload config for ${data.testRunId}: ${(error as Error).message}`,
       );
     }
   }
