@@ -5,6 +5,7 @@ import { TestRun as TestRunEntity, DsChangePoints } from '../../../entities';
 import { TestRunsGateway } from '../gateways/test-runs.gateway';
 import { AuditService } from '../../audit/audit.service';
 import { CreateTestRunCommand } from '../commands/create-test-run.command';
+import { TestRunLookupService } from '../services/test-run-lookup.service';
 
 const baseData = {
   testRunId: 'run-001',
@@ -21,6 +22,7 @@ describe('CreateTestRunHandler — first-run baseline', () => {
   let handler: CreateTestRunHandler;
   let mockTestRunRepo: { count: jest.Mock; create: jest.Mock; save: jest.Mock; findOne: jest.Mock };
   let mockChangePointsRepo: { findOne: jest.Mock; create: jest.Mock; save: jest.Mock };
+  let mockLookupService: { updateWorkloadConfig: jest.Mock };
 
   // Echo the entity back from save with the fields mapEntityToTestRun reads.
   const savedEntity = () => ({
@@ -41,6 +43,7 @@ describe('CreateTestRunHandler — first-run baseline', () => {
       create: jest.fn((d) => d),
       save: jest.fn(),
     };
+    mockLookupService = { updateWorkloadConfig: jest.fn().mockResolvedValue(undefined) };
 
     const module = await Test.createTestingModule({
       providers: [
@@ -49,6 +52,7 @@ describe('CreateTestRunHandler — first-run baseline', () => {
         { provide: getRepositoryToken(DsChangePoints), useValue: mockChangePointsRepo },
         { provide: TestRunsGateway, useValue: { emitTestRunCreated: jest.fn() } },
         { provide: AuditService, useValue: { logCreate: jest.fn() } },
+        { provide: TestRunLookupService, useValue: mockLookupService },
       ],
     }).compile();
 
@@ -81,5 +85,26 @@ describe('CreateTestRunHandler — first-run baseline', () => {
       mode: 'DEFAULT',
       differencesAccepted: 'TBD',
     });
+  });
+
+  it('persists BASELINE to the workload config on the first run so future runs inherit it', async () => {
+    mockTestRunRepo.count.mockResolvedValueOnce(0).mockResolvedValueOnce(1);
+
+    await handler.execute(new CreateTestRunCommand(baseData, { skipEvents: true }));
+
+    expect(mockLookupService.updateWorkloadConfig).toHaveBeenCalledWith(
+      'sut-1',
+      'test',
+      'load',
+      { adaptMode: 'BASELINE' },
+    );
+  });
+
+  it('does not touch the workload config for a subsequent run', async () => {
+    mockTestRunRepo.count.mockResolvedValueOnce(1).mockResolvedValueOnce(2);
+
+    await handler.execute(new CreateTestRunCommand(baseData, { skipEvents: true }));
+
+    expect(mockLookupService.updateWorkloadConfig).not.toHaveBeenCalled();
   });
 });

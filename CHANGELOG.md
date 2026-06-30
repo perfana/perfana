@@ -4,6 +4,11 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
+## [0.2.61.22] - 2026-06-30
+
+### Fixed
+- **First-run BASELINE adapt mode now persists to the workload config, so every subsequent run inherits it.** v0.2.61.17 forced `adaptConfig.mode=BASELINE` on the first test run of a sut/test-environment/workload combination, but only stamped that single run — it never wrote `adaptMode` to the workload's config. Since `storeTestRun` resolves the mode as `DTO override > workloadConfig.adaptMode > DEFAULT`, run #2 read a null `workloadConfig.adaptMode` and silently fell back to `DEFAULT`, so only the very first run was ever BASELINE. `CreateTestRunHandler` now also writes `adaptMode=BASELINE` to `SystemUnderTestWorkload.config` on the first run (via the existing `TestRunLookupService.updateWorkloadConfig`), the same field the SUT config → ADAPT Mode tab reads/writes. Every future run of the combination stays BASELINE until the user changes it in that tab. Best-effort — a config-write failure logs but does not break test run creation, matching the sibling first-run changepoint seeding.
+
 ## [0.2.61.21] - 2026-06-28
 
 ### Security
