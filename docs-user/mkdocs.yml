@@ -1,0 +1,64 @@
+site_name: Perfana User Guide
+site_description: How to use Perfana to send, read, and analyze performance test runs.
+site_url: https://perfana.github.io/perfana/
+
+theme:
+  name: material
+  features:
+    - navigation.instant
+    - navigation.sections
+    - navigation.top
+    - navigation.tracking
+    - search.highlight
+    - search.suggest
+    - content.code.copy
+  palette:
+    - scheme: default
+      toggle: { icon: material/weather-night, name: Switch to dark mode }
+    - scheme: slate
+      toggle: { icon: material/weather-sunny, name: Switch to light mode }
+
+markdown_extensions:
+  - admonition
+  - pymdownx.details
+  - pymdownx.superfences
+  - attr_list
+  - md_in_html
+  - toc: { permalink: true }
+
+plugins:
+  - search
+
+nav:
+  - Home: index.md
+  - Concepts: concepts.md
+  - Getting started:
+      - Sign in to Perfana: getting-started/sign-in.md
+      - Navigate Perfana: getting-started/navigating.md
+  - Test runs:
+      - Send your first test run: test-runs/send-first-run.md
+      - Upload a JMeter result file: test-runs/upload-jtl.md
+      - Find and filter test runs: test-runs/find-and-filter-runs.md
+      - Read a test run: test-runs/read-a-run.md
+      - Check SLO results: test-runs/slo-check-results.md
+      - Understand ADAPT verdicts: test-runs/understand-adapt.md
+      - Compare test runs: test-runs/compare-runs.md
+      - Investigate root cause: test-runs/root-cause-analysis.md
+      - Generate and share a report: test-runs/generate-report.md
+  - Configuration:
+      - Create a system under test: configuration/create-system-under-test.md
+      - Define SLOs: configuration/define-slos.md
+      - Create a profile: configuration/create-profile.md
+      - Configure ADAPT: configuration/adapt-settings.md
+      - Set up alert filters: configuration/alert-filters.md
+      - Manage reporting templates: configuration/reporting-templates.md
+  - Integrations:
+      - Connect Grafana: integrations/connect-grafana.md
+      - Connect Dynatrace: integrations/connect-dynatrace.md
+      - Connect Pyroscope: integrations/connect-pyroscope.md
+      - Connect distributed tracing: integrations/connect-tracing.md
+  - Administration:
+      - Create an API key: administration/api-keys.md
+      - Manage organizations: administration/organizations.md
+      - Manage teams: administration/teams.md
+      - Review audit logs: administration/audit-logs.md
