@@ -7,8 +7,8 @@ theme:
   font:
     text: Inter
     code: Roboto Mono
-  icon:
-    logo: material/chart-line
+  logo: assets/perfana-logo.svg
+  favicon: assets/favicon.png
   features:
     - navigation.tabs
     - navigation.tabs.sticky
