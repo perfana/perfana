@@ -149,19 +149,32 @@ Response: `{ testRunId, scenarioCount, message }`.
 
 ## Read results for a build gate
 
-Use these to decide pass/fail in your pipeline. `{testRunId}` is your run's id string.
+The run record carries a **consolidated verdict**, so your pipeline can gate on a single
+field. `{testRunId}` is your run's id string.
 
 | Endpoint | Returns |
 |---|---|
-| `GET /api/test-runs/{testRunId}/check-results` | SLO (check) results — **the primary pass/fail source** |
-| `GET /api/test-runs/{testRunId}` | The full run record (status, completed, aborted, …) — poll for status |
-| `GET /api/test-runs/{testRunId}/anomaly-detection` | ADAPT anomaly results for the run |
+| `GET /api/test-runs/{testRunId}` | The full run record, including `consolidatedResult`, `valid`, and status |
+| `GET /api/test-runs/{testRunId}/check-results` | Per-SLO (check) results — the detail behind the verdict |
+| `GET /api/test-runs/{testRunId}/anomaly-detection` | ADAPT anomaly results — the detail behind the verdict |
 
-!!! note "There is no single boolean verdict endpoint"
-    Perfana doesn't expose one "did it pass?" flag for a whole run. Build your gate from
-    `check-results` (SLOs), and optionally the anomaly-detection results. Poll
-    `GET /api/test-runs/{testRunId}` until the run is no longer `INITIALIZING` before
-    reading results.
+The `consolidatedResult` object on the run is the pass/fail verdict:
+
+| Field | Meaning |
+|---|---|
+| `overall` | **The gate** — `true` when both the SLOs and ADAPT pass |
+| `meetsRequirement` | All SLO requirements met |
+| `adaptTestRunOK` | ADAPT analysis passed (no unaccepted regressions) |
+| `requirementsOK` | All individual requirements passed |
+
+The run also exposes `valid` (boolean) with `reasonsNotValid` (string[]) — whether the run
+had enough data to be judged at all.
+
+!!! tip "Gating pattern"
+    Poll `GET /api/test-runs/{testRunId}` until the run has finished analysis (it leaves
+    `INITIALIZING` and `consolidatedResult` is populated), then fail the build when
+    `valid` is `true` **and** `consolidatedResult.overall` is `false`. Use `check-results`
+    or `anomaly-detection` if you want to report *why* it failed.
 
 ## Manage API keys
 
