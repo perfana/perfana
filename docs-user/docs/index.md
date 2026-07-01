@@ -1,35 +1,72 @@
-# Perfana User Guide
+<div class="pf-hero" markdown>
 
-Perfana tells you whether a release meets its performance expectations. It collects
-metrics from your performance tests, compares each run against historical baselines,
-and automatically flags regressions and improvements — so you can decide whether to
-ship.
+# How can we help?
 
-This guide is for the people who **use** Perfana: performance engineers reading and
-comparing test runs, and administrators setting up systems, integrations, and teams.
-It is task-based — each article answers one question and walks you through it
-step by step.
+Find answers step by step — from your first test run to interpreting ADAPT
+verdicts and setting up your whole team.
 
-## New to Perfana?
+<span class="pf-search-hint">:material-magnify: &nbsp; Press **/** or use the search box above to find any topic</span>
 
-Start here, in order:
+</div>
 
-1. **[Concepts](concepts.md)** — the handful of terms you need (test run, SUT, ADAPT, profile).
-2. **[Sign in to Perfana](getting-started/sign-in.md)** — get into the app.
-3. **[Navigate Perfana](getting-started/navigating.md)** — find your way around.
-4. **[Read a test run](test-runs/read-a-run.md)** — the core thing you'll do every day.
+## Browse by topic
 
-## Find a task
+<div class="grid cards" markdown>
 
-| I want to… | Go to |
-|---|---|
-| Send test results from my CI pipeline | [Send your first test run](test-runs/send-first-run.md) |
-| Upload a JMeter `.jtl` file by hand | [Upload a JMeter result file](test-runs/upload-jtl.md) |
-| Understand why a run passed or failed | [Check SLO results](test-runs/slo-check-results.md) · [Understand ADAPT verdicts](test-runs/understand-adapt.md) |
-| Compare two runs | [Compare test runs](test-runs/compare-runs.md) |
-| Find the root cause of a regression | [Investigate root cause](test-runs/root-cause-analysis.md) |
-| Share results with my team | [Generate and share a report](test-runs/generate-report.md) |
-| Set up a new application to test | [Create a system under test](configuration/create-system-under-test.md) |
-| Connect Grafana, Dynatrace, or tracing | [Integrations](integrations/connect-grafana.md) |
-| Give a CI pipeline programmatic access | [Create an API key](administration/api-keys.md) |
-| Manage who can see what | [Manage organizations](administration/organizations.md) · [Manage teams](administration/teams.md) |
+-   :material-rocket-launch:{ .lg .middle } **Getting started**
+
+    ---
+
+    Sign in and find your way around the app.
+
+    [:octicons-arrow-right-24: Get started](getting-started/index.md)
+
+-   :material-flask:{ .lg .middle } **Test runs**
+
+    ---
+
+    Send, read, compare, and report on your performance tests.
+
+    [:octicons-arrow-right-24: Work with test runs](test-runs/index.md)
+
+-   :material-tune-vertical:{ .lg .middle } **Configuration**
+
+    ---
+
+    Set up systems, SLOs, profiles, and ADAPT.
+
+    [:octicons-arrow-right-24: Configure Perfana](configuration/index.md)
+
+-   :material-connection:{ .lg .middle } **Integrations**
+
+    ---
+
+    Connect Grafana, Dynatrace, Pyroscope, and tracing.
+
+    [:octicons-arrow-right-24: Connect a tool](integrations/index.md)
+
+-   :material-shield-account:{ .lg .middle } **Administration**
+
+    ---
+
+    API keys, organizations, teams, and audit logs.
+
+    [:octicons-arrow-right-24: Administer Perfana](administration/index.md)
+
+-   :material-book-open-variant:{ .lg .middle } **Concepts**
+
+    ---
+
+    The handful of terms you need, in plain language.
+
+    [:octicons-arrow-right-24: Learn the concepts](concepts.md)
+
+</div>
+
+## Popular articles
+
+- [Read a test run](test-runs/read-a-run.md) — the core thing you'll do every day.
+- [Understand ADAPT verdicts](test-runs/understand-adapt.md) — why a run got flagged.
+- [Send your first test run](test-runs/send-first-run.md) — get results in from CI.
+- [Create an API key](administration/api-keys.md) — give a pipeline programmatic access.
+- [Compare test runs](test-runs/compare-runs.md) — see what changed between runs.
