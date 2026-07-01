@@ -1,6 +1,6 @@
 site_name: Perfana Help Center
 site_description: How to use Perfana to send, read, and analyze performance test runs.
-site_url: https://perfana.github.io/perfana/
+site_url: https://docs.perfana.io/
 
 theme:
   name: material

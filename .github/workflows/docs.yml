@@ -1,11 +1,17 @@
-name: Deploy Documentation
+name: Deploy user guide
+
+# Publishes the Perfana user guide (docs-user/, MkDocs Material) to GitHub
+# Pages, served at the custom domain docs.perfana.io.
+#
+# Replaces the former Quartz "Deploy Documentation" workflow: a repo can host
+# only one Pages site, and this one now owns it.
 
 on:
   push:
-    branches:
-      - main
+    branches: [main]
     paths:
-      - "docs-site/**"
+      - 'docs-user/**'
+      - '.github/workflows/docs.yml'
   workflow_dispatch:
 
 permissions:
@@ -13,42 +19,34 @@ permissions:
   pages: write
   id-token: write
 
+# One deployment at a time; never cancel an in-progress publish.
 concurrency:
-  group: "pages"
+  group: pages
   cancel-in-progress: false
 
 jobs:
   build:
-    runs-on: ubuntu-22.04
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: docs-user
     steps:
       - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
         with:
-          fetch-depth: 0
-
-      - uses: actions/setup-node@v4
+          python-version: '3.x'
+      - run: pip install mkdocs-material
+      - run: mkdocs build --strict
+      - uses: actions/upload-pages-artifact@v3
         with:
-          node-version: 22
-
-      - name: Install Dependencies
-        working-directory: docs-site
-        run: npm ci
-
-      - name: Build Quartz
-        working-directory: docs-site
-        run: npx quartz build
-
-      - name: Upload artifact
-        uses: actions/upload-pages-artifact@v3
-        with:
-          path: docs-site/public
+          path: docs-user/site
 
   deploy:
     needs: build
+    runs-on: ubuntu-latest
     environment:
       name: github-pages
       url: ${{ steps.deployment.outputs.page_url }}
-    runs-on: ubuntu-latest
     steps:
-      - name: Deploy to GitHub Pages
-        id: deployment
+      - id: deployment
         uses: actions/deploy-pages@v4
