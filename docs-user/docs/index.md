@@ -53,6 +53,14 @@ verdicts and setting up your whole team.
 
     [:octicons-arrow-right-24: Administer Perfana](administration/index.md)
 
+-   :material-api:{ .lg .middle } **API reference**
+
+    ---
+
+    Endpoints for your load-test tool and CI pipeline.
+
+    [:octicons-arrow-right-24: Use the API](api.md)
+
 -   :material-book-open-variant:{ .lg .middle } **Concepts**
 
     ---

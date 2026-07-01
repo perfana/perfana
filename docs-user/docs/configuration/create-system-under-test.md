@@ -1,19 +1,21 @@
 # Create a system under test
 
-A system under test (SUT) is the application you are load-testing. Create one so Perfana has a place to collect metrics, store test runs, and hold the dashboards, SLOs, and ADAPT settings for that application.
+A system under test (SUT) is the application you are load-testing. It's where Perfana collects metrics, stores test runs, and holds the dashboards, SLOs, and ADAPT settings for that application.
+
+You **don't** create a SUT in the web app. Perfana creates one automatically the first time you send a test run with a new system name. This article shows how a SUT comes into being and where you configure it afterwards.
 
 **Before you start**
-- Select your active organization in the sidebar.
-- Open the **Configuration** group in the sidebar.
+- An **API key** to send a test run. See [Create an API key](../administration/api-keys.md).
+- A **name** for the system — for example `checkout-service`.
 
 **Steps**
-1. Go to **Systems Under Test** (`/systems`).
-   You see a table of existing systems, with columns for name, description, number of environments, and number of workloads.
-   ![The Systems Under Test list with the create control](../assets/systems.png)
-   *Figure: the Systems Under Test list.*
+1. **Send a test run with a new system name.** Point your load-test tool at `POST /api/test` and set `systemUnderTest` to the name of your application. If no system with that name exists yet, Perfana creates it.
+   The system now exists in Perfana. See [Send your first test run](../test-runs/send-first-run.md) for the full call.
 
-2. Create a new system and give it a **name** and **description**.
-   The new system appears in the table.
+2. Go to **Systems Under Test** (`/systems`).
+   Your new system appears in the table, with columns for name, description, number of environments, and number of workloads.
+   ![The Systems Under Test list](../assets/systems.png)
+   *Figure: the Systems Under Test list.*
 
 3. On the system's row, click **Edit Config** to open its configuration.
    You land on the system's config page (`/systems/[id]/config`), titled with the system name.
@@ -30,12 +32,13 @@ A system under test (SUT) is the application you are load-testing. Create one so
    - **ADAPT Settings** — see [Configure ADAPT](adapt-settings.md)
 
 **Result**
-The system appears in the **Systems Under Test** table and its configuration is reachable through **Edit Config**. Test runs sent to Perfana for this system can now collect metrics and produce results.
+The system appears in the **Systems Under Test** table and its configuration is reachable through **Edit Config**. Further test runs sent under the same system name collect metrics and produce results against it.
 
-**CI alternative**
-You can also provision a system from a pipeline using the idempotent provisioning API (`POST /api/systems-under-test`). It creates the system — optionally with its environments and workloads in one call — or returns the existing one with HTTP 409, so the script is safe to run on every build. See [API keys](../administration/api-keys.md) to authenticate the call.
+**CI alternative — provision explicitly**
+If you'd rather create the system up front (for example, to define its environments and workloads before the first run), call the idempotent provisioning API `POST /api/systems-under-test` from your pipeline. It creates the system — optionally with its environments and workloads in one call — or returns the existing one with HTTP 409, so the script is safe to run on every build. See [Create an API key](../administration/api-keys.md) to authenticate the call.
 
 **Related**
+- [Send your first test run](../test-runs/send-first-run.md)
 - [Define SLOs](define-slos.md)
 - [Configure ADAPT](adapt-settings.md)
 - [Manage reporting templates](reporting-templates.md)
