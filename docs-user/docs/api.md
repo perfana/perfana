@@ -164,8 +164,8 @@ The `consolidatedResult` object on the run is the pass/fail verdict:
 |---|---|
 | `overall` | **The gate** — `true` when both the SLOs and ADAPT pass |
 | `meetsRequirement` | All SLO requirements met |
-| `adaptTestRunOK` | ADAPT analysis passed (no unaccepted regressions) |
-| `requirementsOK` | All individual requirements passed |
+| `adaptTestRunOK` | ADAPT analysis passed (no unaccepted regressions); set once ADAPT has run |
+| `error` | Present only if some checks failed to process (with `overall: false`) |
 
 The run also exposes `valid` (boolean) with `reasonsNotValid` (string[]) — whether the run
 had enough data to be judged at all.
