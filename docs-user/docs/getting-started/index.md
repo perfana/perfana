@@ -4,14 +4,6 @@
 
 <div class="grid cards" markdown>
 
--   :material-login:{ .lg .middle } **Sign in to Perfana**
-
-    ---
-
-    Get into the app with your work account.
-
-    [:octicons-arrow-right-24: Sign in](sign-in.md)
-
 -   :material-compass:{ .lg .middle } **Navigate Perfana**
 
     ---

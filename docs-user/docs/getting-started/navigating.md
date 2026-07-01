@@ -3,7 +3,7 @@
 Learn where everything lives so you can get to the task you want quickly.
 
 **Before you start**
-- You need to be signed in. See [Sign in to Perfana](sign-in.md).
+- You need to be signed in to Perfana.
 
 **Steps**
 1. Look at the **sidebar** on the left. This is the main menu and is collapsible.

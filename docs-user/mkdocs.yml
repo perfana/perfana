@@ -51,7 +51,6 @@ nav:
   - Home: index.md
   - Getting started:
       - getting-started/index.md
-      - Sign in to Perfana: getting-started/sign-in.md
       - Navigate Perfana: getting-started/navigating.md
   - Test runs:
       - test-runs/index.md
