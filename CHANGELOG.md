@@ -4,6 +4,11 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
+## [0.2.61.23] - 2026-07-03
+
+### Fixed
+- **Apdex score no longer renders as `NaN` on the performance-analysis card when a transaction's threshold `T` equals the max value in its `pct_agg` t-digest (#416).** timescaledb_toolkit's `approx_percentile_rank(value, tdigest)` returns `NaN` when `value` is exactly the digest's max centroid; since the read-time Apdex expression `rank(T) + (rank(4T) - rank(T)) / 2` subtracts/adds that term, the whole score became `NaN`. This is common because per-transaction thresholds are frequently auto-derived near the observed max, so `T == max` is not rare. All 8 read-time Apdex sites in `test-runs-performance-query.service.ts` (rollup, CAGG live-Apdex, and raw-scan paths) now build their SQL from a single `apdexScoreSql()` helper that wraps every rank in `LEAST(1.0, COALESCE(NULLIF(approx_percentile_rank(...), 'NaN'), 1.0))`, mapping the boundary to `1.0` (all samples satisfied) to match the raw-count semantics of the worker's `ApdexCalculator`. Both the `T` and `4T` ranks are guarded (`4T` can also equal the max on very tight distributions). The report path (`getApdexDataFromDatabase` / `apdex-renderer.ts`) was already count-based (`response_time <= T`) and unaffected.
+
 ## [0.2.61.22] - 2026-06-30
 
 ### Fixed

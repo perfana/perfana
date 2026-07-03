@@ -22,7 +22,7 @@
 import { Test, TestingModule } from '@nestjs/testing';
 import { getRepositoryToken } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
-import { TestRunsPerformanceQueryService } from './test-runs-performance-query.service';
+import { TestRunsPerformanceQueryService, apdexScoreSql } from './test-runs-performance-query.service';
 import { TestRunsMapperService } from './test-runs-mapper.service';
 import { TestRun as TestRunEntity } from '../../../entities';
 import { DatabaseException } from '../../../common/exceptions/business.exception';
@@ -3282,5 +3282,66 @@ describe('TestRunsPerformanceQueryService', () => {
         expect(msg).toMatch(/aggregated metric timeseries/i);
       });
     });
+  });
+});
+
+/**
+ * Issue #416: `approx_percentile_rank(v, tdigest)` returns NaN when `v` equals
+ * the digest's max centroid, poisoning the whole Apdex expression to NaN. The
+ * `apdexScoreSql` helper wraps every rank in `LEAST(1.0, COALESCE(NULLIF(rank,
+ * 'NaN'), 1.0))` so the boundary resolves to 1.0 (all samples satisfied),
+ * matching the raw-count semantics of the worker's `ApdexCalculator`.
+ */
+describe('apdexScoreSql (issue #416 NaN guard)', () => {
+  it('guards BOTH the T rank and the 4T rank', () => {
+    const sql = apdexScoreSql('tc.active_threshold', 'a.pct_agg');
+    // Every approx_percentile_rank call must sit inside a NULLIF(..., 'NaN')
+    const totalRanks = (sql.match(/approx_percentile_rank\(/g) ?? []).length;
+    const guardedRanks = (sql.match(/NULLIF\(approx_percentile_rank\(/g) ?? []).length;
+    expect(totalRanks).toBe(guardedRanks);
+    expect(guardedRanks).toBeGreaterThanOrEqual(2); // T term + 4T term
+    // T and 4T probes both present, both clamped to 1.0
+    expect(sql).toContain('(tc.active_threshold)::double precision');
+    expect(sql).toContain('((tc.active_threshold) * 4)::double precision');
+    expect(sql).toContain("COALESCE(NULLIF(approx_percentile_rank((tc.active_threshold)::double precision, a.pct_agg), 'NaN'), 1.0)");
+    expect(sql).toContain('LEAST(1.0,');
+  });
+
+  /**
+   * Mirror of the guarded SQL semantics: each rank is NULLIF('NaN')→1.0 then
+   * LEAST(1.0, _). Proves the guard yields a finite Apdex equal to the raw
+   * `(satisfied + 0.5·tolerating)/total` count, never NaN.
+   */
+  const evalGuarded = (rank: number) => (Number.isNaN(rank) ? 1.0 : Math.min(1.0, rank));
+  const apdexFromRanks = (rankT: number, rank4T: number) => {
+    const gT = evalGuarded(rankT);
+    const g4T = evalGuarded(rank4T);
+    return gT + (g4T - gT) / 2;
+  };
+  const rawApdex = (satisfied: number, tolerating: number, total: number) =>
+    (satisfied + 0.5 * tolerating) / total;
+
+  it('T == digest max: NaN rank(T) resolves to 1.0, matching all-satisfied counts', () => {
+    // 1188 samples, all <= T (T is the max) => rank(T)=NaN, rank(4T)=1.0
+    const score = apdexFromRanks(NaN, 1.0);
+    expect(Number.isNaN(score)).toBe(false);
+    expect(score).toBeCloseTo(1.0, 6);
+    expect(score).toBeCloseTo(rawApdex(1188, 0, 1188), 6);
+  });
+
+  it('4T == digest max: NaN rank(4T) resolves to 1.0, matching zero-frustrated counts', () => {
+    // 60% satisfied, rest tolerating (nothing frustrated: everything <= 4T = max)
+    const score = apdexFromRanks(0.6, NaN);
+    expect(Number.isNaN(score)).toBe(false);
+    // raw: 600 satisfied, 400 tolerating, 0 frustrated of 1000 => 0.8
+    expect(score).toBeCloseTo(rawApdex(600, 400, 1000), 6);
+    expect(score).toBeCloseTo(0.8, 6);
+  });
+
+  it('normal (no boundary hit): equals the raw count Apdex', () => {
+    // rank(T)=0.7, rank(4T)=0.9 => 700 satisfied, 200 tolerating, 100 frustrated
+    const score = apdexFromRanks(0.7, 0.9);
+    expect(score).toBeCloseTo(rawApdex(700, 200, 1000), 6);
+    expect(score).toBeCloseTo(0.8, 6);
   });
 });
