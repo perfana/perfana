@@ -379,6 +379,10 @@ export class AdaptValidator {
 
     // Fetch control run lists for empty-control-group cases
     const controlRunMap = new Map<string, string[]>();
+    // Count baseline stats per control group to distinguish "no metrics_source match"
+    // (baseline has data but under a different source — e.g. scenario/workload naming
+    // differs between ingestion paths) from "baseline too short/aborted" (no data at all).
+    const statCountMap = new Map<string, number>();
     if (emptyControlGroups.length > 0) {
       const cgPlaceholders = emptyControlGroups.map((_: string, i: number) => `$${i + 1}`).join(', ');
       const cgRows = await manager.query(
@@ -387,6 +391,16 @@ export class AdaptValidator {
       );
       for (const row of cgRows) {
         controlRunMap.set(row.control_group_id, row.test_runs ?? []);
+      }
+      const statRows = await manager.query(
+        `SELECT control_group_id, COUNT(*)::int AS stat_count
+         FROM ds_control_group_statistics
+         WHERE control_group_id IN (${cgPlaceholders})
+         GROUP BY control_group_id`,
+        emptyControlGroups
+      );
+      for (const row of statRows) {
+        statCountMap.set(row.control_group_id, row.stat_count);
       }
     }
 
@@ -413,16 +427,23 @@ export class AdaptValidator {
         }
       } else {
         const controlRuns = controlRunMap.get(testRunId) ?? [];
-        if (controlRuns.length > 0) {
-          const shown = controlRuns.slice(0, 3).join(', ');
-          const extra = controlRuns.length > 3 ? ` and ${controlRuns.length - 3} more` : '';
+        const shown = controlRuns.slice(0, 3).join(', ');
+        const extra = controlRuns.length > 3 ? ` and ${controlRuns.length - 3} more` : '';
+        const runsClause =
+          controlRuns.length > 0
+            ? `${controlRuns.length} control run${controlRuns.length === 1 ? '' : 's'} (${shown}${extra})`
+            : 'the control run(s)';
+
+        if ((statCountMap.get(testRunId) ?? 0) > 0) {
+          // Baseline has data, but none of it matched this run's metrics source.
           message =
-            `ADAPT requires valid baseline data. The ${controlRuns.length} control run${controlRuns.length === 1 ? '' : 's'} ` +
-            `(${shown}${extra}) contained insufficient metrics — they may have been too short or aborted. ` +
-            'Run at least one full-duration test to establish a baseline.';
+            `ADAPT found no comparable metrics: this run and its baseline (${runsClause}) resolved to ` +
+            'different metrics sources — usually different scenario/workload naming between ingestion paths ' +
+            '(e.g. JTL upload vs the jmeter-timescale listener). Verify both runs use the same ' +
+            'system-under-test / environment / workload.';
         } else {
           message =
-            'ADAPT requires valid baseline data. The control runs contained insufficient metrics — ' +
+            `ADAPT requires valid baseline data. The ${runsClause} contained insufficient metrics — ` +
             'they may have been too short or aborted. Run at least one full-duration test to establish a baseline.';
         }
       }

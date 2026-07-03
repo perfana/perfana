@@ -4,6 +4,12 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
+## [0.2.61.24] - 2026-07-03
+
+### Fixed
+- **ADAPT no longer flags sub-threshold noise on saturated / zero-variance metrics as a "partial regression" (#417).** When a control-group metric is perfectly constant (`control_iqr = 0`, e.g. an Apdex saturated at ~1.0), the IQR check's band `control ± (control_iqr * iqrThreshold)` collapsed to zero width, so *any* nonzero test value tripped `iqr.isDifference = true` and produced a "partial regression" — while the same magnitude noise on a metric with real spread (IQR ≈ 50 ms) correctly read as "no difference". Both `AdaptSQLFragments.buildChecksJSONB()` and the inline copy in `TrackedResultsSQLBuilder` now guard the IQR check's `valid` flag and `isDifference` CASE with `control_iqr <> 0`, so a constant baseline makes the IQR check inert and classification falls through to the percentage / absolute checks (a genuine Apdex drop still trips `pct`). Same guard style already used for the informational `iqrDiff` display field.
+- **The ADAPT empty-control-group message now distinguishes "no metrics_source match" from "baseline too short/aborted" (#417).** `writeExclusionConclusions` counts the control group's `ds_control_group_statistics` rows: when the baseline *has* data but none of it matched the run's `metrics_source_id` (usually different scenario/workload naming between ingestion paths), it now says so and points the user at SUT/environment/workload naming, instead of the misleading "the control run(s) contained insufficient metrics — they may have been too short or aborted."
+
 ## [0.2.61.23] - 2026-07-03
 
 ### Fixed

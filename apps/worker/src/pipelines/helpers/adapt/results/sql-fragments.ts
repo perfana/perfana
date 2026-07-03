@@ -179,9 +179,11 @@ export class AdaptSQLFragments {
                       END
                   ),
                   'iqr', jsonb_build_object(
-                      'valid', wds.control_exists AND wds.test_stat_value IS NOT NULL AND wds.control_stat_value IS NOT NULL AND wds.control_iqr IS NOT NULL,
+                      -- control_iqr <> 0 guards saturated / zero-variance baselines (e.g. Apdex ~1.0):
+                      -- a zero-width IQR band would flag any nonzero diff as a difference (#417).
+                      'valid', wds.control_exists AND wds.test_stat_value IS NOT NULL AND wds.control_stat_value IS NOT NULL AND wds.control_iqr IS NOT NULL AND wds.control_iqr <> 0,
                       'isDifference', CASE
-                          WHEN wds.control_exists AND wds.test_stat_value IS NOT NULL AND wds.control_stat_value IS NOT NULL AND wds.control_iqr IS NOT NULL AND (wds.compare_config->'thresholds'->>'iqrThreshold') IS NOT NULL
+                          WHEN wds.control_exists AND wds.test_stat_value IS NOT NULL AND wds.control_stat_value IS NOT NULL AND wds.control_iqr IS NOT NULL AND wds.control_iqr <> 0 AND (wds.compare_config->'thresholds'->>'iqrThreshold') IS NOT NULL
                           THEN (wds.test_stat_value > wds.control_stat_value + (wds.control_iqr * (wds.compare_config->'thresholds'->>'iqrThreshold')::float) OR
                                 wds.test_stat_value < wds.control_stat_value - (wds.control_iqr * (wds.compare_config->'thresholds'->>'iqrThreshold')::float))
                           ELSE false
