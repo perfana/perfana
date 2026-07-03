@@ -29,6 +29,28 @@ export interface SummaryTimeseriesResponse {
 }
 
 /**
+ * Boundary-safe Apdex score SQL fragment. Apdex = satisfied + 0.5·tolerating
+ * (see worker `ApdexCalculator`), approximated from a t-digest as
+ * `rank(T) + (rank(4T) - rank(T)) / 2`.
+ *
+ * `approx_percentile_rank(v, digest)` returns `NaN` when `v` is exactly the
+ * digest's max centroid, which poisons the whole expression to `NaN`
+ * (issue #416). `T == max` is common because thresholds are often auto-derived
+ * near the observed max. `NULLIF(rank, 'NaN')` + `COALESCE(_, 1.0)` maps that
+ * boundary to 1.0 (every sample ≤ v ⇒ all satisfied), matching the raw counts.
+ *
+ * `thresholdExpr` and `aggExpr` are SQL fragments built from trusted column
+ * references, not user input.
+ */
+export function apdexScoreSql(thresholdExpr: string, aggExpr: string): string {
+  const rank = (v: string) =>
+    `LEAST(1.0, COALESCE(NULLIF(approx_percentile_rank(${v}, ${aggExpr}), 'NaN'), 1.0))`;
+  const t = rank(`(${thresholdExpr})::double precision`);
+  const t4 = rank(`((${thresholdExpr}) * 4)::double precision`);
+  return `${t}\n              + (${t4}\n                 - ${t}) / 2`;
+}
+
+/**
  * Service responsible for performance analysis queries
  * Handles: transaction stats, sampler stats, error analysis, virtual users, throughput
  */
@@ -330,9 +352,7 @@ export class TestRunsPerformanceQueryService {
           th.active_threshold,
           ROUND(
             (
-              approx_percentile_rank(th.active_threshold::double precision, a.pct_agg)
-              + (approx_percentile_rank((th.active_threshold * 4)::double precision, a.pct_agg)
-                 - approx_percentile_rank(th.active_threshold::double precision, a.pct_agg)) / 2
+              ${apdexScoreSql('th.active_threshold', 'a.pct_agg')}
             )::numeric,
             3
           ) AS apdex_score
@@ -490,9 +510,7 @@ export class TestRunsPerformanceQueryService {
           a.impact_score, t.active_threshold,
           ROUND(
             (
-              approx_percentile_rank(t.active_threshold::double precision, a.pct_agg_passed)
-              + (approx_percentile_rank((t.active_threshold * 4)::double precision, a.pct_agg_passed)
-                 - approx_percentile_rank(t.active_threshold::double precision, a.pct_agg_passed)) / 2
+              ${apdexScoreSql('t.active_threshold', 'a.pct_agg_passed')}
             )::numeric, 3
           ) AS apdex_score
         FROM agg a
@@ -614,9 +632,7 @@ export class TestRunsPerformanceQueryService {
         tc.active_threshold,
         ROUND(
           (
-            approx_percentile_rank(tc.active_threshold::double precision, a.pct_agg)
-            + (approx_percentile_rank((tc.active_threshold * 4)::double precision, a.pct_agg)
-               - approx_percentile_rank(tc.active_threshold::double precision, a.pct_agg)) / 2
+            ${apdexScoreSql('tc.active_threshold', 'a.pct_agg')}
           )::numeric,
           3
         ) AS apdex_score
@@ -785,9 +801,7 @@ export class TestRunsPerformanceQueryService {
         tc.active_threshold,
         ROUND(
           (
-            approx_percentile_rank(tc.active_threshold::double precision, a.pct_agg_passed)
-            + (approx_percentile_rank((tc.active_threshold * 4)::double precision, a.pct_agg_passed)
-               - approx_percentile_rank(tc.active_threshold::double precision, a.pct_agg_passed)) / 2
+            ${apdexScoreSql('tc.active_threshold', 'a.pct_agg_passed')}
           )::numeric, 3
         ) AS apdex_score
       FROM agg a CROSS JOIN threshold_config tc
@@ -1024,9 +1038,7 @@ export class TestRunsPerformanceQueryService {
             th.active_threshold,
             ROUND(
               (
-                approx_percentile_rank(th.active_threshold::double precision, a.pct_agg)
-                + (approx_percentile_rank((th.active_threshold * 4)::double precision, a.pct_agg)
-                   - approx_percentile_rank(th.active_threshold::double precision, a.pct_agg)) / 2
+                ${apdexScoreSql('th.active_threshold', 'a.pct_agg')}
               )::numeric,
               3
             ) AS apdex_score
@@ -1318,9 +1330,7 @@ export class TestRunsPerformanceQueryService {
           tc.active_threshold,
           ROUND(
             (
-              approx_percentile_rank(tc.active_threshold::double precision, a.pct_agg)
-              + (approx_percentile_rank((tc.active_threshold * 4)::double precision, a.pct_agg)
-                 - approx_percentile_rank(tc.active_threshold::double precision, a.pct_agg)) / 2
+              ${apdexScoreSql('tc.active_threshold', 'a.pct_agg')}
             )::numeric,
             3
           ) AS apdex_score
@@ -1528,9 +1538,7 @@ export class TestRunsPerformanceQueryService {
               SUM(trss.total_count) AS total_count,
               ROUND(
                 (
-                  approx_percentile_rank(tc.active_threshold::double precision, rollup(trss.pct_agg))
-                  + (approx_percentile_rank((tc.active_threshold * 4)::double precision, rollup(trss.pct_agg))
-                     - approx_percentile_rank(tc.active_threshold::double precision, rollup(trss.pct_agg))) / 2
+                  ${apdexScoreSql('tc.active_threshold', 'rollup(trss.pct_agg)')}
                 )::numeric,
                 3
               ) AS apdex_score
@@ -1558,9 +1566,7 @@ export class TestRunsPerformanceQueryService {
               SUM(c.n)::bigint AS total_count,
               ROUND(
                 (
-                  approx_percentile_rank(tc.active_threshold::double precision, rollup(p.pct_agg_passed))
-                  + (approx_percentile_rank((tc.active_threshold * 4)::double precision, rollup(p.pct_agg_passed))
-                     - approx_percentile_rank(tc.active_threshold::double precision, rollup(p.pct_agg_passed))) / 2
+                  ${apdexScoreSql('tc.active_threshold', 'rollup(p.pct_agg_passed)')}
                 )::numeric,
                 3
               ) AS apdex_score
