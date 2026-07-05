@@ -15,6 +15,7 @@ import {
   scrollToCard,
 } from './hooks';
 import { useEventsData } from './components/events/hooks';
+import { useHasDeepLinks } from './components/deep-links/hooks';
 
 // Types
 import { DrillDownFilters } from './types';
@@ -93,6 +94,12 @@ export default function TestRunDetailsPage() {
     useTestRunData({ testRunId, onLoadComplete: handleTestRunLoaded });
 
   const { events } = useEventsData(testRunId);
+
+  const hasDeepLinks = useHasDeepLinks(
+    testRun?.system_under_test_id || testRun?.systems_under_test?.id,
+    testRun?.test_environment,
+    testRun?.workload,
+  );
 
   // Handlers
   const handleBack = useCallback(() => {
@@ -328,8 +335,8 @@ export default function TestRunDetailsPage() {
               <Box sx={cardBoxStyle(expansionState.dashboardsExpanded)}>
                 <DashboardsSection testRun={testRun} testRunId={testRunId} dashboardsExpanded={expansionState.dashboardsExpanded} onDashboardsExpand={() => { const wasCollapsed = !expansionState.dashboardsExpanded; toggleExpansion('dashboardsExpanded'); if (wasCollapsed) scrollToCard('dashboards-section-expanded'); }} showToast={showToast} />
               </Box>
-              <Box sx={cardBoxStyle(expansionState.deepLinksExpanded)}>
-                <DeepLinksCard testRun={testRun} expanded={expansionState.deepLinksExpanded} onExpand={() => { const wasCollapsed = !expansionState.deepLinksExpanded; toggleExpansion('deepLinksExpanded'); if (wasCollapsed) scrollToCard('deep-links-card-expanded'); }} />
+              <Box sx={cardBoxStyle(expansionState.anomalyExpanded)}>
+                <AnomalyDetectionSection testRun={testRun} testRunId={testRunId} anomalyExpanded={expansionState.anomalyExpanded} onAnomalyExpand={onAnomalyExpand} activeTab={anomalyState.activeTab} onActiveTabChange={setAnomalyActiveTab} conclusionFilter={anomalyState.conclusionFilter} setConclusionFilter={setAnomalyConclusionFilter} showToast={showToast} onTestRunUpdate={handleTestRunUpdate} hasDistributedTracing={configurationStatus.hasDistributedTracing} hasDynatrace={configurationStatus.hasDynatrace} onDrillDownToDistributedTracing={onDrillDownToDistributedTracing} onDrillDownToDynatrace={onDrillDownToDynatrace} />
               </Box>
               <Box sx={cardBoxStyle(expansionState.performanceExpanded)}>
                 <PerformanceAnalysisCard testRunId={testRunId} testRun={testRun} expanded={expansionState.performanceExpanded} onExpand={() => { const wasCollapsed = !expansionState.performanceExpanded; toggleExpansion('performanceExpanded'); if (wasCollapsed) scrollToCard('performance-analysis-card-expanded'); }} showToast={showToast} hasDistributedTracing={configurationStatus.hasDistributedTracing} hasDynatrace={configurationStatus.hasDynatrace} onDrillDownToDistributedTracing={onDrillDownToDistributedTracing} onDrillDownToDynatrace={onDrillDownToDynatrace} />
@@ -337,12 +344,16 @@ export default function TestRunDetailsPage() {
               <Box sx={cardBoxStyle(expansionState.sloExpanded)}>
                 <ServiceLevelObjectivesSection testRun={testRun} testRunId={testRunId} sloExpanded={expansionState.sloExpanded} setSloExpanded={(val) => { const wasCollapsed = !expansionState.sloExpanded; setExpansion('sloExpanded', val); if (wasCollapsed && val) scrollToCard('slo-section-expanded'); }} hasDistributedTracing={configurationStatus.hasDistributedTracing} hasDynatrace={configurationStatus.hasDynatrace} onDrillDownToDistributedTracing={onDrillDownToDistributedTracing} onDrillDownToDynatrace={onDrillDownToDynatrace} />
               </Box>
-              <Box sx={cardBoxStyle(expansionState.anomalyExpanded)}>
-                <AnomalyDetectionSection testRun={testRun} testRunId={testRunId} anomalyExpanded={expansionState.anomalyExpanded} onAnomalyExpand={onAnomalyExpand} activeTab={anomalyState.activeTab} onActiveTabChange={setAnomalyActiveTab} conclusionFilter={anomalyState.conclusionFilter} setConclusionFilter={setAnomalyConclusionFilter} showToast={showToast} onTestRunUpdate={handleTestRunUpdate} hasDistributedTracing={configurationStatus.hasDistributedTracing} hasDynatrace={configurationStatus.hasDynatrace} onDrillDownToDistributedTracing={onDrillDownToDistributedTracing} onDrillDownToDynatrace={onDrillDownToDynatrace} />
-              </Box>
-              <Box sx={cardBoxStyle(expansionState.eventsExpanded)}>
-                <EventsCard testRun={testRun} testRunId={testRunId} expanded={expansionState.eventsExpanded} onExpand={() => { const wasCollapsed = !expansionState.eventsExpanded; toggleExpansion('eventsExpanded'); if (wasCollapsed) scrollToCard('events-card-expanded'); }} showToast={showToast} />
-              </Box>
+              {hasDeepLinks && (
+                <Box sx={cardBoxStyle(expansionState.deepLinksExpanded)}>
+                  <DeepLinksCard testRun={testRun} expanded={expansionState.deepLinksExpanded} onExpand={() => { const wasCollapsed = !expansionState.deepLinksExpanded; toggleExpansion('deepLinksExpanded'); if (wasCollapsed) scrollToCard('deep-links-card-expanded'); }} />
+                </Box>
+              )}
+              {events.length > 0 && (
+                <Box sx={cardBoxStyle(expansionState.eventsExpanded)}>
+                  <EventsCard testRun={testRun} testRunId={testRunId} expanded={expansionState.eventsExpanded} onExpand={() => { const wasCollapsed = !expansionState.eventsExpanded; toggleExpansion('eventsExpanded'); if (wasCollapsed) scrollToCard('events-card-expanded'); }} showToast={showToast} />
+                </Box>
+              )}
             </Box>
           )}
         </Box>

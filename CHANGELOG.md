@@ -4,6 +4,11 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
+## [0.2.61.25] - 2026-07-05
+
+### Changed
+- **Test run details (Results tab): swapped the Anomaly Detection and Deep Links card positions, and made the Deep Links and Events cards conditional.** Anomaly Detection now sits earlier in the grid (where Deep Links used to be); Deep Links moved further down. The Deep Links card only renders when deep links are configured for the run's system/environment/workload (new lightweight `useHasDeepLinks` config check, separate from the card's own per-link resolve), and the Events card only renders when the run actually has events. Previously both always rendered — Deep Links showing an empty "No links configured" state and Events showing an empty card even with zero events.
+
 ## [0.2.61.24] - 2026-07-03
 
 ### Fixed
