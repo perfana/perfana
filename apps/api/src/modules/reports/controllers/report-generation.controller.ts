@@ -19,6 +19,7 @@ import { Response } from 'express';
 import { ApiTags, ApiOperation, ApiQuery, ApiResponse, ApiBearerAuth } from '@nestjs/swagger';
 import { AuthenticatedRequest } from '../../../types/auth.types';
 import { ReportGenerationService } from '../services/report-generation.service';
+import { runAfterRequestCommit } from '../../../common/db/request-em';
 import { UserCtx, UserContext } from '../../../common/decorators/user-context.decorator';
 import { ReportShareService } from '../services/report-share.service';
 import { HtmlGenerationProcessor } from '../processors/html-generation.processor';
@@ -58,6 +59,48 @@ export class ReportGenerationController {
     private readonly htmlGenerationProcessor: HtmlGenerationProcessor,
     private readonly pdfGenerationProcessor: PdfGenerationProcessor,
   ) {}
+
+  /**
+   * Persist the HTML-generation job id (inside the request transaction) and
+   * defer the actual BullMQ enqueue until after that transaction commits, so
+   * the worker's separate DB connection can read the report row (#421).
+   * Returns the job id to include in the HTTP response.
+   */
+  private async enqueueHtmlGenerationAfterCommit(
+    reportId: string,
+    testRunId: string,
+    templateId: string,
+    initiatedBy: string,
+  ): Promise<string> {
+    if (this.htmlGenerationProcessor.isAvailable()) {
+      const jobId = `html-gen-${reportId}-${Date.now()}`;
+      // Commits atomically with the report row (job_id would otherwise be NULL).
+      await this.reportGenerationService.updateJobId(reportId, jobId);
+      runAfterRequestCommit(async () => {
+        try {
+          await this.htmlGenerationProcessor.addJob(reportId, testRunId, templateId, {
+            initiatedBy,
+            jobId,
+          });
+          this.logger.log(`Queued HTML generation job ${jobId} for report ${reportId}`);
+        } catch (error) {
+          const msg = error instanceof Error ? error.message : 'Unknown error';
+          this.logger.error(`Failed to queue HTML generation for report ${reportId}: ${msg}`);
+        }
+      });
+      return jobId;
+    }
+
+    // Redis/BullMQ unavailable — process synchronously in the background, also
+    // after commit so generateHtml can read the row.
+    this.logger.warn('BullMQ unavailable - processing HTML generation synchronously');
+    runAfterRequestCommit(() => {
+      this.htmlGenerationProcessor.processSync(reportId).catch((error) => {
+        this.logger.error(`Sync HTML generation failed for report ${reportId}: ${error.message}`);
+      });
+    });
+    return `sync-${reportId}`;
+  }
 
   // ==================== Report Listing ====================
 
@@ -248,27 +291,16 @@ export class ReportGenerationController {
 
       this.logger.log(`Report ${report.id} generation started from template ${dto.template_id}`);
 
-      // Trigger HTML generation
-      let jobId: string;
-      if (this.htmlGenerationProcessor.isAvailable()) {
-        // Queue the job with BullMQ
-        jobId = await this.htmlGenerationProcessor.addJob(
-          report.id,
-          dto.test_run_id,
-          dto.template_id,
-          { initiatedBy: generatedBy }
-        );
-        await this.reportGenerationService.updateJobId(report.id, jobId);
-        this.logger.log(`Queued HTML generation job ${jobId} for report ${report.id}`);
-      } else {
-        // Process synchronously if Redis/BullMQ is unavailable
-        this.logger.warn('BullMQ unavailable - processing HTML generation synchronously');
-        jobId = `sync-${report.id}`;
-        // Process in background without blocking the response
-        this.htmlGenerationProcessor.processSync(report.id).catch((error) => {
-          this.logger.error(`Sync HTML generation failed for report ${report.id}: ${error.message}`);
-        });
-      }
+      // Trigger HTML generation AFTER the request transaction commits, so the
+      // worker (a different DB connection) can see the report row. Enqueuing
+      // inline races the commit → worker reads "not found" and abandons the
+      // job, leaving the report stuck at pending (issue #421).
+      const jobId = await this.enqueueHtmlGenerationAfterCommit(
+        report.id,
+        dto.test_run_id,
+        dto.template_id,
+        generatedBy,
+      );
 
       return {
         report_id: report.id,
@@ -337,27 +369,13 @@ export class ReportGenerationController {
 
       this.logger.log(`Ad-hoc report ${report.id} generation started`);
 
-      // Trigger HTML generation
-      let jobId: string;
-      if (this.htmlGenerationProcessor.isAvailable()) {
-        // Queue the job with BullMQ
-        jobId = await this.htmlGenerationProcessor.addJob(
-          report.id,
-          dto.test_run_id,
-          report.template_id,
-          { initiatedBy: generatedBy }
-        );
-        await this.reportGenerationService.updateJobId(report.id, jobId);
-        this.logger.log(`Queued HTML generation job ${jobId} for report ${report.id}`);
-      } else {
-        // Process synchronously if Redis/BullMQ is unavailable
-        this.logger.warn('BullMQ unavailable - processing HTML generation synchronously');
-        jobId = `sync-${report.id}`;
-        // Process in background without blocking the response
-        this.htmlGenerationProcessor.processSync(report.id).catch((error) => {
-          this.logger.error(`Sync HTML generation failed for report ${report.id}: ${error.message}`);
-        });
-      }
+      // Trigger HTML generation after commit — see generateFromTemplate (#421).
+      const jobId = await this.enqueueHtmlGenerationAfterCommit(
+        report.id,
+        dto.test_run_id,
+        report.template_id,
+        generatedBy,
+      );
 
       return {
         report_id: report.id,

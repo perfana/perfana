@@ -187,15 +187,9 @@ export class HtmlGenerationProcessor implements OnModuleInit, OnModuleDestroy {
       });
 
       this.worker.on('completed', (job, result) => {
-        if (result.success) {
-          this.logger.log(
-            `HTML generation completed for report ${job.data.reportId} in ${result.generationTimeMs}ms`,
-          );
-        } else {
-          this.logger.warn(
-            `HTML generation failed for report ${job.data.reportId}: ${result.errorMessage}`,
-          );
-        }
+        this.logger.log(
+          `HTML generation completed for report ${job.data.reportId} in ${result.generationTimeMs}ms`,
+        );
       });
 
       this.worker.on('failed', (job, error) => {
@@ -227,7 +221,6 @@ export class HtmlGenerationProcessor implements OnModuleInit, OnModuleDestroy {
     job: Job<HtmlGenerationJobData, HtmlGenerationJobResult>,
   ): Promise<HtmlGenerationJobResult> {
     const { reportId } = job.data;
-    const startTime = Date.now();
 
     this.logger.log(`Starting HTML generation for report ${reportId}`);
 
@@ -281,15 +274,12 @@ export class HtmlGenerationProcessor implements OnModuleInit, OnModuleDestroy {
         `HTML generation failed for report ${reportId}: ${errorMessage}`,
       );
 
-      // The ReportGenerationService already updates the report status to 'failed'
-      // so we just return the error result
-      return {
-        success: false,
-        reportId,
-        generationTimeMs: Date.now() - startTime,
-        errorMessage,
-        errorCode: 'HTML_GENERATION_ERROR',
-      };
+      // Re-throw so BullMQ routes the job to :failed and honours the configured
+      // attempts/backoff. Returning { success: false } marks the job completed
+      // and the retry never fires, leaving the report stuck (issue #421).
+      // ReportGenerationService already set status='failed'; the final attempt's
+      // failure is authoritative.
+      throw error instanceof Error ? error : new Error(errorMessage);
     }
   }
 
@@ -313,7 +303,7 @@ export class HtmlGenerationProcessor implements OnModuleInit, OnModuleDestroy {
     reportId: string,
     testRunId: string,
     templateId: string,
-    options?: { priority?: number; initiatedBy?: string },
+    options?: { priority?: number; initiatedBy?: string; jobId?: string },
   ): Promise<string> {
     if (!this.isAvailable()) {
       throw new Error(
@@ -331,7 +321,7 @@ export class HtmlGenerationProcessor implements OnModuleInit, OnModuleDestroy {
     };
 
     const job = await this.queue!.add('generate-html', jobData, {
-      jobId: `html-gen-${reportId}-${Date.now()}`,
+      jobId: options?.jobId ?? `html-gen-${reportId}-${Date.now()}`,
       priority: options?.priority || 1,
     });
 

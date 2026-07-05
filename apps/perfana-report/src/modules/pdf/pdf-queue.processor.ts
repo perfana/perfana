@@ -163,15 +163,9 @@ export class PdfQueueProcessor implements OnModuleInit, OnModuleDestroy {
       });
 
       this.worker.on('completed', (job, result) => {
-        if (result.success) {
-          this.logger.log(
-            `PDF generation completed for report ${job.data.reportId} in ${result.generationTimeMs}ms (${this.formatFileSize(result.fileSizeBytes || 0)})`
-          );
-        } else {
-          this.logger.warn(
-            `PDF generation failed for report ${job.data.reportId}: ${result.errorMessage}`
-          );
-        }
+        this.logger.log(
+          `PDF generation completed for report ${job.data.reportId} in ${result.generationTimeMs}ms (${this.formatFileSize(result.fileSizeBytes || 0)})`
+        );
       });
 
       this.worker.on('failed', (job, error) => {
@@ -255,13 +249,10 @@ export class PdfQueueProcessor implements OnModuleInit, OnModuleDestroy {
         'PDF_GENERATION_ERROR'
       );
 
-      return {
-        success: false,
-        reportId,
-        generationTimeMs: Date.now() - startTime,
-        errorMessage,
-        errorCode: 'PDF_GENERATION_ERROR',
-      };
+      // Re-throw so BullMQ routes the job to :failed and honours the configured
+      // attempts/backoff. Returning { success: false } marks the job completed
+      // and the retry never fires (issue #421).
+      throw error instanceof Error ? error : new Error(errorMessage);
     }
   }
 
