@@ -800,7 +800,11 @@ export class ReportGenerationService {
   // audit-skip: GeneratedReport job tracking — bucket-2 BullMQ-internal field.
   async updateJobId(reportId: string, jobId: string): Promise<void> {
     try {
-      await this.reportRepo.update(reportId, { job_id: jobId });
+      // withRequestEm: run inside the request's RLS transaction so job_id
+      // commits atomically with the freshly-created report row. Using the
+      // default repo here writes on a separate connection that cannot see the
+      // uncommitted row, silently updating 0 rows (job_id stays NULL).
+      await withRequestEm(this.reportRepo).update(reportId, { job_id: jobId });
       this.logger.log(`Updated report ${reportId} with job ID ${jobId}`);
     } catch (error) {
       this.logger.error(`Failed to update job ID: ${(error as Error).message}`);

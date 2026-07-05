@@ -22,7 +22,11 @@ export class ReportGenerationValidatorService {
       html_complete: ['pdf_processing', 'pdf_complete', 'failed'], // Allow direct transition to pdf_complete for on-demand generation
       pdf_processing: ['pdf_complete', 'failed'],
       pdf_complete: [],
-      failed: ['pending'], // Allow retry
+      // 'pending' = manual retry (POST /reports/:id/retry); 'processing' =
+      // BullMQ auto-retry re-entering generateHtml() after a prior attempt set
+      // 'failed'. Without 'processing', attempts 2/3 throw on the failed→
+      // processing transition and never re-run the render (issue #421).
+      failed: ['pending', 'processing'],
     };
 
     const allowed = validTransitions[currentStatus] || [];

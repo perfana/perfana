@@ -401,9 +401,11 @@ describe('ReportGenerationController', () => {
       // Act
       const result = await controller.generateFromTemplate(dto, createMockRequest(), mockUserCtx);
 
-      // Assert
+      // Assert — job_id is precomputed (html-gen-<reportId>-<ts>) so it can be
+      // returned before the after-commit enqueue runs (#421).
       expect(result.report_id).toBe(mockReport.id);
-      expect(result.job_id).toBe('job-123');
+      expect(result.job_id).toMatch(new RegExp(`^html-gen-${mockReport.id}-\\d+$`));
+      expect(reportGenerationService.updateJobId).toHaveBeenCalledWith(mockReport.id, result.job_id);
       expect(result.status).toBe('pending');
       expect(result.estimated_completion_seconds).toBe(30);
     });
@@ -520,8 +522,8 @@ describe('ReportGenerationController', () => {
 
       // Assert
       expect(result.report_id).toBe(mockReport.id);
-      // Job ID comes from htmlGenerationProcessor.addJob mock
-      expect(result.job_id).toBe('job-123');
+      // Job ID is precomputed and returned before the after-commit enqueue (#421).
+      expect(result.job_id).toMatch(new RegExp(`^html-gen-${mockReport.id}-\\d+$`));
       expect(result.status).toBe('pending');
     });
 
@@ -891,11 +893,13 @@ describe('ReportGenerationController', () => {
       // Act
       const result = await controller.retryGeneration(mockReport.id, mockUserCtx);
 
-      // Assert
+      // Assert — retry now actually re-enqueues, so job_id is a real
+      // html-gen job id (not the old inert `retry-<id>` placeholder) (#421).
       expect(result.status).toBe('pending');
-      expect(result.job_id).toBe(`retry-${mockReport.id}`);
+      expect(result.job_id).toMatch(new RegExp(`^html-gen-${mockReport.id}-\\d+$`));
       expect(reportGenerationService.updateStatus).toHaveBeenCalledWith(mockReport.id, 'pending');
       expect(reportGenerationService.incrementRetryCount).toHaveBeenCalledWith(mockReport.id);
+      expect(reportGenerationService.updateJobId).toHaveBeenCalledWith(mockReport.id, result.job_id);
     });
 
     it('should throw BAD_REQUEST when report is not failed', async () => {
@@ -1073,8 +1077,8 @@ describe('ReportGenerationController', () => {
       // Act
       const result = await controller.generateFromTemplate(dto, createMockRequest(), mockUserCtx);
 
-      // Assert - job_id comes from htmlGenerationProcessor.addJob mock
-      expect(result.job_id).toBe('job-123');
+      // Assert — job_id is precomputed regardless of the report's own job_id (#421).
+      expect(result.job_id).toMatch(new RegExp(`^html-gen-${mockReport.id}-\\d+$`));
     });
   });
 });

@@ -17,6 +17,14 @@ import { DataSource, EntityManager, ObjectLiteral, Repository } from 'typeorm';
 export const REQ_EM = Symbol('rls-request-entity-manager');
 
 /**
+ * CLS key for callbacks that must run AFTER the per-request RLS transaction
+ * commits. Drained by RlsTransactionInterceptor. See runAfterRequestCommit.
+ */
+export const REQ_AFTER_COMMIT = Symbol('rls-after-commit-hooks');
+
+export type AfterCommitHook = () => void | Promise<void>;
+
+/**
  * Returns the request-scoped EntityManager if one is in CLS, otherwise null.
  * Outside an HTTP request (worker, scheduled job, test), CLS isn't initialized
  * and this returns null — callers fall through to default repos.
@@ -70,4 +78,26 @@ export function withRequestEm<T extends ObjectLiteral>(repo: Repository<T>): Rep
  */
 export function withRequestQuery(dataSource: DataSource): EntityManager {
   return getRequestEm() ?? dataSource.manager;
+}
+
+/**
+ * Defers `fn` until the current request's RLS transaction has committed, so it
+ * observes the rows written during the request. Use for enqueuing BullMQ jobs
+ * whose worker reads a row created in the same request — enqueuing inline races
+ * the commit and the worker sees "not found" on a different connection.
+ *
+ * When there is no request transaction (RLS off, unauthenticated, @SkipRls, or
+ * outside an HTTP request) the writes already autocommitted, so `fn` runs
+ * immediately (fire-and-forget; it must handle its own errors).
+ */
+export function runAfterRequestCommit(fn: AfterCommitHook): void {
+  const em = getRequestEm();
+  if (!em) {
+    void Promise.resolve().then(fn);
+    return;
+  }
+  const cls = ClsServiceManager.getClsService();
+  const hooks = cls.get<AfterCommitHook[]>(REQ_AFTER_COMMIT) ?? [];
+  hooks.push(fn);
+  cls.set(REQ_AFTER_COMMIT, hooks);
 }

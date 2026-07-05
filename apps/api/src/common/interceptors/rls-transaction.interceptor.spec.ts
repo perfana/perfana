@@ -5,7 +5,7 @@ import { lastValueFrom, of, throwError } from 'rxjs';
 import { DataSource } from 'typeorm';
 import { AuthorizationService } from '../services/authorization.service';
 import { REQ_CTX } from '../context/request-context';
-import { REQ_EM } from '../db/request-em';
+import { REQ_EM, REQ_AFTER_COMMIT } from '../db/request-em';
 import { RlsTransactionInterceptor } from './rls-transaction.interceptor';
 
 function makeInterceptor(opts: {
@@ -17,6 +17,7 @@ function makeInterceptor(opts: {
   skipRls?: boolean;
   authType?: 'api-key' | 'keycloak-jwt';
   apiKey?: { roles: string[] };
+  afterCommitHooks?: Array<() => void | Promise<void>>;
 }) {
   const queries: Array<{ q: string; params?: unknown[] }> = [];
   const txn = jest.fn(async (cb: (em: unknown) => Promise<unknown>) => {
@@ -31,9 +32,11 @@ function makeInterceptor(opts: {
 
   const dataSource = { transaction: txn } as unknown as DataSource;
   const cls = {
-    get: jest.fn().mockImplementation((key: symbol) =>
-      key === REQ_CTX ? opts.reqCtx : null,
-    ),
+    get: jest.fn().mockImplementation((key: symbol) => {
+      if (key === REQ_CTX) return opts.reqCtx;
+      if (key === REQ_AFTER_COMMIT) return opts.afterCommitHooks ?? null;
+      return null;
+    }),
     set: jest.fn(),
   } as unknown as ClsService;
   const authz = {
@@ -129,6 +132,34 @@ describe('RlsTransactionInterceptor', () => {
       params: ['["user","org-member"]'],
     });
     expect(cls.set).toHaveBeenCalledWith(REQ_EM, expect.any(Object));
+  });
+
+  it('runs after-commit hooks once the transaction commits (#421)', async () => {
+    const order: string[] = [];
+    const hook = jest.fn(async () => {
+      order.push('hook');
+    });
+    const { interceptor, ctx } = makeInterceptor({
+      flagEnabled: true, reqCtx: { userId: 'u1' }, user: { roles: ['user'] },
+      orgs: [], teams: [], afterCommitHooks: [hook],
+    });
+    const next = { handle: () => { order.push('handler'); return of('ok'); } };
+    const obs = await interceptor.intercept(ctx, next);
+    expect(await lastValueFrom(obs)).toBe('ok');
+    expect(hook).toHaveBeenCalledTimes(1);
+    // Hook runs after the handler (i.e. after commit), never before.
+    expect(order).toEqual(['handler', 'hook']);
+  });
+
+  it('a failing after-commit hook does not fail the response', async () => {
+    const { interceptor, ctx } = makeInterceptor({
+      flagEnabled: true, reqCtx: { userId: 'u1' }, user: { roles: ['user'] },
+      orgs: [], teams: [],
+      afterCommitHooks: [jest.fn().mockRejectedValue(new Error('enqueue boom'))],
+    });
+    const next = { handle: () => of('ok') };
+    const obs = await interceptor.intercept(ctx, next);
+    expect(await lastValueFrom(obs)).toBe('ok');
   });
 
   it('rolls back when the handler throws', async () => {

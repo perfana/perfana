@@ -13,7 +13,7 @@ import { mergeMap, toArray } from 'rxjs/operators';
 import { DataSource, EntityManager } from 'typeorm';
 import { AuthorizationService } from '../services/authorization.service';
 import { REQ_CTX, RequestContextStore } from '../context/request-context';
-import { REQ_EM } from '../db/request-em';
+import { REQ_EM, REQ_AFTER_COMMIT, AfterCommitHook } from '../db/request-em';
 import { SKIP_RLS_KEY } from '../db/skip-rls.decorator';
 import { AuthenticatedRequest } from '../../guards/keycloak-enhanced-auth.guard';
 
@@ -83,7 +83,8 @@ export class RlsTransactionInterceptor implements NestInterceptor {
     const logger = this.logger;
 
     return from(
-      dataSource.transaction(async (em: EntityManager) => {
+      dataSource
+        .transaction(async (em: EntityManager) => {
         await em.query(`SET LOCAL ROLE perfana_app`);
         await em.query(
           `SELECT set_config('app.current_user_id', $1, true)`,
@@ -113,7 +114,28 @@ export class RlsTransactionInterceptor implements NestInterceptor {
           );
           throw err;
         }
-      }),
+      })
+        .then(async (values) => {
+          // Transaction committed. Run deferred hooks (e.g. BullMQ enqueues)
+          // so their workers can read rows written during the request.
+          // Clear REQ_EM first: the transaction's EntityManager is now
+          // committed and its query runner released, so any withRequestEm()
+          // inside a hook (e.g. the sync-fallback processSync path) must fall
+          // through to a default pooled repo rather than the stale manager.
+          cls.set(REQ_EM, null);
+          const hooks = cls.get<AfterCommitHook[]>(REQ_AFTER_COMMIT) ?? [];
+          cls.set(REQ_AFTER_COMMIT, []);
+          for (const hook of hooks) {
+            try {
+              await hook();
+            } catch (err) {
+              logger.warn(
+                `after-commit hook failed: ${err instanceof Error ? err.message : err}`,
+              );
+            }
+          }
+          return values;
+        }),
     ).pipe(
       // Re-emit the buffered values so downstream observers see them.
       // For single-value handlers this is a one-element array → one emission.

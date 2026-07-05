@@ -4,6 +4,11 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
+## [0.2.61.26] - 2026-07-05
+
+### Fixed
+- **Reports no longer get permanently stuck in "generating" (#421).** Two compounding defects: (1) the `perfana-report-html-generation` BullMQ job was enqueued *inside* the still-open per-request RLS transaction, so a fast worker on a different DB connection couldn't see the uncommitted `generated_reports` row, failed with "Report not found", and abandoned the job — and `updateJobId` ran on the default connection too, leaving `job_id` NULL after commit. (2) The HTML and PDF workers returned `{ success: false }` instead of throwing, so BullMQ marked the job *completed* and the configured `attempts: 3` / exponential backoff never fired. Fix: new `runAfterRequestCommit()` CLS hook (drained by `RlsTransactionInterceptor` after the transaction commits) defers the enqueue until the row is visible; `updateJobId` now runs via `withRequestEm` so `job_id` commits atomically with the report; and `HtmlGenerationProcessor.processJob` (perfana-api) plus `PdfQueueProcessor.processJob` (perfana-report) now re-throw on failure so BullMQ routes the job to `:failed` and retries. A report whose generation ultimately fails ends at `status='failed'` with `error_code`/`error_message` set — never orphaned at `pending`. Also: the validator now permits `failed → processing` so a BullMQ auto-retry genuinely re-runs the render instead of no-oping on the state-machine guard, and the manual **Retry** endpoint (`POST /reports/:id/retry`) now actually re-enqueues the job — previously it flipped status to `pending` and left the report with nothing processing it.
+
 ## [0.2.61.25] - 2026-07-05
 
 ### Changed
