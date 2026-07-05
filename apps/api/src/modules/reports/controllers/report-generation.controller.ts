@@ -878,11 +878,20 @@ export class ReportGenerationController {
       await this.reportGenerationService.updateStatus(reportId, 'pending');
       await this.reportGenerationService.incrementRetryCount(reportId);
 
-      this.logger.log(`Report ${reportId} retry initiated`);
+      // Actually re-enqueue the generation job — resetting status alone left
+      // the report stuck at pending with nothing processing it (#421).
+      const jobId = await this.enqueueHtmlGenerationAfterCommit(
+        reportId,
+        report.test_run_id,
+        report.template_id,
+        report.generated_by,
+      );
+
+      this.logger.log(`Report ${reportId} retry initiated (job ${jobId})`);
 
       return {
         report_id: reportId,
-        job_id: `retry-${reportId}`,
+        job_id: jobId,
         status: 'pending',
         estimated_completion_seconds: 30,
       };

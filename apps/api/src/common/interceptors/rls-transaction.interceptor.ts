@@ -118,6 +118,11 @@ export class RlsTransactionInterceptor implements NestInterceptor {
         .then(async (values) => {
           // Transaction committed. Run deferred hooks (e.g. BullMQ enqueues)
           // so their workers can read rows written during the request.
+          // Clear REQ_EM first: the transaction's EntityManager is now
+          // committed and its query runner released, so any withRequestEm()
+          // inside a hook (e.g. the sync-fallback processSync path) must fall
+          // through to a default pooled repo rather than the stale manager.
+          cls.set(REQ_EM, null);
           const hooks = cls.get<AfterCommitHook[]>(REQ_AFTER_COMMIT) ?? [];
           cls.set(REQ_AFTER_COMMIT, []);
           for (const hook of hooks) {
