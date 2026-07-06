@@ -219,10 +219,73 @@ export function buildThresholdTraces(
 /**
  * Build chart layout configuration
  */
+// Amber dashed boundary, matching the SLO charts (slo-chart-utils.ts) so the
+// ADAPT analysis window reads identically across both surfaces.
+const ANALYSIS_BOUNDARY_COLOR = '#f59e0b';
+
+/**
+ * Build the analysis-time-range shapes: shaded excluded regions for the leading
+ * start offset and trailing end offset, plus a dashed boundary line at each edge.
+ * Mirrors the SLO chart (service-level-objectives/utils/slo-chart-utils.ts) so
+ * ADAPT and SLO show the same window. Offsets are in seconds from start/end.
+ */
+function buildAnalysisWindowShapes(
+  timeRange: TimeRange,
+  analysisStartOffset: number | undefined,
+  analysisEndOffset: number | undefined,
+  colors: ChartThemeColors
+): Record<string, unknown>[] {
+  const { start, end } = timeRange;
+  const shapes: Record<string, unknown>[] = [];
+
+  const startBoundary = new Date(start.getTime() + (analysisStartOffset ?? 0) * 1000);
+  const endBoundary = new Date(end.getTime() - (analysisEndOffset ?? 0) * 1000);
+  // Guard against the end boundary crossing before the start boundary.
+  const safeEndBoundary =
+    endBoundary.getTime() > startBoundary.getTime() ? endBoundary : startBoundary;
+
+  if (analysisStartOffset !== undefined && analysisStartOffset > 0) {
+    shapes.push({
+      type: 'rect' as const,
+      x0: start, y0: 0, x1: startBoundary, y1: 1,
+      xref: 'x' as const, yref: 'paper' as const,
+      line: { width: 0 }, fillcolor: colors.rampUpColor, layer: 'below' as const, opacity: 1,
+    });
+  }
+  if (analysisStartOffset !== undefined) {
+    shapes.push({
+      type: 'line' as const,
+      x0: startBoundary, y0: 0, x1: startBoundary, y1: 1,
+      xref: 'x' as const, yref: 'paper' as const,
+      line: { color: ANALYSIS_BOUNDARY_COLOR, width: 1.5, dash: 'dash' as const },
+      layer: 'above' as const,
+    });
+  }
+  if (analysisEndOffset !== undefined && analysisEndOffset > 0) {
+    shapes.push({
+      type: 'rect' as const,
+      x0: safeEndBoundary, y0: 0, x1: end, y1: 1,
+      xref: 'x' as const, yref: 'paper' as const,
+      line: { width: 0 }, fillcolor: colors.rampUpColor, layer: 'below' as const, opacity: 1,
+    });
+  }
+  if (analysisEndOffset !== undefined) {
+    shapes.push({
+      type: 'line' as const,
+      x0: safeEndBoundary, y0: 0, x1: safeEndBoundary, y1: 1,
+      xref: 'x' as const, yref: 'paper' as const,
+      line: { color: ANALYSIS_BOUNDARY_COLOR, width: 1.5, dash: 'dash' as const },
+      layer: 'above' as const,
+    });
+  }
+  return shapes;
+}
+
 export function buildChartLayout(
   metricName: string,
   timeRange: TimeRange,
-  lastRampUpTimestamp: Date,
+  analysisStartOffset: number | undefined,
+  analysisEndOffset: number | undefined,
   yAxisLabel: string,
   colors: ChartThemeColors,
   fontFamily: string,
@@ -307,20 +370,7 @@ export function buildChartLayout(
     },
     margin: { l: 50, r: 20, t: 40, b: 80 },
     shapes: hasData
-      ? [
-          {
-            type: 'rect' as const,
-            x0: start,
-            y0: 0,
-            x1: lastRampUpTimestamp,
-            y1: 1,
-            yref: 'paper' as const,
-            line: { width: 0 },
-            fillcolor: colors.rampUpColor,
-            layer: 'below' as const,
-            opacity: 1,
-          },
-        ]
+      ? buildAnalysisWindowShapes(timeRange, analysisStartOffset, analysisEndOffset, colors)
       : [],
     height: DEFAULT_CHART_HEIGHT,
   };

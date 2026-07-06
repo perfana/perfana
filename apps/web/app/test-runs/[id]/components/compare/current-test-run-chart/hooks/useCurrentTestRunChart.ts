@@ -160,10 +160,6 @@ export function useCurrentTestRunChart({
     // Calculate time range
     const timeRange = calculateTimeRange(testRun?.start_time, testRun?.end_time, metricsData);
 
-    // Calculate ramp-up end timestamp
-    const rampUpSeconds = testRun?.ramp_up_seconds || 60;
-    const lastRampUpTimestamp = new Date(timeRange.start.getTime() + rampUpSeconds * 1000);
-
     // Sort data by time for proper line rendering
     const sortedData = [...metricsData].sort(
       (a, b) => new Date(a.time).getTime() - new Date(b.time).getTime()
@@ -202,7 +198,8 @@ export function useCurrentTestRunChart({
     const layout = buildChartLayout(
       metricName,
       timeRange,
-      lastRampUpTimestamp,
+      testRun?.analysis_start_offset,
+      testRun?.analysis_end_offset,
       yAxisLabel,
       colors,
       theme.typography.fontFamily as string,

@@ -302,7 +302,10 @@ export function AnomalyExpandedContent({
                 }
                 return testRun ? {
                   start_time: testRun.start_time,
-                  end_time: testRun.end_time || undefined
+                  end_time: testRun.end_time || undefined,
+                  // Draw the same analysis-window markers the SLO charts use.
+                  analysis_start_offset: testRun.analysis_start_offset,
+                  analysis_end_offset: testRun.analysis_end_offset
                 } : undefined;
               })()}
               thresholds={trendsData && trendsData.length > 0 ? trendsData.find(t => t.test_run_id === (selectedTestRunIdForRow || testRunId))?.thresholds : undefined}
