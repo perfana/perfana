@@ -350,6 +350,10 @@ export class ControlGroupStatisticsPipeline extends BasePipelineTypeORM {
         INNER JOIN test_runs tr ON m.test_run_id = tr.test_run_id
         WHERE m.test_run_id = ANY($2::varchar[])
           AND m.value IS NOT NULL
+          AND m.ramp_up = false   -- respect the analysis window; the fast path
+                                  -- pools per-run sketches already ramp_up-filtered
+                                  -- by StatisticsPipeline, so the legacy raw-scan
+                                  -- fallback must exclude ramp-up/ramp-down too.
           AND (
             m.application_dashboard_id IN (
               SELECT id FROM application_dashboards ad

@@ -48,15 +48,20 @@ describe('StatisticsPipeline', () => {
 
     // Setup mock database service
     // The transaction mock creates a proxy that intercepts SET LOCAL calls
-    // (from withAnalyticsTransaction) so they don't consume mockResolvedValueOnce
-    // chains or shift mock.calls indices on mockEntityManager.query.
+    // (from withAnalyticsTransaction) AND the ramp_up refresh UPDATE (from
+    // refreshRampUpFlags) so they don't consume mockResolvedValueOnce chains or
+    // shift mock.calls indices on mockEntityManager.query — those chains model
+    // only the aggregation query sequence.
     mockDb = {
       transaction: vi.fn((fn) => {
         const proxy = new Proxy(mockEntityManager, {
           get(target: any, prop: string) {
             if (prop === 'query') {
               return (...args: any[]) => {
-                if (typeof args[0] === 'string' && args[0].includes('SET LOCAL')) {
+                if (
+                  typeof args[0] === 'string' &&
+                  (args[0].includes('SET LOCAL') || args[0].includes('UPDATE ds_metrics'))
+                ) {
                   return Promise.resolve(undefined);
                 }
                 return target.query(...args);
