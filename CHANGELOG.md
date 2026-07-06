@@ -4,6 +4,14 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
+## [0.2.61.27] - 2026-07-06
+
+### Fixed
+- **ADAPT now respects the analysis time range (start offset / end offset) on re-analysis.** Editing a completed run's analysis window re-runs ADAPT, but the pipeline skips metric-collection for completed runs, so the `ds_metrics.ramp_up` flag that ADAPT's statistics filter on (`StatisticsPipeline` → `ds_metric_statistics` → `ControlGroupStatisticsPipeline` → ADAPT) stayed baked at ingestion — ADAPT read the *old* window while the SLO graphs (which compute `start + offset` live at query time) reflected the new one. `StatisticsPipeline.refreshRampUpFlags()` now recomputes `ds_metrics.ramp_up` from each run's current `analysisStartOffset`/`analysisEndOffset` (the exact `MetricsPipeline` formula, both ends) at the start of the aggregation transaction — the choke point every ADAPT re-analysis crosses — guarded by `IS DISTINCT FROM` so it's a no-op when offsets are unchanged. Also fixed the legacy control-group raw-scan path (`ControlGroupStatisticsPipeline`), which excluded no ramp-up/ramp-down points at all, to filter `ramp_up = false` like the fast path.
+
+### Changed
+- **The ADAPT per-run chart (expanded anomaly row) now shows the analysis time range the same way the SLO graphs do:** shaded excluded regions for the start and end offsets plus amber dashed boundary lines at `start + startOffset` and `end − endOffset`, driven by `analysis_start_offset`/`analysis_end_offset`. Previously it drew only a single ramp-up rectangle from a hardcoded 60s default and never marked the end of the window.
+
 ## [0.2.61.26] - 2026-07-05
 
 ### Fixed
