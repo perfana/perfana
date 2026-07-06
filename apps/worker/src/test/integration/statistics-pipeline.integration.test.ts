@@ -658,6 +658,56 @@ describe('StatisticsPipeline Integration Tests', () => {
       expect(stat.max_value).toBeLessThan(200); // Should not include ramp-up values
     });
 
+    test('recomputes stale ramp_up flags from current analysis offsets before aggregating', async () => {
+      // Regression for "ADAPT ignores the analysis time range": the ds_metrics.ramp_up
+      // flag is baked at ingestion. Editing the offsets on a completed run skips
+      // metric-collection on re-analysis, so without an in-pipeline refresh the flag
+      // is stale and ADAPT reads the OLD window. Here every point is ingested with
+      // ramp_up=false, then the run's offsets are set to trim 20s off each end.
+      const testStart = new Date('2024-01-01T10:00:00Z');
+      const testEnd = new Date(testStart.getTime() + 100 * 1000); // 100s run
+
+      await testDb.query(
+        `UPDATE test_runs SET start_time = $1, end_time = $2, ramp_up = $3, ramp_down = $4 WHERE test_run_id = $5`,
+        [testStart, testEnd, 20, 20, testRunId], // window = [+20s, +80s]
+      );
+
+      // 100 points at +0s..+99s, value = elapsed second, ALL flagged ramp_up=false
+      // (simulating flags baked before the offsets were set).
+      const metrics = Array.from({ length: 100 }, (_, i) => ({
+        test_run_id: testRunId,
+        application_dashboard_id: 'app-dash-001',
+        panel_id: 1,
+        metric_name: 'response_time',
+        time: new Date(testStart.getTime() + i * 1000),
+        value: i,
+        ramp_up: false,
+      }));
+      await insertTestMetrics(metrics);
+
+      const result = await pipeline.execute({ testRunIds: [testRunId] });
+      expect(result.success).toBe(true);
+
+      // Only points inside [+20s, +80s] survive: elapsed >= 20 and elapsed <= 80.
+      // Start window excludes elapsed < 20 (i=0..19); end window excludes
+      // elapsed > 80 (i=81..99). Included: i=20..80 → 61 points, values 20..80.
+      const statsResult = await testDb.query(
+        'SELECT count, min_value, max_value FROM ds_metric_statistics WHERE test_run_id = $1',
+        [testRunId],
+      );
+      const stat = statsResult.rows[0];
+      expect(stat.count).toBe(61);
+      expect(stat.min_value).toBe(20);
+      expect(stat.max_value).toBe(80);
+
+      // And the underlying flags were actually rewritten (39 points now excluded).
+      const flagged = await testDb.query(
+        'SELECT COUNT(*)::int AS n FROM ds_metrics WHERE test_run_id = $1 AND ramp_up = true',
+        [testRunId],
+      );
+      expect(flagged.rows[0].n).toBe(39);
+    });
+
     test('should return zero records when all metrics are ramp-up', async () => {
       const baseTime = new Date('2024-01-01T10:00:00Z');
       const metrics = Array.from({ length: 100 }, (_, i) => ({

@@ -13,7 +13,12 @@ export interface MetricDataPoint {
 export interface TestRunInfo {
   start_time: string;
   end_time?: string;
+  /** @deprecated use analysis_start_offset — kept for back-compat of the prop shape */
   ramp_up_seconds?: number;
+  /** Analysis start offset in seconds (test_runs.ramp_up); trims the leading window. */
+  analysis_start_offset?: number;
+  /** Analysis end offset in seconds (test_runs.ramp_down); trims the trailing window. */
+  analysis_end_offset?: number;
 }
 
 export interface ThresholdBound {

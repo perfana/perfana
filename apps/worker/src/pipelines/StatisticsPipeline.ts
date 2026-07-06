@@ -94,6 +94,13 @@ export class StatisticsPipeline extends BasePipelineTypeORM {
       await this.cleanupStaleApplicationDashboards(['ds_metric_statistics']);
 
       const result = await this.withAnalyticsTransaction(async (manager: EntityManager) => {
+        // Refresh the ds_metrics.ramp_up flag from each run's CURRENT analysis
+        // offsets before aggregating. The flag is otherwise baked once at
+        // ingestion (MetricsPipeline), so editing the analysis time range on a
+        // completed run — which skips metric-collection on re-analysis — would
+        // leave ADAPT reading the OLD window (#421-followup / analysis-time-range).
+        // Idempotent: only rows whose flag actually changes are written.
+        await this.refreshRampUpFlags(manager, testRunIds);
         return await this.aggregateMetricStatistics(manager, testRunIds);
       });
 
@@ -118,6 +125,65 @@ export class StatisticsPipeline extends BasePipelineTypeORM {
         duration
       );
     }
+  }
+
+  /**
+   * Recompute `ds_metrics.ramp_up` for the given runs from their current analysis
+   * offsets (test_runs.ramp_up = analysisStartOffset, test_runs.ramp_down =
+   * analysisEndOffset). A point is outside the analysis window — flagged
+   * ramp_up=true — when it falls in the leading start-offset window OR the trailing
+   * end-offset window: the canonical `[start + startOffset, end - endOffset]` range
+   * that the SLO charts, TransactionStatsRollupPipeline, and the incremental
+   * collector all use.
+   *
+   * The `IS DISTINCT FROM` guard writes only rows whose flag actually changes.
+   * For incrementally-ingested runs this is a true no-op when offsets are
+   * unchanged. Runs originally ingested by the non-incremental MetricsPipeline get
+   * their trailing flags corrected once here: that path double-subtracts the end
+   * offset (bakes `end - 2*endOffset`; see MetricsPipeline.effectiveEndTime +
+   * flattenSingleDocument) — a pre-existing bug this refresh supersedes before ADAPT
+   * reads the flag, since statistics-calculation always follows metrics-collection.
+   *
+   * Runs with a NULL start_time or end_time are skipped (window undefined) — the
+   * flag stays as ingested, matching MetricsPipeline's `Infinity` duration branch.
+   */
+  private async refreshRampUpFlags(
+    manager: EntityManager,
+    testRunIds: string[]
+  ): Promise<void> {
+    const placeholders = testRunIds.map((_, i) => `$${i + 1}`).join(', ');
+
+    // Defined once, interpolated into both SET and the change-guard so the two
+    // can never drift. Uses `m`/`tr` aliases from the UPDATE ... FROM below.
+    const rampUpExpr = `(
+      EXTRACT(EPOCH FROM (m.time - tr.start_time)) < COALESCE(tr.ramp_up, 0)
+      OR (
+        COALESCE(tr.ramp_down, 0) > 0
+        AND EXTRACT(EPOCH FROM (m.time - tr.start_time))
+            > EXTRACT(EPOCH FROM (tr.end_time - tr.start_time)) - COALESCE(tr.ramp_down, 0)
+      )
+    )`;
+
+    const sql = `
+      UPDATE ds_metrics m
+      SET ramp_up = ${rampUpExpr}
+      FROM test_runs tr
+      WHERE m.test_run_id = tr.test_run_id
+        AND m.test_run_id IN (${placeholders})
+        AND tr.start_time IS NOT NULL
+        AND tr.end_time IS NOT NULL
+        AND m.ramp_up IS DISTINCT FROM ${rampUpExpr}
+    `;
+
+    const result = await manager.query(sql, testRunIds);
+    // pg returns [rows, rowCount] for UPDATE via node-postgres; TypeORM's raw
+    // query surfaces an array whose affected count we log best-effort.
+    const affected = Array.isArray(result) ? (result[1] ?? undefined) : undefined;
+    this.logger.info(
+      `🕒 Refreshed ramp_up flags against current analysis offsets for ${testRunIds.length} run(s)${
+        affected !== undefined ? ` (${affected} rows changed)` : ''
+      }`
+    );
   }
 
   private async aggregateMetricStatistics(
