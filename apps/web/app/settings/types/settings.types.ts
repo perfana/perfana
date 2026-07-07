@@ -53,6 +53,7 @@ export const SECTION_COLORS = {
   'general': 'rgba(156, 39, 176, 1)',
   'notifications': 'rgba(255, 152, 0, 1)',
   'alert-filters': 'rgba(244, 67, 54, 1)',
+  'proxy': 'rgba(0, 150, 136, 1)',
 } as const;
 
 /**

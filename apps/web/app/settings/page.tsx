@@ -11,6 +11,7 @@ import {
   Settings,
   Notifications as NotificationsIcon,
   NotificationsActive as AlertFiltersIcon,
+  Router as ProxyIcon,
 } from '@mui/icons-material';
 
 // Types
@@ -93,6 +94,15 @@ export default function SettingsPage() {
           color={SECTION_COLORS['alert-filters']}
           href="/settings/alert-filters"
           description="Configure which alerts to omit or use to abort test runs"
+        />
+
+        {/* Proxy Section */}
+        <SettingsSectionCard
+          title="Proxy"
+          icon={<ProxyIcon />}
+          color={SECTION_COLORS['proxy']}
+          href="/settings/proxy"
+          description="Configure an outbound proxy server for integrations"
         />
 
         {/* General Settings Section */}
