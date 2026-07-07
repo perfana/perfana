@@ -12,6 +12,7 @@ import {
   DsMetricStatistics,
 } from '../../../entities';
 import { TempoService } from '../../tempo/tempo.service';
+import { ProxyResolverService } from '../../proxy/proxy-resolver.service';
 import { createMockRepository } from '../../../../test/helpers/mock-repository.factory';
 
 // ─── Fixtures ─────────────────────────────────────────────────────────────────
@@ -94,6 +95,7 @@ describe('TestRunsDataSourcesService — getConnectedSources (Dynatrace)', () =>
         { provide: getRepositoryToken(DynatraceConfig), useValue: dynatraceConfigRepo },
         { provide: getRepositoryToken(DsMetricStatistics), useValue: metricStatisticsRepo },
         { provide: TempoService, useValue: tempoService },
+        { provide: ProxyResolverService, useValue: { resolve: jest.fn().mockResolvedValue(null) } },
       ],
     }).compile();
 

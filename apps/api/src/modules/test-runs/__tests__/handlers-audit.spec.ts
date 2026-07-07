@@ -32,6 +32,7 @@ import { UpdateAnalysisStartOffsetHandler } from '../handlers/update-analysis-st
 import { DeleteTestRunHandler } from '../handlers/delete-test-run.handler';
 import { TestRunsGateway } from '../gateways/test-runs.gateway';
 import { AuditService } from '../../audit/audit.service';
+import { TestRunLookupService } from '../services/test-run-lookup.service';
 import {
   ResourceNotFoundException,
   DatabaseException,
@@ -109,6 +110,10 @@ describe('CreateTestRunHandler — audit (Phase 5a, PR8)', () => {
             logUpdate: jest.fn(),
             logDelete: jest.fn(),
           },
+        },
+        {
+          provide: TestRunLookupService,
+          useValue: { updateWorkloadConfig: jest.fn() },
         },
       ],
     }).compile();
