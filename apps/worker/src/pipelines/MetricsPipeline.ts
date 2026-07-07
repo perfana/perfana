@@ -2,7 +2,8 @@ import { EntityManager } from 'typeorm';
 import { BasePipelineTypeORM } from './BasePipelineTypeORM.js';
 import { PipelineResult, PanelDocument, PanelMetricsDocument } from '../types/pipeline.js';
 import { GrafanaClient } from '@perfana/shared/services/grafana';
-import { getGrafanaConfig, getGrafanaInstanceId, tryGetGrafanaConfig } from '../config/grafana-config-cache.js';
+import { getGrafanaConfig, getGrafanaInstanceId, tryGetGrafanaConfig, getGrafanaInstanceMeta } from '../config/grafana-config-cache.js';
+import { resolveProxyDispatcher } from '../config/proxy-resolver.js';
 
 /**
  * Number of records per INSERT batch.
@@ -43,6 +44,14 @@ export class MetricsPipeline extends BasePipelineTypeORM {
     if (this.grafanaClient) {return;}
 
     const grafanaConfig = await getGrafanaConfig();
+    const meta = getGrafanaInstanceMeta();
+    if (meta?.useProxy) {
+      const dispatcher = await resolveProxyDispatcher(meta.organizationId);
+      if (dispatcher) {
+        grafanaConfig.dispatcher = dispatcher;
+        this.logger.info(`🔗 Grafana client will use org proxy (org: ${meta.organizationId})`);
+      }
+    }
     this.grafanaClient = new GrafanaClient(grafanaConfig, this.logger);
     this.logger.info(`🔗 Initialized Grafana client with URL: ${grafanaConfig.url}`);
   }

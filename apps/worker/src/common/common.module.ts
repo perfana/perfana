@@ -25,6 +25,7 @@ import {
   ApiKey,
   TestRunConfiguration,
   PyroscopeInstance,
+  ProxyServer,
 } from '@perfana/shared/entities';
 
 /**
@@ -72,6 +73,9 @@ import {
       DynatraceConfig,
       DynatraceQuery,
       DynatraceEntityMapping,
+
+      // Proxy configuration
+      ProxyServer,
     ]),
   ],
   providers: [WorkerDatabaseService],

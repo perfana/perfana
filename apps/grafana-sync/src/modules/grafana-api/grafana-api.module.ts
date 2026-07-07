@@ -1,7 +1,7 @@
 import { Module } from '@nestjs/common';
 import { TypeOrmModule } from '@nestjs/typeorm';
 import { GrafanaApiService } from './grafana-api.service';
-import { GrafanaInstance } from '@perfana/shared/entities';
+import { GrafanaInstance, ProxyServer } from '@perfana/shared/entities';
 
 /**
  * GrafanaApiModule
@@ -10,7 +10,7 @@ import { GrafanaInstance } from '@perfana/shared/entities';
  * Wraps the existing GrafanaClient from worker for HTTP API access.
  */
 @Module({
-  imports: [TypeOrmModule.forFeature([GrafanaInstance])],
+  imports: [TypeOrmModule.forFeature([GrafanaInstance, ProxyServer])],
   providers: [GrafanaApiService],
   exports: [GrafanaApiService],
 })

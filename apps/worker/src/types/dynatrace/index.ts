@@ -37,6 +37,8 @@ export interface DynatraceConfig {
   platformApiToken?: string;  // For SaaS/DQL queries
   dynatraceType: 'saas' | 'managed';
   label: string;
+  useProxy: boolean;
+  organizationId: string;
 }
 
 // Execution-ready query config (after time range replacement)

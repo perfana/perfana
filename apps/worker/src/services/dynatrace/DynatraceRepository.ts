@@ -85,7 +85,9 @@ export class DynatraceRepository {
         api_token as "apiToken",
         platform_api_token as "platformApiToken",
         dynatrace_type as "dynatraceType",
-        label
+        label,
+        use_proxy as "useProxy",
+        organization_id as "organizationId"
       FROM dynatrace_configs
       WHERE id = $1`,
       [configId]

@@ -14,6 +14,8 @@ import { DynatraceAPIClient } from '../../../services/dynatrace/DynatraceAPIClie
 import { DynatraceRepository } from '../../../services/dynatrace/DynatraceRepository.js';
 import { DataProcessor } from '../../../services/dynatrace/DataProcessor.js';
 import { DynatraceQueryConfig } from '../../../types/dynatrace/index.js';
+import { resolveProxyDispatcher } from '../../../config/proxy-resolver.js';
+import type { Dispatcher } from 'undici';
 import type { CollectionResult } from './types.js';
 import type { BatchProcessor } from './batch-processor.js';
 import type { MetricProcessor, TestRunContext } from './metric-processor.js';
@@ -275,14 +277,18 @@ export class DynatraceCollector {
           `Executing ${queries.length} queries on ${dynatraceConfig.label} (${dynatraceConfig.host})`
         );
 
-        // Create API client
+        // Create API client, threading proxy dispatcher when configured
+        const proxyDispatcher = dynatraceConfig.useProxy
+          ? (await resolveProxyDispatcher(dynatraceConfig.organizationId)) as Dispatcher | undefined
+          : undefined;
+
         const apiClient = new DynatraceAPIClient({
           host: dynatraceConfig.host,
           apiToken: dynatraceConfig.apiToken,
           platformToken: dynatraceConfig.platformApiToken || '',
           dynatraceType: dynatraceConfig.dynatraceType,
           maxConcurrent: 5,
-        });
+        }, proxyDispatcher);
 
         try {
           // Execute queries with time range override
