@@ -13,6 +13,8 @@ import {
   Alert,
   CircularProgress,
   FormControl,
+  FormControlLabel,
+  Switch,
   InputLabel,
   Select,
   MenuItem,
@@ -30,6 +32,7 @@ interface DynatraceFormDialogProps {
   loadingAttributes: boolean;
   selectedTestRunIdAttribute: string;
   selectedRequestNameAttribute: string;
+  proxyConfigured: boolean;
   onClose: () => void;
   onSubmit: (data: CreateDynatraceConfigFormData) => void;
   onTestConnection: (data: CreateDynatraceConfigFormData) => void;
@@ -46,6 +49,7 @@ export function DynatraceFormDialog({
   loadingAttributes,
   selectedTestRunIdAttribute,
   selectedRequestNameAttribute,
+  proxyConfigured,
   onClose,
   onSubmit,
   onTestConnection,
@@ -123,6 +127,24 @@ export function DynatraceFormDialog({
               <MenuItem value="saas">SaaS (Cloud)</MenuItem>
               <MenuItem value="managed">Managed (On-Premise)</MenuItem>
             </TextField>
+
+            {/* Proxy Section */}
+            <FormControlLabel
+              sx={{ mt: 1 }}
+              control={
+                <Switch
+                  checked={form.watch('useProxy') ?? false}
+                  onChange={(e) => form.setValue('useProxy', e.target.checked)}
+                  disabled={!proxyConfigured}
+                />
+              }
+              label="Use proxy"
+            />
+            {!proxyConfigured && (
+              <Typography variant="caption" color="text.secondary" display="block" sx={{ mb: 1 }}>
+                Configure a proxy under Settings first
+              </Typography>
+            )}
 
             {/* Request Attributes Section */}
             {(loadingAttributes || requestAttributes.length > 0) && (

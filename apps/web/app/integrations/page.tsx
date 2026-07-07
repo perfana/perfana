@@ -22,6 +22,7 @@ import {
 import { useOrganizationContext } from '@/lib/contexts/organization-context';
 import { NoOrganizationMembership } from '@/components/NoOrganizationMembership';
 import { NoOrganizationsExist } from '@/components/NoOrganizationsExist';
+import { authenticatedFetch } from '@/lib/api';
 import { GrafanaInstance } from '@/lib/grafana-instances';
 import { DynatraceConfig } from '@/lib/dynatrace';
 import { PyroscopeInstance } from '@/lib/pyroscope';
@@ -62,6 +63,7 @@ export default function IntegrationsPage() {
   const [expandedCards, setExpandedCards] = useState<Set<string>>(new Set());
   const [addIntegrationDialogOpen, setAddIntegrationDialogOpen] = useState(false);
   const [initialLoading, setInitialLoading] = useState(true);
+  const [proxyConfigured, setProxyConfigured] = useState(false);
   const [snackbar, setSnackbar] = useState<SnackbarState>({
     open: false,
     message: '',
@@ -87,6 +89,9 @@ export default function IntegrationsPage() {
         dynatrace.loadConfigs(),
         pyroscope.loadInstances(),
         tracing.loadInstances(),
+        authenticatedFetch('/proxy').then(r => r.ok ? r.json() : null).then(data => {
+          setProxyConfigured(data != null);
+        }).catch(() => setProxyConfigured(false)),
       ]);
       setInitialLoading(false);
     };
@@ -376,6 +381,7 @@ export default function IntegrationsPage() {
         form={grafana.form}
         visiblePasswords={grafana.visiblePasswords}
         testingConnection={grafana.testingConnection}
+        proxyConfigured={proxyConfigured}
         onClose={grafana.closeDialogs}
         onSubmit={grafana.editDialogOpen ? grafana.handleUpdate : grafana.handleCreate}
         onTestConnection={grafana.handleTestConnection}
@@ -398,6 +404,7 @@ export default function IntegrationsPage() {
         loadingAttributes={dynatrace.loadingAttributes}
         selectedTestRunIdAttribute={dynatrace.selectedTestRunIdAttribute}
         selectedRequestNameAttribute={dynatrace.selectedRequestNameAttribute}
+        proxyConfigured={proxyConfigured}
         onClose={dynatrace.closeDialogs}
         onSubmit={dynatrace.editDialogOpen ? dynatrace.handleUpdate : dynatrace.handleCreate}
         onTestConnection={dynatrace.handleTestConnection}
@@ -417,6 +424,7 @@ export default function IntegrationsPage() {
         isEdit={pyroscope.editDialogOpen}
         form={pyroscope.form}
         testingConnection={pyroscope.testingConnection}
+        proxyConfigured={proxyConfigured}
         onClose={pyroscope.closeDialogs}
         onSubmit={pyroscope.editDialogOpen ? pyroscope.handleUpdate : pyroscope.handleCreate}
         onTestConnection={pyroscope.handleTestConnection}
@@ -434,6 +442,7 @@ export default function IntegrationsPage() {
         isEdit={tracing.editDialogOpen}
         form={tracing.form}
         testingConnection={tracing.testingConnection}
+        proxyConfigured={proxyConfigured}
         onClose={tracing.closeDialogs}
         onSubmit={tracing.editDialogOpen ? tracing.handleUpdate : tracing.handleCreate}
         onTestConnection={tracing.handleTestConnection}

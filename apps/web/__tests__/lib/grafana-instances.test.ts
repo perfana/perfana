@@ -59,6 +59,7 @@ describe('Grafana Instances API Client', () => {
             orgId: '1',
             apiKey: 'masked-api-key',
             snapshotInstance: false,
+            useProxy: false,
             createdAt: '2025-01-01T00:00:00Z',
             updatedAt: '2025-01-01T00:00:00Z',
           },
@@ -70,6 +71,7 @@ describe('Grafana Instances API Client', () => {
             username: 'admin',
             password: 'masked-password',
             snapshotInstance: true,
+            useProxy: false,
             createdAt: '2025-01-02T00:00:00Z',
             updatedAt: '2025-01-02T00:00:00Z',
           },
@@ -261,6 +263,7 @@ describe('Grafana Instances API Client', () => {
           orgId: '2',
           apiKey: 'api-key-value',
           snapshotInstance: false,
+          useProxy: false,
           createdAt: '2025-01-01T00:00:00Z',
           updatedAt: '2025-01-15T10:30:00Z',
         };
@@ -361,6 +364,7 @@ describe('Grafana Instances API Client', () => {
         const mockCreatedInstance: GrafanaInstance = {
           id: 'new-instance-id',
           ...createData,
+          useProxy: false,
           createdAt: '2025-01-15T12:00:00Z',
           updatedAt: '2025-01-15T12:00:00Z',
         };

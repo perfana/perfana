@@ -42,6 +42,7 @@ export function useGrafanaIntegration({ onSnackbar, organizationId }: UseGrafana
       username: '',
       password: '',
       snapshotInstance: false,
+      useProxy: false,
     },
   });
 
@@ -57,6 +58,7 @@ export function useGrafanaIntegration({ onSnackbar, organizationId }: UseGrafana
         username: selectedInstance.username || '',
         password: '', // Don't pre-fill password for security
         snapshotInstance: selectedInstance.snapshotInstance,
+        useProxy: selectedInstance.useProxy,
       });
     }
   }, [editDialogOpen, selectedInstance, form]);
@@ -81,6 +83,7 @@ export function useGrafanaIntegration({ onSnackbar, organizationId }: UseGrafana
         username: data.username,
         password: data.password,
         snapshotInstance: data.snapshotInstance,
+        useProxy: data.useProxy,
         ...(organizationId && { organizationId }),
       });
       setInstances([instance, ...instances]);

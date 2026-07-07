@@ -15,6 +15,8 @@ import {
   TextField,
   Alert,
   FormControl,
+  FormControlLabel,
+  Switch,
 } from '@mui/material';
 import {
   Visibility,
@@ -31,6 +33,7 @@ interface GrafanaFormDialogProps {
   form: UseFormReturn<CreateGrafanaInstanceFormData>;
   visiblePasswords: Set<string>;
   testingConnection: boolean;
+  proxyConfigured: boolean;
   onClose: () => void;
   onSubmit: (data: CreateGrafanaInstanceFormData) => void;
   onTestConnection: (data: CreateGrafanaInstanceFormData) => void;
@@ -43,6 +46,7 @@ export function GrafanaFormDialog({
   form,
   visiblePasswords,
   testingConnection,
+  proxyConfigured,
   onClose,
   onSubmit,
   onTestConnection,
@@ -183,6 +187,21 @@ export function GrafanaFormDialog({
             </Grid>
             <Grid size={{ xs: 12, sm: 6 }}>
               <FormControl>
+                <FormControlLabel
+                  control={
+                    <Switch
+                      checked={form.watch('useProxy') ?? false}
+                      onChange={(e) => form.setValue('useProxy', e.target.checked)}
+                      disabled={!proxyConfigured}
+                    />
+                  }
+                  label="Use proxy"
+                />
+                {!proxyConfigured && (
+                  <Typography variant="caption" color="text.secondary">
+                    Configure a proxy under Settings first
+                  </Typography>
+                )}
               </FormControl>
             </Grid>
           </Grid>

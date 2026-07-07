@@ -22,6 +22,7 @@ interface PyroscopeFormDialogProps {
   isEdit: boolean;
   form: UseFormReturn<CreatePyroscopeInstanceFormData>;
   testingConnection: boolean;
+  proxyConfigured: boolean;
   onClose: () => void;
   onSubmit: (data: CreatePyroscopeInstanceFormData) => void;
   onTestConnection: (data: CreatePyroscopeInstanceFormData) => void;
@@ -32,6 +33,7 @@ export function PyroscopeFormDialog({
   isEdit,
   form,
   testingConnection,
+  proxyConfigured,
   onClose,
   onSubmit,
   onTestConnection,
@@ -93,6 +95,22 @@ export function PyroscopeFormDialog({
             <Typography variant="caption" color="text.secondary" display="block">
               Enable if Pyroscope is running in standalone mode (not integrated with Grafana)
             </Typography>
+            <FormControlLabel
+              sx={{ mt: 2 }}
+              control={
+                <Switch
+                  checked={form.watch('useProxy') ?? false}
+                  onChange={(e) => form.setValue('useProxy', e.target.checked)}
+                  disabled={!proxyConfigured}
+                />
+              }
+              label="Use proxy"
+            />
+            {!proxyConfigured && (
+              <Typography variant="caption" color="text.secondary" display="block">
+                Configure a proxy under Settings first
+              </Typography>
+            )}
           </Box>
         </DialogContent>
         <DialogActions>
