@@ -14,6 +14,7 @@ export class DynatraceConfig {
     'dynatraceType',
     'perfanaTestRunIdAttribute',
     'perfanaRequestNameAttribute',
+    'useProxy',
   ] as const;
 
   @PrimaryGeneratedColumn('uuid')
@@ -48,6 +49,9 @@ export class DynatraceConfig {
 
   @Column({ name: 'perfana_request_name_attribute', type: 'varchar', length: 255, nullable: true })
   perfanaRequestNameAttribute?: string;
+
+  @Column({ type: 'boolean', name: 'use_proxy', default: false })
+  useProxy!: boolean;
 
   // Ownership tracking (RBAC Phase 2)
   @Column({ type: 'uuid', name: 'organization_id' })

@@ -16,6 +16,7 @@ export class GrafanaInstance {
     'orgId',
     'username',
     'snapshotInstance',
+    'useProxy',
   ] as const;
 
   @PrimaryGeneratedColumn('uuid')
@@ -44,6 +45,9 @@ export class GrafanaInstance {
 
   @Column({ type: 'boolean', nullable: true, name: 'snapshot_instance' })
   snapshotInstance?: boolean;
+
+  @Column({ type: 'boolean', name: 'use_proxy', default: false })
+  useProxy!: boolean;
 
   // Ownership tracking (RBAC Phase 2)
   @Column({ type: 'uuid', name: 'organization_id' })
