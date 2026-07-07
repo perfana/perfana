@@ -49,6 +49,9 @@ export const Capability = {
   ApiKeyCreate: 'api-key:create',
   ApiKeyDelete: 'api-key:delete',
 
+  // Proxy server (org-scoped — only org-admins can configure the outbound proxy)
+  ProxyManage: 'proxy:manage',
+
   // System-level (global admin only)
   SystemAuditRead: 'system:audit-read',
   SystemManageUsers: 'system:manage-users',
@@ -98,6 +101,7 @@ const orgAdminExtras: CapabilityValue[] = [
   Capability.ApiKeyRead,
   Capability.ApiKeyCreate,
   Capability.ApiKeyDelete,
+  Capability.ProxyManage,
 ];
 
 /**

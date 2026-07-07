@@ -6,6 +6,7 @@ import { ProxyServer } from '../../entities';
 import { AuthorizationService } from '../../common/services/authorization.service';
 import { AuditService } from '../audit/audit.service';
 import { UpsertProxyDto } from './dto/proxy.dto';
+import { Capability } from '../../constants/capabilities.constants';
 
 const mockUserId = 'user-abc';
 const mockRoles = ['user'];
@@ -20,8 +21,9 @@ const buildRepo = () => ({
 
 const buildAuthzService = () => ({
   getAccessibleOrganizations: jest.fn().mockResolvedValue([mockOrgId]),
-  isGlobalAdmin: jest.fn().mockReturnValue(false),
-  isOrganizationAdmin: jest.fn().mockResolvedValue(true),
+  // Default: caller holds ProxyManage (org-admin / global-admin). Denied-path
+  // tests override with mockResolvedValue([]).
+  getCapabilities: jest.fn().mockResolvedValue([Capability.ProxyManage]),
 });
 
 const buildAuditService = () => ({
@@ -64,14 +66,13 @@ describe('ProxyService', () => {
       expect(result).toBeNull();
     });
 
-    it('does not check org-admin for reads (non-admin member can read)', async () => {
-      authzService.isGlobalAdmin.mockReturnValue(false);
-      authzService.isOrganizationAdmin.mockResolvedValue(false);
+    it('does not check the ProxyManage capability for reads (non-admin member can read)', async () => {
+      authzService.getCapabilities.mockResolvedValue([]);
       repo.findOne.mockResolvedValue(null);
 
-      // Should resolve without throwing — no admin check on GET
+      // Should resolve without throwing — no capability check on GET
       await expect(service.getForOrg(mockUserId, mockRoles)).resolves.toBeNull();
-      expect(authzService.isOrganizationAdmin).not.toHaveBeenCalled();
+      expect(authzService.getCapabilities).not.toHaveBeenCalled();
     });
 
     it('returns a response DTO (no password) when a proxy exists', async () => {
@@ -207,8 +208,7 @@ describe('ProxyService', () => {
     });
 
     it('succeeds for a global admin (non-org-admin)', async () => {
-      authzService.isGlobalAdmin.mockReturnValue(true);
-      authzService.isOrganizationAdmin.mockResolvedValue(false);
+      authzService.getCapabilities.mockResolvedValue([Capability.ProxyManage]);
       const dto: UpsertProxyDto = { proxyUrl: 'http://proxy:3128' };
       repo.findOne.mockResolvedValue(null);
       const created: Partial<ProxyServer> = {
@@ -226,8 +226,7 @@ describe('ProxyService', () => {
     });
 
     it('succeeds for an org-admin (non-global-admin)', async () => {
-      authzService.isGlobalAdmin.mockReturnValue(false);
-      authzService.isOrganizationAdmin.mockResolvedValue(true);
+      authzService.getCapabilities.mockResolvedValue([Capability.ProxyManage]);
       const dto: UpsertProxyDto = { proxyUrl: 'http://proxy:3128' };
       repo.findOne.mockResolvedValue(null);
       const created: Partial<ProxyServer> = {
@@ -245,8 +244,7 @@ describe('ProxyService', () => {
     });
 
     it('throws ForbiddenException for a non-admin org member', async () => {
-      authzService.isGlobalAdmin.mockReturnValue(false);
-      authzService.isOrganizationAdmin.mockResolvedValue(false);
+      authzService.getCapabilities.mockResolvedValue([]);
       const dto: UpsertProxyDto = { proxyUrl: 'http://proxy:3128' };
 
       await expect(service.upsert(mockUserId, mockRoles, dto)).rejects.toThrow(ForbiddenException);
@@ -282,8 +280,7 @@ describe('ProxyService', () => {
     });
 
     it('succeeds for a global admin', async () => {
-      authzService.isGlobalAdmin.mockReturnValue(true);
-      authzService.isOrganizationAdmin.mockResolvedValue(false);
+      authzService.getCapabilities.mockResolvedValue([Capability.ProxyManage]);
       const existing: Partial<ProxyServer> = {
         id: 'del-ga',
         organizationId: mockOrgId,
@@ -299,8 +296,7 @@ describe('ProxyService', () => {
     });
 
     it('succeeds for an org-admin', async () => {
-      authzService.isGlobalAdmin.mockReturnValue(false);
-      authzService.isOrganizationAdmin.mockResolvedValue(true);
+      authzService.getCapabilities.mockResolvedValue([Capability.ProxyManage]);
       const existing: Partial<ProxyServer> = {
         id: 'del-oa',
         organizationId: mockOrgId,
@@ -316,8 +312,7 @@ describe('ProxyService', () => {
     });
 
     it('throws ForbiddenException for a non-admin org member', async () => {
-      authzService.isGlobalAdmin.mockReturnValue(false);
-      authzService.isOrganizationAdmin.mockResolvedValue(false);
+      authzService.getCapabilities.mockResolvedValue([]);
 
       await expect(service.remove(mockUserId, mockRoles)).rejects.toThrow(ForbiddenException);
       expect(repo.delete).not.toHaveBeenCalled();

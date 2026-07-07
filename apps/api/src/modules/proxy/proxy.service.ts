@@ -3,6 +3,7 @@ import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { ProxyServer } from '../../entities';
 import { AuthorizationService } from '../../common/services/authorization.service';
+import { Capability } from '../../constants/capabilities.constants';
 import { AuditService } from '../audit/audit.service';
 import { UpsertProxyDto, ProxyResponseDto } from './dto/proxy.dto';
 
@@ -55,7 +56,8 @@ export class ProxyService {
 
   /**
    * Assert the caller is allowed to manage (write/delete) proxy settings for orgId.
-   * Allowed when the caller is a global admin OR an org-admin of that org.
+   * Gated on `Capability.ProxyManage`, which org-admins hold for their org and
+   * global admins hold everywhere (via `getCapabilities(_, _, null)`).
    * Throws ForbiddenException otherwise.
    */
   private async assertCanManageProxy(
@@ -63,11 +65,8 @@ export class ProxyService {
     roles: string[],
     orgId: string,
   ): Promise<void> {
-    if (this.authzService.isGlobalAdmin(roles)) {
-      return;
-    }
-    const isOrgAdmin = await this.authzService.isOrganizationAdmin(userId, orgId);
-    if (!isOrgAdmin) {
+    const caps = await this.authzService.getCapabilities(userId, roles, orgId);
+    if (!caps.includes(Capability.ProxyManage)) {
       throw new ForbiddenException('Requires organization admin to modify proxy settings');
     }
   }
