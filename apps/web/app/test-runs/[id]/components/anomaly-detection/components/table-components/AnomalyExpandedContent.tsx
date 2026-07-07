@@ -290,13 +290,19 @@ export function AnomalyExpandedContent({
               panelId={row.panel_id}
               metricName={row.metric_name}
               testRun={(() => {
-                const _effectiveTestRunId = selectedTestRunIdForRow || testRunId;
-                if (selectedTestRunIdForRow && trendsData) {
+                // A different historical run selected via the trend graph: use its
+                // start from trendsData, but reuse the current run's analysis-window
+                // offsets (same SUT/env/workload config, not carried in trendsData)
+                // so it renders the same markers as Current Test Run Details.
+                // end_time falls back to the metrics data range in the chart.
+                if (selectedTestRunIdForRow && selectedTestRunIdForRow !== testRunId && trendsData) {
                   const selectedTrendData = trendsData.find(t => t.test_run_id === selectedTestRunIdForRow);
                   if (selectedTrendData) {
                     return {
                       start_time: selectedTrendData.test_run_start,
-                      end_time: undefined
+                      end_time: undefined,
+                      analysis_start_offset: testRun?.analysis_start_offset,
+                      analysis_end_offset: testRun?.analysis_end_offset
                     };
                   }
                 }

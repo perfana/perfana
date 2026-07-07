@@ -4,6 +4,11 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
+## [0.2.61.31] - 2026-07-07
+
+### Fixed
+- **Anomaly-detection "Selected Test Run" chart now renders the analysis-window markers.** In the anomaly-detection table, clicking a datapoint in a Trend graph to inspect another test run rendered the `Selected Test Run: <id>` chart without the start/end analysis-offset vertical lines, so it didn't match the `Current Test Run Details` chart. The selected-run `testRun` object passed to `CurrentTestRunChart` dropped `analysis_start_offset`/`analysis_end_offset` (they aren't carried in the trends data); it now reuses the current run's offsets (same SUT/env/workload analysis window). Clicking the current run's own point in the Trend graph also stopped rendering its markers because the selected-run branch fired even when the selection equalled the current run — the branch is now guarded with `selectedTestRunIdForRow !== testRunId` so it falls through to the full current-run object.
+
 ## [0.2.61.30] - 2026-07-07
 
 ### Fixed
