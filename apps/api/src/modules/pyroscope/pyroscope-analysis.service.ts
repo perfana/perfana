@@ -1,10 +1,14 @@
 import { Injectable, Logger, HttpException, HttpStatus } from '@nestjs/common';
+import { InjectRepository } from '@nestjs/typeorm';
+import { Repository } from 'typeorm';
 import {
   AnalyzeFlamegraphDto,
   FlamegraphAnalysisResponseDto,
   FlamegraphDiffDto,
 } from './dto/pyroscope-analysis.dto';
 import { validateExternalUrl } from '../../common/security/url-validator';
+import { PyroscopeInstance } from '../../entities';
+import { ProxyResolverService } from '../proxy/proxy-resolver.service';
 
 /**
  * Pyroscope profile structure (flamebearer format)
@@ -26,6 +30,12 @@ interface PyroscopeProfile {
 @Injectable()
 export class PyroscopeAnalysisService {
   private readonly logger = new Logger(PyroscopeAnalysisService.name);
+
+  constructor(
+    @InjectRepository(PyroscopeInstance)
+    private readonly pyroscopeInstanceRepo: Repository<PyroscopeInstance>,
+    private readonly proxyResolver: ProxyResolverService,
+  ) {}
 
   /**
    * Analyze flamegraphs between baseline and current test runs
@@ -80,6 +90,18 @@ export class PyroscopeAnalysisService {
         );
       }
 
+      // Resolve org proxy if a pyroscopeInstanceId was provided
+      let dispatcher: unknown;
+      if (params.pyroscopeInstanceId) {
+        const instance = await this.pyroscopeInstanceRepo.findOne({
+          where: { id: params.pyroscopeInstanceId },
+        });
+        if (instance) {
+          const agents = await this.proxyResolver.resolve(instance.organizationId, instance.useProxy);
+          dispatcher = agents?.dispatcher;
+        }
+      }
+
       // Fetch both profiles in parallel
       this.logger.log(
         `Fetching flamegraphs for ${application} with profiler ${profilerLabel}`
@@ -91,14 +113,16 @@ export class PyroscopeAnalysisService {
           application,
           profilerLabel,
           baselineStartTime,
-          baselineEndTime
+          baselineEndTime,
+          dispatcher,
         ),
         this.fetchPyroscopeFlamegraph(
           backendUrl,
           application,
           profilerLabel,
           currentStartTime,
-          currentEndTime
+          currentEndTime,
+          dispatcher,
         ),
       ]);
 
@@ -166,7 +190,8 @@ export class PyroscopeAnalysisService {
     application: string,
     profilerLabel: string,
     from: number,
-    until: number
+    until: number,
+    dispatcher?: unknown,
   ): Promise<PyroscopeProfile> {
     // Map profilerLabel back to full profile type
     // profilerLabel is like "process_cpu/cpu", need to convert to full type
@@ -214,7 +239,8 @@ export class PyroscopeAnalysisService {
         headers: {
           'Content-Type': 'application/json',
         },
-      });
+        ...(dispatcher ? { dispatcher } : {}),
+      } as RequestInit & { dispatcher?: unknown });
 
       if (!response.ok) {
         const errorText = await response.text();

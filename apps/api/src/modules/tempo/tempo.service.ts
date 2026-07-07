@@ -4,6 +4,7 @@ import { Repository } from 'typeorm';
 import { validateExternalUrl } from '../../common/security/url-validator';
 import { withRequestEm } from '../../common/db/request-em';
 import { TracingInstance } from '@perfana/shared';
+import { ProxyResolverService } from '../proxy/proxy-resolver.service';
 import {
   SearchTracesDto,
   SearchTracesResponseDto,
@@ -20,6 +21,7 @@ export class TempoService {
   constructor(
     @InjectRepository(TracingInstance)
     private readonly tracingInstanceRepo: Repository<TracingInstance>,
+    private readonly proxyResolver: ProxyResolverService,
   ) {}
 
   /**
@@ -59,13 +61,15 @@ export class TempoService {
 
     this.logger.debug(`Searching Tempo: ${searchUrl}`);
 
+    const searchAgents = await this.proxyResolver.resolve(instance.organizationId, instance.useProxy);
     try {
       const response = await fetch(searchUrl, {
         method: 'GET',
         headers: {
           Accept: 'application/json',
         },
-      });
+        ...(searchAgents ? { dispatcher: searchAgents.dispatcher } : {}),
+      } as RequestInit & { dispatcher?: unknown });
 
       if (!response.ok) {
         const errorText = await response.text();
@@ -112,13 +116,15 @@ export class TempoService {
 
     this.logger.debug(`Fetching trace: ${traceUrl}`);
 
+    const traceAgents = await this.proxyResolver.resolve(instance.organizationId, instance.useProxy);
     try {
       const response = await fetch(traceUrl, {
         method: 'GET',
         headers: {
           Accept: 'application/json',
         },
-      });
+        ...(traceAgents ? { dispatcher: traceAgents.dispatcher } : {}),
+      } as RequestInit & { dispatcher?: unknown });
 
       if (!response.ok) {
         const errorText = await response.text();
@@ -192,10 +198,12 @@ export class TempoService {
       // Tempo ready endpoint
       const healthUrl = `${baseUrl}/ready`;
 
+      const healthAgents = await this.proxyResolver.resolve(instance.organizationId, instance.useProxy);
       const response = await fetch(healthUrl, {
         method: 'GET',
         signal: AbortSignal.timeout(5000),
-      });
+        ...(healthAgents ? { dispatcher: healthAgents.dispatcher } : {}),
+      } as RequestInit & { dispatcher?: unknown });
 
       if (response.ok) {
         return { success: true, message: 'Tempo is healthy' };

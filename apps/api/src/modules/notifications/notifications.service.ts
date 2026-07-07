@@ -4,6 +4,7 @@ import { Repository } from 'typeorm';
 import { ConfigService } from '@nestjs/config';
 import { NotificationChannel, TestRun, SystemUnderTest } from '@perfana/shared';
 import { withRequestEm } from '../../common/db/request-em';
+import { ProxyResolverService } from '../proxy/proxy-resolver.service';
 import {
   ResourceNotFoundException,
   DatabaseException,
@@ -35,6 +36,7 @@ export class NotificationsService {
     @InjectRepository(SystemUnderTest)
     private readonly systemUnderTestRepository: Repository<SystemUnderTest>,
     private readonly configService: ConfigService,
+    private readonly proxyResolver: ProxyResolverService,
   ) {
     // Get Perfana URL for deeplinks, fallback to localhost
     this.perfanaUrl = this.configService.get<string>('PERFANA_URL')
@@ -305,7 +307,8 @@ export class NotificationsService {
           throw new Error(`Unsupported notification type: ${channel.type}`);
       }
 
-      await this.sendWebhook(channel.webhookUrl, message);
+      const testAgents = await this.proxyResolver.resolve(channel.organizationId, channel.useProxy);
+      await this.sendWebhook(channel.webhookUrl, message, testAgents?.dispatcher);
 
       this.logger.log(`Test notification sent successfully to channel ${id} by user ${userId}`);
       return { success: true, message: 'Test notification sent successfully' };
@@ -399,20 +402,22 @@ export class NotificationsService {
         throw new Error(`Unsupported notification type: ${channel.type}`);
     }
 
-    await this.sendWebhook(channel.webhookUrl, message);
+    const channelAgents = await this.proxyResolver.resolve(channel.organizationId, channel.useProxy);
+    await this.sendWebhook(channel.webhookUrl, message, channelAgents?.dispatcher);
   }
 
   /**
    * Send a message to a webhook URL
    */
-  private async sendWebhook(url: string, message: unknown): Promise<void> {
+  private async sendWebhook(url: string, message: unknown, dispatcher?: unknown): Promise<void> {
     const response = await fetch(url, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
       },
       body: JSON.stringify(message),
-    });
+      ...(dispatcher ? { dispatcher } : {}),
+    } as RequestInit & { dispatcher?: unknown });
 
     if (!response.ok) {
       const errorText = await response.text().catch(() => 'Unknown error');

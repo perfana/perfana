@@ -228,6 +228,8 @@ export class EventsService {
             server_url: instance.server_url,
             org_id: instance.orgId,
             api_key: instance.apiKey || '',
+            organizationId: instance.organizationId,
+            useProxy: instance.useProxy,
           };
 
           const result = await this.grafanaClient.createAnnotation(grafanaInst, {
@@ -278,6 +280,8 @@ export class EventsService {
           server_url: instance.server_url,
           org_id: instance.orgId,
           api_key: instance.apiKey || '',
+          organizationId: instance.organizationId,
+          useProxy: instance.useProxy,
         };
 
         await this.grafanaClient.deleteAnnotation(grafanaInst, annotationId);

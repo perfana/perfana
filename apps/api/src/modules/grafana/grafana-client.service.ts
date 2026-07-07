@@ -4,6 +4,7 @@ import { Repository } from 'typeorm';
 import { GrafanaInstance as GrafanaInstanceEntity } from '../../entities';
 import { withRequestEm } from '../../common/db/request-em';
 import { validateGrafanaUrl } from '../../common/security';
+import { ProxyResolverService } from '../proxy/proxy-resolver.service';
 
 interface GrafanaInstance {
   id: string;
@@ -14,6 +15,8 @@ interface GrafanaInstance {
   api_key: string;
   username?: string;
   password?: string;
+  organizationId: string;
+  useProxy: boolean;
 }
 
 interface GrafanaDatasource {
@@ -31,7 +34,8 @@ export class GrafanaClientService {
 
   constructor(
     @InjectRepository(GrafanaInstanceEntity)
-    private grafanaInstanceRepo: Repository<GrafanaInstanceEntity>
+    private grafanaInstanceRepo: Repository<GrafanaInstanceEntity>,
+    private readonly proxyResolver: ProxyResolverService,
   ) {}
 
   async getGrafanaInstance(grafanaInstanceId: string): Promise<GrafanaInstance> {
@@ -49,7 +53,9 @@ export class GrafanaClientService {
       org_id: result.orgId,
       api_key: result.apiKey || '',
       username: result.username,
-      password: result.password
+      password: result.password,
+      organizationId: result.organizationId,
+      useProxy: result.useProxy,
     };
   }
 
@@ -64,12 +70,14 @@ export class GrafanaClientService {
 
     const apiUrl = `${baseUrl}${endpoint}`;
 
-    const options: RequestInit = {
+    const agents = await this.proxyResolver.resolve(grafanaInstance.organizationId, grafanaInstance.useProxy);
+    const options: RequestInit & { dispatcher?: unknown } = {
       headers: {
         'Authorization': `Bearer ${grafanaInstance.api_key}`,
         'Content-Type': 'application/json',
         'Accept': 'application/json',
       },
+      ...(agents ? { dispatcher: agents.dispatcher } : {}),
     };
 
     try {
@@ -108,13 +116,15 @@ export class GrafanaClientService {
 
     const apiUrl = `${baseUrl}/api/dashboards/uid/${dashboardUid}`;
 
-    const options: RequestInit = {
+    const agents = await this.proxyResolver.resolve(grafanaInstance.organizationId, grafanaInstance.useProxy);
+    const options: RequestInit & { dispatcher?: unknown } = {
       method: 'DELETE',
       headers: {
         'Authorization': `Bearer ${grafanaInstance.api_key}`,
         'Content-Type': 'application/json',
         'Accept': 'application/json',
       },
+      ...(agents ? { dispatcher: agents.dispatcher } : {}),
     };
 
     try {
@@ -167,6 +177,7 @@ export class GrafanaClientService {
     if (params.timeEnd != null) body.timeEnd = params.timeEnd;
     if (params.tags?.length) body.tags = params.tags;
 
+    const agents = await this.proxyResolver.resolve(grafanaInstance.organizationId, grafanaInstance.useProxy);
     try {
       const response = await fetch(apiUrl, {
         method: 'POST',
@@ -176,7 +187,8 @@ export class GrafanaClientService {
           'Accept': 'application/json',
         },
         body: JSON.stringify(body),
-      });
+        ...(agents ? { dispatcher: agents.dispatcher } : {}),
+      } as RequestInit & { dispatcher?: unknown });
 
       if (!response.ok) {
         const errorText = await response.text();
@@ -204,6 +216,7 @@ export class GrafanaClientService {
 
     const apiUrl = `${baseUrl}/api/annotations/${annotationId}`;
 
+    const agents = await this.proxyResolver.resolve(grafanaInstance.organizationId, grafanaInstance.useProxy);
     try {
       const response = await fetch(apiUrl, {
         method: 'DELETE',
@@ -212,7 +225,8 @@ export class GrafanaClientService {
           'Content-Type': 'application/json',
           'Accept': 'application/json',
         },
-      });
+        ...(agents ? { dispatcher: agents.dispatcher } : {}),
+      } as RequestInit & { dispatcher?: unknown });
 
       if (!response.ok && response.status !== 404) {
         const errorText = await response.text();

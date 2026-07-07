@@ -9,12 +9,14 @@ import { PyroscopeInstance } from '../../entities';
 import { CommonModule } from '../../common/common.module';
 import { AuditModule } from '../audit/audit.module';
 import { AuditResourceRegistry } from '../audit/audit-resource-registry';
+import { ProxyModule } from '../proxy/proxy.module';
 
 @Module({
   imports: [
     TypeOrmModule.forFeature([PyroscopeInstance]),
     CommonModule,
     AuditModule, // Phase 5a: provides AuditService + AuditResourceRegistry
+    ProxyModule, // Provides ProxyResolverService for outbound proxy routing
   ],
   controllers: [
     PyroscopeInstancesController,
