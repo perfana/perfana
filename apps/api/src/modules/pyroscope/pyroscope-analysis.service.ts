@@ -7,6 +7,8 @@ import {
   FlamegraphDiffDto,
 } from './dto/pyroscope-analysis.dto';
 import { validateExternalUrl } from '../../common/security/url-validator';
+import { withRequestEm } from '../../common/db/request-em';
+import { withOrgFilter } from '../../common/utils/with-org-filter';
 import { PyroscopeInstance } from '../../entities';
 import { ProxyResolverService } from '../proxy/proxy-resolver.service';
 import { AuthorizationService } from '../../common/services/authorization.service';
@@ -96,21 +98,18 @@ export class PyroscopeAnalysisService {
       // scoped to organizations the CALLER can access (closes cross-tenant SSRF pivot / IDOR).
       // Global admins match any instance; regular users only match instances in their orgs.
       let dispatcher: unknown;
-      const isAdmin = this.authzService.isGlobalAdmin(roles);
+      const orgIds = await withOrgFilter(userId, roles, this.authzService);
       let instanceWhere: object;
-      if (isAdmin) {
+      if (orgIds === null) {
+        // Global admin — match any instance with this backendUrl
         instanceWhere = { backendUrl };
+      } else if (orgIds.length === 0) {
+        // No accessible orgs — safe default: no proxy (dummy UUID matches nothing)
+        instanceWhere = { backendUrl, organizationId: In(['00000000-0000-0000-0000-000000000000']) };
       } else {
-        const orgIds = await this.authzService.getAccessibleOrganizations(userId);
-        // If the user has no accessible orgs, In([]) would match nothing — safe default (no proxy).
-        // Short-circuit to avoid an unnecessary DB query.
-        if (orgIds.length === 0) {
-          instanceWhere = { backendUrl, organizationId: In(['00000000-0000-0000-0000-000000000000']) };
-        } else {
-          instanceWhere = { backendUrl, organizationId: In(orgIds) };
-        }
+        instanceWhere = { backendUrl, organizationId: In(orgIds) };
       }
-      const instance = await this.pyroscopeInstanceRepo.findOne({ where: instanceWhere });
+      const instance = await withRequestEm(this.pyroscopeInstanceRepo).findOne({ where: instanceWhere });
       if (instance) {
         const agents = await this.proxyResolver.resolve(instance.organizationId, instance.useProxy);
         dispatcher = agents?.dispatcher;
