@@ -7,6 +7,15 @@ export interface ProxyAgents {
 }
 
 /**
+ * Module-level cache keyed by `${uri}|${token ?? ''}`.
+ * Naturally bounded by the small number of distinct proxy configurations.
+ * A credential change produces a new key → a new agent; no stale-cred reuse.
+ * Exposed for tests only — do not modify from production code.
+ */
+export const _agentCacheForTests: Map<string, ProxyAgent> = new Map();
+const agentCache = _agentCacheForTests;
+
+/**
  * Pure helper — extracts the proxy uri and optional Basic-auth token from a
  * ProxyServer row without constructing any undici object.  Callers that need
  * to build a ProxyAgent from a *different* undici copy (e.g. the worker's
@@ -31,7 +40,12 @@ export function buildProxyAgent(proxy: ProxyServer | null | undefined): ProxyAge
   const url = new URL(proxy.proxyUrl);
   const hasAuth = !!proxy.username && !!proxy.password;
 
-  const dispatcher = new ProxyAgent({ uri: conn.uri, token: conn.token });
+  const key = `${conn.uri}|${conn.token ?? ''}`;
+  let dispatcher = agentCache.get(key);
+  if (!dispatcher) {
+    dispatcher = new ProxyAgent(conn.token ? { uri: conn.uri, token: conn.token } : { uri: conn.uri });
+    agentCache.set(key, dispatcher);
+  }
   const port = url.port ? Number(url.port) : url.protocol === 'https:' ? 443 : 80;
 
   return {

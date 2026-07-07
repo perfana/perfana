@@ -4,6 +4,14 @@ import { buildProxyAgent, proxyConnection } from '@perfana/shared/services/proxy
 import { getDatabaseService } from '../common/database-accessor.js';
 
 /**
+ * Module-level cache for worker-local undici 7 ProxyAgents (Dynatrace path only).
+ * Keyed by `${uri}|${token ?? ''}` — same strategy as the shared cache.
+ * Exposed for tests only; do not modify from production code.
+ */
+export const _dynatraceAgentCacheForTests: Map<string, ProxyAgent> = new Map();
+const dynatraceAgentCache = _dynatraceAgentCacheForTests;
+
+/**
  * Resolve the undici Dispatcher for outbound requests for a given organization.
  *
  * Returns a ProxyAgent dispatcher when the organization has a proxy configured,
@@ -54,5 +62,12 @@ export async function resolveDynatraceProxyDispatcher(
     .findOne({ where: { organizationId } });
 
   const conn = proxyConnection(proxyRow ?? null);
-  return conn ? new ProxyAgent({ uri: conn.uri, token: conn.token }) : undefined;
+  if (!conn) return undefined;
+  const key = `${conn.uri}|${conn.token ?? ''}`;
+  let agent = dynatraceAgentCache.get(key);
+  if (!agent) {
+    agent = new ProxyAgent(conn.token ? { uri: conn.uri, token: conn.token } : { uri: conn.uri });
+    dynatraceAgentCache.set(key, agent);
+  }
+  return agent;
 }
