@@ -7233,7 +7233,7 @@ CREATE POLICY rls_proxy_servers_delete ON public.proxy_servers FOR DELETE USING 
 -- Name: proxy_servers rls_proxy_servers_insert; Type: POLICY; Schema: public; Owner: -
 --
 
-CREATE POLICY rls_proxy_servers_insert ON public.proxy_servers FOR INSERT WITH CHECK (true);
+CREATE POLICY rls_proxy_servers_insert ON public.proxy_servers FOR INSERT WITH CHECK (public.is_global_admin() OR public.can_access_resource(organization_id, team_id, (created_by)::text));
 
 
 --

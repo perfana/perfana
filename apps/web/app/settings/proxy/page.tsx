@@ -54,18 +54,19 @@ export default function ProxySettingsPage() {
     setLoading(true);
     try {
       const res = await authenticatedFetch('/proxy');
-      if (res.status === 404) {
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({}));
+        throw new Error((err as { message?: string }).message ?? `HTTP ${res.status}`);
+      }
+      const data: ProxyConfig | null = await res.json();
+      if (!data) {
+        // 200 + null means no proxy is configured — show an empty form
         setConfig(null);
         setProxyUrl('');
         setUsername('');
         setPassword('');
         return;
       }
-      if (!res.ok) {
-        const err = await res.json().catch(() => ({}));
-        throw new Error((err as { message?: string }).message ?? `HTTP ${res.status}`);
-      }
-      const data: ProxyConfig = await res.json();
       setConfig(data);
       setProxyUrl(data.proxyUrl);
       setUsername(data.username ?? '');

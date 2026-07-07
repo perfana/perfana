@@ -20,12 +20,23 @@ export class ProxyService {
   /**
    * Strip the password from a ProxyServer row and expose a hasPassword flag.
    * The password is NEVER returned by any endpoint.
+   *
+   * Fields are listed explicitly (no spread) so a future sensitive column
+   * cannot accidentally leak into API responses.
    */
   toResponse(row: ProxyServer): ProxyResponseDto {
-    const { password: _pw, ...rest } = row as ProxyServer & { password?: string };
+    const r = row as ProxyServer & { password?: string };
     return {
-      ...rest,
-      hasPassword: Boolean(_pw),
+      id: r.id,
+      proxyUrl: r.proxyUrl,
+      username: r.username,
+      hasPassword: Boolean(r.password),
+      organizationId: r.organizationId,
+      teamId: r.teamId,
+      createdBy: r.createdBy,
+      updatedBy: r.updatedBy,
+      createdAt: r.createdAt,
+      updatedAt: r.updatedAt,
     };
   }
 

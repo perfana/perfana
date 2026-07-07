@@ -22,10 +22,9 @@ export class ProxyController {
   @ApiOperation({ summary: 'Get the proxy configuration for the caller\'s organization' })
   @ApiResponse({
     status: 200,
-    description: 'Proxy configuration (password is never returned)',
+    description: 'Proxy configuration, or null when none is configured (password is never returned)',
     type: ProxyResponseDto,
   })
-  @ApiResponse({ status: 404, description: 'No proxy configured for this organization' })
   async getForOrg(@UserCtx() ctx: UserContext): Promise<ProxyResponseDto | null> {
     return this.proxyService.getForOrg(ctx.userId, ctx.roles);
   }

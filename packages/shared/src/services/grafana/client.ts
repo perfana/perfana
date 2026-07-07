@@ -68,6 +68,13 @@ export class GrafanaClient {
   private dispatcher: Dispatcher;
   private grafanaConfig: GrafanaConfig;
   private logger: Logger;
+  /**
+   * URL origin (scheme + host + port) derived from grafanaConfig.url.
+   * Using the origin guarantees that no-proxy requests are byte-identical to
+   * the old `new Pool(url)` behaviour: undici's Pool always connected to the
+   * origin and ignored any path prefix in the supplied URL.
+   */
+  private originUrl: string;
 
   constructor(grafanaConfig: GrafanaConfig, logger?: Logger) {
     this.grafanaConfig = grafanaConfig;
@@ -75,6 +82,9 @@ export class GrafanaClient {
 
     // Validate Grafana URL for SSRF protection
     this.validateGrafanaUrl();
+
+    // Compute origin once; reused by all request() calls below.
+    this.originUrl = new URL(grafanaConfig.url).origin;
 
     this.pool = this.createConnectionPool();
     // When a proxy dispatcher is provided, use it for all outbound requests.
@@ -270,7 +280,7 @@ export class GrafanaClient {
           dataSize: requestBody.length
         });
 
-        const { statusCode, body } = await request(`${this.grafanaConfig.url}${requestBatch.request.endpoint}`, {
+        const { statusCode, body } = await request(`${this.originUrl}${requestBatch.request.endpoint}`, {
           dispatcher: this.dispatcher,
           method: 'POST',
           headers: {
@@ -332,7 +342,7 @@ export class GrafanaClient {
    */
   async getDatasourceByUid(uid: string): Promise<{ id: number; uid: string; name: string; type: string } | null> {
     try {
-      const { statusCode, body } = await request(`${this.grafanaConfig.url}/api/datasources/uid/${uid}`, {
+      const { statusCode, body } = await request(`${this.originUrl}/api/datasources/uid/${uid}`, {
         dispatcher: this.dispatcher,
         method: 'GET',
         headers: {
