@@ -131,18 +131,18 @@ export function DynatraceExpandedContent({
           aria-label="entity type tabs"
         >
           <Tab
-            label={`Services (${serviceEntities.length})`}
-            disabled={serviceEntities.length === 0}
-          />
-          <Tab
             label={`Hosts (${hostEntities.length})`}
             disabled={hostEntities.length === 0}
+          />
+          <Tab
+            label={`Services (${serviceEntities.length})`}
+            disabled={serviceEntities.length === 0}
           />
         </Tabs>
       </Box>
 
       {/* Services Tab */}
-      <TabPanel value={primaryTabValue} index={0}>
+      <TabPanel value={primaryTabValue} index={1}>
         {/* Service tabs */}
         <Box sx={{ borderBottom: 1, borderColor: 'divider' }}>
           <Tabs
@@ -234,7 +234,7 @@ export function DynatraceExpandedContent({
       </TabPanel>
 
       {/* Hosts Tab */}
-      <TabPanel value={primaryTabValue} index={1}>
+      <TabPanel value={primaryTabValue} index={0}>
         <HostsTabContent
           hostEntities={hostEntities}
           testRun={testRun}

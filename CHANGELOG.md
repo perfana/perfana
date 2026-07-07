@@ -4,6 +4,11 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
+## [0.2.61.29] - 2026-07-07
+
+### Changed
+- **Dynatrace test-run card opens on the Hosts tab.** In the expanded Dynatrace panel on a test-run page, Hosts is now the first (default-selected) primary tab, ahead of Services.
+
 ## [0.2.61.28] - 2026-07-07
 
 ### Added
