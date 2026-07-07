@@ -6,7 +6,7 @@ import { DynatraceRepository } from '../services/dynatrace/DynatraceRepository.j
 import { QueryConstructor } from '../services/dynatrace/QueryConstructor.js';
 import { DynatraceAPIClient } from '../services/dynatrace/DynatraceAPIClient.js';
 import { DataProcessor } from '../services/dynatrace/DataProcessor.js';
-import { resolveProxyDispatcher } from '../config/proxy-resolver.js';
+import { resolveDynatraceProxyDispatcher } from '../config/proxy-resolver.js';
 import type { Dispatcher } from 'undici';
 import {
   DynatraceQueryConfig,
@@ -180,7 +180,7 @@ export class DynatracePipeline extends BasePipelineTypeORM {
       }
 
       const proxyDispatcher = dynatraceConfig.useProxy
-        ? (await resolveProxyDispatcher(dynatraceConfig.organizationId)) as Dispatcher | undefined
+        ? (await resolveDynatraceProxyDispatcher(dynatraceConfig.organizationId)) as Dispatcher | undefined
         : undefined;
 
       const apiClient = new DynatraceAPIClient({

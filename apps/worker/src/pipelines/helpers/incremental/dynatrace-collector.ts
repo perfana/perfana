@@ -14,7 +14,7 @@ import { DynatraceAPIClient } from '../../../services/dynatrace/DynatraceAPIClie
 import { DynatraceRepository } from '../../../services/dynatrace/DynatraceRepository.js';
 import { DataProcessor } from '../../../services/dynatrace/DataProcessor.js';
 import { DynatraceQueryConfig } from '../../../types/dynatrace/index.js';
-import { resolveProxyDispatcher } from '../../../config/proxy-resolver.js';
+import { resolveDynatraceProxyDispatcher } from '../../../config/proxy-resolver.js';
 import type { Dispatcher } from 'undici';
 import type { CollectionResult } from './types.js';
 import type { BatchProcessor } from './batch-processor.js';
@@ -279,7 +279,7 @@ export class DynatraceCollector {
 
         // Create API client, threading proxy dispatcher when configured
         const proxyDispatcher = dynatraceConfig.useProxy
-          ? (await resolveProxyDispatcher(dynatraceConfig.organizationId)) as Dispatcher | undefined
+          ? (await resolveDynatraceProxyDispatcher(dynatraceConfig.organizationId)) as Dispatcher | undefined
           : undefined;
 
         const apiClient = new DynatraceAPIClient({

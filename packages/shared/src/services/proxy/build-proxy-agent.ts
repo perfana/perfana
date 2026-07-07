@@ -6,15 +6,32 @@ export interface ProxyAgents {
   axiosProxy: { host: string; port: number; protocol: string; auth?: { username: string; password: string } };
 }
 
-export function buildProxyAgent(proxy: ProxyServer | null | undefined): ProxyAgents | null {
+/**
+ * Pure helper — extracts the proxy uri and optional Basic-auth token from a
+ * ProxyServer row without constructing any undici object.  Callers that need
+ * to build a ProxyAgent from a *different* undici copy (e.g. the worker's
+ * undici 7 rather than shared's undici 6) should use this instead of
+ * `buildProxyAgent` so there is no cross-version dispatcher skew.
+ */
+export function proxyConnection(
+  proxy: ProxyServer | null | undefined,
+): { uri: string; token?: string } | null {
   if (!proxy || !proxy.proxyUrl) return null;
   const url = new URL(proxy.proxyUrl);
   const hasAuth = !!proxy.username && !!proxy.password;
   const token = hasAuth
     ? `Basic ${Buffer.from(`${proxy.username}:${proxy.password}`).toString('base64')}`
     : undefined;
+  return { uri: url.origin, token };
+}
 
-  const dispatcher = new ProxyAgent({ uri: url.origin, token });
+export function buildProxyAgent(proxy: ProxyServer | null | undefined): ProxyAgents | null {
+  if (!proxy || !proxy.proxyUrl) return null;
+  const conn = proxyConnection(proxy)!;
+  const url = new URL(proxy.proxyUrl);
+  const hasAuth = !!proxy.username && !!proxy.password;
+
+  const dispatcher = new ProxyAgent({ uri: conn.uri, token: conn.token });
   const port = url.port ? Number(url.port) : url.protocol === 'https:' ? 443 : 80;
 
   return {

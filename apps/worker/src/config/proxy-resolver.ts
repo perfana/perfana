@@ -1,5 +1,6 @@
+import { ProxyAgent } from 'undici'; // worker-local undici 7 — matches DynatraceAPIClient's request()
 import { ProxyServer } from '@perfana/shared/entities';
-import { buildProxyAgent } from '@perfana/shared/services/proxy';
+import { buildProxyAgent, proxyConnection } from '@perfana/shared/services/proxy';
 import { getDatabaseService } from '../common/database-accessor.js';
 
 /**
@@ -28,4 +29,30 @@ export async function resolveProxyDispatcher(
 
   const agents = buildProxyAgent(proxyRow ?? null);
   return agents?.dispatcher;
+}
+
+/**
+ * Like resolveProxyDispatcher, but builds the ProxyAgent from the worker's
+ * own undici 7 rather than shared's undici 6.  Use this for Dynatrace call
+ * sites where DynatraceAPIClient.request() is also undici 7 — passing an
+ * undici-6 ProxyAgent to undici-7's request() throws at runtime.
+ *
+ * The Grafana path (GrafanaClient in shared) must keep using resolveProxyDispatcher
+ * because it calls shared's undici 6 request(), so it needs a shared undici 6 ProxyAgent.
+ *
+ * Return type is `unknown` for consistency with resolveProxyDispatcher; callers
+ * cast to `Dispatcher` from their own undici import.
+ */
+export async function resolveDynatraceProxyDispatcher(
+  organizationId: string | null | undefined
+): Promise<unknown | undefined> {
+  if (!organizationId) return undefined;
+
+  const db = getDatabaseService();
+  const proxyRow = await db.dataSource
+    .getRepository(ProxyServer)
+    .findOne({ where: { organizationId } });
+
+  const conn = proxyConnection(proxyRow ?? null);
+  return conn ? new ProxyAgent({ uri: conn.uri, token: conn.token }) : undefined;
 }

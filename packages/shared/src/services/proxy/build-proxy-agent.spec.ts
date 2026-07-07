@@ -1,4 +1,4 @@
-import { buildProxyAgent } from './build-proxy-agent';
+import { buildProxyAgent, proxyConnection } from './build-proxy-agent';
 import { ProxyServer } from '../../entities/proxy-server.entity';
 
 const make = (over: Partial<ProxyServer>): ProxyServer =>
@@ -22,5 +22,22 @@ describe('buildProxyAgent', () => {
   it('includes basic auth when username+password present', () => {
     const r = buildProxyAgent(make({ username: 'u', password: 'p' }))!;
     expect(r.axiosProxy.auth).toEqual({ username: 'u', password: 'p' });
+  });
+});
+
+describe('proxyConnection', () => {
+  it('returns null when proxy is null', () => {
+    expect(proxyConnection(null)).toBeNull();
+  });
+
+  it('returns uri without token when no credentials', () => {
+    const r = proxyConnection(make({}))!;
+    expect(r.uri).toBe('http://proxy.corp:3128');
+    expect(r.token).toBeUndefined();
+  });
+
+  it('returns Basic token when username+password present', () => {
+    const r = proxyConnection(make({ username: 'u', password: 'p' }))!;
+    expect(r.token).toBe(`Basic ${Buffer.from('u:p').toString('base64')}`);
   });
 });
