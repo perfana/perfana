@@ -195,6 +195,7 @@ export class TracingInstancesService {
         tracingApiUrl: createDto.tracingApiUrl || undefined,
         tracingUi: createDto.tracingUi,
         tracingIframeAllowed: createDto.tracingIframeAllowed || false,
+        useProxy: createDto.useProxy || false,
         createdBy: userId,
         updatedBy: userId,
         organizationId,
@@ -264,6 +265,7 @@ export class TracingInstancesService {
       if (updateDto.tracingApiUrl !== undefined) entity.tracingApiUrl = updateDto.tracingApiUrl || undefined;
       if (updateDto.tracingUi !== undefined) entity.tracingUi = updateDto.tracingUi;
       if (updateDto.tracingIframeAllowed !== undefined) entity.tracingIframeAllowed = updateDto.tracingIframeAllowed;
+      if (updateDto.useProxy !== undefined) entity.useProxy = updateDto.useProxy;
 
       // Track who updated the instance
       entity.updatedBy = userId;

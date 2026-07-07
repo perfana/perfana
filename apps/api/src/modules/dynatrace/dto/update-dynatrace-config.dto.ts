@@ -1,4 +1,4 @@
-import { IsOptional, IsString } from 'class-validator';
+import { IsOptional, IsString, IsBoolean } from 'class-validator';
 import { ApiPropertyOptional } from '@nestjs/swagger';
 
 export class UpdateDynatraceConfigDto {
@@ -33,4 +33,9 @@ export class UpdateDynatraceConfigDto {
   @IsOptional()
   @IsString()
   platformApiToken?: string;
+
+  @ApiPropertyOptional({ description: 'Route outbound requests through the organization proxy' })
+  @IsOptional()
+  @IsBoolean()
+  useProxy?: boolean;
 }

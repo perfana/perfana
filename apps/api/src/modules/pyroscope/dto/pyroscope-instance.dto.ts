@@ -21,6 +21,11 @@ export class CreatePyroscopeInstanceDto {
   @IsBoolean()
   pyroscopeStandAlone?: boolean;
 
+  @ApiPropertyOptional({ description: 'Route outbound requests through the organization proxy' })
+  @IsOptional()
+  @IsBoolean()
+  useProxy?: boolean;
+
   @ApiPropertyOptional({ description: 'Organization ID to assign this instance to' })
   @IsOptional()
   @IsString()
@@ -48,6 +53,11 @@ export class UpdatePyroscopeInstanceDto {
   @IsOptional()
   @IsBoolean()
   pyroscopeStandAlone?: boolean;
+
+  @ApiPropertyOptional({ description: 'Route outbound requests through the organization proxy' })
+  @IsOptional()
+  @IsBoolean()
+  useProxy?: boolean;
 }
 
 export class PyroscopeInstanceQuery {

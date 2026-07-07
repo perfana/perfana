@@ -276,6 +276,7 @@ export class DynatraceService {
       dynatrace_type: dto.dynatraceType || 'saas',
       label: dto.label,
       platform_api_token: dto.platformApiToken,
+      use_proxy: dto.useProxy || false,
       created_by: userId,
       updated_by: userId,
       organization_id: dto.organizationId || undefined,
@@ -329,6 +330,7 @@ export class DynatraceService {
       perfana_request_name_attribute: dto.perfanaRequestNameAttribute,
       label: dto.label,
       platform_api_token: dto.platformApiToken,
+      use_proxy: dto.useProxy,
       updated_by: userId,
     });
 

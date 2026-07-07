@@ -12,6 +12,7 @@ import { createAuthorizationServiceMock } from '../../../test/mocks/authorizatio
 import { AuthorizationService } from '../../common/services/authorization.service';
 import { Capability } from '../../constants/capabilities.constants';
 import { AuditService } from '../audit/audit.service';
+import { ProxyResolverService } from '../proxy/proxy-resolver.service';
 
 jest.mock('axios');
 const mockedAxios = axios as jest.Mocked<typeof axios>;
@@ -113,6 +114,12 @@ describe('DynatraceService', () => {
             logDelete: jest.fn(),
           },
         },
+        {
+          provide: ProxyResolverService,
+          useValue: {
+            resolve: jest.fn().mockResolvedValue(null),
+          },
+        },
       ],
     }).compile();
 
@@ -195,6 +202,7 @@ describe('DynatraceService', () => {
           dynatrace_type: createDto.dynatraceType,
           label: createDto.label,
           platform_api_token: createDto.platformApiToken,
+          use_proxy: false,
           created_by: mockUserId,
           updated_by: mockUserId,
           organization_id: undefined,
@@ -1217,6 +1225,12 @@ describe('DynatraceService', () => {
               logCreate: jest.fn(),
               logUpdate: jest.fn(),
               logDelete: jest.fn(),
+            },
+          },
+          {
+            provide: ProxyResolverService,
+            useValue: {
+              resolve: jest.fn().mockResolvedValue(null),
             },
           },
         ],

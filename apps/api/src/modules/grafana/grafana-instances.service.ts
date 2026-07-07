@@ -217,6 +217,7 @@ export class GrafanaInstancesService {
         username: createDto.username || undefined,
         password: createDto.password || undefined,
         snapshotInstance: createDto.snapshotInstance || false,
+        useProxy: createDto.useProxy || false,
         createdBy: userId,
         updatedBy: userId,
         organizationId,
@@ -288,6 +289,7 @@ export class GrafanaInstancesService {
       if (updateDto.username !== undefined) entity.username = updateDto.username;
       if (updateDto.password !== undefined) entity.password = updateDto.password;
       if (updateDto.snapshotInstance !== undefined) entity.snapshotInstance = updateDto.snapshotInstance;
+      if (updateDto.useProxy !== undefined) entity.useProxy = updateDto.useProxy;
 
       // Update ownership tracking
       entity.updatedBy = userId;

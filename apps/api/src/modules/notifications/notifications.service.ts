@@ -166,6 +166,7 @@ export class NotificationsService {
         notifyOnFinished: dto.notifyOnFinished ?? true,
         notifyOnFailedOnly: dto.notifyOnFailedOnly ?? false,
         enabled: dto.enabled ?? true,
+        useProxy: dto.useProxy ?? false,
         createdBy: userId,
         updatedBy: userId,
         organizationId: system.organization_id,
@@ -222,6 +223,7 @@ export class NotificationsService {
       if (dto.notifyOnFinished !== undefined) channel.notifyOnFinished = dto.notifyOnFinished;
       if (dto.notifyOnFailedOnly !== undefined) channel.notifyOnFailedOnly = dto.notifyOnFailedOnly;
       if (dto.enabled !== undefined) channel.enabled = dto.enabled;
+      if (dto.useProxy !== undefined) channel.useProxy = dto.useProxy;
       channel.updatedBy = userId;
 
       this.logger.log(`Updating notification channel ${id} by user ${userId}`);

@@ -129,6 +129,7 @@ export class DynatraceRepository {
     platform_api_token?: string;
     perfana_test_run_id_attribute?: string;
     perfana_request_name_attribute?: string;
+    use_proxy?: boolean;
     created_by?: string;
     updated_by?: string;
     organization_id?: string;
@@ -141,6 +142,7 @@ export class DynatraceRepository {
       platformApiToken: dto.platform_api_token,
       perfanaTestRunIdAttribute: dto.perfana_test_run_id_attribute,
       perfanaRequestNameAttribute: dto.perfana_request_name_attribute,
+      useProxy: dto.use_proxy ?? false,
       createdBy: dto.created_by,
       updatedBy: dto.updated_by,
       organizationId: dto.organization_id,
@@ -155,6 +157,7 @@ export class DynatraceRepository {
       perfana_request_name_attribute?: string;
       label?: string;
       platform_api_token?: string;
+      use_proxy?: boolean;
       updated_by?: string;
     },
   ) {
@@ -171,6 +174,9 @@ export class DynatraceRepository {
     }
     if (dto.platform_api_token !== undefined) {
       updateData.platformApiToken = dto.platform_api_token;
+    }
+    if (dto.use_proxy !== undefined) {
+      updateData.useProxy = dto.use_proxy;
     }
     if (dto.updated_by !== undefined) {
       updateData.updatedBy = dto.updated_by;

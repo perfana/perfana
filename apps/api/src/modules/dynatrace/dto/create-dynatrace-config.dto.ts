@@ -1,5 +1,5 @@
-import { IsUrl, IsNotEmpty, IsString, IsIn, IsOptional } from 'class-validator';
-import { ApiProperty } from '@nestjs/swagger';
+import { IsUrl, IsNotEmpty, IsString, IsIn, IsOptional, IsBoolean } from 'class-validator';
+import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 
 export class CreateDynatraceConfigDto {
   @ApiProperty({
@@ -52,4 +52,9 @@ export class CreateDynatraceConfigDto {
   @IsString()
   @IsOptional()
   organizationId?: string;
+
+  @ApiPropertyOptional({ description: 'Route outbound requests through the organization proxy' })
+  @IsOptional()
+  @IsBoolean()
+  useProxy?: boolean;
 }
