@@ -1,5 +1,5 @@
 import { ApiProperty } from '@nestjs/swagger';
-import { IsNotEmpty, IsString, IsNumber, Min, IsOptional, IsUUID } from 'class-validator';
+import { IsNotEmpty, IsString, IsNumber, Min, IsOptional } from 'class-validator';
 
 /**
  * Request DTO for analyzing Pyroscope flamegraphs between two test runs
@@ -80,14 +80,6 @@ export class AnalyzeFlamegraphDto {
   @IsString()
   symbolFilter?: string;
 
-  @ApiProperty({
-    description: 'Optional Pyroscope instance ID — used to route outbound requests through the org proxy when useProxy is enabled',
-    example: '550e8400-e29b-41d4-a716-446655440000',
-    required: false
-  })
-  @IsOptional()
-  @IsUUID()
-  pyroscopeInstanceId?: string;
 }
 
 /**

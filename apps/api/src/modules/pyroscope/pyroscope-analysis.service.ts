@@ -90,16 +90,14 @@ export class PyroscopeAnalysisService {
         );
       }
 
-      // Resolve org proxy if a pyroscopeInstanceId was provided
+      // Resolve org proxy server-side from the Pyroscope instance matching the target backend URL.
+      // Never trust a client-supplied instance id (cross-tenant IDOR); derive routing from the
+      // destination the request already targets.
       let dispatcher: unknown;
-      if (params.pyroscopeInstanceId) {
-        const instance = await this.pyroscopeInstanceRepo.findOne({
-          where: { id: params.pyroscopeInstanceId },
-        });
-        if (instance) {
-          const agents = await this.proxyResolver.resolve(instance.organizationId, instance.useProxy);
-          dispatcher = agents?.dispatcher;
-        }
+      const instance = await this.pyroscopeInstanceRepo.findOne({ where: { backendUrl } });
+      if (instance) {
+        const agents = await this.proxyResolver.resolve(instance.organizationId, instance.useProxy);
+        dispatcher = agents?.dispatcher;
       }
 
       // Fetch both profiles in parallel
