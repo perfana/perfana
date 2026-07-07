@@ -892,6 +892,14 @@ export class ConsolidatedSchema1700000000000 implements MigrationInterface {
     await queryRunner.query(
       `ALTER TABLE public.proxy_servers FORCE ROW LEVEL SECURITY`,
     );
+    await queryRunner.query(`DROP POLICY IF EXISTS rls_proxy_servers_select ON public.proxy_servers`);
+    await queryRunner.query(`CREATE POLICY rls_proxy_servers_select ON public.proxy_servers FOR SELECT USING (public.can_access_resource(organization_id, team_id, (created_by)::text))`);
+    await queryRunner.query(`DROP POLICY IF EXISTS rls_proxy_servers_insert ON public.proxy_servers`);
+    await queryRunner.query(`CREATE POLICY rls_proxy_servers_insert ON public.proxy_servers FOR INSERT WITH CHECK (true)`);
+    await queryRunner.query(`DROP POLICY IF EXISTS rls_proxy_servers_update ON public.proxy_servers`);
+    await queryRunner.query(`CREATE POLICY rls_proxy_servers_update ON public.proxy_servers FOR UPDATE USING (public.can_modify_resource(organization_id, team_id, (created_by)::text))`);
+    await queryRunner.query(`DROP POLICY IF EXISTS rls_proxy_servers_delete ON public.proxy_servers`);
+    await queryRunner.query(`CREATE POLICY rls_proxy_servers_delete ON public.proxy_servers FOR DELETE USING (public.can_modify_resource(organization_id, team_id, (created_by)::text))`);
 
     // use_proxy columns on integration tables — added after baseline schema dump.
     await queryRunner.query(

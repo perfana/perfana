@@ -6587,6 +6587,12 @@ ALTER TABLE public.profiles ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.pyroscope_instances ENABLE ROW LEVEL SECURITY;
 
 --
+-- Name: proxy_servers; Type: ROW SECURITY; Schema: public; Owner: -
+--
+
+ALTER TABLE public.proxy_servers ENABLE ROW LEVEL SECURITY;
+
+--
 -- Name: report_templates; Type: ROW SECURITY; Schema: public; Owner: -
 --
 
@@ -7214,6 +7220,34 @@ CREATE POLICY rls_pyroscope_instances_select ON public.pyroscope_instances FOR S
 --
 
 CREATE POLICY rls_pyroscope_instances_update ON public.pyroscope_instances FOR UPDATE USING (public.can_modify_resource(organization_id, team_id, (created_by)::text));
+
+
+--
+-- Name: proxy_servers rls_proxy_servers_delete; Type: POLICY; Schema: public; Owner: -
+--
+
+CREATE POLICY rls_proxy_servers_delete ON public.proxy_servers FOR DELETE USING (public.can_modify_resource(organization_id, team_id, (created_by)::text));
+
+
+--
+-- Name: proxy_servers rls_proxy_servers_insert; Type: POLICY; Schema: public; Owner: -
+--
+
+CREATE POLICY rls_proxy_servers_insert ON public.proxy_servers FOR INSERT WITH CHECK (true);
+
+
+--
+-- Name: proxy_servers rls_proxy_servers_select; Type: POLICY; Schema: public; Owner: -
+--
+
+CREATE POLICY rls_proxy_servers_select ON public.proxy_servers FOR SELECT USING (public.can_access_resource(organization_id, team_id, (created_by)::text));
+
+
+--
+-- Name: proxy_servers rls_proxy_servers_update; Type: POLICY; Schema: public; Owner: -
+--
+
+CREATE POLICY rls_proxy_servers_update ON public.proxy_servers FOR UPDATE USING (public.can_modify_resource(organization_id, team_id, (created_by)::text));
 
 
 --
