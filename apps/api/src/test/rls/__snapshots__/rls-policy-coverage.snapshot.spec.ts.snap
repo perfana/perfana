@@ -322,6 +322,16 @@ exports[`RLS policy coverage snapshot every owned-resource and policy-bearing ta
     "policies": [],
     "rls": false,
   },
+  "proxy_servers": {
+    "force": true,
+    "policies": [
+      "DELETE:rls_proxy_servers_delete",
+      "INSERT:rls_proxy_servers_insert",
+      "SELECT:rls_proxy_servers_select",
+      "UPDATE:rls_proxy_servers_update",
+    ],
+    "rls": true,
+  },
   "pyroscope_instances": {
     "force": true,
     "policies": [
