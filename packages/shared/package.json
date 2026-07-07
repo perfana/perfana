@@ -71,6 +71,11 @@
       "development": "./src/services/metrics-source-upsert.ts",
       "default": "./dist/services/metrics-source-upsert.js"
     },
+    "./services/proxy": {
+      "types": "./dist/services/proxy/index.d.ts",
+      "development": "./src/services/proxy/index.ts",
+      "default": "./dist/services/proxy/index.js"
+    },
     "./utils": {
       "types": "./dist/utils/index.d.ts",
       "development": "./src/utils/index.ts",

@@ -37,6 +37,7 @@ export function usePyroscopeIntegration({ onSnackbar, organizationId }: UsePyros
       pyroscopeUrl: '',
       backendUrl: '',
       pyroscopeStandAlone: false,
+      useProxy: false,
     },
   });
 
@@ -48,6 +49,7 @@ export function usePyroscopeIntegration({ onSnackbar, organizationId }: UsePyros
         pyroscopeUrl: selectedInstance.pyroscopeUrl,
         backendUrl: selectedInstance.backendUrl || '',
         pyroscopeStandAlone: selectedInstance.pyroscopeStandAlone,
+        useProxy: selectedInstance.useProxy,
       });
     }
   }, [editDialogOpen, selectedInstance, form]);
@@ -67,6 +69,7 @@ export function usePyroscopeIntegration({ onSnackbar, organizationId }: UsePyros
         label: data.label!,
         pyroscopeUrl: data.pyroscopeUrl!,
         pyroscopeStandAlone: data.pyroscopeStandAlone,
+        useProxy: data.useProxy,
         ...(organizationId && { organizationId }),
       });
       setInstances([instance, ...instances]);

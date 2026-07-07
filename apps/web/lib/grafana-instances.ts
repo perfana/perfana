@@ -12,6 +12,7 @@ export interface GrafanaInstance {
   username?: string;
   password?: string;
   snapshotInstance: boolean;
+  useProxy: boolean;
   createdAt: string;
   updatedAt: string;
 }
@@ -25,6 +26,7 @@ export interface CreateGrafanaInstanceDto {
   username?: string;
   password?: string;
   snapshotInstance?: boolean;
+  useProxy?: boolean;
   organizationId?: string;
 }
 
@@ -48,6 +50,7 @@ function transformGrafanaInstance(data: unknown): GrafanaInstance {
     username: typedData.username as string | undefined,
     password: typedData.password as string | undefined,
     snapshotInstance: (typedData.snapshot_instance ?? typedData.snapshotInstance ?? false) as boolean,
+    useProxy: (typedData.use_proxy ?? typedData.useProxy ?? false) as boolean,
     createdAt: (typedData.created_at || typedData.createdAt) as string,
     updatedAt: (typedData.updated_at || typedData.updatedAt) as string,
   };

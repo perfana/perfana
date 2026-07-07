@@ -12,6 +12,7 @@ export class TracingInstance {
     'tracingApiUrl',
     'tracingUi',
     'tracingIframeAllowed',
+    'useProxy',
   ] as const;
 
   @PrimaryGeneratedColumn('uuid')
@@ -35,6 +36,9 @@ export class TracingInstance {
 
   @Column({ type: 'boolean', default: false, name: 'tracing_iframe_allowed' })
   tracingIframeAllowed!: boolean;
+
+  @Column({ type: 'boolean', name: 'use_proxy', default: false })
+  useProxy!: boolean;
 
   // Ownership tracking (RBAC Phase 2)
   @Column({ type: 'uuid', name: 'organization_id' })

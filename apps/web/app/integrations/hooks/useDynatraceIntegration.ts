@@ -39,13 +39,14 @@ export function useDynatraceIntegration({ onSnackbar, organizationId }: UseDynat
   const [selectedRequestNameAttribute, setSelectedRequestNameAttribute] = useState<string>('');
 
   const form = useForm<CreateDynatraceConfigFormData>({
-    resolver: zodResolver(createDynatraceConfigSchema) as unknown,
+    resolver: zodResolver(createDynatraceConfigSchema),
     defaultValues: {
       label: '',
       host: '',
       apiToken: '',
       platformApiToken: '',
       dynatraceType: 'saas' as const,
+      useProxy: false,
     },
   });
 
@@ -57,6 +58,7 @@ export function useDynatraceIntegration({ onSnackbar, organizationId }: UseDynat
         host: selectedConfig.host,
         apiToken: '', // Don't pre-fill token for security
         dynatraceType: selectedConfig.dynatraceType,
+        useProxy: selectedConfig.useProxy ?? false,
       });
 
       // Load request attributes when opening edit dialog
@@ -95,6 +97,7 @@ export function useDynatraceIntegration({ onSnackbar, organizationId }: UseDynat
         ...(data.platformApiToken && { platformApiToken: data.platformApiToken }),
         ...(selectedTestRunIdAttribute && { perfanaTestRunIdAttribute: selectedTestRunIdAttribute }),
         ...(selectedRequestNameAttribute && { perfanaRequestNameAttribute: selectedRequestNameAttribute }),
+        useProxy: data.useProxy,
         ...(organizationId && { organizationId }),
       };
 
@@ -119,13 +122,14 @@ export function useDynatraceIntegration({ onSnackbar, organizationId }: UseDynat
     }
   };
 
-  const handleUpdate = async (_data: CreateDynatraceConfigFormData) => {
+  const handleUpdate = async (data: CreateDynatraceConfigFormData) => {
     if (!selectedConfig) return;
 
     try {
       const updateData: UpdateDynatraceConfigDto = {
         perfanaTestRunIdAttribute: selectedTestRunIdAttribute || undefined,
         perfanaRequestNameAttribute: selectedRequestNameAttribute || undefined,
+        useProxy: data.useProxy,
       };
 
       await updateDynatraceConfig(selectedConfig.id, updateData);

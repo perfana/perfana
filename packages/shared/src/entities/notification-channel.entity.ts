@@ -32,6 +32,9 @@ export class NotificationChannel {
   @Column({ type: 'boolean', default: true })
   enabled!: boolean;
 
+  @Column({ type: 'boolean', name: 'use_proxy', default: false })
+  useProxy!: boolean;
+
   // Ownership tracking (RBAC Phase 2)
   @Column({ type: 'uuid', name: 'organization_id' })
   organizationId!: string;

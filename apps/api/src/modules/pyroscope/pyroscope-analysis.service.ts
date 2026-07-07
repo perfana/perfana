@@ -1,10 +1,17 @@
 import { Injectable, Logger, HttpException, HttpStatus } from '@nestjs/common';
+import { InjectRepository } from '@nestjs/typeorm';
+import { In, Repository } from 'typeorm';
 import {
   AnalyzeFlamegraphDto,
   FlamegraphAnalysisResponseDto,
   FlamegraphDiffDto,
 } from './dto/pyroscope-analysis.dto';
 import { validateExternalUrl } from '../../common/security/url-validator';
+import { withRequestEm } from '../../common/db/request-em';
+import { withOrgFilter } from '../../common/utils/with-org-filter';
+import { PyroscopeInstance } from '../../entities';
+import { ProxyResolverService } from '../proxy/proxy-resolver.service';
+import { AuthorizationService } from '../../common/services/authorization.service';
 
 /**
  * Pyroscope profile structure (flamebearer format)
@@ -27,13 +34,20 @@ interface PyroscopeProfile {
 export class PyroscopeAnalysisService {
   private readonly logger = new Logger(PyroscopeAnalysisService.name);
 
+  constructor(
+    @InjectRepository(PyroscopeInstance)
+    private readonly pyroscopeInstanceRepo: Repository<PyroscopeInstance>,
+    private readonly proxyResolver: ProxyResolverService,
+    private readonly authzService: AuthorizationService,
+  ) {}
+
   /**
    * Analyze flamegraphs between baseline and current test runs
    *
    * @param params - Analysis parameters including Pyroscope URL, application, time ranges
    * @returns Flamegraph analysis with function-level differences
    */
-  async analyzeFlamegraphs(params: AnalyzeFlamegraphDto): Promise<FlamegraphAnalysisResponseDto> {
+  async analyzeFlamegraphs(params: AnalyzeFlamegraphDto, userId: string, roles: string[]): Promise<FlamegraphAnalysisResponseDto> {
     const {
       backendUrl,
       application,
@@ -80,6 +94,27 @@ export class PyroscopeAnalysisService {
         );
       }
 
+      // Resolve org proxy server-side from the Pyroscope instance matching the target backend URL,
+      // scoped to organizations the CALLER can access (closes cross-tenant SSRF pivot / IDOR).
+      // Global admins match any instance; regular users only match instances in their orgs.
+      let dispatcher: unknown;
+      const orgIds = await withOrgFilter(userId, roles, this.authzService);
+      let instanceWhere: object;
+      if (orgIds === null) {
+        // Global admin — match any instance with this backendUrl
+        instanceWhere = { backendUrl };
+      } else if (orgIds.length === 0) {
+        // No accessible orgs — safe default: no proxy (dummy UUID matches nothing)
+        instanceWhere = { backendUrl, organizationId: In(['00000000-0000-0000-0000-000000000000']) };
+      } else {
+        instanceWhere = { backendUrl, organizationId: In(orgIds) };
+      }
+      const instance = await withRequestEm(this.pyroscopeInstanceRepo).findOne({ where: instanceWhere });
+      if (instance) {
+        const agents = await this.proxyResolver.resolve(instance.organizationId, instance.useProxy);
+        dispatcher = agents?.dispatcher;
+      }
+
       // Fetch both profiles in parallel
       this.logger.log(
         `Fetching flamegraphs for ${application} with profiler ${profilerLabel}`
@@ -91,14 +126,16 @@ export class PyroscopeAnalysisService {
           application,
           profilerLabel,
           baselineStartTime,
-          baselineEndTime
+          baselineEndTime,
+          dispatcher,
         ),
         this.fetchPyroscopeFlamegraph(
           backendUrl,
           application,
           profilerLabel,
           currentStartTime,
-          currentEndTime
+          currentEndTime,
+          dispatcher,
         ),
       ]);
 
@@ -166,7 +203,8 @@ export class PyroscopeAnalysisService {
     application: string,
     profilerLabel: string,
     from: number,
-    until: number
+    until: number,
+    dispatcher?: unknown,
   ): Promise<PyroscopeProfile> {
     // Map profilerLabel back to full profile type
     // profilerLabel is like "process_cpu/cpu", need to convert to full type
@@ -214,7 +252,8 @@ export class PyroscopeAnalysisService {
         headers: {
           'Content-Type': 'application/json',
         },
-      });
+        ...(dispatcher ? { dispatcher } : {}),
+      } as RequestInit & { dispatcher?: unknown });
 
       if (!response.ok) {
         const errorText = await response.text();

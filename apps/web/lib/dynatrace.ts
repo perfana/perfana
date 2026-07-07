@@ -9,6 +9,7 @@ export interface DynatraceConfig {
   platformApiToken?: string
   perfanaTestRunIdAttribute?: string
   perfanaRequestNameAttribute?: string
+  useProxy?: boolean
   createdAt: string
   updatedAt: string
 }
@@ -21,6 +22,7 @@ export interface CreateDynatraceConfigDto {
   dynatraceType?: 'saas' | 'managed'
   perfanaTestRunIdAttribute?: string
   perfanaRequestNameAttribute?: string
+  useProxy?: boolean
   organizationId?: string
 }
 
@@ -87,6 +89,7 @@ export interface UpdateDynatraceConfigDto {
   perfanaTestRunIdAttribute?: string
   perfanaRequestNameAttribute?: string
   platformApiToken?: string
+  useProxy?: boolean
 }
 
 export async function updateDynatraceConfig(

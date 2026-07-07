@@ -30,6 +30,7 @@ export const createGrafanaInstanceSchema = z.object({
   username: z.string().max(255, 'Username must be less than 255 characters').optional(),
   password: z.string().optional(),
   snapshotInstance: z.boolean().optional(),
+  useProxy: z.boolean().optional(),
 }).refine(_data => {
   // Either API key or username/password should be provided, but not required
   return true
@@ -58,6 +59,7 @@ export const createDynatraceConfigSchema = z.object({
     .min(10, 'API token must be at least 10 characters'),
   platformApiToken: z.string().optional(),
   dynatraceType: z.enum(['saas', 'managed']).optional().default('saas'),
+  useProxy: z.boolean().optional(),
 })
 
 // Pyroscope Instance schemas
@@ -66,6 +68,7 @@ export const createPyroscopeInstanceSchema = z.object({
   pyroscopeUrl: z.string().url('Invalid URL format'),
   backendUrl: z.string().url('Invalid URL format').optional().or(z.literal('')),
   pyroscopeStandAlone: z.boolean().optional(),
+  useProxy: z.boolean().optional(),
 })
 
 // Tracing Instance schemas
@@ -75,6 +78,7 @@ export const createTracingInstanceSchema = z.object({
   tracingApiUrl: z.string().url('Invalid URL format').optional().or(z.literal('')),
   tracingUi: z.enum(['tempo', 'jaeger', 'elastic']),
   tracingIframeAllowed: z.boolean(),
+  useProxy: z.boolean().optional(),
 })
 
 // Form field error helper

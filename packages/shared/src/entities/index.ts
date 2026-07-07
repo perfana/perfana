@@ -63,3 +63,4 @@ export * from './report-template.entity';
 export * from './generated-report.entity';
 export * from './workload-apdex-threshold.entity';
 export * from './workload-transaction-apdex-threshold.entity';
+export * from './proxy-server.entity';

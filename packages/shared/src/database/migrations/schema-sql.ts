@@ -1284,7 +1284,8 @@ CREATE TABLE public.grafana_instances (
     organization_id uuid NOT NULL,
     team_id uuid,
     created_by character varying(255),
-    updated_by character varying(255)
+    updated_by character varying(255),
+    use_proxy boolean DEFAULT false NOT NULL
 );
 
 ALTER TABLE ONLY public.grafana_instances FORCE ROW LEVEL SECURITY;
@@ -2067,7 +2068,8 @@ CREATE TABLE public.dynatrace_configs (
     organization_id uuid NOT NULL,
     team_id uuid,
     created_by character varying(255),
-    updated_by character varying(255)
+    updated_by character varying(255),
+    use_proxy boolean DEFAULT false NOT NULL
 );
 
 ALTER TABLE ONLY public.dynatrace_configs FORCE ROW LEVEL SECURITY;
@@ -2322,7 +2324,8 @@ CREATE TABLE public.notification_channels (
     organization_id uuid NOT NULL,
     team_id uuid,
     created_by character varying(255),
-    updated_by character varying(255)
+    updated_by character varying(255),
+    use_proxy boolean DEFAULT false NOT NULL
 );
 
 ALTER TABLE ONLY public.notification_channels FORCE ROW LEVEL SECURITY;
@@ -2510,10 +2513,31 @@ CREATE TABLE public.pyroscope_instances (
     organization_id uuid NOT NULL,
     team_id uuid,
     created_by character varying(255),
-    updated_by character varying(255)
+    updated_by character varying(255),
+    use_proxy boolean DEFAULT false NOT NULL
 );
 
 ALTER TABLE ONLY public.pyroscope_instances FORCE ROW LEVEL SECURITY;
+
+
+--
+-- Name: proxy_servers; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public.proxy_servers (
+    id uuid DEFAULT public.uuid_generate_v4() NOT NULL,
+    organization_id uuid NOT NULL,
+    proxy_url text NOT NULL,
+    username text,
+    password text,
+    team_id uuid,
+    created_by character varying(255),
+    updated_by character varying(255),
+    created_at timestamp without time zone DEFAULT now() NOT NULL,
+    updated_at timestamp without time zone DEFAULT now() NOT NULL
+);
+
+ALTER TABLE ONLY public.proxy_servers FORCE ROW LEVEL SECURITY;
 
 
 --
@@ -2893,7 +2917,8 @@ CREATE TABLE public.tracing_instances (
     organization_id uuid NOT NULL,
     team_id uuid,
     created_by character varying(255),
-    updated_by character varying(255)
+    updated_by character varying(255),
+    use_proxy boolean DEFAULT false NOT NULL
 );
 
 ALTER TABLE ONLY public.tracing_instances FORCE ROW LEVEL SECURITY;
@@ -3276,6 +3301,22 @@ ALTER TABLE ONLY public.api_keys
 
 ALTER TABLE ONLY public.pyroscope_instances
     ADD CONSTRAINT "PK_6396b14be0f34841c7cd76ec951" PRIMARY KEY (id);
+
+
+--
+-- Name: proxy_servers PK_proxy_servers; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.proxy_servers
+    ADD CONSTRAINT "PK_proxy_servers" PRIMARY KEY (id);
+
+
+--
+-- Name: proxy_servers uq_proxy_servers_organization; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.proxy_servers
+    ADD CONSTRAINT "uq_proxy_servers_organization" UNIQUE (organization_id);
 
 
 --
@@ -6546,6 +6587,12 @@ ALTER TABLE public.profiles ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.pyroscope_instances ENABLE ROW LEVEL SECURITY;
 
 --
+-- Name: proxy_servers; Type: ROW SECURITY; Schema: public; Owner: -
+--
+
+ALTER TABLE public.proxy_servers ENABLE ROW LEVEL SECURITY;
+
+--
 -- Name: report_templates; Type: ROW SECURITY; Schema: public; Owner: -
 --
 
@@ -7173,6 +7220,34 @@ CREATE POLICY rls_pyroscope_instances_select ON public.pyroscope_instances FOR S
 --
 
 CREATE POLICY rls_pyroscope_instances_update ON public.pyroscope_instances FOR UPDATE USING (public.can_modify_resource(organization_id, team_id, (created_by)::text));
+
+
+--
+-- Name: proxy_servers rls_proxy_servers_delete; Type: POLICY; Schema: public; Owner: -
+--
+
+CREATE POLICY rls_proxy_servers_delete ON public.proxy_servers FOR DELETE USING (public.can_modify_resource(organization_id, team_id, (created_by)::text));
+
+
+--
+-- Name: proxy_servers rls_proxy_servers_insert; Type: POLICY; Schema: public; Owner: -
+--
+
+CREATE POLICY rls_proxy_servers_insert ON public.proxy_servers FOR INSERT WITH CHECK (public.is_global_admin() OR public.can_access_resource(organization_id, team_id, (created_by)::text));
+
+
+--
+-- Name: proxy_servers rls_proxy_servers_select; Type: POLICY; Schema: public; Owner: -
+--
+
+CREATE POLICY rls_proxy_servers_select ON public.proxy_servers FOR SELECT USING (public.can_access_resource(organization_id, team_id, (created_by)::text));
+
+
+--
+-- Name: proxy_servers rls_proxy_servers_update; Type: POLICY; Schema: public; Owner: -
+--
+
+CREATE POLICY rls_proxy_servers_update ON public.proxy_servers FOR UPDATE USING (public.can_modify_resource(organization_id, team_id, (created_by)::text));
 
 
 --

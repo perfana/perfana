@@ -26,6 +26,7 @@ interface TracingFormDialogProps {
   isEdit: boolean;
   form: UseFormReturn<CreateTracingInstanceFormData>;
   testingConnection: boolean;
+  proxyConfigured: boolean;
   onClose: () => void;
   onSubmit: (data: CreateTracingInstanceFormData) => void;
   onTestConnection: (data: CreateTracingInstanceFormData) => void;
@@ -36,6 +37,7 @@ export function TracingFormDialog({
   isEdit,
   form,
   testingConnection,
+  proxyConfigured,
   onClose,
   onSubmit,
   onTestConnection,
@@ -111,6 +113,22 @@ export function TracingFormDialog({
             <Typography variant="caption" color="text.secondary" display="block">
               Enable to embed the tracing UI directly in Perfana (requires CORS configuration on the tracing server)
             </Typography>
+            <FormControlLabel
+              sx={{ mt: 2 }}
+              control={
+                <Switch
+                  checked={form.watch('useProxy') ?? false}
+                  onChange={(e) => form.setValue('useProxy', e.target.checked)}
+                  disabled={!proxyConfigured}
+                />
+              }
+              label="Use proxy"
+            />
+            {!proxyConfigured && (
+              <Typography variant="caption" color="text.secondary" display="block">
+                Configure a proxy under Settings first
+              </Typography>
+            )}
           </Box>
         </DialogContent>
         <DialogActions>

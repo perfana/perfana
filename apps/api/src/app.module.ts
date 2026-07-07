@@ -40,6 +40,7 @@ import { AuditModule } from './modules/audit/audit.module';
 import { UsersModule } from './modules/users/users.module';
 import { ProvisioningModule } from './modules/provisioning/provisioning.module';
 import { MetricsSourcesModule } from './modules/metrics-sources/metrics-sources.module';
+import { ProxyModule } from './modules/proxy/proxy.module';
 import { KeycloakEnhancedAuthGuard } from './guards/keycloak-enhanced-auth.guard';
 import { RolesGuard } from './guards/roles.guard';
 import { EnhancedThrottlerGuard } from './guards/enhanced-throttler.guard';
@@ -121,6 +122,7 @@ import IORedis from 'ioredis';
     UsersModule,
     ProvisioningModule,
     MetricsSourcesModule,
+    ProxyModule,
   ],
   controllers: [],
   providers: [

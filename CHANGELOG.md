@@ -4,6 +4,14 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
+## [0.2.61.28] - 2026-07-07
+
+### Added
+- **Per-organization outbound proxy with a per-integration toggle.** An org can configure one HTTP proxy (URL + optional basic auth, credentials encrypted) under **Settings → Proxy**, then enable or disable it independently for each outbound integration (Grafana, Dynatrace, Pyroscope, Tempo/tracing, Notification webhooks) via a `Use proxy` switch on each integration dialog. When a proxy is configured and an integration's toggle is on, that integration's outbound calls route through the org's proxy; when off or unconfigured, behavior is byte-identical to before. New per-org `ProxyServer` entity (unique per org, full RLS: `ENABLE`+`FORCE` with scoped select/insert/update/delete policies) and a `use_proxy` column on all five integration entities. New org-scoped `proxy` CRUD API (`GET/PUT/DELETE /proxy`) — the password is never returned, and writes require the new org-admin `ProxyManage` capability. Routing is threaded through every outbound path: API `fetch` and `axios`, worker undici (Grafana `Pool` + Dynatrace), and grafana-sync `fetch`. Because the monorepo carries two undici majors (shared 6, worker/root 7), each consumer builds its `ProxyAgent` from its own undici copy, and agents are cached by connection identity to keep connections alive and avoid per-call socket/FD leaks.
+
+### Security
+- **Pyroscope flamegraph proxy resolution is server-authoritative and org-scoped to the caller.** The proxy for a flamegraph fetch is resolved from the `PyroscopeInstance` matching the request's backend URL, filtered to the caller's accessible organizations (`withOrgFilter` + `withRequestEm`) — closing a cross-tenant proxy-egress IDOR where a client could otherwise route requests through another org's proxy.
+
 ## [0.2.61.27] - 2026-07-06
 
 ### Fixed

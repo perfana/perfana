@@ -42,6 +42,11 @@ export class CreateGrafanaInstanceDto {
   @IsBoolean()
   snapshotInstance?: boolean;
 
+  @ApiPropertyOptional({ description: 'Route outbound requests through the organization proxy' })
+  @IsOptional()
+  @IsBoolean()
+  useProxy?: boolean;
+
   @ApiPropertyOptional({ description: 'Organization ID to assign this instance to' })
   @IsOptional()
   @IsString()
@@ -91,6 +96,11 @@ export class UpdateGrafanaInstanceDto {
   @IsOptional()
   @IsBoolean()
   snapshotInstance?: boolean;
+
+  @ApiPropertyOptional({ description: 'Route outbound requests through the organization proxy' })
+  @IsOptional()
+  @IsBoolean()
+  useProxy?: boolean;
 }
 
 export class GrafanaInstanceQuery {

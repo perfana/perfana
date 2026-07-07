@@ -228,6 +228,7 @@ export function useNotificationsData({
       webhookUrl: channel.webhookUrl,
       notifyOnFailedOnly: channel.notifyOnFailedOnly,
       enabled: channel.enabled,
+      useProxy: channel.useProxy ?? false,
     });
     setEditDialogOpen(true);
   };

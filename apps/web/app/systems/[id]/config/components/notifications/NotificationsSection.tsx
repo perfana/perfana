@@ -1,6 +1,7 @@
 'use client';
 
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
+import { authenticatedFetch } from '@/lib/api';
 import {
   Box,
   Paper,
@@ -28,6 +29,14 @@ export default function NotificationsSection({
     message: '',
     severity: 'success',
   });
+
+  const [proxyConfigured, setProxyConfigured] = useState(false);
+
+  useEffect(() => {
+    authenticatedFetch('/proxy').then(r => r.ok ? r.json() : null).then(data => {
+      setProxyConfigured(data != null);
+    }).catch(() => setProxyConfigured(false));
+  }, []);
 
   // Hook for data and actions
   const {
@@ -117,6 +126,7 @@ export default function NotificationsSection({
         mode="add"
         formData={formData}
         saving={saving}
+        proxyConfigured={proxyConfigured}
         onFormChange={setFormData}
         onClose={() => setAddDialogOpen(false)}
         onSubmit={handleAddChannel}
@@ -128,6 +138,7 @@ export default function NotificationsSection({
         mode="edit"
         formData={formData}
         saving={saving}
+        proxyConfigured={proxyConfigured}
         onFormChange={setFormData}
         onClose={() => setEditDialogOpen(false)}
         onSubmit={handleEditChannel}

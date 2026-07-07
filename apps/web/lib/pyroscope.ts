@@ -8,6 +8,7 @@ export interface PyroscopeInstance {
   pyroscopeUrl: string;
   backendUrl?: string;
   pyroscopeStandAlone: boolean;
+  useProxy: boolean;
   createdAt: string;
   updatedAt: string;
 }
@@ -16,6 +17,7 @@ export interface CreatePyroscopeInstanceDto {
   label: string;
   pyroscopeUrl: string;
   pyroscopeStandAlone?: boolean;
+  useProxy?: boolean;
   organizationId?: string;
 }
 
@@ -35,6 +37,7 @@ function transformPyroscopeInstance(data: unknown): PyroscopeInstance {
     pyroscopeUrl: (typedData.pyroscope_url || typedData.pyroscopeUrl) as string,
     backendUrl: (typedData.backend_url || typedData.backendUrl) as string | undefined,
     pyroscopeStandAlone: (typedData.pyroscope_stand_alone ?? typedData.pyroscopeStandAlone ?? false) as boolean,
+    useProxy: (typedData.use_proxy ?? typedData.useProxy ?? false) as boolean,
     createdAt: (typedData.created_at || typedData.createdAt) as string,
     updatedAt: (typedData.updated_at || typedData.updatedAt) as string,
   };

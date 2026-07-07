@@ -49,6 +49,7 @@ export interface TracingInstance {
   tracing_api_url?: string;
   tracing_ui: 'tempo' | 'jaeger' | 'elastic';
   tracing_iframe_allowed: boolean;
+  use_proxy?: boolean;
   created_at?: string;
   updated_at?: string;
 }
@@ -309,6 +310,7 @@ export async function createTracingInstance(data: {
   tracingApiUrl?: string;
   tracingUi: 'tempo' | 'jaeger' | 'elastic';
   tracingIframeAllowed: boolean;
+  useProxy?: boolean;
   organizationId?: string;
 }): Promise<TracingInstance> {
   const response = await authenticatedFetch('/tracing-instances', {
@@ -335,6 +337,7 @@ export async function updateTracingInstance(
     tracingApiUrl?: string;
     tracingUi: 'tempo' | 'jaeger' | 'elastic';
     tracingIframeAllowed: boolean;
+    useProxy?: boolean;
   }
 ): Promise<TracingInstance> {
   const response = await authenticatedFetch(`/tracing-instances/${id}`, {

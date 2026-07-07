@@ -79,6 +79,7 @@ export class AnalyzeFlamegraphDto {
   @IsOptional()
   @IsString()
   symbolFilter?: string;
+
 }
 
 /**

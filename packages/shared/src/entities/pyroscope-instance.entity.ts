@@ -10,6 +10,7 @@ export class PyroscopeInstance {
     'pyroscopeUrl',
     'backendUrl',
     'pyroscopeStandAlone',
+    'useProxy',
   ] as const;
 
   @PrimaryGeneratedColumn('uuid')
@@ -26,6 +27,9 @@ export class PyroscopeInstance {
 
   @Column({ type: 'boolean', default: false, name: 'pyroscope_stand_alone' })
   pyroscopeStandAlone!: boolean;
+
+  @Column({ type: 'boolean', name: 'use_proxy', default: false })
+  useProxy!: boolean;
 
   // Ownership tracking (RBAC Phase 2)
   @Column({ type: 'uuid', name: 'organization_id' })

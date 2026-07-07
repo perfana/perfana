@@ -16,6 +16,7 @@ export interface NotificationChannel {
   notifyOnFinished: boolean;
   notifyOnFailedOnly: boolean;
   enabled: boolean;
+  useProxy: boolean;
   createdAt: string;
   updatedAt: string;
 }
@@ -37,6 +38,7 @@ export interface NotificationChannelFormData {
   webhookUrl: string;
   notifyOnFailedOnly: boolean;
   enabled: boolean;
+  useProxy: boolean;
 }
 
 /**
@@ -48,6 +50,7 @@ export const INITIAL_FORM_DATA: NotificationChannelFormData = {
   webhookUrl: '',
   notifyOnFailedOnly: false,
   enabled: true,
+  useProxy: false,
 };
 
 /**

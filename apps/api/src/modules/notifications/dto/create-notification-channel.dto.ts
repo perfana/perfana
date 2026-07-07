@@ -59,4 +59,12 @@ export class CreateNotificationChannelDto {
   @IsOptional()
   @IsBoolean()
   enabled?: boolean;
+
+  @ApiPropertyOptional({
+    description: 'Route outbound webhook requests through the organization proxy',
+    default: false,
+  })
+  @IsOptional()
+  @IsBoolean()
+  useProxy?: boolean;
 }

@@ -1,8 +1,9 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
-import { GrafanaInstance } from '@perfana/shared/entities';
+import { GrafanaInstance, ProxyServer } from '@perfana/shared/entities';
 import { validateUrl, sanitizeUrl } from '@perfana/shared/security';
+import { buildProxyAgent } from '@perfana/shared/services/proxy';
 
 /**
  * Provides Grafana HTTP API access for dashboard management operations.
@@ -24,7 +25,21 @@ export class GrafanaApiService {
   constructor(
     @InjectRepository(GrafanaInstance)
     private grafanaInstanceRepo: Repository<GrafanaInstance>,
+    @InjectRepository(ProxyServer)
+    private proxyServerRepo: Repository<ProxyServer>,
   ) {}
+
+  /**
+   * Resolve the undici dispatcher for a GrafanaInstance when useProxy is set.
+   * Returns undefined when no proxy is needed (fetch options unchanged).
+   */
+  private async resolveDispatcher(instance: GrafanaInstance): Promise<unknown | undefined> {
+    if (!instance.useProxy || !instance.organizationId) return undefined;
+    const proxyRow = await this.proxyServerRepo.findOne({
+      where: { organizationId: instance.organizationId },
+    });
+    return buildProxyAgent(proxyRow ?? null)?.dispatcher;
+  }
 
   /**
    * Validate and construct URL for Grafana API requests.
@@ -85,6 +100,7 @@ export class GrafanaApiService {
    */
   private async get(instance: GrafanaInstance, endpoint: string): Promise<any> {
     const url = this.validateAndConstructUrl(instance, endpoint);
+    const dispatcher = await this.resolveDispatcher(instance);
 
     const headers = {
       'Content-Type': 'application/json',
@@ -97,7 +113,8 @@ export class GrafanaApiService {
     const response = await fetch(url, {
       method: 'GET',
       headers,
-    });
+      ...(dispatcher ? { dispatcher } : {}),
+    } as RequestInit & { dispatcher?: unknown });
 
     if (!response.ok) {
       throw new Error(
@@ -113,6 +130,7 @@ export class GrafanaApiService {
    */
   private async post(instance: GrafanaInstance, endpoint: string, data: any): Promise<any> {
     const url = this.validateAndConstructUrl(instance, endpoint);
+    const dispatcher = await this.resolveDispatcher(instance);
 
     const headers = {
       'Content-Type': 'application/json',
@@ -127,7 +145,8 @@ export class GrafanaApiService {
         method: 'POST',
         headers,
         body: JSON.stringify(data),
-      });
+        ...(dispatcher ? { dispatcher } : {}),
+      } as RequestInit & { dispatcher?: unknown });
 
       if (!response.ok) {
         throw new Error(`statusCode: ${response.status} statusText: ${response.statusText}`);
@@ -146,6 +165,7 @@ export class GrafanaApiService {
    */
   private async delete(instance: GrafanaInstance, endpoint: string): Promise<any> {
     const url = this.validateAndConstructUrl(instance, endpoint);
+    const dispatcher = await this.resolveDispatcher(instance);
 
     const headers = {
       'Content-Type': 'application/json',
@@ -158,7 +178,8 @@ export class GrafanaApiService {
     const response = await fetch(url, {
       method: 'DELETE',
       headers,
-    });
+      ...(dispatcher ? { dispatcher } : {}),
+    } as RequestInit & { dispatcher?: unknown });
 
     if (!response.ok) {
       throw new Error(

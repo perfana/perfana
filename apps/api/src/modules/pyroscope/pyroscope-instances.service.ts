@@ -203,6 +203,7 @@ export class PyroscopeInstancesService {
         pyroscopeUrl: createDto.pyroscopeUrl,
         backendUrl: createDto.backendUrl,
         pyroscopeStandAlone: createDto.pyroscopeStandAlone || false,
+        useProxy: createDto.useProxy || false,
         createdBy: userId,
         updatedBy: userId,
         organizationId,
@@ -271,6 +272,7 @@ export class PyroscopeInstancesService {
       if (updateDto.pyroscopeUrl !== undefined) entity.pyroscopeUrl = updateDto.pyroscopeUrl;
       if (updateDto.backendUrl !== undefined) entity.backendUrl = updateDto.backendUrl;
       if (updateDto.pyroscopeStandAlone !== undefined) entity.pyroscopeStandAlone = updateDto.pyroscopeStandAlone;
+      if (updateDto.useProxy !== undefined) entity.useProxy = updateDto.useProxy;
 
       // Track who updated the instance
       entity.updatedBy = userId;

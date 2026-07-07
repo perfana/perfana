@@ -1,4 +1,4 @@
-import { request, Agent } from 'undici';
+import { request, Agent, type Dispatcher } from 'undici';
 import { getLogger } from '../../lib/utils/logger.js';
 import { DynatraceQueryConfig } from '../../types/dynatrace/index.js';
 import { assertValidUrl, sanitizeUrl } from '@perfana/shared/security';
@@ -123,12 +123,13 @@ class Semaphore {
 
 export class DynatraceAPIClient {
   private agent: Agent;
+  private dispatcher: Dispatcher;
   private config: DynatraceAPIConfig;
   private semaphore: Semaphore;
   private baseUrl: string;        // Original host URL (for Metrics API v2)
   private dqlBaseUrl: string;     // Converted host URL (for DQL API on SaaS)
 
-  constructor(config: DynatraceAPIConfig) {
+  constructor(config: DynatraceAPIConfig, proxyDispatcher?: Dispatcher) {
     this.config = {
       maxConcurrent: DEFAULT_MAX_CONCURRENT,
       maxRetries: DEFAULT_MAX_RETRIES,
@@ -194,6 +195,10 @@ export class DynatraceAPIClient {
       keepAliveTimeout: AGENT_KEEP_ALIVE_TIMEOUT_MS,
       keepAliveMaxTimeout: AGENT_MAX_KEEP_ALIVE_TIMEOUT_MS,
     });
+
+    // When a proxy dispatcher is provided, use it for all outbound requests.
+    // Otherwise fall back to the keep-alive Agent (byte-identical to the old path).
+    this.dispatcher = proxyDispatcher ?? this.agent;
 
     this.semaphore = new Semaphore(this.config.maxConcurrent!);
   }
@@ -459,7 +464,7 @@ export class DynatraceAPIClient {
             'Accept': 'application/json',
           },
           body: requestBody,
-          dispatcher: this.agent,
+          dispatcher: this.dispatcher,
         });
 
         const data = await response.body.json() as DQLQueryResponse;
@@ -554,7 +559,7 @@ export class DynatraceAPIClient {
               'Authorization': `Bearer ${this.config.platformToken}`,
               'Accept': 'application/json',
             },
-            dispatcher: this.agent,
+            dispatcher: this.dispatcher,
             signal: abortController.signal,
           }
         );
@@ -680,7 +685,7 @@ export class DynatraceAPIClient {
             'Authorization': `Api-Token ${this.config.apiToken}`,
             'Accept': 'application/json',
           },
-          dispatcher: this.agent,
+          dispatcher: this.dispatcher,
         }
       );
 

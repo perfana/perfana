@@ -6,6 +6,8 @@ import { DynatraceRepository } from '../services/dynatrace/DynatraceRepository.j
 import { QueryConstructor } from '../services/dynatrace/QueryConstructor.js';
 import { DynatraceAPIClient } from '../services/dynatrace/DynatraceAPIClient.js';
 import { DataProcessor } from '../services/dynatrace/DataProcessor.js';
+import { resolveDynatraceProxyDispatcher } from '../config/proxy-resolver.js';
+import type { Dispatcher } from 'undici';
 import {
   DynatraceQueryConfig,
   DynatraceQueryResult,
@@ -177,13 +179,17 @@ export class DynatracePipeline extends BasePipelineTypeORM {
         continue;
       }
 
+      const proxyDispatcher = dynatraceConfig.useProxy
+        ? (await resolveDynatraceProxyDispatcher(dynatraceConfig.organizationId)) as Dispatcher | undefined
+        : undefined;
+
       const apiClient = new DynatraceAPIClient({
         host: dynatraceConfig.host,
         apiToken,
         platformToken: platformToken || '', // Empty string for managed instances
         dynatraceType: dynatraceConfig.dynatraceType,
         maxConcurrent: 5  // Execute queries with controlled concurrency
-      });
+      }, proxyDispatcher);
 
       try {
         const configQueryResults = await this.executeQueries(

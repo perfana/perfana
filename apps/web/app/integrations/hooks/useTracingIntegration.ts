@@ -38,6 +38,7 @@ export function useTracingIntegration({ onSnackbar, organizationId }: UseTracing
       tracingApiUrl: '',
       tracingUi: 'tempo',
       tracingIframeAllowed: false,
+      useProxy: false,
     },
   });
 
@@ -50,6 +51,7 @@ export function useTracingIntegration({ onSnackbar, organizationId }: UseTracing
         tracingApiUrl: selectedInstance.tracing_api_url || '',
         tracingUi: selectedInstance.tracing_ui,
         tracingIframeAllowed: selectedInstance.tracing_iframe_allowed,
+        useProxy: selectedInstance.use_proxy ?? false,
       });
     }
   }, [editDialogOpen, selectedInstance, form]);
@@ -71,6 +73,7 @@ export function useTracingIntegration({ onSnackbar, organizationId }: UseTracing
         tracingApiUrl: data.tracingApiUrl,
         tracingUi: data.tracingUi!,
         tracingIframeAllowed: data.tracingIframeAllowed!,
+        useProxy: data.useProxy,
         ...(organizationId && { organizationId }),
       });
       setInstances([instance, ...instances]);
@@ -100,6 +103,7 @@ export function useTracingIntegration({ onSnackbar, organizationId }: UseTracing
         tracingApiUrl: data.tracingApiUrl,
         tracingUi: data.tracingUi!,
         tracingIframeAllowed: data.tracingIframeAllowed!,
+        useProxy: data.useProxy,
       });
       setInstances(instances.map(t => t.id === instance.id ? instance : t));
       setEditDialogOpen(false);

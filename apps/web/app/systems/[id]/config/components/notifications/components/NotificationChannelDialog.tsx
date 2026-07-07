@@ -15,6 +15,7 @@ import {
   Switch,
   FormControlLabel,
   CircularProgress,
+  Typography,
 } from '@mui/material';
 import {
   NotificationChannelFormData,
@@ -29,6 +30,7 @@ interface NotificationChannelDialogProps {
   mode: DialogMode;
   formData: NotificationChannelFormData;
   saving: boolean;
+  proxyConfigured: boolean;
   onFormChange: (data: NotificationChannelFormData) => void;
   onClose: () => void;
   onSubmit: () => void;
@@ -39,6 +41,7 @@ export function NotificationChannelDialog({
   mode,
   formData,
   saving,
+  proxyConfigured,
   onFormChange,
   onClose,
   onSubmit,
@@ -65,6 +68,10 @@ export function NotificationChannelDialog({
 
   const handleNotifyOnFailedOnlyChange = (notifyOnFailedOnly: boolean) => {
     onFormChange({ ...formData, notifyOnFailedOnly });
+  };
+
+  const handleUseProxyChange = (useProxy: boolean) => {
+    onFormChange({ ...formData, useProxy });
   };
 
   return (
@@ -122,6 +129,22 @@ export function NotificationChannelDialog({
             }
             label="Only notify for failed test runs"
           />
+
+          <FormControlLabel
+            control={
+              <Switch
+                checked={formData.useProxy}
+                onChange={(e) => handleUseProxyChange(e.target.checked)}
+                disabled={!proxyConfigured}
+              />
+            }
+            label="Use proxy"
+          />
+          {!proxyConfigured && (
+            <Typography variant="caption" color="text.secondary">
+              Configure a proxy under Settings first
+            </Typography>
+          )}
         </Box>
       </DialogContent>
       <DialogActions>

@@ -11,12 +11,14 @@ import { ApplicationDashboard, GrafanaInstance, GrafanaDashboard, SystemUnderTes
 import { CommonModule } from '../../common/common.module';
 import { AuditModule } from '../audit/audit.module';
 import { AuditResourceRegistry } from '../audit/audit-resource-registry';
+import { ProxyModule } from '../proxy/proxy.module';
 
 @Module({
   imports: [
     TypeOrmModule.forFeature([ApplicationDashboard, GrafanaInstance, GrafanaDashboard, SystemUnderTest]),
     CommonModule, // Import for AuthorizationService
     AuditModule, // Phase 5a: provides AuditService + AuditResourceRegistry
+    ProxyModule,  // Provides ProxyResolverService for outbound proxy routing
   ],
   controllers: [
     GrafanaInstancesController,

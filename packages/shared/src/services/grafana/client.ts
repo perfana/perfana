@@ -1,4 +1,5 @@
-import { Pool } from 'undici';
+import { Pool, request } from 'undici';
+import type { Dispatcher } from 'undici';
 import {
   PanelDocument,
   PanelMetricsDocument,
@@ -44,6 +45,17 @@ export interface GrafanaConfig {
    * is known to be on a private network and SSRF is not a concern.
    */
   skipSsrfValidation?: boolean;
+  /**
+   * Optional undici Dispatcher to use for outbound requests.
+   * When set (e.g. a ProxyAgent), outbound requests are routed through that
+   * dispatcher instead of the internal connection Pool.
+   * When absent, the internal Pool is used unchanged (default / non-proxy path).
+   *
+   * Typed as `unknown` to avoid version-skew errors when callers import undici
+   * from a different node_modules tree than this shared package does.
+   * The value is cast to `Dispatcher` internally before use.
+   */
+  dispatcher?: unknown;
 }
 
 interface UndiciError extends Error {
@@ -53,8 +65,16 @@ interface UndiciError extends Error {
 
 export class GrafanaClient {
   private pool: Pool;
+  private dispatcher: Dispatcher;
   private grafanaConfig: GrafanaConfig;
   private logger: Logger;
+  /**
+   * URL origin (scheme + host + port) derived from grafanaConfig.url.
+   * Using the origin guarantees that no-proxy requests are byte-identical to
+   * the old `new Pool(url)` behaviour: undici's Pool always connected to the
+   * origin and ignored any path prefix in the supplied URL.
+   */
+  private originUrl: string;
 
   constructor(grafanaConfig: GrafanaConfig, logger?: Logger) {
     this.grafanaConfig = grafanaConfig;
@@ -63,7 +83,15 @@ export class GrafanaClient {
     // Validate Grafana URL for SSRF protection
     this.validateGrafanaUrl();
 
+    // Compute origin once; reused by all request() calls below.
+    this.originUrl = new URL(grafanaConfig.url).origin;
+
     this.pool = this.createConnectionPool();
+    // When a proxy dispatcher is provided, use it for all outbound requests.
+    // Otherwise fall back to the connection pool (byte-identical to the old path).
+    // Cast via `unknown` because the field is typed loosely to avoid cross-package
+    // undici version-skew errors at the boundary.
+    this.dispatcher = (grafanaConfig.dispatcher as Dispatcher | undefined) ?? this.pool;
   }
 
   /**
@@ -252,8 +280,8 @@ export class GrafanaClient {
           dataSize: requestBody.length
         });
 
-        const { statusCode, body } = await this.pool.request({
-          path: requestBatch.request.endpoint,
+        const { statusCode, body } = await request(`${this.originUrl}${requestBatch.request.endpoint}`, {
+          dispatcher: this.dispatcher,
           method: 'POST',
           headers: {
             'Authorization': `Bearer ${this.grafanaConfig.apiKey}`,
@@ -314,8 +342,8 @@ export class GrafanaClient {
    */
   async getDatasourceByUid(uid: string): Promise<{ id: number; uid: string; name: string; type: string } | null> {
     try {
-      const { statusCode, body } = await this.pool.request({
-        path: `/api/datasources/uid/${uid}`,
+      const { statusCode, body } = await request(`${this.originUrl}/api/datasources/uid/${uid}`, {
+        dispatcher: this.dispatcher,
         method: 'GET',
         headers: {
           'Authorization': `Bearer ${this.grafanaConfig.apiKey}`,

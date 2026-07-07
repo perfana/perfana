@@ -2,6 +2,12 @@ import { GrafanaConfig } from '@perfana/shared/services/grafana';
 import { getLogger } from '../lib/utils/logger.js';
 import { getDatabaseService } from '../common/database-accessor.js';
 
+/** Extra fields cached alongside GrafanaConfig to support proxy resolution. */
+interface CachedGrafanaMeta {
+  organizationId: string | null;
+  useProxy: boolean;
+}
+
 const logger = getLogger('grafana-config-cache');
 
 /**
@@ -13,6 +19,7 @@ const logger = getLogger('grafana-config-cache');
  */
 let cachedConfig: GrafanaConfig | null = null;
 let cachedInstanceId: string | null = null;
+let cachedMeta: CachedGrafanaMeta | null = null;
 let loadPromise: Promise<LoadResult> | null = null;
 
 type LoadResult = 'loaded' | 'not-configured' | 'invalid';
@@ -54,6 +61,10 @@ async function loadFromDatabase(): Promise<LoadResult> {
       orgId: grafanaInstance.orgId,
     };
     cachedInstanceId = grafanaInstance.id;
+    cachedMeta = {
+      organizationId: grafanaInstance.organizationId ?? null,
+      useProxy: grafanaInstance.useProxy ?? false,
+    };
 
     logger.info(`Grafana config cached: ${cachedConfig.url} (instance: ${cachedInstanceId})`);
     return 'loaded';
@@ -136,9 +147,18 @@ export function getGrafanaInstanceId(): string | null {
 }
 
 /**
+ * Get cached Grafana instance metadata (organizationId + useProxy).
+ * Returns null if no instance is configured or the cache has not been loaded yet.
+ */
+export function getGrafanaInstanceMeta(): CachedGrafanaMeta | null {
+  return cachedMeta;
+}
+
+/**
  * Clear cache (useful for testing or when Grafana instance config changes)
  */
 export function clearGrafanaConfigCache(): void {
   cachedConfig = null;
   cachedInstanceId = null;
+  cachedMeta = null;
 }

@@ -11,7 +11,8 @@
 
 import type { Logger } from 'pino';
 import { GrafanaClient } from '@perfana/shared/services/grafana';
-import { getGrafanaConfig } from '../../../config/grafana-config-cache.js';
+import { getGrafanaConfig, getGrafanaInstanceMeta } from '../../../config/grafana-config-cache.js';
+import { resolveProxyDispatcher } from '../../../config/proxy-resolver.js';
 import { WorkerDatabaseService } from '../../../common/database.service.js';
 import { PanelsPipeline } from '../../PanelsPipeline.js';
 import type { PanelDocument } from '../../../types/pipeline.js';
@@ -60,6 +61,14 @@ export class GrafanaCollector {
     }
 
     const grafanaConfig = await getGrafanaConfig();
+    const meta = getGrafanaInstanceMeta();
+    if (meta?.useProxy) {
+      const dispatcher = await resolveProxyDispatcher(meta.organizationId);
+      if (dispatcher) {
+        grafanaConfig.dispatcher = dispatcher;
+        this.logger.info(`Grafana client will use org proxy (org: ${meta.organizationId})`);
+      }
+    }
     this.grafanaClient = new GrafanaClient(grafanaConfig, this.logger);
     this.logger.info(`Initialized Grafana client with URL: ${grafanaConfig.url}`);
   }
