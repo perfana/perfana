@@ -4,6 +4,7 @@ import { In, Repository } from 'typeorm';
 import { withRequestEm } from '../../../common/db/request-em';
 import axios from 'axios';
 import { TempoService } from '../../tempo/tempo.service';
+import { ProxyResolverService } from '../../proxy/proxy-resolver.service';
 import { validateExternalUrl } from '../../../common/security/url-validator';
 
 const DOWNSTREAM_TIMEOUT_MS = 10_000;
@@ -135,6 +136,7 @@ export class TestRunsDataSourcesService {
     @InjectRepository(DsMetricStatistics)
     private readonly metricStatisticsRepo: Repository<DsMetricStatistics>,
     private readonly tempoService: TempoService,
+    private readonly proxyResolver: ProxyResolverService,
   ) {}
 
   // ─── Private helpers ──────────────────────────────────────────────────────
@@ -948,6 +950,7 @@ export class TestRunsDataSourcesService {
         const from = startTime.toISOString();
         const to = endTime.toISOString();
 
+        const proxyOpts = await this.proxyResolver.resolve(config.organizationId, config.useProxy);
         const response = await axios.get(`${baseUrl}/api/v2/problems`, {
           headers: {
             Authorization: `Api-Token ${config.apiToken}`,
@@ -955,6 +958,7 @@ export class TestRunsDataSourcesService {
           },
           params: { from, to },
           timeout: DYNATRACE_TIMEOUT_MS,
+          ...(proxyOpts ? { proxy: proxyOpts.axiosProxy } : {}),
         });
 
         const problems: DynatraceProblem[] = (response.data?.problems ?? []).map((p: Record<string, unknown>) => ({

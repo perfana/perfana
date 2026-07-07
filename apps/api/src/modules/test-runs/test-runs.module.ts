@@ -56,6 +56,7 @@ import { TempoModule } from '../tempo/tempo.module';
 import { CommonModule } from '../../common/common.module';
 import { AuditModule } from '../audit/audit.module';
 import { AuditResourceRegistry } from '../audit/audit-resource-registry';
+import { ProxyModule } from '../proxy/proxy.module';
 import {
   TestRun,
   TestRunConfiguration,
@@ -133,6 +134,7 @@ import {
     CommonModule, // Provides AuthorizationService for RBAC
     TempoModule, // Provides TempoService for trace detail fetching
     AuditModule, // Phase 5a: provides AuditService + AuditResourceRegistry
+    ProxyModule, // Provides ProxyResolverService for per-org proxy routing
   ],
   controllers: [
     // Specific routes MUST come before parameterized routes

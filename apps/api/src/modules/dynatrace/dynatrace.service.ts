@@ -13,6 +13,7 @@ import { validateExternalUrl } from '../../common/security/url-validator';
 import { attachPermissions } from '../../common/serializers/with-permissions.serializer';
 import { Capability } from '../../constants/capabilities.constants';
 import { AuditService } from '../audit/audit.service';
+import { ProxyResolverService } from '../proxy/proxy-resolver.service';
 import axios from 'axios';
 import { randomUUID } from 'crypto';
 
@@ -37,7 +38,17 @@ export class DynatraceService {
     private readonly repository: DynatraceRepository,
     private readonly authzService: AuthorizationService,
     private readonly auditService: AuditService,
+    private readonly proxyResolver: ProxyResolverService,
   ) {}
+
+  /**
+   * Returns `{ proxy: axiosProxy }` when the org has a proxy configured and
+   * useProxy is true, otherwise returns `{}`.  Spread into every axios config.
+   */
+  private async proxyOpts(cfg: { organizationId: string; useProxy: boolean }): Promise<{ proxy: { host: string; port: number; protocol: string; auth?: { username: string; password: string } } } | Record<string, never>> {
+    const agents = await this.proxyResolver.resolve(cfg.organizationId, cfg.useProxy);
+    return agents ? { proxy: agents.axiosProxy } : {};
+  }
 
   /**
    * Mask sensitive credentials in a Dynatrace config for API responses.
@@ -448,10 +459,11 @@ export class DynatraceService {
       config = configs[0];
     }
 
-    return this.fetchEntitiesFromHost(config.host, config.apiToken, entityType, entityName);
+    return this.fetchEntitiesFromHost(config, entityType, entityName);
   }
 
-  private async fetchEntitiesFromHost(host: string, apiToken: string, entityType?: string, entityName?: string) {
+  private async fetchEntitiesFromHost(config: { host: string; apiToken: string; organizationId: string; useProxy: boolean }, entityType?: string, entityName?: string) {
+    const { host, apiToken } = config;
     try {
       const baseUrl = this.normalizeUrl(host);
 
@@ -495,7 +507,8 @@ export class DynatraceService {
           // Add some basic filters to limit the response size
           pageSize: 500,
           entitySelector: entitySelector
-        }
+        },
+        ...(await this.proxyOpts(config)),
       });
 
       if (!response.data) {
@@ -592,6 +605,7 @@ export class DynatraceService {
           'Content-Type': 'application/json',
         },
         timeout: DynatraceService.DEFAULT_TIMEOUT_MS,
+        ...(await this.proxyOpts(config)),
       });
 
       if (!response.data?.values) {
@@ -1204,6 +1218,7 @@ export class DynatraceService {
           'Content-Type': 'application/json',
         },
         timeout: DynatraceService.ENTITIES_API_TIMEOUT_MS,
+        ...(await this.proxyOpts(config)),
       });
 
       const entity = response.data;
@@ -1315,6 +1330,8 @@ export class DynatraceService {
       metrics: { cpu: [], memory: [], disk: [], network: [] },
     };
 
+    const proxyOpts = await this.proxyOpts(config);
+
     try {
       // Fetch all metrics concurrently
       const metricPromises = metrics.map(async (metric) => {
@@ -1331,6 +1348,7 @@ export class DynatraceService {
               // Use auto-resolution based on time range for proper time-series data
             },
             timeout: DynatraceService.DEFAULT_TIMEOUT_MS,
+            ...proxyOpts,
           });
 
           const timeSeriesData: TimeSeriesData = {
@@ -1435,6 +1453,7 @@ export class DynatraceService {
           to,
         },
         timeout: DynatraceService.DEFAULT_TIMEOUT_MS,
+        ...(await this.proxyOpts(config)),
       });
 
       // Transform Dynatrace problems to our format
