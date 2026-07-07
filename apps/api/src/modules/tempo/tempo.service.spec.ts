@@ -20,6 +20,7 @@ import { Repository } from 'typeorm';
 import { TracingInstance } from '@perfana/shared';
 import { TempoService } from './tempo.service';
 import { SearchTracesDto } from './dto/tempo.dto';
+import { ProxyResolverService } from '../proxy/proxy-resolver.service';
 
 // ---------------------------------------------------------------------------
 // Global fetch mock — replace the real global fetch before any test runs
@@ -135,6 +136,10 @@ describe('TempoService', () => {
           useValue: {
             findOne: jest.fn(),
           },
+        },
+        {
+          provide: ProxyResolverService,
+          useValue: { resolve: jest.fn().mockResolvedValue(null) },
         },
       ],
     }).compile();

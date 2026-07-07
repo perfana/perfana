@@ -111,7 +111,12 @@ export class IncrementalCollectionScheduler {
     // Use '' as the empty-source sentinel to match the migration (see
     // 1776700000000) — keeps a single canonical form across the scheduler,
     // the worker upsert path, and the database column.
-    return `incremental:${testRunId}:${sourceType}:${sourceId ?? ''}:${bucket}`;
+    // Separators are '.' not ':' — BullMQ rejects any jobId containing ':'
+    // (its Redis key separator) with "Custom Id cannot contain :". '.' is also
+    // absent from every component (source types like 'performance_test' contain
+    // '_', ids contain '-'), so the id stays parseable. The final .replace
+    // guards against a ':' ever slipping in via testRunId/sourceId.
+    return `incremental.${testRunId}.${sourceType}.${sourceId ?? ''}.${bucket}`.replace(/:/g, '.');
   }
 
   /**

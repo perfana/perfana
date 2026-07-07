@@ -20,6 +20,7 @@ import { getRepositoryToken } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { GrafanaClientService } from './grafana-client.service';
 import { GrafanaInstance as GrafanaInstanceEntity } from '../../entities';
+import { ProxyResolverService } from '../proxy/proxy-resolver.service';
 
 // ---------------------------------------------------------------------------
 // Shared fixtures
@@ -105,6 +106,10 @@ describe('GrafanaClientService', () => {
           useValue: {
             findOne: jest.fn(),
           },
+        },
+        {
+          provide: ProxyResolverService,
+          useValue: { resolve: jest.fn().mockResolvedValue(null) },
         },
       ],
     }).compile();
