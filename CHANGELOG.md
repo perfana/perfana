@@ -4,6 +4,11 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
+## [0.2.61.30] - 2026-07-07
+
+### Fixed
+- **Incremental metric collection no longer fails with `Custom Id cannot contain :`.** `IncrementalCollectionScheduler` built its BullMQ dedup `jobId` with `:` separators, which BullMQ rejects (it reserves `:` as its Redis key separator). Every `queue.add()` threw, so no collection jobs enqueued for in-progress test runs — starving `checks-evaluation` and making ADAPT report `INSUFFICIENT_DATA` on otherwise-valid runs. The job ID now uses `.` separators (colon-free and absent from every component) with a defensive strip of any residual `:`. Fixes #426.
+
 ## [0.2.61.29] - 2026-07-07
 
 ### Changed

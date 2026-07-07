@@ -371,6 +371,24 @@ describe('IncrementalCollectionScheduler', () => {
       });
     });
 
+    it('should build colon-free BullMQ jobIds (issue #426)', async () => {
+      // Arrange
+      (scheduler as unknown as { databaseService: typeof mockDb }).databaseService = mockDb;
+      mockTestRunRepo.find.mockResolvedValue([makeTestRun()]);
+      mockApplicationDashboardRepo.find.mockResolvedValue([makeApplicationDashboard()]);
+      mockDataSource.query.mockResolvedValue([]);
+      mockQueueAdd.mockResolvedValue(makeJob('job-g1'));
+
+      // Act
+      await scheduler.handleCron();
+
+      // Assert: BullMQ rejects any jobId containing ':' (its Redis key separator)
+      expect(mockQueueAdd).toHaveBeenCalled();
+      for (const call of mockQueueAdd.mock.calls) {
+        expect(call[2].jobId).not.toContain(':');
+      }
+    });
+
     it('should group dashboards from the same Grafana instance into one job', async () => {
       // Arrange
       (scheduler as unknown as { databaseService: typeof mockDb }).databaseService = mockDb;
@@ -1081,7 +1099,9 @@ describe('IncrementalCollectionScheduler', () => {
         for (const call of mockQueueAdd.mock.calls) {
           const options = call[2];
           expect(options).toHaveProperty('jobId');
-          const [prefix, testRunId, _sourceType, sourceId, bucket] = (options.jobId as string).split(':');
+          // Separators are '.' — BullMQ rejects ':' in a jobId (issue #426).
+          expect(options.jobId).not.toContain(':');
+          const [prefix, testRunId, _sourceType, sourceId, bucket] = (options.jobId as string).split('.');
           expect(prefix).toBe('incremental');
           expect(testRunId).toBe('run-dedup-1');
           expect(Number(bucket)).toBe(expectedBucket);
