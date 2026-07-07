@@ -62,7 +62,7 @@ export async function resolveDynatraceProxyDispatcher(
     .findOne({ where: { organizationId } });
 
   const conn = proxyConnection(proxyRow ?? null);
-  if (!conn) return undefined;
+  if (!conn) { return undefined; }
   const key = `${conn.uri}|${conn.token ?? ''}`;
   let agent = dynatraceAgentCache.get(key);
   if (!agent) {
