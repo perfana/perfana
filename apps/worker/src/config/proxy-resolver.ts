@@ -20,7 +20,7 @@ import { getDatabaseService } from '../common/database-accessor.js';
 export async function resolveProxyDispatcher(
   organizationId: string | null | undefined
 ): Promise<unknown | undefined> {
-  if (!organizationId) return undefined;
+  if (!organizationId) { return undefined; }
 
   const db = getDatabaseService();
   const proxyRow = await db.dataSource
@@ -46,7 +46,7 @@ export async function resolveProxyDispatcher(
 export async function resolveDynatraceProxyDispatcher(
   organizationId: string | null | undefined
 ): Promise<unknown | undefined> {
-  if (!organizationId) return undefined;
+  if (!organizationId) { return undefined; }
 
   const db = getDatabaseService();
   const proxyRow = await db.dataSource
