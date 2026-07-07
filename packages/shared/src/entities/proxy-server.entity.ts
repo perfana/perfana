@@ -13,7 +13,7 @@ export class ProxyServer {
   @Column({ type: 'uuid', name: 'organization_id' })
   organizationId!: string;
 
-  @Column({ type: 'text' })
+  @Column({ type: 'text', name: 'proxy_url' })
   proxyUrl!: string;
 
   @Column({ type: 'text', nullable: true, transformer: encryptedColumnTransformer })

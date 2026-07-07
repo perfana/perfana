@@ -243,6 +243,7 @@ export class ConsolidatedSchema1700000000000 implements MigrationInterface {
       'systems_under_test',
       'configuration',
       'profiles',
+      'proxy_servers',
       'pyroscope_instances',
       'requests_raw',
       'requests_error',
@@ -865,6 +866,48 @@ export class ConsolidatedSchema1700000000000 implements MigrationInterface {
     await queryRunner.query(
       `CREATE UNIQUE INDEX IF NOT EXISTS test_run_configs_test_run_id_key_tags_key
         ON test_run_configs (test_run_id, key, tags_hash(tags))`,
+    );
+
+    // proxy_servers table — created inline in SCHEMA_SQL for greenfield; on existing DBs
+    // the table will be absent if this migration ran before the proxy feature was added.
+    await queryRunner.query(`
+      CREATE TABLE IF NOT EXISTS public.proxy_servers (
+        id uuid DEFAULT public.uuid_generate_v4() NOT NULL,
+        organization_id uuid NOT NULL,
+        proxy_url text NOT NULL,
+        username text,
+        password text,
+        team_id uuid,
+        created_by character varying(255),
+        updated_by character varying(255),
+        created_at timestamp without time zone DEFAULT now() NOT NULL,
+        updated_at timestamp without time zone DEFAULT now() NOT NULL,
+        CONSTRAINT "PK_proxy_servers" PRIMARY KEY (id),
+        CONSTRAINT "uq_proxy_servers_organization" UNIQUE (organization_id)
+      )
+    `);
+    await queryRunner.query(
+      `ALTER TABLE public.proxy_servers ENABLE ROW LEVEL SECURITY`,
+    );
+    await queryRunner.query(
+      `ALTER TABLE public.proxy_servers FORCE ROW LEVEL SECURITY`,
+    );
+
+    // use_proxy columns on integration tables — added after baseline schema dump.
+    await queryRunner.query(
+      `ALTER TABLE public.grafana_instances ADD COLUMN IF NOT EXISTS use_proxy boolean NOT NULL DEFAULT false`,
+    );
+    await queryRunner.query(
+      `ALTER TABLE public.dynatrace_configs ADD COLUMN IF NOT EXISTS use_proxy boolean NOT NULL DEFAULT false`,
+    );
+    await queryRunner.query(
+      `ALTER TABLE public.pyroscope_instances ADD COLUMN IF NOT EXISTS use_proxy boolean NOT NULL DEFAULT false`,
+    );
+    await queryRunner.query(
+      `ALTER TABLE public.tracing_instances ADD COLUMN IF NOT EXISTS use_proxy boolean NOT NULL DEFAULT false`,
+    );
+    await queryRunner.query(
+      `ALTER TABLE public.notification_channels ADD COLUMN IF NOT EXISTS use_proxy boolean NOT NULL DEFAULT false`,
     );
 
     console.log('Phase 6: Post-schema column additions applied.');
