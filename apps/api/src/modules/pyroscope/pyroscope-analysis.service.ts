@@ -1,6 +1,6 @@
 import { Injectable, Logger, HttpException, HttpStatus } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Repository } from 'typeorm';
+import { In, Repository } from 'typeorm';
 import {
   AnalyzeFlamegraphDto,
   FlamegraphAnalysisResponseDto,
@@ -9,6 +9,7 @@ import {
 import { validateExternalUrl } from '../../common/security/url-validator';
 import { PyroscopeInstance } from '../../entities';
 import { ProxyResolverService } from '../proxy/proxy-resolver.service';
+import { AuthorizationService } from '../../common/services/authorization.service';
 
 /**
  * Pyroscope profile structure (flamebearer format)
@@ -35,6 +36,7 @@ export class PyroscopeAnalysisService {
     @InjectRepository(PyroscopeInstance)
     private readonly pyroscopeInstanceRepo: Repository<PyroscopeInstance>,
     private readonly proxyResolver: ProxyResolverService,
+    private readonly authzService: AuthorizationService,
   ) {}
 
   /**
@@ -43,7 +45,7 @@ export class PyroscopeAnalysisService {
    * @param params - Analysis parameters including Pyroscope URL, application, time ranges
    * @returns Flamegraph analysis with function-level differences
    */
-  async analyzeFlamegraphs(params: AnalyzeFlamegraphDto): Promise<FlamegraphAnalysisResponseDto> {
+  async analyzeFlamegraphs(params: AnalyzeFlamegraphDto, userId: string, roles: string[]): Promise<FlamegraphAnalysisResponseDto> {
     const {
       backendUrl,
       application,
@@ -90,11 +92,25 @@ export class PyroscopeAnalysisService {
         );
       }
 
-      // Resolve org proxy server-side from the Pyroscope instance matching the target backend URL.
-      // Never trust a client-supplied instance id (cross-tenant IDOR); derive routing from the
-      // destination the request already targets.
+      // Resolve org proxy server-side from the Pyroscope instance matching the target backend URL,
+      // scoped to organizations the CALLER can access (closes cross-tenant SSRF pivot / IDOR).
+      // Global admins match any instance; regular users only match instances in their orgs.
       let dispatcher: unknown;
-      const instance = await this.pyroscopeInstanceRepo.findOne({ where: { backendUrl } });
+      const isAdmin = this.authzService.isGlobalAdmin(roles);
+      let instanceWhere: object;
+      if (isAdmin) {
+        instanceWhere = { backendUrl };
+      } else {
+        const orgIds = await this.authzService.getAccessibleOrganizations(userId);
+        // If the user has no accessible orgs, In([]) would match nothing — safe default (no proxy).
+        // Short-circuit to avoid an unnecessary DB query.
+        if (orgIds.length === 0) {
+          instanceWhere = { backendUrl, organizationId: In(['00000000-0000-0000-0000-000000000000']) };
+        } else {
+          instanceWhere = { backendUrl, organizationId: In(orgIds) };
+        }
+      }
+      const instance = await this.pyroscopeInstanceRepo.findOne({ where: instanceWhere });
       if (instance) {
         const agents = await this.proxyResolver.resolve(instance.organizationId, instance.useProxy);
         dispatcher = agents?.dispatcher;

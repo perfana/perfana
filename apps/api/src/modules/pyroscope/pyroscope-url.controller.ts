@@ -187,8 +187,8 @@ export class PyroscopeUrlController {
   })
   async analyzeFlamegraphs(
     @Body() analyzeDto: AnalyzeFlamegraphDto,
-    @UserCtx() _ctx: UserContext,
+    @UserCtx() ctx: UserContext,
   ): Promise<FlamegraphAnalysisResponseDto> {
-    return await this.pyroscopeAnalysisService.analyzeFlamegraphs(analyzeDto);
+    return await this.pyroscopeAnalysisService.analyzeFlamegraphs(analyzeDto, ctx.userId, ctx.roles);
   }
 }
