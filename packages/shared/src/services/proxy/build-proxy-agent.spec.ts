@@ -1,4 +1,3 @@
-import { describe, it, expect } from 'vitest';
 import { buildProxyAgent } from './build-proxy-agent';
 import { ProxyServer } from '../../entities/proxy-server.entity';
 

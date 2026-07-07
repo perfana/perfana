@@ -4,7 +4,7 @@ import { encryptedColumnTransformer } from '../utils/encrypted-column.transforme
 @Entity('proxy_servers')
 @Unique('uq_proxy_servers_organization', ['organizationId'])
 export class ProxyServer {
-  // Phase 5a audit logging — connection metadata only; credentials never auditable.
+  // Phase 5a audit logging — connection metadata + username; the password secret is never auditable.
   static auditableFields = ['proxyUrl', 'username'] as const;
 
   @PrimaryGeneratedColumn('uuid')

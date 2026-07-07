@@ -28,6 +28,7 @@ import {
   PyroscopeInstance,
   MetricsSource,
   AuditLog,
+  ProxyServer,
 } from '@perfana/shared/entities';
 
 @Module({
@@ -74,6 +75,8 @@ import {
           ProfileBenchmark,
           // Audit logging
           AuditLog,
+          // Proxy configuration
+          ProxyServer,
         ],
         synchronize: false, // Never auto-sync schema - use migrations instead
         logging: configService.get('DB_LOGGING') === 'true',
