@@ -43,6 +43,25 @@ export class ProxyService {
   }
 
   /**
+   * Assert the caller is allowed to manage (write/delete) proxy settings for orgId.
+   * Allowed when the caller is a global admin OR an org-admin of that org.
+   * Throws ForbiddenException otherwise.
+   */
+  private async assertCanManageProxy(
+    userId: string,
+    roles: string[],
+    orgId: string,
+  ): Promise<void> {
+    if (this.authzService.isGlobalAdmin(roles)) {
+      return;
+    }
+    const isOrgAdmin = await this.authzService.isOrganizationAdmin(userId, orgId);
+    if (!isOrgAdmin) {
+      throw new ForbiddenException('Requires organization admin to modify proxy settings');
+    }
+  }
+
+  /**
    * Return the proxy config for the caller's organization, or null if none.
    */
   async getForOrg(userId: string, _roles: string[]): Promise<ProxyResponseDto | null> {
@@ -58,8 +77,9 @@ export class ProxyService {
    * On update: if dto.password is empty/undefined, the existing password is
    * preserved (blank = "unchanged"). Writes are always audited.
    */
-  async upsert(userId: string, _roles: string[], dto: UpsertProxyDto): Promise<ProxyResponseDto> {
+  async upsert(userId: string, roles: string[], dto: UpsertProxyDto): Promise<ProxyResponseDto> {
     const orgId = await this.resolveOrgId(userId);
+    await this.assertCanManageProxy(userId, roles, orgId);
 
     const existing = await this.repo.findOne({ where: { organizationId: orgId } });
 
@@ -102,8 +122,10 @@ export class ProxyService {
    * Delete the proxy config for the caller's organization.
    * No-ops silently if no proxy is configured.
    */
-  async remove(userId: string, _roles: string[]): Promise<void> {
+  async remove(userId: string, roles: string[]): Promise<void> {
     const orgId = await this.resolveOrgId(userId);
+    await this.assertCanManageProxy(userId, roles, orgId);
+
     const existing = await this.repo.findOne({ where: { organizationId: orgId } });
     if (!existing) return;
 

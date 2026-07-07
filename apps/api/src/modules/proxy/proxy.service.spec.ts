@@ -21,6 +21,7 @@ const buildRepo = () => ({
 const buildAuthzService = () => ({
   getAccessibleOrganizations: jest.fn().mockResolvedValue([mockOrgId]),
   isGlobalAdmin: jest.fn().mockReturnValue(false),
+  isOrganizationAdmin: jest.fn().mockResolvedValue(true),
 });
 
 const buildAuditService = () => ({
@@ -61,6 +62,16 @@ describe('ProxyService', () => {
       repo.findOne.mockResolvedValue(null);
       const result = await service.getForOrg(mockUserId, mockRoles);
       expect(result).toBeNull();
+    });
+
+    it('does not check org-admin for reads (non-admin member can read)', async () => {
+      authzService.isGlobalAdmin.mockReturnValue(false);
+      authzService.isOrganizationAdmin.mockResolvedValue(false);
+      repo.findOne.mockResolvedValue(null);
+
+      // Should resolve without throwing — no admin check on GET
+      await expect(service.getForOrg(mockUserId, mockRoles)).resolves.toBeNull();
+      expect(authzService.isOrganizationAdmin).not.toHaveBeenCalled();
     });
 
     it('returns a response DTO (no password) when a proxy exists', async () => {
@@ -194,6 +205,52 @@ describe('ProxyService', () => {
 
       await expect(service.upsert(mockUserId, mockRoles, dto)).rejects.toThrow(ForbiddenException);
     });
+
+    it('succeeds for a global admin (non-org-admin)', async () => {
+      authzService.isGlobalAdmin.mockReturnValue(true);
+      authzService.isOrganizationAdmin.mockResolvedValue(false);
+      const dto: UpsertProxyDto = { proxyUrl: 'http://proxy:3128' };
+      repo.findOne.mockResolvedValue(null);
+      const created: Partial<ProxyServer> = {
+        id: 'ga-1',
+        organizationId: mockOrgId,
+        proxyUrl: dto.proxyUrl,
+        createdBy: mockUserId,
+        createdAt: new Date(),
+        updatedAt: new Date(),
+      };
+      repo.create.mockReturnValue(created);
+      repo.save.mockResolvedValue(created);
+
+      await expect(service.upsert(mockUserId, ['perfana-admin'], dto)).resolves.toBeDefined();
+    });
+
+    it('succeeds for an org-admin (non-global-admin)', async () => {
+      authzService.isGlobalAdmin.mockReturnValue(false);
+      authzService.isOrganizationAdmin.mockResolvedValue(true);
+      const dto: UpsertProxyDto = { proxyUrl: 'http://proxy:3128' };
+      repo.findOne.mockResolvedValue(null);
+      const created: Partial<ProxyServer> = {
+        id: 'oa-1',
+        organizationId: mockOrgId,
+        proxyUrl: dto.proxyUrl,
+        createdBy: mockUserId,
+        createdAt: new Date(),
+        updatedAt: new Date(),
+      };
+      repo.create.mockReturnValue(created);
+      repo.save.mockResolvedValue(created);
+
+      await expect(service.upsert(mockUserId, mockRoles, dto)).resolves.toBeDefined();
+    });
+
+    it('throws ForbiddenException for a non-admin org member', async () => {
+      authzService.isGlobalAdmin.mockReturnValue(false);
+      authzService.isOrganizationAdmin.mockResolvedValue(false);
+      const dto: UpsertProxyDto = { proxyUrl: 'http://proxy:3128' };
+
+      await expect(service.upsert(mockUserId, mockRoles, dto)).rejects.toThrow(ForbiddenException);
+    });
   });
 
   // ---------------------------------------------------------------- remove
@@ -222,6 +279,48 @@ describe('ProxyService', () => {
       await expect(service.remove(mockUserId, mockRoles)).resolves.toBeUndefined();
       expect(repo.delete).not.toHaveBeenCalled();
       expect(auditService.logDelete).not.toHaveBeenCalled();
+    });
+
+    it('succeeds for a global admin', async () => {
+      authzService.isGlobalAdmin.mockReturnValue(true);
+      authzService.isOrganizationAdmin.mockResolvedValue(false);
+      const existing: Partial<ProxyServer> = {
+        id: 'del-ga',
+        organizationId: mockOrgId,
+        proxyUrl: 'http://proxy:3128',
+        createdAt: new Date(),
+        updatedAt: new Date(),
+      };
+      repo.findOne.mockResolvedValue(existing);
+      repo.delete.mockResolvedValue({ affected: 1 });
+
+      await expect(service.remove(mockUserId, ['perfana-admin'])).resolves.toBeUndefined();
+      expect(repo.delete).toHaveBeenCalledWith({ organizationId: mockOrgId });
+    });
+
+    it('succeeds for an org-admin', async () => {
+      authzService.isGlobalAdmin.mockReturnValue(false);
+      authzService.isOrganizationAdmin.mockResolvedValue(true);
+      const existing: Partial<ProxyServer> = {
+        id: 'del-oa',
+        organizationId: mockOrgId,
+        proxyUrl: 'http://proxy:3128',
+        createdAt: new Date(),
+        updatedAt: new Date(),
+      };
+      repo.findOne.mockResolvedValue(existing);
+      repo.delete.mockResolvedValue({ affected: 1 });
+
+      await expect(service.remove(mockUserId, mockRoles)).resolves.toBeUndefined();
+      expect(repo.delete).toHaveBeenCalledWith({ organizationId: mockOrgId });
+    });
+
+    it('throws ForbiddenException for a non-admin org member', async () => {
+      authzService.isGlobalAdmin.mockReturnValue(false);
+      authzService.isOrganizationAdmin.mockResolvedValue(false);
+
+      await expect(service.remove(mockUserId, mockRoles)).rejects.toThrow(ForbiddenException);
+      expect(repo.delete).not.toHaveBeenCalled();
     });
   });
 
