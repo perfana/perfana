@@ -72,9 +72,9 @@
       "default": "./dist/services/metrics-source-upsert.js"
     },
     "./services/proxy": {
-      "types": "./dist/services/proxy/build-proxy-agent.d.ts",
-      "development": "./src/services/proxy/build-proxy-agent.ts",
-      "default": "./dist/services/proxy/build-proxy-agent.js"
+      "types": "./dist/services/proxy/index.d.ts",
+      "development": "./src/services/proxy/index.ts",
+      "default": "./dist/services/proxy/index.js"
     },
     "./utils": {
       "types": "./dist/utils/index.d.ts",
