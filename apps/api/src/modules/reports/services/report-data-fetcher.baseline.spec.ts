@@ -24,4 +24,32 @@ describe('ReportDataFetcherService.getBaselineRunComparison', () => {
     expect(row.metrics.find(m => m.key === 'avg')!.diffPercent).toBeCloseTo(10);
     expect(row.metrics.find(m => m.key === 'p99')!.diffPercent).toBeCloseTo(20);
   });
+
+  it('pairs ds_metric_statistics rows by dashboard/panel/metric (grafana)', async () => {
+    const rows = [
+      { test_run_id: 'cur', dashboard_label: 'JVM', panel_title: 'Heap', metric_name: 'used', mean: 110, q95: 220, q99: 300, unit: 'bytes' },
+      { test_run_id: 'base', dashboard_label: 'JVM', panel_title: 'Heap', metric_name: 'used', mean: 100, q95: 200, q99: 250, unit: 'bytes' },
+    ];
+    const dataSource = { query: jest.fn().mockResolvedValue(rows) };
+    const svc = new ReportDataFetcherService(repoStub, authzStub, dataSource as any, {} as any);
+    const data = await svc.getBaselineRunComparison('cur', 'base', 'grafana',
+      { metrics: ['avg', 'p95'], userId: 'u', roles: [] });
+    const row = data!.rows[0]!;
+    expect(row.group).toBe('JVM / Heap');
+    expect(row.metrics.find(m => m.key === 'avg')!.diffPercent).toBeCloseTo(10);
+  });
+
+  it('remaps host token for dynatrace baseline lookup', async () => {
+    const rows = [
+      { test_run_id: 'cur', dashboard_label: 'Hosts', panel_title: 'CPU', metric_name: 'cpu.host-A', mean: 60, q95: 80, q99: 90, unit: '%' },
+      { test_run_id: 'base', dashboard_label: 'Hosts', panel_title: 'CPU', metric_name: 'cpu.host-B', mean: 50, q95: 70, q99: 85, unit: '%' },
+    ];
+    const dataSource = { query: jest.fn().mockResolvedValue(rows) };
+    const svc = new ReportDataFetcherService(repoStub, authzStub, dataSource as any, {} as any);
+    const data = await svc.getBaselineRunComparison('cur', 'base', 'dynatrace',
+      { metrics: ['avg'], userId: 'u', roles: [], hostMap: [{ current: 'host-A', baseline: 'host-B' }] });
+    const row = data!.rows[0]!;
+    expect(row.group).toBe('host-A');
+    expect(row.metrics[0]!.diffPercent).toBeCloseTo(20);
+  });
 });

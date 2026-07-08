@@ -1984,18 +1984,98 @@ export class ReportDataFetcherService {
       });
       return { source, rows };
     }
-    // grafana / dynatrace handled in Task 4
-    return this.getBaselineRunComparisonFromStatistics(currentRunId, baselineRunId, source, opts);
+    // grafana / dynatrace: source is narrowed to 'grafana' | 'dynatrace' here
+    return this.getBaselineRunComparisonFromStatistics(currentRunId, baselineRunId, source as 'grafana' | 'dynatrace', opts);
   }
 
-  /** Task 4 stub — replaced when grafana/dynatrace branches are implemented */
+  /**
+   * Fetch ds_metric_statistics rows for both runs and pair them by series identity.
+   * Grafana: groups by `dashboard_label / panel_title`.
+   * Dynatrace: groups by the host token extracted from the series identity;
+   *   when a hostMap is provided the current host token is substituted for the
+   *   mapped baseline token before the lookup so cross-host pairing works.
+   */
   private async getBaselineRunComparisonFromStatistics(
-    _c: string,
-    _b: string,
-    source: 'performance-metrics' | 'grafana' | 'dynatrace',
-    _o: unknown,
+    currentRunId: string,
+    baselineRunId: string,
+    source: 'grafana' | 'dynatrace',
+    opts: { metrics: ('avg' | 'p95' | 'p99')[]; hostMap?: { current: string; baseline: string }[] },
   ): Promise<BaselineComparisonData | null> {
-    return { source, rows: [] };
+    const sourceType = source === 'grafana' ? 'grafana' : 'dynatrace';
+    const rows: Array<{
+      test_run_id: string;
+      dashboard_label: string | null;
+      panel_title: string | null;
+      metric_name: string | null;
+      unit: string | null;
+      mean: number | null;
+      q95: number | null;
+      q99: number | null;
+    }> = await this.dataSource.query(
+      `SELECT s.test_run_id, s.dashboard_label, s.panel_title, s.metric_name, s.unit, s.mean, s.q95, s.q99
+       FROM ds_metric_statistics s
+       LEFT JOIN metrics_sources ms ON ms.id = s.metrics_source_id
+       WHERE s.test_run_id = ANY($1) AND (ms.type = $2 OR ms.type IS NULL)`,
+      [[currentRunId, baselineRunId], sourceType],
+    );
+    if (rows.length === 0) return null;
+
+    const identity = (r: typeof rows[number]) =>
+      `${r.dashboard_label}||${r.panel_title}||${r.metric_name}`;
+
+    const cur = rows.filter((r) => r.test_run_id === currentRunId);
+    const baseByIdentity = new Map(
+      rows.filter((r) => r.test_run_id === baselineRunId).map((r) => [identity(r), r]),
+    );
+
+    // Dynatrace: build a remapped identity that swaps the current host token for
+    // the mapped baseline token before the lookup.
+    const remapIdentity = (r: typeof rows[number]) => {
+      if (source !== 'dynatrace' || !opts.hostMap?.length) return identity(r);
+      let id = identity(r);
+      for (const { current, baseline } of opts.hostMap) {
+        if (id.includes(current)) {
+          id = id.split(current).join(baseline);
+          break;
+        }
+      }
+      return id;
+    };
+
+    const fieldByKey = { avg: 'mean', p95: 'q95', p99: 'q99' } as const;
+
+    const rowsOut: BaselineComparisonRow[] = cur.map((c) => {
+      const b = baseByIdentity.get(remapIdentity(c));
+      const host =
+        source === 'dynatrace'
+          ? (opts.hostMap?.find((h) => (c.metric_name ?? '').includes(h.current))?.current ??
+              this.extractHost(c.metric_name))
+          : null;
+      return {
+        group:
+          source === 'dynatrace'
+            ? (host ?? 'Hosts')
+            : `${c.dashboard_label ?? 'Other'} / ${c.panel_title ?? ''}`.trim(),
+        label: c.metric_name ?? '',
+        metrics: opts.metrics.map((k) => {
+          const cv = c[fieldByKey[k]];
+          const bv = b ? b[fieldByKey[k]] : null;
+          return { key: k, current: cv, baseline: bv, diffPercent: percentDiff(cv, bv) };
+        }),
+      };
+    });
+
+    return { source, rows: rowsOut };
+  }
+
+  /**
+   * ponytail: naive host extractor — last dotted segment of the metric name.
+   * Replace if Dynatrace series encode the host elsewhere (confirm during impl — see plan note).
+   */
+  private extractHost(metricName: string | null): string | null {
+    if (!metricName) return null;
+    const parts = metricName.split('.');
+    return parts.length > 1 ? parts[parts.length - 1]! : metricName;
   }
 
   /**
