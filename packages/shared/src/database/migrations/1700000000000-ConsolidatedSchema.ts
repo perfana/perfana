@@ -494,6 +494,30 @@ export class ConsolidatedSchema1700000000000 implements MigrationInterface {
           console.log(`  Hypertable already exists: ${table}`);
         }
 
+        // Enable native compression + a 7-day policy. Big storage win (ds_metrics ~97%).
+        // segmentby=test_run_id. Force-refetch decompresses affected chunks first to avoid
+        // the per-txn decompression limit — see WorkerDatabaseService.decompressChunksForRange
+        // and migration 1788000000000-AddHypertableCompression (existing-DB counterpart).
+        // Nested savepoint so a compression failure never rolls back the hypertable itself.
+        await queryRunner.query(`SAVEPOINT ${savepointName}_c`);
+        try {
+          await queryRunner.query(
+            `ALTER TABLE ${table} SET (timescaledb.compress, timescaledb.compress_segmentby = 'test_run_id', timescaledb.compress_orderby = 'time DESC')`,
+          );
+          await queryRunner.query(
+            `SELECT add_compression_policy('${table}', INTERVAL '7 days', if_not_exists => TRUE)`,
+          );
+          await queryRunner.query(`RELEASE SAVEPOINT ${savepointName}_c`);
+          console.log(`  Compression enabled: ${table}`);
+        } catch (compressError) {
+          await queryRunner.query(`ROLLBACK TO SAVEPOINT ${savepointName}_c`);
+          await queryRunner.query(`RELEASE SAVEPOINT ${savepointName}_c`);
+          console.warn(
+            `  Warning: Could not enable compression for ${table}:`,
+            (compressError as Error).message,
+          );
+        }
+
         await queryRunner.query(
           `RELEASE SAVEPOINT ${savepointName}`,
         );
