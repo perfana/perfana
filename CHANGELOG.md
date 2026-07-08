@@ -4,6 +4,14 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
+## [0.2.61.32] - 2026-07-08
+
+### Added
+- **TimescaleDB compression on the time-series hypertables.** `ds_metrics`, `requests_raw`, `transactions`, `virtual_users`, and `requests_error` now enable native columnar compression (`segmentby = test_run_id`, `orderby = time DESC`) with a 7-day `add_compression_policy`. `ds_metrics` alone is ~70% of the DB and compresses ~97% (measured: ~2.8 GB → ~81 MB), so this is a large storage reduction. Set up on greenfield in the consolidated migration (`createHypertables`, per-table nested savepoint so a compression failure never rolls back the hypertable) and on existing DBs via new migration `1788000000000-AddHypertableCompression` (idempotent, timescaledb-guarded); both run on fresh installs, the dated one as a no-op.
+
+### Fixed
+- **Force-refetch no longer breaks on compressed `ds_metrics`.** The reevaluate/force-refetch path (`orchestrate-reevaluate-batch`) does a selective `DELETE FROM ds_metrics WHERE test_run_id = $1 AND metrics_source_id IN (...)` then re-inserts. Because `metrics_source_id` isn't a compression `segmentby` column, TimescaleDB must decompress the run's whole segments inline, and runs over 100k rows exceeded `max_tuples_decompressed_per_dml_transaction` (default 100000) — aborting the entire refetch (`ERROR: tuple decompression limit exceeded`). `WorkerDatabaseService.decompressChunksForRange()` now decompresses the run's overlapping chunks up front (range-overlap query on `timescaledb_information.chunks`; `show_chunks` is boundary-based and misses a narrow window inside a chunk), called once per run before the source loop. The compression policy recompresses the chunk(s) afterward. Normal first-time collection is unaffected (it writes the recent, still-uncompressed chunk).
+
 ## [0.2.61.31] - 2026-07-07
 
 ### Fixed
