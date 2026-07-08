@@ -1,6 +1,7 @@
 import { Theme } from '@mui/material/styles';
 import { MetricTrendData } from '../../types';
 import { TrendsPlotData } from '../types';
+import { PLOTLY_HOVER_FONT_FAMILY } from '@/lib/plotly-fonts';
 
 /**
  * Create a Plotly trends plot for anomaly detection
@@ -346,7 +347,7 @@ export function createTrendsPlot(
       font: {
         color: textColor,
         size: 11,
-        family: theme.typography.fontFamily
+        family: PLOTLY_HOVER_FONT_FAMILY
       },
       align: 'left' as const,
     },

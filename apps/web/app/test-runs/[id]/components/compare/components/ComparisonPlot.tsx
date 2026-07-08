@@ -6,6 +6,7 @@ import dynamic from 'next/dynamic';
 import { Layout, Config } from 'plotly.js';
 import { GraphData, Panel, RelatedTestRun } from '../types/compare.types';
 import { TestRun } from '@/types/test-runs';
+import { PLOTLY_HOVER_FONT_FAMILY } from '@/lib/plotly-fonts';
 
 // Dynamically import Plotly to avoid SSR issues
 const Plot = dynamic(() => import('react-plotly.js'), { ssr: false });
@@ -263,7 +264,7 @@ function generatePlotProps(
       font: {
         color: textColor,
         size: 12,
-        family: theme.typography.fontFamily
+        family: PLOTLY_HOVER_FONT_FAMILY
       },
       align: 'left' as const,
     },

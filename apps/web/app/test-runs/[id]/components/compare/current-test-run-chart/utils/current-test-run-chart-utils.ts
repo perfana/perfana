@@ -4,6 +4,7 @@
 
 import type { Theme } from '@mui/material';
 import { alpha } from '@mui/material';
+import { PLOTLY_HOVER_FONT_FAMILY } from '@/lib/plotly-fonts';
 import type {
   MetricDataPoint,
   Thresholds,
@@ -364,7 +365,7 @@ export function buildChartLayout(
       font: {
         color: colors.textColor,
         size: 12,
-        family: fontFamily,
+        family: PLOTLY_HOVER_FONT_FAMILY,
       },
       align: 'left' as const,
     },
