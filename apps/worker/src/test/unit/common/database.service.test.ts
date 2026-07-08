@@ -252,6 +252,46 @@ describe('WorkerDatabaseService', () => {
   });
 
   // -------------------------------------------------------------------------
+  // decompressChunksForRange (force-refetch compression guard)
+  // -------------------------------------------------------------------------
+
+  describe('decompressChunksForRange', () => {
+    const from = new Date('2026-01-10T00:00:00Z');
+    const to = new Date('2026-01-10T02:00:00Z');
+
+    it('queries compressed chunks overlapping the range and passes [hypertable, from, to]', async () => {
+      const { service, dataSource } = buildService({
+        query: vi.fn().mockResolvedValue([{ chunk: '_timescaledb_internal._hyper_1_9_chunk' }]),
+      });
+
+      await service.decompressChunksForRange('ds_metrics', from, to);
+
+      expect(dataSource.query).toHaveBeenCalledTimes(1);
+      const [sql, params] = dataSource.query.mock.calls[0];
+      // range-overlap on timescaledb_information.chunks, NOT show_chunks (boundary-based)
+      expect(sql).toContain('timescaledb_information.chunks');
+      expect(sql).toContain('is_compressed');
+      expect(sql).toContain('range_start <');
+      expect(sql).toContain('range_end');
+      expect(sql).toContain('decompress_chunk');
+      expect(params).toEqual(['ds_metrics', from, to]);
+    });
+
+    it('is a no-op when nothing is compressed (empty result)', async () => {
+      const { service, dataSource } = buildService({ query: vi.fn().mockResolvedValue([]) });
+      await expect(service.decompressChunksForRange('ds_metrics', from, to)).resolves.toBeUndefined();
+      expect(dataSource.query).toHaveBeenCalledTimes(1);
+    });
+
+    it('swallows errors (compression disabled / not a hypertable) without throwing', async () => {
+      const { service } = buildService({
+        query: vi.fn().mockRejectedValue(new Error('relation "timescaledb_information.chunks" does not exist')),
+      });
+      await expect(service.decompressChunksForRange('ds_metrics', from, to)).resolves.toBeUndefined();
+    });
+  });
+
+  // -------------------------------------------------------------------------
   // ensureConnection / ensureDataSourceConnection
   // -------------------------------------------------------------------------
 

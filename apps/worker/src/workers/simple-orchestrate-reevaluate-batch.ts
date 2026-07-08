@@ -392,6 +392,13 @@ export function simpleOrchestrateReevaluateBatchWorker() {
 
             logger.info(`  ${testRunId}: force re-fetching ${sourcesToRefetch.length} sources over [${fromTime.toISOString()} - ${toTime.toISOString()}]`);
 
+            // ds_metrics may be compressed if this run is older than the compression policy interval.
+            // The per-source DELETE/UPSERT below filters on metrics_source_id (a non-segmentby column),
+            // which forces TimescaleDB to decompress the run's segments inline and hit
+            // max_tuples_decompressed_per_dml_transaction (100k) on large runs. Decompress the run's
+            // chunk(s) up front; the compression policy recompresses them afterward.
+            await db.decompressChunksForRange('ds_metrics', fromTime, toTime);
+
             // Refresh panel documents BEFORE metric collection so newly-added dashboards
             // (e.g. a dashboard linked to a SUT after the original collection ran) are included
             const panelsPipeline = new PanelsPipeline(logger);

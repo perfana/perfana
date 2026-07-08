@@ -838,6 +838,43 @@ export class WorkerDatabaseService implements OnModuleInit {
     this.logger.debug(`Removed collection status for test_run=${testRunId}, source=${sourceType}/${sourceId ?? 'null'}`);
   }
 
+  /**
+   * Decompress any compressed chunks of `hypertable` overlapping [from, to].
+   *
+   * Force-refetch (orchestrate-reevaluate-batch) DELETE/UPSERTs ds_metrics for an
+   * existing run. If the run's chunk is already compressed and the DML filters on
+   * a non-segmentby column (metrics_source_id), TimescaleDB decompresses the run's
+   * segments inline and large runs blow past
+   * timescaledb.max_tuples_decompressed_per_dml_transaction (default 100k),
+   * aborting the whole refetch. Decompressing the chunk(s) up front avoids that;
+   * the compression policy recompresses them on its next run.
+   *
+   * No-op (and cheap) when compression is disabled or nothing is compressed.
+   */
+  async decompressChunksForRange(hypertable: string, from: Date, to: Date): Promise<void> {
+    try {
+      const rows: Array<{ chunk: string | null }> = await this.dataSource.query(
+        `SELECT decompress_chunk(format('%I.%I', chunk_schema, chunk_name)::regclass, if_compressed => true) AS chunk
+         FROM timescaledb_information.chunks
+         WHERE hypertable_name = $1
+           AND is_compressed
+           AND range_start < $3::timestamptz
+           AND range_end   > $2::timestamptz`,
+        [hypertable, from, to]
+      );
+      const n = Array.isArray(rows) ? rows.filter((r) => r.chunk).length : 0;
+      if (n > 0) {
+        this.logger.log(
+          `Decompressed ${n} ${hypertable} chunk(s) for refetch over [${from.toISOString()} - ${to.toISOString()}]`
+        );
+      }
+    } catch (err) {
+      // Compression not enabled, timescaledb missing, or table not a hypertable → nothing to do.
+      const msg = err && typeof err === 'object' && 'message' in err ? (err as Error).message : 'unknown error';
+      this.logger.debug(`decompressChunksForRange(${hypertable}) skipped: ${msg}`);
+    }
+  }
+
   // ============================================================================
   // Dynatrace Operations
   // ============================================================================
