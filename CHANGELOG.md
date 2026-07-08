@@ -4,6 +4,11 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
+## [0.2.61.36] - 2026-07-08
+
+### Fixed
+- **The "Analysis timerange" toggle now filters every Performance Analysis tab, not just Overview.** The `excludeRampUp` toggle (which restricts stats to the configured analysis window, trimming ramp-up/ramp-down) was wired only into the Overview tab. The Top 10 Transactions/Requests/URLs tabs and the Error Analysis tab ignored it and always showed full-run data. The Top 10 tabs already hit endpoints (`/transactions`, `/samples`) that support `excludeRampUp`, so they now pass it and refetch when it flips. Error Analysis needed backend support: the five `error-analysis/*` endpoints now accept `excludeRampUp` and restrict `requests_error` to the analysis window (start = `start_time + ramp_up`, end = `end_time - ramp_down`, read from `test_runs`); the error-rate denominator switches to the `ramp_up_excluded = true` rollup total so numerator and denominator share the same window. Default stays `false` wherever the param is absent, so existing API behavior is unchanged.
+
 ## [0.2.61.35] - 2026-07-08
 
 ### Fixed
