@@ -5,6 +5,8 @@ import { TestRun } from '@perfana/shared';
 import { withRequestEm } from '../../../common/db/request-em';
 import { AuthorizationService } from '../../../common/services/authorization.service';
 import { withOrgFilter } from '../../../common/utils/with-org-filter';
+import { TestRunsService } from '../../test-runs/test-runs.service';
+import { percentDiff } from '../renderers/comparison-bands';
 
 /** SLO check result summary for header renderer */
 export interface SloSummary {
@@ -194,6 +196,24 @@ export interface ComparisonsData {
   totalMetrics: number;
 }
 
+/** A single row in a baseline comparison result */
+export interface BaselineComparisonRow {
+  group: string;    // scenario_name (perf) | dashboard/panel (grafana) | host (dynatrace)
+  label: string;    // transaction_name | metric_name
+  metrics: {        // one entry per selected metric key
+    key: 'avg' | 'p95' | 'p99';
+    current: number | null;
+    baseline: number | null;
+    diffPercent: number | null;
+  }[];
+}
+
+/** Full baseline comparison data returned by getBaselineRunComparison */
+export interface BaselineComparisonData {
+  source: 'performance-metrics' | 'grafana' | 'dynatrace';
+  rows: BaselineComparisonRow[];
+}
+
 /** Per-metric regression/improvement detail for report rendering (regressions section) */
 export interface RegressionsMetric {
   dashboardLabel: string;
@@ -337,6 +357,7 @@ export class ReportDataFetcherService {
     private readonly testRunRepo: Repository<TestRun>,
     private readonly authzService: AuthorizationService,
     private readonly dataSource: DataSource,
+    private readonly testRunsService: TestRunsService,
   ) {}
 
   /**
@@ -1917,6 +1938,64 @@ export class ReportDataFetcherService {
       this.logger.error('Failed to fetch metrics time series:', error);
       return [];
     }
+  }
+
+  /**
+   * Compare a current test run against a baseline run for the given source.
+   * Returns paired rows with per-metric diff percentages.
+   *
+   * Performance-metrics branch: pairs transactions by scenario_name||transaction_name
+   * and computes percentDiff for each requested metric key.
+   *
+   * Grafana / Dynatrace branches: delegated to Task 4 stub until implemented.
+   */
+  async getBaselineRunComparison(
+    currentRunId: string,
+    baselineRunId: string,
+    source: 'performance-metrics' | 'grafana' | 'dynatrace',
+    opts: { metrics: ('avg' | 'p95' | 'p99')[]; userId: string; roles: string[]; hostMap?: { current: string; baseline: string }[] },
+  ): Promise<BaselineComparisonData | null> {
+    if (source === 'performance-metrics') {
+      const [cur, base] = await Promise.all([
+        this.testRunsService.getTransactionStats(currentRunId, opts.userId, opts.roles, true),
+        this.testRunsService.getTransactionStats(baselineRunId, opts.userId, opts.roles, true),
+      ]);
+      if (!Array.isArray(cur) || !Array.isArray(base)) return null;
+      const key = (r: { scenario_name?: string; transaction_name: string }) =>
+        `${r.scenario_name ?? ''}||${r.transaction_name}`;
+      const baseMap = new Map(base.map((r) => [key(r), r]));
+      const num = (v: unknown) => (v == null ? null : Number(v));
+      const fieldByKey = {
+        avg: 'avg_response_time',
+        p95: 'p95_response_time',
+        p99: 'p99_response_time',
+      } as const;
+      const rows: BaselineComparisonRow[] = cur.map((c) => {
+        const b = baseMap.get(key(c));
+        return {
+          group: c.scenario_name ?? 'default',
+          label: c.transaction_name,
+          metrics: opts.metrics.map((k) => {
+            const cv = num((c as Record<string, unknown>)[fieldByKey[k]]);
+            const bv = b != null ? num((b as Record<string, unknown>)[fieldByKey[k]]) : null;
+            return { key: k, current: cv, baseline: bv, diffPercent: percentDiff(cv, bv) };
+          }),
+        };
+      });
+      return { source, rows };
+    }
+    // grafana / dynatrace handled in Task 4
+    return this.getBaselineRunComparisonFromStatistics(currentRunId, baselineRunId, source, opts);
+  }
+
+  /** Task 4 stub — replaced when grafana/dynatrace branches are implemented */
+  private async getBaselineRunComparisonFromStatistics(
+    _c: string,
+    _b: string,
+    source: 'performance-metrics' | 'grafana' | 'dynatrace',
+    _o: unknown,
+  ): Promise<BaselineComparisonData | null> {
+    return { source, rows: [] };
   }
 
   /**
