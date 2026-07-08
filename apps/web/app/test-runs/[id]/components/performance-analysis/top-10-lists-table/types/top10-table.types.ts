@@ -40,6 +40,7 @@ export interface Top10TableDimension {
 export interface Top10ListsTableProps {
   testRunId: string;
   selectedScenarios?: string[];
+  excludeRampUp?: boolean;
   hasDistributedTracing?: boolean;
   hasDynatrace?: boolean;
   onDrillDownToDistributedTracing?: (filters: DrillDownFilters) => void;

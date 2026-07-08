@@ -596,6 +596,7 @@ export default function PerformanceAnalysisCard({
               <Top10ListsTable
                 testRunId={testRunId}
                 selectedScenarios={selectedScenarios}
+                excludeRampUp={excludeRampUp}
                 hasDistributedTracing={hasDistributedTracing}
                 hasDynatrace={hasDynatrace}
                 onDrillDownToDistributedTracing={onDrillDownToDistributedTracing}
@@ -608,6 +609,7 @@ export default function PerformanceAnalysisCard({
               <Top10ListsRequests
                 testRunId={testRunId}
                 selectedScenarios={selectedScenarios}
+                excludeRampUp={excludeRampUp}
                 hasDistributedTracing={hasDistributedTracing}
                 hasDynatrace={hasDynatrace}
                 onDrillDownToDistributedTracing={onDrillDownToDistributedTracing}
@@ -617,12 +619,12 @@ export default function PerformanceAnalysisCard({
 
             {/* Tab Panel 3: Top 10 Lists URLs */}
             {activeTab === 3 && (
-              <Top10ListsUrls testRunId={testRunId} selectedScenarios={selectedScenarios} />
+              <Top10ListsUrls testRunId={testRunId} selectedScenarios={selectedScenarios} excludeRampUp={excludeRampUp} />
             )}
 
             {/* Tab Panel 4: Error Analysis */}
             {activeTab === 4 && (
-              <ErrorAnalysisCard testRunId={testRunId} selectedScenarios={selectedScenarios} />
+              <ErrorAnalysisCard testRunId={testRunId} selectedScenarios={selectedScenarios} excludeRampUp={excludeRampUp} />
             )}
           </Collapse>
         </CardContent>

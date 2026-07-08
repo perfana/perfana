@@ -70,6 +70,38 @@ function buildScenarioFilterForRollup(
   return { clause: ` AND (${conditions.join(' OR ')})`, params };
 }
 
+interface AnalysisBounds {
+  startCutoff: Date | null;
+  endCutoff: Date | null;
+}
+
+/**
+ * Builds a SQL fragment + params for restricting `requests_error` rows to the
+ * analysis timerange (ramp-up/ramp-down trimmed). Returns an empty clause when
+ * both cutoffs are null (excludeRampUp off, or the run has no ramp config).
+ * startIndex is the $N position to use for the first new param (1-based).
+ */
+function buildTimeFilter(
+  bounds: AnalysisBounds,
+  startIndex: number,
+): { clause: string; params: unknown[]; nextIndex: number } {
+  const conditions: string[] = [];
+  const params: unknown[] = [];
+  let idx = startIndex;
+
+  if (bounds.startCutoff) {
+    conditions.push(`time >= $${idx++}`);
+    params.push(bounds.startCutoff);
+  }
+  if (bounds.endCutoff) {
+    conditions.push(`time < $${idx++}`);
+    params.push(bounds.endCutoff);
+  }
+
+  const clause = conditions.length > 0 ? ` AND ${conditions.join(' AND ')}` : '';
+  return { clause, params, nextIndex: idx };
+}
+
 export interface ErrorSummary {
   totalErrors: number;
   uniqueResponseCodes: number;
@@ -131,12 +163,44 @@ export class TestRunsErrorAnalysisService {
   ) {}
 
   /**
+   * Resolve the analysis-timerange cutoffs (start after ramp-up, end before
+   * ramp-down) for a test run. Returns null cutoffs when excludeRampUp is off,
+   * matching the Performance Analysis card's "Analysis timerange" toggle.
+   * ramp_up/ramp_down are stored in seconds. The end cutoff only applies to
+   * completed runs (end_time set).
+   */
+  private async getAnalysisBounds(testRunId: string, excludeRampUp: boolean): Promise<AnalysisBounds> {
+    if (!excludeRampUp) return { startCutoff: null, endCutoff: null };
+
+    const rows = await this.dataSource.query(
+      `SELECT start_time, ramp_up, end_time, ramp_down FROM test_runs WHERE test_run_id = $1`,
+      [testRunId],
+    );
+    const row = rows?.[0];
+    let startCutoff: Date | null = null;
+    let endCutoff: Date | null = null;
+
+    if (row?.start_time && row?.ramp_up) {
+      const rampUpSeconds = parseInt(String(row.ramp_up), 10);
+      if (rampUpSeconds > 0) startCutoff = new Date(new Date(row.start_time).getTime() + rampUpSeconds * 1000);
+    }
+    if (row?.end_time && row?.ramp_down) {
+      const rampDownSeconds = parseInt(String(row.ramp_down), 10);
+      if (rampDownSeconds > 0) endCutoff = new Date(new Date(row.end_time).getTime() - rampDownSeconds * 1000);
+    }
+
+    return { startCutoff, endCutoff };
+  }
+
+  /**
    * Get error summary statistics for a test run
    */
-  async getErrorSummary(testRunId: string, scenarios?: string[]): Promise<ErrorSummary> {
+  async getErrorSummary(testRunId: string, scenarios?: string[], excludeRampUp = false): Promise<ErrorSummary> {
     this.logger.log(`Getting error summary for test run: ${testRunId}`);
 
-    const { clause, params } = buildScenarioFilter(scenarios, 2);
+    const bounds = await this.getAnalysisBounds(testRunId, excludeRampUp);
+    const time = buildTimeFilter(bounds, 2);
+    const { clause, params } = buildScenarioFilter(scenarios, time.nextIndex);
     const query = `
       SELECT
         COUNT(*) as "totalErrors",
@@ -144,10 +208,10 @@ export class TestRunsErrorAnalysisService {
         COUNT(DISTINCT transaction_name) as "transactionsWithErrors",
         COUNT(DISTINCT url) as "uniqueErrorUrls"
       FROM requests_error
-      WHERE test_run_id = $1${clause}
+      WHERE test_run_id = $1${time.clause}${clause}
     `;
 
-    const result = await this.dataSource.query(query, [testRunId, ...params]);
+    const result = await this.dataSource.query(query, [testRunId, ...time.params, ...params]);
 
     if (!result || result.length === 0) {
       return {
@@ -170,7 +234,7 @@ export class TestRunsErrorAnalysisService {
     // COUNT(*) FROM requests_raw, which scans the active hypertable chunk and
     // can take seconds on populated TimescaleDB. #287
     try {
-      const totalRequests = await this.getTotalRequestCount(testRunId, scenarios);
+      const totalRequests = await this.getTotalRequestCount(testRunId, scenarios, excludeRampUp, bounds);
       if (totalRequests !== null) {
         summary.totalRequests = totalRequests;
         summary.errorRate = totalRequests > 0 ? (summary.totalErrors / totalRequests) * 100 : 0;
@@ -193,9 +257,13 @@ export class TestRunsErrorAnalysisService {
   private async getTotalRequestCount(
     testRunId: string,
     scenarios?: string[],
+    excludeRampUp = false,
+    bounds: AnalysisBounds = { startCutoff: null, endCutoff: null },
   ): Promise<number | null> {
-    // Rollup path: SUM(total_count) WHERE ramp_up_excluded = false matches the
-    // pre-rollup behavior of COUNT(*) FROM requests_raw (no ramp-up filter).
+    // Rollup path: the rollup stores both aggregations. ramp_up_excluded = true
+    // is the analysis-timerange total; = false is the full run. Pick to match
+    // the toggle so numerator (errors) and denominator (requests) share a window.
+    const rollupExcluded = excludeRampUp ? 'true' : 'false';
     const rollupExists = await this.dataSource.query(
       `SELECT 1 FROM test_run_transaction_stats WHERE test_run_id = $1 LIMIT 1`,
       [testRunId],
@@ -207,7 +275,7 @@ export class TestRunsErrorAnalysisService {
         SELECT COALESCE(SUM(total_count), 0)::bigint AS total
         FROM test_run_transaction_stats
         WHERE test_run_id = $1
-          AND ramp_up_excluded = false
+          AND ramp_up_excluded = ${rollupExcluded}
           ${rollupFilter.clause}
       `;
       const result = await this.dataSource.query(rollupQuery, [testRunId, ...rollupFilter.params]);
@@ -220,15 +288,16 @@ export class TestRunsErrorAnalysisService {
     // Fallback: rollup not yet computed (ingestion in progress, or finalization
     // failed). Scan requests_raw directly — slow on big runs, but keeps the
     // error-rate readout populated for in-progress runs.
-    const rawFilter = buildScenarioFilter(scenarios, 2);
+    const rawTime = buildTimeFilter(bounds, 2);
+    const rawFilter = buildScenarioFilter(scenarios, rawTime.nextIndex);
     const totalRequestsQuery = `
       SELECT COUNT(*) as total
       FROM requests_raw
-      WHERE test_run_id = $1${rawFilter.clause}
+      WHERE test_run_id = $1${rawTime.clause}${rawFilter.clause}
     `;
     const totalRequestsResult = await this.dataSource.query(
       totalRequestsQuery,
-      [testRunId, ...rawFilter.params],
+      [testRunId, ...rawTime.params, ...rawFilter.params],
     );
 
     if (totalRequestsResult && totalRequestsResult.length > 0) {
@@ -240,10 +309,12 @@ export class TestRunsErrorAnalysisService {
   /**
    * Get errors grouped by response code
    */
-  async getErrorsByCode(testRunId: string, scenarios?: string[]): Promise<ErrorByCode[]> {
+  async getErrorsByCode(testRunId: string, scenarios?: string[], excludeRampUp = false): Promise<ErrorByCode[]> {
     this.logger.log(`Getting errors by code for test run: ${testRunId}`);
 
-    const { clause, params } = buildScenarioFilter(scenarios, 2);
+    const bounds = await this.getAnalysisBounds(testRunId, excludeRampUp);
+    const time = buildTimeFilter(bounds, 2);
+    const { clause, params } = buildScenarioFilter(scenarios, time.nextIndex);
     const query = `
       SELECT
         response_code as "responseCode",
@@ -252,12 +323,12 @@ export class TestRunsErrorAnalysisService {
         MIN(response_time) as "minResponseTime",
         MAX(response_time) as "maxResponseTime"
       FROM requests_error
-      WHERE test_run_id = $1${clause}
+      WHERE test_run_id = $1${time.clause}${clause}
       GROUP BY response_code
       ORDER BY "errorCount" DESC
     `;
 
-    const results = await this.dataSource.query(query, [testRunId, ...params]);
+    const results = await this.dataSource.query(query, [testRunId, ...time.params, ...params]);
 
     return results.map((row: Record<string, unknown>) => ({
       responseCode: row.responseCode as string,
@@ -271,10 +342,12 @@ export class TestRunsErrorAnalysisService {
   /**
    * Get errors grouped by transaction/sampler/url
    */
-  async getErrorsByTransaction(testRunId: string, scenarios?: string[]): Promise<ErrorByTransaction[]> {
+  async getErrorsByTransaction(testRunId: string, scenarios?: string[], excludeRampUp = false): Promise<ErrorByTransaction[]> {
     this.logger.log(`Getting errors by transaction for test run: ${testRunId}`);
 
-    const { clause, params } = buildScenarioFilter(scenarios, 2);
+    const bounds = await this.getAnalysisBounds(testRunId, excludeRampUp);
+    const time = buildTimeFilter(bounds, 2);
+    const { clause, params } = buildScenarioFilter(scenarios, time.nextIndex);
     const query = `
       SELECT
         transaction_name as "transactionName",
@@ -285,13 +358,13 @@ export class TestRunsErrorAnalysisService {
         ROUND(AVG(response_time)) as "avgResponseTime",
         bool_or(session_variables IS NOT NULL AND session_variables <> '{}'::jsonb) as "hasSessionVariables"
       FROM requests_error
-      WHERE test_run_id = $1${clause}
+      WHERE test_run_id = $1${time.clause}${clause}
       GROUP BY transaction_name, sampler_name, url, response_code
       ORDER BY "errorCount" DESC
       LIMIT 100
     `;
 
-    const results = await this.dataSource.query(query, [testRunId, ...params]);
+    const results = await this.dataSource.query(query, [testRunId, ...time.params, ...params]);
 
     return results.map((row: Record<string, unknown>) => ({
       transactionName: row.transactionName as string,
@@ -307,21 +380,23 @@ export class TestRunsErrorAnalysisService {
   /**
    * Get errors over time (grouped by minute)
    */
-  async getErrorsOverTime(testRunId: string, scenarios?: string[]): Promise<ErrorOverTime[]> {
+  async getErrorsOverTime(testRunId: string, scenarios?: string[], excludeRampUp = false): Promise<ErrorOverTime[]> {
     this.logger.log(`Getting errors over time for test run: ${testRunId}`);
 
-    const { clause, params } = buildScenarioFilter(scenarios, 2);
+    const bounds = await this.getAnalysisBounds(testRunId, excludeRampUp);
+    const time = buildTimeFilter(bounds, 2);
+    const { clause, params } = buildScenarioFilter(scenarios, time.nextIndex);
     const query = `
       SELECT
         DATE_TRUNC('minute', time) as "timeBucket",
         COUNT(*) as "errorsPerMinute"
       FROM requests_error
-      WHERE test_run_id = $1${clause}
+      WHERE test_run_id = $1${time.clause}${clause}
       GROUP BY "timeBucket"
       ORDER BY "timeBucket"
     `;
 
-    const results = await this.dataSource.query(query, [testRunId, ...params]);
+    const results = await this.dataSource.query(query, [testRunId, ...time.params, ...params]);
 
     return results.map((row: Record<string, unknown>) => ({
       timeBucket: row.timeBucket as string,
@@ -332,22 +407,24 @@ export class TestRunsErrorAnalysisService {
   /**
    * Get errors over time grouped by response code (for multi-line chart)
    */
-  async getErrorsOverTimeByCode(testRunId: string, scenarios?: string[]): Promise<ErrorOverTimeByCode[]> {
+  async getErrorsOverTimeByCode(testRunId: string, scenarios?: string[], excludeRampUp = false): Promise<ErrorOverTimeByCode[]> {
     this.logger.log(`Getting errors over time by code for test run: ${testRunId}`);
 
-    const { clause, params } = buildScenarioFilter(scenarios, 2);
+    const bounds = await this.getAnalysisBounds(testRunId, excludeRampUp);
+    const time = buildTimeFilter(bounds, 2);
+    const { clause, params } = buildScenarioFilter(scenarios, time.nextIndex);
     const query = `
       SELECT
         DATE_TRUNC('minute', time) as "timeBucket",
         response_code as "responseCode",
         COUNT(*) as "errorCount"
       FROM requests_error
-      WHERE test_run_id = $1${clause}
+      WHERE test_run_id = $1${time.clause}${clause}
       GROUP BY "timeBucket", response_code
       ORDER BY "timeBucket", response_code
     `;
 
-    const results = await this.dataSource.query(query, [testRunId, ...params]);
+    const results = await this.dataSource.query(query, [testRunId, ...time.params, ...params]);
 
     // Transform results into the format needed for the chart
     // Group by timeBucket and create dynamic properties for each response code

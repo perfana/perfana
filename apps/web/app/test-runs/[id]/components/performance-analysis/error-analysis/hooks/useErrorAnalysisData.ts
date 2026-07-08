@@ -17,6 +17,7 @@ const NO_SCENARIO_SENTINEL = '__NO_SCENARIO__';
 export interface UseErrorAnalysisDataProps {
   testRunId: string;
   selectedScenarios?: string[];
+  excludeRampUp?: boolean;
 }
 
 export interface UseErrorAnalysisDataReturn {
@@ -46,21 +47,26 @@ export interface UseErrorAnalysisDataReturn {
 export function useErrorAnalysisData({
   testRunId,
   selectedScenarios = [],
+  excludeRampUp = false,
 }: UseErrorAnalysisDataProps): UseErrorAnalysisDataReturn {
   // Loading and error states
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
-  // Stable scenario query string — rebuilds only when contents change
+  // Stable query string (scenarios + analysis-timerange toggle) — rebuilds only when contents change
   const scenariosQueryKey = [...selectedScenarios].sort().join(',');
   const scenariosQuery = useMemo(() => {
-    if (selectedScenarios.length === 0) return '';
-    const sentinels = selectedScenarios.map((s) =>
-      s === NO_SCENARIO_LABEL ? NO_SCENARIO_SENTINEL : s,
-    );
-    return `?scenarios=${encodeURIComponent(sentinels.join(','))}`;
+    const params = new URLSearchParams();
+    if (selectedScenarios.length > 0) {
+      const sentinels = selectedScenarios.map((s) =>
+        s === NO_SCENARIO_LABEL ? NO_SCENARIO_SENTINEL : s,
+      );
+      params.set('scenarios', sentinels.join(','));
+    }
+    params.set('excludeRampUp', String(excludeRampUp));
+    return `?${params.toString()}`;
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [scenariosQueryKey]);
+  }, [scenariosQueryKey, excludeRampUp]);
 
   // Data states
   const [summary, setSummary] = useState<ErrorSummary | null>(null);

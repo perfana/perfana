@@ -13,9 +13,10 @@ import {
 interface ErrorAnalysisCardProps {
   testRunId: string;
   selectedScenarios?: string[];
+  excludeRampUp?: boolean;
 }
 
-export default function ErrorAnalysisCard({ testRunId, selectedScenarios = [] }: ErrorAnalysisCardProps) {
+export default function ErrorAnalysisCard({ testRunId, selectedScenarios = [], excludeRampUp = false }: ErrorAnalysisCardProps) {
   const {
     loading,
     error,
@@ -28,7 +29,7 @@ export default function ErrorAnalysisCard({ testRunId, selectedScenarios = [] }:
     detailsOpen,
     handleViewDetails,
     handleCloseDetails,
-  } = useErrorAnalysisData({ testRunId, selectedScenarios });
+  } = useErrorAnalysisData({ testRunId, selectedScenarios, excludeRampUp });
 
   if (loading) {
     return (

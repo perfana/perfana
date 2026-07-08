@@ -76,9 +76,10 @@ type SortOrder = 'asc' | 'desc';
 interface Top10ListsUrlsProps {
   testRunId: string;
   selectedScenarios?: string[];
+  excludeRampUp?: boolean;
 }
 
-export default function Top10ListsUrls({ testRunId, selectedScenarios = [] }: Top10ListsUrlsProps) {
+export default function Top10ListsUrls({ testRunId, selectedScenarios = [], excludeRampUp = false }: Top10ListsUrlsProps) {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [samplers, setSamplers] = useState<Array<SamplerStat & { transaction_name: string }>>([]);
@@ -89,7 +90,7 @@ export default function Top10ListsUrls({ testRunId, selectedScenarios = [] }: To
   useEffect(() => {
     fetchData();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [testRunId]);
+  }, [testRunId, excludeRampUp]);
 
   const fetchData = async () => {
     setLoading(true);
@@ -107,7 +108,7 @@ export default function Top10ListsUrls({ testRunId, selectedScenarios = [] }: To
 
       // Fetch all transactions
       const transactionsResponse = await authenticatedFetch(
-        `/test-runs/${testRunId}/transactions`
+        `/test-runs/${testRunId}/transactions?excludeRampUp=${excludeRampUp}`
       );
       if (!transactionsResponse.ok) {
         throw new Error('Failed to fetch transactions');
@@ -120,7 +121,7 @@ export default function Top10ListsUrls({ testRunId, selectedScenarios = [] }: To
       for (const transaction of transactionsData) {
         try {
           const samplesResponse = await authenticatedFetch(
-            `/test-runs/${testRunId}/transactions/${encodeURIComponent(transaction.transaction_name)}/samples`
+            `/test-runs/${testRunId}/transactions/${encodeURIComponent(transaction.transaction_name)}/samples?excludeRampUp=${excludeRampUp}`
           );
           if (samplesResponse.ok) {
             const samplesData: SamplerStat[] = await samplesResponse.json();

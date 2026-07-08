@@ -964,4 +964,59 @@ describe('TestRunsErrorAnalysisService', () => {
       await expect(service.getErrorsOverTimeByCode(TEST_RUN_ID)).rejects.toThrow('query failed');
     });
   });
+
+  // =========================================================================
+  // Analysis-timerange toggle (excludeRampUp)
+  // =========================================================================
+
+  describe('excludeRampUp (analysis timerange)', () => {
+    // 10:00 start, 60s ramp-up → 10:01:00 start cutoff; 10:10 end, 60s
+    // ramp-down → 10:09:00 end cutoff.
+    const TEST_RUN_ROW = [{
+      start_time: '2026-01-01T10:00:00.000Z',
+      ramp_up: '60',
+      end_time: '2026-01-01T10:10:00.000Z',
+      ramp_down: '60',
+    }];
+
+    it('does not query test_runs or add a time filter when off (default)', async () => {
+      mockQuery.mockResolvedValueOnce([]);
+
+      await service.getErrorsOverTime(TEST_RUN_ID);
+
+      // Single query, no test_runs bounds lookup, no time predicate.
+      expect(mockQuery).toHaveBeenCalledTimes(1);
+      expect(mockQuery.mock.calls[0][0]).not.toContain('time >=');
+      expect(mockQuery.mock.calls[0][1]).toEqual([TEST_RUN_ID]);
+    });
+
+    it('filters requests_error to the analysis window when on', async () => {
+      mockQuery
+        .mockResolvedValueOnce(TEST_RUN_ROW) // getAnalysisBounds → test_runs
+        .mockResolvedValueOnce([]);          // errors-over-time query
+
+      await service.getErrorsOverTime(TEST_RUN_ID, undefined, true);
+
+      const [sql, params] = mockQuery.mock.calls[1];
+      expect(sql).toContain('time >= $2');
+      expect(sql).toContain('time < $3');
+      expect(params[0]).toBe(TEST_RUN_ID);
+      expect((params[1] as Date).toISOString()).toBe('2026-01-01T10:01:00.000Z');
+      expect((params[2] as Date).toISOString()).toBe('2026-01-01T10:09:00.000Z');
+    });
+
+    it('uses the ramp-up-excluded rollup total for the error rate when on', async () => {
+      mockQuery
+        .mockResolvedValueOnce([{ start_time: '2026-01-01T10:00:00.000Z', ramp_up: '60', end_time: null, ramp_down: null }]) // bounds
+        .mockResolvedValueOnce([{ totalErrors: '10', uniqueResponseCodes: '1', transactionsWithErrors: '1', uniqueErrorUrls: '1' }]) // summary
+        .mockResolvedValueOnce([{ '?column?': 1 }]) // rollup exists
+        .mockResolvedValueOnce([{ total: '1000' }]); // rollup sum
+
+      const result = await service.getErrorSummary(TEST_RUN_ID, undefined, true);
+
+      const rollupSql = mockQuery.mock.calls[3][0] as string;
+      expect(rollupSql).toContain('ramp_up_excluded = true');
+      expect(result.errorRate).toBe(1); // 10/1000 * 100
+    });
+  });
 });

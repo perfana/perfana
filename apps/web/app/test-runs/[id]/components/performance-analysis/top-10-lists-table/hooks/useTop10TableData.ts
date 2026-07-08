@@ -27,6 +27,7 @@ import React from 'react';
 export interface UseTop10TableDataProps {
   testRunId: string;
   selectedScenarios?: string[];
+  excludeRampUp?: boolean;
 }
 
 export interface UseTop10TableDataReturn {
@@ -48,7 +49,7 @@ export interface UseTop10TableDataReturn {
   handleCloseActionMenu: () => void;
 }
 
-export function useTop10TableData({ testRunId, selectedScenarios = [] }: UseTop10TableDataProps): UseTop10TableDataReturn {
+export function useTop10TableData({ testRunId, selectedScenarios = [], excludeRampUp = false }: UseTop10TableDataProps): UseTop10TableDataReturn {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [transactions, setTransactions] = useState<TransactionStat[]>([]);
@@ -72,7 +73,7 @@ export function useTop10TableData({ testRunId, selectedScenarios = [] }: UseTop1
       setTestDuration(durationSeconds);
 
       const transactionsResponse = await authenticatedFetch(
-        `/test-runs/${testRunId}/transactions`
+        `/test-runs/${testRunId}/transactions?excludeRampUp=${excludeRampUp}`
       );
       if (!transactionsResponse.ok) {
         throw new Error('Failed to fetch transactions');
@@ -88,7 +89,7 @@ export function useTop10TableData({ testRunId, selectedScenarios = [] }: UseTop1
     } finally {
       setLoading(false);
     }
-  }, [testRunId]);
+  }, [testRunId, excludeRampUp]);
 
   useEffect(() => {
     fetchData();
