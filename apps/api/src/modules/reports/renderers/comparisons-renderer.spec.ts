@@ -75,6 +75,7 @@ describe('ComparisonsRenderer', () => {
           provide: ReportDataFetcherService,
           useValue: {
             getComparisonsData: jest.fn().mockResolvedValue(null),
+            getBaselineRunComparison: jest.fn().mockResolvedValue(null),
           },
         },
       ],
@@ -202,5 +203,32 @@ describe('ComparisonsRenderer', () => {
     expect(html).toContain('250.6 ms');
     expect(html).toContain('75.3%');
     expect(html).toContain('1.0 GB');
+  });
+
+  it('renders baseline_run mode grouped by scenario with band colors', async () => {
+    const data = { source: 'performance-metrics', rows: [
+      { group: 'checkout', label: 'login', metrics: [
+        { key: 'avg', current: 110, baseline: 100, diffPercent: 10 },
+        { key: 'p95', current: 220, baseline: 200, diffPercent: 10 },
+      ] },
+    ] };
+    jest.spyOn(dataFetcher, 'getBaselineRunComparison').mockResolvedValue(data as any);
+    const html = await renderer.renderComparisonsSection(
+      { type: 'comparisons', order: 0, config: {
+        comparisonMode: 'baseline_run', baselineTestRunId: 'base', source: 'performance-metrics',
+        metrics: ['avg','p95'], thresholds: { good: 10, warning: 50 } } } as any,
+      { testRunId: 'cur' } as any,
+    );
+    expect(html).toContain('checkout');
+    expect(html).toContain('login');
+    expect(html).toContain('#f59e0b'); // 10% == not < good(10) => amber band
+  });
+
+  it('shows empty state when baseline data is null', async () => {
+    jest.spyOn(dataFetcher, 'getBaselineRunComparison').mockResolvedValue(null);
+    const html = await renderer.renderComparisonsSection(
+      { type: 'comparisons', order: 0, config: { comparisonMode: 'baseline_run', baselineTestRunId: 'base', source: 'grafana' } } as any,
+      { testRunId: 'cur' } as any);
+    expect(html).toContain('No comparison data available for the selected baseline run');
   });
 });
