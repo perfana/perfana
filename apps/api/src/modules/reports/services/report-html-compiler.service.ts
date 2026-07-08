@@ -106,7 +106,7 @@ export class ReportHtmlCompilerService {
       case 'trends':
         return await this.trendsRenderer.renderTrendsSection(section, testRun, userId, roles);
       case 'comparisons':
-        return await this.comparisonsRenderer.renderComparisonsSection(section, testRun);
+        return await this.comparisonsRenderer.renderComparisonsSection(section, testRun, userId, roles);
       case 'graphs':
         return await this.graphsRenderer.renderGraphsSection(section, testRun, userId, roles);
       default:

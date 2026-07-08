@@ -217,8 +217,8 @@ export class TestRunsQueryService {
 
   async getBaselineCandidates(
     systemUnderTestId: string,
-    testEnvironment: string,
-    workload: string,
+    testEnvironment: string | undefined,
+    workload: string | undefined,
     _userId: string,
     _roles: string[],
     excludeTestRunId?: string,

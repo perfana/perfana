@@ -7,8 +7,9 @@
  */
 
 import { useState, useEffect } from 'react';
-import { Box, TextField, Select, MenuItem, FormControlLabel, Switch, Typography, Button, Tooltip } from '@mui/material';
+import { Box, TextField, Select, MenuItem, FormControlLabel, Switch, Typography, Button, Tooltip, FormControl, InputLabel, Checkbox, IconButton } from '@mui/material';
 import VisibilityIcon from '@mui/icons-material/Visibility';
+import DeleteIcon from '@mui/icons-material/Delete';
 import SectionPreviewModal from './SectionPreviewModal';
 import dynamic from 'next/dynamic';
 import { authenticatedFetch } from '@/lib/api';
@@ -789,68 +790,229 @@ export interface ComparisonsConfig {
   showDeltaPercentage?: boolean;
   highlightSignificant?: boolean;
   significantChangeThreshold?: number;
+  // Baseline-run comparison mode fields
+  comparisonMode?: 'control_group' | 'baseline_run';
+  source?: 'performance-metrics' | 'grafana' | 'dynatrace';
+  metrics?: ('avg' | 'p95' | 'p99')[];
+  thresholds?: { good: number; warning: number };
+  hostMap?: { current: string; baseline: string }[];
+}
+
+interface BaselineCandidate {
+  test_run_id: string;
+  test_environment: string;
+  workload: string;
+  start_time: string;
 }
 
 interface ComparisonsConfigFormProps {
   config: ComparisonsConfig;
   onChange: (config: ComparisonsConfig) => void;
+  testRunId?: string;
+  systemUnderTestId?: string;
 }
 
-export function ComparisonsConfigForm({ config, onChange }: ComparisonsConfigFormProps) {
+export function ComparisonsConfigForm({ config, onChange, testRunId, systemUnderTestId }: ComparisonsConfigFormProps) {
+  const [baselineCandidates, setBaselineCandidates] = useState<BaselineCandidate[]>([]);
+
+  const comparisonMode = config.comparisonMode ?? 'control_group';
+
+  useEffect(() => {
+    if (comparisonMode !== 'baseline_run' || !systemUnderTestId) return;
+    const params = new URLSearchParams({ systemUnderTestId });
+    if (testRunId) params.set('excludeTestRunId', testRunId);
+    authenticatedFetch(`/test-runs/baseline-candidates?${params.toString()}`)
+      .then((res) => {
+        if (!res.ok) { setBaselineCandidates([]); return; }
+        return res.json();
+      })
+      .then((data: BaselineCandidate[] | undefined) => { if (data) setBaselineCandidates(data); })
+      .catch(() => setBaselineCandidates([]));
+  }, [comparisonMode, systemUnderTestId, testRunId]);
+
+  const metrics = config.metrics ?? ['avg', 'p95', 'p99'];
+
+  const toggleMetric = (metric: 'avg' | 'p95' | 'p99') => {
+    const next = metrics.includes(metric) ? metrics.filter((m) => m !== metric) : [...metrics, metric];
+    onChange({ ...config, metrics: next });
+  };
+
   return (
     <Box sx={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
-      <TextField
-        label="Baseline Test Run ID (optional)"
-        value={config.baselineTestRunId || ''}
-        onChange={(e) => onChange({ ...config, baselineTestRunId: e.target.value })}
-        fullWidth
-        size="small"
-        placeholder="Leave empty for auto-select"
-      />
-      <TextField
-        label="Significant Change Threshold (%)"
-        type="number"
-        value={config.significantChangeThreshold || 10}
-        onChange={(e) => onChange({ ...config, significantChangeThreshold: Number(e.target.value) })}
-        size="small"
-        inputProps={{ min: 0, max: 100 }}
-      />
-      <FormControlLabel
-        control={
-          <Switch
-            checked={config.autoSelectBaseline ?? true}
-            onChange={(e) => onChange({ ...config, autoSelectBaseline: e.target.checked })}
+      {/* Mode toggle — always visible */}
+      <FormControl size="small" fullWidth>
+        <InputLabel id="comparison-mode-label">Comparison Mode</InputLabel>
+        <Select
+          labelId="comparison-mode-label"
+          label="Comparison Mode"
+          value={comparisonMode}
+          onChange={(e) => onChange({ ...config, comparisonMode: e.target.value as 'control_group' | 'baseline_run' })}
+        >
+          <MenuItem value="control_group">Control Group</MenuItem>
+          <MenuItem value="baseline_run">Baseline Run</MenuItem>
+        </Select>
+      </FormControl>
+
+      {/* Existing control-group fields — hidden in baseline_run mode */}
+      {comparisonMode !== 'baseline_run' && (
+        <>
+          <TextField
+            label="Baseline Test Run ID (optional)"
+            value={config.baselineTestRunId || ''}
+            onChange={(e) => onChange({ ...config, baselineTestRunId: e.target.value })}
+            fullWidth
+            size="small"
+            placeholder="Leave empty for auto-select"
           />
-        }
-        label="Auto-Select Baseline"
-      />
-      <FormControlLabel
-        control={
-          <Switch
-            checked={config.showSideBySide ?? true}
-            onChange={(e) => onChange({ ...config, showSideBySide: e.target.checked })}
+          <TextField
+            label="Significant Change Threshold (%)"
+            type="number"
+            value={config.significantChangeThreshold || 10}
+            onChange={(e) => onChange({ ...config, significantChangeThreshold: Number(e.target.value) })}
+            size="small"
+            inputProps={{ min: 0, max: 100 }}
           />
-        }
-        label="Show Side-by-Side"
-      />
-      <FormControlLabel
-        control={
-          <Switch
-            checked={config.showDeltaPercentage ?? true}
-            onChange={(e) => onChange({ ...config, showDeltaPercentage: e.target.checked })}
+          <FormControlLabel
+            control={
+              <Switch
+                checked={config.autoSelectBaseline ?? true}
+                onChange={(e) => onChange({ ...config, autoSelectBaseline: e.target.checked })}
+              />
+            }
+            label="Auto-Select Baseline"
           />
-        }
-        label="Show Delta Percentage"
-      />
-      <FormControlLabel
-        control={
-          <Switch
-            checked={config.highlightSignificant ?? true}
-            onChange={(e) => onChange({ ...config, highlightSignificant: e.target.checked })}
+          <FormControlLabel
+            control={
+              <Switch
+                checked={config.showSideBySide ?? true}
+                onChange={(e) => onChange({ ...config, showSideBySide: e.target.checked })}
+              />
+            }
+            label="Show Side-by-Side"
           />
-        }
-        label="Highlight Significant Changes"
-      />
+          <FormControlLabel
+            control={
+              <Switch
+                checked={config.showDeltaPercentage ?? true}
+                onChange={(e) => onChange({ ...config, showDeltaPercentage: e.target.checked })}
+              />
+            }
+            label="Show Delta Percentage"
+          />
+          <FormControlLabel
+            control={
+              <Switch
+                checked={config.highlightSignificant ?? true}
+                onChange={(e) => onChange({ ...config, highlightSignificant: e.target.checked })}
+              />
+            }
+            label="Highlight Significant Changes"
+          />
+        </>
+      )}
+
+      {/* Baseline-run fields — only shown in baseline_run mode */}
+      {comparisonMode === 'baseline_run' && (
+        <>
+          {/* Baseline run selector */}
+          <FormControl size="small" fullWidth>
+            <InputLabel id="baseline-run-label">Baseline Run</InputLabel>
+            <Select
+              labelId="baseline-run-label"
+              label="Baseline Run"
+              value={config.baselineTestRunId ?? ''}
+              onChange={(e) => onChange({ ...config, baselineTestRunId: e.target.value })}
+            >
+              <MenuItem value=""><em>None</em></MenuItem>
+              {baselineCandidates.map((c) => (
+                <MenuItem key={c.test_run_id} value={c.test_run_id}>
+                  {`${c.test_environment} / ${c.workload} / ${new Date(c.start_time).toLocaleDateString()}`}
+                </MenuItem>
+              ))}
+            </Select>
+          </FormControl>
+
+          {/* Source selector */}
+          <FormControl size="small" fullWidth>
+            <InputLabel id="source-label">Source</InputLabel>
+            <Select
+              labelId="source-label"
+              label="Source"
+              value={config.source ?? 'performance-metrics'}
+              onChange={(e) => onChange({ ...config, source: e.target.value as ComparisonsConfig['source'] })}
+            >
+              <MenuItem value="performance-metrics">Performance Metrics</MenuItem>
+              <MenuItem value="grafana">Grafana</MenuItem>
+              <MenuItem value="dynatrace">Dynatrace</MenuItem>
+            </Select>
+          </FormControl>
+
+          {/* Metric checkboxes */}
+          <Box>
+            <Typography variant="caption" color="text.secondary">Metrics</Typography>
+            <Box sx={{ display: 'flex', gap: 1 }}>
+              {(['avg', 'p95', 'p99'] as const).map((m) => (
+                <FormControlLabel
+                  key={m}
+                  control={
+                    <Checkbox
+                      checked={metrics.includes(m)}
+                      onChange={() => toggleMetric(m)}
+                      size="small"
+                    />
+                  }
+                  label={m}
+                />
+              ))}
+            </Box>
+          </Box>
+
+          {/* Threshold number fields */}
+          <TextField
+            label="Good threshold (%)"
+            type="number"
+            size="small"
+            value={config.thresholds?.good ?? 10}
+            onChange={(e) =>
+              onChange({
+                ...config,
+                thresholds: { good: Number(e.target.value), warning: config.thresholds?.warning ?? 50 },
+              })
+            }
+            inputProps={{ min: 0, max: 100 }}
+          />
+          <TextField
+            label="Warning threshold (%)"
+            type="number"
+            size="small"
+            value={config.thresholds?.warning ?? 50}
+            onChange={(e) =>
+              onChange({
+                ...config,
+                thresholds: { good: config.thresholds?.good ?? 10, warning: Number(e.target.value) },
+              })
+            }
+            inputProps={{ min: 0, max: 100 }}
+          />
+
+          {/* Dynatrace host-map editor */}
+          {config.source === 'dynatrace' && (
+            <Box sx={{ display: 'flex', flexDirection: 'column', gap: 1 }}>
+              <Typography variant="caption" color="text.secondary">Host mapping (current → baseline)</Typography>
+              {(config.hostMap ?? []).map((row, i) => (
+                <Box key={i} sx={{ display: 'flex', gap: 1 }}>
+                  <TextField size="small" label="Current host" value={row.current}
+                    onChange={(e) => { const hm=[...(config.hostMap??[])]; hm[i]={...hm[i]!, current:e.target.value}; onChange({ ...config, hostMap: hm }); }} />
+                  <TextField size="small" label="Baseline host" value={row.baseline}
+                    onChange={(e) => { const hm=[...(config.hostMap??[])]; hm[i]={...hm[i]!, baseline:e.target.value}; onChange({ ...config, hostMap: hm }); }} />
+                  <IconButton size="small" onClick={() => { const hm=[...(config.hostMap??[])]; hm.splice(i,1); onChange({ ...config, hostMap: hm }); }}><DeleteIcon fontSize="small" /></IconButton>
+                </Box>
+              ))}
+              <Button size="small" onClick={() => onChange({ ...config, hostMap: [...(config.hostMap ?? []), { current: '', baseline: '' }] })}>Add host mapping</Button>
+            </Box>
+          )}
+        </>
+      )}
     </Box>
   );
 }

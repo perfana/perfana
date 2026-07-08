@@ -1581,6 +1581,29 @@ describe('TestRunsCrudQueryService', () => {
   });
 
   // =========================================================================
+  // getBaselineCandidates scope
+  // =========================================================================
+
+  describe('getBaselineCandidates scope', () => {
+    it('omits env/workload filters when not provided', async () => {
+      const qb: any = {
+        leftJoinAndSelect: jest.fn().mockReturnThis(),
+        where: jest.fn().mockReturnThis(),
+        andWhere: jest.fn().mockReturnThis(),
+        orderBy: jest.fn().mockReturnThis(),
+        limit: jest.fn().mockReturnThis(),
+        getMany: jest.fn().mockResolvedValue([]),
+      };
+      jest.spyOn(service['testRunRepo'], 'createQueryBuilder' as any).mockReturnValue(qb);
+      await service.getBaselineCandidates('sut-1', undefined, undefined, 'exclude-me');
+      const clauses = qb.andWhere.mock.calls.map((c: any[]) => c[0]);
+      expect(clauses).not.toContain('tr.testEnvironment = :testEnvironment');
+      expect(clauses).not.toContain('tr.workload = :workload');
+      expect(clauses).toContain('tr.completed = :completed');
+    });
+  });
+
+  // =========================================================================
   // getRequestNames
   // =========================================================================
 

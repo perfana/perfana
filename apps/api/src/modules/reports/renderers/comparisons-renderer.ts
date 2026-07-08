@@ -1,7 +1,8 @@
 import { Injectable } from '@nestjs/common';
 import { TestRun, ReportSectionConfig } from '@perfana/shared';
 import { ReportUtilsService } from '../services/report-utils.service';
-import { ReportDataFetcherService, ComparisonsData, ComparisonMetric } from '../services/report-data-fetcher.service';
+import { ReportDataFetcherService, ComparisonsData, ComparisonMetric, BaselineComparisonRow } from '../services/report-data-fetcher.service';
+import { bandColor } from './comparison-bands';
 
 /**
  * Renderer for Comparisons section
@@ -25,8 +26,13 @@ export class ComparisonsRenderer {
   async renderComparisonsSection(
     section: ReportSectionConfig,
     testRun: TestRun | null,
+    userId: string = '',
+    roles: string[] = [],
   ): Promise<string> {
     const config = section.config || {};
+    if (config.comparisonMode === 'baseline_run') {
+      return this.renderBaselineRun(section, testRun, userId, roles);
+    }
     const baselineTestRunId = typeof config.baselineTestRunId === 'string' ? config.baselineTestRunId : undefined;
     const title = section.title || 'Comparisons';
     const comment = section.comment;
@@ -72,6 +78,68 @@ export class ComparisonsRenderer {
         ${grouped.map(({ dashboard, metrics }) => this.renderDashboardGroup(dashboard, metrics)).join('\n')}
       </section>
     `;
+  }
+
+  private async renderBaselineRun(
+    section: ReportSectionConfig,
+    testRun: TestRun | null,
+    userId: string,
+    roles: string[],
+  ): Promise<string> {
+    const config = section.config || {};
+    const title = section.title || 'Comparisons';
+    const comment = section.comment;
+    const source = (config.source as 'performance-metrics' | 'grafana' | 'dynatrace') || 'performance-metrics';
+    const metrics = (Array.isArray(config.metrics) && config.metrics.length ? config.metrics : ['avg', 'p95', 'p99']) as ('avg' | 'p95' | 'p99')[];
+    const thresholds = (config.thresholds as { good: number; warning: number }) || { good: 10, warning: 50 };
+    const baselineId = typeof config.baselineTestRunId === 'string' ? config.baselineTestRunId : undefined;
+    const hostMap = Array.isArray(config.hostMap)
+      ? (config.hostMap as { current: string; baseline: string }[])
+      : undefined;
+
+    const data = testRun && baselineId
+      ? await this.dataFetcher.getBaselineRunComparison(testRun.testRunId, baselineId, source,
+          { metrics, userId, roles, hostMap })
+      : null;
+
+    if (!data || data.rows.length === 0) {
+      return `<section class="comparisons-section"><h2>${this.utils.escapeHtml(title)}</h2>
+        ${comment ? `<div class="section-comment">${this.utils.escapeHtml(comment)}</div>` : ''}
+        <p class="placeholder-message">No comparison data available for the selected baseline run.</p></section>`;
+    }
+
+    const groups = new Map<string, BaselineComparisonRow[]>();
+    for (const r of data.rows) {
+      const arr = groups.get(r.group) ?? [];
+      arr.push(r);
+      groups.set(r.group, arr);
+    }
+
+    const metricHeaders = metrics.map(k =>
+      `<th colspan="3" style="text-align:center;">${k.toUpperCase()}</th>`).join('');
+    const subHeaders = metrics.map(() =>
+      `<th>Current</th><th>Baseline</th><th>Diff %</th>`).join('');
+
+    const groupHtml = Array.from(groups.entries()).map(([group, rows]) => {
+      const body = rows.map(row => {
+        const cells = row.metrics.map(m => {
+          const color = bandColor(m.diffPercent, thresholds);
+          const diff = m.diffPercent == null ? '—' : `${m.diffPercent >= 0 ? '+' : ''}${m.diffPercent.toFixed(1)}%`;
+          return `<td style="text-align:right;">${m.current ?? '—'}</td>
+                  <td style="text-align:right;">${m.baseline ?? '—'}</td>
+                  <td style="text-align:right; color:${color}; font-weight:600;">${diff}</td>`;
+        }).join('');
+        return `<tr><td>${this.utils.escapeHtml(row.label)}</td>${cells}</tr>`;
+      }).join('');
+      return `<h3>${this.utils.escapeHtml(group)}</h3>
+        <table style="width:100%; border-collapse:collapse;">
+          <thead><tr><th rowspan="2">Transaction / Metric</th>${metricHeaders}</tr><tr>${subHeaders}</tr></thead>
+          <tbody>${body}</tbody></table>`;
+    }).join('\n');
+
+    return `<section class="comparisons-section"><h2>${this.utils.escapeHtml(title)}</h2>
+      ${comment ? `<div class="section-comment">${this.utils.escapeHtml(comment)}</div>` : ''}
+      ${groupHtml}</section>`;
   }
 
   private renderSummaryBadges(data: ComparisonsData): string {

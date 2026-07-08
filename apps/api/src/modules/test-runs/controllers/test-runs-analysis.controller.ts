@@ -22,11 +22,11 @@ export class TestRunsAnalysisController {
   @Get('baseline-candidates')
   @ApiOperation({
     summary: 'Get baseline candidate test runs for comparison',
-    description: 'Retrieves test runs suitable for baseline comparison with the same system/environment/workload. Useful for Pyroscope profiling comparisons.'
+    description: 'Retrieves completed test runs for the same system-under-test. Optionally narrow by environment and/or workload. Useful for Pyroscope profiling comparisons and baseline-run section comparisons.'
   })
   @ApiQuery({ name: 'systemUnderTestId', required: true, type: String, description: 'System under test UUID' })
-  @ApiQuery({ name: 'testEnvironment', required: true, type: String, description: 'Test environment name' })
-  @ApiQuery({ name: 'workload', required: true, type: String, description: 'Workload name' })
+  @ApiQuery({ name: 'testEnvironment', required: false, type: String, description: 'Test environment name (omit to include all environments)' })
+  @ApiQuery({ name: 'workload', required: false, type: String, description: 'Workload name (omit to include all workloads)' })
   @ApiQuery({ name: 'excludeTestRunId', required: false, type: String, description: 'Test run ID to exclude from results (typically the current test run)' })
   @ApiQuery({ name: 'limit', required: false, type: Number, description: 'Maximum number of results (default: 50, max: 100)' })
   @ApiResponse({
@@ -53,21 +53,16 @@ export class TestRunsAnalysisController {
   @ApiResponse({ status: 400, description: 'Missing required query parameters' })
   async getBaselineCandidates(
     @Query('systemUnderTestId') systemUnderTestId: string,
-    @Query('testEnvironment') testEnvironment: string,
-    @Query('workload') workload: string,
     @UserCtx() ctx: UserContext,
+    @Query('testEnvironment') testEnvironment?: string,
+    @Query('workload') workload?: string,
     @Query('excludeTestRunId') excludeTestRunId?: string,
     @Query('limit') limit?: number,
   ) {
-    this.logger.debug('Getting baseline candidates', { systemUnderTestId, testEnvironment, workload });
-
-    if (!systemUnderTestId || !testEnvironment || !workload) {
-      throw new ValidationException('systemUnderTestId, testEnvironment, and workload are required');
+    if (!systemUnderTestId) {
+      throw new ValidationException('systemUnderTestId is required');
     }
-
-    // Limit the maximum number of results to prevent excessive data transfer
     const safeLimit = limit ? Math.min(Math.max(1, limit), 100) : 50;
-
     return this.testRunsService.getBaselineCandidates(
       systemUnderTestId,
       testEnvironment,

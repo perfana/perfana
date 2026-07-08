@@ -5,6 +5,8 @@ import { TestRun } from '@perfana/shared';
 import { withRequestEm } from '../../../common/db/request-em';
 import { AuthorizationService } from '../../../common/services/authorization.service';
 import { withOrgFilter } from '../../../common/utils/with-org-filter';
+import { TestRunsService } from '../../test-runs/test-runs.service';
+import { percentDiff } from '../renderers/comparison-bands';
 
 /** SLO check result summary for header renderer */
 export interface SloSummary {
@@ -194,6 +196,24 @@ export interface ComparisonsData {
   totalMetrics: number;
 }
 
+/** A single row in a baseline comparison result */
+export interface BaselineComparisonRow {
+  group: string;    // scenario_name (perf) | dashboard/panel (grafana) | host (dynatrace)
+  label: string;    // transaction_name | metric_name
+  metrics: {        // one entry per selected metric key
+    key: 'avg' | 'p95' | 'p99';
+    current: number | null;
+    baseline: number | null;
+    diffPercent: number | null;
+  }[];
+}
+
+/** Full baseline comparison data returned by getBaselineRunComparison */
+export interface BaselineComparisonData {
+  source: 'performance-metrics' | 'grafana' | 'dynatrace';
+  rows: BaselineComparisonRow[];
+}
+
 /** Per-metric regression/improvement detail for report rendering (regressions section) */
 export interface RegressionsMetric {
   dashboardLabel: string;
@@ -337,6 +357,7 @@ export class ReportDataFetcherService {
     private readonly testRunRepo: Repository<TestRun>,
     private readonly authzService: AuthorizationService,
     private readonly dataSource: DataSource,
+    private readonly testRunsService: TestRunsService,
   ) {}
 
   /**
@@ -1917,6 +1938,150 @@ export class ReportDataFetcherService {
       this.logger.error('Failed to fetch metrics time series:', error);
       return [];
     }
+  }
+
+  /**
+   * Compare a current test run against a baseline run for the given source.
+   * Returns paired rows with per-metric diff percentages.
+   *
+   * Performance-metrics branch: pairs transactions by scenario_name||transaction_name
+   * and computes percentDiff for each requested metric key (avg/p95/p99).
+   *
+   * Grafana branch: pairs ds_metric_statistics rows by dashboard_label/panel_title/metric_name.
+   *
+   * Dynatrace branch: same as grafana, with optional hostMap substitution to remap
+   * current host tokens to their baseline counterparts before the pairing lookup.
+   */
+  async getBaselineRunComparison(
+    currentRunId: string,
+    baselineRunId: string,
+    source: 'performance-metrics' | 'grafana' | 'dynatrace',
+    opts: { metrics: ('avg' | 'p95' | 'p99')[]; userId: string; roles: string[]; hostMap?: { current: string; baseline: string }[] },
+  ): Promise<BaselineComparisonData | null> {
+    if (source === 'performance-metrics') {
+      const [cur, base] = await Promise.all([
+        this.testRunsService.getTransactionStats(currentRunId, opts.userId, opts.roles, true),
+        this.testRunsService.getTransactionStats(baselineRunId, opts.userId, opts.roles, true),
+      ]);
+      if (!Array.isArray(cur) || !Array.isArray(base)) return null;
+      const key = (r: { scenario_name?: string; transaction_name: string }) =>
+        `${r.scenario_name ?? ''}||${r.transaction_name}`;
+      const baseMap = new Map(base.map((r) => [key(r), r]));
+      const num = (v: unknown) => (v == null ? null : Number(v));
+      const fieldByKey = {
+        avg: 'avg_response_time',
+        p95: 'p95_response_time',
+        p99: 'p99_response_time',
+      } as const;
+      const rows: BaselineComparisonRow[] = cur.map((c) => {
+        const b = baseMap.get(key(c));
+        return {
+          group: c.scenario_name ?? 'default',
+          label: c.transaction_name,
+          metrics: opts.metrics.map((k) => {
+            const cv = num((c as Record<string, unknown>)[fieldByKey[k]]);
+            const bv = b != null ? num((b as Record<string, unknown>)[fieldByKey[k]]) : null;
+            return { key: k, current: cv, baseline: bv, diffPercent: percentDiff(cv, bv) };
+          }),
+        };
+      });
+      return { source, rows };
+    }
+    // grafana / dynatrace: source is narrowed to 'grafana' | 'dynatrace' here
+    return this.getBaselineRunComparisonFromStatistics(currentRunId, baselineRunId, source as 'grafana' | 'dynatrace', opts);
+  }
+
+  /**
+   * Fetch ds_metric_statistics rows for both runs and pair them by series identity.
+   * Grafana: groups by `dashboard_label / panel_title`.
+   * Dynatrace: groups by the host token extracted from the series identity;
+   *   when a hostMap is provided the current host token is substituted for the
+   *   mapped baseline token before the lookup so cross-host pairing works.
+   */
+  private async getBaselineRunComparisonFromStatistics(
+    currentRunId: string,
+    baselineRunId: string,
+    source: 'grafana' | 'dynatrace',
+    opts: { metrics: ('avg' | 'p95' | 'p99')[]; hostMap?: { current: string; baseline: string }[] },
+  ): Promise<BaselineComparisonData | null> {
+    const sourceType = source === 'grafana' ? 'grafana' : 'dynatrace';
+    const rows: Array<{
+      test_run_id: string;
+      dashboard_label: string | null;
+      panel_title: string | null;
+      metric_name: string | null;
+      unit: string | null;
+      mean: number | null;
+      q95: number | null;
+      q99: number | null;
+    }> = await this.dataSource.query(
+      `SELECT s.test_run_id, s.dashboard_label, s.panel_title, s.metric_name, s.unit, s.mean, s.q95, s.q99
+       FROM ds_metric_statistics s
+       LEFT JOIN metrics_sources ms ON ms.id = s.metrics_source_id
+       WHERE s.test_run_id = ANY($1) AND (s.metrics_source_id IS NULL OR ms.type = $2)`,
+      [[currentRunId, baselineRunId], sourceType],
+    );
+    if (rows.length === 0) return null;
+
+    const identity = (r: typeof rows[number]) =>
+      `${r.dashboard_label}||${r.panel_title}||${r.metric_name}`;
+
+    const cur = rows.filter((r) => r.test_run_id === currentRunId);
+    const baseByIdentity = new Map(
+      rows.filter((r) => r.test_run_id === baselineRunId).map((r) => [identity(r), r]),
+    );
+
+    // Dynatrace: build a remapped identity that swaps the current host token for
+    // the mapped baseline token before the lookup. Only remap the metric_name segment.
+    const remapIdentity = (r: typeof rows[number]) => {
+      if (source !== 'dynatrace' || !opts.hostMap?.length) return identity(r);
+      const parts = `${r.dashboard_label ?? ''}||${r.panel_title ?? ''}||${r.metric_name ?? ''}`.split('||');
+      let metricName = parts[2];
+      if (metricName) {
+        for (const { current, baseline } of opts.hostMap) {
+          if (metricName.includes(current)) {
+            metricName = metricName.split(current).join(baseline);
+            break;
+          }
+        }
+      }
+      return `${parts[0]}||${parts[1]}||${metricName}`;
+    };
+
+    const fieldByKey = { avg: 'mean', p95: 'q95', p99: 'q99' } as const;
+
+    const rowsOut: BaselineComparisonRow[] = cur.map((c) => {
+      const b = baseByIdentity.get(remapIdentity(c));
+      const host =
+        source === 'dynatrace'
+          ? (opts.hostMap?.find((h) => (c.metric_name ?? '').includes(h.current))?.current ??
+              this.extractHost(c.metric_name))
+          : null;
+      return {
+        group:
+          source === 'dynatrace'
+            ? (host ?? 'Hosts')
+            : `${c.dashboard_label ?? 'Other'} / ${c.panel_title ?? ''}`.trim(),
+        label: c.metric_name ?? '',
+        metrics: opts.metrics.map((k) => {
+          const cv = c[fieldByKey[k]];
+          const bv = b ? b[fieldByKey[k]] : null;
+          return { key: k, current: cv, baseline: bv, diffPercent: percentDiff(cv, bv) };
+        }),
+      };
+    });
+
+    return { source, rows: rowsOut };
+  }
+
+  /**
+   * ponytail: naive host extractor — last dotted segment of the metric name.
+   * Replace if Dynatrace series encode the host elsewhere (confirm during impl — see plan note).
+   */
+  private extractHost(metricName: string | null): string | null {
+    if (!metricName) return null;
+    const parts = metricName.split('.');
+    return parts.length > 1 ? parts[parts.length - 1]! : metricName;
   }
 
   /**
