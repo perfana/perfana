@@ -231,4 +231,21 @@ describe('ComparisonsRenderer', () => {
       { testRunId: 'cur' } as any);
     expect(html).toContain('No comparison data available for the selected baseline run');
   });
+
+  it('seam: forwards userId and roles into getBaselineRunComparison opts (regression guard)', async () => {
+    const spy = jest.spyOn(dataFetcher, 'getBaselineRunComparison').mockResolvedValue(null);
+    await renderer.renderComparisonsSection(
+      { type: 'comparisons', order: 0, config: {
+        comparisonMode: 'baseline_run', baselineTestRunId: 'base-99', source: 'performance-metrics',
+        metrics: ['avg', 'p95'], thresholds: { good: 5, warning: 20 },
+      } } as any,
+      { testRunId: 'cur-42' } as any,
+      'user-1',
+      ['user'],
+    );
+    expect(spy).toHaveBeenCalledTimes(1);
+    const optsArg = spy.mock.calls[0]![3];
+    expect(optsArg.userId).toBe('user-1');
+    expect(optsArg.roles).toEqual(['user']);
+  });
 });

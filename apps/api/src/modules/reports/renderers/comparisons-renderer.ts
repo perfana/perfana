@@ -26,10 +26,12 @@ export class ComparisonsRenderer {
   async renderComparisonsSection(
     section: ReportSectionConfig,
     testRun: TestRun | null,
+    userId: string = '',
+    roles: string[] = [],
   ): Promise<string> {
     const config = section.config || {};
     if (config.comparisonMode === 'baseline_run') {
-      return this.renderBaselineRun(section, testRun);
+      return this.renderBaselineRun(section, testRun, userId, roles);
     }
     const baselineTestRunId = typeof config.baselineTestRunId === 'string' ? config.baselineTestRunId : undefined;
     const title = section.title || 'Comparisons';
@@ -78,7 +80,12 @@ export class ComparisonsRenderer {
     `;
   }
 
-  private async renderBaselineRun(section: ReportSectionConfig, testRun: TestRun | null): Promise<string> {
+  private async renderBaselineRun(
+    section: ReportSectionConfig,
+    testRun: TestRun | null,
+    userId: string,
+    roles: string[],
+  ): Promise<string> {
     const config = section.config || {};
     const title = section.title || 'Comparisons';
     const comment = section.comment;
@@ -86,10 +93,13 @@ export class ComparisonsRenderer {
     const metrics = (Array.isArray(config.metrics) && config.metrics.length ? config.metrics : ['avg', 'p95', 'p99']) as ('avg' | 'p95' | 'p99')[];
     const thresholds = (config.thresholds as { good: number; warning: number }) || { good: 10, warning: 50 };
     const baselineId = typeof config.baselineTestRunId === 'string' ? config.baselineTestRunId : undefined;
+    const hostMap = Array.isArray(config.hostMap)
+      ? (config.hostMap as { current: string; baseline: string }[])
+      : undefined;
 
     const data = testRun && baselineId
       ? await this.dataFetcher.getBaselineRunComparison(testRun.testRunId, baselineId, source,
-          { metrics, userId: '', roles: [], hostMap: config.hostMap as any })
+          { metrics, userId, roles, hostMap })
       : null;
 
     if (!data || data.rows.length === 0) {

@@ -1945,9 +1945,12 @@ export class ReportDataFetcherService {
    * Returns paired rows with per-metric diff percentages.
    *
    * Performance-metrics branch: pairs transactions by scenario_name||transaction_name
-   * and computes percentDiff for each requested metric key.
+   * and computes percentDiff for each requested metric key (avg/p95/p99).
    *
-   * Grafana / Dynatrace branches: delegated to Task 4 stub until implemented.
+   * Grafana branch: pairs ds_metric_statistics rows by dashboard_label/panel_title/metric_name.
+   *
+   * Dynatrace branch: same as grafana, with optional hostMap substitution to remap
+   * current host tokens to their baseline counterparts before the pairing lookup.
    */
   async getBaselineRunComparison(
     currentRunId: string,
