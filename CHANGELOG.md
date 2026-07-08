@@ -4,6 +4,11 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
+## [0.2.61.37] - 2026-07-08
+
+### Added
+- **Report `Comparisons` section gains a `baseline_run` mode: diff the current run against a chosen baseline run across three sources.** The existing section only did ADAPT control-group comparisons and ignored its `baselineTestRunId`. A new mode toggle keeps that path byte-for-byte unchanged (absent `comparisonMode` ⇒ `control_group`, so saved templates are unaffected) and adds a run-vs-run mode. The author picks a baseline test run (dropdown lists the same system-under-test across all environments/workloads — fits "same test, different app version" and "same version, different environment/server"), a source (`performance-metrics` / `grafana` / `dynatrace`), and which metrics to show (avg / p95 / p99). Results render as tables grouped by scenario (performance-metrics, from transaction stats), dashboard→panel (grafana, from `ds_metric_statistics`), or host (dynatrace), with each diff cell colored by configurable percentage bands (good / warning / critical, shared across sources). Response-time metrics are treated as higher-is-worse, so a faster-than-baseline result is always green regardless of band. For dynatrace, a host-mapping editor pairs current→baseline hosts so the same app on a different server compares correctly. The baseline-candidates endpoint was widened to accept optional environment/workload (same-SUT scope) without changing existing callers.
+
 ## [0.2.61.36] - 2026-07-08
 
 ### Fixed
