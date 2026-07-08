@@ -4,6 +4,11 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
+## [0.2.61.35] - 2026-07-08
+
+### Fixed
+- **Anomaly-detection Trend chart hover tooltips no longer misalign.** The v0.2.61.34 fix cured the standalone Trends card but not the anomaly-detection Trend chart (`AnomalyExpandedContent`), which was still separating box from text. That chart already had `useResizeHandler={true}` and still broke, disproving the earlier "add useResizeHandler" theory: react-plotly.js 2.6.0's `useResizeHandler` only attaches a **window** resize listener (`create-plotly-component.js`, `window.addEventListener('resize', ...)`), not a container `ResizeObserver`. A MUI `<Collapse>` expanding resizes the container but not the window, so Plotly draws once mid-animation at partial height and never re-measures. The real fix: dispatch a `window` resize event from the Collapse's `onEntered` callback so the existing `useResizeHandler` relayouts once the animation settles. Applied to both `AnomalyExpandedContent.tsx` (the reported chart) and `trends/TrendsCard.tsx` (same latent gap — the v0.2.61.34 `useResizeHandler` there was also insufficient on its own).
+
 ## [0.2.61.34] - 2026-07-08
 
 ### Fixed
