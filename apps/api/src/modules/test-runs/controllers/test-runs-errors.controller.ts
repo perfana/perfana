@@ -73,6 +73,7 @@ export class TestRunsErrorsController {
   })
   @ApiParam({ name: 'testRunId', description: 'Test run ID', type: String })
   @ApiQuery({ name: 'scenarios', required: false, description: 'Comma-separated scenario names to filter by. Use __NO_SCENARIO__ to include rows with no scenario.', type: String })
+  @ApiQuery({ name: 'excludeRampUp', required: false, description: 'Restrict to the configured analysis timerange (exclude ramp-up/ramp-down).', type: Boolean })
   @ApiResponse({
     status: 200,
     description: 'Error summary retrieved successfully',
@@ -92,9 +93,10 @@ export class TestRunsErrorsController {
     @Param('testRunId') testRunId: string,
     @UserCtx() ctx: UserContext,
     @Query('scenarios') scenarios?: string,
+    @Query('excludeRampUp') excludeRampUp?: string,
   ) {
     await this.testRunsService.verifyTestRunAccess(testRunId, ctx.userId, ctx.roles);
-    return this.errorAnalysisService.getErrorSummary(testRunId, parseScenarios(scenarios));
+    return this.errorAnalysisService.getErrorSummary(testRunId, parseScenarios(scenarios), excludeRampUp === 'true');
   }
 
   @Get(':testRunId/error-analysis/by-code')
@@ -104,6 +106,7 @@ export class TestRunsErrorsController {
   })
   @ApiParam({ name: 'testRunId', description: 'Test run ID', type: String })
   @ApiQuery({ name: 'scenarios', required: false, description: 'Comma-separated scenario names to filter by. Use __NO_SCENARIO__ to include rows with no scenario.', type: String })
+  @ApiQuery({ name: 'excludeRampUp', required: false, description: 'Restrict to the configured analysis timerange (exclude ramp-up/ramp-down).', type: Boolean })
   @ApiResponse({
     status: 200,
     description: 'Errors by code retrieved successfully',
@@ -125,9 +128,10 @@ export class TestRunsErrorsController {
     @Param('testRunId') testRunId: string,
     @UserCtx() ctx: UserContext,
     @Query('scenarios') scenarios?: string,
+    @Query('excludeRampUp') excludeRampUp?: string,
   ) {
     await this.testRunsService.verifyTestRunAccess(testRunId, ctx.userId, ctx.roles);
-    return this.errorAnalysisService.getErrorsByCode(testRunId, parseScenarios(scenarios));
+    return this.errorAnalysisService.getErrorsByCode(testRunId, parseScenarios(scenarios), excludeRampUp === 'true');
   }
 
   @Get(':testRunId/error-analysis/by-transaction')
@@ -137,6 +141,7 @@ export class TestRunsErrorsController {
   })
   @ApiParam({ name: 'testRunId', description: 'Test run ID', type: String })
   @ApiQuery({ name: 'scenarios', required: false, description: 'Comma-separated scenario names to filter by. Use __NO_SCENARIO__ to include rows with no scenario.', type: String })
+  @ApiQuery({ name: 'excludeRampUp', required: false, description: 'Restrict to the configured analysis timerange (exclude ramp-up/ramp-down).', type: Boolean })
   @ApiResponse({
     status: 200,
     description: 'Errors by transaction retrieved successfully',
@@ -159,9 +164,10 @@ export class TestRunsErrorsController {
     @Param('testRunId') testRunId: string,
     @UserCtx() ctx: UserContext,
     @Query('scenarios') scenarios?: string,
+    @Query('excludeRampUp') excludeRampUp?: string,
   ) {
     await this.testRunsService.verifyTestRunAccess(testRunId, ctx.userId, ctx.roles);
-    return this.errorAnalysisService.getErrorsByTransaction(testRunId, parseScenarios(scenarios));
+    return this.errorAnalysisService.getErrorsByTransaction(testRunId, parseScenarios(scenarios), excludeRampUp === 'true');
   }
 
   @Get(':testRunId/error-analysis/over-time')
@@ -171,6 +177,7 @@ export class TestRunsErrorsController {
   })
   @ApiParam({ name: 'testRunId', description: 'Test run ID', type: String })
   @ApiQuery({ name: 'scenarios', required: false, description: 'Comma-separated scenario names to filter by. Use __NO_SCENARIO__ to include rows with no scenario.', type: String })
+  @ApiQuery({ name: 'excludeRampUp', required: false, description: 'Restrict to the configured analysis timerange (exclude ramp-up/ramp-down).', type: Boolean })
   @ApiResponse({
     status: 200,
     description: 'Errors over time retrieved successfully',
@@ -189,9 +196,10 @@ export class TestRunsErrorsController {
     @Param('testRunId') testRunId: string,
     @UserCtx() ctx: UserContext,
     @Query('scenarios') scenarios?: string,
+    @Query('excludeRampUp') excludeRampUp?: string,
   ) {
     await this.testRunsService.verifyTestRunAccess(testRunId, ctx.userId, ctx.roles);
-    return this.errorAnalysisService.getErrorsOverTime(testRunId, parseScenarios(scenarios));
+    return this.errorAnalysisService.getErrorsOverTime(testRunId, parseScenarios(scenarios), excludeRampUp === 'true');
   }
 
   @Get(':testRunId/error-analysis/over-time-by-code')
@@ -201,6 +209,7 @@ export class TestRunsErrorsController {
   })
   @ApiParam({ name: 'testRunId', description: 'Test run ID', type: String })
   @ApiQuery({ name: 'scenarios', required: false, description: 'Comma-separated scenario names to filter by. Use __NO_SCENARIO__ to include rows with no scenario.', type: String })
+  @ApiQuery({ name: 'excludeRampUp', required: false, description: 'Restrict to the configured analysis timerange (exclude ramp-up/ramp-down).', type: Boolean })
   @ApiResponse({
     status: 200,
     description: 'Errors over time by code retrieved successfully',
@@ -221,9 +230,10 @@ export class TestRunsErrorsController {
     @Param('testRunId') testRunId: string,
     @UserCtx() ctx: UserContext,
     @Query('scenarios') scenarios?: string,
+    @Query('excludeRampUp') excludeRampUp?: string,
   ) {
     await this.testRunsService.verifyTestRunAccess(testRunId, ctx.userId, ctx.roles);
-    return this.errorAnalysisService.getErrorsOverTimeByCode(testRunId, parseScenarios(scenarios));
+    return this.errorAnalysisService.getErrorsOverTimeByCode(testRunId, parseScenarios(scenarios), excludeRampUp === 'true');
   }
 
   @Get(':testRunId/error-analysis/details')

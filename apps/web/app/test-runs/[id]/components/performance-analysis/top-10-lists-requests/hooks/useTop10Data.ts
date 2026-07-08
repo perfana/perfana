@@ -23,6 +23,7 @@ import React from 'react';
 export interface UseTop10DataProps {
   testRunId: string;
   selectedScenarios?: string[];
+  excludeRampUp?: boolean;
 }
 
 export interface UseTop10DataReturn {
@@ -51,7 +52,7 @@ export interface UseTop10DataReturn {
   handleCloseActionMenu: () => void;
 }
 
-export function useTop10Data({ testRunId, selectedScenarios = [] }: UseTop10DataProps): UseTop10DataReturn {
+export function useTop10Data({ testRunId, selectedScenarios = [], excludeRampUp = false }: UseTop10DataProps): UseTop10DataReturn {
   // Loading and error states
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -88,7 +89,7 @@ export function useTop10Data({ testRunId, selectedScenarios = [] }: UseTop10Data
 
       // Fetch all transactions
       const transactionsResponse = await authenticatedFetch(
-        `/test-runs/${testRunId}/transactions`
+        `/test-runs/${testRunId}/transactions?excludeRampUp=${excludeRampUp}`
       );
       if (!transactionsResponse.ok) {
         throw new Error('Failed to fetch transactions');
@@ -101,7 +102,7 @@ export function useTop10Data({ testRunId, selectedScenarios = [] }: UseTop10Data
       for (const transaction of transactionsData) {
         try {
           const samplesResponse = await authenticatedFetch(
-            `/test-runs/${testRunId}/transactions/${encodeURIComponent(transaction.transaction_name)}/samples`
+            `/test-runs/${testRunId}/transactions/${encodeURIComponent(transaction.transaction_name)}/samples?excludeRampUp=${excludeRampUp}`
           );
           if (samplesResponse.ok) {
             const samplesData: SamplerStat[] = await samplesResponse.json();
@@ -129,7 +130,7 @@ export function useTop10Data({ testRunId, selectedScenarios = [] }: UseTop10Data
     } finally {
       setLoading(false);
     }
-  }, [testRunId]);
+  }, [testRunId, excludeRampUp]);
 
   // Initial fetch
   useEffect(() => {

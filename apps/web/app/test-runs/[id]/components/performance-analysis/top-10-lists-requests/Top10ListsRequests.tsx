@@ -14,6 +14,7 @@ import type { Top10ListsRequestsProps } from './types';
 export default function Top10ListsRequests({
   testRunId,
   selectedScenarios = [],
+  excludeRampUp = false,
   hasDistributedTracing = false,
   hasDynatrace = false,
   onDrillDownToDistributedTracing,
@@ -33,7 +34,7 @@ export default function Top10ListsRequests({
     actionMenuData,
     handleOpenActionMenu,
     handleCloseActionMenu,
-  } = useTop10Data({ testRunId, selectedScenarios });
+  } = useTop10Data({ testRunId, selectedScenarios, excludeRampUp });
 
   const hasDrillDownOptions = hasDistributedTracing || hasDynatrace;
 

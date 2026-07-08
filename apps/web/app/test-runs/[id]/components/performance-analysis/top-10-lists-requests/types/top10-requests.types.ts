@@ -33,6 +33,7 @@ export interface Top10Dimension {
 export interface Top10ListsRequestsProps {
   testRunId: string;
   selectedScenarios?: string[];
+  excludeRampUp?: boolean;
   hasDistributedTracing?: boolean;
   hasDynatrace?: boolean;
   onDrillDownToDistributedTracing?: (filters: DrillDownFilters) => void;
