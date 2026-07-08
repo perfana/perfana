@@ -76,6 +76,7 @@ export function TrendsChart({
           data={plotData}
           layout={plotLayout}
           config={plotConfig}
+          useResizeHandler={true}
           style={{ width: '100%', height: '400px' }}
         />
       </Box>

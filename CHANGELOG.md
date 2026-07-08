@@ -4,6 +4,11 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
+## [0.2.61.34] - 2026-07-08
+
+### Fixed
+- **Trends card hover tooltips no longer misalign.** The v0.2.61.33 font fix did not resolve the Trends graph — the box and text still separated there, because the cause on that chart was different. The Trends `<Plot>` renders inside a MUI `<Collapse>` and, unlike the working `CurrentTestRunChart`, was missing `useResizeHandler`. So Plotly did its one and only draw (measuring hover-label text geometry) while the Collapse was still animating open — container at partial height — and never re-measured once it settled, leaving the hover box sized and placed against stale geometry. Adding `useResizeHandler={true}` (matching the sibling chart) attaches react-plotly.js's ResizeObserver, which relayouts after the Collapse finishes and re-measures hover geometry against the final size.
+
 ## [0.2.61.33] - 2026-07-08
 
 ### Fixed
