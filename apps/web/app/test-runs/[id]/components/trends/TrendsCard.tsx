@@ -262,7 +262,10 @@ export default function TrendsCard({
           )}
 
           {/* Expanded Content */}
-          <Collapse in={trendsExpanded}>
+          {/* Kick a window resize once the Collapse settles: the Plotly chart inside
+              measures its geometry mid-animation and useResizeHandler only listens to
+              window resize, so without this the hover tooltip stays misaligned. */}
+          <Collapse in={trendsExpanded} onEntered={() => window.dispatchEvent(new Event('resize'))}>
             <Divider sx={{ my: 2 }} />
 
             {/* Saved Presets Section */}

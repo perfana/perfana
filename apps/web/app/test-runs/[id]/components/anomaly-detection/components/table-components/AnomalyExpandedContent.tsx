@@ -108,7 +108,17 @@ export function AnomalyExpandedContent({
   };
 
   return (
-    <Collapse in={isExpanded} timeout="auto" unmountOnExit>
+    <Collapse
+      in={isExpanded}
+      timeout="auto"
+      unmountOnExit
+      // Plotly draws once when it mounts. Inside a Collapse it mounts mid-animation
+      // at partial height and never re-measures (useResizeHandler only listens to
+      // window resize, not container resize), so hover-label geometry stays stale
+      // and the tooltip box detaches from its text. Kick a window resize when the
+      // Collapse settles so the existing useResizeHandler relayouts at full height.
+      onEntered={() => window.dispatchEvent(new Event('resize'))}
+    >
       <Box sx={{
         backgroundColor: alpha(theme.palette.primary.main, 0.02),
         border: `1px solid ${alpha(theme.palette.primary.main, 0.12)}`,
