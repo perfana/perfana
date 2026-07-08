@@ -1,6 +1,7 @@
 import { SeriesConfig, MetricDataPoint } from '../types';
 import { AxisAssignment, UnitConversion, ChartThemeColors, PlotTrace } from '../types/chart.types';
 import { TestRun } from '@/types/test-runs';
+import { PLOTLY_HOVER_FONT_FAMILY } from '@/lib/plotly-fonts';
 
 /**
  * Extended color palette for automatic series color assignment
@@ -425,7 +426,7 @@ export function buildChartLayout(
       font: {
         color: themeColors.textColor,
         size: 12,
-        family: themeColors.fontFamily
+        family: PLOTLY_HOVER_FONT_FAMILY
       },
       align: 'left',
     },

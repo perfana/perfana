@@ -8,6 +8,7 @@ import type {
   UnitConversion,
   ChartThemeColors,
 } from '../types';
+import { PLOTLY_HOVER_FONT_FAMILY } from '@/lib/plotly-fonts';
 
 // Default chart height
 export const DEFAULT_CHART_HEIGHT = 320;
@@ -427,7 +428,7 @@ export function buildChartLayout(
       font: {
         color: colors.textColor,
         size: 12,
-        family: fontFamily,
+        family: PLOTLY_HOVER_FONT_FAMILY,
       },
       align: 'left' as const,
     },

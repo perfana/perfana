@@ -4,6 +4,7 @@ import { useState, useEffect} from 'react';
 import { useTheme } from '@mui/material';
 import { MetricStatistic, TrendsSeries, Panel } from '../types';
 import { getYAxisConfig } from '../utils';
+import { PLOTLY_HOVER_FONT_FAMILY } from '@/lib/plotly-fonts';
 
 interface UseTrendsPlotProps {
   metricsData: MetricStatistic[];
@@ -240,7 +241,7 @@ export function useTrendsPlot({
         font: {
           color: textColor,
           size: 12,
-          family: theme.typography.fontFamily
+          family: PLOTLY_HOVER_FONT_FAMILY
         },
         align: 'left' as const,
       },

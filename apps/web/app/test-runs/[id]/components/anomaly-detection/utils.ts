@@ -1,5 +1,6 @@
 import { formatValueWithUnit } from '@/lib/units';
 import { MetricTrendData, ConfigSourceInfo } from './types';
+import { PLOTLY_HOVER_FONT_FAMILY } from '@/lib/plotly-fonts';
 
 // Data formatting functions
 export const formatNumber = (value: unknown): string => {
@@ -491,7 +492,7 @@ export const createTrendsPlot = (
       font: {
         color: textColor,
         size: 11,
-        family: theme?.typography?.fontFamily || 'Arial'
+        family: PLOTLY_HOVER_FONT_FAMILY
       },
       align: 'left' as const,
     },

@@ -4,6 +4,11 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
+## [0.2.61.33] - 2026-07-08
+
+### Fixed
+- **Plotly chart hover tooltips no longer misalign on Windows Chrome.** Hover labels rendered the box and text separately: the tooltip text landed at the top-left of the chart (overlapping the title) while an empty white box drew near the data point. Cause was the theme's `"Inter"` web font in `hoverlabel.font.family` — Inter isn't a system font on Windows, so it loads async; Plotly sizes the hover box by measuring the rendered text, measures it against the fallback glyphs, then the text reflows to Inter once it loads, and box and text separate. All 10 hover labels across 8 chart builders (ADAPT Trend, trends, compare, SLO, graphs) now use a pure system-font stack via the shared `lib/plotly-fonts.ts` constant. Axis/title fonts keep Inter deliberately — they render once after load and never race. The two performance-analysis modals (inherit Plotly's default font) and `event-lines.ts` (uses `Roboto, sans-serif`, substitutes immediately) were already unaffected.
+
 ## [0.2.61.32] - 2026-07-08
 
 ### Added
