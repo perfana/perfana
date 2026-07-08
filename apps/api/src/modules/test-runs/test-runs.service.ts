@@ -275,7 +275,7 @@ export class TestRunsService {
     return this.queryService.getDashboardSystemsSummary(userId, roles, organizationId);
   }
 
-  async getBaselineCandidates(systemUnderTestId: string, testEnvironment: string, workload: string, userId: string, roles: string[], excludeTestRunId?: string, limit?: number): Promise<TestRun[]> {
+  async getBaselineCandidates(systemUnderTestId: string, testEnvironment: string | undefined, workload: string | undefined, userId: string, roles: string[], excludeTestRunId?: string, limit?: number): Promise<TestRun[]> {
     return this.queryService.getBaselineCandidates(systemUnderTestId, testEnvironment, workload, userId, roles, excludeTestRunId, limit);
   }
 

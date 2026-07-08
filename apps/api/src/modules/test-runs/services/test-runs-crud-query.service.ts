@@ -1068,8 +1068,8 @@ export class TestRunsCrudQueryService {
    */
   async getBaselineCandidates(
     systemUnderTestId: string,
-    testEnvironment: string,
-    workload: string,
+    testEnvironment?: string,
+    workload?: string,
     excludeTestRunId?: string,
     limit: number = 50
   ): Promise<TestRun[]> {
@@ -1082,10 +1082,14 @@ export class TestRunsCrudQueryService {
         .createQueryBuilder('tr')
         .leftJoinAndSelect('tr.systemUnderTest', 'sut')
         .where('tr.systemUnderTestId = :systemUnderTestId', { systemUnderTestId })
-        .andWhere('tr.testEnvironment = :testEnvironment', { testEnvironment })
-        .andWhere('tr.workload = :workload', { workload })
         .andWhere('tr.completed = :completed', { completed: true });
 
+      if (testEnvironment) {
+        queryBuilder.andWhere('tr.testEnvironment = :testEnvironment', { testEnvironment });
+      }
+      if (workload) {
+        queryBuilder.andWhere('tr.workload = :workload', { workload });
+      }
       if (excludeTestRunId) {
         queryBuilder.andWhere('tr.testRunId != :excludeTestRunId', { excludeTestRunId });
       }
