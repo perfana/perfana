@@ -2015,7 +2015,7 @@ export class ReportDataFetcherService {
       `SELECT s.test_run_id, s.dashboard_label, s.panel_title, s.metric_name, s.unit, s.mean, s.q95, s.q99
        FROM ds_metric_statistics s
        LEFT JOIN metrics_sources ms ON ms.id = s.metrics_source_id
-       WHERE s.test_run_id = ANY($1) AND (ms.type = $2 OR ms.type IS NULL)`,
+       WHERE s.test_run_id = ANY($1) AND (s.metrics_source_id IS NULL OR ms.type = $2)`,
       [[currentRunId, baselineRunId], sourceType],
     );
     if (rows.length === 0) return null;
@@ -2029,17 +2029,20 @@ export class ReportDataFetcherService {
     );
 
     // Dynatrace: build a remapped identity that swaps the current host token for
-    // the mapped baseline token before the lookup.
+    // the mapped baseline token before the lookup. Only remap the metric_name segment.
     const remapIdentity = (r: typeof rows[number]) => {
       if (source !== 'dynatrace' || !opts.hostMap?.length) return identity(r);
-      let id = identity(r);
-      for (const { current, baseline } of opts.hostMap) {
-        if (id.includes(current)) {
-          id = id.split(current).join(baseline);
-          break;
+      const parts = `${r.dashboard_label ?? ''}||${r.panel_title ?? ''}||${r.metric_name ?? ''}`.split('||');
+      let metricName = parts[2];
+      if (metricName) {
+        for (const { current, baseline } of opts.hostMap) {
+          if (metricName.includes(current)) {
+            metricName = metricName.split(current).join(baseline);
+            break;
+          }
         }
       }
-      return id;
+      return `${parts[0]}||${parts[1]}||${metricName}`;
     };
 
     const fieldByKey = { avg: 'mean', p95: 'q95', p99: 'q99' } as const;
