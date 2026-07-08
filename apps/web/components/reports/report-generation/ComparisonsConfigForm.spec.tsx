@@ -27,3 +27,12 @@ it('hides baseline_run fields in control_group mode', () => {
   );
   expect(screen.queryByLabelText(/good/i)).not.toBeInTheDocument();
 });
+
+it('adds a host mapping row for dynatrace source', () => {
+  const onChange = jest.fn();
+  render(<ComparisonsConfigForm config={{ comparisonMode: 'baseline_run', source: 'dynatrace', hostMap: [] }} onChange={onChange} />);
+  fireEvent.click(screen.getByRole('button', { name: /add host mapping/i }));
+  expect(onChange).toHaveBeenCalledWith(expect.objectContaining({
+    hostMap: [{ current: '', baseline: '' }],
+  }));
+});

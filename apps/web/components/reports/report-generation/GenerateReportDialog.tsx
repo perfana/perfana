@@ -661,6 +661,7 @@ export function GenerateReportDialog({
                       onMoveUp={index > 0 ? () => handleReorder(index, index - 1) : undefined}
                       onMoveDown={index < sections.length - 1 ? () => handleReorder(index, index + 1) : undefined}
                       testRunId={testRunId}
+                      systemUnderTestId={scope.systemId}
                     />
                   ))}
 
@@ -806,9 +807,10 @@ interface LayoutSectionCardProps {
   onMoveUp?: () => void;
   onMoveDown?: () => void;
   testRunId?: string;
+  systemUnderTestId?: string;
 }
 
-function LayoutSectionCard({ id, section, index, onDelete, onConfigChange, onMoveUp: _onMoveUp, onMoveDown: _onMoveDown, testRunId }: LayoutSectionCardProps) {
+function LayoutSectionCard({ id, section, index, onDelete, onConfigChange, onMoveUp: _onMoveUp, onMoveDown: _onMoveDown, testRunId, systemUnderTestId }: LayoutSectionCardProps) {
   const config = SECTION_CONFIG[section.type];
   const [expanded, setExpanded] = useState(false);
 
@@ -856,7 +858,7 @@ function LayoutSectionCard({ id, section, index, onDelete, onConfigChange, onMov
       case 'trends':
         return <TrendsConfigForm config={sectionConfig} onChange={onConfigChange} />;
       case 'comparisons':
-        return <ComparisonsConfigForm config={sectionConfig} onChange={onConfigChange} />;
+        return <ComparisonsConfigForm config={sectionConfig} onChange={onConfigChange} testRunId={testRunId} systemUnderTestId={systemUnderTestId} />;
       default:
         return null;
     }

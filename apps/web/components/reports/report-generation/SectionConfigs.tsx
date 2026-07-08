@@ -7,8 +7,9 @@
  */
 
 import { useState, useEffect } from 'react';
-import { Box, TextField, Select, MenuItem, FormControlLabel, Switch, Typography, Button, Tooltip, FormControl, InputLabel, Checkbox } from '@mui/material';
+import { Box, TextField, Select, MenuItem, FormControlLabel, Switch, Typography, Button, Tooltip, FormControl, InputLabel, Checkbox, IconButton } from '@mui/material';
 import VisibilityIcon from '@mui/icons-material/Visibility';
+import DeleteIcon from '@mui/icons-material/Delete';
 import SectionPreviewModal from './SectionPreviewModal';
 import dynamic from 'next/dynamic';
 import { authenticatedFetch } from '@/lib/api';
@@ -821,8 +822,11 @@ export function ComparisonsConfigForm({ config, onChange, testRunId, systemUnder
     const params = new URLSearchParams({ systemUnderTestId });
     if (testRunId) params.set('excludeTestRunId', testRunId);
     authenticatedFetch(`/test-runs/baseline-candidates?${params.toString()}`)
-      .then((res) => res.json())
-      .then((data: BaselineCandidate[]) => setBaselineCandidates(data))
+      .then((res) => {
+        if (!res.ok) { setBaselineCandidates([]); return; }
+        return res.json();
+      })
+      .then((data: BaselineCandidate[] | undefined) => { if (data) setBaselineCandidates(data); })
       .catch(() => setBaselineCandidates([]));
   }, [comparisonMode, systemUnderTestId, testRunId]);
 
@@ -990,6 +994,23 @@ export function ComparisonsConfigForm({ config, onChange, testRunId, systemUnder
             }
             inputProps={{ min: 0, max: 100 }}
           />
+
+          {/* Dynatrace host-map editor */}
+          {config.source === 'dynatrace' && (
+            <Box sx={{ display: 'flex', flexDirection: 'column', gap: 1 }}>
+              <Typography variant="caption" color="text.secondary">Host mapping (current → baseline)</Typography>
+              {(config.hostMap ?? []).map((row, i) => (
+                <Box key={i} sx={{ display: 'flex', gap: 1 }}>
+                  <TextField size="small" label="Current host" value={row.current}
+                    onChange={(e) => { const hm=[...(config.hostMap??[])]; hm[i]={...hm[i]!, current:e.target.value}; onChange({ ...config, hostMap: hm }); }} />
+                  <TextField size="small" label="Baseline host" value={row.baseline}
+                    onChange={(e) => { const hm=[...(config.hostMap??[])]; hm[i]={...hm[i]!, baseline:e.target.value}; onChange({ ...config, hostMap: hm }); }} />
+                  <IconButton size="small" onClick={() => { const hm=[...(config.hostMap??[])]; hm.splice(i,1); onChange({ ...config, hostMap: hm }); }}><DeleteIcon fontSize="small" /></IconButton>
+                </Box>
+              ))}
+              <Button size="small" onClick={() => onChange({ ...config, hostMap: [...(config.hostMap ?? []), { current: '', baseline: '' }] })}>Add host mapping</Button>
+            </Box>
+          )}
         </>
       )}
     </Box>
