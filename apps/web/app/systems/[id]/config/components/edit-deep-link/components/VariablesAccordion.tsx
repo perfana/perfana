@@ -65,7 +65,7 @@ export function VariablesAccordion({
                   color: 'primary.contrastText',
                 },
               }}
-              title={variable.description}
+              title={variable.example ? `${variable.description} — e.g. ${variable.example}` : variable.description}
             />
           ))}
         </Box>

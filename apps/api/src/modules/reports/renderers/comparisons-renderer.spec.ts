@@ -224,6 +224,93 @@ describe('ComparisonsRenderer', () => {
     expect(html).toContain('#f59e0b'); // 10% == not < good(10) => amber band
   });
 
+  it('renders dynatrace as ONE merged table: host folded into heading, id prefix stripped, 2dp values', async () => {
+    const data = { source: 'dynatrace', rows: [
+      { group: 'HOST-123', label: 'HOST-123_afterburner-be_Memory Usage', metrics: [
+        { key: 'avg', current: 74.005882, baseline: 70, diffPercent: 5.7 },
+      ] },
+      { group: 'HOST-123', label: 'HOST-123_afterburner-be_CPU Usage', metrics: [
+        { key: 'avg', current: 25.5, baseline: 20, diffPercent: 27.5 },
+      ] },
+    ] };
+    jest.spyOn(dataFetcher, 'getBaselineRunComparison').mockResolvedValue(data as any);
+    const html = await renderer.renderComparisonsSection(
+      { type: 'comparisons', order: 0, config: {
+        comparisonMode: 'baseline_run', baselineTestRunId: 'base', source: 'dynatrace',
+        metrics: ['avg'], thresholds: { good: 10, warning: 50 } } } as any,
+      { testRunId: 'cur' } as any,
+    );
+    expect(html).toContain('Dynatrace · afterburner-be'); // host name folded into the heading
+    expect(html).toContain('Memory Usage');               // id prefix stripped from the metric
+    expect(html).not.toContain('HOST-123_');              // raw entity-id label never shown
+    expect(html).toContain('74.01');                      // rounded to 2 dp
+    expect(html).toContain('>Metric</th>');               // single Metric column
+  });
+
+  it('renders grafana as ONE merged table with a Grafana heading and labels as-is', async () => {
+    const data = { source: 'grafana', rows: [
+      { group: 'JVM / Heap', label: 'heap used', metrics: [
+        { key: 'avg', current: 1200.456, baseline: 1000, diffPercent: 20 },
+      ] },
+    ] };
+    jest.spyOn(dataFetcher, 'getBaselineRunComparison').mockResolvedValue(data as any);
+    const html = await renderer.renderComparisonsSection(
+      { type: 'comparisons', order: 0, config: {
+        comparisonMode: 'baseline_run', baselineTestRunId: 'base', source: 'grafana',
+        metrics: ['avg'], thresholds: { good: 10, warning: 50 } } } as any,
+      { testRunId: 'cur' } as any,
+    );
+    expect(html).toContain('>Grafana</h3>');
+    expect(html).toContain('heap used');
+    expect(html).toContain('1,200.46'); // thousands-grouped, 2 dp
+  });
+
+  it('shows a Current → Baseline caption when a dashboard mapping is in effect', async () => {
+    const data = { source: 'grafana', rows: [
+      { group: 'JVM (acc) / Heap', label: 'heap used', metrics: [
+        { key: 'avg', current: 110, baseline: 100, diffPercent: 10 },
+      ] },
+    ] };
+    jest.spyOn(dataFetcher, 'getBaselineRunComparison').mockResolvedValue(data as any);
+    const html = await renderer.renderComparisonsSection(
+      { type: 'comparisons', order: 0, config: {
+        comparisonMode: 'baseline_run', baselineTestRunId: 'base', source: 'grafana',
+        metrics: ['avg'], thresholds: { good: 10, warning: 50 },
+        dashboardLabel: 'JVM (acc)',
+        dashboardMap: [
+          { current: 'JVM (acc)', baseline: 'JVM (prod)' },
+          { current: 'Other dash', baseline: 'Other dash prod' }, // not selected — not shown
+        ],
+      } } as any,
+      { testRunId: 'cur' } as any,
+    );
+    expect(html).toContain('>Current</span>');
+    expect(html).toContain('JVM (acc)');
+    expect(html).toContain('>Baseline</span>');
+    expect(html).toContain('JVM (prod)');
+    expect(html).toContain('&rarr;');
+    expect(html).not.toContain('Other dash prod'); // scoped to the selected dashboard's pair
+  });
+
+  it('shows no mapping caption without a dashboardMap or for identity pairs', async () => {
+    const data = { source: 'dynatrace', rows: [
+      { group: 'HOST-123', label: 'HOST-123_afterburner-be_CPU Usage', metrics: [
+        { key: 'avg', current: 60, baseline: 50, diffPercent: 20 },
+      ] },
+    ] };
+    jest.spyOn(dataFetcher, 'getBaselineRunComparison').mockResolvedValue(data as any);
+    const html = await renderer.renderComparisonsSection(
+      { type: 'comparisons', order: 0, config: {
+        comparisonMode: 'baseline_run', baselineTestRunId: 'base', source: 'dynatrace',
+        metrics: ['avg'], thresholds: { good: 10, warning: 50 },
+        dashboardMap: [{ current: 'Hosts', baseline: 'Hosts' }], // identity — no caption
+      } } as any,
+      { testRunId: 'cur' } as any,
+    );
+    expect(html).not.toContain('>Current</span>');
+    expect(html).toContain('Dynatrace · afterburner-be'); // heading unchanged
+  });
+
   it('shows empty state when baseline data is null', async () => {
     jest.spyOn(dataFetcher, 'getBaselineRunComparison').mockResolvedValue(null);
     const html = await renderer.renderComparisonsSection(
@@ -247,5 +334,22 @@ describe('ComparisonsRenderer', () => {
     const optsArg = spy.mock.calls[0]![3];
     expect(optsArg.userId).toBe('user-1');
     expect(optsArg.roles).toEqual(['user']);
+  });
+
+  it('forwards dashboardLabel and panel ids from the config into the fetcher opts', async () => {
+    const spy = jest.spyOn(dataFetcher, 'getBaselineRunComparison').mockResolvedValue(null);
+    await renderer.renderComparisonsSection(
+      { type: 'comparisons', order: 0, config: {
+        comparisonMode: 'baseline_run', baselineTestRunId: 'base-99', source: 'grafana',
+        dashboardLabel: 'JVM Metrics',
+        panels: [{ id: 3, title: 'Heap' }, { id: 7, title: 'GC Pause' }],
+      } } as any,
+      { testRunId: 'cur-42' } as any,
+      'user-1',
+      ['user'],
+    );
+    const optsArg = spy.mock.calls[0]![3];
+    expect(optsArg.dashboardLabel).toBe('JVM Metrics');
+    expect(optsArg.panelIds).toEqual([3, 7]);
   });
 });

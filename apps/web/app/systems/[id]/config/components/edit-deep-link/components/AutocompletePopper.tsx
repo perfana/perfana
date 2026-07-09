@@ -87,6 +87,17 @@ export function AutocompletePopper({
                 >
                   {variable.description}
                 </Typography>
+                {variable.example && (
+                  <Typography
+                    variant="caption"
+                    sx={{
+                      fontFamily: 'monospace',
+                      color: isHighlighted ? 'rgba(255,255,255,0.85)' : 'text.disabled',
+                    }}
+                  >
+                    e.g. {variable.example}
+                  </Typography>
+                )}
               </MenuItem>
             );
           })}

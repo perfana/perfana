@@ -1091,7 +1091,13 @@ export class TestRunsCrudQueryService {
         queryBuilder.andWhere('tr.workload = :workload', { workload });
       }
       if (excludeTestRunId) {
-        queryBuilder.andWhere('tr.testRunId != :excludeTestRunId', { excludeTestRunId });
+        // Callers pass either the human-readable test_run_id or the row UUID
+        // (the report dialog passes the UUID) — exclude on both, and cast the
+        // uuid column to text so a non-uuid string can't blow up the query.
+        queryBuilder.andWhere(
+          'tr.testRunId != :excludeTestRunId AND CAST(tr.id AS text) != :excludeTestRunId',
+          { excludeTestRunId },
+        );
       }
 
       const testRunEntities = await queryBuilder

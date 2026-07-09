@@ -1,7 +1,6 @@
 import { Module, OnModuleInit } from '@nestjs/common';
 import { TypeOrmModule } from '@nestjs/typeorm';
 import { GeneratedReport, ReportTemplate, TestRun, SystemUnderTest } from '@perfana/shared';
-import { TestRunsModule } from '../test-runs/test-runs.module';
 import { ReportGenerationController } from './controllers/report-generation.controller';
 import { ReportTemplateController } from './controllers/report-template.controller';
 import { ReportShareController } from './controllers/report-share.controller';
@@ -38,7 +37,6 @@ import { PlaceholderRenderer } from './renderers/placeholder-renderer';
     TypeOrmModule.forFeature([GeneratedReport, ReportTemplate, TestRun, SystemUnderTest]),
     CommonModule, // Provides AuthorizationService
     AuditModule, // Phase 5a — provides AuditService + AuditResourceRegistry
-    TestRunsModule, // Provides TestRunsService for baseline comparison fetcher
   ],
   controllers: [ReportGenerationController, ReportTemplateController, ReportShareController],
   providers: [

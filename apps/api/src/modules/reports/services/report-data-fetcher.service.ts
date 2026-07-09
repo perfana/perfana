@@ -5,7 +5,6 @@ import { TestRun } from '@perfana/shared';
 import { withRequestEm } from '../../../common/db/request-em';
 import { AuthorizationService } from '../../../common/services/authorization.service';
 import { withOrgFilter } from '../../../common/utils/with-org-filter';
-import { TestRunsService } from '../../test-runs/test-runs.service';
 import { percentDiff } from '../renderers/comparison-bands';
 
 /** SLO check result summary for header renderer */
@@ -357,7 +356,6 @@ export class ReportDataFetcherService {
     private readonly testRunRepo: Repository<TestRun>,
     private readonly authzService: AuthorizationService,
     private readonly dataSource: DataSource,
-    private readonly testRunsService: TestRunsService,
   ) {}
 
   /**
@@ -1947,40 +1945,75 @@ export class ReportDataFetcherService {
    * Performance-metrics branch: pairs transactions by scenario_name||transaction_name
    * and computes percentDiff for each requested metric key (avg/p95/p99).
    *
-   * Grafana branch: pairs ds_metric_statistics rows by dashboard_label/panel_title/metric_name.
-   *
-   * Dynatrace branch: same as grafana, with optional hostMap substitution to remap
-   * current host tokens to their baseline counterparts before the pairing lookup.
+   * Grafana/dynatrace branch: pairs ds_metric_statistics rows by
+   * dashboard_label/panel_title/metric_name, with optional dashboardMap
+   * substitution so a differently named baseline dashboard pairs.
    */
   async getBaselineRunComparison(
     currentRunId: string,
     baselineRunId: string,
     source: 'performance-metrics' | 'grafana' | 'dynatrace',
-    opts: { metrics: ('avg' | 'p95' | 'p99')[]; userId: string; roles: string[]; hostMap?: { current: string; baseline: string }[] },
+    opts: {
+      metrics: ('avg' | 'p95' | 'p99')[];
+      userId: string;
+      roles: string[];
+      // grafana/dynatrace only: restrict the comparison to one dashboard and a panel selection
+      dashboardLabel?: string;
+      panelIds?: number[];
+      // grafana/dynatrace only: pair a current-run dashboard with a differently
+      // named baseline-run dashboard (e.g. per-environment dashboard names)
+      dashboardMap?: { current: string; baseline: string }[];
+    },
   ): Promise<BaselineComparisonData | null> {
     if (source === 'performance-metrics') {
-      const [cur, base] = await Promise.all([
-        this.testRunsService.getTransactionStats(currentRunId, opts.userId, opts.roles, true),
-        this.testRunsService.getTransactionStats(baselineRunId, opts.userId, opts.roles, true),
-      ]);
-      if (!Array.isArray(cur) || !Array.isArray(base)) return null;
-      const key = (r: { scenario_name?: string; transaction_name: string }) =>
+      // Query the transactions table directly (like getScenarioDataFromDatabase)
+      // instead of the controller-facing TestRunsService facade. The facade treats
+      // an empty userId as a non-admin user with zero orgs and returns [] — but
+      // report HTML generation runs in a background job with no user context.
+      // resolveOrgFilter implements the fetcher's convention: empty userId =
+      // system call = no org filter; real users get org-scoped results.
+      const orgFilter = await this.resolveOrgFilter(opts.userId, opts.roles, 2, 'tr');
+      // ponytail: full-run stats on both sides (consistent diff); apply
+      // getRampUpCutoffTime per run if analysis-window comparison is needed.
+      const query = `
+        SELECT
+          txn.test_run_id,
+          txn.scenario_name,
+          txn.transaction_name,
+          ROUND(AVG(txn.response_time)::numeric, 2) as avg_ms,
+          ROUND(PERCENTILE_CONT(0.95) WITHIN GROUP (ORDER BY txn.response_time)::numeric, 2) as p95_ms,
+          ROUND(PERCENTILE_CONT(0.99) WITHIN GROUP (ORDER BY txn.response_time)::numeric, 2) as p99_ms
+        FROM transactions txn
+        JOIN test_runs tr ON tr.test_run_id = txn.test_run_id
+        WHERE txn.test_run_id = ANY($1)
+        ${orgFilter.clause}
+        GROUP BY txn.test_run_id, txn.scenario_name, txn.transaction_name
+        ORDER BY txn.scenario_name, txn.transaction_name
+      `;
+      const allRows: Array<{
+        test_run_id: string;
+        scenario_name: string | null;
+        transaction_name: string;
+        avg_ms: string | null;
+        p95_ms: string | null;
+        p99_ms: string | null;
+      }> = await withRequestEm(this.testRunRepo).query(query, [[currentRunId, baselineRunId], ...orgFilter.params]);
+      if (allRows.length === 0) return null;
+
+      const key = (r: { scenario_name?: string | null; transaction_name: string }) =>
         `${r.scenario_name ?? ''}||${r.transaction_name}`;
-      const baseMap = new Map(base.map((r) => [key(r), r]));
+      const cur = allRows.filter((r) => r.test_run_id === currentRunId);
+      const baseMap = new Map(allRows.filter((r) => r.test_run_id === baselineRunId).map((r) => [key(r), r]));
       const num = (v: unknown) => (v == null ? null : Number(v));
-      const fieldByKey = {
-        avg: 'avg_response_time',
-        p95: 'p95_response_time',
-        p99: 'p99_response_time',
-      } as const;
+      const fieldByKey = { avg: 'avg_ms', p95: 'p95_ms', p99: 'p99_ms' } as const;
       const rows: BaselineComparisonRow[] = cur.map((c) => {
         const b = baseMap.get(key(c));
         return {
           group: c.scenario_name ?? 'default',
           label: c.transaction_name,
           metrics: opts.metrics.map((k) => {
-            const cv = num((c as Record<string, unknown>)[fieldByKey[k]]);
-            const bv = b != null ? num((b as Record<string, unknown>)[fieldByKey[k]]) : null;
+            const cv = num(c[fieldByKey[k]]);
+            const bv = b != null ? num(b[fieldByKey[k]]) : null;
             return { key: k, current: cv, baseline: bv, diffPercent: percentDiff(cv, bv) };
           }),
         };
@@ -1994,69 +2027,79 @@ export class ReportDataFetcherService {
   /**
    * Fetch ds_metric_statistics rows for both runs and pair them by series identity.
    * Grafana: groups by `dashboard_label / panel_title`.
-   * Dynatrace: groups by the host token extracted from the series identity;
-   *   when a hostMap is provided the current host token is substituted for the
-   *   mapped baseline token before the lookup so cross-host pairing works.
+   * Dynatrace: groups by the dt.entity id prefix of the series name.
+   * When a dashboardMap is provided, the current row's dashboard_label is
+   * substituted with the mapped baseline label before the lookup, so a
+   * differently named baseline dashboard pairs (both sources).
    */
   private async getBaselineRunComparisonFromStatistics(
     currentRunId: string,
     baselineRunId: string,
     source: 'grafana' | 'dynatrace',
-    opts: { metrics: ('avg' | 'p95' | 'p99')[]; hostMap?: { current: string; baseline: string }[] },
+    opts: {
+      metrics: ('avg' | 'p95' | 'p99')[];
+      dashboardLabel?: string;
+      panelIds?: number[];
+      dashboardMap?: { current: string; baseline: string }[];
+    },
   ): Promise<BaselineComparisonData | null> {
     const sourceType = source === 'grafana' ? 'grafana' : 'dynatrace';
+    // Optional dashboard scoping (from the section config's dashboard selection).
+    // Absent -> unfiltered, preserving behavior for configs saved before selection existed.
+    // The mapped baseline label must be included or its rows never reach the pairing.
+    const params: unknown[] = [[currentRunId, baselineRunId], sourceType];
+    let scopeFilter = '';
+    if (opts.dashboardLabel) {
+      const labels = [opts.dashboardLabel];
+      const mapped = opts.dashboardMap?.find((m) => m.current === opts.dashboardLabel)?.baseline;
+      if (mapped && !labels.includes(mapped)) labels.push(mapped);
+      params.push(labels);
+      scopeFilter += ` AND s.dashboard_label = ANY($${params.length})`;
+    }
     const rows: Array<{
       test_run_id: string;
       dashboard_label: string | null;
       panel_title: string | null;
+      panel_id: number | null;
       metric_name: string | null;
       unit: string | null;
       mean: number | null;
       q95: number | null;
       q99: number | null;
     }> = await this.dataSource.query(
-      `SELECT s.test_run_id, s.dashboard_label, s.panel_title, s.metric_name, s.unit, s.mean, s.q95, s.q99
+      `SELECT s.test_run_id, s.dashboard_label, s.panel_title, s.panel_id, s.metric_name, s.unit, s.mean, s.q95, s.q99
        FROM ds_metric_statistics s
        LEFT JOIN metrics_sources ms ON ms.id = s.metrics_source_id
-       WHERE s.test_run_id = ANY($1) AND (s.metrics_source_id IS NULL OR ms.type = $2)`,
-      [[currentRunId, baselineRunId], sourceType],
+       WHERE s.test_run_id = ANY($1) AND (s.metrics_source_id IS NULL OR ms.source_type = $2)${scopeFilter}`,
+      params,
     );
     if (rows.length === 0) return null;
 
     const identity = (r: typeof rows[number]) =>
       `${r.dashboard_label}||${r.panel_title}||${r.metric_name}`;
 
-    const cur = rows.filter((r) => r.test_run_id === currentRunId);
+    // Panel selection applies to the CURRENT run only — the mapped baseline
+    // dashboard may use different panel ids; pairing is by panel title.
+    const cur = rows
+      .filter((r) => r.test_run_id === currentRunId)
+      .filter((r) => !opts.panelIds?.length || (r.panel_id != null && opts.panelIds.includes(r.panel_id)));
     const baseByIdentity = new Map(
       rows.filter((r) => r.test_run_id === baselineRunId).map((r) => [identity(r), r]),
     );
 
-    // Dynatrace: build a remapped identity that swaps the current host token for
-    // the mapped baseline token before the lookup. Only remap the metric_name segment.
+    // Substitute the current dashboard label with its mapped baseline label
+    // before the lookup, so differently named baseline dashboards pair.
     const remapIdentity = (r: typeof rows[number]) => {
-      if (source !== 'dynatrace' || !opts.hostMap?.length) return identity(r);
-      const parts = `${r.dashboard_label ?? ''}||${r.panel_title ?? ''}||${r.metric_name ?? ''}`.split('||');
-      let metricName = parts[2];
-      if (metricName) {
-        for (const { current, baseline } of opts.hostMap) {
-          if (metricName.includes(current)) {
-            metricName = metricName.split(current).join(baseline);
-            break;
-          }
-        }
-      }
-      return `${parts[0]}||${parts[1]}||${metricName}`;
+      const mapped = opts.dashboardMap?.find((m) => m.current === r.dashboard_label)?.baseline;
+      if (!mapped) return identity(r);
+      return `${mapped}||${r.panel_title}||${r.metric_name}`;
     };
 
     const fieldByKey = { avg: 'mean', p95: 'q95', p99: 'q99' } as const;
 
     const rowsOut: BaselineComparisonRow[] = cur.map((c) => {
       const b = baseByIdentity.get(remapIdentity(c));
-      const host =
-        source === 'dynatrace'
-          ? (opts.hostMap?.find((h) => (c.metric_name ?? '').includes(h.current))?.current ??
-              this.extractHost(c.metric_name))
-          : null;
+      const host = source === 'dynatrace' ? this.extractHost(c.metric_name) : null;
       return {
         group:
           source === 'dynatrace'
@@ -2075,13 +2118,17 @@ export class ReportDataFetcherService {
   }
 
   /**
-   * ponytail: naive host extractor — last dotted segment of the metric name.
-   * Replace if Dynatrace series encode the host elsewhere (confirm during impl — see plan note).
+   * Extract the host/entity grouping token from a Dynatrace series name.
+   * The worker (DataProcessor) stores series as `{dimension values}_{metric}`,
+   * where dimension values are dt.entity.* IDs (e.g. HOST-0A1B2C3D4E5F6789)
+   * joined by underscores — so the entity id is a leading prefix.
+   * ponytail: falls back to the full series name when no entity-id prefix
+   * is present (DQL groupings by non-entity dimensions).
    */
   private extractHost(metricName: string | null): string | null {
     if (!metricName) return null;
-    const parts = metricName.split('.');
-    return parts.length > 1 ? parts[parts.length - 1]! : metricName;
+    const m = metricName.match(/^([A-Z][A-Z_]*-[A-F0-9]{8,})/);
+    return m ? m[1]! : metricName;
   }
 
   /**

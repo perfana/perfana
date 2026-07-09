@@ -405,6 +405,46 @@ describe('ReportGenerationService', () => {
       await expect(service.createAdHocReport(options)).rejects.toThrow(ValidationException);
     });
 
+    it('should reject saveAsTemplate when the template name already exists in scope', async () => {
+      // uq_report_templates_name_scope spans (name, system, environment, workload) —
+      // the pre-check must fail fast with a clear message, not a DB 500.
+      const options: CreateAdHocReportOptions = {
+        testRunId: '123e4567-e89b-12d3-a456-426614174001',
+        name: 'Report with duplicate template name',
+        sections: [{ type: 'header', order: 0 }],
+        generatedBy: 'test-user',
+        saveAsTemplate: true,
+        templateName: 'Compare',
+      };
+      testRunRepo.findOne.mockResolvedValue(createMockTestRun());
+      templateRepo.findOne.mockResolvedValue(createMockTemplate()); // name taken
+
+      await expect(service.createAdHocReport(options)).rejects.toThrow(/already exists/);
+      expect(templateRepo.create).not.toHaveBeenCalled();
+    });
+
+    it('should de-collide the derived ad-hoc template name instead of failing', async () => {
+      const options: CreateAdHocReportOptions = {
+        testRunId: '123e4567-e89b-12d3-a456-426614174001',
+        name: 'Report - 09/07/2026, 19:52:45',
+        sections: [{ type: 'header', order: 0 }],
+        generatedBy: 'test-user',
+      };
+      const mockTemplate = createMockTemplate();
+      const mockReport = createMockReport();
+      testRunRepo.findOne.mockResolvedValue(createMockTestRun());
+      templateRepo.findOne.mockResolvedValue(mockTemplate); // derived name taken
+      templateRepo.create.mockReturnValue(mockTemplate);
+      templateRepo.save.mockResolvedValue(mockTemplate);
+      reportRepo.create.mockReturnValue(mockReport);
+      reportRepo.save.mockResolvedValue(mockReport);
+
+      await service.createAdHocReport(options);
+
+      const created = templateRepo.create.mock.calls[0]![0] as { name: string };
+      expect(created.name).toMatch(/^Ad-hoc: Report - 09\/07\/2026, 19:52:45 \(\d+\)$/);
+    });
+
     it('should use provided templateId when specified', async () => {
       // Arrange
       const sections: ReportSectionConfig[] = [{ type: 'header', order: 0 }];

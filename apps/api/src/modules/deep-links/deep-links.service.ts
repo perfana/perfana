@@ -366,20 +366,26 @@ export class DeepLinksService {
       url = url.replace(/\{perfana-build-result-url\}/g, testRun.ci_build_results_url);
     }
 
-    // Time variables
+    // Time variables — named after the official datetime format they produce
+    // (Unix epoch, ISO 8601). Legacy tool-named variables keep resolving for
+    // deep links saved before the rename.
     if (testRun.start_time) {
       const startDate = new Date(testRun.start_time);
       const startEpochMs = startDate.getTime();
       const startEpochS = Math.round(startEpochMs / 1000);
-      
+      const startIsoUtc = startDate.toISOString();
+
       url = url.replace(/\{perfana-start-epoch-milliseconds\}/g, startEpochMs.toString());
       url = url.replace(/\{perfana-start-epoch-seconds\}/g, startEpochS.toString());
-      
-      // Dynatrace format (ISO string)
-      url = url.replace(/\{perfana-start-dynatrace\}/g, startDate.toISOString());
-      
-      // Elasticsearch format (ISO string with Z)
-      url = url.replace(/\{perfana-start-elasticsearch\}/g, startDate.toISOString());
+
+      // ISO 8601, UTC (e.g. 2026-07-09T19:01:00.000Z)
+      url = url.replace(/\{perfana-start-iso8601-utc\}/g, startIsoUtc);
+      // ISO 8601 with UTC offset, URL-encoded '+' (e.g. 2026-07-09T21:01:00%2B02:00)
+      url = url.replace(/\{perfana-start-iso8601-offset\}/g, this.toIso8601OffsetUrlEncoded(startDate));
+
+      // Legacy tool-named variables (both were the same ISO UTC string)
+      url = url.replace(/\{perfana-start-dynatrace\}/g, startIsoUtc);
+      url = url.replace(/\{perfana-start-elasticsearch\}/g, startIsoUtc);
     }
 
     // For running tests (not completed, no end_time), use current time
@@ -390,18 +396,38 @@ export class DeepLinksService {
     if (endDate) {
       const endEpochMs = endDate.getTime();
       const endEpochS = Math.round(endEpochMs / 1000);
+      const endIsoUtc = endDate.toISOString();
 
       url = url.replace(/\{perfana-end-epoch-milliseconds\}/g, endEpochMs.toString());
       url = url.replace(/\{perfana-end-epoch-seconds\}/g, endEpochS.toString());
 
-      // Dynatrace format (ISO string)
-      url = url.replace(/\{perfana-end-dynatrace\}/g, endDate.toISOString());
+      // ISO 8601, UTC (e.g. 2026-07-09T19:31:00.000Z)
+      url = url.replace(/\{perfana-end-iso8601-utc\}/g, endIsoUtc);
+      // ISO 8601 with UTC offset, URL-encoded '+' (e.g. 2026-07-09T21:31:00%2B02:00)
+      url = url.replace(/\{perfana-end-iso8601-offset\}/g, this.toIso8601OffsetUrlEncoded(endDate));
 
-      // Elasticsearch format (ISO string with Z)
-      url = url.replace(/\{perfana-end-elasticsearch\}/g, endDate.toISOString());
+      // Legacy tool-named variables (both were the same ISO UTC string)
+      url = url.replace(/\{perfana-end-dynatrace\}/g, endIsoUtc);
+      url = url.replace(/\{perfana-end-elasticsearch\}/g, endIsoUtc);
     }
 
     return url;
+  }
+
+  /**
+   * ISO 8601 with the server's local UTC offset at seconds precision,
+   * with only the '+' URL-encoded so it survives query-string parsing:
+   * 2026-07-09T21:01:00%2B02:00. Colons stay literal — they are valid in
+   * query values and target systems (e.g. Dynatrace gtf) expect them.
+   */
+  private toIso8601OffsetUrlEncoded(d: Date): string {
+    const pad = (n: number) => String(n).padStart(2, '0');
+    const offsetMinutes = -d.getTimezoneOffset();
+    const sign = offsetMinutes >= 0 ? '%2B' : '-';
+    const abs = Math.abs(offsetMinutes);
+    return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}` +
+      `T${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}` +
+      `${sign}${pad(Math.floor(abs / 60))}:${pad(abs % 60)}`;
   }
 
   private async replaceConfigVariables(url: string, testRun: TestRunVariableData): Promise<string> {

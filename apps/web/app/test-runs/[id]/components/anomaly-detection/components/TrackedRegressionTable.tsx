@@ -180,8 +180,18 @@ export default function UnresolvedRegressionTable({ regressions, trendsData }: U
                 </Box>
               </Box>
 
-              {/* Expanded Row Content */}
-              <Collapse in={isExpanded} timeout="auto" unmountOnExit>
+              {/* Expanded Row Content.
+                  onEntered: the TrendChart inside mounts mid-animation (unmountOnExit
+                  remounts it on every expand) and Plotly measures hover geometry
+                  against the partial size — dispatch a window resize once the
+                  Collapse settles so useResizeHandler relayouts at the final size
+                  (same fix as AnomalyExpandedContent / TrendsCard, v0.2.61.35). */}
+              <Collapse
+                in={isExpanded}
+                timeout="auto"
+                unmountOnExit
+                onEntered={() => window.dispatchEvent(new Event('resize'))}
+              >
                 <Box sx={(t) => ({
                   borderLeft: '1px solid',
                   borderRight: '1px solid',

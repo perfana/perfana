@@ -213,8 +213,12 @@ export default function DynatraceCard({
             />
           )}
 
-          {/* Expanded content */}
-          <Collapse in={expanded}>
+          {/* Expanded content.
+              onEntered: Plotly charts inside (host performance graphs) measure their
+              geometry mid-animation and useResizeHandler only listens to window
+              resize — dispatch one once the Collapse settles so they relayout at the
+              final width (same fix as TrendsCard / AnomalyExpandedContent). */}
+          <Collapse in={expanded} onEntered={() => window.dispatchEvent(new Event('resize'))}>
             <Divider sx={{ my: 2 }} />
 
             {dynatraceData.loading ? (

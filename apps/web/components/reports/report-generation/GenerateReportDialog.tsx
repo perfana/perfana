@@ -81,6 +81,7 @@ import {
   TrendsConfigForm,
   ComparisonsConfigForm,
 } from './SectionConfigs';
+import { BaselineRunSelect, useBaselineCandidates, type BaselineCandidate } from './BaselineRunSelect';
 
 // ==================== Types ====================
 
@@ -202,6 +203,39 @@ export function GenerateReportDialog({
 
   // Report generation state (polling handled by parent component)
   const [generationStatus, setGenerationStatus] = useState<string>('');
+
+  // Template-level baseline: sections that compare against a baseline test run
+  // can all be pointed at one run from a single dropdown.
+  const isBaselineSection = (s: ReportSectionConfig) =>
+    s.type === 'comparisons' &&
+    (s.config as Record<string, unknown> | undefined)?.comparisonMode === 'baseline_run';
+  const baselineSections = sections.filter(isBaselineSection);
+  const baselineSectionCount = baselineSections.length;
+  const baselineIds = new Set(
+    baselineSections
+      .map((s) => (s.config as Record<string, unknown> | undefined)?.baselineTestRunId)
+      .filter((v): v is string => typeof v === 'string' && v.length > 0),
+  );
+  // One shared value when all baseline sections agree; undefined otherwise
+  const sharedBaselineId = baselineIds.size === 1 ? [...baselineIds][0] : undefined;
+  const baselineCandidates = useBaselineCandidates(
+    scope.systemId,
+    testRunId,
+    open && !isTemplateBuilder && baselineSectionCount > 0,
+  );
+  // "Save as template" name conflict: template summaries are scoped to the
+  // same (system, environment, workload) as the DB unique constraint, so a
+  // client-side match means the server would reject it.
+  const templateNameTaken = saveAsTemplate &&
+    templates.some((t) => t.name.trim() === templateName.trim() && templateName.trim() !== '');
+
+  const handleSharedBaselineChange = (candidate: BaselineCandidate | null) => {
+    setSections(sections.map((s) =>
+      isBaselineSection(s)
+        ? { ...s, config: { ...(s.config ?? {}), baselineTestRunId: candidate?.test_run_id } }
+        : s,
+    ));
+  };
 
   // Load templates on open (skip in template-builder mode)
   useEffect(() => {
@@ -465,11 +499,43 @@ export function GenerateReportDialog({
                   onChange={(e) => setTemplateName(e.target.value)}
                   placeholder="Enter template name..."
                   required
-                  error={saveAsTemplate && !templateName.trim()}
-                  helperText={saveAsTemplate && !templateName.trim() ? 'Template name is required' : ''}
+                  error={(saveAsTemplate && !templateName.trim()) || templateNameTaken}
+                  helperText={
+                    saveAsTemplate && !templateName.trim()
+                      ? 'Template name is required'
+                      : templateNameTaken
+                        ? 'A template with this name already exists — choose a different name'
+                        : ''
+                  }
                   sx={{ mt: 2 }}
                 />
               )}
+            </Box>
+          )}
+
+          {/* Template-level baseline picker: one place to set the baseline run for
+              every comparison section in this report (sections can still override
+              it individually in their own configuration). */}
+          {!isTemplateBuilder && !showTemplateSelector && baselineSectionCount > 0 && (
+            <Box sx={{ mx: 3, mt: 2, p: 2, border: '1px solid', borderColor: 'divider', borderRadius: 2 }}>
+              <Typography variant="body2" sx={{ fontWeight: 600, mb: 0.5 }}>
+                Baseline Test Run
+              </Typography>
+              <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mb: 1.5 }}>
+                {baselineSectionCount} section{baselineSectionCount !== 1 ? 's' : ''} in this report compare{baselineSectionCount === 1 ? 's' : ''} against a baseline run — set it once here.
+              </Typography>
+              <BaselineRunSelect
+                candidates={baselineCandidates}
+                value={sharedBaselineId}
+                onChange={handleSharedBaselineChange}
+                helperText={
+                  sharedBaselineId
+                    ? `Applied to all ${baselineSectionCount} comparison section${baselineSectionCount !== 1 ? 's' : ''}`
+                    : sharedBaselineId === undefined && baselineSectionCount > 1
+                      ? 'Sections currently use different baselines — selecting one here overrides them all'
+                      : `Select from ${baselineCandidates.length} available test runs`
+                }
+              />
             </Box>
           )}
         </Box>
@@ -662,6 +728,8 @@ export function GenerateReportDialog({
                       onMoveDown={index < sections.length - 1 ? () => handleReorder(index, index + 1) : undefined}
                       testRunId={testRunId}
                       systemUnderTestId={scope.systemId}
+                      testEnvironment={scope.testEnvironment}
+                      workload={scope.workload}
                     />
                   ))}
 
@@ -721,7 +789,7 @@ export function GenerateReportDialog({
             <Button
               variant="contained"
               onClick={handleGenerate}
-              disabled={isSubmitting || sections.length === 0 || (saveAsTemplate && !templateName.trim())}
+              disabled={isSubmitting || sections.length === 0 || (saveAsTemplate && !templateName.trim()) || templateNameTaken}
               startIcon={isSubmitting ? <CircularProgress size={16} color="inherit" /> : <DescriptionIcon />}
               sx={{
                 textTransform: 'none',
@@ -808,9 +876,11 @@ interface LayoutSectionCardProps {
   onMoveDown?: () => void;
   testRunId?: string;
   systemUnderTestId?: string;
+  testEnvironment?: string;
+  workload?: string;
 }
 
-function LayoutSectionCard({ id, section, index, onDelete, onConfigChange, onMoveUp: _onMoveUp, onMoveDown: _onMoveDown, testRunId, systemUnderTestId }: LayoutSectionCardProps) {
+function LayoutSectionCard({ id, section, index, onDelete, onConfigChange, onMoveUp: _onMoveUp, onMoveDown: _onMoveDown, testRunId, systemUnderTestId, testEnvironment, workload }: LayoutSectionCardProps) {
   const config = SECTION_CONFIG[section.type];
   const [expanded, setExpanded] = useState(false);
 
@@ -858,7 +928,7 @@ function LayoutSectionCard({ id, section, index, onDelete, onConfigChange, onMov
       case 'trends':
         return <TrendsConfigForm config={sectionConfig} onChange={onConfigChange} />;
       case 'comparisons':
-        return <ComparisonsConfigForm config={sectionConfig} onChange={onConfigChange} testRunId={testRunId} systemUnderTestId={systemUnderTestId} />;
+        return <ComparisonsConfigForm config={sectionConfig} onChange={onConfigChange} testRunId={testRunId} systemUnderTestId={systemUnderTestId} testEnvironment={testEnvironment} workload={workload} />;
       default:
         return null;
     }

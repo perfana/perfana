@@ -336,9 +336,31 @@ export class ReportGenerationService {
           throw new ValidationException('Template name is required when saving as template');
         }
 
-        const templateName = options.saveAsTemplate && options.templateName
+        let templateName = options.saveAsTemplate && options.templateName
           ? options.templateName.trim()
           : `Ad-hoc: ${options.name}`;
+
+        // (name, system, environment, workload) is unique across ALL templates
+        // (uq_report_templates_name_scope) — fail fast with a clear message
+        // instead of a raw unique-constraint 500 that kills the whole generation.
+        const existingTemplate = await withRequestEm(this.templateRepo).findOne({
+          where: {
+            name: templateName,
+            system_id: testRun.systemUnderTestId,
+            test_environment: testRun.testEnvironment,
+            workload: testRun.workload,
+          },
+        });
+        if (existingTemplate) {
+          if (options.saveAsTemplate) {
+            throw new ValidationException(
+              `A template named "${templateName}" already exists for this system/environment/workload — choose a different name`,
+            );
+          }
+          // Ad-hoc names are derived from the report name (second precision) —
+          // de-collide silently rather than failing the generation.
+          templateName = `${templateName} (${Date.now()})`;
+        }
 
         const templateDescription = options.saveAsTemplate && options.templateDescription
           ? options.templateDescription

@@ -488,6 +488,52 @@ describe('DeepLinksService', () => {
         expect(result.isValid).toBe(true);
       });
 
+      it('should resolve perfana-start-iso8601-utc', async () => {
+        const deepLink: DeepLink = {
+          ...mockDeepLink,
+          url: 'https://example.com/?start={perfana-start-iso8601-utc}',
+        };
+        testRunConfigRepo.find.mockResolvedValue([]);
+
+        const result = await service.resolveVariables(deepLink, mockTestRun);
+
+        expect(result.url).toBe('https://example.com/?start=2024-01-15T10:00:00.000Z');
+        expect(result.isValid).toBe(true);
+      });
+
+      it('should resolve perfana-start-iso8601-offset as URL-encoded offset ISO 8601', async () => {
+        const deepLink: DeepLink = {
+          ...mockDeepLink,
+          url: 'https://example.com/?gtf={perfana-start-iso8601-offset}',
+        };
+        testRunConfigRepo.find.mockResolvedValue([]);
+
+        const result = await service.resolveVariables(deepLink, mockTestRun);
+
+        // Shape: 2026-07-09T21:01:00%2B02:00 — seconds precision, literal
+        // colons, only the '+' URL-encoded (a '-' offset needs no encoding).
+        const value = result.url.split('gtf=')[1]!;
+        expect(value).toMatch(/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(%2B|-)\d{2}:\d{2}$/);
+        // Round-trips to the same instant as the test run start
+        const decoded = decodeURIComponent(value.replace('%2B', '+'));
+        expect(new Date(decoded).getTime()).toBe(new Date(mockTestRun.start_time!).getTime());
+        expect(result.isValid).toBe(true);
+      });
+
+      it('should resolve perfana-end-iso8601-utc and perfana-end-iso8601-offset', async () => {
+        const deepLink: DeepLink = {
+          ...mockDeepLink,
+          url: 'https://example.com/?to={perfana-end-iso8601-utc}&gtf={perfana-end-iso8601-offset}',
+        };
+        testRunConfigRepo.find.mockResolvedValue([]);
+
+        const result = await service.resolveVariables(deepLink, mockTestRun);
+
+        expect(result.url).toContain('to=2024-01-15T11:00:00.000Z');
+        expect(result.url).toMatch(/gtf=\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(%2B|-)\d{2}:\d{2}$/);
+        expect(result.isValid).toBe(true);
+      });
+
       it('should resolve perfana-start-dynatrace', async () => {
         // Arrange
         const deepLink: DeepLink = {

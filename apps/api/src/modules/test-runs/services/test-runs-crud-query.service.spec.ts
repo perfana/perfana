@@ -1511,8 +1511,10 @@ describe('TestRunsCrudQueryService', () => {
         'excluded-run-id',
       );
 
+      // Excludes on BOTH identifiers: callers pass either the human-readable
+      // test_run_id or the row UUID (the report dialog passes the UUID).
       expect(testRunQb.andWhere).toHaveBeenCalledWith(
-        'tr.testRunId != :excludeTestRunId',
+        'tr.testRunId != :excludeTestRunId AND CAST(tr.id AS text) != :excludeTestRunId',
         { excludeTestRunId: 'excluded-run-id' },
       );
     });

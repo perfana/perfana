@@ -6,8 +6,20 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
 ## [0.2.61.39] - 2026-07-09
 
+### Changed
+- **Baseline comparison: dashboard mapping replaces host mapping, for both grafana and dynatrace.** The dynatrace-only free-text host-map editor (shipped in 0.2.61.37) is replaced by a dropdown-based dashboard mapping: pair a current-run dashboard with a differently named dashboard from the baseline run's environment (the baseline dropdown's options are fetched for the selected baseline run's environment/workload). The pairing substitutes the mapped `dashboard_label` in the series identity, and the SQL dashboard scope includes the mapped label so baseline rows survive the filter. Panel selection now filters the current run only (in code, not SQL) since a mapped baseline dashboard may renumber panels — pairing is by panel title. Saved configs with the old `hostMap` field ignore it. Note: dynatrace series that embed `dt.entity.*` ids in their names still only pair when those ids match across runs.
+- **Baseline comparison config: grafana/dynatrace sources now prompt for a dashboard first, then one or more of its panels.** The comparison is scoped to the selection; configs saved without a selection keep comparing everything.
+
 ### Fixed
 - **"Build and Push Docker Images" no longer fails when dispatched on a feature branch with "Push images" checked.** The `Log in to Docker Hub` step was gated on `github.event_name == 'push'`, while the build step's `push:` condition also allowed `workflow_dispatch` with `push_images=true` — so branch dispatches built for ~5 minutes and then pushed unauthenticated, dying with `401 Unauthorized: access token has insufficient scopes` in all six build jobs. The login condition now matches the push condition. Also gated the raw `VERSION` image tag to push events only: without that, the first successful branch push would silently overwrite the released version tag on Docker Hub whenever the branch's VERSION file matches main's (branch/sha tags are still pushed).
+
+## [0.2.61.38] - 2026-07-09
+
+### Fixed
+- **`baseline_run` comparison sections no longer render empty in generated reports.** Report HTML generation runs in a background job with no user context (`generateHtml(reportId)` → `userId=''`), and the performance-metrics branch went through the controller-facing `TestRunsService.getTransactionStats`, which treats an empty user as a non-admin with zero organizations and returns `[]` — so the default source produced the empty-state in every real report while mocked unit tests stayed green. The fetcher now queries the `transactions` table directly (AVG/P95/P99 grouped by run, scenario, and transaction) via `resolveOrgFilter`, which implements the reports convention: empty userId = system call = no org filter; real users stay org-scoped. The now-unused `TestRunsService` dependency and `TestRunsModule` import were removed. SQL verified against a live database with the failing report's actual run IDs.
+
+### Changed
+- **The baseline test-run dropdown in the report section config now matches the compare card.** The plain select (env / workload / date) is replaced with the searchable Autocomplete pattern from the test-run details compare card: bold `test_run_id` with a formatted timestamp as the label, and a secondary line showing environment/workload (candidates span all environments of the system under test), application release, and annotations.
 
 ## [0.2.61.37] - 2026-07-08
 

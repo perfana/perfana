@@ -65,6 +65,11 @@ export default function HostPerformanceGraphs({
         tickfont: { color: textColor },
       },
       margin: { l: 70, r: 40, t: 40, b: 60 },
+      // autosize is required for useResizeHandler to have any effect: react-plotly's
+      // resize handler calls Plotly.Plots.resize, which is a no-op on fixed-size
+      // layouts — without it the width measured at first draw (possibly mid-Collapse
+      // animation) is frozen forever.
+      autosize: true,
       height: 300,
       hovermode: 'x unified' as const,
       showlegend: false,
