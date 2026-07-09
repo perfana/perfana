@@ -7,7 +7,7 @@
  */
 
 import { useState, useEffect } from 'react';
-import { Box, TextField, Select, MenuItem, FormControlLabel, Switch, Typography, Button, Tooltip, FormControl, InputLabel, Checkbox, IconButton } from '@mui/material';
+import { Autocomplete, Box, TextField, Select, MenuItem, FormControlLabel, Switch, Typography, Button, Tooltip, FormControl, InputLabel, Checkbox, IconButton } from '@mui/material';
 import VisibilityIcon from '@mui/icons-material/Visibility';
 import DeleteIcon from '@mui/icons-material/Delete';
 import SectionPreviewModal from './SectionPreviewModal';
@@ -802,8 +802,33 @@ interface BaselineCandidate {
   test_run_id: string;
   test_environment: string;
   workload: string;
-  start_time: string;
+  start_time?: string;
+  created_at: string;
+  application_release?: string;
+  annotations?: string[];
 }
+
+// Mirrors the compare card's test-run option rendering (CompareSelectionPanel /
+// compare-utils), extended with env/workload since baseline candidates span
+// all environments and workloads of the SUT.
+const formatCandidateTime = (c: BaselineCandidate): string =>
+  new Date(c.start_time || c.created_at).toLocaleString('en-US', {
+    year: 'numeric',
+    month: 'short',
+    day: 'numeric',
+    hour: '2-digit',
+    minute: '2-digit',
+  });
+
+const getCandidateDisplayText = (c: BaselineCandidate): string =>
+  `${c.test_run_id} - ${formatCandidateTime(c)}`;
+
+const getCandidateSecondaryInfo = (c: BaselineCandidate): string => {
+  const parts = [`${c.test_environment} / ${c.workload}`];
+  if (c.application_release) parts.push(`Version: ${c.application_release}`);
+  if (c.annotations && c.annotations.length > 0) parts.push(`Annotations: ${c.annotations.join(', ')}`);
+  return parts.join(' • ');
+};
 
 interface ComparisonsConfigFormProps {
   config: ComparisonsConfig;
@@ -914,23 +939,46 @@ export function ComparisonsConfigForm({ config, onChange, testRunId, systemUnder
       {/* Baseline-run fields — only shown in baseline_run mode */}
       {comparisonMode === 'baseline_run' && (
         <>
-          {/* Baseline run selector */}
-          <FormControl size="small" fullWidth>
-            <InputLabel id="baseline-run-label">Baseline Run</InputLabel>
-            <Select
-              labelId="baseline-run-label"
-              label="Baseline Run"
-              value={config.baselineTestRunId ?? ''}
-              onChange={(e) => onChange({ ...config, baselineTestRunId: e.target.value })}
-            >
-              <MenuItem value=""><em>None</em></MenuItem>
-              {baselineCandidates.map((c) => (
-                <MenuItem key={c.test_run_id} value={c.test_run_id}>
-                  {`${c.test_environment} / ${c.workload} / ${new Date(c.start_time).toLocaleDateString()}`}
-                </MenuItem>
-              ))}
-            </Select>
-          </FormControl>
+          {/* Baseline run selector — same UX as the compare card's test-run Autocomplete */}
+          <Autocomplete
+            options={baselineCandidates}
+            getOptionLabel={getCandidateDisplayText}
+            isOptionEqualToValue={(option, value) => option.test_run_id === value.test_run_id}
+            value={baselineCandidates.find((c) => c.test_run_id === config.baselineTestRunId) ?? null}
+            onChange={(_, newValue) => onChange({ ...config, baselineTestRunId: newValue?.test_run_id })}
+            size="small"
+            renderInput={(params) => (
+              <TextField
+                {...params}
+                label="Baseline Test Run"
+                variant="outlined"
+                fullWidth
+                helperText={
+                  config.baselineTestRunId
+                    ? `Comparing with: ${config.baselineTestRunId}`
+                    : `Select from ${baselineCandidates.length} available test runs`
+                }
+              />
+            )}
+            renderOption={(props, option) => {
+              const { key, ...otherProps } = props;
+              return (
+                <Box component="li" key={key} {...otherProps}>
+                  <Box sx={{ width: '100%' }}>
+                    <Typography variant="body1" sx={{ fontWeight: 600 }}>
+                      {option.test_run_id}
+                    </Typography>
+                    <Typography variant="body2" color="text.secondary">
+                      {formatCandidateTime(option)}
+                    </Typography>
+                    <Typography variant="caption" color="text.secondary">
+                      {getCandidateSecondaryInfo(option)}
+                    </Typography>
+                  </Box>
+                </Box>
+              );
+            }}
+          />
 
           {/* Source selector */}
           <FormControl size="small" fullWidth>

@@ -1,9 +1,21 @@
-import { render, screen, fireEvent } from '@testing-library/react';
+import { render, screen, fireEvent, waitFor } from '@testing-library/react';
 import { ComparisonsConfigForm } from './SectionConfigs';
+
+const CANDIDATES = [
+  {
+    test_run_id: 'PerfanaWebshop-acc-loadTest-00003',
+    test_environment: 'acc',
+    workload: 'loadTest',
+    start_time: '2026-07-01T10:00:00Z',
+    created_at: '2026-07-01T10:00:00Z',
+    application_release: '2.4.3',
+    annotations: ['good baseline'],
+  },
+];
 
 // Mock authenticatedFetch so the useEffect doesn't blow up in tests
 jest.mock('@/lib/api', () => ({
-  authenticatedFetch: jest.fn(() => Promise.resolve({ ok: true, json: () => Promise.resolve([]) })),
+  authenticatedFetch: jest.fn(() => Promise.resolve({ ok: true, json: () => Promise.resolve(CANDIDATES) })),
 }));
 
 it('reveals baseline_run fields when mode is baseline_run', () => {
@@ -26,6 +38,25 @@ it('hides baseline_run fields in control_group mode', () => {
     />
   );
   expect(screen.queryByLabelText(/good/i)).not.toBeInTheDocument();
+});
+
+it('renders the baseline dropdown as a rich Autocomplete (compare-card style)', async () => {
+  render(
+    <ComparisonsConfigForm
+      config={{ comparisonMode: 'baseline_run' }}
+      onChange={jest.fn()}
+      systemUnderTestId="sut-1"
+      testRunId="PerfanaWebshop-acc-loadTest-00004"
+    />
+  );
+  const input = screen.getByLabelText(/baseline test run/i);
+  fireEvent.mouseDown(input);
+  fireEvent.change(input, { target: { value: 'PerfanaWebshop' } });
+  await waitFor(() => {
+    // Rich option: bold run id + env/workload + version + annotations
+    expect(screen.getByText('PerfanaWebshop-acc-loadTest-00003')).toBeInTheDocument();
+    expect(screen.getByText(/acc \/ loadTest • Version: 2\.4\.3 • Annotations: good baseline/)).toBeInTheDocument();
+  });
 });
 
 it('adds a host mapping row for dynatrace source', () => {
