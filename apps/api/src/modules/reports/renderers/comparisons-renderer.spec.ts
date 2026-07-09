@@ -224,6 +224,47 @@ describe('ComparisonsRenderer', () => {
     expect(html).toContain('#f59e0b'); // 10% == not < good(10) => amber band
   });
 
+  it('renders dynatrace as ONE merged table: host folded into heading, id prefix stripped, 2dp values', async () => {
+    const data = { source: 'dynatrace', rows: [
+      { group: 'HOST-123', label: 'HOST-123_afterburner-be_Memory Usage', metrics: [
+        { key: 'avg', current: 74.005882, baseline: 70, diffPercent: 5.7 },
+      ] },
+      { group: 'HOST-123', label: 'HOST-123_afterburner-be_CPU Usage', metrics: [
+        { key: 'avg', current: 25.5, baseline: 20, diffPercent: 27.5 },
+      ] },
+    ] };
+    jest.spyOn(dataFetcher, 'getBaselineRunComparison').mockResolvedValue(data as any);
+    const html = await renderer.renderComparisonsSection(
+      { type: 'comparisons', order: 0, config: {
+        comparisonMode: 'baseline_run', baselineTestRunId: 'base', source: 'dynatrace',
+        metrics: ['avg'], thresholds: { good: 10, warning: 50 } } } as any,
+      { testRunId: 'cur' } as any,
+    );
+    expect(html).toContain('Dynatrace · afterburner-be'); // host name folded into the heading
+    expect(html).toContain('Memory Usage');               // id prefix stripped from the metric
+    expect(html).not.toContain('HOST-123_');              // raw entity-id label never shown
+    expect(html).toContain('74.01');                      // rounded to 2 dp
+    expect(html).toContain('>Metric</th>');               // single Metric column
+  });
+
+  it('renders grafana as ONE merged table with a Grafana heading and labels as-is', async () => {
+    const data = { source: 'grafana', rows: [
+      { group: 'JVM / Heap', label: 'heap used', metrics: [
+        { key: 'avg', current: 1200.456, baseline: 1000, diffPercent: 20 },
+      ] },
+    ] };
+    jest.spyOn(dataFetcher, 'getBaselineRunComparison').mockResolvedValue(data as any);
+    const html = await renderer.renderComparisonsSection(
+      { type: 'comparisons', order: 0, config: {
+        comparisonMode: 'baseline_run', baselineTestRunId: 'base', source: 'grafana',
+        metrics: ['avg'], thresholds: { good: 10, warning: 50 } } } as any,
+      { testRunId: 'cur' } as any,
+    );
+    expect(html).toContain('>Grafana</h3>');
+    expect(html).toContain('heap used');
+    expect(html).toContain('1,200.46'); // thousands-grouped, 2 dp
+  });
+
   it('shows empty state when baseline data is null', async () => {
     jest.spyOn(dataFetcher, 'getBaselineRunComparison').mockResolvedValue(null);
     const html = await renderer.renderComparisonsSection(
