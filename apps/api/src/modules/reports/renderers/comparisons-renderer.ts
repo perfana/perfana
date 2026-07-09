@@ -210,11 +210,34 @@ export class ComparisonsRenderer {
         : 'Grafana';
       const metricHeaders = metrics.map((k) => `<th style="${thStyle} border-left:1px solid #eef1f5;">${k.toUpperCase()}</th>`).join('');
 
+      // Dashboard-mapping caption: when the comparison pairs a current-run
+      // dashboard with a differently named baseline dashboard, say so —
+      // "Current <dash> → Baseline <dash>" chips under the heading. Scoped to
+      // the selected dashboard's pair; unscoped sections show every differing pair.
+      const activePairs = (dashboardMap ?? [])
+        .filter((p) => p.current && p.baseline && p.current !== p.baseline)
+        .filter((p) => !dashboardLabel || p.current === dashboardLabel);
+      const mappingCaption = activePairs.length === 0 ? '' : activePairs.map((p) =>
+        `<div style="display:flex; align-items:center; gap:12px; margin:-2px 0 16px; font-size:12px;">
+          <span style="display:inline-flex; align-items:center; gap:7px; padding:5px 12px; border-radius:8px; background:#f1f6ff; border:1px solid #d6e4fb;">
+            <span style="width:8px; height:8px; border-radius:50%; background:#1976d2;"></span>
+            <span style="text-transform:uppercase; letter-spacing:0.05em; font-size:10.5px; font-weight:700; color:#5b6470;">Current</span>
+            <span style="font-weight:600; color:#1f2933;">${this.utils.escapeHtml(p.current)}</span>
+          </span>
+          <span style="color:#b6bcc4; font-size:15px;">&rarr;</span>
+          <span style="display:inline-flex; align-items:center; gap:7px; padding:5px 12px; border-radius:8px; background:#f6f7f9; border:1px solid #e6e8ec;">
+            <span style="width:8px; height:8px; border-radius:50%; background:#9aa2ab;"></span>
+            <span style="text-transform:uppercase; letter-spacing:0.05em; font-size:10.5px; font-weight:700; color:#8a929c;">Baseline</span>
+            <span style="font-weight:600; color:#4b5563;">${this.utils.escapeHtml(p.baseline)}</span>
+          </span>
+        </div>`).join('');
+
       bodyHtml = `<div style="margin-top:30px;">
         <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:14px;">
           <h3 style="margin:0; font-size:17px; font-weight:700; color:#2b3138; padding-left:14px; border-left:4px solid #1976d2;">${heading}</h3>
           <div style="display:flex; gap:8px;">${summaryChips(reg, warn, ok)}</div>
         </div>
+        ${mappingCaption}
         <table style="width:100%; border-collapse:collapse;">
           <thead><tr style="border-bottom:2px solid #e6e8ec;">
             <th style="${thText}">Metric</th>

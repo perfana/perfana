@@ -265,6 +265,52 @@ describe('ComparisonsRenderer', () => {
     expect(html).toContain('1,200.46'); // thousands-grouped, 2 dp
   });
 
+  it('shows a Current → Baseline caption when a dashboard mapping is in effect', async () => {
+    const data = { source: 'grafana', rows: [
+      { group: 'JVM (acc) / Heap', label: 'heap used', metrics: [
+        { key: 'avg', current: 110, baseline: 100, diffPercent: 10 },
+      ] },
+    ] };
+    jest.spyOn(dataFetcher, 'getBaselineRunComparison').mockResolvedValue(data as any);
+    const html = await renderer.renderComparisonsSection(
+      { type: 'comparisons', order: 0, config: {
+        comparisonMode: 'baseline_run', baselineTestRunId: 'base', source: 'grafana',
+        metrics: ['avg'], thresholds: { good: 10, warning: 50 },
+        dashboardLabel: 'JVM (acc)',
+        dashboardMap: [
+          { current: 'JVM (acc)', baseline: 'JVM (prod)' },
+          { current: 'Other dash', baseline: 'Other dash prod' }, // not selected — not shown
+        ],
+      } } as any,
+      { testRunId: 'cur' } as any,
+    );
+    expect(html).toContain('>Current</span>');
+    expect(html).toContain('JVM (acc)');
+    expect(html).toContain('>Baseline</span>');
+    expect(html).toContain('JVM (prod)');
+    expect(html).toContain('&rarr;');
+    expect(html).not.toContain('Other dash prod'); // scoped to the selected dashboard's pair
+  });
+
+  it('shows no mapping caption without a dashboardMap or for identity pairs', async () => {
+    const data = { source: 'dynatrace', rows: [
+      { group: 'HOST-123', label: 'HOST-123_afterburner-be_CPU Usage', metrics: [
+        { key: 'avg', current: 60, baseline: 50, diffPercent: 20 },
+      ] },
+    ] };
+    jest.spyOn(dataFetcher, 'getBaselineRunComparison').mockResolvedValue(data as any);
+    const html = await renderer.renderComparisonsSection(
+      { type: 'comparisons', order: 0, config: {
+        comparisonMode: 'baseline_run', baselineTestRunId: 'base', source: 'dynatrace',
+        metrics: ['avg'], thresholds: { good: 10, warning: 50 },
+        dashboardMap: [{ current: 'Hosts', baseline: 'Hosts' }], // identity — no caption
+      } } as any,
+      { testRunId: 'cur' } as any,
+    );
+    expect(html).not.toContain('>Current</span>');
+    expect(html).toContain('Dynatrace · afterburner-be'); // heading unchanged
+  });
+
   it('shows empty state when baseline data is null', async () => {
     jest.spyOn(dataFetcher, 'getBaselineRunComparison').mockResolvedValue(null);
     const html = await renderer.renderComparisonsSection(
