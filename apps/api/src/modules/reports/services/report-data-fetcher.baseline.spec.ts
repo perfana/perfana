@@ -72,6 +72,36 @@ describe('ReportDataFetcherService.getBaselineRunComparison', () => {
     expect(params).toEqual([['cur', 'base'], 'grafana']);
   });
 
+  it('groups dynatrace rows by the leading dt.entity id prefix (real worker encoding)', async () => {
+    // Worker DataProcessor stores dynatrace series as `{dt.entity.* id}_{metric}`,
+    // e.g. HOST-0A1B2C3D4E5F6789_cpu.usage — NOT host-as-last-dotted-segment.
+    const rows = [
+      { test_run_id: 'cur', dashboard_label: 'Hosts', panel_title: 'CPU', metric_name: 'HOST-0A1B2C3D4E5F6789_builtin:host.cpu.usage', mean: 60, q95: 80, q99: 90, unit: '%' },
+      { test_run_id: 'base', dashboard_label: 'Hosts', panel_title: 'CPU', metric_name: 'HOST-0A1B2C3D4E5F6789_builtin:host.cpu.usage', mean: 50, q95: 70, q99: 85, unit: '%' },
+    ];
+    const dataSource = { query: jest.fn().mockResolvedValue(rows) };
+    const svc = new ReportDataFetcherService(repoStub, authzStub, dataSource as any);
+    const data = await svc.getBaselineRunComparison('cur', 'base', 'dynatrace',
+      { metrics: ['avg'], userId: 'u', roles: [] });
+    const row = data!.rows[0]!;
+    expect(row.group).toBe('HOST-0A1B2C3D4E5F6789');
+    expect(row.metrics[0]!.diffPercent).toBeCloseTo(20);
+  });
+
+  it('remaps entity-id host token for dynatrace cross-host pairing', async () => {
+    const rows = [
+      { test_run_id: 'cur', dashboard_label: 'Hosts', panel_title: 'CPU', metric_name: 'HOST-AAAA111122223333_builtin:host.cpu.usage', mean: 60, q95: 80, q99: 90, unit: '%' },
+      { test_run_id: 'base', dashboard_label: 'Hosts', panel_title: 'CPU', metric_name: 'HOST-BBBB444455556666_builtin:host.cpu.usage', mean: 50, q95: 70, q99: 85, unit: '%' },
+    ];
+    const dataSource = { query: jest.fn().mockResolvedValue(rows) };
+    const svc = new ReportDataFetcherService(repoStub, authzStub, dataSource as any);
+    const data = await svc.getBaselineRunComparison('cur', 'base', 'dynatrace',
+      { metrics: ['avg'], userId: 'u', roles: [], hostMap: [{ current: 'HOST-AAAA111122223333', baseline: 'HOST-BBBB444455556666' }] });
+    const row = data!.rows[0]!;
+    expect(row.group).toBe('HOST-AAAA111122223333');
+    expect(row.metrics[0]!.diffPercent).toBeCloseTo(20);
+  });
+
   it('remaps host token for dynatrace baseline lookup', async () => {
     const rows = [
       { test_run_id: 'cur', dashboard_label: 'Hosts', panel_title: 'CPU', metric_name: 'cpu.host-A', mean: 60, q95: 80, q99: 90, unit: '%' },

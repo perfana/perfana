@@ -1174,7 +1174,9 @@ export function ComparisonsConfigForm({ config, onChange, testRunId, systemUnder
           {/* Dynatrace host-map editor */}
           {config.source === 'dynatrace' && (
             <Box sx={{ display: 'flex', flexDirection: 'column', gap: 1 }}>
-              <Typography variant="caption" color="text.secondary">Host mapping (current → baseline)</Typography>
+              <Typography variant="caption" color="text.secondary">
+                Host mapping (current → baseline) — use Dynatrace entity ids as they appear in the series names (e.g. HOST-0A1B2C3D4E5F6789)
+              </Typography>
               {(config.hostMap ?? []).map((row, i) => (
                 <Box key={i} sx={{ display: 'flex', gap: 1 }}>
                   <TextField size="small" label="Current host" value={row.current}

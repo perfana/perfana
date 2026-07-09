@@ -2124,13 +2124,17 @@ export class ReportDataFetcherService {
   }
 
   /**
-   * ponytail: naive host extractor — last dotted segment of the metric name.
-   * Replace if Dynatrace series encode the host elsewhere (confirm during impl — see plan note).
+   * Extract the host/entity grouping token from a Dynatrace series name.
+   * The worker (DataProcessor) stores series as `{dimension values}_{metric}`,
+   * where dimension values are dt.entity.* IDs (e.g. HOST-0A1B2C3D4E5F6789)
+   * joined by underscores — so the entity id is a leading prefix.
+   * ponytail: falls back to the full series name when no entity-id prefix
+   * is present (DQL groupings by non-entity dimensions).
    */
   private extractHost(metricName: string | null): string | null {
     if (!metricName) return null;
-    const parts = metricName.split('.');
-    return parts.length > 1 ? parts[parts.length - 1]! : metricName;
+    const m = metricName.match(/^([A-Z][A-Z_]*-[A-F0-9]{8,})/);
+    return m ? m[1]! : metricName;
   }
 
   /**
