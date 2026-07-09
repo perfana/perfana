@@ -2067,7 +2067,7 @@ export class ReportDataFetcherService {
       `SELECT s.test_run_id, s.dashboard_label, s.panel_title, s.metric_name, s.unit, s.mean, s.q95, s.q99
        FROM ds_metric_statistics s
        LEFT JOIN metrics_sources ms ON ms.id = s.metrics_source_id
-       WHERE s.test_run_id = ANY($1) AND (s.metrics_source_id IS NULL OR ms.type = $2)${scopeFilter}`,
+       WHERE s.test_run_id = ANY($1) AND (s.metrics_source_id IS NULL OR ms.source_type = $2)${scopeFilter}`,
       params,
     );
     if (rows.length === 0) return null;

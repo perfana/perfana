@@ -55,6 +55,9 @@ describe('ReportDataFetcherService.getBaselineRunComparison', () => {
     const [sql, params] = dataSource.query.mock.calls[0]!;
     expect(sql).toContain('s.dashboard_label = $3');
     expect(sql).toContain('s.panel_id = ANY($4)');
+    // Real column is metrics_sources.source_type — `ms.type` blew up against the live DB
+    expect(sql).toContain('ms.source_type = $2');
+    expect(sql).not.toContain('ms.type =');
     expect(params).toEqual([['cur', 'base'], 'grafana', 'JVM', [3, 7]]);
   });
 
