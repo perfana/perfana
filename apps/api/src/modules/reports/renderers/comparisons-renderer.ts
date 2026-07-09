@@ -108,6 +108,17 @@ export class ComparisonsRenderer {
         <p class="placeholder-message">No comparison data available for the selected baseline run.</p></section>`;
     }
 
+    // Map bandColor()'s single hex to a full chip / text / bar / rank palette.
+    const palette = (hex: string): { chip: string; text: string; dot: string; rank: number } => {
+      switch (hex) {
+        case '#4caf50': return { chip: '#e7f4ea', text: '#2e7d32', dot: '#43a047', rank: 0 };
+        case '#f59e0b': return { chip: '#fdf0dd', text: '#9a5b00', dot: '#f59e0b', rank: 1 };
+        case '#db524e': return { chip: '#fbe6e4', text: '#c1362f', dot: '#e04944', rank: 2 };
+        default:        return { chip: '#f1f1f1', text: '#9e9e9e', dot: '#bdbdbd', rank: 0 };
+      }
+    };
+    const fmt = (v: number | null | undefined): string => (v == null ? '—' : String(v));
+
     const groups = new Map<string, BaselineComparisonRow[]>();
     for (const r of data.rows) {
       const arr = groups.get(r.group) ?? [];
@@ -115,31 +126,81 @@ export class ComparisonsRenderer {
       groups.set(r.group, arr);
     }
 
-    const metricHeaders = metrics.map(k =>
-      `<th colspan="3" style="text-align:center;">${k.toUpperCase()}</th>`).join('');
-    const subHeaders = metrics.map(() =>
-      `<th>Current</th><th>Baseline</th><th>Diff %</th>`).join('');
+    const thStyle = 'text-align:right; padding:4px 16px 12px; font-size:11.5px; font-weight:700; letter-spacing:0.06em; color:#1976d2;';
+    const metricHeaders = metrics.map((k, i) =>
+      `<th style="${thStyle}${i > 0 ? ' border-left:1px solid #eef1f5;' : ''}">${k.toUpperCase()}</th>`).join('');
 
     const groupHtml = Array.from(groups.entries()).map(([group, rows]) => {
-      const body = rows.map(row => {
-        const cells = row.metrics.map(m => {
-          const color = bandColor(m.diffPercent, thresholds);
+      let reg = 0, warn = 0, ok = 0;
+
+      const body = rows.map((row, idx) => {
+        const cellData = row.metrics.map(m => ({ m, p: palette(bandColor(m.diffPercent, thresholds)) }));
+        const worst = cellData.reduce((mx, c) => Math.max(mx, c.p.rank), 0);
+        if (worst === 2) reg++; else if (worst === 1) warn++; else ok++;
+        const nameColor = worst === 2 ? '#e04944' : worst === 1 ? '#f59e0b' : '#43a047';
+        const rowBg = worst === 2 ? '#fff7f6' : (idx % 2 === 1 ? '#fbfcfd' : '#ffffff');
+
+        const cells = cellData.map(({ m, p }, gi) => {
           const diff = m.diffPercent == null ? '—' : `${m.diffPercent >= 0 ? '+' : ''}${m.diffPercent.toFixed(1)}%`;
-          return `<td style="text-align:right;">${m.current ?? '—'}</td>
-                  <td style="text-align:right;">${m.baseline ?? '—'}</td>
-                  <td style="text-align:right; color:${color}; font-weight:600;">${diff}</td>`;
+          const arrow = m.diffPercent == null ? '' : (m.diffPercent > 0 ? '▲' : (m.diffPercent < 0 ? '▼' : ''));
+          let left = 50, width = 0;
+          if (m.diffPercent != null) {
+            const mag = Math.min(Math.abs(m.diffPercent), 100) / 2; // 100% diff fills half the track
+            if (m.diffPercent >= 0) { left = 50; width = mag; } else { width = mag; left = 50 - mag; }
+          }
+          return `<td style="padding:14px 16px; border-bottom:1px solid #f0f2f5;${gi > 0 ? ' border-left:1px solid #eef1f5;' : ''}">
+            <div style="display:flex; flex-direction:column; gap:6px; align-items:flex-end;">
+              <div style="display:flex; align-items:baseline; gap:8px;">
+                <span style="font-size:15px; font-weight:700; color:#1f2933; font-variant-numeric:tabular-nums;">${fmt(m.current)}</span>
+                <span style="font-size:11px; color:#9aa2ab; font-variant-numeric:tabular-nums;">vs ${fmt(m.baseline)}</span>
+              </div>
+              <span style="display:inline-flex; align-items:center; gap:3px; padding:2px 8px; border-radius:999px; font-size:11.5px; font-weight:700; font-variant-numeric:tabular-nums; background:${p.chip}; color:${p.text};">${arrow} ${diff}</span>
+              <div style="position:relative; width:110px; height:4px; border-radius:2px; background:#edf0f3;">
+                <div style="position:absolute; left:50%; top:-2px; width:1px; height:8px; background:#ccd0d6;"></div>
+                <div style="position:absolute; top:0; height:100%; border-radius:2px; left:${left}%; width:${width}%; background:${p.dot};"></div>
+              </div>
+            </div></td>`;
         }).join('');
-        return `<tr><td>${this.utils.escapeHtml(row.label)}</td>${cells}</tr>`;
+
+        return `<tr style="background:${rowBg};">
+          <td style="padding:14px 14px 14px 12px; border-left:3px solid ${nameColor}; border-bottom:1px solid #f0f2f5; font-size:13px; color:#374151; font-weight:500; white-space:nowrap; vertical-align:top;">${this.utils.escapeHtml(row.label)}</td>
+          ${cells}</tr>`;
       }).join('');
-      return `<h3>${this.utils.escapeHtml(group)}</h3>
+
+      const chips = [
+        reg > 0 ? `<span style="padding:4px 11px; border-radius:999px; background:#fbe6e4; color:#c1362f; font-size:12px; font-weight:700;">${reg} regressions</span>` : '',
+        warn > 0 ? `<span style="padding:4px 11px; border-radius:999px; background:#fdf0dd; color:#9a5b00; font-size:12px; font-weight:700;">${warn} warnings</span>` : '',
+        ok > 0 ? `<span style="padding:4px 11px; border-radius:999px; background:#e7f4ea; color:#2e7d32; font-size:12px; font-weight:700;">${ok} within range</span>` : '',
+      ].join('');
+
+      return `<div style="margin-top:38px;">
+        <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:14px;">
+          <h3 style="margin:0; font-size:17px; font-weight:700; color:#2b3138; padding-left:14px; border-left:4px solid #1976d2;">${this.utils.escapeHtml(group)}</h3>
+          <div style="display:flex; gap:8px;">${chips}</div>
+        </div>
         <table style="width:100%; border-collapse:collapse;">
-          <thead><tr><th rowspan="2">Transaction / Metric</th>${metricHeaders}</tr><tr>${subHeaders}</tr></thead>
-          <tbody>${body}</tbody></table>`;
+          <thead><tr style="border-bottom:2px solid #e6e8ec;">
+            <th style="text-align:left; padding:4px 14px 12px 12px; font-size:11px; font-weight:700; text-transform:uppercase; letter-spacing:0.05em; color:#8a929c;">Transaction</th>
+            ${metricHeaders}
+          </tr></thead>
+          <tbody>${body}</tbody>
+        </table>
+      </div>`;
     }).join('\n');
 
-    return `<section class="comparisons-section"><h2>${this.utils.escapeHtml(title)}</h2>
+    const legend = `<div style="font-size:12.5px; color:#6b7280; margin-top:12px; display:flex; align-items:center; gap:20px; flex-wrap:wrap;">
+      <span>Each cell shows <strong style="color:#1f2933; font-weight:600;">current</strong> &#183; vs baseline &#183; &#916;%. Bar shows regression magnitude.</span>
+      <span style="display:inline-flex; align-items:center; gap:6px;"><span style="width:9px; height:9px; border-radius:50%; background:#43a047;"></span> &#8804; ${thresholds.good}%</span>
+      <span style="display:inline-flex; align-items:center; gap:6px;"><span style="width:9px; height:9px; border-radius:50%; background:#f59e0b;"></span> ${thresholds.good}&#8211;${thresholds.warning}%</span>
+      <span style="display:inline-flex; align-items:center; gap:6px;"><span style="width:9px; height:9px; border-radius:50%; background:#db524e;"></span> &gt; ${thresholds.warning}%</span>
+    </div>`;
+
+    return `<section class="comparisons-section">
+      <h2>${this.utils.escapeHtml(title)}</h2>
       ${comment ? `<div class="section-comment">${this.utils.escapeHtml(comment)}</div>` : ''}
-      ${groupHtml}</section>`;
+      ${legend}
+      ${groupHtml}
+    </section>`;
   }
 
   private renderSummaryBadges(data: ComparisonsData): string {
