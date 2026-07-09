@@ -4,6 +4,14 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
+## [0.2.61.38] - 2026-07-09
+
+### Fixed
+- **`baseline_run` comparison sections no longer render empty in generated reports.** Report HTML generation runs in a background job with no user context (`generateHtml(reportId)` → `userId=''`), and the performance-metrics branch went through the controller-facing `TestRunsService.getTransactionStats`, which treats an empty user as a non-admin with zero organizations and returns `[]` — so the default source produced the empty-state in every real report while mocked unit tests stayed green. The fetcher now queries the `transactions` table directly (AVG/P95/P99 grouped by run, scenario, and transaction) via `resolveOrgFilter`, which implements the reports convention: empty userId = system call = no org filter; real users stay org-scoped. The now-unused `TestRunsService` dependency and `TestRunsModule` import were removed. SQL verified against a live database with the failing report's actual run IDs.
+
+### Changed
+- **The baseline test-run dropdown in the report section config now matches the compare card.** The plain select (env / workload / date) is replaced with the searchable Autocomplete pattern from the test-run details compare card: bold `test_run_id` with a formatted timestamp as the label, and a secondary line showing environment/workload (candidates span all environments of the system under test), application release, and annotations.
+
 ## [0.2.61.37] - 2026-07-08
 
 ### Added
