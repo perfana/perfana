@@ -4,6 +4,11 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
+## [0.2.61.39] - 2026-07-09
+
+### Fixed
+- **"Build and Push Docker Images" no longer fails when dispatched on a feature branch with "Push images" checked.** The `Log in to Docker Hub` step was gated on `github.event_name == 'push'`, while the build step's `push:` condition also allowed `workflow_dispatch` with `push_images=true` — so branch dispatches built for ~5 minutes and then pushed unauthenticated, dying with `401 Unauthorized: access token has insufficient scopes` in all six build jobs. The login condition now matches the push condition. Also gated the raw `VERSION` image tag to push events only: without that, the first successful branch push would silently overwrite the released version tag on Docker Hub whenever the branch's VERSION file matches main's (branch/sha tags are still pushed).
+
 ## [0.2.61.38] - 2026-07-09
 
 ### Fixed
