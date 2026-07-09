@@ -223,6 +223,12 @@ export function GenerateReportDialog({
     testRunId,
     open && !isTemplateBuilder && baselineSectionCount > 0,
   );
+  // "Save as template" name conflict: template summaries are scoped to the
+  // same (system, environment, workload) as the DB unique constraint, so a
+  // client-side match means the server would reject it.
+  const templateNameTaken = saveAsTemplate &&
+    templates.some((t) => t.name.trim() === templateName.trim() && templateName.trim() !== '');
+
   const handleSharedBaselineChange = (candidate: BaselineCandidate | null) => {
     setSections(sections.map((s) =>
       isBaselineSection(s)
@@ -493,8 +499,14 @@ export function GenerateReportDialog({
                   onChange={(e) => setTemplateName(e.target.value)}
                   placeholder="Enter template name..."
                   required
-                  error={saveAsTemplate && !templateName.trim()}
-                  helperText={saveAsTemplate && !templateName.trim() ? 'Template name is required' : ''}
+                  error={(saveAsTemplate && !templateName.trim()) || templateNameTaken}
+                  helperText={
+                    saveAsTemplate && !templateName.trim()
+                      ? 'Template name is required'
+                      : templateNameTaken
+                        ? 'A template with this name already exists — choose a different name'
+                        : ''
+                  }
                   sx={{ mt: 2 }}
                 />
               )}
@@ -777,7 +789,7 @@ export function GenerateReportDialog({
             <Button
               variant="contained"
               onClick={handleGenerate}
-              disabled={isSubmitting || sections.length === 0 || (saveAsTemplate && !templateName.trim())}
+              disabled={isSubmitting || sections.length === 0 || (saveAsTemplate && !templateName.trim()) || templateNameTaken}
               startIcon={isSubmitting ? <CircularProgress size={16} color="inherit" /> : <DescriptionIcon />}
               sx={{
                 textTransform: 'none',
