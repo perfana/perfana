@@ -73,6 +73,29 @@ jest.mock('@/lib/api/reports', () => ({
   },
 }));
 
+// The dialog (and section config forms) fetch baseline candidates via
+// authenticatedFetch — serve a fixed candidate list, degrade everything else.
+jest.mock('@/lib/api', () => ({
+  authenticatedFetch: jest.fn((url: string) => {
+    if (typeof url === 'string' && url.includes('/test-runs/baseline-candidates')) {
+      return Promise.resolve({
+        ok: true,
+        json: () => Promise.resolve([
+          {
+            test_run_id: 'baseline-001',
+            test_environment: 'acc',
+            workload: 'loadTest',
+            start_time: '2026-07-01T10:00:00Z',
+            created_at: '2026-07-01T10:00:00Z',
+          },
+        ]),
+      });
+    }
+    return Promise.resolve({ ok: false, json: () => Promise.resolve([]) });
+  }),
+  getAuthHeaders: jest.fn(() => ({})),
+}));
+
 describe('GenerateReportDialog', () => {
   const mockOnClose = jest.fn();
   const mockOnSuccess = jest.fn();
@@ -897,6 +920,57 @@ describe('GenerateReportDialog', () => {
         const deleteIcons = screen.getAllByTestId('DeleteIcon');
         expect(deleteIcons.length).toBeGreaterThanOrEqual(1);
       });
+    });
+  });
+
+  describe('Template-level baseline picker', () => {
+    const baselineTemplate: reportsApi.TemplateDetail = {
+      ...mockTemplateDetail,
+      sections: [
+        { type: 'header', order: 0, title: 'Report Header' },
+        { type: 'comparisons', order: 1, title: 'Perf vs Baseline', config: { comparisonMode: 'baseline_run', source: 'performance-metrics' } },
+        { type: 'comparisons', order: 2, title: 'Grafana vs Baseline', config: { comparisonMode: 'baseline_run', source: 'grafana' } },
+      ],
+    };
+
+    it('shows one picker for baseline sections and applies the choice to all of them', async () => {
+      (reportsApi.getTemplate as jest.Mock).mockResolvedValue(baselineTemplate);
+      render(<GenerateReportDialog {...defaultProps} />);
+
+      // Load the template containing two baseline_run sections
+      fireEvent.click(await screen.findByText('Performance Summary'));
+
+      // The template-level picker appears once
+      expect(await screen.findByText(/set it once here/i)).toBeInTheDocument();
+      expect(screen.getByText(/2 sections in this report compare against a baseline run/i)).toBeInTheDocument();
+
+      // Pick the baseline run in the template-level dropdown (first match —
+      // per-section dropdowns live inside collapsed config panels below it)
+      const input = screen.getAllByLabelText(/baseline test run/i)[0];
+      fireEvent.mouseDown(input);
+      fireEvent.change(input, { target: { value: 'baseline' } });
+      fireEvent.click(await screen.findByText('baseline-001'));
+
+      // Generate — every baseline_run section carries the selected id
+      fireEvent.click(screen.getByRole('button', { name: /generate report/i }));
+      await waitFor(() => expect(reportsApi.generateAdHocReport).toHaveBeenCalled());
+      const payload = (reportsApi.generateAdHocReport as jest.Mock).mock.calls[0][0];
+      const comparisonSections = payload.sections.filter((s: { type: string }) => s.type === 'comparisons');
+      expect(comparisonSections).toHaveLength(2);
+      for (const s of comparisonSections) {
+        expect(s.config.baselineTestRunId).toBe('baseline-001');
+      }
+      // The non-comparison section is untouched
+      const header = payload.sections.find((s: { type: string }) => s.type === 'header');
+      expect(header.config?.baselineTestRunId).toBeUndefined();
+    });
+
+    it('does not show the picker when no section requires a baseline', async () => {
+      (reportsApi.getTemplate as jest.Mock).mockResolvedValue(mockTemplateDetail);
+      render(<GenerateReportDialog {...defaultProps} />);
+      fireEvent.click(await screen.findByText('Performance Summary'));
+      await screen.findByText('Available Sections');
+      expect(screen.queryByText(/set it once here/i)).not.toBeInTheDocument();
     });
   });
 });

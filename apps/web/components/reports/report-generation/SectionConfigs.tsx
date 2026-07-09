@@ -15,6 +15,7 @@ import dynamic from 'next/dynamic';
 import { authenticatedFetch } from '@/lib/api';
 import { fetchDynatraceDashboards, fetchDynatraceMetrics } from '@/lib/dynatrace';
 import { isGrafana } from '@/lib/metrics-source-utils';
+import { BaselineRunSelect, useBaselineCandidates } from './BaselineRunSelect';
 
 // Dynamically import preview components to reduce initial bundle size
 const ApdexSectionPreview = dynamic(() => import('./preview/ApdexSectionPreview'), { ssr: false });
@@ -808,38 +809,6 @@ export interface ComparisonsConfig {
 // Panel types the comparison can meaningfully diff (mirrors the compare card).
 const COMPARABLE_PANEL_TYPES = ['graph', 'timeseries', 'stat', 'singlestat', 'flamegraph'];
 
-interface BaselineCandidate {
-  test_run_id: string;
-  test_environment: string;
-  workload: string;
-  start_time?: string;
-  created_at: string;
-  application_release?: string;
-  annotations?: string[];
-}
-
-// Mirrors the compare card's test-run option rendering (CompareSelectionPanel /
-// compare-utils), extended with env/workload since baseline candidates span
-// all environments and workloads of the SUT.
-const formatCandidateTime = (c: BaselineCandidate): string =>
-  new Date(c.start_time || c.created_at).toLocaleString('en-US', {
-    year: 'numeric',
-    month: 'short',
-    day: 'numeric',
-    hour: '2-digit',
-    minute: '2-digit',
-  });
-
-const getCandidateDisplayText = (c: BaselineCandidate): string =>
-  `${c.test_run_id} - ${formatCandidateTime(c)}`;
-
-const getCandidateSecondaryInfo = (c: BaselineCandidate): string => {
-  const parts = [`${c.test_environment} / ${c.workload}`];
-  if (c.application_release) parts.push(`Version: ${c.application_release}`);
-  if (c.annotations && c.annotations.length > 0) parts.push(`Annotations: ${c.annotations.join(', ')}`);
-  return parts.join(' • ');
-};
-
 interface ComparisonsConfigFormProps {
   config: ComparisonsConfig;
   onChange: (config: ComparisonsConfig) => void;
@@ -855,29 +824,16 @@ interface SourceDashboardOption {
 }
 
 export function ComparisonsConfigForm({ config, onChange, testRunId, systemUnderTestId, testEnvironment, workload }: ComparisonsConfigFormProps) {
-  const [baselineCandidates, setBaselineCandidates] = useState<BaselineCandidate[]>([]);
   const [sourceDashboards, setSourceDashboards] = useState<SourceDashboardOption[]>([]);
   const [baselineDashboards, setBaselineDashboards] = useState<SourceDashboardOption[]>([]);
   const [sourcePanels, setSourcePanels] = useState<{ id: number; title: string }[]>([]);
 
   const comparisonMode = config.comparisonMode ?? 'control_group';
   const source = config.source ?? 'performance-metrics';
+  const baselineCandidates = useBaselineCandidates(systemUnderTestId, testRunId, comparisonMode === 'baseline_run');
   // The baseline run may live in a different environment/workload — its
   // dashboard list (for the mapping dropdowns) is fetched for THAT scope.
   const baselineCandidate = baselineCandidates.find((c) => c.test_run_id === config.baselineTestRunId);
-
-  useEffect(() => {
-    if (comparisonMode !== 'baseline_run' || !systemUnderTestId) return;
-    const params = new URLSearchParams({ systemUnderTestId });
-    if (testRunId) params.set('excludeTestRunId', testRunId);
-    authenticatedFetch(`/test-runs/baseline-candidates?${params.toString()}`)
-      .then((res) => {
-        if (!res.ok) { setBaselineCandidates([]); return; }
-        return res.json();
-      })
-      .then((data: BaselineCandidate[] | undefined) => { if (data) setBaselineCandidates(data); })
-      .catch(() => setBaselineCandidates([]));
-  }, [comparisonMode, systemUnderTestId, testRunId]);
 
   // Load dashboards for the selected source (grafana/dynatrace) — same endpoints as the compare card
   useEffect(() => {
@@ -1043,45 +999,11 @@ export function ComparisonsConfigForm({ config, onChange, testRunId, systemUnder
       {/* Baseline-run fields — only shown in baseline_run mode */}
       {comparisonMode === 'baseline_run' && (
         <>
-          {/* Baseline run selector — same UX as the compare card's test-run Autocomplete */}
-          <Autocomplete
-            options={baselineCandidates}
-            getOptionLabel={getCandidateDisplayText}
-            isOptionEqualToValue={(option, value) => option.test_run_id === value.test_run_id}
-            value={baselineCandidates.find((c) => c.test_run_id === config.baselineTestRunId) ?? null}
-            onChange={(_, newValue) => onChange({ ...config, baselineTestRunId: newValue?.test_run_id })}
-            size="small"
-            renderInput={(params) => (
-              <TextField
-                {...params}
-                label="Baseline Test Run"
-                variant="outlined"
-                fullWidth
-                helperText={
-                  config.baselineTestRunId
-                    ? `Comparing with: ${config.baselineTestRunId}`
-                    : `Select from ${baselineCandidates.length} available test runs`
-                }
-              />
-            )}
-            renderOption={(props, option) => {
-              const { key, ...otherProps } = props;
-              return (
-                <Box component="li" key={key} {...otherProps}>
-                  <Box sx={{ width: '100%' }}>
-                    <Typography variant="body1" sx={{ fontWeight: 600 }}>
-                      {option.test_run_id}
-                    </Typography>
-                    <Typography variant="body2" color="text.secondary">
-                      {formatCandidateTime(option)}
-                    </Typography>
-                    <Typography variant="caption" color="text.secondary">
-                      {getCandidateSecondaryInfo(option)}
-                    </Typography>
-                  </Box>
-                </Box>
-              );
-            }}
+          {/* Baseline run selector — shared compare-card-style Autocomplete */}
+          <BaselineRunSelect
+            candidates={baselineCandidates}
+            value={config.baselineTestRunId}
+            onChange={(c) => onChange({ ...config, baselineTestRunId: c?.test_run_id })}
           />
 
           {/* Source selector */}

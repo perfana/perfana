@@ -81,6 +81,7 @@ import {
   TrendsConfigForm,
   ComparisonsConfigForm,
 } from './SectionConfigs';
+import { BaselineRunSelect, useBaselineCandidates, type BaselineCandidate } from './BaselineRunSelect';
 
 // ==================== Types ====================
 
@@ -202,6 +203,33 @@ export function GenerateReportDialog({
 
   // Report generation state (polling handled by parent component)
   const [generationStatus, setGenerationStatus] = useState<string>('');
+
+  // Template-level baseline: sections that compare against a baseline test run
+  // can all be pointed at one run from a single dropdown.
+  const isBaselineSection = (s: ReportSectionConfig) =>
+    s.type === 'comparisons' &&
+    (s.config as Record<string, unknown> | undefined)?.comparisonMode === 'baseline_run';
+  const baselineSections = sections.filter(isBaselineSection);
+  const baselineSectionCount = baselineSections.length;
+  const baselineIds = new Set(
+    baselineSections
+      .map((s) => (s.config as Record<string, unknown> | undefined)?.baselineTestRunId)
+      .filter((v): v is string => typeof v === 'string' && v.length > 0),
+  );
+  // One shared value when all baseline sections agree; undefined otherwise
+  const sharedBaselineId = baselineIds.size === 1 ? [...baselineIds][0] : undefined;
+  const baselineCandidates = useBaselineCandidates(
+    scope.systemId,
+    testRunId,
+    open && !isTemplateBuilder && baselineSectionCount > 0,
+  );
+  const handleSharedBaselineChange = (candidate: BaselineCandidate | null) => {
+    setSections(sections.map((s) =>
+      isBaselineSection(s)
+        ? { ...s, config: { ...(s.config ?? {}), baselineTestRunId: candidate?.test_run_id } }
+        : s,
+    ));
+  };
 
   // Load templates on open (skip in template-builder mode)
   useEffect(() => {
@@ -470,6 +498,32 @@ export function GenerateReportDialog({
                   sx={{ mt: 2 }}
                 />
               )}
+            </Box>
+          )}
+
+          {/* Template-level baseline picker: one place to set the baseline run for
+              every comparison section in this report (sections can still override
+              it individually in their own configuration). */}
+          {!isTemplateBuilder && !showTemplateSelector && baselineSectionCount > 0 && (
+            <Box sx={{ mx: 3, mt: 2, p: 2, border: '1px solid', borderColor: 'divider', borderRadius: 2 }}>
+              <Typography variant="body2" sx={{ fontWeight: 600, mb: 0.5 }}>
+                Baseline Test Run
+              </Typography>
+              <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mb: 1.5 }}>
+                {baselineSectionCount} section{baselineSectionCount !== 1 ? 's' : ''} in this report compare{baselineSectionCount === 1 ? 's' : ''} against a baseline run — set it once here.
+              </Typography>
+              <BaselineRunSelect
+                candidates={baselineCandidates}
+                value={sharedBaselineId}
+                onChange={handleSharedBaselineChange}
+                helperText={
+                  sharedBaselineId
+                    ? `Applied to all ${baselineSectionCount} comparison section${baselineSectionCount !== 1 ? 's' : ''}`
+                    : sharedBaselineId === undefined && baselineSectionCount > 1
+                      ? 'Sections currently use different baselines — selecting one here overrides them all'
+                      : `Select from ${baselineCandidates.length} available test runs`
+                }
+              />
             </Box>
           )}
         </Box>
