@@ -43,6 +43,32 @@ describe('ReportDataFetcherService.getBaselineRunComparison', () => {
     expect(row.metrics.find(m => m.key === 'avg')!.diffPercent).toBeCloseTo(10);
   });
 
+  it('filters by dashboard and panel ids when configured (grafana)', async () => {
+    const rows = [
+      { test_run_id: 'cur', dashboard_label: 'JVM', panel_title: 'Heap', metric_name: 'used', mean: 110, q95: 220, q99: 300, unit: 'bytes' },
+      { test_run_id: 'base', dashboard_label: 'JVM', panel_title: 'Heap', metric_name: 'used', mean: 100, q95: 200, q99: 250, unit: 'bytes' },
+    ];
+    const dataSource = { query: jest.fn().mockResolvedValue(rows) };
+    const svc = new ReportDataFetcherService(repoStub, authzStub, dataSource as any);
+    await svc.getBaselineRunComparison('cur', 'base', 'grafana',
+      { metrics: ['avg'], userId: 'u', roles: [], dashboardLabel: 'JVM', panelIds: [3, 7] });
+    const [sql, params] = dataSource.query.mock.calls[0]!;
+    expect(sql).toContain('s.dashboard_label = $3');
+    expect(sql).toContain('s.panel_id = ANY($4)');
+    expect(params).toEqual([['cur', 'base'], 'grafana', 'JVM', [3, 7]]);
+  });
+
+  it('omits dashboard/panel filters when not configured', async () => {
+    const dataSource = { query: jest.fn().mockResolvedValue([]) };
+    const svc = new ReportDataFetcherService(repoStub, authzStub, dataSource as any);
+    await svc.getBaselineRunComparison('cur', 'base', 'grafana',
+      { metrics: ['avg'], userId: 'u', roles: [] });
+    const [sql, params] = dataSource.query.mock.calls[0]!;
+    expect(sql).not.toContain('s.dashboard_label =');
+    expect(sql).not.toContain('s.panel_id =');
+    expect(params).toEqual([['cur', 'base'], 'grafana']);
+  });
+
   it('remaps host token for dynatrace baseline lookup', async () => {
     const rows = [
       { test_run_id: 'cur', dashboard_label: 'Hosts', panel_title: 'CPU', metric_name: 'cpu.host-A', mean: 60, q95: 80, q99: 90, unit: '%' },

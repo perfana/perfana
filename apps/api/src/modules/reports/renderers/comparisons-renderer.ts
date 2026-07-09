@@ -96,10 +96,14 @@ export class ComparisonsRenderer {
     const hostMap = Array.isArray(config.hostMap)
       ? (config.hostMap as { current: string; baseline: string }[])
       : undefined;
+    const dashboardLabel = typeof config.dashboardLabel === 'string' ? config.dashboardLabel : undefined;
+    const panelIds = Array.isArray(config.panels)
+      ? (config.panels as { id: number; title: string }[]).map((p) => p.id)
+      : undefined;
 
     const data = testRun && baselineId
       ? await this.dataFetcher.getBaselineRunComparison(testRun.testRunId, baselineId, source,
-          { metrics, userId, roles, hostMap })
+          { metrics, userId, roles, hostMap, dashboardLabel, panelIds })
       : null;
 
     if (!data || data.rows.length === 0) {

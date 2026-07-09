@@ -1954,7 +1954,15 @@ export class ReportDataFetcherService {
     currentRunId: string,
     baselineRunId: string,
     source: 'performance-metrics' | 'grafana' | 'dynatrace',
-    opts: { metrics: ('avg' | 'p95' | 'p99')[]; userId: string; roles: string[]; hostMap?: { current: string; baseline: string }[] },
+    opts: {
+      metrics: ('avg' | 'p95' | 'p99')[];
+      userId: string;
+      roles: string[];
+      hostMap?: { current: string; baseline: string }[];
+      // grafana/dynatrace only: restrict the comparison to one dashboard and a panel selection
+      dashboardLabel?: string;
+      panelIds?: number[];
+    },
   ): Promise<BaselineComparisonData | null> {
     if (source === 'performance-metrics') {
       // Query the transactions table directly (like getScenarioDataFromDatabase)
@@ -2026,9 +2034,26 @@ export class ReportDataFetcherService {
     currentRunId: string,
     baselineRunId: string,
     source: 'grafana' | 'dynatrace',
-    opts: { metrics: ('avg' | 'p95' | 'p99')[]; hostMap?: { current: string; baseline: string }[] },
+    opts: {
+      metrics: ('avg' | 'p95' | 'p99')[];
+      hostMap?: { current: string; baseline: string }[];
+      dashboardLabel?: string;
+      panelIds?: number[];
+    },
   ): Promise<BaselineComparisonData | null> {
     const sourceType = source === 'grafana' ? 'grafana' : 'dynatrace';
+    // Optional dashboard/panel scoping (from the section config's panel selection).
+    // Absent -> unfiltered, preserving behavior for configs saved before panel selection existed.
+    const params: unknown[] = [[currentRunId, baselineRunId], sourceType];
+    let scopeFilter = '';
+    if (opts.dashboardLabel) {
+      params.push(opts.dashboardLabel);
+      scopeFilter += ` AND s.dashboard_label = $${params.length}`;
+    }
+    if (opts.panelIds && opts.panelIds.length > 0) {
+      params.push(opts.panelIds);
+      scopeFilter += ` AND s.panel_id = ANY($${params.length})`;
+    }
     const rows: Array<{
       test_run_id: string;
       dashboard_label: string | null;
@@ -2042,8 +2067,8 @@ export class ReportDataFetcherService {
       `SELECT s.test_run_id, s.dashboard_label, s.panel_title, s.metric_name, s.unit, s.mean, s.q95, s.q99
        FROM ds_metric_statistics s
        LEFT JOIN metrics_sources ms ON ms.id = s.metrics_source_id
-       WHERE s.test_run_id = ANY($1) AND (s.metrics_source_id IS NULL OR ms.type = $2)`,
-      [[currentRunId, baselineRunId], sourceType],
+       WHERE s.test_run_id = ANY($1) AND (s.metrics_source_id IS NULL OR ms.type = $2)${scopeFilter}`,
+      params,
     );
     if (rows.length === 0) return null;
 

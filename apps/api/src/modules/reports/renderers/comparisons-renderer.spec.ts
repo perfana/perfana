@@ -248,4 +248,21 @@ describe('ComparisonsRenderer', () => {
     expect(optsArg.userId).toBe('user-1');
     expect(optsArg.roles).toEqual(['user']);
   });
+
+  it('forwards dashboardLabel and panel ids from the config into the fetcher opts', async () => {
+    const spy = jest.spyOn(dataFetcher, 'getBaselineRunComparison').mockResolvedValue(null);
+    await renderer.renderComparisonsSection(
+      { type: 'comparisons', order: 0, config: {
+        comparisonMode: 'baseline_run', baselineTestRunId: 'base-99', source: 'grafana',
+        dashboardLabel: 'JVM Metrics',
+        panels: [{ id: 3, title: 'Heap' }, { id: 7, title: 'GC Pause' }],
+      } } as any,
+      { testRunId: 'cur-42' } as any,
+      'user-1',
+      ['user'],
+    );
+    const optsArg = spy.mock.calls[0]![3];
+    expect(optsArg.dashboardLabel).toBe('JVM Metrics');
+    expect(optsArg.panelIds).toEqual([3, 7]);
+  });
 });

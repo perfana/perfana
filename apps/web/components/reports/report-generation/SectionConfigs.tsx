@@ -13,6 +13,8 @@ import DeleteIcon from '@mui/icons-material/Delete';
 import SectionPreviewModal from './SectionPreviewModal';
 import dynamic from 'next/dynamic';
 import { authenticatedFetch } from '@/lib/api';
+import { fetchDynatraceDashboards, fetchDynatraceMetrics } from '@/lib/dynatrace';
+import { isGrafana } from '@/lib/metrics-source-utils';
 
 // Dynamically import preview components to reduce initial bundle size
 const ApdexSectionPreview = dynamic(() => import('./preview/ApdexSectionPreview'), { ssr: false });
@@ -796,7 +798,13 @@ export interface ComparisonsConfig {
   metrics?: ('avg' | 'p95' | 'p99')[];
   thresholds?: { good: number; warning: number };
   hostMap?: { current: string; baseline: string }[];
+  // grafana/dynatrace only: scope the comparison to one dashboard and selected panels
+  dashboardLabel?: string;
+  panels?: { id: number; title: string }[];
 }
+
+// Panel types the comparison can meaningfully diff (mirrors the compare card).
+const COMPARABLE_PANEL_TYPES = ['graph', 'timeseries', 'stat', 'singlestat', 'flamegraph'];
 
 interface BaselineCandidate {
   test_run_id: string;
@@ -835,12 +843,22 @@ interface ComparisonsConfigFormProps {
   onChange: (config: ComparisonsConfig) => void;
   testRunId?: string;
   systemUnderTestId?: string;
+  testEnvironment?: string;
+  workload?: string;
 }
 
-export function ComparisonsConfigForm({ config, onChange, testRunId, systemUnderTestId }: ComparisonsConfigFormProps) {
+interface SourceDashboardOption {
+  label: string;
+  uid?: string; // grafana only — needed to fetch the dashboard's panels
+}
+
+export function ComparisonsConfigForm({ config, onChange, testRunId, systemUnderTestId, testEnvironment, workload }: ComparisonsConfigFormProps) {
   const [baselineCandidates, setBaselineCandidates] = useState<BaselineCandidate[]>([]);
+  const [sourceDashboards, setSourceDashboards] = useState<SourceDashboardOption[]>([]);
+  const [sourcePanels, setSourcePanels] = useState<{ id: number; title: string }[]>([]);
 
   const comparisonMode = config.comparisonMode ?? 'control_group';
+  const source = config.source ?? 'performance-metrics';
 
   useEffect(() => {
     if (comparisonMode !== 'baseline_run' || !systemUnderTestId) return;
@@ -854,6 +872,58 @@ export function ComparisonsConfigForm({ config, onChange, testRunId, systemUnder
       .then((data: BaselineCandidate[] | undefined) => { if (data) setBaselineCandidates(data); })
       .catch(() => setBaselineCandidates([]));
   }, [comparisonMode, systemUnderTestId, testRunId]);
+
+  // Load dashboards for the selected source (grafana/dynatrace) — same endpoints as the compare card
+  useEffect(() => {
+    if (comparisonMode !== 'baseline_run' || source === 'performance-metrics' || !systemUnderTestId || !testEnvironment) {
+      setSourceDashboards([]);
+      return;
+    }
+    if (source === 'grafana') {
+      const params = new URLSearchParams({ systemId: systemUnderTestId, environment: testEnvironment });
+      authenticatedFetch(`/grafana/application-dashboards?${params.toString()}`)
+        .then((res) => (res.ok ? res.json() : undefined))
+        .then((data: { dashboard_label?: string; dashboard_uid?: string; source_type?: string }[] | undefined) => {
+          if (!Array.isArray(data)) { setSourceDashboards([]); return; }
+          setSourceDashboards(
+            data.filter((d) => isGrafana(d) && d.dashboard_label)
+              .map((d) => ({ label: d.dashboard_label as string, uid: d.dashboard_uid })),
+          );
+        })
+        .catch(() => setSourceDashboards([]));
+    } else if (workload) {
+      fetchDynatraceDashboards(systemUnderTestId, testEnvironment, workload)
+        .then((data) => setSourceDashboards(data.map((d) => ({ label: d.dashboardLabel }))))
+        .catch(() => setSourceDashboards([]));
+    }
+  }, [comparisonMode, source, systemUnderTestId, testEnvironment, workload]);
+
+  // Load panels once a dashboard is selected
+  useEffect(() => {
+    const dashboardLabel = config.dashboardLabel;
+    if (comparisonMode !== 'baseline_run' || source === 'performance-metrics' || !dashboardLabel) {
+      setSourcePanels([]);
+      return;
+    }
+    if (source === 'grafana') {
+      const uid = sourceDashboards.find((d) => d.label === dashboardLabel)?.uid;
+      if (!uid) { setSourcePanels([]); return; }
+      authenticatedFetch(`/grafana/dashboards?uid=${encodeURIComponent(uid)}`)
+        .then((res) => (res.ok ? res.json() : undefined))
+        .then((data: unknown) => {
+          const dashboard = Array.isArray(data) ? data[0] : data;
+          const panels = (dashboard as { panels?: { id: number; title: string; type: string }[] } | undefined)?.panels ?? [];
+          setSourcePanels(
+            panels.filter((p) => COMPARABLE_PANEL_TYPES.includes(p.type)).map((p) => ({ id: p.id, title: p.title })),
+          );
+        })
+        .catch(() => setSourcePanels([]));
+    } else if (systemUnderTestId && testEnvironment && workload) {
+      fetchDynatraceMetrics(systemUnderTestId, testEnvironment, workload, dashboardLabel)
+        .then((data) => setSourcePanels(data.map((m) => ({ id: m.panelId, title: m.panelTitle }))))
+        .catch(() => setSourcePanels([]));
+    }
+  }, [comparisonMode, source, config.dashboardLabel, sourceDashboards, systemUnderTestId, testEnvironment, workload]);
 
   const metrics = config.metrics ?? ['avg', 'p95', 'p99'];
 
@@ -987,13 +1057,71 @@ export function ComparisonsConfigForm({ config, onChange, testRunId, systemUnder
               labelId="source-label"
               label="Source"
               value={config.source ?? 'performance-metrics'}
-              onChange={(e) => onChange({ ...config, source: e.target.value as ComparisonsConfig['source'] })}
+              onChange={(e) =>
+                // Switching source invalidates any dashboard/panel selection from the previous source
+                onChange({
+                  ...config,
+                  source: e.target.value as ComparisonsConfig['source'],
+                  dashboardLabel: undefined,
+                  panels: undefined,
+                })
+              }
             >
               <MenuItem value="performance-metrics">Performance Metrics</MenuItem>
               <MenuItem value="grafana">Grafana</MenuItem>
               <MenuItem value="dynatrace">Dynatrace</MenuItem>
             </Select>
           </FormControl>
+
+          {/* Dashboard → panel cascade (grafana/dynatrace only) */}
+          {source !== 'performance-metrics' && (
+            <>
+              <Autocomplete
+                options={sourceDashboards}
+                getOptionLabel={(o) => o.label}
+                isOptionEqualToValue={(o, v) => o.label === v.label}
+                value={sourceDashboards.find((d) => d.label === config.dashboardLabel) ?? null}
+                onChange={(_, v) => onChange({ ...config, dashboardLabel: v?.label, panels: [] })}
+                size="small"
+                renderInput={(params) => (
+                  <TextField
+                    {...params}
+                    label="Dashboard"
+                    variant="outlined"
+                    fullWidth
+                    helperText={
+                      config.dashboardLabel
+                        ? undefined
+                        : `Select a dashboard first (${sourceDashboards.length} available)`
+                    }
+                  />
+                )}
+              />
+              <Autocomplete
+                multiple
+                options={sourcePanels}
+                getOptionLabel={(o) => o.title}
+                isOptionEqualToValue={(o, v) => o.id === v.id}
+                value={config.panels ?? []}
+                onChange={(_, v) => onChange({ ...config, panels: v })}
+                disabled={!config.dashboardLabel}
+                size="small"
+                renderInput={(params) => (
+                  <TextField
+                    {...params}
+                    label="Panels"
+                    variant="outlined"
+                    fullWidth
+                    helperText={
+                      !config.dashboardLabel
+                        ? 'Select a dashboard to see its panels'
+                        : `Select one or more panels to compare (${sourcePanels.length} available)`
+                    }
+                  />
+                )}
+              />
+            </>
+          )}
 
           {/* Metric checkboxes */}
           <Box>

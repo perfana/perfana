@@ -662,6 +662,8 @@ export function GenerateReportDialog({
                       onMoveDown={index < sections.length - 1 ? () => handleReorder(index, index + 1) : undefined}
                       testRunId={testRunId}
                       systemUnderTestId={scope.systemId}
+                      testEnvironment={scope.testEnvironment}
+                      workload={scope.workload}
                     />
                   ))}
 
@@ -808,9 +810,11 @@ interface LayoutSectionCardProps {
   onMoveDown?: () => void;
   testRunId?: string;
   systemUnderTestId?: string;
+  testEnvironment?: string;
+  workload?: string;
 }
 
-function LayoutSectionCard({ id, section, index, onDelete, onConfigChange, onMoveUp: _onMoveUp, onMoveDown: _onMoveDown, testRunId, systemUnderTestId }: LayoutSectionCardProps) {
+function LayoutSectionCard({ id, section, index, onDelete, onConfigChange, onMoveUp: _onMoveUp, onMoveDown: _onMoveDown, testRunId, systemUnderTestId, testEnvironment, workload }: LayoutSectionCardProps) {
   const config = SECTION_CONFIG[section.type];
   const [expanded, setExpanded] = useState(false);
 
@@ -858,7 +862,7 @@ function LayoutSectionCard({ id, section, index, onDelete, onConfigChange, onMov
       case 'trends':
         return <TrendsConfigForm config={sectionConfig} onChange={onConfigChange} />;
       case 'comparisons':
-        return <ComparisonsConfigForm config={sectionConfig} onChange={onConfigChange} testRunId={testRunId} systemUnderTestId={systemUnderTestId} />;
+        return <ComparisonsConfigForm config={sectionConfig} onChange={onConfigChange} testRunId={testRunId} systemUnderTestId={systemUnderTestId} testEnvironment={testEnvironment} workload={workload} />;
       default:
         return null;
     }

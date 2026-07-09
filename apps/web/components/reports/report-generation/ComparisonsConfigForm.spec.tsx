@@ -59,6 +59,32 @@ it('renders the baseline dropdown as a rich Autocomplete (compare-card style)', 
   });
 });
 
+it('shows the dashboard → panels cascade for grafana source, panels disabled until a dashboard is chosen', () => {
+  render(
+    <ComparisonsConfigForm
+      config={{ comparisonMode: 'baseline_run', source: 'grafana' }}
+      onChange={jest.fn()}
+      systemUnderTestId="sut-1"
+      testEnvironment="acc"
+      workload="loadTest"
+    />
+  );
+  expect(screen.getByLabelText(/dashboard/i)).toBeInTheDocument();
+  expect(screen.getByLabelText(/panels/i)).toBeDisabled();
+  expect(screen.getByText(/select a dashboard to see its panels/i)).toBeInTheDocument();
+});
+
+it('hides the dashboard cascade for performance-metrics source', () => {
+  render(
+    <ComparisonsConfigForm
+      config={{ comparisonMode: 'baseline_run', source: 'performance-metrics' }}
+      onChange={jest.fn()}
+    />
+  );
+  expect(screen.queryByLabelText(/dashboard/i)).not.toBeInTheDocument();
+  expect(screen.queryByLabelText(/panels/i)).not.toBeInTheDocument();
+});
+
 it('adds a host mapping row for dynatrace source', () => {
   const onChange = jest.fn();
   render(<ComparisonsConfigForm config={{ comparisonMode: 'baseline_run', source: 'dynatrace', hostMap: [] }} onChange={onChange} />);
