@@ -797,10 +797,12 @@ export interface ComparisonsConfig {
   source?: 'performance-metrics' | 'grafana' | 'dynatrace';
   metrics?: ('avg' | 'p95' | 'p99')[];
   thresholds?: { good: number; warning: number };
-  hostMap?: { current: string; baseline: string }[];
   // grafana/dynatrace only: scope the comparison to one dashboard and selected panels
   dashboardLabel?: string;
   panels?: { id: number; title: string }[];
+  // grafana/dynatrace only: pair current-run dashboards with differently named
+  // dashboards from the baseline run's environment
+  dashboardMap?: { current: string; baseline: string }[];
 }
 
 // Panel types the comparison can meaningfully diff (mirrors the compare card).
@@ -855,10 +857,14 @@ interface SourceDashboardOption {
 export function ComparisonsConfigForm({ config, onChange, testRunId, systemUnderTestId, testEnvironment, workload }: ComparisonsConfigFormProps) {
   const [baselineCandidates, setBaselineCandidates] = useState<BaselineCandidate[]>([]);
   const [sourceDashboards, setSourceDashboards] = useState<SourceDashboardOption[]>([]);
+  const [baselineDashboards, setBaselineDashboards] = useState<SourceDashboardOption[]>([]);
   const [sourcePanels, setSourcePanels] = useState<{ id: number; title: string }[]>([]);
 
   const comparisonMode = config.comparisonMode ?? 'control_group';
   const source = config.source ?? 'performance-metrics';
+  // The baseline run may live in a different environment/workload — its
+  // dashboard list (for the mapping dropdowns) is fetched for THAT scope.
+  const baselineCandidate = baselineCandidates.find((c) => c.test_run_id === config.baselineTestRunId);
 
   useEffect(() => {
     if (comparisonMode !== 'baseline_run' || !systemUnderTestId) return;
@@ -897,6 +903,34 @@ export function ComparisonsConfigForm({ config, onChange, testRunId, systemUnder
         .catch(() => setSourceDashboards([]));
     }
   }, [comparisonMode, source, systemUnderTestId, testEnvironment, workload]);
+
+  // Load the BASELINE run's dashboards for the mapping dropdowns (its env/workload
+  // may differ from the current run's — that's the point of the mapping)
+  const baselineEnv = baselineCandidate?.test_environment;
+  const baselineWorkload = baselineCandidate?.workload;
+  useEffect(() => {
+    if (comparisonMode !== 'baseline_run' || source === 'performance-metrics' || !systemUnderTestId || !baselineEnv) {
+      setBaselineDashboards([]);
+      return;
+    }
+    if (source === 'grafana') {
+      const params = new URLSearchParams({ systemId: systemUnderTestId, environment: baselineEnv });
+      authenticatedFetch(`/grafana/application-dashboards?${params.toString()}`)
+        .then((res) => (res.ok ? res.json() : undefined))
+        .then((data: { dashboard_label?: string; dashboard_uid?: string; source_type?: string }[] | undefined) => {
+          if (!Array.isArray(data)) { setBaselineDashboards([]); return; }
+          setBaselineDashboards(
+            data.filter((d) => isGrafana(d) && d.dashboard_label)
+              .map((d) => ({ label: d.dashboard_label as string, uid: d.dashboard_uid })),
+          );
+        })
+        .catch(() => setBaselineDashboards([]));
+    } else if (baselineWorkload) {
+      fetchDynatraceDashboards(systemUnderTestId, baselineEnv, baselineWorkload)
+        .then((data) => setBaselineDashboards(data.map((d) => ({ label: d.dashboardLabel }))))
+        .catch(() => setBaselineDashboards([]));
+    }
+  }, [comparisonMode, source, systemUnderTestId, baselineEnv, baselineWorkload]);
 
   // Load panels once a dashboard is selected
   useEffect(() => {
@@ -1064,6 +1098,7 @@ export function ComparisonsConfigForm({ config, onChange, testRunId, systemUnder
                   source: e.target.value as ComparisonsConfig['source'],
                   dashboardLabel: undefined,
                   panels: undefined,
+                  dashboardMap: undefined,
                 })
               }
             >
@@ -1171,22 +1206,41 @@ export function ComparisonsConfigForm({ config, onChange, testRunId, systemUnder
             inputProps={{ min: 0, max: 100 }}
           />
 
-          {/* Dynatrace host-map editor */}
-          {config.source === 'dynatrace' && (
+          {/* Dashboard-map editor (grafana + dynatrace): pair a current-run dashboard
+              with a differently named dashboard from the baseline run's environment */}
+          {source !== 'performance-metrics' && (
             <Box sx={{ display: 'flex', flexDirection: 'column', gap: 1 }}>
               <Typography variant="caption" color="text.secondary">
-                Host mapping (current → baseline) — use Dynatrace entity ids as they appear in the series names (e.g. HOST-0A1B2C3D4E5F6789)
+                Dashboard mapping (current → baseline) — map when the baseline run&apos;s dashboards have different names (e.g. per-environment dashboards)
               </Typography>
-              {(config.hostMap ?? []).map((row, i) => (
-                <Box key={i} sx={{ display: 'flex', gap: 1 }}>
-                  <TextField size="small" label="Current host" value={row.current}
-                    onChange={(e) => { const hm=[...(config.hostMap??[])]; hm[i]={...hm[i]!, current:e.target.value}; onChange({ ...config, hostMap: hm }); }} />
-                  <TextField size="small" label="Baseline host" value={row.baseline}
-                    onChange={(e) => { const hm=[...(config.hostMap??[])]; hm[i]={...hm[i]!, baseline:e.target.value}; onChange({ ...config, hostMap: hm }); }} />
-                  <IconButton size="small" onClick={() => { const hm=[...(config.hostMap??[])]; hm.splice(i,1); onChange({ ...config, hostMap: hm }); }}><DeleteIcon fontSize="small" /></IconButton>
+              {(config.dashboardMap ?? []).map((row, i) => (
+                <Box key={i} sx={{ display: 'flex', gap: 1, alignItems: 'center' }}>
+                  <Autocomplete
+                    options={sourceDashboards.map((d) => d.label)}
+                    value={row.current || null}
+                    onChange={(_, v) => { const dm = [...(config.dashboardMap ?? [])]; dm[i] = { ...dm[i]!, current: v ?? '' }; onChange({ ...config, dashboardMap: dm }); }}
+                    size="small"
+                    sx={{ flex: 1 }}
+                    renderInput={(params) => <TextField {...params} label="Current dashboard" />}
+                  />
+                  <Autocomplete
+                    options={baselineDashboards.map((d) => d.label)}
+                    value={row.baseline || null}
+                    onChange={(_, v) => { const dm = [...(config.dashboardMap ?? [])]; dm[i] = { ...dm[i]!, baseline: v ?? '' }; onChange({ ...config, dashboardMap: dm }); }}
+                    size="small"
+                    sx={{ flex: 1 }}
+                    renderInput={(params) => (
+                      <TextField
+                        {...params}
+                        label="Baseline dashboard"
+                        helperText={!config.baselineTestRunId ? 'Select a baseline run first' : undefined}
+                      />
+                    )}
+                  />
+                  <IconButton size="small" onClick={() => { const dm = [...(config.dashboardMap ?? [])]; dm.splice(i, 1); onChange({ ...config, dashboardMap: dm }); }}><DeleteIcon fontSize="small" /></IconButton>
                 </Box>
               ))}
-              <Button size="small" onClick={() => onChange({ ...config, hostMap: [...(config.hostMap ?? []), { current: '', baseline: '' }] })}>Add host mapping</Button>
+              <Button size="small" onClick={() => onChange({ ...config, dashboardMap: [...(config.dashboardMap ?? []), { current: '', baseline: '' }] })}>Add dashboard mapping</Button>
             </Box>
           )}
         </>

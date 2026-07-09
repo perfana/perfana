@@ -93,8 +93,8 @@ export class ComparisonsRenderer {
     const metrics = (Array.isArray(config.metrics) && config.metrics.length ? config.metrics : ['avg', 'p95', 'p99']) as ('avg' | 'p95' | 'p99')[];
     const thresholds = (config.thresholds as { good: number; warning: number }) || { good: 10, warning: 50 };
     const baselineId = typeof config.baselineTestRunId === 'string' ? config.baselineTestRunId : undefined;
-    const hostMap = Array.isArray(config.hostMap)
-      ? (config.hostMap as { current: string; baseline: string }[])
+    const dashboardMap = Array.isArray(config.dashboardMap)
+      ? (config.dashboardMap as { current: string; baseline: string }[])
       : undefined;
     const dashboardLabel = typeof config.dashboardLabel === 'string' ? config.dashboardLabel : undefined;
     const panelIds = Array.isArray(config.panels)
@@ -103,7 +103,7 @@ export class ComparisonsRenderer {
 
     const data = testRun && baselineId
       ? await this.dataFetcher.getBaselineRunComparison(testRun.testRunId, baselineId, source,
-          { metrics, userId, roles, hostMap, dashboardLabel, panelIds })
+          { metrics, userId, roles, dashboardMap, dashboardLabel, panelIds })
       : null;
 
     if (!data || data.rows.length === 0) {

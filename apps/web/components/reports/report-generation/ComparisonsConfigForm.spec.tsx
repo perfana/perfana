@@ -85,11 +85,22 @@ it('hides the dashboard cascade for performance-metrics source', () => {
   expect(screen.queryByLabelText(/panels/i)).not.toBeInTheDocument();
 });
 
-it('adds a host mapping row for dynatrace source', () => {
+it('adds a dashboard mapping row for grafana source (dropdown-based, not dynatrace-only)', () => {
   const onChange = jest.fn();
-  render(<ComparisonsConfigForm config={{ comparisonMode: 'baseline_run', source: 'dynatrace', hostMap: [] }} onChange={onChange} />);
-  fireEvent.click(screen.getByRole('button', { name: /add host mapping/i }));
+  render(<ComparisonsConfigForm config={{ comparisonMode: 'baseline_run', source: 'grafana', dashboardMap: [] }} onChange={onChange} />);
+  fireEvent.click(screen.getByRole('button', { name: /add dashboard mapping/i }));
   expect(onChange).toHaveBeenCalledWith(expect.objectContaining({
-    hostMap: [{ current: '', baseline: '' }],
+    dashboardMap: [{ current: '', baseline: '' }],
   }));
+});
+
+it('renders mapping rows as dropdowns (current + baseline dashboard autocompletes)', () => {
+  render(
+    <ComparisonsConfigForm
+      config={{ comparisonMode: 'baseline_run', source: 'dynatrace', dashboardMap: [{ current: '', baseline: '' }] }}
+      onChange={jest.fn()}
+    />
+  );
+  expect(screen.getByLabelText(/current dashboard/i)).toBeInTheDocument();
+  expect(screen.getByLabelText(/baseline dashboard/i)).toBeInTheDocument();
 });
