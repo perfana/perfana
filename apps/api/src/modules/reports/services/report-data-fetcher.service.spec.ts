@@ -17,7 +17,6 @@ import { Repository, DataSource } from 'typeorm';
 import { TestRun } from '@perfana/shared';
 import { ReportDataFetcherService } from './report-data-fetcher.service';
 import { AuthorizationService } from '../../../common/services/authorization.service';
-import { TestRunsService } from '../../test-runs/test-runs.service';
 
 // ─── Helpers ────────────────────────────────────────────────────────────────
 
@@ -95,10 +94,6 @@ describe('ReportDataFetcherService', () => {
         {
           provide: DataSource,
           useValue: dataSource,
-        },
-        {
-          provide: TestRunsService,
-          useValue: { getTransactionStats: jest.fn().mockResolvedValue([]) },
         },
       ],
     }).compile();
