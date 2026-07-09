@@ -5,7 +5,6 @@ import { TestRun } from '@perfana/shared';
 import { withRequestEm } from '../../../common/db/request-em';
 import { AuthorizationService } from '../../../common/services/authorization.service';
 import { withOrgFilter } from '../../../common/utils/with-org-filter';
-import { TestRunsService } from '../../test-runs/test-runs.service';
 import { percentDiff } from '../renderers/comparison-bands';
 
 /** SLO check result summary for header renderer */
@@ -357,7 +356,6 @@ export class ReportDataFetcherService {
     private readonly testRunRepo: Repository<TestRun>,
     private readonly authzService: AuthorizationService,
     private readonly dataSource: DataSource,
-    private readonly testRunsService: TestRunsService,
   ) {}
 
   /**
@@ -1959,28 +1957,54 @@ export class ReportDataFetcherService {
     opts: { metrics: ('avg' | 'p95' | 'p99')[]; userId: string; roles: string[]; hostMap?: { current: string; baseline: string }[] },
   ): Promise<BaselineComparisonData | null> {
     if (source === 'performance-metrics') {
-      const [cur, base] = await Promise.all([
-        this.testRunsService.getTransactionStats(currentRunId, opts.userId, opts.roles, true),
-        this.testRunsService.getTransactionStats(baselineRunId, opts.userId, opts.roles, true),
-      ]);
-      if (!Array.isArray(cur) || !Array.isArray(base)) return null;
-      const key = (r: { scenario_name?: string; transaction_name: string }) =>
+      // Query the transactions table directly (like getScenarioDataFromDatabase)
+      // instead of the controller-facing TestRunsService facade. The facade treats
+      // an empty userId as a non-admin user with zero orgs and returns [] — but
+      // report HTML generation runs in a background job with no user context.
+      // resolveOrgFilter implements the fetcher's convention: empty userId =
+      // system call = no org filter; real users get org-scoped results.
+      const orgFilter = await this.resolveOrgFilter(opts.userId, opts.roles, 2, 'tr');
+      // ponytail: full-run stats on both sides (consistent diff); apply
+      // getRampUpCutoffTime per run if analysis-window comparison is needed.
+      const query = `
+        SELECT
+          txn.test_run_id,
+          txn.scenario_name,
+          txn.transaction_name,
+          ROUND(AVG(txn.response_time)::numeric, 2) as avg_ms,
+          ROUND(PERCENTILE_CONT(0.95) WITHIN GROUP (ORDER BY txn.response_time)::numeric, 2) as p95_ms,
+          ROUND(PERCENTILE_CONT(0.99) WITHIN GROUP (ORDER BY txn.response_time)::numeric, 2) as p99_ms
+        FROM transactions txn
+        JOIN test_runs tr ON tr.test_run_id = txn.test_run_id
+        WHERE txn.test_run_id = ANY($1)
+        ${orgFilter.clause}
+        GROUP BY txn.test_run_id, txn.scenario_name, txn.transaction_name
+        ORDER BY txn.scenario_name, txn.transaction_name
+      `;
+      const allRows: Array<{
+        test_run_id: string;
+        scenario_name: string | null;
+        transaction_name: string;
+        avg_ms: string | null;
+        p95_ms: string | null;
+        p99_ms: string | null;
+      }> = await withRequestEm(this.testRunRepo).query(query, [[currentRunId, baselineRunId], ...orgFilter.params]);
+      if (allRows.length === 0) return null;
+
+      const key = (r: { scenario_name?: string | null; transaction_name: string }) =>
         `${r.scenario_name ?? ''}||${r.transaction_name}`;
-      const baseMap = new Map(base.map((r) => [key(r), r]));
+      const cur = allRows.filter((r) => r.test_run_id === currentRunId);
+      const baseMap = new Map(allRows.filter((r) => r.test_run_id === baselineRunId).map((r) => [key(r), r]));
       const num = (v: unknown) => (v == null ? null : Number(v));
-      const fieldByKey = {
-        avg: 'avg_response_time',
-        p95: 'p95_response_time',
-        p99: 'p99_response_time',
-      } as const;
+      const fieldByKey = { avg: 'avg_ms', p95: 'p95_ms', p99: 'p99_ms' } as const;
       const rows: BaselineComparisonRow[] = cur.map((c) => {
         const b = baseMap.get(key(c));
         return {
           group: c.scenario_name ?? 'default',
           label: c.transaction_name,
           metrics: opts.metrics.map((k) => {
-            const cv = num((c as Record<string, unknown>)[fieldByKey[k]]);
-            const bv = b != null ? num((b as Record<string, unknown>)[fieldByKey[k]]) : null;
+            const cv = num(c[fieldByKey[k]]);
+            const bv = b != null ? num(b[fieldByKey[k]]) : null;
             return { key: k, current: cv, baseline: bv, diffPercent: percentDiff(cv, bv) };
           }),
         };
