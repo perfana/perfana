@@ -206,7 +206,8 @@ export class ReportGenerationService {
   ): Promise<{ accessible: boolean; report: GeneratedReport | null }> {
     const report = await this.reportRepo.findOne({
       where: { id: reportId },
-      relations: ['template', 'test_run'],
+      // test_run.systemUnderTest: renderers display the SUT name, not its id
+      relations: ['template', 'test_run', 'test_run.systemUnderTest'],
     });
 
     if (!report) {
