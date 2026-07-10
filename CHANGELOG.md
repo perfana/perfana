@@ -9,6 +9,13 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
 ### Fixed
 - **Generated reports show the system under test's name instead of its UUID.** The cover page and Test Run Summary previously printed the internal id (e.g. `70e6172c-9248-…`); they now show the system's name everywhere it appears.
 - **SLO summary requirements and actuals are formatted like the rest of the app instead of showing raw Grafana unit codes.** `< 0.90 percentunit` now renders as `< 90%` (0.0–1.0 values are converted to percentages, matching the SLO config UI), `< 70.00 short` as `< 70`, and unit suffixes like `ms` keep their spacing. The `le`/`ge` operator spellings render as `≤`/`≥` like the web UI, and non-numeric measured values show `—` instead of `-`.
+## [0.2.61.40] - 2026-07-10
+
+### Added
+- **Collapsed report sections now show what's inside them.** In the Generate Report dialog and template builder, each collapsed section card's subtitle summarizes its own configuration instead of repeating the generic type description — headers show their level and text (`H2 — Results`), text blocks show their content, response-time sections show the selected scenario, baseline-run comparisons show the dashboard, panel count, and comment, and other sections fall back to their section comment. Multiple instances of the same section type are distinguishable without expanding each one. Long summaries are ellipsized; values from hand-edited or API-written templates are treated as untrusted (invalid header levels fall back to H1, emoji aren't split mid-character).
+
+### Fixed
+- The section card header no longer crashes the report dialog when a stored template carries a section type this build doesn't recognize — it shows the raw type name instead.
 
 ## [0.2.61.39] - 2026-07-09
 

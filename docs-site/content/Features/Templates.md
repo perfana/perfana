@@ -49,6 +49,7 @@ Accessible at `/settings/profiles`:
 - Drag-and-drop section ordering
 - Configurable metric selections
 - Preview functionality for report sections
+- Collapsed section cards summarize their own configuration (header level and text, text-block content, response-time scenario, baseline-run dashboard/panel count) so multiple sections of the same type can be told apart without expanding them
 
 ### Template Selector
 - Filtered by `system_under_test_id`

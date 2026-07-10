@@ -82,6 +82,7 @@ import {
   ComparisonsConfigForm,
 } from './SectionConfigs';
 import { BaselineRunSelect, useBaselineCandidates, type BaselineCandidate } from './BaselineRunSelect';
+import { sectionSummary } from './section-summary';
 
 // ==================== Types ====================
 
@@ -881,7 +882,8 @@ interface LayoutSectionCardProps {
 }
 
 function LayoutSectionCard({ id, section, index, onDelete, onConfigChange, onMoveUp: _onMoveUp, onMoveDown: _onMoveDown, testRunId, systemUnderTestId, testEnvironment, workload }: LayoutSectionCardProps) {
-  const config = SECTION_CONFIG[section.type];
+  // DB-stored templates can carry section types this build doesn't know about
+  const config = SECTION_CONFIG[section.type] ?? { icon: null, label: section.type, description: '', color: '#9e9e9e' };
   const [expanded, setExpanded] = useState(false);
 
   // Setup drag and drop
@@ -995,8 +997,8 @@ function LayoutSectionCard({ id, section, index, onDelete, onConfigChange, onMov
           <Typography variant="body2" fontWeight={600}>
             {section.title || config.label}
           </Typography>
-          <Typography variant="caption" color="text.secondary">
-            {config.description}
+          <Typography variant="caption" color="text.secondary" noWrap sx={{ display: 'block' }}>
+            {sectionSummary(section) ?? config.description}
           </Typography>
         </Box>
 
