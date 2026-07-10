@@ -4,6 +4,14 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
+## [0.2.61.40] - 2026-07-10
+
+### Added
+- **Collapsed report sections now show what's inside them.** In the Generate Report dialog and template builder, each collapsed section card's subtitle summarizes its own configuration instead of repeating the generic type description — headers show their level and text (`H2 — Results`), text blocks show their content, response-time sections show the selected scenario, baseline-run comparisons show the dashboard, panel count, and comment, and other sections fall back to their section comment. Multiple instances of the same section type are distinguishable without expanding each one. Long summaries are ellipsized; values from hand-edited or API-written templates are treated as untrusted (invalid header levels fall back to H1, emoji aren't split mid-character).
+
+### Fixed
+- The section card header no longer crashes the report dialog when a stored template carries a section type this build doesn't recognize — it shows the raw type name instead.
+
 ## [0.2.61.39] - 2026-07-09
 
 ### Changed

@@ -90,6 +90,15 @@ and any DQL query / entity-mapping editor pages.
 
 ---
 
+### Fix pre-existing DynatraceCard test failures (23 tests)
+
+**Priority:** P0
+**Origin:** Noticed during /ship on `feat/report-section-collapsed-summary` (2026-07-10). Pre-existing — same 23 failures reproduce on a clean tree with the branch changes stashed.
+**What:** `apps/web/__tests__/app/test-runs/dynatrace/DynatraceCard.test.tsx` — 23 of 47 tests fail (24 pass). Failures include `findByLabelText` timeouts around the autocomplete interaction (~line 1024), suggesting the component's labels/markup drifted from the test assertions.
+**How:** Run `cd apps/web && npx jest __tests__/app/test-runs/dynatrace/DynatraceCard.test.tsx` and reconcile the assertions with the current DynatraceCard markup (likely intentional UI changes with stale tests, same shape as the v0.2.61.2 socket/TestRunDetailsCard cleanup).
+
+---
+
 ### Regenerate ADAPT golden-file snapshot
 
 **Priority:** P0
