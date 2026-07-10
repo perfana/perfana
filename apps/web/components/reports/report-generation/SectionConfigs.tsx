@@ -65,6 +65,23 @@ function SectionConfigShell({
 }: SectionConfigShellProps) {
   const [previewOpen, setPreviewOpen] = useState(false);
 
+  // Local draft of the comment so typing doesn't propagate to the parent (and
+  // re-render every section card) on each keystroke; committed on blur and
+  // before opening the preview modal.
+  const [localComment, setLocalComment] = useState(comment ?? '');
+
+  // Sync the draft when the comment changes externally (e.g. saved from the
+  // preview modal).
+  useEffect(() => {
+    setLocalComment(comment ?? '');
+  }, [comment]);
+
+  const commitComment = () => {
+    if (localComment !== (comment ?? '')) {
+      onCommentChange(localComment);
+    }
+  };
+
   const disabled = !testRunId || previewDisabled;
   const disabledReason = !testRunId
     ? 'Select a test run to enable preview'
@@ -80,19 +97,20 @@ function SectionConfigShell({
           fullWidth
           multiline
           rows={4}
-          value={comment || ''}
-          onChange={(e) => onCommentChange(e.target.value)}
+          value={localComment}
+          onChange={(e) => setLocalComment(e.target.value)}
+          onBlur={commitComment}
           placeholder="Add comments or observations about this section..."
           label="Section Comments"
           variant="outlined"
-          helperText={`${(comment || '').length} / 2000 characters`}
+          helperText={`${localComment.length} / 2000 characters`}
           inputProps={{
             maxLength: 2000,
           }}
           sx={{
             '& .MuiOutlinedInput-root': {
               '&:hover fieldset': {
-                borderColor: '#1976d2',
+                borderColor: 'primary.main',
               },
             },
           }}
@@ -104,17 +122,22 @@ function SectionConfigShell({
             <Button
               variant="outlined"
               startIcon={<VisibilityIcon />}
-              onClick={() => setPreviewOpen(true)}
+              onClick={() => {
+                // Commit any in-progress comment draft so the preview payload
+                // includes the latest comment.
+                commitComment();
+                setPreviewOpen(true);
+              }}
               fullWidth
               disabled={disabled}
               sx={{
                 textTransform: 'none',
                 fontWeight: 600,
-                borderColor: '#1976d2',
-                color: '#1976d2',
+                borderColor: 'primary.main',
+                color: 'primary.main',
                 py: 1.5,
                 '&:hover': {
-                  borderColor: '#1565c0',
+                  borderColor: 'primary.dark',
                   bgcolor: 'rgba(25, 118, 210, 0.04)',
                 },
                 '&.Mui-disabled': {
@@ -136,7 +159,7 @@ function SectionConfigShell({
         sectionTitle={sectionTitle}
         sectionType={sectionType}
         testRunId={testRunId}
-        initialComment={comment}
+        initialComment={localComment}
         onSaveComment={onCommentChange}
       >
         {previewContent ?? (
@@ -168,7 +191,7 @@ export function HeaderConfigForm({ config, onChange, testRunId }: HeaderConfigFo
       sectionTitle={config.text || 'Header'}
       sectionType="Header"
       previewType="header"
-      previewConfig={{ ...config }}
+      previewConfig={config}
       comment={config.comment}
       onCommentChange={(comment) => onChange({ ...config, comment })}
       testRunId={testRunId}
@@ -225,7 +248,7 @@ export function TextBlockConfigForm({ config, onChange, testRunId }: TextBlockCo
       sectionTitle="Text Block"
       sectionType="Text Block"
       previewType="text_block"
-      previewConfig={{ ...config }}
+      previewConfig={config}
       comment={config.comment}
       onCommentChange={(comment) => onChange({ ...config, comment })}
       testRunId={testRunId}
@@ -299,7 +322,7 @@ export function SloConfigForm({ config, onChange, testRunId }: SloConfigFormProp
       sectionTitle="Service Level Objectives"
       sectionType="SLO"
       previewType="slo"
-      previewConfig={{ ...config }}
+      previewConfig={config}
       comment={config.comment}
       onCommentChange={(comment) => onChange({ ...config, comment })}
       testRunId={testRunId}
@@ -367,7 +390,7 @@ export function ApdexConfigForm({ config, onChange, testRunId }: ApdexConfigForm
       sectionTitle="Apdex Score"
       sectionType="Apdex"
       previewType="apdex"
-      previewConfig={{ ...config }}
+      previewConfig={config}
       comment={config.comment}
       onCommentChange={(comment) => onChange({ ...config, comment })}
       testRunId={testRunId}
@@ -480,7 +503,7 @@ export function TransactionResponseTimesConfigForm({ config, onChange, testRunId
       sectionTitle={`Response Times - ${config.scenario || 'N/A'}`}
       sectionType="Transaction Response Times"
       previewType="transaction_response_times"
-      previewConfig={{ ...config }}
+      previewConfig={config}
       comment={config.comment}
       onCommentChange={(comment) => onChange({ ...config, comment })}
       testRunId={testRunId}
@@ -560,7 +583,7 @@ export function RegressionsConfigForm({ config, onChange, testRunId }: Regressio
       sectionTitle="Performance Regressions"
       sectionType="Regressions"
       previewType="regressions"
-      previewConfig={{ ...config }}
+      previewConfig={config}
       comment={config.comment}
       onCommentChange={(comment) => onChange({ ...config, comment })}
       testRunId={testRunId}
@@ -648,7 +671,7 @@ export function GraphsConfigForm({ config, onChange, testRunId }: GraphsConfigFo
       sectionTitle="Custom Graphs"
       sectionType="Graphs"
       previewType="graphs"
-      previewConfig={{ ...config }}
+      previewConfig={config}
       comment={config.comment}
       onCommentChange={(comment) => onChange({ ...config, comment })}
       testRunId={testRunId}
@@ -724,7 +747,7 @@ export function AwrConfigForm({ config, onChange, testRunId }: AwrConfigFormProp
       sectionTitle="AWR Analysis"
       sectionType="AWR"
       previewType="awr"
-      previewConfig={{ ...config }}
+      previewConfig={config}
       comment={config.comment}
       onCommentChange={(comment) => onChange({ ...config, comment })}
       testRunId={testRunId}
@@ -804,7 +827,7 @@ export function TrendsConfigForm({ config, onChange, testRunId }: TrendsConfigFo
       sectionTitle="Trend Charts"
       sectionType="Trends"
       previewType="trends"
-      previewConfig={{ ...config }}
+      previewConfig={config}
       comment={config.comment}
       onCommentChange={(comment) => onChange({ ...config, comment })}
       testRunId={testRunId}
@@ -1005,7 +1028,7 @@ export function ComparisonsConfigForm({ config, onChange, testRunId, systemUnder
       sectionTitle="Test Comparisons"
       sectionType="Comparisons"
       previewType="comparisons"
-      previewConfig={{ ...config }}
+      previewConfig={config}
       comment={config.comment}
       onCommentChange={(comment) => onChange({ ...config, comment })}
       testRunId={testRunId}

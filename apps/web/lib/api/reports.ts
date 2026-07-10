@@ -30,9 +30,12 @@ export const REPORT_SECTION_TYPES = [
 export type ReportSectionType = (typeof REPORT_SECTION_TYPES)[number];
 
 /**
- * Section types that support comments (all except header and text_block)
+ * Section types that support comments (all section types — header and
+ * text_block gained comment support alongside the shared config shell)
  */
 export const COMMENTABLE_SECTION_TYPES = [
+  'header',
+  'text_block',
   'slo',
   'apdex',
   'transaction_response_times',
@@ -456,7 +459,8 @@ export async function generateAdHocReport(
 export async function previewSection(
   section: ReportSectionConfig,
   testRunId?: string,
-  styling?: ReportStyling
+  styling?: ReportStyling,
+  signal?: AbortSignal
 ): Promise<string> {
   const response = await authenticatedFetch('reports/preview-section', {
     method: 'POST',
@@ -466,6 +470,7 @@ export async function previewSection(
       section,
       styling,
     }),
+    signal,
   });
 
   if (!response.ok) {

@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import { Box, CircularProgress, Alert, Typography } from '@mui/material';
 import { previewSection, type ReportSectionType } from '@/lib/api/reports';
 
@@ -13,6 +13,15 @@ interface HtmlSectionPreviewProps {
 }
 
 /**
+ * Strip HTML tags and truncate overly long error dumps (e.g. an HTML error
+ * page returned by the backend) so the error Alert stays readable.
+ */
+function sanitizeErrorMessage(message: string, maxLength = 200): string {
+  const stripped = message.replace(/<[^>]*>/g, ' ').replace(/\s+/g, ' ').trim();
+  return stripped.length > maxLength ? `${stripped.slice(0, maxLength)}…` : stripped;
+}
+
+/**
  * Generic preview renderer for report sections.
  * Fetches the actual HTML that will appear in the generated report via the
  * backend preview endpoint and renders it in a sandboxed iframe.
@@ -22,8 +31,16 @@ export default function HtmlSectionPreview({ testRunId, sectionType, config }: H
   const [error, setError] = useState<string | null>(null);
   const [htmlContent, setHtmlContent] = useState<string>('');
 
+  // Key the fetch on the config's CONTENT, not its object identity — callers
+  // may pass a structurally identical but freshly created object on every
+  // render, which must not retrigger the fetch. The latest config is read
+  // through a ref inside the effect.
+  const configRef = useRef(config);
+  configRef.current = config;
+  const configKey = JSON.stringify(config ?? {});
+
   useEffect(() => {
-    let cancelled = false;
+    const controller = new AbortController();
 
     async function fetchPreview() {
       try {
@@ -31,7 +48,7 @@ export default function HtmlSectionPreview({ testRunId, sectionType, config }: H
         setError(null);
 
         // Lift the comment out of the config — it lives at the section level
-        const { comment, ...sectionConfig } = config;
+        const { comment, ...sectionConfig } = configRef.current ?? {};
 
         const html = await previewSection(
           {
@@ -40,31 +57,39 @@ export default function HtmlSectionPreview({ testRunId, sectionType, config }: H
             comment: typeof comment === 'string' ? comment : undefined,
             config: sectionConfig,
           },
-          testRunId
+          testRunId,
+          undefined,
+          controller.signal
         );
 
-        if (!cancelled) {
+        if (!controller.signal.aborted) {
           setHtmlContent(html);
           setLoading(false);
         }
       } catch (err) {
-        if (!cancelled) {
-          const errorMessage =
-            err && typeof err === 'object' && 'message' in err
-              ? (err as Error).message
-              : 'Failed to load preview';
-          setError(errorMessage);
-          setLoading(false);
+        // An aborted request is not an error — the component unmounted or a
+        // newer request superseded this one. Swallow it silently.
+        const isAbort =
+          controller.signal.aborted ||
+          (err && typeof err === 'object' && 'name' in err && (err as { name: string }).name === 'AbortError');
+        if (isAbort) {
+          return;
         }
+        const errorMessage =
+          err && typeof err === 'object' && 'message' in err
+            ? (err as Error).message
+            : 'Failed to load preview';
+        setError(sanitizeErrorMessage(errorMessage));
+        setLoading(false);
       }
     }
 
     fetchPreview();
 
     return () => {
-      cancelled = true;
+      controller.abort();
     };
-  }, [testRunId, sectionType, config]);
+  }, [testRunId, sectionType, configKey]);
 
   if (loading) {
     return (
@@ -87,8 +112,7 @@ export default function HtmlSectionPreview({ testRunId, sectionType, config }: H
         </Typography>
         <Typography variant="body2">{error}</Typography>
         <Typography variant="caption" sx={{ mt: 1, display: 'block' }}>
-          This is the exact HTML that will appear in your report. The preview is generated using the same backend
-          rendering code as the final report.
+          Adjust the section configuration or select a test run, then reopen the preview.
         </Typography>
       </Alert>
     );
@@ -121,7 +145,7 @@ export default function HtmlSectionPreview({ testRunId, sectionType, config }: H
             border: 'none',
             display: 'block',
           }}
-          sandbox="allow-same-origin"
+          sandbox=""
           title="Section Preview"
         />
       </Box>
