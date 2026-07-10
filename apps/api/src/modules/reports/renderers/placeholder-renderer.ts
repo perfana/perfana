@@ -1,6 +1,7 @@
 import { Injectable } from '@nestjs/common';
 import { ReportSectionConfig } from '@perfana/shared';
 import { ReportUtilsService } from '../services/report-utils.service';
+import { sectionHeader } from './report-style';
 
 /**
  * Renderer for placeholder and error sections
@@ -18,7 +19,7 @@ export class PlaceholderRenderer {
   renderPlaceholderSection(title: string, type: string): string {
     return `
       <section class="placeholder-section">
-        <h2>${this.utils.escapeHtml(title)}</h2>
+        ${sectionHeader(title)}
         <p class="placeholder-message">Section type '${this.utils.escapeHtml(type)}' is not yet implemented.</p>
       </section>
     `;
@@ -30,7 +31,7 @@ export class PlaceholderRenderer {
   renderErrorSection(section: ReportSectionConfig, errorMessage: string): string {
     return `
       <section class="error-section">
-        <h2>${this.utils.escapeHtml(section.title || section.type)}</h2>
+        ${sectionHeader(section.title || section.type)}
         <div class="error-message">
           <p>Failed to render section: ${this.utils.escapeHtml(errorMessage)}</p>
         </div>

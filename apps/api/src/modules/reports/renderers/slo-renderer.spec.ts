@@ -88,8 +88,22 @@ describe('SloRenderer', () => {
 
     const html = await renderer.renderSloSection(makeSection(), makeTestRun());
 
-    expect(html).toContain('2/3');
-    expect(html).toContain('CHECKS PASSED');
+    expect(html).toContain('2/3 passed');
+    expect(html).toContain('1 failed');
+    // Rule 04: no emoji / gradient icon boxes — pass/fail conveyed via chips
+    expect(html).not.toContain('✓');
+    expect(html).not.toContain('✗');
+    expect(html).not.toContain('linear-gradient');
+  });
+
+  it('should render the shared section header with a left accent and kicker', async () => {
+    dataFetcher.getSloCheckResults.mockResolvedValue([makeSloResult()]);
+
+    const html = await renderer.renderSloSection(makeSection(), makeTestRun());
+
+    expect(html).toContain('border-left:4px solid #1976d2');
+    expect(html).toContain('Service Level Objectives');
+    expect(html).toContain('1/1 passed');
   });
 
   it('should render check results table with PASS/FAIL badges', async () => {

@@ -122,7 +122,7 @@ describe('AwrRenderer', () => {
     expect(html).toContain('Enterprise');
     expect(html).toContain('16 CPUs');
     expect(html).toContain('64 GB RAM');
-    expect(html).toContain('60.0 min elapsed');
+    expect(html).toContain('60 min elapsed');
     expect(html).toContain('45.5 min DB time');
   });
 
@@ -186,7 +186,7 @@ describe('AwrRenderer', () => {
     expect(html).toContain('Top SQL by Elapsed Time');
     expect(html).toContain('abc123');
     expect(html).toContain('def456');
-    expect(html).toContain('120.50s');
+    expect(html).toContain('120.5s');
     expect(html).toContain('5,000');
   });
 

@@ -101,16 +101,19 @@ describe('ComparisonsRenderer', () => {
     expect(html).toContain('No comparison data available');
   });
 
-  it('should render summary badges with counts', async () => {
+  it('should render right-aligned summary chips in the section header (rule 04)', async () => {
     dataFetcher.getComparisonsData.mockResolvedValue(makeComparisonsData() as any);
 
     const html = await renderer.renderComparisonsSection(makeSection(), makeTestRun());
 
-    expect(html).toContain('Regressions');
-    expect(html).toContain('Improvements');
-    expect(html).toContain('No Difference');
-    expect(html).toContain('Total Metrics');
+    expect(html).toContain('1 regressions');
+    expect(html).toContain('1 improvements');
+    expect(html).toContain('1 within range');
     expect(html).toContain('3 metrics compared');
+    // Old badge/label vocabulary is gone (rule 01/04)
+    expect(html).not.toContain('Total Metrics');
+    expect(html).not.toContain('No Difference');
+    expect(html).not.toContain('&#x2194;'); // section emoji icon removed
   });
 
   it('should render comparison table grouped by dashboard', async () => {
@@ -122,19 +125,49 @@ describe('ComparisonsRenderer', () => {
     expect(html).toContain('Response Time');
     expect(html).toContain('Throughput');
     expect(html).toContain('Error Rate');
-    expect(html).toContain('120.0 ms');
-    expect(html).toContain('100.0 ms');
+    expect(html).toContain('120 ms');
+    expect(html).toContain('100 ms');
     expect(html).toContain('+20.0%');
+    expect(html).toContain('▲'); // arrow bound to positive diff (rule 02)
   });
 
-  it('should render conclusion badges per metric', async () => {
+  it('should render five-state status pills per metric (rule 01)', async () => {
     dataFetcher.getComparisonsData.mockResolvedValue(makeComparisonsData() as any);
 
     const html = await renderer.renderComparisonsSection(makeSection(), makeTestRun());
 
-    expect(html).toContain('regression');
-    expect(html).toContain('improvement');
-    expect(html).toContain('no difference');
+    expect(html).toContain('>REGRESSION</span>');
+    expect(html).toContain('>IMPROVEMENT</span>');
+    expect(html).toContain('>OK</span>');
+    // Old conclusion labels no longer rendered as-is
+    expect(html).not.toMatch(/no difference/i);
+    expect(html).not.toContain('>regression</span>');
+    // Generic minus arrow is gone (rule 02)
+    expect(html).not.toContain('&#x2796;');
+    expect(html).not.toContain('➖');
+  });
+
+  it('collapses raw increase/partial/incomparable labels to the five states', async () => {
+    const data = makeComparisonsData({
+      metrics: [
+        makeMetric({ conclusion: 'increase' }),
+        makeMetric({ panelTitle: 'P2', conclusion: 'partial increase', differencePercent: 12 }),
+        makeMetric({ panelTitle: 'P3', conclusion: 'decrease', differencePercent: -12 }),
+        makeMetric({ panelTitle: 'P4', conclusion: 'incomparable', currentValue: null, baselineValue: null, difference: null, differencePercent: null }),
+      ],
+    });
+    dataFetcher.getComparisonsData.mockResolvedValue(data as any);
+
+    const html = await renderer.renderComparisonsSection(makeSection(), makeTestRun());
+
+    expect(html).toContain('>REGRESSION</span>');
+    expect(html).toContain('>WARNING</span>');
+    expect(html).toContain('>IMPROVEMENT</span>');
+    expect(html).toContain('>N/A</span>');
+    expect(html).not.toContain('>INCREASE<');
+    expect(html).not.toContain('>increase<');
+    expect(html).not.toMatch(/partial/i);
+    expect(html).not.toMatch(/incomparable/i);
   });
 
   it('should render custom title and comment', async () => {
@@ -147,6 +180,7 @@ describe('ComparisonsRenderer', () => {
 
     expect(html).toContain('Run Comparison');
     expect(html).toContain('vs baseline run');
+    expect(html).toContain('section-comment');
   });
 
   it('should pass baselineTestRunId from config', async () => {
@@ -160,7 +194,7 @@ describe('ComparisonsRenderer', () => {
     expect(dataFetcher.getComparisonsData).toHaveBeenCalledWith('run-001', 'baseline-run-123');
   });
 
-  it('should group metrics by dashboard', async () => {
+  it('should group metrics by dashboard with metric-count chips (rule 05)', async () => {
     const data = makeComparisonsData({
       metrics: [
         makeMetric({ dashboardLabel: 'Dashboard A', panelTitle: 'Panel 1' }),
@@ -173,8 +207,10 @@ describe('ComparisonsRenderer', () => {
 
     const html = await renderer.renderComparisonsSection(makeSection(), makeTestRun());
 
-    expect(html).toContain('Dashboard A (2 metrics)');
-    expect(html).toContain('Dashboard B (1 metrics)');
+    expect(html).toContain('>Dashboard A</h3>');
+    expect(html).toContain('>Dashboard B</h3>');
+    expect(html).toContain('2 metrics');
+    expect(html).toContain('1 metrics');
   });
 
   it('should handle empty metrics gracefully', async () => {
@@ -202,7 +238,7 @@ describe('ComparisonsRenderer', () => {
 
     expect(html).toContain('250.6 ms');
     expect(html).toContain('75.3%');
-    expect(html).toContain('1.0 GB');
+    expect(html).toContain('1 GB');
   });
 
   it('renders baseline_run mode grouped by scenario with band colors', async () => {
@@ -221,10 +257,11 @@ describe('ComparisonsRenderer', () => {
     );
     expect(html).toContain('checkout');
     expect(html).toContain('login');
-    expect(html).toContain('#f59e0b'); // 10% == not < good(10) => amber band
+    expect(html).toContain('#f59e0b'); // 10% == not < good(10) => amber band on the magnitude bar
+    expect(html).not.toContain('➖');
   });
 
-  it('renders dynatrace as ONE merged table: host folded into heading, id prefix stripped, 2dp values', async () => {
+  it('renders dynatrace as ONE merged table: host as chip, id prefix stripped, 2dp values', async () => {
     const data = { source: 'dynatrace', rows: [
       { group: 'HOST-123', label: 'HOST-123_afterburner-be_Memory Usage', metrics: [
         { key: 'avg', current: 74.005882, baseline: 70, diffPercent: 5.7 },
@@ -240,7 +277,9 @@ describe('ComparisonsRenderer', () => {
         metrics: ['avg'], thresholds: { good: 10, warning: 50 } } } as any,
       { testRunId: 'cur' } as any,
     );
-    expect(html).toContain('Dynatrace · afterburner-be'); // host name folded into the heading
+    expect(html).toContain('>Dynatrace</h3>');            // group header via shared groupHeader
+    expect(html).toContain('afterburner-be');             // host name shown as a chip
+    expect(html).toContain('2 metrics');                  // metric-count chip
     expect(html).toContain('Memory Usage');               // id prefix stripped from the metric
     expect(html).not.toContain('HOST-123_');              // raw entity-id label never shown
     expect(html).toContain('74.01');                      // rounded to 2 dp
@@ -263,6 +302,7 @@ describe('ComparisonsRenderer', () => {
     expect(html).toContain('>Grafana</h3>');
     expect(html).toContain('heap used');
     expect(html).toContain('1,200.46'); // thousands-grouped, 2 dp
+    expect(html).toContain('1 warnings'); // shared summary chip
   });
 
   it('shows a Current → Baseline caption when a dashboard mapping is in effect', async () => {
@@ -308,7 +348,8 @@ describe('ComparisonsRenderer', () => {
       { testRunId: 'cur' } as any,
     );
     expect(html).not.toContain('>Current</span>');
-    expect(html).toContain('Dynatrace · afterburner-be'); // heading unchanged
+    expect(html).toContain('>Dynatrace</h3>');   // heading unchanged
+    expect(html).toContain('afterburner-be');    // host chip unchanged
   });
 
   it('shows empty state when baseline data is null', async () => {

@@ -87,7 +87,7 @@ describe('RegressionsRenderer', () => {
     expect(html).toContain('No ADAPT regression analysis data available');
   });
 
-  it('should render summary badges with counts', async () => {
+  it('should render summary chips with counts in the section header', async () => {
     dataFetcher.getRegressionsData.mockResolvedValue(
       makeRegressionsData({
         regressionCount: 3,
@@ -98,35 +98,44 @@ describe('RegressionsRenderer', () => {
 
     const html = await renderer.renderRegressionsSection(makeSection(), makeTestRun());
 
-    expect(html).toContain('>3<');
-    expect(html).toContain('>2<');
-    expect(html).toContain('>15<');
-    expect(html).toContain('Regressions');
-    expect(html).toContain('Improvements');
-    expect(html).toContain('Total Metrics');
+    expect(html).toContain('3 regressions');
+    expect(html).toContain('2 improvements');
+    expect(html).toContain('15 metrics');
   });
 
-  it('should render regression conclusion banner', async () => {
+  it('should render overall REGRESSION status pill for regression conclusion', async () => {
     dataFetcher.getRegressionsData.mockResolvedValue(
       makeRegressionsData({ conclusion: 'regression' }),
     );
 
     const html = await renderer.renderRegressionsSection(makeSection(), makeTestRun());
 
-    expect(html).toContain('Regression Detected');
+    expect(html).toContain('>REGRESSION</span>');
+    expect(html).not.toContain('Regression Detected');
   });
 
-  it('should render no_difference conclusion', async () => {
+  it('should map no_difference conclusion to the OK status pill', async () => {
     dataFetcher.getRegressionsData.mockResolvedValue(
       makeRegressionsData({ conclusion: 'no_difference' }),
     );
 
     const html = await renderer.renderRegressionsSection(makeSection(), makeTestRun());
 
-    expect(html).toContain('No Difference');
+    expect(html).toContain('>OK</span>');
+    expect(html).not.toMatch(/no difference/i);
   });
 
-  it('should render regression metrics table', async () => {
+  it('should map PASSED overall conclusion to OK', async () => {
+    dataFetcher.getRegressionsData.mockResolvedValue(
+      makeRegressionsData({ conclusion: 'PASSED' }),
+    );
+
+    const html = await renderer.renderRegressionsSection(makeSection(), makeTestRun());
+
+    expect(html).toContain('>OK</span>');
+  });
+
+  it('should render regression metrics table with delta arrow bound to the value', async () => {
     dataFetcher.getRegressionsData.mockResolvedValue(
       makeRegressionsData({
         regressionCount: 1,
@@ -139,6 +148,38 @@ describe('RegressionsRenderer', () => {
     expect(html).toContain('API Dashboard');
     expect(html).toContain('Response Time');
     expect(html).toContain('+20.0%');
+    expect(html).toContain('▲'); // arrow tracks the positive diff (rule 02)
+  });
+
+  it('collapses raw conclusion labels onto the five-state scale (rule 01)', async () => {
+    dataFetcher.getRegressionsData.mockResolvedValue(
+      makeRegressionsData({
+        conclusion: 'REGRESSION',
+        regressionCount: 3,
+        regressions: [
+          makeMetric({ conclusionLabel: 'increase' }),
+          makeMetric({ panelTitle: 'P2', conclusionLabel: 'partial increase', differencePercent: 12 }),
+          makeMetric({ panelTitle: 'P3', conclusionLabel: 'incomparable', testValue: null, controlValue: null, differencePercent: null }),
+        ],
+      }),
+    );
+
+    const html = await renderer.renderRegressionsSection(makeSection(), makeTestRun());
+
+    // Five-state labels present
+    expect(html).toContain('>REGRESSION</span>');
+    expect(html).toContain('>WARNING</span>');
+    expect(html).toContain('>N/A</span>');
+    // Old labels gone
+    expect(html).not.toContain('>INCREASE<');
+    expect(html).not.toContain('>increase<');
+    expect(html).not.toMatch(/partial/i);
+    expect(html).not.toMatch(/incomparable/i);
+    // Generic minus / old emoji icons gone (rule 02/04)
+    expect(html).not.toContain('➖');
+    expect(html).not.toContain('&#x2796;');
+    expect(html).not.toContain('&#x2714;');
+    expect(html).not.toContain('&#x2753;');
   });
 
   it('should not show improvements by default', async () => {
@@ -151,9 +192,8 @@ describe('RegressionsRenderer', () => {
 
     const html = await renderer.renderRegressionsSection(makeSection(), makeTestRun());
 
-    // The improvements table should not be rendered by default
-    const improvementsTableMatches = html.match(/Improvements \(\d+\)/g);
-    expect(improvementsTableMatches).toBeNull();
+    // The improvements table (group header) should not be rendered by default
+    expect(html).not.toContain('>Improvements</h3>');
   });
 
   it('should show improvements when config.showImprovements is true', async () => {
@@ -169,7 +209,9 @@ describe('RegressionsRenderer', () => {
       makeTestRun(),
     );
 
-    expect(html).toContain('Improvements (1)');
+    expect(html).toContain('>Improvements</h3>');
+    expect(html).toContain('1 metrics');
+    expect(html).toContain('>IMPROVEMENT</span>');
   });
 
   it('should render custom title', async () => {

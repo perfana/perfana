@@ -135,10 +135,10 @@ describe('TrendsRenderer', () => {
     it('should show current run metrics', async () => {
       const html = await renderer.renderTrendsSection(makeSection(), makeTestRun());
 
-      expect(html).toContain('95.00 ms'); // avg
-      expect(html).toContain('200.00 ms'); // p95
-      expect(html).toContain('0.20%'); // error rate
-      expect(html).toContain('12,000'); // total transactions
+      expect(html).toContain('95 ms'); // avg
+      expect(html).toContain('200 ms'); // p95
+      expect(html).toContain('0.2%'); // error rate
+      expect(html).toContain('12,000'); // total transactions (grouped)
     });
 
     it('should show delta percentages vs previous run', async () => {
@@ -171,10 +171,10 @@ describe('TrendsRenderer', () => {
     it('should show response time metrics for each run', async () => {
       const html = await renderer.renderTrendsSection(makeSection(), makeTestRun());
 
-      // Check run-001 metrics
-      expect(html).toContain('120.50');
-      expect(html).toContain('250.00');
-      expect(html).toContain('400.00');
+      // Check run-001 metrics (formatNum: grouped, max 2 decimals)
+      expect(html).toContain('120.5');
+      expect(html).toContain('250');
+      expect(html).toContain('400');
     });
   });
 
@@ -267,8 +267,10 @@ describe('TrendsRenderer', () => {
 
       const html = await renderer.renderTrendsSection(makeSection(), makeTestRun());
 
-      // Lower avg is better, so decrease should show green
-      expect(html).toContain('#4caf50'); // green for improvement
+      // Lower avg is better: arrow tracks the value, chip colored as improvement (info)
+      expect(html).toContain('▼');
+      expect(html).toContain('-50.0%');
+      expect(html).toContain('#2b64b3'); // info fg for improvement
     });
 
     it('should show degradation when response time increases', async () => {
@@ -279,8 +281,10 @@ describe('TrendsRenderer', () => {
 
       const html = await renderer.renderTrendsSection(makeSection(), makeTestRun());
 
-      // Higher avg is worse, so increase should show red
-      expect(html).toContain('#f44336'); // red for degradation
+      // Higher avg is worse: arrow up, chip colored as regression (bad)
+      expect(html).toContain('▲');
+      expect(html).toContain('+100.0%');
+      expect(html).toContain('#c1362f'); // bad fg for regression
     });
   });
 });
