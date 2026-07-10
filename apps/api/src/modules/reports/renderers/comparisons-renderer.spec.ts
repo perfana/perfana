@@ -150,10 +150,14 @@ describe('ComparisonsRenderer', () => {
   it('collapses raw increase/partial/incomparable labels to the five states', async () => {
     const data = makeComparisonsData({
       metrics: [
-        makeMetric({ conclusion: 'increase' }),
-        makeMetric({ panelTitle: 'P2', conclusion: 'partial increase', differencePercent: 12 }),
-        makeMetric({ panelTitle: 'P3', conclusion: 'decrease', differencePercent: -12 }),
-        makeMetric({ panelTitle: 'P4', conclusion: 'incomparable', currentValue: null, baselineValue: null, difference: null, differencePercent: null }),
+        makeMetric({ conclusion: 'regression' }),
+        // increase/decrease/partial variants are only emitted when the metric
+        // direction is unclassified — they map to WARNING, never REGRESSION.
+        makeMetric({ panelTitle: 'P2', conclusion: 'increase', differencePercent: 12 }),
+        makeMetric({ panelTitle: 'P3', conclusion: 'partial increase', differencePercent: 12 }),
+        makeMetric({ panelTitle: 'P4', conclusion: 'decrease', differencePercent: -12 }),
+        makeMetric({ panelTitle: 'P5', conclusion: 'partial improvement', differencePercent: -12 }),
+        makeMetric({ panelTitle: 'P6', conclusion: 'incomparable', currentValue: null, baselineValue: null, difference: null, differencePercent: null }),
       ],
     });
     dataFetcher.getComparisonsData.mockResolvedValue(data as any);
@@ -166,8 +170,21 @@ describe('ComparisonsRenderer', () => {
     expect(html).toContain('>N/A</span>');
     expect(html).not.toContain('>INCREASE<');
     expect(html).not.toContain('>increase<');
+    expect(html).not.toContain('>DECREASE<');
     expect(html).not.toMatch(/partial/i);
     expect(html).not.toMatch(/incomparable/i);
+  });
+
+  it('maps an increase row to WARNING, not REGRESSION (unclassified direction)', async () => {
+    const data = makeComparisonsData({
+      metrics: [makeMetric({ conclusion: 'increase', differencePercent: 30 })],
+    });
+    dataFetcher.getComparisonsData.mockResolvedValue(data as any);
+
+    const html = await renderer.renderComparisonsSection(makeSection(), makeTestRun());
+
+    expect(html).toContain('>WARNING</span>');
+    expect(html).not.toContain('>REGRESSION</span>');
   });
 
   it('should render custom title and comment', async () => {
@@ -237,8 +254,23 @@ describe('ComparisonsRenderer', () => {
     const html = await renderer.renderComparisonsSection(makeSection(), makeTestRun());
 
     expect(html).toContain('250.6 ms');
-    expect(html).toContain('75.3%');
+    expect(html).toContain('75.3 %'); // '%' falls through unit-format's generic "value + unit" path
     expect(html).toContain('1 GB');
+  });
+
+  it('keeps small non-zero values from collapsing to 0 (rule 03 precision)', async () => {
+    const data = makeComparisonsData({
+      metrics: [
+        makeMetric({ panelTitle: 'Tiny', metricName: 'ratio', unit: null, currentValue: 0.0042, baselineValue: 0.004, difference: 0.0002, differencePercent: 5 }),
+      ],
+    });
+
+    dataFetcher.getComparisonsData.mockResolvedValue(data as any);
+
+    const html = await renderer.renderComparisonsSection(makeSection(), makeTestRun());
+
+    expect(html).toContain('0.0042');
+    expect(html).not.toContain('>0<'); // never rendered as a bare zero
   });
 
   it('renders baseline_run mode grouped by scenario with band colors', async () => {
@@ -257,8 +289,71 @@ describe('ComparisonsRenderer', () => {
     );
     expect(html).toContain('checkout');
     expect(html).toContain('login');
-    expect(html).toContain('#f59e0b'); // 10% == not < good(10) => amber band on the magnitude bar
+    expect(html).toContain('#43a047'); // 10% == good threshold (inclusive) => green band on the magnitude bar
     expect(html).not.toContain('➖');
+  });
+
+  it('agrees between deltaChip and bandColor at diffPercent exactly = thresholds.good', async () => {
+    // Boundary semantics are inclusive on BOTH paths: ≤ good = good. A diff of
+    // exactly 10% with good=10 must render a good delta chip AND a good band bar.
+    const data = { source: 'performance-metrics', rows: [
+      { group: 'checkout', label: 'login', metrics: [
+        { key: 'avg', current: 110, baseline: 100, diffPercent: 10 },
+      ] },
+    ] };
+    jest.spyOn(dataFetcher, 'getBaselineRunComparison').mockResolvedValue(data as any);
+    const html = await renderer.renderComparisonsSection(
+      { type: 'comparisons', order: 0, config: {
+        comparisonMode: 'baseline_run', baselineTestRunId: 'base', source: 'performance-metrics',
+        metrics: ['avg'], thresholds: { good: 10, warning: 50 } } } as any,
+      { testRunId: 'cur' } as any,
+    );
+    // deltaChip: good status → good pill fill
+    expect(html).toContain('background:#e7f4ea; color:#2e7d32;');
+    expect(html).toContain('+10.0%');
+    // bandColor: good dot on the magnitude bar + good row accent (band paths agree)
+    expect(html).toContain('background:#43a047');
+    expect(html).toContain('border-left:3px solid #43a047');
+    // Neither band path may disagree with amber/red at the boundary
+    expect(html).not.toContain('border-left:3px solid #f59e0b');
+    expect(html).not.toContain('background:#fdf0dd; color:#9a5b00;'); // no warn delta chip
+    // Row counted as "within range" in the summary chips
+    expect(html).toContain('1 within range');
+  });
+
+  it('whitelists config.metrics and coerces config.thresholds (hostile config)', async () => {
+    const data = { source: 'performance-metrics', rows: [
+      { group: 'checkout', label: 'login', metrics: [
+        { key: 'avg', current: 110, baseline: 100, diffPercent: 10 },
+      ] },
+    ] };
+    const spy = jest.spyOn(dataFetcher, 'getBaselineRunComparison').mockResolvedValue(data as any);
+    const html = await renderer.renderComparisonsSection(
+      { type: 'comparisons', order: 0, config: {
+        comparisonMode: 'baseline_run', baselineTestRunId: 'base', source: 'performance-metrics',
+        metrics: ['avg', '"><script>alert(1)</script>', 'p95'],
+        thresholds: { good: '<img onerror=x>', warning: 50 },
+      } } as any,
+      { testRunId: 'cur' } as any,
+    );
+    // Injected metric key never reaches the fetcher or the markup
+    expect(spy.mock.calls[0]![3].metrics).toEqual(['avg', 'p95']);
+    expect(html).not.toContain('<script>alert(1)</script>');
+    // Non-numeric thresholds fall back to the defaults (good=10 → boundary is green)
+    expect(html).toContain('&#8804; 10%');
+    expect(html).not.toContain('<img onerror');
+  });
+
+  it('defaults to avg/p95/p99 when config.metrics has no valid entries', async () => {
+    const spy = jest.spyOn(dataFetcher, 'getBaselineRunComparison').mockResolvedValue(null);
+    await renderer.renderComparisonsSection(
+      { type: 'comparisons', order: 0, config: {
+        comparisonMode: 'baseline_run', baselineTestRunId: 'base', source: 'performance-metrics',
+        metrics: ['bogus'],
+      } } as any,
+      { testRunId: 'cur' } as any,
+    );
+    expect(spy.mock.calls[0]![3].metrics).toEqual(['avg', 'p95', 'p99']);
   });
 
   it('renders dynatrace as ONE merged table: host as chip, id prefix stripped, 2dp values', async () => {

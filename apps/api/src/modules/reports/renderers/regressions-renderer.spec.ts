@@ -135,6 +135,40 @@ describe('RegressionsRenderer', () => {
     expect(html).toContain('>OK</span>');
   });
 
+  it('should append a neutral reason chip when the conclusion collapses to N/A', async () => {
+    dataFetcher.getRegressionsData.mockResolvedValue(
+      makeRegressionsData({ conclusion: 'INSUFFICIENT_DATA' }),
+    );
+
+    const html = await renderer.renderRegressionsSection(makeSection(), makeTestRun());
+
+    expect(html).toContain('>N/A</span>');
+    expect(html).toContain('>insufficient data</span>'); // human-readable reason chip
+  });
+
+  it('should show a skipped reason chip next to the N/A pill', async () => {
+    dataFetcher.getRegressionsData.mockResolvedValue(
+      makeRegressionsData({ conclusion: 'SKIPPED' }),
+    );
+
+    const html = await renderer.renderRegressionsSection(makeSection(), makeTestRun());
+
+    expect(html).toContain('>N/A</span>');
+    expect(html).toContain('>skipped</span>');
+  });
+
+  it('should not show a reason chip when the conclusion has a verdict', async () => {
+    dataFetcher.getRegressionsData.mockResolvedValue(
+      makeRegressionsData({ conclusion: 'regression' }),
+    );
+
+    const html = await renderer.renderRegressionsSection(makeSection(), makeTestRun());
+
+    expect(html).toContain('>REGRESSION</span>');
+    expect(html).not.toContain('>N/A</span>');
+    expect(html).not.toContain('>regression</span>'); // no lowercase raw-label chip
+  });
+
   it('should render regression metrics table with delta arrow bound to the value', async () => {
     dataFetcher.getRegressionsData.mockResolvedValue(
       makeRegressionsData({

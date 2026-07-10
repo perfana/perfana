@@ -112,7 +112,7 @@ describe('TrendsRenderer', () => {
       const html = await renderer.renderTrendsSection(makeSection(), makeTestRun());
 
       expect(html).toContain('Performance Trends');
-      expect(html).toContain('3 RUNS COMPARED');
+      expect(html).toContain('3 runs compared'); // natural case — the kicker CSS uppercases
     });
 
     it('should use custom title', async () => {
@@ -161,10 +161,12 @@ describe('TrendsRenderer', () => {
       expect(html).toContain('v3.0.0');
     });
 
-    it('should highlight current run', async () => {
+    it('should highlight current run with a compact marker chip', async () => {
       const html = await renderer.renderTrendsSection(makeSection(), makeTestRun());
 
-      expect(html).toContain('CURRENT');
+      // markerChip('Current','info'): natural-case label, CSS uppercases; compact table sizing
+      expect(html).toContain('>Current</span>');
+      expect(html).toContain('padding:2px 8px');
       expect(html).toContain('#e3f2fd'); // highlight color
     });
 
@@ -285,6 +287,33 @@ describe('TrendsRenderer', () => {
       expect(html).toContain('▲');
       expect(html).toContain('+100.0%');
       expect(html).toContain('#c1362f'); // bad fg for regression
+    });
+
+    it('should render a flat delta as a single neutral em-dash chip', async () => {
+      dataFetcher.getTrendsData.mockResolvedValue(makeTrendsData({
+        currentRun: makeRunSummary({ testRunId: 'run-003', avgMs: 100, p95Ms: 200, p99Ms: 300, errorRate: 0.5, totalTransactions: 10000 }),
+        previousRuns: [makeRunSummary({ testRunId: 'run-002', avgMs: 100, p95Ms: 200, p99Ms: 300, errorRate: 0.5, totalTransactions: 10000 })],
+      }));
+
+      const html = await renderer.renderTrendsSection(makeSection(), makeTestRun());
+
+      // deltaChip(0) → neutral '—' chip, no arrow, no signed zero percentage
+      expect(html).toContain('background:#f1f1f3; color:#7a828b;">—</span>');
+      expect(html).not.toContain('+0.0%');
+      expect(html).not.toContain('-0.0%');
+    });
+  });
+
+  describe('empty state', () => {
+    it('should route no-data branches through the shared emptyState treatment', async () => {
+      dataFetcher.getTrendsData.mockResolvedValue(null);
+
+      const html = await renderer.renderTrendsSection(makeSection(), makeTestRun());
+
+      expect(html).toContain('background:#f5f5f5');
+      expect(html).toContain('No previous runs found');
+      expect(html).not.toContain('#fff3e0'); // old orange box gone
+      expect(html).not.toContain('#ff9800');
     });
   });
 });

@@ -127,7 +127,7 @@ describe('ApdexRenderer', () => {
     );
 
     expect(html).toContain('Apdex Overview');
-    expect(html).toContain('border-left:4px solid #1976d2');
+    expect(html).toContain('border-left:4px solid var(--primary-color, #1976d2)');
     expect(html).toContain('Application Performance Index');
     // Rule 04: no emoji / gradient icon boxes
     expect(html).not.toContain('⭐');
@@ -234,7 +234,35 @@ describe('ApdexRenderer', () => {
       makeTestRun(),
     );
 
-    expect(html).toContain('Scenario "nonexistent" not found');
+    // Rendered through emptyState(), which escapes the message (quotes → &quot;)
+    expect(html).toContain('Scenario &quot;nonexistent&quot; not found');
+    expect(html).toContain('background:#f5f5f5');
+  });
+
+  it('should color the overall Apdex score by its rating, not hardcoded green', async () => {
+    // Fair overall score → warn dot color on the big number
+    dataFetcher.getApdexDataFromDatabase.mockResolvedValue(
+      makeApdexData({
+        overall: { ...makeApdexData().overall, apdex: 0.75 },
+      }),
+    );
+
+    const html = await renderer.renderApdexSection(makeSection(), makeTestRun());
+
+    expect(html).toContain('color: #f59e0b;">0.750</span>');
+    expect(html).not.toContain('color: #43a047;">0.750</span>');
+  });
+
+  it('should render summary metrics as shared stat cards', async () => {
+    dataFetcher.getApdexDataFromDatabase.mockResolvedValue(makeApdexData());
+
+    const html = await renderer.renderApdexSection(makeSection(), makeTestRun());
+
+    // statCard() markup: card background/border + uppercase label treatment
+    expect(html).toContain('background:#f8f9fa; border:1px solid #e9ecef');
+    expect(html).toContain('Peak Transactions / Second');
+    // Good overall score (0.96) → good dot color
+    expect(html).toContain('color: #43a047;">0.960</span>');
   });
 
   it('should hide overall metrics when showOverallMetrics is false', async () => {

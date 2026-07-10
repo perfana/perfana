@@ -6,7 +6,15 @@ import {
   MetricsPanelSelector,
   MetricsTimeSeriesPanel,
 } from '../services/report-data-fetcher.service';
-import { sectionHeader, commentBlock, formatInt, formatNum } from './report-style';
+import {
+  REPORT_COLORS,
+  sectionHeader,
+  commentBlock,
+  emptyState,
+  formatInt,
+  formatNum,
+  groupHeader,
+} from './report-style';
 import { formatValueWithUnit } from './unit-format';
 
 /**
@@ -82,7 +90,7 @@ export class GraphsRenderer {
 
     return `
       <section class="graphs-section">
-        ${sectionHeader(title, { kicker: `${timeSeriesData.length} PANEL${timeSeriesData.length !== 1 ? 'S' : ''}` })}
+        ${sectionHeader(title, { kicker: `${formatInt(timeSeriesData.length)} panel${timeSeriesData.length !== 1 ? 's' : ''}` })}
 
         ${commentBlock(comment)}
 
@@ -106,9 +114,9 @@ export class GraphsRenderer {
 
     if (dataPoints.length === 0) {
       return `
-        <div style="margin: 16px 0; padding: 20px; background: #f5f5f5; border-radius: 4px;">
-          <h3 style="margin: 0 0 8px 0; font-size: 10pt; color: #666;">${this.utils.escapeHtml(panel.panelTitle)}</h3>
-          <div style="padding: 30px; text-align: center; color: #999;">No data points available.</div>
+        <div style="margin: 16px 0;">
+          ${groupHeader(panel.panelTitle)}
+          ${emptyState('No data points available.')}
         </div>
       `;
     }
@@ -184,10 +192,8 @@ export class GraphsRenderer {
 
     return `
       <div style="margin: 24px 0; padding: 20px; background: #f5f5f5; border-radius: 4px;">
-        <h3 style="margin: 0 0 4px 0; font-size: 10pt; color: #333; font-weight: 600;">
-          ${this.utils.escapeHtml(chartTitle)}
-        </h3>
-        <div style="font-size: 9pt; color: #888; margin-bottom: 12px;">
+        ${groupHeader(chartTitle)}
+        <div style="font-size: 9pt; color: ${REPORT_COLORS.mutedInk}; margin: -6px 0 12px;">
           ${this.utils.escapeHtml(panel.metricName)}${unitLabel} &middot; ${formatInt(dataPoints.length)} data points
         </div>
 
@@ -247,9 +253,7 @@ export class GraphsRenderer {
       <section class="graphs-section">
         ${sectionHeader(title)}
         ${commentBlock(comment)}
-        <div style="padding: 20px; background: #fff3e0; border-radius: 4px; border-left: 4px solid #ff9800;">
-          <p style="margin: 0; color: #666;">${message}</p>
-        </div>
+        ${emptyState(message)}
       </section>
     `;
   }

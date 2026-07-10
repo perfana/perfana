@@ -100,15 +100,45 @@ describe('AwrRenderer', () => {
     expect(html).toContain('No AWR report data available');
   });
 
-  it('should render severity badges with counts', async () => {
+  it('should render severity counts as chips on the section header', async () => {
     dataFetcher.getAwrData.mockResolvedValue(makeAwrData() as any);
 
     const html = await renderer.renderAwrSection(makeSection(), makeTestRun());
 
-    expect(html).toContain('1'); // critical count
-    expect(html).toContain('Critical');
-    expect(html).toContain('Warning');
-    expect(html).toContain('2'); // total
+    expect(html).toContain('1 critical');
+    expect(html).toContain('1 warning');
+    // Zero-count chip omitted entirely
+    expect(html).not.toContain('0 info');
+    // Old off-palette stat-card row is gone
+    expect(html).not.toContain('#ffebee');
+    expect(html).not.toContain('#c62828');
+    expect(html).not.toContain('#fff3e0');
+    expect(html).not.toContain('#e65100');
+    expect(html).not.toContain('#1565c0');
+  });
+
+  it('should render the shared light thead instead of the dark primary thead', async () => {
+    dataFetcher.getAwrData.mockResolvedValue(makeAwrData() as any);
+
+    const html = await renderer.renderAwrSection(makeSection(), makeTestRun());
+
+    expect(html).toContain('border-bottom:2px solid #e6e8ec'); // THEAD_ROW
+    expect(html).not.toContain('background: #1976d2; color: white');
+    expect(html).not.toContain('box-shadow');
+    // Timestamp cell uses tabular numerals, not Courier (no top SQL in this
+    // fixture, so no monospace should appear anywhere)
+    expect(html).not.toContain('Courier New');
+  });
+
+  it('should render group headers with counts pulled out into chips', async () => {
+    dataFetcher.getAwrData.mockResolvedValue(makeAwrData() as any);
+
+    const html = await renderer.renderAwrSection(makeSection(), makeTestRun());
+
+    expect(html).toContain('>Insights</h3>');
+    expect(html).toContain('2 insights');
+    expect(html).not.toContain('Insights (2)');
+    expect(html).toContain('border-left:4px solid var(--primary-color, #1976d2)');
   });
 
   it('should render database info', async () => {

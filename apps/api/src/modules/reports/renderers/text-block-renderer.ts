@@ -1,6 +1,7 @@
 import { Injectable } from '@nestjs/common';
 import { ReportSectionConfig } from '@perfana/shared';
 import { ReportUtilsService } from '../services/report-utils.service';
+import { commentBlock } from './report-style';
 
 /**
  * Renderer for text block section
@@ -21,6 +22,7 @@ export class TextBlockRenderer {
 
     return `
       <section class="text-block" style="text-align: ${alignment};">
+        ${commentBlock(section.comment)}
         ${this.utils.escapeHtml(content)}
       </section>
     `;

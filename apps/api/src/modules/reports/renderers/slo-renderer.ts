@@ -3,7 +3,20 @@ import { TestRun, ReportSectionConfig } from '@perfana/shared';
 import { ReportUtilsService } from '../services/report-utils.service';
 import { ReportDataFetcherService, SloCheckResult } from '../services/report-data-fetcher.service';
 import { formatValueWithUnit } from './unit-format';
-import { sectionHeader, chip, pill, commentBlock, formatInt, REPORT_COLORS } from './report-style';
+import {
+  REPORT_COLORS,
+  TH_CENTER,
+  TH_NUM,
+  TH_TEXT,
+  THEAD_ROW,
+  chip,
+  commentBlock,
+  emptyState,
+  formatInt,
+  pill,
+  sectionHeader,
+  statCard,
+} from './report-style';
 
 /**
  * Renderer for SLO section
@@ -37,9 +50,7 @@ export class SloRenderer {
         <section class="slo-section">
           ${sectionHeader(title, { kicker: 'Service Level Objectives' })}
           ${commentBlock(comment)}
-          <div class="slo-results">
-            <p class="placeholder-message">No test run data available for SLO analysis.</p>
-          </div>
+          ${emptyState('No test run data available for SLO analysis.')}
         </section>
       `;
     }
@@ -56,9 +67,7 @@ export class SloRenderer {
         <section class="slo-section">
           ${sectionHeader(title, { kicker: 'Service Level Objectives' })}
           ${commentBlock(comment)}
-          <div style="padding: 20px; background: #f5f5f5; border-radius: 4px; text-align: center; color: #999;">
-            No SLO check results available for this test run.
-          </div>
+          ${emptyState('No SLO check results available for this test run.')}
         </section>
       `;
     }
@@ -80,18 +89,9 @@ export class SloRenderer {
 
         <!-- Summary Cards -->
         <div style="display: grid; grid-template-columns: repeat(3, 1fr); gap: 16px; margin-bottom: 24px;">
-          <div style="background: #f8f9fa; border: 1px solid #e9ecef; border-radius: 8px; padding: 20px;">
-            <div style="font-size: 9pt; color: ${REPORT_COLORS.mutedInk}; text-transform: uppercase; letter-spacing: 0.05em; margin-bottom: 12px; font-weight: 600;">Total Checks</div>
-            <div style="font-size: 28pt; font-weight: 700; color: ${REPORT_COLORS.primary}; font-variant-numeric: tabular-nums;">${formatInt(total)}</div>
-          </div>
-          <div style="background: #f8f9fa; border: 1px solid #e9ecef; border-radius: 8px; padding: 20px;">
-            <div style="font-size: 9pt; color: ${REPORT_COLORS.mutedInk}; text-transform: uppercase; letter-spacing: 0.05em; margin-bottom: 12px; font-weight: 600;">Passed</div>
-            <div style="font-size: 28pt; font-weight: 700; color: ${REPORT_COLORS.dot.good}; font-variant-numeric: tabular-nums;">${formatInt(passed)}</div>
-          </div>
-          <div style="background: #f8f9fa; border: 1px solid #e9ecef; border-radius: 8px; padding: 20px;">
-            <div style="font-size: 9pt; color: ${REPORT_COLORS.mutedInk}; text-transform: uppercase; letter-spacing: 0.05em; margin-bottom: 12px; font-weight: 600;">Failed</div>
-            <div style="font-size: 28pt; font-weight: 700; color: ${failed > 0 ? REPORT_COLORS.dot.bad : REPORT_COLORS.dot.good}; font-variant-numeric: tabular-nums;">${formatInt(failed)}</div>
-          </div>
+          ${statCard('Total Checks', formatInt(total))}
+          ${statCard('Passed', `<span style="color: ${REPORT_COLORS.dot.good};">${formatInt(passed)}</span>`)}
+          ${statCard('Failed', `<span style="color: ${failed > 0 ? REPORT_COLORS.dot.bad : REPORT_COLORS.dot.good};">${formatInt(failed)}</span>`)}
         </div>
 
         <!-- Check Results Table -->
@@ -135,18 +135,16 @@ export class SloRenderer {
       })
       .join('');
 
-    const thText = 'padding: 4px 16px 12px; font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.05em; color: ' + REPORT_COLORS.faintInk + ';';
-
     return `
       <table style="width: 100%; border-collapse: collapse;">
         <thead>
-          <tr style="border-bottom: 2px solid #e6e8ec;">
-            <th style="${thText} text-align: left;">Check Name</th>
-            <th style="${thText} text-align: left;">Type</th>
-            <th style="${thText} text-align: left;">Source</th>
-            <th style="${thText} text-align: left;">Requirement</th>
-            <th style="${thText} text-align: right;">Actual</th>
-            <th style="${thText} text-align: center;">Status</th>
+          <tr style="${THEAD_ROW}">
+            <th style="${TH_TEXT}">Check Name</th>
+            <th style="${TH_TEXT}">Type</th>
+            <th style="${TH_TEXT}">Source</th>
+            <th style="${TH_TEXT}">Requirement</th>
+            <th style="${TH_NUM}">Actual</th>
+            <th style="${TH_CENTER}">Status</th>
           </tr>
         </thead>
         <tbody style="background: white;">

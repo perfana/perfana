@@ -7,10 +7,11 @@ import {
   sectionHeader,
   commentBlock,
   deltaChip,
+  emptyState,
   formatInt,
   formatNum,
   formatPercent,
-  pill,
+  markerChip,
 } from './report-style';
 
 /**
@@ -61,7 +62,7 @@ export class TrendsRenderer {
 
     return `
       <section class="trends-section">
-        ${sectionHeader(title, { kicker: `${allRuns.length} RUNS COMPARED` })}
+        ${sectionHeader(title, { kicker: `${formatInt(allRuns.length)} runs compared` })}
 
         ${commentBlock(comment)}
 
@@ -69,7 +70,7 @@ export class TrendsRenderer {
         ${this.renderTrendSummaryCards(currentRun, previousRun)}
 
         <!-- Historical Runs Table -->
-        <h3 style="margin: 32px 0 16px 0; font-size: 10pt; font-weight: 700; color: #666; text-transform: uppercase; letter-spacing: 0.05em;">Run History</h3>
+        <h3 style="margin: 32px 0 16px 0; font-size: 10pt; font-weight: 700; color: ${REPORT_COLORS.mutedInk}; text-transform: uppercase; letter-spacing: 0.05em;">Run History</h3>
         ${this.renderRunHistoryTable(allRuns, currentRun.testRunId)}
       </section>
     `;
@@ -129,7 +130,7 @@ export class TrendsRenderer {
       return `
         <tr style="${rowStyle}">
           <td style="font-size: 9pt; white-space: nowrap; font-variant-numeric: tabular-nums;">
-            ${dateStr}${isCurrent ? ` ${pill('CURRENT', 'info')}` : ''}
+            ${dateStr}${isCurrent ? ` ${markerChip('Current', 'info')}` : ''}
           </td>
           <td style="font-size: 9pt;">${release}</td>
           <td style="text-align: right; font-variant-numeric: tabular-nums;">${durationStr}</td>
@@ -194,9 +195,7 @@ export class TrendsRenderer {
       <section class="trends-section">
         ${sectionHeader(title)}
         ${commentBlock(comment)}
-        <div style="padding: 20px; background: #fff3e0; border-radius: 4px; border-left: 4px solid #ff9800;">
-          <p style="margin: 0; color: #666;">${message}</p>
-        </div>
+        ${emptyState(message)}
       </section>
     `;
   }

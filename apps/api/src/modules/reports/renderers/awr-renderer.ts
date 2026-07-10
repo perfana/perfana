@@ -1,10 +1,15 @@
 import { Injectable } from '@nestjs/common';
 import { TestRun, ReportSectionConfig } from '@perfana/shared';
 import { ReportUtilsService } from '../services/report-utils.service';
-import { ReportDataFetcherService, AwrData, AwrReportSummary, AwrInsightSummary } from '../services/report-data-fetcher.service';
+import { ReportDataFetcherService, AwrReportSummary, AwrInsightSummary } from '../services/report-data-fetcher.service';
 import {
-  REPORT_COLORS,
   PillKind,
+  TH_CENTER,
+  TH_NUM,
+  TH_TEXT,
+  THEAD_ROW,
+  chip,
+  groupHeader,
   sectionHeader,
   commentBlock,
   formatInt,
@@ -64,14 +69,23 @@ export class AwrRenderer {
       : data.insights;
     const displayInsights = filteredInsights.slice(0, maxInsights);
 
+    // Severity summary as right-aligned chips on the section header (rule 04),
+    // matching how other sections surface their counts.
+    const s = data.severitySummary;
+    const severityChips = [
+      s.critical > 0 ? chip(`${formatInt(s.critical)} critical`, 'bad') : '',
+      s.warning > 0 ? chip(`${formatInt(s.warning)} warning`, 'warn') : '',
+      s.info > 0 ? chip(`${formatInt(s.info)} info`, 'info') : '',
+    ];
+
     return `
       <section class="awr-section">
-        ${sectionHeader(title, { kicker: `${data.reports.length} AWR report${data.reports.length > 1 ? 's' : ''} analyzed` })}
+        ${sectionHeader(title, {
+          kicker: `${data.reports.length} AWR report${data.reports.length > 1 ? 's' : ''} analyzed`,
+          chipsHtml: severityChips,
+        })}
 
         ${commentBlock(comment)}
-
-        <!-- Severity Summary -->
-        ${this.renderSeverityBadges(data)}
 
         <!-- Database Info -->
         ${data.reports.map((r) => this.renderReportSummary(r)).join('\n')}
@@ -82,30 +96,6 @@ export class AwrRenderer {
         <!-- Top SQL -->
         ${showTopSql ? this.renderTopSql(data.reports) : ''}
       </section>
-    `;
-  }
-
-  private renderSeverityBadges(data: AwrData): string {
-    const s = data.severitySummary;
-    return `
-      <div style="display: flex; gap: 16px; margin-bottom: 24px; flex-wrap: wrap;">
-        <div style="flex: 1; min-width: 140px; background: #ffebee; border: 1px solid #ffcdd2; border-radius: 8px; padding: 16px; text-align: center;">
-          <div style="font-size: 28pt; font-weight: 700; color: #c62828; font-variant-numeric: tabular-nums;">${formatInt(s.critical)}</div>
-          <div style="font-size: 9pt; color: #b71c1c; text-transform: uppercase; letter-spacing: 0.05em; font-weight: 600;">Critical</div>
-        </div>
-        <div style="flex: 1; min-width: 140px; background: #fff3e0; border: 1px solid #ffe0b2; border-radius: 8px; padding: 16px; text-align: center;">
-          <div style="font-size: 28pt; font-weight: 700; color: #e65100; font-variant-numeric: tabular-nums;">${formatInt(s.warning)}</div>
-          <div style="font-size: 9pt; color: #bf360c; text-transform: uppercase; letter-spacing: 0.05em; font-weight: 600;">Warning</div>
-        </div>
-        <div style="flex: 1; min-width: 140px; background: #e3f2fd; border: 1px solid #bbdefb; border-radius: 8px; padding: 16px; text-align: center;">
-          <div style="font-size: 28pt; font-weight: 700; color: #1565c0; font-variant-numeric: tabular-nums;">${formatInt(s.info)}</div>
-          <div style="font-size: 9pt; color: #0d47a1; text-transform: uppercase; letter-spacing: 0.05em; font-weight: 600;">Info</div>
-        </div>
-        <div style="flex: 1; min-width: 140px; background: #f5f5f5; border: 1px solid #e0e0e0; border-radius: 8px; padding: 16px; text-align: center;">
-          <div style="font-size: 28pt; font-weight: 700; color: #555; font-variant-numeric: tabular-nums;">${formatInt(s.total)}</div>
-          <div style="font-size: 9pt; color: #666; text-transform: uppercase; letter-spacing: 0.05em; font-weight: 600;">Total</div>
-        </div>
-      </div>
     `;
   }
 
@@ -123,7 +113,7 @@ export class AwrRenderer {
 
     return `
       <div style="margin-bottom: 24px;">
-        <h3 style="margin: 0 0 16px 0; font-size: 11pt; font-weight: 600; color: #333; padding-left: 16px; border-left: 4px solid #1976d2;">${this.utils.escapeHtml(dbLabel)}</h3>
+        ${groupHeader(dbLabel)}
         <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 12px; margin-bottom: 16px;">
           <div style="background: #f5f5f5; border-radius: 6px; padding: 14px; border: 1px solid #e0e0e0;">
             <div style="font-size: 9pt; color: #666; text-transform: uppercase; letter-spacing: 0.05em; font-weight: 600; margin-bottom: 4px;">Host</div>
@@ -136,7 +126,7 @@ export class AwrRenderer {
           </div>
           <div style="background: #f5f5f5; border-radius: 6px; padding: 14px; border: 1px solid #e0e0e0;">
             <div style="font-size: 9pt; color: #666; text-transform: uppercase; letter-spacing: 0.05em; font-weight: 600; margin-bottom: 4px;">Snapshot Window</div>
-            <div style="font-size: 10pt; font-weight: 600; color: #333; font-family: 'Courier New', monospace;">${beginStr}</div>
+            <div style="font-size: 10pt; font-weight: 600; color: #333; font-variant-numeric: tabular-nums;">${beginStr}</div>
             <div style="font-size: 9pt; color: #888;">to ${endStr}</div>
           </div>
           <div style="background: #f5f5f5; border-radius: 6px; padding: 14px; border: 1px solid #e0e0e0;">
@@ -172,15 +162,15 @@ export class AwrRenderer {
 
     return `
       <div style="margin-top: 24px;">
-        <h3 style="margin: 0 0 12px 0; font-size: 11pt; font-weight: 600; color: ${REPORT_COLORS.headingInk}; padding-left: 14px; border-left: 4px solid ${REPORT_COLORS.primary};">Insights (${formatInt(insights.length)})</h3>
-        <table style="width: 100%; border-collapse: collapse; box-shadow: 0 1px 3px rgba(0,0,0,0.1);">
+        ${groupHeader('Insights', [chip(`${formatInt(insights.length)} insights`, 'neutral')])}
+        <table style="width: 100%; border-collapse: collapse;">
           <thead>
-            <tr style="background: ${REPORT_COLORS.primary}; color: white;">
-              <th style="padding: 12px; text-align: center; font-size: 8pt; font-weight: 700; text-transform: uppercase; letter-spacing: 0.05em; width: 80px;">Severity</th>
-              <th style="padding: 12px; text-align: left; font-size: 8pt; font-weight: 700; text-transform: uppercase; letter-spacing: 0.05em; width: 120px;">Category</th>
-              <th style="padding: 12px; text-align: left; font-size: 8pt; font-weight: 700; text-transform: uppercase; letter-spacing: 0.05em;">Finding</th>
-              <th style="padding: 12px; text-align: left; font-size: 8pt; font-weight: 700; text-transform: uppercase; letter-spacing: 0.05em;">Description</th>
-              <th style="padding: 12px; text-align: left; font-size: 8pt; font-weight: 700; text-transform: uppercase; letter-spacing: 0.05em;">Recommendation</th>
+            <tr style="${THEAD_ROW}">
+              <th style="${TH_CENTER} width: 80px;">Severity</th>
+              <th style="${TH_TEXT} width: 120px;">Category</th>
+              <th style="${TH_TEXT}">Finding</th>
+              <th style="${TH_TEXT}">Description</th>
+              <th style="${TH_TEXT}">Recommendation</th>
             </tr>
           </thead>
           <tbody>
@@ -216,6 +206,7 @@ export class AwrRenderer {
 
     if (topSqlEntries.length === 0) return '';
 
+    // SQL IDs stay monospace on purpose — they are opaque identifiers, not numbers.
     const rows = topSqlEntries.map((s) => `
       <tr style="background: white;">
         <td style="padding: 10px 12px; border-bottom: 1px solid #e0e0e0; font-family: 'Courier New', monospace; font-size: 9pt; font-weight: 600;">${this.utils.escapeHtml(s.sqlId)}</td>
@@ -227,14 +218,14 @@ export class AwrRenderer {
 
     return `
       <div style="margin-top: 24px;">
-        <h3 style="margin: 0 0 12px 0; font-size: 11pt; font-weight: 600; color: ${REPORT_COLORS.headingInk}; padding-left: 14px; border-left: 4px solid ${REPORT_COLORS.primary};">Top SQL by Elapsed Time</h3>
-        <table style="width: 100%; border-collapse: collapse; box-shadow: 0 1px 3px rgba(0,0,0,0.1);">
+        ${groupHeader('Top SQL by Elapsed Time', [chip(`${formatInt(topSqlEntries.length)} statements`, 'neutral')])}
+        <table style="width: 100%; border-collapse: collapse;">
           <thead>
-            <tr style="background: ${REPORT_COLORS.primary}; color: white;">
-              <th style="padding: 12px; text-align: left; font-size: 8pt; font-weight: 700; text-transform: uppercase; letter-spacing: 0.05em;">SQL ID</th>
-              <th style="padding: 12px; text-align: right; font-size: 8pt; font-weight: 700; text-transform: uppercase; letter-spacing: 0.05em;">Elapsed Time</th>
-              <th style="padding: 12px; text-align: right; font-size: 8pt; font-weight: 700; text-transform: uppercase; letter-spacing: 0.05em;">Executions</th>
-              <th style="padding: 12px; text-align: right; font-size: 8pt; font-weight: 700; text-transform: uppercase; letter-spacing: 0.05em;">Elapsed/Exec</th>
+            <tr style="${THEAD_ROW}">
+              <th style="${TH_TEXT}">SQL ID</th>
+              <th style="${TH_NUM}">Elapsed Time</th>
+              <th style="${TH_NUM}">Executions</th>
+              <th style="${TH_NUM}">Elapsed/Exec</th>
             </tr>
           </thead>
           <tbody>

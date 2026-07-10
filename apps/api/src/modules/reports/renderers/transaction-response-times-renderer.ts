@@ -4,6 +4,9 @@ import { ReportUtilsService } from '../services/report-utils.service';
 import { ReportDataFetcherService, ScenarioData, ReportTransaction } from '../services/report-data-fetcher.service';
 import {
   REPORT_COLORS,
+  TH_NUM,
+  TH_TEXT,
+  THEAD_ROW,
   sectionHeader,
   commentBlock,
   formatInt,
@@ -271,17 +274,17 @@ export class TransactionResponseTimesRenderer {
 
     const tableRows = transactions
       .map(
-        (txn: ReportTransaction) => {
-          const rowBg = txn.fail > 0 ? '#fff8f8' : 'white';
+        (txn: ReportTransaction, idx: number) => {
+          const rowBg = txn.fail > 0 ? '#fff8f8' : (idx % 2 === 1 ? '#fbfcfd' : '#ffffff');
           return `
       <tr style="background: ${rowBg};">
-        <td style="padding: 12px 16px; border-bottom: 1px solid #e0e0e0;">${this.utils.escapeHtml(txn.name)}</td>
-        <td style="padding: 12px 16px; text-align: right; font-variant-numeric: tabular-nums; border-bottom: 1px solid #e0e0e0;">${formatNum(txn.avgMs)}</td>
-        <td style="padding: 12px 16px; text-align: right; font-variant-numeric: tabular-nums; border-bottom: 1px solid #e0e0e0;">${formatNum(txn.p95Ms)}</td>
-        <td style="padding: 12px 16px; text-align: right; font-variant-numeric: tabular-nums; border-bottom: 1px solid #e0e0e0;">${formatNum(txn.p99Ms)}</td>
-        <td style="padding: 12px 16px; text-align: right; font-weight: 600; font-variant-numeric: tabular-nums; color: ${REPORT_COLORS.dot.good}; border-bottom: 1px solid #e0e0e0;">${formatInt(txn.pass)}</td>
-        <td style="padding: 12px 16px; text-align: right; font-weight: 600; font-variant-numeric: tabular-nums; color: ${txn.fail > 0 ? REPORT_COLORS.dot.bad : REPORT_COLORS.ink}; border-bottom: 1px solid #e0e0e0;">${formatInt(txn.fail)}</td>
-        <td style="padding: 12px 16px; text-align: right; font-weight: 600; font-variant-numeric: tabular-nums; color: ${txn.errPct > 0 ? REPORT_COLORS.dot.warn : REPORT_COLORS.dot.good}; border-bottom: 1px solid #e0e0e0;">${formatPercent(txn.errPct)}</td>
+        <td style="padding: 12px 16px; border-bottom: 1px solid ${REPORT_COLORS.rowBorder};">${this.utils.escapeHtml(txn.name)}</td>
+        <td style="padding: 12px 16px; text-align: right; font-variant-numeric: tabular-nums; border-bottom: 1px solid ${REPORT_COLORS.rowBorder};">${formatNum(txn.avgMs)}</td>
+        <td style="padding: 12px 16px; text-align: right; font-variant-numeric: tabular-nums; border-bottom: 1px solid ${REPORT_COLORS.rowBorder};">${formatNum(txn.p95Ms)}</td>
+        <td style="padding: 12px 16px; text-align: right; font-variant-numeric: tabular-nums; border-bottom: 1px solid ${REPORT_COLORS.rowBorder};">${formatNum(txn.p99Ms)}</td>
+        <td style="padding: 12px 16px; text-align: right; font-weight: 600; font-variant-numeric: tabular-nums; color: ${REPORT_COLORS.dot.good}; border-bottom: 1px solid ${REPORT_COLORS.rowBorder};">${formatInt(txn.pass)}</td>
+        <td style="padding: 12px 16px; text-align: right; font-weight: 600; font-variant-numeric: tabular-nums; color: ${txn.fail > 0 ? REPORT_COLORS.dot.bad : REPORT_COLORS.ink}; border-bottom: 1px solid ${REPORT_COLORS.rowBorder};">${formatInt(txn.fail)}</td>
+        <td style="padding: 12px 16px; text-align: right; font-weight: 600; font-variant-numeric: tabular-nums; color: ${txn.errPct > 0 ? REPORT_COLORS.dot.warn : REPORT_COLORS.dot.good}; border-bottom: 1px solid ${REPORT_COLORS.rowBorder};">${formatPercent(txn.errPct)}</td>
       </tr>
     `;
         },
@@ -290,16 +293,16 @@ export class TransactionResponseTimesRenderer {
 
     return `
       <div style="margin-top: 24px;">
-        <table style="width: 100%; border-collapse: collapse; box-shadow: 0 1px 3px rgba(0,0,0,0.1);">
+        <table style="width: 100%; border-collapse: collapse;">
           <thead>
-            <tr style="background: ${REPORT_COLORS.primary}; color: white;">
-              <th style="padding: 16px; text-align: left; font-size: 10pt; font-weight: 700; text-transform: uppercase; letter-spacing: 0.05em;">TRANSACTION</th>
-            <th style="padding: 16px; text-align: right; font-size: 10pt; font-weight: 700; text-transform: uppercase; letter-spacing: 0.05em;">AVG (MS)</th>
-            <th style="padding: 16px; text-align: right; font-size: 10pt; font-weight: 700; text-transform: uppercase; letter-spacing: 0.05em;">95TH<br/>(MS)</th>
-            <th style="padding: 16px; text-align: right; font-size: 10pt; font-weight: 700; text-transform: uppercase; letter-spacing: 0.05em;">99TH<br/>(MS)</th>
-            <th style="padding: 16px; text-align: right; font-size: 10pt; font-weight: 700; text-transform: uppercase; letter-spacing: 0.05em;">PASS</th>
-            <th style="padding: 16px; text-align: right; font-size: 10pt; font-weight: 700; text-transform: uppercase; letter-spacing: 0.05em;">FAIL</th>
-            <th style="padding: 16px; text-align: right; font-size: 10pt; font-weight: 700; text-transform: uppercase; letter-spacing: 0.05em;">ERR %</th>
+            <tr style="${THEAD_ROW}">
+              <th style="${TH_TEXT}">Transaction</th>
+            <th style="${TH_NUM}">Avg (ms)</th>
+            <th style="${TH_NUM}">P95 (ms)</th>
+            <th style="${TH_NUM}">P99 (ms)</th>
+            <th style="${TH_NUM}">Pass</th>
+            <th style="${TH_NUM}">Fail</th>
+            <th style="${TH_NUM}">Err %</th>
           </tr>
         </thead>
         <tbody style="background: white;">

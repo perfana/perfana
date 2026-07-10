@@ -53,6 +53,48 @@ describe('TextBlockRenderer', () => {
     expect(html).toContain('&lt;script&gt;');
   });
 
+  it('should render the section comment above the content', () => {
+    const section: ReportSectionConfig = {
+      type: 'text_block',
+      order: 0,
+      comment: 'Author note for readers',
+      config: { content: 'Body text' },
+    };
+
+    const html = renderer.renderTextBlockSection(section);
+
+    expect(html).toContain('section-comment');
+    expect(html).toContain('Author note for readers');
+    expect(html).toContain('Body text');
+    expect(html.indexOf('Author note for readers')).toBeLessThan(html.indexOf('Body text'));
+  });
+
+  it('should omit the comment block entirely when no comment is set', () => {
+    const section: ReportSectionConfig = {
+      type: 'text_block',
+      order: 0,
+      config: { content: 'Body text' },
+    };
+
+    const html = renderer.renderTextBlockSection(section);
+
+    expect(html).not.toContain('section-comment');
+  });
+
+  it('should escape HTML in the comment', () => {
+    const section: ReportSectionConfig = {
+      type: 'text_block',
+      order: 0,
+      comment: '<script>alert(1)</script>',
+      config: { content: 'Body' },
+    };
+
+    const html = renderer.renderTextBlockSection(section);
+
+    expect(html).not.toContain('<script>alert(1)</script>');
+    expect(html).toContain('&lt;script&gt;');
+  });
+
   it('should handle missing config gracefully', () => {
     const section: ReportSectionConfig = {
       type: 'text_block',

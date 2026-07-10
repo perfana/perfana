@@ -8,9 +8,11 @@ import {
   chip,
   pill,
   commentBlock,
+  emptyState,
   formatInt,
   formatNum,
   formatPercent,
+  statCard,
   REPORT_COLORS,
   PillKind,
 } from './report-style';
@@ -52,6 +54,16 @@ export class ApdexRenderer {
     return pill(rating, this.ratingKind(rating));
   }
 
+  /** Dot color for an Apdex score, derived from the same rating scale as the pill. */
+  private ratingDotColor(apdex: number): string {
+    const kind = this.ratingKind(this.utils.getApdexRating(apdex));
+    return kind === 'good'
+      ? REPORT_COLORS.dot.good
+      : kind === 'warn'
+        ? REPORT_COLORS.dot.warn
+        : REPORT_COLORS.dot.bad;
+  }
+
   /**
    * Render Apdex section
    * Supports multiple scenarios via config.scenarios parameter
@@ -69,9 +81,7 @@ export class ApdexRenderer {
         <section class="apdex-section">
           ${sectionHeader(title, { kicker: 'Application Performance Index' })}
           ${commentBlock(comment)}
-          <div style="padding: 20px; background: #f5f5f5; border-radius: 4px; text-align: center; color: #999;">
-            No test run data available for Apdex section.
-          </div>
+          ${emptyState('No test run data available for Apdex section.')}
         </section>
       `;
     }
@@ -84,9 +94,7 @@ export class ApdexRenderer {
         <section class="apdex-section">
           ${sectionHeader(title, { kicker: 'Application Performance Index' })}
           ${commentBlock(comment)}
-          <div style="padding: 20px; background: #f5f5f5; border-radius: 4px; text-align: center; color: #999;">
-            No transaction data available for Apdex calculation.
-          </div>
+          ${emptyState('No transaction data available for Apdex calculation.')}
         </section>
       `;
     }
@@ -125,8 +133,8 @@ export class ApdexRenderer {
           const scenarioData = apdexData.scenarios[scenarioName];
           if (!scenarioData) {
             return `
-              <div style="margin: 24px 0; padding: 16px; background: #fff3e0; border-radius: 4px; border-left: 4px solid var(--warning-color);">
-                <p style="margin: 0; color: var(--text-secondary);">Scenario "${this.utils.escapeHtml(scenarioName)}" not found in test run data.</p>
+              <div style="margin: 24px 0;">
+                ${emptyState(`Scenario "${scenarioName}" not found in test run data.`)}
               </div>
             `;
           }
@@ -140,63 +148,37 @@ export class ApdexRenderer {
    * Render overall Apdex metrics grid
    */
   renderApdexOverallMetrics(overallData: ApdexOverallData): string {
+    const sub = (text: string): string =>
+      `<span style="font-size: 9pt; color: ${REPORT_COLORS.mutedInk}; font-weight: 400;">${text}</span>`;
+    const msValue = (value: number): string =>
+      `${formatNum(value)} <span style="font-size: 14pt;">ms</span>`;
+    // Rule 01: the score's color follows its rating, not a hardcoded green.
+    const apdexColor = this.ratingDotColor(overallData.apdex);
+
     return `
       <div style="margin-bottom: 32px;">
         <h3 style="margin: 24px 0 16px 0; font-size: 10pt; font-weight: 700; color: ${REPORT_COLORS.mutedInk}; text-transform: uppercase; letter-spacing: 0.05em;">Overall Test Metrics</h3>
         <div style="display: grid; grid-template-columns: repeat(4, 1fr); gap: 16px; margin: 24px 0;">
-          <!-- Peak Transactions/Second -->
-          <div style="background: #f8f9fa; border: 1px solid #e9ecef; border-radius: 8px; padding: 20px;">
-            <div style="font-size: 9pt; color: ${REPORT_COLORS.mutedInk}; text-transform: uppercase; letter-spacing: 0.05em; margin-bottom: 12px; font-weight: 600;">Peak Transactions / Second</div>
-            <div style="font-size: 28pt; font-weight: 700; color: ${REPORT_COLORS.primary}; font-variant-numeric: tabular-nums;">${formatNum(overallData.peakTxnsPerSec)}</div>
-          </div>
-
-          <!-- Peak Requests/Second -->
-          <div style="background: #f8f9fa; border: 1px solid #e9ecef; border-radius: 8px; padding: 20px;">
-            <div style="font-size: 9pt; color: ${REPORT_COLORS.mutedInk}; text-transform: uppercase; letter-spacing: 0.05em; margin-bottom: 12px; font-weight: 600;">Peak Requests / Second</div>
-            <div style="font-size: 28pt; font-weight: 700; color: ${REPORT_COLORS.primary}; font-variant-numeric: tabular-nums;">${formatNum(overallData.peakReqsPerSec)}</div>
-          </div>
-
-          <!-- Peak Active Users -->
-          <div style="background: #f8f9fa; border: 1px solid #e9ecef; border-radius: 8px; padding: 20px;">
-            <div style="font-size: 9pt; color: ${REPORT_COLORS.mutedInk}; text-transform: uppercase; letter-spacing: 0.05em; margin-bottom: 12px; font-weight: 600;">Peak Active Users</div>
-            <div style="font-size: 28pt; font-weight: 700; color: ${REPORT_COLORS.primary}; font-variant-numeric: tabular-nums;">${formatInt(overallData.peakActiveUsers)}</div>
-            ${overallData.avgActiveUsers ? `<div style="font-size: 9pt; color: ${REPORT_COLORS.mutedInk}; margin-top: 4px;">Avg: ${formatInt(overallData.avgActiveUsers)}</div>` : ''}
-          </div>
-
-          <!-- Transaction Error Rate -->
-          <div style="background: #f8f9fa; border: 1px solid #e9ecef; border-radius: 8px; padding: 20px;">
-            <div style="font-size: 9pt; color: ${REPORT_COLORS.mutedInk}; text-transform: uppercase; letter-spacing: 0.05em; margin-bottom: 12px; font-weight: 600;">Transaction Error Rate</div>
-            <div style="font-size: 28pt; font-weight: 700; color: ${overallData.errorRate > 1 ? REPORT_COLORS.dot.bad : REPORT_COLORS.dot.good}; font-variant-numeric: tabular-nums;">${formatPercent(overallData.errorRate)}</div>
-            ${overallData.failedCount ? `<div style="font-size: 9pt; color: ${REPORT_COLORS.mutedInk}; margin-top: 4px;">${formatInt(overallData.failedCount)} transactions failed</div>` : ''}
-          </div>
-
-          <!-- Avg Response Time -->
-          <div style="background: #f8f9fa; border: 1px solid #e9ecef; border-radius: 8px; padding: 20px;">
-            <div style="font-size: 9pt; color: ${REPORT_COLORS.mutedInk}; text-transform: uppercase; letter-spacing: 0.05em; margin-bottom: 12px; font-weight: 600;">Avg Response Time</div>
-            <div style="font-size: 28pt; font-weight: 700; color: ${REPORT_COLORS.primary}; font-variant-numeric: tabular-nums;">${formatNum(overallData.avgMs)} <span style="font-size: 14pt;">ms</span></div>
-            <div style="font-size: 9pt; color: ${REPORT_COLORS.mutedInk}; margin-top: 4px;">Weighted average</div>
-          </div>
-
-          <!-- P95 Response Time -->
-          <div style="background: #f8f9fa; border: 1px solid #e9ecef; border-radius: 8px; padding: 20px;">
-            <div style="font-size: 9pt; color: ${REPORT_COLORS.mutedInk}; text-transform: uppercase; letter-spacing: 0.05em; margin-bottom: 12px; font-weight: 600;">P95 Response Time</div>
-            <div style="font-size: 28pt; font-weight: 700; color: ${REPORT_COLORS.dot.warn}; font-variant-numeric: tabular-nums;">${formatNum(overallData.p95Ms)} <span style="font-size: 14pt;">ms</span></div>
-            <div style="font-size: 9pt; color: ${REPORT_COLORS.mutedInk}; margin-top: 4px;">95th percentile</div>
-          </div>
-
-          <!-- P99 Response Time -->
-          <div style="background: #f8f9fa; border: 1px solid #e9ecef; border-radius: 8px; padding: 20px;">
-            <div style="font-size: 9pt; color: ${REPORT_COLORS.mutedInk}; text-transform: uppercase; letter-spacing: 0.05em; margin-bottom: 12px; font-weight: 600;">P99 Response Time</div>
-            <div style="font-size: 28pt; font-weight: 700; color: ${REPORT_COLORS.dot.bad}; font-variant-numeric: tabular-nums;">${formatNum(overallData.p99Ms)} <span style="font-size: 14pt;">ms</span></div>
-            <div style="font-size: 9pt; color: ${REPORT_COLORS.mutedInk}; margin-top: 4px;">99th percentile</div>
-          </div>
-
-          <!-- Overall Apdex Score -->
-          <div style="background: #f8f9fa; border: 1px solid #e9ecef; border-radius: 8px; padding: 20px;">
-            <div style="font-size: 9pt; color: ${REPORT_COLORS.mutedInk}; text-transform: uppercase; letter-spacing: 0.05em; margin-bottom: 12px; font-weight: 600;">Overall Apdex Score</div>
-            <div style="font-size: 28pt; font-weight: 700; color: ${REPORT_COLORS.dot.good}; font-variant-numeric: tabular-nums;">${overallData.apdex.toFixed(3)} ${this.ratingPill(overallData.apdex)}</div>
-            <div style="font-size: 9pt; color: ${REPORT_COLORS.mutedInk}; margin-top: 4px;">${overallData.thresholdVaries ? 'T=varies per txn' : `T=${overallData.threshold}ms`}</div>
-          </div>
+          ${statCard('Peak Transactions / Second', formatNum(overallData.peakTxnsPerSec))}
+          ${statCard('Peak Requests / Second', formatNum(overallData.peakReqsPerSec))}
+          ${statCard(
+            'Peak Active Users',
+            formatInt(overallData.peakActiveUsers),
+            overallData.avgActiveUsers ? sub(`Avg: ${formatInt(overallData.avgActiveUsers)}`) : '',
+          )}
+          ${statCard(
+            'Transaction Error Rate',
+            `<span style="color: ${overallData.errorRate > 1 ? REPORT_COLORS.dot.bad : REPORT_COLORS.dot.good};">${formatPercent(overallData.errorRate)}</span>`,
+            overallData.failedCount ? sub(`${formatInt(overallData.failedCount)} transactions failed`) : '',
+          )}
+          ${statCard('Avg Response Time', msValue(overallData.avgMs), sub('Weighted average'))}
+          ${statCard('P95 Response Time', msValue(overallData.p95Ms), sub('95th percentile'))}
+          ${statCard('P99 Response Time', msValue(overallData.p99Ms), sub('99th percentile'))}
+          ${statCard(
+            'Overall Apdex Score',
+            `<span style="color: ${apdexColor};">${overallData.apdex.toFixed(3)}</span> ${this.ratingPill(overallData.apdex)}`,
+            sub(overallData.thresholdVaries ? 'T=varies per txn' : `T=${overallData.threshold}ms`),
+          )}
         </div>
       </div>
     `;

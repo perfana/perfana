@@ -74,9 +74,22 @@ describe('TransactionResponseTimesRenderer', () => {
       const html = await renderer.renderTransactionResponseTimesSection(makeSection(), makeTestRun());
 
       expect(html).toContain('Transaction Response Times');
-      expect(html).toContain('border-left:4px solid #1976d2'); // rule 04 accent
+      expect(html).toContain('border-left:4px solid var(--primary-color, #1976d2)'); // rule 04 accent
       expect(html).not.toContain('📈'); // no emoji in header
       expect(html).not.toContain('linear-gradient'); // no gradient icon box / thead
+    });
+
+    it('should render the shared light thead with single-line P95/P99 headers', async () => {
+      const html = await renderer.renderTransactionResponseTimesSection(makeSection(), makeTestRun());
+
+      expect(html).toContain('border-bottom:2px solid #e6e8ec'); // THEAD_ROW
+      expect(html).toContain('>P95 (ms)</th>');
+      expect(html).toContain('>P99 (ms)</th>');
+      expect(html).not.toContain('95TH<br/>');
+      expect(html).not.toContain('99TH<br/>');
+      expect(html).not.toContain('background: #1976d2; color: white'); // dark thead gone
+      expect(html).not.toContain('box-shadow');
+      expect(html).not.toContain('#e0e0e0;">'); // row borders now REPORT_COLORS.rowBorder
     });
 
     it('should use custom title', async () => {

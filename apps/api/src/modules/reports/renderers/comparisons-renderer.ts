@@ -2,21 +2,34 @@ import { Injectable } from '@nestjs/common';
 import { TestRun, ReportSectionConfig } from '@perfana/shared';
 import { ReportUtilsService } from '../services/report-utils.service';
 import { ReportDataFetcherService, ComparisonsData, ComparisonMetric, BaselineComparisonRow } from '../services/report-data-fetcher.service';
-import { bandColor, statusFromConclusion } from './comparison-bands';
+import { bandColor, statusFromConclusion, DiffThresholds } from './comparison-bands';
 import {
+  ACCENT,
+  DEFAULT_THRESHOLDS,
   REPORT_COLORS,
+  TH_CENTER,
+  TH_NUM,
+  TH_TEXT,
+  THEAD_ROW,
   chip,
   commentBlock,
-  deltaArrow,
   deltaChip,
+  deltaText,
+  emptyState,
+  escapeHtml,
+  formatDiff,
   formatInt,
+  formatMetricValue,
   formatNum,
-  formatPercent,
   groupHeader,
   sectionHeader,
   splitHostLabel,
   statusPill,
 } from './report-style';
+
+/** The only metric keys the baseline-run comparison understands. */
+const ALLOWED_BASELINE_METRICS = ['avg', 'p95', 'p99'] as const;
+type BaselineMetricKey = (typeof ALLOWED_BASELINE_METRICS)[number];
 
 /**
  * Renderer for Comparisons section
@@ -60,9 +73,7 @@ export class ComparisonsRenderer {
         <section class="comparisons-section">
           ${sectionHeader(title)}
           ${commentBlock(comment)}
-          <div class="comparisons-results">
-            <p class="placeholder-message">No comparison data available for this test run.</p>
-          </div>
+          ${emptyState('No comparison data available for this test run.')}
         </section>
       `;
     }
@@ -102,8 +113,21 @@ export class ComparisonsRenderer {
     const title = section.title || 'Comparisons';
     const comment = section.comment;
     const source = (config.source as 'performance-metrics' | 'grafana' | 'dynatrace') || 'performance-metrics';
-    const metrics = (Array.isArray(config.metrics) && config.metrics.length ? config.metrics : ['avg', 'p95', 'p99']) as ('avg' | 'p95' | 'p99')[];
-    const thresholds = (config.thresholds as { good: number; warning: number }) || { good: 10, warning: 50 };
+    // SECURITY: config is user-supplied JSON — whitelist metric keys instead of
+    // trusting a cast (they are interpolated into <th> markup below).
+    const requestedMetrics = Array.isArray(config.metrics) ? config.metrics : [];
+    const whitelisted = requestedMetrics.filter(
+      (m): m is BaselineMetricKey => (ALLOWED_BASELINE_METRICS as readonly unknown[]).includes(m),
+    );
+    const metrics: BaselineMetricKey[] = whitelisted.length ? whitelisted : [...ALLOWED_BASELINE_METRICS];
+    // SECURITY: coerce thresholds — only accept when BOTH fields are finite numbers.
+    const rawThresholds = (config.thresholds ?? {}) as { good?: unknown; warning?: unknown };
+    const goodT = Number(rawThresholds.good);
+    const warningT = Number(rawThresholds.warning);
+    const thresholds: DiffThresholds =
+      Number.isFinite(goodT) && Number.isFinite(warningT)
+        ? { good: goodT, warning: warningT }
+        : DEFAULT_THRESHOLDS;
     const baselineId = typeof config.baselineTestRunId === 'string' ? config.baselineTestRunId : undefined;
     const dashboardMap = Array.isArray(config.dashboardMap)
       ? (config.dashboardMap as { current: string; baseline: string }[])
@@ -121,7 +145,7 @@ export class ComparisonsRenderer {
     if (!data || data.rows.length === 0) {
       return `<section class="comparisons-section">${sectionHeader(title)}
         ${commentBlock(comment)}
-        <p class="placeholder-message">No comparison data available for the selected baseline run.</p></section>`;
+        ${emptyState('No comparison data available for the selected baseline run.')}</section>`;
     }
 
     // Rank a band color for row accents / worst-of-row aggregation.
@@ -141,7 +165,7 @@ export class ComparisonsRenderer {
         const mag = Math.min(Math.abs(m.diffPercent), 100) / 2; // 100% diff fills half the track
         if (m.diffPercent >= 0) { left = 50; width = mag; } else { width = mag; left = 50 - mag; }
       }
-      return `<td style="padding:14px 16px; border-bottom:1px solid #f0f2f5;${leftBorder ? ' border-left:1px solid #eef1f5;' : ''}">
+      return `<td style="padding:14px 16px; border-bottom:1px solid ${REPORT_COLORS.rowBorder};${leftBorder ? ' border-left:1px solid #eef1f5;' : ''}">
         <div style="display:flex; flex-direction:column; gap:6px; align-items:flex-end;">
           <div style="display:flex; align-items:baseline; gap:8px;">
             <span style="font-size:15px; font-weight:700; color:${REPORT_COLORS.ink}; font-variant-numeric:tabular-nums;">${formatNum(m.current)}</span>
@@ -161,11 +185,8 @@ export class ComparisonsRenderer {
       ok > 0 ? chip(`${ok} within range`, 'good') : '',
     ];
 
-    const thStyle = 'text-align:right; padding:4px 16px 12px; font-size:11.5px; font-weight:700; letter-spacing:0.06em; color:#1976d2; white-space:nowrap;';
-    const thText = 'text-align:left; padding:4px 14px 12px 12px; font-size:11px; font-weight:700; text-transform:uppercase; letter-spacing:0.05em; color:#8a929c; white-space:nowrap;';
-
-    const legend = `<div style="font-size:12.5px; color:#6b7280; margin-top:12px; display:flex; align-items:center; gap:20px; flex-wrap:wrap;">
-      <span>Each cell shows <strong style="color:#1f2933; font-weight:600;">current</strong> &#183; vs baseline &#183; &#916;%. Bar shows regression magnitude.</span>
+    const legend = `<div style="font-size:12.5px; color:${REPORT_COLORS.mutedInk}; margin-top:12px; display:flex; align-items:center; gap:20px; flex-wrap:wrap;">
+      <span>Each cell shows <strong style="color:${REPORT_COLORS.ink}; font-weight:600;">current</strong> &#183; vs baseline &#183; &#916;%. Bar shows regression magnitude.</span>
       <span style="display:inline-flex; align-items:center; gap:6px;"><span style="width:9px; height:9px; border-radius:50%; background:${REPORT_COLORS.dot.good};"></span> &#8804; ${thresholds.good}%</span>
       <span style="display:inline-flex; align-items:center; gap:6px;"><span style="width:9px; height:9px; border-radius:50%; background:${REPORT_COLORS.dot.warn};"></span> ${thresholds.good}&#8211;${thresholds.warning}%</span>
       <span style="display:inline-flex; align-items:center; gap:6px;"><span style="width:9px; height:9px; border-radius:50%; background:${REPORT_COLORS.dot.bad};"></span> &gt; ${thresholds.warning}%</span>
@@ -195,7 +216,7 @@ export class ComparisonsRenderer {
           metric = parsed.metric;
         }
         return `<tr style="background:${rowBackground(rank, idx)};">
-          <td style="padding:14px 14px 14px 12px; border-left:3px solid ${accent(rank)}; border-bottom:1px solid #f0f2f5; font-size:13px; color:#1f2933; font-weight:600; white-space:nowrap; vertical-align:top;">${this.utils.escapeHtml(metric)}</td>
+          <td style="padding:14px 14px 14px 12px; border-left:3px solid ${accent(rank)}; border-bottom:1px solid ${REPORT_COLORS.rowBorder}; font-size:13px; color:${REPORT_COLORS.ink}; font-weight:600; white-space:nowrap; vertical-align:top;">${this.utils.escapeHtml(metric)}</td>
           ${cells}</tr>`;
       }).join('');
 
@@ -204,7 +225,7 @@ export class ComparisonsRenderer {
         hasHost && hostName ? chip(hostName, 'info') : '',
         chip(`${formatInt(data.rows.length)} metrics`, 'neutral'),
       ];
-      const metricHeaders = metrics.map((k) => `<th style="${thStyle} border-left:1px solid #eef1f5;">${k.toUpperCase()}</th>`).join('');
+      const metricHeaders = metrics.map((k) => `<th style="${TH_NUM} border-left:1px solid #eef1f5;">${escapeHtml(k.toUpperCase())}</th>`).join('');
 
       // Dashboard-mapping caption: when the comparison pairs a current-run
       // dashboard with a differently named baseline dashboard, say so —
@@ -216,14 +237,14 @@ export class ComparisonsRenderer {
       const mappingCaption = activePairs.length === 0 ? '' : activePairs.map((p) =>
         `<div style="display:flex; align-items:center; gap:12px; margin:-2px 0 16px; font-size:12px;">
           <span style="display:inline-flex; align-items:center; gap:7px; padding:5px 12px; border-radius:8px; background:#f1f6ff; border:1px solid #d6e4fb;">
-            <span style="width:8px; height:8px; border-radius:50%; background:#1976d2;"></span>
+            <span style="width:8px; height:8px; border-radius:50%; background:${ACCENT};"></span>
             <span style="text-transform:uppercase; letter-spacing:0.05em; font-size:10.5px; font-weight:700; color:#5b6470;">Current</span>
             <span style="font-weight:600; color:#1f2933;">${this.utils.escapeHtml(p.current)}</span>
           </span>
           <span style="color:#b6bcc4; font-size:15px;">&rarr;</span>
           <span style="display:inline-flex; align-items:center; gap:7px; padding:5px 12px; border-radius:8px; background:#f6f7f9; border:1px solid #e6e8ec;">
             <span style="width:8px; height:8px; border-radius:50%; background:#9aa2ab;"></span>
-            <span style="text-transform:uppercase; letter-spacing:0.05em; font-size:10.5px; font-weight:700; color:#8a929c;">Baseline</span>
+            <span style="text-transform:uppercase; letter-spacing:0.05em; font-size:10.5px; font-weight:700; color:${REPORT_COLORS.faintInk};">Baseline</span>
             <span style="font-weight:600; color:#4b5563;">${this.utils.escapeHtml(p.baseline)}</span>
           </span>
         </div>`).join('');
@@ -232,8 +253,8 @@ export class ComparisonsRenderer {
         ${groupHeader(heading, headingChips, summaryChips(reg, warn, ok))}
         ${mappingCaption}
         <table style="width:100%; border-collapse:collapse;">
-          <thead><tr style="border-bottom:2px solid #e6e8ec;">
-            <th style="${thText}">Metric</th>
+          <thead><tr style="${THEAD_ROW}">
+            <th style="${TH_TEXT}">Metric</th>
             ${metricHeaders}
           </tr></thead>
           <tbody>${rowsHtml}</tbody>
@@ -247,7 +268,7 @@ export class ComparisonsRenderer {
         arr.push(r);
         groups.set(r.group, arr);
       }
-      const metricHeaders = metrics.map((k, i) => `<th style="${thStyle}${i > 0 ? ' border-left:1px solid #eef1f5;' : ''}">${k.toUpperCase()}</th>`).join('');
+      const metricHeaders = metrics.map((k, i) => `<th style="${TH_NUM}${i > 0 ? ' border-left:1px solid #eef1f5;' : ''}">${escapeHtml(k.toUpperCase())}</th>`).join('');
 
       bodyHtml = Array.from(groups.entries()).map(([group, rows]) => {
         let reg = 0, warn = 0, ok = 0;
@@ -256,15 +277,15 @@ export class ComparisonsRenderer {
           if (rank === 2) reg++; else if (rank === 1) warn++; else ok++;
           const cells = row.metrics.map((m, gi) => renderCell(m, gi > 0)).join('');
           return `<tr style="background:${rowBackground(rank, idx)};">
-            <td style="padding:14px 14px 14px 12px; border-left:3px solid ${accent(rank)}; border-bottom:1px solid #f0f2f5; font-size:13px; color:#374151; font-weight:500; white-space:nowrap; vertical-align:top;">${this.utils.escapeHtml(row.label)}</td>
+            <td style="padding:14px 14px 14px 12px; border-left:3px solid ${accent(rank)}; border-bottom:1px solid ${REPORT_COLORS.rowBorder}; font-size:13px; color:#374151; font-weight:500; white-space:nowrap; vertical-align:top;">${this.utils.escapeHtml(row.label)}</td>
             ${cells}</tr>`;
         }).join('');
 
         return `<div style="margin-top:38px;">
           ${groupHeader(group, [chip(`${formatInt(rows.length)} transactions`, 'neutral')], summaryChips(reg, warn, ok))}
           <table style="width:100%; border-collapse:collapse;">
-            <thead><tr style="border-bottom:2px solid #e6e8ec;">
-              <th style="${thText}">Transaction</th>
+            <thead><tr style="${THEAD_ROW}">
+              <th style="${TH_TEXT}">Transaction</th>
               ${metricHeaders}
             </tr></thead>
             <tbody>${body}</tbody>
@@ -282,24 +303,23 @@ export class ComparisonsRenderer {
   }
 
   private renderDashboardGroup(dashboard: string, metrics: ComparisonMetric[]): string {
-    const thText = 'padding:8px 12px; text-align:left; font-size:11px; font-weight:700; text-transform:uppercase; letter-spacing:0.05em; color:#8a929c; white-space:nowrap;';
-    const thNum = 'padding:8px 12px; text-align:right; font-size:11px; font-weight:700; text-transform:uppercase; letter-spacing:0.05em; color:#8a929c; white-space:nowrap;';
-
     const rows = metrics.map((m) => {
       const status = statusFromConclusion(m.conclusion);
-      const currentStr = m.currentValue != null ? this.formatValue(m.currentValue, m.unit) : '—';
-      const baselineStr = m.baselineValue != null ? this.formatValue(m.baselineValue, m.unit) : '—';
-      const diffStr = m.difference == null || m.difference === 0 ? '—' : this.formatValue(m.difference, m.unit);
+      const currentStr = formatMetricValue(m.currentValue, m.unit);
+      const baselineStr = formatMetricValue(m.baselineValue, m.unit);
+      // formatDiff owns the zero/null → em-dash rule (rule 03); non-zero diffs
+      // carry the metric's unit via formatMetricValue.
+      const diffStr = formatDiff(m.difference) === '—' ? '—' : formatMetricValue(m.difference, m.unit);
 
       return `
         <tr style="background: white;">
-          <td style="padding: 10px 12px; border-bottom: 1px solid #f0f2f5; font-size: 9pt;">${this.utils.escapeHtml(m.panelTitle)}</td>
-          <td style="padding: 10px 12px; border-bottom: 1px solid #f0f2f5; font-size: 9pt;">${this.utils.escapeHtml(m.metricName)}</td>
-          <td style="padding: 10px 12px; border-bottom: 1px solid #f0f2f5; text-align: right; font-size: 9pt; font-variant-numeric: tabular-nums;">${currentStr}</td>
-          <td style="padding: 10px 12px; border-bottom: 1px solid #f0f2f5; text-align: right; font-size: 9pt; font-variant-numeric: tabular-nums;">${baselineStr}</td>
-          <td style="padding: 10px 12px; border-bottom: 1px solid #f0f2f5; text-align: right; font-size: 9pt; font-variant-numeric: tabular-nums;">${diffStr}</td>
-          <td style="padding: 10px 12px; border-bottom: 1px solid #f0f2f5; text-align: right; font-size: 9pt; font-variant-numeric: tabular-nums; font-weight: 600;">${this.renderDiffPercent(m.differencePercent)}</td>
-          <td style="padding: 10px 12px; border-bottom: 1px solid #f0f2f5; text-align: center;">${statusPill(status)}</td>
+          <td style="padding: 10px 12px; border-bottom: 1px solid ${REPORT_COLORS.rowBorder}; font-size: 9pt;">${this.utils.escapeHtml(m.panelTitle)}</td>
+          <td style="padding: 10px 12px; border-bottom: 1px solid ${REPORT_COLORS.rowBorder}; font-size: 9pt;">${this.utils.escapeHtml(m.metricName)}</td>
+          <td style="padding: 10px 12px; border-bottom: 1px solid ${REPORT_COLORS.rowBorder}; text-align: right; font-size: 9pt; font-variant-numeric: tabular-nums;">${currentStr}</td>
+          <td style="padding: 10px 12px; border-bottom: 1px solid ${REPORT_COLORS.rowBorder}; text-align: right; font-size: 9pt; font-variant-numeric: tabular-nums;">${baselineStr}</td>
+          <td style="padding: 10px 12px; border-bottom: 1px solid ${REPORT_COLORS.rowBorder}; text-align: right; font-size: 9pt; font-variant-numeric: tabular-nums;">${diffStr}</td>
+          <td style="padding: 10px 12px; border-bottom: 1px solid ${REPORT_COLORS.rowBorder}; text-align: right; font-size: 9pt; font-variant-numeric: tabular-nums; font-weight: 600;">${deltaText(m.differencePercent)}</td>
+          <td style="padding: 10px 12px; border-bottom: 1px solid ${REPORT_COLORS.rowBorder}; text-align: center;">${statusPill(status)}</td>
         </tr>
       `;
     }).join('');
@@ -309,14 +329,14 @@ export class ComparisonsRenderer {
         ${groupHeader(dashboard, [chip(`${formatInt(metrics.length)} metrics`, 'neutral')])}
         <table style="width: 100%; border-collapse: collapse;">
           <thead>
-            <tr style="border-bottom: 2px solid #e6e8ec;">
-              <th style="${thText}">Panel</th>
-              <th style="${thText}">Metric</th>
-              <th style="${thNum}">Current</th>
-              <th style="${thNum}">Baseline</th>
-              <th style="${thNum}">Diff</th>
-              <th style="${thNum}">Diff %</th>
-              <th style="padding:8px 12px; text-align:center; font-size:11px; font-weight:700; text-transform:uppercase; letter-spacing:0.05em; color:#8a929c; white-space:nowrap;">Status</th>
+            <tr style="${THEAD_ROW}">
+              <th style="${TH_TEXT}">Panel</th>
+              <th style="${TH_TEXT}">Metric</th>
+              <th style="${TH_NUM}">Current</th>
+              <th style="${TH_NUM}">Baseline</th>
+              <th style="${TH_NUM}">Diff</th>
+              <th style="${TH_NUM}">Diff %</th>
+              <th style="${TH_CENTER}">Status</th>
             </tr>
           </thead>
           <tbody>
@@ -335,28 +355,5 @@ export class ComparisonsRenderer {
       map.get(key)!.push(m);
     }
     return Array.from(map.entries()).map(([dashboard, metrics]) => ({ dashboard, metrics }));
-  }
-
-  /** Rule 02/03: arrow bound to the value's direction, true zero renders as em-dash. */
-  private renderDiffPercent(pct: number | null): string {
-    if (pct == null || !isFinite(pct) || pct === 0) return '—';
-    const sign = pct > 0 ? '+' : '';
-    return `${deltaArrow(pct)} ${sign}${formatPercent(pct)}`;
-  }
-
-  private formatValue(value: number, unit: string | null): string {
-    if (unit === 'bytes') return this.formatBytes(value);
-    if (unit === 'ms' || unit === 'milliseconds') return `${formatNum(value)} ms`;
-    if (unit === 's' || unit === 'seconds') return `${formatNum(value)} s`;
-    if (unit === '%' || unit === 'percent') return formatPercent(value);
-    return formatNum(value);
-  }
-
-  private formatBytes(bytes: number): string {
-    const abs = Math.abs(bytes);
-    if (abs >= 1073741824) return `${formatNum(bytes / 1073741824)} GB`;
-    if (abs >= 1048576) return `${formatNum(bytes / 1048576)} MB`;
-    if (abs >= 1024) return `${formatNum(bytes / 1024)} KB`;
-    return `${formatInt(bytes)} B`;
   }
 }
