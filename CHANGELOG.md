@@ -4,6 +4,12 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
+## [0.2.61.41] - 2026-07-10
+
+### Fixed
+- **Generated reports show the system under test's name instead of its UUID.** The cover page and Test Run Summary previously printed the internal id (e.g. `70e6172c-9248-…`); they now show the system's name everywhere it appears.
+- **SLO summary requirements and actuals are formatted like the rest of the app instead of showing raw Grafana unit codes.** `< 0.90 percentunit` now renders as `< 90%` (0.0–1.0 values are converted to percentages, matching the SLO config UI), `< 70.00 short` as `< 70`, and unit suffixes like `ms` keep their spacing. The `le`/`ge` operator spellings render as `≤`/`≥` like the web UI, and non-numeric measured values show `—` instead of `-`.
+
 ## [0.2.61.39] - 2026-07-09
 
 ### Changed

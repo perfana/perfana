@@ -78,6 +78,18 @@ and any DQL query / entity-mapping editor pages.
 
 ---
 
+## Reports
+
+### SLO section renders a green "all clear" card when the check-results query fails
+
+**Priority:** P2
+**Origin:** Adversarial review during /ship on `fix/report-sut-name-and-slo-units` (2026-07-10). Pre-existing behavior, adjacent to the SLO unit-formatting fix.
+**Why:** `getSloCheckResults` swallows any query error (`logger.warn` + return `[]`), and the SLO renderer shows the green ✓ "No SLO check results available" card for an empty list. A transient DB error during generation produces a permanently stored report that visually implies "all clear". Worse: a single `check_results` row whose `requirement->>'value'` isn't castable to numeric throws in the `::numeric` cast and collapses *every* SLO into that green card.
+**What:** Distinguish "query failed" from "no results" — e.g. let the error propagate to fail the generation job (it retries), or render an explicit warning card. Consider `NULLIF`-guarding the `::numeric` cast so one malformed row doesn't blank the section.
+**Where:** `apps/api/src/modules/reports/services/report-data-fetcher.service.ts` (~1532-1555, the catch), `apps/api/src/modules/reports/renderers/slo-renderer.ts` (empty-state card).
+
+---
+
 ## Tests
 
 ### Consider clearing `persistedListeners` on manual `disconnect()`
