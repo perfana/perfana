@@ -31,7 +31,8 @@ export class HeaderRenderer {
     const includeSummary = config.includeSummary !== false;
 
     // Use mock data if testRun is null (preview mode)
-    const systemId = testRun?.systemUnderTestId || 'sample-system';
+    // Display the SUT's name; fall back to the id only when the relation isn't loaded
+    const systemName = testRun?.systemUnderTest?.name || testRun?.systemUnderTestId || 'sample-system';
     const environment = testRun?.testEnvironment || 'test';
     const workload = testRun?.workload || 'sample-workload';
     const testRunId = testRun?.testRunId || 'preview-test-run';
@@ -91,7 +92,7 @@ export class HeaderRenderer {
           <div class="cover-info-card">
             <div class="cover-info-row">
               <div class="cover-info-label">System Under Test</div>
-              <div class="cover-info-value">${this.utils.escapeHtml(systemId)}</div>
+              <div class="cover-info-value">${this.utils.escapeHtml(systemName)}</div>
             </div>
             <div class="cover-info-row">
               <div class="cover-info-label">Environment</div>
@@ -125,7 +126,7 @@ export class HeaderRenderer {
             <!-- Row 1 -->
             <div class="info-item">
               <div class="info-label">System Under Test</div>
-              <div class="info-value">${this.utils.escapeHtml(systemId)}</div>
+              <div class="info-value">${this.utils.escapeHtml(systemName)}</div>
             </div>
             <div class="info-item">
               <div class="info-label">Test Run ID</div>

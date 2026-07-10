@@ -2,6 +2,7 @@ import { Injectable } from '@nestjs/common';
 import { TestRun, ReportSectionConfig } from '@perfana/shared';
 import { ReportUtilsService } from '../services/report-utils.service';
 import { ReportDataFetcherService, SloCheckResult } from '../services/report-data-fetcher.service';
+import { formatValueWithUnit } from './unit-format';
 
 /**
  * Renderer for SLO section
@@ -135,9 +136,9 @@ export class SloRenderer {
           result.metric_unit,
         );
 
-        const actualValue = result.panel_average != null
-          ? `${Number(result.panel_average).toFixed(2)}${result.metric_unit ? ' ' + this.utils.escapeHtml(result.metric_unit) : ''}`
-          : '—';
+        const formattedActual = formatValueWithUnit(result.panel_average, result.metric_unit ?? undefined);
+        // formatValueWithUnit returns '-' for null/NaN; the table uses '—' for missing values
+        const actualValue = formattedActual === '-' ? '—' : this.utils.escapeHtml(formattedActual);
 
         const statusBadge = isPassed
           ? `<span style="display: inline-block; padding: 4px 12px; border-radius: 4px; font-size: 9pt; font-weight: 700; text-transform: uppercase; letter-spacing: 0.05em; background: #e8f5e9; color: #2e7d32;">PASS</span>`
@@ -187,13 +188,15 @@ export class SloRenderer {
   ): string {
     if (!operator || value == null) return 'No requirement';
 
-    const unitStr = unit ? ` ${unit}` : '';
-    const formattedValue = `${Number(value).toFixed(2)}${unitStr}`;
+    // Format like the web UI does (percentunit → %, short/none → bare number)
+    const formattedValue = formatValueWithUnit(value, unit ?? undefined);
 
     switch (operator) {
       case 'lt': return `< ${formattedValue}`;
+      case 'le':
       case 'lte': return `≤ ${formattedValue}`;
       case 'gt': return `> ${formattedValue}`;
+      case 'ge':
       case 'gte': return `≥ ${formattedValue}`;
       case 'eq': return `= ${formattedValue}`;
       case 'ne': return `≠ ${formattedValue}`;

@@ -488,7 +488,8 @@ describe('ReportGenerationService', () => {
       expect(result).toEqual(mockReport);
       expect(reportRepo.findOne).toHaveBeenCalledWith({
         where: { id: mockReport.id },
-        relations: ['template', 'test_run'],
+        // test_run.systemUnderTest: renderers display the SUT name, not its id
+        relations: ['template', 'test_run', 'test_run.systemUnderTest'],
       });
     });
 

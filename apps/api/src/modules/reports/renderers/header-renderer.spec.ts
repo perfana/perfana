@@ -74,6 +74,18 @@ describe('HeaderRenderer', () => {
       expect(html).toContain('run-001');
     });
 
+    it('should show the system under test name, not its UUID, when the relation is loaded', async () => {
+      const testRun = makeTestRun({
+        systemUnderTestId: '70e6172c-9248-42e8-81eb-a5f121b00525',
+        systemUnderTest: { name: 'MyShop Webshop' },
+      } as Partial<TestRun>);
+
+      const html = await renderer.renderHeaderSection(makeSection(), testRun);
+
+      expect(html).toContain('MyShop Webshop');
+      expect(html).not.toContain('70e6172c-9248-42e8-81eb-a5f121b00525');
+    });
+
     it('should use custom title and subtitle', async () => {
       const section = makeSection({
         config: { title: 'Sprint 42 Report', subtitle: 'Nightly Load Test' },
