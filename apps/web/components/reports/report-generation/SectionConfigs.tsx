@@ -13,12 +13,139 @@ import DeleteIcon from '@mui/icons-material/Delete';
 import SectionPreviewModal from './SectionPreviewModal';
 import dynamic from 'next/dynamic';
 import { authenticatedFetch } from '@/lib/api';
+import type { ReportSectionType } from '@/lib/api/reports';
 import { fetchDynatraceDashboards, fetchDynatraceMetrics } from '@/lib/dynatrace';
 import { isGrafana } from '@/lib/metrics-source-utils';
 import { BaselineRunSelect, useBaselineCandidates } from './BaselineRunSelect';
 
 // Dynamically import preview components to reduce initial bundle size
 const ApdexSectionPreview = dynamic(() => import('./preview/ApdexSectionPreview'), { ssr: false });
+const HtmlSectionPreview = dynamic(() => import('./preview/HtmlSectionPreview'), { ssr: false });
+
+// ==================== Shared Section Config Shell ====================
+
+interface SectionConfigShellProps {
+  /** Modal title, e.g. "Apdex Score" */
+  sectionTitle: string;
+  /** Human-readable type label shown in the modal chip, e.g. "Apdex" */
+  sectionType: string;
+  /** API section type used by the generic server-rendered HTML preview */
+  previewType: ReportSectionType;
+  /** Current section config (including comment) — sent to the preview endpoint */
+  previewConfig: Record<string, unknown>;
+  comment?: string;
+  onCommentChange: (comment: string) => void;
+  testRunId?: string;
+  /** Extra per-form condition that disables the preview button */
+  previewDisabled?: boolean;
+  /** Tooltip shown when previewDisabled is true */
+  previewDisabledReason?: string;
+  /** Bespoke preview content; defaults to the server-rendered HTML preview */
+  previewContent?: React.ReactNode;
+  children?: React.ReactNode;
+}
+
+/**
+ * Shared wrapper that gives every section config form the same affordances:
+ * the form's own fields, a Section Comments textarea and a
+ * "Preview Section" button that opens the preview modal.
+ */
+function SectionConfigShell({
+  sectionTitle,
+  sectionType,
+  previewType,
+  previewConfig,
+  comment,
+  onCommentChange,
+  testRunId,
+  previewDisabled = false,
+  previewDisabledReason,
+  previewContent,
+  children,
+}: SectionConfigShellProps) {
+  const [previewOpen, setPreviewOpen] = useState(false);
+
+  const disabled = !testRunId || previewDisabled;
+  const disabledReason = !testRunId
+    ? 'Select a test run to enable preview'
+    : previewDisabledReason || 'Preview is not available for the current configuration';
+
+  return (
+    <>
+      <Box sx={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
+        {children}
+
+        {/* Comment Text Area */}
+        <TextField
+          fullWidth
+          multiline
+          rows={4}
+          value={comment || ''}
+          onChange={(e) => onCommentChange(e.target.value)}
+          placeholder="Add comments or observations about this section..."
+          label="Section Comments"
+          variant="outlined"
+          helperText={`${(comment || '').length} / 2000 characters`}
+          inputProps={{
+            maxLength: 2000,
+          }}
+          sx={{
+            '& .MuiOutlinedInput-root': {
+              '&:hover fieldset': {
+                borderColor: '#1976d2',
+              },
+            },
+          }}
+        />
+
+        {/* Preview Button */}
+        <Tooltip title={disabled ? disabledReason : ''} arrow>
+          <Box component="span" sx={{ display: 'block' }}>
+            <Button
+              variant="outlined"
+              startIcon={<VisibilityIcon />}
+              onClick={() => setPreviewOpen(true)}
+              fullWidth
+              disabled={disabled}
+              sx={{
+                textTransform: 'none',
+                fontWeight: 600,
+                borderColor: '#1976d2',
+                color: '#1976d2',
+                py: 1.5,
+                '&:hover': {
+                  borderColor: '#1565c0',
+                  bgcolor: 'rgba(25, 118, 210, 0.04)',
+                },
+                '&.Mui-disabled': {
+                  borderColor: 'rgba(0, 0, 0, 0.12)',
+                  color: 'rgba(0, 0, 0, 0.26)',
+                },
+              }}
+            >
+              Preview Section
+            </Button>
+          </Box>
+        </Tooltip>
+      </Box>
+
+      {/* Preview Modal */}
+      <SectionPreviewModal
+        open={previewOpen}
+        onClose={() => setPreviewOpen(false)}
+        sectionTitle={sectionTitle}
+        sectionType={sectionType}
+        testRunId={testRunId}
+        initialComment={comment}
+        onSaveComment={onCommentChange}
+      >
+        {previewContent ?? (
+          <HtmlSectionPreview testRunId={testRunId} sectionType={previewType} config={previewConfig} />
+        )}
+      </SectionPreviewModal>
+    </>
+  );
+}
 
 // ==================== Header Section Config ====================
 
@@ -26,16 +153,26 @@ const ApdexSectionPreview = dynamic(() => import('./preview/ApdexSectionPreview'
 export interface HeaderConfig {
   text?: string;
   level?: number;
+  comment?: string;
 }
 
 interface HeaderConfigFormProps {
   config: HeaderConfig;
   onChange: (config: HeaderConfig) => void;
+  testRunId?: string;
 }
 
-export function HeaderConfigForm({ config, onChange }: HeaderConfigFormProps) {
+export function HeaderConfigForm({ config, onChange, testRunId }: HeaderConfigFormProps) {
   return (
-    <Box sx={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
+    <SectionConfigShell
+      sectionTitle={config.text || 'Header'}
+      sectionType="Header"
+      previewType="header"
+      previewConfig={{ ...config }}
+      comment={config.comment}
+      onCommentChange={(comment) => onChange({ ...config, comment })}
+      testRunId={testRunId}
+    >
       <TextField
         label="Header Text"
         value={config.text || ''}
@@ -61,7 +198,7 @@ export function HeaderConfigForm({ config, onChange }: HeaderConfigFormProps) {
           <MenuItem value={6}>H6 - Smallest</MenuItem>
         </Select>
       </Box>
-    </Box>
+    </SectionConfigShell>
   );
 }
 
@@ -73,16 +210,26 @@ export interface TextBlockConfig {
   fontSize?: number;
   markdown?: boolean;
   alignment?: 'left' | 'center' | 'right' | 'justify';
+  comment?: string;
 }
 
 interface TextBlockConfigFormProps {
   config: TextBlockConfig;
   onChange: (config: TextBlockConfig) => void;
+  testRunId?: string;
 }
 
-export function TextBlockConfigForm({ config, onChange }: TextBlockConfigFormProps) {
+export function TextBlockConfigForm({ config, onChange, testRunId }: TextBlockConfigFormProps) {
   return (
-    <Box sx={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
+    <SectionConfigShell
+      sectionTitle="Text Block"
+      sectionType="Text Block"
+      previewType="text_block"
+      previewConfig={{ ...config }}
+      comment={config.comment}
+      onCommentChange={(comment) => onChange({ ...config, comment })}
+      testRunId={testRunId}
+    >
       <TextField
         label="Content"
         value={config.content || ''}
@@ -124,7 +271,7 @@ export function TextBlockConfigForm({ config, onChange }: TextBlockConfigFormPro
         }
         label="Enable Markdown"
       />
-    </Box>
+    </SectionConfigShell>
   );
 }
 
@@ -137,16 +284,26 @@ export interface SloConfig {
   statusFilter?: string[];
   includeTrends?: boolean;
   showSummaryTable?: boolean;
+  comment?: string;
 }
 
 interface SloConfigFormProps {
   config: SloConfig;
   onChange: (config: SloConfig) => void;
+  testRunId?: string;
 }
 
-export function SloConfigForm({ config, onChange }: SloConfigFormProps) {
+export function SloConfigForm({ config, onChange, testRunId }: SloConfigFormProps) {
   return (
-    <Box sx={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
+    <SectionConfigShell
+      sectionTitle="Service Level Objectives"
+      sectionType="SLO"
+      previewType="slo"
+      previewConfig={{ ...config }}
+      comment={config.comment}
+      onCommentChange={(comment) => onChange({ ...config, comment })}
+      testRunId={testRunId}
+    >
       <TextField
         label="Max Items"
         type="number"
@@ -182,7 +339,7 @@ export function SloConfigForm({ config, onChange }: SloConfigFormProps) {
         }
         label="Include Trends"
       />
-    </Box>
+    </SectionConfigShell>
   );
 }
 
@@ -205,101 +362,45 @@ interface ApdexConfigFormProps {
 }
 
 export function ApdexConfigForm({ config, onChange, testRunId }: ApdexConfigFormProps) {
-  const [previewOpen, setPreviewOpen] = useState(false);
-
-  const handleCommentChange = (event: React.ChangeEvent<HTMLInputElement>) => {
-    onChange({ ...config, comment: event.target.value });
-  };
-
   return (
-    <>
-      <Box sx={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
-        {/* Apply to analysis timerange only Toggle */}
-        <Tooltip title="Apply statistics to the configured analysis timerange only" arrow>
-          <FormControlLabel
-            control={
-              <Switch
-                checked={config.excludeRampUp ?? true}
-                onChange={(e) => onChange({ ...config, excludeRampUp: e.target.checked })}
-                size="small"
-                sx={{
-                  '& .MuiSwitch-switchBase.Mui-checked': {
-                    color: 'primary.main',
-                  },
-                  '& .MuiSwitch-switchBase.Mui-checked + .MuiSwitch-track': {
-                    backgroundColor: 'primary.main',
-                  },
-                }}
-              />
-            }
-            label="Apply to analysis timerange only"
-            sx={{
-              '& .MuiFormControlLabel-label': {
-                fontSize: '0.875rem',
-                fontWeight: 500,
-              },
-            }}
-          />
-        </Tooltip>
-
-        {/* Comment Text Area */}
-        <TextField
-          fullWidth
-          multiline
-          rows={4}
-          value={config.comment || ''}
-          onChange={handleCommentChange}
-          placeholder="Add comments or observations about this section..."
-          label="Section Comments"
-          variant="outlined"
-          helperText={`${(config.comment || '').length} / 2000 characters`}
-          inputProps={{
-            maxLength: 2000,
-          }}
+    <SectionConfigShell
+      sectionTitle="Apdex Score"
+      sectionType="Apdex"
+      previewType="apdex"
+      previewConfig={{ ...config }}
+      comment={config.comment}
+      onCommentChange={(comment) => onChange({ ...config, comment })}
+      testRunId={testRunId}
+      previewContent={<ApdexSectionPreview testRunId={testRunId} config={config} />}
+    >
+      {/* Apply to analysis timerange only Toggle */}
+      <Tooltip title="Apply statistics to the configured analysis timerange only" arrow>
+        <FormControlLabel
+          control={
+            <Switch
+              checked={config.excludeRampUp ?? true}
+              onChange={(e) => onChange({ ...config, excludeRampUp: e.target.checked })}
+              size="small"
+              sx={{
+                '& .MuiSwitch-switchBase.Mui-checked': {
+                  color: 'primary.main',
+                },
+                '& .MuiSwitch-switchBase.Mui-checked + .MuiSwitch-track': {
+                  backgroundColor: 'primary.main',
+                },
+              }}
+            />
+          }
+          label="Apply to analysis timerange only"
           sx={{
-            '& .MuiOutlinedInput-root': {
-              '&:hover fieldset': {
-                borderColor: '#1976d2',
-              },
+            '& .MuiFormControlLabel-label': {
+              fontSize: '0.875rem',
+              fontWeight: 500,
             },
           }}
         />
-
-        {/* Preview Button */}
-        <Button
-          variant="outlined"
-          startIcon={<VisibilityIcon />}
-          onClick={() => setPreviewOpen(true)}
-          fullWidth
-          sx={{
-            textTransform: 'none',
-            fontWeight: 600,
-            borderColor: '#1976d2',
-            color: '#1976d2',
-            py: 1.5,
-            '&:hover': {
-              borderColor: '#1565c0',
-              bgcolor: 'rgba(25, 118, 210, 0.04)',
-            },
-          }}
-        >
-          Preview Section
-        </Button>
-      </Box>
-
-      {/* Preview Modal */}
-      <SectionPreviewModal
-        open={previewOpen}
-        onClose={() => setPreviewOpen(false)}
-        sectionTitle="Apdex Score"
-        sectionType="Apdex"
-        testRunId={testRunId}
-        initialComment={config.comment}
-        onSaveComment={(comment) => onChange({ ...config, comment })}
-      >
-        <ApdexSectionPreview testRunId={testRunId} config={config} />
-      </SectionPreviewModal>
-    </>
+      </Tooltip>
+    </SectionConfigShell>
   );
 }
 
@@ -318,7 +419,6 @@ interface TransactionResponseTimesConfigFormProps {
 }
 
 export function TransactionResponseTimesConfigForm({ config, onChange, testRunId }: TransactionResponseTimesConfigFormProps) {
-  const [previewOpen, setPreviewOpen] = useState(false);
   const [scenarios, setScenarios] = useState<string[]>([]);
   const [loadingScenarios, setLoadingScenarios] = useState(false);
 
@@ -375,126 +475,63 @@ export function TransactionResponseTimesConfigForm({ config, onChange, testRunId
     fetchScenarios();
   }, [testRunId]);
 
-  const handleCommentChange = (event: React.ChangeEvent<HTMLInputElement>) => {
-    onChange({ ...config, comment: event.target.value });
-  };
-
   return (
-    <>
-      <Box sx={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
-        {/* Scenario Input - Dropdown if scenarios available, otherwise text field */}
-        {scenarios.length > 0 ? (
-          <Select
-            value={config.scenario || ''}
-            onChange={(e) => onChange({ ...config, scenario: e.target.value })}
-            fullWidth
-            size="small"
-            displayEmpty
-            disabled={loadingScenarios}
-          >
-            <MenuItem value="" disabled>
-              Select a scenario ({scenarios.length} available)
-            </MenuItem>
-            {scenarios.map((scenario) => (
-              <MenuItem key={scenario} value={scenario}>
-                {scenario}
-              </MenuItem>
-            ))}
-          </Select>
-        ) : (
-          <TextField
-            label="Scenario / Transaction Name"
-            value={config.scenario || ''}
-            onChange={(e) => onChange({ ...config, scenario: e.target.value })}
-            fullWidth
-            size="small"
-            placeholder="e.g., BrowseAndSearch, LoginFlow"
-            disabled={loadingScenarios}
-            helperText={
-              loadingScenarios
-                ? 'Loading scenarios...'
-                : !testRunId
-                  ? 'No test run selected - enter scenario name manually'
-                  : 'No scenarios found for this test run - enter manually or select a different test run'
-            }
-          />
-        )}
-
-        {/* Debug info */}
-        {process.env.NODE_ENV === 'development' && (
-          <Typography variant="caption" color="text.secondary">
-            Debug: testRunId={testRunId || 'undefined'}, scenarios={scenarios.length}, loading={loadingScenarios.toString()}
-          </Typography>
-        )}
-
-        {/* Comment Text Area */}
-        <TextField
+    <SectionConfigShell
+      sectionTitle={`Response Times - ${config.scenario || 'N/A'}`}
+      sectionType="Transaction Response Times"
+      previewType="transaction_response_times"
+      previewConfig={{ ...config }}
+      comment={config.comment}
+      onCommentChange={(comment) => onChange({ ...config, comment })}
+      testRunId={testRunId}
+      previewDisabled={!config.scenario}
+      previewDisabledReason="Select a scenario to enable preview"
+    >
+      {/* Scenario Input - Dropdown if scenarios available, otherwise text field */}
+      {scenarios.length > 0 ? (
+        <Select
+          value={config.scenario || ''}
+          onChange={(e) => onChange({ ...config, scenario: e.target.value })}
           fullWidth
-          multiline
-          rows={4}
-          value={config.comment || ''}
-          onChange={handleCommentChange}
-          placeholder="Add comments or observations about this section..."
-          label="Section Comments"
-          variant="outlined"
-          helperText={`${(config.comment || '').length} / 2000 characters`}
-          inputProps={{
-            maxLength: 2000,
-          }}
-          sx={{
-            '& .MuiOutlinedInput-root': {
-              '&:hover fieldset': {
-                borderColor: '#1976d2',
-              },
-            },
-          }}
-        />
-
-        {/* Preview Button */}
-        <Button
-          variant="outlined"
-          startIcon={<VisibilityIcon />}
-          onClick={() => setPreviewOpen(true)}
-          fullWidth
-          disabled={!config.scenario}
-          sx={{
-            textTransform: 'none',
-            fontWeight: 600,
-            borderColor: '#1976d2',
-            color: '#1976d2',
-            py: 1.5,
-            '&:hover': {
-              borderColor: '#1565c0',
-              bgcolor: 'rgba(25, 118, 210, 0.04)',
-            },
-            '&.Mui-disabled': {
-              borderColor: 'rgba(0, 0, 0, 0.12)',
-              color: 'rgba(0, 0, 0, 0.26)',
-            },
-          }}
+          size="small"
+          displayEmpty
+          disabled={loadingScenarios}
         >
-          Preview Section
-        </Button>
-      </Box>
+          <MenuItem value="" disabled>
+            Select a scenario ({scenarios.length} available)
+          </MenuItem>
+          {scenarios.map((scenario) => (
+            <MenuItem key={scenario} value={scenario}>
+              {scenario}
+            </MenuItem>
+          ))}
+        </Select>
+      ) : (
+        <TextField
+          label="Scenario / Transaction Name"
+          value={config.scenario || ''}
+          onChange={(e) => onChange({ ...config, scenario: e.target.value })}
+          fullWidth
+          size="small"
+          placeholder="e.g., BrowseAndSearch, LoginFlow"
+          disabled={loadingScenarios}
+          helperText={
+            loadingScenarios
+              ? 'Loading scenarios...'
+              : !testRunId
+                ? 'No test run selected - enter scenario name manually'
+                : 'No scenarios found for this test run - enter manually or select a different test run'
+          }
+        />
+      )}
 
-      {/* Preview Modal */}
-      <SectionPreviewModal
-        open={previewOpen}
-        onClose={() => setPreviewOpen(false)}
-        sectionTitle={`Response Times - ${config.scenario || 'N/A'}`}
-        sectionType="Transaction Response Times"
-        testRunId={testRunId}
-        initialComment={config.comment}
-        onSaveComment={(comment) => onChange({ ...config, comment })}
-      >
-        <Box sx={{ p: 2, textAlign: 'center' }}>
-          {/* Placeholder - actual preview component would be created separately */}
-          <Typography variant="body2" color="text.secondary">
-            Response times preview for <strong>{config.scenario}</strong> would appear here.
-          </Typography>
-        </Box>
-      </SectionPreviewModal>
-    </>
+      {/* Debug info */}
+      {process.env.NODE_ENV === 'development' && (
+        <Typography variant="caption" color="text.secondary">
+          Debug: testRunId={testRunId || 'undefined'}, scenarios={scenarios.length}, loading={loadingScenarios.toString()}
+        </Typography>
+      )}
+    </SectionConfigShell>
   );
 }
 
@@ -508,16 +545,26 @@ export interface RegressionsConfig {
   minChangePercent?: number;
   showComparisonDetails?: boolean;
   includeComparisonChart?: boolean;
+  comment?: string;
 }
 
 interface RegressionsConfigFormProps {
   config: RegressionsConfig;
   onChange: (config: RegressionsConfig) => void;
+  testRunId?: string;
 }
 
-export function RegressionsConfigForm({ config, onChange }: RegressionsConfigFormProps) {
+export function RegressionsConfigForm({ config, onChange, testRunId }: RegressionsConfigFormProps) {
   return (
-    <Box sx={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
+    <SectionConfigShell
+      sectionTitle="Performance Regressions"
+      sectionType="Regressions"
+      previewType="regressions"
+      previewConfig={{ ...config }}
+      comment={config.comment}
+      onCommentChange={(comment) => onChange({ ...config, comment })}
+      testRunId={testRunId}
+    >
       <Select
         value={config.sortBy || 'severity'}
         onChange={(e) => onChange({ ...config, sortBy: e.target.value as RegressionsConfig['sortBy'] })}
@@ -571,7 +618,7 @@ export function RegressionsConfigForm({ config, onChange }: RegressionsConfigFor
         }
         label="Include Comparison Chart"
       />
-    </Box>
+    </SectionConfigShell>
   );
 }
 
@@ -586,16 +633,26 @@ export interface GraphsConfig {
     endOffset?: number;
   };
   showLegends?: boolean;
+  comment?: string;
 }
 
 interface GraphsConfigFormProps {
   config: GraphsConfig;
   onChange: (config: GraphsConfig) => void;
+  testRunId?: string;
 }
 
-export function GraphsConfigForm({ config, onChange }: GraphsConfigFormProps) {
+export function GraphsConfigForm({ config, onChange, testRunId }: GraphsConfigFormProps) {
   return (
-    <Box sx={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
+    <SectionConfigShell
+      sectionTitle="Custom Graphs"
+      sectionType="Graphs"
+      previewType="graphs"
+      previewConfig={{ ...config }}
+      comment={config.comment}
+      onCommentChange={(comment) => onChange({ ...config, comment })}
+      testRunId={testRunId}
+    >
       <Select
         value={config.quality || 'standard'}
         onChange={(e) => onChange({ ...config, quality: e.target.value as GraphsConfig['quality'] })}
@@ -639,7 +696,7 @@ export function GraphsConfigForm({ config, onChange }: GraphsConfigFormProps) {
           sx={{ flex: 1 }}
         />
       </Box>
-    </Box>
+    </SectionConfigShell>
   );
 }
 
@@ -652,16 +709,26 @@ export interface AwrConfig {
   showWaitEvents?: boolean;
   showTablespaceUsage?: boolean;
   includeExecutionPlans?: boolean;
+  comment?: string;
 }
 
 interface AwrConfigFormProps {
   config: AwrConfig;
   onChange: (config: AwrConfig) => void;
+  testRunId?: string;
 }
 
-export function AwrConfigForm({ config, onChange }: AwrConfigFormProps) {
+export function AwrConfigForm({ config, onChange, testRunId }: AwrConfigFormProps) {
   return (
-    <Box sx={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
+    <SectionConfigShell
+      sectionTitle="AWR Analysis"
+      sectionType="AWR"
+      previewType="awr"
+      previewConfig={{ ...config }}
+      comment={config.comment}
+      onCommentChange={(comment) => onChange({ ...config, comment })}
+      testRunId={testRunId}
+    >
       <TextField
         label="Top SQL Count"
         type="number"
@@ -706,7 +773,7 @@ export function AwrConfigForm({ config, onChange }: AwrConfigFormProps) {
         }
         label="Include Execution Plans"
       />
-    </Box>
+    </SectionConfigShell>
   );
 }
 
@@ -722,16 +789,26 @@ export interface TrendsConfig {
   showCharts?: boolean;
   sensitivity?: 'low' | 'medium' | 'high';
   showStatistics?: boolean;
+  comment?: string;
 }
 
 interface TrendsConfigFormProps {
   config: TrendsConfig;
   onChange: (config: TrendsConfig) => void;
+  testRunId?: string;
 }
 
-export function TrendsConfigForm({ config, onChange }: TrendsConfigFormProps) {
+export function TrendsConfigForm({ config, onChange, testRunId }: TrendsConfigFormProps) {
   return (
-    <Box sx={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
+    <SectionConfigShell
+      sectionTitle="Trend Charts"
+      sectionType="Trends"
+      previewType="trends"
+      previewConfig={{ ...config }}
+      comment={config.comment}
+      onCommentChange={(comment) => onChange({ ...config, comment })}
+      testRunId={testRunId}
+    >
       <TextField
         label="Number of Runs"
         type="number"
@@ -778,7 +855,7 @@ export function TrendsConfigForm({ config, onChange }: TrendsConfigFormProps) {
         }
         label="Show Statistics"
       />
-    </Box>
+    </SectionConfigShell>
   );
 }
 
@@ -804,6 +881,7 @@ export interface ComparisonsConfig {
   // grafana/dynatrace only: pair current-run dashboards with differently named
   // dashboards from the baseline run's environment
   dashboardMap?: { current: string; baseline: string }[];
+  comment?: string;
 }
 
 // Panel types the comparison can meaningfully diff (mirrors the compare card).
@@ -923,7 +1001,15 @@ export function ComparisonsConfigForm({ config, onChange, testRunId, systemUnder
   };
 
   return (
-    <Box sx={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
+    <SectionConfigShell
+      sectionTitle="Test Comparisons"
+      sectionType="Comparisons"
+      previewType="comparisons"
+      previewConfig={{ ...config }}
+      comment={config.comment}
+      onCommentChange={(comment) => onChange({ ...config, comment })}
+      testRunId={testRunId}
+    >
       {/* Mode toggle — always visible */}
       <FormControl size="small" fullWidth>
         <InputLabel id="comparison-mode-label">Comparison Mode</InputLabel>
@@ -1167,6 +1253,6 @@ export function ComparisonsConfigForm({ config, onChange, testRunId, systemUnder
           )}
         </>
       )}
-    </Box>
+    </SectionConfigShell>
   );
 }
