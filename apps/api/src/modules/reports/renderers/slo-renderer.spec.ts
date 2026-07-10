@@ -152,7 +152,39 @@ describe('SloRenderer', () => {
     const html = await renderer.renderSloSection(makeSection(), makeTestRun());
 
     expect(html).toContain('≤');
-    expect(html).toContain('1000.00');
+    expect(html).toContain('1000 ms');
+  });
+
+  it('should render human-readable units instead of raw Grafana unit codes', async () => {
+    dataFetcher.getSloCheckResults.mockResolvedValue([
+      makeSloResult({
+        metric_name: 'Success rate',
+        requirement_operator: 'gt',
+        requirement_value: 0.9,
+        metric_unit: 'percentunit',
+        panel_average: 0.85,
+      }),
+      makeSloResult({
+        metric_name: 'Throughput',
+        requirement_operator: 'lt',
+        requirement_value: 70,
+        metric_unit: 'short',
+        panel_average: 63.5,
+      }),
+    ]);
+
+    const html = await renderer.renderSloSection(makeSection(), makeTestRun());
+
+    // percentunit: stored 0.0-1.0, displayed as 0-100%
+    expect(html).toContain('&gt; 90%');
+    expect(html).toContain('85%');
+    // short: unitless number, no ".00" padding
+    expect(html).toContain('&lt; 70');
+    expect(html).toContain('63.5');
+    // the pre-fix artifacts never reach the report
+    expect(html).not.toContain('percentunit');
+    expect(html).not.toContain('70.00 short');
+    expect(html).not.toContain('63.50 short');
   });
 
   it('should escape HTML in metric names', async () => {
