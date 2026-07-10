@@ -88,8 +88,43 @@ describe('SloRenderer', () => {
 
     const html = await renderer.renderSloSection(makeSection(), makeTestRun());
 
-    expect(html).toContain('2/3');
-    expect(html).toContain('CHECKS PASSED');
+    expect(html).toContain('2/3 passed');
+    expect(html).toContain('1 failed');
+    // Rule 04: no emoji / gradient icon boxes — pass/fail conveyed via chips
+    expect(html).not.toContain('✓');
+    expect(html).not.toContain('✗');
+    expect(html).not.toContain('linear-gradient');
+  });
+
+  it('should render the shared section header with a left accent and kicker', async () => {
+    dataFetcher.getSloCheckResults.mockResolvedValue([makeSloResult()]);
+
+    const html = await renderer.renderSloSection(makeSection(), makeTestRun());
+
+    expect(html).toContain('border-left:4px solid var(--primary-color, #1976d2)');
+    expect(html).toContain('Service Level Objectives');
+    expect(html).toContain('1/1 passed');
+  });
+
+  it('should render summary counts as shared stat cards and empty states via emptyState', async () => {
+    dataFetcher.getSloCheckResults.mockResolvedValue([
+      makeSloResult({ meets_requirement: true }),
+      makeSloResult({ meets_requirement: false, panel_average: 600 }),
+    ]);
+
+    const html = await renderer.renderSloSection(makeSection(), makeTestRun());
+
+    // statCard() markup
+    expect(html).toContain('background:#f8f9fa; border:1px solid #e9ecef');
+    expect(html).toContain('Total Checks');
+    expect(html).toContain('color: #e04944;">1</span>'); // failed > 0 → bad dot
+
+    // Empty branch goes through the shared emptyState treatment
+    dataFetcher.getSloCheckResults.mockResolvedValue([]);
+    const emptyHtml = await renderer.renderSloSection(makeSection(), makeTestRun());
+    expect(emptyHtml).toContain('background:#f5f5f5');
+    expect(emptyHtml).toContain('No SLO check results available');
+    expect(emptyHtml).not.toContain('placeholder-message');
   });
 
   it('should render check results table with PASS/FAIL badges', async () => {

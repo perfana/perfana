@@ -1,0 +1,102 @@
+import { render, screen, waitFor } from '@testing-library/react';
+import HtmlSectionPreview from './HtmlSectionPreview';
+import { previewSection } from '@/lib/api/reports';
+
+jest.mock('@/lib/api/reports', () => ({
+  previewSection: jest.fn(),
+}));
+
+const mockPreviewSection = previewSection as jest.Mock;
+
+describe('HtmlSectionPreview', () => {
+  beforeEach(() => {
+    jest.clearAllMocks();
+  });
+
+  it('shows the loading state while the preview is being fetched', () => {
+    // Never-resolving promise keeps the component in its loading state
+    mockPreviewSection.mockReturnValue(new Promise(() => {}));
+
+    render(<HtmlSectionPreview testRunId="run-1" sectionType="slo" config={{}} />);
+
+    expect(screen.getByText(/loading preview from backend/i)).toBeInTheDocument();
+  });
+
+  it('renders the resolved HTML in a fully sandboxed iframe and lifts the comment out of the config', async () => {
+    mockPreviewSection.mockResolvedValue('<p>Hello preview</p>');
+
+    render(
+      <HtmlSectionPreview
+        testRunId="run-1"
+        sectionType="slo"
+        config={{ maxItems: 5, comment: 'my observation' }}
+      />
+    );
+
+    const iframe = await screen.findByTitle('Section Preview');
+    expect(iframe).toHaveAttribute('srcdoc', expect.stringContaining('<p>Hello preview</p>'));
+
+    // Fully sandboxed: opaque origin, no scripts, no same-origin access
+    expect(iframe).toHaveAttribute('sandbox', '');
+
+    expect(mockPreviewSection).toHaveBeenCalledTimes(1);
+    expect(mockPreviewSection).toHaveBeenCalledWith(
+      {
+        type: 'slo',
+        order: 0,
+        comment: 'my observation',
+        config: { maxItems: 5 },
+      },
+      'run-1',
+      undefined,
+      expect.any(AbortSignal)
+    );
+  });
+
+  it('shows an error Alert with recovery guidance when the preview fails', async () => {
+    mockPreviewSection.mockRejectedValue(
+      new Error(`<html><body><h1>Internal Server Error</h1>${'x'.repeat(500)}</body></html>`)
+    );
+
+    render(<HtmlSectionPreview testRunId="run-1" sectionType="trends" config={{}} />);
+
+    expect(await screen.findByText(/error loading preview/i)).toBeInTheDocument();
+    expect(
+      screen.getByText(/adjust the section configuration or select a test run, then reopen the preview/i)
+    ).toBeInTheDocument();
+    // Success copy must NOT appear in the failure branch
+    expect(screen.queryByText(/exact html/i)).not.toBeInTheDocument();
+
+    // Long HTML error dumps are tag-stripped and truncated to ~200 chars
+    const alert = screen.getByRole('alert');
+    expect(alert.textContent).not.toContain('<html>');
+    expect(alert.textContent).toContain('Internal Server Error');
+    const messageNode = screen.getByText(/internal server error/i);
+    expect((messageNode.textContent ?? '').length).toBeLessThanOrEqual(201);
+  });
+
+  it('does not refetch when re-rendered with a structurally equal but new config object', async () => {
+    mockPreviewSection.mockResolvedValue('<p>stable</p>');
+
+    const { rerender } = render(
+      <HtmlSectionPreview testRunId="run-1" sectionType="slo" config={{ maxItems: 5 }} />
+    );
+
+    await screen.findByTitle('Section Preview');
+    expect(mockPreviewSection).toHaveBeenCalledTimes(1);
+
+    // Fresh object identity, identical content — must NOT trigger a refetch
+    rerender(<HtmlSectionPreview testRunId="run-1" sectionType="slo" config={{ maxItems: 5 }} />);
+
+    await waitFor(() => {
+      expect(mockPreviewSection).toHaveBeenCalledTimes(1);
+    });
+
+    // Sanity check: a content change DOES refetch
+    rerender(<HtmlSectionPreview testRunId="run-1" sectionType="slo" config={{ maxItems: 10 }} />);
+
+    await waitFor(() => {
+      expect(mockPreviewSection).toHaveBeenCalledTimes(2);
+    });
+  });
+});
