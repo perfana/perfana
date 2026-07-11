@@ -42,11 +42,13 @@ import {
   LightMode,
   Schedule,
   History,
+  Terminal,
 } from '@mui/icons-material'
 import { ThemePreference } from '@/contexts/theme-context'
 import { GLOBAL_ADMIN_ROLES } from '@/lib/constants/roles'
 import { OrganizationSelector } from './OrganizationSelector'
 import { fetchAuditCapabilities } from '@/lib/audit-api'
+import { env } from '@/lib/env'
 
 interface NavigationItem {
   href: string
@@ -101,6 +103,13 @@ const getNavigationItems = (
           href: '/audit-logs',
           label: 'Audit Logs',
           icon: <History />,
+        }] : []),
+        // Log Viewer — admin-only, feature-flagged (NEXT_PUBLIC_LOG_VIEWER_ENABLED).
+        ...(env.LOG_VIEWER_ENABLED && isGlobalAdmin ? [{
+          href: '/admin/logs',
+          label: 'Log Viewer',
+          icon: <Terminal />,
+          requiresRoles: Array.from(GLOBAL_ADMIN_ROLES),
         }] : []),
       ].filter(Boolean) as NavigationItem[]
     }

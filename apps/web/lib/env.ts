@@ -25,7 +25,8 @@ function getEnvValue(
     | 'NEXT_PUBLIC_KEYCLOAK_URL'
     | 'NEXT_PUBLIC_KEYCLOAK_REALM'
     | 'NEXT_PUBLIC_KEYCLOAK_CLIENT_ID'
-    | 'NEXT_PUBLIC_USE_KEYCLOAK_AUTH',
+    | 'NEXT_PUBLIC_USE_KEYCLOAK_AUTH'
+    | 'NEXT_PUBLIC_LOG_VIEWER_ENABLED',
   defaultValue: string
 ): string {
   // Use runtime config which checks window.__ENV__ first, then process.env
@@ -94,6 +95,9 @@ export const env = {
   get USE_KEYCLOAK_AUTH(): boolean {
     return getEnvValue('NEXT_PUBLIC_USE_KEYCLOAK_AUTH', DEFAULTS.USE_KEYCLOAK_AUTH) === 'true';
   },
+  get LOG_VIEWER_ENABLED(): boolean {
+    return getEnvValue('NEXT_PUBLIC_LOG_VIEWER_ENABLED', 'false') === 'true';
+  },
 } as const;
 
 // Type-safe environment variables
@@ -103,4 +107,5 @@ export type Env = {
   KEYCLOAK_REALM: string;
   KEYCLOAK_CLIENT_ID: string;
   USE_KEYCLOAK_AUTH: boolean;
+  LOG_VIEWER_ENABLED: boolean;
 };
