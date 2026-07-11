@@ -81,7 +81,7 @@ describe('GraphsRenderer', () => {
       const html = await renderer.renderGraphsSection(makeSection(), makeTestRun());
 
       expect(html).toContain('Custom Graphs');
-      expect(html).toContain('1 PANEL');
+      expect(html).toContain('1 panel'); // natural case in source — the kicker CSS uppercases
     });
 
     it('should use custom title', async () => {
@@ -103,7 +103,7 @@ describe('GraphsRenderer', () => {
       dataFetcher.getMetricsTimeSeries.mockResolvedValue([makePanel(), makePanel({ panelTitle: 'Memory' })]);
       const html = await renderer.renderGraphsSection(makeSection(), makeTestRun());
 
-      expect(html).toContain('2 PANELS');
+      expect(html).toContain('2 panels');
     });
   });
 
@@ -135,6 +135,46 @@ describe('GraphsRenderer', () => {
       const html = await renderer.renderGraphsSection(makeSection(), makeTestRun());
 
       expect(html).toContain('<circle');
+    });
+
+    it('formats ms axis labels through formatValueWithUnit', async () => {
+      // min 0, max 500 → yPadding 50, yMin 0, yMax 550 → grid values
+      // 550/440/330/220/110/0, each labeled via formatValueWithUnit(v, 'ms')
+      dataFetcher.getMetricsTimeSeries.mockResolvedValue([
+        makePanel({
+          unit: 'ms',
+          dataPoints: [
+            { time: new Date('2025-06-01T10:00:00Z'), value: 0 },
+            { time: new Date('2025-06-01T10:01:00Z'), value: 500 },
+          ],
+        }),
+      ]);
+
+      const html = await renderer.renderGraphsSection(makeSection(), makeTestRun());
+
+      expect(html).toContain('550 ms');
+      expect(html).toContain('110 ms');
+      expect(html).toContain('0 ms');
+      expect(html).not.toContain('550.00'); // no trailing-zero padding
+    });
+
+    it('keeps small second values readable on the axis (0.0044 s, not 0 s)', async () => {
+      // min 0, max 0.02 → yMax 0.022 → grid step 0.0044; the small-value path
+      // in formatValueWithUnit keeps up to 5 decimals instead of collapsing to 0
+      dataFetcher.getMetricsTimeSeries.mockResolvedValue([
+        makePanel({
+          unit: 's',
+          dataPoints: [
+            { time: new Date('2025-06-01T10:00:00Z'), value: 0 },
+            { time: new Date('2025-06-01T10:01:00Z'), value: 0.02 },
+          ],
+        }),
+      ]);
+
+      const html = await renderer.renderGraphsSection(makeSection(), makeTestRun());
+
+      expect(html).toContain('0.0044 s');
+      expect(html).toContain('0.0088 s');
     });
 
     it('should skip data point circles when > 50 points', async () => {

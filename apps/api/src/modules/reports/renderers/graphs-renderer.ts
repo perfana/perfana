@@ -6,6 +6,16 @@ import {
   MetricsPanelSelector,
   MetricsTimeSeriesPanel,
 } from '../services/report-data-fetcher.service';
+import {
+  REPORT_COLORS,
+  sectionHeader,
+  commentBlock,
+  emptyState,
+  formatInt,
+  formatNum,
+  groupHeader,
+} from './report-style';
+import { formatValueWithUnit } from './unit-format';
 
 /**
  * Renderer for Graphs section
@@ -74,28 +84,15 @@ export class GraphsRenderer {
       return this.renderNoDataSection(title, comment, 'No ds_metrics data found for the selected panels.');
     }
 
-    const styling = this.utils.getDefaultStyling();
-
     const charts = timeSeriesData
       .map((panel, idx) => this.renderPanelChart(panel, idx, chartWidth, chartHeight))
       .join('\n');
 
     return `
       <section class="graphs-section">
-        <!-- Section Header -->
-        <div style="display: flex; align-items: center; gap: 16px; margin-bottom: 24px;">
-          <div style="background: ${styling.primaryColor || '#1976d2'}; color: white; width: 56px; height: 56px; border-radius: 12px; display: flex; align-items: center; justify-content: center; font-size: 28px;">
-            &#x1F4CA;
-          </div>
-          <div style="flex: 1;">
-            <h2 style="margin: 0; padding: 0; border: none;">${this.utils.escapeHtml(title)}</h2>
-            <div style="font-size: 10pt; color: #666; text-transform: uppercase; letter-spacing: 0.1em; margin-top: 4px;">
-              ${timeSeriesData.length} PANEL${timeSeriesData.length !== 1 ? 'S' : ''}
-            </div>
-          </div>
-        </div>
+        ${sectionHeader(title, { kicker: `${formatInt(timeSeriesData.length)} panel${timeSeriesData.length !== 1 ? 's' : ''}` })}
 
-        ${comment ? `<div class="section-comment">${this.utils.escapeHtml(comment)}</div>` : ''}
+        ${commentBlock(comment)}
 
         ${charts}
       </section>
@@ -117,9 +114,9 @@ export class GraphsRenderer {
 
     if (dataPoints.length === 0) {
       return `
-        <div style="margin: 16px 0; padding: 20px; background: #f5f5f5; border-radius: 4px;">
-          <h3 style="margin: 0 0 8px 0; font-size: 10pt; color: #666;">${this.utils.escapeHtml(panel.panelTitle)}</h3>
-          <div style="padding: 30px; text-align: center; color: #999;">No data points available.</div>
+        <div style="margin: 16px 0;">
+          ${groupHeader(panel.panelTitle)}
+          ${emptyState('No data points available.')}
         </div>
       `;
     }
@@ -195,11 +192,9 @@ export class GraphsRenderer {
 
     return `
       <div style="margin: 24px 0; padding: 20px; background: #f5f5f5; border-radius: 4px;">
-        <h3 style="margin: 0 0 4px 0; font-size: 10pt; color: #333; font-weight: 600;">
-          ${this.utils.escapeHtml(chartTitle)}
-        </h3>
-        <div style="font-size: 9pt; color: #888; margin-bottom: 12px;">
-          ${this.utils.escapeHtml(panel.metricName)}${unitLabel} &middot; ${dataPoints.length} data points
+        ${groupHeader(chartTitle)}
+        <div style="font-size: 9pt; color: ${REPORT_COLORS.mutedInk}; margin: -6px 0 12px;">
+          ${this.utils.escapeHtml(panel.metricName)}${unitLabel} &middot; ${formatInt(dataPoints.length)} data points
         </div>
 
         <div style="background: white; border-radius: 4px; border: 1px solid #e0e0e0; padding: 10px;">
@@ -236,31 +231,29 @@ export class GraphsRenderer {
 
   private formatValue(value: number, unit: string): string {
     if (unit === 'ms' || unit === 'milliseconds') {
-      return `${value.toFixed(1)} ms`;
+      return formatValueWithUnit(value, 'ms');
     }
     if (unit === 's' || unit === 'seconds') {
-      return `${value.toFixed(2)} s`;
+      return formatValueWithUnit(value, 's');
     }
     if (unit === '%' || unit === 'percent') {
-      return `${value.toFixed(1)}%`;
+      return formatValueWithUnit(value, 'percent');
     }
     if (Math.abs(value) >= 1_000_000) {
-      return `${(value / 1_000_000).toFixed(1)}M`;
+      return `${formatNum(value / 1_000_000)}M`;
     }
     if (Math.abs(value) >= 1_000) {
-      return `${(value / 1_000).toFixed(1)}K`;
+      return `${formatNum(value / 1_000)}K`;
     }
-    return value.toFixed(1);
+    return formatNum(value);
   }
 
   private renderNoDataSection(title: string, comment: string | undefined, message: string): string {
     return `
       <section class="graphs-section">
-        <h2>${this.utils.escapeHtml(title)}</h2>
-        ${comment ? `<div class="section-comment">${this.utils.escapeHtml(comment)}</div>` : ''}
-        <div style="padding: 20px; background: #fff3e0; border-radius: 4px; border-left: 4px solid #ff9800;">
-          <p style="margin: 0; color: #666;">${message}</p>
-        </div>
+        ${sectionHeader(title)}
+        ${commentBlock(comment)}
+        ${emptyState(message)}
       </section>
     `;
   }

@@ -2,6 +2,7 @@ import { Injectable } from '@nestjs/common';
 import { TestRun, ReportSectionConfig } from '@perfana/shared';
 import { ReportUtilsService } from '../services/report-utils.service';
 import { ReportDataFetcherService } from '../services/report-data-fetcher.service';
+import { commentBlock } from './report-style';
 
 /**
  * Renderer for header section
@@ -115,11 +116,13 @@ export class HeaderRenderer {
       `;
     }
 
-    // Test Run Summary Section
+    // Test Run Summary Section. The author comment renders here (rule 07),
+    // directly under the heading — never on the cover page.
     if (includeSummary) {
       html += `
         <section>
           <h2>Test Run Summary</h2>
+          ${commentBlock(section.comment)}
 
           <!-- Info Grid (3 columns x 3 rows) -->
           <div class="info-grid">

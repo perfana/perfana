@@ -4,6 +4,17 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
+## [0.2.61.42] - 2026-07-10
+
+### Changed
+- **All report sections now follow one visual style, so a generated report reads as a single document.** A shared style system (`report-style.ts`) is applied across the SLO, Apdex, Regressions, Comparisons, Trends, Response Times, AWR, Graphs and placeholder sections:
+  - **One status scale.** The nine overlapping labels (`NO DIFFERENCE`, `PARTIAL REGRESSION`, `PARTIAL INCREASE`, `INCREASE`, `DECREASE`, `INCOMPARABLE`, …) collapse to five: `OK`, `WARNING`, `REGRESSION`, `IMPROVEMENT`, `N/A`. Judgment lives in the label; raw direction lives in the arrow.
+  - **Delta arrows track the value.** `▲` for increases, `▼` for decreases, `–` only for a genuinely unchanged value — colored by what the movement means, not its direction. The generic `➖` next to every diff is gone.
+  - **One number formatter.** Thousands grouping (`4,937,045`), at most two decimals, true-zero diffs render as `—`, percentages always one decimal, tabular numerals in all numeric cells.
+  - **Uniform headers.** Every section title gets the same 4px blue accent with right-aligned summary chips (`10 regressions`, `4 improvements`); the mixed per-section emoji (`✓ ⭐ ❓ ↔`) and gradient icon boxes are removed. Comparison groups use one header component: source label + host chip + metric-count chip, with host-id prefixes stripped from metric names.
+  - **Uniform severity pills** (uppercase with letter-spacing) and a **uniform author-comment block** (blue accent + speech-bubble icon) that is omitted entirely when empty.
+- **Every report section's configuration now has the same comment box and preview.** All ten section types in the Generate Report dialog and template builder get the Section Comments field and a Preview Section button (previously only Apdex and Response Times had them). Sections without a bespoke preview render a real server-side preview of the section HTML.
+
 ## [0.2.61.41] - 2026-07-10
 
 ### Fixed

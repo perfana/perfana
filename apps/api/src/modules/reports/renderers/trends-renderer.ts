@@ -2,6 +2,17 @@ import { Injectable } from '@nestjs/common';
 import { TestRun, ReportSectionConfig } from '@perfana/shared';
 import { ReportUtilsService } from '../services/report-utils.service';
 import { ReportDataFetcherService, TrendRunSummary } from '../services/report-data-fetcher.service';
+import {
+  REPORT_COLORS,
+  sectionHeader,
+  commentBlock,
+  deltaChip,
+  emptyState,
+  formatInt,
+  formatNum,
+  formatPercent,
+  markerChip,
+} from './report-style';
 
 /**
  * Renderer for Trends section
@@ -48,30 +59,18 @@ export class TrendsRenderer {
 
     const previousRun = trendsData.previousRuns[0]!;
     const currentRun = trendsData.currentRun;
-    const styling = this.utils.getDefaultStyling();
 
     return `
       <section class="trends-section">
-        <!-- Section Header -->
-        <div style="display: flex; align-items: center; gap: 16px; margin-bottom: 24px;">
-          <div style="background: ${styling.primaryColor}; color: white; width: 56px; height: 56px; border-radius: 12px; display: flex; align-items: center; justify-content: center; font-size: 28px;">
-            &#x1F4C8;
-          </div>
-          <div style="flex: 1;">
-            <h2 style="margin: 0; padding: 0; border: none;">${this.utils.escapeHtml(title)}</h2>
-            <div style="font-size: 10pt; color: #666; text-transform: uppercase; letter-spacing: 0.1em; margin-top: 4px;">
-              ${allRuns.length} RUNS COMPARED
-            </div>
-          </div>
-        </div>
+        ${sectionHeader(title, { kicker: `${formatInt(allRuns.length)} runs compared` })}
 
-        ${comment ? `<div class="section-comment">${this.utils.escapeHtml(comment)}</div>` : ''}
+        ${commentBlock(comment)}
 
         <!-- Trend Summary Cards -->
-        ${this.renderTrendSummaryCards(currentRun, previousRun, styling)}
+        ${this.renderTrendSummaryCards(currentRun, previousRun)}
 
         <!-- Historical Runs Table -->
-        <h3 style="margin: 32px 0 16px 0; font-size: 10pt; font-weight: 700; color: #666; text-transform: uppercase; letter-spacing: 0.05em;">Run History</h3>
+        <h3 style="margin: 32px 0 16px 0; font-size: 10pt; font-weight: 700; color: ${REPORT_COLORS.mutedInk}; text-transform: uppercase; letter-spacing: 0.05em;">Run History</h3>
         ${this.renderRunHistoryTable(allRuns, currentRun.testRunId)}
       </section>
     `;
@@ -80,7 +79,6 @@ export class TrendsRenderer {
   private renderTrendSummaryCards(
     current: TrendRunSummary,
     previous: TrendRunSummary,
-    styling: { primaryColor?: string; secondaryColor?: string },
   ): string {
     const avgDelta = this.calculateDelta(current.avgMs, previous.avgMs);
     const p95Delta = this.calculateDelta(current.p95Ms, previous.p95Ms);
@@ -89,10 +87,10 @@ export class TrendsRenderer {
 
     return `
       <div style="display: grid; grid-template-columns: repeat(4, 1fr); gap: 16px; margin: 24px 0;">
-        ${this.renderTrendCard('Avg Response Time', `${current.avgMs.toFixed(2)} ms`, avgDelta, true, styling.primaryColor || '#1976d2')}
-        ${this.renderTrendCard('P95 Response Time', `${current.p95Ms.toFixed(2)} ms`, p95Delta, true, '#ff9800')}
-        ${this.renderTrendCard('Error Rate', `${current.errorRate.toFixed(2)}%`, errorDelta, true, current.errorRate > 1 ? '#f44336' : '#4caf50')}
-        ${this.renderTrendCard('Total Transactions', current.totalTransactions.toLocaleString(), txnDelta, false, styling.secondaryColor || '#9c27b0')}
+        ${this.renderTrendCard('Avg Response Time', `${formatNum(current.avgMs)} ms`, avgDelta, true)}
+        ${this.renderTrendCard('P95 Response Time', `${formatNum(current.p95Ms)} ms`, p95Delta, true)}
+        ${this.renderTrendCard('Error Rate', formatPercent(current.errorRate), errorDelta, true)}
+        ${this.renderTrendCard('Total Transactions', formatInt(current.totalTransactions), txnDelta, false)}
       </div>
     `;
   }
@@ -102,30 +100,13 @@ export class TrendsRenderer {
     value: string,
     delta: { percent: number; direction: 'up' | 'down' | 'flat' },
     lowerIsBetter: boolean,
-    color: string,
   ): string {
-    let trendColor: string;
-    let trendIcon: string;
-
-    if (delta.direction === 'flat') {
-      trendColor = '#666';
-      trendIcon = '&#x2194;';
-    } else if (delta.direction === 'up') {
-      trendColor = lowerIsBetter ? '#f44336' : '#4caf50';
-      trendIcon = '&#x25B2;';
-    } else {
-      trendColor = lowerIsBetter ? '#4caf50' : '#f44336';
-      trendIcon = '&#x25BC;';
-    }
-
-    const sign = delta.percent > 0 ? '+' : '';
-
     return `
       <div style="background: #f8f9fa; border: 1px solid #e9ecef; border-radius: 8px; padding: 20px;">
-        <div style="font-size: 9pt; color: #666; text-transform: uppercase; letter-spacing: 0.05em; margin-bottom: 12px; font-weight: 600;">${label}</div>
-        <div style="font-size: 24pt; font-weight: 700; color: ${color}; font-family: 'Courier New', monospace;">${value}</div>
-        <div style="font-size: 10pt; color: ${trendColor}; margin-top: 8px; font-weight: 600;">
-          <span>${trendIcon}</span> ${sign}${delta.percent.toFixed(1)}% vs previous
+        <div style="font-size: 9pt; color: ${REPORT_COLORS.mutedInk}; text-transform: uppercase; letter-spacing: 0.05em; margin-bottom: 12px; font-weight: 600;">${label}</div>
+        <div style="font-size: 24pt; font-weight: 700; color: ${REPORT_COLORS.ink}; font-variant-numeric: tabular-nums;">${value}</div>
+        <div style="font-size: 10pt; color: ${REPORT_COLORS.mutedInk}; margin-top: 8px; font-weight: 600;">
+          ${deltaChip(delta.percent, undefined, lowerIsBetter)} vs previous
         </div>
       </div>
     `;
@@ -148,16 +129,16 @@ export class TrendsRenderer {
 
       return `
         <tr style="${rowStyle}">
-          <td style="font-family: 'Courier New', monospace; font-size: 9pt; white-space: nowrap;">
-            ${dateStr}${isCurrent ? ' <span style="font-size: 8pt; background: #1976d2; color: white; padding: 2px 6px; border-radius: 3px; margin-left: 4px;">CURRENT</span>' : ''}
+          <td style="font-size: 9pt; white-space: nowrap; font-variant-numeric: tabular-nums;">
+            ${dateStr}${isCurrent ? ` ${markerChip('Current', 'info')}` : ''}
           </td>
           <td style="font-size: 9pt;">${release}</td>
-          <td style="text-align: right; font-family: 'Courier New', monospace;">${durationStr}</td>
-          <td style="text-align: right; font-family: 'Courier New', monospace;">${run.avgMs.toFixed(2)}</td>
-          <td style="text-align: right; font-family: 'Courier New', monospace;">${run.p95Ms.toFixed(2)}</td>
-          <td style="text-align: right; font-family: 'Courier New', monospace;">${run.p99Ms.toFixed(2)}</td>
-          <td style="text-align: right; font-family: 'Courier New', monospace;" class="${run.errorRate > 0 ? 'table-value-error-pct' : ''}">${run.errorRate.toFixed(2)}%</td>
-          <td style="text-align: right; font-family: 'Courier New', monospace;">${run.totalTransactions.toLocaleString()}</td>
+          <td style="text-align: right; font-variant-numeric: tabular-nums;">${durationStr}</td>
+          <td style="text-align: right; font-variant-numeric: tabular-nums;">${formatNum(run.avgMs)}</td>
+          <td style="text-align: right; font-variant-numeric: tabular-nums;">${formatNum(run.p95Ms)}</td>
+          <td style="text-align: right; font-variant-numeric: tabular-nums;">${formatNum(run.p99Ms)}</td>
+          <td style="text-align: right; font-variant-numeric: tabular-nums;" class="${run.errorRate > 0 ? 'table-value-error-pct' : ''}">${formatPercent(run.errorRate)}</td>
+          <td style="text-align: right; font-variant-numeric: tabular-nums;">${formatInt(run.totalTransactions)}</td>
         </tr>
       `;
     }).join('');
@@ -212,11 +193,9 @@ export class TrendsRenderer {
   private renderNoDataSection(title: string, comment: string | undefined, message: string): string {
     return `
       <section class="trends-section">
-        <h2>${this.utils.escapeHtml(title)}</h2>
-        ${comment ? `<div class="section-comment">${this.utils.escapeHtml(comment)}</div>` : ''}
-        <div style="padding: 20px; background: #fff3e0; border-radius: 4px; border-left: 4px solid #ff9800;">
-          <p style="margin: 0; color: #666;">${message}</p>
-        </div>
+        ${sectionHeader(title)}
+        ${commentBlock(comment)}
+        ${emptyState(message)}
       </section>
     `;
   }
