@@ -1,4 +1,4 @@
-export type SutFilter = 'bySut' | 'byTestRunVarchar' | 'byTestRunUuid' | 'byAppDashboard' | 'byReference';
+export type SutFilter = 'bySut' | 'byTestRunVarchar' | 'byTestRunUuid' | 'byAppDashboard' | 'byTestEnvironment' | 'byReference';
 export type SutGroup = 'core' | 'optional' | 'raw' | 'shared';
 
 export interface SutResource {
@@ -50,7 +50,7 @@ export const SUT_RESOURCES: SutResource[] = [
   { table: 'workload_apdex_thresholds', filter: 'bySut', group: 'optional' },
   { table: 'workload_transaction_apdex_thresholds', filter: 'bySut', group: 'optional' },
   { table: 'system_under_test_test_environments', filter: 'bySut', group: 'optional' },
-  { table: 'system_under_test_workloads', filter: 'bySut', group: 'optional' },
+  { table: 'system_under_test_workloads', filter: 'byTestEnvironment', group: 'optional' },
   { table: 'scaling_sessions', filter: 'bySut', group: 'optional' },
   { table: 'sparse_metric_exclusions', filter: 'bySut', group: 'optional' },
   { table: 'alert_tag_filters', filter: 'bySut', group: 'optional' },
@@ -85,6 +85,7 @@ export const SUT_RESOURCES: SutResource[] = [
   { table: 'ds_change_points', filter: 'byTestRunVarchar', group: 'core' },
   { table: 'check_results', filter: 'byTestRunVarchar', group: 'core' },
   { table: 'ds_metric_statistics', filter: 'byTestRunVarchar', group: 'core' },
+  { table: 'test_run_transaction_stats', filter: 'byTestRunVarchar', group: 'core' },
   { table: 'ds_metric_collection_status', filter: 'byTestRunVarchar', group: 'core' },
   { table: 'ds_panels', filter: 'byTestRunVarchar', group: 'core' },
   { table: 'ds_query_executions', filter: 'byTestRunUuid', group: 'core' },

@@ -25,7 +25,7 @@ describe('SUT_RESOURCES', () => {
       'ds_adapt_results', 'ds_adapt_conclusion', 'ds_adapt_tracked_results',
       'ds_change_points', 'check_results', 'ds_metric_statistics',
       'ds_metric_collection_status', 'ds_panels', 'ds_query_executions',
-      'ds_tracked_differences',
+      'ds_tracked_differences', 'test_run_transaction_stats',
     ].sort();
     expect([...tables].sort()).toEqual(expected);
   });
@@ -43,6 +43,8 @@ describe('SUT_RESOURCES', () => {
     expect(idx('test_runs')).toBeLessThan(idx('ds_metrics'));
     expect(idx('test_runs')).toBeLessThan(idx('check_results'));
     expect(idx('ds_control_groups')).toBeLessThan(idx('ds_control_group_statistics'));
+    expect(idx('system_under_test_test_environments')).toBeLessThan(idx('system_under_test_workloads'));
+    expect(idx('test_runs')).toBeLessThan(idx('test_run_transaction_stats'));
   });
 
   it('raw tables are excluded unless includeRaw', () => {
