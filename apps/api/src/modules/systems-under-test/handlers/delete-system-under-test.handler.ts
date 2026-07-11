@@ -351,9 +351,15 @@ export class DeleteSystemUnderTestHandler {
       'deep_links',
       'notification_channels',
       'dynatrace_entity_mappings',
+      'dynatrace_queries',
       'workload_apdex_thresholds',
       'workload_transaction_apdex_thresholds',
       'system_under_test_test_environments',
+      'scaling_sessions',
+      // metrics_sources FK is NO ACTION and must go last — DS tables, benchmarks,
+      // application_dashboards, filter presets, and dynatrace_queries (all deleted
+      // above) reference it.
+      'metrics_sources',
     ];
 
     for (const table of sutLinkedTables) {
