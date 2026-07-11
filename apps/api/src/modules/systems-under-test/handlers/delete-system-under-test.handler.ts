@@ -23,6 +23,7 @@ export interface DeletePreviewResult {
     testRunConfigs: number;
     requestsRaw: number;
     transactions: number;
+    transactionStats: number;
     apdexThresholds: number;
     graphPresets: number;
     filterPresets: number;
@@ -76,6 +77,7 @@ export class DeleteSystemUnderTestHandler {
       testRunConfigs,
       requestsRaw,
       transactions,
+      transactionStats,
       apdexThresholds,
       graphPresets,
       filterPresets,
@@ -113,6 +115,9 @@ export class DeleteSystemUnderTestHandler {
         `SELECT COUNT(*) FROM transactions WHERE test_run_id IN (SELECT test_run_id FROM test_runs WHERE system_under_test_id = $1)`,
       ),
       countQuery(
+        `SELECT COUNT(*) FROM test_run_transaction_stats WHERE test_run_id IN (SELECT test_run_id FROM test_runs WHERE system_under_test_id = $1)`,
+      ),
+      countQuery(
         `SELECT (SELECT COUNT(*) FROM workload_apdex_thresholds WHERE system_under_test_id = $1) + (SELECT COUNT(*) FROM workload_transaction_apdex_thresholds WHERE system_under_test_id = $1) AS count`,
       ),
       countQuery(
@@ -142,6 +147,7 @@ export class DeleteSystemUnderTestHandler {
         testRunConfigs,
         requestsRaw,
         transactions,
+        transactionStats,
         apdexThresholds,
         graphPresets,
         filterPresets,
@@ -315,6 +321,8 @@ export class DeleteSystemUnderTestHandler {
     await this.deleteWithLog(manager, 'requests_error', `DELETE FROM requests_error WHERE test_run_id IN ${strSubq}`, [sutId]);
     await this.deleteWithLog(manager, 'transactions', `DELETE FROM transactions WHERE test_run_id IN ${strSubq}`, [sutId]);
     await this.deleteWithLog(manager, 'virtual_users', `DELETE FROM virtual_users WHERE test_run_id IN ${strSubq}`, [sutId]);
+    // Per-test-run transaction stats rollup (no FK — must be cleaned up explicitly, see #150/#151)
+    await this.deleteWithLog(manager, 'test_run_transaction_stats', `DELETE FROM test_run_transaction_stats WHERE test_run_id IN ${strSubq}`, [sutId]);
 
     // test_run_configs has both UUID and string columns
     await this.deleteWithLog(manager, 'test_run_configs (by UUID)', `DELETE FROM test_run_configs WHERE test_run_id IN ${uuidSubq}`, [sutId]);
