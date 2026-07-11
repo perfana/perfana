@@ -1,7 +1,21 @@
 import { Injectable } from '@nestjs/common';
 import { TestRun, ReportSectionConfig } from '@perfana/shared';
 import { ReportUtilsService } from '../services/report-utils.service';
-import { ReportDataFetcherService, AwrData, AwrReportSummary, AwrInsightSummary } from '../services/report-data-fetcher.service';
+import { ReportDataFetcherService, AwrReportSummary, AwrInsightSummary } from '../services/report-data-fetcher.service';
+import {
+  PillKind,
+  TH_CENTER,
+  TH_NUM,
+  TH_TEXT,
+  THEAD_ROW,
+  chip,
+  groupHeader,
+  sectionHeader,
+  commentBlock,
+  formatInt,
+  formatNum,
+  pill,
+} from './report-style';
 
 /**
  * Renderer for AWR section
@@ -41,8 +55,8 @@ export class AwrRenderer {
     if (!data || data.reports.length === 0) {
       return `
         <section class="awr-section">
-          <h2>${this.utils.escapeHtml(title)}</h2>
-          ${comment ? `<div class="section-comment">${this.utils.escapeHtml(comment)}</div>` : ''}
+          ${sectionHeader(title)}
+          ${commentBlock(comment)}
           <div class="awr-results">
             <p class="placeholder-message">No AWR report data available for this test run.</p>
           </div>
@@ -55,23 +69,23 @@ export class AwrRenderer {
       : data.insights;
     const displayInsights = filteredInsights.slice(0, maxInsights);
 
+    // Severity summary as right-aligned chips on the section header (rule 04),
+    // matching how other sections surface their counts.
+    const s = data.severitySummary;
+    const severityChips = [
+      s.critical > 0 ? chip(`${formatInt(s.critical)} critical`, 'bad') : '',
+      s.warning > 0 ? chip(`${formatInt(s.warning)} warning`, 'warn') : '',
+      s.info > 0 ? chip(`${formatInt(s.info)} info`, 'info') : '',
+    ];
+
     return `
       <section class="awr-section">
-        <!-- Section Header -->
-        <div style="display: flex; align-items: center; gap: 16px; margin-bottom: 32px; border-left: 4px solid #1976d2; padding-left: 20px;">
-          <div style="background: linear-gradient(135deg, #1976d2 0%, #1565c0 100%); color: white; width: 64px; height: 64px; border-radius: 12px; display: flex; align-items: center; justify-content: center; font-size: 28px; box-shadow: 0 2px 8px rgba(25,118,210,0.3);">
-            &#x1F4CA;
-          </div>
-          <div style="flex: 1;">
-            <h2 style="margin: 0; padding: 0; border: none; font-size: 18pt; font-weight: 600; color: #333;">${this.utils.escapeHtml(title)}</h2>
-            <div style="font-size: 10pt; color: #666; margin-top: 4px;">${data.reports.length} AWR report${data.reports.length > 1 ? 's' : ''} analyzed</div>
-          </div>
-        </div>
+        ${sectionHeader(title, {
+          kicker: `${data.reports.length} AWR report${data.reports.length > 1 ? 's' : ''} analyzed`,
+          chipsHtml: severityChips,
+        })}
 
-        ${comment ? `<div class="section-comment">${this.utils.escapeHtml(comment)}</div>` : ''}
-
-        <!-- Severity Summary -->
-        ${this.renderSeverityBadges(data)}
+        ${commentBlock(comment)}
 
         <!-- Database Info -->
         ${data.reports.map((r) => this.renderReportSummary(r)).join('\n')}
@@ -82,30 +96,6 @@ export class AwrRenderer {
         <!-- Top SQL -->
         ${showTopSql ? this.renderTopSql(data.reports) : ''}
       </section>
-    `;
-  }
-
-  private renderSeverityBadges(data: AwrData): string {
-    const s = data.severitySummary;
-    return `
-      <div style="display: flex; gap: 16px; margin-bottom: 24px; flex-wrap: wrap;">
-        <div style="flex: 1; min-width: 140px; background: #ffebee; border: 1px solid #ffcdd2; border-radius: 8px; padding: 16px; text-align: center;">
-          <div style="font-size: 28pt; font-weight: 700; color: #c62828;">${s.critical}</div>
-          <div style="font-size: 9pt; color: #b71c1c; text-transform: uppercase; letter-spacing: 0.05em; font-weight: 600;">Critical</div>
-        </div>
-        <div style="flex: 1; min-width: 140px; background: #fff3e0; border: 1px solid #ffe0b2; border-radius: 8px; padding: 16px; text-align: center;">
-          <div style="font-size: 28pt; font-weight: 700; color: #e65100;">${s.warning}</div>
-          <div style="font-size: 9pt; color: #bf360c; text-transform: uppercase; letter-spacing: 0.05em; font-weight: 600;">Warning</div>
-        </div>
-        <div style="flex: 1; min-width: 140px; background: #e3f2fd; border: 1px solid #bbdefb; border-radius: 8px; padding: 16px; text-align: center;">
-          <div style="font-size: 28pt; font-weight: 700; color: #1565c0;">${s.info}</div>
-          <div style="font-size: 9pt; color: #0d47a1; text-transform: uppercase; letter-spacing: 0.05em; font-weight: 600;">Info</div>
-        </div>
-        <div style="flex: 1; min-width: 140px; background: #f5f5f5; border: 1px solid #e0e0e0; border-radius: 8px; padding: 16px; text-align: center;">
-          <div style="font-size: 28pt; font-weight: 700; color: #555;">${s.total}</div>
-          <div style="font-size: 9pt; color: #666; text-transform: uppercase; letter-spacing: 0.05em; font-weight: 600;">Total</div>
-        </div>
-      </div>
     `;
   }
 
@@ -123,7 +113,7 @@ export class AwrRenderer {
 
     return `
       <div style="margin-bottom: 24px;">
-        <h3 style="margin: 0 0 16px 0; font-size: 11pt; font-weight: 600; color: #333; padding-left: 16px; border-left: 4px solid #1976d2;">${this.utils.escapeHtml(dbLabel)}</h3>
+        ${groupHeader(dbLabel)}
         <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 12px; margin-bottom: 16px;">
           <div style="background: #f5f5f5; border-radius: 6px; padding: 14px; border: 1px solid #e0e0e0;">
             <div style="font-size: 9pt; color: #666; text-transform: uppercase; letter-spacing: 0.05em; font-weight: 600; margin-bottom: 4px;">Host</div>
@@ -136,16 +126,16 @@ export class AwrRenderer {
           </div>
           <div style="background: #f5f5f5; border-radius: 6px; padding: 14px; border: 1px solid #e0e0e0;">
             <div style="font-size: 9pt; color: #666; text-transform: uppercase; letter-spacing: 0.05em; font-weight: 600; margin-bottom: 4px;">Snapshot Window</div>
-            <div style="font-size: 10pt; font-weight: 600; color: #333; font-family: 'Courier New', monospace;">${beginStr}</div>
+            <div style="font-size: 10pt; font-weight: 600; color: #333; font-variant-numeric: tabular-nums;">${beginStr}</div>
             <div style="font-size: 9pt; color: #888;">to ${endStr}</div>
           </div>
           <div style="background: #f5f5f5; border-radius: 6px; padding: 14px; border: 1px solid #e0e0e0;">
             <div style="font-size: 9pt; color: #666; text-transform: uppercase; letter-spacing: 0.05em; font-weight: 600; margin-bottom: 4px;">Timing</div>
-            <div style="font-size: 11pt; font-weight: 600; color: #333;">
-              ${report.elapsedMinutes != null ? `${report.elapsedMinutes.toFixed(1)} min elapsed` : '—'}
+            <div style="font-size: 11pt; font-weight: 600; color: #333; font-variant-numeric: tabular-nums;">
+              ${report.elapsedMinutes != null ? `${formatNum(report.elapsedMinutes)} min elapsed` : '—'}
             </div>
-            <div style="font-size: 9pt; color: #888;">
-              ${report.dbTimeMinutes != null ? `${report.dbTimeMinutes.toFixed(1)} min DB time` : ''}
+            <div style="font-size: 9pt; color: #888; font-variant-numeric: tabular-nums;">
+              ${report.dbTimeMinutes != null ? `${formatNum(report.dbTimeMinutes)} min DB time` : ''}
             </div>
           </div>
         </div>
@@ -155,16 +145,12 @@ export class AwrRenderer {
 
   private renderInsightsTable(insights: AwrInsightSummary[]): string {
     const rows = insights.map((i) => {
-      const severityColor = this.getSeverityColor(i.severity);
-      const severityBg = this.getSeverityBg(i.severity);
       const categoryLabel = i.category.replace(/_/g, ' ');
 
       return `
         <tr style="background: white;">
           <td style="padding: 10px 12px; border-bottom: 1px solid #e0e0e0; text-align: center;">
-            <span style="display: inline-block; padding: 2px 8px; border-radius: 4px; font-size: 8pt; font-weight: 600; color: ${severityColor}; background: ${severityBg}; text-transform: uppercase;">
-              ${this.utils.escapeHtml(i.severity)}
-            </span>
+            ${pill(i.severity, this.severityPillKind(i.severity))}
           </td>
           <td style="padding: 10px 12px; border-bottom: 1px solid #e0e0e0; font-size: 9pt; color: #555; text-transform: capitalize;">${this.utils.escapeHtml(categoryLabel)}</td>
           <td style="padding: 10px 12px; border-bottom: 1px solid #e0e0e0; font-size: 9pt; font-weight: 600;">${this.utils.escapeHtml(i.title)}</td>
@@ -175,16 +161,16 @@ export class AwrRenderer {
     }).join('');
 
     return `
-      <div style="margin-top: 24px; border-left: 4px solid #ff9800; padding-left: 20px;">
-        <h3 style="margin: 0 0 12px 0; font-size: 11pt; font-weight: 600; color: #333;">Insights (${insights.length})</h3>
-        <table style="width: 100%; border-collapse: collapse; box-shadow: 0 1px 3px rgba(0,0,0,0.1);">
+      <div style="margin-top: 24px;">
+        ${groupHeader('Insights', [chip(`${formatInt(insights.length)} insights`, 'neutral')])}
+        <table style="width: 100%; border-collapse: collapse;">
           <thead>
-            <tr style="background: linear-gradient(135deg, #ff9800 0%, #f57c00 100%); color: white;">
-              <th style="padding: 12px; text-align: center; font-size: 8pt; font-weight: 700; text-transform: uppercase; letter-spacing: 0.05em; width: 80px;">Severity</th>
-              <th style="padding: 12px; text-align: left; font-size: 8pt; font-weight: 700; text-transform: uppercase; letter-spacing: 0.05em; width: 120px;">Category</th>
-              <th style="padding: 12px; text-align: left; font-size: 8pt; font-weight: 700; text-transform: uppercase; letter-spacing: 0.05em;">Finding</th>
-              <th style="padding: 12px; text-align: left; font-size: 8pt; font-weight: 700; text-transform: uppercase; letter-spacing: 0.05em;">Description</th>
-              <th style="padding: 12px; text-align: left; font-size: 8pt; font-weight: 700; text-transform: uppercase; letter-spacing: 0.05em;">Recommendation</th>
+            <tr style="${THEAD_ROW}">
+              <th style="${TH_CENTER} width: 80px;">Severity</th>
+              <th style="${TH_TEXT} width: 120px;">Category</th>
+              <th style="${TH_TEXT}">Finding</th>
+              <th style="${TH_TEXT}">Description</th>
+              <th style="${TH_TEXT}">Recommendation</th>
             </tr>
           </thead>
           <tbody>
@@ -220,25 +206,26 @@ export class AwrRenderer {
 
     if (topSqlEntries.length === 0) return '';
 
+    // SQL IDs stay monospace on purpose — they are opaque identifiers, not numbers.
     const rows = topSqlEntries.map((s) => `
       <tr style="background: white;">
         <td style="padding: 10px 12px; border-bottom: 1px solid #e0e0e0; font-family: 'Courier New', monospace; font-size: 9pt; font-weight: 600;">${this.utils.escapeHtml(s.sqlId)}</td>
-        <td style="padding: 10px 12px; border-bottom: 1px solid #e0e0e0; text-align: right; font-family: 'Courier New', monospace; font-size: 9pt;">${s.elapsedTime.toFixed(2)}s</td>
-        <td style="padding: 10px 12px; border-bottom: 1px solid #e0e0e0; text-align: right; font-family: 'Courier New', monospace; font-size: 9pt;">${s.executions.toLocaleString()}</td>
-        <td style="padding: 10px 12px; border-bottom: 1px solid #e0e0e0; text-align: right; font-family: 'Courier New', monospace; font-size: 9pt;">${s.elapsedPerExec.toFixed(4)}s</td>
+        <td style="padding: 10px 12px; border-bottom: 1px solid #e0e0e0; text-align: right; font-variant-numeric: tabular-nums; font-size: 9pt;">${formatNum(s.elapsedTime)}s</td>
+        <td style="padding: 10px 12px; border-bottom: 1px solid #e0e0e0; text-align: right; font-variant-numeric: tabular-nums; font-size: 9pt;">${formatInt(s.executions)}</td>
+        <td style="padding: 10px 12px; border-bottom: 1px solid #e0e0e0; text-align: right; font-variant-numeric: tabular-nums; font-size: 9pt;">${formatNum(s.elapsedPerExec)}s</td>
       </tr>
     `).join('');
 
     return `
-      <div style="margin-top: 24px; border-left: 4px solid #9c27b0; padding-left: 20px;">
-        <h3 style="margin: 0 0 12px 0; font-size: 11pt; font-weight: 600; color: #333;">Top SQL by Elapsed Time</h3>
-        <table style="width: 100%; border-collapse: collapse; box-shadow: 0 1px 3px rgba(0,0,0,0.1);">
+      <div style="margin-top: 24px;">
+        ${groupHeader('Top SQL by Elapsed Time', [chip(`${formatInt(topSqlEntries.length)} statements`, 'neutral')])}
+        <table style="width: 100%; border-collapse: collapse;">
           <thead>
-            <tr style="background: linear-gradient(135deg, #9c27b0 0%, #7b1fa2 100%); color: white;">
-              <th style="padding: 12px; text-align: left; font-size: 8pt; font-weight: 700; text-transform: uppercase; letter-spacing: 0.05em;">SQL ID</th>
-              <th style="padding: 12px; text-align: right; font-size: 8pt; font-weight: 700; text-transform: uppercase; letter-spacing: 0.05em;">Elapsed Time</th>
-              <th style="padding: 12px; text-align: right; font-size: 8pt; font-weight: 700; text-transform: uppercase; letter-spacing: 0.05em;">Executions</th>
-              <th style="padding: 12px; text-align: right; font-size: 8pt; font-weight: 700; text-transform: uppercase; letter-spacing: 0.05em;">Elapsed/Exec</th>
+            <tr style="${THEAD_ROW}">
+              <th style="${TH_TEXT}">SQL ID</th>
+              <th style="${TH_NUM}">Elapsed Time</th>
+              <th style="${TH_NUM}">Executions</th>
+              <th style="${TH_NUM}">Elapsed/Exec</th>
             </tr>
           </thead>
           <tbody>
@@ -249,21 +236,12 @@ export class AwrRenderer {
     `;
   }
 
-  private getSeverityColor(severity: string): string {
+  private severityPillKind(severity: string): PillKind {
     switch (severity) {
-      case 'critical': return '#c62828';
-      case 'warning': return '#e65100';
-      case 'info': return '#1565c0';
-      default: return '#555';
-    }
-  }
-
-  private getSeverityBg(severity: string): string {
-    switch (severity) {
-      case 'critical': return '#ffebee';
-      case 'warning': return '#fff3e0';
-      case 'info': return '#e3f2fd';
-      default: return '#f5f5f5';
+      case 'critical': return 'bad';
+      case 'warning': return 'warn';
+      case 'info': return 'info';
+      default: return 'neutral';
     }
   }
 }

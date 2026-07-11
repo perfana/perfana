@@ -912,23 +912,23 @@ function LayoutSectionCard({ id, section, index, onDelete, onConfigChange, onMov
 
     switch (section.type) {
       case 'header':
-        return <HeaderConfigForm config={sectionConfig} onChange={onConfigChange} />;
+        return <HeaderConfigForm config={sectionConfig} onChange={onConfigChange} testRunId={testRunId} />;
       case 'text_block':
-        return <TextBlockConfigForm config={sectionConfig} onChange={onConfigChange} />;
+        return <TextBlockConfigForm config={sectionConfig} onChange={onConfigChange} testRunId={testRunId} />;
       case 'slo':
-        return <SloConfigForm config={sectionConfig} onChange={onConfigChange} />;
+        return <SloConfigForm config={sectionConfig} onChange={onConfigChange} testRunId={testRunId} />;
       case 'apdex':
         return <ApdexConfigForm config={sectionConfig} onChange={onConfigChange} testRunId={testRunId} />;
       case 'transaction_response_times':
         return <TransactionResponseTimesConfigForm config={sectionConfig} onChange={onConfigChange} testRunId={testRunId} />;
       case 'regressions':
-        return <RegressionsConfigForm config={sectionConfig} onChange={onConfigChange} />;
+        return <RegressionsConfigForm config={sectionConfig} onChange={onConfigChange} testRunId={testRunId} />;
       case 'graphs':
-        return <GraphsConfigForm config={sectionConfig} onChange={onConfigChange} />;
+        return <GraphsConfigForm config={sectionConfig} onChange={onConfigChange} testRunId={testRunId} />;
       case 'awr':
-        return <AwrConfigForm config={sectionConfig} onChange={onConfigChange} />;
+        return <AwrConfigForm config={sectionConfig} onChange={onConfigChange} testRunId={testRunId} />;
       case 'trends':
-        return <TrendsConfigForm config={sectionConfig} onChange={onConfigChange} />;
+        return <TrendsConfigForm config={sectionConfig} onChange={onConfigChange} testRunId={testRunId} />;
       case 'comparisons':
         return <ComparisonsConfigForm config={sectionConfig} onChange={onConfigChange} testRunId={testRunId} systemUnderTestId={systemUnderTestId} testEnvironment={testEnvironment} workload={workload} />;
       default:

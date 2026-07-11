@@ -159,6 +159,47 @@ describe('HeaderRenderer', () => {
     });
   });
 
+  describe('section comment', () => {
+    it('should render the comment block under the Test Run Summary heading', async () => {
+      const section = makeSection({ comment: 'Baseline re-established this sprint' });
+
+      const html = await renderer.renderHeaderSection(section, makeTestRun());
+
+      expect(html).toContain('section-comment');
+      expect(html).toContain('Baseline re-established this sprint');
+      // Comment renders inside the summary section, after its h2
+      expect(html.indexOf('Test Run Summary')).toBeLessThan(html.indexOf('section-comment'));
+    });
+
+    it('should not render the comment on the cover page', async () => {
+      const section = makeSection({
+        comment: 'Cover pages stay clean',
+        config: { includeSummary: false },
+      });
+
+      const html = await renderer.renderHeaderSection(section, makeTestRun());
+
+      expect(html).toContain('class="cover-page"');
+      expect(html).not.toContain('section-comment');
+      expect(html).not.toContain('Cover pages stay clean');
+    });
+
+    it('should omit the comment block entirely when absent', async () => {
+      const html = await renderer.renderHeaderSection(makeSection(), makeTestRun());
+
+      expect(html).not.toContain('section-comment');
+    });
+
+    it('should escape HTML in the comment', async () => {
+      const section = makeSection({ comment: '<img onerror=alert(1)>' });
+
+      const html = await renderer.renderHeaderSection(section, makeTestRun());
+
+      expect(html).not.toContain('<img onerror');
+      expect(html).toContain('&lt;img onerror');
+    });
+  });
+
   describe('annotations', () => {
     it('should render annotations when present', async () => {
       const testRun = makeTestRun({ annotations: ['Deploy v2.0', 'Config change'] });
