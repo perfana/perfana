@@ -4,6 +4,7 @@ export function parseSseChunk(buffer: string): { lines: string[]; rest: string }
   const rest = parts.pop() ?? '';
   const lines = parts
     .map((p) => p.replace(/^data: ?/, ''))
+    // Empty `data:` payloads (blank log lines) are intentionally dropped here.
     .filter((p) => p.length > 0);
   return { lines, rest };
 }

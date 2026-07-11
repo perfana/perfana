@@ -44,7 +44,12 @@ export class LogsController {
     // openLogStream validates id against the live allowlist and throws NotFound if unknown.
     const stream = await this.logsService.openLogStream(id, { tail, follow });
 
-    res.set({ 'Content-Type': 'text/event-stream', 'Cache-Control': 'no-cache', Connection: 'keep-alive' });
+    res.set({
+      'Content-Type': 'text/event-stream',
+      'Cache-Control': 'no-cache',
+      Connection: 'keep-alive',
+      'X-Accel-Buffering': 'no',
+    });
     res.flushHeaders();
 
     const rl = readline.createInterface({ input: stream });

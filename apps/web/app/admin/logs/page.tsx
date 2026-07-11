@@ -46,6 +46,7 @@ export default function LogsPage() {
       // eslint-disable-next-line no-constant-condition
       while (true) {
         const { done, value } = await reader.read();
+        if (ac.signal.aborted) break;
         if (done) break;
         buffer += decoder.decode(value, { stream: true });
         const { lines: newLines, rest } = parseSseChunk(buffer);
