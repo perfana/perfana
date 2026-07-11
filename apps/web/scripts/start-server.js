@@ -15,13 +15,16 @@ const fs = require('fs');
 const path = require('path');
 const { spawn } = require('child_process');
 
-// Environment variable keys to expose to the client
+// Environment variable keys to expose to the client.
+// Keep in sync with RUNTIME_ENV_KEYS in lib/runtime-config.ts (this is a
+// standalone entrypoint that can't import the TS module).
 const RUNTIME_ENV_KEYS = [
   'NEXT_PUBLIC_API_URL',
   'NEXT_PUBLIC_KEYCLOAK_URL',
   'NEXT_PUBLIC_KEYCLOAK_REALM',
   'NEXT_PUBLIC_KEYCLOAK_CLIENT_ID',
   'NEXT_PUBLIC_USE_KEYCLOAK_AUTH',
+  'NEXT_PUBLIC_LOG_VIEWER_ENABLED',
 ];
 
 /**
