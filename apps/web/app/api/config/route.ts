@@ -17,6 +17,11 @@ import { NextResponse } from 'next/server';
  * - RUNTIME_KEYCLOAK_REALM (or NEXT_PUBLIC_KEYCLOAK_REALM)
  * - RUNTIME_KEYCLOAK_CLIENT_ID (or NEXT_PUBLIC_KEYCLOAK_CLIENT_ID)
  * - RUNTIME_USE_KEYCLOAK_AUTH (or NEXT_PUBLIC_USE_KEYCLOAK_AUTH)
+ * - RUNTIME_LOG_VIEWER_ENABLED (or NEXT_PUBLIC_LOG_VIEWER_ENABLED)
+ *
+ * This is the source of truth for window.__ENV__ (the client fetches
+ * /api/config via loadRuntimeConfig). Keep the returned keys in sync with
+ * RUNTIME_ENV_KEYS in lib/runtime-config.ts and scripts/start-server.js.
  */
 
 // Force this route to be dynamic (not statically generated)
@@ -31,6 +36,7 @@ export async function GET() {
     NEXT_PUBLIC_KEYCLOAK_REALM: getEnvValue('KEYCLOAK_REALM', 'perfana-prod'),
     NEXT_PUBLIC_KEYCLOAK_CLIENT_ID: getEnvValue('KEYCLOAK_CLIENT_ID', 'perfana-web'),
     NEXT_PUBLIC_USE_KEYCLOAK_AUTH: getEnvValue('USE_KEYCLOAK_AUTH', 'false'),
+    NEXT_PUBLIC_LOG_VIEWER_ENABLED: getEnvValue('LOG_VIEWER_ENABLED', 'false'),
   };
 
   // Log for debugging (visible in container logs)

@@ -219,6 +219,8 @@ This is how `test-runs` and all working services implement it.
 - `KEYCLOAK_REALM` - Keycloak realm name
 - `KEYCLOAK_CLIENT_ID` - Keycloak client ID
 - `KEYCLOAK_CLIENT_SECRET` - Keycloak client secret
+- `LOG_VIEWER_ENABLED` - Enable admin log viewer (default: `false`). Requires a read-only Docker socket mount on the api service (`/var/run/docker.sock:/var/run/docker.sock:ro`). The distroless api runs non-root, so also grant it the socket's group (`group_add: ["0"]` in compose) or it gets EACCES and the container list is empty.
+- `LOG_VIEWER_COMPOSE_PROJECT` - Docker Compose project name for container filtering (default: `perfana`). Must match your deploy's compose project (often the directory name) or the list is empty.
 
 **Frontend:**
 - `NEXT_PUBLIC_API_URL` - Backend API base URL (defaults to localhost:3001/api)
@@ -226,6 +228,7 @@ This is how `test-runs` and all working services implement it.
 - `NEXT_PUBLIC_KEYCLOAK_REALM` - Keycloak realm name
 - `NEXT_PUBLIC_KEYCLOAK_CLIENT_ID` - Keycloak client ID
 - `NEXT_PUBLIC_USE_KEYCLOAK_AUTH` - Enable/disable Keycloak auth (default: `true`)
+- `NEXT_PUBLIC_LOG_VIEWER_ENABLED` - Enable admin log viewer UI (default: `false`). Must match backend `LOG_VIEWER_ENABLED`.
 
 ## Common Patterns
 

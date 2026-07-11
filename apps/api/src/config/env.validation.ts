@@ -111,6 +111,15 @@ const envValidationSchema = Joi.object({
     .default('/data/provisioning')
     .description('Path to directory containing provisioning YAML files'),
 
+  // Log Viewer Configuration
+  LOG_VIEWER_ENABLED: Joi.string()
+    .valid('true', 'false')
+    .default('false')
+    .description('Enable log viewer feature for admin access to Docker logs'),
+  LOG_VIEWER_COMPOSE_PROJECT: Joi.string()
+    .default('perfana')
+    .description('Docker Compose project name for log viewer'),
+
   // Health Check Configuration
   HEALTH_HEAP_THRESHOLD_MB: Joi.number()
     .positive()

@@ -19,6 +19,7 @@ export const RUNTIME_ENV_KEYS = [
   'NEXT_PUBLIC_KEYCLOAK_REALM',
   'NEXT_PUBLIC_KEYCLOAK_CLIENT_ID',
   'NEXT_PUBLIC_USE_KEYCLOAK_AUTH',
+  'NEXT_PUBLIC_LOG_VIEWER_ENABLED',
 ] as const;
 
 export type RuntimeEnvKey = (typeof RUNTIME_ENV_KEYS)[number];
