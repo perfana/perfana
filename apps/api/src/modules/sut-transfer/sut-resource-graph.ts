@@ -32,6 +32,16 @@ export const SUT_RESOURCES: SutResource[] = [
                   JOIN application_dashboards ad ON ad.grafana_dashboard_id = gd.id
                   WHERE ad.system_under_test_id = $1
                 ) t` },
+  // dynatrace_entity_mappings and dynatrace_queries both FK into
+  // dynatrace_configs (discovered via FK-discovery, see sut-resource-graph.spec.ts).
+  // t.id is the PK, so IN(...) already dedupes without needing DISTINCT.
+  { table: 'dynatrace_configs', filter: 'byReference', group: 'shared',
+    customSql: `SELECT row_to_json(t) AS r FROM dynatrace_configs t
+                WHERE t.id IN (
+                  SELECT dynatrace_config_id FROM dynatrace_entity_mappings WHERE system_under_test_id = $1
+                  UNION
+                  SELECT dynatrace_config_id FROM dynatrace_queries WHERE system_under_test_id = $1
+                )` },
 
   // --- the SUT itself ---
   { table: 'systems_under_test', filter: 'bySut', group: 'core' },

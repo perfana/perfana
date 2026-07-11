@@ -9,7 +9,7 @@ describe('SUT_RESOURCES', () => {
     // Drift guard: this is the full set the delete handler touches, plus shared refs.
     // If you add a table to the delete cascade, add it here too.
     const expected = [
-      'pyroscope_instances', 'grafana_instances', 'grafana_dashboards',
+      'pyroscope_instances', 'grafana_instances', 'grafana_dashboards', 'dynatrace_configs',
       'systems_under_test', 'metrics_sources', 'test_runs', 'application_dashboards',
       'benchmarks', 'expected_config_changes', 'events', 'tracing_services',
       'deep_links', 'notification_channels', 'dynatrace_entity_mappings',
@@ -45,6 +45,9 @@ describe('SUT_RESOURCES', () => {
     expect(idx('ds_control_groups')).toBeLessThan(idx('ds_control_group_statistics'));
     expect(idx('system_under_test_test_environments')).toBeLessThan(idx('system_under_test_workloads'));
     expect(idx('test_runs')).toBeLessThan(idx('test_run_transaction_stats'));
+    expect(idx('dynatrace_configs')).toBeLessThan(idx('dynatrace_entity_mappings'));
+    expect(idx('dynatrace_configs')).toBeLessThan(idx('dynatrace_queries'));
+    expect(idx('application_dashboards')).toBeLessThan(idx('ds_control_group_statistics'));
   });
 
   it('raw tables are excluded unless includeRaw', () => {

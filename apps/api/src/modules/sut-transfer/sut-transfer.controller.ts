@@ -1,10 +1,25 @@
-import { Body, Controller, ForbiddenException, Logger, Param, ParseUUIDPipe, Post, Res } from '@nestjs/common';
-import { ApiBearerAuth, ApiOperation, ApiTags } from '@nestjs/swagger';
+import {
+  BadRequestException,
+  Body,
+  Controller,
+  ForbiddenException,
+  Logger,
+  Param,
+  ParseUUIDPipe,
+  Post,
+  Res,
+  UploadedFile,
+  UseInterceptors,
+} from '@nestjs/common';
+import { FileInterceptor } from '@nestjs/platform-express';
+import { ApiBearerAuth, ApiConsumes, ApiOperation, ApiTags } from '@nestjs/swagger';
 import { ConfigService } from '@nestjs/config';
 import { Response } from 'express';
 import { AdminOnly } from '../../decorators/admin-only.decorator';
 import { ExportSutDto } from './dto/export-sut.dto';
+import { ImportSutDto } from './dto/import-sut.dto';
 import { SutExportService } from './sut-export.service';
+import { ImportSummary, SutImportService } from './sut-import.service';
 
 @ApiTags('sut-transfer')
 @ApiBearerAuth()
@@ -15,6 +30,7 @@ export class SutTransferController {
 
   constructor(
     private readonly exportService: SutExportService,
+    private readonly importService: SutImportService,
     private readonly config: ConfigService,
   ) {}
 
@@ -45,5 +61,18 @@ export class SutTransferController {
       if (!res.headersSent) res.status(500);
       res.destroy(err);
     });
+  }
+
+  @Post('import')
+  @UseInterceptors(FileInterceptor('file', { limits: { fileSize: 500 * 1024 * 1024 } }))
+  @ApiConsumes('multipart/form-data')
+  @ApiOperation({ summary: 'Import a SUT bundle into this environment (admin, toggle-gated)' })
+  async import(
+    @UploadedFile() file: Express.Multer.File,
+    @Body() dto: ImportSutDto,
+  ): Promise<ImportSummary> {
+    this.assertEnabled();
+    if (!file?.buffer) throw new BadRequestException('No file uploaded');
+    return this.importService.import(file.buffer, dto.targetOrganizationId);
   }
 }
