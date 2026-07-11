@@ -43,6 +43,7 @@ import {
   Schedule,
   History,
   Terminal,
+  FileUpload,
 } from '@mui/icons-material'
 import { ThemePreference } from '@/contexts/theme-context'
 import { GLOBAL_ADMIN_ROLES } from '@/lib/constants/roles'
@@ -109,6 +110,13 @@ const getNavigationItems = (
           href: '/admin/logs',
           label: 'Log Viewer',
           icon: <Terminal />,
+          requiresRoles: Array.from(GLOBAL_ADMIN_ROLES),
+        }] : []),
+        // SUT Import — admin-only, feature-flagged (NEXT_PUBLIC_SUT_TRANSFER_ENABLED).
+        ...(env.SUT_TRANSFER_ENABLED && isGlobalAdmin ? [{
+          href: '/admin/sut-import',
+          label: 'SUT Import',
+          icon: <FileUpload />,
           requiresRoles: Array.from(GLOBAL_ADMIN_ROLES),
         }] : []),
       ].filter(Boolean) as NavigationItem[]
