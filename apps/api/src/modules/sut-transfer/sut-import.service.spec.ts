@@ -1,4 +1,5 @@
 import { DataSource } from 'typeorm';
+import { gzipSync } from 'zlib';
 import { createTestApp, closeTestApp, IntegrationTestContext } from '../../../test/helpers/integration-test.helper';
 import { SutExportService } from './sut-export.service';
 import { SutImportService } from './sut-import.service';
@@ -89,5 +90,17 @@ describe('SutImportService (integration)', () => {
     const stream = await exportService.export(sutId, { testRunIds: [runUuid], includeOptional: false, includeRaw: false });
     const bundle = await streamToBuffer(stream);
     await expect(importService.import(bundle, targetOrg)).rejects.toThrow(/already exists/i);
+  });
+
+  it('rejects a bundle that targets a table outside the allowlist (SQL trust boundary)', async () => {
+    const evilSutId = 'bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb';
+    const lines = [
+      JSON.stringify({ __manifest__: { schemaVersion: 1, sourceSutId: evilSutId, sutName: 'evil' } }),
+      JSON.stringify({ __table__: 'api_keys' }),
+      JSON.stringify({ id: 'x', some: 'row' }),
+    ];
+    const evilBuffer = gzipSync(Buffer.from(lines.join('\n') + '\n'));
+
+    await expect(importService.import(evilBuffer, targetOrg)).rejects.toThrow(/unknown table/i);
   });
 });

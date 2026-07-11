@@ -3,6 +3,7 @@ import { DataSource, EntityManager } from 'typeorm';
 import { createGunzip } from 'zlib';
 import { Readable } from 'stream';
 import * as readline from 'readline';
+import { SUT_RESOURCES } from './sut-resource-graph';
 
 export interface ImportSummary {
   sutId: string;
@@ -11,6 +12,18 @@ export interface ImportSummary {
 }
 
 const BATCH_SIZE = 1000;
+
+// Allowlist of tables the import bundle may write to — derived from the same
+// descriptor the exporter reads, so the trust boundary can never drift out of
+// sync with the resource graph. Untrusted __table__ values MUST be checked
+// against this before being interpolated into SQL.
+const VALID_TABLES = new Set(SUT_RESOURCES.map((r) => r.table));
+
+// Derived (not hand-duplicated) so it automatically stays in sync with the
+// group:'shared' entries in sut-resource-graph.ts.
+const SHARED_TABLES = new Set<string>(
+  SUT_RESOURCES.filter((r) => r.group === 'shared').map((r) => r.table),
+);
 
 @Injectable()
 export class SutImportService {
@@ -37,6 +50,9 @@ export class SutImportService {
     if (manifest.schemaVersion !== 1) {
       throw new BadRequestException(`Unsupported bundle schemaVersion ${manifest.schemaVersion}`);
     }
+    if (!manifest.sourceSutId) {
+      throw new BadRequestException('Bundle manifest missing sourceSutId');
+    }
 
     const exists: unknown[] = await this.dataSource.query(
       `SELECT 1 FROM systems_under_test WHERE id = $1`,
@@ -46,35 +62,49 @@ export class SutImportService {
       throw new ConflictException(`SUT ${manifest.sourceSutId} already exists — delete it first`);
     }
 
-    await this.dataSource.transaction(async (manager) => {
-      let currentTable: string | null = null;
-      let batch: Record<string, unknown>[] = [];
+    try {
+      await this.dataSource.transaction(async (manager) => {
+        let currentTable: string | null = null;
+        let batch: Record<string, unknown>[] = [];
 
-      const flush = async (): Promise<void> => {
-        if (!currentTable || batch.length === 0) return;
-        await this.insertBatch(manager, currentTable, batch);
-        rowCounts[currentTable] = (rowCounts[currentTable] ?? 0) + batch.length;
-        batch = [];
-      };
+        const flush = async (): Promise<void> => {
+          if (!currentTable || batch.length === 0) return;
+          await this.insertBatch(manager, currentTable, batch);
+          rowCounts[currentTable] = (rowCounts[currentTable] ?? 0) + batch.length;
+          batch = [];
+        };
 
-      for await (const line of { [Symbol.asyncIterator]: () => iterator }) {
-        if (!line.trim()) continue;
-        const obj = JSON.parse(line);
-        if (obj.__table__) {
-          await flush();
-          currentTable = obj.__table__ as string;
-          if (rowCounts[currentTable] === undefined) rowCounts[currentTable] = 0;
-          continue;
+        for await (const line of { [Symbol.asyncIterator]: () => iterator }) {
+          if (!line.trim()) continue;
+          const obj = JSON.parse(line);
+          if (obj.__table__) {
+            await flush();
+            const table = obj.__table__ as string;
+            if (!VALID_TABLES.has(table)) {
+              throw new BadRequestException(`Unknown table in bundle: ${table}`);
+            }
+            currentTable = table;
+            if (rowCounts[currentTable] === undefined) rowCounts[currentTable] = 0;
+            continue;
+          }
+          if (obj.__summary__ || obj.__manifest__) continue;
+          // Remap ownership on any row that carries these columns.
+          if ('organization_id' in obj) obj.organization_id = targetOrganizationId;
+          if ('team_id' in obj) obj.team_id = null;
+          batch.push(obj);
+          if (batch.length >= BATCH_SIZE) await flush();
         }
-        if (obj.__summary__ || obj.__manifest__) continue;
-        // Remap ownership on any row that carries these columns.
-        if ('organization_id' in obj) obj.organization_id = targetOrganizationId;
-        if ('team_id' in obj) obj.team_id = null;
-        batch.push(obj);
-        if (batch.length >= BATCH_SIZE) await flush();
+        await flush();
+      });
+    } catch (err) {
+      const code =
+        (err as { code?: string; driverError?: { code?: string } })?.code ??
+        (err as { code?: string; driverError?: { code?: string } })?.driverError?.code;
+      if (code === '23505') {
+        throw new ConflictException(`SUT ${manifest.sourceSutId} already exists — delete it first`);
       }
-      await flush();
-    });
+      throw err;
+    }
 
     this.logger.log(
       `Imported SUT ${manifest.sourceSutId} (${manifest.sutName}) into org ${targetOrganizationId}: ${JSON.stringify(rowCounts)}`,
@@ -97,12 +127,3 @@ export class SutImportService {
     );
   }
 }
-
-// Kept local (not derived from the descriptor import) to avoid a circular concern;
-// mirror the group:'shared' entries in sut-resource-graph.ts.
-const SHARED_TABLES = new Set<string>([
-  'pyroscope_instances',
-  'grafana_instances',
-  'grafana_dashboards',
-  'dynatrace_configs',
-]);
