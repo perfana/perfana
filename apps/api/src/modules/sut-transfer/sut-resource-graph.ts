@@ -17,14 +17,21 @@ export const SUT_RESOURCES: SutResource[] = [
   { table: 'pyroscope_instances', filter: 'byReference', group: 'shared',
     customSql: `SELECT row_to_json(t) AS r FROM pyroscope_instances t
                 WHERE t.id = (SELECT pyroscope_instance_id FROM systems_under_test WHERE id = $1)` },
+  // Note: DISTINCT must apply to the real row (via a subquery), not to the
+  // row_to_json() result — Postgres' plain `json` type has no equality
+  // operator, so `SELECT DISTINCT row_to_json(t)` fails with error 42883.
   { table: 'grafana_instances', filter: 'byReference', group: 'shared',
-    customSql: `SELECT DISTINCT row_to_json(t) AS r FROM grafana_instances t
-                JOIN application_dashboards ad ON ad.grafana_instance_id = t.id
-                WHERE ad.system_under_test_id = $1` },
+    customSql: `SELECT row_to_json(t) AS r FROM (
+                  SELECT DISTINCT gi.* FROM grafana_instances gi
+                  JOIN application_dashboards ad ON ad.grafana_instance_id = gi.id
+                  WHERE ad.system_under_test_id = $1
+                ) t` },
   { table: 'grafana_dashboards', filter: 'byReference', group: 'shared',
-    customSql: `SELECT DISTINCT row_to_json(t) AS r FROM grafana_dashboards t
-                JOIN application_dashboards ad ON ad.grafana_dashboard_id = t.id
-                WHERE ad.system_under_test_id = $1` },
+    customSql: `SELECT row_to_json(t) AS r FROM (
+                  SELECT DISTINCT gd.* FROM grafana_dashboards gd
+                  JOIN application_dashboards ad ON ad.grafana_dashboard_id = gd.id
+                  WHERE ad.system_under_test_id = $1
+                ) t` },
 
   // --- the SUT itself ---
   { table: 'systems_under_test', filter: 'bySut', group: 'core' },
@@ -61,7 +68,9 @@ export const SUT_RESOURCES: SutResource[] = [
   { table: 'ds_compare_config', filter: 'bySut', group: 'core' },
   { table: 'provisioned_template_ds_compare_configs', filter: 'bySut', group: 'core' },
   { table: 'ds_control_groups', filter: 'bySut', group: 'core' },
-  { table: 'ds_control_group_statistics', filter: 'bySut', group: 'core' },
+  // Note: this table has no system_under_test_id column of its own; it hangs
+  // off application_dashboards (see \d ds_control_group_statistics).
+  { table: 'ds_control_group_statistics', filter: 'byAppDashboard', group: 'core' },
 
   // --- per-test-run child data (uuid key) ---
   { table: 'ds_metrics', filter: 'byTestRunVarchar', group: 'core' },
