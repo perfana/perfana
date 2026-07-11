@@ -10,6 +10,7 @@ import { AuthModule } from './modules/auth/auth.module';
 import { OrganizationsModule } from './modules/organizations/organizations.module';
 import { TeamsModule } from './modules/teams/teams.module';
 import { SystemsUnderTestModule } from './modules/systems-under-test/systems-under-test.module';
+import { SutTransferModule } from './modules/sut-transfer/sut-transfer.module';
 import { TestRunsModule } from './modules/test-runs/test-runs.module';
 import { BenchmarksModule } from './modules/benchmarks/benchmarks.module';
 import { MetricsModule } from './modules/metrics/metrics.module';
@@ -94,6 +95,7 @@ import IORedis from 'ioredis';
     OrganizationsModule,
     TeamsModule,
     SystemsUnderTestModule,
+    SutTransferModule,
     TestRunsModule,
     BenchmarksModule,
     MetricsModule,
