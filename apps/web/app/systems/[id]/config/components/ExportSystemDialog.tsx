@@ -25,6 +25,7 @@ interface ExportSystemDialogProps {
 
 export default function ExportSystemDialog({ open, onClose, systemId, systemName }: ExportSystemDialogProps) {
   const [runs, setRuns] = useState<TestRunRow[]>([]);
+  const [runsTotal, setRunsTotal] = useState(0);
   const [runsLoading, setRunsLoading] = useState(false);
   const [runsError, setRunsError] = useState<string | null>(null);
   const [selected, setSelected] = useState<Set<string>>(new Set());
@@ -39,7 +40,7 @@ export default function ExportSystemDialog({ open, onClose, systemId, systemName
     try {
       const params = new URLSearchParams({
         page: '1',
-        pageSize: '200',
+        pageSize: '100', // /test-runs caps pageSize at 100
         system: systemName,
         sortBy: 'createdAt',
         sortOrder: 'DESC',
@@ -52,6 +53,7 @@ export default function ExportSystemDialog({ open, onClose, systemId, systemName
       // Handle both paginated response ({ data: TestRun[], total }) and plain array (backward compat)
       const rows: TestRun[] = Array.isArray(data) ? data : (data.data ?? []);
       setRuns(rows.map((r) => ({ id: r.id, testRunId: r.test_run_id })));
+      setRunsTotal(Array.isArray(data) ? rows.length : (data.total ?? rows.length));
     } catch (err) {
       setRunsError(
         err && typeof err === 'object' && 'message' in err
@@ -169,6 +171,11 @@ export default function ExportSystemDialog({ open, onClose, systemId, systemName
                   )}
                   label={`Select all (${runs.length})`}
                 />
+                {runsTotal > runs.length && (
+                  <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mb: 1 }}>
+                    Showing the {runs.length} most recent of {runsTotal} test runs.
+                  </Typography>
+                )}
                 <Divider sx={{ mb: 1 }} />
                 <List dense sx={{ maxHeight: 240, overflowY: 'auto', mb: 2 }}>
                   {runs.map((r) => (
