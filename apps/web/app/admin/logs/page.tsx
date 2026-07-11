@@ -9,7 +9,7 @@ interface LogContainer { id: string; name: string; service: string; state: strin
 export default function LogsPage() {
   const [containers, setContainers] = useState<LogContainer[]>([]);
   const [selected, setSelected] = useState<string | null>(null);
-  const [tail, setTail] = useState(200);
+  const [tail, setTail] = useState(100);
   const [follow, setFollow] = useState(true);
   const [filter, setFilter] = useState('');
   const [lines, setLines] = useState<string[]>([]);
@@ -17,7 +17,7 @@ export default function LogsPage() {
 
   useEffect(() => {
     authenticatedFetch('/logs/containers')
-      .then((r) => r.json())
+      .then((r) => (r.ok ? r.json() : []))
       .then(setContainers)
       .catch(() => setContainers([]));
   }, []);
@@ -38,6 +38,7 @@ export default function LogsPage() {
         `/logs/containers/${selected}/stream?tail=${tail}&follow=${follow}`,
         { signal: ac.signal },
       );
+      if (!res.ok) return;
       const reader = res.body?.getReader();
       if (!reader) return;
       const decoder = new TextDecoder();
