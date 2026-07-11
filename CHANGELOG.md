@@ -4,6 +4,11 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
+## [0.2.61.44] - 2026-07-11
+
+### Fixed
+- **Deleting a system under test no longer fails with a foreign-key error.** The cascade-delete handler was never updated after the MetricsSource refactor, so the final `DELETE FROM systems_under_test` tripped `metrics_sources`' FK (`FK_41fde009f014dff1c3f4f5396da`) and rolled the whole delete back. The handler now also removes the SUT's `metrics_sources`, `dynatrace_queries`, and `scaling_sessions` rows, ordered so `metrics_sources` is deleted last (after everything that references it). Verified against every blocking FK to `systems_under_test` (7) and `metrics_sources` (16).
+
 ## [0.2.61.42] - 2026-07-10
 
 ### Changed
