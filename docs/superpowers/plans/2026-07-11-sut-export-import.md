@@ -547,6 +547,15 @@ export class SutExportService {
           sql: `SELECT row_to_json(t) AS r FROM ${resource.table} t WHERE t.application_dashboard_id = ANY($1)`,
           params: [ctx.appDashboardIds],
         };
+      case 'byTestEnvironment':
+        // system_under_test_workloads has no system_under_test_id; it hangs off
+        // test environments (grandchild). Filter via the SUT's environments.
+        return {
+          sql: `SELECT row_to_json(t) AS r FROM ${resource.table} t
+                WHERE t.system_under_test_test_environment_id IN (
+                  SELECT id FROM system_under_test_test_environments WHERE system_under_test_id = $1)`,
+          params: [ctx.sutId],
+        };
     }
   }
 
