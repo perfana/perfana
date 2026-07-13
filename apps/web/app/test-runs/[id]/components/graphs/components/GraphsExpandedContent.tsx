@@ -7,6 +7,8 @@ import {
   TextField,
   Button,
   CircularProgress,
+  Switch,
+  FormControlLabel,
 } from '@mui/material';
 import { BookmarkBorder } from '@mui/icons-material';
 
@@ -49,6 +51,11 @@ interface GraphsExpandedContentProps {
   setChartName: (name: string) => void;
   addedSeries: SeriesConfig[];
   seriesData: Map<string, MetricDataPoint[]>;
+  overlaySeries?: SeriesConfig[];
+  overlayData?: Map<string, MetricDataPoint[]>;
+  showAggregatedToggle?: boolean;
+  includeAggregated?: boolean;
+  onIncludeAggregatedChange?: (value: boolean) => void;
   chartDataLoading: boolean;
   onRemoveSeries: (seriesId: string) => void;
   onUpdateSeriesUnit: (seriesId: string, unit: string) => void;
@@ -82,11 +89,24 @@ export function GraphsExpandedContent({
   setChartName,
   addedSeries,
   seriesData,
+  overlaySeries = [],
+  overlayData,
+  showAggregatedToggle = false,
+  includeAggregated = false,
+  onIncludeAggregatedChange,
   chartDataLoading,
   onRemoveSeries,
   onUpdateSeriesUnit,
   events,
 }: GraphsExpandedContentProps) {
+  // Overlay series render in the chart only — never in the editable Added
+  // Series list and never saved as a preset.
+  const chartSeries = [...addedSeries, ...overlaySeries];
+  const chartData = new Map(seriesData);
+  if (overlayData) {
+    overlayData.forEach((points, id) => chartData.set(id, points));
+  }
+
   return (
     <Box sx={{ py: 2 }}>
       {/* Saved Presets Table */}
@@ -127,6 +147,19 @@ export function GraphsExpandedContent({
         />
       </Box>
 
+      {showAggregatedToggle && (
+        <FormControlLabel
+          sx={{ mb: 2 }}
+          control={
+            <Switch
+              checked={includeAggregated}
+              onChange={(e) => onIncludeAggregatedChange?.(e.target.checked)}
+            />
+          }
+          label="Include 'All aggregated' series (performance test metrics)"
+        />
+      )}
+
       {/* Chart Name */}
       {addedSeries.length > 0 && (
         <Box sx={{ mb: 4 }}>
@@ -158,7 +191,7 @@ export function GraphsExpandedContent({
       </Box>
 
       {/* Chart Visualization */}
-      {addedSeries.length > 0 && (
+      {chartSeries.length > 0 && (
         <Box sx={{ mb: 4 }}>
           <Typography variant="h6" sx={{ mb: 2, fontWeight: 600 }}>
             Graph Visualization
@@ -186,8 +219,8 @@ export function GraphsExpandedContent({
           ) : (
             <GraphsChart
               testRun={testRun}
-              seriesData={seriesData}
-              seriesConfig={addedSeries}
+              seriesData={chartData}
+              seriesConfig={chartSeries}
               loading={chartDataLoading}
               chartName={chartName}
               events={events}
