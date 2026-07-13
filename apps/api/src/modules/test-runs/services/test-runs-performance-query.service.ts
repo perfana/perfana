@@ -2563,4 +2563,83 @@ export class TestRunsPerformanceQueryService {
       throw new DatabaseException('Failed to retrieve aggregated metric timeseries', error as Error);
     }
   }
+
+  /**
+   * Run-wide aggregate (all transactions/requests collapsed) as a single value
+   * per test run — the non-bucketed, batched sibling of
+   * getAggregatedMetricTimeseries. Powers the "All aggregated" series on the
+   * Trends and Compare cards. Full-run window (no analysis-window clipping).
+   */
+  async getAggregatedMetricStatistics(
+    testRunIds: string[],
+    metric: 'transaction_response_time' | 'request_response_time' | 'error_percentage',
+    stat: 'avg' | 'p50' | 'p90' | 'p95' | 'p99' | 'max',
+    isAdmin: boolean,
+    organizationIds: string[],
+  ): Promise<Array<{ testRunId: string; value: number | null }>> {
+    const requested = testRunIds ?? [];
+    if (requested.length === 0) return [];
+    // Non-admin with no orgs can see nothing.
+    if (!isAdmin && organizationIds.length === 0) {
+      return requested.map(testRunId => ({ testRunId, value: null }));
+    }
+
+    try {
+      const orgClause = isAdmin ? '' : 'AND sut.organization_id = ANY($2::uuid[])';
+
+      const statExprMap: Record<typeof stat, string> = {
+        avg: 'ROUND(AVG(t.response_time)::numeric, 2)',
+        p50: 'ROUND(approx_percentile(0.50, percentile_agg(t.response_time::double precision))::numeric, 2)',
+        p90: 'ROUND(approx_percentile(0.90, percentile_agg(t.response_time::double precision))::numeric, 2)',
+        p95: 'ROUND(approx_percentile(0.95, percentile_agg(t.response_time::double precision))::numeric, 2)',
+        p99: 'ROUND(approx_percentile(0.99, percentile_agg(t.response_time::double precision))::numeric, 2)',
+        max: 'MAX(t.response_time)::numeric',
+      };
+
+      let query: string;
+      if (metric === 'error_percentage') {
+        query = `
+        SELECT
+          r.test_run_id AS test_run_id,
+          ROUND(
+            COUNT(*) FILTER (WHERE NOT r.success)::numeric / NULLIF(COUNT(*), 0) * 100,
+            2
+          ) AS value
+        FROM requests_raw r
+        JOIN test_runs tr ON tr.test_run_id = r.test_run_id
+        JOIN systems_under_test sut ON sut.id = tr.system_under_test_id
+        WHERE r.test_run_id = ANY($1::text[])
+          ${orgClause}
+        GROUP BY r.test_run_id
+      `;
+      } else {
+        const table = metric === 'transaction_response_time' ? 'transactions' : 'requests_raw';
+        query = `
+        SELECT
+          t.test_run_id AS test_run_id,
+          ${statExprMap[stat]} AS value
+        FROM ${table} t
+        JOIN test_runs tr ON tr.test_run_id = t.test_run_id
+        JOIN systems_under_test sut ON sut.id = tr.system_under_test_id
+        WHERE t.test_run_id = ANY($1::text[])
+          ${orgClause}
+        GROUP BY t.test_run_id
+      `;
+      }
+
+      const params: unknown[] = isAdmin ? [requested] : [requested, organizationIds];
+      const rows: Array<{ test_run_id: string; value: string }> = await withRequestEm(this.testRunRepo).query(query, params);
+
+      const byId = new Map<string, number | null>();
+      for (const row of rows) {
+        byId.set(row.test_run_id, this.mapper.parseFloat(row.value));
+      }
+      return requested.map(testRunId => ({
+        testRunId,
+        value: byId.has(testRunId) ? byId.get(testRunId)! : null,
+      }));
+    } catch (error) {
+      throw new DatabaseException('Failed to retrieve aggregated metric statistics', error as Error);
+    }
+  }
 }
