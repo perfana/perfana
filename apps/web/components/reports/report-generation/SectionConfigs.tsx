@@ -917,8 +917,8 @@ export interface ComparisonsConfig {
   // Baseline-run comparison mode fields
   comparisonMode?: 'control_group' | 'baseline_run';
   source?: 'performance-metrics' | 'grafana' | 'dynatrace';
-  metrics?: ('avg' | 'p95' | 'p99')[];
-  thresholds?: { good: number; warning: number };
+  metrics?: ('avg' | 'p90' | 'p95' | 'p99')[];
+  thresholds?: { good: number; warning: number; minAbsolute?: number };
   // grafana/dynatrace only: scope the comparison to one dashboard and selected panels
   dashboardLabel?: string;
   panels?: { id: number; title: string }[];
@@ -1040,7 +1040,7 @@ export function ComparisonsConfigForm({ config, onChange, testRunId, systemUnder
 
   const metrics = config.metrics ?? ['avg', 'p95', 'p99'];
 
-  const toggleMetric = (metric: 'avg' | 'p95' | 'p99') => {
+  const toggleMetric = (metric: 'avg' | 'p90' | 'p95' | 'p99') => {
     const next = metrics.includes(metric) ? metrics.filter((m) => m !== metric) : [...metrics, metric];
     onChange({ ...config, metrics: next });
   };
@@ -1215,7 +1215,7 @@ export function ComparisonsConfigForm({ config, onChange, testRunId, systemUnder
           <Box>
             <Typography variant="caption" color="text.secondary">Metrics</Typography>
             <Box sx={{ display: 'flex', gap: 1 }}>
-              {(['avg', 'p95', 'p99'] as const).map((m) => (
+              {(['avg', 'p90', 'p95', 'p99'] as const).map((m) => (
                 <FormControlLabel
                   key={m}
                   control={
@@ -1265,10 +1265,25 @@ export function ComparisonsConfigForm({ config, onChange, testRunId, systemUnder
             onChange={(e) =>
               onChange({
                 ...config,
-                thresholds: { good: config.thresholds?.good ?? 10, warning: Number(e.target.value) },
+                thresholds: { good: config.thresholds?.good ?? 10, warning: Number(e.target.value), minAbsolute: config.thresholds?.minAbsolute },
               })
             }
             inputProps={{ min: 0, max: 100 }}
+          />
+          <TextField
+            label="Min. absolute change"
+            type="number"
+            size="small"
+            value={config.thresholds?.minAbsolute ?? ''}
+            onChange={(e) => {
+              const v = e.target.value === '' ? undefined : Number(e.target.value);
+              onChange({
+                ...config,
+                thresholds: { good: config.thresholds?.good ?? 10, warning: config.thresholds?.warning ?? 50, minAbsolute: v },
+              });
+            }}
+            helperText="Changes smaller than this (in the metric's units, e.g. ms) are treated as no difference. Leave empty to disable."
+            inputProps={{ min: 0 }}
           />
 
           {/* Dashboard-map editor (grafana + dynatrace): pair a current-run dashboard

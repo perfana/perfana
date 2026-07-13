@@ -36,15 +36,15 @@ describe('ReportDataFetcherService aggregate methods', () => {
     expect(sql).toContain('FILTER (WHERE NOT t.success)');
   });
 
-  it('getAggregatedScalars returns run-wide avg/p95/p99/pass/fail with no GROUP BY', async () => {
+  it('getAggregatedScalars returns run-wide avg/p90/p95/p99/pass/fail with no GROUP BY', async () => {
     const testRunRepo = {
-      query: jest.fn().mockResolvedValue([{ avg: '110', p95: '220', p99: '300', pass: '980', fail: '20' }]),
+      query: jest.fn().mockResolvedValue([{ avg: '110', p90: '180', p95: '220', p99: '300', pass: '980', fail: '20' }]),
     } as any;
     const svc = new ReportDataFetcherService(testRunRepo, {} as any, {} as any);
 
     const s = await svc.getAggregatedScalars('run-1', '', []);
 
-    expect(s).toEqual({ avg: 110, p95: 220, p99: 300, pass: 980, fail: 20 });
+    expect(s).toEqual({ avg: 110, p90: 180, p95: 220, p99: 300, pass: 980, fail: 20 });
     const [sql] = testRunRepo.query.mock.calls[0];
     expect(sql).toContain('FROM transactions');
     expect(sql).not.toContain('GROUP BY');

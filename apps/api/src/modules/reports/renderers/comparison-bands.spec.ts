@@ -1,4 +1,21 @@
-import { bandColor, percentDiff, statusFromConclusion } from './comparison-bands';
+import { bandColor, gatedDiffPercent, percentDiff, statusFromConclusion } from './comparison-bands';
+
+describe('gatedDiffPercent (minimum absolute change gate)', () => {
+  it('collapses to 0 when the absolute change is below minAbsolute', () => {
+    // 1ms -> 2ms is +100% but only 1ms absolute; a 5ms gate treats it as no change.
+    expect(gatedDiffPercent(2, 1, 100, 5)).toBe(0);
+  });
+  it('passes the diff through when the absolute change meets minAbsolute', () => {
+    expect(gatedDiffPercent(60, 50, 20, 5)).toBe(20);
+  });
+  it('is a no-op when minAbsolute is undefined', () => {
+    expect(gatedDiffPercent(2, 1, 100, undefined)).toBe(100);
+  });
+  it('passes null through (missing values cannot be gated)', () => {
+    expect(gatedDiffPercent(null, 1, null, 5)).toBeNull();
+    expect(gatedDiffPercent(2, null, null, 5)).toBeNull();
+  });
+});
 
 describe('percentDiff', () => {
   it('computes percent change vs baseline magnitude', () => {

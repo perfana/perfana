@@ -200,7 +200,7 @@ export interface BaselineComparisonRow {
   group: string;    // scenario_name (perf) | dashboard/panel (grafana) | host (dynatrace)
   label: string;    // transaction_name | metric_name
   metrics: {        // one entry per selected metric key
-    key: 'avg' | 'p95' | 'p99';
+    key: 'avg' | 'p90' | 'p95' | 'p99';
     current: number | null;
     baseline: number | null;
     diffPercent: number | null;
@@ -587,11 +587,12 @@ export class ReportDataFetcherService {
     testRunId: string,
     userId: string = '',
     roles: string[] = [],
-  ): Promise<{ avg: number | null; p95: number | null; p99: number | null; pass: number; fail: number }> {
+  ): Promise<{ avg: number | null; p90: number | null; p95: number | null; p99: number | null; pass: number; fail: number }> {
     const orgFilter = await this.resolveOrgFilter(userId, roles, 2, 'tr');
     const query = `
       SELECT
         ROUND(AVG(t.response_time)::numeric, 2) AS avg,
+        ROUND(PERCENTILE_CONT(0.90) WITHIN GROUP (ORDER BY t.response_time)::numeric, 2) AS p90,
         ROUND(PERCENTILE_CONT(0.95) WITHIN GROUP (ORDER BY t.response_time)::numeric, 2) AS p95,
         ROUND(PERCENTILE_CONT(0.99) WITHIN GROUP (ORDER BY t.response_time)::numeric, 2) AS p99,
         COUNT(*) FILTER (WHERE t.success) AS pass,
@@ -607,6 +608,7 @@ export class ReportDataFetcherService {
     const num = (v: string | null | undefined) => (v == null ? null : Number(v));
     return {
       avg: num(r.avg),
+      p90: num(r.p90),
       p95: num(r.p95),
       p99: num(r.p99),
       pass: Number(r.pass ?? 0),
@@ -2051,7 +2053,7 @@ export class ReportDataFetcherService {
     baselineRunId: string,
     source: 'performance-metrics' | 'grafana' | 'dynatrace',
     opts: {
-      metrics: ('avg' | 'p95' | 'p99')[];
+      metrics: ('avg' | 'p90' | 'p95' | 'p99')[];
       userId: string;
       roles: string[];
       // grafana/dynatrace only: restrict the comparison to one dashboard and a panel selection
@@ -2078,6 +2080,7 @@ export class ReportDataFetcherService {
           txn.scenario_name,
           txn.transaction_name,
           ROUND(AVG(txn.response_time)::numeric, 2) as avg_ms,
+          ROUND(PERCENTILE_CONT(0.90) WITHIN GROUP (ORDER BY txn.response_time)::numeric, 2) as p90_ms,
           ROUND(PERCENTILE_CONT(0.95) WITHIN GROUP (ORDER BY txn.response_time)::numeric, 2) as p95_ms,
           ROUND(PERCENTILE_CONT(0.99) WITHIN GROUP (ORDER BY txn.response_time)::numeric, 2) as p99_ms
         FROM transactions txn
@@ -2092,6 +2095,7 @@ export class ReportDataFetcherService {
         scenario_name: string | null;
         transaction_name: string;
         avg_ms: string | null;
+        p90_ms: string | null;
         p95_ms: string | null;
         p99_ms: string | null;
       }> = await withRequestEm(this.testRunRepo).query(query, [[currentRunId, baselineRunId], ...orgFilter.params]);
@@ -2102,7 +2106,7 @@ export class ReportDataFetcherService {
       const cur = allRows.filter((r) => r.test_run_id === currentRunId);
       const baseMap = new Map(allRows.filter((r) => r.test_run_id === baselineRunId).map((r) => [key(r), r]));
       const num = (v: unknown) => (v == null ? null : Number(v));
-      const fieldByKey = { avg: 'avg_ms', p95: 'p95_ms', p99: 'p99_ms' } as const;
+      const fieldByKey = { avg: 'avg_ms', p90: 'p90_ms', p95: 'p95_ms', p99: 'p99_ms' } as const;
       const rows: BaselineComparisonRow[] = cur.map((c) => {
         const b = baseMap.get(key(c));
         return {
@@ -2134,7 +2138,7 @@ export class ReportDataFetcherService {
     baselineRunId: string,
     source: 'grafana' | 'dynatrace',
     opts: {
-      metrics: ('avg' | 'p95' | 'p99')[];
+      metrics: ('avg' | 'p90' | 'p95' | 'p99')[];
       dashboardLabel?: string;
       panelIds?: number[];
       dashboardMap?: { current: string; baseline: string }[];
@@ -2161,10 +2165,11 @@ export class ReportDataFetcherService {
       metric_name: string | null;
       unit: string | null;
       mean: number | null;
+      q90: number | null;
       q95: number | null;
       q99: number | null;
     }> = await this.dataSource.query(
-      `SELECT s.test_run_id, s.dashboard_label, s.panel_title, s.panel_id, s.metric_name, s.unit, s.mean, s.q95, s.q99
+      `SELECT s.test_run_id, s.dashboard_label, s.panel_title, s.panel_id, s.metric_name, s.unit, s.mean, s.q90, s.q95, s.q99
        FROM ds_metric_statistics s
        LEFT JOIN metrics_sources ms ON ms.id = s.metrics_source_id
        WHERE s.test_run_id = ANY($1) AND (s.metrics_source_id IS NULL OR ms.source_type = $2)${scopeFilter}`,
@@ -2192,7 +2197,7 @@ export class ReportDataFetcherService {
       return `${mapped}||${r.panel_title}||${r.metric_name}`;
     };
 
-    const fieldByKey = { avg: 'mean', p95: 'q95', p99: 'q99' } as const;
+    const fieldByKey = { avg: 'mean', p90: 'q90', p95: 'q95', p99: 'q99' } as const;
 
     const rowsOut: BaselineComparisonRow[] = cur.map((c) => {
       const b = baseByIdentity.get(remapIdentity(c));
