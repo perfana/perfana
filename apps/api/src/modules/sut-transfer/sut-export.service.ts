@@ -95,9 +95,23 @@ export class SutExportService {
       case 'bySut': {
         // The systems_under_test row itself is keyed by `id`, not
         // `system_under_test_id` (every other 'bySut' table is its child).
-        const column = resource.table === 'systems_under_test' ? 'id' : 'system_under_test_id';
+        if (resource.table === 'systems_under_test') {
+          return {
+            sql: `SELECT row_to_json(t) AS r FROM systems_under_test t WHERE t.id = $1`,
+            params: [ctx.sutId],
+          };
+        }
+        // test_runs is per-run: export ONLY the selected runs (by uuid),
+        // not every run of the SUT. All other 'bySut' tables are SUT-level
+        // config and are exported in full.
+        if (resource.table === 'test_runs') {
+          return {
+            sql: `SELECT row_to_json(t) AS r FROM test_runs t WHERE t.id = ANY($1)`,
+            params: [ctx.testRunUuids],
+          };
+        }
         return {
-          sql: `SELECT row_to_json(t) AS r FROM ${resource.table} t WHERE t.${column} = $1`,
+          sql: `SELECT row_to_json(t) AS r FROM ${resource.table} t WHERE t.system_under_test_id = $1`,
           params: [ctx.sutId],
         };
       }

@@ -11,6 +11,10 @@ describe('SutExportService (integration)', () => {
   const sutId = '11111111-1111-1111-1111-111111111111';
   const runUuid = '22222222-2222-2222-2222-222222222222';
   const runKey = 'export-it-run-1';
+  // A second run on the same SUT that is NOT selected — guards against exporting
+  // every run of the SUT instead of only the selected subset.
+  const runUuid2 = '22222222-2222-2222-2222-222222222999';
+  const runKey2 = 'export-it-run-2';
   const orgId = '33333333-3333-3333-3333-333333333333';
 
   beforeAll(async () => {
@@ -19,10 +23,11 @@ describe('SutExportService (integration)', () => {
     service = ctx.module.get(SutExportService);
     await dataSource.query(`INSERT INTO systems_under_test (id, name, description, organization_id) VALUES ($1,'export-it-sut','export-it-sut description',$2)`, [sutId, orgId]);
     await dataSource.query(`INSERT INTO test_runs (id, test_run_id, system_under_test_id, test_environment, workload, organization_id) VALUES ($1,$2,$3,'test','wl-1',$4)`, [runUuid, runKey, sutId, orgId]);
+    await dataSource.query(`INSERT INTO test_runs (id, test_run_id, system_under_test_id, test_environment, workload, organization_id) VALUES ($1,$2,$3,'test','wl-1',$4)`, [runUuid2, runKey2, sutId, orgId]);
   });
 
   afterAll(async () => {
-    await dataSource.query(`DELETE FROM test_runs WHERE id = $1`, [runUuid]);
+    await dataSource.query(`DELETE FROM test_runs WHERE id = ANY($1)`, [[runUuid, runUuid2]]);
     await dataSource.query(`DELETE FROM systems_under_test WHERE id = $1`, [sutId]);
     await closeTestApp(ctx);
   });
@@ -50,7 +55,9 @@ describe('SutExportService (integration)', () => {
     expect(manifest.sutName).toBe('export-it-sut');
     expect(rowsByTable['systems_under_test']).toHaveLength(1);
     expect(rowsByTable['systems_under_test']![0].id).toBe(sutId);
+    // Only the selected run is exported, even though the SUT has two runs.
     expect(rowsByTable['test_runs']).toHaveLength(1);
+    expect(rowsByTable['test_runs']![0].id).toBe(runUuid);
     expect(rowsByTable['test_runs']![0].test_run_id).toBe(runKey);
     expect(rowsByTable['requests_raw']).toBeUndefined(); // raw not requested
   });
