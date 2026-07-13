@@ -71,6 +71,12 @@ export interface MetricComparison {
   current_value: number | null;
   selected_value: number | null;
   percentage_difference: number | null;
+  // Grouping + display context (attached in fetchMetricsComparison).
+  dashboard_label?: string;
+  panel_title?: string;
+  dashboardId?: string;
+  panelId?: number;
+  yAxesFormat?: string;
 }
 
 export interface MetricDataPoint {
@@ -105,6 +111,8 @@ export interface CompareSeries {
   metricName: string;
   source: DataSource;
   metricsSourceId?: string;
+  /** Panel value format (e.g. 'percentunit', 's', 'ms') for unit-correct display. */
+  yAxesFormat?: string;
   /** True when this series is the run-wide "All aggregated" pseudo-metric. */
   isAggregated?: boolean;
 }

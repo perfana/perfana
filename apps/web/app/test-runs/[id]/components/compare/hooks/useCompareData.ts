@@ -15,7 +15,7 @@ import {
   ComparisonStatus,
   SUPPORTED_PANEL_TYPES,
 } from '../types';
-import { calculatePercentageDifference, buildAggregatedComparison } from '../utils/compare-utils';
+import { calculatePercentageDifference, buildAggregatedComparison, DEFAULT_DISPLAY_CONFIG, DisplayConfig } from '../utils/compare-utils';
 import { TestRun } from '@/types/test-runs';
 import { isGrafana, isPerformanceTest} from '@/lib/metrics-source-utils';
 import {
@@ -73,6 +73,7 @@ export function useCompareData({ testRun, testRunId, compareExpanded }: UseCompa
   // Filter state
   const [seriesSearchText, setSeriesSearchText] = useState<string>('');
   const [showPercentiles, setShowPercentiles] = useState<boolean>(false);
+  const [displayConfig, setDisplayConfig] = useState<DisplayConfig>(DEFAULT_DISPLAY_CONFIG);
 
   // Graph state
   const [showGraphs, setShowGraphs] = useState<{ [key: string]: boolean }>({});
@@ -287,19 +288,27 @@ export function useCompareData({ testRun, testRunId, compareExpanded }: UseCompa
     try {
       setMetricsLoading(true);
 
-      // Group series by dashboard+panel to batch API calls (aggregated series are routed separately below)
-      const seriesGroups = new Map<string, { dashboardId: string; panelId: number; metricsSourceId?: string; metricNames: string[] }>();
-
+      // Group non-aggregated series by dashboard+panel to batch API calls.
+      const seriesGroups = new Map<string, {
+        dashboardId: string; panelId: number; metricsSourceId?: string;
+        dashboardLabel: string; panelTitle: string; yAxesFormat?: string; metricNames: string[];
+      }>();
       for (const series of addedSeries.filter(s => !s.isAggregated)) {
         const key = `${series.dashboardId}-${series.panelId}`;
         if (!seriesGroups.has(key)) {
-          seriesGroups.set(key, { dashboardId: series.dashboardId, panelId: series.panelId, metricsSourceId: series.metricsSourceId, metricNames: [] });
+          seriesGroups.set(key, {
+            dashboardId: series.dashboardId, panelId: series.panelId,
+            metricsSourceId: series.metricsSourceId, dashboardLabel: series.dashboardLabel,
+            panelTitle: series.panelTitle, yAxesFormat: series.yAxesFormat, metricNames: [],
+          });
         }
         seriesGroups.get(key)!.metricNames.push(series.metricName);
       }
 
       const allCurrentMetrics: MetricStatistic[] = [];
       const allSelectedMetrics: MetricStatistic[] = [];
+      const allComparisons: MetricComparison[] = [];
+      const evaluateTypes = ['avg', 'q90', 'q95', 'q99'];
 
       for (const [, group] of seriesGroups) {
         const params = new URLSearchParams({
@@ -307,56 +316,47 @@ export function useCompareData({ testRun, testRunId, compareExpanded }: UseCompa
           panelId: group.panelId.toString(),
           system: testRun.systems_under_test?.name || '',
           environment: testRun.test_environment || '',
-          workload: testRun.workload || ''
+          workload: testRun.workload || '',
         });
-
-        // Send metricsSourceId if available
-        if (group.metricsSourceId) {
-          params.set('metricsSourceId', group.metricsSourceId);
-        }
+        if (group.metricsSourceId) params.set('metricsSourceId', group.metricsSourceId);
 
         const response = await authenticatedFetch(
           `/metrics/ds-metric-statistics?${params.toString()}`,
-          { headers: { 'Content-Type': 'application/json' } }
+          { headers: { 'Content-Type': 'application/json' } },
         );
+        if (!response.ok) continue;
 
-        if (response.ok) {
-          const allData: MetricStatistic[] = await response.json();
-          const relevantMetricNames = new Set(group.metricNames);
-          const filteredData = allData.filter(item => relevantMetricNames.has(item.metric_name));
+        const allData: MetricStatistic[] = await response.json();
+        const relevant = new Set(group.metricNames);
+        const filtered = allData.filter(item => relevant.has(item.metric_name));
+        const currentData = filtered.filter(item => item.test_run_id === testRun.test_run_id);
+        const selectedData = filtered.filter(item => item.test_run_id === selectedTestRun.test_run_id);
+        allCurrentMetrics.push(...currentData);
+        allSelectedMetrics.push(...selectedData);
 
-          const currentData = filteredData.filter(item => item.test_run_id === testRun.test_run_id);
-          const selectedData = filteredData.filter(item => item.test_run_id === selectedTestRun.test_run_id);
-
-          allCurrentMetrics.push(...currentData);
-          allSelectedMetrics.push(...selectedData);
+        for (const metricName of new Set(group.metricNames)) {
+          const currentMetric = currentData.find(m => m.metric_name === metricName);
+          const baselineMetric = selectedData.find(m => m.metric_name === metricName);
+          for (const evaluateType of evaluateTypes) {
+            const currentValue = currentMetric?.statistics[evaluateType as keyof typeof currentMetric.statistics] ?? null;
+            const selectedValue = baselineMetric?.statistics[evaluateType as keyof typeof baselineMetric.statistics] ?? null;
+            allComparisons.push({
+              metric_name: metricName,
+              evaluate_type: evaluateType,
+              current_value: currentValue,
+              selected_value: selectedValue,
+              percentage_difference: calculatePercentageDifference(currentValue, selectedValue),
+              dashboard_label: group.dashboardLabel,
+              panel_title: group.panelTitle,
+              dashboardId: group.dashboardId,
+              panelId: group.panelId,
+              yAxesFormat: group.yAxesFormat,
+            });
+          }
         }
       }
 
-      // Create comparisons for all evaluate types
-      const allComparisons: MetricComparison[] = [];
-      const evaluateTypes = ['avg', 'max', 'min', 'last', 'count', 'q50', 'q90', 'q95', 'q99'];
-      const addedMetricNames = new Set(addedSeries.filter(s => !s.isAggregated).map(s => s.metricName));
-
-      for (const metricName of addedMetricNames) {
-        const currentMetric = allCurrentMetrics.find(m => m.metric_name === metricName);
-        const baselineMetric = allSelectedMetrics.find(m => m.metric_name === metricName);
-
-        for (const evaluateType of evaluateTypes) {
-          const currentValue = currentMetric?.statistics[evaluateType as keyof typeof currentMetric.statistics] ?? null;
-          const selectedValue = baselineMetric?.statistics[evaluateType as keyof typeof baselineMetric.statistics] ?? null;
-
-          allComparisons.push({
-            metric_name: metricName,
-            evaluate_type: evaluateType,
-            current_value: currentValue,
-            selected_value: selectedValue,
-            percentage_difference: calculatePercentageDifference(currentValue, selectedValue)
-          });
-        }
-      }
-
-      // Aggregated series: one batch call each for [current, baseline].
+      // Aggregated series: one batch call each for [current, baseline], single stat row.
       const aggregatedSeries = addedSeries.filter(s => s.isAggregated);
       for (const series of aggregatedSeries) {
         const spec = getAggregateSpec(series.panelId);
@@ -367,14 +367,19 @@ export function useCompareData({ testRun, testRunId, compareExpanded }: UseCompa
           spec,
         );
         const byId = new Map(values.map(v => [v.testRunId, v.value]));
-        allComparisons.push(
-          buildAggregatedComparison(
+        allComparisons.push({
+          ...buildAggregatedComparison(
             series,
             byId.get(testRun.test_run_id) ?? null,
             byId.get(selectedTestRun.test_run_id) ?? null,
             spec.stat,
           ),
-        );
+          dashboard_label: series.dashboardLabel,
+          panel_title: series.panelTitle,
+          dashboardId: series.dashboardId,
+          panelId: series.panelId,
+          yAxesFormat: series.yAxesFormat,
+        });
       }
 
       setCurrentMetrics(allCurrentMetrics);
@@ -500,6 +505,7 @@ export function useCompareData({ testRun, testRunId, compareExpanded }: UseCompa
     metricComparisons,
     seriesSearchText,
     showPercentiles,
+    displayConfig,
     showGraphs,
     graphData,
     graphLoading,
@@ -519,6 +525,7 @@ export function useCompareData({ testRun, testRunId, compareExpanded }: UseCompa
     setSelectedMetrics,
     setSeriesSearchText,
     setShowPercentiles,
+    setDisplayConfig,
     setShowGraphs,
     setGraphData,
     setGraphLoading,
