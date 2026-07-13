@@ -418,7 +418,7 @@ function AuditRow({
           ) : null}
         </TableCell>
         <TableCell sx={{ whiteSpace: 'nowrap', fontFamily: 'monospace' }}>
-          {ts.toISOString().replace('T', ' ').slice(0, 19)}
+          {ts.toLocaleString(undefined, { hour12: false })}
         </TableCell>
         <TableCell>
           <Box>
