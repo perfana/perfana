@@ -518,6 +518,101 @@ export class ReportDataFetcherService {
   }
 
   /**
+   * Run-wide aggregate time-series across ALL transactions (no GROUP BY
+   * transaction_name) — the same aggregate the /aggregated-metric-timeseries
+   * endpoint produces, for report rendering.
+   * // ponytail: SQL copied from TestRunsPerformanceQueryService.getAggregatedMetricTimeseries.
+   * Keep in sync if the aggregate definition changes.
+   */
+  async getAggregatedSeries(
+    testRunId: string,
+    metric: 'transaction_response_time' | 'request_response_time' | 'error_percentage',
+    stat: 'avg' | 'p50' | 'p90' | 'p95' | 'p99' | 'max',
+    excludeRampUp: boolean = true,
+    userId: string = '',
+    roles: string[] = [],
+  ): Promise<{ time: Date; value: number }[]> {
+    const cutoffTime = await this.getRampUpCutoffTime(testRunId, excludeRampUp, userId, roles);
+    // params: $1 testRunId, $2 cutoff; org params start at $3
+    const orgFilter = await this.resolveOrgFilter(userId, roles, 3, 'tr');
+
+    const statExprMap: Record<typeof stat, string> = {
+      avg: 'ROUND(AVG(t.response_time)::numeric, 2)',
+      p50: 'ROUND(PERCENTILE_CONT(0.50) WITHIN GROUP (ORDER BY t.response_time)::numeric, 2)',
+      p90: 'ROUND(PERCENTILE_CONT(0.90) WITHIN GROUP (ORDER BY t.response_time)::numeric, 2)',
+      p95: 'ROUND(PERCENTILE_CONT(0.95) WITHIN GROUP (ORDER BY t.response_time)::numeric, 2)',
+      p99: 'ROUND(PERCENTILE_CONT(0.99) WITHIN GROUP (ORDER BY t.response_time)::numeric, 2)',
+      max: 'MAX(t.response_time)::numeric',
+    };
+
+    let query: string;
+    if (metric === 'error_percentage') {
+      query = `
+        SELECT date_trunc('minute', t.time) AS time,
+          ROUND(COUNT(*) FILTER (WHERE NOT t.success)::numeric / NULLIF(COUNT(*), 0) * 100, 2) AS value
+        FROM requests_raw t
+        JOIN test_runs tr ON tr.test_run_id = t.test_run_id
+        WHERE t.test_run_id = $1
+          AND ($2::timestamptz IS NULL OR t.time >= $2::timestamptz)
+          ${orgFilter.clause}
+        GROUP BY 1
+        ORDER BY 1
+      `;
+    } else {
+      const table = metric === 'transaction_response_time' ? 'transactions' : 'requests_raw';
+      query = `
+        SELECT date_trunc('minute', t.time) AS time, ${statExprMap[stat]} AS value
+        FROM ${table} t
+        JOIN test_runs tr ON tr.test_run_id = t.test_run_id
+        WHERE t.test_run_id = $1
+          AND ($2::timestamptz IS NULL OR t.time >= $2::timestamptz)
+          ${orgFilter.clause}
+        GROUP BY 1
+        ORDER BY 1
+      `;
+    }
+
+    const rows: Array<{ time: string; value: string | null }> =
+      await withRequestEm(this.testRunRepo).query(query, [testRunId, cutoffTime, ...orgFilter.params]);
+    return rows.map((r) => ({ time: new Date(r.time), value: r.value == null ? 0 : Number(r.value) }));
+  }
+
+  /**
+   * Run-wide scalar aggregate across ALL transactions for the comparison table
+   * (single row, no GROUP BY).
+   */
+  async getAggregatedScalars(
+    testRunId: string,
+    userId: string = '',
+    roles: string[] = [],
+  ): Promise<{ avg: number | null; p95: number | null; p99: number | null; pass: number; fail: number }> {
+    const orgFilter = await this.resolveOrgFilter(userId, roles, 2, 'tr');
+    const query = `
+      SELECT
+        ROUND(AVG(t.response_time)::numeric, 2) AS avg,
+        ROUND(PERCENTILE_CONT(0.95) WITHIN GROUP (ORDER BY t.response_time)::numeric, 2) AS p95,
+        ROUND(PERCENTILE_CONT(0.99) WITHIN GROUP (ORDER BY t.response_time)::numeric, 2) AS p99,
+        COUNT(*) FILTER (WHERE t.success) AS pass,
+        COUNT(*) FILTER (WHERE NOT t.success) AS fail
+      FROM transactions t
+      JOIN test_runs tr ON tr.test_run_id = t.test_run_id
+      WHERE t.test_run_id = $1
+        ${orgFilter.clause}
+    `;
+    const rows: Array<Record<string, string | null>> =
+      await withRequestEm(this.testRunRepo).query(query, [testRunId, ...orgFilter.params]);
+    const r = rows[0] ?? {};
+    const num = (v: string | null | undefined) => (v == null ? null : Number(v));
+    return {
+      avg: num(r.avg),
+      p95: num(r.p95),
+      p99: num(r.p99),
+      pass: Number(r.pass ?? 0),
+      fail: Number(r.fail ?? 0),
+    };
+  }
+
+  /**
    * Get Apdex data from database for all scenarios
    *
    * IMPORTANT: This method uses WEIGHTED AVERAGES of per-transaction percentiles
