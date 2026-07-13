@@ -4,6 +4,16 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
+## [0.2.61.53] - 2026-07-13
+
+### Added
+- **The test-comparison report section (Baseline Run mode) gains a P90 metric.** P90 is now selectable alongside AVG/P95/P99 for all three sources (performance-metrics, Grafana, Dynatrace) and the "All aggregated" row. It's opt-in — the default metric set stays AVG/P95/P99, so existing reports are unchanged.
+- **Configurable minimum absolute change threshold.** A new "Min. absolute change" field (in the metric's own units, e.g. ms) suppresses noise on tiny baselines: any change where `|current − baseline|` is below the threshold is treated as no difference, regardless of the percentage (a 1ms → 2ms move is +100% but only 1ms). Leave it empty to disable. When set, the legend notes it.
+
+### Changed
+- **The comparison section now names both runs explicitly** — a caption reads "Comparing current run `<id>` against baseline run `<id>`" so the report is unambiguous read out of context.
+- **The baseline figure in each comparison cell is more present** — the grayed-out "vs `<baseline>`" text darkened from `#9aa2ab` to `#6b7280`, bumped to 12px, weight 600.
+
 ## [0.2.61.52] - 2026-07-13
 
 ### Added

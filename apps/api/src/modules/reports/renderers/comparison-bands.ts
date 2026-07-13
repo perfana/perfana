@@ -1,6 +1,33 @@
 import { REPORT_COLORS, type ReportStatus } from './report-style';
 
-export interface DiffThresholds { good: number; warning: number; }
+export interface DiffThresholds {
+  good: number;
+  warning: number;
+  /**
+   * Minimum absolute change (in the metric's own units) before a cell is
+   * flagged. |current − baseline| below this is treated as "no difference"
+   * regardless of the percentage — suppresses noise on tiny baselines
+   * (e.g. 1ms → 2ms is +100% but only 1ms). Undefined = no gate.
+   */
+  minAbsolute?: number;
+}
+
+/**
+ * Effective percentage diff after the minimum-absolute-change gate: if the
+ * absolute change is below `minAbsolute`, collapse to 0 so bandColor/deltaChip
+ * render it as "no difference". Used by the baseline-run comparison renderer.
+ */
+export function gatedDiffPercent(
+  current: number | null,
+  baseline: number | null,
+  diffPercent: number | null,
+  minAbsolute?: number,
+): number | null {
+  if (minAbsolute != null && current != null && baseline != null && Math.abs(current - baseline) < minAbsolute) {
+    return 0;
+  }
+  return diffPercent;
+}
 
 export function percentDiff(current: number | null, baseline: number | null): number | null {
   if (current == null || baseline == null || baseline === 0) return null;
