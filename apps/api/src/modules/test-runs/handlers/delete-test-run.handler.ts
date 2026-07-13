@@ -72,8 +72,14 @@ export class DeleteTestRunHandler implements ICommandHandler<DeleteTestRunComman
       // by the test_run delete and the raw `manager.query('DELETE …')` calls
       // would not surface to the audit lint rule's matcher anyway. The same
       // pattern is used for organization delete (PR6).
+      // Bulk deletes run in the BullMQ worker (processJob) with no HTTP request
+      // CLS context, so AuditService.dispatch would skip the row unless we pass
+      // an explicit actor. The job data carries the userId that queued the
+      // deletion — forward it. In-request single deletes call execute() without
+      // a context and fall back to CLS (which also has email + IP).
       this.auditService.logDelete(testRun as unknown as OwnedResource, {
         organizationIdOverride: testRun.organizationId,
+        ...(context?.userId ? { actorOverride: { userId: context.userId } } : {}),
       });
 
       // Perform cascade deletion with deadlock retry logic.
