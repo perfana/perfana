@@ -75,8 +75,9 @@ export class GraphsRenderer {
         panelTitle: p.panelTitle || p.panel_title,
         metricName: p.metricName || p.metric_name,
       }));
-    } else if (!includeAggregated) {
-      // Auto-discover available panels (skip when we're only rendering aggregated series)
+    } else {
+      // Auto-discover available panels. Aggregated series (if enabled) are appended
+      // on top of these — not a substitute for them.
       panels = await this.dataFetcher.getAvailableMetricsPanels(testRun.testRunId, userId, roles);
     }
 

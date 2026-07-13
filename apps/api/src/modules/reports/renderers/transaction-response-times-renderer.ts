@@ -162,10 +162,17 @@ export class TransactionResponseTimesRenderer {
       });
     });
 
-    // Get unique time buckets for X-axis
-    const uniqueTimes = Array.from(new Set(timeSeriesData.map((row: unknown) => (row as TimeSeriesRow).time_bucket)))
-      .sort()
-      .map((t) => new Date(t as string));
+    // Get unique time buckets for X-axis (dedup/sort by epoch ms so synthetic
+    // aggregated rows using a different time_bucket representation still align
+    // with real DB rows for the same instant)
+    const uniqueTimes = Array.from(
+      new Map(
+        timeSeriesData.map((row: unknown) => {
+          const d = new Date((row as TimeSeriesRow).time_bucket);
+          return [d.getTime(), d] as const;
+        }),
+      ).values(),
+    ).sort((a, b) => a.getTime() - b.getTime());
 
     const timePoints = uniqueTimes.length;
 

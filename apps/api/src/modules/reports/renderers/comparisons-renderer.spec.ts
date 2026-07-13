@@ -513,6 +513,10 @@ describe('ComparisonsRenderer', () => {
 
       expect(html).toContain('All aggregated');
       expect(dataFetcher.getAggregatedScalars).toHaveBeenCalledTimes(2);
+      // Guard against a percentDiff sign/arg-order regression: the aggregated row's
+      // rendered cell must show the current value (150) and "vs <baseline>" (120).
+      expect(html).toContain('>150<');
+      expect(html).toContain('vs 120');
     });
   });
 });

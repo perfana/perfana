@@ -220,6 +220,7 @@ describe('TransactionResponseTimesRenderer', () => {
       });
       await renderer.renderTransactionResponseTimesSection(makeSection(), makeTestRun(), 'u', ['user']);
       expect(dataFetcher.getAggregatedScalars).not.toHaveBeenCalled();
+      expect(dataFetcher.getAggregatedSeries).not.toHaveBeenCalled();
     });
   });
 

@@ -521,8 +521,10 @@ export class ReportDataFetcherService {
    * Run-wide aggregate time-series across ALL transactions (no GROUP BY
    * transaction_name) — the same aggregate the /aggregated-metric-timeseries
    * endpoint produces, for report rendering.
-   * // ponytail: SQL copied from TestRunsPerformanceQueryService.getAggregatedMetricTimeseries.
-   * Keep in sync if the aggregate definition changes.
+   * Re-derived (not a literal copy) from TestRunsPerformanceQueryService.getAggregatedMetricTimeseries:
+   * that endpoint uses TimescaleDB approx_percentile(percentile_agg(...)), while this uses core-Postgres
+   * PERCENTILE_CONT WITHIN GROUP (exact, sort-based), so p95/p99 values here will differ slightly from
+   * the endpoint's. avg is computed the same way either way, so it matches exactly.
    */
   async getAggregatedSeries(
     testRunId: string,
