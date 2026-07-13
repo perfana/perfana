@@ -2,7 +2,7 @@ import { Injectable } from '@nestjs/common';
 import { TestRun, ReportSectionConfig } from '@perfana/shared';
 import { ReportUtilsService } from '../services/report-utils.service';
 import { ReportDataFetcherService, ComparisonsData, ComparisonMetric, BaselineComparisonRow } from '../services/report-data-fetcher.service';
-import { bandColor, statusFromConclusion, DiffThresholds } from './comparison-bands';
+import { bandColor, statusFromConclusion, percentDiff, DiffThresholds } from './comparison-bands';
 import {
   ACCENT,
   DEFAULT_THRESHOLDS,
@@ -137,7 +137,7 @@ export class ComparisonsRenderer {
       ? (config.panels as { id: number; title: string }[]).map((p) => p.id)
       : undefined;
 
-    const data = testRun && baselineId
+    let data = testRun && baselineId
       ? await this.dataFetcher.getBaselineRunComparison(testRun.testRunId, baselineId, source,
           { metrics, userId, roles, dashboardMap, dashboardLabel, panelIds })
       : null;
@@ -146,6 +146,28 @@ export class ComparisonsRenderer {
       return `<section class="comparisons-section">${sectionHeader(title)}
         ${commentBlock(comment)}
         ${emptyState('No comparison data available for the selected baseline run.')}</section>`;
+    }
+
+    // "All aggregated" row — run-wide aggregate across all transactions (perf-metrics only).
+    if (source === 'performance-metrics' && config.includeAggregated === true && testRun && baselineId) {
+      const [curS, baseS] = await Promise.all([
+        this.dataFetcher.getAggregatedScalars(testRun.testRunId, userId, roles),
+        this.dataFetcher.getAggregatedScalars(baselineId, userId, roles),
+      ]);
+      const byKey: Record<BaselineMetricKey, [number | null, number | null]> = {
+        avg: [curS.avg, baseS.avg],
+        p95: [curS.p95, baseS.p95],
+        p99: [curS.p99, baseS.p99],
+      };
+      const aggRow: BaselineComparisonRow = {
+        group: 'All aggregated',
+        label: 'All aggregated',
+        metrics: metrics.map((k) => {
+          const [cv, bv] = byKey[k];
+          return { key: k, current: cv, baseline: bv, diffPercent: percentDiff(cv, bv) };
+        }),
+      };
+      data = { ...data, rows: [aggRow, ...data.rows] };
     }
 
     // Rank a band color for row accents / worst-of-row aggregation.

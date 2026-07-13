@@ -69,17 +69,52 @@ export class TransactionResponseTimesRenderer {
       `;
     }
 
+    let data = scenarioData;
+    if (testRun && config.includeAggregated === true && data) {
+      const excludeRampUp = config.excludeRampUp !== false;
+      const [series, scalars] = await Promise.all([
+        this.dataFetcher.getAggregatedSeries(testRun.testRunId, 'transaction_response_time', 'avg', excludeRampUp, userId, roles),
+        this.dataFetcher.getAggregatedScalars(testRun.testRunId, userId, roles),
+      ]);
+      if (series.length > 0 || scalars.avg != null) {
+        const total = scalars.pass + scalars.fail;
+        data = {
+          ...data,
+          transactions: [
+            {
+              name: 'All aggregated',
+              avgMs: scalars.avg ?? 0,
+              p95Ms: scalars.p95 ?? 0,
+              p99Ms: scalars.p99 ?? 0,
+              pass: scalars.pass,
+              fail: scalars.fail,
+              errPct: total > 0 ? (scalars.fail / total) * 100 : 0,
+            },
+            ...data.transactions,
+          ],
+          timeSeries: [
+            ...series.map((p) => ({
+              transaction_name: 'All aggregated',
+              time_bucket: p.time.toISOString(),
+              avg_response_time: String(p.value),
+            })),
+            ...(data.timeSeries ?? []),
+          ],
+        };
+      }
+    }
+
     return `
       <section class="response-times-section">
-        ${sectionHeader(title, { kicker: scenarioData.scenario })}
+        ${sectionHeader(title, { kicker: data.scenario })}
 
         ${commentBlock(comment)}
 
         <!-- Line Chart Placeholder -->
-        ${includeChart ? this.renderResponseTimesChart(scenarioData) : ''}
+        ${includeChart ? this.renderResponseTimesChart(data) : ''}
 
         <!-- Transactions Table -->
-        ${this.renderTransactionsTable(scenarioData)}
+        ${this.renderTransactionsTable(data)}
       </section>
     `;
   }
@@ -127,10 +162,17 @@ export class TransactionResponseTimesRenderer {
       });
     });
 
-    // Get unique time buckets for X-axis
-    const uniqueTimes = Array.from(new Set(timeSeriesData.map((row: unknown) => (row as TimeSeriesRow).time_bucket)))
-      .sort()
-      .map((t) => new Date(t as string));
+    // Get unique time buckets for X-axis (dedup/sort by epoch ms so synthetic
+    // aggregated rows using a different time_bucket representation still align
+    // with real DB rows for the same instant)
+    const uniqueTimes = Array.from(
+      new Map(
+        timeSeriesData.map((row: unknown) => {
+          const d = new Date((row as TimeSeriesRow).time_bucket);
+          return [d.getTime(), d] as const;
+        }),
+      ).values(),
+    ).sort((a, b) => a.getTime() - b.getTime());
 
     const timePoints = uniqueTimes.length;
 

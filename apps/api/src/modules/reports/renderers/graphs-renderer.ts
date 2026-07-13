@@ -30,6 +30,16 @@ export class GraphsRenderer {
     '#f4b400', '#0f9d58', '#ab47bc', '#00acc1', '#ff7043',
   ];
 
+  private static readonly AGGREGATED_METRICS: ReadonlyArray<{
+    metric: 'transaction_response_time' | 'request_response_time' | 'error_percentage';
+    title: string;
+    unit: string;
+  }> = [
+    { metric: 'transaction_response_time', title: 'All aggregated — Transaction response time (avg)', unit: 'ms' },
+    { metric: 'request_response_time', title: 'All aggregated — Request response time (avg)', unit: 'ms' },
+    { metric: 'error_percentage', title: 'All aggregated — Error percentage', unit: '%' },
+  ];
+
   constructor(
     private readonly utils: ReportUtilsService,
     private readonly dataFetcher: ReportDataFetcherService,
@@ -55,7 +65,8 @@ export class GraphsRenderer {
       return this.renderNoDataSection(title, comment, 'No test run data available for graph rendering.');
     }
 
-    // Determine panels to render
+    // Determine ds_metrics panels to render
+    const includeAggregated = config.includeAggregated === true;
     let panels: MetricsPanelSelector[] = [];
 
     if (Array.isArray(config.panels) && config.panels.length > 0) {
@@ -65,22 +76,31 @@ export class GraphsRenderer {
         metricName: p.metricName || p.metric_name,
       }));
     } else {
-      // Auto-discover available panels
-      panels = await this.dataFetcher.getAvailableMetricsPanels(
-        testRun.testRunId, userId, roles,
+      // Auto-discover available panels. Aggregated series (if enabled) are appended
+      // on top of these — not a substitute for them.
+      panels = await this.dataFetcher.getAvailableMetricsPanels(testRun.testRunId, userId, roles);
+    }
+
+    let timeSeriesData: MetricsTimeSeriesPanel[] = [];
+    if (panels.length > 0) {
+      timeSeriesData = await this.dataFetcher.getMetricsTimeSeries(
+        testRun.testRunId, panels, excludeRampUp, userId, roles,
       );
     }
-
-    if (panels.length === 0) {
-      return this.renderNoDataSection(title, comment, 'No metric panels configured or discovered for this test run.');
+    if (includeAggregated) {
+      timeSeriesData = [
+        ...timeSeriesData,
+        ...(await this.buildAggregatedPanels(testRun.testRunId, excludeRampUp, userId, roles)),
+      ];
     }
 
-    // Fetch time-series data for all panels
-    const timeSeriesData = await this.dataFetcher.getMetricsTimeSeries(
-      testRun.testRunId, panels, excludeRampUp, userId, roles,
-    );
-
     if (timeSeriesData.length === 0) {
+      if (includeAggregated) {
+        return this.renderNoDataSection(title, comment, 'No aggregated performance-test data found for this test run.');
+      }
+      if (panels.length === 0) {
+        return this.renderNoDataSection(title, comment, 'No metric panels configured or discovered for this test run.');
+      }
       return this.renderNoDataSection(title, comment, 'No ds_metrics data found for the selected panels.');
     }
 
@@ -97,6 +117,29 @@ export class GraphsRenderer {
         ${charts}
       </section>
     `;
+  }
+
+  private async buildAggregatedPanels(
+    testRunId: string,
+    excludeRampUp: boolean,
+    userId: string,
+    roles: string[],
+  ): Promise<MetricsTimeSeriesPanel[]> {
+    const out: MetricsTimeSeriesPanel[] = [];
+    for (const spec of GraphsRenderer.AGGREGATED_METRICS) {
+      const series = await this.dataFetcher.getAggregatedSeries(
+        testRunId, spec.metric, 'avg', excludeRampUp, userId, roles,
+      );
+      if (series.length === 0) continue;
+      out.push({
+        panelTitle: spec.title,
+        dashboardLabel: 'Performance Test Metrics',
+        metricName: spec.metric,
+        unit: spec.unit,
+        dataPoints: series.map((p) => ({ time: p.time, value: p.value })),
+      });
+    }
+    return out;
   }
 
   private renderPanelChart(
