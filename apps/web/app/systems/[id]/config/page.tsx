@@ -9,6 +9,7 @@ import {
 import {
   ArrowBack as ArrowBackIcon,
   Delete as DeleteIcon,
+  FileDownload as FileDownloadIcon,
   MonitorHeart as MonitorHeartIcon,
   Assessment as AssessmentIcon,
   Link as LinkIcon,
@@ -19,6 +20,9 @@ import {
   Description as DescriptionIcon,
   TuneRounded as TuneIcon,
 } from '@mui/icons-material';
+import { useAuth } from '@/contexts/auth-context';
+import { GLOBAL_ADMIN_ROLES } from '@/lib/constants/roles';
+import { env } from '@/lib/env';
 
 // Hooks
 import { useSystemData, useDashboardManagement, useSLOManagement, useReportingTemplateManagement } from './hooks';
@@ -39,10 +43,14 @@ import ConfigDialogs from './components/ConfigDialogs';
 import AggregatedSloDialog, { ExistingAggregatedBenchmark } from '@/app/test-runs/[id]/components/performance-analysis/AggregatedSloDialog';
 import TemplateManagementDialog from './components/TemplateManagementDialog';
 import DeleteSystemDialog from './components/DeleteSystemDialog';
+import ExportSystemDialog from './components/ExportSystemDialog';
 
 export default function SystemConfigurationPage() {
   const router = useRouter();
+  const { hasAnyRole } = useAuth();
+  const isGlobalAdmin = hasAnyRole(Array.from(GLOBAL_ADMIN_ROLES));
   const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
+  const [exportDialogOpen, setExportDialogOpen] = useState(false);
   const [aggregatedSloDialogOpen, setAggregatedSloDialogOpen] = useState(false);
   const [selectedAggregatedBenchmark, setSelectedAggregatedBenchmark] = useState<ExistingAggregatedBenchmark | null>(null);
   const dashboard = useDashboardManagement();
@@ -108,15 +116,27 @@ export default function SystemConfigurationPage() {
           >
             Back to Systems
           </Button>
-          <Button
-            startIcon={<DeleteIcon />}
-            color="error"
-            variant="outlined"
-            size="small"
-            onClick={() => setDeleteDialogOpen(true)}
-          >
-            Delete System
-          </Button>
+          <Box sx={{ display: 'flex', gap: 1 }}>
+            {env.SUT_TRANSFER_ENABLED && isGlobalAdmin && (
+              <Button
+                startIcon={<FileDownloadIcon />}
+                variant="outlined"
+                size="small"
+                onClick={() => setExportDialogOpen(true)}
+              >
+                Export (admin)
+              </Button>
+            )}
+            <Button
+              startIcon={<DeleteIcon />}
+              color="error"
+              variant="outlined"
+              size="small"
+              onClick={() => setDeleteDialogOpen(true)}
+            >
+              Delete System
+            </Button>
+          </Box>
         </Box>
         <Typography variant="h4" component="h1" fontWeight="bold" gutterBottom>
           {system.name}
@@ -416,6 +436,13 @@ export default function SystemConfigurationPage() {
       <DeleteSystemDialog
         open={deleteDialogOpen}
         onClose={() => setDeleteDialogOpen(false)}
+        systemId={systemId}
+        systemName={system.name}
+      />
+
+      <ExportSystemDialog
+        open={exportDialogOpen}
+        onClose={() => setExportDialogOpen(false)}
         systemId={systemId}
         systemName={system.name}
       />

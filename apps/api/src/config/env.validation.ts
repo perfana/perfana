@@ -119,6 +119,10 @@ const envValidationSchema = Joi.object({
   LOG_VIEWER_COMPOSE_PROJECT: Joi.string()
     .default('perfana')
     .description('Docker Compose project name for log viewer'),
+  SUT_TRANSFER_ENABLED: Joi.string()
+    .valid('true', 'false')
+    .default('false')
+    .description('Enable admin SUT export/import feature (exports production data to a file)'),
 
   // Health Check Configuration
   HEALTH_HEAP_THRESHOLD_MB: Joi.number()
