@@ -36,6 +36,11 @@ export class CompareSeriesConfig {
   @IsBoolean()
   @IsOptional()
   isAggregated?: boolean;
+
+  @ApiPropertyOptional({ description: "Panel value format (e.g. 'percentunit', 's', 'ms')" })
+  @IsString()
+  @IsOptional()
+  yAxesFormat?: string;
 }
 
 export class CreateComparePresetDto {

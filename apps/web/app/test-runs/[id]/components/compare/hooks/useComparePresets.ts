@@ -98,7 +98,8 @@ export function useComparePresets({
           metricName: config.metricName,
           source: config.source as DataSource,
           metricsSourceId: (config as unknown).metricsSourceId,
-          isAggregated: (config as { isAggregated?: boolean }).isAggregated
+          isAggregated: (config as { isAggregated?: boolean }).isAggregated,
+          yAxesFormat: config.yAxesFormat
         }));
         setAddedSeries(restoredSeries);
       }

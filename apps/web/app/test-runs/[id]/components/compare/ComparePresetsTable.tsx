@@ -34,6 +34,7 @@ export interface ComparePreset {
     metricName: string;
     source: string;
     metricsSourceId?: string;
+    yAxesFormat?: string;
   }>;
   display_config?: {
     warningThreshold: number;
