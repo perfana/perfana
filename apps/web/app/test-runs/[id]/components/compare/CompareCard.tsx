@@ -262,15 +262,12 @@ export default function CompareCard({
                 metricsLoading={compareData.metricsLoading}
                 seriesSearchText={compareData.seriesSearchText}
                 onSeriesSearchChange={compareData.setSeriesSearchText}
-                showPercentiles={compareData.showPercentiles}
-                onShowPercentilesChange={compareData.setShowPercentiles}
+                displayConfig={compareData.displayConfig}
+                onDisplayConfigChange={compareData.setDisplayConfig}
                 showGraphs={compareData.showGraphs}
                 graphData={compareData.graphData}
                 graphLoading={compareData.graphLoading}
                 onToggleGraph={compareHandlers.toggleGraph}
-                onShowGraphsChange={compareData.setShowGraphs}
-                onGraphDataChange={compareData.setGraphData}
-                onGraphLoadingChange={compareData.setGraphLoading}
                 testRun={testRun}
                 testRunId={testRunId}
                 showToast={showToast}
