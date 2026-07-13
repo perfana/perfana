@@ -4,6 +4,11 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
+## [0.2.61.51] - 2026-07-13
+
+### Changed
+- **Audit log timestamps now display in the viewer's local timezone instead of UTC.** The audit log table rendered each timestamp with `toISOString()` (always UTC), which was confusing for anyone reading it in their own timezone. It now uses `toLocaleString` so times match the reader's local clock.
+
 ## [0.2.61.50] - 2026-07-13
 
 ### Added
