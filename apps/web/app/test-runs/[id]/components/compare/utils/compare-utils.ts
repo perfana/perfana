@@ -88,19 +88,20 @@ export const getTestRunSecondaryInfo = (testRun: RelatedTestRun): string => {
 /**
  * Get visible columns based on percentiles toggle
  */
-export const getVisibleColumns = (showPercentiles: boolean): string[] => {
+export const getVisibleColumns = (showPercentiles: boolean, forceInclude: string[] = []): string[] => {
   const baseColumns = ['avg', 'max', 'min', 'last', 'count'];
   const percentileColumns = ['q50', 'q90', 'q95', 'q99'];
-  return showPercentiles ? [...baseColumns, ...percentileColumns] : baseColumns;
+  const visiblePercentiles = showPercentiles
+    ? percentileColumns
+    : percentileColumns.filter(c => forceInclude.includes(c));
+  return [...baseColumns, ...visiblePercentiles];
 };
 
 /**
  * Get grid template columns CSS value
  */
-export const getGridTemplateColumns = (showPercentiles: boolean): string => {
-  const baseColumnsCount = 5; // avg, max, min, last, count
-  const percentileColumnsCount = showPercentiles ? 4 : 0; // q50, q90, q95, q99
-  const totalDataColumns = baseColumnsCount + percentileColumnsCount;
+export const getGridTemplateColumns = (showPercentiles: boolean, forceInclude: string[] = []): string => {
+  const totalDataColumns = getVisibleColumns(showPercentiles, forceInclude).length;
   return `2fr repeat(${totalDataColumns}, 1fr)`; // 2fr for label column, 1fr for each data column
 };
 
@@ -145,6 +146,8 @@ export const COMPARE_ACCENT_COLOR = '#1976d2';
  * (which yields a row per evaluate type), the aggregate only exposes the
  * panel's own stat, so it produces a single row keyed by that stat.
  */
+const AGG_STAT_TO_COLUMN: Record<string, string> = { p50: 'q50', p90: 'q90', p95: 'q95', p99: 'q99' };
+
 export function buildAggregatedComparison(
   series: CompareSeries,
   currentValue: number | null,
@@ -153,7 +156,7 @@ export function buildAggregatedComparison(
 ): MetricComparison {
   return {
     metric_name: series.metricName,
-    evaluate_type: stat,
+    evaluate_type: AGG_STAT_TO_COLUMN[stat] ?? stat,
     current_value: currentValue,
     selected_value: baselineValue,
     percentage_difference: calculatePercentageDifference(currentValue, baselineValue),
