@@ -34,6 +34,16 @@ export function isAggregatablePanel(panelId: number): boolean {
   return panelId in AGGREGATABLE_PERF_PANELS;
 }
 
+/**
+ * Whether the "All aggregated" option should be offered for a panel. Guards
+ * on BOTH the source (perf-test only — panel ids are not disjoint across
+ * Grafana/Dynatrace, so a bare panel-id check can collide) and the panel
+ * being one we can aggregate.
+ */
+export function shouldOfferAllAggregated(source: string, panelId: number): boolean {
+  return source === 'performance-metrics' && isAggregatablePanel(panelId);
+}
+
 /** Readable, per-panel-unique legend/row name so two aggregated panels don't collide. */
 export function buildAggregatedMetricName(panelTitle: string): string {
   return `${ALL_AGGREGATED_OPTION} — ${panelTitle}`;

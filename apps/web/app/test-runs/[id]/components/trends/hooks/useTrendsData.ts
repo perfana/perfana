@@ -18,7 +18,7 @@ import { isGrafana, isPerformanceTest, getSourceType } from '@/lib/metrics-sourc
 import {
   ALL_AGGREGATED_OPTION,
   getAggregateSpec,
-  isAggregatablePanel,
+  shouldOfferAllAggregated,
   buildAggregatedMetricName,
   fetchAggregatedStatistics,
 } from '@/lib/aggregated-perf-series';
@@ -297,7 +297,7 @@ export function useTrendsData({ testRun, testRunId, trendsExpanded }: UseTrendsD
 
       if (response.ok) {
         const metricNames: string[] = await response.json();
-        const withAggregate = isAggregatablePanel(panelId)
+        const withAggregate = shouldOfferAllAggregated(selectedSource, panelId)
           ? [ALL_AGGREGATED_OPTION, ...metricNames]
           : metricNames;
         setAvailableMetrics(withAggregate);
@@ -311,7 +311,7 @@ export function useTrendsData({ testRun, testRunId, trendsExpanded }: UseTrendsD
     } finally {
       setAvailableMetricsLoading(false);
     }
-  }, []);
+  }, [selectedSource]);
 
   // Load metrics data for all added series
   const fetchMetricsData = useCallback(async () => {

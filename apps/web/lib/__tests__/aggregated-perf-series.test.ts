@@ -2,6 +2,7 @@ import {
   ALL_AGGREGATED_OPTION,
   getAggregateSpec,
   isAggregatablePanel,
+  shouldOfferAllAggregated,
   buildAggregatedMetricName,
   fetchAggregatedStatistics,
 } from '../aggregated-perf-series';
@@ -18,6 +19,13 @@ describe('aggregated-perf-series', () => {
     expect(getAggregateSpec(206)).toBeNull(); // throughput — unsupported
     expect(isAggregatablePanel(204)).toBe(true);
     expect(isAggregatablePanel(999)).toBe(false);
+  });
+
+  it('offers "All aggregated" only for the performance-metrics source', () => {
+    expect(shouldOfferAllAggregated('performance-metrics', 102)).toBe(true);
+    expect(shouldOfferAllAggregated('grafana', 102)).toBe(false);      // panel-id collision must not leak
+    expect(shouldOfferAllAggregated('dynatrace', 202)).toBe(false);
+    expect(shouldOfferAllAggregated('performance-metrics', 206)).toBe(false); // unsupported panel
   });
 
   it('builds a readable, unique series name from the panel title', () => {
