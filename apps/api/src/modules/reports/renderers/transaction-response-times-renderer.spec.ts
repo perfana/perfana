@@ -60,6 +60,8 @@ describe('TransactionResponseTimesRenderer', () => {
           useValue: {
             getScenarioDataFromDatabase: jest.fn().mockResolvedValue(makeScenarioData()),
             getMockScenarioData: jest.fn().mockReturnValue(makeScenarioData()),
+            getAggregatedSeries: jest.fn().mockResolvedValue([]),
+            getAggregatedScalars: jest.fn().mockResolvedValue({ avg: null, p95: null, p99: null, pass: 0, fail: 0 }),
           },
         },
       ],
@@ -188,6 +190,36 @@ describe('TransactionResponseTimesRenderer', () => {
       expect(html).toContain('not found');
       expect(html).toContain('missing-scenario');
       expect(html).toContain('response-times-section');
+    });
+  });
+
+  describe('All aggregated', () => {
+    it('prepends an All aggregated row + line when includeAggregated is set', async () => {
+      dataFetcher.getScenarioDataFromDatabase.mockResolvedValue({
+        scenario: 'all',
+        transactions: [{ name: 'login', avgMs: 100, p95Ms: 200, p99Ms: 300, pass: 50, fail: 0, errPct: 0 }],
+        timeSeries: [{ transaction_name: 'login', time_bucket: '2025-06-01T10:00:00Z', avg_response_time: '100' }],
+      });
+      (dataFetcher.getAggregatedSeries as jest.Mock).mockResolvedValue([
+        { time: new Date('2025-06-01T10:00:00Z'), value: 150 },
+      ]);
+      (dataFetcher.getAggregatedScalars as jest.Mock).mockResolvedValue({
+        avg: 150, p95: 250, p99: 300, pass: 980, fail: 20,
+      });
+
+      const html = await renderer.renderTransactionResponseTimesSection(
+        makeSection({ config: { includeAggregated: true } }), makeTestRun(), 'u', ['user'],
+      );
+
+      expect(html).toContain('All aggregated');
+    });
+
+    it('does not fetch aggregated data when the flag is off', async () => {
+      dataFetcher.getScenarioDataFromDatabase.mockResolvedValue({
+        scenario: 'all', transactions: [], timeSeries: [],
+      });
+      await renderer.renderTransactionResponseTimesSection(makeSection(), makeTestRun(), 'u', ['user']);
+      expect(dataFetcher.getAggregatedScalars).not.toHaveBeenCalled();
     });
   });
 
