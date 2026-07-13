@@ -4,6 +4,15 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
+## [0.2.61.48] - 2026-07-13
+
+### Added
+- **Reports can now include an "All aggregated" series for performance-test metrics.** Three report sections gain an *Include 'All aggregated' series* toggle that adds the run-wide aggregate across **all** transactions (the same math as the aggregated-metric-timeseries endpoint — no per-transaction grouping):
+  - **Graphs** — appends aggregated line charts for transaction response time, request response time, and error percentage (avg), on top of any configured/auto-discovered panels.
+  - **Transaction Response Times** — prepends an "All aggregated" line to the chart and a row (avg/p95/p99, pass/fail) to the table.
+  - **Comparisons** (baseline-run mode, performance-metrics source) — prepends an "All aggregated" row comparing the current run's run-wide aggregate against the baseline run's.
+  - The toggle is off by default (existing reports render unchanged); the config is stored as JSON, so no migration. Aggregated percentiles use exact `PERCENTILE_CONT` rather than the endpoint's approximate percentile, so p95/p99 may differ slightly.
+
 ## [0.2.61.44] - 2026-07-11
 
 ### Fixed
