@@ -1,4 +1,4 @@
-import { RelatedTestRun } from '../types/compare.types';
+import { RelatedTestRun, CompareSeries, MetricComparison } from '../types/compare.types';
 
 /**
  * Calculate percentage difference between current and baseline values
@@ -139,3 +139,23 @@ export const getStatusIcon = (
  * Compare card accent color
  */
 export const COMPARE_ACCENT_COLOR = '#1976d2';
+
+/**
+ * One comparison row for an "All aggregated" series. Unlike a normal metric
+ * (which yields a row per evaluate type), the aggregate only exposes the
+ * panel's own stat, so it produces a single row keyed by that stat.
+ */
+export function buildAggregatedComparison(
+  series: CompareSeries,
+  currentValue: number | null,
+  baselineValue: number | null,
+  stat: string,
+): MetricComparison {
+  return {
+    metric_name: series.metricName,
+    evaluate_type: stat,
+    current_value: currentValue,
+    selected_value: baselineValue,
+    percentage_difference: calculatePercentageDifference(currentValue, baselineValue),
+  };
+}

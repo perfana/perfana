@@ -15,9 +15,15 @@ import {
   ComparisonStatus,
   SUPPORTED_PANEL_TYPES,
 } from '../types';
-import { calculatePercentageDifference } from '../utils/compare-utils';
+import { calculatePercentageDifference, buildAggregatedComparison } from '../utils/compare-utils';
 import { TestRun } from '@/types/test-runs';
 import { isGrafana, isPerformanceTest} from '@/lib/metrics-source-utils';
+import {
+  ALL_AGGREGATED_OPTION,
+  getAggregateSpec,
+  shouldOfferAllAggregated,
+  fetchAggregatedStatistics,
+} from '@/lib/aggregated-perf-series';
 
 interface UseCompareDataProps {
   testRun: TestRun | null;
@@ -256,8 +262,11 @@ export function useCompareData({ testRun, testRunId, compareExpanded }: UseCompa
 
       if (response.ok) {
         const metricNames: string[] = await response.json();
-        setAvailableMetrics(metricNames);
-        return metricNames;
+        const withAggregate = shouldOfferAllAggregated(selectedSource, panelId)
+          ? [ALL_AGGREGATED_OPTION, ...metricNames]
+          : metricNames;
+        setAvailableMetrics(withAggregate);
+        return withAggregate;
       } else {
         setAvailableMetrics([]);
         return [];
@@ -269,7 +278,7 @@ export function useCompareData({ testRun, testRunId, compareExpanded }: UseCompa
     } finally {
       setAvailableMetricsLoading(false);
     }
-  }, [testRun]);
+  }, [testRun, selectedSource]);
 
   // Fetch metrics comparison
   const fetchMetricsComparison = useCallback(async () => {
@@ -278,10 +287,10 @@ export function useCompareData({ testRun, testRunId, compareExpanded }: UseCompa
     try {
       setMetricsLoading(true);
 
-      // Group series by dashboard+panel to batch API calls
+      // Group series by dashboard+panel to batch API calls (aggregated series are routed separately below)
       const seriesGroups = new Map<string, { dashboardId: string; panelId: number; metricsSourceId?: string; metricNames: string[] }>();
 
-      for (const series of addedSeries) {
+      for (const series of addedSeries.filter(s => !s.isAggregated)) {
         const key = `${series.dashboardId}-${series.panelId}`;
         if (!seriesGroups.has(key)) {
           seriesGroups.set(key, { dashboardId: series.dashboardId, panelId: series.panelId, metricsSourceId: series.metricsSourceId, metricNames: [] });
@@ -327,7 +336,7 @@ export function useCompareData({ testRun, testRunId, compareExpanded }: UseCompa
       // Create comparisons for all evaluate types
       const allComparisons: MetricComparison[] = [];
       const evaluateTypes = ['avg', 'max', 'min', 'last', 'count', 'q50', 'q90', 'q95', 'q99'];
-      const addedMetricNames = new Set(addedSeries.map(s => s.metricName));
+      const addedMetricNames = new Set(addedSeries.filter(s => !s.isAggregated).map(s => s.metricName));
 
       for (const metricName of addedMetricNames) {
         const currentMetric = allCurrentMetrics.find(m => m.metric_name === metricName);
@@ -345,6 +354,27 @@ export function useCompareData({ testRun, testRunId, compareExpanded }: UseCompa
             percentage_difference: calculatePercentageDifference(currentValue, selectedValue)
           });
         }
+      }
+
+      // Aggregated series: one batch call each for [current, baseline].
+      const aggregatedSeries = addedSeries.filter(s => s.isAggregated);
+      for (const series of aggregatedSeries) {
+        const spec = getAggregateSpec(series.panelId);
+        if (!spec) continue;
+        const values = await fetchAggregatedStatistics(
+          testRun.test_run_id,
+          [testRun.test_run_id, selectedTestRun.test_run_id],
+          spec,
+        );
+        const byId = new Map(values.map(v => [v.testRunId, v.value]));
+        allComparisons.push(
+          buildAggregatedComparison(
+            series,
+            byId.get(testRun.test_run_id) ?? null,
+            byId.get(selectedTestRun.test_run_id) ?? null,
+            spec.stat,
+          ),
+        );
       }
 
       setCurrentMetrics(allCurrentMetrics);

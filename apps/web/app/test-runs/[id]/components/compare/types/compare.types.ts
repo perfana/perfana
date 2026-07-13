@@ -105,6 +105,8 @@ export interface CompareSeries {
   metricName: string;
   source: DataSource;
   metricsSourceId?: string;
+  /** True when this series is the run-wide "All aggregated" pseudo-metric. */
+  isAggregated?: boolean;
 }
 
 /**

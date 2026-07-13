@@ -93,7 +93,8 @@ export function useComparePresets({
           panelTitle: config.panelTitle,
           metricName: config.metricName,
           source: config.source as DataSource,
-          metricsSourceId: (config as unknown).metricsSourceId
+          metricsSourceId: (config as unknown).metricsSourceId,
+          isAggregated: (config as { isAggregated?: boolean }).isAggregated
         }));
         setAddedSeries(restoredSeries);
       }

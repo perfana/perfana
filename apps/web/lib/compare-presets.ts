@@ -13,6 +13,7 @@ export interface CompareSeriesConfig {
   metricName: string;
   source: 'grafana' | 'dynatrace' | 'performance-metrics';
   metricsSourceId?: string;
+  isAggregated?: boolean;
 }
 
 export interface ComparePreset {

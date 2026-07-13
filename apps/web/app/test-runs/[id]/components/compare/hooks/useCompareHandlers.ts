@@ -12,6 +12,7 @@ import {
 } from '../types';
 import { TestRun } from '@/types/test-runs';
 import { getSourceType } from '@/lib/metrics-source-utils';
+import { ALL_AGGREGATED_OPTION, buildAggregatedMetricName } from '@/lib/aggregated-perf-series';
 
 interface UseCompareHandlersProps {
   testRun: TestRun | null;
@@ -185,25 +186,31 @@ export function useCompareHandlers({
   const handleAddSeries = useCallback(() => {
     if (!selectedDashboard || !selectedMetric || selectedMetricNames.length === 0) return;
 
+    const dashboardId = selectedMetric.applicationDashboardId || selectedDashboard.id;
+
     const newSeries: CompareSeries[] = selectedMetricNames
-      .filter(metricName => {
+      .map(metricName => {
+        const isAggregated = metricName === ALL_AGGREGATED_OPTION;
+        return {
+          id: `${selectedDashboard.id}-${selectedMetric.id}-${metricName}-${Date.now()}`,
+          dashboardId,
+          dashboardLabel: selectedDashboard.dashboard_label,
+          panelId: selectedMetric.id,
+          panelTitle: selectedMetric.title,
+          metricName: isAggregated ? buildAggregatedMetricName(selectedMetric.title) : metricName,
+          source: selectedSource,
+          metricsSourceId: selectedMetric.metricsSourceId || selectedDashboard.metrics_source_id,
+          isAggregated,
+        };
+      })
+      .filter(newS => {
         return !addedSeries.some(
           existing =>
-            existing.dashboardId === (selectedMetric.applicationDashboardId || selectedDashboard.id) &&
-            existing.panelId === selectedMetric.id &&
-            existing.metricName === metricName
+            existing.dashboardId === newS.dashboardId &&
+            existing.panelId === newS.panelId &&
+            existing.metricName === newS.metricName
         );
-      })
-      .map(metricName => ({
-        id: `${selectedDashboard.id}-${selectedMetric.id}-${metricName}-${Date.now()}`,
-        dashboardId: selectedMetric.applicationDashboardId || selectedDashboard.id,
-        dashboardLabel: selectedDashboard.dashboard_label,
-        panelId: selectedMetric.id,
-        panelTitle: selectedMetric.title,
-        metricName,
-        source: selectedSource,
-        metricsSourceId: selectedMetric.metricsSourceId || selectedDashboard.metrics_source_id,
-      }));
+      });
 
     if (newSeries.length > 0) {
       setAddedSeries(prev => [...prev, ...newSeries]);
