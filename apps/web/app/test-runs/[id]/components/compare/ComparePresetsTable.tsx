@@ -35,6 +35,12 @@ export interface ComparePreset {
     source: string;
     metricsSourceId?: string;
   }>;
+  display_config?: {
+    warningThreshold: number;
+    regressionThreshold: number;
+    minAbsolute: number;
+    percentiles: { p90: boolean; p95: boolean; p99: boolean };
+  };
   application_dashboard_id?: string;
   dashboard_label?: string;
   panel_id?: number;

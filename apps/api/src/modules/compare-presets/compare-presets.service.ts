@@ -132,6 +132,7 @@ export class ComparePresetsService {
         panelTitle: createComparePresetDto.panel_title,
         baselineTestRunId: createComparePresetDto.baseline_test_run_id,
         seriesConfig: createComparePresetDto.series_config as unknown as Record<string, unknown>[],
+        displayConfig: createComparePresetDto.display_config as unknown as Record<string, unknown>,
         createdForTestRunId: createComparePresetDto.created_for_test_run_id,
         isGlobal: createComparePresetDto.is_global || false,
         createdBy: userId,
@@ -397,6 +398,7 @@ export class ComparePresetsService {
       if (updateComparePresetDto.panel_title !== undefined) updateData.panelTitle = updateComparePresetDto.panel_title;
       if (updateComparePresetDto.baseline_test_run_id !== undefined) updateData.baselineTestRunId = updateComparePresetDto.baseline_test_run_id;
       if (updateComparePresetDto.series_config !== undefined) updateData.seriesConfig = updateComparePresetDto.series_config as unknown as Record<string, unknown>[];
+      if (updateComparePresetDto.display_config !== undefined) updateData.displayConfig = updateComparePresetDto.display_config as unknown as Record<string, unknown>;
       if (updateComparePresetDto.is_global !== undefined) updateData.isGlobal = updateComparePresetDto.is_global;
 
       await withRequestEm(this.comparePresetRepo).update(
@@ -509,6 +511,7 @@ export class ComparePresetsService {
       baseline_annotations: testRun?.annotations,
       dashboard_label: preset.dashboardLabel || dashboard?.dashboardLabel,
       series_config: preset.seriesConfig as CompareSeriesConfig[] | undefined,
+      display_config: preset.displayConfig as ComparePresetResponseDto['display_config'],
       is_global: preset.isGlobal,
       created_by: preset.createdBy || '',
       created_at: preset.createdAt.toISOString(),

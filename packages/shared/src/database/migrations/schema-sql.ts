@@ -1456,6 +1456,7 @@ CREATE TABLE public.compare_filter_presets (
     source character varying(20) DEFAULT 'grafana'::character varying,
     dashboard_label character varying(255),
     series_config jsonb,
+    display_config jsonb,
     created_for_test_run_id character varying(255),
     created_by character varying(255),
     created_at timestamp without time zone DEFAULT now() NOT NULL,

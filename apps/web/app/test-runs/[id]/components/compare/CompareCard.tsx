@@ -88,6 +88,7 @@ export default function CompareCard({
     setSelectedTestRun: compareData.setSelectedTestRun,
     setSeriesSearchText: compareData.setSeriesSearchText,
     setShowPercentiles: compareData.setShowPercentiles,
+    setDisplayConfig: compareData.setDisplayConfig,
     fetchDashboardPanels: compareData.fetchDashboardPanels,
   });
 
@@ -291,7 +292,8 @@ export default function CompareCard({
           seriesSearchText: compareData.seriesSearchText,
           showPercentiles: compareData.showPercentiles,
           source: compareData.selectedSource,
-          addedSeries: compareData.addedSeries
+          addedSeries: compareData.addedSeries,
+          displayConfig: compareData.displayConfig
         }}
       />
     </Box>

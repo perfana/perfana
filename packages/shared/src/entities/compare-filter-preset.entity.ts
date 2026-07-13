@@ -29,6 +29,7 @@ export class CompareFilterPreset {
     'seriesConfig',
     'createdForTestRunId',
     'isGlobal',
+    'displayConfig',
   ] as const;
 
   @PrimaryGeneratedColumn('uuid')
@@ -75,6 +76,9 @@ export class CompareFilterPreset {
 
   @Column({ name: 'series_config', type: 'jsonb', nullable: true })
   seriesConfig?: Record<string, unknown>[];
+
+  @Column({ name: 'display_config', type: 'jsonb', nullable: true })
+  displayConfig?: Record<string, unknown>;
 
   @Column({ name: 'created_for_test_run_id', type: 'varchar', length: 255, nullable: true })
   createdForTestRunId?: string;

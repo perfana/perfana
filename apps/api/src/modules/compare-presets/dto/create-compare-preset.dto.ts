@@ -1,4 +1,4 @@
-import { IsString, IsBoolean, IsOptional, IsEnum, IsNumber, MaxLength, IsArray, ValidateNested } from 'class-validator';
+import { IsString, IsBoolean, IsOptional, IsEnum, IsNumber, MaxLength, IsArray, IsObject, ValidateNested } from 'class-validator';
 import { Type } from 'class-transformer';
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 
@@ -165,4 +165,22 @@ export class CreateComparePresetDto {
   @ValidateNested({ each: true })
   @Type(() => CompareSeriesConfig)
   series_config?: CompareSeriesConfig[];
+
+  @ApiPropertyOptional({
+    description: 'Compare card display config: thresholds + percentile toggles',
+    example: {
+      warningThreshold: 10,
+      regressionThreshold: 50,
+      minAbsolute: 0,
+      percentiles: { p90: false, p95: true, p99: true },
+    },
+  })
+  @IsOptional()
+  @IsObject()
+  display_config?: {
+    warningThreshold: number;
+    regressionThreshold: number;
+    minAbsolute: number;
+    percentiles: { p90: boolean; p95: boolean; p99: boolean };
+  };
 }

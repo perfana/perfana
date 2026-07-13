@@ -13,6 +13,7 @@ import {
   RelatedTestRun,
 } from '../types';
 import { TestRun } from '@/types/test-runs';
+import { DEFAULT_DISPLAY_CONFIG, DisplayConfig } from '../utils/compare-utils';
 
 interface UseComparePresetsProps {
   testRun: TestRun | null;
@@ -33,6 +34,7 @@ interface UseComparePresetsProps {
   setSelectedTestRun: (testRun: RelatedTestRun | null) => void;
   setSeriesSearchText: (text: string) => void;
   setShowPercentiles: (show: boolean) => void;
+  setDisplayConfig: (config: DisplayConfig) => void;
 
   // Fetch functions
   fetchDashboardPanels: (uid: string) => Promise<Panel[]>;
@@ -53,6 +55,7 @@ export function useComparePresets({
   setSelectedTestRun,
   setSeriesSearchText,
   setShowPercentiles,
+  setDisplayConfig,
   fetchDashboardPanels,
 }: UseComparePresetsProps) {
   const { user } = useAuth();
@@ -82,6 +85,7 @@ export function useComparePresets({
       // Apply basic filter settings first
       setSeriesSearchText(preset.series_search_text || '');
       setShowPercentiles(preset.show_percentiles);
+      setDisplayConfig(preset.display_config ?? DEFAULT_DISPLAY_CONFIG);
 
       // Restore series from preset's series_config
       if (preset.series_config && preset.series_config.length > 0) {
@@ -135,7 +139,7 @@ export function useComparePresets({
     }
   }, [
     relatedTestRuns, dashboards, showToast, setSeriesSearchText, setShowPercentiles,
-    setAddedSeries, setSelectedTestRun, setSelectedDashboard, setSelectedMetric,
+    setDisplayConfig, setAddedSeries, setSelectedTestRun, setSelectedDashboard, setSelectedMetric,
     fetchDashboardPanels
   ]);
 
@@ -155,6 +159,7 @@ export function useComparePresets({
         panel_title: presetData.panel_title,
         baseline_test_run_id: presetData.baseline_test_run_id,
         series_config: presetData.series_config,
+        display_config: presetData.display_config,
         created_for_test_run_id: presetData.created_for_test_run_id,
         is_global: presetData.is_global
       };

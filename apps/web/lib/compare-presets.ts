@@ -14,6 +14,14 @@ export interface CompareSeriesConfig {
   source: 'grafana' | 'dynatrace' | 'performance-metrics';
   metricsSourceId?: string;
   isAggregated?: boolean;
+  yAxesFormat?: string;
+}
+
+export interface CompareDisplayConfig {
+  warningThreshold: number;
+  regressionThreshold: number;
+  minAbsolute: number;
+  percentiles: { p90: boolean; p95: boolean; p99: boolean };
 }
 
 export interface ComparePreset {
@@ -32,6 +40,7 @@ export interface ComparePreset {
   baseline_application_release?: string;
   baseline_annotations?: string[];
   series_config?: CompareSeriesConfig[];
+  display_config?: CompareDisplayConfig;
   is_global: boolean;
   created_by: string;
   created_at: string;
@@ -51,6 +60,7 @@ export interface CreateComparePresetRequest {
   panel_title?: string;
   baseline_test_run_id?: string;
   series_config?: CompareSeriesConfig[];
+  display_config?: CompareDisplayConfig;
   created_for_test_run_id?: string;
   is_global: boolean;
 }
