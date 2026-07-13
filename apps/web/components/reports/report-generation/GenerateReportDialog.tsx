@@ -396,7 +396,11 @@ export function GenerateReportDialog({
 
       const result = await generateAdHocReport({
         test_run_id: testRunId,
-        name: `Report - ${new Date().toLocaleString()}`,
+        // Name after the source template (the meaningful differentiator) so the
+        // report list is recognizable; timestamp keeps repeat runs unique. Cap
+        // the template portion at 200 chars — report name is varchar(255) with a
+        // @Length(1,255) DTO guard, and template names can be up to 255.
+        name: `${(selectedTemplate?.name ?? 'Ad-hoc report').slice(0, 200)} - ${new Date().toLocaleString()}`,
         sections,
         styling: {},
         save_as_template: saveAsTemplate,
