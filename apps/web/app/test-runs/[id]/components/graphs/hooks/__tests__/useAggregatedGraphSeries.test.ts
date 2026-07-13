@@ -60,4 +60,21 @@ describe('useAggregatedGraphSeries', () => {
     await waitFor(() => expect(result.current.aggregatedSeries).toHaveLength(0));
     expect(result.current.aggregatedData.size).toBe(0);
   });
+
+  it('resets aggregatedLoading when toggled off before the in-flight fetch resolves', async () => {
+    // Fetch never resolves during this test, simulating a toggle-off that
+    // races ahead of the in-flight request's completion.
+    mockFetch.mockImplementation(() => new Promise<Response>(() => {}));
+
+    const { result } = renderHook(() =>
+      useAggregatedGraphSeries({ testRun, testRunId: 'run-1', selectedSource: 'performance-metrics' }),
+    );
+
+    act(() => result.current.setIncludeAggregated(true));
+    await waitFor(() => expect(result.current.aggregatedLoading).toBe(true));
+
+    act(() => result.current.setIncludeAggregated(false));
+
+    await waitFor(() => expect(result.current.aggregatedLoading).toBe(false));
+  });
 });

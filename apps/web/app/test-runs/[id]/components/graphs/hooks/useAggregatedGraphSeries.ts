@@ -38,6 +38,7 @@ export function useAggregatedGraphSeries({
     if (!includeAggregated || !isPerfSource) {
       setAggregatedSeries([]);
       setAggregatedData(new Map());
+      setAggregatedLoading(false);
       return;
     }
 
@@ -55,7 +56,10 @@ export function useAggregatedGraphSeries({
               `/test-runs/${testRunIdForQuery}/aggregated-metric-timeseries?metric=${spec.metric}&stat=avg`,
               { headers: { 'Content-Type': 'application/json' } },
             );
-            if (!res.ok) return;
+            if (!res.ok) {
+              console.error(`Failed to fetch aggregated ${spec.metric}: HTTP ${res.status}`);
+              return;
+            }
             const body: { buckets?: AggregatedBucket[] } = await res.json();
             const buckets = body.buckets ?? [];
             if (buckets.length === 0) return;
@@ -79,7 +83,7 @@ export function useAggregatedGraphSeries({
     return () => {
       cancelled = true;
     };
-  }, [includeAggregated, isPerfSource, testRun, testRunId]);
+  }, [includeAggregated, isPerfSource, testRun?.test_run_id, testRunId]);
 
   return {
     includeAggregated,
