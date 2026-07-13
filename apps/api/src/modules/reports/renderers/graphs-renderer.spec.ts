@@ -67,6 +67,7 @@ describe('GraphsRenderer', () => {
             getAvailableMetricsPanels: jest.fn().mockResolvedValue([
               { dashboardLabel: 'System Metrics', panelTitle: 'CPU Usage', metricName: 'cpu_usage_percent' },
             ] as MetricsPanelSelector[]),
+            getAggregatedSeries: jest.fn().mockResolvedValue([]),
           },
         },
       ],
@@ -229,6 +230,32 @@ describe('GraphsRenderer', () => {
         expect.anything(),
         expect.anything(),
       );
+    });
+  });
+
+  describe('All aggregated', () => {
+    it('appends aggregated panels when includeAggregated is set, even with no ds_metrics panels', async () => {
+      dataFetcher.getMetricsTimeSeries.mockResolvedValue([]);
+      dataFetcher.getAvailableMetricsPanels.mockResolvedValue([]);
+      (dataFetcher.getAggregatedSeries as jest.Mock).mockResolvedValue([
+        { time: new Date('2025-06-01T10:00:00Z'), value: 120 },
+        { time: new Date('2025-06-01T10:01:00Z'), value: 130 },
+      ]);
+
+      const html = await renderer.renderGraphsSection(
+        makeSection({ config: { includeAggregated: true } }), makeTestRun(),
+      );
+
+      expect(html).toContain('All aggregated');
+      expect(html).toContain('Transaction response time');
+      expect(dataFetcher.getAggregatedSeries).toHaveBeenCalledWith(
+        'run-001', 'transaction_response_time', 'avg', true, '', [],
+      );
+    });
+
+    it('does not fetch aggregated series when the flag is off', async () => {
+      await renderer.renderGraphsSection(makeSection(), makeTestRun());
+      expect(dataFetcher.getAggregatedSeries).not.toHaveBeenCalled();
     });
   });
 
