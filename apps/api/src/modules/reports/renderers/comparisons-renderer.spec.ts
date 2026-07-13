@@ -76,6 +76,7 @@ describe('ComparisonsRenderer', () => {
           useValue: {
             getComparisonsData: jest.fn().mockResolvedValue(null),
             getBaselineRunComparison: jest.fn().mockResolvedValue(null),
+            getAggregatedScalars: jest.fn(),
           },
         },
       ],
@@ -487,5 +488,31 @@ describe('ComparisonsRenderer', () => {
     const optsArg = spy.mock.calls[0]![3];
     expect(optsArg.dashboardLabel).toBe('JVM Metrics');
     expect(optsArg.panelIds).toEqual([3, 7]);
+  });
+
+  describe('All aggregated (performance-metrics baseline)', () => {
+    it('prepends an All aggregated row when includeAggregated is set', async () => {
+      dataFetcher.getBaselineRunComparison.mockResolvedValue({
+        source: 'performance-metrics',
+        rows: [{
+          group: 'checkout', label: 'login',
+          metrics: [{ key: 'avg', current: 110, baseline: 100, diffPercent: 10 }],
+        }],
+      } as any);
+      (dataFetcher.getAggregatedScalars as jest.Mock)
+        .mockResolvedValueOnce({ avg: 150, p95: 250, p99: 300, pass: 0, fail: 0 })  // current
+        .mockResolvedValueOnce({ avg: 120, p95: 200, p99: 250, pass: 0, fail: 0 }); // baseline
+
+      const section = makeSection({
+        config: {
+          comparisonMode: 'baseline_run', source: 'performance-metrics',
+          baselineTestRunId: 'base-1', metrics: ['avg'], includeAggregated: true,
+        },
+      });
+      const html = await renderer.renderComparisonsSection(section, makeTestRun(), 'u', ['user']);
+
+      expect(html).toContain('All aggregated');
+      expect(dataFetcher.getAggregatedScalars).toHaveBeenCalledTimes(2);
+    });
   });
 });
