@@ -2569,6 +2569,11 @@ export class TestRunsPerformanceQueryService {
    * per test run — the non-bucketed, batched sibling of
    * getAggregatedMetricTimeseries. Powers the "All aggregated" series on the
    * Trends and Compare cards. Full-run window (no analysis-window clipping).
+   *
+   * Contract: `testRunIds` are canonical `test_run_id` strings (the key the raw
+   * `transactions`/`requests_raw` tables use), NOT entity UUIDs. Unlike the
+   * single-run route methods, this batch method does not `resolveTestRunId`;
+   * callers (Trends/Compare cards) already hold `test_run_id` strings.
    */
   async getAggregatedMetricStatistics(
     testRunIds: string[],
