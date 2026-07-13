@@ -223,7 +223,8 @@ export function useTrendsPresets({
             metricName: config.metricName,
             source: config.source || 'grafana',
             yAxisFormat: config.yAxisFormat,
-            metricsSourceId: config.metricsSourceId
+            metricsSourceId: config.metricsSourceId,
+            isAggregated: (config as { isAggregated?: boolean }).isAggregated
           }));
           setAddedSeries(restoredSeries);
         }
@@ -270,7 +271,8 @@ export function useTrendsPresets({
           metricName: series.metricName,
           source: series.source,
           yAxisFormat: series.yAxisFormat,
-          metricsSourceId: series.metricsSourceId
+          metricsSourceId: series.metricsSourceId,
+          isAggregated: series.isAggregated
         }));
 
       // If no series were added but we have a selected panel, fetch all available metrics
