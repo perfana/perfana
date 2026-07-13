@@ -4,6 +4,15 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
+## [0.2.61.49] - 2026-07-13
+
+### Fixed
+- **Deleting a system under test no longer fails on large SUTs with "tuple decompression limit exceeded."** The cascade-delete cleared the five compressed TimescaleDB hypertables (`ds_metrics`, `requests_raw`, `requests_error`, `transactions`, `virtual_users`) with a single `DELETE … WHERE test_run_id IN (SELECT …)`. A subquery `IN` can't batch-drop compressed segments, so TimescaleDB decompressed inline and blew past `max_tuples_decompressed_per_dml_transaction`, rolling the whole delete back. Each hypertable is now cleared per-run with a constant-equality `DELETE … WHERE test_run_id = $1`, which drops whole segments with no decompression — the same pattern the single test-run delete already uses.
+- **Deleting a test run is now recorded in the audit log.** Bulk deletes run through a background BullMQ worker with no HTTP request context, so the audit call was silently skipped (only the rarely-used single-delete endpoint was logged). The delete handler now forwards the queuing user's id from the job so the DELETE is attributed and recorded whether it runs in-request or in the worker.
+
+### Changed
+- **Generated reports now have recognizable names in the test-run Reports card.** New reports were all named `Report - <timestamp>`, which only differed by a time already shown in the Created column. The default name is now derived from the source template (e.g. `Apdex Overview - <timestamp>`), falling back to `Ad-hoc report` when starting from scratch. The template portion is capped so the name stays within the 255-char limit.
+
 ## [0.2.61.48] - 2026-07-13
 
 ### Added
