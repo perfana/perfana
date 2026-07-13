@@ -85,4 +85,51 @@ export class TestRunsAggregatedTimeseriesController {
       applyAnalysisWindow,
     );
   }
+
+  @Get(':testRunId/aggregated-metric-statistic')
+  @ApiOperation({ summary: 'Get the run-wide aggregate of a metric as a single value per test run (for Trends/Compare "All aggregated")' })
+  @ApiParam({ name: 'testRunId', description: 'Anchor test run UUID or test_run_id string (org-access scope)', type: String })
+  @ApiQuery({ name: 'metric', required: true, enum: ALLOWED_METRICS })
+  @ApiQuery({ name: 'stat', required: false, enum: ALLOWED_STATS, description: 'Required for response-time metrics; ignored for error_percentage.' })
+  @ApiQuery({ name: 'testRunIds', required: false, type: String, description: 'Comma-separated test_run_id list to aggregate (defaults to the path run).' })
+  @ApiResponse({
+    status: 200,
+    description: 'One aggregate value per requested run (null when a run has no data or is out of scope)',
+    schema: {
+      type: 'array',
+      items: {
+        type: 'object',
+        properties: { testRunId: { type: 'string' }, value: { type: 'number', nullable: true } },
+      },
+    },
+  })
+  @ApiResponse({ status: 400, description: 'Invalid metric or stat parameter' })
+  async getAggregatedMetricStatistic(
+    @Param('testRunId') testRunId: string,
+    @Query('metric') metric: string,
+    @Query('stat') stat: string,
+    @Query('testRunIds') testRunIdsRaw: string,
+    @UserCtx() ctx: UserContext,
+  ) {
+    if (!(ALLOWED_METRICS as readonly string[]).includes(metric)) {
+      throw new BadRequestException(`metric must be one of: ${ALLOWED_METRICS.join(', ')}`);
+    }
+    if (metric !== 'error_percentage' && !(ALLOWED_STATS as readonly string[]).includes(stat)) {
+      throw new BadRequestException(`stat must be one of: ${ALLOWED_STATS.join(', ')} (required unless metric is error_percentage)`);
+    }
+
+    const testRunIds = (testRunIdsRaw ?? '')
+      .split(',')
+      .map(id => id.trim())
+      .filter(id => id.length > 0);
+    const ids = testRunIds.length > 0 ? testRunIds : [testRunId];
+
+    return this.testRunsService.getAggregatedMetricStatistics(
+      ids,
+      ctx.userId,
+      ctx.roles,
+      metric as AllowedMetric,
+      (stat as AllowedStat) ?? 'avg',
+    );
+  }
 }

@@ -349,6 +349,17 @@ export class TestRunsQueryService {
     );
   }
 
+  async getAggregatedMetricStatistics(
+    testRunIds: string[],
+    userId: string,
+    roles: string[],
+    metric: 'transaction_response_time' | 'request_response_time' | 'error_percentage',
+    stat: 'avg' | 'p50' | 'p90' | 'p95' | 'p99' | 'max',
+  ): Promise<Array<{ testRunId: string; value: number | null }>> {
+    const { orgIds, isAdmin } = await this.resolveOrganizationIds(userId, roles);
+    return this.performanceService.getAggregatedMetricStatistics(testRunIds, metric, stat, isAdmin, orgIds);
+  }
+
   async getTransactionSamples(
     testRunId: string,
     transactionName: string,
