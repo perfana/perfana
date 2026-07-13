@@ -4,6 +4,11 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
+## [0.2.61.50] - 2026-07-13
+
+### Added
+- **The interactive Graphs card (test-run detail page) now has an "Include 'All aggregated' series" toggle for performance-test metrics.** When a performance-test panel source is selected, a switch appears that overlays the run-wide aggregate (all transactions collapsed) for transaction response time, request response time, and error percentage — the same three series the report's Graphs section already offers. The overlay is chart-only: it renders on the graph but is not added to the editable "Added Series" list and is never saved into a preset. It uses the existing `aggregated-metric-timeseries` endpoint (no backend change) and is hidden for Grafana/Dynatrace sources. The Compare and Trends cards are not covered by this change (they need net-new aggregated queries).
+
 ## [0.2.61.49] - 2026-07-13
 
 ### Fixed

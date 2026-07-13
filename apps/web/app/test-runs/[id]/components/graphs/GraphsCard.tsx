@@ -16,7 +16,7 @@ import { ExpandMore, ExpandLess } from '@mui/icons-material';
 import { GraphsCardProps } from './types';
 
 // Hooks
-import { useGraphsData, useGraphsPresets } from './hooks';
+import { useGraphsData, useGraphsPresets, useAggregatedGraphSeries } from './hooks';
 
 // Components
 import { GraphsCollapsedView, GraphsExpandedContent } from './components';
@@ -37,6 +37,13 @@ export default function GraphsCard({
     testRun,
     testRunId,
     graphsExpanded,
+  });
+
+  // Aggregated overlay hook
+  const aggregated = useAggregatedGraphSeries({
+    testRun,
+    testRunId,
+    selectedSource: graphsData.selectedSource,
   });
 
   // Presets hook
@@ -284,7 +291,12 @@ export default function GraphsCard({
               setChartName={graphsData.setChartName}
               addedSeries={graphsData.addedSeries}
               seriesData={graphsData.seriesData}
-              chartDataLoading={graphsData.chartDataLoading}
+              overlaySeries={aggregated.aggregatedSeries}
+              overlayData={aggregated.aggregatedData}
+              showAggregatedToggle={aggregated.showAggregatedToggle}
+              includeAggregated={aggregated.includeAggregated}
+              onIncludeAggregatedChange={aggregated.setIncludeAggregated}
+              chartDataLoading={graphsData.chartDataLoading || aggregated.aggregatedLoading}
               onRemoveSeries={handleRemoveSeries}
               onUpdateSeriesUnit={graphsData.handleUpdateSeriesUnit}
               events={events}
