@@ -3283,6 +3283,49 @@ describe('TestRunsPerformanceQueryService', () => {
       });
     });
   });
+
+  describe('getAggregatedMetricStatistics', () => {
+    it('returns one value per requested run and null for runs with no rows', async () => {
+      // Mock the raw query to return rows for run-a only.
+      (testRunRepo.query as jest.Mock).mockResolvedValueOnce([
+        { test_run_id: 'run-a', value: '1823.40' },
+      ]);
+
+      const result = await service.getAggregatedMetricStatistics(
+        ['run-a', 'run-b'],
+        'request_response_time',
+        'p90',
+        true,
+        [],
+      );
+
+      expect(result).toEqual([
+        { testRunId: 'run-a', value: 1823.4 },
+        { testRunId: 'run-b', value: null },
+      ]);
+      // p90 stat expression and requests_raw table used.
+      const sql = (testRunRepo.query as jest.Mock).mock.calls[0][0] as string;
+      expect(sql).toContain('approx_percentile(0.90');
+      expect(sql).toContain('requests_raw');
+      expect(sql).toContain('GROUP BY');
+    });
+
+    it('adds the org clause and org param for non-admin callers', async () => {
+      (testRunRepo.query as jest.Mock).mockResolvedValueOnce([]);
+      await service.getAggregatedMetricStatistics(['run-a'], 'error_percentage', 'avg', false, ['org-1']);
+      const [sql, params] = (testRunRepo.query as jest.Mock).mock.calls[0];
+      expect(sql).toContain('sut.organization_id = ANY');
+      expect(params).toEqual([['run-a'], ['org-1']]);
+      // error_percentage uses the success-count expression, not a stat expr.
+      expect(sql).toContain('FILTER (WHERE NOT r.success)');
+    });
+
+    it('short-circuits to all-null for non-admin with no orgs', async () => {
+      const result = await service.getAggregatedMetricStatistics(['run-a'], 'request_response_time', 'avg', false, []);
+      expect(result).toEqual([{ testRunId: 'run-a', value: null }]);
+      expect(testRunRepo.query).not.toHaveBeenCalled();
+    });
+  });
 });
 
 /**

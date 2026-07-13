@@ -31,6 +31,11 @@ export class CompareSeriesConfig {
   @ApiProperty({ description: 'Data source type', enum: ['grafana', 'dynatrace', 'performance-metrics'] })
   @IsString()
   source!: string;
+
+  @ApiPropertyOptional({ description: 'True when this series is the run-wide "All aggregated" pseudo-metric' })
+  @IsBoolean()
+  @IsOptional()
+  isAggregated?: boolean;
 }
 
 export class CreateComparePresetDto {

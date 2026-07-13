@@ -28,6 +28,7 @@ import {
 } from '../utils/compare-utils';
 import ComparisonPlot from './ComparisonPlot';
 import { TestRun } from '@/types/test-runs';
+import { ALL_AGGREGATED_OPTION } from '@/lib/aggregated-perf-series';
 
 interface MetricsComparisonTableProps {
   metricComparisons: MetricComparison[];
@@ -69,8 +70,19 @@ export default function MetricsComparisonTable({
   showToast,
   addedSeries: _addedSeries
 }: MetricsComparisonTableProps) {
-  const visibleColumns = getVisibleColumns(showPercentiles);
-  const gridTemplateColumns = getGridTemplateColumns(showPercentiles);
+  const aggregatedPercentileCols = Array.from(
+    new Set(
+      metricComparisons
+        .filter(
+          (c) =>
+            c.metric_name.startsWith(`${ALL_AGGREGATED_OPTION} — `) &&
+            ['q50', 'q90', 'q95', 'q99'].includes(c.evaluate_type),
+        )
+        .map((c) => c.evaluate_type),
+    ),
+  );
+  const visibleColumns = getVisibleColumns(showPercentiles, aggregatedPercentileCols);
+  const gridTemplateColumns = getGridTemplateColumns(showPercentiles, aggregatedPercentileCols);
   const panelYAxesFormat = selectedMetric?.yAxesFormat;
 
   // Group comparisons by metric name

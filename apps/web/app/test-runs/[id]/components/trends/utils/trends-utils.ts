@@ -1,4 +1,4 @@
-import { GRAFANA_UNITS, TrendsSeries, TimeRangeOption, TimeRange } from '../types';
+import { GRAFANA_UNITS, TrendsSeries, TimeRangeOption, TimeRange, MetricStatistic } from '../types';
 
 /**
  * Get color for a series based on its index
@@ -82,4 +82,32 @@ export function getUnitLabel(unitValue: string | undefined): string {
   if (!unitValue) return 'No unit set';
   const unit = GRAFANA_UNITS.find(u => u.value === unitValue);
   return unit?.label || unitValue;
+}
+
+/**
+ * Shape the batch aggregate endpoint's per-run values into the MetricStatistic
+ * rows the trends plot consumes. Runs without data (null value) are dropped so
+ * the line simply skips them. created_at/version come from the related-run list
+ * so the point sorts and hovers like a normal series point.
+ */
+export function buildAggregatedTrendsStatistics(
+  series: TrendsSeries,
+  values: Array<{ testRunId: string; value: number | null }>,
+  runs: Array<{ test_run_id: string; created_at: string; version?: string | null }>,
+): MetricStatistic[] {
+  const runById = new Map(runs.map(r => [r.test_run_id, r]));
+  const out: MetricStatistic[] = [];
+  for (const { testRunId, value } of values) {
+    const run = runById.get(testRunId);
+    if (value == null || !run) continue;
+    out.push({
+      test_run_id: testRunId,
+      panel_title: series.panelTitle,
+      metric_name: series.metricName,
+      value,
+      created_at: run.created_at,
+      version: run.version ?? null,
+    });
+  }
+  return out;
 }

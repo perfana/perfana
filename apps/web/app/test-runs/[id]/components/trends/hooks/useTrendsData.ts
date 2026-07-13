@@ -15,6 +15,14 @@ import {
 } from '../types';
 import { TestRun } from '@/types/test-runs';
 import { isGrafana, isPerformanceTest, getSourceType } from '@/lib/metrics-source-utils';
+import {
+  ALL_AGGREGATED_OPTION,
+  getAggregateSpec,
+  shouldOfferAllAggregated,
+  buildAggregatedMetricName,
+  fetchAggregatedStatistics,
+} from '@/lib/aggregated-perf-series';
+import { buildAggregatedTrendsStatistics } from '../utils/trends-utils';
 
 interface UseTrendsDataProps {
   testRun: TestRun | null;
@@ -288,8 +296,11 @@ export function useTrendsData({ testRun, testRunId, trendsExpanded }: UseTrendsD
       );
 
       if (response.ok) {
-        const metricNames = await response.json();
-        setAvailableMetrics(metricNames);
+        const metricNames: string[] = await response.json();
+        const withAggregate = shouldOfferAllAggregated(selectedSource, panelId)
+          ? [ALL_AGGREGATED_OPTION, ...metricNames]
+          : metricNames;
+        setAvailableMetrics(withAggregate);
       } else {
         console.warn('Failed to fetch panel metrics:', response.statusText);
         setAvailableMetrics([]);
@@ -300,7 +311,7 @@ export function useTrendsData({ testRun, testRunId, trendsExpanded }: UseTrendsD
     } finally {
       setAvailableMetricsLoading(false);
     }
-  }, []);
+  }, [selectedSource]);
 
   // Load metrics data for all added series
   const fetchMetricsData = useCallback(async () => {
@@ -331,8 +342,11 @@ export function useTrendsData({ testRun, testRunId, trendsExpanded }: UseTrendsD
         }
       }
 
+      const aggregatedSeries = addedSeries.filter(s => s.isAggregated);
+      const normalSeries = addedSeries.filter(s => !s.isAggregated);
+
       // Group series by dashboard/panel to minimize API calls
-      const seriesByDashboardPanel = addedSeries.reduce((acc, series) => {
+      const seriesByDashboardPanel = normalSeries.reduce((acc, series) => {
         const key = `${series.dashboardId}-${series.panelId}`;
         if (!acc[key]) {
           acc[key] = {
@@ -393,6 +407,41 @@ export function useTrendsData({ testRun, testRunId, trendsExpanded }: UseTrendsD
         }
       }
 
+      // Aggregated series: one batch call each across all related runs in range.
+      if (aggregatedSeries.length > 0 && testRun) {
+        const relatedUrl = (() => {
+          const p = new URLSearchParams();
+          if (testRun.systems_under_test?.name) p.set('system', testRun.systems_under_test.name);
+          if (testRun.test_environment) p.set('environment', testRun.test_environment);
+          if (testRun.workload) p.set('workload', testRun.workload);
+          const qs = p.toString();
+          return `/test-runs/${testRunId}/related${qs ? `?${qs}` : ''}`;
+        })();
+        const relatedRes = await authenticatedFetch(relatedUrl, { headers: { 'Content-Type': 'application/json' } });
+        const related: Array<{ test_run_id: string; created_at: string; version?: string | null }> =
+          relatedRes.ok ? await relatedRes.json() : [];
+        const runs = [
+          { test_run_id: testRun.test_run_id, created_at: testRun.created_at, version: (testRun as { version?: string | null }).version ?? null },
+          ...related,
+        ];
+        // De-dupe (the anchor run may also appear in related) and clip to time range.
+        const seen = new Set<string>();
+        const runsInRange = runs.filter(r => {
+          if (seen.has(r.test_run_id)) return false;
+          seen.add(r.test_run_id);
+          const t = new Date(r.created_at).getTime();
+          return t >= fromDate.getTime() && t <= toDate.getTime();
+        });
+        const ids = runsInRange.map(r => r.test_run_id);
+
+        for (const series of aggregatedSeries) {
+          const spec = getAggregateSpec(series.panelId);
+          if (!spec || ids.length === 0) continue;
+          const values = await fetchAggregatedStatistics(testRun.test_run_id, ids, spec);
+          allData.push(...buildAggregatedTrendsStatistics(series, values, runsInRange));
+        }
+      }
+
       setMetricsData(allData);
 
       // Update selectedSeriesNames to match addedSeries
@@ -406,7 +455,7 @@ export function useTrendsData({ testRun, testRunId, trendsExpanded }: UseTrendsD
     } finally {
       setMetricsLoading(false);
     }
-  }, [addedSeries, evaluateType, timeRange, customTimeRange, testRun]);
+  }, [addedSeries, evaluateType, timeRange, customTimeRange, testRun, testRunId]);
 
   // Compute available sources based on loaded dashboards
   useEffect(() => {
@@ -572,16 +621,20 @@ export function useTrendsData({ testRun, testRunId, trendsExpanded }: UseTrendsD
     const applicationDashboardId = selectedMetric.applicationDashboardId || selectedDashboard.id;
     const metricsSourceId = selectedMetric.metricsSourceId || selectedDashboard.metrics_source_id;
 
-    const newSeries: TrendsSeries[] = selectedMetricNames.map(metricName => ({
-      id: `${applicationDashboardId}-${selectedMetric.id}-${metricName}-${Date.now()}-${Math.random()}`,
-      dashboardId: applicationDashboardId,
-      dashboardLabel: selectedDashboard.dashboard_label,
-      panelId: selectedMetric.id,
-      panelTitle: selectedMetric.title,
-      metricName: metricName,
-      source: source,
-      metricsSourceId: metricsSourceId
-    }));
+    const newSeries: TrendsSeries[] = selectedMetricNames.map(metricName => {
+      const isAggregated = metricName === ALL_AGGREGATED_OPTION;
+      return {
+        id: `${applicationDashboardId}-${selectedMetric.id}-${metricName}-${Date.now()}-${Math.random()}`,
+        dashboardId: applicationDashboardId,
+        dashboardLabel: selectedDashboard.dashboard_label,
+        panelId: selectedMetric.id,
+        panelTitle: selectedMetric.title,
+        metricName: isAggregated ? buildAggregatedMetricName(selectedMetric.title) : metricName,
+        source,
+        metricsSourceId,
+        isAggregated,
+      };
+    });
 
     const filteredNewSeries = newSeries.filter(newS =>
       !addedSeries.some(

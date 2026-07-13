@@ -33,6 +33,7 @@ export interface CompareSeries {
   metricName: string;
   source: 'grafana' | 'dynatrace' | 'performance-metrics';
   metricsSourceId?: string;
+  isAggregated?: boolean;
 }
 
 interface SavePresetModalProps {
@@ -164,7 +165,8 @@ export default function SavePresetModal({
       panelTitle: series.panelTitle,
       metricName: series.metricName,
       source: series.source,
-      metricsSourceId: series.metricsSourceId
+      metricsSourceId: series.metricsSourceId,
+      isAggregated: series.isAggregated
     }));
   };
   

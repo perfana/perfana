@@ -4,6 +4,11 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
+## [0.2.61.52] - 2026-07-13
+
+### Added
+- **The Trends and Compare cards (test-run detail page) now offer an "All aggregated" entry in the Metric Series dropdown for performance-test panels.** Selecting it adds a series equal to the panel's metric and statistic (e.g. Request RT P90) computed across all transactions/requests in the run — one line across runs on Trends, one comparison row on Compare. It uses a new `aggregated-metric-statistic` endpoint (batched over related runs) and only appears for the performance-metrics source (hidden for Grafana/Dynatrace). Available for response-time (avg/p90/p95/p99) and error-rate panels; aggregated series save into presets like any other series.
+
 ## [0.2.61.51] - 2026-07-13
 
 ### Changed

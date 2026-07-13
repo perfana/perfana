@@ -125,6 +125,8 @@ export interface TrendsSeries {
   source: DataSource;
   yAxisFormat?: string;
   metricsSourceId?: string;
+  /** True when this series is the run-wide "All aggregated" pseudo-metric. */
+  isAggregated?: boolean;
 }
 
 /**

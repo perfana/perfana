@@ -202,6 +202,16 @@ export class TestRunsService {
     );
   }
 
+  async getAggregatedMetricStatistics(
+    testRunIds: string[],
+    userId: string,
+    roles: string[],
+    metric: 'transaction_response_time' | 'request_response_time' | 'error_percentage',
+    stat: 'avg' | 'p50' | 'p90' | 'p95' | 'p99' | 'max',
+  ): Promise<Array<{ testRunId: string; value: number | null }>> {
+    return this.queryService.getAggregatedMetricStatistics(testRunIds, userId, roles, metric, stat);
+  }
+
   async getTransactionSamples(testRunId: string, transactionName: string, userId: string, roles: string[], excludeRampUp: boolean = false, sinceMinutes?: number): Promise<Array<{
     sampler_name: string;
     scenario_name?: string;

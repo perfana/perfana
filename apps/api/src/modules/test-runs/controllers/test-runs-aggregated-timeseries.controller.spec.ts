@@ -8,6 +8,7 @@ describe('TestRunsAggregatedTimeseriesController', () => {
 
   const mockService = {
     getAggregatedMetricTimeseries: jest.fn(),
+    getAggregatedMetricStatistics: jest.fn(),
   };
 
   const ctx = { userId: 'u1', roles: ['user'] } as never;
@@ -145,6 +146,42 @@ describe('TestRunsAggregatedTimeseriesController', () => {
         expect.anything(),
         false,
       );
+    });
+  });
+
+  describe('getAggregatedMetricStatistic', () => {
+    it('parses comma-separated testRunIds and delegates', async () => {
+      mockService.getAggregatedMetricStatistics.mockResolvedValue([
+        { testRunId: 'a', value: 10 },
+        { testRunId: 'b', value: null },
+      ]);
+
+      const res = await controller.getAggregatedMetricStatistic('a', 'request_response_time', 'p90', 'a,b', ctx);
+
+      expect(mockService.getAggregatedMetricStatistics).toHaveBeenCalledWith(
+        ['a', 'b'], 'u1', ['user'], 'request_response_time', 'p90',
+      );
+      expect(res).toEqual([{ testRunId: 'a', value: 10 }, { testRunId: 'b', value: null }]);
+    });
+
+    it('defaults testRunIds to the path run when omitted', async () => {
+      mockService.getAggregatedMetricStatistics.mockResolvedValue([]);
+      await controller.getAggregatedMetricStatistic('a', 'error_percentage', undefined as never, undefined as never, ctx);
+      expect(mockService.getAggregatedMetricStatistics).toHaveBeenCalledWith(
+        ['a'], 'u1', ['user'], 'error_percentage', 'avg',
+      );
+    });
+
+    it('rejects an unknown metric', async () => {
+      await expect(
+        controller.getAggregatedMetricStatistic('a', 'bogus', 'avg', 'a', ctx),
+      ).rejects.toThrow('metric must be one of');
+    });
+
+    it('requires stat for response-time metrics', async () => {
+      await expect(
+        controller.getAggregatedMetricStatistic('a', 'request_response_time', 'nope', 'a', ctx),
+      ).rejects.toThrow('stat must be one of');
     });
   });
 });
