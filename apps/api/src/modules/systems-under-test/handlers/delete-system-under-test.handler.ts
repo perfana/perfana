@@ -188,6 +188,13 @@ export class DeleteSystemUnderTestHandler {
     this.auditService.logDelete(sutRef as unknown as OwnedResource);
 
     try {
+      // ponytail: no lock_timeout / 40P01 deadlock-retry here, unlike the
+      // single test-run delete handler. Not needed for the observed failure
+      // (decompression, fixed by the per-run hypertable loop below). If
+      // concurrent SUT/test-run deletes start deadlocking on compressed chunks,
+      // mirror delete-test-run.handler.ts: wrap this transaction in a retry loop
+      // AND set `SET LOCAL lock_timeout` (the two go together — timeout alone
+      // just converts waits into hard failures).
       await this.dataSource.transaction(async (manager) => {
         // Phase 1 — DS tables referencing test_run_id (via subquery)
         await this.deletePhase1_DsTestRunTables(manager, sutId);
@@ -315,12 +322,29 @@ export class DeleteSystemUnderTestHandler {
     const strSubq = `(SELECT test_run_id FROM test_runs WHERE system_under_test_id = $1)`;
     const uuidSubq = `(SELECT id FROM test_runs WHERE system_under_test_id = $1)`;
 
-    // Hypertables (varchar test_run_id)
-    await this.deleteWithLog(manager, 'ds_metrics', `DELETE FROM ds_metrics WHERE test_run_id IN ${strSubq}`, [sutId]);
-    await this.deleteWithLog(manager, 'requests_raw', `DELETE FROM requests_raw WHERE test_run_id IN ${strSubq}`, [sutId]);
-    await this.deleteWithLog(manager, 'requests_error', `DELETE FROM requests_error WHERE test_run_id IN ${strSubq}`, [sutId]);
-    await this.deleteWithLog(manager, 'transactions', `DELETE FROM transactions WHERE test_run_id IN ${strSubq}`, [sutId]);
-    await this.deleteWithLog(manager, 'virtual_users', `DELETE FROM virtual_users WHERE test_run_id IN ${strSubq}`, [sutId]);
+    // Compressed TimescaleDB hypertables — segmentby = test_run_id. A subquery
+    // `test_run_id IN (SELECT …)` DELETE can't batch-drop compressed segments, so
+    // TS decompresses inline and blows past
+    // timescaledb.max_tuples_decompressed_per_dml_transaction on large SUTs
+    // (ERROR: tuple decompression limit exceeded). A per-run constant-equality
+    // DELETE drops whole segments with no decompression — same pattern the
+    // single test-run delete handler uses. See project_ds_metrics_compression.
+    const testRunIdRows: Array<{ test_run_id: string }> = await manager.query(
+      `SELECT test_run_id FROM test_runs WHERE system_under_test_id = $1`,
+      [sutId],
+    );
+    const testRunIds = testRunIdRows.map((r) => r.test_run_id);
+    for (const table of ['ds_metrics', 'requests_raw', 'requests_error', 'transactions', 'virtual_users']) {
+      let total = 0;
+      for (const testRunId of testRunIds) {
+        const result = await manager.query(`DELETE FROM ${table} WHERE test_run_id = $1`, [testRunId]);
+        total += result?.[1] ?? 0;
+      }
+      if (total > 0) {
+        this.logger.log(`Deleted ${total} rows from ${table}`);
+      }
+    }
+
     // Per-test-run transaction stats rollup (no FK — must be cleaned up explicitly, see #150/#151)
     await this.deleteWithLog(manager, 'test_run_transaction_stats', `DELETE FROM test_run_transaction_stats WHERE test_run_id IN ${strSubq}`, [sutId]);
 
