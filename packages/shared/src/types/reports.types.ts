@@ -105,6 +105,8 @@ export interface TransactionResponseTimesSectionOptions {
   includePercentiles?: boolean;
   /** Percentiles to show (e.g., [50, 90, 95, 99]) */
   percentiles?: number[];
+  /** Whether to include the "All aggregated" series alongside per-transaction series */
+  includeAggregated?: boolean;
 }
 
 /**
@@ -163,6 +165,8 @@ export interface ComparisonsSectionOptions {
   differenceThreshold?: number;
   /** Comparison metrics to include */
   metrics?: string[];
+  /** Whether to include the "All aggregated" row (performance-metrics source only) */
+  includeAggregated?: boolean;
 }
 
 /**
@@ -183,6 +187,8 @@ export interface GraphsSectionOptions {
   width?: number;
   /** Graph height in pixels */
   height?: number;
+  /** Whether to include the "All aggregated" series (performance test metrics) */
+  includeAggregated?: boolean;
 }
 
 /**

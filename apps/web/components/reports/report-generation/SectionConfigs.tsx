@@ -432,6 +432,7 @@ export function ApdexConfigForm({ config, onChange, testRunId }: ApdexConfigForm
 /** @public */
 export interface TransactionResponseTimesConfig {
   scenario?: string;
+  includeAggregated?: boolean;
   comment?: string;
 }
 
@@ -548,6 +549,16 @@ export function TransactionResponseTimesConfigForm({ config, onChange, testRunId
         />
       )}
 
+      <FormControlLabel
+        control={
+          <Switch
+            checked={config.includeAggregated ?? false}
+            onChange={(e) => onChange({ ...config, includeAggregated: e.target.checked })}
+          />
+        }
+        label="Include 'All aggregated' series"
+      />
+
       {/* Debug info */}
       {process.env.NODE_ENV === 'development' && (
         <Typography variant="caption" color="text.secondary">
@@ -656,6 +667,7 @@ export interface GraphsConfig {
     endOffset?: number;
   };
   showLegends?: boolean;
+  includeAggregated?: boolean;
   comment?: string;
 }
 
@@ -694,6 +706,15 @@ export function GraphsConfigForm({ config, onChange, testRunId }: GraphsConfigFo
           />
         }
         label="Show Legends"
+      />
+      <FormControlLabel
+        control={
+          <Switch
+            checked={config.includeAggregated ?? false}
+            onChange={(e) => onChange({ ...config, includeAggregated: e.target.checked })}
+          />
+        }
+        label="Include 'All aggregated' series (performance test metrics)"
       />
       <Box sx={{ display: 'flex', gap: 2 }}>
         <TextField
@@ -904,6 +925,7 @@ export interface ComparisonsConfig {
   // grafana/dynatrace only: pair current-run dashboards with differently named
   // dashboards from the baseline run's environment
   dashboardMap?: { current: string; baseline: string }[];
+  includeAggregated?: boolean;
   comment?: string;
 }
 
@@ -1208,6 +1230,18 @@ export function ComparisonsConfigForm({ config, onChange, testRunId, systemUnder
               ))}
             </Box>
           </Box>
+
+          {source === 'performance-metrics' && (
+            <FormControlLabel
+              control={
+                <Switch
+                  checked={config.includeAggregated ?? false}
+                  onChange={(e) => onChange({ ...config, includeAggregated: e.target.checked })}
+                />
+              }
+              label="Include 'All aggregated' row"
+            />
+          )}
 
           {/* Threshold number fields */}
           <TextField
