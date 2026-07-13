@@ -296,7 +296,7 @@ export default function GraphsCard({
               showAggregatedToggle={aggregated.showAggregatedToggle}
               includeAggregated={aggregated.includeAggregated}
               onIncludeAggregatedChange={aggregated.setIncludeAggregated}
-              chartDataLoading={graphsData.chartDataLoading}
+              chartDataLoading={graphsData.chartDataLoading || aggregated.aggregatedLoading}
               onRemoveSeries={handleRemoveSeries}
               onUpdateSeriesUnit={graphsData.handleUpdateSeriesUnit}
               events={events}
