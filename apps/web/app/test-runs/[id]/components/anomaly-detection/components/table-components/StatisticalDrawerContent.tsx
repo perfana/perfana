@@ -13,12 +13,14 @@ import {
   TableHead,
   TableRow,
   Chip,
+  Tooltip,
 } from '@mui/material';
 import { alpha } from '@mui/material/styles';
 import {
-  CheckCircle,
-  Error,
-  Warning,
+  ArrowDropUp,
+  ArrowDropDown,
+  Remove,
+  HelpOutline,
 } from '@mui/icons-material';
 import { AnomalyData } from '../../types';
 import { formatValueWithUnit } from '@/lib/units';
@@ -110,12 +112,35 @@ export function StatisticalDrawerContent({
                     </TableCell>
                     <TableCell sx={{ fontSize: '0.75rem', py: 1, fontFamily: 'monospace' }}>{threshold.observedDifference}</TableCell>
                     <TableCell sx={{ fontSize: '0.75rem', py: 1, textAlign: 'center' }}>
-                      {threshold.result === 'passed' ? (
-                        <CheckCircle sx={{ fontSize: '1rem', color: 'success.main' }} />
-                      ) : threshold.result === 'failed' ? (
-                        <Error sx={{ fontSize: '1rem', color: 'error.main' }} />
+                      {threshold.result === 'improvement' || threshold.result === 'regression' ? (
+                        <Chip
+                          label={threshold.result === 'improvement' ? 'Improvement' : 'Regression'}
+                          size="small"
+                          color={threshold.result === 'improvement' ? 'success' : 'error'}
+                          variant="outlined"
+                          icon={threshold.side === 'above' ? <ArrowDropUp /> : threshold.side === 'below' ? <ArrowDropDown /> : undefined}
+                          sx={{ height: '22px', fontSize: '0.7rem', '& .MuiChip-icon': { fontSize: '1.25rem', ml: 0.25, mr: -0.75 } }}
+                        />
+                      ) : threshold.result === 'invalid' ? (
+                        <Tooltip title={threshold.reason ?? 'This threshold could not be evaluated.'} arrow>
+                          <Chip
+                            label="N/A"
+                            size="small"
+                            variant="outlined"
+                            icon={<HelpOutline />}
+                            sx={{ height: '22px', fontSize: '0.7rem', color: 'text.secondary', cursor: 'help', '& .MuiChip-icon': { fontSize: '0.85rem', color: 'text.disabled' } }}
+                          />
+                        </Tooltip>
+                      ) : threshold.result === 'skipped' ? (
+                        <Typography variant="caption" sx={{ color: 'text.disabled' }}>Not set</Typography>
                       ) : (
-                        <Warning sx={{ fontSize: '1rem', color: 'warning.main' }} />
+                        <Chip
+                          label="In range"
+                          size="small"
+                          variant="outlined"
+                          icon={<Remove />}
+                          sx={{ height: '22px', fontSize: '0.7rem', color: 'text.secondary', '& .MuiChip-icon': { fontSize: '0.9rem', color: 'text.disabled' } }}
+                        />
                       )}
                     </TableCell>
                   </TableRow>

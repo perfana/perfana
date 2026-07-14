@@ -4,6 +4,26 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
+## [0.2.61.59] - 2026-07-14
+
+### Added
+- **"N/A" state for thresholds that are configured but can't be evaluated.** When a threshold's ADAPT check reports `valid: false` — most commonly a zero-variance baseline where the control IQR is 0, which collapses the valid range to a single point (#417) — the Result column now shows a muted "N/A" chip with a hover tooltip explaining why ("Baseline has no variance (IQR = 0)…" or "Not enough baseline or test data…"). Previously such a row was mislabelled: first as "In range", then (after 0.2.61.58's geometric fix) as a spurious "Regression". N/A is distinct from "Not set" (threshold never configured). Frontend-only.
+
+## [0.2.61.58] - 2026-07-14
+
+### Fixed
+- **Threshold Result now matches the displayed valid range.** The three-state classifier trusted ADAPT's per-check `isDifference` flag first, so a row could show "In range" even when its test value sat outside the range printed next to it (e.g. IQR range `4.32% – 4.32%`, test `6.06%`). Classification is now geometric — test value vs the shown lower/upper bounds decides in-range/improvement/regression — so the chip always agrees with the numbers in the row. `isDifference` is used only as a fallback when a row has no numeric bounds to show.
+
+## [0.2.61.57] - 2026-07-14
+
+### Changed
+- **Anomaly-detection threshold Result column reworked to a three-state model.** Replaced the pass/fail/improve icon set with a judgment-first design: each row is now *In range* (neutral gray chip, `–`), *Improvement* (green chip), or *Regression* (red chip). The arrow encodes which side of the valid range the test value fell on (`▲` above / `▼` below) and the color encodes the verdict — decided by side × metric direction (`higherIsBetter`). For a lower-is-better metric, below-range = improvement and above-range = regression; for higher-is-better, reversed. Unconfigured thresholds show a muted "Not set". Builds on 0.2.61.56; frontend-only.
+
+## [0.2.61.56] - 2026-07-14
+
+### Fixed
+- **Anomaly-detection threshold icons no longer flag an improvement as danger.** In the Statistical Analysis drawer, the per-threshold Result icon was computed purely from "is the value outside the valid range", ignoring metric direction. For a lower-is-better metric (e.g. `Request RT Avg`) whose value dropped *below* the range — a genuine improvement, and already labelled as such by the Conclusion — the Percent and IQR rows still showed the red danger icon. A favorable breach now renders a green trend arrow (`↓` for a decrease, `↑` for an increase) instead of red; regressions stay red, in-range stays a green check, and unconfigured thresholds stay amber. Direction is read from `metricClassification.higherIsBetter` and evaluated per row (bounds are nested, so a value can breach one threshold type but not another). Frontend-only — no ADAPT/backend change.
+
 ## [0.2.61.55] - 2026-07-14
 
 ### Fixed

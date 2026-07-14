@@ -90,6 +90,50 @@ export function generateThresholdData(drawerData: unknown, unit?: string): Thres
     const lowerThresholds = thresholdRanges.lower || {};
     const upperThresholds = thresholdRanges.upper || {};
 
+    // Metric direction: for a lower-is-better metric a breach BELOW the range is an
+    // improvement, not a regression. Fall back to the top-level metric_classification
+    // if compare_config doesn't carry it.
+    const higherIsBetter: boolean | undefined =
+      config.metricClassification?.higherIsBetter ??
+      drawerData.metric_classification?.higherIsBetter;
+
+    // Three-state classification, driven by the *displayed* valid range so the icon always
+    // agrees with the range/value shown next to it. Test value inside the range → neutral;
+    // outside → the side it fell on, judged against metric direction, decides improvement vs
+    // regression. ADAPT's per-check isDifference is only a fallback when no bounds are shown
+    // (its IQR/abs checks compare a different axis than the mean, so they can disagree with
+    // the geometric range — the range is what the user reads).
+    const classify = (
+      isDifference: boolean | undefined,
+      valid: boolean | undefined,
+      lower: number | undefined,
+      upper: number | undefined,
+    ): { result: 'inRange' | 'improvement' | 'regression' | 'invalid'; side?: 'above' | 'below'; reason?: string } => {
+      // Configured but not evaluable: the check exists yet ADAPT couldn't apply it.
+      // Most common: a zero-variance baseline (control IQR = 0) collapses the band to a
+      // point (see #417), so the range and value are shown but the verdict is undefined.
+      if (valid === false) {
+        const reason =
+          lower !== undefined && upper !== undefined && lower === upper
+            ? 'Baseline has no variance (IQR = 0), so this threshold has no width to evaluate against.'
+            : 'Not enough baseline or test data to evaluate this threshold.';
+        return { result: 'invalid', reason };
+      }
+      if (lower === undefined && upper === undefined) {
+        return { result: isDifference ? 'regression' : 'inRange' };
+      }
+      const below = lower !== undefined && testValue < lower;
+      const above = upper !== undefined && testValue > upper;
+      if (!below && !above) return { result: 'inRange' };
+      const side: 'above' | 'below' = above ? 'above' : 'below';
+      // Unknown direction defaults to regression (the alerting-safe interpretation).
+      const favorable =
+        higherIsBetter === undefined
+          ? false
+          : (above && higherIsBetter) || (below && !higherIsBetter);
+      return { result: favorable ? 'improvement' : 'regression', side };
+    };
+
     // Always show all three threshold types
 
     // Percentage threshold
@@ -113,7 +157,9 @@ export function generateThresholdData(drawerData: unknown, unit?: string): Thres
       thresholdValue: pctValidRange,
       source: pctSource,
       observedDifference: formatValueWithUnit(testValue, unit),
-      result: hasPercentageThreshold ? (checks.pct?.isDifference === false ? 'passed' : 'failed') : 'skipped',
+      ...(hasPercentageThreshold
+        ? classify(checks.pct?.isDifference, checks.pct?.valid, lowerThresholds.pct, upperThresholds.pct)
+        : { result: 'skipped' as const }),
       enabled: hasPercentageThreshold
     });
 
@@ -137,7 +183,9 @@ export function generateThresholdData(drawerData: unknown, unit?: string): Thres
       thresholdValue: iqrValidRange,
       source: iqrSource,
       observedDifference: formatValueWithUnit(testValue, unit),
-      result: hasIqrThreshold ? (checks.iqr?.isDifference === false ? 'passed' : 'failed') : 'skipped',
+      ...(hasIqrThreshold
+        ? classify(checks.iqr?.isDifference, checks.iqr?.valid, lowerThresholds.iqr, upperThresholds.iqr)
+        : { result: 'skipped' as const }),
       enabled: hasIqrThreshold
     });
 
@@ -163,7 +211,9 @@ export function generateThresholdData(drawerData: unknown, unit?: string): Thres
       thresholdValue: absValidRange,
       source: absSource,
       observedDifference: formatValueWithUnit(testValue, unit),
-      result: hasAbsoluteThreshold ? (checks.abs?.isDifference === false ? 'passed' : 'failed') : 'skipped',
+      ...(hasAbsoluteThreshold
+        ? classify(checks.abs?.isDifference, checks.abs?.valid, lowerThresholds.overall, upperThresholds.overall)
+        : { result: 'skipped' as const }),
       enabled: hasAbsoluteThreshold
     });
   }
@@ -189,10 +239,14 @@ export function generateThresholdData(drawerData: unknown, unit?: string): Thres
         : lowerOverall !== undefined ? `> ${formatNumber(lowerOverall)}`
         : `< ${formatNumber(upperOverall)}`;
 
-      const isWithinThreshold = (
-        (lowerOverall === undefined || testValue >= lowerOverall) &&
-        (upperOverall === undefined || testValue <= upperOverall)
-      );
+      const below = lowerOverall !== undefined && testValue < lowerOverall;
+      const above = upperOverall !== undefined && testValue > upperOverall;
+      const higherIsBetter: boolean | undefined = drawerData.metric_classification?.higherIsBetter;
+      const side: 'above' | 'below' | undefined = above ? 'above' : below ? 'below' : undefined;
+      const favorable =
+        higherIsBetter === undefined
+          ? false
+          : (above && higherIsBetter) || (below && !higherIsBetter);
 
       thresholds.push({
         threshold: 'Overall',
@@ -200,7 +254,8 @@ export function generateThresholdData(drawerData: unknown, unit?: string): Thres
         thresholdValue,
         source: 'Legacy',
         observedDifference: formatValueWithUnit(testValue, unit),
-        result: isWithinThreshold ? 'passed' : 'failed',
+        result: side === undefined ? 'inRange' : favorable ? 'improvement' : 'regression',
+        side,
         enabled: true
       });
     }
