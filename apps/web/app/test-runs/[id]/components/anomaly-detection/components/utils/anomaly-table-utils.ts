@@ -90,6 +90,30 @@ export function generateThresholdData(drawerData: unknown, unit?: string): Thres
     const lowerThresholds = thresholdRanges.lower || {};
     const upperThresholds = thresholdRanges.upper || {};
 
+    // Metric direction: for a lower-is-better metric a breach BELOW the range is an
+    // improvement, not a regression. Fall back to the top-level metric_classification
+    // if compare_config doesn't carry it.
+    const higherIsBetter: boolean | undefined =
+      config.metricClassification?.higherIsBetter ??
+      drawerData.metric_classification?.higherIsBetter;
+
+    // Classify a single threshold breach as passed / improved (favorable) / failed.
+    const classify = (
+      isDifference: boolean | undefined,
+      lower: number | undefined,
+      upper: number | undefined,
+    ): { result: 'passed' | 'improved' | 'failed'; direction?: 'up' | 'down' } => {
+      if (isDifference === false) return { result: 'passed' };
+      const decreased = lower !== undefined && testValue < lower;
+      const increased = upper !== undefined && testValue > upper;
+      const favorable =
+        higherIsBetter === undefined
+          ? false
+          : (decreased && !higherIsBetter) || (increased && higherIsBetter);
+      if (!favorable) return { result: 'failed' };
+      return { result: 'improved', direction: decreased ? 'down' : 'up' };
+    };
+
     // Always show all three threshold types
 
     // Percentage threshold
@@ -113,7 +137,9 @@ export function generateThresholdData(drawerData: unknown, unit?: string): Thres
       thresholdValue: pctValidRange,
       source: pctSource,
       observedDifference: formatValueWithUnit(testValue, unit),
-      result: hasPercentageThreshold ? (checks.pct?.isDifference === false ? 'passed' : 'failed') : 'skipped',
+      ...(hasPercentageThreshold
+        ? classify(checks.pct?.isDifference, lowerThresholds.pct, upperThresholds.pct)
+        : { result: 'skipped' as const }),
       enabled: hasPercentageThreshold
     });
 
@@ -137,7 +163,9 @@ export function generateThresholdData(drawerData: unknown, unit?: string): Thres
       thresholdValue: iqrValidRange,
       source: iqrSource,
       observedDifference: formatValueWithUnit(testValue, unit),
-      result: hasIqrThreshold ? (checks.iqr?.isDifference === false ? 'passed' : 'failed') : 'skipped',
+      ...(hasIqrThreshold
+        ? classify(checks.iqr?.isDifference, lowerThresholds.iqr, upperThresholds.iqr)
+        : { result: 'skipped' as const }),
       enabled: hasIqrThreshold
     });
 
@@ -163,7 +191,9 @@ export function generateThresholdData(drawerData: unknown, unit?: string): Thres
       thresholdValue: absValidRange,
       source: absSource,
       observedDifference: formatValueWithUnit(testValue, unit),
-      result: hasAbsoluteThreshold ? (checks.abs?.isDifference === false ? 'passed' : 'failed') : 'skipped',
+      ...(hasAbsoluteThreshold
+        ? classify(checks.abs?.isDifference, lowerThresholds.overall, upperThresholds.overall)
+        : { result: 'skipped' as const }),
       enabled: hasAbsoluteThreshold
     });
   }

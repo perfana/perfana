@@ -4,6 +4,11 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
+## [0.2.61.56] - 2026-07-14
+
+### Fixed
+- **Anomaly-detection threshold icons no longer flag an improvement as danger.** In the Statistical Analysis drawer, the per-threshold Result icon was computed purely from "is the value outside the valid range", ignoring metric direction. For a lower-is-better metric (e.g. `Request RT Avg`) whose value dropped *below* the range — a genuine improvement, and already labelled as such by the Conclusion — the Percent and IQR rows still showed the red danger icon. A favorable breach now renders a green trend arrow (`↓` for a decrease, `↑` for an increase) instead of red; regressions stay red, in-range stays a green check, and unconfigured thresholds stay amber. Direction is read from `metricClassification.higherIsBetter` and evaluated per row (bounds are nested, so a value can breach one threshold type but not another). Frontend-only — no ADAPT/backend change.
+
 ## [0.2.61.55] - 2026-07-14
 
 ### Fixed

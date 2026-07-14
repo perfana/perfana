@@ -78,7 +78,9 @@ export interface ThresholdComparisonData {
   thresholdValue: string;
   source: string;
   observedDifference: string;
-  result: 'passed' | 'failed' | 'skipped';
+  result: 'passed' | 'failed' | 'improved' | 'skipped';
+  // Arrow direction for an 'improved' (favorable) breach: the way the value moved.
+  direction?: 'up' | 'down';
   enabled: boolean;
 }
 

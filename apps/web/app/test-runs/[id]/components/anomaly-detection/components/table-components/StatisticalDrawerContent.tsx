@@ -19,6 +19,8 @@ import {
   CheckCircle,
   Error,
   Warning,
+  TrendingDown,
+  TrendingUp,
 } from '@mui/icons-material';
 import { AnomalyData } from '../../types';
 import { formatValueWithUnit } from '@/lib/units';
@@ -112,6 +114,12 @@ export function StatisticalDrawerContent({
                     <TableCell sx={{ fontSize: '0.75rem', py: 1, textAlign: 'center' }}>
                       {threshold.result === 'passed' ? (
                         <CheckCircle sx={{ fontSize: '1rem', color: 'success.main' }} />
+                      ) : threshold.result === 'improved' ? (
+                        threshold.direction === 'up' ? (
+                          <TrendingUp titleAccess="Significant improvement" sx={{ fontSize: '1rem', color: 'success.main' }} />
+                        ) : (
+                          <TrendingDown titleAccess="Significant improvement" sx={{ fontSize: '1rem', color: 'success.main' }} />
+                        )
                       ) : threshold.result === 'failed' ? (
                         <Error sx={{ fontSize: '1rem', color: 'error.main' }} />
                       ) : (
