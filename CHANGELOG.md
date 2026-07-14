@@ -4,6 +4,11 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
+## [0.2.61.59] - 2026-07-14
+
+### Added
+- **"N/A" state for thresholds that are configured but can't be evaluated.** When a threshold's ADAPT check reports `valid: false` — most commonly a zero-variance baseline where the control IQR is 0, which collapses the valid range to a single point (#417) — the Result column now shows a muted "N/A" chip with a hover tooltip explaining why ("Baseline has no variance (IQR = 0)…" or "Not enough baseline or test data…"). Previously such a row was mislabelled: first as "In range", then (after 0.2.61.58's geometric fix) as a spurious "Regression". N/A is distinct from "Not set" (threshold never configured). Frontend-only.
+
 ## [0.2.61.58] - 2026-07-14
 
 ### Fixed

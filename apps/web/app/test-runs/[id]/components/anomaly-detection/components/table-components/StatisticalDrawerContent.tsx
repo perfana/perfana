@@ -13,12 +13,14 @@ import {
   TableHead,
   TableRow,
   Chip,
+  Tooltip,
 } from '@mui/material';
 import { alpha } from '@mui/material/styles';
 import {
   ArrowDropUp,
   ArrowDropDown,
   Remove,
+  HelpOutline,
 } from '@mui/icons-material';
 import { AnomalyData } from '../../types';
 import { formatValueWithUnit } from '@/lib/units';
@@ -119,6 +121,16 @@ export function StatisticalDrawerContent({
                           icon={threshold.side === 'above' ? <ArrowDropUp /> : threshold.side === 'below' ? <ArrowDropDown /> : undefined}
                           sx={{ height: '22px', fontSize: '0.7rem', '& .MuiChip-icon': { fontSize: '1.25rem', ml: 0.25, mr: -0.75 } }}
                         />
+                      ) : threshold.result === 'invalid' ? (
+                        <Tooltip title={threshold.reason ?? 'This threshold could not be evaluated.'} arrow>
+                          <Chip
+                            label="N/A"
+                            size="small"
+                            variant="outlined"
+                            icon={<HelpOutline />}
+                            sx={{ height: '22px', fontSize: '0.7rem', color: 'text.secondary', cursor: 'help', '& .MuiChip-icon': { fontSize: '0.85rem', color: 'text.disabled' } }}
+                          />
+                        </Tooltip>
                       ) : threshold.result === 'skipped' ? (
                         <Typography variant="caption" sx={{ color: 'text.disabled' }}>Not set</Typography>
                       ) : (

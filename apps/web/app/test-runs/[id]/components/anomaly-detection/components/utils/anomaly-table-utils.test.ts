@@ -7,13 +7,14 @@ const makeDrawer = (opts: {
   lower: { pct: number; iqr: number; overall: number };
   upper: { pct: number; iqr: number; overall: number };
   checks: { pct: boolean; iqr: boolean; abs: boolean }; // isDifference per threshold
+  valid?: { pct?: boolean; iqr?: boolean; abs?: boolean }; // defaults to true
   absoluteThreshold?: number | null;
 }) => ({
   statistic: { test: opts.test, control: 24.18, diff: opts.test - 24.18 },
   checks: {
-    pct: { isDifference: opts.checks.pct },
-    iqr: { isDifference: opts.checks.iqr },
-    abs: { isDifference: opts.checks.abs },
+    pct: { isDifference: opts.checks.pct, valid: opts.valid?.pct ?? true },
+    iqr: { isDifference: opts.checks.iqr, valid: opts.valid?.iqr ?? true },
+    abs: { isDifference: opts.checks.abs, valid: opts.valid?.abs ?? true },
   },
   thresholds: { lower: opts.lower, upper: opts.upper },
   compare_config: {
@@ -73,19 +74,21 @@ describe('generateThresholdData — three-state classification', () => {
     expect(rows['Percent'].side).toBe('above');
   });
 
-  it('value outside the displayed range is a breach even when ADAPT isDifference is false', () => {
-    // Reported case: IQR range 4.32% to 4.32%, test 6.06% (above) but checks.iqr.isDifference=false.
-    // The icon must agree with the shown range, not ADAPT's separate-axis IQR verdict.
+  it('zero-variance baseline (IQR band collapsed to a point) is invalid (N/A), not in-range or a breach', () => {
+    // Reported case: IQR range 4.32% to 4.32%, test 6.06%. control_iqr=0 → checks.iqr.valid=false
+    // and isDifference is forced false (#417 guard). The row can't be judged → N/A with a reason.
     const rows = byName(generateThresholdData(makeDrawer({
       test: 6.06,
       higherIsBetter: false,
       lower: { pct: 4.32, iqr: 4.32, overall: 4.32 },
       upper: { pct: 4.32, iqr: 4.32, overall: 4.32 },
       checks: { pct: false, iqr: false, abs: false },
+      valid: { iqr: false },
     }) as unknown, '%'));
 
-    expect(rows['Interquartile Range Factor'].result).toBe('regression');
-    expect(rows['Interquartile Range Factor'].side).toBe('above');
+    expect(rows['Interquartile Range Factor'].result).toBe('invalid');
+    expect(rows['Interquartile Range Factor'].reason).toMatch(/variance/i);
+    expect(rows['Interquartile Range Factor'].side).toBeUndefined();
   });
 
   it('within range is neutral (inRange), no side', () => {

@@ -78,11 +78,14 @@ export interface ThresholdComparisonData {
   thresholdValue: string;
   source: string;
   observedDifference: string;
-  // Three-state judgment: in range (neutral), or a breach judged by side × metric direction.
+  // Judgment: in range (neutral), a breach judged by side × metric direction, 'invalid'
+  // (configured but not evaluable — e.g. zero-variance baseline), or 'skipped' (not configured).
   // 'passed' | 'failed' retained for the legacy DetailDrawer path only.
-  result: 'inRange' | 'improvement' | 'regression' | 'skipped' | 'passed' | 'failed';
+  result: 'inRange' | 'improvement' | 'regression' | 'invalid' | 'skipped' | 'passed' | 'failed';
   // Which side of the valid range the test value fell on; drives the arrow (▲ above / ▼ below).
   side?: 'above' | 'below';
+  // Tooltip text for an 'invalid' row explaining why it couldn't be evaluated.
+  reason?: string;
   enabled: boolean;
 }
 

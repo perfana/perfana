@@ -105,9 +105,20 @@ export function generateThresholdData(drawerData: unknown, unit?: string): Thres
     // the geometric range — the range is what the user reads).
     const classify = (
       isDifference: boolean | undefined,
+      valid: boolean | undefined,
       lower: number | undefined,
       upper: number | undefined,
-    ): { result: 'inRange' | 'improvement' | 'regression'; side?: 'above' | 'below' } => {
+    ): { result: 'inRange' | 'improvement' | 'regression' | 'invalid'; side?: 'above' | 'below'; reason?: string } => {
+      // Configured but not evaluable: the check exists yet ADAPT couldn't apply it.
+      // Most common: a zero-variance baseline (control IQR = 0) collapses the band to a
+      // point (see #417), so the range and value are shown but the verdict is undefined.
+      if (valid === false) {
+        const reason =
+          lower !== undefined && upper !== undefined && lower === upper
+            ? 'Baseline has no variance (IQR = 0), so this threshold has no width to evaluate against.'
+            : 'Not enough baseline or test data to evaluate this threshold.';
+        return { result: 'invalid', reason };
+      }
       if (lower === undefined && upper === undefined) {
         return { result: isDifference ? 'regression' : 'inRange' };
       }
@@ -147,7 +158,7 @@ export function generateThresholdData(drawerData: unknown, unit?: string): Thres
       source: pctSource,
       observedDifference: formatValueWithUnit(testValue, unit),
       ...(hasPercentageThreshold
-        ? classify(checks.pct?.isDifference, lowerThresholds.pct, upperThresholds.pct)
+        ? classify(checks.pct?.isDifference, checks.pct?.valid, lowerThresholds.pct, upperThresholds.pct)
         : { result: 'skipped' as const }),
       enabled: hasPercentageThreshold
     });
@@ -173,7 +184,7 @@ export function generateThresholdData(drawerData: unknown, unit?: string): Thres
       source: iqrSource,
       observedDifference: formatValueWithUnit(testValue, unit),
       ...(hasIqrThreshold
-        ? classify(checks.iqr?.isDifference, lowerThresholds.iqr, upperThresholds.iqr)
+        ? classify(checks.iqr?.isDifference, checks.iqr?.valid, lowerThresholds.iqr, upperThresholds.iqr)
         : { result: 'skipped' as const }),
       enabled: hasIqrThreshold
     });
@@ -201,7 +212,7 @@ export function generateThresholdData(drawerData: unknown, unit?: string): Thres
       source: absSource,
       observedDifference: formatValueWithUnit(testValue, unit),
       ...(hasAbsoluteThreshold
-        ? classify(checks.abs?.isDifference, lowerThresholds.overall, upperThresholds.overall)
+        ? classify(checks.abs?.isDifference, checks.abs?.valid, lowerThresholds.overall, upperThresholds.overall)
         : { result: 'skipped' as const }),
       enabled: hasAbsoluteThreshold
     });
