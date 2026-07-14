@@ -1,4 +1,10 @@
-import { SeriesConfig, MetricDataPoint } from '../types';
+import { authenticatedFetch } from '@/lib/api';
+import {
+  ALL_AGGREGATED_OPTION,
+  shouldOfferAllAggregated,
+  getAggregateSpec,
+} from '@/lib/aggregated-perf-series';
+import { MetricDataPoint, SeriesConfig } from '../types';
 
 /** One point of the /aggregated-metric-timeseries response `buckets` array. */
 export interface AggregatedBucket {
@@ -6,49 +12,59 @@ export interface AggregatedBucket {
   value: number;
 }
 
-/**
- * The run-wide aggregate metrics to overlay. Mirrors the report renderer's
- * AGGREGATED_METRICS (graphs-renderer.ts) so the interactive card and the
- * generated report agree. yAxisFormat uses Grafana-style unit strings the
- * chart's getUnitConversion understands (see graph-formatters.ts).
- */
-export interface AggregatedMetricSpec {
-  metric: 'transaction_response_time' | 'request_response_time' | 'error_percentage';
-  title: string;
-  yAxisFormat: string;
-}
-
-export const AGGREGATED_METRIC_SPECS: readonly AggregatedMetricSpec[] = [
-  { metric: 'transaction_response_time', title: "All aggregated — Transaction response time (avg)", yAxisFormat: 'ms' },
-  { metric: 'request_response_time', title: "All aggregated — Request response time (avg)", yAxisFormat: 'ms' },
-  { metric: 'error_percentage', title: "All aggregated — Error percentage", yAxisFormat: 'percent' },
-] as const;
-
-/**
- * Shape one aggregated metric's buckets into the chart's series model. The id
- * is deterministic (`aggregated-<metric>`) so the toggle can clear it by key.
- */
-export function buildAggregatedMetricSeries(
-  spec: AggregatedMetricSpec,
+/** Shape aggregated-timeseries buckets into the chart's data-point model. */
+export function bucketsToDataPoints(
   buckets: AggregatedBucket[],
-): { config: SeriesConfig; data: MetricDataPoint[] } {
-  const config: SeriesConfig = {
-    id: `aggregated-${spec.metric}`,
-    dashboardId: 'aggregated',
-    dashboardLabel: 'Performance Test Metrics',
-    panelId: -1,
-    panelTitle: spec.title,
-    metricName: spec.title,
-    source: 'performance-metrics',
-    yAxisFormat: spec.yAxisFormat,
-  };
-
-  const data: MetricDataPoint[] = buckets.map((b, i) => ({
+  metricName: string,
+): MetricDataPoint[] {
+  return buckets.map((b, i) => ({
     time: b.time,
-    metric_name: spec.title,
+    metric_name: metricName,
     value: b.value,
     timestep: i,
   }));
+}
 
-  return { config, data };
+/** Default Y-axis unit for an aggregated perf metric. */
+export function aggregatedYAxisFormat(metric: string): string {
+  return metric === 'error_percentage' ? 'percent' : 'ms';
+}
+
+/** Prepend the "All aggregated" dropdown entry for aggregatable perf panels. */
+export function offerAggregatedOption(
+  source: string,
+  panelId: number,
+  metricNames: string[],
+): string[] {
+  return shouldOfferAllAggregated(source, panelId)
+    ? [ALL_AGGREGATED_OPTION, ...metricNames]
+    : metricNames;
+}
+
+/**
+ * Fetch one panel's run-wide aggregate as a chart series' data. Routes to the
+ * aggregated-timeseries endpoint using the panel's (metric, stat) spec.
+ * Returns [] when the panel isn't aggregatable or on any HTTP/transport error.
+ */
+export async function fetchAggregatedSeriesData(
+  testRunIdForQuery: string,
+  series: SeriesConfig,
+): Promise<MetricDataPoint[]> {
+  const spec = getAggregateSpec(series.panelId);
+  if (!spec) return [];
+  try {
+    const res = await authenticatedFetch(
+      `/test-runs/${testRunIdForQuery}/aggregated-metric-timeseries?metric=${spec.metric}&stat=${spec.stat}`,
+      { headers: { 'Content-Type': 'application/json' } },
+    );
+    if (!res.ok) {
+      console.warn(`Failed to fetch aggregated data for series ${series.id}:`, res.statusText);
+      return [];
+    }
+    const body: { buckets?: AggregatedBucket[] } = await res.json();
+    return bucketsToDataPoints(body.buckets ?? [], series.metricName);
+  } catch (err) {
+    console.error(`Error fetching aggregated data for series ${series.id}:`, err);
+    return [];
+  }
 }
