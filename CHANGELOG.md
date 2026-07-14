@@ -4,6 +4,11 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
+## [0.2.61.57] - 2026-07-14
+
+### Changed
+- **Anomaly-detection threshold Result column reworked to a three-state model.** Replaced the pass/fail/improve icon set with a judgment-first design: each row is now *In range* (neutral gray chip, `–`), *Improvement* (green chip), or *Regression* (red chip). The arrow encodes which side of the valid range the test value fell on (`▲` above / `▼` below) and the color encodes the verdict — decided by side × metric direction (`higherIsBetter`). For a lower-is-better metric, below-range = improvement and above-range = regression; for higher-is-better, reversed. Unconfigured thresholds show a muted "Not set". Builds on 0.2.61.56; frontend-only.
+
 ## [0.2.61.56] - 2026-07-14
 
 ### Fixed

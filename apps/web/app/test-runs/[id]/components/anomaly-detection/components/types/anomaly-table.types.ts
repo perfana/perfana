@@ -78,9 +78,11 @@ export interface ThresholdComparisonData {
   thresholdValue: string;
   source: string;
   observedDifference: string;
-  result: 'passed' | 'failed' | 'improved' | 'skipped';
-  // Arrow direction for an 'improved' (favorable) breach: the way the value moved.
-  direction?: 'up' | 'down';
+  // Three-state judgment: in range (neutral), or a breach judged by side × metric direction.
+  // 'passed' | 'failed' retained for the legacy DetailDrawer path only.
+  result: 'inRange' | 'improvement' | 'regression' | 'skipped' | 'passed' | 'failed';
+  // Which side of the valid range the test value fell on; drives the arrow (▲ above / ▼ below).
+  side?: 'above' | 'below';
   enabled: boolean;
 }
 

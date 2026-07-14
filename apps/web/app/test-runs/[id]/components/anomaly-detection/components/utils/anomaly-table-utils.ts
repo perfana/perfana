@@ -97,21 +97,23 @@ export function generateThresholdData(drawerData: unknown, unit?: string): Thres
       config.metricClassification?.higherIsBetter ??
       drawerData.metric_classification?.higherIsBetter;
 
-    // Classify a single threshold breach as passed / improved (favorable) / failed.
+    // Three-state classification: in range → neutral; otherwise the side of the range
+    // the value fell on, judged against metric direction, decides improvement vs regression.
     const classify = (
       isDifference: boolean | undefined,
       lower: number | undefined,
       upper: number | undefined,
-    ): { result: 'passed' | 'improved' | 'failed'; direction?: 'up' | 'down' } => {
-      if (isDifference === false) return { result: 'passed' };
-      const decreased = lower !== undefined && testValue < lower;
-      const increased = upper !== undefined && testValue > upper;
+    ): { result: 'inRange' | 'improvement' | 'regression'; side?: 'above' | 'below' } => {
+      const below = lower !== undefined && testValue < lower;
+      const above = upper !== undefined && testValue > upper;
+      if (isDifference === false || (!below && !above)) return { result: 'inRange' };
+      const side: 'above' | 'below' = above ? 'above' : 'below';
+      // Unknown direction defaults to regression (the alerting-safe interpretation).
       const favorable =
         higherIsBetter === undefined
           ? false
-          : (decreased && !higherIsBetter) || (increased && higherIsBetter);
-      if (!favorable) return { result: 'failed' };
-      return { result: 'improved', direction: decreased ? 'down' : 'up' };
+          : (above && higherIsBetter) || (below && !higherIsBetter);
+      return { result: favorable ? 'improvement' : 'regression', side };
     };
 
     // Always show all three threshold types
@@ -219,10 +221,14 @@ export function generateThresholdData(drawerData: unknown, unit?: string): Thres
         : lowerOverall !== undefined ? `> ${formatNumber(lowerOverall)}`
         : `< ${formatNumber(upperOverall)}`;
 
-      const isWithinThreshold = (
-        (lowerOverall === undefined || testValue >= lowerOverall) &&
-        (upperOverall === undefined || testValue <= upperOverall)
-      );
+      const below = lowerOverall !== undefined && testValue < lowerOverall;
+      const above = upperOverall !== undefined && testValue > upperOverall;
+      const higherIsBetter: boolean | undefined = drawerData.metric_classification?.higherIsBetter;
+      const side: 'above' | 'below' | undefined = above ? 'above' : below ? 'below' : undefined;
+      const favorable =
+        higherIsBetter === undefined
+          ? false
+          : (above && higherIsBetter) || (below && !higherIsBetter);
 
       thresholds.push({
         threshold: 'Overall',
@@ -230,7 +236,8 @@ export function generateThresholdData(drawerData: unknown, unit?: string): Thres
         thresholdValue,
         source: 'Legacy',
         observedDifference: formatValueWithUnit(testValue, unit),
-        result: isWithinThreshold ? 'passed' : 'failed',
+        result: side === undefined ? 'inRange' : favorable ? 'improvement' : 'regression',
+        side,
         enabled: true
       });
     }

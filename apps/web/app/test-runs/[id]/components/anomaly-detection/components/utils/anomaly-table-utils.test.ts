@@ -26,8 +26,8 @@ const makeDrawer = (opts: {
 const byName = (rows: ReturnType<typeof generateThresholdData>) =>
   Object.fromEntries(rows.map(r => [r.threshold, r]));
 
-describe('generateThresholdData — favorable-breach classification', () => {
-  it('lower-is-better metric that dropped below the range is an improvement (down arrow), not a failure', () => {
+describe('generateThresholdData — three-state classification', () => {
+  it('lower-is-better metric below the range is an improvement (▼ below)', () => {
     // Real case: T03_Search_Products.search_query_processing, test 6.36ms below both lower bounds.
     const rows = byName(generateThresholdData(makeDrawer({
       test: 6.36,
@@ -37,15 +37,15 @@ describe('generateThresholdData — favorable-breach classification', () => {
       checks: { pct: true, iqr: true, abs: false },
     }) as unknown, 'ms'));
 
-    expect(rows['Percent'].result).toBe('improved');
-    expect(rows['Percent'].direction).toBe('down');
-    expect(rows['Interquartile Range Factor'].result).toBe('improved');
-    expect(rows['Interquartile Range Factor'].direction).toBe('down');
-    // Absolute threshold not configured -> skipped (amber warning), unchanged.
+    expect(rows['Percent'].result).toBe('improvement');
+    expect(rows['Percent'].side).toBe('below');
+    expect(rows['Interquartile Range Factor'].result).toBe('improvement');
+    expect(rows['Interquartile Range Factor'].side).toBe('below');
+    // Absolute threshold not configured -> skipped, unchanged.
     expect(rows['Absolute'].result).toBe('skipped');
   });
 
-  it('lower-is-better metric that rose above the range is a regression (failed)', () => {
+  it('lower-is-better metric above the range is a regression (▲ above)', () => {
     const rows = byName(generateThresholdData(makeDrawer({
       test: 73.5,
       higherIsBetter: false,
@@ -54,11 +54,13 @@ describe('generateThresholdData — favorable-breach classification', () => {
       checks: { pct: true, iqr: true, abs: false },
     }) as unknown, 'ms'));
 
-    expect(rows['Percent'].result).toBe('failed');
-    expect(rows['Interquartile Range Factor'].result).toBe('failed');
+    expect(rows['Percent'].result).toBe('regression');
+    expect(rows['Percent'].side).toBe('above');
+    expect(rows['Interquartile Range Factor'].result).toBe('regression');
+    expect(rows['Interquartile Range Factor'].side).toBe('above');
   });
 
-  it('higher-is-better metric that rose above the range is an improvement (up arrow)', () => {
+  it('higher-is-better metric above the range is an improvement (▲ above)', () => {
     const rows = byName(generateThresholdData(makeDrawer({
       test: 100,
       higherIsBetter: true,
@@ -67,11 +69,11 @@ describe('generateThresholdData — favorable-breach classification', () => {
       checks: { pct: true, iqr: true, abs: false },
     }) as unknown, 'ms'));
 
-    expect(rows['Percent'].result).toBe('improved');
-    expect(rows['Percent'].direction).toBe('up');
+    expect(rows['Percent'].result).toBe('improvement');
+    expect(rows['Percent'].side).toBe('above');
   });
 
-  it('within range stays passed', () => {
+  it('within range is neutral (inRange), no side', () => {
     const rows = byName(generateThresholdData(makeDrawer({
       test: 24,
       higherIsBetter: false,
@@ -80,7 +82,8 @@ describe('generateThresholdData — favorable-breach classification', () => {
       checks: { pct: false, iqr: false, abs: false },
     }) as unknown, 'ms'));
 
-    expect(rows['Percent'].result).toBe('passed');
-    expect(rows['Interquartile Range Factor'].result).toBe('passed');
+    expect(rows['Percent'].result).toBe('inRange');
+    expect(rows['Percent'].side).toBeUndefined();
+    expect(rows['Interquartile Range Factor'].result).toBe('inRange');
   });
 });
