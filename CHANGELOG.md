@@ -4,6 +4,12 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
+## [0.2.61.55] - 2026-07-14
+
+### Fixed
+- **InfluxDB v2 (Flux) metrics now ingest correctly.** The worker's Grafana response formatter identified the timestamp column by the literal name `time`, but Flux responses name it `_time` (schema `type: "time"`). As a result `_time` was treated as a metric, every real value inherited the current time, and dedup collapsed the whole series to a single stale point outside the test window — so panels looked empty. The formatter now identifies the timestamp column by its schema type, which is datasource-agnostic (Prometheus/InfluxQL `Time` already worked).
+- **Grafana dashboard template variables backed by Flux queries now populate.** When adding a dashboard with a Flux (InfluxDB v2) variable, the API sent the Flux query to the legacy InfluxQL `/query?db=&q=` endpoint, which cannot run Flux, so the dropdown stayed empty. Flux datasources (detected via `jsonData.version === "Flux"`, with a query-shape fallback) now resolve variable values through `POST /api/ds/query` and parse the returned dataframes. The InfluxQL path is unchanged.
+
 ## [0.2.61.53] - 2026-07-13
 
 ### Added
