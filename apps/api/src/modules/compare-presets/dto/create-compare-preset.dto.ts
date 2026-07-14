@@ -32,6 +32,11 @@ export class CompareSeriesConfig {
   @IsString()
   source!: string;
 
+  @ApiPropertyOptional({ description: 'Metrics source ID (UUID) disambiguating multi-source dashboards' })
+  @IsString()
+  @IsOptional()
+  metricsSourceId?: string;
+
   @ApiPropertyOptional({ description: 'True when this series is the run-wide "All aggregated" pseudo-metric' })
   @IsBoolean()
   @IsOptional()
