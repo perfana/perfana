@@ -680,6 +680,120 @@ describe('GrafanaClientService', () => {
   });
 
   // -------------------------------------------------------------------------
+  // getInfluxVariableValues — Flux (InfluxDB v2) path
+  // -------------------------------------------------------------------------
+
+  describe('getInfluxVariableValues (Flux)', () => {
+    const FLUX_DATASOURCE = {
+      id: 1,
+      name: 'InfluxDB v2',
+      type: 'influxdb',
+      uid: 'rn8_KJEnk',
+      database: undefined,
+      url: 'http://influxdb.example.com',
+      jsonData: { version: 'Flux' },
+    };
+
+    // Grafana dataframe response for a Flux tagValues query.
+    const fluxFramesResponse = (values: unknown[]) => ({
+      results: {
+        metricFindQuery: {
+          status: 200,
+          frames: [
+            {
+              schema: { refId: 'metricFindQuery', fields: [{ name: '_value', type: 'string' }] },
+              data: { values: [values] },
+            },
+          ],
+        },
+      },
+    });
+
+    const tagValuesQuery =
+      'import "influxdata/influxdb/v1"\nv1.tagValues(bucket: "monitoring", tag: "host", predicate: (r) => true, start: -1d)';
+
+    it('POSTs the Flux query to /api/ds/query instead of the InfluxQL endpoint', async () => {
+      fetchMock.mockResolvedValue(makeOkResponse(fluxFramesResponse(['host-a'])));
+
+      await service.getInfluxVariableValues(VALID_GRAFANA_INSTANCE, FLUX_DATASOURCE, tagValuesQuery);
+
+      const [calledUrl, options] = fetchMock.mock.calls[0];
+      expect(calledUrl).toContain('/api/ds/query');
+      expect(calledUrl).not.toContain('/query?db=');
+      expect((options as RequestInit).method).toBe('POST');
+      const body = JSON.parse((options as RequestInit).body as string);
+      expect(body.queries[0]).toMatchObject({
+        refId: 'metricFindQuery',
+        rawQuery: true,
+        datasource: { type: 'influxdb', uid: 'rn8_KJEnk' },
+        datasourceId: 1,
+      });
+    });
+
+    it('extracts the tag values from the dataframe string column', async () => {
+      const hosts = ['UWVA3VWPAPP0106', 'UWVA3VWPAPP0107', 'UWVA3VWPAPP0108'];
+      fetchMock.mockResolvedValue(makeOkResponse(fluxFramesResponse(hosts)));
+
+      const result = await service.getInfluxVariableValues(
+        VALID_GRAFANA_INSTANCE,
+        FLUX_DATASOURCE,
+        tagValuesQuery,
+      );
+
+      expect(result).toEqual(hosts);
+    });
+
+    it('routes to the Flux path when the query is Flux even without jsonData.version', async () => {
+      const bareDatasource = { ...FLUX_DATASOURCE, jsonData: undefined };
+      fetchMock.mockResolvedValue(makeOkResponse(fluxFramesResponse(['h1'])));
+
+      await service.getInfluxVariableValues(VALID_GRAFANA_INSTANCE, bareDatasource, tagValuesQuery);
+
+      const [calledUrl] = fetchMock.mock.calls[0];
+      expect(calledUrl).toContain('/api/ds/query');
+    });
+
+    it('applies the variable regex to Flux values', async () => {
+      fetchMock.mockResolvedValue(makeOkResponse(fluxFramesResponse(['prod-host-01', 'prod-host-02'])));
+
+      const result = await service.getInfluxVariableValues(
+        VALID_GRAFANA_INSTANCE,
+        FLUX_DATASOURCE,
+        tagValuesQuery,
+        '/prod-(host-\\d+)/',
+      );
+
+      expect(result).toEqual(['host-01', 'host-02']);
+    });
+
+    it('deduplicates and skips null values from the frame', async () => {
+      fetchMock.mockResolvedValue(makeOkResponse(fluxFramesResponse(['a', 'a', null, 'b'])));
+
+      const result = await service.getInfluxVariableValues(
+        VALID_GRAFANA_INSTANCE,
+        FLUX_DATASOURCE,
+        tagValuesQuery,
+      );
+
+      expect(result).toEqual(['a', 'b']);
+    });
+
+    it('still uses the InfluxQL endpoint for a non-Flux InfluxQL query', async () => {
+      fetchMock.mockResolvedValue(makeOkResponse({ results: [] }));
+
+      await service.getInfluxVariableValues(
+        VALID_GRAFANA_INSTANCE,
+        INFLUX_DATASOURCE,
+        'SHOW TAG VALUES FROM "cpu" WITH KEY = "host"',
+      );
+
+      const [calledUrl] = fetchMock.mock.calls[0];
+      expect(calledUrl).toContain('/api/datasources/proxy/uid/');
+      expect(calledUrl).not.toContain('/api/ds/query');
+    });
+  });
+
+  // -------------------------------------------------------------------------
   // getPrometheusVariableValues
   // -------------------------------------------------------------------------
 

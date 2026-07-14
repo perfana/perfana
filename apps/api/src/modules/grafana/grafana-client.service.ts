@@ -26,6 +26,9 @@ interface GrafanaDatasource {
   uid: string;
   database?: string;
   url?: string;
+  // Grafana's InfluxDB datasource sets jsonData.version to "Flux" when the
+  // datasource speaks Flux (InfluxDB v2) instead of InfluxQL (InfluxDB v1).
+  jsonData?: { version?: string };
 }
 
 @Injectable()
@@ -256,10 +259,18 @@ export class GrafanaClientService {
     query: string,
     regex?: string
   ): Promise<string[]> {
+    // Flux (InfluxDB v2) datasources can't answer the legacy InfluxQL
+    // /query?db=&q= endpoint. Grafana runs Flux variable queries through
+    // POST /api/ds/query, which returns dataframes. Detect Flux via the
+    // datasource version, with a query-shape fallback for older configs.
+    if (this.isFluxDatasource(datasource, query)) {
+      return this.getFluxVariableValues(grafanaInstance, datasource, query, regex);
+    }
+
     try {
       const encodedQuery = encodeURIComponent(query);
       const queryUrl = `/api/datasources/proxy/uid/${datasource.uid}/query?db=${datasource.database}&q=${encodedQuery}`;
-      
+
       const response = await this.grafanaCall(grafanaInstance, queryUrl) as Record<string, unknown>;
       const variableValues: string[] = [];
 
@@ -298,6 +309,131 @@ export class GrafanaClientService {
       this.logger.error(`Error getting InfluxDB variable values:`, error);
       throw error;
     }
+  }
+
+  /**
+   * A Flux datasource is either explicitly marked (jsonData.version === 'Flux')
+   * or gives itself away with Flux syntax in the variable query.
+   */
+  private isFluxDatasource(datasource: GrafanaDatasource, query: string): boolean {
+    if (datasource.jsonData?.version === 'Flux') return true;
+    return /\bimport\s+"|\bfrom\s*\(\s*bucket\s*:|\|>/.test(query);
+  }
+
+  /**
+   * Resolve Flux (InfluxDB v2) variable values via POST /api/ds/query.
+   * The response is Grafana's dataframe format: results[refId].frames[].data.values
+   * with the tag values in a string-typed field (typically "_value").
+   */
+  private async getFluxVariableValues(
+    grafanaInstance: GrafanaInstance,
+    datasource: GrafanaDatasource,
+    query: string,
+    regex?: string,
+  ): Promise<string[]> {
+    const now = Date.now();
+    const body = {
+      queries: [
+        {
+          refId: 'metricFindQuery',
+          query,
+          rawQuery: true,
+          datasource: { type: datasource.type, uid: datasource.uid },
+          datasourceId: datasource.id,
+          maxDataPoints: 1000,
+        },
+      ],
+      from: String(now - 24 * 60 * 60 * 1000),
+      to: String(now),
+    };
+
+    const response = (await this.grafanaPost(grafanaInstance, '/api/ds/query', body)) as Record<string, unknown>;
+    return this.parseFluxVariableFrames(response, regex);
+  }
+
+  /**
+   * Extract distinct string values from a Grafana dataframe response.
+   * Mirrors the InfluxQL parser's regex-capture behavior.
+   */
+  private parseFluxVariableFrames(response: Record<string, unknown>, regex?: string): string[] {
+    const variableValues: string[] = [];
+    const results = response?.results as Record<string, unknown> | undefined;
+    if (!results) return variableValues;
+
+    for (const result of Object.values(results)) {
+      const frames = (result as Record<string, unknown>)?.frames;
+      if (!Array.isArray(frames)) continue;
+
+      for (const frame of frames) {
+        const values = (frame as Record<string, unknown>)?.data as Record<string, unknown> | undefined;
+        const columns = values?.values;
+        if (!Array.isArray(columns) || columns.length === 0) continue;
+
+        // Variable queries return the value in the last column ("_value", or
+        // the value column of a text/value pair). Match the InfluxQL parser.
+        const valueColumn = columns[columns.length - 1];
+        if (!Array.isArray(valueColumn)) continue;
+
+        for (const raw of valueColumn) {
+          if (raw === null || raw === undefined) continue;
+          const variableValue = String(raw);
+          const pushValue = this.applyVariableRegex(variableValue, regex);
+          if (pushValue !== '' && variableValues.indexOf(pushValue) === -1) {
+            variableValues.push(pushValue);
+          }
+        }
+      }
+    }
+
+    return variableValues;
+  }
+
+  /** Apply an optional variable regex, returning the concatenated capture groups. */
+  private applyVariableRegex(variableValue: string, regex?: string): string {
+    if (!regex || regex === '') return variableValue;
+    const valueRegex = new RegExp(regex.replace(/^\/|\/$/g, ''));
+    const matches = variableValue.match(valueRegex);
+    if (!matches) return variableValue;
+    let valueAfterRegex = '';
+    matches.forEach((match: string, i: number) => {
+      if (i > 0) valueAfterRegex += match;
+    });
+    return valueAfterRegex !== '' ? valueAfterRegex : variableValue;
+  }
+
+  /** POST helper for Grafana endpoints (GET counterpart is grafanaCall). */
+  private async grafanaPost(
+    grafanaInstance: GrafanaInstance,
+    endpoint: string,
+    body: unknown,
+  ): Promise<unknown> {
+    const baseUrl = grafanaInstance.server_url || grafanaInstance.client_url;
+
+    const urlValidation = validateGrafanaUrl(baseUrl);
+    if (!urlValidation.isValid) {
+      throw new BadRequestException(`Invalid Grafana URL: ${urlValidation.error}`);
+    }
+
+    const apiUrl = `${baseUrl}${endpoint}`;
+    const agents = await this.proxyResolver.resolve(grafanaInstance.organizationId, grafanaInstance.useProxy);
+
+    const response = await fetch(apiUrl, {
+      method: 'POST',
+      headers: {
+        'Authorization': `Bearer ${grafanaInstance.api_key}`,
+        'Content-Type': 'application/json',
+        'Accept': 'application/json',
+      },
+      body: JSON.stringify(body),
+      ...(agents ? { dispatcher: agents.dispatcher } : {}),
+    } as RequestInit & { dispatcher?: unknown });
+
+    if (!response.ok) {
+      const errorText = await response.text();
+      throw new Error(`HTTP error! status: ${response.status}, message: ${errorText}`);
+    }
+
+    return response.json();
   }
 
   async getPrometheusVariableValues(
