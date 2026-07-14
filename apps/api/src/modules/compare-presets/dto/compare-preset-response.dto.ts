@@ -99,6 +99,22 @@ export class ComparePresetResponseDto {
   })
   series_config?: CompareSeriesConfig[];
 
+  @ApiPropertyOptional({
+    description: 'Compare card display config: thresholds + percentile toggles',
+    example: {
+      warningThreshold: 10,
+      regressionThreshold: 50,
+      minAbsolute: 0,
+      percentiles: { p90: false, p95: true, p99: true },
+    },
+  })
+  display_config?: {
+    warningThreshold: number;
+    regressionThreshold: number;
+    minAbsolute: number;
+    percentiles: { p90: boolean; p95: boolean; p99: boolean };
+  };
+
   @ApiProperty({
     description: 'Whether this preset is available to all users',
     example: false

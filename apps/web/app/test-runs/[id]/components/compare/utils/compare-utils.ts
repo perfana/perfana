@@ -1,4 +1,5 @@
 import { RelatedTestRun, CompareSeries, MetricComparison } from '../types/compare.types';
+import { DiffThresholds } from './compare-bands';
 
 /**
  * Calculate percentage difference between current and baseline values
@@ -162,3 +163,51 @@ export function buildAggregatedComparison(
     percentage_difference: calculatePercentageDifference(currentValue, baselineValue),
   };
 }
+
+/** Per-view display config for the baseline-style compare table. Persisted in presets. */
+export interface DisplayConfig {
+  /** Good→warn band ceiling %, shown as "Warning threshold" in the UI. */
+  warningThreshold: number;
+  /** Warn→bad band ceiling %, shown as "Regression threshold" in the UI. */
+  regressionThreshold: number;
+  /** Min absolute change gate; 0 = off. */
+  minAbsolute: number;
+  percentiles: { p90: boolean; p95: boolean; p99: boolean };
+}
+
+export const DEFAULT_DISPLAY_CONFIG: DisplayConfig = {
+  warningThreshold: 10,
+  regressionThreshold: 50,
+  minAbsolute: 0,
+  percentiles: { p90: false, p95: true, p99: true },
+};
+
+/** Map the UI's warning/regression labels onto the band-logic good/warning fields. */
+export function toDiffThresholds(cfg: DisplayConfig): DiffThresholds {
+  return {
+    good: cfg.warningThreshold,
+    warning: cfg.regressionThreshold,
+    minAbsolute: cfg.minAbsolute > 0 ? cfg.minAbsolute : undefined,
+  };
+}
+
+/** Ordered evaluate-type columns: avg always, then the enabled percentiles. */
+export function getMetricColumns(cfg: DisplayConfig): string[] {
+  const cols = ['avg'];
+  if (cfg.percentiles.p90) cols.push('q90');
+  if (cfg.percentiles.p95) cols.push('q95');
+  if (cfg.percentiles.p99) cols.push('q99');
+  return cols;
+}
+
+/** Report-style column headers. */
+export const METRIC_COLUMN_LABELS: Record<string, string> = {
+  avg: 'AVG',
+  q90: 'P90',
+  q95: 'P95',
+  q99: 'P99',
+};
+
+/** Stable per-row key for graph state maps (rows are unique by dashboard+panel+metric). */
+export const graphKeyOf = (dashboardId: string, panelId: number, metricName: string): string =>
+  `${dashboardId}::${panelId}::${metricName}`;

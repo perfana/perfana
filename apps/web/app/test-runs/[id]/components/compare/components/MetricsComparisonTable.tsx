@@ -1,392 +1,293 @@
 'use client';
 
 import React from 'react';
-import {
-  Box,
-  Typography,
-  Chip,
-  Button,
-  Collapse,
-  CircularProgress
-} from '@mui/material';
-import { BarChart } from '@mui/icons-material';
+import { Box, Typography, Chip, Collapse, CircularProgress, IconButton } from '@mui/material';
+import { ExpandMore, ExpandLess, BarChart } from '@mui/icons-material';
 import {
   MetricComparison,
   RelatedTestRun,
   Panel,
   ApplicationDashboard,
   GraphData,
-  CompareSeries
+  CompareSeries,
 } from '../types/compare.types';
 import {
-  getVisibleColumns,
-  getGridTemplateColumns,
-  getDiffColor,
-  applyUnitConversion,
+  DisplayConfig,
+  toDiffThresholds,
+  getMetricColumns,
+  METRIC_COLUMN_LABELS,
+  graphKeyOf,
   formatCompareNumber,
-  COLUMN_LABELS
 } from '../utils/compare-utils';
+import {
+  bandOf,
+  worstBand,
+  gatedDiffPercent,
+  BAND_COLORS,
+  Band,
+  DiffThresholds,
+} from '../utils/compare-bands';
 import ComparisonPlot from './ComparisonPlot';
 import { TestRun } from '@/types/test-runs';
 import { ALL_AGGREGATED_OPTION } from '@/lib/aggregated-perf-series';
+
+interface MetricRow {
+  metricName: string;
+  dashboardId: string;
+  panelId: number;
+  yAxesFormat?: string;
+  isAggregated: boolean;
+  byColumn: Record<string, MetricComparison>;
+}
 
 interface MetricsComparisonTableProps {
   metricComparisons: MetricComparison[];
   selectedTestRun: RelatedTestRun;
   testRunId: string;
-  showPercentiles: boolean;
+  displayConfig: DisplayConfig;
   seriesSearchText: string;
   selectedMetric: Panel | null;
   selectedDashboard: ApplicationDashboard | null;
   showGraphs: Record<string, boolean>;
   graphData: Record<string, GraphData>;
   graphLoading: Record<string, boolean>;
-  onToggleGraph: (metricName: string) => void;
-  onShowGraphsChange: (update: (prev: Record<string, boolean>) => Record<string, boolean>) => void;
-  onGraphDataChange: (update: (prev: Record<string, GraphData>) => Record<string, GraphData>) => void;
-  onGraphLoadingChange: (update: (prev: Record<string, boolean>) => Record<string, boolean>) => void;
+  onToggleGraph: (row: { dashboardId: string; panelId: number; metricName: string }) => void;
   testRun: TestRun | null;
   relatedTestRuns: RelatedTestRun[];
   showToast: (message: string) => void;
   addedSeries: CompareSeries[];
 }
 
+const fmt = (v: number | null | undefined, unit?: string): string =>
+  v == null ? '—' : formatCompareNumber(v, unit);
+
+function DeltaChip({ diff, thresholds }: { diff: number | null; thresholds: DiffThresholds }) {
+  if (diff == null || diff === 0) {
+    return (
+      <Box component="span" sx={{ display: 'inline-flex', alignItems: 'center', px: 1, py: 0.25,
+        borderRadius: '999px', bgcolor: 'rgba(0,0,0,0.06)', color: 'text.secondary',
+        fontSize: '0.72rem', fontWeight: 700, fontVariantNumeric: 'tabular-nums' }}>—</Box>
+    );
+  }
+  const band = bandOf(diff, thresholds);
+  const color = BAND_COLORS[band];
+  const arrow = diff > 0 ? '▲' : '▼';
+  return (
+    <Box component="span" sx={{ display: 'inline-flex', alignItems: 'center', gap: 0.5, px: 1, py: 0.25,
+      borderRadius: '999px', bgcolor: `${color}22`, color, fontSize: '0.72rem', fontWeight: 700,
+      fontVariantNumeric: 'tabular-nums' }}>
+      {arrow} {diff > 0 ? '+' : ''}{diff.toFixed(1)}%
+    </Box>
+  );
+}
+
+function MagnitudeBar({ diff, band }: { diff: number | null; band: Band }) {
+  let left = 50, width = 0;
+  if (diff != null) {
+    const mag = Math.min(Math.abs(diff), 100) / 2; // 100% fills half the track
+    if (diff >= 0) { left = 50; width = mag; } else { width = mag; left = 50 - mag; }
+  }
+  return (
+    <Box sx={{ position: 'relative', width: 110, height: 4, borderRadius: 2, bgcolor: '#edf0f3' }}>
+      <Box sx={{ position: 'absolute', left: '50%', top: -2, width: '1px', height: 8, bgcolor: '#ccd0d6' }} />
+      <Box sx={{ position: 'absolute', top: 0, height: '100%', borderRadius: 2,
+        left: `${left}%`, width: `${width}%`, bgcolor: BAND_COLORS[band] }} />
+    </Box>
+  );
+}
+
+function Cell({ c, thresholds }: { c: MetricComparison | undefined; thresholds: DiffThresholds }) {
+  if (!c) return <Box sx={{ px: 2, py: 1.5, textAlign: 'right', color: 'text.secondary' }}>—</Box>;
+  const d = gatedDiffPercent(c.current_value, c.selected_value, c.percentage_difference, thresholds.minAbsolute);
+  const band = bandOf(d, thresholds);
+  return (
+    <Box sx={{ px: 2, py: 1.5, display: 'flex', flexDirection: 'column', gap: 0.75, alignItems: 'flex-end' }}>
+      <Box sx={{ display: 'flex', alignItems: 'baseline', gap: 1 }}>
+        <Typography component="span" sx={{ fontSize: '0.9rem', fontWeight: 700, fontVariantNumeric: 'tabular-nums' }}>
+          {fmt(c.current_value, c.yAxesFormat)}
+        </Typography>
+        <Typography component="span" sx={{ fontSize: '0.72rem', fontWeight: 600, color: 'text.secondary', fontVariantNumeric: 'tabular-nums' }}>
+          vs {fmt(c.selected_value, c.yAxesFormat)}
+        </Typography>
+      </Box>
+      <DeltaChip diff={d} thresholds={thresholds} />
+      <MagnitudeBar diff={d} band={band} />
+    </Box>
+  );
+}
+
 export default function MetricsComparisonTable({
   metricComparisons,
   selectedTestRun,
-  testRunId,
-  showPercentiles,
+  displayConfig,
   seriesSearchText,
   selectedMetric,
   showGraphs,
   graphData,
   graphLoading,
   onToggleGraph,
-  onShowGraphsChange,
-  onGraphDataChange,
-  onGraphLoadingChange,
   testRun,
   relatedTestRuns,
   showToast,
-  addedSeries: _addedSeries
 }: MetricsComparisonTableProps) {
-  const aggregatedPercentileCols = Array.from(
-    new Set(
-      metricComparisons
-        .filter(
-          (c) =>
-            c.metric_name.startsWith(`${ALL_AGGREGATED_OPTION} — `) &&
-            ['q50', 'q90', 'q95', 'q99'].includes(c.evaluate_type),
-        )
-        .map((c) => c.evaluate_type),
-    ),
+  const thresholds = toDiffThresholds(displayConfig);
+  const columns = getMetricColumns(displayConfig);
+  const gridTemplateColumns = `minmax(180px, 2fr) ${columns.map(() => 'minmax(150px, 1fr)').join(' ')} 44px`;
+
+  // Build rows, grouped dashboard -> panel -> metric.
+  const search = seriesSearchText.trim().toLowerCase();
+  const dashboards = new Map<string, Map<string, MetricRow[]>>();
+  const rowsByMetric = new Map<string, MetricRow>();
+
+  for (const c of metricComparisons) {
+    if (search && !c.metric_name.toLowerCase().includes(search)) continue;
+    const dashboardId = c.dashboardId ?? 'unknown';
+    const panelId = c.panelId ?? 0;
+    const rowKey = graphKeyOf(dashboardId, panelId, c.metric_name);
+    let row = rowsByMetric.get(rowKey);
+    if (!row) {
+      row = {
+        metricName: c.metric_name,
+        dashboardId,
+        panelId,
+        yAxesFormat: c.yAxesFormat,
+        isAggregated: c.metric_name.startsWith(`${ALL_AGGREGATED_OPTION} — `),
+        byColumn: {},
+      };
+      rowsByMetric.set(rowKey, row);
+      const dashLabel = c.dashboard_label ?? 'Metrics';
+      const panelLabel = c.panel_title ?? '';
+      if (!dashboards.has(dashLabel)) dashboards.set(dashLabel, new Map());
+      const panels = dashboards.get(dashLabel)!;
+      if (!panels.has(panelLabel)) panels.set(panelLabel, []);
+      panels.get(panelLabel)!.push(row);
+    }
+    row.byColumn[c.evaluate_type] = c;
+  }
+
+  const rowDiffs = (row: MetricRow): (number | null)[] =>
+    columns.map((col) => {
+      const c = row.byColumn[col];
+      return c ? gatedDiffPercent(c.current_value, c.selected_value, c.percentage_difference, thresholds.minAbsolute) : null;
+    });
+
+  const legendDot = (color: string, label: string) => (
+    <Box component="span" sx={{ display: 'inline-flex', alignItems: 'center', gap: 0.75 }}>
+      <Box component="span" sx={{ width: 9, height: 9, borderRadius: '50%', bgcolor: color }} /> {label}
+    </Box>
   );
-  const visibleColumns = getVisibleColumns(showPercentiles, aggregatedPercentileCols);
-  const gridTemplateColumns = getGridTemplateColumns(showPercentiles, aggregatedPercentileCols);
-  const panelYAxesFormat = selectedMetric?.yAxesFormat;
-
-  // Group comparisons by metric name
-  const metricGroups = metricComparisons.reduce((groups, comparison) => {
-    if (!groups[comparison.metric_name]) {
-      groups[comparison.metric_name] = [];
-    }
-    groups[comparison.metric_name].push(comparison);
-    return groups;
-  }, {} as Record<string, MetricComparison[]>);
-
-  // Filter groups based on search text
-  const filteredGroups = (() => {
-    if (seriesSearchText === '') {
-      return metricGroups;
-    }
-
-    const filtered = Object.fromEntries(
-      Object.entries(metricGroups).filter(([metricName]) =>
-        metricName.toLowerCase().includes(seriesSearchText.toLowerCase())
-      )
-    );
-
-    // Clean up graph state for metrics that are no longer visible
-    const visibleMetricNames = Object.keys(filtered);
-    const currentGraphKeys = Object.keys(showGraphs);
-    const graphKeysToRemove = currentGraphKeys.filter(key => !visibleMetricNames.includes(key));
-
-    if (graphKeysToRemove.length > 0) {
-      onShowGraphsChange(prev => {
-        const newState = { ...prev };
-        graphKeysToRemove.forEach(key => delete newState[key]);
-        return newState;
-      });
-      onGraphDataChange(prev => {
-        const newState = { ...prev };
-        graphKeysToRemove.forEach(key => delete newState[key]);
-        return newState;
-      });
-      onGraphLoadingChange(prev => {
-        const newState = { ...prev };
-        graphKeysToRemove.forEach(key => delete newState[key]);
-        return newState;
-      });
-    }
-
-    return filtered;
-  })();
 
   return (
-    <>
-      {Object.entries(filteredGroups).map(([metricName, comparisons]) => (
-        <Box key={metricName} sx={{ mb: 3 }}>
-          {/* Table for each metric */}
-          <Box sx={{
-            border: '1px solid',
-            borderColor: 'divider',
-            borderRadius: 1,
-            overflow: 'hidden'
-          }}>
-            {/* Table Header with metric name */}
-            <Box sx={{
-              display: 'grid',
-              gridTemplateColumns,
-              gap: 0,
-              background: 'linear-gradient(135deg, rgba(25, 118, 210, 0.08) 0%, rgba(30, 136, 229, 0.06) 50%, rgba(25, 118, 210, 0.04) 100%)',
-              borderBottom: '2px solid',
-              borderColor: 'rgba(25, 118, 210, 0.15)',
-              boxShadow: '0 1px 3px rgba(0, 0, 0, 0.08)',
-              backdropFilter: 'blur(8px)'
-            }}>
-              <Box sx={{ p: 2.5, borderRight: '1px solid', borderColor: 'rgba(25, 118, 210, 0.15)' }}>
-                <Typography variant="subtitle2" sx={{
-                  fontWeight: 700,
-                  color: 'primary.dark',
-                  fontSize: '0.85rem',
-                  letterSpacing: '0.5px',
-                  wordBreak: 'break-word',
-                  overflowWrap: 'anywhere'
-                }}>
-                  {metricName}
-                </Typography>
-              </Box>
-              {visibleColumns.map((col) => (
-                <Box key={col} sx={{ p: 2.5, borderRight: '1px solid', borderColor: 'rgba(25, 118, 210, 0.15)', textAlign: 'center' }}>
-                  <Typography variant="subtitle2" sx={{
-                    fontWeight: 700,
-                    color: 'primary.dark',
-                    fontSize: '0.85rem',
-                    letterSpacing: '0.5px',
-                    textTransform: 'uppercase'
-                  }}>
-                    {COLUMN_LABELS[col]}
-                  </Typography>
+    <Box>
+      {/* Legend */}
+      <Box sx={{ display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: 2.5, mb: 3,
+        color: 'text.secondary', fontSize: '0.78rem' }}>
+        <span>Each cell: <strong>current</strong> · vs baseline · Δ%. Bar shows regression magnitude.</span>
+        {legendDot(BAND_COLORS.good, `≤ ${displayConfig.warningThreshold}%`)}
+        {legendDot(BAND_COLORS.warn, `${displayConfig.warningThreshold}–${displayConfig.regressionThreshold}%`)}
+        {legendDot(BAND_COLORS.bad, `> ${displayConfig.regressionThreshold}%`)}
+        {displayConfig.minAbsolute > 0 && <span>changes &lt; {displayConfig.minAbsolute} treated as none</span>}
+        <Box component="span" sx={{ ml: 'auto', color: 'text.disabled' }}>
+          baseline: {selectedTestRun.test_run_id}
+        </Box>
+      </Box>
+
+      {Array.from(dashboards.entries()).map(([dashLabel, panels]) => (
+        <Box key={dashLabel} sx={{ mb: 4 }}>
+          <Typography variant="subtitle1" sx={{ fontWeight: 700, mb: 1.5, pl: 1.5,
+            borderLeft: '4px solid', borderColor: 'primary.main' }}>
+            {dashLabel}
+          </Typography>
+
+          {Array.from(panels.entries()).map(([panelLabel, rows]) => {
+            let reg = 0, warn = 0, ok = 0;
+            rows.forEach((row) => {
+              const b = worstBand(rowDiffs(row), thresholds);
+              if (b === 'bad') reg++; else if (b === 'warn') warn++; else ok++;
+            });
+            return (
+              <Box key={panelLabel} sx={{ mb: 2.5, border: '1px solid', borderColor: 'divider',
+                borderRadius: 1, overflow: 'hidden' }}>
+                {/* Panel header */}
+                <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+                  gap: 1, px: 2, py: 1.25, bgcolor: 'action.hover', borderBottom: '1px solid', borderColor: 'divider' }}>
+                  <Typography variant="subtitle2" sx={{ fontWeight: 700 }}>{panelLabel || 'Metrics'}</Typography>
+                  <Box sx={{ display: 'flex', gap: 0.75 }}>
+                    {reg > 0 && <Chip size="small" label={`${reg} regressions`} sx={{ bgcolor: `${BAND_COLORS.bad}22`, color: BAND_COLORS.bad, fontWeight: 700 }} />}
+                    {warn > 0 && <Chip size="small" label={`${warn} warnings`} sx={{ bgcolor: `${BAND_COLORS.warn}22`, color: BAND_COLORS.warn, fontWeight: 700 }} />}
+                    {ok > 0 && <Chip size="small" label={`${ok} within range`} sx={{ bgcolor: `${BAND_COLORS.good}22`, color: BAND_COLORS.good, fontWeight: 700 }} />}
+                  </Box>
                 </Box>
-              ))}
-            </Box>
 
-            {/* Baseline Test Run Row */}
-            <Box sx={{
-              display: 'grid',
-              gridTemplateColumns,
-              gap: 0,
-              backgroundColor: 'background.paper',
-              borderBottom: '1px solid',
-              borderColor: 'divider'
-            }}>
-              <Box sx={{ p: 1.5, borderRight: '1px solid', borderColor: 'divider', display: 'flex', alignItems: 'center', gap: 1 }}>
-                <Chip
-                  label="BASELINE"
-                  size="small"
-                  sx={{
-                    backgroundColor: 'rgba(156, 39, 176, 0.1)',
-                    color: 'rgba(156, 39, 176, 0.9)',
-                    borderRadius: '12px',
-                    fontWeight: 700,
-                    fontSize: '0.65rem',
-                    height: '20px',
-                    border: '1px solid rgba(156, 39, 176, 0.2)'
-                  }}
-                />
-                <Typography variant="caption" color="text.secondary" sx={{ fontWeight: 500, fontSize: '0.75rem' }}>
-                  {selectedTestRun.test_run_id}
-                </Typography>
-              </Box>
-              {visibleColumns.map((evaluateType) => {
-                const comparison = comparisons.find(c => c.evaluate_type === evaluateType);
-                const baselineValue = comparison?.selected_value;
-
-                return (
-                  <Box key={evaluateType} sx={{ p: 1.5, borderRight: '1px solid', borderColor: 'divider', textAlign: 'center' }}>
-                    <Typography variant="body2" sx={{ fontFamily: 'monospace', fontSize: '0.8rem' }}>
-                      {formatCompareNumber(baselineValue, panelYAxesFormat)}
-                    </Typography>
+                {/* Column header */}
+                <Box sx={{ display: 'grid', gridTemplateColumns, alignItems: 'center',
+                  borderBottom: '2px solid', borderColor: 'divider', bgcolor: 'background.paper' }}>
+                  <Box sx={{ px: 2, py: 1 }}>
+                    <Typography variant="caption" sx={{ fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.05em', color: 'text.secondary' }}>Metric</Typography>
                   </Box>
-                );
-              })}
-            </Box>
-
-            {/* Current Test Run Row */}
-            <Box sx={{
-              display: 'grid',
-              gridTemplateColumns,
-              gap: 0,
-              backgroundColor: 'action.hover',
-              borderBottom: '1px solid',
-              borderColor: 'divider'
-            }}>
-              <Box sx={{ p: 1.5, borderRight: '1px solid', borderColor: 'divider', display: 'flex', alignItems: 'center', gap: 1 }}>
-                <Chip
-                  label="CURRENT"
-                  size="small"
-                  sx={{
-                    backgroundColor: 'rgba(25, 118, 210, 0.1)',
-                    color: 'rgba(25, 118, 210, 0.9)',
-                    borderRadius: '12px',
-                    fontWeight: 700,
-                    fontSize: '0.65rem',
-                    height: '20px',
-                    border: '1px solid rgba(25, 118, 210, 0.2)'
-                  }}
-                />
-                <Typography variant="caption" color="text.secondary" sx={{ fontWeight: 500, fontSize: '0.75rem' }}>
-                  {testRunId}
-                </Typography>
-              </Box>
-              {visibleColumns.map((evaluateType) => {
-                const comparison = comparisons.find(c => c.evaluate_type === evaluateType);
-                return (
-                  <Box key={evaluateType} sx={{ p: 1.5, borderRight: '1px solid', borderColor: 'divider', textAlign: 'center' }}>
-                    <Typography variant="body2" sx={{ fontFamily: 'monospace', fontSize: '0.8rem' }}>
-                      {formatCompareNumber(comparison?.current_value ?? null, panelYAxesFormat)}
-                    </Typography>
-                  </Box>
-                );
-              })}
-            </Box>
-
-            {/* Difference Row with absolute and relative values */}
-            <Box sx={{
-              display: 'grid',
-              gridTemplateColumns,
-              gap: 0,
-              backgroundColor: 'rgba(25, 118, 210, 0.04)'
-            }}>
-              <Box sx={{ p: 1.5, borderRight: '1px solid', borderColor: 'divider' }}>
-                <Typography variant="caption" sx={{ fontWeight: 700, color: 'primary.main' }}>
-                  Difference
-                </Typography>
-              </Box>
-              {visibleColumns.map((evaluateType) => {
-                const comparison = comparisons.find(c => c.evaluate_type === evaluateType);
-                const currentValue = comparison?.current_value;
-                const baselineValue = comparison?.selected_value;
-                const absoluteDiff = currentValue !== null && currentValue !== undefined &&
-                  baselineValue !== null && baselineValue !== undefined
-                  ? currentValue - baselineValue
-                  : null;
-                const convertedAbsoluteDiff = applyUnitConversion(absoluteDiff, panelYAxesFormat);
-                const percentDiff = comparison?.percentage_difference;
-
-                return (
-                  <Box key={evaluateType} sx={{ p: 1.5, borderRight: '1px solid', borderColor: 'divider', textAlign: 'center' }}>
-                    {convertedAbsoluteDiff != null && percentDiff != null ? (
-                      <>
-                        <Typography
-                          variant="body2"
-                          sx={{
-                            fontFamily: 'monospace',
-                            fontSize: '0.75rem',
-                            fontWeight: 600,
-                            color: getDiffColor(percentDiff)
-                          }}
-                        >
-                          {convertedAbsoluteDiff > 0 ? '+' : ''}{convertedAbsoluteDiff.toFixed(2)}
-                        </Typography>
-                        <Typography
-                          variant="caption"
-                          sx={{
-                            display: 'block',
-                            fontSize: '0.65rem',
-                            fontWeight: 700,
-                            color: getDiffColor(percentDiff)
-                          }}
-                        >
-                          ({percentDiff > 0 ? '+' : ''}{percentDiff.toFixed(1)}%)
-                        </Typography>
-                      </>
-                    ) : (
-                      <Typography variant="body2" sx={{ fontFamily: 'monospace', fontSize: '0.8rem', color: 'text.secondary' }}>
-                        -
+                  {columns.map((col) => (
+                    <Box key={col} sx={{ px: 2, py: 1, textAlign: 'right' }}>
+                      <Typography variant="caption" sx={{ fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.05em', color: 'text.secondary' }}>
+                        {METRIC_COLUMN_LABELS[col] ?? col.toUpperCase()}
                       </Typography>
-                    )}
-                  </Box>
-                );
-              })}
-            </Box>
+                    </Box>
+                  ))}
+                  <Box />
+                </Box>
 
-            {/* Show graph button row */}
-            <Box sx={{
-              display: 'grid',
-              gridTemplateColumns: '1fr',
-              gap: 0,
-              backgroundColor: 'primary.main',
-              color: 'white'
-            }}>
-              <Box sx={{
-                p: 1.5,
-                display: 'flex',
-                justifyContent: 'center',
-                alignItems: 'center',
-                gap: 1
-              }}>
-                <Button
-                  variant="contained"
-                  size="small"
-                  startIcon={graphLoading[metricName] ? <CircularProgress size={16} color="inherit" /> : <BarChart />}
-                  onClick={() => onToggleGraph(metricName)}
-                  disabled={graphLoading[metricName]}
-                  sx={{
-                    backgroundColor: 'white',
-                    color: 'primary.main',
-                    fontWeight: 600,
-                    fontSize: '0.75rem',
-                    px: 2,
-                    py: 0.5,
-                    minWidth: 'auto',
-                    '&:hover': {
-                      backgroundColor: 'action.selected',
-                      transform: 'translateY(-1px)'
-                    },
-                    '&:disabled': {
-                      backgroundColor: 'grey.200',
-                      color: 'grey.500'
-                    }
-                  }}
-                >
-                  {showGraphs[metricName] ? 'Hide Graph' : 'Show Graph'}
-                </Button>
+                {/* Metric rows */}
+                {rows.map((row) => {
+                  const band = worstBand(rowDiffs(row), thresholds);
+                  const gKey = graphKeyOf(row.dashboardId, row.panelId, row.metricName);
+                  const open = !!showGraphs[gKey];
+                  const loading = !!graphLoading[gKey];
+                  return (
+                    <Box key={gKey}>
+                      <Box sx={{ display: 'grid', gridTemplateColumns, alignItems: 'stretch',
+                        borderBottom: '1px solid', borderColor: 'divider',
+                        borderLeft: '3px solid', borderLeftColor: BAND_COLORS[band] }}>
+                        <Box sx={{ px: 2, py: 1.5, display: 'flex', alignItems: 'center' }}>
+                          <Typography variant="body2" sx={{ fontWeight: 500, wordBreak: 'break-word', overflowWrap: 'anywhere' }}>
+                            {row.metricName}
+                          </Typography>
+                        </Box>
+                        {columns.map((col) => (
+                          <Cell key={col} c={row.byColumn[col]} thresholds={thresholds} />
+                        ))}
+                        <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                          {!row.isAggregated && (
+                            <IconButton size="small" onClick={() => onToggleGraph(row)} disabled={loading}
+                              aria-label={open ? 'Hide graph' : 'Show graph'}>
+                              {loading ? <CircularProgress size={16} /> : open ? <ExpandLess fontSize="small" /> : <ExpandMore fontSize="small" />}
+                            </IconButton>
+                          )}
+                        </Box>
+                      </Box>
+                      <Collapse in={open} unmountOnExit>
+                        <Box sx={{ p: 2, bgcolor: 'action.hover', borderBottom: '1px solid', borderColor: 'divider' }}>
+                          <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, mb: 1, color: 'text.secondary' }}>
+                            <BarChart fontSize="small" />
+                            <Typography variant="caption">{row.metricName}</Typography>
+                          </Box>
+                          <ComparisonPlot
+                            metricName={row.metricName}
+                            graphData={graphData[gKey]}
+                            graphLoading={loading}
+                            selectedMetric={selectedMetric}
+                            testRun={testRun}
+                            relatedTestRuns={relatedTestRuns}
+                            showToast={showToast}
+                          />
+                        </Box>
+                      </Collapse>
+                    </Box>
+                  );
+                })}
               </Box>
-            </Box>
-
-            {/* Expandable graph row */}
-            <Collapse in={showGraphs[metricName]}>
-              <Box sx={{
-                p: 2,
-                backgroundColor: 'action.hover',
-                borderTop: '1px solid',
-                borderColor: 'divider'
-              }}>
-                <ComparisonPlot
-                  metricName={metricName}
-                  graphData={graphData[metricName]}
-                  graphLoading={graphLoading[metricName]}
-                  selectedMetric={selectedMetric}
-                  testRun={testRun}
-                  relatedTestRuns={relatedTestRuns}
-                  showToast={showToast}
-                />
-              </Box>
-            </Collapse>
-          </Box>
+            );
+          })}
         </Box>
       ))}
-    </>
+    </Box>
   );
 }

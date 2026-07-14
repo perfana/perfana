@@ -88,6 +88,7 @@ export default function CompareCard({
     setSelectedTestRun: compareData.setSelectedTestRun,
     setSeriesSearchText: compareData.setSeriesSearchText,
     setShowPercentiles: compareData.setShowPercentiles,
+    setDisplayConfig: compareData.setDisplayConfig,
     fetchDashboardPanels: compareData.fetchDashboardPanels,
   });
 
@@ -262,15 +263,12 @@ export default function CompareCard({
                 metricsLoading={compareData.metricsLoading}
                 seriesSearchText={compareData.seriesSearchText}
                 onSeriesSearchChange={compareData.setSeriesSearchText}
-                showPercentiles={compareData.showPercentiles}
-                onShowPercentilesChange={compareData.setShowPercentiles}
+                displayConfig={compareData.displayConfig}
+                onDisplayConfigChange={compareData.setDisplayConfig}
                 showGraphs={compareData.showGraphs}
                 graphData={compareData.graphData}
                 graphLoading={compareData.graphLoading}
                 onToggleGraph={compareHandlers.toggleGraph}
-                onShowGraphsChange={compareData.setShowGraphs}
-                onGraphDataChange={compareData.setGraphData}
-                onGraphLoadingChange={compareData.setGraphLoading}
                 testRun={testRun}
                 testRunId={testRunId}
                 showToast={showToast}
@@ -294,7 +292,8 @@ export default function CompareCard({
           seriesSearchText: compareData.seriesSearchText,
           showPercentiles: compareData.showPercentiles,
           source: compareData.selectedSource,
-          addedSeries: compareData.addedSeries
+          addedSeries: compareData.addedSeries,
+          displayConfig: compareData.displayConfig
         }}
       />
     </Box>

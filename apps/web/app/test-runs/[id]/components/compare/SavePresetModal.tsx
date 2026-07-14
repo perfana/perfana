@@ -20,6 +20,7 @@ import {
 } from '@mui/material';
 import { Save } from '@mui/icons-material';
 import { CompareSeriesConfig } from '@/lib/compare-presets';
+import { DisplayConfig } from './utils/compare-utils';
 
 /**
  * Represents a series added for comparison (matching TrendsCard pattern)
@@ -34,6 +35,7 @@ export interface CompareSeries {
   source: 'grafana' | 'dynatrace' | 'performance-metrics';
   metricsSourceId?: string;
   isAggregated?: boolean;
+  yAxesFormat?: string;
 }
 
 interface SavePresetModalProps {
@@ -62,6 +64,7 @@ export interface CurrentFilterState {
   showPercentiles: boolean;
   source?: 'grafana' | 'dynatrace' | 'performance-metrics';
   addedSeries?: CompareSeries[]; // Series added for comparison
+  displayConfig?: DisplayConfig;
 }
 
 export interface PresetFormData {
@@ -77,6 +80,12 @@ export interface PresetFormData {
   panel_title?: string;
   baseline_test_run_id?: string;
   series_config?: CompareSeriesConfig[]; // Series to restore when applying preset
+  display_config?: {
+    warningThreshold: number;
+    regressionThreshold: number;
+    minAbsolute: number;
+    percentiles: { p90: boolean; p95: boolean; p99: boolean };
+  };
   created_for_test_run_id?: string;
   is_global: boolean;
 }
@@ -166,7 +175,8 @@ export default function SavePresetModal({
       metricName: series.metricName,
       source: series.source,
       metricsSourceId: series.metricsSourceId,
-      isAggregated: series.isAggregated
+      isAggregated: series.isAggregated,
+      yAxesFormat: series.yAxesFormat
     }));
   };
   
@@ -186,6 +196,7 @@ export default function SavePresetModal({
     panel_title: currentFilters.selectedMetric?.title,
     baseline_test_run_id: currentFilters.selectedTestRun?.test_run_id,
     series_config: getSeriesToSave(),
+    display_config: currentFilters.displayConfig,
     created_for_test_run_id: currentTestRunId,
     is_global: true
   });
@@ -209,6 +220,7 @@ export default function SavePresetModal({
         panel_title: currentFilters.selectedMetric?.title,
         baseline_test_run_id: currentFilters.selectedTestRun?.test_run_id,
         series_config: getSeriesToSave(),
+        display_config: currentFilters.displayConfig,
         created_for_test_run_id: currentTestRunId
       }));
     }
@@ -272,6 +284,7 @@ export default function SavePresetModal({
       panel_title: currentFilters.selectedMetric?.title,
       baseline_test_run_id: currentFilters.selectedTestRun?.test_run_id,
       series_config: getSeriesToSave(),
+      display_config: currentFilters.displayConfig,
       created_for_test_run_id: currentTestRunId,
       is_global: true
     });

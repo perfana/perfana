@@ -13,6 +13,7 @@ import {
 import { TestRun } from '@/types/test-runs';
 import { getSourceType } from '@/lib/metrics-source-utils';
 import { ALL_AGGREGATED_OPTION, buildAggregatedMetricName } from '@/lib/aggregated-perf-series';
+import { graphKeyOf } from '../utils/compare-utils';
 
 interface UseCompareHandlersProps {
   testRun: TestRun | null;
@@ -200,6 +201,7 @@ export function useCompareHandlers({
           metricName: isAggregated ? buildAggregatedMetricName(selectedMetric.title) : metricName,
           source: selectedSource,
           metricsSourceId: selectedMetric.metricsSourceId || selectedDashboard.metrics_source_id,
+          yAxesFormat: selectedMetric.yAxesFormat,
           isAggregated,
         };
       })
@@ -243,29 +245,22 @@ export function useCompareHandlers({
     setSelectedMetrics, setShowGraphs, setGraphData
   ]);
 
-  // Fetch graph data for a specific metric
-  const fetchGraphData = useCallback(async (metricName: string) => {
+  // Fetch graph data for a specific row (dashboard+panel+metric).
+  const fetchGraphData = useCallback(async (row: { dashboardId: string; panelId: number; metricName: string }) => {
     if (!selectedTestRun) return;
-
-    const seriesInfo = addedSeries.find(s => s.metricName === metricName);
-    if (!seriesInfo) return;
-
-    const graphKey = metricName;
+    const graphKey = graphKeyOf(row.dashboardId, row.panelId, row.metricName);
     setGraphLoading(prev => ({ ...prev, [graphKey]: true }));
 
     try {
       const params = new URLSearchParams({
         currentTestRunId: testRun?.test_run_id || testRunId,
         baselineTestRunId: selectedTestRun.test_run_id,
-        applicationDashboardId: seriesInfo.dashboardId,
-        panelId: seriesInfo.panelId.toString(),
-        metricName: metricName
+        applicationDashboardId: row.dashboardId,
+        panelId: row.panelId.toString(),
+        metricName: row.metricName,
       });
 
-      const response = await authenticatedFetch(
-        `/metrics/ds-metrics-comparison?${params.toString()}`
-      );
-
+      const response = await authenticatedFetch(`/metrics/ds-metrics-comparison?${params.toString()}`);
       if (response.ok) {
         const data: GraphData = await response.json();
         setGraphData(prev => ({ ...prev, [graphKey]: data }));
@@ -278,17 +273,15 @@ export function useCompareHandlers({
     } finally {
       setGraphLoading(prev => ({ ...prev, [graphKey]: false }));
     }
-  }, [selectedTestRun, addedSeries, testRun?.test_run_id, testRunId, showToast, setGraphLoading, setGraphData]);
+  }, [selectedTestRun, testRun?.test_run_id, testRunId, showToast, setGraphLoading, setGraphData]);
 
-  // Toggle graph visibility
-  const toggleGraph = useCallback(async (metricName: string) => {
-    const graphKey = metricName;
+  // Toggle graph visibility for a row.
+  const toggleGraph = useCallback(async (row: { dashboardId: string; panelId: number; metricName: string }) => {
+    const graphKey = graphKeyOf(row.dashboardId, row.panelId, row.metricName);
     const isCurrentlyShown = showGraphs[graphKey];
-
     if (!isCurrentlyShown) {
-      await fetchGraphData(metricName);
+      await fetchGraphData(row);
     }
-
     setShowGraphs(prev => ({ ...prev, [graphKey]: !isCurrentlyShown }));
   }, [showGraphs, fetchGraphData, setShowGraphs]);
 

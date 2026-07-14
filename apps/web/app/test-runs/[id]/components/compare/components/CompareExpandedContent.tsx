@@ -15,6 +15,7 @@ import {
   MetricComparison,
   GraphData,
 } from '../types';
+import { DisplayConfig } from '../utils/compare-utils';
 import { DynatraceMetric } from '@/lib/dynatrace';
 import {
   CompareSelectionPanel,
@@ -75,17 +76,14 @@ interface CompareExpandedContentProps {
   metricsLoading: boolean;
   seriesSearchText: string;
   onSeriesSearchChange: (text: string) => void;
-  showPercentiles: boolean;
-  onShowPercentilesChange: (show: boolean) => void;
+  displayConfig: DisplayConfig;
+  onDisplayConfigChange: (cfg: DisplayConfig) => void;
 
   // Graph state
   showGraphs: Record<string, boolean>;
   graphData: Record<string, GraphData>;
   graphLoading: Record<string, boolean>;
-  onToggleGraph: (name: string) => void;
-  onShowGraphsChange: (fn: (prev: Record<string, boolean>) => Record<string, boolean>) => void;
-  onGraphDataChange: (fn: (prev: Record<string, GraphData>) => Record<string, GraphData>) => void;
-  onGraphLoadingChange: (fn: (prev: Record<string, boolean>) => Record<string, boolean>) => void;
+  onToggleGraph: (row: { dashboardId: string; panelId: number; metricName: string }) => void;
 
   // Test run context
   testRun: TestRun | null;
@@ -128,15 +126,12 @@ export function CompareExpandedContent({
   metricsLoading,
   seriesSearchText,
   onSeriesSearchChange,
-  showPercentiles,
-  onShowPercentilesChange,
+  displayConfig,
+  onDisplayConfigChange,
   showGraphs,
   graphData,
   graphLoading,
   onToggleGraph,
-  onShowGraphsChange,
-  onGraphDataChange,
-  onGraphLoadingChange,
   testRun,
   testRunId,
   showToast,
@@ -263,8 +258,8 @@ export function CompareExpandedContent({
                 metricsLoading={metricsLoading}
                 seriesSearchText={seriesSearchText}
                 onSeriesSearchChange={onSeriesSearchChange}
-                showPercentiles={showPercentiles}
-                onShowPercentilesChange={onShowPercentilesChange}
+                displayConfig={displayConfig}
+                onDisplayConfigChange={onDisplayConfigChange}
                 selectedDashboard={selectedDashboard}
                 selectedMetric={selectedMetric}
                 onSavePresetClick={onSavePresetClick}
@@ -272,9 +267,6 @@ export function CompareExpandedContent({
                 graphData={graphData}
                 graphLoading={graphLoading}
                 onToggleGraph={onToggleGraph}
-                onShowGraphsChange={onShowGraphsChange}
-                onGraphDataChange={onGraphDataChange}
-                onGraphLoadingChange={onGraphLoadingChange}
                 testRun={testRun}
                 testRunId={testRunId}
                 selectedTestRun={selectedTestRun}
