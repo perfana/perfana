@@ -223,6 +223,13 @@ function createDataFrameFromFrames(frame: unknown): Record<string, unknown>[] {
 
   // Get column names using EXACT Python logic from get_columns_from_frame
   const columnNames = fields.map(field => {
+    // Normalize the timestamp column to the canonical name "time". Grafana labels
+    // the time field by schema type ("time"), but its name varies by datasource:
+    // InfluxDB-v2/Flux keeps it as "_time", InfluxQL/Prometheus as "Time". Downstream
+    // (transformTimestamps, convertToLongFormat) only recognizes a column literally
+    // named "time"; without this, Flux "_time" is treated as a metric, real values
+    // inherit the current timestamp, and dedup collapses the series to one stale point.
+    if (field.type === 'time') return 'time';
     // Python: field["config"]["displayNameFromDS"] if "config" in field.keys() and "displayNameFromDS" in field["config"] else field["name"]
     return (field.config && field.config.displayNameFromDS) ? field.config.displayNameFromDS : field.name;
   });
