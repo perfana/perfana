@@ -116,7 +116,7 @@ export function StatisticalDrawerContent({
                           size="small"
                           color={threshold.result === 'improvement' ? 'success' : 'error'}
                           variant="outlined"
-                          icon={threshold.side === 'above' ? <ArrowDropUp /> : <ArrowDropDown />}
+                          icon={threshold.side === 'above' ? <ArrowDropUp /> : threshold.side === 'below' ? <ArrowDropDown /> : undefined}
                           sx={{ height: '22px', fontSize: '0.7rem', '& .MuiChip-icon': { fontSize: '1.25rem', ml: 0.25, mr: -0.75 } }}
                         />
                       ) : threshold.result === 'skipped' ? (

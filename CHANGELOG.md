@@ -4,6 +4,11 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
+## [0.2.61.58] - 2026-07-14
+
+### Fixed
+- **Threshold Result now matches the displayed valid range.** The three-state classifier trusted ADAPT's per-check `isDifference` flag first, so a row could show "In range" even when its test value sat outside the range printed next to it (e.g. IQR range `4.32% – 4.32%`, test `6.06%`). Classification is now geometric — test value vs the shown lower/upper bounds decides in-range/improvement/regression — so the chip always agrees with the numbers in the row. `isDifference` is used only as a fallback when a row has no numeric bounds to show.
+
 ## [0.2.61.57] - 2026-07-14
 
 ### Changed

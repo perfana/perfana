@@ -73,6 +73,21 @@ describe('generateThresholdData — three-state classification', () => {
     expect(rows['Percent'].side).toBe('above');
   });
 
+  it('value outside the displayed range is a breach even when ADAPT isDifference is false', () => {
+    // Reported case: IQR range 4.32% to 4.32%, test 6.06% (above) but checks.iqr.isDifference=false.
+    // The icon must agree with the shown range, not ADAPT's separate-axis IQR verdict.
+    const rows = byName(generateThresholdData(makeDrawer({
+      test: 6.06,
+      higherIsBetter: false,
+      lower: { pct: 4.32, iqr: 4.32, overall: 4.32 },
+      upper: { pct: 4.32, iqr: 4.32, overall: 4.32 },
+      checks: { pct: false, iqr: false, abs: false },
+    }) as unknown, '%'));
+
+    expect(rows['Interquartile Range Factor'].result).toBe('regression');
+    expect(rows['Interquartile Range Factor'].side).toBe('above');
+  });
+
   it('within range is neutral (inRange), no side', () => {
     const rows = byName(generateThresholdData(makeDrawer({
       test: 24,

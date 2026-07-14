@@ -97,16 +97,23 @@ export function generateThresholdData(drawerData: unknown, unit?: string): Thres
       config.metricClassification?.higherIsBetter ??
       drawerData.metric_classification?.higherIsBetter;
 
-    // Three-state classification: in range → neutral; otherwise the side of the range
-    // the value fell on, judged against metric direction, decides improvement vs regression.
+    // Three-state classification, driven by the *displayed* valid range so the icon always
+    // agrees with the range/value shown next to it. Test value inside the range → neutral;
+    // outside → the side it fell on, judged against metric direction, decides improvement vs
+    // regression. ADAPT's per-check isDifference is only a fallback when no bounds are shown
+    // (its IQR/abs checks compare a different axis than the mean, so they can disagree with
+    // the geometric range — the range is what the user reads).
     const classify = (
       isDifference: boolean | undefined,
       lower: number | undefined,
       upper: number | undefined,
     ): { result: 'inRange' | 'improvement' | 'regression'; side?: 'above' | 'below' } => {
+      if (lower === undefined && upper === undefined) {
+        return { result: isDifference ? 'regression' : 'inRange' };
+      }
       const below = lower !== undefined && testValue < lower;
       const above = upper !== undefined && testValue > upper;
-      if (isDifference === false || (!below && !above)) return { result: 'inRange' };
+      if (!below && !above) return { result: 'inRange' };
       const side: 'above' | 'below' = above ? 'above' : 'below';
       // Unknown direction defaults to regression (the alerting-safe interpretation).
       const favorable =
