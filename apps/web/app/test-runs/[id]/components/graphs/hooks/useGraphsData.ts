@@ -13,6 +13,16 @@ import {
 } from '../types';
 import { extractYAxisFormat, generateChartName, PERFORMANCE_METRICS_PANEL_UNITS } from '../utils';
 import { getFilteredDashboards, computeAvailableSources, determineSource } from '../utils';
+import {
+  ALL_AGGREGATED_OPTION,
+  getAggregateSpec,
+  buildAggregatedMetricName,
+} from '@/lib/aggregated-perf-series';
+import {
+  offerAggregatedOption,
+  aggregatedYAxisFormat,
+  fetchAggregatedSeriesData,
+} from '../utils/aggregated-series';
 import { isDynatrace, isGrafana, isPerformanceTest, getSourceType } from '@/lib/metrics-source-utils';
 import { TestRun } from '@/types/test-runs';
 
@@ -311,7 +321,7 @@ export function useGraphsData({ testRun, testRunId, _graphsExpanded }: UseGraphs
 
       if (response.ok) {
         const metricNames = await response.json();
-        setMetrics(metricNames as string[]);
+        setMetrics(offerAggregatedOption(selectedSource, panelId, metricNames as string[]));
       } else {
         console.warn('Failed to fetch metrics:', response.statusText);
         setMetrics([]);
@@ -322,7 +332,7 @@ export function useGraphsData({ testRun, testRunId, _graphsExpanded }: UseGraphs
     } finally {
       setMetricsLoading(false);
     }
-  }, [testRun]);
+  }, [testRun, selectedSource]);
 
   /**
    * Handle dashboard selection
@@ -377,6 +387,9 @@ export function useGraphsData({ testRun, testRunId, _graphsExpanded }: UseGraphs
    * Fetch metric data for a series from the backend
    */
   const fetchSeriesData = useCallback(async (series: SeriesConfig): Promise<MetricDataPoint[]> => {
+    if (series.metricName.startsWith(ALL_AGGREGATED_OPTION)) {
+      return fetchAggregatedSeriesData(testRun?.test_run_id || testRunId, series);
+    }
     try {
       const params = new URLSearchParams({
         applicationDashboardId: series.dashboardId,
@@ -425,17 +438,21 @@ export function useGraphsData({ testRun, testRunId, _graphsExpanded }: UseGraphs
     const metricsSourceId = selectedPanel.metricsSourceId || selectedDashboard.metrics_source_id;
     const source = determineSource(selectedPanel.type, selectedDashboard.dashboard_uid);
 
-    const newSeriesList: SeriesConfig[] = selectedMetrics.map(metricName => ({
-      id: `${applicationDashboardId}-${selectedPanel.id}-${metricName}-${Date.now()}-${Math.random()}`,
-      dashboardId: applicationDashboardId,
-      dashboardLabel: selectedDashboard.dashboard_label,
-      panelId: selectedPanel.id,
-      panelTitle: selectedPanel.title,
-      metricName: metricName,
-      source: source,
-      yAxisFormat: selectedPanel.yAxesFormat,
-      metricsSourceId: metricsSourceId
-    }));
+    const newSeriesList: SeriesConfig[] = selectedMetrics.map(metricName => {
+      const isAggregated = metricName === ALL_AGGREGATED_OPTION;
+      const spec = isAggregated ? getAggregateSpec(selectedPanel.id) : null;
+      return {
+        id: `${applicationDashboardId}-${selectedPanel.id}-${isAggregated ? 'aggregated' : metricName}-${Date.now()}-${Math.random()}`,
+        dashboardId: applicationDashboardId,
+        dashboardLabel: selectedDashboard.dashboard_label,
+        panelId: selectedPanel.id,
+        panelTitle: selectedPanel.title,
+        metricName: isAggregated ? buildAggregatedMetricName(selectedPanel.title) : metricName,
+        source: source,
+        yAxisFormat: isAggregated && spec ? aggregatedYAxisFormat(spec.metric) : selectedPanel.yAxesFormat,
+        metricsSourceId: metricsSourceId
+      };
+    });
 
     // Filter out duplicates
     const filteredNewSeries = newSeriesList.filter(newSeries =>

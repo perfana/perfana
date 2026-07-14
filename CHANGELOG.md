@@ -4,6 +4,11 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
+## [0.2.61.60] - 2026-07-14
+
+### Changed
+- **Graphs card "All aggregated" is now a metric-dropdown option, matching Trends/Compare.** Replaced the standalone toggle (which overlaid three fixed, non-savable avg-only run-wide series) with a per-panel **"All aggregated"** entry in the metric dropdown, offered for aggregatable performance-test panels. Selecting it adds a normal, editable, savable series that uses the panel's actual statistic (avg/p90/p95/p99) via the shared `aggregated-perf-series` helper. Removed the Graphs card's private duplicate aggregation util and the overlay hook. Frontend-only.
+
 ## [0.2.61.59] - 2026-07-14
 
 ### Added
