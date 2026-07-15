@@ -12,7 +12,7 @@ import {
 } from '../types';
 import { TestRun } from '@/types/test-runs';
 import { getSourceType, isPerformanceTest } from '@/lib/metrics-source-utils';
-import { ALL_AGGREGATED_OPTION, buildAggregatedMetricName } from '@/lib/aggregated-perf-series';
+import { ALL_AGGREGATED_OPTION, buildAggregatedMetricName, collapsePerfRtPanels } from '@/lib/aggregated-perf-series';
 import { buildUrlPanels } from '@/lib/url-perf-panels';
 import { graphKeyOf } from '../utils/compare-utils';
 
@@ -153,7 +153,7 @@ export function useCompareHandlers({
                 });
               }
             }
-            setPanels([...panels, ...buildUrlPanels(dashboard.id)]);
+            setPanels(collapsePerfRtPanels([...panels, ...buildUrlPanels(dashboard.id)]));
           } else {
             setPanels([]);
           }

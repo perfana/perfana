@@ -5,6 +5,7 @@ import {
   shouldOfferAllAggregated,
   buildAggregatedMetricName,
   fetchAggregatedStatistics,
+  collapsePerfRtPanels,
 } from '../aggregated-perf-series';
 import { authenticatedFetch } from '@/lib/api';
 
@@ -26,6 +27,24 @@ describe('aggregated-perf-series', () => {
     expect(shouldOfferAllAggregated('grafana', 102)).toBe(false);      // panel-id collision must not leak
     expect(shouldOfferAllAggregated('dynatrace', 202)).toBe(false);
     expect(shouldOfferAllAggregated('performance-metrics', 206)).toBe(false); // unsupported panel
+  });
+
+  it('collapses redundant RT percentile panels, relabelling the Avg keeper', () => {
+    const panels = [
+      { id: 101, title: 'Transaction RT Avg' },
+      { id: 102, title: 'Transaction RT P90' },
+      { id: 103, title: 'Transaction RT P95' },
+      { id: 104, title: 'Transaction RT P99' },
+      { id: 105, title: 'Transaction Error Rate' },
+      { id: 201, title: 'Request RT Avg' },
+      { id: 202, title: 'Request RT P90' },
+      { id: 210, title: 'URL RT' }, // not aggregatable — untouched
+    ];
+    const out = collapsePerfRtPanels(panels);
+    expect(out.map(p => p.id)).toEqual([101, 105, 201, 210]);
+    expect(out.find(p => p.id === 101)?.title).toBe('Transaction RT');
+    expect(out.find(p => p.id === 201)?.title).toBe('Request RT');
+    expect(out.find(p => p.id === 105)?.title).toBe('Transaction Error Rate'); // error panel kept as-is
   });
 
   it('builds a readable, unique series name from the panel title', () => {

@@ -23,6 +23,7 @@ import {
   getAggregateSpec,
   shouldOfferAllAggregated,
   fetchAggregatedStatistics,
+  collapsePerfRtPanels,
 } from '@/lib/aggregated-perf-series';
 import {
   isUrlPanel,
@@ -208,7 +209,7 @@ export function useCompareData({ testRun, testRunId, compareExpanded }: UseCompa
         // The `/grafana/dashboards` payload is raw Grafana JSON and never carries
         // an `applicationDashboardId` — the caller passes the DB row id explicitly.
         const withUrl = isPerfMetrics
-          ? [...filteredPanels, ...buildUrlPanels(applicationDashboardId)]
+          ? collapsePerfRtPanels([...filteredPanels, ...buildUrlPanels(applicationDashboardId)])
           : filteredPanels;
 
         setPanels(withUrl);
