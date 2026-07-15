@@ -1,4 +1,4 @@
-import { sortValueOf } from '../MetricsComparisonTable';
+import { sortValueOf, buildNameMatcher } from '../MetricsComparisonTable';
 import type { MetricComparison } from '../../types/compare.types';
 
 const c = (cur: number | null, sel: number | null): MetricComparison => ({
@@ -17,5 +17,25 @@ describe('sortValueOf', () => {
   it('returns NaN for missing cells or values so they sort to the end', () => {
     expect(sortValueOf(undefined, 'absolute', 0)).toBeNaN();
     expect(sortValueOf(c(null, 100), 'absolute', 0)).toBeNaN();
+  });
+});
+
+describe('buildNameMatcher', () => {
+  it('returns null for an empty search (no filtering)', () => {
+    expect(buildNameMatcher('   ', false)).toBeNull();
+  });
+  it('substring-matches case-insensitively when regex is off', () => {
+    const m = buildNameMatcher('cart', false)!;
+    expect(m('T01_Add_To_Cart')).toBe(true);
+    expect(m('Homepage')).toBe(false);
+  });
+  it('regex-matches case-insensitively when regex is on', () => {
+    const m = buildNameMatcher('^(get|post)_', true)!;
+    expect(m('GET_users')).toBe(true);
+    expect(m('DELETE_users')).toBe(false);
+  });
+  it('matches nothing for an invalid regex', () => {
+    const m = buildNameMatcher('(unclosed', true)!;
+    expect(m('anything')).toBe(false);
   });
 });

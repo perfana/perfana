@@ -46,6 +46,7 @@ interface MetricsComparisonTableProps {
   testRunId: string;
   displayConfig: DisplayConfig;
   seriesSearchText: string;
+  seriesSearchRegex: boolean;
   selectedMetric: Panel | null;
   selectedDashboard: ApplicationDashboard | null;
   showGraphs: Record<string, boolean>;
@@ -106,6 +107,22 @@ function SortIndicator({ active, dir }: { active: boolean; dir: SortDir }) {
     : <ArrowDownward sx={{ fontSize: 13 }} />;
 }
 
+/**
+ * Build a metric-name filter. Empty search → null (no filtering). Regex mode
+ * compiles a case-insensitive RegExp; an invalid pattern matches nothing so the
+ * table clears (the search field surfaces the "invalid" state separately).
+ */
+export function buildNameMatcher(rawSearch: string, regex: boolean): ((n: string) => boolean) | null {
+  const q = rawSearch.trim();
+  if (!q) return null;
+  if (regex) {
+    try { const re = new RegExp(q, 'i'); return (n) => re.test(n); }
+    catch { return () => false; }
+  }
+  const lower = q.toLowerCase();
+  return (n) => n.toLowerCase().includes(lower);
+}
+
 /** Signed sort value for a row's column, or NaN when the cell is missing. */
 export function sortValueOf(c: MetricComparison | undefined, mode: SortMode, minAbsolute: number): number {
   if (!c) return NaN;
@@ -142,6 +159,7 @@ export default function MetricsComparisonTable({
   selectedTestRun,
   displayConfig,
   seriesSearchText,
+  seriesSearchRegex,
   selectedMetric,
   showGraphs,
   graphData,
@@ -190,12 +208,14 @@ export default function MetricsComparisonTable({
   };
 
   // Build rows, grouped dashboard -> panel -> metric.
-  const search = seriesSearchText.trim().toLowerCase();
+  // Row filter: substring (case-insensitive) or, when seriesSearchRegex is on,
+  // a case-insensitive regex. An invalid regex matches nothing.
+  const matchName = buildNameMatcher(seriesSearchText, seriesSearchRegex);
   const dashboards = new Map<string, Map<string, MetricRow[]>>();
   const rowsByMetric = new Map<string, MetricRow>();
 
   for (const c of metricComparisons) {
-    if (search && !c.metric_name.toLowerCase().includes(search)) continue;
+    if (matchName && !matchName(c.metric_name)) continue;
     const dashboardId = c.dashboardId ?? 'unknown';
     const panelId = c.panelId ?? 0;
     const rowKey = graphKeyOf(dashboardId, panelId, c.metric_name);

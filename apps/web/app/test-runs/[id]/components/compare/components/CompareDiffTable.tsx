@@ -3,7 +3,7 @@
 import React from 'react';
 import {
   Box, Typography, TextField, IconButton, Button, CircularProgress,
-  Popover, FormControlLabel, Checkbox, Stack, Divider,
+  Popover, FormControlLabel, Checkbox, Stack, Divider, Tooltip,
 } from '@mui/material';
 import { Close, BookmarkBorder, Tune } from '@mui/icons-material';
 import {
@@ -42,8 +42,12 @@ export function CompareDiffTable({
   relatedTestRuns, showToast,
 }: CompareDiffTableProps) {
   const [cfgAnchor, setCfgAnchor] = React.useState<HTMLElement | null>(null);
+  const [useRegex, setUseRegex] = React.useState(false);
   const uniqueSeriesNames = Array.from(new Set(metricComparisons.map(m => m.metric_name)));
   const shouldShowSeriesSearch = uniqueSeriesNames.length > 1;
+
+  const regexError = useRegex && seriesSearchText.trim().length > 0 &&
+    (() => { try { new RegExp(seriesSearchText); return false; } catch { return true; } })();
 
   const setPct = (key: 'p90' | 'p95' | 'p99', v: boolean) =>
     onDisplayConfigChange({ ...displayConfig, percentiles: { ...displayConfig.percentiles, [key]: v } });
@@ -72,12 +76,26 @@ export function CompareDiffTable({
         {shouldShowSeriesSearch && (
           <Box sx={{ flex: 1 }}>
             <Typography variant="subtitle2" gutterBottom sx={{ fontWeight: 600 }}>Search Series</Typography>
-            <TextField fullWidth size="small" placeholder="Search series by metric name..."
+            <TextField fullWidth size="small"
+              placeholder={useRegex ? 'Filter by regex, e.g. ^(GET|POST) …' : 'Search series by metric name...'}
               value={seriesSearchText} onChange={(e) => onSeriesSearchChange(e.target.value)}
-              InputProps={{ endAdornment: seriesSearchText && (
-                <IconButton size="small" onClick={() => onSeriesSearchChange('')} sx={{ mr: -1 }}>
-                  <Close fontSize="small" />
-                </IconButton>) }} />
+              error={!!regexError}
+              helperText={regexError ? 'Invalid regular expression' : undefined}
+              InputProps={{ endAdornment: (
+                <Box sx={{ display: 'flex', alignItems: 'center', mr: -1 }}>
+                  <Tooltip title={useRegex ? 'Regex filtering on' : 'Filter with a regular expression'} arrow>
+                    <IconButton size="small" onClick={() => setUseRegex(v => !v)}
+                      aria-label="Toggle regex filtering" aria-pressed={useRegex}
+                      color={useRegex ? 'primary' : 'default'}>
+                      <Box component="span" sx={{ fontSize: '0.8rem', fontWeight: 700, fontFamily: 'monospace' }}>.*</Box>
+                    </IconButton>
+                  </Tooltip>
+                  {seriesSearchText && (
+                    <IconButton size="small" onClick={() => onSeriesSearchChange('')} aria-label="Clear search">
+                      <Close fontSize="small" />
+                    </IconButton>
+                  )}
+                </Box>) }} />
           </Box>
         )}
         <Button variant="outlined" size="small" startIcon={<Tune />} onClick={(e) => setCfgAnchor(e.currentTarget)}
@@ -118,6 +136,7 @@ export function CompareDiffTable({
         testRunId={testRunId}
         displayConfig={displayConfig}
         seriesSearchText={seriesSearchText}
+        seriesSearchRegex={useRegex}
         selectedMetric={selectedMetric}
         selectedDashboard={selectedDashboard}
         showGraphs={showGraphs}
