@@ -375,6 +375,11 @@ export class TestRunsQueryService {
     return this.performanceService.getUrlDistinctNames(testRunId, isAdmin, orgIds);
   }
 
+  async getSamplerUrlMap(testRunId: string, userId: string, roles: string[]) {
+    const { orgIds, isAdmin } = await this.resolveOrganizationIds(userId, roles);
+    return this.performanceService.getSamplerUrlMap(testRunId, isAdmin, orgIds);
+  }
+
   async getTransactionSamples(
     testRunId: string,
     transactionName: string,

@@ -3398,6 +3398,31 @@ describe('TestRunsPerformanceQueryService', () => {
       expect(testRunRepo.query).not.toHaveBeenCalled();
     });
   });
+
+  describe('getSamplerUrlMap', () => {
+    it('reduces query rows into a metric_name -> normalized_url map (admin path)', async () => {
+      (testRunRepo.query as jest.Mock).mockResolvedValueOnce([
+        { metric_name: 'T04_Payment.checkout', normalized_url: '/api/checkout/{id}' },
+        { metric_name: 'T01_Home.home', normalized_url: '/home' },
+        { metric_name: 'T02_NoUrl.thing', normalized_url: null },
+      ]);
+
+      const map = await service.getSamplerUrlMap('run-1', true, []);
+
+      const sql = (testRunRepo.query as jest.Mock).mock.calls[0][0] as string;
+      // Key must be transaction_name.sampler_name to match ds_metric_statistics (panel 201).
+      expect(sql).toMatch(/s\.transaction_name \|\| '\.' \|\| s\.sampler_name/);
+      expect(sql).toMatch(/JOIN\s+url_patterns/i);
+      // Requests with no normalized URL are omitted (caller falls back to name).
+      expect(map).toEqual({ 'T04_Payment.checkout': '/api/checkout/{id}', 'T01_Home.home': '/home' });
+    });
+
+    it('returns {} for a non-admin with no organizations', async () => {
+      const map = await service.getSamplerUrlMap('run-1', false, []);
+      expect(map).toEqual({});
+      expect(testRunRepo.query).not.toHaveBeenCalled();
+    });
+  });
 });
 
 /**

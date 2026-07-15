@@ -2802,4 +2802,51 @@ export class TestRunsPerformanceQueryService {
       throw new DatabaseException('Failed to retrieve URL distinct names', error as Error);
     }
   }
+
+  /**
+   * Map of Request-RT metric name -> normalized URL for a run, for the Compare
+   * card's Request RT dimension (mirrors the perf-analysis samples join). The
+   * key is `transaction_name.sampler_name` — identical to `ds_metric_statistics.
+   * metric_name` for panel 201, so the frontend can join by metric name. Only
+   * requests that resolve to a `url_patterns.normalized_url` are included; a
+   * request with no pattern is omitted so the caller falls back to the bare
+   * name. When a request spans multiple url_hashes, the highest-count one wins.
+   */
+  async getSamplerUrlMap(
+    testRunId: string,
+    isAdmin: boolean,
+    organizationIds: string[],
+  ): Promise<Record<string, string>> {
+    if (!isAdmin && organizationIds.length === 0) return {};
+    try {
+      const orgClause = isAdmin ? '' : 'AND sut.organization_id = ANY($2::uuid[])';
+      const query = `
+      SELECT DISTINCT ON (s.transaction_name || '.' || s.sampler_name)
+        s.transaction_name || '.' || s.sampler_name AS metric_name,
+        LOWER(up.normalized_url) AS normalized_url
+      FROM test_run_sampler_stats s
+      JOIN test_runs tr           ON tr.test_run_id = s.test_run_id
+      JOIN systems_under_test sut ON sut.id = tr.system_under_test_id
+      JOIN url_patterns up
+        ON  up.url_hash          = s.url_hash
+        AND up.system_under_test = s.system_under_test
+        AND up.test_environment  = s.test_environment
+      WHERE s.test_run_id = $1
+        AND s.ramp_up_excluded = true
+        AND s.total_count > 0
+        ${orgClause}
+      ORDER BY s.transaction_name || '.' || s.sampler_name, s.total_count DESC
+    `;
+      const params: unknown[] = isAdmin ? [testRunId] : [testRunId, organizationIds];
+      const rows: Array<{ metric_name: string; normalized_url: string }> =
+        await withRequestEm(this.testRunRepo).query(query, params);
+      const map: Record<string, string> = {};
+      for (const r of rows) {
+        if (r.metric_name && r.normalized_url) map[r.metric_name] = r.normalized_url;
+      }
+      return map;
+    } catch (error) {
+      throw new DatabaseException('Failed to retrieve sampler URL map', error as Error);
+    }
+  }
 }
