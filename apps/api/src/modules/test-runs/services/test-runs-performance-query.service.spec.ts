@@ -3376,6 +3376,28 @@ describe('TestRunsPerformanceQueryService', () => {
       expect(testRunRepo.query).not.toHaveBeenCalled();
     });
   });
+
+  describe('getUrlDistinctNames', () => {
+    it('returns the mapped list of normalized URLs from the query rows (admin path)', async () => {
+      (testRunRepo.query as jest.Mock).mockResolvedValueOnce([
+        { normalized_url: '/api/user/{id}' },
+        { normalized_url: '/orders/{id}' },
+      ]);
+
+      const urls = await service.getUrlDistinctNames('run-1', true, []);
+
+      const sql = (testRunRepo.query as jest.Mock).mock.calls[0][0] as string;
+      expect(sql).toMatch(/FROM\s+test_run_sampler_stats/i);
+      expect(sql).toMatch(/ramp_up_excluded\s*=\s*true/);
+      expect(urls).toEqual(['/api/user/{id}', '/orders/{id}']);
+    });
+
+    it('returns [] for a non-admin with no organizations', async () => {
+      const urls = await service.getUrlDistinctNames('run-1', false, []);
+      expect(urls).toEqual([]);
+      expect(testRunRepo.query).not.toHaveBeenCalled();
+    });
+  });
 });
 
 /**

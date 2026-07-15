@@ -2682,9 +2682,10 @@ export class TestRunsPerformanceQueryService {
     if (requested.length === 0) return [];
     if (!isAdmin && organizationIds.length === 0) return [];
 
-    const orgClause = isAdmin ? '' : 'AND sut.organization_id = ANY($2::uuid[])';
+    try {
+      const orgClause = isAdmin ? '' : 'AND sut.organization_id = ANY($2::uuid[])';
 
-    const query = `
+      const query = `
       WITH agg AS (
         SELECT
           s.test_run_id,
@@ -2730,38 +2731,41 @@ export class TestRunsPerformanceQueryService {
       ORDER BY a.total_count DESC
     `;
 
-    const params: unknown[] = isAdmin ? [requested] : [requested, organizationIds];
-    const rows: Array<Record<string, unknown>> = await withRequestEm(this.testRunRepo).query(query, params);
+      const params: unknown[] = isAdmin ? [requested] : [requested, organizationIds];
+      const rows: Array<Record<string, unknown>> = await withRequestEm(this.testRunRepo).query(query, params);
 
-    return rows.map(row => {
-      const totalCount = this.mapper.parseInt(row.total_count) ?? undefined;
-      let statistics: { avg?: number; q50?: number; q90?: number; q95?: number; q99?: number; count?: number };
-      if (metric === 'response_time') {
-        statistics = {
-          avg: this.mapper.parseFloat(row.avg_response_time) ?? undefined,
-          q50: this.mapper.parseFloat(row.p50) ?? undefined,
-          q90: this.mapper.parseFloat(row.p90) ?? undefined,
-          q95: this.mapper.parseFloat(row.p95) ?? undefined,
-          q99: this.mapper.parseFloat(row.p99) ?? undefined,
+      return rows.map(row => {
+        const totalCount = this.mapper.parseInt(row.total_count) ?? undefined;
+        let statistics: { avg?: number; q50?: number; q90?: number; q95?: number; q99?: number; count?: number };
+        if (metric === 'response_time') {
+          statistics = {
+            avg: this.mapper.parseFloat(row.avg_response_time) ?? undefined,
+            q50: this.mapper.parseFloat(row.p50) ?? undefined,
+            q90: this.mapper.parseFloat(row.p90) ?? undefined,
+            q95: this.mapper.parseFloat(row.p95) ?? undefined,
+            q99: this.mapper.parseFloat(row.p99) ?? undefined,
+          };
+        } else {
+          const scalarCol =
+            metric === 'error_percentage' ? 'error_percentage'
+            : metric === 'throughput'     ? 'throughput'
+            : metric === 'latency'        ? 'avg_latency'
+            :                               'avg_connect_time';
+          statistics = { avg: this.mapper.parseFloat(row[scalarCol]) ?? undefined, count: totalCount };
+        }
+        return {
+          test_run_id: row.test_run_id as string,
+          panel_title: 'URL',
+          metric_name: row.normalized_url as string,
+          created_at: '',
+          version: null,
+          annotations: null,
+          statistics,
         };
-      } else {
-        const scalarCol =
-          metric === 'error_percentage' ? 'error_percentage'
-          : metric === 'throughput'     ? 'throughput'
-          : metric === 'latency'        ? 'avg_latency'
-          :                               'avg_connect_time';
-        statistics = { avg: this.mapper.parseFloat(row[scalarCol]) ?? undefined, count: totalCount };
-      }
-      return {
-        test_run_id: row.test_run_id as string,
-        panel_title: 'URL',
-        metric_name: row.normalized_url as string,
-        created_at: '',
-        version: null,
-        annotations: null,
-        statistics,
-      };
-    });
+      });
+    } catch (error) {
+      throw new DatabaseException('Failed to retrieve URL metric statistics', error as Error);
+    }
   }
 
   /**
@@ -2774,8 +2778,9 @@ export class TestRunsPerformanceQueryService {
     organizationIds: string[],
   ): Promise<string[]> {
     if (!isAdmin && organizationIds.length === 0) return [];
-    const orgClause = isAdmin ? '' : 'AND sut.organization_id = ANY($2::uuid[])';
-    const query = `
+    try {
+      const orgClause = isAdmin ? '' : 'AND sut.organization_id = ANY($2::uuid[])';
+      const query = `
       SELECT DISTINCT COALESCE(up.normalized_url, s.url_hash) AS normalized_url
       FROM test_run_sampler_stats s
       JOIN test_runs tr           ON tr.test_run_id = s.test_run_id
@@ -2790,8 +2795,11 @@ export class TestRunsPerformanceQueryService {
         ${orgClause}
       ORDER BY 1
     `;
-    const params: unknown[] = isAdmin ? [testRunId] : [testRunId, organizationIds];
-    const rows: Array<{ normalized_url: string }> = await withRequestEm(this.testRunRepo).query(query, params);
-    return rows.map(r => r.normalized_url).filter(Boolean);
+      const params: unknown[] = isAdmin ? [testRunId] : [testRunId, organizationIds];
+      const rows: Array<{ normalized_url: string }> = await withRequestEm(this.testRunRepo).query(query, params);
+      return rows.map(r => r.normalized_url).filter(Boolean);
+    } catch (error) {
+      throw new DatabaseException('Failed to retrieve URL distinct names', error as Error);
+    }
   }
 }
