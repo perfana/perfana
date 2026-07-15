@@ -4,6 +4,15 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
+## [0.2.61.74] - 2026-07-15
+
+### Fixed
+- **Compare card no longer shows an empty graph for URL RT rows.** The virtual URL panels (`URL RT` 210, plus URL Error Rate/Throughput/Latency/Connect Time) are aggregate-only — their stats come from the `test_run_sampler_stats` rollup, which has no time dimension. But the graph toggle called `/metrics/ds-metrics-comparison`, which reads the `ds_metrics` table (Grafana/Dynatrace time-series only), so URL rows always expanded to a blank "no series" chart. `MetricsComparisonTable` now hides the graph toggle for URL panels (`isUrlPanel(row.panelId)`), same as it already does for aggregated rows. The compare table stats are unaffected.
+
+### Changed
+- **Added Series chips are grouped by dashboard with a header per group.** `AddedSeriesDisplay` was a flat chip list; it now buckets chips by `dashboardLabel` (first-seen order) under a small caption header, so a comparison spanning several dashboards is readable at a glance. The existing collapse-past-8 behavior is unchanged.
+- **Select Series multi-select collapses when many series are picked.** Added `limitTags={8}` to the series `Autocomplete` in `CompareSelectionPanel`, so selecting a large set shows the first 8 chips plus a `+N` pill instead of growing the field to full height — matching the Added Series section's collapse threshold.
+
 ## [0.2.61.73] - 2026-07-15
 
 ### Added

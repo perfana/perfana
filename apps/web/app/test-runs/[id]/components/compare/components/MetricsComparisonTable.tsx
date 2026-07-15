@@ -28,6 +28,7 @@ import {
   DiffThresholds,
 } from '../utils/compare-bands';
 import ComparisonPlot from './ComparisonPlot';
+import { isUrlPanel } from '@/lib/url-perf-panels';
 import { TestRun } from '@/types/test-runs';
 import { ALL_AGGREGATED_OPTION } from '@/lib/aggregated-perf-series';
 
@@ -378,7 +379,8 @@ export default function MetricsComparisonTable({
                           <Cell key={col} c={row.byColumn[col]} thresholds={thresholds} />
                         ))}
                         <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-                          {!row.isAggregated && (
+                          {/* URL/perf-test panels are aggregate-only (no ds_metrics time-series), so no graph. */}
+                          {!row.isAggregated && !isUrlPanel(row.panelId) && (
                             <IconButton size="small" onClick={() => onToggleGraph(row)} disabled={loading}
                               aria-label={open ? 'Hide graph' : 'Show graph'}>
                               {loading ? <CircularProgress size={16} /> : open ? <ExpandLess fontSize="small" /> : <ExpandMore fontSize="small" />}
