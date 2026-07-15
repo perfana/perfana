@@ -572,7 +572,8 @@ describe('DynatracePipeline', () => {
         expect.objectContaining({
           apiToken: 'env-api-token',
           platformToken: 'env-platform-token',
-        })
+        }),
+        undefined, // no proxy dispatcher when the instance has no proxy configured
       );
     });
 
@@ -1244,13 +1245,16 @@ describe('DynatracePipeline', () => {
       await pipeline.execute(input);
 
       // Assert
-      expect(DynatraceAPIClient).toHaveBeenCalledWith({
-        host: saasConfig.host,
-        apiToken: 'api-token',
-        platformToken: 'platform-token',
-        dynatraceType: 'saas',
-        maxConcurrent: 5,
-      });
+      expect(DynatraceAPIClient).toHaveBeenCalledWith(
+        {
+          host: saasConfig.host,
+          apiToken: 'api-token',
+          platformToken: 'platform-token',
+          dynatraceType: 'saas',
+          maxConcurrent: 5,
+        },
+        undefined, // no proxy dispatcher when the instance has no proxy configured
+      );
     });
 
     it('should create API client with maxConcurrent limit', async () => {
@@ -1273,7 +1277,8 @@ describe('DynatracePipeline', () => {
       expect(DynatraceAPIClient).toHaveBeenCalledWith(
         expect.objectContaining({
           maxConcurrent: 5,
-        })
+        }),
+        undefined, // no proxy dispatcher when the instance has no proxy configured
       );
     });
   });

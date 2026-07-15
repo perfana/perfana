@@ -1,7 +1,12 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
-import { GrafanaInstance, ProxyServer } from '@perfana/shared/entities';
+// Direct entity imports (not the '@perfana/shared/entities' barrel): when this
+// service is pulled in transitively (e.g. via VariableDetectorService) the barrel
+// can still be mid-init, leaving ProxyServer undefined at @InjectRepository()
+// decoration time — NestJS then throws a spurious circular-dependency error.
+import { GrafanaInstance } from '@perfana/shared/entities/grafana-instance.entity';
+import { ProxyServer } from '@perfana/shared/entities/proxy-server.entity';
 import { validateUrl, sanitizeUrl } from '@perfana/shared/security';
 import { buildProxyAgent } from '@perfana/shared/services/proxy';
 

@@ -45,22 +45,21 @@ interface UseDashboardManagementReturn {
     label: string,
     variables: VariableValue[],
     systemId: string,
-    systemName: string,
     environment: string
   ) => Promise<void>;
   handleEditDashboard: (dashboard: ApplicationDashboard) => void;
   handleSubmitEditDashboard: (
     label: string,
     variables: VariableValue[],
-    systemName: string,
+    systemId: string,
     environment: string
   ) => Promise<void>;
   handleDeleteDashboard: (dashboard: ApplicationDashboard) => Promise<void>;
-  handleConfirmDelete: (systemName: string, environment: string) => Promise<void>;
+  handleConfirmDelete: (systemId: string, environment: string) => Promise<void>;
   handleBatchDeleteDashboards: (
     ids: string[],
     deleteFromGrafana: boolean,
-    systemName: string,
+    systemId: string,
     environment: string
   ) => Promise<void>;
 
@@ -189,7 +188,6 @@ export function useDashboardManagement(): UseDashboardManagementReturn {
     label: string,
     variables: VariableValue[],
     systemId: string,
-    systemName: string,
     environment: string
   ) => {
     try {
@@ -224,7 +222,7 @@ export function useDashboardManagement(): UseDashboardManagementReturn {
         throw new Error('Failed to add dashboard configuration');
       }
 
-      await fetchApplicationDashboards(systemName, environment);
+      await fetchApplicationDashboards(systemId, environment);
       setAddDashboardOpen(false);
     } finally {
       setFormLoading(false);
@@ -241,7 +239,7 @@ export function useDashboardManagement(): UseDashboardManagementReturn {
   const handleSubmitEditDashboard = useCallback(async (
     label: string,
     variables: VariableValue[],
-    systemName: string,
+    systemId: string,
     environment: string
   ) => {
     if (!editingDashboard) return;
@@ -267,7 +265,7 @@ export function useDashboardManagement(): UseDashboardManagementReturn {
         throw new Error('Failed to update dashboard configuration');
       }
 
-      await fetchApplicationDashboards(systemName, environment);
+      await fetchApplicationDashboards(systemId, environment);
       setEditDashboardOpen(false);
       setEditingDashboard(null);
     } finally {
@@ -303,7 +301,7 @@ export function useDashboardManagement(): UseDashboardManagementReturn {
   }, []);
 
   // Confirm delete
-  const handleConfirmDelete = useCallback(async (systemName: string, environment: string) => {
+  const handleConfirmDelete = useCallback(async (systemId: string, environment: string) => {
     if (!deletingDashboard) return;
 
     try {
@@ -327,7 +325,7 @@ export function useDashboardManagement(): UseDashboardManagementReturn {
         throw new Error(message);
       }
 
-      await fetchApplicationDashboards(systemName, environment);
+      await fetchApplicationDashboards(systemId, environment);
       setDeleteConfirmOpen(false);
       setDeletingDashboard(null);
       setDeleteInfo(null);
@@ -347,7 +345,7 @@ export function useDashboardManagement(): UseDashboardManagementReturn {
   const handleBatchDeleteDashboards = useCallback(async (
     ids: string[],
     deleteFromGrafanaFlag: boolean,
-    systemName: string,
+    systemId: string,
     environment: string
   ) => {
     await Promise.all(
@@ -362,7 +360,7 @@ export function useDashboardManagement(): UseDashboardManagementReturn {
       })
     );
 
-    await fetchApplicationDashboards(systemName, environment);
+    await fetchApplicationDashboards(systemId, environment);
   }, [fetchApplicationDashboards]);
 
   // Handle dashboard tag toggle

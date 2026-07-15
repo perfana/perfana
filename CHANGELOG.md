@@ -4,6 +4,15 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
+## [0.2.61.61] - 2026-07-15
+
+### Fixed
+- **Grafana dashboard list refreshes in place after add / edit / delete.** In System-under-test settings → Grafana dashboards, adding, editing, or deleting a dashboard left the table blank until a full page reload. The list refetch passed the system *display name* into the `?systemId=` query param, which matches on the system UUID, so it returned an empty list; a reload worked only because the initial load uses the route id. `handleSubmitDashboard`, `handleSubmitEditDashboard`, `handleConfirmDelete`, and `handleBatchDeleteDashboards` now refetch with the actual systemId. Frontend-only.
+- **Dynatrace card opens on the Services tab.** The expanded card's primary tabs rendered Hosts at index 0 (the default) and Services at index 1, contradicting the component's own "Services | Hosts" order. Since the Hosts tab is disabled when a test run has no host entities, a services-only run opened to a disabled, empty tab with all Services content hidden. Services is now the first/default primary tab. Frontend-only.
+
+### Internal
+- **Test-suite cleanup that turbo's fail-fast had been masking.** A single stale entity snapshot aborted `turbo test` early, hiding real failures downstream. Fixing it surfaced (and this change repairs) broken suites across grafana-sync (`@InjectRepository(ProxyServer)` circular-import via a barrel), worker (DynatracePipeline mocks missing the new `proxyDispatcher` arg; ADAPT golden-file tests now gate on the exact snapshot instead of any data), plus lint (two `any` casts) and dead-code (seven over-exported symbols) cleanup. No product behavior change from the test/lint work.
+
 ## [0.2.61.60] - 2026-07-14
 
 ### Changed

@@ -1,5 +1,5 @@
-export type SutFilter = 'bySut' | 'byTestRunVarchar' | 'byTestRunUuid' | 'byAppDashboard' | 'byTestEnvironment' | 'byReference';
-export type SutGroup = 'core' | 'optional' | 'raw' | 'shared';
+type SutFilter = 'bySut' | 'byTestRunVarchar' | 'byTestRunUuid' | 'byAppDashboard' | 'byTestEnvironment' | 'byReference';
+type SutGroup = 'core' | 'optional' | 'raw' | 'shared';
 
 export interface SutResource {
   table: string;
