@@ -4,6 +4,11 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
+## [0.2.61.70] - 2026-07-15
+
+### Added
+- **Compare card: Request RT rows show the normalized URL.** When comparing performance-metrics "Request RT", each request row now displays its normalized URL (e.g. `/api/checkout/{id}`) as a grey second line under the request name, matching the Performance Analysis card's URL source. New read-only endpoint `GET /test-runs/:testRunId/sampler-url-map` returns a `{ "transaction.sampler": "normalized/url" }` map for the run, joining `test_run_sampler_stats.url_hash → url_patterns.normalized_url` (highest-count url_hash wins per request; requests with no pattern are omitted so the row falls back to the bare name). The map key is `transaction_name.sampler_name` to match `ds_metric_statistics.metric_name` for panel 201, so the frontend joins by metric name. The map is fetched once, only when a Request RT panel is present, and org-scoped identically to the sibling URL endpoints. Also fixed two stale Compare-card tests (`useCompareData`, `useCompareHandlers`) that still asserted the P90 request panel survived after the v0.2.61.63 RT-panel collapse.
+
 ## [0.2.61.69] - 2026-07-15
 
 ### Fixed
