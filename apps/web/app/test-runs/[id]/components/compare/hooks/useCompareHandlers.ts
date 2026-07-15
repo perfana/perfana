@@ -11,8 +11,9 @@ import {
   RelatedTestRun,
 } from '../types';
 import { TestRun } from '@/types/test-runs';
-import { getSourceType } from '@/lib/metrics-source-utils';
+import { getSourceType, isPerformanceTest } from '@/lib/metrics-source-utils';
 import { ALL_AGGREGATED_OPTION, buildAggregatedMetricName } from '@/lib/aggregated-perf-series';
+import { buildUrlPanels } from '@/lib/url-perf-panels';
 import { graphKeyOf } from '../utils/compare-utils';
 
 interface UseCompareHandlersProps {
@@ -46,7 +47,7 @@ interface UseCompareHandlersProps {
   setGraphLoading: (loading: Record<string, boolean> | ((prev: Record<string, boolean>) => Record<string, boolean>)) => void;
 
   // Fetch functions
-  fetchDashboardPanels: (uid: string) => Promise<Panel[]>;
+  fetchDashboardPanels: (uid: string, isPerfMetrics?: boolean, applicationDashboardId?: string) => Promise<Panel[]>;
   fetchDynatraceMetricsList: (label: string) => Promise<void>;
   fetchPanelMetrics: (dashboardId: string, panelId: number, metricsSourceId?: string) => Promise<string[]>;
 }
@@ -152,14 +153,14 @@ export function useCompareHandlers({
                 });
               }
             }
-            setPanels(panels);
+            setPanels([...panels, ...buildUrlPanels(dashboard.id)]);
           } else {
             setPanels([]);
           }
         }).catch(() => setPanels([]));
       }
     } else if (dashboard.dashboard_uid) {
-      fetchDashboardPanels(dashboard.dashboard_uid);
+      fetchDashboardPanels(dashboard.dashboard_uid, isPerformanceTest(dashboard), dashboard.id);
     }
   }, [
     testRun,

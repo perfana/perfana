@@ -14,6 +14,7 @@ import {
 } from '../types';
 import { TestRun } from '@/types/test-runs';
 import { DEFAULT_DISPLAY_CONFIG, DisplayConfig } from '../utils/compare-utils';
+import { isPerformanceTest } from '@/lib/metrics-source-utils';
 
 interface UseComparePresetsProps {
   testRun: TestRun | null;
@@ -37,7 +38,7 @@ interface UseComparePresetsProps {
   setDisplayConfig: (config: DisplayConfig) => void;
 
   // Fetch functions
-  fetchDashboardPanels: (uid: string) => Promise<Panel[]>;
+  fetchDashboardPanels: (uid: string, isPerfMetrics?: boolean, applicationDashboardId?: string) => Promise<Panel[]>;
 }
 
 export function useComparePresets({
@@ -119,7 +120,7 @@ export function useComparePresets({
           setSelectedDashboard(dashboard);
 
           if (preset.panel_id && preset.panel_title) {
-            await fetchDashboardPanels(dashboard.dashboard_uid);
+            await fetchDashboardPanels(dashboard.dashboard_uid, isPerformanceTest(dashboard), dashboard.id);
 
             setTimeout(() => {
               setSelectedMetric({

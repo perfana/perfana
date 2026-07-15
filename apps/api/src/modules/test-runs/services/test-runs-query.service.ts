@@ -360,6 +360,21 @@ export class TestRunsQueryService {
     return this.performanceService.getAggregatedMetricStatistics(testRunIds, metric, stat, isAdmin, orgIds);
   }
 
+  async getUrlMetricStatistics(
+    testRunIds: string[],
+    userId: string,
+    roles: string[],
+    metric: 'response_time' | 'error_percentage' | 'throughput' | 'latency' | 'connect_time',
+  ) {
+    const { orgIds, isAdmin } = await this.resolveOrganizationIds(userId, roles);
+    return this.performanceService.getUrlMetricStatistics(testRunIds, metric, isAdmin, orgIds);
+  }
+
+  async getUrlDistinctNames(testRunId: string, userId: string, roles: string[]) {
+    const { orgIds, isAdmin } = await this.resolveOrganizationIds(userId, roles);
+    return this.performanceService.getUrlDistinctNames(testRunId, isAdmin, orgIds);
+  }
+
   async getTransactionSamples(
     testRunId: string,
     transactionName: string,

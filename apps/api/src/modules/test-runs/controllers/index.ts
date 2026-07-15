@@ -10,6 +10,7 @@
  * - TestRunsDashboardController: Dashboard statistics and summaries
  * - TestRunsErrorsController: Error analysis and grouped error statistics
  * - TestRunsAggregatedTimeseriesController: 60-second bucketed timeseries for aggregated SLO charts
+ * - TestRunsUrlMetricsController: Per-normalized-URL statistics and distinct URL names (Compare card URL dimension)
  * - TestRunsDataSourcesController: Connected data sources, traces, flamegraph, hotspots, dashboard snapshot, Dynatrace problems
  * - TestController: Test run creation via /test endpoint
  * - ConfigController: Test configuration management
@@ -25,6 +26,7 @@ export { TestRunsComparisonController } from './test-runs-comparison.controller'
 export { TestRunsDashboardController } from './test-runs-dashboard.controller';
 export { TestRunsErrorsController } from './test-runs-errors.controller';
 export { TestRunsAggregatedTimeseriesController } from './test-runs-aggregated-timeseries.controller';
+export { TestRunsUrlMetricsController } from './test-runs-url-metrics.controller';
 export { TestController } from './test.controller';
 export { ConfigController } from './config.controller';
 export { InitController } from './init.controller';

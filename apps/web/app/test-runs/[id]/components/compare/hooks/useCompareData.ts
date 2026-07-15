@@ -24,6 +24,13 @@ import {
   shouldOfferAllAggregated,
   fetchAggregatedStatistics,
 } from '@/lib/aggregated-perf-series';
+import {
+  isUrlPanel,
+  getUrlPanelMetric,
+  buildUrlPanels,
+  fetchUrlDistinctNames,
+  fetchUrlMetricStatistics,
+} from '@/lib/url-perf-panels';
 
 interface UseCompareDataProps {
   testRun: TestRun | null;
@@ -175,7 +182,11 @@ export function useCompareData({ testRun, testRunId, compareExpanded }: UseCompa
   }, [testRun]);
 
   // Load Grafana panels when dashboard selected
-  const fetchDashboardPanels = useCallback(async (dashboardUid: string): Promise<Panel[]> => {
+  const fetchDashboardPanels = useCallback(async (
+    dashboardUid: string,
+    isPerfMetrics = false,
+    applicationDashboardId = '',
+  ): Promise<Panel[]> => {
     if (!dashboardUid) return [];
 
     try {
@@ -189,12 +200,19 @@ export function useCompareData({ testRun, testRunId, compareExpanded }: UseCompa
         const dashboardData = await response.json();
         const dashboard = Array.isArray(dashboardData) ? dashboardData[0] : dashboardData;
 
-        const filteredPanels = dashboard?.panels?.filter((panel: Panel) =>
+        const filteredPanels: Panel[] = dashboard?.panels?.filter((panel: Panel) =>
           SUPPORTED_PANEL_TYPES.includes(panel.type)
         ) || [];
 
-        setPanels(filteredPanels);
-        return filteredPanels;
+        // Inject virtual URL panels for performance-metrics dashboards only.
+        // The `/grafana/dashboards` payload is raw Grafana JSON and never carries
+        // an `applicationDashboardId` — the caller passes the DB row id explicitly.
+        const withUrl = isPerfMetrics
+          ? [...filteredPanels, ...buildUrlPanels(applicationDashboardId)]
+          : filteredPanels;
+
+        setPanels(withUrl);
+        return withUrl;
       } else {
         setPanels([]);
         return [];
@@ -238,6 +256,17 @@ export function useCompareData({ testRun, testRunId, compareExpanded }: UseCompa
     if (!applicationDashboardId || !panelId || !testRun) {
       setAvailableMetrics([]);
       return [];
+    }
+
+    if (isUrlPanel(panelId)) {
+      setAvailableMetricsLoading(true);
+      try {
+        const names = await fetchUrlDistinctNames(testRun.test_run_id);
+        setAvailableMetrics(names);
+        return names;
+      } finally {
+        setAvailableMetricsLoading(false);
+      }
     }
 
     try {
@@ -311,22 +340,33 @@ export function useCompareData({ testRun, testRunId, compareExpanded }: UseCompa
       const evaluateTypes = ['avg', 'q90', 'q95', 'q99'];
 
       for (const [, group] of seriesGroups) {
-        const params = new URLSearchParams({
-          applicationDashboardId: group.dashboardId,
-          panelId: group.panelId.toString(),
-          system: testRun.systems_under_test?.name || '',
-          environment: testRun.test_environment || '',
-          workload: testRun.workload || '',
-        });
-        if (group.metricsSourceId) params.set('metricsSourceId', group.metricsSourceId);
+        let allData: MetricStatistic[];
 
-        const response = await authenticatedFetch(
-          `/metrics/ds-metric-statistics?${params.toString()}`,
-          { headers: { 'Content-Type': 'application/json' } },
-        );
-        if (!response.ok) continue;
+        if (isUrlPanel(group.panelId)) {
+          const metric = getUrlPanelMetric(group.panelId);
+          if (!metric) continue;
+          allData = await fetchUrlMetricStatistics(
+            testRun.test_run_id,
+            [testRun.test_run_id, selectedTestRun.test_run_id],
+            metric,
+          );
+        } else {
+          const params = new URLSearchParams({
+            applicationDashboardId: group.dashboardId,
+            panelId: group.panelId.toString(),
+            system: testRun.systems_under_test?.name || '',
+            environment: testRun.test_environment || '',
+            workload: testRun.workload || '',
+          });
+          if (group.metricsSourceId) params.set('metricsSourceId', group.metricsSourceId);
+          const response = await authenticatedFetch(
+            `/metrics/ds-metric-statistics?${params.toString()}`,
+            { headers: { 'Content-Type': 'application/json' } },
+          );
+          if (!response.ok) continue;
+          allData = await response.json();
+        }
 
-        const allData: MetricStatistic[] = await response.json();
         const relevant = new Set(group.metricNames);
         const filtered = allData.filter(item => relevant.has(item.metric_name));
         const currentData = filtered.filter(item => item.test_run_id === testRun.test_run_id);
