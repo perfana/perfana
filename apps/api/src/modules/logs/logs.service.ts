@@ -45,7 +45,7 @@ export class LogsService {
       stdout: true,
       stderr: true,
       timestamps: false,
-    } as unknown as any);
+    } as unknown as Docker.ContainerLogsOptions & { follow: true });
 
     // follow:true -> a live stream; follow:false -> a Buffer. Normalize to a Readable.
     const srcStream: Readable = opts.follow ? (source as unknown as Readable) : Readable.from(source as unknown as Buffer);

@@ -81,6 +81,7 @@ exports[`auditableFields snapshot — every OwnedResource entity has a stable de
     "seriesConfig",
     "createdForTestRunId",
     "isGlobal",
+    "displayConfig",
   ],
   "DeepLink": null,
   "DsAdaptConclusion": null,
@@ -109,6 +110,7 @@ exports[`auditableFields snapshot — every OwnedResource entity has a stable de
     "dynatraceType",
     "perfanaTestRunIdAttribute",
     "perfanaRequestNameAttribute",
+    "useProxy",
   ],
   "DynatraceEntityMapping": [
     "dynatraceConfigId",
@@ -171,6 +173,7 @@ exports[`auditableFields snapshot — every OwnedResource entity has a stable de
     "orgId",
     "username",
     "snapshotInstance",
+    "useProxy",
   ],
   "GraphPreset": [
     "name",
@@ -244,11 +247,16 @@ exports[`auditableFields snapshot — every OwnedResource entity has a stable de
     "metric_classification",
     "config_overrides",
   ],
+  "ProxyServer": [
+    "proxyUrl",
+    "username",
+  ],
   "PyroscopeInstance": [
     "label",
     "pyroscopeUrl",
     "backendUrl",
     "pyroscopeStandAlone",
+    "useProxy",
   ],
   "ReportTemplate": [
     "name",
@@ -303,6 +311,7 @@ exports[`auditableFields snapshot — every OwnedResource entity has a stable de
     "tracingApiUrl",
     "tracingUi",
     "tracingIframeAllowed",
+    "useProxy",
   ],
   "TracingService": [
     "systemUnderTestId",

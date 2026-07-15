@@ -78,7 +78,7 @@ const toFiniteNumber = (value: number | string | null | undefined): number | nul
 
 export type ReportStatus = 'ok' | 'warning' | 'regression' | 'improvement' | 'na';
 
-export const STATUS_LABEL: Record<ReportStatus, string> = {
+const STATUS_LABEL: Record<ReportStatus, string> = {
   ok: 'OK',
   warning: 'WARNING',
   regression: 'REGRESSION',
@@ -86,7 +86,7 @@ export const STATUS_LABEL: Record<ReportStatus, string> = {
   na: 'N/A',
 };
 
-export const STATUS_PILL_KIND: Record<ReportStatus, PillKind> = {
+const STATUS_PILL_KIND: Record<ReportStatus, PillKind> = {
   ok: 'good',
   warning: 'warn',
   regression: 'bad',

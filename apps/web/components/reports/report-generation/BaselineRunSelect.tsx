@@ -24,7 +24,7 @@ export interface BaselineCandidate {
   annotations?: string[];
 }
 
-export const formatCandidateTime = (c: BaselineCandidate): string =>
+const formatCandidateTime = (c: BaselineCandidate): string =>
   new Date(c.start_time || c.created_at).toLocaleString('en-US', {
     year: 'numeric',
     month: 'short',
@@ -33,10 +33,10 @@ export const formatCandidateTime = (c: BaselineCandidate): string =>
     minute: '2-digit',
   });
 
-export const getCandidateDisplayText = (c: BaselineCandidate): string =>
+const getCandidateDisplayText = (c: BaselineCandidate): string =>
   `${c.test_run_id} - ${formatCandidateTime(c)}`;
 
-export const getCandidateSecondaryInfo = (c: BaselineCandidate): string => {
+const getCandidateSecondaryInfo = (c: BaselineCandidate): string => {
   const parts = [`${c.test_environment} / ${c.workload}`];
   if (c.application_release) parts.push(`Version: ${c.application_release}`);
   if (c.annotations && c.annotations.length > 0) parts.push(`Annotations: ${c.annotations.join(', ')}`);

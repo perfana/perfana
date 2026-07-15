@@ -155,7 +155,7 @@ export class SutExportService {
     try {
       // ponytail: pg-query-stream cursor keeps ds_metrics memory-bounded; swap to
       // Postgres COPY only if export of huge runs is measurably too slow.
-      const stream = await qr.stream(sql, params as any[]);
+      const stream = await qr.stream(sql, params as unknown[]);
       for await (const row of stream as AsyncIterable<{ r: unknown }>) {
         await write(row.r);
         count++;

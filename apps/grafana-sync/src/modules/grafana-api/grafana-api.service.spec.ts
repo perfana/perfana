@@ -2,7 +2,7 @@ import { Test, TestingModule } from '@nestjs/testing';
 import { getRepositoryToken } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { GrafanaApiService } from './grafana-api.service';
-import { GrafanaInstance } from '@perfana/shared/entities';
+import { GrafanaInstance, ProxyServer } from '@perfana/shared/entities';
 
 // Mock fetch globally
 global.fetch = jest.fn();
@@ -26,6 +26,13 @@ describe('GrafanaApiService', () => {
         GrafanaApiService,
         {
           provide: getRepositoryToken(GrafanaInstance),
+          useValue: {
+            findOne: jest.fn(),
+            find: jest.fn(),
+          },
+        },
+        {
+          provide: getRepositoryToken(ProxyServer),
           useValue: {
             findOne: jest.fn(),
             find: jest.fn(),
