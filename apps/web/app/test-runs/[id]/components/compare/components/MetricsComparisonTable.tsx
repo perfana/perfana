@@ -1,8 +1,8 @@
 'use client';
 
 import React from 'react';
-import { Box, Typography, Chip, Collapse, CircularProgress, IconButton } from '@mui/material';
-import { ExpandMore, ExpandLess, BarChart } from '@mui/icons-material';
+import { Box, Typography, Chip, Collapse, CircularProgress, IconButton, ToggleButton, ToggleButtonGroup } from '@mui/material';
+import { ExpandMore, ExpandLess, BarChart, ArrowUpward, ArrowDownward, UnfoldMore } from '@mui/icons-material';
 import {
   MetricComparison,
   RelatedTestRun,
@@ -46,6 +46,7 @@ interface MetricsComparisonTableProps {
   testRunId: string;
   displayConfig: DisplayConfig;
   seriesSearchText: string;
+  seriesSearchRegex: boolean;
   selectedMetric: Panel | null;
   selectedDashboard: ApplicationDashboard | null;
   showGraphs: Record<string, boolean>;
@@ -96,6 +97,43 @@ function MagnitudeBar({ diff, band }: { diff: number | null; band: Band }) {
   );
 }
 
+type SortDir = 'asc' | 'desc';
+type SortMode = 'percentage' | 'absolute';
+
+function SortIndicator({ active, dir }: { active: boolean; dir: SortDir }) {
+  if (!active) return <UnfoldMore sx={{ fontSize: 13, opacity: 0.35 }} />;
+  return dir === 'asc'
+    ? <ArrowUpward sx={{ fontSize: 13 }} />
+    : <ArrowDownward sx={{ fontSize: 13 }} />;
+}
+
+/**
+ * Build a metric-name filter. Empty search → null (no filtering). Regex mode
+ * compiles a case-insensitive RegExp; an invalid pattern matches nothing so the
+ * table clears (the search field surfaces the "invalid" state separately).
+ */
+export function buildNameMatcher(rawSearch: string, regex: boolean): ((n: string) => boolean) | null {
+  const q = rawSearch.trim();
+  if (!q) return null;
+  if (regex) {
+    try { const re = new RegExp(q, 'i'); return (n) => re.test(n); }
+    catch { return () => false; }
+  }
+  const lower = q.toLowerCase();
+  return (n) => n.toLowerCase().includes(lower);
+}
+
+/** Signed sort value for a row's column, or NaN when the cell is missing. */
+export function sortValueOf(c: MetricComparison | undefined, mode: SortMode, minAbsolute: number): number {
+  if (!c) return NaN;
+  if (mode === 'absolute') {
+    if (c.current_value == null || c.selected_value == null) return NaN;
+    return c.current_value - c.selected_value;
+  }
+  const d = gatedDiffPercent(c.current_value, c.selected_value, c.percentage_difference, minAbsolute);
+  return d == null ? NaN : d;
+}
+
 function Cell({ c, thresholds }: { c: MetricComparison | undefined; thresholds: DiffThresholds }) {
   if (!c) return <Box sx={{ px: 2, py: 1.5, textAlign: 'right', color: 'text.secondary' }}>—</Box>;
   const d = gatedDiffPercent(c.current_value, c.selected_value, c.percentage_difference, thresholds.minAbsolute);
@@ -121,6 +159,7 @@ export default function MetricsComparisonTable({
   selectedTestRun,
   displayConfig,
   seriesSearchText,
+  seriesSearchRegex,
   selectedMetric,
   showGraphs,
   graphData,
@@ -134,13 +173,49 @@ export default function MetricsComparisonTable({
   const columns = getMetricColumns(displayConfig);
   const gridTemplateColumns = `minmax(180px, 2fr) ${columns.map(() => 'minmax(150px, 1fr)').join(' ')} 44px`;
 
+  // Row sorting (view-only). sortKey is 'metric' or an evaluate_type column; null = insertion order.
+  const [sortKey, setSortKey] = React.useState<string | null>(null);
+  const [sortDir, setSortDir] = React.useState<SortDir>('desc');
+  const [sortMode, setSortMode] = React.useState<SortMode>('percentage');
+
+  // Band filter driven by the panel status chips. Empty = show all.
+  const [bandFilter, setBandFilter] = React.useState<Set<Band>>(new Set());
+  const toggleBand = (b: Band) =>
+    setBandFilter(prev => {
+      const next = new Set(prev);
+      if (next.has(b)) next.delete(b); else next.add(b);
+      return next;
+    });
+
+  const onHeaderClick = (key: string) => {
+    if (sortKey === key) setSortDir(d => (d === 'asc' ? 'desc' : 'asc'));
+    else { setSortKey(key); setSortDir('desc'); }
+  };
+
+  const sortRows = (rows: MetricRow[]): MetricRow[] => {
+    if (!sortKey) return rows;
+    const mult = sortDir === 'asc' ? 1 : -1;
+    return [...rows].sort((a, b) => {
+      if (sortKey === 'metric') return a.metricName.localeCompare(b.metricName) * mult;
+      const av = sortValueOf(a.byColumn[sortKey], sortMode, thresholds.minAbsolute ?? 0);
+      const bv = sortValueOf(b.byColumn[sortKey], sortMode, thresholds.minAbsolute ?? 0);
+      const aNaN = isNaN(av), bNaN = isNaN(bv);
+      if (aNaN && bNaN) return 0;
+      if (aNaN) return 1;   // missing cells always sort to the end
+      if (bNaN) return -1;
+      return (av - bv) * mult;
+    });
+  };
+
   // Build rows, grouped dashboard -> panel -> metric.
-  const search = seriesSearchText.trim().toLowerCase();
+  // Row filter: substring (case-insensitive) or, when seriesSearchRegex is on,
+  // a case-insensitive regex. An invalid regex matches nothing.
+  const matchName = buildNameMatcher(seriesSearchText, seriesSearchRegex);
   const dashboards = new Map<string, Map<string, MetricRow[]>>();
   const rowsByMetric = new Map<string, MetricRow>();
 
   for (const c of metricComparisons) {
-    if (search && !c.metric_name.toLowerCase().includes(search)) continue;
+    if (matchName && !matchName(c.metric_name)) continue;
     const dashboardId = c.dashboardId ?? 'unknown';
     const panelId = c.panelId ?? 0;
     const rowKey = graphKeyOf(dashboardId, panelId, c.metric_name);
@@ -187,12 +262,25 @@ export default function MetricsComparisonTable({
         {legendDot(BAND_COLORS.warn, `${displayConfig.warningThreshold}–${displayConfig.regressionThreshold}%`)}
         {legendDot(BAND_COLORS.bad, `> ${displayConfig.regressionThreshold}%`)}
         {displayConfig.minAbsolute > 0 && <span>changes &lt; {displayConfig.minAbsolute} treated as none</span>}
-        <Box component="span" sx={{ ml: 'auto', color: 'text.disabled' }}>
+        <Box component="span" sx={{ ml: 'auto', display: 'inline-flex', alignItems: 'center', gap: 1 }}>
+          <span style={{ color: 'inherit' }}>Sort Δ by</span>
+          <ToggleButtonGroup size="small" exclusive value={sortMode}
+            onChange={(_e, v: SortMode | null) => v && setSortMode(v)} aria-label="Sort magnitude mode"
+            sx={{ '& .MuiToggleButton-root': { py: 0, px: 0.75, fontSize: '0.65rem', minHeight: 20, textTransform: 'none' } }}>
+            <ToggleButton value="absolute" aria-label="Sort by absolute difference">Abs</ToggleButton>
+            <ToggleButton value="percentage" aria-label="Sort by percentage difference">%</ToggleButton>
+          </ToggleButtonGroup>
+        </Box>
+        <Box component="span" sx={{ color: 'text.disabled' }}>
           baseline: {selectedTestRun.test_run_id}
         </Box>
       </Box>
 
-      {Array.from(dashboards.entries()).map(([dashLabel, panels]) => (
+      {Array.from(dashboards.entries())
+        .filter(([, panels]) => !bandFilter.size ||
+          Array.from(panels.values()).some(rows =>
+            rows.some(row => bandFilter.has(worstBand(rowDiffs(row), thresholds)))))
+        .map(([dashLabel, panels]) => (
         <Box key={dashLabel} sx={{ mb: 4 }}>
           <Typography variant="subtitle1" sx={{ fontWeight: 700, mb: 1.5, pl: 1.5,
             borderLeft: '4px solid', borderColor: 'primary.main' }}>
@@ -200,11 +288,31 @@ export default function MetricsComparisonTable({
           </Typography>
 
           {Array.from(panels.entries()).map(([panelLabel, rows]) => {
+            const bandByRow = new Map(rows.map(row => [row, worstBand(rowDiffs(row), thresholds)]));
             let reg = 0, warn = 0, ok = 0;
-            rows.forEach((row) => {
-              const b = worstBand(rowDiffs(row), thresholds);
-              if (b === 'bad') reg++; else if (b === 'warn') warn++; else ok++;
-            });
+            bandByRow.forEach((b) => { if (b === 'bad') reg++; else if (b === 'warn') warn++; else ok++; });
+            const visibleRows = bandFilter.size
+              ? rows.filter(row => bandFilter.has(bandByRow.get(row)!))
+              : rows;
+            // Hide panels with nothing matching the active filter.
+            if (bandFilter.size && visibleRows.length === 0) return null;
+
+            const statChip = (band: Band, count: number, label: string) => {
+              const active = bandFilter.has(band);
+              const dimmed = bandFilter.size > 0 && !active;
+              return (
+                <Chip size="small" label={`${count} ${label}`} onClick={() => toggleBand(band)}
+                  variant={active ? 'filled' : 'outlined'}
+                  aria-pressed={active}
+                  sx={{
+                    cursor: 'pointer', fontWeight: 700, color: BAND_COLORS[band],
+                    bgcolor: active ? `${BAND_COLORS[band]}33` : `${BAND_COLORS[band]}22`,
+                    borderColor: active ? BAND_COLORS[band] : 'transparent',
+                    opacity: dimmed ? 0.45 : 1,
+                    '&:hover': { bgcolor: `${BAND_COLORS[band]}3a` },
+                  }} />
+              );
+            };
             return (
               <Box key={panelLabel} sx={{ mb: 2.5, border: '1px solid', borderColor: 'divider',
                 borderRadius: 1, overflow: 'hidden' }}>
@@ -213,30 +321,38 @@ export default function MetricsComparisonTable({
                   gap: 1, px: 2, py: 1.25, bgcolor: 'action.hover', borderBottom: '1px solid', borderColor: 'divider' }}>
                   <Typography variant="subtitle2" sx={{ fontWeight: 700 }}>{panelLabel || 'Metrics'}</Typography>
                   <Box sx={{ display: 'flex', gap: 0.75 }}>
-                    {reg > 0 && <Chip size="small" label={`${reg} regressions`} sx={{ bgcolor: `${BAND_COLORS.bad}22`, color: BAND_COLORS.bad, fontWeight: 700 }} />}
-                    {warn > 0 && <Chip size="small" label={`${warn} warnings`} sx={{ bgcolor: `${BAND_COLORS.warn}22`, color: BAND_COLORS.warn, fontWeight: 700 }} />}
-                    {ok > 0 && <Chip size="small" label={`${ok} within range`} sx={{ bgcolor: `${BAND_COLORS.good}22`, color: BAND_COLORS.good, fontWeight: 700 }} />}
+                    {reg > 0 && statChip('bad', reg, 'regressions')}
+                    {warn > 0 && statChip('warn', warn, 'warnings')}
+                    {ok > 0 && statChip('good', ok, 'within range')}
                   </Box>
                 </Box>
 
                 {/* Column header */}
                 <Box sx={{ display: 'grid', gridTemplateColumns, alignItems: 'center',
                   borderBottom: '2px solid', borderColor: 'divider', bgcolor: 'background.paper' }}>
-                  <Box sx={{ px: 2, py: 1 }}>
+                  <Box role="button" tabIndex={0} onClick={() => onHeaderClick('metric')}
+                    onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); onHeaderClick('metric'); } }}
+                    sx={{ px: 2, py: 1, display: 'flex', alignItems: 'center', gap: 0.5, cursor: 'pointer', userSelect: 'none',
+                      '&:hover': { bgcolor: 'action.hover' } }}>
                     <Typography variant="caption" sx={{ fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.05em', color: 'text.secondary' }}>Metric</Typography>
+                    <SortIndicator active={sortKey === 'metric'} dir={sortDir} />
                   </Box>
                   {columns.map((col) => (
-                    <Box key={col} sx={{ px: 2, py: 1, textAlign: 'right' }}>
+                    <Box key={col} role="button" tabIndex={0} onClick={() => onHeaderClick(col)}
+                      onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); onHeaderClick(col); } }}
+                      sx={{ px: 2, py: 1, display: 'flex', alignItems: 'center', justifyContent: 'flex-end', gap: 0.5,
+                        cursor: 'pointer', userSelect: 'none', '&:hover': { bgcolor: 'action.hover' } }}>
                       <Typography variant="caption" sx={{ fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.05em', color: 'text.secondary' }}>
                         {METRIC_COLUMN_LABELS[col] ?? col.toUpperCase()}
                       </Typography>
+                      <SortIndicator active={sortKey === col} dir={sortDir} />
                     </Box>
                   ))}
                   <Box />
                 </Box>
 
                 {/* Metric rows */}
-                {rows.map((row) => {
+                {sortRows(visibleRows).map((row) => {
                   const band = worstBand(rowDiffs(row), thresholds);
                   const gKey = graphKeyOf(row.dashboardId, row.panelId, row.metricName);
                   const open = !!showGraphs[gKey];

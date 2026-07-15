@@ -30,6 +30,26 @@ export function getAggregateSpec(panelId: number): AggregateSpec | null {
   return AGGREGATABLE_PERF_PANELS[panelId] ?? null;
 }
 
+const RT_AGG_METRICS = new Set<AggMetric>(['transaction_response_time', 'request_response_time']);
+const RT_KEEPER_TITLES: Record<number, string> = { 101: 'Transaction RT', 201: 'Request RT' };
+
+/**
+ * Collapse the redundant per-percentile RT panels. Transaction/Request RT
+ * Avg/P90/P95/P99 all store the identical per-series distribution (the
+ * percentile lives only in the panel title, not the ds_metric_statistics row),
+ * so P90/P95/P99 are dropped and the Avg panel is relabelled to one "… RT" entry.
+ * Perf-metrics panels only — panel ids are not unique across sources, so callers
+ * MUST gate on source === 'performance-metrics' before calling this.
+ */
+export function collapsePerfRtPanels<T extends { id: number; title?: string }>(panels: T[]): T[] {
+  return panels
+    .filter(p => {
+      const spec = getAggregateSpec(p.id);
+      return !(spec && RT_AGG_METRICS.has(spec.metric) && spec.stat !== 'avg');
+    })
+    .map(p => (RT_KEEPER_TITLES[p.id] ? { ...p, title: RT_KEEPER_TITLES[p.id] } : p));
+}
+
 export function isAggregatablePanel(panelId: number): boolean {
   return panelId in AGGREGATABLE_PERF_PANELS;
 }
