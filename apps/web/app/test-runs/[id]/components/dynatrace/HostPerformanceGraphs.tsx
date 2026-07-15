@@ -1,7 +1,9 @@
 'use client';
 
+import { useEffect } from 'react';
 import { Box, Paper, Typography, useTheme } from '@mui/material';
 import dynamic from 'next/dynamic';
+import { Config } from 'plotly.js';
 import { HostMetricsResponse } from '@/lib/dynatrace';
 
 const Plot = dynamic(() => import('react-plotly.js'), { ssr: false });
@@ -23,6 +25,21 @@ export default function HostPerformanceGraphs({
   const isDark = theme.palette.mode === 'dark';
   const textColor = theme.palette.text.primary;
   const gridColor = isDark ? 'rgba(255,255,255,0.1)' : 'rgba(0,0,0,0.1)';
+
+  // On the very first render these plots mount after the async metrics fetch and
+  // after the lazy react-plotly chunk loads, so Plotly's first draw can measure
+  // the grid before it has its final width — leaving the 2x2 plots overlapping
+  // until an unrelated resize (e.g. switching host tabs) fixes them. autosize +
+  // useResizeHandler only relayout on a window resize, so dispatch one on mount.
+  useEffect(() => {
+    const nudge = () => window.dispatchEvent(new Event('resize'));
+    const raf = requestAnimationFrame(nudge);
+    const timer = setTimeout(nudge, 200); // covers the lazy Plot chunk arriving late
+    return () => {
+      cancelAnimationFrame(raf);
+      clearTimeout(timer);
+    };
+  }, []);
 
   const createPlotData = (
     timeSeries: { timestamp: string; value: number }[],
@@ -76,11 +93,11 @@ export default function HostPerformanceGraphs({
     };
   };
 
-  const createPlotConfig = (metricName: string) => ({
+  const createPlotConfig = (metricName: string): Partial<Config> => ({
     responsive: true,
     displayModeBar: true,
     displaylogo: false,
-    modeBarButtonsToRemove: ['pan2d', 'lasso2d', 'select2d', 'autoScale2d', 'zoom2d', 'zoomIn2d', 'zoomOut2d', 'resetScale2d'] as unknown,
+    modeBarButtonsToRemove: ['pan2d', 'lasso2d', 'select2d', 'autoScale2d', 'zoom2d', 'zoomIn2d', 'zoomOut2d', 'resetScale2d'],
     toImageButtonOptions: {
       format: 'png' as const,
       filename: `${hostDisplayName || 'host'}_${metricName.toLowerCase().replace(/\s+/g, '_')}`,
