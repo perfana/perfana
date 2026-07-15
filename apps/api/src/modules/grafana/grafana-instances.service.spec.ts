@@ -656,6 +656,26 @@ describe('GrafanaInstancesService', () => {
       expect(Logger.prototype.log).toHaveBeenCalledWith('Grafana instance updated: update-id by user test-user-id');
     });
 
+    it('should ignore the [MASKED] sentinel and keep the existing secrets', async () => {
+      // Arrange — the frontend may echo back the masked read; it must not overwrite real secrets.
+      const existingEntity = createMockEntity({
+        id: 'masked-id',
+        apiKey: 'real-api-key',
+        password: 'real-password',
+      });
+      const updateDto = { apiKey: '[MASKED]', password: '[MASKED]' };
+
+      repository.findOne.mockResolvedValue(existingEntity);
+      repository.save.mockResolvedValue(existingEntity);
+
+      // Act
+      await service.update('masked-id', updateDto, mockUserId, mockRoles);
+
+      // Assert — untouched
+      expect(existingEntity.apiKey).toBe('real-api-key');
+      expect(existingEntity.password).toBe('real-password');
+    });
+
     it('should update only label field when only label is provided', async () => {
       // Arrange
       const existingEntity = createMockEntity({

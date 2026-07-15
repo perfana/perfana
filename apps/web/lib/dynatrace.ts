@@ -88,6 +88,7 @@ export async function testDynatraceConnection(
 export interface UpdateDynatraceConfigDto {
   perfanaTestRunIdAttribute?: string
   perfanaRequestNameAttribute?: string
+  apiToken?: string
   platformApiToken?: string
   useProxy?: boolean
 }

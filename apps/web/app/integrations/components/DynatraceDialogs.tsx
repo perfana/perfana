@@ -58,7 +58,7 @@ export function DynatraceFormDialog({
 }: DynatraceFormDialogProps) {
   return (
     <Dialog open={open} onClose={onClose} maxWidth="sm" fullWidth>
-      <form onSubmit={form.handleSubmit(onSubmit)}>
+      <form onSubmit={form.handleSubmit(onSubmit)} autoComplete="off">
         <DialogTitle>
           {isEdit ? 'Edit Dynatrace Configuration' : 'Configure Dynatrace'}
         </DialogTitle>
@@ -75,6 +75,7 @@ export function DynatraceFormDialog({
               placeholder="Production Dynatrace"
               fullWidth
               variant="outlined"
+              autoComplete="off"
               sx={{ mb: 2 }}
               {...form.register('label')}
               error={!!form.formState.errors.label}
@@ -85,6 +86,7 @@ export function DynatraceFormDialog({
               placeholder="https://your-tenant.dynatrace.com"
               fullWidth
               variant="outlined"
+              autoComplete="off"
               sx={{ mb: 2 }}
               {...form.register('host')}
               error={!!form.formState.errors.host}
@@ -92,26 +94,28 @@ export function DynatraceFormDialog({
             />
             <TextField
               label="API Token"
-              placeholder="dt0c01.XXXXXXXXXXXX.YYYYYYYYYYYY"
+              placeholder={isEdit ? 'Leave blank to keep existing' : 'dt0c01.XXXXXXXXXXXX.YYYYYYYYYYYY'}
               fullWidth
               variant="outlined"
               type="password"
+              autoComplete="new-password"
               sx={{ mb: 2 }}
               {...form.register('apiToken')}
               error={!!form.formState.errors.apiToken}
-              helperText={form.formState.errors.apiToken?.message || "Dynatrace API token with required permissions"}
+              helperText={form.formState.errors.apiToken?.message || (isEdit ? 'Leave blank to keep the existing token' : 'Dynatrace API token with required permissions')}
             />
             {form.watch('dynatraceType') === 'saas' && (
               <TextField
                 label="Platform API Token (Optional)"
-                placeholder="dt0s16.XXXXXXXXXXXX.YYYYYYYYYYYY"
+                placeholder={isEdit ? 'Leave blank to keep existing' : 'dt0s16.XXXXXXXXXXXX.YYYYYYYYYYYY'}
                 fullWidth
                 variant="outlined"
                 type="password"
+                autoComplete="new-password"
                 sx={{ mb: 2 }}
                 {...form.register('platformApiToken')}
                 error={!!form.formState.errors.platformApiToken}
-                helperText={form.formState.errors.platformApiToken?.message || "OAuth client token for DQL queries (Grail Platform API)"}
+                helperText={form.formState.errors.platformApiToken?.message || (isEdit ? 'Leave blank to keep the existing token' : 'OAuth client token for DQL queries (Grail Platform API)')}
               />
             )}
             <TextField

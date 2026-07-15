@@ -133,15 +133,29 @@ export function createTrendsPlot(
           conclusion: point.conclusion_label
         };
       }),
-      hovertemplate:
-        `<b>Trends</b><br>` +
-        'Test Run: %{customdata.testRunId}<br>' +
-        'Time: %{customdata.datetime}<br>' +
-        'Value: %{customdata.formattedValue}' + unitSuffix + '<br>' +
-        'Conclusion: %{customdata.conclusion}<br>' +
-        '%{customdata.versionLine}' +
-        '%{customdata.annotationsLine}' +
-        '<extra></extra>',
+      // Build a per-point hovertemplate so every <br> stays literal in the template
+      // (Plotly renders literal <br> as line breaks, but escapes them inside %{customdata.*}
+      // substitutions). Mirrors the working test-run-details graph hover implementation.
+      hovertemplate: sortedData.map(point => {
+        const formattedDate = new Date(point.test_run_start).toLocaleString('en-US', {
+          month: 'short',
+          day: 'numeric',
+          year: 'numeric',
+          hour: '2-digit',
+          minute: '2-digit'
+        });
+        const value = (point.mean * conversionFactor).toFixed(2);
+        const versionLine = point.version ? `Version: ${point.version}<br>` : '';
+        const annotationsLine = point.annotations ? `Annotations: ${point.annotations}<br>` : '';
+        return `<b>Trends</b><br>` +
+          `Test Run: ${point.test_run_id}<br>` +
+          `Time: ${formattedDate}<br>` +
+          `Value: ${value}${unitSuffix}<br>` +
+          `Conclusion: ${point.conclusion_label}<br>` +
+          versionLine +
+          annotationsLine +
+          '<extra></extra>';
+      }),
       marker: {
         size: markerSizes,
         color: markerColors,

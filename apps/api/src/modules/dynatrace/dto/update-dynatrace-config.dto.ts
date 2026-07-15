@@ -27,6 +27,14 @@ export class UpdateDynatraceConfigDto {
   label?: string;
 
   @ApiPropertyOptional({
+    description: 'Dynatrace API token — omit to keep the existing one',
+    example: 'dt0c01.XXXXXXXXXXXX.YYYYYYYYYYYY',
+  })
+  @IsOptional()
+  @IsString()
+  apiToken?: string;
+
+  @ApiPropertyOptional({
     description: 'Optional Dynatrace Platform API token for advanced features',
     example: 'dt0s02.XXXXXXXXXXXX.YYYYYYYYYYYY',
   })

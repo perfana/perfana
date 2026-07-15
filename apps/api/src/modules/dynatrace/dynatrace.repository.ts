@@ -156,6 +156,7 @@ export class DynatraceRepository {
       perfana_test_run_id_attribute?: string;
       perfana_request_name_attribute?: string;
       label?: string;
+      api_token?: string;
       platform_api_token?: string;
       use_proxy?: boolean;
       updated_by?: string;
@@ -171,6 +172,9 @@ export class DynatraceRepository {
     }
     if (dto.label !== undefined) {
       updateData.label = dto.label;
+    }
+    if (dto.api_token !== undefined) {
+      updateData.apiToken = dto.api_token;
     }
     if (dto.platform_api_token !== undefined) {
       updateData.platformApiToken = dto.platform_api_token;

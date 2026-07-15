@@ -54,7 +54,7 @@ export function GrafanaFormDialog({
 }: GrafanaFormDialogProps) {
   return (
     <Dialog open={open} onClose={onClose} maxWidth="md" fullWidth>
-      <form onSubmit={form.handleSubmit(onSubmit)}>
+      <form onSubmit={form.handleSubmit(onSubmit)} autoComplete="off">
         <DialogTitle>
           {isEdit ? 'Edit Grafana Instance' : 'Add Grafana Instance'}
         </DialogTitle>
@@ -72,6 +72,7 @@ export function GrafanaFormDialog({
                 placeholder="e.g., Production Grafana"
                 fullWidth
                 variant="outlined"
+                autoComplete="off"
                 {...form.register('label')}
                 error={!!form.formState.errors.label}
                 helperText={form.formState.errors.label?.message}
@@ -83,6 +84,7 @@ export function GrafanaFormDialog({
                 placeholder="1"
                 fullWidth
                 variant="outlined"
+                autoComplete="off"
                 {...form.register('orgId')}
                 error={!!form.formState.errors.orgId}
                 helperText={form.formState.errors.orgId?.message}
@@ -94,6 +96,7 @@ export function GrafanaFormDialog({
                 placeholder="https://grafana.example.com"
                 fullWidth
                 variant="outlined"
+                autoComplete="off"
                 {...form.register('clientUrl')}
                 error={!!form.formState.errors.clientUrl}
                 helperText={form.formState.errors.clientUrl?.message || "URL used by browser clients to access Grafana"}
@@ -105,6 +108,7 @@ export function GrafanaFormDialog({
                 placeholder="http://grafana-internal:3000"
                 fullWidth
                 variant="outlined"
+                autoComplete="off"
                 {...form.register('serverUrl')}
                 error={!!form.formState.errors.serverUrl}
                 helperText={form.formState.errors.serverUrl?.message || "URL used by server-side components (if different from client URL)"}
@@ -121,12 +125,14 @@ export function GrafanaFormDialog({
             <Grid size={{ xs: 12 }}>
               <TextField
                 label="API Key (Optional)"
-                placeholder="glsa_..."
+                placeholder={isEdit ? 'Leave blank to keep existing' : 'glsa_...'}
+                type="password"
                 fullWidth
                 variant="outlined"
+                autoComplete="new-password"
                 {...form.register('apiKey')}
                 error={!!form.formState.errors.apiKey}
-                helperText={form.formState.errors.apiKey?.message || "Grafana Service Account token (recommended)"}
+                helperText={form.formState.errors.apiKey?.message || (isEdit ? 'Leave blank to keep the existing API key' : 'Grafana Service Account token (recommended)')}
               />
             </Grid>
             <Grid size={{ xs: 12, sm: 6 }}>
@@ -134,6 +140,7 @@ export function GrafanaFormDialog({
                 label="Username (Optional)"
                 fullWidth
                 variant="outlined"
+                autoComplete="off"
                 {...form.register('username')}
                 error={!!form.formState.errors.username}
                 helperText={form.formState.errors.username?.message || "For basic authentication"}
@@ -143,11 +150,13 @@ export function GrafanaFormDialog({
               <TextField
                 label="Password (Optional)"
                 type={visiblePasswords.has('form') ? 'text' : 'password'}
+                placeholder={isEdit ? 'Leave blank to keep existing' : undefined}
                 fullWidth
                 variant="outlined"
+                autoComplete="new-password"
                 {...form.register('password')}
                 error={!!form.formState.errors.password}
-                helperText={form.formState.errors.password?.message || "For basic authentication"}
+                helperText={form.formState.errors.password?.message || (isEdit ? 'Leave blank to keep the existing password' : 'For basic authentication')}
                 InputProps={{
                   endAdornment: (
                     <IconButton

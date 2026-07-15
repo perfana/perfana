@@ -54,7 +54,7 @@ export function useGrafanaIntegration({ onSnackbar, organizationId }: UseGrafana
         clientUrl: selectedInstance.clientUrl,
         serverUrl: selectedInstance.serverUrl || '',
         orgId: selectedInstance.orgId,
-        apiKey: selectedInstance.apiKey || '',
+        apiKey: '', // Don't pre-fill secrets — API returns '[MASKED]'; blank means "keep existing"
         username: selectedInstance.username || '',
         password: '', // Don't pre-fill password for security
         snapshotInstance: selectedInstance.snapshotInstance,
@@ -107,7 +107,13 @@ export function useGrafanaIntegration({ onSnackbar, organizationId }: UseGrafana
     if (!selectedInstance) return;
 
     try {
-      const instance = await updateGrafanaInstance(selectedInstance.id, data);
+      // Only send secrets the user actually typed — blank means "keep existing".
+      const { apiKey, password, ...rest } = data;
+      const instance = await updateGrafanaInstance(selectedInstance.id, {
+        ...rest,
+        ...(apiKey ? { apiKey } : {}),
+        ...(password ? { password } : {}),
+      });
       setInstances(instances.map(g => g.id === instance.id ? instance : g));
       setEditDialogOpen(false);
       setSelectedInstance(null);
