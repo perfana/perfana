@@ -220,6 +220,16 @@ export function useDynatraceData({
   const serviceEntities = entityMappings.filter(m => m.entityType === 'SERVICE');
   const hostEntities = entityMappings.filter(m => m.entityType === 'HOST');
 
+  // Default the primary tab to Hosts (index 0) when hosts exist, else Services
+  // (index 1). A host-less run must not open on the disabled, empty Hosts tab.
+  // Runs once when mappings first arrive; user clicks afterwards are preserved.
+  const [primaryTabDefaulted, setPrimaryTabDefaulted] = useState(false);
+  useEffect(() => {
+    if (primaryTabDefaulted || entityMappings.length === 0) return;
+    setPrimaryTabValue(hostEntities.length > 0 ? 0 : 1);
+    setPrimaryTabDefaulted(true);
+  }, [primaryTabDefaulted, entityMappings.length, hostEntities.length]);
+
   // Handle tab changes
   const handleTabChange = (_event: React.SyntheticEvent, newValue: number) => {
     setTabValue(newValue);
