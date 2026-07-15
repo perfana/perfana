@@ -1,3 +1,4 @@
+import { safeDecrypt } from '@perfana/shared/utils';
 import { getLogger } from '../../lib/utils/logger.js';
 import {
   DynatraceQueryConfigFromDb,
@@ -6,6 +7,23 @@ import {
 import { WorkerDatabaseService } from '../../common/database.service.js';
 
 const logger = getLogger('dynatrace-repository');
+
+/**
+ * Decrypt credential columns read via raw SQL. The API loads configs through
+ * TypeORM entities whose `encryptedColumnTransformer` decrypts transparently;
+ * these raw-SQL reads bypass that, so tokens come back as ciphertext and must
+ * be decrypted here or Dynatrace rejects them with 401. `safeDecrypt` passes
+ * through legacy plaintext values unchanged.
+ */
+function decryptConfigTokens(config: DynatraceConfig): DynatraceConfig {
+  return {
+    ...config,
+    apiToken: config.apiToken ? safeDecrypt(config.apiToken) : config.apiToken,
+    platformApiToken: config.platformApiToken
+      ? safeDecrypt(config.platformApiToken)
+      : config.platformApiToken,
+  };
+}
 
 /**
  * Repository for Dynatrace database operations (TypeORM)
@@ -98,7 +116,7 @@ export class DynatraceRepository {
       return null;
     }
 
-    return result[0];
+    return decryptConfigTokens(result[0]);
   }
 
   /**
@@ -129,7 +147,7 @@ export class DynatraceRepository {
       return null;
     }
 
-    return result[0];
+    return decryptConfigTokens(result[0]);
   }
 
   /**
@@ -150,6 +168,6 @@ export class DynatraceRepository {
       ORDER BY created_at DESC`
     );
 
-    return result;
+    return result.map(decryptConfigTokens);
   }
 }

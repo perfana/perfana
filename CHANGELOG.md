@@ -4,6 +4,12 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
+## [0.2.61.72] - 2026-07-15
+
+### Fixed
+- **Worker Dynatrace collection no longer 401s ("Token Authentication failed").** `dynatrace_configs.api_token` and `platform_api_token` are encrypted at rest (AES-256-GCM); the API loads configs through TypeORM entities whose `encryptedColumnTransformer` decrypts them transparently, but the worker's `DynatraceRepository` reads them via raw SQL (`SELECT api_token as "apiToken" …`), which bypasses the transformer and returned ciphertext. The worker then sent `Api-Token <ciphertext>` and Dynatrace rejected it with 401. All three raw-SQL config reads now run tokens through `safeDecrypt` (which passes legacy plaintext through unchanged). Requires the worker to have the same `ENCRYPTION_KEY` env var as the API. The Grafana worker path was already safe — it loads instances via the TypeORM repository, not raw SQL.
+- **Dynatrace card host graphs render correctly on first open.** The 2×2 CPU/Memory/Disk/Network Plotly charts mount after the async metrics fetch and the lazy `react-plotly` chunk load, so Plotly's first draw could measure the grid before it had its final width — leaving the plots overlapping until an unrelated resize (switching host tabs) fixed them. `HostPerformanceGraphs` now dispatches a window `resize` on mount (rAF + 200ms fallback), triggering each plot's `useResizeHandler` to relayout at the correct width. Also fixed 4 pre-existing Plotly `Config` type errors in the same file (the file is excluded from the web build's type-check gate) by replacing the broken `as unknown` cast with a `Partial<Config>` return type.
+
 ## [0.2.61.71] - 2026-07-15
 
 ### Fixed
