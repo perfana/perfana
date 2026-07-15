@@ -28,31 +28,48 @@ export default function AddedSeriesDisplay({
 
   const collapsible = addedSeries.length > COLLAPSE_THRESHOLD;
 
+  // Group chips by dashboard, preserving first-seen order.
+  const byDashboard = new Map<string, CompareSeries[]>();
+  for (const series of addedSeries) {
+    const list = byDashboard.get(series.dashboardLabel);
+    if (list) list.push(series);
+    else byDashboard.set(series.dashboardLabel, [series]);
+  }
+
   const chips = (
-    <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 1 }}>
-        {addedSeries.map((series) => (
-          <Chip
-            key={series.id}
-            label={`${series.panelTitle} → ${series.metricName}`}
-            onDelete={() => onRemoveSeries(series.id)}
-            deleteIcon={<Close fontSize="small" />}
-            sx={(theme) => ({
-              background: theme.palette.mode === 'dark'
-                ? 'linear-gradient(135deg, rgba(56, 142, 232, 0.18) 0%, rgba(30, 136, 229, 0.24) 100%)'
-                : 'linear-gradient(135deg, rgba(25, 118, 210, 0.08) 0%, rgba(30, 136, 229, 0.12) 100%)',
-              border: theme.palette.mode === 'dark'
-                ? '1px solid rgba(56, 142, 232, 0.5)'
-                : '1px solid rgba(25, 118, 210, 0.3)',
-              color: theme.palette.mode === 'dark' ? '#90caf9' : theme.palette.primary.dark,
-              '& .MuiChip-deleteIcon': {
-                color: theme.palette.mode === 'dark' ? '#90caf9' : theme.palette.primary.main,
-                '&:hover': {
-                  color: theme.palette.error.main,
-                }
-              }
-            })}
-          />
-        ))}
+    <Box sx={{ display: 'flex', flexDirection: 'column', gap: 1.5 }}>
+      {[...byDashboard].map(([dashboardLabel, series]) => (
+        <Box key={dashboardLabel}>
+          <Typography variant="caption" sx={{ color: 'text.secondary', fontWeight: 600, display: 'block', mb: 0.5 }}>
+            {dashboardLabel}
+          </Typography>
+          <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 1 }}>
+            {series.map((s) => (
+              <Chip
+                key={s.id}
+                label={`${s.panelTitle} → ${s.metricName}`}
+                onDelete={() => onRemoveSeries(s.id)}
+                deleteIcon={<Close fontSize="small" />}
+                sx={(theme) => ({
+                  background: theme.palette.mode === 'dark'
+                    ? 'linear-gradient(135deg, rgba(56, 142, 232, 0.18) 0%, rgba(30, 136, 229, 0.24) 100%)'
+                    : 'linear-gradient(135deg, rgba(25, 118, 210, 0.08) 0%, rgba(30, 136, 229, 0.12) 100%)',
+                  border: theme.palette.mode === 'dark'
+                    ? '1px solid rgba(56, 142, 232, 0.5)'
+                    : '1px solid rgba(25, 118, 210, 0.3)',
+                  color: theme.palette.mode === 'dark' ? '#90caf9' : theme.palette.primary.dark,
+                  '& .MuiChip-deleteIcon': {
+                    color: theme.palette.mode === 'dark' ? '#90caf9' : theme.palette.primary.main,
+                    '&:hover': {
+                      color: theme.palette.error.main,
+                    }
+                  }
+                })}
+              />
+            ))}
+          </Box>
+        </Box>
+      ))}
     </Box>
   );
 

@@ -270,6 +270,7 @@ export function CompareSelectionPanel({
           {/* Series Multi-Select */}
           <Autocomplete
             multiple
+            limitTags={8}
             options={availableMetrics}
             value={selectedMetricNames}
             onChange={(_, newValue) => setSelectedMetricNames(newValue)}
