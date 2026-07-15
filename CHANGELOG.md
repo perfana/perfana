@@ -4,6 +4,12 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
+## [0.2.61.69] - 2026-07-15
+
+### Fixed
+- **Dynatrace card defaults to the Hosts tab again (when the run has hosts).** v0.2.61.61 (#454) made Services the first/default primary tab to avoid opening a host-less run on the disabled, empty Hosts tab. That regressed #425's intent (Hosts first). Restored Hosts as the first tab and, instead of a fixed default, the primary tab now defaults to Hosts when host entities exist and falls back to Services otherwise — so host runs open on Hosts and services-only runs no longer land on a disabled tab. Frontend-only (`DynatraceExpandedContent.tsx`, `useDynatraceData.ts`).
+- **Worker honors `HTTP_PROXY`/`HTTPS_PROXY`/`NO_PROXY` for Dynatrace and Grafana collection.** In proxy-only deployments the API reached Dynatrace/Grafana through the docker-compose env proxy but the worker could not, despite identical env config. The API uses axios, whose Node adapter reads these env vars automatically; the worker uses undici, which does not — it only proxied when an explicit `ProxyServer` DB row existed. Both worker resolvers (`resolveDynatraceProxyDispatcher`, `resolveProxyDispatcher`) now fall back to an `EnvHttpProxyAgent` built from the matching undici copy (worker's undici 7 for Dynatrace, shared's undici 6 for Grafana — no version skew) when no DB proxy row is found. Returns `undefined` when no proxy env vars are set, so the direct-connection path is unchanged.
+
 ## [0.2.61.68] - 2026-07-15
 
 ### Fixed
