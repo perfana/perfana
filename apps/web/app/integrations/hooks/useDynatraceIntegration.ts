@@ -56,7 +56,8 @@ export function useDynatraceIntegration({ onSnackbar, organizationId }: UseDynat
       form.reset({
         label: selectedConfig.label || '',
         host: selectedConfig.host,
-        apiToken: '', // Don't pre-fill token for security
+        apiToken: '', // Don't pre-fill secrets — blank means "keep existing"
+        platformApiToken: '',
         dynatraceType: selectedConfig.dynatraceType,
         useProxy: selectedConfig.useProxy ?? false,
       });
@@ -130,6 +131,9 @@ export function useDynatraceIntegration({ onSnackbar, organizationId }: UseDynat
         perfanaTestRunIdAttribute: selectedTestRunIdAttribute || undefined,
         perfanaRequestNameAttribute: selectedRequestNameAttribute || undefined,
         useProxy: data.useProxy,
+        // Only send secrets the user actually typed — blank means "keep existing".
+        ...(data.apiToken ? { apiToken: data.apiToken } : {}),
+        ...(data.platformApiToken ? { platformApiToken: data.platformApiToken } : {}),
       };
 
       await updateDynatraceConfig(selectedConfig.id, updateData);

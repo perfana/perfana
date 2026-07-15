@@ -285,9 +285,10 @@ export class GrafanaInstancesService {
       if (updateDto.clientUrl !== undefined) entity.client_url = updateDto.clientUrl;
       if (updateDto.serverUrl !== undefined) entity.server_url = updateDto.serverUrl;
       if (updateDto.orgId !== undefined) entity.orgId = updateDto.orgId;
-      if (updateDto.apiKey !== undefined) entity.apiKey = updateDto.apiKey;
+      // Ignore the '[MASKED]' sentinel so a masked read can never overwrite the real secret.
+      if (updateDto.apiKey !== undefined && updateDto.apiKey !== '[MASKED]') entity.apiKey = updateDto.apiKey;
       if (updateDto.username !== undefined) entity.username = updateDto.username;
-      if (updateDto.password !== undefined) entity.password = updateDto.password;
+      if (updateDto.password !== undefined && updateDto.password !== '[MASKED]') entity.password = updateDto.password;
       if (updateDto.snapshotInstance !== undefined) entity.snapshotInstance = updateDto.snapshotInstance;
       if (updateDto.useProxy !== undefined) entity.useProxy = updateDto.useProxy;
 

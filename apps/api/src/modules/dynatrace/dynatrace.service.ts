@@ -324,12 +324,17 @@ export class DynatraceService {
       throw new ForbiddenException('You do not have permission to modify this Dynatrace configuration');
     }
 
+    // Ignore the '[MASKED]' sentinel so a masked read can never overwrite the real token.
+    const apiToken = dto.apiToken === '[MASKED]' ? undefined : dto.apiToken;
+    const platformApiToken = dto.platformApiToken === '[MASKED]' ? undefined : dto.platformApiToken;
+
     // Update the configuration with the provided attributes
     const updated = await this.repository.update(id, {
       perfana_test_run_id_attribute: dto.perfanaTestRunIdAttribute,
       perfana_request_name_attribute: dto.perfanaRequestNameAttribute,
       label: dto.label,
-      platform_api_token: dto.platformApiToken,
+      api_token: apiToken,
+      platform_api_token: platformApiToken,
       use_proxy: dto.useProxy,
       updated_by: userId,
     });
