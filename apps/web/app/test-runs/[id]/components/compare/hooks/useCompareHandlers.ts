@@ -13,6 +13,7 @@ import {
 import { TestRun } from '@/types/test-runs';
 import { getSourceType, isPerformanceTest } from '@/lib/metrics-source-utils';
 import { ALL_AGGREGATED_OPTION, buildAggregatedMetricName } from '@/lib/aggregated-perf-series';
+import { buildUrlPanels } from '@/lib/url-perf-panels';
 import { graphKeyOf } from '../utils/compare-utils';
 
 interface UseCompareHandlersProps {
@@ -152,7 +153,7 @@ export function useCompareHandlers({
                 });
               }
             }
-            setPanels(panels);
+            setPanels([...panels, ...buildUrlPanels(dashboard.id)]);
           } else {
             setPanels([]);
           }
