@@ -4,6 +4,11 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
+## [0.2.61.68] - 2026-07-15
+
+### Fixed
+- **grafana-sync starts again: fix `Cannot find module '.../packages/shared/src/entities/grafana-instance.entity'`.** `grafana-api.service.ts` imported two entities via deep subpaths (`@perfana/shared/entities/grafana-instance.entity` and `.../proxy-server.entity`) that aren't declared in `@perfana/shared`'s `exports` map (only the `./entities` barrel is). Unsupported subpaths fall through to the tsconfig `paths` alias and get baked into the build as relative `packages/shared/src/...` requires — paths that don't exist in the runtime container (only `dist/` ships), so the service crashed on boot. Both now import from the `@perfana/shared/entities` barrel like the other 30 shared imports. Introduced in v0.2.61.61 (#454).
+
 ## [0.2.61.62] - 2026-07-15
 
 ### Added
