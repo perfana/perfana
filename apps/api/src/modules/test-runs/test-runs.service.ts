@@ -212,6 +212,19 @@ export class TestRunsService {
     return this.queryService.getAggregatedMetricStatistics(testRunIds, userId, roles, metric, stat);
   }
 
+  async getUrlMetricStatistics(
+    testRunIds: string[],
+    userId: string,
+    roles: string[],
+    metric: 'response_time' | 'error_percentage' | 'throughput' | 'latency' | 'connect_time',
+  ) {
+    return this.queryService.getUrlMetricStatistics(testRunIds, userId, roles, metric);
+  }
+
+  async getUrlDistinctNames(testRunId: string, userId: string, roles: string[]) {
+    return this.queryService.getUrlDistinctNames(testRunId, userId, roles);
+  }
+
   async getTransactionSamples(testRunId: string, transactionName: string, userId: string, roles: string[], excludeRampUp: boolean = false, sinceMinutes?: number): Promise<Array<{
     sampler_name: string;
     scenario_name?: string;
