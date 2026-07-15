@@ -131,19 +131,18 @@ export function DynatraceExpandedContent({
           aria-label="entity type tabs"
         >
           <Tab
-            label={`Services (${serviceEntities.length})`}
-            disabled={serviceEntities.length === 0}
-          />
-          <Tab
             label={`Hosts (${hostEntities.length})`}
             disabled={hostEntities.length === 0}
+          />
+          <Tab
+            label={`Services (${serviceEntities.length})`}
+            disabled={serviceEntities.length === 0}
           />
         </Tabs>
       </Box>
 
-      {/* Services Tab — index 0 so the card opens on Services (the common case);
-          hosts are frequently empty and the Hosts tab is disabled when so. */}
-      <TabPanel value={primaryTabValue} index={0}>
+      {/* Services Tab (index 1 — Hosts is the default first tab, see #425) */}
+      <TabPanel value={primaryTabValue} index={1}>
         {/* Service tabs */}
         <Box sx={{ borderBottom: 1, borderColor: 'divider' }}>
           <Tabs
@@ -234,8 +233,8 @@ export function DynatraceExpandedContent({
         ))}
       </TabPanel>
 
-      {/* Hosts Tab */}
-      <TabPanel value={primaryTabValue} index={1}>
+      {/* Hosts Tab (index 0 — default-selected tab) */}
+      <TabPanel value={primaryTabValue} index={0}>
         <HostsTabContent
           hostEntities={hostEntities}
           testRun={testRun}

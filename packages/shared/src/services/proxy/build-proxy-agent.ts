@@ -1,4 +1,4 @@
-import { ProxyAgent } from 'undici';
+import { ProxyAgent, EnvHttpProxyAgent } from 'undici';
 import { ProxyServer } from '../../entities/proxy-server.entity';
 
 export interface ProxyAgents {
@@ -60,3 +60,19 @@ export function buildProxyAgent(proxy: ProxyServer | null | undefined): ProxyAge
 }
 // ponytail: axios native proxy uses CONNECT tunneling for https targets — swap in
 // https-proxy-agent only if a proxied HTTPS target proves flaky in the field.
+
+/**
+ * Fallback dispatcher honoring HTTP_PROXY/HTTPS_PROXY/NO_PROXY env vars, built
+ * from shared's undici so it matches the Grafana request() path. Returns
+ * undefined when no proxy env vars are set (direct-connection path unchanged).
+ * undici does not honor these env vars on its own the way axios does.
+ */
+let _envProxyAgent: EnvHttpProxyAgent | undefined;
+export function envProxyDispatcher(): ProxyAgents['dispatcher'] | undefined {
+  const hasEnvProxy =
+    process.env.HTTP_PROXY || process.env.http_proxy ||
+    process.env.HTTPS_PROXY || process.env.https_proxy;
+  if (!hasEnvProxy) return undefined;
+  if (!_envProxyAgent) _envProxyAgent = new EnvHttpProxyAgent();
+  return _envProxyAgent as unknown as ProxyAgents['dispatcher'];
+}

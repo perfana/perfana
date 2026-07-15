@@ -1,6 +1,6 @@
-import { ProxyAgent } from 'undici'; // worker-local undici 7 — matches DynatraceAPIClient's request()
+import { ProxyAgent, EnvHttpProxyAgent } from 'undici'; // worker-local undici 7 — matches DynatraceAPIClient's request()
 import { ProxyServer } from '@perfana/shared/entities';
-import { buildProxyAgent, proxyConnection } from '@perfana/shared/services/proxy';
+import { buildProxyAgent, proxyConnection, envProxyDispatcher } from '@perfana/shared/services/proxy';
 import { getDatabaseService } from '../common/database-accessor.js';
 
 /**
@@ -28,15 +28,19 @@ const dynatraceAgentCache = _dynatraceAgentCacheForTests;
 export async function resolveProxyDispatcher(
   organizationId: string | null | undefined
 ): Promise<unknown | undefined> {
-  if (!organizationId) { return undefined; }
+  if (organizationId) {
+    const db = getDatabaseService();
+    const proxyRow = await db.dataSource
+      .getRepository(ProxyServer)
+      .findOne({ where: { organizationId } });
 
-  const db = getDatabaseService();
-  const proxyRow = await db.dataSource
-    .getRepository(ProxyServer)
-    .findOne({ where: { organizationId } });
+    const agents = buildProxyAgent(proxyRow ?? null);
+    if (agents) { return agents.dispatcher; }
+  }
 
-  const agents = buildProxyAgent(proxyRow ?? null);
-  return agents?.dispatcher;
+  // No DB ProxyServer row → honor HTTP_PROXY/HTTPS_PROXY/NO_PROXY env vars
+  // (shared undici, matching the Grafana request() path). See resolveDynatraceProxyDispatcher.
+  return envProxyDispatcher();
 }
 
 /**
@@ -54,20 +58,43 @@ export async function resolveProxyDispatcher(
 export async function resolveDynatraceProxyDispatcher(
   organizationId: string | null | undefined
 ): Promise<unknown | undefined> {
-  if (!organizationId) { return undefined; }
+  if (organizationId) {
+    const db = getDatabaseService();
+    const proxyRow = await db.dataSource
+      .getRepository(ProxyServer)
+      .findOne({ where: { organizationId } });
 
-  const db = getDatabaseService();
-  const proxyRow = await db.dataSource
-    .getRepository(ProxyServer)
-    .findOne({ where: { organizationId } });
-
-  const conn = proxyConnection(proxyRow ?? null);
-  if (!conn) { return undefined; }
-  const key = `${conn.uri}|${conn.token ?? ''}`;
-  let agent = dynatraceAgentCache.get(key);
-  if (!agent) {
-    agent = new ProxyAgent(conn.token ? { uri: conn.uri, token: conn.token } : { uri: conn.uri });
-    dynatraceAgentCache.set(key, agent);
+    const conn = proxyConnection(proxyRow ?? null);
+    if (conn) {
+      const key = `${conn.uri}|${conn.token ?? ''}`;
+      let agent = dynatraceAgentCache.get(key);
+      if (!agent) {
+        agent = new ProxyAgent(conn.token ? { uri: conn.uri, token: conn.token } : { uri: conn.uri });
+        dynatraceAgentCache.set(key, agent);
+      }
+      return agent;
+    }
   }
-  return agent;
+
+  // No DB ProxyServer row → fall back to HTTP_PROXY/HTTPS_PROXY/NO_PROXY env vars.
+  // undici (unlike axios, which the API uses) does not honor these on its own, so
+  // the worker would otherwise connect directly and fail in proxy-only environments.
+  // Built from the worker's undici 7 (matches DynatraceAPIClient.request()); the
+  // Grafana path uses shared's undici 6 envProxyDispatcher instead — no version skew.
+  return dynatraceEnvProxyDispatcher();
+}
+
+/**
+ * Lazily-built EnvHttpProxyAgent honoring HTTP_PROXY/HTTPS_PROXY/NO_PROXY.
+ * Returns undefined when no proxy env vars are set, so the direct-connection
+ * path stays byte-identical to before. Cached because env is read at construction.
+ */
+let _envProxyAgent: EnvHttpProxyAgent | undefined;
+function dynatraceEnvProxyDispatcher(): unknown | undefined {
+  const hasEnvProxy =
+    process.env.HTTP_PROXY || process.env.http_proxy ||
+    process.env.HTTPS_PROXY || process.env.https_proxy;
+  if (!hasEnvProxy) { return undefined; }
+  if (!_envProxyAgent) { _envProxyAgent = new EnvHttpProxyAgent(); }
+  return _envProxyAgent;
 }
