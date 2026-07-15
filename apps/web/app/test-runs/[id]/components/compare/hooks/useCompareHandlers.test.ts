@@ -73,6 +73,7 @@ it('injects URL panels alongside ds-metrics panels for a performance-metrics das
   (authenticatedFetch as jest.Mock).mockResolvedValue({
     ok: true,
     json: async () => [
+      { dashboard_label: 'Perf', panel_title: 'Request RT Avg', panel_id: 201, unit: 'ms' },
       { dashboard_label: 'Perf', panel_title: 'Request RT P90', panel_id: 202, unit: 'ms' },
     ],
   });
@@ -84,7 +85,8 @@ it('injects URL panels alongside ds-metrics panels for a performance-metrics das
   await waitFor(() => expect(setPanels).toHaveBeenCalled());
   await waitFor(() => {
     const lastCallPanels = setPanels.mock.calls[setPanels.mock.calls.length - 1][0];
-    expect(lastCallPanels.some((p: any) => p.id === 210)).toBe(true);
-    expect(lastCallPanels.some((p: any) => p.id === 202)).toBe(true);
+    expect(lastCallPanels.some((p: any) => p.id === 210)).toBe(true);   // URL panel injected
+    expect(lastCallPanels.some((p: any) => p.id === 201)).toBe(true);   // Avg request panel kept ("Request RT")
+    expect(lastCallPanels.some((p: any) => p.id === 202)).toBe(false);  // P90 collapsed away
   });
 });

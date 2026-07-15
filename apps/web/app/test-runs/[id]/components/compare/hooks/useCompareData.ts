@@ -31,6 +31,8 @@ import {
   buildUrlPanels,
   fetchUrlDistinctNames,
   fetchUrlMetricStatistics,
+  fetchSamplerUrlMap,
+  REQUEST_RT_PANEL_ID,
 } from '@/lib/url-perf-panels';
 
 interface UseCompareDataProps {
@@ -340,6 +342,14 @@ export function useCompareData({ testRun, testRunId, compareExpanded }: UseCompa
       const allComparisons: MetricComparison[] = [];
       const evaluateTypes = ['avg', 'q90', 'q95', 'q99'];
 
+      // Sampler -> normalized URL, fetched once and only if a Request RT panel
+      // is in play, to label those rows with their URL (like perf-analysis).
+      let samplerUrlMap: Record<string, string> | null = null;
+      const getSamplerUrlMap = async (): Promise<Record<string, string>> => {
+        if (samplerUrlMap === null) samplerUrlMap = await fetchSamplerUrlMap(testRun.test_run_id);
+        return samplerUrlMap;
+      };
+
       for (const [, group] of seriesGroups) {
         let allData: MetricStatistic[];
 
@@ -378,6 +388,9 @@ export function useCompareData({ testRun, testRunId, compareExpanded }: UseCompa
         for (const metricName of new Set(group.metricNames)) {
           const currentMetric = currentData.find(m => m.metric_name === metricName);
           const baselineMetric = selectedData.find(m => m.metric_name === metricName);
+          const url = group.panelId === REQUEST_RT_PANEL_ID
+            ? (await getSamplerUrlMap())[metricName]
+            : undefined;
           for (const evaluateType of evaluateTypes) {
             const currentValue = currentMetric?.statistics[evaluateType as keyof typeof currentMetric.statistics] ?? null;
             const selectedValue = baselineMetric?.statistics[evaluateType as keyof typeof baselineMetric.statistics] ?? null;
@@ -392,6 +405,7 @@ export function useCompareData({ testRun, testRunId, compareExpanded }: UseCompa
               dashboardId: group.dashboardId,
               panelId: group.panelId,
               yAxesFormat: group.yAxesFormat,
+              url,
             });
           }
         }

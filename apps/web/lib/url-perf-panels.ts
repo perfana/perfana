@@ -56,6 +56,29 @@ export async function fetchUrlDistinctNames(testRunId: string): Promise<string[]
   }
 }
 
+/**
+ * Map of sampler/request name -> normalized URL for a run, for enriching the
+ * Compare card's Request RT rows with their normalized URL. {} on error.
+ */
+export async function fetchSamplerUrlMap(
+  anchorTestRunId: string,
+): Promise<Record<string, string>> {
+  try {
+    const res = await authenticatedFetch(
+      `/test-runs/${anchorTestRunId}/sampler-url-map`,
+      { headers: { 'Content-Type': 'application/json' } },
+    );
+    if (!res.ok) { console.error(`Failed to fetch sampler URL map: HTTP ${res.status}`); return {}; }
+    return await res.json();
+  } catch (err) {
+    console.error('Failed to fetch sampler URL map:', err);
+    return {};
+  }
+}
+
+/** Panel id for the per-request response-time panel ("Request RT"). */
+export const REQUEST_RT_PANEL_ID = 201;
+
 /** Per-URL statistics for the given metric across runs. [] on error. */
 export async function fetchUrlMetricStatistics(
   anchorTestRunId: string,

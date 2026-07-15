@@ -225,6 +225,10 @@ export class TestRunsService {
     return this.queryService.getUrlDistinctNames(testRunId, userId, roles);
   }
 
+  async getSamplerUrlMap(testRunId: string, userId: string, roles: string[]) {
+    return this.queryService.getSamplerUrlMap(testRunId, userId, roles);
+  }
+
   async getTransactionSamples(testRunId: string, transactionName: string, userId: string, roles: string[], excludeRampUp: boolean = false, sinceMinutes?: number): Promise<Array<{
     sampler_name: string;
     scenario_name?: string;

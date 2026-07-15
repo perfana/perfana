@@ -25,6 +25,17 @@ export class TestRunsUrlMetricsController {
     return this.testRunsService.getUrlDistinctNames(testRunId, ctx.userId, ctx.roles);
   }
 
+  @Get(':testRunId/sampler-url-map')
+  @ApiOperation({ summary: 'Map of sampler/request name to normalized URL (Compare card Request RT dimension)' })
+  @ApiParam({ name: 'testRunId', description: 'Anchor test_run_id string', type: String })
+  @ApiResponse({ status: 200, description: 'Object keyed by sampler name with the normalized URL as value', schema: { type: 'object', additionalProperties: { type: 'string' } } })
+  async getSamplerUrlMap(
+    @Param('testRunId') testRunId: string,
+    @UserCtx() ctx: UserContext,
+  ): Promise<Record<string, string>> {
+    return this.testRunsService.getSamplerUrlMap(testRunId, ctx.userId, ctx.roles);
+  }
+
   @Get(':testRunId/url-metric-statistics')
   @ApiOperation({ summary: 'Per-normalized-URL statistics across runs (Compare card URL dimension)' })
   @ApiParam({ name: 'testRunId', description: 'Anchor test_run_id string (org-access scope)', type: String })
