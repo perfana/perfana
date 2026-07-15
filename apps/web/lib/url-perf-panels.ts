@@ -7,14 +7,13 @@ export const URL_PANEL_ID_MIN = 210;
 
 interface UrlPanelSpec { id: number; title: string; metric: UrlMetric; yAxesFormat: string }
 
-// ponytail: 210-213 all map to response_time and return the same distribution;
-// distinct titles match the request-panel list. Apdex (216) is omitted — per-URL
-// Apdex crosses transaction thresholds and has no single active threshold.
+// ponytail: one "URL RT" entry (210) — the response_time row already carries the
+// full avg/p90/p95/p99 distribution, and the compare table renders every percentile
+// column from it, so separate Avg/P90/P95/P99 entries were identical duplicates.
+// Apdex (216) is omitted — per-URL Apdex crosses transaction thresholds and has no
+// single active threshold.
 const URL_PANELS: UrlPanelSpec[] = [
-  { id: 210, title: 'URL RT Avg',       metric: 'response_time',    yAxesFormat: 'ms' },
-  { id: 211, title: 'URL RT P90',       metric: 'response_time',    yAxesFormat: 'ms' },
-  { id: 212, title: 'URL RT P95',       metric: 'response_time',    yAxesFormat: 'ms' },
-  { id: 213, title: 'URL RT P99',       metric: 'response_time',    yAxesFormat: 'ms' },
+  { id: 210, title: 'URL RT',           metric: 'response_time',    yAxesFormat: 'ms' },
   { id: 214, title: 'URL Error Rate',   metric: 'error_percentage', yAxesFormat: 'percent' },
   { id: 215, title: 'URL Throughput',   metric: 'throughput',       yAxesFormat: 'reqps' },
   { id: 217, title: 'URL Latency',      metric: 'latency',          yAxesFormat: 'ms' },
