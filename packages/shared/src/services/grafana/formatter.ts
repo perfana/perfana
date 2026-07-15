@@ -84,6 +84,17 @@ async function transformPanelData(queryResult: ProcessedPanelResult, testRun?: u
   const databasePanel = qrp.panel; // This is the JSONB panel field from ds_panels table
   let unit: string | null = null;
 
+  // Repeating-panel expansion (helpers.ts) stashes this hint when the repeat variable
+  // won't appear in the series legend; prefix it into metric_name so per-value rows stay
+  // distinct on the ds_metrics (panel_id, metric_name) key.
+  let metricNamePrefix: string | null = null;
+  if (databasePanel && typeof databasePanel === 'object') {
+    const pfx = (databasePanel as Record<string, unknown>).__perfanaMetricPrefix;
+    if (typeof pfx === 'string' && pfx.length > 0) {
+      metricNamePrefix = pfx;
+    }
+  }
+
   // Python equivalent: field_config = getattr(panel_query_response.panel, 'fieldConfig', {})
   if (databasePanel && typeof databasePanel === 'object') {
     const dpObj = databasePanel as Record<string, unknown>;
@@ -176,7 +187,7 @@ async function transformPanelData(queryResult: ProcessedPanelResult, testRun?: u
   const combinedData = transformedFrames.flat() as Record<string, unknown>[];
 
   // Use passed test run info for timestep calculation
-  const longFormatData = convertToLongFormat(combinedData, unit, testRun);
+  const longFormatData = convertToLongFormat(combinedData, unit, testRun, metricNamePrefix);
 
   // Sort and deduplicate (Python behavior)
   const sortedData = sortAndDeduplicate(longFormatData);
@@ -337,14 +348,16 @@ function transformTimestamps(dataFrame: Record<string, unknown>[]): Record<strin
  * Convert wide format to long format (equivalent to pandas melt)
  * Replicates Python's DataFrame.melt operation (format_result.py:92-93)
  */
-function convertToLongFormat(dataFrame: Record<string, unknown>[], unit?: string | null, testRun?: unknown): MetricsRecord[] {
+function convertToLongFormat(dataFrame: Record<string, unknown>[], unit?: string | null, testRun?: unknown, metricNamePrefix?: string | null): MetricsRecord[] {
   const longFormatData: MetricsRecord[] = [];
 
   for (const row of dataFrame) {
     const { time, ...metrics } = row;
 
     // Convert each metric column to a separate record - Python: df_wide.melt(ignore_index=False, var_name="metric_name")
-    for (const [metricName, value] of Object.entries(metrics)) {
+    for (const [rawMetricName, value] of Object.entries(metrics)) {
+      // Prefix repeat-value into metric_name when the panel expansion requested it
+      const metricName = metricNamePrefix ? `${metricNamePrefix} - ${rawMetricName}` : rawMetricName;
       // Allow null values in intermediate processing (Python keeps nulls until final cleanup)
       if (value !== undefined) {
         const recordTime = (time instanceof Date) ? time : new Date();
