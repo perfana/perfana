@@ -160,6 +160,15 @@ export default function MetricsComparisonTable({
   const [sortDir, setSortDir] = React.useState<SortDir>('desc');
   const [sortMode, setSortMode] = React.useState<SortMode>('percentage');
 
+  // Band filter driven by the panel status chips. Empty = show all.
+  const [bandFilter, setBandFilter] = React.useState<Set<Band>>(new Set());
+  const toggleBand = (b: Band) =>
+    setBandFilter(prev => {
+      const next = new Set(prev);
+      if (next.has(b)) next.delete(b); else next.add(b);
+      return next;
+    });
+
   const onHeaderClick = (key: string) => {
     if (sortKey === key) setSortDir(d => (d === 'asc' ? 'desc' : 'asc'));
     else { setSortKey(key); setSortDir('desc'); }
@@ -247,7 +256,11 @@ export default function MetricsComparisonTable({
         </Box>
       </Box>
 
-      {Array.from(dashboards.entries()).map(([dashLabel, panels]) => (
+      {Array.from(dashboards.entries())
+        .filter(([, panels]) => !bandFilter.size ||
+          Array.from(panels.values()).some(rows =>
+            rows.some(row => bandFilter.has(worstBand(rowDiffs(row), thresholds)))))
+        .map(([dashLabel, panels]) => (
         <Box key={dashLabel} sx={{ mb: 4 }}>
           <Typography variant="subtitle1" sx={{ fontWeight: 700, mb: 1.5, pl: 1.5,
             borderLeft: '4px solid', borderColor: 'primary.main' }}>
@@ -255,11 +268,31 @@ export default function MetricsComparisonTable({
           </Typography>
 
           {Array.from(panels.entries()).map(([panelLabel, rows]) => {
+            const bandByRow = new Map(rows.map(row => [row, worstBand(rowDiffs(row), thresholds)]));
             let reg = 0, warn = 0, ok = 0;
-            rows.forEach((row) => {
-              const b = worstBand(rowDiffs(row), thresholds);
-              if (b === 'bad') reg++; else if (b === 'warn') warn++; else ok++;
-            });
+            bandByRow.forEach((b) => { if (b === 'bad') reg++; else if (b === 'warn') warn++; else ok++; });
+            const visibleRows = bandFilter.size
+              ? rows.filter(row => bandFilter.has(bandByRow.get(row)!))
+              : rows;
+            // Hide panels with nothing matching the active filter.
+            if (bandFilter.size && visibleRows.length === 0) return null;
+
+            const statChip = (band: Band, count: number, label: string) => {
+              const active = bandFilter.has(band);
+              const dimmed = bandFilter.size > 0 && !active;
+              return (
+                <Chip size="small" label={`${count} ${label}`} onClick={() => toggleBand(band)}
+                  variant={active ? 'filled' : 'outlined'}
+                  aria-pressed={active}
+                  sx={{
+                    cursor: 'pointer', fontWeight: 700, color: BAND_COLORS[band],
+                    bgcolor: active ? `${BAND_COLORS[band]}33` : `${BAND_COLORS[band]}22`,
+                    borderColor: active ? BAND_COLORS[band] : 'transparent',
+                    opacity: dimmed ? 0.45 : 1,
+                    '&:hover': { bgcolor: `${BAND_COLORS[band]}3a` },
+                  }} />
+              );
+            };
             return (
               <Box key={panelLabel} sx={{ mb: 2.5, border: '1px solid', borderColor: 'divider',
                 borderRadius: 1, overflow: 'hidden' }}>
@@ -268,9 +301,9 @@ export default function MetricsComparisonTable({
                   gap: 1, px: 2, py: 1.25, bgcolor: 'action.hover', borderBottom: '1px solid', borderColor: 'divider' }}>
                   <Typography variant="subtitle2" sx={{ fontWeight: 700 }}>{panelLabel || 'Metrics'}</Typography>
                   <Box sx={{ display: 'flex', gap: 0.75 }}>
-                    {reg > 0 && <Chip size="small" label={`${reg} regressions`} sx={{ bgcolor: `${BAND_COLORS.bad}22`, color: BAND_COLORS.bad, fontWeight: 700 }} />}
-                    {warn > 0 && <Chip size="small" label={`${warn} warnings`} sx={{ bgcolor: `${BAND_COLORS.warn}22`, color: BAND_COLORS.warn, fontWeight: 700 }} />}
-                    {ok > 0 && <Chip size="small" label={`${ok} within range`} sx={{ bgcolor: `${BAND_COLORS.good}22`, color: BAND_COLORS.good, fontWeight: 700 }} />}
+                    {reg > 0 && statChip('bad', reg, 'regressions')}
+                    {warn > 0 && statChip('warn', warn, 'warnings')}
+                    {ok > 0 && statChip('good', ok, 'within range')}
                   </Box>
                 </Box>
 
@@ -299,7 +332,7 @@ export default function MetricsComparisonTable({
                 </Box>
 
                 {/* Metric rows */}
-                {sortRows(rows).map((row) => {
+                {sortRows(visibleRows).map((row) => {
                   const band = worstBand(rowDiffs(row), thresholds);
                   const gKey = graphKeyOf(row.dashboardId, row.panelId, row.metricName);
                   const open = !!showGraphs[gKey];
