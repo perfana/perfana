@@ -278,9 +278,10 @@ export class DynatraceCollector {
         );
 
         // Create API client, threading proxy dispatcher when configured
-        const proxyDispatcher = dynatraceConfig.useProxy
-          ? (await resolveDynatraceProxyDispatcher(dynatraceConfig.organizationId)) as Dispatcher | undefined
-          : undefined;
+        // Always resolve: returns a dispatcher for a DB ProxyServer row OR env HTTP(S)_PROXY,
+        // undefined otherwise. Not gated on useProxy — that flag only covers the DB-row case
+        // and would skip the env-proxy fallback in proxy-only deployments.
+        const proxyDispatcher = (await resolveDynatraceProxyDispatcher(dynatraceConfig.organizationId)) as Dispatcher | undefined;
 
         const apiClient = new DynatraceAPIClient({
           host: dynatraceConfig.host,

@@ -4,6 +4,11 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
+## [0.2.61.71] - 2026-07-15
+
+### Fixed
+- **Worker env-proxy fallback actually fires now (Dynatrace + Grafana).** v0.2.61.69 (#458) added an `EnvHttpProxyAgent` fallback so the worker honors `HTTP_PROXY`/`HTTPS_PROXY`, but every call site still gated the whole proxy resolution behind the per-config `useProxy` flag — so in proxy-only deployments (no `ProxyServer` DB row, `useProxy` off) the fallback was never reached and the worker connected directly, timing out against Dynatrace/Grafana IPs (`Connect Timeout Error`). Removed the `useProxy` gate at all four call sites (`DynatracePipeline.ts`, `MetricsPipeline.ts`, `dynatrace-collector.ts`, `grafana-collector.ts`); each now always calls the resolver, which returns `undefined` when there is neither a DB proxy row nor proxy env vars — so no-proxy deployments are byte-identical to before. Deployments must set `HTTP_PROXY`/`HTTPS_PROXY` (and `NO_PROXY`) on the worker container for the fallback to engage.
+
 ## [0.2.61.70] - 2026-07-15
 
 ### Added

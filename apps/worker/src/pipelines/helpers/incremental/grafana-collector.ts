@@ -62,12 +62,13 @@ export class GrafanaCollector {
 
     const grafanaConfig = await getGrafanaConfig();
     const meta = getGrafanaInstanceMeta();
-    if (meta?.useProxy) {
-      const dispatcher = await resolveProxyDispatcher(meta.organizationId);
-      if (dispatcher) {
-        grafanaConfig.dispatcher = dispatcher;
-        this.logger.info(`Grafana client will use org proxy (org: ${meta.organizationId})`);
-      }
+    // Always resolve: returns a dispatcher for a DB ProxyServer row OR env HTTP(S)_PROXY,
+    // undefined otherwise. Not gated on meta.useProxy — that flag only covers the DB-row
+    // case and would skip the env-proxy fallback in proxy-only deployments.
+    const dispatcher = await resolveProxyDispatcher(meta?.organizationId);
+    if (dispatcher) {
+      grafanaConfig.dispatcher = dispatcher;
+      this.logger.info(`Grafana client will use proxy (org: ${meta?.organizationId ?? 'env'})`);
     }
     this.grafanaClient = new GrafanaClient(grafanaConfig, this.logger);
     this.logger.info(`Initialized Grafana client with URL: ${grafanaConfig.url}`);
