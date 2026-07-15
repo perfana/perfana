@@ -4,6 +4,13 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
+## [0.2.61.75] - 2026-07-15
+
+### Fixed
+- **Integration add/edit dialogs no longer get clobbered by browser autofill, and Grafana edits no longer save `[MASKED]` over the real token.** Three related bugs on the Grafana and Dynatrace integration cards: (1) the credential `TextField`s had no `autoComplete` attributes, so Chrome's password manager autofilled saved values on open — pre-filling pristine "Add" fields and overwriting the loaded config in "Edit"; every text field now sets `autoComplete="off"` and every secret field `autoComplete="new-password"`. (2) The Grafana edit form pre-filled `apiKey` with the API's `[MASKED]` read and sent the whole form back on save, so the literal string `[MASKED]` got encrypted and stored — corrupting the token (and the blank `password` field wiped the stored password). The edit form now leaves secrets blank, and `handleUpdate` only sends `apiKey`/`password` when the user actually typed one. (3) `GrafanaInstancesService.update` and `DynatraceService.update` now ignore the `[MASKED]` sentinel defensively, so a masked read can never overwrite a real secret regardless of what the client sends.
+- **Standardized secret handling across the integration dialogs.** Secret fields (Grafana API key/password, Dynatrace API token/platform token) are consistently blank on edit with a "Leave blank to keep existing" placeholder + helper, are only persisted when a new value is typed, and render as `type="password"`. Editing a Dynatrace config can now rotate its API token from the UI: `apiToken` was wired through `UpdateDynatraceConfigDto` → `DynatraceService.update` → `DynatraceRepository.update` (the encrypted-column transformer handles at-rest encryption, same path as create); previously the edit dialog's token field was inert.
+- **Anomaly-detection trend graph hover tooltips now render correctly.** The trend plot's `hovertemplate` pulled the Version/Annotation lines out of `customdata` via `%{customdata.versionLine}`, and those substituted values contained `<br>` — which Plotly renders as a line break only when literal in the template, not inside a `%{customdata.*}` substitution. Both trend-plot builders (`utils.ts` for `TrendChart` and `components/utils/trends-plot-utils.ts` for the anomaly-table expanded row) now build a per-point `hovertemplate` array with all `<br>` literal and values interpolated in JS, matching the working test-run-details graph implementation. `customdata` is kept intact so the expanded row's `plotly_click`/`plotly_hover` handlers still read `customdata.testRunId`.
+
 ## [0.2.61.74] - 2026-07-15
 
 ### Fixed
