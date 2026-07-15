@@ -195,7 +195,7 @@ export default function SystemConfigurationPage() {
               onEditDashboard={dashboard.handleEditDashboard}
               onDeleteDashboard={dashboard.handleDeleteDashboard}
               onBatchDelete={(ids, del) =>
-                dashboard.handleBatchDeleteDashboards(ids, del, system.name, selectedEnvironment)
+                dashboard.handleBatchDeleteDashboards(ids, del, systemId, selectedEnvironment)
               }
             />
           )}
@@ -339,14 +339,14 @@ export default function SystemConfigurationPage() {
         }}
         onAddDashboardClose={() => dashboard.setAddDashboardOpen(false)}
         onAddDashboardSubmit={(id, label, vars) =>
-          dashboard.handleSubmitDashboard(id, label, vars, systemId, system.name, selectedEnvironment)
+          dashboard.handleSubmitDashboard(id, label, vars, systemId, selectedEnvironment)
         }
         onEditDashboardClose={() => dashboard.setEditDashboardOpen(false)}
         onEditDashboardSubmit={(label, vars) =>
-          dashboard.handleSubmitEditDashboard(label, vars, system.name, selectedEnvironment)
+          dashboard.handleSubmitEditDashboard(label, vars, systemId, selectedEnvironment)
         }
         onDeleteDashboardClose={dashboard.clearDeleteState}
-        onDeleteDashboardConfirm={() => dashboard.handleConfirmDelete(system.name, selectedEnvironment)}
+        onDeleteDashboardConfirm={() => dashboard.handleConfirmDelete(systemId, selectedEnvironment)}
         onDeleteFromGrafanaChange={dashboard.setDeleteFromGrafana}
         onAddSloClose={() => slo.setAddSloOpen(false)}
         onSLOCreated={(newSLO) =>
