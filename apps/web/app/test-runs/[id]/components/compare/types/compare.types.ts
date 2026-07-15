@@ -77,6 +77,8 @@ export interface MetricComparison {
   dashboardId?: string;
   panelId?: number;
   yAxesFormat?: string;
+  // Normalized URL for the sampler, attached for the Request RT dimension only.
+  url?: string;
 }
 
 export interface MetricDataPoint {

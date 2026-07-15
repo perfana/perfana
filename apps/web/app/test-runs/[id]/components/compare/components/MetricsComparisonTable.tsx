@@ -37,6 +37,7 @@ interface MetricRow {
   panelId: number;
   yAxesFormat?: string;
   isAggregated: boolean;
+  url?: string;
   byColumn: Record<string, MetricComparison>;
 }
 
@@ -227,6 +228,7 @@ export default function MetricsComparisonTable({
         panelId,
         yAxesFormat: c.yAxesFormat,
         isAggregated: c.metric_name.startsWith(`${ALL_AGGREGATED_OPTION} — `),
+        url: c.url,
         byColumn: {},
       };
       rowsByMetric.set(rowKey, row);
@@ -362,10 +364,15 @@ export default function MetricsComparisonTable({
                       <Box sx={{ display: 'grid', gridTemplateColumns, alignItems: 'stretch',
                         borderBottom: '1px solid', borderColor: 'divider',
                         borderLeft: '3px solid', borderLeftColor: BAND_COLORS[band] }}>
-                        <Box sx={{ px: 2, py: 1.5, display: 'flex', alignItems: 'center' }}>
+                        <Box sx={{ px: 2, py: 1.5, display: 'flex', flexDirection: 'column', justifyContent: 'center' }}>
                           <Typography variant="body2" sx={{ fontWeight: 500, wordBreak: 'break-word', overflowWrap: 'anywhere' }}>
                             {row.metricName}
                           </Typography>
+                          {row.url && (
+                            <Typography variant="caption" sx={{ color: 'text.secondary', wordBreak: 'break-word', overflowWrap: 'anywhere' }}>
+                              {row.url}
+                            </Typography>
+                          )}
                         </Box>
                         {columns.map((col) => (
                           <Cell key={col} c={row.byColumn[col]} thresholds={thresholds} />

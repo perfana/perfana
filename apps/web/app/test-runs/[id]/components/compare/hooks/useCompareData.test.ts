@@ -35,13 +35,17 @@ beforeEach(() => {
 it('appends URL panels for a performance-metrics dashboard', async () => {
   (authenticatedFetch as jest.Mock).mockResolvedValue({
     ok: true,
-    json: async () => [{ panels: [{ id: 202, title: 'Request RT P90', type: 'timeseries' }] }],
+    json: async () => [{ panels: [
+      { id: 201, title: 'Request RT Avg', type: 'timeseries' },
+      { id: 202, title: 'Request RT P90', type: 'timeseries' },
+    ] }],
   });
   const { result } = renderHook(() => useCompareData({ testRun, testRunId: 'run-1', compareExpanded: true }));
   let panels: any[] = [];
   await act(async () => { panels = await result.current.fetchDashboardPanels('perf-uid', true); });
   expect(panels.some(p => p.id === 210)).toBe(true);   // URL panel injected
-  expect(panels.some(p => p.id === 202)).toBe(true);   // request panel preserved
+  expect(panels.some(p => p.id === 201)).toBe(true);   // Avg request panel kept ("Request RT")
+  expect(panels.some(p => p.id === 202)).toBe(false);  // P90 collapsed away
 });
 
 it('does NOT append URL panels for a non-perf dashboard', async () => {
