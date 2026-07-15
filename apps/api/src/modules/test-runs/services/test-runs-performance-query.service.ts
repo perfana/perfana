@@ -2647,4 +2647,151 @@ export class TestRunsPerformanceQueryService {
       throw new DatabaseException('Failed to retrieve aggregated metric statistics', error as Error);
     }
   }
+
+  /**
+   * Per-normalized-URL statistics for the Compare card's URL dimension.
+   * Regroups the pre-computed sampler rollup (`test_run_sampler_stats`) by
+   * `url_hash`, merging the per-sampler tdigests with `rollup()` (accurate,
+   * unlike averaging percentiles) and count-weighting the mean columns. Reads
+   * the analysis-window rows (`ramp_up_excluded = true`). Fast: hits the small
+   * rollup table, never `requests_raw`.
+   *
+   * Contract mirrors getAggregatedMetricStatistics: `testRunIds` are canonical
+   * `test_run_id` strings; org scoping via (isAdmin, organizationIds).
+   *
+   * Caveat: the sampler rollup keeps only the last-seen `url_hash` per sampler,
+   * so a sampler that hits multiple normalized URLs in one run attributes all
+   * its samples to that last URL. Pre-existing rollup property; degrades
+   * gracefully; irrelevant to the primary case (samplers labelled by raw URL).
+   */
+  async getUrlMetricStatistics(
+    testRunIds: string[],
+    metric: 'response_time' | 'error_percentage' | 'throughput' | 'latency' | 'connect_time',
+    isAdmin: boolean,
+    organizationIds: string[],
+  ): Promise<Array<{
+    test_run_id: string;
+    panel_title: string;
+    metric_name: string;
+    created_at: string;
+    version: string | null;
+    annotations: string | null;
+    statistics: { avg?: number; q50?: number; q90?: number; q95?: number; q99?: number; count?: number };
+  }>> {
+    const requested = testRunIds ?? [];
+    if (requested.length === 0) return [];
+    if (!isAdmin && organizationIds.length === 0) return [];
+
+    const orgClause = isAdmin ? '' : 'AND sut.organization_id = ANY($2::uuid[])';
+
+    const query = `
+      WITH agg AS (
+        SELECT
+          s.test_run_id,
+          s.url_hash,
+          s.system_under_test,
+          s.test_environment,
+          rollup(s.pct_agg)                                                        AS pct_agg,
+          SUM(s.total_count)                                                       AS total_count,
+          SUM(s.passed_count)                                                      AS passed_count,
+          SUM(s.failed_count)                                                      AS failed_count,
+          SUM(s.avg_response_time * s.total_count) / NULLIF(SUM(s.total_count), 0) AS avg_response_time,
+          SUM(s.avg_latency       * s.total_count) / NULLIF(SUM(s.total_count), 0) AS avg_latency,
+          SUM(s.avg_connect_time  * s.total_count) / NULLIF(SUM(s.total_count), 0) AS avg_connect_time
+        FROM test_run_sampler_stats s
+        JOIN test_runs tr           ON tr.test_run_id = s.test_run_id
+        JOIN systems_under_test sut ON sut.id = tr.system_under_test_id
+        WHERE s.test_run_id = ANY($1::text[])
+          AND s.ramp_up_excluded = true
+          AND s.total_count > 0
+          ${orgClause}
+        GROUP BY s.test_run_id, s.url_hash, s.system_under_test, s.test_environment
+      )
+      SELECT
+        a.test_run_id,
+        COALESCE(up.normalized_url, a.url_hash)                                    AS normalized_url,
+        a.total_count,
+        ROUND(a.avg_response_time::numeric, 2)                                     AS avg_response_time,
+        ROUND(approx_percentile(0.50, a.pct_agg)::numeric, 2)                      AS p50,
+        ROUND(approx_percentile(0.90, a.pct_agg)::numeric, 2)                      AS p90,
+        ROUND(approx_percentile(0.95, a.pct_agg)::numeric, 2)                      AS p95,
+        ROUND(approx_percentile(0.99, a.pct_agg)::numeric, 2)                      AS p99,
+        ROUND(a.avg_latency::numeric, 2)                                           AS avg_latency,
+        ROUND(a.avg_connect_time::numeric, 2)                                      AS avg_connect_time,
+        ROUND(a.failed_count::numeric / NULLIF(a.total_count, 0) * 100, 2)         AS error_percentage,
+        ROUND(a.total_count::numeric
+              / NULLIF(GREATEST(tr.duration - COALESCE(tr.ramp_up, 0), 0), 0), 2)  AS throughput
+      FROM agg a
+      JOIN test_runs tr           ON tr.test_run_id = a.test_run_id
+      LEFT JOIN url_patterns up
+        ON  up.url_hash          = a.url_hash
+        AND up.system_under_test = a.system_under_test
+        AND up.test_environment  = a.test_environment
+      ORDER BY a.total_count DESC
+    `;
+
+    const params: unknown[] = isAdmin ? [requested] : [requested, organizationIds];
+    const rows: Array<Record<string, unknown>> = await withRequestEm(this.testRunRepo).query(query, params);
+
+    return rows.map(row => {
+      const totalCount = this.mapper.parseInt(row.total_count) ?? undefined;
+      let statistics: { avg?: number; q50?: number; q90?: number; q95?: number; q99?: number; count?: number };
+      if (metric === 'response_time') {
+        statistics = {
+          avg: this.mapper.parseFloat(row.avg_response_time) ?? undefined,
+          q50: this.mapper.parseFloat(row.p50) ?? undefined,
+          q90: this.mapper.parseFloat(row.p90) ?? undefined,
+          q95: this.mapper.parseFloat(row.p95) ?? undefined,
+          q99: this.mapper.parseFloat(row.p99) ?? undefined,
+        };
+      } else {
+        const scalarCol =
+          metric === 'error_percentage' ? 'error_percentage'
+          : metric === 'throughput'     ? 'throughput'
+          : metric === 'latency'        ? 'avg_latency'
+          :                               'avg_connect_time';
+        statistics = { avg: this.mapper.parseFloat(row[scalarCol]) ?? undefined, count: totalCount };
+      }
+      return {
+        test_run_id: row.test_run_id as string,
+        panel_title: 'URL',
+        metric_name: row.normalized_url as string,
+        created_at: '',
+        version: null,
+        annotations: null,
+        statistics,
+      };
+    });
+  }
+
+  /**
+   * Distinct normalized URLs present in a single run's sampler rollup — powers
+   * the URL series multi-select. Anchor run only.
+   */
+  async getUrlDistinctNames(
+    testRunId: string,
+    isAdmin: boolean,
+    organizationIds: string[],
+  ): Promise<string[]> {
+    if (!isAdmin && organizationIds.length === 0) return [];
+    const orgClause = isAdmin ? '' : 'AND sut.organization_id = ANY($2::uuid[])';
+    const query = `
+      SELECT DISTINCT COALESCE(up.normalized_url, s.url_hash) AS normalized_url
+      FROM test_run_sampler_stats s
+      JOIN test_runs tr           ON tr.test_run_id = s.test_run_id
+      JOIN systems_under_test sut ON sut.id = tr.system_under_test_id
+      LEFT JOIN url_patterns up
+        ON  up.url_hash          = s.url_hash
+        AND up.system_under_test = s.system_under_test
+        AND up.test_environment  = s.test_environment
+      WHERE s.test_run_id = $1
+        AND s.ramp_up_excluded = true
+        AND s.total_count > 0
+        ${orgClause}
+      ORDER BY 1
+    `;
+    const params: unknown[] = isAdmin ? [testRunId] : [testRunId, organizationIds];
+    const rows: Array<{ normalized_url: string }> = await withRequestEm(this.testRunRepo).query(query, params);
+    return rows.map(r => r.normalized_url).filter(Boolean);
+  }
 }

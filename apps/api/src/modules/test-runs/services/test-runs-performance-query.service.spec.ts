@@ -3326,6 +3326,56 @@ describe('TestRunsPerformanceQueryService', () => {
       expect(testRunRepo.query).not.toHaveBeenCalled();
     });
   });
+
+  describe('getUrlMetricStatistics', () => {
+    it('merges tdigests grouped by url_hash and maps response_time rows', async () => {
+      // Arrange: single query, no UUID/ramp-up/rollup preludes for this method.
+      (testRunRepo.query as jest.Mock).mockResolvedValueOnce([
+        {
+          test_run_id: 'run-1', normalized_url: '/api/user/{id}',
+          avg_response_time: '120.5', p50: '100', p90: '200', p95: '260', p99: '400',
+          total_count: '3000', error_percentage: '1.50', throughput: '50.00',
+          avg_latency: '30.2', avg_connect_time: '5.1',
+        },
+      ]);
+
+      const rows = await service.getUrlMetricStatistics(['run-1'], 'response_time', true, []);
+
+      // SQL correctness
+      const sql = (testRunRepo.query as jest.Mock).mock.calls[0][0] as string;
+      expect(sql).toMatch(/FROM\s+test_run_sampler_stats/i);
+      expect(sql).toMatch(/rollup\(\s*s\.pct_agg\s*\)/i);
+      expect(sql).toMatch(/GROUP BY[^;]*url_hash/i);
+      expect(sql).toMatch(/ramp_up_excluded\s*=\s*true/);
+      // Mapping correctness
+      expect(rows).toHaveLength(1);
+      expect(rows[0]).toMatchObject({
+        test_run_id: 'run-1',
+        metric_name: '/api/user/{id}',
+        statistics: { avg: 120.5, q50: 100, q90: 200, q95: 260, q99: 400 },
+      });
+    });
+
+    it('maps a scalar metric (throughput) into statistics.avg only', async () => {
+      (testRunRepo.query as jest.Mock).mockResolvedValueOnce([
+        {
+          test_run_id: 'run-1', normalized_url: '/orders/{id}',
+          avg_response_time: '90', p50: '80', p90: '150', p95: '180', p99: '250',
+          total_count: '1200', error_percentage: '0.00', throughput: '20.00',
+          avg_latency: '10', avg_connect_time: '2',
+        },
+      ]);
+
+      const rows = await service.getUrlMetricStatistics(['run-1'], 'throughput', true, []);
+      expect(rows[0].statistics).toEqual({ avg: 20, count: 1200 });
+    });
+
+    it('returns [] for a non-admin with no organizations', async () => {
+      const rows = await service.getUrlMetricStatistics(['run-1'], 'response_time', false, []);
+      expect(rows).toEqual([]);
+      expect(testRunRepo.query).not.toHaveBeenCalled();
+    });
+  });
 });
 
 /**
