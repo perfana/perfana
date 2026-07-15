@@ -4,6 +4,11 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
+## [0.2.61.73] - 2026-07-15
+
+### Added
+- **Grafana repeating panels now expand into one panel per variable value.** A panel marked `repeat: "<var>"` (e.g. `repeat: "host"`) previously produced a single `ds_panels` row: the repeat variable resolved to only its first value, the query hit just that one host, and the title kept the literal `${host}`. `createPanelDocuments` (`apps/worker/src/pipelines/panels/helpers.ts`) now expands such a panel into one doc per value of the dashboard variable (capped at 20, overflow logged), substituting the value into both the query and the panel title. The real Grafana `panel_id` is preserved on every copy so "view in Grafana" deep links stay valid. To keep each value's metrics distinct on the `ds_metrics (panel_id, metric_name)` key when the repeat variable appears only in the title (not the query/legend), the panel JSONB carries a `__perfanaMetricPrefix` hint that the shared Grafana formatter (`packages/shared/src/services/grafana/formatter.ts`) prepends to `metric_name`; when the variable is already in the query, Grafana's series legend disambiguates and no prefix is added. Non-repeating panels are unaffected.
+
 ## [0.2.61.72] - 2026-07-15
 
 ### Fixed
