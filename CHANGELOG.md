@@ -4,6 +4,11 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
+## [0.2.61.62] - 2026-07-15
+
+### Added
+- **Compare card: compare per aggregated normalized URL.** The Compare card can now compare two test runs grouped by normalized URL (e.g. `/api/user/{id}`), alongside the existing transaction and request (sampler) dimensions. For performance-test dashboards, the panel dropdown gains URL panels (URL RT Avg/P90/P95/P99, Error Rate, Throughput, Latency, Connect Time); selecting one lists normalized URLs as series. Values are re-aggregated at query time from the existing `test_run_sampler_stats` rollup grouped by `url_hash` — percentiles merged accurately via t-digest `rollup()`, means count-weighted — so it works on every existing run with no new table, migration, or backfill. Adds two read-only endpoints (`GET /test-runs/:id/url-distinct-names`, `GET /test-runs/:id/url-metric-statistics`), org-scoped identically to the sibling aggregated endpoints. Apdex is intentionally omitted (a per-URL Apdex has no single transaction threshold). URL panels appear only for performance-metrics dashboards, never Grafana/Dynatrace.
+
 ## [0.2.61.61] - 2026-07-15
 
 ### Fixed

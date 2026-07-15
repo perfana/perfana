@@ -4,7 +4,6 @@ import { Panel, MetricStatistic } from '@/app/test-runs/[id]/components/compare/
 export type UrlMetric = 'response_time' | 'error_percentage' | 'throughput' | 'latency' | 'connect_time';
 
 export const URL_PANEL_ID_MIN = 210;
-export const URL_PANEL_ID_MAX = 218;
 
 interface UrlPanelSpec { id: number; title: string; metric: UrlMetric; yAxesFormat: string }
 
