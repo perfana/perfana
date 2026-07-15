@@ -23,6 +23,29 @@ interface GrafanaPanelJson {
   fieldConfig?: { defaults?: { unit?: string } };
   options?: { reduceOptions?: { calcs?: string[] } };
   transformations?: unknown[];
+  repeat?: string; // Grafana "repeat by variable" — expand into one panel per variable value
+}
+
+// Cap how many panels a single repeating panel expands into, to avoid a large
+// host list exploding ds_panels/ds_metrics.
+const MAX_REPEAT_EXPANSION = 20;
+
+/** Replace both `$name` and `${name}` occurrences of a template variable in a string. */
+function substituteVarInString(str: string, name: string, value: string): string {
+  return str
+    .replace(new RegExp(`\\$${name}\\b`, 'g'), value)
+    .replace(new RegExp(`\\$\\{${name}\\}`, 'g'), value);
+}
+
+/**
+ * Does the repeat variable appear in the panel's targets (query/legend)? If so, the
+ * Grafana series legend already differs per value, so metric_name is naturally unique and
+ * we don't need to prefix it. ponytail: substring heuristic, not word-boundary — `$hostname`
+ * would match `$host`; upgrade to a tokenized scan only if that collision ever bites.
+ */
+function repeatVarInTargets(targets: GrafanaTargetJson[] | undefined, name: string): boolean {
+  const s = JSON.stringify(targets ?? []);
+  return s.includes(`$${name}`) || s.includes(`\${${name}}`);
 }
 
 interface GrafanaDashboardContent {
@@ -353,19 +376,16 @@ export async function createPanelDocuments(
         })
         .map(b => b.id);
 
-      // Generate template variable values from application dashboard variables
-      const queryVariables = generateTemplateVariablesFromAppDashboard(
+      // Base template variable values from application dashboard variables
+      const baseQueryVariables = generateTemplateVariablesFromAppDashboard(
         perfanaData.test_run,
         systemUnderTestName,
         appDashboard,
         dashboardJson.dashboard.templating?.list || []
       );
 
-      // Create Grafana API request with variable substitution
-      const requests = await createPanelRequests(p, queryVariables, perfanaData.test_run, datasourceMap);
-
-
       // Extract datasource type - handle both string and object datasource formats
+      // (invariant across repeat expansion — depends only on the panel definition)
       let datasourceType = null;
       if (p.datasource) {
         if (typeof p.datasource === 'string') {
@@ -390,25 +410,68 @@ export async function createPanelDocuments(
         continue;
       }
 
-      const panelDocument = {
-        test_run_id: perfanaData.test_run_id,
-        application_dashboard_id: appDashboard.id,
-        metrics_source_id: appDashboard.metrics_source_id || null,
-        dashboard_uid: dashboard.uid,
-        panel_id: p.id,
-        panel_title: p.title,
-        dashboard_label: appDashboard.dashboard_label,
-        benchmark_ids: benchmarkIds.length > 0 ? benchmarkIds : null,
-        panel: p, // Store full panel definition
-        query_variables: queryVariables, // Resolved variable values
-        datasource_type: datasourceType,
-        requests: requests, // Pre-built Grafana API requests
-        errors: null,
-        warnings: null,
-        updated_at: new Date()
-      };
+      // Grafana "repeat by variable": expand into one panel per value of the repeat variable.
+      // Non-repeating panels (or ones whose variable has no values) yield a single doc (repeatValue = null).
+      const repeatVar = p.repeat;
+      const repeatValues =
+        repeatVar
+          ? (appDashboard.variables?.find(v => v.name === repeatVar)?.values ?? [])
+          : [];
+      let expansionValues: (string | null)[] = [null];
+      if (repeatValues.length > 0) {
+        if (repeatValues.length > MAX_REPEAT_EXPANSION) {
+          logger.warn(
+            `Panel ${p.id} (${p.title}) repeats over ${repeatValues.length} "${repeatVar}" values; capping at ${MAX_REPEAT_EXPANSION}`
+          );
+        }
+        expansionValues = repeatValues.slice(0, MAX_REPEAT_EXPANSION);
+      }
+      // If the repeat var is in the query/legend, metric_name is naturally unique per value;
+      // otherwise (var only in title, or nowhere) we must prefix metric_name to avoid ds_metrics collisions.
+      const varInTargets = repeatVar ? repeatVarInTargets(p.targets, repeatVar) : false;
 
-      panelDocuments.push(panelDocument);
+      for (const repeatValue of expansionValues) {
+        const queryVariables = { ...baseQueryVariables };
+        let panelTitle = p.title;
+        if (repeatValue !== null && repeatVar) {
+          queryVariables[repeatVar] = repeatValue === 'All' ? '.*' : repeatValue;
+          panelTitle = substituteVarInString(p.title, repeatVar, repeatValue);
+        }
+
+        // Store the (title-resolved) panel. When the repeat value won't surface in the legend,
+        // stash a hint the formatter uses to prefix metric_name — keeps the real panel_id (and
+        // thus Grafana deep links) intact while making (panel_id, metric_name) unique per value.
+        const panelForDoc: GrafanaPanelJson & { __perfanaMetricPrefix?: string } = {
+          ...p,
+          title: panelTitle,
+        };
+        if (repeatValue !== null && !varInTargets) {
+          panelForDoc.__perfanaMetricPrefix = repeatValue;
+        }
+
+        // Create Grafana API request with variable substitution (per repeat value)
+        const requests = await createPanelRequests(panelForDoc, queryVariables, perfanaData.test_run, datasourceMap);
+
+        const panelDocument = {
+          test_run_id: perfanaData.test_run_id,
+          application_dashboard_id: appDashboard.id,
+          metrics_source_id: appDashboard.metrics_source_id || null,
+          dashboard_uid: dashboard.uid,
+          panel_id: p.id,
+          panel_title: panelTitle,
+          dashboard_label: appDashboard.dashboard_label,
+          benchmark_ids: benchmarkIds.length > 0 ? benchmarkIds : null,
+          panel: panelForDoc, // Store full panel definition (title resolved, prefix hint when needed)
+          query_variables: queryVariables, // Resolved variable values
+          datasource_type: datasourceType,
+          requests: requests, // Pre-built Grafana API requests
+          errors: null,
+          warnings: null,
+          updated_at: new Date()
+        };
+
+        panelDocuments.push(panelDocument);
+      }
       }
     }
   }

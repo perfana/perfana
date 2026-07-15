@@ -357,7 +357,86 @@ describe('Panels Helper Functions', () => {
       expect(panelDoc.benchmark_ids).toContain(benchmark2.id);
     });
 
-    test('should handle missing application dashboard', async () => {
+    // --- Repeating panels (Grafana "repeat by variable") ---
+
+    const repeatingPerfanaData = (panel: Record<string, unknown>, values: string[]) => {
+      const testRun = testRunFixtures.basic();
+      const appDash = {
+        ...applicationDashboardFixtures.ecommerce(),
+        dashboard_uid: 'perf-overview-abc123',
+        dashboard_label: 'Performance Overview',
+        variables: [{ name: 'host', values }],
+      };
+      const grafanaDash = {
+        id: 'grafana-perf-001',
+        uid: 'perf-overview-abc123',
+        title: 'Performance Overview',
+        application_dashboard_id: appDash.id,
+        dashboard: { dashboard: { id: 1, uid: 'perf-overview-abc123', title: 'Performance Overview', panels: [panel] } },
+      };
+      return {
+        test_run_id: testRun.test_run_id,
+        test_run: testRun,
+        application_dashboards: [appDash],
+        benchmarks: [],
+        dashboards: [grafanaDash],
+      };
+    };
+
+    test('expands a repeating panel into one doc per variable value, resolving the title', async () => {
+      const panel = {
+        id: 27,
+        title: 'CPU usage for ${host}',
+        type: 'graph',
+        repeat: 'host',
+        datasource: { type: 'prometheus', uid: 'prometheus-main' },
+        targets: [{ refId: 'A', expr: 'cpu_usage', datasource: { type: 'prometheus', uid: 'prometheus-main' } }],
+      };
+      const results = await createPanelDocuments(repeatingPerfanaData(panel, ['web-1', 'web-2', 'web-3']), 'ecommerce-api');
+
+      expect(results).toHaveLength(3);
+      expect(results.map(r => r.panel_title)).toEqual([
+        'CPU usage for web-1',
+        'CPU usage for web-2',
+        'CPU usage for web-3',
+      ]);
+      // Real Grafana panel_id preserved on every copy (keeps deep links valid)
+      expect(results.every(r => r.panel_id === 27)).toBe(true);
+      // Host is only in the title (not the query) → prefix hint so metric_name stays unique
+      expect(results.map(r => (r.panel as any).__perfanaMetricPrefix)).toEqual(['web-1', 'web-2', 'web-3']);
+    });
+
+    test('skips the metric_name prefix when the repeat variable is already in the query/legend', async () => {
+      const panel = {
+        id: 30,
+        title: 'CPU usage',
+        type: 'graph',
+        repeat: 'host',
+        datasource: { type: 'prometheus', uid: 'prometheus-main' },
+        targets: [{ refId: 'A', expr: 'cpu_usage{host="$host"}', datasource: { type: 'prometheus', uid: 'prometheus-main' } }],
+      };
+      const results = await createPanelDocuments(repeatingPerfanaData(panel, ['web-1', 'web-2']), 'ecommerce-api');
+
+      expect(results).toHaveLength(2);
+      expect(results.every(r => (r.panel as any).__perfanaMetricPrefix === undefined)).toBe(true);
+    });
+
+    test('caps expansion at 20 values', async () => {
+      const values = Array.from({ length: 25 }, (_, i) => `web-${i}`);
+      const panel = {
+        id: 27,
+        title: 'CPU usage for ${host}',
+        type: 'graph',
+        repeat: 'host',
+        datasource: { type: 'prometheus', uid: 'prometheus-main' },
+        targets: [{ refId: 'A', expr: 'cpu_usage', datasource: { type: 'prometheus', uid: 'prometheus-main' } }],
+      };
+      const results = await createPanelDocuments(repeatingPerfanaData(panel, values), 'ecommerce-api');
+
+      expect(results).toHaveLength(20);
+    });
+
+    test('missing application dashboard', async () => {
       const testRun = testRunFixtures.basic();
       const ecommerceAppDash = {
         ...applicationDashboardFixtures.ecommerce(),
