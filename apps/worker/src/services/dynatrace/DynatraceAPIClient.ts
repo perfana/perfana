@@ -293,6 +293,23 @@ export class DynatraceAPIClient {
   ): Promise<unknown> {
     const useMetricsAPI = this.isMetricSelector(query);
 
+    // [dt-diag] Root-cause routing trace: shows, per instance, which API a query
+    // is sent to and whether the credentials for that path are present. A managed
+    // instance reaching the DQL path (or hitting it with an empty platform token)
+    // is bug #2; a metric selector on a token lacking metrics.read shows up as 403.
+    logger.info(
+      `[dt-diag] routing decision: host=${this.baseUrl} type=${this.config.dynatraceType} ` +
+      `route=${useMetricsAPI ? 'metrics-v2' : 'dql'} ` +
+      `hasApiToken=${Boolean(this.config.apiToken)} hasPlatformToken=${Boolean(this.config.platformToken)} ` +
+      `dqlBaseUrl=${this.dqlBaseUrl} query="${query.slice(0, 120)}"`
+    );
+    if (!useMetricsAPI && this.config.dynatraceType === 'managed') {
+      logger.warn(
+        `[dt-diag] ⚠️ MANAGED instance ${this.baseUrl} routed to DQL — managed has no platform token ` +
+        `(hasPlatformToken=${Boolean(this.config.platformToken)}); this query will fail. query="${query.slice(0, 120)}"`
+      );
+    }
+
     if (useMetricsAPI) {
       logger.info(`📊 Routing to Metrics API v2 (query format: metric selector)`);
       // Use Metrics API v2 for metric selector queries
@@ -456,6 +473,12 @@ export class DynatraceAPIClient {
         logger.debug(`🔹 Payload: ${JSON.stringify(payload, null, 2)}`);
         logger.debug(`Starting DQL query execution (attempt ${attempt}, ${query.length} chars, timezone=${timezone})`);
 
+        logger.info(
+          `[dt-diag] DQL POST ${this.dqlBaseUrl}/platform/storage/query/v1/query:execute  ` +
+          `type=${this.config.dynatraceType} hasPlatformToken=${Boolean(this.config.platformToken)} ` +
+          `platformTokenLen=${(this.config.platformToken || '').length}`
+        );
+
         const response = await request(`${this.dqlBaseUrl}/platform/storage/query/v1/query:execute`, {
           method: 'POST',
           headers: {
@@ -467,8 +490,14 @@ export class DynatraceAPIClient {
           dispatcher: this.dispatcher,
         });
 
-        const data = await response.body.json() as DQLQueryResponse;
         const statusCode = response.statusCode;
+        if (statusCode === 401 || statusCode === 403) {
+          logger.error(
+            `[dt-diag] DQL auth failed status=${statusCode} at ${this.dqlBaseUrl} — Bearer platform token ` +
+            `${this.config.platformToken ? 'present but rejected (scope?)' : 'MISSING — managed instance should use Metrics v2, not DQL'}`
+          );
+        }
+        const data = await response.body.json() as DQLQueryResponse;
 
         // Handle immediate success (HTTP 200) - query completed synchronously
         if (statusCode === 200 && data.state === 'SUCCEEDED') {
@@ -677,19 +706,44 @@ export class DynatraceAPIClient {
       logger.info(`  🔎 Selector: ${metricSelector}`);
       logger.info(`  🌐 URL: ${this.baseUrl}/api/v2/metrics/query`);
 
-      const response = await request(
-        `${this.baseUrl}/api/v2/metrics/query?${queryParams.toString()}`,
-        {
-          method: 'GET',
-          headers: {
-            'Authorization': `Api-Token ${this.config.apiToken}`,
-            'Accept': 'application/json',
-          },
-          dispatcher: this.dispatcher,
-        }
-      );
+      const metricsUrl = `${this.baseUrl}/api/v2/metrics/query?${queryParams.toString()}`;
+      // Log token length only (not any token bytes) so two instances are distinguishable without leaking credential material into logs.
+      logger.info(`[dt-diag] Metrics v2 GET ${this.baseUrl}/api/v2/metrics/query  Api-Token present=${Boolean(this.config.apiToken)} (len=${(this.config.apiToken || '').length})`);
 
-      const data = await response.body.json() as Record<string, unknown>;
+      const response = await request(metricsUrl, {
+        method: 'GET',
+        headers: {
+          'Authorization': `Api-Token ${this.config.apiToken}`,
+          'Accept': 'application/json',
+        },
+        dispatcher: this.dispatcher,
+      });
+
+      // Read as text first so we can classify non-JSON bodies (proxy HTML block
+      // pages, gateway errors) instead of throwing an opaque JSON parse error.
+      const rawBody = await response.body.text();
+      const contentType = String(response.headers?.['content-type'] ?? '');
+      let data: Record<string, unknown>;
+      try {
+        data = JSON.parse(rawBody) as Record<string, unknown>;
+      } catch {
+        const looksHtml = /^\s*<(?:!doctype|html)/i.test(rawBody);
+        logger.error(
+          `[dt-diag] Metrics v2 returned non-JSON (status=${response.statusCode}, content-type=${contentType}, ` +
+          `looksHtml=${looksHtml}) — ${looksHtml ? 'proxy/gateway block page: request went through a proxy it should have bypassed' : 'unexpected body'}. ` +
+          `Body head: ${rawBody.slice(0, 200)}`
+        );
+        throw new Error(`Metrics query returned non-JSON body (status ${response.statusCode}, content-type ${contentType})`);
+      }
+
+      if (response.statusCode !== 200) {
+        const hint =
+          response.statusCode === 403 ? 'token lacks metrics.read scope (entities.read alone is not enough)'
+          : response.statusCode === 401 ? 'token invalid/undecrypted for this instance'
+          : response.statusCode === 404 ? 'wrong metrics URL/host for this instance (path or tenant mismatch)'
+          : 'see body';
+        logger.error(`[dt-diag] Metrics v2 FAILED status=${response.statusCode} host=${this.baseUrl} → likely: ${hint}. Body: ${rawBody.slice(0, 400)}`);
+      }
 
       if (response.statusCode === 200) {
         logger.info(`✓ Metrics API v2 query completed successfully`);
@@ -707,8 +761,7 @@ export class DynatraceAPIClient {
         return data;
       }
 
-      logger.error(`Metrics API v2 query failed with status ${response.statusCode}:`, data);
-      throw new Error(`Metrics query failed with status ${response.statusCode}: ${JSON.stringify(data)}`);
+      throw new Error(`Metrics query failed with status ${response.statusCode}: ${rawBody.slice(0, 400)}`);
 
     } finally {
       this.semaphore.release();

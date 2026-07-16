@@ -4,6 +4,11 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
+## [0.2.61.82] - 2026-07-16
+
+### Added
+- **`[dt-diag]` root-cause logging for worker Dynatrace metrics collection.** When a SUT spans two Dynatrace instances and metrics collection works for one but not the other (while the API's entities calls work for both), the worker now logs, per query: the routing decision (`metrics-v2` vs `dql`), the target host, and whether each credential (Api-Token / platform token) is present. A managed instance routed to DQL — which it can't authenticate, having no platform token — is flagged with a loud warning (`⚠️ MANAGED instance … routed to DQL`). On a Metrics API v2 failure the status code is mapped to a plain-English cause (403 → token lacks `metrics.read` scope, 401 → bad/undecrypted token, 404 → wrong host/path), and the body is read as text first so a non-JSON proxy/gateway block page is classified (`looksHtml=true`) instead of throwing an opaque JSON parse error. DQL auth failures (401/403) distinguish "token present but rejected" from "token MISSING". Grep `[dt-diag]` in the worker log to pinpoint which of the three failure modes is in play. Also hardened: `response.headers` access is now null-safe.
+
 ## [0.2.61.81] - 2026-07-16
 
 ### Fixed
