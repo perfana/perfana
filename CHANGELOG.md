@@ -4,6 +4,11 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
+## [0.2.61.80] - 2026-07-16
+
+### Fixed
+- **Worker Grafana collection now queries each dashboard's own Grafana instance instead of always the first one.** `grafana-config-cache` was a process-wide singleton that cached `grafana_instances` row #1 (`ORDER BY created_at ASC LIMIT 1`) and every worker Grafana call used it, ignoring each dashboard's `grafana_instance_id`. On a setup with a second Grafana instance, panel builds and metric queries hit the wrong host — 404s or empty/incorrect metrics. Same class of bug as the v0.2.61.77 Dynatrace `configs[0]` fix, but broader because it was a cached global rather than a local index. Added `getGrafanaConfigById()` (per-instance resolution + cache) and a `grafana-client-factory` that groups panels by their application dashboard's `grafana_instance_id` and builds a client per instance. `MetricsPipeline`, the incremental `GrafanaCollector`, and the panels-processing datasource lookup (datasource ids are instance-scoped) all resolve per instance now. Legacy rows with a null `grafana_instance_id` fall back to the existing singleton — no behavior change for single-instance deployments.
+
 ## [0.2.61.77] - 2026-07-16
 
 ### Fixed
