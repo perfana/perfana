@@ -14,8 +14,7 @@ import { DynatraceAPIClient } from '../../../services/dynatrace/DynatraceAPIClie
 import { DynatraceRepository } from '../../../services/dynatrace/DynatraceRepository.js';
 import { DataProcessor } from '../../../services/dynatrace/DataProcessor.js';
 import { DynatraceQueryConfig } from '../../../types/dynatrace/index.js';
-import { resolveDynatraceProxyDispatcher } from '../../../config/proxy-resolver.js';
-import type { Dispatcher } from 'undici';
+import { resolveDynatraceAxiosProxy } from '../../../config/proxy-resolver.js';
 import type { CollectionResult } from './types.js';
 import type { BatchProcessor } from './batch-processor.js';
 import type { MetricProcessor, TestRunContext } from './metric-processor.js';
@@ -277,11 +276,10 @@ export class DynatraceCollector {
           `Executing ${queries.length} queries on ${dynatraceConfig.label} (${dynatraceConfig.host})`
         );
 
-        // Create API client, threading proxy dispatcher when configured
-        // Always resolve: returns a dispatcher for a DB ProxyServer row OR env HTTP(S)_PROXY,
-        // undefined otherwise. Not gated on useProxy — that flag only covers the DB-row case
-        // and would skip the env-proxy fallback in proxy-only deployments.
-        const proxyDispatcher = (await resolveDynatraceProxyDispatcher(dynatraceConfig.organizationId)) as Dispatcher | undefined;
+        // Mirror the API's DynatraceService: only pass an explicit proxy when
+        // use_proxy is set (+ a DB ProxyServer row); otherwise axios reads
+        // HTTP(S)_PROXY/NO_PROXY from the env and honors NO_PROXY on its own.
+        const proxyOpts = await resolveDynatraceAxiosProxy(dynatraceConfig.organizationId, dynatraceConfig.useProxy);
 
         const apiClient = new DynatraceAPIClient({
           host: dynatraceConfig.host,
@@ -289,7 +287,7 @@ export class DynatraceCollector {
           platformToken: dynatraceConfig.platformApiToken || '',
           dynatraceType: dynatraceConfig.dynatraceType,
           maxConcurrent: 5,
-        }, proxyDispatcher);
+        }, proxyOpts);
 
         try {
           // Execute queries with time range override
