@@ -88,6 +88,7 @@ export class ReportUtilsService {
       trends: 'Trends',
       comparisons: 'Comparisons',
       graphs: 'Custom Graphs',
+      top_10_lists: 'Top 10 Lists',
     };
     return titles[type] || type;
   }

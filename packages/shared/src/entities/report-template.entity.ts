@@ -21,7 +21,8 @@ export type ReportSectionType =
   | 'awr'
   | 'trends'
   | 'comparisons'
-  | 'graphs';
+  | 'graphs'
+  | 'top_10_lists';
 
 /**
  * Configuration for a report section.
