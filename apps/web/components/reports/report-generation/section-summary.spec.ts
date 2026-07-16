@@ -95,4 +95,16 @@ describe('sectionSummary', () => {
     );
     expect(sectionSummary(section({ type: 'apdex', config: { comment: 'from config' } }))).toBe('from config');
   });
+
+  it('summarizes a top_10_lists section by scope and list count', () => {
+    expect(
+      sectionSummary({ type: 'top_10_lists', order: 0, config: { scope: 'requests', lists: ['slowest', 'impact'] } } as never),
+    ).toBe('Requests · 2 lists');
+  });
+
+  it('defaults top_10_lists to all four lists when none selected', () => {
+    expect(
+      sectionSummary({ type: 'top_10_lists', order: 0, config: { scope: 'urls' } } as never),
+    ).toBe('URLs · 4 lists');
+  });
 });
