@@ -18,11 +18,15 @@ import {
 } from '../../../pipelines/panels/helpers.js';
 import { testRunFixtures, applicationDashboardFixtures, grafanaDashboardFixtures, benchmarkFixtures } from '../../fixtures/test-data.js';
 
-// Mock the Grafana config module
-vi.mock('../../../config/grafana-config-cache.js', () => ({
-  getGrafanaConfig: vi.fn(async () => ({
-    grafanaUrl: 'http://localhost:3000',
-    grafanaApiKey: 'test-api-key'
+// Mock the per-instance Grafana client factory (helpers resolve datasources through it)
+vi.mock('../../../config/grafana-client-factory.js', () => ({
+  createGrafanaClient: vi.fn(async () => ({
+    getDatasourceByUid: vi.fn().mockResolvedValue({
+      id: 1,
+      uid: 'prometheus-main',
+      name: 'Prometheus',
+      type: 'prometheus'
+    })
   }))
 }));
 

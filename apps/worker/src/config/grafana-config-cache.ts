@@ -22,6 +22,13 @@ let cachedInstanceId: string | null = null;
 let cachedMeta: CachedGrafanaMeta | null = null;
 let loadPromise: Promise<LoadResult> | null = null;
 
+/** Resolved config + meta for a specific grafana_instances row, keyed by instance id. */
+export interface ResolvedGrafanaInstance {
+  config: GrafanaConfig;
+  meta: CachedGrafanaMeta;
+}
+const byInstanceId = new Map<string, ResolvedGrafanaInstance | null>();
+
 type LoadResult = 'loaded' | 'not-configured' | 'invalid';
 
 /**
@@ -139,6 +146,56 @@ export async function tryGetGrafanaConfig(): Promise<GrafanaConfig | null> {
 }
 
 /**
+ * Resolve config + meta for a SPECIFIC Grafana instance by id, caching per id.
+ *
+ * Returns null if the row is missing or invalid (bad server_url/apiKey) — callers
+ * should skip that instance's panels rather than silently hitting the wrong Grafana.
+ * Use this (not the singleton {@link getGrafanaConfig}) whenever a dashboard/panel
+ * carries its own grafana_instance_id, so multi-instance setups query the right host.
+ */
+export async function getGrafanaConfigById(instanceId: string): Promise<ResolvedGrafanaInstance | null> {
+  if (byInstanceId.has(instanceId)) {
+    return byInstanceId.get(instanceId) ?? null;
+  }
+  try {
+    const db = getDatabaseService();
+    const instance = await db.grafanaInstanceRepo.findOne({ where: { id: instanceId } });
+    if (!instance) {
+      logger.warn(`Grafana instance ${instanceId} not found — panels on it will be skipped`);
+      byInstanceId.set(instanceId, null);
+      return null;
+    }
+    if (!instance.server_url || !instance.apiKey) {
+      logger.warn(`Grafana instance ${instanceId} missing server_url or apiKey — panels on it will be skipped`);
+      byInstanceId.set(instanceId, null);
+      return null;
+    }
+    const resolved: ResolvedGrafanaInstance = {
+      config: { url: instance.server_url, apiKey: instance.apiKey, orgId: instance.orgId },
+      meta: { organizationId: instance.organizationId ?? null, useProxy: instance.useProxy ?? false },
+    };
+    byInstanceId.set(instanceId, resolved);
+    return resolved;
+  } catch (error) {
+    logger.warn(`Failed to load Grafana instance ${instanceId}:`, error);
+    return null; // transient DB error — don't poison the cache
+  }
+}
+
+/**
+ * Resolved config + meta for the default (singleton) instance, or null if none is
+ * configured. Fallback for dashboards/panels whose grafana_instance_id is null
+ * (legacy single-instance rows).
+ */
+export async function getDefaultResolvedGrafana(): Promise<ResolvedGrafanaInstance | null> {
+  const config = await tryGetGrafanaConfig();
+  if (!config || !cachedMeta) {
+    return null;
+  }
+  return { config, meta: cachedMeta };
+}
+
+/**
  * Get cached Grafana instance ID.
  * Returns null if no instance is configured.
  */
@@ -161,4 +218,5 @@ export function clearGrafanaConfigCache(): void {
   cachedConfig = null;
   cachedInstanceId = null;
   cachedMeta = null;
+  byInstanceId.clear();
 }

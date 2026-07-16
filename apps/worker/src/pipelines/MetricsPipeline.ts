@@ -1,9 +1,8 @@
 import { EntityManager } from 'typeorm';
 import { BasePipelineTypeORM } from './BasePipelineTypeORM.js';
 import { PipelineResult, PanelDocument, PanelMetricsDocument } from '../types/pipeline.js';
-import { GrafanaClient } from '@perfana/shared/services/grafana';
-import { getGrafanaConfig, getGrafanaInstanceId, tryGetGrafanaConfig, getGrafanaInstanceMeta } from '../config/grafana-config-cache.js';
-import { resolveProxyDispatcher } from '../config/proxy-resolver.js';
+import { getGrafanaInstanceId, tryGetGrafanaConfig } from '../config/grafana-config-cache.js';
+import { groupPanelsByGrafanaInstance } from '../config/grafana-client-factory.js';
 
 /**
  * Number of records per INSERT batch.
@@ -38,25 +37,6 @@ interface MetricsInput {
  * - Releases connections immediately after use
  */
 export class MetricsPipeline extends BasePipelineTypeORM {
-  private grafanaClient: GrafanaClient | null = null;
-
-  private async initializeGrafanaClient(): Promise<void> {
-    if (this.grafanaClient) {return;}
-
-    const grafanaConfig = await getGrafanaConfig();
-    const meta = getGrafanaInstanceMeta();
-    // Always resolve: returns a dispatcher for a DB ProxyServer row OR env HTTP(S)_PROXY,
-    // undefined otherwise. Not gated on meta.useProxy — that flag only covers the DB-row
-    // case and would skip the env-proxy fallback in proxy-only deployments.
-    const dispatcher = await resolveProxyDispatcher(meta?.organizationId);
-    if (dispatcher) {
-      grafanaConfig.dispatcher = dispatcher;
-      this.logger.info(`🔗 Grafana client will use proxy (org: ${meta?.organizationId ?? 'env'})`);
-    }
-    this.grafanaClient = new GrafanaClient(grafanaConfig, this.logger);
-    this.logger.info(`🔗 Initialized Grafana client with URL: ${grafanaConfig.url}`);
-  }
-
   async execute(input: unknown): Promise<PipelineResult> {
     const startTime = Date.now();
 
@@ -81,9 +61,6 @@ export class MetricsPipeline extends BasePipelineTypeORM {
 
       // Cleanup stale data before processing
       await this.cleanupStaleApplicationDashboards(['ds_metrics']);
-
-      // Initialize Grafana client with cached configuration (no DB query)
-      await this.initializeGrafanaClient();
 
       // Load test run and panels using TypeORM
       const testRun = await this.db.getTestRunByTestRunId(testRunId);
@@ -266,44 +243,47 @@ export class MetricsPipeline extends BasePipelineTypeORM {
 
     const allRecords: unknown[] = [];
 
-    // Process panels without errors - query Grafana and transform to records
+    // Process panels without errors - query Grafana and transform to records.
+    // Panels can span multiple Grafana instances (each application dashboard carries
+    // its own grafana_instance_id), so group by instance and query each against its
+    // own client instead of a single process-wide "first instance" client.
     if (panelsWithoutErrors.length > 0) {
-      this.logger.info(`🔍 Querying Grafana for ${panelsWithoutErrors.length} panels without errors`);
+      const groups = await groupPanelsByGrafanaInstance(this.db, panelsWithoutErrors, this.logger);
+      this.logger.info(`🔍 Querying Grafana for ${panelsWithoutErrors.length} panels without errors across ${groups.length} instance(s)`);
 
-      try {
-        if (!this.grafanaClient) {
-          throw new Error('Grafana client not initialized');
-        }
-        const grafanaResults = await this.grafanaClient.queryPanelData(panelsWithoutErrors, testRun);
+      for (const group of groups) {
+        try {
+          const grafanaResults = await group.client.queryPanelData(group.panels, testRun);
 
-        // Flatten the results directly to records
-        for (const metricsDocument of grafanaResults) {
-          // Skip storing data if query returned errors or empty results
-          if (metricsDocument.errors && metricsDocument.errors.length > 0) {
-            const errorMessages = metricsDocument.errors
-              .map((e: { message?: string }) => e.message || JSON.stringify(e))
-              .join('; ');
-            this.logger.warn(`⚠️ Skipping storage for panel ${metricsDocument.panel_id} (${metricsDocument.panel_title}): ${errorMessages}`);
-            continue;
+          // Flatten the results directly to records
+          for (const metricsDocument of grafanaResults) {
+            // Skip storing data if query returned errors or empty results
+            if (metricsDocument.errors && metricsDocument.errors.length > 0) {
+              const errorMessages = metricsDocument.errors
+                .map((e: { message?: string }) => e.message || JSON.stringify(e))
+                .join('; ');
+              this.logger.warn(`⚠️ Skipping storage for panel ${metricsDocument.panel_id} (${metricsDocument.panel_title}): ${errorMessages}`);
+              continue;
+            }
+
+            // Skip storing data if query returned empty results
+            if (!metricsDocument.data || metricsDocument.data.length === 0) {
+              this.logger.warn(`⚠️ Skipping storage for panel ${metricsDocument.panel_id} - query returned empty results`, {
+                panel_id: metricsDocument.panel_id,
+                panel_title: metricsDocument.panel_title
+              });
+              continue;
+            }
+
+            const flattenedRecords = this.flattenSingleDocument(metricsDocument, testRun);
+            allRecords.push(...flattenedRecords);
           }
-
-          // Skip storing data if query returned empty results
-          if (!metricsDocument.data || metricsDocument.data.length === 0) {
-            this.logger.warn(`⚠️ Skipping storage for panel ${metricsDocument.panel_id} - query returned empty results`, {
-              panel_id: metricsDocument.panel_id,
-              panel_title: metricsDocument.panel_title
-            });
-            continue;
+        } catch (error) {
+          this.logger.error(`❌ Grafana query failed for instance ${group.instanceId ?? 'default'}:`, error);
+          // Just log the error, don't store error records
+          for (const panel of group.panels) {
+            this.logger.error(`❌ Failed to query panel ${panel.panel_id} (${panel.panel_title}):`, error);
           }
-
-          const flattenedRecords = this.flattenSingleDocument(metricsDocument, testRun);
-          allRecords.push(...flattenedRecords);
-        }
-      } catch (error) {
-        this.logger.error('❌ Grafana query failed:', error);
-        // Just log the error, don't store error records
-        for (const panel of panelsWithoutErrors) {
-          this.logger.error(`❌ Failed to query panel ${panel.panel_id} (${panel.panel_title}):`, error);
         }
       }
     }

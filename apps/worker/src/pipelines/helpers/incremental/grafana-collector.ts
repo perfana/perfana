@@ -10,9 +10,7 @@
  */
 
 import type { Logger } from 'pino';
-import { GrafanaClient } from '@perfana/shared/services/grafana';
-import { getGrafanaConfig, getGrafanaInstanceMeta } from '../../../config/grafana-config-cache.js';
-import { resolveProxyDispatcher } from '../../../config/proxy-resolver.js';
+import { groupPanelsByGrafanaInstance } from '../../../config/grafana-client-factory.js';
 import { WorkerDatabaseService } from '../../../common/database.service.js';
 import { PanelsPipeline } from '../../PanelsPipeline.js';
 import type { PanelDocument } from '../../../types/pipeline.js';
@@ -44,35 +42,11 @@ interface TestRunData {
  * Manages Grafana metrics collection for the Incremental Metrics Pipeline.
  */
 export class GrafanaCollector {
-  private grafanaClient: GrafanaClient | null = null;
-
   constructor(
     private logger: Logger,
     private db: WorkerDatabaseService,
     private batchProcessor: BatchProcessor
   ) {}
-
-  /**
-   * Initialize Grafana client with cached configuration
-   */
-  private async initializeGrafanaClient(): Promise<void> {
-    if (this.grafanaClient) {
-      return;
-    }
-
-    const grafanaConfig = await getGrafanaConfig();
-    const meta = getGrafanaInstanceMeta();
-    // Always resolve: returns a dispatcher for a DB ProxyServer row OR env HTTP(S)_PROXY,
-    // undefined otherwise. Not gated on meta.useProxy — that flag only covers the DB-row
-    // case and would skip the env-proxy fallback in proxy-only deployments.
-    const dispatcher = await resolveProxyDispatcher(meta?.organizationId);
-    if (dispatcher) {
-      grafanaConfig.dispatcher = dispatcher;
-      this.logger.info(`Grafana client will use proxy (org: ${meta?.organizationId ?? 'env'})`);
-    }
-    this.grafanaClient = new GrafanaClient(grafanaConfig, this.logger);
-    this.logger.info(`Initialized Grafana client with URL: ${grafanaConfig.url}`);
-  }
 
   /**
    * Collect Grafana metrics for a specific time range
@@ -101,9 +75,6 @@ export class GrafanaCollector {
     try {
       this.logger.info(`Collecting Grafana metrics for time range`);
 
-      // Initialize Grafana client
-      await this.initializeGrafanaClient();
-
       // Load panels — prefer metricsSourceIds over applicationDashboardIds
       const panels = await this.loadPanels(testRunId, applicationDashboardIds, metricsSourceIds);
 
@@ -131,17 +102,11 @@ export class GrafanaCollector {
         updated_at: testRun.updatedAt,
       };
 
-      // Query Grafana for panel data
-      if (!this.grafanaClient) {
-        throw new Error('Grafana client not initialized');
-      }
+      // Query Grafana for panel data. Panels may span multiple Grafana instances,
+      // so group by the application dashboard's grafana_instance_id and query each
+      // group against its own client rather than a single "first instance" client.
+      const groups = await groupPanelsByGrafanaInstance(this.db, panels, this.logger);
 
-      const metricsDocuments = await this.grafanaClient.queryPanelData(panels, testRunAdapter, {
-        from: fromTime,
-        to: toTime,
-      });
-
-      // Process metrics documents using batch processor
       const testRunContext: TestRunContext = {
         startTime: testRun.startTime,
         endTime: testRun.endTime,
@@ -151,21 +116,29 @@ export class GrafanaCollector {
         teamId: testRun.teamId || null,
       };
 
-      const batchResult = await this.batchProcessor.processGrafanaDocuments(
-        metricsDocuments,
-        testRunContext
-      );
+      let totalRecords = 0;
+      for (const group of groups) {
+        const metricsDocuments = await group.client.queryPanelData(group.panels, testRunAdapter, {
+          from: fromTime,
+          to: toTime,
+        });
 
-      // Merge batch errors
-      errors.push(...batchResult.errors);
+        const batchResult = await this.batchProcessor.processGrafanaDocuments(
+          metricsDocuments,
+          testRunContext
+        );
 
-      if (batchResult.totalRecords > 0) {
-        this.logger.info(`Saved ${batchResult.totalRecords} Grafana metric records`);
+        errors.push(...batchResult.errors);
+        totalRecords += batchResult.totalRecords;
+      }
+
+      if (totalRecords > 0) {
+        this.logger.info(`Saved ${totalRecords} Grafana metric records`);
       }
 
       return {
         success: true,
-        dataPoints: batchResult.totalRecords,
+        dataPoints: totalRecords,
         errors,
         duration: Date.now() - startTime,
       };
