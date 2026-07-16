@@ -11,6 +11,7 @@ import { AwrRenderer } from '../renderers/awr-renderer';
 import { TrendsRenderer } from '../renderers/trends-renderer';
 import { ComparisonsRenderer } from '../renderers/comparisons-renderer';
 import { GraphsRenderer } from '../renderers/graphs-renderer';
+import { Top10ListsRenderer } from '../renderers/top-10-lists-renderer';
 import { PlaceholderRenderer } from '../renderers/placeholder-renderer';
 
 /**
@@ -36,6 +37,7 @@ export class ReportHtmlCompilerService {
     private readonly trendsRenderer: TrendsRenderer,
     private readonly comparisonsRenderer: ComparisonsRenderer,
     private readonly graphsRenderer: GraphsRenderer,
+    private readonly top10ListsRenderer: Top10ListsRenderer,
     private readonly placeholderRenderer: PlaceholderRenderer,
   ) {}
 
@@ -109,6 +111,8 @@ export class ReportHtmlCompilerService {
         return await this.comparisonsRenderer.renderComparisonsSection(section, testRun, userId, roles);
       case 'graphs':
         return await this.graphsRenderer.renderGraphsSection(section, testRun, userId, roles);
+      case 'top_10_lists':
+        return await this.top10ListsRenderer.renderTop10ListsSection(section, testRun, userId, roles);
       default:
         return this.placeholderRenderer.renderPlaceholderSection(sectionTitle, section.type);
     }

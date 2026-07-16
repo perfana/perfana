@@ -20,6 +20,7 @@ import { AwrRenderer } from '../renderers/awr-renderer';
 import { TrendsRenderer } from '../renderers/trends-renderer';
 import { ComparisonsRenderer } from '../renderers/comparisons-renderer';
 import { GraphsRenderer } from '../renderers/graphs-renderer';
+import { Top10ListsRenderer } from '../renderers/top-10-lists-renderer';
 import { PlaceholderRenderer } from '../renderers/placeholder-renderer';
 import {
   ReportSectionConfig,
@@ -76,6 +77,7 @@ describe('ReportHtmlCompilerService', () => {
   let trendsRenderer: jest.Mocked<TrendsRenderer>;
   let comparisonsRenderer: jest.Mocked<ComparisonsRenderer>;
   let graphsRenderer: jest.Mocked<GraphsRenderer>;
+  let top10ListsRenderer: jest.Mocked<Top10ListsRenderer>;
   let placeholderRenderer: jest.Mocked<PlaceholderRenderer>;
   // Real utils so we can verify escaping behaviour without extra mocking noise
   let utils: ReportUtilsService;
@@ -146,6 +148,12 @@ describe('ReportHtmlCompilerService', () => {
           },
         },
         {
+          provide: Top10ListsRenderer,
+          useValue: {
+            renderTop10ListsSection: jest.fn().mockResolvedValue('<div>top_10_lists</div>'),
+          },
+        },
+        {
           provide: PlaceholderRenderer,
           useValue: {
             renderPlaceholderSection: jest
@@ -177,6 +185,7 @@ describe('ReportHtmlCompilerService', () => {
     trendsRenderer = module.get(TrendsRenderer);
     comparisonsRenderer = module.get(ComparisonsRenderer);
     graphsRenderer = module.get(GraphsRenderer);
+    top10ListsRenderer = module.get(Top10ListsRenderer);
     placeholderRenderer = module.get(PlaceholderRenderer);
   });
 
@@ -284,6 +293,18 @@ describe('ReportHtmlCompilerService', () => {
         await service.renderSections(sections, null, null);
 
         expect(graphsRenderer.renderGraphsSection).toHaveBeenCalledTimes(1);
+      });
+
+      it('should render a top_10_lists section (async renderer)', async () => {
+        const sections = [makeSection('top_10_lists', 0)];
+        await service.renderSections(sections, null, null, 'user-1', ['user']);
+
+        expect(top10ListsRenderer.renderTop10ListsSection).toHaveBeenCalledWith(
+          sections[0],
+          null,
+          'user-1',
+          ['user'],
+        );
       });
 
       it('should delegate unknown section types to placeholderRenderer', async () => {
