@@ -332,6 +332,51 @@ interface VirtualUserScenarioRow {
   avg_active_threads: string;
 }
 
+/** A single ranked row for the Top 10 Lists report section. */
+export interface Top10Row {
+  label: string;
+  secondaryLabel?: string;
+  scenarioName: string;
+  avgResponseTime: number;
+  callCount: number;
+  errorCount: number;
+  errorRate: number;
+  throughput: number;
+  impact: number;
+}
+
+/** Raw stat-table row shared by all three Top 10 scopes. */
+export interface RawTop10Row {
+  label: string;
+  secondary_label: string | null;
+  scenario_name: string | null;
+  avg_response_time: string | number | null;
+  total_count: string | number | null;
+  failed_count: string | number | null;
+}
+
+/** Derive Top10Row metrics from raw stat rows (formulas match prepareTop10Data). */
+export function mapRawToTop10Rows(raw: RawTop10Row[], testDuration: number): Top10Row[] {
+  const duration = testDuration > 0 ? testDuration : 1;
+  return raw.map((r) => {
+    const avg = Number(r.avg_response_time) || 0;
+    const total = Number(r.total_count) || 0;
+    const failed = Number(r.failed_count) || 0;
+    const scenario = r.scenario_name && r.scenario_name.length > 0 ? r.scenario_name : 'No Scenario';
+    return {
+      label: r.label,
+      secondaryLabel: r.secondary_label ?? undefined,
+      scenarioName: scenario,
+      avgResponseTime: avg,
+      callCount: total,
+      errorCount: failed,
+      errorRate: total > 0 ? (failed / total) * 100 : 0,
+      throughput: total / duration,
+      impact: avg * total,
+    };
+  });
+}
+
 /**
  * Service for fetching report data from database
  *
@@ -515,6 +560,115 @@ export class ReportDataFetcherService {
       this.logger.error(`Failed to fetch scenario data for ${scenarioName}:`, error);
       return null;
     }
+  }
+
+  /**
+   * Ranked transaction rows for the Top 10 Lists section (transactions scope).
+   * Aggregated per (transaction, scenario) from test_run_transaction_stats.
+   */
+  async getTop10TransactionRows(
+    testRun: TestRun,
+    scenarios: string[],
+    excludeRampUp: boolean,
+    userId: string = '',
+    roles: string[] = [],
+  ): Promise<Top10Row[]> {
+    const params: unknown[] = [testRun.testRunId, excludeRampUp];
+    let scenarioClause = '';
+    if (scenarios.length > 0) {
+      params.push(scenarios);
+      scenarioClause = `AND COALESCE(NULLIF(trs.scenario_name, ''), 'No Scenario') = ANY($${params.length})`;
+    }
+    const orgFilter = await this.resolveOrgFilter(userId, roles, params.length + 1, 'tr');
+    params.push(...orgFilter.params);
+
+    const query = `
+      SELECT
+        trs.transaction_name        AS label,
+        NULL::text                  AS secondary_label,
+        trs.scenario_name,
+        trs.avg_response_time,
+        trs.total_count,
+        trs.failed_count
+      FROM test_run_transaction_stats trs
+      JOIN test_runs tr ON tr.test_run_id = trs.test_run_id
+      WHERE trs.test_run_id = $1
+        AND trs.ramp_up_excluded = $2
+        AND trs.total_count > 0
+        ${scenarioClause}
+        ${orgFilter.clause}
+    `;
+    const rows: RawTop10Row[] = await withRequestEm(this.testRunRepo).query(query, params);
+    return mapRawToTop10Rows(rows, testRun.duration ?? 1);
+  }
+
+  /**
+   * Ranked sampler rows for the Top 10 Lists section (requests / urls scope).
+   * requests: one row per sampler, url pattern as secondary_label.
+   * urls (groupByUrl): aggregated per (url pattern, scenario), weighted avg RT.
+   */
+  async getTop10SamplerRows(
+    testRun: TestRun,
+    scenarios: string[],
+    excludeRampUp: boolean,
+    groupByUrl: boolean,
+    userId: string = '',
+    roles: string[] = [],
+  ): Promise<Top10Row[]> {
+    const params: unknown[] = [testRun.testRunId, excludeRampUp];
+    let scenarioClause = '';
+    if (scenarios.length > 0) {
+      params.push(scenarios);
+      scenarioClause = `AND COALESCE(NULLIF(trss.scenario_name, ''), 'No Scenario') = ANY($${params.length})`;
+    }
+    const orgFilter = await this.resolveOrgFilter(userId, roles, params.length + 1, 'tr');
+    params.push(...orgFilter.params);
+
+    const urlExpr = `COALESCE(LOWER(up.normalized_url), trss.sampler_name)`;
+    const query = groupByUrl
+      ? `
+        SELECT
+          ${urlExpr}                 AS label,
+          NULL::text                 AS secondary_label,
+          trss.scenario_name,
+          ROUND((SUM(trss.avg_response_time * trss.total_count) / NULLIF(SUM(trss.total_count), 0))::numeric, 2) AS avg_response_time,
+          SUM(trss.total_count)      AS total_count,
+          SUM(trss.failed_count)     AS failed_count
+        FROM test_run_sampler_stats trss
+        JOIN test_runs tr ON tr.test_run_id = trss.test_run_id
+        LEFT JOIN url_patterns up
+          ON  up.url_hash          = trss.url_hash
+          AND up.system_under_test = trss.system_under_test
+          AND up.test_environment  = trss.test_environment
+        WHERE trss.test_run_id = $1
+          AND trss.ramp_up_excluded = $2
+          AND trss.total_count > 0
+          ${scenarioClause}
+          ${orgFilter.clause}
+        GROUP BY label, trss.scenario_name
+      `
+      : `
+        SELECT
+          trss.sampler_name          AS label,
+          LOWER(up.normalized_url)   AS secondary_label,
+          trss.scenario_name,
+          trss.avg_response_time,
+          trss.total_count,
+          trss.failed_count
+        FROM test_run_sampler_stats trss
+        JOIN test_runs tr ON tr.test_run_id = trss.test_run_id
+        LEFT JOIN url_patterns up
+          ON  up.url_hash          = trss.url_hash
+          AND up.system_under_test = trss.system_under_test
+          AND up.test_environment  = trss.test_environment
+        WHERE trss.test_run_id = $1
+          AND trss.ramp_up_excluded = $2
+          AND trss.total_count > 0
+          ${scenarioClause}
+          ${orgFilter.clause}
+      `;
+    const rows: RawTop10Row[] = await withRequestEm(this.testRunRepo).query(query, params);
+    return mapRawToTop10Rows(rows, testRun.duration ?? 1);
   }
 
   /**

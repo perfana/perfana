@@ -57,6 +57,7 @@ import {
   Settings as SettingsIcon,
   ExpandMore as ExpandMoreIcon,
   Star as StarIcon,
+  FormatListNumbered as ListNumberedIcon,
 } from '@mui/icons-material';
 import {
   generateAdHocReport,
@@ -80,6 +81,7 @@ import {
   AwrConfigForm,
   TrendsConfigForm,
   ComparisonsConfigForm,
+  Top10ListsConfigForm,
 } from './SectionConfigs';
 import { BaselineRunSelect, useBaselineCandidates, type BaselineCandidate } from './BaselineRunSelect';
 import { sectionSummary } from './section-summary';
@@ -170,6 +172,12 @@ const SECTION_CONFIG: Record<ReportSectionType, { icon: React.ReactNode; label: 
     label: 'Custom Graphs',
     description: 'Performance metrics visualizations',
     color: '#00bcd4',
+  },
+  top_10_lists: {
+    icon: <ListNumberedIcon />,
+    label: 'Top 10 Lists',
+    description: 'Ranked top-10 lists (slowest, throughput, impact, error rate) for transactions, requests, or URLs',
+    color: '#ff9800',
   },
 };
 
@@ -935,6 +943,8 @@ function LayoutSectionCard({ id, section, index, onDelete, onConfigChange, onMov
         return <TrendsConfigForm config={sectionConfig} onChange={onConfigChange} testRunId={testRunId} />;
       case 'comparisons':
         return <ComparisonsConfigForm config={sectionConfig} onChange={onConfigChange} testRunId={testRunId} systemUnderTestId={systemUnderTestId} testEnvironment={testEnvironment} workload={workload} />;
+      case 'top_10_lists':
+        return <Top10ListsConfigForm config={sectionConfig} onChange={onConfigChange} testRunId={testRunId} />;
       default:
         return null;
     }

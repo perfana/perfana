@@ -7,7 +7,7 @@
  */
 
 import { useState, useEffect } from 'react';
-import { Autocomplete, Box, TextField, Select, MenuItem, FormControlLabel, Switch, Typography, Button, Tooltip, FormControl, InputLabel, Checkbox, IconButton } from '@mui/material';
+import { Autocomplete, Box, TextField, Select, MenuItem, FormControlLabel, Switch, Typography, Button, Tooltip, FormControl, InputLabel, Checkbox, IconButton, ListItemText, OutlinedInput } from '@mui/material';
 import VisibilityIcon from '@mui/icons-material/Visibility';
 import DeleteIcon from '@mui/icons-material/Delete';
 import SectionPreviewModal from './SectionPreviewModal';
@@ -564,6 +564,148 @@ export function TransactionResponseTimesConfigForm({ config, onChange, testRunId
         <Typography variant="caption" color="text.secondary">
           Debug: testRunId={testRunId || 'undefined'}, scenarios={scenarios.length}, loading={loadingScenarios.toString()}
         </Typography>
+      )}
+    </SectionConfigShell>
+  );
+}
+
+// ==================== Top 10 Lists Config ====================
+
+const TOP10_LIST_OPTIONS: Array<{ key: NonNullable<Top10ListsConfig['lists']>[number]; label: string }> = [
+  { key: 'slowest', label: 'Slowest Average Response Times' },
+  { key: 'throughput', label: 'Highest Throughput' },
+  { key: 'impact', label: 'Highest Performance Impact' },
+  { key: 'error_rate', label: 'Highest Error Rate' },
+];
+
+const ALL_TOP10_LIST_KEYS = TOP10_LIST_OPTIONS.map((o) => o.key);
+
+/** @public */
+export interface Top10ListsConfig {
+  scope?: 'transactions' | 'requests' | 'urls';
+  lists?: Array<'slowest' | 'throughput' | 'impact' | 'error_rate'>;
+  scenarios?: string[];
+  excludeRampUp?: boolean;
+  includeUrl?: boolean;
+  comment?: string;
+}
+
+interface Top10ListsConfigFormProps {
+  config: Top10ListsConfig;
+  onChange: (config: Top10ListsConfig) => void;
+  testRunId?: string;
+}
+
+export function Top10ListsConfigForm({ config, onChange, testRunId }: Top10ListsConfigFormProps) {
+  const [scenarios, setScenarios] = useState<string[]>([]);
+
+  useEffect(() => {
+    if (!testRunId) return;
+    const fetchScenarios = async () => {
+      try {
+        const response = await authenticatedFetch(`/test-runs/${testRunId}/transactions`, { method: 'GET' });
+        if (!response.ok) return;
+        const transactions = await response.json();
+        if (!Array.isArray(transactions)) return;
+        const unique = Array.from(
+          new Set(transactions.map((t: { scenario_name?: string }) => t.scenario_name).filter(Boolean)),
+        );
+        setScenarios(unique as string[]);
+      } catch {
+        setScenarios([]);
+      }
+    };
+    fetchScenarios();
+  }, [testRunId]);
+
+  const scope = config.scope ?? 'transactions';
+  const selectedLists = config.lists && config.lists.length > 0 ? config.lists : ALL_TOP10_LIST_KEYS;
+  const selectedScenarios = config.scenarios ?? [];
+
+  return (
+    <SectionConfigShell
+      sectionTitle="Top 10 Lists"
+      sectionType="Top 10 Lists"
+      previewType="top_10_lists"
+      previewConfig={config}
+      comment={config.comment}
+      onCommentChange={(comment) => onChange({ ...config, comment })}
+      testRunId={testRunId}
+    >
+      {/* Scope */}
+      <Typography variant="caption" color="text.secondary">Scope</Typography>
+      <Select
+        value={scope}
+        onChange={(e) => onChange({ ...config, scope: e.target.value as Top10ListsConfig['scope'] })}
+        fullWidth
+        size="small"
+      >
+        <MenuItem value="transactions">Transactions</MenuItem>
+        <MenuItem value="requests">Requests</MenuItem>
+        <MenuItem value="urls">URLs</MenuItem>
+      </Select>
+
+      {/* Lists (multi-select) */}
+      <Typography variant="caption" color="text.secondary">Lists to include</Typography>
+      <Select
+        multiple
+        value={selectedLists}
+        onChange={(e) => {
+          const value = e.target.value as Top10ListsConfig['lists'];
+          onChange({ ...config, lists: Array.isArray(value) ? value : [] });
+        }}
+        input={<OutlinedInput />}
+        renderValue={(selected) =>
+          TOP10_LIST_OPTIONS.filter((o) => (selected as string[]).includes(o.key)).map((o) => o.label).join(', ')
+        }
+        fullWidth
+        size="small"
+      >
+        {TOP10_LIST_OPTIONS.map((o) => (
+          <MenuItem key={o.key} value={o.key}>
+            <Checkbox checked={selectedLists.includes(o.key)} />
+            <ListItemText primary={o.label} />
+          </MenuItem>
+        ))}
+      </Select>
+
+      {/* Scenarios (multi-select; empty = all) */}
+      {scenarios.length > 0 && (
+        <>
+          <Typography variant="caption" color="text.secondary">Scenarios (empty = all)</Typography>
+          <Select
+            multiple
+            value={selectedScenarios}
+            onChange={(e) => {
+              const value = e.target.value as string[];
+              onChange({ ...config, scenarios: typeof value === 'string' ? [value] : value });
+            }}
+            input={<OutlinedInput />}
+            renderValue={(selected) => (selected as string[]).join(', ') || 'All scenarios'}
+            fullWidth
+            size="small"
+          >
+            {scenarios.map((s) => (
+              <MenuItem key={s} value={s}>
+                <Checkbox checked={selectedScenarios.includes(s)} />
+                <ListItemText primary={s} />
+              </MenuItem>
+            ))}
+          </Select>
+        </>
+      )}
+
+      {/* includeUrl — requests scope only, mirrors the Compare/Perf-Analysis URL toggle */}
+      {scope === 'requests' && (
+        <FormControlLabel
+          control={
+            <Switch
+              checked={config.includeUrl ?? false}
+              onChange={(e) => onChange({ ...config, includeUrl: e.target.checked })}
+            />
+          }
+          label="Show URL"
+        />
       )}
     </SectionConfigShell>
   );

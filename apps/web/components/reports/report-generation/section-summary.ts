@@ -4,6 +4,7 @@ import type {
   HeaderConfig,
   TextBlockConfig,
   TransactionResponseTimesConfig,
+  Top10ListsConfig,
 } from './SectionConfigs';
 
 export const SUMMARY_MAX_LENGTH = 90;
@@ -58,6 +59,13 @@ export function sectionSummary(section: ReportSectionConfig): string | null {
       ]
         .filter(Boolean)
         .join(' · ');
+    }
+    case 'top_10_lists': {
+      const cfg = (section.config ?? {}) as Top10ListsConfig;
+      const scopeLabel =
+        cfg.scope === 'requests' ? 'Requests' : cfg.scope === 'urls' ? 'URLs' : 'Transactions';
+      const count = Array.isArray(cfg.lists) && cfg.lists.length > 0 ? cfg.lists.length : 4;
+      return `${scopeLabel} · ${count} list${count === 1 ? '' : 's'}`;
     }
     default:
       // ponytail: no naming field in these configs — the comment is the only distinguisher

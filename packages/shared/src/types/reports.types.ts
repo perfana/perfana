@@ -550,6 +550,7 @@ export const REPORT_SECTION_TYPES: readonly ReportSectionType[] = [
   'trends',
   'comparisons',
   'graphs',
+  'top_10_lists',
 ] as const;
 
 /**
@@ -564,6 +565,7 @@ export const COMMENTABLE_SECTION_TYPES: readonly CommentableSectionType[] = [
   'trends',
   'comparisons',
   'graphs',
+  'top_10_lists',
 ] as const;
 
 /**
@@ -580,6 +582,7 @@ export const SECTION_TYPE_LABELS: Record<ReportSectionType, string> = {
   trends: 'Trends',
   comparisons: 'Comparisons',
   graphs: 'Custom Graphs',
+  top_10_lists: 'Top 10 Lists',
 } as const;
 
 /**
