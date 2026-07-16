@@ -1,4 +1,4 @@
-import { buildProxyAgent, proxyConnection, _agentCacheForTests } from './build-proxy-agent';
+import { buildProxyAgent, proxyConnection, normalizeNoProxy, _agentCacheForTests } from './build-proxy-agent';
 import { ProxyServer } from '../../entities/proxy-server.entity';
 
 const make = (over: Partial<ProxyServer>): ProxyServer =>
@@ -69,5 +69,33 @@ describe('proxyConnection', () => {
   it('returns Basic token when username+password present', () => {
     const r = proxyConnection(make({ username: 'u', password: 'p' }))!;
     expect(r.token).toBe(`Basic ${Buffer.from('u:p').toString('base64')}`);
+  });
+});
+
+describe('normalizeNoProxy', () => {
+  it('rewrites a leading glob star (no dot) into a dot so undici matches subdomains', () => {
+    // The field bug: `*ba.uwv.nl` was kept literal by undici and never matched.
+    expect(normalizeNoProxy('*ba.uwv.nl')).toBe('.ba.uwv.nl');
+  });
+
+  it('leaves already-valid forms untouched', () => {
+    expect(normalizeNoProxy('.ba.uwv.nl')).toBe('.ba.uwv.nl');
+    expect(normalizeNoProxy('*.ba.uwv.nl')).toBe('*.ba.uwv.nl');
+    expect(normalizeNoProxy('ba.uwv.nl')).toBe('ba.uwv.nl');
+  });
+
+  it('normalizes only the offending entry in a full list', () => {
+    expect(normalizeNoProxy('localhost,127.0.0.1,.svc,*ba.uwv.nl,grafana-pto'))
+      .toBe('localhost,127.0.0.1,.svc,.ba.uwv.nl,grafana-pto');
+  });
+
+  it('handles comma+whitespace separators and trims blanks', () => {
+    expect(normalizeNoProxy('localhost, *ba.uwv.nl ,, grafana')).toBe('localhost,.ba.uwv.nl,grafana');
+  });
+
+  it('returns undefined for empty/absent input', () => {
+    expect(normalizeNoProxy(undefined)).toBeUndefined();
+    expect(normalizeNoProxy('')).toBeUndefined();
+    expect(normalizeNoProxy('   ')).toBeUndefined();
   });
 });

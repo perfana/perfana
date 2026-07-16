@@ -62,10 +62,30 @@ export function buildProxyAgent(proxy: ProxyServer | null | undefined): ProxyAge
 // https-proxy-agent only if a proxied HTTPS target proves flaky in the field.
 
 /**
+ * Normalize NO_PROXY for undici's EnvHttpProxyAgent, which only strips a leading
+ * `*.` or `.` (regex `/^\*?\./`). A glob entry like `*ba.uwv.nl` (star, NO dot)
+ * is kept literal and never matches `foo.ba.uwv.nl`, so the host gets proxied —
+ * exactly the corporate-proxy HTML-block-page failure seen in the field. axios
+ * (used by the API) is lenient about this form; undici is strict. We rewrite a
+ * leading `*` that is NOT followed by `.` into `.` (`*foo` → `.foo`), leaving
+ * `*.foo`, `.foo`, and `foo` untouched. Returns undefined for empty input.
+ */
+export function normalizeNoProxy(raw: string | undefined): string | undefined {
+  if (!raw) return undefined;
+  const normalized = raw
+    .split(/[\s,]+/)
+    .filter(Boolean)
+    .map(entry => entry.replace(/^\*(?!\.)/, '.'))
+    .join(',');
+  return normalized || undefined;
+}
+
+/**
  * Fallback dispatcher honoring HTTP_PROXY/HTTPS_PROXY/NO_PROXY env vars, built
  * from shared's undici so it matches the Grafana request() path. Returns
  * undefined when no proxy env vars are set (direct-connection path unchanged).
  * undici does not honor these env vars on its own the way axios does.
+ * NO_PROXY is normalized so glob entries (`*foo`) behave like axios.
  */
 let _envProxyAgent: EnvHttpProxyAgent | undefined;
 export function envProxyDispatcher(): ProxyAgents['dispatcher'] | undefined {
@@ -73,6 +93,9 @@ export function envProxyDispatcher(): ProxyAgents['dispatcher'] | undefined {
     process.env.HTTP_PROXY || process.env.http_proxy ||
     process.env.HTTPS_PROXY || process.env.https_proxy;
   if (!hasEnvProxy) return undefined;
-  if (!_envProxyAgent) _envProxyAgent = new EnvHttpProxyAgent();
+  if (!_envProxyAgent) {
+    const noProxy = normalizeNoProxy(process.env.NO_PROXY ?? process.env.no_proxy);
+    _envProxyAgent = new EnvHttpProxyAgent(noProxy ? { noProxy } : {});
+  }
   return _envProxyAgent as unknown as ProxyAgents['dispatcher'];
 }
