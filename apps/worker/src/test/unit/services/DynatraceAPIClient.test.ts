@@ -139,7 +139,17 @@ describe('DynatraceAPIClient', () => {
                 values: [50.5]
               }]
             }]
-          })
+          }),
+          text: vi.fn().mockResolvedValue(JSON.stringify({
+            result: [{
+              metricId: 'builtin:host.cpu.usage',
+              data: [{
+                dimensionMap: { 'dt.entity.host': 'HOST-123' },
+                timestamps: [1704067200000],
+                values: [50.5]
+              }]
+            }]
+          }))
         }
       };
       mockRequest.mockResolvedValueOnce(mockMetricsResponse as any);
@@ -160,7 +170,11 @@ describe('DynatraceAPIClient', () => {
           json: vi.fn().mockResolvedValue({
             state: 'SUCCEEDED',
             result: { records: [] }
-          })
+          }),
+          text: vi.fn().mockResolvedValue(JSON.stringify({
+            state: 'SUCCEEDED',
+            result: { records: [] }
+          }))
         }
       };
       mockRequest.mockResolvedValueOnce(mockDQLResponse as any);
@@ -199,7 +213,15 @@ describe('DynatraceAPIClient', () => {
                 { timestamp: '2024-01-01T00:00:00Z', 'dt.entity.host': 'HOST-123', value: 50.5 }
               ]
             }
-          })
+          }),
+          text: vi.fn().mockResolvedValue(JSON.stringify({
+            state: 'SUCCEEDED',
+            result: {
+              records: [
+                { timestamp: '2024-01-01T00:00:00Z', 'dt.entity.host': 'HOST-123', value: 50.5 }
+              ]
+            }
+          }))
         }
       };
       mockRequest.mockResolvedValue(mockResponse as any);
@@ -237,7 +259,11 @@ describe('DynatraceAPIClient', () => {
           json: vi.fn().mockResolvedValue({
             state: 'RUNNING',
             requestToken
-          })
+          }),
+          text: vi.fn().mockResolvedValue(JSON.stringify({
+            state: 'RUNNING',
+            requestToken
+          }))
         }
       };
 
@@ -246,7 +272,10 @@ describe('DynatraceAPIClient', () => {
         body: {
           json: vi.fn().mockResolvedValue({
             state: 'RUNNING'
-          })
+          }),
+          text: vi.fn().mockResolvedValue(JSON.stringify({
+            state: 'RUNNING'
+          }))
         }
       };
 
@@ -260,7 +289,15 @@ describe('DynatraceAPIClient', () => {
                 { timestamp: '2024-01-01T00:00:00Z', 'dt.entity.host': 'HOST-123', value: 75.2 }
               ]
             }
-          })
+          }),
+          text: vi.fn().mockResolvedValue(JSON.stringify({
+            state: 'SUCCEEDED',
+            result: {
+              records: [
+                { timestamp: '2024-01-01T00:00:00Z', 'dt.entity.host': 'HOST-123', value: 75.2 }
+              ]
+            }
+          }))
         }
       };
 
@@ -299,7 +336,11 @@ describe('DynatraceAPIClient', () => {
           json: vi.fn().mockResolvedValue({
             state: 'RUNNING',
             requestToken
-          })
+          }),
+          text: vi.fn().mockResolvedValue(JSON.stringify({
+            state: 'RUNNING',
+            requestToken
+          }))
         }
       };
 
@@ -312,7 +353,14 @@ describe('DynatraceAPIClient', () => {
               code: 'QUERY_ERROR',
               message: 'Invalid DQL syntax'
             }
-          })
+          }),
+          text: vi.fn().mockResolvedValue(JSON.stringify({
+            state: 'FAILED',
+            error: {
+              code: 'QUERY_ERROR',
+              message: 'Invalid DQL syntax'
+            }
+          }))
         }
       };
 
@@ -345,7 +393,11 @@ describe('DynatraceAPIClient', () => {
           json: vi.fn().mockResolvedValue({
             state: 'RUNNING',
             requestToken
-          })
+          }),
+          text: vi.fn().mockResolvedValue(JSON.stringify({
+            state: 'RUNNING',
+            requestToken
+          }))
         }
       };
 
@@ -354,7 +406,10 @@ describe('DynatraceAPIClient', () => {
         body: {
           json: vi.fn().mockResolvedValue({
             state: 'RUNNING'
-          })
+          }),
+          text: vi.fn().mockResolvedValue(JSON.stringify({
+            state: 'RUNNING'
+          }))
         }
       };
 
@@ -378,7 +433,11 @@ describe('DynatraceAPIClient', () => {
           json: vi.fn().mockResolvedValue({
             state: 'SUCCEEDED',
             result: { records: [] }
-          })
+          }),
+          text: vi.fn().mockResolvedValue(JSON.stringify({
+            state: 'SUCCEEDED',
+            result: { records: [] }
+          }))
         }
       };
       mockRequest.mockResolvedValue(mockResponse as any);
@@ -413,7 +472,11 @@ describe('DynatraceAPIClient', () => {
           json: vi.fn().mockResolvedValue({
             state: 'SUCCEEDED',
             result: { records: [] }
-          })
+          }),
+          text: vi.fn().mockResolvedValue(JSON.stringify({
+            state: 'SUCCEEDED',
+            result: { records: [] }
+          }))
         }
       };
 
@@ -482,7 +545,21 @@ describe('DynatraceAPIClient', () => {
                 ]
               }
             ]
-          })
+          }),
+          text: vi.fn().mockResolvedValue(JSON.stringify({
+            result: [
+              {
+                metricId: 'builtin:host.cpu.system',
+                data: [
+                  {
+                    dimensionMap: { 'dt.entity.host': 'HOST-123' },
+                    timestamps: [1704067200000, 1704067260000], // 1-minute intervals
+                    values: [25.5, 30.2]
+                  }
+                ]
+              }
+            ]
+          }))
         }
       };
       mockRequest.mockResolvedValue(mockResponse as any);
@@ -528,7 +605,21 @@ describe('DynatraceAPIClient', () => {
                 ]
               }
             ]
-          })
+          }),
+          text: vi.fn().mockResolvedValue(JSON.stringify({
+            result: [
+              {
+                metricId: 'builtin:host.cpu.system',
+                data: [
+                  {
+                    dimensionMap: { 'dt.entity.host': 'HOST-456' },
+                    timestamps: [1704067200000],
+                    values: [42.7]
+                  }
+                ]
+              }
+            ]
+          }))
         }
       };
       mockRequest.mockResolvedValue(mockResponse as any);
@@ -553,7 +644,10 @@ describe('DynatraceAPIClient', () => {
         body: {
           json: vi.fn().mockResolvedValue({
             result: []
-          })
+          }),
+          text: vi.fn().mockResolvedValue(JSON.stringify({
+            result: []
+          }))
         }
       };
       mockRequest.mockResolvedValue(mockResponse as any);
@@ -577,7 +671,13 @@ describe('DynatraceAPIClient', () => {
               code: 400,
               message: 'Invalid metric selector'
             }
-          })
+          }),
+          text: vi.fn().mockResolvedValue(JSON.stringify({
+            error: {
+              code: 400,
+              message: 'Invalid metric selector'
+            }
+          }))
         }
       };
       mockRequest.mockResolvedValue(mockResponse as any);
@@ -595,7 +695,10 @@ describe('DynatraceAPIClient', () => {
         body: {
           json: vi.fn().mockResolvedValue({
             result: []
-          })
+          }),
+          text: vi.fn().mockResolvedValue(JSON.stringify({
+            result: []
+          }))
         }
       };
       mockRequest.mockResolvedValue(mockResponse as any);
@@ -635,7 +738,11 @@ describe('DynatraceAPIClient', () => {
           json: vi.fn().mockResolvedValue({
             state: 'SUCCEEDED',
             result: { records: [{ timestamp: '2024-01-01T00:00:00Z', value: 50 }] }
-          })
+          }),
+          text: vi.fn().mockResolvedValue(JSON.stringify({
+            state: 'SUCCEEDED',
+            result: { records: [{ timestamp: '2024-01-01T00:00:00Z', value: 50 }] }
+          }))
         }
       };
 
@@ -645,7 +752,11 @@ describe('DynatraceAPIClient', () => {
           json: vi.fn().mockResolvedValue({
             state: 'SUCCEEDED',
             result: { records: [{ timestamp: '2024-01-01T00:00:00Z', value: 75 }] }
-          })
+          }),
+          text: vi.fn().mockResolvedValue(JSON.stringify({
+            state: 'SUCCEEDED',
+            result: { records: [{ timestamp: '2024-01-01T00:00:00Z', value: 75 }] }
+          }))
         }
       };
 
@@ -688,7 +799,11 @@ describe('DynatraceAPIClient', () => {
               json: vi.fn().mockResolvedValue({
                 state: 'SUCCEEDED',
                 result: { records: [] }
-              })
+              }),
+          text: vi.fn().mockResolvedValue(JSON.stringify({
+                state: 'SUCCEEDED',
+                result: { records: [] }
+              }))
             }
           } as any;
         } else {
@@ -719,7 +834,11 @@ describe('DynatraceAPIClient', () => {
           json: vi.fn().mockResolvedValue({
             state: 'SUCCEEDED',
             result: { records: [] }
-          })
+          }),
+          text: vi.fn().mockResolvedValue(JSON.stringify({
+            state: 'SUCCEEDED',
+            result: { records: [] }
+          }))
         }
       };
       mockRequest.mockResolvedValue(mockResponse as any);
@@ -823,7 +942,13 @@ describe('DynatraceAPIClient', () => {
                 metricId: 'builtin:host.cpu.usage',
                 data: [{ dimensionMap: {}, timestamps: [1704067200000], values: [50.5] }]
               }]
-            })
+            }),
+          text: vi.fn().mockResolvedValue(JSON.stringify({
+              result: [{
+                metricId: 'builtin:host.cpu.usage',
+                data: [{ dimensionMap: {}, timestamps: [1704067200000], values: [50.5] }]
+              }]
+            }))
           }
         };
         mockRequest.mockResolvedValue(mockResponse as any);
@@ -852,7 +977,10 @@ describe('DynatraceAPIClient', () => {
           body: {
             json: vi.fn().mockResolvedValue({
               result: []
-            })
+            }),
+          text: vi.fn().mockResolvedValue(JSON.stringify({
+              result: []
+            }))
           }
         };
         mockRequest.mockResolvedValue(mockResponse as any);
@@ -874,7 +1002,8 @@ describe('DynatraceAPIClient', () => {
         const mockResponse = {
           statusCode: 200,
           body: {
-            json: vi.fn().mockResolvedValue({ result: [] })
+            json: vi.fn().mockResolvedValue({ result: [] }),
+          text: vi.fn().mockResolvedValue(JSON.stringify({ result: [] }))
           }
         };
         mockRequest.mockResolvedValue(mockResponse as any);
@@ -896,7 +1025,8 @@ describe('DynatraceAPIClient', () => {
         const mockResponse = {
           statusCode: 200,
           body: {
-            json: vi.fn().mockResolvedValue({ result: [] })
+            json: vi.fn().mockResolvedValue({ result: [] }),
+          text: vi.fn().mockResolvedValue(JSON.stringify({ result: [] }))
           }
         };
         mockRequest.mockResolvedValue(mockResponse as any);
@@ -918,7 +1048,8 @@ describe('DynatraceAPIClient', () => {
         const mockResponse = {
           statusCode: 200,
           body: {
-            json: vi.fn().mockResolvedValue({ result: [] })
+            json: vi.fn().mockResolvedValue({ result: [] }),
+          text: vi.fn().mockResolvedValue(JSON.stringify({ result: [] }))
           }
         };
         mockRequest.mockResolvedValue(mockResponse as any);
@@ -954,7 +1085,11 @@ describe('DynatraceAPIClient', () => {
             json: vi.fn().mockResolvedValue({
               state: 'SUCCEEDED',
               result: { records: [] }
-            })
+            }),
+          text: vi.fn().mockResolvedValue(JSON.stringify({
+              state: 'SUCCEEDED',
+              result: { records: [] }
+            }))
           }
         };
         mockRequest.mockResolvedValue(mockResponse as any);
@@ -984,7 +1119,11 @@ describe('DynatraceAPIClient', () => {
             json: vi.fn().mockResolvedValue({
               state: 'SUCCEEDED',
               result: { records: [] }
-            })
+            }),
+          text: vi.fn().mockResolvedValue(JSON.stringify({
+              state: 'SUCCEEDED',
+              result: { records: [] }
+            }))
           }
         };
         mockRequest.mockResolvedValue(mockResponse as any);
@@ -1009,7 +1148,11 @@ describe('DynatraceAPIClient', () => {
             json: vi.fn().mockResolvedValue({
               state: 'SUCCEEDED',
               result: { records: [] }
-            })
+            }),
+          text: vi.fn().mockResolvedValue(JSON.stringify({
+              state: 'SUCCEEDED',
+              result: { records: [] }
+            }))
           }
         };
         mockRequest.mockResolvedValue(mockResponse as any);
@@ -1034,7 +1177,11 @@ describe('DynatraceAPIClient', () => {
             json: vi.fn().mockResolvedValue({
               state: 'SUCCEEDED',
               result: { records: [] }
-            })
+            }),
+          text: vi.fn().mockResolvedValue(JSON.stringify({
+              state: 'SUCCEEDED',
+              result: { records: [] }
+            }))
           }
         };
         mockRequest.mockResolvedValue(mockResponse as any);
@@ -1065,7 +1212,8 @@ describe('DynatraceAPIClient', () => {
         const mockResponse = {
           statusCode: 200,
           body: {
-            json: vi.fn().mockResolvedValue({ result: [] })
+            json: vi.fn().mockResolvedValue({ result: [] }),
+          text: vi.fn().mockResolvedValue(JSON.stringify({ result: [] }))
           }
         };
         mockRequest.mockResolvedValue(mockResponse as any);
@@ -1097,7 +1245,11 @@ describe('DynatraceAPIClient', () => {
             json: vi.fn().mockResolvedValue({
               state: 'SUCCEEDED',
               result: { records: [] }
-            })
+            }),
+          text: vi.fn().mockResolvedValue(JSON.stringify({
+              state: 'SUCCEEDED',
+              result: { records: [] }
+            }))
           }
         };
         mockRequest.mockResolvedValue(mockResponse as any);
@@ -1134,7 +1286,10 @@ describe('DynatraceAPIClient', () => {
         body: {
           json: vi.fn().mockResolvedValue({
             error: { message: 'Internal server error' }
-          })
+          }),
+          text: vi.fn().mockResolvedValue(JSON.stringify({
+            error: { message: 'Internal server error' }
+          }))
         }
       };
       mockRequest.mockResolvedValue(mockResponse as any);
@@ -1150,7 +1305,8 @@ describe('DynatraceAPIClient', () => {
       const mockResponse = {
         statusCode: 200,
         body: {
-          json: vi.fn().mockResolvedValue(null) // Malformed response
+          json: vi.fn().mockResolvedValue(null),
+          text: vi.fn().mockResolvedValue(JSON.stringify(null)) // Malformed response
         }
       };
       mockRequest.mockResolvedValue(mockResponse as any);
@@ -1170,7 +1326,11 @@ describe('DynatraceAPIClient', () => {
           json: vi.fn().mockResolvedValue({
             state: 'RUNNING',
             requestToken
-          })
+          }),
+          text: vi.fn().mockResolvedValue(JSON.stringify({
+            state: 'RUNNING',
+            requestToken
+          }))
         }
       };
 
@@ -1183,7 +1343,11 @@ describe('DynatraceAPIClient', () => {
           json: vi.fn().mockResolvedValue({
             state: 'SUCCEEDED',
             result: { records: [] }
-          })
+          }),
+          text: vi.fn().mockResolvedValue(JSON.stringify({
+            state: 'SUCCEEDED',
+            result: { records: [] }
+          }))
         }
       };
 
