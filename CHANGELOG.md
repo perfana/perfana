@@ -4,6 +4,11 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
+## [0.2.61.83] - 2026-07-16
+
+### Fixed
+- **Dynatrace card Services-tab deep links now open the instance the service was mapped from, not always the first one.** `useDynatraceHandlers` used `configs[0]` for all three actions — Performance Insights deep links, Multidimensional Analysis, and Performance Comparison — so for a SUT spanning two Dynatrace instances, every service's link pointed at instance #1's host regardless of where that service actually lives. A service mapped from the second instance opened a URL on the wrong tenant (dead/incorrect link). Each handler now selects `configs.find(c => c.id === <mapping/entity>.dynatraceConfigId) ?? configs[0]`, threading the mapping's `dynatraceConfigId` (already present on `DynatraceEntityMapping`) through the entity passed to the deep-link and analysis handlers. Single-instance setups are unchanged (fallback to `configs[0]`). Same class as the v0.2.61.77 host-tab fix, now covering the services tab.
+
 ## [0.2.61.81] - 2026-07-16
 
 ### Fixed
