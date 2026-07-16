@@ -4,6 +4,11 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
+## [0.2.61.76] - 2026-07-16
+
+### Fixed
+- **Escape user-authored values in the anomaly trend-graph hover template.** Follow-up to v0.2.61.75: the per-point Plotly `hovertemplate` interpolated `test_run_id`, `version`, `annotations`, and `conclusion_label` raw, and Plotly renders the template as pseudo-HTML — so a value containing `<`, `>`, or `&` could be read as markup. Both trend-plot builders (`utils.ts` and `components/utils/trends-plot-utils.ts`) now HTML-escape those values before interpolation, keeping the structural `<br>`/`<b>` literals intact. This hardening commit missed the v0.2.61.75 squash-merge; re-landed here.
+
 ## [0.2.61.75] - 2026-07-15
 
 ### Fixed
