@@ -24,6 +24,12 @@ export interface DynatraceEntity {
   entityId: string;
   displayName: string;
   type: string;
+  /**
+   * The Dynatrace config/instance this entity was mapped from. Deep links and
+   * multidimensional-analysis URLs must target this instance's host, not
+   * `configs[0]`, when a SUT spans multiple Dynatrace instances.
+   */
+  dynatraceConfigId?: string;
   tags?: Array<{
     key: string;
     value: string;
