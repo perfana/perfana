@@ -41,7 +41,7 @@
       "project": ["src/**/*.ts"]
     }
   },
-  "ignore": ["docs-site/**", ".eslintrc.js", "scripts/**"],
+  "ignore": [".eslintrc.js", "scripts/**"],
   "exclude": ["duplicates"],
   "ignoreBinaries": ["typeorm", "quartz", "tsconfig-paths"],
   "ignoreDependencies": [

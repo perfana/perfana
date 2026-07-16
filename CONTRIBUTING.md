@@ -97,7 +97,7 @@ npx typeorm migration:generate -d src/config/typeorm.config.ts src/migrations/Yo
 | **PR Quality Gate** (`pr-quality-gate.yml`) | Manual / PR | Runs type-check and test suite across all apps (API, web, worker, shared, grafana-sync) |
 | **Claude Code Review** (`claude-review.yml`) | PR comment with `/review` | AI-powered code review using Claude |
 | **Docker Build** (`docker-build.yml`) | Push to `main`/`develop`, version tags | Builds and pushes Docker images for all services |
-| **Deploy Documentation** (`docs.yml`) | Push to `main` (docs-site changes) | Builds and deploys the documentation site |
+| **Deploy user guide** (`docs.yml`) | Push to `main` (`docs-user/` changes) | Builds the MkDocs user guide and deploys it to docs.perfana.io |
 
 ### Running Checks Locally
 
@@ -183,8 +183,9 @@ New here? Read these in order to get oriented:
 1. [README.md](README.md) — what Perfana is and how to run it
 2. [ARCHITECTURE.md](ARCHITECTURE.md) — system diagrams and how the apps fit together
 3. [AGENTS.md](AGENTS.md) — conventions and guidance for humans and AI agents
-4. The documentation site under [`docs-site/`](docs-site/) — deep reference for
-   ADAPT, RBAC, schemas, and features
+4. The developer reference under [`docs/reference/`](docs/reference/) — narrative
+   deep reference for ADAPT, RBAC, schemas, and features (derivable architecture
+   is served live from the GitNexus index)
 
 ## Developer Certificate of Origin (DCO)
 
