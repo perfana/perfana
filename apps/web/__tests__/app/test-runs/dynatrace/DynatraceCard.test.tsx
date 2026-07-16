@@ -865,7 +865,7 @@ describe('DynatraceCard', () => {
 
       await waitFor(() => {
         expect(screen.getByText('Response Time Hotspots')).toBeInTheDocument();
-        expect(screen.getByText('PurePaths')).toBeInTheDocument();
+        expect(screen.getByText('Distributed Tracing')).toBeInTheDocument();
         expect(screen.getByText('Outlier Analysis')).toBeInTheDocument();
         expect(screen.getByText('Method Hotspots')).toBeInTheDocument();
         expect(screen.getByText('Top Web Requests')).toBeInTheDocument();
@@ -886,16 +886,16 @@ describe('DynatraceCard', () => {
       );
 
       await waitFor(() => {
-        expect(screen.getByText('PurePaths')).toBeInTheDocument();
+        expect(screen.getByText('Distributed Tracing')).toBeInTheDocument();
       });
 
       // Wait for filters to be applied and button to be enabled
       await waitFor(() => {
-        const purePathsButton = screen.getByText('PurePaths').closest('button');
+        const purePathsButton = screen.getByText('Distributed Tracing').closest('button');
         expect(purePathsButton).not.toBeDisabled();
       });
 
-      const purePathsButton = screen.getByText('PurePaths').closest('button');
+      const purePathsButton = screen.getByText('Distributed Tracing').closest('button');
       expect(purePathsButton).not.toBeNull();
       fireEvent.click(purePathsButton!);
 

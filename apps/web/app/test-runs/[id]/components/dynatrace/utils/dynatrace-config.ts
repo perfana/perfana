@@ -61,7 +61,7 @@ export const MULTIDIMENSIONAL_ANALYSIS_ITEMS: AnalysisItem[] = [
  */
 export const DEEP_LINK_ITEMS: DeepLinkItem[] = [
   { key: 'response-time-hotspots', label: 'Response Time Hotspots', icon: Whatshot, description: 'Identify performance bottlenecks' },
-  { key: 'pure-paths', label: 'PurePaths', icon: Route, description: 'Trace complete request paths' },
+  { key: 'pure-paths', label: 'Distributed Tracing', icon: Route, description: 'Trace complete request paths' },
   { key: 'outliers', label: 'Outlier Analysis', icon: ShowChart, description: 'Find unusual response patterns' },
   { key: 'method-hotspots', label: 'Method Hotspots', icon: FlashOn, description: 'Analyze method-level performance' },
   { key: 'top-web-requests', label: 'Top Web Requests', icon: Language, description: 'View most frequent requests' },
