@@ -10,6 +10,7 @@ import {
   AwrConfigForm,
   TrendsConfigForm,
   ComparisonsConfigForm,
+  Top10ListsConfigForm,
 } from './SectionConfigs';
 
 // Mock authenticatedFetch so data-fetching effects don't blow up in tests
@@ -129,4 +130,17 @@ it('keeps the Preview Section button disabled for response times until a scenari
     />
   );
   expect(screen.getByRole('button', { name: /preview section/i })).toBeDisabled();
+});
+
+describe('Top10ListsConfigForm', () => {
+  it('renders the scope selector and hides includeUrl unless scope is requests', () => {
+    render(<Top10ListsConfigForm config={{}} onChange={() => {}} testRunId="tr-1" />);
+    expect(screen.getByText(/scope/i)).toBeInTheDocument();
+    expect(screen.queryByLabelText(/show url/i)).not.toBeInTheDocument();
+  });
+
+  it('shows the includeUrl toggle when scope is requests', () => {
+    render(<Top10ListsConfigForm config={{ scope: 'requests' }} onChange={() => {}} testRunId="tr-1" />);
+    expect(screen.getByLabelText(/show url/i)).toBeInTheDocument();
+  });
 });

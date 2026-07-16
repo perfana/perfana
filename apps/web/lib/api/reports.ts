@@ -25,6 +25,7 @@ export const REPORT_SECTION_TYPES = [
   'trends',
   'comparisons',
   'graphs',
+  'top_10_lists',
 ] as const;
 
 export type ReportSectionType = (typeof REPORT_SECTION_TYPES)[number];
@@ -44,6 +45,7 @@ export const COMMENTABLE_SECTION_TYPES = [
   'trends',
   'comparisons',
   'graphs',
+  'top_10_lists',
 ] as const;
 
 export type CommentableSectionType = (typeof COMMENTABLE_SECTION_TYPES)[number];
@@ -1055,6 +1057,7 @@ export function getSectionTypeLabel(type: ReportSectionType): string {
     trends: 'Trends',
     comparisons: 'Comparisons',
     graphs: 'Custom Graphs',
+    top_10_lists: 'Top 10 Lists',
   };
   return labels[type] || type;
 }
