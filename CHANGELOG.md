@@ -4,6 +4,11 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
+## [0.2.61.81] - 2026-07-16
+
+### Fixed
+- **Worker now honors glob-style `NO_PROXY` entries (`*ba.uwv.nl`), so Dynatrace/Grafana hosts behind a corporate proxy are reached directly.** undici's `EnvHttpProxyAgent` only strips a leading `*.` or `.` from `NO_PROXY` entries (regex `/^\*?\./`); an entry like `*ba.uwv.nl` (star with no dot) was kept as a literal hostname and never matched `ketenmonitoring-managed.ba.uwv.nl`, so the request went through the proxy and the proxy returned an HTML block page — surfacing as `Unexpected token '<', "<!DOCTYPE"... is not valid JSON` and `0/16 queries succeeded`. axios (used by the API) is lenient about this form, which is why the same `NO_PROXY` worked for `perfana-api` but not the worker. Added `normalizeNoProxy()` in `@perfana/shared/services/proxy` that rewrites a leading `*` not followed by `.` into `.` (`*foo` → `.foo`), and applied it when constructing `EnvHttpProxyAgent` in both the worker Dynatrace path (`proxy-resolver.ts`) and the shared Grafana path (`envProxyDispatcher`). Valid forms (`.foo`, `*.foo`, `foo`) are untouched. Operators should still prefer `.ba.uwv.nl`, but the malformed `*ba.uwv.nl` now works too.
+
 ## [0.2.61.80] - 2026-07-16
 
 ### Fixed
