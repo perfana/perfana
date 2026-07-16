@@ -15,18 +15,21 @@ import * as databaseAccessor from '../../../common/database-accessor.js';
 import {
   getGrafanaConfig,
   tryGetGrafanaConfig,
+  getGrafanaConfigById,
   initializeGrafanaConfig,
   clearGrafanaConfigCache,
 } from '../../../config/grafana-config-cache.js';
 
 describe('grafana-config-cache', () => {
   let findMock: ReturnType<typeof vi.fn>;
+  let findOneMock: ReturnType<typeof vi.fn>;
 
   beforeEach(() => {
     clearGrafanaConfigCache();
     findMock = vi.fn();
+    findOneMock = vi.fn();
     vi.mocked(databaseAccessor.getDatabaseService).mockReturnValue({
-      grafanaInstanceRepo: { find: findMock },
+      grafanaInstanceRepo: { find: findMock, findOne: findOneMock },
     } as any);
   });
 
@@ -138,6 +141,62 @@ describe('grafana-config-cache', () => {
         apiKey: 'secret',
         orgId: '1',
       });
+    });
+  });
+
+  describe('getGrafanaConfigById', () => {
+    test('resolves the requested instance — not the first row', async () => {
+      // The singleton path would return the oldest row; by-id must return exactly inst-2.
+      findOneMock.mockResolvedValue({
+        id: 'inst-2',
+        server_url: 'https://grafana-2.example',
+        apiKey: 'secret-2',
+        orgId: '7',
+        organizationId: 'org-2',
+        useProxy: true,
+      });
+
+      const result = await getGrafanaConfigById('inst-2');
+
+      expect(findOneMock).toHaveBeenCalledWith({ where: { id: 'inst-2' } });
+      expect(result).toEqual({
+        config: { url: 'https://grafana-2.example', apiKey: 'secret-2', orgId: '7' },
+        meta: { organizationId: 'org-2', useProxy: true },
+      });
+    });
+
+    test('caches per id (one DB hit per instance)', async () => {
+      findOneMock.mockResolvedValue({
+        id: 'inst-2', server_url: 'https://g2', apiKey: 'k', orgId: '1',
+      });
+
+      await getGrafanaConfigById('inst-2');
+      await getGrafanaConfigById('inst-2');
+
+      expect(findOneMock).toHaveBeenCalledTimes(1);
+    });
+
+    test('returns null (and caches the miss) when the instance is missing', async () => {
+      findOneMock.mockResolvedValue(null);
+
+      expect(await getGrafanaConfigById('nope')).toBeNull();
+      expect(await getGrafanaConfigById('nope')).toBeNull();
+      expect(findOneMock).toHaveBeenCalledTimes(1); // negative result cached
+    });
+
+    test('returns null when the row is missing required fields', async () => {
+      findOneMock.mockResolvedValue({ id: 'inst-2', server_url: '', apiKey: '', orgId: '1' });
+
+      expect(await getGrafanaConfigById('inst-2')).toBeNull();
+    });
+
+    test('returns null without poisoning the cache on a DB error', async () => {
+      findOneMock.mockRejectedValueOnce(new Error('connection refused'));
+      expect(await getGrafanaConfigById('inst-2')).toBeNull();
+
+      // A later call retries (transient error was not cached).
+      findOneMock.mockResolvedValue({ id: 'inst-2', server_url: 'https://g2', apiKey: 'k', orgId: '1' });
+      expect(await getGrafanaConfigById('inst-2')).not.toBeNull();
     });
   });
 

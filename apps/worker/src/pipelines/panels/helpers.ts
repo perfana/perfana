@@ -128,6 +128,7 @@ export interface GrafanaDashboard {
   title: string;
   dashboard: unknown; // JSONB dashboard definition
   application_dashboard_id: string;
+  grafana_instance_id: string | null; // which Grafana instance this dashboard lives on
   tags?: string[];
 }
 
@@ -201,7 +202,7 @@ export async function getGrafanaDashboardsForApplicationDashboards(
   const placeholders = dashboardUids.map((_, i) => `$${i + 1}`).join(',');
 
   const query = `
-    SELECT id, uid, name as title, grafana_json as dashboard, tags
+    SELECT id, uid, name as title, grafana_json as dashboard, grafana_instance_id, tags
     FROM grafana_dashboards
     WHERE uid IN (${placeholders})
   `;
@@ -210,7 +211,7 @@ export async function getGrafanaDashboardsForApplicationDashboards(
 
   // Parse the dashboard JSON for each result
   const dashboards = result.rows.map(rawRow => {
-    const row = rawRow as { id: string; uid: string; title: string; dashboard: unknown; tags?: string[] };
+    const row = rawRow as { id: string; uid: string; title: string; dashboard: unknown; grafana_instance_id: string | null; tags?: string[] };
     let parsedDashboard = null;
     try {
       parsedDashboard = typeof row.dashboard === 'string' ? JSON.parse(row.dashboard) : row.dashboard;
@@ -225,6 +226,7 @@ export async function getGrafanaDashboardsForApplicationDashboards(
       title: row.title,
       dashboard: parsedDashboard,
       application_dashboard_id: applicationDashboards.find(ad => ad.dashboard_uid === row.uid)?.id || '',
+      grafana_instance_id: row.grafana_instance_id ?? null,
       tags: row.tags || []
     };
   }).filter(dashboard => dashboard !== null);
@@ -271,13 +273,25 @@ export async function createPanelDocuments(
 ): Promise<unknown[]> {
   const logger = getLogger('panels-helpers');
 
-  // Step 1: Collect all unique datasource UIDs from panels
-  const datasourceUids = new Set<string>();
+  // Step 1: Collect unique datasource UIDs per Grafana instance. Datasource numeric
+  // ids are instance-scoped, so a UID must be resolved against the instance the
+  // dashboard actually lives on — resolving everything against one "first instance"
+  // client returns wrong ids (or 404s) for dashboards on a second instance.
+  const uidsByInstance = new Map<string | null, Set<string>>();
+  const addUid = (instanceId: string | null, uid: string): void => {
+    let set = uidsByInstance.get(instanceId);
+    if (!set) {
+      set = new Set<string>();
+      uidsByInstance.set(instanceId, set);
+    }
+    set.add(uid);
+  };
   for (const dashboard of perfanaData.dashboards) {
     const dashboardJson = dashboard.dashboard as GrafanaDashboardJson | undefined;
     if (!dashboardJson?.dashboard?.panels) {
       continue;
     }
+    const instanceId = dashboard.grafana_instance_id ?? null;
     for (const panel of dashboardJson.dashboard.panels) {
       const p = panel as GrafanaPanelJson;
       if (p.targets) {
@@ -295,7 +309,7 @@ export async function createPanelDocuments(
               uid = p.datasource.uid;
             }
             if (uid && uid !== 'grafana') {
-              datasourceUids.add(uid);
+              addUid(instanceId, uid);
             }
           }
         }
@@ -303,26 +317,35 @@ export async function createPanelDocuments(
     }
   }
 
-  logger.info(`🔍 Found ${datasourceUids.size} unique datasource UIDs: ${Array.from(datasourceUids).join(', ')}`);
+  // Step 2: Fetch datasource info from each instance's Grafana API to get numeric ids,
+  // keyed by instance so lookups at request-build time use the right instance.
+  const { createGrafanaClient } = await import('../../config/grafana-client-factory.js');
+  type DatasourceInfo = { id: number; uid: string; name: string; type: string };
+  const emptyDatasourceMap = new Map<string, DatasourceInfo>();
+  const datasourceMapByInstance = new Map<string | null, Map<string, DatasourceInfo>>();
 
-  // Step 2: Fetch datasource info from Grafana API to get numeric IDs
-  const { GrafanaClient } = await import('@perfana/shared/services/grafana');
-  const { getGrafanaConfig } = await import('../../config/grafana-config-cache.js');
-  const grafanaConfig = await getGrafanaConfig();
-  const grafanaClient = new GrafanaClient(grafanaConfig);
-  const datasourceMap = new Map<string, { id: number; uid: string; name: string; type: string }>();
+  for (const [instanceId, uids] of uidsByInstance) {
+    logger.info(`🔍 Found ${uids.size} unique datasource UIDs on instance ${instanceId ?? 'default'}: ${Array.from(uids).join(', ')}`);
+    const datasourceMap = new Map<string, DatasourceInfo>();
+    datasourceMapByInstance.set(instanceId, datasourceMap);
 
-  for (const uid of datasourceUids) {
-    try {
-      const datasource = await grafanaClient.getDatasourceByUid(uid);
-      if (datasource) {
-        datasourceMap.set(uid, datasource);
-        logger.info(`✅ Fetched datasource ${uid}: id=${datasource.id}, name=${datasource.name}, type=${datasource.type}`);
-      } else {
-        logger.warn(`⚠️ Could not fetch datasource for UID: ${uid}`);
+    const grafanaClient = await createGrafanaClient(instanceId, logger);
+    if (!grafanaClient) {
+      logger.warn(`⚠️ No Grafana client for instance ${instanceId ?? 'default'} — datasource ids unresolved for its panels`);
+      continue;
+    }
+    for (const uid of uids) {
+      try {
+        const datasource = await grafanaClient.getDatasourceByUid(uid);
+        if (datasource) {
+          datasourceMap.set(uid, datasource);
+          logger.info(`✅ Fetched datasource ${uid}: id=${datasource.id}, name=${datasource.name}, type=${datasource.type}`);
+        } else {
+          logger.warn(`⚠️ Could not fetch datasource for UID: ${uid}`);
+        }
+      } catch (error) {
+        logger.error(`❌ Error fetching datasource ${uid}:`, error);
       }
-    } catch (error) {
-      logger.error(`❌ Error fetching datasource ${uid}:`, error);
     }
   }
 
@@ -335,6 +358,9 @@ export async function createPanelDocuments(
     if (!dashboardJson?.dashboard?.panels) {
       continue;
     }
+
+    // Datasource ids for this dashboard's own Grafana instance.
+    const datasourceMap = datasourceMapByInstance.get(dashboard.grafana_instance_id ?? null) ?? emptyDatasourceMap;
 
     // Filter 1: Skip dashboards with "no-anomaly-detection" tag
     if (dashboard.tags && dashboard.tags.includes(NO_ANOMALY_DETECTION_MARKER)) {

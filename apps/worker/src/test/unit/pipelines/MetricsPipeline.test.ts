@@ -17,12 +17,14 @@ import { MetricsPipeline } from '../../../pipelines/MetricsPipeline.js';
 import { PanelDocument, PanelMetricsDocument } from '../../../types/pipeline.js';
 import { getLogger } from '../../../lib/utils/logger.js';
 import * as grafanaConfigCache from '../../../config/grafana-config-cache.js';
+import * as grafanaClientFactory from '../../../config/grafana-client-factory.js';
 import * as databaseAccessor from '../../../common/database-accessor.js';
 import { EntityManager } from 'typeorm';
 
 // Mock dependencies
 vi.mock('../../../lib/utils/logger.js');
 vi.mock('../../../config/grafana-config-cache.js');
+vi.mock('../../../config/grafana-client-factory.js');
 vi.mock('../../../common/database-accessor.js');
 vi.mock('@perfana/shared/services/grafana', () => ({
   GrafanaClient: vi.fn()
@@ -120,6 +122,13 @@ describe('MetricsPipeline', () => {
     // Mock GrafanaClient constructor
     const { GrafanaClient } = vi.mocked(await import('@perfana/shared/services/grafana'));
     GrafanaClient.mockImplementation(() => mockGrafanaClient);
+
+    // Route per-instance grouping to the single mock client (one default-instance group).
+    vi.mocked(grafanaClientFactory.groupPanelsByGrafanaInstance).mockImplementation(
+      async (_db, panels) => panels.length
+        ? [{ instanceId: null, client: mockGrafanaClient, panels }]
+        : []
+    );
 
     // Setup mock entity manager
     mockEntityManager = {
@@ -521,7 +530,7 @@ describe('MetricsPipeline', () => {
   });
 
   describe('Grafana Client Operations', () => {
-    test('should initialize Grafana client with cached config', async () => {
+    test('groups panels by Grafana instance before querying', async () => {
       const mockTestRun = createMockTestRun();
       const mockPanels = [createMockPanel()];
 
@@ -531,10 +540,9 @@ describe('MetricsPipeline', () => {
 
       await pipeline.execute({ testRunId: 'test-run-001' });
 
-      expect(grafanaConfigCache.getGrafanaConfig).toHaveBeenCalled();
-      expect(mockLogger.info).toHaveBeenCalledWith(
-        expect.stringContaining('Initialized Grafana client')
-      );
+      // Client is resolved per instance via the factory, not a single process-wide client.
+      expect(grafanaClientFactory.groupPanelsByGrafanaInstance).toHaveBeenCalled();
+      expect(mockGrafanaClient.queryPanelData).toHaveBeenCalled();
     });
 
     test('should handle Grafana client not initialized', async () => {
