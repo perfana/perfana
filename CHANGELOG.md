@@ -4,6 +4,12 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
+## [0.2.61.77] - 2026-07-16
+
+### Fixed
+- **Dynatrace host-tab graphs now populate when a SUT spans two Dynatrace instances.** `HostsTabContent` passed `configs[0]` (the first configured instance) to every host detail panel, so hosts belonging to a second instance requested `/dynatrace/hosts/{id}/properties?dynatraceConfigId={firstInstance}` and got a 404 (`Host entity … not found in Dynatrace`). The panel now selects the config matching each host's own `dynatraceConfigId` (which the mappings API already returns), falling back to `configs[0]`. Added `dynatraceConfigId` to the frontend `DynatraceEntityMapping` types.
+- **Tag key/value dropdowns populate when adding host entities in the Dynatrace config.** The `/api/v2/entities` call to Dynatrace never requested the `tags` field, and the v2 entities API omits tags by default — so `entity.tags` was always empty and both tag dropdowns stayed blank in both instances. `fetchEntitiesFromHost` now passes `fields: '+tags'`.
+
 ## [0.2.61.76] - 2026-07-16
 
 ### Fixed
