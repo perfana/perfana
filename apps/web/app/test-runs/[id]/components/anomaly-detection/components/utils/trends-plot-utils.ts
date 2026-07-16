@@ -137,6 +137,9 @@ export function createTrendsPlot(
       // (Plotly renders literal <br> as line breaks, but escapes them inside %{customdata.*}
       // substitutions). Mirrors the working test-run-details graph hover implementation.
       hovertemplate: sortedData.map(point => {
+        // Escape user-authored values before interpolating — Plotly renders the
+        // hovertemplate as pseudo-HTML, so raw <, >, & could be read as markup.
+        const esc = (v: unknown) => String(v ?? '').replace(/[<>&]/g, c => ({ '<': '&lt;', '>': '&gt;', '&': '&amp;' }[c] as string));
         const formattedDate = new Date(point.test_run_start).toLocaleString('en-US', {
           month: 'short',
           day: 'numeric',
@@ -145,13 +148,13 @@ export function createTrendsPlot(
           minute: '2-digit'
         });
         const value = (point.mean * conversionFactor).toFixed(2);
-        const versionLine = point.version ? `Version: ${point.version}<br>` : '';
-        const annotationsLine = point.annotations ? `Annotations: ${point.annotations}<br>` : '';
+        const versionLine = point.version ? `Version: ${esc(point.version)}<br>` : '';
+        const annotationsLine = point.annotations ? `Annotations: ${esc(point.annotations)}<br>` : '';
         return `<b>Trends</b><br>` +
-          `Test Run: ${point.test_run_id}<br>` +
+          `Test Run: ${esc(point.test_run_id)}<br>` +
           `Time: ${formattedDate}<br>` +
           `Value: ${value}${unitSuffix}<br>` +
-          `Conclusion: ${point.conclusion_label}<br>` +
+          `Conclusion: ${esc(point.conclusion_label)}<br>` +
           versionLine +
           annotationsLine +
           '<extra></extra>';
