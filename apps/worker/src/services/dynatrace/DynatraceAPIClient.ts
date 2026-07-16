@@ -1,7 +1,16 @@
-import { request, Agent, type Dispatcher } from 'undici';
+import axios, { isAxiosError } from 'axios';
 import { getLogger } from '../../lib/utils/logger.js';
 import { DynatraceQueryConfig } from '../../types/dynatrace/index.js';
 import { assertValidUrl, sanitizeUrl } from '@perfana/shared/security';
+import type { AxiosProxyConfig } from '../../config/proxy-resolver.js';
+
+/**
+ * axios request options spread into every Dynatrace call. Either `{ proxy }`
+ * (explicit DB-configured proxy) or `{}` — in which case axios reads
+ * HTTP(S)_PROXY/NO_PROXY from the environment and honors NO_PROXY, matching the
+ * API's DynatraceService. See resolveDynatraceAxiosProxy.
+ */
+export type DynatraceProxyOpts = { proxy: AxiosProxyConfig } | Record<string, never>;
 
 const logger = getLogger('dynatrace-api-client');
 
@@ -27,14 +36,11 @@ const POLL_REQUEST_TIMEOUT_MS = 5_000; // 5s
 /** Timeout (ms) for the DQL query execution on the Dynatrace side */
 const DQL_FETCH_TIMEOUT_SECONDS = 60;
 
-/** Number of persistent HTTP connections to Dynatrace */
-const AGENT_CONNECTIONS = 10;
+/** Timeout (ms) for a Metrics API v2 GET (short, synchronous request) */
+const METRICS_REQUEST_TIMEOUT_MS = 30_000; // 30s
 
-/** Keep-alive timeout (ms) for connection reuse between requests */
-const AGENT_KEEP_ALIVE_TIMEOUT_MS = 60_000; // 60s
-
-/** Maximum keep-alive timeout (ms) before forcing a new connection */
-const AGENT_MAX_KEEP_ALIVE_TIMEOUT_MS = 600_000; // 10min
+/** Timeout (ms) for the DQL start POST — server-side fetch can take up to DQL_FETCH_TIMEOUT_SECONDS */
+const DQL_START_TIMEOUT_MS = 70_000; // 70s (> 60s server fetch timeout)
 
 /** Base delay (ms) for exponential backoff: delay = 2^(attempt-1) * BASE_RETRY_DELAY_MS */
 const BASE_RETRY_DELAY_MS = 1_000;
@@ -84,9 +90,9 @@ interface DQLQueryResponse {
   };
 }
 
-interface UndiciError extends Error {
+/** Narrow error shape for logging (axios errors expose `code`; HTTP status lives on `response.status`). */
+interface HttpClientError extends Error {
   code?: string;
-  statusCode?: number;
 }
 
 /**
@@ -122,14 +128,13 @@ class Semaphore {
 }
 
 export class DynatraceAPIClient {
-  private agent: Agent;
-  private dispatcher: Dispatcher;
+  private proxyOpts: DynatraceProxyOpts;
   private config: DynatraceAPIConfig;
   private semaphore: Semaphore;
   private baseUrl: string;        // Original host URL (for Metrics API v2)
   private dqlBaseUrl: string;     // Converted host URL (for DQL API on SaaS)
 
-  constructor(config: DynatraceAPIConfig, proxyDispatcher?: Dispatcher) {
+  constructor(config: DynatraceAPIConfig, proxyOpts: DynatraceProxyOpts = {}) {
     this.config = {
       maxConcurrent: DEFAULT_MAX_CONCURRENT,
       maxRetries: DEFAULT_MAX_RETRIES,
@@ -188,17 +193,10 @@ export class DynatraceAPIClient {
       logger.info(`Managed instance configured: ${this.baseUrl}`);
     }
 
-    // Use Agent pattern: keeps connections alive without per-request timeouts
-    // This prevents timeout issues when Dynatrace takes 60+ seconds to process queries
-    this.agent = new Agent({
-      connections: AGENT_CONNECTIONS,
-      keepAliveTimeout: AGENT_KEEP_ALIVE_TIMEOUT_MS,
-      keepAliveMaxTimeout: AGENT_MAX_KEEP_ALIVE_TIMEOUT_MS,
-    });
-
-    // When a proxy dispatcher is provided, use it for all outbound requests.
-    // Otherwise fall back to the keep-alive Agent (byte-identical to the old path).
-    this.dispatcher = proxyDispatcher ?? this.agent;
+    // axios proxy handling mirrors the API's DynatraceService: `{ proxy }` when a
+    // DB proxy is configured + use_proxy, else `{}` so axios honors env HTTP(S)_PROXY
+    // and NO_PROXY on its own (per-request tunneling, no persistent dispatcher).
+    this.proxyOpts = proxyOpts;
 
     this.semaphore = new Semaphore(this.config.maxConcurrent!);
   }
@@ -465,8 +463,6 @@ export class DynatraceAPIClient {
           payload.defaultTimeframeEnd = endTime.toISOString();
         }
 
-        const requestBody = JSON.stringify(payload);
-
         // Log details matching Python format (api_client.py:67-70)
         logger.debug(`🔹 Executing Dynatrace API request`);
         logger.debug(`🔹 URL: ${this.dqlBaseUrl}/platform/storage/query/v1/query:execute`);
@@ -479,25 +475,29 @@ export class DynatraceAPIClient {
           `platformTokenLen=${(this.config.platformToken || '').length}`
         );
 
-        const response = await request(`${this.dqlBaseUrl}/platform/storage/query/v1/query:execute`, {
-          method: 'POST',
-          headers: {
-            'Authorization': `Bearer ${this.config.platformToken}`,
-            'Content-Type': 'application/json',
-            'Accept': 'application/json',
-          },
-          body: requestBody,
-          dispatcher: this.dispatcher,
-        });
+        const response = await axios.post(
+          `${this.dqlBaseUrl}/platform/storage/query/v1/query:execute`,
+          payload,
+          {
+            headers: {
+              'Authorization': `Bearer ${this.config.platformToken}`,
+              'Content-Type': 'application/json',
+              'Accept': 'application/json',
+            },
+            timeout: DQL_START_TIMEOUT_MS,
+            validateStatus: () => true,
+            ...this.proxyOpts,
+          }
+        );
 
-        const statusCode = response.statusCode;
+        const statusCode = response.status;
         if (statusCode === 401 || statusCode === 403) {
           logger.error(
             `[dt-diag] DQL auth failed status=${statusCode} at ${this.dqlBaseUrl} — Bearer platform token ` +
             `${this.config.platformToken ? 'present but rejected (scope?)' : 'MISSING — managed instance should use Metrics v2, not DQL'}`
           );
         }
-        const data = await response.body.json() as DQLQueryResponse;
+        const data = response.data as DQLQueryResponse;
 
         // Handle immediate success (HTTP 200) - query completed synchronously
         if (statusCode === 200 && data.state === 'SUCCEEDED') {
@@ -524,12 +524,12 @@ export class DynatraceAPIClient {
 
       } catch (error) {
         lastError = error as Error;
-        const undiciError = error as UndiciError;
+        const httpError = error as HttpClientError;
 
         const errorDetails = {
-          message: undiciError.message,
-          code: undiciError.code,
-          statusCode: undiciError.statusCode,
+          message: httpError.message,
+          code: httpError.code,
+          statusCode: isAxiosError(error) ? error.response?.status : undefined,
           attempt,
           maxRetries
         };
@@ -573,29 +573,24 @@ export class DynatraceAPIClient {
       pollAttempt++;
 
       try {
-        // Create AbortController with 5s timeout for this individual poll request
-        // Poll endpoint should respond quickly - it's just checking status
-        const abortController = new AbortController();
-        const pollTimeout = setTimeout(() => abortController.abort(), POLL_REQUEST_TIMEOUT_MS);
-
+        // Poll endpoint should respond quickly — a short per-request timeout
+        // prevents a hung poll from stalling the loop (axios ECONNABORTED → retry).
         logger.info(`📊 Poll attempt ${pollAttempt} for token ${requestToken} (elapsed: ${elapsed}ms)`);
 
-        const response = await request(
+        const response = await axios.get(
           `${this.dqlBaseUrl}/platform/storage/query/v1/query:poll?request-token=${encodeURIComponent(requestToken)}`,
           {
-            method: 'GET',
             headers: {
               'Authorization': `Bearer ${this.config.platformToken}`,
               'Accept': 'application/json',
             },
-            dispatcher: this.dispatcher,
-            signal: abortController.signal,
+            timeout: POLL_REQUEST_TIMEOUT_MS,
+            validateStatus: () => true,
+            ...this.proxyOpts,
           }
         );
 
-        clearTimeout(pollTimeout);
-
-        const data = await response.body.json() as DQLQueryResponse;
+        const data = response.data as DQLQueryResponse;
 
         if (data.state === 'SUCCEEDED') {
           logger.info(`✓ DQL query ${requestToken} succeeded after ${Date.now() - startTime}ms (${pollAttempt} poll attempts)`);
@@ -612,7 +607,7 @@ export class DynatraceAPIClient {
         await new Promise(resolve => setTimeout(resolve, pollInterval));
 
       } catch (error) {
-        const undiciError = error as UndiciError;
+        const httpError = error as HttpClientError;
 
         // Check if we've exceeded overall timeout
         if (Date.now() - startTime > maxWaitMs) {
@@ -620,9 +615,10 @@ export class DynatraceAPIClient {
           throw new Error(`DQL query polling timed out after ${maxWaitMs}ms (${pollAttempt} attempts)`);
         }
 
-        // If it's an abort error or network error, retry
-        if (undiciError.code === 'UND_ERR_ABORTED' || undiciError.code) {
-          logger.warn(`⚠️  Poll attempt ${pollAttempt} for token ${requestToken} failed (${undiciError.code}), retrying in ${pollInterval}ms`);
+        // Timeout (axios ECONNABORTED) or any network error → retry. A thrown
+        // "DQL query failed" state error has no `code`, so it rethrows below.
+        if (httpError.code) {
+          logger.warn(`⚠️  Poll attempt ${pollAttempt} for token ${requestToken} failed (${httpError.code}), retrying in ${pollInterval}ms`);
           await new Promise(resolve => setTimeout(resolve, pollInterval));
           continue;
         }
@@ -710,42 +706,44 @@ export class DynatraceAPIClient {
       // Log token length only (not any token bytes) so two instances are distinguishable without leaking credential material into logs.
       logger.info(`[dt-diag] Metrics v2 GET ${this.baseUrl}/api/v2/metrics/query  Api-Token present=${Boolean(this.config.apiToken)} (len=${(this.config.apiToken || '').length})`);
 
-      const response = await request(metricsUrl, {
-        method: 'GET',
+      const response = await axios.get(metricsUrl, {
         headers: {
           'Authorization': `Api-Token ${this.config.apiToken}`,
           'Accept': 'application/json',
         },
-        dispatcher: this.dispatcher,
+        timeout: METRICS_REQUEST_TIMEOUT_MS,
+        validateStatus: () => true,
+        ...this.proxyOpts,
       });
 
-      // Read as text first so we can classify non-JSON bodies (proxy HTML block
-      // pages, gateway errors) instead of throwing an opaque JSON parse error.
-      const rawBody = await response.body.text();
-      const contentType = String(response.headers?.['content-type'] ?? '');
-      let data: Record<string, unknown>;
-      try {
-        data = JSON.parse(rawBody) as Record<string, unknown>;
-      } catch {
-        const looksHtml = /^\s*<(?:!doctype|html)/i.test(rawBody);
+      const status = response.status;
+      const contentType = String(response.headers['content-type'] ?? '');
+      // axios parses a JSON body into an object; a non-JSON body (proxy/gateway
+      // HTML block page) is left as a string. Classify it instead of throwing an
+      // opaque parse error — this is the corporate-proxy failure fingerprint.
+      const raw: unknown = response.data;
+      if (typeof raw !== 'object' || raw === null) {
+        const bodyText = typeof raw === 'string' ? raw : String(raw ?? '');
+        const looksHtml = /^\s*<(?:!doctype|html)/i.test(bodyText);
         logger.error(
-          `[dt-diag] Metrics v2 returned non-JSON (status=${response.statusCode}, content-type=${contentType}, ` +
+          `[dt-diag] Metrics v2 returned non-JSON (status=${status}, content-type=${contentType}, ` +
           `looksHtml=${looksHtml}) — ${looksHtml ? 'proxy/gateway block page: request went through a proxy it should have bypassed' : 'unexpected body'}. ` +
-          `Body head: ${rawBody.slice(0, 200)}`
+          `Body head: ${bodyText.slice(0, 200)}`
         );
-        throw new Error(`Metrics query returned non-JSON body (status ${response.statusCode}, content-type ${contentType})`);
+        throw new Error(`Metrics query returned non-JSON body (status ${status}, content-type ${contentType})`);
       }
+      const data = raw as Record<string, unknown>;
 
-      if (response.statusCode !== 200) {
+      if (status !== 200) {
         const hint =
-          response.statusCode === 403 ? 'token lacks metrics.read scope (entities.read alone is not enough)'
-          : response.statusCode === 401 ? 'token invalid/undecrypted for this instance'
-          : response.statusCode === 404 ? 'wrong metrics URL/host for this instance (path or tenant mismatch)'
+          status === 403 ? 'token lacks metrics.read scope (entities.read alone is not enough)'
+          : status === 401 ? 'token invalid/undecrypted for this instance'
+          : status === 404 ? 'wrong metrics URL/host for this instance (path or tenant mismatch)'
           : 'see body';
-        logger.error(`[dt-diag] Metrics v2 FAILED status=${response.statusCode} host=${this.baseUrl} → likely: ${hint}. Body: ${rawBody.slice(0, 400)}`);
+        logger.error(`[dt-diag] Metrics v2 FAILED status=${status} host=${this.baseUrl} → likely: ${hint}. Body: ${JSON.stringify(data).slice(0, 400)}`);
       }
 
-      if (response.statusCode === 200) {
+      if (status === 200) {
         logger.info(`✓ Metrics API v2 query completed successfully`);
         logger.debug(`📊 Raw Metrics API v2 response: ${JSON.stringify(data, null, 2)}`);
 
@@ -761,7 +759,7 @@ export class DynatraceAPIClient {
         return data;
       }
 
-      throw new Error(`Metrics query failed with status ${response.statusCode}: ${rawBody.slice(0, 400)}`);
+      throw new Error(`Metrics query failed with status ${status}: ${JSON.stringify(data).slice(0, 400)}`);
 
     } finally {
       this.semaphore.release();
@@ -769,11 +767,11 @@ export class DynatraceAPIClient {
   }
 
   /**
-   * Close the agent and destroy all connections immediately
-   * This prevents connection stalling on subsequent requests
+   * No-op teardown. Kept for caller compatibility (pipelines call this in a
+   * `finally`). The undici keep-alive Agent was removed with the axios port;
+   * axios manages sockets per request via the default global agent.
    */
   async close(): Promise<void> {
-    // Destroy connections immediately instead of waiting for keep-alive to expire
-    await this.agent.destroy();
+    // nothing to tear down
   }
 }

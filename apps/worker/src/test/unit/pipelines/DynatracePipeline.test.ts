@@ -573,7 +573,7 @@ describe('DynatracePipeline', () => {
           apiToken: 'env-api-token',
           platformToken: 'env-platform-token',
         }),
-        undefined, // no proxy dispatcher when the instance has no proxy configured
+        {}, // empty axios proxy opts (env NO_PROXY path) when the instance has no proxy configured
       );
     });
 
@@ -1253,7 +1253,7 @@ describe('DynatracePipeline', () => {
           dynatraceType: 'saas',
           maxConcurrent: 5,
         },
-        undefined, // no proxy dispatcher when the instance has no proxy configured
+        {}, // empty axios proxy opts (env NO_PROXY path) when the instance has no proxy configured
       );
     });
 
@@ -1278,7 +1278,7 @@ describe('DynatracePipeline', () => {
         expect.objectContaining({
           maxConcurrent: 5,
         }),
-        undefined, // no proxy dispatcher when the instance has no proxy configured
+        {}, // empty axios proxy opts (env NO_PROXY path) when the instance has no proxy configured
       );
     });
   });

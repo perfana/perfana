@@ -4,6 +4,11 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
+## [0.2.61.84] - 2026-07-16
+
+### Fixed
+- **Worker Dynatrace metrics collection now uses axios (like the API), so internal hosts behind a corporate proxy are reached.** The undici path proxied every request when a proxy was in play and couldn't bypass internal hosts: env `NO_PROXY` was only honored on the no-DB-proxy branch, and a DB-configured proxy (`proxy_servers` row) went through `undici.ProxyAgent`, which has no bypass concept at all. Result on a two-instance UWV/DCX setup: the external DCX host worked (proxy forwards it) but the internal `.ba.uwv.nl` host got the corporate proxy's HTML 403 block page — while the API (axios) reached both. `DynatraceAPIClient` now uses `axios` for all three calls (Metrics v2 GET, DQL start POST, DQL poll GET) and mirrors the API's `DynatraceService` proxy handling exactly via `resolveDynatraceAxiosProxy`: pass an explicit `proxy` only when `use_proxy` is set + a `proxy_servers` row exists, otherwise pass nothing so axios reads `HTTP(S)_PROXY`/`NO_PROXY` from the env and honors `NO_PROXY` (lenient matching, internal hosts bypass). The undici keep-alive `Agent` is replaced with per-request axios timeouts (Metrics 30s, DQL start 70s, poll 5s). The worker's undici Dynatrace proxy path (`resolveDynatraceProxyDispatcher` + its agent cache) is removed; the Grafana path (`resolveProxyDispatcher`) still uses shared undici and is unchanged. `[dt-diag]` root-cause logging from v0.2.61.82 is carried over in axios form. Added `axios` as a direct worker dependency.
+
 ## [0.2.61.83] - 2026-07-16
 
 ### Fixed
