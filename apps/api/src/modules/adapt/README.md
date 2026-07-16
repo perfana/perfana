@@ -31,4 +31,4 @@ ADAPT compares performance metrics between test runs and a control group (baseli
 ## Related
 
 - Worker pipeline: `apps/worker/src/pipelines/AdaptPipeline.ts`
-- Deep reference: `docs-site/content/Features/adapt-algorithm.md`
+- Deep reference: `docs/reference/Features/ADAPT Algorithm.md`
