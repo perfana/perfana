@@ -4,6 +4,15 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
+## [0.2.61.85] - 2026-07-16
+
+### Fixed
+- **Dynatrace managed-cluster deep links now use the cluster's `/ui/…` URL format instead of the classic `#hash` format that this version can't route.** On a managed instance (`dynatraceType: 'managed'`, e.g. UWV's `ketenmonitoring-managed.ba.uwv.nl/e/<env>`), three Services-tab links produced dead URLs: **Multidimensional Analysis** now targets `${host}/ui/diagnostictools/mda?…&metric=<M>&dimension={Request:Name}{RequestAttribute:<perfanaRequestNameAttribute>}&mergeServices=false&aggregation=AVERAGE&percentile=80&chart=LINE&servicefilter=<filter>` (service scoped via the request-attribute `servicefilter`, not the path); **Top Web Requests** now targets `${host}/ui/services/<SERVICE>/mda?mdaId=topweb&<timeFilter>&gf=all&metric=REQUEST_COUNT&dimension={Request:Name}&mergeServices=false&aggregation=COUNT&percentile=80&chart=COLUMN`; **PurePaths** now targets `${host}/ui/services/<SERVICE>/purepaths?<timeFilter>&gf=all`. SaaS branches are unchanged.
+- **"PurePaths" is renamed to "Distributed Tracing"** in the Dynatrace card's Performance Insights section (label only; the `pure-paths` key and behavior are unchanged).
+
+### Changed
+- **The Dynatrace card opens on the Services tab when reached via a context-menu drill-down.** "View in Dynatrace" from performance analysis, anomaly detection, apdex SLO, and the top-10 transaction/request lists all carry service-scoped `initialFilters`; the card now defaults its primary tab to Services (index 1) in that case instead of Hosts. Direct expansion still defaults to Hosts when hosts exist, else Services (unchanged).
+
 ## [0.2.61.84] - 2026-07-16
 
 ### Fixed
