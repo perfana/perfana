@@ -1,6 +1,6 @@
 import { ProxyAgent, EnvHttpProxyAgent } from 'undici'; // worker-local undici 7 — matches DynatraceAPIClient's request()
 import { ProxyServer } from '@perfana/shared/entities';
-import { buildProxyAgent, proxyConnection, envProxyDispatcher } from '@perfana/shared/services/proxy';
+import { buildProxyAgent, proxyConnection, envProxyDispatcher, normalizeNoProxy } from '@perfana/shared/services/proxy';
 import { getDatabaseService } from '../common/database-accessor.js';
 
 /**
@@ -95,6 +95,10 @@ function dynatraceEnvProxyDispatcher(): unknown | undefined {
     process.env.HTTP_PROXY || process.env.http_proxy ||
     process.env.HTTPS_PROXY || process.env.https_proxy;
   if (!hasEnvProxy) { return undefined; }
-  if (!_envProxyAgent) { _envProxyAgent = new EnvHttpProxyAgent(); }
+  if (!_envProxyAgent) {
+    // Normalize NO_PROXY so glob entries (`*ba.uwv.nl`) match, matching axios/API behavior.
+    const noProxy = normalizeNoProxy(process.env.NO_PROXY ?? process.env.no_proxy);
+    _envProxyAgent = new EnvHttpProxyAgent(noProxy ? { noProxy } : {});
+  }
   return _envProxyAgent;
 }
