@@ -11,6 +11,7 @@ interface DynatraceEntityMapping {
   entityId: string;
   entityDisplayName: string;
   entityType: string;
+  dynatraceConfigId: string;
   systemUnderTestId: string;
   testEnvironment?: string;
   workload?: string;
@@ -100,7 +101,8 @@ export default function HostsTabContent({
           <HostDetailPanel
             host={host}
             testRun={testRun}
-            config={configs[0]}
+            // Each host belongs to a specific Dynatrace instance; use its own config, not always the first
+            config={configs.find(c => c.id === host.dynatraceConfigId) ?? configs[0]}
           />
         </TabPanel>
       ))}

@@ -38,6 +38,7 @@ export interface DynatraceEntityMapping {
   entityId: string;
   entityDisplayName: string;
   entityType: string;
+  dynatraceConfigId: string;
   systemUnderTestId: string;
   testEnvironment?: string;
   workload?: string;

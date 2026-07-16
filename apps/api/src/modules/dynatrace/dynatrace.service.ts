@@ -513,7 +513,9 @@ export class DynatraceService {
         params: {
           // Add some basic filters to limit the response size
           pageSize: 500,
-          entitySelector: entitySelector
+          entitySelector: entitySelector,
+          // v2 entities API omits tags unless requested; '+tags' adds to the default fields
+          fields: '+tags'
         },
         ...(await this.proxyOpts(config)),
       });
