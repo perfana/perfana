@@ -698,8 +698,11 @@ git commit -m "feat(reports): wire top_10_lists renderer into compiler + module"
 ### Task 5: Frontend config form (`Top10ListsConfigForm`)
 
 **Files:**
+- Modify: `apps/web/lib/api/reports.ts` (web-local `REPORT_SECTION_TYPES`, `COMMENTABLE_SECTION_TYPES`, `getSectionTypeLabel` labels map)
 - Modify: `apps/web/components/reports/report-generation/SectionConfigs.tsx` (add `Top10ListsConfig` interface + `Top10ListsConfigForm` export)
 - Modify: `apps/web/components/reports/report-generation/SectionConfigs.spec.tsx` (add form tests)
+
+> **Prerequisite (do this first — Step 0):** `apps/web` does NOT import `ReportSectionType` from `@perfana/shared`; it maintains its **own** copy in `apps/web/lib/api/reports.ts`. The web `SECTION_CONFIG` (Task 6), the config-form dispatch (Task 6), and `section-summary` (Task 7) all key off this web-local type, so it must include `top_10_lists` or those tasks will not compile.
 
 **Interfaces:**
 - Produces:
@@ -715,6 +718,10 @@ git commit -m "feat(reports): wire top_10_lists renderer into compiler + module"
   export function Top10ListsConfigForm(props: { config: Top10ListsConfig; onChange: (c: Top10ListsConfig) => void; testRunId?: string }): JSX.Element;
   ```
 - Consumes: `SectionConfigShell` (already in this file), `authenticatedFetch` (already imported), MUI `Select`, `MenuItem`, `Checkbox`, `ListItemText`, `FormControlLabel`, `Switch`, `OutlinedInput`.
+
+- [ ] **Step 0: Register `top_10_lists` in the web-local section-type registry**
+
+In `apps/web/lib/api/reports.ts`: append `'top_10_lists'` to `REPORT_SECTION_TYPES` (after `'graphs'`, ~line 28) and to `COMMENTABLE_SECTION_TYPES`, and add `top_10_lists: 'Top 10 Lists',` to the `labels` map inside `getSectionTypeLabel` (it is typed `Record<ReportSectionType, string>`, so this is compiler-enforced). This mirrors Task 1's shared-side registration for the web's independent copy.
 
 - [ ] **Step 1: Write the failing form tests**
 
