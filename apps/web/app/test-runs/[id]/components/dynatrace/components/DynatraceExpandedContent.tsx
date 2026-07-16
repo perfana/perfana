@@ -84,8 +84,8 @@ interface DynatraceExpandedContentProps {
   onFetchRelatedTestRuns: () => void;
 
   // Action handlers
-  onDeepLinkClick: (entity: { entityId: string; displayName: string; type: string }, linkType: string) => void;
-  onMultiDimensionalAnalysis: (entity: { entityId: string; displayName: string; type: string }, analysisType: string) => void;
+  onDeepLinkClick: (entity: { entityId: string; displayName: string; type: string; dynatraceConfigId?: string }, linkType: string) => void;
+  onMultiDimensionalAnalysis: (entity: { entityId: string; displayName: string; type: string; dynatraceConfigId?: string }, analysisType: string) => void;
   onComparisonClick: (mapping: DynatraceEntityMapping, comparisonTestRun: RelatedTestRun) => void;
 }
 
@@ -196,7 +196,8 @@ export function DynatraceExpandedContent({
                 onAnalysisClick={(analysisType) => onMultiDimensionalAnalysis({
                   entityId: mapping.entityId,
                   displayName: mapping.entityDisplayName,
-                  type: mapping.entityType
+                  type: mapping.entityType,
+                  dynatraceConfigId: mapping.dynatraceConfigId
                 }, analysisType)}
                 title="Multidimensional Analysis"
                 description="Analyze performance metrics across multiple dimensions"
@@ -210,7 +211,8 @@ export function DynatraceExpandedContent({
                 onAnalysisClick={(linkType) => onDeepLinkClick({
                   entityId: mapping.entityId,
                   displayName: mapping.entityDisplayName,
-                  type: mapping.entityType
+                  type: mapping.entityType,
+                  dynatraceConfigId: mapping.dynatraceConfigId
                 }, linkType)}
                 title="Performance Insights"
                 description="Navigate directly to detailed analysis views in Dynatrace"

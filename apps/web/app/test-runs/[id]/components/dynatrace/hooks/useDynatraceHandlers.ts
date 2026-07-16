@@ -29,7 +29,8 @@ export function useDynatraceHandlers({
   const handleDeepLinkClick = useCallback((entity: DynatraceEntity, linkType: string) => {
     if (configs.length === 0) return;
 
-    const config = configs[0];
+    // Target the instance this entity was mapped from, not always the first one.
+    const config = configs.find(c => c.id === entity.dynatraceConfigId) ?? configs[0];
     const serviceFilterParam = buildServiceFilterParam(
       config,
       testRun.test_run_id,
@@ -55,7 +56,8 @@ export function useDynatraceHandlers({
   const handleMultiDimensionalAnalysis = useCallback((entity: DynatraceEntity, analysisType: string) => {
     if (configs.length === 0) return;
 
-    const config = configs[0];
+    // Target the instance this entity was mapped from, not always the first one.
+    const config = configs.find(c => c.id === entity.dynatraceConfigId) ?? configs[0];
     const serviceFilterParam = buildServiceFilterParam(
       config,
       testRun.test_run_id,
@@ -84,7 +86,8 @@ export function useDynatraceHandlers({
   ) => {
     if (configs.length === 0 || !selectedComparisonTestRun) return;
 
-    const config = configs[0];
+    // Target the instance this mapping was configured from, not always the first one.
+    const config = configs.find(c => c.id === mapping.dynatraceConfigId) ?? configs[0];
     const url = buildComparisonUrl(
       mapping.entityId,
       config,
