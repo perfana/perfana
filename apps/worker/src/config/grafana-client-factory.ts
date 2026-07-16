@@ -16,7 +16,7 @@ import {
   getGrafanaConfigById,
   getDefaultResolvedGrafana,
 } from './grafana-config-cache.js';
-import { resolveProxyDispatcher } from './proxy-resolver.js';
+import { resolveGrafanaAxiosProxy } from './proxy-resolver.js';
 import type { WorkerDatabaseService } from '../common/database.service.js';
 
 /**
@@ -34,11 +34,11 @@ export async function createGrafanaClient(
   if (!resolved) {
     return null;
   }
-  // Clone: resolveProxyDispatcher mutates `dispatcher` and the resolved config is cached.
-  const config = { ...resolved.config };
-  const dispatcher = await resolveProxyDispatcher(resolved.meta.organizationId);
-  if (dispatcher) {
-    config.dispatcher = dispatcher;
+  // Only pass an explicit proxy when use_proxy is set (+ a DB ProxyServer row);
+  // otherwise `{}` so axios reads env HTTP(S)_PROXY/NO_PROXY and honors NO_PROXY.
+  const proxyOpts = await resolveGrafanaAxiosProxy(resolved.meta.organizationId, resolved.meta.useProxy);
+  const config = { ...resolved.config, ...proxyOpts };
+  if ('proxy' in proxyOpts) {
     logger.info(`🔗 Grafana client (instance ${instanceId ?? 'default'}) will use proxy (org: ${resolved.meta.organizationId ?? 'env'})`);
   }
   logger.info(`🔗 Initialized Grafana client for instance ${instanceId ?? 'default'} with URL: ${config.url}`);

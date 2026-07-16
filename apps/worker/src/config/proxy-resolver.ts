@@ -1,5 +1,5 @@
 import { ProxyServer } from '@perfana/shared/entities';
-import { buildProxyAgent, envProxyDispatcher } from '@perfana/shared/services/proxy';
+import { buildProxyAgent } from '@perfana/shared/services/proxy';
 import { getDatabaseService } from '../common/database-accessor.js';
 
 /** axios `proxy` config shape (host/port/protocol + optional basic auth). */
@@ -39,33 +39,15 @@ export async function resolveDynatraceAxiosProxy(
 }
 
 /**
- * Resolve the undici Dispatcher for outbound requests for a given organization.
- *
- * Returns a ProxyAgent dispatcher when the organization has a proxy configured,
- * or `undefined` when no proxy is needed (caller should use its own default
- * dispatcher/pool unchanged).
- *
- * Typed as `unknown` to avoid cross-package undici version-skew errors.
- * Callers assign the value to `GrafanaConfig.dispatcher` (also `unknown`) or
- * cast to `Dispatcher` from their own undici copy before passing to undici APIs.
- *
- * The lookup is intentionally per-call (not cached) because the proxy config
- * can change at runtime and these are long-running background jobs.
+ * Resolve axios proxy options for the Grafana client. Identical policy to the
+ * Dynatrace client (see resolveDynatraceAxiosProxy): `{ proxy }` only when
+ * use_proxy is set AND a DB ProxyServer row exists; otherwise `{}` so axios
+ * reads HTTP(S)_PROXY/NO_PROXY from the env and honors NO_PROXY, letting
+ * internal hosts bypass the corporate proxy. Spread into GrafanaConfig.proxy.
  */
-export async function resolveProxyDispatcher(
-  organizationId: string | null | undefined
-): Promise<unknown | undefined> {
-  if (organizationId) {
-    const db = getDatabaseService();
-    const proxyRow = await db.dataSource
-      .getRepository(ProxyServer)
-      .findOne({ where: { organizationId } });
-
-    const agents = buildProxyAgent(proxyRow ?? null);
-    if (agents) { return agents.dispatcher; }
-  }
-
-  // No DB ProxyServer row → honor HTTP_PROXY/HTTPS_PROXY/NO_PROXY env vars
-  // (shared undici, matching the Grafana request() path).
-  return envProxyDispatcher();
+export async function resolveGrafanaAxiosProxy(
+  organizationId: string | null | undefined,
+  useProxy: boolean,
+): Promise<{ proxy: AxiosProxyConfig } | Record<string, never>> {
+  return resolveDynatraceAxiosProxy(organizationId, useProxy);
 }

@@ -4,8 +4,8 @@
  * Verifies that:
  * 1. buildProxyAgent(null) returns null (no-proxy path, default Pool used)
  * 2. buildProxyAgent with a proxyUrl returns an object with a truthy dispatcher
- * 3. GrafanaClient accepts a dispatcher from buildProxyAgent without throwing
- * 4. GrafanaClient without a dispatcher also constructs without throwing
+ * 3. GrafanaClient accepts an axios proxy from buildProxyAgent without throwing
+ * 4. GrafanaClient without a proxy also constructs without throwing
  *
  * No real network calls are made — construction-time behaviour only.
  */
@@ -48,20 +48,20 @@ describe('buildProxyAgent', () => {
 });
 
 describe('GrafanaClient construction', () => {
-  test('constructs without throwing when a proxy dispatcher is provided', () => {
+  test('constructs without throwing when an axios proxy is provided', () => {
     const agents = buildProxyAgent({ proxyUrl: PROXY_URL, organizationId: 'o1' } as any)!;
     expect(agents).not.toBeNull();
 
     const config: GrafanaConfig = {
       url: PUBLIC_GRAFANA_URL,
       apiKey: 'test-key',
-      dispatcher: agents.dispatcher,
+      proxy: agents.axiosProxy,
     };
 
     expect(() => new GrafanaClient(config)).not.toThrow();
   });
 
-  test('constructs without throwing when no dispatcher is provided (falls back to internal Pool)', () => {
+  test('constructs without throwing when no proxy is provided (env NO_PROXY path)', () => {
     const config: GrafanaConfig = {
       url: PUBLIC_GRAFANA_URL,
       apiKey: 'test-key',

@@ -4,6 +4,11 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
+## [0.2.61.86] - 2026-07-16
+
+### Fixed
+- **Worker Grafana metrics collection now uses axios (like the Dynatrace client in v0.2.61.84), so internal hosts behind a corporate proxy are reached.** The shared `GrafanaClient` used undici, which cannot bypass internal hosts: a DB-configured proxy tunneled every request, and the env-proxy fallback couldn't honor `NO_PROXY`. Same failure fingerprint as the Dynatrace bug — the external host worked (proxy forwards it) but internal hosts got the proxy's HTML block page. `GrafanaClient` now uses `axios` for both calls (batched panel-query POST, datasource-lookup GET) and takes an explicit axios `proxy` only when `use_proxy` is set + a `proxy_servers` row exists; otherwise it passes nothing so axios reads `HTTP(S)_PROXY`/`NO_PROXY` from the env and honors `NO_PROXY` (internal hosts bypass). The undici keep-alive `Pool` is replaced with per-request axios timeouts; non-2xx responses still surface as a status (`validateStatus: () => true`) so batch processing is unchanged. The worker's undici Grafana proxy path (`resolveProxyDispatcher`) is removed in favor of `resolveGrafanaAxiosProxy`, which mirrors the Dynatrace policy exactly. Added `axios` as a direct `@perfana/shared` dependency.
+
 ## [0.2.61.85] - 2026-07-16
 
 ### Fixed

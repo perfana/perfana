@@ -1,5 +1,4 @@
-import { Pool, request } from 'undici';
-import type { Dispatcher } from 'undici';
+import axios, { isAxiosError } from 'axios';
 import {
   PanelDocument,
   PanelMetricsDocument,
@@ -24,7 +23,8 @@ import { validateUrl, type UrlValidationOptions } from '../../security/url-valid
  * 4. Automatic retries with exponential backoff
  * 5. Response data transformation to time-series format
  *
- * Uses undici for modern HTTP connection pooling with proper keep-alive
+ * Uses axios so internal hosts behind a corporate proxy are honored via the
+ * environment's HTTP(S)_PROXY/NO_PROXY (matching the API's Dynatrace client).
  */
 export interface GrafanaConfig {
   url: string;
@@ -46,33 +46,39 @@ export interface GrafanaConfig {
    */
   skipSsrfValidation?: boolean;
   /**
-   * Optional undici Dispatcher to use for outbound requests.
-   * When set (e.g. a ProxyAgent), outbound requests are routed through that
-   * dispatcher instead of the internal connection Pool.
-   * When absent, the internal Pool is used unchanged (default / non-proxy path).
-   *
-   * Typed as `unknown` to avoid version-skew errors when callers import undici
-   * from a different node_modules tree than this shared package does.
-   * The value is cast to `Dispatcher` internally before use.
+   * Explicit axios proxy config (host/port/protocol + optional basic auth).
+   * When set, outbound requests tunnel through that proxy. When absent, axios
+   * reads HTTP(S)_PROXY/NO_PROXY from the environment and honors NO_PROXY on its
+   * own, so internal hosts bypass the corporate proxy. Mirrors the API's
+   * DynatraceService proxy handling. See resolveGrafanaAxiosProxy in the worker.
    */
-  dispatcher?: unknown;
+  proxy?: GrafanaProxyConfig;
 }
 
-interface UndiciError extends Error {
+/** axios `proxy` config shape (matches build-proxy-agent's axiosProxy). */
+export interface GrafanaProxyConfig {
+  host: string;
+  port: number;
+  protocol: string;
+  auth?: { username: string; password: string };
+}
+
+/** axios request options spread into every call: `{ proxy }` or `{}` (env NO_PROXY path). */
+type GrafanaProxyOpts = { proxy: GrafanaProxyConfig } | Record<string, never>;
+
+/** Narrow error shape for logging (axios errors expose `code`; HTTP status lives on `response.status`). */
+interface HttpClientError extends Error {
   code?: string;
-  statusCode?: number;
 }
 
 export class GrafanaClient {
-  private pool: Pool;
-  private dispatcher: Dispatcher;
+  private proxyOpts: GrafanaProxyOpts;
   private grafanaConfig: GrafanaConfig;
   private logger: Logger;
   /**
    * URL origin (scheme + host + port) derived from grafanaConfig.url.
-   * Using the origin guarantees that no-proxy requests are byte-identical to
-   * the old `new Pool(url)` behaviour: undici's Pool always connected to the
-   * origin and ignored any path prefix in the supplied URL.
+   * Using the origin keeps requests targeting the host root and ignores any
+   * path prefix in the supplied URL (endpoints are appended per request).
    */
   private originUrl: string;
 
@@ -83,15 +89,17 @@ export class GrafanaClient {
     // Validate Grafana URL for SSRF protection
     this.validateGrafanaUrl();
 
-    // Compute origin once; reused by all request() calls below.
+    // Compute origin once; reused by all axios calls below.
     this.originUrl = new URL(grafanaConfig.url).origin;
 
-    this.pool = this.createConnectionPool();
-    // When a proxy dispatcher is provided, use it for all outbound requests.
-    // Otherwise fall back to the connection pool (byte-identical to the old path).
-    // Cast via `unknown` because the field is typed loosely to avoid cross-package
-    // undici version-skew errors at the boundary.
-    this.dispatcher = (grafanaConfig.dispatcher as Dispatcher | undefined) ?? this.pool;
+    // Explicit `{ proxy }` when configured, else `{}` so axios reads env
+    // HTTP(S)_PROXY and honors NO_PROXY on its own (internal hosts bypass).
+    this.proxyOpts = grafanaConfig.proxy ? { proxy: grafanaConfig.proxy } : {};
+  }
+
+  /** Per-request timeout (ms); axios connect+response bound. */
+  private get requestTimeout(): number {
+    return this.grafanaConfig.timeout || 30000;
   }
 
   /**
@@ -129,27 +137,6 @@ export class GrafanaClient {
     }
 
     this.logger.debug(`✅ Grafana URL validated: ${validationResult.url?.origin}`);
-  }
-
-  /**
-   * Create connection pool with proper HTTP keep-alive
-   * Undici handles connection pooling automatically
-   *
-   * Note: Uses concurrency from config to match worker concurrency
-   */
-  private createConnectionPool(): Pool {
-    const timeout = this.grafanaConfig.timeout || 30000;
-    const concurrency = this.grafanaConfig.concurrency || 30;
-
-    return new Pool(this.grafanaConfig.url, {
-      connections: concurrency * 10,
-      pipelining: 1,
-      keepAliveTimeout: 60000,
-      keepAliveMaxTimeout: 600000,
-      connectTimeout: timeout,
-      bodyTimeout: timeout,
-      headersTimeout: timeout,
-    });
   }
 
   /**
@@ -272,49 +259,49 @@ export class GrafanaClient {
 
     for (let attempt = 1; attempt <= maxRetries; attempt++) {
       try {
-        const requestBody = JSON.stringify(requestBatch.request.request_body);
-
         this.logger.debug('🔍 Grafana request:', {
           method: 'POST',
           path: requestBatch.request.endpoint,
-          dataSize: requestBody.length
         });
 
-        const { statusCode, body } = await request(`${this.originUrl}${requestBatch.request.endpoint}`, {
-          dispatcher: this.dispatcher,
-          method: 'POST',
-          headers: {
-            'Authorization': `Bearer ${this.grafanaConfig.apiKey}`,
-            'Content-Type': 'application/json',
-            'Accept': 'application/json',
-          },
-          body: requestBody,
-        });
+        // validateStatus: () => true — surface 4xx/5xx as a status (like undici's
+        // request did) so processBatchedResponses classifies them; only network
+        // errors/timeouts throw and get retried below.
+        const response = await axios.post(
+          `${this.originUrl}${requestBatch.request.endpoint}`,
+          requestBatch.request.request_body,
+          {
+            headers: {
+              'Authorization': `Bearer ${this.grafanaConfig.apiKey}`,
+              'Content-Type': 'application/json',
+              'Accept': 'application/json',
+            },
+            timeout: this.requestTimeout,
+            validateStatus: () => true,
+            ...this.proxyOpts,
+          }
+        );
 
-        const data = await body.json();
-
-        const result = {
+        return {
           batch: requestBatch,
-          response: data,
-          status: statusCode
+          response: response.data,
+          status: response.status
         };
-
-        return result;
 
       } catch (error) {
         lastError = error as Error;
-        const undiciError = error as UndiciError;
+        const httpError = error as HttpClientError;
 
         // Log detailed error information
         const errorDetails = {
-          message: undiciError.message,
-          code: undiciError.code,
-          statusCode: undiciError.statusCode,
+          message: httpError.message,
+          code: httpError.code,
+          statusCode: isAxiosError(error) ? error.response?.status : undefined,
           requestPath: requestBatch.request.endpoint,
           requestMethod: 'POST',
           timeout: this.grafanaConfig.timeout,
-          isTimeout: undiciError.code === 'UND_ERR_HEADERS_TIMEOUT' || undiciError.code === 'UND_ERR_BODY_TIMEOUT',
-          isNetworkError: undiciError.code === 'ENOTFOUND' || undiciError.code === 'ECONNREFUSED',
+          isTimeout: httpError.code === 'ECONNABORTED' || httpError.code === 'ETIMEDOUT',
+          isNetworkError: httpError.code === 'ENOTFOUND' || httpError.code === 'ECONNREFUSED',
         };
 
         if (attempt < maxRetries) {
@@ -342,18 +329,19 @@ export class GrafanaClient {
    */
   async getDatasourceByUid(uid: string): Promise<{ id: number; uid: string; name: string; type: string } | null> {
     try {
-      const { statusCode, body } = await request(`${this.originUrl}/api/datasources/uid/${uid}`, {
-        dispatcher: this.dispatcher,
-        method: 'GET',
+      const response = await axios.get(`${this.originUrl}/api/datasources/uid/${uid}`, {
         headers: {
           'Authorization': `Bearer ${this.grafanaConfig.apiKey}`,
           'Accept': 'application/json',
         },
+        timeout: this.requestTimeout,
+        validateStatus: () => true,
+        ...this.proxyOpts,
       });
 
-      if (statusCode === 200) {
+      if (response.status === 200) {
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        const data = await body.json() as any;
+        const data = response.data as any;
         return {
           id: data.id,
           uid: data.uid,
@@ -362,7 +350,7 @@ export class GrafanaClient {
         };
       }
 
-      this.logger.warn(`Failed to fetch datasource ${uid}: status ${statusCode}`);
+      this.logger.warn(`Failed to fetch datasource ${uid}: status ${response.status}`);
       return null;
     } catch (error) {
       this.logger.error(`Error fetching datasource ${uid}:`, error);
