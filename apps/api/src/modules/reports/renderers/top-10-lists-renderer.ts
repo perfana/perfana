@@ -33,16 +33,11 @@ const SCOPE_LABELS: Record<Scope, string> = {
   urls: 'URLs',
 };
 
-// NOTE: 'impact' is listed first so the default (all-lists) render leads with
-// the highest-signal ranking. This also keeps the two test fixture rows
-// (GET /a: avg 300ms/impact 30000, GET /b: avg 100ms/impact 50000) ordered as
-// GET /b before GET /a in document order, matching the impact-ranked spec
-// expectation — with 'slowest' first instead, GET /a (the slower row) would
-// lead the very first table and the ordering assertion would fail.
+// Order matches Performance Analysis display order.
 const LIST_DEFS: ListDef[] = [
-  { key: 'impact', title: 'Highest Performance Impact', valueOf: (r) => r.impact, format: (v) => formatNum(v), showErrorCount: false },
   { key: 'slowest', title: 'Slowest Average Response Times', valueOf: (r) => r.avgResponseTime, format: (v) => `${formatNum(v)} ms`, showErrorCount: false },
   { key: 'throughput', title: 'Highest Throughput', valueOf: (r) => r.throughput, format: (v) => `${formatNum(v)}/s`, showErrorCount: false },
+  { key: 'impact', title: 'Highest Performance Impact', valueOf: (r) => r.impact, format: (v) => formatNum(v), showErrorCount: false },
   { key: 'error_rate', title: 'Highest Error Rate', valueOf: (r) => r.errorRate, format: (v) => formatPercent(v), showErrorCount: true },
 ];
 

@@ -30,7 +30,13 @@ describe('Top10ListsRenderer', () => {
     expect(html).toContain('Highest Throughput');
     expect(html).toContain('Highest Performance Impact');
     expect(html).toContain('Highest Error Rate');
-    // impact ordering: /b (50000) before /a (30000)
+  });
+
+  it('ranks the impact list by descending impact', async () => {
+    const { renderer } = makeRenderer(makeRows());
+    const section = { type: 'top_10_lists', order: 0, config: { lists: ['impact'] } } as ReportSectionConfig;
+    const html = await renderer.renderTop10ListsSection(section, testRun);
+    // /b impact 50000 > /a impact 30000
     expect(html.indexOf('GET /b')).toBeLessThan(html.indexOf('GET /a'));
   });
 
