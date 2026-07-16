@@ -6,8 +6,7 @@ import { DynatraceRepository } from '../services/dynatrace/DynatraceRepository.j
 import { QueryConstructor } from '../services/dynatrace/QueryConstructor.js';
 import { DynatraceAPIClient } from '../services/dynatrace/DynatraceAPIClient.js';
 import { DataProcessor } from '../services/dynatrace/DataProcessor.js';
-import { resolveDynatraceProxyDispatcher } from '../config/proxy-resolver.js';
-import type { Dispatcher } from 'undici';
+import { resolveDynatraceAxiosProxy } from '../config/proxy-resolver.js';
 import {
   DynatraceQueryConfig,
   DynatraceQueryResult,
@@ -179,10 +178,10 @@ export class DynatracePipeline extends BasePipelineTypeORM {
         continue;
       }
 
-      // Always resolve: returns a dispatcher for a DB ProxyServer row OR env HTTP(S)_PROXY,
-      // undefined otherwise. Not gated on useProxy — that flag only covers the DB-row case
-      // and would skip the env-proxy fallback in proxy-only deployments.
-      const proxyDispatcher = (await resolveDynatraceProxyDispatcher(dynatraceConfig.organizationId)) as Dispatcher | undefined;
+      // Mirror the API's DynatraceService: only pass an explicit proxy when
+      // use_proxy is set (+ a DB ProxyServer row); otherwise axios reads
+      // HTTP(S)_PROXY/NO_PROXY from the env and honors NO_PROXY on its own.
+      const proxyOpts = await resolveDynatraceAxiosProxy(dynatraceConfig.organizationId, dynatraceConfig.useProxy);
 
       const apiClient = new DynatraceAPIClient({
         host: dynatraceConfig.host,
@@ -190,7 +189,7 @@ export class DynatracePipeline extends BasePipelineTypeORM {
         platformToken: platformToken || '', // Empty string for managed instances
         dynatraceType: dynatraceConfig.dynatraceType,
         maxConcurrent: 5  // Execute queries with controlled concurrency
-      }, proxyDispatcher);
+      }, proxyOpts);
 
       try {
         const configQueryResults = await this.executeQueries(

@@ -1,15 +1,42 @@
-import { ProxyAgent, EnvHttpProxyAgent } from 'undici'; // worker-local undici 7 — matches DynatraceAPIClient's request()
 import { ProxyServer } from '@perfana/shared/entities';
-import { buildProxyAgent, proxyConnection, envProxyDispatcher, normalizeNoProxy } from '@perfana/shared/services/proxy';
+import { buildProxyAgent, envProxyDispatcher } from '@perfana/shared/services/proxy';
 import { getDatabaseService } from '../common/database-accessor.js';
 
+/** axios `proxy` config shape (host/port/protocol + optional basic auth). */
+export interface AxiosProxyConfig {
+  host: string;
+  port: number;
+  protocol: string;
+  auth?: { username: string; password: string };
+}
+
 /**
- * Module-level cache for worker-local undici 7 ProxyAgents (Dynatrace path only).
- * Keyed by `${uri}|${token ?? ''}` — same strategy as the shared cache.
- * Exposed for tests only; do not modify from production code.
+ * Resolve axios proxy options for the Dynatrace client, mirroring the API's
+ * DynatraceService.proxyOpts exactly (apps/api ProxyResolverService.resolve):
+ *
+ *   - `useProxy` false  → return `{}`. axios then reads HTTP(S)_PROXY/NO_PROXY
+ *     from the environment itself and honors NO_PROXY (lenient matching), so
+ *     internal hosts bypass the corporate proxy. This is the path the API takes
+ *     for both current Dynatrace instances (use_proxy = false) and the reason
+ *     it reaches internal + external hosts where the undici path failed.
+ *   - `useProxy` true + DB ProxyServer row → return `{ proxy }` so axios tunnels
+ *     through the configured proxy. (Like the API, this explicit-proxy path has
+ *     no NO_PROXY bypass — same limitation, kept for parity.)
+ *
+ * Spread the result into every axios request config.
  */
-export const _dynatraceAgentCacheForTests: Map<string, ProxyAgent> = new Map();
-const dynatraceAgentCache = _dynatraceAgentCacheForTests;
+export async function resolveDynatraceAxiosProxy(
+  organizationId: string | null | undefined,
+  useProxy: boolean,
+): Promise<{ proxy: AxiosProxyConfig } | Record<string, never>> {
+  if (!useProxy || !organizationId) { return {}; }
+  const db = getDatabaseService();
+  const proxyRow = await db.dataSource
+    .getRepository(ProxyServer)
+    .findOne({ where: { organizationId } });
+  const agents = buildProxyAgent(proxyRow ?? null);
+  return agents ? { proxy: agents.axiosProxy } : {};
+}
 
 /**
  * Resolve the undici Dispatcher for outbound requests for a given organization.
@@ -39,66 +66,6 @@ export async function resolveProxyDispatcher(
   }
 
   // No DB ProxyServer row → honor HTTP_PROXY/HTTPS_PROXY/NO_PROXY env vars
-  // (shared undici, matching the Grafana request() path). See resolveDynatraceProxyDispatcher.
+  // (shared undici, matching the Grafana request() path).
   return envProxyDispatcher();
-}
-
-/**
- * Like resolveProxyDispatcher, but builds the ProxyAgent from the worker's
- * own undici 7 rather than shared's undici 6.  Use this for Dynatrace call
- * sites where DynatraceAPIClient.request() is also undici 7 — passing an
- * undici-6 ProxyAgent to undici-7's request() throws at runtime.
- *
- * The Grafana path (GrafanaClient in shared) must keep using resolveProxyDispatcher
- * because it calls shared's undici 6 request(), so it needs a shared undici 6 ProxyAgent.
- *
- * Return type is `unknown` for consistency with resolveProxyDispatcher; callers
- * cast to `Dispatcher` from their own undici import.
- */
-export async function resolveDynatraceProxyDispatcher(
-  organizationId: string | null | undefined
-): Promise<unknown | undefined> {
-  if (organizationId) {
-    const db = getDatabaseService();
-    const proxyRow = await db.dataSource
-      .getRepository(ProxyServer)
-      .findOne({ where: { organizationId } });
-
-    const conn = proxyConnection(proxyRow ?? null);
-    if (conn) {
-      const key = `${conn.uri}|${conn.token ?? ''}`;
-      let agent = dynatraceAgentCache.get(key);
-      if (!agent) {
-        agent = new ProxyAgent(conn.token ? { uri: conn.uri, token: conn.token } : { uri: conn.uri });
-        dynatraceAgentCache.set(key, agent);
-      }
-      return agent;
-    }
-  }
-
-  // No DB ProxyServer row → fall back to HTTP_PROXY/HTTPS_PROXY/NO_PROXY env vars.
-  // undici (unlike axios, which the API uses) does not honor these on its own, so
-  // the worker would otherwise connect directly and fail in proxy-only environments.
-  // Built from the worker's undici 7 (matches DynatraceAPIClient.request()); the
-  // Grafana path uses shared's undici 6 envProxyDispatcher instead — no version skew.
-  return dynatraceEnvProxyDispatcher();
-}
-
-/**
- * Lazily-built EnvHttpProxyAgent honoring HTTP_PROXY/HTTPS_PROXY/NO_PROXY.
- * Returns undefined when no proxy env vars are set, so the direct-connection
- * path stays byte-identical to before. Cached because env is read at construction.
- */
-let _envProxyAgent: EnvHttpProxyAgent | undefined;
-function dynatraceEnvProxyDispatcher(): unknown | undefined {
-  const hasEnvProxy =
-    process.env.HTTP_PROXY || process.env.http_proxy ||
-    process.env.HTTPS_PROXY || process.env.https_proxy;
-  if (!hasEnvProxy) { return undefined; }
-  if (!_envProxyAgent) {
-    // Normalize NO_PROXY so glob entries (`*ba.uwv.nl`) match, matching axios/API behavior.
-    const noProxy = normalizeNoProxy(process.env.NO_PROXY ?? process.env.no_proxy);
-    _envProxyAgent = new EnvHttpProxyAgent(noProxy ? { noProxy } : {});
-  }
-  return _envProxyAgent;
 }

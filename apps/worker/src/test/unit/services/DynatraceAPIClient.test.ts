@@ -1,13 +1,11 @@
 import { describe, it, expect, beforeEach, vi, afterEach } from 'vitest';
 import { DynatraceAPIClient } from '../../../services/dynatrace/DynatraceAPIClient.js';
-import { request } from 'undici';
 
-// Mock undici request
-vi.mock('undici', () => ({
-  request: vi.fn(),
-  Agent: vi.fn().mockImplementation(() => ({
-    destroy: vi.fn()
-  }))
+// Mock axios (default export used as axios.get / axios.post; named isAxiosError).
+const { mockGet, mockPost } = vi.hoisted(() => ({ mockGet: vi.fn(), mockPost: vi.fn() }));
+vi.mock('axios', () => ({
+  default: { get: mockGet, post: mockPost },
+  isAxiosError: (e: unknown) => !!(e && typeof e === 'object' && 'isAxiosError' in e),
 }));
 
 // Mock logger
@@ -20,9 +18,12 @@ vi.mock('../../../lib/utils/logger.js', () => ({
   })),
 }));
 
+// axios-shaped responses
+const ok = (data: unknown) => ({ status: 200, data, headers: { 'content-type': 'application/json' } });
+const resp = (status: number, data: unknown) => ({ status, data, headers: { 'content-type': 'application/json' } });
+
 describe('DynatraceAPIClient', () => {
   let client: DynatraceAPIClient;
-  const mockRequest = vi.mocked(request);
 
   beforeEach(() => {
     vi.clearAllMocks();
@@ -36,155 +37,82 @@ describe('DynatraceAPIClient', () => {
 
   describe('Configuration and Initialization', () => {
     it('should initialize with SaaS configuration and convert host URL', () => {
-      // Arrange
-      const config = {
+      client = new DynatraceAPIClient({
         host: 'live.dynatrace.com',
         apiToken: 'test-api-token',
         platformToken: 'test-platform-token',
-        dynatraceType: 'saas' as const,
-      };
-
-      // Act
-      client = new DynatraceAPIClient(config);
-
-      // Assert
+        dynatraceType: 'saas',
+      });
       expect(client).toBeDefined();
-      // Note: baseUrl is private, but we can test behavior through API calls
     });
 
     it('should initialize with Managed configuration and keep original host URL', () => {
-      // Arrange
-      const config = {
+      client = new DynatraceAPIClient({
         host: 'dynatrace.example.com',
         apiToken: 'test-api-token',
         platformToken: 'test-platform-token',
-        dynatraceType: 'managed' as const,
-      };
-
-      // Act
-      client = new DynatraceAPIClient(config);
-
-      // Assert
+        dynatraceType: 'managed',
+      });
       expect(client).toBeDefined();
     });
 
     it('should apply default configuration values', () => {
-      // Arrange
-      const config = {
+      client = new DynatraceAPIClient({
         host: 'live.dynatrace.com',
         apiToken: 'test-api-token',
         platformToken: 'test-platform-token',
-        dynatraceType: 'saas' as const,
-      };
-
-      // Act
-      client = new DynatraceAPIClient(config);
-
-      // Assert - defaults should be applied (maxConcurrent: 5, maxRetries: 3, etc.)
+        dynatraceType: 'saas',
+      });
       expect(client).toBeDefined();
     });
 
     it('should handle host URLs with https:// prefix', () => {
-      // Arrange
-      const config = {
+      client = new DynatraceAPIClient({
         host: 'https://live.dynatrace.com',
         apiToken: 'test-api-token',
         platformToken: 'test-platform-token',
-        dynatraceType: 'saas' as const,
-      };
-
-      // Act
-      client = new DynatraceAPIClient(config);
-
-      // Assert
+        dynatraceType: 'saas',
+      });
       expect(client).toBeDefined();
     });
 
     it('should remove trailing slash from host URL', () => {
-      // Arrange
-      const config = {
+      client = new DynatraceAPIClient({
         host: 'https://live.dynatrace.com/',
         apiToken: 'test-api-token',
         platformToken: 'test-platform-token',
-        dynatraceType: 'saas' as const,
-      };
-
-      // Act
-      client = new DynatraceAPIClient(config);
-
-      // Assert
+        dynatraceType: 'saas',
+      });
       expect(client).toBeDefined();
     });
 
     it('should use live.dynatrace.com for Metrics API and apps.dynatrace.com for DQL on SaaS', async () => {
-      // Arrange - SaaS instance with a metric selector query
-      const config = {
+      client = new DynatraceAPIClient({
         host: 'oti61760.live.dynatrace.com',
         apiToken: 'test-api-token',
         platformToken: 'test-platform-token',
-        dynatraceType: 'saas' as const,
-      };
-      client = new DynatraceAPIClient(config);
+        dynatraceType: 'saas',
+      });
 
-      // First call: Metrics API (metric selector)
-      const mockMetricsResponse = {
-        statusCode: 200,
-        body: {
-          json: vi.fn().mockResolvedValue({
-            result: [{
-              metricId: 'builtin:host.cpu.usage',
-              data: [{
-                dimensionMap: { 'dt.entity.host': 'HOST-123' },
-                timestamps: [1704067200000],
-                values: [50.5]
-              }]
-            }]
-          }),
-          text: vi.fn().mockResolvedValue(JSON.stringify({
-            result: [{
-              metricId: 'builtin:host.cpu.usage',
-              data: [{
-                dimensionMap: { 'dt.entity.host': 'HOST-123' },
-                timestamps: [1704067200000],
-                values: [50.5]
-              }]
-            }]
-          }))
-        }
-      };
-      mockRequest.mockResolvedValueOnce(mockMetricsResponse as any);
-
-      // Act - metric selector should route to Metrics API v2 with live.dynatrace.com
+      // Metric selector → Metrics API v2 (GET) on live.dynatrace.com
+      mockGet.mockResolvedValueOnce(ok({
+        result: [{
+          metricId: 'builtin:host.cpu.usage',
+          data: [{ dimensionMap: { 'dt.entity.host': 'HOST-123' }, timestamps: [1704067200000], values: [50.5] }],
+        }],
+      }));
       await client.executeQuery('builtin:host.cpu.usage:filter(eq("dt.entity.host","HOST-123")):avg');
-
-      // Assert - Metrics API v2 should use live.dynatrace.com (NOT apps.dynatrace.com)
-      expect(mockRequest).toHaveBeenCalledWith(
+      expect(mockGet).toHaveBeenCalledWith(
         expect.stringContaining('oti61760.live.dynatrace.com/api/v2/metrics/query'),
         expect.any(Object)
       );
 
-      // Second call: DQL API (DQL query)
-      const mockDQLResponse = {
-        statusCode: 200,
-        body: {
-          json: vi.fn().mockResolvedValue({
-            state: 'SUCCEEDED',
-            result: { records: [] }
-          }),
-          text: vi.fn().mockResolvedValue(JSON.stringify({
-            state: 'SUCCEEDED',
-            result: { records: [] }
-          }))
-        }
-      };
-      mockRequest.mockResolvedValueOnce(mockDQLResponse as any);
-
-      // Act - DQL query should route to DQL API with apps.dynatrace.com
+      // DQL query → DQL API (POST) on apps.dynatrace.com
+      mockPost.mockResolvedValueOnce(ok({ state: 'SUCCEEDED', result: { records: [] } }));
       await client.executeQuery('timeseries avg(dt.host.cpu.usage)');
-
-      // Assert - DQL API should use apps.dynatrace.com (NOT live.dynatrace.com)
-      expect(mockRequest).toHaveBeenLastCalledWith(
+      expect(mockPost).toHaveBeenLastCalledWith(
         expect.stringContaining('oti61760.apps.dynatrace.com/platform/storage/query/v1/query:execute'),
+        expect.any(Object),
         expect.any(Object)
       );
     });
@@ -201,45 +129,22 @@ describe('DynatraceAPIClient', () => {
     });
 
     it('should execute DQL query with immediate success (HTTP 200)', async () => {
-      // Arrange
       const query = 'timeseries avg(dt.host.cpu.usage) by: {dt.entity.host}';
-      const mockResponse = {
-        statusCode: 200,
-        body: {
-          json: vi.fn().mockResolvedValue({
-            state: 'SUCCEEDED',
-            result: {
-              records: [
-                { timestamp: '2024-01-01T00:00:00Z', 'dt.entity.host': 'HOST-123', value: 50.5 }
-              ]
-            }
-          }),
-          text: vi.fn().mockResolvedValue(JSON.stringify({
-            state: 'SUCCEEDED',
-            result: {
-              records: [
-                { timestamp: '2024-01-01T00:00:00Z', 'dt.entity.host': 'HOST-123', value: 50.5 }
-              ]
-            }
-          }))
-        }
-      };
-      mockRequest.mockResolvedValue(mockResponse as any);
+      mockPost.mockResolvedValue(ok({
+        state: 'SUCCEEDED',
+        result: { records: [{ timestamp: '2024-01-01T00:00:00Z', 'dt.entity.host': 'HOST-123', value: 50.5 }] },
+      }));
 
-      // Act
       const result = await client.executeQuery(query);
 
-      // Assert
       expect(result).toEqual({
-        records: [
-          { timestamp: '2024-01-01T00:00:00Z', 'dt.entity.host': 'HOST-123', value: 50.5 }
-        ]
+        records: [{ timestamp: '2024-01-01T00:00:00Z', 'dt.entity.host': 'HOST-123', value: 50.5 }],
       });
-      expect(mockRequest).toHaveBeenCalledTimes(1);
-      expect(mockRequest).toHaveBeenCalledWith(
+      expect(mockPost).toHaveBeenCalledTimes(1);
+      expect(mockPost).toHaveBeenCalledWith(
         expect.stringContaining('/platform/storage/query/v1/query:execute'),
+        expect.any(Object),
         expect.objectContaining({
-          method: 'POST',
           headers: expect.objectContaining({
             'Authorization': 'Bearer test-platform-token',
             'Content-Type': 'application/json',
@@ -249,213 +154,81 @@ describe('DynatraceAPIClient', () => {
     });
 
     it('should execute DQL query with async execution (HTTP 202) and poll for results', async () => {
-      // Arrange
       const query = 'timeseries avg(dt.host.cpu.usage) by: {dt.entity.host}';
       const requestToken = 'test-request-token-123';
 
-      const mockStartResponse = {
-        statusCode: 202,
-        body: {
-          json: vi.fn().mockResolvedValue({
-            state: 'RUNNING',
-            requestToken
-          }),
-          text: vi.fn().mockResolvedValue(JSON.stringify({
-            state: 'RUNNING',
-            requestToken
-          }))
-        }
-      };
+      mockPost.mockResolvedValueOnce(resp(202, { state: 'RUNNING', requestToken }));
+      mockGet
+        .mockResolvedValueOnce(ok({ state: 'RUNNING' }))
+        .mockResolvedValueOnce(ok({
+          state: 'SUCCEEDED',
+          result: { records: [{ timestamp: '2024-01-01T00:00:00Z', 'dt.entity.host': 'HOST-123', value: 75.2 }] },
+        }));
 
-      const mockPollResponseRunning = {
-        statusCode: 200,
-        body: {
-          json: vi.fn().mockResolvedValue({
-            state: 'RUNNING'
-          }),
-          text: vi.fn().mockResolvedValue(JSON.stringify({
-            state: 'RUNNING'
-          }))
-        }
-      };
-
-      const mockPollResponseSuccess = {
-        statusCode: 200,
-        body: {
-          json: vi.fn().mockResolvedValue({
-            state: 'SUCCEEDED',
-            result: {
-              records: [
-                { timestamp: '2024-01-01T00:00:00Z', 'dt.entity.host': 'HOST-123', value: 75.2 }
-              ]
-            }
-          }),
-          text: vi.fn().mockResolvedValue(JSON.stringify({
-            state: 'SUCCEEDED',
-            result: {
-              records: [
-                { timestamp: '2024-01-01T00:00:00Z', 'dt.entity.host': 'HOST-123', value: 75.2 }
-              ]
-            }
-          }))
-        }
-      };
-
-      mockRequest
-        .mockResolvedValueOnce(mockStartResponse as any) // Start query
-        .mockResolvedValueOnce(mockPollResponseRunning as any) // First poll - still running
-        .mockResolvedValueOnce(mockPollResponseSuccess as any); // Second poll - completed
-
-      // Act
       const result = await client.executeQuery(query);
 
-      // Assert
       expect(result).toEqual({
-        records: [
-          { timestamp: '2024-01-01T00:00:00Z', 'dt.entity.host': 'HOST-123', value: 75.2 }
-        ]
+        records: [{ timestamp: '2024-01-01T00:00:00Z', 'dt.entity.host': 'HOST-123', value: 75.2 }],
       });
-      expect(mockRequest).toHaveBeenCalledTimes(3); // 1 start + 2 polls
-      expect(mockRequest).toHaveBeenNthCalledWith(
-        2,
+      expect(mockPost).toHaveBeenCalledTimes(1);
+      expect(mockGet).toHaveBeenCalledTimes(2);
+      expect(mockGet).toHaveBeenNthCalledWith(
+        1,
         expect.stringContaining(`/platform/storage/query/v1/query:poll?request-token=${requestToken}`),
-        expect.objectContaining({
-          method: 'GET',
-        })
+        expect.any(Object)
       );
     });
 
     it('should handle DQL query failure during polling', async () => {
-      // Arrange
       const query = 'timeseries avg(dt.host.cpu.usage) by: {dt.entity.host}';
       const requestToken = 'test-request-token-456';
 
-      const mockStartResponse = {
-        statusCode: 202,
-        body: {
-          json: vi.fn().mockResolvedValue({
-            state: 'RUNNING',
-            requestToken
-          }),
-          text: vi.fn().mockResolvedValue(JSON.stringify({
-            state: 'RUNNING',
-            requestToken
-          }))
-        }
-      };
+      mockPost.mockResolvedValueOnce(resp(202, { state: 'RUNNING', requestToken }));
+      mockGet.mockResolvedValueOnce(ok({
+        state: 'FAILED',
+        error: { code: 'QUERY_ERROR', message: 'Invalid DQL syntax' },
+      }));
 
-      const mockPollResponseFailed = {
-        statusCode: 200,
-        body: {
-          json: vi.fn().mockResolvedValue({
-            state: 'FAILED',
-            error: {
-              code: 'QUERY_ERROR',
-              message: 'Invalid DQL syntax'
-            }
-          }),
-          text: vi.fn().mockResolvedValue(JSON.stringify({
-            state: 'FAILED',
-            error: {
-              code: 'QUERY_ERROR',
-              message: 'Invalid DQL syntax'
-            }
-          }))
-        }
-      };
-
-      mockRequest
-        .mockResolvedValueOnce(mockStartResponse as any)
-        .mockResolvedValueOnce(mockPollResponseFailed as any);
-
-      // Act & Assert
       await expect(client.executeQuery(query)).rejects.toThrow('DQL query failed: Invalid DQL syntax');
-      expect(mockRequest).toHaveBeenCalledTimes(2);
+      expect(mockPost).toHaveBeenCalledTimes(1);
+      expect(mockGet).toHaveBeenCalledTimes(1);
     });
 
     it('should handle polling timeout', async () => {
-      // Arrange
       client = new DynatraceAPIClient({
         host: 'live.dynatrace.com',
         apiToken: 'test-api-token',
         platformToken: 'test-platform-token',
         dynatraceType: 'saas',
-        maxPollWaitMs: 100, // Very short timeout for testing
+        maxPollWaitMs: 100,
         pollInterval: 10,
       });
-
       const query = 'timeseries avg(dt.host.cpu.usage) by: {dt.entity.host}';
-      const requestToken = 'test-request-token-789';
 
-      const mockStartResponse = {
-        statusCode: 202,
-        body: {
-          json: vi.fn().mockResolvedValue({
-            state: 'RUNNING',
-            requestToken
-          }),
-          text: vi.fn().mockResolvedValue(JSON.stringify({
-            state: 'RUNNING',
-            requestToken
-          }))
-        }
-      };
+      mockPost.mockResolvedValueOnce(resp(202, { state: 'RUNNING', requestToken: 'test-request-token-789' }));
+      mockGet.mockResolvedValue(ok({ state: 'RUNNING' })); // always RUNNING
 
-      const mockPollResponseRunning = {
-        statusCode: 200,
-        body: {
-          json: vi.fn().mockResolvedValue({
-            state: 'RUNNING'
-          }),
-          text: vi.fn().mockResolvedValue(JSON.stringify({
-            state: 'RUNNING'
-          }))
-        }
-      };
-
-      mockRequest
-        .mockResolvedValueOnce(mockStartResponse as any)
-        .mockResolvedValue(mockPollResponseRunning as any); // Always return RUNNING
-
-      // Act & Assert
       await expect(client.executeQuery(query)).rejects.toThrow(/timed out/);
     });
 
     it('should include timeframe in DQL query request', async () => {
-      // Arrange
       const query = 'timeseries avg(dt.host.cpu.usage) by: {dt.entity.host}';
       const startTime = new Date('2024-01-01T00:00:00Z');
       const endTime = new Date('2024-01-01T01:00:00Z');
 
-      const mockResponse = {
-        statusCode: 200,
-        body: {
-          json: vi.fn().mockResolvedValue({
-            state: 'SUCCEEDED',
-            result: { records: [] }
-          }),
-          text: vi.fn().mockResolvedValue(JSON.stringify({
-            state: 'SUCCEEDED',
-            result: { records: [] }
-          }))
-        }
-      };
-      mockRequest.mockResolvedValue(mockResponse as any);
+      mockPost.mockResolvedValue(ok({ state: 'SUCCEEDED', result: { records: [] } }));
 
-      // Act
       await client.executeQuery(query, startTime, endTime);
 
-      // Assert
-      expect(mockRequest).toHaveBeenCalledWith(
+      // axios.post(url, payload, config) — payload is the 2nd argument (an object).
+      expect(mockPost).toHaveBeenCalledWith(
         expect.any(String),
-        expect.objectContaining({
-          body: expect.stringContaining('"defaultTimeframeStart":"2024-01-01T00:00:00.000Z"'),
-        })
+        expect.objectContaining({ defaultTimeframeStart: '2024-01-01T00:00:00.000Z' }),
+        expect.any(Object)
       );
     });
 
     it('should retry on network errors with exponential backoff', async () => {
-      // Arrange
       client = new DynatraceAPIClient({
         host: 'live.dynatrace.com',
         apiToken: 'test-api-token',
@@ -463,38 +236,20 @@ describe('DynatraceAPIClient', () => {
         dynatraceType: 'saas',
         maxRetries: 3,
       });
-
       const query = 'timeseries avg(dt.host.cpu.usage)';
 
-      const mockResponse = {
-        statusCode: 200,
-        body: {
-          json: vi.fn().mockResolvedValue({
-            state: 'SUCCEEDED',
-            result: { records: [] }
-          }),
-          text: vi.fn().mockResolvedValue(JSON.stringify({
-            state: 'SUCCEEDED',
-            result: { records: [] }
-          }))
-        }
-      };
-
-      mockRequest
+      mockPost
         .mockRejectedValueOnce(new Error('Network error'))
         .mockRejectedValueOnce(new Error('Network error'))
-        .mockResolvedValueOnce(mockResponse as any); // Success on third attempt
+        .mockResolvedValueOnce(ok({ state: 'SUCCEEDED', result: { records: [] } }));
 
-      // Act
       const result = await client.executeQuery(query);
 
-      // Assert
       expect(result).toEqual({ records: [] });
-      expect(mockRequest).toHaveBeenCalledTimes(3);
+      expect(mockPost).toHaveBeenCalledTimes(3);
     });
 
     it('should fail after maximum retries', async () => {
-      // Arrange
       client = new DynatraceAPIClient({
         host: 'live.dynatrace.com',
         apiToken: 'test-api-token',
@@ -502,14 +257,12 @@ describe('DynatraceAPIClient', () => {
         dynatraceType: 'saas',
         maxRetries: 2,
       });
-
       const query = 'timeseries avg(dt.host.cpu.usage)';
 
-      mockRequest.mockRejectedValue(new Error('Persistent network error'));
+      mockPost.mockRejectedValue(new Error('Persistent network error'));
 
-      // Act & Assert
       await expect(client.executeQuery(query)).rejects.toThrow('Persistent network error');
-      expect(mockRequest).toHaveBeenCalledTimes(2);
+      expect(mockPost).toHaveBeenCalledTimes(2);
     });
   });
 
@@ -524,110 +277,41 @@ describe('DynatraceAPIClient', () => {
     });
 
     it('should execute Metrics API v2 query successfully', async () => {
-      // Arrange
       const metricSelector = 'builtin:host.cpu.system:filter(eq("dt.entity.host",HOST-123)):avg';
       const startTime = new Date('2024-01-01T00:00:00Z');
       const endTime = new Date('2024-01-01T01:00:00Z');
 
-      const mockResponse = {
-        statusCode: 200,
-        body: {
-          json: vi.fn().mockResolvedValue({
-            result: [
-              {
-                metricId: 'builtin:host.cpu.system',
-                data: [
-                  {
-                    dimensionMap: { 'dt.entity.host': 'HOST-123' },
-                    timestamps: [1704067200000, 1704067260000], // 1-minute intervals
-                    values: [25.5, 30.2]
-                  }
-                ]
-              }
-            ]
-          }),
-          text: vi.fn().mockResolvedValue(JSON.stringify({
-            result: [
-              {
-                metricId: 'builtin:host.cpu.system',
-                data: [
-                  {
-                    dimensionMap: { 'dt.entity.host': 'HOST-123' },
-                    timestamps: [1704067200000, 1704067260000], // 1-minute intervals
-                    values: [25.5, 30.2]
-                  }
-                ]
-              }
-            ]
-          }))
-        }
-      };
-      mockRequest.mockResolvedValue(mockResponse as any);
+      mockGet.mockResolvedValue(ok({
+        result: [{
+          metricId: 'builtin:host.cpu.system',
+          data: [{ dimensionMap: { 'dt.entity.host': 'HOST-123' }, timestamps: [1704067200000, 1704067260000], values: [25.5, 30.2] }],
+        }],
+      }));
 
-      // Act
-      const result = await client.executeQuery(metricSelector, startTime, endTime);
+      const result = await client.executeQuery(metricSelector, startTime, endTime) as { records: Array<Record<string, unknown>> };
 
-      // Assert
       expect(result.records).toBeDefined();
       expect(result.records).toHaveLength(2);
-      expect(result.records[0]).toMatchObject({
-        'dt.entity.host': 'HOST-123',
-        value: 25.5,
-      });
-      expect(mockRequest).toHaveBeenCalledWith(
+      expect(result.records[0]).toMatchObject({ 'dt.entity.host': 'HOST-123', value: 25.5 });
+      expect(mockGet).toHaveBeenCalledWith(
         expect.stringContaining('/api/v2/metrics/query'),
         expect.objectContaining({
-          method: 'GET',
-          headers: expect.objectContaining({
-            'Authorization': 'Api-Token test-api-token',
-          }),
+          headers: expect.objectContaining({ 'Authorization': 'Api-Token test-api-token' }),
         })
       );
     });
 
     it('should transform Metrics API v2 response to DQL-like format', async () => {
-      // Arrange
       const metricSelector = 'builtin:host.cpu.system:avg';
+      mockGet.mockResolvedValue(ok({
+        result: [{
+          metricId: 'builtin:host.cpu.system',
+          data: [{ dimensionMap: { 'dt.entity.host': 'HOST-456' }, timestamps: [1704067200000], values: [42.7] }],
+        }],
+      }));
 
-      const mockResponse = {
-        statusCode: 200,
-        body: {
-          json: vi.fn().mockResolvedValue({
-            result: [
-              {
-                metricId: 'builtin:host.cpu.system',
-                data: [
-                  {
-                    dimensionMap: { 'dt.entity.host': 'HOST-456' },
-                    timestamps: [1704067200000],
-                    values: [42.7]
-                  }
-                ]
-              }
-            ]
-          }),
-          text: vi.fn().mockResolvedValue(JSON.stringify({
-            result: [
-              {
-                metricId: 'builtin:host.cpu.system',
-                data: [
-                  {
-                    dimensionMap: { 'dt.entity.host': 'HOST-456' },
-                    timestamps: [1704067200000],
-                    values: [42.7]
-                  }
-                ]
-              }
-            ]
-          }))
-        }
-      };
-      mockRequest.mockResolvedValue(mockResponse as any);
+      const result = await client.executeQuery(metricSelector) as { records: Array<Record<string, unknown>> };
 
-      // Act
-      const result = await client.executeQuery(metricSelector);
-
-      // Assert
       expect(result).toHaveProperty('records');
       expect(result.records[0]).toHaveProperty('timestamp');
       expect(result.records[0]).toHaveProperty('value');
@@ -636,78 +320,20 @@ describe('DynatraceAPIClient', () => {
     });
 
     it('should handle empty Metrics API v2 response', async () => {
-      // Arrange
-      const metricSelector = 'builtin:host.cpu.system:avg';
-
-      const mockResponse = {
-        statusCode: 200,
-        body: {
-          json: vi.fn().mockResolvedValue({
-            result: []
-          }),
-          text: vi.fn().mockResolvedValue(JSON.stringify({
-            result: []
-          }))
-        }
-      };
-      mockRequest.mockResolvedValue(mockResponse as any);
-
-      // Act
-      const result = await client.executeQuery(metricSelector);
-
-      // Assert
+      mockGet.mockResolvedValue(ok({ result: [] }));
+      const result = await client.executeQuery('builtin:host.cpu.system:avg');
       expect(result).toEqual({ records: [] });
     });
 
     it('should handle Metrics API v2 error response', async () => {
-      // Arrange
-      const metricSelector = 'invalid:metric:selector';
-
-      const mockResponse = {
-        statusCode: 400,
-        body: {
-          json: vi.fn().mockResolvedValue({
-            error: {
-              code: 400,
-              message: 'Invalid metric selector'
-            }
-          }),
-          text: vi.fn().mockResolvedValue(JSON.stringify({
-            error: {
-              code: 400,
-              message: 'Invalid metric selector'
-            }
-          }))
-        }
-      };
-      mockRequest.mockResolvedValue(mockResponse as any);
-
-      // Act & Assert
-      await expect(client.executeQuery(metricSelector)).rejects.toThrow(/failed with status 400/);
+      mockGet.mockResolvedValue(resp(400, { error: { code: 400, message: 'Invalid metric selector' } }));
+      await expect(client.executeQuery('invalid:metric:selector')).rejects.toThrow(/failed with status 400/);
     });
 
     it('should use default timeframe when not provided', async () => {
-      // Arrange
-      const metricSelector = 'builtin:host.cpu.system:avg';
-
-      const mockResponse = {
-        statusCode: 200,
-        body: {
-          json: vi.fn().mockResolvedValue({
-            result: []
-          }),
-          text: vi.fn().mockResolvedValue(JSON.stringify({
-            result: []
-          }))
-        }
-      };
-      mockRequest.mockResolvedValue(mockResponse as any);
-
-      // Act
-      await client.executeQuery(metricSelector);
-
-      // Assert
-      expect(mockRequest).toHaveBeenCalledWith(
+      mockGet.mockResolvedValue(ok({ result: [] }));
+      await client.executeQuery('builtin:host.cpu.system:avg');
+      expect(mockGet).toHaveBeenCalledWith(
         expect.stringMatching(/from=\d+&to=\d+/),
         expect.any(Object)
       );
@@ -726,130 +352,56 @@ describe('DynatraceAPIClient', () => {
     });
 
     it('should execute multiple queries in batch', async () => {
-      // Arrange
       const queries = [
         { tileId: 'tile-1', tileTitle: 'CPU Usage', query: 'timeseries avg(dt.host.cpu.usage)' },
         { tileId: 'tile-2', tileTitle: 'Memory Usage', query: 'timeseries avg(dt.host.memory.usage)' },
       ];
 
-      const mockResponse1 = {
-        statusCode: 200,
-        body: {
-          json: vi.fn().mockResolvedValue({
-            state: 'SUCCEEDED',
-            result: { records: [{ timestamp: '2024-01-01T00:00:00Z', value: 50 }] }
-          }),
-          text: vi.fn().mockResolvedValue(JSON.stringify({
-            state: 'SUCCEEDED',
-            result: { records: [{ timestamp: '2024-01-01T00:00:00Z', value: 50 }] }
-          }))
-        }
-      };
+      mockPost
+        .mockResolvedValueOnce(ok({ state: 'SUCCEEDED', result: { records: [{ timestamp: '2024-01-01T00:00:00Z', value: 50 }] } }))
+        .mockResolvedValueOnce(ok({ state: 'SUCCEEDED', result: { records: [{ timestamp: '2024-01-01T00:00:00Z', value: 75 }] } }));
 
-      const mockResponse2 = {
-        statusCode: 200,
-        body: {
-          json: vi.fn().mockResolvedValue({
-            state: 'SUCCEEDED',
-            result: { records: [{ timestamp: '2024-01-01T00:00:00Z', value: 75 }] }
-          }),
-          text: vi.fn().mockResolvedValue(JSON.stringify({
-            state: 'SUCCEEDED',
-            result: { records: [{ timestamp: '2024-01-01T00:00:00Z', value: 75 }] }
-          }))
-        }
-      };
-
-      mockRequest
-        .mockResolvedValueOnce(mockResponse1 as any)
-        .mockResolvedValueOnce(mockResponse2 as any);
-
-      // Act
       const results = await client.executeBatchQueries(queries);
 
-      // Assert
       expect(results).toHaveLength(2);
-      expect(results[0]).toMatchObject({
-        tileId: 'tile-1',
-        tileTitle: 'CPU Usage',
-        error: null,
-      });
-      expect(results[1]).toMatchObject({
-        tileId: 'tile-2',
-        tileTitle: 'Memory Usage',
-        error: null,
-      });
-      expect(mockRequest).toHaveBeenCalledTimes(2);
+      expect(results[0]).toMatchObject({ tileId: 'tile-1', tileTitle: 'CPU Usage', error: null });
+      expect(results[1]).toMatchObject({ tileId: 'tile-2', tileTitle: 'Memory Usage', error: null });
+      expect(mockPost).toHaveBeenCalledTimes(2);
     });
 
     it('should handle partial batch failures gracefully', async () => {
-      // Arrange
       const queries = [
         { tileId: 'tile-1', tileTitle: 'CPU Usage', query: 'timeseries avg(dt.host.cpu.usage)' },
         { tileId: 'tile-2', tileTitle: 'Invalid', query: 'invalid query' },
       ];
 
       let callCount = 0;
-      mockRequest.mockImplementation(async () => {
+      mockPost.mockImplementation(async () => {
         callCount++;
-        if (callCount === 1) {
-          return {
-            statusCode: 200,
-            body: {
-              json: vi.fn().mockResolvedValue({
-                state: 'SUCCEEDED',
-                result: { records: [] }
-              }),
-          text: vi.fn().mockResolvedValue(JSON.stringify({
-                state: 'SUCCEEDED',
-                result: { records: [] }
-              }))
-            }
-          } as any;
-        } else {
-          throw new Error('Query syntax error');
-        }
+        if (callCount === 1) return ok({ state: 'SUCCEEDED', result: { records: [] } });
+        throw new Error('Query syntax error');
       });
 
-      // Act
       const results = await client.executeBatchQueries(queries);
 
-      // Assert
       expect(results).toHaveLength(2);
       expect(results[0].error).toBeNull();
       expect(results[1].error).toContain('Query syntax error');
     });
 
     it('should respect maxConcurrent limit', async () => {
-      // Arrange
       const queries = Array.from({ length: 10 }, (_, i) => ({
         tileId: `tile-${i}`,
         tileTitle: `Query ${i}`,
         query: `query ${i}`,
       }));
 
-      const mockResponse = {
-        statusCode: 200,
-        body: {
-          json: vi.fn().mockResolvedValue({
-            state: 'SUCCEEDED',
-            result: { records: [] }
-          }),
-          text: vi.fn().mockResolvedValue(JSON.stringify({
-            state: 'SUCCEEDED',
-            result: { records: [] }
-          }))
-        }
-      };
-      mockRequest.mockResolvedValue(mockResponse as any);
+      mockPost.mockResolvedValue(ok({ state: 'SUCCEEDED', result: { records: [] } }));
 
-      // Act
       const results = await client.executeBatchQueries(queries);
 
-      // Assert
       expect(results).toHaveLength(10);
-      expect(mockRequest).toHaveBeenCalledTimes(10);
-      // All should succeed
+      expect(mockPost).toHaveBeenCalledTimes(10);
       expect(results.every(r => r.error === null)).toBe(true);
     });
   });
@@ -866,56 +418,37 @@ describe('DynatraceAPIClient', () => {
     });
 
     it('should limit concurrent requests based on maxConcurrent', async () => {
-      // Arrange
       let activeRequests = 0;
       let maxActiveRequests = 0;
 
-      const mockResponse = {
-        statusCode: 200,
-        body: {
-          json: vi.fn().mockImplementation(async () => {
-            activeRequests++;
-            maxActiveRequests = Math.max(maxActiveRequests, activeRequests);
-            await new Promise(resolve => setTimeout(resolve, 10));
-            activeRequests--;
-            return {
-              state: 'SUCCEEDED',
-              result: { records: [] }
-            };
-          })
-        }
-      };
-      mockRequest.mockResolvedValue(mockResponse as any);
+      mockPost.mockImplementation(async () => {
+        activeRequests++;
+        maxActiveRequests = Math.max(maxActiveRequests, activeRequests);
+        await new Promise(resolve => setTimeout(resolve, 10));
+        activeRequests--;
+        return ok({ state: 'SUCCEEDED', result: { records: [] } });
+      });
 
-      // Act
-      const promises = [
+      await Promise.all([
         client.executeQuery('query 1'),
         client.executeQuery('query 2'),
         client.executeQuery('query 3'),
-      ];
-      await Promise.all(promises);
+      ]);
 
-      // Assert
-      expect(maxActiveRequests).toBe(1); // Should never exceed maxConcurrent
-      expect(mockRequest).toHaveBeenCalledTimes(3);
+      expect(maxActiveRequests).toBe(1);
+      expect(mockPost).toHaveBeenCalledTimes(3);
     });
   });
 
   describe('Resource Cleanup', () => {
-    it('should close agent and destroy connections', async () => {
-      // Arrange
+    it('should close without error (no persistent agent to destroy)', async () => {
       client = new DynatraceAPIClient({
         host: 'live.dynatrace.com',
         apiToken: 'test-api-token',
         platformToken: 'test-platform-token',
         dynatraceType: 'saas',
       });
-
-      // Act
-      await client.close();
-
-      // Assert - verify destroy was called (via mock)
-      expect(client).toBeDefined();
+      await expect(client.close()).resolves.toBeUndefined();
     });
   });
 
@@ -926,142 +459,46 @@ describe('DynatraceAPIClient', () => {
           host: 'live.dynatrace.com',
           apiToken: 'test-api-token',
           platformToken: 'test-platform-token',
-          dynatraceType: 'saas', // Even on SaaS, metric selectors should use Metrics API
+          dynatraceType: 'saas',
         });
       });
 
+      const expectMetricsGet = () =>
+        expect(mockGet).toHaveBeenCalledWith(expect.stringContaining('/api/v2/metrics/query'), expect.any(Object));
+
       it('should route builtin: metric selectors to Metrics API v2', async () => {
-        // Arrange
-        const metricSelector = 'builtin:host.cpu.usage:filter(eq("dt.entity.host","HOST-123")):avg';
-
-        const mockResponse = {
-          statusCode: 200,
-          body: {
-            json: vi.fn().mockResolvedValue({
-              result: [{
-                metricId: 'builtin:host.cpu.usage',
-                data: [{ dimensionMap: {}, timestamps: [1704067200000], values: [50.5] }]
-              }]
-            }),
-          text: vi.fn().mockResolvedValue(JSON.stringify({
-              result: [{
-                metricId: 'builtin:host.cpu.usage',
-                data: [{ dimensionMap: {}, timestamps: [1704067200000], values: [50.5] }]
-              }]
-            }))
-          }
-        };
-        mockRequest.mockResolvedValue(mockResponse as any);
-
-        // Act
-        await client.executeQuery(metricSelector);
-
-        // Assert - should call Metrics API v2, not DQL endpoint
-        expect(mockRequest).toHaveBeenCalledWith(
+        mockGet.mockResolvedValue(ok({
+          result: [{ metricId: 'builtin:host.cpu.usage', data: [{ dimensionMap: {}, timestamps: [1704067200000], values: [50.5] }] }],
+        }));
+        await client.executeQuery('builtin:host.cpu.usage:filter(eq("dt.entity.host","HOST-123")):avg');
+        expect(mockGet).toHaveBeenCalledWith(
           expect.stringContaining('/api/v2/metrics/query'),
-          expect.objectContaining({
-            method: 'GET',
-            headers: expect.objectContaining({
-              'Authorization': 'Api-Token test-api-token',
-            }),
-          })
+          expect.objectContaining({ headers: expect.objectContaining({ 'Authorization': 'Api-Token test-api-token' }) })
         );
       });
 
       it('should route ext: metric selectors to Metrics API v2', async () => {
-        // Arrange
-        const metricSelector = 'ext:custom.metric:filter(eq("dt.entity.service","SVC-123")):sum';
-
-        const mockResponse = {
-          statusCode: 200,
-          body: {
-            json: vi.fn().mockResolvedValue({
-              result: []
-            }),
-          text: vi.fn().mockResolvedValue(JSON.stringify({
-              result: []
-            }))
-          }
-        };
-        mockRequest.mockResolvedValue(mockResponse as any);
-
-        // Act
-        await client.executeQuery(metricSelector);
-
-        // Assert
-        expect(mockRequest).toHaveBeenCalledWith(
-          expect.stringContaining('/api/v2/metrics/query'),
-          expect.any(Object)
-        );
+        mockGet.mockResolvedValue(ok({ result: [] }));
+        await client.executeQuery('ext:custom.metric:filter(eq("dt.entity.service","SVC-123")):sum');
+        expectMetricsGet();
       });
 
       it('should route calc: metric selectors to Metrics API v2', async () => {
-        // Arrange
-        const metricSelector = 'calc:service.availability:avg';
-
-        const mockResponse = {
-          statusCode: 200,
-          body: {
-            json: vi.fn().mockResolvedValue({ result: [] }),
-          text: vi.fn().mockResolvedValue(JSON.stringify({ result: [] }))
-          }
-        };
-        mockRequest.mockResolvedValue(mockResponse as any);
-
-        // Act
-        await client.executeQuery(metricSelector);
-
-        // Assert
-        expect(mockRequest).toHaveBeenCalledWith(
-          expect.stringContaining('/api/v2/metrics/query'),
-          expect.any(Object)
-        );
+        mockGet.mockResolvedValue(ok({ result: [] }));
+        await client.executeQuery('calc:service.availability:avg');
+        expectMetricsGet();
       });
 
       it('should route queries with :splitBy transformation to Metrics API v2', async () => {
-        // Arrange
-        const metricSelector = 'builtin:host.mem.usage:splitBy("dt.entity.host"):avg';
-
-        const mockResponse = {
-          statusCode: 200,
-          body: {
-            json: vi.fn().mockResolvedValue({ result: [] }),
-          text: vi.fn().mockResolvedValue(JSON.stringify({ result: [] }))
-          }
-        };
-        mockRequest.mockResolvedValue(mockResponse as any);
-
-        // Act
-        await client.executeQuery(metricSelector);
-
-        // Assert
-        expect(mockRequest).toHaveBeenCalledWith(
-          expect.stringContaining('/api/v2/metrics/query'),
-          expect.any(Object)
-        );
+        mockGet.mockResolvedValue(ok({ result: [] }));
+        await client.executeQuery('builtin:host.mem.usage:splitBy("dt.entity.host"):avg');
+        expectMetricsGet();
       });
 
       it('should route queries ending with :avg aggregation to Metrics API v2', async () => {
-        // Arrange
-        const metricSelector = 'builtin:host.disk.utilTime:avg';
-
-        const mockResponse = {
-          statusCode: 200,
-          body: {
-            json: vi.fn().mockResolvedValue({ result: [] }),
-          text: vi.fn().mockResolvedValue(JSON.stringify({ result: [] }))
-          }
-        };
-        mockRequest.mockResolvedValue(mockResponse as any);
-
-        // Act
-        await client.executeQuery(metricSelector);
-
-        // Assert
-        expect(mockRequest).toHaveBeenCalledWith(
-          expect.stringContaining('/api/v2/metrics/query'),
-          expect.any(Object)
-        );
+        mockGet.mockResolvedValue(ok({ result: [] }));
+        await client.executeQuery('builtin:host.disk.utilTime:avg');
+        expectMetricsGet();
       });
     });
 
@@ -1073,193 +510,66 @@ describe('DynatraceAPIClient', () => {
           platformToken: 'test-platform-token',
           dynatraceType: 'saas',
         });
+        mockPost.mockResolvedValue(ok({ state: 'SUCCEEDED', result: { records: [] } }));
       });
 
-      it('should route fetch queries to DQL API', async () => {
-        // Arrange
-        const dqlQuery = 'fetch logs | filter status == "ERROR" | limit 100';
-
-        const mockResponse = {
-          statusCode: 200,
-          body: {
-            json: vi.fn().mockResolvedValue({
-              state: 'SUCCEEDED',
-              result: { records: [] }
-            }),
-          text: vi.fn().mockResolvedValue(JSON.stringify({
-              state: 'SUCCEEDED',
-              result: { records: [] }
-            }))
-          }
-        };
-        mockRequest.mockResolvedValue(mockResponse as any);
-
-        // Act
-        await client.executeQuery(dqlQuery);
-
-        // Assert - should call DQL endpoint
-        expect(mockRequest).toHaveBeenCalledWith(
+      const expectDqlPost = () =>
+        expect(mockPost).toHaveBeenCalledWith(
           expect.stringContaining('/platform/storage/query/v1/query:execute'),
-          expect.objectContaining({
-            method: 'POST',
-            headers: expect.objectContaining({
-              'Authorization': 'Bearer test-platform-token',
-            }),
-          })
+          expect.any(Object),
+          expect.any(Object)
+        );
+
+      it('should route fetch queries to DQL API', async () => {
+        await client.executeQuery('fetch logs | filter status == "ERROR" | limit 100');
+        expect(mockPost).toHaveBeenCalledWith(
+          expect.stringContaining('/platform/storage/query/v1/query:execute'),
+          expect.any(Object),
+          expect.objectContaining({ headers: expect.objectContaining({ 'Authorization': 'Bearer test-platform-token' }) })
         );
       });
 
       it('should route timeseries queries to DQL API', async () => {
-        // Arrange
-        const dqlQuery = 'timeseries avg(dt.host.cpu.usage), by:{dt.entity.host}';
-
-        const mockResponse = {
-          statusCode: 200,
-          body: {
-            json: vi.fn().mockResolvedValue({
-              state: 'SUCCEEDED',
-              result: { records: [] }
-            }),
-          text: vi.fn().mockResolvedValue(JSON.stringify({
-              state: 'SUCCEEDED',
-              result: { records: [] }
-            }))
-          }
-        };
-        mockRequest.mockResolvedValue(mockResponse as any);
-
-        // Act
-        await client.executeQuery(dqlQuery);
-
-        // Assert
-        expect(mockRequest).toHaveBeenCalledWith(
-          expect.stringContaining('/platform/storage/query/v1/query:execute'),
-          expect.any(Object)
-        );
+        await client.executeQuery('timeseries avg(dt.host.cpu.usage), by:{dt.entity.host}');
+        expectDqlPost();
       });
 
       it('should route SELECT queries to DQL API', async () => {
-        // Arrange
-        const dqlQuery = 'SELECT timestamp, value FROM dt.host.cpu.usage WHERE host = "HOST-123"';
-
-        const mockResponse = {
-          statusCode: 200,
-          body: {
-            json: vi.fn().mockResolvedValue({
-              state: 'SUCCEEDED',
-              result: { records: [] }
-            }),
-          text: vi.fn().mockResolvedValue(JSON.stringify({
-              state: 'SUCCEEDED',
-              result: { records: [] }
-            }))
-          }
-        };
-        mockRequest.mockResolvedValue(mockResponse as any);
-
-        // Act
-        await client.executeQuery(dqlQuery);
-
-        // Assert
-        expect(mockRequest).toHaveBeenCalledWith(
-          expect.stringContaining('/platform/storage/query/v1/query:execute'),
-          expect.any(Object)
-        );
+        await client.executeQuery('SELECT timestamp, value FROM dt.host.cpu.usage WHERE host = "HOST-123"');
+        expectDqlPost();
       });
 
       it('should route queries with | filter pipe syntax to DQL API', async () => {
-        // Arrange
-        const dqlQuery = 'data | filter host.name == "server-01" | summarize count()';
-
-        const mockResponse = {
-          statusCode: 200,
-          body: {
-            json: vi.fn().mockResolvedValue({
-              state: 'SUCCEEDED',
-              result: { records: [] }
-            }),
-          text: vi.fn().mockResolvedValue(JSON.stringify({
-              state: 'SUCCEEDED',
-              result: { records: [] }
-            }))
-          }
-        };
-        mockRequest.mockResolvedValue(mockResponse as any);
-
-        // Act
-        await client.executeQuery(dqlQuery);
-
-        // Assert
-        expect(mockRequest).toHaveBeenCalledWith(
-          expect.stringContaining('/platform/storage/query/v1/query:execute'),
-          expect.any(Object)
-        );
+        await client.executeQuery('data | filter host.name == "server-01" | summarize count()');
+        expectDqlPost();
       });
     });
 
     describe('Mixed Environment Routing', () => {
       it('should route metric selectors to Metrics API on managed instances', async () => {
-        // Arrange
         client = new DynatraceAPIClient({
           host: 'dynatrace.example.com',
           apiToken: 'test-api-token',
           platformToken: 'test-platform-token',
           dynatraceType: 'managed',
         });
-
-        const metricSelector = 'builtin:host.cpu.usage:avg';
-
-        const mockResponse = {
-          statusCode: 200,
-          body: {
-            json: vi.fn().mockResolvedValue({ result: [] }),
-          text: vi.fn().mockResolvedValue(JSON.stringify({ result: [] }))
-          }
-        };
-        mockRequest.mockResolvedValue(mockResponse as any);
-
-        // Act
-        await client.executeQuery(metricSelector);
-
-        // Assert
-        expect(mockRequest).toHaveBeenCalledWith(
-          expect.stringContaining('/api/v2/metrics/query'),
-          expect.any(Object)
-        );
+        mockGet.mockResolvedValue(ok({ result: [] }));
+        await client.executeQuery('builtin:host.cpu.usage:avg');
+        expect(mockGet).toHaveBeenCalledWith(expect.stringContaining('/api/v2/metrics/query'), expect.any(Object));
       });
 
       it('should route DQL queries to DQL API even on managed instances (if supported)', async () => {
-        // Arrange
         client = new DynatraceAPIClient({
           host: 'dynatrace.example.com',
           apiToken: 'test-api-token',
           platformToken: 'test-platform-token',
           dynatraceType: 'managed',
         });
-
-        const dqlQuery = 'fetch logs | filter level == "ERROR"';
-
-        const mockResponse = {
-          statusCode: 200,
-          body: {
-            json: vi.fn().mockResolvedValue({
-              state: 'SUCCEEDED',
-              result: { records: [] }
-            }),
-          text: vi.fn().mockResolvedValue(JSON.stringify({
-              state: 'SUCCEEDED',
-              result: { records: [] }
-            }))
-          }
-        };
-        mockRequest.mockResolvedValue(mockResponse as any);
-
-        // Act
-        await client.executeQuery(dqlQuery);
-
-        // Assert
-        expect(mockRequest).toHaveBeenCalledWith(
+        mockPost.mockResolvedValue(ok({ state: 'SUCCEEDED', result: { records: [] } }));
+        await client.executeQuery('fetch logs | filter level == "ERROR"');
+        expect(mockPost).toHaveBeenCalledWith(
           expect.stringContaining('/platform/storage/query/v1/query:execute'),
+          expect.any(Object),
           expect.any(Object)
         );
       });
@@ -1278,90 +588,34 @@ describe('DynatraceAPIClient', () => {
     });
 
     it('should handle unexpected status codes', async () => {
-      // Arrange
-      const query = 'timeseries avg(dt.host.cpu.usage)';
-
-      const mockResponse = {
-        statusCode: 500,
-        body: {
-          json: vi.fn().mockResolvedValue({
-            error: { message: 'Internal server error' }
-          }),
-          text: vi.fn().mockResolvedValue(JSON.stringify({
-            error: { message: 'Internal server error' }
-          }))
-        }
-      };
-      mockRequest.mockResolvedValue(mockResponse as any);
-
-      // Act & Assert
-      await expect(client.executeQuery(query)).rejects.toThrow(/Unexpected status code 500/);
+      mockPost.mockResolvedValue(resp(500, { error: { message: 'Internal server error' } }));
+      await expect(client.executeQuery('timeseries avg(dt.host.cpu.usage)')).rejects.toThrow(/Unexpected status code 500/);
     });
 
     it('should handle malformed response data', async () => {
-      // Arrange
-      const query = 'timeseries avg(dt.host.cpu.usage)';
-
-      const mockResponse = {
-        statusCode: 200,
-        body: {
-          json: vi.fn().mockResolvedValue(null),
-          text: vi.fn().mockResolvedValue(JSON.stringify(null)) // Malformed response
-        }
-      };
-      mockRequest.mockResolvedValue(mockResponse as any);
-
-      // Act & Assert
-      await expect(client.executeQuery(query)).rejects.toThrow();
+      mockPost.mockResolvedValue(resp(200, null)); // null body → data.state throws
+      await expect(client.executeQuery('timeseries avg(dt.host.cpu.usage)')).rejects.toThrow();
     });
 
-    it('should handle poll request abort errors', async () => {
-      // Arrange
+    it('should retry poll request timeout/abort errors', async () => {
       const query = 'timeseries avg(dt.host.cpu.usage)';
       const requestToken = 'test-token';
 
-      const mockStartResponse = {
-        statusCode: 202,
-        body: {
-          json: vi.fn().mockResolvedValue({
-            state: 'RUNNING',
-            requestToken
-          }),
-          text: vi.fn().mockResolvedValue(JSON.stringify({
-            state: 'RUNNING',
-            requestToken
-          }))
-        }
-      };
+      mockPost.mockResolvedValueOnce(resp(202, { state: 'RUNNING', requestToken }));
 
-      const abortError = new Error('Request aborted');
-      (abortError as any).code = 'UND_ERR_ABORTED';
+      const abortError = new Error('Request aborted') as Error & { code?: string; isAxiosError?: boolean };
+      abortError.code = 'ECONNABORTED';
+      abortError.isAxiosError = true;
 
-      const mockPollResponseSuccess = {
-        statusCode: 200,
-        body: {
-          json: vi.fn().mockResolvedValue({
-            state: 'SUCCEEDED',
-            result: { records: [] }
-          }),
-          text: vi.fn().mockResolvedValue(JSON.stringify({
-            state: 'SUCCEEDED',
-            result: { records: [] }
-          }))
-        }
-      };
+      mockGet
+        .mockRejectedValueOnce(abortError) // first poll times out → retry
+        .mockResolvedValueOnce(ok({ state: 'SUCCEEDED', result: { records: [] } }));
 
-      mockRequest
-        .mockResolvedValueOnce(mockStartResponse as any)
-        .mockRejectedValueOnce(abortError) // Abort error on first poll
-        .mockResolvedValueOnce(mockPollResponseSuccess as any); // Success on retry
-
-      // Act
       const result = await client.executeQuery(query);
 
-      // Assert
       expect(result).toEqual({ records: [] });
-      expect(mockRequest).toHaveBeenCalledTimes(3);
+      expect(mockPost).toHaveBeenCalledTimes(1);
+      expect(mockGet).toHaveBeenCalledTimes(2);
     });
   });
 });
