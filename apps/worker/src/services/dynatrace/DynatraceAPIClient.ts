@@ -707,8 +707,8 @@ export class DynatraceAPIClient {
       logger.info(`  🌐 URL: ${this.baseUrl}/api/v2/metrics/query`);
 
       const metricsUrl = `${this.baseUrl}/api/v2/metrics/query?${queryParams.toString()}`;
-      const tokenTail = (this.config.apiToken || '').slice(-4);
-      logger.info(`[dt-diag] Metrics v2 GET ${this.baseUrl}/api/v2/metrics/query  Api-Token=…${tokenTail} (len=${(this.config.apiToken || '').length})`);
+      // Log token length only (not any token bytes) so two instances are distinguishable without leaking credential material into logs.
+      logger.info(`[dt-diag] Metrics v2 GET ${this.baseUrl}/api/v2/metrics/query  Api-Token present=${Boolean(this.config.apiToken)} (len=${(this.config.apiToken || '').length})`);
 
       const response = await request(metricsUrl, {
         method: 'GET',
