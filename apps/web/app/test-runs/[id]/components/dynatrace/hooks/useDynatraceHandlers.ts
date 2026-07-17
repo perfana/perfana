@@ -31,12 +31,17 @@ export function useDynatraceHandlers({
 
     // Target the instance this entity was mapped from, not always the first one.
     const config = configs.find(c => c.id === entity.dynatraceConfigId) ?? configs[0];
+    // Managed /ui/services/* routes reject the classic-hash filter encoding.
+    const isManagedUiRoute =
+      config.dynatraceType !== 'saas' &&
+      (linkType === 'pure-paths' || linkType === 'top-web-requests');
     const serviceFilterParam = buildServiceFilterParam(
       config,
       testRun.test_run_id,
       selectedMetric,
       minDuration,
-      maxDuration
+      maxDuration,
+      isManagedUiRoute ? 'ui' : 'classic'
     );
 
     const url = buildDeepLinkUrl(
@@ -58,12 +63,14 @@ export function useDynatraceHandlers({
 
     // Target the instance this entity was mapped from, not always the first one.
     const config = configs.find(c => c.id === entity.dynatraceConfigId) ?? configs[0];
+    // Managed MDA is served from /ui/services/*/mda, which needs the ui encoding.
     const serviceFilterParam = buildServiceFilterParam(
       config,
       testRun.test_run_id,
       selectedMetric,
       minDuration,
-      maxDuration
+      maxDuration,
+      config.dynatraceType !== 'saas' ? 'ui' : 'classic'
     );
 
     const url = buildMDAUrl(

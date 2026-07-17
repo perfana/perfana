@@ -35,10 +35,31 @@ export function buildServiceFilterParam(
   testRunId: string,
   selectedMetric: string | null,
   minDuration: string,
-  maxDuration: string
+  maxDuration: string,
+  format: 'classic' | 'ui' = 'classic'
 ): string {
   if (!config.perfanaTestRunIdAttribute) {
     return '';
+  }
+
+  if (format === 'ui') {
+    // Managed /ui/services/* routes (mda, purepaths) use the newer filter
+    // encoding: bare 15%11<attr>%14<value> blocks joined by %10, values plain
+    // URI-encoded (no %5C0 slash escaping, no trailing empty %14 fields),
+    // request-name filter before test-run id.
+    const blocks: string[] = [];
+    if (selectedMetric && selectedMetric !== 'all' && config.perfanaRequestNameAttribute) {
+      blocks.push(`15%11${config.perfanaRequestNameAttribute}%14${encodeURIComponent(selectedMetric)}`);
+    }
+    blocks.push(`15%11${config.perfanaTestRunIdAttribute}%14${encodeURIComponent(testRunId)}`);
+    if (minDuration && maxDuration) {
+      blocks.push(`0%11${minDuration}000%14${maxDuration}000`);
+    } else if (minDuration) {
+      blocks.push(`0%11${minDuration}000%144611686018427387`);
+    } else if (maxDuration) {
+      blocks.push(`0%110%14${maxDuration}000`);
+    }
+    return `0%1E${blocks.join('%10')}`;
   }
 
   const urlEncodedTestRunId = testRunId.replace(/\//g, '%5C0');
