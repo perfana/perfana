@@ -73,6 +73,22 @@ describe('buildServiceFilterParam ui format (managed /ui/services/* routes)', ()
     );
   });
 
+  it("omits the request-name block for the 'all' metric and for configs without the attribute", () => {
+    const testRunOnly = '0%1E15%114633f5c1-3735-4f19-bd45-d44e5b89e54e%14run-1';
+    expect(buildServiceFilterParam(managedConfig, 'run-1', 'all', '', '', 'ui')).toBe(testRunOnly);
+    const noRequestAttr = { ...managedConfig, perfanaRequestNameAttribute: undefined } as DynatraceConfig;
+    expect(buildServiceFilterParam(noRequestAttr, 'run-1', 'a|b|c', '', '', 'ui')).toBe(testRunOnly);
+  });
+
+  it('min-only and max-only durations produce open-ended range blocks', () => {
+    expect(buildServiceFilterParam(managedConfig, 'run-1', null, '1', '', 'ui')).toBe(
+      '0%1E15%114633f5c1-3735-4f19-bd45-d44e5b89e54e%14run-1%100%111000%144611686018427387'
+    );
+    expect(buildServiceFilterParam(managedConfig, 'run-1', null, '', '2', 'ui')).toBe(
+      '0%1E15%114633f5c1-3735-4f19-bd45-d44e5b89e54e%14run-1%100%110%142000'
+    );
+  });
+
   it('classic format is unchanged (SaaS + classic-hash routes)', () => {
     const param = buildServiceFilterParam(managedConfig, 'run/1', null, '', '');
     expect(param).toBe(

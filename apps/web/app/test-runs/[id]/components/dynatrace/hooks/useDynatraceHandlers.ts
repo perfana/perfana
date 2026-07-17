@@ -8,6 +8,7 @@ import {
   buildDeepLinkUrl,
   buildMDAUrl,
   buildComparisonUrl,
+  MANAGED_UI_FILTER_LINK_TYPES,
 } from '../utils/dynatrace-formatters';
 
 interface UseDynatraceHandlersProps {
@@ -33,8 +34,7 @@ export function useDynatraceHandlers({
     const config = configs.find(c => c.id === entity.dynatraceConfigId) ?? configs[0];
     // Managed /ui/services/* routes reject the classic-hash filter encoding.
     const isManagedUiRoute =
-      config.dynatraceType !== 'saas' &&
-      (linkType === 'pure-paths' || linkType === 'top-web-requests');
+      config.dynatraceType !== 'saas' && MANAGED_UI_FILTER_LINK_TYPES.has(linkType);
     const serviceFilterParam = buildServiceFilterParam(
       config,
       testRun.test_run_id,
@@ -53,7 +53,7 @@ export function useDynatraceHandlers({
     );
 
     if (url) {
-      window.open(url, '_blank');
+      window.open(url, '_blank', 'noopener,noreferrer');
     }
   }, [configs, testRun, selectedMetric, minDuration, maxDuration]);
 
@@ -82,7 +82,7 @@ export function useDynatraceHandlers({
     );
 
     if (url) {
-      window.open(url, '_blank');
+      window.open(url, '_blank', 'noopener,noreferrer');
     }
   }, [configs, testRun, selectedMetric, minDuration, maxDuration]);
 
@@ -106,7 +106,7 @@ export function useDynatraceHandlers({
     );
 
     if (url) {
-      window.open(url, '_blank');
+      window.open(url, '_blank', 'noopener,noreferrer');
     }
   }, [configs, testRun, selectedMetric, minDuration, maxDuration]);
 

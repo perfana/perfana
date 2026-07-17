@@ -27,6 +27,20 @@ export function createPlatformUrl(baseUrl: string): string {
   return `https://${hostname}.apps.dynatrace.com`;
 }
 
+// Dynatrace's sentinel for an open-ended max duration (microseconds).
+const DT_MAX_DURATION = '4611686018427387';
+
+// Managed /ui/services/* deep links that need the 'ui' servicefilter encoding.
+// Keep in sync with the managed branches in buildDeepLinkUrl.
+export const MANAGED_UI_FILTER_LINK_TYPES = new Set(['pure-paths', 'top-web-requests']);
+
+function buildDurationBlock(minDuration: string, maxDuration: string): string | null {
+  if (minDuration && maxDuration) return `0%11${minDuration}000%14${maxDuration}000`;
+  if (minDuration) return `0%11${minDuration}000%14${DT_MAX_DURATION}`;
+  if (maxDuration) return `0%110%14${maxDuration}000`;
+  return null;
+}
+
 /**
  * Build service filter parameter for Dynatrace URLs
  */
@@ -52,13 +66,8 @@ export function buildServiceFilterParam(
       blocks.push(`15%11${config.perfanaRequestNameAttribute}%14${encodeURIComponent(selectedMetric)}`);
     }
     blocks.push(`15%11${config.perfanaTestRunIdAttribute}%14${encodeURIComponent(testRunId)}`);
-    if (minDuration && maxDuration) {
-      blocks.push(`0%11${minDuration}000%14${maxDuration}000`);
-    } else if (minDuration) {
-      blocks.push(`0%11${minDuration}000%144611686018427387`);
-    } else if (maxDuration) {
-      blocks.push(`0%110%14${maxDuration}000`);
-    }
+    const durationBlock = buildDurationBlock(minDuration, maxDuration);
+    if (durationBlock) blocks.push(durationBlock);
     return `0%1E${blocks.join('%10')}`;
   }
 
@@ -72,13 +81,8 @@ export function buildServiceFilterParam(
   }
 
   // Add duration filter
-  if (minDuration && maxDuration) {
-    serviceFilterParam += `%100%11${minDuration}000%14${maxDuration}000`;
-  } else if (minDuration) {
-    serviceFilterParam += `%100%11${minDuration}000%144611686018427387`;
-  } else if (maxDuration) {
-    serviceFilterParam += `%100%110%14${maxDuration}000`;
-  }
+  const durationBlock = buildDurationBlock(minDuration, maxDuration);
+  if (durationBlock) serviceFilterParam += `%10${durationBlock}`;
 
   return serviceFilterParam;
 }
@@ -150,10 +154,11 @@ export function buildMDAUrl(
 
   // Managed clusters: scope MDA to the service via the /ui/services/<id>/mda
   // path (like Top Web Requests) — /ui/diagnostictools/mda has no service
-  // context. Request-attribute filtering rides in servicefilter (same encoding
-  // as the classic #hash links); the dimension must NOT reference the attribute
-  // — config stores the attribute UUID, and {RequestAttribute:...} only accepts
-  // the attribute name.
+  // context. Request-attribute filtering rides in servicefilter using the 'ui'
+  // encoding (bare blocks, no trailing empty fields — callers pass format
+  // 'ui' to buildServiceFilterParam); the dimension must NOT reference the
+  // attribute — config stores the attribute UUID, and {RequestAttribute:...}
+  // only accepts the attribute name.
   return isSaaS
     ? `${platformBaseUrl}/ui/apps/dynatrace.classic.mda/ui/services/${entityId}/mda?metric=${metric}&mergeServices=false&aggregation=P95&percentile=95&chart=LINE${serviceFilterParam ? `&servicefilter=${serviceFilterParam}` : ''}&gf=all&${timeFilter}`
     : `${baseUrl}/ui/services/${entityId}/mda?gf=all&${timeFilter}&metric=${metric}&dimension=%7BRequest:Name%7D&mergeServices=false&aggregation=AVERAGE&percentile=80&chart=LINE${serviceFilterParam ? `&servicefilter=${serviceFilterParam}` : ''}`;
@@ -188,13 +193,8 @@ export function buildComparisonUrl(
     serviceFilterParam = `0%1E15%11${config.perfanaRequestNameAttribute}%14${encodedRequestName}%140%14%14%14%14`;
   }
 
-  if (minDuration && maxDuration) {
-    serviceFilterParam += `%100%11${minDuration}000%14${maxDuration}000`;
-  } else if (minDuration) {
-    serviceFilterParam += `%100%11${minDuration}000%144611686018427387`;
-  } else if (maxDuration) {
-    serviceFilterParam += `%100%110%14${maxDuration}000`;
-  }
+  const durationBlock = buildDurationBlock(minDuration, maxDuration);
+  if (durationBlock) serviceFilterParam += `%10${durationBlock}`;
 
   return [
     `${baseUrl}/#serviceComparison`,
