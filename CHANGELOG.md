@@ -4,6 +4,17 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
+## [0.2.61.89] - 2026-07-17
+
+### Fixed
+- **Managed Dynatrace Top Web Requests, Distributed Tracing, and Multidimensional Analysis deep links now filter correctly.** The managed `/ui/services/<SERVICE>/…` routes reject the classic-hash `servicefilter` encoding those links carried (Dynatrace `\0` slash-escaping via `%5C0` plus trailing empty `%14` fields), so the request-attribute filters were dropped and the views opened unfiltered. Managed links on those routes now emit the newer encoding captured from a working managed cluster URL: bare `15%11<attribute>%14<value>` blocks joined by `%10`, values plainly URI-encoded (slashes stay `%2F`), request-name filter before test-run id. SaaS links and the classic `#hash` routes (Response Time Hotspots, Outliers, Method Hotspots, Exception Analysis, Service Flow, comparison) keep the previous encoding. Deep links also open with `noopener,noreferrer` now, so the target page cannot reach back into the Perfana tab.
+- Regression tests pin the format selection per route and deployment type (managed ui routes vs managed classic-hash vs SaaS), the exact managed filter string, and the duration-block variants; the duration-block construction and the open-ended max-duration sentinel are deduplicated into shared helpers.
+
+## [0.2.61.88] - 2026-07-17
+
+### Fixed
+- **Managed Multidimensional Analysis deep links are now service-scoped.** The managed MDA link targeted `${host}/ui/diagnostictools/mda`, which has no service context — the entity the user clicked was not reflected in the view (only the request-attribute `servicefilter` narrowed it). It now targets `${host}/ui/services/<SERVICE>/mda?…`, the same service-scoped route Top Web Requests uses; query params (metric, `dimension={Request:Name}`, `servicefilter`, time filter) are unchanged from v0.2.61.87. SaaS branch unchanged.
+
 ## [0.2.61.87] - 2026-07-17
 
 ### Fixed

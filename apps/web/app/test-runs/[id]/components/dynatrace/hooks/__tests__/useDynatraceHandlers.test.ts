@@ -59,3 +59,62 @@ describe('useDynatraceHandlers instance selection', () => {
     expect(String(openSpy.mock.calls[0]?.[0] ?? '')).toContain('second.dynatrace.example');
   });
 });
+
+describe('useDynatraceHandlers servicefilter format selection', () => {
+  const attrConfigs = (dynatraceType: 'managed' | 'saas'): DynatraceConfig[] => [{
+    id: 'cfg-1', host: 'https://dt.example.com/e/env-1', apiToken: 't', dynatraceType,
+    label: 'dt', perfanaTestRunIdAttribute: 'attr-uuid', createdAt: '', updatedAt: '',
+  } as DynatraceConfig];
+  const entity: DynatraceEntity = { entityId: 'SERVICE-1', displayName: 'svc', type: 'SERVICE', dynatraceConfigId: 'cfg-1' };
+  const CLASSIC_BLOCK = '15%11attr-uuid%14run-1%140%14%14%14%14';
+  const UI_BLOCK = '0%1E15%11attr-uuid%14run-1&';
+
+  let openSpy: jest.SpyInstance;
+  beforeEach(() => {
+    openSpy = jest.spyOn(window, 'open').mockImplementation(() => null);
+  });
+  afterEach(() => openSpy.mockRestore());
+
+  const openedUrl = () => String(openSpy.mock.calls[0][0]);
+
+  function renderWith(dynatraceType: 'managed' | 'saas') {
+    return renderHook(() =>
+      useDynatraceHandlers({
+        testRun, configs: attrConfigs(dynatraceType), selectedMetric: null, minDuration: '', maxDuration: '',
+      })
+    ).result.current;
+  }
+
+  it('managed top-web-requests uses the ui format (no trailing empty fields)', () => {
+    renderWith('managed').handleDeepLinkClick(entity, 'top-web-requests');
+    expect(openedUrl()).toContain(`servicefilter=${UI_BLOCK}`);
+    expect(openedUrl()).not.toContain(CLASSIC_BLOCK);
+  });
+
+  it('managed pure-paths uses the ui format', () => {
+    renderWith('managed').handleDeepLinkClick(entity, 'pure-paths');
+    expect(openedUrl()).toContain(`servicefilter=${UI_BLOCK}`);
+  });
+
+  it('managed MDA uses the ui format', () => {
+    renderWith('managed').handleMultiDimensionalAnalysis(entity, 'response-times');
+    expect(openedUrl()).toContain('servicefilter=0%1E15%11attr-uuid%14run-1');
+    expect(openedUrl()).not.toContain(CLASSIC_BLOCK);
+  });
+
+  it('managed classic-hash links keep the classic format', () => {
+    renderWith('managed').handleDeepLinkClick(entity, 'response-time-hotspots');
+    expect(openedUrl()).toContain(CLASSIC_BLOCK);
+  });
+
+  it('saas top-web-requests keeps the classic format', () => {
+    renderWith('saas').handleDeepLinkClick(entity, 'top-web-requests');
+    expect(openedUrl()).toContain(CLASSIC_BLOCK);
+  });
+
+  it('saas MDA keeps the classic format', () => {
+    renderWith('saas').handleMultiDimensionalAnalysis(entity, 'response-times');
+    expect(openedUrl()).toContain(CLASSIC_BLOCK);
+    expect(openedUrl()).not.toContain(UI_BLOCK);
+  });
+});
