@@ -4,6 +4,11 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
+## [0.2.61.88] - 2026-07-17
+
+### Fixed
+- **Managed Multidimensional Analysis deep links are now service-scoped.** The managed MDA link targeted `${host}/ui/diagnostictools/mda`, which has no service context — the entity the user clicked was not reflected in the view (only the request-attribute `servicefilter` narrowed it). It now targets `${host}/ui/services/<SERVICE>/mda?…`, the same service-scoped route Top Web Requests uses; query params (metric, `dimension={Request:Name}`, `servicefilter`, time filter) are unchanged from v0.2.61.87. SaaS branch unchanged.
+
 ## [0.2.61.87] - 2026-07-17
 
 ### Fixed

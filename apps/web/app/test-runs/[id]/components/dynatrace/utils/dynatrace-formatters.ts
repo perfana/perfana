@@ -127,13 +127,15 @@ export function buildMDAUrl(
   const isSaaS = config.dynatraceType === 'saas';
   const timeFilter = createTimeFilter(testRun);
 
-  // Managed clusters expose MDA at /ui/diagnostictools/mda. Request-attribute
-  // filtering rides in servicefilter (same encoding as the classic #hash links);
-  // the dimension must NOT reference the attribute — config stores the attribute
-  // UUID, and {RequestAttribute:...} only accepts the attribute name.
+  // Managed clusters: scope MDA to the service via the /ui/services/<id>/mda
+  // path (like Top Web Requests) — /ui/diagnostictools/mda has no service
+  // context. Request-attribute filtering rides in servicefilter (same encoding
+  // as the classic #hash links); the dimension must NOT reference the attribute
+  // — config stores the attribute UUID, and {RequestAttribute:...} only accepts
+  // the attribute name.
   return isSaaS
     ? `${platformBaseUrl}/ui/apps/dynatrace.classic.mda/ui/services/${entityId}/mda?metric=${metric}&mergeServices=false&aggregation=P95&percentile=95&chart=LINE${serviceFilterParam ? `&servicefilter=${serviceFilterParam}` : ''}&gf=all&${timeFilter}`
-    : `${baseUrl}/ui/diagnostictools/mda?gf=all&${timeFilter}&metric=${metric}&dimension=%7BRequest:Name%7D&mergeServices=false&aggregation=AVERAGE&percentile=80&chart=LINE${serviceFilterParam ? `&servicefilter=${serviceFilterParam}` : ''}`;
+    : `${baseUrl}/ui/services/${entityId}/mda?gf=all&${timeFilter}&metric=${metric}&dimension=%7BRequest:Name%7D&mergeServices=false&aggregation=AVERAGE&percentile=80&chart=LINE${serviceFilterParam ? `&servicefilter=${serviceFilterParam}` : ''}`;
 }
 
 /**
