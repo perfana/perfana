@@ -88,7 +88,7 @@ export function buildDeepLinkUrl(
     case 'pure-paths':
       return isSaaS
         ? `${platformBaseUrl}/ui/apps/dynatrace.classic.distributed.traces/ui/services/${entityId}/purepaths?${filterParam}&${timeFilter}&gf=all`
-        : `${baseUrl}/ui/services/${entityId}/purepaths?${timeFilter}&gf=all`;
+        : `${baseUrl}/ui/services/${entityId}/purepaths?${filterParam}&${timeFilter}&gf=all`;
     case 'outliers':
       return `${baseUrl}/#responsetimedistribution;sci=${entityId};timeframe=custom${startMs}to${endMs};${filterParam};gf=all`;
     case 'method-hotspots':
@@ -96,7 +96,7 @@ export function buildDeepLinkUrl(
     case 'top-web-requests':
       return isSaaS
         ? `${platformBaseUrl}/ui/apps/dynatrace.classic.mda/ui/services/${entityId}/mda?mdaId=topweb&${filterParam}&${timeFilter}&gf=all`
-        : `${baseUrl}/ui/services/${entityId}/mda?mdaId=topweb&${timeFilter}&gf=all&metric=REQUEST_COUNT&dimension=%7BRequest:Name%7D&mergeServices=false&aggregation=COUNT&percentile=80&chart=COLUMN`;
+        : `${baseUrl}/ui/services/${entityId}/mda?mdaId=topweb&${filterParam}&${timeFilter}&gf=all&metric=REQUEST_COUNT&dimension=%7BRequest:Name%7D&mergeServices=false&aggregation=COUNT&percentile=80&chart=COLUMN`;
     case 'exception-analysis':
       return `${baseUrl}/#exceptionsoverview;entityId=${entityId};timeframe=custom${startMs}to${endMs};${filterParam};gf=all`;
     case 'service-flow':
@@ -127,16 +127,13 @@ export function buildMDAUrl(
   const isSaaS = config.dynatraceType === 'saas';
   const timeFilter = createTimeFilter(testRun);
 
-  // Managed clusters expose MDA at /ui/diagnostictools/mda with the service
-  // scoped via servicefilter (the request-attribute filter), not in the path.
-  const requestAttr = config.perfanaRequestNameAttribute;
-  const dimension = requestAttr
-    ? `%7BRequest:Name%7D%7BRequestAttribute:${requestAttr}%7D`
-    : `%7BRequest:Name%7D`;
-
+  // Managed clusters expose MDA at /ui/diagnostictools/mda. Request-attribute
+  // filtering rides in servicefilter (same encoding as the classic #hash links);
+  // the dimension must NOT reference the attribute — config stores the attribute
+  // UUID, and {RequestAttribute:...} only accepts the attribute name.
   return isSaaS
     ? `${platformBaseUrl}/ui/apps/dynatrace.classic.mda/ui/services/${entityId}/mda?metric=${metric}&mergeServices=false&aggregation=P95&percentile=95&chart=LINE${serviceFilterParam ? `&servicefilter=${serviceFilterParam}` : ''}&gf=all&${timeFilter}`
-    : `${baseUrl}/ui/diagnostictools/mda?gf=all&${timeFilter}&metric=${metric}&dimension=${dimension}&mergeServices=false&aggregation=AVERAGE&percentile=80&chart=LINE${serviceFilterParam ? `&servicefilter=${serviceFilterParam}` : ''}`;
+    : `${baseUrl}/ui/diagnostictools/mda?gf=all&${timeFilter}&metric=${metric}&dimension=%7BRequest:Name%7D&mergeServices=false&aggregation=AVERAGE&percentile=80&chart=LINE${serviceFilterParam ? `&servicefilter=${serviceFilterParam}` : ''}`;
 }
 
 /**

@@ -4,6 +4,11 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
+## [0.2.61.87] - 2026-07-17
+
+### Fixed
+- **Dynatrace managed-cluster deep links carry the request-attribute `servicefilter` again, and Multidimensional Analysis no longer breaks on an invalid dimension.** v0.2.61.85 rewrote the managed (`dynatraceType: 'managed'`) links to the `/ui/…` format but dropped the test-run-id/request-name `servicefilter` from **Top Web Requests** and **Distributed Tracing** (PurePaths), so those links opened unfiltered; both now include `servicefilter=<filter>` (same `buildServiceFilterParam` encoding the working Response Time Hotspots link uses). **Multidimensional Analysis** built its dimension as `{Request:Name}{RequestAttribute:<perfanaRequestNameAttribute>}` — but the config stores the request attribute's **UUID**, and Dynatrace's `{RequestAttribute:…}` dimension syntax only accepts the attribute *name*, making the whole MDA view fail to resolve; the dimension is now plain `{Request:Name}` and the request-attribute filtering rides in `servicefilter`, as it does in the classic links. SaaS branches unchanged. Added a formatter test suite pinning all three managed URLs.
+
 ## [0.2.61.86] - 2026-07-16
 
 ### Fixed
