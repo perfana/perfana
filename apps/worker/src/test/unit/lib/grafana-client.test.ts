@@ -13,13 +13,14 @@ import { GrafanaAPIClient } from '@perfana/shared/services/grafana';
 import { mockGrafanaAPI, createMockGrafanaRequest } from '../../mocks/grafana.js';
 import { panelDocumentFixtures } from '../../fixtures/test-data.js';
 
-// Mock axios at module level
-const mockAxiosCreate = vi.fn();
+// Mock axios at module level (vi.hoisted — vi.mock factories are hoisted above const declarations)
+const { mockAxiosCreate } = vi.hoisted(() => ({ mockAxiosCreate: vi.fn() }));
 
 vi.mock('axios', () => ({
   default: {
     create: mockAxiosCreate
-  }
+  },
+  isAxiosError: vi.fn(() => false)
 }));
 
 // TODO: GrafanaAPIClient test - requires HTTP mock setup
