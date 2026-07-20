@@ -128,10 +128,10 @@ export class TestRunsQueryService {
     return this.crudService.findAllPaginated(isAdmin, orgIds, userTeamIds, paginationDto, organizationId);
   }
 
-  async getFilterOptions(userId: string, roles: string[], organizationId?: string): Promise<{ systems: string[]; environments: string[]; workloads: string[] }> {
+  async getFilterOptions(userId: string, roles: string[], organizationId?: string, selected?: { system?: string; environment?: string; workload?: string }): Promise<{ systems: string[]; environments: string[]; workloads: string[] }> {
     const { orgIds, isAdmin } = await this.resolveOrganizationIds(userId, roles, organizationId);
     const userTeamIds = await this.resolveTeamIds(userId, roles);
-    return this.crudService.getFilterOptions(isAdmin, orgIds, userTeamIds, organizationId);
+    return this.crudService.getFilterOptions(isAdmin, orgIds, userTeamIds, organizationId, selected);
   }
 
   async findAll(userId: string, roles: string[]): Promise<TestRun[]> {

@@ -131,6 +131,74 @@ describe('TestRunsController', () => {
   });
 
   describe('Happy Path - Core Queries', () => {
+    describe('getFilterOptions', () => {
+      it('should forward the selected filters to the service (cascading dropdowns)', async () => {
+        const options = { systems: ['sysA'], environments: ['test'], workloads: ['load'] };
+        service.getFilterOptions.mockResolvedValue(options);
+
+        const result = await controller.getFilterOptions('org-1', 'sysA', 'test', 'load', mockUserContext);
+
+        expect(result).toEqual(options);
+        expect(service.getFilterOptions).toHaveBeenCalledWith(
+          mockUserContext.userId,
+          mockUserContext.roles,
+          'org-1',
+          { system: 'sysA', environment: 'test', workload: 'load' },
+        );
+      });
+
+      it('should coerce polluted array params (?system=a&system=b) to their first value', async () => {
+        service.getFilterOptions.mockResolvedValue({ systems: [], environments: [], workloads: [] });
+
+        await controller.getFilterOptions(
+          undefined,
+          ['sysA', 'sysB'] as unknown as string,
+          undefined,
+          undefined,
+          mockUserContext,
+        );
+
+        expect(service.getFilterOptions).toHaveBeenCalledWith(
+          mockUserContext.userId,
+          mockUserContext.roles,
+          undefined,
+          { system: 'sysA', environment: undefined, workload: undefined },
+        );
+      });
+
+      it('should drop object-shaped params (?system[a]=b, qs extended parser)', async () => {
+        service.getFilterOptions.mockResolvedValue({ systems: [], environments: [], workloads: [] });
+
+        await controller.getFilterOptions(
+          { a: 'b' } as unknown as string,
+          { a: 'b' } as unknown as string,
+          undefined,
+          undefined,
+          mockUserContext,
+        );
+
+        expect(service.getFilterOptions).toHaveBeenCalledWith(
+          mockUserContext.userId,
+          mockUserContext.roles,
+          undefined,
+          { system: undefined, environment: undefined, workload: undefined },
+        );
+      });
+
+      it('should pass undefined selections when no filter params are supplied', async () => {
+        service.getFilterOptions.mockResolvedValue({ systems: [], environments: [], workloads: [] });
+
+        await controller.getFilterOptions(undefined, undefined, undefined, undefined, mockUserContext);
+
+        expect(service.getFilterOptions).toHaveBeenCalledWith(
+          mockUserContext.userId,
+          mockUserContext.roles,
+          undefined,
+          { system: undefined, environment: undefined, workload: undefined },
+        );
+      });
+    });
+
     describe('findAll', () => {
       it('should return paginated test runs with default parameters', async () => {
         // Arrange

@@ -672,6 +672,76 @@ describe('TestRunsCrudQueryService', () => {
 
       await expect(service.getFilterOptions(true, [], [])).rejects.toThrow(DatabaseException);
     });
+
+    it('should constrain each list by the OTHER selected filters (cascading dropdowns)', async () => {
+      let qbIndex = 0;
+      const qbs = Array.from({ length: 6 }, () => {
+        const qb = createMockQueryBuilder<TestRunEntity>();
+        qb.getRawMany.mockResolvedValue([]);
+        qb.orderBy.mockReturnThis();
+        qb.andWhere.mockReturnThis();
+        qb.select.mockReturnThis();
+        qb.leftJoin.mockReturnThis();
+        qb.where.mockReturnThis();
+        return qb;
+      });
+      testRunRepo.createQueryBuilder.mockImplementation(() => qbs[qbIndex++ % qbs.length]);
+
+      await service.getFilterOptions(true, [], [], undefined, {
+        system: 'PaymentService',
+        environment: 'production',
+        workload: 'loadTest',
+      });
+
+      const whereClauses = (qb: MockSelectQueryBuilder<TestRunEntity>) =>
+        qb.andWhere.mock.calls.map((call: unknown[]) => String(call[0])).join(' | ');
+
+      // Systems list (qb 0): constrained by environment + workload, NOT by system
+      expect(whereClauses(qbs[0])).toContain('testEnvironment');
+      expect(whereClauses(qbs[0])).toContain('tr.workload');
+      expect(whereClauses(qbs[0])).not.toContain('sut.name =');
+
+      // Environments list (qb 1): constrained by system + workload, NOT by environment
+      expect(whereClauses(qbs[1])).toContain('sut.name =');
+      expect(whereClauses(qbs[1])).toContain('tr.workload');
+      expect(whereClauses(qbs[1])).not.toContain('testEnvironment =');
+
+      // Workloads list (qb 2): constrained by system + environment, NOT by workload
+      expect(whereClauses(qbs[2])).toContain('sut.name =');
+      expect(whereClauses(qbs[2])).toContain('testEnvironment');
+      expect(whereClauses(qbs[2])).not.toContain('tr.workload =');
+    });
+
+    it('should only apply the selected filters that are set (partial selection)', async () => {
+      let qbIndex = 0;
+      const qbs = Array.from({ length: 6 }, () => {
+        const qb = createMockQueryBuilder<TestRunEntity>();
+        qb.getRawMany.mockResolvedValue([]);
+        qb.orderBy.mockReturnThis();
+        qb.andWhere.mockReturnThis();
+        qb.select.mockReturnThis();
+        qb.leftJoin.mockReturnThis();
+        qb.where.mockReturnThis();
+        return qb;
+      });
+      testRunRepo.createQueryBuilder.mockImplementation(() => qbs[qbIndex++ % qbs.length]);
+
+      await service.getFilterOptions(true, [], [], undefined, { system: 'PaymentService' });
+
+      const whereClauses = (qb: MockSelectQueryBuilder<TestRunEntity>) =>
+        qb.andWhere.mock.calls.map((call: unknown[]) => String(call[0])).join(' | ');
+
+      // Systems list: nothing else selected, so no selection constraints at all
+      expect(whereClauses(qbs[0])).not.toContain('sut.name =');
+      expect(whereClauses(qbs[0])).not.toContain('testEnvironment =');
+      expect(whereClauses(qbs[0])).not.toContain('tr.workload =');
+
+      // Environments and workloads lists: constrained by the selected system only
+      expect(whereClauses(qbs[1])).toContain('sut.name =');
+      expect(whereClauses(qbs[1])).not.toContain('tr.workload =');
+      expect(whereClauses(qbs[2])).toContain('sut.name =');
+      expect(whereClauses(qbs[2])).not.toContain('testEnvironment =');
+    });
   });
 
   // =========================================================================

@@ -322,12 +322,15 @@ export class TestRunsCrudQueryService {
    * @param organizationIds - User's accessible organization IDs (resolved by the parent)
    * @param userTeamIds - User's accessible team IDs (resolved by the parent); admins receive `[]`
    * @param organizationId - Optional explicit organization scope
+   * @param selected - Currently selected filter values; each list is constrained by the
+   *   OTHER two selections (cascading dropdowns) so only existing combinations are offered
    */
   async getFilterOptions(
     isAdmin: boolean,
     organizationIds: string[],
     userTeamIds: string[],
     organizationId?: string,
+    selected?: { system?: string; environment?: string; workload?: string },
   ): Promise<{ systems: string[]; environments: string[]; workloads: string[] }> {
     try {
       // Non-admin without explicit org and no accessible orgs → nothing to show
@@ -377,14 +380,35 @@ export class TestRunsCrudQueryService {
         }
       };
 
+      // Constrain a list by the selected values of the OTHER dropdowns, so each
+      // dropdown only offers values that exist in combination with the rest —
+      // while still listing alternatives for its own current selection.
+      const applySelected = (
+        qb: SelectQueryBuilder<ObjectLiteral>,
+        constrain: Array<'system' | 'environment' | 'workload'>,
+      ) => {
+        if (constrain.includes('system') && selected?.system) {
+          qb.andWhere('sut.name = :selSystem', { selSystem: selected.system });
+        }
+        if (constrain.includes('environment') && selected?.environment) {
+          qb.andWhere('tr.testEnvironment = :selEnvironment', { selEnvironment: selected.environment });
+        }
+        if (constrain.includes('workload') && selected?.workload) {
+          qb.andWhere('tr.workload = :selWorkload', { selWorkload: selected.workload });
+        }
+      };
+
       const systemsQb = buildBaseQuery().select('DISTINCT sut.name', 'name').andWhere('sut.name IS NOT NULL');
       applyAccessFilter(systemsQb);
+      applySelected(systemsQb, ['environment', 'workload']);
 
       const envsQb = buildBaseQuery().select('DISTINCT tr.testEnvironment', 'env').andWhere('tr.testEnvironment IS NOT NULL');
       applyAccessFilter(envsQb);
+      applySelected(envsQb, ['system', 'workload']);
 
       const workloadsQb = buildBaseQuery().select('DISTINCT tr.workload', 'workload').andWhere('tr.workload IS NOT NULL');
       applyAccessFilter(workloadsQb);
+      applySelected(workloadsQb, ['system', 'environment']);
 
       const [systemRows, envRows, workloadRows] = await Promise.all([
         systemsQb.orderBy('sut.name', 'ASC').getRawMany(),

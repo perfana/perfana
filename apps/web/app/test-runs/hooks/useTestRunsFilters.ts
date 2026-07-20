@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect, useMemo, useCallback } from 'react';
+import { useState, useEffect, useMemo, useCallback, useRef } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { authenticatedFetch } from '@/lib/api';
 import { TestRun } from '@/types/test-runs';
@@ -61,13 +61,21 @@ export function useTestRunsFilters({ organizationId }: UseTestRunsFiltersProps) 
     }
   }, [systemFilter, environmentFilter, workloadFilter, router]);
 
-  // Fetch filter options from the API (distinct values across all test runs)
+  // Fetch filter options from the API. The current selections are passed along so
+  // each dropdown only lists values that exist in combination with the other
+  // selected filters (cascading dropdowns). The current selection of a dropdown is
+  // always kept in its own list so it stays visible/switchable.
+  const optionsFetchSeq = useRef(0);
   const loadFilterOptions = useCallback(async () => {
+    const seq = ++optionsFetchSeq.current;
     try {
       const params = new URLSearchParams();
       if (organizationId) {
         params.set('organizationId', organizationId);
       }
+      if (systemFilter) params.set('system', systemFilter);
+      if (environmentFilter) params.set('environment', environmentFilter);
+      if (workloadFilter) params.set('workload', workloadFilter);
       const url = params.toString()
         ? `/test-runs/filter-options?${params.toString()}`
         : '/test-runs/filter-options';
@@ -77,16 +85,21 @@ export function useTestRunsFilters({ organizationId }: UseTestRunsFiltersProps) 
       });
       if (response.ok) {
         const data = await response.json();
+        // Drop out-of-order responses so a slow stale request can't clobber
+        // options — checked after the last await so nothing can interleave.
+        if (seq !== optionsFetchSeq.current) return;
+        const keepSelected = (options: string[], selected: string) =>
+          selected && !options.includes(selected) ? [...options, selected] : options;
         setFilterOptions({
-          systems: data.systems || [],
-          environments: data.environments || [],
-          workloads: data.workloads || [],
+          systems: keepSelected(data.systems || [], systemFilter),
+          environments: keepSelected(data.environments || [], environmentFilter),
+          workloads: keepSelected(data.workloads || [], workloadFilter),
         });
       }
     } catch {
       // Filter options are non-critical; keep whatever we have
     }
-  }, [organizationId]);
+  }, [organizationId, systemFilter, environmentFilter, workloadFilter]);
 
   useEffect(() => {
     loadFilterOptions();

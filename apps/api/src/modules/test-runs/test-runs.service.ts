@@ -125,8 +125,8 @@ export class TestRunsService {
     return this.queryService.findAllPaginated(userId, roles, paginationDto, organizationId);
   }
 
-  async getFilterOptions(userId: string, roles: string[], organizationId?: string): Promise<{ systems: string[]; environments: string[]; workloads: string[] }> {
-    return this.queryService.getFilterOptions(userId, roles, organizationId);
+  async getFilterOptions(userId: string, roles: string[], organizationId?: string, selected?: { system?: string; environment?: string; workload?: string }): Promise<{ systems: string[]; environments: string[]; workloads: string[] }> {
+    return this.queryService.getFilterOptions(userId, roles, organizationId, selected);
   }
 
   async findAll(userId: string, roles: string[]): Promise<TestRun[]> {
