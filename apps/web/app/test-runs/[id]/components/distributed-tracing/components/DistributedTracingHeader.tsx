@@ -1,5 +1,6 @@
 'use client';
 
+import { buildSystemConfigUrl } from '@/lib/system-config-url';
 import React from 'react';
 import {
   Box,
@@ -15,6 +16,7 @@ import {
 
 interface DistributedTracingHeaderProps {
   expanded: boolean;
+  testRunId: string;
   systemId: string;
   testEnvironment: string;
   workload: string;
@@ -24,6 +26,7 @@ interface DistributedTracingHeaderProps {
 
 export function DistributedTracingHeader({
   expanded,
+  testRunId,
   systemId,
   testEnvironment,
   workload,
@@ -72,7 +75,7 @@ export function DistributedTracingHeader({
           <IconButton
             onClick={(e) => {
               e.stopPropagation();
-              window.open(`/systems/${systemId}/config?tab=tracing&environment=${encodeURIComponent(testEnvironment)}&workload=${encodeURIComponent(workload)}`, '_blank');
+              window.open(buildSystemConfigUrl({ systemId, tab: 'tracing', environment: testEnvironment, workload, fromTestRun: testRunId }), '_blank');
             }}
             size="medium"
             sx={{

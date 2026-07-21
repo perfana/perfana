@@ -22,6 +22,7 @@
  * ```
  */
 
+import { buildSystemConfigUrl } from '@/lib/system-config-url';
 import { useState, useRef, useCallback, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
 import {
@@ -309,17 +310,15 @@ export function ReportCard({
       return;
     }
 
-    const params = new URLSearchParams();
-    params.set('tab', '7'); // Reporting Templates tab
-    if (testRun.test_environment) {
-      params.set('environment', testRun.test_environment);
-    }
-    if (testRun.workload) {
-      params.set('workload', testRun.workload);
-    }
-
-    router.push(`/systems/${testRun.system_under_test_id}/config?${params.toString()}`);
-  }, [testRun.system_under_test_id, testRun.test_environment, testRun.workload, router, handleSnackbar]);
+    // tab 7 = Reporting Templates
+    router.push(buildSystemConfigUrl({
+      systemId: testRun.system_under_test_id,
+      tab: '7',
+      environment: testRun.test_environment,
+      workload: testRun.workload,
+      fromTestRun: testRun.test_run_id,
+    }));
+  }, [testRun.system_under_test_id, testRun.test_environment, testRun.workload, testRun.test_run_id, router, handleSnackbar]);
 
   // Handle view report
   const handleViewReport = useCallback(async (reportId: string) => {

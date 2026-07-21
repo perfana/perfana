@@ -279,13 +279,27 @@ describe('Test Run Lifecycle Workflow Integration', () => {
       render(<TestRunDetailsPage />);
 
       await waitFor(() => {
-        expect(screen.getByText('TR-2024-001')).toBeInTheDocument();
+        expect(screen.getAllByText('TR-2024-001').length).toBeGreaterThan(0);
       });
 
       // "my-app" appears multiple times (in card header and job progress indicator)
       expect(screen.getAllByText('my-app').length).toBeGreaterThan(0);
       expect(screen.getAllByText('production').length).toBeGreaterThan(0);
       expect(screen.getAllByText('baseline').length).toBeGreaterThan(0);
+    });
+
+    it('should render a Test Runs breadcrumb linking back to the filtered list', async () => {
+      render(<TestRunDetailsPage />);
+
+      await waitFor(() => {
+        expect(screen.getAllByText('TR-2024-001').length).toBeGreaterThan(0);
+      });
+
+      const backLink = screen.getByRole('link', { name: 'Test Runs' });
+      expect(backLink).toHaveAttribute('href', expect.stringContaining('/test-runs?'));
+      expect(backLink).toHaveAttribute('href', expect.stringContaining('system=my-app'));
+      expect(backLink).toHaveAttribute('href', expect.stringContaining('environment=production'));
+      expect(backLink).toHaveAttribute('href', expect.stringContaining('workload=baseline'));
     });
 
     it('should fetch test run data with correct parameters', async () => {
@@ -541,7 +555,7 @@ describe('Test Run Lifecycle Workflow Integration', () => {
 
       // TrendsCard is on the Reporting tab (tab index 2), not the Results tab
       await waitFor(() => {
-        expect(screen.getByText('TR-2024-001')).toBeInTheDocument();
+        expect(screen.getAllByText('TR-2024-001').length).toBeGreaterThan(0);
       });
 
       // Switch to Reporting tab
@@ -557,7 +571,7 @@ describe('Test Run Lifecycle Workflow Integration', () => {
       render(<TestRunDetailsPage />);
 
       await waitFor(() => {
-        expect(screen.getByText('TR-2024-001')).toBeInTheDocument();
+        expect(screen.getAllByText('TR-2024-001').length).toBeGreaterThan(0);
       });
 
       // Switch to Reporting tab
@@ -578,7 +592,7 @@ describe('Test Run Lifecycle Workflow Integration', () => {
       render(<TestRunDetailsPage />);
 
       await waitFor(() => {
-        expect(screen.getByText('TR-2024-001')).toBeInTheDocument();
+        expect(screen.getAllByText('TR-2024-001').length).toBeGreaterThan(0);
       });
 
       // Switch to Reporting tab
@@ -652,7 +666,7 @@ describe('Test Run Lifecycle Workflow Integration', () => {
 
       // Step 1: Load page and view test run details
       await waitFor(() => {
-        expect(screen.getByText('TR-2024-001')).toBeInTheDocument();
+        expect(screen.getAllByText('TR-2024-001').length).toBeGreaterThan(0);
       });
 
       // Step 2: Expand test run details

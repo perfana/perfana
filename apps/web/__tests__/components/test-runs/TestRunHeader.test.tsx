@@ -3,7 +3,7 @@
  *
  * Tests the header component functionality:
  * - Rendering with test run data
- * - Back button navigation
+ * - Breadcrumb navigation back to the (filtered) test runs list
  * - Previous/Next test run navigation
  * - Navigation button disabled states
  * - Tooltips for navigation buttons
@@ -49,7 +49,7 @@ jest.mock('next/navigation', () => ({
 
 describe('TestRunHeader', () => {
   const mockPush = jest.fn();
-  const mockOnBack = jest.fn();
+  const mockBackHref = '/test-runs?system=my-system&environment=production&workload=load-test-1';
 
   const mockTestRun: TestRun = {
     id: 'test-uuid-123',
@@ -91,34 +91,22 @@ describe('TestRunHeader', () => {
   });
 
   describe('Rendering', () => {
-    it('should render the header with title', () => {
+    it('should render the breadcrumb with the test run id', () => {
       render(
         <TestRunHeader
           testRun={mockTestRun}
-          onBack={mockOnBack}
+          backHref={mockBackHref}
         />
       );
 
-      expect(screen.getByText('Test Run Details')).toBeInTheDocument();
-    });
-
-    it('should render back button', () => {
-      render(
-        <TestRunHeader
-          testRun={mockTestRun}
-          onBack={mockOnBack}
-        />
-      );
-
-      const backButton = screen.getByRole('button', { name: /back/i });
-      expect(backButton).toBeInTheDocument();
+      expect(screen.getByText('test-run-001')).toBeInTheDocument();
     });
 
     it('should render navigation buttons', () => {
       render(
         <TestRunHeader
           testRun={mockTestRun}
-          onBack={mockOnBack}
+          backHref={mockBackHref}
           previousTestRun={mockPreviousTestRun}
           nextTestRun={mockNextTestRun}
         />
@@ -126,24 +114,22 @@ describe('TestRunHeader', () => {
 
       // Navigation buttons are IconButtons without explicit names
       const buttons = screen.getAllByRole('button');
-      // Should have: Back button + Previous button + Next button
-      expect(buttons.length).toBeGreaterThanOrEqual(3);
+      // Should have: Previous button + Next button
+      expect(buttons.length).toBeGreaterThanOrEqual(2);
     });
   });
 
   describe('Back Navigation', () => {
-    it('should call onBack when back button is clicked', () => {
+    it('should render a Test Runs breadcrumb link with the provided href', () => {
       render(
         <TestRunHeader
           testRun={mockTestRun}
-          onBack={mockOnBack}
+          backHref={mockBackHref}
         />
       );
 
-      const backButton = screen.getByRole('button', { name: /back/i });
-      fireEvent.click(backButton);
-
-      expect(mockOnBack).toHaveBeenCalledTimes(1);
+      const backLink = screen.getByRole('link', { name: 'Test Runs' });
+      expect(backLink).toHaveAttribute('href', mockBackHref);
     });
   });
 
@@ -152,7 +138,7 @@ describe('TestRunHeader', () => {
       render(
         <TestRunHeader
           testRun={mockTestRun}
-          onBack={mockOnBack}
+          backHref={mockBackHref}
           previousTestRun={mockPreviousTestRun}
         />
       );
@@ -168,7 +154,7 @@ describe('TestRunHeader', () => {
       render(
         <TestRunHeader
           testRun={mockTestRun}
-          onBack={mockOnBack}
+          backHref={mockBackHref}
           nextTestRun={mockNextTestRun}
         />
       );
@@ -184,7 +170,7 @@ describe('TestRunHeader', () => {
       render(
         <TestRunHeader
           testRun={mockTestRun}
-          onBack={mockOnBack}
+          backHref={mockBackHref}
         />
       );
 
@@ -198,7 +184,7 @@ describe('TestRunHeader', () => {
       render(
         <TestRunHeader
           testRun={mockTestRun}
-          onBack={mockOnBack}
+          backHref={mockBackHref}
         />
       );
 
@@ -212,7 +198,7 @@ describe('TestRunHeader', () => {
       render(
         <TestRunHeader
           testRun={mockTestRun}
-          onBack={mockOnBack}
+          backHref={mockBackHref}
           previousTestRun={mockPreviousTestRun}
         />
       );
@@ -241,7 +227,7 @@ describe('TestRunHeader', () => {
       render(
         <TestRunHeader
           testRun={mockTestRun}
-          onBack={mockOnBack}
+          backHref={mockBackHref}
           nextTestRun={mockNextTestRun}
         />
       );
@@ -271,7 +257,7 @@ describe('TestRunHeader', () => {
       render(
         <TestRunHeader
           testRun={incompleteTestRun}
-          onBack={mockOnBack}
+          backHref={mockBackHref}
           previousTestRun={mockPreviousTestRun}
         />
       );
@@ -293,7 +279,7 @@ describe('TestRunHeader', () => {
       render(
         <TestRunHeader
           testRun={mockTestRun}
-          onBack={mockOnBack}
+          backHref={mockBackHref}
         />
       );
 
@@ -306,7 +292,7 @@ describe('TestRunHeader', () => {
       render(
         <TestRunHeader
           testRun={mockTestRun}
-          onBack={mockOnBack}
+          backHref={mockBackHref}
         />
       );
 
@@ -321,7 +307,7 @@ describe('TestRunHeader', () => {
       render(
         <TestRunHeader
           testRun={null}
-          onBack={mockOnBack}
+          backHref={mockBackHref}
         />
       );
 
@@ -332,7 +318,7 @@ describe('TestRunHeader', () => {
       render(
         <TestRunHeader
           testRun={null}
-          onBack={mockOnBack}
+          backHref={mockBackHref}
           previousTestRun={mockPreviousTestRun}
         />
       );

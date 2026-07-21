@@ -1,5 +1,6 @@
 'use client';
 
+import { buildSystemConfigUrl } from '@/lib/system-config-url';
 import React from 'react';
 import {
   Box,
@@ -12,9 +13,10 @@ import { MonitorHeart, Add } from '@mui/icons-material';
 import { SLOList } from './SLOList';
 import {} from '../hooks';
 import { SortField, SortDirection, SamplerStat } from '../types';
+import { TestRun } from '@/types/test-runs';
 
 interface SLOExpandedViewProps {
-  testRun: unknown;
+  testRun: TestRun | null;
   testRunId: string;
   checkResults: unknown[];
   checkResultsLoading: boolean;
@@ -160,7 +162,7 @@ export function SLOExpandedView({
           startIcon={<Add />}
           onClick={(e) => {
             e.stopPropagation();
-            const configUrl = `/systems/${testRun.system_under_test_id}/config?tab=slo&environment=${encodeURIComponent(testRun.test_environment)}&workload=${encodeURIComponent(testRun.workload || '')}`;
+            const configUrl = buildSystemConfigUrl({ systemId: testRun.system_under_test_id, tab: 'slo', environment: testRun.test_environment, workload: testRun.workload, fromTestRun: testRun.test_run_id });
             window.open(configUrl, '_blank');
           }}
           sx={{

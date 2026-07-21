@@ -124,6 +124,7 @@ export default function DistributedTracingCard({
           {/* Header Section */}
           <DistributedTracingHeader
             expanded={expanded}
+            testRunId={testRun.test_run_id}
             systemId={testRun.system_under_test_id}
             testEnvironment={testRun.test_environment || ''}
             workload={testRun.workload || ''}
