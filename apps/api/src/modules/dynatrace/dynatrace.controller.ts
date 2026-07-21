@@ -505,9 +505,11 @@ export class DynatraceController {
     @Query('entityType') entityType?: string,
     @Query('entityName') entityName?: string,
     @Query('dynatraceConfigId') dynatraceConfigId?: string,
+    @Query('tagKey') tagKey?: string,
+    @Query('tagValue') tagValue?: string,
     @UserCtx() ctx?: UserContext,
   ) {
-    return this.dynatraceService.fetchEntities(ctx?.userId ?? '', ctx?.roles ?? [], entityType, entityName, dynatraceConfigId);
+    return this.dynatraceService.fetchEntities(ctx?.userId ?? '', ctx?.roles ?? [], entityType, entityName, dynatraceConfigId, tagKey, tagValue);
   }
 
   @Get('entities/mappings')
