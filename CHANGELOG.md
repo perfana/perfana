@@ -4,6 +4,11 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
+## [0.2.61.92] - 2026-07-21
+
+### Fixed
+- **The Generate Report dialog no longer overflows its own width.** The report-layout column was a flex child without `min-width: 0`, so a wide section config (a long "Lists to include" value) forced the column past the dialog edge and clipped the panel. The column can now shrink to the dialog, and its full-width Selects truncate their own text.
+
 ## [0.2.61.91] - 2026-07-21
 
 ### Fixed

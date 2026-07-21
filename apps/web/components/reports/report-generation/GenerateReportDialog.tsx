@@ -704,7 +704,8 @@ export function GenerateReportDialog({
             </Box>
 
             {/* Right Column: Report Layout */}
-            <Box sx={{ flex: 1, display: 'flex', flexDirection: 'column' }}>
+            {/* ponytail: minWidth:0 lets this flex child shrink; without it wide Selects overflow the dialog */}
+            <Box sx={{ flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column' }}>
             <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', mb: 2 }}>
               <Box>
                 <Typography variant="subtitle1" fontWeight={600} gutterBottom>
