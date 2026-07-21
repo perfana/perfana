@@ -4,6 +4,15 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
+## [0.2.61.90] - 2026-07-20
+
+### Added
+- **Breadcrumb navigation replaces the back buttons on test run details and system configuration.** The test run details header now shows `Test Runs › <run id>` — the first crumb returns to the test runs list with the system/environment/workload filters preserved, and the run id doubles as the page heading. The system configuration page shows `Systems › Configuration`, and when opened from a test run (via the SLO, dashboards, deep links, reporting, Pyroscope, or distributed tracing cards — including links opened in a new tab) it shows `Test Runs › <run id> › Configuration` so you can jump straight back to the run you came from.
+
+### Fixed
+- **Request figures now update in realtime during a running test.** The performance analysis card refreshed transaction figures on every live update, but the request (sampler) rows of expanded transactions stayed frozen at their expand-time values. Expanded rows now refetch alongside the transactions on each update — without a spinner flash, with in-flight dedup so slow sampler queries cannot pile up across refresh ticks, and a failed background refresh keeps the last figures on screen with an inline error.
+- **Test runs view filter dropdowns only offer combinations that exist.** The system, test environment, and workload dropdowns listed every distinct value in the database regardless of the other selections. Each dropdown is now constrained by the other two selected filters (server-side, respecting organization/team access), refetches when a selection changes, ignores out-of-order responses, and keeps your current selection visible even when it no longer matches. Repeated query parameters (`?system=a&system=b`) are coerced instead of erroring.
+
 ## [0.2.61.89] - 2026-07-17
 
 ### Fixed
