@@ -28,6 +28,7 @@ export interface UseTop10TableDataProps {
   testRunId: string;
   selectedScenarios?: string[];
   excludeRampUp?: boolean;
+  nameFilter?: string;
 }
 
 export interface UseTop10TableDataReturn {
@@ -49,7 +50,7 @@ export interface UseTop10TableDataReturn {
   handleCloseActionMenu: () => void;
 }
 
-export function useTop10TableData({ testRunId, selectedScenarios = [], excludeRampUp = false }: UseTop10TableDataProps): UseTop10TableDataReturn {
+export function useTop10TableData({ testRunId, selectedScenarios = [], excludeRampUp = false, nameFilter = '' }: UseTop10TableDataProps): UseTop10TableDataReturn {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [transactions, setTransactions] = useState<TransactionStat[]>([]);
@@ -96,7 +97,7 @@ export function useTop10TableData({ testRunId, selectedScenarios = [], excludeRa
   }, [fetchData]);
 
   const allTop10Data = prepareTop10TransactionData(transactions, testDuration);
-  const top10Data = selectedScenarios.length === 0
+  const scenarioFiltered = selectedScenarios.length === 0
     ? allTop10Data
     : allTop10Data.filter((item) => {
         const label = item.scenarioName && item.scenarioName.length > 0
@@ -104,6 +105,11 @@ export function useTop10TableData({ testRunId, selectedScenarios = [], excludeRa
           : 'No Scenario';
         return selectedScenarios.includes(label);
       });
+  // Name filter applies before the top-10 slice so search narrows the pool, then ranks.
+  const filter = nameFilter.trim().toLowerCase();
+  const top10Data = filter
+    ? scenarioFiltered.filter((item) => item.transactionName.toLowerCase().includes(filter))
+    : scenarioFiltered;
 
   const dimensions: Top10TableDimension[] = [
     {

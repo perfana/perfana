@@ -17,6 +17,7 @@ import {
 import { alpha } from '@mui/material/styles';
 import { MoreVert } from '@mui/icons-material';
 import type { RequestsBreakdownTableProps } from '../../types';
+import { ClippedUrl } from '@/components/ui/clipped-url';
 
 export function RequestsBreakdownTable({
   samples,
@@ -65,23 +66,14 @@ export function RequestsBreakdownTable({
               })}
             >
               <TableCell component="th" scope="row">
-                <Box>
+                <Box sx={{ minWidth: 0 }}>
                   <Typography variant="body2" sx={{ fontFamily: 'monospace', fontSize: '0.75rem' }}>
                     {sampler.sampler_name}
                   </Typography>
                   {sampler.url_pattern && (
-                    <Typography
-                      variant="caption"
-                      color="text.secondary"
-                      sx={{
-                        fontFamily: 'monospace',
-                        fontSize: '0.65rem',
-                        display: 'block',
-                        mt: 0.5,
-                      }}
-                    >
-                      {sampler.url_pattern}
-                    </Typography>
+                    <Box sx={{ mt: 0.5 }}>
+                      <ClippedUrl url={sampler.url_pattern} />
+                    </Box>
                   )}
                 </Box>
               </TableCell>

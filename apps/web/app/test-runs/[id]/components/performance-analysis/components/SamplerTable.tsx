@@ -16,6 +16,7 @@ import {
 import { MoreVert as MoreVertIcon } from '@mui/icons-material';
 import { SamplerStat } from '../types/performance-analysis.types';
 import { formatNumber, formatApdex, getApdexColor, getApdexLabel } from '../utils/performance-formatters';
+import { ClippedUrl } from '@/components/ui/clipped-url';
 
 export interface SamplerTableProps {
   samples: SamplerStat[];
@@ -53,24 +54,14 @@ export function SamplerTable({
               '&:nth-of-type(odd)': { backgroundColor: 'rgba(0, 0, 0, 0.02)' }
             }}>
               <TableCell component="th" scope="row" sx={{ fontWeight: 500 }}>
-                <Box>
+                <Box sx={{ minWidth: 0 }}>
                   <Typography variant="body2" fontFamily="monospace">
                     {sampler.sampler_name}
                   </Typography>
                   {sampler.url_pattern && (
-                    <Typography
-                      variant="caption"
-                      color="text.secondary"
-                      sx={{
-                        fontFamily: 'monospace',
-                        fontSize: '0.65rem',
-                        display: 'block',
-                        mt: 0.5,
-                        textTransform: 'none',
-                      }}
-                    >
-                      {sampler.url_pattern}
-                    </Typography>
+                    <Box sx={{ mt: 0.5 }}>
+                      <ClippedUrl url={sampler.url_pattern} sx={{ textTransform: 'none' }} />
+                    </Box>
                   )}
                 </Box>
               </TableCell>
