@@ -76,12 +76,30 @@ export class TestRunsController {
     description: 'Returns distinct system names, environments, and workloads for populating filter dropdowns.',
   })
   @ApiQuery({ name: 'organizationId', required: false, type: String, description: 'Filter by organization' })
+  @ApiQuery({ name: 'system', required: false, type: String, description: 'Selected system — constrains environment and workload options to existing combinations' })
+  @ApiQuery({ name: 'environment', required: false, type: String, description: 'Selected environment — constrains system and workload options to existing combinations' })
+  @ApiQuery({ name: 'workload', required: false, type: String, description: 'Selected workload — constrains system and environment options to existing combinations' })
   @ApiResponse({ status: 200, description: 'Filter options retrieved successfully' })
   async getFilterOptions(
     @Query('organizationId') organizationId: string | undefined,
+    @Query('system') system: string | undefined,
+    @Query('environment') environment: string | undefined,
+    @Query('workload') workload: string | undefined,
     @UserCtx() ctx: UserContext,
   ) {
-    return this.testRunsService.getFilterOptions(ctx.userId, ctx.roles, organizationId);
+    // HTTP parameter pollution: ?system=a&system=b arrives as string[], ?system[a]=b
+    // as an object (qs extended parser). Accept only plain strings; anything else is
+    // dropped instead of surfacing a 500 from the query layer.
+    const one = (v: string | string[] | undefined): string | undefined => {
+      if (typeof v === 'string') return v;
+      if (Array.isArray(v) && typeof v[0] === 'string') return v[0];
+      return undefined;
+    };
+    return this.testRunsService.getFilterOptions(ctx.userId, ctx.roles, one(organizationId), {
+      system: one(system),
+      environment: one(environment),
+      workload: one(workload),
+    });
   }
 
   @Post('bulk-delete')

@@ -1,7 +1,8 @@
 import React from 'react';
-import { Box, Typography, Button, IconButton, Tooltip, Divider } from '@mui/material';
-import { ArrowBack, NavigateBefore, NavigateNext } from '@mui/icons-material';
+import { Box, Typography, IconButton, Tooltip, Divider, Breadcrumbs, Link as MuiLink } from '@mui/material';
+import { NavigateBefore, NavigateNext } from '@mui/icons-material';
 import { useRouter } from 'next/navigation';
+import NextLink from 'next/link';
 import { TestRun } from '@/types/test-runs';
 import TestRunActionsMenu from './TestRunActionsMenu';
 import { AbortTestRunButton } from '../../../components/AbortTestRunButton';
@@ -13,7 +14,8 @@ interface RelatedTestRun {
 
 interface TestRunHeaderProps {
   testRun: TestRun | null;
-  onBack: () => void;
+  /** Href for the "Test Runs" breadcrumb (list URL incl. filter params) */
+  backHref: string;
   previousTestRun?: RelatedTestRun;
   nextTestRun?: RelatedTestRun;
   onSuccess?: (message: string) => void;
@@ -25,7 +27,7 @@ interface TestRunHeaderProps {
 
 export default function TestRunHeader({
   testRun,
-  onBack,
+  backHref,
   previousTestRun,
   nextTestRun,
   onSuccess,
@@ -68,35 +70,19 @@ export default function TestRunHeader({
     }}>
       <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', mb: 2 }}>
         <Box sx={{ display: 'flex', alignItems: 'center', gap: 3 }}>
-          <Button
-            startIcon={<ArrowBack />}
-            onClick={onBack}
-            sx={{ 
-              color: 'text.secondary',
-              minWidth: 'auto',
-              '&:hover': {
-                backgroundColor: 'action.hover',
-                color: 'primary.main'
-              }
-            }}
-            variant="text"
-            size="small"
-          >
-            Back
-          </Button>
-          
-          <Typography 
-            variant="h4" 
-            component="h1" 
-            sx={{ 
-              fontWeight: 600,
-              color: 'text.primary',
-              letterSpacing: '-0.02em',
-              fontSize: '1.75rem'
-            }}
-          >
-            Test Run Details
-          </Typography>
+          <Breadcrumbs>
+            <MuiLink
+              component={NextLink}
+              href={backHref}
+              underline="hover"
+              color="inherit"
+            >
+              Test Runs
+            </MuiLink>
+            <Typography color="text.primary" component="h1" variant="body1" aria-current="page">
+              {testRun?.test_run_id ?? 'Test Run Details'}
+            </Typography>
+          </Breadcrumbs>
         </Box>
 
         {/* Right side: navigation and chips */}

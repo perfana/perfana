@@ -14,6 +14,7 @@ jest.mock('@perfana/shared/entities', () => ({
   Benchmark: class Benchmark {},
   GrafanaDashboard: class GrafanaDashboard {},
   GrafanaInstance: class GrafanaInstance {},
+  ProxyServer: class ProxyServer {},
   ApplicationDashboard: class ApplicationDashboard {},
   SystemUnderTest: class SystemUnderTest {},
 }));

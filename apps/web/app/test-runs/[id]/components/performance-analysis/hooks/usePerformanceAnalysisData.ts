@@ -297,20 +297,78 @@ export function usePerformanceAnalysisData({
     prevIsRunningRef.current = isRunning;
   }, [isRunning]);
 
-  // When the time window changes, invalidate any cached sampler data because it
-  // was fetched for a different window and is now stale.
+  // When the time window or ramp-up filter changes, invalidate any cached sampler
+  // data because it was fetched for different parameters and is now stale. The
+  // epoch ref lets in-flight fetches from the old window discard their results.
+  const samplesEpochRef = useRef(0);
   useEffect(() => {
+    samplesEpochRef.current += 1;
     setRowSamples({});
     setExpandedRows(new Set());
-  }, [sinceMinutes]);
+  }, [sinceMinutes, excludeRampUp]);
 
-  // Refresh all data
+  // Fetch sampler (request) stats for one transaction. The spinner is only shown
+  // on the initial load — live refreshes update the figures in place.
+  // In-flight dedup: a WS tick arriving while a transaction's previous sampler
+  // fetch is still running skips that transaction, so slow queries can't pile up.
+  const inFlightSamplesRef = useRef<Set<string>>(new Set());
+  const fetchSamplesFor = useCallback(async (transactionName: string, showSpinner: boolean) => {
+    if (inFlightSamplesRef.current.has(transactionName)) return;
+    inFlightSamplesRef.current.add(transactionName);
+    const epoch = samplesEpochRef.current;
+    if (showSpinner) setLoadingSamples(prev => ({ ...prev, [transactionName]: true }));
+    setSamplesError(prev => (prev[transactionName] ? { ...prev, [transactionName]: '' } : prev));
+
+    try {
+      const sampleParams = new URLSearchParams({ excludeRampUp: String(excludeRampUp) });
+      if (sinceMinutes != null) sampleParams.set('sinceMinutes', String(sinceMinutes));
+
+      const response = await authenticatedFetch(
+        `/test-runs/${testRunId}/transactions/${encodeURIComponent(transactionName)}/samples?${sampleParams.toString()}`,
+        {
+          method: 'GET',
+          headers: {
+            'Content-Type': 'application/json',
+          },
+        }
+      );
+
+      if (!response.ok) {
+        throw new Error('Failed to fetch request samples');
+      }
+
+      const data = await response.json();
+      // The window/ramp-up filter changed while this fetch was in flight — its
+      // result belongs to the old parameters, so writing it would silently show
+      // wrong figures next to the guard in handleRowClick.
+      if (epoch !== samplesEpochRef.current) return;
+      setRowSamples(prev => ({ ...prev, [transactionName]: data }));
+    } catch (err) {
+      console.error('Error fetching sampler statistics:', err);
+      if (epoch !== samplesEpochRef.current) return;
+      // A failed background refresh keeps the last good figures on screen; the
+      // error banner is reserved for fetches with nothing to fall back on.
+      if (showSpinner) {
+        setSamplesError(prev => ({
+          ...prev,
+          [transactionName]: err && typeof err === 'object' && 'message' in err ? (err as Error).message : 'Failed to fetch sampler statistics'
+        }));
+      }
+    } finally {
+      inFlightSamplesRef.current.delete(transactionName);
+      if (showSpinner) setLoadingSamples(prev => ({ ...prev, [transactionName]: false }));
+    }
+  }, [testRunId, excludeRampUp, sinceMinutes]);
+
+  // Refresh all data — including the request figures of any expanded rows, so
+  // they update in realtime alongside the transaction figures during a run.
   const refreshAll = useCallback(() => {
     fetchTransactions();
     fetchTestLevelThreshold();
     fetchVirtualUserStats();
     fetchThroughputStats();
-  }, [fetchTransactions, fetchTestLevelThreshold, fetchVirtualUserStats, fetchThroughputStats]);
+    expandedRows.forEach(name => fetchSamplesFor(name, false));
+  }, [fetchTransactions, fetchTestLevelThreshold, fetchVirtualUserStats, fetchThroughputStats, expandedRows, fetchSamplesFor]);
 
   // Auto-refresh: re-fetch whenever a WS update arrives (signalled by updated_at
   // changing), unless the last fetch was slow (≥5 s). The initial load is handled
@@ -387,41 +445,10 @@ export function usePerformanceAnalysisData({
       setExpandedRows(newExpandedRows);
 
       if (!rowSamples[transactionName]) {
-        setLoadingSamples(prev => ({ ...prev, [transactionName]: true }));
-        setSamplesError(prev => ({ ...prev, [transactionName]: '' }));
-
-        try {
-          const sampleParams = new URLSearchParams({ excludeRampUp: String(excludeRampUp) });
-          if (sinceMinutes != null) sampleParams.set('sinceMinutes', String(sinceMinutes));
-
-          const response = await authenticatedFetch(
-            `/test-runs/${testRunId}/transactions/${encodeURIComponent(transactionName)}/samples?${sampleParams.toString()}`,
-            {
-              method: 'GET',
-              headers: {
-                'Content-Type': 'application/json',
-              },
-            }
-          );
-
-          if (!response.ok) {
-            throw new Error('Failed to fetch request samples');
-          }
-
-          const data = await response.json();
-          setRowSamples(prev => ({ ...prev, [transactionName]: data }));
-        } catch (err) {
-          console.error('Error fetching sampler statistics:', err);
-          setSamplesError(prev => ({
-            ...prev,
-            [transactionName]: err && typeof err === 'object' && 'message' in err ? (err as Error).message : 'Failed to fetch sampler statistics'
-          }));
-        } finally {
-          setLoadingSamples(prev => ({ ...prev, [transactionName]: false }));
-        }
+        await fetchSamplesFor(transactionName, true);
       }
     }
-  }, [expandedRows, rowSamples, testRunId, excludeRampUp, sinceMinutes]);
+  }, [expandedRows, rowSamples, fetchSamplesFor]);
 
   // Scenario toggle handler
   const handleToggleScenario = useCallback((scenarioName: string) => {

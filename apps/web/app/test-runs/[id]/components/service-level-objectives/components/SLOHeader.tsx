@@ -1,6 +1,8 @@
 'use client';
 
+import { buildSystemConfigUrl } from '@/lib/system-config-url';
 import React from 'react';
+import { TestRun } from '@/types/test-runs';
 import {
   Box,
   Typography,
@@ -69,7 +71,7 @@ export function SLOCollapsedHeader({
 }
 
 interface ExpandedHeaderProps {
-  testRun: unknown;
+  testRun: TestRun | null;
   onCollapse: () => void;
 }
 
@@ -125,7 +127,7 @@ export function SLOExpandedHeader({
           onClick={(e) => {
             e.stopPropagation();
             if (testRun) {
-              const configUrl = `/systems/${testRun.system_under_test_id}/config?tab=slo&environment=${encodeURIComponent(testRun.test_environment)}&workload=${encodeURIComponent(testRun.workload || '')}`;
+              const configUrl = buildSystemConfigUrl({ systemId: testRun.system_under_test_id, tab: 'slo', environment: testRun.test_environment, workload: testRun.workload, fromTestRun: testRun.test_run_id });
               window.open(configUrl, '_blank');
             }
           }}

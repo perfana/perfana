@@ -614,6 +614,9 @@ describe('DeepLinksCard', () => {
         expect(mockPush).toHaveBeenCalledWith(
           expect.stringContaining('tab=2')
         );
+        expect(mockPush).toHaveBeenCalledWith(
+          expect.stringContaining('fromTestRun=')
+        );
       }
     });
   });

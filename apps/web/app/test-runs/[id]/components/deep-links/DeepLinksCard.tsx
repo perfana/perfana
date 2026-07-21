@@ -1,5 +1,6 @@
 'use client';
 
+import { buildSystemConfigUrl } from '@/lib/system-config-url';
 import { useState, useRef } from 'react';
 import { useRouter } from 'next/navigation';
 import {
@@ -88,7 +89,7 @@ export default function DeepLinksCard({ testRun, expanded, onExpand }: DeepLinks
 
   const handleConfigClick = () => {
     router.push(
-      `/systems/${systemUnderTestId}/config?tab=2&environment=${encodeURIComponent(testEnvironment)}&workload=${encodeURIComponent(workload)}`,
+      buildSystemConfigUrl({ systemId: systemUnderTestId, tab: '2', environment: testEnvironment, workload, fromTestRun: testRunId }),
     );
   };
 

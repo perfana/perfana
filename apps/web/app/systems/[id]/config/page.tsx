@@ -1,13 +1,14 @@
 'use client';
 
 import { useEffect, useState } from 'react';
-import { useRouter } from 'next/navigation';
+import { useSearchParams } from 'next/navigation';
+import NextLink from 'next/link';
 import {
   Box, Typography, Button, CircularProgress, Alert, Paper, Tabs, Tab,
   Dialog, DialogTitle, DialogContent, DialogContentText, DialogActions,
+  Breadcrumbs, Link as MuiLink,
 } from '@mui/material';
 import {
-  ArrowBack as ArrowBackIcon,
   Delete as DeleteIcon,
   FileDownload as FileDownloadIcon,
   MonitorHeart as MonitorHeartIcon,
@@ -46,7 +47,7 @@ import DeleteSystemDialog from './components/DeleteSystemDialog';
 import ExportSystemDialog from './components/ExportSystemDialog';
 
 export default function SystemConfigurationPage() {
-  const router = useRouter();
+  const searchParams = useSearchParams();
   const { hasAnyRole } = useAuth();
   const isGlobalAdmin = hasAnyRole(Array.from(GLOBAL_ADMIN_ROLES));
   const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
@@ -77,7 +78,39 @@ export default function SystemConfigurationPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [systemData.selectedEnvironment]);
 
-  const handleBack = () => router.push('/systems');
+  // When opened from a test run (fromTestRun=<test_run_id>), the breadcrumb leads
+  // back to that test run instead of the systems list. The "Test Runs" crumb keeps
+  // the filter context reconstructible from this page's own params.
+  const fromTestRun = searchParams?.get('fromTestRun') || '';
+  const testRunsHref = (() => {
+    const params = new URLSearchParams();
+    if (systemData.system?.name) params.set('system', systemData.system.name);
+    const envParam = searchParams?.get('environment');
+    const workloadParam = searchParams?.get('workload');
+    if (envParam) params.set('environment', envParam);
+    if (workloadParam) params.set('workload', workloadParam);
+    const query = params.toString();
+    return query ? `/test-runs?${query}` : '/test-runs';
+  })();
+  const configBreadcrumbs = (label: string) => (
+    <Breadcrumbs>
+      {fromTestRun
+        ? [
+            <MuiLink key="runs" component={NextLink} href={testRunsHref} underline="hover" color="inherit">
+              Test Runs
+            </MuiLink>,
+            <MuiLink key="run" component={NextLink} href={`/test-runs/${encodeURIComponent(fromTestRun)}`} underline="hover" color="inherit">
+              {fromTestRun}
+            </MuiLink>,
+          ]
+        : (
+            <MuiLink component={NextLink} href="/systems" underline="hover" color="inherit">
+              Systems
+            </MuiLink>
+          )}
+      <Typography color="text.primary" aria-current="page">{label}</Typography>
+    </Breadcrumbs>
+  );
 
   if (systemData.loading) {
     return (
@@ -90,10 +123,8 @@ export default function SystemConfigurationPage() {
   if (systemData.error || !systemData.system) {
     return (
       <Box sx={{ p: 3 }}>
-        <Alert severity="error">{systemData.error || 'System not found'}</Alert>
-        <Button startIcon={<ArrowBackIcon />} onClick={handleBack} sx={{ mt: 2 }}>
-          Back to Systems
-        </Button>
+        {configBreadcrumbs('Configuration')}
+        <Alert severity="error" sx={{ mt: 2 }}>{systemData.error || 'System not found'}</Alert>
       </Box>
     );
   }
@@ -105,17 +136,7 @@ export default function SystemConfigurationPage() {
       {/* Header */}
       <Box sx={{ mb: 4, px: 3, pt: 3 }}>
         <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 2 }}>
-          <Button
-            startIcon={<ArrowBackIcon />}
-            onClick={handleBack}
-            sx={{
-              textTransform: 'none',
-              color: 'text.secondary',
-              '&:hover': { bgcolor: 'action.hover', color: 'text.primary' },
-            }}
-          >
-            Back to Systems
-          </Button>
+          {configBreadcrumbs('Configuration')}
           <Box sx={{ display: 'flex', gap: 1 }}>
             {env.SUT_TRANSFER_ENABLED && isGlobalAdmin && (
               <Button

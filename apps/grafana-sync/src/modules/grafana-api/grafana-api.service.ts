@@ -1,12 +1,10 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
-// Direct entity imports (not the '@perfana/shared/entities' barrel): when this
-// service is pulled in transitively (e.g. via VariableDetectorService) the barrel
-// can still be mid-init, leaving ProxyServer undefined at @InjectRepository()
-// decoration time — NestJS then throws a spurious circular-dependency error.
-import { GrafanaInstance } from '@perfana/shared/entities';
-import { ProxyServer } from '@perfana/shared/entities';
+// Specs that jest.mock('@perfana/shared/entities') must include every entity
+// injected here (incl. ProxyServer) — a missing class arrives as undefined and
+// NestJS throws a spurious circular-dependency error at decoration time.
+import { GrafanaInstance, ProxyServer } from '@perfana/shared/entities';
 import { validateUrl, sanitizeUrl } from '@perfana/shared/security';
 import { buildProxyAgent } from '@perfana/shared/services/proxy';
 

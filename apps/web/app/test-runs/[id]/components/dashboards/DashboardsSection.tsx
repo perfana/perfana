@@ -1,5 +1,6 @@
 'use client';
 
+import { buildSystemConfigUrl } from '@/lib/system-config-url';
 import React, { useRef } from 'react';
 import {
   Box,
@@ -179,7 +180,7 @@ export default function DashboardsSection({
                     onClick={(e) => {
                       e.stopPropagation();
                       if (testRun) {
-                        const configUrl = `/systems/${testRun.system_under_test_id}/config?tab=grafana&environment=${encodeURIComponent(testRun.test_environment)}&workload=${encodeURIComponent(testRun.workload || '')}`;
+                        const configUrl = buildSystemConfigUrl({ systemId: testRun.system_under_test_id, tab: 'grafana', environment: testRun.test_environment, workload: testRun.workload, fromTestRun: testRun.test_run_id });
                         window.open(configUrl, '_blank');
                       }
                     }}

@@ -116,6 +116,7 @@ export default function PyroscopeCard({
           <PyroscopeHeader
             expanded={expanded}
             onExpand={handleExpand}
+            testRunId={testRun.test_run_id}
             systemUnderTestId={testRun.system_under_test_id}
             testEnvironment={testRun.test_environment || ''}
             workload={testRun.workload || ''}

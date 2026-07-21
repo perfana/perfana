@@ -1,11 +1,13 @@
 'use client';
 
+import { buildSystemConfigUrl } from '@/lib/system-config-url';
 import { Box, Typography, Tooltip, IconButton } from '@mui/material';
 import { ExpandMore, ExpandLess, Settings } from '@mui/icons-material';
 
 interface PyroscopeHeaderProps {
   expanded: boolean;
   onExpand: () => void;
+  testRunId: string;
   systemUnderTestId: string;
   testEnvironment: string;
   workload: string;
@@ -15,6 +17,7 @@ interface PyroscopeHeaderProps {
 export function PyroscopeHeader({
   expanded,
   onExpand,
+  testRunId,
   systemUnderTestId,
   testEnvironment,
   workload,
@@ -62,7 +65,7 @@ export function PyroscopeHeader({
           <IconButton
             onClick={(e) => {
               e.stopPropagation();
-              window.open(`/systems/${systemUnderTestId}/config?tab=pyroscope&environment=${encodeURIComponent(testEnvironment)}&workload=${encodeURIComponent(workload)}`, '_blank');
+              window.open(buildSystemConfigUrl({ systemId: systemUnderTestId, tab: 'pyroscope', environment: testEnvironment, workload, fromTestRun: testRunId }), '_blank');
             }}
             size="medium"
             sx={{

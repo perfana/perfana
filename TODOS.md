@@ -78,6 +78,16 @@ and any DQL query / entity-mapping editor pages.
 
 ---
 
+### Delete the dead `sut.organization_id IS NULL` branch in filter-options access filter
+
+**Priority:** P2
+**Origin:** Adversarial review during /ship on `fix/bugs-20260720` (2026-07-20). Pre-existing behavior, adjacent to the cascading filter-options change.
+**Why:** `applyAccessFilter` in `test-runs-crud-query.service.ts` (~line 371) still allows `sut.organization_id IS NULL` for non-admins. Phase 4 made `organization_id` NOT NULL, so the branch is dead for real SUT rows — but combined with the `leftJoin`, a test run whose SUT row is missing (dangling FK) would expose its environment/workload strings to every authenticated non-admin across tenants via this endpoint.
+**What:** Verify no dangling `system_under_test_id` FKs exist, then delete the `sut.organization_id IS NULL` escape (and audit sibling `withOrgFilter`-style helpers for the same leftover branch).
+**Where:** `apps/api/src/modules/test-runs/services/test-runs-crud-query.service.ts` (`applyAccessFilter` inside `getFilterOptions`).
+
+---
+
 ## Reports
 
 ### SLO section renders a green "all clear" card when the check-results query fails

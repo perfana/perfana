@@ -1,7 +1,7 @@
 'use client';
 
 import React, { useState, useCallback, useEffect } from 'react';
-import { useRouter, useParams } from 'next/navigation';
+import { useParams } from 'next/navigation';
 import { Box, CircularProgress, Alert, Snackbar, Tabs, Tab } from '@mui/material';
 import { TestRun } from '@/types/test-runs';
 import { getReport } from '@/lib/api/reports';
@@ -43,7 +43,6 @@ import { GenerateReportDialog } from '@/components/reports/report-generation/Gen
 import { HtmlReportViewerModal } from '@/components/reports/HtmlReportViewerModal';
 
 export default function TestRunDetailsPage() {
-  const router = useRouter();
   const params = useParams();
   const testRunId = params.id as string;
 
@@ -101,8 +100,8 @@ export default function TestRunDetailsPage() {
     testRun?.workload,
   );
 
-  // Handlers
-  const handleBack = useCallback(() => {
+  // Breadcrumb href back to the (filtered) test runs list
+  const backHref = (() => {
     const params = new URLSearchParams();
     if (testRun) {
       const systemName = testRun.systems_under_test?.name;
@@ -111,8 +110,8 @@ export default function TestRunDetailsPage() {
       if (testRun.workload) params.set('workload', testRun.workload);
     }
     const query = params.toString();
-    router.push(query ? `/test-runs?${query}` : '/test-runs');
-  }, [router, testRun]);
+    return query ? `/test-runs?${query}` : '/test-runs';
+  })();
 
   const showToast = useCallback((message: string) => {
     setSnackbarMessage(message);
@@ -267,7 +266,7 @@ export default function TestRunDetailsPage() {
       {/* Header */}
       <TestRunHeader
         testRun={testRun}
-        onBack={handleBack}
+        backHref={backHref}
         previousTestRun={previousTestRun}
         nextTestRun={nextTestRun}
         onSuccess={showToast}
