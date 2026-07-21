@@ -21,7 +21,6 @@ export interface Top10DimensionCardProps {
   sortedData: Top10Item[];
   sortField?: Top10SortField;
   sortOrder?: Top10SortOrder;
-  showUrl: boolean;
   hasDrillDownOptions: boolean;
   onSort: (dimensionIndex: number, field: Top10SortField) => void;
   onOpenActionMenu: (event: React.MouseEvent<HTMLElement>, item: Top10Item) => void;
@@ -33,7 +32,6 @@ export function Top10DimensionCard({
   sortedData,
   sortField,
   sortOrder,
-  showUrl,
   hasDrillDownOptions,
   onSort,
   onOpenActionMenu,
@@ -68,7 +66,6 @@ export function Top10DimensionCard({
             dimensionIndex={dimensionIndex}
             sortField={sortField}
             sortOrder={sortOrder}
-            showUrl={showUrl}
             hasDrillDownOptions={hasDrillDownOptions}
             showErrorCount={dimension.showErrorCount}
             onSort={onSort}
@@ -89,7 +86,6 @@ export function Top10DimensionCard({
                   item={item}
                   index={idx}
                   dimension={dimension}
-                  showUrl={showUrl}
                   hasDrillDownOptions={hasDrillDownOptions}
                   showErrorCount={dimension.showErrorCount}
                   onOpenActionMenu={onOpenActionMenu}

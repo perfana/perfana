@@ -25,7 +25,8 @@ import {
 } from '@mui/icons-material';
 import FancyChip from '../../../shared/FancyChip';
 import { ErrorByTransaction, ErrorByTransactionGroup } from '../types';
-import { truncateUrl, groupErrorsByTransactionSampler } from '../utils/error-formatters';
+import { groupErrorsByTransactionSampler } from '../utils/error-formatters';
+import { ClippedUrl } from '@/components/ui/clipped-url';
 
 interface ErrorsTableProps {
   errorsByTransaction: ErrorByTransaction[];
@@ -114,15 +115,14 @@ function GroupRow({
                       <TableCell>
                         <FancyChip label={child.responseCode || 'N/A'} colorTheme="red" />
                       </TableCell>
-                      <TableCell>
-                        <Tooltip title={child.url || 'N/A'} arrow>
-                          <Typography
-                            variant="body2"
-                            sx={{ fontFamily: 'monospace', fontSize: '0.75rem', color: 'text.secondary' }}
-                          >
-                            {truncateUrl(child.url)}
+                      <TableCell sx={{ maxWidth: 320 }}>
+                        {child.url ? (
+                          <ClippedUrl url={child.url} variant="body2" sx={{ fontSize: '0.75rem' }} />
+                        ) : (
+                          <Typography variant="body2" sx={{ fontFamily: 'monospace', fontSize: '0.75rem', color: 'text.secondary' }}>
+                            N/A
                           </Typography>
-                        </Tooltip>
+                        )}
                       </TableCell>
                       <TableCell align="right">
                         <Typography

@@ -5,16 +5,18 @@ import {
   TableCell,
   Chip,
   IconButton,
+  Box,
+  Typography,
 } from '@mui/material';
 import { MoreVert as MoreVertIcon } from '@mui/icons-material';
 import { Top10Item, Top10Dimension } from '../types';
 import { getRankingChipStyles } from '../utils';
+import { ClippedUrl } from '@/components/ui/clipped-url';
 
 export interface Top10TableRowProps {
   item: Top10Item;
   index: number;
   dimension: Top10Dimension;
-  showUrl: boolean;
   hasDrillDownOptions: boolean;
   showErrorCount?: boolean;
   onOpenActionMenu: (event: React.MouseEvent<HTMLElement>, item: Top10Item) => void;
@@ -24,7 +26,6 @@ export function Top10TableRow({
   item,
   index,
   dimension,
-  showUrl,
   hasDrillDownOptions,
   showErrorCount,
   onOpenActionMenu,
@@ -71,14 +72,17 @@ export function Top10TableRow({
       >
         {item.transactionName}
       </TableCell>
-      <TableCell
-        sx={{
-          fontFamily: 'monospace',
-          fontSize: '0.85rem',
-          wordBreak: 'break-all',
-        }}
-      >
-        {showUrl ? item.url : item.requestName}
+      <TableCell sx={{ wordBreak: 'break-all' }}>
+        <Box sx={{ minWidth: 0 }}>
+          <Typography variant="body2" fontFamily="monospace" sx={{ fontSize: '0.85rem' }}>
+            {item.requestName}
+          </Typography>
+          {item.url && item.url !== item.requestName && (
+            <Box sx={{ mt: 0.5 }}>
+              <ClippedUrl url={item.url} />
+            </Box>
+          )}
+        </Box>
       </TableCell>
       {showErrorCount && (
         <TableCell

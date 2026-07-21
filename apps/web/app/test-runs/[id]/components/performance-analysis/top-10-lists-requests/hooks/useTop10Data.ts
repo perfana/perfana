@@ -24,6 +24,7 @@ export interface UseTop10DataProps {
   testRunId: string;
   selectedScenarios?: string[];
   excludeRampUp?: boolean;
+  nameFilter?: string;
 }
 
 export interface UseTop10DataReturn {
@@ -41,10 +42,6 @@ export interface UseTop10DataReturn {
   handleSort: (dimensionIndex: number, field: Top10SortField) => void;
   getSortedData: (data: Top10Item[], dimensionIndex: number, valueField: keyof Top10Item) => Top10Item[];
 
-  // Display toggle
-  showUrl: boolean;
-  setShowUrl: (show: boolean) => void;
-
   // Action menu
   actionMenuAnchor: HTMLElement | null;
   actionMenuData: Top10Item | null;
@@ -52,7 +49,7 @@ export interface UseTop10DataReturn {
   handleCloseActionMenu: () => void;
 }
 
-export function useTop10Data({ testRunId, selectedScenarios = [], excludeRampUp = false }: UseTop10DataProps): UseTop10DataReturn {
+export function useTop10Data({ testRunId, selectedScenarios = [], excludeRampUp = false, nameFilter = '' }: UseTop10DataProps): UseTop10DataReturn {
   // Loading and error states
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -64,9 +61,6 @@ export function useTop10Data({ testRunId, selectedScenarios = [], excludeRampUp 
   // Sorting states
   const [sortFields, setSortFields] = useState<Record<number, Top10SortField>>({});
   const [sortOrders, setSortOrders] = useState<Record<number, Top10SortOrder>>({});
-
-  // Display toggle
-  const [showUrl, setShowUrl] = useState(false);
 
   // Action menu state
   const [actionMenuAnchor, setActionMenuAnchor] = useState<null | HTMLElement>(null);
@@ -139,7 +133,7 @@ export function useTop10Data({ testRunId, selectedScenarios = [], excludeRampUp 
 
   // Prepare data (filtered by scenario if any selected)
   const allTop10Data = prepareTop10Data(samplers, testDuration);
-  const top10Data = selectedScenarios.length === 0
+  const scenarioFiltered = selectedScenarios.length === 0
     ? allTop10Data
     : allTop10Data.filter((item) => {
         const label = item.scenarioName && item.scenarioName.length > 0
@@ -147,6 +141,15 @@ export function useTop10Data({ testRunId, selectedScenarios = [], excludeRampUp 
           : 'No Scenario';
         return selectedScenarios.includes(label);
       });
+  // Name filter applies before the top-10 slice; matches request name or URL (either can be displayed).
+  const filter = nameFilter.trim().toLowerCase();
+  const top10Data = filter
+    ? scenarioFiltered.filter(
+        (item) =>
+          item.requestName.toLowerCase().includes(filter) ||
+          item.url.toLowerCase().includes(filter),
+      )
+    : scenarioFiltered;
 
   // Build dimensions configuration
   const dimensions: Top10Dimension[] = [
@@ -230,10 +233,6 @@ export function useTop10Data({ testRunId, selectedScenarios = [], excludeRampUp 
     sortOrders,
     handleSort,
     getSortedData,
-
-    // Display toggle
-    showUrl,
-    setShowUrl,
 
     // Action menu
     actionMenuAnchor,

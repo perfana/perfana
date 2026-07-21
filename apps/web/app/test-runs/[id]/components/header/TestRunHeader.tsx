@@ -70,16 +70,17 @@ export default function TestRunHeader({
     }}>
       <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', mb: 2 }}>
         <Box sx={{ display: 'flex', alignItems: 'center', gap: 3 }}>
-          <Breadcrumbs>
+          <Breadcrumbs sx={{ '& .MuiBreadcrumbs-separator': { fontSize: '0.95rem' } }}>
             <MuiLink
               component={NextLink}
               href={backHref}
               underline="hover"
               color="inherit"
+              sx={{ fontWeight: 600, fontSize: '0.95rem' }}
             >
               Test Runs
             </MuiLink>
-            <Typography color="text.primary" component="h1" variant="body1" aria-current="page">
+            <Typography color="text.primary" component="h1" aria-current="page" sx={{ fontWeight: 600, fontSize: '0.95rem' }}>
               {testRun?.test_run_id ?? 'Test Run Details'}
             </Typography>
           </Breadcrumbs>

@@ -29,6 +29,7 @@ import {
 } from '../utils/compare-bands';
 import ComparisonPlot from './ComparisonPlot';
 import { isUrlPanel } from '@/lib/url-perf-panels';
+import { ClippedUrl } from '@/components/ui/clipped-url';
 import { TestRun } from '@/types/test-runs';
 import { ALL_AGGREGATED_OPTION } from '@/lib/aggregated-perf-series';
 
@@ -365,14 +366,14 @@ export default function MetricsComparisonTable({
                       <Box sx={{ display: 'grid', gridTemplateColumns, alignItems: 'stretch',
                         borderBottom: '1px solid', borderColor: 'divider',
                         borderLeft: '3px solid', borderLeftColor: BAND_COLORS[band] }}>
-                        <Box sx={{ px: 2, py: 1.5, display: 'flex', flexDirection: 'column', justifyContent: 'center' }}>
+                        <Box sx={{ px: 2, py: 1.5, display: 'flex', flexDirection: 'column', justifyContent: 'center', minWidth: 0 }}>
                           <Typography variant="body2" sx={{ fontWeight: 500, wordBreak: 'break-word', overflowWrap: 'anywhere' }}>
                             {row.metricName}
                           </Typography>
                           {row.url && (
-                            <Typography variant="caption" sx={{ color: 'text.secondary', wordBreak: 'break-word', overflowWrap: 'anywhere' }}>
-                              {row.url}
-                            </Typography>
+                            <Box sx={{ mt: 0.25 }}>
+                              <ClippedUrl url={row.url} sx={{ fontSize: '0.75rem' }} />
+                            </Box>
                           )}
                         </Box>
                         {columns.map((col) => (

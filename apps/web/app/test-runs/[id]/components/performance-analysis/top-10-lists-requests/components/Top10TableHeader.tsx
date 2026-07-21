@@ -12,7 +12,6 @@ export interface Top10TableHeaderProps {
   dimensionIndex: number;
   sortField?: Top10SortField;
   sortOrder?: Top10SortOrder;
-  showUrl: boolean;
   hasDrillDownOptions: boolean;
   showErrorCount?: boolean;
   onSort: (dimensionIndex: number, field: Top10SortField) => void;
@@ -22,7 +21,6 @@ export function Top10TableHeader({
   dimensionIndex,
   sortField,
   sortOrder,
-  showUrl,
   hasDrillDownOptions,
   showErrorCount,
   onSort,
@@ -49,13 +47,13 @@ export function Top10TableHeader({
             Transaction
           </TableSortLabel>
         </TableCell>
-        <TableCell sx={{ fontWeight: 700, width: showUrl ? (hasDrillDownOptions ? '40%' : '45%') : (hasDrillDownOptions ? '12%' : '15%') }}>
+        <TableCell sx={{ fontWeight: 700, width: hasDrillDownOptions ? '40%' : '45%' }}>
           <TableSortLabel
-            active={sortField === (showUrl ? 'url' : 'requestName')}
+            active={sortField === 'requestName'}
             direction={sortOrder || 'asc'}
-            onClick={() => onSort(dimensionIndex, showUrl ? 'url' : 'requestName')}
+            onClick={() => onSort(dimensionIndex, 'requestName')}
           >
-            {showUrl ? 'URL' : 'Request'}
+            Request
           </TableSortLabel>
         </TableCell>
         {showErrorCount && (

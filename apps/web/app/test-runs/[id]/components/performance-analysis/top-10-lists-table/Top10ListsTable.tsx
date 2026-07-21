@@ -1,5 +1,6 @@
 'use client';
 
+import { useState } from 'react';
 import {
   Box,
   CircularProgress,
@@ -7,6 +8,7 @@ import {
 } from '@mui/material';
 import { useTop10TableData } from './hooks';
 import { Top10TransactionDimensionCard, Top10TransactionActionMenu } from './components';
+import { Top10Filter } from '../components';
 import type { Top10ListsTableProps } from './types';
 
 export default function Top10ListsTable({
@@ -18,6 +20,7 @@ export default function Top10ListsTable({
   onDrillDownToDistributedTracing,
   onDrillDownToDynatrace,
 }: Top10ListsTableProps) {
+  const [nameFilter, setNameFilter] = useState('');
   const {
     loading,
     error,
@@ -30,7 +33,7 @@ export default function Top10ListsTable({
     actionMenuData,
     handleOpenActionMenu,
     handleCloseActionMenu,
-  } = useTop10TableData({ testRunId, selectedScenarios, excludeRampUp });
+  } = useTop10TableData({ testRunId, selectedScenarios, excludeRampUp, nameFilter });
 
   const hasDrillDownOptions = hasDistributedTracing || hasDynatrace;
 
@@ -52,6 +55,9 @@ export default function Top10ListsTable({
 
   return (
     <Box sx={{ p: 3 }}>
+      <Box sx={{ mb: 2 }}>
+        <Top10Filter value={nameFilter} onChange={setNameFilter} placeholder="Filter transactions..." />
+      </Box>
       {/* Dimensions */}
       <Box sx={{ display: 'flex', flexDirection: 'column', gap: 3 }}>
         {dimensions.map((dimension, index) => (

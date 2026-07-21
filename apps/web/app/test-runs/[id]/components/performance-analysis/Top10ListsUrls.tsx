@@ -24,6 +24,8 @@ import {
   NetworkCheck as NetworkCheckIcon,
 } from '@mui/icons-material';
 import { authenticatedFetch } from '@/lib/api';
+import { Top10Filter } from './components';
+import { ClippedUrl } from '@/components/ui/clipped-url';
 
 interface TransactionStat {
   transaction_name: string;
@@ -86,6 +88,7 @@ export default function Top10ListsUrls({ testRunId, selectedScenarios = [], excl
   const [testDuration, setTestDuration] = useState<number>(1);
   const [sortFields, setSortFields] = useState<Record<number, SortField>>({});
   const [sortOrders, setSortOrders] = useState<Record<number, SortOrder>>({});
+  const [nameFilter, setNameFilter] = useState('');
 
   useEffect(() => {
     fetchData();
@@ -272,7 +275,11 @@ export default function Top10ListsUrls({ testRunId, selectedScenarios = [], excl
     return [...data].sort(sortFn).slice(0, 10);
   };
 
-  const top10Data = prepareTop10Data();
+  // Name filter applies before the top-10 slice so search narrows the pool, then ranks.
+  const filter = nameFilter.trim().toLowerCase();
+  const top10Data = filter
+    ? prepareTop10Data().filter((item) => item.url.toLowerCase().includes(filter))
+    : prepareTop10Data();
   const hasMissingUrlPatterns = samplers.some((s) => s.url_pattern == null);
 
   const dimensions = [
@@ -330,6 +337,9 @@ export default function Top10ListsUrls({ testRunId, selectedScenarios = [], excl
 
   return (
     <Box sx={{ p: 3 }}>
+      <Box sx={{ mb: 2 }}>
+        <Top10Filter value={nameFilter} onChange={setNameFilter} placeholder="Filter URLs..." />
+      </Box>
       {hasMissingUrlPatterns && (
         <Alert severity="info" sx={{ mb: 2 }} data-testid="top10-urls-pending-hint">
           Some entries show the sampler name in place of the URL pattern. URL patterns populate once the test completes and the post-test rollup runs.
@@ -438,14 +448,8 @@ export default function Top10ListsUrls({ testRunId, selectedScenarios = [], excl
                               }}
                             />
                           </TableCell>
-                          <TableCell
-                            sx={{
-                              fontFamily: 'monospace',
-                              fontSize: '0.85rem',
-                              wordBreak: 'break-all',
-                            }}
-                          >
-                            {item.url}
+                          <TableCell sx={{ maxWidth: 0 }}>
+                            <ClippedUrl url={item.url} variant="body2" color="text.primary" sx={{ fontSize: '0.85rem' }} />
                           </TableCell>
                           {(dimension as unknown).showErrorCount && (
                             <TableCell
