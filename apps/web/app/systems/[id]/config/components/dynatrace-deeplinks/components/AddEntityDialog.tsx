@@ -113,12 +113,12 @@ export function AddEntityDialog({
     onEntityTypeChange(newType);
     onEntityChange(null);
 
-    // HOST entities require workload level for metric query creation
+    // HOST entities require workload level for metric query creation.
+    // HOST fetching (incl. server-side tag filter) is driven by the hook effect,
+    // so only non-HOST types fetch here to avoid a double fetch.
     if (newType === 'HOST') {
       onLevelChange('sut_testenv_workload');
-    }
-
-    if (newType) {
+    } else if (newType) {
       onFetchEntities(newType);
     }
   };
@@ -130,19 +130,23 @@ export function AddEntityDialog({
     }
   };
 
-  // Only HOST entities feed the multi-select list, even if `entities` still holds
-  // a stale mixed-type fetch from before the type was switched to HOST.
-  const hostEntities = entities.filter((e) => e.entityType === 'HOST');
+  // Entities of the currently selected type, even if `entities` still holds a
+  // stale mixed-type fetch from before the type was switched.
+  const typeEntities = entities.filter((e) => e.entityType === selectedEntityType);
+  // HOST feeds the multi-select list; other types feed the tag suggestions only.
+  const hostEntities = typeEntities;
 
-  // Tag options derived from the fetched hosts. ponytail: client-side over the
-  // fetched page (≤500 hosts); push tag("k:v") into the server entitySelector if
-  // a fleet ever exceeds one page.
+  // Tag options are suggestions derived from the currently fetched hosts. Picking
+  // a key/value re-fetches with tag("k:v") pushed into the server entitySelector,
+  // so filtering spans the whole fleet — not just this page. ponytail: a value
+  // that appears ONLY on hosts beyond the first 500-host page won't be offered as
+  // a suggestion until its key narrows the fetch; acceptable for grouping tags.
   const tagKeys = Array.from(
-    new Set(hostEntities.flatMap((e) => (e.tags || []).map((t) => t.key)))
+    new Set(typeEntities.flatMap((e) => (e.tags || []).map((t) => t.key)))
   ).sort();
   const tagValues = Array.from(
     new Set(
-      hostEntities
+      typeEntities
         .flatMap((e) => e.tags || [])
         .filter((t) => t.key === selectedTagKey && t.value)
         .map((t) => t.value as string)
@@ -255,6 +259,34 @@ export function AddEntityDialog({
             </FormHelperText>
           </FormControl>
 
+          {/* Tag filter — narrows the fetch server-side across the whole fleet,
+              for HOST and non-HOST types alike. */}
+          {selectedEntityType && (
+            <Box sx={{ display: 'flex', gap: 2 }}>
+              <Autocomplete
+                fullWidth
+                options={tagKeys}
+                value={tagKeys.includes(selectedTagKey) ? selectedTagKey : null}
+                onChange={(_, newValue) => onTagKeyChange(newValue || '')}
+                disabled={tagKeys.length === 0}
+                renderInput={(params) => (
+                  <TextField {...params} label="Tag" placeholder="Any tag" />
+                )}
+              />
+
+              <Autocomplete
+                fullWidth
+                options={tagValues}
+                value={tagValues.includes(selectedTagValue) ? selectedTagValue : null}
+                onChange={(_, newValue) => onTagValueChange(newValue || '')}
+                disabled={!selectedTagKey || tagValues.length === 0}
+                renderInput={(params) => (
+                  <TextField {...params} label="Value" placeholder="Any value" />
+                )}
+              />
+            </Box>
+          )}
+
           {isHost ? (
             <>
               <TextField
@@ -271,46 +303,6 @@ export function AddEntityDialog({
                 }}
                 fullWidth
               />
-
-              <Box sx={{ display: 'flex', gap: 2 }}>
-                <FormControl fullWidth>
-                  <InputLabel>Tag</InputLabel>
-                  <Select
-                    value={tagKeys.includes(selectedTagKey) ? selectedTagKey : ''}
-                    onChange={(e: SelectChangeEvent) => onTagKeyChange(e.target.value)}
-                    label="Tag"
-                    disabled={tagKeys.length === 0}
-                  >
-                    <MenuItem value="">
-                      <em>Any tag</em>
-                    </MenuItem>
-                    {tagKeys.map((key) => (
-                      <MenuItem key={key} value={key}>
-                        {key}
-                      </MenuItem>
-                    ))}
-                  </Select>
-                </FormControl>
-
-                <FormControl fullWidth>
-                  <InputLabel>Value</InputLabel>
-                  <Select
-                    value={tagValues.includes(selectedTagValue) ? selectedTagValue : ''}
-                    onChange={(e: SelectChangeEvent) => onTagValueChange(e.target.value)}
-                    label="Value"
-                    disabled={!selectedTagKey || tagValues.length === 0}
-                  >
-                    <MenuItem value="">
-                      <em>Any value</em>
-                    </MenuItem>
-                    {tagValues.map((value) => (
-                      <MenuItem key={value} value={value}>
-                        {value}
-                      </MenuItem>
-                    ))}
-                  </Select>
-                </FormControl>
-              </Box>
 
               <Box sx={{ border: 1, borderColor: 'divider', borderRadius: 1 }}>
                 <ListItemButton onClick={toggleSelectAll} disabled={filteredHosts.length === 0}>
@@ -366,7 +358,7 @@ export function AddEntityDialog({
               getOptionLabel={(option) => option.displayName}
               value={selectedEntity}
               inputValue={searchInput}
-              open={entities.length > 0 && searchInput.length >= 2 && !selectedEntity}
+              open={entities.length > 0 && (searchInput.length >= 2 || !!selectedTagKey) && !selectedEntity}
               onChange={handleEntityChange}
               onInputChange={onInputChange}
               disabled={!selectedEntityType || entitiesLoading}

@@ -92,8 +92,8 @@ interface UseDynatraceEntityMappingsReturn {
   inputChangeTimeoutRef: React.MutableRefObject<NodeJS.Timeout | null>;
 
   // Actions
-  fetchDynatraceEntities: (entityType?: string, entityName?: string) => Promise<void>;
-  handleAddEntity: () => Promise<void>;
+  fetchDynatraceEntities: (entityType?: string, entityName?: string, tagKey?: string, tagValue?: string) => Promise<void>;
+  handleAddEntity: () => void;
   handleSubmitEntity: () => Promise<void>;
   handleDeleteEntity: (mapping: DynatraceEntityMapping) => void;
   handleInputChange: (event: unknown, newInputValue: string, reason?: string) => void;
@@ -161,9 +161,7 @@ export function useDynatraceEntityMappings({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [systemId, selectedEnvironment, selectedWorkload]);
 
-  // Debounced search effect.
-  // HOST mode loads the full host list once (on entity-type change) and filters
-  // client-side by tag + name in the dialog, so it does not refetch on keystrokes.
+  // Debounced search effect (non-HOST types).
   useEffect(() => {
     if (!selectedEntityType || selectedEntityType === 'HOST') {
       return;
@@ -171,15 +169,32 @@ export function useDynatraceEntityMappings({
 
     const timeoutId = setTimeout(() => {
       if (searchInput.trim().length >= 2) {
-        fetchDynatraceEntities(selectedEntityType, searchInput.trim());
+        fetchDynatraceEntities(selectedEntityType, searchInput.trim(), selectedTagKey, selectedTagValue);
       } else if (searchInput.trim().length === 0 && !selectedEntity) {
-        fetchDynatraceEntities(selectedEntityType);
+        fetchDynatraceEntities(selectedEntityType, undefined, selectedTagKey, selectedTagValue);
       }
     }, 300);
 
     return () => clearTimeout(timeoutId);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [selectedEntityType, searchInput, selectedEntity]);
+  }, [selectedEntityType, searchInput, selectedEntity, selectedTagKey, selectedTagValue]);
+
+  // HOST mode: the tag filter is pushed into the Dynatrace entitySelector so the
+  // whole fleet is filtered server-side (not just the first fetched page). Name
+  // search stays client-side in the dialog. Owns the initial HOST fetch too, so
+  // the dialog's entity-type change must NOT also fetch HOST (would double-fire).
+  useEffect(() => {
+    if (selectedEntityType !== 'HOST') {
+      return;
+    }
+
+    const timeoutId = setTimeout(() => {
+      fetchDynatraceEntities('HOST', undefined, selectedTagKey, selectedTagValue);
+    }, 300);
+
+    return () => clearTimeout(timeoutId);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selectedEntityType, selectedTagKey, selectedTagValue]);
 
   // Cleanup timeout on unmount
   useEffect(() => {
@@ -239,7 +254,7 @@ export function useDynatraceEntityMappings({
     }
   };
 
-  const fetchDynatraceEntities = useCallback(async (entityType?: string, entityName?: string) => {
+  const fetchDynatraceEntities = useCallback(async (entityType?: string, entityName?: string, tagKey?: string, tagValue?: string) => {
     try {
       setEntitiesLoading(true);
       setError(null);
@@ -248,6 +263,8 @@ export function useDynatraceEntityMappings({
       if (entityType) params.append('entityType', entityType);
       if (entityName) params.append('entityName', entityName);
       if (selectedInstance) params.append('dynatraceConfigId', selectedInstance);
+      if (tagKey) params.append('tagKey', tagKey);
+      if (tagValue) params.append('tagValue', tagValue);
 
       const response = await authenticatedFetch(`/dynatrace/entities?${params.toString()}`, {
         method: 'GET',
@@ -323,10 +340,9 @@ export function useDynatraceEntityMappings({
     lastValidInputRef.current = '';
   }, []);
 
-  const handleAddEntity = async () => {
-    if (entities.length === 0) {
-      await fetchDynatraceEntities();
-    }
+  const handleAddEntity = () => {
+    // No pre-fetch: selecting an entity type drives the first fetch (non-HOST via
+    // the search effect, HOST via the tag effect), so there's nothing to load yet.
     setAddDialogOpen(true);
   };
 
