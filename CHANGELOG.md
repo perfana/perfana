@@ -4,6 +4,11 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
+## [0.2.61.93] - 2026-07-21
+
+### Changed
+- **The Dynatrace "Add Entity" tag filter is now type-ahead and filters the whole fleet server-side.** The Tag and Value fields were plain dropdowns that became unusable with many tags, and they only filtered the first 500 fetched hosts — a value living on hosts beyond that page never matched. They are now type-ahead autocompletes, and picking a tag pushes `tag("key:value")` into the Dynatrace `entitySelector` so filtering spans the entire fleet, not just one page. Tag filtering now works for SERVICE (and other non-HOST) entity types too, not only HOST. Clicking "Add Entity" no longer pre-fetches a throwaway list of 500 services — the first fetch happens when you pick an entity type.
+
 ## [0.2.61.92] - 2026-07-21
 
 ### Fixed

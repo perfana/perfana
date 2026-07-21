@@ -444,7 +444,7 @@ export class DynatraceService {
    * Note: DynatraceConfig entity does not have organization_id yet, so access checks are not applied.
    * Full access permission checks will be enabled when Phase 4 adds organization_id column.
    */
-  async fetchEntities(userId: string, _roles: string[], entityType?: string, entityName?: string, dynatraceConfigId?: string) {
+  async fetchEntities(userId: string, _roles: string[], entityType?: string, entityName?: string, dynatraceConfigId?: string, tagKey?: string, tagValue?: string) {
     // Log authorization context for debugging
     this.logger.debug(`fetchEntities: userId=${userId}, dynatraceConfigId=${dynatraceConfigId}`);
 
@@ -466,10 +466,10 @@ export class DynatraceService {
       config = configs[0];
     }
 
-    return this.fetchEntitiesFromHost(config, entityType, entityName);
+    return this.fetchEntitiesFromHost(config, entityType, entityName, tagKey, tagValue);
   }
 
-  private async fetchEntitiesFromHost(config: { host: string; apiToken: string; organizationId: string; useProxy: boolean }, entityType?: string, entityName?: string) {
+  private async fetchEntitiesFromHost(config: { host: string; apiToken: string; organizationId: string; useProxy: boolean }, entityType?: string, entityName?: string, tagKey?: string, tagValue?: string) {
     const { host, apiToken } = config;
     try {
       const baseUrl = this.normalizeUrl(host);
@@ -487,6 +487,14 @@ export class DynatraceService {
         // Sanitize entityName to prevent injection by escaping quotes and backslashes
         const sanitizedEntityName = entityName.replace(/\\/g, '\\\\').replace(/"/g, '\\"');
         conditions.push(`entityName.contains("${sanitizedEntityName}")`);
+      }
+
+      if (tagKey) {
+        // Filter server-side across the whole fleet instead of the fetched page.
+        // Dynatrace tag syntax: tag("key:value") for key+value, tag("key") for key only.
+        const sanitize = (s: string) => s.replace(/\\/g, '\\\\').replace(/"/g, '\\"');
+        const tag = tagValue ? `${sanitize(tagKey)}:${sanitize(tagValue)}` : sanitize(tagKey);
+        conditions.push(`tag("${tag}")`);
       }
 
       if (conditions.length > 0) {

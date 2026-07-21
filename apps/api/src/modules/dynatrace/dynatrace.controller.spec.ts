@@ -502,10 +502,10 @@ describe('DynatraceController', () => {
         };
         service.fetchEntities.mockResolvedValue(mockEntities);
 
-        const result = await controller.fetchEntities(undefined, undefined, undefined, mockUserContext);
+        const result = await controller.fetchEntities(undefined, undefined, undefined, undefined, undefined, mockUserContext);
 
         expect(result).toEqual(mockEntities);
-        expect(service.fetchEntities).toHaveBeenCalledWith(mockUserContext.userId, mockUserContext.roles, undefined, undefined, undefined);
+        expect(service.fetchEntities).toHaveBeenCalledWith(mockUserContext.userId, mockUserContext.roles, undefined, undefined, undefined, undefined, undefined);
       });
 
       it('should fetch entities with entityType filter', async () => {
@@ -517,9 +517,9 @@ describe('DynatraceController', () => {
         };
         service.fetchEntities.mockResolvedValue(mockEntities);
 
-        await controller.fetchEntities('SERVICE', undefined, undefined, mockUserContext);
+        await controller.fetchEntities('SERVICE', undefined, undefined, undefined, undefined, mockUserContext);
 
-        expect(service.fetchEntities).toHaveBeenCalledWith(mockUserContext.userId, mockUserContext.roles, 'SERVICE', undefined, undefined);
+        expect(service.fetchEntities).toHaveBeenCalledWith(mockUserContext.userId, mockUserContext.roles, 'SERVICE', undefined, undefined, undefined, undefined);
       });
 
       it('should fetch entities with entityName filter', async () => {
@@ -531,9 +531,9 @@ describe('DynatraceController', () => {
         };
         service.fetchEntities.mockResolvedValue(mockEntities);
 
-        await controller.fetchEntities(undefined, 'payment-service', undefined, mockUserContext);
+        await controller.fetchEntities(undefined, 'payment-service', undefined, undefined, undefined, mockUserContext);
 
-        expect(service.fetchEntities).toHaveBeenCalledWith(mockUserContext.userId, mockUserContext.roles, undefined, 'payment-service', undefined);
+        expect(service.fetchEntities).toHaveBeenCalledWith(mockUserContext.userId, mockUserContext.roles, undefined, 'payment-service', undefined, undefined, undefined);
       });
 
       it('should fetch entities with dynatraceConfigId', async () => {
@@ -545,9 +545,18 @@ describe('DynatraceController', () => {
         };
         service.fetchEntities.mockResolvedValue(mockEntities);
 
-        await controller.fetchEntities(undefined, undefined, 'config-123', mockUserContext);
+        await controller.fetchEntities(undefined, undefined, 'config-123', undefined, undefined, mockUserContext);
 
-        expect(service.fetchEntities).toHaveBeenCalledWith(mockUserContext.userId, mockUserContext.roles, undefined, undefined, 'config-123');
+        expect(service.fetchEntities).toHaveBeenCalledWith(mockUserContext.userId, mockUserContext.roles, undefined, undefined, 'config-123', undefined, undefined);
+      });
+
+      it('should forward tagKey and tagValue for server-side tag filtering', async () => {
+        const mockEntities = { entities: [], totalCount: 0, pageSize: 500, nextPageKey: null };
+        service.fetchEntities.mockResolvedValue(mockEntities);
+
+        await controller.fetchEntities('HOST', undefined, 'config-123', 'environment', 'prod', mockUserContext);
+
+        expect(service.fetchEntities).toHaveBeenCalledWith(mockUserContext.userId, mockUserContext.roles, 'HOST', undefined, 'config-123', 'environment', 'prod');
       });
 
       it('should handle BadRequestException for API errors', async () => {
@@ -555,7 +564,7 @@ describe('DynatraceController', () => {
           new BadRequestException('Failed to fetch entities')
         );
 
-        await expect(controller.fetchEntities(undefined, undefined, undefined, mockUserContext)).rejects.toThrow(BadRequestException);
+        await expect(controller.fetchEntities(undefined, undefined, undefined, undefined, undefined, mockUserContext)).rejects.toThrow(BadRequestException);
       });
     });
 
@@ -779,7 +788,7 @@ describe('DynatraceController', () => {
       };
       service.fetchEntities.mockResolvedValue(emptyResult);
 
-      const result = await controller.fetchEntities(undefined, undefined, undefined, mockUserContext);
+      const result = await controller.fetchEntities(undefined, undefined, undefined, undefined, undefined, mockUserContext);
 
       expect(result.entities).toHaveLength(0);
       expect(result.totalCount).toBe(0);
