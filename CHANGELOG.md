@@ -4,6 +4,11 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
+## [0.2.61.91] - 2026-07-21
+
+### Fixed
+- **SUT import no longer fails with a phantom "SUT already exists" error.** Three exported tables (`ds_panels`, `ds_change_points`, `ds_control_group_statistics`) use env-local serial-integer primary keys. The import copied those ids verbatim, so the source env's small integer ids collided with whatever the target already had in that range — a guaranteed `23505` regardless of which SUT was being imported. These tables now insert with an explicit column list that omits `id`, letting the target's sequence assign a fresh one (verified none of the three is referenced by a foreign key). The `23505` catch-all also stopped blaming every duplicate on the SUT: it now only reports "SUT already exists — delete it first" when the collision is genuinely on `systems_under_test`, and surfaces the actual table/constraint/detail otherwise.
+
 ## [0.2.61.90] - 2026-07-20
 
 ### Added
