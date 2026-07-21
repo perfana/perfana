@@ -4,6 +4,16 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
+## [0.2.61.94] - 2026-07-21
+
+### Added
+- **The Top 10 Lists tabs (Transactions, Requests, URLs) now have a name filter.** Each tab gets one filter box that narrows the pool *before* the top-10 slice, so searching for a name returns the top 10 matching rows across every dimension table in that tab rather than clipping whatever was already shown. The Requests filter matches request name or URL.
+- **Long URLs no longer blow up row height anywhere they are shown.** URLs render on a single ellipsis-clipped line with a viewer icon beside them; the icon opens a popover with the full URL and a copy-to-clipboard button. Applied to the Top 10 Requests and URLs tabs, the Overview sampler table, the SLO Apdex requests breakdown, the metrics comparison table, and the error analysis table (which replaces its old truncate-plus-tooltip).
+
+### Changed
+- **The Top 10 Requests tab drops the "Show Request Name / URL" toggle.** The URL now shows directly under the request name in the same cell (matching the Overview sampler rows), so you see both at once instead of toggling between them.
+- **The test run details breadcrumb matches the tab typography.** Same weight and size as the Results / Root Cause Analysis / Reporting tabs, so the header reads as one consistent bar.
+
 ## [0.2.61.93] - 2026-07-21
 
 ### Changed
