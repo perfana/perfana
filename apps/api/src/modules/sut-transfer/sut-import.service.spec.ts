@@ -92,6 +92,53 @@ describe('SutImportService (integration)', () => {
     await expect(importService.import(bundle, targetOrg)).rejects.toThrow(/already exists/i);
   });
 
+  it('assigns a fresh serial id for ds_panels instead of colliding on the source id', async () => {
+    // ds_panels.id is an env-local serial int; a source id will already be taken in
+    // the target. Import must drop it and let the sequence assign a new one, not 23505.
+    const fixtureSut = '11111111-0000-0000-0000-000000000009';
+    const manifestSut = '11111111-0000-0000-0000-00000000000a'; // must NOT exist → passes pre-check
+    const gi = '11111111-0000-0000-0000-000000000001';
+    const gd = '11111111-0000-0000-0000-000000000002';
+    const ad = '11111111-0000-0000-0000-000000000003';
+    const panelRunKey = 'serial-collision-run';
+    try {
+      await dataSource.query(`INSERT INTO systems_under_test (id, name, description, organization_id) VALUES ($1,'serial-collision-sut','sc',$2)`, [fixtureSut, targetOrg]);
+      await dataSource.query(`INSERT INTO grafana_instances (id, label, client_url, org_id, organization_id) VALUES ($1,'sc-grafana','https://g.example.com','1',$2)`, [gi, targetOrg]);
+      await dataSource.query(`INSERT INTO grafana_dashboards (id, grafana_instance_id, grafana_id, uid, name, panels, organization_id) VALUES ($1,$2,1,'sc-uid','sc-dash','{}'::jsonb,$3)`, [gd, gi, targetOrg]);
+      await dataSource.query(`INSERT INTO application_dashboards (id, system_under_test_id, test_environment, grafana_instance_id, grafana_dashboard_id, dashboard_name, dashboard_label, organization_id) VALUES ($1,$2,'test',$3,$4,'sc-app','sc-label',$5)`, [ad, fixtureSut, gi, gd, targetOrg]);
+
+      // Seed an existing panel and capture its serial id — the bundle will reuse it.
+      const seeded = await dataSource.query(
+        `INSERT INTO ds_panels (test_run_id, application_dashboard_id, organization_id) VALUES ('existing-run',$1,$2) RETURNING id`,
+        [ad, targetOrg],
+      );
+      const existingId: number = seeded[0].id;
+
+      const lines = [
+        JSON.stringify({ __manifest__: { schemaVersion: 1, sourceSutId: manifestSut, sutName: 'serial-collision' } }),
+        JSON.stringify({ __table__: 'ds_panels' }),
+        // created_at/updated_at mirror a real export row (full rows); the column-explicit
+        // insert takes JSON values verbatim rather than the column default.
+        JSON.stringify({ id: existingId, test_run_id: panelRunKey, application_dashboard_id: ad, organization_id: srcOrg, created_at: '2026-01-01T00:00:00Z', updated_at: '2026-01-01T00:00:00Z' }),
+      ];
+      const bundle = gzipSync(Buffer.from(lines.join('\n') + '\n'));
+
+      const summary = await importService.import(bundle, targetOrg);
+      expect(summary.rowCounts['ds_panels']).toBe(1);
+
+      const imported = await dataSource.query(`SELECT id, organization_id FROM ds_panels WHERE test_run_id = $1`, [panelRunKey]);
+      expect(imported).toHaveLength(1);
+      expect(imported[0].id).not.toBe(existingId); // fresh serial id, not the colliding source id
+      expect(imported[0].organization_id).toBe(targetOrg); // org still remapped
+    } finally {
+      await dataSource.query(`DELETE FROM ds_panels WHERE test_run_id IN ('existing-run', $1)`, [panelRunKey]);
+      await dataSource.query(`DELETE FROM application_dashboards WHERE id = $1`, [ad]);
+      await dataSource.query(`DELETE FROM grafana_dashboards WHERE id = $1`, [gd]);
+      await dataSource.query(`DELETE FROM grafana_instances WHERE id = $1`, [gi]);
+      await dataSource.query(`DELETE FROM systems_under_test WHERE id = $1`, [fixtureSut]);
+    }
+  });
+
   it('rejects a bundle that targets a table outside the allowlist (SQL trust boundary)', async () => {
     const evilSutId = 'bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb';
     const lines = [
