@@ -4,6 +4,11 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
+## [0.2.61.97] - 2026-07-22
+
+### Fixed
+- **The "Add SLO" (and "Edit SLO") Dynatrace metric dropdown is no longer empty when the config page's selected workload differs from the one that collected the data.** The SLO dialog filtered the available Dynatrace dashboards/metrics by the page's auto-selected environment *and workload*, but a Dynatrace dashboard's panels are identical across workloads — so a workload that never had a Dynatrace test run (e.g. the alphabetically-first workload auto-selected on page load) returned zero rows and blanked the dropdown, even though the same dashboard's metrics resolved fine in the Trends/Compare/Graphs cards (which derive the workload from the actual test run). The Dynatrace SLO lookups (`queries/dashboards`, `queries/metrics`, and the `checkDynatraceDataExists` gate) are now workload-agnostic, matching how the dialog's Grafana and performance-metrics branches already worked. `workload` became an optional filter across the shared endpoints, so the Trends/Compare/Graphs cards keep passing it and their behavior is unchanged; the saved benchmark still carries the page's workload. This is distinct from the 0.2.61.96 `_key` rendering fix — that bug blanked the dropdown everywhere; this one only bit environments whose SUT has more than one workload.
+
 ## [0.2.61.96] - 2026-07-22
 
 ### Added

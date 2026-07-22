@@ -72,15 +72,15 @@ export function useEditSLOForm({
     }
   }, [systemId, environment]);
 
-  // Fetch Dynatrace dashboards
+  // Fetch Dynatrace dashboards (workload-agnostic — see useAddSLOForm)
   const fetchDynatraceDashboardsForSlo = useCallback(async () => {
-    if (!systemId || !environment || !workload) {
+    if (!systemId || !environment) {
       return;
     }
 
     try {
       setDashboardsLoading(true);
-      const dashboardsData = await fetchDynatraceDashboards(systemId, environment, workload);
+      const dashboardsData = await fetchDynatraceDashboards(systemId, environment);
       setAvailableDynatraceDashboards(dashboardsData);
     } catch (error) {
       console.error('Error fetching Dynatrace dashboards for SLO:', error);
@@ -88,18 +88,18 @@ export function useEditSLOForm({
     } finally {
       setDashboardsLoading(false);
     }
-  }, [systemId, environment, workload]);
+  }, [systemId, environment]);
 
-  // Fetch Dynatrace metrics
+  // Fetch Dynatrace metrics (workload-agnostic — see useAddSLOForm)
   const fetchDynatraceMetricsForSlo = useCallback(
     async (dashboardLabel: string) => {
-      if (!systemId || !environment || !workload || !dashboardLabel) {
+      if (!systemId || !environment || !dashboardLabel) {
         return;
       }
 
       try {
         setPanelsLoading(true);
-        const metricsData = await fetchDynatraceMetrics(systemId, environment, workload, dashboardLabel);
+        const metricsData = await fetchDynatraceMetrics(systemId, environment, undefined, dashboardLabel);
         setAvailableDynatraceMetrics(metricsData);
       } catch (error) {
         console.error('Error fetching Dynatrace metrics for SLO:', error);
@@ -108,7 +108,7 @@ export function useEditSLOForm({
         setPanelsLoading(false);
       }
     },
-    [systemId, environment, workload]
+    [systemId, environment]
   );
 
   // Fetch Grafana dashboard panels

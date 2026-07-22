@@ -316,13 +316,10 @@ export interface DynatraceMetric {
 export async function fetchDynatraceDashboards(
   systemId: string,
   environment: string,
-  workload: string
+  workload?: string
 ): Promise<DynatraceDashboard[]> {
-  const params = new URLSearchParams({
-    systemId,
-    environment,
-    workload
-  })
+  const params = new URLSearchParams({ systemId, environment })
+  if (workload) params.append('workload', workload)
 
   const response = await authenticatedFetch(`/dynatrace/queries/dashboards?${params.toString()}`, {
     method: 'GET',
@@ -343,15 +340,11 @@ export async function fetchDynatraceDashboards(
 export async function fetchDynatraceMetrics(
   systemId: string,
   environment: string,
-  workload: string,
+  workload: string | undefined,
   dashboardLabel: string
 ): Promise<DynatraceMetric[]> {
-  const params = new URLSearchParams({
-    systemId,
-    environment,
-    workload,
-    dashboardLabel
-  })
+  const params = new URLSearchParams({ systemId, environment, dashboardLabel })
+  if (workload) params.append('workload', workload)
 
   const response = await authenticatedFetch(`/dynatrace/queries/metrics?${params.toString()}`, {
     method: 'GET',
