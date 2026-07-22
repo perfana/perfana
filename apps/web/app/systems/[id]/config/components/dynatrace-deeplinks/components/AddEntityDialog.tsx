@@ -136,11 +136,13 @@ export function AddEntityDialog({
   // HOST feeds the multi-select list; other types feed the tag suggestions only.
   const hostEntities = typeEntities;
 
-  // Tag options are suggestions derived from the currently fetched hosts. Picking
-  // a key/value re-fetches with tag("k:v") pushed into the server entitySelector,
-  // so filtering spans the whole fleet — not just this page. ponytail: a value
-  // that appears ONLY on hosts beyond the first 500-host page won't be offered as
-  // a suggestion until its key narrows the fetch; acceptable for grouping tags.
+  // Tag options are derived from the fetched entities. The API now pages through
+  // the whole fleet (nextPageKey, capped at ENTITIES_MAX_PAGES=20 → 10k entities),
+  // so keys and values reflect every entity, not just the first page. Picking a
+  // key also re-fetches with tag("key") in the server entitySelector, narrowing
+  // the set so values for that key are complete even on large fleets.
+  // ponytail: values living only on entities past the 10k cap still won't show;
+  // narrow with the tag key first. Acceptable — 10k is far beyond real fleets here.
   const tagKeys = Array.from(
     new Set(typeEntities.flatMap((e) => (e.tags || []).map((t) => t.key)))
   ).sort();

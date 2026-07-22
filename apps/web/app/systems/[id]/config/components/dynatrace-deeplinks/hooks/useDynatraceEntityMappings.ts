@@ -179,22 +179,25 @@ export function useDynatraceEntityMappings({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selectedEntityType, searchInput, selectedEntity, selectedTagKey, selectedTagValue]);
 
-  // HOST mode: the tag filter is pushed into the Dynatrace entitySelector so the
-  // whole fleet is filtered server-side (not just the first fetched page). Name
-  // search stays client-side in the dialog. Owns the initial HOST fetch too, so
-  // the dialog's entity-type change must NOT also fetch HOST (would double-fire).
+  // HOST mode: both the tag filter and the name search are pushed into the
+  // Dynatrace entitySelector so the whole fleet is filtered server-side (not just
+  // the fetched page). Name search uses the same >=2-char threshold as the
+  // non-HOST path; below that we fetch the tag-filtered (or full) list. Owns the
+  // initial HOST fetch too, so the dialog's entity-type change must NOT also
+  // fetch HOST (would double-fire).
   useEffect(() => {
     if (selectedEntityType !== 'HOST') {
       return;
     }
 
     const timeoutId = setTimeout(() => {
-      fetchDynatraceEntities('HOST', undefined, selectedTagKey, selectedTagValue);
+      const name = searchInput.trim();
+      fetchDynatraceEntities('HOST', name.length >= 2 ? name : undefined, selectedTagKey, selectedTagValue);
     }, 300);
 
     return () => clearTimeout(timeoutId);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [selectedEntityType, selectedTagKey, selectedTagValue]);
+  }, [selectedEntityType, searchInput, selectedTagKey, selectedTagValue]);
 
   // Cleanup timeout on unmount
   useEffect(() => {

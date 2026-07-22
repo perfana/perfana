@@ -199,3 +199,46 @@ describe('useDynatraceEntityMappings — host query refetch callback', () => {
     expect(onHostQueriesCreated).not.toHaveBeenCalled();
   });
 });
+
+describe('useDynatraceEntityMappings — HOST name search hits the server', () => {
+  // Regression: the HOST search field used to filter only client-side over the
+  // fetched page. It must push the name into the entities endpoint as
+  // entityName (server-side entityName.contains), mirroring the non-HOST path.
+  it('re-fetches with entityName once the search is >=2 chars', async () => {
+    const { result } = await renderLoaded();
+
+    act(() => result.current.setSelectedEntityType('HOST'));
+    act(() => result.current.setSearchInput('web'));
+
+    await waitFor(() => {
+      const hit = mockAuthFetch.mock.calls.some(([url]) => {
+        const u = String(url);
+        return (
+          u.includes('/dynatrace/entities?') &&
+          u.includes('entityType=HOST') &&
+          u.includes('entityName=web')
+        );
+      });
+      expect(hit).toBe(true);
+    });
+  });
+
+  it('does not send entityName for a single-character search', async () => {
+    const { result } = await renderLoaded();
+
+    act(() => result.current.setSelectedEntityType('HOST'));
+    act(() => result.current.setSearchInput('w'));
+
+    // Wait for the debounced HOST fetch to fire, then assert no name was sent.
+    await waitFor(() => {
+      const hostFetch = mockAuthFetch.mock.calls.some(([url]) =>
+        String(url).includes('entityType=HOST'),
+      );
+      expect(hostFetch).toBe(true);
+    });
+    const withName = mockAuthFetch.mock.calls.some(([url]) =>
+      String(url).includes('entityName='),
+    );
+    expect(withName).toBe(false);
+  });
+});
