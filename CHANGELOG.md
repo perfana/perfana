@@ -4,6 +4,14 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
+## [0.2.61.96] - 2026-07-22
+
+### Added
+- **The Dynatrace card's Hosts tab now opens on an overview table of every host** instead of a tab-per-host strip. Each row shows the host's average CPU % and memory % over the test-run window plus a problem indicator (a severity-colored count chip, or "healthy" when there are none), sorted so hosts with problems and higher CPU surface first. Clicking a row drills into the existing per-host detail view (properties, performance graphs, problems), with a "Back to hosts" button to return. A new batch endpoint (`GET /dynatrace/hosts/overview`) aggregates all hosts server-side — two Dynatrace API calls per instance (a split-by-host metrics query and a `type("HOST")` problems query) — and fails soft per instance so one unreachable Dynatrace config never blanks the whole table.
+
+### Fixed
+- **The "Add SLO" metric dropdown for a Dynatrace dashboard is no longer empty.** A lint change had renamed the destructured `key` to `_key` in the Dynatrace metric option renderer but left the JSX referencing the now-undefined `key`, so rendering each option threw and the dropdown showed nothing after a Dynatrace dashboard was selected. The option now uses a stable key derived from the metric, matching the Grafana and performance-metrics branches. (Grafana and performance-metrics dropdowns were unaffected.)
+
 ## [0.2.61.95] - 2026-07-22
 
 ### Fixed

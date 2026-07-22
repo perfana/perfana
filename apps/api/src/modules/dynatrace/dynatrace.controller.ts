@@ -26,7 +26,7 @@ import { UpdateDynatraceQueryDto } from './dto/update-dynatrace-query.dto';
 import { DynatraceQueryDto } from './dto/dynatrace-query.dto';
 import { CreateEntityMappingDto } from './dto/create-entity-mapping.dto';
 import { TestConnectionDto } from './dto/test-connection.dto';
-import { StoreHostPropertiesDto, HostPropertiesResponse, HostMetricsResponse, HostProblemResponse } from './dto/host.dto';
+import { StoreHostPropertiesDto, HostPropertiesResponse, HostMetricsResponse, HostProblemResponse, HostOverviewRow } from './dto/host.dto';
 
 @ApiTags('dynatrace')
 @ApiBearerAuth()
@@ -86,6 +86,50 @@ export class DynatraceController {
   })
   async testConnection(@Body() dto: TestConnectionDto, @UserCtx() _ctx: UserContext) {
     return this.dynatraceService.testConnection(dto.host, dto.apiToken);
+  }
+
+  @Get('hosts/overview')
+  @ApiOperation({ summary: 'Per-host overview (avg CPU/mem + problem flag) for a test-run window' })
+  @ApiResponse({
+    status: 200,
+    description: 'Host overview rows',
+    schema: {
+      type: 'array',
+      items: {
+        type: 'object',
+        properties: {
+          hostId: { type: 'string' },
+          displayName: { type: 'string' },
+          dynatraceConfigId: { type: 'string' },
+          cpuAvg: { type: 'number', nullable: true },
+          memAvg: { type: 'number', nullable: true },
+          problemCount: { type: 'number' },
+          worstSeverity: { type: 'string', nullable: true },
+        },
+      },
+    },
+  })
+  @ApiResponse({ status: 400, description: 'Invalid or missing query parameters' })
+  async getHostsOverview(
+    @Query('systemId') systemId: string,
+    @Query('environment') environment: string,
+    @Query('workload') workload: string,
+    @Query('startTime') startTime: string,
+    @Query('endTime') endTime: string,
+    @UserCtx() ctx: UserContext,
+  ): Promise<HostOverviewRow[]> {
+    if (!systemId || !environment || !workload) {
+      throw new BadRequestException('systemId, environment and workload query parameters are required');
+    }
+    if (!startTime || !endTime) {
+      throw new BadRequestException('startTime and endTime query parameters are required');
+    }
+    const start = new Date(startTime);
+    const end = new Date(endTime);
+    if (isNaN(start.getTime()) || isNaN(end.getTime())) {
+      throw new BadRequestException('Invalid date format for startTime or endTime');
+    }
+    return this.dynatraceService.fetchHostsOverview(systemId, environment, workload, start, end, ctx.userId, ctx.roles);
   }
 
   // Host Endpoints - Place before parameterized routes to avoid conflicts

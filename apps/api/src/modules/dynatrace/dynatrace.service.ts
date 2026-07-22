@@ -5,7 +5,7 @@ import { UpdateDynatraceConfigDto } from './dto/update-dynatrace-config.dto';
 import { CreateDynatraceQueryDto } from './dto/create-dynatrace-query.dto';
 import { UpdateDynatraceQueryDto } from './dto/update-dynatrace-query.dto';
 import { CreateEntityMappingDto } from './dto/create-entity-mapping.dto';
-import { HostPropertiesResponse, HostMetricsResponse, HostProblemResponse, TimeSeriesData } from './dto/host.dto';
+import { HostPropertiesResponse, HostMetricsResponse, HostProblemResponse, HostOverviewRow, TimeSeriesData } from './dto/host.dto';
 import { AuthorizationService } from '../../common/services/authorization.service';
 import { withOrgFilter } from '../../common/utils/with-org-filter';
 import { OwnedResource, DynatraceQuery, DynatraceEntityMapping } from '@perfana/shared';
@@ -16,6 +16,26 @@ import { AuditService } from '../audit/audit.service';
 import { ProxyResolverService } from '../proxy/proxy-resolver.service';
 import axios from 'axios';
 import { randomUUID } from 'crypto';
+
+// Return type of DynatraceService#proxyOpts — spread into every axios config.
+type DynatraceProxyOpts = { proxy: { host: string; port: number; protocol: string; auth?: { username: string; password: string } } } | Record<string, never>;
+
+// Rough severity ranking so the overview can surface the "worst" problem per host.
+const DT_SEVERITY_RANK: Record<string, number> = {
+  AVAILABILITY: 6,
+  ERROR: 5,
+  PERFORMANCE: 4,
+  RESOURCE_CONTENTION: 3,
+  CUSTOM_ALERT: 2,
+  MONITORING_UNAVAILABLE: 1,
+  INFO: 0,
+};
+
+function worseSeverity(current: string | null, candidate: string | null): string | null {
+  if (!candidate) return current;
+  if (!current) return candidate;
+  return (DT_SEVERITY_RANK[candidate] ?? -1) > (DT_SEVERITY_RANK[current] ?? -1) ? candidate : current;
+}
 
 /**
  * Service responsible for managing Dynatrace configurations, queries, and entity mappings.
@@ -1528,6 +1548,153 @@ export class DynatraceService {
       }
       throw new BadRequestException('Failed to fetch host problems: ' + (error && typeof error === 'object' && 'message' in error ? (error as Error).message : 'Unknown error'));
     }
+  }
+
+  /**
+   * Batch host overview for the Hosts tab: one row per HOST entity mapped to the
+   * given system/environment/workload, with average CPU/mem over [startTime,endTime]
+   * and a count of problems overlapping the window. Hosts are grouped by their own
+   * Dynatrace instance config; each config costs 2 Dynatrace calls. Fails soft per
+   * config so one bad instance never blanks the whole table.
+   */
+  async fetchHostsOverview(
+    systemId: string,
+    environment: string,
+    workload: string,
+    startTime: Date,
+    endTime: Date,
+    userId: string,
+    roles: string[],
+  ): Promise<HostOverviewRow[]> {
+    const mappings = await this.getEntityMappings(userId, roles, systemId, environment, workload);
+    const hosts = (mappings ?? []).filter((m: { entityType: string }) => m.entityType === 'HOST') as Array<{
+      entityId: string;
+      entityDisplayName: string;
+      dynatraceConfigId: string;
+    }>;
+    if (hosts.length === 0) return [];
+
+    // ponytail: 2 Dynatrace calls per DISTINCT config. Usually one config → 2 total.
+    const byConfig = new Map<string, typeof hosts>();
+    for (const h of hosts) {
+      const list = byConfig.get(h.dynatraceConfigId) ?? [];
+      list.push(h);
+      byConfig.set(h.dynatraceConfigId, list);
+    }
+
+    const from = startTime.toISOString();
+    const to = endTime.toISOString();
+    const rows: HostOverviewRow[] = [];
+
+    for (const [configId, configHosts] of byConfig) {
+      const base = configHosts.map((h) => ({
+        hostId: h.entityId,
+        displayName: h.entityDisplayName,
+        dynatraceConfigId: configId,
+      }));
+      try {
+        const config = await this.repository.findById(configId);
+        if (!config) throw new Error(`Dynatrace configuration ${configId} not found`);
+
+        const baseUrl = this.normalizeUrl(config.host);
+        const proxyOpts = await this.proxyOpts(config);
+        const entityIds = configHosts.map((h) => `"${h.entityId}"`).join(',');
+        const entitySelector = `type("HOST"),entityId(${entityIds})`;
+
+        const [cpuMap, memMap, problemsMap] = await Promise.all([
+          this.queryHostMetricAverages(baseUrl, config.apiToken, 'builtin:host.cpu.usage', entitySelector, from, to, proxyOpts),
+          this.queryHostMetricAverages(baseUrl, config.apiToken, 'builtin:host.mem.usage', entitySelector, from, to, proxyOpts),
+          this.queryHostProblemCounts(baseUrl, config.apiToken, entitySelector, from, to, proxyOpts),
+        ]);
+
+        for (const b of base) {
+          const p = problemsMap.get(b.hostId);
+          rows.push({
+            ...b,
+            cpuAvg: cpuMap.get(b.hostId) ?? null,
+            memAvg: memMap.get(b.hostId) ?? null,
+            problemCount: p?.count ?? 0,
+            worstSeverity: p?.worst ?? null,
+          });
+        }
+      } catch (error) {
+        this.logger.warn(`fetchHostsOverview: failed for config ${configId}`, {
+          error: error && typeof error === 'object' && 'message' in error ? (error as Error).message : 'Unknown error',
+        });
+        for (const b of base) {
+          rows.push({ ...b, cpuAvg: null, memAvg: null, problemCount: 0, worstSeverity: null });
+        }
+      }
+    }
+
+    return rows;
+  }
+
+  /** One /metrics/query call → Map<hostId, avgValue> over the window (resolution=Inf gives one value per host). */
+  private async queryHostMetricAverages(
+    baseUrl: string,
+    apiToken: string,
+    metric: string,
+    entitySelector: string,
+    from: string,
+    to: string,
+    proxyOpts: DynatraceProxyOpts,
+  ): Promise<Map<string, number>> {
+    const map = new Map<string, number>();
+    const response = await axios.get(`${baseUrl}/api/v2/metrics/query`, {
+      headers: { Authorization: `Api-Token ${apiToken}`, 'Content-Type': 'application/json' },
+      params: {
+        metricSelector: `${metric}:splitBy("dt.entity.host"):avg`,
+        entitySelector,
+        from,
+        to,
+        resolution: 'Inf',
+      },
+      timeout: DynatraceService.DEFAULT_TIMEOUT_MS,
+      ...proxyOpts,
+    });
+
+    const series = response.data?.result?.[0]?.data ?? [];
+    for (const s of series) {
+      const hostId: string | undefined = s?.dimensionMap?.['dt.entity.host'] ?? s?.dimensions?.[0];
+      if (!hostId) continue;
+      const value = (s?.values ?? []).find((v: number | null) => v !== null && v !== undefined);
+      if (typeof value === 'number') map.set(hostId, value);
+    }
+    return map;
+  }
+
+  /** One /problems call → Map<hostId, {count, worst}> for problems overlapping the window. */
+  private async queryHostProblemCounts(
+    baseUrl: string,
+    apiToken: string,
+    entitySelector: string,
+    from: string,
+    to: string,
+    proxyOpts: DynatraceProxyOpts,
+  ): Promise<Map<string, { count: number; worst: string | null }>> {
+    const map = new Map<string, { count: number; worst: string | null }>();
+    const response = await axios.get(`${baseUrl}/api/v2/problems`, {
+      headers: { Authorization: `Api-Token ${apiToken}`, 'Content-Type': 'application/json' },
+      params: { entitySelector, from, to, fields: '+affectedEntities' },
+      timeout: DynatraceService.DEFAULT_TIMEOUT_MS,
+      ...proxyOpts,
+    });
+
+    const problems = response.data?.problems ?? [];
+    for (const problem of problems) {
+      const severity: string | null = problem?.severityLevel ?? null;
+      const affected = problem?.affectedEntities ?? [];
+      for (const e of affected) {
+        const id: string | undefined = e?.entityId?.id;
+        if (!id) continue;
+        const cur = map.get(id) ?? { count: 0, worst: null };
+        cur.count += 1;
+        cur.worst = worseSeverity(cur.worst, severity);
+        map.set(id, cur);
+      }
+    }
+    return map;
   }
 
   /**

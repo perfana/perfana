@@ -1,10 +1,12 @@
 'use client';
 
-import { useState } from 'react';
-import { Box, Tabs, Tab } from '@mui/material';
+import { useState, useEffect, useCallback } from 'react';
+import { Box, Button } from '@mui/material';
+import ArrowBackIcon from '@mui/icons-material/ArrowBack';
 import { TestRun } from '@/types/test-runs';
-import { DynatraceConfig } from '@/lib/dynatrace';
+import { DynatraceConfig, fetchHostsOverview, HostOverviewRow } from '@/lib/dynatrace';
 import HostDetailPanel from './HostDetailPanel';
+import HostsOverviewTable from './HostsOverviewTable';
 
 interface DynatraceEntityMapping {
   id: string;
@@ -26,86 +28,64 @@ interface HostsTabContentProps {
   configs: DynatraceConfig[];
 }
 
-interface TabPanelProps {
-  children?: React.ReactNode;
-  index: number;
-  value: number;
-}
+export default function HostsTabContent({ hostEntities, testRun, configs }: HostsTabContentProps) {
+  const [selectedHostId, setSelectedHostId] = useState<string | null>(null);
+  const [rows, setRows] = useState<HostOverviewRow[]>([]);
+  const [loading, setLoading] = useState(false);
 
-function TabPanel(props: TabPanelProps) {
-  const { children, value, index, ...other } = props;
+  const first = hostEntities[0];
 
-  return (
-    <div
-      role="tabpanel"
-      hidden={value !== index}
-      id={`host-tabpanel-${index}`}
-      aria-labelledby={`host-tab-${index}`}
-      {...other}
-    >
-      {value === index && <Box sx={{ pt: 3 }}>{children}</Box>}
-    </div>
-  );
-}
+  const loadOverview = useCallback(async () => {
+    if (!first || !testRun.start_time || !testRun.end_time) {
+      setRows([]);
+      return;
+    }
+    try {
+      setLoading(true);
+      const data = await fetchHostsOverview(
+        first.systemUnderTestId,
+        first.testEnvironment ?? '',
+        first.workload ?? '',
+        testRun.start_time,
+        testRun.end_time,
+      );
+      setRows(data);
+    } catch (error) {
+      console.error('Failed to fetch host overview:', error);
+      setRows([]);
+    } finally {
+      setLoading(false);
+    }
+  }, [first, testRun.start_time, testRun.end_time]);
 
-function a11yProps(index: number) {
-  return {
-    id: `host-tab-${index}`,
-    'aria-controls': `host-tabpanel-${index}`,
-  };
-}
+  useEffect(() => {
+    loadOverview();
+  }, [loadOverview]);
 
-export default function HostsTabContent({
-  hostEntities,
-  testRun,
-  configs
-}: HostsTabContentProps) {
-  const [tabValue, setTabValue] = useState(0);
+  const selectedHost = hostEntities.find((h) => h.entityId === selectedHostId) ?? null;
 
-  const handleTabChange = (event: React.SyntheticEvent, newValue: number) => {
-    setTabValue(newValue);
-  };
-
-  const getHostColor = () => 'rgba(76, 175, 80, 0.8)'; // Green for hosts
-
-  return (
-    <Box>
-      {/* Host tabs */}
-      <Box sx={{ borderBottom: 1, borderColor: 'divider' }}>
-        <Tabs
-          value={tabValue}
-          onChange={handleTabChange}
-          aria-label="host tabs"
-          variant="scrollable"
-          scrollButtons="auto"
-        >
-          {hostEntities.map((host, index) => (
-            <Tab
-              key={host.id}
-              label={host.entityDisplayName}
-              {...a11yProps(index)}
-              sx={{
-                color: getHostColor(),
-                '&.Mui-selected': {
-                  color: getHostColor(),
-                }
-              }}
-            />
-          ))}
-        </Tabs>
+  if (selectedHost) {
+    return (
+      <Box>
+        <Button startIcon={<ArrowBackIcon />} onClick={() => setSelectedHostId(null)} sx={{ mb: 2 }}>
+          Back to hosts
+        </Button>
+        <HostDetailPanel
+          host={selectedHost}
+          testRun={testRun}
+          // Each host belongs to a specific Dynatrace instance; use its own config, not always the first
+          config={configs.find((c) => c.id === selectedHost.dynatraceConfigId) ?? configs[0]}
+        />
       </Box>
+    );
+  }
 
-      {/* Tab panels */}
-      {hostEntities.map((host, index) => (
-        <TabPanel key={host.id} value={tabValue} index={index}>
-          <HostDetailPanel
-            host={host}
-            testRun={testRun}
-            // Each host belongs to a specific Dynatrace instance; use its own config, not always the first
-            config={configs.find(c => c.id === host.dynatraceConfigId) ?? configs[0]}
-          />
-        </TabPanel>
-      ))}
-    </Box>
+  return (
+    <HostsOverviewTable
+      hosts={hostEntities}
+      rows={rows}
+      loading={loading}
+      onSelectHost={setSelectedHostId}
+    />
   );
 }

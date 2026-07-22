@@ -1584,4 +1584,78 @@ describe('DynatraceService', () => {
       });
     });
   });
+
+  describe('fetchHostsOverview', () => {
+    const start = new Date('2026-07-22T10:00:00.000Z');
+    const end = new Date('2026-07-22T10:30:00.000Z');
+
+    const hostMappings = [
+      { id: 'm1', entityId: 'HOST-A', entityType: 'HOST', entityDisplayName: 'web-1', dynatraceConfigId: 'config-123' },
+      { id: 'm2', entityId: 'HOST-B', entityType: 'HOST', entityDisplayName: 'web-2', dynatraceConfigId: 'config-123' },
+      { id: 'm3', entityId: 'SERVICE-X', entityType: 'SERVICE', entityDisplayName: 'svc', dynatraceConfigId: 'config-123' },
+    ];
+
+    const metricSeries = (hostId: string, value: number) => ({
+      dimensionMap: { 'dt.entity.host': hostId },
+      dimensions: [hostId],
+      values: [value],
+    });
+
+    it('returns avg CPU/mem and problem flag per host, ignoring non-HOST mappings', async () => {
+      repository.getEntityMappings.mockResolvedValue(hostMappings as never);
+      repository.findById.mockResolvedValue(mockDynatraceConfig as never);
+      mockedAxios.get.mockImplementation((url: string) => {
+        if (url.endsWith('/api/v2/metrics/query')) {
+          // First call = CPU, second = memory; return both hosts each time with distinct values
+          return Promise.resolve({ data: { result: [{ data: [metricSeries('HOST-A', 42), metricSeries('HOST-B', 17)] }] } });
+        }
+        if (url.endsWith('/api/v2/problems')) {
+          return Promise.resolve({ data: { problems: [
+            { severityLevel: 'PERFORMANCE', affectedEntities: [{ entityId: { id: 'HOST-A' } }] },
+            { severityLevel: 'AVAILABILITY', affectedEntities: [{ entityId: { id: 'HOST-A' } }] },
+          ] } });
+        }
+        return Promise.resolve({ data: {} });
+      });
+
+      const rows = await service.fetchHostsOverview('sys-1', 'prod', 'load', start, end, mockUserId, mockRoles);
+
+      expect(rows).toHaveLength(2);
+      const a = rows.find(r => r.hostId === 'HOST-A')!;
+      expect(a).toMatchObject({ displayName: 'web-1', cpuAvg: 42, memAvg: 42, problemCount: 2, worstSeverity: 'AVAILABILITY' });
+      const b = rows.find(r => r.hostId === 'HOST-B')!;
+      expect(b).toMatchObject({ displayName: 'web-2', cpuAvg: 17, memAvg: 17, problemCount: 0, worstSeverity: null });
+
+      expect(mockedAxios.get).toHaveBeenCalledWith(
+        expect.stringContaining('/api/v2/problems'),
+        expect.objectContaining({ params: expect.objectContaining({ fields: '+affectedEntities' }) }),
+      );
+    });
+
+    it('returns [] when there are no HOST mappings', async () => {
+      repository.getEntityMappings.mockResolvedValue([
+        { id: 'm3', entityId: 'SERVICE-X', entityType: 'SERVICE', entityDisplayName: 'svc', dynatraceConfigId: 'config-123' },
+      ] as never);
+      const rows = await service.fetchHostsOverview('sys-1', 'prod', 'load', start, end, mockUserId, mockRoles);
+      expect(rows).toEqual([]);
+      expect(repository.findById).not.toHaveBeenCalled();
+    });
+
+    it('null-fills metrics for hosts with no metric data', async () => {
+      repository.getEntityMappings.mockResolvedValue([hostMappings[0]] as never);
+      repository.findById.mockResolvedValue(mockDynatraceConfig as never);
+      mockedAxios.get.mockResolvedValue({ data: { result: [{ data: [] }], problems: [] } });
+      const rows = await service.fetchHostsOverview('sys-1', 'prod', 'load', start, end, mockUserId, mockRoles);
+      expect(rows[0]).toMatchObject({ hostId: 'HOST-A', cpuAvg: null, memAvg: null, problemCount: 0 });
+    });
+
+    it('fails soft: a config whose Dynatrace call rejects still lists its hosts with null metrics', async () => {
+      repository.getEntityMappings.mockResolvedValue([hostMappings[0]] as never);
+      repository.findById.mockResolvedValue(mockDynatraceConfig as never);
+      mockedAxios.get.mockRejectedValue(new Error('boom'));
+      const rows = await service.fetchHostsOverview('sys-1', 'prod', 'load', start, end, mockUserId, mockRoles);
+      expect(rows).toHaveLength(1);
+      expect(rows[0]).toMatchObject({ hostId: 'HOST-A', cpuAvg: null, memAvg: null, problemCount: 0, worstSeverity: null });
+    });
+  });
 });
