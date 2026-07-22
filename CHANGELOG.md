@@ -4,6 +4,12 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
+## [0.2.61.95] - 2026-07-22
+
+### Fixed
+- **The Dynatrace "Add Entity" tag Value dropdown (and tag Key list) is no longer capped to the first page of entities.** `fetchEntitiesFromHost` requested a single 500-entity page and never followed Dynatrace's `nextPageKey`, so tag values living on entities beyond page 1 were never offered as suggestions. The fetch now pages through the whole fleet via `nextPageKey` (follow-up requests send only the cursor, as the API requires), capped at 20 pages / 10k entities. This applies to every entity type, HOST and SERVICE alike, since the tag suggestions are derived from the fetched entities.
+- **"Search hosts by name" now queries Dynatrace instead of only filtering the loaded page.** In HOST mode the name box filtered client-side over whatever page was already fetched; a host not on that page could never be found. The search now pushes the name into the entities endpoint (`entityName.contains(...)`) with a 2-character threshold, matching what the non-HOST entity search already did — so you can find any host by name regardless of fleet size.
+
 ## [0.2.61.94] - 2026-07-21
 
 ### Added

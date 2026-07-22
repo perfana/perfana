@@ -432,10 +432,52 @@ describe('DynatraceService', () => {
         expect(result).toEqual({
           entities: [{ entityId: 'entity-1', displayName: 'Service 1', type: 'SERVICE' }],
           totalCount: 1,
-          pageSize: 500,
+          pageSize: 1,
           nextPageKey: null,
         });
         expect(repository.findById).toHaveBeenCalledWith('config-123');
+      });
+
+      it('should follow nextPageKey and aggregate entities across all pages', async () => {
+        // Regression: tag key/value dropdowns were parsed from page 1 only, so a
+        // tag value living on a later page was never offered. The fetch must page
+        // through the whole fleet, and Dynatrace requires follow-up requests to
+        // send ONLY nextPageKey (no entitySelector/pageSize/fields).
+        repository.findById.mockResolvedValue(mockDynatraceConfig);
+        mockedAxios.get
+          .mockResolvedValueOnce({
+            data: {
+              entities: [{ entityId: 'host-1', displayName: 'Host 1', type: 'HOST' }],
+              totalCount: 2,
+              pageSize: 1,
+              nextPageKey: 'PAGE2_CURSOR',
+            },
+          })
+          .mockResolvedValueOnce({
+            data: {
+              entities: [{ entityId: 'host-2', displayName: 'Host 2', type: 'HOST' }],
+              totalCount: 2,
+              pageSize: 1,
+              nextPageKey: null,
+            },
+          });
+
+        const result = await service.fetchEntities(mockUserId, mockRoles, 'HOST', undefined, 'config-123');
+
+        expect(result.entities).toEqual([
+          { entityId: 'host-1', displayName: 'Host 1', type: 'HOST' },
+          { entityId: 'host-2', displayName: 'Host 2', type: 'HOST' },
+        ]);
+        expect(result.totalCount).toBe(2);
+        expect(result.nextPageKey).toBeNull();
+
+        expect(mockedAxios.get).toHaveBeenCalledTimes(2);
+        // First page carries the query params.
+        expect(mockedAxios.get.mock.calls[0][1].params).toEqual(
+          expect.objectContaining({ entitySelector: 'type("HOST")', pageSize: 500 }),
+        );
+        // Follow-up page sends ONLY the cursor.
+        expect(mockedAxios.get.mock.calls[1][1].params).toEqual({ nextPageKey: 'PAGE2_CURSOR' });
       });
 
       it('should fetch entities with filters', async () => {
