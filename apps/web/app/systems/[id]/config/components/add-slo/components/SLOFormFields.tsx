@@ -304,7 +304,7 @@ export function SLOFormFields({
             renderOption={(props, option) => {
               const { key: _key, ...otherProps } = props;
               return (
-                <Box component="li" key={key} {...otherProps}>
+                <Box component="li" key={`dynatrace-metric-${option.panelId}`} {...otherProps}>
                   <Box>
                     <Typography variant="body1">{option.panelTitle}</Typography>
                     <Typography variant="body2" color="text.secondary">
