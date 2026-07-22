@@ -209,15 +209,16 @@ export class DynatraceRepository {
     return results.map(this.mapEntityToDtoFields);
   }
 
-  async findQueryBySystemAndEnvironment(systemId: string, environment: string, workload: string) {
-    const results = await withRequestEm(this.queryRepo)
+  async findQueryBySystemAndEnvironment(systemId: string, environment: string, workload?: string) {
+    const qb = withRequestEm(this.queryRepo)
       .createQueryBuilder('query')
       .leftJoinAndSelect('query.dynatraceConfig', 'config')
       .where('query.systemUnderTestId = :systemId', { systemId })
-      .andWhere('query.testEnvironment = :environment', { environment })
-      .andWhere('query.workload = :workload', { workload })
-      .orderBy('query.createdAt', 'DESC')
-      .getMany();
+      .andWhere('query.testEnvironment = :environment', { environment });
+    // workload is optional: SLO pickers are workload-agnostic (a Dynatrace
+    // dashboard's panels are identical across workloads), cards still pass it.
+    if (workload) qb.andWhere('query.workload = :workload', { workload });
+    const results = await qb.orderBy('query.createdAt', 'DESC').getMany();
     return results.map(this.mapEntityToDtoFields);
   }
 
@@ -466,29 +467,27 @@ export class DynatraceRepository {
   }
 
   // SLO Support Methods
-  async getDistinctDashboardLabels(systemId: string, environment: string, workload: string) {
-    const results = await withRequestEm(this.queryRepo)
+  async getDistinctDashboardLabels(systemId: string, environment: string, workload?: string) {
+    const qb = withRequestEm(this.queryRepo)
       .createQueryBuilder('query')
       .select('DISTINCT query.dashboardLabel', 'dashboardLabel')
       .where('query.systemUnderTestId = :systemId', { systemId })
-      .andWhere('query.testEnvironment = :environment', { environment })
-      .andWhere('query.workload = :workload', { workload })
-      .orderBy('query.dashboardLabel', 'ASC')
-      .getRawMany();
+      .andWhere('query.testEnvironment = :environment', { environment });
+    if (workload) qb.andWhere('query.workload = :workload', { workload });
+    const results = await qb.orderBy('query.dashboardLabel', 'ASC').getRawMany();
 
     return results.map(row => ({ dashboardLabel: row.dashboardLabel }));
   }
 
-  async getPanelTitlesForDashboard(systemId: string, environment: string, workload: string, dashboardLabel: string) {
-    const results = await withRequestEm(this.queryRepo)
+  async getPanelTitlesForDashboard(systemId: string, environment: string, workload: string | undefined, dashboardLabel: string) {
+    const qb = withRequestEm(this.queryRepo)
       .createQueryBuilder('query')
       .select(['query.panelTitle', 'query.panelId', 'query.applicationDashboardId', 'query.metricsSourceId', 'query.metricUnit'])
       .where('query.systemUnderTestId = :systemId', { systemId })
       .andWhere('query.testEnvironment = :environment', { environment })
-      .andWhere('query.workload = :workload', { workload })
-      .andWhere('query.dashboardLabel = :dashboardLabel', { dashboardLabel })
-      .orderBy('query.panelTitle', 'ASC')
-      .getMany();
+      .andWhere('query.dashboardLabel = :dashboardLabel', { dashboardLabel });
+    if (workload) qb.andWhere('query.workload = :workload', { workload });
+    const results = await qb.orderBy('query.panelTitle', 'ASC').getMany();
 
     // Remove duplicates based on panel_title
     const uniqueItems = Array.from(

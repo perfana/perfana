@@ -289,7 +289,7 @@ describe('DynatraceController', () => {
         );
       });
 
-      it('should throw BadRequestException when required parameters missing', async () => {
+      it('should throw BadRequestException when systemId or environment missing', async () => {
         await expect(
           controller.getDashboardsForSlo('', 'production', 'load-test', mockUserContext)
         ).rejects.toThrow(BadRequestException);
@@ -297,10 +297,14 @@ describe('DynatraceController', () => {
         await expect(
           controller.getDashboardsForSlo('sys-123', '', 'load-test', mockUserContext)
         ).rejects.toThrow(BadRequestException);
+      });
+
+      it('should accept a missing workload (SLO pickers are workload-agnostic)', async () => {
+        service.getDistinctDashboardLabels.mockResolvedValue([]);
 
         await expect(
           controller.getDashboardsForSlo('sys-123', 'production', '', mockUserContext)
-        ).rejects.toThrow(BadRequestException);
+        ).resolves.toEqual([]);
       });
     });
 

@@ -355,7 +355,7 @@ export class DynatraceController {
     @Query('workload') workload?: string,
     @UserCtx() ctx?: UserContext,
   ) {
-    if (systemId && environment && workload) {
+    if (systemId && environment) {
       return this.dynatraceService.findQueryBySystemAndEnvironment(systemId, environment, workload, ctx?.userId ?? '', ctx?.roles ?? []);
     }
     return this.dynatraceService.findAllQuery(ctx?.userId ?? '', ctx?.roles ?? []);
@@ -371,11 +371,11 @@ export class DynatraceController {
   async getDashboardsForSlo(
     @Query('systemId') systemId: string,
     @Query('environment') environment: string,
-    @Query('workload') workload: string,
+    @Query('workload') workload: string | undefined,
     @UserCtx() ctx: UserContext,
   ) {
-    if (!systemId || !environment || !workload) {
-      throw new BadRequestException(`Missing required parameters: systemId=${systemId}, environment=${environment}, workload=${workload}`);
+    if (!systemId || !environment) {
+      throw new BadRequestException(`Missing required parameters: systemId=${systemId}, environment=${environment}`);
     }
     const result = await this.dynatraceService.getDistinctDashboardLabels(systemId, environment, workload, ctx.userId, ctx.roles);
     this.logger.debug('GET /queries/dashboards response', { count: result.length, result });
@@ -392,7 +392,7 @@ export class DynatraceController {
   async getMetricsForSlo(
     @Query('systemId') systemId: string,
     @Query('environment') environment: string,
-    @Query('workload') workload: string,
+    @Query('workload') workload: string | undefined,
     @Query('dashboardLabel') dashboardLabel: string,
     @UserCtx() ctx: UserContext,
   ) {
