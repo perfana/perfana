@@ -1625,6 +1625,11 @@ describe('DynatraceService', () => {
       expect(a).toMatchObject({ displayName: 'web-1', cpuAvg: 42, memAvg: 42, problemCount: 2, worstSeverity: 'AVAILABILITY' });
       const b = rows.find(r => r.hostId === 'HOST-B')!;
       expect(b).toMatchObject({ displayName: 'web-2', cpuAvg: 17, memAvg: 17, problemCount: 0, worstSeverity: null });
+
+      expect(mockedAxios.get).toHaveBeenCalledWith(
+        expect.stringContaining('/api/v2/problems'),
+        expect.objectContaining({ params: expect.objectContaining({ fields: '+affectedEntities' }) }),
+      );
     });
 
     it('returns [] when there are no HOST mappings', async () => {

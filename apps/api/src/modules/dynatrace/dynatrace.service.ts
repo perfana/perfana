@@ -1676,7 +1676,7 @@ export class DynatraceService {
     const map = new Map<string, { count: number; worst: string | null }>();
     const response = await axios.get(`${baseUrl}/api/v2/problems`, {
       headers: { Authorization: `Api-Token ${apiToken}`, 'Content-Type': 'application/json' },
-      params: { entitySelector, from, to, fields: 'affectedEntities' },
+      params: { entitySelector, from, to, fields: '+affectedEntities' },
       timeout: DynatraceService.DEFAULT_TIMEOUT_MS,
       ...proxyOpts,
     });
