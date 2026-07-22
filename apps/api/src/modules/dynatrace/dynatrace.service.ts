@@ -33,6 +33,9 @@ export class DynatraceService {
   // HTTP timeout constants (in milliseconds)
   private static readonly DEFAULT_TIMEOUT_MS = 10000;  // 10 seconds
   private static readonly ENTITIES_API_TIMEOUT_MS = 15000;  // 15 seconds
+  // Max entities-API pages to follow (500 entities/page = 10k entity cap). Bounds
+  // the fleet-wide tag scan so a huge environment can't spin forever.
+  private static readonly ENTITIES_MAX_PAGES = 20;
 
   constructor(
     private readonly repository: DynatraceRepository,
@@ -512,43 +515,71 @@ export class DynatraceService {
         hasTokenLength: apiToken ? apiToken.length : 0
       });
 
-      const response = await axios.get(requestUrl, {
-        headers: {
-          Authorization: `Api-Token ${apiToken}`,
-          'Content-Type': 'application/json',
-        },
-        timeout: DynatraceService.ENTITIES_API_TIMEOUT_MS,
-        params: {
-          // Add some basic filters to limit the response size
-          pageSize: 500,
-          entitySelector: entitySelector,
-          // v2 entities API omits tags unless requested; '+tags' adds to the default fields
-          fields: '+tags'
-        },
-        ...(await this.proxyOpts(config)),
-      });
+      const proxyOpts = await this.proxyOpts(config);
+      const headers = {
+        Authorization: `Api-Token ${apiToken}`,
+        'Content-Type': 'application/json',
+      };
 
-      if (!response.data) {
-        throw new BadRequestException('Invalid response from Dynatrace entities API');
+      // Dynatrace v2 paging: the FIRST request carries the query params; every
+      // follow-up request must send ONLY nextPageKey (passing entitySelector/
+      // pageSize/fields alongside it returns 400). Follow the cursor so the tag
+      // key/value dropdowns and host list reflect the whole fleet, not just the
+      // first 500-entity page — previously the tag suggestions were parsed from
+      // page 1 only, so a value living on a later page was never offered.
+      const entities: Record<string, unknown>[] = [];
+      let totalCount = 0;
+      let nextPageKey: string | null = null;
+      let page = 0;
+
+      do {
+        const params: Record<string, string | number> = nextPageKey
+          ? { nextPageKey }
+          : {
+              pageSize: 500,
+              entitySelector,
+              // v2 entities API omits tags unless requested; '+tags' adds to the default fields
+              fields: '+tags',
+            };
+
+        const response = await axios.get(requestUrl, {
+          headers,
+          timeout: DynatraceService.ENTITIES_API_TIMEOUT_MS,
+          params,
+          ...proxyOpts,
+        });
+
+        if (!response.data) {
+          throw new BadRequestException('Invalid response from Dynatrace entities API');
+        }
+
+        entities.push(...(response.data.entities || []));
+        totalCount = response.data.totalCount || totalCount;
+        nextPageKey = response.data.nextPageKey || null;
+        page++;
+      } while (nextPageKey && page < DynatraceService.ENTITIES_MAX_PAGES);
+
+      if (nextPageKey) {
+        this.logger.warn(
+          `Dynatrace entities fetch hit the ${DynatraceService.ENTITIES_MAX_PAGES}-page cap ` +
+            `(${entities.length} of ${totalCount}); tag suggestions may be incomplete — narrow with a tag filter.`,
+          { entitySelector },
+        );
       }
 
       this.logger.debug('Dynatrace entities API response', {
-        totalCount: response.data.totalCount,
-        pageSize: response.data.pageSize,
-        entitiesCount: response.data.entities?.length || 0,
-        firstEntity: response.data.entities?.[0] ? {
-          entityId: response.data.entities[0].entityId,
-          displayName: response.data.entities[0].displayName,
-          type: response.data.entities[0].type
-        } : null
+        totalCount,
+        entitiesCount: entities.length,
+        pages: page,
       });
 
-      // Return the response in the expected format
+      // Return the response in the expected format. nextPageKey is null because
+      // the loop already exhausted (or capped) the cursor server-side.
       return {
-        entities: response.data.entities || [],
-        totalCount: response.data.totalCount || 0,
-        pageSize: response.data.pageSize || 0,
-        nextPageKey: response.data.nextPageKey || null
+        entities,
+        totalCount,
+        pageSize: entities.length,
+        nextPageKey: null,
       };
     } catch (error) {
       if (axios.isAxiosError(error)) {
