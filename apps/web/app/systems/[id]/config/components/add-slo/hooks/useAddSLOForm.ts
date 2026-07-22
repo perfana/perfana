@@ -72,15 +72,18 @@ export function useAddSLOForm({
     }
   }, [systemId, environment]);
 
-  // Fetch Dynatrace dashboards
+  // Fetch Dynatrace dashboards.
+  // Workload-agnostic: a Dynatrace dashboard's panels are identical across
+  // workloads, so the SLO picker must not filter by the page's selected
+  // workload (which may be a workload that never had a Dynatrace run).
   const fetchDynatraceDashboardsForSlo = useCallback(async () => {
-    if (!systemId || !environment || !workload) {
+    if (!systemId || !environment) {
       return;
     }
 
     try {
       setDashboardsLoading(true);
-      const dashboardsData = await fetchDynatraceDashboards(systemId, environment, workload);
+      const dashboardsData = await fetchDynatraceDashboards(systemId, environment);
       setAvailableDynatraceDashboards(dashboardsData);
     } catch (error) {
       console.error('Error fetching Dynatrace dashboards for SLO:', error);
@@ -88,18 +91,18 @@ export function useAddSLOForm({
     } finally {
       setDashboardsLoading(false);
     }
-  }, [systemId, environment, workload]);
+  }, [systemId, environment]);
 
   // Fetch Dynatrace metrics
   const fetchDynatraceMetricsForSlo = useCallback(
     async (dashboardLabel: string) => {
-      if (!systemId || !environment || !workload || !dashboardLabel) {
+      if (!systemId || !environment || !dashboardLabel) {
         return;
       }
 
       try {
         setPanelsLoading(true);
-        const metricsData = await fetchDynatraceMetrics(systemId, environment, workload, dashboardLabel);
+        const metricsData = await fetchDynatraceMetrics(systemId, environment, undefined, dashboardLabel);
         setAvailableDynatraceMetrics(metricsData);
       } catch (error) {
         console.error('Error fetching Dynatrace metrics for SLO:', error);
@@ -108,23 +111,23 @@ export function useAddSLOForm({
         setPanelsLoading(false);
       }
     },
-    [systemId, environment, workload]
+    [systemId, environment]
   );
 
   // Check if Dynatrace data exists
   const checkDynatraceDataExists = useCallback(async () => {
-    if (!systemId || !environment || !workload) {
+    if (!systemId || !environment) {
       return false;
     }
 
     try {
-      const queryQueries = await fetchDynatraceQueries(systemId, environment, workload);
+      const queryQueries = await fetchDynatraceQueries(systemId, environment);
       return queryQueries.length > 0;
     } catch (error) {
       console.error('Error checking Dynatrace data existence:', error);
       return false;
     }
-  }, [systemId, environment, workload]);
+  }, [systemId, environment]);
 
   // Fetch Performance metrics dashboards
   const fetchPerfMetricsDashboardsForSlo = useCallback(async () => {

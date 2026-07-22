@@ -756,7 +756,7 @@ export class DynatraceService {
    * Note: DynatraceQuery entity does not have organization_id yet, so access checks are not applied.
    * Full access permission checks will be enabled when Phase 4 adds organization_id column.
    */
-  async findQueryBySystemAndEnvironment(systemId: string, environment: string, workload: string, userId: string, _roles: string[]) {
+  async findQueryBySystemAndEnvironment(systemId: string, environment: string, workload: string | undefined, userId: string, _roles: string[]) {
     // Log authorization context for debugging
     this.logger.debug(`findQueryBySystemAndEnvironment: systemId=${systemId}, environment=${environment}, workload=${workload}, userId=${userId}`);
 
@@ -1059,7 +1059,7 @@ export class DynatraceService {
    * Note: DynatraceQuery entity does not have organization_id yet, so access checks are not applied.
    * Full access permission checks will be enabled when Phase 4 adds organization_id column.
    */
-  async getDistinctDashboardLabels(systemId: string, environment: string, workload: string, userId: string, _roles: string[]) {
+  async getDistinctDashboardLabels(systemId: string, environment: string, workload: string | undefined, userId: string, _roles: string[]) {
     // Log authorization context for debugging
     this.logger.debug(`getDistinctDashboardLabels: systemId=${systemId}, environment=${environment}, workload=${workload}, userId=${userId}`);
 
@@ -1092,7 +1092,7 @@ export class DynatraceService {
    * Note: DynatraceQuery entity does not have organization_id yet, so access checks are not applied.
    * Full access permission checks will be enabled when Phase 4 adds organization_id column.
    */
-  async getPanelTitlesForDashboard(systemId: string, environment: string, workload: string, dashboardLabel: string, userId: string, _roles: string[]) {
+  async getPanelTitlesForDashboard(systemId: string, environment: string, workload: string | undefined, dashboardLabel: string, userId: string, _roles: string[]) {
     // Log authorization context for debugging
     this.logger.debug(`getPanelTitlesForDashboard: systemId=${systemId}, environment=${environment}, workload=${workload}, dashboardLabel=${dashboardLabel}, userId=${userId}`);
 
