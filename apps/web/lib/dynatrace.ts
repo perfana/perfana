@@ -520,3 +520,34 @@ export async function storeHostProperties(
     throw new Error(errorData.message || 'Failed to store host properties')
   }
 }
+
+export interface HostOverviewRow {
+  hostId: string;
+  displayName: string;
+  dynatraceConfigId: string;
+  cpuAvg: number | null;
+  memAvg: number | null;
+  problemCount: number;
+  worstSeverity: string | null;
+}
+
+export async function fetchHostsOverview(
+  systemId: string,
+  environment: string,
+  workload: string,
+  startTime: string,
+  endTime: string,
+): Promise<HostOverviewRow[]> {
+  const params = new URLSearchParams({ systemId, environment, workload, startTime, endTime });
+  const response = await authenticatedFetch(`/dynatrace/hosts/overview?${params.toString()}`, {
+    method: 'GET',
+    headers: { 'Content-Type': 'application/json' },
+  });
+
+  if (!response.ok) {
+    const errorData = await response.json().catch(() => ({}));
+    throw new Error(errorData.message || 'Failed to fetch host overview');
+  }
+
+  return response.json();
+}
