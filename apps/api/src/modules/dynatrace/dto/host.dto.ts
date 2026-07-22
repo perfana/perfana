@@ -57,6 +57,20 @@ export interface HostProblemResponse {
 }
 
 /**
+ * One row of the Hosts-tab overview table: average CPU/mem over the test-run
+ * window plus a problem flag. `null` metric = no data returned for that host.
+ */
+export interface HostOverviewRow {
+  hostId: string;
+  displayName: string;
+  dynatraceConfigId: string;
+  cpuAvg: number | null;
+  memAvg: number | null;
+  problemCount: number;
+  worstSeverity: string | null;
+}
+
+/**
  * DTO for storing host properties as test run configuration
  */
 export class StoreHostPropertiesDto {
