@@ -4,6 +4,14 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
+## [0.2.61.99] - 2026-07-23
+
+### Changed
+- **The Compare card graphs now show the analysis window the same way the SLO graphs do.** Each comparison plot dims the leading ramp-up and trailing ramp-down samples and marks the two boundaries with amber dashed lines, so the clear band in the middle is exactly the window the diff-table statistics are computed over. The diff-table numbers were already analysis-window-scoped — `ds_metric_statistics` aggregates only `ramp_up = false` rows, and the StatisticsPipeline bakes `ramp_up = true` on both the start-offset and end-offset samples — but the graphs still drew the whole run, so a reviewer couldn't see which samples the numbers ignored. The overlay reads the same baked `ramp_up` flag the stats use (falling back to `analysis_start_offset` / `analysis_end_offset` ÷ bucket size when a source's samples carry no flag). No switch and no backend change: the window is always shown. Boundaries are drawn from the current run's window only; the baseline stays overlaid on the shared sample-index axis, matching the pre-existing behavior.
+
+### Fixed
+- **A Compare graph for a run with a trailing analysis offset (`analysis_end_offset > 0`) no longer draws a single misplaced dim band.** The old code scanned for the *last* `ramp_up === true` sample to find the leading ramp-up boundary, but the StatisticsPipeline also flags the trailing ramp-down samples, so that scan landed on a trailing sample and shaded almost the entire plot. The window is now computed from the first and last in-window samples, so both the leading and trailing excluded regions render correctly.
+
 ## [0.2.61.98] - 2026-07-23
 
 ### Fixed
