@@ -21,6 +21,38 @@ interface ComparisonPlotProps {
   showToast: (message: string) => void;
 }
 
+// Amber dashed boundary line, matching the SLO charts (ANALYSIS_BOUNDARY_COLOR).
+const ANALYSIS_BOUNDARY_COLOR = '#f59e0b';
+
+/**
+ * SLO-chart-style analysis-window overlay: dim the leading (0 → startIndex) and
+ * trailing (endIndex → last) excluded regions and mark each boundary with an amber
+ * dashed line. Indices are in sample-index space; `n` is the current run's length.
+ */
+function buildAnalysisWindowShapes(
+  startIndex: number | null,
+  endIndex: number | null,
+  n: number,
+  excludedColor: string,
+) {
+  const shapes: Record<string, unknown>[] = [];
+  const dimRect = (x0: number, x1: number) => ({
+    type: 'rect' as const, x0, x1, y0: 0, y1: 1, yref: 'paper' as const,
+    line: { width: 0 }, fillcolor: excludedColor, layer: 'below' as const, opacity: 0.3,
+  });
+  const boundaryLine = (x: number) => ({
+    type: 'line' as const, x0: x, x1: x, y0: 0, y1: 1, yref: 'paper' as const,
+    line: { color: ANALYSIS_BOUNDARY_COLOR, width: 1.5, dash: 'dash' as const }, layer: 'below' as const,
+  });
+  if (startIndex !== null && startIndex > 0) {
+    shapes.push(dimRect(0, startIndex), boundaryLine(startIndex));
+  }
+  if (endIndex !== null && endIndex < n - 1) {
+    shapes.push(dimRect(endIndex, n - 1), boundaryLine(endIndex));
+  }
+  return shapes;
+}
+
 /**
  * Generate Plotly props for comparison chart
  */
@@ -95,26 +127,41 @@ function generatePlotProps(
   const baselineMode: 'lines+markers' | 'lines' = sortedBaselineMetrics.length < 50 ? 'lines+markers' : 'lines';
   const currentMode: 'lines+markers' | 'lines' = sortedCurrentMetrics.length < 50 ? 'lines+markers' : 'lines';
 
-  // Calculate ramp-up end index from sorted data
-  let rampUpEndIndex: number | null = null;
-  if (sortedCurrentMetrics.length > 0) {
-    // Find the last ramp-up point's index in the sorted array
-    for (let i = sortedCurrentMetrics.length - 1; i >= 0; i--) {
-      if (sortedCurrentMetrics[i].ramp_up === true) {
-        rampUpEndIndex = i;
-        break;
+  // Analysis-window boundaries in sample-index space, SLO-chart style: the leading
+  // start-offset and trailing end-offset regions are dimmed, the in-window band is
+  // clear. Computed from the CURRENT run only.
+  // ponytail: baseline is overlaid on the same sample-index axis, so its own window
+  // isn't drawn separately — matching the pre-existing behavior. Per-run windows
+  // would require moving off sample-index alignment to a time axis (out of scope).
+  const n = sortedCurrentMetrics.length;
+  // analysisStartIndex = first in-window sample (dim [0, analysisStartIndex]).
+  // analysisEndIndex   = last in-window sample + 1 (dim [analysisEndIndex, n-1]).
+  let analysisStartIndex: number | null = null;
+  let analysisEndIndex: number | null = null;
+  // The StatisticsPipeline bakes ramp_up=true on BOTH the leading start-offset and
+  // trailing end-offset samples — the exact flag the stats aggregate on — so prefer it.
+  const hasRampFlags = sortedCurrentMetrics.some(d => typeof d.ramp_up === 'boolean');
+  if (n > 0 && hasRampFlags) {
+    const firstInWindow = sortedCurrentMetrics.findIndex(d => d.ramp_up === false);
+    if (firstInWindow !== -1) {
+      let lastInWindow = firstInWindow;
+      for (let i = n - 1; i >= firstInWindow; i--) {
+        if (sortedCurrentMetrics[i].ramp_up === false) { lastInWindow = i; break; }
       }
+      analysisStartIndex = firstInWindow;
+      analysisEndIndex = lastInWindow + 1;
     }
-    // Fallback: Calculate from testRun.analysis_start_offset (seconds) and bucket_size
-    if (rampUpEndIndex === null && testRun?.analysis_start_offset && testRun?.start_time && sortedCurrentMetrics.length >= 2) {
-      const firstTime = new Date(sortedCurrentMetrics[0].time).getTime();
-      const secondTime = new Date(sortedCurrentMetrics[1].time).getTime();
-      const bucketSizeMs = secondTime - firstTime;
-      const bucketSizeSeconds = bucketSizeMs / 1000;
-
-      // Calculate analysis start offset end index, constrained to actual data length
-      const calculatedIndex = Math.floor(testRun.analysis_start_offset / bucketSizeSeconds);
-      rampUpEndIndex = Math.min(calculatedIndex, sortedCurrentMetrics.length - 1);
+  } else if (n >= 2 && testRun?.start_time) {
+    // Fallback (samples carry no ramp_up flag): derive indices from the offsets.
+    const bucketSizeSeconds =
+      (new Date(sortedCurrentMetrics[1].time).getTime() - new Date(sortedCurrentMetrics[0].time).getTime()) / 1000;
+    if (bucketSizeSeconds > 0) {
+      if (testRun.analysis_start_offset) {
+        analysisStartIndex = Math.min(Math.floor(testRun.analysis_start_offset / bucketSizeSeconds), n - 1);
+      }
+      if (testRun.analysis_end_offset) {
+        analysisEndIndex = Math.max(0, n - Math.floor(testRun.analysis_end_offset / bucketSizeSeconds));
+      }
     }
   }
 
@@ -270,18 +317,7 @@ function generatePlotProps(
     },
     margin: { t: 40, b: 70, l: 60, r: 20 },
     height: 480,
-    shapes: rampUpEndIndex !== null ? [{
-      type: 'rect' as const,
-      x0: 0,
-      y0: 0,
-      x1: rampUpEndIndex,
-      y1: 1,
-      yref: 'paper' as const,
-      line: { width: 0 },
-      fillcolor: gridColor,
-      layer: 'below' as const,
-      opacity: 0.15
-    }] : []
+    shapes: buildAnalysisWindowShapes(analysisStartIndex, analysisEndIndex, n, gridColor),
   };
 
   const config = {
