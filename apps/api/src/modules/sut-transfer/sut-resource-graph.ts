@@ -42,6 +42,20 @@ export const SUT_RESOURCES: SutResource[] = [
                   UNION
                   SELECT dynatrace_config_id FROM dynatrace_queries WHERE system_under_test_id = $1
                 )` },
+  // generated_reports.template_id → report_templates(id) is NOT NULL, so the
+  // parent template must ship in the bundle or the import FK-violates. Templates
+  // are scoped by system_id (SUT name) but can also be '*' (global, shared across
+  // SUTs), so we can't filter by name — export exactly the templates referenced
+  // by this SUT's generated_reports (superset of the selected runs → full cover).
+  // Shared (not SUT-owned): imported ON CONFLICT DO NOTHING and, like
+  // grafana_dashboards, deliberately NOT removed by the SUT delete cascade.
+  { table: 'report_templates', filter: 'byReference', group: 'shared',
+    customSql: `SELECT row_to_json(t) AS r FROM report_templates t
+                WHERE t.id IN (
+                  SELECT DISTINCT gr.template_id FROM generated_reports gr
+                  JOIN test_runs tr ON tr.id = gr.test_run_id
+                  WHERE tr.system_under_test_id = $1
+                )` },
 
   // --- the SUT itself ---
   { table: 'systems_under_test', filter: 'bySut', group: 'core' },

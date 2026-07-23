@@ -10,6 +10,7 @@ describe('SUT_RESOURCES', () => {
     // If you add a table to the delete cascade, add it here too.
     const expected = [
       'pyroscope_instances', 'grafana_instances', 'grafana_dashboards', 'dynatrace_configs',
+      'report_templates',
       'systems_under_test', 'metrics_sources', 'test_runs', 'application_dashboards',
       'benchmarks', 'expected_config_changes', 'events', 'tracing_services',
       'deep_links', 'notification_channels', 'dynatrace_entity_mappings',
@@ -48,6 +49,8 @@ describe('SUT_RESOURCES', () => {
     expect(idx('dynatrace_configs')).toBeLessThan(idx('dynatrace_entity_mappings'));
     expect(idx('dynatrace_configs')).toBeLessThan(idx('dynatrace_queries'));
     expect(idx('application_dashboards')).toBeLessThan(idx('ds_control_group_statistics'));
+    // report_templates is the NOT NULL FK parent of generated_reports.template_id.
+    expect(idx('report_templates')).toBeLessThan(idx('generated_reports'));
   });
 
   it('raw tables are excluded unless includeRaw', () => {
