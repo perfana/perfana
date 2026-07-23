@@ -149,6 +149,18 @@ export class SutImportService {
     const isShared = SHARED_TABLES.has(table);
     const conflict = isShared ? 'ON CONFLICT DO NOTHING' : '';
 
+    // generated_reports.template_id is a NOT NULL FK to report_templates, which
+    // now travels in the bundle. Bundles exported before that fix carry the
+    // reports but not their templates, so those rows would FK-violate the whole
+    // import. Drop the orphans (logged) so the rest of the SUT still lands; a
+    // re-export with the current code brings the templates — and the reports —
+    // back. For self-contained bundles this prunes nothing.
+    const toInsert =
+      table === 'generated_reports'
+        ? await this.dropRowsMissingParent(manager, table, rows, 'template_id', 'report_templates')
+        : rows;
+    if (toInsert.length === 0) return;
+
     if (SERIAL_ID_TABLES.has(table)) {
       // Omit the serial `id` so the target sequence assigns a fresh one, sidestepping
       // the env-local integer-id collision. Column list comes from the catalog (not the
@@ -157,15 +169,44 @@ export class SutImportService {
       const colList = cols.map((c) => `"${c}"`).join(', ');
       await manager.query(
         `INSERT INTO ${table} (${colList}) SELECT ${colList} FROM json_populate_recordset(null::${table}, $1::json) ${conflict}`,
-        [JSON.stringify(rows)],
+        [JSON.stringify(toInsert)],
       );
       return;
     }
 
     await manager.query(
       `INSERT INTO ${table} SELECT * FROM json_populate_recordset(null::${table}, $1::json) ${conflict}`,
-      [JSON.stringify(rows)],
+      [JSON.stringify(toInsert)],
     );
+  }
+
+  // Drop rows whose (NOT NULL) FK column points at a parent row absent from the
+  // target — used for orphaned generated_reports in pre-fix bundles. The parent
+  // table is a trusted literal from the caller; ids are cast to text so this
+  // works regardless of the key type. Logs how many rows were pruned.
+  private async dropRowsMissingParent(
+    manager: EntityManager,
+    table: string,
+    rows: Record<string, unknown>[],
+    column: string,
+    parentTable: string,
+  ): Promise<Record<string, unknown>[]> {
+    const ids = [...new Set(rows.map((r) => r[column]).filter((v) => v != null).map(String))];
+    if (ids.length === 0) return rows;
+    const present: Array<{ id: string }> = await manager.query(
+      `SELECT id::text AS id FROM ${parentTable} WHERE id::text = ANY($1::text[])`,
+      [ids],
+    );
+    const have = new Set(present.map((p) => p.id));
+    const kept = rows.filter((r) => r[column] != null && have.has(String(r[column])));
+    const dropped = rows.length - kept.length;
+    if (dropped > 0) {
+      this.logger.warn(
+        `Dropped ${dropped} ${table} row(s) referencing a missing ${parentTable} — ` +
+          `re-export the SUT with the current version to include them.`,
+      );
+    }
+    return kept;
   }
 
   // Non-id column names for a table, straight from the catalog and cached per table.

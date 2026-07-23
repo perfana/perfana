@@ -4,6 +4,11 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
+## [0.2.61.98] - 2026-07-23
+
+### Fixed
+- **SUT import no longer aborts with `insert or update on table "generated_reports" violates foreign key constraint`.** `generated_reports.template_id` is a NOT NULL foreign key to `report_templates`, but `report_templates` was never part of the SUT export graph — so importing a bundle whose runs had generated reports FK-violated and rolled back the entire import. The export now ships the referenced `report_templates` (scoped by the template ids actually referenced by the SUT's generated reports, so `'*'` global and ad-hoc templates come along too); like `grafana_dashboards` they are treated as shared reference rows — imported `ON CONFLICT DO NOTHING` and deliberately left untouched by the SUT delete cascade. For bundles exported before this fix (which carry the reports but not their templates), the importer now drops the orphaned `generated_reports` rows with a logged count instead of failing the whole import; re-exporting with the current version brings those reports back. Verified end-to-end by replaying a real 900k-row bundle through a rolled-back import transaction: all tables land, only the 2 orphaned reports are pruned.
+
 ## [0.2.61.97] - 2026-07-22
 
 ### Fixed
