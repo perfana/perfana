@@ -1,6 +1,5 @@
 import { Test, TestingModule } from '@nestjs/testing';
 import { TextBlockRenderer } from './text-block-renderer';
-import { ReportUtilsService } from '../services/report-utils.service';
 import { ReportSectionConfig } from '@perfana/shared';
 
 describe('TextBlockRenderer', () => {
@@ -8,7 +7,7 @@ describe('TextBlockRenderer', () => {
 
   beforeEach(async () => {
     const module: TestingModule = await Test.createTestingModule({
-      providers: [TextBlockRenderer, ReportUtilsService],
+      providers: [TextBlockRenderer],
     }).compile();
 
     renderer = module.get(TextBlockRenderer);
@@ -203,5 +202,46 @@ describe('TextBlockRenderer', () => {
     };
 
     expect(renderer.renderTextBlockSection(section)).toContain('<li>a list item</li>');
+  });
+
+  it('should not let a crafted alignment break out of the style attribute', () => {
+    // config is only validated as @IsObject(), and this HTML is served
+    // unauthenticated via report share links and rendered by Puppeteer.
+    const section: ReportSectionConfig = {
+      type: 'text_block',
+      order: 0,
+      config: {
+        content: 'Body',
+        alignment: 'left"><img src=x onerror=alert(1)>',
+      },
+    };
+
+    const html = renderer.renderTextBlockSection(section);
+
+    expect(html).not.toContain('<img');
+    expect(html).not.toContain('onerror');
+    expect(html).toContain('text-align: left;');
+  });
+
+  it('should fall back to left for an unrecognised alignment', () => {
+    const section: ReportSectionConfig = {
+      type: 'text_block',
+      order: 0,
+      config: { content: 'Body', alignment: 'diagonal' },
+    };
+
+    expect(renderer.renderTextBlockSection(section)).toContain('text-align: left;');
+  });
+
+  it('should accept every alignment the form offers', () => {
+    for (const alignment of ['left', 'center', 'right', 'justify']) {
+      const section: ReportSectionConfig = {
+        type: 'text_block',
+        order: 0,
+        config: { content: 'Body', alignment },
+      };
+
+      expect(renderer.renderTextBlockSection(section)).toContain(`text-align: ${alignment};`);
+    }
   });
 });
