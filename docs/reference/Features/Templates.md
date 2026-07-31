@@ -51,6 +51,13 @@ Accessible at `/settings/profiles`:
 - Preview functionality for report sections
 - Collapsed section cards summarize their own configuration (header level and text, text-block content, response-time scenario, baseline-run dashboard/panel count) so multiple sections of the same type can be told apart without expanding them
 
+#### Text block sections
+
+- Content is written in a **markdown subset** rendered by `markdown.ts` in [[Shared Package]]: headings, bold, italic, inline code, links, bullet and ordered lists. Tables, images, blockquotes and nested lists are not supported.
+- A **formatting toolbar** (bold, italic, heading, bullets, numbers, link) sits above a live preview, so an author who does not know markdown can click a button and see the rendered result. Buttons wrap the current selection or insert sample text when nothing is selected, and clicking the same button again removes the markers instead of stacking them.
+- The **Enable Markdown** switch turns rendering off for a single section, which is the escape hatch for text where a leading `-` or `#` was meant literally.
+- Text blocks authored before markdown rendering shipped (v0.2.61.102) were pinned to `markdown: false` by a migration, so their output is unchanged. Blocks created from that release on default to markdown on.
+
 ### Template Selector
 - Filtered by `system_under_test_id`
 - Organization-scoped templates
