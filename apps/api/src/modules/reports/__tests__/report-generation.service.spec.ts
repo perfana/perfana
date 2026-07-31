@@ -263,6 +263,140 @@ describe('ReportGenerationService', () => {
       expect(reportRepo.save).toHaveBeenCalled();
     });
 
+    it('should look up the test run by human test run id when not a uuid', async () => {
+      // Arrange
+      const options: CreateReportFromTemplateOptions = {
+        testRunId: 'test-run-001',
+        templateId: '123e4567-e89b-12d3-a456-426614174002',
+        generatedBy: 'ci-pipeline',
+      };
+      const mockTestRun = createMockTestRun();
+      testRunRepo.findOne.mockResolvedValue(mockTestRun);
+      templateRepo.findOne.mockResolvedValue(createMockTemplate());
+      reportRepo.create.mockReturnValue(createMockReport());
+      reportRepo.save.mockResolvedValue(createMockReport());
+
+      // Act
+      await service.createFromTemplate(options);
+
+      // Assert
+      expect(testRunRepo.findOne).toHaveBeenCalledWith({
+        where: { testRunId: 'test-run-001' },
+        relations: ['systemUnderTest', 'systemUnderTest.team'],
+      });
+      // The report row stores the resolved uuid, not the human id
+      expect(reportRepo.create).toHaveBeenCalledWith(
+        expect.objectContaining({ test_run_id: mockTestRun.id }),
+      );
+    });
+
+    it('should fall back to the default template when templateId is omitted', async () => {
+      // Arrange
+      const options: CreateReportFromTemplateOptions = {
+        testRunId: 'test-run-001',
+        generatedBy: 'ci-pipeline',
+      };
+      const mockTemplate = createMockTemplate();
+      testRunRepo.findOne.mockResolvedValue(createMockTestRun());
+      templateRepo.findOne.mockResolvedValue(mockTemplate);
+      reportRepo.create.mockReturnValue(createMockReport());
+      reportRepo.save.mockResolvedValue(createMockReport());
+
+      // Act
+      await service.createFromTemplate(options);
+
+      // Assert
+      expect(templateRepo.findOne).toHaveBeenCalledWith({
+        where: {
+          system_id: 'system-001',
+          test_environment: 'staging',
+          workload: 'load-test',
+          is_default: true,
+          is_adhoc: false,
+        },
+      });
+      expect(reportRepo.create).toHaveBeenCalledWith(
+        expect.objectContaining({ template_id: mockTemplate.id }),
+      );
+    });
+
+    it('should resolve the template by name within the test run scope', async () => {
+      // Arrange
+      const mockTemplate = createMockTemplate();
+      testRunRepo.findOne.mockResolvedValue(createMockTestRun());
+      templateRepo.findOne.mockResolvedValue(mockTemplate);
+      reportRepo.create.mockReturnValue(createMockReport());
+      reportRepo.save.mockResolvedValue(createMockReport());
+
+      // Act
+      await service.createFromTemplate({
+        testRunId: 'test-run-001',
+        templateName: 'Nightly regression',
+        generatedBy: 'ci-pipeline',
+      });
+
+      // Assert
+      expect(templateRepo.findOne).toHaveBeenCalledWith({
+        where: {
+          system_id: 'system-001',
+          test_environment: 'staging',
+          workload: 'load-test',
+          is_adhoc: false,
+          name: 'Nightly regression',
+        },
+      });
+      expect(reportRepo.create).toHaveBeenCalledWith(
+        expect.objectContaining({ template_id: mockTemplate.id }),
+      );
+    });
+
+    it('should prefer templateId over templateName', async () => {
+      // Arrange
+      testRunRepo.findOne.mockResolvedValue(createMockTestRun());
+      templateRepo.findOne.mockResolvedValue(createMockTemplate());
+      reportRepo.create.mockReturnValue(createMockReport());
+      reportRepo.save.mockResolvedValue(createMockReport());
+
+      // Act
+      await service.createFromTemplate({
+        testRunId: 'test-run-001',
+        templateId: '123e4567-e89b-12d3-a456-426614174002',
+        templateName: 'Nightly regression',
+        generatedBy: 'ci-pipeline',
+      });
+
+      // Assert
+      expect(templateRepo.findOne).toHaveBeenCalledWith({
+        where: { id: '123e4567-e89b-12d3-a456-426614174002' },
+      });
+    });
+
+    it('should throw ResourceNotFoundException when the named template does not exist', async () => {
+      // Arrange
+      testRunRepo.findOne.mockResolvedValue(createMockTestRun());
+      templateRepo.findOne.mockResolvedValue(null);
+
+      // Act & Assert
+      await expect(
+        service.createFromTemplate({
+          testRunId: 'test-run-001',
+          templateName: 'No Such Template',
+          generatedBy: 'ci-pipeline',
+        }),
+      ).rejects.toThrow(/No Such Template/);
+    });
+
+    it('should throw ResourceNotFoundException when no default template exists', async () => {
+      // Arrange
+      testRunRepo.findOne.mockResolvedValue(createMockTestRun());
+      templateRepo.findOne.mockResolvedValue(null);
+
+      // Act & Assert
+      await expect(
+        service.createFromTemplate({ testRunId: 'test-run-001', generatedBy: 'ci-pipeline' }),
+      ).rejects.toThrow(ResourceNotFoundException);
+    });
+
     it('should use provided name when specified', async () => {
       // Arrange
       const options: CreateReportFromTemplateOptions = {

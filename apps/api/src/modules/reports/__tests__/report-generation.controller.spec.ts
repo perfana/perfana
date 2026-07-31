@@ -748,6 +748,80 @@ describe('ReportGenerationController', () => {
     });
   });
 
+  describe('downloadHtml', () => {
+    const createMockRes = () => ({ set: jest.fn() }) as any;
+
+    it('should serve HTML as an attachment and count the download', async () => {
+      // Arrange
+      const mockReport = createMockReport({ status: 'html_complete', html_content: '<html>report</html>' });
+      reportGenerationService.findById.mockResolvedValue(mockReport);
+      const res = createMockRes();
+
+      // Act
+      const file = await controller.downloadHtml(mockReport.id, mockUserCtx, res);
+
+      // Assert
+      expect(res.set).toHaveBeenCalledWith(expect.objectContaining({
+        'Content-Type': 'text/html; charset=utf-8',
+        'Content-Disposition': expect.stringContaining('.html"'),
+      }));
+      expect(reportGenerationService.incrementDownloadCount).toHaveBeenCalledWith(mockReport.id);
+      expect(file.getStream().read().toString()).toBe('<html>report</html>');
+    });
+
+    it('should return 202 while HTML is still generating', async () => {
+      // Arrange
+      reportGenerationService.findById.mockResolvedValue(createMockReport({ status: 'processing' }));
+
+      // Act & Assert
+      await expect(controller.downloadHtml('report-1', mockUserCtx, createMockRes())).rejects.toMatchObject({
+        status: HttpStatus.ACCEPTED,
+      });
+    });
+
+    it('should throw BAD_REQUEST with the error details when generation failed', async () => {
+      // Arrange
+      reportGenerationService.findById.mockResolvedValue(
+        createMockReport({
+          status: 'failed',
+          error_message: 'Section renderer blew up',
+          error_code: 'RENDER_ERROR',
+        }),
+      );
+
+      // Act & Assert — CI needs the reason, not a bare 400
+      await expect(controller.downloadHtml('report-1', mockUserCtx, createMockRes())).rejects.toMatchObject({
+        status: HttpStatus.BAD_REQUEST,
+        response: expect.objectContaining({
+          message: expect.stringContaining('Section renderer blew up'),
+          errorCode: 'RENDER_ERROR',
+        }),
+      });
+    });
+
+    it('should throw NOT_FOUND when the report does not exist', async () => {
+      // Arrange
+      reportGenerationService.findById.mockRejectedValue(new Error('Report not found'));
+
+      // Act & Assert
+      await expect(controller.downloadHtml('nope', mockUserCtx, createMockRes())).rejects.toMatchObject({
+        status: HttpStatus.NOT_FOUND,
+      });
+    });
+
+    it('should throw BAD_REQUEST when HTML content is missing', async () => {
+      // Arrange
+      reportGenerationService.findById.mockResolvedValue(
+        createMockReport({ status: 'html_complete', html_content: undefined }),
+      );
+
+      // Act & Assert
+      await expect(controller.downloadHtml('report-1', mockUserCtx, createMockRes())).rejects.toMatchObject({
+        status: HttpStatus.BAD_REQUEST,
+      });
+    });
+  });
+
   // ==================== Share Management ====================
 
   describe('getShareSettings', () => {
