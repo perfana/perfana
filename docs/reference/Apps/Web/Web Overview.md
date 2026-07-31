@@ -102,6 +102,9 @@ RootLayout
 - `BatchActionsToolbar` — Bulk operations toolbar
 - `TestRunStatusChip` — Status badge component
 
+### Reports
+- `MarkdownField` — Text block editor: formatting toolbar over a live preview (see [[Templates]])
+
 ### Layout
 - `AuthLayout` — Main layout with sidebar + header
 - `Sidebar` — Navigation with org selector

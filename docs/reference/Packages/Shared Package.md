@@ -100,6 +100,19 @@ The `@perfana/shared` package is the central repository for domain models, types
 | `encrypted-column.transformer.ts` | Generic field encryption |
 | `safe-regex.ts` | Safe regex pattern evaluation |
 | `url-validator.ts` | Deep-link URL validation |
+| `markdown.ts` | Markdown subset renderer for report text blocks (`renderMarkdown`, `renderPlainText`, `RenderMarkdownOptions`, `TEXT_BLOCK_MARKDOWN_DEFAULT`) |
+
+> [!note] Why `markdown.ts` lives in shared
+> Two places must agree on the output structure: the API renders text blocks into
+> the report HTML/PDF, and the web editor renders the live preview next to the
+> input. A second implementation would drift. It escapes the source before
+> emitting its first tag, so no author HTML survives and no sanitizer dependency
+> is needed. Supported: headings, bold, italic, inline code, links, bullet and
+> ordered lists, paragraphs. Not supported: tables, images, blockquotes, nested
+> lists, nested emphasis, `_underscore_` emphasis (metric names are full of
+> underscores). Typography is not shared — `styled: true` (the default) bakes the
+> print-oriented inline styles the PDF needs; the web preview passes
+> `styled: false` and styles the tags via the theme so it reads in dark mode.
 
 ## Database Configuration
 

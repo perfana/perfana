@@ -4,6 +4,16 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
+## [0.2.61.102] - 2026-07-31
+
+### Added
+- **Report text blocks now render markdown, and you no longer have to know markdown to write it.** The text block editor's placeholder had promised "(markdown supported)" for a while, but nothing rendered it — a `## Summary` printed in the PDF as the literal characters `## Summary`. Text blocks now go through a markdown renderer supporting headings, bold, italic, inline code, links and bullet/ordered lists. The editor gained a formatting toolbar (bold, italic, heading, bullets, numbers, link) above a live preview, so an author who has never typed a `*` clicks a button and watches the rendered result underneath. Bold, italic and link wrap the current selection; heading and the list buttons prefix whole lines and grow the selection to line boundaries. Any button inserts sample text when its target is empty, so a click always does something visible, and clicking the same button again undoes it rather than stacking markers. The renderer escapes the entire source before emitting its first tag, so no author HTML can reach the report and no HTML sanitizer dependency was needed. Emphasis only fires when the asterisks hug the text, so `2 * 3 * 4 = 24` and glob patterns survive, and metric names full of underscores are left alone.
+
+### Fixed
+- **The "Enable Markdown" switch in the text block editor actually does something now.** The switch had been in the form for a while, defaulting to on, but `TextBlockRenderer` never read `config.markdown` — turning it off changed nothing. It is now honoured, and it doubles as the per-section escape hatch for text authored before markdown rendering existed.
+- **Text blocks written before this release are not reinterpreted as markdown.** `config.markdown` defaults to on, so those blocks would have started rendering as markdown the next time their template generated a report — silently renumbering explicit ordered lists (`1.` / `5.` / `7.` becoming 1, 2, 3), collapsing indentation and flattening nested bullets in text nobody had edited. A migration pins existing blocks to plain text; markdown applies to blocks authored from here on. One deliberate difference remains: plain text is now emitted in a pre-wrapped paragraph, so line breaks that previously collapsed are preserved. Already-generated reports were never affected either way, since `generated_reports` stores the rendered HTML and the PDF is produced from that.
+- **Hardened report rendering against untrusted section configuration.** A text block's display settings were written into the generated report HTML without validation. They are now checked against an allowlist, with a safe fallback. Upgrading is recommended, particularly for deployments that share reports outside the organisation.
+
 ## [0.2.61.101] - 2026-07-31
 
 ### Fixed

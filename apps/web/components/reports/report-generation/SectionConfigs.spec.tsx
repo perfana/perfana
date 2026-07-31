@@ -132,6 +132,39 @@ it('keeps the Preview Section button disabled for response times until a scenari
   expect(screen.getByRole('button', { name: /preview section/i })).toBeDisabled();
 });
 
+describe('TextBlockConfigForm', () => {
+  it('stores the markdown editor value straight onto config.content', () => {
+    // MarkdownField hands back a string, not a change event — a regression here
+    // would silently store "[object Object]" as the report body.
+    const onChange = jest.fn();
+    render(<TextBlockConfigForm config={{ alignment: 'center' }} onChange={onChange} />);
+
+    const editor = screen.getByPlaceholderText(/write your text here/i);
+    fireEvent.change(editor, { target: { value: '## Summary' } });
+
+    expect(onChange).toHaveBeenCalledWith({ alignment: 'center', content: '## Summary' });
+  });
+
+  it('writes the Enable Markdown switch onto config and forwards it to the editor', () => {
+    // This wiring is what makes the switch functional at all — the renderer
+    // ignored config.markdown until now, so a dropped prop would silently
+    // restore the dead toggle with every suite still green.
+    const onChange = jest.fn();
+    const { rerender } = render(<TextBlockConfigForm config={{}} onChange={onChange} />);
+
+    expect(screen.getByLabelText('Bold')).toBeVisible();
+
+    const toggle = screen.getByRole('switch', { name: /enable markdown/i });
+    expect(toggle).toBeChecked();
+
+    fireEvent.click(toggle);
+    expect(onChange).toHaveBeenCalledWith({ markdown: false });
+
+    rerender(<TextBlockConfigForm config={{ markdown: false }} onChange={onChange} />);
+    expect(screen.getByLabelText('Bold')).not.toBeVisible();
+  });
+});
+
 describe('Top10ListsConfigForm', () => {
   it('renders the scope selector and hides includeUrl unless scope is requests', () => {
     render(<Top10ListsConfigForm config={{}} onChange={() => {}} testRunId="tr-1" />);

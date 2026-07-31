@@ -17,6 +17,8 @@ import type { ReportSectionType } from '@/lib/api/reports';
 import { fetchDynatraceDashboards, fetchDynatraceMetrics } from '@/lib/dynatrace';
 import { isGrafana } from '@/lib/metrics-source-utils';
 import { BaselineRunSelect, useBaselineCandidates } from './BaselineRunSelect';
+import { MarkdownField } from './MarkdownField';
+import { TEXT_BLOCK_MARKDOWN_DEFAULT } from '@perfana/shared/utils';
 
 // Dynamically import preview components to reduce initial bundle size
 const ApdexSectionPreview = dynamic(() => import('./preview/ApdexSectionPreview'), { ssr: false });
@@ -253,15 +255,12 @@ export function TextBlockConfigForm({ config, onChange, testRunId }: TextBlockCo
       onCommentChange={(comment) => onChange({ ...config, comment })}
       testRunId={testRunId}
     >
-      <TextField
+      <MarkdownField
         label="Content"
         value={config.content || ''}
-        onChange={(e) => onChange({ ...config, content: e.target.value })}
-        multiline
-        rows={4}
-        fullWidth
-        size="small"
-        placeholder="Enter text content (markdown supported)"
+        onChange={(content) => onChange({ ...config, content })}
+        markdown={config.markdown ?? TEXT_BLOCK_MARKDOWN_DEFAULT}
+        placeholder="Write your text here, or use the buttons above to format it"
       />
       <Box sx={{ display: 'flex', gap: 2 }}>
         <TextField
@@ -288,7 +287,7 @@ export function TextBlockConfigForm({ config, onChange, testRunId }: TextBlockCo
       <FormControlLabel
         control={
           <Switch
-            checked={config.markdown ?? true}
+            checked={config.markdown ?? TEXT_BLOCK_MARKDOWN_DEFAULT}
             onChange={(e) => onChange({ ...config, markdown: e.target.checked })}
           />
         }

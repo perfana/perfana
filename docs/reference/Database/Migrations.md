@@ -12,9 +12,15 @@ Database migrations are managed through TypeORM and consolidated migration scrip
 
 Perfana uses TypeORM migrations located in `packages/shared/src/database/migrations/`:
 
-- **3 consolidated migrations** (1700000000000-1 through 1700000000000-3)
-- Consolidates legacy migration records
-- Syncs schema state with codebase entities
+- **1 consolidated migration** (`1700000000000-ConsolidatedSchema.ts`) — consolidates legacy migration records and syncs schema state with codebase entities
+- **Standalone migrations** layered on top of it, applied in timestamp order:
+
+| Migration | Purpose |
+|---|---|
+| `1783409734007-AddProxyServer` | Proxy server configuration |
+| `1788000000000-AddHypertableCompression` | TimescaleDB compression on `ds_metrics` |
+| `1789000000000-AddComparePresetDisplayConfig` | Display config on compare presets |
+| `1790000000000-BackfillTextBlockMarkdownOff` | Pins report text blocks authored before markdown rendering to `markdown: false`. Not reversible — `down()` is intentionally a no-op, since it cannot tell a backfilled `false` from one an author chose. |
 
 ## Commands
 
