@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { render, screen, fireEvent, waitFor } from '@testing-library/react';
+import { render, screen, fireEvent, waitFor, createEvent } from '@testing-library/react';
 import { MarkdownField } from './MarkdownField';
 
 function setup(value = '') {
@@ -194,6 +194,53 @@ describe('MarkdownField', () => {
     await waitFor(() => expect(textarea.value).toBe('the p95 rose'));
   });
 
+  it('unwraps when the selection includes the markers themselves', async () => {
+    // Drag-selecting across bold text takes the asterisks with it. This is the
+    // `wrapped` branch; the other unwrap tests only reach `surrounded`.
+    const textarea = setupControlled('the **p95** rose');
+    textarea.focus();
+    textarea.setSelectionRange(4, 11);
+
+    fireEvent.click(screen.getByLabelText('Bold'));
+
+    await waitFor(() => expect(textarea.value).toBe('the p95 rose'));
+    await waitFor(() => {
+      expect(textarea.selectionStart).toBe(4);
+      expect(textarea.selectionEnd).toBe(7);
+    });
+  });
+
+  it('prevents mousedown so the textarea keeps its selection', () => {
+    // Load-bearing and otherwise untestable: fireEvent.click never dispatches
+    // mousedown, so jsdom preserves the selection artificially and every
+    // "wraps the selection" test would still pass with this handler deleted.
+    setup('the p95 rose');
+    const button = screen.getByLabelText('Bold');
+
+    const event = createEvent.mouseDown(button);
+    fireEvent(button, event);
+
+    expect(event.defaultPrevented).toBe(true);
+  });
+
+  it('toggles a block marker off when the line already has it', () => {
+    const { onChange, textarea } = setup('## Summary');
+    select(textarea, 0, 0);
+
+    fireEvent.click(screen.getByLabelText('Heading'));
+
+    expect(onChange).toHaveBeenCalledWith('Summary');
+  });
+
+  it('replaces a different block marker rather than toggling', () => {
+    const { onChange, textarea } = setup('- Summary');
+    select(textarea, 0, 0);
+
+    fireEvent.click(screen.getByLabelText('Heading'));
+
+    expect(onChange).toHaveBeenCalledWith('## Summary');
+  });
+
   it('selects the url placeholder after inserting a link', async () => {
     const textarea = setupControlled('see docs');
     textarea.focus();
@@ -213,6 +260,11 @@ describe('MarkdownField', () => {
     expect(screen.getByRole('textbox', { name: 'Content' })).toBeInTheDocument();
     expect(screen.getByRole('toolbar', { name: 'Content formatting' })).toBeInTheDocument();
     expect(screen.getByRole('region', { name: 'Content preview' })).toBeInTheDocument();
+    // aria-describedby deliberately absent: pointing it at the live preview made
+    // screen readers read back the whole document on every refocus.
+    expect(screen.getByRole('textbox', { name: 'Content' })).not.toHaveAttribute(
+      'aria-describedby',
+    );
   });
 
   it('renders the preview without the print inline styles so the theme can own it', () => {

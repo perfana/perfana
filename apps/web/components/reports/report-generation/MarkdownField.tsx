@@ -1,6 +1,6 @@
 'use client';
 
-import { useId, useRef } from 'react';
+import { useMemo, useRef } from 'react';
 import { Box, IconButton, InputBase, Tooltip, Typography } from '@mui/material';
 import FormatBoldIcon from '@mui/icons-material/FormatBold';
 import FormatItalicIcon from '@mui/icons-material/FormatItalic';
@@ -20,9 +20,18 @@ import { renderMarkdown, renderPlainText } from '@perfana/shared/utils';
  * markdown alongside the preview turns out to bother people.
  *
  * The preview runs the same renderMarkdown the API renders the report with, so the
- * STRUCTURE matches the PDF exactly. Typography deliberately does not: the preview
- * asks for unstyled output and dresses it via the theme, because the renderer's
- * print styles are light-mode absolutes that would be unreadable in dark mode.
+ * markdown BODY structure matches. It is not a full proof: alignment and font size
+ * come from sibling controls the report renderer applies around this body, and are
+ * not previewed here. Typography deliberately differs too — the preview asks for
+ * unstyled output and dresses it via the theme, because the renderer's print styles
+ * are light-mode absolutes that would be unreadable in dark mode.
+ *
+ * SECURITY: unlike every other consumer of report HTML (HtmlReportViewerModal and
+ * the public share page both use a sandboxed iframe with scripts disabled), this
+ * injects renderer output straight into the app-origin DOM. renderMarkdown's
+ * escape-then-transform is therefore load-bearing on its own here. Any new syntax
+ * added to it must be re-audited against the invariant test in
+ * packages/shared/src/utils/__tests__/markdown.spec.ts.
  */
 
 const TOOLS = [
@@ -79,7 +88,10 @@ const PREVIEW_SX = {
     px: 0.5,
     borderRadius: '3px',
   },
-  '& a': { color: 'primary.main' },
+  // Inert on purpose: this is a proofing surface, not a navigation surface.
+  // Clicking your own link here would navigate the dialog away and lose every
+  // unsaved section config.
+  '& a': { color: 'primary.main', pointerEvents: 'none' },
   '& [data-placeholder]': { color: 'text.secondary' },
 } as const;
 
@@ -102,7 +114,6 @@ export function MarkdownField({
   markdown = true,
 }: MarkdownFieldProps) {
   const inputRef = useRef<HTMLTextAreaElement | null>(null);
-  const previewId = useId();
 
   const applyTool = (tool: Tool) => {
     const el = inputRef.current;
@@ -125,11 +136,20 @@ export function MarkdownField({
 
       before = value.slice(0, lineStart);
       after = value.slice(lineEnd);
-      inserted = (value.slice(lineStart, lineEnd) || tool.sample)
-        .split('\n')
+      const lines = (value.slice(lineStart, lineEnd) || tool.sample).split('\n');
+      // Toggle off when every selected line already carries THIS tool's marker,
+      // so "click again to undo" means the same thing on Heading and the list
+      // buttons as it does on Bold. Otherwise apply, replacing any other marker.
+      const alreadyApplied = lines.every((line) =>
+        tool.key === 'numbers' ? /^\d+[.)]\s+/.test(line) : line.startsWith(tool.prefix),
+      );
+
+      inserted = lines
         .map((line, index) => {
+          const bare = line.replace(EXISTING_BLOCK_MARKER, '');
+          if (alreadyApplied) return bare;
           const marker = tool.key === 'numbers' ? `${index + 1}. ` : tool.prefix;
-          return `${marker}${line.replace(EXISTING_BLOCK_MARKER, '')}`;
+          return `${marker}${bare}`;
         })
         .join('\n');
 
@@ -189,9 +209,15 @@ export function MarkdownField({
     });
   };
 
-  const previewHtml = markdown
-    ? renderMarkdown(value, { styled: false })
-    : renderPlainText(value, { styled: false });
+  // Memoised: this runs on every keystroke and the parent re-renders every
+  // section card when the value propagates.
+  const previewHtml = useMemo(
+    () =>
+      markdown
+        ? renderMarkdown(value, { styled: false })
+        : renderPlainText(value, { styled: false }),
+    [markdown, value],
+  );
 
   return (
     <Box>
@@ -202,7 +228,10 @@ export function MarkdownField({
       <Box
         sx={{
           border: 1,
-          borderColor: 'rgba(0, 0, 0, 0.23)',
+          // MUI's own outlined-input border, both modes. Hardcoding the light
+          // value paints a near-black border on the #0f172a dark surface.
+          borderColor: (t) =>
+            t.palette.mode === 'dark' ? 'rgba(255, 255, 255, 0.23)' : 'rgba(0, 0, 0, 0.23)',
           borderRadius: 1,
           overflow: 'hidden',
           '&:hover': { borderColor: 'text.primary' },
@@ -249,7 +278,7 @@ export function MarkdownField({
           multiline
           rows={rows}
           placeholder={placeholder}
-          inputProps={{ 'aria-label': label, 'aria-describedby': previewId }}
+          inputProps={{ 'aria-label': label }}
           sx={{
             display: 'flex',
             width: '100%',
@@ -261,7 +290,6 @@ export function MarkdownField({
         />
 
         <Box
-          id={previewId}
           role="region"
           aria-label={`${label} preview`}
           sx={PREVIEW_SX}
