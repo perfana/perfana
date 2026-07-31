@@ -20,9 +20,13 @@ export class TextBlockRenderer {
     const content = (config.content as string) || '';
     const alignment = (config.alignment as string) || 'left';
 
+    // An empty text block otherwise prints as a bare bordered card in the PDF.
+    const comment = commentBlock(section.comment);
+    if (!content.trim() && !comment) return '';
+
     return `
       <section class="text-block" style="text-align: ${alignment};">
-        ${commentBlock(section.comment)}
+        ${comment}
         ${this.utils.escapeHtml(content)}
       </section>
     `;
