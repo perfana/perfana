@@ -100,7 +100,7 @@ The `@perfana/shared` package is the central repository for domain models, types
 | `encrypted-column.transformer.ts` | Generic field encryption |
 | `safe-regex.ts` | Safe regex pattern evaluation |
 | `url-validator.ts` | Deep-link URL validation |
-| `markdown.ts` | Markdown subset renderer for report text blocks (`renderMarkdown`, `renderPlainText`, `TEXT_BLOCK_MARKDOWN_DEFAULT`) |
+| `markdown.ts` | Markdown subset renderer for report text blocks (`renderMarkdown`, `renderPlainText`, `RenderMarkdownOptions`, `TEXT_BLOCK_MARKDOWN_DEFAULT`) |
 
 > [!note] Why `markdown.ts` lives in shared
 > Two places must agree on the output structure: the API renders text blocks into
