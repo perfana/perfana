@@ -140,7 +140,6 @@ describe('MarkdownField', () => {
   });
 
   it('hides the toolbar and previews raw text when markdown is disabled', () => {
-    // Must match the renderer's escapeHtml + pre-wrap branch, or the preview lies.
     render(
       <MarkdownField label="Content" value={'- not a list'} onChange={jest.fn()} markdown={false} />,
     );
@@ -149,6 +148,78 @@ describe('MarkdownField', () => {
     expect(preview).toHaveTextContent('- not a list');
     expect(preview.querySelector('ul')).toBeNull();
     expect(screen.getByLabelText('Bold')).not.toBeVisible();
+  });
+
+  it('preserves line breaks in the plain-text preview, matching the renderer', () => {
+    // toHaveTextContent normalises whitespace, so assert the literal text and the
+    // pre-wrap that actually carries the newline into the rendered output.
+    render(
+      <MarkdownField
+        label="Content"
+        value={'line one\nline two'}
+        onChange={jest.fn()}
+        markdown={false}
+      />,
+    );
+    const paragraph = screen.getByLabelText('Content preview').querySelector('p')!;
+
+    expect(paragraph.textContent).toBe('line one\nline two');
+    expect(paragraph.style.whiteSpace).toBe('pre-wrap');
+  });
+
+  it('unwraps instead of stacking when an inline button is clicked twice', async () => {
+    // Stacking would produce ****p95****, which prints literal asterisks in the PDF.
+    const textarea = setupControlled('the p95 rose');
+    textarea.focus();
+    textarea.setSelectionRange(4, 7);
+
+    fireEvent.click(screen.getByLabelText('Bold'));
+    await waitFor(() => expect(textarea.value).toBe('the **p95** rose'));
+    // The caret restore lands a frame later; the second click must see the
+    // selection the first one left behind, as a real user's would.
+    await waitFor(() => expect(textarea.selectionStart).toBe(6));
+
+    fireEvent.click(screen.getByLabelText('Bold'));
+    await waitFor(() => expect(textarea.value).toBe('the p95 rose'));
+    expect(textarea.value).not.toContain('****');
+  });
+
+  it('unwraps when the selection sits inside existing markers', async () => {
+    const textarea = setupControlled('the **p95** rose');
+    textarea.focus();
+    textarea.setSelectionRange(6, 9);
+
+    fireEvent.click(screen.getByLabelText('Bold'));
+
+    await waitFor(() => expect(textarea.value).toBe('the p95 rose'));
+  });
+
+  it('selects the url placeholder after inserting a link', async () => {
+    const textarea = setupControlled('see docs');
+    textarea.focus();
+    textarea.setSelectionRange(4, 8);
+
+    fireEvent.click(screen.getByLabelText('Link'));
+
+    await waitFor(() => expect(textarea.value).toBe('see [docs](https://)'));
+    await waitFor(() =>
+      expect(textarea.value.slice(textarea.selectionStart, textarea.selectionEnd)).toBe('https://'),
+    );
+  });
+
+  it('gives the textarea an accessible name and the toolbar a role', () => {
+    setup('');
+
+    expect(screen.getByRole('textbox', { name: 'Content' })).toBeInTheDocument();
+    expect(screen.getByRole('toolbar', { name: 'Content formatting' })).toBeInTheDocument();
+    expect(screen.getByRole('region', { name: 'Content preview' })).toBeInTheDocument();
+  });
+
+  it('renders the preview without the print inline styles so the theme can own it', () => {
+    setup('## Summary');
+    const heading = screen.getByLabelText('Content preview').querySelector('h2')!;
+
+    expect(heading.getAttribute('style')).toBeNull();
   });
 
   it('shows placeholder copy in the preview until something is typed', () => {

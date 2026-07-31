@@ -144,6 +144,25 @@ describe('TextBlockConfigForm', () => {
 
     expect(onChange).toHaveBeenCalledWith({ alignment: 'center', content: '## Summary' });
   });
+
+  it('writes the Enable Markdown switch onto config and forwards it to the editor', () => {
+    // This wiring is what makes the switch functional at all — the renderer
+    // ignored config.markdown until now, so a dropped prop would silently
+    // restore the dead toggle with every suite still green.
+    const onChange = jest.fn();
+    const { rerender } = render(<TextBlockConfigForm config={{}} onChange={onChange} />);
+
+    expect(screen.getByLabelText('Bold')).toBeVisible();
+
+    const toggle = screen.getByRole('switch', { name: /enable markdown/i });
+    expect(toggle).toBeChecked();
+
+    fireEvent.click(toggle);
+    expect(onChange).toHaveBeenCalledWith({ markdown: false });
+
+    rerender(<TextBlockConfigForm config={{ markdown: false }} onChange={onChange} />);
+    expect(screen.getByLabelText('Bold')).not.toBeVisible();
+  });
 });
 
 describe('Top10ListsConfigForm', () => {
