@@ -1315,7 +1315,7 @@ describe('Dynatrace API Client', () => {
 
         // Assert
         expect(mockAuthenticatedFetch).toHaveBeenCalledWith(
-          '/dynatrace/queries/metrics?systemId=system-1&environment=production&workload=load-test&dashboardLabel=Performance+Dashboard',
+          '/dynatrace/queries/metrics?systemId=system-1&environment=production&dashboardLabel=Performance+Dashboard&workload=load-test',
           {
             method: 'GET',
             headers: {
@@ -1359,7 +1359,7 @@ describe('Dynatrace API Client', () => {
         // Assert
         // URLSearchParams uses + for spaces, not %20
         expect(mockAuthenticatedFetch).toHaveBeenCalledWith(
-          '/dynatrace/queries/metrics?systemId=system-1&environment=production&workload=load-test&dashboardLabel=Dashboard+%26+Metrics',
+          '/dynatrace/queries/metrics?systemId=system-1&environment=production&dashboardLabel=Dashboard+%26+Metrics&workload=load-test',
           expect.any(Object)
         );
       });
