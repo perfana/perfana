@@ -31,8 +31,12 @@ import { ReportHtmlCompilerService } from './report-html-compiler.service';
  * Options for creating a new report from a template
  */
 export interface CreateReportFromTemplateOptions {
+  /** Test run uuid or the human test run id */
   testRunId: string;
-  templateId: string;
+  /** Takes precedence over templateName */
+  templateId?: string;
+  /** Template name within the test run's system/environment/workload scope */
+  templateName?: string;
   name?: string;
   generatedBy: string;
   userId?: string;
@@ -161,8 +165,11 @@ export class ReportGenerationService {
     userId: string,
     roles: string[],
   ): Promise<{ accessible: boolean; testRun: TestRun | null }> {
+    // Accept either the DB uuid or the human test run id ("my-test-2026-07-31").
+    // CI/CD pipelines only know the latter — it's what they passed to the test tool.
+    const isUuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(testRunId);
     const testRun = await withRequestEm(this.testRunRepo).findOne({
-      where: { id: testRunId },
+      where: isUuid ? { id: testRunId } : { testRunId },
       relations: ['systemUnderTest', 'systemUnderTest.team'],
     });
 
@@ -263,19 +270,41 @@ export class ReportGenerationService {
         throw new ResourceNotFoundException('Test Run', options.testRunId);
       }
 
+      // Template selection, in order of precedence: explicit uuid, name within the
+      // test run's own scope, then the scope's default. CI/CD pipelines don't know
+      // uuids, so the name/default routes are what they use.
+      // Name is unique per scope (uq_report_templates_name_scope); is_adhoc rows are
+      // ephemeral per-report templates and are never addressable by name.
+      const scope = {
+        system_id: testRun.systemUnderTestId,
+        test_environment: testRun.testEnvironment,
+        workload: testRun.workload,
+        is_adhoc: false,
+      };
       const template = await withRequestEm(this.templateRepo).findOne({
-        where: { id: options.templateId },
+        where: options.templateId
+          ? { id: options.templateId }
+          : options.templateName
+            ? { ...scope, name: options.templateName }
+            : { ...scope, is_default: true },
       });
 
       if (!template) {
-        throw new ResourceNotFoundException('Report Template', options.templateId);
+        const scopeLabel = `${testRun.testEnvironment}/${testRun.workload}`;
+        throw new ResourceNotFoundException(
+          'Report Template',
+          options.templateId ||
+            (options.templateName
+              ? `"${options.templateName}" in ${scopeLabel}`
+              : `default for ${scopeLabel}`),
+        );
       }
 
       const reportName = options.name || `${template.name} - ${new Date().toISOString().slice(0, 10)}`;
 
       const report = this.reportRepo.create({
-        test_run_id: options.testRunId,
-        template_id: options.templateId,
+        test_run_id: testRun.id,
+        template_id: template.id,
         name: reportName,
         generated_by: options.generatedBy,
         status: 'pending' as ReportStatus,
@@ -287,7 +316,7 @@ export class ReportGenerationService {
       const savedReport = await withRequestEm(this.reportRepo).save(report);
 
       this.logger.log(
-        `Created report ${savedReport.id} from template ${options.templateId} for test run ${options.testRunId}`,
+        `Created report ${savedReport.id} from template ${template.id} for test run ${testRun.id}`,
       );
 
       return savedReport;
@@ -405,7 +434,7 @@ export class ReportGenerationService {
       }
 
       const report = this.reportRepo.create({
-        test_run_id: options.testRunId,
+        test_run_id: testRun.id,
         template_id: templateId,
         name: options.name,
         generated_by: options.generatedBy,

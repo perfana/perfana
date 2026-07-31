@@ -162,18 +162,31 @@ export class ReportStylingDto {
  */
 export class GenerateReportFromTemplateDto {
   @ApiProperty({
-    description: 'Test run UUID to generate report for',
+    description: 'Test run UUID, or the human test run id (what CI/CD pipelines know)',
     example: '123e4567-e89b-12d3-a456-426614174000',
   })
-  @IsUUID('4', { message: 'Test run ID must be a valid UUID' })
+  @IsString()
+  @Length(1, 255)
   test_run_id!: string;
 
-  @ApiProperty({
-    description: 'Template UUID to use for generation',
+  @ApiPropertyOptional({
+    description: 'Template UUID to use for generation. Takes precedence over template_name.',
     example: '456e7890-e89b-12d3-a456-426614174000',
   })
+  @IsOptional()
   @IsUUID('4', { message: 'Template ID must be a valid UUID' })
-  template_id!: string;
+  template_id?: string;
+
+  @ApiPropertyOptional({
+    description:
+      "Template name within the test run's system/environment/workload. Use instead of template_id when you don't have the UUID (CI/CD). When neither is given, the scope's default template is used.",
+    example: 'Nightly regression',
+    maxLength: 255,
+  })
+  @IsOptional()
+  @IsString()
+  @Length(1, 255)
+  template_name?: string;
 
   @ApiPropertyOptional({
     description: 'Custom report name (defaults to template name + timestamp)',

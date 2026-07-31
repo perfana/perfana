@@ -419,7 +419,9 @@ describe('Background fetch triggers', () => {
     const { unmount } = renderHook(() => useEditSLOForm(DYNATRACE_PROPS));
 
     await waitFor(() =>
-      expect(mockFetchDynatraceDashboards).toHaveBeenCalledWith('sys-1', 'production', 'normal')
+      // Workload-agnostic since v0.2.61.97 — the dropdown lists dashboards
+      // across the whole environment, so no workload is passed.
+      expect(mockFetchDynatraceDashboards).toHaveBeenCalledWith('sys-1', 'production')
     );
     unmount();
   });
@@ -517,7 +519,7 @@ describe('Upgrade: real Dynatrace dashboard replaces synthetic', () => {
 
     await waitFor(() =>
       expect(mockFetchDynatraceMetrics).toHaveBeenCalledWith(
-        'sys-1', 'production', 'normal', 'Error Rate Dashboard'
+        'sys-1', 'production', undefined, 'Error Rate Dashboard'
       )
     );
     unmount();

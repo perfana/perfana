@@ -43,6 +43,7 @@ Perfana collects metrics from performance tests and compares them against histor
 - [[Integrations]] — Grafana, Dynatrace, Pyroscope, Tempo
 - [[Templates]] — Standardized checks, reports, and dashboards
 - [[AWR Reports]] — Oracle AWR report analysis
+- [[Reports in CI-CD]] — Generating and downloading HTML reports from a pipeline
 - [[Trace Analysis]] — Distributed trace analysis
 
 ### Operations

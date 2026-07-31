@@ -4,6 +4,15 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
+## [0.2.61.100] - 2026-07-31
+
+### Added
+- **You can now download a report as HTML, from the report viewer or from a CI/CD pipeline.** The viewer gets a download button next to the PDF one — the HTML is already in the browser, so it saves instantly with no round-trip and no PDF render wait. For pipelines there's a new `GET /api/reports/:reportId/html/download`, which serves the stored HTML as a file attachment and works with an API key, so a build job can store the report as an artifact. The report HTML is self-contained (graphs are embedded), so the single file is the whole artifact. The endpoint answers 202 while generation is still running, 400 with the failure reason if generation failed, and 404 if the report isn't visible to that key.
+- **A pipeline can now ask for a report using the ids it actually has.** `POST /api/reports/generate` accepts the human test run id (`my-service-2026-07-31-001`) as well as the test run UUID, and takes a `template_name` instead of a template UUID — resolved within the test run's own system/environment/workload, where names are unique. `template_id` still wins when given, and when neither is supplied the scope's default template is used, so a CI job can hard-code a template name or nothing at all. New reference page: **Reports in CI/CD**, with the two-call flow, the status-code table, and a ready-to-paste GitLab CI job.
+
+### Fixed
+- **Two web tests that had been failing on main since v0.2.61.97 now pass.** That release deliberately made the Dynatrace SLO dashboard and metric dropdowns workload-agnostic, but the assertions still expected a workload argument, and the metrics URL test still expected `workload` ahead of `dashboardLabel` (it is appended last when present). The behaviour was correct; only the assertions were stale.
+
 ## [0.2.61.99] - 2026-07-23
 
 ### Changed

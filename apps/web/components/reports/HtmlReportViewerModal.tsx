@@ -50,6 +50,7 @@ import {
   Refresh as RefreshIcon,
   OpenInNew as OpenInNewIcon,
   PictureAsPdf as PdfIcon,
+  Download as DownloadIcon,
   Share as ShareIcon,
 } from '@mui/icons-material';
 import { forwardRef, type ReactElement, type Ref } from 'react';
@@ -255,6 +256,21 @@ export function HtmlReportViewerModal({
     }
   }, [shareId, htmlContent]);
 
+  // Handle HTML download — the report HTML is self-contained, so no backend round-trip
+  const handleDownloadHtml = useCallback(() => {
+    if (!htmlContent) return;
+    const blob = new Blob([htmlContent], { type: 'text/html' });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = `${displayName.replace(/[^a-z0-9\s-]/gi, '_').replace(/\s+/g, '_').toLowerCase()}.html`;
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+    setTimeout(() => URL.revokeObjectURL(url), 100);
+    showSnackbar('HTML downloaded', 'success');
+  }, [htmlContent, displayName, showSnackbar]);
+
   // Handle PDF generation and download
   const handleGeneratePdf = useCallback(async () => {
     if (!reportId) {
@@ -449,6 +465,18 @@ export function HtmlReportViewerModal({
             aria-label="Refresh report"
           >
             <RefreshIcon fontSize="small" />
+          </IconButton>
+        </Tooltip>
+
+        {/* Download HTML */}
+        <Tooltip title="Download as HTML">
+          <IconButton
+            size="small"
+            onClick={handleDownloadHtml}
+            disabled={loading || !!error || !htmlContent}
+            aria-label="Download report as HTML"
+          >
+            <DownloadIcon fontSize="small" />
           </IconButton>
         </Tooltip>
 

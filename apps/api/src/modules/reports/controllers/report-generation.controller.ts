@@ -283,6 +283,7 @@ export class ReportGenerationController {
       const report = await this.reportGenerationService.createFromTemplate({
         testRunId: dto.test_run_id,
         templateId: dto.template_id,
+        templateName: dto.template_name,
         name: dto.name,
         generatedBy,
         userId: ctx.userId,
@@ -295,10 +296,12 @@ export class ReportGenerationController {
       // worker (a different DB connection) can see the report row. Enqueuing
       // inline races the commit → worker reads "not found" and abandons the
       // job, leaving the report stuck at pending (issue #421).
+      // Use the resolved ids from the saved report — dto.test_run_id may be the
+      // human test run id and dto.template_id may be absent (default template).
       const jobId = await this.enqueueHtmlGenerationAfterCommit(
         report.id,
-        dto.test_run_id,
-        dto.template_id,
+        report.test_run_id,
+        report.template_id,
         generatedBy,
       );
 
@@ -372,7 +375,7 @@ export class ReportGenerationController {
       // Trigger HTML generation after commit — see generateFromTemplate (#421).
       const jobId = await this.enqueueHtmlGenerationAfterCommit(
         report.id,
-        dto.test_run_id,
+        report.test_run_id,
         report.template_id,
         generatedBy,
       );
@@ -608,6 +611,96 @@ export class ReportGenerationController {
       }
       throw new HttpException(
         'Failed to start PDF generation',
+        HttpStatus.INTERNAL_SERVER_ERROR,
+      );
+    }
+  }
+
+  @Get(':reportId/html/download')
+  @ApiOperation({
+    summary: 'Download HTML for a report',
+    description: 'Returns the generated, self-contained HTML report as a file attachment. Useful for storing a report as a CI/CD pipeline artifact.'
+  })
+  @ApiResponse({ status: 200, description: 'HTML file' })
+  @ApiResponse({ status: 202, description: 'HTML generation in progress - try again later' })
+  @ApiResponse({ status: 400, description: 'HTML not available' })
+  @ApiResponse({ status: 401, description: 'Unauthorized - valid authentication required' })
+  @ApiResponse({ status: 404, description: 'Report not found' })
+  async downloadHtml(
+    @Param('reportId') reportId: string,
+    @UserCtx() ctx: UserContext,
+    @Res({ passthrough: true }) res: Response,
+  ): Promise<StreamableFile> {
+    try {
+      const report = await this.reportGenerationService.findById(reportId, ctx.userId, ctx.roles);
+
+      if (report.status === 'pending' || report.status === 'processing') {
+        throw new HttpException(
+          {
+            statusCode: HttpStatus.ACCEPTED,
+            message: 'Report HTML is still being generated. Please try again in a few moments.',
+            reportStatus: report.status,
+            reportId: report.id,
+          },
+          HttpStatus.ACCEPTED,
+        );
+      }
+
+      if (report.status === 'failed') {
+        throw new HttpException(
+          {
+            statusCode: HttpStatus.BAD_REQUEST,
+            message: `Report generation failed: ${report.error_message || 'Unknown error'}`,
+            errorCode: report.error_code,
+            reportId: report.id,
+          },
+          HttpStatus.BAD_REQUEST,
+        );
+      }
+
+      if (!report.html_content) {
+        throw new HttpException(
+          'Report HTML content not available. Generate report first using POST /reports/generate',
+          HttpStatus.BAD_REQUEST,
+        );
+      }
+
+      const sanitizedName = report.name
+        .replace(/[^a-z0-9\s-]/gi, '_')
+        .replace(/\s+/g, '_')
+        .toLowerCase();
+
+      const buffer = Buffer.from(report.html_content, 'utf-8');
+
+      res.set({
+        'Content-Type': 'text/html; charset=utf-8',
+        'Content-Disposition': `attachment; filename="${sanitizedName}.html"`,
+        'Content-Length': buffer.length.toString(),
+        // Report HTML embeds user-controlled content (report name, section
+        // comments, template customCss). attachment already stops the browser
+        // rendering it on the API origin; nosniff closes the sniffing path too.
+        'X-Content-Type-Options': 'nosniff',
+      });
+
+      await this.reportGenerationService.incrementDownloadCount(reportId);
+
+      return new StreamableFile(buffer);
+    } catch (error) {
+      if (error instanceof HttpException) {
+        if (error.getStatus() !== HttpStatus.ACCEPTED) {
+          this.logger.error(`Failed to download HTML for report ${reportId}:`, error);
+        }
+        throw error;
+      }
+      this.logger.error(`Failed to download HTML for report ${reportId}:`, error);
+      const errorMessage = error && typeof error === 'object' && 'message' in error
+        ? (error as Error).message
+        : 'Unknown error';
+      if (errorMessage.includes('not found')) {
+        throw new HttpException('Report not found', HttpStatus.NOT_FOUND);
+      }
+      throw new HttpException(
+        'Failed to download HTML',
         HttpStatus.INTERNAL_SERVER_ERROR,
       );
     }
