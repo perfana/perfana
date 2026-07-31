@@ -118,4 +118,90 @@ describe('TextBlockRenderer', () => {
     expect(html).toContain('class="text-block"');
     expect(html).toContain('Reviewed by the perf team');
   });
+
+  it('should render markdown structure into the report HTML', () => {
+    const section: ReportSectionConfig = {
+      type: 'text_block',
+      order: 0,
+      config: { content: '## Summary\n\n- p95 rose\n- errors flat' },
+    };
+
+    const html = renderer.renderTextBlockSection(section);
+
+    expect(html).toContain('<h2 ');
+    expect(html).toContain('Summary');
+    expect(html).toContain('<ul');
+    expect(html).toContain('<li>p95 rose</li>');
+    expect(html).toContain('<li>errors flat</li>');
+    // The raw markers must not survive into the PDF.
+    expect(html).not.toContain('## Summary');
+  });
+
+  it('should render inline markdown emphasis and safe links, dropping unsafe hrefs', () => {
+    const section: ReportSectionConfig = {
+      type: 'text_block',
+      order: 0,
+      config: {
+        content: 'The **p95** rose, see [docs](https://perfana.io) not [x](javascript:alert(1))',
+      },
+    };
+
+    const html = renderer.renderTextBlockSection(section);
+
+    expect(html).toContain('<strong>p95</strong>');
+    expect(html).toContain('<a href="https://perfana.io">docs</a>');
+    expect(html).not.toContain('javascript:alert(1)"');
+    expect(html).not.toContain('<a href="javascript');
+  });
+
+  it('should render nothing when the content is only whitespace and there is no comment', () => {
+    const section: ReportSectionConfig = {
+      type: 'text_block',
+      order: 0,
+      config: { content: '   \n\n  ' },
+    };
+
+    expect(renderer.renderTextBlockSection(section)).toBe('');
+  });
+
+  it('should treat the content as plain text when markdown is disabled', () => {
+    // The escape hatch for blocks authored before markdown rendering existed,
+    // where a leading dash was meant literally.
+    const section: ReportSectionConfig = {
+      type: 'text_block',
+      order: 0,
+      config: { content: '- not a list\n**not bold**', markdown: false },
+    };
+
+    const html = renderer.renderTextBlockSection(section);
+
+    expect(html).not.toContain('<ul');
+    expect(html).not.toContain('<strong>');
+    expect(html).toContain('- not a list');
+    expect(html).toContain('**not bold**');
+    expect(html).toContain('pre-wrap');
+  });
+
+  it('should still escape HTML when markdown is disabled', () => {
+    const section: ReportSectionConfig = {
+      type: 'text_block',
+      order: 0,
+      config: { content: '<script>alert("xss")</script>', markdown: false },
+    };
+
+    const html = renderer.renderTextBlockSection(section);
+
+    expect(html).not.toContain('<script>');
+    expect(html).toContain('&lt;script&gt;');
+  });
+
+  it('should render markdown when the flag is absent, matching the form default', () => {
+    const section: ReportSectionConfig = {
+      type: 'text_block',
+      order: 0,
+      config: { content: '- a list item' },
+    };
+
+    expect(renderer.renderTextBlockSection(section)).toContain('<li>a list item</li>');
+  });
 });

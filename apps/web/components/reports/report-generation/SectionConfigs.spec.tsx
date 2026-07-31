@@ -132,6 +132,20 @@ it('keeps the Preview Section button disabled for response times until a scenari
   expect(screen.getByRole('button', { name: /preview section/i })).toBeDisabled();
 });
 
+describe('TextBlockConfigForm', () => {
+  it('stores the markdown editor value straight onto config.content', () => {
+    // MarkdownField hands back a string, not a change event — a regression here
+    // would silently store "[object Object]" as the report body.
+    const onChange = jest.fn();
+    render(<TextBlockConfigForm config={{ alignment: 'center' }} onChange={onChange} />);
+
+    const editor = screen.getByPlaceholderText(/write your text here/i);
+    fireEvent.change(editor, { target: { value: '## Summary' } });
+
+    expect(onChange).toHaveBeenCalledWith({ alignment: 'center', content: '## Summary' });
+  });
+});
+
 describe('Top10ListsConfigForm', () => {
   it('renders the scope selector and hides includeUrl unless scope is requests', () => {
     render(<Top10ListsConfigForm config={{}} onChange={() => {}} testRunId="tr-1" />);

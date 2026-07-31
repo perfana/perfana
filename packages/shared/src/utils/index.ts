@@ -15,6 +15,9 @@ export * from './safe-regex';
 // Export audit-log diff helpers (used by API + grafana-sync audit dispatchers)
 export * from './audit-diff';
 
+// Export the report text-block markdown renderer (used by API report HTML + web editor preview)
+export * from './markdown';
+
 /**
  * Formats a date to ISO string
  */
