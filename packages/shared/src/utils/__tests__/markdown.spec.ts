@@ -1,3 +1,5 @@
+import { readFileSync } from 'fs';
+import { join } from 'path';
 import { renderMarkdown, renderPlainText } from '../markdown';
 
 describe('renderMarkdown', () => {
@@ -221,6 +223,82 @@ describe('renderMarkdown', () => {
     const html = renderMarkdown('[x](/\rjavascript:alert(1))');
 
     expect(html).not.toMatch(/href="[^"]*<br>/);
+  });
+
+  it('rejects the backslash form of a protocol-relative href', () => {
+    // WHATWG URL resolution treats U+005C as U+002F for special schemes, so
+    // `/\evil.com` resolves off-origin exactly like `//evil.com`.
+    const html = renderMarkdown('[click](/\\evil.example/steal)');
+
+    expect(html).not.toContain('<a href');
+    expect(html).toContain('click');
+  });
+
+  it('renders an empty ordered marker as an empty item, not a stray paragraph', () => {
+    // The Numbered list button produces a bare `1.` on an empty field.
+    const html = renderMarkdown('1. \n2. b');
+
+    expect(html).not.toContain('<p');
+    expect(html).toContain('<ol');
+    expect(html).toContain('<li></li><li>b</li>');
+  });
+
+  it('uses no regex lookbehind, which is a SyntaxError on Safari before 16.4', () => {
+    // This module is imported into browser code at module scope, so an
+    // unsupported browser would fail to evaluate the whole chunk.
+    const code = readFileSync(join(__dirname, '..', 'markdown.ts'), 'utf8')
+      .replace(/\/\*[\s\S]*?\*\//g, '')
+      .replace(/^\s*\/\/.*$/gm, '');
+
+    expect(code).not.toMatch(/\(\?<[!=]/);
+  });
+
+  describe('heading chrome', () => {
+    it('neutralises the report stylesheet so a heading is not a fake section title', () => {
+      // `section h2` in the report stylesheet paints the brand colour and a
+      // full-width underline. An inline style attribute outranks it.
+      const html = renderMarkdown('## Summary');
+
+      expect(html).toContain('color:inherit');
+      expect(html).toContain('border:0');
+      expect(html).toContain('padding:0');
+    });
+
+    it('keeps h1 larger than h2 so the hierarchy reads correctly', () => {
+      const h1 = /font-size:(\d+)px/.exec(renderMarkdown('# One'))![1]!;
+      const h2 = /font-size:(\d+)px/.exec(renderMarkdown('## Two'))![1]!;
+
+      expect(Number(h1)).toBeGreaterThan(Number(h2));
+    });
+  });
+
+  it('never emits a script tag or an inline event handler attribute', () => {
+    // The web preview injects this output into the app-origin DOM without a
+    // sandbox, so this invariant is load-bearing for any new syntax added here.
+    const hostile = [
+      '<script>alert(1)</script>',
+      '<img src=x onerror=alert(1)>',
+      '[x](javascript:alert(1))',
+      '**<svg onload=alert(1)>**',
+      '`<iframe src=evil>`',
+      '# <body onload=alert(1)>',
+    ].join('\n\n');
+
+    const html = renderMarkdown(hostile);
+
+    // Every real `<` in the output is one the renderer emitted, because author
+    // angle brackets became &lt; first. So assert on the emitted tag set rather
+    // than on substrings, which escaped text would match harmlessly.
+    const tags = [...html.matchAll(/<\/?([a-z0-9]+)/gi)].map((m) => m[1]!.toLowerCase());
+    const allowed = new Set(['p', 'br', 'strong', 'em', 'code', 'a', 'ul', 'ol', 'li',
+      'h1', 'h2', 'h3', 'h4', 'h5', 'h6']);
+
+    expect([...new Set(tags)].filter((t) => !allowed.has(t))).toEqual([]);
+
+    // And no event-handler attribute inside any emitted tag.
+    for (const tag of html.match(/<[^>]*>/g) ?? []) {
+      expect(tag).not.toMatch(/\son\w+\s*=/i);
+    }
   });
 
   describe('styled: false (web preview)', () => {

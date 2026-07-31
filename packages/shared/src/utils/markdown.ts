@@ -18,6 +18,8 @@
  * the tags via the theme, so it stays readable in dark mode.
  */
 
+const STYLED_DEFAULT = true;
+
 export interface RenderMarkdownOptions {
   /** Bake print inline styles into the output. Off for themed web rendering. */
   styled?: boolean;
@@ -34,18 +36,27 @@ const HTML_ESCAPES: Record<string, string> = {
   "'": '&#039;',
 };
 
-export const escapeHtml = (text: string): string =>
+const escapeHtml = (text: string): string =>
   (text ?? '').replace(/[&<>"']/g, char => HTML_ESCAPES[char] || char);
 
 // Inline styles rather than a stylesheet: the print/PDF path has no cascade of
 // its own to hook into, and every other report renderer does the same.
+//
+// H_RESET is load-bearing, not decoration. A text block is emitted as
+// `<section class="text-block">`, so an author's `## Summary` matches the report
+// stylesheet's `section h2` rule and would print with the brand colour and a
+// full-width underline — indistinguishable from a real report section title,
+// which is exactly what the toolbar's Heading button would produce by default.
+// An inline style attribute outranks any selector, so this neutralises the
+// document chrome without the shared package needing to know the API's CSS.
+const H_RESET = 'color:inherit; border:0; padding:0; ';
 const H_STYLE: Record<number, string> = {
-  1: 'font-size:18px; font-weight:700; margin:0 0 10px;',
-  2: 'font-size:15px; font-weight:700; margin:14px 0 8px;',
-  3: 'font-size:13px; font-weight:700; margin:12px 0 6px;',
-  4: 'font-size:12px; font-weight:700; margin:12px 0 6px;',
-  5: 'font-size:12px; font-weight:600; margin:10px 0 6px;',
-  6: 'font-size:11px; font-weight:600; margin:10px 0 6px;',
+  1: `${H_RESET}font-size:18px; font-weight:700; margin:0 0 10px;`,
+  2: `${H_RESET}font-size:16px; font-weight:700; margin:14px 0 8px;`,
+  3: `${H_RESET}font-size:14px; font-weight:700; margin:12px 0 6px;`,
+  4: `${H_RESET}font-size:13px; font-weight:700; margin:12px 0 6px;`,
+  5: `${H_RESET}font-size:12px; font-weight:600; margin:10px 0 6px;`,
+  6: `${H_RESET}font-size:11px; font-weight:600; margin:10px 0 6px;`,
 };
 const P_STYLE = 'margin:0 0 10px;';
 const LIST_STYLE = 'margin:0 0 10px; padding-left:22px;';
@@ -54,15 +65,23 @@ const CODE_STYLE =
 
 const attr = (style: string, styled: boolean): string => (styled ? ` style="${style}"` : '');
 
-// Relative, anchor, http(s) and mailto only. `\/(?!\/)` excludes protocol-relative
-// `//evil.com`, which would otherwise ride in on the relative-path branch.
-const SAFE_HREF = /^(https?:\/\/|mailto:|\/(?!\/)|#)/i;
+// Relative, anchor, http(s) and mailto only. The `(?![/\\])` excludes BOTH
+// protocol-relative forms: `//evil.com` and `/\evil.com`. The backslash matters
+// because WHATWG URL resolution (what Chrome and Puppeteer use) treats U+005C as
+// U+002F for special schemes, so `/\evil.com` resolves off-origin exactly like
+// `//evil.com` does.
+const SAFE_HREF = /^(https?:\/\/|mailto:|\/(?![/\\])|#)/i;
 
 // Single pass with alternation so precedence falls out of match order:
 // code wins over bold wins over italic.
 //
 // Emphasis requires a non-space character adjacent to both delimiters, so prose
-// like `2 * 3 * 4 = 24` and glob patterns keep their literal asterisks.
+// like `2 * 3 * 4 = 24` and glob patterns keep their literal asterisks. The
+// closing side is written as `[^*\n]*[^\s*]` rather than a `(?<!\s)` lookbehind
+// ON PURPOSE: this module is imported into browser code, lookbehind is a
+// SyntaxError in Safari/iOS before 16.4, and the literal is a module-scope const,
+// so an unsupported browser would fail to evaluate the whole chunk and take the
+// report builder down with it rather than degrading.
 //
 // The link label is bounded to one line and 200 chars on purpose: unbounded
 // `[^\]]+` backtracks char-by-char from every unclosed `[` to end-of-string,
@@ -71,7 +90,7 @@ const SAFE_HREF = /^(https?:\/\/|mailto:|\/(?!\/)|#)/i;
 //
 // The href allows one level of balanced parens so Grafana/wiki URLs survive.
 const INLINE =
-  /`([^`]+)`|\*\*(?!\s)([^*\n]+?)(?<!\s)\*\*|\*(?!\s)([^*\n]+?)(?<!\s)\*|\[([^\]\n]{1,200})\]\(((?:[^()\s]|\([^()\s]*\))+)\)/g;
+  /`([^`]+)`|\*\*(?!\s)([^*\n]*[^\s*])\*\*|\*(?!\s)([^*\n]*[^\s*])\*|\[([^\]\n]{1,200})\]\(((?:[^()\s]|\([^()\s]*\))+)\)/g;
 
 function inline(text: string, styled: boolean): string {
   return text.replace(INLINE, (match, code, bold, italic, label, href) => {
@@ -87,13 +106,13 @@ function inline(text: string, styled: boolean): string {
  * Shared so the API renderer and the web preview cannot disagree about it.
  */
 export function renderPlainText(source: string, options: RenderMarkdownOptions = {}): string {
-  const styled = options.styled ?? true;
+  const styled = options.styled ?? STYLED_DEFAULT;
   const margin = styled ? 'margin:0 0 10px; ' : '';
   return `<p style="${margin}white-space:pre-wrap;">${escapeHtml(source)}</p>`;
 }
 
 export function renderMarkdown(source: string, options: RenderMarkdownOptions = {}): string {
-  const styled = options.styled ?? true;
+  const styled = options.styled ?? STYLED_DEFAULT;
   const escaped = escapeHtml(source).replace(/\r\n?/g, '\n');
 
   const out: string[] = [];
