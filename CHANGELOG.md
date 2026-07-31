@@ -4,6 +4,18 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
+## [0.2.61.102] - 2026-07-31
+
+### Added
+- **Report text blocks now render markdown, and you no longer have to know markdown to write it.** The text block editor's placeholder had promised "(markdown supported)" for a while, but nothing rendered it — a `## Summary` printed in the PDF as the literal characters `## Summary`. Text blocks now go through a markdown renderer supporting headings, bold, italic, inline code, links and bullet/ordered lists. The editor gained a formatting toolbar (bold, italic, heading, bullets, numbers, link) above a live preview, so an author who has never typed a `*` clicks a button and watches the rendered result underneath. Buttons wrap the current selection, or insert sample text when nothing is selected, so a click always does something visible; clicking the same button again undoes it rather than stacking markers. The renderer escapes the entire source before emitting its first tag, so no author HTML can reach the report and no HTML sanitizer dependency was needed. Emphasis only fires when the asterisks hug the text, so `2 * 3 * 4 = 24` and glob patterns survive, and metric names full of underscores are left alone.
+
+### Fixed
+- **The "Enable Markdown" switch in the text block editor actually does something now.** The switch had been in the form for a while, defaulting to on, but `TextBlockRenderer` never read `config.markdown` — turning it off changed nothing. It is now honoured, and it doubles as the per-section escape hatch for text authored before markdown rendering existed.
+- **Text blocks written before this release keep rendering exactly as they did.** `config.markdown` defaults to on, so those blocks would have started rendering as markdown the next time their template generated a report — silently renumbering explicit ordered lists (`1.` / `5.` / `7.` becoming 1, 2, 3), collapsing indentation and flattening nested bullets in text nobody had edited. A migration pins existing blocks to the behaviour they were authored under; markdown applies to blocks authored from here on. Already-generated reports were never affected, since `generated_reports` stores the rendered HTML and the PDF is produced from that.
+- **A crafted text block alignment can no longer inject HTML into a shared report.** `config.alignment` was interpolated straight into a `style` attribute, and the section config is only validated as an object, so a value like `left"><img src=x onerror=…>` escaped the attribute. That HTML is served unauthenticated through report share links and rendered by Puppeteer with JavaScript enabled during PDF generation. Alignment is now checked against the four values the form offers, falling back to `left`.
+- **A markdown heading inside a text block no longer looks like a real report section title.** Text blocks render as `<section class="text-block">`, so an author's `## Summary` matched the report stylesheet's `section h2` rule and printed with the brand colour and a full-width underline — indistinguishable from an actual top-level section heading, and the toolbar's Heading button inserts `## ` by default. Markdown headings now carry their own reset, and `h1` is larger than `h2` again.
+- **The report builder no longer breaks on Safari and iOS before 16.4.** The renderer's emphasis rules used regex lookbehind, which is a syntax error on those versions; because the pattern is evaluated when the module loads, the whole report-configuration dialog would have failed rather than degrading. The rules were rewritten without lookbehind.
+
 ## [0.2.61.101] - 2026-07-31
 
 ### Fixed
