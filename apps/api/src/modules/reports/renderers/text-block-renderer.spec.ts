@@ -95,15 +95,27 @@ describe('TextBlockRenderer', () => {
     expect(html).toContain('&lt;script&gt;');
   });
 
-  it('should handle missing config gracefully', () => {
+  it('should render nothing when there is no content and no comment', () => {
     const section: ReportSectionConfig = {
       type: 'text_block',
       order: 0,
+    };
+
+    // An empty section would otherwise print as a bare bordered card in the PDF.
+    expect(renderer.renderTextBlockSection(section)).toBe('');
+  });
+
+  it('should still render when only a comment is present', () => {
+    const section: ReportSectionConfig = {
+      type: 'text_block',
+      order: 0,
+      comment: 'Reviewed by the perf team',
     };
 
     const html = renderer.renderTextBlockSection(section);
 
     expect(html).toContain('text-align: left');
     expect(html).toContain('class="text-block"');
+    expect(html).toContain('Reviewed by the perf team');
   });
 });
