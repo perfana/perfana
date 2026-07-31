@@ -441,7 +441,6 @@ export class ReportHtmlCompilerService {
       padding: 30px;
       margin-bottom: 30px;
       box-shadow: 0 1px 3px rgba(0, 0, 0, 0.08), 0 4px 12px rgba(0, 0, 0, 0.04);
-      page-break-inside: avoid;
     }
 
     section h2 {
@@ -613,6 +612,14 @@ export class ReportHtmlCompilerService {
       font-size: 10pt;
     }
 
+    /* Data cells only, and inherited by the inline-block pills inside them. Without
+       this a long unbreakable cell (the UNACCEPTABLE apdex pill) sets a min-content
+       width wider than the page and Chrome silently clips the trailing columns.
+       Headers keep normal wrapping so they break on spaces, not mid-word. */
+    .data-table td {
+      overflow-wrap: anywhere;
+    }
+
     .data-table th {
       background-color: ${primaryColor};
       color: var(--bg-color);
@@ -716,22 +723,33 @@ export class ReportHtmlCompilerService {
 
     /* Print Styles */
     @media print {
+      /* Puppeteer's pdfOptions.margin already insets the page box. Padding here stacks
+         on top of it and squeezed the content column to ~140mm of a 210mm page. */
       body {
-        padding: 20mm;
+        padding: 0;
         background-color: var(--bg-color);
       }
 
+      /* Chrome does not implement "position: running()", so this element never moved
+         into the page margin box -- it printed inline on page 1, directly under the
+         header Puppeteer draws from headerTemplate. */
       .page-header {
-        position: running(header);
+        display: none;
       }
 
       section {
-        page-break-inside: avoid;
         box-shadow: none;
         border: 1px solid var(--border-color);
       }
 
-      .data-table {
+      /* Break inside tables at row granularity, repeating the header on each page.
+         "page-break-inside: avoid" on the whole section/table pushed any card that
+         did not fit entirely onto the next page, leaving pages ~40% blank. */
+      .data-table thead {
+        display: table-header-group;
+      }
+
+      .data-table tr {
         page-break-inside: avoid;
       }
 
@@ -739,19 +757,15 @@ export class ReportHtmlCompilerService {
         page-break-after: always;
       }
 
-      @page {
-        margin: 20mm;
-
-        @top-left {
-          content: element(header);
-        }
-
-        @bottom-right {
-          content: "Page " counter(page) " of " counter(pages);
-          font-size: 9pt;
-          color: var(--text-secondary);
-        }
+      /* The 60px screen margin was enough to push the three-line footer onto a
+         page of its own at the end of the report. */
+      footer {
+        margin-top: 24px;
+        padding: 16px 0;
       }
+
+      /* No @page rule: Puppeteer owns the margins, and Chrome 142 *does* honour
+         @bottom-right, which duplicated the footerTemplate page counter. */
     }
 
     /* Custom CSS Override */
