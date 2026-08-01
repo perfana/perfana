@@ -4,6 +4,15 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
+## [0.2.61.103] - 2026-08-01
+
+### Added
+- **Every report section's comment field now has the same formatting toolbar as a text block, and comments render markdown.** Comments were escaped as plain text while text block bodies rendered markdown, so the same text produced different output depending on which field you typed it into. All 11 section types now share one editor: bold, italic, heading, bullets, numbers and link, with the live preview underneath. Comments authored before this release start rendering as markdown on the next report generation — in practice they are short prose, but explicit `1.` / `5.` numbering and deliberate indentation are the shapes that change.
+- **The editor can be expanded.** Inside the report dialog the field sits in a fixed, already-scrolling column that is cramped for anything longer than a sentence. The expand button in the toolbar reopens the same editor in a large modal, with formatting and preview working identically there.
+
+### Fixed
+- **`CLAUDE.md` gave the wrong port for the web dev server.** It said `:4001` in three places; `npm run dev` starts it on `:4000`.
+
 ## [0.2.61.102] - 2026-07-31
 
 ### Added
