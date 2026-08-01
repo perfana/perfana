@@ -224,5 +224,30 @@ describe('report-style', () => {
     it('escapes comment content', () => {
       expect(commentBlock('<img onerror=x>')).toContain('&lt;img');
     });
+
+    it('renders markdown, matching the toolbar the editor offers for comments', () => {
+      const html = commentBlock('The **p95** rose\n\n- checkout\n- search');
+
+      expect(html).toContain('<strong>p95</strong>');
+      expect(html).toContain('<ul');
+      expect(html).toContain('<li>checkout</li>');
+      expect(html).not.toContain('**p95**');
+    });
+
+    it('still escapes author HTML once markdown rendering is in play', () => {
+      const html = commentBlock('<script>alert(1)</script> and [x](javascript:alert(1))');
+
+      expect(html).not.toContain('<script>');
+      expect(html).toContain('&lt;script&gt;');
+      expect(html).not.toContain('<a href="javascript');
+    });
+
+    it('keeps a heading in a comment from inheriting the report section chrome', () => {
+      // The comment bubble sits inside <section>, so an unreset h2 would pick up
+      // the brand colour and underline meant for real section titles.
+      const html = commentBlock('## Note');
+
+      expect(html).toContain('color:inherit');
+    });
   });
 });

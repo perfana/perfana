@@ -1,13 +1,26 @@
 'use client';
 
-import { useMemo, useRef } from 'react';
-import { Box, IconButton, InputBase, Tooltip, Typography } from '@mui/material';
+import { useMemo, useRef, useState } from 'react';
+import {
+  Box,
+  Button,
+  Dialog,
+  DialogActions,
+  DialogContent,
+  DialogTitle,
+  IconButton,
+  InputBase,
+  Tooltip,
+  Typography,
+} from '@mui/material';
 import FormatBoldIcon from '@mui/icons-material/FormatBold';
 import FormatItalicIcon from '@mui/icons-material/FormatItalic';
 import TitleIcon from '@mui/icons-material/Title';
 import FormatListBulletedIcon from '@mui/icons-material/FormatListBulleted';
 import FormatListNumberedIcon from '@mui/icons-material/FormatListNumbered';
 import LinkIcon from '@mui/icons-material/Link';
+import OpenInFullIcon from '@mui/icons-material/OpenInFull';
+import CloseFullscreenIcon from '@mui/icons-material/CloseFullscreen';
 import { renderMarkdown, renderPlainText } from '@perfana/shared/utils';
 
 /**
@@ -62,6 +75,8 @@ const EXISTING_BLOCK_MARKER = /^(#{1,6}\s+|[-*]\s+|\d+[.)]\s+)/;
 
 const LINK_URL_PLACEHOLDER = 'https://';
 
+const EXPANDED_ROWS = 18;
+
 // Theme tokens rather than the renderer's print styles, so the preview stays
 // legible in dark mode and matches the surrounding form's type scale.
 const PREVIEW_SX = {
@@ -103,6 +118,13 @@ interface MarkdownFieldProps {
   rows?: number;
   /** Mirrors the renderer's "Enable Markdown" switch. Off = plain text, toolbar hidden. */
   markdown?: boolean;
+  /** Committed on blur by callers that keep a local draft. */
+  onBlur?: () => void;
+  maxLength?: number;
+  /** Small text beside the label, e.g. a character count. */
+  helperText?: string;
+  /** Offer the expand-to-modal button. */
+  expandable?: boolean;
 }
 
 export function MarkdownField({
@@ -112,8 +134,13 @@ export function MarkdownField({
   placeholder,
   rows = 6,
   markdown = true,
+  onBlur,
+  maxLength,
+  helperText,
+  expandable = true,
 }: MarkdownFieldProps) {
   const inputRef = useRef<HTMLTextAreaElement | null>(null);
+  const [expanded, setExpanded] = useState(false);
 
   const applyTool = (tool: Tool) => {
     const el = inputRef.current;
@@ -219,91 +246,141 @@ export function MarkdownField({
     [markdown, value],
   );
 
-  return (
-    <Box>
-      <Typography variant="caption" sx={{ color: 'text.secondary', display: 'block', mb: 0.5 }}>
-        {label}
-      </Typography>
-
+  const surface = (
+    <Box
+      sx={{
+        border: 1,
+        // MUI's own outlined-input border, both modes. Hardcoding the light
+        // value paints a near-black border on the #0f172a dark surface.
+        borderColor: (t) =>
+          t.palette.mode === 'dark' ? 'rgba(255, 255, 255, 0.23)' : 'rgba(0, 0, 0, 0.23)',
+        borderRadius: 1,
+        overflow: 'hidden',
+        '&:hover': { borderColor: 'text.primary' },
+        '&:focus-within': {
+          borderColor: 'primary.main',
+          boxShadow: (t) => `0 0 0 1px ${t.palette.primary.main}`,
+        },
+      }}
+    >
       <Box
+        role="toolbar"
+        aria-label={`${label} formatting`}
         sx={{
-          border: 1,
-          // MUI's own outlined-input border, both modes. Hardcoding the light
-          // value paints a near-black border on the #0f172a dark surface.
-          borderColor: (t) =>
-            t.palette.mode === 'dark' ? 'rgba(255, 255, 255, 0.23)' : 'rgba(0, 0, 0, 0.23)',
-          borderRadius: 1,
-          overflow: 'hidden',
-          '&:hover': { borderColor: 'text.primary' },
-          '&:focus-within': {
-            borderColor: 'primary.main',
-            boxShadow: (t) => `0 0 0 1px ${t.palette.primary.main}`,
-          },
+          display: markdown ? 'flex' : 'none',
+          gap: 0.5,
+          px: 0.5,
+          py: 0.25,
+          borderBottom: 1,
+          borderColor: 'divider',
+          bgcolor: 'action.hover',
         }}
       >
-        <Box
-          role="toolbar"
-          aria-label={`${label} formatting`}
-          sx={{
-            display: markdown ? 'flex' : 'none',
-            gap: 0.5,
-            px: 0.5,
-            py: 0.25,
-            borderBottom: 1,
-            borderColor: 'divider',
-            bgcolor: 'action.hover',
-          }}
-        >
-          {TOOLS.map((tool) => (
-            <Tooltip key={tool.key} title={tool.title} arrow>
-              <IconButton
-                size="small"
-                aria-label={tool.title}
-                onClick={() => applyTool(tool)}
-                // Keep the textarea selection alive — mousedown would blur it first.
-                onMouseDown={(e) => e.preventDefault()}
-              >
-                <tool.Icon fontSize="small" />
-              </IconButton>
-            </Tooltip>
-          ))}
-        </Box>
+        {TOOLS.map((tool) => (
+          <Tooltip key={tool.key} title={tool.title} arrow>
+            <IconButton
+              size="small"
+              aria-label={tool.title}
+              onClick={() => applyTool(tool)}
+              // Keep the textarea selection alive — mousedown would blur it first.
+              onMouseDown={(e) => e.preventDefault()}
+            >
+              <tool.Icon fontSize="small" />
+            </IconButton>
+          </Tooltip>
+        ))}
 
-        {/* Stacked, never side by side: this renders in the report dialog's ~650px
-            form column, where two panes would each be ~40 characters wide. */}
-        <InputBase
-          inputRef={inputRef}
-          value={value}
-          onChange={(e) => onChange(e.target.value)}
-          multiline
-          rows={rows}
-          placeholder={placeholder}
-          inputProps={{ 'aria-label': label }}
-          sx={{
-            display: 'flex',
-            width: '100%',
-            alignItems: 'flex-start',
-            p: 1.5,
-            fontFamily: 'ui-monospace, SFMono-Regular, Menlo, monospace',
-            fontSize: '0.875rem',
-          }}
-        />
-
-        <Box
-          role="region"
-          aria-label={`${label} preview`}
-          sx={PREVIEW_SX}
-          // Safe without a sanitizer: both renderers escape the whole source before
-          // emitting their first tag, so no author HTML can reach the DOM. Covered
-          // by packages/shared/src/utils/__tests__/markdown.spec.ts.
-          dangerouslySetInnerHTML={{
-            __html:
-              value.trim().length > 0
-                ? previewHtml
-                : '<p data-placeholder="true">Preview appears here as you type</p>',
-          }}
-        />
+        {expandable && (
+          <Tooltip title={expanded ? 'Exit full screen' : 'Expand editor'} arrow>
+            <IconButton
+              size="small"
+              aria-label={expanded ? 'Exit full screen' : 'Expand editor'}
+              onClick={() => setExpanded(!expanded)}
+              onMouseDown={(e) => e.preventDefault()}
+              sx={{ ml: 'auto' }}
+            >
+              {expanded ? <CloseFullscreenIcon fontSize="small" /> : <OpenInFullIcon fontSize="small" />}
+            </IconButton>
+          </Tooltip>
+        )}
       </Box>
+
+      {/* Stacked, never side by side: inline this renders in the report dialog's
+          ~650px form column, where two panes would each be ~40 characters wide. */}
+      <InputBase
+        inputRef={inputRef}
+        value={value}
+        onChange={(e) => onChange(e.target.value)}
+        onBlur={onBlur}
+        multiline
+        rows={expanded ? EXPANDED_ROWS : rows}
+        placeholder={placeholder}
+        inputProps={{ 'aria-label': label, ...(maxLength ? { maxLength } : {}) }}
+        sx={{
+          display: 'flex',
+          width: '100%',
+          alignItems: 'flex-start',
+          p: 1.5,
+          fontFamily: 'ui-monospace, SFMono-Regular, Menlo, monospace',
+          fontSize: '0.875rem',
+        }}
+      />
+
+      <Box
+        role="region"
+        aria-label={`${label} preview`}
+        sx={{ ...PREVIEW_SX, ...(expanded ? { minHeight: 200 } : {}) }}
+        // Safe without a sanitizer: both renderers escape the whole source before
+        // emitting their first tag, so no author HTML can reach the DOM. Covered
+        // by packages/shared/src/utils/__tests__/markdown.spec.ts.
+        dangerouslySetInnerHTML={{
+          __html:
+            value.trim().length > 0
+              ? previewHtml
+              : '<p data-placeholder="true">Preview appears here as you type</p>',
+        }}
+      />
+    </Box>
+  );
+
+  const caption = (
+    <Box sx={{ display: 'flex', alignItems: 'baseline', justifyContent: 'space-between', mb: 0.5 }}>
+      <Typography variant="caption" sx={{ color: 'text.secondary' }}>
+        {label}
+      </Typography>
+      {helperText && (
+        <Typography variant="caption" sx={{ color: 'text.secondary' }}>
+          {helperText}
+        </Typography>
+      )}
+    </Box>
+  );
+
+  // Expanded lives in a modal rather than growing in place: the report dialog's
+  // form column is a fixed, already-scrolling ~650px, so growing inline just
+  // moves the scrollbar around. The surface is parented to one place at a time,
+  // so there is never a second textarea competing for inputRef.
+  if (expanded) {
+    return (
+      <Dialog open fullWidth maxWidth="md" onClose={() => setExpanded(false)}>
+        <DialogTitle sx={{ pb: 1 }}>{label}</DialogTitle>
+        <DialogContent>{surface}</DialogContent>
+        <DialogActions>
+          {helperText && (
+            <Typography variant="caption" sx={{ color: 'text.secondary', mr: 'auto', ml: 1 }}>
+              {helperText}
+            </Typography>
+          )}
+          <Button onClick={() => setExpanded(false)}>Done</Button>
+        </DialogActions>
+      </Dialog>
+    );
+  }
+
+  return (
+    <Box>
+      {caption}
+      {surface}
     </Box>
   );
 }

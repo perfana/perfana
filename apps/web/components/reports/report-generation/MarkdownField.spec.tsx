@@ -241,6 +241,75 @@ describe('MarkdownField', () => {
     expect(onChange).toHaveBeenCalledWith('## Summary');
   });
 
+  it('expands into a modal and back, keeping the value', () => {
+    render(<MarkdownField label="Content" value="## Summary" onChange={jest.fn()} />);
+
+    expect(screen.queryByRole('dialog')).toBeNull();
+
+    fireEvent.click(screen.getByLabelText('Expand editor'));
+
+    const dialog = screen.getByRole('dialog');
+    expect(dialog).toBeInTheDocument();
+    expect(screen.getByRole('textbox', { name: 'Content' })).toHaveValue('## Summary');
+    // Exactly one editor is mounted at a time, so nothing competes for the ref.
+    expect(screen.getAllByRole('textbox')).toHaveLength(1);
+
+    fireEvent.click(screen.getByRole('button', { name: 'Done' }));
+    expect(screen.queryByRole('dialog')).toBeNull();
+  });
+
+  it('formats normally while expanded', async () => {
+    function Owner() {
+      const [value, setValue] = useState('the p95 rose');
+      return <MarkdownField label="Content" value={value} onChange={setValue} />;
+    }
+    render(<Owner />);
+
+    fireEvent.click(screen.getByLabelText('Expand editor'));
+    const textarea = screen.getByRole('textbox', { name: 'Content' }) as HTMLTextAreaElement;
+    textarea.focus();
+    textarea.setSelectionRange(4, 7);
+
+    fireEvent.click(screen.getByLabelText('Bold'));
+
+    await waitFor(() => expect(textarea.value).toBe('the **p95** rose'));
+  });
+
+  it('hides the expand button when the caller opts out', () => {
+    render(
+      <MarkdownField label="Content" value="" onChange={jest.fn()} expandable={false} />,
+    );
+
+    expect(screen.queryByLabelText('Expand editor')).toBeNull();
+  });
+
+  it('enforces maxLength and shows the helper text', () => {
+    render(
+      <MarkdownField
+        label="Section Comments"
+        value="abc"
+        onChange={jest.fn()}
+        maxLength={2000}
+        helperText="3 / 2000 characters"
+      />,
+    );
+
+    expect(screen.getByRole('textbox', { name: 'Section Comments' })).toHaveAttribute(
+      'maxlength',
+      '2000',
+    );
+    expect(screen.getByText('3 / 2000 characters')).toBeInTheDocument();
+  });
+
+  it('calls onBlur so a caller keeping a local draft can commit it', () => {
+    const onBlur = jest.fn();
+    render(<MarkdownField label="Content" value="x" onChange={jest.fn()} onBlur={onBlur} />);
+
+    fireEvent.blur(screen.getByRole('textbox', { name: 'Content' }));
+
+    expect(onBlur).toHaveBeenCalled();
+  });
+
   it('selects the url placeholder after inserting a link', async () => {
     const textarea = setupControlled('see docs');
     textarea.focus();

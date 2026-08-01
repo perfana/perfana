@@ -12,7 +12,7 @@ npm run dev
 ```
 
 - API: http://localhost:3001/api/docs (Swagger)
-- Web: http://localhost:4001
+- Web: http://localhost:4000
 - Keycloak: http://localhost:8080 (admin/admin, realm: perfana-prod)
 - Login: perfana@example.com / perfana
 
@@ -49,10 +49,10 @@ npm run dev
 
 ## Development Commands
 
-- `npm run dev` — Start all services (api :3001, web :4001, grafana-sync :3002, worker)
+- `npm run dev` — Start all services (api :3001, web :4000, grafana-sync :3002, worker)
 - `npm run build` / `npm run test` / `npm run type-check` / `npm run lint`
 - `npm run dev:api` / `npm run dev:web` / `npm run dev:grafana-sync` — Individual services
-- `lsof -ti:3001,3002,4001 | xargs kill -9 && npm run dev` — Kill and restart
+- `lsof -ti:3001,3002,4000 | xargs kill -9 && npm run dev` — Kill and restart
 
 ## Authentication System
 

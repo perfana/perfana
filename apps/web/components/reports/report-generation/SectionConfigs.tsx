@@ -20,6 +20,8 @@ import { BaselineRunSelect, useBaselineCandidates } from './BaselineRunSelect';
 import { MarkdownField } from './MarkdownField';
 import { TEXT_BLOCK_MARKDOWN_DEFAULT } from '@perfana/shared/utils';
 
+const COMMENT_MAX_LENGTH = 2000;
+
 // Dynamically import preview components to reduce initial bundle size
 const ApdexSectionPreview = dynamic(() => import('./preview/ApdexSectionPreview'), { ssr: false });
 const HtmlSectionPreview = dynamic(() => import('./preview/HtmlSectionPreview'), { ssr: false });
@@ -94,28 +96,17 @@ function SectionConfigShell({
       <Box sx={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
         {children}
 
-        {/* Comment Text Area */}
-        <TextField
-          fullWidth
-          multiline
-          rows={4}
+        {/* Comment Text Area — same editor as the text block body, so every
+            section gets the formatting toolbar and preview. */}
+        <MarkdownField
+          label="Section Comments"
           value={localComment}
-          onChange={(e) => setLocalComment(e.target.value)}
+          onChange={setLocalComment}
           onBlur={commitComment}
           placeholder="Add comments or observations about this section..."
-          label="Section Comments"
-          variant="outlined"
-          helperText={`${localComment.length} / 2000 characters`}
-          inputProps={{
-            maxLength: 2000,
-          }}
-          sx={{
-            '& .MuiOutlinedInput-root': {
-              '&:hover fieldset': {
-                borderColor: 'primary.main',
-              },
-            },
-          }}
+          rows={4}
+          maxLength={COMMENT_MAX_LENGTH}
+          helperText={`${localComment.length} / ${COMMENT_MAX_LENGTH} characters`}
         />
 
         {/* Preview Button */}

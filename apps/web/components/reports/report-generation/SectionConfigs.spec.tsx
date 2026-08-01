@@ -73,7 +73,9 @@ describe.each(FORMS)('%s (shared section config affordances)', (_name, Form, pre
     const onChange = jest.fn();
     render(<Form config={{}} onChange={onChange} />);
 
-    const commentField = screen.getByLabelText(/section comments/i);
+    // Query by role: the comment editor's toolbar also carries the field name
+    // in its aria-label, so a plain label match is ambiguous.
+    const commentField = screen.getByRole('textbox', { name: 'Section Comments' });
     expect(commentField).toBeInTheDocument();
 
     // Typing keeps the draft local — no parent onChange per keystroke —
@@ -152,7 +154,7 @@ describe('TextBlockConfigForm', () => {
     const onChange = jest.fn();
     const { rerender } = render(<TextBlockConfigForm config={{}} onChange={onChange} />);
 
-    expect(screen.getByLabelText('Bold')).toBeVisible();
+    expect(screen.getAllByLabelText('Bold')[0]).toBeVisible();
 
     const toggle = screen.getByRole('switch', { name: /enable markdown/i });
     expect(toggle).toBeChecked();
@@ -161,7 +163,9 @@ describe('TextBlockConfigForm', () => {
     expect(onChange).toHaveBeenCalledWith({ markdown: false });
 
     rerender(<TextBlockConfigForm config={{ markdown: false }} onChange={onChange} />);
-    expect(screen.getByLabelText('Bold')).not.toBeVisible();
+    // Two editors now: the text block body and the section comment. The body's
+    // toolbar is the first one.
+    expect(screen.getAllByLabelText('Bold')[0]).not.toBeVisible();
   });
 });
 
