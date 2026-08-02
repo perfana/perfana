@@ -152,8 +152,8 @@ function SectionConfigShell({
         sectionTitle={sectionTitle}
         sectionType={sectionType}
         testRunId={testRunId}
-        initialComment={localComment}
-        onSaveComment={onCommentChange}
+        initialText={localComment}
+        onSaveText={onCommentChange}
       >
         {previewContent ?? (
           <HtmlSectionPreview testRunId={testRunId} sectionType={previewType} config={previewConfig} />
