@@ -174,7 +174,7 @@ describe('ApdexRenderer', () => {
     expect(html).toContain('background:#e7f4ea');
   });
 
-  it('should render comment via the shared comment block when provided', async () => {
+  it('should render the accompanying text via the shared section-text block when provided', async () => {
     dataFetcher.getApdexDataFromDatabase.mockResolvedValue(makeApdexData());
 
     const html = await renderer.renderApdexSection(
@@ -186,7 +186,7 @@ describe('ApdexRenderer', () => {
     expect(html).toContain('Discuss with the team');
   });
 
-  it('should omit the comment block when no comment is set', async () => {
+  it('should omit the section-text block when no text is set', async () => {
     dataFetcher.getApdexDataFromDatabase.mockResolvedValue(makeApdexData());
 
     const html = await renderer.renderApdexSection(makeSection(), makeTestRun());
