@@ -69,27 +69,6 @@ describe.each(FORMS)('%s (shared section config affordances)', (_name, Form, pre
     mockHtmlPreviewProps.length = 0;
   });
 
-  it('commits comment changes on blur, not on every keystroke', () => {
-    const onChange = jest.fn();
-    render(<Form config={{}} onChange={onChange} />);
-
-    // Query by role: the comment editor's toolbar also carries the field name
-    // in its aria-label, so a plain label match is ambiguous.
-    const commentField = screen.getByRole('textbox', { name: 'Section Comments' });
-    expect(commentField).toBeInTheDocument();
-
-    // Typing keeps the draft local — no parent onChange per keystroke —
-    // while the character counter stays live from local state
-    fireEvent.change(commentField, { target: { value: 'looks good' } });
-    expect(onChange).not.toHaveBeenCalled();
-    expect(screen.getByText('10 / 2000 characters')).toBeInTheDocument();
-
-    // Blur commits the draft to the parent
-    fireEvent.blur(commentField);
-    expect(onChange).toHaveBeenCalledTimes(1);
-    expect(onChange).toHaveBeenCalledWith(expect.objectContaining({ comment: 'looks good' }));
-  });
-
   it('renders a Preview Section button, disabled when no test run is selected', () => {
     render(<Form config={{}} onChange={jest.fn()} />);
 
@@ -118,8 +97,47 @@ describe.each(FORMS)('%s (shared section config affordances)', (_name, Form, pre
   });
 });
 
+it('commits text changes on blur, not on every keystroke', () => {
+  const onTextChange = jest.fn();
+  render(
+    <SloConfigForm
+      config={{}}
+      onChange={jest.fn()}
+      text=""
+      onTextChange={onTextChange}
+      testRunId="run-1"
+    />,
+  );
+
+  // Query by role: the text editor's toolbar also carries the field name
+  const textField = screen.getByRole('textbox', { name: 'Text' });
+  expect(textField).toBeInTheDocument();
+
+  fireEvent.change(textField, { target: { value: 'looks good' } });
+  expect(onTextChange).not.toHaveBeenCalled();
+
+  fireEvent.blur(textField);
+  expect(onTextChange).toHaveBeenCalledWith('looks good');
+});
+
+it('gives a text block no accompanying-text editor — its content is the text', () => {
+  render(
+    <TextBlockConfigForm config={{ content: 'body' }} onChange={jest.fn()} testRunId="run-1" />,
+  );
+
+  expect(screen.queryByRole('textbox', { name: 'Text' })).not.toBeInTheDocument();
+  expect(screen.getByRole('textbox', { name: 'Content' })).toBeInTheDocument();
+});
+
 it('enables the Preview Section button when a testRunId is provided', () => {
-  render(<SloConfigForm config={{}} onChange={jest.fn()} testRunId="MyApp-acc-loadTest-00001" />);
+  render(
+    <SloConfigForm
+      config={{}}
+      onChange={jest.fn()}
+      onTextChange={jest.fn()}
+      testRunId="MyApp-acc-loadTest-00001"
+    />,
+  );
   expect(screen.getByRole('button', { name: /preview section/i })).toBeEnabled();
 });
 
@@ -128,6 +146,7 @@ it('keeps the Preview Section button disabled for response times until a scenari
     <TransactionResponseTimesConfigForm
       config={{}}
       onChange={jest.fn()}
+      onTextChange={jest.fn()}
       testRunId="MyApp-acc-loadTest-00001"
     />
   );
@@ -163,21 +182,28 @@ describe('TextBlockConfigForm', () => {
     expect(onChange).toHaveBeenCalledWith({ markdown: false });
 
     rerender(<TextBlockConfigForm config={{ markdown: false }} onChange={onChange} />);
-    // Two editors now: the text block body and the section comment. The body's
-    // toolbar is the first one.
+    // Only one editor now: the text block body — text blocks have no
+    // accompanying-text field.
     expect(screen.getAllByLabelText('Bold')[0]).not.toBeVisible();
   });
 });
 
 describe('Top10ListsConfigForm', () => {
   it('renders the scope selector and hides includeUrl unless scope is requests', () => {
-    render(<Top10ListsConfigForm config={{}} onChange={() => {}} testRunId="tr-1" />);
+    render(<Top10ListsConfigForm config={{}} onChange={() => {}} onTextChange={() => {}} testRunId="tr-1" />);
     expect(screen.getByText(/scope/i)).toBeInTheDocument();
     expect(screen.queryByLabelText(/show url/i)).not.toBeInTheDocument();
   });
 
   it('shows the includeUrl toggle when scope is requests', () => {
-    render(<Top10ListsConfigForm config={{ scope: 'requests' }} onChange={() => {}} testRunId="tr-1" />);
+    render(
+      <Top10ListsConfigForm
+        config={{ scope: 'requests' }}
+        onChange={() => {}}
+        onTextChange={() => {}}
+        testRunId="tr-1"
+      />,
+    );
     expect(screen.getByLabelText(/show url/i)).toBeInTheDocument();
   });
 });

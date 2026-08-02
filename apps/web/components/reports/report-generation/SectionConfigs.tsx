@@ -14,13 +14,12 @@ import SectionPreviewModal from './SectionPreviewModal';
 import dynamic from 'next/dynamic';
 import { authenticatedFetch } from '@/lib/api';
 import type { ReportSectionType } from '@/lib/api/reports';
+import { REPORT_LIMITS } from '@/lib/api/reports';
 import { fetchDynatraceDashboards, fetchDynatraceMetrics } from '@/lib/dynatrace';
 import { isGrafana } from '@/lib/metrics-source-utils';
 import { BaselineRunSelect, useBaselineCandidates } from './BaselineRunSelect';
 import { MarkdownField } from './MarkdownField';
 import { TEXT_BLOCK_MARKDOWN_DEFAULT } from '@perfana/shared/utils';
-
-const COMMENT_MAX_LENGTH = 2000;
 
 // Dynamically import preview components to reduce initial bundle size
 const ApdexSectionPreview = dynamic(() => import('./preview/ApdexSectionPreview'), { ssr: false });
@@ -35,10 +34,14 @@ interface SectionConfigShellProps {
   sectionType: string;
   /** API section type used by the generic server-rendered HTML preview */
   previewType: ReportSectionType;
-  /** Current section config (including comment) — sent to the preview endpoint */
+  /** Current section config — config only; accompanying text is separate */
   previewConfig: Record<string, unknown>;
-  comment?: string;
-  onCommentChange: (comment: string) => void;
+  /**
+   * Accompanying text. Omit both this and onTextChange to render no text
+   * editor — text_block sections, whose Content field already is the text.
+   */
+  text?: string;
+  onTextChange?: (text: string) => void;
   testRunId?: string;
   /** Extra per-form condition that disables the preview button */
   previewDisabled?: boolean;
@@ -51,16 +54,16 @@ interface SectionConfigShellProps {
 
 /**
  * Shared wrapper that gives every section config form the same affordances:
- * the form's own fields, a Section Comments textarea and a
- * "Preview Section" button that opens the preview modal.
+ * the form's own fields, an accompanying-text editor and a "Preview Section"
+ * button that opens the preview modal.
  */
 function SectionConfigShell({
   sectionTitle,
   sectionType,
   previewType,
   previewConfig,
-  comment,
-  onCommentChange,
+  text,
+  onTextChange,
   testRunId,
   previewDisabled = false,
   previewDisabledReason,
@@ -69,20 +72,20 @@ function SectionConfigShell({
 }: SectionConfigShellProps) {
   const [previewOpen, setPreviewOpen] = useState(false);
 
-  // Local draft of the comment so typing doesn't propagate to the parent (and
+  // Local draft of the text so typing doesn't propagate to the parent (and
   // re-render every section card) on each keystroke; committed on blur and
   // before opening the preview modal.
-  const [localComment, setLocalComment] = useState(comment ?? '');
+  const [localText, setLocalText] = useState(text ?? '');
 
-  // Sync the draft when the comment changes externally (e.g. saved from the
+  // Sync the draft when the text changes externally (e.g. saved from the
   // preview modal).
   useEffect(() => {
-    setLocalComment(comment ?? '');
-  }, [comment]);
+    setLocalText(text ?? '');
+  }, [text]);
 
-  const commitComment = () => {
-    if (localComment !== (comment ?? '')) {
-      onCommentChange(localComment);
+  const commitText = () => {
+    if (onTextChange && localText !== (text ?? '')) {
+      onTextChange(localText);
     }
   };
 
@@ -96,18 +99,20 @@ function SectionConfigShell({
       <Box sx={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
         {children}
 
-        {/* Comment Text Area — same editor as the text block body, so every
+        {/* Accompanying text — same editor as the text block body, so every
             section gets the formatting toolbar and preview. */}
-        <MarkdownField
-          label="Section Comments"
-          value={localComment}
-          onChange={setLocalComment}
-          onBlur={commitComment}
-          placeholder="Add comments or observations about this section..."
-          rows={4}
-          maxLength={COMMENT_MAX_LENGTH}
-          helperText={`${localComment.length} / ${COMMENT_MAX_LENGTH} characters`}
-        />
+        {onTextChange && (
+          <MarkdownField
+            label="Text"
+            value={localText}
+            onChange={setLocalText}
+            onBlur={commitText}
+            placeholder="Write the text that accompanies this section, or use the buttons above to format it"
+            rows={4}
+            maxLength={REPORT_LIMITS.MAX_SECTION_TEXT_LENGTH}
+            helperText={`${localText.length} / ${REPORT_LIMITS.MAX_SECTION_TEXT_LENGTH} characters`}
+          />
+        )}
 
         {/* Preview Button */}
         <Tooltip title={disabled ? disabledReason : ''} arrow>
@@ -116,9 +121,9 @@ function SectionConfigShell({
               variant="outlined"
               startIcon={<VisibilityIcon />}
               onClick={() => {
-                // Commit any in-progress comment draft so the preview payload
-                // includes the latest comment.
-                commitComment();
+                // Commit any in-progress draft so the preview payload includes
+                // the latest text.
+                commitText();
                 setPreviewOpen(true);
               }}
               fullWidth
@@ -152,11 +157,16 @@ function SectionConfigShell({
         sectionTitle={sectionTitle}
         sectionType={sectionType}
         testRunId={testRunId}
-        initialText={localComment}
-        onSaveText={onCommentChange}
+        initialText={localText}
+        onSaveText={onTextChange}
       >
         {previewContent ?? (
-          <HtmlSectionPreview testRunId={testRunId} sectionType={previewType} config={previewConfig} />
+          <HtmlSectionPreview
+            testRunId={testRunId}
+            sectionType={previewType}
+            config={previewConfig}
+            text={localText}
+          />
         )}
       </SectionPreviewModal>
     </>
@@ -169,24 +179,25 @@ function SectionConfigShell({
 export interface HeaderConfig {
   text?: string;
   level?: number;
-  comment?: string;
 }
 
 interface HeaderConfigFormProps {
   config: HeaderConfig;
   onChange: (config: HeaderConfig) => void;
+  text?: string;
+  onTextChange: (text: string) => void;
   testRunId?: string;
 }
 
-export function HeaderConfigForm({ config, onChange, testRunId }: HeaderConfigFormProps) {
+export function HeaderConfigForm({ config, onChange, text, onTextChange, testRunId }: HeaderConfigFormProps) {
   return (
     <SectionConfigShell
       sectionTitle={config.text || 'Header'}
       sectionType="Header"
       previewType="header"
       previewConfig={config}
-      comment={config.comment}
-      onCommentChange={(comment) => onChange({ ...config, comment })}
+      text={text}
+      onTextChange={onTextChange}
       testRunId={testRunId}
     >
       <TextField
@@ -226,7 +237,6 @@ export interface TextBlockConfig {
   fontSize?: number;
   markdown?: boolean;
   alignment?: 'left' | 'center' | 'right' | 'justify';
-  comment?: string;
 }
 
 interface TextBlockConfigFormProps {
@@ -235,6 +245,8 @@ interface TextBlockConfigFormProps {
   testRunId?: string;
 }
 
+// A text block has no accompanying text — its Content field already is the
+// text, so the shell gets no text/onTextChange and renders no second editor.
 export function TextBlockConfigForm({ config, onChange, testRunId }: TextBlockConfigFormProps) {
   return (
     <SectionConfigShell
@@ -242,8 +254,6 @@ export function TextBlockConfigForm({ config, onChange, testRunId }: TextBlockCo
       sectionType="Text Block"
       previewType="text_block"
       previewConfig={config}
-      comment={config.comment}
-      onCommentChange={(comment) => onChange({ ...config, comment })}
       testRunId={testRunId}
     >
       <MarkdownField
@@ -297,24 +307,25 @@ export interface SloConfig {
   statusFilter?: string[];
   includeTrends?: boolean;
   showSummaryTable?: boolean;
-  comment?: string;
 }
 
 interface SloConfigFormProps {
   config: SloConfig;
   onChange: (config: SloConfig) => void;
+  text?: string;
+  onTextChange: (text: string) => void;
   testRunId?: string;
 }
 
-export function SloConfigForm({ config, onChange, testRunId }: SloConfigFormProps) {
+export function SloConfigForm({ config, onChange, text, onTextChange, testRunId }: SloConfigFormProps) {
   return (
     <SectionConfigShell
       sectionTitle="Service Level Objectives"
       sectionType="SLO"
       previewType="slo"
       previewConfig={config}
-      comment={config.comment}
-      onCommentChange={(comment) => onChange({ ...config, comment })}
+      text={text}
+      onTextChange={onTextChange}
       testRunId={testRunId}
     >
       <TextField
@@ -365,26 +376,27 @@ export interface ApdexConfig {
   showTransactionLevel?: boolean;
   includeDistributionChart?: boolean;
   excludeRampUp?: boolean;
-  comment?: string; // Added for section comments
 }
 
 interface ApdexConfigFormProps {
   config: ApdexConfig;
   onChange: (config: ApdexConfig) => void;
+  text?: string;
+  onTextChange: (text: string) => void;
   testRunId?: string; // Optional test run ID for preview
 }
 
-export function ApdexConfigForm({ config, onChange, testRunId }: ApdexConfigFormProps) {
+export function ApdexConfigForm({ config, onChange, text, onTextChange, testRunId }: ApdexConfigFormProps) {
   return (
     <SectionConfigShell
       sectionTitle="Apdex Score"
       sectionType="Apdex"
       previewType="apdex"
       previewConfig={config}
-      comment={config.comment}
-      onCommentChange={(comment) => onChange({ ...config, comment })}
+      text={text}
+      onTextChange={onTextChange}
       testRunId={testRunId}
-      previewContent={<ApdexSectionPreview testRunId={testRunId} config={config} />}
+      previewContent={<ApdexSectionPreview testRunId={testRunId} config={config} text={text} />}
     >
       {/* Apply to analysis timerange only Toggle */}
       <Tooltip title="Apply statistics to the configured analysis timerange only" arrow>
@@ -423,16 +435,17 @@ export function ApdexConfigForm({ config, onChange, testRunId }: ApdexConfigForm
 export interface TransactionResponseTimesConfig {
   scenario?: string;
   includeAggregated?: boolean;
-  comment?: string;
 }
 
 interface TransactionResponseTimesConfigFormProps {
   config: TransactionResponseTimesConfig;
   onChange: (config: TransactionResponseTimesConfig) => void;
+  text?: string;
+  onTextChange: (text: string) => void;
   testRunId?: string; // Optional test run ID for fetching scenarios and preview
 }
 
-export function TransactionResponseTimesConfigForm({ config, onChange, testRunId }: TransactionResponseTimesConfigFormProps) {
+export function TransactionResponseTimesConfigForm({ config, onChange, text, onTextChange, testRunId }: TransactionResponseTimesConfigFormProps) {
   const [scenarios, setScenarios] = useState<string[]>([]);
   const [loadingScenarios, setLoadingScenarios] = useState(false);
 
@@ -495,8 +508,8 @@ export function TransactionResponseTimesConfigForm({ config, onChange, testRunId
       sectionType="Transaction Response Times"
       previewType="transaction_response_times"
       previewConfig={config}
-      comment={config.comment}
-      onCommentChange={(comment) => onChange({ ...config, comment })}
+      text={text}
+      onTextChange={onTextChange}
       testRunId={testRunId}
       previewDisabled={!config.scenario}
       previewDisabledReason="Select a scenario to enable preview"
@@ -577,16 +590,17 @@ export interface Top10ListsConfig {
   scenarios?: string[];
   excludeRampUp?: boolean;
   includeUrl?: boolean;
-  comment?: string;
 }
 
 interface Top10ListsConfigFormProps {
   config: Top10ListsConfig;
   onChange: (config: Top10ListsConfig) => void;
+  text?: string;
+  onTextChange: (text: string) => void;
   testRunId?: string;
 }
 
-export function Top10ListsConfigForm({ config, onChange, testRunId }: Top10ListsConfigFormProps) {
+export function Top10ListsConfigForm({ config, onChange, text, onTextChange, testRunId }: Top10ListsConfigFormProps) {
   const [scenarios, setScenarios] = useState<string[]>([]);
 
   useEffect(() => {
@@ -618,8 +632,8 @@ export function Top10ListsConfigForm({ config, onChange, testRunId }: Top10Lists
       sectionType="Top 10 Lists"
       previewType="top_10_lists"
       previewConfig={config}
-      comment={config.comment}
-      onCommentChange={(comment) => onChange({ ...config, comment })}
+      text={text}
+      onTextChange={onTextChange}
       testRunId={testRunId}
     >
       {/* Scope */}
@@ -711,24 +725,25 @@ export interface RegressionsConfig {
   minChangePercent?: number;
   showComparisonDetails?: boolean;
   includeComparisonChart?: boolean;
-  comment?: string;
 }
 
 interface RegressionsConfigFormProps {
   config: RegressionsConfig;
   onChange: (config: RegressionsConfig) => void;
+  text?: string;
+  onTextChange: (text: string) => void;
   testRunId?: string;
 }
 
-export function RegressionsConfigForm({ config, onChange, testRunId }: RegressionsConfigFormProps) {
+export function RegressionsConfigForm({ config, onChange, text, onTextChange, testRunId }: RegressionsConfigFormProps) {
   return (
     <SectionConfigShell
       sectionTitle="Performance Regressions"
       sectionType="Regressions"
       previewType="regressions"
       previewConfig={config}
-      comment={config.comment}
-      onCommentChange={(comment) => onChange({ ...config, comment })}
+      text={text}
+      onTextChange={onTextChange}
       testRunId={testRunId}
     >
       <Select
@@ -800,24 +815,25 @@ export interface GraphsConfig {
   };
   showLegends?: boolean;
   includeAggregated?: boolean;
-  comment?: string;
 }
 
 interface GraphsConfigFormProps {
   config: GraphsConfig;
   onChange: (config: GraphsConfig) => void;
+  text?: string;
+  onTextChange: (text: string) => void;
   testRunId?: string;
 }
 
-export function GraphsConfigForm({ config, onChange, testRunId }: GraphsConfigFormProps) {
+export function GraphsConfigForm({ config, onChange, text, onTextChange, testRunId }: GraphsConfigFormProps) {
   return (
     <SectionConfigShell
       sectionTitle="Custom Graphs"
       sectionType="Graphs"
       previewType="graphs"
       previewConfig={config}
-      comment={config.comment}
-      onCommentChange={(comment) => onChange({ ...config, comment })}
+      text={text}
+      onTextChange={onTextChange}
       testRunId={testRunId}
     >
       <Select
@@ -885,24 +901,25 @@ export interface AwrConfig {
   showWaitEvents?: boolean;
   showTablespaceUsage?: boolean;
   includeExecutionPlans?: boolean;
-  comment?: string;
 }
 
 interface AwrConfigFormProps {
   config: AwrConfig;
   onChange: (config: AwrConfig) => void;
+  text?: string;
+  onTextChange: (text: string) => void;
   testRunId?: string;
 }
 
-export function AwrConfigForm({ config, onChange, testRunId }: AwrConfigFormProps) {
+export function AwrConfigForm({ config, onChange, text, onTextChange, testRunId }: AwrConfigFormProps) {
   return (
     <SectionConfigShell
       sectionTitle="AWR Analysis"
       sectionType="AWR"
       previewType="awr"
       previewConfig={config}
-      comment={config.comment}
-      onCommentChange={(comment) => onChange({ ...config, comment })}
+      text={text}
+      onTextChange={onTextChange}
       testRunId={testRunId}
     >
       <TextField
@@ -965,24 +982,25 @@ export interface TrendsConfig {
   showCharts?: boolean;
   sensitivity?: 'low' | 'medium' | 'high';
   showStatistics?: boolean;
-  comment?: string;
 }
 
 interface TrendsConfigFormProps {
   config: TrendsConfig;
   onChange: (config: TrendsConfig) => void;
+  text?: string;
+  onTextChange: (text: string) => void;
   testRunId?: string;
 }
 
-export function TrendsConfigForm({ config, onChange, testRunId }: TrendsConfigFormProps) {
+export function TrendsConfigForm({ config, onChange, text, onTextChange, testRunId }: TrendsConfigFormProps) {
   return (
     <SectionConfigShell
       sectionTitle="Trend Charts"
       sectionType="Trends"
       previewType="trends"
       previewConfig={config}
-      comment={config.comment}
-      onCommentChange={(comment) => onChange({ ...config, comment })}
+      text={text}
+      onTextChange={onTextChange}
       testRunId={testRunId}
     >
       <TextField
@@ -1058,7 +1076,6 @@ export interface ComparisonsConfig {
   // dashboards from the baseline run's environment
   dashboardMap?: { current: string; baseline: string }[];
   includeAggregated?: boolean;
-  comment?: string;
 }
 
 // Panel types the comparison can meaningfully diff (mirrors the compare card).
@@ -1067,6 +1084,8 @@ const COMPARABLE_PANEL_TYPES = ['graph', 'timeseries', 'stat', 'singlestat', 'fl
 interface ComparisonsConfigFormProps {
   config: ComparisonsConfig;
   onChange: (config: ComparisonsConfig) => void;
+  text?: string;
+  onTextChange: (text: string) => void;
   testRunId?: string;
   systemUnderTestId?: string;
   testEnvironment?: string;
@@ -1078,7 +1097,7 @@ interface SourceDashboardOption {
   uid?: string; // grafana only — needed to fetch the dashboard's panels
 }
 
-export function ComparisonsConfigForm({ config, onChange, testRunId, systemUnderTestId, testEnvironment, workload }: ComparisonsConfigFormProps) {
+export function ComparisonsConfigForm({ config, onChange, text, onTextChange, testRunId, systemUnderTestId, testEnvironment, workload }: ComparisonsConfigFormProps) {
   const [sourceDashboards, setSourceDashboards] = useState<SourceDashboardOption[]>([]);
   const [baselineDashboards, setBaselineDashboards] = useState<SourceDashboardOption[]>([]);
   const [sourcePanels, setSourcePanels] = useState<{ id: number; title: string }[]>([]);
@@ -1183,8 +1202,8 @@ export function ComparisonsConfigForm({ config, onChange, testRunId, systemUnder
       sectionType="Comparisons"
       previewType="comparisons"
       previewConfig={config}
-      comment={config.comment}
-      onCommentChange={(comment) => onChange({ ...config, comment })}
+      text={text}
+      onTextChange={onTextChange}
       testRunId={testRunId}
     >
       {/* Mode toggle — always visible */}

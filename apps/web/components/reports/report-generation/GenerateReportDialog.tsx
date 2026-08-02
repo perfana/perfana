@@ -69,6 +69,7 @@ import {
   type ReportSectionType,
   type ReportStyling,
   REPORT_SECTION_TYPES,
+  getSectionText,
 } from '@/lib/api/reports';
 import {
   HeaderConfigForm,
@@ -330,15 +331,14 @@ export function GenerateReportDialog({
   // Handle section config change
   const handleConfigChange = (index: number, config: Record<string, unknown>) => {
     const newSections = [...sections];
+    newSections[index] = { ...newSections[index], config };
+    setSections(newSections);
+  };
 
-    // Extract comment from config (if present) and store as separate field
-    const { comment, ...restConfig } = config;
-
-    newSections[index] = {
-      ...newSections[index],
-      config: restConfig,
-      ...(comment !== undefined && { comment: comment as string }), // Only set comment if present
-    };
+  // Handle section text change — a section-level field, never part of config
+  const handleTextChange = (index: number, text: string) => {
+    const newSections = [...sections];
+    newSections[index] = { ...newSections[index], text };
     setSections(newSections);
   };
 
@@ -738,6 +738,7 @@ export function GenerateReportDialog({
                       index={index}
                       onDelete={() => handleDelete(index)}
                       onConfigChange={(config) => handleConfigChange(index, config)}
+                      onTextChange={(text) => handleTextChange(index, text)}
                       onMoveUp={index > 0 ? () => handleReorder(index, index - 1) : undefined}
                       onMoveDown={index < sections.length - 1 ? () => handleReorder(index, index + 1) : undefined}
                       testRunId={testRunId}
@@ -886,6 +887,7 @@ interface LayoutSectionCardProps {
   index: number;
   onDelete: () => void;
   onConfigChange: (config: Record<string, unknown>) => void;
+  onTextChange: (text: string) => void;
   onMoveUp?: () => void;
   onMoveDown?: () => void;
   testRunId?: string;
@@ -894,7 +896,7 @@ interface LayoutSectionCardProps {
   workload?: string;
 }
 
-function LayoutSectionCard({ id, section, index, onDelete, onConfigChange, onMoveUp: _onMoveUp, onMoveDown: _onMoveDown, testRunId, systemUnderTestId, testEnvironment, workload }: LayoutSectionCardProps) {
+function LayoutSectionCard({ id, section, index, onDelete, onConfigChange, onTextChange, onMoveUp: _onMoveUp, onMoveDown: _onMoveDown, testRunId, systemUnderTestId, testEnvironment, workload }: LayoutSectionCardProps) {
   // DB-stored templates can carry section types this build doesn't know about
   const config = SECTION_CONFIG[section.type] ?? { icon: null, label: section.type, description: '', color: '#9e9e9e' };
   const [expanded, setExpanded] = useState(false);
@@ -915,37 +917,36 @@ function LayoutSectionCard({ id, section, index, onDelete, onConfigChange, onMov
     opacity: isDragging ? 0.5 : 1,
   };
 
-  // Render the appropriate config form
+  // Render the appropriate config form. Section text is a section-level field
+  // passed as its own prop — it is deliberately NOT merged into config, which
+  // would collide with HeaderConfig's own `text`.
   const renderConfigForm = () => {
-    // Merge config with comment for forms that support comments
-    const sectionConfig = {
-      ...(section.config || {}),
-      ...(section.comment !== undefined && { comment: section.comment }),
-    } as Record<string, unknown>;
+    const sectionConfig = (section.config || {}) as Record<string, unknown>;
+    const text = getSectionText(section);
 
     switch (section.type) {
       case 'header':
-        return <HeaderConfigForm config={sectionConfig} onChange={onConfigChange} testRunId={testRunId} />;
+        return <HeaderConfigForm config={sectionConfig} onChange={onConfigChange} text={text} onTextChange={onTextChange} testRunId={testRunId} />;
       case 'text_block':
         return <TextBlockConfigForm config={sectionConfig} onChange={onConfigChange} testRunId={testRunId} />;
       case 'slo':
-        return <SloConfigForm config={sectionConfig} onChange={onConfigChange} testRunId={testRunId} />;
+        return <SloConfigForm config={sectionConfig} onChange={onConfigChange} text={text} onTextChange={onTextChange} testRunId={testRunId} />;
       case 'apdex':
-        return <ApdexConfigForm config={sectionConfig} onChange={onConfigChange} testRunId={testRunId} />;
+        return <ApdexConfigForm config={sectionConfig} onChange={onConfigChange} text={text} onTextChange={onTextChange} testRunId={testRunId} />;
       case 'transaction_response_times':
-        return <TransactionResponseTimesConfigForm config={sectionConfig} onChange={onConfigChange} testRunId={testRunId} />;
+        return <TransactionResponseTimesConfigForm config={sectionConfig} onChange={onConfigChange} text={text} onTextChange={onTextChange} testRunId={testRunId} />;
       case 'regressions':
-        return <RegressionsConfigForm config={sectionConfig} onChange={onConfigChange} testRunId={testRunId} />;
+        return <RegressionsConfigForm config={sectionConfig} onChange={onConfigChange} text={text} onTextChange={onTextChange} testRunId={testRunId} />;
       case 'graphs':
-        return <GraphsConfigForm config={sectionConfig} onChange={onConfigChange} testRunId={testRunId} />;
+        return <GraphsConfigForm config={sectionConfig} onChange={onConfigChange} text={text} onTextChange={onTextChange} testRunId={testRunId} />;
       case 'awr':
-        return <AwrConfigForm config={sectionConfig} onChange={onConfigChange} testRunId={testRunId} />;
+        return <AwrConfigForm config={sectionConfig} onChange={onConfigChange} text={text} onTextChange={onTextChange} testRunId={testRunId} />;
       case 'trends':
-        return <TrendsConfigForm config={sectionConfig} onChange={onConfigChange} testRunId={testRunId} />;
+        return <TrendsConfigForm config={sectionConfig} onChange={onConfigChange} text={text} onTextChange={onTextChange} testRunId={testRunId} />;
       case 'comparisons':
-        return <ComparisonsConfigForm config={sectionConfig} onChange={onConfigChange} testRunId={testRunId} systemUnderTestId={systemUnderTestId} testEnvironment={testEnvironment} workload={workload} />;
+        return <ComparisonsConfigForm config={sectionConfig} onChange={onConfigChange} text={text} onTextChange={onTextChange} testRunId={testRunId} systemUnderTestId={systemUnderTestId} testEnvironment={testEnvironment} workload={workload} />;
       case 'top_10_lists':
-        return <Top10ListsConfigForm config={sectionConfig} onChange={onConfigChange} testRunId={testRunId} />;
+        return <Top10ListsConfigForm config={sectionConfig} onChange={onConfigChange} text={text} onTextChange={onTextChange} testRunId={testRunId} />;
       default:
         return null;
     }
