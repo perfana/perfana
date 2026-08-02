@@ -42,6 +42,8 @@ jest.mock('./preview/ApdexSectionPreview', () => ({
 type AnyConfigForm = React.ComponentType<{
   config: Record<string, unknown>;
   onChange: (config: Record<string, unknown>) => void;
+  text?: string;
+  onTextChange?: (text: string) => void;
   testRunId?: string;
 }>;
 
@@ -70,7 +72,7 @@ describe.each(FORMS)('%s (shared section config affordances)', (_name, Form, pre
   });
 
   it('renders a Preview Section button, disabled when no test run is selected', () => {
-    render(<Form config={{}} onChange={jest.fn()} />);
+    render(<Form config={{}} onChange={jest.fn()} onTextChange={jest.fn()} />);
 
     const previewButton = screen.getByRole('button', { name: /preview section/i });
     expect(previewButton).toBeInTheDocument();
@@ -78,7 +80,14 @@ describe.each(FORMS)('%s (shared section config affordances)', (_name, Form, pre
   });
 
   it('opens the preview modal with the correct preview type', async () => {
-    render(<Form config={enableConfig} onChange={jest.fn()} testRunId="MyApp-acc-loadTest-00001" />);
+    render(
+      <Form
+        config={enableConfig}
+        onChange={jest.fn()}
+        onTextChange={jest.fn()}
+        testRunId="MyApp-acc-loadTest-00001"
+      />,
+    );
 
     const previewButton = screen.getByRole('button', { name: /preview section/i });
     expect(previewButton).toBeEnabled();
@@ -96,6 +105,36 @@ describe.each(FORMS)('%s (shared section config affordances)', (_name, Form, pre
     }
   });
 });
+
+// TextBlockConfigForm deliberately has no accompanying-text editor — its
+// Content field already is the text (see the dedicated TextBlockConfigForm
+// describe block below) — so it's filtered out of FORMS for this assertion
+// rather than special-cased inside the test body.
+const FORMS_WITH_TEXT_EDITOR = FORMS.filter(([name]) => name !== 'TextBlockConfigForm');
+
+describe.each(FORMS_WITH_TEXT_EDITOR)(
+  '%s (accompanying-text editor wiring)',
+  (_name, Form) => {
+    it('renders the accompanying-text editor and forwards a blur commit to onTextChange', () => {
+      // This is the regression the loop previously missed: every entry here was
+      // rendered with `onChange` only, so a form that dropped or misrouted its
+      // `onTextChange` prop would still pass every other test in this suite.
+      const onTextChange = jest.fn();
+      render(
+        <Form config={{}} onChange={jest.fn()} onTextChange={onTextChange} testRunId="run-1" />,
+      );
+
+      const textField = screen.getByRole('textbox', { name: 'Text' });
+      expect(textField).toBeInTheDocument();
+
+      fireEvent.change(textField, { target: { value: 'accompanying text' } });
+      expect(onTextChange).not.toHaveBeenCalled();
+
+      fireEvent.blur(textField);
+      expect(onTextChange).toHaveBeenCalledWith('accompanying text');
+    });
+  },
+);
 
 it('commits text changes on blur, not on every keystroke', () => {
   const onTextChange = jest.fn();
@@ -185,6 +224,62 @@ describe('TextBlockConfigForm', () => {
     // Only one editor now: the text block body — text blocks have no
     // accompanying-text field.
     expect(screen.getAllByLabelText('Bold')[0]).not.toBeVisible();
+  });
+});
+
+describe('HeaderConfigForm (caption vs accompanying text independence)', () => {
+  // This is the exact bug the section-text refactor exists to prevent: before
+  // it, the accompanying text was smuggled into `config`, so a naive
+  // `const { text, ...rest } = config` split in the dialog would have
+  // stripped the header's own caption (also named `config.text`) right along
+  // with it. These two fields must stay fully independent.
+
+  it('routes the Header Text field to config.text via onChange, not onTextChange', () => {
+    const onChange = jest.fn();
+    const onTextChange = jest.fn();
+    render(
+      <HeaderConfigForm
+        config={{ text: 'My Caption', level: 2 }}
+        onChange={onChange}
+        text="Some accompanying text"
+        onTextChange={onTextChange}
+        testRunId="run-1"
+      />,
+    );
+
+    const captionField = screen.getByRole('textbox', { name: 'Header Text' });
+    fireEvent.change(captionField, { target: { value: 'New Caption' } });
+
+    // The caption lands in config.text with level preserved — the
+    // accompanying-text prop is untouched.
+    expect(onChange).toHaveBeenCalledWith({ text: 'New Caption', level: 2 });
+    expect(onTextChange).not.toHaveBeenCalled();
+  });
+
+  it('routes the accompanying Text field to onTextChange on blur, not into config', () => {
+    const onChange = jest.fn();
+    const onTextChange = jest.fn();
+    render(
+      <HeaderConfigForm
+        config={{ text: 'My Caption', level: 2 }}
+        onChange={onChange}
+        text="Some accompanying text"
+        onTextChange={onTextChange}
+        testRunId="run-1"
+      />,
+    );
+
+    // Query by role/name: both fields are textboxes, and the accompanying-text
+    // editor's toolbar buttons also carry the field name.
+    const textField = screen.getByRole('textbox', { name: 'Text' });
+    fireEvent.change(textField, { target: { value: 'New accompanying text' } });
+    expect(onChange).not.toHaveBeenCalled();
+
+    fireEvent.blur(textField);
+    expect(onTextChange).toHaveBeenCalledWith('New accompanying text');
+    // If the two fields were ever re-merged, this edit would route through
+    // onChange (and clobber the caption) instead of onTextChange.
+    expect(onChange).not.toHaveBeenCalled();
   });
 });
 
