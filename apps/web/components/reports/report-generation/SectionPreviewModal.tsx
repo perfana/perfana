@@ -147,35 +147,40 @@ export default function SectionPreviewModal({
             {children}
           </Paper>
 
-          {/* Accompanying Text */}
-          <Paper
-            elevation={2}
-            sx={{
-              p: 3,
-              borderRadius: 2,
-            }}
-          >
-            <Box sx={{ display: 'flex', alignItems: 'center', mb: 2 }}>
-              <NotesIcon sx={{ mr: 1, color: '#1976d2' }} />
-              <Typography variant="h6" component="div">
-                Text
+          {/* Accompanying Text — omitted entirely when the caller has no way
+              to save it (e.g. text_block sections, whose Content field
+              already is the text). Rendering a read-only editor here would
+              let users type into it and silently lose the input on save. */}
+          {onSaveText && (
+            <Paper
+              elevation={2}
+              sx={{
+                p: 3,
+                borderRadius: 2,
+              }}
+            >
+              <Box sx={{ display: 'flex', alignItems: 'center', mb: 2 }}>
+                <NotesIcon sx={{ mr: 1, color: '#1976d2' }} />
+                <Typography variant="h6" component="div">
+                  Text
+                </Typography>
+              </Box>
+              <Divider sx={{ mb: 2 }} />
+              <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
+                Add text based on what you see in the preview above. It is saved with the
+                section configuration and rendered above this section in the report.
               </Typography>
-            </Box>
-            <Divider sx={{ mb: 2 }} />
-            <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
-              Add text based on what you see in the preview above. It is saved with the
-              section configuration and rendered above this section in the report.
-            </Typography>
-            <MarkdownField
-              label="Text"
-              value={text}
-              onChange={handleTextChange}
-              placeholder="Write the text that accompanies this section, or use the buttons above to format it"
-              rows={6}
-              maxLength={REPORT_LIMITS.MAX_SECTION_TEXT_LENGTH}
-              helperText={`${text.length} / ${REPORT_LIMITS.MAX_SECTION_TEXT_LENGTH} characters`}
-            />
-          </Paper>
+              <MarkdownField
+                label="Text"
+                value={text}
+                onChange={handleTextChange}
+                placeholder="Write the text that accompanies this section, or use the buttons above to format it"
+                rows={6}
+                maxLength={REPORT_LIMITS.MAX_SECTION_TEXT_LENGTH}
+                helperText={`${text.length} / ${REPORT_LIMITS.MAX_SECTION_TEXT_LENGTH} characters`}
+              />
+            </Paper>
+          )}
         </Box>
 
         {/* Action Bar */}
@@ -210,21 +215,23 @@ export default function SectionPreviewModal({
             >
               Cancel
             </Button>
-            <Button
-              variant="contained"
-              onClick={handleSave}
-              disabled={!hasChanges && text === initialText}
-              sx={{
-                textTransform: 'none',
-                fontWeight: 600,
-                background: 'linear-gradient(135deg, #1976d2 0%, #1565c0 100%)',
-                '&:hover': {
-                  background: 'linear-gradient(135deg, #1565c0 0%, #0d47a1 100%)',
-                },
-              }}
-            >
-              Save Text
-            </Button>
+            {onSaveText && (
+              <Button
+                variant="contained"
+                onClick={handleSave}
+                disabled={!hasChanges && text === initialText}
+                sx={{
+                  textTransform: 'none',
+                  fontWeight: 600,
+                  background: 'linear-gradient(135deg, #1976d2 0%, #1565c0 100%)',
+                  '&:hover': {
+                    background: 'linear-gradient(135deg, #1565c0 0%, #0d47a1 100%)',
+                  },
+                }}
+              >
+                Save Text
+              </Button>
+            )}
           </Box>
         </Paper>
       </Box>

@@ -271,5 +271,5 @@ Potential improvements:
 For issues or questions:
 - Check existing preview implementations (ApdexSectionPreview)
 - Review SectionPreviewModal props and usage
-- Ensure config interface includes `comment?: string`
+- Accompanying text is a section-level `text` prop (`SectionConfigShell`'s `text`/`onTextChange`), not a config field — don't add `comment?: string` (or `text?: string`) to the config interface
 - Verify testRunId is passed through component tree

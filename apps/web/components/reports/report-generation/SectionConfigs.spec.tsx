@@ -281,6 +281,40 @@ describe('HeaderConfigForm (caption vs accompanying text independence)', () => {
     // onChange (and clobber the caption) instead of onTextChange.
     expect(onChange).not.toHaveBeenCalled();
   });
+
+  it('keeps both fields populated and independent when both are set at once', () => {
+    const onChange = jest.fn();
+    const onTextChange = jest.fn();
+    render(
+      <HeaderConfigForm
+        config={{ text: 'My Caption', level: 2 }}
+        onChange={onChange}
+        text="Accompanying prose"
+        onTextChange={onTextChange}
+        testRunId="run-1"
+      />,
+    );
+
+    const captionField = screen.getByRole('textbox', { name: 'Header Text' });
+    const textField = screen.getByRole('textbox', { name: 'Text' });
+
+    // Both fields show their own value simultaneously — this is the exact
+    // collision this branch exists to prevent.
+    expect(captionField).toHaveValue('My Caption');
+    expect(textField).toHaveValue('Accompanying prose');
+
+    // Editing the caption leaves the accompanying-text callback untouched,
+    // and the level carried in the onChange payload is unaffected.
+    fireEvent.change(captionField, { target: { value: 'New Caption' } });
+    expect(onChange).toHaveBeenCalledWith({ text: 'New Caption', level: 2 });
+    expect(onTextChange).not.toHaveBeenCalled();
+
+    // Editing the accompanying text leaves the caption callback untouched.
+    fireEvent.change(textField, { target: { value: 'New accompanying text' } });
+    fireEvent.blur(textField);
+    expect(onTextChange).toHaveBeenCalledWith('New accompanying text');
+    expect(onChange).toHaveBeenCalledTimes(1); // still just the earlier caption edit
+  });
 });
 
 describe('Top10ListsConfigForm', () => {

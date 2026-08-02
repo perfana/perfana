@@ -51,4 +51,16 @@ describe('SectionPreviewModal', () => {
 
     expect(onSaveText).not.toHaveBeenCalled();
   });
+
+  it('renders no text editor or save button when there is nothing to save to (e.g. text blocks)', () => {
+    open({ onSaveText: undefined });
+
+    expect(screen.queryByRole('textbox', { name: 'Text' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Save Text' })).not.toBeInTheDocument();
+    // The preview content itself still renders — the modal stays useful, just read-only.
+    expect(screen.getByText('preview content')).toBeInTheDocument();
+    // Close affordances remain.
+    expect(screen.getByRole('button', { name: 'Cancel' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'close' })).toBeInTheDocument();
+  });
 });
