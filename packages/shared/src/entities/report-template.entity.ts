@@ -37,7 +37,12 @@ export interface ReportSectionConfig {
   title?: string;
   /** Section-specific configuration */
   config?: Record<string, unknown>;
-  /** Optional comment for stakeholder communication (not available for header/text_block) */
+  /** Accompanying text for this section, rendered as markdown prose. Not available on text_block. */
+  text?: string;
+  /**
+   * @deprecated Read-only fallback for templates saved before 2026-08-02.
+   * Use `text`. Never written by new code — read it through `getSectionText()`.
+   */
   comment?: string;
 }
 

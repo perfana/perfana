@@ -23,10 +23,10 @@ export type { ReportSectionType, ReportSectionConfig, ReportStyling, ReportStatu
 // ==================== Section Configuration Extensions ====================
 
 /**
- * Section types that support comments
- * All except 'header' and 'text_block'
+ * Section types that support accompanying text.
+ * All except 'text_block' — a text block's `content` already is the text.
  */
-export type CommentableSectionType = Exclude<ReportSectionType, 'header' | 'text_block'>;
+export type TextableSectionType = Exclude<ReportSectionType, 'text_block'>;
 
 /**
  * Report file MIME types
@@ -554,9 +554,10 @@ export const REPORT_SECTION_TYPES: readonly ReportSectionType[] = [
 ] as const;
 
 /**
- * Section types that support comments
+ * Section types that support accompanying text
  */
-export const COMMENTABLE_SECTION_TYPES: readonly CommentableSectionType[] = [
+export const SECTION_TYPES_WITH_TEXT: readonly TextableSectionType[] = [
+  'header',
   'slo',
   'apdex',
   'transaction_response_times',
@@ -618,15 +619,31 @@ export const REPORT_DEFAULTS = {
   MAX_SECTIONS: 50,
   /** Maximum custom CSS length */
   MAX_CUSTOM_CSS_LENGTH: 10000,
+  /** Maximum accompanying-text length per section */
+  MAX_SECTION_TEXT_LENGTH: 5000,
 } as const;
 
 // ==================== Type Guards ====================
 
 /**
- * Check if a section type supports comments
+ * Check if a section type supports accompanying text
  */
-export function isCommentableSection(type: ReportSectionType): type is CommentableSectionType {
-  return COMMENTABLE_SECTION_TYPES.includes(type as CommentableSectionType);
+export function sectionSupportsText(type: ReportSectionType): type is TextableSectionType {
+  return SECTION_TYPES_WITH_TEXT.includes(type as TextableSectionType);
+}
+
+/**
+ * Read a section's accompanying text.
+ *
+ * Templates saved before 2026-08-02 store the value under the deprecated
+ * `comment` key; there is no data migration, so every reader goes through
+ * here. Nullish coalescing (not `||`) so a deliberately cleared '' wins over
+ * a stale comment.
+ */
+export function getSectionText(
+  section: Pick<ReportSectionConfig, 'text' | 'comment'>,
+): string | undefined {
+  return section.text ?? section.comment;
 }
 
 /**
