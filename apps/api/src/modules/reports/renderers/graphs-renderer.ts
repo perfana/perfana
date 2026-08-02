@@ -1,5 +1,5 @@
 import { Injectable } from '@nestjs/common';
-import { TestRun, ReportSectionConfig } from '@perfana/shared';
+import { TestRun, ReportSectionConfig, getSectionText } from '@perfana/shared';
 import { ReportUtilsService } from '../services/report-utils.service';
 import {
   ReportDataFetcherService,
@@ -9,7 +9,7 @@ import {
 import {
   REPORT_COLORS,
   sectionHeader,
-  commentBlock,
+  sectionText,
   emptyState,
   formatInt,
   formatNum,
@@ -56,13 +56,13 @@ export class GraphsRenderer {
   ): Promise<string> {
     const config = section.config || {};
     const title = section.title || 'Custom Graphs';
-    const comment = section.comment;
+    const text = getSectionText(section);
     const excludeRampUp = config.excludeRampUp !== false;
     const chartWidth = (config.chartWidth as number) || 1000;
     const chartHeight = (config.chartHeight as number) || 320;
 
     if (!testRun) {
-      return this.renderNoDataSection(title, comment, 'No test run data available for graph rendering.');
+      return this.renderNoDataSection(title, text, 'No test run data available for graph rendering.');
     }
 
     // Determine ds_metrics panels to render
@@ -96,12 +96,12 @@ export class GraphsRenderer {
 
     if (timeSeriesData.length === 0) {
       if (includeAggregated) {
-        return this.renderNoDataSection(title, comment, 'No aggregated performance-test data found for this test run.');
+        return this.renderNoDataSection(title, text, 'No aggregated performance-test data found for this test run.');
       }
       if (panels.length === 0) {
-        return this.renderNoDataSection(title, comment, 'No metric panels configured or discovered for this test run.');
+        return this.renderNoDataSection(title, text, 'No metric panels configured or discovered for this test run.');
       }
-      return this.renderNoDataSection(title, comment, 'No ds_metrics data found for the selected panels.');
+      return this.renderNoDataSection(title, text, 'No ds_metrics data found for the selected panels.');
     }
 
     const charts = timeSeriesData
@@ -112,7 +112,7 @@ export class GraphsRenderer {
       <section class="graphs-section">
         ${sectionHeader(title, { kicker: `${formatInt(timeSeriesData.length)} panel${timeSeriesData.length !== 1 ? 's' : ''}` })}
 
-        ${commentBlock(comment)}
+        ${sectionText(text)}
 
         ${charts}
       </section>
@@ -291,11 +291,11 @@ export class GraphsRenderer {
     return formatNum(value);
   }
 
-  private renderNoDataSection(title: string, comment: string | undefined, message: string): string {
+  private renderNoDataSection(title: string, text: string | undefined, message: string): string {
     return `
       <section class="graphs-section">
         ${sectionHeader(title)}
-        ${commentBlock(comment)}
+        ${sectionText(text)}
         ${emptyState(message)}
       </section>
     `;

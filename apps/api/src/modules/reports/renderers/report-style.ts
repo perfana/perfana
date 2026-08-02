@@ -348,23 +348,20 @@ export function statCard(label: string, valueHtml: string, subHtml = ''): string
 }
 
 // ---------------------------------------------------------------------------
-// Rule 07 · Optional section comment
+// Rule 07 · Optional accompanying section text
 // ---------------------------------------------------------------------------
 
 /**
- * Author comment block: accent + monochrome speech-bubble icon, rendered
- * under the section header. Empty/whitespace comment → '' (omit entirely —
- * no empty box, no placeholder).
+ * Accompanying text, rendered directly under the section header as plain
+ * prose — the same markdown subset and typography a text block body gets, so
+ * the two read identically. Empty/whitespace text → '' (omit entirely — no
+ * empty box, no placeholder).
+ *
+ * renderMarkdown escapes the source before emitting any tag, so this is not an
+ * HTML hole even though the output is served unauthenticated via share links.
  */
-export function commentBlock(comment: string | null | undefined): string {
-  const text = (comment ?? '').trim();
-  if (!text) return '';
-  const bubble = `<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="${REPORT_COLORS.primary}" stroke-width="2" style="flex-shrink:0; margin-top:2px;"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>`;
-  // Comments render the same markdown subset as text block bodies — the editor
-  // offers the same toolbar for both, so the output has to agree. renderMarkdown
-  // escapes the source before emitting any tag, so this is not an HTML hole.
-  return `<div class="section-comment" style="display:flex; gap:10px; align-items:flex-start; margin:0 0 20px; padding:12px 16px; background:#f5f9ff; border-left:4px solid ${ACCENT}; border-radius:0 6px 6px 0; font-size:13px; color:#374151; line-height:1.5;">
-    ${bubble}
-    <div style="min-width:0;">${renderMarkdown(text)}</div>
-  </div>`;
+export function sectionText(text: string | null | undefined): string {
+  const value = (text ?? '').trim();
+  if (!value) return '';
+  return `<div class="section-text" style="margin:0 0 20px;">${renderMarkdown(value)}</div>`;
 }

@@ -114,13 +114,13 @@ describe('TransactionResponseTimesRenderer', () => {
       const html = await renderer.renderTransactionResponseTimesSection(section, makeTestRun());
 
       expect(html).toContain('Peak-hour scenario only');
-      expect(html).toContain('section-comment');
+      expect(html).toContain('section-text');
     });
 
     it('should omit comment block entirely when absent', async () => {
       const html = await renderer.renderTransactionResponseTimesSection(makeSection(), makeTestRun());
 
-      expect(html).not.toContain('section-comment');
+      expect(html).not.toContain('section-text');
     });
   });
 

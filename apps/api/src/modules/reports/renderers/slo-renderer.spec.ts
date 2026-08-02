@@ -161,7 +161,7 @@ describe('SloRenderer', () => {
     );
 
     expect(html).toContain('Review with PM');
-    expect(html).toContain('section-comment');
+    expect(html).toContain('section-text');
   });
 
   it('should filter by evaluate_type when filterType is set', async () => {

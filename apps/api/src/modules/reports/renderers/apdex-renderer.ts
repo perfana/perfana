@@ -1,5 +1,5 @@
 import { Injectable } from '@nestjs/common';
-import { TestRun, ReportSectionConfig } from '@perfana/shared';
+import { TestRun, ReportSectionConfig, getSectionText } from '@perfana/shared';
 import { ReportUtilsService } from '../services/report-utils.service';
 import { ReportDataFetcherService, ApdexOverallData, ApdexScenarioData, ApdexTransaction } from '../services/report-data-fetcher.service';
 import {
@@ -7,7 +7,7 @@ import {
   groupHeader,
   chip,
   pill,
-  commentBlock,
+  sectionText,
   emptyState,
   formatInt,
   formatNum,
@@ -71,7 +71,7 @@ export class ApdexRenderer {
   async renderApdexSection(section: ReportSectionConfig, testRun: TestRun | null, userId: string = '', roles: string[] = []): Promise<string> {
     const config = section.config || {};
     const title = section.title || 'Apdex Scores';
-    const comment = section.comment;
+    const text = getSectionText(section);
     const showOverallMetrics = config.showOverallMetrics !== false;
     const apdexThreshold = (config.apdexThreshold as number) || 500; // Default T=500ms
     const excludeRampUp = config.excludeRampUp !== false; // Default to true (match Performance Analysis)
@@ -80,7 +80,7 @@ export class ApdexRenderer {
       return `
         <section class="apdex-section">
           ${sectionHeader(title, { kicker: 'Application Performance Index' })}
-          ${commentBlock(comment)}
+          ${sectionText(text)}
           ${emptyState('No test run data available for Apdex section.')}
         </section>
       `;
@@ -93,7 +93,7 @@ export class ApdexRenderer {
       return `
         <section class="apdex-section">
           ${sectionHeader(title, { kicker: 'Application Performance Index' })}
-          ${commentBlock(comment)}
+          ${sectionText(text)}
           ${emptyState('No transaction data available for Apdex calculation.')}
         </section>
       `;
@@ -120,7 +120,7 @@ export class ApdexRenderer {
     return `
       <section class="apdex-section">
         ${sectionHeader(title, { kicker: 'Application Performance Index', chipsHtml: headerChips })}
-        ${commentBlock(comment)}
+        ${sectionText(text)}
 
         <!-- Overall Test Metrics -->
         ${showOverallMetrics ? this.renderApdexOverallMetrics(apdexData.overall) : ''}

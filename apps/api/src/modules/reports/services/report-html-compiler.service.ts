@@ -253,18 +253,6 @@ export class ReportHtmlCompilerService {
       font-family: 'Monaco', 'Menlo', monospace;
     }
 
-    .section-comment {
-      background-color: rgba(33, 150, 243, 0.08);
-      border-left: 4px solid var(--info-color);
-      padding: 16px 20px;
-      margin: 16px 0 24px 0;
-      border-radius: 4px;
-      font-size: 14px;
-      line-height: 1.7;
-      color: var(--text-primary);
-      font-weight: 500;
-    }
-
     ${customCss}
   </style>
 </head>
@@ -589,19 +577,6 @@ export class ReportHtmlCompilerService {
     .annotations-box li {
       margin-bottom: 6px;
       font-size: 10pt;
-    }
-
-    /* Section Comment */
-    .section-comment {
-      background-color: rgba(33, 150, 243, 0.08);
-      border-left: 4px solid var(--info-color);
-      padding: 16px 20px;
-      margin: 16px 0 20px 0;
-      border-radius: 4px;
-      font-size: 10pt;
-      line-height: 1.7;
-      color: var(--text-color);
-      font-weight: 500;
     }
 
     /* Data Tables */

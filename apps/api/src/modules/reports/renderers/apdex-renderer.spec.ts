@@ -182,7 +182,7 @@ describe('ApdexRenderer', () => {
       makeTestRun(),
     );
 
-    expect(html).toContain('section-comment');
+    expect(html).toContain('section-text');
     expect(html).toContain('Discuss with the team');
   });
 
@@ -191,7 +191,7 @@ describe('ApdexRenderer', () => {
 
     const html = await renderer.renderApdexSection(makeSection(), makeTestRun());
 
-    expect(html).not.toContain('section-comment');
+    expect(html).not.toContain('section-text');
   });
 
   it('should escape HTML in scenario and transaction names', async () => {

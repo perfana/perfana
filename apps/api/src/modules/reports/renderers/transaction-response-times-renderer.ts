@@ -1,5 +1,5 @@
 import { Injectable } from '@nestjs/common';
-import { TestRun, ReportSectionConfig } from '@perfana/shared';
+import { TestRun, ReportSectionConfig, getSectionText } from '@perfana/shared';
 import { ReportUtilsService } from '../services/report-utils.service';
 import { ReportDataFetcherService, ScenarioData, ReportTransaction } from '../services/report-data-fetcher.service';
 import {
@@ -8,7 +8,7 @@ import {
   TH_TEXT,
   THEAD_ROW,
   sectionHeader,
-  commentBlock,
+  sectionText,
   formatInt,
   formatNum,
   formatPercent,
@@ -50,7 +50,7 @@ export class TransactionResponseTimesRenderer {
     const scenarioName = (config.scenario as string) || 'all';
     const includeChart = config.includeChart !== false;
     const title = section.title || 'Transaction Response Times';
-    const comment = section.comment;
+    const text = getSectionText(section);
 
     // Fetch real transaction data from database
     const scenarioData = testRun
@@ -61,7 +61,7 @@ export class TransactionResponseTimesRenderer {
       return `
         <section class="response-times-section">
           ${sectionHeader(title)}
-          ${commentBlock(comment)}
+          ${sectionText(text)}
           <div class="placeholder-message">
             Scenario "${this.utils.escapeHtml(scenarioName)}" not found. Available scenarios will be listed here when transaction data is available.
           </div>
@@ -108,7 +108,7 @@ export class TransactionResponseTimesRenderer {
       <section class="response-times-section">
         ${sectionHeader(title, { kicker: data.scenario })}
 
-        ${commentBlock(comment)}
+        ${sectionText(text)}
 
         <!-- Line Chart Placeholder -->
         ${includeChart ? this.renderResponseTimesChart(data) : ''}

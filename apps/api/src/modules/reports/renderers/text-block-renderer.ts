@@ -5,7 +5,6 @@ import {
   renderMarkdown,
   renderPlainText,
 } from '@perfana/shared';
-import { commentBlock } from './report-style';
 
 /** `config` is only validated as an object, so the value reaches HTML unchecked. */
 const ALIGNMENTS = new Set(['left', 'center', 'right', 'justify']);
@@ -32,8 +31,7 @@ export class TextBlockRenderer {
     const markdown = (config.markdown as boolean | undefined) ?? TEXT_BLOCK_MARKDOWN_DEFAULT;
 
     // An empty text block otherwise prints as a bare bordered card in the PDF.
-    const comment = commentBlock(section.comment);
-    if (!content.trim() && !comment) return '';
+    if (!content.trim()) return '';
 
     // The plain-text branch is the escape hatch for blocks authored before
     // markdown rendering existed, where a leading `-` or `#` was meant literally.
@@ -41,7 +39,6 @@ export class TextBlockRenderer {
 
     return `
       <section class="text-block" style="text-align: ${alignment};">
-        ${comment}
         ${body}
       </section>
     `;

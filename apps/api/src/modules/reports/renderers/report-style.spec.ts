@@ -12,7 +12,7 @@ import {
   sectionHeader,
   groupHeader,
   splitHostLabel,
-  commentBlock,
+  sectionText,
   emptyState,
   statCard,
   markerChip,
@@ -206,27 +206,35 @@ describe('report-style', () => {
     });
   });
 
-  describe('comment block (rule 07)', () => {
-    it('renders accent + icon for a comment', () => {
-      const html = commentBlock('Investigated with team, see PERF-42');
-      expect(html).toContain('section-comment');
-      expect(html).toContain('var(--primary-color, #1976d2)');
+  describe('section text (rule 07)', () => {
+    it('renders the text as bare prose', () => {
+      const html = sectionText('Investigated with team, see PERF-42');
+      expect(html).toContain('section-text');
       expect(html).toContain('PERF-42');
-      expect(html).toContain('<svg');
+    });
+
+    it('carries no callout chrome — no icon, tint, or accent border', () => {
+      // Accompanying text is narrative belonging to the section, not an
+      // annotation about it. Any of these would reintroduce the old bubble.
+      const html = sectionText('Some prose');
+      expect(html).not.toContain('<svg');
+      expect(html).not.toContain('#f5f9ff');
+      expect(html).not.toContain('border-left');
+      expect(html).not.toContain('section-comment');
     });
 
     it('omits entirely when empty or whitespace', () => {
-      expect(commentBlock(undefined)).toBe('');
-      expect(commentBlock('')).toBe('');
-      expect(commentBlock('   ')).toBe('');
+      expect(sectionText(undefined)).toBe('');
+      expect(sectionText('')).toBe('');
+      expect(sectionText('   ')).toBe('');
     });
 
-    it('escapes comment content', () => {
-      expect(commentBlock('<img onerror=x>')).toContain('&lt;img');
+    it('escapes text content', () => {
+      expect(sectionText('<img onerror=x>')).toContain('&lt;img');
     });
 
-    it('renders markdown, matching the toolbar the editor offers for comments', () => {
-      const html = commentBlock('The **p95** rose\n\n- checkout\n- search');
+    it('renders markdown, matching the toolbar the editor offers', () => {
+      const html = sectionText('The **p95** rose\n\n- checkout\n- search');
 
       expect(html).toContain('<strong>p95</strong>');
       expect(html).toContain('<ul');
@@ -235,17 +243,17 @@ describe('report-style', () => {
     });
 
     it('still escapes author HTML once markdown rendering is in play', () => {
-      const html = commentBlock('<script>alert(1)</script> and [x](javascript:alert(1))');
+      const html = sectionText('<script>alert(1)</script> and [x](javascript:alert(1))');
 
       expect(html).not.toContain('<script>');
       expect(html).toContain('&lt;script&gt;');
       expect(html).not.toContain('<a href="javascript');
     });
 
-    it('keeps a heading in a comment from inheriting the report section chrome', () => {
-      // The comment bubble sits inside <section>, so an unreset h2 would pick up
-      // the brand colour and underline meant for real section titles.
-      const html = commentBlock('## Note');
+    it('keeps a heading from inheriting the report section chrome', () => {
+      // The text sits inside <section>, so an unreset h2 would pick up the
+      // brand colour and underline meant for real section titles.
+      const html = sectionText('## Note');
 
       expect(html).toContain('color:inherit');
     });

@@ -1,5 +1,5 @@
 import { Injectable } from '@nestjs/common';
-import { TestRun, ReportSectionConfig } from '@perfana/shared';
+import { TestRun, ReportSectionConfig, getSectionText } from '@perfana/shared';
 import { ReportUtilsService } from '../services/report-utils.service';
 import { ReportDataFetcherService, AwrReportSummary, AwrInsightSummary } from '../services/report-data-fetcher.service';
 import {
@@ -11,7 +11,7 @@ import {
   chip,
   groupHeader,
   sectionHeader,
-  commentBlock,
+  sectionText,
   formatInt,
   formatNum,
   pill,
@@ -46,7 +46,7 @@ export class AwrRenderer {
     const categories = Array.isArray(config.categories) ? config.categories as string[] : null;
     const showTopSql = config.showTopSql !== false;
     const title = section.title || 'AWR Analysis';
-    const comment = section.comment;
+    const text = getSectionText(section);
 
     const data = testRun
       ? await this.dataFetcher.getAwrData(testRun.testRunId)
@@ -56,7 +56,7 @@ export class AwrRenderer {
       return `
         <section class="awr-section">
           ${sectionHeader(title)}
-          ${commentBlock(comment)}
+          ${sectionText(text)}
           <div class="awr-results">
             <p class="placeholder-message">No AWR report data available for this test run.</p>
           </div>
@@ -85,7 +85,7 @@ export class AwrRenderer {
           chipsHtml: severityChips,
         })}
 
-        ${commentBlock(comment)}
+        ${sectionText(text)}
 
         <!-- Database Info -->
         ${data.reports.map((r) => this.renderReportSummary(r)).join('\n')}

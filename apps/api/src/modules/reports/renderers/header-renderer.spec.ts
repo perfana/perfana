@@ -165,10 +165,10 @@ describe('HeaderRenderer', () => {
 
       const html = await renderer.renderHeaderSection(section, makeTestRun());
 
-      expect(html).toContain('section-comment');
+      expect(html).toContain('section-text');
       expect(html).toContain('Baseline re-established this sprint');
       // Comment renders inside the summary section, after its h2
-      expect(html.indexOf('Test Run Summary')).toBeLessThan(html.indexOf('section-comment'));
+      expect(html.indexOf('Test Run Summary')).toBeLessThan(html.indexOf('section-text'));
     });
 
     it('should not render the comment on the cover page', async () => {
@@ -180,14 +180,14 @@ describe('HeaderRenderer', () => {
       const html = await renderer.renderHeaderSection(section, makeTestRun());
 
       expect(html).toContain('class="cover-page"');
-      expect(html).not.toContain('section-comment');
+      expect(html).not.toContain('section-text');
       expect(html).not.toContain('Cover pages stay clean');
     });
 
     it('should omit the comment block entirely when absent', async () => {
       const html = await renderer.renderHeaderSection(makeSection(), makeTestRun());
 
-      expect(html).not.toContain('section-comment');
+      expect(html).not.toContain('section-text');
     });
 
     it('should escape HTML in the comment', async () => {

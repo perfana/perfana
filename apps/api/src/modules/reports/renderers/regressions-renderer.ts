@@ -1,5 +1,5 @@
 import { Injectable } from '@nestjs/common';
-import { TestRun, ReportSectionConfig } from '@perfana/shared';
+import { TestRun, ReportSectionConfig, getSectionText } from '@perfana/shared';
 import { ReportUtilsService } from '../services/report-utils.service';
 import { ReportDataFetcherService, RegressionsMetric } from '../services/report-data-fetcher.service';
 import { statusFromConclusion } from './comparison-bands';
@@ -10,7 +10,7 @@ import {
   TH_TEXT,
   THEAD_ROW,
   chip,
-  commentBlock,
+  sectionText,
   deltaText,
   emptyState,
   formatInt,
@@ -46,7 +46,7 @@ export class RegressionsRenderer {
   ): Promise<string> {
     const config = section.config || {};
     const title = section.title || 'Regressions';
-    const comment = section.comment;
+    const text = getSectionText(section);
     const showImprovements = config.showImprovements === true;
     const maxRows = typeof config.maxRows === 'number' ? config.maxRows : 50;
 
@@ -58,7 +58,7 @@ export class RegressionsRenderer {
       return `
         <section class="regressions-section">
           ${sectionHeader(title)}
-          ${commentBlock(comment)}
+          ${sectionText(text)}
           ${emptyState('No ADAPT regression analysis data available for this test run.')}
         </section>
       `;
@@ -81,7 +81,7 @@ export class RegressionsRenderer {
     return `
       <section class="regressions-section">
         ${sectionHeader(title, { chipsHtml: headerChips })}
-        ${commentBlock(comment)}
+        ${sectionText(text)}
 
         <!-- Regressions Table -->
         ${data.regressions.length > 0 ? this.renderMetricsTable(data.regressions.slice(0, maxRows), 'Regressions') : ''}

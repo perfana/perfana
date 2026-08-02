@@ -1,5 +1,5 @@
 import { Injectable } from '@nestjs/common';
-import { TestRun, ReportSectionConfig } from '@perfana/shared';
+import { TestRun, ReportSectionConfig, getSectionText } from '@perfana/shared';
 import { ReportUtilsService } from '../services/report-utils.service';
 import { ReportDataFetcherService, ComparisonsData, ComparisonMetric, BaselineComparisonRow } from '../services/report-data-fetcher.service';
 import { bandColor, statusFromConclusion, percentDiff, gatedDiffPercent, DiffThresholds } from './comparison-bands';
@@ -12,7 +12,7 @@ import {
   TH_TEXT,
   THEAD_ROW,
   chip,
-  commentBlock,
+  sectionText,
   deltaChip,
   deltaText,
   emptyState,
@@ -62,7 +62,7 @@ export class ComparisonsRenderer {
     }
     const baselineTestRunId = typeof config.baselineTestRunId === 'string' ? config.baselineTestRunId : undefined;
     const title = section.title || 'Comparisons';
-    const comment = section.comment;
+    const text = getSectionText(section);
 
     const data = testRun
       ? await this.dataFetcher.getComparisonsData(testRun.testRunId, baselineTestRunId)
@@ -72,7 +72,7 @@ export class ComparisonsRenderer {
       return `
         <section class="comparisons-section">
           ${sectionHeader(title)}
-          ${commentBlock(comment)}
+          ${sectionText(text)}
           ${emptyState('No comparison data available for this test run.')}
         </section>
       `;
@@ -87,7 +87,7 @@ export class ComparisonsRenderer {
           kicker: `Test run vs control group — ${formatInt(data.totalMetrics)} metrics compared`,
           chipsHtml: this.summaryChips(data),
         })}
-        ${commentBlock(comment)}
+        ${sectionText(text)}
 
         <!-- Grouped Comparison Tables -->
         ${grouped.map(({ dashboard, metrics }) => this.renderDashboardGroup(dashboard, metrics)).join('\n')}
@@ -111,7 +111,7 @@ export class ComparisonsRenderer {
   ): Promise<string> {
     const config = section.config || {};
     const title = section.title || 'Comparisons';
-    const comment = section.comment;
+    const text = getSectionText(section);
     const source = (config.source as 'performance-metrics' | 'grafana' | 'dynatrace') || 'performance-metrics';
     // SECURITY: config is user-supplied JSON — whitelist metric keys instead of
     // trusting a cast (they are interpolated into <th> markup below).
@@ -149,7 +149,7 @@ export class ComparisonsRenderer {
 
     if (!data || data.rows.length === 0) {
       return `<section class="comparisons-section">${sectionHeader(title)}
-        ${commentBlock(comment)}
+        ${sectionText(text)}
         ${emptyState('No comparison data available for the selected baseline run.')}</section>`;
     }
 
@@ -344,7 +344,7 @@ export class ComparisonsRenderer {
     return `<section class="comparisons-section">
       ${sectionHeader(title)}
       ${runIds}
-      ${commentBlock(comment)}
+      ${sectionText(text)}
       ${legend}
       ${bodyHtml}
     </section>`;
