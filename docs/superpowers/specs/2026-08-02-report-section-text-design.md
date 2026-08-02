@@ -149,6 +149,9 @@ term, becoming a plain `if (!content.trim()) return ''`.
 - `report-template.service.ts:779-784`: the rejection list narrows from
   `['header', 'text_block']` to `['text_block']`, and checks `getSectionText(section)`
   so a legacy `comment` on a text_block is caught too.
+- `report-template.service.ts:735-746`: drive-by fix — the `validTypes` list is missing
+  `'top_10_lists'`, so saving any template containing a Top 10 Lists section currently
+  throws `Invalid section type`. Adjacent to the edit above; fixed there.
 - Controller passthroughs add `text` alongside `comment`:
   `report-generation.controller.ts:354, 428`;
   `report-template.controller.ts:272, 387, 598`.
@@ -183,13 +186,17 @@ term, becoming a plain `if (!content.trim()) return ''`.
 
 **Other web files**
 
-- `GenerateReportDialog.tsx:333-342` and `:919-923` — split/merge `text` instead of
-  `comment` when moving between form-config and section-level shape.
+- `GenerateReportDialog.tsx:333-342` and `:919-923` — **the split/merge is deleted.**
+  Section text stops being smuggled through the `config` object and becomes an explicit
+  `text` / `onTextChange` prop on every form. Required, not cosmetic: `HeaderConfig`
+  already has its own `config.text` (the header caption), which the existing split would
+  destroy. See "Amendment 1" in the implementation plan.
 - `section-summary.ts:29-72` — the collapsed-card fallback label reads
-  `getSectionText(section) ?? (section.config as {text?}).text`.
+  `getSectionText(section)`; the header case's own `const text = trim(cfg.text)` is
+  renamed to `caption` to avoid shadowing.
 - `preview/HtmlSectionPreview.tsx:50-63` and `preview/ApdexSectionPreview.tsx:29-44` —
-  lift `text` out of config into the section-level field before POSTing to
-  `/preview-section`.
+  gain an explicit `text?: string` prop; the "lift the comment out of config" code is
+  deleted.
 - `apps/web/lib/api/reports.ts` — `text?: string` on the section type (`:107`),
   registry renames, `MAX_COMMENT_LENGTH` → `MAX_SECTION_TEXT_LENGTH`.
 
