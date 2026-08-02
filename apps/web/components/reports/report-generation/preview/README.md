@@ -1,12 +1,12 @@
 # Report Section Preview Feature
 
-This directory contains preview renderers for report sections, allowing users to preview how sections will appear in the final report and add comments based on what they see.
+This directory contains preview renderers for report sections, allowing users to preview how sections will appear in the final report and add text based on what they see.
 
 ## Overview
 
 The preview feature provides:
 - **Visual Preview**: Shows how the section will be rendered in the final report
-- **Comment Functionality**: Users can add comments about the section
+- **Text Functionality**: Users can add text about the section
 - **Mock Data**: Demonstrates section appearance with realistic sample data
 - **Responsive Design**: Full-screen modal for optimal viewing
 
@@ -16,7 +16,7 @@ The preview feature provides:
 
 1. **SectionPreviewModal** (`../SectionPreviewModal.tsx`)
    - Generic modal container for all section previews
-   - Handles comment text box and save functionality
+   - Handles text box and save functionality
    - Full-screen display with app bar and actions
    - Reusable across all section types
 
@@ -30,10 +30,10 @@ The preview feature provides:
 
 ```typescript
 // 1. User clicks "Preview Section" button in section config
-// 2. Modal opens with preview content and comment box
+// 2. Modal opens with preview content and text box
 // 3. Preview renderer shows section with current config
-// 4. User can add/edit comments
-// 5. Comments are saved to section config on save
+// 4. User can add/edit text
+// 5. Text is saved on the section on save
 ```
 
 ## Usage
@@ -43,9 +43,9 @@ The preview feature provides:
 1. Configure a report section (e.g., Apdex)
 2. Click the "Preview Section" button
 3. Review the preview with sample data
-4. Add comments in the text box (max 5000 characters)
-5. Click "Save Comment" to save notes
-6. Comments are stored with the section configuration
+4. Add text in the text box (max 5000 characters)
+5. Click "Save Text" to save notes
+6. Text is stored on the section (`section.text`), not with the section configuration
 
 ### For Developers
 
@@ -235,7 +235,7 @@ The Apdex section preview demonstrates best practices:
 
 ### For Users
 - **Visual Confirmation**: See exactly how section will appear
-- **Documentation**: Add context-specific comments
+- **Documentation**: Add context-specific text
 - **Configuration Validation**: Verify settings produce desired output
 - **Collaboration**: Share observations with team
 
@@ -254,7 +254,7 @@ Potential improvements:
 3. **Export Preview**: Download preview as image
 4. **Side-by-Side Compare**: Show before/after for config changes
 5. **Preview History**: View previous preview snapshots
-6. **Collaborative Comments**: Share comments with team members
+6. **Collaborative Text**: Share text with team members
 7. **Preview Templates**: Save preview configurations for reuse
 
 ## Technical Notes

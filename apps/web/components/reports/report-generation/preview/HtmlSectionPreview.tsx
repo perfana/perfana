@@ -41,9 +41,6 @@ export default function HtmlSectionPreview({ testRunId, sectionType, config, tex
   configRef.current = config;
   const configKey = JSON.stringify(config ?? {});
 
-  const textRef = useRef(text);
-  textRef.current = text;
-
   useEffect(() => {
     const controller = new AbortController();
 
@@ -56,7 +53,7 @@ export default function HtmlSectionPreview({ testRunId, sectionType, config, tex
           {
             type: sectionType,
             order: 0,
-            text: textRef.current,
+            text,
             config: configRef.current ?? {},
           },
           testRunId,

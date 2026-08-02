@@ -100,4 +100,36 @@ describe('HtmlSectionPreview', () => {
       expect(mockPreviewSection).toHaveBeenCalledTimes(2);
     });
   });
+
+  it('refetches when re-rendered with a changed text prop and an unchanged config', async () => {
+    // Guards against `text` being dropped from the effect's dependency array,
+    // which would silently stop the preview from refreshing when text is edited.
+    mockPreviewSection.mockResolvedValue('<p>stable</p>');
+
+    const { rerender } = render(
+      <HtmlSectionPreview testRunId="run-1" sectionType="slo" config={{ maxItems: 5 }} text="first" />
+    );
+
+    await screen.findByTitle('Section Preview');
+    expect(mockPreviewSection).toHaveBeenCalledTimes(1);
+
+    // Same config content, changed text — MUST trigger a refetch
+    rerender(<HtmlSectionPreview testRunId="run-1" sectionType="slo" config={{ maxItems: 5 }} text="second" />);
+
+    await waitFor(() => {
+      expect(mockPreviewSection).toHaveBeenCalledTimes(2);
+    });
+
+    expect(previewSection).toHaveBeenLastCalledWith(
+      {
+        type: 'slo',
+        order: 0,
+        text: 'second',
+        config: { maxItems: 5 },
+      },
+      'run-1',
+      undefined,
+      expect.anything(),
+    );
+  });
 });
