@@ -17,6 +17,7 @@ import {
 } from 'class-validator';
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import { Type } from 'class-transformer';
+import { REPORT_DEFAULTS } from '@perfana/shared';
 
 /**
  * Report section types supported by the reporting system.
@@ -83,14 +84,24 @@ export class ReportSectionConfigDto {
   config?: Record<string, unknown>;
 
   @ApiPropertyOptional({
-    description:
-      'Optional comment for stakeholder communication (not available for header/text_block)',
+    description: 'Accompanying text for the section, rendered as markdown (not available for text_block)',
     example: 'All SLOs met during this test run',
-    maxLength: 5000,
+    maxLength: REPORT_DEFAULTS.MAX_SECTION_TEXT_LENGTH,
   })
   @IsOptional()
   @IsString()
-  @Length(0, 5000, { message: 'Comment must not exceed 5000 characters' })
+  @Length(0, REPORT_DEFAULTS.MAX_SECTION_TEXT_LENGTH, {
+    message: `Text must not exceed ${REPORT_DEFAULTS.MAX_SECTION_TEXT_LENGTH} characters`,
+  })
+  text?: string;
+
+  /**
+   * @deprecated Superseded by `text`. Still accepted so older API clients and
+   * CI pipelines keep working; read it through `getSectionText()`.
+   */
+  @IsOptional()
+  @IsString()
+  @Length(0, REPORT_DEFAULTS.MAX_SECTION_TEXT_LENGTH)
   comment?: string;
 }
 

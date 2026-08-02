@@ -219,24 +219,6 @@ describe('ReportTemplateService', () => {
       await expect(service.create(options)).rejects.toThrow(ValidationException);
     });
 
-    it('should throw ValidationException for comments on non-commentable sections', async () => {
-      // Arrange
-      const options: CreateTemplateOptions = {
-        name: 'Invalid Comment',
-        createdBy: 'test-user',
-        systemId: 'system-001',
-        testEnvironment: 'staging',
-        workload: 'load-test',
-        sections: [
-          { type: 'header', order: 0, comment: 'Should not be allowed' },
-        ],
-      };
-      templateRepo.findOne.mockResolvedValue(null);
-
-      // Act & Assert
-      await expect(service.create(options)).rejects.toThrow(ValidationException);
-    });
-
     it('should clear default in scope when creating new default template', async () => {
       // Arrange
       const options: CreateTemplateOptions = {

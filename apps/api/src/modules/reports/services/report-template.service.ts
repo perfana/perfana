@@ -6,6 +6,7 @@ import {
   ReportSectionConfig,
   ReportStyling,
   SystemUnderTest,
+  getSectionText,
 } from '@perfana/shared';
 import type { OwnedResource } from '@perfana/shared';
 import { withRequestEm } from '../../../common/db/request-em';
@@ -743,6 +744,7 @@ export class ReportTemplateService {
       'trends',
       'comparisons',
       'graphs',
+      'top_10_lists',
     ];
 
     const orders = new Set<number>();
@@ -776,11 +778,10 @@ export class ReportTemplateService {
       }
       orders.add(section.order);
 
-      // Validate comments are only on commentable sections
-      const nonCommentableSections = ['header', 'text_block'];
-      if (section.comment && nonCommentableSections.includes(section.type)) {
+      // Accompanying text is not available on text_block — its `content` is the text.
+      if (getSectionText(section) && section.type === 'text_block') {
         throw new ValidationException(
-          `Comments are not allowed on '${section.type}' sections (index ${i})`,
+          `Accompanying text is not allowed on 'text_block' sections (index ${i})`,
         );
       }
     }

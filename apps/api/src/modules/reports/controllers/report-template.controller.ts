@@ -269,6 +269,7 @@ export class ReportTemplateController {
           order: s.order,
           title: s.title,
           config: s.config,
+          text: s.text,
           comment: s.comment,
         })),
         styling: dto.styling
@@ -384,6 +385,7 @@ export class ReportTemplateController {
           order: s.order,
           title: s.title,
           config: s.config,
+          text: s.text,
           comment: s.comment,
         })),
         styling: dto.styling
@@ -595,6 +597,7 @@ export class ReportTemplateController {
         order: dto.order,
         title: dto.title,
         config: dto.config,
+        text: dto.text,
         comment: dto.comment,
       });
 

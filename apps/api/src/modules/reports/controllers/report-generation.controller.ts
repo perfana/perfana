@@ -351,6 +351,7 @@ export class ReportGenerationController {
           order: s.order,
           title: s.title,
           config: s.config,
+          text: s.text,
           comment: s.comment,
         })),
         styling: dto.styling
@@ -425,6 +426,7 @@ export class ReportGenerationController {
           order: dto.section.order,
           title: dto.section.title,
           config: dto.section.config,
+          text: dto.section.text,
           comment: dto.section.comment,
         },
         dto.test_run_id,
