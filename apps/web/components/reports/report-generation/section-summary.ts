@@ -1,4 +1,4 @@
-import type { ReportSectionConfig } from '@/lib/api/reports';
+import { getSectionText, type ReportSectionConfig } from '@/lib/api/reports';
 import type {
   ComparisonsConfig,
   HeaderConfig,
@@ -26,36 +26,35 @@ const trim = (v: unknown, max = SUMMARY_MAX_LENGTH): string | null => {
 // Collapsed-header summary derived from the section's own config, so multiple
 // instances of the same section type can be told apart without expanding them.
 export function sectionSummary(section: ReportSectionConfig): string | null {
-  const comment =
-    trim(section.comment) ?? trim((section.config as { comment?: unknown } | undefined)?.comment);
+  const text = trim(getSectionText(section));
   switch (section.type) {
     case 'header': {
       const cfg = (section.config ?? {}) as HeaderConfig;
-      const text = trim(cfg.text);
+      const caption = trim(cfg.text);
       const level =
         typeof cfg.level === 'number' && Number.isInteger(cfg.level) && cfg.level >= 1 && cfg.level <= 6
           ? cfg.level
           : 1;
-      return text ? `H${level} — ${text}` : comment;
+      return caption ? `H${level} — ${caption}` : text;
     }
     case 'text_block': {
       const cfg = (section.config ?? {}) as TextBlockConfig;
-      return trim(cfg.content) ?? comment;
+      return trim(cfg.content) ?? text;
     }
     case 'transaction_response_times': {
       const cfg = (section.config ?? {}) as TransactionResponseTimesConfig;
       const scenario = trim(cfg.scenario);
-      return scenario ? `Scenario: ${scenario}` : comment;
+      return scenario ? `Scenario: ${scenario}` : text;
     }
     case 'comparisons': {
       const cfg = (section.config ?? {}) as ComparisonsConfig;
-      if (cfg.comparisonMode !== 'baseline_run') return comment;
+      if (cfg.comparisonMode !== 'baseline_run') return text;
       const panelCount = Array.isArray(cfg.panels) ? cfg.panels.length : 0;
       return [
         'Baseline run',
         trim(cfg.dashboardLabel),
         panelCount ? `${panelCount} panel${panelCount === 1 ? '' : 's'}` : null,
-        comment,
+        text,
       ]
         .filter(Boolean)
         .join(' · ');
@@ -68,7 +67,7 @@ export function sectionSummary(section: ReportSectionConfig): string | null {
       return `${scopeLabel} · ${count} list${count === 1 ? '' : 's'}`;
     }
     default:
-      // ponytail: no naming field in these configs — the comment is the only distinguisher
-      return comment;
+      // ponytail: no naming field in these configs — the text is the only distinguisher
+      return text;
   }
 }

@@ -17,8 +17,8 @@ describe('sectionSummary', () => {
     );
   });
 
-  it('falls back to the comment for a header without text, then null', () => {
-    expect(sectionSummary(section({ type: 'header', config: {}, comment: 'intro block' }))).toBe('intro block');
+  it('falls back to the text for a header without a caption, then null', () => {
+    expect(sectionSummary(section({ type: 'header', config: {}, text: 'intro block' }))).toBe('intro block');
     expect(sectionSummary(section({ type: 'header', config: {} }))).toBeNull();
   });
 
@@ -45,7 +45,7 @@ describe('sectionSummary', () => {
     ).toBe('Scenario: CheckoutFlow');
   });
 
-  it('summarizes baseline-run comparisons with dashboard, panel count and comment', () => {
+  it('summarizes baseline-run comparisons with dashboard, panel count and text', () => {
     expect(
       sectionSummary(
         section({
@@ -63,7 +63,7 @@ describe('sectionSummary', () => {
         section({
           type: 'comparisons',
           config: { comparisonMode: 'baseline_run', dashboardLabel: 'Perf', panels: [{ id: 1, title: 'a' }] },
-          comment: 'vs release 42',
+          text: 'vs release 42',
         }),
       ),
     ).toBe('Baseline run · Perf · 1 panel · vs release 42');
@@ -78,22 +78,25 @@ describe('sectionSummary', () => {
     ).toBe('Baseline run');
   });
 
-  it('falls back to comment for control-group comparisons', () => {
+  it('falls back to text for control-group comparisons', () => {
     expect(
-      sectionSummary(section({ type: 'comparisons', config: { comparisonMode: 'control_group' }, comment: 'vs 8 CPUs' })),
+      sectionSummary(section({ type: 'comparisons', config: { comparisonMode: 'control_group' }, text: 'vs 8 CPUs' })),
     ).toBe('vs 8 CPUs');
   });
 
-  it('falls back to the section comment for config-less sections', () => {
-    expect(sectionSummary(section({ type: 'apdex', comment: '  peak load   run ' }))).toBe('peak load run');
+  it('falls back to the section text for config-less sections', () => {
+    expect(sectionSummary(section({ type: 'apdex', text: '  peak load   run ' }))).toBe('peak load run');
     expect(sectionSummary(section({ type: 'apdex' }))).toBeNull();
   });
 
-  it('consults config.comment when section.comment is empty or missing', () => {
-    expect(sectionSummary(section({ type: 'apdex', comment: '', config: { comment: 'from config' } }))).toBe(
-      'from config',
+  it('falls back to a legacy comment when text is absent', () => {
+    expect(sectionSummary(section({ type: 'apdex', comment: 'legacy note' }))).toBe('legacy note');
+  });
+
+  it('prefers text over a legacy comment', () => {
+    expect(sectionSummary(section({ type: 'apdex', text: 'new note', comment: 'legacy note' }))).toBe(
+      'new note',
     );
-    expect(sectionSummary(section({ type: 'apdex', config: { comment: 'from config' } }))).toBe('from config');
   });
 
   it('summarizes a top_10_lists section by scope and list count', () => {
