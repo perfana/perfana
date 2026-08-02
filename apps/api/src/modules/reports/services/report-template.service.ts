@@ -6,7 +6,6 @@ import {
   ReportSectionConfig,
   ReportStyling,
   SystemUnderTest,
-  getSectionText,
 } from '@perfana/shared';
 import type { OwnedResource } from '@perfana/shared';
 import { withRequestEm } from '../../../common/db/request-em';
@@ -779,7 +778,14 @@ export class ReportTemplateService {
       orders.add(section.order);
 
       // Accompanying text is not available on text_block — its `content` is the text.
-      if (getSectionText(section) && section.type === 'text_block') {
+      // Only reject the new `text` field, not a legacy `comment`: older rows
+      // (e.g. templates saved via `save_as_template`, which bypasses this
+      // validator, or created before this branch removed the comment box
+      // from the text-block form) may carry a stray `comment`. It is never
+      // rendered (see text-block-renderer.ts), so tolerate it rather than
+      // making such a template permanently unsaveable with no way for the
+      // user to clear the offending field via the UI.
+      if (section.type === 'text_block' && section.text) {
         throw new ValidationException(
           `Accompanying text is not allowed on 'text_block' sections (index ${i})`,
         );
