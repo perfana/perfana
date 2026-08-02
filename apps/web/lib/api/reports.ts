@@ -31,12 +31,11 @@ export const REPORT_SECTION_TYPES = [
 export type ReportSectionType = (typeof REPORT_SECTION_TYPES)[number];
 
 /**
- * Section types that support comments (all section types — header and
- * text_block gained comment support alongside the shared config shell)
+ * Section types that support accompanying text — every type except
+ * text_block, whose `content` already is the text.
  */
-export const COMMENTABLE_SECTION_TYPES = [
+export const SECTION_TYPES_WITH_TEXT = [
   'header',
-  'text_block',
   'slo',
   'apdex',
   'transaction_response_times',
@@ -48,7 +47,7 @@ export const COMMENTABLE_SECTION_TYPES = [
   'top_10_lists',
 ] as const;
 
-export type CommentableSectionType = (typeof COMMENTABLE_SECTION_TYPES)[number];
+export type TextableSectionType = (typeof SECTION_TYPES_WITH_TEXT)[number];
 
 /**
  * Report status values
@@ -104,6 +103,9 @@ export interface ReportSectionConfig {
   order: number;
   title?: string;
   config?: Record<string, unknown>;
+  /** Accompanying text, rendered as markdown prose under the section header. */
+  text?: string;
+  /** @deprecated Read-only fallback for templates saved before 2026-08-02. Use `text`. */
   comment?: string;
 }
 
@@ -1015,10 +1017,21 @@ export async function reorderTemplateSections(
 // ==================== Utility Functions ====================
 
 /**
- * Check if a section type supports comments
+ * Check if a section type supports accompanying text
  */
-export function isCommentableSection(type: ReportSectionType): type is CommentableSectionType {
-  return COMMENTABLE_SECTION_TYPES.includes(type as CommentableSectionType);
+export function sectionSupportsText(type: ReportSectionType): type is TextableSectionType {
+  return SECTION_TYPES_WITH_TEXT.includes(type as TextableSectionType);
+}
+
+/**
+ * Read a section's accompanying text, falling back to the deprecated
+ * `comment` for templates saved before 2026-08-02. Nullish coalescing so a
+ * deliberately cleared '' wins over a stale comment.
+ */
+export function getSectionText(
+  section: Pick<ReportSectionConfig, 'text' | 'comment'>,
+): string | undefined {
+  return section.text ?? section.comment;
 }
 
 /**
@@ -1107,7 +1120,7 @@ export const DEFAULT_REPORT_STYLING: ReportStyling = {
 export const REPORT_LIMITS = {
   MAX_SECTIONS: 50,
   MAX_TITLE_LENGTH: 255,
-  MAX_COMMENT_LENGTH: 5000,
+  MAX_SECTION_TEXT_LENGTH: 5000,
   MAX_NAME_LENGTH: 255,
   MAX_DESCRIPTION_LENGTH: 1000,
   MAX_CUSTOM_CSS_LENGTH: 10000,
