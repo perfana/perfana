@@ -8,8 +8,10 @@ interface HtmlSectionPreviewProps {
   testRunId?: string;
   /** API section type, e.g. 'slo', 'trends' */
   sectionType: ReportSectionType;
-  /** Current section config (a `comment` key, if present, is lifted to the section level) */
+  /** Section config — section config only; accompanying text is a separate prop */
   config: Record<string, unknown>;
+  /** Accompanying text, sent at the section level */
+  text?: string;
 }
 
 /**
@@ -26,7 +28,7 @@ function sanitizeErrorMessage(message: string, maxLength = 200): string {
  * Fetches the actual HTML that will appear in the generated report via the
  * backend preview endpoint and renders it in a sandboxed iframe.
  */
-export default function HtmlSectionPreview({ testRunId, sectionType, config }: HtmlSectionPreviewProps) {
+export default function HtmlSectionPreview({ testRunId, sectionType, config, text }: HtmlSectionPreviewProps) {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [htmlContent, setHtmlContent] = useState<string>('');
@@ -39,6 +41,9 @@ export default function HtmlSectionPreview({ testRunId, sectionType, config }: H
   configRef.current = config;
   const configKey = JSON.stringify(config ?? {});
 
+  const textRef = useRef(text);
+  textRef.current = text;
+
   useEffect(() => {
     const controller = new AbortController();
 
@@ -47,15 +52,12 @@ export default function HtmlSectionPreview({ testRunId, sectionType, config }: H
         setLoading(true);
         setError(null);
 
-        // Lift the comment out of the config — it lives at the section level
-        const { comment, ...sectionConfig } = configRef.current ?? {};
-
         const html = await previewSection(
           {
             type: sectionType,
             order: 0,
-            comment: typeof comment === 'string' ? comment : undefined,
-            config: sectionConfig,
+            text: textRef.current,
+            config: configRef.current ?? {},
           },
           testRunId,
           undefined,
@@ -89,7 +91,7 @@ export default function HtmlSectionPreview({ testRunId, sectionType, config }: H
     return () => {
       controller.abort();
     };
-  }, [testRunId, sectionType, configKey]);
+  }, [testRunId, sectionType, configKey, text]);
 
   if (loading) {
     return (

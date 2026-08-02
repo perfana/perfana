@@ -43,7 +43,7 @@ The preview feature provides:
 1. Configure a report section (e.g., Apdex)
 2. Click the "Preview Section" button
 3. Review the preview with sample data
-4. Add comments in the text box (max 2000 characters)
+4. Add comments in the text box (max 5000 characters)
 5. Click "Save Comment" to save notes
 6. Comments are stored with the section configuration
 
@@ -262,7 +262,7 @@ Potential improvements:
 - Preview components use dynamic imports to reduce bundle size
 - All previews are client-side only (`'use client'`)
 - Mock data is embedded to avoid API dependencies
-- Comments are stored in section config (not separate entity)
+- Accompanying text is stored on the section (`section.text`), not in the section config and not as a separate entity.
 - Preview modal uses Material-UI Dialog with fullScreen mode
 - Styling matches report generation styling system
 

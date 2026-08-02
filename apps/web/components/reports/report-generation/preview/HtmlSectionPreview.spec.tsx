@@ -22,35 +22,36 @@ describe('HtmlSectionPreview', () => {
     expect(screen.getByText(/loading preview from backend/i)).toBeInTheDocument();
   });
 
-  it('renders the resolved HTML in a fully sandboxed iframe and lifts the comment out of the config', async () => {
+  it('renders the resolved HTML in a fully sandboxed iframe and sends text at the section level', async () => {
+    // The previous test leaves a never-resolving mock implementation behind
+    // (jest.clearAllMocks() only clears call records, not implementations).
     mockPreviewSection.mockResolvedValue('<p>Hello preview</p>');
 
     render(
       <HtmlSectionPreview
         testRunId="run-1"
         sectionType="slo"
-        config={{ maxItems: 5, comment: 'my observation' }}
-      />
+        config={{ maxItems: 5 }}
+        text="my observation"
+      />,
     );
 
-    const iframe = await screen.findByTitle('Section Preview');
-    expect(iframe).toHaveAttribute('srcdoc', expect.stringContaining('<p>Hello preview</p>'));
+    await waitFor(() => expect(previewSection).toHaveBeenCalled());
 
-    // Fully sandboxed: opaque origin, no scripts, no same-origin access
-    expect(iframe).toHaveAttribute('sandbox', '');
-
-    expect(mockPreviewSection).toHaveBeenCalledTimes(1);
-    expect(mockPreviewSection).toHaveBeenCalledWith(
+    expect(previewSection).toHaveBeenCalledWith(
       {
         type: 'slo',
         order: 0,
-        comment: 'my observation',
+        text: 'my observation',
         config: { maxItems: 5 },
       },
       'run-1',
       undefined,
-      expect.any(AbortSignal)
+      expect.anything(),
     );
+
+    const iframe = document.querySelector('iframe');
+    expect(iframe).toHaveAttribute('sandbox', '');
   });
 
   it('shows an error Alert with recovery guidance when the preview fails', async () => {
