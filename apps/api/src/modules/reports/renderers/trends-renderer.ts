@@ -1,11 +1,11 @@
 import { Injectable } from '@nestjs/common';
-import { TestRun, ReportSectionConfig } from '@perfana/shared';
+import { TestRun, ReportSectionConfig, getSectionText } from '@perfana/shared';
 import { ReportUtilsService } from '../services/report-utils.service';
 import { ReportDataFetcherService, TrendRunSummary } from '../services/report-data-fetcher.service';
 import {
   REPORT_COLORS,
   sectionHeader,
-  commentBlock,
+  sectionText,
   deltaChip,
   emptyState,
   formatInt,
@@ -40,17 +40,17 @@ export class TrendsRenderer {
   ): Promise<string> {
     const config = section.config || {};
     const title = section.title || 'Performance Trends';
-    const comment = section.comment;
+    const text = getSectionText(section);
     const maxRuns = typeof config.maxRuns === 'number' ? config.maxRuns : 10;
 
     if (!testRun) {
-      return this.renderNoDataSection(title, comment, 'No test run data available for trends analysis.');
+      return this.renderNoDataSection(title, text, 'No test run data available for trends analysis.');
     }
 
     const trendsData = await this.dataFetcher.getTrendsData(testRun, maxRuns, userId, roles);
 
     if (!trendsData || trendsData.previousRuns.length === 0) {
-      return this.renderNoDataSection(title, comment, 'No previous runs found for trend comparison. Trends require at least two completed runs with the same system, environment, and workload.');
+      return this.renderNoDataSection(title, text, 'No previous runs found for trend comparison. Trends require at least two completed runs with the same system, environment, and workload.');
     }
 
     // All runs in chronological order (oldest first)
@@ -64,7 +64,7 @@ export class TrendsRenderer {
       <section class="trends-section">
         ${sectionHeader(title, { kicker: `${formatInt(allRuns.length)} runs compared` })}
 
-        ${commentBlock(comment)}
+        ${sectionText(text)}
 
         <!-- Trend Summary Cards -->
         ${this.renderTrendSummaryCards(currentRun, previousRun)}
@@ -190,11 +190,11 @@ export class TrendsRenderer {
     };
   }
 
-  private renderNoDataSection(title: string, comment: string | undefined, message: string): string {
+  private renderNoDataSection(title: string, text: string | undefined, message: string): string {
     return `
       <section class="trends-section">
         ${sectionHeader(title)}
-        ${commentBlock(comment)}
+        ${sectionText(text)}
         ${emptyState(message)}
       </section>
     `;

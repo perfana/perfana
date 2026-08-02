@@ -159,19 +159,19 @@ describe('HeaderRenderer', () => {
     });
   });
 
-  describe('section comment', () => {
-    it('should render the comment block under the Test Run Summary heading', async () => {
+  describe('section text', () => {
+    it('should render the accompanying text under the Test Run Summary heading', async () => {
       const section = makeSection({ comment: 'Baseline re-established this sprint' });
 
       const html = await renderer.renderHeaderSection(section, makeTestRun());
 
-      expect(html).toContain('section-comment');
+      expect(html).toContain('section-text');
       expect(html).toContain('Baseline re-established this sprint');
-      // Comment renders inside the summary section, after its h2
-      expect(html.indexOf('Test Run Summary')).toBeLessThan(html.indexOf('section-comment'));
+      // The accompanying text renders inside the summary section, after its h2
+      expect(html.indexOf('Test Run Summary')).toBeLessThan(html.indexOf('section-text'));
     });
 
-    it('should not render the comment on the cover page', async () => {
+    it('should not render the accompanying text on the cover page', async () => {
       const section = makeSection({
         comment: 'Cover pages stay clean',
         config: { includeSummary: false },
@@ -180,17 +180,17 @@ describe('HeaderRenderer', () => {
       const html = await renderer.renderHeaderSection(section, makeTestRun());
 
       expect(html).toContain('class="cover-page"');
-      expect(html).not.toContain('section-comment');
+      expect(html).not.toContain('section-text');
       expect(html).not.toContain('Cover pages stay clean');
     });
 
-    it('should omit the comment block entirely when absent', async () => {
+    it('should omit the section-text block entirely when absent', async () => {
       const html = await renderer.renderHeaderSection(makeSection(), makeTestRun());
 
-      expect(html).not.toContain('section-comment');
+      expect(html).not.toContain('section-text');
     });
 
-    it('should escape HTML in the comment', async () => {
+    it('should escape HTML in the accompanying text', async () => {
       const section = makeSection({ comment: '<img onerror=alert(1)>' });
 
       const html = await renderer.renderHeaderSection(section, makeTestRun());

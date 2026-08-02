@@ -1,5 +1,5 @@
 import { Injectable } from '@nestjs/common';
-import { TestRun, ReportSectionConfig } from '@perfana/shared';
+import { TestRun, ReportSectionConfig, getSectionText } from '@perfana/shared';
 import { ReportUtilsService } from '../services/report-utils.service';
 import { ReportDataFetcherService, SloCheckResult } from '../services/report-data-fetcher.service';
 import { formatValueWithUnit } from './unit-format';
@@ -10,7 +10,7 @@ import {
   TH_TEXT,
   THEAD_ROW,
   chip,
-  commentBlock,
+  sectionText,
   emptyState,
   formatInt,
   pill,
@@ -41,7 +41,7 @@ export class SloRenderer {
     roles: string[] = [],
   ): Promise<string> {
     const title = section.title || 'SLO Results';
-    const comment = section.comment;
+    const text = getSectionText(section);
     const config = section.config || {};
     const filterType = config.filterType as string | undefined; // 'metric' | 'apdex' | undefined (show all)
 
@@ -49,7 +49,7 @@ export class SloRenderer {
       return `
         <section class="slo-section">
           ${sectionHeader(title, { kicker: 'Service Level Objectives' })}
-          ${commentBlock(comment)}
+          ${sectionText(text)}
           ${emptyState('No test run data available for SLO analysis.')}
         </section>
       `;
@@ -66,7 +66,7 @@ export class SloRenderer {
       return `
         <section class="slo-section">
           ${sectionHeader(title, { kicker: 'Service Level Objectives' })}
-          ${commentBlock(comment)}
+          ${sectionText(text)}
           ${emptyState('No SLO check results available for this test run.')}
         </section>
       `;
@@ -85,7 +85,7 @@ export class SloRenderer {
     return `
       <section class="slo-section">
         ${sectionHeader(title, { kicker: 'Service Level Objectives', chipsHtml: headerChips })}
-        ${commentBlock(comment)}
+        ${sectionText(text)}
 
         <!-- Summary Cards -->
         <div style="display: grid; grid-template-columns: repeat(3, 1fr); gap: 16px; margin-bottom: 24px;">

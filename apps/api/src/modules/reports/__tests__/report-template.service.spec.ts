@@ -219,24 +219,6 @@ describe('ReportTemplateService', () => {
       await expect(service.create(options)).rejects.toThrow(ValidationException);
     });
 
-    it('should throw ValidationException for comments on non-commentable sections', async () => {
-      // Arrange
-      const options: CreateTemplateOptions = {
-        name: 'Invalid Comment',
-        createdBy: 'test-user',
-        systemId: 'system-001',
-        testEnvironment: 'staging',
-        workload: 'load-test',
-        sections: [
-          { type: 'header', order: 0, comment: 'Should not be allowed' },
-        ],
-      };
-      templateRepo.findOne.mockResolvedValue(null);
-
-      // Act & Assert
-      await expect(service.create(options)).rejects.toThrow(ValidationException);
-    });
-
     it('should clear default in scope when creating new default template', async () => {
       // Arrange
       const options: CreateTemplateOptions = {
@@ -855,16 +837,69 @@ describe('ReportTemplateService', () => {
       expect(result.sections).toHaveLength(3);
     });
 
-    it('should reject comments on text_block sections', async () => {
+    it('should allow text on header sections', async () => {
       // Arrange
       const options: CreateTemplateOptions = {
-        name: 'Invalid Text Block Comment',
+        name: 'Header Text Template',
+        createdBy: 'test-user',
+        systemId: 'system-001',
+        testEnvironment: 'staging',
+        workload: 'load-test',
+        sections: [{ type: 'header', order: 0, text: 'Introductory text' }],
+      };
+      const mockTemplate = createMockTemplate({ sections: options.sections });
+
+      templateRepo.findOne.mockResolvedValue(null);
+      templateRepo.create.mockReturnValue(mockTemplate);
+      templateRepo.save.mockResolvedValue(mockTemplate);
+
+      // Act
+      const result = await service.create(options);
+
+      // Assert
+      expect(result.sections).toHaveLength(1);
+    });
+
+    it('should tolerate a legacy comment on text_block sections (never rejected, never rendered)', async () => {
+      // A legacy `comment` on a text_block is not the new `text` field — it's
+      // pre-existing data from before this branch removed the comment box
+      // from the text-block form (or a row written by save_as_template,
+      // which bypasses validateSections entirely). Rejecting it here would
+      // make such a template permanently unsaveable with no UI path left to
+      // clear the field. text-block-renderer.ts already never renders it.
+      const options: CreateTemplateOptions = {
+        name: 'Legacy Text Block Comment',
         createdBy: 'test-user',
         systemId: 'system-001',
         testEnvironment: 'staging',
         workload: 'load-test',
         sections: [
-          { type: 'text_block', order: 0, comment: 'Should not be allowed' },
+          { type: 'text_block', order: 0, comment: 'Should be tolerated' },
+        ],
+      };
+      const mockTemplate = createMockTemplate({ sections: options.sections });
+
+      templateRepo.findOne.mockResolvedValue(null);
+      templateRepo.create.mockReturnValue(mockTemplate);
+      templateRepo.save.mockResolvedValue(mockTemplate);
+
+      // Act
+      const result = await service.create(options);
+
+      // Assert
+      expect(result.sections).toHaveLength(1);
+    });
+
+    it('should reject the new text field on text_block sections', async () => {
+      // Arrange
+      const options: CreateTemplateOptions = {
+        name: 'Invalid Text Block Text',
+        createdBy: 'test-user',
+        systemId: 'system-001',
+        testEnvironment: 'staging',
+        workload: 'load-test',
+        sections: [
+          { type: 'text_block', order: 0, text: 'Should not be allowed' },
         ],
       };
       templateRepo.findOne.mockResolvedValue(null);
@@ -1006,6 +1041,58 @@ describe('ReportTemplateService', () => {
       const [ref] = (auditService.logDelete as jest.Mock).mock.calls[0];
       expect(ref).toBe(mockTemplate);
       expect(callOrder).toEqual(['logDelete', 'remove']);
+    });
+  });
+
+  // ==================== validateSections ====================
+  // Moved from services/report-template.service.spec.ts (Task 3 review, Finding 1):
+  // validateSections is pure and reads no injected dependency, so calling it
+  // directly off the service instance built above avoids constructing a second stub.
+
+  describe('validateSections', () => {
+    const validate = (sections: ReportSectionConfig[]) =>
+      (service as unknown as { validateSections(s: ReportSectionConfig[]): void }).validateSections(sections);
+
+    const section = (over: Partial<ReportSectionConfig>): ReportSectionConfig => ({
+      type: 'slo',
+      order: 0,
+      ...over,
+    });
+
+    it('accepts text on a header section', () => {
+      expect(() => validate([section({ type: 'header', text: 'intro' })])).not.toThrow();
+    });
+
+    it('accepts a top_10_lists section', () => {
+      expect(() => validate([section({ type: 'top_10_lists' })])).not.toThrow();
+    });
+
+    it('rejects text on a text_block section', () => {
+      expect(() => validate([section({ type: 'text_block', text: 'nope' })])).toThrow(
+        /not allowed on 'text_block'/,
+      );
+    });
+
+    // A legacy `comment` on a text_block is tolerated, not rejected: such
+    // rows are reachable in production (save_as_template persists sections
+    // without calling validateSections at all, and the pre-branch web form
+    // offered a comment box on text blocks), the comment is never rendered
+    // (text-block-renderer.ts drops it deliberately), and — since this
+    // branch removed the field from the UI — rejecting it here would leave
+    // affected templates permanently unsaveable with no way for a user to
+    // clear the offending value. Do NOT "fix" this back to a throw.
+    it('accepts a legacy comment on a text_block section', () => {
+      expect(() => validate([section({ type: 'text_block', comment: 'nope' })])).not.toThrow();
+    });
+
+    it('still rejects an unknown section type', () => {
+      expect(() => validate([section({ type: 'nonsense' as never })])).toThrow(/Invalid section type/);
+    });
+
+    it('still rejects duplicate orders', () => {
+      expect(() => validate([section({ order: 0 }), section({ order: 0 })])).toThrow(
+        /Duplicate section order/,
+      );
     });
   });
 });

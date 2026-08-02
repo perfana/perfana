@@ -97,7 +97,7 @@ describe('GraphsRenderer', () => {
       const html = await renderer.renderGraphsSection(section, makeTestRun());
 
       expect(html).toContain('Collected from Grafana');
-      expect(html).toContain('section-comment');
+      expect(html).toContain('section-text');
     });
 
     it('should pluralize panel count', async () => {

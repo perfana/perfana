@@ -42,10 +42,8 @@ jest.mock('@/lib/api/reports', () => ({
     };
     return labels[type] || type;
   }),
-  isCommentableSection: jest.fn((type: string) => {
-    const commentable = ['slo', 'apdex', 'transaction_response_times', 'regressions', 'awr', 'trends', 'comparisons', 'graphs'];
-    return commentable.includes(type);
-  }),
+  sectionSupportsText: jest.fn((type: string) => type !== 'text_block'),
+  getSectionText: jest.fn((s: { text?: string; comment?: string }) => s.text ?? s.comment),
   REPORT_SECTION_TYPES: [
     'header',
     'text_block',
@@ -66,7 +64,7 @@ jest.mock('@/lib/api/reports', () => ({
   REPORT_LIMITS: {
     MAX_SECTIONS: 50,
     MAX_TITLE_LENGTH: 255,
-    MAX_COMMENT_LENGTH: 5000,
+    MAX_SECTION_TEXT_LENGTH: 5000,
     MAX_NAME_LENGTH: 255,
     MAX_DESCRIPTION_LENGTH: 1000,
     MAX_CUSTOM_CSS_LENGTH: 10000,

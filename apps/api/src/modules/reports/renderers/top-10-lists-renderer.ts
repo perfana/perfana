@@ -1,5 +1,5 @@
 import { Injectable } from '@nestjs/common';
-import { TestRun, ReportSectionConfig } from '@perfana/shared';
+import { TestRun, ReportSectionConfig, getSectionText } from '@perfana/shared';
 import { ReportUtilsService } from '../services/report-utils.service';
 import { ReportDataFetcherService, Top10Row } from '../services/report-data-fetcher.service';
 import {
@@ -8,7 +8,7 @@ import {
   TH_TEXT,
   THEAD_ROW,
   sectionHeader,
-  commentBlock,
+  sectionText,
   groupHeader,
   emptyState,
   formatInt,
@@ -70,11 +70,11 @@ export class Top10ListsRenderer {
       ? LIST_DEFS.filter((d) => requestedLists.includes(d.key))
       : LIST_DEFS;
     const title = section.title || 'Top 10 Lists';
-    const comment = section.comment;
+    const text = getSectionText(section);
 
     const rows = testRun ? await this.fetchRows(scope, testRun, scenarios, excludeRampUp, userId, roles) : [];
 
-    const header = `${sectionHeader(title)}${commentBlock(comment)}`;
+    const header = `${sectionHeader(title)}${sectionText(text)}`;
 
     if (rows.length === 0) {
       return `<section class="top-10-lists-section">${header}${emptyState(`No ${SCOPE_LABELS[scope]} data available for this test run.`)}</section>`;

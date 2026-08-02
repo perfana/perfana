@@ -127,7 +127,7 @@ describe('TrendsRenderer', () => {
       const html = await renderer.renderTrendsSection(section, makeTestRun());
 
       expect(html).toContain('Comparing last 3 sprint runs');
-      expect(html).toContain('section-comment');
+      expect(html).toContain('section-text');
     });
   });
 

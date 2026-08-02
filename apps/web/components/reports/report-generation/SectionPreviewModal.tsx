@@ -8,7 +8,6 @@ import {
   Typography,
   IconButton,
   Box,
-  TextField,
   Button,
   Paper,
   Divider,
@@ -16,7 +15,9 @@ import {
 } from '@mui/material';
 import CloseIcon from '@mui/icons-material/Close';
 import VisibilityIcon from '@mui/icons-material/Visibility';
-import CommentIcon from '@mui/icons-material/Comment';
+import NotesIcon from '@mui/icons-material/Notes';
+import { MarkdownField } from './MarkdownField';
+import { REPORT_LIMITS } from '@/lib/api/reports';
 
 export interface SectionPreviewModalProps {
   open: boolean;
@@ -24,13 +25,13 @@ export interface SectionPreviewModalProps {
   sectionTitle: string;
   sectionType: string;
   children: React.ReactNode; // The preview content (section-specific renderer)
-  initialComment?: string;
-  onSaveComment?: (comment: string) => void;
+  initialText?: string;
+  onSaveText?: (text: string) => void;
   testRunId?: string;
 }
 
 /**
- * Generic modal for previewing report sections with comment capability
+ * Generic modal for previewing a report section and editing its accompanying text
  *
  * Usage:
  * <SectionPreviewModal
@@ -38,8 +39,8 @@ export interface SectionPreviewModalProps {
  *   onClose={() => setPreviewOpen(false)}
  *   sectionTitle="Apdex Score"
  *   sectionType="Apdex"
- *   initialComment={config.comment}
- *   onSaveComment={(comment) => onChange({ ...config, comment })}
+ *   initialText={text}
+ *   onSaveText={onTextChange}
  * >
  *   <ApdexSectionPreview testRunId={testRunId} config={config} />
  * </SectionPreviewModal>
@@ -50,29 +51,30 @@ export default function SectionPreviewModal({
   sectionTitle,
   sectionType,
   children,
-  initialComment = '',
-  onSaveComment,
+  initialText = '',
+  onSaveText,
   testRunId: _testRunId,
 }: SectionPreviewModalProps) {
-  const [comment, setComment] = useState(initialComment);
+  const [text, setText] = useState(initialText);
   const [hasChanges, setHasChanges] = useState(false);
 
-  const handleCommentChange = (event: React.ChangeEvent<HTMLInputElement>) => {
-    setComment(event.target.value);
-    setHasChanges(event.target.value !== initialComment);
+  // MarkdownField hands back the string, not a change event.
+  const handleTextChange = (value: string) => {
+    setText(value);
+    setHasChanges(value !== initialText);
   };
 
   const handleSave = () => {
-    if (onSaveComment) {
-      onSaveComment(comment);
+    if (onSaveText) {
+      onSaveText(text);
     }
     setHasChanges(false);
     onClose();
   };
 
   const handleClose = () => {
-    // Reset comment to initial value if not saved
-    setComment(initialComment);
+    // Reset to the initial value if not saved
+    setText(initialText);
     setHasChanges(false);
     onClose();
   };
@@ -85,7 +87,7 @@ export default function SectionPreviewModal({
       TransitionProps={{
         onEnter: () => {
           // Reset state when modal opens
-          setComment(initialComment);
+          setText(initialText);
           setHasChanges(false);
         },
       }}
@@ -145,46 +147,40 @@ export default function SectionPreviewModal({
             {children}
           </Paper>
 
-          {/* Comment Section */}
-          <Paper
-            elevation={2}
-            sx={{
-              p: 3,
-              borderRadius: 2,
-            }}
-          >
-            <Box sx={{ display: 'flex', alignItems: 'center', mb: 2 }}>
-              <CommentIcon sx={{ mr: 1, color: '#1976d2' }} />
-              <Typography variant="h6" component="div">
-                Section Comments
-              </Typography>
-            </Box>
-            <Divider sx={{ mb: 2 }} />
-            <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
-              Add comments or observations based on what you see in the preview above.
-              These comments will be saved with the section configuration.
-            </Typography>
-            <TextField
-              fullWidth
-              multiline
-              rows={6}
-              value={comment}
-              onChange={handleCommentChange}
-              placeholder="Enter your comments about this section..."
-              variant="outlined"
-              helperText={`${comment.length} / 2000 characters`}
-              inputProps={{
-                maxLength: 2000,
-              }}
+          {/* Accompanying Text — omitted entirely when the caller has no way
+              to save it (e.g. text_block sections, whose Content field
+              already is the text). Rendering a read-only editor here would
+              let users type into it and silently lose the input on save. */}
+          {onSaveText && (
+            <Paper
+              elevation={2}
               sx={{
-                '& .MuiOutlinedInput-root': {
-                  '&:hover fieldset': {
-                    borderColor: '#1976d2',
-                  },
-                },
+                p: 3,
+                borderRadius: 2,
               }}
-            />
-          </Paper>
+            >
+              <Box sx={{ display: 'flex', alignItems: 'center', mb: 2 }}>
+                <NotesIcon sx={{ mr: 1, color: '#1976d2' }} />
+                <Typography variant="h6" component="div">
+                  Text
+                </Typography>
+              </Box>
+              <Divider sx={{ mb: 2 }} />
+              <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
+                Add text based on what you see in the preview above. It is saved with the
+                section configuration and rendered above this section in the report.
+              </Typography>
+              <MarkdownField
+                label="Text"
+                value={text}
+                onChange={handleTextChange}
+                placeholder="Write the text that accompanies this section, or use the buttons above to format it"
+                rows={6}
+                maxLength={REPORT_LIMITS.MAX_SECTION_TEXT_LENGTH}
+                helperText={`${text.length} / ${REPORT_LIMITS.MAX_SECTION_TEXT_LENGTH} characters`}
+              />
+            </Paper>
+          )}
         </Box>
 
         {/* Action Bar */}
@@ -219,21 +215,23 @@ export default function SectionPreviewModal({
             >
               Cancel
             </Button>
-            <Button
-              variant="contained"
-              onClick={handleSave}
-              disabled={!hasChanges && comment === initialComment}
-              sx={{
-                textTransform: 'none',
-                fontWeight: 600,
-                background: 'linear-gradient(135deg, #1976d2 0%, #1565c0 100%)',
-                '&:hover': {
-                  background: 'linear-gradient(135deg, #1565c0 0%, #0d47a1 100%)',
-                },
-              }}
-            >
-              Save Comment
-            </Button>
+            {onSaveText && (
+              <Button
+                variant="contained"
+                onClick={handleSave}
+                disabled={!hasChanges && text === initialText}
+                sx={{
+                  textTransform: 'none',
+                  fontWeight: 600,
+                  background: 'linear-gradient(135deg, #1976d2 0%, #1565c0 100%)',
+                  '&:hover': {
+                    background: 'linear-gradient(135deg, #1565c0 0%, #0d47a1 100%)',
+                  },
+                }}
+              >
+                Save Text
+              </Button>
+            )}
           </Box>
         </Paper>
       </Box>

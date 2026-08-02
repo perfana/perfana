@@ -8,13 +8,15 @@ import { previewSection } from '@/lib/api/reports';
 interface ApdexSectionPreviewProps {
   testRunId?: string;
   config: ApdexConfig;
+  /** Accompanying text, sent at the section level */
+  text?: string;
 }
 
 /**
  * Preview renderer for Apdex report section
  * Fetches the actual HTML that will appear in the generated report
  */
-export default function ApdexSectionPreview({ testRunId, config }: ApdexSectionPreviewProps) {
+export default function ApdexSectionPreview({ testRunId, config, text }: ApdexSectionPreviewProps) {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [htmlContent, setHtmlContent] = useState<string>('');
@@ -31,7 +33,7 @@ export default function ApdexSectionPreview({ testRunId, config }: ApdexSectionP
           {
             type: 'apdex',
             order: 0,
-            comment: config.comment, // Include comment in section
+            text,
             config: {
               showSummary: config.showSummary,
               showTransactionLevel: config.showTransactionLevel,
@@ -65,7 +67,7 @@ export default function ApdexSectionPreview({ testRunId, config }: ApdexSectionP
     return () => {
       cancelled = true;
     };
-  }, [testRunId, config]);
+  }, [testRunId, config, text]);
 
   if (loading) {
     return (

@@ -108,19 +108,19 @@ describe('TransactionResponseTimesRenderer', () => {
     });
   });
 
-  describe('section comment', () => {
-    it('should render comment block when provided', async () => {
+  describe('section text', () => {
+    it('should render the accompanying text when provided', async () => {
       const section = makeSection({ comment: 'Peak-hour scenario only' });
       const html = await renderer.renderTransactionResponseTimesSection(section, makeTestRun());
 
       expect(html).toContain('Peak-hour scenario only');
-      expect(html).toContain('section-comment');
+      expect(html).toContain('section-text');
     });
 
-    it('should omit comment block entirely when absent', async () => {
+    it('should omit the section-text block entirely when absent', async () => {
       const html = await renderer.renderTransactionResponseTimesSection(makeSection(), makeTestRun());
 
-      expect(html).not.toContain('section-comment');
+      expect(html).not.toContain('section-text');
     });
   });
 

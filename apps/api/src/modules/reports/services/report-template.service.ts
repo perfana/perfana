@@ -743,6 +743,7 @@ export class ReportTemplateService {
       'trends',
       'comparisons',
       'graphs',
+      'top_10_lists',
     ];
 
     const orders = new Set<number>();
@@ -776,11 +777,17 @@ export class ReportTemplateService {
       }
       orders.add(section.order);
 
-      // Validate comments are only on commentable sections
-      const nonCommentableSections = ['header', 'text_block'];
-      if (section.comment && nonCommentableSections.includes(section.type)) {
+      // Accompanying text is not available on text_block — its `content` is the text.
+      // Only reject the new `text` field, not a legacy `comment`: older rows
+      // (e.g. templates saved via `save_as_template`, which bypasses this
+      // validator, or created before this branch removed the comment box
+      // from the text-block form) may carry a stray `comment`. It is never
+      // rendered (see text-block-renderer.ts), so tolerate it rather than
+      // making such a template permanently unsaveable with no way for the
+      // user to clear the offending field via the UI.
+      if (section.type === 'text_block' && section.text) {
         throw new ValidationException(
-          `Comments are not allowed on '${section.type}' sections (index ${i})`,
+          `Accompanying text is not allowed on 'text_block' sections (index ${i})`,
         );
       }
     }

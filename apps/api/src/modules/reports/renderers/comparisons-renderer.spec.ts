@@ -198,7 +198,7 @@ describe('ComparisonsRenderer', () => {
 
     expect(html).toContain('Run Comparison');
     expect(html).toContain('vs baseline run');
-    expect(html).toContain('section-comment');
+    expect(html).toContain('section-text');
   });
 
   it('should pass baselineTestRunId from config', async () => {

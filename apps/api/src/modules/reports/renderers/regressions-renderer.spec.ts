@@ -268,7 +268,7 @@ describe('RegressionsRenderer', () => {
     );
 
     expect(html).toContain('Check with team lead');
-    expect(html).toContain('section-comment');
+    expect(html).toContain('section-text');
   });
 
   it('should escape HTML in metric names', async () => {
