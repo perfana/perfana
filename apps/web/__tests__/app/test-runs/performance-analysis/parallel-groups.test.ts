@@ -1,7 +1,4 @@
-import {
-  buildSamplerSections,
-  summariseGroup,
-} from '@/app/test-runs/[id]/components/performance-analysis/utils/parallel-groups';
+import { buildSamplerSections } from '@/app/test-runs/[id]/components/performance-analysis/utils/parallel-groups';
 import { SamplerStat } from '@/app/test-runs/[id]/components/performance-analysis/types/performance-analysis.types';
 
 function sampler(name: string, overrides: Partial<SamplerStat> = {}): SamplerStat {
@@ -92,22 +89,5 @@ describe('buildSamplerSections', () => {
 
     const names = sections.map((s) => (s.kind === 'single' ? s.sample.sampler_name : s.name));
     expect(names).toEqual(['first', 'second', 'third']);
-  });
-});
-
-describe('summariseGroup', () => {
-  it('reports wall clock as the slowest member', () => {
-    const timing = summariseGroup([
-      sampler('slow', { avg_response_time: 158 }),
-      sampler('medium', { avg_response_time: 117 }),
-      sampler('fast', { avg_response_time: 7 }),
-    ]);
-
-    expect(timing.wallClockMs).toBe(158);
-    expect(timing.concurrency).toBe(3);
-  });
-
-  it('handles an empty group without producing -Infinity', () => {
-    expect(summariseGroup([])).toEqual({ wallClockMs: 0, concurrency: 0 });
   });
 });

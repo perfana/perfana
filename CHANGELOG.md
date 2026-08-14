@@ -7,7 +7,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
 ## [0.2.62.0] - 2026-08-14
 
 ### Added
-- **The Performance Analysis card now shows which requests a virtual user issued at the same time.** Expanding a transaction used to list every request in a flat table, so a request that ran concurrently with its neighbours looked identical to one that ran after them — the numbers simply did not add up to the transaction's duration and nothing explained why. Requests that ran together are now clustered under a band naming their parallel group, with how many ran concurrently and the group's wall clock. Transactions with no concurrent requests render exactly as before.
+- **The Performance Analysis card now shows which requests a virtual user issued at the same time.** Expanding a transaction used to list every request in a flat table, so a request that ran concurrently with its neighbours looked identical to one that ran after them — the numbers simply did not add up to the transaction's duration and nothing explained why. Requests that ran together are now clustered under a band naming their parallel group. Transactions with no concurrent requests render exactly as before.
 
 ### Changed
 - Request records now carry the parallel group they ran under (`requests_raw.parallel_group`), populated by load test tools that report it. Runs recorded before this, and tools that do not report it, leave the field empty and are displayed as they always were.

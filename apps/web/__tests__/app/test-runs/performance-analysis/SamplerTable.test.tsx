@@ -43,7 +43,6 @@ describe('SamplerTable parallel groups', () => {
     expect(screen.getByText('a')).toBeInTheDocument();
     expect(screen.getByText('b')).toBeInTheDocument();
     expect(screen.queryByText(/Parallel group/i)).not.toBeInTheDocument();
-    expect(screen.queryByText(/Wall clock/i)).not.toBeInTheDocument();
   });
 
   it('bands grouped requests and names the group', () => {
@@ -55,23 +54,22 @@ describe('SamplerTable parallel groups', () => {
 
     expect(screen.getByText('Parallel group')).toBeInTheDocument();
     expect(screen.getByText('T01_Add_To_Cart_PG1')).toBeInTheDocument();
-    expect(screen.getByText(/2 requests issued concurrently/)).toBeInTheDocument();
     // The sequential sibling is still rendered as an ordinary row.
     expect(screen.getByText('cart_session_init')).toBeInTheDocument();
   });
 
-  it('reports wall clock as the slowest member', () => {
+  it('labels the band with the group name and nothing derived', () => {
     renderTable([
       sampler('slow', { parallel_group: 'PG1', avg_response_time: 158 }),
       sampler('fast', { parallel_group: 'PG1', avg_response_time: 7 }),
     ]);
 
-    // Approximate, and labelled as such — it is derived from per-request averages.
-    const band = screen.getByText(/Wall clock/);
-    expect(band).toHaveTextContent(/Wall clock ≈/);
-    expect(band).toHaveTextContent(/158\.00 ms/);
-    // The sequential comparison was dropped as noise — it must not come back.
-    expect(band).not.toHaveTextContent(/if run sequentially/);
+    // The band states which group the requests belong to. Derived figures — wall clock,
+    // the sequential comparison, the concurrency count — were all dropped as noise.
+    expect(screen.getByText('PG1')).toBeInTheDocument();
+    expect(screen.queryByText(/requests issued concurrently/)).not.toBeInTheDocument();
+    expect(screen.queryByText(/Wall clock/)).not.toBeInTheDocument();
+    expect(screen.queryByText(/if run sequentially/)).not.toBeInTheDocument();
   });
 
   it('does not band a group with a single member', () => {

@@ -18,7 +18,7 @@ import { alpha } from '@mui/material/styles';
 import { MoreVert as MoreVertIcon, AltRoute as AltRouteIcon } from '@mui/icons-material';
 import { SamplerStat } from '../types/performance-analysis.types';
 import { formatNumber, formatApdex, getApdexColor, getApdexLabel } from '../utils/performance-formatters';
-import { buildSamplerSections, summariseGroup } from '../utils/parallel-groups';
+import { buildSamplerSections } from '../utils/parallel-groups';
 import { ClippedUrl } from '@/components/ui/clipped-url';
 
 const COLUMN_COUNT = 9;
@@ -209,7 +209,6 @@ export function SamplerTable({
               );
             }
 
-            const timing = summariseGroup(section.samples);
             return (
               <Fragment key={`g-${idx}`}>
                 <TableRow sx={(theme) => ({ backgroundColor: alpha(theme.palette.secondary.main, 0.06) })}>
@@ -225,9 +224,6 @@ export function SamplerTable({
                       <Typography variant="caption" fontFamily="monospace" color="text.secondary">
                         {section.name}
                       </Typography>
-                      <Typography variant="caption" color="text.secondary">
-                        · {timing.concurrency} requests issued concurrently
-                      </Typography>
                     </Box>
                   </TableCell>
                 </TableRow>
@@ -242,23 +238,6 @@ export function SamplerTable({
                     onOpenSamplerErrors={onOpenSamplerErrors}
                   />
                 ))}
-
-                <TableRow sx={(theme) => ({ backgroundColor: alpha(theme.palette.secondary.main, 0.03) })}>
-                  <TableCell
-                    colSpan={COLUMN_COUNT}
-                    sx={{ py: 0.5, borderLeft: '3px solid', borderLeftColor: GROUP_ACCENT }}
-                  >
-                    <Tooltip
-                      arrow
-                      placement="top"
-                      title="Wall clock is approximated by the slowest request in the group, since these run at the same time. It is derived from per-request averages, not per-iteration start and end times."
-                    >
-                      <Typography variant="caption" color="text.secondary" sx={{ cursor: 'help' }}>
-                        Wall clock ≈ <strong>{formatNumber(timing.wallClockMs)} ms</strong>
-                      </Typography>
-                    </Tooltip>
-                  </TableCell>
-                </TableRow>
               </Fragment>
             );
           })}

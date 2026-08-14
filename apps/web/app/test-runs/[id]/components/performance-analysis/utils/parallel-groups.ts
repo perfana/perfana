@@ -51,21 +51,3 @@ export function buildSamplerSections(samples: SamplerStat[]): SamplerSection[] {
       : section,
   );
 }
-
-export interface GroupTiming {
-  /**
-   * Approximate wall clock: members run concurrently, so the group takes about as long as its
-   * slowest member. Approximate because it is derived from per-request averages rather than
-   * per-iteration start/end times.
-   */
-  wallClockMs: number;
-  concurrency: number;
-}
-
-export function summariseGroup(samples: SamplerStat[]): GroupTiming {
-  const averages = samples.map((s) => s.avg_response_time || 0);
-  return {
-    wallClockMs: averages.length > 0 ? Math.max(...averages) : 0,
-    concurrency: samples.length,
-  };
-}
