@@ -14,6 +14,7 @@ import {
   Paper,
   Tooltip,
 } from '@mui/material';
+import { alpha } from '@mui/material/styles';
 import { MoreVert as MoreVertIcon, AltRoute as AltRouteIcon } from '@mui/icons-material';
 import { SamplerStat } from '../types/performance-analysis.types';
 import { formatNumber, formatApdex, getApdexColor, getApdexLabel } from '../utils/performance-formatters';
@@ -211,7 +212,7 @@ export function SamplerTable({
             const timing = summariseGroup(section.samples);
             return (
               <Fragment key={`g-${idx}`}>
-                <TableRow sx={{ backgroundColor: 'rgba(156, 39, 176, 0.06)' }}>
+                <TableRow sx={(theme) => ({ backgroundColor: alpha(theme.palette.secondary.main, 0.06) })}>
                   <TableCell
                     colSpan={COLUMN_COUNT}
                     sx={{ py: 0.75, borderLeft: '3px solid', borderLeftColor: GROUP_ACCENT }}
@@ -242,7 +243,7 @@ export function SamplerTable({
                   />
                 ))}
 
-                <TableRow sx={{ backgroundColor: 'rgba(156, 39, 176, 0.03)' }}>
+                <TableRow sx={(theme) => ({ backgroundColor: alpha(theme.palette.secondary.main, 0.03) })}>
                   <TableCell
                     colSpan={COLUMN_COUNT}
                     sx={{ py: 0.5, borderLeft: '3px solid', borderLeftColor: GROUP_ACCENT }}
