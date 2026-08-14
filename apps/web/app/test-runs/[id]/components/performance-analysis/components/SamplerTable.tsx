@@ -255,8 +255,6 @@ export function SamplerTable({
                     >
                       <Typography variant="caption" color="text.secondary" sx={{ cursor: 'help' }}>
                         Wall clock ≈ <strong>{formatNumber(timing.wallClockMs)} ms</strong>
-                        {' · '}
-                        {formatNumber(timing.summedMs)} ms if run sequentially
                       </Typography>
                     </Tooltip>
                   </TableCell>

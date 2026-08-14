@@ -59,8 +59,6 @@ export interface GroupTiming {
    * per-iteration start/end times.
    */
   wallClockMs: number;
-  /** What the same requests would have cost run one after another. */
-  summedMs: number;
   concurrency: number;
 }
 
@@ -68,7 +66,6 @@ export function summariseGroup(samples: SamplerStat[]): GroupTiming {
   const averages = samples.map((s) => s.avg_response_time || 0);
   return {
     wallClockMs: averages.length > 0 ? Math.max(...averages) : 0,
-    summedMs: averages.reduce((total, value) => total + value, 0),
     concurrency: samples.length,
   };
 }

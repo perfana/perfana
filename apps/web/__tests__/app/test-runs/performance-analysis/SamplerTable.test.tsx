@@ -60,18 +60,18 @@ describe('SamplerTable parallel groups', () => {
     expect(screen.getByText('cart_session_init')).toBeInTheDocument();
   });
 
-  it('reports wall clock as the slowest member and the sequential cost as the sum', () => {
+  it('reports wall clock as the slowest member', () => {
     renderTable([
       sampler('slow', { parallel_group: 'PG1', avg_response_time: 158 }),
       sampler('fast', { parallel_group: 'PG1', avg_response_time: 7 }),
     ]);
 
     // Approximate, and labelled as such — it is derived from per-request averages.
-    // 158 is the slowest member; 165 is 158 + 7 had they run one after another.
-    const band = screen.getByText(/if run sequentially/);
+    const band = screen.getByText(/Wall clock/);
     expect(band).toHaveTextContent(/Wall clock ≈/);
     expect(band).toHaveTextContent(/158\.00 ms/);
-    expect(band).toHaveTextContent(/165\.00 ms if run sequentially/);
+    // The sequential comparison was dropped as noise — it must not come back.
+    expect(band).not.toHaveTextContent(/if run sequentially/);
   });
 
   it('does not band a group with a single member', () => {

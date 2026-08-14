@@ -96,7 +96,7 @@ describe('buildSamplerSections', () => {
 });
 
 describe('summariseGroup', () => {
-  it('reports wall clock as the slowest member and the sequential cost as the sum', () => {
+  it('reports wall clock as the slowest member', () => {
     const timing = summariseGroup([
       sampler('slow', { avg_response_time: 158 }),
       sampler('medium', { avg_response_time: 117 }),
@@ -104,11 +104,10 @@ describe('summariseGroup', () => {
     ]);
 
     expect(timing.wallClockMs).toBe(158);
-    expect(timing.summedMs).toBe(282);
     expect(timing.concurrency).toBe(3);
   });
 
   it('handles an empty group without producing -Infinity', () => {
-    expect(summariseGroup([])).toEqual({ wallClockMs: 0, summedMs: 0, concurrency: 0 });
+    expect(summariseGroup([])).toEqual({ wallClockMs: 0, concurrency: 0 });
   });
 });
