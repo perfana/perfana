@@ -87,19 +87,33 @@ export class TestRunsAggregatedTimeseriesController {
   }
 
   @Get(':testRunId/aggregated-metric-statistic')
-  @ApiOperation({ summary: 'Get the run-wide aggregate of a metric as a single value per test run (for Trends/Compare "All aggregated")' })
+  @ApiOperation({
+    summary: 'Get the run-wide aggregate of a metric as a single value per test run (for Trends/Compare "All aggregated")',
+    description:
+      'Served from the pre-computed rollups, so every stat costs one pass. Computed over the analysis window ' +
+      '(ramp-up excluded) when the run has analysis-window rows, otherwise over the full run. Percentiles are ' +
+      'tdigest approximations, the same sketches the per-transaction rows report. Note this differs from the ' +
+      'sibling aggregated-metric-timeseries endpoint, whose applyAnalysisWindow defaults to false.',
+  })
   @ApiParam({ name: 'testRunId', description: 'Anchor test run UUID or test_run_id string (org-access scope)', type: String })
   @ApiQuery({ name: 'metric', required: true, enum: ALLOWED_METRICS })
   @ApiQuery({ name: 'stat', required: false, enum: ALLOWED_STATS, description: 'Required for response-time metrics; ignored for error_percentage.' })
   @ApiQuery({ name: 'testRunIds', required: false, type: String, description: 'Comma-separated test_run_id list to aggregate (defaults to the path run).' })
   @ApiResponse({
     status: 200,
-    description: 'One aggregate value per requested run (null when a run has no data or is out of scope)',
+    description:
+      'One aggregate per requested run. `value` is the requested stat (for error_percentage, always the percentage — ' +
+      '`stat` is ignored). `values` carries avg/p50/p90/p95/p99/max for the response-time metrics, and `avg` alone ' +
+      'for error_percentage. `value` is null and `values` is `{}` when a run has no data or is out of scope.',
     schema: {
       type: 'array',
       items: {
         type: 'object',
-        properties: { testRunId: { type: 'string' }, value: { type: 'number', nullable: true } },
+        properties: {
+          testRunId: { type: 'string' },
+          value: { type: 'number', nullable: true },
+          values: { type: 'object', additionalProperties: { type: 'number', nullable: true } },
+        },
       },
     },
   })

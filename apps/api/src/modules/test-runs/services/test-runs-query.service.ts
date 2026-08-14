@@ -355,7 +355,7 @@ export class TestRunsQueryService {
     roles: string[],
     metric: 'transaction_response_time' | 'request_response_time' | 'error_percentage',
     stat: 'avg' | 'p50' | 'p90' | 'p95' | 'p99' | 'max',
-  ): Promise<Array<{ testRunId: string; value: number | null }>> {
+  ): Promise<Array<{ testRunId: string; value: number | null; values: Record<string, number | null> }>> {
     const { orgIds, isAdmin } = await this.resolveOrganizationIds(userId, roles);
     return this.performanceService.getAggregatedMetricStatistics(testRunIds, metric, stat, isAdmin, orgIds);
   }

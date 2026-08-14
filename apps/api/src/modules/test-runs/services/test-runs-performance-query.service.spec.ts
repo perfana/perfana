@@ -3285,10 +3285,9 @@ describe('TestRunsPerformanceQueryService', () => {
   });
 
   describe('getAggregatedMetricStatistics', () => {
-    it('returns one value per requested run and null for runs with no rows', async () => {
-      // Mock the raw query to return rows for run-a only.
+    it('returns every stat per run from the sampler rollup, null for runs with no rows', async () => {
       (testRunRepo.query as jest.Mock).mockResolvedValueOnce([
-        { test_run_id: 'run-a', value: '1823.40' },
+        { test_run_id: 'run-a', avg: '820.10', p50: '700.00', p90: '1823.40', p95: '2100.00', p99: '3000.00', max: '5000.00' },
       ]);
 
       const result = await service.getAggregatedMetricStatistics(
@@ -3299,15 +3298,31 @@ describe('TestRunsPerformanceQueryService', () => {
         [],
       );
 
-      expect(result).toEqual([
-        { testRunId: 'run-a', value: 1823.4 },
-        { testRunId: 'run-b', value: null },
-      ]);
-      // p90 stat expression and requests_raw table used.
+      // `value` is the requested stat; `values` carries the full set.
+      expect(result[0]).toEqual({
+        testRunId: 'run-a',
+        value: 1823.4,
+        values: { avg: 820.1, p50: 700, p90: 1823.4, p95: 2100, p99: 3000, max: 5000 },
+      });
+      expect(result[1]).toEqual({ testRunId: 'run-b', value: null, values: {} });
+
+      // Rollup table + merged tdigest, not a raw-table scan.
       const sql = (testRunRepo.query as jest.Mock).mock.calls[0][0] as string;
+      expect(sql).toMatch(/FROM\s+test_run_sampler_stats/i);
+      expect(sql).toMatch(/rollup\(\s*s\.pct_agg\s*\)/i);
+      // Window is chosen per run, not hard-filtered to the analysis window.
+      expect(sql).toMatch(/bool_or\(ramp_up_excluded\)\s+AS\s+use_excluded/i);
+      expect(sql).toMatch(/s\.ramp_up_excluded\s*=\s*w\.use_excluded/i);
+      expect(sql).not.toContain('requests_raw');
       expect(sql).toContain('approx_percentile(0.90');
-      expect(sql).toContain('requests_raw');
-      expect(sql).toContain('GROUP BY');
+      expect(sql).toContain('approx_percentile(0.99');
+    });
+
+    it('reads the transaction rollup for transaction_response_time', async () => {
+      (testRunRepo.query as jest.Mock).mockResolvedValueOnce([]);
+      await service.getAggregatedMetricStatistics(['run-a'], 'transaction_response_time', 'avg', true, []);
+      const sql = (testRunRepo.query as jest.Mock).mock.calls[0][0] as string;
+      expect(sql).toMatch(/FROM\s+test_run_transaction_stats/i);
     });
 
     it('adds the org clause and org param for non-admin callers', async () => {
@@ -3316,14 +3331,106 @@ describe('TestRunsPerformanceQueryService', () => {
       const [sql, params] = (testRunRepo.query as jest.Mock).mock.calls[0];
       expect(sql).toContain('sut.organization_id = ANY');
       expect(params).toEqual([['run-a'], ['org-1']]);
-      // error_percentage uses the success-count expression, not a stat expr.
-      expect(sql).toContain('FILTER (WHERE NOT r.success)');
+      // error_percentage counts from the rollup, no tdigest involved.
+      expect(sql).toContain('SUM(s.failed_count)');
     });
 
     it('short-circuits to all-null for non-admin with no orgs', async () => {
       const result = await service.getAggregatedMetricStatistics(['run-a'], 'request_response_time', 'avg', false, []);
-      expect(result).toEqual([{ testRunId: 'run-a', value: null }]);
+      expect(result).toEqual([{ testRunId: 'run-a', value: null, values: {} }]);
       expect(testRunRepo.query).not.toHaveBeenCalled();
+    });
+
+    it('returns [] without querying for an empty or missing id list', async () => {
+      await expect(service.getAggregatedMetricStatistics([], 'request_response_time', 'avg', true, [])).resolves.toEqual([]);
+      await expect(
+        service.getAggregatedMetricStatistics(undefined as unknown as string[], 'request_response_time', 'avg', true, []),
+      ).resolves.toEqual([]);
+      expect(testRunRepo.query).not.toHaveBeenCalled();
+    });
+
+    it('omits the org clause and the org param for admin callers', async () => {
+      (testRunRepo.query as jest.Mock).mockResolvedValueOnce([]);
+      await service.getAggregatedMetricStatistics(['run-a'], 'request_response_time', 'avg', true, ['org-1']);
+      const [sql, params] = (testRunRepo.query as jest.Mock).mock.calls[0];
+      expect(sql).not.toContain('sut.organization_id');
+      expect(params).toEqual([['run-a']]);
+    });
+
+    it('maps the error_percentage rollup counts into value and values', async () => {
+      (testRunRepo.query as jest.Mock).mockResolvedValueOnce([{ test_run_id: 'run-a', avg: '2.50' }]);
+      const result = await service.getAggregatedMetricStatistics(['run-a'], 'error_percentage', 'avg', true, []);
+      expect(result).toEqual([{ testRunId: 'run-a', value: 2.5, values: { avg: 2.5 } }]);
+      const sql = (testRunRepo.query as jest.Mock).mock.calls[0][0] as string;
+      expect(sql).not.toContain('approx_percentile');
+      expect(sql).toMatch(/s\.ramp_up_excluded\s*=\s*w\.use_excluded/i);
+    });
+
+    it('ignores stat for error_percentage, as the API documents', async () => {
+      // The controller deliberately skips allowlisting `stat` for this metric,
+      // so `value` must never be keyed off it — always the percentage.
+      (testRunRepo.query as jest.Mock).mockResolvedValueOnce([{ test_run_id: 'run-a', avg: '2.50' }]);
+      const result = await service.getAggregatedMetricStatistics(['run-a'], 'error_percentage', 'p95', true, []);
+      expect(result).toEqual([{ testRunId: 'run-a', value: 2.5, values: { avg: 2.5 } }]);
+    });
+
+    it('never resolves a prototype member for an unvalidated stat', async () => {
+      (testRunRepo.query as jest.Mock).mockResolvedValueOnce([{ test_run_id: 'run-a', avg: '2.50' }]);
+      const result = await service.getAggregatedMetricStatistics(
+        ['run-a'], 'error_percentage', 'constructor' as never, true, [],
+      );
+      expect(result[0]!.value).toBe(2.5);
+
+      (testRunRepo.query as jest.Mock).mockResolvedValueOnce([{ test_run_id: 'run-a', avg: '10.00', p90: '20.00' }]);
+      const rt = await service.getAggregatedMetricStatistics(
+        ['run-a'], 'request_response_time', 'toString' as never, true, [],
+      );
+      expect(rt[0]!.value).toBeNull();
+    });
+
+    it('falls back to the full-run rows when a run has no analysis-window rows', async () => {
+      // The rollup pipeline writes the ramp_up_excluded=true half only WHERE
+      // total_excl > 0, so a run whose samples all sit inside ramp-up has none.
+      // bool_or picks false for that run, and it still reports a value.
+      (testRunRepo.query as jest.Mock).mockResolvedValueOnce([
+        { test_run_id: 'ramp-only', avg: '50.00', p50: '40.00', p90: '90.00', p95: '95.00', p99: '99.00', max: '120.00' },
+      ]);
+      const result = await service.getAggregatedMetricStatistics(
+        ['ramp-only'], 'request_response_time', 'p95', true, [],
+      );
+      expect(result[0]!.value).toBe(95);
+
+      const sql = (testRunRepo.query as jest.Mock).mock.calls[0][0] as string;
+      // The window join must not exclude runs that only have full-run rows.
+      expect(sql).not.toMatch(/ramp_up_excluded\s*=\s*true/);
+      expect(sql).toMatch(/bool_or\(ramp_up_excluded\)/i);
+    });
+
+    it('skips rows that carry no test_run_id', async () => {
+      (testRunRepo.query as jest.Mock).mockResolvedValueOnce([
+        { test_run_id: null, avg: '10.00' },
+        { test_run_id: 'run-a', avg: '20.00' },
+      ]);
+      const result = await service.getAggregatedMetricStatistics(['run-a'], 'error_percentage', 'avg', true, []);
+      expect(result).toEqual([{ testRunId: 'run-a', value: 20, values: { avg: 20 } }]);
+    });
+
+    it('maps NULL stat columns through the shared parser (0, not null)', async () => {
+      // NULLIF guards and empty tdigests can emit SQL NULL; the shared parser
+      // defaults those to 0, so a run WITH a row never reports a null stat.
+      (testRunRepo.query as jest.Mock).mockResolvedValueOnce([
+        { test_run_id: 'run-a', avg: null, p50: null, p90: null, p95: null, p99: null, max: null },
+      ]);
+      const result = await service.getAggregatedMetricStatistics(['run-a'], 'request_response_time', 'p90', true, []);
+      expect(result[0].value).toBe(0);
+      expect(result[0].values).toEqual({ avg: 0, p50: 0, p90: 0, p95: 0, p99: 0, max: 0 });
+    });
+
+    it('wraps a query failure in DatabaseException', async () => {
+      (testRunRepo.query as jest.Mock).mockRejectedValueOnce(new Error('connection refused'));
+      await expect(
+        service.getAggregatedMetricStatistics(['run-a'], 'request_response_time', 'avg', true, []),
+      ).rejects.toThrow(DatabaseException);
     });
   });
 
