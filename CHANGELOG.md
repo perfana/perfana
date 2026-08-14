@@ -4,6 +4,20 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
+## [0.2.61.105] - 2026-08-14
+
+### Fixed
+- **The Compare card's "All aggregated" rows now fill their percentile columns.** Picking *All aggregated — Transaction RT* or *All aggregated — Request RT* produced a row with a mean and three blank cells where P90, P95 and P99 should have been. The four per-percentile RT panels store the identical distribution — the percentile lives only in the panel title — so the dropdown collapses them into one entry, which pinned the aggregate to the mean and left the other three columns with nothing to render. The aggregate is now read from the pre-computed rollups, where merging the stored sketches yields every statistic in a single pass, so all four columns populate.
+
+### Changed
+- **The "All aggregated" figure on Trends and Compare is computed differently, and its value moves slightly.** It previously scanned every raw sample in the run; it now merges the pre-computed per-series sketches. Three consequences. It is measured over the analysis window (ramp-up excluded) for runs that have one, where before it always covered the whole run — for a run with no analysis window it still falls back to the full run rather than reporting nothing. Percentiles are now approximations from those sketches, the same ones every per-transaction row has always shown. And it no longer touches the raw tables, so the cost stops growing with the size of the test: on a large run this is the difference between scanning millions of rows per statistic and reading a few hundred.
+- **`GET /test-runs/{id}/aggregated-metric-statistic` returns every statistic, not just the requested one.** The response gained a `values` object carrying avg/p50/p90/p95/p99/max for the response-time metrics (`avg` alone for `error_percentage`). The existing `value` field is unchanged, so current callers need no edit.
+
+## [0.2.61.104] - 2026-08-13
+
+### Added
+- **Report sections take accompanying text that renders as prose.** Sections previously carried a comment that rendered as a callout box; a section now takes explicit accompanying text rendered as ordinary prose alongside the content, editable through the same markdown editor used everywhere else in the report dialog, and available on header sections too. Collapsed sections in the dialog summarise themselves by that text. Text authored as a comment before this release is still read, so nothing is lost.
+
 ## [0.2.61.103] - 2026-08-01
 
 ### Added

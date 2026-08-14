@@ -2565,15 +2565,30 @@ export class TestRunsPerformanceQueryService {
   }
 
   /**
-   * Run-wide aggregate (all transactions/requests collapsed) as a single value
-   * per test run — the non-bucketed, batched sibling of
-   * getAggregatedMetricTimeseries. Powers the "All aggregated" series on the
-   * Trends and Compare cards. Full-run window (no analysis-window clipping).
+   * Run-wide aggregate (all transactions/requests collapsed) per test run — the
+   * non-bucketed, batched sibling of getAggregatedMetricTimeseries. Powers the
+   * "All aggregated" series on the Trends and Compare cards.
    *
-   * Contract: `testRunIds` are canonical `test_run_id` strings (the key the raw
-   * `transactions`/`requests_raw` tables use), NOT entity UUIDs. Unlike the
-   * single-run route methods, this batch method does not `resolveTestRunId`;
-   * callers (Trends/Compare cards) already hold `test_run_id` strings.
+   * Reads the pre-computed rollups (`test_run_transaction_stats` /
+   * `test_run_sampler_stats`), merging the per-series tdigests with `rollup()`
+   * — accurate, unlike averaging percentiles — so ALL stats come back from one
+   * pass over a small table instead of a raw-table scan per stat. `stat` only
+   * selects which one lands in `value`; for the response-time metrics `values`
+   * carries avg/p50/p90/p95/p99/max, which is what Compare's AVG/P90/P95/P99
+   * columns need. `error_percentage` yields `{ avg }` alone and, as the API
+   * documents, ignores `stat` entirely — `value` always holds the percentage.
+   *
+   * Window: analysis-window rows (`ramp_up_excluded = true`) when the run has
+   * them, else the full-run rows. The rollup pipeline only writes the
+   * analysis-window half `WHERE total_excl > 0`, so a run whose samples all
+   * fall inside ramp-up has no such rows at all — without the fallback it would
+   * report nothing. The previous raw-table implementation always used the full
+   * run, so values shift slightly for runs that do have a window. Percentiles
+   * are tdigest approximations (the same ones per-transaction rows show).
+   *
+   * Contract: `testRunIds` are canonical `test_run_id` strings, NOT entity
+   * UUIDs. Unlike the single-run route methods, this batch method does not
+   * `resolveTestRunId`; callers (Trends/Compare cards) already hold them.
    */
   async getAggregatedMetricStatistics(
     testRunIds: string[],
@@ -2581,68 +2596,95 @@ export class TestRunsPerformanceQueryService {
     stat: 'avg' | 'p50' | 'p90' | 'p95' | 'p99' | 'max',
     isAdmin: boolean,
     organizationIds: string[],
-  ): Promise<Array<{ testRunId: string; value: number | null }>> {
+  ): Promise<Array<{ testRunId: string; value: number | null; values: Record<string, number | null> }>> {
     const requested = testRunIds ?? [];
     if (requested.length === 0) return [];
     // Non-admin with no orgs can see nothing.
     if (!isAdmin && organizationIds.length === 0) {
-      return requested.map(testRunId => ({ testRunId, value: null }));
+      return requested.map(testRunId => ({ testRunId, value: null, values: {} }));
     }
 
     try {
       const orgClause = isAdmin ? '' : 'AND sut.organization_id = ANY($2::uuid[])';
+      // request_response_time and error_percentage are both request-level.
+      const table = metric === 'transaction_response_time'
+        ? 'test_run_transaction_stats'
+        : 'test_run_sampler_stats';
 
-      const statExprMap: Record<typeof stat, string> = {
-        avg: 'ROUND(AVG(t.response_time)::numeric, 2)',
-        p50: 'ROUND(approx_percentile(0.50, percentile_agg(t.response_time::double precision))::numeric, 2)',
-        p90: 'ROUND(approx_percentile(0.90, percentile_agg(t.response_time::double precision))::numeric, 2)',
-        p95: 'ROUND(approx_percentile(0.95, percentile_agg(t.response_time::double precision))::numeric, 2)',
-        p99: 'ROUND(approx_percentile(0.99, percentile_agg(t.response_time::double precision))::numeric, 2)',
-        max: 'MAX(t.response_time)::numeric',
-      };
+      // Org-scoped rows for the requested runs, then one window per run:
+      // analysis-window rows when the run has any, else the full-run rows.
+      const scoped = `
+        scoped AS (
+          SELECT s.*
+          FROM ${table} s
+          JOIN test_runs tr ON tr.test_run_id = s.test_run_id
+          JOIN systems_under_test sut ON sut.id = tr.system_under_test_id
+          WHERE s.test_run_id = ANY($1::text[])
+            ${orgClause}
+        ),
+        win AS (
+          SELECT test_run_id, bool_or(ramp_up_excluded) AS use_excluded
+          FROM scoped
+          GROUP BY test_run_id
+        )`;
 
       let query: string;
       if (metric === 'error_percentage') {
         query = `
+        WITH ${scoped}
         SELECT
-          r.test_run_id AS test_run_id,
-          ROUND(
-            COUNT(*) FILTER (WHERE NOT r.success)::numeric / NULLIF(COUNT(*), 0) * 100,
-            2
-          ) AS value
-        FROM requests_raw r
-        JOIN test_runs tr ON tr.test_run_id = r.test_run_id
-        JOIN systems_under_test sut ON sut.id = tr.system_under_test_id
-        WHERE r.test_run_id = ANY($1::text[])
-          ${orgClause}
-        GROUP BY r.test_run_id
+          s.test_run_id AS test_run_id,
+          ROUND(SUM(s.failed_count)::numeric / NULLIF(SUM(s.total_count), 0) * 100, 2) AS avg
+        FROM scoped s
+        JOIN win w ON w.test_run_id = s.test_run_id
+        WHERE s.ramp_up_excluded = w.use_excluded
+        GROUP BY s.test_run_id
       `;
       } else {
-        const table = metric === 'transaction_response_time' ? 'transactions' : 'requests_raw';
         query = `
+        WITH ${scoped},
+        agg AS (
+          SELECT s.test_run_id, rollup(s.pct_agg) AS pct_agg
+          FROM scoped s
+          JOIN win w ON w.test_run_id = s.test_run_id
+          WHERE s.ramp_up_excluded = w.use_excluded
+          GROUP BY s.test_run_id
+        )
         SELECT
-          t.test_run_id AS test_run_id,
-          ${statExprMap[stat]} AS value
-        FROM ${table} t
-        JOIN test_runs tr ON tr.test_run_id = t.test_run_id
-        JOIN systems_under_test sut ON sut.id = tr.system_under_test_id
-        WHERE t.test_run_id = ANY($1::text[])
-          ${orgClause}
-        GROUP BY t.test_run_id
+          test_run_id,
+          ROUND(mean(pct_agg)::numeric, 2)                        AS avg,
+          ROUND(approx_percentile(0.50, pct_agg)::numeric, 2)     AS p50,
+          ROUND(approx_percentile(0.90, pct_agg)::numeric, 2)     AS p90,
+          ROUND(approx_percentile(0.95, pct_agg)::numeric, 2)     AS p95,
+          ROUND(approx_percentile(0.99, pct_agg)::numeric, 2)     AS p99,
+          ROUND(max_val(pct_agg)::numeric, 2)                     AS max
+        FROM agg
       `;
       }
 
       const params: unknown[] = isAdmin ? [requested] : [requested, organizationIds];
-      const rows: Array<{ test_run_id: string; value: string }> = await withRequestEm(this.testRunRepo).query(query, params);
+      const rows: Array<Record<string, string>> = await withRequestEm(this.testRunRepo).query(query, params);
 
-      const byId = new Map<string, number | null>();
+      const byId = new Map<string, Record<string, number | null>>();
       for (const row of rows) {
-        byId.set(row.test_run_id, this.mapper.parseFloat(row.value));
+        const { test_run_id: id, ...stats } = row;
+        if (!id) continue;
+        byId.set(id, Object.fromEntries(
+          Object.entries(stats).map(([k, v]) => [k, this.mapper.parseFloat(v)]),
+        ));
       }
-      return requested.map(testRunId => ({
-        testRunId,
-        value: byId.has(testRunId) ? byId.get(testRunId)! : null,
-      }));
+      // error_percentage has one column and ignores `stat` (the controller
+      // deliberately skips allowlisting it for that metric, so never index by
+      // it — an arbitrary key would otherwise reach a prototype member).
+      const key = metric === 'error_percentage' ? 'avg' : stat;
+      return requested.map(testRunId => {
+        const values = byId.get(testRunId) ?? {};
+        return {
+          testRunId,
+          value: Object.hasOwn(values, key) ? values[key] ?? null : null,
+          values,
+        };
+      });
     } catch (error) {
       throw new DatabaseException('Failed to retrieve aggregated metric statistics', error as Error);
     }

@@ -142,26 +142,49 @@ export const getStatusIcon = (
  */
 export const COMPARE_ACCENT_COLOR = '#1976d2';
 
-/**
- * One comparison row for an "All aggregated" series. Unlike a normal metric
- * (which yields a row per evaluate type), the aggregate only exposes the
- * panel's own stat, so it produces a single row keyed by that stat.
- */
-const AGG_STAT_TO_COLUMN: Record<string, string> = { p50: 'q50', p90: 'q90', p95: 'q95', p99: 'q99' };
+/** Aggregate stats for one run: the panel's own stat plus, when the API sent them, all of them. */
+export interface AggregateValues {
+  value: number | null;
+  values?: Record<string, number | null>;
+}
 
-export function buildAggregatedComparison(
+/**
+ * API stat -> table column. Deliberately the exact set `getMetricColumns`
+ * renders: the API also returns p50 and max, but the table has no Q50 or Max
+ * column for these rows (normal metric rows emit the same four), so emitting
+ * them would produce cells nothing consumes.
+ */
+const AGG_STAT_TO_COLUMN: Record<string, string> = { avg: 'avg', p90: 'q90', p95: 'q95', p99: 'q99' };
+
+/**
+ * Comparison cells for an "All aggregated" series — one per stat the API
+ * returned, so the row fills the same AVG/P90/P95/P99 columns as a normal
+ * metric. Falls back to a single cell keyed by the panel's own stat when the
+ * API only sent `value` (older backend).
+ */
+export function buildAggregatedComparisons(
   series: CompareSeries,
-  currentValue: number | null,
-  baselineValue: number | null,
+  current: AggregateValues | undefined,
+  baseline: AggregateValues | undefined,
   stat: string,
-): MetricComparison {
-  return {
+): MetricComparison[] {
+  const statsOf = (v?: AggregateValues): Record<string, number | null> =>
+    v?.values ?? (v ? { [stat]: v.value } : {});
+  const cur = statsOf(current);
+  const base = statsOf(baseline);
+
+  const stats = Object.keys(AGG_STAT_TO_COLUMN)
+    .filter(s => cur[s] != null || base[s] != null);
+  // No data at all: still emit the panel's own stat so the series stays visible.
+  if (stats.length === 0) stats.push(stat);
+
+  return stats.map(s => ({
     metric_name: series.metricName,
-    evaluate_type: AGG_STAT_TO_COLUMN[stat] ?? stat,
-    current_value: currentValue,
-    selected_value: baselineValue,
-    percentage_difference: calculatePercentageDifference(currentValue, baselineValue),
-  };
+    evaluate_type: AGG_STAT_TO_COLUMN[s] ?? s,
+    current_value: cur[s] ?? null,
+    selected_value: base[s] ?? null,
+    percentage_difference: calculatePercentageDifference(cur[s] ?? null, base[s] ?? null),
+  }));
 }
 
 /** Per-view display config for the baseline-style compare table. Persisted in presets. */

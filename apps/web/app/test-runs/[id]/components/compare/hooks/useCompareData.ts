@@ -15,7 +15,7 @@ import {
   ComparisonStatus,
   SUPPORTED_PANEL_TYPES,
 } from '../types';
-import { calculatePercentageDifference, buildAggregatedComparison, DEFAULT_DISPLAY_CONFIG, DisplayConfig } from '../utils/compare-utils';
+import { calculatePercentageDifference, buildAggregatedComparisons, DEFAULT_DISPLAY_CONFIG, DisplayConfig } from '../utils/compare-utils';
 import { TestRun } from '@/types/test-runs';
 import { isGrafana, isPerformanceTest} from '@/lib/metrics-source-utils';
 import {
@@ -411,7 +411,8 @@ export function useCompareData({ testRun, testRunId, compareExpanded }: UseCompa
         }
       }
 
-      // Aggregated series: one batch call each for [current, baseline], single stat row.
+      // Aggregated series: one batch call each for [current, baseline]. The API
+      // returns every stat in that one call, so this emits one cell per column.
       const aggregatedSeries = addedSeries.filter(s => s.isAggregated);
       for (const series of aggregatedSeries) {
         const spec = getAggregateSpec(series.panelId);
@@ -421,20 +422,23 @@ export function useCompareData({ testRun, testRunId, compareExpanded }: UseCompa
           [testRun.test_run_id, selectedTestRun.test_run_id],
           spec,
         );
-        const byId = new Map(values.map(v => [v.testRunId, v.value]));
-        allComparisons.push({
-          ...buildAggregatedComparison(
-            series,
-            byId.get(testRun.test_run_id) ?? null,
-            byId.get(selectedTestRun.test_run_id) ?? null,
-            spec.stat,
-          ),
-          dashboard_label: series.dashboardLabel,
-          panel_title: series.panelTitle,
-          dashboardId: series.dashboardId,
-          panelId: series.panelId,
-          yAxesFormat: series.yAxesFormat,
-        });
+        const byId = new Map(values.map(v => [v.testRunId, v]));
+        const cells = buildAggregatedComparisons(
+          series,
+          byId.get(testRun.test_run_id),
+          byId.get(selectedTestRun.test_run_id),
+          spec.stat,
+        );
+        for (const cell of cells) {
+          allComparisons.push({
+            ...cell,
+            dashboard_label: series.dashboardLabel,
+            panel_title: series.panelTitle,
+            dashboardId: series.dashboardId,
+            panelId: series.panelId,
+            yAxesFormat: series.yAxesFormat,
+          });
+        }
       }
 
       setCurrentMetrics(allCurrentMetrics);

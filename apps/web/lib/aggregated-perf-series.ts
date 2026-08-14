@@ -8,10 +8,10 @@ export type AggStat = 'avg' | 'p50' | 'p90' | 'p95' | 'p99' | 'max';
 export interface AggregateSpec { metric: AggMetric; stat: AggStat }
 
 /**
- * Performance-test panel ids that have a raw-table run-wide aggregate, mapped
- * to the (metric, stat) the aggregate endpoint understands. Panel ids come from
- * METRIC_TYPE_PANEL_IDS in apps/worker/src/constants/performance-metrics.ts.
- * error_percentage ignores stat (kept 'avg' as an ignored placeholder).
+ * Performance-test panel ids that have a rollup-backed run-wide aggregate,
+ * mapped to the (metric, stat) the aggregate endpoint understands. Panel ids
+ * come from METRIC_TYPE_PANEL_IDS in apps/worker/src/constants/performance-metrics.ts.
+ * error_percentage ignores stat ('avg' is a placeholder the API never reads).
  */
 const AGGREGATABLE_PERF_PANELS: Record<number, AggregateSpec> = {
   101: { metric: 'transaction_response_time', stat: 'avg' },
@@ -71,13 +71,16 @@ export function buildAggregatedMetricName(panelTitle: string): string {
 
 /**
  * Fetch the run-wide aggregate for one panel spec across the given runs.
+ * `value` is the spec's own stat; `values` carries every stat (avg/p50/p90/
+ * p95/p99/max) — the API computes them all in one pass, so Compare can fill
+ * its percentile columns for free.
  * Returns [] on transport/HTTP error (callers treat that as no data).
  */
 export async function fetchAggregatedStatistics(
   anchorTestRunId: string,
   testRunIds: string[],
   spec: AggregateSpec,
-): Promise<Array<{ testRunId: string; value: number | null }>> {
+): Promise<Array<{ testRunId: string; value: number | null; values?: Record<string, number | null> }>> {
   try {
     const params = new URLSearchParams({
       metric: spec.metric,

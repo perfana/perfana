@@ -13,6 +13,11 @@ jest.mock('@/lib/api', () => ({ authenticatedFetch: jest.fn() }));
 const mockFetch = authenticatedFetch as jest.MockedFunction<typeof authenticatedFetch>;
 
 describe('aggregated-perf-series', () => {
+  // jest.config.js sets neither clearMocks nor resetMocks, so a persistent
+  // mockResolvedValue/mockRejectedValue and the call history both leak into
+  // every later test in file order without this.
+  beforeEach(() => { jest.clearAllMocks(); });
+
   it('maps the ten supported panel ids to (metric, stat)', () => {
     expect(getAggregateSpec(102)).toEqual({ metric: 'transaction_response_time', stat: 'p90' });
     expect(getAggregateSpec(201)).toEqual({ metric: 'request_response_time', stat: 'avg' });
@@ -65,5 +70,21 @@ describe('aggregated-perf-series', () => {
     mockFetch.mockResolvedValue({ ok: false, status: 500 } as unknown as Response);
     const res = await fetchAggregatedStatistics('a', ['a'], { metric: 'error_percentage', stat: 'avg' });
     expect(res).toEqual([]);
+  });
+
+  it('returns [] when the transport throws', async () => {
+    const spy = jest.spyOn(console, 'error').mockImplementation(() => {});
+    mockFetch.mockRejectedValueOnce(new Error('network down'));
+    const res = await fetchAggregatedStatistics('a', ['a'], { metric: 'request_response_time', stat: 'avg' });
+    expect(res).toEqual([]);
+    spy.mockRestore();
+  });
+
+  it('passes the per-stat values map through untouched', async () => {
+    const payload = [{ testRunId: 'a', value: 200, values: { avg: 100, p50: 90, p90: 200, p95: 300, p99: 400, max: 900 } }];
+    mockFetch.mockResolvedValue({ ok: true, json: async () => payload } as unknown as Response);
+    const res = await fetchAggregatedStatistics('a', ['a', 'b'], { metric: 'request_response_time', stat: 'p90' });
+    expect(res).toEqual(payload);
+    expect(res[0]?.values?.p95).toBe(300);
   });
 });

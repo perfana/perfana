@@ -59,6 +59,7 @@ type MockPerformanceQueryService = jest.Mocked<Pick<
   | 'getVirtualUserStats'
   | 'getThroughputStats'
   | 'getAggregatedMetricTimeseries'
+  | 'getAggregatedMetricStatistics'
 >>;
 
 type MockTimeSeriesQueryService = jest.Mocked<Pick<
@@ -153,6 +154,7 @@ describe('TestRunsQueryService', () => {
       getVirtualUserStats: jest.fn(),
       getThroughputStats: jest.fn(),
       getAggregatedMetricTimeseries: jest.fn(),
+      getAggregatedMetricStatistics: jest.fn(),
     };
 
     const mockTimeSeriesService: MockTimeSeriesQueryService = {
@@ -700,6 +702,35 @@ describe('TestRunsQueryService', () => {
         // Assert: isAdmin=true forwarded correctly
         const callArgs = performanceService.getAggregatedMetricTimeseries.mock.calls[0];
         expect(callArgs[4]).toBe(true); // isAdmin is the 5th argument
+      });
+    });
+
+    describe('getAggregatedMetricStatistics', () => {
+      it('resolves org IDs and passes the full per-stat result through', async () => {
+        // Default authz mock returns isGlobalAdmin=true → isAdmin=true, orgIds=[]
+        const mockResult = [
+          { testRunId: 'run-a', value: 200, values: { avg: 100, p50: 90, p90: 200, p95: 300, p99: 400, max: 900 } },
+          { testRunId: 'run-b', value: null, values: {} },
+        ];
+        performanceService.getAggregatedMetricStatistics.mockResolvedValue(mockResult);
+
+        const result = await service.getAggregatedMetricStatistics(
+          ['run-a', 'run-b'],
+          mockUserId,
+          mockRoles,
+          'request_response_time',
+          'p90',
+        );
+
+        expect(performanceService.getAggregatedMetricStatistics).toHaveBeenCalledWith(
+          ['run-a', 'run-b'],
+          'request_response_time',
+          'p90',
+          true, // isAdmin resolved from global-admin mock
+          [],   // orgIds empty for admin
+        );
+        // The facade must not strip `values` — Compare's percentile columns need it.
+        expect(result).toEqual(mockResult);
       });
     });
   });
