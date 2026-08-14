@@ -31,6 +31,11 @@ export interface SamplerStat {
   active_threshold: number;
   url_hash: string | null;
   url_pattern: string | null;
+  /**
+   * Parallel Controller this request ran under, or null/undefined when it ran sequentially or
+   * the run predates the tag. Absent means "not parallel", never "unknown".
+   */
+  parallel_group?: string | null;
 }
 
 export interface VirtualUserStats {

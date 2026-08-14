@@ -158,6 +158,12 @@ export interface SamplerStats {
   active_threshold: number;
   url_hash: string | null;
   url_pattern: string | null;
+  /**
+   * Name of the Parallel Controller this request ran under, or null when it ran sequentially.
+   * Also null for runs recorded before the load test tool reported it, so consumers must treat
+   * an absent value as "not parallel" rather than "unknown".
+   */
+  parallel_group?: string | null;
 }
 
 /**

@@ -1129,6 +1129,84 @@ export class TestRunsPerformanceQueryService {
     organizationIds: string[] = [],
     sinceMinutes?: number,
   ): Promise<SamplerStats[] | RollupPendingResult> {
+    const samples = await this.getTransactionSamplesInternal(
+      testRunId,
+      transactionName,
+      excludeRampUp,
+      isAdmin,
+      organizationIds,
+      sinceMinutes,
+    );
+    // Decorate here rather than in each fetch path (rollup / CAGG / raw fallback), so all of
+    // them report parallel groups identically.
+    if (Array.isArray(samples) && samples.length > 0) {
+      await this.attachParallelGroups(testRunId, transactionName, samples);
+    }
+    return samples;
+  }
+
+  /**
+   * Labels each sampler with the Parallel Controller it ran under.
+   *
+   * The sampler rollup is keyed by (test_run_id, transaction_name, sampler_name, scenario_name,
+   * ramp_up_excluded) and does not carry the group, so this is a separate lookup against
+   * requests_raw rather than a change to the rollup or its populating job.
+   *
+   * Every failure mode degrades to "no groups", which renders exactly as before this existed:
+   * a database without the column (rolling deploy ahead of the migration), a run recorded by a
+   * load test tool that does not report the tag, or a query error.
+   */
+  private async attachParallelGroups(
+    testRunId: string,
+    transactionName: string,
+    samples: SamplerStats[],
+  ): Promise<void> {
+    try {
+      const resolvedTestRunId = await this.resolveTestRunId(testRunId);
+      const rows = await withRequestEm(this.testRunRepo).query(
+        `SELECT DISTINCT sampler_name, parallel_group
+           FROM requests_raw
+          WHERE test_run_id = $1
+            AND transaction_name = $2
+            AND parallel_group IS NOT NULL
+            AND parallel_group <> ''`,
+        [resolvedTestRunId, transactionName],
+      );
+      if (!rows || rows.length === 0) {
+        return;
+      }
+      const groupBySampler = new Map<string, string>();
+      for (const row of rows as Array<Record<string, unknown>>) {
+        const sampler = row.sampler_name as string;
+        const group = row.parallel_group as string;
+        // A sampler that appears in more than one group across iterations has no single
+        // answer; leave it unlabelled rather than picking one arbitrarily.
+        if (groupBySampler.has(sampler) && groupBySampler.get(sampler) !== group) {
+          groupBySampler.set(sampler, '');
+        } else {
+          groupBySampler.set(sampler, group);
+        }
+      }
+      for (const sample of samples) {
+        sample.parallel_group = groupBySampler.get(sample.sampler_name) || null;
+      }
+    } catch (error) {
+      this.logger.warn(
+        `Could not resolve parallel groups for transaction ${transactionName}: ${
+          error instanceof Error ? error.message : String(error)
+        }. Rendering without them.`,
+      );
+    }
+  }
+
+  private async getTransactionSamplesInternal(
+    testRunId: string,
+    transactionName: string,
+    excludeRampUp: boolean = false,
+    isAdmin: boolean = false,
+    organizationIds: string[] = [],
+    sinceMinutes?: number,
+  ): Promise<SamplerStats[] | RollupPendingResult> {
     try {
       // Non-admin users with no organization memberships see empty results
       if (!isAdmin && organizationIds.length === 0) {
