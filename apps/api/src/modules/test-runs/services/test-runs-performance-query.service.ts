@@ -54,6 +54,13 @@ export function apdexScoreSql(thresholdExpr: string, aggExpr: string): string {
  * Service responsible for performance analysis queries
  * Handles: transaction stats, sampler stats, error analysis, virtual users, throughput
  */
+/**
+ * Rows read when resolving parallel-group membership. Membership is fixed by the test plan and
+ * repeats every iteration, so a bounded slice names every group without scanning the whole
+ * transaction.
+ */
+const PARALLEL_GROUP_SCAN_ROWS = 5000;
+
 @Injectable()
 export class TestRunsPerformanceQueryService {
   private readonly logger = new Logger(TestRunsPerformanceQueryService.name);
@@ -1129,8 +1136,11 @@ export class TestRunsPerformanceQueryService {
     organizationIds: string[] = [],
     sinceMinutes?: number,
   ): Promise<SamplerStats[] | RollupPendingResult> {
+    // Resolve once. Both the fetch and the decoration need the real test_run_id, and
+    // resolveTestRunId issues a lookup when handed a UUID — which is what the frontend sends.
+    const resolvedTestRunId = await this.resolveTestRunId(testRunId);
     const samples = await this.getTransactionSamplesInternal(
-      testRunId,
+      resolvedTestRunId,
       transactionName,
       excludeRampUp,
       isAdmin,
@@ -1140,7 +1150,7 @@ export class TestRunsPerformanceQueryService {
     // Decorate here rather than in each fetch path (rollup / CAGG / raw fallback), so all of
     // them report parallel groups identically.
     if (Array.isArray(samples) && samples.length > 0) {
-      await this.attachParallelGroups(testRunId, transactionName, samples);
+      await this.attachParallelGroups(resolvedTestRunId, transactionName, samples);
     }
     return samples;
   }
@@ -1157,38 +1167,57 @@ export class TestRunsPerformanceQueryService {
    * load test tool that does not report the tag, or a query error.
    */
   private async attachParallelGroups(
-    testRunId: string,
+    resolvedTestRunId: string,
     transactionName: string,
     samples: SamplerStats[],
   ): Promise<void> {
     try {
-      const resolvedTestRunId = await this.resolveTestRunId(testRunId);
+      // Bounded scan. A plain DISTINCT over requests_raw would scan every row this
+      // transaction produced — the raw-hypertable cost the rollup and CAGG paths exist to
+      // avoid (60s+ on a 10M-row run). Group membership is a property of the test plan, so
+      // it is identical in every iteration: the first slice of rows, walked along the
+      // (test_run_id, time) index, names every group the transaction has.
+      //
+      // The LIMIT sits INSIDE the subquery and the parallel_group filter OUTSIDE it, so the
+      // bound is on rows *scanned*, not rows *matched*. Filtering first would make a run with
+      // no tagged requests — every run recorded before this column existed — scan the whole
+      // transaction hunting for matches that do not exist.
       const rows = await withRequestEm(this.testRunRepo).query(
-        `SELECT DISTINCT sampler_name, parallel_group
-           FROM requests_raw
-          WHERE test_run_id = $1
-            AND transaction_name = $2
-            AND parallel_group IS NOT NULL
+        `SELECT DISTINCT sampler_name, scenario_name, parallel_group
+           FROM (
+             SELECT sampler_name, scenario_name, parallel_group
+               FROM requests_raw
+              WHERE test_run_id = $1
+                AND transaction_name = $2
+              ORDER BY time
+              LIMIT ${PARALLEL_GROUP_SCAN_ROWS}
+           ) first_rows
+          WHERE parallel_group IS NOT NULL
             AND parallel_group <> ''`,
         [resolvedTestRunId, transactionName],
       );
       if (!rows || rows.length === 0) {
         return;
       }
+      // Keyed by scenario AND sampler: the sampler rollup's primary key includes
+      // scenario_name, so one transaction can hold the same sampler under two scenarios.
+      // Keying on the name alone would copy one scenario's group onto the other's row.
+      const key = (scenario: string | null | undefined, sampler: string) =>
+        `${scenario ?? ''}\u0000${sampler}`;
       const groupBySampler = new Map<string, string>();
       for (const row of rows as Array<Record<string, unknown>>) {
-        const sampler = row.sampler_name as string;
+        const k = key(row.scenario_name as string | null, row.sampler_name as string);
         const group = row.parallel_group as string;
         // A sampler that appears in more than one group across iterations has no single
         // answer; leave it unlabelled rather than picking one arbitrarily.
-        if (groupBySampler.has(sampler) && groupBySampler.get(sampler) !== group) {
-          groupBySampler.set(sampler, '');
+        if (groupBySampler.has(k) && groupBySampler.get(k) !== group) {
+          groupBySampler.set(k, '');
         } else {
-          groupBySampler.set(sampler, group);
+          groupBySampler.set(k, group);
         }
       }
       for (const sample of samples) {
-        sample.parallel_group = groupBySampler.get(sample.sampler_name) || null;
+        sample.parallel_group = groupBySampler.get(key(sample.scenario_name, sample.sampler_name)) || null;
       }
     } catch (error) {
       this.logger.warn(

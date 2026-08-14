@@ -1084,10 +1084,11 @@ describe('TestRunsPerformanceQueryService', () => {
         const result = await service.getTransactionSamples(TEST_RUN_ID, TRANSACTION, true, IS_ADMIN, []);
 
         expect(result).toHaveLength(1);
-        // 7 calls: rollup existence check + scope lookup (rollup-pending gate)
+        // 8 calls: rollup existence check + scope lookup (rollup-pending gate)
         // + CAGG scope lookup (live-Apdex CAGG plan) + ramp-up lookup
         // + SET LOCAL statement_timeout + SET LOCAL work_mem + samples query
-        expect(testRunRepo.query).toHaveBeenCalledTimes(7);
+        // + parallel-group lookup (bounded requests_raw read, decorates the result)
+        expect(testRunRepo.query).toHaveBeenCalledTimes(8);
       });
 
       it('does not fetch cutoff when excludeRampUp is false', async () => {
@@ -1095,10 +1096,113 @@ describe('TestRunsPerformanceQueryService', () => {
 
         await service.getTransactionSamples(TEST_RUN_ID, TRANSACTION, false, IS_ADMIN, []);
 
-        // 6 calls — rollup existence check + scope lookup (rollup-pending gate)
+        // 7 calls — rollup existence check + scope lookup (rollup-pending gate)
         // + CAGG scope lookup (live-Apdex CAGG plan) + SET LOCAL statement_timeout
         // + SET LOCAL work_mem + samples query (no ramp-up lookup)
-        expect(testRunRepo.query).toHaveBeenCalledTimes(6);
+        // + parallel-group lookup (bounded requests_raw read, decorates the result)
+        expect(testRunRepo.query).toHaveBeenCalledTimes(7);
+      });
+    });
+
+    describe('parallel groups', () => {
+      it('labels samplers with the Parallel Controller they ran under', async () => {
+        mockQuerySequence(
+          [RAW_SAMPLER_ROW],
+          [{ sampler_name: 'POST /checkout', scenario_name: 'load_test', parallel_group: 'T01_Add_To_Cart_PG1' }],
+        );
+
+        const result = await service.getTransactionSamples(TEST_RUN_ID, TRANSACTION, false, IS_ADMIN, []);
+
+        expect(Array.isArray(result)).toBe(true);
+        expect((result as SamplerStats[])[0].parallel_group).toBe('T01_Add_To_Cart_PG1');
+      });
+
+      it('leaves samplers unlabelled when the run has no tagged requests', async () => {
+        // An older run, or a load test tool that does not report groups: the lookup
+        // returns nothing and the response must look exactly as it did before.
+        mockQuerySequence([RAW_SAMPLER_ROW], []);
+
+        const result = await service.getTransactionSamples(TEST_RUN_ID, TRANSACTION, false, IS_ADMIN, []);
+
+        expect((result as SamplerStats[])[0].parallel_group).toBeUndefined();
+      });
+
+      it('leaves a sampler unlabelled when it appears in more than one group', async () => {
+        mockQuerySequence(
+          [RAW_SAMPLER_ROW],
+          [
+            { sampler_name: 'POST /checkout', scenario_name: 'load_test', parallel_group: 'PG1' },
+            { sampler_name: 'POST /checkout', scenario_name: 'load_test', parallel_group: 'PG2' },
+          ],
+        );
+
+        const result = await service.getTransactionSamples(TEST_RUN_ID, TRANSACTION, false, IS_ADMIN, []);
+
+        expect((result as SamplerStats[])[0].parallel_group).toBeNull();
+      });
+
+      it('does not copy one scenario\'s group onto the same sampler in another scenario', async () => {
+        // The sampler rollup is keyed by (…, sampler_name, scenario_name, …), so one
+        // transaction can hold the same sampler under two scenarios. Keying the lookup on
+        // the sampler name alone would silently mislabel the sequential one.
+        mockQuerySequence(
+          [
+            { ...RAW_SAMPLER_ROW, scenario_name: 'browse' },
+            { ...RAW_SAMPLER_ROW, scenario_name: 'checkout' },
+          ],
+          [{ sampler_name: 'POST /checkout', scenario_name: 'browse', parallel_group: 'PG1' }],
+        );
+
+        const result = (await service.getTransactionSamples(
+          TEST_RUN_ID, TRANSACTION, false, IS_ADMIN, [],
+        )) as SamplerStats[];
+
+        const browse = result.find((r) => r.scenario_name === 'browse');
+        const checkout = result.find((r) => r.scenario_name === 'checkout');
+        expect(browse?.parallel_group).toBe('PG1');
+        expect(checkout?.parallel_group).toBeNull();
+      });
+
+      it('still returns samplers when the parallel-group lookup fails', async () => {
+        // A database without the parallel_group column (deploy ahead of the migration)
+        // must degrade to the previous behaviour, not fail the whole request.
+        let call = 0;
+        (testRunRepo.query as jest.Mock).mockImplementation(async (sql: unknown) => {
+          if (isSetLocalWorkMem(sql)) return [];
+          if (isRollupExistenceCheck(sql)) return [];
+          if (isRollupScopeLookup(sql)) return [];
+          if (isCaggScopeLookup(sql)) return [];
+          if (String(sql).includes('parallel_group')) {
+            throw new Error('column "parallel_group" does not exist');
+          }
+          call++;
+          return call === 1 ? [RAW_SAMPLER_ROW] : [];
+        });
+
+        const result = await service.getTransactionSamples(TEST_RUN_ID, TRANSACTION, false, IS_ADMIN, []);
+
+        expect(result).toHaveLength(1);
+        expect((result as SamplerStats[])[0].sampler_name).toBe('POST /checkout');
+      });
+
+      it('bounds the lookup so it cannot scan the whole hypertable', async () => {
+        mockQuerySequence([RAW_SAMPLER_ROW], []);
+
+        await service.getTransactionSamples(TEST_RUN_ID, TRANSACTION, false, IS_ADMIN, []);
+
+        const groupQuery = (testRunRepo.query as jest.Mock).mock.calls
+          .map((c) => String(c[0]))
+          .find((sql) => sql.includes('parallel_group'));
+        expect(groupQuery).toBeDefined();
+        expect(groupQuery).toMatch(/ORDER BY time/);
+        expect(groupQuery).toMatch(/LIMIT \d+/);
+        // The bound must be on rows SCANNED, not rows MATCHED: the LIMIT has to come before
+        // the parallel_group filter. Filtering first makes a run with no tagged requests
+        // scan the whole transaction looking for matches that do not exist.
+        const limitAt = (groupQuery as string).indexOf('LIMIT');
+        const filterAt = (groupQuery as string).indexOf('parallel_group IS NOT NULL');
+        expect(limitAt).toBeGreaterThan(-1);
+        expect(filterAt).toBeGreaterThan(limitAt);
       });
     });
 
