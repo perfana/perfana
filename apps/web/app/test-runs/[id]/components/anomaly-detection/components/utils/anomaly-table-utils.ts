@@ -1,5 +1,6 @@
 import { formatValueWithUnit } from '@/lib/units';
-import { ThresholdComparisonData, DrawerData } from '../../types';
+import { ThresholdComparisonData } from '../types/anomaly-table.types';
+import { DrawerData } from '../../types';
 
 /**
  * Format a number for display

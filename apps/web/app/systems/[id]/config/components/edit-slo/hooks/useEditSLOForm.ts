@@ -133,7 +133,7 @@ export function useEditSLOForm({
 
         // Filter panels by supported types
         const filteredPanels =
-          dashboard?.panels?.filter((panel: unknown) => SUPPORTED_PANEL_TYPES.includes(panel.type)) || [];
+          dashboard?.panels?.filter((panel: GrafanaPanel) => SUPPORTED_PANEL_TYPES.includes(panel.type)) || [];
 
         setAvailablePanels(filteredPanels);
       } else {
@@ -221,7 +221,7 @@ export function useEditSLOForm({
             panelTitle,
           }
         : {
-            id: benchmark.configuration?.panelId || benchmark.configuration?.id,
+            id: Number(benchmark.configuration?.panelId ?? benchmark.configuration?.id),
             title: panelTitle,
             type: 'timeseries',
             yAxesFormat: benchmark.configuration?.yAxesFormat,
@@ -259,7 +259,7 @@ export function useEditSLOForm({
       // Find the dashboard that matches the benchmark - prioritize metrics_source_id, then application_dashboard_id
       let matchingDashboard = null;
 
-      type DashboardEntry = { id?: unknown; dashboard_uid?: unknown; metrics_source_id?: unknown };
+      type DashboardEntry = Pick<ApplicationDashboard, 'id' | 'dashboard_uid' | 'metrics_source_id'>;
       const benchmarkAny = benchmark as { metrics_source_id?: unknown };
       // First try to match by metrics_source_id (most reliable when available)
       if (benchmarkAny.metrics_source_id) {

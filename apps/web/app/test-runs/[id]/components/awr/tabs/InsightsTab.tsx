@@ -363,7 +363,12 @@ export function InsightsTab({
     const sqlTextMap = new Map<string, string>();
 
     // Check all SQL statement arrays for fullSqlText
-    const topSql = report.parsedData.topSql as unknown;
+    // AWR groups Top SQL into several rankings (by elapsed time, by CPU, ...),
+    // each an array of the same statement shape.
+    const topSql = (report.parsedData.topSql ?? {}) as Record<
+      string,
+      Array<{ sqlId?: string; fullSqlText?: string }> | undefined
+    >;
     const sqlArrays = [
       topSql.byElapsedTime,
       topSql.byCpuTime,

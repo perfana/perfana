@@ -107,10 +107,19 @@ export function createEventAnnotations(events: PerfanaEvent[]) {
   });
 }
 
+/**
+ * A Plotly layout as far as this module cares: an open bag of properties, with
+ * the two arrays event lines append to called out so they can be spread.
+ */
+export interface EventLayout extends Record<string, unknown> {
+  shapes?: unknown[];
+  annotations?: unknown[];
+}
+
 export function mergeEventShapesIntoLayout(
-  layout: Record<string, unknown>,
+  layout: EventLayout,
   events: PerfanaEvent[],
-): Record<string, unknown> {
+): EventLayout {
   if (!events || events.length === 0) return layout;
 
   return {
@@ -147,10 +156,10 @@ function findClosestIndex(eventMs: number, sortedMs: number[]): number | null {
  * sortedTimestamps: the chart's sorted timestamp strings from buildTimestampMapping.
  */
 export function mergeEventShapesIntoIndexedLayout(
-  layout: Record<string, unknown>,
+  layout: EventLayout,
   events: PerfanaEvent[],
   sortedTimestamps: string[],
-): Record<string, unknown> {
+): EventLayout {
   if (!events || events.length === 0 || sortedTimestamps.length === 0) return layout;
 
   const sortedMs = sortedTimestamps.map(ts => new Date(ts).getTime());

@@ -77,6 +77,8 @@ export type ConclusionLabel = 'REGRESSION' | 'OK' | 'IMPROVEMENT' | string;
 /** One of the three ADAPT difference checks (percentage, IQR, absolute). */
 export interface AdaptCheck {
   isDifference?: boolean;
+  /** False when the check could not be evaluated (missing baseline, etc.). */
+  valid?: boolean;
   [key: string]: unknown;
 }
 
@@ -103,9 +105,15 @@ export interface DrawerData {
     thresholds?: {
       percentageThreshold?: number | null;
       iqrThreshold?: number | null;
-      absoluteFailureThreshold?: number | null;
+      absoluteThreshold?: number | null;
+      aggregation?: string;
       [key: string]: unknown;
     };
+    metricClassification?: {
+      classification?: string;
+      higherIsBetter?: boolean;
+    };
+    ignore?: boolean;
     [key: string]: unknown;
   };
   thresholds?: {
@@ -130,7 +138,21 @@ export interface TrendsData {
   [key: string]: MetricTrendData[];
 }
 
+/** The ADAPT compare-config form, as edited in the anomaly row drawer. */
 export interface ConfigFormData {
+  ignore?: boolean;
+  metricClassification: {
+    classification?: string;
+    higherIsBetter?: boolean;
+  };
+  thresholds: {
+    aggregation?: string;
+    /** Entered as a percentage; divided by 100 before it is sent. */
+    percentageThreshold: number;
+    iqrThreshold?: number;
+    absoluteThreshold?: number;
+  };
+  defaultValueIfControlGroupMissing?: number;
   [key: string]: unknown;
 }
 

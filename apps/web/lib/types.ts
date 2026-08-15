@@ -125,6 +125,29 @@ export interface CheckResultTarget {
 }
 
 /**
+ * The `configuration` JSONB on a benchmark. It mirrors the panel the SLO points
+ * at plus the evaluation settings, in camelCase (unlike the columns around it).
+ * The index signature stays because the blob is written by several producers.
+ */
+export interface BenchmarkConfiguration {
+  id?: number | string;
+  panelId?: number | string;
+  title?: string;
+  type?: string;
+  dashboardUid?: string;
+  yAxesFormat?: string;
+  metricUnit?: string;
+  evaluateType?: string;
+  requirement?: { operator?: string; value?: number | string };
+  excludeRampUpTime?: boolean;
+  averageAll?: boolean;
+  matchPattern?: string;
+  validateWithDefaultIfNoData?: boolean;
+  validateWithDefaultIfNoDataValue?: number | string | null;
+  [key: string]: unknown;
+}
+
+/**
  * A row from `benchmarks` as the API returns it (snake_case, like CheckResult).
  * `benchmark_type` selects which of the metric / apdex field groups applies.
  */
@@ -141,7 +164,7 @@ export interface Benchmark {
   application_dashboard_id?: string;
   metrics_source_id?: string;
   generic_check_id?: string;
-  configuration: Record<string, unknown>;
+  configuration: BenchmarkConfiguration;
   config_title?: string;
   config_id?: string;
   config_type?: string;

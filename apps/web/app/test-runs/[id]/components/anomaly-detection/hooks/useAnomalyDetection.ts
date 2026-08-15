@@ -6,7 +6,7 @@ import { TestRun } from '@/types/test-runs';
 import { authenticatedFetch } from '@/lib/api';
 import { generateConfigHash } from '@/lib/config-hash';
 import { deleteAnomalyData, DeleteAnomalyRequest } from '@/lib/anomaly-api';
-import { AnomalyData, MetricTrendData } from '../types';
+import { AnomalyData, MetricTrendData, ConfigFormData, ConclusionLabel } from '../types';
 import { useUpdateAdaptConfig } from './useUpdateAdaptConfig';
 
 // Known classification values - anything not in this list shows as "Unclassified"
@@ -98,7 +98,7 @@ interface UseAnomalyDetectionReturn {
   anomalyData: AnomalyData[];
   loading: boolean;
   error: string | undefined;
-  dsAdaptConclusion: unknown;
+  dsAdaptConclusion: ConclusionLabel | null;
   trackedCount: number;
 
   // Tab state
@@ -160,7 +160,7 @@ interface UseAnomalyDetectionReturn {
   handleRowToggle: (rowKey: string) => void;
   handleDrawerToggle: (rowKey: string) => void;
   handleConfigFormToggle: (rowKey: string) => void;
-  handleConfigSave: (rowKey: string, configData: unknown, scope: 'metric' | 'panel') => Promise<void>;
+  handleConfigSave: (rowKey: string, configData: ConfigFormData, scope: 'metric' | 'panel') => Promise<void>;
   handleDeleteAnomaly: (anomaly: AnomalyData, options: { scope: 'metric' | 'panel'; range: 'current-test-run' | 'all-test-runs' }) => Promise<void>;
   handleAcceptResults: () => void;
   handleDenyResults: () => void;
@@ -203,7 +203,7 @@ export function useAnomalyDetection({
   const [anomalyData, setAnomalyData] = useState<AnomalyData[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string>();
-  const [dsAdaptConclusion, setDsAdaptConclusion] = useState<unknown>(null);
+  const [dsAdaptConclusion, setDsAdaptConclusion] = useState<ConclusionLabel | null>(null);
 
   // Tab and tracking state
   const [localActiveTab, setLocalActiveTab] = useState<number>(0);
@@ -560,7 +560,7 @@ export function useAnomalyDetection({
     setShowConfigForm(prev => ({ ...prev, [rowKey]: !prev[rowKey] }));
   }, []);
 
-  const handleConfigSave = useCallback(async (rowKey: string, configData: unknown, scope: 'metric' | 'panel') => {
+  const handleConfigSave = useCallback(async (rowKey: string, configData: ConfigFormData, scope: 'metric' | 'panel') => {
     try {
       const rowIndex = parseInt(rowKey.split('_').pop() || '0');
       const item = paginatedData[rowIndex];
