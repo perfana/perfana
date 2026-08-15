@@ -108,6 +108,36 @@ and any DQL query / entity-mapping editor pages.
 
 ---
 
+## Type safety
+
+### Turn on `strict` in apps/web
+
+**Priority:** P2
+**Origin:** /ship on `fix/web-type-errors-ts2339` (2026-08-15), after clearing 506 type errors.
+**Why:** apps/web compiles with `strict: false`, so `strictNullChecks` is off. The types added in that
+branch describe nullability accurately (113 optional fields on the shared API shapes), but nothing
+enforces it: a caller can dereference a possibly-undefined field and the compiler stays quiet. So the
+type system now catches shape and name errors, which is what all 506 were, and catches no null
+dereferences at all.
+**What:** Flip `strict` (or start with just `strictNullChecks`) in `apps/web/tsconfig.json` and work the
+errors down. Measured cost at the time of writing: `npx tsc -p tsconfig.json --noEmit --strict` reports
+**81 errors**. Bounded enough to do in one pass.
+**Where:** `apps/web/tsconfig.json`.
+
+### Move `--fix` out of the lint check scripts
+
+**Priority:** P3
+**Origin:** /health on `fix/web-type-errors-ts2339` (2026-08-15).
+**Why:** `apps/api`, `apps/grafana-sync` and `apps/perfana-report` run `eslint ... --fix` as their `lint`
+script. A check that repairs instead of reporting cannot fail: in CI's ephemeral checkout it fixes,
+passes, and throws the fix away, so an auto-fixable violation recurs forever without ever failing a
+build. It also mutates the working tree when you run lint locally. Harmless today (all three report
+zero fixable findings), but the gate is not doing what its name says.
+**What:** Drop `--fix` from `lint`; add a separate `lint:fix` script for the repair pass.
+**Where:** `apps/api/package.json`, `apps/grafana-sync/package.json`, `apps/perfana-report/package.json`.
+
+---
+
 ## Reports
 
 ### SLO section renders a green "all clear" card when the check-results query fails
