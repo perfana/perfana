@@ -2,11 +2,15 @@
   "$schema": "https://unpkg.com/knip@6/schema.json",
   "workspaces": {
     "apps/api": {
-      "entry": ["src/main.ts", "src/data-source.ts"],
-      "project": ["src/**/*.ts"],
+      "entry": [
+        "src/main.ts",
+        "src/data-source.ts"
+      ],
+      "project": [
+        "src/**/*.ts"
+      ],
       "ignore": [
         "src/test/**",
-        "src/**/*.spec.ts",
         "src/**/*.e2e-spec.ts",
         "src/repositories/application-dashboard.repository.ts",
         "src/repositories/compare-filter-preset.repository.ts",
@@ -14,36 +18,70 @@
       ]
     },
     "apps/web": {
-      "entry": ["app/**/*.{ts,tsx}", "lib/**/*.{ts,tsx}"],
-      "project": ["app/**/*.{ts,tsx}", "lib/**/*.{ts,tsx}", "hooks/**/*.{ts,tsx}", "components/**/*.{ts,tsx}"],
-      "ignore": ["public/**", "scripts/**"],
+      "entry": [
+        "app/**/*.{ts,tsx}",
+        "lib/**/*.{ts,tsx}"
+      ],
+      "project": [
+        "app/**/*.{ts,tsx}",
+        "lib/**/*.{ts,tsx}",
+        "hooks/**/*.{ts,tsx}",
+        "components/**/*.{ts,tsx}"
+      ],
       "jest": false
     },
     "apps/worker": {
-      "entry": ["src/main.ts"],
-      "project": ["src/**/*.ts"],
-      "ignore": ["src/test/**"]
+      "project": [
+        "src/**/*.ts"
+      ],
+      "ignore": [
+        "src/test/**"
+      ]
     },
     "apps/grafana-sync": {
-      "entry": ["src/main.ts"],
-      "project": ["src/**/*.ts"]
+      "entry": [
+        "src/main.ts"
+      ],
+      "project": [
+        "src/**/*.ts"
+      ]
     },
     "apps/perfana-report": {
-      "entry": ["src/main.ts"],
-      "project": ["src/**/*.ts"]
+      "entry": [
+        "src/main.ts"
+      ],
+      "project": [
+        "src/**/*.ts"
+      ]
     },
     "packages/shared": {
-      "entry": ["src/index.ts"],
-      "project": ["src/**/*.ts"]
+      "project": [
+        "src/**/*.ts"
+      ],
+      "entry": [
+        "src/database/migrations/*.ts"
+      ]
     },
     "packages/config": {
-      "entry": ["src/index.ts"],
-      "project": ["src/**/*.ts"]
+      "entry": [
+        "src/index.ts"
+      ],
+      "project": [
+        "src/**/*.ts"
+      ]
     }
   },
-  "ignore": [".eslintrc.js", "scripts/**"],
-  "exclude": ["duplicates"],
-  "ignoreBinaries": ["typeorm", "quartz", "tsconfig-paths"],
+  "ignore": [
+    ".eslintrc.js",
+    "scripts/**",
+    "docs-user/**"
+  ],
+  "exclude": [
+    "duplicates"
+  ],
+  "ignoreBinaries": [
+    "typeorm"
+  ],
   "ignoreDependencies": [
     "tsconfig-paths",
     "@types/.+",
@@ -64,7 +102,10 @@
     "lint-staged",
     "prettier",
     "postcss",
-    "brace-expansion"
+    "brace-expansion",
+    "dockerode"
   ],
-  "ignoreWorkspaces": ["apps/mcp"]
+  "ignoreWorkspaces": [
+    "apps/mcp"
+  ]
 }
