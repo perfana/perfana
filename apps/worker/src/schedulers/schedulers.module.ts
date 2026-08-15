@@ -10,7 +10,8 @@ import { AuditPartitionManager } from './AuditPartitionManager.js';
  * Provides scheduled tasks for the worker application.
  * Currently includes:
  * - IncrementalCollectionScheduler: Polls for in-progress test runs and triggers incremental metric collection
- * - AuditPartitionManager: Daily look-ahead partition creation + expired partition drop for audit_logs
+ * - AuditPartitionManager: Look-ahead partition creation + expired partition drop for audit_logs,
+ *   on boot and daily
  *
  * Uses @nestjs/schedule for cron-based scheduling.
  */

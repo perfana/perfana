@@ -1,4 +1,4 @@
-import { Injectable, Logger } from '@nestjs/common';
+import { Injectable, Logger, OnModuleInit } from '@nestjs/common';
 import { Cron, CronExpression } from '@nestjs/schedule';
 import { DataSource } from 'typeorm';
 import { getDatabaseService } from '../common/database-accessor.js';
@@ -8,14 +8,18 @@ const RETENTION_MONTHS = Number.parseInt(process.env.AUDIT_RETENTION_MONTHS ?? '
 /**
  * AuditPartitionManager (Phase 5a)
  *
- * Daily at 03:00 UTC: ensures partitions exist for current_month + next 2 months
- * and drops partitions older than AUDIT_RETENTION_MONTHS (default 24).
+ * On boot and daily at 03:00 UTC: ensures partitions exist for current_month +
+ * next 2 months and drops partitions older than AUDIT_RETENTION_MONTHS (default 24).
+ *
+ * The boot run matters for deployments that are not up at 03:00 UTC (laptops,
+ * business-hours-only self-hosted installs) — without it the look-ahead silently
+ * expires and every audit insert fails with "no partition of relation found".
  *
  * Idempotent: safe to re-run within the same day (CREATE TABLE IF NOT EXISTS,
  * date-bounded DROP).
  */
 @Injectable()
-export class AuditPartitionManager {
+export class AuditPartitionManager implements OnModuleInit {
   private readonly logger = new Logger(AuditPartitionManager.name);
 
   /**
@@ -29,6 +33,10 @@ export class AuditPartitionManager {
       return this.dataSourceOverride;
     }
     return getDatabaseService().dataSource;
+  }
+
+  async onModuleInit(): Promise<void> {
+    await this.cron();
   }
 
   @Cron(CronExpression.EVERY_DAY_AT_3AM, { timeZone: 'UTC' })
