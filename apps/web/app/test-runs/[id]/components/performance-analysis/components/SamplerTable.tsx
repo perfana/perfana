@@ -19,6 +19,7 @@ import { MoreVert as MoreVertIcon, AltRoute as AltRouteIcon } from '@mui/icons-m
 import { SamplerStat } from '../types/performance-analysis.types';
 import { formatNumber, formatApdex, getApdexColor, getApdexLabel } from '../utils/performance-formatters';
 import { buildSamplerSections } from '../utils/parallel-groups';
+import { TABLE_HEADER_CELL_SX } from '../utils/table-header-style';
 import { ClippedUrl } from '@/components/ui/clipped-url';
 
 const COLUMN_COUNT = 9;
@@ -246,15 +247,15 @@ export function SamplerTable({
       <Table size="small">
         <TableHead>
           <TableRow sx={{ backgroundColor: 'rgba(0, 0, 0, 0.04)' }}>
-            <TableCell sx={{ fontWeight: 700 }}>Request Name</TableCell>
-            <TableCell align="right" sx={{ fontWeight: 700 }}>Avg Response (ms)</TableCell>
-            <TableCell align="right" sx={{ fontWeight: 700 }}>95th Pct (ms)</TableCell>
-            <TableCell align="right" sx={{ fontWeight: 700 }}>99th Pct (ms)</TableCell>
-            <TableCell align="right" sx={{ fontWeight: 700 }}>Passed</TableCell>
-            <TableCell align="right" sx={{ fontWeight: 700 }}>Failed</TableCell>
-            <TableCell align="right" sx={{ fontWeight: 700 }}>Apdex Threshold</TableCell>
-            <TableCell align="right" sx={{ fontWeight: 700 }}>Apdex Score</TableCell>
-            <TableCell align="center" sx={{ fontWeight: 700 }}>Actions</TableCell>
+            <TableCell sx={TABLE_HEADER_CELL_SX}>Request Name</TableCell>
+            <TableCell align="right" sx={TABLE_HEADER_CELL_SX}>Avg Response (ms)</TableCell>
+            <TableCell align="right" sx={TABLE_HEADER_CELL_SX}>95th Pct (ms)</TableCell>
+            <TableCell align="right" sx={TABLE_HEADER_CELL_SX}>99th Pct (ms)</TableCell>
+            <TableCell align="right" sx={TABLE_HEADER_CELL_SX}>Passed</TableCell>
+            <TableCell align="right" sx={TABLE_HEADER_CELL_SX}>Failed</TableCell>
+            <TableCell align="right" sx={TABLE_HEADER_CELL_SX}>Apdex Threshold</TableCell>
+            <TableCell align="right" sx={TABLE_HEADER_CELL_SX}>Apdex Score</TableCell>
+            <TableCell align="center" sx={TABLE_HEADER_CELL_SX}>Actions</TableCell>
           </TableRow>
         </TableHead>
         <TableBody>

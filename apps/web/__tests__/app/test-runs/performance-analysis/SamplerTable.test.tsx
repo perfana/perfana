@@ -120,6 +120,19 @@ describe('SamplerTable parallel groups', () => {
     expect(screen.queryByText('Parallel group')).not.toBeInTheDocument();
   });
 
+  it('styles its headers the same way the transaction table does', () => {
+    // The two tables sit one above the other; different header styling reads as a mistake.
+    const { container } = renderTable([sampler('a')]);
+
+    const headers = Array.from(container.querySelectorAll('thead th'));
+    expect(headers.length).toBeGreaterThan(0);
+    for (const th of headers) {
+      const style = window.getComputedStyle(th);
+      expect(style.textTransform).toBe('uppercase');
+      expect(style.fontWeight).toBe('700');
+    }
+  });
+
   it('gives each group its own colour so they can be told apart', () => {
     const { container } = renderTable([
       sampler('a', { parallel_group: 'PG1' }),
