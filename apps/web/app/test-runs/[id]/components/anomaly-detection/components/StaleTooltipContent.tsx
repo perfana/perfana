@@ -5,8 +5,7 @@ import { Box, Typography, CircularProgress } from '@mui/material';
 import { StaleTooltipContentProps, ConfigSetting } from './types';
 
 export default function StaleTooltipContent({
-  row,
-  _rowIndex
+  row
 }: StaleTooltipContentProps) {
   const [configSettings, setConfigSettings] = useState<ConfigSetting[]>([]);
   const [loading, setLoading] = useState(false);

@@ -3,6 +3,7 @@
 import { useState, useEffect, useCallback } from 'react';
 import { authenticatedFetch } from '@/lib/api';
 import { fetchDynatraceDashboards, fetchDynatraceMetrics, DynatraceDashboard, DynatraceMetric } from '@/lib/dynatrace';
+import { GrafanaPanel } from '@/lib/types';
 import {
   ApplicationDashboard,
   Panel,
@@ -186,7 +187,7 @@ export function useTrendsData({ testRun, testRunId, trendsExpanded }: UseTrendsD
         const dashboardData = await response.json();
         const dashboard = Array.isArray(dashboardData) ? dashboardData[0] : dashboardData;
 
-        const filteredPanels = dashboard?.panels?.filter((panel: unknown) =>
+        const filteredPanels = dashboard?.panels?.filter((panel: GrafanaPanel) =>
           SUPPORTED_PANEL_TYPES.includes(panel.type)
         ) || [];
 

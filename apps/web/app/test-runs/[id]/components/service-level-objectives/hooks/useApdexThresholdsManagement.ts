@@ -1,3 +1,4 @@
+import { CheckResult } from '@/lib/types';
 'use client';
 
 import { useState, useEffect, useCallback } from 'react';
@@ -14,7 +15,7 @@ import {
 interface UseApdexThresholdsManagementProps {
   open: boolean;
   testRunId: string;
-  apdexCheckResult: unknown;
+  apdexCheckResult: CheckResult | null;
   onSuccess: () => void;
   onClose: () => void;
 }

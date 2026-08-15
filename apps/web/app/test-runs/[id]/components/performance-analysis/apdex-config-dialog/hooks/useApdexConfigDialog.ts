@@ -2,6 +2,7 @@
 
 import { useState, useEffect, useCallback } from 'react';
 import { authenticatedFetch } from '@/lib/api';
+import { Benchmark } from '@/lib/types';
 import { TestRunDetails, ExistingSlo, ApdexConfigState, ApdexConfigActions } from '../types';
 import { validateThreshold, validateApdexScore } from '../utils/apdex-utils';
 
@@ -81,8 +82,8 @@ export function useApdexConfigDialog({
         return;
       }
 
-      const benchmarks = await response.json();
-      const matchingSlo = benchmarks.find((b: unknown) =>
+      const benchmarks: Benchmark[] = await response.json();
+      const matchingSlo = benchmarks.find((b) =>
         transactionName ? b.transaction_name === transactionName : !b.transaction_name
       );
 

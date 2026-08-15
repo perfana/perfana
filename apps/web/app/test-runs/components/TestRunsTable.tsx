@@ -2,6 +2,7 @@
 
 import { useMemo } from 'react';
 import { useRouter } from 'next/navigation';
+import { getSystemName } from '../utils/test-runs-filters';
 import {
   Box,
   Card,
@@ -76,7 +77,7 @@ export function TestRunsTable({
     }
 
     const params: Record<string, string> = {
-      system: testRun.systems_under_test?.name || (testRun as unknown).systemUnderTest || '',
+      system: testRun.systems_under_test?.name || getSystemName(testRun) || '',
       environment: testRun.test_environment || '',
       workload: testRun.workload || '',
     };

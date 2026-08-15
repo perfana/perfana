@@ -107,7 +107,7 @@ export default function EditDynatraceQueryDialog({
         matchMetricPattern: query.matchMetricPattern || '',
         omitGroupByVariableFromMetricName: query.omitGroupByVariableFromMetricName || [],
         templateVariables: query.templateVariables || {},
-        metricUnit: (query as unknown).metricUnit || 'ms',
+        metricUnit: query.metricUnit || 'ms',
       });
 
       // Initialize variable values from existing data

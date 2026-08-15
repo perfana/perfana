@@ -1,5 +1,6 @@
 'use client';
 
+import type { CompareSeriesConfig } from '@/lib/compare-presets';
 import React, { useState } from 'react';
 import {
   Box,
@@ -26,16 +27,7 @@ export interface ComparePreset {
   preset_type: 'generic' | 'specific';
   series_search_text?: string;
   show_percentiles: boolean;
-  series_config?: Array<{
-    dashboardId: string;
-    dashboardLabel: string;
-    panelId: number;
-    panelTitle: string;
-    metricName: string;
-    source: string;
-    metricsSourceId?: string;
-    yAxesFormat?: string;
-  }>;
+  series_config?: CompareSeriesConfig[];
   display_config?: {
     warningThreshold: number;
     regressionThreshold: number;
