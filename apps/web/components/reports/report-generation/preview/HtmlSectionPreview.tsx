@@ -8,7 +8,6 @@ interface HtmlSectionPreviewProps {
   testRunId?: string;
   /** API section type, e.g. 'slo', 'trends' */
   sectionType: ReportSectionType;
-  /** Section config — section config only; accompanying text is a separate prop */
   config: Record<string, unknown>;
   /** Accompanying text, sent at the section level */
   text?: string;

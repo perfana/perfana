@@ -35,7 +35,7 @@ interface SectionConfigShellProps {
   /** API section type used by the generic server-rendered HTML preview */
   previewType: ReportSectionType;
   /** Current section config — config only; accompanying text is separate */
-  previewConfig: Record<string, unknown>;
+  previewConfig: object;
   /**
    * Accompanying text. Omit both this and onTextChange to render no text
    * editor — text_block sections, whose Content field already is the text.

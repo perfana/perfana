@@ -107,8 +107,11 @@ export interface CheckResult {
  * (node-postgres returns NUMERIC as a string).
  */
 export interface CheckResultRequirement {
-  operator: string;
-  value: number;
+  /** Metric SLOs: the comparison. Absent on apdex results, which use min_score. */
+  operator?: string;
+  value?: number;
+  /** Apdex SLOs: the minimum acceptable score. */
+  min_score?: number;
   type?: string;
   aggregate_metric?: string;
   aggregate_stat?: string;

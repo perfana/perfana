@@ -72,6 +72,8 @@ export interface ConfigSourceInfo {
   description: string;
 }
 
+export type ConclusionLabel = 'REGRESSION' | 'OK' | 'IMPROVEMENT' | string;
+
 /** One of the three ADAPT difference checks (percentage, IQR, absolute). */
 export interface AdaptCheck {
   isDifference?: boolean;
@@ -114,6 +116,13 @@ export interface DrawerData {
     higherIsBetter?: boolean;
     [key: string]: unknown;
   };
+  conclusion?: {
+    label?: ConclusionLabel;
+    [key: string]: unknown;
+  };
+  /** Distribution summaries, shown when the result carries them. */
+  mean?: { test?: number; control?: number; [key: string]: unknown };
+  q25?: { test?: number; control?: number; [key: string]: unknown };
   [key: string]: unknown;
 }
 
@@ -154,7 +163,6 @@ export interface ChartKeyState {
   [key: string]: number;
 }
 
-export type ConclusionLabel = 'REGRESSION' | 'OK' | 'IMPROVEMENT' | string;
 export type ClassificationFilter = 'all' | 'higher-is-better' | 'lower-is-better' | string;
 
 export interface ThresholdData {
