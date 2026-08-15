@@ -86,7 +86,7 @@ export default function DashboardSection({
   const [batchDeleteFromGrafana, setBatchDeleteFromGrafana] = useState(false);
   const [_batchDeleteLoading, setBatchDeleteLoading] = useState(false);
   const [copyDialogOpen, setCopyDialogOpen] = useState(false);
-  const [copySuccess, setCopySuccess] = useState<string | null>(null);
+  const [actionSuccess, setActionSuccess] = useState<string | null>(null);
 
   // Get all unique tags from dashboards (excluding system tags)
   const getAllDashboardTags = () => {
@@ -185,6 +185,9 @@ export default function DashboardSection({
   const handleBatchDeleteConfirm = async () => {
     const idsToDelete = Array.from(selectedDashboardIds);
     await onBatchDelete(idsToDelete, batchDeleteFromGrafana);
+    setActionSuccess(
+      `${idsToDelete.length} dashboard${idsToDelete.length !== 1 ? 's' : ''} queued for deletion — this runs in the background.`
+    );
     setBatchDeleteDialogOpen(false);
     setBatchDeleteInfo(null);
     setBatchDeleteFromGrafana(false);
@@ -206,7 +209,7 @@ export default function DashboardSection({
       conflictStrategy: target.conflictStrategy,
       ids: selectedDashboardIds.size > 0 ? Array.from(selectedDashboardIds) : undefined,
     });
-    setCopySuccess(`Copied ${result.copied} dashboard${result.copied !== 1 ? 's' : ''}${result.skipped > 0 ? `, skipped ${result.skipped} duplicate${result.skipped !== 1 ? 's' : ''}` : ''}`);
+    setActionSuccess(`Copied ${result.copied} dashboard${result.copied !== 1 ? 's' : ''}${result.skipped > 0 ? `, skipped ${result.skipped} duplicate${result.skipped !== 1 ? 's' : ''}` : ''}`);
   };
 
   if (!selectedEnvironment) {
@@ -246,10 +249,10 @@ export default function DashboardSection({
   return (
     <>
       <Paper sx={{ p: 3, mb: 3, mx: 3 }}>
-        {/* Copy Success Alert */}
-        {copySuccess && (
-          <Alert severity="success" sx={{ mb: 2 }} onClose={() => setCopySuccess(null)}>
-            {copySuccess}
+        {/* Copy / batch-delete success alert */}
+        {actionSuccess && (
+          <Alert severity="success" sx={{ mb: 2 }} onClose={() => setActionSuccess(null)}>
+            {actionSuccess}
           </Alert>
         )}
 

@@ -4,6 +4,7 @@ import { ApplicationDashboardsController } from './application-dashboards.contro
 import { ApplicationDashboardsService, ApplicationDashboard } from './application-dashboards.service';
 import { CreateApplicationDashboardDto, UpdateApplicationDashboardDto } from './dto/application-dashboard.dto';
 import { UserContext } from '../../common/decorators/user-context.decorator';
+import { ApplicationDashboardDeletionProcessor } from './processors/application-dashboard-deletion.processor';
 
 describe('ApplicationDashboardsController', () => {
   // Mock user context for authorization
@@ -17,6 +18,7 @@ describe('ApplicationDashboardsController', () => {
   };
   let controller: ApplicationDashboardsController;
   let service: jest.Mocked<ApplicationDashboardsService>;
+  let deletionProcessor: jest.Mocked<ApplicationDashboardDeletionProcessor>;
 
   // Mock data fixtures
   const mockApplicationDashboard: ApplicationDashboard = {
@@ -61,6 +63,7 @@ describe('ApplicationDashboardsController', () => {
     delete: jest.fn(),
     getDeleteInfo: jest.fn(),
     getBatchDeleteInfo: jest.fn(),
+    filterAccessible: jest.fn(),
   });
 
   beforeEach(async () => {
@@ -71,15 +74,62 @@ describe('ApplicationDashboardsController', () => {
           provide: ApplicationDashboardsService,
           useValue: mockServiceFactory(),
         },
+        {
+          provide: ApplicationDashboardDeletionProcessor,
+          useValue: { isAvailable: jest.fn().mockReturnValue(true), addBulkJobs: jest.fn() },
+        },
       ],
     }).compile();
 
     controller = module.get<ApplicationDashboardsController>(ApplicationDashboardsController);
     service = module.get(ApplicationDashboardsService);
+    deletionProcessor = module.get(ApplicationDashboardDeletionProcessor);
   });
 
   afterEach(() => {
     jest.clearAllMocks();
+  });
+
+  describe('batchDelete', () => {
+    const ids = ['id-1', 'id-2'];
+
+    beforeEach(() => {
+      service.filterAccessible.mockImplementation(async (requested: string[]) => requested);
+    });
+
+    it('queues the batch instead of deleting it in the request', async () => {
+      const result = await controller.batchDelete({ ids, deleteFromGrafana: true }, mockUserContext);
+
+      expect(result).toEqual({ queued: 2, deleted: 0 });
+      expect(deletionProcessor.addBulkJobs).toHaveBeenCalledWith(ids, true, mockUserContext);
+      expect(service.delete).not.toHaveBeenCalled();
+    });
+
+    it('deletes sequentially when the queue is unavailable', async () => {
+      deletionProcessor.isAvailable.mockReturnValue(false);
+      service.delete.mockResolvedValue({ deletedFromGrafana: false });
+
+      const result = await controller.batchDelete({ ids }, mockUserContext);
+
+      expect(result).toEqual({ queued: 0, deleted: 2 });
+      expect(service.delete).toHaveBeenCalledTimes(2);
+      expect(service.delete).toHaveBeenCalledWith('id-1', false, mockUserContext.userId, mockUserContext.roles);
+    });
+
+    it('does not queue dashboards the caller cannot see', async () => {
+      service.filterAccessible.mockResolvedValue(['id-1']);
+
+      const result = await controller.batchDelete({ ids }, mockUserContext);
+
+      expect(result).toEqual({ queued: 1, deleted: 0 });
+      expect(deletionProcessor.addBulkJobs).toHaveBeenCalledWith(['id-1'], false, mockUserContext);
+    });
+
+    it('rejects a malformed ids payload', async () => {
+      await expect(
+        controller.batchDelete({ ids: [123 as unknown as string] }, mockUserContext),
+      ).rejects.toThrow(HttpException);
+    });
   });
 
   describe('Happy Path - Query Operations', () => {

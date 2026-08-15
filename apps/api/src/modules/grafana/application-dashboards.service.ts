@@ -1,6 +1,6 @@
 import { Injectable, Logger, NotFoundException } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Repository, DataSource } from 'typeorm';
+import { Repository, DataSource, In } from 'typeorm';
 import {
   CreateApplicationDashboardDto,
   UpdateApplicationDashboardDto,
@@ -703,7 +703,30 @@ export class ApplicationDashboardsService {
    * Note: ApplicationDashboard entity does not have organization_id yet, so permission checks are not applied.
    * Full permission checks will be enabled when Phase 4 adds organization_id column.
    */
-  async delete(id: string, deleteFromGrafana: boolean, userId: string, _roles: string[]): Promise<DeleteResult> {
+  /**
+   * Narrow a batch to the dashboards the caller can actually see.
+   *
+   * Batch deletion is executed by a background worker, where there is no request
+   * transaction and therefore no RLS role/GUCs — the DELETE would go through for
+   * any id. So the visibility check has to happen here, in the request, while the
+   * RLS policies still apply to this read.
+   */
+  async filterAccessible(ids: string[]): Promise<string[]> {
+    if (ids.length === 0) return [];
+    const rows = await withRequestEm(this.appDashboardRepo).find({
+      where: { id: In(ids) },
+      select: { id: true },
+    });
+    return rows.map(row => row.id);
+  }
+
+  async delete(
+    id: string,
+    deleteFromGrafana: boolean,
+    userId: string,
+    _roles: string[],
+    opts?: { auditActorOverride?: { userId: string } },
+  ): Promise<DeleteResult> {
     this.logger.debug(`delete: id=${id}, deleteFromGrafana=${deleteFromGrafana}, userId=${userId}`);
 
     try {
@@ -739,12 +762,22 @@ export class ApplicationDashboardsService {
       // to also remove it from Grafana and the linked GrafanaDashboard is
       // unused by any other SUT) the sibling GrafanaDashboard. Cascaded
       // benchmark deletions are not individually audited (bucket-2 pattern).
+      // Batch deletes run in the BullMQ worker with no HTTP request CLS context,
+      // so AuditService would skip the row unless the queuing user is forwarded
+      // explicitly (same fix as DeleteTestRunHandler). In-request deletes pass
+      // no override and fall back to CLS, which also has email + IP.
+      const actorOverride = opts?.auditActorOverride
+        ? { actorOverride: opts.auditActorOverride }
+        : {};
+
       this.auditService.logDelete(existing as unknown as OwnedResource, {
         organizationIdOverride: existing.organizationId,
+        ...actorOverride,
       });
       if (shouldDeleteFromGrafana && grafanaDashboard) {
         this.auditService.logDelete(grafanaDashboard as unknown as OwnedResource, {
           organizationIdOverride: grafanaDashboard.organizationId,
+          ...actorOverride,
         });
       }
 

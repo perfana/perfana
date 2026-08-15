@@ -8,6 +8,7 @@ import {
   Param,
   Body,
   Logger,
+  HttpCode,
   HttpException,
   HttpStatus,
   NotFoundException,
@@ -22,6 +23,7 @@ import {
 } from './application-dashboards.service';
 import { CreateApplicationDashboardDto, UpdateApplicationDashboardDto } from './dto/application-dashboard.dto';
 import { CopyApplicationDashboardsDto } from './dto/copy-application-dashboards.dto';
+import { ApplicationDashboardDeletionProcessor } from './processors/application-dashboard-deletion.processor';
 import { UserCtx, UserContext } from '../../common/decorators/user-context.decorator';
 import { ApplicationDashboardQuery } from './application-dashboards.service';
 
@@ -34,13 +36,21 @@ class BatchDeleteInfoDto {
   ids!: string[];
 }
 
+class BatchDeleteDto {
+  ids!: string[];
+  deleteFromGrafana?: boolean;
+}
+
 @ApiTags('grafana/application-dashboards')
 @Controller('grafana/application-dashboards')
 @ApiBearerAuth()
 export class ApplicationDashboardsController {
   private readonly logger = new Logger(ApplicationDashboardsController.name);
 
-  constructor(private readonly applicationDashboardsService: ApplicationDashboardsService) {}
+  constructor(
+    private readonly applicationDashboardsService: ApplicationDashboardsService,
+    private readonly deletionProcessor: ApplicationDashboardDeletionProcessor,
+  ) {}
 
   @Get()
   @ApiOperation({ summary: 'Get all application dashboards' })
@@ -89,6 +99,56 @@ export class ApplicationDashboardsController {
       this.logger.error('Failed to get batch delete info:', error);
       throw new HttpException(
         'Failed to get batch delete info',
+        HttpStatus.INTERNAL_SERVER_ERROR,
+      );
+    }
+  }
+
+  @Post('batch-delete')
+  @HttpCode(HttpStatus.ACCEPTED)
+  @ApiOperation({
+    summary: 'Queue multiple application dashboards for deletion',
+    description:
+      'Queues the dashboards for asynchronous deletion via a background job queue and returns 202 immediately. Deletions are processed one at a time — each one cascades into the metrics hypertables, so running them in parallel blocks the UI and deadlocks the database. Falls back to sequential in-request deletion when Redis is unavailable.',
+  })
+  @ApiResponse({ status: 202, description: 'Application dashboards queued for deletion' })
+  async batchDelete(
+    @Body() body: BatchDeleteDto,
+    @UserCtx() ctx: UserContext,
+  ): Promise<{ queued: number; deleted: number }> {
+    const ids = body?.ids;
+    if (!Array.isArray(ids) || ids.some(id => typeof id !== 'string' || id.length === 0)) {
+      throw new HttpException('ids must be a non-empty array of strings', HttpStatus.BAD_REQUEST);
+    }
+    if (ids.length === 0) {
+      return { queued: 0, deleted: 0 };
+    }
+
+    const deleteFromGrafana = body.deleteFromGrafana === true;
+
+    try {
+      // The worker runs without RLS in force, so check visibility here, while
+      // the request's RLS role and GUCs still apply.
+      const accessibleIds = await this.applicationDashboardsService.filterAccessible(ids);
+      if (accessibleIds.length === 0) {
+        return { queued: 0, deleted: 0 };
+      }
+
+      if (this.deletionProcessor.isAvailable()) {
+        await this.deletionProcessor.addBulkJobs(accessibleIds, deleteFromGrafana, ctx);
+        return { queued: accessibleIds.length, deleted: 0 };
+      }
+
+      // Redis down: still delete sequentially rather than in parallel.
+      for (const id of accessibleIds) {
+        await this.applicationDashboardsService.delete(id, deleteFromGrafana, ctx.userId, ctx.roles);
+      }
+      return { queued: 0, deleted: accessibleIds.length };
+    } catch (error) {
+      this.logger.error('Failed to queue application dashboards for deletion:', error);
+      throw new HttpException(
+        (error && typeof error === 'object' && 'message' in error ? (error as Error).message : null) ||
+          'Failed to queue application dashboards for deletion',
         HttpStatus.INTERNAL_SERVER_ERROR,
       );
     }

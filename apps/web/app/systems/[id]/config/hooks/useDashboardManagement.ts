@@ -341,27 +341,28 @@ export function useDashboardManagement(): UseDashboardManagementReturn {
     }
   }, [deletingDashboard, deleteFromGrafana, deleteInfo, fetchApplicationDashboards]);
 
-  // Batch delete dashboards
+  // Batch delete dashboards — queued server-side, since each delete cascades
+  // into the metrics hypertables and a parallel batch froze the UI for minutes.
   const handleBatchDeleteDashboards = useCallback(async (
     ids: string[],
     deleteFromGrafanaFlag: boolean,
-    systemId: string,
-    environment: string
+    _systemId: string,
+    _environment: string
   ) => {
-    await Promise.all(
-      ids.map(id => {
-        const deleteUrl = deleteFromGrafanaFlag
-          ? `/grafana/application-dashboards/${id}?deleteFromGrafana=true`
-          : `/grafana/application-dashboards/${id}`;
-        return authenticatedFetch(deleteUrl, {
-          method: 'DELETE',
-          headers: { 'Content-Type': 'application/json' },
-        });
-      })
-    );
+    const response = await authenticatedFetch('/grafana/application-dashboards/batch-delete', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ ids, deleteFromGrafana: deleteFromGrafanaFlag }),
+    });
 
-    await fetchApplicationDashboards(systemId, environment);
-  }, [fetchApplicationDashboards]);
+    if (!response.ok) {
+      throw new Error('Failed to queue dashboards for deletion');
+    }
+
+    // Deletion happens in the background, so refetching would just bring the
+    // rows back. Drop them locally; a reload shows anything that failed.
+    setDashboards(prev => prev.filter(d => !ids.includes(d.id)));
+  }, []);
 
   // Handle dashboard tag toggle
   const handleDashboardTagToggle = useCallback((tag: string) => {

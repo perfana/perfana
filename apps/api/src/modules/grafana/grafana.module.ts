@@ -7,6 +7,7 @@ import { GrafanaDashboardsService } from './grafana-dashboards.service';
 import { GrafanaClientService } from './grafana-client.service';
 import { ApplicationDashboardsController } from './application-dashboards.controller';
 import { ApplicationDashboardsService } from './application-dashboards.service';
+import { ApplicationDashboardDeletionProcessor } from './processors/application-dashboard-deletion.processor';
 import { ApplicationDashboard, GrafanaInstance, GrafanaDashboard, SystemUnderTest } from '../../entities';
 import { CommonModule } from '../../common/common.module';
 import { AuditModule } from '../audit/audit.module';
@@ -29,7 +30,8 @@ import { ProxyModule } from '../proxy/proxy.module';
     GrafanaInstancesService,
     GrafanaDashboardsService,
     GrafanaClientService,
-    ApplicationDashboardsService
+    ApplicationDashboardsService,
+    ApplicationDashboardDeletionProcessor
   ],
   exports: [
     GrafanaInstancesService,
