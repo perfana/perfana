@@ -88,14 +88,18 @@ describe('SamplerTable parallel groups', () => {
     expect(screen.getByText('40')).toBeInTheDocument();
   });
 
-  it('renders the band without timings for a run analysed before they existed', () => {
+  it('says why the timings are missing rather than looking broken', () => {
+    // Two cases land here: a test still running (never analysed) and a run analysed before the
+    // rollup existed. The wording has to be true of both.
     renderTable([
       sampler('one', { parallel_group: 'PG1' }),
       sampler('two', { parallel_group: 'PG1' }),
     ]);
 
     expect(screen.getByText('PG1')).toBeInTheDocument();
-    expect(screen.getByText(/Group timings unavailable/)).toBeInTheDocument();
+    expect(screen.getByText(/Timings appear once the run is analysed/)).toBeInTheDocument();
+    // Must not claim the run was already analysed — that is false during a running test.
+    expect(screen.queryByText(/was analysed before/)).not.toBeInTheDocument();
   });
 
   it('marks percentiles computed from too few executions', () => {

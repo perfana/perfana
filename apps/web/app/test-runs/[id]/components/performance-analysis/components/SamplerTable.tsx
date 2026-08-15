@@ -286,9 +286,15 @@ export function SamplerTable({
                     </>
                   ) : (
                     <TableCell colSpan={COLUMN_COUNT - 1} sx={{ color: 'text.disabled' }}>
-                      <Typography variant="caption">
-                        Group timings unavailable — this run was analysed before they were recorded
-                      </Typography>
+                      <Tooltip
+                        arrow
+                        placement="top"
+                        title="A group's duration is measured across its executions once the run is analysed, so it is not available while a test is still running. For a run analysed before this was recorded, re-evaluating the run fills it in."
+                      >
+                        <Typography variant="caption" sx={{ cursor: 'help' }}>
+                          Timings appear once the run is analysed
+                        </Typography>
+                      </Tooltip>
                     </TableCell>
                   )}
                 </TableRow>
