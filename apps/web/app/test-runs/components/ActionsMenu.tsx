@@ -189,7 +189,7 @@ export function ActionsMenu({ testRun, onDelete, showToast, onRefresh }: Actions
           'Content-Type': 'application/json',
         },
         body: JSON.stringify({
-          systemUnderTestId: testRun.system_under_test_id || (testRun.systems_under_test as unknown)?.id,
+          systemUnderTestId: testRun.system_under_test_id || testRun.systems_under_test?.id,
           testEnvironment: testRun.test_environment,
           workload: testRun.workload,
           testRunId: testRun.test_run_id,
@@ -226,7 +226,7 @@ export function ActionsMenu({ testRun, onDelete, showToast, onRefresh }: Actions
           'Content-Type': 'application/json',
         },
         body: JSON.stringify({
-          systemUnderTestId: testRun.system_under_test_id || (testRun.systems_under_test as unknown)?.id,
+          systemUnderTestId: testRun.system_under_test_id || testRun.systems_under_test?.id,
           testEnvironment: testRun.test_environment,
           workload: testRun.workload,
           testRunId: testRun.test_run_id,

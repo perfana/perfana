@@ -1,3 +1,4 @@
+import { SloPanel } from '../types';
 import { SLOFormData, ValidationErrors, ParsedValueWithUnit } from '../types';
 
 /**

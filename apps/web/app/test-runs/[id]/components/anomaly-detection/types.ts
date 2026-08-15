@@ -72,6 +72,14 @@ export interface ConfigSourceInfo {
   description: string;
 }
 
+/** Response of GET /adapt/conclusion/:testRunId — the run-level ADAPT verdict. */
+export interface AdaptConclusion {
+  label?: string;
+  tracked_regressions?: unknown[];
+  details?: { message?: string };
+  [key: string]: unknown;
+}
+
 export type ConclusionLabel = 'REGRESSION' | 'OK' | 'IMPROVEMENT' | string;
 
 /** One of the three ADAPT difference checks (percentage, IQR, absolute). */

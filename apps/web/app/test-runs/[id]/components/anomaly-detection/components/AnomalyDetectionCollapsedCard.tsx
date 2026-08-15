@@ -14,7 +14,7 @@ import {
   Delete,
   Error as _ErrorIcon,
 } from '@mui/icons-material';
-import { AnomalyData } from '../types';
+import { AnomalyData, AdaptConclusion } from '../types';
 import KPIDisplay from '../../shared/KPIDisplay';
 import SoftBadge from '../../shared/SoftBadge';
 
@@ -26,7 +26,7 @@ interface AnomalyDetectionCollapsedCardProps {
   onExpand: (tabIndex?: number) => void;
   onDelete?: () => void;
   testRun: TestRun | null;
-  dsAdaptConclusion?: unknown;
+  dsAdaptConclusion?: AdaptConclusion | null;
 }
 
 export default function AnomalyDetectionCollapsedCard({
@@ -66,7 +66,7 @@ export default function AnomalyDetectionCollapsedCard({
   const staleCount = hasAnyData ? anomalyData.filter(item => item.is_stale === true).length : 0;
 
   // Check for unresolved tracked regressions
-  const hasTrackedRegressions = dsAdaptConclusion?.tracked_regressions?.length > 0;
+  const hasTrackedRegressions = (dsAdaptConclusion?.tracked_regressions?.length ?? 0) > 0;
   const trackedRegressionsCount = dsAdaptConclusion?.tracked_regressions?.length || 0;
 
   // Get unique conclusions that have data (exclude partial, incomparable, and no difference)
@@ -245,7 +245,7 @@ export default function AnomalyDetectionCollapsedCard({
                   lineHeight: 1.5,
                 }}
               >
-                {(dsAdaptConclusion as { details?: { message?: string } } | null)?.details?.message ?? 'No previous results to compare with'}
+                {dsAdaptConclusion?.details?.message ?? 'No previous results to compare with'}
               </Typography>
             </Box>
           ) : (

@@ -21,8 +21,9 @@ interface TrackedRegression {
   unit?: string;
   testRunStart: Date;
   updatedAt: Date;
-  conclusion?: unknown;
-  trackedConclusion?: unknown;
+  conclusion?: { label?: string; [key: string]: unknown };
+  /** Set once the regression has been re-evaluated on a later run. */
+  trackedConclusion?: { resolved?: boolean; label?: string; [key: string]: unknown };
 }
 
 interface GroupedTrackedRegressions {

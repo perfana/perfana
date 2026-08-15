@@ -1,4 +1,5 @@
 import { ProfileBenchmark } from '@/lib/profile-benchmarks';
+import { ProfileDashboard } from '@/lib/profiles';
 
 /**
  * Snackbar notification state

@@ -26,6 +26,7 @@ import { AnomalyData } from '../../types';
 import { formatValueWithUnit } from '@/lib/units';
 import { getConclusionColor } from '../../helpers';
 import { formatNumber, getConfigSourceInfo, generateThresholdData } from '../utils';
+import { DrawerData } from '../../../types';
 
 interface StatisticalDrawerContentProps {
   drawerData: DrawerData;

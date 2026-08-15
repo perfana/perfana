@@ -2,6 +2,7 @@
  * Utility functions for SLO Metrics Chart
  */
 
+import { PlotlyGraphDiv, getPlotly } from '@/lib/plotly';
 import type { Theme } from '@mui/material';
 import type {
   MetricDataPoint,

@@ -6,7 +6,7 @@ import { TestRun } from '@/types/test-runs';
 import { authenticatedFetch } from '@/lib/api';
 import { generateConfigHash } from '@/lib/config-hash';
 import { deleteAnomalyData, DeleteAnomalyRequest } from '@/lib/anomaly-api';
-import { AnomalyData, MetricTrendData, ConfigFormData, ConclusionLabel } from '../types';
+import { AnomalyData, MetricTrendData, ConfigFormData, AdaptConclusion } from '../types';
 import { useUpdateAdaptConfig } from './useUpdateAdaptConfig';
 
 // Known classification values - anything not in this list shows as "Unclassified"
@@ -98,7 +98,7 @@ interface UseAnomalyDetectionReturn {
   anomalyData: AnomalyData[];
   loading: boolean;
   error: string | undefined;
-  dsAdaptConclusion: ConclusionLabel | null;
+  dsAdaptConclusion: AdaptConclusion | null;
   trackedCount: number;
 
   // Tab state
@@ -203,7 +203,7 @@ export function useAnomalyDetection({
   const [anomalyData, setAnomalyData] = useState<AnomalyData[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string>();
-  const [dsAdaptConclusion, setDsAdaptConclusion] = useState<ConclusionLabel | null>(null);
+  const [dsAdaptConclusion, setDsAdaptConclusion] = useState<AdaptConclusion | null>(null);
 
   // Tab and tracking state
   const [localActiveTab, setLocalActiveTab] = useState<number>(0);

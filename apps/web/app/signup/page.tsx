@@ -62,7 +62,7 @@ export default function SignUpPage() {
       router.push('/signin?message=Account created successfully. Please sign in.')
     } catch (err: unknown) {
       setFormError('root', {
-        message: err.message || 'An error occurred during sign up'
+        message: err instanceof Error ? err.message : 'An error occurred during sign up'
       })
     }
   }
