@@ -90,13 +90,22 @@ export class ApplicationDashboardDeletionProcessor implements OnModuleInit, OnMo
       connection: this.redis!,
       defaultJobOptions: {
         removeOnComplete: 100,
-        removeOnFail: 50,
+        // Must be true, not a retention count. Jobs are keyed by
+        // `delete-appdash-{id}` for deduplication, and BullMQ's add script
+        // no-ops when that key still exists (addStandardJob-9.lua:90). A
+        // permanently failed job left in the failed set would therefore
+        // swallow every later retry of the same dashboard while the API
+        // still answered "queued". The failure is logged below instead.
+        removeOnFail: true,
         attempts: 3,
         backoff: { type: 'exponential', delay: 10000 },
       },
     });
 
-    // Concurrency 1 — the serialization point that keeps the cascades from deadlocking.
+    // Concurrency 1 — the serialization point that keeps the cascades from
+    // deadlocking. ponytail: per-process, so N API replicas give effective
+    // concurrency N. Same shape as TestRunDeletionProcessor; if the API is ever
+    // scaled horizontally, both need a distributed lock instead.
     this.worker = new Worker<ApplicationDashboardDeletionJobData, void>(
       QUEUE_NAME,
       async (job) => this.processJob(job),

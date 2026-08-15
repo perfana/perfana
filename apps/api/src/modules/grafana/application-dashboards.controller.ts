@@ -41,6 +41,14 @@ class BatchDeleteDto {
   deleteFromGrafana?: boolean;
 }
 
+/**
+ * Upper bound on one batch-delete call. Far above any real selection (a busy
+ * SUT environment holds tens of dashboards), but it keeps an API-key caller
+ * from handing us an unbounded array that becomes one enormous IN clause and
+ * a matching pile of queue writes inside the request.
+ */
+const MAX_BATCH_DELETE_IDS = 500;
+
 @ApiTags('grafana/application-dashboards')
 @Controller('grafana/application-dashboards')
 @ApiBearerAuth()
@@ -122,6 +130,12 @@ export class ApplicationDashboardsController {
     }
     if (ids.length === 0) {
       return { queued: 0, deleted: 0 };
+    }
+    if (ids.length > MAX_BATCH_DELETE_IDS) {
+      throw new HttpException(
+        `Cannot delete more than ${MAX_BATCH_DELETE_IDS} dashboards in one request`,
+        HttpStatus.BAD_REQUEST,
+      );
     }
 
     const deleteFromGrafana = body.deleteFromGrafana === true;
