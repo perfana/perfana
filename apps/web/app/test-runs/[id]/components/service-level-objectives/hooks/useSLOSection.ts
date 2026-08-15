@@ -6,6 +6,7 @@ import { useSearchParams } from 'next/navigation';
 import { authenticatedFetch } from '@/lib/api';
 import { TestRun, TestRunStatus } from '@/types/test-runs';
 import { SamplerStat, SortField, SortDirection } from '../types/slo.types';
+import { CheckResult, Benchmark } from '@/lib/types';
 
 export interface RequestActionMenuData {
   transactionName: string;
@@ -33,9 +34,9 @@ export interface UseSLOSectionProps {
 
 export interface UseSLOSectionReturn {
   // Core data
-  checkResults: unknown[];
+  checkResults: CheckResult[];
   checkResultsLoading: boolean;
-  benchmarks: unknown[];
+  benchmarks: Benchmark[];
   benchmarksLoading: boolean;
 
   // UI state
@@ -61,11 +62,11 @@ export interface UseSLOSectionReturn {
 
   // Dialog state
   editSloDialogOpen: boolean;
-  selectedSloForEdit: unknown;
+  selectedSloForEdit: Benchmark | null;
   apdexConfigDialogOpen: boolean;
   selectedTransactionForApdex: TransactionForApdex | null;
   apdexThresholdsDialogOpen: boolean;
-  selectedApdexResultForThresholds: unknown;
+  selectedApdexResultForThresholds: CheckResult | null;
 
   // Refs
   cardRef: React.RefObject<HTMLDivElement>;
@@ -91,24 +92,24 @@ export interface UseSLOSectionReturn {
   handleCloseApdexActionMenu: () => void;
 
   // Dialog actions
-  handleEditSlo: (checkResult: unknown) => Promise<void>;
-  handleSloUpdated: (updatedSlo: unknown) => void;
+  handleEditSlo: (checkResult: CheckResult) => Promise<void>;
+  handleSloUpdated: (updatedSlo: Benchmark) => void;
   handleOpenApdexConfigDialog: (transactionName: string, currentThreshold: number, event: React.MouseEvent) => void;
   handleApdexConfigSuccess: () => void;
   setApdexConfigDialogOpen: (open: boolean) => void;
   setSelectedTransactionForApdex: (data: TransactionForApdex | null) => void;
-  handleOpenApdexThresholdsDialog: (result: unknown, event: React.MouseEvent) => void;
+  handleOpenApdexThresholdsDialog: (result: CheckResult, event: React.MouseEvent) => void;
   handleApdexThresholdsSuccess: () => void;
   setApdexThresholdsDialogOpen: (open: boolean) => void;
-  setSelectedApdexResultForThresholds: (result: unknown) => void;
+  setSelectedApdexResultForThresholds: (result: CheckResult | null) => void;
   setEditSloDialogOpen: (open: boolean) => void;
-  setSelectedSloForEdit: (slo: unknown) => void;
+  setSelectedSloForEdit: (slo: Benchmark | null) => void;
 
   // Re-evaluation
   handleReEvaluate: (panelId: number, applicationDashboardId?: string, metricName?: string, metricsSourceId?: string) => Promise<void>;
 
   // Utilities
-  getCheckResultKey: (result: unknown) => string;
+  getCheckResultKey: (result: CheckResult) => string;
 }
 
 export function useSLOSection({
@@ -122,9 +123,9 @@ export function useSLOSection({
   const cardRef = useRef<HTMLDivElement>(null);
 
   // Core data state
-  const [checkResults, setCheckResults] = useState<unknown[]>([]);
+  const [checkResults, setCheckResults] = useState<CheckResult[]>([]);
   const [checkResultsLoading, setCheckResultsLoading] = useState(false);
-  const [benchmarks, setBenchmarks] = useState<unknown[]>([]);
+  const [benchmarks, setBenchmarks] = useState<Benchmark[]>([]);
   const [benchmarksLoading, setBenchmarksLoading] = useState(false);
 
   // UI state
@@ -151,7 +152,7 @@ export function useSLOSection({
 
   // Edit SLO dialog state
   const [editSloDialogOpen, setEditSloDialogOpen] = useState(false);
-  const [selectedSloForEdit, setSelectedSloForEdit] = useState<unknown>(null);
+  const [selectedSloForEdit, setSelectedSloForEdit] = useState<Benchmark | null>(null);
 
   // Apdex transaction threshold config dialog state
   const [apdexConfigDialogOpen, setApdexConfigDialogOpen] = useState(false);
@@ -159,13 +160,13 @@ export function useSLOSection({
 
   // Apdex thresholds management dialog state
   const [apdexThresholdsDialogOpen, setApdexThresholdsDialogOpen] = useState(false);
-  const [selectedApdexResultForThresholds, setSelectedApdexResultForThresholds] = useState<unknown>(null);
+  const [selectedApdexResultForThresholds, setSelectedApdexResultForThresholds] = useState<CheckResult | null>(null);
 
   // Ref for status change tracking
   const prevStatusRef = useRef<TestRunStatus | null>(null);
 
   // Generate a unique key for each check result based on its properties
-  const getCheckResultKey = useCallback((result: unknown): string => {
+  const getCheckResultKey = useCallback((result: CheckResult): string => {
     if (result.panel_type === 'apdex' || result.evaluate_type === 'apdex') {
       const benchmarkId = result.benchmark_id || 'unknown';
       const panelTitle = result.panel_title || 'unknown';
@@ -420,7 +421,7 @@ export function useSLOSection({
   }, []);
 
   // Edit SLO handler
-  const handleEditSlo = useCallback(async (checkResult: unknown) => {
+  const handleEditSlo = useCallback(async (checkResult: CheckResult) => {
     try {
       const benchmarkId = checkResult.benchmark_id;
       if (!benchmarkId) {
@@ -444,8 +445,19 @@ export function useSLOSection({
     } catch (error) {
       console.error('Failed to fetch current benchmark:', error);
 
-      const benchmarkFromCheckResult = {
-        id: checkResult.benchmark_id || checkResult.application_dashboard_id,
+      // Degraded fallback: rebuild what we can of the benchmark from the check
+      // result so the dialog still opens. The scope fields (system/environment/
+      // workload), timestamps and enabled/valid all come off the check result
+      // itself — a result only exists if its benchmark was enabled and valid.
+      const benchmarkFromCheckResult: Benchmark = {
+        id: checkResult.benchmark_id || checkResult.application_dashboard_id || '',
+        system_under_test_id: checkResult.system_under_test_id,
+        test_environment: checkResult.test_environment,
+        workload: checkResult.workload,
+        enabled: true,
+        valid: true,
+        created_at: checkResult.created_at,
+        updated_at: checkResult.updated_at || checkResult.created_at,
         source: checkResult.source || 'grafana',
         application_dashboard_id: checkResult.application_dashboard_id,
         dashboard_uid: checkResult.dashboard_uid,
@@ -472,7 +484,7 @@ export function useSLOSection({
   }, []);
 
   // SLO updated handler
-  const handleSloUpdated = useCallback((_updatedSlo: unknown) => {
+  const handleSloUpdated = useCallback((_updatedSlo: Benchmark) => {
     loadCheckResults(testRunId);
     loadBenchmarks();
     setEditSloDialogOpen(false);
@@ -492,7 +504,7 @@ export function useSLOSection({
   }, [testRunId, loadCheckResults]);
 
   // Apdex thresholds dialog handlers
-  const handleOpenApdexThresholdsDialog = useCallback((result: unknown, event: React.MouseEvent) => {
+  const handleOpenApdexThresholdsDialog = useCallback((result: CheckResult, event: React.MouseEvent) => {
     event.stopPropagation();
     setSelectedApdexResultForThresholds(result);
     setApdexThresholdsDialogOpen(true);

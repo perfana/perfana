@@ -1,6 +1,6 @@
 import { Test, TestingModule } from '@nestjs/testing';
 import { getRepositoryToken } from '@nestjs/typeorm';
-import { Repository, DataSource } from 'typeorm';
+import { Repository, DataSource, In } from 'typeorm';
 import { Logger } from '@nestjs/common';
 import { ApplicationDashboardsService } from './application-dashboards.service';
 import { ApplicationDashboard as ApplicationDashboardEntity, SystemUnderTest } from '../../entities';
@@ -1108,7 +1108,80 @@ describe('ApplicationDashboardsService', () => {
     });
   });
 
+  // Batch deletion is executed by a background worker, which runs with no RLS
+  // role or GUCs — the DELETE would go through for any id. filterAccessible is
+  // the in-request visibility check that stands in for the policy the worker
+  // will not have.
+  describe('filterAccessible', () => {
+    it('should return the ids the repository can see', async () => {
+      // Arrange
+      appDashboardRepo.find.mockResolvedValue([{ id: 'id-1' }, { id: 'id-3' }] as never);
+
+      // Act
+      const result = await service.filterAccessible(['id-1', 'id-2', 'id-3']);
+
+      // Assert
+      expect(result).toEqual(['id-1', 'id-3']);
+      expect(appDashboardRepo.find).toHaveBeenCalledWith({
+        where: { id: In(['id-1', 'id-2', 'id-3']) },
+        select: { id: true },
+      });
+    });
+
+    it('should return an empty array without querying when given no ids', async () => {
+      // Act
+      const result = await service.filterAccessible([]);
+
+      // Assert
+      expect(result).toEqual([]);
+      expect(appDashboardRepo.find).not.toHaveBeenCalled();
+    });
+
+    it('should return an empty array when none of the ids are visible', async () => {
+      // Arrange — RLS filtered every row out
+      appDashboardRepo.find.mockResolvedValue([] as never);
+
+      // Act
+      const result = await service.filterAccessible(['other-org-id']);
+
+      // Assert
+      expect(result).toEqual([]);
+    });
+  });
+
   describe('delete', () => {
+    // Queued deletions run in the BullMQ worker with no HTTP request CLS
+    // context, so AuditService.dispatch drops the row unless the queuing user
+    // is forwarded explicitly. Mirrors DeleteTestRunHandler.
+    it('should forward the audit actor when called from the worker', async () => {
+      // Arrange
+      appDashboardRepo.findOne.mockResolvedValue(mockApplicationDashboardEntity);
+
+      // Act
+      await service.delete('app-dashboard-uuid', false, mockUserId, mockRoles, {
+        auditActorOverride: { userId: 'queuing-user' },
+      });
+
+      // Assert
+      expect(auditService.logDelete).toHaveBeenCalledTimes(1);
+      expect(auditService.logDelete.mock.calls[0][1]).toEqual(
+        expect.objectContaining({ actorOverride: { userId: 'queuing-user' } })
+      );
+    });
+
+    it('should omit the audit actor override in the in-request path', async () => {
+      // Arrange
+      appDashboardRepo.findOne.mockResolvedValue(mockApplicationDashboardEntity);
+
+      // Act — no opts: AuditService falls back to the request CLS context,
+      // which also carries email + IP.
+      await service.delete('app-dashboard-uuid', false, mockUserId, mockRoles);
+
+      // Assert
+      expect(auditService.logDelete).toHaveBeenCalledTimes(1);
+      expect(auditService.logDelete.mock.calls[0][1].actorOverride).toBeUndefined();
+    });
+
     it('should delete application dashboard and cascade delete related benchmarks', async () => {
       // Arrange
       appDashboardRepo.findOne.mockResolvedValue(mockApplicationDashboardEntity);

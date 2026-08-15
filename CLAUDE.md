@@ -511,6 +511,7 @@ Run all tests from the repo root: `npm run test`
 - lint: turbo run lint
 - test: turbo run test
 - deadcode: npx knip
+- shell: shellcheck $(git ls-files '*.sh') .githooks/pre-push — optional local tool (`brew install shellcheck`); not wired into preflight so a machine without it can still push.
 - **preflight (pre-push gate): npm run preflight** — runs lint + type-check across the monorepo, then the API RLS test suite (`apps/api/src/test/rls/` with `DB_ENABLE_RLS_ROLE=true`). Wired to `git push` via `.githooks/pre-push` (auto-installed by `npm install` via the `prepare` script). Local-only by design — turbo's cache makes warm runs sub-second, and the RLS suite is ~3s. The RLS step targets the local dev DB (`perfana` on `localhost:5432` by default; override with `DB_NAME`); it requires Phase 5b migrations to be applied (cluster roles `perfana_app`/`perfana_system` + per-DB RLS policies and helper functions). Bypass: `git push --no-verify` (use sparingly).
 
 <!-- gitnexus:start -->

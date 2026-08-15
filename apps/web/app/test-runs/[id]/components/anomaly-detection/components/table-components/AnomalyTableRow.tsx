@@ -1,5 +1,6 @@
 'use client';
 
+import type { DrawerData } from '../../types';
 import React from 'react';
 import {
   Box,
@@ -45,7 +46,8 @@ interface AnomalyTableRowProps {
   isExpanded: boolean;
   isLast: boolean;
   testRunId: string;
-  drawerData: Record<string, unknown>;
+  /** ADAPT result per expanded row, keyed by the row key. */
+  drawerData: Record<string, DrawerData>;
   onToggleExpanded: () => void;
   onOpenActionMenu: (event: React.MouseEvent<HTMLElement>) => void;
   onStaleChipClick: () => void;
@@ -191,7 +193,7 @@ export function AnomalyTableRow({
         <Chip
           label={row.conclusion_label}
           size="small"
-          color={getConclusionColor(row.conclusion_label) as unknown}
+          color={getConclusionColor(row.conclusion_label)}
           variant="filled"
           icon={row.is_stale ? (
             <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.25 }}>

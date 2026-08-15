@@ -14,6 +14,7 @@ import {
 } from '@mui/material';
 import { GrafanaDashboard, VariableValue } from './types';
 import { authenticatedFetch } from '@/lib/api';
+import { DashboardVariable, DashboardVariableOption } from '@/lib/types';
 
 interface AddDashboardDialogProps {
   open: boolean;
@@ -37,7 +38,7 @@ export default function AddDashboardDialog({
   const [selectedDashboard, setSelectedDashboard] = useState<GrafanaDashboard | null>(null);
   const [dashboardLabel, setDashboardLabel] = useState('');
   const [variableValues, setVariableValues] = useState<Record<string, string[]>>({});
-  const [variableOptions, setVariableOptions] = useState<Record<string, unknown[]>>({});
+  const [variableOptions, setVariableOptions] = useState<Record<string, DashboardVariableOption[]>>({});
   const [loadingVariables, setLoadingVariables] = useState<Record<string, boolean>>({});
 
   // Reset form when dialog opens
@@ -85,7 +86,9 @@ export default function AddDashboardDialog({
     }));
   };
 
-  const fetchVariableOptions = async (variable: unknown, dashboard: GrafanaDashboard) => {
+  // Only the variable's name is used; callers pass either a stored
+  // DashboardVariable or a Grafana templating variable, which lacks `values`.
+  const fetchVariableOptions = async (variable: Pick<DashboardVariable, 'name'>, dashboard: GrafanaDashboard) => {
     try {
       const response = await authenticatedFetch(`/grafana/dashboards/variable-values`, {
         method: 'POST',
@@ -138,7 +141,7 @@ export default function AddDashboardDialog({
     }
   };
 
-  const preSelectVariableValue = (variableName: string, options: unknown[]) => {
+  const preSelectVariableValue = (variableName: string, options: DashboardVariableOption[]) => {
     // Check if this variable should be pre-selected based on configuration scope
     let preSelectedValue: string | null = null;
     
@@ -155,9 +158,9 @@ export default function AddDashboardDialog({
     // Priority 3: Auto-select if there's only one option available
     else if (options.length === 1) {
       const singleOption = options[0];
-      preSelectedValue = typeof singleOption === 'string' 
-        ? singleOption 
-        : (singleOption.value || singleOption.label || singleOption);
+      preSelectedValue = typeof singleOption === 'string'
+        ? singleOption
+        : singleOption.value;
       
       console.info(`Auto-selected single option "${preSelectedValue}" for variable "${variableName}"`);
     }
@@ -284,14 +287,14 @@ export default function AddDashboardDialog({
                       getOptionLabel={(option) => {
                         // Handle both string and object options
                         if (typeof option === 'string') return option;
-                        return option.label || option.value || option;
+                        return option.label;
                       }}
                       value={variableValues[variable.name] || []}
                       onChange={(_, newValue) => {
                         // Convert mixed array of strings and objects to array of strings
                         const stringValues = newValue.map(v => {
                           if (typeof v === 'string') return v;
-                          return v.value || v.label || v;
+                          return v.value;
                         });
                         handleVariableChange(variable.name, stringValues);
                       }}

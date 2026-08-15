@@ -14,6 +14,8 @@ export interface TrendsSeriesConfig {
   source: 'grafana' | 'dynatrace' | 'performance-metrics';
   yAxisFormat?: string;
   metricsSourceId?: string;
+  /** True when the series is the run-wide "All aggregated" pseudo-metric. */
+  isAggregated?: boolean;
 }
 
 export interface TrendsPreset {

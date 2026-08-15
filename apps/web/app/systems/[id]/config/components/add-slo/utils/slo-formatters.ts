@@ -1,3 +1,4 @@
+import { SloPanel } from '../types';
 import { getUnit } from '@/lib/units';
 import { EvaluateTypeOption, RequirementOperatorOption, SourceOption, DataSourceAvailability } from '../types';
 import { parseValueWithUnit, getEffectiveUnitFormat } from './slo-validators';
@@ -155,7 +156,7 @@ export function getSourceOption(value: string): SourceOption | null {
 /**
  * Get placeholder text for requirement value input
  */
-export function getRequirementValuePlaceholder(selectedPanel: unknown): string {
+export function getRequirementValuePlaceholder(selectedPanel: SloPanel | null | undefined): string {
   const effectiveUnitFormat = getEffectiveUnitFormat(selectedPanel);
   if (effectiveUnitFormat) {
     const unit = getUnit(effectiveUnitFormat);
@@ -167,7 +168,7 @@ export function getRequirementValuePlaceholder(selectedPanel: unknown): string {
 /**
  * Get helper text for requirement value input
  */
-export function getRequirementValueHelperText(value: string, selectedPanel: unknown): string {
+export function getRequirementValueHelperText(value: string, selectedPanel: SloPanel | null | undefined): string {
   const detectedUnit = getDetectedUnit(value);
   const effectiveUnitFormat = getEffectiveUnitFormat(selectedPanel);
   const expectedUnit = effectiveUnitFormat ? getUnit(effectiveUnitFormat) : null;
@@ -183,7 +184,7 @@ export function getRequirementValueHelperText(value: string, selectedPanel: unkn
 /**
  * Get the unit chip label for a value
  */
-export function getUnitChipLabel(value: string, selectedPanel: unknown): string | null {
+export function getUnitChipLabel(value: string, selectedPanel: SloPanel | null | undefined): string | null {
   const parsed = parseValueWithUnit(value);
   const effectiveUnitFormat = getEffectiveUnitFormat(selectedPanel);
   const panelUnit = effectiveUnitFormat ? getUnit(effectiveUnitFormat) : null;

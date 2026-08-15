@@ -56,7 +56,6 @@
     "reflect-metadata": "^0.1.13",
     "rxjs": "^7.8.1",
     "typeorm": "^0.3.27",
-    "undici": "^7.16.0",
     "zod": "^3.22.4"
   },
   "devDependencies": {

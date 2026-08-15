@@ -17,6 +17,7 @@ import {
   FormHelperText,
   Snackbar,
   Autocomplete,
+  type SelectChangeEvent,
 } from '@mui/material';
 import {
   Save as SaveIcon,
@@ -97,7 +98,7 @@ export default function PyroscopeSection({
     setIsDirty(hasChanges);
   }, [selectedInstanceId, configurations, systemUnderTest]);
 
-  const handleInstanceChange = (event: unknown) => {
+  const handleInstanceChange = (event: SelectChangeEvent<string>) => {
     setSelectedInstanceId(event.target.value);
   };
 

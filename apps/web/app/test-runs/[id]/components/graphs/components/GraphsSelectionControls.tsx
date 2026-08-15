@@ -117,7 +117,7 @@ export function GraphsSelectionControls({
           />
         )}
         renderOption={(props, option) => {
-          const { _key, ...otherProps } = props;
+          const { key: _key, ...otherProps } = props;
           const { color } = getSourceDisplayInfo(option);
           return (
             <Box component="li" key={option.id} {...otherProps} sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
@@ -164,7 +164,7 @@ export function GraphsSelectionControls({
           />
         )}
         renderOption={(props, option) => {
-          const { _key, ...otherProps } = props;
+          const { key: _key, ...otherProps } = props;
           return (
             <Box component="li" key={option.id} {...otherProps}>
               <Typography variant="body1">{option.title}</Typography>
@@ -211,7 +211,7 @@ export function GraphsSelectionControls({
             />
           )}
           renderOption={(props, option) => {
-            const { _key, ...otherProps } = props;
+            const { key: _key, ...otherProps } = props;
             return (
               <Box component="li" key={option} {...otherProps}>
                 <Typography variant="body1">{option}</Typography>

@@ -1,6 +1,6 @@
 {
   "name": "perfana",
-  "version": "0.2.62.0",
+  "version": "0.2.63.2",
   "private": true,
   "description": "Open-source performance analysis platform",
   "workspaces": [
@@ -33,15 +33,16 @@
     "migration:show": "cd packages/shared && typeorm migration:show -d ormconfig.js"
   },
   "devDependencies": {
-    "brace-expansion": "^1.1.11",
     "@faker-js/faker": "^10.0.0",
     "@playwright/test": "^1.55.0",
     "@types/multer": "^2.0.0",
     "@types/node": "^20.10.0",
     "@types/supertest": "^6.0.3",
+    "brace-expansion": "^1.1.11",
     "knip": "^6.3.0",
     "prettier": "^3.1.0",
     "supertest": "^7.1.4",
+    "tsx": "^4.0.0",
     "turbo": "^1.11.0",
     "typescript": "^5.3.0"
   },

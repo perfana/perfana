@@ -157,7 +157,7 @@ function EmptyState() {
 interface SeveritySummaryCardProps {
   severity: InsightSeverity;
   count: number;
-  _total: number;
+  total: number;
   onClick?: () => void;
   selected?: boolean;
 }
@@ -165,7 +165,7 @@ interface SeveritySummaryCardProps {
 function SeveritySummaryCard({
   severity,
   count,
-  _total,
+  total: _total,
   onClick,
   selected,
 }: SeveritySummaryCardProps) {
@@ -308,7 +308,6 @@ function PendingAnalysisState({
  */
 export function InsightsTab({
   reportId,
-  _testRunId,
   initialFilters,
   showComparisonInsights = false,
   onSnackbar,
@@ -332,7 +331,6 @@ export function InsightsTab({
   const {
     analysis,
     insights: rawInsights,
-    _severitySummary,
     loading,
     error,
     refetch,
@@ -340,8 +338,6 @@ export function InsightsTab({
     isReanalyzing,
     hasAnalysis,
     filterInsights,
-    _getInsightsBySeverity,
-    _getInsightsByCategory,
   } = useAwrAnalysis(reportId, {
     onSnackbar,
   });
@@ -367,7 +363,12 @@ export function InsightsTab({
     const sqlTextMap = new Map<string, string>();
 
     // Check all SQL statement arrays for fullSqlText
-    const topSql = report.parsedData.topSql as unknown;
+    // AWR groups Top SQL into several rankings (by elapsed time, by CPU, ...),
+    // each an array of the same statement shape.
+    const topSql = (report.parsedData.topSql ?? {}) as Record<
+      string,
+      Array<{ sqlId?: string; fullSqlText?: string }> | undefined
+    >;
     const sqlArrays = [
       topSql.byElapsedTime,
       topSql.byCpuTime,

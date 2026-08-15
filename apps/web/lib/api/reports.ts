@@ -102,7 +102,13 @@ export interface ReportSectionConfig {
   type: ReportSectionType;
   order: number;
   title?: string;
-  config?: Record<string, unknown>;
+  /**
+   * Opaque section-config blob. `object` rather than Record<string, unknown>
+   * because callers pass declared config interfaces, which have no implicit
+   * index signature; nothing in the web app reads keys off it, it only
+   * round-trips to the report API.
+   */
+  config?: object;
   /** Accompanying text, rendered as markdown prose under the section header. */
   text?: string;
   /** @deprecated Read-only fallback for templates saved before 2026-08-02. Use `text`. */

@@ -204,14 +204,6 @@ export function getGrafanaInstanceId(): string | null {
 }
 
 /**
- * Get cached Grafana instance metadata (organizationId + useProxy).
- * Returns null if no instance is configured or the cache has not been loaded yet.
- */
-export function getGrafanaInstanceMeta(): CachedGrafanaMeta | null {
-  return cachedMeta;
-}
-
-/**
  * Clear cache (useful for testing or when Grafana instance config changes)
  */
 export function clearGrafanaConfigCache(): void {

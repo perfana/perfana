@@ -10,7 +10,7 @@
     "lint": "eslint app lib --ext .ts,.tsx",
     "test": "jest",
     "test:watch": "jest --watch",
-    "type-check": "tsc --project tsconfig.build.json --noEmit",
+    "type-check": "tsc --project tsconfig.json --noEmit",
     "clean": "rimraf .next out"
   },
   "dependencies": {

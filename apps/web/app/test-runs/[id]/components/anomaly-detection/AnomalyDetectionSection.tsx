@@ -66,9 +66,7 @@ export default function AnomalyDetectionSection({
     classificationFilter,
     setClassificationFilter,
     dashboardFilter,
-    _setDashboardFilter,
     panelFilter,
-    _setPanelFilter,
     // Sort state
     sortBy,
     sortDirection,

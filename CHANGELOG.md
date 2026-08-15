@@ -4,13 +4,35 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
-## [0.2.62.0] - 2026-08-14
+## [0.2.63.2] - 2026-08-15
 
 ### Added
 - **The Performance Analysis card now shows which requests a virtual user issued at the same time.** Expanding a transaction used to list every request in a flat table, so a request that ran concurrently with its neighbours looked identical to one that ran after them — the numbers simply did not add up to the transaction's duration and nothing explained why. Requests that ran together are now clustered under a band naming their parallel group, and the band reports how long the group itself took — average, 95th and 99th percentile, and how many executions passed or failed — in the same columns as the requests beneath it. That duration is measured per execution as last finish minus first start, so it is the time a user actually waited, not the sum of the concurrent requests. Percentiles computed from very few executions are marked as such rather than presented as if they carried the same weight as a percentile over thousands of requests. A group's duration is measured across its executions when the run is analysed, so while a test is still running the band names the group and says the timings follow. Transactions with no concurrent requests render exactly as before.
 
 ### Changed
 - Request records now carry the parallel group they ran under and which execution of it they belonged to (`requests_raw.parallel_group`, `parallel_group_id`), populated by load test tools that report them. Runs recorded before this, and tools that do not report it, leave the field empty and are displayed as they always were.
+## [0.2.63.0] - 2026-08-15
+
+### Fixed
+- **The AWR Insights tab shows its content again.** Clicking *Insights* on an AWR report rendered an empty panel: the tab button emitted one id while the panel listened for another. It only ever worked on first load, because that path used the default. Reopening the tab now shows the insights.
+- **The AWR time-model pie and donut charts render.** Both threw while drawing and took the surrounding card down with them; only the bar view survived.
+- **Time-model segments are coloured again.** Every slice was falling through to the same grey instead of the per-category colours, so the chart carried no information.
+- **Editing an SLO after a failed load keeps its scope.** When the benchmark could not be fetched, the edit dialog rebuilt it from the check result but dropped the system, environment and workload, so saving from that dialog wrote a benchmark with no scope.
+
+### Changed
+- **The frontend type check now covers the whole app.** It previously checked a fraction of it: four route trees were excluded outright and the include list reached only a handful of directories. 506 type errors had accumulated behind a passing check. All are fixed and the check now runs over everything, so this class of error fails a pull request instead of piling up.
+- Unused-code detection reports the whole repo. It had never analysed the worker at all (its configured entry point did not exist), counted generated documentation as dead files, and counted database migrations as unused because nothing imports them directly. It now reports nothing, and what it does report is real.
+- Shell scripts are linted. All eleven are clean.
+
+### Removed
+- An unused `undici` dependency from the worker, left behind when that code moved to axios.
+
+### Fixed
+- **Deleting a large batch of Grafana dashboards no longer freezes the page.** System under test → Grafana dashboards fired one `DELETE` per selected dashboard in parallel, and each of those cascades into the metrics hypertables — so a batch of any size left the browser waiting, and the concurrent cascades competed for the same rows in the database. The batch is now handed to a background queue that deletes one dashboard at a time, exactly as batches of test runs are handled: the page returns immediately and the selected rows disappear from the list while the deletion runs behind them. If Redis is unavailable the deletions still run in the request, but sequentially rather than all at once.
+- **An unreachable Grafana can no longer stall dashboard deletion for minutes.** Deleting a dashboard from Grafana used an HTTP call with no timeout, so a Grafana that accepted the connection but never answered held the database transaction open for five minutes. The call now gives up after 30 seconds.
+
+### Added
+- **`POST /api/grafana/application-dashboards/batch-delete`** queues application dashboards for deletion and returns 202. Takes `{ ids, deleteFromGrafana }`, up to 500 per call; dashboards the caller cannot see are skipped.
 
 ## [0.2.61.105] - 2026-08-14
 

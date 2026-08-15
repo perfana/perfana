@@ -77,7 +77,7 @@ const TIME_MODEL_COLORS: Record<string, string> = {
 /**
  * Get color for a time model segment
  */
-function getTimeModelColor(_name: string): string {
+function getTimeModelColor(name: string): string {
   // Check for exact match
   if (TIME_MODEL_COLORS[name]) {
     return TIME_MODEL_COLORS[name];
@@ -229,7 +229,6 @@ function PieChartView({ data, height, isDonut, dbTime }: PieChartViewProps) {
 
   // Custom label
   const renderLabel = ({
-    _name,
     percent,
   }: {
     name: string;
@@ -253,7 +252,7 @@ function PieChartView({ data, height, isDonut, dbTime }: PieChartViewProps) {
           label={renderLabel}
           labelLine={{ stroke: theme.palette.text.secondary, strokeWidth: 1 }}
         >
-          {data.map((_entry, index) => (
+          {data.map((entry, index) => (
             <Cell key={`cell-${index}`} fill={entry.color} />
           ))}
         </Pie>
@@ -333,7 +332,7 @@ function BarChartView({ data, height }: BarChartViewProps) {
           width={90}
         />
         <RechartsTooltip
-          formatter={(value: number, name: string, props: unknown) => {
+          formatter={(value: number, name: string, props: { payload: { percent?: number; name?: string } }) => {
             const percent = props.payload.percent || 0;
             return [
               `${formatDuration(value)} (${formatPercentage(percent)})`,

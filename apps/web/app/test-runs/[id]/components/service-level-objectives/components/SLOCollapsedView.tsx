@@ -11,12 +11,13 @@ import { Add } from '@mui/icons-material';
 import { TestRun } from '@/types/test-runs';
 import KPIDisplay from '../../shared/KPIDisplay';
 import SoftBadge from '../../shared/SoftBadge';
+import { CheckResult, Benchmark } from '@/lib/types';
 import { isCheckResultStale } from '../utils/slo-formatters';
 
 interface SLOCollapsedViewProps {
-  checkResults: unknown[];
+  checkResults: CheckResult[];
   checkResultsLoading: boolean;
-  benchmarks: unknown[];
+  benchmarks: Benchmark[];
   benchmarksLoading: boolean;
   testRun: TestRun | null;
 }
@@ -66,9 +67,9 @@ function KPISection({
   benchmarks,
   benchmarksLoading,
 }: {
-  checkResults: unknown[];
+  checkResults: CheckResult[];
   checkResultsLoading: boolean;
-  benchmarks: unknown[];
+  benchmarks: Benchmark[];
   benchmarksLoading: boolean;
 }) {
   if (checkResultsLoading || benchmarksLoading) {
@@ -120,9 +121,9 @@ function BadgeSection({
   benchmarksLoading,
   testRun,
 }: {
-  checkResults: unknown[];
+  checkResults: CheckResult[];
   checkResultsLoading: boolean;
-  benchmarks: unknown[];
+  benchmarks: Benchmark[];
   benchmarksLoading: boolean;
   testRun: TestRun | null;
 }) {
@@ -173,8 +174,8 @@ function CollapsedBadges({
   checkResults,
   benchmarks,
 }: {
-  checkResults: unknown[];
-  benchmarks: unknown[];
+  checkResults: CheckResult[];
+  benchmarks: Benchmark[];
 }) {
   const passedCount = checkResults.filter(r => r.meets_requirement === true).length;
   const failedCount = checkResults.filter(r => r.meets_requirement === false).length;

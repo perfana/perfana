@@ -1,12 +1,41 @@
+import { ApplicationDashboard, GrafanaPanel } from '@/lib/types';
+import { DynatraceDashboard, DynatraceMetric } from '@/lib/dynatrace';
 import { Benchmark } from '../../types';
+
+/**
+ * A dashboard reference held by the SLO form. Every field is optional on
+ * purpose: add mode stores a full ApplicationDashboard or DynatraceDashboard,
+ * while edit mode reconstructs a partial one from the saved benchmark before
+ * the dashboard lists have loaded.
+ */
+export type SloDashboard = Partial<ApplicationDashboard> &
+  Partial<DynatraceDashboard> & {
+    /** Only set on the synthetic dashboard the edit dialog rebuilds from a benchmark. */
+    dashboard_id?: number;
+    grafanaInstance?: { label: string };
+  };
+
+/** A panel/metric reference held by the SLO form. Optional for the same reason. */
+export type SloPanel = Partial<GrafanaPanel> & Partial<DynatraceMetric>;
+
+/** Dynatrace dashboards are the only camelCase shape in the union. */
+export function isDynatraceDashboard(d: SloDashboard): boolean {
+  return d.dashboardLabel !== undefined;
+}
+
+/** Dynatrace metrics carry panelTitle; Grafana panels carry title. */
+export function isDynatraceMetric(p: SloPanel): boolean {
+  return p.panelTitle !== undefined;
+}
 
 /**
  * SLO Form Data State
  */
 export interface SLOFormData {
   source: string;
-  selectedDashboard: unknown;
-  selectedPanel: unknown;
+  /** Grafana + performance-test dashboards are ApplicationDashboards; Dynatrace has its own shape. */
+  selectedDashboard: SloDashboard | null;
+  selectedPanel: SloPanel | null;
   evaluateType: string;
   requirementOperator: string;
   requirementValue: string;
@@ -63,10 +92,10 @@ export interface LoadingStates {
  * Available options from API responses
  */
 export interface AvailableOptions {
-  availableDashboards: unknown[];
-  availablePanels: unknown[];
-  availableDynatraceDashboards: unknown[];
-  availableDynatraceMetrics: unknown[];
+  availableDashboards: ApplicationDashboard[];
+  availablePanels: GrafanaPanel[];
+  availableDynatraceDashboards: DynatraceDashboard[];
+  availableDynatraceMetrics: DynatraceMetric[];
 }
 
 /**

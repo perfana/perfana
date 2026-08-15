@@ -1,3 +1,4 @@
+import type { DrawerData } from '../../types';
 import { AnomalyData, MetricTrendData } from '../../types';
 import { TestRun } from '@/types/test-runs';
 import { DeleteOptions } from '../DeleteAnomalyDialog';
@@ -42,7 +43,8 @@ export interface AnomalyDetectionTableProps {
   chartKey: Record<string, number>;
   drawerOpen: Record<string, boolean>;
   onDrawerToggle: (rowKey: string) => void;
-  drawerData: Record<string, unknown>;
+  /** ADAPT result per expanded row, keyed by the row key. */
+  drawerData: Record<string, DrawerData>;
   drawerLoading: Record<string, boolean>;
   showToast?: (message: string) => void;
 

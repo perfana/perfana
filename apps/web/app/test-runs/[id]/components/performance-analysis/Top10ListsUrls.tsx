@@ -282,7 +282,19 @@ export default function Top10ListsUrls({ testRunId, selectedScenarios = [], excl
     : prepareTop10Data();
   const hasMissingUrlPatterns = samplers.some((s) => s.url_pattern == null);
 
-  const dimensions = [
+  /** One "Top 10 by ..." table. description/showErrorCount vary per entry. */
+  type Top10Dimension = {
+    title: string;
+    icon: React.ReactNode;
+    data: Top10Item[];
+    valueField: keyof Top10Item;
+    valueFormatter: (val: number) => string;
+    color: string;
+    description?: string;
+    showErrorCount?: boolean;
+  };
+
+  const dimensions: Top10Dimension[] = [
     {
       title: 'Slowest Average Response Times',
       icon: <SpeedIcon />,
@@ -364,7 +376,7 @@ export default function Top10ListsUrls({ testRunId, selectedScenarios = [], excl
               <Typography
                 variant="h6"
                 sx={{ fontWeight: 700, fontSize: '1rem' }}
-                title={(dimension as unknown).description}
+                title={dimension.description}
               >
                 {dimension.title}
               </Typography>
@@ -386,7 +398,7 @@ export default function Top10ListsUrls({ testRunId, selectedScenarios = [], excl
                         URL
                       </TableSortLabel>
                     </TableCell>
-                    {(dimension as unknown).showErrorCount && (
+                    {dimension.showErrorCount && (
                       <TableCell sx={{ fontWeight: 700, width: '10%', textAlign: 'right' }}>
                         Errors
                       </TableCell>
@@ -414,7 +426,7 @@ export default function Top10ListsUrls({ testRunId, selectedScenarios = [], excl
                     const sortedData = sortData(dimension.data, index, dimension.valueField);
                     return sortedData.length === 0 ? (
                       <TableRow>
-                        <TableCell colSpan={(dimension as unknown).showErrorCount ? 4 : 3} sx={{ textAlign: 'center', py: 3 }}>
+                        <TableCell colSpan={dimension.showErrorCount ? 4 : 3} sx={{ textAlign: 'center', py: 3 }}>
                           <Typography variant="body2" color="text.secondary">
                             No data available
                           </Typography>
@@ -451,7 +463,7 @@ export default function Top10ListsUrls({ testRunId, selectedScenarios = [], excl
                           <TableCell sx={{ maxWidth: 0 }}>
                             <ClippedUrl url={item.url} variant="body2" color="text.primary" sx={{ fontSize: '0.85rem' }} />
                           </TableCell>
-                          {(dimension as unknown).showErrorCount && (
+                          {dimension.showErrorCount && (
                             <TableCell
                               sx={{
                                 textAlign: 'right',

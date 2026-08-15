@@ -3,7 +3,7 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import { useAuth } from '@/contexts/auth-context';
 import { authenticatedFetch } from '@/lib/api';
-import { TrendsPresetsAPI, PresetType } from '@/lib/trends-presets';
+import { TrendsPresetsAPI, PresetType, TrendsSeriesConfig } from '@/lib/trends-presets';
 import { fetchDynatraceDashboards, DynatraceMetric } from '@/lib/dynatrace';
 import { TrendsPreset } from '../TrendsPresetsTable';
 import { PresetFormData } from '../SaveTrendsPresetModal';
@@ -102,7 +102,7 @@ export function useTrendsPresets({
       setApplyingPreset(true);
 
       // Apply source if present in preset (defaults to grafana for backwards compatibility)
-      const presetSource = (preset as unknown).source || 'grafana';
+      const presetSource = (preset.source as DataSource) || 'grafana';
       setSelectedSource(presetSource);
 
       if (preset.application_dashboard_id) {
@@ -175,7 +175,7 @@ export function useTrendsPresets({
 
                 setTimeout(() => {
                   setDynatraceMetrics(currentMetrics => {
-                    const metric = currentMetrics.find((m: unknown) => m.panelTitle === preset.panel_title);
+                    const metric = currentMetrics.find((m) => m.panelTitle === preset.panel_title);
                     if (metric) {
                       setSelectedMetric({
                         id: metric.panelId,
@@ -209,12 +209,12 @@ export function useTrendsPresets({
       // Restore series config if present
       if (preset.series_config && Array.isArray(preset.series_config) && preset.series_config.length > 0) {
         // Filter out invalid entries (e.g. empty arrays, entries missing required fields)
-        const validConfigs = preset.series_config.filter((config: unknown) =>
+        const validConfigs = preset.series_config.filter((config) =>
           config && typeof config === 'object' && !Array.isArray(config) &&
           config.dashboardId && config.panelId != null && config.metricName
         );
         if (validConfigs.length > 0) {
-          const restoredSeries: TrendsSeries[] = validConfigs.map((config: unknown) => ({
+          const restoredSeries: TrendsSeries[] = validConfigs.map((config) => ({
             id: `${config.dashboardId}-${config.panelId}-${config.metricName}-${Date.now()}-${Math.random()}`,
             dashboardId: config.dashboardId,
             dashboardLabel: config.dashboardLabel,
@@ -224,7 +224,7 @@ export function useTrendsPresets({
             source: config.source || 'grafana',
             yAxisFormat: config.yAxisFormat,
             metricsSourceId: config.metricsSourceId,
-            isAggregated: (config as { isAggregated?: boolean }).isAggregated
+            isAggregated: config.isAggregated
           }));
           setAddedSeries(restoredSeries);
         }
@@ -258,7 +258,7 @@ export function useTrendsPresets({
       setPresetsSaving(true);
 
       // Convert addedSeries to series_config format, filtering out invalid entries
-      let seriesConfig = addedSeries
+      let seriesConfig: TrendsSeriesConfig[] = addedSeries
         .filter(series =>
           series && typeof series === 'object' && !Array.isArray(series) &&
           series.dashboardId && series.panelId != null && series.metricName

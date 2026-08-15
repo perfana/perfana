@@ -127,6 +127,13 @@ export class GrafanaClientService {
         'Content-Type': 'application/json',
         'Accept': 'application/json',
       },
+      // Bounded because this call happens inside the dashboard-delete
+      // transaction, and batch deletes now run through a concurrency-1 queue:
+      // an unreachable Grafana that still accepts connections would otherwise
+      // hold a transaction open for undici's 300s default and block every
+      // queued deletion behind it. Deleting a dashboard is a metadata write —
+      // 30s is generous.
+      signal: AbortSignal.timeout(30_000),
       ...(agents ? { dispatcher: agents.dispatcher } : {}),
     };
 

@@ -18,7 +18,6 @@ import {
   Delete as DeleteIcon,
   MonitorHeart as MonitorHeartIcon,
 } from '@mui/icons-material';
-import { useThemeMode } from '@/contexts/theme-context';
 import { ApplicationDashboard } from '@/lib/types';
 import { filterSystemTags } from '@perfana/shared/utils';
 
@@ -63,7 +62,6 @@ export default function DashboardTable({
   onSelectAll,
   onSelectOne
 }: DashboardTableProps) {
-  const { _mode } = useThemeMode();
 
   const getFilteredDashboards = () => {
     // First, filter out artificial dashboards (created by performance-metrics pipeline)

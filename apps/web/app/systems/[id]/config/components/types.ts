@@ -1,43 +1,6 @@
 export type { ApplicationDashboard } from '@/lib/types';
 
-export interface Benchmark {
-  id: string;
-  system_under_test_id: string;
-  test_environment: string;
-  workload: string;
-  source: string;
-  grafana_instance?: string;
-  dashboard_label?: string;
-  dashboard_id?: number;
-  dashboard_uid?: string;
-  application_dashboard_id?: string;
-  metrics_source_id?: string;
-  generic_check_id?: string;
-  configuration: unknown;
-  config_title?: string;
-  config_id?: string;
-  evaluate_type?: string;
-  requirement_operator?: string;
-  requirement_value?: number;
-  enabled: boolean;
-  valid: boolean;
-  description?: string;
-  tags: string[];
-  panel_title?: string;
-  metric_unit?: string;
-  exclude_ramp_up_time: boolean;
-  metric_name?: string;
-  created_at: string;
-  updated_at: string;
-  // Apdex / Aggregated SLO fields
-  benchmark_type?: 'metric' | 'apdex' | 'aggregated';
-  aggregate_metric?: string;
-  aggregate_stat?: string;
-  transaction_name?: string;
-  apdex_threshold_ms?: number;
-  min_apdex_score?: number;
-  include_failed_requests?: boolean;
-}
+export type { Benchmark } from '@/lib/types';
 
 export interface System {
   id: string;
