@@ -18,32 +18,13 @@ export interface DSMetric {
   data: MetricDataPoint[];
 }
 
-export interface CheckResultRequirement {
-  operator: string;
-  value: number;
-  type?: string;
-  aggregate_metric?: string;
-  aggregate_stat?: string;
-}
+// These used to be redeclared here as a narrower, subtly different shape than
+// what the check-results endpoint actually returns. One canonical definition
+// now lives in lib/types.ts, derived from the check_results table; re-exported
+// so existing imports from this module keep working.
+import type { CheckResult } from '@/lib/types';
 
-export interface CheckResultTarget {
-  target: string;
-  value: number;
-  meets_requirement: boolean;
-}
-
-export interface CheckResult {
-  panel_id: number;
-  panel_title?: string;
-  dashboard_label?: string;
-  metric_name?: string;
-  benchmark_id?: string;
-  application_dashboard_id?: string;
-  requirement?: CheckResultRequirement;
-  evaluate_type?: string;
-  metric_unit?: string;
-  targets?: CheckResultTarget[];
-}
+export type { CheckResult, CheckResultRequirement, CheckResultTarget } from '@/lib/types';
 
 export interface TestRunInfo {
   start_time: string;

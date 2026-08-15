@@ -1,4 +1,6 @@
 'use client';
+import { ApplicationDashboard, GrafanaPanel } from '@/lib/types';
+import { DynatraceDashboard, DynatraceMetric } from '@/lib/dynatrace';
 
 import React, { useMemo } from 'react';
 import {
@@ -10,7 +12,7 @@ import {
   Autocomplete,
   ListSubheader,
 } from '@mui/material';
-import { SLOFormData, ValidationErrors, DataSourceAvailability } from '../types';
+import { SLOFormData, ValidationErrors, DataSourceAvailability, SloDashboard, isDynatraceDashboard, isDynatraceMetric } from '../types';
 import {} from '../utils/slo-formatters';
 import { SOURCE_DISPLAY } from '@/lib/metrics-source-utils';
 
@@ -21,12 +23,12 @@ interface SLOFormFieldsProps {
   setValidationErrors: React.Dispatch<React.SetStateAction<ValidationErrors>>;
   dashboardsLoading: boolean;
   panelsLoading: boolean;
-  availableDashboards: unknown[];
-  availablePanels: unknown[];
-  availableDynatraceDashboards: unknown[];
-  availableDynatraceMetrics: unknown[];
-  availablePerfMetricsDashboards: unknown[];
-  availablePerfMetricsPanels: unknown[];
+  availableDashboards: ApplicationDashboard[];
+  availablePanels: GrafanaPanel[];
+  availableDynatraceDashboards: DynatraceDashboard[];
+  availableDynatraceMetrics: DynatraceMetric[];
+  availablePerfMetricsDashboards: ApplicationDashboard[];
+  availablePerfMetricsPanels: GrafanaPanel[];
   _dataSourceAvailability: DataSourceAvailability;
   systemName: string;
   environment: string;
@@ -59,6 +61,15 @@ export function SLOFormFields({
   fetchPerfMetricsPanels,
   fetchDynatraceMetricsForSlo,
 }: SLOFormFieldsProps) {
+  // The form holds whichever shape the chosen source produced. Narrow once here
+  // so each source-specific picker below works with a concrete type.
+  const sel = sloFormData.selectedDashboard;
+  const selectedAppDashboard = sel && !isDynatraceDashboard(sel) ? sel : null;
+  const selectedDynatraceDashboard = sel && isDynatraceDashboard(sel) ? sel : null;
+  const selPanel = sloFormData.selectedPanel;
+  const selectedGrafanaPanel = selPanel && !isDynatraceMetric(selPanel) ? selPanel : null;
+  const selectedDynatraceMetric = selPanel && isDynatraceMetric(selPanel) ? selPanel : null;
+
   const clearValidationError = (field: string) => {
     if (validationErrors[field]) {
       setValidationErrors((prev) => {
@@ -69,7 +80,7 @@ export function SLOFormFields({
   };
 
   // Merge all dashboards into a single grouped list
-  type UnifiedDashboard = { id: string; label: string; sourceType: string; groupLabel: string; color: string; original: unknown };
+  type UnifiedDashboard = { id: string; label: string; sourceType: string; groupLabel: string; color: string; original: SloDashboard };
   const allDashboardsMerged = useMemo((): UnifiedDashboard[] => {
     const result: UnifiedDashboard[] = [];
 
@@ -127,12 +138,17 @@ export function SLOFormFields({
     clearValidationError('selectedDashboard');
 
     // Fetch panels/metrics based on source
-    if (newValue.sourceType === 'grafana' && newValue.original?.dashboard_uid) {
-      fetchDashboardPanels(newValue.original.dashboard_uid);
-    } else if (newValue.sourceType === 'dynatrace' && newValue.original?.dashboardLabel) {
-      fetchDynatraceMetricsForSlo(newValue.original.dashboardLabel);
-    } else if (newValue.sourceType === 'performance_test' && newValue.original?.id) {
-      fetchPerfMetricsPanels(newValue.original.id);
+    const original = newValue.original;
+    if (newValue.sourceType === 'dynatrace') {
+      if (isDynatraceDashboard(original) && original.dashboardLabel) {
+        fetchDynatraceMetricsForSlo(original.dashboardLabel);
+      }
+    } else if (!isDynatraceDashboard(original)) {
+      if (newValue.sourceType === 'grafana' && original.dashboard_uid) {
+        fetchDashboardPanels(original.dashboard_uid);
+      } else if (newValue.sourceType === 'performance_test' && original.id) {
+        fetchPerfMetricsPanels(original.id);
+      }
     }
   };
 
@@ -148,7 +164,7 @@ export function SLOFormFields({
           value={allDashboardsMerged.find(d => {
             const sel = sloFormData.selectedDashboard;
             if (!sel) return false;
-            return d.original === sel || d.label === (sel.dashboard_label || sel.dashboardLabel);
+            return d.original === sel || d.label === (isDynatraceDashboard(sel) ? sel.dashboardLabel : sel.dashboard_label);
           }) || null}
           onChange={handleUnifiedDashboardSelect}
           loading={dashboardsLoading}
@@ -212,7 +228,7 @@ export function SLOFormFields({
             options={availablePanels}
             getOptionLabel={(option) => option.title}
             isOptionEqualToValue={(option, value) => option.id === value.id}
-            value={sloFormData.selectedPanel}
+            value={selectedGrafanaPanel}
             onChange={(_, newValue) => {
               setSloFormData((prev) => ({
                 ...prev,
@@ -231,7 +247,7 @@ export function SLOFormFields({
                 error={!!validationErrors.selectedPanel}
                 helperText={
                   validationErrors.selectedPanel ||
-                  (panelsLoading ? 'Loading metrics...' : `Select metric from ${sloFormData.selectedDashboard?.dashboard_label}`)
+                  (panelsLoading ? 'Loading metrics...' : `Select metric from ${selectedAppDashboard?.dashboard_label}`)
                 }
                 InputProps={{
                   ...params.InputProps,
@@ -269,7 +285,7 @@ export function SLOFormFields({
           <Autocomplete
             options={availableDynatraceMetrics}
             getOptionLabel={(option) => option.panelTitle}
-            value={sloFormData.selectedPanel}
+            value={selectedDynatraceMetric}
             onChange={(_, newValue) => {
               setSloFormData((prev) => ({
                 ...prev,
@@ -288,7 +304,7 @@ export function SLOFormFields({
                 error={!!validationErrors.selectedPanel}
                 helperText={
                   validationErrors.selectedPanel ||
-                  (panelsLoading ? 'Loading metrics...' : `Select metric from ${sloFormData.selectedDashboard?.dashboardLabel}`)
+                  (panelsLoading ? 'Loading metrics...' : `Select metric from ${selectedDynatraceDashboard?.dashboardLabel}`)
                 }
                 InputProps={{
                   ...params.InputProps,
@@ -327,7 +343,7 @@ export function SLOFormFields({
             options={availablePerfMetricsPanels}
             getOptionLabel={(option) => option.title || ''}
             isOptionEqualToValue={(option, value) => option.id === value.id}
-            value={sloFormData.selectedPanel}
+            value={selectedGrafanaPanel}
             onChange={(_, newValue) => {
               setSloFormData((prev) => ({
                 ...prev,
@@ -346,7 +362,7 @@ export function SLOFormFields({
                 error={!!validationErrors.selectedPanel}
                 helperText={
                   validationErrors.selectedPanel ||
-                  (panelsLoading ? 'Loading metrics...' : `Select metric from ${sloFormData.selectedDashboard?.dashboard_label}`)
+                  (panelsLoading ? 'Loading metrics...' : `Select metric from ${selectedAppDashboard?.dashboard_label}`)
                 }
                 InputProps={{
                   ...params.InputProps,

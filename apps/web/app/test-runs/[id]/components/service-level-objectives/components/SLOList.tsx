@@ -27,6 +27,8 @@ import ApdexScenarioTable from './ApdexScenarioTable';
 import MetricSeriesTable from './MetricSeriesTable';
 
 import { SortField, SortDirection, SamplerStat } from '../types';
+import { CheckResult, Benchmark } from '@/lib/types';
+import { TestRun } from '@/types/test-runs';
 import {
   isApdexResult,
   formatApdexRequirement,
@@ -35,10 +37,10 @@ import {
 } from '../utils/slo-formatters';
 
 interface SLOListProps {
-  testRun: unknown;
+  testRun: TestRun | null;
   testRunId: string;
-  checkResults: unknown[];
-  benchmarks: unknown[];
+  checkResults: CheckResult[];
+  benchmarks: Benchmark[];
   expandedSloRows: Set<string>;
   sloFilter: 'all' | 'failed';
   searchText: string;
@@ -61,10 +63,10 @@ interface SLOListProps {
   toggleTransactionExpanded: (transactionKey: string, transactionName: string, excludeRampUp: boolean) => Promise<void>;
   handleOpenRequestActionMenu: (event: React.MouseEvent<HTMLElement>, transactionName: string, scenarioName: string | undefined, samplerName: string) => void;
   handleOpenApdexActionMenu: (event: React.MouseEvent<HTMLElement>, transactionName: string, scenarioName: string | undefined, threshold: number) => void;
-  handleEditSlo: (checkResult: unknown) => Promise<void>;
+  handleEditSlo: (checkResult: CheckResult) => Promise<void>;
   handleReEvaluate: (panelId: number, applicationDashboardId?: string, metricName?: string) => Promise<void>;
-  handleOpenApdexThresholdsDialog: (result: unknown, event: React.MouseEvent) => void;
-  getCheckResultKey: (result: unknown) => string;
+  handleOpenApdexThresholdsDialog: (result: CheckResult, event: React.MouseEvent) => void;
+  getCheckResultKey: (result: CheckResult) => string;
 }
 
 export function SLOList({
@@ -108,7 +110,6 @@ export function SLOList({
       const searchLower = searchText.toLowerCase();
       filteredResults = filteredResults.filter(r =>
         r.dashboard_label?.toLowerCase().includes(searchLower) ||
-        r.dashboard_name?.toLowerCase().includes(searchLower) ||
         r.panel_title?.toLowerCase().includes(searchLower) ||
         r.metric_name?.toLowerCase().includes(searchLower) ||
         r.config_title?.toLowerCase().includes(searchLower)
@@ -139,7 +140,6 @@ export function SLOList({
       const searchLower = searchText.toLowerCase();
       base = base.filter(r =>
         r.dashboard_label?.toLowerCase().includes(searchLower) ||
-        r.dashboard_name?.toLowerCase().includes(searchLower) ||
         r.panel_title?.toLowerCase().includes(searchLower) ||
         r.metric_name?.toLowerCase().includes(searchLower) ||
         r.config_title?.toLowerCase().includes(searchLower)
@@ -340,11 +340,6 @@ export function SLOList({
                     {result.dashboard_label && (
                       <Typography variant="body2" sx={{ fontWeight: 600, mb: 0.5 }}>
                         {result.dashboard_label}
-                      </Typography>
-                    )}
-                    {result.dashboard_name && (
-                      <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mb: 0.5 }}>
-                        {result.dashboard_name}
                       </Typography>
                     )}
                   </>

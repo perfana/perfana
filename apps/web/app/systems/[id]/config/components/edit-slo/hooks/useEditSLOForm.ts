@@ -1,4 +1,6 @@
 'use client';
+import { ApplicationDashboard, GrafanaPanel } from '@/lib/types';
+import { DynatraceDashboard, DynatraceMetric } from '@/lib/dynatrace';
 
 import { useState, useEffect, useCallback } from 'react';
 import { authenticatedFetch } from '@/lib/api';
@@ -34,10 +36,10 @@ export function useEditSLOForm({
   const [saveDialogOption, setSaveDialogOption] = useState<SaveDialogOption>('none');
 
   // Available options
-  const [availableDashboards, setAvailableDashboards] = useState<unknown[]>([]);
-  const [availablePanels, setAvailablePanels] = useState<unknown[]>([]);
-  const [availableDynatraceDashboards, setAvailableDynatraceDashboards] = useState<unknown[]>([]);
-  const [availableDynatraceMetrics, setAvailableDynatraceMetrics] = useState<unknown[]>([]);
+  const [availableDashboards, setAvailableDashboards] = useState<ApplicationDashboard[]>([]);
+  const [availablePanels, setAvailablePanels] = useState<GrafanaPanel[]>([]);
+  const [availableDynatraceDashboards, setAvailableDynatraceDashboards] = useState<DynatraceDashboard[]>([]);
+  const [availableDynatraceMetrics, setAvailableDynatraceMetrics] = useState<DynatraceMetric[]>([]);
   const [validationErrors, setValidationErrors] = useState<ValidationErrors>({});
 
   // Fetch Grafana application dashboards

@@ -38,7 +38,6 @@ export default function AddSLODialog({
     validationErrors,
     setValidationErrors,
     loadingStates,
-    _setLoadingStates,
     availableOptions,
     dataSourceAvailability,
     fetchDashboardPanels,

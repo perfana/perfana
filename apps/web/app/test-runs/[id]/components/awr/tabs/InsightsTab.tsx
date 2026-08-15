@@ -308,7 +308,6 @@ function PendingAnalysisState({
  */
 export function InsightsTab({
   reportId,
-  _testRunId,
   initialFilters,
   showComparisonInsights = false,
   onSnackbar,
@@ -332,7 +331,6 @@ export function InsightsTab({
   const {
     analysis,
     insights: rawInsights,
-    _severitySummary,
     loading,
     error,
     refetch,
@@ -340,8 +338,6 @@ export function InsightsTab({
     isReanalyzing,
     hasAnalysis,
     filterInsights,
-    _getInsightsBySeverity,
-    _getInsightsByCategory,
   } = useAwrAnalysis(reportId, {
     onSnackbar,
   });

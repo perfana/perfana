@@ -77,7 +77,7 @@ const TIME_MODEL_COLORS: Record<string, string> = {
 /**
  * Get color for a time model segment
  */
-function getTimeModelColor(_name: string): string {
+function getTimeModelColor(name: string): string {
   // Check for exact match
   if (TIME_MODEL_COLORS[name]) {
     return TIME_MODEL_COLORS[name];
@@ -229,7 +229,6 @@ function PieChartView({ data, height, isDonut, dbTime }: PieChartViewProps) {
 
   // Custom label
   const renderLabel = ({
-    _name,
     percent,
   }: {
     name: string;

@@ -13,14 +13,15 @@ import { MonitorHeart, Add } from '@mui/icons-material';
 import { SLOList } from './SLOList';
 import {} from '../hooks';
 import { SortField, SortDirection, SamplerStat } from '../types';
+import { CheckResult, Benchmark } from '@/lib/types';
 import { TestRun } from '@/types/test-runs';
 
 interface SLOExpandedViewProps {
   testRun: TestRun | null;
   testRunId: string;
-  checkResults: unknown[];
+  checkResults: CheckResult[];
   checkResultsLoading: boolean;
-  benchmarks: unknown[];
+  benchmarks: Benchmark[];
   benchmarksLoading: boolean;
   expandedSloRows: Set<string>;
   sloFilter: 'all' | 'failed';
@@ -44,10 +45,10 @@ interface SLOExpandedViewProps {
   toggleTransactionExpanded: (transactionKey: string, transactionName: string, excludeRampUp: boolean) => Promise<void>;
   handleOpenRequestActionMenu: (event: React.MouseEvent<HTMLElement>, transactionName: string, scenarioName: string | undefined, samplerName: string) => void;
   handleOpenApdexActionMenu: (event: React.MouseEvent<HTMLElement>, transactionName: string, scenarioName: string | undefined, threshold: number) => void;
-  handleEditSlo: (checkResult: unknown) => Promise<void>;
+  handleEditSlo: (checkResult: CheckResult) => Promise<void>;
   handleReEvaluate: (panelId: number, applicationDashboardId?: string, metricName?: string) => Promise<void>;
-  handleOpenApdexThresholdsDialog: (result: unknown, event: React.MouseEvent) => void;
-  getCheckResultKey: (result: unknown) => string;
+  handleOpenApdexThresholdsDialog: (result: CheckResult, event: React.MouseEvent) => void;
+  getCheckResultKey: (result: CheckResult) => string;
 }
 
 export function SLOExpandedView({

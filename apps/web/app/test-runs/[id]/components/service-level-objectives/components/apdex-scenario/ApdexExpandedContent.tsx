@@ -77,7 +77,6 @@ function ThemeAwareStatCards({ target }: { target: { satisfied_count?: number; t
 
 export function ApdexExpandedContent({
   target,
-  _transactionKey,
   isLastRow,
   scenario,
   transactionSamples,

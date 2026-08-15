@@ -1,4 +1,6 @@
 'use client';
+import { ApplicationDashboard, GrafanaPanel } from '@/lib/types';
+import { DynatraceDashboard, DynatraceMetric } from '@/lib/dynatrace';
 
 import React from 'react';
 import {
@@ -9,7 +11,7 @@ import {
   CircularProgress,
   Autocomplete,
 } from '@mui/material';
-import { SLOFormData, ValidationErrors } from '../types';
+import { SLOFormData, ValidationErrors, isDynatraceDashboard, isDynatraceMetric } from '../types';
 import { SOURCE_OPTIONS, getSourceOption } from '../utils/slo-formatters';
 
 interface SLOFormFieldsProps {
@@ -19,10 +21,10 @@ interface SLOFormFieldsProps {
   setValidationErrors: React.Dispatch<React.SetStateAction<ValidationErrors>>;
   dashboardsLoading: boolean;
   panelsLoading: boolean;
-  availableDashboards: unknown[];
-  availablePanels: unknown[];
-  availableDynatraceDashboards: unknown[];
-  availableDynatraceMetrics: unknown[];
+  availableDashboards: ApplicationDashboard[];
+  availablePanels: GrafanaPanel[];
+  availableDynatraceDashboards: DynatraceDashboard[];
+  availableDynatraceMetrics: DynatraceMetric[];
   fetchSloApplicationDashboards: () => Promise<void>;
   fetchDynatraceDashboardsForSlo: () => Promise<void>;
   fetchDashboardPanels: (dashboardUid: string) => Promise<void>;
@@ -45,6 +47,15 @@ export function SLOFormFields({
   fetchDashboardPanels,
   fetchDynatraceMetricsForSlo,
 }: SLOFormFieldsProps) {
+  // The form holds whichever shape the chosen source produced. Narrow once here
+  // so each source-specific picker below works with a concrete type.
+  const sel = sloFormData.selectedDashboard;
+  const selectedAppDashboard = sel && !isDynatraceDashboard(sel) ? sel : null;
+  const selectedDynatraceDashboard = sel && isDynatraceDashboard(sel) ? sel : null;
+  const selPanel = sloFormData.selectedPanel;
+  const selectedGrafanaPanel = selPanel && !isDynatraceMetric(selPanel) ? selPanel : null;
+  const selectedDynatraceMetric = selPanel && isDynatraceMetric(selPanel) ? selPanel : null;
+
   const clearValidationError = (field: string) => {
     if (validationErrors[field]) {
       setValidationErrors((prev) => {
@@ -234,10 +245,10 @@ export function SLOFormFields({
       {sloFormData.source === 'dynatrace' && sloFormData.selectedDashboard && (
         <Grid size={{ xs: 12 }}>
           <Autocomplete
-            options={availableDynatraceMetrics.length > 0 ? availableDynatraceMetrics : (sloFormData.selectedPanel ? [sloFormData.selectedPanel] : [])}
+            options={availableDynatraceMetrics.length > 0 ? availableDynatraceMetrics : (selectedDynatraceMetric ? [selectedDynatraceMetric] : [])}
             getOptionLabel={(option) => option.panelTitle || ''}
             isOptionEqualToValue={(option, value) => option.panelTitle === value?.panelTitle}
-            value={sloFormData.selectedPanel}
+            value={selectedDynatraceMetric}
             onChange={(_, newValue) => {
               setSloFormData((prev) => ({
                 ...prev,
@@ -291,10 +302,10 @@ export function SLOFormFields({
       {sloFormData.source === 'grafana' && sloFormData.selectedDashboard && (
         <Grid size={{ xs: 12 }}>
           <Autocomplete
-            options={availablePanels.length > 0 ? availablePanels : (sloFormData.selectedPanel ? [sloFormData.selectedPanel] : [])}
+            options={availablePanels.length > 0 ? availablePanels : (selectedGrafanaPanel ? [selectedGrafanaPanel] : [])}
             getOptionLabel={(option) => option.title || ''}
             isOptionEqualToValue={(option, value) => (option.id != null && value?.id != null) ? String(option.id) === String(value.id) : option.title === value?.title}
-            value={sloFormData.selectedPanel}
+            value={selectedGrafanaPanel}
             onChange={(_, newValue) => {
               setSloFormData((prev) => ({
                 ...prev,
@@ -350,7 +361,7 @@ export function SLOFormFields({
           <Grid size={{ xs: 12 }}>
             <TextField
               label="Dashboard"
-              value={sloFormData.selectedDashboard?.dashboard_label || sloFormData.selectedDashboard?.dashboardLabel || ''}
+              value={selectedAppDashboard?.dashboard_label || selectedDynatraceDashboard?.dashboardLabel || ''}
               variant="outlined"
               fullWidth
               disabled={true}

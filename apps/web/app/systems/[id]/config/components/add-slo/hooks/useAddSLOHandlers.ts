@@ -1,6 +1,7 @@
 'use client';
 
 import { useCallback } from 'react';
+import { isDynatraceDashboard, isDynatraceMetric } from '../types';
 import { authenticatedFetch } from '@/lib/api';
 import {  UseAddSLOHandlersProps, UseAddSLOHandlersReturn } from '../types';
 import {
@@ -11,7 +12,6 @@ import {
 
 export function useAddSLOHandlers({
   systemId,
-  _systemName,
   environment,
   workload,
   sloFormData,
@@ -48,9 +48,17 @@ export function useAddSLOHandlers({
     try {
       setSloFormLoading(true);
 
+      // The form stores whichever shape the chosen source produced; narrow once.
+      const selDash = sloFormData.selectedDashboard;
+      const selPanel = sloFormData.selectedPanel;
+      const appDashboard = selDash && !isDynatraceDashboard(selDash) ? selDash : null;
+      const dynDashboard = selDash && isDynatraceDashboard(selDash) ? selDash : null;
+      const grafanaPanel = selPanel && !isDynatraceMetric(selPanel) ? selPanel : null;
+      const dynMetric = selPanel && isDynatraceMetric(selPanel) ? selPanel : null;
+
       // Handle percentunit conversion - divide by 100 if panel uses percentunit format
       let processedRequirementValue = sloFormData.requirementValue;
-      if (sloFormData.selectedPanel?.yAxesFormat === 'percentunit') {
+      if (grafanaPanel?.yAxesFormat === 'percentunit') {
         const parsedValue = parseValueWithUnit(sloFormData.requirementValue);
         if (parsedValue.value && !isNaN(Number(parsedValue.value))) {
           processedRequirementValue = String(Number(parsedValue.value) / 100);
@@ -70,11 +78,11 @@ export function useAddSLOHandlers({
           workload: workload,
           source: 'dynatrace',
           grafanaInstance: 'Dynatrace',
-          dashboardLabel: sloFormData.selectedDashboard?.dashboardLabel || '',
+          dashboardLabel: dynDashboard?.dashboardLabel || '',
           dashboardUid: '',
-          applicationDashboardId: sloFormData.selectedPanel?.applicationDashboardId || '',
-          configTitle: `${sloFormData.selectedDashboard?.dashboardLabel || 'Dashboard'} - ${sloFormData.selectedPanel?.panelTitle || 'Metric'}`,
-          panelTitle: sloFormData.selectedPanel?.panelTitle || '',
+          applicationDashboardId: dynMetric?.applicationDashboardId || '',
+          configTitle: `${dynDashboard?.dashboardLabel || 'Dashboard'} - ${dynMetric?.panelTitle || 'Metric'}`,
+          panelTitle: dynMetric?.panelTitle || '',
           evaluateType: sloFormData.evaluateType,
           requirementOperator: sloFormData.requirementOperator,
           requirementValue: processedRequirementValue,
@@ -87,10 +95,10 @@ export function useAddSLOHandlers({
             },
             evaluateType: sloFormData.evaluateType,
             dashboardUid: '',
-            id: sloFormData.selectedPanel?.panelId,
+            id: dynMetric?.panelId,
             type: 'dynatrace',
-            title: `${sloFormData.selectedDashboard?.dashboardLabel || 'Dashboard'} - ${sloFormData.selectedPanel?.panelTitle || 'Metric'}`,
-            yAxesFormat: sloFormData.selectedPanel?.metricUnit || null,
+            title: `${dynDashboard?.dashboardLabel || 'Dashboard'} - ${dynMetric?.panelTitle || 'Metric'}`,
+            yAxesFormat: dynMetric?.metricUnit || null,
             excludeRampUpTime: sloFormData.excludeRampUpTime,
             averageAll: sloFormData.averageAll,
             matchPattern: sloFormData.matchPattern,
@@ -108,15 +116,15 @@ export function useAddSLOHandlers({
           workload: workload,
           source: sloFormData.source,
           grafanaInstance: sloFormData.selectedDashboard?.grafanaInstance?.label || 'Default',
-          dashboardLabel: sloFormData.selectedDashboard?.dashboard_label || '',
+          dashboardLabel: appDashboard?.dashboard_label || '',
           ...(sloFormData.selectedDashboard?.dashboard_id &&
           typeof sloFormData.selectedDashboard.dashboard_id === 'number'
             ? { dashboardId: sloFormData.selectedDashboard.dashboard_id }
             : {}),
-          dashboardUid: sloFormData.selectedDashboard?.dashboard_uid || '',
-          applicationDashboardId: sloFormData.selectedDashboard?.id || '',
-          configTitle: `${sloFormData.selectedDashboard?.dashboard_label || 'Dashboard'} - ${sloFormData.selectedPanel?.title || 'Metric'}`,
-          panelTitle: sloFormData.selectedPanel?.title || '',
+          dashboardUid: appDashboard?.dashboard_uid || '',
+          applicationDashboardId: appDashboard?.id || '',
+          configTitle: `${appDashboard?.dashboard_label || 'Dashboard'} - ${grafanaPanel?.title || 'Metric'}`,
+          panelTitle: grafanaPanel?.title || '',
           evaluateType: sloFormData.evaluateType,
           requirementOperator: sloFormData.requirementOperator,
           requirementValue: processedRequirementValue,
@@ -128,9 +136,9 @@ export function useAddSLOHandlers({
               value: processedRequirementValue,
             },
             evaluateType: sloFormData.evaluateType,
-            dashboardUid: sloFormData.selectedDashboard?.dashboard_uid,
-            id: sloFormData.selectedPanel?.id,
-            yAxesFormat: sloFormData.selectedPanel?.yAxesFormat || null,
+            dashboardUid: appDashboard?.dashboard_uid,
+            id: grafanaPanel?.id,
+            yAxesFormat: grafanaPanel?.yAxesFormat || null,
             excludeRampUpTime: sloFormData.excludeRampUpTime,
             averageAll: sloFormData.averageAll,
             matchPattern: sloFormData.matchPattern,

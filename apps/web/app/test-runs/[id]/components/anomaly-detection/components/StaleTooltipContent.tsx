@@ -6,8 +6,6 @@ import { StaleTooltipContentProps, ConfigSetting } from './types';
 
 export default function StaleTooltipContent({
   row,
-  _testRunId,
-  _drawerData,
   _rowIndex
 }: StaleTooltipContentProps) {
   const [configSettings, setConfigSettings] = useState<ConfigSetting[]>([]);

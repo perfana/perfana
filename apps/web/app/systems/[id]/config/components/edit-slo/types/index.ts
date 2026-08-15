@@ -1,12 +1,31 @@
+import { ApplicationDashboard, GrafanaPanel } from '@/lib/types';
+import { DynatraceDashboard, DynatraceMetric } from '@/lib/dynatrace';
 import { Benchmark } from '../../types';
+
+/** A dashboard the SLO form can point at, across all three metric sources. */
+export type SloDashboard = ApplicationDashboard | DynatraceDashboard;
+
+/** A panel or metric the SLO form can point at, across all three metric sources. */
+export type SloPanel = GrafanaPanel | DynatraceMetric;
+
+/** Dynatrace dashboards are the only camelCase shape in the union. */
+export function isDynatraceDashboard(d: SloDashboard): d is DynatraceDashboard {
+  return 'dashboardLabel' in d;
+}
+
+/** Dynatrace metrics carry panelTitle; Grafana panels carry title. */
+export function isDynatraceMetric(p: SloPanel): p is DynatraceMetric {
+  return 'panelTitle' in p;
+}
 
 /**
  * SLO Form Data State
  */
 export interface SLOFormData {
   source: string;
-  selectedDashboard: unknown;
-  selectedPanel: unknown;
+  /** Grafana + performance-test dashboards are ApplicationDashboards; Dynatrace has its own shape. */
+  selectedDashboard: SloDashboard | null;
+  selectedPanel: SloPanel | null;
   evaluateType: string;
   requirementOperator: string;
   requirementValue: string;
@@ -63,10 +82,10 @@ export interface LoadingStates {
  * Available options from API responses
  */
 export interface AvailableOptions {
-  availableDashboards: unknown[];
-  availablePanels: unknown[];
-  availableDynatraceDashboards: unknown[];
-  availableDynatraceMetrics: unknown[];
+  availableDashboards: ApplicationDashboard[];
+  availablePanels: GrafanaPanel[];
+  availableDynatraceDashboards: DynatraceDashboard[];
+  availableDynatraceMetrics: DynatraceMetric[];
 }
 
 /**

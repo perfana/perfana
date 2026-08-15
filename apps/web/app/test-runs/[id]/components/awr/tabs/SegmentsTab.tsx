@@ -151,9 +151,7 @@ function getTotalValue(report: unknown, segmentType: SegmentType): number | unde
 
 export function SegmentsTab({
   reportId,
-  _testRunId,
   initialSegmentType = 'tableScans',
-  _onSnackbar,
 }: SegmentsTabProps) {
   const theme = useTheme();
   const [selectedType, setSelectedType] = useState<SegmentType>(initialSegmentType);
