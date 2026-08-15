@@ -125,6 +125,46 @@ describe('ApplicationDashboardsController', () => {
       expect(deletionProcessor.addBulkJobs).toHaveBeenCalledWith(['id-1'], false, mockUserContext);
     });
 
+    it('is a no-op for an empty batch', async () => {
+      const result = await controller.batchDelete({ ids: [] }, mockUserContext);
+
+      expect(result).toEqual({ queued: 0, deleted: 0 });
+      expect(deletionProcessor.addBulkJobs).not.toHaveBeenCalled();
+      expect(service.delete).not.toHaveBeenCalled();
+    });
+
+    it('queues nothing when the caller can see none of the dashboards', async () => {
+      service.filterAccessible.mockResolvedValue([]);
+
+      const result = await controller.batchDelete({ ids }, mockUserContext);
+
+      expect(result).toEqual({ queued: 0, deleted: 0 });
+      expect(deletionProcessor.addBulkJobs).not.toHaveBeenCalled();
+    });
+
+    it('surfaces a queue failure as a 500 rather than silently dropping the batch', async () => {
+      deletionProcessor.addBulkJobs.mockRejectedValue(new Error('Redis went away'));
+
+      await expect(controller.batchDelete({ ids }, mockUserContext)).rejects.toThrow(HttpException);
+    });
+
+    it('rejects a batch larger than the cap rather than queueing it', async () => {
+      const tooMany = Array.from({ length: 501 }, (_, i) => `id-${i}`);
+
+      await expect(controller.batchDelete({ ids: tooMany }, mockUserContext)).rejects.toThrow(
+        HttpException,
+      );
+      expect(deletionProcessor.addBulkJobs).not.toHaveBeenCalled();
+    });
+
+    it('accepts a batch exactly at the cap', async () => {
+      const atCap = Array.from({ length: 500 }, (_, i) => `id-${i}`);
+
+      const result = await controller.batchDelete({ ids: atCap }, mockUserContext);
+
+      expect(result).toEqual({ queued: 500, deleted: 0 });
+    });
+
     it('rejects a malformed ids payload', async () => {
       await expect(
         controller.batchDelete({ ids: [123 as unknown as string] }, mockUserContext),
