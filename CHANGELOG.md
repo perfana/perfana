@@ -4,6 +4,11 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
+## [0.2.63.1] - 2026-08-15
+
+### Fixed
+- **Audit logging no longer breaks on installs that are switched off overnight.** The worker created the next three months of audit partitions once a day at 03:00 UTC. A deployment that is not running at that hour — a laptop, or a self-hosted install that only runs during business hours — never got the look-ahead, and once it ran out every audit write failed with "no partition of relation found". The partitions are now also ensured when the worker starts. A failure there is logged and does not stop the worker from booting.
+
 ## [0.2.63.0] - 2026-08-15
 
 ### Fixed
