@@ -216,12 +216,16 @@ export function useEditSLOForm({
         ? (benchmark.config_title?.split(' - ').slice(1).join(' - ') || benchmark.panel_title || benchmark.metric_name || 'Metric')
         : (benchmark.panel_title || benchmark.metric_name || benchmark.config_title?.split(' - ').slice(1).join(' - ') || 'Metric');
 
+      const rawPanelId = benchmark.configuration?.panelId ?? benchmark.configuration?.id;
       const syntheticPanel = benchmark.source === 'dynatrace'
         ? {
             panelTitle,
           }
         : {
-            id: Number(benchmark.configuration?.panelId ?? benchmark.configuration?.id),
+            // Coerce only when there is something to coerce: Number(undefined)
+            // is NaN, which JSON.stringify writes as null, where the previous
+            // `panelId || id` simply omitted the key.
+            id: rawPanelId != null ? Number(rawPanelId) : undefined,
             title: panelTitle,
             type: 'timeseries',
             yAxesFormat: benchmark.configuration?.yAxesFormat,
