@@ -90,4 +90,30 @@ describe('buildSamplerSections', () => {
     const names = sections.map((s) => (s.kind === 'single' ? s.sample.sampler_name : s.name));
     expect(names).toEqual(['first', 'second', 'third']);
   });
+
+  it('carries the group timings onto the section', () => {
+    const stats = {
+      parallel_group: 'PG1', executions: 12, passed_count: 12, failed_count: 0,
+      avg_elapsed: 156, min_elapsed: 154, max_elapsed: 160, p95_elapsed: 159, p99_elapsed: 160,
+    };
+    const sections = buildSamplerSections([
+      sampler('a', { parallel_group: 'PG1', parallel_group_stats: stats }),
+      sampler('b', { parallel_group: 'PG1', parallel_group_stats: stats }),
+    ]);
+
+    const group = sections[0];
+    if (group.kind !== 'group') throw new Error('expected a group');
+    expect(group.stats).toEqual(stats);
+  });
+
+  it('leaves stats null when the run predates the rollup', () => {
+    const sections = buildSamplerSections([
+      sampler('a', { parallel_group: 'PG1' }),
+      sampler('b', { parallel_group: 'PG1' }),
+    ]);
+
+    const group = sections[0];
+    if (group.kind !== 'group') throw new Error('expected a group');
+    expect(group.stats).toBeNull();
+  });
 });

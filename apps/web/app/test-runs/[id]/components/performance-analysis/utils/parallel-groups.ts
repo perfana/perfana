@@ -1,9 +1,14 @@
-import { SamplerStat } from '../types/performance-analysis.types';
+import { ParallelGroupStats, SamplerStat } from '../types/performance-analysis.types';
 
 export interface SamplerGroupSection {
   kind: 'group';
   name: string;
   samples: SamplerStat[];
+  /**
+   * How long the group itself took. Read off the first member that carries it — the API repeats
+   * it on every member. Null for runs analysed before the rollup that computes it.
+   */
+  stats: ParallelGroupStats | null;
 }
 
 export interface SamplerSingleSection {
@@ -36,8 +41,14 @@ export function buildSamplerSections(samples: SamplerStat[]): SamplerSection[] {
     const existing = groupIndex.get(group);
     if (existing) {
       existing.samples.push(sample);
+      existing.stats = existing.stats ?? sample.parallel_group_stats ?? null;
     } else {
-      const section: SamplerGroupSection = { kind: 'group', name: group, samples: [sample] };
+      const section: SamplerGroupSection = {
+        kind: 'group',
+        name: group,
+        samples: [sample],
+        stats: sample.parallel_group_stats ?? null,
+      };
       groupIndex.set(group, section);
       sections.push(section);
     }

@@ -1,6 +1,21 @@
 import { render, screen } from '@testing-library/react';
 import { SamplerTable } from '@/app/test-runs/[id]/components/performance-analysis/components/SamplerTable';
-import { SamplerStat } from '@/app/test-runs/[id]/components/performance-analysis/types/performance-analysis.types';
+import { ParallelGroupStats, SamplerStat } from '@/app/test-runs/[id]/components/performance-analysis/types/performance-analysis.types';
+
+function groupStats(overrides: Partial<ParallelGroupStats> = {}): ParallelGroupStats {
+  return {
+    parallel_group: 'PG1',
+    executions: 40,
+    passed_count: 40,
+    failed_count: 0,
+    avg_elapsed: 156,
+    min_elapsed: 154,
+    max_elapsed: 160,
+    p95_elapsed: 159,
+    p99_elapsed: 160,
+    ...overrides,
+  };
+}
 
 function sampler(name: string, overrides: Partial<SamplerStat> = {}): SamplerStat {
   return {
@@ -58,18 +73,40 @@ describe('SamplerTable parallel groups', () => {
     expect(screen.getByText('cart_session_init')).toBeInTheDocument();
   });
 
-  it('labels the band with the group name and nothing derived', () => {
+  it('reports the group\'s own timings in the same columns as the requests', () => {
+    const stats = groupStats();
     renderTable([
-      sampler('slow', { parallel_group: 'PG1', avg_response_time: 158 }),
-      sampler('fast', { parallel_group: 'PG1', avg_response_time: 7 }),
+      sampler('slow', { parallel_group: 'PG1', parallel_group_stats: stats, avg_response_time: 158 }),
+      sampler('fast', { parallel_group: 'PG1', parallel_group_stats: stats, avg_response_time: 7 }),
     ]);
 
-    // The band states which group the requests belong to. Derived figures — wall clock,
-    // the sequential comparison, the concurrency count — were all dropped as noise.
     expect(screen.getByText('PG1')).toBeInTheDocument();
-    expect(screen.queryByText(/requests issued concurrently/)).not.toBeInTheDocument();
-    expect(screen.queryByText(/Wall clock/)).not.toBeInTheDocument();
-    expect(screen.queryByText(/if run sequentially/)).not.toBeInTheDocument();
+    // The group's measured elapsed time, not the sum or the max of its members.
+    expect(screen.getByText('156.00')).toBeInTheDocument();
+    expect(screen.getByText('159.00')).toBeInTheDocument();
+    expect(screen.getByText('160.00')).toBeInTheDocument();
+    expect(screen.getByText('40')).toBeInTheDocument();
+  });
+
+  it('renders the band without timings for a run analysed before they existed', () => {
+    renderTable([
+      sampler('one', { parallel_group: 'PG1' }),
+      sampler('two', { parallel_group: 'PG1' }),
+    ]);
+
+    expect(screen.getByText('PG1')).toBeInTheDocument();
+    expect(screen.getByText(/Group timings unavailable/)).toBeInTheDocument();
+  });
+
+  it('marks percentiles computed from too few executions', () => {
+    const stats = groupStats({ executions: 4 });
+    renderTable([
+      sampler('one', { parallel_group: 'PG1', parallel_group_stats: stats }),
+      sampler('two', { parallel_group: 'PG1', parallel_group_stats: stats }),
+    ]);
+
+    // A p95 over 4 observations is not a p95; the cell says so rather than implying otherwise.
+    expect(screen.getAllByText('*').length).toBeGreaterThan(0);
   });
 
   it('does not band a group with a single member', () => {

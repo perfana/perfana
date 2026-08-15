@@ -1185,6 +1185,68 @@ describe('TestRunsPerformanceQueryService', () => {
         expect((result as SamplerStats[])[0].sampler_name).toBe('POST /checkout');
       });
 
+      it('attaches the group timings from the rollup', async () => {
+        mockQuerySequence(
+          [RAW_SAMPLER_ROW],
+          [{ sampler_name: 'POST /checkout', scenario_name: 'load_test', parallel_group: 'PG1' }],
+          [{
+            parallel_group: 'PG1', scenario_name: 'load_test',
+            executions: '12', passed_count: '12', failed_count: '0',
+            avg_elapsed: '156.25', min_elapsed: '154', max_elapsed: '160',
+            p95_elapsed: '159.00', p99_elapsed: '160.00',
+          }],
+        );
+
+        const result = (await service.getTransactionSamples(
+          TEST_RUN_ID, TRANSACTION, false, IS_ADMIN, [],
+        )) as SamplerStats[];
+
+        expect(result[0].parallel_group_stats).toEqual({
+          parallel_group: 'PG1',
+          executions: 12,
+          passed_count: 12,
+          failed_count: 0,
+          avg_elapsed: 156.25,
+          min_elapsed: 154,
+          max_elapsed: 160,
+          p95_elapsed: 159,
+          p99_elapsed: 160,
+        });
+      });
+
+      it('still labels groups when the rollup has not been computed', async () => {
+        // A run analysed before the rollup table existed: the band still renders, without timings.
+        mockQuerySequence(
+          [RAW_SAMPLER_ROW],
+          [{ sampler_name: 'POST /checkout', scenario_name: 'load_test', parallel_group: 'PG1' }],
+          [],
+        );
+
+        const result = (await service.getTransactionSamples(
+          TEST_RUN_ID, TRANSACTION, false, IS_ADMIN, [],
+        )) as SamplerStats[];
+
+        expect(result[0].parallel_group).toBe('PG1');
+        expect(result[0].parallel_group_stats).toBeUndefined();
+      });
+
+      it('reads the rollup for the same ramp-up setting as the samplers', async () => {
+        // Group timings must describe the same window as the rows they sit above.
+        mockQuerySequence(
+          [{ start_time: new Date().toISOString(), ramp_up: '120' }],
+          [RAW_SAMPLER_ROW],
+          [{ sampler_name: 'POST /checkout', scenario_name: 'load_test', parallel_group: 'PG1' }],
+          [],
+        );
+
+        await service.getTransactionSamples(TEST_RUN_ID, TRANSACTION, true, IS_ADMIN, []);
+
+        const statsCall = (testRunRepo.query as jest.Mock).mock.calls
+          .find(([sql]) => /test_run_parallel_group_stats/i.test(String(sql)));
+        expect(statsCall).toBeDefined();
+        expect(statsCall[1]).toContain(true);
+      });
+
       it('bounds the lookup so it cannot scan the whole hypertable', async () => {
         mockQuerySequence([RAW_SAMPLER_ROW], []);
 

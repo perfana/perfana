@@ -12,6 +12,23 @@ export interface TransactionStat {
   active_threshold: number;
 }
 
+/**
+ * How long a parallel group itself took, measured per pass as last finish minus first start.
+ * Distinct from its members' response times: those describe individual requests.
+ */
+export interface ParallelGroupStats {
+  parallel_group: string;
+  /** Number of times the group ran — the sample size behind the percentiles. */
+  executions: number;
+  passed_count: number;
+  failed_count: number;
+  avg_elapsed: number;
+  min_elapsed: number;
+  max_elapsed: number;
+  p95_elapsed: number;
+  p99_elapsed: number;
+}
+
 export interface SamplerStat {
   sampler_name: string;
   scenario_name?: string;
@@ -36,6 +53,8 @@ export interface SamplerStat {
    * the run predates the tag. Absent means "not parallel", never "unknown".
    */
   parallel_group?: string | null;
+  /** Repeated on every member of a group; absent for runs analysed before the rollup existed. */
+  parallel_group_stats?: ParallelGroupStats | null;
 }
 
 export interface VirtualUserStats {

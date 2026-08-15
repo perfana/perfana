@@ -139,6 +139,24 @@ export interface TransactionStats {
 /**
  * Sampler/request statistics
  */
+/**
+ * How long a parallel group itself took, measured per pass as last finish minus first start.
+ * Distinct from its members' response times: those describe individual requests, this describes
+ * the concurrent pass they belong to.
+ */
+export interface ParallelGroupStats {
+  parallel_group: string;
+  /** Number of times the group ran — the sample size behind the percentiles. */
+  executions: number;
+  passed_count: number;
+  failed_count: number;
+  avg_elapsed: number;
+  min_elapsed: number;
+  max_elapsed: number;
+  p95_elapsed: number;
+  p99_elapsed: number;
+}
+
 export interface SamplerStats {
   sampler_name: string;
   scenario_name?: string;
@@ -158,6 +176,12 @@ export interface SamplerStats {
   active_threshold: number;
   url_hash: string | null;
   url_pattern: string | null;
+  /**
+   * Statistics for the parallel group this request belongs to, repeated on each of the group's
+   * members so the client can read them off whichever member it renders first. Null when the
+   * request ran sequentially, or when the run predates the rollup that computes them.
+   */
+  parallel_group_stats?: ParallelGroupStats | null;
   /**
    * Name of the Parallel Controller this request ran under, or null when it ran sequentially.
    * Also null for runs recorded before the load test tool reported it, so consumers must treat

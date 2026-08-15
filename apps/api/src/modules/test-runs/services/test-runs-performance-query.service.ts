@@ -13,6 +13,7 @@ import {
   ErrorStats,
   VirtualUserStats,
   ThroughputStats,
+  ParallelGroupStats,
 } from '../types/test-run.types';
 
 interface SummaryTimeseriesBucket {
@@ -685,6 +686,69 @@ export class TestRunsPerformanceQueryService {
   }
 
   /**
+   * Attaches how long each parallel group itself took.
+   *
+   * Read from test_run_parallel_group_stats rather than derived here: the metric is a pass's
+   * elapsed time, so a percentile over it needs every pass of the run, which is a full scan of
+   * the transaction. The rollup pipeline computes it once instead.
+   *
+   * The stats are repeated on every member of a group so the client can read them off whichever
+   * member it renders first, without a second lookup or a change to the response shape.
+   */
+  private async attachParallelGroupStats(
+    resolvedTestRunId: string,
+    transactionName: string,
+    samples: SamplerStats[],
+    excludeRampUp: boolean,
+  ): Promise<void> {
+    const rows = await withRequestEm(this.testRunRepo).query(
+      `SELECT parallel_group,
+              NULLIF(scenario_name, '')                                   AS scenario_name,
+              executions, passed_count, failed_count,
+              avg_elapsed, min_elapsed, max_elapsed,
+              ROUND(approx_percentile(0.95, pct_agg)::numeric, 2)         AS p95_elapsed,
+              ROUND(approx_percentile(0.99, pct_agg)::numeric, 2)         AS p99_elapsed
+         FROM test_run_parallel_group_stats
+        WHERE test_run_id = $1
+          AND transaction_name = $2
+          AND ramp_up_excluded = $3`,
+      [resolvedTestRunId, transactionName, excludeRampUp],
+    );
+    if (!rows || rows.length === 0) {
+      // No rollup yet: an older run, or one analysed before this table existed. The groups still
+      // render, just without their own timings.
+      return;
+    }
+
+    const statsByGroup = new Map<string, ParallelGroupStats>();
+    for (const row of rows as Array<Record<string, unknown>>) {
+      const scenario = (row.scenario_name as string) ?? '';
+      statsByGroup.set(`${scenario}\u0000${row.parallel_group as string}`, {
+        parallel_group: row.parallel_group as string,
+        executions: this.mapper.parseInt(row.executions),
+        passed_count: this.mapper.parseInt(row.passed_count),
+        failed_count: this.mapper.parseInt(row.failed_count),
+        avg_elapsed: this.mapper.parseFloat(row.avg_elapsed),
+        min_elapsed: this.mapper.parseInt(row.min_elapsed),
+        max_elapsed: this.mapper.parseInt(row.max_elapsed),
+        p95_elapsed: this.mapper.parseFloat(row.p95_elapsed),
+        p99_elapsed: this.mapper.parseFloat(row.p99_elapsed),
+      });
+    }
+
+    for (const sample of samples) {
+      if (!sample.parallel_group) {
+        continue;
+      }
+      const scoped = statsByGroup.get(`${sample.scenario_name ?? ''}\u0000${sample.parallel_group}`);
+      // Fall back to a scenario-less match: the rollup stores '' for an unset scenario, and a
+      // sampler row may carry undefined for the same thing.
+      sample.parallel_group_stats =
+        scoped ?? statsByGroup.get(`\u0000${sample.parallel_group}`) ?? null;
+    }
+  }
+
+  /**
    * CAGG-backed sampler stats — the live-Apdex companion to
    * `getTransactionSamplesFromRollup`. Reads from `requests_raw_5s` JOINed
    * with `requests_raw_passed_5s` (added in migration 1779100000000) instead
@@ -1150,7 +1214,7 @@ export class TestRunsPerformanceQueryService {
     // Decorate here rather than in each fetch path (rollup / CAGG / raw fallback), so all of
     // them report parallel groups identically.
     if (Array.isArray(samples) && samples.length > 0) {
-      await this.attachParallelGroups(resolvedTestRunId, transactionName, samples);
+      await this.attachParallelGroups(resolvedTestRunId, transactionName, samples, excludeRampUp);
     }
     return samples;
   }
@@ -1170,6 +1234,7 @@ export class TestRunsPerformanceQueryService {
     resolvedTestRunId: string,
     transactionName: string,
     samples: SamplerStats[],
+    excludeRampUp: boolean,
   ): Promise<void> {
     try {
       // Bounded scan. A plain DISTINCT over requests_raw would scan every row this
@@ -1219,6 +1284,8 @@ export class TestRunsPerformanceQueryService {
       for (const sample of samples) {
         sample.parallel_group = groupBySampler.get(key(sample.scenario_name, sample.sampler_name)) || null;
       }
+
+      await this.attachParallelGroupStats(resolvedTestRunId, transactionName, samples, excludeRampUp);
     } catch (error) {
       this.logger.warn(
         `Could not resolve parallel groups for transaction ${transactionName}: ${

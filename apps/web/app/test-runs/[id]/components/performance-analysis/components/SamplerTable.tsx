@@ -23,6 +23,8 @@ import { ClippedUrl } from '@/components/ui/clipped-url';
 
 const COLUMN_COUNT = 9;
 const GROUP_ACCENT = 'secondary.main';
+/** Below this many executions, a p95/p99 is a statement about a handful of points. */
+const MIN_EXECUTIONS_FOR_PERCENTILES = 20;
 
 export interface SamplerTableProps {
   samples: SamplerStat[];
@@ -171,6 +173,41 @@ function SamplerRow({
   );
 }
 
+/**
+ * One statistic of a parallel group. Percentiles over a small number of executions are reported
+ * with a caveat rather than silently presented as if they carried the same weight as a percentile
+ * over thousands of requests.
+ */
+function GroupStatCell({
+  value,
+  executions,
+  tooltip,
+}: {
+  value: number;
+  executions?: number;
+  tooltip?: string;
+}) {
+  const thin = executions !== undefined && executions < MIN_EXECUTIONS_FOR_PERCENTILES;
+  const title =
+    tooltip ??
+    (thin
+      ? `Only ${executions} executions of this group — too few for a meaningful percentile.`
+      : `Across ${executions} executions of this group.`);
+
+  return (
+    <Tooltip title={title} arrow placement="top">
+      <TableCell align="right" sx={{ fontFamily: 'monospace', cursor: 'help' }}>
+        {formatNumber(value)}
+        {thin && (
+          <Typography component="span" variant="caption" sx={{ color: 'warning.main', ml: 0.5 }}>
+            *
+          </Typography>
+        )}
+      </TableCell>
+    </Tooltip>
+  );
+}
+
 export function SamplerTable({
   samples,
   transactionName,
@@ -212,10 +249,7 @@ export function SamplerTable({
             return (
               <Fragment key={`g-${idx}`}>
                 <TableRow sx={(theme) => ({ backgroundColor: alpha(theme.palette.secondary.main, 0.06) })}>
-                  <TableCell
-                    colSpan={COLUMN_COUNT}
-                    sx={{ py: 0.75, borderLeft: '3px solid', borderLeftColor: GROUP_ACCENT }}
-                  >
+                  <TableCell sx={{ py: 0.75, borderLeft: '3px solid', borderLeftColor: GROUP_ACCENT }}>
                     <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
                       <AltRouteIcon fontSize="small" sx={{ color: GROUP_ACCENT }} />
                       <Typography variant="caption" sx={{ fontWeight: 700, color: GROUP_ACCENT }}>
@@ -226,6 +260,37 @@ export function SamplerTable({
                       </Typography>
                     </Box>
                   </TableCell>
+                  {section.stats ? (
+                    <>
+                      <GroupStatCell
+                        value={section.stats.avg_elapsed}
+                        tooltip={`The group's own elapsed time, averaged over ${section.stats.executions} executions. Measured per execution as last finish minus first start, so it is not the sum of the rows below.`}
+                      />
+                      <GroupStatCell value={section.stats.p95_elapsed} executions={section.stats.executions} />
+                      <GroupStatCell value={section.stats.p99_elapsed} executions={section.stats.executions} />
+                      <TableCell align="right" sx={{ fontFamily: 'monospace', color: 'success.main', fontWeight: 600 }}>
+                        {section.stats.passed_count}
+                      </TableCell>
+                      <TableCell align="right" sx={{
+                        fontFamily: 'monospace',
+                        color: section.stats.failed_count > 0 ? 'error.main' : 'text.secondary',
+                        fontWeight: section.stats.failed_count > 0 ? 600 : 400,
+                      }}>
+                        {section.stats.failed_count}
+                      </TableCell>
+                      {/* A group has no Apdex: the threshold is configured per transaction and per
+                          request, and a group's duration is neither. */}
+                      <TableCell align="right" sx={{ color: 'text.disabled' }}>—</TableCell>
+                      <TableCell align="right" sx={{ color: 'text.disabled' }}>—</TableCell>
+                      <TableCell align="center" />
+                    </>
+                  ) : (
+                    <TableCell colSpan={COLUMN_COUNT - 1} sx={{ color: 'text.disabled' }}>
+                      <Typography variant="caption">
+                        Group timings unavailable — this run was analysed before they were recorded
+                      </Typography>
+                    </TableCell>
+                  )}
                 </TableRow>
 
                 {section.samples.map((sampler, sIdx) => (
