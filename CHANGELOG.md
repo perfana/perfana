@@ -4,13 +4,14 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
-## [0.2.61.106] - 2026-08-15
+## [0.2.62.1] - 2026-08-15
 
 ### Fixed
 - **Deleting a large batch of Grafana dashboards no longer freezes the page.** System under test → Grafana dashboards fired one `DELETE` per selected dashboard in parallel, and each of those cascades into the metrics hypertables — so a batch of any size left the browser waiting, and the concurrent cascades competed for the same rows in the database. The batch is now handed to a background queue that deletes one dashboard at a time, exactly as batches of test runs are handled: the page returns immediately and the selected rows disappear from the list while the deletion runs behind them. If Redis is unavailable the deletions still run in the request, but sequentially rather than all at once.
+- **An unreachable Grafana can no longer stall dashboard deletion for minutes.** Deleting a dashboard from Grafana used an HTTP call with no timeout, so a Grafana that accepted the connection but never answered held the database transaction open for five minutes. The call now gives up after 30 seconds.
 
 ### Added
-- **`POST /api/grafana/application-dashboards/batch-delete`** queues application dashboards for deletion and returns 202. Takes `{ ids, deleteFromGrafana }`; dashboards the caller cannot see are skipped.
+- **`POST /api/grafana/application-dashboards/batch-delete`** queues application dashboards for deletion and returns 202. Takes `{ ids, deleteFromGrafana }`, up to 500 per call; dashboards the caller cannot see are skipped.
 
 ## [0.2.61.105] - 2026-08-14
 

@@ -88,6 +88,26 @@ and any DQL query / entity-mapping editor pages.
 
 ---
 
+## Grafana dashboards
+
+### Surface failed background dashboard deletions in the UI
+
+**Priority:** P2
+**Origin:** Deliberate scope call during /ship on `fix/queue-grafana-dashboard-batch-delete` (2026-08-15).
+**Why:** Batch dashboard deletion is now queued, but `application_dashboards` has no `deletion_status` column (test runs do). The UI drops the queued rows optimistically and a permanently failed job only surfaces as the dashboard reappearing after a reload, with the reason buried in the API log. The user is told "queued for deletion" and nothing contradicts that.
+**What:** Either add `deletion_status` to `application_dashboards` and mirror the test-run treatment (queued/deleting/failed badge, row stays visible), or return a per-id result the UI can poll. The `failed` handler in the processor is already the hook point.
+**Where:** `apps/api/src/modules/grafana/processors/application-dashboard-deletion.processor.ts` (the `failed` worker event), `apps/web/app/systems/[id]/config/hooks/useDashboardManagement.ts` (`handleBatchDeleteDashboards`), compare with `apps/api/src/modules/test-runs/processors/test-run-deletion.processor.ts`.
+
+### `concurrency: 1` deletion queues are per-process, not per-cluster
+
+**Priority:** P3
+**Origin:** Adversarial review during /ship on `fix/queue-grafana-dashboard-batch-delete` (2026-08-15). Pre-existing shape, inherited by the new dashboard-deletion queue.
+**Why:** Both deletion processors run their BullMQ `Worker` inside the API process with `concurrency: 1`, which is what stops the hypertable cascades from deadlocking each other. That guarantee holds only while exactly one API process exists — scale the API to N replicas and effective concurrency becomes N, silently restoring the deadlocks the queue was built to prevent. Nothing in the code or the deploy config asserts the single-replica assumption.
+**What:** Either move both workers into the worker app (one replica by design), or take a Redis-based distributed lock around the delete so concurrency stays 1 cluster-wide. At minimum, assert the assumption where replicas are configured.
+**Where:** `apps/api/src/modules/grafana/processors/application-dashboard-deletion.processor.ts` (~line 92), `apps/api/src/modules/test-runs/processors/test-run-deletion.processor.ts` (~line 155).
+
+---
+
 ## Reports
 
 ### SLO section renders a green "all clear" card when the check-results query fails
