@@ -120,6 +120,45 @@ describe('SamplerTable parallel groups', () => {
     expect(screen.queryByText('Parallel group')).not.toBeInTheDocument();
   });
 
+  it('gives each group its own colour so they can be told apart', () => {
+    const { container } = renderTable([
+      sampler('a', { parallel_group: 'PG1' }),
+      sampler('b', { parallel_group: 'PG1' }),
+      sampler('c', { parallel_group: 'PG2' }),
+      sampler('d', { parallel_group: 'PG2' }),
+    ]);
+
+    const borderColors = Array.from(container.querySelectorAll('th'))
+      .map((el) => window.getComputedStyle(el).borderLeftColor)
+      .filter((c) => c && c !== '' && !/rgba\(0, 0, 0, 0\)/.test(c));
+
+    // Two groups, two distinct accent colours.
+    expect(new Set(borderColors).size).toBeGreaterThanOrEqual(2);
+  });
+
+  it('draws the group line only beside the request name', () => {
+    // th:first-of-type only. Including td:first-of-type drew a second line down the Avg column,
+    // because the name cell is a th so the first td is the next column along.
+    const { container } = renderTable([
+      sampler('a', { parallel_group: 'PG1' }),
+      sampler('b', { parallel_group: 'PG1' }),
+    ]);
+
+    // Look at the member rows only — the band's own header cell is meant to carry the line.
+    const memberRows = Array.from(container.querySelectorAll('tr')).filter((row) =>
+      /^(a|b)$/.test(row.querySelector('th')?.textContent?.trim() ?? ''),
+    );
+    expect(memberRows).toHaveLength(2);
+
+    for (const row of memberRows) {
+      const bordered = Array.from(row.querySelectorAll('th,td')).filter(
+        (el) => window.getComputedStyle(el).borderLeftWidth === '3px',
+      );
+      expect(bordered).toHaveLength(1);
+      expect(bordered[0].tagName).toBe('TH');
+    }
+  });
+
   it('renders separate bands for separate groups', () => {
     renderTable([
       sampler('a', { parallel_group: 'PG1' }),

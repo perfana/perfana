@@ -22,7 +22,22 @@ import { buildSamplerSections } from '../utils/parallel-groups';
 import { ClippedUrl } from '@/components/ui/clipped-url';
 
 const COLUMN_COUNT = 9;
-const GROUP_ACCENT = 'secondary.main';
+/**
+ * One colour per parallel group within a transaction, so several groups can be told apart at a
+ * glance. Deliberately avoids red and green: those already mean failed and passed in this table.
+ */
+const GROUP_COLORS = [
+  '#7b1fa2', // purple
+  '#00796b', // teal
+  '#303f9f', // indigo
+  '#c2185b', // pink
+  '#0097a7', // cyan
+  '#5d4037', // brown
+];
+
+function groupColor(ordinal: number): string {
+  return GROUP_COLORS[ordinal % GROUP_COLORS.length];
+}
 /** Below this many executions, a p95/p99 is a statement about a handful of points. */
 const MIN_EXECUTIONS_FOR_PERCENTILES = 20;
 
@@ -36,7 +51,8 @@ export interface SamplerTableProps {
 interface SamplerRowProps {
   sampler: SamplerStat;
   transactionName: string;
-  inParallelGroup?: boolean;
+  /** Colour of the group this row belongs to; undefined for a sequential row. */
+  groupColor?: string;
   onOpenSamplerActionMenu: (event: React.MouseEvent<HTMLElement>, transaction: string, sampler: SamplerStat) => void;
   onOpenSamplerErrors: (transactionName: string, samplerName: string) => void;
 }
@@ -44,7 +60,7 @@ interface SamplerRowProps {
 function SamplerRow({
   sampler,
   transactionName,
-  inParallelGroup = false,
+  groupColor: accent,
   onOpenSamplerActionMenu,
   onOpenSamplerErrors,
 }: SamplerRowProps) {
@@ -52,10 +68,12 @@ function SamplerRow({
     <TableRow sx={{
       '&:hover': { backgroundColor: 'rgba(25, 118, 210, 0.04)' },
       '&:nth-of-type(odd)': { backgroundColor: 'rgba(0, 0, 0, 0.02)' },
-      ...(inParallelGroup && {
-        '& > td:first-of-type, & > th:first-of-type': {
+      // Only the name cell carries the line. Including td:first-of-type drew a second line
+      // down the Avg column, because the name cell is a th and the first td is the next one.
+      ...(accent && {
+        '& > th:first-of-type': {
           borderLeft: '3px solid',
-          borderLeftColor: GROUP_ACCENT,
+          borderLeftColor: accent,
           pl: 2.5,
         },
       }),
@@ -215,6 +233,13 @@ export function SamplerTable({
   onOpenSamplerErrors,
 }: SamplerTableProps) {
   const sections = buildSamplerSections(samples);
+  // Ordinal by order of appearance, so the same group keeps its colour across re-renders.
+  const colorByGroup = new Map<string, string>();
+  sections.forEach((section) => {
+    if (section.kind === 'group' && !colorByGroup.has(section.name)) {
+      colorByGroup.set(section.name, groupColor(colorByGroup.size));
+    }
+  });
 
   return (
     <TableContainer component={Paper} elevation={0} sx={{ border: '1px solid rgba(0, 0, 0, 0.08)' }}>
@@ -246,13 +271,15 @@ export function SamplerTable({
               );
             }
 
+            const accent = colorByGroup.get(section.name) ?? GROUP_COLORS[0];
+
             return (
               <Fragment key={`g-${idx}`}>
-                <TableRow sx={(theme) => ({ backgroundColor: alpha(theme.palette.secondary.main, 0.06) })}>
-                  <TableCell sx={{ py: 0.75, borderLeft: '3px solid', borderLeftColor: GROUP_ACCENT }}>
+                <TableRow sx={{ backgroundColor: alpha(accent, 0.06) }}>
+                  <TableCell sx={{ py: 0.75, borderLeft: '3px solid', borderLeftColor: accent }}>
                     <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
-                      <AltRouteIcon fontSize="small" sx={{ color: GROUP_ACCENT }} />
-                      <Typography variant="caption" sx={{ fontWeight: 700, color: GROUP_ACCENT }}>
+                      <AltRouteIcon fontSize="small" sx={{ color: accent }} />
+                      <Typography variant="caption" sx={{ fontWeight: 700, color: accent }}>
                         Parallel group
                       </Typography>
                       <Typography variant="caption" fontFamily="monospace" color="text.secondary">
@@ -304,7 +331,7 @@ export function SamplerTable({
                     key={`g-${idx}-${sIdx}`}
                     sampler={sampler}
                     transactionName={transactionName}
-                    inParallelGroup
+                    groupColor={accent}
                     onOpenSamplerActionMenu={onOpenSamplerActionMenu}
                     onOpenSamplerErrors={onOpenSamplerErrors}
                   />
