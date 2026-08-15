@@ -1,3 +1,4 @@
+import type { TestRun } from '@/types/test-runs';
 /**
  * Types for SLOMetricsChart component
  */
@@ -26,14 +27,17 @@ import type { CheckResult } from '@/lib/types';
 
 export type { CheckResult, CheckResultRequirement, CheckResultTarget } from '@/lib/types';
 
-export interface TestRunInfo {
-  start_time: string;
-  end_time?: string;
+/**
+ * The window fields the SLO charts read off a test run. Derived from TestRun so
+ * the optionality cannot drift from the source type.
+ */
+export type TestRunInfo = Pick<
+  TestRun,
+  'start_time' | 'end_time' | 'analysis_start_offset' | 'analysis_end_offset'
+> & {
   /** @deprecated Use analysis_start_offset instead. Kept for API compatibility. */
   ramp_up_seconds?: number;
-  analysis_start_offset?: number;
-  analysis_end_offset?: number;
-}
+};
 
 export interface SLOMetricsChartProps {
   testRunId: string;

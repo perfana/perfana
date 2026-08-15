@@ -2,6 +2,7 @@
 
 import { useCallback } from 'react';
 import { authenticatedFetch } from '@/lib/api';
+import type React from 'react';
 import {
   ApplicationDashboard,
   Panel,
@@ -9,7 +10,10 @@ import {
   CompareSeries,
   DataSource,
   RelatedTestRun,
+  MetricComparison,
+  MetricStatistic,
 } from '../types';
+import { DynatraceMetric } from '@/lib/dynatrace';
 import { TestRun } from '@/types/test-runs';
 import { getSourceType, isPerformanceTest } from '@/lib/metrics-source-utils';
 import { ALL_AGGREGATED_OPTION, buildAggregatedMetricName, collapsePerfRtPanels } from '@/lib/aggregated-perf-series';
@@ -35,13 +39,13 @@ interface UseCompareHandlersProps {
   setSelectedDashboard: (dashboard: ApplicationDashboard | null) => void;
   setSelectedMetric: (metric: Panel | null) => void;
   setPanels: (panels: Panel[]) => void;
-  setDynatraceMetrics: (metrics: unknown[]) => void;
+  setDynatraceMetrics: React.Dispatch<React.SetStateAction<DynatraceMetric[]>>;
   setAvailableMetrics: (metrics: string[]) => void;
   setSelectedMetricNames: (names: string[]) => void;
   setAddedSeries: (series: CompareSeries[] | ((prev: CompareSeries[]) => CompareSeries[])) => void;
-  setMetricComparisons: (comparisons: unknown[]) => void;
-  setCurrentMetrics: (metrics: unknown[]) => void;
-  setSelectedMetrics: (metrics: unknown[]) => void;
+  setMetricComparisons: React.Dispatch<React.SetStateAction<MetricComparison[]>>;
+  setCurrentMetrics: React.Dispatch<React.SetStateAction<MetricStatistic[]>>;
+  setSelectedMetrics: React.Dispatch<React.SetStateAction<MetricStatistic[]>>;
   setShowGraphs: (graphs: Record<string, boolean> | ((prev: Record<string, boolean>) => Record<string, boolean>)) => void;
   setGraphData: (data: Record<string, GraphData> | ((prev: Record<string, GraphData>) => Record<string, GraphData>)) => void;
   setGraphLoading: (loading: Record<string, boolean> | ((prev: Record<string, boolean>) => Record<string, boolean>)) => void;

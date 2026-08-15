@@ -26,7 +26,7 @@ import { AnomalyData } from '../../types';
 import { formatValueWithUnit } from '@/lib/units';
 import { getConclusionColor } from '../../helpers';
 import { formatNumber, getConfigSourceInfo, generateThresholdData } from '../utils';
-import { DrawerData } from '../../../types';
+import { DrawerData, AdaptStatisticValues } from '../../types';
 
 interface StatisticalDrawerContentProps {
   drawerData: DrawerData;
@@ -198,7 +198,7 @@ export function StatisticalDrawerContent({
                     <StatisticRow
                       key={stat}
                       stat={stat}
-                      data={drawerData[stat]}
+                      data={drawerData[stat] as AdaptStatisticValues}
                       isPrimary={isPrimaryStatistic}
                       unit={row.unit ?? undefined}
                       isIqr={stat === 'iqr'}
@@ -213,7 +213,7 @@ export function StatisticalDrawerContent({
                     <StatisticRow
                       key={quantile}
                       stat={quantile}
-                      data={drawerData[quantile]}
+                      data={drawerData[quantile] as AdaptStatisticValues}
                       isPrimary={isPrimaryStatistic}
                       unit={row.unit ?? undefined}
                       isQuantile

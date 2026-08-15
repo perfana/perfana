@@ -29,10 +29,10 @@ interface SLOFormFieldsProps {
   availableDynatraceMetrics: DynatraceMetric[];
   availablePerfMetricsDashboards: ApplicationDashboard[];
   availablePerfMetricsPanels: GrafanaPanel[];
-  _dataSourceAvailability: DataSourceAvailability;
+  dataSourceAvailability: DataSourceAvailability;
   systemName: string;
   environment: string;
-  _workload: string;
+  workload: string;
   handleSourceChange: (sourceValue: string) => void;
   fetchDashboardPanels: (dashboardUid: string) => Promise<void>;
   fetchPerfMetricsPanels: (dashboardUid: string) => Promise<void>;
@@ -52,10 +52,10 @@ export function SLOFormFields({
   availableDynatraceMetrics,
   availablePerfMetricsDashboards,
   availablePerfMetricsPanels,
-  _dataSourceAvailability,
+  dataSourceAvailability: _dataSourceAvailability,
   systemName,
   environment,
-  _workload,
+  workload: _workload,
   handleSourceChange,
   fetchDashboardPanels,
   fetchPerfMetricsPanels,

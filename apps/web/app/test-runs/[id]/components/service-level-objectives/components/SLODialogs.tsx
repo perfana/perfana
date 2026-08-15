@@ -1,6 +1,7 @@
 'use client';
 
 import React from 'react';
+import { CheckResult, Benchmark } from '@/lib/types';
 import {
   Menu,
   MenuItem,
@@ -33,10 +34,10 @@ export interface SLODialogsProps {
 
   // Edit SLO dialog
   editSloDialogOpen: boolean;
-  selectedSloForEdit: unknown;
+  selectedSloForEdit: Benchmark | null;
   setEditSloDialogOpen: (open: boolean) => void;
-  setSelectedSloForEdit: (slo: unknown) => void;
-  handleSloUpdated: (updatedSlo: unknown) => void;
+  setSelectedSloForEdit: (slo: Benchmark | null) => void;
+  handleSloUpdated: (updatedSlo: Benchmark) => void;
 
   // Apdex action menu
   apdexActionMenuAnchor: HTMLElement | null;
@@ -57,9 +58,9 @@ export interface SLODialogsProps {
 
   // Apdex thresholds dialog
   apdexThresholdsDialogOpen: boolean;
-  selectedApdexResultForThresholds: unknown;
+  selectedApdexResultForThresholds: CheckResult | null;
   setApdexThresholdsDialogOpen: (open: boolean) => void;
-  setSelectedApdexResultForThresholds: (result: unknown) => void;
+  setSelectedApdexResultForThresholds: (result: CheckResult | null) => void;
   handleApdexThresholdsSuccess: () => void;
 }
 

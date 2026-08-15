@@ -32,7 +32,7 @@ export interface TemplateManagementDialogProps {
   onClose: () => void;
   template: TemplateListItem | null;
   systemId: string;
-  _systemName: string;
+  systemName: string;
   testEnvironment: string;
   workload: string;
   isEdit: boolean;
@@ -51,7 +51,7 @@ export function TemplateManagementDialog({
   onClose,
   template,
   systemId,
-  _systemName,
+  systemName: _systemName,
   testEnvironment,
   workload,
   isEdit,

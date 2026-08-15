@@ -509,7 +509,7 @@ export function TestRunsTable({
             hideFooterSelectedRowCount
             hideFooter={testRuns.length <= 5}
             disableVirtualization={false}
-            onRowClick={(params, event) => handleRowClick(params.row, event as unknown)}
+            onRowClick={(params, event) => handleRowClick(params.row, event)}
             sx={dataGridSx}
           />
         </Box>
@@ -553,7 +553,7 @@ export function TestRunsTable({
           disableColumnResize={false}
           hideFooterSelectedRowCount
           disableVirtualization={false}
-          onRowClick={(params, event) => handleRowClick(params.row, event as unknown)}
+          onRowClick={(params, event) => handleRowClick(params.row, event)}
           sx={dataGridSx}
         />
       </Box>

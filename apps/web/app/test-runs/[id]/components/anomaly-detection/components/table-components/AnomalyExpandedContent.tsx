@@ -17,7 +17,7 @@ import {
 } from '@mui/icons-material';
 import { useTheme, alpha } from '@mui/material/styles';
 import dynamic from 'next/dynamic';
-import { AnomalyData, MetricTrendData } from '../../types';
+import { AnomalyData, MetricTrendData, DrawerData } from '../../types';
 import { TestRun } from '@/types/test-runs';
 import CurrentTestRunChart from '../../../compare/CurrentTestRunChart';
 import type { AggregatedMetricSource } from '../../../compare/current-test-run-chart/types';
@@ -61,7 +61,7 @@ interface AnomalyExpandedContentProps {
   trendsLoading: boolean;
   chartKey: number;
   drawerOpen: boolean;
-  drawerData: unknown;
+  drawerData: DrawerData;
   drawerLoading: boolean;
   showConfigForm: boolean;
   showToast?: (message: string) => void;
@@ -403,7 +403,7 @@ export function AnomalyExpandedContent({
                     metricName: row.metric_name,
                     dashboardLabel: row.dashboard_label || 'Unknown Dashboard',
                     currentConfig: (() => {
-                      const drawerRecord = drawerData as Record<string, unknown> | undefined;
+                      const drawerRecord = drawerData;
                       type NestedConfig = Record<string, unknown>;
                       const existingConfig = (drawerRecord?.compare_config as NestedConfig) || {} as NestedConfig;
                       const mc = existingConfig.metricClassification as NestedConfig | undefined;

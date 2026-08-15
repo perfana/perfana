@@ -11,8 +11,12 @@ export function formatMetricUnit(metricUnit?: string): string {
   return unit.format || '';
 }
 
-// Helper function to check if a check result is an Apdex SLO
-export function isApdexResult(result: CheckResult): boolean {
+/**
+ * Whether a check result is an Apdex SLO. Takes only the two fields it reads so
+ * the narrower per-table views (MetricSeriesResult, ApdexResult) can be passed
+ * without being widened to a full CheckResult.
+ */
+export function isApdexResult(result: Partial<Pick<CheckResult, 'panel_type' | 'evaluate_type'>>): boolean {
   return result.panel_type === 'apdex' || result.evaluate_type === 'apdex';
 }
 
@@ -49,7 +53,10 @@ export function formatApdexScore(score: number | string | null | undefined): str
 }
 
 // Helper function to determine if a check result is stale
-export function isCheckResultStale(checkResult: CheckResult, benchmark: Benchmark | undefined): boolean {
+export function isCheckResultStale(
+  checkResult: Partial<Pick<CheckResult, 'created_at'>>,
+  benchmark: Partial<Pick<Benchmark, 'updated_at'>> | undefined,
+): boolean {
   if (!checkResult.created_at || !benchmark?.updated_at) {
     return false;
   }

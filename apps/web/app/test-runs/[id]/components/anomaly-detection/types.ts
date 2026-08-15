@@ -95,11 +95,21 @@ export interface AdaptCheck {
  * than this, so the index signature stays — these are the fields the drawer
  * and the threshold table actually read.
  */
+/** Test vs control for one statistic. Keyed dynamically on DrawerData. */
+export interface AdaptStatisticValues {
+  test: number;
+  control: number;
+  diff: number;
+}
+
 export interface DrawerData {
   statistic?: {
+    /** Which keyed statistic (mean, median, q95, ...) is the primary one. */
+    name?: string;
     test?: number;
     control?: number;
     diff?: number;
+    effect_size?: number | string;
     [key: string]: unknown;
   };
   checks?: {
@@ -136,9 +146,11 @@ export interface DrawerData {
     label?: ConclusionLabel;
     [key: string]: unknown;
   };
-  /** Distribution summaries, shown when the result carries them. */
-  mean?: { test?: number; control?: number; [key: string]: unknown };
-  q25?: { test?: number; control?: number; [key: string]: unknown };
+  /**
+   * Per-statistic distributions (mean, median, iqr, q10, q25, ...) live at the
+   * top level under their own key, so they are read through the index
+   * signature and narrowed to AdaptStatisticValues at the call site.
+   */
   [key: string]: unknown;
 }
 

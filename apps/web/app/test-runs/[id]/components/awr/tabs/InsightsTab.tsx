@@ -157,7 +157,7 @@ function EmptyState() {
 interface SeveritySummaryCardProps {
   severity: InsightSeverity;
   count: number;
-  _total: number;
+  total: number;
   onClick?: () => void;
   selected?: boolean;
 }
@@ -165,7 +165,7 @@ interface SeveritySummaryCardProps {
 function SeveritySummaryCard({
   severity,
   count,
-  _total,
+  total: _total,
   onClick,
   selected,
 }: SeveritySummaryCardProps) {

@@ -6,7 +6,7 @@ import { TestRun } from '@/types/test-runs';
 import { authenticatedFetch } from '@/lib/api';
 import { generateConfigHash } from '@/lib/config-hash';
 import { deleteAnomalyData, DeleteAnomalyRequest } from '@/lib/anomaly-api';
-import { AnomalyData, MetricTrendData, ConfigFormData, AdaptConclusion } from '../types';
+import { AnomalyData, MetricTrendData, ConfigFormData, AdaptConclusion, DrawerData } from '../types';
 import { useUpdateAdaptConfig } from './useUpdateAdaptConfig';
 
 // Known classification values - anything not in this list shows as "Unclassified"
@@ -133,7 +133,7 @@ interface UseAnomalyDetectionReturn {
 
   // Drawer state
   drawerOpen: Record<string, boolean>;
-  drawerData: Record<string, unknown>;
+  drawerData: Record<string, DrawerData>;
   drawerLoading: Record<string, boolean>;
   chartKey: Record<string, number>;
 
@@ -231,7 +231,7 @@ export function useAnomalyDetection({
 
   // Drawer state
   const [drawerOpen, setDrawerOpen] = useState<Record<string, boolean>>({});
-  const [drawerData, setDrawerData] = useState<Record<string, unknown>>({});
+  const [drawerData, setDrawerData] = useState<Record<string, DrawerData>>({});
   const [drawerLoading, setDrawerLoading] = useState<Record<string, boolean>>({});
   const [chartKey, setChartKey] = useState<Record<string, number>>({});
 

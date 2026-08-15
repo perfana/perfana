@@ -1,3 +1,4 @@
+import type { CheckResultTarget, CheckResultRequirement } from '@/lib/types';
 /**
  * Types for ApdexScenarioTable component and related sub-components
  */
@@ -17,26 +18,13 @@ export interface TransactionSample {
   failed_count: number;
 }
 
-export interface ApdexTarget {
-  transaction_name?: string;
-  target?: string;
-  scenario_name?: string;
-  threshold_ms?: number;
-  avg_response_time_ms?: number;
-  apdex_score?: number;
-  value?: number;
-  meets_requirement?: boolean;
-  satisfied_count?: number;
-  tolerating_count?: number;
-  frustrated_count?: number;
-  total_count?: number;
-}
+/** Apdex view of a check result target. */
+export type ApdexTarget = CheckResultTarget;
 
+/** The subset of a CheckResult the apdex table reads. */
 export interface ApdexResult {
-  targets?: ApdexTarget[];
-  requirement?: {
-    threshold_ms?: number;
-  };
+  targets?: CheckResultTarget[];
+  requirement?: CheckResultRequirement;
   exclude_ramp_up_time?: boolean;
 }
 

@@ -43,7 +43,9 @@ export default function EditDashboardDialog({
   // Helper function for auth headers
 
   // Function to fetch variable options from Grafana
-  const fetchVariableOptions = async (variable: DashboardVariable, dashboard: ApplicationDashboard) => {
+  // Only the variable's name is used; callers pass either a stored
+  // DashboardVariable or a Grafana templating variable, which lacks `values`.
+  const fetchVariableOptions = async (variable: Pick<DashboardVariable, 'name'>, dashboard: ApplicationDashboard) => {
     if (!systemName || !selectedEnvironment) {
       console.warn('Missing systemName or selectedEnvironment for variable options fetch');
       return;
@@ -192,13 +194,13 @@ export default function EditDashboardDialog({
                       options={optionsWithAll}
                       getOptionLabel={(option) => {
                         if (typeof option === 'string') return option;
-                        return option.label || option.value || option;
+                        return option.label;
                       }}
                       value={effectiveValues}
                       onChange={(_, newValue) => {
                         const stringValues = newValue.map(v => {
                           if (typeof v === 'string') return v;
-                          return v.value || v.label || v;
+                          return v.value;
                         });
                         handleVariableChange(variable.name, stringValues);
                       }}

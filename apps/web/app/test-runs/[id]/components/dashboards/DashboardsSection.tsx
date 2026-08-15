@@ -36,7 +36,8 @@ import {
 
 export default function DashboardsSection({
   testRun,
-  testRunId,
+  // Kept on the props interface for the parent; the data hook no longer needs it.
+  testRunId: _testRunId,
   dashboardsExpanded,
   onDashboardsExpand,
 }: DashboardsSectionProps) {
@@ -46,7 +47,6 @@ export default function DashboardsSection({
   // Data hook
   const dashboardsData = useDashboardsData({
     testRun,
-    testRunId,
     dashboardsExpanded,
     onDashboardsExpand,
   });

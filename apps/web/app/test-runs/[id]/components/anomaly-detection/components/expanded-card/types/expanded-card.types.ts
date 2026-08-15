@@ -2,6 +2,7 @@
  * Types for AnomalyDetectionExpandedCard component
  */
 
+import type { DrawerData } from '../../../types';
 import { TestRun } from '@/types/test-runs';
 import { AnomalyData, MetricTrendData } from '../../../types';
 import { DeleteOptions } from '../../DeleteAnomalyDialog';
@@ -79,7 +80,8 @@ export interface AnomalyTabContentProps {
   chartKey: Record<string, number>;
   drawerOpen: Record<string, boolean>;
   onDrawerToggle: (rowKey: string) => void;
-  drawerData: Record<string, unknown>;
+  /** ADAPT result per expanded row, keyed by the row key. */
+  drawerData: Record<string, DrawerData>;
   drawerLoading: Record<string, boolean>;
   showToast: (message: string) => void;
   showConfigForm: Record<string, boolean>;
@@ -143,7 +145,8 @@ export interface AnomalyDetectionExpandedCardProps {
   // Drawer state
   drawerOpen: Record<string, boolean>;
   onDrawerToggle: (rowKey: string) => void;
-  drawerData: Record<string, unknown>;
+  /** ADAPT result per expanded row, keyed by the row key. */
+  drawerData: Record<string, DrawerData>;
   drawerLoading: Record<string, boolean>;
 
   // Trends state

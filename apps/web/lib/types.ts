@@ -18,10 +18,13 @@ export interface DashboardVariable {
   allValue?: string;
 }
 
-/** One selectable value returned by the variable-values endpoint. */
+/**
+ * One selectable value from POST /grafana/dashboards/variable-values, which
+ * returns Array<{ label, value }> — both always present.
+ */
 export interface DashboardVariableOption {
+  label: string;
   value: string;
-  label?: string;
 }
 
 // Application Dashboard types
@@ -107,21 +110,39 @@ export interface CheckResult {
  * (node-postgres returns NUMERIC as a string).
  */
 export interface CheckResultRequirement {
-  /** Metric SLOs: the comparison. Absent on apdex results, which use min_score. */
+  /** Metric SLOs: the comparison. Absent on apdex results. */
   operator?: string;
   value?: number;
-  /** Apdex SLOs: the minimum acceptable score. */
+  /** Apdex SLOs: the minimum acceptable score and the satisfied threshold. */
   min_score?: number;
+  threshold_ms?: number;
   type?: string;
   aggregate_metric?: string;
   aggregate_stat?: string;
 }
 
-/** One entry of the `targets` JSONB array on a check result. */
+/**
+ * One entry of the `targets` JSONB array on a check result. The array holds
+ * metric targets (target/value/status) or apdex targets (per-transaction
+ * counts and scores) depending on the SLO kind, so this is the union of both
+ * and everything is optional. The per-table views alias this type.
+ */
 export interface CheckResultTarget {
-  target: string;
-  value: number;
-  meets_requirement: boolean;
+  target?: string;
+  value?: number | string | null;
+  meets_requirement?: boolean;
+  status?: string;
+  message?: string;
+  // Apdex targets
+  transaction_name?: string;
+  scenario_name?: string;
+  threshold_ms?: number;
+  avg_response_time_ms?: number;
+  apdex_score?: number;
+  satisfied_count?: number;
+  tolerating_count?: number;
+  frustrated_count?: number;
+  total_count?: number;
 }
 
 /**
