@@ -2,20 +2,30 @@ import { ApplicationDashboard, GrafanaPanel } from '@/lib/types';
 import { DynatraceDashboard, DynatraceMetric } from '@/lib/dynatrace';
 import { Benchmark } from '../../types';
 
-/** A dashboard the SLO form can point at, across all three metric sources. */
-export type SloDashboard = ApplicationDashboard | DynatraceDashboard;
+/**
+ * A dashboard reference held by the SLO form. Every field is optional on
+ * purpose: add mode stores a full ApplicationDashboard or DynatraceDashboard,
+ * while edit mode reconstructs a partial one from the saved benchmark before
+ * the dashboard lists have loaded.
+ */
+export type SloDashboard = Partial<ApplicationDashboard> &
+  Partial<DynatraceDashboard> & {
+    /** Only set on the synthetic dashboard the edit dialog rebuilds from a benchmark. */
+    dashboard_id?: number;
+    grafanaInstance?: { label: string };
+  };
 
-/** A panel or metric the SLO form can point at, across all three metric sources. */
-export type SloPanel = GrafanaPanel | DynatraceMetric;
+/** A panel/metric reference held by the SLO form. Optional for the same reason. */
+export type SloPanel = Partial<GrafanaPanel> & Partial<DynatraceMetric>;
 
 /** Dynatrace dashboards are the only camelCase shape in the union. */
-export function isDynatraceDashboard(d: SloDashboard): d is DynatraceDashboard {
-  return 'dashboardLabel' in d;
+export function isDynatraceDashboard(d: SloDashboard): boolean {
+  return d.dashboardLabel !== undefined;
 }
 
 /** Dynatrace metrics carry panelTitle; Grafana panels carry title. */
-export function isDynatraceMetric(p: SloPanel): p is DynatraceMetric {
-  return 'panelTitle' in p;
+export function isDynatraceMetric(p: SloPanel): boolean {
+  return p.panelTitle !== undefined;
 }
 
 /**

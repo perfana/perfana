@@ -12,7 +12,7 @@ import {
   Autocomplete,
   ListSubheader,
 } from '@mui/material';
-import { SLOFormData, ValidationErrors, DataSourceAvailability, SloDashboard, isDynatraceDashboard, isDynatraceMetric } from '../types';
+import { SLOFormData, ValidationErrors, DataSourceAvailability, SloDashboard, SloPanel, isDynatraceDashboard, isDynatraceMetric } from '../types';
 import {} from '../utils/slo-formatters';
 import { SOURCE_DISPLAY } from '@/lib/metrics-source-utils';
 
@@ -225,7 +225,7 @@ export function SLOFormFields({
       {sloFormData.source === 'grafana' && sloFormData.selectedDashboard && (
         <Grid size={{ xs: 12 }}>
           <Autocomplete
-            options={availablePanels}
+            options={availablePanels as SloPanel[]}
             getOptionLabel={(option) => option.title}
             isOptionEqualToValue={(option, value) => option.id === value.id}
             value={selectedGrafanaPanel}
@@ -283,7 +283,7 @@ export function SLOFormFields({
       {sloFormData.source === 'dynatrace' && sloFormData.selectedDashboard && (
         <Grid size={{ xs: 12 }}>
           <Autocomplete
-            options={availableDynatraceMetrics}
+            options={availableDynatraceMetrics as SloPanel[]}
             getOptionLabel={(option) => option.panelTitle}
             value={selectedDynatraceMetric}
             onChange={(_, newValue) => {
@@ -340,7 +340,7 @@ export function SLOFormFields({
       {sloFormData.source === 'performance-metrics' && sloFormData.selectedDashboard && (
         <Grid size={{ xs: 12 }}>
           <Autocomplete
-            options={availablePerfMetricsPanels}
+            options={availablePerfMetricsPanels as SloPanel[]}
             getOptionLabel={(option) => option.title || ''}
             isOptionEqualToValue={(option, value) => option.id === value.id}
             value={selectedGrafanaPanel}

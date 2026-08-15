@@ -1,6 +1,29 @@
 // Re-export types from their primary locations for convenience
 export type { SystemUnderTest, PyroscopeInstance } from '../types/test-runs';
 
+/**
+ * A Grafana templating variable attached to an application dashboard. The API
+ * enriches the stored `{ name, values }` pair with metadata read back off the
+ * dashboard JSON (`enrichVariablesWithTemplateMetadata`), so everything past
+ * `values` is present only when the source dashboard still declares it.
+ */
+export interface DashboardVariable {
+  name: string;
+  values: string[];
+  label?: string;
+  type?: string;
+  query?: string | { query?: string; [key: string]: unknown };
+  includeAll?: boolean;
+  multi?: boolean;
+  allValue?: string;
+}
+
+/** One selectable value returned by the variable-values endpoint. */
+export interface DashboardVariableOption {
+  value: string;
+  label?: string;
+}
+
 // Application Dashboard types
 export interface ApplicationDashboard {
   id: string;
@@ -11,10 +34,7 @@ export interface ApplicationDashboard {
   dashboard_name: string;
   dashboard_uid: string;
   dashboard_label: string;
-  variables: Array<{
-    name: string;
-    values: string[];
-  }>;
+  variables: DashboardVariable[];
   tags?: string[];
   metrics_source_id?: string;
   created_at: string;

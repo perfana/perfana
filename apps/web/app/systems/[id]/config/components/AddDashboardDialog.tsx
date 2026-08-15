@@ -14,6 +14,7 @@ import {
 } from '@mui/material';
 import { GrafanaDashboard, VariableValue } from './types';
 import { authenticatedFetch } from '@/lib/api';
+import { DashboardVariable, DashboardVariableOption } from '@/lib/types';
 
 interface AddDashboardDialogProps {
   open: boolean;
@@ -37,7 +38,7 @@ export default function AddDashboardDialog({
   const [selectedDashboard, setSelectedDashboard] = useState<GrafanaDashboard | null>(null);
   const [dashboardLabel, setDashboardLabel] = useState('');
   const [variableValues, setVariableValues] = useState<Record<string, string[]>>({});
-  const [variableOptions, setVariableOptions] = useState<Record<string, unknown[]>>({});
+  const [variableOptions, setVariableOptions] = useState<Record<string, DashboardVariableOption[]>>({});
   const [loadingVariables, setLoadingVariables] = useState<Record<string, boolean>>({});
 
   // Reset form when dialog opens
@@ -85,7 +86,7 @@ export default function AddDashboardDialog({
     }));
   };
 
-  const fetchVariableOptions = async (variable: unknown, dashboard: GrafanaDashboard) => {
+  const fetchVariableOptions = async (variable: DashboardVariable, dashboard: GrafanaDashboard) => {
     try {
       const response = await authenticatedFetch(`/grafana/dashboards/variable-values`, {
         method: 'POST',
@@ -138,7 +139,7 @@ export default function AddDashboardDialog({
     }
   };
 
-  const preSelectVariableValue = (variableName: string, options: unknown[]) => {
+  const preSelectVariableValue = (variableName: string, options: DashboardVariableOption[]) => {
     // Check if this variable should be pre-selected based on configuration scope
     let preSelectedValue: string | null = null;
     

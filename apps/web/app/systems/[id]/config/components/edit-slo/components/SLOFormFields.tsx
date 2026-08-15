@@ -11,7 +11,7 @@ import {
   CircularProgress,
   Autocomplete,
 } from '@mui/material';
-import { SLOFormData, ValidationErrors, isDynatraceDashboard, isDynatraceMetric } from '../types';
+import { SLOFormData, ValidationErrors, SloDashboard, SloPanel, isDynatraceDashboard, isDynatraceMetric } from '../types';
 import { SOURCE_OPTIONS, getSourceOption } from '../utils/slo-formatters';
 
 interface SLOFormFieldsProps {
@@ -121,10 +121,10 @@ export function SLOFormFields({
       {sloFormData.source === 'grafana' && (
         <Grid size={{ xs: 12 }}>
           <Autocomplete
-            options={availableDashboards.length > 0 ? availableDashboards : (sloFormData.selectedDashboard ? [sloFormData.selectedDashboard] : [])}
+            options={availableDashboards.length > 0 ? (availableDashboards as SloDashboard[]) : (selectedAppDashboard ? [selectedAppDashboard] : [])}
             getOptionLabel={(option) => option.dashboard_label || ''}
             isOptionEqualToValue={(option, value) => option.id === value?.id || option.dashboard_uid === value?.dashboard_uid}
-            value={sloFormData.selectedDashboard}
+            value={selectedAppDashboard}
             onChange={(_, newValue) => {
               setSloFormData((prev) => ({
                 ...prev,
@@ -183,10 +183,10 @@ export function SLOFormFields({
       {sloFormData.source === 'dynatrace' && (
         <Grid size={{ xs: 12 }}>
           <Autocomplete
-            options={availableDynatraceDashboards.length > 0 ? availableDynatraceDashboards : (sloFormData.selectedDashboard ? [sloFormData.selectedDashboard] : [])}
+            options={availableDynatraceDashboards.length > 0 ? (availableDynatraceDashboards as SloDashboard[]) : (selectedDynatraceDashboard ? [selectedDynatraceDashboard] : [])}
             getOptionLabel={(option) => option.dashboardLabel || ''}
             isOptionEqualToValue={(option, value) => option.dashboardLabel === value?.dashboardLabel}
-            value={sloFormData.selectedDashboard}
+            value={selectedDynatraceDashboard}
             onChange={(_, newValue) => {
               setSloFormData((prev) => ({
                 ...prev,
@@ -245,7 +245,7 @@ export function SLOFormFields({
       {sloFormData.source === 'dynatrace' && sloFormData.selectedDashboard && (
         <Grid size={{ xs: 12 }}>
           <Autocomplete
-            options={availableDynatraceMetrics.length > 0 ? availableDynatraceMetrics : (selectedDynatraceMetric ? [selectedDynatraceMetric] : [])}
+            options={availableDynatraceMetrics.length > 0 ? (availableDynatraceMetrics as SloPanel[]) : (selectedDynatraceMetric ? [selectedDynatraceMetric] : [])}
             getOptionLabel={(option) => option.panelTitle || ''}
             isOptionEqualToValue={(option, value) => option.panelTitle === value?.panelTitle}
             value={selectedDynatraceMetric}
@@ -302,7 +302,7 @@ export function SLOFormFields({
       {sloFormData.source === 'grafana' && sloFormData.selectedDashboard && (
         <Grid size={{ xs: 12 }}>
           <Autocomplete
-            options={availablePanels.length > 0 ? availablePanels : (selectedGrafanaPanel ? [selectedGrafanaPanel] : [])}
+            options={availablePanels.length > 0 ? (availablePanels as SloPanel[]) : (selectedGrafanaPanel ? [selectedGrafanaPanel] : [])}
             getOptionLabel={(option) => option.title || ''}
             isOptionEqualToValue={(option, value) => (option.id != null && value?.id != null) ? String(option.id) === String(value.id) : option.title === value?.title}
             value={selectedGrafanaPanel}

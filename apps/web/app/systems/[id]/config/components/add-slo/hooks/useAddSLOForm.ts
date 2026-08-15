@@ -31,7 +31,7 @@ export function useAddSLOForm({
 
   // Available options
   const [availableDashboards, setAvailableDashboards] = useState<ApplicationDashboard[]>([]);
-  const [availablePanels, setAvailablePanels] = useState<ApplicationDashboard[]>([]);
+  const [availablePanels, setAvailablePanels] = useState<GrafanaPanel[]>([]);
   const [availableDynatraceDashboards, setAvailableDynatraceDashboards] = useState<DynatraceDashboard[]>([]);
   const [availableDynatraceMetrics, setAvailableDynatraceMetrics] = useState<DynatraceMetric[]>([]);
   const [availablePerfMetricsDashboards, setAvailablePerfMetricsDashboards] = useState<ApplicationDashboard[]>([]);

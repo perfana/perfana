@@ -1,12 +1,42 @@
-import { TestRun } from '@/types/test-runs';
+import { TestRun, SystemUnderTest, ConsolidatedResult, AdaptConfig, DeepLinks } from '@/types/test-runs';
 import { FilterState, FilterOptions } from '../types';
+
+/**
+ * The camelCase shape a test run arrives in over the websocket. REST returns
+ * the snake_case `TestRun`; real-time events carry the entity property names.
+ * Every field is optional because only the changed ones are guaranteed.
+ */
+type CamelCaseTestRun = {
+  testRunId?: string;
+  testEnvironment?: string;
+  systemUnderTestId?: string;
+  startTime?: string;
+  endTime?: string;
+  plannedDuration?: number;
+  analysisStartOffset?: number;
+  consolidatedResult?: ConsolidatedResult;
+  applicationRelease?: string;
+  ciBuildResultsUrl?: string;
+  deepLinks?: DeepLinks;
+  createdAt?: string;
+  updatedAt?: string;
+  reasonsNotValid?: string[];
+  dataWarnings?: string[];
+  adaptConfig?: AdaptConfig;
+  isChangepoint?: boolean;
+  isControlGroup?: boolean;
+  systemUnderTest?: SystemUnderTest;
+};
+
+/** A test run as received, which may carry either casing. */
+type MaybeCamelTestRun = TestRun & Partial<CamelCaseTestRun>;
 
 /**
  * Normalize a test run from camelCase to snake_case format
  * This is needed because real-time events may use camelCase
  */
 export function normalizeTestRun(testRun: TestRun): TestRun {
-  const rawTestRun = testRun as unknown;
+  const rawTestRun = testRun as MaybeCamelTestRun;
   return {
     ...testRun,
     test_run_id: rawTestRun.testRunId || testRun.test_run_id,
@@ -35,14 +65,14 @@ export function normalizeTestRun(testRun: TestRun): TestRun {
  * Extract system name from a test run (supports both camelCase and snake_case)
  */
 export function getSystemName(testRun: TestRun): string | undefined {
-  return (testRun as unknown).systemUnderTest?.name || testRun.systems_under_test?.name;
+  return (testRun as MaybeCamelTestRun).systemUnderTest?.name || testRun.systems_under_test?.name;
 }
 
 /**
  * Extract environment from a test run (supports both camelCase and snake_case)
  */
 export function getEnvironment(testRun: TestRun): string | undefined {
-  return (testRun as unknown).testEnvironment || testRun.test_environment;
+  return (testRun as MaybeCamelTestRun).testEnvironment || testRun.test_environment;
 }
 
 /**
@@ -67,8 +97,8 @@ export function filterTestRuns(testRuns: TestRun[], filters: FilterState): TestR
  */
 export function sortTestRunsByEndTime(testRuns: TestRun[]): TestRun[] {
   return [...testRuns].sort((a, b) => {
-    const aTime = ((a as unknown).endTime || a.end_time) ? new Date((a as unknown).endTime || a.end_time).getTime() : 0;
-    const bTime = ((b as unknown).endTime || b.end_time) ? new Date((b as unknown).endTime || b.end_time).getTime() : 0;
+    const aTime = ((a as MaybeCamelTestRun).endTime || a.end_time) ? new Date((a as MaybeCamelTestRun).endTime || a.end_time).getTime() : 0;
+    const bTime = ((b as MaybeCamelTestRun).endTime || b.end_time) ? new Date((b as MaybeCamelTestRun).endTime || b.end_time).getTime() : 0;
     return bTime - aTime;
   });
 }

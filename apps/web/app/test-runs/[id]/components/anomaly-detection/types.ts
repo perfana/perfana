@@ -72,7 +72,48 @@ export interface ConfigSourceInfo {
   description: string;
 }
 
+/** One of the three ADAPT difference checks (percentage, IQR, absolute). */
+export interface AdaptCheck {
+  isDifference?: boolean;
+  [key: string]: unknown;
+}
+
+/**
+ * The ADAPT result behind an expanded anomaly row. The payload carries more
+ * than this, so the index signature stays — these are the fields the drawer
+ * and the threshold table actually read.
+ */
 export interface DrawerData {
+  statistic?: {
+    test?: number;
+    control?: number;
+    diff?: number;
+    [key: string]: unknown;
+  };
+  checks?: {
+    pct?: AdaptCheck;
+    iqr?: AdaptCheck;
+    abs?: AdaptCheck;
+    [key: string]: AdaptCheck | undefined;
+  };
+  compare_config?: {
+    source?: string;
+    thresholds?: {
+      percentageThreshold?: number | null;
+      iqrThreshold?: number | null;
+      absoluteFailureThreshold?: number | null;
+      [key: string]: unknown;
+    };
+    [key: string]: unknown;
+  };
+  thresholds?: {
+    lower?: Record<string, number | undefined>;
+    upper?: Record<string, number | undefined>;
+  };
+  metric_classification?: {
+    higherIsBetter?: boolean;
+    [key: string]: unknown;
+  };
   [key: string]: unknown;
 }
 
