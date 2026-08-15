@@ -34,6 +34,25 @@ describe('AuditPartitionManager', () => {
     expect(ddls.every((s: string) => s.includes('IF NOT EXISTS'))).toBe(true);
   });
 
+  it('ensures partitions on boot, not just on the 03:00 cron', async () => {
+    const ds = fakeDataSource();
+    const manager = new AuditPartitionManager(ds as any);
+    await manager.onModuleInit();
+
+    const ddls = ds.calls.filter((s: string) => s.includes('CREATE TABLE') && s.includes('PARTITION OF'));
+    expect(ddls).toHaveLength(3);
+    expect(ddls[0]).toContain('audit_logs_2026_05');
+  });
+
+  it('does not fail boot when the partition run throws', async () => {
+    const ds = fakeDataSource();
+    ds.query = vi.fn(async () => {
+      throw new Error('connection refused');
+    });
+    const manager = new AuditPartitionManager(ds as any);
+    await expect(manager.onModuleInit()).resolves.toBeUndefined();
+  });
+
   it('drops partitions older than retentionMonths', async () => {
     const ds = fakeDataSource();
     // Pretend pg_tables returns three old partitions for 2024-01..2024-03 + a recent one
