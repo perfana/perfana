@@ -2,6 +2,7 @@
 
 import { useMemo } from 'react';
 import { useRouter } from 'next/navigation';
+import { getSystemName } from '../utils/test-runs-filters';
 import {
   Box,
   Card,
@@ -76,7 +77,7 @@ export function TestRunsTable({
     }
 
     const params: Record<string, string> = {
-      system: testRun.systems_under_test?.name || (testRun as unknown).systemUnderTest || '',
+      system: testRun.systems_under_test?.name || getSystemName(testRun) || '',
       environment: testRun.test_environment || '',
       workload: testRun.workload || '',
     };
@@ -508,7 +509,7 @@ export function TestRunsTable({
             hideFooterSelectedRowCount
             hideFooter={testRuns.length <= 5}
             disableVirtualization={false}
-            onRowClick={(params, event) => handleRowClick(params.row, event as unknown)}
+            onRowClick={(params, event) => handleRowClick(params.row, event)}
             sx={dataGridSx}
           />
         </Box>
@@ -552,7 +553,7 @@ export function TestRunsTable({
           disableColumnResize={false}
           hideFooterSelectedRowCount
           disableVirtualization={false}
-          onRowClick={(params, event) => handleRowClick(params.row, event as unknown)}
+          onRowClick={(params, event) => handleRowClick(params.row, event)}
           sx={dataGridSx}
         />
       </Box>

@@ -79,7 +79,7 @@ import SoftBadge from '../shared/SoftBadge';
 // ==================== Constants ====================
 
 const TAB_CONFIGS: AwrTabConfig[] = [
-  { id: '_insights', label: 'Insights' },
+  { id: 'insights', label: 'Insights' },
   { id: 'top-sql', label: 'Top SQL' },
   { id: 'wait-events', label: 'Wait Events' },
   { id: 'segments', label: 'Segments' },
@@ -137,8 +137,6 @@ export function AwrReportCard({
 
   // Fetch analysis for the selected report
   const {
-    _analysis,
-    _insights,
     severitySummary,
     criticalCount,
     warningCount,

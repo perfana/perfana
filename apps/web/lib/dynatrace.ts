@@ -170,6 +170,8 @@ export interface DynatraceQuery {
   matchMetricPattern?: string
   omitGroupByVariableFromMetricName?: string[]
   templateVariables?: Record<string, string>
+  /** Maps the dynatrace_queries.metric_unit column. */
+  metricUnit?: string
   dynatraceConfig?: DynatraceConfig
   createdAt: string
   updatedAt: string

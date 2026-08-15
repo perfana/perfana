@@ -51,7 +51,7 @@ docker compose -f "$COMPOSE_FILE" up -d keycloak
 
 # Wait for Keycloak to be healthy, then ensure test user password is set
 echo "       Waiting for Keycloak..."
-for i in $(seq 1 30); do
+for _ in $(seq 1 30); do
   kc_status=$(docker compose -f "$COMPOSE_FILE" ps keycloak --format "{{.Status}}" 2>/dev/null)
   if echo "$kc_status" | grep -q "healthy"; then
     break

@@ -1,4 +1,6 @@
 'use client';
+import { ApplicationDashboard, GrafanaPanel } from '@/lib/types';
+import { DynatraceDashboard, DynatraceMetric } from '@/lib/dynatrace';
 
 import { useState, useEffect, useCallback } from 'react';
 import { authenticatedFetch } from '@/lib/api';
@@ -28,12 +30,12 @@ export function useAddSLOForm({
   const [panelsLoading, setPanelsLoading] = useState(false);
 
   // Available options
-  const [availableDashboards, setAvailableDashboards] = useState<unknown[]>([]);
-  const [availablePanels, setAvailablePanels] = useState<unknown[]>([]);
-  const [availableDynatraceDashboards, setAvailableDynatraceDashboards] = useState<unknown[]>([]);
-  const [availableDynatraceMetrics, setAvailableDynatraceMetrics] = useState<unknown[]>([]);
-  const [availablePerfMetricsDashboards, setAvailablePerfMetricsDashboards] = useState<unknown[]>([]);
-  const [availablePerfMetricsPanels, setAvailablePerfMetricsPanels] = useState<unknown[]>([]);
+  const [availableDashboards, setAvailableDashboards] = useState<ApplicationDashboard[]>([]);
+  const [availablePanels, setAvailablePanels] = useState<GrafanaPanel[]>([]);
+  const [availableDynatraceDashboards, setAvailableDynatraceDashboards] = useState<DynatraceDashboard[]>([]);
+  const [availableDynatraceMetrics, setAvailableDynatraceMetrics] = useState<DynatraceMetric[]>([]);
+  const [availablePerfMetricsDashboards, setAvailablePerfMetricsDashboards] = useState<ApplicationDashboard[]>([]);
+  const [availablePerfMetricsPanels, setAvailablePerfMetricsPanels] = useState<GrafanaPanel[]>([]);
   const [validationErrors, setValidationErrors] = useState<ValidationErrors>({});
 
   // Data source availability

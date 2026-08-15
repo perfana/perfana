@@ -8,8 +8,13 @@ interface HtmlSectionPreviewProps {
   testRunId?: string;
   /** API section type, e.g. 'slo', 'trends' */
   sectionType: ReportSectionType;
-  /** Section config — section config only; accompanying text is a separate prop */
-  config: Record<string, unknown>;
+  /**
+   * Section config only; accompanying text is a separate prop. Typed as
+   * `object` rather than Record<string, unknown> because callers pass declared
+   * config interfaces, which have no implicit index signature. It is only
+   * JSON-serialised here, never read field by field.
+   */
+  config: object;
   /** Accompanying text, sent at the section level */
   text?: string;
 }

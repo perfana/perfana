@@ -1,4 +1,5 @@
 import { getUnit } from '@/lib/units';
+import { CheckResult, CheckResultRequirement, Benchmark } from '@/lib/types';
 
 // Helper function to format metric unit to human readable format
 export function formatMetricUnit(metricUnit?: string): string {
@@ -10,13 +11,17 @@ export function formatMetricUnit(metricUnit?: string): string {
   return unit.format || '';
 }
 
-// Helper function to check if a check result is an Apdex SLO
-export function isApdexResult(result: unknown): boolean {
+/**
+ * Whether a check result is an Apdex SLO. Takes only the two fields it reads so
+ * the narrower per-table views (MetricSeriesResult, ApdexResult) can be passed
+ * without being widened to a full CheckResult.
+ */
+export function isApdexResult(result: Partial<Pick<CheckResult, 'panel_type' | 'evaluate_type'>>): boolean {
   return result.panel_type === 'apdex' || result.evaluate_type === 'apdex';
 }
 
 // Helper function to format Apdex requirement
-export function formatApdexRequirement(requirement: unknown): string {
+export function formatApdexRequirement(requirement: CheckResultRequirement | undefined): string {
   if (!requirement || typeof requirement !== 'object') {
     return 'No requirement specified';
   }
@@ -48,7 +53,10 @@ export function formatApdexScore(score: number | string | null | undefined): str
 }
 
 // Helper function to determine if a check result is stale
-export function isCheckResultStale(checkResult: unknown, benchmark: unknown): boolean {
+export function isCheckResultStale(
+  checkResult: Partial<Pick<CheckResult, 'created_at'>>,
+  benchmark: Partial<Pick<Benchmark, 'updated_at'>> | undefined,
+): boolean {
   if (!checkResult.created_at || !benchmark?.updated_at) {
     return false;
   }
@@ -61,7 +69,7 @@ export function isCheckResultStale(checkResult: unknown, benchmark: unknown): bo
 }
 
 // Helper function to format aggregated SLO metric label from requirement JSON
-export function formatAggregatedMetricLabel(requirement: unknown): string {
+export function formatAggregatedMetricLabel(requirement: CheckResultRequirement | undefined): string {
   if (!requirement || typeof requirement !== 'object') return 'Aggregated Metric';
   const req = requirement as { aggregate_metric?: string; aggregate_stat?: string };
 
@@ -78,7 +86,7 @@ export function formatAggregatedMetricLabel(requirement: unknown): string {
 }
 
 // Helper function to format requirement as human readable text
-export function formatRequirement(requirement: unknown, evaluateType?: string, metricUnit?: string): string {
+export function formatRequirement(requirement: CheckResultRequirement | undefined, evaluateType?: string, metricUnit?: string): string {
   if (!requirement || typeof requirement !== 'object') {
     return 'No requirement specified';
   }

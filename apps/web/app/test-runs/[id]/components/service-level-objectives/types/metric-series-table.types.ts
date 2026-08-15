@@ -1,3 +1,4 @@
+import type { CheckResultTarget } from '@/lib/types';
 import { SortField, SortDirection } from './slo.types';
 
 export interface SortConfig {
@@ -5,16 +6,14 @@ export interface SortConfig {
   direction: SortDirection;
 }
 
-export interface MetricTarget {
-  target?: string;
-  value?: number | string | null;
-  meets_requirement?: boolean;
-  status?: string;
-  message?: string;
-}
+/** Metric view of a check result target. */
+export type MetricTarget = CheckResultTarget;
 
+/** The subset of a CheckResult this table reads. Callers pass the full row. */
 export interface MetricSeriesResult {
   benchmark_id?: string;
+  /** Compared against the benchmark's updated_at to flag a stale result. */
+  created_at?: string;
   targets?: MetricTarget[];
   metric_unit?: string;
   status?: string;

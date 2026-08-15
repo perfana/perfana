@@ -4,8 +4,6 @@ import { useCallback } from 'react';
 import { authenticatedFetch } from '@/lib/api';
 import {} from '../../types';
 import {
-  _SLOFormData,
-  _ValidationErrors,
   SaveDialogOption,
   UseEditSLOHandlersProps,
   UseEditSLOHandlersReturn,
@@ -19,12 +17,9 @@ export function useEditSLOHandlers({
   environment,
   workload,
   sloFormData,
-  _setSloFormData,
-  _validationErrors,
   setValidationErrors,
   setSloFormLoading,
   setShowSaveDialog,
-  _saveDialogOption,
   setSaveDialogOption,
   onSLOUpdated,
   onClose,

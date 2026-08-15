@@ -57,7 +57,7 @@ export default function SignInPage() {
       await login()
     } catch (err: unknown) {
       setFormError('root', {
-        message: err.message || 'Keycloak login failed'
+        message: err instanceof Error ? err.message : 'Keycloak login failed'
       })
     }
   }

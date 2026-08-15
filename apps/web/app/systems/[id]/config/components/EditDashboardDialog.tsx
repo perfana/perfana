@@ -13,6 +13,7 @@ import {
   Chip
 } from '@mui/material';
 import { authenticatedFetch } from '@/lib/api';
+import { DashboardVariable, DashboardVariableOption } from '@/lib/types';
 import { ApplicationDashboard, VariableValue } from './types';
 
 interface EditDashboardDialogProps {
@@ -36,13 +37,15 @@ export default function EditDashboardDialog({
 }: EditDashboardDialogProps) {
   const [dashboardLabel, setDashboardLabel] = useState('');
   const [variableValues, setVariableValues] = useState<Record<string, string[]>>({});
-  const [variableOptions, setVariableOptions] = useState<Record<string, unknown[]>>({});
+  const [variableOptions, setVariableOptions] = useState<Record<string, DashboardVariableOption[]>>({});
   const [loadingVariables, setLoadingVariables] = useState<Record<string, boolean>>({});
 
   // Helper function for auth headers
 
   // Function to fetch variable options from Grafana
-  const fetchVariableOptions = async (variable: unknown, dashboard: ApplicationDashboard) => {
+  // Only the variable's name is used; callers pass either a stored
+  // DashboardVariable or a Grafana templating variable, which lacks `values`.
+  const fetchVariableOptions = async (variable: Pick<DashboardVariable, 'name'>, dashboard: ApplicationDashboard) => {
     if (!systemName || !selectedEnvironment) {
       console.warn('Missing systemName or selectedEnvironment for variable options fetch');
       return;
@@ -104,7 +107,7 @@ export default function EditDashboardDialog({
       // Initialize variable values from dashboard
       const initialVariableValues: Record<string, string[]> = {};
       if (dashboard.variables && Array.isArray(dashboard.variables)) {
-        dashboard.variables.forEach((variable: unknown) => {
+        dashboard.variables.forEach((variable: DashboardVariable) => {
           initialVariableValues[variable.name] = variable.values || [];
         });
       }
@@ -114,7 +117,7 @@ export default function EditDashboardDialog({
       
       // Fetch variable options from Grafana
       if (dashboard.variables && Array.isArray(dashboard.variables) && systemName && selectedEnvironment) {
-        dashboard.variables.forEach(async (variable: unknown) => {
+        dashboard.variables.forEach(async (variable: DashboardVariable) => {
           await fetchVariableOptions(variable, dashboard);
         });
       }
@@ -170,7 +173,7 @@ export default function EditDashboardDialog({
                 Dashboard Variables
               </Typography>
               
-              {dashboard.variables.map((variable: unknown, index: number) => {
+              {dashboard.variables.map((variable: DashboardVariable, index: number) => {
                 const currentValues = variableValues[variable.name] || variable.values || [];
                 const options = variableOptions[variable.name] || [];
                 const isLoading = loadingVariables[variable.name] || false;
@@ -191,13 +194,13 @@ export default function EditDashboardDialog({
                       options={optionsWithAll}
                       getOptionLabel={(option) => {
                         if (typeof option === 'string') return option;
-                        return option.label || option.value || option;
+                        return option.label;
                       }}
                       value={effectiveValues}
                       onChange={(_, newValue) => {
                         const stringValues = newValue.map(v => {
                           if (typeof v === 'string') return v;
-                          return v.value || v.label || v;
+                          return v.value;
                         });
                         handleVariableChange(variable.name, stringValues);
                       }}

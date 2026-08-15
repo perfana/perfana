@@ -97,7 +97,6 @@ export default function TestRunsPage() {
     selectedTestRunIds,
     batchDeleteDialogOpen,
     refreshDialogOpen,
-    _refreshTargetTestRunId,
     availableSources,
     handleSelectAll,
     handleSelectOne,

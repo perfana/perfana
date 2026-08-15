@@ -1,5 +1,14 @@
 'use client';
 
+import type { PlotData } from 'plotly.js';
+
+/**
+ * Plotly accepts objects in `customdata` so hovertemplate can read
+ * `%{customdata.field}`, but @types/plotly.js narrows it to Datum. Widen just
+ * that field and keep the rest of the library's typing.
+ */
+type TrendsTrace = Omit<Partial<PlotData>, 'customdata'> & { customdata?: unknown[] };
+import { PlotlyGraphDiv, getPlotly } from '@/lib/plotly';
 import { useState, useEffect} from 'react';
 import { useTheme } from '@mui/material';
 import { MetricStatistic, TrendsSeries, Panel } from '../types';
@@ -79,7 +88,9 @@ export function useTrendsPlot({
     const isDark = theme.palette.mode === 'dark';
 
     // Create traces for each series with datetime x-axis but equal spacing
-    const traces = Object.entries(seriesData)
+    // Annotated so the changepoint legend trace below (mode 'lines', a dashed
+    // coloured line) fits alongside the data traces rather than being narrowed out.
+    const traces: TrendsTrace[] = Object.entries(seriesData)
       .filter(([seriesName]) => selectedSeriesNames.has(seriesName))
       .map(([seriesName, data]) => ({
         x: data.map((_, index) => index),
@@ -306,10 +317,10 @@ export function useTrendsPlot({
             path: 'M768 1664h896v-640h-416q-40 0-68-28t-28-68v-416h-384v1152zm256-1440v-64q0-13-9.5-22.5t-22.5-9.5h-704q-13 0-22.5 9.5t-9.5 22.5v64q0 13 9.5 22.5t22.5 9.5h704q13 0 22.5-9.5t9.5-22.5zm256 672h299l-299-299v299zm512 128v672q0 40-28 68t-68 28h-960q-40 0-68-28t-28-68v-160h-544q-40 0-68-28t-28-68v-1344q0-40 28-68t68-28h1088q40 0 68 28t28 68v328q21 13 36 28l408 408q28 28 48 76t20 88z',
             transform: 'scale(0.8)'
           },
-          click: function(gd: unknown) {
-            const Plotly = (window as { Plotly?: { toImage: (gd: unknown, opts: Record<string, unknown>) => Promise<string> } }).Plotly;
-            if (!Plotly) return;
-            Plotly.toImage(gd, {
+          click: function(gd: PlotlyGraphDiv) {
+            const plotly = getPlotly();
+            if (!plotly) return;
+            plotly.toImage(gd, {
               format: 'png',
               width: (gd as { _fullLayout?: { width?: number } })._fullLayout?.width || 800,
               height: (gd as { _fullLayout?: { height?: number } })._fullLayout?.height || 400,

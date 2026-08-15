@@ -5,7 +5,7 @@ import { Box, IconButton, Popover, Typography, Tooltip, type SxProps, type Theme
 import { Visibility, ContentCopy, Check } from '@mui/icons-material';
 
 /** Clickable icon that opens a popover with the full URL and a copy-to-clipboard button. */
-export function UrlViewer({ url }: { url: string }) {
+function UrlViewer({ url }: { url: string }) {
   const [anchor, setAnchor] = useState<HTMLElement | null>(null);
   const [copied, setCopied] = useState(false);
 

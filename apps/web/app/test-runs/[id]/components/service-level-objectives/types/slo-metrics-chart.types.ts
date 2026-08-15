@@ -1,3 +1,4 @@
+import type { TestRun } from '@/types/test-runs';
 /**
  * Types for SLOMetricsChart component
  */
@@ -18,41 +19,25 @@ export interface DSMetric {
   data: MetricDataPoint[];
 }
 
-export interface CheckResultRequirement {
-  operator: string;
-  value: number;
-  type?: string;
-  aggregate_metric?: string;
-  aggregate_stat?: string;
-}
+// These used to be redeclared here as a narrower, subtly different shape than
+// what the check-results endpoint actually returns. One canonical definition
+// now lives in lib/types.ts, derived from the check_results table; re-exported
+// so existing imports from this module keep working.
+import type { CheckResult } from '@/lib/types';
 
-export interface CheckResultTarget {
-  target: string;
-  value: number;
-  meets_requirement: boolean;
-}
+export type { CheckResult, CheckResultRequirement, CheckResultTarget } from '@/lib/types';
 
-export interface CheckResult {
-  panel_id: number;
-  panel_title?: string;
-  dashboard_label?: string;
-  metric_name?: string;
-  benchmark_id?: string;
-  application_dashboard_id?: string;
-  requirement?: CheckResultRequirement;
-  evaluate_type?: string;
-  metric_unit?: string;
-  targets?: CheckResultTarget[];
-}
-
-export interface TestRunInfo {
-  start_time: string;
-  end_time?: string;
+/**
+ * The window fields the SLO charts read off a test run. Derived from TestRun so
+ * the optionality cannot drift from the source type.
+ */
+export type TestRunInfo = Pick<
+  TestRun,
+  'start_time' | 'end_time' | 'analysis_start_offset' | 'analysis_end_offset'
+> & {
   /** @deprecated Use analysis_start_offset instead. Kept for API compatibility. */
   ramp_up_seconds?: number;
-  analysis_start_offset?: number;
-  analysis_end_offset?: number;
-}
+};
 
 export interface SLOMetricsChartProps {
   testRunId: string;

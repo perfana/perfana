@@ -1,10 +1,11 @@
 import { formatValueWithUnit } from '@/lib/units';
-import { ThresholdComparisonData } from '../types';
+import { ThresholdComparisonData } from '../types/anomaly-table.types';
+import { DrawerData } from '../../types';
 
 /**
  * Format a number for display
  */
-export function formatNumber(value: unknown): string {
+export function formatNumber(value: number | string | null | undefined): string {
   // Handle null, undefined, or non-numeric values
   if (value === null || value === undefined || value === '' || isNaN(Number(value))) {
     return '-';
@@ -73,7 +74,7 @@ export function getConfigSourceInfo(configSource?: string): {
 /**
  * Generate threshold comparison data for display in detail drawer
  */
-export function generateThresholdData(drawerData: unknown, unit?: string): ThresholdComparisonData[] {
+export function generateThresholdData(drawerData: DrawerData, unit?: string): ThresholdComparisonData[] {
   const thresholds: ThresholdComparisonData[] = [];
 
   if (drawerData.checks && drawerData.statistic && drawerData.compare_config) {

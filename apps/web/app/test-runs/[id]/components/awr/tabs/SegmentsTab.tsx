@@ -43,7 +43,7 @@ import {
   Speed as SpeedIcon,
 } from '@mui/icons-material';
 import { useQuery } from '@tanstack/react-query';
-import { getAwrReport } from '@/lib/api/awr-reports';
+import { getAwrReport, type AwrReport } from '@/lib/api/awr-reports';
 import type { SegmentsTabProps } from '../types';
 import { formatNumber } from '../utils';
 
@@ -114,8 +114,14 @@ const SEGMENT_TYPE_CONFIGS: SegmentTypeConfig[] = [
 
 // ==================== Helper Functions ====================
 
-function getSegmentData(report: unknown, segmentType: SegmentType): SegmentStatistic[] {
-  const segmentStats = report?.parsedData?.segmentStatistics;
+/**
+ * Segment statistics are grouped by ranking (byTableScans, byLogicalReads, ...)
+ * with a matching total per group, so both lookups are keyed rather than named.
+ */
+type SegmentStatistics = Record<string, SegmentStatistic[] | number | undefined>;
+
+function getSegmentData(report: AwrReport, segmentType: SegmentType): SegmentStatistic[] {
+  const segmentStats = report?.parsedData?.segmentStatistics as SegmentStatistics | undefined;
   if (!segmentStats) return [];
 
   const mapping: Record<SegmentType, string> = {
@@ -127,11 +133,11 @@ function getSegmentData(report: unknown, segmentType: SegmentType): SegmentStati
     bufferBusyWaits: 'byBufferBusyWaits',
   };
 
-  return segmentStats[mapping[segmentType]] || [];
+  return (segmentStats[mapping[segmentType]] as SegmentStatistic[] | undefined) || [];
 }
 
-function getTotalValue(report: unknown, segmentType: SegmentType): number | undefined {
-  const segmentStats = report?.parsedData?.segmentStatistics;
+function getTotalValue(report: AwrReport, segmentType: SegmentType): number | undefined {
+  const segmentStats = report?.parsedData?.segmentStatistics as SegmentStatistics | undefined;
   if (!segmentStats) return undefined;
 
   const mapping: Record<SegmentType, string> = {
@@ -144,16 +150,14 @@ function getTotalValue(report: unknown, segmentType: SegmentType): number | unde
   };
 
   const totalKey = mapping[segmentType];
-  return totalKey ? segmentStats[totalKey] : undefined;
+  return totalKey ? (segmentStats[totalKey] as number | undefined) : undefined;
 }
 
 // ==================== Main Component ====================
 
 export function SegmentsTab({
   reportId,
-  _testRunId,
   initialSegmentType = 'tableScans',
-  _onSnackbar,
 }: SegmentsTabProps) {
   const theme = useTheme();
   const [selectedType, setSelectedType] = useState<SegmentType>(initialSegmentType);

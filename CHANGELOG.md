@@ -4,7 +4,21 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
-## [0.2.62.1] - 2026-08-15
+## [0.2.63.0] - 2026-08-15
+
+### Fixed
+- **The AWR Insights tab shows its content again.** Clicking *Insights* on an AWR report rendered an empty panel: the tab button emitted one id while the panel listened for another. It only ever worked on first load, because that path used the default. Reopening the tab now shows the insights.
+- **The AWR time-model pie and donut charts render.** Both threw while drawing and took the surrounding card down with them; only the bar view survived.
+- **Time-model segments are coloured again.** Every slice was falling through to the same grey instead of the per-category colours, so the chart carried no information.
+- **Editing an SLO after a failed load keeps its scope.** When the benchmark could not be fetched, the edit dialog rebuilt it from the check result but dropped the system, environment and workload, so saving from that dialog wrote a benchmark with no scope.
+
+### Changed
+- **The frontend type check now covers the whole app.** It previously checked a fraction of it: four route trees were excluded outright and the include list reached only a handful of directories. 506 type errors had accumulated behind a passing check. All are fixed and the check now runs over everything, so this class of error fails a pull request instead of piling up.
+- Unused-code detection reports the whole repo. It had never analysed the worker at all (its configured entry point did not exist), counted generated documentation as dead files, and counted database migrations as unused because nothing imports them directly. It now reports nothing, and what it does report is real.
+- Shell scripts are linted. All eleven are clean.
+
+### Removed
+- An unused `undici` dependency from the worker, left behind when that code moved to axios.
 
 ### Fixed
 - **Deleting a large batch of Grafana dashboards no longer freezes the page.** System under test → Grafana dashboards fired one `DELETE` per selected dashboard in parallel, and each of those cascades into the metrics hypertables — so a batch of any size left the browser waiting, and the concurrent cascades competed for the same rows in the database. The batch is now handed to a background queue that deletes one dashboard at a time, exactly as batches of test runs are handled: the page returns immediately and the selected rows disappear from the list while the deletion runs behind them. If Redis is unavailable the deletions still run in the request, but sequentially rather than all at once.

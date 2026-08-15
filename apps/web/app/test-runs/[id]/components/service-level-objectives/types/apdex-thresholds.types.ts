@@ -1,3 +1,4 @@
+import { CheckResult } from '@/lib/types';
 'use client';
 
 /**
@@ -44,7 +45,7 @@ export interface ApdexThresholdsManagementDialogProps {
   open: boolean;
   onClose: () => void;
   testRunId: string;
-  apdexCheckResult: unknown;
+  apdexCheckResult: CheckResult | null;
   onSuccess: () => void;
 }
 
