@@ -206,6 +206,12 @@ export interface SamplerStats {
    * ran under more than one chain — in which case no single chain describes it.
    */
   parent_controllers?: ControllerRef[] | null;
+  /**
+   * Where this sampler first fired within the scanned slice of the run. A proxy for its
+   * position in the test plan — within one pass a thread walks the plan top to bottom —
+   * used to order the request table. Absent when the run carries no controller data.
+   */
+  first_seen?: number;
 }
 
 /**

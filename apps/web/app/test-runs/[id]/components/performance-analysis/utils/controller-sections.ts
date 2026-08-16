@@ -11,15 +11,33 @@ import {
  * answers "why is this count lower and ragged". Giving a loop an elapsed time would be inventing
  * a number nothing measures.
  */
-export type ControllerKind = 'parallel' | 'loop' | 'conditional' | 'transaction' | 'other';
+export type ControllerKind =
+  | 'parallel'
+  | 'loop'
+  | 'conditional'
+  | 'alternating'
+  | 'transaction'
+  | 'other';
 
 const KIND_BY_CLASS: Record<string, ControllerKind> = {
   ParallelController: 'parallel',
+
   LoopController: 'loop',
   ForeachController: 'loop',
   WhileController: 'loop',
+
   IfController: 'conditional',
-  SwitchController: 'conditional',
+  ThroughputController: 'conditional',
+  RunTime: 'conditional',
+
+  // One child per pass rather than all of them, which is why a band's count is split across
+  // its members instead of repeated on each: 29 + 21 = 50, not 50 + 50.
+  InterleaveControl: 'alternating',
+  InterleaveController: 'alternating',
+  RandomController: 'alternating',
+  RandomOrderController: 'alternating',
+  SwitchController: 'alternating',
+
   TransactionController: 'transaction',
 };
 
@@ -102,11 +120,18 @@ export function buildSamplerSections(
   transactionName: string = '',
 ): SamplerSection[] {
   const root: SamplerSection[] = [];
+  // Ordered by where each request first fired, which puts the controllers in the order the test
+  // plan declares them: within one pass a thread walks the plan top to bottom. Runs with no
+  // controller data keep the order they arrived in (total_count DESC), so nothing moves for
+  // them.
+  const ordered = samples.some((s) => s.first_seen !== undefined)
+    ? [...samples].sort((a, b) => (a.first_seen ?? Infinity) - (b.first_seen ?? Infinity))
+    : samples;
   // Keyed by the full path so two different loops can share a controller name, and so a name
   // reused at two depths does not collapse into one band.
   const bandByPath = new Map<string, SamplerGroupSection>();
 
-  for (const sample of samples) {
+  for (const sample of ordered) {
     let siblings = root;
     let path = '';
 

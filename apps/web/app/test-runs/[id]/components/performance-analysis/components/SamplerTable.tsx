@@ -19,6 +19,8 @@ import {
   AltRoute as AltRouteIcon,
   Loop as LoopIcon,
   CallSplit as CallSplitIcon,
+  Shuffle as ShuffleIcon,
+  AccountTree as AccountTreeIcon,
 } from '@mui/icons-material';
 import { SamplerStat } from '../types/performance-analysis.types';
 import { formatNumber, formatApdex, getApdexColor, getApdexLabel } from '../utils/performance-formatters';
@@ -33,21 +35,58 @@ import { TABLE_HEADER_CELL_SX } from '../utils/table-header-style';
 import { ClippedUrl } from '@/components/ui/clipped-url';
 
 const COLUMN_COUNT = 9;
-/**
- * One colour per parallel group within a transaction, so several groups can be told apart at a
- * glance. Deliberately avoids red and green: those already mean failed and passed in this table.
- */
-const GROUP_COLORS = [
-  '#7b1fa2', // purple
-  '#00796b', // teal
-  '#303f9f', // indigo
-  '#c2185b', // pink
-  '#0097a7', // cyan
-  '#5d4037', // brown
-];
+/** Width of one nesting level, and of the guide line drawn at that level. */
+const INDENT_PX = 16;
 
-function groupColor(ordinal: number): string {
-  return GROUP_COLORS[ordinal % GROUP_COLORS.length];
+/**
+ * Colour carries the controller's KIND, so a reader learns "orange means conditional" once and
+ * it holds in every transaction. Deliberately avoids red and green: those already mean failed
+ * and passed in this table.
+ */
+const KIND_COLORS: Record<Exclude<ControllerKind, 'parallel'>, string> = {
+  loop: '#00695c', // teal
+  conditional: '#ef6c00', // orange
+  alternating: '#0277bd', // blue
+  transaction: '#455a64', // blue grey
+  other: '#616161', // grey
+};
+
+/**
+ * Parallel groups rotate rather than take one fixed colour: a transaction can hold several, and
+ * telling them apart matters more than memorising a hue. Kept to the purple/pink/brown family so
+ * none of them can be mistaken for a KIND_COLORS entry.
+ */
+const PARALLEL_COLORS = ['#7b1fa2', '#c2185b', '#5d4037', '#6a1b9a', '#ad1457', '#4e342e'];
+
+function parallelColor(ordinal: number): string {
+  return PARALLEL_COLORS[ordinal % PARALLEL_COLORS.length];
+}
+
+/**
+ * One vertical line per enclosing band, drawn at that band's own colour and offset.
+ *
+ * This is what makes nesting readable. Indentation alone does not: at one level of 16px, a
+ * conditional inside a loop looks like a conditional beside a loop, which is exactly how the
+ * first version read. Each line sits at the same offset as its band's own marker, so a member
+ * row's line continues the band header's.
+ */
+function Guides({ colors }: { colors: string[] }) {
+  return (
+    <>
+      {colors.map((color, i) => (
+        <Box
+          key={i}
+          sx={{
+            width: `${INDENT_PX}px`,
+            flexShrink: 0,
+            alignSelf: 'stretch',
+            borderLeft: '2px solid',
+            borderLeftColor: alpha(color, 0.4),
+          }}
+        />
+      ))}
+    </>
+  );
 }
 /** Below this many executions, a p95/p99 is a statement about a handful of points. */
 const MIN_EXECUTIONS_FOR_PERCENTILES = 20;
@@ -62,10 +101,8 @@ export interface SamplerTableProps {
 interface SamplerRowProps {
   sampler: SamplerStat;
   transactionName: string;
-  /** Colour of the parallel group this row belongs to; undefined outside one. */
-  groupColor?: string;
-  /** How many bands enclose this row, used purely for indentation. */
-  depth?: number;
+  /** Colour of each enclosing band, outermost first. Empty for a top-level row. */
+  ancestors?: string[];
   onOpenSamplerActionMenu: (event: React.MouseEvent<HTMLElement>, transaction: string, sampler: SamplerStat) => void;
   onOpenSamplerErrors: (transactionName: string, samplerName: string) => void;
 }
@@ -73,8 +110,7 @@ interface SamplerRowProps {
 function SamplerRow({
   sampler,
   transactionName,
-  groupColor: accent,
-  depth = 0,
+  ancestors = [],
   onOpenSamplerActionMenu,
   onOpenSamplerErrors,
 }: SamplerRowProps) {
@@ -82,23 +118,23 @@ function SamplerRow({
     <TableRow sx={{
       '&:hover': { backgroundColor: 'rgba(25, 118, 210, 0.04)' },
       '&:nth-of-type(odd)': { backgroundColor: 'rgba(0, 0, 0, 0.02)' },
-      // Only the name cell carries the line. Including td:first-of-type drew a second line
-      // down the Avg column, because the name cell is a th and the first td is the next one.
-      '& > th:first-of-type': {
-        pl: 2 + depth * 2,
-        ...(accent && { borderLeft: '3px solid', borderLeftColor: accent }),
-      },
     }}>
-      <TableCell component="th" scope="row" sx={{ fontWeight: 500 }}>
-        <Box sx={{ minWidth: 0 }}>
+      {/* The guides live inside the name cell, not as a border on it: a border would stop at
+          the cell edge, while these run the full height of the row and line up with the band
+          header above. */}
+      <TableCell component="th" scope="row" sx={{ fontWeight: 500, pl: 1, pr: 2 }}>
+        <Box sx={{ display: 'flex', alignItems: 'stretch', minWidth: 0 }}>
+          <Guides colors={ancestors} />
+          <Box sx={{ minWidth: 0, pl: ancestors.length > 0 ? 1.5 : 1 }}>
           <Typography variant="body2" fontFamily="monospace">
             {sampler.sampler_name}
           </Typography>
-          {sampler.url_pattern && (
-            <Box sx={{ mt: 0.5 }}>
-              <ClippedUrl url={sampler.url_pattern} sx={{ textTransform: 'none' }} />
-            </Box>
-          )}
+            {sampler.url_pattern && (
+              <Box sx={{ mt: 0.5 }}>
+                <ClippedUrl url={sampler.url_pattern} sx={{ textTransform: 'none' }} />
+              </Box>
+            )}
+          </Box>
         </Box>
       </TableCell>
       <TableCell align="right" sx={{ fontFamily: 'monospace' }}>
@@ -241,6 +277,7 @@ const KIND_LABEL: Record<ControllerKind, string> = {
   parallel: 'Parallel group',
   loop: 'Loop',
   conditional: 'Conditional',
+  alternating: 'Alternating',
   transaction: 'Transaction',
   other: 'Controller',
 };
@@ -253,6 +290,8 @@ const KIND_HELP: Record<ControllerKind, string> = {
     'These requests repeat within a single pass of the transaction, which is why their counts are a multiple of their neighbours\u2019.',
   conditional:
     'These requests only ran when the controller\u2019s condition held, so their counts are lower than their neighbours\u2019 and need not match.',
+  alternating:
+    'This controller runs one of these requests per pass rather than all of them, which is why the band\u2019s count is split across its members instead of repeated on each.',
   transaction: 'A sub-transaction inside the one you expanded.',
   other: 'An enclosing controller reported by the load test tool.',
 };
@@ -262,6 +301,8 @@ function KindIcon({ kind, color }: { kind: ControllerKind; color: string }) {
   if (kind === 'parallel') return <AltRouteIcon sx={sx} />;
   if (kind === 'loop') return <LoopIcon sx={sx} />;
   if (kind === 'conditional') return <CallSplitIcon sx={sx} />;
+  if (kind === 'alternating') return <ShuffleIcon sx={sx} />;
+  if (kind === 'transaction') return <AccountTreeIcon sx={sx} />;
   return null;
 }
 
@@ -319,16 +360,20 @@ export function SamplerTable({
 }: SamplerTableProps) {
   const sections = buildSamplerSections(samples, transactionName);
 
-  // Colour is reserved for parallel bands — it is the one kind that changes how the response
-  // times below it must be read. Assigned by order of appearance so a group keeps its colour
-  // across re-renders.
+  // Every band is coloured. Non-parallel kinds take their kind's fixed hue, so the colour is
+  // information rather than decoration; parallel groups rotate, because one transaction can
+  // hold several and telling them apart is what matters there.
   const colorByBand = new Map<SamplerGroupSection, string>();
+  let parallelSeen = 0;
   const assignColors = (list: SamplerSection[]) => {
     for (const section of list) {
       if (section.kind !== 'group') continue;
-      if (section.controller === 'parallel') {
-        colorByBand.set(section, groupColor(colorByBand.size));
-      }
+      colorByBand.set(
+        section,
+        section.controller === 'parallel'
+          ? parallelColor(parallelSeen++)
+          : KIND_COLORS[section.controller],
+      );
       assignColors(section.children);
     }
   };
@@ -336,8 +381,7 @@ export function SamplerTable({
 
   const renderSections = (
     list: SamplerSection[],
-    depth: number,
-    accent: string | undefined,
+    ancestors: string[],
     keyPrefix: string,
   ): React.ReactNode[] =>
     list.flatMap((section, idx) => {
@@ -349,8 +393,7 @@ export function SamplerTable({
             key={key}
             sampler={section.sample}
             transactionName={transactionName}
-            groupColor={accent}
-            depth={depth}
+            ancestors={ancestors}
             onOpenSamplerActionMenu={onOpenSamplerActionMenu}
             onOpenSamplerErrors={onOpenSamplerErrors}
           />,
@@ -358,51 +401,52 @@ export function SamplerTable({
       }
 
       const isParallel = section.controller === 'parallel';
-      // A parallel band owns a colour and passes it to its subtree; every other kind is drawn in
-      // muted ink so "these ran at the same time" keeps its visual monopoly.
-      const bandColor = isParallel ? colorByBand.get(section) ?? GROUP_COLORS[0] : undefined;
-      const ink = bandColor ?? 'text.secondary';
+      const bandColor = colorByBand.get(section) ?? KIND_COLORS.other;
       const saved = isParallel ? savedLabel(section) : null;
       const descendants = sectionSamples(section);
 
       return [
-        <TableRow
-          key={`${key}-band`}
-          sx={{ backgroundColor: bandColor ? alpha(bandColor, 0.06) : 'rgba(0, 0, 0, 0.02)' }}
-        >
-          <TableCell
-            sx={{
-              py: 0.75,
-              pl: 2 + depth * 2,
-              borderLeft: '3px solid',
-              borderLeftColor: bandColor ?? 'divider',
-            }}
-          >
-            <Tooltip title={KIND_HELP[section.controller]} arrow placement="top">
-              <Box sx={{ display: 'inline-flex', alignItems: 'center', gap: 1, cursor: 'help' }}>
-                <KindIcon kind={section.controller} color={bandColor ?? 'rgba(0, 0, 0, 0.45)'} />
-                <Typography variant="caption" sx={{ fontWeight: 700, color: ink }}>
-                  {KIND_LABEL[section.controller]}
-                </Typography>
-                <Typography variant="caption" fontFamily="monospace" color="text.secondary">
-                  {section.name}
-                </Typography>
-              </Box>
-            </Tooltip>
-            {saved && (
-              <Tooltip
-                arrow
-                placement="bottom-start"
-                title="The requests below ran at the same time, so their response times overlap. This is what the same work would have cost one after another, and how much the concurrency saved."
+        <TableRow key={`${key}-band`} sx={{ backgroundColor: alpha(bandColor, 0.07) }}>
+          <TableCell sx={{ py: 0.75, pl: 1, pr: 2 }}>
+            <Box sx={{ display: 'flex', alignItems: 'stretch', minWidth: 0 }}>
+              {/* The enclosing bands' lines, then this band's own marker at the next offset —
+                  so the member rows below continue exactly this line. */}
+              <Guides colors={ancestors} />
+              <Box
+                sx={{
+                  borderLeft: '3px solid',
+                  borderLeftColor: bandColor,
+                  pl: 1.5,
+                  minWidth: 0,
+                }}
               >
-                <Typography
-                  variant="caption"
-                  sx={{ display: 'block', mt: 0.25, color: 'text.secondary', cursor: 'help' }}
-                >
-                  {saved}
-                </Typography>
-              </Tooltip>
-            )}
+                <Tooltip title={KIND_HELP[section.controller]} arrow placement="top">
+                  <Box sx={{ display: 'inline-flex', alignItems: 'center', gap: 1, cursor: 'help' }}>
+                    <KindIcon kind={section.controller} color={bandColor} />
+                    <Typography variant="caption" sx={{ fontWeight: 700, color: bandColor }}>
+                      {KIND_LABEL[section.controller]}
+                    </Typography>
+                    <Typography variant="caption" fontFamily="monospace" color="text.secondary">
+                      {section.name}
+                    </Typography>
+                  </Box>
+                </Tooltip>
+                {saved && (
+                  <Tooltip
+                    arrow
+                    placement="bottom-start"
+                    title="The requests below ran at the same time, so their response times overlap. This is what the same work would have cost one after another, and how much the concurrency saved."
+                  >
+                    <Typography
+                      variant="caption"
+                      sx={{ display: 'block', mt: 0.25, color: 'text.secondary', cursor: 'help' }}
+                    >
+                      {saved}
+                    </Typography>
+                  </Tooltip>
+                )}
+              </Box>
+            </Box>
           </TableCell>
 
           {isParallel && section.stats ? (
@@ -450,7 +494,7 @@ export function SamplerTable({
             </>
           )}
         </TableRow>,
-        ...renderSections(section.children, depth + 1, bandColor ?? accent, key),
+        ...renderSections(section.children, [...ancestors, bandColor], key),
       ];
     });
 
@@ -470,7 +514,7 @@ export function SamplerTable({
             <TableCell align="center" sx={TABLE_HEADER_CELL_SX}>Actions</TableCell>
           </TableRow>
         </TableHead>
-        <TableBody>{renderSections(sections, 0, undefined, 's')}</TableBody>
+        <TableBody>{renderSections(sections, [], 's')}</TableBody>
       </Table>
     </TableContainer>
   );

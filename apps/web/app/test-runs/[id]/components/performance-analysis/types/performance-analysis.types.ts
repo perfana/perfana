@@ -71,6 +71,11 @@ export interface SamplerStat {
    * tag, when the tool does not report it, or when the request ran under more than one chain.
    */
   parent_controllers?: ControllerRef[] | null;
+  /**
+   * Where this sampler first fired in the run — a proxy for its position in the test plan,
+   * used to order the table. Absent when the run carries no controller data.
+   */
+  first_seen?: number;
 }
 
 export interface VirtualUserStats {

@@ -1260,24 +1260,36 @@ export class TestRunsPerformanceQueryService {
       // hunting for matches that do not exist.
       //
       // Only `name` and `class` are projected. `iteration` and `execution` change on every
-      // request, so keeping them would defeat the DISTINCT and return one row per request
+      // request, so keeping them would defeat the grouping and return one row per request
       // rather than one per distinct chain.
+      //
+      // `first_seen` is where the sampler first fired inside the scanned slice. Nothing in the
+      // data records a controller's position in the test plan, and this is the closest honest
+      // proxy: within one pass a thread executes the plan top to bottom, so first-appearance
+      // order IS plan order. It can misplace a controller whose first pass did not run (an If
+      // that was false on iteration one), which is why it orders the table rather than claiming
+      // to be the plan.
       const rows = await withRequestEm(this.testRunRepo).query(
-        `SELECT DISTINCT sampler_name, scenario_name, chain
+        `SELECT sampler_name, scenario_name, chain, MIN(seq) AS first_seen
            FROM (
-             SELECT sampler_name, scenario_name,
+             SELECT rr.sampler_name, rr.scenario_name,
                     (SELECT jsonb_agg(
                               jsonb_build_object('name', e ->> 'name', 'class', e ->> 'class')
                               ORDER BY ord)
                        FROM jsonb_array_elements(rr.parent_controllers)
-                            WITH ORDINALITY AS t(e, ord)) AS chain
-               FROM requests_raw rr
-              WHERE test_run_id = $1
-                AND transaction_name = $2
-              ORDER BY time
-              LIMIT ${PARALLEL_GROUP_SCAN_ROWS}
+                            WITH ORDINALITY AS t(e, ord)) AS chain,
+                    ROW_NUMBER() OVER (ORDER BY rr.time) AS seq
+               FROM (
+                      SELECT sampler_name, scenario_name, parent_controllers, time
+                        FROM requests_raw
+                       WHERE test_run_id = $1
+                         AND transaction_name = $2
+                       ORDER BY time
+                       LIMIT ${PARALLEL_GROUP_SCAN_ROWS}
+                    ) rr
            ) first_rows
-          WHERE chain IS NOT NULL`,
+          WHERE chain IS NOT NULL
+          GROUP BY sampler_name, scenario_name, chain`,
         [resolvedTestRunId, transactionName],
       );
       if (!rows || rows.length === 0) {
@@ -1290,9 +1302,12 @@ export class TestRunsPerformanceQueryService {
         `${scenario ?? ''}\u0000${sampler}`;
       const CONFLICT = 'conflict' as const;
       const chainBySampler = new Map<string, ControllerRef[] | typeof CONFLICT>();
+      const firstSeenBySampler = new Map<string, number>();
       for (const row of rows as Array<Record<string, unknown>>) {
         const k = key(row.scenario_name as string | null, row.sampler_name as string);
         const chain = (row.chain as ControllerRef[]) ?? [];
+        const firstSeen = this.mapper.parseInt(row.first_seen);
+        firstSeenBySampler.set(k, Math.min(firstSeenBySampler.get(k) ?? firstSeen, firstSeen));
         const seen = chainBySampler.get(k);
         // A sampler that ran under two different chains has no single answer; leave it
         // unlabelled rather than picking one arbitrarily.
@@ -1303,7 +1318,9 @@ export class TestRunsPerformanceQueryService {
         }
       }
       for (const sample of samples) {
-        const chain = chainBySampler.get(key(sample.scenario_name, sample.sampler_name));
+        const k = key(sample.scenario_name, sample.sampler_name);
+        sample.first_seen = firstSeenBySampler.get(k);
+        const chain = chainBySampler.get(k);
         if (chain === undefined || chain === CONFLICT) {
           sample.parent_controllers = null;
           sample.parallel_group = null;

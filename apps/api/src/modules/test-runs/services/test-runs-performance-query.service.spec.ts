@@ -1108,7 +1108,7 @@ const TG = { name: 'Shoppers', class: 'org.apache.jmeter.threads.ThreadGroup' };
 const PC = (name: string) => ({ name, class: 'org.apache.jmeter.control.ParallelController' });
 /** A lookup row as the chain query returns it. */
 const chainRow = (sampler: string, scenario: string, ...chain: Array<{ name: string; class: string }>) =>
-  ({ sampler_name: sampler, scenario_name: scenario, chain });
+  ({ sampler_name: sampler, scenario_name: scenario, chain, first_seen: '1' });
 
     describe('parallel groups', () => {
       it('labels samplers with the Parallel Controller they ran under', async () => {
@@ -1167,6 +1167,36 @@ const chainRow = (sampler: string, scenario: string, ...chain: Array<{ name: str
         const checkout = result.find((r) => r.scenario_name === 'checkout');
         expect(browse?.parallel_group).toBe('PG1');
         expect(checkout?.parallel_group).toBeNull();
+      });
+
+      it('attaches where each sampler first fired, so the table can follow the test plan', async () => {
+        // Nothing in the data records a controller's position in the plan. Within one pass a
+        // thread walks the plan top to bottom, so first-appearance order is the closest proxy.
+        mockQuerySequence(
+          [RAW_SAMPLER_ROW],
+          [{ ...chainRow('POST /checkout', 'load_test', TG, PC('PG1')), first_seen: '7' }],
+        );
+
+        const result = (await service.getTransactionSamples(
+          TEST_RUN_ID, TRANSACTION, false, IS_ADMIN, [],
+        )) as SamplerStats[];
+
+        expect(result[0].first_seen).toBe(7);
+      });
+
+      it('bounds the ordinal to the scanned slice, not the whole hypertable', async () => {
+        mockQuerySequence([RAW_SAMPLER_ROW], []);
+
+        await service.getTransactionSamples(TEST_RUN_ID, TRANSACTION, false, IS_ADMIN, []);
+
+        const groupQuery = (testRunRepo.query as jest.Mock).mock.calls
+          .map((c) => String(c[0]))
+          .find((sql) => sql.includes('parent_controllers')) as string;
+        // The row number is assigned inside the LIMIT, so it counts scanned rows.
+        const limitAt = groupQuery.indexOf('LIMIT');
+        const rowNumberAt = groupQuery.indexOf('ROW_NUMBER()');
+        expect(rowNumberAt).toBeGreaterThan(-1);
+        expect(rowNumberAt).toBeLessThan(limitAt);
       });
 
       it('still returns samplers when the parallel-group lookup fails', async () => {

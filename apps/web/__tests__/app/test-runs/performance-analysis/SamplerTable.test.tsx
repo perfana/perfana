@@ -45,6 +45,15 @@ function sampler(name: string, overrides: Partial<SamplerStat> = {}): SamplerSta
   };
 }
 
+/** Colours of every vertical line drawn inside `root` — the band markers and their guides. */
+function borderColors(root: Element): string[] {
+  return Array.from(root.querySelectorAll('*'))
+    .map((el) => window.getComputedStyle(el))
+    .filter((s) => s.borderLeftStyle === 'solid' && parseFloat(s.borderLeftWidth || '0') >= 2)
+    .map((s) => s.borderLeftColor)
+    .filter((c) => c && !/rgba\(0, 0, 0, 0\)/.test(c));
+}
+
 function renderTable(samples: SamplerStat[]) {
   return render(
     <SamplerTable
@@ -146,34 +155,25 @@ describe('SamplerTable parallel groups', () => {
       sampler('d', { parallel_group: 'PG2' }),
     ]);
 
-    const borderColors = Array.from(container.querySelectorAll('th'))
-      .map((el) => window.getComputedStyle(el).borderLeftColor)
-      .filter((c) => c && c !== '' && !/rgba\(0, 0, 0, 0\)/.test(c));
-
     // Two groups, two distinct accent colours.
-    expect(new Set(borderColors).size).toBeGreaterThanOrEqual(2);
+    expect(new Set(borderColors(container)).size).toBeGreaterThanOrEqual(2);
   });
 
-  it('draws the group line only beside the request name', () => {
-    // th:first-of-type only. Including td:first-of-type drew a second line down the Avg column,
-    // because the name cell is a th so the first td is the next column along.
+  it('draws the guide lines only beside the request name', () => {
+    // Every line lives inside the name cell. A line in any other column would run down the
+    // Avg or Passed figures and read as a table border.
     const { container } = renderTable([
       sampler('a', { parallel_group: 'PG1' }),
       sampler('b', { parallel_group: 'PG1' }),
     ]);
 
-    // Look at the member rows only — the band's own header cell is meant to carry the line.
-    const memberRows = Array.from(container.querySelectorAll('tr')).filter((row) =>
-      /^(a|b)$/.test(row.querySelector('th')?.textContent?.trim() ?? ''),
-    );
-    expect(memberRows).toHaveLength(2);
-
-    for (const row of memberRows) {
-      const bordered = Array.from(row.querySelectorAll('th,td')).filter(
-        (el) => window.getComputedStyle(el).borderLeftWidth === '3px',
-      );
-      expect(bordered).toHaveLength(1);
-      expect(bordered[0].tagName).toBe('TH');
+    for (const row of Array.from(container.querySelectorAll('tbody tr'))) {
+      const cells = Array.from(row.querySelectorAll('th,td'));
+      cells.forEach((cell, i) => {
+        const lines = borderColors(cell);
+        if (i > 0) expect(lines).toHaveLength(0);
+      });
+      expect(borderColors(cells[0]).length).toBeGreaterThan(0);
     }
   });
 
@@ -290,5 +290,99 @@ describe('SamplerTable controller bands', () => {
 
     expect(screen.queryByText(/if serial/)).not.toBeInTheDocument();
     expect(screen.getByText(/Timings appear once the run is analysed/)).toBeInTheDocument();
+  });
+});
+
+describe('SamplerTable nesting and order', () => {
+  const chain = (...c: ControllerRef[]) => c;
+
+  it('draws one guide line per enclosing band, so depth is visible not merely implied', () => {
+    // The complaint this exists for: a conditional inside a loop rendered indistinguishably
+    // from a conditional beside it, because 16px of indent is not a hierarchy.
+    const { container } = renderTable([
+      sampler('wishlist_item', {
+        parent_controllers: chain(threadGroup, forEach('Loop_Wishlist_x3')),
+      }),
+      sampler('even_iteration_extra', {
+        parent_controllers: chain(threadGroup, forEach('Loop_Wishlist_x3'), ifCtl('If_Even_Iteration')),
+      }),
+    ]);
+
+    const rowFor = (text: string) =>
+      Array.from(container.querySelectorAll('tbody tr')).find((r) =>
+        (r.textContent ?? '').includes(text),
+      )!;
+
+    // Depth 1 (inside the loop) → one line. Depth 2 (inside loop + conditional) → two.
+    expect(borderColors(rowFor('wishlist_item')).length).toBe(1);
+    expect(borderColors(rowFor('even_iteration_extra')).length).toBe(2);
+    // The conditional's own band sits one level in: the loop's guide, then its own marker.
+    expect(borderColors(rowFor('If_Even_Iteration')).length).toBe(2);
+  });
+
+  it('colours a loop and a conditional differently from each other', () => {
+    const { container } = renderTable([
+      sampler('a', { parent_controllers: chain(threadGroup, forEach('L1')) }),
+      sampler('b', { parent_controllers: chain(threadGroup, ifCtl('C1')) }),
+    ]);
+
+    expect(new Set(borderColors(container)).size).toBeGreaterThanOrEqual(2);
+  });
+
+  it('names an interleave for what it does rather than calling it a generic controller', () => {
+    // 29 + 21 = 50 on the band: one child runs per pass, so the count is split, not repeated.
+    renderTable([
+      sampler('banner_a', {
+        parent_controllers: chain(threadGroup, {
+          name: 'Interleave_Banner',
+          class: 'org.apache.jmeter.control.InterleaveControl',
+        }),
+        passed_count: 29,
+      }),
+      sampler('banner_b', {
+        parent_controllers: chain(threadGroup, {
+          name: 'Interleave_Banner',
+          class: 'org.apache.jmeter.control.InterleaveControl',
+        }),
+        passed_count: 21,
+      }),
+    ]);
+
+    expect(screen.getByText('Alternating')).toBeInTheDocument();
+    expect(screen.queryByText('Controller')).not.toBeInTheDocument();
+    expect(screen.getByText('50')).toBeInTheDocument();
+  });
+
+  it('orders controllers as the test plan declares them, not by request volume', () => {
+    // Incoming order is total_count DESC; first_seen says the plan runs them the other way.
+    const { container } = renderTable([
+      sampler('busy', {
+        total_count: 500,
+        first_seen: 90,
+        parent_controllers: chain(threadGroup, forEach('Later_Loop')),
+      }),
+      sampler('quiet', {
+        total_count: 5,
+        first_seen: 1,
+        parent_controllers: chain(threadGroup, forEach('Earlier_Loop')),
+      }),
+    ]);
+
+    const text = Array.from(container.querySelectorAll('tbody tr')).map((r) => r.textContent ?? '');
+    expect(text.findIndex((t) => t.includes('Earlier_Loop'))).toBeLessThan(
+      text.findIndex((t) => t.includes('Later_Loop')),
+    );
+  });
+
+  it('keeps the incoming order when the run carries no controller data', () => {
+    const { container } = renderTable([
+      sampler('first', { total_count: 100 }),
+      sampler('second', { total_count: 50 }),
+    ]);
+
+    const text = Array.from(container.querySelectorAll('tbody tr')).map((r) => r.textContent ?? '');
+    expect(text.findIndex((t) => t.includes('first'))).toBeLessThan(
+      text.findIndex((t) => t.includes('second')),
+    );
   });
 });
