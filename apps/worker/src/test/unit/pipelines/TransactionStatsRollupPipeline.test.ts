@@ -163,8 +163,25 @@ describe('TransactionStatsRollupPipeline', () => {
 
       const passesCte = (groupSql as string).slice(0, (groupSql as string).indexOf('base AS'));
       const groupBy = passesCte.slice(passesCte.lastIndexOf('GROUP BY'));
-      expect(groupBy).toMatch(/r\.parallel_group_id/);
+      expect(groupBy).toMatch(/r\.pc ->> 'execution'/);
       expect(groupBy).not.toMatch(/r\.transaction_name/);
+    });
+
+    it('picks the innermost Parallel Controller from parent_controllers, by class', async () => {
+      // The chain is outermost-first, so `-> -1` is the controller that actually dispatched the
+      // request. Matching on name instead would break on a plan that reuses a controller name.
+      mockDb.getTestRunByTestRunId.mockResolvedValue(makeTestRun());
+      wireTransaction({ tx: 1, sampler: 1 });
+
+      await pipeline.execute({ testRunId: 'run-001' });
+
+      const groupSql = mockManagerQuery.mock.calls
+        .map(([sql]) => sql as string)
+        .find(s => /INSERT INTO test_run_parallel_group_stats/i.test(s)) as string;
+
+      expect(groupSql).toMatch(
+        /jsonb_path_query_array\(\s*r\.parent_controllers,\s*'\$\[\*\] \? \(@\.class == "org\.apache\.jmeter\.control\.ParallelController"\)'\s*\) -> -1/,
+      );
     });
 
     it('measures a pass as last finish minus first start', async () => {

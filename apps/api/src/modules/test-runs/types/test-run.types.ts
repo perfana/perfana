@@ -144,6 +144,18 @@ export interface TransactionStats {
  * Distinct from its members' response times: those describe individual requests, this describes
  * the concurrent pass they belong to.
  */
+/**
+ * One enclosing controller from a request's `parent_controllers` chain.
+ *
+ * `iteration` and `execution` are deliberately not carried here: they change on every request,
+ * while this chain describes a sampler aggregated over the whole run.
+ */
+export interface ControllerRef {
+  name: string;
+  /** Fully-qualified class, e.g. `org.apache.jmeter.control.ParallelController`. */
+  class: string;
+}
+
 export interface ParallelGroupStats {
   parallel_group: string;
   /** Number of times the group ran — the sample size behind the percentiles. */
@@ -185,9 +197,15 @@ export interface SamplerStats {
   /**
    * Name of the Parallel Controller this request ran under, or null when it ran sequentially.
    * Also null for runs recorded before the load test tool reported it, so consumers must treat
-   * an absent value as "not parallel" rather than "unknown".
+   * an absent value as "not parallel" rather than "unknown". Derived from `parent_controllers`.
    */
   parallel_group?: string | null;
+  /**
+   * The controllers this request ran under, outermost first, ending at its nearest parent.
+   * Null when the run predates the tag, when the tool does not report it, or when the sampler
+   * ran under more than one chain — in which case no single chain describes it.
+   */
+  parent_controllers?: ControllerRef[] | null;
 }
 
 /**

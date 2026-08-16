@@ -14,6 +14,7 @@ import {
   VirtualUserStats,
   ThroughputStats,
   ParallelGroupStats,
+  ControllerRef,
 } from '../types/test-run.types';
 
 interface SummaryTimeseriesBucket {
@@ -61,6 +62,16 @@ export function apdexScoreSql(thresholdExpr: string, aggExpr: string): string {
  * transaction.
  */
 const PARALLEL_GROUP_SCAN_ROWS = 5000;
+
+/**
+ * `class` is the only reliable type discriminator in a `parent_controllers` entry: controller
+ * names are free text and not unique within a test plan.
+ */
+const PARALLEL_CONTROLLER_CLASS = 'org.apache.jmeter.control.ParallelController';
+
+const sameChain = (a: ControllerRef[], b: ControllerRef[]): boolean =>
+  a.length === b.length &&
+  a.every((entry, i) => entry.name === b[i]?.name && entry.class === b[i]?.class);
 
 @Injectable()
 export class TestRunsPerformanceQueryService {
@@ -1220,13 +1231,13 @@ export class TestRunsPerformanceQueryService {
   }
 
   /**
-   * Labels each sampler with the Parallel Controller it ran under.
+   * Labels each sampler with the chain of controllers it ran under.
    *
    * The sampler rollup is keyed by (test_run_id, transaction_name, sampler_name, scenario_name,
-   * ramp_up_excluded) and does not carry the group, so this is a separate lookup against
+   * ramp_up_excluded) and does not carry the chain, so this is a separate lookup against
    * requests_raw rather than a change to the rollup or its populating job.
    *
-   * Every failure mode degrades to "no groups", which renders exactly as before this existed:
+   * Every failure mode degrades to "no chain", which renders exactly as before this existed:
    * a database without the column (rolling deploy ahead of the migration), a run recorded by a
    * load test tool that does not report the tag, or a query error.
    */
@@ -1239,26 +1250,34 @@ export class TestRunsPerformanceQueryService {
     try {
       // Bounded scan. A plain DISTINCT over requests_raw would scan every row this
       // transaction produced — the raw-hypertable cost the rollup and CAGG paths exist to
-      // avoid (60s+ on a 10M-row run). Group membership is a property of the test plan, so
-      // it is identical in every iteration: the first slice of rows, walked along the
-      // (test_run_id, time) index, names every group the transaction has.
+      // avoid (60s+ on a 10M-row run). The chain is a property of the test plan, so it is
+      // identical in every iteration: the first slice of rows, walked along the
+      // (test_run_id, time) index, names every chain the transaction has.
       //
-      // The LIMIT sits INSIDE the subquery and the parallel_group filter OUTSIDE it, so the
-      // bound is on rows *scanned*, not rows *matched*. Filtering first would make a run with
-      // no tagged requests — every run recorded before this column existed — scan the whole
-      // transaction hunting for matches that do not exist.
+      // The LIMIT sits INSIDE the subquery and the chain filter OUTSIDE it, so the bound is on
+      // rows *scanned*, not rows *matched*. Filtering first would make a run with no tagged
+      // requests — every run recorded before this column existed — scan the whole transaction
+      // hunting for matches that do not exist.
+      //
+      // Only `name` and `class` are projected. `iteration` and `execution` change on every
+      // request, so keeping them would defeat the DISTINCT and return one row per request
+      // rather than one per distinct chain.
       const rows = await withRequestEm(this.testRunRepo).query(
-        `SELECT DISTINCT sampler_name, scenario_name, parallel_group
+        `SELECT DISTINCT sampler_name, scenario_name, chain
            FROM (
-             SELECT sampler_name, scenario_name, parallel_group
-               FROM requests_raw
+             SELECT sampler_name, scenario_name,
+                    (SELECT jsonb_agg(
+                              jsonb_build_object('name', e ->> 'name', 'class', e ->> 'class')
+                              ORDER BY ord)
+                       FROM jsonb_array_elements(rr.parent_controllers)
+                            WITH ORDINALITY AS t(e, ord)) AS chain
+               FROM requests_raw rr
               WHERE test_run_id = $1
                 AND transaction_name = $2
               ORDER BY time
               LIMIT ${PARALLEL_GROUP_SCAN_ROWS}
            ) first_rows
-          WHERE parallel_group IS NOT NULL
-            AND parallel_group <> ''`,
+          WHERE chain IS NOT NULL`,
         [resolvedTestRunId, transactionName],
       );
       if (!rows || rows.length === 0) {
@@ -1269,20 +1288,33 @@ export class TestRunsPerformanceQueryService {
       // Keying on the name alone would copy one scenario's group onto the other's row.
       const key = (scenario: string | null | undefined, sampler: string) =>
         `${scenario ?? ''}\u0000${sampler}`;
-      const groupBySampler = new Map<string, string>();
+      const CONFLICT = 'conflict' as const;
+      const chainBySampler = new Map<string, ControllerRef[] | typeof CONFLICT>();
       for (const row of rows as Array<Record<string, unknown>>) {
         const k = key(row.scenario_name as string | null, row.sampler_name as string);
-        const group = row.parallel_group as string;
-        // A sampler that appears in more than one group across iterations has no single
-        // answer; leave it unlabelled rather than picking one arbitrarily.
-        if (groupBySampler.has(k) && groupBySampler.get(k) !== group) {
-          groupBySampler.set(k, '');
-        } else {
-          groupBySampler.set(k, group);
+        const chain = (row.chain as ControllerRef[]) ?? [];
+        const seen = chainBySampler.get(k);
+        // A sampler that ran under two different chains has no single answer; leave it
+        // unlabelled rather than picking one arbitrarily.
+        if (seen === undefined) {
+          chainBySampler.set(k, chain);
+        } else if (seen !== CONFLICT && !sameChain(seen, chain)) {
+          chainBySampler.set(k, CONFLICT);
         }
       }
       for (const sample of samples) {
-        sample.parallel_group = groupBySampler.get(key(sample.scenario_name, sample.sampler_name)) || null;
+        const chain = chainBySampler.get(key(sample.scenario_name, sample.sampler_name));
+        if (chain === undefined || chain === CONFLICT) {
+          sample.parent_controllers = null;
+          sample.parallel_group = null;
+          continue;
+        }
+        sample.parent_controllers = chain;
+        // The chain is outermost-first, so the LAST Parallel Controller is the one that
+        // actually dispatched this request. Kept as its own field because the group stats
+        // below are keyed by it.
+        sample.parallel_group =
+          [...chain].reverse().find((c) => c.class === PARALLEL_CONTROLLER_CLASS)?.name || null;
       }
 
       await this.attachParallelGroupStats(resolvedTestRunId, transactionName, samples, excludeRampUp);

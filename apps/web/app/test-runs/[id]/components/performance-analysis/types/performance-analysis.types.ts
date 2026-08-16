@@ -16,6 +16,17 @@ export interface TransactionStat {
  * How long a parallel group itself took, measured per pass as last finish minus first start.
  * Distinct from its members' response times: those describe individual requests.
  */
+/**
+ * One enclosing controller from a request's chain. `iteration` is deliberately absent: it varies
+ * per request, while these rows are aggregated over the whole run — and a raw iteration printed
+ * without its controller's counting base misleads more than it tells.
+ */
+export interface ControllerRef {
+  name: string;
+  /** Fully-qualified class, e.g. `org.apache.jmeter.control.ParallelController`. */
+  class: string;
+}
+
 export interface ParallelGroupStats {
   parallel_group: string;
   /** Number of times the group ran — the sample size behind the percentiles. */
@@ -55,6 +66,11 @@ export interface SamplerStat {
   parallel_group?: string | null;
   /** Repeated on every member of a group; absent for runs analysed before the rollup existed. */
   parallel_group_stats?: ParallelGroupStats | null;
+  /**
+   * The controllers this request ran under, outermost first. Null when the run predates the
+   * tag, when the tool does not report it, or when the request ran under more than one chain.
+   */
+  parent_controllers?: ControllerRef[] | null;
 }
 
 export interface VirtualUserStats {

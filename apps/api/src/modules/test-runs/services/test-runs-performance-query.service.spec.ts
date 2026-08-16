@@ -1104,11 +1104,17 @@ describe('TestRunsPerformanceQueryService', () => {
       });
     });
 
+const TG = { name: 'Shoppers', class: 'org.apache.jmeter.threads.ThreadGroup' };
+const PC = (name: string) => ({ name, class: 'org.apache.jmeter.control.ParallelController' });
+/** A lookup row as the chain query returns it. */
+const chainRow = (sampler: string, scenario: string, ...chain: Array<{ name: string; class: string }>) =>
+  ({ sampler_name: sampler, scenario_name: scenario, chain });
+
     describe('parallel groups', () => {
       it('labels samplers with the Parallel Controller they ran under', async () => {
         mockQuerySequence(
           [RAW_SAMPLER_ROW],
-          [{ sampler_name: 'POST /checkout', scenario_name: 'load_test', parallel_group: 'T01_Add_To_Cart_PG1' }],
+          [chainRow('POST /checkout', 'load_test', TG, PC('T01_Add_To_Cart_PG1'))],
         );
 
         const result = await service.getTransactionSamples(TEST_RUN_ID, TRANSACTION, false, IS_ADMIN, []);
@@ -1131,8 +1137,8 @@ describe('TestRunsPerformanceQueryService', () => {
         mockQuerySequence(
           [RAW_SAMPLER_ROW],
           [
-            { sampler_name: 'POST /checkout', scenario_name: 'load_test', parallel_group: 'PG1' },
-            { sampler_name: 'POST /checkout', scenario_name: 'load_test', parallel_group: 'PG2' },
+            chainRow('POST /checkout', 'load_test', TG, PC('PG1')),
+            chainRow('POST /checkout', 'load_test', TG, PC('PG2')),
           ],
         );
 
@@ -1150,7 +1156,7 @@ describe('TestRunsPerformanceQueryService', () => {
             { ...RAW_SAMPLER_ROW, scenario_name: 'browse' },
             { ...RAW_SAMPLER_ROW, scenario_name: 'checkout' },
           ],
-          [{ sampler_name: 'POST /checkout', scenario_name: 'browse', parallel_group: 'PG1' }],
+          [chainRow('POST /checkout', 'browse', TG, PC('PG1'))],
         );
 
         const result = (await service.getTransactionSamples(
@@ -1164,7 +1170,7 @@ describe('TestRunsPerformanceQueryService', () => {
       });
 
       it('still returns samplers when the parallel-group lookup fails', async () => {
-        // A database without the parallel_group column (deploy ahead of the migration)
+        // A database without the parent_controllers column (deploy ahead of the migration)
         // must degrade to the previous behaviour, not fail the whole request.
         let call = 0;
         (testRunRepo.query as jest.Mock).mockImplementation(async (sql: unknown) => {
@@ -1172,8 +1178,8 @@ describe('TestRunsPerformanceQueryService', () => {
           if (isRollupExistenceCheck(sql)) return [];
           if (isRollupScopeLookup(sql)) return [];
           if (isCaggScopeLookup(sql)) return [];
-          if (String(sql).includes('parallel_group')) {
-            throw new Error('column "parallel_group" does not exist');
+          if (String(sql).includes('parent_controllers')) {
+            throw new Error('column "parent_controllers" does not exist');
           }
           call++;
           return call === 1 ? [RAW_SAMPLER_ROW] : [];
@@ -1188,7 +1194,7 @@ describe('TestRunsPerformanceQueryService', () => {
       it('attaches the group timings from the rollup', async () => {
         mockQuerySequence(
           [RAW_SAMPLER_ROW],
-          [{ sampler_name: 'POST /checkout', scenario_name: 'load_test', parallel_group: 'PG1' }],
+          [chainRow('POST /checkout', 'load_test', TG, PC('PG1'))],
           [{
             parallel_group: 'PG1', scenario_name: 'load_test',
             executions: '12', passed_count: '12', failed_count: '0',
@@ -1218,7 +1224,7 @@ describe('TestRunsPerformanceQueryService', () => {
         // A run analysed before the rollup table existed: the band still renders, without timings.
         mockQuerySequence(
           [RAW_SAMPLER_ROW],
-          [{ sampler_name: 'POST /checkout', scenario_name: 'load_test', parallel_group: 'PG1' }],
+          [chainRow('POST /checkout', 'load_test', TG, PC('PG1'))],
           [],
         );
 
@@ -1235,7 +1241,7 @@ describe('TestRunsPerformanceQueryService', () => {
         mockQuerySequence(
           [{ start_time: new Date().toISOString(), ramp_up: '120' }],
           [RAW_SAMPLER_ROW],
-          [{ sampler_name: 'POST /checkout', scenario_name: 'load_test', parallel_group: 'PG1' }],
+          [chainRow('POST /checkout', 'load_test', TG, PC('PG1'))],
           [],
         );
 
@@ -1254,15 +1260,22 @@ describe('TestRunsPerformanceQueryService', () => {
 
         const groupQuery = (testRunRepo.query as jest.Mock).mock.calls
           .map((c) => String(c[0]))
-          .find((sql) => sql.includes('parallel_group'));
+          .find((sql) => sql.includes('parent_controllers'));
         expect(groupQuery).toBeDefined();
         expect(groupQuery).toMatch(/ORDER BY time/);
         expect(groupQuery).toMatch(/LIMIT \d+/);
+        // Only name and class are projected: iteration and execution change on every request
+        // and would defeat the DISTINCT, returning a row per request instead of per chain.
+        expect(groupQuery).toMatch(/jsonb_array_elements\(rr\.parent_controllers\)/);
+        expect(groupQuery).toMatch(/'name', e ->> 'name'/);
+        expect(groupQuery).toMatch(/'class', e ->> 'class'/);
+        expect(groupQuery).not.toMatch(/'iteration'/);
+        expect(groupQuery).not.toMatch(/'execution'/);
         // The bound must be on rows SCANNED, not rows MATCHED: the LIMIT has to come before
         // the parallel_group filter. Filtering first makes a run with no tagged requests
         // scan the whole transaction looking for matches that do not exist.
         const limitAt = (groupQuery as string).indexOf('LIMIT');
-        const filterAt = (groupQuery as string).indexOf('parallel_group IS NOT NULL');
+        const filterAt = (groupQuery as string).indexOf('chain IS NOT NULL');
         expect(limitAt).toBeGreaterThan(-1);
         expect(filterAt).toBeGreaterThan(limitAt);
       });

@@ -647,8 +647,16 @@ CREATE TABLE public.requests_raw (
     response_latency integer,
     response_time integer,
     scenario_name text,
-    url_hash text
+    url_hash text,
+    parent_controllers jsonb
 );
+
+
+--
+-- Name: COLUMN requests_raw.parent_controllers; Type: COMMENT; Schema: public; Owner: -
+--
+
+COMMENT ON COLUMN public.requests_raw.parent_controllers IS 'Enclosing controllers, outermost first: [{name, class, iteration, execution?}]. Array order is the path order; JSON key order is not meaningful. The parallel group is the innermost entry whose class is a ParallelController, and that entry''s execution identifies one concurrent pass. NULL - never [] - when the load test tool does not report it.';
 
 
 --
@@ -2794,6 +2802,37 @@ CREATE TABLE public.test_run_events (
 
 
 --
+-- Name: test_run_parallel_group_stats; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public.test_run_parallel_group_stats (
+    test_run_id text NOT NULL,
+    transaction_name text NOT NULL,
+    parallel_group text NOT NULL,
+    scenario_name text DEFAULT ''::text NOT NULL,
+    ramp_up_excluded boolean NOT NULL,
+    system_under_test text,
+    test_environment text,
+    executions bigint NOT NULL,
+    passed_count bigint NOT NULL,
+    failed_count bigint NOT NULL,
+    request_count bigint NOT NULL,
+    avg_elapsed numeric,
+    min_elapsed integer,
+    max_elapsed integer,
+    pct_agg public.tdigest NOT NULL,
+    computed_at timestamp with time zone DEFAULT now() NOT NULL
+);
+
+
+--
+-- Name: TABLE test_run_parallel_group_stats; Type: COMMENT; Schema: public; Owner: -
+--
+
+COMMENT ON TABLE public.test_run_parallel_group_stats IS 'Per parallel-group statistics over the group''s own elapsed time per pass (last finish minus first start). Populated by the transaction-stats-rollup pipeline.';
+
+
+--
 -- Name: test_run_sampler_stats; Type: TABLE; Schema: public; Owner: -
 --
 
@@ -3862,6 +3901,14 @@ ALTER TABLE ONLY public.test_run_alerts
 
 ALTER TABLE ONLY public.test_run_events
     ADD CONSTRAINT test_run_events_pkey PRIMARY KEY (id);
+
+
+--
+-- Name: test_run_parallel_group_stats test_run_parallel_group_stats_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.test_run_parallel_group_stats
+    ADD CONSTRAINT test_run_parallel_group_stats_pkey PRIMARY KEY (test_run_id, transaction_name, parallel_group, scenario_name, ramp_up_excluded);
 
 
 --
@@ -5264,6 +5311,13 @@ CREATE INDEX idx_transactions_transaction_name ON public.transactions USING btre
 --
 
 CREATE INDEX idx_trs_sampler_stats_lookup ON public.test_run_sampler_stats USING btree (test_run_id, transaction_name, ramp_up_excluded);
+
+
+--
+-- Name: idx_trs_parallel_group_stats_lookup; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX idx_trs_parallel_group_stats_lookup ON public.test_run_parallel_group_stats USING btree (test_run_id, transaction_name, ramp_up_excluded);
 
 
 --
@@ -8330,6 +8384,14 @@ GRANT SELECT,INSERT,DELETE,UPDATE ON TABLE public.test_run_configs TO perfana_sy
 
 GRANT SELECT,INSERT,DELETE,UPDATE ON TABLE public.test_run_events TO perfana_app;
 GRANT SELECT,INSERT,DELETE,UPDATE ON TABLE public.test_run_events TO perfana_system;
+
+
+--
+-- Name: TABLE test_run_parallel_group_stats; Type: ACL; Schema: public; Owner: -
+--
+
+GRANT SELECT,INSERT,DELETE,UPDATE ON TABLE public.test_run_parallel_group_stats TO perfana_app;
+GRANT SELECT,INSERT,DELETE,UPDATE ON TABLE public.test_run_parallel_group_stats TO perfana_system;
 
 
 --

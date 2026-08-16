@@ -1,6 +1,11 @@
 import { render, screen } from '@testing-library/react';
 import { SamplerTable } from '@/app/test-runs/[id]/components/performance-analysis/components/SamplerTable';
-import { ParallelGroupStats, SamplerStat } from '@/app/test-runs/[id]/components/performance-analysis/types/performance-analysis.types';
+import { ControllerRef, ParallelGroupStats, SamplerStat } from '@/app/test-runs/[id]/components/performance-analysis/types/performance-analysis.types';
+
+const threadGroup: ControllerRef = { name: 'Shoppers', class: 'org.apache.jmeter.threads.ThreadGroup' };
+const forEach = (name: string): ControllerRef => ({ name, class: 'org.apache.jmeter.control.ForeachController' });
+const ifCtl = (name: string): ControllerRef => ({ name, class: 'org.apache.jmeter.control.IfController' });
+const parallel = (name: string): ControllerRef => ({ name, class: 'org.apache.jmeter.control.ParallelController' });
 
 function groupStats(overrides: Partial<ParallelGroupStats> = {}): ParallelGroupStats {
   return {
@@ -183,5 +188,107 @@ describe('SamplerTable parallel groups', () => {
     expect(screen.getAllByText('Parallel group')).toHaveLength(2);
     expect(screen.getByText('PG1')).toBeInTheDocument();
     expect(screen.getByText('PG2')).toBeInTheDocument();
+  });
+});
+
+describe('SamplerTable controller bands', () => {
+  it('bands a loop and explains the counts instead of inventing a duration', () => {
+    renderTable([
+      sampler('product_detail', {
+        parent_controllers: [threadGroup, forEach('product_loop')],
+        passed_count: 27,
+        failed_count: 3,
+      }),
+    ]);
+
+    expect(screen.getByText('Loop')).toBeInTheDocument();
+    expect(screen.getByText('product_loop')).toBeInTheDocument();
+    // The counts are real - they are the requests below, summed.
+    expect(screen.getAllByText('27').length).toBeGreaterThan(0);
+    expect(screen.getAllByText('3').length).toBeGreaterThan(0);
+    // Nothing measures how long a loop takes, so it is never labelled as a parallel group.
+    expect(screen.queryByText('Parallel group')).not.toBeInTheDocument();
+  });
+
+  it('labels a conditional so a lower count does not read as a bug', () => {
+    renderTable([
+      sampler('even_thread_extra', {
+        parent_controllers: [threadGroup, ifCtl('even_threads_only')],
+      }),
+    ]);
+
+    expect(screen.getByText('Conditional')).toBeInTheDocument();
+    expect(screen.getByText('even_threads_only')).toBeInTheDocument();
+  });
+
+  it('nests a parallel band inside the loop that drives it', () => {
+    const { container } = renderTable([
+      sampler('product_detail', { parent_controllers: [threadGroup, forEach('product_loop')] }),
+      sampler('asset_css', {
+        parent_controllers: [threadGroup, forEach('product_loop'), parallel('PG1')],
+      }),
+      sampler('asset_js', {
+        parent_controllers: [threadGroup, forEach('product_loop'), parallel('PG1')],
+      }),
+    ]);
+
+    expect(screen.getByText('Loop')).toBeInTheDocument();
+    expect(screen.getByText('Parallel group')).toBeInTheDocument();
+
+    const rowText = Array.from(container.querySelectorAll('tbody tr')).map(
+      (r) => r.textContent ?? '',
+    );
+    const loopAt = rowText.findIndex((t) => t.includes('product_loop'));
+    const pgAt = rowText.findIndex((t) => t.includes('PG1'));
+    const assetAt = rowText.findIndex((t) => t.includes('asset_css'));
+    // Outer band, then the nested band, then the nested band's requests.
+    expect(loopAt).toBeLessThan(pgAt);
+    expect(pgAt).toBeLessThan(assetAt);
+  });
+
+  it('says what the parallel group would have cost one request after another', () => {
+    // The whole point of the band: 240 ms of work the user waited 100 ms for.
+    const stats = groupStats({ executions: 10, avg_elapsed: 100 });
+    renderTable([
+      sampler('a', { parallel_group: 'PG1', parallel_group_stats: stats, avg_response_time: 90, total_count: 10 }),
+      sampler('b', { parallel_group: 'PG1', parallel_group_stats: stats, avg_response_time: 80, total_count: 10 }),
+      sampler('c', { parallel_group: 'PG1', parallel_group_stats: stats, avg_response_time: 70, total_count: 10 }),
+    ]);
+
+    expect(screen.getByText(/240\.00 ms if serial/)).toBeInTheDocument();
+    expect(screen.getByText(/2\.4/)).toBeInTheDocument();
+  });
+
+  it('weights a request that fires more than once per execution of the group', () => {
+    // 20 firings over 10 executions is twice per execution, so it costs twice per execution.
+    const stats = groupStats({ executions: 10, avg_elapsed: 100 });
+    renderTable([
+      sampler('twice', { parallel_group: 'PG1', parallel_group_stats: stats, avg_response_time: 100, total_count: 20 }),
+      sampler('once', { parallel_group: 'PG1', parallel_group_stats: stats, avg_response_time: 50, total_count: 10 }),
+    ]);
+
+    expect(screen.getByText(/250\.00 ms if serial/)).toBeInTheDocument();
+  });
+
+  it('claims no saving when the requests barely overlapped', () => {
+    // Serial 102 against a wall of 100 is noise, not concurrency worth announcing.
+    const stats = groupStats({ executions: 10, avg_elapsed: 100 });
+    renderTable([
+      sampler('a', { parallel_group: 'PG1', parallel_group_stats: stats, avg_response_time: 51, total_count: 10 }),
+      sampler('b', { parallel_group: 'PG1', parallel_group_stats: stats, avg_response_time: 51, total_count: 10 }),
+    ]);
+
+    expect(screen.queryByText(/if serial/)).not.toBeInTheDocument();
+  });
+
+  it('omits the comparison entirely when the run has not been analysed', () => {
+    // No measured wall time means no honest ratio to show.
+    renderTable([
+      sampler('a', { parallel_group: 'PG1', avg_response_time: 90 }),
+      sampler('b', { parallel_group: 'PG1', avg_response_time: 80 }),
+    ]);
+
+    expect(screen.queryByText(/if serial/)).not.toBeInTheDocument();
+    expect(screen.getByText(/Timings appear once the run is analysed/)).toBeInTheDocument();
   });
 });

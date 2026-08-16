@@ -349,7 +349,7 @@ const TRANSACTION_ROLLUP_SQL = `
  * Per parallel-group statistics.
  *
  * Two-level aggregation, because the metric is a property of the *pass*, not of a request. The
- * inner CTE collapses each concurrent pass — every request sharing a parallel_group_id — into one
+ * inner CTE collapses each concurrent pass — every request sharing an `execution` id — into one
  * elapsed time: last finish minus first start. The outer level then aggregates those durations
  * per group, so the stored sketch describes real observed group durations and its percentiles
  * mean what a reader expects.
@@ -359,22 +359,37 @@ const TRANSACTION_ROLLUP_SQL = `
  * half at the cutoff and invent short durations that never happened.
  */
 const PARALLEL_GROUP_ROLLUP_SQL = `
-  WITH passes AS (
+  WITH tagged AS (
+    SELECT
+      r.test_run_id, r.transaction_name, r.sampler_name, r.scenario_name,
+      r.system_under_test, r.test_environment, r.success, r.time, r.response_time,
+      -- parent_controllers is outermost-first, so the LAST Parallel Controller in the chain is
+      -- the one that actually dispatched this request. Match on class, never on name: names are
+      -- free text and not unique across a plan.
+      jsonb_path_query_array(
+        r.parent_controllers,
+        '$[*] ? (@.class == "org.apache.jmeter.control.ParallelController")'
+      ) -> -1                                                          AS pc
+    FROM requests_raw r
+    WHERE r.test_run_id = $1
+      AND r.transaction_name IS NOT NULL
+      AND r.parent_controllers IS NOT NULL
+  ),
+  passes AS (
     SELECT
       r.test_run_id,
-      r.parallel_group_id,
-      -- A pass is defined by its id ALONE. Grouping by transaction_name here would split a
-      -- pass whose members disagree on it — which happens when a run is cut off mid-transaction
-      -- and the load test tool attributes the orphaned leaves to themselves. Each fragment would
-      -- then report its own span instead of the pass's, inventing durations that never happened.
-      -- Prefer a genuine Transaction Controller attribution; fall back only if every member was
-      -- orphaned.
+      -- A pass is defined by its execution id ALONE. Grouping by transaction_name here would
+      -- split a pass whose members disagree on it — which happens when a run is cut off
+      -- mid-transaction and the load test tool attributes the orphaned leaves to themselves.
+      -- Each fragment would then report its own span instead of the pass's, inventing durations
+      -- that never happened. Prefer a genuine Transaction Controller attribution; fall back only
+      -- if every member was orphaned.
       COALESCE(
         (ARRAY_AGG(r.transaction_name ORDER BY r.time)
           FILTER (WHERE r.transaction_name IS DISTINCT FROM r.sampler_name))[1],
         MIN(r.transaction_name)
       )                                                                AS transaction_name,
-      MIN(r.parallel_group)                                            AS parallel_group,
+      MIN(r.pc ->> 'name')                                             AS parallel_group,
       COALESCE(MIN(r.scenario_name), '')                               AS scenario_name,
       MIN(r.system_under_test)                                         AS system_under_test,
       MIN(r.test_environment)                                          AS test_environment,
@@ -384,15 +399,13 @@ const PARALLEL_GROUP_ROLLUP_SQL = `
       EXTRACT(EPOCH FROM (
         MAX(r.time) - MIN(r.time - (r.response_time * INTERVAL '1 millisecond'))
       )) * 1000                                                        AS elapsed_ms
-    FROM requests_raw r
-    WHERE r.test_run_id = $1
-      AND r.transaction_name IS NOT NULL
-      AND r.parallel_group IS NOT NULL
-      AND r.parallel_group <> ''
-      AND r.parallel_group_id IS NOT NULL
-      AND r.parallel_group_id <> ''
+    FROM tagged r
+    WHERE r.pc ->> 'name' IS NOT NULL
+      AND r.pc ->> 'name' <> ''
+      AND r.pc ->> 'execution' IS NOT NULL
+      AND r.pc ->> 'execution' <> ''
     GROUP BY
-      r.test_run_id, r.parallel_group_id
+      r.test_run_id, r.pc ->> 'execution'
   ),
   base AS (
     SELECT
