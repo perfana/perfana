@@ -17,15 +17,26 @@ export interface TransactionStat {
  * Distinct from its members' response times: those describe individual requests.
  */
 /**
- * One enclosing controller from a request's chain. `iteration` is deliberately absent: it varies
- * per request, while these rows are aggregated over the whole run — and a raw iteration printed
- * without its controller's counting base misleads more than it tells.
+ * One enclosing controller on the path from the test plan's root down to a request. Only what is
+ * stable for a sampler aggregated over a whole run: the engine's current metadata describes where
+ * a request sits in the plan, not which loop pass or concurrent execution produced it.
  */
 export interface ControllerRef {
   name: string;
   /** Fully-qualified class, e.g. `org.apache.jmeter.control.ParallelController`. */
   class: string;
+  /**
+   * Which of several identically-named siblings this is, 0-based. Absent on runs recorded by the
+   * retired runtime shape, which could not tell them apart.
+   */
+  occurrence?: number;
 }
+
+/**
+ * Which metadata shape a request's chain came from. `runtime` runs can have parallel-group
+ * timings; `plan` runs never can, so a band with no timings there is finished, not pending.
+ */
+export type ChainSource = 'plan' | 'runtime';
 
 export interface ParallelGroupStats {
   parallel_group: string;
@@ -76,6 +87,8 @@ export interface SamplerStat {
    * used to order the table. Absent when the run carries no controller data.
    */
   first_seen?: number;
+  /** Which metadata shape the chain came from. Absent when the run has no controller data. */
+  chain_source?: ChainSource;
 }
 
 export interface VirtualUserStats {

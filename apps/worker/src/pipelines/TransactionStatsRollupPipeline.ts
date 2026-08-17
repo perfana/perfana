@@ -346,7 +346,14 @@ const TRANSACTION_ROLLUP_SQL = `
  * $1 = testRunId, $2 = startCutoff (start + ramp_up), $3 = endCutoff (end - ramp_down)
  */
 /**
- * Per parallel-group statistics.
+ * Per parallel-group statistics — historical runs only.
+ *
+ * This reads `parent_controllers`, the retired runtime-tagged metadata. Its replacement records
+ * where a request sits in the test plan and carries no per-execution identity, so there is no way
+ * to tell which requests shared a concurrent pass and nothing here can be ported to it. The
+ * pipeline is kept rather than deleted because runs already recorded this way still have their
+ * timings, and it self-disables on newer runs: the WHERE clause below matches no rows when
+ * `parent_controllers` is NULL, so the INSERT is a no-op and the table simply gains nothing.
  *
  * Two-level aggregation, because the metric is a property of the *pass*, not of a request. The
  * inner CTE collapses each concurrent pass — every request sharing an `execution` id — into one

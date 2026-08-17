@@ -57,8 +57,9 @@ export interface SamplerGroupSection {
   controller: ControllerKind;
   /**
    * How long the group itself took. Only ever set for a `parallel` band — it is the one kind
-   * whose duration is measured (by the rollup pipeline). Null for every other kind, and for a
-   * parallel group in a run that has not been analysed yet.
+   * whose duration is measured (by the rollup pipeline). Null for every other kind, for a run
+   * not yet analysed, and permanently for any run whose chain came from the plan-path metadata,
+   * which records no per-execution identity to measure a pass with.
    */
   stats: ParallelGroupStats | null;
   children: SamplerSection[];
@@ -93,6 +94,9 @@ function meaningfulChain(chain: ControllerRef[], transactionName: string): Contr
 
 /**
  * The chain to render a sampler under.
+ *
+ * The API has already dropped the trailing sampler entry that plan-path metadata carries, so
+ * both metadata shapes arrive here ending at the innermost controller.
  *
  * Falls back to synthesising a one-entry chain from `parallel_group` so a web build that is
  * ahead of the API still draws the parallel bands it used to, rather than flattening the table.
@@ -136,8 +140,10 @@ export function buildSamplerSections(
     let path = '';
 
     for (const controller of chainFor(sample, transactionName)) {
-      // Length-prefixed so ("ab","c") and ("a","bc") cannot produce the same path.
-      path += `${controller.name.length}:${controller.name}`;
+      // Length-prefixed so ("ab","c") and ("a","bc") cannot produce the same path, and keyed on
+      // occurrence as well as name so two identically-named sibling controllers stay two bands
+      // instead of collapsing into one. That is what occurrence was added for.
+      path += `${controller.name.length}:${controller.name}@${controller.occurrence ?? 0}`;
       let band = bandByPath.get(path);
       if (!band) {
         band = {

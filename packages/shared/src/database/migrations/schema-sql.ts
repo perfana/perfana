@@ -648,7 +648,8 @@ CREATE TABLE public.requests_raw (
     response_time integer,
     scenario_name text,
     url_hash text,
-    parent_controllers jsonb
+    parent_controllers jsonb,
+    source_element_path jsonb
 );
 
 
@@ -656,7 +657,14 @@ CREATE TABLE public.requests_raw (
 -- Name: COLUMN requests_raw.parent_controllers; Type: COMMENT; Schema: public; Owner: -
 --
 
-COMMENT ON COLUMN public.requests_raw.parent_controllers IS 'Enclosing controllers, outermost first: [{name, class, iteration, execution?}]. Array order is the path order; JSON key order is not meaningful. The parallel group is the innermost entry whose class is a ParallelController, and that entry''s execution identifies one concurrent pass. NULL - never [] - when the load test tool does not report it.';
+COMMENT ON COLUMN public.requests_raw.parent_controllers IS 'RETIRED, read-only. Runtime-tagged enclosing controllers, outermost first: [{name, class, iteration, execution?}]. Superseded by source_element_path, which no longer carries loop pass or concurrent execution. Kept because historical runs are still read through it; no longer written by any listener.';
+
+
+--
+-- Name: COLUMN requests_raw.source_element_path; Type: COMMENT; Schema: public; Owner: -
+--
+
+COMMENT ON COLUMN public.requests_raw.source_element_path IS 'Configured position in the test plan, outermost first, last entry is the sampler: [{name, class, occurrence}]. occurrence separates same-named siblings. Static per plan position - carries no loop pass or concurrent execution. NULL - never [] - when the engine does not supply it.';
 
 
 --

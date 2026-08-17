@@ -167,6 +167,23 @@ describe('TransactionStatsRollupPipeline', () => {
       expect(groupBy).not.toMatch(/r\.transaction_name/);
     });
 
+    it('is scoped to the retired runtime metadata, so it no-ops on plan-path runs', async () => {
+      // Its replacement records where a request sits in the plan and carries no per-execution
+      // identity, so no pass can be reconstructed. The pipeline stays for historical runs and
+      // must simply select nothing on newer ones rather than inventing groups from the path.
+      mockDb.getTestRunByTestRunId.mockResolvedValue(makeTestRun());
+      wireTransaction({ tx: 1, sampler: 1 });
+
+      await pipeline.execute({ testRunId: 'run-001' });
+
+      const groupSql = mockManagerQuery.mock.calls
+        .map(([sql]) => sql as string)
+        .find(s => /INSERT INTO test_run_parallel_group_stats/i.test(s)) as string;
+
+      expect(groupSql).toMatch(/r\.parent_controllers IS NOT NULL/);
+      expect(groupSql).not.toMatch(/source_element_path/);
+    });
+
     it('picks the innermost Parallel Controller from parent_controllers, by class', async () => {
       // The chain is outermost-first, so `-> -1` is the controller that actually dispatched the
       // request. Matching on name instead would break on a plan that reuses a controller name.

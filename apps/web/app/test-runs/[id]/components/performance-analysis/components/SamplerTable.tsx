@@ -404,6 +404,9 @@ export function SamplerTable({
       const bandColor = colorByBand.get(section) ?? KIND_COLORS.other;
       const saved = isParallel ? savedLabel(section) : null;
       const descendants = sectionSamples(section);
+      // Read off any member: a run is written by one listener version, so every request in it
+      // carries the same metadata shape.
+      const planPathOnly = descendants[0]?.chain_source === 'plan';
 
       return [
         <TableRow key={`${key}-band`} sx={{ backgroundColor: alpha(bandColor, 0.07) }}>
@@ -420,7 +423,17 @@ export function SamplerTable({
                   minWidth: 0,
                 }}
               >
-                <Tooltip title={KIND_HELP[section.controller]} arrow placement="top">
+                <Tooltip
+                  arrow
+                  placement="top"
+                  title={
+                    isParallel
+                      ? KIND_HELP[section.controller]
+                      : // Stated rather than left to inference: with a band nested inside another,
+                        // "150" on the outer one is not any single thing the reader can point at.
+                        `${KIND_HELP[section.controller]} The counts are the total of every request below it, at any depth.`
+                  }
+                >
                   <Box sx={{ display: 'inline-flex', alignItems: 'center', gap: 1, cursor: 'help' }}>
                     <KindIcon kind={section.controller} color={bandColor} />
                     <Typography variant="caption" sx={{ fontWeight: 700, color: bandColor }}>
@@ -467,13 +480,23 @@ export function SamplerTable({
             </>
           ) : isParallel ? (
             <TableCell colSpan={COLUMN_COUNT - 1} sx={{ color: 'text.disabled' }}>
+              {/* Two different absences, and saying "not yet" about a permanent one is a lie the
+                  reader would act on by re-analysing a run that can never produce the number.
+                  Measuring a pass needs to know which requests shared it; plan-path metadata is
+                  a fixed address in the test plan and records no such identity. */}
               <Tooltip
                 arrow
                 placement="top"
-                title="A group's duration is measured across its executions once the run is analysed, so it is not available while a test is still running. For a run analysed before this was recorded, re-evaluating the run fills it in."
+                title={
+                  planPathOnly
+                    ? "A group's duration is measured per execution, which needs the load test tool to mark which requests belonged to the same concurrent pass. This run's metadata records where each request sits in the test plan instead, so the grouping below is accurate but the timings cannot be recovered — not by re-analysing, and not by a later release."
+                    : "A group's duration is measured across its executions once the run is analysed, so it is not available while a test is still running. For a run analysed before this was recorded, re-evaluating the run fills it in."
+                }
               >
                 <Typography variant="caption" sx={{ cursor: 'help' }}>
-                  Timings appear once the run is analysed
+                  {planPathOnly
+                    ? 'Ran concurrently — this run records no per-execution timings'
+                    : 'Timings appear once the run is analysed'}
                 </Typography>
               </Tooltip>
             </TableCell>

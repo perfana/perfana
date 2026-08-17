@@ -71,7 +71,13 @@ const PARALLEL_CONTROLLER_CLASS = 'org.apache.jmeter.control.ParallelController'
 
 const sameChain = (a: ControllerRef[], b: ControllerRef[]): boolean =>
   a.length === b.length &&
-  a.every((entry, i) => entry.name === b[i]?.name && entry.class === b[i]?.class);
+  a.every(
+    (entry, i) =>
+      entry.name === b[i]?.name &&
+      entry.class === b[i]?.class &&
+      // Two same-named siblings differ only here, which is the whole reason occurrence exists.
+      entry.occurrence === b[i]?.occurrence,
+  );
 
 @Injectable()
 export class TestRunsPerformanceQueryService {
@@ -1259,9 +1265,17 @@ export class TestRunsPerformanceQueryService {
       // requests — every run recorded before this column existed — scan the whole transaction
       // hunting for matches that do not exist.
       //
-      // Only `name` and `class` are projected. `iteration` and `execution` change on every
-      // request, so keeping them would defeat the grouping and return one row per request
-      // rather than one per distinct chain.
+      // Two shapes, one result. `source_element_path` is where the request sits in the plan and
+      // ENDS AT THE SAMPLER, so its last entry is dropped here — the table already has a row for
+      // the sampler and would otherwise band every request under a copy of itself. Its retired
+      // predecessor `parent_controllers` ends at the innermost controller and needs no trim.
+      // A run is written by one listener version, so the COALESCE is a per-row choice between
+      // shapes, never a merge of them.
+      //
+      // Only `name`, `class` and `occurrence` are projected. The retired shape's `iteration` and
+      // `execution` changed on every request and would have defeated the grouping; `occurrence`
+      // is fixed per plan position, so it groups cleanly and lets same-named siblings be told
+      // apart.
       //
       // `first_seen` is where the sampler first fired inside the scanned slice. Nothing in the
       // data records a controller's position in the test plan, and this is the closest honest
@@ -1270,17 +1284,30 @@ export class TestRunsPerformanceQueryService {
       // that was false on iteration one), which is why it orders the table rather than claiming
       // to be the plan.
       const rows = await withRequestEm(this.testRunRepo).query(
-        `SELECT sampler_name, scenario_name, chain, MIN(seq) AS first_seen
+        `SELECT sampler_name, scenario_name, chain, from_plan, MIN(seq) AS first_seen
            FROM (
              SELECT rr.sampler_name, rr.scenario_name,
-                    (SELECT jsonb_agg(
-                              jsonb_build_object('name', e ->> 'name', 'class', e ->> 'class')
-                              ORDER BY ord)
-                       FROM jsonb_array_elements(rr.parent_controllers)
-                            WITH ORDINALITY AS t(e, ord)) AS chain,
+                    COALESCE(
+                      (SELECT jsonb_agg(
+                                jsonb_build_object(
+                                  'name', e ->> 'name',
+                                  'class', e ->> 'class',
+                                  'occurrence', e -> 'occurrence')
+                                ORDER BY ord)
+                         FROM jsonb_array_elements(rr.source_element_path)
+                              WITH ORDINALITY AS t(e, ord)
+                        WHERE ord < jsonb_array_length(rr.source_element_path)),
+                      (SELECT jsonb_agg(
+                                jsonb_build_object('name', e ->> 'name', 'class', e ->> 'class')
+                                ORDER BY ord)
+                         FROM jsonb_array_elements(rr.parent_controllers)
+                              WITH ORDINALITY AS t(e, ord))
+                    ) AS chain,
+                    (rr.source_element_path IS NOT NULL) AS from_plan,
                     ROW_NUMBER() OVER (ORDER BY rr.time) AS seq
                FROM (
-                      SELECT sampler_name, scenario_name, parent_controllers, time
+                      SELECT sampler_name, scenario_name, parent_controllers,
+                             source_element_path, time
                         FROM requests_raw
                        WHERE test_run_id = $1
                          AND transaction_name = $2
@@ -1289,7 +1316,7 @@ export class TestRunsPerformanceQueryService {
                     ) rr
            ) first_rows
           WHERE chain IS NOT NULL
-          GROUP BY sampler_name, scenario_name, chain`,
+          GROUP BY sampler_name, scenario_name, chain, from_plan`,
         [resolvedTestRunId, transactionName],
       );
       if (!rows || rows.length === 0) {
@@ -1303,14 +1330,19 @@ export class TestRunsPerformanceQueryService {
       const CONFLICT = 'conflict' as const;
       const chainBySampler = new Map<string, ControllerRef[] | typeof CONFLICT>();
       const firstSeenBySampler = new Map<string, number>();
+      const fromPlanBySampler = new Map<string, boolean>();
       for (const row of rows as Array<Record<string, unknown>>) {
         const k = key(row.scenario_name as string | null, row.sampler_name as string);
         const chain = (row.chain as ControllerRef[]) ?? [];
         const firstSeen = this.mapper.parseInt(row.first_seen);
         firstSeenBySampler.set(k, Math.min(firstSeenBySampler.get(k) ?? firstSeen, firstSeen));
+        fromPlanBySampler.set(k, (fromPlanBySampler.get(k) ?? false) || row.from_plan === true);
         const seen = chainBySampler.get(k);
-        // A sampler that ran under two different chains has no single answer; leave it
-        // unlabelled rather than picking one arbitrarily.
+        // A sampler that ran at two different plan positions has no single answer HERE: the
+        // sampler rollup holds one row per (sampler_name, scenario_name), so its numbers already
+        // cover both positions. Banding it under one of them would misattribute them, so it is
+        // left unbanded. Splitting it into a row per position would need the sampler rollup
+        // keyed by path too, which is a schema change and separate work.
         if (seen === undefined) {
           chainBySampler.set(k, chain);
         } else if (seen !== CONFLICT && !sameChain(seen, chain)) {
@@ -1320,6 +1352,9 @@ export class TestRunsPerformanceQueryService {
       for (const sample of samples) {
         const k = key(sample.scenario_name, sample.sampler_name);
         sample.first_seen = firstSeenBySampler.get(k);
+        // Which shape the chain came from, so the UI can tell "not analysed yet" from "this
+        // engine never records that" when a parallel band has no timings.
+        sample.chain_source = fromPlanBySampler.get(k) ? 'plan' : 'runtime';
         const chain = chainBySampler.get(k);
         if (chain === undefined || chain === CONFLICT) {
           sample.parent_controllers = null;

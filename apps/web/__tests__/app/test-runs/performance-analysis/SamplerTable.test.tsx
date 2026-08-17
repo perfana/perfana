@@ -386,3 +386,73 @@ describe('SamplerTable nesting and order', () => {
     );
   });
 });
+
+describe('SamplerTable plan-path runs', () => {
+  const pg = (name: string) => ({ name, class: 'org.apache.jmeter.control.ParallelController' });
+
+  it('does not promise timings a plan-path run can never produce', () => {
+    // "Timings appear once the run is analysed" is a lie here: measuring a pass needs to know
+    // which requests shared it, and plan-path metadata records no such identity. A reader would
+    // act on that lie by re-analysing a run that will never yield the number.
+    renderTable([
+      sampler('a', { parallel_group: 'PG1', chain_source: 'plan' }),
+      sampler('b', { parallel_group: 'PG1', chain_source: 'plan' }),
+    ]);
+
+    expect(screen.queryByText(/Timings appear once the run is analysed/)).not.toBeInTheDocument();
+    expect(screen.getByText(/no per-execution timings/)).toBeInTheDocument();
+  });
+
+  it('still bands the group, because the grouping itself is accurate', () => {
+    // Losing the numbers is not losing the fact that these ran concurrently.
+    renderTable([
+      sampler('a', { parallel_group: 'PG1', chain_source: 'plan' }),
+      sampler('b', { parallel_group: 'PG1', chain_source: 'plan' }),
+    ]);
+
+    expect(screen.getByText('Parallel group')).toBeInTheDocument();
+    expect(screen.getByText('PG1')).toBeInTheDocument();
+  });
+
+  it('keeps the pending wording for a runtime-shaped run that is merely unanalysed', () => {
+    renderTable([
+      sampler('a', { parallel_group: 'PG1', chain_source: 'runtime' }),
+      sampler('b', { parallel_group: 'PG1', chain_source: 'runtime' }),
+    ]);
+
+    expect(screen.getByText(/Timings appear once the run is analysed/)).toBeInTheDocument();
+    expect(screen.queryByText(/no per-execution timings/)).not.toBeInTheDocument();
+  });
+
+  it('shows the timings when a historical run has them, whatever the wording elsewhere', () => {
+    const stats = groupStats();
+    renderTable([
+      sampler('a', { parallel_group: 'PG1', parallel_group_stats: stats, chain_source: 'runtime' }),
+      sampler('b', { parallel_group: 'PG1', parallel_group_stats: stats, chain_source: 'runtime' }),
+    ]);
+
+    expect(screen.getByText('156.00')).toBeInTheDocument();
+    expect(screen.queryByText(/no per-execution timings/)).not.toBeInTheDocument();
+  });
+
+  it('renders a plan-path parallel band with no chain_source as merely unanalysed', () => {
+    // Absent means the API did not say; only an explicit 'plan' claims permanence.
+    renderTable([sampler('a', { parallel_group: 'PG1' }), sampler('b', { parallel_group: 'PG1' })]);
+
+    expect(screen.getByText(/Timings appear once the run is analysed/)).toBeInTheDocument();
+  });
+
+  it('separates two same-named sibling controllers into two bands', () => {
+    const loop = (occurrence: number) => ({
+      name: 'retry',
+      class: 'org.apache.jmeter.control.LoopController',
+      occurrence,
+    });
+    renderTable([
+      sampler('a', { parent_controllers: [threadGroup, loop(0)] }),
+      sampler('b', { parent_controllers: [threadGroup, loop(1)] }),
+    ]);
+
+    expect(screen.getAllByText('Loop')).toHaveLength(2);
+  });
+});

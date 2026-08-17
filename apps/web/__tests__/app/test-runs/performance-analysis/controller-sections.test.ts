@@ -327,3 +327,51 @@ describe('buildSamplerSections', () => {
     });
   });
 });
+
+describe('plan-path metadata', () => {
+  const loopAt = (name: string, occurrence: number) => ({
+    name,
+    class: 'org.apache.jmeter.control.LoopController',
+    occurrence,
+  });
+
+  it('keeps two same-named sibling controllers as two bands', () => {
+    // Without occurrence these collapse into one band, silently merging two plan positions.
+    const sections = buildSamplerSections(
+      [
+        sampler('a', { parent_controllers: [loopAt('retry', 0)] }),
+        sampler('b', { parent_controllers: [loopAt('retry', 1)] }),
+      ],
+      'T01',
+    );
+
+    expect(names(sections)).toEqual(['retry', 'retry']);
+    expect(sectionSamples(sections[0]).map((s) => s.sampler_name)).toEqual(['a']);
+    expect(sectionSamples(sections[1]).map((s) => s.sampler_name)).toEqual(['b']);
+  });
+
+  it('still merges requests that share one plan position', () => {
+    const sections = buildSamplerSections(
+      [
+        sampler('a', { parent_controllers: [loopAt('retry', 0)] }),
+        sampler('b', { parent_controllers: [loopAt('retry', 0)] }),
+      ],
+      'T01',
+    );
+
+    expect(names(sections)).toEqual(['retry']);
+    expect(sectionSamples(sections[0]).map((s) => s.sampler_name)).toEqual(['a', 'b']);
+  });
+
+  it('treats a chain with no occurrence as position zero, so old runs are unaffected', () => {
+    const sections = buildSamplerSections(
+      [
+        sampler('a', { parent_controllers: [C.loop('retry')] }),
+        sampler('b', { parent_controllers: [loopAt('retry', 0)] }),
+      ],
+      'T01',
+    );
+
+    expect(names(sections)).toEqual(['retry']);
+  });
+});

@@ -1106,9 +1106,16 @@ describe('TestRunsPerformanceQueryService', () => {
 
 const TG = { name: 'Shoppers', class: 'org.apache.jmeter.threads.ThreadGroup' };
 const PC = (name: string) => ({ name, class: 'org.apache.jmeter.control.ParallelController' });
-/** A lookup row as the chain query returns it. */
-const chainRow = (sampler: string, scenario: string, ...chain: Array<{ name: string; class: string }>) =>
-  ({ sampler_name: sampler, scenario_name: scenario, chain, first_seen: '1' });
+/**
+ * A lookup row as the chain query returns it. `chain` is already trimmed by the SQL — the
+ * plan-path shape's trailing sampler entry is dropped there — so both metadata shapes reach the
+ * mapping code ending at the innermost controller. `from_plan` says which shape it came from.
+ */
+const chainRow = (
+  sampler: string,
+  scenario: string,
+  ...chain: Array<{ name: string; class: string; occurrence?: number }>
+) => ({ sampler_name: sampler, scenario_name: scenario, chain, first_seen: '1', from_plan: true });
 
     describe('parallel groups', () => {
       it('labels samplers with the Parallel Controller they ran under', async () => {
@@ -1199,8 +1206,96 @@ const chainRow = (sampler: string, scenario: string, ...chain: Array<{ name: str
         expect(rowNumberAt).toBeLessThan(limitAt);
       });
 
+      it('reads the plan-path column, falling back to the retired runtime one', async () => {
+        // A run is written by one listener version, so the COALESCE picks a shape per row rather
+        // than merging them. Both columns must be named, or a database holding only one of them
+        // fails the query outright and renders no bands at all.
+        mockQuerySequence([RAW_SAMPLER_ROW], []);
+
+        await service.getTransactionSamples(TEST_RUN_ID, TRANSACTION, false, IS_ADMIN, []);
+
+        const q = (testRunRepo.query as jest.Mock).mock.calls
+          .map((c) => String(c[0]))
+          .find((sql) => sql.includes('source_element_path')) as string;
+        expect(q).toBeDefined();
+        expect(q).toMatch(/COALESCE/);
+        expect(q).toMatch(/jsonb_array_elements\(rr\.source_element_path\)/);
+        expect(q).toMatch(/jsonb_array_elements\(rr\.parent_controllers\)/);
+      });
+
+      it('drops the trailing sampler entry the plan path carries', async () => {
+        // source_element_path ends at the sampler itself. Kept, every request would be banded
+        // under a one-child band named after itself and the table would double in height.
+        // Trimmed by POSITION, not by class: a sampler is not always an HTTPSamplerProxy.
+        mockQuerySequence([RAW_SAMPLER_ROW], []);
+
+        await service.getTransactionSamples(TEST_RUN_ID, TRANSACTION, false, IS_ADMIN, []);
+
+        const q = (testRunRepo.query as jest.Mock).mock.calls
+          .map((c) => String(c[0]))
+          .find((sql) => sql.includes('source_element_path')) as string;
+        expect(q).toMatch(/ord < jsonb_array_length\(rr\.source_element_path\)/);
+        expect(q).not.toMatch(/HTTPSamplerProxy/);
+      });
+
+      it('projects occurrence so same-named siblings stay distinguishable', async () => {
+        mockQuerySequence([RAW_SAMPLER_ROW], []);
+
+        await service.getTransactionSamples(TEST_RUN_ID, TRANSACTION, false, IS_ADMIN, []);
+
+        const q = (testRunRepo.query as jest.Mock).mock.calls
+          .map((c) => String(c[0]))
+          .find((sql) => sql.includes('source_element_path')) as string;
+        expect(q).toMatch(/'occurrence', e -> 'occurrence'/);
+      });
+
+      it('reports which metadata shape the chain came from', async () => {
+        // The UI needs it to tell "not analysed yet" from "this engine never records that".
+        mockQuerySequence(
+          [RAW_SAMPLER_ROW],
+          [chainRow('POST /checkout', 'load_test', TG, PC('PG1'))],
+        );
+
+        const result = (await service.getTransactionSamples(
+          TEST_RUN_ID, TRANSACTION, false, IS_ADMIN, [],
+        )) as SamplerStats[];
+
+        expect(result[0].chain_source).toBe('plan');
+      });
+
+      it('marks a historical run as runtime-shaped', async () => {
+        mockQuerySequence(
+          [RAW_SAMPLER_ROW],
+          [{ ...chainRow('POST /checkout', 'load_test', TG, PC('PG1')), from_plan: false }],
+        );
+
+        const result = (await service.getTransactionSamples(
+          TEST_RUN_ID, TRANSACTION, false, IS_ADMIN, [],
+        )) as SamplerStats[];
+
+        expect(result[0].chain_source).toBe('runtime');
+      });
+
+      it('tells two same-named sibling controllers apart by occurrence alone', async () => {
+        // Identical but for occurrence: these are two different plan positions, so the sampler
+        // has no single chain and is left unbanded rather than attributed to one of them.
+        mockQuerySequence(
+          [RAW_SAMPLER_ROW],
+          [
+            chainRow('POST /checkout', 'load_test', TG, { ...PC('retry'), occurrence: 0 }),
+            chainRow('POST /checkout', 'load_test', TG, { ...PC('retry'), occurrence: 1 }),
+          ],
+        );
+
+        const result = (await service.getTransactionSamples(
+          TEST_RUN_ID, TRANSACTION, false, IS_ADMIN, [],
+        )) as SamplerStats[];
+
+        expect(result[0].parallel_group).toBeNull();
+      });
+
       it('still returns samplers when the parallel-group lookup fails', async () => {
-        // A database without the parent_controllers column (deploy ahead of the migration)
+        // A database without the source_element_path column (deploy ahead of the migration)
         // must degrade to the previous behaviour, not fail the whole request.
         let call = 0;
         (testRunRepo.query as jest.Mock).mockImplementation(async (sql: unknown) => {
@@ -1208,8 +1303,8 @@ const chainRow = (sampler: string, scenario: string, ...chain: Array<{ name: str
           if (isRollupExistenceCheck(sql)) return [];
           if (isRollupScopeLookup(sql)) return [];
           if (isCaggScopeLookup(sql)) return [];
-          if (String(sql).includes('parent_controllers')) {
-            throw new Error('column "parent_controllers" does not exist');
+          if (String(sql).includes('source_element_path')) {
+            throw new Error('column "source_element_path" does not exist');
           }
           call++;
           return call === 1 ? [RAW_SAMPLER_ROW] : [];

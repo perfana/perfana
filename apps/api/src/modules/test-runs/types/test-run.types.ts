@@ -145,16 +145,31 @@ export interface TransactionStats {
  * the concurrent pass they belong to.
  */
 /**
- * One enclosing controller from a request's `parent_controllers` chain.
+ * One enclosing controller on the path from the test plan's root down to a request.
  *
- * `iteration` and `execution` are deliberately not carried here: they change on every request,
- * while this chain describes a sampler aggregated over the whole run.
+ * Deliberately only what is stable for a sampler aggregated over a whole run. The retired
+ * runtime shape also carried `iteration` and `execution`, which changed per request; the current
+ * plan-path shape carries neither, and no longer describes what the plan was doing at the time.
  */
 export interface ControllerRef {
   name: string;
   /** Fully-qualified class, e.g. `org.apache.jmeter.control.ParallelController`. */
   class: string;
+  /**
+   * Which of several identically-named siblings this is, 0-based. Absent on chains from the
+   * retired runtime shape, which could not tell them apart.
+   */
+  occurrence?: number;
 }
+
+/**
+ * Which metadata shape a request's chain was read from.
+ *
+ * `runtime` chains come from the retired per-request tagging and can carry parallel-group
+ * timings. `plan` chains are a fixed address in the test plan: they never can, so an absent
+ * timing is permanent rather than pending.
+ */
+export type ChainSource = 'plan' | 'runtime';
 
 export interface ParallelGroupStats {
   parallel_group: string;
@@ -212,6 +227,11 @@ export interface SamplerStats {
    * used to order the request table. Absent when the run carries no controller data.
    */
   first_seen?: number;
+  /**
+   * Which metadata shape `parent_controllers` above was built from. Absent when the run carries
+   * no controller data at all.
+   */
+  chain_source?: ChainSource;
 }
 
 /**
