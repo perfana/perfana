@@ -700,15 +700,20 @@ export class ReportHtmlCompilerService {
       font-family: 'Courier New', monospace;
     }
 
-    /* On screen the report is still an A4 document, so it is laid out as one instead of
-       stretching to whatever the window happens to be. On a wide monitor the full-bleed column
-       ran lines past any comfortable reading length and let tables sprawl into a shape the PDF
-       never has.
+    /* On screen the report is held to a fixed measure instead of stretching to whatever the
+       window happens to be: on a wide monitor the full-bleed column ran lines well past any
+       comfortable reading length.
 
-       The measurements are the PDF's, not arbitrary: A4 is 210mm and pdf.service.ts insets
-       15mm left and right, so the printed text column is 180mm. Matching the padding to that
-       margin gives a 180mm column on screen too — the same line breaks, the same table widths,
-       so what is on screen is what comes out of the printer.
+       340mm, not A4's 210mm. A4 was tried and is too narrow for this content — the regressions
+       table needs seven columns and at 210mm it lost Diff % and Status entirely, the Apdex
+       metric cards clipped their values, and headings broke mid-word. Measured against a real
+       report, everything fits from roughly 320mm; 340mm leaves the dashboard column two lines
+       instead of four. It is still bounded, which is the point: a 2560px monitor gives a
+       ~1285px column rather than a 2560px line.
+
+       The consequence, stated plainly: the screen no longer matches the PDF's line breaks. The
+       PDF is A4 and those wide tables are clipped there — which was true before any of this and
+       is a separate problem.
 
        Screen only. In print Puppeteer's page box already sets the width, and the @media print
        block below zeroes this padding; constraining it again would inset the content twice. */
@@ -720,7 +725,7 @@ export class ReportHtmlCompilerService {
       }
 
       body {
-        max-width: 210mm;
+        max-width: 340mm;
         padding: 20mm 15mm;
         margin-left: auto;
         margin-right: auto;

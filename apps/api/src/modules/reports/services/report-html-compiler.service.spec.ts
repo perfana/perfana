@@ -887,26 +887,35 @@ describe('ReportHtmlCompilerService', () => {
   });
 });
 
-describe('ReportHtmlCompilerService A4 layout', () => {
+describe('ReportHtmlCompilerService screen measure', () => {
   // The report is a document. On a wide monitor it used to stretch to the full window, so lines
-  // ran past any comfortable reading length and tables sprawled into a shape the PDF never has.
+  // ran past any comfortable reading length.
   const html = () =>
     new ReportHtmlCompilerService(
       { getSectionTitle: (t: string) => t, escapeHtml: (v: string) => v } as never,
       { render: jest.fn() } as never,
     ).compileHtml('Report', '<section>x</section>', {} as never);
 
-  it('holds the report to A4 width on screen', () => {
+  it('holds the report to a fixed, centred measure on screen', () => {
     const out = html();
     const screenBlock = out.slice(out.indexOf('@media screen'), out.indexOf('/* Print Styles */'));
 
-    expect(screenBlock).toMatch(/max-width:\s*210mm/);
+    expect(screenBlock).toMatch(/max-width:\s*340mm/);
     expect(screenBlock).toMatch(/margin-left:\s*auto/);
     expect(screenBlock).toMatch(/margin-right:\s*auto/);
   });
 
-  it('uses the same side margin the PDF does, so the column matches what prints', () => {
-    // pdf.service.ts insets 15mm left and right of a 210mm page: a 180mm text column.
+  it('is wider than A4, because A4 clipped the widest tables', () => {
+    // The regressions table is seven columns; at 210mm it lost Diff % and Status entirely.
+    // Guards against someone "restoring" A4 without re-checking that content against it.
+    const out = html();
+    const screenBlock = out.slice(out.indexOf('@media screen'), out.indexOf('/* Print Styles */'));
+
+    const measure = /max-width:\s*(\d+)mm/.exec(screenBlock);
+    expect(Number(measure?.[1])).toBeGreaterThanOrEqual(320);
+  });
+
+  it('keeps a side margin, so text does not run to the very edge', () => {
     const out = html();
     const screenBlock = out.slice(out.indexOf('@media screen'), out.indexOf('/* Print Styles */'));
 
@@ -921,7 +930,7 @@ describe('ReportHtmlCompilerService A4 layout', () => {
     // Anchor on the section marker: the screen block's own comment mentions "@media print".
     const printBlock = out.slice(out.indexOf('/* Print Styles */'));
     expect(printBlock).toMatch(/padding:\s*0/);
-    expect(printBlock).not.toMatch(/max-width:\s*210mm/);
+    expect(printBlock).not.toMatch(/max-width:\s*340mm/);
   });
 
   it('paints the page background so the centred column is not a grey stripe', () => {
