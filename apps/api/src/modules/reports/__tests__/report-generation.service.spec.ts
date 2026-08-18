@@ -648,6 +648,80 @@ describe('ReportGenerationService', () => {
     });
   });
 
+  describe('createFromTemplate CI/CD entry points', () => {
+    const setupTemplate = () => {
+      testRunRepo.findOne.mockResolvedValue(createMockTestRun());
+      templateRepo.findOne.mockResolvedValue(createMockTemplate());
+      reportRepo.create.mockImplementation((r: never) => r);
+      reportRepo.save.mockImplementation(async (r: never) => r);
+    };
+
+    it('accepts the human test run id a pipeline actually has', async () => {
+      // A CI/CD job knows the id it handed the load test tool, never the internal uuid.
+      setupTemplate();
+
+      await service.createFromTemplate({
+        testRunId: 'EA-acc-loadtest-00020',
+        generatedBy: 'ci',
+        userId: 'u1',
+        roles: ['admin'],
+      });
+
+      expect(testRunRepo.findOne).toHaveBeenCalledWith(
+        expect.objectContaining({ where: { testRunId: 'EA-acc-loadtest-00020' } }),
+      );
+    });
+
+    it('stores the resolved uuid, not the id that came in', async () => {
+      setupTemplate();
+
+      const report = await service.createFromTemplate({
+        testRunId: 'EA-acc-loadtest-00020',
+        generatedBy: 'ci',
+        userId: 'u1',
+        roles: ['admin'],
+      });
+
+      expect(report.test_run_id).toBe('123e4567-e89b-12d3-a456-426614174001');
+    });
+
+    it('needs neither template_id nor template_name — it falls back to the default', async () => {
+      // This is why template_name is optional: a pipeline can post the test run alone.
+      setupTemplate();
+
+      await service.createFromTemplate({ testRunId: 'EA-acc-loadtest-00020', generatedBy: 'ci' });
+
+      expect(templateRepo.findOne).toHaveBeenCalledWith(
+        expect.objectContaining({ where: expect.objectContaining({ is_default: true }) }),
+      );
+    });
+
+    it('names an unnamed report after the template, down to the second', async () => {
+      // The date alone collided: nightly plus an on-demand run on the same day produced two
+      // reports with identical names, indistinguishable in the list.
+      setupTemplate();
+
+      const report = await service.createFromTemplate({
+        testRunId: 'EA-acc-loadtest-00020',
+        generatedBy: 'ci',
+      });
+
+      expect(report.name).toMatch(/^Test Template - \d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$/);
+    });
+
+    it('keeps an explicit name untouched', async () => {
+      setupTemplate();
+
+      const report = await service.createFromTemplate({
+        testRunId: 'EA-acc-loadtest-00020',
+        name: 'Release 4.2 sign-off',
+        generatedBy: 'ci',
+      });
+
+      expect(report.name).toBe('Release 4.2 sign-off');
+    });
+  });
+
   // ==================== findByTestRunId ====================
 
   describe('findByTestRunId', () => {

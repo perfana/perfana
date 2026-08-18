@@ -368,7 +368,12 @@ export class ReportGenerationService {
         );
       }
 
-      const reportName = options.name || `${template.name} - ${new Date().toISOString().slice(0, 10)}`;
+      // Date alone collided: a pipeline generating nightly and on demand on the same day
+      // produced several reports with identical names, indistinguishable in the list. Seconds
+      // are enough to separate them, and the format stays sortable as text.
+      const reportName =
+        options.name ||
+        `${template.name} - ${new Date().toISOString().slice(0, 19).replace('T', ' ')}`;
 
       const report = this.reportRepo.create({
         test_run_id: testRun.id,
