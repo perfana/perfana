@@ -1813,4 +1813,226 @@ describe('TestRunsCrudQueryService', () => {
       expect(teamWhereCall).toBeUndefined();
     });
   });
+
+  // =========================================================================
+  // denialReason (shared guard behind findByTestRunId / findOne /
+  // getTestRunByTestRunId)
+  // =========================================================================
+
+  describe('denialReason', () => {
+    /**
+     * All four denial causes surface to the caller as an identical 404 (or a
+     * bare null) by design — a caller must not learn a run exists. That makes
+     * the log the ONLY place the causes are distinguishable, so the log text is
+     * load-bearing behaviour, not incidental output.
+     *
+     * The three genuine authorization denials log at WARN. The invisible-row
+     * case logs at DEBUG instead: it is also reached by an ordinary missing or
+     * typo'd id, and GlobalExceptionFilter already records the resulting 404 at
+     * WARN, so warning here would both duplicate that and bury the real
+     * denials under routine misses.
+     */
+    describe('denial logging', () => {
+      it('should log an invisible row at debug, not warn, so routine misses stay out of the denial signal', async () => {
+        const warnSpy = jest.spyOn(service['logger'], 'warn');
+        const debugSpy = jest.spyOn(service['logger'], 'debug');
+        testRunRepo.findOne.mockResolvedValue(null);
+
+        await expect(
+          service.findByTestRunId('ghost-run', userId, false),
+        ).rejects.toThrow(ResourceNotFoundException);
+
+        // Assert against the SINGLE matching call, not the spy as a whole: the
+        // pre-existing entry log already emits both the id and the userId, so
+        // three separate stringContaining assertions would still pass with the
+        // miss-path log line deleted.
+        const missCall = debugSpy.mock.calls.find(
+          (call) =>
+            typeof call[0] === 'string' &&
+            (call[0] as string).includes('no visible row (RLS-filtered or nonexistent)'),
+        );
+        expect(missCall).toBeDefined();
+        expect(missCall?.[0]).toContain('ghost-run');
+        expect(missCall?.[0]).toContain(userId);
+        // A missing id is not an authorization event — it must not reach the
+        // warn stream operators grep for real denials.
+        expect(warnSpy).not.toHaveBeenCalled();
+      });
+
+      it('should log the org-less system under test by name and id', async () => {
+        const warnSpy = jest.spyOn(service['logger'], 'warn');
+        const entity = createMockTestRunEntity({
+          systemUnderTest: {
+            id: 'system-uuid-123',
+            name: 'PaymentService',
+            organization_id: undefined,
+            created_at: NOW,
+          } as unknown as SystemUnderTest,
+        });
+        testRunRepo.findOne.mockResolvedValue(entity);
+
+        await expect(
+          service.findByTestRunId(entity.testRunId, userId, false),
+        ).rejects.toThrow(ResourceNotFoundException);
+
+        expect(warnSpy).toHaveBeenCalledWith(
+          expect.stringContaining(
+            "system under test 'PaymentService' (system-uuid-123) has no organization_id",
+          ),
+        );
+      });
+
+      it('should log the organization the caller is not a member of (findOne / UUID variant)', async () => {
+        const warnSpy = jest.spyOn(service['logger'], 'warn');
+        authzService.isOrganizationMember.mockResolvedValue(false);
+        const entity = createMockTestRunEntity();
+        testRunRepo.findOne.mockResolvedValue(entity);
+
+        await expect(service.findOne(entity.id, userId, false)).rejects.toThrow(
+          ResourceNotFoundException,
+        );
+
+        expect(warnSpy).toHaveBeenCalledWith(
+          expect.stringContaining('user is not a member of organization org-uuid-123'),
+        );
+        // findOne identifies the run by UUID, not testRunId.
+        expect(warnSpy).toHaveBeenCalledWith(expect.stringContaining(entity.id));
+      });
+
+      it('should log the team id and the underlying team-access reason', async () => {
+        const warnSpy = jest.spyOn(service['logger'], 'warn');
+        authzService.isOrganizationMember.mockResolvedValue(true);
+        authzService.canViewTeamResources.mockResolvedValue({
+          allowed: false,
+          reason: 'user is not a member of team Payments',
+        });
+        const entity = createMockTestRunEntity();
+        testRunRepo.findOne.mockResolvedValue(entity);
+
+        await expect(
+          service.findByTestRunId(entity.testRunId, userId, false),
+        ).rejects.toThrow(ResourceNotFoundException);
+
+        expect(warnSpy).toHaveBeenCalledWith(
+          expect.stringContaining(
+            'user lacks access to team team-uuid-123: user is not a member of team Payments',
+          ),
+        );
+      });
+
+      it('should log the denial reason on the null-returning variant too', async () => {
+        const warnSpy = jest.spyOn(service['logger'], 'warn');
+        authzService.isOrganizationMember.mockResolvedValue(false);
+        const entity = createMockTestRunEntity();
+        testRunRepo.findOne.mockResolvedValue(entity);
+
+        const result = await service.getTestRunByTestRunId(entity.testRunId, userId, false);
+
+        expect(result).toBeNull();
+        expect(warnSpy).toHaveBeenCalledWith(
+          expect.stringContaining('user is not a member of organization org-uuid-123'),
+        );
+      });
+    });
+
+    describe('allow paths', () => {
+      it('should return the test run for a non-admin org member with team access, without warning', async () => {
+        const warnSpy = jest.spyOn(service['logger'], 'warn');
+        authzService.isOrganizationMember.mockResolvedValue(true);
+        authzService.canViewTeamResources.mockResolvedValue({ allowed: true, reason: 'ok' });
+
+        const entity = createMockTestRunEntity();
+        const mapped = createMockMappedTestRun(entity);
+        mapper.mapEntityToTestRun.mockReturnValue(mapped as any);
+        testRunRepo.findOne.mockResolvedValue(entity);
+        changePointsRepo.findOne.mockResolvedValue(null);
+
+        const result = await service.findByTestRunId(entity.testRunId, userId, false);
+
+        expect(result.test_run_id).toBe(entity.testRunId);
+        expect(authzService.isOrganizationMember).toHaveBeenCalledWith(userId, 'org-uuid-123');
+        expect(authzService.canViewTeamResources).toHaveBeenCalledWith(userId, 'team-uuid-123');
+        expect(warnSpy).not.toHaveBeenCalled();
+      });
+
+      it('should skip the team check when the system under test has no team', async () => {
+        authzService.isOrganizationMember.mockResolvedValue(true);
+
+        const entity = createMockTestRunEntity({
+          systemUnderTest: {
+            id: 'system-uuid-123',
+            name: 'PaymentService',
+            organization_id: 'org-uuid-123',
+            team_id: undefined,
+            created_at: NOW,
+          } as unknown as SystemUnderTest,
+        });
+        const mapped = createMockMappedTestRun(entity);
+        mapper.mapEntityToTestRun.mockReturnValue(mapped as any);
+        testRunRepo.findOne.mockResolvedValue(entity);
+        changePointsRepo.findOne.mockResolvedValue(null);
+
+        const result = await service.findByTestRunId(entity.testRunId, userId, false);
+
+        expect(result.test_run_id).toBe(entity.testRunId);
+        expect(authzService.canViewTeamResources).not.toHaveBeenCalled();
+      });
+
+      it('should deny a non-admin when the system under test is not loaded, rather than skipping the checks', async () => {
+        // system_under_test_id is NOT NULL, so an absent relation is never a
+        // legitimate SUT-less run. Under RLS it means systems_under_test was
+        // filtered out for a run the caller can otherwise see — a denial, not a
+        // free pass. Returning the run here would skip every org and team check.
+        const warnSpy = jest.spyOn(service['logger'], 'warn');
+        const entity = createMockTestRunEntity({ systemUnderTest: undefined });
+        testRunRepo.findOne.mockResolvedValue(entity);
+        changePointsRepo.findOne.mockResolvedValue(null);
+
+        await expect(
+          service.findByTestRunId(entity.testRunId, userId, false),
+        ).rejects.toThrow(ResourceNotFoundException);
+
+        expect(warnSpy).toHaveBeenCalledWith(
+          expect.stringContaining('system under test not visible'),
+        );
+        // Denied before any membership lookup — there is no org to check against.
+        expect(authzService.isOrganizationMember).not.toHaveBeenCalled();
+        expect(authzService.canViewTeamResources).not.toHaveBeenCalled();
+      });
+
+      it('should still let a global admin read a run whose system under test is not loaded', async () => {
+        const entity = createMockTestRunEntity({ systemUnderTest: undefined });
+        const mapped = createMockMappedTestRun(entity);
+        mapper.mapEntityToTestRun.mockReturnValue(mapped as any);
+        testRunRepo.findOne.mockResolvedValue(entity);
+        changePointsRepo.findOne.mockResolvedValue(null);
+
+        const result = await service.findByTestRunId(entity.testRunId, userId, true);
+
+        expect(result.test_run_id).toBe(entity.testRunId);
+      });
+
+      it('should bypass every check for a global admin, even on an org-less system', async () => {
+        const entity = createMockTestRunEntity({
+          systemUnderTest: {
+            id: 'system-uuid-123',
+            name: 'PaymentService',
+            organization_id: undefined,
+            team_id: 'team-uuid-123',
+            created_at: NOW,
+          } as unknown as SystemUnderTest,
+        });
+        const mapped = createMockMappedTestRun(entity);
+        mapper.mapEntityToTestRun.mockReturnValue(mapped as any);
+        testRunRepo.findOne.mockResolvedValue(entity);
+        changePointsRepo.findOne.mockResolvedValue(null);
+
+        const result = await service.findByTestRunId(entity.testRunId, userId, true);
+
+        expect(result.test_run_id).toBe(entity.testRunId);
+        expect(authzService.isOrganizationMember).not.toHaveBeenCalled();
+        expect(authzService.canViewTeamResources).not.toHaveBeenCalled();
+      });
+    });
+  });
 });
