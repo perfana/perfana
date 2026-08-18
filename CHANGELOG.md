@@ -19,6 +19,14 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
   checked through its system under test, but if that system was filtered out for the caller
   the check was skipped and the run was returned with no organization or team check at all.
   It now refuses, like every other denial.
+- **Related test runs no longer skip the access check.** Asking for a run's related runs
+  without naming a system, environment and workload took a shortcut that looked the run up by
+  id and ran no check at all, then listed up to fifty of its siblings. It now applies the same
+  check as every other way of reading a run.
+- **Asking for another organization's test runs by id no longer works.** The `organizationId`
+  query parameter was trusted as given, so naming an organization you do not belong to
+  returned its runs instead of yours. It can now only narrow what you may already see.
+  Administrators are unaffected.
 
 ### Changed
 - **A refused test run says why in the server log.** Five different reasons — the run is not
