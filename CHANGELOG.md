@@ -4,6 +4,15 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
+## [0.2.63.4] - 2026-08-18
+
+### Fixed
+- **Reports are now found for a test run whose name happens to look like an internal id.** Some pipelines name a run after a build guid, which has the same shape as the identifier Perfana assigns internally. Those runs were looked up in the wrong place and their reports quietly came back empty — no error, just nothing. An identifier of that shape is now checked against both, so the reports appear.
+
+### Changed
+- **The aggregate metric endpoint now has a documented ceiling on how many runs one request may combine.** The list of runs was read from the URL with no limit, so a hand-built request could ask for arbitrarily many at once. Over the limit the request is now refused with a message saying so, rather than quietly returning a partial answer, and a run named twice in the same request is counted once.
+- Every reporting endpoint now resolves a test run identifier the same way, in one place, so the class of bug fixed in 0.2.63.3 cannot come back through an endpoint added later. The shapes the report renderers consume moved into their own module, which is a sixth of what was the largest file in that area.
+
 ## [0.2.63.3] - 2026-08-18
 
 ### Fixed

@@ -7,6 +7,19 @@ priority (P0–P4), origin, and enough context that someone picking it up in
 3 months can act without re-deriving the motivation.
 
 When an item ships, move it to the `## Completed` section at the bottom
+
+### Cap the `testRunIds` query param on the aggregate endpoint
+
+**Priority:** P4
+**Origin:** /ship performance specialist on `feat/aggregated-percentiles` (2026-08-14).
+**Why:** `testRunIds` is parsed from an unbounded comma-separated param straight
+into `= ANY($1::text[])`. Materially de-risked now that each id costs an indexed
+rollup read instead of a raw-table scan, but Trends passes every run in the
+selected range, so a wide range on a busy SUT still fans one request into an
+arbitrarily large aggregate.
+**Where:** `apps/api/src/modules/test-runs/controllers/test-runs-aggregated-timeseries.controller.ts`
+— alongside the existing metric/stat validation (~line 124).
+**Completed:** v0.2.63.4 (2026-08-18)
 with the version it landed in.
 
 ---
@@ -218,19 +231,6 @@ via `buildAggregatedMetricName(RT_KEEPER_TITLES[keeper])`.
 **Where:** `apps/web/app/test-runs/[id]/components/compare/hooks/useComparePresets.ts`
 (~line 93); keeper map in `apps/web/lib/aggregated-perf-series.ts` (~line 34).
 
-### Cap the `testRunIds` query param on the aggregate endpoint
-
-**Priority:** P4
-**Origin:** /ship performance specialist on `feat/aggregated-percentiles` (2026-08-14).
-**Why:** `testRunIds` is parsed from an unbounded comma-separated param straight
-into `= ANY($1::text[])`. Materially de-risked now that each id costs an indexed
-rollup read instead of a raw-table scan, but Trends passes every run in the
-selected range, so a wide range on a busy SUT still fans one request into an
-arbitrarily large aggregate.
-**Where:** `apps/api/src/modules/test-runs/controllers/test-runs-aggregated-timeseries.controller.ts`
-— alongside the existing metric/stat validation (~line 124).
-
----
 
 ## Completed
 
