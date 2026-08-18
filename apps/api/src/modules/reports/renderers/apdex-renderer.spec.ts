@@ -276,4 +276,14 @@ describe('ApdexRenderer', () => {
     expect(html).not.toContain('Peak Transactions / Second');
     expect(html).toContain('Scenarios');
   });
+  it('gives the stat-card grid columns a zero floor, so a long value cannot widen the page', async () => {
+    // repeat(4, 1fr) is min-content, not zero: one unbreakable value stretched its column past
+    // the page and Chrome clipped the trailing cards out of the PDF.
+    dataFetcher.getApdexDataFromDatabase.mockResolvedValue(makeApdexData());
+
+    const html = await renderer.renderApdexSection(makeSection(), makeTestRun());
+
+    expect(html).toContain('grid-template-columns: repeat(4, minmax(0, 1fr))');
+    expect(html).not.toContain('grid-template-columns: repeat(4, 1fr)');
+  });
 });

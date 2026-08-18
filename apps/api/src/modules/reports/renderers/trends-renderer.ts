@@ -86,7 +86,7 @@ export class TrendsRenderer {
     const txnDelta = this.calculateDelta(current.totalTransactions, previous.totalTransactions);
 
     return `
-      <div style="display: grid; grid-template-columns: repeat(4, 1fr); gap: 16px; margin: 24px 0;">
+      <div style="display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 16px; margin: 24px 0;">
         ${this.renderTrendCard('Avg Response Time', `${formatNum(current.avgMs)} ms`, avgDelta, true)}
         ${this.renderTrendCard('P95 Response Time', `${formatNum(current.p95Ms)} ms`, p95Delta, true)}
         ${this.renderTrendCard('Error Rate', formatPercent(current.errorRate), errorDelta, true)}

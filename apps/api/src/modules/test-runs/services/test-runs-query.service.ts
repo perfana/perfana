@@ -178,7 +178,7 @@ export class TestRunsQueryService {
   ): Promise<RelatedTestRun[]> {
     const { orgIds, isAdmin } = await this.resolveOrganizationIds(userId, roles);
     const userTeamIds = await this.resolveTeamIds(userId, roles);
-    return this.crudService.getRelatedTestRuns(testRunId, isAdmin, orgIds, userTeamIds, system, environment, workload);
+    return this.crudService.getRelatedTestRuns(testRunId, userId, isAdmin, orgIds, userTeamIds, system, environment, workload);
   }
 
   async getSystemsSummary(userId: string, roles: string[], organizationId?: string): Promise<SystemsSummary[]> {
@@ -292,7 +292,14 @@ export class TestRunsQueryService {
     const accessible = await withOrgFilter(userId, roles, this.authzService);
     const isAdmin = accessible === null;
     if (organizationId) {
-      return { orgIds: [organizationId], isAdmin };
+      // `organizationId` is a caller-supplied query parameter, so it narrows the
+      // caller's own access — it never widens it. Returning it verbatim let any
+      // authenticated principal read another organization's runs by passing that
+      // org's id. Admins (accessible === null) may still scope to any org.
+      if (isAdmin || (accessible ?? []).includes(organizationId)) {
+        return { orgIds: [organizationId], isAdmin };
+      }
+      return { orgIds: [], isAdmin };
     }
     return { orgIds: accessible ?? [], isAdmin };
   }

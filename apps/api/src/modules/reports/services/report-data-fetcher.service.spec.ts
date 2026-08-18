@@ -62,13 +62,15 @@ const makeApdexTransactionRow = (overrides: Record<string, string> = {}) => ({
 
 describe('ReportDataFetcherService', () => {
   let service: ReportDataFetcherService;
-  let testRunRepo: jest.Mocked<Pick<Repository<TestRun>, 'query'>>;
+  let testRunRepo: jest.Mocked<Pick<Repository<TestRun>, 'query' | 'findOne'>>;
   let authzService: jest.Mocked<Pick<AuthorizationService, 'isGlobalAdmin' | 'getAccessibleOrganizations'>>;
   let dataSource: { query: jest.Mock };
 
   beforeEach(async () => {
     testRunRepo = {
       query: jest.fn(),
+      // getAwrData resolves the human test run id to a uuid before querying awr_reports.
+      findOne: jest.fn().mockResolvedValue({ id: 'aaaaaaaa-0000-0000-0000-000000000001' }),
     };
 
     authzService = {
@@ -1142,5 +1144,182 @@ describe('ReportDataFetcherService', () => {
       expect(sql).toContain('organization_id IN');
       expect(sql).toContain('organization_id IS NULL');
     });
+  });
+});
+
+describe('ReportDataFetcherService getAwrData id resolution', () => {
+  // awr_reports.test_run_id is a uuid FK onto test_runs(id) — the only table this service reads
+  // that is keyed that way. Every renderer passes the human test run id, so handing it straight
+  // through was a 22P02, swallowed by the catch as a warning, leaving the AWR section silently
+  // empty in every generated report.
+  let service: ReportDataFetcherService;
+  let testRunRepo: { query: jest.Mock; findOne: jest.Mock };
+  let dataSource: { query: jest.Mock };
+
+  const RUN_UUID = 'aaaaaaaa-0000-0000-0000-000000000001';
+
+  beforeEach(async () => {
+    testRunRepo = { query: jest.fn(), findOne: jest.fn().mockResolvedValue({ id: RUN_UUID }) };
+    dataSource = { query: jest.fn().mockResolvedValue([]) };
+
+    const module: TestingModule = await Test.createTestingModule({
+      providers: [
+        ReportDataFetcherService,
+        { provide: getRepositoryToken(TestRun), useValue: testRunRepo },
+        {
+          provide: AuthorizationService,
+          useValue: {
+            isGlobalAdmin: jest.fn().mockReturnValue(true),
+            getAccessibleOrganizations: jest.fn().mockResolvedValue([]),
+          },
+        },
+        { provide: DataSource, useValue: dataSource },
+      ],
+    }).compile();
+
+    service = module.get(ReportDataFetcherService);
+  });
+
+  it('queries awr_reports by the uuid, never the human id', async () => {
+    await service.getAwrData('EA-acc-loadtest-00020');
+
+    expect(testRunRepo.findOne).toHaveBeenCalledWith(
+      expect.objectContaining({ where: { testRunId: 'EA-acc-loadtest-00020' } }),
+    );
+    const [sql, params] = dataSource.query.mock.calls[0];
+    expect(String(sql)).toMatch(/FROM awr_reports/);
+    expect(params).toEqual([RUN_UUID]);
+  });
+
+  it('returns null for a run that does not exist rather than querying', async () => {
+    testRunRepo.findOne.mockResolvedValue(null);
+
+    const result = await service.getAwrData('no-such-run');
+
+    expect(result).toBeNull();
+    expect(dataSource.query).not.toHaveBeenCalled();
+  });
+
+  it('takes a uuid straight through when it matches a run', async () => {
+    testRunRepo.findOne.mockResolvedValue({ id: RUN_UUID });
+
+    await service.getAwrData(RUN_UUID);
+
+    const [, params] = dataSource.query.mock.calls[0];
+    expect(params).toEqual([RUN_UUID]);
+  });
+
+  it('falls back to the name column for a run NAMED with a uuid', async () => {
+    // A pipeline naming its run after a build guid. The shape says uuid, but the value lives in
+    // test_run_id; trusting the shape returned no AWR data at all for those runs.
+    const NAMED_LIKE_A_UUID = '123e4567-e89b-12d3-a456-426614174000';
+    testRunRepo.findOne
+      .mockResolvedValueOnce(null) // no row has it as an id
+      .mockResolvedValueOnce({ id: RUN_UUID }); // but one is named it
+
+    await service.getAwrData(NAMED_LIKE_A_UUID);
+
+    expect(testRunRepo.findOne).toHaveBeenNthCalledWith(
+      2,
+      expect.objectContaining({ where: { testRunId: NAMED_LIKE_A_UUID } }),
+    );
+    const [, params] = dataSource.query.mock.calls[0];
+    expect(params).toEqual([RUN_UUID]);
+  });
+
+  it('costs a single lookup for a human id', async () => {
+    // Only the ambiguous, uuid-shaped case pays for a second query.
+    await service.getAwrData('EA-acc-loadtest-00020');
+
+    expect(testRunRepo.findOne).toHaveBeenCalledTimes(1);
+  });
+
+  it('keeps returning null when the run resolves but has no completed AWR report', async () => {
+    // Resolution succeeding is not the same as there being anything to render.
+    dataSource.query.mockResolvedValue([]);
+
+    expect(await service.getAwrData('EA-acc-loadtest-00020')).toBeNull();
+  });
+
+  it('swallows a failed lookup rather than failing the whole report', async () => {
+    // Every renderer calls this; one unavailable section must not take the report with it.
+    testRunRepo.findOne.mockRejectedValue(new Error('connection terminated'));
+
+    expect(await service.getAwrData('EA-acc-loadtest-00020')).toBeNull();
+  });
+});
+
+describe('ReportDataFetcherService getPreviousTestRun', () => {
+  let service: ReportDataFetcherService;
+  let qb: Record<string, jest.Mock>;
+
+  const testRun = {
+    id: 'run-2',
+    systemUnderTestId: 'sut-1',
+    testEnvironment: 'acc',
+    workload: 'loadTest',
+    startTime: new Date('2026-08-18T10:00:00Z'),
+  } as never;
+
+  beforeEach(async () => {
+    qb = {
+      where: jest.fn().mockReturnThis(),
+      andWhere: jest.fn().mockReturnThis(),
+      orderBy: jest.fn().mockReturnThis(),
+      limit: jest.fn().mockReturnThis(),
+      getOne: jest.fn().mockResolvedValue({ testRunId: 'EA-acc-loadtest-00019' }),
+    };
+    const module: TestingModule = await Test.createTestingModule({
+      providers: [
+        ReportDataFetcherService,
+        {
+          provide: getRepositoryToken(TestRun),
+          useValue: { query: jest.fn(), findOne: jest.fn(), createQueryBuilder: () => qb },
+        },
+        {
+          provide: AuthorizationService,
+          useValue: {
+            isGlobalAdmin: jest.fn().mockReturnValue(true),
+            getAccessibleOrganizations: jest.fn().mockResolvedValue([]),
+          },
+        },
+        { provide: DataSource, useValue: { query: jest.fn().mockResolvedValue([]) } },
+      ],
+    }).compile();
+    service = module.get(ReportDataFetcherService);
+  });
+
+  it('takes only runs that started BEFORE this one', async () => {
+    // Ordering by start time alone would hand back a LATER run whenever a report is generated
+    // for anything but the newest, reading the change backwards.
+    await service.getPreviousTestRun(testRun);
+
+    expect(qb.andWhere).toHaveBeenCalledWith('tr.startTime < :startTime', {
+      startTime: testRun.startTime,
+    });
+    expect(qb.orderBy).toHaveBeenCalledWith('tr.startTime', 'DESC');
+    expect(qb.limit).toHaveBeenCalledWith(1);
+  });
+
+  it('scopes to the same system, environment and workload, completed only', async () => {
+    // Same scope the baseline dropdown uses, so "previous" is the run a person would have picked.
+    await service.getPreviousTestRun(testRun);
+
+    const clauses = [...qb.where.mock.calls, ...qb.andWhere.mock.calls].map((c) => c[0]);
+    expect(clauses).toEqual(
+      expect.arrayContaining([
+        'tr.systemUnderTestId = :systemUnderTestId',
+        'tr.testEnvironment = :testEnvironment',
+        'tr.workload = :workload',
+        'tr.completed = :completed',
+        'tr.id != :id',
+      ]),
+    );
+  });
+
+  it('returns null when the run is the first in its scope', async () => {
+    qb.getOne.mockResolvedValue(null);
+
+    expect(await service.getPreviousTestRun(testRun)).toBeNull();
   });
 });

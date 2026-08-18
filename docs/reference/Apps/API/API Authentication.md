@@ -81,15 +81,20 @@ Rate limits tracked per user ID (JWT) or IP address (API key/public). Storage ba
 
 ## Row-Level Security (RLS)
 
-The `DatabaseSessionMiddleware` sets PostgreSQL session variables on every request:
+`RlsTransactionInterceptor` (`apps/api/src/common/interceptors/rls-transaction.interceptor.ts`) wraps each request in a transaction and establishes the RLS context on it:
 
-1. Loads user's organization memberships from database
-2. Validates the `X-Organization-Id` header
-3. Sets session variables for RLS policy enforcement
-4. Optionally downgrades role to `perfana_app` for enforced RLS
+1. Resolves the caller's accessible organizations via `AuthorizationService.getAccessibleOrganizations(ctx.userId)`
+2. Opens a per-request transaction and runs `SET LOCAL ROLE perfana_app`
+3. Sets four `app.current_*` GUCs — including `app.current_user_organizations` — that the policies read
+4. Commits or rolls back at the end of the request
+
+Repository calls only see that context if they go through `withRequestEm()`. A call on the plain pooled repository runs on a different connection with none of the GUCs set. The lint rule `owned-resource-must-use-request-em` enforces this.
 
 > [!warning] Multi-tenant Security
-> All queries are automatically filtered by `organization_id` through RLS policies. Worker pipelines needed explicit organization filtering fixes — see [[Multi-tenancy]] for details.
+> Queries routed through `withRequestEm()` are filtered by `organization_id` at the database level through RLS policies. Worker pipelines run outside this interceptor and need explicit organization filtering — see [[Multi-tenancy]] for details.
+
+> [!note] The one deliberate bypass
+> The API-key branch of `getAccessibleOrganizations` / `isOrganizationMember` reads `api_keys` on the pooled connection on purpose: its result *becomes* `app.current_user_organizations`, so it cannot be read through a policy that consumes it. Because `api_keys` is `FORCE ROW LEVEL SECURITY`, that read works only while the API's login role bypasses RLS (`rolsuper`/`rolbypassrls`). See [[RBAC]] §1.
 
 ## Related
 

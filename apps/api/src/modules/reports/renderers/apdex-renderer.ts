@@ -158,7 +158,7 @@ export class ApdexRenderer {
     return `
       <div style="margin-bottom: 32px;">
         <h3 style="margin: 24px 0 16px 0; font-size: 10pt; font-weight: 700; color: ${REPORT_COLORS.mutedInk}; text-transform: uppercase; letter-spacing: 0.05em;">Overall Test Metrics</h3>
-        <div style="display: grid; grid-template-columns: repeat(4, 1fr); gap: 16px; margin: 24px 0;">
+        <div style="display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 16px; margin: 24px 0;">
           ${statCard('Peak Transactions / Second', formatNum(overallData.peakTxnsPerSec))}
           ${statCard('Peak Requests / Second', formatNum(overallData.peakReqsPerSec))}
           ${statCard(

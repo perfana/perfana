@@ -148,18 +148,29 @@ When you modify any file listed in `apps/api/.rbac-migration-allowlist.json`, mi
 
 After migrating a site, remove its file from `apps/api/.rbac-migration-allowlist.json` (when the LAST site in that file is migrated) and update the burndown table in the audit log.
 
-## Phase 5b RLS migration (in progress)
+## Phase 5b RLS migration
 
-When you modify any file listed in `apps/api/.rls-em-migration-allowlist.json`, migrate its owned-resource repository calls to `withRequestEm()` as part of the same PR. The lint rule (`owned-resource-must-use-request-em`) blocks new un-wrapped sites in non-allowlisted files; the allowlist tolerates existing un-migrated files until they're touched.
+`apps/api/.rls-em-migration-allowlist.json` is now empty — every file has been migrated. The lint rule (`owned-resource-must-use-request-em`) blocks new un-wrapped owned-resource repository calls. If the allowlist ever grows again, migrate a listed file's calls as part of the same PR that touches it.
 
 The transformation is mechanical: `this.<ownedRepo>.<method>(...)` → `withRequestEm(this.<ownedRepo>).<method>(...)`. The wrapper participates in the per-request transaction opened by `RlsTransactionInterceptor`, which sets the GUCs that RLS policies read.
 
-Migration references:
-- [Phase 5b spec](docs/superpowers/specs/2026-05-04-rbac-phase5b-rls-design.md) §4.2
-- [Phase 5b plan](docs/superpowers/plans/2026-05-04-rbac-phase5b-rls.md) — "Standard transformation pattern"
-- [Phase 5b decisions](docs/superpowers/audits/2026-05-04-rls-decisions.md)
+### The one deliberate exception
 
-After migrating, remove the file from `apps/api/.rls-em-migration-allowlist.json` in the same PR and update the burndown table in the decisions doc.
+Two sites in `apps/api/src/common/services/authorization.service.ts` read `api_keys` through the **plain pooled repository** and suppress the rule with `eslint-disable-next-line owned-resource-must-use-request-em`. That is intentional and must not be "migrated":
+
+`AuthorizationService.getAccessibleOrganizations` is what *builds* `app.current_user_organizations` — `RlsTransactionInterceptor` calls it before opening the transaction. Reading `api_keys` through a policy that consumes that GUC is circular: the key would have to already be in the organization to prove it is in the organization, and the answer would flip with whichever GUCs were in force. The membership cache makes it worse, because `buildOrgMembershipKey` carries no RLS context and would cache a context-dependent answer.
+
+If you add another site that genuinely cannot be RLS-scoped, suppress it the same way and leave a comment on the call site explaining why — same convention as an unmigratable Bucket C site above. Silent suppression is not acceptable.
+
+Note the deployment constraint this creates: `api_keys` is `FORCE ROW LEVEL SECURITY`, so the unscoped read only returns rows because the API's login role is `rolsuper`/`rolbypassrls`. Run the API under a role without that bypass and every API key silently loses organization access.
+
+References. The original Phase 5b spec, plan, and decisions docs under `docs/superpowers/` are no longer in the repo, so read the code:
+
+- `apps/api/src/common/interceptors/rls-transaction.interceptor.ts` — the per-request transaction, `SET LOCAL ROLE perfana_app`, and the four `app.current_*` GUCs
+- `apps/api/src/common/db/request-em.ts` — `withRequestEm()` itself
+- `apps/api/eslint-rules/owned-resource-must-use-request-em.js` — what the rule does and does not catch
+- `apps/api/src/test/rls/` — policy matrix, helper functions, failure modes; run by `npm run preflight`
+- `packages/shared/src/database/migrations/schema-sql.ts` — the policies and `FORCE ROW LEVEL SECURITY` flags
 
 ## Before you push
 

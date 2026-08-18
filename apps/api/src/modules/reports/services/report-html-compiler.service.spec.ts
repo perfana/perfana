@@ -886,3 +886,175 @@ describe('ReportHtmlCompilerService', () => {
     });
   });
 });
+
+describe('ReportHtmlCompilerService screen measure', () => {
+  // The report is a document. On a wide monitor it used to stretch to the full window, so lines
+  // ran past any comfortable reading length.
+  const html = () =>
+    new ReportHtmlCompilerService(
+      { getSectionTitle: (t: string) => t, escapeHtml: (v: string) => v } as never,
+      { render: jest.fn() } as never,
+    ).compileHtml('Report', '<section>x</section>', {} as never);
+
+  it('holds the report to a fixed, centred measure on screen', () => {
+    const out = html();
+    const screenBlock = out.slice(out.indexOf('@media screen'), out.indexOf('/* Print Styles */'));
+
+    expect(screenBlock).toMatch(/max-width:\s*340mm/);
+    expect(screenBlock).toMatch(/margin-left:\s*auto/);
+    expect(screenBlock).toMatch(/margin-right:\s*auto/);
+  });
+
+  it('is wider than A4, because A4 clipped the widest tables', () => {
+    // The regressions table is seven columns; at 210mm it lost Diff % and Status entirely.
+    // Guards against someone "restoring" A4 without re-checking that content against it.
+    const out = html();
+    const screenBlock = out.slice(out.indexOf('@media screen'), out.indexOf('/* Print Styles */'));
+
+    const measure = /max-width:\s*(\d+)mm/.exec(screenBlock);
+    expect(Number(measure?.[1])).toBeGreaterThanOrEqual(320);
+  });
+
+  it('keeps a side margin, so text does not run to the very edge', () => {
+    const out = html();
+    const screenBlock = out.slice(out.indexOf('@media screen'), out.indexOf('/* Print Styles */'));
+
+    expect(screenBlock).toMatch(/padding:\s*20mm\s+15mm/);
+  });
+
+  it('scopes the constraint to screen, so print is not inset twice', () => {
+    // Puppeteer's page box already sets the printed width, and the print block zeroes padding.
+    const out = html();
+
+    expect(out.indexOf('@media screen')).toBeGreaterThan(-1);
+    // Anchor on the section marker: the screen block's own comment mentions "@media print".
+    const printBlock = out.slice(out.indexOf('/* Print Styles */'));
+    expect(printBlock).toMatch(/padding:\s*0/);
+    expect(printBlock).not.toMatch(/max-width:\s*340mm/);
+  });
+
+  it('paints the page background so the centred column is not a grey stripe', () => {
+    const out = html();
+    const screenBlock = out.slice(out.indexOf('@media screen'), out.indexOf('/* Print Styles */'));
+
+    expect(screenBlock).toMatch(/html\s*\{[^}]*background-color/);
+  });
+});
+
+describe('ReportHtmlCompilerService print scale', () => {
+  const html = () =>
+    new ReportHtmlCompilerService(
+      { getSectionTitle: (t: string) => t, escapeHtml: (v: string) => v } as never,
+      { render: jest.fn() } as never,
+    ).compileHtml('Report', '<section>x</section>', {} as never);
+
+  it('scales the printed page down, so wide tables fit the 180mm column', () => {
+    // Without this the regressions table runs off the right edge of the page and its Status
+    // column is simply gone — and paper has no scrollbar to recover it.
+    const out = html();
+    const printBlock = out.slice(out.indexOf('/* Print Styles */'));
+
+    expect(printBlock).toMatch(/zoom:\s*0\.8/);
+  });
+
+  it('scales with zoom, not transform, so pagination follows the scaled layout', () => {
+    // transform: scale paints smaller without relaying out, so page breaks would still fall at
+    // the unscaled positions and cut through rows.
+    const out = html();
+
+    // Scoped to the print block, and only after proving the block was actually found: an
+    // unanchored slice that misses its marker is empty, and every not.toMatch over an empty
+    // string passes vacuously.
+    const printStart = out.indexOf('/* Print Styles */');
+    expect(printStart).toBeGreaterThan(-1);
+    const printBlock = out.slice(printStart);
+    expect(printBlock).toMatch(/zoom:\s*0\.8/);
+    expect(printBlock).not.toMatch(/transform:\s*scale\([^)]*\)\s*;/);
+  });
+
+  it('leaves the screen measure unscaled', () => {
+    const out = html();
+    const screenBlock = out.slice(out.indexOf('@media screen'), out.indexOf('/* Print Styles */'));
+
+    expect(screenBlock).not.toMatch(/zoom:/);
+  });
+});
+
+describe('ReportHtmlCompilerService cover page height', () => {
+  const html = () =>
+    new ReportHtmlCompilerService(
+      { getSectionTitle: (t: string) => t, escapeHtml: (v: string) => v } as never,
+      { render: jest.fn() } as never,
+    ).compileHtml('Report', '<section>x</section>', {} as never);
+
+  it('gives the cover a page height on screen, not the container height', () => {
+    // 100vh means "as tall as whatever this lands in", and the report renders inside an iframe:
+    // in a tall one the cover became screens of gradient with the title marooned in the middle.
+    const out = html();
+    const screenBlock = out.slice(out.indexOf('@media screen'), out.indexOf('/* Print Styles */'));
+
+    expect(screenBlock).toMatch(/\.cover-page\s*\{[^}]*min-height:\s*257mm/);
+  });
+
+  it('declares the screen overrides after the rules they override', () => {
+    // A media query adds no specificity, so source order decides. With the block above
+    // .cover-page, its 100vh won and the override silently did nothing.
+    const out = html();
+
+    expect(out.indexOf('.cover-page {')).toBeLessThan(out.indexOf('@media screen'));
+  });
+
+  it('leaves the printed cover on 100vh, where the container is the page box', () => {
+    const out = html();
+    const beforeScreen = out.slice(0, out.indexOf('@media screen'));
+
+    expect(beforeScreen).toMatch(/\.cover-page\s*\{[^}]*min-height:\s*100vh/);
+  });
+});
+
+describe('ReportHtmlCompilerService wide tables', () => {
+  const html = () =>
+    new ReportHtmlCompilerService(
+      { getSectionTitle: (t: string) => t, escapeHtml: (v: string) => v } as never,
+      { render: jest.fn() } as never,
+    ).compileHtml('Report', '<section>x</section>', {} as never);
+
+  it('keeps a too-wide table inside its section on screen', () => {
+    // The regressions list and per-transaction Apdex breakdown carry more columns than 180mm
+    // holds. Unconstrained they ran out of their card and off the page.
+    const out = html();
+    const screenBlock = out.slice(out.indexOf('@media screen'), out.indexOf('/* Print Styles */'));
+
+    expect(screenBlock).toMatch(/section\s*\{[^}]*overflow-x:\s*auto/);
+  });
+
+  it('does not force columns to equal shares', () => {
+    // table-layout:fixed was tried: it squashed the per-transaction tables until the text
+    // overlapped, and the widest table still did not fit.
+    // A declaration at the start of a line — the rejected approach is still named in a
+    // comment, which is the point of the comment.
+    expect(html()).not.toMatch(/^\s*table-layout:\s*fixed/m);
+  });
+});
+
+describe('ReportHtmlCompilerService info grid', () => {
+  const html = () =>
+    new ReportHtmlCompilerService(
+      { getSectionTitle: (t: string) => t, escapeHtml: (v: string) => v } as never,
+      { render: jest.fn() } as never,
+    ).compileHtml('Report', '<section>x</section>', {} as never);
+
+  it('gives the summary grid columns a zero floor', () => {
+    // 1fr floors a column at its content width, so one unbreakable value (a long release name)
+    // widened the grid past the page and the trailing column was clipped out of the PDF.
+    expect(html()).toMatch(/\.info-grid\s*\{[^}]*grid-template-columns:\s*repeat\(3,\s*minmax\(0,\s*1fr\)\)/);
+  });
+
+  it('lets data cells break anywhere but leaves headers alone', () => {
+    // A header that breaks anywhere lets the browser shrink the column to almost nothing —
+    // "TRANSACTION NAME" came out as "TRANSACTI ON NAME" over three lines.
+    const out = html();
+    expect(out).toMatch(/\.data-table td\s*\{[^}]*overflow-wrap:\s*anywhere/);
+    expect(out).not.toMatch(/\.data-table th\s*\{[^}]*overflow-wrap:\s*anywhere/);
+  });
+});

@@ -15,7 +15,13 @@
  */
 
 import React from 'react';
-import { render, screen, fireEvent, waitFor, within } from '@testing-library/react';
+import {
+  render,
+  screen,
+  fireEvent,
+  waitFor,
+  within,
+} from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import '@testing-library/jest-dom';
 import GenerateReportDialog from '@/components/reports/report-generation/GenerateReportDialog';
@@ -43,7 +49,9 @@ jest.mock('@/lib/api/reports', () => ({
     return labels[type] || type;
   }),
   sectionSupportsText: jest.fn((type: string) => type !== 'text_block'),
-  getSectionText: jest.fn((s: { text?: string; comment?: string }) => s.text ?? s.comment),
+  getSectionText: jest.fn(
+    (s: { text?: string; comment?: string }) => s.text ?? s.comment
+  ),
   REPORT_SECTION_TYPES: [
     'header',
     'text_block',
@@ -75,18 +83,22 @@ jest.mock('@/lib/api/reports', () => ({
 // authenticatedFetch — serve a fixed candidate list, degrade everything else.
 jest.mock('@/lib/api', () => ({
   authenticatedFetch: jest.fn((url: string) => {
-    if (typeof url === 'string' && url.includes('/test-runs/baseline-candidates')) {
+    if (
+      typeof url === 'string' &&
+      url.includes('/test-runs/baseline-candidates')
+    ) {
       return Promise.resolve({
         ok: true,
-        json: () => Promise.resolve([
-          {
-            test_run_id: 'baseline-001',
-            test_environment: 'acc',
-            workload: 'loadTest',
-            start_time: '2026-07-01T10:00:00Z',
-            created_at: '2026-07-01T10:00:00Z',
-          },
-        ]),
+        json: () =>
+          Promise.resolve([
+            {
+              test_run_id: 'baseline-001',
+              test_environment: 'acc',
+              workload: 'loadTest',
+              start_time: '2026-07-01T10:00:00Z',
+              created_at: '2026-07-01T10:00:00Z',
+            },
+          ]),
       });
     }
     return Promise.resolve({ ok: false, json: () => Promise.resolve([]) });
@@ -164,10 +176,16 @@ describe('GenerateReportDialog', () => {
 
   beforeEach(() => {
     jest.clearAllMocks();
-    (reportsApi.getTemplateSummaries as jest.Mock).mockResolvedValue(mockTemplateSummaries);
+    (reportsApi.getTemplateSummaries as jest.Mock).mockResolvedValue(
+      mockTemplateSummaries
+    );
     (reportsApi.getTemplate as jest.Mock).mockResolvedValue(mockTemplateDetail);
-    (reportsApi.generateReportFromTemplate as jest.Mock).mockResolvedValue(mockGenerateResponse);
-    (reportsApi.generateAdHocReport as jest.Mock).mockResolvedValue(mockGenerateResponse);
+    (reportsApi.generateReportFromTemplate as jest.Mock).mockResolvedValue(
+      mockGenerateResponse
+    );
+    (reportsApi.generateAdHocReport as jest.Mock).mockResolvedValue(
+      mockGenerateResponse
+    );
   });
 
   describe('Rendering', () => {
@@ -192,7 +210,9 @@ describe('GenerateReportDialog', () => {
 
     it('should have Cancel button', () => {
       render(<GenerateReportDialog {...defaultProps} />);
-      expect(screen.getByRole('button', { name: 'Cancel' })).toBeInTheDocument();
+      expect(
+        screen.getByRole('button', { name: 'Cancel' })
+      ).toBeInTheDocument();
     });
   });
 
@@ -211,7 +231,10 @@ describe('GenerateReportDialog', () => {
 
     it('should display loading state while fetching templates', async () => {
       (reportsApi.getTemplateSummaries as jest.Mock).mockImplementation(
-        () => new Promise(resolve => setTimeout(() => resolve(mockTemplateSummaries), 100))
+        () =>
+          new Promise(resolve =>
+            setTimeout(() => resolve(mockTemplateSummaries), 100)
+          )
       );
 
       render(<GenerateReportDialog {...defaultProps} />);
@@ -286,7 +309,9 @@ describe('GenerateReportDialog', () => {
       await waitFor(() => {
         // Multiple alerts may be present (error + info "no templates available")
         const alerts = screen.getAllByRole('alert');
-        const errorAlert = alerts.find(alert => alert.textContent?.includes('Failed to load templates'));
+        const errorAlert = alerts.find(alert =>
+          alert.textContent?.includes('Failed to load templates')
+        );
         expect(errorAlert).toBeTruthy();
       });
     });
@@ -299,7 +324,9 @@ describe('GenerateReportDialog', () => {
       });
 
       // Generate button only shows on the builder view, not the selector
-      expect(screen.queryByRole('button', { name: 'Generate Report' })).not.toBeInTheDocument();
+      expect(
+        screen.queryByRole('button', { name: 'Generate Report' })
+      ).not.toBeInTheDocument();
     });
   });
 
@@ -328,7 +355,7 @@ describe('GenerateReportDialog', () => {
 
       await navigateToBuilder();
 
-      expect(screen.getByText(/No sections added yet/)).toBeInTheDocument();
+      expect(screen.getByText(/No sections yet/)).toBeInTheDocument();
     });
 
     it('should display available section types', async () => {
@@ -386,7 +413,9 @@ describe('GenerateReportDialog', () => {
 
       await navigateToBuilder();
 
-      expect(screen.getByText('Save as template for future use')).toBeInTheDocument();
+      expect(
+        screen.getByText('Save as template for future use')
+      ).toBeInTheDocument();
     });
 
     it('should toggle save as template state when switch clicked', async () => {
@@ -411,7 +440,7 @@ describe('GenerateReportDialog', () => {
 
       await navigateToBuilder();
 
-      expect(screen.getByText(/No sections added yet/)).toBeInTheDocument();
+      expect(screen.getByText(/No sections yet/)).toBeInTheDocument();
     });
 
     it('should disable generate button when no sections', async () => {
@@ -419,16 +448,19 @@ describe('GenerateReportDialog', () => {
 
       await navigateToBuilder();
 
-      const generateButton = screen.getByRole('button', { name: 'Generate Report' });
+      const generateButton = screen.getByRole('button', {
+        name: 'Generate Report',
+      });
       expect(generateButton).toBeDisabled();
     });
 
-    it('should show section count in builder', async () => {
+    it('hides the section count until it is close to the limit', async () => {
+      // At zero it is a constraint nobody asked about; it earns its place near the cap.
       render(<GenerateReportDialog {...defaultProps} />);
 
       await navigateToBuilder();
 
-      expect(screen.getByText('0 sections / 20 max')).toBeInTheDocument();
+      expect(screen.queryByText(/\/ 20 sections/)).not.toBeInTheDocument();
     });
   });
 
@@ -444,7 +476,9 @@ describe('GenerateReportDialog', () => {
 
       // Generate Report button is not visible on the template selector view -
       // user must select a template or start from scratch first
-      expect(screen.queryByRole('button', { name: 'Generate Report' })).not.toBeInTheDocument();
+      expect(
+        screen.queryByRole('button', { name: 'Generate Report' })
+      ).not.toBeInTheDocument();
     });
 
     it('should validate report name length', async () => {
@@ -497,7 +531,9 @@ describe('GenerateReportDialog', () => {
 
       // The generate button should be disabled when template name is empty
       await waitFor(() => {
-        const generateButton = screen.getByRole('button', { name: 'Generate Report' });
+        const generateButton = screen.getByRole('button', {
+          name: 'Generate Report',
+        });
         expect(generateButton).toBeDisabled();
       });
     });
@@ -524,7 +560,9 @@ describe('GenerateReportDialog', () => {
 
       await navigateViaTemplate();
 
-      const generateButton = screen.getByRole('button', { name: 'Generate Report' });
+      const generateButton = screen.getByRole('button', {
+        name: 'Generate Report',
+      });
       fireEvent.click(generateButton);
 
       await waitFor(() => {
@@ -542,11 +580,16 @@ describe('GenerateReportDialog', () => {
 
       await navigateViaTemplate();
 
-      const generateButton = screen.getByRole('button', { name: 'Generate Report' });
+      const generateButton = screen.getByRole('button', {
+        name: 'Generate Report',
+      });
       fireEvent.click(generateButton);
 
       await waitFor(() => {
-        expect(mockOnSuccess).toHaveBeenCalledWith('report-uuid-123', 'job-uuid-456');
+        expect(mockOnSuccess).toHaveBeenCalledWith(
+          'report-uuid-123',
+          'job-uuid-456'
+        );
       });
     });
 
@@ -555,7 +598,9 @@ describe('GenerateReportDialog', () => {
 
       await navigateViaTemplate();
 
-      const generateButton = screen.getByRole('button', { name: 'Generate Report' });
+      const generateButton = screen.getByRole('button', {
+        name: 'Generate Report',
+      });
       fireEvent.click(generateButton);
 
       await waitFor(() => {
@@ -573,7 +618,9 @@ describe('GenerateReportDialog', () => {
 
       await navigateViaTemplate();
 
-      const generateButton = screen.getByRole('button', { name: 'Generate Report' });
+      const generateButton = screen.getByRole('button', {
+        name: 'Generate Report',
+      });
       fireEvent.click(generateButton);
 
       // During generation, CircularProgress spinners appear (in status area and button)
@@ -585,14 +632,19 @@ describe('GenerateReportDialog', () => {
 
     it('should disable Cancel button during generation', async () => {
       (reportsApi.generateAdHocReport as jest.Mock).mockImplementation(
-        () => new Promise(resolve => setTimeout(() => resolve(mockGenerateResponse), 100))
+        () =>
+          new Promise(resolve =>
+            setTimeout(() => resolve(mockGenerateResponse), 100)
+          )
       );
 
       render(<GenerateReportDialog {...defaultProps} />);
 
       await navigateViaTemplate();
 
-      const generateButton = screen.getByRole('button', { name: 'Generate Report' });
+      const generateButton = screen.getByRole('button', {
+        name: 'Generate Report',
+      });
       fireEvent.click(generateButton);
 
       await waitFor(() => {
@@ -620,7 +672,9 @@ describe('GenerateReportDialog', () => {
       // Add a header section
       fireEvent.click(screen.getByText('Header'));
 
-      const generateButton = screen.getByRole('button', { name: 'Generate Report' });
+      const generateButton = screen.getByRole('button', {
+        name: 'Generate Report',
+      });
       fireEvent.click(generateButton);
 
       await waitFor(() => {
@@ -644,7 +698,9 @@ describe('GenerateReportDialog', () => {
       fireEvent.click(screen.getByText('Header'));
       fireEvent.click(screen.getByText('SLO Summary'));
 
-      const generateButton = screen.getByRole('button', { name: 'Generate Report' });
+      const generateButton = screen.getByRole('button', {
+        name: 'Generate Report',
+      });
       fireEvent.click(generateButton);
 
       await waitFor(() => {
@@ -664,7 +720,9 @@ describe('GenerateReportDialog', () => {
 
       await navigateToBuilder();
 
-      expect(screen.getByText('Save as template for future use')).toBeInTheDocument();
+      expect(
+        screen.getByText('Save as template for future use')
+      ).toBeInTheDocument();
     });
   });
 
@@ -689,11 +747,15 @@ describe('GenerateReportDialog', () => {
       await navigateToBuilder();
       fireEvent.click(screen.getByText('Header'));
 
-      const generateButton = screen.getByRole('button', { name: 'Generate Report' });
+      const generateButton = screen.getByRole('button', {
+        name: 'Generate Report',
+      });
       fireEvent.click(generateButton);
 
       await waitFor(() => {
-        expect(screen.getByRole('alert')).toHaveTextContent('Generation failed');
+        expect(screen.getByRole('alert')).toHaveTextContent(
+          'Generation failed'
+        );
       });
     });
 
@@ -707,7 +769,9 @@ describe('GenerateReportDialog', () => {
       await navigateToBuilder();
       fireEvent.click(screen.getByText('Header'));
 
-      const generateButton = screen.getByRole('button', { name: 'Generate Report' });
+      const generateButton = screen.getByRole('button', {
+        name: 'Generate Report',
+      });
       fireEvent.click(generateButton);
 
       await waitFor(() => {
@@ -725,7 +789,9 @@ describe('GenerateReportDialog', () => {
       await navigateToBuilder();
       fireEvent.click(screen.getByText('Header'));
 
-      const generateButton = screen.getByRole('button', { name: 'Generate Report' });
+      const generateButton = screen.getByRole('button', {
+        name: 'Generate Report',
+      });
       fireEvent.click(generateButton);
 
       await waitFor(() => {
@@ -736,18 +802,24 @@ describe('GenerateReportDialog', () => {
     });
 
     it('should handle non-Error rejection objects', async () => {
-      (reportsApi.generateAdHocReport as jest.Mock).mockRejectedValue('string error');
+      (reportsApi.generateAdHocReport as jest.Mock).mockRejectedValue(
+        'string error'
+      );
 
       render(<GenerateReportDialog {...defaultProps} />);
 
       await navigateToBuilder();
       fireEvent.click(screen.getByText('Header'));
 
-      const generateButton = screen.getByRole('button', { name: 'Generate Report' });
+      const generateButton = screen.getByRole('button', {
+        name: 'Generate Report',
+      });
       fireEvent.click(generateButton);
 
       await waitFor(() => {
-        expect(screen.getByRole('alert')).toHaveTextContent('Failed to generate report');
+        expect(screen.getByRole('alert')).toHaveTextContent(
+          'Failed to generate report'
+        );
       });
     });
   });
@@ -781,7 +853,9 @@ describe('GenerateReportDialog', () => {
 
       // Add a section and generate
       fireEvent.click(screen.getByText('Header'));
-      const generateButton = screen.getByRole('button', { name: 'Generate Report' });
+      const generateButton = screen.getByRole('button', {
+        name: 'Generate Report',
+      });
       fireEvent.click(generateButton);
 
       const cancelButton = screen.getByRole('button', { name: 'Cancel' });
@@ -826,7 +900,9 @@ describe('GenerateReportDialog', () => {
       fireEvent.click(screen.getByText('Start from Scratch'));
 
       await waitFor(() => {
-        const generateButton = screen.getByRole('button', { name: 'Generate Report' });
+        const generateButton = screen.getByRole('button', {
+          name: 'Generate Report',
+        });
         expect(generateButton).toBeInTheDocument();
       });
     });
@@ -846,7 +922,9 @@ describe('GenerateReportDialog', () => {
 
       await waitFor(() => {
         expect(screen.getByText('Start from Scratch')).toBeInTheDocument();
-        expect(screen.getByText('Build a custom report from an empty canvas')).toBeInTheDocument();
+        expect(
+          screen.getByText('Build a custom report from an empty canvas')
+        ).toBeInTheDocument();
       });
     });
   });
@@ -926,8 +1004,21 @@ describe('GenerateReportDialog', () => {
       ...mockTemplateDetail,
       sections: [
         { type: 'header', order: 0, title: 'Report Header' },
-        { type: 'comparisons', order: 1, title: 'Perf vs Baseline', config: { comparisonMode: 'baseline_run', source: 'performance-metrics' } },
-        { type: 'comparisons', order: 2, title: 'Grafana vs Baseline', config: { comparisonMode: 'baseline_run', source: 'grafana' } },
+        {
+          type: 'comparisons',
+          order: 1,
+          title: 'Perf vs Baseline',
+          config: {
+            comparisonMode: 'baseline_run',
+            source: 'performance-metrics',
+          },
+        },
+        {
+          type: 'comparisons',
+          order: 2,
+          title: 'Grafana vs Baseline',
+          config: { comparisonMode: 'baseline_run', source: 'grafana' },
+        },
       ],
     };
 
@@ -940,7 +1031,11 @@ describe('GenerateReportDialog', () => {
 
       // The template-level picker appears once
       expect(await screen.findByText(/set it once here/i)).toBeInTheDocument();
-      expect(screen.getByText(/2 sections in this report compare against a baseline run/i)).toBeInTheDocument();
+      expect(
+        screen.getByText(
+          /2 sections in this report compare against a baseline run/i
+        )
+      ).toBeInTheDocument();
 
       // Pick the baseline run in the template-level dropdown (first match —
       // per-section dropdowns live inside collapsed config panels below it)
@@ -951,24 +1046,167 @@ describe('GenerateReportDialog', () => {
 
       // Generate — every baseline_run section carries the selected id
       fireEvent.click(screen.getByRole('button', { name: /generate report/i }));
-      await waitFor(() => expect(reportsApi.generateAdHocReport).toHaveBeenCalled());
-      const payload = (reportsApi.generateAdHocReport as jest.Mock).mock.calls[0][0];
-      const comparisonSections = payload.sections.filter((s: { type: string }) => s.type === 'comparisons');
+      await waitFor(() =>
+        expect(reportsApi.generateAdHocReport).toHaveBeenCalled()
+      );
+      const payload = (reportsApi.generateAdHocReport as jest.Mock).mock
+        .calls[0][0];
+      const comparisonSections = payload.sections.filter(
+        (s: { type: string }) => s.type === 'comparisons'
+      );
       expect(comparisonSections).toHaveLength(2);
       for (const s of comparisonSections) {
         expect(s.config.baselineTestRunId).toBe('baseline-001');
       }
       // The non-comparison section is untouched
-      const header = payload.sections.find((s: { type: string }) => s.type === 'header');
+      const header = payload.sections.find(
+        (s: { type: string }) => s.type === 'header'
+      );
       expect(header.config?.baselineTestRunId).toBeUndefined();
     });
 
     it('does not show the picker when no section requires a baseline', async () => {
-      (reportsApi.getTemplate as jest.Mock).mockResolvedValue(mockTemplateDetail);
+      (reportsApi.getTemplate as jest.Mock).mockResolvedValue(
+        mockTemplateDetail
+      );
       render(<GenerateReportDialog {...defaultProps} />);
       fireEvent.click(await screen.findByText('Performance Summary'));
       await screen.findByText('Available Sections');
       expect(screen.queryByText(/set it once here/i)).not.toBeInTheDocument();
+    });
+  });
+
+  describe('section palette', () => {
+    const navigate = async () => {
+      await waitFor(() => {
+        expect(screen.getByText('Start from Scratch')).toBeInTheDocument();
+      });
+      fireEvent.click(screen.getByText('Start from Scratch'));
+      await waitFor(() => {
+        expect(screen.getByLabelText('Hide section list')).toBeInTheDocument();
+      });
+    };
+
+    it('does not claim sections can be dragged from the palette', async () => {
+      // The palette never had drag wired up. The old grip icons and "drag sections to the canvas"
+      // copy described an interaction that did nothing, so people concluded the dialog was broken.
+      render(<GenerateReportDialog {...defaultProps} />);
+      await navigate();
+
+      expect(
+        screen.queryByText(/Drag sections to the canvas/i)
+      ).not.toBeInTheDocument();
+      expect(
+        screen.getByText(/Click to add to your report/i)
+      ).toBeInTheDocument();
+    });
+
+    it('adds a section on click', async () => {
+      render(<GenerateReportDialog {...defaultProps} />);
+      await navigate();
+
+      fireEvent.click(screen.getByLabelText('Add SLO Summary section'));
+
+      expect(screen.queryByText(/No sections yet/)).not.toBeInTheDocument();
+    });
+
+    it('collapses the palette so the canvas gets the width', async () => {
+      render(<GenerateReportDialog {...defaultProps} />);
+      await navigate();
+
+      fireEvent.click(screen.getByLabelText('Hide section list'));
+
+      // The catalogue is gone; a single add control takes its place.
+      expect(screen.queryByText('Available Sections')).not.toBeInTheDocument();
+      expect(
+        screen.getByRole('button', { name: 'Add section' })
+      ).toBeInTheDocument();
+      expect(screen.getByLabelText('Show section list')).toBeInTheDocument();
+    });
+
+    it('offers a searchable menu when collapsed', async () => {
+      render(<GenerateReportDialog {...defaultProps} />);
+      await navigate();
+      fireEvent.click(screen.getByLabelText('Hide section list'));
+      fireEvent.click(screen.getByRole('button', { name: 'Add section' }));
+
+      const search = await screen.findByPlaceholderText('Search sections');
+      fireEvent.change(search, { target: { value: 'apdex' } });
+
+      expect(screen.getByText('Apdex Scores')).toBeInTheDocument();
+      expect(screen.queryByText('AWR Analysis')).not.toBeInTheDocument();
+    });
+
+    it('fills an empty canvas from a starter layout', async () => {
+      // A blank page is the hardest place to start.
+      render(<GenerateReportDialog {...defaultProps} />);
+      await navigate();
+
+      fireEvent.click(screen.getByText('Executive summary'));
+
+      expect(screen.queryByText(/No sections yet/)).not.toBeInTheDocument();
+    });
+
+    it('enforces the section cap it advertises', async () => {
+      // The dialog displayed "20 max" but never stopped at it, so the count sailed past.
+      render(<GenerateReportDialog {...defaultProps} />);
+      await navigate();
+
+      const addSlo = screen.getByLabelText('Add SLO Summary section');
+      for (let i = 0; i < 25; i++) {
+        fireEvent.click(addSlo);
+      }
+
+      expect(screen.getByText('20 / 20 sections')).toBeInTheDocument();
+    });
+
+    it('lays out the full-analysis starter in order, each section titled', async () => {
+      // The layout is a starting shape, not a stub: every section arrives named, so the canvas
+      // reads as a report outline rather than a stack of "Header".
+      render(<GenerateReportDialog {...defaultProps} />);
+      await navigate();
+
+      fireEvent.click(screen.getByText('Full analysis'));
+
+      // Each label now appears twice: once in the catalogue, once on the canvas.
+      for (const label of [
+        'SLO Summary',
+        'Apdex Scores',
+        'Trend Charts',
+        'Response Times',
+      ]) {
+        expect(screen.getAllByText(label)).toHaveLength(2);
+      }
+      // Top 10 Lists is missing from this file's mocked type list, so its single occurrence can
+      // only be the canvas — which is the assertion that matters here.
+      expect(screen.getByText('Top 10 Lists')).toBeInTheDocument();
+      // ...and the offer is gone, because the canvas is no longer empty.
+      expect(screen.queryByText('Executive summary')).not.toBeInTheDocument();
+    });
+
+    it('points at the + when the catalogue is collapsed', async () => {
+      // Telling someone to "pick one from the left" when the left is a single icon is no help.
+      render(<GenerateReportDialog {...defaultProps} />);
+      await navigate();
+
+      fireEvent.click(screen.getByLabelText('Hide section list'));
+
+      expect(screen.getByText(/Use \+ to add one/)).toBeInTheDocument();
+      expect(
+        screen.queryByText(/Pick one from the left/)
+      ).not.toBeInTheDocument();
+    });
+
+    it('shows the count once it is near the cap', async () => {
+      render(<GenerateReportDialog {...defaultProps} />);
+      await navigate();
+
+      const addSlo = screen.getByLabelText('Add SLO Summary section');
+      for (let i = 0; i < 15; i++) {
+        fireEvent.click(addSlo);
+      }
+
+      expect(screen.getByText('15 / 20 sections')).toBeInTheDocument();
     });
   });
 });

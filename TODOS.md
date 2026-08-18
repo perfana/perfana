@@ -88,6 +88,46 @@ and any DQL query / entity-mapping editor pages.
 
 ---
 
+### Fail fast when the API's DB role cannot bypass RLS
+
+**Priority:** P2
+**Origin:** Red team review during /ship on `fix/api-key-authz-rls-and-denial-logging` (2026-08-18).
+**Why:** `AuthorizationService` resolves an API key's organization by reading
+`api_keys` on the pooled connection, deliberately outside RLS (the read is an
+*input* to the RLS context, so scoping it is circular). `api_keys` is FORCE ROW
+LEVEL SECURITY, so that read only returns rows because the API's login role is
+`rolsuper`/`rolbypassrls`. Deploy the API under a least-privilege role — the
+stated point of `perfana_app`, or an RDS master user, which is not BYPASSRLS —
+and both api-key branches return zero rows. Every API key silently loses all
+organization access, and it surfaces as the misleading denial
+"user is not a member of organization X". The dependency is documented in a
+comment but nothing enforces it.
+**What:** On boot, assert the configured `DB_USERNAME` has `rolsuper` OR
+`rolbypassrls` and fail with an explicit message naming this constraint, rather
+than degrading into blanket api-key 404s at runtime.
+**Where to start:** `apps/api/src/common/services/authorization.service.ts`
+(comment above the api-key branch in `isOrganizationMember` states the
+invariant); query `pg_roles` for the connected user during the existing startup
+checks.
+
+---
+
+### Live-DB RLS regression test for API-key organization resolution
+
+**Priority:** P3
+**Origin:** /ship coverage audit on `fix/api-key-authz-rls-and-denial-logging` (2026-08-18).
+**Why:** The unit guards added in that PR pin *which repository* the api-key
+lookups use (they fail if either reverts to `withRequestEm`), but not the
+*policy outcome*. Nothing proves end-to-end that an RLS-scoped read actually
+starves an API-key caller, which is the behavior the whole fix turns on.
+**What:** A test in `apps/api/src/test/rls/` that seeds an API key plus a test
+run in its organization, drives a request through `RlsTransactionInterceptor`,
+and asserts the key reads its own run — and that the scoped variant does not.
+**Where to start:** `apps/api/src/test/rls/rls-test-harness.ts` already sets the
+four GUCs; needs Phase 5b migrations applied to the target database.
+
+---
+
 ## Grafana dashboards
 
 ### Surface failed background dashboard deletions in the UI
@@ -148,6 +188,81 @@ zero fixable findings), but the gate is not doing what its name says.
 **What:** Distinguish "query failed" from "no results" — e.g. let the error propagate to fail the generation job (it retries), or render an explicit warning card. Consider `NULLIF`-guarding the `::numeric` cast so one malformed row doesn't blank the section.
 **Where:** `apps/api/src/modules/reports/services/report-data-fetcher.service.ts` (~1532-1555, the catch), `apps/api/src/modules/reports/renderers/slo-renderer.ts` (empty-state card).
 
+### Report typography on screen: prose measure and body size
+
+**Priority:** P3
+**Origin:** /ship design specialist on `feat/reporting-improvements` (2026-08-18).
+**Why:** The screen measure was widened to 340mm so the seven-column regressions table fits.
+Tables need it; prose does not — body copy now runs ~150-170 characters per line, past the
+65-75 range the width change was partly meant to fix. Separately, body is 11pt (~14.7px) on
+screen, below the 16px floor, which was defensible while the report was print-first and is less
+so now it is a deliberate on-screen reading surface.
+**Where:** `apps/api/src/modules/reports/services/report-html-compiler.service.ts` — the
+`@media screen` block. `max-width: 75ch` on `.section-text` and section `<p>`; a screen-only
+`body { font-size: 16px }` leaving 11pt for print.
+**Deferred because:** the report layout had already been through several rounds; only the print
+legibility floor was taken.
+
+### Scroll wide tables in their own container, not the whole section
+
+**Priority:** P3
+**Origin:** /ship design specialist on `feat/reporting-improvements` (2026-08-18).
+**Why:** `@media screen { section { overflow-x: auto } }` makes every section a scroll container,
+not just the wide tables. The scrollbar lands at the bottom of the whole 30px-padded card rather
+than under the table, the card's right padding collapses at the end of the scroll, and per spec
+`overflow-y` computes from `visible` to `auto`, so any child overflowing vertically gets its own
+scrollbar.
+**Where:** emit `<div class="table-scroll">` around `.data-table` in the renderers and scope the
+rule to it, leaving `section` alone.
+
+### Report builder has a ~662px hard floor
+
+**Priority:** P3
+**Origin:** /ship design specialist on `feat/reporting-improvements` (2026-08-18).
+**Why:** `minWidth: 380` on the canvas plus `minWidth: 210` on the palette plus gaps, inside a
+`DialogContent` with `overflow: hidden`. Below that the overflow is clipped rather than scrolled,
+so on tablet-portrait or a small laptop window part of the palette or canvas is unreachable. The
+collapse control exists but is manual and defaults to expanded.
+**Where:** `apps/web/components/reports/report-generation/GenerateReportDialog.tsx` — stack the
+columns below a breakpoint, or auto-collapse the palette when the dialog is narrow.
+
+### Section accent colours are not unique and are not theme tokens
+
+**Priority:** P4
+**Origin:** /ship design specialist on `feat/reporting-improvements` (2026-08-18).
+**Why:** The palette, card avatar and order badge all key off `config.color`, but `trends` and
+`transaction_response_times` share an icon, `trends` and `top_10_lists` share `#ff9800`, `header`
+and `transaction_response_times` share `#2196f3`, and `text_block`/`slo` share a rotated
+AssignmentIcon. All eleven accents are hardcoded literals, so the darker ones (brown `#795548`,
+blue-grey `#607d8b`) sit near the 3:1 non-text contrast floor on dark-mode paper.
+**Where:** `apps/web/components/reports/report-generation/section-config.tsx`.
+
+### Comparison section cannot say why its baseline is empty
+
+**Priority:** P4
+**Origin:** /ship api-contract specialist on `feat/reporting-improvements` (2026-08-18).
+**Why:** When the `previous` sentinel resolves to nothing the section falls through to the
+generic "No comparison data available for the selected baseline run." A caller cannot tell "this
+run has no predecessor" from "the baseline exists but has no comparable data" from "the pinned id
+is wrong" — the same silent-empty-section failure mode the AWR fix in this branch removed.
+**Where:** `apps/api/src/modules/reports/renderers/comparisons-renderer.ts` — the generic empty
+state at ~line 189, and the second, differently worded one at ~line 87 ("...for this test run."),
+which should probably say the same thing.
+
+### Three more places still say 50 sections
+
+**Priority:** P4
+**Origin:** /document-release doc review on `feat/reporting-improvements` (2026-08-18).
+**Why:** `MAX_REPORT_SECTIONS` (20) is now the cap the ad-hoc validator and the builder enforce,
+and the Swagger `maxItems` was corrected to match. Three sized-for-50 leftovers remain, none of
+them load-bearing today but all of them lies waiting to be believed: a dead second cap, an order
+ceiling one short of the old limit, and the template DTOs, which are a genuinely separate limit
+that nobody has decided on.
+**Where:** `apps/api/src/modules/reports/services/report-generation.service.ts` (~line 423, the
+`> 50` throw the validator now pre-empts); `apps/api/src/modules/reports/dto/create-report.dto.ts`
+(~line 63, `@Max(49)` on `ReportSectionConfigDto.order`); `apps/api/src/modules/reports/dto/create-template.dto.ts`
+(~lines 87, 151, 203 — decide whether templates share the report cap or keep their own).
+
 ---
 
 ## Tests
@@ -159,6 +274,17 @@ zero fixable findings), but the gate is not doing what its name says.
 **Why:** `socketManager.disconnect()` tears down the socket but intentionally preserves `persistedListeners` so they survive transient reconnects. A *manual* disconnect is a full teardown though — a later `connect()` re-attaches listeners the caller may have meant to drop. This same leak caused the socket `on()` test to grab a stale handler across the suite (worked around in the test, not the source).
 **What:** Decide whether a manual `disconnect()` should clear `persistedListeners` while reconnect-triggered teardown keeps them. If yes, distinguish manual teardown from reconnect teardown.
 **Where:** `apps/web/lib/socket.ts` — `disconnect()` (~line 281) and `persistedListeners` (~line 55).
+
+### `apps/api/.test-db-config.json` is tracked but machine-generated
+
+**Priority:** P4
+**Origin:** /ship testing + maintainability specialists on `feat/reporting-improvements`
+(2026-08-18).
+**Why:** `src/test/setup-database.ts` writes this file from the running testcontainer with an
+ephemeral port, so every developer's test run dirties the tree and a stale port points tests at a
+dead socket. It has already been committed with a machine-local value at least once.
+**Where:** gitignore it and `git rm --cached`; commit a `.test-db-config.example.json` if the
+shape needs documenting. Not done in-branch because untracking affects every checkout.
 
 ---
 
@@ -218,20 +344,6 @@ via `buildAggregatedMetricName(RT_KEEPER_TITLES[keeper])`.
 **Where:** `apps/web/app/test-runs/[id]/components/compare/hooks/useComparePresets.ts`
 (~line 93); keeper map in `apps/web/lib/aggregated-perf-series.ts` (~line 34).
 
-### Cap the `testRunIds` query param on the aggregate endpoint
-
-**Priority:** P4
-**Origin:** /ship performance specialist on `feat/aggregated-percentiles` (2026-08-14).
-**Why:** `testRunIds` is parsed from an unbounded comma-separated param straight
-into `= ANY($1::text[])`. Materially de-risked now that each id costs an indexed
-rollup read instead of a raw-table scan, but Trends passes every run in the
-selected range, so a wide range on a busy SUT still fans one request into an
-arbitrarily large aggregate.
-**Where:** `apps/api/src/modules/test-runs/controllers/test-runs-aggregated-timeseries.controller.ts`
-— alongside the existing metric/stat validation (~line 124).
-
----
-
 ## Completed
 
 ### Fix pre-existing DynatraceCard test failures (23 tests)
@@ -248,3 +360,16 @@ Resolved by gating instead of regenerating. The failure was environmental: the g
 
 Updated stale test assertions to match intentional source changes: socket transport order (polling-first, #377), socket `on()` listener registration (state-leak workaround + rename), and abort UI (`<Chip label="Aborted">` instead of removed text). Full web suite back to 3963/3963.
 **Completed:** v0.2.61.2 (2026-05-31)
+
+### Cap the `testRunIds` query param on the aggregate endpoint
+
+**Priority:** P4
+**Origin:** /ship performance specialist on `feat/aggregated-percentiles` (2026-08-14).
+**Why:** `testRunIds` is parsed from an unbounded comma-separated param straight
+into `= ANY($1::text[])`. Materially de-risked now that each id costs an indexed
+rollup read instead of a raw-table scan, but Trends passes every run in the
+selected range, so a wide range on a busy SUT still fans one request into an
+arbitrarily large aggregate.
+**Where:** `apps/api/src/modules/test-runs/controllers/test-runs-aggregated-timeseries.controller.ts`
+— alongside the existing metric/stat validation (~line 124).
+**Completed:** v0.2.63.4 (2026-08-18)

@@ -90,6 +90,13 @@ export const createAuthorizationServiceMock = () => ({
    * `createRestrictiveAuthorizationServiceMock` or override `getCapabilities`.
    */
   getCapabilities: jest.fn().mockResolvedValue(GLOBAL_ADMIN_CAPABILITIES),
+
+  /**
+   * Drop a principal's cached org/team membership. Services call this after a
+   * membership or credential change, so it must be stubbed here or those code
+   * paths throw a TypeError that the caller's catch block silently swallows.
+   */
+  invalidateUserCache: jest.fn().mockResolvedValue(undefined),
 });
 
 /**
@@ -109,4 +116,5 @@ export const createRestrictiveAuthorizationServiceMock = () => ({
   isOrgAdminInAnyOrganization: jest.fn().mockResolvedValue(false),
   canAdministerAnyOrganization: jest.fn().mockResolvedValue({ allowed: false, reason: 'Mock: admin denied' }),
   getCapabilities: jest.fn().mockResolvedValue([]),
+  invalidateUserCache: jest.fn().mockResolvedValue(undefined),
 });

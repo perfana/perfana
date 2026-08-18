@@ -20,6 +20,11 @@ import {
 @Index('idx_test_runs_created_at', ['createdAt'])
 @Index('idx_test_runs_system_env_workload', ['systemUnderTestId', 'testEnvironment', 'workload'])
 @Index('idx_test_runs_system_env_workload_created', ['systemUnderTestId', 'testEnvironment', 'workload', 'createdAt'])
+// Serves the "run immediately before this one" lookup a report's previous-run baseline needs:
+// same system/environment/workload, ordered by start_time. The _created index above cannot
+// serve it — created_at is ingest order, not run order — so without this Postgres sorts every
+// matching run to take one row.
+@Index('idx_test_runs_system_env_workload_start', ['systemUnderTestId', 'testEnvironment', 'workload', 'startTime'])
 export class TestRun {
   // Phase 5a audit logging — user-mutable fields across the 8 mutation
   // handlers. Skips: identity / immutable axes (id, systemUnderTestId,

@@ -11,7 +11,6 @@ import {
   OwnedResource,
   createdByUser,
 } from '@perfana/shared/entities';
-import { withRequestEm } from '../db/request-em';
 import {
   hasGlobalAdminRole,
   OrganizationRole,
@@ -276,10 +275,44 @@ export class AuthorizationService {
 
       let isMember = count > 0;
 
-      // For API key users, also check if the API key belongs to this organization
+      // For API key users, also check if the API key belongs to this organization.
+      //
+      // Deliberately NOT RLS-scoped. This lookup is an *input* to the RLS
+      // context — getAccessibleOrganizations feeds the same row into
+      // app.current_user_organizations, which rls_api_keys_select then reads.
+      // Scoping it would be circular: the key would have to already be in the
+      // organization to prove it is in the organization, and the answer would
+      // change with the GUCs currently in force. Keeping it context-free also
+      // makes the cache below sound — buildOrgMembershipKey carries no RLS
+      // context, so a context-dependent answer would be cached and reused.
+      //
+      // (The organization_members lookup above is unscoped for a different
+      // reason: that table has RLS disabled entirely — no policies — so
+      // withRequestEm would not change its visibility either way.)
+      //
+      // Three consequences to know. (1) This read leaves the request
+      // transaction and runs on a pooled connection, so it cannot see rows
+      // written earlier in the same request; that is fine because api_keys
+      // rows are never created and re-read within one request. (2) It is safe
+      // only while `userId` is the authenticated principal itself — every
+      // caller today passes ctx.userId or a self-derived id. Passing a
+      // third-party userId here would make this a cross-org membership oracle
+      // that RLS would have blocked. (3) api_keys is FORCE ROW LEVEL SECURITY,
+      // so this read returns rows only because the API's login role bypasses
+      // RLS (rolsuper/rolbypassrls). Deploy the API under a least-privilege
+      // role without that and BOTH api-key branches return zero rows: every
+      // key silently loses org access, surfacing as the misleading
+      // "user is not a member of organization X" denial below.
+      //
+      // Correctness here also assumes api_keys rows are immutable and
+      // delete-only — the membership cache below is keyed on api-key:<id> and
+      // is invalidated on delete (see api-keys.service.ts deleteApiKey). Add a
+      // revoke flag or an org-move endpoint and that invalidation must grow
+      // to match.
       if (!isMember && userId.startsWith('api-key:')) {
         const apiKeyId = userId.replace('api-key:', '');
-        const apiKeyCount = await withRequestEm(this.apiKeyRepository).count({
+        // eslint-disable-next-line owned-resource-must-use-request-em
+        const apiKeyCount = await this.apiKeyRepository.count({
           where: { id: apiKeyId, organization_id: organizationId },
         });
         isMember = apiKeyCount > 0;
@@ -458,10 +491,17 @@ export class AuthorizationService {
 
       const orgIds = memberships.map((m) => m.organization_id);
 
-      // For API key users, also include the API key's own organization_id
+      // For API key users, also include the API key's own organization_id.
+      //
+      // Deliberately NOT RLS-scoped — see isOrganizationMember for the full
+      // rationale, including the requirement that `userId` be the authenticated
+      // principal. This result *becomes* app.current_user_organizations
+      // (RlsTransactionInterceptor calls this before opening the transaction),
+      // so it cannot be read through a policy that consumes it.
       if (userId.startsWith('api-key:')) {
         const apiKeyId = userId.replace('api-key:', '');
-        const apiKey = await withRequestEm(this.apiKeyRepository).findOne({
+        // eslint-disable-next-line owned-resource-must-use-request-em
+        const apiKey = await this.apiKeyRepository.findOne({
           where: { id: apiKeyId },
           select: ['organization_id'],
         });

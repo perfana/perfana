@@ -15,6 +15,7 @@ import {
   IsObject,
   Matches,
 } from 'class-validator';
+import { MAX_REPORT_SECTIONS } from '@perfana/shared/types';
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import { Type } from 'class-transformer';
 import { REPORT_DEFAULTS } from '@perfana/shared';
@@ -75,9 +76,19 @@ export class ReportSectionConfigDto {
   @Length(0, 255, { message: 'Title must not exceed 255 characters' })
   title?: string;
 
+  /**
+   * Section-specific configuration.
+   *
+   * Comparison sections additionally accept the reserved value `'previous'` for
+   * `baselineTestRunId` — see the Swagger description below.
+   */
   @ApiPropertyOptional({
-    description: 'Section-specific configuration options',
-    example: { includeChart: true, showFailedOnly: false },
+    description:
+      'Section-specific configuration options. Comparison sections additionally accept the ' +
+      "reserved value 'previous' for baselineTestRunId, which resolves per report to the run " +
+      'immediately before this one in the same system, environment and workload — so a template ' +
+      'compares each report against its own predecessor rather than a pinned run.',
+    example: { comparisonMode: 'baseline_run', baselineTestRunId: 'previous' },
   })
   @IsOptional()
   @IsObject()
@@ -167,14 +178,15 @@ export class ReportStylingDto {
  * // Generate report from template:
  * // POST /api/reports/generate
  * // {
- * //   "test_run_id": "123e4567-e89b-12d3-a456-426614174000",
+ * //   "test_run_id": "EA-acc-loadtest-00020",
  * //   "template_id": "456e7890-e89b-12d3-a456-426614174000"
  * // }
  */
 export class GenerateReportFromTemplateDto {
   @ApiProperty({
-    description: 'Test run UUID, or the human test run id (what CI/CD pipelines know)',
-    example: '123e4567-e89b-12d3-a456-426614174000',
+    description:
+      'The test run id you gave the load test tool, or the internal UUID. Pipelines use the former — it is the only one they have.',
+    example: 'EA-acc-loadtest-00020',
   })
   @IsString()
   @Length(1, 255)
@@ -217,7 +229,7 @@ export class GenerateReportFromTemplateDto {
  * // Generate ad-hoc report:
  * // POST /api/reports/generate/ad-hoc
  * // {
- * //   "test_run_id": "123e4567-e89b-12d3-a456-426614174000",
+ * //   "test_run_id": "EA-acc-loadtest-00020",
  * //   "name": "Custom Performance Report",
  * //   "sections": [
  * //     { "type": "header", "order": 0, "title": "Performance Analysis" },
@@ -227,10 +239,15 @@ export class GenerateReportFromTemplateDto {
  */
 export class GenerateAdHocReportDto {
   @ApiProperty({
-    description: 'Test run UUID to generate report for',
-    example: '123e4567-e89b-12d3-a456-426614174000',
+    description:
+      'The test run id you gave the load test tool, or the internal UUID. Pipelines use the former — it is the only one they have.',
+    example: 'EA-acc-loadtest-00020',
   })
-  @IsUUID('4', { message: 'Test run ID must be a valid UUID' })
+  // Was @IsUUID, which rejected the human id before it reached the service — even though
+  // createAdHoc resolves either form through isTestRunAccessible, exactly as /generate does.
+  // A pipeline could therefore use one endpoint and not the other, for no reason.
+  @IsString()
+  @Length(1, 255)
   test_run_id!: string;
 
   @ApiProperty({
@@ -243,14 +260,16 @@ export class GenerateAdHocReportDto {
   name!: string;
 
   @ApiProperty({
-    description: 'Section configurations for the report (1-50 sections)',
+    description: `Section configurations for the report (1-${MAX_REPORT_SECTIONS} sections)`,
     type: [ReportSectionConfigDto],
     minItems: 1,
-    maxItems: 50,
+    // Swagger published 50 while the validator below rejected at 20, so /api/docs
+    // advertised a section count the endpoint refuses.
+    maxItems: MAX_REPORT_SECTIONS,
   })
   @IsArray()
   @ArrayMinSize(1, { message: 'At least one section is required' })
-  @ArrayMaxSize(50, { message: 'Maximum 50 sections allowed' })
+  @ArrayMaxSize(MAX_REPORT_SECTIONS, { message: `Maximum ${MAX_REPORT_SECTIONS} sections allowed` })
   @ValidateNested({ each: true })
   @Type(() => ReportSectionConfigDto)
   sections!: ReportSectionConfigDto[];
@@ -459,7 +478,7 @@ export class ShareParamsDto {
  * // Preview Apdex section:
  * // POST /api/reports/preview-section
  * // {
- * //   "test_run_id": "123e4567-e89b-12d3-a456-426614174000",
+ * //   "test_run_id": "EA-acc-loadtest-00020",
  * //   "section": {
  * //     "type": "apdex",
  * //     "order": 0,
@@ -469,11 +488,17 @@ export class ShareParamsDto {
  */
 export class PreviewSectionDto {
   @ApiPropertyOptional({
-    description: 'Test run UUID to generate preview for (optional, uses mock data if not provided)',
-    example: '123e4567-e89b-12d3-a456-426614174000',
+    // Either form: the human-readable run id a pipeline has, or the internal uuid.
+    // previewSection resolves both through isTestRunAccessible, so rejecting the human id
+    // here made preview the one report endpoint a pipeline could not call.
+    description:
+      'Test run to generate the preview for — the human-readable id or the internal uuid. ' +
+      'Optional; mock data is used when omitted.',
+    example: 'EA-acc-loadtest-00020',
   })
   @IsOptional()
-  @IsUUID('4', { message: 'Test run ID must be a valid UUID' })
+  @IsString()
+  @Length(1, 255)
   test_run_id?: string;
 
   @ApiProperty({

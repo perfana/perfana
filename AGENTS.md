@@ -117,7 +117,7 @@ Perfana implements a multi-tenant RBAC system for fine-grained access control ac
 | Phase 3 | Service-layer authorization enforcement | Lint-enforced (allowlist empty) |
 | Phase 4 | Data migration — `organization_id` NOT NULL on owned resources | Completed (2026-05-02) |
 | Phase 5a | Audit logging | Completed (2026-05-04 — allowlist empty; 29 services migrated, 27 closed via `POLICY_EXEMPT`) |
-| Phase 5b | Row-Level Security | Pending — separate spec to be drafted (Postgres RLS + GUC plumbing) |
+| Phase 5b | Row-Level Security | Shipped — `RlsTransactionInterceptor` opens a per-request transaction, runs `SET LOCAL ROLE perfana_app`, and sets four `app.current_*` GUCs the policies read. Owned-resource repository calls go through `withRequestEm()` (`apps/api/.rls-em-migration-allowlist.json` is empty). `npm run preflight` runs `apps/api/src/test/rls/`. One deliberate carve-out — see "API-key organization resolution" below. |
 
 ### Role Hierarchy
 
@@ -198,10 +198,33 @@ async findAll(userId: string, roles: string[]) {
 
 This is how `test-runs` and all working services implement it.
 
+### API-key organization resolution (deliberately outside RLS)
+
+An API-key principal (`api-key:{uuid}`) gets its organization from the `api_keys` row itself, not from `organization_members`. `AuthorizationService.isOrganizationMember` and `getAccessibleOrganizations` read that row through the **plain pooled repository**, not `withRequestEm()` — both sites carry an `eslint-disable-next-line owned-resource-must-use-request-em`. Do not "fix" this back:
+
+- **Scoping it is circular.** `RlsTransactionInterceptor` calls `getAccessibleOrganizations` to *build* `app.current_user_organizations`, which is what `rls_api_keys_select` then reads. The key would have to already be in the organization to prove it is in the organization.
+- **The membership cache demands a context-free answer.** `buildOrgMembershipKey` carries no RLS context, so a context-dependent result would be cached and replayed.
+- **Safe only because `userId` is the authenticated principal.** Passing a third-party `userId` here would make it a cross-org membership oracle.
+
+**Deployment constraint**: `api_keys` is `FORCE ROW LEVEL SECURITY`, so this read returns rows only because the API's login role is `rolsuper`/`rolbypassrls`. Under a least-privilege role without that bypass, both api-key branches return zero rows and every API key silently loses organization access, surfacing as the misleading denial `user is not a member of organization X`. Nothing enforces this yet (filed in TODOS.md).
+
+`api_keys` rows are treated as immutable and delete-only; the `api-key:<id>` membership cache is invalidated in `ApiKeysService.deleteApiKey`. A revoke flag or org-move endpoint would need that invalidation to grow.
+
+### Per-resource authorization in test-runs
+
+`TestRunsCrudQueryService` splits two patterns that look alike:
+
+- **List methods** use `withOrgFilter` / `withTeamFilter` to compute the accessible sets once.
+- **Per-resource methods** (`findByTestRunId`, `findOne`, `getTestRunByTestRunId`) delegate to the private `denialReason()` helper, which calls `isOrganizationMember` / `canViewTeamResources` on the single row via the joined `SystemUnderTest`.
+
+`denialReason()` **fails closed**: a missing `systemUnderTest` relation is a denial, not a skip. `system_under_test_id` is NOT NULL, so a null relation means the LEFT JOIN produced nothing — under RLS a legitimate refusal, since a run can be visible via its own `created_by` while its system is policy-filtered.
+
+All five denial causes return an indistinguishable refusal (404, or `null` from `getTestRunByTestRunId`) so nobody learns whether a run exists. The **server log is the only place they are distinguishable**, so any new caller of `denialReason()` must log the returned reason before refusing. Caller-supplied ids go through `forLog()` first — `testRunId` is a raw path parameter and Express percent-decodes path segments, so an unsanitized `%0A` would let a caller forge lines in the denial stream.
+
 ### Ownership column nullability
 
 - `organization_id` is **NOT NULL** on all 26 owned-resource entities (Phase 4, 2026-05-02). The "null org = visible to all authenticated users" backward-compat rule is gone.
-- Exceptions intentionally kept nullable: `audit_logs.organization_id` (system-level events with no org context) and `test_runs.organization_id` (vestigial — TestRun access is checked via the joined SystemUnderTest's `organization_id`).
+- Exception intentionally kept nullable: `audit_logs.organization_id` (system-level events with no org context). `test_runs.organization_id` is NOT NULL in the DDL and `rls_test_runs_select` reads it directly, but the service-layer per-resource check still goes through the joined `SystemUnderTest` (the TypeORM entity also still declares it `nullable: true` — drift against the DDL).
 - `team_id` remains nullable on all entities — teams are optional even on owned resources.
 - Authorization enforcement (Phase 3) is now lint-enforced and the data layer (Phase 4) prevents the escape hatch.
 
