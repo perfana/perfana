@@ -328,7 +328,7 @@ describe('GenerateReportDialog', () => {
 
       await navigateToBuilder();
 
-      expect(screen.getByText(/No sections added yet/)).toBeInTheDocument();
+      expect(screen.getByText(/No sections yet/)).toBeInTheDocument();
     });
 
     it('should display available section types', async () => {
@@ -411,7 +411,7 @@ describe('GenerateReportDialog', () => {
 
       await navigateToBuilder();
 
-      expect(screen.getByText(/No sections added yet/)).toBeInTheDocument();
+      expect(screen.getByText(/No sections yet/)).toBeInTheDocument();
     });
 
     it('should disable generate button when no sections', async () => {
@@ -423,12 +423,13 @@ describe('GenerateReportDialog', () => {
       expect(generateButton).toBeDisabled();
     });
 
-    it('should show section count in builder', async () => {
+    it('hides the section count until it is close to the limit', async () => {
+      // At zero it is a constraint nobody asked about; it earns its place near the cap.
       render(<GenerateReportDialog {...defaultProps} />);
 
       await navigateToBuilder();
 
-      expect(screen.getByText('0 sections / 20 max')).toBeInTheDocument();
+      expect(screen.queryByText(/\/ 20 sections/)).not.toBeInTheDocument();
     });
   });
 
@@ -971,4 +972,96 @@ describe('GenerateReportDialog', () => {
       expect(screen.queryByText(/set it once here/i)).not.toBeInTheDocument();
     });
   });
+
+  describe('section palette', () => {
+    const navigate = async () => {
+      await waitFor(() => {
+        expect(screen.getByText('Start from Scratch')).toBeInTheDocument();
+      });
+      fireEvent.click(screen.getByText('Start from Scratch'));
+      await waitFor(() => {
+        expect(screen.getByLabelText('Hide section list')).toBeInTheDocument();
+      });
+    };
+
+    it('does not claim sections can be dragged from the palette', async () => {
+      // The palette never had drag wired up. The old grip icons and "drag sections to the canvas"
+      // copy described an interaction that did nothing, so people concluded the dialog was broken.
+      render(<GenerateReportDialog {...defaultProps} />);
+      await navigate();
+
+      expect(screen.queryByText(/Drag sections to the canvas/i)).not.toBeInTheDocument();
+      expect(screen.getByText(/Click to add to your report/i)).toBeInTheDocument();
+    });
+
+    it('adds a section on click', async () => {
+      render(<GenerateReportDialog {...defaultProps} />);
+      await navigate();
+
+      fireEvent.click(screen.getByLabelText('Add SLO Summary section'));
+
+      expect(screen.queryByText(/No sections yet/)).not.toBeInTheDocument();
+    });
+
+    it('collapses the palette so the canvas gets the width', async () => {
+      render(<GenerateReportDialog {...defaultProps} />);
+      await navigate();
+
+      fireEvent.click(screen.getByLabelText('Hide section list'));
+
+      // The catalogue is gone; a single add control takes its place.
+      expect(screen.queryByText('Available Sections')).not.toBeInTheDocument();
+      expect(screen.getByRole('button', { name: 'Add section' })).toBeInTheDocument();
+      expect(screen.getByLabelText('Show section list')).toBeInTheDocument();
+    });
+
+    it('offers a searchable menu when collapsed', async () => {
+      render(<GenerateReportDialog {...defaultProps} />);
+      await navigate();
+      fireEvent.click(screen.getByLabelText('Hide section list'));
+      fireEvent.click(screen.getByRole('button', { name: 'Add section' }));
+
+      const search = await screen.findByPlaceholderText('Search sections');
+      fireEvent.change(search, { target: { value: 'apdex' } });
+
+      expect(screen.getByText('Apdex Scores')).toBeInTheDocument();
+      expect(screen.queryByText('AWR Analysis')).not.toBeInTheDocument();
+    });
+
+    it('fills an empty canvas from a starter layout', async () => {
+      // A blank page is the hardest place to start.
+      render(<GenerateReportDialog {...defaultProps} />);
+      await navigate();
+
+      fireEvent.click(screen.getByText('Executive summary'));
+
+      expect(screen.queryByText(/No sections yet/)).not.toBeInTheDocument();
+    });
+
+    it('enforces the section cap it advertises', async () => {
+      // The dialog displayed "20 max" but never stopped at it, so the count sailed past.
+      render(<GenerateReportDialog {...defaultProps} />);
+      await navigate();
+
+      const addSlo = screen.getByLabelText('Add SLO Summary section');
+      for (let i = 0; i < 25; i++) {
+      fireEvent.click(addSlo);
+      }
+
+      expect(screen.getByText('20 / 20 sections')).toBeInTheDocument();
+    });
+
+    it('shows the count once it is near the cap', async () => {
+      render(<GenerateReportDialog {...defaultProps} />);
+      await navigate();
+
+      const addSlo = screen.getByLabelText('Add SLO Summary section');
+      for (let i = 0; i < 15; i++) {
+      fireEvent.click(addSlo);
+      }
+
+      expect(screen.getByText('15 / 20 sections')).toBeInTheDocument();
+    });
+  });
+
 });
