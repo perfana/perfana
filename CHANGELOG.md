@@ -4,6 +4,11 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
+## [0.2.63.11] - 2026-08-18
+
+### Fixed
+- **Wide tables no longer run out of the report and off the page.** Holding the report to A4 width left the widest tables — the regressions list and the per-transaction Apdex breakdown — with less room than their columns need, so they spilled out of their section and past the edge of the document. They now scroll within their own section instead.
+
 ## [0.2.63.10] - 2026-08-18
 
 ### Fixed
