@@ -8,8 +8,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
 ### Added
 - **A report template can follow the previous run as its baseline.** Comparison sections accept
-  the reserved value `previous` for their baseline, which resolves per report to the run
-  immediately before the reported one in the same system, environment and workload — so a saved
+  the reserved value `previous` for their baseline, which resolves per report to the most recent
+  completed run that started strictly before the reported one, in the same system, environment
+  and workload — so a saved
   template compares each report against its own predecessor instead of a run pinned when the
   template was written. Offered as "Previous run" at the top of the baseline picker, and
   documented in Swagger for templates created through the API.
@@ -38,10 +39,11 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
 - **Reports generated on the same day no longer collide.** An unnamed report was named after the
   template and the date; it now carries the time as well.
 - **Wide tables stay inside the report.** The regressions list and the per-transaction Apdex
-  breakdown carry more columns than an A4 column holds. On screen the report is a fixed 340mm
-  measure — bounded, so a wide monitor no longer stretches lines past reading length — and wide
-  tables scroll within their section. In print the page is scaled so those columns fit, with
-  table headers and footer metadata held at their intended size.
+  breakdown carry more columns than an A4 column holds. On screen the report is held to a fixed
+  340mm measure instead of stretching to the window, and a section scrolls horizontally when its
+  content is wider than that. In print the page is scaled so those columns fit, with table
+  headers and footer metadata held at their intended size. Running prose still sets to the full
+  340mm measure, which is wider than a comfortable line — capping it is tracked in TODOS.md.
 - **Metric cards and table headings no longer break up.** A long label could push the last card's
   value off the edge, and a heading could break mid-word ("Transacti on Name"). Status pills no
   longer split either ("EXCELLEN T").
